@@ -150,10 +150,20 @@ function mountRoster() {
     stage.scene.add(m.root);
     rosterModels.push(m);
   });
-  // Wide line-up: frame by subject height, but scaled up to hold all 11.
+  // Wide line-up. Frame by GROUND width, not subject height: the row is ~26m across,
+  // and subject-framing sized the camera to one 2.1m character, which shrank the whole
+  // cast to specks. Width in world units = metres / WORLD_SCALE, plus margin.
+  // Wide line-up. Ground framing is wrong here: it divides by sin(pitch), so at the
+  // shallow pitch this shot wants it pushes the camera to ~54m and the cast becomes
+  // specks. Instead frame as a "subject" whose height is the row's span converted
+  // through the viewport aspect — that fits the row across the frame directly.
+  const spanMetres = (CHARACTER_IDS.length - 1) * spacing + 3.4;
+  const aspect = (container.clientWidth || window.innerWidth) /
+                 Math.max(1, container.clientHeight || window.innerHeight);
   stage.rig.frameMode = 'subject';
-  stage.rig.subjectHeight = CHARACTER_HEIGHT;
-  stage.rig.subjectFill = 0.16;
+  stage.rig.subjectFill = 0.95;
+  stage.rig.subjectHeight = spanMetres / Math.max(0.2, aspect);
+  stage.rig.pitchDeg = 14;
   stage.rig.targetHeight = CHARACTER_HEIGHT * 0.5;
   stage.rig.snapTo(0, 0);
 }

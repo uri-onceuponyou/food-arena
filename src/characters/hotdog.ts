@@ -48,7 +48,7 @@ export class HotDogCharacter extends BaseCharacter {
         torso: PALETTE.bun,
         limbRoughness: 0.8,
       },
-      proportions: { headFraction: 0.60 },
+      proportions: { headFraction: 0.53 },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -69,7 +69,7 @@ export class HotDogCharacter extends BaseCharacter {
     // -0.90R, which cancels the headCentreY offset almost exactly regardless of
     // R), hidden behind the bun lobes' own footprint from every angle the game
     // camera uses. The lobes themselves stay a moderate, readable height.
-    const NECK_W = R * 1.05, NECK_D = R * 0.56, NECK_H = R * 0.34;
+    const NECK_W = R * 0.95, NECK_D = R * 0.44, NECK_H = R * 0.34;
     const NECK_Y = -R * 0.90 + NECK_H / 2;
 
     const LOBE_LEN = R * 1.85;
@@ -96,7 +96,7 @@ export class HotDogCharacter extends BaseCharacter {
       color: CYBER, roughness: 0.4, metalness: 0.3, emissive: CYBER, emissiveIntensity: 0.45,
     });
     this.glowMats.push(glowMat);
-    const neckMat = toonMat({ color: PALETTE.bunDark, roughness: 0.85 });
+    const neckMat = toonMat({ color: PALETTE.bun, roughness: 0.85 }); // matches the bun exactly — reads as its base, not a separate collar
 
     // ── Neck block — bridges the bun down to the torso. Narrower than the bun
     // lobes above it, so it stays hidden behind their footprint at every angle

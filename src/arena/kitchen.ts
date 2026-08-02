@@ -323,10 +323,15 @@ function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack
     g.add(coil);
   }
 
-  // Herb garnish on the back corner of the cabinet top, clear of the burners —
-  // a small, guaranteed-visible cool-green accent on every stove island in the hub.
-  const herb = buildHerbSprig(M, 0.85);
-  herb.position.set(-wM * 0.37, cabH, -dM * 0.36);
+  // Herb garnish sitting on the steel top's inner-front corner (the side that faces
+  // the pot — `+dM*0.28` lands there regardless of the 0/180° yaw the caller applies,
+  // since that flips which world edge is "inner"), clear of both burners. These
+  // islands are enormous (8.5m x 4.5m footprints), so a realistic pot-plant scale
+  // was completely invisible at gameplay camera distance — sized way up, matching
+  // roughly the same on-counter footprint fraction as the tomato/lettuce accents on
+  // the produce crates, so it actually reads as a bold green shape.
+  const herb = buildHerbSprig(M, 3.4);
+  herb.position.set(wM * 0.3, cabH + 0.09, dM * 0.26);
   g.add(herb);
 
   if (opts?.panRack) {
@@ -953,23 +958,28 @@ function buildFloor(M: Materials): THREE.Group {
   darkMesh.instanceMatrix.needsUpdate = true;
   g.add(lightMesh, darkMesh);
 
-  // Hub tile ring — a deliberate COOL band circling the hub, sitting between the
-  // (warm) hazard glow at the centre and the (warm) stove islands beyond it. This is
-  // the "teal-tiled zone" called out in the critique: real floor real-estate in a
-  // colour nothing else near the hub uses, not just a small coloured prop. Radii are
-  // hand-fit to the gap between the hazard's glow falloff (~106wu) and the nearest
-  // stove-island corner (~138wu) so it never overlaps either.
-  const ringInner = wu(112);
-  const ringOuter = wu(128);
-  const tealRing = mesh(new THREE.RingGeometry(ringInner, ringOuter, 56), M.tealTile, 'floor_teal_ring');
-  tealRing.rotation.x = -Math.PI / 2;
-  tealRing.position.set(wu(CENTER.x), FLOOR_Y.decal, wu(CENTER.y));
-  noOutline(tealRing);
-  g.add(tealRing);
-  for (const rr of [ringInner, ringOuter]) {
-    const trim = mesh(new THREE.RingGeometry(rr - 0.02, rr + 0.02, 56), M.tealTileDark, 'floor_teal_ring_trim');
-    trim.rotation.x = -Math.PI / 2;
-    trim.position.set(wu(CENTER.x), FLOOR_Y.fine, wu(CENTER.y));
+  // Teal-tiled zones — four small cool floor patches under the hub's four
+  // chokepoint props (the N/S lane pots, the E/W spice carts), the same "sits under
+  // a cluster" treatment as the wood pantry pads. A first pass tried one continuous
+  // ring around the whole hub at this radius and it just recreated the original
+  // problem in a new colour: at this frame width (~360wu across) any full circle
+  // out past ~r100 reads as a second giant disc dominating the shot, and it landed
+  // exactly on the ring where the spawned cast stands. Four discrete patches sized
+  // to their prop, elongated along the open lane so they clear the stove islands
+  // on the cross-axis, read as floor styling instead.
+  const tealZones: Array<[number, number, number, number]> = [
+    [CENTER.x, CENTER.y - 242, 150, 80], // north, under the lane pot
+    [CENTER.x, CENTER.y + 242, 150, 80], // south, under the lane pot
+    [CENTER.x - 175, CENTER.y, 80, 150], // west, under the spice cart
+    [CENTER.x + 175, CENTER.y, 80, 150], // east, under the spice cart
+  ];
+  for (const [zx, zy, zw, zh] of tealZones) {
+    const patch = mesh(roundedBox(wu(zw), 0.04, wu(zh), 0.1, 3), M.tealTile, 'floor_teal_zone');
+    patch.position.set(wu(zx), FLOOR_Y.decal, wu(zy));
+    noOutline(patch);
+    g.add(patch);
+    const trim = mesh(roundedBox(wu(zw) + 0.06, 0.02, wu(zh) + 0.06, 0.12, 3), M.tealTileDark, 'floor_teal_zone_trim');
+    trim.position.set(wu(zx), FLOOR_Y.decal - 0.06, wu(zy));
     noOutline(trim);
     g.add(trim);
   }

@@ -247,15 +247,18 @@ export class TacoCharacter extends BaseCharacter {
     // A few small crimp teeth along the pod's upper-outer rim, echoing the main
     // shell's zigzag in miniature — without these the pod read as a plain ball
     // stuck to the character rather than another fold of the same toasted shell.
-    // Embedded a third of the way into the sphere (not just touching its surface)
-    // so they read as ridges growing out of it, not props glued on top.
-    const toothGeo = new THREE.ConeGeometry(podR * 0.13, podR * 0.3, 4);
+    // A cone's origin is its geometric CENTRE (half the height either side), so to
+    // get a tip that actually pokes past the sphere surface the object must be
+    // centred AT that surface (radius podR), not pulled inward — the first attempt
+    // put the centre at 0.82*podR, which left the tip at just 0.97*podR: fully
+    // swallowed by the sphere and invisible.
+    const toothGeo = new THREE.ConeGeometry(podR * 0.14, podR * 0.34, 4);
     for (let i = 0; i < 4; i++) {
       const a = -0.55 + i * 0.42; // sweeps the upper-outer quarter, toward +X/+Z
       const dir = new THREE.Vector3(Math.sin(a) * 0.9, 0.62, Math.cos(a) * 0.55 + 0.35).normalize();
       const tooth = new THREE.Mesh(toothGeo, shellDarkMat);
       tooth.name = 'taco_pod_crimp';
-      tooth.position.copy(dir).multiplyScalar(podR * 0.82);
+      tooth.position.copy(dir).multiplyScalar(podR * 1.0);
       tooth.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
       tooth.castShadow = true;
       pod.add(tooth);
