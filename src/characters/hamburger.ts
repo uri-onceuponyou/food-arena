@@ -449,8 +449,12 @@ export class HamburgerCharacter extends BaseCharacter {
     // of needing its own bespoke arm.
     const spatula = new THREE.Group();
     spatula.name = 'spatula';
-    spatula.position.set(0.04, -0.05, 0.05);
-    spatula.rotation.set(-1.2, 0, -0.2);
+    // Offset toward the outer side of the mitt (sx-biased) rather than dead
+    // centre through it — gripping through the palm's centre made the dark
+    // handle cross straight over the pale mitt sphere, coincidentally reading
+    // as a second, misplaced limb.
+    spatula.position.set(0.16, -0.03, 0.10);
+    spatula.rotation.set(-0.5, 0.35, -0.4);
     this.rig.joints.handR.add(spatula);
 
     const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.42, 4, 8), spatulaHandleMat);
