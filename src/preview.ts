@@ -155,7 +155,8 @@ if (piece === 'character') {
 const clock = new THREE.Clock();
 let simTime = 0;
 
-function step(dt: number) {
+/** Advance animation only. Deliberately does NOT render. */
+function advance(dt: number) {
   simTime += dt;
   const ctx = {
     dt,
@@ -165,6 +166,10 @@ function step(dt: number) {
   };
   model?.update(ctx);
   for (const m of rosterModels) m.update(ctx);
+}
+
+function step(dt: number) {
+  advance(dt);
   stage.render(dt);
 }
 
@@ -172,9 +177,13 @@ if (frozenTime !== null) {
   // Deterministic: advance in fixed sub-steps to exactly `t`, then hold. Two
   // screenshots of the same URL are then pixel-identical, which is what makes
   // before/after critic comparisons meaningful.
+  // Step the ANIMATION to `t` without rendering, then render once. Rendering every
+  // sub-step meant ~180 fully post-processed frames per screenshot, which made a
+  // single capture take ~26s under CPU-rasterised WebGL and was the real reason
+  // batch renders ran for minutes.
   const h = 1 / 120;
   const steps = Math.max(1, Math.round(frozenTime / h));
-  for (let i = 0; i < steps; i++) step(h);
+  for (let i = 0; i < steps; i++) advance(h);
   // Post FX (SMAA/bloom) need a couple of settled frames.
   stage.render(0);
   stage.render(0);

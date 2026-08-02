@@ -2,10 +2,12 @@
  * Hamburger — Normal rarity, the roster's first-built model and art-direction
  * anchor for the rest of the cast.
  *
- * Read as: a big rounded bun "head" riding a stacked patty/cheese/tomato/lettuce
- * "torso" on a squat bun base, with stubby bun-coloured arms and dark little feet.
- * Closed happy eyes + small smile live on the crown, the roundest/most front-facing
- * surface, so they stay legible from the tilted gameplay camera.
+ * Read as: a real stacked burger — bottom bun / patty / cheese / tomato /
+ * lettuce / top bun — where every named layer owns a visible share of the
+ * height, so the silhouette reads as a STACK rather than a big head sitting on
+ * a thin belt. Stubby bun-coloured arms and dark little feet peek out in an
+ * asymmetric, weight-shifted stance. Closed happy eyes + small smile live on
+ * the crown, high enough on its front face to clear the lettuce collar below.
  */
 
 import * as THREE from 'three';
@@ -13,7 +15,7 @@ import { BaseCharacter } from './types';
 import type { AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, RAMP_CHARACTER } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineGroup, RAMP_CHARACTER, OUTLINE_THIN } from '../render/toon';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local geometry helpers — chunky rounded discs the shared kit doesn't provide.
@@ -42,21 +44,72 @@ function roundedPuck(radius: number, height: number, edge: number, radialSegment
   return geo;
 }
 
+/** Bun crown profile as (radius fraction, height fraction) control points —
+ * shared by `bunDome` (which revolves it into geometry) and `crownSurface`
+ * (which samples the SAME points to place seeds/face decals exactly on the
+ * resulting surface). One source of truth is what stops decals from floating
+ * off the mesh or clipping through it if this silhouette is ever retuned. */
+const CROWN_PROFILE: Array<[r: number, h: number]> = [
+  [0, 0], [0.88, 0], [1.0, 0.16], [0.97, 0.42], [0.78, 0.72], [0.4, 0.93], [0, 1],
+];
+
 /** The bun crown: a squat dome that bulges out near its base then rounds to an
  * apex — the classic burger-bun silhouette, not just a sphere. */
 function bunDome(baseRadius: number, height: number, radialSegments = 28): THREE.BufferGeometry {
-  const pts = [
-    new THREE.Vector2(0, 0),
-    new THREE.Vector2(baseRadius * 0.88, 0),
-    new THREE.Vector2(baseRadius, height * 0.16),
-    new THREE.Vector2(baseRadius * 0.97, height * 0.42),
-    new THREE.Vector2(baseRadius * 0.78, height * 0.72),
-    new THREE.Vector2(baseRadius * 0.4, height * 0.93),
-    new THREE.Vector2(0, height),
-  ];
+  const pts = CROWN_PROFILE.map(([r, h]) => new THREE.Vector2(r * baseRadius, h * height));
   const geo = new THREE.LatheGeometry(pts, radialSegments);
   geo.computeVertexNormals();
   return geo;
+}
+
+/** Exact surface point + outward normal on the crown dome at a given azimuth
+ * (`theta`, radians, 0 = character-front/+Z, increasing toward +X) and height
+ * fraction (0 = crown base, 1 = apex). The normal is derived from the profile's
+ * own tangent (dR, dH) → normal ∝ (dH, -dR) in the (radial, vertical) meridian
+ * plane, which correctly tilts down-and-out on the lower bulge and up-and-out
+ * near the apex — a fixed/guessed normal was the root cause of seeds floating
+ * detached above the surface and the blush decal clipping through it. */
+function crownSurface(theta: number, hFrac: number): { pos: THREE.Vector3; normal: THREE.Vector3 } {
+  const h = THREE.MathUtils.clamp(hFrac, 0, 1);
+  let seg = CROWN_PROFILE[0];
+  let segNext = CROWN_PROFILE[1];
+  for (let i = 0; i < CROWN_PROFILE.length - 1; i++) {
+    if (h >= CROWN_PROFILE[i][1] && h <= CROWN_PROFILE[i + 1][1]) {
+      seg = CROWN_PROFILE[i];
+      segNext = CROWN_PROFILE[i + 1];
+      break;
+    }
+  }
+  const [r0, h0] = seg;
+  const [r1, h1] = segNext;
+  const t = h1 > h0 ? (h - h0) / (h1 - h0) : 0;
+  const rFrac = r0 + (r1 - r0) * t;
+  const radius = CROWN.baseR * rFrac;
+  const y = h * CROWN.h;
+
+  const dR = (r1 - r0) * CROWN.baseR;
+  const dH = (h1 - h0) * CROWN.h;
+  const n2 = new THREE.Vector2(dH, -dR);
+  if (n2.lengthSq() < 1e-8) n2.set(1, 0);
+  n2.normalize();
+
+  const nx = Math.sin(theta);
+  const nz = Math.cos(theta);
+  const pos = new THREE.Vector3(nx * radius, y, nz * radius);
+  const normal = new THREE.Vector3(nx * n2.x, n2.y, nz * n2.x).normalize();
+  return { pos, normal };
+}
+
+/** A group pre-positioned + oriented flush against the crown surface at
+ * (theta, hFrac), pushed out along the normal by `embed` so a decal sits just
+ * proud of the surface instead of floating above it or clipping through it. */
+function addCrownDecal(parent: THREE.Object3D, theta: number, hFrac: number, embed: number): THREE.Group {
+  const { pos, normal } = crownSurface(theta, hFrac);
+  const g = new THREE.Group();
+  g.position.copy(pos).addScaledVector(normal, embed);
+  g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+  parent.add(g);
+  return g;
 }
 
 /** Small flattened arc used for eyes (bulge up) and mouth (bulge down). The torus
@@ -71,20 +124,24 @@ function faceArc(curveRadius: number, tube: number, arcRad: number): THREE.Buffe
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Layout constants (metres) — feet at y=0, apex lands close to CHARACTER_HEIGHT.
+//
+// Each named band owns a real fraction of the total ~2.07 m stack: bottom bun
+// 24% / patty 16% / cheese 3% (a thin accent drape, not one of the five named
+// bands) / tomato 10% / lettuce 11% / top bun 35%. The previous pass put 55%+
+// of the height into the top bun alone, crushing everything else into an
+// unreadable belt below it — rebalancing this is the single biggest fix here.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Radii deliberately do NOT shrink monotonically: cheese and tomato are made
-// *wider* than the patty beneath them so they peek out past its edge instead of
-// hiding behind it, and the lettuce's solid base disc is kept narrower than the
-// tomato so it nests on top rather than blanketing it from the camera's tilted
-// downward view. Only the frill blobs (not the base disc) reach out wide, to read
-// as a ruffled edge rather than a fourth solid occluding layer.
-const BOTTOM_BUN = { r: 0.6, h: 0.58, edge: 0.18, yTop: 0.58 };
-const PATTY = { r: 0.56, h: 0.26, edge: 0.07, yTop: 0.84 };
-const CHEESE = { r: 0.62, h: 0.06, edge: 0.02, yBottom: 0.84, yTop: 0.9 };
-const TOMATO = { r: 0.58, h: 0.14, edge: 0.06, yBottom: 0.9, yTop: 1.04 };
-const LETTUCE = { r: 0.46, frillR: 0.64, h: 0.09, edge: 0.03, yBottom: 1.04, yTop: 1.13 };
-const CROWN = { baseR: 0.62, h: 0.95, yBase: 1.1 };
+const BOTTOM_BUN = { r: 0.6, h: 0.5, edge: 0.17, yTop: 0.5 };
+const PATTY = { r: 0.56, h: 0.34, edge: 0.06, yTop: 0.84 };
+const CHEESE = { r: 0.62, h: 0.07, edge: 0.02, yBottom: 0.84, yTop: 0.91 };
+const TOMATO = { r: 0.6, h: 0.21, edge: 0.06, yBottom: 0.91, yTop: 1.12 };
+// Lettuce is split into a low solid base disc (mostly hidden, structural only)
+// and a taller ruffled frill ring near the TOP of the band, so it reads as a
+// leaf collar peeking from under the (now much smaller) crown, not a wafer.
+const LETTUCE = { r: 0.5, baseH: 0.11, frillR: 0.68, h: 0.23, edge: 0.035, yBottom: 1.12, yTop: 1.35 };
+const CROWN = { baseR: 0.62, h: 0.72, yBase: 1.35 };
+// apex ≈ 1.35 + 0.72 = 2.07 m, ≈ CHARACTER_HEIGHT (2.1 m).
 
 export class HamburgerCharacter extends BaseCharacter {
   private topBun: THREE.Group;
@@ -118,6 +175,13 @@ export class HamburgerCharacter extends BaseCharacter {
     const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.45 });
     const glowMat = flatMat(PALETTE.mustard, { transparent: true, opacity: 0 });
 
+    // Contrapposto weight-shift bias — set once. Nothing in BaseCharacter's
+    // shared motion ever touches body.position.x or body.rotation.y (only
+    // position.y / rotation.x / rotation.z are driven per-frame), so this
+    // constant asymmetry survives idle, run, attack, hit and death alike.
+    this.body.position.x = 0.05;
+    this.body.rotation.y = 0.07;
+
     // ── Bottom bun ────────────────────────────────────────────────────────────
     const bottomBun = new THREE.Mesh(roundedPuck(BOTTOM_BUN.r, BOTTOM_BUN.h, BOTTOM_BUN.edge), bunDarkMat);
     bottomBun.name = 'bottom_bun';
@@ -126,9 +190,11 @@ export class HamburgerCharacter extends BaseCharacter {
     bottomBun.receiveShadow = true;
     this.body.add(bottomBun);
 
-    // ── Feet — peek out from under the bottom bun's front edge ──────────────
-    this.footL = this.buildFoot(pattyDarkMat, -0.3);
-    this.footR = this.buildFoot(pattyDarkMat, 0.3);
+    // ── Feet — asymmetric contrapposto stance, embedded into the bottom bun's
+    // lower silhouette (rather than floating below it) via a short ankle nub
+    // plus a pivot pulled inside the bun's footprint. ──────────────────────
+    this.footL = this.buildFoot(pattyDarkMat, -1, { x: -0.28, y: 0.07, z: 0.4, rotY: -0.32 });
+    this.footR = this.buildFoot(pattyDarkMat, 1, { x: 0.24, y: 0.1, z: 0.34, rotY: 0.18 });
     this.body.add(this.footL, this.footR);
 
     // ── Patty ─────────────────────────────────────────────────────────────────
@@ -145,7 +211,7 @@ export class HamburgerCharacter extends BaseCharacter {
       mark.name = 'grill_mark__no_outline';
       mark.userData.noOutline = true;
       mark.rotation.y = Math.PI / 5;
-      mark.position.set(gx, BOTTOM_BUN.h + PATTY.h - 0.03, 0);
+      mark.position.set(gx, BOTTOM_BUN.h + PATTY.h - 0.04, 0);
       this.body.add(mark);
     }
 
@@ -155,12 +221,14 @@ export class HamburgerCharacter extends BaseCharacter {
     cheese.position.y = CHEESE.yBottom;
     cheese.castShadow = true;
     this.body.add(cheese);
-    const dripAngles = [0.5, 1.7, 3.4, 5.0];
+    // Kept off dead-centre-front/back (theta ~1.57/4.71) so they read as melt
+    // dripping down the sides rather than fangs hanging under the face.
+    const dripAngles = [0.7, 2.44, 3.84, 5.58];
     for (const a of dripAngles) {
-      const drip = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.14, 8), cheeseMat);
+      const drip = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), cheeseMat);
       drip.name = 'cheese_drip';
-      drip.position.set(Math.cos(a) * CHEESE.r * 0.96, CHEESE.yBottom + 0.02, Math.sin(a) * CHEESE.r * 0.96);
-      drip.rotation.x = Math.PI;
+      drip.position.set(Math.cos(a) * CHEESE.r * 0.96, CHEESE.yBottom - 0.05, Math.sin(a) * CHEESE.r * 0.96);
+      drip.scale.set(1, 1.6, 1);
       drip.castShadow = true;
       this.body.add(drip);
     }
@@ -180,30 +248,35 @@ export class HamburgerCharacter extends BaseCharacter {
       this.body.add(seed);
     }
 
-    // ── Lettuce — solid base disc + a ruffled ring of frill blobs ───────────
-    const lettuceBase = new THREE.Mesh(roundedPuck(LETTUCE.r, LETTUCE.h, LETTUCE.edge), lettuceMatA);
+    // ── Lettuce — solid base disc + a ruffled ring of frill blobs sitting in
+    // the upper portion of the band, so it reads as a leaf collar peeking out
+    // from under the crown, not a flat green wafer. ─────────────────────────
+    const lettuceBase = new THREE.Mesh(roundedPuck(LETTUCE.r, LETTUCE.baseH, LETTUCE.edge), lettuceMatA);
     lettuceBase.name = 'lettuce_base';
     lettuceBase.position.y = LETTUCE.yBottom;
     lettuceBase.castShadow = true;
     lettuceBase.receiveShadow = true;
     this.body.add(lettuceBase);
 
-    const frillCount = 14;
+    const frillCount = 16;
+    const frillCenterY = LETTUCE.yBottom + LETTUCE.h * 0.62;
     for (let i = 0; i < frillCount; i++) {
       const a = (i / frillCount) * Math.PI * 2;
-      const wobble = (i % 3) * 0.02 - 0.02;
-      const frill = new THREE.Mesh(new THREE.SphereGeometry(0.115, 8, 8), i % 2 === 0 ? lettuceMatA : lettuceMatB);
+      const wobble = (i % 3) * 0.025 - 0.025;
+      const frill = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), i % 2 === 0 ? lettuceMatA : lettuceMatB);
       frill.name = 'lettuce_frill';
-      frill.position.set(Math.cos(a) * LETTUCE.frillR, LETTUCE.yBottom + LETTUCE.h * 0.5 + wobble, Math.sin(a) * LETTUCE.frillR);
-      frill.scale.set(1, 0.4, 0.8);
+      frill.position.set(Math.cos(a) * LETTUCE.frillR, frillCenterY + wobble, Math.sin(a) * LETTUCE.frillR);
+      frill.scale.set(1, 0.5, 0.85);
       frill.rotation.y = a;
       frill.castShadow = true;
       this.body.add(frill);
     }
 
-    // ── Arms — stubby bun-coloured limbs with cream mitts ────────────────────
-    this.armL = this.buildArm(armMat, mittMat, -1);
-    this.armR = this.buildArm(armMat, mittMat, 1);
+    // ── Arms — stubby bun-coloured limbs with cream mitts. Asymmetric base
+    // pose (different height + angle per side) so the idle stance already
+    // reads as weight-shifted rather than mirrored. ─────────────────────────
+    this.armL = this.buildArm(armMat, mittMat, -1, { y: 0.9, rotZ: -0.16, rotX: 0.08 });
+    this.armR = this.buildArm(armMat, mittMat, 1, { y: 1.0, rotZ: 0.44, rotX: -0.12 });
     this.body.add(this.armL, this.armR);
 
     // ── Top bun crown, sesame seeds and face ─────────────────────────────────
@@ -221,93 +294,101 @@ export class HamburgerCharacter extends BaseCharacter {
 
     // Sesame seeds — hand-placed, deterministic scatter across the crown's upper
     // and side surfaces, kept clear of the face zone (front, lower third).
+    // Positions are (theta radians, height fraction 0-1), resolved to an EXACT
+    // surface point + normal via `crownSurface` so every seed sits flush on the
+    // dome regardless of how sharply the profile curves at that height — the
+    // previous approximate placement is what let seeds float in mid-air.
     const seedSpots: Array<[number, number]> = [
-      [0.0, 0.86], [0.5, 0.8], [-0.5, 0.8], [1.0, 0.74], [-1.0, 0.74],
-      [1.5, 0.62], [-1.5, 0.62], [2.1, 0.5], [-2.1, 0.5], [2.7, 0.6],
-      [-2.7, 0.6], [3.1, 0.78], [Math.PI, 0.68], [2.4, 0.9],
+      [0.0, 0.82], [0.5, 0.76], [-0.5, 0.76], [1.0, 0.68], [-1.0, 0.68],
+      [1.5, 0.56], [-1.5, 0.56], [2.1, 0.46], [-2.1, 0.46], [2.7, 0.55],
+      [-2.7, 0.55], [3.1, 0.72], [Math.PI, 0.62], [2.4, 0.84], [-2.4, 0.84], [0.2, 0.6],
     ];
     const seedGeo = new THREE.SphereGeometry(1, 8, 6);
     for (const [theta, hf] of seedSpots) {
-      const y = CROWN.h * hf;
-      const radiusAtH = CROWN.baseR * (0.6 + 0.4 * Math.sin(hf * Math.PI * 0.9)); // rough profile match
-      const nx = Math.sin(theta);
-      const nz = Math.cos(theta);
+      const { pos, normal } = crownSurface(theta, hf);
       const seed = new THREE.Mesh(seedGeo, seedMat);
       seed.name = 'sesame_seed';
-      seed.position.set(nx * (radiusAtH + 0.015), y, nz * (radiusAtH + 0.015));
-      // Lie the seed flat against the crown: align its thin local-Z axis with the
-      // (mostly horizontal) outward normal, then vary the tangential spin per seed
-      // so they scatter naturally instead of all pointing the same way.
-      const normal = new THREE.Vector3(nx, 0.15, nz).normalize();
+      // Pushed out along the TRUE surface normal (not a flat radial guess) so
+      // the seed sits flush against — and slightly embedded in — the dome.
+      seed.position.copy(pos).addScaledVector(normal, 0.009);
       seed.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-      seed.rotateZ(theta * 1.7);
-      seed.scale.set(0.055, 0.09, 0.018);
+      seed.rotateZ(theta * 1.7); // vary tangential spin per seed for a natural scatter
+      seed.scale.set(0.05, 0.085, 0.016);
       seed.castShadow = true;
       this.topBun.add(seed);
     }
 
-    // Face — closed happy eyes + small smile + blush, on the crown's lower front.
-    const faceGroup = new THREE.Group();
-    faceGroup.name = 'face';
-    faceGroup.position.set(0, CROWN.h * 0.3, CROWN.baseR * 0.98);
-    this.topBun.add(faceGroup);
-
+    // Face — closed happy eyes + small smile + blush, placed high enough on the
+    // crown's front (hFrac 0.26-0.46) that the mouth clears the lettuce collar
+    // below with real margin, and each decal is oriented flush to the crown's
+    // true surface normal (via `addCrownDecal`) instead of a flat guessed
+    // offset — this is what fixed both the mouth-behind-lettuce occlusion and
+    // the blush clipping through the cheek.
     for (const sx of [-1, 1]) {
+      const eyeG = addCrownDecal(this.topBun, sx * 0.3, 0.46, 0.006);
       const eye = new THREE.Mesh(faceArc(0.1, 0.022, Math.PI * 0.72), inkMat);
       eye.name = 'eye__no_outline';
       eye.userData.noOutline = true;
       eye.rotation.z = Math.PI / 2; // bulge upward: closed happy "^" eye
-      eye.position.set(sx * 0.155, 0.02, 0.03);
-      faceGroup.add(eye);
+      eyeG.add(eye);
 
-      const blush = new THREE.Mesh(new THREE.CircleGeometry(0.075, 16), blushMat);
+      const blushG = addCrownDecal(this.topBun, sx * 0.6, 0.3, 0.004);
+      const blush = new THREE.Mesh(new THREE.CircleGeometry(0.068, 16), blushMat);
       blush.name = 'blush__no_outline';
       blush.userData.noOutline = true;
-      blush.position.set(sx * 0.32, -0.08, 0.02);
-      blush.rotation.y = sx * -0.5;
-      faceGroup.add(blush);
+      blushG.add(blush);
     }
 
+    const mouthG = addCrownDecal(this.topBun, 0, 0.26, 0.006);
     const mouth = new THREE.Mesh(faceArc(0.11, 0.02, Math.PI * 0.5), inkMat);
     mouth.name = 'mouth__no_outline';
     mouth.userData.noOutline = true;
     mouth.rotation.z = -Math.PI / 2; // bulge downward: small smile "u"
-    mouth.position.set(0, -0.16, 0.035);
-    faceGroup.add(mouth);
+    mouthG.add(mouth);
 
     // ── Heal glow — dormant ring for the Onion Ring self-heal flourish ──────
     this.healGlow = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.05, 8, 32), glowMat);
     this.healGlow.name = 'heal_glow__no_outline';
     this.healGlow.userData.noOutline = true;
     this.healGlow.rotation.x = Math.PI / 2;
-    this.healGlow.position.y = 0.58;
+    this.healGlow.position.y = 0.78;
     this.body.add(this.healGlow);
 
-    outlineGroup(this.root, 0.032);
+    // Outline: a whisper, per render/toon.ts — the reference bar carries almost
+    // no ink line. The previous 0.032 was 8x the module's tuned default.
+    outlineGroup(this.root, OUTLINE_THIN);
     this.collectFlashTargets();
   }
 
-  private buildFoot(mat: THREE.Material, sx: number): THREE.Group {
+  private buildFoot(mat: THREE.Material, sx: number, cfg: { x: number; y: number; z: number; rotY: number }): THREE.Group {
     const pivot = new THREE.Group();
     pivot.name = sx < 0 ? 'foot_l_pivot' : 'foot_r_pivot';
-    // Pushed out to BOTTOM_BUN.r so the toe clearly pokes past the bun's front
-    // edge — Kirby-style feet peeking from under a round body — while the heel
-    // stays tucked just inside it.
-    pivot.position.set(sx * 0.28, 0.1, 0.62);
-    const shoe = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.1, 4, 10), mat);
+    pivot.position.set(cfg.x, cfg.y, cfg.z);
+    pivot.rotation.y = cfg.rotY;
+
+    // Short ankle nub bridges up into the bottom bun's lower curve so the foot
+    // reads as attached rather than a separate blob floating beneath the body.
+    const ankle = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.08, 4, 8), mat);
+    ankle.name = 'ankle';
+    ankle.position.set(0, 0.09, -0.04);
+    ankle.castShadow = true;
+    pivot.add(ankle);
+
+    const shoe = new THREE.Mesh(new THREE.CapsuleGeometry(0.115, 0.13, 4, 10), mat);
     shoe.name = 'foot';
     shoe.rotation.x = Math.PI / 2;
-    shoe.position.set(0, -0.01, 0.1);
+    shoe.position.set(0, -0.01, 0.09);
     shoe.castShadow = true;
     pivot.add(shoe);
     return pivot;
   }
 
-  private buildArm(armMat: THREE.Material, mittMat: THREE.Material, sx: number): THREE.Group {
+  private buildArm(armMat: THREE.Material, mittMat: THREE.Material, sx: number, cfg: { y: number; rotZ: number; rotX: number }): THREE.Group {
     const pivot = new THREE.Group();
     pivot.name = sx < 0 ? 'arm_l_pivot' : 'arm_r_pivot';
-    pivot.position.set(sx * 0.66, 0.76, 0.06);
-    pivot.rotation.z = sx * 0.22;
+    pivot.position.set(sx * 0.66, cfg.y, 0.06);
+    pivot.rotation.z = cfg.rotZ;
+    pivot.rotation.x = cfg.rotX;
 
     const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.12, 4, 10), armMat);
     upper.name = 'arm_upper';
@@ -344,6 +425,13 @@ export class HamburgerCharacter extends BaseCharacter {
     this.bunLagZ += this.bunLagZVel * ctx.dt;
     this.topBun.position.y = CROWN.yBase + (this.bunLagY - targetY);
     this.topBun.rotation.z += this.bunLagZ - targetZ;
+
+    // ── Contrapposto bias — a small constant lean layered on top of the
+    // shared idle/run/hit/death motion (both of which fully overwrite
+    // body.rotation.z and topBun.rotation.z earlier this frame), so the pose
+    // always reads as weighted to one side rather than perfectly symmetric. ──
+    this.body.rotation.z += 0.05;
+    this.topBun.rotation.z += 0.035;
 
     // ── Idle sway / run swing for arms and feet ─────────────────────────────
     const idleSway = Math.sin(this.elapsed * 2.1) * 0.05 * (1 - move);
