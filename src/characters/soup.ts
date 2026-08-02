@@ -51,7 +51,7 @@ export class SoupCharacter extends BaseCharacter {
         torso: CERAMIC,
         limbRoughness: 0.5,
       },
-      proportions: { headFraction: 0.42 }, // the bowl is WIDE and shallow, not tall
+      proportions: { headFraction: 0.46 }, // the bowl is WIDE and shallow, not tall
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -73,13 +73,24 @@ export class SoupCharacter extends BaseCharacter {
     // mirroring `hamburger.ts`'s crownSurface: every decal (rim trim, eyes) is
     // placed through the same function so nothing floats off the curve or sinks
     // into it — the two failure modes named in the brief.
+    // Round 1 defect: the profile flared so aggressively (r growing much faster than
+    // h) that its true outward surface normal in the eye zone pointed mostly
+    // DOWNWARD rather than outward — like the underside of a wide eave — so the
+    // eyes ended up embedded facing toward the ground and read as barely-visible
+    // dots. Round 1 also floated the whole bowl too high above the neck (bottomY
+    // was only -0.56R, versus every other character's food mass reaching down to
+    // roughly -0.9R to sit flush against it), leaving a visible gap, and let steam
+    // push the measured height to 2.31 m. Fixed by: a gentler, more sustained
+    // "belly" segment (h 0.22-0.38) where height grows faster than radius — giving
+    // a mostly-outward normal — placed BELOW the wide rim flare rather than at it;
+    // and by lowering + shortening the whole bowl to sit against the neck.
     const BOWL_PROFILE: Array<[r: number, h: number]> = [
-      [0, 0], [0.30, 0], [0.30, 0.10], [0.44, 0.22], [0.68, 0.42],
-      [0.90, 0.66], [1.0, 0.86], [0.94, 0.96], [1.0, 1.0],
+      [0, 0], [0.38, 0], [0.44, 0.08], [0.58, 0.22], [0.70, 0.38],
+      [0.82, 0.54], [0.94, 0.72], [1.0, 0.88], [0.95, 0.97], [1.0, 1.0],
     ];
-    const bowlBaseR = R * 1.42;
-    const bowlH = R * 1.05;
-    const bowlBottomY = -R * 0.56; // head-local Y of the bowl's own base (h=0)
+    const bowlBaseR = R * 1.6;
+    const bowlH = R * 1.3;
+    const bowlBottomY = -R * 1.0; // head-local Y of the bowl's own base (h=0) — flush with the neck
 
     const bowlPoint = (rFrac: number, hFrac: number): THREE.Vector2 =>
       new THREE.Vector2(rFrac * bowlBaseR, bowlBottomY + hFrac * bowlH);
@@ -183,7 +194,7 @@ export class SoupCharacter extends BaseCharacter {
 
     this.buildSteam(R, brothPt.pos.y, brothRadius);
     this.buildFace(R, bowlSurface);
-    this.buildLadle(R);
+    this.buildLadle();
     this.dressTorsoAsSoup();
 
     outlineGroup(this.root);
@@ -211,8 +222,8 @@ export class SoupCharacter extends BaseCharacter {
       // Three stacked, slightly offset capsules per wisp — a cheap curling-smoke read
       // without needing a real particle system.
       for (let j = 0; j < 3; j++) {
-        const seg = new THREE.Mesh(new THREE.CapsuleGeometry(R * (0.05 - j * 0.008), R * 0.16, 4, 6), mat);
-        seg.position.set(Math.sin(j * 1.7 + i) * R * 0.05, R * (0.14 + j * 0.15), Math.cos(j * 1.3 + i) * R * 0.04);
+        const seg = new THREE.Mesh(new THREE.CapsuleGeometry(R * (0.042 - j * 0.007), R * 0.11, 4, 6), mat);
+        seg.position.set(Math.sin(j * 1.7 + i) * R * 0.04, R * (0.08 + j * 0.09), Math.cos(j * 1.3 + i) * R * 0.03);
         seg.rotation.z = Math.sin(j + i) * 0.3;
         seg.userData.noOutline = true;
         group.add(seg);
@@ -231,16 +242,24 @@ export class SoupCharacter extends BaseCharacter {
     face.position.set(0, 0, 0); // features are authored directly on `head` in exact surface coords
     const head = this.rig.joints.head;
 
-    const EYE_THETA = 0.62;
-    const EYE_H = 0.52;
+    // EYE_H sits in the belly segment (h 0.22-0.38), chosen because there height
+    // grows faster than radius — a mostly-outward true surface normal. Orientation
+    // still uses the flattened HORIZONTAL-outward direction rather than the raw 3D
+    // normal, though: even a mild residual downward tilt is enough to visibly
+    // angle a flattened sclera away from a roughly-eye-level camera, and a bowl's
+    // profile is easy to retune later, so this is a deliberate belt-and-braces fix
+    // rather than relying on getting the profile derivative exactly right.
+    const EYE_THETA = 0.5;
+    const EYE_H = 0.30;
     const irisMat = toonMat({ color: '#6B6E72', roughness: 0.3 }); // grey steam-toned, not ink-black
     const scleraMat = toonMat({ color: '#EDEDEA', roughness: 0.3 });
 
     for (const sx of [-1, 1] as const) {
-      const { pos, normal } = bowlSurface(sx * EYE_THETA, EYE_H);
+      const { pos } = bowlSurface(sx * EYE_THETA, EYE_H);
+      const outward = new THREE.Vector3(pos.x, 0, pos.z).normalize();
       const eye = new THREE.Group();
-      eye.position.copy(pos).addScaledVector(normal, R * 0.012);
-      eye.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+      eye.position.copy(pos).addScaledVector(outward, R * 0.03);
+      eye.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
       head.add(eye);
 
       const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.135, 16, 14), scleraMat);
@@ -267,25 +286,32 @@ export class SoupCharacter extends BaseCharacter {
    * Splash/Noodle Toss/Soup Dump without inventing an unrelated prop. A few
    * noodles drape over the scoop's rim as the "matte noodle" material callout.
    */
-  private buildLadle(R: number): void {
+  private buildLadle(): void {
+    // Round 2 defect: every offset here was scaled against `R` (the BOWL/head
+    // radius, ~0.44m) instead of the hand's own scale. `ChibiRig` sizes the hand
+    // mitt from `CHARACTER_HEIGHT` (handRadius = height*0.075 ≈ 0.16m) — completely
+    // independent of the food mass — so an offset of `R*0.05` (~0.02m) barely
+    // clears the CENTRE of a 0.16m-radius hand sphere: the whole prop was built
+    // sitting inside the mitt, invisible. Fixed by sizing against handRadius.
+    const handRadius = CHARACTER_HEIGHT * 0.075;
     const hand = this.rig.joints.handR;
     const ladle = new THREE.Group();
     ladle.name = 'soup_ladle';
-    ladle.position.set(R * 0.05, -R * 0.05, R * 0.05);
-    ladle.rotation.set(-0.3, 0, 0.15);
+    ladle.position.set(handRadius * 0.1, 0, handRadius * 0.35);
+    ladle.rotation.set(-0.25, 0, 0.12);
     hand.add(ladle);
 
     const handleMat = toonMat({ color: WOOD, roughness: 0.6 });
-    const handle = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.045, R * 0.5, 4, 8), handleMat);
+    const handle = new THREE.Mesh(new THREE.CapsuleGeometry(handRadius * 0.16, handRadius * 1.7, 4, 8), handleMat);
     handle.name = 'soup_ladle_handle';
-    handle.position.set(0, R * 0.28, 0);
+    handle.position.set(0, -handRadius * 0.35, 0);
     handle.castShadow = true;
     ladle.add(handle);
 
     const bowlMat = glossyMat({ color: '#C7CDD4', roughness: 0.3, metalness: 0.4 });
-    const scoop = new THREE.Mesh(new THREE.SphereGeometry(R * 0.16, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), bowlMat);
+    const scoop = new THREE.Mesh(new THREE.SphereGeometry(handRadius * 0.5, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), bowlMat);
     scoop.name = 'soup_ladle_scoop';
-    scoop.position.set(0, -R * 0.02, 0);
+    scoop.position.set(0, -handRadius * 1.55, 0);
     scoop.rotation.x = Math.PI;
     scoop.castShadow = true;
     ladle.add(scoop);
@@ -294,10 +320,10 @@ export class SoupCharacter extends BaseCharacter {
     const noodleMat = toonMat({ color: NOODLE, roughness: 0.6 });
     const noodleDarkMat = toonMat({ color: NOODLE_DARK, roughness: 0.6 });
     for (let i = 0; i < 4; i++) {
-      const noodle = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.016, R * 0.22, 3, 6), i % 2 === 0 ? noodleMat : noodleDarkMat);
+      const noodle = new THREE.Mesh(new THREE.CapsuleGeometry(handRadius * 0.05, handRadius * 0.7, 3, 6), i % 2 === 0 ? noodleMat : noodleDarkMat);
       noodle.name = 'soup_noodle';
       const a = -0.5 + i * 0.33;
-      noodle.position.set(Math.sin(a) * R * 0.1, R * 0.02, Math.cos(a) * R * 0.06);
+      noodle.position.set(Math.sin(a) * handRadius * 0.3, -handRadius * 1.28, Math.cos(a) * handRadius * 0.2);
       noodle.rotation.set(Math.PI / 2 + Math.sin(a) * 0.4, 0, a * 0.6);
       noodle.castShadow = true;
       ladle.add(noodle);
@@ -358,9 +384,9 @@ export class SoupCharacter extends BaseCharacter {
       const cycle = 2.6;
       const t = ((this.elapsed + i * 0.9) % cycle) / cycle;
       wisp.position.y = wisp.userData.baseY ?? (wisp.userData.baseY = wisp.position.y);
-      wisp.position.y = (wisp.userData.baseY as number) + t * this.rig.headRadius * 0.55;
+      wisp.position.y = (wisp.userData.baseY as number) + t * this.rig.headRadius * 0.34;
       wisp.rotation.y = this.elapsed * 0.6 + i;
-      wisp.scale.setScalar(0.7 + t * 0.6);
+      wisp.scale.setScalar(0.7 + t * 0.35);
       const mat = this.steamMats[i];
       if (mat) mat.opacity = 0.34 * (1 - t) * (t < 0.15 ? t / 0.15 : 1);
     }

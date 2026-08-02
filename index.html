@@ -12,6 +12,9 @@
     html, body { margin: 0; height: 100%; overflow: hidden; background: #16101f; font-family: 'Heebo', sans-serif; }
     #game { position: fixed; inset: 0; }
     canvas { display: block; width: 100%; height: 100%; }
+    /* pointer-events:none so mouse/click input passes through to the canvas below;
+       the interactive bits (e.g. the Play Again button) re-enable it themselves. */
+    #hud { position: fixed; inset: 0; pointer-events: none; }
     #boot {
       position: fixed; inset: 0; display: grid; place-items: center;
       color: #FFF3DE; font-family: 'Rubik', sans-serif; font-weight: 800; letter-spacing: 0.04em;
@@ -23,6 +26,7 @@
 </head>
 <body>
   <div id="game"></div>
+  <div id="hud"></div>
   <div id="boot">Heating the kitchen…</div>
   <script type="module" src="/src/main.ts"></script>
 </body>
