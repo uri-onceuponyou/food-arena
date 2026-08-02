@@ -100,7 +100,7 @@ plates (`reference/images/curated/`, gitignored) · live progress page.
 |---|---|
 | Kitchen arena | ✅ round 2 — 7/10 (was 2/10). Danger zone is a glow ring, palette broken out of monochrome |
 | Match simulation | ✅ 47/47 tests |
-| Playable match (glue + HUD) | 🔄 in progress |
+| Playable match (glue + HUD) | ✅ playable end-to-end |
 | Ability VFX | ⬜ not started |
 | Camera / game feel | ⬜ not started |
 | Menus (roster, results) | ⬜ not started |
@@ -109,10 +109,8 @@ plates (`reference/images/curated/`, gitignored) · live progress page.
 
 ## Next actions, in priority order
 
-1. **Finish Soup** — the last stub. Follow `donut.ts`; wide bowl, rising steam, grey eyes
-   and deliberately no mouth (that's its personality).
-2. **Land the playable match** — `stepMatch` → models → HUD. Then actually play it and
-   judge how it FEELS, which nothing has assessed yet.
+1. **Fix the AI axis-lock** (below) — it is the biggest thing between this and "fun".
+2. **Play it and judge feel** — a human at a real 60fps browser, not SwiftShader.
 3. **Ability VFX** — the sim already emits `weapon-fired`, `projectile-spawned`,
    `hit-landed`, `splat-created`, `trail-mark-created`, `death`. Subscribe to those; the
    sim must stay renderer-agnostic.
@@ -122,6 +120,17 @@ plates (`reference/images/curated/`, gitignored) · live progress page.
    `tools/review.mjs`. Report the real verdict, including losses.
 
 ## Known issues
+
+- **AI axis-lock (gameplay bug, real).** The arena places spice-cart props exactly on
+  `y = CENTER.y`, which is also both spawn y-coordinates. `ai.ts`/`movement.ts` chase in a
+  straight line with no pathfinding, so when both fighters share a y the AI presses into
+  the box forever: `tryMove` blocks x, and dy is exactly 0 so there is nothing to slide
+  along. Diagonal approach routes around it. Fix by moving those props off the spawn
+  line, or by giving the AI a slide/juke when blocked.
+- **AI picks the highest-damage usable weapon and nothing else** — no kiting or
+  positioning, so it reads as a wall rather than an opponent. Faithful to the prototype,
+  but worth improving now that deviation is authorised.
+- Countdown digits render very large over the player and briefly obscure them.
 
 - `ChibiRig.headCentreY` assumes a head mass extending ~±R about its origin. Non-spherical
   masses float or sink (Hot Dog's floated 0.33m). Hot Dog uses a hidden connector.
