@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
 import { ChibiRig } from './rig';
 
 const CRUST = '#EFB868';       // baked dough slab
@@ -80,7 +80,11 @@ export class PizzaCharacter extends BaseCharacter {
     this.rig = new ChibiRig({
       palette: {
         limb: CRUST,
-        hand: CHEESE,
+        // Cheese hands sat too close in hue to the crust limb — both warm
+        // gold, differing mostly in value. Pepperoni-red mitts (the same
+        // colour already used for the topping) give hands a genuine hue
+        // break, not just a lighter shade of the same colour.
+        hand: PEPPERONI,
         foot: CRUST_CHAR,
         torso: CRUST,
         limbRoughness: 0.78,
@@ -213,10 +217,11 @@ export class PizzaCharacter extends BaseCharacter {
 
     // ── Body: dress the torso ─────────────────────────────────────────────────
     // Two independent builder rounds both named the same gap: a themed head on a
-    // generic body. Pizza's body is a crust-coloured torso wearing a melted-cheese
-    // "vest" that drapes over the shoulders and drips down the chest, trimmed with
-    // the same puffy crust-rim colour as the head's own base — so the slice's food
-    // language runs the full height of the model instead of stopping at the neck.
+    // generic body. Pizza's body is a crust-coloured torso wearing a smaller
+    // crust-rimmed cheese badge on the chest, with cheese drips over the
+    // shoulders and a pepperoni continuing the topping motif — so the slice's
+    // food language runs the full height of the model instead of stopping dead
+    // at the neck.
     dressTorso(this.rig, (size) => {
       const group = new THREE.Group();
       group.name = 'pizza_torso';
@@ -235,67 +240,90 @@ export class PizzaCharacter extends BaseCharacter {
       doughBody.receiveShadow = true;
       group.add(doughBody);
 
-      // Cheese vest: a rounded bib draped over the shoulders, apex pointing down
-      // the belly — a small echo of the head's own triangle, in melted cheese
-      // rather than crust, so it reads as a distinct garment, not a recoloured
-      // copy of the head.
-      const vestHalfW = bodyHalfW * 0.88;
-      const vestTopY = size.h * 0.92;
-      const vestBottomY = size.h * 0.20;
-      const vestMidY = vestTopY - (vestTopY - vestBottomY) * 0.55;
-      const vestShape = new THREE.Shape();
-      vestShape.moveTo(-vestHalfW, vestTopY);
-      vestShape.lineTo(vestHalfW, vestTopY);
-      vestShape.quadraticCurveTo(vestHalfW * 0.35, vestMidY, 0, vestBottomY);
-      vestShape.quadraticCurveTo(-vestHalfW * 0.35, vestMidY, -vestHalfW, vestTopY);
-      const vestDepth = bodyHalfD * 0.30;
-      const vest = new THREE.Mesh(
-        new THREE.ExtrudeGeometry(vestShape, { depth: vestDepth, bevelEnabled: true, bevelThickness: vestDepth * 0.2, bevelSize: vestDepth * 0.2, bevelSegments: 2, curveSegments: 12 }),
-        glossyMat({ color: CHEESE, roughness: 0.28 })
-      );
-      vest.name = 'pizza_torso_vest';
-      vest.position.z = bodyHalfD * 0.78 - vestDepth / 2;
-      vest.castShadow = true;
-      vest.receiveShadow = true;
-      group.add(vest);
+      // Chest badge: a SMALLER echo of the head's own wedge (curved crust base,
+      // sharp point), worn apex-down like a pendant on the chest rather than
+      // covering the whole torso. A first pass built this as a full-width bib
+      // and it read as a stiff funnel/collar wrapping the neck; narrowing it to
+      // a badge that leaves bare crust body visible on both sides reads as a
+      // garment ON a body instead of a robot collar.
+      const apexY = size.h * 0.30;
+      const baseY = size.h * 0.88;
+      const halfW = bodyHalfW * 0.60;
+      const bulge = (baseY - apexY) * 0.30;
+      const cornerY = baseY - (baseY - apexY) * 0.10;
+      const badgeShape = (scale: number): THREE.Shape => {
+        const midY = (apexY + baseY) / 2;
+        const sc = (y: number) => midY + (y - midY) * scale;
+        const s = new THREE.Shape();
+        s.moveTo(0, sc(apexY));
+        s.lineTo(halfW * scale, sc(cornerY));
+        s.quadraticCurveTo(0, sc(baseY + bulge), -halfW * scale, sc(cornerY));
+        s.lineTo(0, sc(apexY));
+        return s;
+      };
 
-      // Crust-rim collar trim along the vest's top edge — the same toasty colour
-      // as the head's own crust roll, so the two read as the same food.
-      const collar = new THREE.Mesh(
-        roundedBox(vestHalfW * 2.1, bodyHalfD * 0.22, bodyHalfD * 0.32, bodyHalfD * 0.1, 3),
+      // Depths trimmed down from a first pass that pushed the badge proud enough
+      // to read as a satchel bulging off the chest at an angle — this sits
+      // closer to flush, like a patch on the crust rather than a strapped-on
+      // slab.
+      const badgeDepth = bodyHalfD * 0.14;
+      const rim = new THREE.Mesh(
+        new THREE.ExtrudeGeometry(badgeShape(1.0), { depth: badgeDepth, bevelEnabled: true, bevelThickness: badgeDepth * 0.25, bevelSize: badgeDepth * 0.25, bevelSegments: 2, curveSegments: 16 }),
         toonMat({ color: CRUST_RIM, roughness: 0.83 })
       );
-      collar.name = 'pizza_torso_collar';
-      collar.position.set(0, vestTopY, bodyHalfD * 0.82);
-      collar.castShadow = true;
-      collar.receiveShadow = true;
-      group.add(collar);
+      rim.name = 'pizza_torso_rim';
+      rim.position.z = bodyHalfD * 0.60;
+      rim.castShadow = true;
+      rim.receiveShadow = true;
+      group.add(rim);
 
-      // Cheese drips hanging off the collar over the shoulders.
-      const dripXs = [-vestHalfW * 0.85, -vestHalfW * 0.45, 0.05 * vestHalfW, vestHalfW * 0.5, vestHalfW * 0.88];
+      const cheeseDepth = bodyHalfD * 0.09;
+      const badgeFrontZ = bodyHalfD * 0.60 + badgeDepth;
+      const cheeseBadge = new THREE.Mesh(
+        new THREE.ExtrudeGeometry(badgeShape(0.78), { depth: cheeseDepth, bevelEnabled: true, bevelThickness: cheeseDepth * 0.3, bevelSize: cheeseDepth * 0.3, bevelSegments: 2, curveSegments: 16 }),
+        glossyMat({ color: CHEESE, roughness: 0.28 })
+      );
+      cheeseBadge.name = 'pizza_torso_cheese';
+      cheeseBadge.position.z = badgeFrontZ;
+      cheeseBadge.castShadow = true;
+      cheeseBadge.receiveShadow = true;
+      group.add(cheeseBadge);
+
+      // Cheese drips off the badge's top corners, over the shoulders. Two
+      // earlier passes anchored these against `baseY`, but the badge's actual
+      // top boundary is a CURVE that bulges above `baseY` at its centre and
+      // only meets `cornerY` right at the corners — anchoring against the
+      // nominal (non-curved) value left both attempts poking up through the
+      // rim as visible spikes. Anchored well below `cornerY` instead — a flat,
+      // conservative floor that sits under the curve everywhere near these
+      // corner-ish x positions — so only the bottom of each sphere is ever
+      // visible, hanging down over the crust body.
+      const dripAnchorY = cornerY - (baseY - apexY) * 0.14;
+      const dripR = bodyHalfD * 0.06;
+      const dripXs = [-halfW * 0.92, -halfW * 0.60, halfW * 0.60, halfW * 0.92];
       for (let i = 0; i < dripXs.length; i++) {
-        const len = bodyHalfD * (0.22 + (i % 3) * 0.07);
-        const drip = new THREE.Mesh(new THREE.SphereGeometry(bodyHalfD * 0.13, 10, 10), glossyMat({ color: CHEESE, roughness: 0.28 }));
+        const len = bodyHalfD * (0.10 + (i % 2) * 0.05);
+        const drip = new THREE.Mesh(new THREE.SphereGeometry(dripR, 10, 10), glossyMat({ color: CHEESE, roughness: 0.28 }));
         drip.name = 'pizza_torso_drip';
-        drip.position.set(dripXs[i], vestTopY - len * 0.6, bodyHalfD * 0.86);
-        drip.scale.set(1, len / (bodyHalfD * 0.13), 1);
+        drip.position.set(dripXs[i], dripAnchorY - len, badgeFrontZ + cheeseDepth * 0.6 + dripR * 0.6);
+        drip.scale.set(1, len / dripR, 1);
         drip.castShadow = true;
         drip.receiveShadow = true;
         group.add(drip);
       }
 
-      // A couple of pepperoni discs on the vest, continuing the topping motif
-      // down onto the body.
-      const pepMat = glossyMat({ color: PEPPERONI, roughness: 0.18 });
-      for (const [px, py] of [[-vestHalfW * 0.4, vestTopY - (vestTopY - vestBottomY) * 0.35], [vestHalfW * 0.32, vestTopY - (vestTopY - vestBottomY) * 0.55]] as const) {
-        const pep = new THREE.Mesh(new THREE.CylinderGeometry(bodyHalfD * 0.11, bodyHalfD * 0.12, bodyHalfD * 0.06, 14), pepMat);
-        pep.name = 'pizza_torso_pepperoni';
-        pep.rotation.x = Math.PI / 2;
-        pep.position.set(px, py, bodyHalfD * 0.78 + vestDepth * 0.5);
-        pep.castShadow = true;
-        pep.receiveShadow = true;
-        group.add(pep);
-      }
+      // A single pepperoni on the badge, continuing the topping motif onto the
+      // body without crowding the smaller shape.
+      const pep = new THREE.Mesh(
+        new THREE.CylinderGeometry(bodyHalfD * 0.10, bodyHalfD * 0.11, bodyHalfD * 0.06, 14),
+        glossyMat({ color: PEPPERONI, roughness: 0.18 })
+      );
+      pep.name = 'pizza_torso_pepperoni';
+      pep.rotation.x = Math.PI / 2;
+      pep.position.set(halfW * 0.05, (apexY + baseY) / 2 + bulge * 0.2, badgeFrontZ + cheeseDepth * 0.5 + bodyHalfD * 0.03);
+      pep.castShadow = true;
+      pep.receiveShadow = true;
+      group.add(pep);
 
       return group;
     });

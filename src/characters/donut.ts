@@ -176,7 +176,11 @@ export class DonutCharacter extends BaseCharacter {
       const collarR = bodyHalfW * 0.82;
       const collarTube = bodyHalfW * 0.30;
       const collarMat = glossyMat({ color: GLAZE, roughness: 0.16 });
-      const collar = new THREE.Mesh(new THREE.TorusGeometry(collarR, collarTube, 12, 28), collarMat);
+      // Radial segments pushed up from a first pass at 12 — viewed near
+      // edge-on from the front (a flat ring's own tube cross-section faces the
+      // camera almost directly there), 12 facets around the tube showed as a
+      // visible jagged/faceted silhouette against the smooth dough body.
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(collarR, collarTube, 22, 40), collarMat);
       collar.name = 'donut_torso_collar';
       collar.rotation.x = Math.PI / 2;
       collar.position.y = collarY;
@@ -199,16 +203,18 @@ export class DonutCharacter extends BaseCharacter {
         group.add(drip);
       }
 
-      // Sprinkles carry on down from the head, scattered across the collar.
+      // Sprinkles carry on down from the head, scattered across the lower half
+      // of the collar band — kept off the topmost row, which sits right at the
+      // seam against the head ring above and reads as a stray face feature.
       const sGeo = new THREE.CapsuleGeometry(R * 0.024, R * 0.06, 4, 6);
       for (let i = 0; i < 10; i++) {
-        const a = 0.5 + (i / 10) * 2.3;
-        const rr = collarR + (((i * 41) % 100) / 100 - 0.5) * collarTube * 1.5;
+        const a = 0.6 + (i / 10) * 2.1;
+        const rr = collarR + (((i * 41) % 100) / 100 - 0.5) * collarTube * 1.4;
         const mat = flatMat(SPRINKLE_COLORS[(i + 2) % SPRINKLE_COLORS.length]);
         const s = new THREE.Mesh(sGeo, mat);
         s.userData.noOutline = true;
         s.castShadow = true;
-        s.position.set(Math.cos(a) * rr, collarY + ((i % 3) - 1) * collarTube * 0.4, Math.sin(a) * rr);
+        s.position.set(Math.cos(a) * rr, collarY - collarTube * (0.15 + (i % 3) * 0.22), Math.sin(a) * rr);
         s.rotation.set(Math.PI / 2, 0, a + ((i * 29) % 100) / 100 - 0.5);
         group.add(s);
         this.sprinkles.push(s);
