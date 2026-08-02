@@ -80,18 +80,18 @@ Scaffold · frozen design spec · render core (IBL, SSAO, high-key rig, saturati
 preview harness · headless-WebGL screenshots · blind A/B compositor · 21 curated reference
 plates (`reference/images/curated/`, gitignored) · live progress page.
 
-### Characters — 10 of 11 modelled
+### Characters — 11 of 11 modelled, all on the shared rig
 | Character | State | Note |
 |---|---|---|
-| Hamburger | 🔄 porting to rig | Richest food mass in the cast; last one off the shared rig |
+| Hamburger | ✅ | Richest food mass in the cast; bottom bun is its dressed torso |
 | Donut | ✅ | Reference implementation; dressed torso |
 | Taco | ✅ | Two-panel V-fold shell (a flat panel vanished edge-on) |
-| Burrito | ✅ | |
+| Burrito | ✅ | Up-facing opening so it reads under the steep camera |
 | Egg | ✅ | Torso built from the same `eggSurface` math as the head |
-| Lollipop | ✅ | |
+| Lollipop | ✅ | Uses the rig's neck-to-head gap AS the stick |
 | Pizza | ✅ | Extruded wedge, crust rim hugging the dough's own boundary |
-| Sushi | ✅ | |
-| Soup | ⬜ **STILL A STUB** | Only remaining plain-sphere placeholder |
+| Sushi | ✅ | Two lathes sharing one seam vertex; overhanging salmon lid |
+| Soup | ✅ | Lathed bowl, ladle prop, deliberately no mouth |
 | Water Bottle | ✅ | Real transparency; water opaque inside a transmissive shell |
 | Hot Dog | ✅ | Mustard zigzag pushed along the sausage's true surface normal |
 
