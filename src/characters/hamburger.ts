@@ -508,9 +508,12 @@ export class HamburgerCharacter extends BaseCharacter {
     // Pulled in from the old 0.8 — that placed the shoulder pivot well outside
     // the torso's own radius (~0.6-0.68m through the cheese/tomato bands), so
     // the upper-arm capsule never touched the body and read as a floating
-    // sausage (round-3 defect #1). At ~0.47m off-axis the pivot origin sits
-    // INSIDE the torso volume at both attach heights.
-    pivot.position.set(sx * 0.47, cfg.y, 0.12);
+    // sausage (round-3 defect #1). Only a modest trim, to just outside the
+    // torso surface: a first attempt at 0.47 (well INSIDE the torso) buried
+    // the whole forearm/mitt in the body mesh and produced ugly z-fighting —
+    // worse than the original gap. The residual few centimetres of gap left
+    // at this distance is what the shoulder sphere below is sized to bridge.
+    pivot.position.set(sx * 0.68, cfg.y, 0.08);
     pivot.rotation.z = cfg.rotZ;
     pivot.rotation.x = cfg.rotX;
 
@@ -568,7 +571,11 @@ export class HamburgerCharacter extends BaseCharacter {
       // are oversized and bold" reference direction.
       const spatula = new THREE.Group();
       spatula.name = 'spatula';
-      spatula.position.set(0.03, -0.2, 0.08);
+      // Offset to the outer side of the mitt (sx-biased) rather than dead
+      // centre through it — gripping through the palm's centre put the dark
+      // handle crossing straight over the pale mitt sphere in side-on attack
+      // poses, which coincidentally read as a stray eye.
+      spatula.position.set(0.03 + sx * 0.07, -0.15, 0.1);
       spatula.rotation.x = -1.25;
       spatula.rotation.z = -0.16;
       forearmPivot.add(spatula);

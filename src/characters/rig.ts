@@ -101,6 +101,8 @@ export class ChibiRig {
   readonly joints: RigJoints;
   readonly headRadius: number;
   readonly headCentreY: number;
+  /** The default torso mesh, so characters can restyle or hide it. */
+  torsoMesh: THREE.Mesh | null = null;
   private readonly p: Required<RigProportions>;
 
   constructor(opts: ChibiRigOptions) {
@@ -215,15 +217,33 @@ export class ChibiRig {
       return m;
     };
 
-    // Torso — small and mostly hidden, but it gives the body a waist so the head
-    // doesn't sit directly on the legs.
-    const torsoMesh = solid(new THREE.Mesh(
-      roundedBox(this.p.shoulderWidth * 1.85, torsoH, this.p.shoulderWidth * 1.35, this.p.shoulderWidth * 0.42, 4),
-      torsoMat
-    ));
+    // Torso.
+    //
+    // Deliberately a soft tapered barrel rather than a box. A side-by-side against a
+    // character whose food mass spanned its whole body showed the box torso reading
+    // as "toy robot wearing a costume head" — the plain slab was doing active harm.
+    // Characters SHOULD still dress this with their own food geometry (see the
+    // `dressTorso` helper); this is a decent default, not a finished body.
+    const tw = this.p.shoulderWidth * 1.72;
+    const torsoGeo = new THREE.SphereGeometry(tw * 0.5, 20, 16);
+    // Taper: narrow at the shoulders, fuller at the waist, so it reads as a soft
+    // body rather than a capsule.
+    const pos = torsoGeo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i);
+      const t = (y / (tw * 0.5) + 1) * 0.5; // 0 at bottom, 1 at top
+      const taper = 0.86 + 0.30 * Math.sin(t * Math.PI * 0.85);
+      pos.setX(i, pos.getX(i) * taper);
+      pos.setZ(i, pos.getZ(i) * taper * 0.88);
+      pos.setY(i, y * (torsoH / tw));
+    }
+    torsoGeo.computeVertexNormals();
+
+    const torsoMesh = solid(new THREE.Mesh(torsoGeo, torsoMat));
     torsoMesh.position.y = torsoH * 0.5;
     torsoMesh.name = 'torso_mesh';
     this.joints.torso.add(torsoMesh);
+    this.torsoMesh = torsoMesh;
 
     // Segment helper: a capsule whose top sits at the joint origin and hangs down.
     const segment = (len: number, radius: number, mat: THREE.Material, name: string) => {

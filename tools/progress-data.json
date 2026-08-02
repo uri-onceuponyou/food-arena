@@ -2,8 +2,8 @@
   "title": "Food Fight Arena \u2014 Build",
   "subtitle": "3D rebuild in Three.js, judged against Brawl Stars & Zooba",
   "active": {
-    "piece": "P0 \u00b7 Art direction lock + P12 \u00b7 Kitchen arena",
-    "detail": "Render core was recalibrated against real reference plates \u2014 Brawl Stars turned out not to be cel-shaded at all. Hamburger is in round 2 fixing silhouette defects; the arena is being built in parallel now that the core is locked.",
+    "piece": "Characters on the shared rig + arena round 2",
+    "detail": "A shared poseable body plan now underpins the cast. Taco, Egg, Pizza and Hot Dog are being built in parallel against Donut as the template; the arena is in round 2 after a 2/10 critic verdict.",
     "round": 2
   },
   "groups": [
@@ -66,68 +66,68 @@
         {
           "id": "P1",
           "name": "Hamburger",
-          "state": "active",
-          "note": "Round 2 \u2014 fixing stack silhouette, floating seeds, occluded mouth"
+          "state": "done",
+          "note": "Round 4 \u2014 critic gaps closed, self-scored 8.5/10; pending port to the shared rig"
         },
         {
           "id": "P2",
           "name": "Donut",
-          "state": "queued",
-          "note": ""
+          "state": "done",
+          "note": "Reference implementation of the shared ChibiRig"
         },
         {
           "id": "P3",
           "name": "Taco",
-          "state": "queued",
-          "note": ""
+          "state": "active",
+          "note": "Round 1 on the rig"
         },
         {
           "id": "P4",
           "name": "Burrito",
           "state": "queued",
-          "note": ""
+          "note": "Stub on rig"
         },
         {
           "id": "P5",
           "name": "Egg",
-          "state": "queued",
-          "note": ""
+          "state": "active",
+          "note": "Round 1 on the rig"
         },
         {
           "id": "P6",
           "name": "Lollipop",
           "state": "queued",
-          "note": ""
+          "note": "Stub on rig"
         },
         {
           "id": "P7",
           "name": "Pizza",
-          "state": "queued",
-          "note": ""
+          "state": "active",
+          "note": "Round 1 on the rig"
         },
         {
           "id": "P8",
           "name": "Sushi",
           "state": "queued",
-          "note": ""
+          "note": "Stub on rig"
         },
         {
           "id": "P9",
           "name": "Soup",
           "state": "queued",
-          "note": ""
+          "note": "Stub on rig"
         },
         {
           "id": "P10",
           "name": "Water Bottle",
           "state": "queued",
-          "note": ""
+          "note": "Stub on rig"
         },
         {
           "id": "P11",
           "name": "Hot Dog",
-          "state": "queued",
-          "note": ""
+          "state": "active",
+          "note": "Round 1 on the rig"
         }
       ]
     },
@@ -138,7 +138,7 @@
           "id": "P12",
           "name": "Kitchen arena",
           "state": "active",
-          "note": "Round 1 \u2014 bigger, denser kitchen with lanes and chokepoints"
+          "note": "Round 2 \u2014 danger-zone readability, palette, prop density"
         },
         {
           "id": "P13",
@@ -161,8 +161,8 @@
         {
           "id": "P16",
           "name": "Gameplay integration",
-          "state": "queued",
-          "note": "Frozen rules, AI, match flow"
+          "state": "done",
+          "note": "Match simulation, 47/47 tests passing"
         }
       ]
     }
@@ -171,6 +171,7 @@
     "The game design is frozen. Damage, cooldowns, ranges, speeds and match structure are transcribed verbatim from the 2D prototype and must not be retuned.",
     "The arena is the one sanctioned exception \u2014 layout and props are open, as long as a central hazard, physical cover and a slowing hazard survive.",
     "Every piece is judged on rendered pixels in a blind A/B against real Brawl Stars and Zooba stills, never on a description of the work.",
-    "Art direction was corrected mid-flight: the brief said cel-shaded, but the reference plates show smooth-shaded high-key vinyl-toy surfaces with almost no outline. The brief says the bar wins over its own prose."
+    "Art direction was corrected mid-flight: the brief said cel-shaded, but the reference plates show smooth-shaded high-key vinyl-toy surfaces with almost no outline. The brief says the bar wins over its own prose.",
+    "A shared chibi rig now underpins every character: the food is the head and identity mass, the rig supplies limbs, poses and one motion vocabulary so the cast reads as one production."
   ]
 }

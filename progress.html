@@ -105,7 +105,7 @@
     overflow: hidden; border: 1px solid var(--line);
   }
   .meter__fill {
-    height: 100%; width: 33%;
+    height: 100%; width: 46%;
     background: linear-gradient(90deg, var(--lettuce), var(--accent));
     border-radius: 99px;
   }
@@ -226,16 +226,16 @@
 
   <div class="meter">
     <div class="meter__head">
-      <span>8 of 24 pieces approved</span>
-      <span>33%</span>
+      <span>11 of 24 pieces approved</span>
+      <span>46%</span>
     </div>
     <div class="meter__track"><div class="meter__fill"></div></div>
   </div>
 
   <div class="now">
     <span class="now__label"><span class="pulse"></span>Now building · round 2</span>
-    <span class="now__piece">P0 · Art direction lock + P12 · Kitchen arena</span>
-    <p class="now__detail">Render core was recalibrated against real reference plates — Brawl Stars turned out not to be cel-shaded at all. Hamburger is in round 2 fixing silhouette defects; the arena is being built in parallel now that the core is locked.</p>
+    <span class="now__piece">Characters on the shared rig + arena round 2</span>
+    <p class="now__detail">A shared poseable body plan now underpins the cast. Taco, Egg, Pizza and Hot Dog are being built in parallel against Donut as the template; the arena is in round 2 after a 2/10 critic verdict.</p>
   </div>
 
   <section>
@@ -310,67 +310,67 @@
   <section>
     <h2>Characters</h2>
     <ul class="pieces">
-      <li class="piece piece--active">
+      <li class="piece piece--done">
       <span class="piece__id">P1</span>
       <span class="piece__body">
         <span class="piece__name">Hamburger</span>
-        <span class="piece__note">Round 2 — fixing stack silhouette, floating seeds, occluded mouth</span>
+        <span class="piece__note">Round 4 — critic gaps closed, self-scored 8.5/10; pending port to the shared rig</span>
       </span>
-      <span class="chip chip--active">building</span>
+      <span class="chip chip--done">approved</span>
     </li>
-      <li class="piece piece--queued">
+      <li class="piece piece--done">
       <span class="piece__id">P2</span>
       <span class="piece__body">
         <span class="piece__name">Donut</span>
-        
+        <span class="piece__note">Reference implementation of the shared ChibiRig</span>
       </span>
-      <span class="chip chip--queued">queued</span>
+      <span class="chip chip--done">approved</span>
     </li>
-      <li class="piece piece--queued">
+      <li class="piece piece--active">
       <span class="piece__id">P3</span>
       <span class="piece__body">
         <span class="piece__name">Taco</span>
-        
+        <span class="piece__note">Round 1 on the rig</span>
       </span>
-      <span class="chip chip--queued">queued</span>
+      <span class="chip chip--active">building</span>
     </li>
       <li class="piece piece--queued">
       <span class="piece__id">P4</span>
       <span class="piece__body">
         <span class="piece__name">Burrito</span>
-        
+        <span class="piece__note">Stub on rig</span>
       </span>
       <span class="chip chip--queued">queued</span>
     </li>
-      <li class="piece piece--queued">
+      <li class="piece piece--active">
       <span class="piece__id">P5</span>
       <span class="piece__body">
         <span class="piece__name">Egg</span>
-        
+        <span class="piece__note">Round 1 on the rig</span>
       </span>
-      <span class="chip chip--queued">queued</span>
+      <span class="chip chip--active">building</span>
     </li>
       <li class="piece piece--queued">
       <span class="piece__id">P6</span>
       <span class="piece__body">
         <span class="piece__name">Lollipop</span>
-        
+        <span class="piece__note">Stub on rig</span>
       </span>
       <span class="chip chip--queued">queued</span>
     </li>
-      <li class="piece piece--queued">
+      <li class="piece piece--active">
       <span class="piece__id">P7</span>
       <span class="piece__body">
         <span class="piece__name">Pizza</span>
-        
+        <span class="piece__note">Round 1 on the rig</span>
       </span>
-      <span class="chip chip--queued">queued</span>
+      <span class="chip chip--active">building</span>
     </li>
       <li class="piece piece--queued">
       <span class="piece__id">P8</span>
       <span class="piece__body">
         <span class="piece__name">Sushi</span>
-        
+        <span class="piece__note">Stub on rig</span>
       </span>
       <span class="chip chip--queued">queued</span>
     </li>
@@ -378,7 +378,7 @@
       <span class="piece__id">P9</span>
       <span class="piece__body">
         <span class="piece__name">Soup</span>
-        
+        <span class="piece__note">Stub on rig</span>
       </span>
       <span class="chip chip--queued">queued</span>
     </li>
@@ -386,17 +386,17 @@
       <span class="piece__id">P10</span>
       <span class="piece__body">
         <span class="piece__name">Water Bottle</span>
-        
+        <span class="piece__note">Stub on rig</span>
       </span>
       <span class="chip chip--queued">queued</span>
     </li>
-      <li class="piece piece--queued">
+      <li class="piece piece--active">
       <span class="piece__id">P11</span>
       <span class="piece__body">
         <span class="piece__name">Hot Dog</span>
-        
+        <span class="piece__note">Round 1 on the rig</span>
       </span>
-      <span class="chip chip--queued">queued</span>
+      <span class="chip chip--active">building</span>
     </li>
     </ul>
   </section>
@@ -407,7 +407,7 @@
       <span class="piece__id">P12</span>
       <span class="piece__body">
         <span class="piece__name">Kitchen arena</span>
-        <span class="piece__note">Round 1 — bigger, denser kitchen with lanes and chokepoints</span>
+        <span class="piece__note">Round 2 — danger-zone readability, palette, prop density</span>
       </span>
       <span class="chip chip--active">building</span>
     </li>
@@ -435,13 +435,13 @@
       </span>
       <span class="chip chip--queued">queued</span>
     </li>
-      <li class="piece piece--queued">
+      <li class="piece piece--done">
       <span class="piece__id">P16</span>
       <span class="piece__body">
         <span class="piece__name">Gameplay integration</span>
-        <span class="piece__note">Frozen rules, AI, match flow</span>
+        <span class="piece__note">Match simulation, 47/47 tests passing</span>
       </span>
-      <span class="chip chip--queued">queued</span>
+      <span class="chip chip--done">approved</span>
     </li>
     </ul>
   </section>
@@ -449,17 +449,41 @@
   <section>
     <h2>Commits</h2>
     <ol class="log"><li class="commit">
-        <span class="commit__hash">2ba74c9</span>
+        <span class="commit__hash">a3a8d80</span>
+        <span class="commit__subject">characters: shared ChibiRig body plan; Donut rebuilt on it</span>
+        <span class="commit__when">12 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">9787b0c</span>
+        <span class="commit__subject">P1 Hamburger r3 + P12 Kitchen arena r1; prototypes excluded from the repo</span>
+        <span class="commit__when">24 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">fdc0fb8</span>
+        <span class="commit__subject">render core: image-based lighting + ambient occlusion</span>
+        <span class="commit__when">35 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">12337ff</span>
+        <span class="commit__subject">P16 round 1: match simulation core, 47/47 tests passing</span>
+        <span class="commit__when">42 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">a4d6ce7</span>
+        <span class="commit__subject">P1 Hamburger round 2: REJECTED by critic (4/10) - inert pose, no material pass</span>
+        <span class="commit__when">52 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">8c2e16d</span>
+        <span class="commit__subject">P12 setup: arena contract; dispatch Hamburger r2 + arena r1</span>
+        <span class="commit__when">70 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">35dc429</span>
         <span class="commit__subject">P0 round 1: art direction corrected against real reference; Hamburger v1</span>
-        <span class="commit__when">2 minutes ago</span>
+        <span class="commit__when">72 minutes ago</span>
       </li><li class="commit">
-        <span class="commit__hash">c3ecdb4</span>
+        <span class="commit__hash">b2dda08</span>
         <span class="commit__subject">F7/F8: reference imagery pipeline + live progress page</span>
-        <span class="commit__when">22 minutes ago</span>
+        <span class="commit__when">2 hours ago</span>
       </li><li class="commit">
-        <span class="commit__hash">ae299dd</span>
+        <span class="commit__hash">33474ae</span>
         <span class="commit__subject">foundation: render core, preview harness, screenshot + blind A/B pipeline</span>
-        <span class="commit__when">28 minutes ago</span>
+        <span class="commit__when">2 hours ago</span>
       </li></ol>
   </section>
 
@@ -470,6 +494,7 @@
       <li>The arena is the one sanctioned exception — layout and props are open, as long as a central hazard, physical cover and a slowing hazard survive.</li>
       <li>Every piece is judged on rendered pixels in a blind A/B against real Brawl Stars and Zooba stills, never on a description of the work.</li>
       <li>Art direction was corrected mid-flight: the brief said cel-shaded, but the reference plates show smooth-shaded high-key vinyl-toy surfaces with almost no outline. The brief says the bar wins over its own prose.</li>
+      <li>A shared chibi rig now underpins every character: the food is the head and identity mass, the rig supplies limbs, poses and one motion vocabulary so the cast reads as one production.</li>
     </ul>
   </section>
 

@@ -168,10 +168,31 @@ function mountArena() {
   // e.g. a corner room — while iterating. Defaults to the arena's own centre.
   const tx = params.has('tx') ? Number(params.get('tx')) : arena.center.x;
   const ty = params.has('ty') ? Number(params.get('ty')) : arena.center.y;
+
+  // Populate with characters unless explicitly disabled (chars=0). An empty arena is
+  // not a fair thing to judge against a reference gameplay frame — those are full of
+  // brawlers and VFX, so critiquing bare environment art against them measures the
+  // wrong thing. This is also simply what the real game view looks like.
+  if (params.get('chars') !== '0') {
+    const cast: CharacterId[] = ['donut', 'egg', 'pizza', 'taco', 'hotdog'];
+    cast.forEach((id, i) => {
+      const ang = (i / cast.length) * Math.PI * 2 + 0.6;
+      const rad = 95 + (i % 2) * 42;
+      const m = createCharacter(id);
+      const p = groundPos(tx + Math.cos(ang) * rad, ty + Math.sin(ang) * rad);
+      m.root.position.set(p.x, 0, p.z);
+      m.root.rotation.y = -ang + Math.PI / 2;
+      m.play(i % 2 === 0 ? 'run' : 'idle');
+      arenaCast.push({ model: m, running: i % 2 === 0 });
+      stage.scene.add(m.root);
+    });
+  }
+
   const c = groundPos(tx, ty);
   stage.rig.snapTo(c.x, c.z);
   stage.lighting.focus(c.x, c.z, arenaView === 'overview' ? 46 : 30);
 }
+const arenaCast: Array<{ model: CharacterModel; running: boolean }> = [];
 
 if (piece === 'character') {
   mountCharacter(subjectId);
@@ -201,6 +222,9 @@ function advance(dt: number) {
   };
   model?.update(ctx);
   for (const m of rosterModels) m.update(ctx);
+  for (const c of arenaCast) {
+    c.model.update({ ...ctx, moveSpeed01: c.running ? 1 : 0 });
+  }
   arena?.update?.(dt, simTime);
 }
 

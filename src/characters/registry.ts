@@ -12,6 +12,15 @@ import { CHARACTERS, type CharacterId, type CharacterDef } from '../game/rules';
 import type { CharacterModel } from './types';
 import { PlaceholderCharacter } from './placeholder';
 import { DonutCharacter } from './donut';
+import { TacoCharacter } from './taco';
+import { BurritoCharacter } from './burrito';
+import { EggCharacter } from './egg';
+import { LollipopCharacter } from './lollipop';
+import { PizzaCharacter } from './pizza';
+import { SushiCharacter } from './sushi';
+import { SoupCharacter } from './soup';
+import { WaterBottleCharacter } from './waterbottle';
+import { HotDogCharacter } from './hotdog';
 import { HamburgerCharacter } from './hamburger';
 
 export type Factory = (def: CharacterDef) => CharacterModel;
@@ -25,15 +34,15 @@ const placeholder: Factory = (def) => new PlaceholderCharacter(def);
 export const CHARACTER_FACTORIES: Record<CharacterId, Factory> = {
   hamburger: (def) => new HamburgerCharacter(def),
   donut: (def) => new DonutCharacter(def),
-  taco: placeholder,
-  burrito: placeholder,
-  egg: placeholder,
-  lollipop: placeholder,
-  pizza: placeholder,
-  sushi: placeholder,
-  soup: placeholder,
-  waterbottle: placeholder,
-  hotdog: placeholder,
+  taco: (def) => new TacoCharacter(def),
+  burrito: (def) => new BurritoCharacter(def),
+  egg: (def) => new EggCharacter(def),
+  lollipop: (def) => new LollipopCharacter(def),
+  pizza: (def) => new PizzaCharacter(def),
+  sushi: (def) => new SushiCharacter(def),
+  soup: (def) => new SoupCharacter(def),
+  waterbottle: (def) => new WaterBottleCharacter(def),
+  hotdog: (def) => new HotDogCharacter(def),
 };
 
 export function createCharacter(id: CharacterId): CharacterModel {
