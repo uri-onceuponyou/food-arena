@@ -15,7 +15,7 @@ import { BaseCharacter } from './types';
 import type { AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, RAMP_CHARACTER, OUTLINE_THIN } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox, RAMP_CHARACTER, OUTLINE_THIN } from '../render/toon';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local geometry helpers — chunky rounded discs the shared kit doesn't provide.
@@ -147,6 +147,8 @@ export class HamburgerCharacter extends BaseCharacter {
   private topBun: THREE.Group;
   private armL: THREE.Group;
   private armR: THREE.Group;
+  private forearmL: THREE.Group;
+  private forearmR: THREE.Group;
   private footL: THREE.Group;
   private footR: THREE.Group;
   private healGlow: THREE.Mesh;
@@ -160,27 +162,41 @@ export class HamburgerCharacter extends BaseCharacter {
   constructor(def: CharacterDef) {
     super(def);
 
-    const bunMat = toonMat({ color: PALETTE.bun, ramp: RAMP_CHARACTER() });
-    const bunDarkMat = toonMat({ color: PALETTE.bunDark, ramp: RAMP_CHARACTER() });
-    const pattyMat = toonMat({ color: PALETTE.patty, ramp: RAMP_CHARACTER() });
-    const pattyDarkMat = toonMat({ color: PALETTE.pattyDark, ramp: RAMP_CHARACTER() });
-    const cheeseMat = glossyMat({ color: PALETTE.cheese, roughness: 0.4 });
-    const tomatoMat = glossyMat({ color: PALETTE.tomato, roughness: 0.22 });
-    const lettuceMatA = toonMat({ color: PALETTE.lettuce, ramp: RAMP_CHARACTER() });
-    const lettuceMatB = toonMat({ color: new THREE.Color(PALETTE.lettuce).offsetHSL(0, -0.06, 0.05), ramp: RAMP_CHARACTER() });
-    const seedMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER() });
-    const armMat = toonMat({ color: PALETTE.bun, ramp: RAMP_CHARACTER() });
-    const mittMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER() });
+    // ── Material differentiation ──────────────────────────────────────────
+    // Every layer gets its OWN roughness so the stack reads as different
+    // SUBSTANCES — bread, meat, veg, dairy, tool — instead of one glossy
+    // plastic shader repeated in different colours (critic defect #1: "reads
+    // as a blob wearing coloured rings"). See ToonMatOptions.roughness.
+    const bunMat = toonMat({ color: PALETTE.bun, ramp: RAMP_CHARACTER(), roughness: 0.85 }); // dry, matte-baked crust
+    const bunDarkMat = toonMat({ color: PALETTE.bunDark, ramp: RAMP_CHARACTER(), roughness: 0.85 });
+    const pattyMat = toonMat({ color: PALETTE.patty, ramp: RAMP_CHARACTER(), roughness: 0.55 }); // seared, faintly greasy meat
+    const pattyDarkMat = toonMat({ color: PALETTE.pattyDark, ramp: RAMP_CHARACTER(), roughness: 0.55 });
+    const cheeseMat = glossyMat({ color: PALETTE.cheese, roughness: 0.35 }); // soft melt sheen
+    const tomatoMat = glossyMat({ color: PALETTE.tomato, roughness: 0.18 }); // wettest surface on the model
+    const lettuceMatA = toonMat({ color: PALETTE.lettuce, ramp: RAMP_CHARACTER(), roughness: 0.6 }); // leafy, satin not shiny
+    const lettuceMatB = toonMat({ color: new THREE.Color(PALETTE.lettuce).offsetHSL(0, -0.06, 0.05), ramp: RAMP_CHARACTER(), roughness: 0.6 });
+    const seedMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER(), roughness: 0.75 }); // dry toasted sesame
+    const armMat = toonMat({ color: PALETTE.bun, ramp: RAMP_CHARACTER(), roughness: 0.85 }); // same bread stock as the buns
+    const mittMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER(), roughness: 0.68 }); // soft dough, a touch smoother than crust
     const inkMat = flatMat(PALETTE.ink);
     const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.45 });
     const glowMat = flatMat(PALETTE.mustard, { transparent: true, opacity: 0 });
+    // Spatula — the held prop (see buildArm). Deliberately NOT a food
+    // material: brushed metal + dark plastic reads as "tool", sells Patty
+    // Smash as an ability, and gives the silhouette a landmark nothing else
+    // in a roster of round food blobs would have.
+    const spatulaHandleMat = toonMat({ color: '#3B2A22', roughness: 0.55 });
+    const spatulaBladeMat = toonMat({ color: '#CDD3DC', roughness: 0.28, metalness: 0.55 });
 
     // Contrapposto weight-shift bias — set once. Nothing in BaseCharacter's
     // shared motion ever touches body.position.x or body.rotation.y (only
     // position.y / rotation.x / rotation.z are driven per-frame), so this
     // constant asymmetry survives idle, run, attack, hit and death alike.
-    this.body.position.x = 0.05;
-    this.body.rotation.y = 0.07;
+    // Pushed noticeably further than the previous pass (0.05 / 0.07) — at
+    // the small on-screen scale of a gameplay camera a subtle lean read as
+    // "inert", not "weighted".
+    this.body.position.x = 0.09;
+    this.body.rotation.y = 0.13;
 
     // ── Bottom bun ────────────────────────────────────────────────────────────
     const bottomBun = new THREE.Mesh(roundedPuck(BOTTOM_BUN.r, BOTTOM_BUN.h, BOTTOM_BUN.edge), bunDarkMat);
@@ -193,8 +209,8 @@ export class HamburgerCharacter extends BaseCharacter {
     // ── Feet — asymmetric contrapposto stance, embedded into the bottom bun's
     // lower silhouette (rather than floating below it) via a short ankle nub
     // plus a pivot pulled inside the bun's footprint. ──────────────────────
-    this.footL = this.buildFoot(pattyDarkMat, -1, { x: -0.28, y: 0.07, z: 0.4, rotY: -0.32 });
-    this.footR = this.buildFoot(pattyDarkMat, 1, { x: 0.24, y: 0.1, z: 0.34, rotY: 0.18 });
+    this.footL = this.buildFoot(pattyDarkMat, -1, { x: -0.32, y: 0.07, z: 0.44, rotY: -0.42 });
+    this.footR = this.buildFoot(pattyDarkMat, 1, { x: 0.2, y: 0.1, z: 0.3, rotY: 0.12 });
     this.body.add(this.footL, this.footR);
 
     // ── Patty ─────────────────────────────────────────────────────────────────
@@ -212,6 +228,7 @@ export class HamburgerCharacter extends BaseCharacter {
       mark.userData.noOutline = true;
       mark.rotation.y = Math.PI / 5;
       mark.position.set(gx, BOTTOM_BUN.h + PATTY.h - 0.04, 0);
+      mark.receiveShadow = true;
       this.body.add(mark);
     }
 
@@ -220,6 +237,7 @@ export class HamburgerCharacter extends BaseCharacter {
     cheese.name = 'cheese';
     cheese.position.y = CHEESE.yBottom;
     cheese.castShadow = true;
+    cheese.receiveShadow = true;
     this.body.add(cheese);
     // Kept off dead-centre-front/back (theta ~1.57/4.71) so they read as melt
     // dripping down the sides rather than fangs hanging under the face.
@@ -230,6 +248,7 @@ export class HamburgerCharacter extends BaseCharacter {
       drip.position.set(Math.cos(a) * CHEESE.r * 0.96, CHEESE.yBottom - 0.05, Math.sin(a) * CHEESE.r * 0.96);
       drip.scale.set(1, 1.6, 1);
       drip.castShadow = true;
+      drip.receiveShadow = true;
       this.body.add(drip);
     }
 
@@ -238,6 +257,7 @@ export class HamburgerCharacter extends BaseCharacter {
     tomato.name = 'tomato';
     tomato.position.y = TOMATO.yBottom;
     tomato.castShadow = true;
+    tomato.receiveShadow = true;
     this.body.add(tomato);
     for (const [sx, sz] of [[0.22, 0.4], [-0.28, 0.32], [0.05, -0.42], [-0.15, -0.3]]) {
       const seed = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), seedMat);
@@ -245,6 +265,7 @@ export class HamburgerCharacter extends BaseCharacter {
       seed.userData.noOutline = true;
       seed.position.set(sx * TOMATO.r, TOMATO.yBottom + TOMATO.h * 0.55, sz * TOMATO.r);
       seed.scale.set(1, 0.5, 1);
+      seed.receiveShadow = true;
       this.body.add(seed);
     }
 
@@ -269,14 +290,23 @@ export class HamburgerCharacter extends BaseCharacter {
       frill.scale.set(1, 0.5, 0.85);
       frill.rotation.y = a;
       frill.castShadow = true;
+      frill.receiveShadow = true;
       this.body.add(frill);
     }
 
-    // ── Arms — stubby bun-coloured limbs with cream mitts. Asymmetric base
-    // pose (different height + angle per side) so the idle stance already
-    // reads as weight-shifted rather than mirrored. ─────────────────────────
-    this.armL = this.buildArm(armMat, mittMat, -1, { y: 0.9, rotZ: -0.16, rotX: 0.08 });
-    this.armR = this.buildArm(armMat, mittMat, 1, { y: 1.0, rotZ: 0.44, rotX: -0.12 });
+    // ── Arms — stubby bun-coloured limbs with cream mitts, each with a real
+    // elbow joint (critic defect #3: arms were one straight capsule with a
+    // ball hand, which cannot read as "bent" from any angle). Deliberately
+    // asymmetric: the right arm is raised, shoulder higher, and grips the
+    // spatula prop like a weapon at the ready; the left arm is bent low and
+    // tucked near the body, akimbo. That asymmetry is what makes the idle
+    // silhouette read as weight-shifted rather than mirrored. ───────────────
+    const armResultL = this.buildArm(armMat, mittMat, -1, { y: 0.86, rotZ: -0.58, rotX: 0.06, elbowBend: 1.0 });
+    const armResultR = this.buildArm(armMat, mittMat, 1, { y: 1.06, rotZ: 0.62, rotX: -0.16, elbowBend: -1.1, prop: { handleMat: spatulaHandleMat, bladeMat: spatulaBladeMat } });
+    this.armL = armResultL.pivot;
+    this.armR = armResultR.pivot;
+    this.forearmL = armResultL.forearm;
+    this.forearmR = armResultR.forearm;
     this.body.add(this.armL, this.armR);
 
     // ── Top bun crown, sesame seeds and face ─────────────────────────────────
@@ -285,6 +315,13 @@ export class HamburgerCharacter extends BaseCharacter {
     this.topBun.position.y = CROWN.yBase;
     this.body.add(this.topBun);
     this.head = this.topBun; // free counter-lean/tilt from BaseCharacter
+
+    // Fixed head turn — nothing in BaseCharacter or this file's onUpdate ever
+    // touches topBun.rotation.y (only .position.y and .rotation.z are driven
+    // per-frame), so this constant survives every state. Turned opposite the
+    // torso twist for a jaunty "looking past you" mascot tilt rather than a
+    // face pointed dead-on at the camera.
+    this.topBun.rotation.y = -0.16;
 
     const crown = new THREE.Mesh(bunDome(CROWN.baseR, CROWN.h), bunMat);
     crown.name = 'crown';
@@ -315,22 +352,40 @@ export class HamburgerCharacter extends BaseCharacter {
       seed.rotateZ(theta * 1.7); // vary tangential spin per seed for a natural scatter
       seed.scale.set(0.05, 0.085, 0.016);
       seed.castShadow = true;
+      seed.receiveShadow = true;
       this.topBun.add(seed);
     }
 
-    // Face — closed happy eyes + small smile + blush, placed high enough on the
-    // crown's front (hFrac 0.26-0.46) that the mouth clears the lettuce collar
-    // below with real margin, and each decal is oriented flush to the crown's
-    // true surface normal (via `addCrownDecal`) instead of a flat guessed
-    // offset — this is what fixed both the mouth-behind-lettuce occlusion and
-    // the blush clipping through the cheek.
+    // Face — closed happy eyes + small smile, kept as the fixed personality
+    // identity from rules.ts, but made SPECIFIC rather than a neutral sleepy
+    // default (critic defect #4): one eyebrow cocked higher than the other,
+    // eyes slightly unequal in squint, and the smile tilted into a one-sided
+    // smirk. Placed high enough on the crown's front (hFrac 0.26-0.46) that
+    // the mouth clears the lettuce collar below with real margin, and each
+    // decal is oriented flush to the crown's true surface normal (via
+    // `addCrownDecal`) instead of a flat guessed offset.
     for (const sx of [-1, 1]) {
+      // Right eye (sx>0) squints a touch tighter than the left — reads as a
+      // half-wink instead of two identically mirrored arcs.
+      const eyeArc = sx > 0 ? Math.PI * 0.62 : Math.PI * 0.72;
       const eyeG = addCrownDecal(this.topBun, sx * 0.3, 0.46, 0.006);
-      const eye = new THREE.Mesh(faceArc(0.1, 0.022, Math.PI * 0.72), inkMat);
+      const eye = new THREE.Mesh(faceArc(0.1, 0.022, eyeArc), inkMat);
       eye.name = 'eye__no_outline';
       eye.userData.noOutline = true;
       eye.rotation.z = Math.PI / 2; // bulge upward: closed happy "^" eye
       eyeG.add(eye);
+
+      // Eyebrow — a short separate dash sitting clearly ABOVE the eye (not
+      // touching it — the first pass placed it close enough to read as a
+      // doubled-up second eye), cocked higher on the right than the left for
+      // a specific one-eyebrow-raised personality instead of the symmetric
+      // default.
+      const browG = addCrownDecal(this.topBun, sx * 0.3, 0.615, 0.006);
+      const brow = new THREE.Mesh(faceArc(0.07, 0.014, Math.PI * 0.3), inkMat);
+      brow.name = 'brow__no_outline';
+      brow.userData.noOutline = true;
+      brow.rotation.z = sx > 0 ? 0.5 : 0.16;
+      browG.add(brow);
 
       const blushG = addCrownDecal(this.topBun, sx * 0.6, 0.3, 0.004);
       const blush = new THREE.Mesh(new THREE.CircleGeometry(0.068, 16), blushMat);
@@ -339,11 +394,14 @@ export class HamburgerCharacter extends BaseCharacter {
       blushG.add(blush);
     }
 
-    const mouthG = addCrownDecal(this.topBun, 0, 0.26, 0.006);
-    const mouth = new THREE.Mesh(faceArc(0.11, 0.02, Math.PI * 0.5), inkMat);
+    // Mouth — kept off-centre with the whole arc tilted, so the small closed
+    // smile reads as a one-sided smirk (playful short-order cook) instead of
+    // a perfectly symmetric "u".
+    const mouthG = addCrownDecal(this.topBun, -0.05, 0.26, 0.006);
+    const mouth = new THREE.Mesh(faceArc(0.11, 0.02, Math.PI * 0.46), inkMat);
     mouth.name = 'mouth__no_outline';
     mouth.userData.noOutline = true;
-    mouth.rotation.z = -Math.PI / 2; // bulge downward: small smile "u"
+    mouth.rotation.z = -Math.PI / 2 + 0.16; // bulge down-and-tilted: smirk, not a flat "u"
     mouthG.add(mouth);
 
     // ── Heal glow — dormant ring for the Onion Ring self-heal flourish ──────
@@ -372,6 +430,7 @@ export class HamburgerCharacter extends BaseCharacter {
     ankle.name = 'ankle';
     ankle.position.set(0, 0.09, -0.04);
     ankle.castShadow = true;
+    ankle.receiveShadow = true;
     pivot.add(ankle);
 
     const shoe = new THREE.Mesh(new THREE.CapsuleGeometry(0.115, 0.13, 4, 10), mat);
@@ -379,31 +438,94 @@ export class HamburgerCharacter extends BaseCharacter {
     shoe.rotation.x = Math.PI / 2;
     shoe.position.set(0, -0.01, 0.09);
     shoe.castShadow = true;
+    shoe.receiveShadow = true;
     pivot.add(shoe);
     return pivot;
   }
 
-  private buildArm(armMat: THREE.Material, mittMat: THREE.Material, sx: number, cfg: { y: number; rotZ: number; rotX: number }): THREE.Group {
+  /**
+   * Shoulder pivot -> forearm pivot (elbow) -> mitt, so the limb reads as a
+   * jointed arm instead of one straight capsule with a ball hand glued to the
+   * end. The shoulder is pushed out past the lettuce frill radius (0.68m) so
+   * the arm is never swallowed by the collar silhouette.
+   *
+   * `elbowBend` sets the forearm pivot's REST rotation on Z, not X. Z is the
+   * screen-plane axis (same axis body/topBun "tilt" already animates on), so
+   * the fold is always visible from a front-on camera; an X-axis bend mostly
+   * foreshortens into depth once the shoulder itself carries any Z swing,
+   * which is what made the first pass at this read as one long straight limb
+   * instead of a bent one. onUpdate layers dynamic swing on top via X, which
+   * adds depth/life without fighting this static screen-plane fold.
+   */
+  private buildArm(
+    armMat: THREE.Material,
+    mittMat: THREE.Material,
+    sx: number,
+    cfg: { y: number; rotZ: number; rotX: number; elbowBend: number; prop?: { handleMat: THREE.Material; bladeMat: THREE.Material } }
+  ): { pivot: THREE.Group; forearm: THREE.Group } {
     const pivot = new THREE.Group();
     pivot.name = sx < 0 ? 'arm_l_pivot' : 'arm_r_pivot';
-    pivot.position.set(sx * 0.66, cfg.y, 0.06);
+    pivot.position.set(sx * 0.8, cfg.y, 0.05);
     pivot.rotation.z = cfg.rotZ;
     pivot.rotation.x = cfg.rotX;
 
-    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.12, 4, 10), armMat);
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.115, 0.15, 4, 10), armMat);
     upper.name = 'arm_upper';
-    upper.position.set(0, -0.12, 0);
+    upper.position.set(0, -0.14, 0);
     upper.castShadow = true;
+    upper.receiveShadow = true;
     pivot.add(upper);
+
+    const forearmPivot = new THREE.Group();
+    forearmPivot.name = sx < 0 ? 'forearm_l_pivot' : 'forearm_r_pivot';
+    forearmPivot.position.set(0, -0.27, 0);
+    forearmPivot.rotation.z = cfg.elbowBend;
+    forearmPivot.rotation.x = 0.18;
+    pivot.add(forearmPivot);
+
+    const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.098, 0.13, 4, 10), armMat);
+    forearm.name = 'arm_forearm';
+    forearm.position.set(0, -0.11, 0);
+    forearm.castShadow = true;
+    forearm.receiveShadow = true;
+    forearmPivot.add(forearm);
 
     const mitt = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10), mittMat);
     mitt.name = 'mitt';
-    mitt.position.set(0, -0.27, 0);
+    mitt.position.set(0, -0.24, 0);
     mitt.scale.set(1, 0.92, 1);
     mitt.castShadow = true;
-    pivot.add(mitt);
+    mitt.receiveShadow = true;
+    forearmPivot.add(mitt);
 
-    return pivot;
+    // Held prop — a grill spatula, gripped in the fist. This is the roster's
+    // one distinctive silhouette landmark (critic's "also worth considering")
+    // and it's what a Patty Smash swing actually reads as swinging.
+    if (cfg.prop) {
+      const spatula = new THREE.Group();
+      spatula.name = 'spatula';
+      spatula.position.set(0.015, -0.22, 0.03);
+      spatula.rotation.x = -2.35;
+      spatula.rotation.z = -0.12;
+      forearmPivot.add(spatula);
+
+      const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.034, 0.32, 4, 8), cfg.prop.handleMat);
+      handle.name = 'spatula_handle';
+      handle.position.set(0, 0.17, 0);
+      handle.castShadow = true;
+      handle.receiveShadow = true;
+      spatula.add(handle);
+
+      const blade = new THREE.Mesh(roundedBox(0.24, 0.026, 0.32, 0.06, 3), cfg.prop.bladeMat);
+      blade.name = 'spatula_blade';
+      blade.position.set(0, 0.36, 0.03);
+      blade.rotation.x = 0.2;
+      blade.castShadow = true;
+      blade.receiveShadow = true;
+      spatula.add(blade);
+    }
+
+    return { pivot, forearm: forearmPivot };
   }
 
   protected onUpdate(ctx: AnimContext): void {
@@ -429,9 +551,11 @@ export class HamburgerCharacter extends BaseCharacter {
     // ── Contrapposto bias — a small constant lean layered on top of the
     // shared idle/run/hit/death motion (both of which fully overwrite
     // body.rotation.z and topBun.rotation.z earlier this frame), so the pose
-    // always reads as weighted to one side rather than perfectly symmetric. ──
-    this.body.rotation.z += 0.05;
-    this.topBun.rotation.z += 0.035;
+    // always reads as weighted to one side rather than perfectly symmetric.
+    // Pushed up from the previous pass (0.05 / 0.035) — at gameplay scale the
+    // smaller values read as noise, not a stance. ──────────────────────────
+    this.body.rotation.z += 0.075;
+    this.topBun.rotation.z += 0.05;
 
     // ── Idle sway / run swing for arms and feet ─────────────────────────────
     const idleSway = Math.sin(this.elapsed * 2.1) * 0.05 * (1 - move);
@@ -440,6 +564,12 @@ export class HamburgerCharacter extends BaseCharacter {
 
     this.armL.rotation.x = idleSway + runSwing;
     this.armR.rotation.x = -idleSway + runSwingOpp;
+    // Elbows pump opposite the run bounce — a straight-locked elbow through a
+    // full run cycle is a big part of what read as "inert" before. The 0.18
+    // base matches the constant rest offset from buildArm so idle (move=0)
+    // doesn't snap the forearm flat.
+    this.forearmL.rotation.x = 0.18 - Math.abs(runSwing) * 0.6;
+    this.forearmR.rotation.x = 0.18 - Math.abs(runSwingOpp) * 0.6;
 
     const liftL = Math.max(0, Math.sin(runPhase)) * 0.5 * move;
     const liftR = Math.max(0, Math.sin(runPhase + Math.PI)) * 0.5 * move;
@@ -447,7 +577,11 @@ export class HamburgerCharacter extends BaseCharacter {
     this.footR.rotation.x = -liftR;
 
     // ── Attack — differentiate per weapon so smash / toss / fling / heal all
-    // read as distinct gestures rather than sharing one generic swing. ──────
+    // read as distinct gestures rather than sharing one generic swing. Each
+    // one now also drives the forearm/elbow, not just the shoulder, and
+    // Patty Smash in particular swings the spatula OVERHEAD rather than
+    // fore-and-aft, so its silhouette is unmistakable even head-on — a pure
+    // forward/back swing foreshortens away to almost nothing from camera. ──
     let glowOpacity = 0;
     if (this.attackT >= 0) {
       const p = this.attackT / this.attackDuration;
@@ -456,33 +590,47 @@ export class HamburgerCharacter extends BaseCharacter {
 
       switch (this.attackWeaponIndex) {
         case 0: {
-          // Patty Smash — both arms rear back, then slam down together.
-          const x = -anticipation * 0.55 + strike * 1.15;
-          this.armL.rotation.x = x;
-          this.armR.rotation.x = x;
+          // Patty Smash — spatula arm winds up high overhead (shoulder swings
+          // back-and-up on both X and Z), then slams down and forward
+          // together with the brace arm. The overhead raise is what makes
+          // this silhouette unmistakable even head-on — a pure forward/back
+          // swing would foreshorten away to almost nothing from camera.
+          this.armR.rotation.x = -anticipation * 1.5 + strike * 1.35;
+          this.armR.rotation.z = 0.62 - anticipation * 0.85 + strike * 0.2;
+          this.forearmR.rotation.x = 0.18 - anticipation * 0.3 + strike * 0.55;
+          this.armL.rotation.x = -anticipation * 0.3 + strike * 0.4;
+          this.armL.rotation.z = -0.58 - strike * 0.3;
+          this.forearmL.rotation.x = 0.18 + strike * 0.25;
           break;
         }
         case 1: {
-          // Tomato Toss — right arm winds back and throws overhand.
+          // Tomato Toss — right arm winds back and throws overhand, elbow
+          // snapping through at release like a real pitching motion.
           this.armR.rotation.x = -anticipation * 0.75 + strike * 1.3;
           this.armR.rotation.z = 0.35 - anticipation * 0.25;
+          this.forearmR.rotation.x = 0.18 - anticipation * 0.4 + strike * 0.65;
           this.armL.rotation.x = anticipation * 0.12;
           break;
         }
         case 2: {
-          // Lettuce Fling — left arm sweeps sideways in a low flick.
-          this.armL.rotation.z = -0.35 - anticipation * 0.35 + strike * 0.9;
+          // Lettuce Fling — left arm sweeps sideways in a low flick, forearm
+          // trailing then snapping through at release.
+          this.armL.rotation.z = -0.58 - anticipation * 0.35 + strike * 0.9;
           this.armL.rotation.x = strike * 0.22;
+          this.forearmL.rotation.x = 0.18 + anticipation * 0.3 - strike * 0.6;
           this.armR.rotation.x = anticipation * 0.12;
           break;
         }
         case 3: {
-          // Onion Ring — self-hug and a warm healing pulse.
+          // Onion Ring — self-hug and a warm healing pulse, elbows curling
+          // tighter in than their idle bend.
           const hug = anticipation * 0.4 + strike * 0.6;
           this.armL.rotation.x = hug;
           this.armR.rotation.x = hug;
-          this.armL.rotation.z = -0.35 - hug * 0.4;
-          this.armR.rotation.z = 0.35 + hug * 0.4;
+          this.armL.rotation.z = -0.58 - hug * 0.4;
+          this.armR.rotation.z = 0.62 + hug * 0.4;
+          this.forearmL.rotation.x = 0.18 + hug * 0.5;
+          this.forearmR.rotation.x = 0.18 + hug * 0.5;
           glowOpacity = strike * 0.75;
           break;
         }

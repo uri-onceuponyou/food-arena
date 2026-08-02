@@ -20,3 +20,6 @@ reference/images/
 
 # Generated renders and critic comparison sheets
 shots/
+
+# Original 2D prototypes — reference only, kept local and never published.
+reference/prototypes/

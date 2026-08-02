@@ -24,8 +24,10 @@ import { Stage } from './render/stage';
 import { createCharacter } from './characters/registry';
 import { CHARACTERS, CHARACTER_IDS, type CharacterId } from './game/rules';
 import type { AnimState, CharacterModel } from './characters/types';
-import { CHARACTER_HEIGHT } from './units';
+import { CHARACTER_HEIGHT, groundPos } from './units';
 import { toonMat, RAMP_SOFT, outlineGroup } from './render/toon';
+import { createKitchenArena } from './arena/kitchen';
+import type { ArenaDefinition } from './arena/types';
 
 declare global {
   interface Window {
@@ -46,6 +48,9 @@ const piece = params.get('piece') ?? 'character';
 const shotMode = params.get('shot') === '1';
 const showGrid = params.get('grid') === '1';
 const frozenTime = params.has('t') ? Number(params.get('t')) : null;
+const isArena = piece === 'arena';
+// arena only: 'gameplay' frames a combat-distance patch, 'overview' frames the whole map.
+const arenaView = params.get('view') === 'overview' ? 'overview' : 'gameplay';
 
 if (shotMode) document.body.classList.add('shot');
 
@@ -54,16 +59,27 @@ const label = document.getElementById('label')!;
 
 // Bright studio backdrop by default. A dark ground made every model read as gloomy
 // clay; the reference presents characters on bright, saturated grounds and that
-// materially changes how the shading is perceived.
+// materially changes how the shading is perceived. The arena brings its own warm
+// kitchen palette, so it gets a warmer sky default instead of the character-preview cyan.
 const bgParam = params.get('bg');
-const background = bgParam ? Number(`0x${bgParam.replace('#', '')}`) : 0x39b7e8;
+const background = bgParam ? Number(`0x${bgParam.replace('#', '')}`) : isArena ? 0xffcf8a : 0x39b7e8;
+
+// The arena is tens of metres across — the tight fog tuned for small preview subjects
+// would grey out most of a gameplay shot and nearly all of an overview. Push it out
+// proportionally to how much ground the shot needs to show.
+const arenaFog = arenaView === 'overview' ? { near: 100, far: 260 } : { near: 40, far: 130 };
 
 const stage = new Stage({
   container,
   background,
-  // Preview subjects are small; pull the fog back so it never tints the model.
-  fog: { color: background, near: 40, far: 120 },
-  camera: {
+  fog: isArena ? { color: background, ...arenaFog } : { color: background, near: 40, far: 120 },
+  camera: isArena ? {
+    pitchDeg: params.has('pitch') ? Number(params.get('pitch')) : 58,
+    yawDeg: params.has('yaw') ? Number(params.get('yaw')) : 0,
+    frameMode: 'ground',
+    viewWidthUnits: arenaView === 'overview' ? 1600 : 360,
+    followLerp: 1,
+  } : {
     pitchDeg: params.has('pitch') ? Number(params.get('pitch')) : 22,
     yawDeg: params.has('yaw') ? Number(params.get('yaw')) : 0,
     frameMode: 'subject',
@@ -77,16 +93,18 @@ const stage = new Stage({
 
 // ── Neutral studio ground ────────────────────────────────────────────────────
 // A shadow-catching disc, so models are judged with real contact shadows rather
-// than floating in a void.
-const ground = new THREE.Mesh(
-  new THREE.CircleGeometry(14, 64),
-  toonMat({ color: params.get('ground') ? `#${params.get('ground')}` : '#8fd6f2', ramp: RAMP_SOFT() })
-);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-ground.name = 'preview_ground';
-ground.userData.noOutline = true;
-stage.scene.add(ground);
+// than floating in a void. The arena piece brings its own floor, so it skips this.
+if (!isArena) {
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(14, 64),
+    toonMat({ color: params.get('ground') ? `#${params.get('ground')}` : '#8fd6f2', ramp: RAMP_SOFT() })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  ground.name = 'preview_ground';
+  ground.userData.noOutline = true;
+  stage.scene.add(ground);
+}
 
 if (showGrid) {
   const grid = new THREE.GridHelper(12, 24, 0x8a7aa0, 0x5a4a70);
@@ -141,12 +159,29 @@ function mountRoster() {
 }
 const rosterModels: CharacterModel[] = [];
 
+let arena: ArenaDefinition | null = null;
+
+function mountArena() {
+  arena = createKitchenArena();
+  stage.scene.add(arena.build());
+  // tx/ty (world units) let a builder re-target the camera at any spot on the map —
+  // e.g. a corner room — while iterating. Defaults to the arena's own centre.
+  const tx = params.has('tx') ? Number(params.get('tx')) : arena.center.x;
+  const ty = params.has('ty') ? Number(params.get('ty')) : arena.center.y;
+  const c = groundPos(tx, ty);
+  stage.rig.snapTo(c.x, c.z);
+  stage.lighting.focus(c.x, c.z, arenaView === 'overview' ? 46 : 30);
+}
+
 if (piece === 'character') {
   mountCharacter(subjectId);
   label.textContent = `${CHARACTERS[subjectId]?.name ?? subjectId} · ${anim}`;
 } else if (piece === 'roster') {
   mountRoster();
   label.textContent = 'roster · all 11';
+} else if (piece === 'arena') {
+  mountArena();
+  label.textContent = `kitchen · ${arenaView}`;
 } else {
   label.textContent = `piece "${piece}" not implemented yet`;
 }
@@ -166,6 +201,7 @@ function advance(dt: number) {
   };
   model?.update(ctx);
   for (const m of rosterModels) m.update(ctx);
+  arena?.update?.(dt, simTime);
 }
 
 function step(dt: number) {
