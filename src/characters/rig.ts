@@ -288,6 +288,46 @@ export class ChibiRig {
   }
 
   /**
+   * Replace the default torso with character-authored geometry.
+   *
+   * The strongest characters extend their food mass down through the BODY rather
+   * than perching a themed head on a generic one — a burger whose lower bun IS its
+   * torso reads far richer than a donut head on a plain barrel, which is exactly what
+   * a side-by-side showed and what two independent builders both named as their top
+   * remaining gap.
+   *
+   * The returned size is measured off the real default mesh, so it stays correct if
+   * rig proportions are retuned later. Geometry is parented to `joints.torso`, so it
+   * inherits the rig's breathing, lean and run animation for free.
+   */
+  dressTorso(build: (size: { w: number; h: number; d: number }) => THREE.Object3D): void {
+    const size = this.torsoSize;
+    if (this.torsoMesh) {
+      this.torsoMesh.parent?.remove(this.torsoMesh);
+      this.torsoMesh.geometry.dispose();
+      this.torsoMesh = null;
+    }
+    this.joints.torso.add(build(size));
+  }
+
+  /** Torso extents in metres, measured from the built mesh where available. */
+  get torsoSize(): { w: number; h: number; d: number } {
+    const m = this.torsoMesh;
+    if (m) {
+      m.geometry.computeBoundingBox();
+      const bb = m.geometry.boundingBox;
+      if (bb) {
+        return { w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z };
+      }
+    }
+    return {
+      w: this.p.shoulderWidth * 1.18,
+      h: this.p.height * 0.28,
+      d: this.p.shoulderWidth * 1.04,
+    };
+  }
+
+  /**
    * Neutral standing pose with a slight, appealing asymmetry.
    *
    * This is called at the top of every `animate()` frame and MUST fully reset any

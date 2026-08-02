@@ -24,8 +24,52 @@ import { ChibiRig } from './rig';
 const GLAZE = PALETTE.glaze;      // #FF9EC4
 const DOUGH = '#F0C070';
 const DOUGH_DARK = '#D9A253';
+// Shoes deliberately break from the dough/glaze pair — a genuine dark value drop
+// ("chocolate-dipped feet") so the body doesn't read as one undifferentiated tan
+// mass. `DOUGH_DARK` above is too close in hue/value to `DOUGH` to do that job.
+const CHOC_DIP = '#5C3417';
 
 const SPRINKLE_COLORS = ['#E63946', '#7CB518', '#FFC93C', '#7C4DFF', '#2E86D8', '#FFFFFF'];
+
+/**
+ * Local stand-in for `ChibiRig`'s intended `dressTorso`/`torsoSize` — at the time of
+ * writing `rig.ts` documents the pattern (see its torso comment) but does not yet
+ * expose either, and this file is not allowed to touch `rig.ts`. Reads the real size
+ * off the default torso mesh's geometry (so it stays correct even if rig proportions
+ * are retuned later), then swaps it out for character geometry parented the same way
+ * the default was — a child of `rig.joints.torso`, so it inherits the rig's own
+ * breathing/lean/run animation for free.
+ */
+function dressTorso(rig: ChibiRig, build: (size: { w: number; h: number; d: number }) => THREE.Object3D): void {
+  let size = { w: 0.42, h: 0.5, d: 0.32 };
+  const old = rig.torsoMesh;
+  if (old) {
+    old.geometry.computeBoundingBox();
+    const bb = old.geometry.boundingBox;
+    if (bb) size = { w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z };
+    old.parent?.remove(old);
+    old.geometry.dispose();
+  }
+  rig.joints.torso.add(build(size));
+}
+
+/** Soft tapered barrel — the same visual language as the rig's own default torso
+ * (fuller belly, narrower neck) but built locally so each character can own its
+ * material and proportions. */
+function torsoBarrel(halfW: number, height: number, halfD: number, taper: number): THREE.BufferGeometry {
+  const geo = new THREE.SphereGeometry(1, 22, 16);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const t = (y + 1) * 0.5; // 0 bottom .. 1 top
+    const bulge = 1 + taper * Math.sin(t * Math.PI * 0.9) - taper * 0.55 * t;
+    pos.setX(i, pos.getX(i) * halfW * bulge);
+    pos.setZ(i, pos.getZ(i) * halfD * bulge);
+    pos.setY(i, y * height * 0.5);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
 
 export class DonutCharacter extends BaseCharacter {
   private rig: ChibiRig;
@@ -38,7 +82,7 @@ export class DonutCharacter extends BaseCharacter {
       palette: {
         limb: DOUGH,
         hand: GLAZE,
-        foot: DOUGH_DARK,
+        foot: CHOC_DIP,
         torso: DOUGH,
         limbRoughness: 0.72,
       },
@@ -101,6 +145,77 @@ export class DonutCharacter extends BaseCharacter {
       head.add(s);
       this.sprinkles.push(s);
     }
+
+    // ── Body: dress the torso ─────────────────────────────────────────────────
+    // Two independent builder rounds both named the same gap: a themed head on a
+    // generic body. Donut's body is a second, smaller dough mass wearing its own
+    // iced collar — glaze drips over the shoulders and sprinkles carry on down
+    // from the head — so the food identity runs the full height of the model
+    // instead of stopping dead at the neck.
+    dressTorso(this.rig, (size) => {
+      const group = new THREE.Group();
+      group.name = 'donut_torso';
+
+      const bodyHalfW = size.w * 0.56;
+      const bodyHalfD = size.d * 0.60;
+      const bodyBottomY = size.h * 0.02;
+      const bodyTopY = size.h * 1.06;
+      const doughBody = new THREE.Mesh(
+        torsoBarrel(bodyHalfW, bodyTopY - bodyBottomY, bodyHalfD, 0.30),
+        toonMat({ color: DOUGH, roughness: 0.82 })
+      );
+      doughBody.name = 'donut_torso_dough';
+      doughBody.position.y = (bodyTopY + bodyBottomY) / 2;
+      doughBody.castShadow = true;
+      doughBody.receiveShadow = true;
+      group.add(doughBody);
+
+      // Icing collar: a flattened glaze ring worn like a yoke, sized to sit
+      // clearly inside the shoulder pivots so it never collides with the arms.
+      const collarY = size.h * 0.86;
+      const collarR = bodyHalfW * 0.82;
+      const collarTube = bodyHalfW * 0.30;
+      const collarMat = glossyMat({ color: GLAZE, roughness: 0.16 });
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(collarR, collarTube, 12, 28), collarMat);
+      collar.name = 'donut_torso_collar';
+      collar.rotation.x = Math.PI / 2;
+      collar.position.y = collarY;
+      collar.castShadow = true;
+      collar.receiveShadow = true;
+      group.add(collar);
+
+      // Glaze drips down the chest — same trick as the head icing, dribbling
+      // down from the collar across the front arc (theta ~0.5..2.6, +Z-ward).
+      const dripAngles = [0.55, 0.95, 1.35, 1.75, 2.15, 2.55];
+      for (let i = 0; i < dripAngles.length; i++) {
+        const a = dripAngles[i];
+        const len = collarTube * (1.5 + (i % 3) * 0.5);
+        const drip = new THREE.Mesh(new THREE.SphereGeometry(collarTube * 0.85, 10, 10), collarMat);
+        drip.name = 'donut_torso_drip';
+        drip.position.set(Math.cos(a) * collarR * 0.98, collarY - len * 0.55, Math.sin(a) * collarR * 0.98);
+        drip.scale.set(1, len / (collarTube * 0.85), 1);
+        drip.castShadow = true;
+        drip.receiveShadow = true;
+        group.add(drip);
+      }
+
+      // Sprinkles carry on down from the head, scattered across the collar.
+      const sGeo = new THREE.CapsuleGeometry(R * 0.024, R * 0.06, 4, 6);
+      for (let i = 0; i < 10; i++) {
+        const a = 0.5 + (i / 10) * 2.3;
+        const rr = collarR + (((i * 41) % 100) / 100 - 0.5) * collarTube * 1.5;
+        const mat = flatMat(SPRINKLE_COLORS[(i + 2) % SPRINKLE_COLORS.length]);
+        const s = new THREE.Mesh(sGeo, mat);
+        s.userData.noOutline = true;
+        s.castShadow = true;
+        s.position.set(Math.cos(a) * rr, collarY + ((i % 3) - 1) * collarTube * 0.4, Math.sin(a) * rr);
+        s.rotation.set(Math.PI / 2, 0, a + ((i * 29) % 100) / 100 - 0.5);
+        group.add(s);
+        this.sprinkles.push(s);
+      }
+
+      return group;
+    });
 
     this.buildFace(R);
 

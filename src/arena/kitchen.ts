@@ -473,18 +473,21 @@ function buildHerbCrate(M: Materials, wM: number, dM: number): THREE.Group {
   }
 
   // Bundled herb sprigs instead of loose produce — bold cone clusters read as
-  // bunched greens at gameplay distance without needing fine leaf detail.
-  const bundlePositions: Array<[number, number]> = [[-wM * 0.2, dM * 0.1], [wM * 0.18, -dM * 0.12], [wM * 0.02, dM * 0.28]];
+  // bunched greens at gameplay distance without needing fine leaf detail. Sized as
+  // a fraction of the crate's own footprint (not a fixed metre size) so it stays
+  // legible whatever scale this crate is built at — a fixed 0.05m cone was invisible
+  // against a 4.5m crate top.
+  const leafR = Math.min(wM, dM) * 0.065;
+  const bundlePositions: Array<[number, number]> = [[-wM * 0.18, dM * 0.12], [wM * 0.16, -dM * 0.14]];
   const leafMats = [M.herbLeafA, M.herbLeafB];
-  bundlePositions.forEach(([sx, sz], i) => {
+  bundlePositions.forEach(([sx, sz]) => {
     for (let k = 0; k < 3; k++) {
-      const leaf = mesh(new THREE.ConeGeometry(0.05, 0.24, 6), leafMats[k % 2], 'crate_herb_leaf');
+      const leaf = mesh(new THREE.ConeGeometry(leafR, leafR * 2.6, 7), leafMats[k % 2], 'crate_herb_leaf');
       const a = (k / 3) * Math.PI * 2;
-      leaf.position.set(sx + Math.cos(a) * 0.05, h + 0.16, sz + Math.sin(a) * 0.05);
+      leaf.position.set(sx + Math.cos(a) * leafR, h + leafR * 1.3, sz + Math.sin(a) * leafR);
       leaf.rotation.set(Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3);
       g.add(leaf);
     }
-    void i;
   });
 
   return g;
@@ -903,7 +906,7 @@ function buildHubDebris(M: Materials): THREE.Group {
     const r = 104 + rand() * 30; // 104..134 wu — clear of the hazard glow and every hub prop
     const wx = CENTER.x + Math.cos(ang) * r;
     const wy = CENTER.y + Math.sin(ang) * r;
-    const s = 0.08 + rand() * 0.06;
+    const s = 0.11 + rand() * 0.08;
     const item = mesh(new THREE.SphereGeometry(s, 8, 6), mats[i % mats.length], 'hub_debris_veg');
     const p = groundPos(wx, wy);
     item.position.set(p.x, s * 0.7, p.z);
@@ -991,10 +994,11 @@ function buildFloor(M: Materials): THREE.Group {
   // regardless of angle.
   g.add(buildHubDebris(M));
 
-  // A couple of worn-floor marks near the service counters — grease under the
-  // fryer (south), a cool wet sheen under the sink (north), doubling as one more
-  // small patch of cool colour close to the hub.
-  const grimeSpots: Array<[number, number, number]> = [[672, 792, 20], [733, 805, 15]];
+  // A couple of worn-floor marks near the service counters — grease behind the
+  // fryer (south, on its far side away from the hub), a cool wet sheen behind the
+  // sink (north). Placed on the OUTER side of each counter, clear of both the
+  // counter's own CoverBox and the hub teal zone that sits on its inner side.
+  const grimeSpots: Array<[number, number, number]> = [[675, 882, 20], [722, 892, 15]];
   for (const [gx, gy, gr] of grimeSpots) {
     const spot = mesh(new THREE.CircleGeometry(wu(gr), 12), M.floorGrime, 'floor_grime');
     spot.rotation.x = -Math.PI / 2;
@@ -1003,7 +1007,7 @@ function buildFloor(M: Materials): THREE.Group {
     noOutline(spot);
     g.add(spot);
   }
-  const wetSpots: Array<[number, number, number]> = [[668, 205, 18], [730, 195, 13]];
+  const wetSpots: Array<[number, number, number]> = [[675, 118, 18], [722, 108, 13]];
   for (const [gx, gy, gr] of wetSpots) {
     const spot = mesh(new THREE.CircleGeometry(wu(gr), 12), M.floorWet, 'floor_wet');
     spot.rotation.x = -Math.PI / 2;

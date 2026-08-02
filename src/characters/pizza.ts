@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig } from './rig';
 
 const CRUST = '#EFB868';       // baked dough slab
@@ -25,6 +25,50 @@ const CRUST_RIM = '#CE8A2E';   // puffier crust roll along the base — noticeab
 const SAUCE = PALETTE.tomato;  // '#E63946' — thin margin peeking past the cheese
 const CHEESE = '#FFDE73';      // melted top layer — pushed brighter than the dough so it pops
 const PEPPERONI = '#B93A28';   // wet cured meat, redder than the crust rim
+// Feet deliberately break from the crust family altogether — a charred-crust-bottom
+// brown, dark enough to be a real value drop against the pale CRUST limbs rather than
+// a slightly-darker shade of the same tan.
+const CRUST_CHAR = '#4A2A12';
+
+/**
+ * Local stand-in for `ChibiRig`'s intended `dressTorso`/`torsoSize` — at the time of
+ * writing `rig.ts` documents the pattern (see its torso comment) but does not yet
+ * expose either, and this file is not allowed to touch `rig.ts`. Reads the real size
+ * off the default torso mesh's geometry (so it stays correct even if rig proportions
+ * are retuned later), then swaps it out for character geometry parented the same way
+ * the default was — a child of `rig.joints.torso`, so it inherits the rig's own
+ * breathing/lean/run animation for free.
+ */
+function dressTorso(rig: ChibiRig, build: (size: { w: number; h: number; d: number }) => THREE.Object3D): void {
+  let size = { w: 0.42, h: 0.5, d: 0.32 };
+  const old = rig.torsoMesh;
+  if (old) {
+    old.geometry.computeBoundingBox();
+    const bb = old.geometry.boundingBox;
+    if (bb) size = { w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z };
+    old.parent?.remove(old);
+    old.geometry.dispose();
+  }
+  rig.joints.torso.add(build(size));
+}
+
+/** Soft tapered barrel — the same visual language as the rig's own default torso
+ * (fuller belly, narrower neck) but built locally so each character can own its
+ * material and proportions. */
+function torsoBarrel(halfW: number, height: number, halfD: number, taper: number): THREE.BufferGeometry {
+  const geo = new THREE.SphereGeometry(1, 22, 16);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const t = (y + 1) * 0.5; // 0 bottom .. 1 top
+    const bulge = 1 + taper * Math.sin(t * Math.PI * 0.9) - taper * 0.55 * t;
+    pos.setX(i, pos.getX(i) * halfW * bulge);
+    pos.setZ(i, pos.getZ(i) * halfD * bulge);
+    pos.setY(i, y * height * 0.5);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
 
 export class PizzaCharacter extends BaseCharacter {
   private rig: ChibiRig;
@@ -37,7 +81,7 @@ export class PizzaCharacter extends BaseCharacter {
       palette: {
         limb: CRUST,
         hand: CHEESE,
-        foot: CRUST_RIM,
+        foot: CRUST_CHAR,
         torso: CRUST,
         limbRoughness: 0.78,
       },
@@ -166,6 +210,95 @@ export class PizzaCharacter extends BaseCharacter {
       glisten.userData.noOutline = true;
       head.add(glisten);
     }
+
+    // ── Body: dress the torso ─────────────────────────────────────────────────
+    // Two independent builder rounds both named the same gap: a themed head on a
+    // generic body. Pizza's body is a crust-coloured torso wearing a melted-cheese
+    // "vest" that drapes over the shoulders and drips down the chest, trimmed with
+    // the same puffy crust-rim colour as the head's own base — so the slice's food
+    // language runs the full height of the model instead of stopping at the neck.
+    dressTorso(this.rig, (size) => {
+      const group = new THREE.Group();
+      group.name = 'pizza_torso';
+
+      const bodyHalfW = size.w * 0.55;
+      const bodyHalfD = size.d * 0.58;
+      const bodyBottomY = size.h * 0.02;
+      const bodyTopY = size.h * 1.05;
+      const doughBody = new THREE.Mesh(
+        torsoBarrel(bodyHalfW, bodyTopY - bodyBottomY, bodyHalfD, 0.26),
+        toonMat({ color: CRUST, roughness: 0.85 })
+      );
+      doughBody.name = 'pizza_torso_crust';
+      doughBody.position.y = (bodyTopY + bodyBottomY) / 2;
+      doughBody.castShadow = true;
+      doughBody.receiveShadow = true;
+      group.add(doughBody);
+
+      // Cheese vest: a rounded bib draped over the shoulders, apex pointing down
+      // the belly — a small echo of the head's own triangle, in melted cheese
+      // rather than crust, so it reads as a distinct garment, not a recoloured
+      // copy of the head.
+      const vestHalfW = bodyHalfW * 0.88;
+      const vestTopY = size.h * 0.92;
+      const vestBottomY = size.h * 0.20;
+      const vestMidY = vestTopY - (vestTopY - vestBottomY) * 0.55;
+      const vestShape = new THREE.Shape();
+      vestShape.moveTo(-vestHalfW, vestTopY);
+      vestShape.lineTo(vestHalfW, vestTopY);
+      vestShape.quadraticCurveTo(vestHalfW * 0.35, vestMidY, 0, vestBottomY);
+      vestShape.quadraticCurveTo(-vestHalfW * 0.35, vestMidY, -vestHalfW, vestTopY);
+      const vestDepth = bodyHalfD * 0.30;
+      const vest = new THREE.Mesh(
+        new THREE.ExtrudeGeometry(vestShape, { depth: vestDepth, bevelEnabled: true, bevelThickness: vestDepth * 0.2, bevelSize: vestDepth * 0.2, bevelSegments: 2, curveSegments: 12 }),
+        glossyMat({ color: CHEESE, roughness: 0.28 })
+      );
+      vest.name = 'pizza_torso_vest';
+      vest.position.z = bodyHalfD * 0.78 - vestDepth / 2;
+      vest.castShadow = true;
+      vest.receiveShadow = true;
+      group.add(vest);
+
+      // Crust-rim collar trim along the vest's top edge — the same toasty colour
+      // as the head's own crust roll, so the two read as the same food.
+      const collar = new THREE.Mesh(
+        roundedBox(vestHalfW * 2.1, bodyHalfD * 0.22, bodyHalfD * 0.32, bodyHalfD * 0.1, 3),
+        toonMat({ color: CRUST_RIM, roughness: 0.83 })
+      );
+      collar.name = 'pizza_torso_collar';
+      collar.position.set(0, vestTopY, bodyHalfD * 0.82);
+      collar.castShadow = true;
+      collar.receiveShadow = true;
+      group.add(collar);
+
+      // Cheese drips hanging off the collar over the shoulders.
+      const dripXs = [-vestHalfW * 0.85, -vestHalfW * 0.45, 0.05 * vestHalfW, vestHalfW * 0.5, vestHalfW * 0.88];
+      for (let i = 0; i < dripXs.length; i++) {
+        const len = bodyHalfD * (0.22 + (i % 3) * 0.07);
+        const drip = new THREE.Mesh(new THREE.SphereGeometry(bodyHalfD * 0.13, 10, 10), glossyMat({ color: CHEESE, roughness: 0.28 }));
+        drip.name = 'pizza_torso_drip';
+        drip.position.set(dripXs[i], vestTopY - len * 0.6, bodyHalfD * 0.86);
+        drip.scale.set(1, len / (bodyHalfD * 0.13), 1);
+        drip.castShadow = true;
+        drip.receiveShadow = true;
+        group.add(drip);
+      }
+
+      // A couple of pepperoni discs on the vest, continuing the topping motif
+      // down onto the body.
+      const pepMat = glossyMat({ color: PEPPERONI, roughness: 0.18 });
+      for (const [px, py] of [[-vestHalfW * 0.4, vestTopY - (vestTopY - vestBottomY) * 0.35], [vestHalfW * 0.32, vestTopY - (vestTopY - vestBottomY) * 0.55]] as const) {
+        const pep = new THREE.Mesh(new THREE.CylinderGeometry(bodyHalfD * 0.11, bodyHalfD * 0.12, bodyHalfD * 0.06, 14), pepMat);
+        pep.name = 'pizza_torso_pepperoni';
+        pep.rotation.x = Math.PI / 2;
+        pep.position.set(px, py, bodyHalfD * 0.78 + vestDepth * 0.5);
+        pep.castShadow = true;
+        pep.receiveShadow = true;
+        group.add(pep);
+      }
+
+      return group;
+    });
 
     this.buildFace(R, cheeseFrontZ);
 

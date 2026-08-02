@@ -97,6 +97,36 @@ const CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
   [1.28, 0.27], [1.48, 0.35], [1.20, 0.42], [1.42, 0.50],
 ];
 
+/** Continuation of the crack onto the torso shell, same side (character's right
+ * front), near the top where it emerges from under the neck. `eggSurface` and
+ * `buildCrackLine` are both already generic in R, so this reuses them verbatim
+ * against the torso's own smaller shell radius. */
+const TORSO_CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
+  [1.30, 0.08], [1.52, 0.18], [1.24, 0.29],
+];
+
+/**
+ * Local stand-in for `ChibiRig`'s intended `dressTorso`/`torsoSize` — at the time of
+ * writing `rig.ts` documents the pattern (see its torso comment) but does not yet
+ * expose either, and this file is not allowed to touch `rig.ts`. Reads the real size
+ * off the default torso mesh's geometry (so it stays correct even if rig proportions
+ * are retuned later), then swaps it out for character geometry parented the same way
+ * the default was — a child of `rig.joints.torso`, so it inherits the rig's own
+ * breathing/lean/run animation for free.
+ */
+function dressTorso(rig: ChibiRig, build: (size: { w: number; h: number; d: number }) => THREE.Object3D): void {
+  let size = { w: 0.42, h: 0.5, d: 0.32 };
+  const old = rig.torsoMesh;
+  if (old) {
+    old.geometry.computeBoundingBox();
+    const bb = old.geometry.boundingBox;
+    if (bb) size = { w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z };
+    old.parent?.remove(old);
+    old.geometry.dispose();
+  }
+  rig.joints.torso.add(build(size));
+}
+
 /**
  * A jagged crack line: a chain of thin boxes, each built its own oriented basis
  * from the tangent between consecutive surface points and the averaged normal,
@@ -150,8 +180,13 @@ export class EggCharacter extends BaseCharacter {
     this.rig = new ChibiRig({
       palette: {
         limb: SHELL,
-        hand: '#FFE9A8',       // warm yolk-tinted mitts
-        foot: SHELL_SHADOW,
+        // Hand/foot were both pale near-whites barely a shade off the shell —
+        // the exact "one undifferentiated mass" failure called out in review.
+        // Hands now take the same saturated yolk used for the crack-tip peek,
+        // feet take the crack's own dark caramel, so extremities carry real
+        // value AND hue contrast against the near-white shell limbs.
+        hand: YOLK,
+        foot: CRACK_DARK,
         torso: SHELL,
         limbRoughness: 0.5,
       },
@@ -205,6 +240,49 @@ export class EggCharacter extends BaseCharacter {
     yolk.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tipSurface.normal);
     yolk.userData.noOutline = true;
     head.add(yolk);
+
+    // ── Body: dress the torso ─────────────────────────────────────────────────
+    // Two independent builder rounds both named the same gap: a themed head on a
+    // generic body. Egg's body is a second, smaller shell built from the exact
+    // same `shellPoint` surface as the head — literally the same ovoid language,
+    // just scaled down — with the crack motif continuing a short way down onto
+    // it, so the identity runs the full height of the model instead of stopping
+    // dead at the neck.
+    dressTorso(this.rig, (size) => {
+      const torsoR = size.w * 0.5;
+      const halfH = 1.04 * torsoR;
+      const bottomY = size.h * 0.05;
+      const centerY = bottomY + halfH;
+
+      const group = new THREE.Group();
+      group.name = 'egg_torso_shell_group';
+      group.position.y = centerY;
+
+      const shellGeo = new THREE.SphereGeometry(1, 28, 20);
+      {
+        const posAttr = shellGeo.attributes.position as THREE.BufferAttribute;
+        const dir = new THREE.Vector3();
+        for (let i = 0; i < posAttr.count; i++) {
+          dir.fromBufferAttribute(posAttr, i).normalize();
+          const p = shellPoint(dir, torsoR);
+          posAttr.setXYZ(i, p.x, p.y, p.z);
+        }
+        shellGeo.computeVertexNormals();
+      }
+      const torsoShell = new THREE.Mesh(shellGeo, toonMat({ color: SHELL, roughness: 0.35 }));
+      torsoShell.name = 'egg_torso_shell';
+      torsoShell.castShadow = true;
+      torsoShell.receiveShadow = true;
+      group.add(torsoShell);
+
+      // The crack carries on down from the neck — same helper, same colour, just
+      // a shorter path against the torso's own (smaller) shell radius.
+      buildCrackLine(group, torsoR, TORSO_CRACK_PATH, {
+        thickness: torsoR * 0.075, embed: torsoR * 0.008, color: CRACK_DARK, roughness: 0.55,
+      });
+
+      return group;
+    });
 
     this.buildFace(head, R);
 
