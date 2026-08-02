@@ -3,9 +3,13 @@
  *
  * Transcribed from the prototype's inline AI block: chase the player, flee and
  * snipe below a flee-HP threshold, otherwise pick the highest-damage weapon that's
- * off cooldown and in range. See `sim.ts` for the one deliberate behavioural
- * deviation from the prototype (melee cone-checking the AI too) and the report for
- * why.
+ * off cooldown and in range. Attacks are issued through `combat.ts`'s
+ * `attemptAttack` — the same function the player uses — rather than a separate AI
+ * firing path. That is a deliberate, low-risk deviation from the prototype, whose
+ * `aiFireWeapon` skips the melee cone/facing check the player is subject to; see
+ * the report for why unifying the two paths was judged safe (the AI always faces
+ * the target it is about to melee, so the cone check is a no-op in every reachable
+ * state — it only matters for defensive consistency).
  */
 
 import { AI_CHASE_SPEED, AI_FLEE_HP_FRACTION, AI_FLEE_SPEED, AI_SLOW_MULTIPLIER, CHARACTERS } from './rules.ts';

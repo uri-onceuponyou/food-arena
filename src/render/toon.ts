@@ -68,6 +68,15 @@ export interface ToonMatOptions {
   doubleSide?: boolean;
   map?: THREE.Texture | null;
   flatShading?: boolean;
+  /**
+   * Surface roughness, 0 = mirror, 1 = fully matte. THIS IS THE MAIN TOOL for making
+   * different materials read as different substances. A character whose every part
+   * shares one roughness reads as "a blob wearing coloured rings" rather than as a
+   * thing made of bread, meat and vegetables. Suggested: matte bread ~0.85, leafy
+   * greens ~0.6, cooked meat ~0.55, wet tomato/sauce ~0.2, glaze/candy/glass ~0.1.
+   */
+  roughness?: number;
+  metalness?: number;
 }
 
 /**
@@ -88,8 +97,8 @@ export interface ToonMatOptions {
 export function toonMat(opts: ToonMatOptions): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({
     color: new THREE.Color(opts.color),
-    roughness: 0.52,
-    metalness: 0.0,
+    roughness: opts.roughness ?? 0.52,
+    metalness: opts.metalness ?? 0.0,
     transparent: opts.transparent ?? false,
     opacity: opts.opacity ?? 1,
     side: opts.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
