@@ -96,9 +96,12 @@ async function run() {
     for (const job of jobs) {
       const w = Number(job.w ?? 1200);
       const h = Number(job.h ?? 900);
+      // SwiftShader is CPU-rasterised, so cost scales with total pixels. Drop to 1x
+      // on large viewports — at 2x a 1200x1500 shot blows past the screenshot timeout.
+      const scale = w * h > 1_100_000 ? 1 : 2;
       const page = await browser.newPage({
         viewport: { width: w, height: h },
-        deviceScaleFactor: 2,
+        deviceScaleFactor: scale,
       });
 
       const errors = [];
@@ -114,7 +117,7 @@ async function run() {
         const info = await page.evaluate(() => window.__preview?.info?.() ?? null);
 
         await mkdir(dirname(resolve(job.out)), { recursive: true });
-        await page.screenshot({ path: job.out });
+        await page.screenshot({ path: job.out, timeout: 90_000 });
         results.push({ out: job.out, ok: true, info, errors });
         console.log(`✓ ${job.out}${info?.height ? `  (h=${info.height}m)` : ''}`);
       } catch (err) {

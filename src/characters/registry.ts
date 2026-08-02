@@ -11,6 +11,7 @@
 import { CHARACTERS, type CharacterId, type CharacterDef } from '../game/rules';
 import type { CharacterModel } from './types';
 import { PlaceholderCharacter } from './placeholder';
+import { HamburgerCharacter } from './hamburger';
 
 export type Factory = (def: CharacterDef) => CharacterModel;
 
@@ -21,7 +22,7 @@ const placeholder: Factory = (def) => new PlaceholderCharacter(def);
  * Keep the import list alphabetical to minimise merge friction between agents.
  */
 export const CHARACTER_FACTORIES: Record<CharacterId, Factory> = {
-  hamburger: placeholder,
+  hamburger: (def) => new HamburgerCharacter(def),
   donut: placeholder,
   taco: placeholder,
   burrito: placeholder,

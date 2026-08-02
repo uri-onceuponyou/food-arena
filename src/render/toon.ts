@@ -1,7 +1,7 @@
 /**
  * Toon / cel shading kit.
  *
- * Target look: Brawl Stars & Zooba — soft banded cel shading (not hard 2-tone),
+  * Target look: Brawl Stars & Zooba — smooth-shaded, hyper-saturated, high-key vinyl-
  * high colour saturation, a thin dark inverted-hull outline, glossy specular pop,
  * and chunky rounded forms. Everything in the game should be built with these
  * helpers so the whole scene reads as one coherent art style.
@@ -69,18 +69,32 @@ export interface ToonMatOptions {
   flatShading?: boolean;
 }
 
-/** Standard character/prop surface. */
-export function toonMat(opts: ToonMatOptions): THREE.MeshToonMaterial {
-  const m = new THREE.MeshToonMaterial({
+/**
+ * The default character / prop surface.
+ *
+ * ── Why this is NOT MeshToonMaterial ────────────────────────────────────────
+ * The brief said "toon/cel-shaded", but the actual Brawl Stars reference frames
+ * (see `reference/images/curated/`) are not cel-shaded at all. They are smooth-shaded,
+ * hyper-saturated, brightly lit surfaces with a soft specular highlight — the look of
+ * moulded vinyl toys, not of banded cel shading. The brief is explicit that when the
+ * written description and the reference bar disagree, the bar wins.
+ *
+ * MeshToonMaterial cannot produce a specular highlight at all, and that highlight is
+ * doing a large share of the work in every reference image. So the default surface is
+ * a standard material tuned for plastic, and `ramp` is accepted-but-ignored so the
+ * call sites that pass one still compile.
+ */
+export function toonMat(opts: ToonMatOptions): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({
     color: new THREE.Color(opts.color),
-    gradientMap: opts.ramp ?? RAMP_CHARACTER(),
+    roughness: 0.52,
+    metalness: 0.0,
     transparent: opts.transparent ?? false,
     opacity: opts.opacity ?? 1,
     side: opts.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
     map: opts.map ?? null,
+    flatShading: opts.flatShading ?? false,
   });
-  // Not in MeshToonMaterial's constructor types, but supported at runtime.
-  if (opts.flatShading) (m as unknown as { flatShading: boolean }).flatShading = true;
   if (opts.emissive !== undefined) {
     m.emissive = new THREE.Color(opts.emissive);
     m.emissiveIntensity = opts.emissiveIntensity ?? 1;
@@ -134,7 +148,21 @@ export function flatMat(color: THREE.ColorRepresentation, opts?: { transparent?:
 // Outlines — inverted hull
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const OUTLINE_INK = '#180f22';
+/**
+ * Outline ink. Deliberately a deep desaturated navy rather than black — pure black
+ * outlines read as flat stickers against saturated colour.
+ */
+export const OUTLINE_INK = '#241a33';
+
+/**
+ * Default outline thickness, in metres, for a ~2.1 m character.
+ *
+ * Tuned DOWN hard from an initial 0.035. In the actual gameplay reference frames,
+ * characters carry almost no ink line — they separate from the environment through
+ * value contrast, rim light and the ground ring beneath them. A heavy outline is one
+ * of the loudest "hobby project" tells, so this is intentionally subtle.
+ */
+export const OUTLINE_THIN = 0.004;
 
 /**
  * Inverted-hull outline. Clones the geometry, renders backfaces only, pushed out
@@ -144,7 +172,7 @@ export const OUTLINE_INK = '#180f22';
  * `thickness` is in world units. Keep it proportional to the mesh: too thick reads
  * as a sticker, too thin disappears at gameplay camera distance.
  */
-export function addOutline(mesh: THREE.Mesh, thickness = 0.035, color: THREE.ColorRepresentation = OUTLINE_INK): THREE.Mesh {
+export function addOutline(mesh: THREE.Mesh, thickness = OUTLINE_THIN, color: THREE.ColorRepresentation = OUTLINE_INK): THREE.Mesh {
   // A dedicated ShaderMaterial rather than patching MeshBasicMaterial: basic
   // materials carry no normal chunks, so `objectNormal` is undefined there and the
   // hull silently never expands (an outline that renders as nothing at all).
@@ -153,11 +181,17 @@ export function addOutline(mesh: THREE.Mesh, thickness = 0.035, color: THREE.Col
       outlineColor: { value: new THREE.Color(color) },
       outlineThickness: { value: thickness },
     },
+    // Expansion happens in VIEW space, not object space. Expanding `position` directly
+    // means the offset is subsequently multiplied by the object's scale, so a mesh
+    // scaled 3x gets a 3x fatter outline — which reads as a randomly uneven ink line
+    // across a model built from differently-scaled parts.
     vertexShader: /* glsl */ `
       uniform float outlineThickness;
       void main() {
-        vec3 expanded = position + normalize(normal) * outlineThickness;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(expanded, 1.0);
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        vec3 n = normalize(normalMatrix * normal);
+        mvPosition.xyz += n * outlineThickness;
+        gl_Position = projectionMatrix * mvPosition;
       }
     `,
     fragmentShader: /* glsl */ `
@@ -184,7 +218,7 @@ export function addOutline(mesh: THREE.Mesh, thickness = 0.035, color: THREE.Col
  * carrying `userData.noOutline`, are skipped — use that for eyes and decals that
  * sit flush on a surface, where an outline would z-fight.
  */
-export function outlineGroup(group: THREE.Object3D, thickness = 0.035, color: THREE.ColorRepresentation = OUTLINE_INK): void {
+export function outlineGroup(group: THREE.Object3D, thickness = OUTLINE_THIN, color: THREE.ColorRepresentation = OUTLINE_INK): void {
   const targets: THREE.Mesh[] = [];
   group.traverse((o) => {
     const m = o as THREE.Mesh;

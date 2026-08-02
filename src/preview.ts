@@ -52,8 +52,11 @@ if (shotMode) document.body.classList.add('shot');
 const container = document.getElementById('stage')!;
 const label = document.getElementById('label')!;
 
+// Bright studio backdrop by default. A dark ground made every model read as gloomy
+// clay; the reference presents characters on bright, saturated grounds and that
+// materially changes how the shading is perceived.
 const bgParam = params.get('bg');
-const background = bgParam ? Number(`0x${bgParam.replace('#', '')}`) : 0x241a33;
+const background = bgParam ? Number(`0x${bgParam.replace('#', '')}`) : 0x39b7e8;
 
 const stage = new Stage({
   container,
@@ -77,7 +80,7 @@ const stage = new Stage({
 // than floating in a void.
 const ground = new THREE.Mesh(
   new THREE.CircleGeometry(14, 64),
-  toonMat({ color: '#4a3a5e', ramp: RAMP_SOFT() })
+  toonMat({ color: params.get('ground') ? `#${params.get('ground')}` : '#8fd6f2', ramp: RAMP_SOFT() })
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;

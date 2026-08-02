@@ -28,7 +28,9 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   const mapSize = opts?.shadowMapSize ?? 2048;
 
   // Warm key — the sun. Slightly off-axis so shadows fall down-right.
-  const key = new THREE.DirectionalLight(0xfff2d6, 2.6);
+  // Deliberately restrained: in the reference, the key does shaping, NOT contrast.
+  // Most of the illumination comes from the very bright fill below.
+  const key = new THREE.DirectionalLight(0xfff4de, 1.9);
   key.position.set(9, 16, 7);
   key.castShadow = true;
   key.shadow.mapSize.set(mapSize, mapSize);
@@ -40,19 +42,20 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   group.add(key);
   group.add(key.target);
 
-  // Cool sky / warm bounce. Keeps shadow sides tinted instead of muddy.
-  const fill = new THREE.HemisphereLight(0xbfd9ff, 0xffb774, 0.85);
+  // The workhorse. Reference frames are HIGH-KEY: shadow sides stay bright and
+  // saturated, never murky. A strong sky/bounce hemisphere is what produces that —
+  // it lifts every unlit surface without flattening form the way raw ambient does.
+  const fill = new THREE.HemisphereLight(0xdcefff, 0xffc79a, 2.15);
   group.add(fill);
 
-  // Cool rim from behind — the separation light. This is what makes toon characters
-  // pop off the floor in Brawl Stars.
-  const rim = new THREE.DirectionalLight(0x9fd0ff, 1.15);
+  // Cool rim from behind — the separation light that pops characters off the floor.
+  const rim = new THREE.DirectionalLight(0xaddcff, 1.05);
   rim.position.set(-8, 7, -11);
   rim.castShadow = false;
   group.add(rim);
 
-  // Tiny flat lift so nothing ever reads pure black.
-  const ambient = new THREE.AmbientLight(0xffffff, 0.22);
+  // Flat lift so nothing ever reads as a dead black hole.
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
   group.add(ambient);
 
   const focus = (x: number, z: number, radius = shadowRadius) => {

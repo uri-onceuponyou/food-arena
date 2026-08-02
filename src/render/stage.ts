@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import {
   EffectComposer, RenderPass, EffectPass,
   BloomEffect, SMAAEffect, VignetteEffect,
-  ToneMappingEffect, ToneMappingMode, BlendFunction,
+  HueSaturationEffect, BrightnessContrastEffect, BlendFunction,
 } from 'postprocessing';
 import { CameraRig, type CameraRigOptions } from './camera';
 import { createLighting, type LightingRig } from './lighting';
@@ -81,27 +81,33 @@ export class Stage {
     });
     composer.addPass(new RenderPass(this.scene, this.rig.camera));
 
-    // Gentle bloom — just enough to make highlights and Neon/Cyber accents sing.
-    // Overdone bloom is the fastest way to look like a hobby project.
+    // Bloom only on genuinely hot highlights. The threshold is high on purpose:
+    // at 0.72 it was haloing plain white geometry (sesame seeds glowed like LEDs).
     const bloom = new BloomEffect({
-      intensity: 0.42,
-      luminanceThreshold: 0.72,
-      luminanceSmoothing: 0.32,
+      intensity: 0.30,
+      luminanceThreshold: 0.88,
+      luminanceSmoothing: 0.20,
       mipmapBlur: true,
-      radius: 0.62,
+      radius: 0.58,
     });
 
+    // NO filmic tonemapping. AgX/ACES are built to tame photorealistic HDR and both
+    // desaturate hard — exactly the wrong move for a hyper-saturated toy-plastic look.
+    // Reference frames are vivid and high-key, so we grade toward that instead.
+    // Restrained on purpose. At 0.34 this shoved an authored tan bun to pure orange —
+    // the grade should lift what the artist chose, not overwrite it. Saturation belongs
+    // in the albedo colours first, with only a light global assist here.
+    const saturation = new HueSaturationEffect({ saturation: 0.16 });
+    const contrast = new BrightnessContrastEffect({ brightness: 0.02, contrast: 0.06 });
+
+    // Barely-there vignette; the reference has essentially none.
     const vignette = new VignetteEffect({
-      offset: 0.30,
-      darkness: 0.42,
+      offset: 0.42,
+      darkness: 0.20,
       blendFunction: BlendFunction.NORMAL,
     });
 
-    const tone = new ToneMappingEffect({
-      mode: ToneMappingMode.AGX,
-    });
-
-    composer.addPass(new EffectPass(this.rig.camera, bloom, tone, vignette));
+    composer.addPass(new EffectPass(this.rig.camera, bloom, saturation, contrast, vignette));
     composer.addPass(new EffectPass(this.rig.camera, new SMAAEffect()));
     this.composer = composer;
   }
