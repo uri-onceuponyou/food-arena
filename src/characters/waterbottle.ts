@@ -131,13 +131,17 @@ export class WaterBottleCharacter extends BaseCharacter {
       palette: {
         // Contrasting zones rather than one flat colour — the reference bar
         // (bs_06/bs_02) dresses the body in distinct blocks (overalls/shirt/boots),
-        // not a single hue repeated everywhere. Pale plastic limbs, dark navy
-        // hands/feet (mitts/boots), a near-white torso (a small "shirt" peeking out
-        // below the bottle) — three readable tones instead of one.
+        // not a single hue repeated everywhere. Pale plastic limbs and torso, dark
+        // navy hands/feet (mitts/boots) for the contrast. Round 3 tried a near-white
+        // LABEL torso here and it backfired: at this scale the torso sphere is the
+        // single biggest mass below the neck, and full white made it compete with
+        // the bottle itself — the eye landed on a floating white ball instead of
+        // the glass. Matching it to the shell tone keeps the silhouette's brightest
+        // white reserved for the label wrap, where it belongs.
         limb: PLASTIC,
         hand: CAP,
         foot: CAP_DARK,
-        torso: LABEL,
+        torso: PLASTIC,
         limbRoughness: 0.5,
       },
       // Smaller than the 0.46 default: the bottle's own elongation (shoulder, neck,

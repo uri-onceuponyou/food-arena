@@ -70,12 +70,12 @@ export class BurritoCharacter extends BaseCharacter {
     // A barrel-bulged cylinder rather than a straight tube — real burritos bulge
     // where they're stuffed. Built by displacing a plain CylinderGeometry's vertices
     // radially, the same technique rig.ts uses for the torso taper.
-    const botR = R * 0.50;
-    const topR = R * 0.60;
+    const botR = R * 0.56;
+    const topR = R * 0.62;
     const bodyBottomY = -R * 0.85;
-    const bodyTopY = R * 0.55;
+    const bodyTopY = R * 0.50;
     const bodyH = bodyTopY - bodyBottomY;
-    const bulgeAmt = 0.18;
+    const bulgeAmt = 0.12;
 
     const wrapGeo = new THREE.CylinderGeometry(topR, botR, bodyH, 28, 8, false);
     {
@@ -128,12 +128,12 @@ export class BurritoCharacter extends BaseCharacter {
     rim.receiveShadow = true;
     head.add(rim);
 
-    const domeCenterY = bodyTopY + R * 0.04;
-    const domeR = topR * 0.88;
+    const domeCenterY = bodyTopY + R * 0.02;
+    const domeR = topR * 0.85;
     const mound = new THREE.Mesh(
-      // A dome cap (theta 0..~0.52π from the +Y pole) rather than a full sphere —
+      // A dome cap (theta 0..~0.48π from the +Y pole) rather than a full sphere —
       // just the top bulge, like donut's proud-glaze trick.
-      new THREE.SphereGeometry(domeR, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
+      new THREE.SphereGeometry(domeR, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.48),
       toonMat({ color: RICE, roughness: 0.62 })
     );
     mound.name = 'burrito_rice';
@@ -173,20 +173,24 @@ export class BurritoCharacter extends BaseCharacter {
       return m;
     };
 
-    const meatGeo = new THREE.SphereGeometry(R * 0.16, 10, 8);
-    const tomatoGeo = new THREE.BoxGeometry(R * 0.13, R * 0.13, R * 0.13);
-    const cheeseGeo = new THREE.ConeGeometry(R * 0.06, R * 0.22, 6);
-    const lettuceGeo = new THREE.CapsuleGeometry(R * 0.035, R * 0.15, 4, 6);
-    const creamGeo = new THREE.SphereGeometry(R * 0.08, 10, 8);
+    // Sized up from round 1, where sparse small toppings left the pale rice mound
+    // dominant and the whole thing read as ice-cream-with-sprinkles rather than a
+    // packed burrito filling. Bigger, denser, and mostly the LIGHTER meat tone — an
+    // even mix with the near-black MEAT_DARK read as scattered chocolate chips.
+    const meatGeo = new THREE.SphereGeometry(R * 0.19, 10, 8);
+    const tomatoGeo = new THREE.BoxGeometry(R * 0.17, R * 0.17, R * 0.17);
+    const cheeseGeo = new THREE.ConeGeometry(R * 0.08, R * 0.27, 6);
+    const lettuceGeo = new THREE.CapsuleGeometry(R * 0.045, R * 0.18, 4, 6);
+    const creamGeo = new THREE.SphereGeometry(R * 0.095, 10, 8);
 
     const meatSpots: Spot[] = [[15, 0.35], [80, 0.55], [150, 0.3], [230, 0.6], [300, 0.42]];
-    const tomatoSpots: Spot[] = [[50, 0.62], [140, 0.45], [220, 0.68], [320, 0.5]];
-    const cheeseSpots: Spot[] = [[0, 0.28], [100, 0.7], [190, 0.4], [275, 0.6]];
-    const lettuceSpots: Spot[] = [[35, 0.8], [125, 0.78], [205, 0.82], [300, 0.76]];
+    const tomatoSpots: Spot[] = [[50, 0.62], [140, 0.45], [220, 0.68], [320, 0.5], [95, 0.32], [265, 0.58]];
+    const cheeseSpots: Spot[] = [[0, 0.28], [100, 0.7], [190, 0.4], [275, 0.6], [145, 0.55], [330, 0.3]];
+    const lettuceSpots: Spot[] = [[35, 0.8], [125, 0.78], [205, 0.82], [300, 0.76], [355, 0.7]];
     const creamSpots: Spot[] = [[65, 0.22], [170, 0.24], [260, 0.2]];
 
     meatSpots.forEach((s, i) => {
-      const m = placeOnDome(s, meatGeo, i % 2 === 0 ? meatMat : meatDarkMat, 'burrito_meat');
+      const m = placeOnDome(s, meatGeo, i % 4 === 0 ? meatDarkMat : meatMat, 'burrito_meat');
       m.scale.set(1.1, 0.8, 1.1);
     });
     tomatoSpots.forEach((s) => {
@@ -287,42 +291,47 @@ export class BurritoCharacter extends BaseCharacter {
 
     // Paper wrapper band, snug around the lower-mid torso.
     const band = new THREE.Mesh(
-      new THREE.CylinderGeometry(torsoMaxX * 0.99, torsoMaxX * 1.03, torsoSpan * 0.22, 20, 1, true),
+      new THREE.CylinderGeometry(torsoMaxX * 0.99, torsoMaxX * 1.03, torsoSpan * 0.2, 20, 1, true),
       bandMat
     );
     band.name = 'burrito_band';
-    band.position.y = torsoBaseY + torsoSpan * 0.42;
+    band.position.y = torsoBaseY + torsoSpan * 0.46;
     band.castShadow = true;
     band.receiveShadow = true;
     this.rig.joints.torso.add(band);
 
-    // Foil collar hugging the torso base, just below the band.
+    // Foil collar hugging the torso base, just below the band. Sized up from round 1
+    // (0.8/0.05 -> 0.98/0.075) — at the original size it was almost entirely hidden
+    // behind the rig's own oversized hands from the front, reading as a thin sliver.
     const collar = new THREE.Mesh(
-      new THREE.TorusGeometry(torsoMaxX * 0.8, R * 0.05, 8, 20),
+      new THREE.TorusGeometry(torsoMaxX * 0.98, R * 0.075, 8, 20),
       foilMat
     );
     collar.name = 'burrito_foil_collar';
     collar.rotation.x = Math.PI / 2;
-    collar.position.y = torsoBaseY + torsoSpan * 0.12;
+    collar.position.y = torsoBaseY + torsoSpan * 0.06;
     collar.castShadow = true;
     collar.receiveShadow = true;
     this.rig.joints.torso.add(collar);
 
     // Peeled foil flaps below the collar — flared outward/down, alternating tilt so
-    // they read as torn foil rather than a uniform skirt.
+    // they read as torn foil rather than a uniform skirt. Enlarged and tilted less
+    // steeply than round 1 (which pointed the flaps almost straight down, presenting
+    // their narrow top edge to the front camera instead of their broad face) so they
+    // flare OUTWARD past the hip silhouette where the front view can actually see them.
     const flapCount = 5;
-    const flapGeo = new THREE.ConeGeometry(torsoMaxX * 0.30, torsoMaxX * 0.62, 3, 1, true);
+    const flapGeo = new THREE.ConeGeometry(torsoMaxX * 0.42, torsoMaxX * 0.85, 3, 1, true);
     for (let i = 0; i < flapCount; i++) {
       const a = (i / flapCount) * Math.PI * 2 + 0.3;
       const pivot = new THREE.Group();
-      pivot.position.set(Math.cos(a) * torsoMaxX * 0.68, torsoBaseY, Math.sin(a) * torsoMaxX * 0.68);
+      pivot.position.set(Math.cos(a) * torsoMaxX * 0.78, torsoBaseY, Math.sin(a) * torsoMaxX * 0.78);
       pivot.rotation.y = -a;
-      pivot.rotation.x = 0.85 + (i % 2) * 0.3;
+      pivot.rotation.x = 0.5 + (i % 2) * 0.22;
       this.rig.joints.torso.add(pivot);
 
       const flap = new THREE.Mesh(flapGeo, foilMat);
       flap.name = 'burrito_foil_flap';
-      flap.position.y = -torsoMaxX * 0.30;
+      flap.position.y = -torsoMaxX * 0.4;
       flap.castShadow = true;
       flap.receiveShadow = true;
       pivot.add(flap);

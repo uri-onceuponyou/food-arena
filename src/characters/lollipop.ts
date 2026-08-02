@@ -75,7 +75,7 @@ export class LollipopCharacter extends BaseCharacter {
         torso: STICK,
         limbRoughness: 0.75,
       },
-      proportions: { headFraction: 0.44 },
+      proportions: { headFraction: 0.42 },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -88,12 +88,18 @@ export class LollipopCharacter extends BaseCharacter {
     const neckGap = this.rig.joints.head.position.y;
 
     // ── Layout (head-local) ────────────────────────────────────────────────────
-    const discCenterY = R * 0.55;
-    const discOuterR = R * 0.92;
-    const discDepth = R * 0.24; // real thickness — a paper-thin disc would vanish to a
+    // Round 1 defect: at discOuterR=0.92R centred on discCenterY=0.55R, the disc's own
+    // circular footprint (it's a coin, so it spans +-discOuterR in Y too, not just X)
+    // reached all the way down to Y=-0.37R — well past the stick's top — so the disc
+    // visually swallowed most of the stick from the front. Shrunk and raised so the
+    // disc's bottom edge clears the stick with room to spare.
+    const discCenterY = R * 0.68;
+    const discOuterR = R * 0.78;
+    const discDepth = R * 0.26; // real thickness — a paper-thin disc would vanish to a
                                 // blade edge-on (idle_135/210), same failure Taco solved
-    const stickR = R * 0.17;
-    const stickTopY = discCenterY - discOuterR * 0.35; // embeds into the disc's underside
+    const discBottomY = discCenterY - discOuterR;
+    const stickR = R * 0.19;
+    const stickTopY = discCenterY - discOuterR * 0.5; // embeds into the disc's underside
     const stickBottomY = -neckGap * 1.12; // reaches past the neck join, into the torso —
                                            // no visible gap between stick and body
 
@@ -113,19 +119,35 @@ export class LollipopCharacter extends BaseCharacter {
     // Spiral ribbon, proud of the base disc's front face. This is the single hardest
     // shading surface in the cast on purpose — hard sugar candy, glossiest thing built.
     const ribbonShape = spiralRibbonShape(2.35, discOuterR * 0.08, discOuterR * 0.97, discOuterR * 0.17);
+    const ribbonGeo = new THREE.ExtrudeGeometry(ribbonShape, {
+      depth: discDepth * 0.55, bevelEnabled: true, bevelThickness: R * 0.008, bevelSize: R * 0.008, bevelSegments: 2, curveSegments: 1,
+    });
     const ribbonDepth = discDepth * 0.55;
     const ribbonMat = glossyMat({ color: CANDY_RED, roughness: 0.12, emissive: CANDY_RED, emissiveIntensity: 0.12 });
-    const ribbon = new THREE.Mesh(
-      new THREE.ExtrudeGeometry(ribbonShape, {
-        depth: ribbonDepth, bevelEnabled: true, bevelThickness: R * 0.008, bevelSize: R * 0.008, bevelSegments: 2, curveSegments: 1,
-      }),
-      ribbonMat
-    );
+    const ribbon = new THREE.Mesh(ribbonGeo, ribbonMat);
     ribbon.name = 'lollipop_swirl';
     ribbon.position.set(0, discCenterY, discDepth / 2 - ribbonDepth * 0.2);
     ribbon.castShadow = true;
     ribbon.receiveShadow = true;
     head.add(ribbon);
+    // The z coordinate that safely clears the ribbon's own proud front face — mouth
+    // and blush below are placed relative to this rather than a flat guess, otherwise
+    // they land UNDER the ribbon wherever it happens to cross that point on the swirl
+    // and vanish entirely (exactly what happened in round 1).
+    const ribbonFrontZ = ribbon.position.z + ribbonDepth;
+
+    // A flat disc is one-sided by default — round 1 only decorated the front face, so
+    // at yaw 135/210 (closer to a back/edge view) the candy read as a featureless pale
+    // oval, the exact "vanishes to a blank blade off-axis" failure the brief warns
+    // about. Mirroring the ribbon onto the back face fixes it: every angle now shows
+    // swirl, not blank candy.
+    const ribbonBack = new THREE.Mesh(ribbonGeo, ribbonMat);
+    ribbonBack.name = 'lollipop_swirl_back';
+    ribbonBack.position.set(0, discCenterY, -(discDepth / 2 - ribbonDepth * 0.2));
+    ribbonBack.scale.z = -1;
+    ribbonBack.castShadow = true;
+    ribbonBack.receiveShadow = true;
+    head.add(ribbonBack);
 
     // Candy-white edge ring, cleaning up the swirl's outer terminus into a crisp rim.
     const edgeRing = new THREE.Mesh(
@@ -165,7 +187,7 @@ export class LollipopCharacter extends BaseCharacter {
     // "petals", echoing real candy-stick wrapper twists and doubling as the torso's
     // contrasting costume accent (per the brief: dress the body in contrasting
     // colours, not one flat tone).
-    const petalGeo = new THREE.ConeGeometry(stickR * 1.7, R * 0.3, 3, 1, true);
+    const petalGeo = new THREE.ConeGeometry(stickR * 1.3, R * 0.18, 3, 1, true);
     const petalMatA = toonMat({ color: CANDY_RED, roughness: 0.68 });
     const petalMatB = toonMat({ color: CANDY_WHITE, roughness: 0.68 });
     for (let i = 0; i < 6; i++) {
@@ -173,7 +195,7 @@ export class LollipopCharacter extends BaseCharacter {
       const petal = new THREE.Mesh(petalGeo, i % 2 === 0 ? petalMatA : petalMatB);
       petal.name = 'lollipop_wrapper_petal';
       petal.position.set(Math.cos(a) * stickR * 0.85, stickBottomY + R * 0.14, Math.sin(a) * stickR * 0.85);
-      petal.rotation.set(0.55, a, 0);
+      petal.rotation.set(0.4, a, 0);
       petal.castShadow = true;
       petal.receiveShadow = true;
       head.add(petal);
@@ -181,7 +203,7 @@ export class LollipopCharacter extends BaseCharacter {
 
     // ── Face: eyes on the stick, mouth on the candy ───────────────────────────
     this.rig.joints.face.position.set(0, 0, 0);
-    this.buildFace(R, stickR, discCenterY, discOuterR, discDepth, stickTopY, stickBottomY);
+    this.buildFace(R, stickR, discCenterY, discOuterR, discBottomY, discDepth, ribbonFrontZ, stickTopY, stickBottomY);
 
     // ── Torso: candy-wrapper costume, contrasting the pale limbs ──────────────
     this.dressTorso(R);
@@ -202,7 +224,9 @@ export class LollipopCharacter extends BaseCharacter {
     stickR: number,
     discCenterY: number,
     discOuterR: number,
+    discBottomY: number,
     discDepth: number,
+    ribbonFrontZ: number,
     stickTopY: number,
     stickBottomY: number
   ): void {
@@ -210,7 +234,11 @@ export class LollipopCharacter extends BaseCharacter {
     const ink = PALETTE.ink;
     const eyeMat = toonMat({ color: ink, roughness: 0.25 });
 
-    const stickFaceY = stickBottomY + (stickTopY - stickBottomY) * 0.62;
+    // Centred in the stick's CLEARLY VISIBLE span — below the disc's actual bottom
+    // edge (with a little clearance), not the full stick length, most of whose top
+    // half is embedded inside the disc.
+    const visibleStickTop = discBottomY - R * 0.05;
+    const stickFaceY = stickBottomY + (visibleStickTop - stickBottomY) * 0.5;
     for (const sx of [-1, 1]) {
       const ex = sx * stickR * 0.52;
       const ez = Math.sqrt(Math.max(0, stickR * stickR - ex * ex)) * 0.96;
@@ -244,7 +272,7 @@ export class LollipopCharacter extends BaseCharacter {
       toonMat({ color: ink, roughness: 0.3 })
     );
     mouth.name = 'lollipop_mouth';
-    mouth.position.set(0, mouthY, discDepth / 2 + R * 0.015);
+    mouth.position.set(0, mouthY, ribbonFrontZ + R * 0.02);
     mouth.rotation.z = Math.PI * 1.08;
     mouth.castShadow = true;
     face.add(mouth);
@@ -254,7 +282,7 @@ export class LollipopCharacter extends BaseCharacter {
         new THREE.SphereGeometry(R * 0.07, 10, 8),
         flatMat('#FF9EC4', { transparent: true, opacity: 0.5 })
       );
-      blush.position.set(sx * discOuterR * 0.48, discCenterY - discOuterR * 0.12, discDepth / 2 + R * 0.005);
+      blush.position.set(sx * discOuterR * 0.48, discCenterY - discOuterR * 0.12, ribbonFrontZ + R * 0.01);
       blush.scale.set(1, 0.7, 0.3);
       blush.userData.noOutline = true;
       face.add(blush);
