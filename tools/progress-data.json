@@ -1,55 +1,176 @@
 {
-  "title": "Food Fight Arena — Build",
+  "title": "Food Fight Arena \u2014 Build",
   "subtitle": "3D rebuild in Three.js, judged against Brawl Stars & Zooba",
   "active": {
-    "piece": "P0 · Art direction lock",
-    "detail": "Hamburger is being modelled first and becomes the art bible for the other ten. Reference stills are being cropped into clean, text-free A/B plates in parallel.",
-    "round": 1
+    "piece": "P0 \u00b7 Art direction lock + P12 \u00b7 Kitchen arena",
+    "detail": "Render core was recalibrated against real reference plates \u2014 Brawl Stars turned out not to be cel-shaded at all. Hamburger is in round 2 fixing silhouette defects; the arena is being built in parallel now that the core is locked.",
+    "round": 2
   },
   "groups": [
     {
       "name": "Foundation",
       "pieces": [
-        { "id": "F1", "name": "Project scaffold", "state": "done", "note": "Vite + TS + Three 0.180, typecheck clean" },
-        { "id": "F2", "name": "Frozen design spec", "state": "done", "note": "All 11 characters, every weapon, all balance numbers" },
-        { "id": "F3", "name": "Render core", "state": "done", "note": "Toon ramps, inverted-hull outline, 3-point rig, AgX + bloom + SMAA" },
-        { "id": "F4", "name": "Preview harness", "state": "done", "note": "Isolated, deterministic renders per piece" },
-        { "id": "F5", "name": "Screenshot pipeline", "state": "done", "note": "Headless WebGL verified producing real pixels" },
-        { "id": "F6", "name": "Blind A/B compositor", "state": "done", "note": "Shuffles ours/reference into A and B; key held separately" },
-        { "id": "F7", "name": "Reference imagery", "state": "active", "note": "30 full-res stills pulled; cropping to clean plates" },
-        { "id": "F8", "name": "Live progress page", "state": "done", "note": "This page" }
+        {
+          "id": "F1",
+          "name": "Project scaffold",
+          "state": "done",
+          "note": "Vite + TS + Three 0.180, typecheck clean"
+        },
+        {
+          "id": "F2",
+          "name": "Frozen design spec",
+          "state": "done",
+          "note": "All 11 characters, every weapon, all balance numbers"
+        },
+        {
+          "id": "F3",
+          "name": "Render core",
+          "state": "done",
+          "note": "Vinyl-toy shading, high-key rig, thin outline, saturation grade (no filmic tonemap)"
+        },
+        {
+          "id": "F4",
+          "name": "Preview harness",
+          "state": "done",
+          "note": "Isolated, deterministic renders per piece"
+        },
+        {
+          "id": "F5",
+          "name": "Screenshot pipeline",
+          "state": "done",
+          "note": "Headless WebGL verified producing real pixels"
+        },
+        {
+          "id": "F6",
+          "name": "Blind A/B compositor",
+          "state": "done",
+          "note": "Shuffles ours/reference into A and B; key held separately"
+        },
+        {
+          "id": "F7",
+          "name": "Reference imagery",
+          "state": "done",
+          "note": "21 verified-clean crops, marketing text removed so A/B stays blind"
+        },
+        {
+          "id": "F8",
+          "name": "Live progress page",
+          "state": "done",
+          "note": "This page"
+        }
       ]
     },
     {
       "name": "Characters",
       "pieces": [
-        { "id": "P1", "name": "Hamburger", "state": "active", "note": "Sets the art direction for the whole cast" },
-        { "id": "P2", "name": "Donut", "state": "queued", "note": "" },
-        { "id": "P3", "name": "Taco", "state": "queued", "note": "" },
-        { "id": "P4", "name": "Burrito", "state": "queued", "note": "" },
-        { "id": "P5", "name": "Egg", "state": "queued", "note": "" },
-        { "id": "P6", "name": "Lollipop", "state": "queued", "note": "" },
-        { "id": "P7", "name": "Pizza", "state": "queued", "note": "" },
-        { "id": "P8", "name": "Sushi", "state": "queued", "note": "" },
-        { "id": "P9", "name": "Soup", "state": "queued", "note": "" },
-        { "id": "P10", "name": "Water Bottle", "state": "queued", "note": "" },
-        { "id": "P11", "name": "Hot Dog", "state": "queued", "note": "" }
+        {
+          "id": "P1",
+          "name": "Hamburger",
+          "state": "active",
+          "note": "Round 2 \u2014 fixing stack silhouette, floating seeds, occluded mouth"
+        },
+        {
+          "id": "P2",
+          "name": "Donut",
+          "state": "queued",
+          "note": ""
+        },
+        {
+          "id": "P3",
+          "name": "Taco",
+          "state": "queued",
+          "note": ""
+        },
+        {
+          "id": "P4",
+          "name": "Burrito",
+          "state": "queued",
+          "note": ""
+        },
+        {
+          "id": "P5",
+          "name": "Egg",
+          "state": "queued",
+          "note": ""
+        },
+        {
+          "id": "P6",
+          "name": "Lollipop",
+          "state": "queued",
+          "note": ""
+        },
+        {
+          "id": "P7",
+          "name": "Pizza",
+          "state": "queued",
+          "note": ""
+        },
+        {
+          "id": "P8",
+          "name": "Sushi",
+          "state": "queued",
+          "note": ""
+        },
+        {
+          "id": "P9",
+          "name": "Soup",
+          "state": "queued",
+          "note": ""
+        },
+        {
+          "id": "P10",
+          "name": "Water Bottle",
+          "state": "queued",
+          "note": ""
+        },
+        {
+          "id": "P11",
+          "name": "Hot Dog",
+          "state": "queued",
+          "note": ""
+        }
       ]
     },
     {
       "name": "World & feel",
       "pieces": [
-        { "id": "P12", "name": "Kitchen arena", "state": "queued", "note": "Bigger, denser; hazard + cover + slow zone preserved" },
-        { "id": "P13", "name": "Ability VFX", "state": "queued", "note": "Projectiles, melee arcs, splats, trails, giant slam" },
-        { "id": "P14", "name": "Camera & juice", "state": "queued", "note": "Hit stop, shake, damage numbers" },
-        { "id": "P15", "name": "HUD & menus", "state": "queued", "note": "DOM/CSS over the canvas" },
-        { "id": "P16", "name": "Gameplay integration", "state": "queued", "note": "Frozen rules, AI, match flow" }
+        {
+          "id": "P12",
+          "name": "Kitchen arena",
+          "state": "active",
+          "note": "Round 1 \u2014 bigger, denser kitchen with lanes and chokepoints"
+        },
+        {
+          "id": "P13",
+          "name": "Ability VFX",
+          "state": "queued",
+          "note": "Projectiles, melee arcs, splats, trails, giant slam"
+        },
+        {
+          "id": "P14",
+          "name": "Camera & juice",
+          "state": "queued",
+          "note": "Hit stop, shake, damage numbers"
+        },
+        {
+          "id": "P15",
+          "name": "HUD & menus",
+          "state": "queued",
+          "note": "DOM/CSS over the canvas"
+        },
+        {
+          "id": "P16",
+          "name": "Gameplay integration",
+          "state": "queued",
+          "note": "Frozen rules, AI, match flow"
+        }
       ]
     }
   ],
   "notes": [
     "The game design is frozen. Damage, cooldowns, ranges, speeds and match structure are transcribed verbatim from the 2D prototype and must not be retuned.",
-    "The arena is the one sanctioned exception — layout and props are open, as long as a central hazard, physical cover and a slowing hazard survive.",
-    "Every piece is judged on rendered pixels in a blind A/B against real Brawl Stars and Zooba stills, never on a description of the work."
+    "The arena is the one sanctioned exception \u2014 layout and props are open, as long as a central hazard, physical cover and a slowing hazard survive.",
+    "Every piece is judged on rendered pixels in a blind A/B against real Brawl Stars and Zooba stills, never on a description of the work.",
+    "Art direction was corrected mid-flight: the brief said cel-shaded, but the reference plates show smooth-shaded high-key vinyl-toy surfaces with almost no outline. The brief says the bar wins over its own prose."
   ]
 }

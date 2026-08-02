@@ -1,10 +1,11 @@
 /**
- * Toon / cel shading kit.
+ * Stylised shading kit.
  *
-  * Target look: Brawl Stars & Zooba — smooth-shaded, hyper-saturated, high-key vinyl-
- * high colour saturation, a thin dark inverted-hull outline, glossy specular pop,
- * and chunky rounded forms. Everything in the game should be built with these
- * helpers so the whole scene reads as one coherent art style.
+ * Target look, verified against real reference plates in `reference/images/curated/`:
+ * Brawl Stars & Zooba are smooth-shaded, hyper-saturated and high-key — moulded vinyl
+ * toys with soft specular highlights, NOT banded cel shading, and with only a whisper
+ * of a dark outline. Chunky rounded forms throughout. Everything in the game is built
+ * with these helpers so the whole scene reads as one coherent art style.
  */
 
 import * as THREE from 'three';

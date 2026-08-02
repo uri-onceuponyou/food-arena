@@ -105,7 +105,7 @@
     overflow: hidden; border: 1px solid var(--line);
   }
   .meter__fill {
-    height: 100%; width: 29%;
+    height: 100%; width: 33%;
     background: linear-gradient(90deg, var(--lettuce), var(--accent));
     border-radius: 99px;
   }
@@ -226,16 +226,16 @@
 
   <div class="meter">
     <div class="meter__head">
-      <span>7 of 24 pieces approved</span>
-      <span>29%</span>
+      <span>8 of 24 pieces approved</span>
+      <span>33%</span>
     </div>
     <div class="meter__track"><div class="meter__fill"></div></div>
   </div>
 
   <div class="now">
-    <span class="now__label"><span class="pulse"></span>Now building · round 1</span>
-    <span class="now__piece">P0 · Art direction lock</span>
-    <p class="now__detail">Hamburger is being modelled first and becomes the art bible for the other ten. Reference stills are being cropped into clean, text-free A/B plates in parallel.</p>
+    <span class="now__label"><span class="pulse"></span>Now building · round 2</span>
+    <span class="now__piece">P0 · Art direction lock + P12 · Kitchen arena</span>
+    <p class="now__detail">Render core was recalibrated against real reference plates — Brawl Stars turned out not to be cel-shaded at all. Hamburger is in round 2 fixing silhouette defects; the arena is being built in parallel now that the core is locked.</p>
   </div>
 
   <section>
@@ -261,7 +261,7 @@
       <span class="piece__id">F3</span>
       <span class="piece__body">
         <span class="piece__name">Render core</span>
-        <span class="piece__note">Toon ramps, inverted-hull outline, 3-point rig, AgX + bloom + SMAA</span>
+        <span class="piece__note">Vinyl-toy shading, high-key rig, thin outline, saturation grade (no filmic tonemap)</span>
       </span>
       <span class="chip chip--done">approved</span>
     </li>
@@ -289,13 +289,13 @@
       </span>
       <span class="chip chip--done">approved</span>
     </li>
-      <li class="piece piece--active">
+      <li class="piece piece--done">
       <span class="piece__id">F7</span>
       <span class="piece__body">
         <span class="piece__name">Reference imagery</span>
-        <span class="piece__note">30 full-res stills pulled; cropping to clean plates</span>
+        <span class="piece__note">21 verified-clean crops, marketing text removed so A/B stays blind</span>
       </span>
-      <span class="chip chip--active">building</span>
+      <span class="chip chip--done">approved</span>
     </li>
       <li class="piece piece--done">
       <span class="piece__id">F8</span>
@@ -314,7 +314,7 @@
       <span class="piece__id">P1</span>
       <span class="piece__body">
         <span class="piece__name">Hamburger</span>
-        <span class="piece__note">Sets the art direction for the whole cast</span>
+        <span class="piece__note">Round 2 — fixing stack silhouette, floating seeds, occluded mouth</span>
       </span>
       <span class="chip chip--active">building</span>
     </li>
@@ -403,13 +403,13 @@
   <section>
     <h2>World &amp; feel</h2>
     <ul class="pieces">
-      <li class="piece piece--queued">
+      <li class="piece piece--active">
       <span class="piece__id">P12</span>
       <span class="piece__body">
         <span class="piece__name">Kitchen arena</span>
-        <span class="piece__note">Bigger, denser; hazard + cover + slow zone preserved</span>
+        <span class="piece__note">Round 1 — bigger, denser kitchen with lanes and chokepoints</span>
       </span>
-      <span class="chip chip--queued">queued</span>
+      <span class="chip chip--active">building</span>
     </li>
       <li class="piece piece--queued">
       <span class="piece__id">P13</span>
@@ -449,9 +449,17 @@
   <section>
     <h2>Commits</h2>
     <ol class="log"><li class="commit">
+        <span class="commit__hash">2ba74c9</span>
+        <span class="commit__subject">P0 round 1: art direction corrected against real reference; Hamburger v1</span>
+        <span class="commit__when">2 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">c3ecdb4</span>
+        <span class="commit__subject">F7/F8: reference imagery pipeline + live progress page</span>
+        <span class="commit__when">22 minutes ago</span>
+      </li><li class="commit">
         <span class="commit__hash">ae299dd</span>
         <span class="commit__subject">foundation: render core, preview harness, screenshot + blind A/B pipeline</span>
-        <span class="commit__when">5 minutes ago</span>
+        <span class="commit__when">28 minutes ago</span>
       </li></ol>
   </section>
 
@@ -461,6 +469,7 @@
       <li>The game design is frozen. Damage, cooldowns, ranges, speeds and match structure are transcribed verbatim from the 2D prototype and must not be retuned.</li>
       <li>The arena is the one sanctioned exception — layout and props are open, as long as a central hazard, physical cover and a slowing hazard survive.</li>
       <li>Every piece is judged on rendered pixels in a blind A/B against real Brawl Stars and Zooba stills, never on a description of the work.</li>
+      <li>Art direction was corrected mid-flight: the brief said cel-shaded, but the reference plates show smooth-shaded high-key vinyl-toy surfaces with almost no outline. The brief says the bar wins over its own prose.</li>
     </ul>
   </section>
 
