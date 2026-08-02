@@ -63,34 +63,79 @@ export class SushiCharacter extends BaseCharacter {
     const riceMat = toonMat({ color: RICE, roughness: 0.65 });        // matte sticky rice
     const noriMat = glossyMat({ color: NORI, roughness: 0.3 });       // glossy seaweed sheen
     const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });   // wet fish
-    const salmonDarkMat = glossyMat({ color: SALMON_DARK, roughness: 0.22 });
+    const salmonDarkMat = toonMat({ color: SALMON_DARK, roughness: 0.3 });
 
-    // ── Rice mound ───────────────────────────────────────────────────────────
-    // A capsule (constant-radius cylindrical wall + hemispherical caps) rather than a
-    // sphere — its cylindrical section has a known, constant radius, which is what
-    // lets every decal below (nori band, face, grains) be placed by exact algebra
-    // against the true surface instead of a guessed offset (the float/bury failure
-    // mode called out in the brief).
-    const riceR = R * 0.58;
-    const riceLen = R * 0.79;
-    const capCenterY = riceLen / 2; // centre of the top hemisphere cap, in head-local space
+    // ── Rice mound + salmon topping — one shared profile, two lathes ─────────
+    // Round 1 built the salmon as a concentric sphere over the rice's own dome: at
+    // any radius bigger than the rice, a matching ROUNDED cap continues the exact
+    // same curvature as the ball beneath it, so the two fused into one bigger sphere
+    // with no visible seam — it read as an orange hard hat, not a draped fish slice,
+    // and the thin "streak" capsules stuck out radially near the pole like hair
+    // spikes (which also blew the measured height past the 2.1 m budget).
+    //
+    // Fixed by giving rice and salmon DIFFERENT silhouettes that share one exact
+    // vertex at the seam: `PROFILE` is a single (heightFraction, radiusFraction)
+    // curve, split at `SEAM_H`. The rice half is rounded (classic nigiri mound,
+    // constant-radius wall through the nori band); the salmon half is flatter with a
+    // small overhanging lip, the way a real fish slice sits proud of the rice rather
+    // than continuing its curve. Because both lathes are built from literally the
+    // same point at the seam, there is no gap or float to solve for — it's exact by
+    // construction, same technique as the bottom-bun/patty stack in hamburger.ts.
+    const PROFILE: Array<[h: number, r: number]> = [
+      [0.00, 0.00], [0.02, 0.66], [0.08, 0.92], [0.14, 1.00],
+      [0.40, 1.00], [0.63, 0.80], // ← SEAM_H
+      [0.75, 0.94], [0.90, 0.68], [1.00, 0.00],
+    ];
+    const SEAM_H = 0.63;
+    const SEAM_IDX = PROFILE.findIndex(([h]) => h === SEAM_H);
+    const SCALE_R = R * 0.58;
+    const SCALE_H = R * 1.65;
 
-    const rice = new THREE.Mesh(new THREE.CapsuleGeometry(riceR, riceLen, 10, 28), riceMat);
+    /** Linear-interpolated radius FRACTION (0-1) at a given height fraction. */
+    const radiusFracAt = (hFrac: number): number => {
+      for (let i = 0; i < PROFILE.length - 1; i++) {
+        const [h0, r0] = PROFILE[i];
+        const [h1, r1] = PROFILE[i + 1];
+        if (hFrac >= h0 && hFrac <= h1) {
+          const t = h1 > h0 ? (hFrac - h0) / (h1 - h0) : 0;
+          return r0 + (r1 - r0) * t;
+        }
+      }
+      return PROFILE[PROFILE.length - 1][1];
+    };
+    /** Actual local Y (metres) for a height fraction — content spans ±SCALE_H/2. */
+    const yAt = (hFrac: number): number => hFrac * SCALE_H - SCALE_H / 2;
+    /** Actual local radius (metres) at a height fraction. */
+    const rAt = (hFrac: number): number => radiusFracAt(hFrac) * SCALE_R;
+    /** Exact front-surface Z for a given local X at a height fraction (this is a
+     * lathe, so any horizontal slice is a perfect circle of radius rAt(hFrac)). */
+    const zAt = (x: number, hFrac: number): number => Math.sqrt(Math.max(0, rAt(hFrac) ** 2 - x * x));
+
+    const latheGeo = (points: Array<[number, number]>) =>
+      new THREE.LatheGeometry(points.map(([h, r]) => new THREE.Vector2(r * SCALE_R, yAt(h))), 32);
+
+    const rice = new THREE.Mesh(latheGeo(PROFILE.slice(0, SEAM_IDX + 1)), riceMat);
     rice.name = 'sushi_rice';
     rice.castShadow = true;
     rice.receiveShadow = true;
     head.add(rice);
 
+    const salmon = new THREE.Mesh(latheGeo(PROFILE.slice(SEAM_IDX)), salmonMat);
+    salmon.name = 'sushi_salmon';
+    salmon.castShadow = true;
+    salmon.receiveShadow = true;
+    head.add(salmon);
+
     // ── Nori band ────────────────────────────────────────────────────────────
-    // Wrapped around the lower-middle of the cylindrical wall, where the rice radius
-    // is exactly constant (riceR) — a slightly larger cylinder (1.05x) is therefore
-    // guaranteed proud of the rice everywhere along the band, never floating or
-    // buried. This near-black band against warm-white rice is THE landmark.
-    const noriTop = -R * 0.04;
-    const noriBottom = -R * 0.38;
-    const noriH = noriTop - noriBottom;
+    // Wrapped around the rice's constant-radius wall (h 0.14–0.40, where PROFILE
+    // holds flat at r=1.00) — a slightly larger cylinder (1.03x) is therefore
+    // guaranteed proud of the rice everywhere along the band. This near-black band
+    // against warm-white rice is THE landmark.
+    const noriTop = yAt(0.40);
+    const noriBottom = yAt(0.14);
+    const noriRadius = SCALE_R * 1.03;
     const nori = new THREE.Mesh(
-      new THREE.CylinderGeometry(riceR * 1.05, riceR * 1.05, noriH, 28, 1, true),
+      new THREE.CylinderGeometry(noriRadius, noriRadius, noriTop - noriBottom, 32, 1, true),
       noriMat
     );
     nori.name = 'sushi_nori_band';
@@ -98,10 +143,8 @@ export class SushiCharacter extends BaseCharacter {
     nori.castShadow = true;
     nori.receiveShadow = true;
     head.add(nori);
-    // Cap the band's open top/bottom rims with thin discs so the hollow cylinder
-    // interior never peeks through at grazing angles.
     for (const y of [noriTop, noriBottom]) {
-      const cap = new THREE.Mesh(new THREE.CircleGeometry(riceR * 1.05, 28), noriMat);
+      const cap = new THREE.Mesh(new THREE.CircleGeometry(noriRadius, 32), noriMat);
       cap.name = 'sushi_nori_cap__no_outline';
       cap.userData.noOutline = true;
       cap.rotation.x = -Math.PI / 2;
@@ -117,79 +160,62 @@ export class SushiCharacter extends BaseCharacter {
     );
     clasp.name = 'sushi_clasp';
     clasp.rotation.x = Math.PI / 2;
-    clasp.position.set(0, (noriTop + noriBottom) / 2, riceR * 1.05 + R * 0.01);
+    clasp.position.set(0, (noriTop + noriBottom) / 2, noriRadius + R * 0.01);
     clasp.castShadow = true;
     head.add(clasp);
 
-    // ── Salmon topping ───────────────────────────────────────────────────────
-    // A spherical cap concentric with the rice's own top-hemisphere centre, at a
-    // slightly larger radius (1.06x) — the same "two concentric spheres" guarantee
-    // used for the nori band, extended just past the equator (thetaLength ~97°) so it
-    // drapes down over the rice's shoulders like a real fish slice. Checked against
-    // the cylindrical wall below the equator: at the bottom edge the cap's horizontal
-    // radius (riceR*1.06*sin97°) still exceeds riceR, so it stays proud of the rice
-    // wall the whole way down rather than curving back inside it.
-    const salmonR = riceR * 1.06;
-    const salmonThetaLen = THREE.MathUtils.degToRad(97);
-    const salmon = new THREE.Mesh(
-      new THREE.SphereGeometry(salmonR, 32, 20, 0, Math.PI * 2, 0, salmonThetaLen),
-      salmonMat
-    );
-    salmon.name = 'sushi_salmon';
-    salmon.position.y = capCenterY;
-    salmon.castShadow = true;
-    salmon.receiveShadow = true;
-    head.add(salmon);
-
-    // Fish striations — thin darker streaks running down the salmon, following the
-    // exact same sphere (concentric, marginally larger radius) so they sit flush
-    // against the salmon's own surface rather than floating off it.
-    const streakR = salmonR * 1.01;
-    for (let i = 0; i < 5; i++) {
-      const phi = -0.9 + i * 0.42;
-      const streak = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.014, R * 0.34, 3, 6), salmonDarkMat);
-      streak.name = 'sushi_streak';
-      const theta = 0.18 + (i % 2) * 0.1;
-      const dir = new THREE.Vector3(Math.sin(theta) * Math.sin(phi), Math.cos(theta), Math.sin(theta) * Math.cos(phi)).normalize();
-      streak.position.copy(dir).multiplyScalar(streakR).add(new THREE.Vector3(0, capCenterY, 0));
-      streak.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-      streak.rotateX(0.25);
-      streak.userData.noOutline = true;
-      head.add(streak);
+    // Fish striations — short, flush stripes on the salmon's own surface (built from
+    // the same zAt() surface equation, embedded a hair proud rather than sticking out
+    // radially — round 1's radial capsules read as hair spikes and are exactly the
+    // mistake this avoids).
+    const stripeHs: Array<[number, number]> = [[-0.28, 0.68], [0.05, 0.72], [0.32, 0.69], [-0.05, 0.82]];
+    for (const [sx, hMid] of stripeHs) {
+      const h0 = hMid - 0.05, h1 = hMid + 0.05;
+      const x = sx * SCALE_R * 0.7;
+      const p0 = new THREE.Vector3(x, yAt(h0), zAt(x, h0));
+      const p1 = new THREE.Vector3(x, yAt(h1), zAt(x, h1));
+      const mid = p0.clone().add(p1).multiplyScalar(0.5);
+      const outward = new THREE.Vector3(x, 0, (p0.z + p1.z) / 2).normalize();
+      mid.addScaledVector(outward, R * 0.006);
+      const dir = p1.clone().sub(p0).normalize();
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(R * 0.02, p0.distanceTo(p1) * 1.1, R * 0.012), salmonDarkMat);
+      stripe.position.copy(mid);
+      stripe.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      stripe.userData.noOutline = true;
+      head.add(stripe);
     }
 
-    // A wet glisten on the salmon — cheap, sells "wet" against the matte rice.
-    const glisten = new THREE.Mesh(new THREE.SphereGeometry(R * 0.05, 10, 8), flatMat('#ffffff', { transparent: true, opacity: 0.55 }));
-    glisten.position.set(-R * 0.18, capCenterY + salmonR * 0.55, salmonR * 0.72);
-    glisten.userData.noOutline = true;
-    head.add(glisten);
+    // A wet glisten on the salmon's lip bulge — cheap, sells "wet" against the matte rice.
+    {
+      const gx = -R * 0.16, gh = 0.73;
+      const glisten = new THREE.Mesh(new THREE.SphereGeometry(R * 0.045, 10, 8), flatMat('#ffffff', { transparent: true, opacity: 0.55 }));
+      glisten.position.set(gx, yAt(gh), zAt(gx, gh) + R * 0.01);
+      glisten.userData.noOutline = true;
+      head.add(glisten);
+    }
 
     // ── Rice grains ──────────────────────────────────────────────────────────
-    // Small stretched capsules seated exactly on the cylindrical rice wall (surface
-    // equation x²+z²=riceR² is exact there, so z is solved directly rather than
-    // guessed), kept on the sides/back so they never compete with the face.
+    // Small stretched capsules seated exactly on the rice's surface via zAt(), kept
+    // on the sides/back so they never compete with the face.
     const grainMat = toonMat({ color: RICE_SHADE, roughness: 0.7 });
-    const grainSpots: Array<[number, number]> = [
-      [0.44, -0.30], [-0.46, -0.28], [0.30, -0.08], [-0.32, -0.10],
-      [0.50, 0.05], [-0.50, 0.02], [0.20, -0.36], [-0.18, -0.35],
+    const grainSpots: Array<[number, number, 1 | -1]> = [
+      [0.30, 0.20, -1], [-0.34, 0.18, -1], [0.20, 0.28, -1], [-0.22, 0.30, -1],
+      [0.36, 0.08, -1], [-0.38, 0.10, -1], [0.10, 0.04, -1], [-0.14, 0.06, -1],
     ];
-    for (const [gx, gy] of grainSpots) {
-      const x = gx * riceR;
-      const y = gy * R;
-      const zSq = riceR * riceR - x * x;
-      if (zSq <= 0) continue;
-      const z = -Math.sqrt(zSq) - R * 0.005; // back/side hemisphere, embedded a hair for a snug seat
-      const grain = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.035, R * 0.09, 3, 6), grainMat);
-      grain.position.set(x, y, z);
+    for (const [gx, gh, side] of grainSpots) {
+      const x = gx * SCALE_R;
+      const z = side * (zAt(x, gh) + R * 0.006);
+      const grain = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.032, R * 0.085, 3, 6), grainMat);
+      grain.position.set(x, yAt(gh), z);
       const outNormal = new THREE.Vector3(x, 0, z).normalize();
       grain.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), outNormal);
-      grain.rotateX(Math.PI / 2 + (Math.random() - 0.5) * 0.6);
+      grain.rotateX(Math.PI / 2);
       grain.castShadow = true;
       head.add(grain);
       this.riceGrains.push(grain);
     }
 
-    this.buildFace(R, riceR);
+    this.buildFace(R, yAt, zAt);
     this.dressTorsoAsSushi();
 
     outlineGroup(this.root);
@@ -198,11 +224,11 @@ export class SushiCharacter extends BaseCharacter {
   }
 
   /**
-   * Wide, slightly-startled eyes and puckered "o" lips — placed on the front of the
-   * rice mound's cylindrical wall, between the nori band and the salmon drape, where
-   * the surface radius is exactly `riceR` (solved directly, not approximated).
+   * Wide, slightly-startled eyes and puckered "o" lips — placed in the rice's own
+   * face zone (between the nori band and the salmon seam), via `zAt()`, the exact
+   * surface equation for this lathe (every horizontal slice is a perfect circle).
    */
-  private buildFace(R: number, riceR: number): void {
+  private buildFace(R: number, yAt: (h: number) => number, zAt: (x: number, h: number) => number): void {
     const face = this.rig.joints.face;
     // `face` carries the rig's generic forward offset tuned for a plain sphere; this
     // model's surface is authored directly on `head` instead, in exact local coords,
@@ -211,13 +237,14 @@ export class SushiCharacter extends BaseCharacter {
     const head = this.rig.joints.head;
     const ink = PALETTE.ink;
 
-    const eyeY = R * 0.20;
+    const eyeH = 0.54;
+    const eyeY = yAt(eyeH);
     for (const sx of [-1, 1]) {
-      const ex = sx * R * 0.27;
-      const ez = Math.sqrt(Math.max(0, riceR * riceR - ex * ex));
+      const ex = sx * R * 0.24;
+      const ez = zAt(ex, eyeH);
 
       // Sclera — wide white eye, the "slightly startled" read.
-      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.165, 18, 14), toonMat({ color: '#FFFFFF', roughness: 0.25 }));
+      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.155, 18, 14), toonMat({ color: '#FFFFFF', roughness: 0.25 }));
       white.position.set(ex, eyeY, ez + R * 0.02);
       white.scale.set(1, 1.08, 0.55);
       white.castShadow = true;
@@ -225,33 +252,34 @@ export class SushiCharacter extends BaseCharacter {
 
       // Pupil pushed toward the top of the sclera — white shows below, the classic
       // "wide-eyed" surprised cue.
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.088, 16, 12), toonMat({ color: ink, roughness: 0.25 }));
-      pupil.position.set(ex, eyeY + R * 0.035, ez + R * 0.06);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.082, 16, 12), toonMat({ color: ink, roughness: 0.25 }));
+      pupil.position.set(ex, eyeY + R * 0.03, ez + R * 0.06);
       pupil.scale.set(1, 1, 0.6);
       pupil.castShadow = true;
       head.add(pupil);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.032, 8, 8), flatMat('#ffffff'));
-      glint.position.set(ex - R * 0.03, eyeY + R * 0.06, ez + R * 0.10);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.03, 8, 8), flatMat('#ffffff'));
+      glint.position.set(ex - R * 0.028, eyeY + R * 0.055, ez + R * 0.095);
       glint.userData.noOutline = true;
       head.add(glint);
     }
 
     // Puckered "o" lips — a plump little ring (tube nearly as thick as its own
     // radius, for a pursed-lip read rather than a thin circle outline).
-    const mouthY = -R * 0.005;
-    const mouthZ = riceR + R * 0.01;
+    const mouthH = 0.46;
+    const mouthY = yAt(mouthH);
+    const mouthZ = zAt(0, mouthH) + R * 0.01;
     const lipMat = toonMat({ color: LIP, roughness: 0.4 });
-    const lips = new THREE.Mesh(new THREE.TorusGeometry(R * 0.052, R * 0.03, 10, 20), lipMat);
+    const lips = new THREE.Mesh(new THREE.TorusGeometry(R * 0.05, R * 0.028, 10, 20), lipMat);
     lips.name = 'sushi_lips';
     lips.position.set(0, mouthY, mouthZ);
     lips.castShadow = true;
     head.add(lips);
     // A dark inner disc so the "o" reads as an open pucker, not a solid pink bead.
-    const lipHole = new THREE.Mesh(new THREE.CircleGeometry(R * 0.026, 12), toonMat({ color: '#7A2E38', roughness: 0.5 }));
+    const lipHole = new THREE.Mesh(new THREE.CircleGeometry(R * 0.024, 12), toonMat({ color: '#7A2E38', roughness: 0.5 }));
     lipHole.name = 'sushi_lip_hole__no_outline';
     lipHole.userData.noOutline = true;
-    lipHole.position.set(0, mouthY, mouthZ + R * 0.005);
+    lipHole.position.set(0, mouthY, mouthZ + R * 0.004);
     head.add(lipHole);
   }
 

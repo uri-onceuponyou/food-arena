@@ -30,7 +30,7 @@ import { ChibiRig } from './rig';
 const TORTILLA = '#F5EAD6';        // pale flour wrap — the dominant, matte mass
 const TORTILLA_SHADE = '#E4CFA0';  // toasted/shadow tone — rim, torso wrap-continuation
 const WRAP_BAND = '#E0562B';       // paper wrapper band + hands — vivid contrast colour
-const FOIL = '#D8DEE2';            // peeled foil — cool, metallic
+const FOIL = '#E7EDEF';            // peeled foil — cool, bright, metallic
 const BOOT = '#7A5230';            // dark toasted-tortilla boots, grounds the pale body
 const RICE = PALETTE.cream;        // '#FFF3DE' — filling mound base
 const MEAT = PALETTE.patty;
@@ -315,14 +315,15 @@ export class BurritoCharacter extends BaseCharacter {
     this.rig.joints.torso.add(collar);
 
     // Peeled foil flaps below the collar — flared outward/down, alternating tilt so
-    // they read as torn foil rather than a uniform skirt. Enlarged and tilted less
-    // steeply than round 1 (which pointed the flaps almost straight down, presenting
-    // their narrow top edge to the front camera instead of their broad face) so they
-    // flare OUTWARD past the hip silhouette where the front view can actually see them.
-    const flapCount = 5;
+    // they read as torn foil rather than a uniform skirt. Round 2 defect: evenly
+    // spaced around the full 360 degrees, only one ever pointed anywhere near the
+    // camera at a time, so the front view (the primary read) showed barely a sliver.
+    // +X/+Z here maps to world a=0 -> +X (side), a=90 -> +Z (front) — so the angles
+    // below are deliberately clustered around 90 deg to bias flaps toward the front
+    // hemisphere, with two left at the back for coverage from behind.
+    const flapAngles = [20, 55, 90, 125, 160, 245, 300].map((d) => THREE.MathUtils.degToRad(d));
     const flapGeo = new THREE.ConeGeometry(torsoMaxX * 0.42, torsoMaxX * 0.85, 3, 1, true);
-    for (let i = 0; i < flapCount; i++) {
-      const a = (i / flapCount) * Math.PI * 2 + 0.3;
+    flapAngles.forEach((a, i) => {
       const pivot = new THREE.Group();
       pivot.position.set(Math.cos(a) * torsoMaxX * 0.78, torsoBaseY, Math.sin(a) * torsoMaxX * 0.78);
       pivot.rotation.y = -a;
@@ -335,7 +336,7 @@ export class BurritoCharacter extends BaseCharacter {
       flap.castShadow = true;
       flap.receiveShadow = true;
       pivot.add(flap);
-    }
+    });
   }
 
   protected onUpdate(ctx: AnimContext): void {

@@ -75,7 +75,7 @@ export class LollipopCharacter extends BaseCharacter {
         torso: STICK,
         limbRoughness: 0.75,
       },
-      proportions: { headFraction: 0.42 },
+      proportions: { headFraction: 0.4 },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -93,8 +93,8 @@ export class LollipopCharacter extends BaseCharacter {
     // reached all the way down to Y=-0.37R — well past the stick's top — so the disc
     // visually swallowed most of the stick from the front. Shrunk and raised so the
     // disc's bottom edge clears the stick with room to spare.
-    const discCenterY = R * 0.68;
-    const discOuterR = R * 0.78;
+    const discCenterY = R * 0.66;
+    const discOuterR = R * 0.74;
     const discDepth = R * 0.26; // real thickness — a paper-thin disc would vanish to a
                                 // blade edge-on (idle_135/210), same failure Taco solved
     const discBottomY = discCenterY - discOuterR;
@@ -203,7 +203,7 @@ export class LollipopCharacter extends BaseCharacter {
 
     // ── Face: eyes on the stick, mouth on the candy ───────────────────────────
     this.rig.joints.face.position.set(0, 0, 0);
-    this.buildFace(R, stickR, discCenterY, discOuterR, discBottomY, discDepth, ribbonFrontZ, stickTopY, stickBottomY);
+    this.buildFace(R, stickR, discCenterY, discOuterR, discBottomY, ribbonFrontZ, stickBottomY);
 
     // ── Torso: candy-wrapper costume, contrasting the pale limbs ──────────────
     this.dressTorso(R);
@@ -225,9 +225,7 @@ export class LollipopCharacter extends BaseCharacter {
     discCenterY: number,
     discOuterR: number,
     discBottomY: number,
-    discDepth: number,
     ribbonFrontZ: number,
-    stickTopY: number,
     stickBottomY: number
   ): void {
     const face = this.rig.joints.face;
@@ -239,34 +237,28 @@ export class LollipopCharacter extends BaseCharacter {
     // half is embedded inside the disc.
     const visibleStickTop = discBottomY - R * 0.05;
     const stickFaceY = stickBottomY + (visibleStickTop - stickBottomY) * 0.5;
+    // Round 2 defect: eyes sat close together (+-0.52*stickR, radius 0.42*stickR) right
+    // where the disc's shadow falls, and read as a single squinting smudge. Pushed
+    // apart and enlarged — the stick was widened specifically to give this room.
     for (const sx of [-1, 1]) {
-      const ex = sx * stickR * 0.52;
+      const ex = sx * stickR * 0.68;
       const ez = Math.sqrt(Math.max(0, stickR * stickR - ex * ex)) * 0.96;
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.42, 14, 12), eyeMat);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.5, 14, 12), eyeMat);
       eye.position.set(ex, stickFaceY, ez);
-      eye.scale.set(1, 1.2, 0.55);
+      eye.scale.set(1, 1.15, 0.55);
       eye.castShadow = true;
       face.add(eye);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.13, 8, 8), flatMat('#ffffff'));
-      glint.position.set(ex - stickR * 0.11, stickFaceY + stickR * 0.15, ez + stickR * 0.1);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.15, 8, 8), flatMat('#ffffff'));
+      glint.position.set(ex - stickR * 0.13, stickFaceY + stickR * 0.17, ez + stickR * 0.12);
       glint.userData.noOutline = true;
       face.add(glint);
     }
-    // One raised brow, echoing the confident "about to swing" personality without
-    // duplicating Taco's identical trick verbatim — here it's built on the stick,
-    // above the eyes, rather than on the food mass itself.
-    const brow = new THREE.Mesh(
-      new THREE.CapsuleGeometry(stickR * 0.09, stickR * 0.5, 4, 8),
-      toonMat({ color: ink, roughness: 0.5 })
-    );
-    brow.position.set(-stickR * 0.52, stickFaceY + stickR * 0.62, stickR * 0.9);
-    brow.rotation.z = Math.PI / 2 + 0.3;
-    brow.castShadow = true;
-    face.add(brow);
 
-    // Mouth: a closed, sweet smile on the candy's front face.
-    const mouthY = discCenterY - discOuterR * 0.42;
+    // Mouth: a closed, sweet smile on the candy's front face. Pulled further down from
+    // the disc centre than round 2 (0.42 -> 0.52) so it sits clear of the spiral's
+    // innermost curl instead of visually merging with it.
+    const mouthY = discCenterY - discOuterR * 0.52;
     const mouth = new THREE.Mesh(
       new THREE.TorusGeometry(R * 0.15, R * 0.04, 8, 20, Math.PI * 0.85),
       toonMat({ color: ink, roughness: 0.3 })
