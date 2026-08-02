@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Dependencies / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Third-party reference imagery (Brawl Stars / Zooba screenshots).
+# Used locally as a quality bar for critics only — never redistributed.
+reference/images/
+
+# Generated renders and critic comparison sheets
+shots/

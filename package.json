@@ -1,0 +1,26 @@
+{
+  "name": "food-fight-arena",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Food Fight Arena — real-time 3D brawler in Three.js",
+  "scripts": {
+    "dev": "vite --port 5173 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "shot": "node tools/shoot.mjs",
+    "compare": "node tools/compare.mjs"
+  },
+  "dependencies": {
+    "three": "^0.180.0",
+    "postprocessing": "^6.37.8"
+  },
+  "devDependencies": {
+    "@types/three": "^0.180.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "playwright": "^1.50.1",
+    "sharp": "^0.34.2"
+  }
+}
