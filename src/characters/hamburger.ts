@@ -134,14 +134,19 @@ function faceArc(curveRadius: number, tube: number, arcRad: number): THREE.Buffe
 
 const BOTTOM_BUN = { r: 0.6, h: 0.5, edge: 0.17, yTop: 0.5 };
 const PATTY = { r: 0.56, h: 0.34, edge: 0.06, yTop: 0.84 };
-const CHEESE = { r: 0.62, h: 0.07, edge: 0.02, yBottom: 0.84, yTop: 0.91 };
-const TOMATO = { r: 0.6, h: 0.21, edge: 0.06, yBottom: 0.91, yTop: 1.12 };
+// Cheese was the round-3 defect: a 0.07m puck read as a thin yellow LINE, not
+// a melted slab. Given real thickness (0.16m) and a radius that overhangs
+// the patty/tomato beneath it, so it drapes rather than just tints a seam.
+const CHEESE = { r: 0.68, h: 0.16, edge: 0.05, yBottom: 0.84, yTop: 1.0 };
+const TOMATO = { r: 0.6, h: 0.21, edge: 0.06, yBottom: 1.0, yTop: 1.21 };
 // Lettuce is split into a low solid base disc (mostly hidden, structural only)
 // and a taller ruffled frill ring near the TOP of the band, so it reads as a
 // leaf collar peeking from under the (now much smaller) crown, not a wafer.
-const LETTUCE = { r: 0.5, baseH: 0.11, frillR: 0.68, h: 0.23, edge: 0.035, yBottom: 1.12, yTop: 1.35 };
-const CROWN = { baseR: 0.62, h: 0.72, yBase: 1.35 };
-// apex ≈ 1.35 + 0.72 = 2.07 m, ≈ CHARACTER_HEIGHT (2.1 m).
+const LETTUCE = { r: 0.5, baseH: 0.11, frillR: 0.68, h: 0.23, edge: 0.035, yBottom: 1.21, yTop: 1.44 };
+// Crown height trimmed down by the same amount cheese grew, so the apex
+// still lands at CHARACTER_HEIGHT instead of pushing the model taller.
+const CROWN = { baseR: 0.62, h: 0.63, yBase: 1.44 };
+// apex ≈ 1.44 + 0.63 = 2.07 m, ≈ CHARACTER_HEIGHT (2.1 m).
 
 export class HamburgerCharacter extends BaseCharacter {
   private topBun: THREE.Group;
@@ -178,7 +183,6 @@ export class HamburgerCharacter extends BaseCharacter {
     const seedMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER(), roughness: 0.75 }); // dry toasted sesame
     const armMat = toonMat({ color: PALETTE.bun, ramp: RAMP_CHARACTER(), roughness: 0.85 }); // same bread stock as the buns
     const mittMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER(), roughness: 0.68 }); // soft dough, a touch smoother than crust
-    const inkMat = flatMat(PALETTE.ink);
     const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.45 });
     const glowMat = flatMat(PALETTE.mustard, { transparent: true, opacity: 0 });
     // Spatula — the held prop (see buildArm). Deliberately NOT a food
@@ -209,8 +213,8 @@ export class HamburgerCharacter extends BaseCharacter {
     // ── Feet — asymmetric contrapposto stance, embedded into the bottom bun's
     // lower silhouette (rather than floating below it) via a short ankle nub
     // plus a pivot pulled inside the bun's footprint. ──────────────────────
-    this.footL = this.buildFoot(pattyDarkMat, -1, { x: -0.32, y: 0.07, z: 0.44, rotY: -0.42 });
-    this.footR = this.buildFoot(pattyDarkMat, 1, { x: 0.2, y: 0.1, z: 0.3, rotY: 0.12 });
+    this.footL = this.buildFoot(pattyDarkMat, -1, { x: -0.34, y: 0.0, z: 0.36, rotY: -0.32 });
+    this.footR = this.buildFoot(pattyDarkMat, 1, { x: 0.33, y: 0.0, z: 0.32, rotY: 0.24 });
     this.body.add(this.footL, this.footR);
 
     // ── Patty ─────────────────────────────────────────────────────────────────
@@ -232,7 +236,10 @@ export class HamburgerCharacter extends BaseCharacter {
       this.body.add(mark);
     }
 
-    // ── Cheese — thin glossy drape with a few melt drips at the rim ─────────
+    // ── Cheese — a real melted slab with body, overhanging the patty/tomato
+    // edge so it drapes rather than reading as a coloured seam line (round-3
+    // defect: 0.07m tall was invisible at gameplay scale). Bigger, denser,
+    // longer drips at the rim sell the "melting over the edge" read. ────────
     const cheese = new THREE.Mesh(roundedPuck(CHEESE.r, CHEESE.h, CHEESE.edge), cheeseMat);
     cheese.name = 'cheese';
     cheese.position.y = CHEESE.yBottom;
@@ -241,12 +248,14 @@ export class HamburgerCharacter extends BaseCharacter {
     this.body.add(cheese);
     // Kept off dead-centre-front/back (theta ~1.57/4.71) so they read as melt
     // dripping down the sides rather than fangs hanging under the face.
-    const dripAngles = [0.7, 2.44, 3.84, 5.58];
-    for (const a of dripAngles) {
-      const drip = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), cheeseMat);
+    const dripAngles = [0.5, 1.15, 2.2, 2.85, 3.6, 4.25, 5.3, 5.95];
+    for (let i = 0; i < dripAngles.length; i++) {
+      const a = dripAngles[i];
+      const len = 0.09 + (i % 3) * 0.03;
+      const drip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), cheeseMat);
       drip.name = 'cheese_drip';
-      drip.position.set(Math.cos(a) * CHEESE.r * 0.96, CHEESE.yBottom - 0.05, Math.sin(a) * CHEESE.r * 0.96);
-      drip.scale.set(1, 1.6, 1);
+      drip.position.set(Math.cos(a) * CHEESE.r * 0.97, CHEESE.yBottom - len * 0.7, Math.sin(a) * CHEESE.r * 0.97);
+      drip.scale.set(1, len / 0.075, 1);
       drip.castShadow = true;
       drip.receiveShadow = true;
       this.body.add(drip);
@@ -358,33 +367,58 @@ export class HamburgerCharacter extends BaseCharacter {
 
     // Face — closed happy eyes + small smile, kept as the fixed personality
     // identity from rules.ts, but made SPECIFIC rather than a neutral sleepy
-    // default (critic defect #4): one eyebrow cocked higher than the other,
-    // eyes slightly unequal in squint, and the smile tilted into a one-sided
-    // smirk. Placed high enough on the crown's front (hFrac 0.26-0.46) that
-    // the mouth clears the lettuce collar below with real margin, and each
-    // decal is oriented flush to the crown's true surface normal (via
-    // `addCrownDecal`) instead of a flat guessed offset.
+    // default: one eyebrow cocked higher than the other, eyes slightly
+    // unequal in squint, and the smile tilted into a one-sided smirk.
+    //
+    // Round-3 regression fix: brows and eyes previously each called
+    // `addCrownDecal` independently at DIFFERENT hFracs. Because the crown is
+    // a dome, two different heights produce two DIFFERENT tangent-plane
+    // orientations (the surface normal tilts as it climbs toward the apex),
+    // so the eye's "up" and the brow's "up" were subtly different planes —
+    // exactly what let the brow's arc swing down into the eye's arc on the
+    // right side, and turn into a tangled smear once topBun picked up extra
+    // rotation during run. Fixed by anchoring ONE shared tangent frame per
+    // side (`faceSideG`) and placing the eye and brow as children offset
+    // along that SAME local Y axis — they are now guaranteed coplanar and a
+    // fixed, generous distance apart, at every crown rotation and every yaw.
+    //
+    // Per the relaxed face convention, eyes/brows/mouth are now built with a
+    // real shaded material (`faceMat`, lit + outlined) instead of flatMat, so
+    // they read as soft sculpted ink rather than sticker decals — closer to
+    // the reference plates' soft-formed features.
+    const faceMat = toonMat({ color: PALETTE.ink, ramp: RAMP_CHARACTER(), roughness: 0.42 });
     for (const sx of [-1, 1]) {
-      // Right eye (sx>0) squints a touch tighter than the left — reads as a
-      // half-wink instead of two identically mirrored arcs.
-      const eyeArc = sx > 0 ? Math.PI * 0.62 : Math.PI * 0.72;
-      const eyeG = addCrownDecal(this.topBun, sx * 0.3, 0.46, 0.006);
-      const eye = new THREE.Mesh(faceArc(0.1, 0.022, eyeArc), inkMat);
-      eye.name = 'eye__no_outline';
-      eye.userData.noOutline = true;
+      const faceSideG = addCrownDecal(this.topBun, sx * 0.33, 0.5, 0.014);
+
+      // Eye — closed happy "^" arc. Tube/curve radius held IDENTICAL between
+      // sides so the two eyes carry equal visual weight; only the arc length
+      // varies (right squints a touch tighter), which reads as a deliberate
+      // half-wink rather than one eye being malformed.
+      const eyeArc = sx > 0 ? Math.PI * 0.66 : Math.PI * 0.74;
+      const eyeG = new THREE.Group();
+      eyeG.position.set(0, -0.125, 0);
+      faceSideG.add(eyeG);
+      const eye = new THREE.Mesh(faceArc(0.12, 0.028, eyeArc), faceMat);
+      eye.name = 'eye';
       eye.rotation.z = Math.PI / 2; // bulge upward: closed happy "^" eye
+      eye.castShadow = true;
+      eye.receiveShadow = true;
       eyeG.add(eye);
 
-      // Eyebrow — a short separate dash sitting clearly ABOVE the eye (not
-      // touching it — the first pass placed it close enough to read as a
-      // doubled-up second eye), cocked higher on the right than the left for
-      // a specific one-eyebrow-raised personality instead of the symmetric
-      // default.
-      const browG = addCrownDecal(this.topBun, sx * 0.3, 0.615, 0.006);
-      const brow = new THREE.Mesh(faceArc(0.07, 0.014, Math.PI * 0.3), inkMat);
-      brow.name = 'brow__no_outline';
-      brow.userData.noOutline = true;
-      brow.rotation.z = sx > 0 ? 0.5 : 0.16;
+      // Eyebrow — offset +0.13 along the SAME local Y the eye is offset
+      // -0.125 along, so the gap between them (~0.25 local units) is fixed
+      // and cannot collapse regardless of dome curvature. Cocked higher on
+      // the right than the left for a one-eyebrow-raised personality, but
+      // the tilt is kept mild now that there's no collision risk to guard
+      // against.
+      const browG = new THREE.Group();
+      browG.position.set(0, 0.13, 0.012);
+      faceSideG.add(browG);
+      const brow = new THREE.Mesh(faceArc(0.09, 0.02, Math.PI * 0.32), faceMat);
+      brow.name = 'brow';
+      brow.rotation.z = sx > 0 ? 0.24 : 0.1;
+      brow.castShadow = true;
+      brow.receiveShadow = true;
       browG.add(brow);
 
       const blushG = addCrownDecal(this.topBun, sx * 0.6, 0.3, 0.004);
@@ -396,12 +430,14 @@ export class HamburgerCharacter extends BaseCharacter {
 
     // Mouth — kept off-centre with the whole arc tilted, so the small closed
     // smile reads as a one-sided smirk (playful short-order cook) instead of
-    // a perfectly symmetric "u".
-    const mouthG = addCrownDecal(this.topBun, -0.05, 0.26, 0.006);
-    const mouth = new THREE.Mesh(faceArc(0.11, 0.02, Math.PI * 0.46), inkMat);
-    mouth.name = 'mouth__no_outline';
-    mouth.userData.noOutline = true;
+    // a perfectly symmetric "u". Enlarged and switched to the shaded face
+    // material to match the rebuilt eyes/brows.
+    const mouthG = addCrownDecal(this.topBun, -0.05, 0.25, 0.014);
+    const mouth = new THREE.Mesh(faceArc(0.13, 0.024, Math.PI * 0.46), faceMat);
+    mouth.name = 'mouth';
     mouth.rotation.z = -Math.PI / 2 + 0.16; // bulge down-and-tilted: smirk, not a flat "u"
+    mouth.castShadow = true;
+    mouth.receiveShadow = true;
     mouthG.add(mouth);
 
     // ── Heal glow — dormant ring for the Onion Ring self-heal flourish ──────
@@ -418,25 +454,29 @@ export class HamburgerCharacter extends BaseCharacter {
     this.collectFlashTargets();
   }
 
+  /**
+   * Round-3 defect: feet were small capsule blobs, easily lost against the
+   * ground shadow, and one went missing entirely in idle. Rebuilt as a stout
+   * ankle post plugged well up into the bottom bun's lower curve (real
+   * overlap, not a hairline seam) plus a big chunky rounded-box shoe — a
+   * shape with an actual toe/heel volume instead of a stretched sphere.
+   */
   private buildFoot(mat: THREE.Material, sx: number, cfg: { x: number; y: number; z: number; rotY: number }): THREE.Group {
     const pivot = new THREE.Group();
     pivot.name = sx < 0 ? 'foot_l_pivot' : 'foot_r_pivot';
     pivot.position.set(cfg.x, cfg.y, cfg.z);
     pivot.rotation.y = cfg.rotY;
 
-    // Short ankle nub bridges up into the bottom bun's lower curve so the foot
-    // reads as attached rather than a separate blob floating beneath the body.
-    const ankle = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.08, 4, 8), mat);
+    const ankle = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.16, 4, 8), mat);
     ankle.name = 'ankle';
-    ankle.position.set(0, 0.09, -0.04);
+    ankle.position.set(0, 0.14, -0.02);
     ankle.castShadow = true;
     ankle.receiveShadow = true;
     pivot.add(ankle);
 
-    const shoe = new THREE.Mesh(new THREE.CapsuleGeometry(0.115, 0.13, 4, 10), mat);
+    const shoe = new THREE.Mesh(roundedBox(0.27, 0.17, 0.35, 0.085, 3), mat);
     shoe.name = 'foot';
-    shoe.rotation.x = Math.PI / 2;
-    shoe.position.set(0, -0.01, 0.09);
+    shoe.position.set(0, 0.07, 0.1);
     shoe.castShadow = true;
     shoe.receiveShadow = true;
     pivot.add(shoe);
@@ -465,9 +505,28 @@ export class HamburgerCharacter extends BaseCharacter {
   ): { pivot: THREE.Group; forearm: THREE.Group } {
     const pivot = new THREE.Group();
     pivot.name = sx < 0 ? 'arm_l_pivot' : 'arm_r_pivot';
-    pivot.position.set(sx * 0.8, cfg.y, 0.05);
+    // Pulled in from the old 0.8 — that placed the shoulder pivot well outside
+    // the torso's own radius (~0.6-0.68m through the cheese/tomato bands), so
+    // the upper-arm capsule never touched the body and read as a floating
+    // sausage (round-3 defect #1). At ~0.47m off-axis the pivot origin sits
+    // INSIDE the torso volume at both attach heights.
+    pivot.position.set(sx * 0.47, cfg.y, 0.12);
     pivot.rotation.z = cfg.rotZ;
     pivot.rotation.x = cfg.rotX;
+
+    // Shoulder / deltoid cap — a sphere centred exactly on the pivot's own
+    // origin. Because a sphere is rotationally symmetric about its centre,
+    // it stays visually fixed at the shoulder attach point no matter how
+    // `pivot.rotation` gets driven per-frame (idle sway, run swing, attack
+    // wind-up) or which yaw the camera views from — it is what physically
+    // bridges the torso surface to the upper-arm capsule at every angle,
+    // instead of relying on a static pose that only happens to line up at
+    // one rotation.
+    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 12), armMat);
+    shoulder.name = 'shoulder';
+    shoulder.castShadow = true;
+    shoulder.receiveShadow = true;
+    pivot.add(shoulder);
 
     const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.115, 0.15, 4, 10), armMat);
     upper.name = 'arm_upper';
@@ -502,24 +561,29 @@ export class HamburgerCharacter extends BaseCharacter {
     // one distinctive silhouette landmark (critic's "also worth considering")
     // and it's what a Patty Smash swing actually reads as swinging.
     if (cfg.prop) {
+      // Round-3 defect: this rendered as a small grey rectangular sliver —
+      // unreadable as a tool. Scaled up substantially (handle + blade both
+      // roughly 1.6x longer and wider) and re-angled so the blade's broad
+      // FACE is presented outward rather than edge-on, matching the "props
+      // are oversized and bold" reference direction.
       const spatula = new THREE.Group();
       spatula.name = 'spatula';
-      spatula.position.set(0.015, -0.22, 0.03);
-      spatula.rotation.x = -2.35;
-      spatula.rotation.z = -0.12;
+      spatula.position.set(0.03, -0.2, 0.08);
+      spatula.rotation.x = -1.25;
+      spatula.rotation.z = -0.16;
       forearmPivot.add(spatula);
 
-      const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.034, 0.32, 4, 8), cfg.prop.handleMat);
+      const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.42, 4, 8), cfg.prop.handleMat);
       handle.name = 'spatula_handle';
-      handle.position.set(0, 0.17, 0);
+      handle.position.set(0, 0.24, 0);
       handle.castShadow = true;
       handle.receiveShadow = true;
       spatula.add(handle);
 
-      const blade = new THREE.Mesh(roundedBox(0.24, 0.026, 0.32, 0.06, 3), cfg.prop.bladeMat);
+      const blade = new THREE.Mesh(roundedBox(0.4, 0.05, 0.5, 0.09, 3), cfg.prop.bladeMat);
       blade.name = 'spatula_blade';
-      blade.position.set(0, 0.36, 0.03);
-      blade.rotation.x = 0.2;
+      blade.position.set(0, 0.55, 0.06);
+      blade.rotation.x = 0.3;
       blade.castShadow = true;
       blade.receiveShadow = true;
       spatula.add(blade);

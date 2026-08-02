@@ -11,6 +11,7 @@
 import { CHARACTERS, type CharacterId, type CharacterDef } from '../game/rules';
 import type { CharacterModel } from './types';
 import { PlaceholderCharacter } from './placeholder';
+import { DonutCharacter } from './donut';
 import { HamburgerCharacter } from './hamburger';
 
 export type Factory = (def: CharacterDef) => CharacterModel;
@@ -23,7 +24,7 @@ const placeholder: Factory = (def) => new PlaceholderCharacter(def);
  */
 export const CHARACTER_FACTORIES: Record<CharacterId, Factory> = {
   hamburger: (def) => new HamburgerCharacter(def),
-  donut: placeholder,
+  donut: (def) => new DonutCharacter(def),
   taco: placeholder,
   burrito: placeholder,
   egg: placeholder,

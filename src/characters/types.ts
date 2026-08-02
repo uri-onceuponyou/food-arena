@@ -13,7 +13,15 @@
  *  4. Build every surface with `toonMat` / `glossyMat` / `flatMat` from render/toon.
  *     Never construct a raw MeshStandardMaterial — it will break the art style.
  *  5. Call `outlineGroup(root, ...)` once at the end of construction.
- *  6. Solid meshes set `castShadow = true`. Eyes/decals set `userData.noOutline`.
+ *  6. Solid meshes set BOTH `castShadow` and `receiveShadow = true`. Casting without
+ *     receiving means a character's own parts cannot occlude each other, which reads
+ *     as flat. Decals that sit flush on a surface set `userData.noOutline`.
+ *
+ *     Faces are NOT restricted to flat unlit decals. An earlier version of this file
+ *     implied they were, and that became a hard ceiling on quality — reference faces
+ *     are softly shaded, sculpted forms, not stickers. Build eyes, brows and mouths
+ *     as real geometry with depth wherever it reads better; use `flatMat` only when
+ *     a genuinely flat graphic is the intent.
  *  7. All animation is time-based (seconds), never frame-count based.
  */
 
