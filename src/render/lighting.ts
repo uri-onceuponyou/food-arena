@@ -45,17 +45,17 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   // The workhorse. Reference frames are HIGH-KEY: shadow sides stay bright and
   // saturated, never murky. A strong sky/bounce hemisphere is what produces that —
   // it lifts every unlit surface without flattening form the way raw ambient does.
-  const fill = new THREE.HemisphereLight(0xdcefff, 0xffc79a, 2.15);
+  const fill = new THREE.HemisphereLight(0xdcefff, 0xffc79a, 1.45);
   group.add(fill);
 
   // Cool rim from behind — the separation light that pops characters off the floor.
-  const rim = new THREE.DirectionalLight(0xaddcff, 1.05);
+  const rim = new THREE.DirectionalLight(0xaddcff, 0.65);
   rim.position.set(-8, 7, -11);
   rim.castShadow = false;
   group.add(rim);
 
   // Flat lift so nothing ever reads as a dead black hole.
-  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.18);
   group.add(ambient);
 
   const focus = (x: number, z: number, radius = shadowRadius) => {

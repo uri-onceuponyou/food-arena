@@ -8,10 +8,11 @@
 
 import * as THREE from 'three';
 import {
-  EffectComposer, RenderPass, EffectPass,
-  BloomEffect, SMAAEffect, VignetteEffect,
+  EffectComposer, RenderPass, EffectPass, NormalPass,
+  BloomEffect, SMAAEffect, VignetteEffect, SSAOEffect,
   HueSaturationEffect, BrightnessContrastEffect, BlendFunction,
 } from 'postprocessing';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { CameraRig, type CameraRigOptions } from './camera';
 import { createLighting, type LightingRig } from './lighting';
 
@@ -25,6 +26,11 @@ export interface StageOptions {
   fog?: { color: THREE.ColorRepresentation; near: number; far: number } | null;
   postFx?: boolean;
   shadows?: boolean;
+  /** Image-based lighting. On by default — it is what gives surfaces their sheen. */
+  environment?: boolean;
+  environmentIntensity?: number;
+  /** Ambient occlusion. On by default; disable for cheap/fast renders. */
+  ao?: boolean;
   /** Cap the device pixel ratio. Screenshots use 2 for crisp critic review. */
   maxPixelRatio?: number;
 }
@@ -38,8 +44,11 @@ export class Stage {
   private composer: EffectComposer | null = null;
   private container: HTMLElement;
   private disposed = false;
+  private envMap: THREE.Texture | null = null;
+  private useAO = true;
 
   constructor(opts: StageOptions = {}) {
+    this.useAO = opts.ao !== false;
     this.container = opts.container ?? document.body;
     this.canvas = opts.canvas ?? document.createElement('canvas');
     if (!this.canvas.parentElement) this.container.appendChild(this.canvas);
@@ -71,6 +80,25 @@ export class Stage {
     this.lighting = createLighting();
     this.scene.add(this.lighting.group);
 
+    // ── Image-based lighting ─────────────────────────────────────────────────
+    // Without an environment map, MeshStandardMaterial derives specular purely from
+    // direct lights, which yields a dull, chalky surface no matter how the lights are
+    // tuned. Reference art gets its moulded-vinyl sheen from IBL. This is the single
+    // largest material-quality win available, and it applies to every mesh at once.
+    if (opts.environment !== false) {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      pmrem.compileEquirectangularShader();
+      const envScene = new RoomEnvironment();
+      this.envMap = pmrem.fromScene(envScene, 0.04).texture;
+      this.scene.environment = this.envMap;
+      this.scene.environmentIntensity = opts.environmentIntensity ?? 0.38;
+      envScene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.geometry?.dispose();
+      });
+      pmrem.dispose();
+    }
+
     if (opts.postFx !== false) this.buildPost();
     this.resize();
   }
@@ -80,6 +108,31 @@ export class Stage {
       frameBufferType: THREE.HalfFloatType,
     });
     composer.addPass(new RenderPass(this.scene, this.rig.camera));
+
+    // ── Ambient occlusion ────────────────────────────────────────────────────
+    // The critic's #2 named gap: forms read as flat because nothing darkens where
+    // parts meet. Shadow maps alone don't deliver contact darkening between a
+    // character's own overlapping pieces — SSAO does, and it's what makes a stack of
+    // shapes read as genuinely three-dimensional rather than as decals on a blob.
+    let ssao: SSAOEffect | null = null;
+    if (this.useAO) {
+      const normalPass = new NormalPass(this.scene, this.rig.camera);
+      composer.addPass(normalPass);
+      ssao = new SSAOEffect(this.rig.camera, normalPass.texture, {
+        blendFunction: BlendFunction.MULTIPLY,
+        distanceScaling: true,
+        worldDistanceThreshold: 30,
+        worldDistanceFalloff: 6,
+        worldProximityThreshold: 0.5,
+        worldProximityFalloff: 0.2,
+        luminanceInfluence: 0.6,
+        samples: 16,
+        rings: 5,
+        radius: 0.06,
+        intensity: 2.0,
+        resolutionScale: 0.75,
+      });
+    }
 
     // Bloom only on genuinely hot highlights. The threshold is high on purpose:
     // at 0.72 it was haloing plain white geometry (sesame seeds glowed like LEDs).
@@ -107,7 +160,10 @@ export class Stage {
       blendFunction: BlendFunction.NORMAL,
     });
 
-    composer.addPass(new EffectPass(this.rig.camera, bloom, saturation, contrast, vignette));
+    const effects = ssao
+      ? [ssao, bloom, saturation, contrast, vignette]
+      : [bloom, saturation, contrast, vignette];
+    composer.addPass(new EffectPass(this.rig.camera, ...effects));
     composer.addPass(new EffectPass(this.rig.camera, new SMAAEffect()));
     this.composer = composer;
   }
