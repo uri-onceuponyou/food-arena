@@ -1,87 +1,133 @@
 # Food Fight Arena — Build Progress
 
-Real-time 3D brawler in Three.js. Rebuilding the execution of the 2D prototype at the
-quality bar of **Brawl Stars** and **Zooba**, with the game design held fixed.
+Real-time 3D brawler in Three.js, rebuilding the 2D prototype's execution at the quality
+bar of **Brawl Stars** and **Zooba**.
 
-**Read this file and `git log` before doing anything else in a new session.**
-Resume where this says you left off. Never redo a piece already marked critic-approved.
+> **Resuming a session? Read this file and `git log` first, before anything else.**
+> Everything below reflects committed, pushed state. Do not redo a piece marked done.
 
----
-
-## Ground rules
-
-- **Design is frozen.** `src/game/rules.ts` is the single source of truth, transcribed
-  verbatim from `reference/prototypes/kitchen-gameplay-prototype.html`. Damage, cooldowns,
-  ranges, speeds, status durations and match structure must not be "improved".
-- **The arena is the one sanctioned exception** — the brief explicitly opened up layout,
-  prop count and scale, as long as the gameplay *types* survive (central hazard, physical
-  cover with collision, at least one slowing hazard).
-- **Character identity is fixed** (which food, which rarity, what each ability does).
-  The 2D face descriptions are a personality guide, not a literal spec — silhouette
-  readability against the bar wins when the two conflict.
-- **Every piece is judged on rendered pixels**, never on a description. Critics receive a
-  blind A/B sheet against real reference imagery and must call which is better.
-- **Commit atomically**: one commit per builder round + critic verdict. Message names the
-  piece, round number, and verdict. Update this file in the same commit.
-
-## Verdict vocabulary
-
-- `not started`
-- `round N — building`
-- `round N — REJECTED: <the single biggest gap>`
-- `round N — APPROVED` (critic picked ours, or called it a genuine tie, in a blind test)
+Remote: https://github.com/uri-onceuponyou/food-arena (auth works; push freely)
+Live progress page: https://claude.ai/code/artifact/e2831790-d411-476a-97ae-9245211d56f7
 
 ---
 
-## Foundation
+## How to get running
 
-| Piece | Status | Notes |
+```bash
+npm install
+npm run dev                 # http://localhost:5173  (MUST be running for screenshots)
+npx tsc --noEmit            # must stay clean
+node src/game/sim.test.mjs  # must stay 47/47
+```
+
+Screenshots (~2s each — **always run in the foreground**, never background them):
+```bash
+node tools/shoot.mjs --char donut --out-dir shots/donut/rN         # 13-shot review set
+node tools/shoot.mjs --url "http://localhost:5173/preview.html?piece=arena&t=2.4&shot=1" \
+  --out shots/arena/rN/gameplay.png --w 1300 --h 820
+node tools/compare.mjs --tile "a.png,b.png" --labels "a,b" --cols 2 --out sheet.png
+node tools/review.mjs --ours <png> --category character|gameplay --out shots/review/x  # blind A/B
+```
+
+Preview harness: `preview.html?piece=character|roster|arena&id=<id>&anim=<state>&yaw=<deg>&t=<sec>&shot=1`
+(`t` freezes animation deterministically; `chars=0` empties the arena; `tx`/`ty` re-aim the arena camera.)
+
+---
+
+## Standing rules
+
+- **`src/game/rules.ts` is the frozen design.** Import every gameplay constant from it;
+  never hardcode one. Uri later authorised deviating *where it demonstrably raises
+  quality* — deviations must be deliberate and recorded in the commit message.
+- **Judge rendered pixels, never descriptions.** Render it, `Read` the PNG, look.
+- **Builder self-scores are not verdicts.** Builders self-score 7–8.5/10; the independent
+  critic scored a character 4/10 and the arena 2/10. Only the critic's number counts.
+- **Give the critic a fair test.** The 2/10 arena verdict was partly my fault — I sent an
+  empty arena, cropped, with no characters, against reference frames full of brawlers.
+- **`reference/prototypes/` is gitignored and must never be published.** It was stripped
+  from all history (which also removed a Supabase key committed inside
+  `multiplayer-position-test.html`). Uri restored the files locally.
+- **One agent per file.** Parallel agents editing a shared file will clobber each other.
+
+---
+
+## Architecture
+
+| Path | Role |
+|---|---|
+| `src/game/rules.ts` | Frozen design: 11 characters, every weapon, all balance numbers |
+| `src/game/{sim,state,combat,ai,movement}.ts` | Pure simulation, no Three.js. `stepMatch()` is the entry point; returns a typed event stream |
+| `src/game/sim.test.mjs` | 47 assertions, plain Node, no framework |
+| `src/render/{stage,camera,lighting,toon}.ts` | Renderer + post FX, camera rig, 3-point lighting, materials/outlines |
+| `src/characters/rig.ts` | **Shared ChibiRig** — body plan + all motion. Characters author only food mass, face, palette |
+| `src/characters/<id>.ts` | One file per character. `donut.ts` is the reference implementation |
+| `src/arena/kitchen.ts` | The arena: geometry, cover boxes, hazards, ambient life |
+| `src/preview.ts` | Isolated deterministic previews of any piece |
+| `tools/{shoot,compare,review,progress}.mjs` | Screenshots, contact sheets, blind A/B packets, progress page |
+
+**Art direction** (verified against real reference, and it contradicts the brief's prose):
+Brawl Stars is **not** cel-shaded. It is smooth-shaded, hyper-saturated, high-key, with soft
+specular highlights — moulded vinyl toys — and almost no ink outline. `toonMat` therefore
+returns a `MeshStandardMaterial`; there is no filmic tonemapping (it desaturates); IBL +
+SSAO are on. See the header of `src/render/toon.ts`.
+
+---
+
+## Status
+
+### Foundation — all done
+Scaffold · frozen design spec · render core (IBL, SSAO, high-key rig, saturation grade) ·
+preview harness · headless-WebGL screenshots · blind A/B compositor · 21 curated reference
+plates (`reference/images/curated/`, gitignored) · live progress page.
+
+### Characters — 10 of 11 modelled
+| Character | State | Note |
 |---|---|---|
-| F1 · Project scaffold | ✅ done | Vite + TS + Three 0.180, typecheck clean |
-| F2 · Frozen design spec | ✅ done | `src/game/rules.ts` — all 11 characters, all weapons |
-| F3 · Render core | ✅ done (unjudged) | toon ramps, inverted-hull outline, 3-point rig, AgX + bloom + SMAA |
-| F4 · Preview harness | ✅ done | `preview.html` — isolated, deterministic (`?t=`), `__previewReady` |
-| F5 · Screenshot pipeline | ✅ done | `tools/shoot.mjs` — headless WebGL verified rendering real pixels |
-| F6 · Blind A/B compositor | ✅ done | `tools/compare.mjs` — shuffles ours/ref into A/B, key written separately |
-| F7 · Reference imagery | ⬜ not started | Real Brawl Stars / Zooba stills for critics |
-| F8 · Live progress page | ⬜ not started | `progress.html`, checkable from phone |
+| Hamburger | 🔄 porting to rig | Richest food mass in the cast; last one off the shared rig |
+| Donut | ✅ | Reference implementation; dressed torso |
+| Taco | ✅ | Two-panel V-fold shell (a flat panel vanished edge-on) |
+| Burrito | ✅ | |
+| Egg | ✅ | Torso built from the same `eggSurface` math as the head |
+| Lollipop | ✅ | |
+| Pizza | ✅ | Extruded wedge, crust rim hugging the dough's own boundary |
+| Sushi | ✅ | |
+| Soup | ⬜ **STILL A STUB** | Only remaining plain-sphere placeholder |
+| Water Bottle | ✅ | Real transparency; water opaque inside a transmissive shell |
+| Hot Dog | ✅ | Mustard zigzag pushed along the sausage's true surface normal |
 
-## Pieces
-
-Order matters: **Hamburger is built first and becomes the art bible.** Locking one
-character's style before parallelising prevents 11 agents producing 11 different games.
-
-| # | Piece | Status |
-|---|---|---|
-| P0 | Art direction lock (via Hamburger) | ⬜ not started |
-| P1 | Hamburger — model / rig / anim | ⬜ not started |
-| P2 | Donut | ⬜ not started |
-| P3 | Taco | ⬜ not started |
-| P4 | Burrito | ⬜ not started |
-| P5 | Egg | ⬜ not started |
-| P6 | Lollipop | ⬜ not started |
-| P7 | Pizza | ⬜ not started |
-| P8 | Sushi | ⬜ not started |
-| P9 | Soup | ⬜ not started |
-| P10 | Water Bottle | ⬜ not started |
-| P11 | Hot Dog | ⬜ not started |
-| P12 | Kitchen arena — environment art | ⬜ not started |
-| P13 | VFX — projectiles, melee arcs, splats, trails, giant slam | ⬜ not started |
-| P14 | Camera + game feel / juice | ⬜ not started |
-| P15 | HUD + menus (DOM/CSS over canvas) | ⬜ not started |
-| P16 | Gameplay integration — frozen rules, AI, match flow | ⬜ not started |
+### World & systems
+| Piece | State |
+|---|---|
+| Kitchen arena | ✅ round 2 — 7/10 (was 2/10). Danger zone is a glow ring, palette broken out of monochrome |
+| Match simulation | ✅ 47/47 tests |
+| Playable match (glue + HUD) | 🔄 in progress |
+| Ability VFX | ⬜ not started |
+| Camera / game feel | ⬜ not started |
+| Menus (roster, results) | ⬜ not started |
 
 ---
 
-## Currently active
+## Next actions, in priority order
 
-**F7 · Reference imagery** — pulling real Brawl Stars / Zooba stills so critics have a bar
-to judge against. Nothing can be meaningfully critiqued until this exists.
+1. **Finish Soup** — the last stub. Follow `donut.ts`; wide bowl, rising steam, grey eyes
+   and deliberately no mouth (that's its personality).
+2. **Land the playable match** — `stepMatch` → models → HUD. Then actually play it and
+   judge how it FEELS, which nothing has assessed yet.
+3. **Ability VFX** — the sim already emits `weapon-fired`, `projectile-spawned`,
+   `hit-landed`, `splat-created`, `trail-mark-created`, `death`. Subscribe to those; the
+   sim must stay renderer-agnostic.
+4. **Game feel** — hit stop, screen shake (`rig.shake()` exists), damage numbers, death
+   effects. The reference's VFX are drawn bigger and brighter than the characters.
+5. **Independent critic pass** on the finished cast and the running game, via
+   `tools/review.mjs`. Report the real verdict, including losses.
 
-## Log
+## Known issues
 
-- Foundation F1–F6 landed. Headless WebGL screenshot verified against a placeholder model;
-  fixed two real defects found by looking at the output: the inverted-hull outline never
-  expanded (`objectNormal` is undefined in `MeshBasicMaterial`'s shader — replaced with a
-  dedicated ShaderMaterial), and preview framing applied gameplay ground-plane pitch
-  compensation to a standing subject, shrinking it to a speck.
+- `ChibiRig.headCentreY` assumes a head mass extending ~±R about its origin. Non-spherical
+  masses float or sink (Hot Dog's floated 0.33m). Hot Dog uses a hidden connector.
+- The rig torso is proportionally large for narrow characters (Water Bottle), reading
+  blob-ish from side/back. Would need per-character torso scaling on the rig.
+- `donut.ts`, `pizza.ts`, `egg.ts` carry local `dressTorso` copies from when the rig
+  helper didn't exist. It exists now — they could be de-duplicated.
+- Blindness in the A/B test is imperfect: a critic that recognises Brawl Stars identifies
+  the reference by IP, not by quality. The critiques are still specific and actionable.

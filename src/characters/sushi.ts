@@ -82,9 +82,9 @@ export class SushiCharacter extends BaseCharacter {
     // same point at the seam, there is no gap or float to solve for — it's exact by
     // construction, same technique as the bottom-bun/patty stack in hamburger.ts.
     const PROFILE: Array<[h: number, r: number]> = [
-      [0.00, 0.00], [0.02, 0.66], [0.08, 0.92], [0.14, 1.00],
-      [0.40, 1.00], [0.63, 0.80], // ← SEAM_H
-      [0.75, 0.94], [0.90, 0.68], [1.00, 0.00],
+      [0.00, 0.00], [0.02, 0.66], [0.08, 0.92], [0.16, 1.00],
+      [0.34, 1.00], [0.63, 0.78], // ← SEAM_H
+      [0.70, 0.92], [0.76, 1.06], [0.85, 0.88], [0.93, 0.55], [0.98, 0.22], [1.00, 0.00],
     ];
     const SEAM_H = 0.63;
     const SEAM_IDX = PROFILE.findIndex(([h]) => h === SEAM_H);
@@ -127,12 +127,12 @@ export class SushiCharacter extends BaseCharacter {
     head.add(salmon);
 
     // ── Nori band ────────────────────────────────────────────────────────────
-    // Wrapped around the rice's constant-radius wall (h 0.14–0.40, where PROFILE
+    // Wrapped around the rice's constant-radius wall (h 0.16–0.34, where PROFILE
     // holds flat at r=1.00) — a slightly larger cylinder (1.03x) is therefore
     // guaranteed proud of the rice everywhere along the band. This near-black band
     // against warm-white rice is THE landmark.
-    const noriTop = yAt(0.40);
-    const noriBottom = yAt(0.14);
+    const noriTop = yAt(0.34);
+    const noriBottom = yAt(0.16);
     const noriRadius = SCALE_R * 1.03;
     const nori = new THREE.Mesh(
       new THREE.CylinderGeometry(noriRadius, noriRadius, noriTop - noriBottom, 32, 1, true),
@@ -168,9 +168,9 @@ export class SushiCharacter extends BaseCharacter {
     // the same zAt() surface equation, embedded a hair proud rather than sticking out
     // radially — round 1's radial capsules read as hair spikes and are exactly the
     // mistake this avoids).
-    const stripeHs: Array<[number, number]> = [[-0.28, 0.68], [0.05, 0.72], [0.32, 0.69], [-0.05, 0.82]];
+    const stripeHs: Array<[number, number]> = [[-0.24, 0.73], [0.08, 0.76], [0.30, 0.72]];
     for (const [sx, hMid] of stripeHs) {
-      const h0 = hMid - 0.05, h1 = hMid + 0.05;
+      const h0 = hMid - 0.04, h1 = hMid + 0.04;
       const x = sx * SCALE_R * 0.7;
       const p0 = new THREE.Vector3(x, yAt(h0), zAt(x, h0));
       const p1 = new THREE.Vector3(x, yAt(h1), zAt(x, h1));
@@ -187,7 +187,7 @@ export class SushiCharacter extends BaseCharacter {
 
     // A wet glisten on the salmon's lip bulge — cheap, sells "wet" against the matte rice.
     {
-      const gx = -R * 0.16, gh = 0.73;
+      const gx = -R * 0.18, gh = 0.76;
       const glisten = new THREE.Mesh(new THREE.SphereGeometry(R * 0.045, 10, 8), flatMat('#ffffff', { transparent: true, opacity: 0.55 }));
       glisten.position.set(gx, yAt(gh), zAt(gx, gh) + R * 0.01);
       glisten.userData.noOutline = true;
@@ -197,15 +197,19 @@ export class SushiCharacter extends BaseCharacter {
     // ── Rice grains ──────────────────────────────────────────────────────────
     // Small stretched capsules seated exactly on the rice's surface via zAt(), kept
     // on the sides/back so they never compete with the face.
+    // Kept strictly below (h<0.16) or above (h>0.34) the nori band's own h-range —
+    // the band fully wraps the cylinder at a slightly larger radius, so a grain
+    // placed at the rice's own surface WITHIN that range would be swallowed inside
+    // it, invisible.
     const grainMat = toonMat({ color: RICE_SHADE, roughness: 0.7 });
     const grainSpots: Array<[number, number, 1 | -1]> = [
-      [0.30, 0.20, -1], [-0.34, 0.18, -1], [0.20, 0.28, -1], [-0.22, 0.30, -1],
-      [0.36, 0.08, -1], [-0.38, 0.10, -1], [0.10, 0.04, -1], [-0.14, 0.06, -1],
+      [0.34, 0.08, -1], [-0.36, 0.06, -1], [0.20, 0.12, -1], [-0.18, 0.05, -1],
+      [0.30, 0.40, -1], [-0.32, 0.38, -1], [0.20, 0.52, -1], [-0.22, 0.55, -1],
     ];
     for (const [gx, gh, side] of grainSpots) {
       const x = gx * SCALE_R;
       const z = side * (zAt(x, gh) + R * 0.006);
-      const grain = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.032, R * 0.085, 3, 6), grainMat);
+      const grain = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.026, R * 0.05, 3, 6), grainMat);
       grain.position.set(x, yAt(gh), z);
       const outNormal = new THREE.Vector3(x, 0, z).normalize();
       grain.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), outNormal);
@@ -237,14 +241,14 @@ export class SushiCharacter extends BaseCharacter {
     const head = this.rig.joints.head;
     const ink = PALETTE.ink;
 
-    const eyeH = 0.54;
+    const eyeH = 0.53;
     const eyeY = yAt(eyeH);
     for (const sx of [-1, 1]) {
       const ex = sx * R * 0.24;
       const ez = zAt(ex, eyeH);
 
       // Sclera — wide white eye, the "slightly startled" read.
-      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.155, 18, 14), toonMat({ color: '#FFFFFF', roughness: 0.25 }));
+      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.14, 18, 14), toonMat({ color: '#FFFFFF', roughness: 0.25 }));
       white.position.set(ex, eyeY, ez + R * 0.02);
       white.scale.set(1, 1.08, 0.55);
       white.castShadow = true;
@@ -252,31 +256,31 @@ export class SushiCharacter extends BaseCharacter {
 
       // Pupil pushed toward the top of the sclera — white shows below, the classic
       // "wide-eyed" surprised cue.
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.082, 16, 12), toonMat({ color: ink, roughness: 0.25 }));
-      pupil.position.set(ex, eyeY + R * 0.03, ez + R * 0.06);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.074, 16, 12), toonMat({ color: ink, roughness: 0.25 }));
+      pupil.position.set(ex, eyeY + R * 0.027, ez + R * 0.055);
       pupil.scale.set(1, 1, 0.6);
       pupil.castShadow = true;
       head.add(pupil);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.03, 8, 8), flatMat('#ffffff'));
-      glint.position.set(ex - R * 0.028, eyeY + R * 0.055, ez + R * 0.095);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.027, 8, 8), flatMat('#ffffff'));
+      glint.position.set(ex - R * 0.025, eyeY + R * 0.05, ez + R * 0.085);
       glint.userData.noOutline = true;
       head.add(glint);
     }
 
     // Puckered "o" lips — a plump little ring (tube nearly as thick as its own
     // radius, for a pursed-lip read rather than a thin circle outline).
-    const mouthH = 0.46;
+    const mouthH = 0.42;
     const mouthY = yAt(mouthH);
     const mouthZ = zAt(0, mouthH) + R * 0.01;
     const lipMat = toonMat({ color: LIP, roughness: 0.4 });
-    const lips = new THREE.Mesh(new THREE.TorusGeometry(R * 0.05, R * 0.028, 10, 20), lipMat);
+    const lips = new THREE.Mesh(new THREE.TorusGeometry(R * 0.045, R * 0.024, 10, 20), lipMat);
     lips.name = 'sushi_lips';
     lips.position.set(0, mouthY, mouthZ);
     lips.castShadow = true;
     head.add(lips);
     // A dark inner disc so the "o" reads as an open pucker, not a solid pink bead.
-    const lipHole = new THREE.Mesh(new THREE.CircleGeometry(R * 0.024, 12), toonMat({ color: '#7A2E38', roughness: 0.5 }));
+    const lipHole = new THREE.Mesh(new THREE.CircleGeometry(R * 0.019, 12), toonMat({ color: '#7A2E38', roughness: 0.5 }));
     lipHole.name = 'sushi_lip_hole__no_outline';
     lipHole.userData.noOutline = true;
     lipHole.position.set(0, mouthY, mouthZ + R * 0.004);

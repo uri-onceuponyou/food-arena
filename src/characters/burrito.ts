@@ -175,30 +175,41 @@ export class BurritoCharacter extends BaseCharacter {
 
     // Sized up from round 1, where sparse small toppings left the pale rice mound
     // dominant and the whole thing read as ice-cream-with-sprinkles rather than a
-    // packed burrito filling. Bigger, denser, and mostly the LIGHTER meat tone — an
-    // even mix with the near-black MEAT_DARK read as scattered chocolate chips.
-    const meatGeo = new THREE.SphereGeometry(R * 0.19, 10, 8);
-    const tomatoGeo = new THREE.BoxGeometry(R * 0.17, R * 0.17, R * 0.17);
-    const cheeseGeo = new THREE.ConeGeometry(R * 0.08, R * 0.27, 6);
-    const lettuceGeo = new THREE.CapsuleGeometry(R * 0.045, R * 0.18, 4, 6);
-    const creamGeo = new THREE.SphereGeometry(R * 0.095, 10, 8);
+    // packed burrito filling.
+    //
+    // Round 3 defect: each topping type had its own block of angles (all the meat
+    // clustered in 0-150 deg, etc). From the front camera that meant one whole TYPE
+    // dominated the visible half of the dome — a solid clump of meat with the cheese,
+    // tomato and lettuce hidden behind/under it — rather than a mixed filling. Fixed
+    // by interleaving all four types round-robin around the full circle, so every
+    // angular slice the camera can see has a mix, never a monotone clump. Sizes also
+    // trimmed down so adjacent pieces don't overlap into a single blob.
+    const meatGeo = new THREE.SphereGeometry(R * 0.15, 10, 8);
+    const tomatoGeo = new THREE.BoxGeometry(R * 0.14, R * 0.14, R * 0.14);
+    const cheeseGeo = new THREE.ConeGeometry(R * 0.065, R * 0.23, 6);
+    const lettuceGeo = new THREE.CapsuleGeometry(R * 0.04, R * 0.16, 4, 6);
+    const creamGeo = new THREE.SphereGeometry(R * 0.08, 10, 8);
 
-    const meatSpots: Spot[] = [[15, 0.35], [80, 0.55], [150, 0.3], [230, 0.6], [300, 0.42]];
-    const tomatoSpots: Spot[] = [[50, 0.62], [140, 0.45], [220, 0.68], [320, 0.5], [95, 0.32], [265, 0.58]];
-    const cheeseSpots: Spot[] = [[0, 0.28], [100, 0.7], [190, 0.4], [275, 0.6], [145, 0.55], [330, 0.3]];
-    const lettuceSpots: Spot[] = [[35, 0.8], [125, 0.78], [205, 0.82], [300, 0.76], [355, 0.7]];
-    const creamSpots: Spot[] = [[65, 0.22], [170, 0.24], [260, 0.2]];
+    const KIND_COUNT = 16; // 4 full trips around the four kinds below
+    const kinds = ['meat', 'tomato', 'cheese', 'lettuce'] as const;
+    const spotsByKind: Record<(typeof kinds)[number], Spot[]> = { meat: [], tomato: [], cheese: [], lettuce: [] };
+    for (let i = 0; i < KIND_COUNT; i++) {
+      const deg = (i / KIND_COUNT) * 360 + ((i * 13) % 10); // near-even ring, deterministic jitter
+      const rFrac = 0.32 + (((i * 37) % 100) / 100) * 0.46; // 0.32..0.78, deterministic jitter
+      spotsByKind[kinds[i % kinds.length]].push([deg, rFrac]);
+    }
+    const creamSpots: Spot[] = [[10, 0.2], [135, 0.22], [250, 0.18], [300, 0.24]];
 
-    meatSpots.forEach((s, i) => {
-      const m = placeOnDome(s, meatGeo, i % 4 === 0 ? meatDarkMat : meatMat, 'burrito_meat');
+    spotsByKind.meat.forEach((s, i) => {
+      const m = placeOnDome(s, meatGeo, i % 3 === 0 ? meatDarkMat : meatMat, 'burrito_meat');
       m.scale.set(1.1, 0.8, 1.1);
     });
-    tomatoSpots.forEach((s) => {
+    spotsByKind.tomato.forEach((s) => {
       const m = placeOnDome(s, tomatoGeo, tomatoMat, 'burrito_tomato');
       m.rotation.z = 0.4;
     });
-    cheeseSpots.forEach((s) => placeOnDome(s, cheeseGeo, cheeseMat, 'burrito_cheese'));
-    lettuceSpots.forEach((s) => {
+    spotsByKind.cheese.forEach((s) => placeOnDome(s, cheeseGeo, cheeseMat, 'burrito_cheese'));
+    spotsByKind.lettuce.forEach((s) => {
       const m = placeOnDome(s, lettuceGeo, lettuceMat, 'burrito_lettuce');
       m.rotation.x += Math.PI / 2; // lay along the surface rather than poking straight up
     });

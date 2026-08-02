@@ -2,9 +2,9 @@
   "title": "Food Fight Arena \u2014 Build",
   "subtitle": "3D rebuild in Three.js, judged against Brawl Stars & Zooba",
   "active": {
-    "piece": "Characters on the shared rig + arena round 2",
-    "detail": "A shared poseable body plan now underpins the cast. Taco, Egg, Pizza and Hot Dog are being built in parallel against Donut as the template; the arena is in round 2 after a 2/10 critic verdict.",
-    "round": 2
+    "piece": "Playable match + final characters",
+    "detail": "Simulation, arena and 10 of 11 characters are done and pushed. Wiring the tested simulation to the renderer into a playable match; Soup is the last stub; Hamburger is being ported to the shared rig.",
+    "round": 1
   },
   "groups": [
     {
@@ -66,8 +66,8 @@
         {
           "id": "P1",
           "name": "Hamburger",
-          "state": "done",
-          "note": "Round 4 \u2014 critic gaps closed, self-scored 8.5/10; pending port to the shared rig"
+          "state": "active",
+          "note": "Porting to the shared rig \u2014 last character off-plan"
         },
         {
           "id": "P2",
@@ -78,26 +78,26 @@
         {
           "id": "P3",
           "name": "Taco",
-          "state": "active",
-          "note": "Round 1 on the rig"
+          "state": "done",
+          "note": "Two-panel V-fold shell"
         },
         {
           "id": "P4",
           "name": "Burrito",
-          "state": "queued",
-          "note": "Stub on rig"
+          "state": "done",
+          "note": "On the rig"
         },
         {
           "id": "P5",
           "name": "Egg",
-          "state": "active",
-          "note": "Round 1 on the rig"
+          "state": "done",
+          "note": "Torso from the same eggSurface math as the head"
         },
         {
           "id": "P6",
           "name": "Lollipop",
-          "state": "queued",
-          "note": "Stub on rig"
+          "state": "done",
+          "note": "On the rig"
         },
         {
           "id": "P7",
@@ -108,26 +108,26 @@
         {
           "id": "P8",
           "name": "Sushi",
-          "state": "queued",
-          "note": "Stub on rig"
+          "state": "done",
+          "note": "On the rig"
         },
         {
           "id": "P9",
           "name": "Soup",
           "state": "queued",
-          "note": "Stub on rig"
+          "note": "LAST STUB \u2014 still a placeholder sphere"
         },
         {
           "id": "P10",
           "name": "Water Bottle",
-          "state": "queued",
-          "note": "Stub on rig"
+          "state": "done",
+          "note": "Real transparency; water opaque inside a transmissive shell"
         },
         {
           "id": "P11",
           "name": "Hot Dog",
-          "state": "active",
-          "note": "Round 1 on the rig"
+          "state": "done",
+          "note": "Mustard zigzag on the true surface normal"
         }
       ]
     },
@@ -137,14 +137,14 @@
         {
           "id": "P12",
           "name": "Kitchen arena",
-          "state": "active",
-          "note": "Round 2 \u2014 danger-zone readability, palette, prop density"
+          "state": "done",
+          "note": "Round 2 \u2014 7/10, up from 2/10"
         },
         {
           "id": "P13",
           "name": "Ability VFX",
           "state": "queued",
-          "note": "Projectiles, melee arcs, splats, trails, giant slam"
+          "note": "Sim already emits the events to subscribe to"
         },
         {
           "id": "P14",
@@ -155,14 +155,14 @@
         {
           "id": "P15",
           "name": "HUD & menus",
-          "state": "queued",
-          "note": "DOM/CSS over the canvas"
+          "state": "active",
+          "note": "HUD landing with the playable match"
         },
         {
           "id": "P16",
           "name": "Gameplay integration",
-          "state": "done",
-          "note": "Match simulation, 47/47 tests passing"
+          "state": "active",
+          "note": "Wiring sim to renderer"
         }
       ]
     }
