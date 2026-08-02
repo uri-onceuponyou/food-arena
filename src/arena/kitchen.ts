@@ -59,7 +59,6 @@ const KPAL = {
   tileLight: '#EAD3A8',
   tileDark: '#D8B586',
   subfloor: '#B08355',
-  hotzone: '#E07A3E',
   border: '#5B3A22',
   woodPad: '#C9945A',
   woodSeam: '#9C6A38',
@@ -68,22 +67,39 @@ const KPAL = {
   cabinet: '#B5793C',
   cabinetDark: '#8A5A2E',
   butcherBlock: '#E4C48C',
-  // Deliberately a dark saturated slate, not a pale "steel" grey: a flat glossy top
-  // this size, viewed almost head-on under this rig's key+hemisphere lighting, adds
-  // enough specular+clearcoat energy on top of the albedo to blow straight past 1.0
-  // and clip to white — a mid-grey (#9BA7B4) still did it. Only a genuinely dark base
-  // survives with its hue intact once that highlight lands.
-  steel: '#3E4A56',
-  steelDark: '#2B343D',
+  // Shifted from a neutral slate toward a visibly blue-teal steel — this surface is
+  // large and sits front-and-centre on every stove/service top, so its hue is one of
+  // the main levers for pulling the whole hub out of the orange/tan band. Kept dark
+  // for the same exposure reason as before: a flat glossy top this size, viewed almost
+  // head-on under this rig's key+hemisphere lighting, adds enough specular+clearcoat
+  // energy on top of the albedo to blow straight past 1.0 and clip to white — only a
+  // genuinely dark base survives with its hue intact once that highlight lands.
+  steel: '#2E4A5C',
+  steelDark: '#20313E',
 
   freezerBody: '#4FA0C2',
   freezerDoor: '#2E88AC',
   freezerTrim: '#2B2B2B',
+  // Cold light spilling off the freezer onto the floor in front of its door.
+  freezerGlow: '#8FE3FF',
 
   crateWood: '#C08A46',
   crateSlat: '#5B3A22',
   burlap: '#D9C08A',
   burlapDark: '#B99D66',
+
+  // Cool counterpoint crate — herbs/greens, not another warm produce box. Deep
+  // teal-green body reads as "cold storage / fresh herbs" against the orange hub.
+  herbCrateWood: '#2F7A5E',
+  herbCrateSlat: '#1E5641',
+  herbLeafA: '#3FAE6E',
+  herbLeafB: '#2E8F72',
+  potteryWarm: '#B5602E',
+
+  // Decorative tile band ringing the hub — a deliberate cool zone the eye can land
+  // on before it reaches the warm scorch/hazard ring at the centre.
+  tealTile: '#3C99A6',
+  tealTileDark: '#2B7681',
 
   potMetal: '#888D95',
   potMetalDark: '#5B5F66',
@@ -106,50 +122,79 @@ const KPAL = {
 
 function buildMaterials() {
   return {
-    tileLight: toonMat({ color: KPAL.tileLight, ramp: RAMP_SOFT() }),
-    tileDark: toonMat({ color: KPAL.tileDark, ramp: RAMP_SOFT() }),
-    subfloor: toonMat({ color: KPAL.subfloor, ramp: RAMP_SOFT() }),
-    hotzone: toonMat({ color: KPAL.hotzone, ramp: RAMP_SOFT() }),
-    border: toonMat({ color: KPAL.border, ramp: RAMP_SOFT() }),
-    woodPad: toonMat({ color: KPAL.woodPad, ramp: RAMP_SOFT() }),
-    woodSeam: toonMat({ color: KPAL.woodSeam, ramp: RAMP_SOFT() }),
+    // Roughness spread across the floor/cabinet/crate surfaces is deliberate: identical
+    // mid-roughness everywhere is what makes a scene read as shadeless plastic even
+    // under working lights, because nothing catches a distinct specular highlight.
+    tileLight: toonMat({ color: KPAL.tileLight, ramp: RAMP_SOFT(), roughness: 0.55 }),
+    tileDark: toonMat({ color: KPAL.tileDark, ramp: RAMP_SOFT(), roughness: 0.55 }),
+    subfloor: toonMat({ color: KPAL.subfloor, ramp: RAMP_SOFT(), roughness: 0.92 }),
+    border: toonMat({ color: KPAL.border, ramp: RAMP_SOFT(), roughness: 0.7 }),
+    woodPad: toonMat({ color: KPAL.woodPad, ramp: RAMP_SOFT(), roughness: 0.68 }),
+    woodSeam: toonMat({ color: KPAL.woodSeam, ramp: RAMP_SOFT(), roughness: 0.75 }),
     // Unlit on purpose: a lit near-white toonMat disc this pale caught the same
     // key+fill overexposure as the counter tops and rendered as a hard white lump
     // instead of a soft dusting. flatMat can't blow out — it ignores scene lighting
     // entirely, so the low opacity below is the only thing controlling how it reads.
     flour: flatMat(KPAL.flour, { transparent: true, opacity: 0.45 }),
+    // Generic worn-floor marks — dark grime near the fryer, a cool wet sheen near the
+    // sink. Small, cheap, and exactly the kind of graphic-not-fine floor wear the
+    // reference frames are full of and this arena was missing.
+    floorGrime: flatMat('#3E2A18', { transparent: true, opacity: 0.22 }),
+    floorWet: flatMat('#3E90BE', { transparent: true, opacity: 0.2 }),
 
-    cabinet: toonMat({ color: KPAL.cabinet }),
-    cabinetDark: toonMat({ color: KPAL.cabinetDark }),
-    butcherBlock: toonMat({ color: KPAL.butcherBlock }),
-    steel: glossyMat({ color: KPAL.steel, roughness: 0.4 }),
-    steelDark: glossyMat({ color: KPAL.steelDark, roughness: 0.42 }),
+    cabinet: toonMat({ color: KPAL.cabinet, roughness: 0.62 }),
+    cabinetDark: toonMat({ color: KPAL.cabinetDark, roughness: 0.65 }),
+    butcherBlock: toonMat({ color: KPAL.butcherBlock, roughness: 0.5 }),
+    steel: glossyMat({ color: KPAL.steel, roughness: 0.32 }),
+    steelDark: glossyMat({ color: KPAL.steelDark, roughness: 0.36 }),
 
-    freezerBody: glossyMat({ color: KPAL.freezerBody, roughness: 0.45 }),
-    freezerDoor: toonMat({ color: KPAL.freezerDoor }),
-    freezerTrim: toonMat({ color: KPAL.freezerTrim }),
+    freezerBody: glossyMat({ color: KPAL.freezerBody, roughness: 0.4 }),
+    freezerDoor: toonMat({ color: KPAL.freezerDoor, roughness: 0.45 }),
+    freezerTrim: toonMat({ color: KPAL.freezerTrim, roughness: 0.5 }),
+    // Cold ground light spilling out in front of each freezer door — unlit so it
+    // reads as emitted light rather than a painted floor patch.
+    freezerGlow: flatMat(KPAL.freezerGlow, { transparent: true, opacity: 0.28 }),
 
-    crateWood: toonMat({ color: KPAL.crateWood }),
-    crateSlat: toonMat({ color: KPAL.crateSlat }),
-    burlap: toonMat({ color: KPAL.burlap }),
-    burlapDark: toonMat({ color: KPAL.burlapDark }),
+    crateWood: toonMat({ color: KPAL.crateWood, roughness: 0.72 }),
+    crateSlat: toonMat({ color: KPAL.crateSlat, roughness: 0.78 }),
+    burlap: toonMat({ color: KPAL.burlap, roughness: 0.85 }),
+    burlapDark: toonMat({ color: KPAL.burlapDark, roughness: 0.88 }),
 
-    potMetal: glossyMat({ color: KPAL.potMetal, roughness: 0.28 }),
-    potMetalDark: toonMat({ color: KPAL.potMetalDark }),
+    herbCrateWood: toonMat({ color: KPAL.herbCrateWood, roughness: 0.7 }),
+    herbCrateSlat: toonMat({ color: KPAL.herbCrateSlat, roughness: 0.78 }),
+    herbLeafA: toonMat({ color: KPAL.herbLeafA, roughness: 0.58 }),
+    herbLeafB: toonMat({ color: KPAL.herbLeafB, roughness: 0.6 }),
+    potteryWarm: toonMat({ color: KPAL.potteryWarm, roughness: 0.65 }),
+
+    tealTile: toonMat({ color: KPAL.tealTile, ramp: RAMP_SOFT(), roughness: 0.5 }),
+    tealTileDark: toonMat({ color: KPAL.tealTileDark, ramp: RAMP_SOFT(), roughness: 0.55 }),
+
+    potMetal: glossyMat({ color: KPAL.potMetal, roughness: 0.22 }),
+    potMetalDark: toonMat({ color: KPAL.potMetalDark, roughness: 0.4 }),
     broth: glossyMat({ color: PALETTE.broth, roughness: 0.22, emissive: '#3a1a05', emissiveIntensity: 0.12 }),
     flame: flatMat(KPAL.flame, { transparent: true, opacity: 0.92 }),
     flameCore: flatMat(KPAL.flameCore, { transparent: true, opacity: 0.95 }),
 
     water: glossyMat({ color: KPAL.water, roughness: 0.3, transparent: true, opacity: 0.82 }),
-    waterCap: toonMat({ color: KPAL.waterCap }),
+    waterCap: toonMat({ color: KPAL.waterCap, roughness: 0.4 }),
     grease: glossyMat({ color: KPAL.grease, roughness: 0.32, transparent: true, opacity: 0.85 }),
 
     tomato: glossyMat({ color: PALETTE.tomato, roughness: 0.28 }),
-    lettuce: toonMat({ color: PALETTE.lettuce }),
-    onion: toonMat({ color: PALETTE.onion }),
+    lettuce: toonMat({ color: PALETTE.lettuce, roughness: 0.6 }),
+    onion: toonMat({ color: PALETTE.onion, roughness: 0.6 }),
     ink: flatMat(PALETTE.ink),
     chalk: flatMat('#F4EFE2', { transparent: true, opacity: 0.85 }),
     dust: flatMat('#FFF6DC', { transparent: true, opacity: 0.5 }),
+
+    // Fake ambient occlusion — a soft dark radial decal dropped under every cover
+    // prop's footprint (see `addCover`) so props read as sitting ON the floor with
+    // real contact darkening, rather than pasted on top of it.
+    contactShadow: new THREE.MeshBasicMaterial({
+      map: makeContactShadowTexture(),
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.9,
+    }),
   };
 }
 
@@ -178,11 +223,74 @@ function noOutline<T extends THREE.Object3D>(o: T): T {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Fake contact AO — a soft dark radial-gradient decal, canvas-generated once and
+// shared by every prop's footprint. This is the single cheapest lever for killing
+// the "pasted onto the floor" look: real-time contact shadows are expensive, but a
+// baked dark ellipse under each prop reads as grounding at gameplay camera distance.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function makeContactShadowTexture(): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(12,8,6,0.55)');
+  g.addColorStop(0.55, 'rgba(12,8,6,0.28)');
+  g.addColorStop(1, 'rgba(12,8,6,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Elliptical AO blob sized to a prop's own footprint (in metres), slightly oversized
+ * so it peeks out past the silhouette the way a real contact shadow would. */
+function buildContactShadow(mat: THREE.Material, wM: number, dM: number, scale = 1.25): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(wM * scale, dM * scale), mat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = 0.011;
+  m.renderOrder = 1;
+  m.name = 'contact_shadow__no_outline';
+  m.castShadow = false;
+  m.receiveShadow = false;
+  noOutline(m);
+  return m;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Cover prop builders. Each takes its footprint in METRES (already converted from
 // the CoverBox's world-unit w/h by `addCover`) and returns a group whose outer-most
 // visible geometry never exceeds that footprint — so the collision box always
 // covers everything a player can see and bump into.
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Small potted herb garnish — deliberately cool-green against every warm cabinet/
+ * cabinetDark surface it sits on. Cheap, bold-shaped (a pot + a leaf cluster, no
+ * fine detail) so it still reads at gameplay camera distance, and it is the one
+ * prop guaranteed to sit on every stove island — i.e. always in the gameplay shot.
+ */
+function buildHerbSprig(M: Materials, scale = 1): THREE.Group {
+  const g = new THREE.Group();
+  const potR = 0.09 * scale;
+  const potH = 0.11 * scale;
+  const pot = mesh(puck(potR, potH, 10), M.potteryWarm, 'herb_pot');
+  pot.position.y = potH / 2;
+  g.add(pot);
+  const leafMats = [M.herbLeafA, M.herbLeafB, M.herbLeafA];
+  let a = 0;
+  for (const lm of leafMats) {
+    const leaf = mesh(new THREE.ConeGeometry(potR * 0.85, potR * 2.6, 6), lm, 'herb_leaf');
+    leaf.position.set(Math.cos(a) * potR * 0.35, potH + potR * 1.15, Math.sin(a) * potR * 0.35);
+    leaf.rotation.z = Math.cos(a) * 0.22;
+    leaf.rotation.x = Math.sin(a) * 0.22;
+    g.add(leaf);
+    a += (Math.PI * 2) / leafMats.length;
+  }
+  return g;
+}
 
 function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack?: boolean }): THREE.Group {
   const g = new THREE.Group();
@@ -214,6 +322,12 @@ function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack
     coil.position.set(bx, cabH + 0.1, 0);
     g.add(coil);
   }
+
+  // Herb garnish on the back corner of the cabinet top, clear of the burners —
+  // a small, guaranteed-visible cool-green accent on every stove island in the hub.
+  const herb = buildHerbSprig(M, 0.85);
+  herb.position.set(-wM * 0.37, cabH, -dM * 0.36);
+  g.add(herb);
 
   if (opts?.panRack) {
     const postH = 1.15;
@@ -270,6 +384,15 @@ function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.Group {
     g.add(strip);
   }
 
+  // Cold light spilling onto the floor in front of the door — pushes the freezer's
+  // cool colour out past its own footprint and onto the ground plane around it.
+  const glow = mesh(new THREE.CircleGeometry(dM * 0.62, 20), M.freezerGlow, 'freezer_floor_glow__no_outline');
+  glow.rotation.x = -Math.PI / 2;
+  glow.scale.set(1, 1.4, 1);
+  glow.position.set(0, 0.02, dM / 2 + dM * 0.35);
+  noOutline(glow);
+  g.add(glow);
+
   return g;
 }
 
@@ -318,6 +441,46 @@ function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Group {
   const onion = mesh(new THREE.SphereGeometry(0.13, 10, 8), M.onion, 'crate_onion');
   onion.position.set(0, h1 + h2 + 0.11, 0);
   g.add(onion);
+
+  return g;
+}
+
+/**
+ * Cool-toned herb crate — same silhouette language as `buildCrateSmall` (a slatted
+ * box with produce piled on top) but built entirely from the teal-green side of the
+ * palette. Exists specifically to break up the orange/tan/cream monochrome the
+ * critic called out: a whole crate body in a different hue family, not just a small
+ * coloured prop sitting on a warm one.
+ */
+function buildHerbCrate(M: Materials, wM: number, dM: number): THREE.Group {
+  const g = new THREE.Group();
+  const h = 0.82;
+  const crate = mesh(roundedBox(wM, h, dM, 0.05), M.herbCrateWood, 'crate_body');
+  crate.position.y = h / 2;
+  g.add(crate);
+
+  for (const rot of [Math.PI / 5, -Math.PI / 5]) {
+    const slat = mesh(new THREE.BoxGeometry(wM * 1.02, 0.05, dM * 1.02), M.herbCrateSlat, 'crate_slat__no_outline');
+    noOutline(slat);
+    slat.rotation.y = rot;
+    slat.position.y = h * 0.55;
+    g.add(slat);
+  }
+
+  // Bundled herb sprigs instead of loose produce — bold cone clusters read as
+  // bunched greens at gameplay distance without needing fine leaf detail.
+  const bundlePositions: Array<[number, number]> = [[-wM * 0.2, dM * 0.1], [wM * 0.18, -dM * 0.12], [wM * 0.02, dM * 0.28]];
+  const leafMats = [M.herbLeafA, M.herbLeafB];
+  bundlePositions.forEach(([sx, sz], i) => {
+    for (let k = 0; k < 3; k++) {
+      const leaf = mesh(new THREE.ConeGeometry(0.05, 0.24, 6), leafMats[k % 2], 'crate_herb_leaf');
+      const a = (k / 3) * Math.PI * 2;
+      leaf.position.set(sx + Math.cos(a) * 0.05, h + 0.16, sz + Math.sin(a) * 0.05);
+      leaf.rotation.set(Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3);
+      g.add(leaf);
+    }
+    void i;
+  });
 
   return g;
 }
@@ -431,7 +594,11 @@ function buildLanePots(M: Materials, wM: number, dM: number): THREE.Group {
 function buildSpiceCart(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h = 0.62;
-  const body = mesh(roundedBox(wM * 0.85, h, dM * 0.85, 0.05), M.cabinetDark, 'cart_body');
+  // Cool teal body, not the warm cabinetDark used everywhere else — this cart sits
+  // dead-centre in the hub chokepoint and is one of the very few props guaranteed
+  // to be on-screen in every gameplay frame, so its hue does real work for palette
+  // contrast.
+  const body = mesh(roundedBox(wM * 0.85, h, dM * 0.85, 0.05), M.tealTileDark, 'cart_body');
   body.position.y = h / 2 + 0.06;
   g.add(body);
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
@@ -441,7 +608,9 @@ function buildSpiceCart(M: Materials, wM: number, dM: number): THREE.Group {
     noOutline(wheel);
     g.add(wheel);
   }
-  const jarColors = [PALETTE.tomato, PALETTE.lettuce, PALETTE.mustard, PALETTE.onion];
+  // Mostly-cool jars with a single warm tomato pop — the same "cool field, one warm
+  // accent" contrast the reference frames use, just at prop scale.
+  const jarColors = [PALETTE.lettuce, KPAL.herbLeafB, PALETTE.waterCap, PALETTE.tomato];
   let jx = -wM * 0.28;
   for (const c of jarColors) {
     const jar = mesh(puck(0.06, 0.16, 10), toonMat({ color: c }), 'cart_jar');
@@ -473,6 +642,11 @@ function buildPot(M: Materials): PotAssembly {
 
   const solid = new THREE.Group();
   solid.name = 'pot_solid';
+
+  // Contact AO directly under the pot's own base — a tighter, darker ring than the
+  // broad hazard scorch, so the heaviest object in the arena visibly presses into
+  // the floor rather than floating on top of it.
+  g.add(buildContactShadow(M.contactShadow, bodyR * 2.1, bodyR * 2.1, 1));
 
   const base = mesh(puck(bodyR * 0.5, 0.06, 24), M.potMetalDark, 'pot_stove_base');
   base.position.y = 0.03;
@@ -548,21 +722,192 @@ function buildPot(M: Materials): PotAssembly {
 // ─────────────────────────────────────────────────────────────────────────────
 // Floor — big flat graphic shapes, not fine repeating texture. A checkerboard of
 // 5m tiles (two InstancedMeshes, one per shade) covers the whole playfield; wood
-// pads sit above it under the two pantry nooks; a warm accent disc marks the hub.
+// pads sit above it under the two pantry nooks; a cool tile ring circles the hub.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Floor layer heights, in METRES. Gameplay/overview cameras sit 20-100m out, where a
 // standard depth buffer has nowhere near enough precision to resolve millimetre gaps
-// reliably — an early pass stacked these a few mm apart and the hot-zone disc lost the
-// z-fight against the tile field beneath it, showing checkerboard through the "solid"
-// accent. Centimetre-scale separation is still visually flat from gameplay distance but
-// leaves the depth buffer an unambiguous answer.
+// reliably — an early pass stacked these a few mm apart and lost z-fights against the
+// tile field beneath. Centimetre-scale separation is still visually flat from gameplay
+// distance but leaves the depth buffer an unambiguous answer.
 const FLOOR_Y = {
   subfloor: -0.1,
   tile: 0,
-  decal: 0.15, // hot-zone, puddles, flour, wood pads, border trim — never overlap each other
-  fine: 0.25, // marks drawn ON a decal (wood seams, danger ring)
+  decal: 0.15, // scorch patch, puddles, flour, wood pads, tile ring, border trim
+  fine: 0.25, // marks drawn ON a decal (wood seams, hazard ring/glow)
 } as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hazard ground treatment — the pot's danger radius, drawn as a scorched floor
+// patch + a bright glow ring + drifting heat wisps, NOT a flat opaque disc. Every
+// measurement is driven off `POT.dangerRadius` (the actual gameplay hazard radius
+// from `game/rules.ts`), so the visual always matches exactly what hurts the player —
+// only the drawing changed, not the hazard.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Soft, organic dark wash + irregular char blotches — reads as scorched concrete,
+ * not a coloured lid, and lets the tile pattern show through almost everywhere. */
+function makeScorchTexture(): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const cx = size / 2, cy = size / 2;
+
+  const base = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.5);
+  base.addColorStop(0, 'rgba(58,26,14,0.5)');
+  base.addColorStop(0.5, 'rgba(66,32,16,0.26)');
+  base.addColorStop(0.78, 'rgba(74,38,18,0.08)');
+  base.addColorStop(1, 'rgba(74,38,18,0)');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, size, size);
+
+  let seed = 907;
+  const rand = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
+  for (let i = 0; i < 16; i++) {
+    const a = rand() * Math.PI * 2;
+    const r = rand() * size * 0.42;
+    const bx = cx + Math.cos(a) * r;
+    const by = cy + Math.sin(a) * r;
+    const br = size * (0.03 + rand() * 0.08);
+    const g = ctx.createRadialGradient(bx, by, 0, bx, by, br);
+    const alpha = 0.14 + rand() * 0.2;
+    g.addColorStop(0, `rgba(32,16,9,${alpha})`);
+    g.addColorStop(1, 'rgba(32,16,9,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(bx, by, br, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Soft halo centred exactly on the hazard boundary — bright, defined edge with a
+ * falloff on either side, instead of a hard-edged disc. `ringNorm` here must match
+ * `glowPlaneR`'s derivation in `buildHazardGround` below. */
+function makeHazardGlowTexture(): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const cx = size / 2, cy = size / 2, R = size * 0.5;
+  const ringNorm = 0.84;
+
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+  g.addColorStop(0, 'rgba(255,140,60,0)');
+  g.addColorStop(Math.max(0, ringNorm - 0.22), 'rgba(255,120,50,0)');
+  g.addColorStop(ringNorm - 0.07, 'rgba(255,130,55,0.2)');
+  g.addColorStop(ringNorm - 0.02, 'rgba(255,214,140,0.65)');
+  g.addColorStop(ringNorm, 'rgba(255,240,195,0.95)');
+  g.addColorStop(ringNorm + 0.025, 'rgba(255,170,80,0.5)');
+  g.addColorStop(ringNorm + 0.09, 'rgba(255,110,40,0.16)');
+  g.addColorStop(1, 'rgba(255,90,30,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+interface HazardGround {
+  group: THREE.Group;
+  glowMat: THREE.MeshBasicMaterial;
+  wisps: THREE.Mesh[];
+}
+
+function buildHazardGround(M: Materials): HazardGround {
+  const g = new THREE.Group();
+  noOutline(g);
+
+  const R = wu(POT.dangerRadius);
+
+  // Scorched floor patch — organic, mostly transparent, sits at the same layer as
+  // every other floor decal (puddles, wood pads).
+  const scorchMat = new THREE.MeshBasicMaterial({ map: makeScorchTexture(), transparent: true, depthWrite: false });
+  const scorch = new THREE.Mesh(new THREE.PlaneGeometry(R * 2.15, R * 2.15), scorchMat);
+  scorch.rotation.x = -Math.PI / 2;
+  scorch.position.y = FLOOR_Y.decal;
+  scorch.renderOrder = 1;
+  g.add(scorch);
+
+  // Bright glow halo, centred exactly on the real hazard boundary.
+  const ringNorm = 0.84;
+  const glowPlaneR = R / ringNorm * 1.02;
+  const glowMat = new THREE.MeshBasicMaterial({
+    map: makeHazardGlowTexture(),
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(glowPlaneR * 2, glowPlaneR * 2), glowMat);
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = FLOOR_Y.fine;
+  glow.renderOrder = 2;
+  g.add(glow);
+
+  // Crisp crest line right on the boundary — the "bright defined edge" the glow
+  // alone can't quite give at gameplay camera distance.
+  const crisp = mesh(
+    new THREE.RingGeometry(R - 0.03, R + 0.03, 64),
+    flatMat('#FFDCA0', { transparent: true, opacity: 0.8 }),
+    'hazard_ring_crisp'
+  );
+  crisp.rotation.x = -Math.PI / 2;
+  crisp.position.y = FLOOR_Y.fine + 0.002;
+  noOutline(crisp);
+  g.add(crisp);
+
+  // Heat-shimmer wisps drifting up off the boundary — cheap stand-in for real
+  // screen-space refraction, animated (rise + fade, looping) in the arena's update().
+  const wisps: THREE.Mesh[] = [];
+  const wispCount = 7;
+  for (let i = 0; i < wispCount; i++) {
+    const a = (i / wispCount) * Math.PI * 2 + 0.35;
+    const wispMat = flatMat('#FFE6B8', { transparent: true, opacity: 0.28 });
+    const wisp = mesh(new THREE.ConeGeometry(R * 0.1, R * 0.36, 8, 1, true), wispMat, 'hazard_wisp__no_outline');
+    noOutline(wisp);
+    wisp.position.set(Math.cos(a) * R * 0.96, 0.04, Math.sin(a) * R * 0.96);
+    wisp.userData.baseY = wisp.position.y;
+    wisp.userData.phase = i * 0.7;
+    g.add(wisp);
+    wisps.push(wisp);
+  }
+
+  return { group: g, glowMat, wisps };
+}
+
+/**
+ * Scattered loose ingredients ringing the hub — bold, small, deterministic (seeded
+ * RNG, not `Math.random()`) so the arena is identical across rebuilds/hot-reloads.
+ * Kept purely decorative (no CoverBox) at a radius that never reaches an existing
+ * prop, so it adds visual density without touching collision.
+ */
+function buildHubDebris(M: Materials): THREE.Group {
+  const g = new THREE.Group();
+  noOutline(g);
+  let seed = 733;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const mats = [M.tomato, M.onion, M.lettuce];
+  const count = 12;
+  for (let i = 0; i < count; i++) {
+    const ang = rand() * Math.PI * 2;
+    const r = 104 + rand() * 30; // 104..134 wu — clear of the hazard glow and every hub prop
+    const wx = CENTER.x + Math.cos(ang) * r;
+    const wy = CENTER.y + Math.sin(ang) * r;
+    const s = 0.08 + rand() * 0.06;
+    const item = mesh(new THREE.SphereGeometry(s, 8, 6), mats[i % mats.length], 'hub_debris_veg');
+    const p = groundPos(wx, wy);
+    item.position.set(p.x, s * 0.7, p.z);
+    item.scale.y = 0.7;
+    item.rotation.y = rand() * Math.PI * 2;
+    g.add(item);
+  }
+  return g;
+}
 
 function buildFloor(M: Materials): THREE.Group {
   const g = new THREE.Group();
@@ -608,12 +953,55 @@ function buildFloor(M: Materials): THREE.Group {
   darkMesh.instanceMatrix.needsUpdate = true;
   g.add(lightMesh, darkMesh);
 
-  // Hub hot-zone accent — warm disc under the stove cluster.
-  const hot = mesh(new THREE.CircleGeometry(wu(155), 40), M.hotzone, 'floor_hotzone');
-  hot.rotation.x = -Math.PI / 2;
-  hot.position.set(wu(CENTER.x), FLOOR_Y.decal, wu(CENTER.y));
-  noOutline(hot);
-  g.add(hot);
+  // Hub tile ring — a deliberate COOL band circling the hub, sitting between the
+  // (warm) hazard glow at the centre and the (warm) stove islands beyond it. This is
+  // the "teal-tiled zone" called out in the critique: real floor real-estate in a
+  // colour nothing else near the hub uses, not just a small coloured prop. Radii are
+  // hand-fit to the gap between the hazard's glow falloff (~106wu) and the nearest
+  // stove-island corner (~138wu) so it never overlaps either.
+  const ringInner = wu(112);
+  const ringOuter = wu(128);
+  const tealRing = mesh(new THREE.RingGeometry(ringInner, ringOuter, 56), M.tealTile, 'floor_teal_ring');
+  tealRing.rotation.x = -Math.PI / 2;
+  tealRing.position.set(wu(CENTER.x), FLOOR_Y.decal, wu(CENTER.y));
+  noOutline(tealRing);
+  g.add(tealRing);
+  for (const rr of [ringInner, ringOuter]) {
+    const trim = mesh(new THREE.RingGeometry(rr - 0.02, rr + 0.02, 56), M.tealTileDark, 'floor_teal_ring_trim');
+    trim.rotation.x = -Math.PI / 2;
+    trim.position.set(wu(CENTER.x), FLOOR_Y.fine, wu(CENTER.y));
+    noOutline(trim);
+    g.add(trim);
+  }
+
+  // Scattered ingredients + floor wear around the hub — the empty tan floor in the
+  // lane gaps was the single biggest "this feels empty" tell at gameplay framing.
+  // Radius band (104-134wu) sits just past the hazard ring and stays clear of every
+  // hub prop (nearest is the stove islands' inner corner at ~138wu), so it's safe
+  // regardless of angle.
+  g.add(buildHubDebris(M));
+
+  // A couple of worn-floor marks near the service counters — grease under the
+  // fryer (south), a cool wet sheen under the sink (north), doubling as one more
+  // small patch of cool colour close to the hub.
+  const grimeSpots: Array<[number, number, number]> = [[672, 792, 20], [733, 805, 15]];
+  for (const [gx, gy, gr] of grimeSpots) {
+    const spot = mesh(new THREE.CircleGeometry(wu(gr), 12), M.floorGrime, 'floor_grime');
+    spot.rotation.x = -Math.PI / 2;
+    spot.scale.set(1, 1.3, 1);
+    spot.position.set(wu(gx), FLOOR_Y.decal, wu(gy));
+    noOutline(spot);
+    g.add(spot);
+  }
+  const wetSpots: Array<[number, number, number]> = [[668, 205, 18], [730, 195, 13]];
+  for (const [gx, gy, gr] of wetSpots) {
+    const spot = mesh(new THREE.CircleGeometry(wu(gr), 12), M.floorWet, 'floor_wet');
+    spot.rotation.x = -Math.PI / 2;
+    spot.scale.set(1.3, 1, 1);
+    spot.position.set(wu(gx), FLOOR_Y.decal, wu(gy));
+    noOutline(spot);
+    g.add(spot);
+  }
 
   // Wood pantry pads (NE + SW) — sit above the tile, hiding it under the clusters.
   const woodPads: Array<[number, number, number, number]> = [
@@ -705,10 +1093,11 @@ interface CoverSpec {
   build: (wM: number, dM: number) => THREE.Group;
 }
 
-function addCover(propsGroup: THREE.Group, cover: CoverBox[], spec: CoverSpec): THREE.Group {
+function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Materials, spec: CoverSpec): THREE.Group {
   const wM = wu(spec.w);
   const dM = wu(spec.h);
   const group = spec.build(wM, dM);
+  group.add(buildContactShadow(M.contactShadow, wM, dM));
   const p = groundPos(spec.x, spec.y);
   group.position.set(p.x, 0, p.z);
   if (spec.yawDeg) group.rotation.y = THREE.MathUtils.degToRad(spec.yawDeg);
@@ -737,100 +1126,103 @@ export const createKitchenArena: ArenaFactory = () => {
 
   // ── Central stove hub ────────────────────────────────────────────────────────
   const HUB_ISLAND_W = 170, HUB_ISLAND_H = 90;
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x - 175, y: CENTER.y - 150, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island',
     build: (w, d) => buildStoveIsland(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x + 175, y: CENTER.y - 150, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island',
     build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x - 175, y: CENTER.y + 150, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island', yawDeg: 180,
     build: (w, d) => buildStoveIsland(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x + 175, y: CENTER.y + 150, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island', yawDeg: 180,
     build: (w, d) => buildStoveIsland(M, w, d),
   });
 
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x, y: CENTER.y - 242, w: 55, h: 55, kind: 'stacked_pots',
     build: (w, d) => buildLanePots(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x, y: CENTER.y + 242, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
     build: (w, d) => buildLanePots(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x - 175, y: CENTER.y, w: 50, h: 50, kind: 'spice_cart',
     build: (w, d) => buildSpiceCart(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x + 175, y: CENTER.y, w: 50, h: 50, kind: 'spice_cart', yawDeg: 180,
     build: (w, d) => buildSpiceCart(M, w, d),
   });
 
   // ── Walk-in freezers (NW / SE) ───────────────────────────────────────────────
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: 230, y: 190, w: 230, h: 190, kind: 'freezer',
     build: (w, d) => buildFreezerSized(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: ARENA_W - 230, y: ARENA_H - 190, w: 230, h: 190, kind: 'freezer', yawDeg: 180,
     build: (w, d) => buildFreezerSized(M, w, d),
   });
 
   // ── Pantry clusters (NE / SW) ────────────────────────────────────────────────
-  addCover(propsGroup, cover, {
-    x: 1120, y: 150, w: 90, h: 90, kind: 'produce_crate',
-    build: (w, d) => buildCrateSmall(M, w, d),
+  // One crate in each pantry cluster is the cool-toned herb crate rather than the
+  // warm produce crate — every prop cluster in the arena carries at least one
+  // deliberate counterpoint hue instead of being uniformly orange/tan.
+  addCover(propsGroup, cover, M, {
+    x: 1120, y: 150, w: 90, h: 90, kind: 'herb_crate',
+    build: (w, d) => buildHerbCrate(M, w, d),
   });
-  addCover(propsGroup, cover, {
-    x: ARENA_W - 1120, y: ARENA_H - 150, w: 90, h: 90, kind: 'produce_crate', yawDeg: 180,
-    build: (w, d) => buildCrateSmall(M, w, d),
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1120, y: ARENA_H - 150, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    build: (w, d) => buildHerbCrate(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: 1230, y: 140, w: 80, h: 80, kind: 'produce_crate_tall',
     build: (w, d) => buildCrateTall(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: ARENA_W - 1230, y: ARENA_H - 140, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
     build: (w, d) => buildCrateTall(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: 1175, y: 235, w: 110, h: 70, kind: 'flour_sacks',
     build: (w, d) => buildFlourSack(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: ARENA_W - 1175, y: ARENA_H - 235, w: 110, h: 70, kind: 'flour_sacks', yawDeg: 180,
     build: (w, d) => buildFlourSack(M, w, d),
   });
 
   // ── Prep stations (mid-west / mid-east) ──────────────────────────────────────
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: 340, y: 420, w: 160, h: 55, kind: 'prep_counter',
     build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: 340, y: 580, w: 160, h: 55, kind: 'prep_counter',
     build: (w, d) => buildPrepCounter(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: ARENA_W - 340, y: ARENA_H - 420, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
     build: (w, d) => buildPrepCounter(M, w, d),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: ARENA_W - 340, y: ARENA_H - 580, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
     build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
   });
 
   // ── Service counters (fryer south / sink north) ──────────────────────────────
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x, y: 830, w: 150, h: 70, kind: 'fryer_counter',
     build: (w, d) => buildServiceCounter(M, w, d, 'fryer'),
   });
-  addCover(propsGroup, cover, {
+  addCover(propsGroup, cover, M, {
     x: CENTER.x, y: 170, w: 150, h: 70, kind: 'sink_counter', yawDeg: 180,
     build: (w, d) => buildServiceCounter(M, w, d, 'sink'),
   });
@@ -844,16 +1236,12 @@ export const createKitchenArena: ArenaFactory = () => {
   pot.group.position.set(potPos.x, 0, potPos.z);
   root.add(pot.group);
 
-  // Danger-ring ground marking (visual only — not collidable, not a CoverBox).
-  const dangerRing = mesh(
-    new THREE.RingGeometry(wu(POT.dangerRadius) - 0.04, wu(POT.dangerRadius), 48),
-    flatMat('#E63946', { transparent: true, opacity: 0.4 }),
-    'pot_danger_ring'
-  );
-  dangerRing.rotation.x = -Math.PI / 2;
-  dangerRing.position.set(potPos.x, FLOOR_Y.fine, potPos.z);
-  noOutline(dangerRing);
-  root.add(dangerRing);
+  // Hazard ground marking (visual only — not collidable, not a CoverBox). Scorch +
+  // glow ring + heat wisps, radius driven directly off POT.dangerRadius so it always
+  // matches the real hazard exactly.
+  const hazardGround = buildHazardGround(M);
+  hazardGround.group.position.set(potPos.x, 0, potPos.z);
+  root.add(hazardGround.group);
 
   const hazards: HazardZone[] = [
     { x: CENTER.x, y: CENTER.y, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs },
@@ -881,6 +1269,7 @@ export const createKitchenArena: ArenaFactory = () => {
 
   // ── Chalkboard menu — freestanding, thin, decorative only ───────────────────
   const board = new THREE.Group();
+  board.add(buildContactShadow(M.contactShadow, 0.55, 0.32, 1));
   const legMat = M.crateSlat;
   for (const sx of [-0.24, 0.24]) {
     const leg = mesh(puck(0.02, 0.62, 6), legMat, 'chalkboard_leg');
@@ -951,6 +1340,21 @@ export const createKitchenArena: ArenaFactory = () => {
       const flicker = 0.75 + Math.sin(elapsed * 18) * 0.12 + Math.sin(elapsed * 41 + 1.3) * 0.08;
       pot.flame.scale.set(1, THREE.MathUtils.clamp(flicker, 0.5, 1.15), 1);
       pot.flameCore.scale.set(1, THREE.MathUtils.clamp(flicker * 1.08, 0.5, 1.2), 1);
+
+      // Hazard boundary: a slow breathing pulse on the glow halo, plus heat wisps
+      // rising and fading off the ring — the "shimmer" that keeps the danger zone
+      // reading as active heat rather than a painted mark.
+      hazardGround.glowMat.opacity = 0.75 + Math.sin(elapsed * 2.6) * 0.2;
+      const wispCycle = 1.9;
+      hazardGround.wisps.forEach((wisp, i) => {
+        const t = ((elapsed + (wisp.userData.phase as number)) % wispCycle) / wispCycle;
+        const baseY = wisp.userData.baseY as number;
+        wisp.position.y = baseY + t * 0.7;
+        const mat = wisp.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.3 * (1 - t) * (t < 0.2 ? t / 0.2 : 1);
+        wisp.scale.setScalar(0.6 + t * 0.7);
+        void i;
+      });
 
       // Slow-drifting dust motes: gentle circular drift + vertical bob, wrapped.
       const bounds = { w: wu(ARENA_W), h: wu(ARENA_H) };

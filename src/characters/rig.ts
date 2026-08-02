@@ -224,7 +224,12 @@ export class ChibiRig {
     // as "toy robot wearing a costume head" — the plain slab was doing active harm.
     // Characters SHOULD still dress this with their own food geometry (see the
     // `dressTorso` helper); this is a decent default, not a finished body.
-    const tw = this.p.shoulderWidth * 1.72;
+    // Torso width is deliberately NARROWER than the shoulder span. At 1.72x the
+    // shoulder width, half-width (0.36m) barely cleared the shoulder pivots (0.42m),
+    // so 0.12m-radius arms sank into the body and the whole character read as a pile
+    // of overlapping dough balls. Limbs must sit clearly OUTSIDE the torso silhouette
+    // for the body to read as a body.
+    const tw = this.p.shoulderWidth * 1.18;
     const torsoGeo = new THREE.SphereGeometry(tw * 0.5, 20, 16);
     // Taper: narrow at the shoulders, fuller at the waist, so it reads as a soft
     // body rather than a capsule.
@@ -235,7 +240,7 @@ export class ChibiRig {
       const taper = 0.86 + 0.30 * Math.sin(t * Math.PI * 0.85);
       pos.setX(i, pos.getX(i) * taper);
       pos.setZ(i, pos.getZ(i) * taper * 0.88);
-      pos.setY(i, y * (torsoH / tw));
+      pos.setY(i, y * (torsoH / tw) * 0.92);
     }
     torsoGeo.computeVertexNormals();
 

@@ -29,7 +29,9 @@ import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render
 import { ChibiRig } from './rig';
 
 const SHELL = PALETTE.egg;          // #FFF8EA — matte-ish porcelain
-const SHELL_SHADOW = '#E4D6AE';     // crack gap + brow-crease shadow
+const SHELL_SHADOW = '#E4D6AE';     // faint brow-crease shadow, subtle on purpose
+const CRACK_DARK = '#7C5530';       // the crack itself — needs real value contrast against
+                                     // the pale shell or it reads as a stray highlight, not a break
 const YOLK = '#FFC23C';             // glossy peek at the crack tip
 const NEON_ACCENT = RARITY_COLORS.Neon; // #FF2FD0 — Egg's rarity accent, used ONLY on the crack seam
 const INK = PALETTE.ink;
@@ -42,8 +44,9 @@ const INK = PALETTE.ink;
 const TOP_TAPER = 0.42;
 /** How much the shell bulges below the equator — the "fuller at the bottom" read. */
 const BOTTOM_BULGE = 0.16;
-/** Overall vertical elongation, taller than it is wide like a real egg. */
-const VERT_SCALE = 1.08;
+/** Overall vertical elongation, taller than it is wide like a real egg. Kept modest —
+ * an earlier pass at 1.08 pushed idle height to 2.26m, visibly off the 2.1m cast norm. */
+const VERT_SCALE = 1.04;
 
 /** Unit direction from spherical angles. theta=0 is character-front (+Z),
  * increasing toward +X (her right). phi=0 is the top pole, phi=PI the bottom. */
@@ -87,11 +90,11 @@ function addShellDecal(parent: THREE.Object3D, theta: number, phi: number, embed
   return g;
 }
 
-/** Path (theta, phi-as-fraction-of-PI) for the crack landmark: crown, down the
- * right side, zigzagging past the equator. Kept clear of the eyes (theta ±0.50)
- * and mouth (theta 0). */
+/** Path (theta, phi-as-fraction-of-PI) for the crack landmark: a short, bold
+ * zigzag on the temple/cheek, well clear of the eyes (theta ±0.50) and mouth
+ * (theta 0) so it reads as a distinct scar rather than crowding the face. */
 const CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
-  [1.00, 0.24], [1.22, 0.32], [0.92, 0.40], [1.16, 0.49], [0.86, 0.57],
+  [1.28, 0.27], [1.48, 0.35], [1.20, 0.42], [1.42, 0.50],
 ];
 
 /**
@@ -123,8 +126,11 @@ function buildCrackLine(
 
     // Taper the two end segments so the crack fades rather than stopping abruptly.
     const taper = i === 0 || i === pts.length - 2 ? 0.65 : 1;
+    // Kept deliberately flat (shallow Z/normal depth) — an earlier pass used a
+    // near-cubic cross-section whose own proud depth was enough to bury the
+    // thinner glow line laid on top of it, so the "glow" never actually showed.
     const seg = new THREE.Mesh(
-      new THREE.BoxGeometry(length * 1.2, opts.thickness * taper, opts.thickness * 0.5),
+      new THREE.BoxGeometry(length * 1.2, opts.thickness * taper, opts.thickness * 0.16),
       mat
     );
     seg.position.copy(mid).addScaledVector(normal, opts.embed);
@@ -149,7 +155,7 @@ export class EggCharacter extends BaseCharacter {
         torso: SHELL,
         limbRoughness: 0.5,
       },
-      proportions: { headFraction: 0.47 },
+      proportions: { headFraction: 0.44 },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -176,24 +182,26 @@ export class EggCharacter extends BaseCharacter {
     head.add(shell);
 
     // ── Crack: the silhouette landmark ────────────────────────────────────────
-    // Dark structural line (shadow of the gap), then a thinner glowing seam laid
-    // just proud of it — the Neon accent, restrained to this one feature rather
-    // than washing the whole shell.
+    // Bold caramel-brown fracture line — high contrast against the pale shell,
+    // the way a real cracked eggshell darkens along the break. The Neon accent
+    // is deliberately NOT smeared along the whole seam (that read as a blown-out
+    // glow stripe on the first pass); instead it's one small, hot ember at the
+    // crack's widest gap, right where the yolk peeks through.
     buildCrackLine(head, R, CRACK_PATH, {
-      thickness: R * 0.052, embed: R * 0.006, color: SHELL_SHADOW, roughness: 0.55,
+      thickness: R * 0.062, embed: R * 0.007, color: CRACK_DARK, roughness: 0.55,
     });
-    buildCrackLine(head, R, CRACK_PATH, {
-      thickness: R * 0.020, embed: R * 0.011, color: '#FFE3F7', roughness: 0.35,
-      emissive: NEON_ACCENT, emissiveIntensity: 0.5,
+    buildCrackLine(head, R, [CRACK_PATH[2], CRACK_PATH[3]], {
+      thickness: R * 0.026, embed: R * 0.017, color: NEON_ACCENT, roughness: 0.3,
+      emissive: NEON_ACCENT, emissiveIntensity: 1.0,
     });
 
-    // A glossy sliver of yolk peeking through the lowest point of the crack —
+    // A glossy sliver of yolk peeking through the widest point of the crack —
     // wet where the shell is matte, and a quiet nod to Hatch!.
     const tip = CRACK_PATH[CRACK_PATH.length - 1];
     const tipSurface = eggSurface(tip[0], tip[1] * Math.PI, R);
-    const yolk = new THREE.Mesh(new THREE.SphereGeometry(R * 0.05, 12, 10), glossyMat({ color: YOLK, roughness: 0.2 }));
+    const yolk = new THREE.Mesh(new THREE.SphereGeometry(R * 0.065, 12, 10), glossyMat({ color: YOLK, roughness: 0.2 }));
     yolk.scale.set(1, 1, 0.4);
-    yolk.position.copy(tipSurface.pos).addScaledVector(tipSurface.normal, R * 0.004);
+    yolk.position.copy(tipSurface.pos).addScaledVector(tipSurface.normal, R * 0.003);
     yolk.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tipSurface.normal);
     yolk.userData.noOutline = true;
     head.add(yolk);
@@ -242,7 +250,9 @@ export class EggCharacter extends BaseCharacter {
         roundedBox(R * 0.20, R * 0.040, R * 0.028, R * 0.018, 2),
         toonMat({ color: SHELL_SHADOW, roughness: 0.45 })
       );
-      creaseMesh.rotation.z = -sx * 0.38;
+      // (sign verified against a render: the naive -sx tilt read as angry —
+      // inner end low, outer high — so this is flipped to lift the inner end.)
+      creaseMesh.rotation.z = sx * 0.38;
       creaseMesh.castShadow = true;
       brow.add(creaseMesh);
     }

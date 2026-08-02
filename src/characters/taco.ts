@@ -33,7 +33,8 @@ const MEAT_DARK = PALETTE.pattyDark; // '#4E2C1B'
 const TOMATO = PALETTE.tomato;       // '#E63946'
 const LETTUCE = '#8FCB1E';
 const LETTUCE_DARK = '#6FA112';
-const ONION = '#C9A2E0';       // ties visually to the Onion Bomb projectile colour
+const ONION = '#AD82D6';       // ties visually to the Onion Bomb projectile colour — kept saturated
+                                // enough not to read as another tomato bit at a glance
 
 /**
  * Trapezoid shell outline: a narrow crease at the bottom (the fold) widening to an
@@ -87,6 +88,7 @@ export class TacoCharacter extends BaseCharacter {
     // Every filling gets its own roughness so the fold reads as bread + seared meat +
     // wet vegetables rather than one glossy plastic shader repeated in different hues.
     const shellMat = toonMat({ color: SHELL, roughness: 0.8 });        // crisp, dry, fried shell
+    const shellDarkMat = toonMat({ color: SHELL_DARK, roughness: 0.8 });
     const podMat = toonMat({ color: POD, roughness: 0.76 });
     const meatMat = toonMat({ color: MEAT, roughness: 0.55 });         // seared, faintly greasy
     const meatDarkMat = toonMat({ color: MEAT_DARK, roughness: 0.5 });
@@ -96,40 +98,78 @@ export class TacoCharacter extends BaseCharacter {
     const onionMat = glossyMat({ color: ONION, roughness: 0.32 });     // moist, faintly translucent
 
     // ── Shell ────────────────────────────────────────────────────────────────
-    // A wide, jagged-topped trapezoid — the "hard shell taco" read at any distance.
-    // Given real thickness (not a flat cutout) so it survives edge-on camera angles.
+    // A wide, jagged-topped trapezoid — the "hard shell taco" read at a glance — but
+    // NOT one flat panel. Round 1 built it as a single extruded slab and it disappeared
+    // to a thin featureless blade from every angle except near-front (idle_135/210
+    // showed nothing but a flat gold triangle). Fixed by splitting it into two full
+    // panels hinged at the bottom crease and tilted apart around that hinge like an
+    // open book: the front wall leans toward the camera, the back wall leans away.
+    // From the front this still reads as a solid shell; from the side/back the "V"
+    // itself is now the silhouette, with real width in every direction.
     const halfWBot = R * 0.16;
-    const halfWTop = R * 0.95;
-    const yBot = -R * 0.92;
-    const yTopBase = R * 0.58;
-    const shellDepth = R * 0.62;
+    const halfWTop = R * 0.92;
+    const yBot = -R * 0.85;
+    const yTopBase = R * 0.55;
+    const panelThickness = R * 0.16;
+    const tilt = 0.44; // radians each panel splays from vertical
+    const hingeY = yBot;
 
     const shellShape = tacoShellShape(halfWBot, halfWTop, yBot, yTopBase, 9, R * 0.3);
     const shellGeo = new THREE.ExtrudeGeometry(shellShape, {
-      depth: shellDepth, bevelEnabled: false, curveSegments: 1,
+      depth: panelThickness, bevelEnabled: false, curveSegments: 1,
     });
-    shellGeo.translate(0, 0, -shellDepth / 2);
+    shellGeo.translate(0, 0, -panelThickness / 2);
     shellGeo.computeVertexNormals();
-    const shell = new THREE.Mesh(shellGeo, shellMat);
-    shell.name = 'taco_shell';
-    shell.castShadow = true;
-    shell.receiveShadow = true;
-    head.add(shell);
-    const shellFrontZ = shellDepth / 2;
+
+    // Front wall — the dominant, camera-facing panel. Everything else (fillings, the
+    // face pod) is parented under it so those features inherit its tilt for free and
+    // stay correctly attached at every angle instead of needing separate hinge math.
+    const frontPivot = new THREE.Group();
+    frontPivot.name = 'shell_front_pivot';
+    frontPivot.position.set(0, hingeY, 0);
+    frontPivot.rotation.x = tilt;
+    head.add(frontPivot);
+    const frontMesh = new THREE.Mesh(shellGeo, shellMat);
+    frontMesh.name = 'taco_shell_front';
+    frontMesh.position.set(0, -hingeY, 0); // re-centres the shape's own yBot back onto the hinge
+    frontMesh.castShadow = true;
+    frontMesh.receiveShadow = true;
+    frontPivot.add(frontMesh);
+
+    // Back wall — same geometry, tilted the opposite way, a shade darker so it reads
+    // as the shadowed inner wall of the fold rather than a plain duplicate.
+    const backPivot = new THREE.Group();
+    backPivot.name = 'shell_back_pivot';
+    backPivot.position.set(0, hingeY, 0);
+    backPivot.rotation.x = -tilt;
+    head.add(backPivot);
+    const backMesh = new THREE.Mesh(shellGeo, shellDarkMat);
+    backMesh.name = 'taco_shell_back';
+    backMesh.position.set(0, -hingeY, 0);
+    backMesh.castShadow = true;
+    backMesh.receiveShadow = true;
+    backPivot.add(backMesh);
 
     // ── Fillings: meat, tomato, lettuce, a wink of onion ────────────────────────
-    // Piled onto the shell's front face in its upper half so they read as spilling
-    // out the open top, each mesh embedded (overlapping into the shell surface) so
-    // nothing floats detached from the shell it sits on.
-    const meatSpots: Array<[number, number, THREE.Material]> = [
-      [-0.55, 0.18, meatMat], [-0.14, 0.42, meatDarkMat], [0.3, 0.22, meatMat],
-      [0.6, -0.02, meatDarkMat], [0.0, -0.08, meatMat], [-0.32, -0.14, meatDarkMat],
+    // Sit in the gap between the two walls (z spans from the back wall toward the
+    // front one), embedded into whichever wall they're closest to so nothing reads as
+    // floating. Positions are given in "natural" (untilted) head-space coordinates —
+    // the fillings themselves stay untilted, independent of either wall, which is
+    // exactly right for something loose sitting in the pocket between them.
+    // Round 2 defect: meat sat too low/shallow (fy<=0.28, fz<=0.2) and was completely
+    // hidden behind the front wall's crimp from every camera angle tested — only the
+    // lettuce read. Raised into the same upper "peeking over the crimp" band the
+    // lettuce and tomato occupy, low RGB choices swapped for a bit of extra spread so
+    // it still forms a visible base layer under them rather than an equal-height mush.
+    const meatSpots: Array<[number, number, number, THREE.Material]> = [
+      [-0.5, 0.3, 0.24, meatMat], [-0.1, 0.46, 0.32, meatDarkMat], [0.3, 0.34, 0.22, meatMat],
+      [0.58, 0.2, 0.14, meatDarkMat], [0.0, 0.2, 0.3, meatMat], [-0.32, 0.16, 0.14, meatDarkMat],
     ];
-    for (const [fx, fy, mat] of meatSpots) {
+    for (const [fx, fy, fz, mat] of meatSpots) {
       const blob = new THREE.Mesh(new THREE.SphereGeometry(R * 0.22, 12, 10), mat);
       blob.name = 'taco_meat';
-      blob.scale.set(1.15, 0.85, 0.65);
-      blob.position.set(fx * halfWTop, yTopBase * fy + R * 0.05, shellFrontZ + R * 0.02);
+      blob.scale.set(1.15, 0.85, 0.9);
+      blob.position.set(fx * halfWTop, fy * R, fz * R);
       blob.castShadow = true;
       blob.receiveShadow = true;
       head.add(blob);
@@ -137,13 +177,14 @@ export class TacoCharacter extends BaseCharacter {
       this.fillingBaseRotZ.push(blob.rotation.z);
     }
 
-    const tomatoSpots: Array<[number, number]> = [
-      [-0.68, 0.62], [-0.28, 0.78], [0.12, 0.7], [0.5, 0.6], [0.72, 0.34], [-0.5, 0.4],
+    const tomatoSpots: Array<[number, number, number]> = [
+      [-0.62, 0.46, 0.3], [-0.24, 0.52, 0.36], [0.14, 0.48, 0.32],
+      [0.46, 0.42, 0.22], [0.6, 0.28, 0.16], [-0.46, 0.3, 0.12],
     ];
-    for (const [fx, fyFrac] of tomatoSpots) {
-      const bit = new THREE.Mesh(new THREE.BoxGeometry(R * 0.16, R * 0.16, R * 0.16), tomatoMat);
+    for (const [fx, fy, fz] of tomatoSpots) {
+      const bit = new THREE.Mesh(new THREE.BoxGeometry(R * 0.19, R * 0.19, R * 0.19), tomatoMat);
       bit.name = 'taco_tomato';
-      bit.position.set(fx * halfWTop, yTopBase * fyFrac, shellFrontZ + R * 0.1);
+      bit.position.set(fx * halfWTop, fy * R, fz * R);
       bit.rotation.set(0.3, 0.5, 0.2 + fx);
       bit.castShadow = true;
       bit.receiveShadow = true;
@@ -152,16 +193,16 @@ export class TacoCharacter extends BaseCharacter {
       this.fillingBaseRotZ.push(bit.rotation.z);
     }
 
-    const lettuceSpots: Array<[number, number, number]> = [
-      [-0.82, 0.95, 0.3], [-0.5, 1.08, -0.15], [-0.18, 1.15, 0.25], [0.16, 1.1, -0.2],
-      [0.48, 1.0, 0.2], [0.78, 0.9, -0.25], [-0.66, 0.78, 0.1], [0.62, 0.68, -0.1],
+    const lettuceSpots: Array<[number, number, number, number]> = [
+      [-0.74, 0.52, 0.16, 0.3], [-0.42, 0.6, 0.32, -0.15], [-0.12, 0.64, 0.22, 0.25], [0.18, 0.62, 0.34, -0.2],
+      [0.44, 0.56, 0.14, 0.2], [0.7, 0.48, -0.04, -0.25], [-0.58, 0.38, -0.06, 0.1], [0.56, 0.32, -0.08, -0.1],
     ];
     for (let i = 0; i < lettuceSpots.length; i++) {
-      const [fx, fyFrac, tilt] = lettuceSpots[i];
+      const [fx, fy, fz, tilt2] = lettuceSpots[i];
       const shred = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.045, R * 0.26, 4, 6), i % 2 === 0 ? lettuceMatA : lettuceMatB);
       shred.name = 'taco_lettuce';
-      shred.position.set(fx * halfWTop, yTopBase * fyFrac, shellFrontZ + R * 0.08);
-      shred.rotation.set(Math.PI / 2 + tilt * 0.6, 0, tilt);
+      shred.position.set(fx * halfWTop, fy * R, fz * R);
+      shred.rotation.set(Math.PI / 2 + tilt2 * 0.6, 0, tilt2);
       shred.castShadow = true;
       shred.receiveShadow = true;
       head.add(shred);
@@ -169,13 +210,16 @@ export class TacoCharacter extends BaseCharacter {
       this.fillingBaseRotZ.push(shred.rotation.z);
     }
 
-    // A few onion slivers tucked into the meat — ties visually to the Onion Bomb
-    // ability's projectile colour.
-    const onionSpots: Array<[number, number]> = [[-0.2, 0.3], [0.35, 0.44], [0.05, 0.02]];
-    for (const [fx, fyFrac] of onionSpots) {
-      const sliver = new THREE.Mesh(new THREE.TorusGeometry(R * 0.1, R * 0.028, 6, 12, Math.PI * 1.3), onionMat);
+    // A few onion slivers tucked among the meat — ties visually to the Onion Bomb
+    // ability's projectile colour. Raised alongside the meat fix above (round 2 had
+    // these buried too), and enlarged in round 4 — at the original R*0.1/R*0.028 size
+    // they were nearly invisible against the meat, the one filling that didn't
+    // register at gameplay distance.
+    const onionSpots: Array<[number, number, number]> = [[-0.22, 0.42, 0.3], [0.36, 0.48, 0.34], [0.06, 0.24, 0.38]];
+    for (const [fx, fy, fz] of onionSpots) {
+      const sliver = new THREE.Mesh(new THREE.TorusGeometry(R * 0.14, R * 0.042, 6, 12, Math.PI * 1.3), onionMat);
       sliver.name = 'taco_onion';
-      sliver.position.set(fx * halfWTop, yTopBase * fyFrac, shellFrontZ + R * 0.14);
+      sliver.position.set(fx * halfWTop, fy * R, fz * R);
       sliver.rotation.set(0.4, 0.7, fx);
       sliver.castShadow = true;
       sliver.receiveShadow = true;
@@ -185,24 +229,43 @@ export class TacoCharacter extends BaseCharacter {
     }
 
     // ── Face pod ─────────────────────────────────────────────────────────────
-    // A second, smaller fold of shell fused onto the main shell's right edge —
-    // roughly a third of it embedded inside the shell's own volume, the rest
-    // protruding, so the face landmark is unmistakably attached rather than
-    // literally floating, while still reading as its own separate lobe living
-    // outside the main shell's front face.
+    // A second, smaller fold of shell fused onto the front wall's right edge — well
+    // embedded (its centre sits inside the wall's own footprint), with roughly a third
+    // of its volume protruding, so the landmark is unmistakably attached rather than
+    // literally floating, while still reading as its own lobe living outside the main
+    // shell surface. Parented under the front wall so it inherits the fold's tilt.
     const podR = R * 0.4;
-    const podCenter = new THREE.Vector3(R * 0.5, R * 0.06, shellFrontZ + R * 0.14);
+    const podCenter = new THREE.Vector3(R * 0.55, R * 0.18, R * 0.08);
     const pod = new THREE.Mesh(new THREE.SphereGeometry(podR, 20, 16), podMat);
     pod.name = 'taco_face_pod';
     pod.scale.set(1, 1.04, 0.92);
     pod.position.copy(podCenter);
     pod.castShadow = true;
     pod.receiveShadow = true;
-    head.add(pod);
+    frontMesh.add(pod);
+
+    // A few small crimp teeth along the pod's upper-outer rim, echoing the main
+    // shell's zigzag in miniature — without these the pod read as a plain ball
+    // stuck to the character rather than another fold of the same toasted shell.
+    // Embedded a third of the way into the sphere (not just touching its surface)
+    // so they read as ridges growing out of it, not props glued on top.
+    const toothGeo = new THREE.ConeGeometry(podR * 0.13, podR * 0.3, 4);
+    for (let i = 0; i < 4; i++) {
+      const a = -0.55 + i * 0.42; // sweeps the upper-outer quarter, toward +X/+Z
+      const dir = new THREE.Vector3(Math.sin(a) * 0.9, 0.62, Math.cos(a) * 0.55 + 0.35).normalize();
+      const tooth = new THREE.Mesh(toothGeo, shellDarkMat);
+      tooth.name = 'taco_pod_crimp';
+      tooth.position.copy(dir).multiplyScalar(podR * 0.82);
+      tooth.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      tooth.castShadow = true;
+      pod.add(tooth);
+    }
 
     // `face` normally rides the head's own front surface; nothing in the rig's
-    // per-frame animate() ever touches its transform, so re-anchoring it onto the
-    // pod is safe and keeps every feature below in simple pod-local coordinates.
+    // per-frame animate() ever touches its transform, so re-parenting it onto the
+    // front wall (it inherits the tilt) and re-anchoring it onto the pod is safe, and
+    // keeps every feature below in simple pod-local coordinates.
+    frontMesh.add(this.rig.joints.face);
     this.rig.joints.face.position.copy(podCenter);
     this.buildFace(podR);
 
@@ -222,29 +285,39 @@ export class TacoCharacter extends BaseCharacter {
     const eyeMat = toonMat({ color: ink, roughness: 0.25 });
     const browMat = toonMat({ color: SHELL_DARK, roughness: 0.7 });
 
-    const eyeSizes: [number, number] = [0.38, 0.46]; // left, right — right eye a touch wider open
+    // Round 2 defect: at offset 0.4*podR with radii up to 0.46*podR each, the two eyes'
+    // combined radius (0.84*podR) exceeded their 0.8*podR separation and they visually
+    // fused into one dark mass. Pushed further apart and shrunk slightly so there's a
+    // clear gap of bare "skin" between them.
+    const eyeSizes: [number, number] = [0.3, 0.36]; // left, right — right eye a touch wider open
     for (const sx of [-1, 1]) {
       const size = sx < 0 ? eyeSizes[0] : eyeSizes[1];
       const eye = new THREE.Mesh(new THREE.SphereGeometry(podR * size, 16, 14), eyeMat);
-      eye.position.set(sx * podR * 0.4, podR * 0.14, podR * 0.7);
+      eye.position.set(sx * podR * 0.52, podR * 0.14, podR * 0.68);
       eye.scale.set(1, 1.2, 0.6);
       eye.castShadow = true;
       face.add(eye);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(podR * 0.13, 10, 8), flatMat('#ffffff'));
-      glint.position.set(sx * podR * 0.4 - podR * 0.1, podR * 0.24, podR * 0.86);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(podR * 0.11, 10, 8), flatMat('#ffffff'));
+      glint.position.set(sx * podR * 0.52 - podR * 0.08, podR * 0.24, podR * 0.82);
       glint.userData.noOutline = true;
       face.add(glint);
     }
 
     // One eyebrow cocked up over the left eye — a mischievous, "about to throw
-    // something spicy" look.
+    // something spicy" look. Round 2 defect: placed at a z-depth (0.68*podR) shallower
+    // than the pod sphere's own surface at that (x,y) (~0.76*podR), so it was buried
+    // almost entirely inside the pod and invisible. Pushed out just proud of the true
+    // surface instead of a flat guessed offset.
+    const browX = -podR * 0.52;
+    const browY = podR * 0.42;
+    const browSurfaceZ = podR * Math.sqrt(Math.max(0, 1 - (browX / podR) ** 2 - (browY / podR) ** 2));
     const brow = new THREE.Mesh(
-      new THREE.CapsuleGeometry(podR * 0.05, podR * 0.34, 4, 8),
+      new THREE.CapsuleGeometry(podR * 0.055, podR * 0.3, 4, 8),
       browMat
     );
     brow.name = 'brow';
-    brow.position.set(-podR * 0.42, podR * 0.5, podR * 0.68);
+    brow.position.set(browX, browY, browSurfaceZ + podR * 0.05);
     brow.rotation.z = Math.PI / 2 + 0.35;
     brow.castShadow = true;
     face.add(brow);

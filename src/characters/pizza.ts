@@ -75,16 +75,27 @@ export class PizzaCharacter extends BaseCharacter {
     dough.receiveShadow = true;
     head.add(dough);
 
-    // Crust rim: a puffy roll of raised dough along the curved base — the "thick
-    // crust" called out in the brief, built as its own volume rather than implied by
-    // the slab thickness alone, so it reads distinctly at a glance.
+    // Crust rim: a puffy raised band hugging the dough's own base curve exactly, so
+    // it can never float outside the wedge silhouette or bury itself in the torso —
+    // both happened in earlier passes (a free-floating capsule primitive first sat
+    // fully embedded inside the dough, invisible, then — once pushed down to clear
+    // the dough — sat low enough to disappear behind the torso instead). Built the
+    // same way as the sauce/cheese insets: an exact offset of the dough's boundary,
+    // extruded thicker and pushed proud in Z for a raised, toastier-coloured roll.
+    const rimBand = R * 0.13;
+    const rimShape = new THREE.Shape();
+    rimShape.moveTo(-halfW, baseY + R * 0.10);
+    rimShape.quadraticCurveTo(0, baseY - R * 0.30, halfW, baseY + R * 0.10);
+    rimShape.lineTo(halfW, baseY + R * 0.10 + rimBand);
+    rimShape.quadraticCurveTo(0, baseY - R * 0.30 + rimBand, -halfW, baseY + R * 0.10 + rimBand);
+    rimShape.lineTo(-halfW, baseY + R * 0.10);
+    const rimDepth = depth + R * 0.1;
     const rim = new THREE.Mesh(
-      new THREE.CapsuleGeometry(depth * 0.46, halfW * 1.72, 6, 14),
+      new THREE.ExtrudeGeometry(rimShape, { depth: rimDepth, bevelEnabled: true, bevelThickness: R * 0.03, bevelSize: R * 0.03, bevelSegments: 2, curveSegments: 16 }),
       toonMat({ color: CRUST_RIM, roughness: 0.83 })
     );
     rim.name = 'pizza_crust_rim';
-    rim.rotation.z = Math.PI / 2;
-    rim.position.set(0, baseY + R * 0.02, depth * 0.02);
+    rim.position.z = -rimDepth / 2 + R * 0.08; // proud of the dough's own front face
     rim.castShadow = true;
     rim.receiveShadow = true;
     head.add(rim);
@@ -100,7 +111,7 @@ export class PizzaCharacter extends BaseCharacter {
     sauceShape.lineTo(0, sTip);
     const sauce = new THREE.Mesh(
       new THREE.ExtrudeGeometry(sauceShape, { depth: R * 0.05, bevelEnabled: false, curveSegments: 16 }),
-      glossyMat({ color: SAUCE, roughness: 0.2 })
+      glossyMat({ color: SAUCE, roughness: 0.18 })
     );
     sauce.name = 'pizza_sauce';
     sauce.position.z = depth / 2 - R * 0.01;
