@@ -21,7 +21,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig } from './rig';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -58,6 +58,48 @@ function tacoShellShape(halfWBot: number, halfWTop: number, yBot: number, yTop: 
   shape.lineTo(halfWBot, yBot);
   shape.lineTo(-halfWBot, yBot);
   return shape;
+}
+
+/**
+ * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
+ * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
+ * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
+ * reference copy. Taco's own call sites use a low `radialSegments` and a
+ * flattened Z scale so the limb reads as a faceted, crunchy shell shard rather
+ * than the smooth rubbery capsule every other character in the cast would get
+ * from the same helper at default settings.
+ */
+function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+  // Profile MUST be wound bottom-to-top (y increasing), matching every other
+  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
+  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
+  // outward-vs-inward call) depends on point order, not just point position. An
+  // earlier version of this function built the profile top-to-bottom and every
+  // limb using it rendered near-black: inverted normals facing away from the
+  // light. The y=0/y=-len hang-down placement is unchanged.
+  const capSegs = 4;
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+  }
+  const yBotCap = -len + rBot;
+  const yTopCap = -rTop;
+  if (yTopCap >= yBotCap) {
+    const sideSteps = 3;
+    for (let i = 1; i <= sideSteps; i++) {
+      const t = i / sideSteps;
+      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
+    }
+  }
+  const yTopSafe = Math.max(yTopCap, yBotCap);
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+  }
+  const geo = new THREE.LatheGeometry(pts, radialSegments);
+  geo.computeVertexNormals();
+  return geo;
 }
 
 export class TacoCharacter extends BaseCharacter {
@@ -272,6 +314,71 @@ export class TacoCharacter extends BaseCharacter {
     this.rig.joints.face.position.copy(podCenter);
     this.buildFace(podR);
 
+    // ── Limbs: bespoke, not the shared rig defaults ───────────────────────────
+    // An independent art director named the rig's identical capsule-arm/ball-hand/
+    // wedge-foot kit as the single biggest "template" tell across the whole cast.
+    // Taco's limbs are hard shell, not soft dough: faceted (low radial segment
+    // count) and flattened into shard-like cross-sections, with a couple of the
+    // pod's own crimp teeth glued onto the hand — the same toasted-shell language
+    // as the head, not a generic mitt.
+    const limbShellMat = shellMat;
+    const limbShellDarkMat = shellDarkMat;
+    const mittMat = toonMat({ color: PALETTE.onion, roughness: 0.62 });
+    const toothGeoSmall = new THREE.ConeGeometry(R * 0.05, R * 0.12, 4);
+    this.rig.dressLimbs((part, size) => {
+      switch (part) {
+        case 'upperArmL': case 'upperArmR':
+        case 'thighL': case 'thighR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.05, size.radius * 0.8, 6), limbShellMat);
+          m.scale.z = 0.62;
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'forearmL': case 'forearmR':
+        case 'shinL': case 'shinR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.8, size.radius * 0.6, 6), limbShellDarkMat);
+          m.scale.z = 0.62;
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'handL': case 'handR': {
+          const g = new THREE.Group();
+          const fist = new THREE.Mesh(new THREE.IcosahedronGeometry(size.radius * 0.92, 0), mittMat);
+          fist.position.y = -size.radius * 0.9;
+          fist.scale.z = 0.75;
+          fist.name = `${part}_mesh`;
+          fist.castShadow = true;
+          fist.receiveShadow = true;
+          g.add(fist);
+          for (const sx of [-1, 1]) {
+            const tooth = new THREE.Mesh(toothGeoSmall, limbShellDarkMat);
+            tooth.position.set(sx * size.radius * 0.5, -size.radius * 1.5, size.radius * 0.2);
+            tooth.rotation.z = sx * 0.5;
+            tooth.castShadow = true;
+            g.add(tooth);
+          }
+          return g;
+        }
+        case 'footL': case 'footR': {
+          const foot = new THREE.Mesh(
+            roundedBox(size.radius * 2.2, size.len * 0.85, size.radius * 2.6, size.radius * 0.22, 3),
+            limbShellDarkMat
+          );
+          foot.position.set(0, -size.len * 0.5, size.radius * 0.55);
+          foot.name = `${part}_mesh`;
+          foot.castShadow = true;
+          foot.receiveShadow = true;
+          return foot;
+        }
+        default:
+          return null;
+      }
+    });
+
     outlineGroup(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
@@ -292,10 +399,17 @@ export class TacoCharacter extends BaseCharacter {
     // combined radius (0.84*podR) exceeded their 0.8*podR separation and they visually
     // fused into one dark mass. Pushed further apart and shrunk slightly so there's a
     // clear gap of bare "skin" between them.
-    const eyeSizes: [number, number] = [0.3, 0.36]; // left, right — right eye a touch wider open
+    // An independent art director flagged mismatched pupil sizes elsewhere in this
+    // cast as reading like a placement error rather than a deliberate choice. A
+    // ~20% size difference between the two eyes here was exactly that: too subtle
+    // to clearly read as a wink, easy to mistake for a mistake. Eyes are now the
+    // SAME size on both sides; the single raised eyebrow below (over the left eye
+    // only) carries the "mischievous, about to throw something spicy" asymmetry
+    // instead, and a raised brow is unambiguous in a way a slightly smaller pupil
+    // is not.
+    const eyeSize = 0.33;
     for (const sx of [-1, 1]) {
-      const size = sx < 0 ? eyeSizes[0] : eyeSizes[1];
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(podR * size, 16, 14), eyeMat);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(podR * eyeSize, 16, 14), eyeMat);
       eye.position.set(sx * podR * 0.52, podR * 0.14, podR * 0.68);
       eye.scale.set(1, 1.2, 0.6);
       eye.castShadow = true;

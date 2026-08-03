@@ -24,9 +24,114 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
-import { ChibiRig } from './rig';
+import { ChibiRig, type LimbPart } from './rig';
 
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0'
+
+/** Tapered limb: a flat cap at the joint origin (plugs flush, no gap) taper to a
+ * rounded tip — the bun's own matte roughness, no capsule uniformity. */
+function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
+  // Points MUST run bottom → top for LatheGeometry's automatic normals to face
+  // outward. Getting it backwards was a round 1 defect: the real mesh got
+  // face-culled invisible and its outline shell rendered as a solid dark wedge
+  // instead of a thin line.
+  // Bottom tip is a full rounded hemisphere; the TOP is a shallow dome rather than
+  // a hard flat disc — round 2 found that a flat cap, at the angle the rig's rest
+  // pose rotates the shoulder/hip to, reads as a flat flag/wing sticking out of
+  // the joint rather than blending into it. The dome keeps almost the whole
+  // length budget for the actual tapered shaft.
+  const capBot = Math.min(rBot, len * 0.45);
+  const capTopH = Math.min(rTop * 0.42, len * 0.16);
+  const wallBotY = -(len - capBot);
+  const wallTopY = -capTopH;
+  const CAP = 5;
+  const pts: THREE.Vector2[] = [];
+  for (let i = CAP; i >= 0; i--) {
+    const a = (i / CAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(capBot * Math.cos(a), wallBotY - capBot * Math.sin(a)));
+  }
+  pts.push(new THREE.Vector2(rTop, wallTopY));
+  const TCAP = 4;
+  for (let i = 1; i <= TCAP; i++) {
+    const a = (i / TCAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(rTop * Math.cos(a), wallTopY + capTopH * Math.sin(a)));
+  }
+  const m = new THREE.Mesh(new THREE.LatheGeometry(pts, segs), mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+/** A "condiment cuff" — a glossy drizzle ring at the wrist/knee, echoing the
+ * mustard zigzag / ketchup drips already established as this character's motif. */
+function condimentCuff(y: number, radius: number, thickness: number, mat: THREE.Material): THREE.Mesh {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, thickness, 8, 20), mat);
+  ring.name = 'limb_cuff';
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = y;
+  ring.castShadow = true;
+  ring.receiveShadow = true;
+  return ring;
+}
+
+/**
+ * A little sausage-link fist: three short, plump glossy capsule "fingers" bundled
+ * side by side instead of round knuckle bumps — a genuinely different hand grammar
+ * from a knuckled fist, and one that reads unmistakably as this character's own meat
+ * material rather than a recoloured ball.
+ */
+function buildSausageFingers(R: number, side: 1 | -1, mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const palm = new THREE.Mesh(new THREE.SphereGeometry(R * 0.72, 12, 10), mat);
+  palm.scale.set(1.0, 0.9, 0.85);
+  palm.position.z = -R * 0.10;
+  palm.castShadow = true;
+  palm.receiveShadow = true;
+  g.add(palm);
+  for (let i = 0; i < 3; i++) {
+    const fx = (i - 1) * R * 0.46;
+    const finger = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.22, R * 0.52, 4, 8), mat);
+    finger.position.set(fx, -R * 0.05, R * 0.42);
+    finger.rotation.x = Math.PI / 2 - 0.15;
+    finger.castShadow = true;
+    finger.receiveShadow = true;
+    g.add(finger);
+  }
+  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.20, R * 0.36, 4, 8), mat);
+  thumb.position.set(side * R * 0.62, -R * 0.10, R * 0.05);
+  thumb.rotation.set(0.2, 0, side * 0.9);
+  thumb.castShadow = true;
+  thumb.receiveShadow = true;
+  g.add(thumb);
+  return g;
+}
+
+/** A chunky bun-dark boot with a ketchup-trim sole and cuff, wide and stubby to
+ * match the sausage/bun proportions rather than the rig's thin default wedge. */
+function buildBunBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const upper = new THREE.Mesh(roundedBox(fw * 1.0, fw * 0.66, fw * 1.36, fw * 0.24, 3), bodyMat);
+  upper.position.set(0, -fw * 0.10, fw * 0.22);
+  upper.castShadow = true;
+  upper.receiveShadow = true;
+  g.add(upper);
+
+  const sole = new THREE.Mesh(roundedBox(fw * 1.10, fw * 0.20, fw * 1.58, fw * 0.09, 2), trimMat);
+  sole.position.set(0, -fw * 0.46, fw * 0.30);
+  sole.castShadow = true;
+  sole.receiveShadow = true;
+  g.add(sole);
+
+  const cuff = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.46, fw * 0.09, 8, 18), trimMat);
+  cuff.name = 'boot_cuff';
+  cuff.rotation.x = Math.PI / 2;
+  cuff.position.set(0, fw * 0.17, fw * 0.10);
+  cuff.castShadow = true;
+  cuff.receiveShadow = true;
+  g.add(cuff);
+
+  return g;
+}
 
 export class HotDogCharacter extends BaseCharacter {
   private rig: ChibiRig;
@@ -181,6 +286,7 @@ export class HotDogCharacter extends BaseCharacter {
     }
 
     this.buildFace(R, SAUS_Y, SAUS_R);
+    this.dressLimbs();
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -311,6 +417,61 @@ export class HotDogCharacter extends BaseCharacter {
     // Restrained amplitude (0.25-0.55) so it reads as tech-flavoured, not a strobe.
     const pulse = 0.4 + Math.sin(this.elapsed * 3.0) * 0.15;
     for (const m of this.glowMats) m.emissiveIntensity = pulse;
+  }
+
+  /**
+   * Bespoke limbs — an independent art director named the shared snowman-body
+   * capsule arms and ball hands as the biggest cast-wide tell. HotDog gets matte
+   * bun-coloured tapered limbs with glossy mustard "drizzle cuffs" at the wrist and
+   * knee (the same condiment language as the zigzag landmark on the sausage), a
+   * bundled sausage-link fist instead of a knuckled fist, and a wide stubby
+   * ketchup-trimmed boot matching this character's chunky proportions.
+   */
+  private dressLimbs(): void {
+    const bunMat = toonMat({ color: PALETTE.bun, roughness: 0.85 });
+    const bunDarkMat = toonMat({ color: PALETTE.bunDark, roughness: 0.8 });
+    const mustardMat = glossyMat({ color: PALETTE.mustard, roughness: 0.15 });
+    const ketchupMat = glossyMat({ color: PALETTE.ketchup, roughness: 0.15 });
+    const sausageMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 });
+
+    this.rig.dressLimbs((part: LimbPart, size) => {
+      switch (part) {
+        case 'upperArmL':
+        case 'upperArmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.28, size.radius * 0.92, bunMat));
+          g.add(condimentCuff(-size.len * 0.96, size.radius * 0.96, size.radius * 0.20, bunDarkMat));
+          return g;
+        }
+        case 'forearmL':
+        case 'forearmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 0.90, size.radius * 0.64, bunMat));
+          g.add(condimentCuff(-size.len * 0.90, size.radius * 0.70, size.radius * 0.19, mustardMat));
+          return g;
+        }
+        case 'handL':
+        case 'handR': {
+          const side = part === 'handL' ? 1 : -1;
+          return buildSausageFingers(size.radius, side, sausageMat);
+        }
+        case 'thighL':
+        case 'thighR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.18, size.radius * 0.94, bunMat));
+          g.add(condimentCuff(-size.len * 0.95, size.radius * 0.98, size.radius * 0.20, bunDarkMat));
+          return g;
+        }
+        case 'shinL':
+        case 'shinR':
+          return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.76, bunMat);
+        case 'footL':
+        case 'footR':
+          return buildBunBoot(size.len, bunDarkMat, ketchupMat);
+        default:
+          return null;
+      }
+    });
   }
 
   /** The rig owns all body motion; the base class's whole-body pass would fight it. */

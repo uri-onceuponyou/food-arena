@@ -158,6 +158,48 @@ function faceArc(curveRadius: number, tube: number, arcRad: number): THREE.Buffe
   return geo;
 }
 
+/**
+ * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
+ * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
+ * `dressLimbs()` expects. Used so Hamburger's limbs read as tapered dough rather
+ * than the rig's uniform-radius default capsule. Degenerates to a plain sphere
+ * when rTop==rBot==len/2, which is exactly what the hand slot wants.
+ */
+function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+  // Profile MUST be wound bottom-to-top (y increasing), matching the convention
+  // every other lathe helper in this file (`roundedPuck`, `bunDome`) already
+  // uses — LatheGeometry's face winding (and therefore `computeVertexNormals`'s
+  // outward-vs-inward call) depends on point order, not just point position. An
+  // earlier version of this function built the profile top-to-bottom for
+  // convenience (it "hangs down", so starting at the joint origin felt natural)
+  // and every limb using it rendered near-black: inverted normals facing away
+  // from the light. Built the shape the same way round now; the y=0/y=-len
+  // hang-down placement is unchanged.
+  const capSegs = 5;
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+  }
+  const yBotCap = -len + rBot;
+  const yTopCap = -rTop;
+  if (yTopCap >= yBotCap) {
+    const sideSteps = 3;
+    for (let i = 1; i <= sideSteps; i++) {
+      const t = i / sideSteps;
+      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
+    }
+  }
+  const yTopSafe = Math.max(yTopCap, yBotCap);
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+  }
+  const geo = new THREE.LatheGeometry(pts, radialSegments);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 export class HamburgerCharacter extends BaseCharacter {
   private rig: ChibiRig;
 
@@ -440,6 +482,67 @@ export class HamburgerCharacter extends BaseCharacter {
       bottomBun.receiveShadow = true;
       group.add(bottomBun);
       return group;
+    });
+
+    // ── Limbs: bespoke, not the shared rig defaults ───────────────────────────
+    // An independent art director named the rig's identical capsule-arm/ball-hand/
+    // wedge-foot kit as the single biggest "template" tell across the whole cast.
+    // Hamburger's limbs are dough: thicker near the body, tapering toward the
+    // wrist/ankle, capped with a mini toasted bun for a hand and a mini seared
+    // patty (grill mark included) for a foot — the same food language as the
+    // stack on `head`, carried all the way down through the body.
+    const mittMat = toonMat({ color: PALETTE.cream, roughness: 0.68 });
+    this.rig.dressLimbs((part, size) => {
+      switch (part) {
+        case 'upperArmL': case 'upperArmR':
+        case 'thighL': case 'thighR': {
+          const geo = taperedSegment(size.len, size.radius * 1.2, size.radius * 0.84, 10);
+          const m = new THREE.Mesh(geo, bunMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'forearmL': case 'forearmR':
+        case 'shinL': case 'shinR': {
+          const geo = taperedSegment(size.len, size.radius * 0.84, size.radius * 0.64, 10);
+          const m = new THREE.Mesh(geo, bunDarkMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'handL': case 'handR': {
+          // The bun crown's own mushroom-cap profile (narrow cuff, bulging
+          // "knuckle", rounded tip) doubles perfectly as a mitt shape — flip it
+          // so the narrow end sits at the wrist and the bulge/tip hang down.
+          const bun = new THREE.Mesh(bunDome(size.radius * 1.05, size.len * 0.86, 14), mittMat);
+          bun.rotation.x = Math.PI;
+          bun.name = `${part}_mesh`;
+          bun.castShadow = true;
+          bun.receiveShadow = true;
+          return bun;
+        }
+        case 'footL': case 'footR': {
+          const g = new THREE.Group();
+          const footR = size.radius * 1.55;
+          const footH = size.len * 0.62;
+          const foot = new THREE.Mesh(roundedPuck(footR, footH, footR * 0.32, 16), pattyDarkMat);
+          foot.position.set(0, -footH, footR * 0.32);
+          foot.name = `${part}_mesh`;
+          foot.castShadow = true;
+          foot.receiveShadow = true;
+          g.add(foot);
+          // Grill-mark echo — ties the foot back to the patty it's shaped after.
+          const mark = new THREE.Mesh(new THREE.BoxGeometry(footR * 1.7, footR * 0.1, footR * 0.1), pattyMat);
+          mark.position.set(0, -footH * 0.55, footR * 0.68);
+          mark.userData.noOutline = true;
+          g.add(mark);
+          return g;
+        }
+        default:
+          return null;
+      }
     });
 
     // ── Spatula prop — gripped in the right fist ────────────────────────────

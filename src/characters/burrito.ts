@@ -42,6 +42,46 @@ const SOUR_CREAM = '#FFFDF7';
 
 type Spot = readonly [angleDeg: number, radiusFrac: number];
 
+/**
+ * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
+ * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
+ * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
+ * reference copy. Burrito's own call sites keep top/bottom radii close together
+ * — a rolled tortilla is close to a true cylinder, not a tapered dough limb.
+ */
+function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+  // Profile MUST be wound bottom-to-top (y increasing), matching every other
+  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
+  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
+  // outward-vs-inward call) depends on point order, not just point position. An
+  // earlier version of this function built the profile top-to-bottom and every
+  // limb using it rendered near-black: inverted normals facing away from the
+  // light. The y=0/y=-len hang-down placement is unchanged.
+  const capSegs = 5;
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+  }
+  const yBotCap = -len + rBot;
+  const yTopCap = -rTop;
+  if (yTopCap >= yBotCap) {
+    const sideSteps = 3;
+    for (let i = 1; i <= sideSteps; i++) {
+      const t = i / sideSteps;
+      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
+    }
+  }
+  const yTopSafe = Math.max(yTopCap, yBotCap);
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+  }
+  const geo = new THREE.LatheGeometry(pts, radialSegments);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 export class BurritoCharacter extends BaseCharacter {
   private rig: ChibiRig;
   private toppings: THREE.Object3D[] = [];
@@ -230,6 +270,90 @@ export class BurritoCharacter extends BaseCharacter {
     // ── Torso: dressed as a wrap continuation, foil peeling back at the base ──
     this.dressTorso(R);
 
+    // ── Limbs: bespoke, not the shared rig defaults ───────────────────────────
+    // An independent art director named the rig's identical capsule-arm/ball-hand/
+    // wedge-foot kit as the single biggest "template" tell across the whole cast.
+    // Burrito's limbs are rolled tortilla, close to true cylinders rather than
+    // tapered dough, with a seam stripe echoing the roll; hands are twisted foil
+    // nubs (the classic "twist the wrapper end" burrito silhouette) instead of a
+    // generic mitt, and feet read as the wrap's own cut end.
+    const limbWrapMat = toonMat({ color: TORTILLA, roughness: 0.8 });
+    const limbWrapShadeMat = toonMat({ color: TORTILLA_SHADE, roughness: 0.8 });
+    const seamMat = toonMat({ color: TORTILLA_SHADE, roughness: 0.7 });
+    const foilMatLimb = toonMat({ color: FOIL, roughness: 0.25, metalness: 0.5 });
+    const bandMatLimb = toonMat({ color: WRAP_BAND, roughness: 0.72 });
+    const bootMatLimb = toonMat({ color: BOOT, roughness: 0.75 });
+    this.rig.dressLimbs((part, size) => {
+      switch (part) {
+        case 'upperArmL': case 'upperArmR':
+        case 'thighL': case 'thighR': {
+          const g = new THREE.Group();
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.05, size.radius * 1.0, 12), limbWrapMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          g.add(m);
+          const seam = new THREE.Mesh(new THREE.BoxGeometry(size.radius * 0.16, size.len * 0.94, size.radius * 0.05), seamMat);
+          seam.position.set(0, -size.len * 0.5, size.radius * 0.98);
+          seam.userData.noOutline = true;
+          g.add(seam);
+          return g;
+        }
+        case 'forearmL': case 'forearmR':
+        case 'shinL': case 'shinR': {
+          const g = new THREE.Group();
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.0, size.radius * 0.92, 12), limbWrapShadeMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          g.add(m);
+          // Wrapper-band cuff — same costume language as the torso's own sash.
+          const cuff = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 1.02, size.radius * 0.26, 8, 20), bandMatLimb);
+          cuff.rotation.x = Math.PI / 2;
+          cuff.position.y = -size.radius * 0.3;
+          cuff.castShadow = true;
+          g.add(cuff);
+          return g;
+        }
+        case 'handL': case 'handR': {
+          const g = new THREE.Group();
+          const cuff = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.7, size.radius * 0.22, 8, 16), bandMatLimb);
+          cuff.rotation.x = Math.PI / 2;
+          cuff.castShadow = true;
+          g.add(cuff);
+          // The classic twisted-foil wrapper end — a cone tapering to a point.
+          const twist = new THREE.Mesh(new THREE.ConeGeometry(size.radius * 0.62, size.radius * 1.5, 8), foilMatLimb);
+          twist.position.y = -size.radius * 0.95;
+          twist.name = `${part}_mesh`;
+          twist.castShadow = true;
+          twist.receiveShadow = true;
+          g.add(twist);
+          return g;
+        }
+        case 'footL': case 'footR': {
+          const g = new THREE.Group();
+          const stub = new THREE.Mesh(
+            new THREE.CylinderGeometry(size.radius * 1.1, size.radius * 1.02, size.len * 0.75, 16, 1, false),
+            bootMatLimb
+          );
+          stub.position.set(0, -size.len * 0.42, size.radius * 0.3);
+          stub.rotation.x = Math.PI * 0.06;
+          stub.name = `${part}_mesh`;
+          stub.castShadow = true;
+          stub.receiveShadow = true;
+          g.add(stub);
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 1.06, size.radius * 0.1, 6, 16), foilMatLimb);
+          ring.rotation.x = Math.PI / 2;
+          ring.position.set(0, -size.len * 0.1, size.radius * 0.3);
+          ring.castShadow = true;
+          g.add(ring);
+          return g;
+        }
+        default:
+          return null;
+      }
+    });
+
     outlineGroup(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
@@ -255,6 +379,22 @@ export class BurritoCharacter extends BaseCharacter {
       glint.position.set(ex - R * 0.03, eyeY + R * 0.045, ez + R * 0.05);
       glint.userData.noOutline = true;
       face.add(glint);
+
+      // Brows — matched height/angle on both sides, eager and upward, matching
+      // "ready to roll into a fight". Real shaded geometry, not a flat decal, and
+      // placed against the SAME `surfaceZ` equation as the eye it sits above so it
+      // can't sink into or float off the tube regardless of where sx pushes it.
+      const bx = ex;
+      const by = eyeY + R * 0.155;
+      const bz = surfaceZ(bx, by) * 0.95;
+      const brow = new THREE.Mesh(
+        new THREE.CapsuleGeometry(R * 0.022, R * 0.15, 4, 8),
+        toonMat({ color: PALETTE.ink, roughness: 0.4 })
+      );
+      brow.position.set(bx, by, bz);
+      brow.rotation.z = Math.PI / 2 - sx * 0.22;
+      brow.castShadow = true;
+      face.add(brow);
     }
 
     const mouthY = -R * 0.22;

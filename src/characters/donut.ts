@@ -53,6 +53,48 @@ function dressTorso(rig: ChibiRig, build: (size: { w: number; h: number; d: numb
   rig.joints.torso.add(build(size));
 }
 
+/**
+ * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
+ * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
+ * `dressLimbs()` expects. Local to this file per the same pattern as `dressTorso`
+ * above; see `hamburger.ts` for the reference copy of this helper. Donut's own
+ * radii stay close together (soft dough barely tapers) rather than the aggressive
+ * wedge every other character in this file gives it, which is the point: a cast
+ * that shares a helper but tunes it per-character reads as one family, not one mould.
+ */
+function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+  // Profile MUST be wound bottom-to-top (y increasing), matching every other
+  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
+  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
+  // outward-vs-inward call) depends on point order, not just point position. An
+  // earlier version of this function built the profile top-to-bottom and every
+  // limb using it rendered near-black: inverted normals facing away from the
+  // light. The y=0/y=-len hang-down placement is unchanged.
+  const capSegs = 5;
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+  }
+  const yBotCap = -len + rBot;
+  const yTopCap = -rTop;
+  if (yTopCap >= yBotCap) {
+    const sideSteps = 3;
+    for (let i = 1; i <= sideSteps; i++) {
+      const t = i / sideSteps;
+      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
+    }
+  }
+  const yTopSafe = Math.max(yTopCap, yBotCap);
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+  }
+  const geo = new THREE.LatheGeometry(pts, radialSegments);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 /** Soft tapered barrel — the same visual language as the rig's own default torso
  * (fuller belly, narrower neck) but built locally so each character can own its
  * material and proportions. */
@@ -223,6 +265,67 @@ export class DonutCharacter extends BaseCharacter {
       return group;
     });
 
+    // ── Limbs: bespoke, not the shared rig defaults ───────────────────────────
+    // An independent art director named the rig's identical capsule-arm/ball-hand/
+    // wedge-foot kit — recoloured but otherwise the same on every character — as
+    // the single biggest "template" tell across the whole cast. Donut's limbs stay
+    // soft and barely taper (this is dough, not muscle) but the extremities carry
+    // her own material story: glaze-dipped glossy hands that end in a drip, and
+    // chocolate-dipped glossy feet, both a deliberate step up in gloss from the
+    // matte dough limbs, echoing the head's own matte-dough/glossy-glaze contrast.
+    const doughMat = toonMat({ color: DOUGH, roughness: 0.82 });
+    const doughDarkMat = toonMat({ color: DOUGH_DARK, roughness: 0.82 });
+    const glazeHandMat = glossyMat({ color: GLAZE, roughness: 0.16 });
+    const chocFootMat = glossyMat({ color: CHOC_DIP, roughness: 0.22 });
+    this.rig.dressLimbs((part, size) => {
+      switch (part) {
+        case 'upperArmL': case 'upperArmR':
+        case 'thighL': case 'thighR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.16, size.radius * 1.0, 10), doughMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'forearmL': case 'forearmR':
+        case 'shinL': case 'shinR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.0, size.radius * 0.84, 10), doughDarkMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'handL': case 'handR': {
+          const g = new THREE.Group();
+          const ball = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.98, 16, 14), glazeHandMat);
+          ball.position.y = -size.radius * 0.98;
+          ball.scale.set(1, 1.06, 1);
+          ball.name = `${part}_mesh`;
+          ball.castShadow = true;
+          ball.receiveShadow = true;
+          g.add(ball);
+          // A small drip nub at the bottom — the same trick the head/torso glaze
+          // uses, carried down to the extremities instead of stopping at the neck.
+          const drip = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.22, 8, 8), glazeHandMat);
+          drip.position.y = -size.radius * 1.85;
+          drip.scale.set(1, 1.6, 1);
+          drip.userData.noOutline = true;
+          g.add(drip);
+          return g;
+        }
+        case 'footL': case 'footR': {
+          const foot = new THREE.Mesh(taperedSegment(size.len * 1.3, size.radius * 1.2, size.radius * 0.3, 12), chocFootMat);
+          foot.position.z = size.radius * 0.3;
+          foot.name = `${part}_mesh`;
+          foot.castShadow = true;
+          foot.receiveShadow = true;
+          return foot;
+        }
+        default:
+          return null;
+      }
+    });
+
     this.buildFace(R);
 
     outlineGroup(this.root);
@@ -253,6 +356,20 @@ export class DonutCharacter extends BaseCharacter {
       glint.position.set(sx * R * 0.36 - R * 0.035, R * 0.345, -R * 0.10);
       glint.userData.noOutline = true;
       face.add(glint);
+
+      // Brows — matched height and curve on both sides. An independent art
+      // director flagged flat dot-eyes with no brow/lid as reading "unfinished";
+      // these are real shaded geometry (a short capsule), not a decal, and sit at
+      // an IDENTICAL height/offset from each eye so any asymmetry elsewhere on the
+      // face (the crooked smile) reads as a deliberate choice, not a stray brow.
+      const brow = new THREE.Mesh(
+        new THREE.CapsuleGeometry(R * 0.02, R * 0.14, 4, 8),
+        toonMat({ color: PALETTE.ink, roughness: 0.4 })
+      );
+      brow.position.set(sx * R * 0.36, R * 0.47, -R * 0.155);
+      brow.rotation.z = Math.PI / 2 - sx * 0.16;
+      brow.castShadow = true;
+      face.add(brow);
     }
 
     // Crooked smile — asymmetric on purpose, per Donut's described personality.

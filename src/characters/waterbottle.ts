@@ -41,8 +41,8 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
-import { ChibiRig } from './rig';
+import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { ChibiRig, type LimbPart } from './rig';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 // Reuses the prototype's own water/waterCap hexes for the shell/liquid so the
@@ -116,6 +116,117 @@ const WATER_PROFILE_ABS: Array<[number, number]> = [
 // this point makes it visibly TIP like a real half-full container instead of
 // swinging like a pendulum hung from the bottle's base.
 const WATER_PIVOT_F = (WATER_BOTTOM_F + WATER_FILL_F) / 2;
+
+// ── Bespoke-limb geometry ────────────────────────────────────────────────────
+// An independent art director named the shared snowman-body capsule arms and ball
+// hands as the single biggest cast-wide tell. Kept OPAQUE here deliberately — the
+// file header's whole point is that `transmission` is reserved for the head, where
+// depth-write behaviour has been carefully reasoned through; giving the limbs their
+// own transmissive material would risk the exact "wrong sort order" failure that
+// section warns about, for a part of the silhouette that doesn't need it. Instead
+// the limbs read as "plastic" through low roughness alone, and pick up the head's
+// own grip-ridge language (see `waterbottle_cap_ridge` above) as their accent motif.
+
+/** Tapered limb: a flat cap at the joint origin (plugs flush with no gap) taper to a
+ * rounded tip — used for a sleek moulded-plastic "hose" read. */
+function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
+  // Points MUST run bottom → top for LatheGeometry's automatic normals to face
+  // outward — this file's own SHELL_PROFILE comment already documents the same
+  // rule. Getting it backwards was a round 1 defect: the real mesh got
+  // face-culled invisible and its outline shell rendered as a solid dark wedge.
+  // Bottom tip is a full rounded hemisphere; the TOP is a shallow dome rather than
+  // a hard flat disc — round 2 found that a flat cap, at the angle the rig's rest
+  // pose rotates the shoulder/hip to, reads as a flat flag/wing sticking out of
+  // the joint rather than blending into it. The dome keeps almost the whole
+  // length budget for the actual tapered shaft.
+  const capBot = Math.min(rBot, len * 0.45);
+  const capTopH = Math.min(rTop * 0.42, len * 0.16);
+  const wallBotY = -(len - capBot);
+  const wallTopY = -capTopH;
+  const CAP = 5;
+  const pts: THREE.Vector2[] = [];
+  for (let i = CAP; i >= 0; i--) {
+    const a = (i / CAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(capBot * Math.cos(a), wallBotY - capBot * Math.sin(a)));
+  }
+  pts.push(new THREE.Vector2(rTop, wallTopY));
+  const TCAP = 4;
+  for (let i = 1; i <= TCAP; i++) {
+    const a = (i / TCAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(rTop * Math.cos(a), wallTopY + capTopH * Math.sin(a)));
+  }
+  const m = new THREE.Mesh(new THREE.LatheGeometry(pts, segs), mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+/** A grip-ridge ring — the same "thin darker ring around a cylindrical wall" motif
+ * the head's cap already uses, echoed here as the limb's cuff/joint accent. */
+function ridgeRing(y: number, radius: number, thickness: number, mat: THREE.Material): THREE.Mesh {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, thickness, 8, 20), mat);
+  ring.name = 'limb_ridge';
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = y;
+  ring.castShadow = true;
+  ring.receiveShadow = true;
+  return ring;
+}
+
+// A miniature of the head's own CAP_PROFILE silhouette (narrow base, flared grip
+// body, domed top) — the hand becomes a literal little bottle cap, the strongest
+// possible "this hand belongs to THIS character" read available, and it moves the
+// dark matte cap material down into the silhouette twice instead of once.
+const MINI_CAP_PROFILE: Array<[number, number]> = [
+  [0, -0.95], [0.35, -0.85], [0.85, -0.55], [0.96, -0.10],
+  [0.96, 0.30], [0.70, 0.62], [0.30, 0.80], [0, 0.90],
+];
+
+function buildCapHand(R: number, mat: THREE.Material, ridgeMat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const pts = MINI_CAP_PROFILE.map(([r, y]) => new THREE.Vector2(r * R, y * R));
+  const body = new THREE.Mesh(new THREE.LatheGeometry(pts, 16), mat);
+  body.name = 'cap_hand';
+  body.castShadow = true;
+  body.receiveShadow = true;
+  g.add(body);
+  for (const yF of [-0.08, 0.14]) {
+    g.add(ridgeRing(yF * R, R * 0.99, R * 0.045, ridgeMat));
+  }
+  return g;
+}
+
+// A rounded-bottom "bottle base" foot — echoes the shell's own rounded underside
+// (SHELL_PROFILE's bottom curve) instead of the rig's blocky wedge, with a pale
+// plastic trim ring near the ankle breaking up the dark boot the same way the
+// label wrap breaks up the head's transparency.
+const BOTTLE_FOOT_PROFILE: Array<[number, number]> = [
+  [0, -1.0], [0.55, -0.92], [0.92, -0.68], [1.0, -0.38],
+  [1.0, -0.05], [0.82, 0.10], [0.55, 0.15],
+];
+
+function buildBottleFoot(FR: number, mat: THREE.Material, trimMat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const heightScale = FR * 1.35;
+  const radiusScale = FR * 1.05;
+  const pts = BOTTLE_FOOT_PROFILE.map(([r, y]) => new THREE.Vector2(r * radiusScale, y * heightScale));
+  const body = new THREE.Mesh(new THREE.LatheGeometry(pts, 18), mat);
+  body.name = 'bottle_foot';
+  body.position.z = FR * 0.18;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  g.add(body);
+
+  const trim = new THREE.Mesh(new THREE.TorusGeometry(radiusScale * 1.0, FR * 0.05, 8, 20), trimMat);
+  trim.name = 'bottle_foot_trim';
+  trim.rotation.x = Math.PI / 2;
+  trim.position.set(0, -0.05 * heightScale, FR * 0.18);
+  trim.castShadow = true;
+  trim.receiveShadow = true;
+  g.add(trim);
+
+  return g;
+}
 
 export class WaterBottleCharacter extends BaseCharacter {
   private rig: ChibiRig;
@@ -288,6 +399,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     this.rig.joints.hips.add(belt);
 
     this.buildFace(R);
+    this.dressLimbs();
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -299,6 +411,16 @@ export class WaterBottleCharacter extends BaseCharacter {
    * small pod — the "floating face" idea kept and pushed further, per the brief's
    * authorisation to lean into it. A thin sparkle trail down toward the cap keeps
    * it reading as a deliberate whimsical touch rather than a detached defect.
+   *
+   * An independent art director called out "one eye sitting slightly higher than
+   * the other... reads as an unintentional placement error." Both eyes here are
+   * already built from one mirrored loop at an identical `y=0` — there is no
+   * per-side offset anywhere to cause a real height mismatch. What WAS missing is
+   * anything to anchor that symmetry visually: two bare spheres give the eye
+   * nothing to check the alignment against, so even a correct render can read as
+   * "off" at a glance. Fixed by adding a cap-coloured brow stroke above each eye —
+   * the brows sit on one explicit shared height and give the face a visible
+   * reference line, plus real expression (previously: none at all above the eyes).
    */
   private buildFace(R: number): void {
     const face = this.rig.joints.face;
@@ -306,6 +428,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     const ink = PALETTE.ink;
 
     const eyeMat = toonMat({ color: ink, roughness: 0.25 });
+    const browMat = toonMat({ color: CAP, roughness: 0.4 }); // ties the brows to the cap material
     for (const sx of [-1, 1]) {
       const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.13, 16, 14), eyeMat);
       eye.position.set(sx * R * 0.28, 0, 0);
@@ -317,6 +440,15 @@ export class WaterBottleCharacter extends BaseCharacter {
       glint.position.set(sx * R * 0.28 - R * 0.036, R * 0.045, R * 0.12);
       glint.userData.noOutline = true;
       face.add(glint);
+
+      // Brow: a slight friendly lift outward (not a V — this bottle is cheerful,
+      // not fierce), on one shared Y so the pair reads as deliberately level.
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.018, R * 0.13, 4, 8), browMat);
+      brow.name = 'waterbottle_brow';
+      brow.rotation.z = Math.PI / 2 - sx * 0.18;
+      brow.position.set(sx * R * 0.28, R * 0.175, R * 0.05);
+      brow.castShadow = true;
+      face.add(brow);
     }
 
     // Big, warm, open smile — friendly rather than crooked, per the brief. A torus
@@ -380,6 +512,59 @@ export class WaterBottleCharacter extends BaseCharacter {
       this.bubbles[i].position.y =
         this.bubbleBaseY[i] + Math.sin(this.elapsed * (0.6 + i * 0.13) + i * 2) * this.bubbleRange;
     }
+  }
+
+  /**
+   * Bespoke limbs — an independent art director named the shared snowman-body
+   * capsule arms and ball hands as the biggest cast-wide tell. Water Bottle gets
+   * sleek pale-plastic tapered limbs with dark grip-ridge rings (the same accent
+   * already used on the head's cap), a hand shaped as a miniature of the head's own
+   * bottle cap, and a foot shaped as a rounded bottle base with a pale trim ring —
+   * every new shape a direct echo of this character's own silhouette, never a
+   * generic part recoloured. Kept fully opaque — see the block comment above the
+   * geometry helpers for why transmission stays reserved for the head.
+   */
+  private dressLimbs(): void {
+    const plasticMat = glossyMat({ color: PLASTIC, roughness: 0.16 });
+    const capMat = toonMat({ color: CAP, roughness: 0.4 });
+    const capDarkMat = toonMat({ color: CAP_DARK, roughness: 0.4 });
+
+    this.rig.dressLimbs((part: LimbPart, size) => {
+      switch (part) {
+        case 'upperArmL':
+        case 'upperArmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.02, size.radius * 0.72, plasticMat));
+          g.add(ridgeRing(-size.len * 0.95, size.radius * 0.76, size.radius * 0.10, capDarkMat));
+          return g;
+        }
+        case 'forearmL':
+        case 'forearmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 0.70, size.radius * 0.52, plasticMat));
+          g.add(ridgeRing(-size.len * 0.90, size.radius * 0.56, size.radius * 0.09, capDarkMat));
+          return g;
+        }
+        case 'handL':
+        case 'handR':
+          return buildCapHand(size.radius, capMat, capDarkMat);
+        case 'thighL':
+        case 'thighR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.0, size.radius * 0.84, plasticMat));
+          g.add(ridgeRing(-size.len * 0.94, size.radius * 0.88, size.radius * 0.10, capDarkMat));
+          return g;
+        }
+        case 'shinL':
+        case 'shinR':
+          return taperedLimb(size.len, size.radius * 0.84, size.radius * 0.66, plasticMat);
+        case 'footL':
+        case 'footR':
+          return buildBottleFoot(size.radius, capDarkMat, plasticMat);
+        default:
+          return null;
+      }
+    });
   }
 
   /** The rig owns all body motion; the base class's whole-body pass would fight it. */

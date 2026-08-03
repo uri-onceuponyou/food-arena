@@ -171,6 +171,47 @@ function buildCrackLine(
   }
 }
 
+/**
+ * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
+ * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
+ * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
+ * reference copy. Egg's own call sites pass radii noticeably SMALLER than
+ * `size.radius` — she is a small, delicate character, and the rig's default
+ * limb thickness read as too stocky for that.
+ */
+function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+  // Profile MUST be wound bottom-to-top (y increasing), matching every other
+  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
+  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
+  // outward-vs-inward call) depends on point order, not just point position. An
+  // earlier version of this function built the profile top-to-bottom and every
+  // limb using it rendered near-black: inverted normals facing away from the
+  // light. The y=0/y=-len hang-down placement is unchanged.
+  const capSegs = 5;
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+  }
+  const yBotCap = -len + rBot;
+  const yTopCap = -rTop;
+  if (yTopCap >= yBotCap) {
+    const sideSteps = 3;
+    for (let i = 1; i <= sideSteps; i++) {
+      const t = i / sideSteps;
+      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
+    }
+  }
+  const yTopSafe = Math.max(yTopCap, yBotCap);
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+  }
+  const geo = new THREE.LatheGeometry(pts, radialSegments);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 export class EggCharacter extends BaseCharacter {
   private rig: ChibiRig;
 
@@ -282,6 +323,67 @@ export class EggCharacter extends BaseCharacter {
       });
 
       return group;
+    });
+
+    // ── Limbs: bespoke, not the shared rig defaults ───────────────────────────
+    // An independent art director named the rig's identical capsule-arm/ball-hand/
+    // wedge-foot kit as the single biggest "template" tell across the whole cast.
+    // Egg is small and delicate, so her limbs are noticeably thinner than the
+    // rig's own default thickness, glossy porcelain like the shell; hands taper
+    // to a glossy yolk-coloured teardrop (a quiet echo of the crack-tip yolk
+    // peek) and feet are small dark shell-chip wedges, echoing the crack motif
+    // instead of a generic block.
+    const limbShellMat = toonMat({ color: SHELL, roughness: 0.35 });
+    const limbShellShadowMat = toonMat({ color: SHELL_SHADOW, roughness: 0.4 });
+    const yolkHandMat = glossyMat({ color: YOLK, roughness: 0.2 });
+    const crackFootMat = toonMat({ color: CRACK_DARK, roughness: 0.5 });
+    this.rig.dressLimbs((part, size) => {
+      switch (part) {
+        case 'upperArmL': case 'upperArmR':
+        case 'thighL': case 'thighR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.82, size.radius * 0.6, 12), limbShellMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'forearmL': case 'forearmR':
+        case 'shinL': case 'shinR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.6, size.radius * 0.42, 12), limbShellShadowMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'handL': case 'handR': {
+          const drop = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.5, 14, 12), yolkHandMat);
+          drop.position.y = -size.radius * 0.62;
+          drop.scale.set(1, 1.5, 1);
+          drop.name = `${part}_mesh`;
+          drop.castShadow = true;
+          drop.receiveShadow = true;
+          return drop;
+        }
+        case 'footL': case 'footR': {
+          // A flattened, rounded chip rather than a cone — a cone tip reads as a
+          // sharp spike once the run cycle's own foot rotation combines with a
+          // static tilt (verified against a render: it looked like she was
+          // standing on a dagger mid-stride). Same "broken shell fragment" idea,
+          // safe under animation.
+          const chip = new THREE.Mesh(
+            roundedBox(size.radius * 1.7, size.len * 0.5, size.radius * 1.15, size.radius * 0.3, 3),
+            crackFootMat
+          );
+          chip.position.set(0, -size.len * 0.36, size.radius * 0.25);
+          chip.rotation.y = Math.PI / 5;
+          chip.name = `${part}_mesh`;
+          chip.castShadow = true;
+          chip.receiveShadow = true;
+          return chip;
+        }
+        default:
+          return null;
+      }
     });
 
     this.buildFace(head, R);

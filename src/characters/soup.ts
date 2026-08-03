@@ -20,8 +20,8 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
-import { ChibiRig } from './rig';
+import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { ChibiRig, type LimbPart } from './rig';
 import { CHARACTER_HEIGHT } from '../units';
 
 const CERAMIC = '#F7F1E6';      // glazed bowl exterior — warm off-white, not clinical
@@ -33,6 +33,112 @@ const STEAM = PALETTE.steam;     // #C9C9C9
 const NOODLE = '#F2D98A';
 const NOODLE_DARK = '#D9B85E';
 const WOOD = '#8A5A34';          // ladle handle
+
+/**
+ * Tapered limb segment: a flat cap at the joint origin (plugs flush into the
+ * shoulder/hip, no gap) tapering down a straight wall to a rounded tip. Used for a
+ * glazed-ceramic "sleeve" read — glossy, like the bowl exterior itself.
+ */
+function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
+  // Points MUST run bottom → top for LatheGeometry's automatic normals to face
+  // outward (this file's own BOWL_PROFILE lathe follows the same rule). Getting
+  // it backwards was a round 1 defect: the real mesh got face-culled invisible
+  // and its outline shell rendered as a solid dark wedge instead of a thin line.
+  // Bottom tip is a full rounded hemisphere; the TOP is a shallow dome rather than
+  // a hard flat disc — round 2 found that a flat cap, at the angle the rig's rest
+  // pose rotates the shoulder/hip to, reads as a flat flag/wing sticking out of
+  // the joint rather than blending into it. The dome keeps almost the whole
+  // length budget for the actual tapered shaft.
+  const capBot = Math.min(rBot, len * 0.45);
+  const capTopH = Math.min(rTop * 0.42, len * 0.16);
+  const wallBotY = -(len - capBot);
+  const wallTopY = -capTopH;
+  const CAP = 5;
+  const pts: THREE.Vector2[] = [];
+  for (let i = CAP; i >= 0; i--) {
+    const a = (i / CAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(capBot * Math.cos(a), wallBotY - capBot * Math.sin(a)));
+  }
+  pts.push(new THREE.Vector2(rTop, wallTopY));
+  const TCAP = 4;
+  for (let i = 1; i <= TCAP; i++) {
+    const a = (i / TCAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(rTop * Math.cos(a), wallTopY + capTopH * Math.sin(a)));
+  }
+  const m = new THREE.Mesh(new THREE.LatheGeometry(pts, segs), mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+/** A thin rust-trim ring at local Y `y` — the apron sash's colour, cinched at the
+ * wrist/elbow/knee like a rolled sleeve or cuffed pant leg. */
+function cuffRing(y: number, radius: number, thickness: number, mat: THREE.Material): THREE.Mesh {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, thickness, 8, 20), mat);
+  ring.name = 'limb_cuff';
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = y;
+  ring.castShadow = true;
+  ring.receiveShadow = true;
+  return ring;
+}
+
+/**
+ * A cloth oven mitt — a flat paddle shape with a separate thumb, deliberately NOT a
+ * round fist, so the glazed-ceramic arm visibly ends in a fabric mitt rather than
+ * continuing the same material all the way down (the material break the brief calls
+ * for: ceramic sleeve → cloth mitt).
+ */
+function buildOvenMitt(R: number, side: 1 | -1, mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const paddle = new THREE.Mesh(new THREE.SphereGeometry(R * 0.98, 14, 12), mat);
+  paddle.scale.set(1.12, 0.62, 1.02);
+  paddle.castShadow = true;
+  paddle.receiveShadow = true;
+  g.add(paddle);
+
+  const cuffBand = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.66, R * 0.66, R * 0.34, 14, 1, true), mat);
+  cuffBand.name = 'mitt_cuff_band';
+  cuffBand.position.set(0, R * 0.42, 0);
+  cuffBand.castShadow = true;
+  cuffBand.receiveShadow = true;
+  g.add(cuffBand);
+
+  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.30, R * 0.34, 4, 8), mat);
+  thumb.position.set(side * R * 0.80, -R * 0.02, R * 0.18);
+  thumb.rotation.set(0.2, 0, side * 0.75);
+  thumb.castShadow = true;
+  thumb.receiveShadow = true;
+  g.add(thumb);
+  return g;
+}
+
+/** A sturdy vendor's work boot — toe box, sole plate and an ankle cuff blending up
+ * into the shin, dark against the pale ceramic limbs. */
+function buildWorkBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const upper = new THREE.Mesh(roundedBox(fw * 0.96, fw * 0.68, fw * 1.34, fw * 0.26, 3), bodyMat);
+  upper.position.set(0, -fw * 0.12, fw * 0.22);
+  upper.castShadow = true;
+  upper.receiveShadow = true;
+  g.add(upper);
+
+  const sole = new THREE.Mesh(roundedBox(fw * 1.04, fw * 0.20, fw * 1.56, fw * 0.09, 2), trimMat);
+  sole.position.set(0, -fw * 0.48, fw * 0.30);
+  sole.castShadow = true;
+  sole.receiveShadow = true;
+  g.add(sole);
+
+  const cuff = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.44, fw * 0.09, 8, 18), trimMat);
+  cuff.name = 'boot_cuff';
+  cuff.rotation.x = Math.PI / 2;
+  cuff.position.set(0, fw * 0.16, fw * 0.10);
+  cuff.castShadow = true;
+  cuff.receiveShadow = true;
+  g.add(cuff);
+
+  return g;
+}
 
 export class SoupCharacter extends BaseCharacter {
   private rig: ChibiRig;
@@ -196,6 +302,7 @@ export class SoupCharacter extends BaseCharacter {
     this.buildFace(R, bowlSurface);
     this.buildLadle();
     this.dressTorsoAsSoup();
+    this.dressLimbs();
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -234,8 +341,22 @@ export class SoupCharacter extends BaseCharacter {
 
   /**
    * Grey steam-coloured eyes and NO mouth — the one genuinely unsettling-calm read
-   * in the cast. Perfectly round, unlidded, symmetric: a blank, patient stare
-   * rather than an expression. Placed on the bowl's front wall via `bowlSurface()`.
+   * in the cast, kept and sharpened rather than removed.
+   *
+   * An independent art director scored this face 3/10, calling it "two flat white
+   * ovals with black dot pupils of visibly different sizes... reads as an error, not
+   * a design choice." The two defects that reading points at: (1) nothing anchors
+   * the eye to the bowl surface — a sphere floating in front of a curve reads as
+   * stuck-on — and (2) with no mouth, the eyes carry the ENTIRE face, so a plain
+   * circle-on-circle reads as unfinished rather than deliberate. Fixed by giving each
+   * eye a heavy ceramic-toned LID — a shallow shell that caps the sclera's upper
+   * third and casts a real shadow line across it — plus a soft brow stroke above.
+   * The lid is what turns "two dots" into a sleepy, patient, INTENTIONAL stare: it is
+   * the single highest-leverage shape this character has, since there is no mouth to
+   * share the work. Both eyes remain exactly mirrored in size/position (this was
+   * already true in code — the mismatch the critic saw was in the FACE'S DESIGN, not
+   * mismatched numbers) but the identical sizing is now easy to verify at a glance
+   * because the lid gives each eye a real silhouette instead of a bare circle.
    */
   private buildFace(R: number, bowlSurface: (theta: number, hFrac: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }): void {
     const face = this.rig.joints.face;
@@ -253,6 +374,8 @@ export class SoupCharacter extends BaseCharacter {
     const EYE_H = 0.30;
     const irisMat = toonMat({ color: '#6B6E72', roughness: 0.3 }); // grey steam-toned, not ink-black
     const scleraMat = toonMat({ color: '#EDEDEA', roughness: 0.3 });
+    const lidMat = toonMat({ color: '#B7BABD', roughness: 0.35 }); // between sclera and iris — a real shaded lid
+    const browMat = toonMat({ color: '#6E7276', roughness: 0.4 }); // groups with the iris as "the eye area"
 
     for (const sx of [-1, 1] as const) {
       const { pos } = bowlSurface(sx * EYE_THETA, EYE_H);
@@ -277,6 +400,30 @@ export class SoupCharacter extends BaseCharacter {
       glint.position.set(-R * 0.025, R * 0.03, R * 0.09);
       glint.userData.noOutline = true;
       eye.add(glint);
+
+      // Heavy lid — a shallow dome capping the sclera's upper third, sitting proud
+      // (bigger radius + forward Z) so it casts a real shadow line rather than
+      // z-fighting with the white beneath. This is what turns a bare "dot on a
+      // curve" into a deliberate, sleepy, PATIENT stare — the single highest-
+      // leverage shape available here, since there is no mouth to share the work.
+      const lid = new THREE.Mesh(
+        new THREE.SphereGeometry(R * 0.152, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.30),
+        lidMat
+      );
+      lid.name = 'soup_eye_lid';
+      lid.position.set(0, R * 0.018, R * 0.018);
+      lid.scale.set(1, 1, 0.62);
+      lid.castShadow = true;
+      eye.add(lid);
+
+      // A soft brow stroke above the lid — flat, calm, not angled into a V (which
+      // would read as annoyed rather than unsettling-calm).
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.016, R * 0.13, 4, 8), browMat);
+      brow.name = 'soup_brow';
+      brow.rotation.z = Math.PI / 2 + sx * 0.05;
+      brow.position.set(0, R * 0.135, R * 0.03);
+      brow.castShadow = true;
+      eye.add(brow);
     }
     // Deliberately no mouth — see class doc.
   }
@@ -393,6 +540,60 @@ export class SoupCharacter extends BaseCharacter {
 
     // Broth gently shimmers via a faint bob — cheap "hot liquid" life.
     this.brothSurface.position.y += Math.sin(this.elapsed * 3.2) * 0.0005;
+  }
+
+  /**
+   * Bespoke limbs — an independent art director named the shared snowman-body
+   * capsule arms and ball hands as the biggest cast-wide tell. Soup gets glazed-
+   * ceramic tapered "sleeves" (glossy, matching the bowl's own exterior material)
+   * ending in a genuinely different material: a matte cloth oven mitt, echoing the
+   * vendor apron the torso already wears. A dark work boot with a rust cuff replaces
+   * the blocky default foot.
+   */
+  private dressLimbs(): void {
+    const ceramicMat = glossyMat({ color: CERAMIC, roughness: 0.25 });
+    const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });
+    const mittMat = toonMat({ color: RIM_TRIM, roughness: 0.55 }); // matte cloth, not glazed ceramic
+    const bootMat = toonMat({ color: '#3A2E24', roughness: 0.7 });
+
+    this.rig.dressLimbs((part: LimbPart, size) => {
+      switch (part) {
+        case 'upperArmL':
+        case 'upperArmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.08, size.radius * 0.80, ceramicMat));
+          g.add(cuffRing(-size.len * 0.95, size.radius * 0.84, size.radius * 0.17, trimMat));
+          return g;
+        }
+        case 'forearmL':
+        case 'forearmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 0.78, size.radius * 0.58, ceramicMat));
+          g.add(cuffRing(-size.len * 0.90, size.radius * 0.64, size.radius * 0.16, trimMat));
+          return g;
+        }
+        case 'handL':
+        case 'handR': {
+          const side = part === 'handL' ? 1 : -1;
+          return buildOvenMitt(size.radius, side, mittMat);
+        }
+        case 'thighL':
+        case 'thighR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, ceramicMat));
+          g.add(cuffRing(-size.len * 0.94, size.radius * 0.92, size.radius * 0.17, trimMat));
+          return g;
+        }
+        case 'shinL':
+        case 'shinR':
+          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, ceramicMat);
+        case 'footL':
+        case 'footR':
+          return buildWorkBoot(size.len, bootMat, trimMat);
+        default:
+          return null;
+      }
+    });
   }
 
   /** The rig owns all body motion; the base class's whole-body pass would fight it. */

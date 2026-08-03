@@ -24,8 +24,8 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
-import { ChibiRig } from './rig';
+import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { ChibiRig, type LimbPart } from './rig';
 import { CHARACTER_HEIGHT } from '../units';
 
 const RICE = '#FFFDF6';        // warm-white sticky rice, not clinical pure white
@@ -35,6 +35,116 @@ const SALMON = PALETTE.salmon; // #F4A261
 const SALMON_DARK = '#D97F45'; // fish striation lines
 const LIP = '#E8798F';         // puckered-lip coral
 const GOLD = RARITY_COLORS.Legendary; // #F4A300 — rarity accent, used sparingly
+
+/**
+ * Tapered limb segment: a flat cap at the joint origin (plugs flush into the
+ * shoulder/hip, no gap) tapering down a straight wall to a rounded tip of radius
+ * `rBot`. Reused per-character with different taper ratios so each cast member's
+ * limbs read as their own shape rather than a shared uniform capsule.
+ */
+function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
+  // Points MUST run bottom → top for LatheGeometry's automatic normals to face
+  // outward (this file's own PROFILE lathe follows the same rule). Getting it
+  // backwards was a round 1 defect: the real mesh got face-culled invisible and
+  // its outline shell rendered as a solid dark wedge instead of a thin line.
+  // Bottom tip is a full rounded hemisphere; the TOP is a shallow dome rather than
+  // a hard flat disc — round 2 found that a flat cap, at the angle the rig's rest
+  // pose rotates the shoulder/hip to, reads as a flat flag/wing sticking out of
+  // the joint rather than blending into it. The dome keeps almost the whole
+  // length budget for the actual tapered shaft.
+  const capBot = Math.min(rBot, len * 0.45);
+  const capTopH = Math.min(rTop * 0.42, len * 0.16);
+  const wallBotY = -(len - capBot);
+  const wallTopY = -capTopH;
+  const CAP = 5;
+  const pts: THREE.Vector2[] = [];
+  for (let i = CAP; i >= 0; i--) {
+    const a = (i / CAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(capBot * Math.cos(a), wallBotY - capBot * Math.sin(a)));
+  }
+  pts.push(new THREE.Vector2(rTop, wallTopY));
+  const TCAP = 4;
+  for (let i = 1; i <= TCAP; i++) {
+    const a = (i / TCAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(rTop * Math.cos(a), wallTopY + capTopH * Math.sin(a)));
+  }
+  const m = new THREE.Mesh(new THREE.LatheGeometry(pts, segs), mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+/** A thin ring cinched around a limb at local Y `y` — the nori-band motif echoed
+ * down onto the limbs as a wrist/ankle wrap. */
+function cuffRing(y: number, radius: number, thickness: number, mat: THREE.Material): THREE.Mesh {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, thickness, 8, 20), mat);
+  ring.name = 'limb_cuff';
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = y;
+  ring.castShadow = true;
+  ring.receiveShadow = true;
+  return ring;
+}
+
+/**
+ * A smooth, closed rice-ball fist — no knuckle bumps (that read as too rustic for a
+ * Legendary-tier character) — wrapped with a thin nori ribbon and a small gold stud,
+ * echoing the head's own nori-band + gold-clasp motif at hand scale.
+ */
+function buildRiceFist(R: number, side: 1 | -1, mat: THREE.Material, noriMat: THREE.Material, goldMat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const palm = new THREE.Mesh(new THREE.SphereGeometry(R * 0.92, 16, 14), mat);
+  palm.scale.set(1.0, 0.94, 1.08);
+  palm.castShadow = true;
+  palm.receiveShadow = true;
+  g.add(palm);
+
+  const ribbon = new THREE.Mesh(new THREE.TorusGeometry(R * 0.72, R * 0.14, 8, 20), noriMat);
+  ribbon.name = 'fist_ribbon';
+  ribbon.rotation.z = side * 0.35;
+  ribbon.position.set(0, -R * 0.05, 0);
+  ribbon.castShadow = true;
+  ribbon.receiveShadow = true;
+  g.add(ribbon);
+
+  const stud = new THREE.Mesh(new THREE.SphereGeometry(R * 0.13, 10, 8), goldMat);
+  stud.name = 'fist_stud';
+  stud.position.set(side * R * 0.55, R * 0.18, R * 0.55);
+  stud.castShadow = true;
+  g.add(stud);
+
+  return g;
+}
+
+/**
+ * A low, elegant lacquered boot — flatter and more slipper-like than a chunky wedge,
+ * with a thin gold ankle strap in place of a thick rolled cuff, and a pale rice-shade
+ * sole strip breaking up the near-black nori body.
+ */
+function buildLacqueredBoot(fw: number, bodyMat: THREE.Material, soleMat: THREE.Material, strapMat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(roundedBox(fw * 0.90, fw * 0.46, fw * 1.42, fw * 0.20, 3), bodyMat);
+  body.position.set(0, -fw * 0.20, fw * 0.26);
+  body.castShadow = true;
+  body.receiveShadow = true;
+  g.add(body);
+
+  const sole = new THREE.Mesh(roundedBox(fw * 0.98, fw * 0.14, fw * 1.60, fw * 0.06, 2), soleMat);
+  sole.position.set(0, -fw * 0.44, fw * 0.30);
+  sole.castShadow = true;
+  sole.receiveShadow = true;
+  g.add(sole);
+
+  const strap = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.38, fw * 0.045, 8, 18), strapMat);
+  strap.name = 'boot_strap';
+  strap.rotation.x = Math.PI / 2;
+  strap.position.set(0, fw * 0.06, fw * 0.06);
+  strap.castShadow = true;
+  strap.receiveShadow = true;
+  g.add(strap);
+
+  return g;
+}
 
 export class SushiCharacter extends BaseCharacter {
   private rig: ChibiRig;
@@ -221,6 +331,7 @@ export class SushiCharacter extends BaseCharacter {
 
     this.buildFace(R, yAt, zAt);
     this.dressTorsoAsSushi();
+    this.dressLimbs();
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -340,6 +451,62 @@ export class SushiCharacter extends BaseCharacter {
       attack01: this.attackT >= 0 ? this.attackT / this.attackDuration : -1,
       hit01: this.hitT >= 0 ? this.hitT / 0.26 : -1,
       dead01: this.deathT >= 0 ? this.deathT / 0.75 : -1,
+    });
+  }
+
+  /**
+   * Bespoke limbs — an independent art director named the shared snowman-body
+   * capsule arms and ball hands as the biggest cast-wide tell. Sushi gets slender
+   * rice-white tapered limbs with thin nori wrist/knee wraps (echoing the head's own
+   * band), a smooth rice-ball fist wrapped in a nori ribbon with a small gold stud
+   * (Legendary accent, used sparingly per the file's own convention), and a low
+   * lacquered boot with a gold ankle strap instead of a thick rolled cuff — reading
+   * as refined rather than chunky, matching this character's premium tier.
+   */
+  private dressLimbs(): void {
+    const riceMat = toonMat({ color: RICE, roughness: 0.65 });
+    const noriMat = glossyMat({ color: NORI, roughness: 0.3 });
+    const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });
+    const goldMat = toonMat({ color: GOLD, roughness: 0.3, metalness: 0.35 });
+    const riceShadeMat = toonMat({ color: RICE_SHADE, roughness: 0.6 });
+
+    this.rig.dressLimbs((part: LimbPart, size) => {
+      switch (part) {
+        case 'upperArmL':
+        case 'upperArmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.10, size.radius * 0.82, riceMat));
+          g.add(cuffRing(-size.len * 0.95, size.radius * 0.86, size.radius * 0.16, noriMat));
+          return g;
+        }
+        case 'forearmL':
+        case 'forearmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, riceMat));
+          g.add(cuffRing(-size.len * 0.90, size.radius * 0.62, size.radius * 0.15, noriMat));
+          return g;
+        }
+        case 'handL':
+        case 'handR': {
+          const side = part === 'handL' ? 1 : -1;
+          return buildRiceFist(size.radius, side, salmonMat, noriMat, goldMat);
+        }
+        case 'thighL':
+        case 'thighR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, riceMat));
+          g.add(cuffRing(-size.len * 0.94, size.radius * 0.92, size.radius * 0.16, noriMat));
+          return g;
+        }
+        case 'shinL':
+        case 'shinR':
+          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, riceMat);
+        case 'footL':
+        case 'footR':
+          return buildLacqueredBoot(size.len, noriMat, riceShadeMat, goldMat);
+        default:
+          return null;
+      }
     });
   }
 

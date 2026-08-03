@@ -23,7 +23,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig } from './rig';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -59,6 +59,47 @@ function spiralRibbonShape(turns: number, rStart: number, rEnd: number, bandWidt
   for (let i = inner.length - 1; i >= 0; i--) shape.lineTo(inner[i].x, inner[i].y);
   shape.closePath();
   return shape;
+}
+
+/**
+ * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
+ * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
+ * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
+ * reference copy. Lollipop's own call sites pass radii noticeably SMALLER than
+ * `size.radius` — she is a slender candy-on-a-stick character, and the rig's
+ * default limb thickness read as far too stocky for that read.
+ */
+function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+  // Profile MUST be wound bottom-to-top (y increasing), matching every other
+  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
+  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
+  // outward-vs-inward call) depends on point order, not just point position. An
+  // earlier version of this function built the profile top-to-bottom and every
+  // limb using it rendered near-black: inverted normals facing away from the
+  // light. The y=0/y=-len hang-down placement is unchanged.
+  const capSegs = 5;
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+  }
+  const yBotCap = -len + rBot;
+  const yTopCap = -rTop;
+  if (yTopCap >= yBotCap) {
+    const sideSteps = 3;
+    for (let i = 1; i <= sideSteps; i++) {
+      const t = i / sideSteps;
+      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
+    }
+  }
+  const yTopSafe = Math.max(yTopCap, yBotCap);
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+  }
+  const geo = new THREE.LatheGeometry(pts, radialSegments);
+  geo.computeVertexNormals();
+  return geo;
 }
 
 export class LollipopCharacter extends BaseCharacter {
@@ -208,6 +249,83 @@ export class LollipopCharacter extends BaseCharacter {
     // ── Torso: candy-wrapper costume, contrasting the pale limbs ──────────────
     this.dressTorso(R);
 
+    // ── Limbs: bespoke, not the shared rig defaults ───────────────────────────
+    // An independent art director named the rig's identical capsule-arm/ball-hand/
+    // wedge-foot kit as the single biggest "template" tell across the whole cast.
+    // Lollipop is slender candy-on-a-stick, so her limbs are noticeably thinner
+    // than the rig's default and wear the same red/white candy-cane stripe as her
+    // own wrapper-petal cuff; hands are miniature glossy lollipops (a swirl ring
+    // echoing the head disc), and feet are dark pointed candy-shoe boots.
+    const stickLimbMat = toonMat({ color: STICK, roughness: 0.72 });
+    const stripeMat = toonMat({ color: CANDY_RED, roughness: 0.55 });
+    const candyHandMat = glossyMat({ color: CANDY_RED, roughness: 0.14 });
+    const candySwirlMat = candyMat;
+    this.rig.dressLimbs((part, size) => {
+      switch (part) {
+        case 'upperArmL': case 'upperArmR':
+        case 'thighL': case 'thighR': {
+          const g = new THREE.Group();
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.66, size.radius * 0.52, 10), stickLimbMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          g.add(m);
+          for (const f of [0.28, 0.62]) {
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.58, size.radius * 0.1, 6, 14), stripeMat);
+            ring.rotation.x = Math.PI / 2;
+            ring.position.y = -size.len * f;
+            ring.userData.noOutline = true;
+            g.add(ring);
+          }
+          return g;
+        }
+        case 'forearmL': case 'forearmR':
+        case 'shinL': case 'shinR': {
+          const g = new THREE.Group();
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.52, size.radius * 0.38, 10), stickLimbMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          g.add(m);
+          for (const f of [0.22, 0.5, 0.78]) {
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.44, size.radius * 0.08, 6, 14), stripeMat);
+            ring.rotation.x = Math.PI / 2;
+            ring.position.y = -size.len * f;
+            ring.userData.noOutline = true;
+            g.add(ring);
+          }
+          return g;
+        }
+        case 'handL': case 'handR': {
+          const g = new THREE.Group();
+          const ball = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.62, 14, 12), candyHandMat);
+          ball.position.y = -size.radius * 0.62;
+          ball.name = `${part}_mesh`;
+          ball.castShadow = true;
+          ball.receiveShadow = true;
+          g.add(ball);
+          const swirl = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.34, size.radius * 0.07, 6, 16, Math.PI * 1.4), candySwirlMat);
+          swirl.position.set(0, -size.radius * 0.62, size.radius * 0.5);
+          swirl.userData.noOutline = true;
+          g.add(swirl);
+          return g;
+        }
+        case 'footL': case 'footR': {
+          const boot = new THREE.Mesh(
+            roundedBox(size.radius * 1.6, size.len * 0.55, size.radius * 2.6, size.radius * 0.28, 3),
+            toonMat({ color: BOOT, roughness: 0.55 })
+          );
+          boot.position.set(0, -size.len * 0.42, size.radius * 0.55);
+          boot.name = `${part}_mesh`;
+          boot.castShadow = true;
+          boot.receiveShadow = true;
+          return boot;
+        }
+        default:
+          return null;
+      }
+    });
+
     outlineGroup(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
@@ -253,6 +371,18 @@ export class LollipopCharacter extends BaseCharacter {
       glint.position.set(ex - stickR * 0.13, stickFaceY + stickR * 0.17, ez + stickR * 0.12);
       glint.userData.noOutline = true;
       face.add(glint);
+
+      // Brows — matched height/curve on both sides, a confident upward sweep (she
+      // "swings herself like a hammer"). Real shaded geometry, not a flat decal,
+      // sitting a fixed offset above each eye so it can't drift out of alignment.
+      const brow = new THREE.Mesh(
+        new THREE.CapsuleGeometry(stickR * 0.09, stickR * 0.55, 4, 8),
+        toonMat({ color: ink, roughness: 0.4 })
+      );
+      brow.position.set(ex, stickFaceY + stickR * 0.62, ez * 0.85);
+      brow.rotation.z = Math.PI / 2 - sx * 0.3;
+      brow.castShadow = true;
+      face.add(brow);
     }
 
     // Mouth: a closed, sweet smile on the candy's front face. Pulled further down from

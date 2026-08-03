@@ -17,8 +17,8 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
-import { ChibiRig } from './rig';
+import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { ChibiRig, type LimbPart } from './rig';
 
 const CRUST = '#EFB868';       // baked dough slab
 const CRUST_RIM = '#CE8A2E';   // puffier crust roll along the base — noticeably deeper/toastier
@@ -68,6 +68,117 @@ function torsoBarrel(halfW: number, height: number, halfD: number, taper: number
   }
   geo.computeVertexNormals();
   return geo;
+}
+
+/**
+ * Tapered limb segment: a flat cap (radius `rTop`) right at the joint origin — so it
+ * plugs flush into the shoulder/hip with no gap — tapering down a straight wall to a
+ * rounded hemisphere tip of radius `rBot`. Unlike the rig's default capsule (uniform
+ * radius top-to-bottom), this reads as a real tapered form: thick doughy shoulder,
+ * narrower wrist, per the art director's call for varied taper per character.
+ */
+function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
+  // Points MUST run bottom → top for LatheGeometry's automatic normals to face
+  // outward — this file's other lathes (dough wedge etc.) rely on the same rule.
+  // Getting it backwards was a round 1 defect: the real mesh got face-culled
+  // invisible and its outline shell rendered as a solid dark wedge instead of a
+  // thin line, which is exactly the "flipper" artifact a render caught.
+  // Bottom tip is a full rounded hemisphere; the TOP is a shallow dome rather than
+  // a hard flat disc — round 2 found that a flat cap, at the angle the rig's rest
+  // pose rotates the shoulder/hip to, reads as a flat flag/wing sticking out of
+  // the joint rather than blending into it. The dome keeps almost the whole
+  // length budget for the actual tapered shaft.
+  const capBot = Math.min(rBot, len * 0.45);
+  const capTopH = Math.min(rTop * 0.42, len * 0.16);
+  const wallBotY = -(len - capBot);
+  const wallTopY = -capTopH;
+  const CAP = 5;
+  const pts: THREE.Vector2[] = [];
+  for (let i = CAP; i >= 0; i--) {
+    const a = (i / CAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(capBot * Math.cos(a), wallBotY - capBot * Math.sin(a)));
+  }
+  pts.push(new THREE.Vector2(rTop, wallTopY));
+  const TCAP = 4;
+  for (let i = 1; i <= TCAP; i++) {
+    const a = (i / TCAP) * Math.PI * 0.5;
+    pts.push(new THREE.Vector2(rTop * Math.cos(a), wallTopY + capTopH * Math.sin(a)));
+  }
+  const m = new THREE.Mesh(new THREE.LatheGeometry(pts, segs), mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+/** A thin ring cinched around a limb — rolled-cuff / trim detail, sitting proud of
+ * the limb's own surface at local Y `y`. */
+function cuffRing(y: number, radius: number, thickness: number, mat: THREE.Material): THREE.Mesh {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, thickness, 8, 20), mat);
+  ring.name = 'limb_cuff';
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = y;
+  ring.castShadow = true;
+  ring.receiveShadow = true;
+  return ring;
+}
+
+/**
+ * Doughy fist mitt: a flattened palm plus three knuckle bumps and a thumb — a real
+ * hand silhouette rather than a smooth ball. `side` is +1/-1 to mirror the thumb.
+ */
+function buildDoughMitt(R: number, side: 1 | -1, mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const palm = new THREE.Mesh(new THREE.SphereGeometry(R * 0.95, 14, 12), mat);
+  palm.scale.set(1.0, 0.8, 1.14);
+  palm.position.z = R * 0.05;
+  palm.castShadow = true;
+  palm.receiveShadow = true;
+  g.add(palm);
+  for (let i = 0; i < 3; i++) {
+    const kx = (i - 1) * R * 0.46;
+    const knuckle = new THREE.Mesh(new THREE.SphereGeometry(R * 0.30, 8, 8), mat);
+    knuckle.position.set(kx, R * 0.28, R * 0.66);
+    knuckle.castShadow = true;
+    knuckle.receiveShadow = true;
+    g.add(knuckle);
+  }
+  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.26, R * 0.38, 4, 8), mat);
+  thumb.position.set(side * R * 0.78, -R * 0.05, R * 0.20);
+  thumb.rotation.set(0.25, 0, side * 0.85);
+  thumb.castShadow = true;
+  thumb.receiveShadow = true;
+  g.add(thumb);
+  return g;
+}
+
+/**
+ * A hearty charred-crust wedge boot: toe box + a proud sole plate + an ankle cuff
+ * blending up into the shin — a real boot silhouette, not the rig's single blocky
+ * wedge. `fw` is the foot-width scale the rig hands `dressLimbs` for this slot.
+ */
+function buildCrustBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const upper = new THREE.Mesh(roundedBox(fw * 0.92, fw * 0.62, fw * 1.30, fw * 0.22, 3), bodyMat);
+  upper.position.set(0, -fw * 0.10, fw * 0.22);
+  upper.castShadow = true;
+  upper.receiveShadow = true;
+  g.add(upper);
+
+  const sole = new THREE.Mesh(roundedBox(fw * 1.02, fw * 0.22, fw * 1.55, fw * 0.10, 2), trimMat);
+  sole.position.set(0, -fw * 0.46, fw * 0.30);
+  sole.castShadow = true;
+  sole.receiveShadow = true;
+  g.add(sole);
+
+  const cuff = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.42, fw * 0.10, 8, 18), trimMat);
+  cuff.name = 'boot_cuff';
+  cuff.rotation.x = Math.PI / 2;
+  cuff.position.set(0, fw * 0.18, fw * 0.10);
+  cuff.castShadow = true;
+  cuff.receiveShadow = true;
+  g.add(cuff);
+
+  return g;
 }
 
 export class PizzaCharacter extends BaseCharacter {
@@ -329,6 +440,7 @@ export class PizzaCharacter extends BaseCharacter {
     });
 
     this.buildFace(R, cheeseFrontZ);
+    this.dressLimbs();
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -389,6 +501,71 @@ export class PizzaCharacter extends BaseCharacter {
       attack01: this.attackT >= 0 ? this.attackT / this.attackDuration : -1,
       hit01: this.hitT >= 0 ? this.hitT / 0.26 : -1,
       dead01: this.deathT >= 0 ? this.deathT / 0.75 : -1,
+    });
+  }
+
+  /**
+   * Bespoke limbs — an independent art director named the shared snowman-body
+   * capsule arms and ball hands as the biggest cast-wide tell. Pizza gets doughy
+   * tapered limbs (thick at the shoulder, narrower at the wrist, matching the crust's
+   * own matte roughness), a toasted-crust-rim cuff at each joint break, a
+   * pepperoni-red fist mitt with a crust-rim knuckle badge, and a charred-crust wedge
+   * boot with its own sole plate — all built from colours this file already declared.
+   */
+  private dressLimbs(): void {
+    const doughMat = toonMat({ color: CRUST, roughness: 0.85 });
+    const doughDarkMat = toonMat({ color: CRUST_RIM, roughness: 0.8 });
+    const pepMat = glossyMat({ color: PEPPERONI, roughness: 0.18 });
+    const charMat = toonMat({ color: CRUST_CHAR, roughness: 0.75 });
+    const cheeseMat = glossyMat({ color: CHEESE, roughness: 0.25 });
+
+    this.rig.dressLimbs((part: LimbPart, size) => {
+      switch (part) {
+        case 'upperArmL':
+        case 'upperArmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.32, size.radius * 0.94, doughMat));
+          g.add(cuffRing(-size.len * 0.96, size.radius * 0.98, size.radius * 0.22, doughDarkMat));
+          return g;
+        }
+        case 'forearmL':
+        case 'forearmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 0.92, size.radius * 0.60, doughMat));
+          g.add(cuffRing(-size.len * 0.90, size.radius * 0.68, size.radius * 0.19, cheeseMat));
+          return g;
+        }
+        case 'handL':
+        case 'handR': {
+          const side = part === 'handL' ? 1 : -1;
+          const mitt = buildDoughMitt(size.radius, side, pepMat);
+          const badge = new THREE.Mesh(
+            new THREE.CylinderGeometry(size.radius * 0.22, size.radius * 0.22, size.radius * 0.08, 12),
+            doughDarkMat
+          );
+          badge.name = 'mitt_badge';
+          badge.rotation.x = Math.PI / 2;
+          badge.position.set(0, size.radius * 0.18, size.radius * 0.98);
+          badge.castShadow = true;
+          mitt.add(badge);
+          return mitt;
+        }
+        case 'thighL':
+        case 'thighR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 1.22, size.radius * 0.96, doughMat));
+          g.add(cuffRing(-size.len * 0.95, size.radius * 1.0, size.radius * 0.22, doughDarkMat));
+          return g;
+        }
+        case 'shinL':
+        case 'shinR':
+          return taperedLimb(size.len, size.radius * 0.96, size.radius * 0.78, doughMat);
+        case 'footL':
+        case 'footR':
+          return buildCrustBoot(size.len, charMat, doughDarkMat);
+        default:
+          return null;
+      }
     });
   }
 
