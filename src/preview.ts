@@ -50,6 +50,14 @@ const piece = params.get('piece') ?? 'character';
 const shotMode = params.get('shot') === '1';
 const showGrid = params.get('grid') === '1';
 const frozenTime = params.has('t') ? Number(params.get('t')) : null;
+/**
+ * Silhouette mode: flatten everything to unlit black on a white ground.
+ *
+ * Tests whether SHAPES read at all, independent of colour, texture and lighting —
+ * the fastest way to answer "can you tell these apart at thumbnail size", which is
+ * what the reference cast does best and what our critics keep circling.
+ */
+const silhouette = params.get('silhouette') === '1';
 const isArena = piece === 'arena' || piece === 'prop' || piece === 'floor';
 // arena only: 'gameplay' frames a combat-distance patch, 'overview' frames the whole map.
 const arenaView = params.get('view') === 'overview' ? 'overview' : 'gameplay';
@@ -139,6 +147,15 @@ function mountCharacter(id: CharacterId) {
   stage.scene.add(model.root);
   model.play(anim);
   stage.rig.snapTo(0, 0);
+  // Face close-up. Critics anchor hardest on faces, but judge them from full-body
+  // distance where they are only a few dozen pixels across.
+  if (params.get('face') === '1') {
+    stage.rig.subjectHeight = CHARACTER_HEIGHT * 0.30;
+    stage.rig.subjectFill = 0.80;
+    stage.rig.targetHeight = CHARACTER_HEIGHT * 0.80;
+    stage.rig.pitchDeg = params.has('pitch') ? Number(params.get('pitch')) : 8;
+    stage.rig.snapTo(0, 0);
+  }
 }
 
 function mountRoster() {
@@ -350,6 +367,23 @@ if (frozenTime !== null) {
   loop();
   setTimeout(() => { window.__previewReady = true; }, 400);
 }
+
+/** Flatten every mesh to matte black; the backdrop and ground go white. */
+function applySilhouette() {
+  const black = new THREE.MeshBasicMaterial({ color: 0x000000 });
+  stage.scene.background = new THREE.Color(0xffffff);
+  stage.scene.fog = null;
+  stage.scene.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    if (m.name === 'preview_ground' || m.name.startsWith('floor')) {
+      m.material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      return;
+    }
+    m.material = black;
+  });
+}
+if (silhouette) applySilhouette();
 
 window.addEventListener('resize', () => stage.resize());
 

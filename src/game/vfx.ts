@@ -26,6 +26,11 @@ declare global {
      * guessing at screenshot timing for effects that live well under a second.
      * Never read by game logic. */
     __vfxQaCounts?: Record<'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash', number>;
+    /** QA-only per-tick fighter snapshot, refreshed every `sync()` call — lets a
+     * Playwright driver steer input off real positions/HP/terrain-slow state instead
+     * of guessing from rendered pixels (e.g. to script a player walking into a puddle
+     * while dodging the AI). Never read by game logic. */
+    __vfxDebugFighters?: Record<FighterRole, { x: number; y: number; hp: number; alive: boolean; terrainSlowFactor: number }>;
   }
 }
 
@@ -608,6 +613,17 @@ export class VfxLayer {
   }
 
   sync(state: MatchState): void {
+    window.__vfxDebugFighters = {
+      player: {
+        x: state.player.x, y: state.player.y, hp: state.player.hp,
+        alive: state.player.alive, terrainSlowFactor: state.player.terrainSlowFactor,
+      },
+      enemy: {
+        x: state.enemy.x, y: state.enemy.y, hp: state.enemy.hp,
+        alive: state.enemy.alive, terrainSlowFactor: state.enemy.terrainSlowFactor,
+      },
+    };
+
     syncPool<Projectile>(
       this.projectilePool,
       this.group,
