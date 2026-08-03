@@ -203,6 +203,92 @@ function buildStreakTexture(): THREE.CanvasTexture {
 }
 
 /**
+ * Vertical gradient mapped onto a melee wedge's UV.y (apex→rim): faint/transparent
+ * near the pivot, rising to a hot white-edged band right at the swept rim. A critic
+ * pass called the melee cone out as "a flat, hard-edged" fill with zero internal
+ * shading — this is what turns it into a directional swoosh with a bright leading
+ * edge (like a blade catching light) instead of one uniform flat colour.
+ */
+function buildWedgeGradientTexture(): THREE.CanvasTexture {
+  const w = 8;
+  const h = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  // Canvas Y grows downward; texture V=0 (apex) should be the image's TOP row so it
+  // maps to v=0 with THREE's default flipY, keeping v=1 (rim) at the bottom row.
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(255,255,255,0.1)');
+  grad.addColorStop(0.55, 'rgba(255,255,255,0.55)');
+  grad.addColorStop(0.86, 'rgba(255,255,255,0.85)');
+  grad.addColorStop(0.94, 'rgba(255,255,255,1)');
+  grad.addColorStop(1, 'rgba(255,255,255,0.65)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  const tex = new THREE.CanvasTexture(canvas);
+  // Disable the automatic vertical flip so UV.y maps directly to the canvas rows as
+  // drawn above (v=0 -> row 0 -> apex-faint, v=1 -> row h -> rim-bright) — with the
+  // default flipY this directional gradient would come out inverted.
+  tex.flipY = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Angular crystal/shard silhouette — a hard-edged faceted polygon with a bright
+ * off-centre highlight facet, NOT another soft circle. A critic pass specifically
+ * flagged every particle in this layer as "just a soft additive circle... no shape
+ * vocabulary — no shards, sparks, or debris". Reusing the radial-glow dot for impact
+ * debris is exactly that complaint; this is a deliberately different silhouette so
+ * flying debris reads as actual broken-off chunks.
+ */
+function buildShardTexture(): THREE.CanvasTexture {
+  const size = 64;
+  const c = size / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  // A slightly irregular 6-point crystal outline (not a regular hexagon) so it
+  // doesn't read as a generic gem icon.
+  const points: Array<[number, number]> = [
+    [0.5, 0.02], [0.78, 0.32], [0.68, 0.98], [0.32, 0.98], [0.22, 0.32], [0.5, 0.02],
+  ];
+  ctx.beginPath();
+  points.forEach(([px, py], i) => {
+    const x = px * size;
+    const y = py * size;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+
+  const grad = ctx.createLinearGradient(size * 0.3, 0, size * 0.6, size);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.45, 'rgba(255,255,255,0.85)');
+  grad.addColorStop(1, 'rgba(255,255,255,0.55)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // A brighter off-centre facet highlight so the shape reads as faceted crystal
+  // catching light, not a flat cutout.
+  ctx.beginPath();
+  ctx.moveTo(size * 0.5, size * 0.05);
+  ctx.lineTo(size * 0.62, size * 0.34);
+  ctx.lineTo(size * 0.5, size * 0.5);
+  ctx.lineTo(size * 0.4, size * 0.3);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.fill();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
  * Flat filled wedge (pie-slice), apex at the local origin, spanning `coneDeg`
  * symmetrically about local +Z, out to `radiusM`. `coneDeg = 360` degenerates into a
  * full disc — exactly what Lollipop's Giant Lollipop (cone: 360) needs. Built in the
@@ -214,14 +300,20 @@ function buildWedgeGeometry(radiusM: number, coneDeg: number): THREE.BufferGeome
   const half = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(coneDeg, 1, 360)) / 2;
   const segments = Math.max(8, Math.round(coneDeg / 8));
   const positions: number[] = [0, 0, 0];
+  // UV.y = radial distance from the apex (0 at the pivot, 1 at the swept rim), UV.x =
+  // angle across the sweep — lets `wedgeGradientTex` paint a bright leading edge at
+  // the rim fading back to the pivot, instead of the wedge being one flat fill.
+  const uvs: number[] = [0.5, 0];
   for (let i = 0; i <= segments; i++) {
     const a = -half + (i / segments) * half * 2;
     positions.push(Math.sin(a) * radiusM, 0, Math.cos(a) * radiusM);
+    uvs.push(i / segments, 1);
   }
   const indices: number[] = [];
   for (let i = 1; i < segments + 1; i++) indices.push(0, i, i + 1);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
   return geo;
@@ -310,6 +402,8 @@ export class VfxLayer {
   private readonly glowTex = buildRadialGlowTexture();
   private readonly starTex = buildStarburstTexture();
   private readonly streakTex = buildStreakTexture();
+  private readonly shardTex = buildShardTexture();
+  private readonly wedgeGradientTex = buildWedgeGradientTexture();
   private readonly particles: ParticleSlot[] = [];
   private readonly wedges: WedgeSlot[] = [];
   private readonly rings: RingSlot[] = [];
@@ -349,7 +443,7 @@ export class VfxLayer {
 
     for (let i = 0; i < WEDGE_POOL_SIZE; i++) {
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0,
+        color: 0xffffff, map: this.wedgeGradientTex, transparent: true, opacity: 0,
         side: THREE.DoubleSide, depthWrite: false,
       });
       const mesh = new THREE.Mesh(buildWedgeGeometry(0.01, 10), mat);
@@ -725,19 +819,24 @@ export class VfxLayer {
 
     // Instant white-hot starburst pop — the "frame 1" punch that sells a hit as
     // landing HARD, distinct from (and shorter than) the colour-tinted flash below.
+    // Deliberately kept smaller than round 1 (was 1.7x) — a critic pass found the
+    // pop+flash so big and so white that they visually swallowed the shard/streak
+    // debris flying through the same space, reading as "one soft blob" instead of a
+    // hit with actual particle craft. Leaving room for the debris to read as separate
+    // shapes matters more than maximizing the flash alone.
     if (!opts?.skipPop) {
-      this.spawnStarPop(origin, IMPACT_HEIGHT, color, 1.7 * sizeFactor, (0.14 + sizeFactor * 0.02) * life);
+      this.spawnStarPop(origin, IMPACT_HEIGHT, color, 1.25 * sizeFactor, (0.12 + sizeFactor * 0.016) * life);
     }
 
     if (!opts?.skipFlash) {
       const flash = this.allocParticle();
-      flash.active = true; flash.life = 0; flash.maxLife = (0.18 + sizeFactor * 0.05) * life;
+      flash.active = true; flash.life = 0; flash.maxLife = (0.16 + sizeFactor * 0.04) * life;
       flash.sprite.visible = true;
       flash.sprite.position.set(origin.x, IMPACT_HEIGHT, origin.z);
       flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
-      flash.startScale = 0.75 * sizeFactor; flash.endScale = 2.2 * sizeFactor;
+      flash.startScale = 0.7 * sizeFactor; flash.endScale = 1.7 * sizeFactor;
       flash.startOpacity = 1; flash.endOpacity = 0; flash.fadeEase = 1.4;
-      flash.mat.color.set(color).lerp(WHITE, 0.42);
+      flash.mat.color.set(color).lerp(WHITE, 0.3);
     }
 
     if (!opts?.skipRing) {
@@ -770,21 +869,28 @@ export class VfxLayer {
       this.spawnStreaks(origin, IMPACT_HEIGHT, color, streakCount, (0.9 + sizeFactor * 0.55) * speedMult, 0.22 * life);
     }
 
+    // Angular crystal-shard debris, NOT more soft glow dots (that was the critic's
+    // #1 complaint: "no shape vocabulary — no shards, sparks, or debris"). Thrown
+    // fast enough, and kept small enough, that they visibly clear the pop/flash's
+    // footprint and read as distinct flying chunks rather than fusing into it.
     for (let i = 0; i < shardCount; i++) {
       const s = this.allocParticle();
+      s.mat.map = this.shardTex;
+      s.mat.rotation = Math.random() * Math.PI * 2;
+      s.aspect = 0.72 + Math.random() * 0.3;
       const ang = Math.random() * Math.PI * 2;
-      const speed = (1.8 + Math.random() * 2.1) * (0.6 + sizeFactor * 0.4) * speedMult;
-      s.active = true; s.life = 0; s.maxLife = (0.3 + Math.random() * 0.2 + sizeFactor * 0.06) * life;
+      const speed = (2.3 + Math.random() * 2.6) * (0.6 + sizeFactor * 0.4) * speedMult;
+      s.active = true; s.life = 0; s.maxLife = (0.32 + Math.random() * 0.22 + sizeFactor * 0.06) * life;
       s.sprite.visible = true;
       s.sprite.position.set(origin.x, IMPACT_HEIGHT, origin.z);
       s.vx = Math.cos(ang) * speed;
       s.vz = Math.sin(ang) * speed;
-      s.vy = 1.2 + Math.random() * 1.7;
-      s.gravity = -5.4;
-      s.startScale = (0.2 + Math.random() * 0.14) * sizeFactor;
+      s.vy = 1.3 + Math.random() * 1.8;
+      s.gravity = -6.2;
+      s.startScale = (0.22 + Math.random() * 0.16) * sizeFactor;
       s.endScale = 0;
       s.startOpacity = 1; s.endOpacity = 0; s.fadeEase = 1;
-      s.mat.color.set(color).lerp(WHITE, 0.12);
+      s.mat.color.set(color).lerp(WHITE, 0.08);
     }
   }
 

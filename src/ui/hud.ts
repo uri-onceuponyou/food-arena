@@ -539,7 +539,7 @@ const CSS = `
 /* A light, warm plate — not the dark card used everywhere else in this HUD — is a
    deliberate exception: readiness has to read from the icon itself (bright emoji =
    usable), and a dark cooldown wedge sweeping over a DARK card is nearly invisible
-   (measured — see the fix note on `.hud-weapon-cooldown` below). A light plate is
+   (measured — see the fix note on .hud-weapon-cooldown below). A light plate is
    the one background dark-on-dark contrast actually resolves against. */
 .hud-weapon-slot {
   position: relative;
@@ -823,8 +823,11 @@ const CSS = `
   font-family: 'Rubik', sans-serif;
   font-weight: 900;
   color: #FFF3DE;
-  -webkit-text-stroke: 2px #1a1224;
-  text-shadow: 0 2px 0 rgba(0,0,0,0.4);
+  /* Heavier stroke + a tight dark drop-shadow behind it — the previous 2px stroke
+     alone washed out over the arena's bright cream floor tiles. */
+  -webkit-text-stroke: 3px #1a1224;
+  paint-order: stroke fill;
+  text-shadow: 0 2px 0 rgba(0,0,0,0.55), 0 0 6px rgba(0,0,0,0.35);
   white-space: nowrap;
   opacity: 0;
   will-change: transform, opacity;
