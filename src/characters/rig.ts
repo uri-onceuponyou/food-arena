@@ -33,6 +33,31 @@ import * as THREE from 'three';
 import { toonMat, roundedBox } from '../render/toon';
 import { CHARACTER_HEIGHT } from '../units';
 
+/**
+ * Per-character idle stance. An art director's note after four rounds: "every
+ * character stands in the identical symmetric, dead-front, arms-slightly-out pose
+ * ... nothing in the lineup demonstrates the studio can vary silhouette or pose."
+ * That was literally true — every character used one hardcoded rest pose. These
+ * offsets let each character carry its own attitude while still sharing the rig.
+ */
+export interface RigStance {
+  /** Shoulder raise/drop, radians. Positive lifts the arm outward. */
+  shoulderL?: number;
+  shoulderR?: number;
+  /** Elbow bend, radians. More negative = more tucked. */
+  elbowL?: number;
+  elbowR?: number;
+  /** Torso twist about Y, radians — the main weight-shift read. */
+  twist?: number;
+  /** Head tilt about Z and turn about Y, radians. */
+  headTilt?: number;
+  headTurn?: number;
+  /** Hip sway about Z, radians. */
+  hipSway?: number;
+  /** Forward/back lean about X, radians. */
+  lean?: number;
+}
+
 /** Attachment points `dressLimbs` can replace. */
 export type LimbPart =
   | 'upperArmL' | 'upperArmR' | 'forearmL' | 'forearmR' | 'handL' | 'handR'
@@ -98,6 +123,8 @@ export interface RigJoints {
 export interface ChibiRigOptions {
   palette: RigPalette;
   proportions?: RigProportions;
+  /** Per-character idle attitude. Omit for the neutral default. */
+  stance?: RigStance;
   /** Skip default limb geometry and only build the joint hierarchy. */
   jointsOnly?: boolean;
 }
@@ -108,9 +135,23 @@ export class ChibiRig {
   readonly headCentreY: number;
   /** The default torso mesh, so characters can restyle or hide it. */
   torsoMesh: THREE.Mesh | null = null;
+  /** Per-character idle attitude, applied by restPose(). */
+  stance: Required<RigStance>;
   private readonly p: Required<RigProportions>;
 
   constructor(opts: ChibiRigOptions) {
+    const st = opts.stance ?? {};
+    this.stance = {
+      shoulderL: st.shoulderL ?? 0.30,
+      shoulderR: st.shoulderR ?? -0.22,
+      elbowL: st.elbowL ?? -0.42,
+      elbowR: st.elbowR ?? -0.30,
+      twist: st.twist ?? 0.10,
+      headTilt: st.headTilt ?? 0.05,
+      headTurn: st.headTurn ?? -0.13,
+      hipSway: st.hipSway ?? 0.035,
+      lean: st.lean ?? 0,
+    };
     const pr = opts.proportions ?? {};
     const height = pr.height ?? CHARACTER_HEIGHT;
     this.p = {
@@ -400,20 +441,22 @@ export class ChibiRig {
     j.body.position.set(0, 0, 0);
     j.body.rotation.set(0, 0, 0);
     j.body.scale.set(1, 1, 1);
-    j.shoulderL.rotation.set(0.12, 0, 0.30);
-    j.shoulderR.rotation.set(0.06, 0, -0.22);
-    j.elbowL.rotation.set(-0.42, 0, -0.16);
-    j.elbowR.rotation.set(-0.30, 0, 0.12);
+    const s = this.stance;
+    j.shoulderL.rotation.set(0.12, 0, s.shoulderL);
+    j.shoulderR.rotation.set(0.06, 0, s.shoulderR);
+    j.elbowL.rotation.set(s.elbowL, 0, -0.16);
+    j.elbowR.rotation.set(s.elbowR, 0, 0.12);
     j.hipL.rotation.set(0.03, 0, 0.05);
     j.hipR.rotation.set(-0.02, 0, -0.04);
     j.kneeL.rotation.set(0.10, 0, 0);
     j.kneeR.rotation.set(0.05, 0, 0);
     // Weight shift + counter-rotation through the spine.
-    j.hips.rotation.z = 0.035;
+    j.hips.rotation.z = s.hipSway;
     j.torso.rotation.z = -0.05;
-    j.torso.rotation.y = 0.10;
-    j.head.rotation.y = -0.13;
-    j.head.rotation.z = 0.05;
+    j.torso.rotation.y = s.twist;
+    j.torso.rotation.x = s.lean;
+    j.head.rotation.y = s.headTurn;
+    j.head.rotation.z = s.headTilt;
   }
 
   /**
