@@ -35,6 +35,13 @@ const CRACK_DARK = '#7C5530';       // the crack itself — needs real value con
 const YOLK = '#FFC23C';             // glossy peek at the crack tip
 const NEON_ACCENT = RARITY_COLORS.Neon; // #FF2FD0 — Egg's rarity accent, used ONLY on the crack seam
 const INK = PALETTE.ink;
+// Limb-only pale-lilac family. A second independent art-director pass named Egg,
+// Burrito and Lollipop as all converging on pale cream/white limbs with dark
+// boots — the shell itself stays near-white (that IS the egg read), but the limbs
+// shift to a soft lilac tint of her own Neon accent so the body carries real hue
+// distinct from the shell, instead of reading as one undifferentiated pale mass.
+const LIMB_LILAC = '#E4C2E8';
+const LIMB_LILAC_SHADOW = '#CB9ED4';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shell surface — single source of truth for both the mesh and every decal.
@@ -220,18 +227,32 @@ export class EggCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: SHELL,
+        limb: LIMB_LILAC,
         // Hand/foot were both pale near-whites barely a shade off the shell —
         // the exact "one undifferentiated mass" failure called out in review.
         // Hands now take the same saturated yolk used for the crack-tip peek,
         // feet take the crack's own dark caramel, so extremities carry real
-        // value AND hue contrast against the near-white shell limbs.
+        // value AND hue contrast against the shell.
         hand: YOLK,
         foot: CRACK_DARK,
         torso: SHELL,
         limbRoughness: 0.5,
       },
-      proportions: { headFraction: 0.44 },
+      // Small, delicate, thin limbs, dainty narrow stance, slightly shorter overall.
+      // `height` sits below the 2.1m cast norm (she's the smallest character) and
+      // radii/stance are pulled in hard — the thinnest limbs and narrowest stance in
+      // the cast bar Lollipop. `headFraction` stays close to her original value: an
+      // egg's silhouette IS mostly head, so that ratio carries her identity rather
+      // than needing to move.
+      proportions: {
+        height: 1.98,
+        headFraction: 0.46,
+        armRadius: 0.079,
+        handRadius: 0.103,
+        legRadius: 0.087,
+        shoulderWidth: 0.307,
+        stanceWidth: 0.139,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -333,8 +354,8 @@ export class EggCharacter extends BaseCharacter {
     // to a glossy yolk-coloured teardrop (a quiet echo of the crack-tip yolk
     // peek) and feet are small dark shell-chip wedges, echoing the crack motif
     // instead of a generic block.
-    const limbShellMat = toonMat({ color: SHELL, roughness: 0.35 });
-    const limbShellShadowMat = toonMat({ color: SHELL_SHADOW, roughness: 0.4 });
+    const limbShellMat = toonMat({ color: LIMB_LILAC, roughness: 0.4 });
+    const limbShellShadowMat = toonMat({ color: LIMB_LILAC_SHADOW, roughness: 0.42 });
     const yolkHandMat = glossyMat({ color: YOLK, roughness: 0.2 });
     const crackFootMat = toonMat({ color: CRACK_DARK, roughness: 0.5 });
     this.rig.dressLimbs((part, size) => {
@@ -424,23 +445,34 @@ export class EggCharacter extends BaseCharacter {
       glint.userData.noOutline = true;
       eye.add(glint);
 
-      // Worry crease: a raised shell ridge, inner end lifted, above each eye.
-      const brow = addShellDecal(head, sx * EYE_THETA * 0.92, EYE_PHI - 0.155, R * 0.010, R);
+      // Worry crease: a raised shell ridge, inner end lifted, above each eye. A
+      // second independent art-director pass named facial acting as the cast's
+      // biggest remaining gap, and a mirrored crease on both sides (identical
+      // height/tilt) was exactly the "matched, no personality" pattern it flagged —
+      // so the right crease now sits higher and cocks harder than the left, one
+      // genuinely raised eyebrow rather than two symmetric worry lines.
+      const browPhi = sx > 0 ? EYE_PHI - 0.205 : EYE_PHI - 0.135;
+      const brow = addShellDecal(head, sx * EYE_THETA * 0.92, browPhi, R * 0.010, R);
       const creaseMesh = new THREE.Mesh(
         roundedBox(R * 0.20, R * 0.040, R * 0.028, R * 0.018, 2),
         toonMat({ color: SHELL_SHADOW, roughness: 0.45 })
       );
       // (sign verified against a render: the naive -sx tilt read as angry —
       // inner end low, outer high — so this is flipped to lift the inner end.)
-      creaseMesh.rotation.z = sx * 0.38;
+      creaseMesh.rotation.z = sx * (sx > 0 ? 0.52 : 0.30);
       creaseMesh.castShadow = true;
       brow.add(creaseMesh);
     }
 
-    // Straight, neutral mouth — dead centre, just below eye level.
+    // Mouth: a small worried "o" rather than a flat dash — a flat bar barely reads
+    // as a mouth shape at all at gameplay distance, and a second independent
+    // art-director pass named a real mouth shape as required across the whole
+    // cast. A small open ring pairs naturally with the raised-crease worry above
+    // it (about to hatch, bracing for a hit) while staying dainty/deadpan rather
+    // than a wide cartoon gasp.
     const mouth = addShellDecal(head, 0, 0.505 * Math.PI, R * 0.010, R);
     const mouthMesh = new THREE.Mesh(
-      roundedBox(R * 0.20, R * 0.026, R * 0.020, R * 0.012, 2),
+      new THREE.TorusGeometry(R * 0.052, R * 0.019, 10, 16),
       toonMat({ color: INK, roughness: 0.3 })
     );
     mouthMesh.castShadow = true;

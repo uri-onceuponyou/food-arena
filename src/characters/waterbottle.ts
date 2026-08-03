@@ -94,9 +94,16 @@ const CAP_TOP_F = 0.86;
 // read as insect eye-stalks, not a face attached to this character. Pulled back
 // in to +0.20 AND, more importantly, bridged with a solid `buildFaceStalk()`
 // connector (see below) so the face reads as perched on a raised nub of the
-// cap rather than floating disconnected from it. Still wide enough, combined
-// with the smaller smile below, for the smile to clear the cap's apex.
-const FACE_FLOAT_F = CAP_TOP_F + 0.20;
+// cap rather than floating disconnected from it.
+//
+// A FRESH independent art director still read this as "two googly stalk-eyes, no
+// brows, no mouth at all" — the previous pass's smile technically existed but its
+// lowest point cleared the cap apex by only 0.02R, so it sat almost fused into the
+// stalk/cap and never registered as a separate mouth shape. Pushed out further, to
+// +0.32, so the smile (enlarged below) gets real clearance above the cap; the
+// stalk itself grows to match automatically since it spans CAP_TOP_F to
+// FACE_FLOAT_F, so the face still reads as attached rather than detached.
+const FACE_FLOAT_F = CAP_TOP_F + 0.32;
 
 // Water fill, in ABSOLUTE fractions of R first (bottom to the fill line), then
 // re-expressed relative to its own sloshing pivot below.
@@ -266,24 +273,35 @@ export class WaterBottleCharacter extends BaseCharacter {
       palette: {
         // Contrasting zones rather than one flat colour — the reference bar
         // (bs_06/bs_02) dresses the body in distinct blocks (overalls/shirt/boots),
-        // not a single hue repeated everywhere. Pale plastic limbs and torso, dark
-        // navy hands/feet (mitts/boots) for the contrast. Round 3 tried a near-white
-        // LABEL torso here and it backfired: at this scale the torso sphere is the
-        // single biggest mass below the neck, and full white made it compete with
-        // the bottle itself — the eye landed on a floating white ball instead of
-        // the glass. Matching it to the shell tone keeps the silhouette's brightest
-        // white reserved for the label wrap, where it belongs.
-        limb: PLASTIC,
+        // not a single hue repeated everywhere. A fresh independent art director named
+        // the cast-wide failure directly: Soup, Water Bottle and Sushi all ended up
+        // with cream/white tapered limbs and dark boots, reading as the same parts
+        // reskinned. The HEAD shell stays pale PLASTIC — that's load-bearing for the
+        // transmission/glass read and untouched here — but the limbs/torso move to the
+        // richer, more saturated WATER blue (the same hue already used for the water
+        // fill and this character's own ability VFX), a real value/saturation break
+        // from the pale near-white shell. Dark navy hands/feet stay as the contrast.
+        limb: WATER,
         hand: CAP,
         foot: CAP_DARK,
-        torso: PLASTIC,
-        limbRoughness: 0.5,
+        torso: WATER,
+        limbRoughness: 0.4,
       },
-      // Smaller than the 0.46 default: the bottle's own elongation (shoulder, neck,
-      // cap, then the floating face on top of that) already adds a lot of height
-      // beyond a normal spherical food mass. Round 1 at the default measured 2.39m
-      // against the 2.1m target — this pulls the whole assembly back down.
-      proportions: { headFraction: 0.40 },
+      // headFraction stays at the value already tuned for this character's own
+      // elongated head geometry (shoulder, neck, cap, then the floating face on top of
+      // that) — round 1 at the 0.46 default measured 2.39m against the 2.1m target, and
+      // this is what pulls the whole assembly back down; changing it here would reopen
+      // that regression. The NEW proportions below are what actually make this
+      // character read as "tall and narrow" per the brief: narrow shoulders, a close
+      // stance, and the thinnest limbs in the cast.
+      proportions: {
+        headFraction: 0.40,
+        shoulderWidth: CHARACTER_HEIGHT * 0.13,  // narrowest shoulders in the cast
+        stanceWidth: CHARACTER_HEIGHT * 0.075,   // closest, narrowest stance in the cast
+        armRadius: CHARACTER_HEIGHT * 0.040,     // thinnest arms in the cast
+        handRadius: CHARACTER_HEIGHT * 0.058,    // slender — a small cap, not a mitt
+        legRadius: CHARACTER_HEIGHT * 0.044,     // thinnest legs in the cast
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -462,44 +480,57 @@ export class WaterBottleCharacter extends BaseCharacter {
     const eyeMat = toonMat({ color: ink, roughness: 0.25 });
     const browMat = toonMat({ color: CAP, roughness: 0.4 }); // ties the brows to the cap material
     for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.155, 16, 14), eyeMat);
-      eye.position.set(sx * R * 0.30, 0, 0);
-      eye.scale.set(1, 1.1, 0.62);
+      // Enlarged from the previous pass (0.155R → 0.175R) and rounder (scale 0.62 →
+      // 0.68 on Z) — a fresh independent art director read the previous eyes as
+      // "googly stalk-eyes" with nothing else to anchor them as a face; bigger,
+      // rounder eyes plus a real brow and a real visible smile (below) are what
+      // turn that into a face rather than two dots.
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.175, 16, 14), eyeMat);
+      eye.position.set(sx * R * 0.32, 0, 0);
+      eye.scale.set(1, 1.08, 0.68);
       eye.castShadow = true;
       face.add(eye);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.040, 10, 8), flatMat('#ffffff'));
-      glint.position.set(sx * R * 0.30 - R * 0.038, R * 0.048, R * 0.13);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.045, 10, 8), flatMat('#ffffff'));
+      glint.position.set(sx * R * 0.32 - R * 0.042, R * 0.052, R * 0.15);
       glint.userData.noOutline = true;
       face.add(glint);
 
       // Brow: a slight friendly lift outward (not a V — this bottle is cheerful,
       // not fierce), on one shared Y so the pair reads as deliberately level.
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.019, R * 0.14, 4, 8), browMat);
+      // Thickened and lengthened, and lifted further above the (now bigger) eye so
+      // it reads as its own distinct stroke rather than grazing the eye's own bulge.
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.024, R * 0.17, 4, 8), browMat);
       brow.name = 'waterbottle_brow';
       brow.rotation.z = Math.PI / 2 - sx * 0.18;
-      brow.position.set(sx * R * 0.30, R * 0.185, R * 0.05);
+      brow.position.set(sx * R * 0.32, R * 0.235, R * 0.06);
       brow.castShadow = true;
       face.add(brow);
     }
 
-    // Warm, open smile — friendly rather than crooked, per the brief. A torus
-    // arc's own bottom point sits a full `radius` below wherever it's anchored
-    // (the arc sweeps through the ring's south pole), so the true footprint here
-    // is "anchor Y minus radius", not just the anchor itself. Trimmed smaller
-    // than the previous pass (radius 0.12R → 0.10R, offset 0.10R → 0.08R) to keep
-    // real clearance above the cap apex now that the face sits closer to it: the
-    // lowest point lands at FACE_FLOAT_F - 0.08 - 0.10 = CAP_TOP_F + 0.02, a real
-    // checked margin, and the face stalk fills in visually beneath it either way.
+    // Big, warm smile — per the brief's own spec for this character, and the single
+    // biggest miss two fresh independent art-director passes both named: "no mouth at
+    // all." The previous two attempts anchored the smile inside the same tight pod as
+    // the eyes, directly above the stalk connector — at that scale, an ink-black torus
+    // arc sitting right against the stalk's own dark-navy material had almost no colour
+    // contrast to read against, so it visually fused into the connector and vanished
+    // (confirmed by cropping a render: the "mouth" area showed only two dark flaps,
+    // not a smile). Fixed by moving the smile OFF the eye pod entirely and onto the
+    // cap's own front wall — a separate visual zone from the eyes/stalk clutter above —
+    // and giving it the label's bright near-white colour so it reads clearly against
+    // the dark matte cap, the same colour-contrast trick the label wrap already uses
+    // against the shell. Sits on the cap's straight cylindrical wall (CAP_PROFILE holds
+    // radius 0.30R from h 0.67 to 0.78) at the front, between the two grip ridges.
+    const smileMat = toonMat({ color: LABEL, roughness: 0.4 });
     const smile = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.10, R * 0.026, 8, 20, Math.PI * 0.82),
-      toonMat({ color: ink, roughness: 0.3 })
+      new THREE.TorusGeometry(R * 0.155, R * 0.034, 8, 20, Math.PI * 0.8),
+      smileMat
     );
     smile.name = 'waterbottle_smile';
-    smile.position.set(0, -R * 0.08, 0);
+    smile.position.set(0, R * 0.735, R * 0.30 + R * 0.012);
     smile.rotation.z = Math.PI * 1.09;
     smile.castShadow = true;
-    face.add(smile);
+    head.add(smile);
   }
 
   /**
@@ -514,7 +545,7 @@ export class WaterBottleCharacter extends BaseCharacter {
    */
   private dressTorsoAsBottle(): void {
     const height = CHARACTER_HEIGHT;
-    const shoulderWidth = height * 0.20;
+    const shoulderWidth = height * 0.13; // must match the rig's own `proportions.shoulderWidth`
     const tw = shoulderWidth * 1.18;
     const torsoH = height * 0.28;
     const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85); // rig.ts's taper at t=0.5
@@ -599,7 +630,9 @@ export class WaterBottleCharacter extends BaseCharacter {
    * ends here" without extra hardware.
    */
   private dressLimbs(): void {
-    const plasticMat = glossyMat({ color: PLASTIC, roughness: 0.16 });
+    // Richer WATER blue, not the pale near-white shell tone — see the constructor's
+    // own comment on the colour-convergence fix.
+    const plasticMat = glossyMat({ color: WATER, roughness: 0.16 });
     const capMat = toonMat({ color: CAP, roughness: 0.4 });
     const capDarkMat = toonMat({ color: CAP_DARK, roughness: 0.4 });
 

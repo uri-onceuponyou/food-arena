@@ -214,7 +214,21 @@ export class HamburgerCharacter extends BaseCharacter {
         torso: PALETTE.bunDark,  // fallback only — dressTorso() replaces this mesh below
         limbRoughness: 0.85,     // dry, matte-baked crust, matching the bun layers
       },
-      proportions: { headFraction: 0.46 },
+      // Wide, squat, heavy, planted — broad shoulders and thick, short-reading legs so
+      // the silhouette reads as "burger" even with the head covered. A second
+      // independent art-director pass named identical body proportions across the cast
+      // as the single biggest remaining "template" tell despite per-character limb
+      // geometry; `height` is deliberately below the 2.1m cast norm (short/squat) while
+      // radii and stance run well above it (thick/planted).
+      proportions: {
+        height: 1.95,
+        headFraction: 0.50,
+        armRadius: 0.172,
+        handRadius: 0.195,
+        legRadius: 0.185,
+        shoulderWidth: 0.536,
+        stanceWidth: 0.312,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head; // free counter-lean/tilt from BaseCharacter
@@ -435,13 +449,17 @@ export class HamburgerCharacter extends BaseCharacter {
       // Eyebrow — offset along the SAME local Y the eye is offset along, so the
       // gap between them is fixed and cannot collapse regardless of dome
       // curvature. Cocked higher on the right than the left for a
-      // one-eyebrow-raised personality.
+      // one-eyebrow-raised personality. Thickened and cocked further than the
+      // original pass — a second independent art-director round named facial
+      // acting as the single biggest appeal gap across the cast, and this face
+      // was singled out as the one to keep rather than replace, so the brow gets
+      // more read (bolder arc, stronger raise) without changing its shape language.
       const browG = new THREE.Group();
       browG.position.set(0, 0.13 * faceScale, 0.012 * faceScale);
       faceSideG.add(browG);
-      const brow = new THREE.Mesh(faceArc(0.09 * faceScale, 0.02 * faceScale, Math.PI * 0.32), faceMat);
+      const brow = new THREE.Mesh(faceArc(0.09 * faceScale, 0.026 * faceScale, Math.PI * 0.36), faceMat);
       brow.name = 'brow';
-      brow.rotation.z = sx > 0 ? 0.24 : 0.1;
+      brow.rotation.z = sx > 0 ? 0.32 : 0.05;
       brow.castShadow = true;
       brow.receiveShadow = true;
       browG.add(brow);
@@ -457,7 +475,7 @@ export class HamburgerCharacter extends BaseCharacter {
     // smile reads as a one-sided smirk (playful short-order cook) instead of a
     // perfectly symmetric "u".
     const mouthG = addCrownDecal(face, CROWN, -0.05, 0.25, 0.014 * faceScale);
-    const mouth = new THREE.Mesh(faceArc(0.13 * faceScale, 0.024 * faceScale, Math.PI * 0.46), faceMat);
+    const mouth = new THREE.Mesh(faceArc(0.13 * faceScale, 0.028 * faceScale, Math.PI * 0.54), faceMat);
     mouth.name = 'mouth';
     mouth.rotation.z = -Math.PI / 2 + 0.16; // bulge down-and-tilted: smirk, not a flat "u"
     mouth.castShadow = true;

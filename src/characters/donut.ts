@@ -28,6 +28,14 @@ const DOUGH_DARK = '#D9A253';
 // ("chocolate-dipped feet") so the body doesn't read as one undifferentiated tan
 // mass. `DOUGH_DARK` above is too close in hue/value to `DOUGH` to do that job.
 const CHOC_DIP = '#5C3417';
+// Limb-only pink family — a second independent art-director pass found Hamburger,
+// Donut and Taco all converging on the same golden-tan-dough hue for their limbs
+// despite different heads. Donut's own icing is already pink, so her limbs lean
+// into THAT identity instead of the shared dough tone: a saturated glaze pink for
+// the meaty part of the limb, a deeper berry pink for the lower segment, so the
+// whole body reads pink-and-cream rather than another tan blob.
+const LIMB_PINK = '#F0729B';
+const LIMB_PINK_DARK = '#D14E7C';
 
 const SPRINKLE_COLORS = ['#E63946', '#7CB518', '#FFC93C', '#7C4DFF', '#2E86D8', '#FFFFFF'];
 
@@ -122,13 +130,27 @@ export class DonutCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: DOUGH,
+        limb: LIMB_PINK,
         hand: GLAZE,
         foot: CHOC_DIP,
         torso: DOUGH,
         limbRoughness: 0.72,
       },
-      proportions: { headFraction: 0.47 },
+      // Round and bouncy, mid everything — proportions stay close to the shared rig
+      // defaults (unlike her five castmates, all pushed hard toward an extreme) so
+      // Donut reads as the cast's baseline "regular" body against which the wide
+      // Hamburger, lean Taco, tall Burrito, tiny Egg and gangly Lollipop all measure
+      // themselves as visibly different. Nudged up only slightly for a plumper,
+      // rounder read (a fraction bigger hands/head, a touch wider stance).
+      proportions: {
+        height: 2.10,
+        headFraction: 0.47,
+        armRadius: 0.130,
+        handRadius: 0.168,
+        legRadius: 0.139,
+        shoulderWidth: 0.431,
+        stanceWidth: 0.252,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -273,15 +295,15 @@ export class DonutCharacter extends BaseCharacter {
     // her own material story: glaze-dipped glossy hands that end in a drip, and
     // chocolate-dipped glossy feet, both a deliberate step up in gloss from the
     // matte dough limbs, echoing the head's own matte-dough/glossy-glaze contrast.
-    const doughMat = toonMat({ color: DOUGH, roughness: 0.82 });
-    const doughDarkMat = toonMat({ color: DOUGH_DARK, roughness: 0.82 });
+    const limbPinkMat = toonMat({ color: LIMB_PINK, roughness: 0.7 });
+    const limbPinkDarkMat = toonMat({ color: LIMB_PINK_DARK, roughness: 0.7 });
     const glazeHandMat = glossyMat({ color: GLAZE, roughness: 0.16 });
     const chocFootMat = glossyMat({ color: CHOC_DIP, roughness: 0.22 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {
         case 'upperArmL': case 'upperArmR':
         case 'thighL': case 'thighR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.16, size.radius * 1.0, 10), doughMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.16, size.radius * 1.0, 10), limbPinkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -289,7 +311,7 @@ export class DonutCharacter extends BaseCharacter {
         }
         case 'forearmL': case 'forearmR':
         case 'shinL': case 'shinR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.0, size.radius * 0.84, 10), doughDarkMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.0, size.radius * 0.84, 10), limbPinkDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -345,29 +367,36 @@ export class DonutCharacter extends BaseCharacter {
     const eyeGeo = new THREE.SphereGeometry(R * 0.115, 16, 14);
     const eyeMat = toonMat({ color: ink, roughness: 0.25 });
     for (const sx of [-1, 1]) {
+      // Right eye (sx>0) squints slightly under its cocked brow — a real wink-lite
+      // read rather than the mirrored, matched-everything face this shipped with. A
+      // second independent art-director pass named facial acting as the cast's
+      // biggest remaining appeal gap, and perfectly symmetric brows/eyes were exactly
+      // the kind of "no personality, just present" feature that scored badly.
+      const squint = sx > 0 ? 0.72 : 1;
       const eye = new THREE.Mesh(eyeGeo, eyeMat);
       eye.position.set(sx * R * 0.36, R * 0.30, -R * 0.16);
-      eye.scale.set(1, 1.15, 0.6);
+      eye.scale.set(1, 1.15 * squint, 0.6);
       eye.castShadow = true;
       face.add(eye);
 
       // Specular catchlight — the single cheapest trick for making eyes feel alive.
       const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.038, 10, 8), flatMat('#ffffff'));
-      glint.position.set(sx * R * 0.36 - R * 0.035, R * 0.345, -R * 0.10);
+      glint.position.set(sx * R * 0.36 - R * 0.035, R * 0.345 * squint, -R * 0.10);
       glint.userData.noOutline = true;
       face.add(glint);
 
-      // Brows — matched height and curve on both sides. An independent art
-      // director flagged flat dot-eyes with no brow/lid as reading "unfinished";
-      // these are real shaded geometry (a short capsule), not a decal, and sit at
-      // an IDENTICAL height/offset from each eye so any asymmetry elsewhere on the
-      // face (the crooked smile) reads as a deliberate choice, not a stray brow.
+      // Brows — genuinely asymmetric now: the right brow (over the squinting eye)
+      // sits higher and cocks harder, the left stays low and nearly flat, so the
+      // crooked smile below reads as ONE character's deliberate smirk instead of a
+      // matched, interchangeable pair of brows either side of it.
+      const browY = sx > 0 ? R * 0.54 : R * 0.47;
+      const browTilt = sx > 0 ? 0.36 : 0.04;
       const brow = new THREE.Mesh(
-        new THREE.CapsuleGeometry(R * 0.02, R * 0.14, 4, 8),
+        new THREE.CapsuleGeometry(R * 0.021, R * 0.14, 4, 8),
         toonMat({ color: PALETTE.ink, roughness: 0.4 })
       );
-      brow.position.set(sx * R * 0.36, R * 0.47, -R * 0.155);
-      brow.rotation.z = Math.PI / 2 - sx * 0.16;
+      brow.position.set(sx * R * 0.36, browY, -R * 0.155);
+      brow.rotation.z = Math.PI / 2 - sx * browTilt;
       brow.castShadow = true;
       face.add(brow);
     }

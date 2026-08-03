@@ -39,6 +39,13 @@ const TOMATO = PALETTE.tomato;
 const CHEESE = PALETTE.cheese;
 const LETTUCE = PALETTE.lettuce;
 const SOUR_CREAM = '#FFFDF7';
+// Limb-only avocado-green family. A second independent art-director pass named
+// Burrito, Egg and Lollipop as all converging on pale cream/white LIMBS with dark
+// boots — the wrap itself stays this pale tortilla tone (that's the food read for
+// the head/torso), but the arms and legs shift to a fresh guac-green so the body
+// no longer reads as another undifferentiated cream mass.
+const LIMB_AVOCADO = '#7DA33F';
+const LIMB_AVOCADO_DARK = '#587429';
 
 type Spot = readonly [angleDeg: number, radiusFrac: number];
 
@@ -92,13 +99,29 @@ export class BurritoCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: TORTILLA,
+        limb: LIMB_AVOCADO,
         hand: WRAP_BAND,
         foot: BOOT,
         torso: TORTILLA_SHADE,
         limbRoughness: 0.78,
       },
-      proportions: { headFraction: 0.46 },
+      // Tall and cylindrical, narrow shoulders, upright. `height` runs well above
+      // the cast norm (arm/leg length is a fixed fraction of `height` in the shared
+      // rig, so a genuinely taller frame is the only way to buy that read) while a
+      // small `headFraction` keeps the actual rendered top-of-head height close to
+      // the 2.1m norm rather than making Burrito a giant — the extra height goes
+      // into an elongated body instead. Shoulder width is pulled in hard, the one
+      // trait called out explicitly; radii stay close to the shared default so
+      // limbs read as true cylinders rather than tapered dough.
+      proportions: {
+        height: 2.35,
+        headFraction: 0.38,
+        armRadius: 0.122,
+        handRadius: 0.155,
+        legRadius: 0.132,
+        shoulderWidth: 0.306,
+        stanceWidth: 0.223,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -277,9 +300,9 @@ export class BurritoCharacter extends BaseCharacter {
     // tapered dough, with a seam stripe echoing the roll; hands are twisted foil
     // nubs (the classic "twist the wrapper end" burrito silhouette) instead of a
     // generic mitt, and feet read as the wrap's own cut end.
-    const limbWrapMat = toonMat({ color: TORTILLA, roughness: 0.8 });
-    const limbWrapShadeMat = toonMat({ color: TORTILLA_SHADE, roughness: 0.8 });
-    const seamMat = toonMat({ color: TORTILLA_SHADE, roughness: 0.7 });
+    const limbWrapMat = toonMat({ color: LIMB_AVOCADO, roughness: 0.75 });
+    const limbWrapShadeMat = toonMat({ color: LIMB_AVOCADO_DARK, roughness: 0.75 });
+    const seamMat = toonMat({ color: LIMB_AVOCADO_DARK, roughness: 0.7 });
     const foilMatLimb = toonMat({ color: FOIL, roughness: 0.25, metalness: 0.5 });
     const bandMatLimb = toonMat({ color: WRAP_BAND, roughness: 0.72 });
     const bootMatLimb = toonMat({ color: BOOT, roughness: 0.75 });
@@ -367,32 +390,39 @@ export class BurritoCharacter extends BaseCharacter {
     const eyeY = R * 0.10;
 
     for (const sx of [-1, 1]) {
+      // Right eye (sx>0) winks — noticeably squashed and its brow cocked hard above
+      // it — while the left stays wide open with a low, relaxed brow. A second
+      // independent art-director pass named matched, mirrored brows/eyes across the
+      // cast as the biggest reason facial acting wasn't landing; "ready to roll into
+      // a fight" now reads as one deliberate wink-and-grin rather than a symmetric
+      // eager stare.
+      const wink = sx > 0 ? 0.34 : 1.15;
       const ex = sx * R * 0.30;
       const ez = surfaceZ(ex, eyeY) * 0.94;
       const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.125, 16, 14), eyeMat);
       eye.position.set(ex, eyeY, ez);
-      eye.scale.set(1, 1.15, 0.55);
+      eye.scale.set(1, wink, 0.55);
       eye.castShadow = true;
       face.add(eye);
 
       const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.04, 8, 8), flatMat('#ffffff'));
-      glint.position.set(ex - R * 0.03, eyeY + R * 0.045, ez + R * 0.05);
+      glint.position.set(ex - R * 0.03, eyeY + R * 0.045 * wink, ez + R * 0.05);
       glint.userData.noOutline = true;
       face.add(glint);
 
-      // Brows — matched height/angle on both sides, eager and upward, matching
-      // "ready to roll into a fight". Real shaded geometry, not a flat decal, and
-      // placed against the SAME `surfaceZ` equation as the eye it sits above so it
-      // can't sink into or float off the tube regardless of where sx pushes it.
+      // Brows — placed against the SAME `surfaceZ` equation as the eye it sits above
+      // so it can't sink into or float off the tube regardless of where sx pushes it.
+      // Genuinely asymmetric now: cocked hard over the winking eye, low and level
+      // over the open one.
       const bx = ex;
-      const by = eyeY + R * 0.155;
+      const by = eyeY + (sx > 0 ? R * 0.205 : R * 0.135);
       const bz = surfaceZ(bx, by) * 0.95;
       const brow = new THREE.Mesh(
         new THREE.CapsuleGeometry(R * 0.022, R * 0.15, 4, 8),
         toonMat({ color: PALETTE.ink, roughness: 0.4 })
       );
       brow.position.set(bx, by, bz);
-      brow.rotation.z = Math.PI / 2 - sx * 0.22;
+      brow.rotation.z = Math.PI / 2 - sx * (sx > 0 ? 0.40 : 0.10);
       brow.castShadow = true;
       face.add(brow);
     }

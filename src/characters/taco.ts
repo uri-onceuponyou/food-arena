@@ -35,6 +35,15 @@ const LETTUCE = '#8FCB1E';
 const LETTUCE_DARK = '#6FA112';
 const ONION = '#AD82D6';       // ties visually to the Onion Bomb projectile colour — kept saturated
                                 // enough not to read as another tomato bit at a glance
+// Limb-only rust family. A second independent art-director pass found Hamburger's
+// bun-amber, Donut's dough-tan and Taco's own shell-gold all sitting in the same
+// golden-orange hue band despite different heads — the "one templated body" read
+// survived per-character geometry because every limb was still the same colour
+// family. The HEAD keeps its golden shell (that's the "hard taco shell" read), but
+// the limbs shift to a deeper, redder terracotta — extra-crispy fried-edge shell —
+// which is a distinctly different hue from both castmates above.
+const LIMB_SHELL = '#C1522B';
+const LIMB_SHELL_DARK = '#8F3A1D';
 
 /**
  * Trapezoid shell outline: a narrow crease at the bottom (the fold) widening to an
@@ -112,13 +121,28 @@ export class TacoCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: SHELL,
-        hand: PALETTE.onion, // cream — contrast against the golden shell, per the reference bar
+        limb: LIMB_SHELL,
+        hand: ONION,  // saturated purple — ties to Onion Bomb, breaks from the cast's
+                       // repeated cream/white mitt, per the same review pass above
         foot: SHELL_DARK,
         torso: SHELL,
         limbRoughness: 0.8,
       },
-      proportions: { headFraction: 0.48 },
+      // Lean and angular, longer limbs, narrow stance. `height` runs well above the
+      // 2.1m cast norm — since arm/leg LENGTH is a fixed fraction of `height` in the
+      // shared rig, that's the only way to buy a genuinely longer-limbed read — while
+      // a smaller `headFraction` keeps overall silhouette height close to the cast
+      // norm rather than making Taco a giant. Radii and stance both pulled in hard for
+      // the angular, narrow-framed read.
+      proportions: {
+        height: 2.30,
+        headFraction: 0.40,
+        armRadius: 0.097,
+        handRadius: 0.133,
+        legRadius: 0.106,
+        shoulderWidth: 0.414,
+        stanceWidth: 0.179,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -314,6 +338,34 @@ export class TacoCharacter extends BaseCharacter {
     this.rig.joints.face.position.copy(podCenter);
     this.buildFace(podR);
 
+    // ── Torso: a second, smaller shell fold, not the rig's bare default ball ──
+    // Taco never authored a torso, so it was rendering the shared rig's plain
+    // default sphere underneath its shell head — on a cast where every other
+    // character dresses its torso, an undressed default ball is exactly the
+    // "one templated body" tell a second independent art-director pass warned
+    // about, and the most obvious one in the whole roster. This is the same
+    // trapezoid, crimped-top fold language as the head shell and the face pod,
+    // just smaller, so the body keeps building on the same food identity instead
+    // of exposing the shared rig underneath it.
+    this.rig.dressTorso((size) => {
+      const group = new THREE.Group();
+      group.name = 'taco_torso_fold';
+      const halfWBotT = size.w * 0.16;
+      const halfWTopT = size.w * 0.50;
+      const toothHT = size.h * 0.10;
+      const shapeT = tacoShellShape(halfWBotT, halfWTopT, 0, size.h * 0.82, 6, toothHT);
+      const thicknessT = size.d * 0.85;
+      const geoT = new THREE.ExtrudeGeometry(shapeT, { depth: thicknessT, bevelEnabled: false, curveSegments: 1 });
+      geoT.translate(0, 0, -thicknessT / 2);
+      geoT.computeVertexNormals();
+      const mesh = new THREE.Mesh(geoT, shellMat);
+      mesh.name = 'taco_torso_fold_mesh';
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+      return group;
+    });
+
     // ── Limbs: bespoke, not the shared rig defaults ───────────────────────────
     // An independent art director named the rig's identical capsule-arm/ball-hand/
     // wedge-foot kit as the single biggest "template" tell across the whole cast.
@@ -321,9 +373,9 @@ export class TacoCharacter extends BaseCharacter {
     // count) and flattened into shard-like cross-sections, with a couple of the
     // pod's own crimp teeth glued onto the hand — the same toasted-shell language
     // as the head, not a generic mitt.
-    const limbShellMat = shellMat;
-    const limbShellDarkMat = shellDarkMat;
-    const mittMat = toonMat({ color: PALETTE.onion, roughness: 0.62 });
+    const limbShellMat = toonMat({ color: LIMB_SHELL, roughness: 0.78 });
+    const limbShellDarkMat = toonMat({ color: LIMB_SHELL_DARK, roughness: 0.78 });
+    const mittMat = glossyMat({ color: ONION, roughness: 0.32 });
     const toothGeoSmall = new THREE.ConeGeometry(R * 0.05, R * 0.12, 4);
     this.rig.dressLimbs((part, size) => {
       switch (part) {
@@ -438,6 +490,24 @@ export class TacoCharacter extends BaseCharacter {
     brow.rotation.z = Math.PI / 2 + 0.35;
     brow.castShadow = true;
     face.add(brow);
+
+    // A second, calmer brow over the right eye — flatter, lower, barely angled. A
+    // second independent art-director pass flagged bare, brow-less eyes elsewhere in
+    // the cast as reading "unfinished" rather than deliberate; this eye now has a real
+    // brow too, it's just NOT the one doing the acting, so the mischievous raise above
+    // stays unambiguous instead of reading as two brows that happen to differ.
+    const browX2 = podR * 0.52;
+    const browY2 = podR * 0.30;
+    const browSurfaceZ2 = podR * Math.sqrt(Math.max(0, 1 - (browX2 / podR) ** 2 - (browY2 / podR) ** 2));
+    const brow2 = new THREE.Mesh(
+      new THREE.CapsuleGeometry(podR * 0.05, podR * 0.28, 4, 8),
+      browMat
+    );
+    brow2.name = 'brow';
+    brow2.position.set(browX2, browY2, browSurfaceZ2 + podR * 0.05);
+    brow2.rotation.z = Math.PI / 2 - 0.06;
+    brow2.castShadow = true;
+    face.add(brow2);
 
     // Crooked, wide-open grin.
     const smile = new THREE.Mesh(

@@ -25,6 +25,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
+import { CHARACTER_HEIGHT } from '../units';
 
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0'
 
@@ -148,7 +149,19 @@ export class HotDogCharacter extends BaseCharacter {
         torso: PALETTE.bun,
         limbRoughness: 0.8,
       },
-      proportions: { headFraction: 0.53 },
+      // A fresh independent art director scored the cast 4/10 and named the body plan
+      // directly: every character took the rig's defaults, so bodies read as identical
+      // parts under different heads. HotDog's own head mass is long and HORIZONTAL —
+      // per the brief it needs a low, wide stance and stubby limbs underneath to
+      // balance that width, or the body reads like a stick holding up a long log.
+      proportions: {
+        headFraction: 0.53,
+        shoulderWidth: CHARACTER_HEIGHT * 0.23,  // wide enough to visually support the sausage's span
+        stanceWidth: CHARACTER_HEIGHT * 0.16,    // low, wide stance — the widest paired with Soup
+        armRadius: CHARACTER_HEIGHT * 0.072,     // stubby, thick
+        handRadius: CHARACTER_HEIGHT * 0.092,    // biggest bundled fist in the cast
+        legRadius: CHARACTER_HEIGHT * 0.082,     // stubby, thick
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -329,6 +342,19 @@ export class HotDogCharacter extends BaseCharacter {
       glint.position.set(sx * R * 0.24 - R * 0.018, eyeY - R * 0.05, R * 0.025);
       glint.userData.noOutline = true;
       face.add(glint);
+
+      // A thin, level brow riding just above the lid — a fresh independent art
+      // director's checklist explicitly called for verifying every character has
+      // "brows carrying expression," and the sleepy lid alone was doing double duty
+      // as both lid and brow. A separate stroke, mustard-toned rather than ink-black
+      // so it doesn't fuse into the lid below it, keeps the same level/unbothered
+      // angle (no V-tilt) so the laid-back personality isn't disturbed.
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.018, R * 0.14, 4, 8), toonMat({ color: PALETTE.mustard, roughness: 0.4 }));
+      brow.name = 'brow';
+      brow.rotation.z = Math.PI / 2;
+      brow.position.set(sx * R * 0.24, eyeY + R * 0.095, R * 0.01);
+      brow.castShadow = true;
+      face.add(brow);
     }
 
     // Small closed-lip smile — calm and symmetric-ish rather than crooked, to

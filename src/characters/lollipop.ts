@@ -32,6 +32,14 @@ const CANDY_RED = '#E63946';
 const STICK = '#FBF7EE';       // matte paper stick
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0' — restrained trim accent only
 const BOOT = '#2A2140';        // dark, near-ink boots — grounds the pale/red palette
+// Limb-only frosted-teal family, a tint of Lollipop's own Cyber accent. A second
+// independent art-director pass named Lollipop, Egg and Burrito as all converging
+// on pale cream/white limbs with dark boots — the disc/stick stay their candy-white
+// (that's the "hard sugar candy" read), but arms and legs shift to a cool teal so
+// the body carries real hue instead of reading as another pale mass, and it ties
+// directly to her own rarity accent rather than borrowing a hue from elsewhere.
+const LIMB_TEAL = '#8FE0C9';
+const LIMB_TEAL_DARK = '#57B296';
 
 /**
  * Archimedean spiral ribbon: a band of constant width whose centreline radius grows
@@ -110,13 +118,25 @@ export class LollipopCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: STICK,
+        limb: LIMB_TEAL,
         hand: CANDY_RED,
         foot: BOOT,
         torso: STICK,
         limbRoughness: 0.75,
       },
-      proportions: { headFraction: 0.4 },
+      // Tall and gangly, very thin limbs, big head-to-body ratio. `headFraction` is
+      // the highest in the cast (a bobblehead-on-a-stick read: the candy disc IS
+      // most of her), paired with a taller-than-norm `height` for the gangly body
+      // underneath and the thinnest radii/stance in the cast.
+      proportions: {
+        height: 2.00,
+        headFraction: 0.49,
+        armRadius: 0.072,
+        handRadius: 0.100,
+        legRadius: 0.080,
+        shoulderWidth: 0.290,
+        stanceWidth: 0.124,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -256,7 +276,8 @@ export class LollipopCharacter extends BaseCharacter {
     // than the rig's default and wear the same red/white candy-cane stripe as her
     // own wrapper-petal cuff; hands are miniature glossy lollipops (a swirl ring
     // echoing the head disc), and feet are dark pointed candy-shoe boots.
-    const stickLimbMat = toonMat({ color: STICK, roughness: 0.72 });
+    const stickLimbMat = toonMat({ color: LIMB_TEAL, roughness: 0.55 });
+    const stickLimbDarkMat = toonMat({ color: LIMB_TEAL_DARK, roughness: 0.55 });
     const stripeMat = toonMat({ color: CANDY_RED, roughness: 0.55 });
     const candyHandMat = glossyMat({ color: CANDY_RED, roughness: 0.14 });
     const candySwirlMat = candyMat;
@@ -282,7 +303,7 @@ export class LollipopCharacter extends BaseCharacter {
         case 'forearmL': case 'forearmR':
         case 'shinL': case 'shinR': {
           const g = new THREE.Group();
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.52, size.radius * 0.38, 10), stickLimbMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.52, size.radius * 0.38, 10), stickLimbDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -358,29 +379,49 @@ export class LollipopCharacter extends BaseCharacter {
     // Round 2 defect: eyes sat close together (+-0.52*stickR, radius 0.42*stickR) right
     // where the disc's shadow falls, and read as a single squinting smudge. Pushed
     // apart and enlarged — the stick was widened specifically to give this room.
+    // Right eye (sx>0) winks shut — a real closed-eye read, not just a squint — under
+    // a hard-cocked brow; the left stays wide open under a low, level brow. A second
+    // independent art-director pass named matched, mirrored brows/eyes as the reason
+    // facial acting wasn't landing across the cast, and "confident, a little sassy"
+    // is exactly the personality a genuine wink sells that a symmetric stare can't.
     for (const sx of [-1, 1]) {
+      const winking = sx > 0;
       const ex = sx * stickR * 0.68;
       const ez = Math.sqrt(Math.max(0, stickR * stickR - ex * ex)) * 0.96;
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.5, 14, 12), eyeMat);
-      eye.position.set(ex, stickFaceY, ez);
-      eye.scale.set(1, 1.15, 0.55);
-      eye.castShadow = true;
-      face.add(eye);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.15, 8, 8), flatMat('#ffffff'));
-      glint.position.set(ex - stickR * 0.13, stickFaceY + stickR * 0.17, ez + stickR * 0.12);
-      glint.userData.noOutline = true;
-      face.add(glint);
+      if (winking) {
+        // A thin closed-lid arc instead of an open eyeball — flattened almost to a
+        // line, with a slight upward curve so it reads as shut-and-smiling rather
+        // than a flat dash.
+        const lid = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.5, 14, 12), eyeMat);
+        lid.position.set(ex, stickFaceY - stickR * 0.06, ez);
+        lid.scale.set(1, 0.16, 0.55);
+        lid.castShadow = true;
+        face.add(lid);
+      } else {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.5, 14, 12), eyeMat);
+        eye.position.set(ex, stickFaceY, ez);
+        eye.scale.set(1, 1.15, 0.55);
+        eye.castShadow = true;
+        face.add(eye);
 
-      // Brows — matched height/curve on both sides, a confident upward sweep (she
-      // "swings herself like a hammer"). Real shaded geometry, not a flat decal,
-      // sitting a fixed offset above each eye so it can't drift out of alignment.
+        const glint = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.15, 8, 8), flatMat('#ffffff'));
+        glint.position.set(ex - stickR * 0.13, stickFaceY + stickR * 0.17, ez + stickR * 0.12);
+        glint.userData.noOutline = true;
+        face.add(glint);
+      }
+
+      // Brows — real shaded geometry, not a flat decal, sitting a fixed offset
+      // above each eye so it can't drift out of alignment. Cocked hard over the
+      // winking eye, low and level over the open one.
+      const browLift = winking ? stickR * 0.78 : stickR * 0.55;
+      const browTilt = winking ? 0.55 : 0.12;
       const brow = new THREE.Mesh(
         new THREE.CapsuleGeometry(stickR * 0.09, stickR * 0.55, 4, 8),
         toonMat({ color: ink, roughness: 0.4 })
       );
-      brow.position.set(ex, stickFaceY + stickR * 0.62, ez * 0.85);
-      brow.rotation.z = Math.PI / 2 - sx * 0.3;
+      brow.position.set(ex, stickFaceY + browLift, ez * 0.85);
+      brow.rotation.z = Math.PI / 2 - sx * browTilt;
       brow.castShadow = true;
       face.add(brow);
     }

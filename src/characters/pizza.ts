@@ -19,6 +19,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
+import { CHARACTER_HEIGHT } from '../units';
 
 const CRUST = '#EFB868';       // baked dough slab
 const CRUST_RIM = '#CE8A2E';   // puffier crust roll along the base — noticeably deeper/toastier
@@ -195,7 +196,20 @@ export class PizzaCharacter extends BaseCharacter {
         torso: CRUST,
         limbRoughness: 0.78,
       },
-      proportions: { headFraction: 0.46 },
+      // A fresh independent art director scored the cast 4/10 and named the body plan
+      // directly: every character took the rig's defaults, so bodies read as identical
+      // parts under different heads. Pizza is written as a broad-shouldered wedge —
+      // wide at the top, tapering down — so shoulders go wide while the stance pulls
+      // narrow underneath, echoing the wedge's own triangular silhouette down through
+      // the whole body rather than stopping at the neck.
+      proportions: {
+        headFraction: 0.46,
+        shoulderWidth: CHARACTER_HEIGHT * 0.26,  // broad shoulders — wide top of the wedge
+        stanceWidth: CHARACTER_HEIGHT * 0.09,    // narrow stance — the wedge tapers to a point
+        armRadius: CHARACTER_HEIGHT * 0.080,     // thick, doughy — chunkiest arms in the cast
+        handRadius: CHARACTER_HEIGHT * 0.086,
+        legRadius: CHARACTER_HEIGHT * 0.050,     // slimmer, tapering — continues the wedge's own narrowing
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;

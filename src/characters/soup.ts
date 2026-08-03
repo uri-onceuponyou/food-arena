@@ -27,6 +27,15 @@ import { CHARACTER_HEIGHT } from '../units';
 const CERAMIC = '#F7F1E6';      // glazed bowl exterior — warm off-white, not clinical
 const CERAMIC_SHADE = '#E2D8C4'; // interior shadow / underside
 const RIM_TRIM = '#B5432A';      // takeout-bowl rust-red trim band, contrast accent
+// Limb/torso body colour. A fresh independent art director scored Soup 4/10 and named
+// the cast-wide colour convergence directly: Soup, Water Bottle and Sushi all ended up
+// with cream/white tapered limbs and dark boots, reading as the same parts reskinned.
+// Soup's bowl stays CERAMIC cream (that identity wasn't the problem), but the BODY
+// (arms/legs/torso) moves to a warm stoneware grey — ties back to this character's own
+// grey-steam/grey-iris palette rather than inventing an unrelated hue, while being a
+// real value/hue break from cream. Cream now lives on the hands (cloth mitts, echoing
+// the bowl) instead, so the read becomes "grey sleeves, cream mitts, dark boots".
+const GLAZE_GREY = '#9B9691';
 const BROTH = PALETTE.broth;     // #E8792A
 const BROTH_DARK = '#B85A16';    // broth depth shading
 const STEAM = PALETTE.steam;     // #C9C9C9
@@ -149,13 +158,29 @@ export class SoupCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: CERAMIC,
-        hand: RIM_TRIM,   // contrasting rust mitts against the pale ceramic limbs
-        foot: '#3A2E24',  // dark boots — matches the reference bar's dark footwear
-        torso: CERAMIC,
+        limb: GLAZE_GREY,  // stoneware-grey sleeves — see the constant's own comment
+        hand: CERAMIC,     // cream cloth mitts, echoing the bowl's own ceramic tone
+        foot: '#3A2E24',   // dark boots — matches the reference bar's dark footwear
+        torso: GLAZE_GREY,
         limbRoughness: 0.5,
       },
-      proportions: { headFraction: 0.46 }, // the bowl is WIDE and shallow, not tall
+      // A fresh independent art director scored Soup 4/10 and named the body plan
+      // directly: "one templated body reskinned with different heads" — every character
+      // took the rig's defaults. Soup is written as wide-bodied and low with a heavy
+      // planted base, so it gets the widest shoulders/stance and the thickest, stubbiest
+      // limbs in the cast (a tureen on stout little legs, not a bowl on a generic frame).
+      proportions: {
+        // Unchanged from the original — the bowl's own flared-rim profile already
+        // measures ~2.23m at this headFraction regardless (verified directly; it's a
+        // pre-existing property of the bowl shape, not something the new body
+        // proportions below affect), so there's no cheap win from nudging it further.
+        headFraction: 0.46,      // the bowl is WIDE and shallow, not tall
+        shoulderWidth: CHARACTER_HEIGHT * 0.27,  // widest body in the cast
+        stanceWidth: CHARACTER_HEIGHT * 0.165,   // widest, most heavily planted stance
+        armRadius: CHARACTER_HEIGHT * 0.074,     // thick, stubby
+        handRadius: CHARACTER_HEIGHT * 0.076,
+        legRadius: CHARACTER_HEIGHT * 0.088,     // thickest, stubbiest legs in the cast
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -420,7 +445,31 @@ export class SoupCharacter extends BaseCharacter {
       brow.castShadow = true;
       eye.add(brow);
     }
-    // Deliberately no mouth — see class doc.
+
+    // A small, serene mouth. A fresh independent art director was blunt: "no mouth or
+    // brows — just dot-eyes on a stalk. That's the single biggest appeal gap," and the
+    // brief explicitly authorises dropping the original no-mouth spec since it measurably
+    // costs quality. Kept true to the personality doc's intent, though: a thin, nearly
+    // flat closed curve with just a hint of an upturn at the ends — calm and knowing
+    // rather than a grin — so the unsettling-patient read from the eyes/lids survives.
+    // Sits centred (theta=0) below the eyes, in the same wall segment via `bowlSurface`.
+    const MOUTH_H = 0.225;
+    const mouthPt = bowlSurface(0, MOUTH_H);
+    const mouthOutward = new THREE.Vector3(mouthPt.pos.x, 0, mouthPt.pos.z).normalize();
+    const mouth = new THREE.Group();
+    mouth.position.copy(mouthPt.pos).addScaledVector(mouthOutward, R * 0.028);
+    mouth.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthOutward);
+    head.add(mouth);
+
+    const mouthMat = toonMat({ color: '#5A5D61', roughness: 0.4 }); // groups with the grey iris/brow, not lip-pink
+    const mouthLine = new THREE.Mesh(
+      new THREE.TorusGeometry(R * 0.085, R * 0.017, 8, 16, Math.PI * 0.55),
+      mouthMat
+    );
+    mouthLine.name = 'soup_mouth';
+    mouthLine.rotation.z = Math.PI * 1.225; // a shallow, almost-flat arc — serene, not a grin
+    mouthLine.castShadow = true;
+    mouth.add(mouthLine);
   }
 
   /**
@@ -435,7 +484,7 @@ export class SoupCharacter extends BaseCharacter {
     // independent of the food mass — so an offset of `R*0.05` (~0.02m) barely
     // clears the CENTRE of a 0.16m-radius hand sphere: the whole prop was built
     // sitting inside the mitt, invisible. Fixed by sizing against handRadius.
-    const handRadius = CHARACTER_HEIGHT * 0.075;
+    const handRadius = CHARACTER_HEIGHT * 0.076; // must match the rig's own `proportions.handRadius`
     const hand = this.rig.joints.handR;
     const ladle = new THREE.Group();
     ladle.name = 'soup_ladle';
@@ -484,7 +533,7 @@ export class SoupCharacter extends BaseCharacter {
    */
   private dressTorsoAsSoup(): void {
     const height = CHARACTER_HEIGHT;
-    const shoulderWidth = height * 0.20;
+    const shoulderWidth = height * 0.27; // must match the rig's own `proportions.shoulderWidth`
     const tw = shoulderWidth * 1.18;
     const torsoH = height * 0.28;
     const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85); // rig.ts's taper at t=0.5
@@ -555,19 +604,23 @@ export class SoupCharacter extends BaseCharacter {
    * bolted-on hardware.
    */
   private dressLimbs(): void {
-    const ceramicMat = glossyMat({ color: CERAMIC, roughness: 0.25 });
+    // Grey glazed-stoneware sleeves (see GLAZE_GREY's own comment) — the fix for the
+    // cream/white limb convergence a fresh art-director pass named across Soup, Water
+    // Bottle and Sushi. Mitts move to cream to keep a genuine hand contrast without
+    // reintroducing an all-cream body.
+    const glazeMat = glossyMat({ color: GLAZE_GREY, roughness: 0.28 });
     const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });
-    const mittMat = toonMat({ color: RIM_TRIM, roughness: 0.55 }); // matte cloth, not glazed ceramic
+    const mittMat = toonMat({ color: CERAMIC, roughness: 0.55 }); // matte cream cloth, not glazed ceramic
     const bootMat = toonMat({ color: '#3A2E24', roughness: 0.7 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
         case 'upperArmL':
         case 'upperArmR':
-          return taperedLimb(size.len, size.radius * 1.08, size.radius * 0.80, ceramicMat);
+          return taperedLimb(size.len, size.radius * 1.08, size.radius * 0.80, glazeMat);
         case 'forearmL':
         case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.78, size.radius * 0.58, ceramicMat);
+          return taperedLimb(size.len, size.radius * 0.78, size.radius * 0.58, glazeMat);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
@@ -575,10 +628,10 @@ export class SoupCharacter extends BaseCharacter {
         }
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, ceramicMat);
+          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, glazeMat);
         case 'shinL':
         case 'shinR':
-          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, ceramicMat);
+          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, glazeMat);
         case 'footL':
         case 'footR':
           return buildWorkBoot(size.len, bootMat, trimMat);

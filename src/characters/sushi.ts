@@ -155,13 +155,31 @@ export class SushiCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: RICE,
-        hand: SALMON,   // contrasting fish-orange mitts against the white rice limbs
-        foot: NORI,     // dark nori boots — the reference bar's contrasting dark footwear
-        torso: RICE,
-        limbRoughness: 0.65, // matte sticky rice
+        // A fresh independent art director named the exact failure: Soup, Water Bottle
+        // and Sushi all ended up with cream/white tapered limbs and dark boots, reading
+        // as the same parts reskinned. The rice-mound HEAD stays white (that's not the
+        // problem, and it's the character's own landmark shape) but the BODY moves to a
+        // glossy nori-charcoal "wetsuit" — echoing the head's own nori band at body
+        // scale — with pale rice-white boots inverting the old dark-boot convention.
+        limb: NORI,
+        hand: SALMON,      // contrasting fish-orange mitts, unchanged
+        foot: RICE,        // pale rice-white boots — inverted from the old dark-boot default
+        torso: NORI,
+        limbRoughness: 0.35, // glossy nori sheen, not matte rice
       },
-      proportions: { headFraction: 0.46 },
+      // A fresh independent art director scored the cast 4/10 and named the body plan
+      // directly: every character took the rig's defaults, so the bodies read as
+      // identical parts under different heads. Sushi is written as compact and stout
+      // with thick short limbs and a low wide stance, so shoulders pull IN (compact)
+      // while the stance and limb thickness both go up (stout, planted).
+      proportions: {
+        headFraction: 0.46,
+        shoulderWidth: CHARACTER_HEIGHT * 0.16,  // narrow, compact — arms held close in
+        stanceWidth: CHARACTER_HEIGHT * 0.15,    // low, wide stance
+        armRadius: CHARACTER_HEIGHT * 0.068,     // thick
+        handRadius: CHARACTER_HEIGHT * 0.088,    // big round rice-fist
+        legRadius: CHARACTER_HEIGHT * 0.078,     // thick, stout
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -431,18 +449,20 @@ export class SushiCharacter extends BaseCharacter {
   }
 
   /**
-   * Carries the rice + nori motif down onto the body: the rig's default torso is
-   * already recoloured rice-white via the palette, so this only adds the nori belt
-   * and its matching clasp. There is no `dressTorso` helper on the shared rig, so the
-   * belt is sized against the torso's own known geometry — `rig.ts` builds the torso
-   * as a tapered sphere of half-width `(shoulderWidth*1.18)*0.5` at its equator,
-   * scaled by a taper factor that peaks at ~1.123 around the vertical midpoint — with
-   * a further margin so the belt is guaranteed to sit proud of that taper rather than
-   * sinking into it at any point.
+   * Carries the rice + nori motif down onto the body. The rig's default torso is now
+   * recoloured nori-charcoal via the palette (see the constructor's own comment on the
+   * colour-convergence fix), so the belt inverts the head's own rice-with-a-nori-band
+   * motif into a nori-body-with-a-rice-band — a pale rice-white sash wrapping the dark
+   * torso, echoed by the same gold clasp used on the head. There is no `dressTorso`
+   * helper on the shared rig, so the belt is sized against the torso's own known
+   * geometry — `rig.ts` builds the torso as a tapered sphere of half-width
+   * `(shoulderWidth*1.18)*0.5` at its equator, scaled by a taper factor that peaks at
+   * ~1.123 around the vertical midpoint — with a further margin so the belt is
+   * guaranteed to sit proud of that taper rather than sinking into it at any point.
    */
   private dressTorsoAsSushi(): void {
     const height = CHARACTER_HEIGHT;
-    const shoulderWidth = height * 0.20;
+    const shoulderWidth = height * 0.16; // must match the rig's own `proportions.shoulderWidth`
     const tw = shoulderWidth * 1.18;
     const torsoH = height * 0.28;
     const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85); // rig.ts's taper at t=0.5
@@ -450,15 +470,15 @@ export class SushiCharacter extends BaseCharacter {
     const beltRadius = torsoHalfWidthMid * 1.18; // safety margin over the tapered waist
     const beltY = torsoH * 0.52;
 
-    const noriMat = glossyMat({ color: NORI, roughness: 0.3 });
-    const belt = new THREE.Mesh(new THREE.CylinderGeometry(beltRadius, beltRadius, torsoH * 0.22, 24, 1, true), noriMat);
+    const riceBeltMat = toonMat({ color: RICE, roughness: 0.6 }); // pale, against the now nori-dark torso
+    const belt = new THREE.Mesh(new THREE.CylinderGeometry(beltRadius, beltRadius, torsoH * 0.22, 24, 1, true), riceBeltMat);
     belt.name = 'sushi_torso_belt';
     belt.position.y = beltY;
     belt.castShadow = true;
     belt.receiveShadow = true;
     this.rig.joints.torso.add(belt);
     for (const dy of [-torsoH * 0.11, torsoH * 0.11]) {
-      const cap = new THREE.Mesh(new THREE.CircleGeometry(beltRadius, 24), noriMat);
+      const cap = new THREE.Mesh(new THREE.CircleGeometry(beltRadius, 24), riceBeltMat);
       cap.name = 'sushi_torso_belt_cap__no_outline';
       cap.userData.noOutline = true;
       cap.rotation.x = -Math.PI / 2;
@@ -503,34 +523,37 @@ export class SushiCharacter extends BaseCharacter {
    * trimmed down so they read as garment details rather than hardware.
    */
   private dressLimbs(): void {
-    const riceMat = toonMat({ color: RICE, roughness: 0.65 });
-    const noriMat = glossyMat({ color: NORI, roughness: 0.3 });
+    // Nori-charcoal limbs — see the constructor's own comment on the colour-
+    // convergence fix. Rice-white now lives on the boots (inverted from the old
+    // dark-boot default) and the fist stays salmon-orange (unchanged).
+    const noriLimbMat = glossyMat({ color: NORI, roughness: 0.32 });
+    const noriAccentMat = glossyMat({ color: NORI, roughness: 0.3 });
     const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });
     const goldMat = toonMat({ color: GOLD, roughness: 0.3, metalness: 0.35 });
-    const riceShadeMat = toonMat({ color: RICE_SHADE, roughness: 0.6 });
+    const riceMat = toonMat({ color: RICE, roughness: 0.6 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
         case 'upperArmL':
         case 'upperArmR':
-          return taperedLimb(size.len, size.radius * 1.10, size.radius * 0.82, riceMat);
+          return taperedLimb(size.len, size.radius * 1.10, size.radius * 0.82, noriLimbMat);
         case 'forearmL':
         case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, riceMat);
+          return taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, noriLimbMat);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
-          return buildRiceFist(size.radius, side, salmonMat, noriMat, goldMat);
+          return buildRiceFist(size.radius, side, salmonMat, noriAccentMat, goldMat);
         }
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, riceMat);
+          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, noriLimbMat);
         case 'shinL':
         case 'shinR':
-          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, riceMat);
+          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, noriLimbMat);
         case 'footL':
         case 'footR':
-          return buildLacqueredBoot(size.len, noriMat, riceShadeMat, goldMat);
+          return buildLacqueredBoot(size.len, riceMat, noriAccentMat, goldMat);
         default:
           return null;
       }
