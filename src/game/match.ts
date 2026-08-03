@@ -15,14 +15,15 @@ import { Stage } from '../render/stage';
 import { createKitchenArena } from '../arena/kitchen';
 import { createCharacter } from '../characters/registry';
 import type { CharacterModel } from '../characters/types';
+import { createFogRing, type FogRing } from '../arena/fogRing';
 import { createMatch, stepMatch } from './sim';
 import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchState } from './state';
 import { otherRole } from './state';
-import { CHARACTER_IDS, CHARACTERS, type CharacterId, type Weapon } from './rules';
+import { CHARACTER_IDS, CHARACTERS, MATCH_DURATION_MS, type CharacterId, type Weapon } from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 import { InputController } from './input';
 import { VfxLayer } from './vfx';
-import { createHud, type Hud } from '../ui/hud';
+import { createHud, type Hud, type ScreenPoint } from '../ui/hud';
 
 declare global {
   interface Window {
@@ -60,6 +61,14 @@ function characterFromQuery(param: string): CharacterId | null {
   return raw && (CHARACTER_IDS as readonly string[]).includes(raw) ? (raw as CharacterId) : null;
 }
 
+/** QA-only numeric URL override, same spirit as `?simSpeed=`. */
+function numberFromQuery(param: string): number | null {
+  const raw = new URLSearchParams(location.search).get(param);
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Metres above a fighter's feet the floating HUD pill should anchor to. */
 const FLOAT_BAR_HEIGHT = CHARACTER_HEIGHT + 0.35;
 
@@ -69,6 +78,7 @@ export class GameSession {
   private readonly vfx: VfxLayer;
   private readonly hud: Hud;
   private readonly input: InputController;
+  private readonly fogRing: FogRing;
   private readonly playerId: CharacterId;
   private readonly enemyId: CharacterId;
 
@@ -94,6 +104,23 @@ export class GameSession {
    * screenshot means waiting far longer than 5 real seconds.
    */
   private readonly simSpeed: number;
+
+  /**
+   * QA-only closing-fog setup, so a screenshot can land on an exact ring state
+   * instead of fast-forwarding and hoping.
+   *
+   * `?fogRadius=<worldUnits>` skips the countdown and rewinds the match clock to the
+   * moment `safeRadius` equals that value (the sim's schedule is
+   * `safeRadius = maxSafeRadius * timeRemaining / MATCH_DURATION_MS`, so this is a
+   * straight inversion and every other timer stays consistent with it).
+   * `?px=`/`?py=` place the player anywhere on the map — the only sane way to shoot
+   * "standing in the fog" or "standing on the boundary" repeatably.
+   *
+   * Never read by game logic; absent params leave a match completely untouched.
+   */
+  private readonly qaFogRadius = numberFromQuery('fogRadius');
+  private readonly qaPlayerX = numberFromQuery('px');
+  private readonly qaPlayerY = numberFromQuery('py');
 
   // ── Hit-stop bookkeeping ──────────────────────────────────────────────────
   // On a solid hit we withhold most of this frame's (and the next few frames')
@@ -148,6 +175,12 @@ export class GameSession {
     });
     this.stage.scene.add(this.arena.build());
 
+    // The closing fog's boundary. Lives here rather than inside the arena build
+    // because it is driven by SIM state (`safeRadius`), which the arena never sees —
+    // and `match.ts` is the one module allowed to talk to both.
+    this.fogRing = createFogRing(this.arena.center);
+    this.stage.scene.add(this.fogRing.root);
+
     this.vfx = new VfxLayer(this.stage.scene);
     this.hud = createHud(opts.hudRoot, { onRestart: () => this.restart() });
     this.hud.setCharacters(this.playerId, this.enemyId);
@@ -181,6 +214,7 @@ export class GameSession {
     this.input.dispose();
     this.hud.dispose();
     this.vfx.dispose();
+    this.fogRing.dispose();
     this.playerModel.dispose();
     this.enemyModel.dispose();
     this.stage.dispose();
@@ -188,6 +222,7 @@ export class GameSession {
 
   private spawnMatch(): void {
     this.state = createMatch(this.arena, this.playerId, this.enemyId);
+    this.applyQaSetup();
 
     this.stage.scene.remove(this.playerModel.root, this.enemyModel.root);
     this.playerModel.dispose();
@@ -210,7 +245,31 @@ export class GameSession {
 
     const startPos = groundPos(this.state.player.x, this.state.player.y);
     this.stage.rig.snapTo(startPos.x, startPos.z);
-    this.stage.lighting.focus(startPos.x, startPos.z, 30);
+    this.stage.lighting.focus(startPos.x, startPos.z);
+
+    this.fogRing.update(
+      this.state.safeRadius,
+      this.state.elapsed / 1000,
+      this.state.phase === 'playing',
+      this.stage.rig,
+    );
+  }
+
+  /** Apply the QA-only `?fogRadius=` / `?px=` / `?py=` overrides to a fresh match.
+   * A no-op unless those params are on the URL — see the field comments. */
+  private applyQaSetup(): void {
+    if (this.qaPlayerX !== null) this.state.player.x = this.qaPlayerX;
+    if (this.qaPlayerY !== null) this.state.player.y = this.qaPlayerY;
+
+    if (this.qaFogRadius === null) return;
+    const maxR = this.arena.maxSafeRadius;
+    const frac = THREE.MathUtils.clamp(this.qaFogRadius / maxR, 0, 1);
+    this.state.phase = 'playing';
+    this.state.countdownValue = 0;
+    this.state.countdownTick = 0;
+    this.state.startFlashTimer = 0;
+    this.state.timeRemaining = MATCH_DURATION_MS * frac;
+    this.state.safeRadius = maxR * frac;
   }
 
   /** Gather this tick's raw input and turn it into a `MatchInput` the sim understands. */
@@ -335,6 +394,23 @@ export class GameSession {
           const color = this.colorForDamageSource(ev.targetRole, ev.source);
           lastHitColor[ev.targetRole] = color;
 
+          // ── Closing fog: deliberately NOT the generic impact treatment ────────
+          // Fog damage used to run the exact same code path as a weapon hit —
+          // impact burst, camera shake, white damage number — with only a violet
+          // tint to tell them apart, so being killed by the zone was visually
+          // indistinguishable from being shot at 50 HP/s. It is not a hit from a
+          // direction, so it gets no burst at the "impact point" and no shake:
+          // instead the frame's edge ignites (`flashFogTick`), the damage number
+          // comes up violet and tagged "ZONE", and the persistent HUD danger state
+          // (edge vignette + alarm strip + chevron) is already running from
+          // `hud.update()`. See `ui/hud.ts` -> `flashFogTick`.
+          if (ev.source.kind === 'fog') {
+            const fogPos = this.projectPointToScreen(ev.x, ev.y, 1.3);
+            if (fogPos) this.hud.spawnDamageNumber(fogPos, ev.amount, { fog: true });
+            if (ev.targetRole === 'player') this.hud.flashFogTick();
+            break;
+          }
+
           // Resolve the attacking weapon (if this hit came from one) so
           // `spawnImpactBurst` can look up a bespoke per-weapon `impact()` hook
           // (`vfx/weapons/`) — trail/hazard/fog hits have no weapon and always take
@@ -427,6 +503,30 @@ export class GameSession {
     };
   }
 
+  /**
+   * Where the HUD should draw its "run this way" chevron, and which way it points.
+   *
+   * Both are SCREEN-space, and both have to be, because the direction to safety on
+   * screen depends on the camera's yaw and pitch — the HUD has no access to either.
+   * Derived by projecting the player and a point one stride toward the arena centre,
+   * then taking the difference: that survives any future camera change for free,
+   * where a hand-derived angle would silently rot.
+   */
+  private safeArrow(): { at: ScreenPoint; angleRad: number } | null {
+    const p = this.state.player;
+    const dx = this.arena.center.x - p.x;
+    const dy = this.arena.center.y - p.y;
+    const mag = Math.hypot(dx, dy);
+    if (mag < 1e-3) return null;
+    const at = this.projectPointToScreen(p.x, p.y, 0.35);
+    const ahead = this.projectPointToScreen(p.x + (dx / mag) * 80, p.y + (dy / mag) * 80, 0.35);
+    if (!at || !ahead) return null;
+    const sx = ahead.x - at.x;
+    const sy = ahead.y - at.y;
+    if (Math.hypot(sx, sy) < 1) return null;
+    return { at, angleRad: Math.atan2(sy, sx) };
+  }
+
   private readonly handleResize = (): void => this.resize();
 
   /** Exponential decay toward zero, used for the visual-only knockback offset.
@@ -517,9 +617,18 @@ export class GameSession {
     // the freeze instead of also grinding to a near-halt with everything else.
     this.vfx.updateEffects(rawDtSeconds);
 
+    // The boundary is driven off the sim, but its drift/pulse runs on real time so it
+    // keeps breathing through hit-stop (a frozen wall would read as a rendering hitch).
+    this.fogRing.update(
+      this.state.safeRadius,
+      this.clock.elapsedTime,
+      this.state.phase === 'playing',
+      this.stage.rig,
+    );
+
     const playerPos = groundPos(this.state.player.x, this.state.player.y);
     this.stage.rig.follow(playerPos.x, playerPos.z);
-    this.stage.lighting.focus(playerPos.x, playerPos.z, 30);
+    this.stage.lighting.focus(playerPos.x, playerPos.z);
 
     // TEMP DEBUG: ground-plane screen projections for scripted aim in
     // tools/tmp/vfx_convert_capture.mjs (the floating HUD pill sits well above the
@@ -530,7 +639,10 @@ export class GameSession {
       enemy: this.projectPointToScreen(this.state.enemy.x, this.state.enemy.y, 0),
     };
 
-    this.hud.update(this.state, { selectedWeapon: this.input.selectedWeapon });
+    this.hud.update(this.state, {
+      selectedWeapon: this.input.selectedWeapon,
+      safeArrow: this.safeArrow(),
+    });
     this.hud.updateFloatingBars(
       this.projectToScreen(this.playerModel, this.state.player.alive),
       this.projectToScreen(this.enemyModel, this.state.enemy.alive),

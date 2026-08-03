@@ -10,7 +10,7 @@
  * `MatchState` back in the `countdown` phase) just works without any extra wiring.
  */
 
-import { CHARACTERS, MATCH_DURATION_MS, type CharacterId, type Weapon } from '../game/rules';
+import { CHARACTERS, FOG_DAMAGE, FOG_TICK_MS, MATCH_DURATION_MS, type CharacterId, type Weapon } from '../game/rules';
 import type { FighterRole, MatchState } from '../game/state';
 
 export interface HudCallbacks {
@@ -25,6 +25,13 @@ export interface ScreenPoint {
 export interface HudFrameInfo {
   /** The weapon slot the player currently has selected (for the highlight ring). */
   selectedWeapon: number;
+  /**
+   * Where to draw the "run this way" chevron while the player is outside the safe
+   * zone, and which way it points — both in SCREEN space, because the direction to
+   * safety depends on the camera and only `match.ts` can project it. Null (or absent)
+   * hides the chevron.
+   */
+  safeArrow?: { at: ScreenPoint; angleRad: number } | null;
 }
 
 export interface Hud {
@@ -36,10 +43,20 @@ export interface Hud {
   updateFloatingBars(player: ScreenPoint | null, enemy: ScreenPoint | null, player01: number, enemy01: number): void;
   /** Spawn a rising, fading damage/heal number at a screen point. Pooled — safe to
    * call as often as hits land, never allocates a new DOM node. */
-  spawnDamageNumber(point: ScreenPoint, amount: number, opts?: { heal?: boolean }): void;
+  spawnDamageNumber(point: ScreenPoint, amount: number, opts?: { heal?: boolean; fog?: boolean }): void;
   /** Brief full-viewport radial flash, tinted `color` — reserved for genuinely
    * screen-filling moments (Lollipop's Giant Lollipop). Always pointer-events:none. */
   flashScreen(color: string): void;
+  /**
+   * One-shot screen-EDGE pulse, fired on every closing-fog damage tick.
+   *
+   * Deliberately a different shape of feedback from `flashScreen` (radial, centre-out)
+   * and from a weapon impact burst: the fog is not a hit from a direction, it is the
+   * whole world closing in, so it presents as the frame's border igniting. Before this
+   * existed, fog damage reused the generic violet impact burst and was literally
+   * indistinguishable from being shot.
+   */
+  flashFogTick(): void;
   dispose(): void;
 }
 
@@ -92,6 +109,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
   root.innerHTML = `
     <div class="hud-root">
+      <!-- FIRST in the stack, deliberately. These two are the only full-viewport
+           tints in the HUD, and siblings here are painted in DOM order, so anything
+           declared after them stays legible ON TOP of the danger wash. Round 1 had
+           them last and the burn discoloured the health bars, the weapon icons and
+           the radar's own safe disc — i.e. the readouts you most need while it is
+           firing. -->
+      <div class="hud-fogedge" data-el="fogedge"></div>
+      <div class="hud-fogtick" data-el="fogtick"></div>
+
       <div class="hud-topbar-scrim"></div>
       <div class="hud-topbar">
         <div class="hud-fighter hud-fighter--player">
@@ -104,7 +130,20 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
             <div class="hud-healthbar-text" data-el="player-hp"></div>
           </div>
         </div>
-        <div class="hud-timer" data-el="timer">3:00</div>
+        <div class="hud-clock">
+          <div class="hud-timer" data-el="timer">3:00</div>
+          <!-- Closing-fog readout. Sits directly under the match clock because the
+               two are the SAME number: the safe radius is a pure function of time
+               remaining (see zoneInfo() below), so reading them as one column is
+               honest. Flips to a danger state the instant the player steps outside. -->
+          <div class="hud-zone" data-el="zone">
+            <div class="hud-zone-row">
+              <div class="hud-zone-label" data-el="zone-label">SAFE ZONE</div>
+              <div class="hud-zone-value" data-el="zone-value">--</div>
+            </div>
+            <div class="hud-zone-track"><div class="hud-zone-bar" data-el="zone-bar"></div></div>
+          </div>
+        </div>
         <div class="hud-fighter hud-fighter--enemy">
           <div class="hud-fighter-pill">
             <div class="hud-fighter-name" data-el="enemy-name"></div>
@@ -149,6 +188,35 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         </div>
       </div>
 
+      <!-- ── Closing-fog boundary readouts ────────────────────────────────────
+           The 3D boundary (src/arena/fogRing.ts) answers "where is the edge" only
+           while the edge is in frame. It very often is not: the map is 1400x1000 wu
+           and a player is only guaranteed to see 199.2 wu in any direction, so for
+           most of a match the safe radius is far outside the window. These three
+           elements are what make the zone knowable from ANYWHERE:
+
+             - the radar, which shows the whole map, the circle, and both fighters;
+             - the edge vignette, which says "you are being killed right now";
+             - the chevron, which says which way to run. -->
+      <div class="hud-radar" data-el="radar">
+        <div class="hud-radar-map" data-el="radar-map">
+          <div class="hud-radar-safe" data-el="radar-safe"></div>
+          <!-- Drawn OVER the safe disc: at match start the disc is wider than the map
+               and the widget would otherwise be a blank cream card with two dots on
+               it. A grid makes it read as a map in every state. -->
+          <div class="hud-radar-grid"></div>
+          <div class="hud-radar-dot hud-radar-dot--enemy" data-el="radar-enemy"></div>
+          <div class="hud-radar-dot hud-radar-dot--player" data-el="radar-player"></div>
+        </div>
+        <div class="hud-radar-cap" data-el="radar-cap">SAFE ZONE</div>
+      </div>
+
+      <div class="hud-safearrow" data-el="safearrow">
+        <div class="hud-safearrow-chevron"></div>
+        <div class="hud-safearrow-chevron hud-safearrow-chevron--2"></div>
+      </div>
+      <div class="hud-safearrow-label" data-el="safearrow-label">RUN TO THE ZONE</div>
+
       <div class="hud-dmg-layer" data-el="dmg-layer"></div>
       <div class="hud-screenflash" data-el="screenflash"></div>
     </div>
@@ -188,6 +256,20 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
   const dmgLayer = q<HTMLDivElement>('dmg-layer');
   const screenflashEl = q<HTMLDivElement>('screenflash');
+
+  const zoneEl = q<HTMLDivElement>('zone');
+  const zoneLabelEl = q<HTMLDivElement>('zone-label');
+  const zoneValueEl = q<HTMLDivElement>('zone-value');
+  const zoneBarEl = q<HTMLDivElement>('zone-bar');
+  const radarEl = q<HTMLDivElement>('radar');
+  const radarSafeEl = q<HTMLDivElement>('radar-safe');
+  const radarPlayerEl = q<HTMLDivElement>('radar-player');
+  const radarEnemyEl = q<HTMLDivElement>('radar-enemy');
+  const radarCapEl = q<HTMLDivElement>('radar-cap');
+  const fogEdgeEl = q<HTMLDivElement>('fogedge');
+  const fogTickEl = q<HTMLDivElement>('fogtick');
+  const safeArrowEl = q<HTMLDivElement>('safearrow');
+  const safeArrowLabelEl = q<HTMLDivElement>('safearrow-label');
 
   // Pooled floating damage/heal numbers — pre-created once, cycled round-robin, so
   // spawning one on every hit never allocates a DOM node.
@@ -234,6 +316,114 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         wasReady: true,
       };
     });
+  }
+
+  /** HP/second the closing fog deals, printed on the danger readout so the threat is
+   * a number the player can weigh, not a vague warning. Derived from `rules.ts`. */
+  const FOG_DPS = Math.round((FOG_DAMAGE / FOG_TICK_MS) * 1000);
+
+  /**
+   * Everything the zone readouts need, derived from the sim state alone.
+   *
+   * `sim.ts` shrinks the ring as `safeRadius = maxSafeRadius * timeRemaining /
+   * MATCH_DURATION_MS` — a continuous linear close, NOT the stepped "next circle" of
+   * a battle royale. So there is no "next shrink" to count down to; the useful number
+   * is when the edge will sweep over WHERE THE PLAYER IS STANDING, which inverts that
+   * same formula. If the shrink schedule in `sim.ts` ever stops being linear in time,
+   * this inversion has to change with it.
+   */
+  function zoneInfo(state: MatchState): {
+    outside: boolean;
+    radius01: number;
+    /** ms until the edge reaches the player's current spot; null once outside. */
+    msUntilEdge: number | null;
+  } {
+    const maxR = state.arena.maxSafeRadius;
+    const dist = Math.hypot(state.player.x - state.arena.center.x, state.player.y - state.arena.center.y);
+    const outside = dist > state.safeRadius;
+    const shrinkPerMs = maxR / MATCH_DURATION_MS; // world units of radius per ms
+    return {
+      outside,
+      radius01: maxR > 0 ? Math.max(0, Math.min(1, state.safeRadius / maxR)) : 0,
+      msUntilEdge: outside || shrinkPerMs <= 0 ? null : (state.safeRadius - dist) / shrinkPerMs,
+    };
+  }
+
+  function renderZone(state: MatchState, frame: HudFrameInfo): void {
+    const live = state.phase === 'playing';
+    const info = zoneInfo(state);
+    const danger = live && info.outside && state.player.alive;
+
+    zoneEl.classList.toggle('is-danger', danger);
+    // Warn BEFORE it costs HP. The edge sweeps at maxSafeRadius / MATCH_DURATION_MS
+    // ~= 4.7 wu/s, so 12 s is roughly 57 wu of grace — comfortably more than the
+    // guaranteed view radius gives you to notice the curtain arriving on its own.
+    zoneEl.classList.toggle('is-imminent', !danger && info.msUntilEdge !== null && info.msUntilEdge < 12_000);
+    zoneBarEl.style.width = `${(info.radius01 * 100).toFixed(1)}%`;
+
+    if (danger) {
+      zoneLabelEl.textContent = '\u25B2 OUTSIDE THE ZONE';
+      zoneValueEl.textContent = `−${FOG_DPS} HP/s`;
+    } else {
+      zoneLabelEl.textContent = 'SAFE ZONE';
+      // Shown during the countdown too, not just while playing: the ring's schedule is
+      // already fixed then, so previewing "how long this spot stays safe" is honest,
+      // and it beats a phase-dependent placeholder that teaches the player nothing.
+      //
+      // Wording matters here and was changed after a blind critic read the first
+      // version, "closes on you 0:08", as genuinely ambiguous English — it can mean
+      // "the ring is closing toward you" or "the ring closes in 8 seconds", and a
+      // player who does not already understand the mechanic cannot tell which.
+      // "REACHES YOU 0:08" states the relationship to the player and has one reading.
+      zoneValueEl.textContent = info.msUntilEdge !== null
+        ? `REACHES YOU ${formatTime(info.msUntilEdge)}`
+        : 'CLOSING';
+    }
+
+    // ── Radar ────────────────────────────────────────────────────────────────
+    // Percentages against the arena's own extents, so the whole widget is correct
+    // for any arena size without a magic scale factor. The map box's aspect ratio is
+    // pinned to the arena's in CSS, which is what keeps the safe circle circular.
+    const aw = state.arena.width;
+    const ah = state.arena.height;
+    const pct = (v: number, span: number) => `${((v / span) * 100).toFixed(2)}%`;
+    radarSafeEl.style.left = pct(state.arena.center.x, aw);
+    radarSafeEl.style.top = pct(state.arena.center.y, ah);
+    // Diameter as a % of WIDTH for both axes — the box has the arena's aspect, so a
+    // square in those terms is a square on screen, and the circle stays a circle.
+    const diaPct = ((state.safeRadius * 2) / aw) * 100;
+    radarSafeEl.style.width = `${diaPct.toFixed(2)}%`;
+    radarSafeEl.style.paddingBottom = '0';
+    radarSafeEl.style.height = `${((state.safeRadius * 2) / ah) * 100}%`;
+    radarPlayerEl.style.left = pct(state.player.x, aw);
+    radarPlayerEl.style.top = pct(state.player.y, ah);
+    radarPlayerEl.style.display = state.player.alive ? 'block' : 'none';
+    radarEnemyEl.style.left = pct(state.enemy.x, aw);
+    radarEnemyEl.style.top = pct(state.enemy.y, ah);
+    radarEnemyEl.style.display = state.enemy.alive ? 'block' : 'none';
+    radarEl.classList.toggle('is-danger', danger);
+    radarCapEl.textContent = danger ? 'GET INSIDE' : 'SAFE ZONE';
+
+    // ── Danger vignette + chevron ────────────────────────────────────────────
+    fogEdgeEl.classList.toggle('is-on', danger);
+    const arrow = danger ? frame.safeArrow ?? null : null;
+    if (arrow) {
+      safeArrowEl.style.display = 'block';
+      safeArrowLabelEl.style.display = 'block';
+      const deg = (arrow.angleRad * 180) / Math.PI;
+      safeArrowEl.style.transform =
+        `translate(${arrow.at.x.toFixed(1)}px, ${arrow.at.y.toFixed(1)}px) rotate(${deg.toFixed(1)}deg)`;
+      // The label rides PAST the chevron tip along the same direction, never at a
+      // fixed screen offset: pinned below the player it collided with the arrow every
+      // time safety happened to lie downward, which is a quarter of all cases.
+      const lx = arrow.at.x + Math.cos(arrow.angleRad) * 178;
+      const ly = arrow.at.y + Math.sin(arrow.angleRad) * 178;
+      safeArrowLabelEl.style.transform =
+        `translate(${lx.toFixed(1)}px, ${ly.toFixed(1)}px) translate(-50%, -50%)`;
+    } else {
+      safeArrowEl.style.display = 'none';
+      safeArrowLabelEl.style.display = 'none';
+    }
   }
 
   return {
@@ -288,6 +478,8 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           slot.wasReady = ready;
         });
       }
+
+      renderZone(state, frame);
 
       if (state.phase === 'countdown') {
         countdownEl.style.display = 'flex';
@@ -350,8 +542,11 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       const medium = !big && amount >= 6;
       el.style.setProperty('--x', `${point.x.toFixed(1)}px`);
       el.style.setProperty('--y', `${point.y.toFixed(1)}px`);
-      el.textContent = heal ? `+${Math.round(amount)}` : `-${Math.round(amount)}`;
-      el.className = `hud-dmg ${big ? 'hud-dmg--big' : medium ? 'hud-dmg--medium' : 'hud-dmg--small'}${heal ? ' hud-dmg--heal' : ''}`;
+      el.textContent = heal
+        ? `+${Math.round(amount)}`
+        : `-${Math.round(amount)}`;
+      const tint = heal ? ' hud-dmg--heal' : opts?.fog ? ' hud-dmg--fog' : '';
+      el.className = `hud-dmg ${big ? 'hud-dmg--big' : medium ? 'hud-dmg--medium' : 'hud-dmg--small'}${tint}`;
       // Force a reflow between resetting the class and re-adding `is-playing` so the
       // CSS animation restarts even when this pooled element is reused mid-animation.
       void el.offsetWidth;
@@ -363,6 +558,12 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       screenflashEl.classList.remove('is-playing');
       void screenflashEl.offsetWidth;
       screenflashEl.classList.add('is-playing');
+    },
+
+    flashFogTick() {
+      fogTickEl.classList.remove('is-playing');
+      void fogTickEl.offsetWidth;
+      fogTickEl.classList.add('is-playing');
     },
 
     dispose() {
@@ -513,8 +714,15 @@ const CSS = `
   50% { box-shadow: inset 0 2px 4px rgba(0,0,0,0.5), 0 2px 0 rgba(0,0,0,0.35), 0 0 14px 3px rgba(255,60,60,0.85); }
 }
 
-.hud-timer {
+.hud-clock {
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.hud-timer {
   font-family: 'Rubik', sans-serif;
   font-weight: 900;
   font-size: 22px;
@@ -524,6 +732,291 @@ const CSS = `
   border-radius: 14px;
   padding: 6px 16px;
   box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+}
+
+/* ── Closing-fog readout ──────────────────────────────────────────────────── */
+/* Violet is reserved, project-wide, for the closing fog: this strip, the radar,
+   the edge vignette, the chevron, the fog damage numbers and the 3D curtain in
+   src/arena/fogRing.ts all use the same three tones. Nothing else in the arena is
+   allowed this hue — the two colours already spoken for on the floor are hazard
+   amber/black and puddle blue — so "violet means the fog" is learnable from a
+   single frame. */
+.hud-zone {
+  width: 196px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(26,18,36,0.78);
+  border: 3px solid #1a1224;
+  border-radius: 12px;
+  padding: 5px 9px 6px;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+}
+.hud-zone-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hud-zone-label {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #E9A6FF;
+  white-space: nowrap;
+}
+.hud-zone-value {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: #EFE2FF;
+  white-space: nowrap;
+}
+.hud-zone-track {
+  height: 7px;
+  border-radius: 999px;
+  background: #2a1b3a;
+  border: 1.5px solid #120c1c;
+  overflow: hidden;
+}
+/* The bar is the SHRINKING SAFE AREA, so it empties left-to-right as the ring
+   closes — the same direction as the clock beside it. */
+.hud-zone-bar {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7B3FA8, #E9A6FF);
+  transition: width 0.2s linear;
+}
+.hud-zone.is-danger {
+  background: rgba(88,20,124,0.9);
+  border-color: #E9A6FF;
+  animation: hud-zone-alarm 0.6s ease-in-out infinite;
+}
+.hud-zone.is-danger .hud-zone-label { color: #FFFFFF; font-size: 12px; }
+.hud-zone.is-danger .hud-zone-value { color: #FFD4FF; }
+/* A beat of warning BEFORE the first tick of damage, so the fog is never the thing
+   that "just started hurting me for no reason". */
+.hud-zone.is-imminent {
+  border-color: #E9A6FF;
+  animation: hud-zone-alarm 1.2s ease-in-out infinite;
+}
+.hud-zone.is-imminent .hud-zone-value { color: #FFFFFF; }
+@keyframes hud-zone-alarm {
+  0%, 100% { box-shadow: 0 3px 0 rgba(0,0,0,0.35), 0 0 0 rgba(233,166,255,0); }
+  50% { box-shadow: 0 3px 0 rgba(0,0,0,0.35), 0 0 16px 3px rgba(233,166,255,0.9); }
+}
+
+/* ── Radar ────────────────────────────────────────────────────────────────── */
+/* THE answer to "the boundary is usually off screen". The guaranteed view radius
+   is 199.2 wu on a 1400x1000 wu map, so for most of a match the ring is nowhere
+   near the frame and the 3D curtain cannot help. This shows the whole map at once:
+   violet field = lethal, cream disc = safe, green dot = you. Bottom-right, the
+   genre's habitual minimap corner, clear of the weapon bar and both nameplates. */
+.hud-radar {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.hud-radar-map {
+  position: relative;
+  width: 152px;
+  /* Pinned to the arena's 1400x1000 aspect so the safe disc renders as a circle. */
+  height: 109px;
+  border: 3px solid #1a1224;
+  border-radius: 10px;
+  /* Everything outside the disc is lethal, so the map's own background IS the
+     danger field — no separate overlay to get the z-order wrong. Deliberately the
+     same near-black violet the 3D field uses, and deliberately DARKER than the safe
+     disc, so the radar teaches the same "dark = death, bright = live" reading the
+     world does. */
+  background: #2A0B47;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35), inset 0 0 0 1px rgba(233,166,255,0.4);
+  overflow: hidden;
+}
+.hud-radar-safe {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #F2E0BE;
+  box-shadow: inset 0 0 0 2px #E9A6FF, 0 0 10px 2px rgba(233,166,255,0.85);
+  transition: width 0.2s linear, height 0.2s linear;
+}
+.hud-radar-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, rgba(26,18,36,0.22) 0 1px, rgba(0,0,0,0) 1px 25%),
+    repeating-linear-gradient(0deg, rgba(26,18,36,0.22) 0 1px, rgba(0,0,0,0) 1px 33.34%);
+}
+.hud-radar-dot {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid #1a1224;
+}
+.hud-radar-dot--player {
+  background: #16C46F;
+  box-shadow: 0 0 0 2.5px #FFFFFF, 0 0 0 4px #1a1224;
+  z-index: 2;
+}
+.hud-radar-dot--enemy { background: #E6493F; box-shadow: 0 0 0 1.5px rgba(255,255,255,0.6); z-index: 1; }
+.hud-radar-cap {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: #E9A6FF;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+}
+.hud-radar.is-danger .hud-radar-map {
+  border-color: #E9A6FF;
+  animation: hud-zone-alarm 0.6s ease-in-out infinite;
+}
+.hud-radar.is-danger .hud-radar-cap { color: #FFFFFF; }
+
+/* ── Fog damage feedback ──────────────────────────────────────────────────── */
+/* Sustained edge burn while outside the zone. A BORDER treatment on purpose: a hit
+   from a weapon is a point event somewhere in the world (impact burst + shake +
+   hit-stop), whereas the fog is the world itself closing in, so it presents as the
+   frame igniting rather than as anything happening at a location. That difference
+   is the whole fix — fog damage used to reuse the generic violet impact burst and
+   was indistinguishable from being shot. */
+.hud-fogedge {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+  /* Tight to the frame edge on purpose. Round 1 ran these ramps to 22-26% of the
+     viewport at alpha 0.85, which is not a vignette — it is a colour filter over the
+     whole picture, and it made the arena unreadable at exactly the moment the player
+     needs to find a route out. 9-11% burns the border and leaves the middle clean. */
+  background:
+    linear-gradient(90deg, rgba(120,26,190,0.75), rgba(120,26,190,0) 9%),
+    linear-gradient(270deg, rgba(120,26,190,0.75), rgba(120,26,190,0) 9%),
+    linear-gradient(180deg, rgba(120,26,190,0.75), rgba(120,26,190,0) 11%),
+    linear-gradient(0deg, rgba(120,26,190,0.8), rgba(120,26,190,0) 11%);
+}
+.hud-fogedge.is-on {
+  opacity: 1;
+  animation: hud-fogedge-breathe 0.9s ease-in-out infinite;
+}
+@keyframes hud-fogedge-breathe {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+/* One-shot bright rim on each 300 ms fog tick — the "that just cost me 15 HP" beat. */
+.hud-fogtick {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 60px 14px rgba(233,166,255,0.95);
+}
+.hud-fogtick.is-playing { animation: hud-fogtick-pop 0.3s ease-out forwards; }
+@keyframes hud-fogtick-pop {
+  0% { opacity: 0.95; }
+  100% { opacity: 0; }
+}
+
+/* ── "Run this way" chevron ───────────────────────────────────────────────── */
+/* Anchored to the PLAYER's projected screen position and rotated into the camera's
+   screen space by match.ts, so it stays correct under any camera yaw. Being
+   damaged with no idea which way to run is the actual failure mode this fixes. */
+.hud-safearrow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  will-change: transform;
+  animation: hud-safearrow-throb 0.75s ease-in-out infinite;
+}
+/* Two stacked CSS-border triangles: a near-black one behind, a bright one inset in
+   front. Round 2 tried faking a stroke with four offset drop-shadows and the chevron
+   came out reading as a hollow outline — a filled shape needs an actual fill layer,
+   and a pale arrow with no dark backing disappears against this arena's cream tile.
+   The dark backer is the same plum the whole HUD outlines with. */
+.hud-safearrow-chevron {
+  position: absolute;
+  left: 92px;
+  top: -36px;
+  width: 0;
+  height: 0;
+  border-top: 36px solid transparent;
+  border-bottom: 36px solid transparent;
+  border-left: 48px solid #2B0A44;
+  filter: drop-shadow(0 0 14px rgba(233,166,255,1));
+}
+/* NOTE the offsets: a 0x0 bordered element's absolutely-positioned child is placed
+   against its PADDING box, which sits at (border-left, border-top) inside the border
+   box. So left/top here are (wanted inset) minus (48, 36), not the inset itself.
+   Getting that wrong is what made round 3's arrows read as hollow outlines — the
+   white fill was shoved to one side and the dark backer showed through as the tip. */
+.hud-safearrow-chevron::before {
+  content: '';
+  position: absolute;
+  left: -45px;
+  top: -30px;
+  width: 0;
+  height: 0;
+  border-top: 30px solid transparent;
+  border-bottom: 30px solid transparent;
+  border-left: 40px solid #FFFFFF;
+}
+.hud-safearrow-chevron--2 {
+  left: 40px;
+  top: -26px;
+  border-top-width: 26px;
+  border-bottom-width: 26px;
+  border-left-width: 35px;
+}
+.hud-safearrow-chevron--2::before {
+  left: -32px;
+  top: -20px;
+  border-top-width: 20px;
+  border-bottom-width: 20px;
+  border-left-width: 28px;
+  /* White, not a tint: a pale lilac trailing chevron was measured disappearing into
+     the curtain it is drawn against. Size, not colour, carries the "these two are a
+     sequence" read. */
+  border-left-color: #FFFFFF;
+}
+@keyframes hud-safearrow-throb {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+.hud-safearrow-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  pointer-events: none;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  color: #FFFFFF;
+  background: rgba(88,20,124,0.92);
+  border: 2px solid #F3C4FF;
+  border-radius: 999px;
+  padding: 3px 12px;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  will-change: transform;
 }
 
 /* ── Weapon bar ───────────────────────────────────────────────────────────── */
@@ -845,6 +1338,15 @@ const CSS = `
 .hud-dmg--medium { font-size: 25px; color: #FFD873; }
 .hud-dmg--big { font-size: 36px; color: #FF6B5C; }
 .hud-dmg--heal { color: #6FE0A8; }
+/* Fog ticks are violet AND literally labelled, so a number floating off the player is
+   attributable to the zone rather than to the opponent even in a still frame. The tag
+   is a pseudo-element so the pooled node's textContent stays a plain number. */
+.hud-dmg--fog { color: #F3C4FF; }
+.hud-dmg--fog::after {
+  content: ' ZONE';
+  font-size: 0.55em;
+  letter-spacing: 0.08em;
+}
 
 /* ── Screen-filling ultimate flash (Giant Lollipop) ───────────────────────── */
 .hud-screenflash {
@@ -872,5 +1374,13 @@ const CSS = `
   .hud-countdown { font-size: 90px; }
   .hud-gameover-card { padding: 26px 32px; }
   .hud-gameover-title { font-size: 34px; }
+  .hud-zone { width: 156px; padding: 4px 7px 5px; }
+  .hud-zone-label, .hud-zone-value { font-size: 9px; }
+  .hud-radar-map { width: 105px; height: 75px; }
+  .hud-radar-dot { width: 8px; height: 8px; }
+}
+/* Short viewports (19.5:9 / 21:9 phones) — keep the radar clear of the weapon bar. */
+@media (max-height: 640px) {
+  .hud-radar-map { width: 105px; height: 75px; }
 }
 `;
