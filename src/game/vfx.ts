@@ -16,8 +16,16 @@
 import * as THREE from 'three';
 import type { FighterRole, MatchState, Projectile, Splat, TrailMark, Vec2 } from './state';
 import { SPLAT_RADIUS, TRAIL } from './rules';
+import type { CharacterId, Weapon } from './rules';
 import { CHARACTER_HEIGHT, groundPos, wu } from '../units';
 import { flatMat } from '../render/toon';
+// Per-weapon bespoke VFX extension point (see `vfx/weapons/types.ts` for the full
+// `WeaponVfx` contract). `getWeaponVfx()` returns `undefined` for any weapon with no
+// bespoke entry — every call site below falls back to this file's existing generic
+// projectile/impact/cast behaviour in that case, unchanged from before this system
+// existed.
+import { getWeaponVfx } from '../vfx/weapons';
+import type { WeaponVfx, WeaponVfxCtx } from '../vfx/weapons/types';
 
 declare global {
   interface Window {
@@ -75,14 +83,24 @@ const STUN_STAR_RADIUS = 0.42;
 // timer — so both are treated as one `slowed` signal below (see `sync()`).
 /** Cool, desaturated slate-blue — reads as "wet/cold/dragging" at a glance without
  * competing with any character's own palette. */
-const SLOW_TINT_COLOR = new THREE.Color('#6C93A6');
-/** Tint-sprite footprint, in metres — sized to sit over the chibi rig's torso+head
- * "identity mass" (see `characters/rig.ts`), deliberately short of the full body/legs,
- * and kept at a moderate peak opacity (see `sync()`) so a character's own colours
- * still read through the tint instead of being fully overwritten. */
-const SLOW_TINT_WIDTH = CHARACTER_HEIGHT * 0.62;
-const SLOW_TINT_HEIGHT = CHARACTER_HEIGHT * 0.82;
-const SLOW_TINT_CENTER_Y = CHARACTER_HEIGHT * 0.62;
+const SLOW_TINT_COLOR = new THREE.Color('#5C8FB0');
+/**
+ * Tint-sprite footprint, in metres. It reuses `glowTex` (a soft RADIAL gradient,
+ * hottest dead-centre, fading equally toward every edge) stretched non-uniformly via
+ * `Sprite.scale`, so its visual "hot zone" is concentrated right at the sprite's own
+ * centre — sizing/centring this to the rig's actual HEAD mass (see `characters/rig.ts`:
+ * the head is ~46% of total height and, from this game's steep top-down camera, is
+ * almost the entire visible silhouette) matters more than covering the full body.
+ * First pass centred this too high and too tall (spanned well above the head into
+ * empty air, reading as a floating smudge with the actual head barely darkened) —
+ * centred on the rig's own `headCentreY` instead, sized just past the head's own
+ * diameter plus the torso peeking out beneath it, not the full body/legs. Kept at a
+ * moderate-high peak opacity (see `sync()`) so a character's own colours still read
+ * through rather than being fully overwritten.
+ */
+const SLOW_TINT_WIDTH = CHARACTER_HEIGHT * 0.48;
+const SLOW_TINT_HEIGHT = CHARACTER_HEIGHT * 0.46;
+const SLOW_TINT_CENTER_Y = CHARACTER_HEIGHT * 0.72;
 /** World-unit distance a fighter must travel (accumulated only while terrain-slowed)
  * between puddle-splash bursts — a footstep-like cadence tied to actual movement,
  * not a timer, so it naturally speeds up or stops with the fighter's own motion. */
@@ -138,6 +156,13 @@ function syncPool<T extends { id: number }>(
 }
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
+
+/** Normalize a (vx, vy) velocity into a unit direction, `{0,0}` for a ~stationary
+ * vector. Shared by every bespoke-projectile call site below (`ctx.direction`). */
+function normalizedDir(vx: number, vy: number): { x: number; y: number } {
+  const mag = Math.hypot(vx, vy);
+  return mag > 1e-6 ? { x: vx / mag, y: vy / mag } : { x: 0, y: 0 };
+}
 
 /** Soft radial glow, generated once and shared by every particle sprite (flashes,
  * shards, heal sparkle). A hard-edged square sprite would read as a blocky decal;
@@ -471,6 +496,27 @@ export class VfxLayer {
   private readonly trailPool = new Map<number, THREE.Object3D>();
   private readonly materialCache = new Map<string, THREE.Material>();
 
+  // ── Bespoke per-weapon VFX support (`vfx/weapons/`) ────────────────────────
+  /** Short-lived custom `Object3D`s spawned by a `WeaponVfx` hook via
+   * `ctx.spawnTransient` (see `spawnTransientObject`/`updateEffects`). Unlike the
+   * fixed-size pools above, this is a plain growable list — bespoke weapon VFX fire
+   * at ability-cooldown cadence (roughly once a second per weapon), not every frame,
+   * so pooling the *wrapper* list itself would add bookkeeping this doesn't need;
+   * the discipline this system asks authors to hold is caching their own geometry/
+   * material at module scope (see `vfx/weapons/types.ts`), not this list. */
+  private readonly transientEffects: Array<{
+    object: THREE.Object3D;
+    life: number;
+    maxLife: number;
+    onUpdate?: (progress: number, elapsedSeconds: number) => void;
+  }> = [];
+  /** `state.elapsed` (sim ms) as of the previous `sync()` call — lets `sync()`
+   * derive a SIM-time delta to hand bespoke `trail()` hooks as `ctx.dt`, so a
+   * projectile's own per-frame animation freezes during hit-stop right along with
+   * its position, matching every other projectile-flight behaviour. Reset to 0 in
+   * `clear()` so a match restart never reads a huge bogus first-frame delta. */
+  private lastSyncElapsedMs = 0;
+
   // Shared geometry — every instance of a given kind reuses the same buffers.
   private readonly projectileGeo = new THREE.SphereGeometry(wu(10), 10, 8);
   private readonly splatGeo = new THREE.CircleGeometry(wu(SPLAT_RADIUS), 20);
@@ -624,27 +670,92 @@ export class VfxLayer {
       },
     };
 
+    // SIM-time delta since the last `sync()` call, in seconds — handed to bespoke
+    // `trail()` hooks as `ctx.dt` (see `lastSyncElapsedMs`'s field comment for why
+    // this is sim time, not real time). Computed once per call, before the
+    // projectile pool below runs.
+    const frameDtSeconds = Math.max(0, (state.elapsed - this.lastSyncElapsedMs) / 1000);
+    this.lastSyncElapsedMs = state.elapsed;
+
     syncPool<Projectile>(
       this.projectilePool,
       this.group,
       state.projectiles,
-      (p) => new THREE.Mesh(this.projectileGeo, this.materialFor(p.color)),
-      (obj, p) => {
-        const mesh = obj as THREE.Mesh;
-        mesh.material = this.materialFor(p.color);
-        const pos = groundPos(p.x, p.y);
-        // Egg's Hatch!: once the projectile has arrived and is pecking in place
-        // (`p.arrived`), pulse its scale on each peck interval instead of just
-        // sitting still, so the repeated hits read as an actual attack rather than
-        // a ball resting on the target.
-        if (p.arrived) {
-          const peckT = (p.peckTimer ?? 0) / 500;
-          const pulse = 1 + Math.sin(peckT * Math.PI) * 0.5;
-          mesh.scale.setScalar(pulse);
-        } else {
-          mesh.scale.setScalar(1);
+      (p) => {
+        // Bespoke-VFX lookup (`vfx/weapons/`): a weapon with its own `projectile()`
+        // hook gets a fully custom Object3D instead of the generic tinted sphere.
+        // The matched `WeaponVfx` (or `undefined`) is stashed on `userData` so the
+        // `update` callback below — which only receives the pool's `Object3D`, not
+        // the weapon that made it — knows which path to take without a second
+        // lookup or a parallel id-keyed map.
+        const owner = state[p.ownerRole];
+        const bespoke = getWeaponVfx(owner.characterId, p.weapon.key);
+        if (bespoke?.projectile) {
+          const pos = groundPos(p.x, p.y);
+          const dir = normalizedDir(p.vx, p.vy);
+          const ctx: WeaponVfxCtx = {
+            THREE,
+            position: new THREE.Vector3(pos.x, PROJECTILE_HEIGHT, pos.z),
+            direction: new THREE.Vector3(dir.x, 0, dir.y),
+            color: p.color,
+            damage: p.damage,
+            weapon: p.weapon,
+            characterId: owner.characterId,
+            spawnTransient: (obj, life, onUpdate) => this.spawnTransientObject(obj, life, onUpdate),
+          };
+          (window as any).__bespokeVfxDebug = ((window as any).__bespokeVfxDebug ?? 0) + 1; // TEMP DEBUG
+          const obj = bespoke.projectile(ctx);
+          obj.userData.weaponVfx = bespoke;
+          return obj;
         }
-        mesh.position.set(pos.x, PROJECTILE_HEIGHT, pos.z);
+        const mesh = new THREE.Mesh(this.projectileGeo, this.materialFor(p.color));
+        return mesh;
+      },
+      (obj, p) => {
+        const owner = state[p.ownerRole];
+        const bespoke = obj.userData.weaponVfx as WeaponVfx | undefined;
+        const pos = groundPos(p.x, p.y);
+
+        if (!bespoke) {
+          // ── Generic path — unchanged from before this system existed. ──────────
+          const mesh = obj as THREE.Mesh;
+          mesh.material = this.materialFor(p.color);
+          // Egg's Hatch!: once the projectile has arrived and is pecking in place
+          // (`p.arrived`), pulse its scale on each peck interval instead of just
+          // sitting still, so the repeated hits read as an actual attack rather than
+          // a ball resting on the target.
+          if (p.arrived) {
+            const peckT = (p.peckTimer ?? 0) / 500;
+            const pulse = 1 + Math.sin(peckT * Math.PI) * 0.5;
+            mesh.scale.setScalar(pulse);
+          } else {
+            mesh.scale.setScalar(1);
+          }
+          mesh.position.set(pos.x, PROJECTILE_HEIGHT, pos.z);
+          return;
+        }
+
+        // ── Bespoke path ────────────────────────────────────────────────────────
+        obj.position.set(pos.x, PROJECTILE_HEIGHT, pos.z);
+        const dir = normalizedDir(p.vx, p.vy);
+        // Default orientation (face travel direction), same convention `match.ts`
+        // uses for character facing — a `trail()` hook is free to override this.
+        if (dir.x !== 0 || dir.y !== 0) obj.rotation.y = Math.atan2(dir.x, dir.y);
+        if (bespoke.trail) {
+          const ctx: WeaponVfxCtx = {
+            THREE,
+            position: obj.position.clone(),
+            direction: new THREE.Vector3(dir.x, 0, dir.y),
+            color: p.color,
+            damage: p.damage,
+            weapon: p.weapon,
+            characterId: owner.characterId,
+            spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+            object: obj,
+            dt: frameDtSeconds,
+          };
+          bespoke.trail(ctx);
+        }
       },
     );
 
@@ -710,7 +821,7 @@ export class VfxLayer {
         (vis.slowRing.material as THREE.MeshBasicMaterial).opacity = 0.55;
 
         vis.slowTint.position.set(pos.x, SLOW_TINT_CENTER_Y, pos.z);
-        const tintPulse = 0.42 + Math.sin(state.elapsed * 0.006) * 0.08;
+        const tintPulse = 0.68 + Math.sin(state.elapsed * 0.006) * 0.1;
         (vis.slowTint.material as THREE.SpriteMaterial).opacity = tintPulse;
       }
 
@@ -804,19 +915,69 @@ export class VfxLayer {
       r.mesh.scale.set(s, s, s);
       r.mat.opacity = r.startOpacity * (1 - t);
     }
+
+    // Bespoke per-weapon transients (`vfx/weapons/` hooks via `ctx.spawnTransient`)
+    // — advanced on the same not-slowed-by-hit-stop clock as every pool above, so a
+    // bespoke impact/cast effect stays exactly as snappy as the generic burst it's
+    // standing in for. Iterated back-to-front so mid-loop removal is safe.
+    for (let i = this.transientEffects.length - 1; i >= 0; i--) {
+      const eff = this.transientEffects[i];
+      eff.life += dtSeconds;
+      if (eff.life >= eff.maxLife) {
+        this.group.remove(eff.object);
+        this.transientEffects.splice(i, 1);
+        continue;
+      }
+      eff.onUpdate?.(eff.life / eff.maxLife, eff.life);
+    }
+  }
+
+  /** `ctx.spawnTransient` for every `WeaponVfx` hook (see `vfx/weapons/types.ts`):
+   * adds `object` to the VFX layer and removes it again after `lifetimeSeconds`,
+   * calling `onUpdate(progress, elapsedSeconds)` once per `updateEffects` tick in
+   * between so an author can fade/scale/move it over its life. */
+  private spawnTransientObject(
+    object: THREE.Object3D,
+    lifetimeSeconds: number,
+    onUpdate?: (progress: number, elapsedSeconds: number) => void,
+  ): void {
+    this.group.add(object);
+    this.transientEffects.push({ object, life: 0, maxLife: Math.max(0.001, lifetimeSeconds), onUpdate });
   }
 
   // ── Spawn API — called from match.ts's event handling ─────────────────────────
 
   /** Muzzle/cast flash at the attacker, tinted the weapon's colour. Fires for every
-   * `weapon-fired` event (melee wind-up, ranged muzzle, or a self-cast heal). */
-  spawnCastFlash(xWU: number, yWU: number, facing: Vec2, color: string): void {
+   * `weapon-fired` event (melee wind-up, ranged muzzle, or a self-cast heal). Looks
+   * up this weapon's bespoke `cast()` hook first (`vfx/weapons/`); falls back to the
+   * generic flash below when it has none. */
+  spawnCastFlash(xWU: number, yWU: number, facing: Vec2, weapon: Weapon, characterId: CharacterId): void {
     bumpVfxQaCount('cast');
     const origin = groundPos(xWU, yWU);
     const mag = Math.hypot(facing.x, facing.y) || 1;
     const fx = facing.x / mag;
     const fy = facing.y / mag;
     const offM = 0.7;
+    const color = weapon.color;
+
+    const bespoke = getWeaponVfx(characterId, weapon.key)?.cast;
+    if (bespoke) {
+      const ctx: WeaponVfxCtx = {
+        THREE,
+        position: new THREE.Vector3(origin.x + fx * offM, CAST_HEIGHT, origin.z + fy * offM),
+        direction: new THREE.Vector3(fx, 0, fy),
+        color,
+        damage: weapon.damage,
+        weapon,
+        characterId,
+        spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+      };
+      (window as any).__bespokeVfxDebugCast = ((window as any).__bespokeVfxDebugCast ?? 0) + 1; // TEMP DEBUG
+      bespoke(ctx);
+      return;
+    }
+
+    // ── Generic path — unchanged from before this system existed. ────────────────
     const p = this.allocParticle();
     p.active = true;
     p.life = 0;
@@ -908,10 +1069,50 @@ export class VfxLayer {
    * by how hard the hit was. Sized to read as clearly BIGGER than the fighters
    * themselves for any hit that isn't trivial chip damage — matching the reference
    * bar, where combat VFX dominate the frame rather than politely sitting beside the
-   * characters. */
-  spawnImpactBurst(xWU: number, yWU: number, color: string, amount: number): void {
+   * characters.
+   *
+   * `source`, when provided, identifies the weapon that caused this hit
+   * (`combat.ts`'s `DamageSource.kind === 'weapon'` — trail/hazard/fog hits have no
+   * weapon and so never look up bespoke VFX, exactly like they never had a `cast`
+   * either). When that weapon has a bespoke `impact()` hook (`vfx/weapons/`), it
+   * fully replaces the generic burst below; otherwise this falls back to the exact
+   * generic burst that ran here before this system existed. `fromXWU`/`fromYWU`
+   * (the attacker's position) are optional and only used to give the bespoke hook a
+   * meaningful `ctx.direction` (attacker → hit); omit them and it's just zero. */
+  spawnImpactBurst(
+    xWU: number,
+    yWU: number,
+    color: string,
+    amount: number,
+    source?: { weapon: Weapon; characterId: CharacterId; fromXWU?: number; fromYWU?: number },
+  ): void {
     bumpVfxQaCount('impact');
     const origin = groundPos(xWU, yWU);
+
+    const bespoke = source && getWeaponVfx(source.characterId, source.weapon.key)?.impact;
+    if (bespoke && source) {
+      let dirX = 0;
+      let dirY = 0;
+      if (source.fromXWU !== undefined && source.fromYWU !== undefined) {
+        const d = normalizedDir(xWU - source.fromXWU, yWU - source.fromYWU);
+        dirX = d.x; dirY = d.y;
+      }
+      const ctx: WeaponVfxCtx = {
+        THREE,
+        position: new THREE.Vector3(origin.x, IMPACT_HEIGHT, origin.z),
+        direction: new THREE.Vector3(dirX, 0, dirY),
+        color,
+        damage: amount,
+        weapon: source.weapon,
+        characterId: source.characterId,
+        spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+      };
+      (window as any).__bespokeVfxDebugImpact = ((window as any).__bespokeVfxDebugImpact ?? 0) + 1; // TEMP DEBUG
+      bespoke(ctx);
+      return;
+    }
+
+    // ── Generic path — unchanged from before this system existed. ────────────────
     // Sized up again (was base 0.85/slope 0.055/cap 3.4) — four critic rounds in a
     // row judged this game's combat VFX against Brawl Stars references shot on a
     // MUCH closer camera than ours; the same effect occupies a far smaller fraction
@@ -963,27 +1164,43 @@ export class VfxLayer {
    * nothing new is allocated per spawn. Deliberately one neutral bright droplet
    * colour for both puddles (not per-kind grease/water tinted) — this motion cue's
    * job is "you're moving through liquid," not re-litigating which hazard this is.
+   *
+   * Spawn height starts at `STATUS_RING_Y` (0.3m), NOT ground level: the puddle disc
+   * itself (`hazards.ts`'s `buildPuddleVisual`) sits at `FLOOR_Y.decal`/`FLOOR_Y.fine`
+   * (0.15-0.25m) using `glossyMat`/`flatMat`, neither of which sets `depthWrite:
+   * false` — a `transparent: true` material still writes the depth buffer by THREE's
+   * own default unless told otherwise, so a particle spawned BELOW that plane (this
+   * used 0.06m originally) gets depth-tested against it and is silently culled for
+   * its entire life, everywhere the puddle disc covers it. Verified by temporarily
+   * blowing the particles up to multi-second lifetimes and still seeing nothing
+   * render — confirms occlusion, not a timing/capture artifact.
    */
   private spawnPuddleSplash(xM: number, zM: number): void {
     bumpVfxQaCount('puddleSplash');
-    const count = 3;
+    const count = 4;
     for (let i = 0; i < count; i++) {
       const p = this.allocParticle();
       const ang = (i / count) * Math.PI * 2 + Math.random() * 1.2;
       const r = 0.05 + Math.random() * 0.08;
       p.active = true;
       p.life = 0;
-      p.maxLife = 0.26 + Math.random() * 0.1;
+      p.maxLife = 0.3 + Math.random() * 0.12;
       p.sprite.visible = true;
-      p.sprite.position.set(xM + Math.cos(ang) * r, 0.06, zM + Math.sin(ang) * r);
+      p.sprite.position.set(xM + Math.cos(ang) * r, STATUS_RING_Y, zM + Math.sin(ang) * r);
       p.vx = Math.cos(ang) * 0.6;
       p.vz = Math.sin(ang) * 0.6;
       p.vy = 1.1 + Math.random() * 0.5;
       p.gravity = -5.5;
-      p.startScale = 0.14 + Math.random() * 0.05;
+      p.startScale = 0.2 + Math.random() * 0.06;
       p.endScale = 0.03;
-      p.startOpacity = 0.85; p.endOpacity = 0; p.fadeEase = 1;
-      p.mat.color.set('#BFE9FF');
+      p.startOpacity = 1; p.endOpacity = 0; p.fadeEase = 1;
+      // Additive blending (this whole pool's material — see the constructor) washes
+      // a pale colour out to near-white against a bright background rather than
+      // reading as a distinct hue; that's fine here since these only need to read as
+      // bright droplets of light catching a splash, not carry any colour meaning of
+      // their own (this design deliberately put NO meaning on colour any more — see
+      // the file header). Lifted toward white instead of fighting the blend mode.
+      p.mat.color.set('#E8F8FF');
     }
   }
 
@@ -1253,6 +1470,13 @@ export class VfxLayer {
     for (const p of this.particles) { p.active = false; p.sprite.visible = false; }
     for (const w of this.wedges) { w.active = false; w.mesh.visible = false; }
     for (const r of this.rings) { r.active = false; r.mesh.visible = false; }
+    // Bespoke per-weapon transients (`vfx/weapons/`) — a burst mid-fade from a
+    // bespoke `impact()`/`cast()` hook is exactly the kind of stale VFX this method
+    // exists to drop; see `lastSyncElapsedMs`'s own reset just below for why the
+    // sim-time-delta tracking resets here too.
+    for (const eff of this.transientEffects) this.group.remove(eff.object);
+    this.transientEffects.length = 0;
+    this.lastSyncElapsedMs = 0;
     for (const role of ['player', 'enemy'] as const) {
       const vis = this.statusByRole[role];
       vis.slowRing.visible = false;

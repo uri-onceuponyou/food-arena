@@ -82,6 +82,15 @@ function finishTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
+  // Anisotropic filtering. This camera is a TILTED top-down rig, so the floor — and
+  // the top face of every counter — is sampled at a hard grazing angle for most of
+  // the frame. With the default anisotropy of 1, trilinear filtering picks a mip
+  // based on the worst-case axis and averages surface detail into flat mush exactly
+  // where the tilt is steepest, which is most of the visible ground. Every grain
+  // texture in this file is fighting that before it draws a single pixel.
+  // three.js clamps this against `capabilities.getMaxAnisotropy()` internally, so
+  // requesting 8 is safe on hardware that supports less.
+  tex.anisotropy = 8;
   tex.needsUpdate = true;
   return tex;
 }
@@ -92,11 +101,38 @@ function grey(v: number, a = 1): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Floor tile wear — grout shading + soft mottling + a couple of low-contrast scuffs.
-// Deliberately the LOWEST-contrast texture in this file: the critic has repeatedly
-// praised this floor for keeping characters readable against a low-noise ground, and
-// the brief is explicit that this must not become clutter. This is meant to be felt
-// (a tile that isn't a perfectly flat plastic chip) more than consciously seen.
+// Floor tile wear — HIGH-FREQUENCY GRAIN ONLY.
+//
+// This generator was rewritten after a diagnostic that replaced its output with a
+// garish 4x4 red/cyan checker and rendered `preview.html?piece=floor`. The checker
+// came back crisp and full-contrast on every tile, which proves the UVs, the `map`
+// forwarding through `toonMat`, the instancing and the repeat wrapping are all
+// healthy. The texture was never "not wired" — five independent critics called this
+// floor "a single flat fill per cell" because of what this function DRAWS.
+//
+// The bug was SPATIAL FREQUENCY, not contrast. This texture maps 0..1 across ONE
+// tile, so a soft blob of radius 0.22-0.46 (what the old version drew, five of them)
+// is a feature the same size as the tile carrying it. That cannot read as surface
+// detail — it reads as "this tile is slightly tinted", which is precisely the
+// complaint. Shrinking the tile 100wu -> 40wu made it worse, not better.
+//
+// Worse, `map` is a property of the MATERIAL, not the instance, and the whole floor
+// runs on two variants (seeds 4001/4029). So the old "2-3 directional scuffs" were
+// stamped identically onto every light tile in the arena — hundreds of copies of the
+// same scuff. Any RECOGNISABLE mark in a per-tile texture becomes a visible repeat.
+// That is why nothing here is allowed a landmark: the content must be isotropic, so
+// it reads as material grain no matter how many times it tiles.
+//
+// The three frequency bands are therefore owned separately, and this file owns
+// exactly one of them:
+//   HIGH (sub-tile grain, pebble tooth) -> HERE. Isotropic, no landmarks.
+//   MID  (tile-sized blobs)             -> NOBODY. Reads as flat tint AND repeats.
+//   LOW  (wear across many tiles)       -> `floor.ts` via `InstancedMesh.instanceColor`.
+//
+// Contrast is set so the grain survives being multiplied against a pale tile colour
+// and pushed through the contrast pass — see the file header. It stays isotropic, so
+// "low-noise ground, characters stay readable" still holds: this is felt as material
+// tooth, never as clutter competing with a character silhouette.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function makeTileWearTexture(seed: number): THREE.CanvasTexture {
@@ -107,50 +143,72 @@ export function makeTileWearTexture(seed: number): THREE.CanvasTexture {
   ctx.fillStyle = grey(0.88);
   ctx.fillRect(0, 0, size, size);
 
-  // Soft mottled patches — large, irregular so a repeating grid of tiles doesn't
-  // read as an obvious stamped pattern. Still the softest-edged marks in this file
-  // (huge radial falloff), but pushed enough alpha to actually survive being
-  // multiplied against the floor's own pale colour and the render pipeline's tone
-  // mapping — see the file header's note on why the first pass was invisible.
-  for (let i = 0; i < 5; i++) {
-    const bx = rand() * size, by = rand() * size;
-    const br = size * (0.22 + rand() * 0.24);
-    const g = ctx.createRadialGradient(bx, by, 0, bx, by, br);
-    const dark = rand() > 0.5;
-    const alpha = 0.22 + rand() * 0.14;
-    g.addColorStop(0, grey(dark ? 0.62 : 1.0, alpha));
-    g.addColorStop(1, grey(dark ? 0.68 : 1.0, 0));
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(bx, by, br, 0, Math.PI * 2);
-    ctx.fill();
+  // ── Pebble/aggregate flecks — the band that actually reads as "this is a
+  // material". Deliberately 2-7px in a 256 map: fine enough to be sub-tile detail
+  // rather than a shape, coarse enough to survive minification. Pure per-pixel
+  // noise (below) averages to flat grey the moment a mip kicks in, so it cannot be
+  // the only carrier — these flecks are what still reads at gameplay distance.
+  // Drawn with wrap-around copies so the map still tiles seamlessly.
+  const flecks = 520;
+  for (let i = 0; i < flecks; i++) {
+    const fx = rand() * size;
+    const fy = rand() * size;
+    const fr = 1 + rand() * 2.5;
+    const dark = rand() > 0.42;
+    ctx.fillStyle = dark ? grey(0.60, 0.15 + rand() * 0.22) : grey(1.0, 0.16 + rand() * 0.24);
+    // Wrap in both axes so a fleck straddling an edge appears on the far side too.
+    // Offsets are built with an explicit push rather than an inline ternary array:
+    // `[0, cond ? size : 0]` yields a duplicate 0 for every fleck NOT near an edge,
+    // which is most of them, and would draw each one four times over — quadrupling
+    // its alpha and blowing out the contrast this band is carefully tuned for.
+    const oxs = [0];
+    if (fx < fr) oxs.push(size);
+    else if (fx > size - fr) oxs.push(-size);
+    const oys = [0];
+    if (fy < fr) oys.push(size);
+    else if (fy > size - fr) oys.push(-size);
+    for (const ox of oxs) {
+      for (const oy of oys) {
+        ctx.beginPath();
+        ctx.arc(fx + ox, fy + oy, fr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
-  // Grout shading — a darker band inset from the tile's own edge (the physical
-  // bevel already carves a grout gap between instances; this just makes each tile's
-  // own edge read as worn/recessed rather than a razor-flat plastic chip).
-  const pad = size * 0.05;
-  ctx.strokeStyle = grey(0.62, 0.55);
-  ctx.lineWidth = size * 0.045;
-  ctx.strokeRect(pad, pad, size - pad * 2, size - pad * 2);
-
-  // A couple of directional scuffs — short streaks, never more than 2-3 so the
-  // floor stays "low-noise" per the brief, but dark/bright enough to actually
-  // register as a scuff instead of vanishing into the tile.
-  const scuffs = 2 + Math.floor(rand() * 2);
-  for (let i = 0; i < scuffs; i++) {
-    const sx = size * (0.2 + rand() * 0.6);
-    const sy = size * (0.2 + rand() * 0.6);
-    const ang = rand() * Math.PI;
-    const len = size * (0.12 + rand() * 0.14);
-    ctx.strokeStyle = grey(rand() > 0.5 ? 0.7 : 1.0, 0.2);
-    ctx.lineWidth = size * 0.02;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(sx - Math.cos(ang) * len * 0.5, sy - Math.sin(ang) * len * 0.5);
-    ctx.lineTo(sx + Math.cos(ang) * len * 0.5, sy + Math.sin(ang) * len * 0.5);
-    ctx.stroke();
+  // ── Soft edge shading — the tile's own bevel reading as worn/recessed rather than
+  // a razor-flat plastic chip. A GRADIENT inset, not the old hard stroked rect: at
+  // tile scale a crisp inset rectangle is itself a recognisable landmark, and with
+  // only two variants it stamped a visible frame onto every tile. Symmetric on all
+  // four sides, so it stays seamless when tiled.
+  const inset = size * 0.13;
+  const edge = ctx.createLinearGradient(0, 0, 0, inset);
+  edge.addColorStop(0, grey(0.58, 0.42));
+  edge.addColorStop(1, grey(0.58, 0));
+  for (let side = 0; side < 4; side++) {
+    ctx.save();
+    ctx.translate(size / 2, size / 2);
+    ctx.rotate((side * Math.PI) / 2);
+    ctx.translate(-size / 2, -size / 2);
+    ctx.fillStyle = edge;
+    ctx.fillRect(0, 0, size, inset);
+    ctx.restore();
   }
+
+  // ── Fine per-pixel tooth. Adds genuine grain when the camera is close or a tile is
+  // magnified; mips average it toward the base value at distance, which is the
+  // correct behaviour rather than a defect — it keeps distant floor calm while
+  // near floor has surface. Applied last so it also breaks up the gradient banding
+  // in the edge shading above.
+  const img = ctx.getImageData(0, 0, size, size);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (rand() - 0.5) * 26;
+    d[i] = THREE.MathUtils.clamp(d[i] + n, 0, 255);
+    d[i + 1] = THREE.MathUtils.clamp(d[i + 1] + n, 0, 255);
+    d[i + 2] = THREE.MathUtils.clamp(d[i + 2] + n, 0, 255);
+  }
+  ctx.putImageData(img, 0, 0);
 
   return finishTexture(canvas);
 }
