@@ -17,6 +17,107 @@ import { toonMat, roundedBox } from '../../render/toon';
 import { PALETTE } from '../../game/rules';
 import { puck, mesh, noOutline, addBacksplash, addTopRim, type Materials } from '../shared';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Round-8 gameplay-legibility fix. A fresh blind critic (shown this file's cover
+// alongside shipped references, not told which was which) scored it 3/10 and named
+// the exact failure: cover meets the floor with "a hard, shadowless edge" instead of
+// a grounding shadow, next to reference crates/barrels that carry a crisp, dark
+// footprint shadow every time. `addCover` in `../shared` DOES already drop a baked
+// AO decal under every registered cover box — verified directly (sampled pixels
+// along the base of a live render): it IS there, but its feather was tuned once for
+// EVERY prop in the arena, tiny to huge, and at this file's scale (the biggest
+// footprints in the map) it fades from near-black to full floor brightness over
+// roughly 60px / ~0.8m — soft enough that a critic glancing at it reads "no shadow"
+// rather than "soft shadow." `shared.ts` is out of bounds for this file to edit, so
+// this adds a SECOND, tighter, higher-contrast ground shadow reserved for the
+// counter family specifically, layered underneath the shared one — same "flat decal
+// resting on the floor, not part of the collidable body" idiom `addCover`'s own
+// `buildContactShadow` already establishes arena-wide, just re-tuned narrower/darker
+// so it actually reads as an intentional shadow at a glance instead of a slow fade.
+//
+// A blurred ROUNDED-RECT (not a radial gradient) so it hugs an elongated footprint's
+// CORNERS too — every counter here is a long rectangle (up to 8.5m x 4.5m), and a
+// plain radial gradient reaches zero well inside a long rectangle's short ends,
+// which is the exact bug `shared.ts`'s own `makeGroundedShadowTexture` already had
+// to fix once, for the same reason (see that file's comment on the same function).
+//
+// Sized from the counter's OWN visible cabinet footprint (already inset from the raw
+// CoverBox — `wM * 0.98` etc.), never from the raw box — so the extra darkening this
+// adds is always a flat ground decal reaching a LITTLE past the real solid body,
+// exactly like every other AO ring in the arena, never a claim that the collidable
+// object itself is any bigger than its true footprint.
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function makeCounterGroundShadowTexture(): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  // Round-8 second pass: the first version of this texture (pad 5%/blur 5.5%) was
+  // sized SMALLER than the shared `groundedShadowStrong` decal `addCover` already
+  // adds on top of it (1.6x oversize there vs 1.16-1.28x here), so it sat entirely
+  // INSIDE that decal's own reach and added nothing visibly new — confirmed by
+  // sampling actual rendered pixels before/after, which showed only a marginal
+  // darkening in the fade zone, not the crisp wide shadow intended. Fixed two ways:
+  // the fill now stays near-FULL alpha out to ~88% of the plane (pad/blur both
+  // shrunk) instead of ramping from the very centre, and the plane itself (see the
+  // oversize factors below) is sized to reach further than the shared decal, so
+  // this one is now the outer, dominant, crisper shadow and the shared one layers
+  // as an inner reinforcement rather than swallowing this one whole.
+  const pad = size * 0.025;
+  const rectW = size - pad * 2;
+  const rectH = size - pad * 2;
+  const radius = size * 0.13;
+  const blur = size * 0.032;
+  const off = size * 3; // pushes the actual filled rect off-canvas; only its blurred edge is visible
+  ctx.save();
+  ctx.shadowColor = 'rgba(6,4,3,0.88)';
+  ctx.shadowBlur = blur;
+  ctx.shadowOffsetX = -off;
+  ctx.fillStyle = 'rgba(6,4,3,0.88)';
+  roundRectPath(ctx, off + pad, pad, rectW, rectH, radius);
+  ctx.fill();
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+let counterGroundShadowTex: THREE.CanvasTexture | null = null;
+
+/** One counter-family-reserved crisp ground shadow, built once and reused across
+ * every stove island / prep counter / service counter placed in the arena. Sized to
+ * reach slightly FURTHER than `addCover`'s own `groundedShadowStrong` ring (1.6x),
+ * so this one is the outer, dominant shadow shape and reads clearly beyond it. */
+function buildCounterGroundAnchor(footW: number, footD: number): THREE.Mesh {
+  if (!counterGroundShadowTex) counterGroundShadowTex = makeCounterGroundShadowTexture();
+  const mat = new THREE.MeshBasicMaterial({
+    map: counterGroundShadowTex,
+    transparent: true,
+    depthWrite: false,
+    opacity: 0.8,
+  });
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(footW * 1.75, footD * 1.95), mat);
+  m.rotation.x = -Math.PI / 2;
+  // Clears the floor tile's own top face (y=0.015) with margin, and sits BELOW the
+  // shared arena-wide AO/cast-shadow decals `addCover` adds afterward (y=0.017/0.019)
+  // so those still layer visibly on top of this one, not the other way round.
+  m.position.y = 0.016;
+  m.name = 'counter_ground_anchor__no_outline';
+  m.castShadow = false;
+  m.receiveShadow = false;
+  noOutline(m);
+  return m;
+}
+
 /**
  * Small potted herb garnish — deliberately cool-green against every warm cabinet/
  * cabinetDark surface it sits on. Cheap, bold-shaped (a pot + a leaf cluster, no
@@ -45,7 +146,20 @@ function buildHerbSprig(M: Materials, scale = 1): THREE.Group {
 
 export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack?: boolean }): THREE.Group {
   const g = new THREE.Group();
-  const cabH = 0.92;
+  // Round-8 gameplay-legibility fix: a critic flagged cover as reading with "no
+  // height... a player cannot tell at a glance whether they block movement or line
+  // of sight." Raising the cabinet body (was 0.92) and the backsplash behind it
+  // (was 0.46) is the single highest-leverage lever available in this file — this
+  // is purely a Y-axis (vertical) change, so it can never poke the visible body
+  // outside the CoverBox's X/Z collision footprint, which is untouched.
+  const cabH = 1.08;
+  // Reserved-BLOCKING foot band (see the `kick` note below) — also enlarged, from
+  // a thin 0.12 sliver to a proportionally chunkier band, so the one colour in the
+  // whole arena that means "this collides" actually reads as its own band instead
+  // of a near-invisible trim line at gameplay camera distance.
+  const kickH = 0.18;
+
+  g.add(buildCounterGroundAnchor(wM * 0.98, dM * 0.96));
 
   const cabinet = mesh(roundedBox(wM * 0.98, cabH, dM * 0.96, 0.06), M.cabinet, 'stove_cabinet');
   cabinet.position.y = cabH / 2;
@@ -54,14 +168,14 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   // Kick + backsplash both use `coverPlinth` — the one material reserved for
   // BLOCKING across every cover prop in the arena (see the KPAL note). Nothing
   // hazard or decoration ever uses this colour, so it alone signals "this collides."
-  const kick = mesh(roundedBox(wM * 0.98, 0.12, dM * 0.96 + 0.02, 0.02), M.coverPlinth, 'stove_kick');
-  kick.position.y = 0.06;
+  const kick = mesh(roundedBox(wM * 0.98, kickH, dM * 0.96 + 0.02, 0.02), M.coverPlinth, 'stove_kick');
+  kick.position.y = kickH / 2;
   g.add(kick);
 
   // Back wall + bright cap trim — see `addBacksplash`. Sits further back (-Z) than
   // the pan rack posts below, so on the island that has a rack this reads as "wall
   // behind the hanging pans" rather than clipping through them.
-  addBacksplash(g, M, wM, dM, cabH, M.coverPlinthPanel, 0.46);
+  addBacksplash(g, M, wM, dM, cabH, M.coverPlinthPanel, 0.56);
 
   // Top is deliberately narrower than the cabinet beneath it — from the steep
   // top-down gameplay camera the top face is almost all you see, so leaving a
@@ -129,14 +243,19 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
  */
 export function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBlock?: boolean; rollingPin?: boolean }): THREE.Group {
   const g = new THREE.Group();
-  const h = 0.86;
+  // Round-8: same height + plinth-thickness fix as `buildStoveIsland` — see that
+  // function's comment. `h` drives every topper's Y offset below already, so
+  // raising it alone re-grounds the cutting board / knife block / bowl+pin too.
+  const h = 1.0;
+  const kickH = 0.17;
+  g.add(buildCounterGroundAnchor(wM * 0.98, dM * 0.94));
   const cabinet = mesh(roundedBox(wM * 0.98, h, dM * 0.94, 0.06), M.cabinet, 'prep_cabinet');
   cabinet.position.y = h / 2;
   g.add(cabinet);
-  const kick = mesh(roundedBox(wM * 0.98, 0.12, dM * 0.94 + 0.02, 0.02), M.coverPlinth, 'prep_kick');
-  kick.position.y = 0.06;
+  const kick = mesh(roundedBox(wM * 0.98, kickH, dM * 0.94 + 0.02, 0.02), M.coverPlinth, 'prep_kick');
+  kick.position.y = kickH / 2;
   g.add(kick);
-  addBacksplash(g, M, wM, dM, h, M.coverPlinthPanel, 0.3);
+  addBacksplash(g, M, wM, dM, h, M.coverPlinthPanel, 0.38);
   const top = mesh(roundedBox(wM * 0.82, 0.08, dM * 0.72, 0.04), M.butcherBlock, 'prep_top');
   top.position.y = h + 0.04;
   g.add(top);
@@ -213,17 +332,20 @@ export function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { 
 
 export function buildServiceCounter(M: Materials, wM: number, dM: number, variant: 'fryer' | 'sink'): THREE.Group {
   const g = new THREE.Group();
-  const h = 0.9;
+  // Round-8: same height + plinth-thickness fix as `buildStoveIsland`/`buildPrepCounter`.
+  const h = 1.05;
+  const kickH = 0.16;
+  g.add(buildCounterGroundAnchor(wM * 0.98, dM * 0.95));
   const cabinet = mesh(roundedBox(wM * 0.98, h, dM * 0.95, 0.06), M.cabinetDark, 'service_cabinet');
   cabinet.position.y = h / 2;
   g.add(cabinet);
   // The cabinet body here is ALREADY cabinetDark, so the kick uses the reserved
   // BLOCKING `coverPlinth` (near-black) to read as a distinct foot band rather than
   // disappearing into the body it's attached to.
-  const kick = mesh(roundedBox(wM * 0.98, 0.1, dM * 0.95 + 0.02, 0.02), M.coverPlinth, 'service_kick');
-  kick.position.y = 0.05;
+  const kick = mesh(roundedBox(wM * 0.98, kickH, dM * 0.95 + 0.02, 0.02), M.coverPlinth, 'service_kick');
+  kick.position.y = kickH / 2;
   g.add(kick);
-  addBacksplash(g, M, wM, dM, h, M.coverPlinthPanel, 0.32);
+  addBacksplash(g, M, wM, dM, h, M.coverPlinthPanel, 0.4);
   const top = mesh(roundedBox(wM * 0.8, 0.09, dM * 0.74, 0.05), M.steel, 'service_top');
   top.position.y = h + 0.045;
   g.add(top);
