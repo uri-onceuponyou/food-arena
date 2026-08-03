@@ -38,6 +38,12 @@ const STUN_STAR_HEIGHT = CHARACTER_HEIGHT * 1.04;
 const STUN_STAR_RADIUS = 0.42;
 
 const WHITE = new THREE.Color('#ffffff');
+/** Deep desaturated ink, matching `render/toon.ts`'s outline colour (kept as a local
+ * literal rather than an import — this module has no other reason to depend on the
+ * character outline module). Mixing ground-plane fills toward this instead of using
+ * a weapon's raw (often pale/warm) colour at low opacity is what keeps melee arcs and
+ * AOE fills legible against the arena's bright cream floor. */
+const INK = new THREE.Color('#241a33');
 
 /**
  * Keep `pool` (id -> mesh) in sync with `items` (id-bearing sim records): create a
@@ -405,7 +411,10 @@ export class VfxLayer {
         continue;
       }
       const t = w.life / w.maxLife;
-      w.mat.opacity = w.startOpacity * (1 - t);
+      // Hold near-full opacity through the first ~60% of life, then drop fast — a
+      // swept cone should read as a clean, held shape, not something dissolving
+      // from the instant it appears.
+      w.mat.opacity = w.startOpacity * (1 - Math.pow(t, 1.8));
     }
 
     for (const r of this.rings) {
@@ -463,13 +472,18 @@ export class VfxLayer {
     const w = this.allocWedge();
     w.active = true;
     w.life = 0;
-    w.maxLife = 0.22;
-    w.startOpacity = 0.6;
+    w.maxLife = 0.3;
+    w.startOpacity = 0.88;
     w.mesh.visible = true;
     w.mesh.geometry = geo;
     w.mesh.rotation.y = Math.atan2(facing.x, facing.y);
     w.mesh.position.set(origin.x, GROUND_VFX_Y, origin.z);
-    w.mat.color.set(color);
+    // Mix toward ink rather than using the weapon's raw colour at low opacity — a
+    // pale weapon colour (e.g. Patty Smash's yellow) alpha-blended over the arena's
+    // equally pale floor is nearly invisible; darkening it first guarantees contrast
+    // regardless of what's underneath, matching how the reference bar's AOE
+    // indicators are bold saturated shapes, not a light tint.
+    w.mat.color.set(color).lerp(INK, 0.3);
     w.mat.opacity = w.startOpacity;
   }
 
