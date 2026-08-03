@@ -51,6 +51,20 @@ const CENTER = { x: ARENA_W / 2, y: ARENA_H / 2 }; // 700, 500
 const MAX_SAFE_RADIUS = 850;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Baked shadow direction — a round-6 fix for the critic's #1 finding: cover props
+// carry `castShadow=true` (every mesh built through the shared `mesh()` helper below
+// already sets it), but at gameplay zoom their real-time shadow-map contribution
+// shrinks to a faint sliver against the bright cream tile, so props still read as
+// floating. Rather than fight that subtlety, every cover prop (via `addCover`) and
+// the pot ALSO get an authored, guaranteed-visible directional shadow decal — see
+// `buildDirectionalShadowMesh`. Its direction is fixed to match the key light's
+// authored offset in `render/lighting.ts` (`(9, 16, 7)` relative to its target — that
+// file is out of bounds for this arena, so the direction is baked in here instead of
+// read at runtime). A shadow falls AWAY from the light, i.e. toward -X/-Z.
+const SHADOW_DIR_LEN = Math.hypot(9, 7);
+const SHADOW_DIR = { x: -9 / SHADOW_DIR_LEN, z: -7 / SHADOW_DIR_LEN };
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Kitchen palette — extends the shared character PALETTE with arena-only tones so
 // produce accents on crates/sacks visually match the roster.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,6 +169,33 @@ const KPAL = {
   // rather than another tan crate.
   barrelBody: '#C0281F',
   barrelBodyDark: '#8E1B15',
+
+  // ── Round-6 fix: spice-cart body ─────────────────────────────────────────────
+  // The cart's body used to share `tealTileDark` with the floor's own decorative
+  // "hub zone" mat directly beneath it — the exact bug the round-6 critic flagged
+  // ("cannot tell whether these are raised blocking terrain... or pure floor
+  // decals"): a blocking CoverBox and a walkable floor decal painted the identical
+  // colour. A violet nowhere else in KPAL keeps the cart's "cool counterpoint to the
+  // warm hub" role while making it unmistakably its OWN thing, never confusable with
+  // the mat it sits on.
+  spiceCartBody: '#6C4FA6',
+  spiceCartBodyDark: '#4A3572',
+
+  // ── Round-6 fix: loose ground debris (mistaken for gameplay pickups) ─────────
+  // `buildHubDebris`/`buildDebrisPile` used to include a bright-red "tomato" sphere
+  // in their rotation. Small, red, scattered loose on the floor around the hazard
+  // ring, it read exactly like a collectible pickup and sat far too close in hue to
+  // the hazard's own amber/red caution grammar. Blueberry-violet keeps the "loose
+  // veg" variety without ever using red for anything that isn't the hazard itself.
+  debrisBerry: '#4C5FC4',
+
+  // Cool utility rubber mat under the two walk-in freezers — round-6 "vary the four
+  // corner mats" fix: only the two PANTRY corners had a distinguishing floor pad
+  // (the warm wood `woodPad`); the two FREEZER corners sat on bare checkerboard tile.
+  // A cool grey mat (never used anywhere else) gives all four corners their own
+  // floor treatment instead of two matching and two bare.
+  utilityMat: '#95A6AC',
+  utilityMatDark: '#6D7C81',
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -258,6 +299,13 @@ function buildMaterials() {
     barrelBody: glossyMat({ color: KPAL.barrelBody, roughness: 0.4 }),
     barrelBodyDark: toonMat({ color: KPAL.barrelBodyDark, roughness: 0.55 }),
 
+    // Round-6 fixes — see the KPAL notes on `spiceCartBody` / `debrisBerry`.
+    spiceCartBody: toonMat({ color: KPAL.spiceCartBody, roughness: 0.5 }),
+    spiceCartBodyDark: toonMat({ color: KPAL.spiceCartBodyDark, roughness: 0.6 }),
+    debrisBerry: toonMat({ color: KPAL.debrisBerry, roughness: 0.55 }),
+    utilityMat: toonMat({ color: KPAL.utilityMat, ramp: RAMP_SOFT(), roughness: 0.65 }),
+    utilityMatDark: toonMat({ color: KPAL.utilityMatDark, ramp: RAMP_SOFT(), roughness: 0.68 }),
+
     // Fake ambient occlusion — a soft dark radial decal dropped under ROUND props
     // (the pot) so they read as sitting ON the floor with real contact darkening,
     // rather than pasted on top of it.
@@ -281,6 +329,18 @@ function buildMaterials() {
       transparent: true,
       depthWrite: false,
       opacity: 1,
+    }),
+
+    // Baked directional cast-shadow blob — see `buildDirectionalShadowMesh`. Reuses
+    // the same soft radial gradient as `contactShadow` (its feather still looks right
+    // once the plane is stretched long-and-thin) at a lower opacity so it reads as a
+    // soft ground shadow trailing away from the prop, not another AO ring stacked on
+    // top of the real contact shadow.
+    castShadowDecal: new THREE.MeshBasicMaterial({
+      map: makeCastShadowTexture(),
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.7,
     }),
   };
 }
@@ -386,6 +446,28 @@ function makeGroundedShadowTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+/** Bolder radial gradient than `makeContactShadowTexture` — that one was tuned for a
+ * subtle AO ring sitting almost entirely UNDER the prop that casts it, but the baked
+ * directional shadow (`buildDirectionalShadowMesh`) has to read clearly on its own,
+ * out on open floor, at gameplay zoom. Same soft-edged radial shape (so it still looks
+ * right once stretched into a long oval), just noticeably darker at the core. */
+function makeCastShadowTexture(): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(18,12,7,0.8)');
+  g.addColorStop(0.45, 'rgba(18,12,7,0.6)');
+  g.addColorStop(0.8, 'rgba(18,12,7,0.22)');
+  g.addColorStop(1, 'rgba(18,12,7,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /** Elliptical AO blob sized to a prop's own footprint (in metres), slightly oversized
  * so it peeks out past the silhouette the way a real contact shadow would. */
 function buildContactShadow(mat: THREE.Material, wM: number, dM: number, scale = 1.25): THREE.Mesh {
@@ -407,6 +489,105 @@ function buildContactShadow(mat: THREE.Material, wM: number, dM: number, scale =
   m.receiveShadow = false;
   noOutline(m);
   return m;
+}
+
+/**
+ * Baked directional ground shadow — a soft, feathered oval that STARTS beyond the
+ * prop's own `buildContactShadow` AO ring and trails further out along the FIXED
+ * world-space direction the key light casts in (`SHADOW_DIR`). Unlike the AO ring
+ * (which only says "touching the floor"), this one visibly points away from the
+ * light — the actual cue a real cast shadow gives — and, being an authored decal
+ * rather than the renderer's real-time shadow map, it stays clearly visible at any
+ * camera zoom instead of shrinking to a faint sliver against the bright tile.
+ *
+ * `yawDeg` must be the SAME 0/180 flip the caller applies to the whole prop group —
+ * the shadow direction is a world-space constant (the light doesn't rotate with the
+ * prop), so the offset is counter-rotated into the group's local space here, and the
+ * group's own yaw rotates it right back to the correct world direction.
+ *
+ * `startDist` is the distance from the group's origin to where the blob should BEGIN
+ * — the caller must size this to clear the prop's own (usually 1.3x-oversized) AO
+ * ring, or the two decals sit almost exactly on top of each other and the AO (drawn
+ * later, more opaque) simply hides this one entirely. That was a real round-6 bug:
+ * an early version measured only the prop's bare silhouette edge, which the AO ring
+ * already covers, so the "directional" shadow rendered fully invisible underneath it.
+ */
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+function buildDirectionalShadowMesh(M: Materials, length: number, width: number, yawDeg = 0, startDist = 0): THREE.Mesh {
+  const { x: localX, z: localZ } = localShadowDir(yawDeg);
+
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(length, width), M.castShadowDecal);
+  // Two rotations composed as QUATERNIONS, not sequential Euler `rotation.x`/`.y` —
+  // Euler angles apply intrinsically (each axis is the mesh's OWN, already-tilted
+  // axis from the previous step), so setting `.y` after `.x` spins the plane about
+  // its now-horizontal local Y axis and tips it up into a vertical sliver instead of
+  // spinning the flat plane around the world's up axis. That was a real round-6 bug:
+  // every baked shadow rendered edge-on and invisible from the top-down camera.
+  // Quaternion multiplication order `spin * flat` applies `flat` first (lie the plane
+  // down) and `spin` second as a genuine world-space rotation about (world) +Y.
+  const qFlat = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -Math.PI / 2);
+  const spinAngle = Math.atan2(-localZ, localX);
+  const qSpin = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, spinAngle);
+  m.quaternion.multiplyQuaternions(qSpin, qFlat);
+  const offset = startDist + length / 2;
+  m.position.set(localX * offset, 0.017, localZ * offset);
+  m.renderOrder = 2;
+  m.name = 'cast_shadow__no_outline';
+  m.castShadow = false;
+  m.receiveShadow = false;
+  noOutline(m);
+  return m;
+}
+
+/** Counter-rotates the fixed world `SHADOW_DIR` into a group's local (pre-yaw) space —
+ * shared by `buildDirectionalShadowMesh` and `buildCoverCastShadow` so both agree on
+ * exactly the same direction. */
+function localShadowDir(yawDeg: number): { x: number; z: number } {
+  const yawRad = THREE.MathUtils.degToRad(yawDeg);
+  const c = Math.cos(-yawRad), s = Math.sin(-yawRad);
+  return { x: SHADOW_DIR.x * c + SHADOW_DIR.z * s, z: -SHADOW_DIR.x * s + SHADOW_DIR.z * c };
+}
+
+/** Approximate prop height (metres) per CoverBox `kind`, used only to scale the baked
+ * directional shadow's length (see `buildDirectionalShadowMesh`). Deliberately coarse
+ * — this is a stylised drop shadow, not a physically exact one — so a rough per-kind
+ * height is enough to keep tall props (the freezer) throwing a visibly longer shadow
+ * than short ones (a supply barrel) without threading real height data through every
+ * individual builder function. */
+const COVER_SHADOW_HEIGHT: Record<string, number> = {
+  stove_island: 1.5,
+  freezer: 2.05,
+  herb_crate: 0.82,
+  produce_crate_tall: 0.96,
+  flour_sacks: 0.95,
+  prep_counter: 1.05,
+  supply_barrel: 0.6,
+  stacked_pots: 0.9,
+  spice_cart: 0.68,
+  fryer_counter: 1.15,
+  sink_counter: 1.2,
+};
+
+/** `buildDirectionalShadowMesh`, sized from a cover prop's footprint + its looked-up
+ * approximate height — the single call site `addCover` uses so every registered cover
+ * box gets one automatically and it can't be forgotten on a future prop. */
+function buildCoverCastShadow(M: Materials, wM: number, dM: number, kind: string, yawDeg = 0): THREE.Mesh {
+  const heightM = COVER_SHADOW_HEIGHT[kind] ?? 1.0;
+  // ~0.72 approximates 1 / tan(the key light's ~54.5° elevation) — see SHADOW_DIR.
+  const length = Math.max(0.6, heightM * 0.85 + 0.3);
+  const width = Math.max(0.4, Math.min(wM, dM) * 0.5);
+  // Distance from the group's centre to ITS OWN rectangular footprint's edge along the
+  // shadow direction, ×1.35 to clear `addCover`'s own 1.3x-oversized AO ring — see the
+  // `startDist` note on `buildDirectionalShadowMesh`.
+  const { x: localX, z: localZ } = localShadowDir(yawDeg);
+  const hw = wM / 2, hd = dM / 2;
+  const edgeReach = Math.min(
+    Math.abs(localX) > 1e-4 ? hw / Math.abs(localX) : hw,
+    Math.abs(localZ) > 1e-4 ? hd / Math.abs(localZ) : hd
+  );
+  return buildDirectionalShadowMesh(M, length, width, yawDeg, edgeReach * 1.35);
 }
 
 /**
@@ -756,7 +937,16 @@ function buildFlourSack(M: Materials, wM: number, dM: number): THREE.Group {
   return g;
 }
 
-function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBlock?: boolean }): THREE.Group {
+/**
+ * Round-6 fix for "orange-trimmed platforms... raised walkway? bed? no clear
+ * function?" — every prep counter now ALWAYS carries a cutting board with chopped
+ * veg (not just the two that happened to get a knife block), so its function reads
+ * unambiguously as a food-prep surface regardless of which instance a player sees.
+ * `knifeBlock`/`rollingPin` are mutually-exclusive SECOND toppers so the pair of
+ * counters on each side of the map are visibly distinct from one another rather than
+ * a bare-vs-furnished repeat (the round-6 "vary... clutter" note).
+ */
+function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBlock?: boolean; rollingPin?: boolean }): THREE.Group {
   const g = new THREE.Group();
   const h = 0.86;
   const cabinet = mesh(roundedBox(wM * 0.98, h, dM * 0.94, 0.06), M.cabinet, 'prep_cabinet');
@@ -771,6 +961,21 @@ function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBl
   g.add(top);
   addTopRim(g, M, wM * 0.82, dM * 0.72, h + 0.081, 0.03);
 
+  // Always-present cutting board + a few chopped-veg cubes, off-centre so it never
+  // collides with either the knife block or the bowl/pin below.
+  const boardY = h + 0.08;
+  const board = mesh(roundedBox(wM * 0.3, 0.035, dM * 0.5, 0.03), M.crateWood, 'prep_cutting_board');
+  board.position.set(-wM * 0.2, boardY, 0);
+  g.add(board);
+  const choppedMats = [M.tomato, M.onion, M.lettuce];
+  const choppedSpots: Array<[number, number]> = [[-0.09, 0.11], [0.05, -0.09], [-0.12, -0.08], [0.09, 0.1]];
+  choppedSpots.forEach(([cx2, cz2], i) => {
+    const chip = mesh(new THREE.BoxGeometry(0.045, 0.03, 0.045), choppedMats[i % choppedMats.length], 'prep_chopped_veg');
+    chip.position.set(-wM * 0.2 + cx2 * wM * 0.3, boardY + 0.03, cz2 * dM * 0.3);
+    chip.rotation.y = i * 0.8;
+    g.add(chip);
+  });
+
   if (opts?.knifeBlock) {
     const block = mesh(roundedBox(0.22, 0.26, 0.18, 0.04), M.crateSlat, 'knife_block');
     block.position.set(wM * 0.3, h + 0.08 + 0.13, 0);
@@ -781,6 +986,28 @@ function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBl
       blade.position.set(wM * 0.3 + Math.sin(a) * 0.07, h + 0.08 + 0.32, Math.cos(a) * 0.04);
       blade.rotation.z = a * 0.5;
       g.add(blade);
+    }
+  } else if (opts?.rollingPin) {
+    // The OTHER counter's distinct topper — a mixing bowl + rolling pin — so this
+    // pair reads as two different prep stations rather than a copy-pasted repeat.
+    const bowl = mesh(puck(0.16, 0.1, 16), toonMat({ color: PALETTE.lettuce, roughness: 0.5 }), 'prep_bowl');
+    bowl.position.set(wM * 0.28, h + 0.08 + 0.05, 0.12);
+    g.add(bowl);
+    const bowlRimTorus = mesh(new THREE.TorusGeometry(0.16, 0.014, 6, 16), M.rimLight, 'prep_bowl_rim');
+    bowlRimTorus.rotation.x = Math.PI / 2;
+    bowlRimTorus.position.set(wM * 0.28, h + 0.08 + 0.1, 0.12);
+    noOutline(bowlRimTorus);
+    g.add(bowlRimTorus);
+    const pin = mesh(puck(0.035, 0.36, 10), M.woodPad, 'prep_rolling_pin');
+    pin.rotation.z = Math.PI / 2;
+    pin.position.set(wM * 0.28, h + 0.08 + 0.035, -0.14);
+    g.add(pin);
+    for (const side of [-1, 1]) {
+      const knob = mesh(puck(0.022, 0.05, 8), M.crateSlat, 'prep_rolling_pin_knob');
+      knob.rotation.z = Math.PI / 2;
+      knob.position.set(wM * 0.28 + side * 0.205, h + 0.08 + 0.035, -0.14);
+      noOutline(knob);
+      g.add(knob);
     }
   }
 
@@ -868,11 +1095,14 @@ function buildSpiceCart(M: Materials, wM: number, dM: number): THREE.Group {
   const skid = mesh(roundedBox(wM * 0.7, 0.05, dM * 0.7, 0.04), M.coverPlinth, 'cart_skid');
   skid.position.y = 0.025;
   g.add(skid);
-  // Cool teal body, not the warm cabinetDark used everywhere else — this cart sits
+  // Violet body, not the warm cabinetDark used everywhere else — this cart sits
   // dead-centre in the hub chokepoint and is one of the very few props guaranteed
   // to be on-screen in every gameplay frame, so its hue does real work for palette
-  // contrast.
-  const body = mesh(roundedBox(wM * 0.85, h, dM * 0.85, 0.05), M.tealTileDark, 'cart_body');
+  // contrast. NOT `tealTileDark` (round-6 fix): that colour belongs to the floor's
+  // own decorative hub-zone mat directly beneath this cart, and a blocking prop
+  // sharing its body colour with the walkable decal under it was exactly the
+  // "cover vs decal, indistinguishable" bug the round-6 critic flagged.
+  const body = mesh(roundedBox(wM * 0.85, h, dM * 0.85, 0.05), M.spiceCartBody, 'cart_body');
   body.position.y = h / 2 + 0.06;
   g.add(body);
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
@@ -969,6 +1199,11 @@ function buildPot(M: Materials): PotAssembly {
   // broad hazard scorch, so the heaviest object in the arena visibly presses into
   // the floor rather than floating on top of it.
   g.add(buildContactShadow(M.contactShadow, bodyR * 2.1, bodyR * 2.1, 1));
+  // Baked directional shadow — the pot is the single tallest object in the arena and
+  // has no CoverBox (so it never runs through `addCover`), but it's exactly the kind
+  // of "hard geometry floating on the floor" prop the round-6 critic flagged, so it
+  // gets the same treatment by hand. Never yawed, so no counter-rotation needed.
+  g.add(buildDirectionalShadowMesh(M, Math.max(1.1, bodyH * 1.1), Math.max(0.6, bodyR * 0.85), 0, bodyR * 1.25));
 
   const base = mesh(puck(bodyR * 0.5, 0.06, 24), M.potMetalDark, 'pot_stove_base');
   base.position.y = 0.03;
@@ -1266,7 +1501,11 @@ function buildHubDebris(M: Materials): THREE.Group {
   noOutline(g);
   let seed = 733;
   const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  const mats = [M.tomato, M.onion, M.lettuce];
+  // `debrisBerry`, not `tomato` (round-6 fix): a bright-red loose sphere scattered on
+  // the floor around the hazard ring read exactly like a collectible pickup and sat
+  // far too close in hue to the hazard's own amber/red caution grammar. See the KPAL
+  // note on `debrisBerry` — red stays exclusive to the hazard everywhere on this map.
+  const mats = [M.debrisBerry, M.onion, M.lettuce];
   const count = 12;
   for (let i = 0; i < count; i++) {
     const ang = rand() * Math.PI * 2;
@@ -1296,7 +1535,11 @@ function buildDebrisPile(M: Materials, cx: number, cy: number, seed: number, cou
   noOutline(g);
   let s = seed;
   const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-  const mats = [M.tomato, M.onion, M.lettuce];
+  // `debrisBerry`, not `tomato` (round-6 fix): a bright-red loose sphere scattered on
+  // the floor around the hazard ring read exactly like a collectible pickup and sat
+  // far too close in hue to the hazard's own amber/red caution grammar. See the KPAL
+  // note on `debrisBerry` — red stays exclusive to the hazard everywhere on this map.
+  const mats = [M.debrisBerry, M.onion, M.lettuce];
   for (let i = 0; i < count; i++) {
     const ang = rand() * Math.PI * 2;
     const r = rand() * spreadWu;
@@ -1310,6 +1553,72 @@ function buildDebrisPile(M: Materials, cx: number, cy: number, seed: number, cou
     item.rotation.y = rand() * Math.PI * 2;
     g.add(item);
   }
+  return g;
+}
+
+/**
+ * Kitchen exhaust pipe — a vertical duct, elbow and vent cap standing beside each
+ * walk-in freezer. Round-6 "add secondary themed clutter... at varied heights" fix:
+ * the freezer is a single huge flat-topped shape and was the tallest thing in either
+ * back corner, so the corner read as one uniform block height. This is taller than
+ * the freezer itself, giving that corner a genuine foreground/midground/background
+ * read. Pure decoration (no CoverBox) — the "pipes" half of the brief's kitchen-motif
+ * suggestion (pipes, signage, spill stains, hanging racks).
+ */
+function buildExhaustPipe(M: Materials): THREE.Group {
+  const g = new THREE.Group();
+  noOutline(g);
+  const postH = 1.9;
+  const post = mesh(puck(0.09, postH, 12), M.steelDark, 'pipe_post');
+  post.position.y = postH / 2;
+  g.add(post);
+  for (let i = 0; i < 3; i++) {
+    const band = mesh(new THREE.TorusGeometry(0.1, 0.014, 6, 14), M.freezerTrim, 'pipe_band__no_outline');
+    band.rotation.x = Math.PI / 2;
+    band.position.y = 0.32 + i * 0.58;
+    noOutline(band);
+    g.add(band);
+  }
+  const elbow = mesh(puck(0.12, 0.18, 12), M.freezerTrim, 'pipe_elbow');
+  elbow.position.y = postH;
+  g.add(elbow);
+  const cap = mesh(puck(0.15, 0.05, 14), M.steelDark, 'pipe_cap');
+  cap.position.y = postH + 0.115;
+  g.add(cap);
+  g.add(buildContactShadow(M.contactShadow, 0.3, 0.3, 1.5));
+  g.add(buildDirectionalShadowMesh(M, Math.max(1.2, postH * 0.85), 0.5, 0, 0.25));
+  return g;
+}
+
+/**
+ * Hanging order-tag sign on a thin post — the "signage" half of the round-6 kitchen-
+ * motif suggestion. Mid-height (~1.4m), meant for the open mid-lane: the lane view was
+ * called the emptiest composition, and this gives it a distinct silhouette between
+ * the supply barrels and the hub without adding any new collision. `yawDeg` matches
+ * the caller's own mirror flip so the pennant always faces the same way relative to
+ * the lane it sits in.
+ */
+function buildHangingSign(M: Materials, yawDeg = 0): THREE.Group {
+  const g = new THREE.Group();
+  noOutline(g);
+  const postH = 1.35;
+  const post = mesh(puck(0.035, postH, 8), M.crateSlat, 'sign_post');
+  post.position.y = postH / 2;
+  g.add(post);
+  // A HORIZONTAL little awning/shelf-sign, not a vertical hanging plaque — a vertical
+  // board presents mostly its thin edge to this rig's steep top-down camera and reads
+  // as a near-invisible sliver (an early version did exactly that). Flat-and-up, plus
+  // the same bright `addTopRim` cap trim every counter uses, reads immediately.
+  const board = mesh(roundedBox(0.42, 0.035, 0.3, 0.02), M.woodPad, 'sign_board');
+  board.position.y = postH;
+  g.add(board);
+  addTopRim(g, M, 0.42, 0.3, postH + 0.018, 0.028);
+  const pennant = mesh(new THREE.ConeGeometry(0.1, 0.18, 3), M.barrelBody, 'sign_pennant');
+  pennant.rotation.x = Math.PI / 2;
+  pennant.position.set(0, postH + 0.02, 0.23);
+  g.add(pennant);
+  g.add(buildContactShadow(M.contactShadow, 0.24, 0.24, 1.5));
+  g.add(buildDirectionalShadowMesh(M, Math.max(0.9, postH * 0.7), 0.4, yawDeg, 0.2));
   return g;
 }
 
@@ -1372,15 +1681,24 @@ function buildFloor(M: Materials): THREE.Group {
     [CENTER.x - 175, CENTER.y, 80, 150], // west, under the spice cart
     [CENTER.x + 175, CENTER.y, 80, 150], // east, under the spice cart
   ];
+  // Round-6 fix: these used to be a THICKER patch (0.04) sitting ABOVE a wider, offset
+  // "trim" box floating 0.06 BELOW it — two slabs stepped apart read exactly like a
+  // raised curb/dais lip, which is precisely the "raised blocking terrain? ground-level
+  // cover? or pure floor decal?" ambiguity the critic called out, made worse by the
+  // trim sharing its colour (`tealTileDark`) with the spice cart's own body (see that
+  // material's KPAL note). These are committed to being PURE FLOOR DECORATION now: a
+  // flat two-tone rug — border + fill BOTH the same thin height, barely proud of each
+  // other (0.003, just enough to dodge z-fighting) rather than stacked into a step —
+  // so there is no raised edge for the eye to mistake for collidable geometry.
   for (const [zx, zy, zw, zh] of tealZones) {
-    const patch = mesh(roundedBox(wu(zw), 0.04, wu(zh), 0.1, 3), M.tealTile, 'floor_teal_zone');
-    patch.position.set(wu(zx), FLOOR_Y.decal, wu(zy));
-    noOutline(patch);
-    g.add(patch);
-    const trim = mesh(roundedBox(wu(zw) + 0.06, 0.02, wu(zh) + 0.06, 0.12, 3), M.tealTileDark, 'floor_teal_zone_trim');
-    trim.position.set(wu(zx), FLOOR_Y.decal - 0.06, wu(zy));
+    const trim = mesh(roundedBox(wu(zw) + 0.05, 0.025, wu(zh) + 0.05, 0.1, 3), M.tealTileDark, 'floor_teal_zone_trim');
+    trim.position.set(wu(zx), FLOOR_Y.decal, wu(zy));
     noOutline(trim);
     g.add(trim);
+    const patch = mesh(roundedBox(wu(zw), 0.025, wu(zh), 0.08, 3), M.tealTile, 'floor_teal_zone');
+    patch.position.set(wu(zx), FLOOR_Y.decal + 0.003, wu(zy));
+    noOutline(patch);
+    g.add(patch);
   }
 
   // Scattered ingredients + floor wear around the hub — the empty tan floor in the
@@ -1428,6 +1746,35 @@ function buildFloor(M: Materials): THREE.Group {
       seam.position.set(wu(px), FLOOR_Y.fine, wu(py) + s * wu(ph) * 0.18);
       noOutline(seam);
       g.add(seam);
+    }
+  }
+
+  // Round-6 "vary the four corner mats" fix: the freezer corners (NW/SE) had no floor
+  // pad at all — only the pantry corners did — so two of the arena's four corners read
+  // as bare tile and two read as furnished. A cool utility mat (never used elsewhere;
+  // see the KPAL note) gives the freezer corners their own distinct floor treatment, a
+  // deliberate cool/industrial counterpoint to the pantry's warm wood.
+  // Sized generously beyond the freezer's own 230x190 footprint (unlike a first pass
+  // that used only a 30wu margin — so thin the mat was almost entirely hidden under
+  // the freezer body itself, the same "peeks out" mistake the pantry wood pads avoid
+  // by being sized to their whole cluster, not one prop).
+  const utilityPads: Array<[number, number, number, number]> = [
+    [230, 190, 420, 340],
+    [ARENA_W - 230, ARENA_H - 190, 420, 340],
+  ];
+  for (const [px, py, pw, ph] of utilityPads) {
+    const pad = mesh(roundedBox(wu(pw), 0.03, wu(ph), 0.1, 3), M.utilityMat, 'floor_utility_pad');
+    pad.position.set(wu(px), FLOOR_Y.decal, wu(py));
+    noOutline(pad);
+    g.add(pad);
+    // Drain grates sit in the mat's visible margin BEYOND the freezer's own 115wu
+    // half-width, not hidden underneath its body.
+    for (const ox of [-160, 160]) {
+      const drain = mesh(new THREE.TorusGeometry(wu(pw) * 0.032, wu(pw) * 0.008, 6, 16), M.utilityMatDark, 'floor_drain');
+      drain.rotation.x = -Math.PI / 2;
+      drain.position.set(wu(px + ox), FLOOR_Y.fine, wu(py));
+      noOutline(drain);
+      g.add(drain);
     }
   }
 
@@ -1529,6 +1876,10 @@ function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Materials, spec
   // `makeGroundedShadowTexture`), so the prop's own edge sits in the near-full-alpha
   // interior instead of the faint outer ramp.
   group.add(buildContactShadow(M.groundedShadow, wM, dM, 1.3));
+  // Baked directional shadow — see `buildCoverCastShadow` / the round-6 shadow note on
+  // `SHADOW_DIR`. Added here, in the ONE place every CoverBox is registered, so it is
+  // physically impossible to add new cover without it also getting a cast shadow.
+  group.add(buildCoverCastShadow(M, wM, dM, spec.kind, spec.yawDeg ?? 0));
   const p = groundPos(spec.x, spec.y);
   group.position.set(p.x, 0, p.z);
   if (spec.yawDeg) group.rotation.y = THREE.MathUtils.degToRad(spec.yawDeg);
@@ -1637,11 +1988,11 @@ export const createKitchenArena: ArenaFactory = () => {
   });
   addCover(propsGroup, cover, M, {
     x: 340, y: 580, w: 160, h: 55, kind: 'prep_counter',
-    build: (w, d) => buildPrepCounter(M, w, d),
+    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
   });
   addCover(propsGroup, cover, M, {
     x: ARENA_W - 340, y: ARENA_H - 420, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
-    build: (w, d) => buildPrepCounter(M, w, d),
+    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
   });
   addCover(propsGroup, cover, M, {
     x: ARENA_W - 340, y: ARENA_H - 580, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
@@ -1750,6 +2101,10 @@ export const createKitchenArena: ArenaFactory = () => {
   // ── Chalkboard menu — freestanding, thin, decorative only ───────────────────
   const board = new THREE.Group();
   board.add(buildContactShadow(M.contactShadow, 0.55, 0.32, 1));
+  // yawDeg here must match the board's OWN `rotation.y = 20°` set below — the shadow
+  // direction is a world-space constant, so it has to be counter-rotated by however
+  // much this particular group gets spun, same as every `addCover` prop.
+  board.add(buildDirectionalShadowMesh(M, 0.75, 0.4, 20, 0.45));
   const legMat = M.crateSlat;
   for (const sx of [-0.24, 0.24]) {
     const leg = mesh(puck(0.02, 0.62, 6), legMat, 'chalkboard_leg');
@@ -1774,6 +2129,34 @@ export const createKitchenArena: ArenaFactory = () => {
   // `buildFloor`). Outlining it would borrow BLOCKING's now much-heavier ink line
   // and falsely suggest this collides.
   root.add(board);
+
+  // ── Round-6 kitchen-motif clutter — pipes + signage, height variety ──────────
+  // Exhaust pipes beside both freezers: the tallest silhouette in either back
+  // corner, giving those corners a foreground/midground/background read instead of
+  // one uniform freezer-height block (see `buildExhaustPipe`). Decoration only — no
+  // CoverBox, placed just clear of the freezer's own footprint.
+  const pipeNW = buildExhaustPipe(M);
+  const pipeNWPos = groundPos(375, 80);
+  pipeNW.position.set(pipeNWPos.x, 0, pipeNWPos.z);
+  root.add(pipeNW);
+  const pipeSE = buildExhaustPipe(M);
+  const pipeSEPos = groundPos(ARENA_W - 375, ARENA_H - 80);
+  pipeSE.position.set(pipeSEPos.x, 0, pipeSEPos.z);
+  root.add(pipeSE);
+
+  // Hanging order-tag signs in the mid-lane, in the open gap BETWEEN the two supply
+  // barrels — signage motif, and the single tallest thing in the lane view, the
+  // composition the round-6 critic called emptiest. Kept clear of every CoverBox
+  // (barrels sit at x=250/460 ±30/24, prep counters at y=420/580 ±27.5).
+  const signW = buildHangingSign(M);
+  const signWPos = groundPos(365, 500);
+  signW.position.set(signWPos.x, 0, signWPos.z);
+  root.add(signW);
+  const signE = buildHangingSign(M, 180);
+  const signEPos = groundPos(ARENA_W - 365, ARENA_H - 500);
+  signE.position.set(signEPos.x, 0, signEPos.z);
+  signE.rotation.y = THREE.MathUtils.degToRad(180);
+  root.add(signE);
 
   // ── Ambient dust ──────────────────────────────────────────────────────────────
   const dust = buildDustField(M, 40);
