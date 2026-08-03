@@ -247,9 +247,22 @@ filmic tonemapping (it desaturates); IBL + SSAO on.
 
 ## Standing constraints
 
-- `src/game/rules.ts` is the frozen design. Import every gameplay constant; never
-  hardcode one. Uri later authorised deviating *where it demonstrably raises quality* —
-  deviations must be deliberate and recorded in the commit message.
+- **`src/game/rules.ts` is NO LONGER FROZEN** (Uri, 2026-08-03: *"Don't let anything
+  frozen impair your ability to improve looks and gameplay."*). It is still the single
+  source of truth — import every gameplay constant, never hardcode one — but its VALUES
+  are now tunable when a change demonstrably improves looks or gameplay. Deviations must
+  be deliberate, verified, and recorded in the commit message. The first such change is
+  the weapon-range rebalance forced by viewport fairness (below).
+- **The arena must respect the fair-play window.** Everything that decides a fight —
+  cover edges, hazard tells, spawns, pickups, the fog edge — must be readable inside the
+  fair-play square centred on the PLAYER. On a 21:9 the view reaches well beyond it, and
+  that surplus is *cosmetic bleed*: non-colliding decoration only, whose gameplay meaning
+  is already known. Two violations exist today: at spawn a 21:9 player sees the boiling
+  pot and its caution ring while a 4:3 player does not (a hazard living in bleed), and
+  the playfield has **no apron** — from the west spawn every aspect shows flat background
+  off the map edge. The arena needs dressing out well beyond its 1400×1000 bounds.
+- **VFX owner:** Lollipop's `giantSlam` tell must be readable with the caster OFF SCREEN.
+  That assumption is what keeps the fair radius from ballooning to ~918wu.
 - **Judge rendered pixels, never descriptions.** Render it, Read the PNG, look.
 - `reference/prototypes/` and `reference/images/` are gitignored and must never be
   published. Prototypes were stripped from all history, which also removed a Supabase key
@@ -305,6 +318,25 @@ worked examples, chosen from opposite ends of the weapon space.
    which is entirely unassessed), and **ambient effects alone** (steam, dust, flame are
    invisible in a busy frame).
 6. Nobody has played a full match at real framerate and judged how it FEELS.
+
+### Cross-element debts the camera rewrite created — assign these
+
+1. **SSAO is now a no-op in matches.** Probed: raising `worldDistanceThreshold` 30→120m
+   changes the frame by mean **0.003/255**. Its 0.07m radius was ~7px before and is
+   sub-pixel at the new camera distance. It currently costs a NormalPass plus 16
+   samples/px for nothing. Lighting owner: raise radius *and* threshold together, or drop
+   it. **Re-check after the range rebalance lands**, since that pulls the camera back in.
+2. **Shadow box too small.** `lighting.focus(..., 30)` (`match.ts:522`) is ±30m; visible
+   half-width now reaches 30.5m at 21:9, so shadows clip at the extreme corners.
+3. **Preview framings drifted from the game.** `preview.ts` arena/floor/prop views still
+   use `viewWidthUnits: 265` while the shipped game spans ~928wu at 16:9 — those loops
+   have been judging at ~3.5× the zoom anyone plays at. Fix centrally once the range
+   rebalance settles the final camera distance, then re-verify any floor/prop work that
+   was tuned at the old zoom.
+4. **Feet below y=0, cast-wide.** Every character's lowest point is −0.08 to −0.25m,
+   violating `types.ts` convention #1 ("feet at y=0"). Pre-existing, improved but not
+   fixed by `footClearance`; several characters' custom foot geometry hangs a full
+   segment below the ankle joint. Decide whether the RIG guarantees y=0 or characters do.
 
 ### Two known measurement weaknesses
 
