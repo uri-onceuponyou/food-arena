@@ -257,7 +257,13 @@ filmic tonemapping (it desaturates); IBL + SSAO on.
 - Verify before committing: `tsc` clean AND sim 51/51. I once pushed a broken tree by
   letting `git add -A` sweep in a file an agent was mid-edit on.
 
-## ⏸ PAUSED 2026-08-03 — READ THIS FIRST ON RESUME
+## ⏸ PAUSED 2026-08-03 — READ `LAUNCH_PLAN.md` FIRST, THEN THIS
+
+**`LAUNCH_PLAN.md` is the resume document.** It has the wave order, the body-archetype
+decision, exact file ownership per agent, and the token budget that makes 8–10 hours of
+running possible. Start at its Wave 0 — a serial blocker that unblocks every character
+loop, because `RigProportions` currently exposes only thicknesses and widths, with **no
+knob for torso size or limb length**. That is the real reason all 11 bodies look alike.
 
 Everything is committed and pushed. `tsc` clean, sim 51/51, live game smoke-rendered
 with no runtime break. Working tree was clean at pause. **Nothing is half-finished.**
