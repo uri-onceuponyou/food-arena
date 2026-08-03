@@ -34,23 +34,38 @@ const w = Number(args.w ?? 1300);
 const h = Number(args.h ?? 820);
 const frames = Number(args.frames ?? 10);
 const frameGapMs = Number(args.frameGapMs ?? 60);
+const waitFor = args.waitFor ?? 'any';
+const waitTimeoutMs = Number(args.waitTimeoutMs ?? 60000);
 
 // Screenshotting under this environment's software (SwiftShader) renderer can take
 // anywhere from ~300ms to several REAL seconds per call. A naive burst loop that
 // just calls page.screenshot() on an interval ends up measuring screenshot latency,
-// not game time — freeze the canvas (neuter rAF) for the instant of each shot, then
-// un-freeze and let the game actually run for `frameGapMs` before the next one, so
-// each frame is a true snapshot of live state at that moment, not smeared by however
-// long the pixel readback itself took.
+// not game time — freeze the canvas for the instant of each shot, then un-freeze and
+// let the game actually run for `frameGapMs` before the next one, so each frame is a
+// true snapshot of live state at that moment, not smeared by however long the pixel
+// readback itself took.
+//
+// IMPORTANT: `match.ts`'s loop RE-SCHEDULES ITSELF via `requestAnimationFrame(this.loop)`
+// at the end of every frame — so simply replacing `window.requestAnimationFrame`
+// with a no-op doesn't "pause" it, it PERMANENTLY KILLS the loop (nothing is left
+// pending to resume once the real rAF is restored). Instead, freeze QUEUES the next
+// callback instead of dropping it, and unfreeze hands that queued callback back to
+// the real rAF — a true pause/resume, not a one-way kill switch.
 async function freezeFrame(page) {
   await page.evaluate(() => {
     if (!window.__origRAF) window.__origRAF = window.requestAnimationFrame.bind(window);
-    window.requestAnimationFrame = () => 0;
+    window.__pendingRAF = null;
+    window.requestAnimationFrame = (cb) => { window.__pendingRAF = cb; return 0; };
   });
 }
 async function unfreezeFrame(page) {
   await page.evaluate(() => {
-    if (window.__origRAF) window.requestAnimationFrame = window.__origRAF;
+    window.requestAnimationFrame = window.__origRAF;
+    if (window.__pendingRAF) {
+      const cb = window.__pendingRAF;
+      window.__pendingRAF = null;
+      window.__origRAF(cb);
+    }
   });
 }
 
@@ -76,7 +91,15 @@ async function main() {
     await page.keyboard.down('KeyD');
     await page.keyboard.down('KeyW');
 
-    await page.waitForFunction(() => (window.__vfxQaCounts?.meleeArc ?? 0) + (window.__vfxQaCounts?.impact ?? 0) + (window.__vfxQaCounts?.cast ?? 0) > 0, null, { timeout: 60000, polling: 50 });
+    await page.waitForFunction(
+      (key) => {
+        const c = window.__vfxQaCounts;
+        if (!c) return false;
+        return key === 'any' ? (c.meleeArc + c.impact + c.cast) > 0 : (c[key] ?? 0) > 0;
+      },
+      waitFor,
+      { timeout: waitTimeoutMs, polling: 50 },
+    );
 
     // Stop moving right before the capture burst — screenshotting under a software
     // (SwiftShader) renderer can take a while per frame, and `--simSpeed` scales

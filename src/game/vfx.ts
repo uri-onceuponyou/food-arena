@@ -131,24 +131,34 @@ function buildStarburstTexture(): THREE.CanvasTexture {
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
 
-  const core = ctx.createRadialGradient(c, c, 0, c, c, size * 0.32);
+  // Small, bright core — kept deliberately SMALL relative to round 1 (was 0.32 of the
+  // canvas). A critic pass twice read this whole texture as "a single soft circular
+  // bloom" with the spikes invisible at normal render size; a big soft core is what
+  // was drowning them out. Long, high-alpha spikes below now do the actual shape
+  // work.
+  const core = ctx.createRadialGradient(c, c, 0, c, c, size * 0.16);
   core.addColorStop(0, 'rgba(255,255,255,1)');
-  core.addColorStop(0.5, 'rgba(255,255,255,0.9)');
+  core.addColorStop(0.6, 'rgba(255,255,255,0.85)');
   core.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = core;
   ctx.fillRect(0, 0, size, size);
 
+  // 4 long cardinal spikes reaching almost to the edge (a classic "sparkle/lens
+  // flare" cross) + 4 shorter diagonal spikes, all kept near-full alpha along most
+  // of their length so the STAR SILHOUETTE itself is unmistakable, not just a
+  // brightness gradient that blurs back into a circle.
   const spikes = 8;
   for (let i = 0; i < spikes; i++) {
     const long = i % 2 === 0;
-    const len = size * (long ? 0.5 : 0.32);
-    const halfWidth = size * (long ? 0.09 : 0.05);
+    const len = size * (long ? 0.48 : 0.26);
+    const halfWidth = size * (long ? 0.045 : 0.028);
     const ang = (i / spikes) * Math.PI * 2;
     ctx.save();
     ctx.translate(c, c);
     ctx.rotate(ang);
     const grad = ctx.createLinearGradient(0, 0, len, 0);
-    grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.7, 'rgba(255,255,255,0.8)');
     grad.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = grad;
     ctx.beginPath();
@@ -319,6 +329,32 @@ function buildWedgeGeometry(radiusM: number, coneDeg: number): THREE.BufferGeome
   return geo;
 }
 
+/**
+ * Flat jagged star polygon (a fan alternating outer/inner radius per point), lying in
+ * the XZ plane like `buildWedgeGeometry`. This is what an impact's ground-mark decal
+ * uses instead of another soft round particle — two critic rounds in a row read every
+ * particle in this layer as "a soft circular bloom, no shape vocabulary"; a properly
+ * sized (comparable to a fighter's own footprint) hard-edged star SHAPE is legible at
+ * normal gameplay-camera distance in a way a handful of small sprite particles are
+ * not, no matter how angular their own texture is.
+ */
+function buildStarPolygonGeometry(radiusM: number, points = 8, innerRatio = 0.45): THREE.BufferGeometry {
+  const spikes = points * 2;
+  const positions: number[] = [0, 0, 0];
+  for (let i = 0; i <= spikes; i++) {
+    const a = (i / spikes) * Math.PI * 2;
+    const r = i % 2 === 0 ? radiusM : radiusM * innerRatio;
+    positions.push(Math.sin(a) * r, 0, Math.cos(a) * r);
+  }
+  const indices: number[] = [];
+  for (let i = 1; i < spikes + 1; i++) indices.push(0, i, i + 1);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Transient particle pool — flashes, shards, heal sparkle. Every slot owns its own
 // Sprite + SpriteMaterial (created once, mutated forever) so spawning never allocates.
@@ -350,7 +386,10 @@ interface ParticleSlot {
 // allocates well over a dozen particles, and rings are used in pairs (bright inner
 // rim + soft outer glow) for every burst.
 const PARTICLE_POOL_SIZE = 96;
-const WEDGE_POOL_SIZE = 6;
+// Bumped from 6 — this pool now also serves the impact "star decal" ground mark
+// (see `spawnImpactStarDecal`), not just melee-arc sweeps, so it needs headroom for
+// both to be live at once.
+const WEDGE_POOL_SIZE = 10;
 const RING_POOL_SIZE = 16;
 
 interface WedgeSlot {
@@ -715,7 +754,10 @@ export class VfxLayer {
     bumpVfxQaCount('impact');
     const origin = groundPos(xWU, yWU);
     const sizeFactor = THREE.MathUtils.clamp(0.85 + amount * 0.055, 0.85, 3.4);
-    this.burst(origin, color, sizeFactor, Math.round(THREE.MathUtils.clamp(4 + amount * 0.35, 4, 11)));
+    // Fewer, bigger shards (see the shard loop's comment in `burst`) — round 2 used
+    // up to 11 small ones per hit; they averaged into more glow instead of reading as
+    // individual debris.
+    this.burst(origin, color, sizeFactor, Math.round(THREE.MathUtils.clamp(3 + amount * 0.16, 3, 6)));
   }
 
   /** Bigger burst + scatter + a bright pop for a death — the biggest non-ultimate
@@ -723,7 +765,7 @@ export class VfxLayer {
   spawnDeathBurst(xWU: number, yWU: number, color: string): void {
     bumpVfxQaCount('death');
     const origin = groundPos(xWU, yWU);
-    this.burst(origin, color, 3.6, 18, { life: 1.35 });
+    this.burst(origin, color, 3.6, 9, { life: 1.35 });
   }
 
   /** Gentle rising sparkle for a heal (Hamburger's Onion Ring). */
@@ -785,17 +827,21 @@ export class VfxLayer {
     ring2.mat.opacity = ring2.startOpacity;
 
     // Starburst flash — the sparkle silhouette, not just a soft circle, is what
-    // makes an 8-second ultimate read as a genuinely special event.
-    this.spawnStarPop(origin, IMPACT_HEIGHT * 1.5, color, 6.5, 0.4);
+    // makes an 8-second ultimate read as a genuinely special event. Pulled back
+    // slightly from round 1 (was scale 6.5 / flash-white 0.55) — big enough to
+    // dominate the frame, but not so bright it fuses with the shard debris below
+    // into one indistinct white mass, which a critic pass explicitly called out
+    // ("zero debris/sparks" — they WERE there, just visually swallowed).
+    this.spawnStarPop(origin, IMPACT_HEIGHT * 1.5, color, 5.2, 0.38);
 
     const flash = this.allocParticle();
-    flash.active = true; flash.life = 0; flash.maxLife = 0.32;
+    flash.active = true; flash.life = 0; flash.maxLife = 0.3;
     flash.sprite.visible = true;
     flash.sprite.position.set(origin.x, IMPACT_HEIGHT * 1.5, origin.z);
     flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
-    flash.startScale = 2.1; flash.endScale = 4.4;
+    flash.startScale = 1.8; flash.endScale = 3.5;
     flash.startOpacity = 0.9; flash.endOpacity = 0; flash.fadeEase = 1.2;
-    flash.mat.color.set(color).lerp(WHITE, 0.55);
+    flash.mat.color.set(color).lerp(WHITE, 0.4);
 
     // Long hit-spark rays punching outward from the epicentre, on top of the ring.
     this.spawnStreaks(origin, IMPACT_HEIGHT * 0.6, color, 10, 4.5, 0.55);
@@ -803,7 +849,9 @@ export class VfxLayer {
     // Shards only — the dedicated flash+rings above already cover this cast's
     // "flash" and "shockwave rim" beats; a second overlapping flash/ring from the
     // shared burst helper just stacked additive brightness into a full whiteout.
-    this.burst(origin, color, 2.6, 20, { life: 0.9, speedMult: 1.6, skipFlash: true, skipRing: true, skipPop: true, skipStreaks: true });
+    // These now render as angular crystal debris (see `burst`'s shard loop), not
+    // more soft dots, so this is where the ultimate gets actual particle craft.
+    this.burst(origin, color, 3.2, 14, { life: 0.9, speedMult: 1.7, skipFlash: true, skipRing: true, skipPop: true, skipStreaks: true });
   }
 
   /** Shared pop+flash+double-ring+streaks+shards burst used by impact/death/giant-slam. */
@@ -870,27 +918,39 @@ export class VfxLayer {
     }
 
     // Angular crystal-shard debris, NOT more soft glow dots (that was the critic's
-    // #1 complaint: "no shape vocabulary — no shards, sparks, or debris"). Thrown
-    // fast enough, and kept small enough, that they visibly clear the pop/flash's
-    // footprint and read as distinct flying chunks rather than fusing into it.
+    // repeated #1 complaint across two rounds: "no shape vocabulary — no shards,
+    // sparks, or debris... reads as a single soft circular bloom"). Round 2 already
+    // gave these an angular texture, but at typical gameplay-camera distance a LOT of
+    // small shards still visually average out into "more glow" — so round 3 goes
+    // the other way: FEWER, deliberately BIGGER, fully-saturated (no white lerp, so
+    // they contrast against the white flash instead of blending into it) chunks,
+    // each pre-offset a little from the epicentre so they read as already-scattered
+    // debris from the very first rendered frame, not something that needs several
+    // frames of motion to separate from the flash.
+    const shardBaseScale = 0.55 * sizeFactor;
     for (let i = 0; i < shardCount; i++) {
       const s = this.allocParticle();
       s.mat.map = this.shardTex;
       s.mat.rotation = Math.random() * Math.PI * 2;
       s.aspect = 0.72 + Math.random() * 0.3;
       const ang = Math.random() * Math.PI * 2;
-      const speed = (2.3 + Math.random() * 2.6) * (0.6 + sizeFactor * 0.4) * speedMult;
-      s.active = true; s.life = 0; s.maxLife = (0.32 + Math.random() * 0.22 + sizeFactor * 0.06) * life;
+      const speed = (2.6 + Math.random() * 2.8) * (0.6 + sizeFactor * 0.4) * speedMult;
+      const startOffset = 0.12 + Math.random() * 0.18;
+      s.active = true; s.life = 0; s.maxLife = (0.34 + Math.random() * 0.22 + sizeFactor * 0.06) * life;
       s.sprite.visible = true;
-      s.sprite.position.set(origin.x, IMPACT_HEIGHT, origin.z);
+      s.sprite.position.set(
+        origin.x + Math.cos(ang) * startOffset,
+        IMPACT_HEIGHT,
+        origin.z + Math.sin(ang) * startOffset,
+      );
       s.vx = Math.cos(ang) * speed;
       s.vz = Math.sin(ang) * speed;
       s.vy = 1.3 + Math.random() * 1.8;
       s.gravity = -6.2;
-      s.startScale = (0.22 + Math.random() * 0.16) * sizeFactor;
-      s.endScale = 0;
-      s.startOpacity = 1; s.endOpacity = 0; s.fadeEase = 1;
-      s.mat.color.set(color).lerp(WHITE, 0.08);
+      s.startScale = shardBaseScale * (0.75 + Math.random() * 0.5);
+      s.endScale = shardBaseScale * 0.15;
+      s.startOpacity = 1; s.endOpacity = 0; s.fadeEase = 0.85;
+      s.mat.color.set(color);
     }
   }
 
@@ -931,7 +991,9 @@ export class VfxLayer {
     p.vx = 0; p.vy = 0; p.vz = 0; p.gravity = 0;
     p.startScale = scale * 0.5; p.endScale = scale;
     p.startOpacity = 1; p.endOpacity = 0; p.fadeEase = 1.7;
-    p.mat.color.set(color).lerp(WHITE, 0.6);
+    // Kept the colour more saturated (was 0.6 toward white) — a fully white-hot pop
+    // at this size was blowing out the debris/streaks sharing the same space.
+    p.mat.color.set(color).lerp(WHITE, 0.45);
   }
 
   /** Radiating hit-spark rays out of an impact point — thin bright streaks at random
@@ -993,6 +1055,8 @@ export class VfxLayer {
     this.glowTex.dispose();
     this.starTex.dispose();
     this.streakTex.dispose();
+    this.shardTex.dispose();
+    this.wedgeGradientTex.dispose();
     for (const p of this.particles) p.mat.dispose();
     for (const w of this.wedges) w.mat.dispose();
     for (const r of this.rings) r.mat.dispose();
