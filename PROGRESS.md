@@ -155,9 +155,31 @@ Own the three bands separately. This generalises to every tiling surface in the 
 
 | Band | Owner | Notes |
 |---|---|---|
-| HIGH — sub-tile grain, pebble tooth | the texture | isotropic, no landmarks |
+| HIGH — sub-tile grain, pebble tooth | the texture | isotropic, no landmarks. **Close-range only — see below** |
 | MID — feature the size of one tile | **nobody** | reads as flat tint AND repeats |
-| LOW — wear across many tiles | `instanceColor` / vertex colour | macro variation |
+| LOW — wear across many tiles | `instanceColor` / vertex colour | macro variation. **The only band that survives at gameplay distance** |
+
+### The band that matters depends on ZOOM, and we were judging at the wrong one
+
+`preview.ts` isolation views use `viewWidthUnits: 265`; the shipped game spans ~900wu.
+Every floor and prop loop has been judging at roughly **3.5× the zoom anyone plays at.**
+Re-shooting the floor at shipped framing sorted its own work into three piles:
+
+- **Survives:** the baked LOW-frequency lighting gradient — by far the biggest win and
+  the only thing carrying the floor at distance. Per-tile tonal/hue variation. Overall
+  value/saturation re-key.
+- **Vanishes entirely:** tile chamfer/bevel, the high-frequency grain from `textures.ts`,
+  per-tile yaw/scale jitter, stain tidemark rings. All close-range-only polish.
+- **Inverts:** tile scale. Sized to 25wu against the preview, that is 36 tiles across a
+  real frame with ~1px joints — an aliasing generator.
+
+**At shipped distance, floor detail should live almost entirely in the LOW band.** The
+frequency contract above is still right about what each band DOES; this says which band
+is worth spending rounds on. Re-check after the range rebalance, which pulls the camera
+back in and may partially restore the high band.
+
+Re-shooting at shipped framing also exposed a bug the preview zoom had hidden completely:
+decals z-fighting into shredded stripes, invisible at 265wu.
 
 Also: `finishTexture` never set `anisotropy`. On a tilted top-down rig the floor and
 every counter top are sampled at a grazing angle for most of the frame, where anisotropy
@@ -337,6 +359,44 @@ worked examples, chosen from opposite ends of the weapon space.
    violating `types.ts` convention #1 ("feet at y=0"). Pre-existing, improved but not
    fixed by `footClearance`; several characters' custom foot geometry hangs a full
    segment below the ankle joint. Decide whether the RIG guarantees y=0 or characters do.
+
+### THE POST CHAIN IS CLAMPING COLOUR — probably a project-wide quality cap
+
+`stage.ts` runs `HueSaturationEffect({ saturation: 0.32 })`. A pixel probe returned
+**`rgb(0, 161, 176)`** — red clamped to **zero** — from an albedo that had 47 red.
+
+This is the mechanism behind the years-old "heavy orange grout" complaint: the joint kept
+being authored warm-brown and kept arriving on screen as an orange stripe, so round after
+round attacked the albedo when the post chain was eating the channel. **Any owner picking
+a colour must currently author it well below the target saturation**, which means every
+colour decision in this project has been made against a moving target.
+
+It is also a strong candidate for the hazards element's cap ("every hue collided with a
+genre meaning" — 6, 6.5, 6, 5, 6). If the chain cannot reproduce the hue that was
+authored, hue semiotics were never really under the author's control.
+
+**Lighting/post owner: verify and fix this first.** It plausibly outranks every other
+lighting change. Note the art direction genuinely is hyper-saturated — the fix is a
+saturation curve that does not clip channels, not simply turning saturation down.
+
+### Critics can contradict each other into a standstill — use an objective test
+
+The floor scored 4, 4, 4, 4 across four fresh critics while every named fix was
+implemented faithfully. On grout contrast: r1 measured 2.5:1 and demanded ~1.2:1; r3, shown
+1.15:1, called it *physically inverted* and demanded 2.5–3.3:1; r4, shown 2.0:1, demanded
+1.25:1 again. Same reversal on lighting range and on value. **Each round implemented the
+previous critic's fix and the next critic demanded its reverse.**
+
+Fresh-critic-per-round prevents anchoring, which is why we do it — but it also means
+nothing carries forward, so an element with no objective anchor can oscillate forever at
+its noise floor. When a score sits flat for 3+ rounds with contradictory guidance, stop.
+The element is not converging and more rounds will not help.
+
+**The fix is a measurable acceptance test.** The floor's r4 critic supplied a good one,
+gameplay-grounded rather than aesthetic: *composite a mid-value character silhouette on
+the floor — the character's outline must be the darkest edge within a 200px radius.* That
+single criterion would have settled all four contradictions. Give every element a test of
+this kind before spending rounds on it.
 
 ### Two known measurement weaknesses
 
