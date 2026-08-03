@@ -68,6 +68,18 @@ const CAP_DARK = '#0B2A49';
 const LABEL = '#F5FBFF';            // wraparound label — near white, breaks up the glass
 const LABEL_TRIM = PALETTE.waterCap; // trim rings on the label, ties back to the cap
 
+// ── Costume layer ────────────────────────────────────────────────────────────
+// A fresh independent art director named the missing costume/accessory layer as
+// the TOP gap in the whole cast: without one, characters read as "naked mascot
+// body with a themed head glued on" no matter how good the body sculpt is. A
+// crossbody sports strap with a pouch and a carabiner clip is this character's
+// silhouette-breaking item — it projects past the narrow bottle body the way a
+// cape or backpack does on the reference roster — plus a thin retainer cord
+// around the shoulder taper as a smaller "sports-cap strap" detail.
+const STRAP_FABRIC = '#2E7D5B';    // sporty webbing — a fresh hue not used elsewhere on this character
+const STRAP_TRIM = '#1F5A40';
+const CARABINER_METAL = '#B6BEC4'; // brushed aluminium — genuinely new metalness on this character
+
 // ── Bottle silhouette, in fractions of headRadius (R) ───────────────────────
 // A genuine surface-of-revolution profile (LatheGeometry), not a stretched sphere —
 // the shoulder-taper-into-a-narrow-neck is exactly the shape that reads as "bottle"
@@ -188,6 +200,21 @@ function ribbedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material
   return m;
 }
 
+/**
+ * A worn strap: a curved tube from `from` to `to`, bowed out through a control
+ * point offset by `bow` — the same bezier-tube technique `soup.ts`'s
+ * `buildHandleArc` uses for its bowl-handle arms, reused here for costume
+ * webbing that has to read as fabric draped over a body rather than a rigid rod.
+ */
+function strapArc(from: THREE.Vector3, to: THREE.Vector3, bow: THREE.Vector3, radius: number, mat: THREE.Material): THREE.Mesh {
+  const mid = from.clone().add(to).multiplyScalar(0.5).add(bow);
+  const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+  const m = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, radius, 8, false), mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
 /** A grip-ridge ring — the same "thin darker ring around a cylindrical wall" motif
  * the head's cap already uses, echoed here as the limb's cuff/joint accent. */
 function ridgeRing(y: number, radius: number, thickness: number, mat: THREE.Material): THREE.Mesh {
@@ -297,6 +324,15 @@ export class WaterBottleCharacter extends BaseCharacter {
         armRadius: CHARACTER_HEIGHT * 0.040,     // thinnest arms in the cast
         handRadius: CHARACTER_HEIGHT * 0.058,    // slender — a small cap, not a mitt
         legRadius: CHARACTER_HEIGHT * 0.044,     // thinnest legs in the cast
+      },
+      // Upright and eager — chest forward, one arm raised as if reaching/
+      // waving. Distinct from every other character's stance in this file's
+      // own cast slice: the only one leaning back into an eager, alert posture.
+      stance: {
+        shoulderL: 0.46, shoulderR: -0.12,
+        elbowL: -0.18, elbowR: -0.46,
+        twist: -0.06, headTilt: -0.05, headTurn: 0.12,
+        hipSway: 0.015, lean: -0.05,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -475,6 +511,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     this.buildFace(R, shellSurface);
     this.dressTorsoAsBottle();
     this.dressLimbs();
+    this.buildAccessories(R, shellSurface);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -602,6 +639,104 @@ export class WaterBottleCharacter extends BaseCharacter {
       trim.position.y = labelY + dy;
       trim.userData.noOutline = true;
       this.rig.joints.torso.add(trim);
+    }
+  }
+
+  /**
+   * Costume layer: a crossbody sports strap with a hip pouch and a metal
+   * carabiner clip (the silhouette-breaking item), a thin retainer cord around
+   * the shoulder taper, and beaded condensation droplets on the lower shell —
+   * the "cold glass" surface detail the material-fidelity note calls for.
+   */
+  private buildAccessories(
+    R: number,
+    shellSurface: (theta: number, yF: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }
+  ): void {
+    const head = this.rig.joints.head;
+    const shoulderWidth = CHARACTER_HEIGHT * 0.13; // must match rig's own proportions.shoulderWidth
+    const torsoH = CHARACTER_HEIGHT * 0.28;
+
+    const strapMat = toonMat({ color: STRAP_FABRIC, roughness: 0.72 });
+    const trimMat = toonMat({ color: STRAP_TRIM, roughness: 0.68 });
+    const metalMat = toonMat({ color: CARABINER_METAL, roughness: 0.28, metalness: 0.75 });
+
+    // `dressTorsoAsBottle` rescales the rig's default torso (0.92/1.10/0.92).
+    // Measuring its REAL half-width off the built mesh (root/hips/torso are all
+    // still at their identity rest transform here — `restPose()` runs at the
+    // very end of the constructor, so a world-space Box3 on `joints.torso`
+    // gives an exact local half-extent) fixed an earlier pass's under-estimate
+    // that buried the whole strap/pouch inside the body — but adding a flat
+    // clearance margin on TOP of that measurement overshot the other way,
+    // pushing the pouch out past the shoulder's own reach so it read as
+    // something HELD rather than WORN. The shoulder joint itself
+    // (`shoulderWidth`) is already the rig's own "clearly outside the torso"
+    // reference every arm uses, so anchoring there — capped against the
+    // measured torso only as a safety floor — keeps the pouch snug against the
+    // body's own side instead of floating at arm's length.
+    this.rig.joints.root.updateMatrixWorld(true);
+    const torsoBB = new THREE.Box3().setFromObject(this.rig.joints.torso);
+    const torsoHalfW = Math.max(Math.abs(torsoBB.min.x), Math.abs(torsoBB.max.x));
+    const hipX = -Math.max(shoulderWidth * 0.90, torsoHalfW * 0.85);
+
+    // Strap + pouch: a SHORT strap from the shoulder straight down to the
+    // waist on the SAME side — not a long diagonal across the whole chest,
+    // which read as a rigid rod in an earlier pass. Placement rule: the rig's
+    // thighs hang straight DOWN from y=0 in this same torso-local frame, so
+    // the pouch/strap low end stays at y ≥ torsoH*0.20 — above the hip line.
+    const pouchW = shoulderWidth * 0.62, pouchH = shoulderWidth * 0.62, pouchD = shoulderWidth * 0.34;
+    const hipPt = new THREE.Vector3(hipX, torsoH * 0.22, shoulderWidth * 0.12);
+    const shoulderPt = new THREE.Vector3(hipX * 0.97, torsoH * 0.80, shoulderWidth * 0.22);
+    const strap = strapArc(shoulderPt, hipPt, new THREE.Vector3(-shoulderWidth * 0.18, 0, shoulderWidth * 0.30), shoulderWidth * 0.065, strapMat);
+    strap.name = 'waterbottle_strap';
+    this.rig.joints.torso.add(strap);
+
+    const pouch = new THREE.Mesh(roundedBox(pouchW, pouchH, pouchD, pouchW * 0.14, 3), trimMat);
+    pouch.name = 'waterbottle_pouch';
+    pouch.position.copy(hipPt);
+    pouch.rotation.set(0.05, 0.15, 0.06);
+    pouch.castShadow = true;
+    pouch.receiveShadow = true;
+    this.rig.joints.torso.add(pouch);
+
+    // Carabiner clip pinning the pouch to the strap — a genuinely new, high-
+    // metalness material this character doesn't otherwise carry anywhere on
+    // its body.
+    const carabiner = new THREE.Mesh(new THREE.TorusGeometry(pouchW * 0.28, pouchW * 0.06, 8, 16, Math.PI * 1.7), metalMat);
+    carabiner.name = 'waterbottle_carabiner';
+    carabiner.position.copy(hipPt).add(new THREE.Vector3(0, pouchH * 0.55, pouchD * 0.3));
+    carabiner.rotation.z = 0.4;
+    carabiner.castShadow = true;
+    this.rig.joints.torso.add(carabiner);
+
+    // Retainer cord — a thin strap ring around the bottle's own shoulder taper,
+    // echoing a sports-cap retainer strap. Built via `shellSurface` so it sits
+    // exactly on the shell, never floating or sunk into the taper.
+    const cordYF = 0.20;
+    const cordPt = shellSurface(0, cordYF).pos;
+    const cordRadius = Math.hypot(cordPt.x, cordPt.z) * 1.05;
+    const cord = new THREE.Mesh(new THREE.TorusGeometry(cordRadius, R * 0.014, 6, 24), trimMat);
+    cord.name = 'waterbottle_cap_strap';
+    cord.rotation.x = Math.PI / 2;
+    cord.position.y = cordPt.y;
+    cord.castShadow = true;
+    head.add(cord);
+
+    // Condensation speckles — small beaded droplets on the lower shell, spread
+    // around the circumference clear of the face (EYE_THETA=0.40, MOUTH at 0).
+    const dropMat = flatMat('#EAFFFF', { transparent: true, opacity: 0.45 });
+    const dropSpots: Array<[number, number, number]> = [
+      [0.9, -0.55, 0.026], [2.4, -0.42, 0.020], [4.2, -0.30, 0.017],
+      [1.6, -0.68, 0.022], [3.3, -0.50, 0.019], [5.4, -0.60, 0.024],
+    ];
+    for (const [theta, yF, sF] of dropSpots) {
+      const { pos, normal } = shellSurface(theta, yF);
+      const outward = new THREE.Vector3(normal.x, 0, normal.z).normalize();
+      const drop = new THREE.Mesh(new THREE.SphereGeometry(sF * R, 8, 6), dropMat);
+      drop.name = 'waterbottle_condensation';
+      drop.position.copy(pos).addScaledVector(outward, R * 0.012);
+      drop.scale.set(1, 1.3, 0.6);
+      drop.userData.noOutline = true;
+      head.add(drop);
     }
   }
 

@@ -50,6 +50,24 @@ const LIMB_AVOCADO_DARK = '#587429';
 type Spot = readonly [angleDeg: number, radiusFrac: number];
 
 /**
+ * A cloth strip curved around a cylinder of `radius`, spanning `arcRad` of angle
+ * centred on `angleOffset` (radians, 0 = character-front/+Z), `height` tall. Used
+ * for the poncho cape — a garment panel that hugs the torso's own curvature
+ * rather than floating as a flat card in front of or behind it.
+ */
+function curvedPanel(radius: number, arcRad: number, height: number, angleOffset = 0, segX = 20, segY = 6): THREE.BufferGeometry {
+  const geo = new THREE.PlaneGeometry(arcRad, height, segX, segY);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const theta = angleOffset + pos.getX(i);
+    const y = pos.getY(i);
+    pos.setXYZ(i, Math.sin(theta) * radius, y, Math.cos(theta) * radius);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
  * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
  * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
  * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
@@ -121,6 +139,17 @@ export class BurritoCharacter extends BaseCharacter {
         legRadius: 0.132,
         shoulderWidth: 0.306,
         stanceWidth: 0.223,
+      },
+      // Tall and burly, chest out, planted wide — a bruiser's power stance. An art
+      // director's second pass named the cast's identical dead-front symmetric
+      // pose as a top gap; both arms swing wide here (rather than one tucked in
+      // like most of this file's cast) since Burrito is the roster's physically
+      // biggest silhouette and should read that way even standing still.
+      stance: {
+        shoulderL: 0.62, shoulderR: -0.60,
+        elbowL: -0.20, elbowR: -0.15,
+        twist: -0.04, headTilt: 0.03, headTurn: 0.08,
+        hipSway: 0.02, lean: -0.05,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -518,6 +547,63 @@ export class BurritoCharacter extends BaseCharacter {
       flap.receiveShadow = true;
       pivot.add(flap);
     });
+
+    // ── Costume: fringed poncho cape ────────────────────────────────────────
+    // A second independent art-director pass named the total absence of any worn
+    // costume/accessory layer as the cast's single biggest remaining gap. A
+    // striped poncho draped over both shoulders and hanging down the back is a
+    // real garment silhouette break — visible from every yaw angle, not just the
+    // front — on top of the wrapper band and foil already dressing this torso.
+    // Sized and coloured to be visible from EVERY yaw angle, front included — a
+    // first pass wrapped only the back 115 deg (theta 76-284, centred on the
+    // spine) and coloured itself in the wrap's OWN tortilla tones, so it was
+    // invisible in the primary front-on review shot and blended into the body
+    // even from the back. Widened to 270 deg (a 90 deg front gap only, so it
+    // drapes over both shoulders and peeks past the arms from the front) and
+    // recoloured to a genuine contrasting serape palette instead of body tones.
+    const ponchoR = torsoMaxX * 1.26;
+    const ponchoArc = Math.PI * 1.5;
+    const ponchoH = torsoSpan * 0.7;
+    const ponchoCenterY = torsoBaseY + torsoSpan * 0.64;
+    const ponchoStripeColors = [RICE, TOMATO, WRAP_BAND, LETTUCE, BOOT]
+      .map((c) => toonMat({ color: c, roughness: 0.76 }));
+    const rows = ponchoStripeColors.length;
+    const rowH = ponchoH / rows;
+    for (let i = 0; i < rows; i++) {
+      const rowY = ponchoCenterY - ponchoH / 2 + rowH * (i + 0.5);
+      const row = new THREE.Mesh(curvedPanel(ponchoR, ponchoArc, rowH * 1.1, Math.PI), ponchoStripeColors[i]);
+      row.name = 'burrito_poncho_stripe';
+      row.position.y = rowY;
+      row.castShadow = true;
+      row.receiveShadow = true;
+      this.rig.joints.torso.add(row);
+    }
+
+    // Fringe tassels along the poncho's lower hem.
+    const fringeCount = 16;
+    const fringeY = ponchoCenterY - ponchoH / 2;
+    for (let i = 0; i < fringeCount; i++) {
+      const t = i / (fringeCount - 1);
+      const theta = Math.PI + (t - 0.5) * ponchoArc * 0.96;
+      const tassel = new THREE.Mesh(
+        new THREE.ConeGeometry(ponchoR * 0.032, ponchoR * 0.2, 6),
+        ponchoStripeColors[i % ponchoStripeColors.length]
+      );
+      tassel.name = 'burrito_poncho_fringe';
+      tassel.position.set(Math.sin(theta) * ponchoR, fringeY - ponchoR * 0.09, Math.cos(theta) * ponchoR);
+      tassel.rotation.z = Math.PI; // flip so the point hangs down, not up
+      tassel.castShadow = true;
+      this.rig.joints.torso.add(tassel);
+    }
+
+    // Woven cord — ties the poncho closed at the front, the small worn detail
+    // underneath the cape's own silhouette break.
+    const cordMat = toonMat({ color: BOOT, roughness: 0.6 });
+    const cordKnot = new THREE.Mesh(new THREE.TorusGeometry(ponchoR * 0.11, ponchoR * 0.032, 8, 16), cordMat);
+    cordKnot.name = 'burrito_poncho_cord';
+    cordKnot.position.set(0, ponchoCenterY + ponchoH * 0.18, ponchoR * 0.99);
+    cordKnot.castShadow = true;
+    this.rig.joints.torso.add(cordKnot);
   }
 
   protected onUpdate(ctx: AnimContext): void {

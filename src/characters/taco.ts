@@ -143,6 +143,17 @@ export class TacoCharacter extends BaseCharacter {
         shoulderWidth: 0.414,
         stanceWidth: 0.179,
       },
+      // Leaning forward, eager — weight already committed toward the fight, both
+      // fists cocked like she's about to toss filling. An art director's second
+      // pass named the cast's identical dead-front symmetric pose as a top gap;
+      // this is the most forward-committed lean in this file's cast, matching
+      // a character built entirely around throwing things.
+      stance: {
+        shoulderL: 0.20, shoulderR: -0.45,
+        elbowL: -0.75, elbowR: -0.85,
+        twist: 0.05, headTilt: -0.05, headTurn: -0.05,
+        hipSway: -0.04, lean: 0.16,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -391,6 +402,71 @@ export class TacoCharacter extends BaseCharacter {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       group.add(mesh);
+
+      // ── Costume: serape sash + chili charm ────────────────────────────────
+      // A second independent art-director pass named the total absence of any
+      // worn costume/accessory layer as the cast's single biggest remaining gap.
+      // A striped serape sash slung diagonally across the shell — the classic
+      // Mexican-blanket read — breaks the torso's trapezoid silhouette with a
+      // hard diagonal line the shape itself doesn't have, and the chili charm
+      // dangling off its low end is the small worn detail underneath it.
+      const sashColors = ['#C1432B', '#F5EAD6', '#2E8C86', '#C1432B', '#F5EAD6', '#2E8C86', '#C1432B']
+        .map((c) => toonMat({ color: c, roughness: 0.72 }));
+      const sashA = new THREE.Vector3(-halfWTopT * 0.85, size.h * 0.92, thicknessT * 0.56);
+      const sashB = new THREE.Vector3(halfWTopT * 0.68, size.h * 0.02, thicknessT * 0.56);
+      const sashDir = sashB.clone().sub(sashA);
+      const sashLen = sashDir.length();
+      sashDir.normalize();
+      const sashWidth = size.w * 0.30;
+      const sashQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), sashDir);
+      const segCount = 7;
+      const segLen = (sashLen / segCount) * 1.18; // slight overlap so segments read as one continuous band
+      for (let i = 0; i < segCount; i++) {
+        const t = (i + 0.5) / segCount;
+        const center = sashA.clone().lerp(sashB, t);
+        const seg = new THREE.Mesh(
+          roundedBox(sashWidth, segLen, thicknessT * 0.14, sashWidth * 0.1, 2),
+          sashColors[i % sashColors.length]
+        );
+        seg.name = 'taco_serape_stripe';
+        seg.position.copy(center);
+        seg.quaternion.copy(sashQuat);
+        seg.castShadow = true;
+        seg.receiveShadow = true;
+        group.add(seg);
+      }
+      // Fringe tassels along the sash's low end.
+      for (let i = 0; i < 5; i++) {
+        const t = (i - 2) / 4;
+        const base = sashB.clone().add(new THREE.Vector3(t * sashWidth * 0.85, 0, 0).applyQuaternion(sashQuat));
+        const tassel = new THREE.Mesh(new THREE.ConeGeometry(sashWidth * 0.055, sashWidth * 0.42, 6), sashColors[i % sashColors.length]);
+        tassel.name = 'taco_serape_tassel';
+        tassel.position.copy(base).addScaledVector(sashDir, sashWidth * 0.24);
+        tassel.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), sashDir.clone().negate());
+        tassel.castShadow = true;
+        group.add(tassel);
+      }
+      // Chili charm — hangs off the sash's low point on a thin cord.
+      const chiliStemMat = toonMat({ color: '#5E8C3B', roughness: 0.6 });
+      const chiliMat = toonMat({ color: '#D93A2B', roughness: 0.48 });
+      const chiliAnchor = sashB.clone().addScaledVector(sashDir, sashWidth * 0.5);
+      const chiliString = new THREE.Mesh(new THREE.CapsuleGeometry(sashWidth * 0.025, size.h * 0.1, 4, 6), chiliStemMat);
+      chiliString.name = 'taco_chili_string';
+      chiliString.position.copy(chiliAnchor).add(new THREE.Vector3(0, -size.h * 0.06, 0));
+      group.add(chiliString);
+      const chiliBody = new THREE.Mesh(new THREE.SphereGeometry(sashWidth * 0.22, 10, 8), chiliMat);
+      chiliBody.name = 'taco_chili';
+      chiliBody.scale.set(0.6, 1.4, 0.6);
+      chiliBody.position.copy(chiliAnchor).add(new THREE.Vector3(0, -size.h * 0.15, 0));
+      chiliBody.castShadow = true;
+      chiliBody.receiveShadow = true;
+      group.add(chiliBody);
+      const chiliStem = new THREE.Mesh(new THREE.ConeGeometry(sashWidth * 0.06, sashWidth * 0.2, 6), chiliStemMat);
+      chiliStem.name = 'taco_chili_stem';
+      chiliStem.position.copy(chiliBody.position).add(new THREE.Vector3(0, sashWidth * 0.3, 0));
+      chiliStem.castShadow = true;
+      group.add(chiliStem);
+
       return group;
     });
 

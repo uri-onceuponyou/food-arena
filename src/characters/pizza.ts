@@ -31,6 +31,21 @@ const PEPPERONI = '#B93A28';   // wet cured meat, redder than the crust rim
 // a slightly-darker shade of the same tan.
 const CRUST_CHAR = '#4A2A12';
 
+// ── Costume layer ────────────────────────────────────────────────────────────
+// A fresh independent art director named the missing costume/accessory layer as
+// the TOP gap in the whole cast: without one, characters read as "naked mascot
+// body with a themed head glued on" no matter how good the body sculpt is. A
+// worn leather delivery satchel slung across the torso is Pizza's silhouette-
+// breaking item — it projects past the body outline the way a cape or backpack
+// does on the reference roster — plus a quilted oven mitt overlaid on one hand
+// as a smaller detail prop that still reads as this character's own trade.
+const SATCHEL_LEATHER = '#7A4A24';
+const SATCHEL_TRIM = '#54301A';
+const SATCHEL_BUCKLE = '#D9B458';
+const MITT_RED = '#C23B2E';
+const MITT_CREAM = '#F7EFE0';
+const FLOUR_DUST = '#F7ECD3';
+
 /**
  * Local stand-in for `ChibiRig`'s intended `dressTorso`/`torsoSize` — at the time of
  * writing `rig.ts` documents the pattern (see its torso comment) but does not yet
@@ -124,6 +139,21 @@ function cuffRing(y: number, radius: number, thickness: number, mat: THREE.Mater
 }
 
 /**
+ * A worn strap/cord: a curved tube from `from` to `to`, bowed out through a control
+ * point offset by `bow` — the same bezier-tube technique `soup.ts`'s `buildHandleArc`
+ * uses for its bowl-handle arms, reused here for costume webbing that has to read as
+ * cloth draped over a body rather than a rigid straight rod.
+ */
+function strapArc(from: THREE.Vector3, to: THREE.Vector3, bow: THREE.Vector3, radius: number, mat: THREE.Material): THREE.Mesh {
+  const mid = from.clone().add(to).multiplyScalar(0.5).add(bow);
+  const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+  const m = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, radius, 8, false), mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+/**
  * Doughy fist mitt: a flattened palm plus three knuckle bumps and a thumb — a real
  * hand silhouette rather than a smooth ball. `side` is +1/-1 to mirror the thumb.
  */
@@ -209,6 +239,16 @@ export class PizzaCharacter extends BaseCharacter {
         armRadius: CHARACTER_HEIGHT * 0.080,     // thick, doughy — chunkiest arms in the cast
         handRadius: CHARACTER_HEIGHT * 0.086,
         legRadius: CHARACTER_HEIGHT * 0.050,     // slimmer, tapering — continues the wedge's own narrowing
+      },
+      // Confident, presenting swagger — one hand planted on the hip (heavy elbow
+      // tuck on the right), head cocked and turned toward camera. Distinct from
+      // every other character in this file's own cast slice: the only one with a
+      // strong asymmetric hand-on-hip read.
+      stance: {
+        shoulderL: 0.22, shoulderR: -0.42,
+        elbowL: -0.28, elbowR: -0.64,
+        twist: 0.16, headTilt: -0.09, headTurn: 0.20,
+        hipSway: -0.045, lean: 0.04,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -450,6 +490,7 @@ export class PizzaCharacter extends BaseCharacter {
 
     this.buildFace(R, cheeseFrontZ);
     this.dressLimbs();
+    this.buildAccessories(R, head);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -511,6 +552,144 @@ export class PizzaCharacter extends BaseCharacter {
       hit01: this.hitT >= 0 ? this.hitT / 0.26 : -1,
       dead01: this.deathT >= 0 ? this.deathT / 0.75 : -1,
     });
+  }
+
+  /**
+   * Costume layer: a satchel bag slung on a strap across the torso, plus a
+   * quilted oven mitt on one hand and flour/char speckling on the crust rim.
+   *
+   * Placement rule for anything mounted on `joints.torso`/`joints.hips`: the
+   * shared rig's thighs hang straight DOWN from y=0 in that same local frame
+   * (see `rig.ts`'s `hipL`/`hipR`), so every torso-mounted prop here stays at
+   * y ≥ torsoH*0.20 — comfortably above the hip line — and is pushed out past
+   * the wedge's own broad shoulders in X, so nothing sinks into a leg or floats
+   * disconnected from the body.
+   */
+  private buildAccessories(R: number, head: THREE.Group): void {
+    const shoulderWidth = CHARACTER_HEIGHT * 0.26; // must match rig's own proportions.shoulderWidth
+    const torsoH = CHARACTER_HEIGHT * 0.28;
+
+    const leatherMat = toonMat({ color: SATCHEL_LEATHER, roughness: 0.78 });
+    const trimMat = toonMat({ color: SATCHEL_TRIM, roughness: 0.72 });
+    const buckleMat = toonMat({ color: SATCHEL_BUCKLE, roughness: 0.32, metalness: 0.55 });
+
+    // The dressed dough torso is custom geometry (see `dressTorso` above), and
+    // an earlier pass hand-estimated its half-width far too small, burying the
+    // whole bag inside the body. Measuring the REAL half-width off the built
+    // mesh (root/hips/torso are all still at their identity rest transform
+    // here — `restPose()` runs at the very end of the constructor, so a
+    // world-space Box3 on `joints.torso` gives an exact local half-extent)
+    // fixed that — but adding a flat clearance margin on TOP of it overshot
+    // the other way: at waist height this torso is nearly as wide as the
+    // shoulders themselves, so the margin pushed the bag out past the whole
+    // arm's own reach, and it read as something HELD rather than WORN. The
+    // shoulder joint itself (`shoulderWidth`) is already the rig's own
+    // "clearly outside the torso" reference every arm uses, so anchoring
+    // there — capped against the measured torso only as a safety floor for
+    // unusually wide waists — keeps the bag snug against the body's own side
+    // instead of floating at arm's length.
+    this.rig.joints.root.updateMatrixWorld(true);
+    const torsoBB = new THREE.Box3().setFromObject(this.rig.joints.torso);
+    const torsoHalfW = Math.max(Math.abs(torsoBB.min.x), Math.abs(torsoBB.max.x));
+    // Positive X — the RIGHT side, opposite the oven mitt on `handL` below, so
+    // the two accessories don't compete for the same patch of silhouette.
+    const bagX = Math.max(shoulderWidth * 0.88, torsoHalfW * 0.85);
+
+    // Satchel bag: hangs on a SHORT strap from the shoulder straight down to
+    // the waist on the SAME side — not a long diagonal across the whole chest,
+    // which read as a rigid mallet-like rod in an earlier pass — at true waist
+    // height (clear of the hip line where the rig's own thighs hang straight
+    // down from y=0).
+    const bagW = shoulderWidth * 0.40, bagH = shoulderWidth * 0.42, bagD = shoulderWidth * 0.24;
+    const bagPt = new THREE.Vector3(bagX, torsoH * 0.22, shoulderWidth * 0.10);
+    const shoulderPt = new THREE.Vector3(bagX * 0.97, torsoH * 0.80, shoulderWidth * 0.16);
+    const strap = strapArc(shoulderPt, bagPt, new THREE.Vector3(shoulderWidth * 0.10, 0, shoulderWidth * 0.22), shoulderWidth * 0.055, leatherMat);
+    strap.name = 'pizza_satchel_strap';
+    this.rig.joints.torso.add(strap);
+
+    const bag = new THREE.Mesh(roundedBox(bagW, bagH, bagD, bagW * 0.16, 3), leatherMat);
+    bag.name = 'pizza_satchel_bag';
+    bag.position.copy(bagPt);
+    bag.rotation.set(0.06, 0.12, 0.08);
+    bag.castShadow = true;
+    bag.receiveShadow = true;
+    this.rig.joints.torso.add(bag);
+
+    const flap = new THREE.Mesh(roundedBox(bagW * 0.98, bagH * 0.42, bagD * 0.5, bagW * 0.14, 3), trimMat);
+    flap.name = 'pizza_satchel_flap';
+    flap.position.copy(bagPt).add(new THREE.Vector3(0, bagH * 0.26, bagD * 0.30));
+    flap.rotation.set(-0.15, 0.12, 0.08);
+    flap.castShadow = true;
+    flap.receiveShadow = true;
+    this.rig.joints.torso.add(flap);
+
+    const buckle = new THREE.Mesh(new THREE.CylinderGeometry(bagW * 0.12, bagW * 0.12, bagW * 0.06, 12), buckleMat);
+    buckle.name = 'pizza_satchel_buckle';
+    buckle.rotation.x = Math.PI / 2;
+    buckle.position.copy(bagPt).add(new THREE.Vector3(0, bagH * 0.10, bagD * 0.55));
+    buckle.castShadow = true;
+    this.rig.joints.torso.add(buckle);
+
+    // Oven mitt: a flattened, oversized PADDLE on the LEFT hand — a genuine
+    // silhouette/shape change (round fist → flat mitt), not just a recolour of
+    // the existing pepperoni-red fist, which an earlier pass tried and found
+    // unreadable at thumbnail scale since both were the same red hue. Cream
+    // body with bold red trim stripes reads unmistakably as a quilted mitt.
+    const handRadius = CHARACTER_HEIGHT * 0.086; // must match rig's own proportions.handRadius
+    const mittMat = toonMat({ color: MITT_CREAM, roughness: 0.8 });
+    const stripeMat = toonMat({ color: MITT_RED, roughness: 0.7 });
+    const mittGroup = new THREE.Group();
+    mittGroup.name = 'pizza_oven_mitt';
+    const paddle = new THREE.Mesh(roundedBox(handRadius * 1.85, handRadius * 2.2, handRadius * 1.05, handRadius * 0.5, 4), mittMat);
+    paddle.position.y = -handRadius * 0.05;
+    paddle.castShadow = true;
+    paddle.receiveShadow = true;
+    mittGroup.add(paddle);
+    for (const dy of [-0.62, 0, 0.62]) {
+      const stripe = new THREE.Mesh(roundedBox(handRadius * 1.92, handRadius * 0.30, handRadius * 1.12, handRadius * 0.1, 2), stripeMat);
+      stripe.name = 'pizza_mitt_stripe';
+      stripe.position.y = -handRadius * 0.05 + dy * handRadius;
+      stripe.castShadow = true;
+      mittGroup.add(stripe);
+    }
+    // Thumb notch — the one shape cue that makes a paddle read as a MITT
+    // rather than a shield.
+    const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(handRadius * 0.34, handRadius * 0.5, 4, 8), mittMat);
+    thumb.name = 'pizza_mitt_thumb';
+    thumb.rotation.z = 0.9;
+    thumb.position.set(-handRadius * 0.95, handRadius * 0.35, handRadius * 0.10);
+    thumb.castShadow = true;
+    mittGroup.add(thumb);
+    this.rig.joints.handL.add(mittGroup);
+
+    // Flour-dust + toasted-char speckling along the crust rim's own base curve —
+    // small surface detail so the crust reads as baked dough rather than one
+    // flat matte colour. Sampled off the exact quadratic curve `pizza_dough`'s
+    // own base uses, so specks sit precisely on the rim, never floating or
+    // sunk into the dough.
+    const tipY = R * 0.98, baseY = -R * 0.86, halfWedge = R * 0.80, depth = R * 0.62;
+    const rimDepth = depth + R * 0.1;
+    const rimFrontZ = rimDepth / 2 + R * 0.13 + R * 0.008;
+    const p0 = new THREE.Vector2(-halfWedge, baseY + R * 0.10);
+    const p1 = new THREE.Vector2(0, baseY - R * 0.30);
+    const p2 = new THREE.Vector2(halfWedge, baseY + R * 0.10);
+    const quadPt = (t: number): THREE.Vector2 => {
+      const a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+      return new THREE.Vector2(a * p0.x + b * p1.x + c * p2.x, a * p0.y + b * p1.y + c * p2.y);
+    };
+    const flourMat = toonMat({ color: FLOUR_DUST, roughness: 0.92 });
+    const charMat = toonMat({ color: CRUST_CHAR, roughness: 0.8 });
+    const speckTs = [0.12, 0.22, 0.34, 0.46, 0.58, 0.70, 0.82, 0.90];
+    for (let i = 0; i < speckTs.length; i++) {
+      const p = quadPt(speckTs[i]);
+      const isChar = i % 3 === 1;
+      const speck = new THREE.Mesh(new THREE.SphereGeometry(R * (isChar ? 0.026 : 0.020), 6, 6), isChar ? charMat : flourMat);
+      speck.name = isChar ? 'pizza_char_speck' : 'pizza_flour_speck';
+      speck.position.set(p.x, p.y + R * 0.035, rimFrontZ);
+      speck.scale.set(1, 0.6, 0.5);
+      speck.userData.noOutline = true;
+      head.add(speck);
+    }
   }
 
   /**

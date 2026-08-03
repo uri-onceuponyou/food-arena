@@ -268,6 +268,17 @@ export class EggCharacter extends BaseCharacter {
         shoulderWidth: 0.307,
         stanceWidth: 0.139,
       },
+      // Timid, closed-in — elbows pulled tight against the body, shoulders barely
+      // lifted, head ducked and turned away shyly. An art director's second pass
+      // named the cast's identical dead-front symmetric pose as a top gap; Egg's
+      // read is the cast's most defensive/withdrawn stance, distinct from every
+      // other character's more open posture in this file.
+      stance: {
+        shoulderL: 0.06, shoulderR: -0.06,
+        elbowL: -0.95, elbowR: -0.92,
+        twist: 0.05, headTilt: 0.16, headTurn: 0.32,
+        hipSway: 0.01, lean: 0.10,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -317,6 +328,78 @@ export class EggCharacter extends BaseCharacter {
     yolk.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tipSurface.normal);
     yolk.userData.noOutline = true;
     head.add(yolk);
+
+    // ── Costume: oversized scarf + knit cap ───────────────────────────────────
+    // A second independent art-director pass named the total absence of any worn
+    // costume/accessory layer as the cast's single biggest remaining gap. An
+    // oversized scarf wound around the neck, its tails hanging past the shell's
+    // own front, is the single most legible costume for a timid character: it
+    // reads as "bundled up, hiding a little" and breaks the ovoid silhouette with
+    // real hanging cloth. The knit cap perched near the crown is the smaller worn
+    // detail, tucked well clear of the crack landmark's own theta band.
+    //
+    // Round 1 defect: attached to `rig.joints.neck`. Egg's head is BOTH unusually
+    // large (headFraction 0.46) and bulges wider below its own equator
+    // (BOTTOM_BULGE), so the shell's lowest point actually sits BELOW the neck
+    // joint's own world Y — the neck is entirely swallowed inside the shell
+    // volume, not in a visible gap above the torso. Anything hung off it renders
+    // fully hidden. Fixed by anchoring the scarf to the SHELL's own surface via
+    // `eggSurface` (the same source of truth the crack and face already use)
+    // near the bottom of the head, where the bulge gives it real radius to wrap.
+    const scarfMat = toonMat({ color: LIMB_LILAC, roughness: 0.6 });
+    const scarfDarkMat = toonMat({ color: LIMB_LILAC_SHADOW, roughness: 0.6 });
+    const scarfPhi = 0.80 * Math.PI;
+    const scarfPt = eggSurface(Math.PI / 2, scarfPhi, R);
+    const scarfRadius = Math.hypot(scarfPt.pos.x, scarfPt.pos.z);
+    const scarfY = scarfPt.pos.y;
+
+    const scarfWrap = new THREE.Mesh(new THREE.TorusGeometry(scarfRadius * 1.08, R * 0.13, 10, 24), scarfMat);
+    scarfWrap.name = 'egg_scarf_wrap';
+    scarfWrap.rotation.x = Math.PI / 2;
+    scarfWrap.position.y = scarfY;
+    scarfWrap.castShadow = true;
+    scarfWrap.receiveShadow = true;
+    head.add(scarfWrap);
+
+    for (const sx of [-1, 1] as const) {
+      const tail = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.085, R * 0.48, 4, 8), sx > 0 ? scarfMat : scarfDarkMat);
+      tail.name = 'egg_scarf_tail';
+      tail.position.set(sx * R * 0.16, scarfY - R * 0.40, scarfRadius * 0.92);
+      tail.rotation.x = 0.22;
+      tail.rotation.z = sx * 0.08;
+      tail.castShadow = true;
+      tail.receiveShadow = true;
+      head.add(tail);
+
+      const tassel = new THREE.Mesh(new THREE.SphereGeometry(R * 0.07, 8, 6), scarfDarkMat);
+      tassel.name = 'egg_scarf_tassel';
+      tassel.position.set(sx * R * 0.16, scarfY - R * 0.66, scarfRadius * 0.98);
+      tassel.castShadow = true;
+      head.add(tassel);
+    }
+
+    // Knit cap — a small dome-cap-plus-pompom perched near the top pole, well
+    // clear of the crack (theta 0.66-0.86), on a curved basis solved the exact
+    // same way as every other decal on this shell (`eggSurface`) so it can't
+    // float off or sink into the surface.
+    const capMat = toonMat({ color: '#CB9ED4', roughness: 0.6 });
+    const capPompomMat = toonMat({ color: YOLK, roughness: 0.55 });
+    const capBasis = eggSurface(-0.30, 0.10 * Math.PI, R);
+    const capR = R * 0.34;
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(capR, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.66), capMat);
+    cap.name = 'egg_cap';
+    cap.position.copy(capBasis.pos).addScaledVector(capBasis.normal, capR * 0.22);
+    cap.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), capBasis.normal);
+    cap.castShadow = true;
+    cap.receiveShadow = true;
+    head.add(cap);
+
+    const capPompom = new THREE.Mesh(new THREE.SphereGeometry(capR * 0.3, 10, 8), capPompomMat);
+    capPompom.name = 'egg_cap_pompom';
+    const capApex = new THREE.Vector3(0, capR, 0).applyQuaternion(cap.quaternion);
+    capPompom.position.copy(cap.position).add(capApex);
+    capPompom.castShadow = true;
+    head.add(capPompom);
 
     // ── Body: dress the torso ─────────────────────────────────────────────────
     // Two independent builder rounds both named the same gap: a themed head on a

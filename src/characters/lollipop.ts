@@ -70,6 +70,24 @@ function spiralRibbonShape(turns: number, rStart: number, rEnd: number, bandWidt
 }
 
 /**
+ * A cloth/cellophane strip curved around a cylinder of `radius`, spanning
+ * `arcRad` of angle centred on `angleOffset` (radians, 0 = character-front/+Z),
+ * `height` tall. Used for the wrapper cape — a panel that hugs the body's own
+ * curvature rather than floating as a flat card behind it.
+ */
+function curvedPanel(radius: number, arcRad: number, height: number, angleOffset = 0, segX = 18, segY = 8): THREE.BufferGeometry {
+  const geo = new THREE.PlaneGeometry(arcRad, height, segX, segY);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const theta = angleOffset + pos.getX(i);
+    const y = pos.getY(i);
+    pos.setXYZ(i, Math.sin(theta) * radius, y, Math.cos(theta) * radius);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
  * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
  * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
  * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
@@ -136,6 +154,17 @@ export class LollipopCharacter extends BaseCharacter {
         legRadius: 0.080,
         shoulderWidth: 0.290,
         stanceWidth: 0.124,
+      },
+      // Cocky and hip-shot — weight thrown hard onto one hip, one shoulder popped
+      // up, head tilted with attitude. An art director's second pass named the
+      // cast's identical dead-front symmetric pose as a top gap and named this
+      // exact read ("cocky and hip-shot") as the target for Lollipop specifically;
+      // `hipSway` is pushed well past every other character in this file's cast.
+      stance: {
+        shoulderL: 0.70, shoulderR: -0.10,
+        elbowL: -0.30, elbowR: -0.55,
+        twist: 0.30, headTilt: -0.28, headTurn: -0.35,
+        hipSway: 0.20, lean: -0.06,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -268,6 +297,55 @@ export class LollipopCharacter extends BaseCharacter {
 
     // ── Torso: candy-wrapper costume, contrasting the pale limbs ──────────────
     this.dressTorso(R);
+
+    // ── Costume: translucent wrapper cape ─────────────────────────────────────
+    // A second independent art-director pass named the total absence of any
+    // silhouette-breaking costume/accessory layer as the cast's single biggest
+    // remaining gap — the existing sash/trim dress the torso but never leave its
+    // own footprint. A cellophane wrapper worn like a cloak (the brief's own
+    // suggested read) is Lollipop's: translucent, glossy candy-wrap plastic
+    // flowing from a twisted knot at the neck down her back, with a hairline
+    // Cyber trim along its hem echoing her own rarity accent.
+    const neck = this.rig.joints.neck;
+    const capeMat = glossyMat({ color: CANDY_WHITE, roughness: 0.16, transparent: true, opacity: 0.6 });
+    capeMat.side = THREE.DoubleSide; // seen edge-on/from behind at yaw 135/210, not just front
+    const capeTrimMat = toonMat({ color: CYBER, roughness: 0.3, emissive: CYBER, emissiveIntensity: 0.5 });
+    const twistMat = glossyMat({ color: CANDY_WHITE, roughness: 0.14 });
+
+    const capeR = R * 0.55;
+    const capeArc = Math.PI * 0.85;
+    const capeH = R * 1.55;
+    const cape = new THREE.Mesh(curvedPanel(capeR, capeArc, capeH, Math.PI), capeMat);
+    cape.name = 'lollipop_wrapper_cape';
+    cape.position.y = -capeH * 0.38;
+    cape.castShadow = true;
+    cape.receiveShadow = true;
+    neck.add(cape);
+
+    const capeTrim = new THREE.Mesh(curvedPanel(capeR * 1.01, capeArc * 0.97, capeH * 0.045, Math.PI), capeTrimMat);
+    capeTrim.name = 'lollipop_wrapper_cape_trim__no_outline';
+    capeTrim.userData.noOutline = true;
+    capeTrim.position.y = cape.position.y - capeH * 0.48;
+    neck.add(capeTrim);
+
+    // Twisted wrapper knot — the cape's own "tied at the neck" landmark, echoing
+    // the twist-cone hands and wrapper-petal cuffs already on this character.
+    const twist = new THREE.Mesh(new THREE.ConeGeometry(R * 0.16, R * 0.3, 8), twistMat);
+    twist.name = 'lollipop_wrapper_twist';
+    twist.rotation.x = Math.PI;
+    twist.position.set(0, R * 0.16, -R * 0.10);
+    twist.castShadow = true;
+    neck.add(twist);
+
+    // Choker — a slim candy-cane ring around the stick, the small worn detail
+    // underneath the cape's own silhouette break.
+    const chokerMat = toonMat({ color: CANDY_RED, roughness: 0.5 });
+    const choker = new THREE.Mesh(new THREE.TorusGeometry(stickR * 1.15, stickR * 0.16, 8, 18), chokerMat);
+    choker.name = 'lollipop_choker';
+    choker.rotation.x = Math.PI / 2;
+    choker.position.y = -neckGap * 0.3;
+    choker.castShadow = true;
+    head.add(choker);
 
     // ── Limbs: bespoke, not the shared rig defaults ───────────────────────────
     // An independent art director named the rig's identical capsule-arm/ball-hand/

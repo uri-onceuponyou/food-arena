@@ -151,6 +151,17 @@ export class DonutCharacter extends BaseCharacter {
         shoulderWidth: 0.431,
         stanceWidth: 0.252,
       },
+      // Bouncy and playful — hip popped out, head cocked, weight rocked back onto
+      // her heels like she's mid-bounce. An art director's second pass named the
+      // cast's identical dead-front symmetric pose as a top gap; Donut's read is
+      // the cast's "sweetest"/most carefree attitude, distinct from every other
+      // stance in this file's cast.
+      stance: {
+        shoulderL: 0.55, shoulderR: -0.15,
+        elbowL: -0.55, elbowR: -0.65,
+        twist: 0.22, headTilt: 0.22, headTurn: -0.30,
+        hipSway: 0.12, lean: -0.03,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -210,6 +221,58 @@ export class DonutCharacter extends BaseCharacter {
       this.sprinkles.push(s);
     }
 
+    // ── Costume: knit beanie ─────────────────────────────────────────────────
+    // A second independent art-director pass named the total absence of any worn
+    // costume/accessory layer as the cast's single biggest remaining gap — every
+    // reference character (mustache+tux, hoodie+cap+headphones, scarf+cape) reads
+    // through wardrobe, and this cast had none. A jaunty knit beanie perched above
+    // the ring is Donut's: it breaks the torus's round silhouette upward with a
+    // real worn shape, in a fresh violet that doesn't fight her own pink glaze.
+    const beanieMat = toonMat({ color: '#8E5FD9', roughness: 0.68 });
+    const beanieBrimMat = toonMat({ color: '#6E3FB8', roughness: 0.68 });
+    const pompomMat = toonMat({ color: GLAZE, roughness: 0.7 });
+
+    const beanieR = R * 0.36;
+    const beanieThetaLen = Math.PI * 0.62;
+    const beanieCenter = new THREE.Vector3(R * 0.12, R * 0.80, -R * 0.08);
+    // A single quaternion drives the dome mesh AND every point/normal derived
+    // from it (rim, apex) so the cap, its brim and its pompom stay geometrically
+    // consistent with each other at any tilt — the same "one source of truth for
+    // a curved surface" discipline `hamburger.ts`'s crownSurface encodes.
+    const beanieTiltQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.45, 0.15, 0.35));
+
+    const beanie = new THREE.Mesh(
+      new THREE.SphereGeometry(beanieR, 20, 14, 0, Math.PI * 2, 0, beanieThetaLen),
+      beanieMat
+    );
+    beanie.name = 'donut_beanie';
+    beanie.position.copy(beanieCenter);
+    beanie.quaternion.copy(beanieTiltQ);
+    beanie.castShadow = true;
+    beanie.receiveShadow = true;
+    head.add(beanie);
+
+    const rimLocalY = beanieR * Math.cos(beanieThetaLen);
+    const rimRadius = beanieR * Math.sin(beanieThetaLen);
+    const rimCenter = beanieCenter.clone().add(new THREE.Vector3(0, rimLocalY, 0).applyQuaternion(beanieTiltQ));
+    const rimNormal = new THREE.Vector3(0, 1, 0).applyQuaternion(beanieTiltQ);
+
+    const beanieBrim = new THREE.Mesh(new THREE.TorusGeometry(rimRadius, R * 0.06, 10, 24), beanieBrimMat);
+    beanieBrim.name = 'donut_beanie_brim';
+    beanieBrim.position.copy(rimCenter);
+    beanieBrim.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), rimNormal);
+    beanieBrim.castShadow = true;
+    beanieBrim.receiveShadow = true;
+    head.add(beanieBrim);
+
+    const pompom = new THREE.Mesh(new THREE.SphereGeometry(R * 0.115, 12, 10), pompomMat);
+    pompom.name = 'donut_beanie_pompom';
+    const apexLocal = new THREE.Vector3(0, beanieR, 0).applyQuaternion(beanieTiltQ);
+    pompom.position.copy(beanieCenter).add(apexLocal);
+    pompom.castShadow = true;
+    pompom.receiveShadow = true;
+    head.add(pompom);
+
     // ── Body: dress the torso ─────────────────────────────────────────────────
     // Two independent builder rounds both named the same gap: a themed head on a
     // generic body. Donut's body is a second, smaller dough mass wearing its own
@@ -266,6 +329,28 @@ export class DonutCharacter extends BaseCharacter {
         drip.receiveShadow = true;
         group.add(drip);
       }
+
+      // Pin badge — a small worn detail on the collar, the accessory scaled down
+      // (the beanie above is the silhouette-breaking piece; this is the close-up
+      // "worn, not just coloured" read), tucked into the gap the drip angles leave
+      // clear at the front (drips start at 0.55 rad).
+      const badgeMat = toonMat({ color: '#FFD873', roughness: 0.5 });
+      const badgeInnerMat = toonMat({ color: '#8E5FD9', roughness: 0.5 });
+      const badgeA = 0.18;
+      const badgeR = collarR + collarTube * 0.85;
+      const badge = new THREE.Mesh(new THREE.CylinderGeometry(collarTube * 0.55, collarTube * 0.55, collarTube * 0.18, 16), badgeMat);
+      badge.name = 'donut_pin_badge';
+      badge.position.set(Math.cos(badgeA) * badgeR, collarY, Math.sin(badgeA) * badgeR);
+      badge.rotation.z = Math.PI / 2;
+      badge.rotation.y = -badgeA;
+      badge.castShadow = true;
+      badge.receiveShadow = true;
+      group.add(badge);
+      const badgeInner = new THREE.Mesh(new THREE.CircleGeometry(collarTube * 0.32, 14), badgeInnerMat);
+      badgeInner.name = 'donut_pin_badge_face__no_outline';
+      badgeInner.userData.noOutline = true;
+      badgeInner.position.set(0, 0, collarTube * 0.1);
+      badge.add(badgeInner);
 
       // Sprinkles carry on down from the head, scattered across the lower half
       // of the collar band — kept off the topmost row, which sits right at the
@@ -336,7 +421,17 @@ export class DonutCharacter extends BaseCharacter {
           return g;
         }
         case 'footL': case 'footR': {
-          const foot = new THREE.Mesh(taperedSegment(size.len * 1.3, size.radius * 1.2, size.radius * 0.3, 12), chocFootMat);
+          // `taperedSegment`'s own convention hangs the FULL `len` down from the
+          // joint origin — correct for an arm/leg bone, but the foot joint already
+          // sits barely above true ground level, so the previous `size.len * 1.3`
+          // (a full leg-segment length) sank the whole foot 30-40cm through the
+          // floor: a verified defect (the character's own measured height came out
+          // ~0.8m taller than the cast norm because the bounding box was being
+          // measured down into the floor, not because anything visible got taller).
+          // Shortened to a true foot-scaled drop, matching the shallow droop every
+          // other character's own foot geometry keeps.
+          const footLen = size.len * 0.55;
+          const foot = new THREE.Mesh(taperedSegment(footLen, size.radius * 1.2, size.radius * 0.3, 12), chocFootMat);
           foot.position.z = size.radius * 0.3;
           foot.name = `${part}_mesh`;
           foot.castShadow = true;

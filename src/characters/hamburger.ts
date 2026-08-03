@@ -172,6 +172,24 @@ function faceArc(curveRadius: number, tube: number, arcRad: number): THREE.Buffe
 }
 
 /**
+ * A vertical cloth strip curved around a cylinder of `radius`, spanning `arcRad`
+ * of angle centred on the character's front (+Z), `height` tall. Used for the
+ * apron bib — a cloth panel that hugs the dressed torso's own curvature rather
+ * than floating in front of it as a flat card.
+ */
+function curvedPanel(radius: number, arcRad: number, height: number, segX = 14, segY = 6): THREE.BufferGeometry {
+  const geo = new THREE.PlaneGeometry(arcRad, height, segX, segY);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const theta = pos.getX(i);
+    const y = pos.getY(i);
+    pos.setXYZ(i, Math.sin(theta) * radius, y, Math.cos(theta) * radius);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
  * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
  * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
  * `dressLimbs()` expects. Used so Hamburger's limbs read as tapered dough rather
@@ -242,6 +260,17 @@ export class HamburgerCharacter extends BaseCharacter {
         shoulderWidth: 0.536,
         stanceWidth: 0.312,
       },
+      // Grill-master swagger: weight planted and leaning in over the flat-top,
+      // one arm cocked back with the spatula ready, the other tucked in tight —
+      // an art director's second pass named the cast's identical dead-front
+      // symmetric pose as a top gap, and Hamburger's read (short-order cook,
+      // mid-flip) is the most physically confident stance in this file's cast.
+      stance: {
+        shoulderL: 0.46, shoulderR: -0.58,
+        elbowL: -0.95, elbowR: -0.22,
+        twist: -0.12, headTilt: -0.07, headTurn: 0.20,
+        hipSway: 0.06, lean: 0.06,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head; // free counter-lean/tilt from BaseCharacter
@@ -269,6 +298,16 @@ export class HamburgerCharacter extends BaseCharacter {
     // silhouette a landmark nothing else in a roster of round food blobs would have.
     const spatulaHandleMat = toonMat({ color: '#3B2A22', roughness: 0.55 });
     const spatulaBladeMat = toonMat({ color: '#CDD3DC', roughness: 0.28, metalness: 0.55 });
+    const spatulaSlotMat = toonMat({ color: '#4A5058', roughness: 0.4, metalness: 0.3 });
+    // Apron — the costume layer. A second independent art-director pass named the
+    // complete absence of any costume/accessory layer as the cast's top remaining
+    // gap: personality was coming entirely from the food mass, with nothing worn.
+    // A bib apron is the single most legible costume for a short-order cook — hard
+    // straight edges and a real pocket break the bottom bun's round silhouette,
+    // and it reads instantly even at gameplay distance.
+    const apronMat = toonMat({ color: '#D2453A', roughness: 0.78 });
+    const apronTrimMat = toonMat({ color: '#FFF8EE', roughness: 0.7 });
+    const apronPocketMat = toonMat({ color: '#B9382E', roughness: 0.78 });
 
     // ── Vertical layout ──────────────────────────────────────────────────────
     // See the file-level comment for the full derivation. BASE_Y anchors the
@@ -543,6 +582,71 @@ export class HamburgerCharacter extends BaseCharacter {
       bottomBun.castShadow = true;
       bottomBun.receiveShadow = true;
       group.add(bottomBun);
+
+      // ── Apron: the costume layer ─────────────────────────────────────────
+      const apronR = bunR * 1.05;
+      const apronArc = Math.PI * 0.62;
+      const apronH = bunH * 0.92;
+      const apronY = size.h * 0.02 - bunH * 0.06;
+      const apron = new THREE.Mesh(curvedPanel(apronR, apronArc, apronH), apronMat);
+      apron.name = 'apron_bib';
+      apron.position.y = apronY;
+      apron.castShadow = true;
+      apron.receiveShadow = true;
+      group.add(apron);
+
+      // Cream hem trim along the bottom edge — the second material, so the
+      // apron reads as a garment (fabric + trim) rather than a flat colour card.
+      const hem = new THREE.Mesh(curvedPanel(apronR * 1.01, apronArc * 0.96, apronH * 0.09), apronTrimMat);
+      hem.name = 'apron_hem';
+      hem.position.y = apronY - apronH * 0.46;
+      hem.castShadow = true;
+      group.add(hem);
+
+      // Chest pocket, proud of the bib's own front face — the small detail item
+      // that sells "worn garment" up close, on top of the bib's silhouette break.
+      const pocket = new THREE.Mesh(roundedBox(apronR * 0.42, apronH * 0.22, apronR * 0.06, apronR * 0.05, 2), apronPocketMat);
+      pocket.name = 'apron_pocket';
+      pocket.position.set(0, apronY + apronH * 0.08, apronR * 1.02);
+      pocket.castShadow = true;
+      pocket.receiveShadow = true;
+      group.add(pocket);
+
+      // Neck straps rising from the bib's top corners — reads as "tied behind
+      // the neck" without needing a literal loop back there.
+      for (const sx of [-1, 1] as const) {
+        const strap = new THREE.Mesh(new THREE.CapsuleGeometry(apronR * 0.075, apronH * 0.5, 4, 8), apronMat);
+        strap.name = 'apron_strap';
+        const baseTheta = sx * apronArc * 0.42;
+        strap.position.set(Math.sin(baseTheta) * apronR, apronY + apronH * 0.62, Math.cos(baseTheta) * apronR);
+        strap.rotation.z = sx * 0.55;
+        strap.rotation.x = -0.3;
+        strap.castShadow = true;
+        strap.receiveShadow = true;
+        group.add(strap);
+      }
+
+      // Waist tie — a bow knotted at the character's left hip, the classic
+      // "apron tied at the side" landmark, and a silhouette break independent
+      // of the bib itself (visible from the back/side yaw angles too).
+      const tieTheta = -apronArc * 0.62;
+      const tieBase = new THREE.Vector3(Math.sin(tieTheta) * apronR * 1.03, apronY - apronH * 0.2, Math.cos(tieTheta) * apronR * 1.03);
+      const tieKnot = new THREE.Mesh(new THREE.SphereGeometry(apronR * 0.13, 10, 8), apronMat);
+      tieKnot.name = 'apron_tie_knot';
+      tieKnot.position.copy(tieBase);
+      tieKnot.castShadow = true;
+      group.add(tieKnot);
+      for (const sx of [-1, 1] as const) {
+        const loop = new THREE.Mesh(new THREE.CapsuleGeometry(apronR * 0.06, apronR * 0.24, 4, 8), apronMat);
+        loop.name = 'apron_tie_loop';
+        loop.position.copy(tieBase);
+        loop.position.x += sx * apronR * 0.15;
+        loop.position.y += apronR * 0.02;
+        loop.rotation.z = sx * 0.85;
+        loop.castShadow = true;
+        group.add(loop);
+      }
+
       return group;
     });
 
@@ -649,36 +753,87 @@ export class HamburgerCharacter extends BaseCharacter {
     // swing actually reads as swinging. Attached to the rig's own `handR` joint
     // so it inherits the shared shoulder→elbow→hand animation for free instead
     // of needing its own bespoke arm.
+    //
+    // ── Round 5 rebuild: an independent art director flagged this prop as
+    // illegible — "a gray wedge that could be a knife, a spork, or a modeling
+    // error." The root causes: the blade was a plain flat rectangle with no
+    // shape language distinguishing it from any other flat panel, there was no
+    // visible connection between handle and blade (they just touched), and the
+    // whole prop was small and tilted at an angle that foreshortened it in the
+    // idle camera. Fixed with three changes that each target one of those:
+    // (1) the blade is now a genuine turner silhouette — narrow at the neck,
+    // flaring wide at the tip, with a gently curled-up leading edge, unmistakably
+    // "flat tool for flipping food" rather than a generic panel; (2) a metal
+    // ferrule collar visually welds the handle into the blade's neck, the exact
+    // connective tissue a bare abutment was missing; (3) it's ~40% bigger overall
+    // and held with the blade rotated more upright/outward so it reads as its own
+    // silhouette instead of edge-on sliver at the default viewing angle.
     const spatula = new THREE.Group();
     spatula.name = 'spatula';
-    // Offset toward the outer side of the mitt (sx-biased) rather than dead
-    // centre through it — gripping through the palm's centre made the dark
-    // handle cross straight over the pale mitt sphere, coincidentally reading
-    // as a second, misplaced limb.
-    // Offset only slightly from the palm centre. It was previously pushed 0.16 out
-    // — about a full hand-radius — which worked against the old ball hand but left
-    // the prop visibly floating in mid-air once the hand became a smaller bun-cap
-    // mitt. A held prop must overlap the hand geometry, not merely start near it.
-    spatula.position.set(0.05, -0.02, 0.06);
-    spatula.rotation.set(-0.5, 0.35, -0.4);
+    spatula.position.set(0.06, -0.02, 0.08);
+    spatula.rotation.set(-0.3, 0.2, -0.25);
     this.rig.joints.handR.add(spatula);
 
-    const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.42, 4, 8), spatulaHandleMat);
+    const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.46, 4, 8), spatulaHandleMat);
     handle.name = 'spatula_handle';
     // Lowered so the handle's bottom end passes THROUGH the mitt rather than
     // beginning at its surface — that overlap is what sells the grip.
-    handle.position.set(0, 0.15, 0);
+    handle.position.set(0, 0.17, 0);
     handle.castShadow = true;
     handle.receiveShadow = true;
     spatula.add(handle);
 
-    const blade = new THREE.Mesh(roundedBox(0.4, 0.05, 0.5, 0.09, 3), spatulaBladeMat);
+    // Ferrule — a metal collar wrapping the handle-to-blade joint. Without this
+    // the two parts merely touch and can read as two separate props; the collar
+    // makes the join unambiguous at a glance, the same trick a real kitchen tool
+    // uses to visually (and physically) marry a wood handle to a steel head.
+    const ferrule = new THREE.Mesh(new THREE.CylinderGeometry(0.082, 0.072, 0.09, 14), spatulaSlotMat);
+    ferrule.name = 'spatula_ferrule';
+    ferrule.position.set(0, 0.42, 0);
+    ferrule.castShadow = true;
+    ferrule.receiveShadow = true;
+    spatula.add(ferrule);
+
+    // Blade — a real turner outline: narrow neck at the ferrule, flaring to a
+    // broad flat tip, with the leading edge curled gently upward (bent sheet
+    // steel, not a straight-cut panel). Built as an extruded 2D shape so the
+    // silhouette itself carries the "spatula" read even in solid shadow.
+    const bladeShape = new THREE.Shape();
+    bladeShape.moveTo(-0.135, 0);
+    bladeShape.lineTo(0.135, 0);
+    bladeShape.lineTo(0.30, 0.58);
+    bladeShape.quadraticCurveTo(0.16, 0.72, 0, 0.66);
+    bladeShape.quadraticCurveTo(-0.16, 0.72, -0.30, 0.58);
+    bladeShape.lineTo(-0.135, 0);
+    const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, {
+      depth: 0.032, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 2, curveSegments: 10,
+    });
+    bladeGeo.translate(0, 0, -0.016);
+    bladeGeo.computeVertexNormals();
+    const blade = new THREE.Mesh(bladeGeo, spatulaBladeMat);
     blade.name = 'spatula_blade';
-    blade.position.set(0, 0.46, 0.06);
-    blade.rotation.x = 0.3;
+    blade.position.set(0, 0.46, 0.02);
+    blade.rotation.x = 0.55; // tips the broad face up toward camera instead of edge-on
     blade.castShadow = true;
     blade.receiveShadow = true;
     spatula.add(blade);
+
+    // Slotted turner holes — three flush decal ovals climbing the blade's own
+    // centreline, the detail that finishes selling "kitchen turner" up close.
+    const slotGeo = new THREE.CircleGeometry(0.032, 14);
+    for (const sy of [0.22, 0.40, 0.56]) {
+      const slot = new THREE.Mesh(slotGeo, spatulaSlotMat);
+      slot.name = 'spatula_slot__no_outline';
+      slot.userData.noOutline = true;
+      slot.position.set(0, sy, 0.017);
+      blade.add(slot);
+      const slotBack = new THREE.Mesh(slotGeo, spatulaSlotMat);
+      slotBack.name = 'spatula_slot__no_outline';
+      slotBack.userData.noOutline = true;
+      slotBack.rotation.y = Math.PI;
+      slotBack.position.set(0, sy, -0.017);
+      blade.add(slotBack);
+    }
 
     // Outline: a whisper, per render/toon.ts — the reference bar carries almost
     // no ink line.

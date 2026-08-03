@@ -36,6 +36,18 @@ const SALMON_DARK = '#D97F45'; // fish striation lines
 const LIP = '#E8798F';         // puckered-lip coral
 const GOLD = RARITY_COLORS.Legendary; // #F4A300 — rarity accent, used sparingly
 
+// ── Costume layer ────────────────────────────────────────────────────────────
+// A fresh independent art director named the missing costume/accessory layer as
+// the TOP gap in the whole cast: without one, characters read as "naked mascot
+// body with a themed head glued on" no matter how good the body sculpt is. A
+// tied hachimaki headband with trailing tails is Sushi's silhouette-breaking
+// item — the tails project past the head's own round silhouette from the back/
+// side the way a cape or backpack does on the reference roster — plus a pair of
+// chopsticks tucked into the torso sash as a smaller detail prop.
+const HEADBAND = '#B23A2E';      // chef's-headband red
+const HEADBAND_DARK = '#8A2A20'; // knot shading
+const CHOPSTICK = '#C99A52';     // pale bamboo
+
 /**
  * Tapered limb segment: a flat cap at the joint origin (plugs flush into the
  * shoulder/hip, no gap) tapering down a straight wall to a rounded tip of radius
@@ -180,6 +192,15 @@ export class SushiCharacter extends BaseCharacter {
         handRadius: CHARACTER_HEIGHT * 0.088,    // big round rice-fist
         legRadius: CHARACTER_HEIGHT * 0.078,     // thick, stout
       },
+      // Poised and refined — arms held close in rather than out, a slight
+      // aloof over-the-shoulder glance. Distinct from every other stance in
+      // this file's own cast slice: the only near-symmetric, closed-arm pose.
+      stance: {
+        shoulderL: 0.04, shoulderR: -0.04,
+        elbowL: -0.58, elbowR: -0.58,
+        twist: -0.07, headTilt: 0.11, headTurn: -0.22,
+        hipSway: 0.02, lean: -0.02,
+      },
     });
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
@@ -188,7 +209,7 @@ export class SushiCharacter extends BaseCharacter {
     const head = this.rig.joints.head;
 
     // ── Materials ────────────────────────────────────────────────────────────
-    const riceMat = toonMat({ color: RICE, roughness: 0.65 });        // matte sticky rice
+    const riceMat = toonMat({ color: RICE, roughness: 0.76 });        // matte sticky rice — pushed further from the glossy nori/salmon for real contrast
     const noriMat = glossyMat({ color: NORI, roughness: 0.3 });       // glossy seaweed sheen
     const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });   // wet fish
     const salmonDarkMat = toonMat({ color: SALMON_DARK, roughness: 0.3 });
@@ -350,6 +371,7 @@ export class SushiCharacter extends BaseCharacter {
     this.buildFace(R, yAt, zAt);
     this.dressTorsoAsSushi();
     this.dressLimbs();
+    this.buildAccessories(R, yAt, zAt);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -494,6 +516,92 @@ export class SushiCharacter extends BaseCharacter {
     clasp.position.set(0, beltY, beltRadius + torsoH * 0.02);
     clasp.castShadow = true;
     this.rig.joints.torso.add(clasp);
+  }
+
+  /**
+   * Costume layer: a tied hachimaki headband — a thin ribbon wrap sitting in the
+   * clear band of rice between the nori belt and the salmon seam, with a knot and
+   * two trailing tails at the BACK of the head that project past the round rice
+   * silhouette (visible from the side/back angles, unlike anything else on this
+   * character's own face-forward front). A pair of chopsticks tucked into the
+   * torso sash is the smaller detail prop. Also adds a thin glossy highlight
+   * streak along the nori band's own top edge — the "glaze band" specular pop
+   * that sells wet seaweed rather than flat matte charcoal.
+   */
+  private buildAccessories(R: number, yAt: (h: number) => number, zAt: (x: number, h: number) => number): void {
+    const head = this.rig.joints.head;
+    const bandMat = toonMat({ color: HEADBAND, roughness: 0.55 });
+    const knotMat = toonMat({ color: HEADBAND_DARK, roughness: 0.55 });
+
+    // Ribbon wrap: a full thin ring at a height that sits in clear rice — above
+    // the nori belt (h 0.16-0.34), below the rice/salmon seam (h=0.63).
+    const bandH = 0.46;
+    const bandY = yAt(bandH);
+    const bandR = zAt(0, bandH) * 1.035; // proud of the rice surface at this height
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(bandR, bandR, R * 0.05, 28, 1, true),
+      bandMat
+    );
+    band.name = 'sushi_headband';
+    band.position.y = bandY;
+    band.castShadow = true;
+    head.add(band);
+
+    // Knot + tails at the back (theta = π, i.e. -Z) — the silhouette-breaking
+    // element: two tapered ribbon strips hanging down and flaring outward past
+    // the head's own round profile.
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(R * 0.09, 12, 10), knotMat);
+    knot.name = 'sushi_headband_knot';
+    knot.position.set(0, bandY, -bandR);
+    knot.scale.set(1.1, 0.85, 0.8);
+    knot.castShadow = true;
+    head.add(knot);
+
+    for (const sx of [-1, 1] as const) {
+      const tail = new THREE.Mesh(roundedBox(R * 0.11, R * 0.34, R * 0.025, R * 0.02, 2), bandMat);
+      tail.name = 'sushi_headband_tail';
+      tail.position.set(sx * R * 0.09, bandY - R * 0.20, -bandR - R * 0.05);
+      tail.rotation.set(0.25, 0, sx * 0.22);
+      tail.castShadow = true;
+      tail.receiveShadow = true;
+      head.add(tail);
+    }
+
+    // Glaze highlight streak along the nori band's own top edge — a bright,
+    // near-mirror sliver that reads as a photographed specular highlight on wet
+    // seaweed rather than the band's own flat glossy colour alone.
+    const noriTop = yAt(0.34);
+    const highlightMat = glossyMat({ color: '#E8E8E8', roughness: 0.08 });
+    const highlight = new THREE.Mesh(
+      new THREE.TorusGeometry(zAt(0, 0.32) * 1.005, R * 0.012, 6, 28, Math.PI * 0.5),
+      highlightMat
+    );
+    highlight.name = 'sushi_nori_highlight';
+    highlight.rotation.x = Math.PI / 2;
+    highlight.rotation.z = Math.PI * 0.65; // front-ish arc, the side a key light would catch
+    highlight.position.y = noriTop - R * 0.02;
+    highlight.userData.noOutline = true;
+    head.add(highlight);
+
+    // Chopsticks — a smaller detail prop, tucked crossed into the torso sash at
+    // the back, sized off the belt geometry `dressTorsoAsSushi` already built.
+    const height = CHARACTER_HEIGHT;
+    const shoulderWidth = height * 0.16;
+    const tw = shoulderWidth * 1.18;
+    const torsoH = height * 0.28;
+    const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85);
+    const beltRadius = tw * 0.5 * taperMid * 1.18;
+    const beltY = torsoH * 0.52;
+
+    const chopstickMat = toonMat({ color: CHOPSTICK, roughness: 0.5 });
+    for (const sx of [-1, 1] as const) {
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.012, R * 0.02, R * 0.62, 8), chopstickMat);
+      stick.name = 'sushi_chopstick';
+      stick.position.set(sx * beltRadius * 0.30, beltY + R * 0.10, -beltRadius * 0.85);
+      stick.rotation.set(0.35, 0, sx * 0.30);
+      stick.castShadow = true;
+      this.rig.joints.torso.add(stick);
+    }
   }
 
   protected onUpdate(ctx: AnimContext): void {

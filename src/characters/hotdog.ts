@@ -29,6 +29,21 @@ import { CHARACTER_HEIGHT } from '../units';
 
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0'
 
+// ── Costume layer ────────────────────────────────────────────────────────────
+// A fresh independent art director named the missing costume/accessory layer as
+// the TOP gap in the whole cast: without one, characters read as "naked mascot
+// body with a themed head glued on" no matter how good the body sculpt is. A
+// leather mustard-bottle holster slung on a bandolier strap is this character's
+// silhouette-breaking item — it projects past the body outline at the hip the
+// way a cape or backpack does on the reference roster — plus a knotted bandana
+// at the neck as a smaller "patterned fabric panel" detail.
+const HOLSTER_LEATHER = '#6B4226';
+const HOLSTER_TRIM = '#4A2E1A';
+const HOLSTER_BUCKLE = '#C9A227';
+const BANDANA = '#3E6B8A';      // cool contrast neckerchief — a fresh hue against the warm bun/meat palette
+const BANDANA_TRIM = '#2A4C63';
+const GRILL_MARK = '#7A4A1E';   // toasted griddle stripes on the bun
+
 /** Tapered limb: a flat cap at the joint origin (plugs flush, no gap) taper to a
  * rounded tip — the bun's own matte roughness, no capsule uniformity. */
 function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
@@ -107,6 +122,21 @@ function buildSausageFingers(R: number, side: 1 | -1, mat: THREE.Material): THRE
   return g;
 }
 
+/**
+ * A worn strap: a curved tube from `from` to `to`, bowed out through a control
+ * point offset by `bow` — the same bezier-tube technique `soup.ts`'s
+ * `buildHandleArc` uses for its bowl-handle arms, reused here for costume
+ * webbing that has to read as a draped bandolier rather than a rigid rod.
+ */
+function strapArc(from: THREE.Vector3, to: THREE.Vector3, bow: THREE.Vector3, radius: number, mat: THREE.Material): THREE.Mesh {
+  const mid = from.clone().add(to).multiplyScalar(0.5).add(bow);
+  const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+  const m = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, radius, 8, false), mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
 /** A chunky bun-dark boot with a ketchup-trim sole and cuff, wide and stubby to
  * match the sausage/bun proportions rather than the rig's thin default wedge. */
 function buildBunBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material): THREE.Group {
@@ -161,6 +191,16 @@ export class HotDogCharacter extends BaseCharacter {
         armRadius: CHARACTER_HEIGHT * 0.072,     // stubby, thick
         handRadius: CHARACTER_HEIGHT * 0.092,    // biggest bundled fist in the cast
         legRadius: CHARACTER_HEIGHT * 0.082,     // stubby, thick
+      },
+      // Slouched and sleepy — weight dropped onto one hip, one shoulder
+      // drooping low, head lolling to the side. Distinct from every other
+      // character's stance in this file's own cast slice: the only one with a
+      // real forward slump and asymmetric shoulder droop.
+      stance: {
+        shoulderL: 0.10, shoulderR: -0.38,
+        elbowL: -0.12, elbowR: -0.58,
+        twist: 0.22, headTilt: 0.24, headTurn: -0.10,
+        hipSway: 0.09, lean: 0.16,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -333,6 +373,7 @@ export class HotDogCharacter extends BaseCharacter {
 
     this.buildFace(R, SAUS_Y, SAUS_R);
     this.dressLimbs();
+    this.buildAccessories(R, head, { LOBE_Y, LOBE_DZ, LOBE_TILT, LOBE_LEN, LOBE_D, LOBE_H });
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -460,6 +501,135 @@ export class HotDogCharacter extends BaseCharacter {
       seg.quaternion.setFromUnitVectors(up, dir.clone().normalize());
       seg.castShadow = true;
       head.add(seg);
+    }
+  }
+
+  /**
+   * Costume layer: a mustard-bottle holster on a bandolier strap (the
+   * silhouette-breaking item), a knotted bandana at the neck, and toasted
+   * grill-mark stripes on the bun lobes — the "texture stripe" surface detail
+   * the material-fidelity note calls for, so the bread reads as griddled rather
+   * than one flat matte tan.
+   */
+  private buildAccessories(
+    R: number,
+    head: THREE.Group,
+    lobe: { LOBE_Y: number; LOBE_DZ: number; LOBE_TILT: number; LOBE_LEN: number; LOBE_D: number; LOBE_H: number }
+  ): void {
+    const shoulderWidth = CHARACTER_HEIGHT * 0.23; // must match rig's own proportions.shoulderWidth
+    const torsoH = CHARACTER_HEIGHT * 0.28;
+
+    const holsterMat = toonMat({ color: HOLSTER_LEATHER, roughness: 0.76 });
+    const buckleMat = toonMat({ color: HOLSTER_BUCKLE, roughness: 0.32, metalness: 0.5 });
+    const bottleMat = glossyMat({ color: PALETTE.mustard, roughness: 0.2 });
+
+    // The dressed split-bun torso (see the constructor's own `dressTorso` call)
+    // is custom geometry, not the rig's default barrel. Measuring its REAL
+    // half-width off the built mesh (root/hips/torso are all still at their
+    // identity rest transform here — `restPose()` runs at the very end of the
+    // constructor, so a world-space Box3 on `joints.torso` gives an exact
+    // local half-extent) fixed an earlier pass's under-estimate that buried
+    // the holster inside the body — but adding a flat clearance margin on TOP
+    // of that measurement overshot the other way, pushing the pouch out past
+    // the shoulder's own reach so it read as something HELD rather than WORN.
+    // The shoulder joint itself (`shoulderWidth`) is already the rig's own
+    // "clearly outside the torso" reference every arm uses, so anchoring there
+    // — capped against the measured torso only as a safety floor — keeps the
+    // holster snug against the body's own side instead of floating at arm's
+    // length, right where a hand would otherwise rest.
+    this.rig.joints.root.updateMatrixWorld(true);
+    const torsoBB = new THREE.Box3().setFromObject(this.rig.joints.torso);
+    const torsoHalfW = Math.max(Math.abs(torsoBB.min.x), Math.abs(torsoBB.max.x));
+
+    // Holster pouch: rides at true WAIST height (well above where even a
+    // tucked-elbow hand rests) on the LEFT side — the loose, low-hanging arm
+    // in this character's own slouched stance — so it can never coincide with
+    // where a hand naturally swings.
+    const pouchW = shoulderWidth * 0.32, pouchH = shoulderWidth * 0.58, pouchD = shoulderWidth * 0.24;
+    const holsterX = -Math.max(shoulderWidth * 0.85, torsoHalfW * 0.82);
+    const holsterPt = new THREE.Vector3(holsterX, torsoH * 0.36, shoulderWidth * 0.14);
+    const holster = new THREE.Mesh(roundedBox(pouchW, pouchH, pouchD, pouchW * 0.18, 3), holsterMat);
+    holster.name = 'hotdog_holster';
+    holster.position.copy(holsterPt);
+    holster.rotation.z = 0.12;
+    holster.castShadow = true;
+    holster.receiveShadow = true;
+    this.rig.joints.torso.add(holster);
+
+    // Mustard-bottle prop nestled in the holster, nozzle peeking above the pouch.
+    const bottle = new THREE.Group();
+    bottle.name = 'hotdog_mustard_bottle';
+    bottle.position.copy(holsterPt).add(new THREE.Vector3(0, pouchH * 0.32, pouchD * 0.15));
+    const bottleBody = new THREE.Mesh(new THREE.CylinderGeometry(pouchW * 0.32, pouchW * 0.36, pouchH * 0.55, 10), bottleMat);
+    bottleBody.castShadow = true;
+    bottle.add(bottleBody);
+    const nozzle = new THREE.Mesh(new THREE.ConeGeometry(pouchW * 0.16, pouchH * 0.16, 8), bottleMat);
+    nozzle.position.y = pouchH * 0.35;
+    nozzle.castShadow = true;
+    bottle.add(nozzle);
+    this.rig.joints.torso.add(bottle);
+
+    // Bandolier strap: opposite (right) shoulder, diagonally down the chest to
+    // the left-hip holster — the actual silhouette-breaking read. Anchored at
+    // natural shoulder height (not up near the neck) and given a real bow so
+    // it reads as draped fabric rather than a rigid rod crossing the chest.
+    const shoulderPt = new THREE.Vector3(shoulderWidth * 0.60, torsoH * 0.78, shoulderWidth * 0.18);
+    const strap = strapArc(shoulderPt, holsterPt.clone().add(new THREE.Vector3(0, pouchH * 0.35, 0)), new THREE.Vector3(-shoulderWidth * 0.15, 0, shoulderWidth * 0.45), shoulderWidth * 0.06, holsterMat);
+    strap.name = 'hotdog_bandolier';
+    this.rig.joints.torso.add(strap);
+
+    const buckle = new THREE.Mesh(new THREE.CylinderGeometry(pouchW * 0.14, pouchW * 0.14, pouchW * 0.06, 10), buckleMat);
+    buckle.name = 'hotdog_holster_buckle';
+    buckle.rotation.x = Math.PI / 2;
+    buckle.position.copy(holsterPt).add(new THREE.Vector3(0, pouchH * 0.10, pouchD * 0.55));
+    buckle.castShadow = true;
+    this.rig.joints.torso.add(buckle);
+
+    // Bandana: a knotted triangular neckerchief at the base of the neck — the
+    // "patterned fabric panel" detail item, a cool hue breaking up the warm
+    // bun/meat/condiment palette.
+    const bandanaMat = toonMat({ color: BANDANA, roughness: 0.62 });
+    const bandanaTrimMat = toonMat({ color: BANDANA_TRIM, roughness: 0.55 });
+    const bTopY = torsoH * 0.96;
+    const triShape = new THREE.Shape();
+    triShape.moveTo(-shoulderWidth * 0.30, bTopY);
+    triShape.lineTo(shoulderWidth * 0.30, bTopY);
+    triShape.lineTo(0, bTopY - shoulderWidth * 0.42);
+    triShape.lineTo(-shoulderWidth * 0.30, bTopY);
+    const bandanaDepth = shoulderWidth * 0.03;
+    const bandana = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(triShape, { depth: bandanaDepth, bevelEnabled: true, bevelThickness: bandanaDepth * 0.4, bevelSize: bandanaDepth * 0.4, bevelSegments: 2, curveSegments: 8 }),
+      bandanaMat
+    );
+    bandana.name = 'hotdog_bandana';
+    bandana.position.z = shoulderWidth * 0.55;
+    bandana.castShadow = true;
+    bandana.receiveShadow = true;
+    this.rig.joints.torso.add(bandana);
+
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(shoulderWidth * 0.06, 10, 8), bandanaTrimMat);
+    knot.name = 'hotdog_bandana_knot';
+    knot.position.set(0, bTopY, -shoulderWidth * 0.50);
+    knot.castShadow = true;
+    this.rig.joints.torso.add(knot);
+
+    // Grill-mark stripes on the front bun lobe — built in a group that mirrors
+    // the lobe mesh's own transform exactly, so marks land proud of its curved
+    // front face rather than floating or sinking into it.
+    const grillMat = toonMat({ color: GRILL_MARK, roughness: 0.78 });
+    const grillGroup = new THREE.Group();
+    grillGroup.name = 'hotdog_grill_marks';
+    grillGroup.position.set(0, lobe.LOBE_Y, lobe.LOBE_DZ);
+    grillGroup.rotation.x = lobe.LOBE_TILT;
+    head.add(grillGroup);
+    const markXs = [-0.32, -0.10, 0.14, 0.36];
+    for (const mx of markXs) {
+      const mark = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.018, R * 0.30, 3, 6), grillMat);
+      mark.name = 'hotdog_grill_mark';
+      mark.position.set(mx * lobe.LOBE_LEN, lobe.LOBE_H * 0.05, lobe.LOBE_D * 0.52);
+      mark.rotation.set(Math.PI / 2, 0, 0.55);
+      mark.userData.noOutline = true;
+      grillGroup.add(mark);
     }
   }
 

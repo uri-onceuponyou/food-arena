@@ -43,6 +43,18 @@ const NOODLE = '#F2D98A';
 const NOODLE_DARK = '#D9B85E';
 const WOOD = '#8A5A34';          // ladle handle
 
+// ── Costume layer ────────────────────────────────────────────────────────────
+// A fresh independent art director named the missing costume/accessory layer as
+// the TOP gap in the whole cast: without one, characters read as "naked mascot
+// body with a themed head glued on" no matter how good the body sculpt is. A
+// spare ladle worn on a diagonal back-sling is Soup's silhouette-breaking item —
+// its handle pokes up past the shoulder line the way a cape or backpack does on
+// the reference roster — plus a tied napkin bib layered over the existing apron
+// sash as a smaller fabric-panel detail.
+const BIB = '#FBF7EE';       // pale napkin cloth, warmer than pure white
+const SLING = '#6B4226';     // leather sling strap
+const SLING_DARK = '#4A2E1A';
+
 /**
  * Tapered limb segment: a flat cap at the joint origin (plugs flush into the
  * shoulder/hip, no gap) tapering down a straight wall to a rounded tip. Reused here
@@ -136,6 +148,21 @@ function buildHandleArc(
   return g;
 }
 
+/**
+ * A worn strap: a curved tube from `from` to `to`, bowed out through a control
+ * point offset by `bow` — the same bezier-tube technique `buildHandleArc` above
+ * uses, reused here for costume webbing that has to read as cloth draped over a
+ * body rather than a rigid straight rod.
+ */
+function strapArc(from: THREE.Vector3, to: THREE.Vector3, bow: THREE.Vector3, radius: number, mat: THREE.Material): THREE.Mesh {
+  const mid = from.clone().add(to).multiplyScalar(0.5).add(bow);
+  const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+  const m = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, radius, 8, false), mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
 /** A sturdy little foot pad — a low, wide plate rather than a tall boot, echoing a
  * heavy vessel resting on stubby feet directly under its own base, dark against the
  * pale ceramic legs. */
@@ -197,6 +224,16 @@ export class SoupCharacter extends BaseCharacter {
         armRadius: CHARACTER_HEIGHT * 0.095,      // thick handle stock
         handRadius: CHARACTER_HEIGHT * 0.062,     // small rounded cap, not a mitt
         legRadius: CHARACTER_HEIGHT * 0.105,      // thickest, stubbiest legs in the cast
+      },
+      // Serene and still — the calmest, most nearly-neutral stance in the cast,
+      // matching the unsettling-patient no-mouth-then-mouth face. Distinct from
+      // every other character's stance in this file's own slice: the only one
+      // with almost no shoulder/elbow swing or head turn at all.
+      stance: {
+        shoulderL: 0.08, shoulderR: -0.06,
+        elbowL: -0.14, elbowR: -0.10,
+        twist: 0.02, headTilt: 0.03, headTurn: 0.0,
+        hipSway: 0.0, lean: 0.0,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -343,6 +380,7 @@ export class SoupCharacter extends BaseCharacter {
     this.buildLadle();
     this.dressTorsoAsSoup();
     this.dressLimbs();
+    this.buildAccessories(R, bowlSurface);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -580,6 +618,122 @@ export class SoupCharacter extends BaseCharacter {
       cap.position.y = beltY + dy;
       this.rig.joints.torso.add(cap);
     }
+  }
+
+  /**
+   * Costume layer: a spare ladle worn on a diagonal back-sling (handle poking up
+   * past the shoulder — the silhouette-breaking element), a tied napkin bib
+   * layered above the existing apron sash, and a bright ceramic glaze-highlight
+   * streak climbing the bowl's own belly — the "glossy specular rim" for
+   * ceramic the material-fidelity note calls for by name.
+   */
+  private buildAccessories(R: number, bowlSurface: (theta: number, hFrac: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }): void {
+    const head = this.rig.joints.head;
+    const height = CHARACTER_HEIGHT;
+    const shoulderWidth = height * 0.235; // must match rig's own proportions.shoulderWidth
+    const torsoH = height * 0.28;
+
+    // ── Napkin bib ────────────────────────────────────────────────────────────
+    // A tied cloth bib hanging from the neck over the chest, layered above the
+    // sash built in `dressTorsoAsSoup` so the body reads as dressed in two
+    // garment pieces rather than one flat colour — reinforcing the exact
+    // "garment, not paint-on-a-blob" read the critic already praised.
+    const bibMat = toonMat({ color: BIB, roughness: 0.62 });
+    const bibTrimMat = toonMat({ color: RIM_TRIM, roughness: 0.42 });
+    const bTopY = torsoH * 0.94, bBotY = torsoH * 0.42;
+    const bHalfW = shoulderWidth * 0.30;
+    const midY = (bTopY + bBotY) / 2;
+    const bibShapeAt = (scale: number): THREE.Shape => {
+      const sc = (y: number) => midY + (y - midY) * scale;
+      const s = new THREE.Shape();
+      s.moveTo(0, sc(bTopY));
+      s.lineTo(bHalfW * scale * 0.35, sc(bTopY - (bTopY - bBotY) * 0.12));
+      s.lineTo(bHalfW * scale, sc(bBotY + (bTopY - bBotY) * 0.22));
+      s.quadraticCurveTo(0, sc(bBotY - (bTopY - bBotY) * 0.12), -bHalfW * scale, sc(bBotY + (bTopY - bBotY) * 0.22));
+      s.lineTo(-bHalfW * scale * 0.35, sc(bTopY - (bTopY - bBotY) * 0.12));
+      s.lineTo(0, sc(bTopY));
+      return s;
+    };
+    const bibDepth = shoulderWidth * 0.05;
+    const bibOuter = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(bibShapeAt(1.0), { depth: bibDepth, bevelEnabled: true, bevelThickness: bibDepth * 0.3, bevelSize: bibDepth * 0.3, bevelSegments: 2, curveSegments: 16 }),
+      bibTrimMat
+    );
+    bibOuter.name = 'soup_bib_trim';
+    bibOuter.position.z = shoulderWidth * 0.60;
+    bibOuter.castShadow = true;
+    bibOuter.receiveShadow = true;
+    this.rig.joints.torso.add(bibOuter);
+
+    const innerDepth = bibDepth * 0.6;
+    const bibInner = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(bibShapeAt(0.80), { depth: innerDepth, bevelEnabled: true, bevelThickness: innerDepth * 0.3, bevelSize: innerDepth * 0.3, bevelSegments: 2, curveSegments: 16 }),
+      bibMat
+    );
+    bibInner.name = 'soup_bib';
+    bibInner.position.z = shoulderWidth * 0.60 + bibDepth;
+    bibInner.castShadow = true;
+    bibInner.receiveShadow = true;
+    this.rig.joints.torso.add(bibInner);
+
+    const tie = new THREE.Mesh(new THREE.CapsuleGeometry(shoulderWidth * 0.018, shoulderWidth * 0.42, 4, 8), bibTrimMat);
+    tie.name = 'soup_bib_tie';
+    tie.rotation.z = Math.PI / 2;
+    tie.position.set(0, bTopY + shoulderWidth * 0.02, shoulderWidth * 0.44);
+    tie.castShadow = true;
+    this.rig.joints.torso.add(tie);
+
+    // ── Back-sling ladle ──────────────────────────────────────────────────────
+    // Placement rule: the rig's thighs hang straight DOWN from y=0 in this same
+    // torso-local frame, so the sling's low end stays at y ≥ torsoH*0.28 —
+    // comfortably above the hip line, clear of the cast's thickest legs.
+    const slingMat = toonMat({ color: SLING, roughness: 0.76 });
+    const shoulderPt = new THREE.Vector3(shoulderWidth * 0.48, torsoH * 0.97, -shoulderWidth * 0.18);
+    const hipPt = new THREE.Vector3(-shoulderWidth * 0.40, torsoH * 0.30, -shoulderWidth * 0.55);
+    const sling = strapArc(shoulderPt, hipPt, new THREE.Vector3(shoulderWidth * 0.05, 0, -shoulderWidth * 0.30), shoulderWidth * 0.06, slingMat);
+    sling.name = 'soup_ladle_sling';
+    this.rig.joints.torso.add(sling);
+
+    const dir = shoulderPt.clone().sub(hipPt).normalize();
+    const miniLadle = new THREE.Group();
+    miniLadle.name = 'soup_sling_ladle';
+    miniLadle.position.copy(hipPt).addScaledVector(dir, shoulderWidth * 0.05);
+    miniLadle.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    this.rig.joints.torso.add(miniLadle);
+
+    const handleMat = toonMat({ color: WOOD, roughness: 0.6 });
+    const handle = new THREE.Mesh(new THREE.CapsuleGeometry(shoulderWidth * 0.024, shoulderWidth * 0.55, 4, 8), handleMat);
+    handle.name = 'soup_sling_ladle_handle';
+    handle.position.y = shoulderWidth * 0.30;
+    handle.castShadow = true;
+    miniLadle.add(handle);
+
+    const scoopMat = glossyMat({ color: '#C7CDD4', roughness: 0.3, metalness: 0.4 });
+    const scoop = new THREE.Mesh(new THREE.SphereGeometry(shoulderWidth * 0.13, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), scoopMat);
+    scoop.name = 'soup_sling_ladle_scoop';
+    scoop.rotation.x = Math.PI;
+    scoop.position.y = -shoulderWidth * 0.04;
+    scoop.castShadow = true;
+    miniLadle.add(scoop);
+
+    // ── Glaze highlight ───────────────────────────────────────────────────────
+    // A bright, near-mirror streak climbing the bowl's own belly, off to one
+    // side clear of the face/rim-trim — the photographed ceramic specular pop
+    // the material-fidelity note calls for by name.
+    const stripeTheta = -1.15;
+    const stripePts: THREE.Vector3[] = [];
+    for (let i = 0; i <= 4; i++) {
+      const h = 0.30 + (i / 4) * 0.45;
+      const { pos, normal } = bowlSurface(stripeTheta, h);
+      const outward = new THREE.Vector3(normal.x, normal.y * 0.3, normal.z).normalize();
+      stripePts.push(pos.clone().addScaledVector(outward, R * 0.015));
+    }
+    const stripeCurve = new THREE.CatmullRomCurve3(stripePts);
+    const highlightMat = glossyMat({ color: '#FFFCF5', roughness: 0.06 });
+    const highlight = new THREE.Mesh(new THREE.TubeGeometry(stripeCurve, 16, R * 0.02, 8, false), highlightMat);
+    highlight.name = 'soup_glaze_highlight';
+    highlight.userData.noOutline = true;
+    head.add(highlight);
   }
 
   protected onUpdate(ctx: AnimContext): void {
