@@ -36,15 +36,41 @@ improvement ever gets credit.
 5. Builder self-scores are NOT verdicts. They have run 2–4 points above independent
    critics all project.
 
+### ISOLATION EARNED THE SCALE-OUT
+
+Uri's condition was *"if it proves itself do it scale — on every element we failed to
+improve, isolate, review, fix, each element in its own improvement loop."* It proved
+itself three separate ways, so every plateaued element now has its own loop:
+
+1. **Floor** — flat 3/10 across five rounds judged in the full arena; peaked **6/10**
+   once judged on the `piece=floor` clean slate. The isolation also revealed that the
+   default centred crop sat almost entirely inside the pot hazard's radius, so critics
+   had been scoring nearly bare tile.
+2. **Silhouettes** — one render of the cast as pure black on white (`silhouette=1`) did
+   what five rounds of prose critique could not: it named *which* characters fail.
+   Lollipop, Pizza, Donut, Taco, Soup, Egg read distinctly; **Burrito, Sushi and Water
+   Bottle collapse into generic blobs.** It also showed every body is nearly identical,
+   so essentially all identifying information lives in the head — the measurable form of
+   the recurring "one template with different heads" complaint.
+3. **The checker probe** — root-caused a five-round blocker in about ten minutes.
+
+The general lesson: **an element judged inside a busy shared scene is scored on the
+scene.** Cover props lost a round to a neighbouring spice cart that wasn't under review.
+Isolate first, then loop.
+
 ### Element scoreboard
 
 | Element | Owner files | Status |
 |---|---|---|
 | **HUD** | `src/ui/hud.ts` | ✅ **Beat the shipped reference in a blind test** — critic scored the shipped side 5/10 and ours higher |
-| Lighting & post | `src/render/lighting.ts`, `stage.ts` | 5/10 after 5 rounds, capped |
-| Combat VFX | `src/game/vfx.ts` | loop running |
-| Arena (whole) | `src/arena/*` | 4/10 — being split into per-element modules |
-| Characters (whole) | `src/characters/*` | **PARKED at 4/10** — do not resume unless asked |
+| Floor | `src/arena/floor.ts` | 4.5/10, peak 6 — texture blocker now cleared, loop resumed |
+| Tile/prop textures | `src/arena/textures.ts` | ✅ frequency bug fixed, grain verified visible |
+| Lighting & post | `src/render/lighting.ts`, `stage.ts` | 5/10 capped — loop running, building a neutral probe scene |
+| Cover props | `src/arena/props/*` | 3,4,3,3,4 capped — loop running, per-prop isolation |
+| Hazards | `src/arena/hazards.ts` | 6,6.5,6,5,6 — capped by colour semiotics (every hue collided with a genre meaning). Now reworked to Uri's design: render grease/water plainly, react on contact |
+| Combat VFX | `src/game/vfx.ts`, `src/vfx/weapons/*` | 3,4,4,3,3.5 capped — per-weapon agents, one per weapon |
+| Burrito / Sushi / Water Bottle | `src/characters/<id>.ts` | loops running — the three the silhouette test named |
+| Characters (rest) | `src/characters/*` | **PARKED at 4/10** — do not resume unless asked |
 
 ### Score histories
 
@@ -56,32 +82,37 @@ TOPOLOGY and where the FACE LIVES. What didn't: colour and proportion changes. A
 full-body-reference experiment was run to test whether the plateau was a framing
 artifact — **no score change**, so it was parked, not adopted.
 
-### Arena element loops — queued, blocked on the split
+### Arena element loops — the split landed
 
-`kitchen.ts` (2,495 lines) is being split into `props/counters.ts`, `props/storage.ts`,
-`props/smallProps.ts`, `floor.ts`, `hazards.ts`, `ambient.ts`, `shared.ts`. The split
-must be **behaviour-preserving**, proven by a numeric per-pixel diff of before/after
-renders (deterministic: frozen `t`, seeded texture LCG).
+`kitchen.ts` (2,495 lines) is now `props/counters.ts`, `props/storage.ts`,
+`props/smallProps.ts`, `floor.ts`, `hazards.ts`, `ambient.ts`, `shared.ts`, with
+`kitchen.ts` as the assembler. Behaviour preservation was proven by numeric per-pixel
+diff of before/after renders (deterministic: frozen `t`, seeded texture LCG) at
+0.0007–0.0039/255 — the harness noise floor, from an unseeded `Math.random()` in the
+dust field. A scarier ~6.9/255 reading turned out to be a Vite cache artifact, proven by
+hand-reconstructing the original monolith and A/B testing that it affected old and new
+code identically.
 
-Once landed, fan out one agent per module. Isolate a single prop with
-`preview.html?piece=prop&kind=<kind>` — gameplay pitch, character beside it for scale.
-Kinds: `stove_island prep_counter sink_counter fryer_counter freezer supply_barrel
-produce_crate_tall herb_crate flour_sacks stacked_pots spice_cart`.
+Isolate a single prop with `preview.html?piece=prop&kind=<kind>` — gameplay pitch,
+character beside it for scale. Kinds: `stove_island prep_counter sink_counter
+fryer_counter freezer supply_barrel produce_crate_tall herb_crate flour_sacks
+stacked_pots spice_cart`.
 
-**Known cross-element conflict to resolve there:** `kitchen.ts` bakes its own soft radial
-cast-shadow decal under every prop. The lighting loop REGRESSED to 3/10 in one round
-because widening SSAO stacked a third soft darkening layer on top of that decal AND the
-real shadow map — a critic read the mush as one directionless blob. Now that real shadows
-are crisp, those decals are likely redundant and harmful. **Test removing them.** This is
-exactly what the whole-arena scan exists to catch: element owners optimising locally can
-fight each other.
+**Known cross-element conflict, still unresolved:** the arena bakes its own soft radial
+cast-shadow decal under every prop, from back when real shadows were mushy. The lighting
+loop REGRESSED to 3/10 in one round because widening SSAO stacked a third soft darkening
+layer on top of that decal AND the real shadow map — a critic read the mush as one
+directionless blob. Now that real shadows are crisp, those decals are likely redundant
+and harmful. **Both the lighting and props loops have been asked to test removing them.**
+This is exactly what the whole-arena scan exists to catch: element owners optimising
+locally can fight each other.
 
 ---
 
 ## THE PATTERN THAT KEEPS COSTING TIME
 
 **When a critic says "X isn't there", check whether X is rendering and INVISIBLE before
-concluding it is missing.** True cause three separate times:
+concluding it is missing.** True cause six separate times:
 
 1. Sesame seeds placed at a mesh's front landed on its hidden back face — the mesh is
    flipped 180° about X, which negates Z.
@@ -89,10 +120,53 @@ concluding it is missing.** True cause three separate times:
    — buried inside the floor, visible only through grout gaps.
 3. The HUD cooldown wipe was dark-on-dark against a dark card. Three critics reported
    "no visible cooldown" across three rounds before it was root-caused.
+4. Headless screenshot readback took seconds while sub-300ms VFX had already decayed.
+5. Splash particles spawned at y=0.06, *underneath* the puddle decal stack at 0.15–0.25.
+   Transparent materials that never set `depthWrite:false` still write depth, so they
+   silently occlude anything behind or beneath them.
+6. Arena textures were wired correctly and still invisible — but see below, because the
+   reason was NOT the one everyone assumed.
 
-Related: arena textures were wired correctly and still invisible, because ±5–10% value
-swings get crushed once multiplied against dark saturated bases and pushed through the
-contrast pass. Needed 0.5–0.6 depth.
+### The probe technique — prove it, don't infer it
+
+The tile texture was called invisible for five rounds. The fix was to replace the
+generator's output with a **garish 4x4 red/cyan checker** and render `piece=floor`. It
+came back crisp and full-contrast, which *disproved* the whole invisible-wiring theory
+in one shot: UVs, `toonMat`'s `map` forwarding, instancing and repeat were all healthy.
+
+Do this first, always. A 10-minute unmissable-value probe beats hours of reading code
+and beats five rounds of guessing. The pattern above is a prompt to **test**, not a
+conclusion to reach.
+
+### What the real bug was: spatial frequency, not contrast
+
+A tile texture maps 0..1 across ONE tile. The old generator drew five soft blobs of
+radius 0.22–0.46 — features the same size as the tile carrying them. That cannot read
+as surface detail; it reads as "this tile is slightly tinted", which is precisely what
+five critics reported as *"a single flat fill per cell."* Shrinking tiles 100→40wu made
+it worse, not better.
+
+**`map` is a property of the MATERIAL, not the instance.** The whole floor ran on two
+texture variants, so the old "2–3 directional scuffs" were stamped identically onto
+every light tile — hundreds of copies of one scuff. **Any recognisable mark in a tiling
+texture becomes a visible repeat.** Detail must be isotropic, or it reads as a stamp.
+
+Own the three bands separately. This generalises to every tiling surface in the project:
+
+| Band | Owner | Notes |
+|---|---|---|
+| HIGH — sub-tile grain, pebble tooth | the texture | isotropic, no landmarks |
+| MID — feature the size of one tile | **nobody** | reads as flat tint AND repeats |
+| LOW — wear across many tiles | `instanceColor` / vertex colour | macro variation |
+
+Also: `finishTexture` never set `anisotropy`. On a tilted top-down rig the floor and
+every counter top are sampled at a grazing angle for most of the frame, where anisotropy
+1 averages detail into mush — every grain texture was fighting that before it drew a
+pixel. Now 8 (three.js clamps to hardware max).
+
+The older contrast finding still holds and is separate: ±5–10% value swings get crushed
+once multiplied against dark saturated bases and pushed through the contrast pass.
+Needed 0.5–0.6 depth.
 
 ## Other hard-won traps
 
@@ -135,6 +209,9 @@ Preview harness — `preview.html?`:
 - `piece=roster` — all 11 lined up
 - `piece=arena&t=<sec>&tx=<worldX>&ty=<worldY>&view=overview|gameplay&chars=0`
 - `piece=prop&kind=<kind>` — single prop, gameplay pitch, character for scale
+- `piece=floor` — floor alone, no props/hazards. Params `tx`/`ty`/`zoom`/`pitch` (700/500/265/58)
+- `silhouette=1` — everything pure black on white. The single most diagnostic shot we have
+- `face=1` — face detail alone
 
 Real game — `/?simSpeed=<n>&player=<id>&enemy=<id>`. Static shots often miss brief
 effects; **script Playwright** to drive input and wait on a condition instead.
@@ -182,10 +259,26 @@ filmic tonemapping (it desaturates); IBL + SSAO on.
 
 ## Next actions
 
-1. Land the arena split (behaviour-preserving, per-pixel diff proven).
-2. Fan out one agent per arena module, each looping to 7/10.
-3. Wire the periodic whole-arena scanner as the real scoreboard — element scores will
+1. **Six element loops are running** — floor, lighting, cover props, and Burrito / Sushi /
+   Water Bottle. Plus per-weapon VFX. Collect verdicts, commit what passes its gate.
+2. Wire the periodic whole-arena scanner as the real scoreboard — element scores will
    read higher than the whole, because a critic judging one barrel isn't weighing
-   composition or density. Optimising the easier metric is the risk to avoid.
-4. Resolve the authored-shadow-decal vs real-shadow conflict.
-5. Nobody has played a full match at real framerate and judged how it FEELS.
+   composition or density. **Optimising the easier metric is the standing risk of this
+   entire working model** and the scanner is the only thing that catches it.
+3. Resolve the authored-shadow-decal vs real-shadow conflict (both loops are testing it).
+4. **Give every character a distinct BODY.** The silhouette test showed all identifying
+   information currently lives in the head. Fixing the three named blobs is necessary but
+   not sufficient — the shared body plan is the deeper cause.
+5. Isolation modes still unbuilt: **motion filmstrip** (every character critique so far
+   has judged stills, yet "reads like a turntable render" is a complaint about motion,
+   which is entirely unassessed), and **ambient effects alone** (steam, dust, flame are
+   invisible in a busy frame).
+6. Nobody has played a full match at real framerate and judged how it FEELS.
+
+### Two known measurement weaknesses
+
+- **Inter-critic variance is real.** Two fresh critics scored comparable material 5 and
+  4. Treat a single round's score as noisy; trust the trend across rounds.
+- **Blindness is imperfect.** A critic who recognises Brawl Stars is identifying the
+  reference by IP, not judging it on quality. Nothing fixes this fully — it is a reason
+  to weight *named specific gaps* over the number.
