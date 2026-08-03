@@ -30,7 +30,7 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   // Warm key — the sun. Slightly off-axis so shadows fall down-right.
   // Deliberately restrained: in the reference, the key does shaping, NOT contrast.
   // Most of the illumination comes from the very bright fill below.
-  const key = new THREE.DirectionalLight(0xfff4de, 1.9);
+  const key = new THREE.DirectionalLight(0xfff4de, 3.1);
   key.position.set(9, 16, 7);
   key.castShadow = true;
   key.shadow.mapSize.set(mapSize, mapSize);
@@ -45,17 +45,17 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   // The workhorse. Reference frames are HIGH-KEY: shadow sides stay bright and
   // saturated, never murky. A strong sky/bounce hemisphere is what produces that —
   // it lifts every unlit surface without flattening form the way raw ambient does.
-  const fill = new THREE.HemisphereLight(0xdcefff, 0xffc79a, 1.45);
+  const fill = new THREE.HemisphereLight(0xdcefff, 0xffc79a, 0.95);
   group.add(fill);
 
   // Cool rim from behind — the separation light that pops characters off the floor.
-  const rim = new THREE.DirectionalLight(0xaddcff, 0.65);
+  const rim = new THREE.DirectionalLight(0xaddcff, 1.05);
   rim.position.set(-8, 7, -11);
   rim.castShadow = false;
   group.add(rim);
 
   // Flat lift so nothing ever reads as a dead black hole.
-  const ambient = new THREE.AmbientLight(0xffffff, 0.18);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.10);
   group.add(ambient);
 
   const focus = (x: number, z: number, radius = shadowRadius) => {

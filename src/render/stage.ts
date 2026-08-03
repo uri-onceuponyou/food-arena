@@ -129,8 +129,8 @@ export class Stage {
         samples: 16,
         rings: 5,
         radius: 0.06,
-        intensity: 2.0,
-        resolutionScale: 0.75,
+        intensity: 3.2,
+        resolutionScale: 0.85,
       });
     }
 
