@@ -321,6 +321,11 @@ export class VfxLayer {
   constructor(scene: THREE.Scene) {
     this.group.name = 'vfx_layer';
     scene.add(this.group);
+    // TEMP QA HOOK — lets a Playwright driver introspect live pool state (mesh
+    // visibility/opacity/position) when a screenshot alone can't tell whether an
+    // effect actually rendered vs. was mistimed. Harmless in production (just an
+    // extra object reference), and cheap to strip later.
+    (window as unknown as { __vfxDebugLayer?: unknown }).__vfxDebugLayer = this;
 
     for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
       const mat = new THREE.SpriteMaterial({

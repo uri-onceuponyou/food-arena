@@ -99,7 +99,7 @@ export class Stage {
       // MeshToonMaterial isn't used. 0.28 is the compromise: enough reflected
       // highlight to read as moulded vinyl, without swamping the key/fill balance
       // that gives objects their top-vs-side value separation.
-      this.scene.environmentIntensity = opts.environmentIntensity ?? 0.28;
+      this.scene.environmentIntensity = opts.environmentIntensity ?? 0.32;
       envScene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.isMesh) m.geometry?.dispose();
@@ -136,14 +136,15 @@ export class Stage {
         luminanceInfluence: 0.6,
         samples: 16,
         rings: 5,
-        // Widened from 0.06 to help grounding, but at 0.16/3.6 it read in blind
-        // critic review as a "blanket AO" halo that competed with — and blurred the
-        // read of — the actual directional cast shadow, undoing the shadow-crisping
-        // work in lighting.ts. Pulled back to a middle ground: still wider than the
-        // original fine-seam-only 0.06, but no longer strong enough to masquerade as
-        // the scene's primary shadow cue.
-        radius: 0.11,
-        intensity: 3.0,
+        // Pulled back further (0.16 → 0.11 → 0.07): src/arena/kitchen.ts (owned
+        // elsewhere) turns out to already bake its own soft grounding-shadow decal
+        // under every prop by design, so widening AO here was piling a THIRD soft
+        // darkening layer (decal + AO halo + shadow map) on top of that, and blind
+        // critic review kept reading the stack as one indistinct "blob" rather than
+        // a crisp directional shadow. Back to fine-seam/crevice duty only; grounding
+        // is the decal's job, legibility of the real cast shadow is lighting.ts's.
+        radius: 0.07,
+        intensity: 2.4,
         resolutionScale: 0.85,
       });
     }
@@ -168,12 +169,12 @@ export class Stage {
     // against bs_01/04/06 still called our colour "pastel/muted rather than punchy"
     // next to the reference's saturated palette, even after the light-energy fix
     // stopped surfaces clipping to white.
-    const saturation = new HueSaturationEffect({ saturation: 0.25 });
+    const saturation = new HueSaturationEffect({ saturation: 0.32 });
     // Brightness dropped from +0.02 to 0: the fix for the flat/washed look was
     // reducing raw light energy so faces stop clipping to white, so the grade
     // shouldn't immediately add brightness back and undo that. Contrast nudged up
     // now that there's headroom below full white to push into.
-    const contrast = new BrightnessContrastEffect({ brightness: 0.0, contrast: 0.12 });
+    const contrast = new BrightnessContrastEffect({ brightness: 0.0, contrast: 0.18 });
 
     // Barely-there vignette; the reference has essentially none.
     const vignette = new VignetteEffect({

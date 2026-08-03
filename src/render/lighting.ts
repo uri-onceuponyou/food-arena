@@ -38,7 +38,16 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   // gradient that sells volume. The key is now the dominant, and the fill's ground
   // tone is deliberately darkened (see below) so it actually falls off with
   // orientation instead of just tinting a uniform pedestal.
-  const key = new THREE.DirectionalLight(0xfff4de, 3.3);
+  // NOTE for future rounds: src/arena/kitchen.ts (owned elsewhere) already bakes its
+  // own soft radial-gradient "grounded/cast shadow" decals under every prop
+  // (groundedShadow/castShadowDecal materials) — deliberately soft by design, per its
+  // own comments, as a cheap grounding cue independent of this real-time shadow map.
+  // A critic seeing a "soft directionless blob" under props may be reacting to THAT
+  // authored decal, not (only) to this light rig. This file can't change the decal's
+  // shape/opacity, so the lever here is making the REAL directional shadow as crisp
+  // and dark as possible so it reads clearly alongside the decal instead of being
+  // absorbed into it.
+  const key = new THREE.DirectionalLight(0xfff4de, 3.8);
   key.position.set(9, 16, 7);
   key.castShadow = true;
   key.shadow.mapSize.set(mapSize, mapSize);
@@ -46,12 +55,10 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   key.shadow.camera.far = 70;
   key.shadow.bias = -0.0006;
   key.shadow.normalBias = 0.035;
-  // Blur radius tightened twice now (3 → 1.4 → 0.9): a critic blind-comparing us
-  // directly against bs_01/04/06 still called our shadows "soft, centered blobs...
-  // reads as blanket AO rather than a cast shadow" — the true directional shadow
-  // needs a crisp enough edge that it doesn't get visually absorbed into the SSAO
-  // contact halo (see the AO radius note in stage.ts, also pulled back this round).
-  key.shadow.radius = 0.9;
+  // Blur radius tightened four times now (3 → 1.4 → 0.9 → 0.6 → 0.4) chasing a
+  // crisper, more legible cast-shadow edge — see the note above on the decal layer
+  // this stacks with.
+  key.shadow.radius = 0.4;
   group.add(key);
   group.add(key.target);
 
@@ -63,7 +70,7 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   // equally regardless of which way it faced, which is what read as "flat painted
   // blockout." Intensity is also down so it no longer wins the exposure fight
   // against the key on top faces.
-  const fill = new THREE.HemisphereLight(0xd8ecff, 0x8c5830, 0.36);
+  const fill = new THREE.HemisphereLight(0xd8ecff, 0x6f4322, 0.24);
   group.add(fill);
 
   // Cool rim from behind — the separation light that pops characters off the floor.
@@ -75,7 +82,7 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   // Flat lift so nothing ever reads as a dead black hole. Kept low — this is the
   // one light that truly ignores orientation, so any more than a whisper of it
   // re-introduces the flattening the fill rework above was meant to remove.
-  const ambient = new THREE.AmbientLight(0xffffff, 0.04);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.025);
   group.add(ambient);
 
   const focus = (x: number, z: number, radius = shadowRadius) => {

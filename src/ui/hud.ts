@@ -130,16 +130,23 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         </div>
       </div>
 
-      <!-- Deliberately NO name text here — the top-corner nameplates are the one
-           canonical place to read "who is who"; repeating it here just split
-           attention between two labels for the same two fighters. This notch is
-           purely a spatial "how hurt is the thing I'm looking at" cue, so it's
-           just a bar — nothing to read, only to glance at. -->
+      <!-- Deliberately NO name TEXT here — the top-corner nameplates are the one
+           canonical place to read "who is who"; repeating the full name would just
+           split attention between two labels for the same two fighters. A small
+           emoji badge (matching the corner pill's language, not its text) plus a
+           chunky bar on a solid backing plate keeps this legible against any floor
+           colour without reintroducing that duplicate readout. -->
       <div class="hud-float hud-float--player" data-el="float-player">
-        <div class="hud-float-bar"><div class="hud-float-fill" data-el="float-player-fill"></div></div>
+        <div class="hud-float-pill">
+          <div class="hud-float-emoji" data-el="float-player-emoji"></div>
+          <div class="hud-float-bar"><div class="hud-float-fill" data-el="float-player-fill"></div></div>
+        </div>
       </div>
       <div class="hud-float hud-float--enemy" data-el="float-enemy">
-        <div class="hud-float-bar"><div class="hud-float-fill" data-el="float-enemy-fill"></div></div>
+        <div class="hud-float-pill">
+          <div class="hud-float-emoji" data-el="float-enemy-emoji"></div>
+          <div class="hud-float-bar"><div class="hud-float-fill" data-el="float-enemy-fill"></div></div>
+        </div>
       </div>
 
       <div class="hud-dmg-layer" data-el="dmg-layer"></div>
@@ -174,6 +181,8 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
   const floatPlayer = q<HTMLDivElement>('float-player');
   const floatEnemy = q<HTMLDivElement>('float-enemy');
+  const floatPlayerEmoji = q<HTMLDivElement>('float-player-emoji');
+  const floatEnemyEmoji = q<HTMLDivElement>('float-enemy-emoji');
   const floatPlayerFill = q<HTMLDivElement>('float-player-fill');
   const floatEnemyFill = q<HTMLDivElement>('float-enemy-fill');
 
@@ -234,6 +243,8 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       enemyName.textContent = CHARACTERS[enemyId].name;
       playerEmoji.textContent = CHARACTERS[playerId].emoji;
       enemyEmoji.textContent = CHARACTERS[enemyId].emoji;
+      floatPlayerEmoji.textContent = CHARACTERS[playerId].emoji;
+      floatEnemyEmoji.textContent = CHARACTERS[enemyId].emoji;
       buildWeaponSlots(CHARACTERS[playerId].weapons);
     },
 
@@ -525,11 +536,16 @@ const CSS = `
   gap: 10px;
 }
 
+/* A light, warm plate — not the dark card used everywhere else in this HUD — is a
+   deliberate exception: readiness has to read from the icon itself (bright emoji =
+   usable), and a dark cooldown wedge sweeping over a DARK card is nearly invisible
+   (measured — see the fix note on `.hud-weapon-cooldown` below). A light plate is
+   the one background dark-on-dark contrast actually resolves against. */
 .hud-weapon-slot {
   position: relative;
   width: 58px;
   height: 58px;
-  background: rgba(26,18,36,0.82);
+  background: #FFF3DE;
   border: 3px solid #1a1224;
   border-radius: 16px;
   display: flex;
@@ -582,32 +598,46 @@ const CSS = `
   justify-content: center;
   z-index: 2;
 }
+/* FIX (recurring critic finding across 3 rounds): this used to be a dark wedge on
+   the OLD dark slot background — measured near-invisible, since mask and card were
+   nearly the same tone. The slot background above is now a light plate specifically
+   so this dark, near-opaque wipe reads as an unmistakable silhouette change (bright
+   icon => usable, most of the icon masked dark => still cooling), the same
+   "pac-man" cooldown language shipped brawlers use. */
 .hud-weapon-cooldown {
   position: absolute;
   inset: 0;
   border-radius: 13px;
-  background: conic-gradient(rgba(8,4,12,0.72) calc(var(--p, 0) * 360deg), transparent 0);
+  background: conic-gradient(rgba(20,14,28,0.88) calc(var(--p, 0) * 360deg), transparent 0);
   pointer-events: none;
 }
 .hud-weapon-slot.is-ready .hud-weapon-cooldown { background: transparent; }
 
-/* Numeric seconds-remaining countdown — the unambiguous third signal alongside the
-   radial wipe and the desaturated icon. Empty text content while ready collapses
-   this to nothing, so it never competes with the emoji when a weapon is usable. */
+/* Numeric seconds-remaining countdown — a small corner badge (not a center overlay
+   stacked on the emoji, which just cluttered the icon) so it reads as a distinct
+   "time left" readout alongside the radial wipe rather than competing with it. */
 .hud-weapon-timer {
   position: absolute;
-  inset: 0;
+  right: -4px;
+  bottom: -4px;
+  min-width: 22px;
+  padding: 1px 3px;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #1a1224;
+  border: 2px solid #FFF3DE;
+  border-radius: 8px;
   font-family: 'Rubik', sans-serif;
   font-weight: 900;
-  font-size: 17px;
+  font-size: 12px;
   color: #FFF3DE;
-  -webkit-text-stroke: 2px #1a1224;
-  z-index: 2;
+  z-index: 3;
   pointer-events: none;
 }
+/* Collapses to nothing while ready (empty textContent) — never an empty badge
+   floating over a usable, full-colour icon. */
+.hud-weapon-timer:empty { display: none; }
 
 /* ── Countdown overlay ────────────────────────────────────────────────────── */
 .hud-countdown {
@@ -725,18 +755,51 @@ const CSS = `
   pointer-events: none;
   will-change: transform;
 }
+/* Solid backing plate — same trick that already made the corner nameplate legible
+   over any floor colour — plus a compact emoji badge (never the name text: that
+   stays the corner's job alone) so this reads as an intentional, chunky "mini"
+   version of the corner pill rather than a bare line easy to lose mid-fight. */
+.hud-float-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(10,6,16,0.62);
+  border: 2px solid rgba(26,18,36,0.85);
+  border-radius: 999px;
+  padding: 3px 8px 3px 3px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.35);
+}
+.hud-float-emoji {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.14);
+}
+.hud-float--player .hud-float-emoji { border: 1.5px solid #3FCB86; }
+.hud-float--enemy .hud-float-emoji { border: 1.5px solid #E6493F; }
+
 .hud-float-bar {
-  width: 58px;
-  height: 8px;
+  width: 68px;
+  height: 12px;
   background: #241a30;
-  border: 2px solid #1a1224;
+  border: 2.5px solid #1a1224;
   border-radius: 999px;
   overflow: hidden;
-  box-shadow: 0 1px 0 rgba(0,0,0,0.35);
+  box-shadow: 0 2px 0 rgba(0,0,0,0.4);
 }
-.hud-float-fill { height: 100%; transition: width 0.15s ease-out; }
-.hud-float--player .hud-float-fill { background: #3FCB86; }
-.hud-float--enemy .hud-float-fill { background: #E6493F; }
+.hud-float-fill {
+  height: 100%;
+  transition: width 0.15s ease-out;
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 45%);
+  background-blend-mode: overlay;
+}
+.hud-float--player .hud-float-fill { background-color: #3FCB86; }
+.hud-float--enemy .hud-float-fill { background-color: #E6493F; }
 .hud-float-fill.is-low { animation: hud-lowhp-pulse-small 0.7s ease-in-out infinite; }
 @keyframes hud-lowhp-pulse-small {
   0%, 100% { filter: brightness(1); }

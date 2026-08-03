@@ -35,6 +35,25 @@ const h = Number(args.h ?? 820);
 const frames = Number(args.frames ?? 10);
 const frameGapMs = Number(args.frameGapMs ?? 60);
 
+// Screenshotting under this environment's software (SwiftShader) renderer can take
+// anywhere from ~300ms to several REAL seconds per call. A naive burst loop that
+// just calls page.screenshot() on an interval ends up measuring screenshot latency,
+// not game time — freeze the canvas (neuter rAF) for the instant of each shot, then
+// un-freeze and let the game actually run for `frameGapMs` before the next one, so
+// each frame is a true snapshot of live state at that moment, not smeared by however
+// long the pixel readback itself took.
+async function freezeFrame(page) {
+  await page.evaluate(() => {
+    if (!window.__origRAF) window.__origRAF = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = () => 0;
+  });
+}
+async function unfreezeFrame(page) {
+  await page.evaluate(() => {
+    if (window.__origRAF) window.requestAnimationFrame = window.__origRAF;
+  });
+}
+
 async function main() {
   await mkdir(outDir, { recursive: true });
   const browser = await chromium.launch({ args: LAUNCH_ARGS });
@@ -52,12 +71,29 @@ async function main() {
     await page.keyboard.up(String(weapon));
     await page.mouse.move(w * 0.62, h * 0.42);
     await page.mouse.down();
+    // Close distance first — the AI enemy often kites at range rather than walking
+    // into OUR melee reach on its own.
+    await page.keyboard.down('KeyD');
+    await page.keyboard.down('KeyW');
 
     await page.waitForFunction(() => (window.__vfxQaCounts?.meleeArc ?? 0) + (window.__vfxQaCounts?.impact ?? 0) + (window.__vfxQaCounts?.cast ?? 0) > 0, null, { timeout: 60000, polling: 50 });
 
+    // Stop moving right before the capture burst — screenshotting under a software
+    // (SwiftShader) renderer can take a while per frame, and `--simSpeed` scales
+    // sim-time-per-real-second, so holding a move key through a slow screenshot call
+    // visibly drags the character away from where a short-lived ground decal (e.g.
+    // the melee arc, ~300ms sim-life) was actually anchored. Attack stays held.
+    await page.keyboard.up('KeyD');
+    await page.keyboard.up('KeyW');
+
     for (let i = 0; i < frames; i++) {
+      // Frame 0 is captured IMMEDIATELY (no lead-in wait) so it lands as close as
+      // possible to the detected event; every subsequent frame waits frameGapMs of
+      // real (live, unfrozen) game time first, to sample the effect's decay curve.
+      if (i > 0) await page.waitForTimeout(frameGapMs);
+      await freezeFrame(page);
       await page.screenshot({ path: `${outDir}/f${String(i).padStart(2, '0')}.png`, timeout: 20000 });
-      await page.waitForTimeout(frameGapMs);
+      await unfreezeFrame(page);
     }
 
     const counts = await page.evaluate(() => window.__vfxQaCounts ?? null);

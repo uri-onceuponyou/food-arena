@@ -58,6 +58,22 @@ async function main() {
   }
 }
 
+// Screenshotting under this environment's software (SwiftShader) WebGL renderer can
+// take anywhere from ~300ms to several REAL seconds per call (visible as "GPU stall
+// due to ReadPixels" in the page's own console). Short-lived VFX (a melee arc is
+// ~300ms of SIM time, scaled down further in real time by --simSpeed) are routinely
+// already-decayed by the time a screenshot's pixel readback finishes, even when the
+// screenshot is requested the instant the QA counter flips. The fix: neuter
+// `requestAnimationFrame` the moment we detect the event, which freezes the canvas
+// at whatever was already drawn — the frame where the counter just flipped — so the
+// screenshot (however long it takes) captures exactly that frame, not whatever the
+// live game has moved on to by the time pixels are actually read back.
+async function freezeFrame(page) {
+  await page.evaluate(() => {
+    window.requestAnimationFrame = () => 0;
+  });
+}
+
 async function run(browser) {
   const page = await browser.newPage({ viewport: { width: w, height: h } });
 
@@ -100,14 +116,15 @@ async function run(browser) {
   }
   const elapsed = Date.now() - start;
 
-  // Give the effect a frame or two to actually be reflected in a render, then shoot.
-  await page.waitForTimeout(16);
-  await page.screenshot({ path: out });
-
-  const counts = await page.evaluate(() => window.__vfxQaCounts ?? null);
+  // Stop input, then IMMEDIATELY freeze the canvas (see freezeFrame's comment above)
+  // before the slow screenshot readback gets a chance to let the effect decay.
   await page.mouse.up();
   await page.keyboard.up('KeyD');
   await page.keyboard.up('KeyW');
+  await freezeFrame(page);
+  await page.screenshot({ path: out });
+
+  const counts = await page.evaluate(() => window.__vfxQaCounts ?? null);
 
   console.log(JSON.stringify({ out, fired, elapsedMs: elapsed, counts }, null, 2));
   if (!fired) process.exitCode = 1;
