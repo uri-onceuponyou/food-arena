@@ -59,6 +59,25 @@ export const MAX_SAFE_RADIUS = 850;
 // authored offset in `render/lighting.ts` (`(9, 16, 7)` relative to its target — that
 // file is out of bounds for this arena, so the direction is baked in here instead of
 // read at runtime). A shadow falls AWAY from the light, i.e. toward -X/-Z.
+//
+// ── Round-8 ablation, so the next owner does not have to re-run it ────────────
+// With the decals finally un-buried (see `BAKED_SHADOW_Y`), hiding each family in
+// turn at shipped framing and diffing measures what each is actually worth:
+//   contact/AO decals : mean 3.92/255 over 13.7% of pixels — LOAD-BEARING. Hiding
+//                       them makes every prop standing on a floor pad float again.
+//   cast decals       : mean 0.74/255 over 3.0% of pixels — and the ablation render
+//                       is essentially indistinguishable from the full frame. The
+//                       real shadow map now does this job properly.
+// (Both numbers are ~5x what an earlier probe measured, because that probe ran while
+// the decals were still 63% z-occluded. Any verdict from before the lift is void.)
+//
+// So the cast decals are removable. They are kept for now for ONE reason worth
+// stating: this fixed `SHADOW_DIR` is why the key light's azimuth cannot rotate —
+// swinging the key would put real and baked shadows in different directions. Deleting
+// `buildDirectionalShadowMesh` frees that azimuth, and raking light across every prop
+// in the arena is worth far more than 0.74/255. That is a lighting-owner change, and
+// removing these BEFORE the azimuth moves is a small strict loss, so the two need to
+// land together.
 const SHADOW_DIR_LEN = Math.hypot(9, 7);
 const SHADOW_DIR = { x: -9 / SHADOW_DIR_LEN, z: -7 / SHADOW_DIR_LEN };
 
@@ -79,6 +98,18 @@ export const KPAL = {
   // Pushed more saturated than the original muted tan — see the round-5 saturation
   // note on `buildMaterials`: cabinets are some of the biggest cover surfaces in
   // the arena, so their chroma does real work for the overall scene average.
+  //
+  // Round-8 NOTE, recorded so nobody re-derives it: a critic measured 5.94% of the
+  // frame at R >= 253 against 0.27% in the reference plate, and these two were named
+  // as the cause ("~15% too hot in red"). They are not. Cutting both by 15% moved
+  // whole-frame red clipping from 4.50% to 4.47% — three hundredths of a point, i.e.
+  // nothing — so the change was reverted rather than kept as an unmotivated look
+  // shift on the arena's biggest warm surfaces. Rendering the clipped pixels as a
+  // MASK instead of trusting the aggregate showed where the red actually flatlines:
+  // `rimLight` trim (see below) and the pot's broth disc. Cutting `rimLight` alone
+  // took the same frame from 4.50% to 3.02% (lower-right quadrant 2.05% -> 0.85%).
+  // A percentage over a whole frame says how much is clipped, never what is doing
+  // it; the mask is one command and settles it.
   cabinet: '#C1731E',
   cabinetDark: '#8A5A2E',
   butcherBlock: '#E4C48C',
@@ -121,17 +152,42 @@ export const KPAL = {
   flame: '#FFB238',
   flameCore: '#FFE9A8',
 
-  // A puddle mixing the character roster's pale `PALETTE.water` straight in at full
-  // size blew out the same way the steel tops did — deepened toward the cap colour
-  // instead so the disc keeps a visible blue body under its highlight.
-  water: '#4FA8D6',
+  // ── Puddle bodies ───────────────────────────────────────────────────────────
+  // Measured at shipped framing, these two discs were the loudest objects in the
+  // arena — each ~19% of the frame width, so "loudest" is not a small area effect:
+  //   water  rendered (97,203,251), HSV val **0.984** against a frame mean of 0.562
+  //          — effectively clipped white-cyan, the single brightest thing on screen;
+  //   grease rendered (210,152,23), HSV sat **0.897** against a frame mean of 0.603
+  //          — the single most saturated thing on screen.
+  // That is what made them read as MOBA pickup/heal pads instead of spills, and no
+  // amount of edge treatment fixes a body that bright. Both are pulled down here to
+  // land near the frame's own sat/val band while keeping their hue, so each still
+  // reads instantly as water or grease and still separates from the warm tile
+  // beneath it (rendered ≈ (160,107,76), sat 0.53, val 0.63) — a slow hazard still
+  // has to be legible, it just must not out-shout the characters fighting on it.
+  //
+  // Both are authored BELOW the intended on-screen values: this rig's lighting plus
+  // `stage.ts`'s grade add roughly +0.15 saturation and +0.13 value between the
+  // authored albedo and the pixel.
+  water: '#3F86A8',
   waterCap: PALETTE.waterCap,
-  grease: '#B08A2E',
+  grease: '#A08350',
 
-  // Warm pale gold used ONLY as a thin light-catching cap/rim trim along the top
-  // edge of counters and backsplashes — the "chamfer that catches a different light
-  // angle" cue. Never used as a body colour, so it stays legible as an edge accent.
-  rimLight: '#F6DFA0',
+  // Warm gold used ONLY as a thin light-catching cap/rim trim along the top edge of
+  // counters and backsplashes — the "chamfer that catches a different light angle"
+  // cue. Never used as a body colour, so it stays legible as an edge accent.
+  //
+  // Round-8: pulled down from `#F6DFA0`. This trim runs along the top edge of every
+  // counter, backsplash and `addTopRim` frame in the arena, which is a lot of pixels
+  // for something this bright, and at R=246 it did not survive the rig's ~1.25x
+  // lighting multiply — it arrived with its red channel flatlined. A clipped
+  // highlight is not a brighter highlight: once one channel pins and the others keep
+  // moving, the trim stops holding its own hue and slides toward white, which is
+  // exactly the opposite of "a chamfer catching a warm light". Measured by clip mask
+  // as the single biggest source of red clipping in the arena (see the note on
+  // `cabinet` above): whole-frame R >= 253 went 4.50% -> 3.02% from this one value.
+  // Still unmistakably the brightest trim in the frame — it just keeps its gold now.
+  rimLight: '#D8BE84',
 
   // ── Round-5 visual-grammar accents ──────────────────────────────────────────
   // A critic scored this arena 4/10 for having "one visual grammar applied
@@ -163,11 +219,30 @@ export const KPAL = {
   hazardStripeDark: '#241207',
   hazardGlowHot: '#FF5A1E',
 
-  // Puddle (slow hazard) rims — same "hard bright edge" hazard grammar as the pot,
-  // but a distinct saturated hue per puddle so grease and water stay tellable
-  // apart at a glance. Never used anywhere else.
-  greaseRim: '#D6FF3A',
-  waterRim: '#2FE8FF',
+  // ── Puddle edges — NOT hazard markings any more ─────────────────────────────
+  // These used to be `#D6FF3A` (neon lime, s0.77/v1.00) and `#2FE8FF` (electric
+  // cyan, s0.82/v1.00): the "hard bright edge" HAZARD grammar borrowed from the
+  // pot's caution ring, on the theory that a puddle had to shout that it slows you.
+  //
+  // That theory was retired — a puddle now only has to look like a puddle, and the
+  // "you are slowed" signal lives on the CHARACTER (`game/vfx.ts`). The rework that
+  // deleted the rest of that layer (glow halo, accent tint, warning icons) could not
+  // delete THIS one, because the colours live here in `shared.ts` and that pass only
+  // owned `hazards.ts` — so the single loudest element of the layer outlived the
+  // change written to remove it. Measured at shipped framing, the two puddles were
+  // 19% of the frame width, 3.8x a character's width, and the most saturated objects
+  // on screen: a saturated gold disc ringed in neon lime and a cyan disc ringed in
+  // neon cyan, which is the exact visual language of a MOBA pickup or heal pad.
+  //
+  // What they are now is a WET EDGE: the darker, thicker meniscus a real spill leaves
+  // where the liquid piles against the floor. Same hue family as the pool it edges
+  // (so grease still reads as grease and water as water), but well down in value and
+  // saturation, so the boundary comes from a VALUE step against the tile rather than
+  // from chroma. Nothing in the arena reads these as a warning any more. Note these
+  // are authored below the intended on-screen chroma on purpose: `stage.ts`'s grade
+  // pushes saturation UP, so an "already muted" colour still arrives with life in it.
+  greaseRim: '#7E6738',
+  waterRim: '#5C8496',
 
   // New mid-lane cover (see the four `supply_barrel`s below) — round-7 RECOLOUR:
   // a critic mistook this prop for an explosive hazard and marked the arena down
@@ -389,9 +464,10 @@ export function buildMaterials() {
     // isn't worth diluting the "one flat reserved colour = blocking" instant-read cue.
     coverPlinthPanel: flatMat(KPAL.coverPlinthPanel),
 
-    // Hazard rim materials — hard-edged, fully opaque, unlit (so they read as a
-    // painted warning marking, not a lit surface that can wash out under the rig's
-    // key light the way the old pale-gold ring did).
+    // Puddle wet-edge materials — see the KPAL note. Still unlit: the edge of a
+    // spill wants to hold one steady value rather than pick up a key-light gradient
+    // across a 5m disc, and unlit is also what keeps it from washing out on the lit
+    // side the way an earlier lit ring did.
     greaseRim: flatMat(KPAL.greaseRim),
     waterRim: flatMat(KPAL.waterRim),
 
@@ -635,11 +711,18 @@ function makeGroundedShadowTextureStrong(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  const pad = size * 0.1;
+  // Round-8: feather tightened (pad 0.10 -> 0.075, blur 0.13 -> 0.09). Every number
+  // in this texture was tuned while ~63% of the decal's area was z-occluded by the
+  // opaque floor pads the props stand on (see `BAKED_SHADOW_Y`), so a wide, soft,
+  // far-reaching feather was compensating for a shadow that mostly never arrived.
+  // With the decal actually on screen the same feather reads as a broad grey haze
+  // spreading well past the prop on every side — grounding wants a defined dark band
+  // hugging the silhouette, not a fog bank around it.
+  const pad = size * 0.075;
   const rectW = size - pad * 2;
   const rectH = size - pad * 2;
   const radius = size * 0.16;
-  const blur = size * 0.13;
+  const blur = size * 0.09;
   const off = size * 3;
 
   ctx.save();
@@ -675,21 +758,51 @@ function makeCastShadowTextureStrong(): THREE.CanvasTexture {
   return tex;
 }
 
+/**
+ * Y height of EVERY baked grounding decal in the arena (contact/AO ring and the
+ * directional cast blob, which sits `0.002` below it to preserve their original
+ * draw order). This is one number because it has been wrong twice for the same
+ * reason and the fix must be impossible to apply to only half of them.
+ *
+ * ── The history, because the number looks arbitrary and is not ──────────────────
+ *
+ * v1 put these at y = 0.011, INSIDE the floor tile's own 0.03m-tall box (top face at
+ * +0.015), so every AO decal in the arena rendered behind opaque tile geometry and
+ * was visible only through the ~6%-wide grout gaps. v2 raised them to 0.019/0.017 —
+ * clear of the TILE, and that part is still true.
+ *
+ * v2 was still wrong, and a measured probe (garish-recolour every decal, render at
+ * shipped framing) showed exactly how: only ~37% of contact-decal area reaches the
+ * screen, ~75% for the cast decals. The tile is not the only opaque thing on the
+ * floor. Above it sit `floor.ts`'s pads and mats — `floor_woodpad`,
+ * `floor_utility_pad`, `floor_teal_zone`(+`_trim`), `floor_border` at y = 0.045-0.048
+ * and `floor_seam`/`floor_drain` at 0.062 — all opaque, all depth-writing. And props
+ * are DELIBERATELY placed on those pads, so the exact props that most needed
+ * grounding (the spice carts and stacked pots standing on the hub's teal mats) had
+ * their entire shadow drawn underneath an opaque plane and reaching the screen at
+ * literally zero pixels, while the ~37% that did survive was the part leaking out
+ * onto bare tile — un-anchored to anything, which is precisely the "mushy
+ * directionless blob" a lighting round was once scored down for.
+ *
+ * That measurement also settles a question this project had queued for a long time
+ * ("are these baked decals a redundant third darkening layer now that real shadows
+ * are crisp — delete them?"). The answer is NO: they were never redundant, they were
+ * mostly INVISIBLE, and the fraction that showed was the least useful fraction.
+ *
+ * 0.07 is chosen as a window, not a taste call: above the highest opaque floor layer
+ * (`floor.ts`'s `FINE_Y` = 0.062) and below the lowest prop kick/plinth (~0.08), so a
+ * decal clears every pad it might be standing on while still being occluded by the
+ * prop body that casts it. Anything in `arena/floor.ts` that grows past 0.062, or any
+ * prop base that drops below 0.08, breaks this and must move this constant with it.
+ */
+const BAKED_SHADOW_Y = 0.07;
+
 /** Elliptical AO blob sized to a prop's own footprint (in metres), slightly oversized
  * so it peeks out past the silhouette the way a real contact shadow would. */
 export function buildContactShadow(mat: THREE.Material, wM: number, dM: number, scale = 1.25): THREE.Mesh {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(wM * scale, dM * scale), mat);
   m.rotation.x = -Math.PI / 2;
-  // MUST clear the floor tile's own top face (see `FLOOR_Y.tile` / the checkerboard
-  // build below: each tile is a 0.03m-tall box centred at y=0, so its top sits at
-  // +0.015). This used to sit at y=0.011 — INSIDE that opaque box — so from the
-  // steep top-down camera every AO/contact-shadow decal in the arena was rendering
-  // behind the tile's own solid top face and was invisible everywhere except the
-  // ~6%-wide grout gaps between tiles. That silent bug is almost certainly a big
-  // part of why cover read with "no AO where it meets the floor": the code to draw
-  // it was there, it just could never actually show up. 0.019 clears the tile top
-  // with a hair of margin, same idiom as the FLOOR_Y.decal layer above it.
-  m.position.y = 0.019;
+  m.position.y = BAKED_SHADOW_Y;
   m.renderOrder = 1;
   m.name = 'contact_shadow__no_outline';
   m.castShadow = false;
@@ -746,7 +859,9 @@ export function buildDirectionalShadowMesh(
   const qSpin = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, spinAngle);
   m.quaternion.multiplyQuaternions(qSpin, qFlat);
   const offset = startDist + length / 2;
-  m.position.set(localX * offset, 0.017, localZ * offset);
+  // A hair BELOW the contact ring (see `BAKED_SHADOW_Y`) so the two keep the draw
+  // order they have always had: where they overlap, the tighter/darker AO ring wins.
+  m.position.set(localX * offset, BAKED_SHADOW_Y - 0.002, localZ * offset);
   m.renderOrder = 2;
   m.name = 'cast_shadow__no_outline';
   m.castShadow = false;
@@ -813,18 +928,36 @@ function buildCoverCastShadow(M: Materials, wM: number, dM: number, kind: string
   const length = Math.max(0.6, heightM * 0.85 + 0.3) * (isLarge ? 1.2 : 1);
   const width = Math.max(0.4, Math.min(wM, dM) * (isLarge ? 0.62 : 0.5));
   // Distance from the group's centre to ITS OWN rectangular footprint's edge along the
-  // shadow direction, ×1.35 to clear `addCover`'s own oversized AO ring — see the
-  // `startDist` note on `buildDirectionalShadowMesh`. Large kinds get a slightly
-  // bigger clearance multiplier to match their own wider AO oversize (see `addCover`).
+  // shadow direction, plus a small margin so the blob reads as trailing AWAY from the
+  // prop rather than sitting under it.
+  //
+  // That margin used to be MULTIPLICATIVE (`edgeReach * 1.35`, 1.55 for large kinds),
+  // which is a gap proportional to the prop's own WIDTH. On a supply barrel
+  // (edgeReach ≈ 1.9m) that is a ~0.7m offset and looks fine, which is why it survived
+  // review; on the freezer (230x190wu, edgeReach 7.29m) the identical rule puts the
+  // blob's near edge 11.3m from a box whose half-width is 5.75m — about 5.5m of clean
+  // floor between the prop and the thing claiming to be its shadow, which at shipped
+  // framing is ~19% of the frame width and reads as an unrelated dark oval lying
+  // nearby, not as grounding. A cast shadow's offset is set by the light's elevation
+  // and the prop's HEIGHT — which is exactly what `length` above is already derived
+  // from — and has nothing to do with how wide the prop is, so the clearance must not
+  // scale with the footprint either. An absolute margin, tied to the shadow's own
+  // length and capped, keeps the near edge just clear of the silhouette at every size.
+  //
+  // It no longer has to clear `addCover`'s oversized AO ring the way the old comment
+  // claimed: the two decals have distinct `renderOrder`s (contact 1, cast 2) and both
+  // run `depthWrite: false`, so the cast blob draws OVER the AO ring where they
+  // overlap instead of being swallowed by it. Overlap right at the prop's edge is
+  // wanted anyway — that is where contact darkening belongs.
   const { x: localX, z: localZ } = localShadowDir(yawDeg);
   const hw = wM / 2, hd = dM / 2;
   const edgeReach = Math.min(
     Math.abs(localX) > 1e-4 ? hw / Math.abs(localX) : hw,
     Math.abs(localZ) > 1e-4 ? hd / Math.abs(localZ) : hd
   );
-  const clearance = isLarge ? 1.55 : 1.35;
+  const startDist = edgeReach + THREE.MathUtils.clamp(length * 0.25, 0.12, 0.6);
   const material = isLarge ? M.castShadowDecalStrong : M.castShadowDecal;
-  return buildDirectionalShadowMesh(M, length, width, yawDeg, edgeReach * clearance, material);
+  return buildDirectionalShadowMesh(M, length, width, yawDeg, startDist, material);
 }
 
 /**
@@ -915,10 +1048,26 @@ export function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Material
   // `groundedShadowStrong` texture, so the shadow visibly clears the prop's own body
   // instead of staying hidden under it — the exact "counters/platforms... rely on a
   // darker side-face rather than a separate ground-contact shadow" gap.
+  //
+  // Round-8: both oversizes come DOWN (1.6 -> 1.34 large, 1.3 -> 1.22 small) and the
+  // ring is now OFFSET along the shadow direction instead of sitting concentric.
+  // Same reason as the texture-feather change (see `makeGroundedShadowTextureStrong`):
+  // every one of these numbers was chosen while most of the decal's area was buried
+  // under an opaque floor pad, so they were sized to make a mostly-invisible thing
+  // register. Fully visible, a 1.6x ring around an 11.5m freezer threw 3.5m of grey
+  // in every direction — including the side the key light comes from, where a real
+  // contact shadow is at its thinnest. Offsetting it a fraction of its own overhang
+  // along `SHADOW_DIR` keeps the band tight on the lit side and lets it run a little
+  // further on the shaded side, which is what makes it read as light-driven contact
+  // darkening rather than a symmetric grey halo pasted under the prop.
   const isLarge = LARGE_COVER_KINDS.has(spec.kind);
   const aoMat = isLarge ? M.groundedShadowStrong : M.groundedShadow;
-  const aoScale = isLarge ? 1.6 : 1.3;
-  group.add(buildContactShadow(aoMat, wM, dM, aoScale));
+  const aoScale = isLarge ? 1.34 : 1.22;
+  const ao = buildContactShadow(aoMat, wM, dM, aoScale);
+  const aoDir = localShadowDir(spec.yawDeg ?? 0);
+  ao.position.x += aoDir.x * wM * (aoScale - 1) * 0.42;
+  ao.position.z += aoDir.z * dM * (aoScale - 1) * 0.42;
+  group.add(ao);
   // Baked directional shadow — see `buildCoverCastShadow` / the round-6 shadow note on
   // `SHADOW_DIR`. Added here, in the ONE place every CoverBox is registered, so it is
   // physically impossible to add new cover without it also getting a cast shadow.

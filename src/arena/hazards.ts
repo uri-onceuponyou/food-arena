@@ -354,11 +354,19 @@ export function buildHazardGround(M: Materials): HazardGround {
 // icons, no full-disc accent tint — that entire "make this shout HAZARD" layer is
 // gone; it was fighting a battle the character-side feedback wins instead.
 //
-// Every layer below is built from scratch in THIS file (new canvas textures, new
-// `THREE.Mesh`/`MeshBasicMaterial` instances) rather than by mutating the
-// `mat`/`rimMat` instances the caller hands in — those are `shared.ts`'s
-// `M.grease`/`M.water`/`M.greaseRim`/`M.waterRim`, out of bounds for this file to
-// edit at the source, so nothing here touches their `.color`/`.map`/opacity.
+// ── The half of that rework that did not land, and why ──────────────────────
+// This header used to claim the "bold accent ring" was gone. It was not. The pass
+// that wrote this owned `hazards.ts` but NOT `shared.ts`, and the ring's colours
+// (`KPAL.greaseRim` = neon lime, `KPAL.waterRim` = electric cyan) live there — so
+// `buildPuddleVisual` kept drawing `puddle_wet_rim` in exactly the material the
+// change was written to retire, and the single loudest element of the layer outlived
+// the note announcing its removal. Both files now have one owner and it is finished:
+// those two colours are muted wet-edge tones (see the KPAL note on `greaseRim`), and
+// the puddle bodies came down with them.
+//
+// Worth remembering as a pattern, not just an incident: a file-scoped rework can
+// silently no-op when the thing it is removing is DEFINED outside its scope. The
+// header describing the change is not evidence the change happened — the render is.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Parses a `#rrggbb` hex string into a 0-255 RGB triple via `THREE.Color`, so these
@@ -401,7 +409,7 @@ function makeGreaseSurfaceTexture(highlightHex: string): THREE.CanvasTexture {
   }
 
   const [lr, lg, lb] = hexToRgb(highlightHex);
-  ctx.strokeStyle = `rgba(${lr},${lg},${lb},0.4)`;
+  ctx.strokeStyle = `rgba(${lr},${lg},${lb},0.28)`;
   ctx.lineWidth = size * 0.05;
   ctx.lineCap = 'round';
   for (const off of [-0.22, 0.18]) {
@@ -442,8 +450,14 @@ function makeWaterSurfaceTexture(): THREE.CanvasTexture {
   let seed = 6421;
   const rand = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-  for (const rr of [0.14, 0.24, 0.35, 0.46]) {
+  // Four evenly-spaced, equally-bright, perfectly concentric white rings at 0.4 alpha
+  // is not what a ripple looks like — it is what a RADAR SWEEP or a targeting reticle
+  // looks like, and on a 5m disc it was a big part of why this puddle read as a
+  // gameplay pad rather than a spill. Same shapes, but the alpha is now low and
+  // UNEVEN ring to ring (a real disturbance loses energy outward and never produces
+  // four identical crests), which leaves surface movement without drawing a target.
+  for (const [rr, alpha] of [[0.14, 0.2], [0.24, 0.13], [0.35, 0.17], [0.46, 0.09]] as const) {
+    ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
     ctx.lineWidth = size * (0.012 + rr * 0.01);
     ctx.beginPath();
     ctx.arc(cx, cy, size * rr, 0, Math.PI * 2);
@@ -454,7 +468,10 @@ function makeWaterSurfaceTexture(): THREE.CanvasTexture {
     const bx = rand() * size, by = rand() * size;
     const br = size * (0.1 + rand() * 0.14);
     const grad = ctx.createRadialGradient(bx, by, 0, bx, by, br);
-    grad.addColorStop(0, 'rgba(255,255,255,0.35)');
+    // Caustic patches pulled down from 0.35 for the same reason as the base colour
+    // (see `KPAL.water`): stacked on an already near-clipping blue they were pushing
+    // pixels to flat white, so the disc had no surface read left at its brightest.
+    grad.addColorStop(0, 'rgba(255,255,255,0.2)');
     grad.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = grad;
     ctx.beginPath();
@@ -487,10 +504,21 @@ export function buildPuddleVisual(
   const isGrease = mat === M.grease;
 
   // Grounding — puddles previously had NO contact shadow at all, so they floated
-  // free with no dark boundary separating them from the floor. This is the one
-  // layer from the old hazard-signalling pass that was a genuine grounding fix
-  // rather than a colour escalation, so it's kept exactly as it was.
-  g.add(buildContactShadow(M.contactShadow, R * 2, R * 2, 1.35));
+  // free with no dark boundary separating them from the floor.
+  //
+  // It has to be positioned EXPLICITLY. Every other layer in this function writes
+  // absolute world coordinates into its own mesh (`gp.x`/`gp.z`) and the group this
+  // all goes into is never moved by the caller (see `kitchen.ts`: `puddleGroup` sits
+  // at the origin), so a child that relies on the group's transform lands at world
+  // (0,0) — the map's SW corner. That is exactly what happened here: BOTH puddles'
+  // contact shadows were being drawn stacked on top of each other in the corner of
+  // the map, and neither actual puddle had any grounding shadow at all. Same class of
+  // bug as everything in PROGRESS.md's "rendering and INVISIBLE" list — the layer was
+  // built, added and drawn every frame, just nowhere near the thing it belonged to.
+  const shadow = buildContactShadow(M.contactShadow, R * 2, R * 2, 1.35);
+  shadow.position.x = gp.x;
+  shadow.position.z = gp.z;
+  g.add(shadow);
 
   const disc = mesh(new THREE.CircleGeometry(R, 32), mat, 'puddle');
   disc.rotation.x = -Math.PI / 2;
@@ -516,10 +544,10 @@ export function buildPuddleVisual(
   g.add(surf);
 
   // Thin wet rim tracing the real edge, in the caller's own material (`M.greaseRim`/
-  // `M.waterRim` — `shared.ts`'s, out of bounds to recolour here). Just enough of a
-  // boundary line that the puddle's edge doesn't dissolve into the tile — the same
-  // "wet edge" a real spill leaves, not a hazard marking; there is deliberately no
-  // second bold accent band, glow halo or icon ring stacked on top of it any more.
+  // `M.waterRim`, now muted wet-edge tones — see the KPAL note in `shared.ts`). Just
+  // enough of a boundary line that the puddle's edge doesn't dissolve into the tile —
+  // the same "wet edge" a real spill leaves, not a hazard marking; there is
+  // deliberately no second bold accent band, glow halo or icon ring on top of it.
   const trimW = R * 0.045;
   const trim = mesh(
     new THREE.RingGeometry(R - trimW, R + trimW, 40),

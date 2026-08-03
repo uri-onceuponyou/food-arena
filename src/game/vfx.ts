@@ -34,6 +34,18 @@ declare global {
      * guessing at screenshot timing for effects that live well under a second.
      * Never read by game logic. */
     __vfxQaCounts?: Record<'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash', number>;
+    /**
+     * QA-only: fire one effect on demand at a world position, bypassing the sim
+     * entirely. Never called by game logic — it exists because DRIVING a specific
+     * effect through real gameplay is unreliable enough to have burned real time:
+     * the AI kites, so scripted melee often never connects, and a probe that waits
+     * for a hit can time out while the safe zone closes and kills the subject
+     * instead. Nine per-weapon VFX agents are queued behind this file, and each of
+     * them needs to see its own effect on demand, repeatably, to judge it.
+     *
+     * Published by `VfxLayer`'s constructor, cleared by `dispose()`.
+     */
+    __vfxSpawnTest?: (kind: 'impact' | 'death' | 'cast', xWU: number, yWU: number, amount?: number, color?: string) => void;
     /** QA-only per-tick fighter snapshot, refreshed every `sync()` call — lets a
      * Playwright driver steer input off real positions/HP/terrain-slow state instead
      * of guessing from rendered pixels (e.g. to script a player walking into a puddle
@@ -81,9 +93,19 @@ const STUN_STAR_RADIUS = 0.42;
 // two slow sources caused it — a puddle underfoot (`Fighter.terrainSlowFactor`, the
 // sim's read-only per-tick observation) or a weapon's own `status.slowedUntil`
 // timer — so both are treated as one `slowed` signal below (see `sync()`).
-/** Cool, desaturated slate-blue — reads as "wet/cold/dragging" at a glance without
- * competing with any character's own palette. */
-const SLOW_TINT_COLOR = new THREE.Color('#5C8FB0');
+/**
+ * Cool blue wash — reads as "wet/cold/dragging" at a glance without competing with
+ * any character's own palette.
+ *
+ * Brighter and more chromatic than the first pass (`#5C8FB0`), for a compositing
+ * reason rather than a taste one. Alpha-blending a MID-value blue over a bright warm
+ * character just averages toward grey — the result loses saturation but never gains a
+ * cool cast, so it reads as "slightly dirty", not "chilled". To flip the hue the tint
+ * has to be brighter in blue than the character is: our warmest cast member's bun sits
+ * near `rgb(254,191,109)` (B=109), so a tint at B≈224 pulls the composited blue above
+ * the composited red and the character visibly turns cold.
+ */
+const SLOW_TINT_COLOR = new THREE.Color('#63A8E0');
 /**
  * Tint-sprite footprint, in metres. It reuses `glowTex` (a soft RADIAL gradient,
  * hottest dead-centre, fading equally toward every edge) stretched non-uniformly via
@@ -98,9 +120,27 @@ const SLOW_TINT_COLOR = new THREE.Color('#5C8FB0');
  * moderate-high peak opacity (see `sync()`) so a character's own colours still read
  * through rather than being fully overwritten.
  */
-const SLOW_TINT_WIDTH = CHARACTER_HEIGHT * 0.48;
-const SLOW_TINT_HEIGHT = CHARACTER_HEIGHT * 0.46;
-const SLOW_TINT_CENTER_Y = CHARACTER_HEIGHT * 0.72;
+const SLOW_TINT_WIDTH = CHARACTER_HEIGHT * 0.62;
+const SLOW_TINT_HEIGHT = CHARACTER_HEIGHT * 0.66;
+const SLOW_TINT_CENTER_Y = CHARACTER_HEIGHT * 0.62;
+/** Peak alpha of the tint wash. High enough that the composite actually flips the
+ * character cool (see `SLOW_TINT_COLOR`), low enough that its own colours and face
+ * still read through — a status effect, not a repaint. */
+const SLOW_TINT_PEAK_OPACITY = 0.58;
+/**
+ * Ground telegraph ring at a slowed fighter's feet — TWO concentric rings, a dark
+ * base and a bright frost band on top of it.
+ *
+ * The single ring this replaces was `#6FE0FF`: the same cyan as the water puddle it
+ * is most often standing in, so the one place the cue mattered most was the one place
+ * it could not be seen. Picking a different single hue only moves that problem, since
+ * this ring has to read on warm brown tile, on an amber grease pool AND on a blue
+ * water pool. A bright band with a dark band under it reads on all three by VALUE, the
+ * same reason this file already mixes melee arcs toward `INK` — contrast that does not
+ * depend on guessing the background.
+ */
+const SLOW_RING_BRIGHT = '#EAF4FF';
+const SLOW_RING_DARK = '#1D2740';
 /** World-unit distance a fighter must travel (accumulated only while terrain-slowed)
  * between puddle-splash bursts — a footstep-like cadence tied to actual movement,
  * not a timer, so it naturally speeds up or stops with the fighter's own motion. */
@@ -176,6 +216,38 @@ function buildRadialGlowTexture(): THREE.CanvasTexture {
   const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
   grad.addColorStop(0, 'rgba(255,255,255,1)');
   grad.addColorStop(0.4, 'rgba(255,255,255,0.85)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Soft-edged disc with a FLAT alpha plateau — opaque out to ~62% of the radius, then
+ * a smooth ramp to nothing. Used only by the slow tint (see `SLOW_TINT_COLOR`).
+ *
+ * The tint used to reuse `glowTex`, whose alpha peaks at a single point and is already
+ * down to ~0.5 at 60% of the radius. Composited over a character that is only ~13% of
+ * the frame height, that means the wash is at full strength on a handful of pixels
+ * dead-centre and effectively absent across the rest of the silhouette — which is
+ * exactly what a measurement found: a slowed Hamburger's bun still read `rgb(254,191,109)`,
+ * pure warm orange, with no cooling at all. The compositing was never broken (forcing
+ * the tint red at 5x proved it lands); the ALPHA PROFILE was wrong for the job. A tint
+ * has to cover a silhouette evenly; a glow has to fall off from a hot core. They are
+ * different shapes and this one needed its own.
+ */
+function buildSoftDiscTexture(): THREE.CanvasTexture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.62, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.82, 'rgba(255,255,255,0.6)');
   grad.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
@@ -483,6 +555,9 @@ interface RingSlot {
 
 interface StatusVisual {
   slowRing: THREE.Mesh;
+  /** Dark band drawn just outside/under `slowRing` so the pair reads on any
+   * background — see `SLOW_RING_BRIGHT`/`SLOW_RING_DARK`. */
+  slowRingDark: THREE.Mesh;
   /** Camera-facing colour-shift sprite over the character's own body — see the
    * "Slow feedback" design note above `SLOW_TINT_COLOR`. */
   slowTint: THREE.Sprite;
@@ -532,6 +607,7 @@ export class VfxLayer {
 
   // ── Ability VFX pools ──────────────────────────────────────────────────────
   private readonly glowTex = buildRadialGlowTexture();
+  private readonly softDiscTex = buildSoftDiscTexture();
   private readonly starTex = buildStarburstTexture();
   private readonly streakTex = buildStreakTexture();
   private readonly shardTex = buildShardTexture();
@@ -606,11 +682,22 @@ export class VfxLayer {
     }
 
     const buildStatusVisual = (): StatusVisual => {
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: '#6FE0FF', transparent: true, opacity: 0,
+      // Dark base band first (wider on both sides), bright frost band on top of it.
+      const darkMat = new THREE.MeshBasicMaterial({
+        color: SLOW_RING_DARK, transparent: true, opacity: 0,
         side: THREE.DoubleSide, depthWrite: false,
       });
-      const slowRing = new THREE.Mesh(new THREE.RingGeometry(0.62, 0.86, 28), ringMat);
+      const slowRingDark = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.95, 28), darkMat);
+      slowRingDark.rotation.x = -Math.PI / 2;
+      slowRingDark.visible = false;
+      slowRingDark.renderOrder = 3;
+      this.group.add(slowRingDark);
+
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: SLOW_RING_BRIGHT, transparent: true, opacity: 0,
+        side: THREE.DoubleSide, depthWrite: false,
+      });
+      const slowRing = new THREE.Mesh(new THREE.RingGeometry(0.64, 0.86, 28), ringMat);
       slowRing.rotation.x = -Math.PI / 2;
       slowRing.visible = false;
       slowRing.renderOrder = 4;
@@ -626,7 +713,7 @@ export class VfxLayer {
       // would clip the tint unevenly (visible on one side of the body, missing on the
       // other) instead of reading as one even wash over the character.
       const tintMat = new THREE.SpriteMaterial({
-        map: this.glowTex,
+        map: this.softDiscTex,
         color: SLOW_TINT_COLOR,
         transparent: true,
         opacity: 0,
@@ -652,10 +739,17 @@ export class VfxLayer {
         this.group.add(star);
         stunStars.push(star);
       }
-      return { slowRing, slowTint, stunStars };
+      return { slowRing, slowRingDark, slowTint, stunStars };
     };
 
     this.statusByRole = { player: buildStatusVisual(), enemy: buildStatusVisual() };
+
+    // QA-only on-demand spawn — see the `__vfxSpawnTest` declaration above.
+    window.__vfxSpawnTest = (kind, xWU, yWU, amount = 14, color = '#FFC93C') => {
+      if (kind === 'impact') this.spawnImpactBurst(xWU, yWU, color, amount);
+      else if (kind === 'death') this.spawnDeathBurst(xWU, yWU, color);
+      else this.spawnCastFlash(xWU, yWU, { x: 1, y: 0 }, { key: 'qa', name: 'qa', type: 'ranged', range: 100, damage: amount, cooldown: 1, color, effect: null } as unknown as Weapon, 'hamburger');
+    };
   }
 
   sync(state: MatchState): void {
@@ -812,16 +906,24 @@ export class VfxLayer {
       const slowed = terrainSlowed || weaponSlowed;
 
       vis.slowRing.visible = slowed;
+      vis.slowRingDark.visible = slowed;
       vis.slowTint.visible = slowed;
       if (slowed) {
-        vis.slowRing.position.set(pos.x, STATUS_RING_Y, pos.z);
         const pulse = 0.9 + Math.sin(state.elapsed * 0.0035) * 0.12;
+        const spin = state.elapsed * 0.0012;
+        // Dark band sits a hair lower so it never z-fights the bright one.
+        vis.slowRingDark.position.set(pos.x, STATUS_RING_Y - 0.01, pos.z);
+        vis.slowRingDark.scale.setScalar(pulse);
+        vis.slowRingDark.rotation.z = spin;
+        (vis.slowRingDark.material as THREE.MeshBasicMaterial).opacity = 0.5;
+
+        vis.slowRing.position.set(pos.x, STATUS_RING_Y, pos.z);
         vis.slowRing.scale.setScalar(pulse);
-        vis.slowRing.rotation.z = state.elapsed * 0.0012;
-        (vis.slowRing.material as THREE.MeshBasicMaterial).opacity = 0.55;
+        vis.slowRing.rotation.z = spin;
+        (vis.slowRing.material as THREE.MeshBasicMaterial).opacity = 0.9;
 
         vis.slowTint.position.set(pos.x, SLOW_TINT_CENTER_Y, pos.z);
-        const tintPulse = 0.68 + Math.sin(state.elapsed * 0.006) * 0.1;
+        const tintPulse = SLOW_TINT_PEAK_OPACITY + Math.sin(state.elapsed * 0.006) * 0.08;
         (vis.slowTint.material as THREE.SpriteMaterial).opacity = tintPulse;
       }
 
@@ -1112,14 +1214,34 @@ export class VfxLayer {
       return;
     }
 
-    // ── Generic path — unchanged from before this system existed. ────────────────
-    // Sized up again (was base 0.85/slope 0.055/cap 3.4) — four critic rounds in a
-    // row judged this game's combat VFX against Brawl Stars references shot on a
-    // MUCH closer camera than ours; the same effect occupies a far smaller fraction
-    // of OUR wider frame at the same world-space size. Compensating by making the
-    // effect itself bigger in world space is the only lever available here (the
-    // camera framing itself belongs to match.ts/stage.ts, not this file).
-    const sizeFactor = THREE.MathUtils.clamp(1.2 + amount * 0.075, 1.2, 4.4);
+    // ── Generic path ────────────────────────────────────────────────────────────
+    // `sizeFactor` is the ONE knob every element of `burst()` is multiplied by, so
+    // it is also the one number that decides whether a hit is readable. It has been
+    // wrong in both directions:
+    //
+    // Four critic rounds judged our combat VFX against Brawl Stars plates shot on a
+    // much closer camera, so the same world-space effect filled far less of OUR
+    // frame — and the response was to keep scaling the world-space effect up (base
+    // 0.85 → 1.2, cap 3.4 → 4.4). That over-corrected past the point of absurdity:
+    // measured against the current camera, the star ground-mark reached **4.4m** on
+    // a **2.1m** character and each individual shard sprite reached 2.6m, i.e. a
+    // single piece of debris was larger than the fighter it came off. On screen the
+    // burst spanned ~270px against a ~55px character and completely swallowed it —
+    // during a hit the only things still legible were the HP bar and the damage
+    // number, which are HUD, not the character. An effect that hides the thing it is
+    // giving feedback about has stopped being feedback.
+    //
+    // Re-derived against `CHARACTER_HEIGHT` rather than against a reference plate's
+    // framing, so it stays anchored if the camera moves again: at typical weapon
+    // damage the burst's largest opaque element is about ONE character height across
+    // and every element is sized as a fraction of that (see `burst`). The character
+    // stays readable through its own hit; the burst still dominates the tile it
+    // lands on.
+    //
+    // This is load-bearing beyond this call site: nine per-weapon `vfx/weapons/*`
+    // agents each tune a bespoke effect against this generic recipe as their
+    // reference for "how big is a hit", so an error here gets paid for nine times.
+    const sizeFactor = THREE.MathUtils.clamp(0.85 + amount * 0.035, 0.85, 2.0);
     // Fewer, bigger shards (see the shard loop's comment in `burst`) — round 2 used
     // up to 11 small ones per hit; they averaged into more glow instead of reading as
     // individual debris.
@@ -1127,11 +1249,14 @@ export class VfxLayer {
   }
 
   /** Bigger burst + scatter + a bright pop for a death — the biggest non-ultimate
-   * moment in a match, so it deliberately outsizes even a hard hit. */
+   * moment in a match, so it deliberately outsizes even a hard hit. 2.6 against
+   * `spawnImpactBurst`'s 2.0 cap keeps that ordering after the burst rescale (see the
+   * note there); it is not an independent number, it is "a bit more than the hardest
+   * possible hit". */
   spawnDeathBurst(xWU: number, yWU: number, color: string): void {
     bumpVfxQaCount('death');
     const origin = groundPos(xWU, yWU);
-    this.burst(origin, color, 3.6, 9, { life: 1.35 });
+    this.burst(origin, color, 2.6, 9, { life: 1.35 });
   }
 
   /** Gentle rising sparkle for a heal (Hamburger's Onion Ring). */
@@ -1191,8 +1316,15 @@ export class VfxLayer {
       p.vz = Math.sin(ang) * 0.6;
       p.vy = 1.1 + Math.random() * 0.5;
       p.gravity = -5.5;
-      p.startScale = 0.2 + Math.random() * 0.06;
-      p.endScale = 0.03;
+      // ~3x the first pass (was 0.20-0.26 shrinking to 0.03). Measured against the
+      // current camera those droplets spanned 0.03-0.04m for most of their life —
+      // about TWO PIXELS — with a 0.22m peak on the first frame, so the splash was
+      // present, correct and completely sub-perceptual. This is not the old depth bug
+      // (fixed: see the spawn-height note above); it is a scale failure against a
+      // camera that moved out from under it. At 0.6m a droplet is ~29% of a
+      // character's height, which is a readable splash without becoming a smoke plume.
+      p.startScale = 0.58 + Math.random() * 0.2;
+      p.endScale = 0.12;
       p.startOpacity = 1; p.endOpacity = 0; p.fadeEase = 1;
       // Additive blending (this whole pool's material — see the constructor) washes
       // a pale colour out to near-white against a bright background rather than
@@ -1293,7 +1425,11 @@ export class VfxLayer {
     // flash/shards by a good margin so it reads as a mark LEFT BEHIND, not part of
     // the initial pop.
     if (!opts?.skipDecal) {
-      this.spawnImpactStarDecal(origin, color, THREE.MathUtils.clamp(1.05 * sizeFactor, 1.0, 4.2), (0.55 + sizeFactor * 0.08) * life);
+      // Radius, so ~1m here is a ~2m mark — about one character height across at
+      // typical weapon damage. See `spawnImpactBurst`'s note for why every
+      // multiplier in this function is now expressed against the character rather
+      // than against a reference plate's framing.
+      this.spawnImpactStarDecal(origin, color, THREE.MathUtils.clamp(0.65 * sizeFactor, 0.55, 1.5), (0.55 + sizeFactor * 0.08) * life);
     }
 
     if (!opts?.skipFlash) {
@@ -1302,7 +1438,7 @@ export class VfxLayer {
       flash.sprite.visible = true;
       flash.sprite.position.set(origin.x, IMPACT_HEIGHT, origin.z);
       flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
-      flash.startScale = 0.85 * sizeFactor; flash.endScale = 2.1 * sizeFactor;
+      flash.startScale = 0.5 * sizeFactor; flash.endScale = 1.15 * sizeFactor;
       flash.startOpacity = 1; flash.endOpacity = 0; flash.fadeEase = 1.4;
       flash.mat.color.set(color).lerp(WHITE, 0.3);
     }
@@ -1311,7 +1447,7 @@ export class VfxLayer {
       // Bright inner rim...
       const ring = this.allocRing();
       ring.active = true; ring.life = 0; ring.maxLife = (0.24 + sizeFactor * 0.06) * life;
-      ring.startScale = 0.15; ring.targetScale = 1.05 * sizeFactor + 0.55;
+      ring.startScale = 0.15; ring.targetScale = 0.6 * sizeFactor + 0.35;
       ring.startOpacity = 0.95;
       ring.mesh.visible = true;
       ring.mesh.position.set(origin.x, GROUND_VFX_Y, origin.z);
@@ -1320,10 +1456,12 @@ export class VfxLayer {
       ring.mat.opacity = ring.startOpacity;
 
       // ...plus a softer, slightly larger companion ring right behind it, so the
-      // shockwave reads as a band with body rather than a single thin line.
+      // shockwave reads as a band with body rather than a single thin line. It is
+      // allowed to outrun the character's own footprint — a thin expanding rim
+      // doesn't hide anything, unlike the opaque star mark above.
       const ring2 = this.allocRing();
       ring2.active = true; ring2.life = 0; ring2.maxLife = (0.32 + sizeFactor * 0.08) * life;
-      ring2.startScale = 0.1; ring2.targetScale = (1.05 * sizeFactor + 0.55) * 1.4;
+      ring2.startScale = 0.1; ring2.targetScale = (0.6 * sizeFactor + 0.35) * 1.35;
       ring2.startOpacity = 0.55;
       ring2.mesh.visible = true;
       ring2.mesh.position.set(origin.x, GROUND_VFX_Y - 0.01, origin.z);
@@ -1337,7 +1475,7 @@ export class VfxLayer {
     // colour-graded flash/decal rather than another same-hued shape fusing into them.
     if (!opts?.skipStreaks) {
       const streakCount = Math.max(4, Math.round(shardCount * 0.7));
-      this.spawnStreaks(origin, IMPACT_HEIGHT, '#FFE79A', streakCount, (1.1 + sizeFactor * 0.7) * speedMult, 0.26 * life);
+      this.spawnStreaks(origin, IMPACT_HEIGHT, '#FFE79A', streakCount, (0.5 + sizeFactor * 0.5) * speedMult, 0.26 * life);
     }
 
     // Angular crystal-shard debris, NOT more soft glow dots (that was the critic's
@@ -1352,7 +1490,10 @@ export class VfxLayer {
     // from the epicentre reads as "flung outward" even frozen, the same trick 2D
     // hit-effect sprites have always used for exactly this problem. Pre-offset from
     // the epicentre so they read as already-scattered from the very first frame.
-    const shardBaseScale = 0.95 * sizeFactor;
+    // 0.4x, not 0.95x. At the old value a single shard sprite measured 2.6m against a
+    // 2.1m character — one chip of debris bigger than the fighter it flew off, which
+    // is most of why a hit read as one undifferentiated bloom rather than as debris.
+    const shardBaseScale = 0.4 * sizeFactor;
     for (let i = 0; i < shardCount; i++) {
       const s = this.allocParticle();
       s.mat.map = this.shardTex;
@@ -1480,6 +1621,7 @@ export class VfxLayer {
     for (const role of ['player', 'enemy'] as const) {
       const vis = this.statusByRole[role];
       vis.slowRing.visible = false;
+      vis.slowRingDark.visible = false;
       vis.slowTint.visible = false;
       vis.stunStars.forEach((s) => { s.visible = false; });
       // Reset footstep-distance tracking too — see the `slowSplashState` field
@@ -1495,6 +1637,7 @@ export class VfxLayer {
 
   dispose(): void {
     this.clear();
+    delete window.__vfxSpawnTest;
     this.projectileGeo.dispose();
     this.splatGeo.dispose();
     this.trailGeo.dispose();
@@ -1504,6 +1647,7 @@ export class VfxLayer {
     this.materialCache.clear();
 
     this.glowTex.dispose();
+    this.softDiscTex.dispose();
     this.starTex.dispose();
     this.streakTex.dispose();
     this.shardTex.dispose();
@@ -1518,6 +1662,8 @@ export class VfxLayer {
       const vis = this.statusByRole[role];
       (vis.slowRing.material as THREE.Material).dispose();
       vis.slowRing.geometry.dispose();
+      (vis.slowRingDark.material as THREE.Material).dispose();
+      vis.slowRingDark.geometry.dispose();
       (vis.slowTint.material as THREE.Material).dispose();
       vis.stunStars.forEach((s) => (s.material as THREE.Material).dispose());
     }
