@@ -137,7 +137,7 @@ export class GameSession {
       container: opts.container,
       background: 0xffcf8a,
       fog: { color: 0xffcf8a, near: 40, far: 130 },
-      camera: { pitchDeg: 58, yawDeg: 0, frameMode: 'ground', viewWidthUnits: 360 },
+      camera: { pitchDeg: 58, yawDeg: 0, frameMode: 'ground', viewWidthUnits: 265 },
     });
     this.stage.scene.add(this.arena.build());
 

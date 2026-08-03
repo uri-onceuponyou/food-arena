@@ -77,7 +77,7 @@ const stage = new Stage({
     pitchDeg: params.has('pitch') ? Number(params.get('pitch')) : 58,
     yawDeg: params.has('yaw') ? Number(params.get('yaw')) : 0,
     frameMode: 'ground',
-    viewWidthUnits: arenaView === 'overview' ? 1600 : 360,
+    viewWidthUnits: arenaView === 'overview' ? 1600 : 265,
     followLerp: 1,
   } : {
     pitchDeg: params.has('pitch') ? Number(params.get('pitch')) : 22,
