@@ -91,7 +91,15 @@ export class Stage {
       const envScene = new RoomEnvironment();
       this.envMap = pmrem.fromScene(envScene, 0.04).texture;
       this.scene.environment = this.envMap;
-      this.scene.environmentIntensity = opts.environmentIntensity ?? 0.38;
+      // RoomEnvironment's irradiance is nearly uniform across surface orientation
+      // (it's an enclosed lit room), so cranking this flattens tops vs sides same as
+      // an over-bright hemisphere fill would. But cutting it too far (0.22, tried and
+      // measured) reads as flat matte plastic with zero sheen in blind critic review —
+      // this is the ONLY source of rounded specular highlights in the rig, since
+      // MeshToonMaterial isn't used. 0.28 is the compromise: enough reflected
+      // highlight to read as moulded vinyl, without swamping the key/fill balance
+      // that gives objects their top-vs-side value separation.
+      this.scene.environmentIntensity = opts.environmentIntensity ?? 0.28;
       envScene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.isMesh) m.geometry?.dispose();
@@ -128,8 +136,14 @@ export class Stage {
         luminanceInfluence: 0.6,
         samples: 16,
         rings: 5,
-        radius: 0.06,
-        intensity: 3.2,
+        // Widened from 0.06 to help grounding, but at 0.16/3.6 it read in blind
+        // critic review as a "blanket AO" halo that competed with — and blurred the
+        // read of — the actual directional cast shadow, undoing the shadow-crisping
+        // work in lighting.ts. Pulled back to a middle ground: still wider than the
+        // original fine-seam-only 0.06, but no longer strong enough to masquerade as
+        // the scene's primary shadow cue.
+        radius: 0.11,
+        intensity: 3.0,
         resolutionScale: 0.85,
       });
     }
@@ -150,8 +164,16 @@ export class Stage {
     // Restrained on purpose. At 0.34 this shoved an authored tan bun to pure orange —
     // the grade should lift what the artist chose, not overwrite it. Saturation belongs
     // in the albedo colours first, with only a light global assist here.
-    const saturation = new HueSaturationEffect({ saturation: 0.16 });
-    const contrast = new BrightnessContrastEffect({ brightness: 0.02, contrast: 0.06 });
+    // Pushed up again (0.16 → 0.19 → 0.25): a critic blind-comparing directly
+    // against bs_01/04/06 still called our colour "pastel/muted rather than punchy"
+    // next to the reference's saturated palette, even after the light-energy fix
+    // stopped surfaces clipping to white.
+    const saturation = new HueSaturationEffect({ saturation: 0.25 });
+    // Brightness dropped from +0.02 to 0: the fix for the flat/washed look was
+    // reducing raw light energy so faces stop clipping to white, so the grade
+    // shouldn't immediately add brightness back and undo that. Contrast nudged up
+    // now that there's headroom below full white to push into.
+    const contrast = new BrightnessContrastEffect({ brightness: 0.0, contrast: 0.12 });
 
     // Barely-there vignette; the reference has essentially none.
     const vignette = new VignetteEffect({

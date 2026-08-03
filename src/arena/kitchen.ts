@@ -36,6 +36,16 @@ import type { ArenaDefinition, ArenaFactory, CoverBox, HazardZone } from './type
 import { toonMat, glossyMat, flatMat, roundedBox, outlineGroup, RAMP_SOFT } from '../render/toon';
 import { wu, groundPos } from '../units';
 import { POT, PUDDLE_SLOW_FACTOR, PALETTE } from '../game/rules';
+import {
+  makeTileWearTexture,
+  makeWoodGrainTexture,
+  makeButcherBlockTexture,
+  makeBrushedMetalTexture,
+  makePlankTexture,
+  makeBurlapTexture,
+  makeBarrelTexture,
+  makePanelSeamTexture,
+} from './textures';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Map constants
@@ -148,6 +158,13 @@ const KPAL = {
   // "this collides" from the colour alone, anywhere in the arena, before reading
   // shape at all.
   coverPlinth: '#191320',
+  // Round-7: the backsplash WALL specifically (see `coverPlinthPanel` in
+  // `buildMaterials`) needs a touch more headroom than the reserved trim colour
+  // above — a texture `map` is multiplicative against the base colour, and
+  // `coverPlinth` is dark enough (RGB ~25,19,32) that even a strong texture has
+  // almost no absolute range left to show. A little lighter, still unmistakably the
+  // same near-black plum family, so the panel-seam texture actually reads.
+  coverPlinthPanel: '#332A3D',
 
   // HAZARD — replaces the old pale-gold "crisp ring" that sat almost exactly the
   // tile's own hue+value (the critic's literal complaint: "faint warm glow,
@@ -164,11 +181,24 @@ const KPAL = {
   greaseRim: '#D6FF3A',
   waterRim: '#2FE8FF',
 
-  // New mid-lane cover (see the four `supply_barrel`s below) — a bold saturated
-  // red body found nowhere else in the arena, so it reads as its own landmark
-  // rather than another tan crate.
-  barrelBody: '#C0281F',
-  barrelBodyDark: '#8E1B15',
+  // New mid-lane cover (see the four `supply_barrel`s below) — round-7 RECOLOUR:
+  // a critic mistook this prop for an explosive hazard and marked the arena down
+  // for not telegraphing it. It never was one — it's plain cover, like the crates —
+  // but the critic's mistake is itself the real bug: red means "danger" everywhere
+  // else in this arena (the hazard ring, its glow, its caution stripes all live in
+  // the amber/red band — see `hazardStripeBright`/`hazardGlowHot` below), so a red
+  // COVER prop was actively lying about what it does. Every other cover prop reads
+  // as safe-to-approach; this is the one place the arena accidentally spoke the
+  // hazard language for something you're supposed to hide behind. Recoloured to a
+  // saturated navy — the real-world "supply/water drum" convention (blue plastic
+  // barrels read as cargo almost universally, the same way red/orange reads as
+  // explosive) — and distinct in both hue and value from every other blue already
+  // in the palette: much darker/more desaturated than the freezer's bright sky-cyan
+  // (`freezerBody`) and the hub's vivid `tealTile`, and bluer (less teal, less
+  // violet) than `steel`/`spiceCartBody`. Still bold enough to read as its own
+  // landmark, never implying "this explodes."
+  barrelBody: '#2E5A8A',
+  barrelBodyDark: '#1D3B5C',
 
   // ── Round-6 fix: spice-cart body ─────────────────────────────────────────────
   // The cart's body used to share `tealTileDark` with the floor's own decorative
@@ -205,15 +235,76 @@ const KPAL = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildMaterials() {
-  return {
+  // ── Round-7 texture kit ──────────────────────────────────────────────────────
+  // The recurring, round-over-round critic complaint has been the SAME finding every
+  // time: "flat, single-value fills per surface with almost no internal gradient —
+  // painted blockout, not finished material." Every reference frame gets most of its
+  // material read from texture almost for free (mowed-grass stripes, brick coursing,
+  // tile wear); this arena had exactly one place doing that (the hazard stripe/scorch
+  // decals) and a solid colour everywhere else. These canvas textures (see
+  // `./textures.ts` for the generators and the shared design rules) are assigned as
+  // `map` below on every major surface family so the fix is broad, not another single
+  // spot-fix. Built once per arena instance, same lifetime as everything else here.
+  const tileWearA = makeTileWearTexture(4001);
+  const tileWearB = makeTileWearTexture(4029);
+  const woodGrainWarm = makeWoodGrainTexture(4111);
+  const butcherBlockTex = makeButcherBlockTexture(4177);
+  const brushedSteel = makeBrushedMetalTexture(4211);
+  const brushedFreezer = makeBrushedMetalTexture(4237);
+  const plankWarm = makePlankTexture(4271, 4);
+  const plankHerb = makePlankTexture(4293, 3);
+  const burlapTex = makeBurlapTexture(4321);
+  const barrelTex = makeBarrelTexture(4357);
+  const panelSeamTex = makePanelSeamTexture(4391);
+  // Round-7 second pass — a few more surfaces that turned out to still be flat
+  // single-value fills once the first batch above was actually visible on screen
+  // (see the freezer lid: a SEPARATE material from `freezerBody`, missed entirely
+  // by the first pass despite being the single biggest flat panel in the arena at
+  // default gameplay framing). Own texture instances (not reused ones) so each can
+  // carry its own `repeat` without fighting another surface's tuning.
+  const rugWeave = makeBurlapTexture(4451);
+  const cartMetal = makeBrushedMetalTexture(4487);
+  const utilityMatTex = makeTileWearTexture(4519);
+  const potMetalTex = makeBrushedMetalTexture(4547);
+
+  // Floor tiles: applied at repeat (1,1) — each tile box's own UV already spans
+  // 0..1 across its top face (see `buildFloor`), so the generator's one "tile's
+  // worth" of wear IS the whole face, not a pattern meant to repeat within it.
+  // Two different seeds (A for the light tile, B for the dark) so alternating
+  // checkerboard squares don't show the identical mottling.
+  tileWearA.repeat.set(1, 1);
+  tileWearB.repeat.set(1, 1);
+  // Wood pad is shared between the big pantry floor pads (~14x13m) and the small
+  // rolling-pin prop — a single moderate repeat is the best compromise across both.
+  woodGrainWarm.repeat.set(3, 3);
+  butcherBlockTex.repeat.set(3, 1);
+  brushedSteel.repeat.set(1, 1);
+  // Own texture instance (not shared with `steel`/`steelDark`) so this can carry a
+  // wider repeat suited to the freezer's much bigger flat faces without changing the
+  // stove/service tops' streak scale.
+  brushedFreezer.repeat.set(3, 2);
+  burlapTex.repeat.set(2, 2);
+  // Hub rugs are long thin rectangles (150x80wu / 80x150wu) — an elongated repeat
+  // keeps the weave cells roughly square instead of stretched.
+  rugWeave.repeat.set(3, 5);
+  cartMetal.repeat.set(2, 2);
+  // This pad is enormous (420x340wu, ~21x17m) and `makeTileWearTexture`'s features
+  // (one border ring, a handful of sparse blotches/scuffs) are discrete, not a
+  // continuous pattern — at a low repeat, most of any given camera framing could
+  // land entirely inside one cell's flat interior and show nothing. A denser repeat
+  // guarantees a border line (at minimum) crosses through frame from any angle.
+  utilityMatTex.repeat.set(6, 5);
+  potMetalTex.repeat.set(1, 1);
+
+  const mats = {
     // Roughness spread across the floor/cabinet/crate surfaces is deliberate: identical
     // mid-roughness everywhere is what makes a scene read as shadeless plastic even
     // under working lights, because nothing catches a distinct specular highlight.
-    tileLight: toonMat({ color: KPAL.tileLight, ramp: RAMP_SOFT(), roughness: 0.55 }),
-    tileDark: toonMat({ color: KPAL.tileDark, ramp: RAMP_SOFT(), roughness: 0.55 }),
+    tileLight: toonMat({ color: KPAL.tileLight, ramp: RAMP_SOFT(), roughness: 0.55, map: tileWearA }),
+    tileDark: toonMat({ color: KPAL.tileDark, ramp: RAMP_SOFT(), roughness: 0.55, map: tileWearB }),
     subfloor: toonMat({ color: KPAL.subfloor, ramp: RAMP_SOFT(), roughness: 0.92 }),
     border: toonMat({ color: KPAL.border, ramp: RAMP_SOFT(), roughness: 0.7 }),
-    woodPad: toonMat({ color: KPAL.woodPad, ramp: RAMP_SOFT(), roughness: 0.68 }),
+    woodPad: toonMat({ color: KPAL.woodPad, ramp: RAMP_SOFT(), roughness: 0.68, map: woodGrainWarm }),
     woodSeam: toonMat({ color: KPAL.woodSeam, ramp: RAMP_SOFT(), roughness: 0.75 }),
     // Unlit on purpose: a lit near-white toonMat disc this pale caught the same
     // key+fill overexposure as the counter tops and rendered as a hard white lump
@@ -226,40 +317,52 @@ function buildMaterials() {
     floorGrime: flatMat('#3E2A18', { transparent: true, opacity: 0.22 }),
     floorWet: flatMat('#3E90BE', { transparent: true, opacity: 0.2 }),
 
-    cabinet: toonMat({ color: KPAL.cabinet, roughness: 0.62 }),
-    cabinetDark: toonMat({ color: KPAL.cabinetDark, roughness: 0.65 }),
-    butcherBlock: toonMat({ color: KPAL.butcherBlock, roughness: 0.5 }),
+    cabinet: toonMat({ color: KPAL.cabinet, roughness: 0.62, map: woodGrainWarm }),
+    cabinetDark: toonMat({ color: KPAL.cabinetDark, roughness: 0.65, map: woodGrainWarm }),
+    butcherBlock: toonMat({ color: KPAL.butcherBlock, roughness: 0.5, map: butcherBlockTex }),
+    // `steel`/`steelDark` also get the brushed texture as a `roughnessMap`, not just
+    // `map` — the same streak pattern darkening the diffuse read also breaks up the
+    // specular highlight into fine bands instead of one smooth glossy patch, which is
+    // what an actual brushed-metal counter top does under a key light.
     steel: glossyMat({ color: KPAL.steel, roughness: 0.32 }),
     steelDark: glossyMat({ color: KPAL.steelDark, roughness: 0.36 }),
 
     freezerBody: glossyMat({ color: KPAL.freezerBody, roughness: 0.4 }),
-    freezerDoor: toonMat({ color: KPAL.freezerDoor, roughness: 0.45 }),
+    freezerDoor: toonMat({ color: KPAL.freezerDoor, roughness: 0.45, map: brushedFreezer }),
     freezerTrim: toonMat({ color: KPAL.freezerTrim, roughness: 0.5 }),
     // Frosty lid cap, noticeably lighter/cooler than the body — from the steep
     // top-down camera the freezer's flat top is almost the whole silhouette, so this
     // two-tone break (plus the bright rim trim ringing it) is what keeps its huge top
     // face reading as a lid catching light rather than a single flat coloured slab.
-    freezerLid: toonMat({ color: '#7FD6EE', roughness: 0.3 }),
+    // Round-7: this is the SINGLE biggest flat-fill surface in the whole arena at the
+    // default gameplay framing (a freezer corner fills a huge fraction of the frame,
+    // top-down) and was missed by the first texture pass entirely — it's its own
+    // material, not `freezerBody`, so `brushedFreezer` had to be wired here too.
+    freezerLid: toonMat({ color: '#7FD6EE', roughness: 0.3, map: brushedFreezer }),
     // Cold ground light spilling out in front of each freezer door — unlit so it
     // reads as emitted light rather than a painted floor patch.
     freezerGlow: flatMat(KPAL.freezerGlow, { transparent: true, opacity: 0.28 }),
 
-    crateWood: toonMat({ color: KPAL.crateWood, roughness: 0.72 }),
-    crateSlat: toonMat({ color: KPAL.crateSlat, roughness: 0.78 }),
-    burlap: toonMat({ color: KPAL.burlap, roughness: 0.85 }),
-    burlapDark: toonMat({ color: KPAL.burlapDark, roughness: 0.88 }),
+    crateWood: toonMat({ color: KPAL.crateWood, roughness: 0.72, map: plankWarm }),
+    crateSlat: toonMat({ color: KPAL.crateSlat, roughness: 0.78, map: plankWarm }),
+    burlap: toonMat({ color: KPAL.burlap, roughness: 0.85, map: burlapTex }),
+    burlapDark: toonMat({ color: KPAL.burlapDark, roughness: 0.88, map: burlapTex }),
 
-    herbCrateWood: toonMat({ color: KPAL.herbCrateWood, roughness: 0.7 }),
-    herbCrateSlat: toonMat({ color: KPAL.herbCrateSlat, roughness: 0.78 }),
+    herbCrateWood: toonMat({ color: KPAL.herbCrateWood, roughness: 0.7, map: plankHerb }),
+    herbCrateSlat: toonMat({ color: KPAL.herbCrateSlat, roughness: 0.78, map: plankHerb }),
     herbLeafA: toonMat({ color: KPAL.herbLeafA, roughness: 0.58 }),
     herbLeafB: toonMat({ color: KPAL.herbLeafB, roughness: 0.6 }),
     potteryWarm: toonMat({ color: KPAL.potteryWarm, roughness: 0.65 }),
 
-    tealTile: toonMat({ color: KPAL.tealTile, ramp: RAMP_SOFT(), roughness: 0.5 }),
-    tealTileDark: toonMat({ color: KPAL.tealTileDark, ramp: RAMP_SOFT(), roughness: 0.55 }),
+    // Round-7: these long rug-like floor patches under the hub chokepoint props were
+    // a completely flat colour fill in the first review pass — a woven-mat texture
+    // (reusing the burlap generator; hue comes entirely from the material colour)
+    // gives them a fabric read instead of a painted rectangle.
+    tealTile: toonMat({ color: KPAL.tealTile, ramp: RAMP_SOFT(), roughness: 0.5, map: rugWeave }),
+    tealTileDark: toonMat({ color: KPAL.tealTileDark, ramp: RAMP_SOFT(), roughness: 0.55, map: rugWeave }),
 
     potMetal: glossyMat({ color: KPAL.potMetal, roughness: 0.22 }),
-    potMetalDark: toonMat({ color: KPAL.potMetalDark, roughness: 0.4 }),
+    potMetalDark: toonMat({ color: KPAL.potMetalDark, roughness: 0.4, map: potMetalTex }),
     broth: glossyMat({ color: PALETTE.broth, roughness: 0.22, emissive: '#3a1a05', emissiveIntensity: 0.12 }),
     flame: flatMat(KPAL.flame, { transparent: true, opacity: 0.92 }),
     flameCore: flatMat(KPAL.flameCore, { transparent: true, opacity: 0.95 }),
@@ -288,23 +391,38 @@ function buildMaterials() {
     // material" problem being fixed here.
     coverPlinth: flatMat(KPAL.coverPlinth),
 
+    // Round-7: the vertical backsplash WALL (see `addBacksplash`) is one of the
+    // biggest single flat-colour surfaces on every stove/prep/service counter — at
+    // gameplay pitch it's the whole visible "riser" face — so it gets its own
+    // textured variant instead of sharing bare `coverPlinth`. Same near-black plum
+    // (still unambiguously the reserved BLOCKING hue), plus horizontal tile-coursing
+    // seam lines. `coverPlinth` itself stays untouched/flat: it's reused on tiny trim
+    // (kicks, feet, bungs) where a patterned texture would be barely visible and
+    // isn't worth diluting the "one flat reserved colour = blocking" instant-read cue.
+    coverPlinthPanel: flatMat(KPAL.coverPlinthPanel),
+
     // Hazard rim materials — hard-edged, fully opaque, unlit (so they read as a
     // painted warning marking, not a lit surface that can wash out under the rig's
     // key light the way the old pale-gold ring did).
     greaseRim: flatMat(KPAL.greaseRim),
     waterRim: flatMat(KPAL.waterRim),
 
-    // New mid-lane cover body — glossy like the pot's metal, but a bold saturated
-    // red found nowhere else in the arena.
+    // New mid-lane cover body — glossy like the pot's metal. Round-7: recoloured
+    // from red to navy (see the KPAL note on `barrelBody`) after a critic mistook it
+    // for an explosive hazard; the drum texture below (banding + a neutral shipping
+    // chevron, see `makeBarrelTexture`) reinforces "supply cargo," not "danger."
     barrelBody: glossyMat({ color: KPAL.barrelBody, roughness: 0.4 }),
-    barrelBodyDark: toonMat({ color: KPAL.barrelBodyDark, roughness: 0.55 }),
+    barrelBodyDark: toonMat({ color: KPAL.barrelBodyDark, roughness: 0.55, map: barrelTex }),
 
-    // Round-6 fixes — see the KPAL notes on `spiceCartBody` / `debrisBerry`.
-    spiceCartBody: toonMat({ color: KPAL.spiceCartBody, roughness: 0.5 }),
-    spiceCartBodyDark: toonMat({ color: KPAL.spiceCartBodyDark, roughness: 0.6 }),
+    // Round-6 fixes — see the KPAL notes on `spiceCartBody` / `debrisBerry`. Round-7:
+    // both the cart body and the utility mats were still flat single-value fills —
+    // a metal-panel texture on the cart (it's a wheeled trolley), a subtle worn-mat
+    // texture (reusing the tile-wear generator) on the rubber utility pads.
+    spiceCartBody: toonMat({ color: KPAL.spiceCartBody, roughness: 0.5, map: cartMetal }),
+    spiceCartBodyDark: toonMat({ color: KPAL.spiceCartBodyDark, roughness: 0.6, map: cartMetal }),
     debrisBerry: toonMat({ color: KPAL.debrisBerry, roughness: 0.55 }),
-    utilityMat: toonMat({ color: KPAL.utilityMat, ramp: RAMP_SOFT(), roughness: 0.65 }),
-    utilityMatDark: toonMat({ color: KPAL.utilityMatDark, ramp: RAMP_SOFT(), roughness: 0.68 }),
+    utilityMat: toonMat({ color: KPAL.utilityMat, ramp: RAMP_SOFT(), roughness: 0.65, map: utilityMatTex }),
+    utilityMatDark: toonMat({ color: KPAL.utilityMatDark, ramp: RAMP_SOFT(), roughness: 0.68, map: utilityMatTex }),
 
     // Fake ambient occlusion — a soft dark radial decal dropped under ROUND props
     // (the pot) so they read as sitting ON the floor with real contact darkening,
@@ -342,7 +460,47 @@ function buildMaterials() {
       depthWrite: false,
       opacity: 0.7,
     }),
+
+    // Round-7: stronger, wider-spread grounding pair reserved for `LARGE_COVER_KINDS`
+    // (see `addCover` and the texture notes above `makeGroundedShadowTextureStrong`).
+    groundedShadowStrong: new THREE.MeshBasicMaterial({
+      map: makeGroundedShadowTextureStrong(),
+      transparent: true,
+      depthWrite: false,
+      opacity: 1,
+    }),
+    castShadowDecalStrong: new THREE.MeshBasicMaterial({
+      map: makeCastShadowTextureStrong(),
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.88,
+    }),
   };
+
+  // ── Post-creation texture wiring ─────────────────────────────────────────────
+  // `glossyMat`/`flatMat` (unlike `toonMat`) don't take a `map` option, but every
+  // material they return is a real `THREE.Material` — mutating `.map` directly here
+  // is exactly as valid as passing it through a constructor option, and doing it in
+  // one place keeps `buildMaterials` itself the single source of truth for which
+  // surface gets which texture.
+  mats.steel.map = brushedSteel;
+  mats.steel.roughnessMap = brushedSteel;
+  mats.steel.needsUpdate = true;
+  mats.steelDark.map = brushedSteel;
+  mats.steelDark.roughnessMap = brushedSteel;
+  mats.steelDark.needsUpdate = true;
+  mats.freezerBody.map = brushedFreezer;
+  mats.freezerBody.roughnessMap = brushedFreezer;
+  mats.freezerBody.needsUpdate = true;
+  mats.barrelBody.map = barrelTex;
+  mats.barrelBody.needsUpdate = true;
+  mats.coverPlinthPanel.map = panelSeamTex;
+  mats.coverPlinthPanel.needsUpdate = true;
+  mats.potMetal.map = potMetalTex;
+  mats.potMetal.roughnessMap = potMetalTex;
+  mats.potMetal.needsUpdate = true;
+
+  return mats;
 }
 
 type Materials = ReturnType<typeof buildMaterials>;
@@ -468,6 +626,67 @@ function makeCastShadowTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+/**
+ * Round-7 "Strong" variant of `makeGroundedShadowTexture`, reserved for the large
+ * structural cover pieces (stove islands, freezers, prep/service counters — see
+ * `LARGE_COVER_KINDS` near `addCover`). The critic's finding was specific: small
+ * props (barrels, crates, the lane pots) already show a consistent grounding
+ * shadow, but the big platforms "mostly rely on a darker side-face... shadow
+ * opacity/contrast is much lower than either shipped reference." The base
+ * texture's feather is deliberately NARROW (4%/5% of the canvas) so a snug
+ * 1.3x-oversized plane still shows a crisp edge close to a SMALL prop — but that
+ * also means almost all of a LARGE prop's much bigger absolute overhang sits
+ * under the fully-opaque interior, which is itself hidden beneath the box's own
+ * geometry, leaving only a thin sliver of feather actually visible on the open
+ * floor around it. This widens the feather zone and raises peak alpha so a wider,
+ * darker band is actually visible beyond a big platform's silhouette instead of
+ * fading to nothing within a few centimetres.
+ */
+function makeGroundedShadowTextureStrong(): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const pad = size * 0.1;
+  const rectW = size - pad * 2;
+  const rectH = size - pad * 2;
+  const radius = size * 0.16;
+  const blur = size * 0.13;
+  const off = size * 3;
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(10,6,4,0.95)';
+  ctx.shadowBlur = blur;
+  ctx.shadowOffsetX = -off;
+  ctx.fillStyle = 'rgba(10,6,4,0.95)';
+  roundRectPath(ctx, off + pad, pad, rectW, rectH, radius);
+  ctx.fill();
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Strong companion to `makeCastShadowTexture` — darker core, wider mid-alpha
+ * shelf, used only for `LARGE_COVER_KINDS` (see `addCover`). */
+function makeCastShadowTextureStrong(): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(12,8,5,0.92)');
+  g.addColorStop(0.4, 'rgba(12,8,5,0.75)');
+  g.addColorStop(0.75, 'rgba(12,8,5,0.34)');
+  g.addColorStop(1, 'rgba(12,8,5,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /** Elliptical AO blob sized to a prop's own footprint (in metres), slightly oversized
  * so it peeks out past the silhouette the way a real contact shadow would. */
 function buildContactShadow(mat: THREE.Material, wM: number, dM: number, scale = 1.25): THREE.Mesh {
@@ -515,10 +734,17 @@ function buildContactShadow(mat: THREE.Material, wM: number, dM: number, scale =
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
-function buildDirectionalShadowMesh(M: Materials, length: number, width: number, yawDeg = 0, startDist = 0): THREE.Mesh {
+function buildDirectionalShadowMesh(
+  M: Materials,
+  length: number,
+  width: number,
+  yawDeg = 0,
+  startDist = 0,
+  material: THREE.Material = M.castShadowDecal
+): THREE.Mesh {
   const { x: localX, z: localZ } = localShadowDir(yawDeg);
 
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(length, width), M.castShadowDecal);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(length, width), material);
   // Two rotations composed as QUATERNIONS, not sequential Euler `rotation.x`/`.y` —
   // Euler angles apply intrinsically (each axis is the mesh's OWN, already-tilted
   // axis from the previous step), so setting `.y` after `.x` spins the plane about
@@ -570,24 +796,47 @@ const COVER_SHADOW_HEIGHT: Record<string, number> = {
   sink_counter: 1.2,
 };
 
+/**
+ * Round-7 grounding fix. The critic's finding was specific: small props (barrels,
+ * crates, the lane pots) already show a consistent AO + cast shadow, but "the
+ * larger structural pieces (the counters/platforms, which matter most for the
+ * 'is this a wall' read) mostly rely on a darker side-face rather than a separate
+ * ground-contact shadow falling onto the floor beyond their footprint." These are
+ * exactly the CoverBox `kind`s tall/wide enough that a steep top-down camera mostly
+ * shows their flat top, with only a thin riser visible at the near edge — the same
+ * kinds the file header already calls out as needing a vertical `addBacksplash`
+ * wall for the same reason. They get the wider, higher-contrast AO + cast-shadow
+ * pair (see `makeGroundedShadowTextureStrong`/`makeCastShadowTextureStrong`) so the
+ * grounding shadow actually pokes out past the body and its kick, instead of the
+ * thin sliver the base (small-prop-tuned) texture would leave visible on something
+ * this big.
+ */
+const LARGE_COVER_KINDS = new Set(['stove_island', 'freezer', 'prep_counter', 'fryer_counter', 'sink_counter']);
+
 /** `buildDirectionalShadowMesh`, sized from a cover prop's footprint + its looked-up
  * approximate height — the single call site `addCover` uses so every registered cover
  * box gets one automatically and it can't be forgotten on a future prop. */
 function buildCoverCastShadow(M: Materials, wM: number, dM: number, kind: string, yawDeg = 0): THREE.Mesh {
   const heightM = COVER_SHADOW_HEIGHT[kind] ?? 1.0;
+  const isLarge = LARGE_COVER_KINDS.has(kind);
   // ~0.72 approximates 1 / tan(the key light's ~54.5° elevation) — see SHADOW_DIR.
-  const length = Math.max(0.6, heightM * 0.85 + 0.3);
-  const width = Math.max(0.4, Math.min(wM, dM) * 0.5);
+  // Large structural pieces get a visibly LONGER, WIDER trailing shadow on top of
+  // the stronger texture — see the `LARGE_COVER_KINDS` note above.
+  const length = Math.max(0.6, heightM * 0.85 + 0.3) * (isLarge ? 1.2 : 1);
+  const width = Math.max(0.4, Math.min(wM, dM) * (isLarge ? 0.62 : 0.5));
   // Distance from the group's centre to ITS OWN rectangular footprint's edge along the
-  // shadow direction, ×1.35 to clear `addCover`'s own 1.3x-oversized AO ring — see the
-  // `startDist` note on `buildDirectionalShadowMesh`.
+  // shadow direction, ×1.35 to clear `addCover`'s own oversized AO ring — see the
+  // `startDist` note on `buildDirectionalShadowMesh`. Large kinds get a slightly
+  // bigger clearance multiplier to match their own wider AO oversize (see `addCover`).
   const { x: localX, z: localZ } = localShadowDir(yawDeg);
   const hw = wM / 2, hd = dM / 2;
   const edgeReach = Math.min(
     Math.abs(localX) > 1e-4 ? hw / Math.abs(localX) : hw,
     Math.abs(localZ) > 1e-4 ? hd / Math.abs(localZ) : hd
   );
-  return buildDirectionalShadowMesh(M, length, width, yawDeg, edgeReach * 1.35);
+  const clearance = isLarge ? 1.55 : 1.35;
+  const material = isLarge ? M.castShadowDecalStrong : M.castShadowDecal;
+  return buildDirectionalShadowMesh(M, length, width, yawDeg, edgeReach * clearance, material);
 }
 
 /**
@@ -693,7 +942,7 @@ function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack
   // Back wall + bright cap trim — see `addBacksplash`. Sits further back (-Z) than
   // the pan rack posts below, so on the island that has a rack this reads as "wall
   // behind the hanging pans" rather than clipping through them.
-  addBacksplash(g, M, wM, dM, cabH, M.coverPlinth, 0.46);
+  addBacksplash(g, M, wM, dM, cabH, M.coverPlinthPanel, 0.46);
 
   // Top is deliberately narrower than the cabinet beneath it — from the steep
   // top-down gameplay camera the top face is almost all you see, so leaving a
@@ -955,7 +1204,7 @@ function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBl
   const kick = mesh(roundedBox(wM * 0.98, 0.12, dM * 0.94 + 0.02, 0.02), M.coverPlinth, 'prep_kick');
   kick.position.y = 0.06;
   g.add(kick);
-  addBacksplash(g, M, wM, dM, h, M.coverPlinth, 0.3);
+  addBacksplash(g, M, wM, dM, h, M.coverPlinthPanel, 0.3);
   const top = mesh(roundedBox(wM * 0.82, 0.08, dM * 0.72, 0.04), M.butcherBlock, 'prep_top');
   top.position.y = h + 0.04;
   g.add(top);
@@ -967,13 +1216,29 @@ function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBl
   const board = mesh(roundedBox(wM * 0.3, 0.035, dM * 0.5, 0.03), M.crateWood, 'prep_cutting_board');
   board.position.set(-wM * 0.2, boardY, 0);
   g.add(board);
+  // Round-7 fix: these used to be four separate chips spread evenly across the
+  // board — a critic flagged small isolated coloured items on counters as
+  // "genuinely unclear as decoration vs pickup." Clustering them into two tight,
+  // overlapping piles (with size jitter) reads as diced scraps someone just left
+  // mid-prep, not four placed objects at reading-distance spacing.
   const choppedMats = [M.tomato, M.onion, M.lettuce];
-  const choppedSpots: Array<[number, number]> = [[-0.09, 0.11], [0.05, -0.09], [-0.12, -0.08], [0.09, 0.1]];
-  choppedSpots.forEach(([cx2, cz2], i) => {
-    const chip = mesh(new THREE.BoxGeometry(0.045, 0.03, 0.045), choppedMats[i % choppedMats.length], 'prep_chopped_veg');
-    chip.position.set(-wM * 0.2 + cx2 * wM * 0.3, boardY + 0.03, cz2 * dM * 0.3);
-    chip.rotation.y = i * 0.8;
-    g.add(chip);
+  const choppedPiles: Array<[number, number]> = [[-0.05, 0.09], [0.07, -0.08]];
+  let choppedIdx = 0;
+  choppedPiles.forEach(([px, pz]) => {
+    for (let k = 0; k < 2; k++) {
+      const jx = (k === 0 ? -1 : 1) * 0.017;
+      const jz = (k === 0 ? 1 : -1) * 0.013;
+      const sc = k === 0 ? 1.15 : 0.85;
+      const chip = mesh(
+        new THREE.BoxGeometry(0.042 * sc, 0.026 * sc, 0.042 * sc),
+        choppedMats[choppedIdx % choppedMats.length],
+        'prep_chopped_veg'
+      );
+      chip.position.set(-wM * 0.2 + (px + jx) * wM * 0.3, boardY + 0.013 * sc, (pz + jz) * dM * 0.3);
+      chip.rotation.y = choppedIdx * 0.8;
+      g.add(chip);
+      choppedIdx++;
+    }
   });
 
   if (opts?.knifeBlock) {
@@ -1026,7 +1291,7 @@ function buildServiceCounter(M: Materials, wM: number, dM: number, variant: 'fry
   const kick = mesh(roundedBox(wM * 0.98, 0.1, dM * 0.95 + 0.02, 0.02), M.coverPlinth, 'service_kick');
   kick.position.y = 0.05;
   g.add(kick);
-  addBacksplash(g, M, wM, dM, h, M.coverPlinth, 0.32);
+  addBacksplash(g, M, wM, dM, h, M.coverPlinthPanel, 0.32);
   const top = mesh(roundedBox(wM * 0.8, 0.09, dM * 0.74, 0.05), M.steel, 'service_top');
   top.position.y = h + 0.045;
   g.add(top);
@@ -1114,24 +1379,47 @@ function buildSpiceCart(M: Materials, wM: number, dM: number): THREE.Group {
   }
   // Mostly-cool jars with a single warm tomato pop — the same "cool field, one warm
   // accent" contrast the reference frames use, just at prop scale.
+  //
+  // Round-7 fix: these used to be four bare, perfectly-even pucks in a dead-straight
+  // row — exactly the "little coloured dots... genuinely unclear as decoration vs
+  // pickup" a critic flagged (a row of small, evenly-spaced saturated discs is the
+  // same visual grammar most top-down arena games use for a resource/ammo count).
+  // Two changes kill that read without touching the palette: (1) a shared wood TRAY
+  // underneath ties all four into one object — jars sitting IN a rack, not loose
+  // items floating on the cart — and (2) each is a two-part jar silhouette (a
+  // neutral wood-tone LID stacked on the coloured body, not a flat coloured chip),
+  // staggered front/back so the row itself is no longer perfectly regular.
   const jarColors = [PALETTE.lettuce, KPAL.herbLeafB, PALETTE.waterCap, PALETTE.tomato];
-  let jx = -wM * 0.28;
-  for (const c of jarColors) {
-    const jar = mesh(puck(0.06, 0.16, 10), toonMat({ color: c }), 'cart_jar');
-    jar.position.set(jx, h + 0.06 + 0.08, 0);
+  const tray = mesh(roundedBox(wM * 0.64, 0.025, dM * 0.3, 0.02), M.woodPad, 'cart_tray');
+  tray.position.set(0, h + 0.06 + 0.0125, 0);
+  g.add(tray);
+  let jx = -wM * 0.24;
+  jarColors.forEach((c, i) => {
+    const stagger = i % 2 === 0 ? -dM * 0.04 : dM * 0.06;
+    const jarY = h + 0.06 + 0.025;
+    const jar = mesh(puck(0.055, 0.13, 10), toonMat({ color: c }), 'cart_jar');
+    jar.position.set(jx, jarY + 0.065, stagger);
     g.add(jar);
-    jx += wM * 0.19;
-  }
+    const lid = mesh(puck(0.058, 0.028, 10), M.woodSeam, 'cart_jar_lid');
+    lid.position.set(jx, jarY + 0.13 + 0.014, stagger);
+    noOutline(lid);
+    g.add(lid);
+    jx += wM * 0.16;
+  });
   return g;
 }
 
 /**
  * Supply barrel — new mid-lane cover (round 5's "open plaza" fix: the critic asked
  * for 3-5 obstacles between the two spawns to break the dead-straight sightline
- * that ran through the hub). A single bold cylinder in a saturated red found
+ * that ran through the hub). A single bold cylinder in a saturated navy (see the
+ * round-7 KPAL note on `barrelBody` — this used to be red, which a critic read as
+ * an explosive hazard; it is cover, always was, and now reads that way) found
  * nowhere else in the arena, so it reads as its own landmark rather than another
  * tan crate, carrying the same reserved BLOCKING `coverPlinth` foot+bung every other
- * cover prop's base uses.
+ * cover prop's base uses. Its drum texture (`makeBarrelTexture`) adds banding and a
+ * neutral shipping-stencil chevron — the "stencil marks" half of the round-7 texture
+ * brief — in the same desaturated tone as the rest of the drum, never a hazard hue.
  */
 function buildSupplyBarrel(M: Materials, wM: number, dM: number, opts?: { dark?: boolean }): THREE.Group {
   const g = new THREE.Group();
@@ -1874,8 +2162,15 @@ function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Materials, spec
   // Rounded-rect grounded shadow — see the `groundedShadow` material comment. 1.3x
   // is snug against the redesigned texture's much narrower feather (see
   // `makeGroundedShadowTexture`), so the prop's own edge sits in the near-full-alpha
-  // interior instead of the faint outer ramp.
-  group.add(buildContactShadow(M.groundedShadow, wM, dM, 1.3));
+  // interior instead of the faint outer ramp. `LARGE_COVER_KINDS` (see the round-7
+  // note above `buildCoverCastShadow`) get a bigger oversize AND the wider/darker
+  // `groundedShadowStrong` texture, so the shadow visibly clears the prop's own body
+  // instead of staying hidden under it — the exact "counters/platforms... rely on a
+  // darker side-face rather than a separate ground-contact shadow" gap.
+  const isLarge = LARGE_COVER_KINDS.has(spec.kind);
+  const aoMat = isLarge ? M.groundedShadowStrong : M.groundedShadow;
+  const aoScale = isLarge ? 1.6 : 1.3;
+  group.add(buildContactShadow(aoMat, wM, dM, aoScale));
   // Baked directional shadow — see `buildCoverCastShadow` / the round-6 shadow note on
   // `SHADOW_DIR`. Added here, in the ONE place every CoverBox is registered, so it is
   // physically impossible to add new cover without it also getting a cast shadow.

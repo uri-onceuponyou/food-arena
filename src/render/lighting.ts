@@ -28,9 +28,17 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   const mapSize = opts?.shadowMapSize ?? 2048;
 
   // Warm key — the sun. Slightly off-axis so shadows fall down-right.
-  // Deliberately restrained: in the reference, the key does shaping, NOT contrast.
-  // Most of the illumination comes from the very bright fill below.
-  const key = new THREE.DirectionalLight(0xfff4de, 3.1);
+  // REVISED: an earlier version of this comment argued the key should do shaping,
+  // NOT contrast, with most illumination coming from the fill below. That produced
+  // measured value-std ~0.17 and a mean frame value of ~0.87 (reference cluster:
+  // ~0.56-0.68) — the fill's two endpoint colours (sky 0xdcefff, ground 0xffc79a)
+  // were both nearly full-bright, so the "fill" behaved like a flat ambient lift
+  // regardless of surface orientation, and it was strong enough to blow bright
+  // pastel top faces to clipped white — killing exactly the top-vs-side value
+  // gradient that sells volume. The key is now the dominant, and the fill's ground
+  // tone is deliberately darkened (see below) so it actually falls off with
+  // orientation instead of just tinting a uniform pedestal.
+  const key = new THREE.DirectionalLight(0xfff4de, 3.3);
   key.position.set(9, 16, 7);
   key.castShadow = true;
   key.shadow.mapSize.set(mapSize, mapSize);
@@ -38,24 +46,36 @@ export function createLighting(opts?: { shadowRadius?: number; shadowMapSize?: n
   key.shadow.camera.far = 70;
   key.shadow.bias = -0.0006;
   key.shadow.normalBias = 0.035;
-  key.shadow.radius = 3;
+  // Blur radius tightened twice now (3 → 1.4 → 0.9): a critic blind-comparing us
+  // directly against bs_01/04/06 still called our shadows "soft, centered blobs...
+  // reads as blanket AO rather than a cast shadow" — the true directional shadow
+  // needs a crisp enough edge that it doesn't get visually absorbed into the SSAO
+  // contact halo (see the AO radius note in stage.ts, also pulled back this round).
+  key.shadow.radius = 0.9;
   group.add(key);
   group.add(key.target);
 
-  // The workhorse. Reference frames are HIGH-KEY: shadow sides stay bright and
-  // saturated, never murky. A strong sky/bounce hemisphere is what produces that —
-  // it lifts every unlit surface without flattening form the way raw ambient does.
-  const fill = new THREE.HemisphereLight(0xdcefff, 0xffc79a, 0.95);
+  // The sky/bounce fill. Still keeps shadow sides coloured rather than grey — but
+  // the ground tone is now a noticeably DARKER terracotta (value ~0.72 vs the sky's
+  // ~1.0) rather than the previous near-white 0xffc79a. A hemisphere light only
+  // creates value falloff across surface orientation if its two ends actually
+  // differ in VALUE, not just hue; with both ends bright it lit every face almost
+  // equally regardless of which way it faced, which is what read as "flat painted
+  // blockout." Intensity is also down so it no longer wins the exposure fight
+  // against the key on top faces.
+  const fill = new THREE.HemisphereLight(0xd8ecff, 0x8c5830, 0.36);
   group.add(fill);
 
   // Cool rim from behind — the separation light that pops characters off the floor.
-  const rim = new THREE.DirectionalLight(0xaddcff, 1.05);
+  const rim = new THREE.DirectionalLight(0xaddcff, 0.95);
   rim.position.set(-8, 7, -11);
   rim.castShadow = false;
   group.add(rim);
 
-  // Flat lift so nothing ever reads as a dead black hole.
-  const ambient = new THREE.AmbientLight(0xffffff, 0.10);
+  // Flat lift so nothing ever reads as a dead black hole. Kept low — this is the
+  // one light that truly ignores orientation, so any more than a whisper of it
+  // re-introduces the flattening the fill rework above was meant to remove.
+  const ambient = new THREE.AmbientLight(0xffffff, 0.04);
   group.add(ambient);
 
   const focus = (x: number, z: number, radius = shadowRadius) => {

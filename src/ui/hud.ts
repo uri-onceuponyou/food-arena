@@ -10,8 +10,8 @@
  * `MatchState` back in the `countdown` phase) just works without any extra wiring.
  */
 
-import { CHARACTERS, type CharacterId, type Weapon } from '../game/rules';
-import type { MatchState } from '../game/state';
+import { CHARACTERS, MATCH_DURATION_MS, type CharacterId, type Weapon } from '../game/rules';
+import type { FighterRole, MatchState } from '../game/state';
 
 export interface HudCallbacks {
   onRestart: () => void;
@@ -60,6 +60,18 @@ function formatTime(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** Elapsed-time formatter for the game-over card's "Match time" stat — rounds to the
+ * nearest second (formatTime above deliberately ceils instead, since it's a
+ * countdown where "0:01" must not read as "over"). */
+function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+const LOW_HP_FRACTION = 0.25;
+
 function setBar(fill: HTMLElement, text: HTMLElement, hp: number, maxHp: number): void {
   const frac = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
   fill.style.width = `${(frac * 100).toFixed(1)}%`;
@@ -69,6 +81,10 @@ function setBar(fill: HTMLElement, text: HTMLElement, hp: number, maxHp: number)
 interface WeaponSlotEls {
   root: HTMLDivElement;
   cooldown: HTMLDivElement;
+  timer: HTMLDivElement;
+  /** Tracks the ready/cooling edge so a weapon coming off cooldown gets a one-shot
+   * "ready!" flash instead of silently flipping a border colour. */
+  wasReady: boolean;
 }
 
 export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
@@ -76,18 +92,25 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
   root.innerHTML = `
     <div class="hud-root">
+      <div class="hud-topbar-scrim"></div>
       <div class="hud-topbar">
         <div class="hud-fighter hud-fighter--player">
-          <div class="hud-fighter-name" data-el="player-name"></div>
-          <div class="hud-healthbar hud-healthbar--player">
+          <div class="hud-fighter-pill">
+            <div class="hud-fighter-emoji" data-el="player-emoji"></div>
+            <div class="hud-fighter-name" data-el="player-name"></div>
+          </div>
+          <div class="hud-healthbar hud-healthbar--player" data-el="player-bar">
             <div class="hud-healthbar-fill" data-el="player-fill"></div>
             <div class="hud-healthbar-text" data-el="player-hp"></div>
           </div>
         </div>
         <div class="hud-timer" data-el="timer">3:00</div>
         <div class="hud-fighter hud-fighter--enemy">
-          <div class="hud-fighter-name" data-el="enemy-name"></div>
-          <div class="hud-healthbar hud-healthbar--enemy">
+          <div class="hud-fighter-pill">
+            <div class="hud-fighter-name" data-el="enemy-name"></div>
+            <div class="hud-fighter-emoji" data-el="enemy-emoji"></div>
+          </div>
+          <div class="hud-healthbar hud-healthbar--enemy" data-el="enemy-bar">
             <div class="hud-healthbar-fill" data-el="enemy-fill"></div>
             <div class="hud-healthbar-text" data-el="enemy-hp"></div>
           </div>
@@ -101,16 +124,21 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       <div class="hud-gameover" data-el="gameover">
         <div class="hud-gameover-card">
           <div class="hud-gameover-title" data-el="gameover-title"></div>
+          <div class="hud-gameover-subtitle" data-el="gameover-subtitle"></div>
+          <div class="hud-gameover-stats" data-el="gameover-stats"></div>
           <button class="hud-gameover-btn" data-el="gameover-btn" type="button">Play Again</button>
         </div>
       </div>
 
+      <!-- Deliberately NO name text here — the top-corner nameplates are the one
+           canonical place to read "who is who"; repeating it here just split
+           attention between two labels for the same two fighters. This notch is
+           purely a spatial "how hurt is the thing I'm looking at" cue, so it's
+           just a bar — nothing to read, only to glance at. -->
       <div class="hud-float hud-float--player" data-el="float-player">
-        <div class="hud-float-name" data-el="float-player-name"></div>
         <div class="hud-float-bar"><div class="hud-float-fill" data-el="float-player-fill"></div></div>
       </div>
       <div class="hud-float hud-float--enemy" data-el="float-enemy">
-        <div class="hud-float-name" data-el="float-enemy-name"></div>
         <div class="hud-float-bar"><div class="hud-float-fill" data-el="float-enemy-fill"></div></div>
       </div>
 
@@ -127,6 +155,10 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
   const playerName = q<HTMLDivElement>('player-name');
   const enemyName = q<HTMLDivElement>('enemy-name');
+  const playerEmoji = q<HTMLDivElement>('player-emoji');
+  const enemyEmoji = q<HTMLDivElement>('enemy-emoji');
+  const playerBar = q<HTMLDivElement>('player-bar');
+  const enemyBar = q<HTMLDivElement>('enemy-bar');
   const playerFill = q<HTMLDivElement>('player-fill');
   const enemyFill = q<HTMLDivElement>('enemy-fill');
   const playerHpText = q<HTMLDivElement>('player-hp');
@@ -136,12 +168,12 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const countdownEl = q<HTMLDivElement>('countdown');
   const gameoverEl = q<HTMLDivElement>('gameover');
   const gameoverTitleEl = q<HTMLDivElement>('gameover-title');
+  const gameoverSubtitleEl = q<HTMLDivElement>('gameover-subtitle');
+  const gameoverStatsEl = q<HTMLDivElement>('gameover-stats');
   const gameoverBtn = q<HTMLButtonElement>('gameover-btn');
 
   const floatPlayer = q<HTMLDivElement>('float-player');
   const floatEnemy = q<HTMLDivElement>('float-enemy');
-  const floatPlayerName = q<HTMLDivElement>('float-player-name');
-  const floatEnemyName = q<HTMLDivElement>('float-enemy-name');
   const floatPlayerFill = q<HTMLDivElement>('float-player-fill');
   const floatEnemyFill = q<HTMLDivElement>('float-enemy-fill');
 
@@ -182,12 +214,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       slot.innerHTML = `
         <div class="hud-weapon-cooldown"></div>
         <div class="hud-weapon-emoji">${w.emoji}</div>
+        <div class="hud-weapon-timer" data-role="timer"></div>
         <div class="hud-weapon-key">${i + 1}</div>
       `;
       weaponsEl.appendChild(slot);
       return {
         root: slot,
         cooldown: slot.querySelector<HTMLDivElement>('.hud-weapon-cooldown')!,
+        timer: slot.querySelector<HTMLDivElement>('[data-role="timer"]')!,
+        wasReady: true,
       };
     });
   }
@@ -197,8 +232,8 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       playerCharId = playerId;
       playerName.textContent = CHARACTERS[playerId].name;
       enemyName.textContent = CHARACTERS[enemyId].name;
-      floatPlayerName.textContent = CHARACTERS[playerId].name;
-      floatEnemyName.textContent = CHARACTERS[enemyId].name;
+      playerEmoji.textContent = CHARACTERS[playerId].emoji;
+      enemyEmoji.textContent = CHARACTERS[enemyId].emoji;
       buildWeaponSlots(CHARACTERS[playerId].weapons);
     },
 
@@ -206,6 +241,14 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       setBar(playerFill, playerHpText, state.player.hp, state.player.maxHp);
       setBar(enemyFill, enemyHpText, state.enemy.hp, state.enemy.maxHp);
       timerEl.textContent = formatTime(state.timeRemaining);
+
+      // Danger pulse once a fighter's own bar reads critically low — a fast,
+      // unmistakable "you are about to die" signal that doesn't depend on reading
+      // the numeric text at all.
+      const playerFrac = state.player.maxHp > 0 ? state.player.hp / state.player.maxHp : 0;
+      const enemyFrac = state.enemy.maxHp > 0 ? state.enemy.hp / state.enemy.maxHp : 0;
+      playerBar.classList.toggle('is-low', state.player.alive && playerFrac <= LOW_HP_FRACTION);
+      enemyBar.classList.toggle('is-low', state.enemy.alive && enemyFrac <= LOW_HP_FRACTION);
 
       if (playerCharId) {
         const weapons = CHARACTERS[playerCharId].weapons;
@@ -216,8 +259,22 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           const remaining = Math.max(0, w.cooldown - (state.elapsed - lastUsed[i]));
           const frac = w.cooldown > 0 ? Math.min(1, remaining / w.cooldown) : 0;
           slot.cooldown.style.setProperty('--p', frac.toFixed(3));
-          slot.root.classList.toggle('is-ready', frac <= 0);
+          const ready = frac <= 0;
+          slot.root.classList.toggle('is-ready', ready);
           slot.root.classList.toggle('is-selected', i === frame.selectedWeapon);
+          // Numeric countdown on top of the radial wipe — a lone dark wedge reads as
+          // "slightly dimmed icon" at a glance, especially in a screenshot/still frame.
+          // A literal "0.4" leaves zero ambiguity about whether a weapon is usable.
+          slot.timer.textContent = ready ? '' : (remaining / 1000).toFixed(1);
+          // One-shot "just became ready" flash on the rising edge only, never while
+          // idle-ready — re-triggering the CSS animation the same reflow-forcing way
+          // the pooled damage numbers do above.
+          if (ready && !slot.wasReady) {
+            slot.root.classList.remove('is-flash');
+            void slot.root.offsetWidth;
+            slot.root.classList.add('is-flash');
+          }
+          slot.wasReady = ready;
         });
       }
 
@@ -236,6 +293,18 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         gameoverTitleEl.textContent = won ? 'VICTORY!' : 'DEFEAT!';
         gameoverTitleEl.classList.toggle('is-win', won);
         gameoverTitleEl.classList.toggle('is-lose', !won);
+
+        const winnerRole: FighterRole = state.winner ?? 'player';
+        const loserRole: FighterRole = winnerRole === 'player' ? 'enemy' : 'player';
+        const winnerChar = CHARACTERS[state[winnerRole].characterId];
+        const loserChar = CHARACTERS[state[loserRole].characterId];
+        gameoverSubtitleEl.innerHTML =
+          `<span class="hud-go-emoji">${winnerChar.emoji}</span>${winnerChar.name}` +
+          `<span class="hud-go-vs">defeated</span>` +
+          `<span class="hud-go-emoji">${loserChar.emoji}</span>${loserChar.name}`;
+
+        const elapsedMs = Math.max(0, MATCH_DURATION_MS - state.timeRemaining);
+        gameoverStatsEl.textContent = `⏱ Match time ${formatDuration(elapsedMs)}`;
       } else {
         gameoverEl.style.display = 'none';
       }
@@ -245,14 +314,18 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       if (player) {
         floatPlayer.style.display = 'flex';
         floatPlayer.style.transform = `translate(${player.x.toFixed(1)}px, ${player.y.toFixed(1)}px) translate(-50%, -100%)`;
-        floatPlayerFill.style.width = `${(Math.max(0, Math.min(1, player01)) * 100).toFixed(1)}%`;
+        const frac = Math.max(0, Math.min(1, player01));
+        floatPlayerFill.style.width = `${(frac * 100).toFixed(1)}%`;
+        floatPlayerFill.classList.toggle('is-low', frac > 0 && frac <= LOW_HP_FRACTION);
       } else {
         floatPlayer.style.display = 'none';
       }
       if (enemy) {
         floatEnemy.style.display = 'flex';
         floatEnemy.style.transform = `translate(${enemy.x.toFixed(1)}px, ${enemy.y.toFixed(1)}px) translate(-50%, -100%)`;
-        floatEnemyFill.style.width = `${(Math.max(0, Math.min(1, enemy01)) * 100).toFixed(1)}%`;
+        const frac = Math.max(0, Math.min(1, enemy01));
+        floatEnemyFill.style.width = `${(frac * 100).toFixed(1)}%`;
+        floatEnemyFill.classList.toggle('is-low', frac > 0 && frac <= LOW_HP_FRACTION);
       } else {
         floatEnemy.style.display = 'none';
       }
@@ -306,6 +379,19 @@ const CSS = `
 }
 
 /* ── Top bar: player / timer / enemy ─────────────────────────────────────── */
+/* Full-width scrim behind the whole top strip — guarantees the nameplates and
+   timer stay readable no matter how bright or busy the arena floor gets under
+   them (a bright kitchen tile, a lit hazard, a light character), independent of
+   each element's own text-shadow. */
+.hud-topbar-scrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 120px;
+  background: linear-gradient(180deg, rgba(10,6,16,0.5), rgba(10,6,16,0));
+}
+
 .hud-topbar {
   position: absolute;
   top: 14px;
@@ -320,12 +406,41 @@ const CSS = `
 .hud-fighter {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
   flex: 1 1 260px;
   max-width: 380px;
 }
 .hud-fighter--enemy { align-items: flex-end; }
+
+/* Solid pill behind the name+portrait — belt-and-suspenders legibility on top of
+   the topbar scrim above, so a single fighter name is never lost even if the
+   camera happens to frame a bright prop right behind it. */
+.hud-fighter-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(26,18,36,0.72);
+  border: 2px solid rgba(26,18,36,0.9);
+  border-radius: 999px;
+  padding: 3px 12px 3px 4px;
+  max-width: 100%;
+}
+.hud-fighter--enemy .hud-fighter-pill { padding: 3px 4px 3px 12px; }
+
+.hud-fighter-emoji {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.12);
+}
+.hud-fighter--player .hud-fighter-emoji { border: 2px solid #3FCB86; }
+.hud-fighter--enemy .hud-fighter-emoji { border: 2px solid #E6493F; }
 
 .hud-fighter-name {
   font-family: 'Rubik', sans-serif;
@@ -333,13 +448,17 @@ const CSS = `
   font-size: 15px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  text-shadow: 0 2px 0 #1a1224, 0 0 6px rgba(0,0,0,0.5);
+  text-shadow: 0 1px 0 #1a1224;
+  -webkit-text-stroke: 0.5px rgba(26,18,36,0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hud-healthbar {
   position: relative;
   width: 100%;
-  height: 22px;
+  height: 26px;
   background: #241a30;
   border: 3px solid #1a1224;
   border-radius: 999px;
@@ -352,9 +471,13 @@ const CSS = `
   right: auto;
   border-radius: 999px;
   transition: width 0.15s ease-out;
+  /* Glossy top highlight — a cheap but reliable "shipped" tell on a mobile-game
+     health bar, versus a flat single-tone fill. */
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0) 42%);
+  background-blend-mode: overlay;
 }
-.hud-fighter--player .hud-healthbar-fill { background: linear-gradient(180deg, #6FE0A8, #2FAE6E); }
-.hud-fighter--enemy .hud-healthbar-fill { background: linear-gradient(180deg, #FF8E7A, #E6493F); }
+.hud-fighter--player .hud-healthbar-fill { background-color: #3FCB86; }
+.hud-fighter--enemy .hud-healthbar-fill { background-color: #E6493F; }
 .hud-healthbar-text {
   position: absolute;
   inset: 0;
@@ -367,6 +490,16 @@ const CSS = `
   color: #FFF3DE;
   text-shadow: 0 1px 2px rgba(0,0,0,0.8);
   letter-spacing: 0.02em;
+}
+
+/* Danger pulse: an unmistakable "you are about to die" cue that reads instantly,
+   without parsing the numeric text — a fast red glow breathing around the bar. */
+.hud-healthbar.is-low {
+  animation: hud-lowhp-pulse 0.7s ease-in-out infinite;
+}
+@keyframes hud-lowhp-pulse {
+  0%, 100% { box-shadow: inset 0 2px 4px rgba(0,0,0,0.5), 0 2px 0 rgba(0,0,0,0.35), 0 0 0 rgba(230,57,70,0); }
+  50% { box-shadow: inset 0 2px 4px rgba(0,0,0,0.5), 0 2px 0 rgba(0,0,0,0.35), 0 0 14px 3px rgba(255,60,60,0.85); }
 }
 
 .hud-timer {
@@ -410,11 +543,26 @@ const CSS = `
   transform: translateY(-3px);
   box-shadow: 0 6px 0 rgba(0,0,0,0.35), 0 0 10px rgba(244,163,0,0.7);
 }
+/* One-shot pop the instant a weapon comes off cooldown — an unmistakable "usable
+   now" beat, not just a border-colour change that's easy to miss mid-fight. */
+.hud-weapon-slot.is-flash { animation: hud-weapon-ready-flash 0.35s ease-out; }
+@keyframes hud-weapon-ready-flash {
+  0% { box-shadow: 0 3px 0 rgba(0,0,0,0.35), 0 0 0 6px rgba(255,255,255,0.55); }
+  100% { box-shadow: 0 3px 0 rgba(0,0,0,0.35), 0 0 0 0 rgba(255,255,255,0); }
+}
 .hud-weapon-emoji {
   font-size: 26px;
   line-height: 1;
   filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));
   z-index: 1;
+  transition: filter 0.15s, opacity 0.15s;
+}
+/* Cooling down: visibly desaturated/dimmed so "not usable" reads even before the
+   radial wipe or the numeric countdown register — three redundant signals for the
+   single most fight-critical piece of HUD information. */
+.hud-weapon-slot:not(.is-ready) .hud-weapon-emoji {
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5)) grayscale(0.75) brightness(0.6);
+  opacity: 0.85;
 }
 .hud-weapon-key {
   position: absolute;
@@ -442,6 +590,24 @@ const CSS = `
   pointer-events: none;
 }
 .hud-weapon-slot.is-ready .hud-weapon-cooldown { background: transparent; }
+
+/* Numeric seconds-remaining countdown — the unambiguous third signal alongside the
+   radial wipe and the desaturated icon. Empty text content while ready collapses
+   this to nothing, so it never competes with the emoji when a weapon is usable. */
+.hud-weapon-timer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: 17px;
+  color: #FFF3DE;
+  -webkit-text-stroke: 2px #1a1224;
+  z-index: 2;
+  pointer-events: none;
+}
 
 /* ── Countdown overlay ────────────────────────────────────────────────────── */
 .hud-countdown {
@@ -498,6 +664,33 @@ const CSS = `
 }
 .hud-gameover-title.is-win { color: #6FE0A8; }
 .hud-gameover-title.is-lose { color: #FF6B5C; }
+.hud-gameover-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: -8px;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #FFF3DE;
+}
+.hud-go-emoji { font-size: 20px; line-height: 1; }
+.hud-go-vs {
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: #C9B8DE;
+  text-transform: lowercase;
+}
+.hud-gameover-stats {
+  font-family: 'Heebo', sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: #C9B8DE;
+  letter-spacing: 0.02em;
+}
 .hud-gameover-btn {
   pointer-events: auto;
   font-family: 'Rubik', sans-serif;
@@ -532,27 +725,23 @@ const CSS = `
   pointer-events: none;
   will-change: transform;
 }
-.hud-float-name {
-  font-family: 'Rubik', sans-serif;
-  font-weight: 800;
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: #FFF3DE;
-  text-shadow: 0 2px 0 #1a1224, 0 0 4px rgba(0,0,0,0.6);
-  white-space: nowrap;
-}
 .hud-float-bar {
-  width: 64px;
+  width: 58px;
   height: 8px;
   background: #241a30;
   border: 2px solid #1a1224;
   border-radius: 999px;
   overflow: hidden;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.35);
 }
 .hud-float-fill { height: 100%; transition: width 0.15s ease-out; }
 .hud-float--player .hud-float-fill { background: #3FCB86; }
 .hud-float--enemy .hud-float-fill { background: #E6493F; }
+.hud-float-fill.is-low { animation: hud-lowhp-pulse-small 0.7s ease-in-out infinite; }
+@keyframes hud-lowhp-pulse-small {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.6); }
+}
 
 /* ── Floating damage/heal numbers ─────────────────────────────────────────── */
 /* NEVER interactive: this layer sits over the whole canvas and a stray

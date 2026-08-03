@@ -19,6 +19,23 @@ import { SPLAT_RADIUS, TRAIL } from './rules';
 import { CHARACTER_HEIGHT, groundPos, wu } from '../units';
 import { flatMat } from '../render/toon';
 
+declare global {
+  interface Window {
+    /** QA-only counters, bumped once per `spawn*` call below — lets a Playwright
+     * driver `waitForFunction` on the exact frame a specific effect fires instead of
+     * guessing at screenshot timing for effects that live well under a second.
+     * Never read by game logic. */
+    __vfxQaCounts?: Record<'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam', number>;
+  }
+}
+
+type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam';
+
+function bumpVfxQaCount(key: VfxQaKey): void {
+  window.__vfxQaCounts ??= { cast: 0, meleeArc: 0, impact: 0, death: 0, heal: 0, giantSlam: 0 };
+  window.__vfxQaCounts[key]++;
+}
+
 /** Metres off the ground projectiles fly at — roughly chest height on the cast. */
 const PROJECTILE_HEIGHT = 0.5;
 /** Ground-decal layer heights, kept above the arena's own decal layer (0.15m) so
@@ -99,6 +116,93 @@ function buildRadialGlowTexture(): THREE.CanvasTexture {
 }
 
 /**
+ * 8-point sparkle/star flash — soft radial core plus radiating spikes (alternating
+ * long/short) drawn with additive-friendly alpha falloff. A plain soft circle (the
+ * radial-glow texture above) reads as a blur once scaled up big; the spikes are what
+ * make a flash read as a CONCENTRATED burst of light — matching the starburst shapes
+ * in the Brawl Stars reference plates — rather than a fog patch. Used for the
+ * first-frame "pop" on every impact and the big ultimate/death flashes.
+ */
+function buildStarburstTexture(): THREE.CanvasTexture {
+  const size = 128;
+  const c = size / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  const core = ctx.createRadialGradient(c, c, 0, c, c, size * 0.32);
+  core.addColorStop(0, 'rgba(255,255,255,1)');
+  core.addColorStop(0.5, 'rgba(255,255,255,0.9)');
+  core.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(0, 0, size, size);
+
+  const spikes = 8;
+  for (let i = 0; i < spikes; i++) {
+    const long = i % 2 === 0;
+    const len = size * (long ? 0.5 : 0.32);
+    const halfWidth = size * (long ? 0.09 : 0.05);
+    const ang = (i / spikes) * Math.PI * 2;
+    ctx.save();
+    ctx.translate(c, c);
+    ctx.rotate(ang);
+    const grad = ctx.createLinearGradient(0, 0, len, 0);
+    grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(0, -halfWidth);
+    ctx.lineTo(len, 0);
+    ctx.lineTo(0, halfWidth);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Thin directional glow streak — bright along its centreline, tapering to transparent
+ * at both ends AND top/bottom. Rotated per-spawn via `SpriteMaterial.rotation` so one
+ * texture can fire "hit spark" rays radiating out of an impact at any angle, instead
+ * of needing a pre-rotated texture per direction.
+ */
+function buildStreakTexture(): THREE.CanvasTexture {
+  const w = 128;
+  const h = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+
+  const along = ctx.createLinearGradient(0, 0, w, 0);
+  along.addColorStop(0, 'rgba(255,255,255,0)');
+  along.addColorStop(0.5, 'rgba(255,255,255,1)');
+  along.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = along;
+  ctx.fillRect(0, 0, w, h);
+
+  // Clip to a vertical taper (independent of x) so the ray narrows to a point at
+  // both ends rather than reading as a hard-edged bar.
+  ctx.globalCompositeOperation = 'destination-in';
+  const across = ctx.createLinearGradient(0, 0, 0, h);
+  across.addColorStop(0, 'rgba(255,255,255,0)');
+  across.addColorStop(0.5, 'rgba(255,255,255,1)');
+  across.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = across;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'source-over';
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
  * Flat filled wedge (pie-slice), apex at the local origin, spanning `coneDeg`
  * symmetrically about local +Z, out to `radiusM`. `coneDeg = 360` degenerates into a
  * full disc — exactly what Lollipop's Giant Lollipop (cone: 360) needs. Built in the
@@ -143,11 +247,19 @@ interface ParticleSlot {
   startOpacity: number;
   endOpacity: number;
   fadeEase: number;
+  /** Height/width ratio applied on top of the (uniform) scale animation — 1 for every
+   * ordinary glow dot/flash, < 1 for a hit-spark streak so it reads as a thin ray
+   * rather than a square blob. Reset to 1 by `allocParticle` for every new use. */
+  aspect: number;
 }
 
-const PARTICLE_POOL_SIZE = 64;
+// Bumped up from the original 64/10 once impacts gained a pop-flash + hit-spark
+// streaks on top of the flash/shards they already had — a single big hit now
+// allocates well over a dozen particles, and rings are used in pairs (bright inner
+// rim + soft outer glow) for every burst.
+const PARTICLE_POOL_SIZE = 96;
 const WEDGE_POOL_SIZE = 6;
-const RING_POOL_SIZE = 10;
+const RING_POOL_SIZE = 16;
 
 interface WedgeSlot {
   mesh: THREE.Mesh;
@@ -196,6 +308,8 @@ export class VfxLayer {
 
   // ── Ability VFX pools ──────────────────────────────────────────────────────
   private readonly glowTex = buildRadialGlowTexture();
+  private readonly starTex = buildStarburstTexture();
+  private readonly streakTex = buildStreakTexture();
   private readonly particles: ParticleSlot[] = [];
   private readonly wedges: WedgeSlot[] = [];
   private readonly rings: RingSlot[] = [];
@@ -224,7 +338,7 @@ export class VfxLayer {
       this.particles.push({
         sprite, mat, active: false, life: 0, maxLife: 1,
         vx: 0, vy: 0, vz: 0, gravity: 0,
-        startScale: 1, endScale: 1, startOpacity: 1, endOpacity: 0, fadeEase: 1,
+        startScale: 1, endScale: 1, startOpacity: 1, endOpacity: 0, fadeEase: 1, aspect: 1,
       });
     }
 
@@ -398,7 +512,7 @@ export class VfxLayer {
       p.sprite.position.y += p.vy * dtSeconds;
       p.sprite.position.z += p.vz * dtSeconds;
       const scale = THREE.MathUtils.lerp(p.startScale, p.endScale, easeOutCubic(t));
-      p.sprite.scale.set(scale, scale, 1);
+      p.sprite.scale.set(scale, scale * p.aspect, 1);
       p.mat.opacity = Math.max(0, THREE.MathUtils.lerp(p.startOpacity, p.endOpacity, Math.pow(t, p.fadeEase)));
     }
 
@@ -437,6 +551,7 @@ export class VfxLayer {
   /** Muzzle/cast flash at the attacker, tinted the weapon's colour. Fires for every
    * `weapon-fired` event (melee wind-up, ranged muzzle, or a self-cast heal). */
   spawnCastFlash(xWU: number, yWU: number, facing: Vec2, color: string): void {
+    bumpVfxQaCount('cast');
     const origin = groundPos(xWU, yWU);
     const mag = Math.hypot(facing.x, facing.y) || 1;
     const fx = facing.x / mag;
@@ -449,9 +564,9 @@ export class VfxLayer {
     p.sprite.visible = true;
     p.sprite.position.set(origin.x + fx * offM, CAST_HEIGHT, origin.z + fy * offM);
     p.vx = 0; p.vy = 0; p.vz = 0; p.gravity = 0;
-    p.startScale = 0.55; p.endScale = 0.95;
+    p.startScale = 0.75; p.endScale = 1.3;
     p.startOpacity = 1; p.endOpacity = 0; p.fadeEase = 1.6;
-    p.mat.color.set(color).lerp(WHITE, 0.35);
+    p.mat.color.set(color).lerp(WHITE, 0.4);
   }
 
   /**
@@ -461,6 +576,7 @@ export class VfxLayer {
    * like a real swing animation would.
    */
   spawnMeleeArc(xWU: number, yWU: number, facing: Vec2, rangeWU: number, coneDeg: number, color: string): void {
+    bumpVfxQaCount('meleeArc');
     const origin = groundPos(xWU, yWU);
     const radiusM = wu(rangeWU);
     const key = `${Math.round(coneDeg)}_${radiusM.toFixed(3)}`;
@@ -482,28 +598,38 @@ export class VfxLayer {
     // pale weapon colour (e.g. Patty Smash's yellow) alpha-blended over the arena's
     // equally pale floor is nearly invisible; darkening it first guarantees contrast
     // regardless of what's underneath, matching how the reference bar's AOE
-    // indicators are bold saturated shapes, not a light tint.
-    w.mat.color.set(color).lerp(INK, 0.3);
+    // indicators are bold saturated shapes, not a light tint. Mixed only lightly now
+    // (was 0.3) — a critic pass flagged melee arcs as reading dull/muddy next to how
+    // saturated the reference bar's AOE shapes are; a hint of ink is still enough to
+    // guarantee contrast on the pale floor without flattening the colour.
+    w.mat.color.set(color).lerp(INK, 0.14);
     w.mat.opacity = w.startOpacity;
   }
 
-  /** Bright impact burst at a hit location: expanding flash + ground ring + radial
-   * shards, tinted by the damage source and scaled by how hard the hit was. */
+  /** Bright impact burst at a hit location: pop + expanding flash + double ground
+   * ring + hit-spark streaks + radial shards, tinted by the damage source and scaled
+   * by how hard the hit was. Sized to read as clearly BIGGER than the fighters
+   * themselves for any hit that isn't trivial chip damage — matching the reference
+   * bar, where combat VFX dominate the frame rather than politely sitting beside the
+   * characters. */
   spawnImpactBurst(xWU: number, yWU: number, color: string, amount: number): void {
+    bumpVfxQaCount('impact');
     const origin = groundPos(xWU, yWU);
-    const sizeFactor = THREE.MathUtils.clamp(0.55 + amount * 0.035, 0.55, 2.4);
-    this.burst(origin, color, sizeFactor, Math.round(THREE.MathUtils.clamp(3 + amount * 0.3, 3, 9)));
+    const sizeFactor = THREE.MathUtils.clamp(0.85 + amount * 0.055, 0.85, 3.4);
+    this.burst(origin, color, sizeFactor, Math.round(THREE.MathUtils.clamp(4 + amount * 0.35, 4, 11)));
   }
 
   /** Bigger burst + scatter + a bright pop for a death — the biggest non-ultimate
    * moment in a match, so it deliberately outsizes even a hard hit. */
   spawnDeathBurst(xWU: number, yWU: number, color: string): void {
+    bumpVfxQaCount('death');
     const origin = groundPos(xWU, yWU);
-    this.burst(origin, color, 2.4, 13, { life: 1.35 });
+    this.burst(origin, color, 3.6, 18, { life: 1.35 });
   }
 
   /** Gentle rising sparkle for a heal (Hamburger's Onion Ring). */
   spawnHealPulse(xWU: number, yWU: number): void {
+    bumpVfxQaCount('heal');
     const origin = groundPos(xWU, yWU);
     for (let i = 0; i < 5; i++) {
       const p = this.allocParticle();
@@ -532,12 +658,14 @@ export class VfxLayer {
    * the cast reads as a genuine event, not just a bigger version of a normal swing.
    */
   spawnGiantSlamShockwave(xWU: number, yWU: number, color: string, rangeWU: number): void {
+    bumpVfxQaCount('giantSlam');
     const origin = groundPos(xWU, yWU);
     const radiusM = wu(rangeWU);
 
+    // Bright inner shockwave rim, racing out to the ability's true (huge) radius...
     const ring = this.allocRing();
-    ring.active = true; ring.life = 0; ring.maxLife = 0.6;
-    ring.startScale = 0.3; ring.targetScale = radiusM;
+    ring.active = true; ring.life = 0; ring.maxLife = 0.65;
+    ring.startScale = 0.3; ring.targetScale = radiusM * 1.05;
     ring.startOpacity = 1;
     ring.mesh.visible = true;
     ring.mesh.position.set(origin.x, GROUND_VFX_Y + 0.02, origin.z);
@@ -545,82 +673,173 @@ export class VfxLayer {
     ring.mat.color.set(color).lerp(WHITE, 0.3);
     ring.mat.opacity = ring.startOpacity;
 
+    // ...plus a second, softer ring trailing just behind it, so the shockwave reads
+    // as a THICK expanding band rather than a single thin line racing outward.
+    const ring2 = this.allocRing();
+    ring2.active = true; ring2.life = 0; ring2.maxLife = 0.8;
+    ring2.startScale = 0.15; ring2.targetScale = radiusM * 0.85;
+    ring2.startOpacity = 0.6;
+    ring2.mesh.visible = true;
+    ring2.mesh.position.set(origin.x, GROUND_VFX_Y + 0.01, origin.z);
+    ring2.mesh.scale.setScalar(ring2.startScale);
+    ring2.mat.color.set(color);
+    ring2.mat.opacity = ring2.startOpacity;
+
+    // Starburst flash — the sparkle silhouette, not just a soft circle, is what
+    // makes an 8-second ultimate read as a genuinely special event.
+    this.spawnStarPop(origin, IMPACT_HEIGHT * 1.5, color, 6.5, 0.4);
+
     const flash = this.allocParticle();
-    flash.active = true; flash.life = 0; flash.maxLife = 0.3;
+    flash.active = true; flash.life = 0; flash.maxLife = 0.32;
     flash.sprite.visible = true;
     flash.sprite.position.set(origin.x, IMPACT_HEIGHT * 1.5, origin.z);
     flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
-    flash.startScale = 1.6; flash.endScale = 3.1;
+    flash.startScale = 2.1; flash.endScale = 4.4;
     flash.startOpacity = 0.9; flash.endOpacity = 0; flash.fadeEase = 1.2;
     flash.mat.color.set(color).lerp(WHITE, 0.55);
 
-    // Shards only — the dedicated flash+ring above already cover this cast's
+    // Long hit-spark rays punching outward from the epicentre, on top of the ring.
+    this.spawnStreaks(origin, IMPACT_HEIGHT * 0.6, color, 10, 4.5, 0.55);
+
+    // Shards only — the dedicated flash+rings above already cover this cast's
     // "flash" and "shockwave rim" beats; a second overlapping flash/ring from the
     // shared burst helper just stacked additive brightness into a full whiteout.
-    this.burst(origin, color, 2.2, 16, { life: 0.9, speedMult: 1.6, skipFlash: true, skipRing: true });
+    this.burst(origin, color, 2.6, 20, { life: 0.9, speedMult: 1.6, skipFlash: true, skipRing: true, skipPop: true, skipStreaks: true });
   }
 
-  /** Shared flash+shards burst used by impact/death/giant-slam. */
+  /** Shared pop+flash+double-ring+streaks+shards burst used by impact/death/giant-slam. */
   private burst(
     origin: { x: number; z: number },
     color: string,
     sizeFactor: number,
     shardCount: number,
-    opts?: { life?: number; speedMult?: number; skipFlash?: boolean; skipRing?: boolean },
+    opts?: { life?: number; speedMult?: number; skipFlash?: boolean; skipRing?: boolean; skipPop?: boolean; skipStreaks?: boolean },
   ): void {
     const life = opts?.life ?? 1;
     const speedMult = opts?.speedMult ?? 1;
 
+    // Instant white-hot starburst pop — the "frame 1" punch that sells a hit as
+    // landing HARD, distinct from (and shorter than) the colour-tinted flash below.
+    if (!opts?.skipPop) {
+      this.spawnStarPop(origin, IMPACT_HEIGHT, color, 1.7 * sizeFactor, (0.14 + sizeFactor * 0.02) * life);
+    }
+
     if (!opts?.skipFlash) {
       const flash = this.allocParticle();
-      flash.active = true; flash.life = 0; flash.maxLife = (0.16 + sizeFactor * 0.04) * life;
+      flash.active = true; flash.life = 0; flash.maxLife = (0.18 + sizeFactor * 0.05) * life;
       flash.sprite.visible = true;
       flash.sprite.position.set(origin.x, IMPACT_HEIGHT, origin.z);
       flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
-      flash.startScale = 0.5 * sizeFactor; flash.endScale = 1.5 * sizeFactor;
+      flash.startScale = 0.75 * sizeFactor; flash.endScale = 2.2 * sizeFactor;
       flash.startOpacity = 1; flash.endOpacity = 0; flash.fadeEase = 1.4;
-      flash.mat.color.set(color).lerp(WHITE, 0.4);
+      flash.mat.color.set(color).lerp(WHITE, 0.42);
     }
 
     if (!opts?.skipRing) {
+      // Bright inner rim...
       const ring = this.allocRing();
-      ring.active = true; ring.life = 0; ring.maxLife = (0.22 + sizeFactor * 0.05) * life;
-      ring.startScale = 0.15; ring.targetScale = 0.55 * sizeFactor + 0.3;
-      ring.startOpacity = 0.85;
+      ring.active = true; ring.life = 0; ring.maxLife = (0.24 + sizeFactor * 0.06) * life;
+      ring.startScale = 0.15; ring.targetScale = 0.85 * sizeFactor + 0.45;
+      ring.startOpacity = 0.95;
       ring.mesh.visible = true;
       ring.mesh.position.set(origin.x, GROUND_VFX_Y, origin.z);
       ring.mesh.scale.setScalar(ring.startScale);
-      ring.mat.color.set(color);
+      ring.mat.color.set(color).lerp(WHITE, 0.25);
       ring.mat.opacity = ring.startOpacity;
+
+      // ...plus a softer, slightly larger companion ring right behind it, so the
+      // shockwave reads as a band with body rather than a single thin line.
+      const ring2 = this.allocRing();
+      ring2.active = true; ring2.life = 0; ring2.maxLife = (0.32 + sizeFactor * 0.08) * life;
+      ring2.startScale = 0.1; ring2.targetScale = (0.85 * sizeFactor + 0.45) * 1.4;
+      ring2.startOpacity = 0.55;
+      ring2.mesh.visible = true;
+      ring2.mesh.position.set(origin.x, GROUND_VFX_Y - 0.01, origin.z);
+      ring2.mesh.scale.setScalar(ring2.startScale);
+      ring2.mat.color.set(color);
+      ring2.mat.opacity = ring2.startOpacity;
+    }
+
+    if (!opts?.skipStreaks) {
+      const streakCount = Math.max(3, Math.round(shardCount * 0.45));
+      this.spawnStreaks(origin, IMPACT_HEIGHT, color, streakCount, (0.9 + sizeFactor * 0.55) * speedMult, 0.22 * life);
     }
 
     for (let i = 0; i < shardCount; i++) {
       const s = this.allocParticle();
       const ang = Math.random() * Math.PI * 2;
-      const speed = (1.6 + Math.random() * 1.8) * (0.6 + sizeFactor * 0.4) * speedMult;
+      const speed = (1.8 + Math.random() * 2.1) * (0.6 + sizeFactor * 0.4) * speedMult;
       s.active = true; s.life = 0; s.maxLife = (0.3 + Math.random() * 0.2 + sizeFactor * 0.06) * life;
       s.sprite.visible = true;
       s.sprite.position.set(origin.x, IMPACT_HEIGHT, origin.z);
       s.vx = Math.cos(ang) * speed;
       s.vz = Math.sin(ang) * speed;
-      s.vy = 1.1 + Math.random() * 1.5;
+      s.vy = 1.2 + Math.random() * 1.7;
       s.gravity = -5.4;
-      s.startScale = (0.14 + Math.random() * 0.09) * sizeFactor;
+      s.startScale = (0.2 + Math.random() * 0.14) * sizeFactor;
       s.endScale = 0;
       s.startOpacity = 1; s.endOpacity = 0; s.fadeEase = 1;
-      s.mat.color.set(color);
+      s.mat.color.set(color).lerp(WHITE, 0.12);
     }
   }
 
+  /**
+   * Grab a free (or, failing that, closest-to-death) particle slot, reset to its
+   * default look (soft glow, unrotated) so nothing a PRIOR occupant configured (a
+   * star/streak texture, a rotation) leaks into this new use. Callers that want
+   * something other than a plain glow dot (see `spawnStarPop`/`spawnStreaks`) set
+   * `mat.map`/`mat.rotation` themselves right after allocating.
+   */
   private allocParticle(): ParticleSlot {
-    for (const p of this.particles) if (!p.active) return p;
-    let best = this.particles[0];
-    let bestRatio = -Infinity;
+    let best: ParticleSlot | null = null;
     for (const p of this.particles) {
-      const r = p.life / p.maxLife;
-      if (r > bestRatio) { bestRatio = r; best = p; }
+      if (!p.active) { best = p; break; }
     }
-    return best;
+    if (!best) {
+      let bestRatio = -Infinity;
+      for (const p of this.particles) {
+        const r = p.life / p.maxLife;
+        if (r > bestRatio) { bestRatio = r; best = p; }
+      }
+    }
+    const slot = best!;
+    slot.mat.map = this.glowTex;
+    slot.mat.rotation = 0;
+    slot.aspect = 1;
+    return slot;
+  }
+
+  /** Single bright starburst pop — the instant, punchy "frame 1" flash of an impact,
+   * separate from the softer colour-tinted afterglow flash that follows it. */
+  private spawnStarPop(origin: { x: number; z: number }, height: number, color: string, scale: number, life: number): void {
+    const p = this.allocParticle();
+    p.mat.map = this.starTex;
+    p.active = true; p.life = 0; p.maxLife = life;
+    p.sprite.visible = true;
+    p.sprite.position.set(origin.x, height, origin.z);
+    p.vx = 0; p.vy = 0; p.vz = 0; p.gravity = 0;
+    p.startScale = scale * 0.5; p.endScale = scale;
+    p.startOpacity = 1; p.endOpacity = 0; p.fadeEase = 1.7;
+    p.mat.color.set(color).lerp(WHITE, 0.6);
+  }
+
+  /** Radiating hit-spark rays out of an impact point — thin bright streaks at random
+   * angles, reusing one texture via per-sprite `SpriteMaterial.rotation`. This is
+   * what separates a "concentrated hit" from a generic puff of particles. */
+  private spawnStreaks(origin: { x: number; z: number }, height: number, color: string, count: number, length: number, life: number): void {
+    for (let i = 0; i < count; i++) {
+      const p = this.allocParticle();
+      p.mat.map = this.streakTex;
+      p.mat.rotation = Math.random() * Math.PI * 2;
+      p.aspect = 0.22;
+      p.active = true; p.life = 0; p.maxLife = life * (0.8 + Math.random() * 0.4);
+      p.sprite.visible = true;
+      p.sprite.position.set(origin.x, height, origin.z);
+      p.vx = 0; p.vy = 0; p.vz = 0; p.gravity = 0;
+      p.startScale = length * (0.7 + Math.random() * 0.3); p.endScale = length * 1.35;
+      p.startOpacity = 0.95; p.endOpacity = 0; p.fadeEase = 1.3;
+      p.mat.color.set(color).lerp(WHITE, 0.3);
+    }
   }
 
   private allocWedge(): WedgeSlot {
@@ -661,6 +880,8 @@ export class VfxLayer {
     this.materialCache.clear();
 
     this.glowTex.dispose();
+    this.starTex.dispose();
+    this.streakTex.dispose();
     for (const p of this.particles) p.mat.dispose();
     for (const w of this.wedges) w.mat.dispose();
     for (const r of this.rings) r.mat.dispose();
