@@ -31,10 +31,20 @@
  * and a dark matte cap anchoring the silhouette.
  *
  * Personality guide (identity is fixed, presentation is not, per the brief):
- *   Translucent blue bottle, darker cap, eyes above the cap, big smile. The floating
- *   eyes read as a deliberate, slightly surreal design choice — kept, and reinforced
- *   with a small sparkle trail linking them back down to the cap so they read as
- *   "this bottle's magic" rather than as detached geometry.
+ *   Translucent blue bottle, darker cap, big smile.
+ *
+ * ── Structural fix, round 4 ──────────────────────────────────────────────────
+ * Three independent art-director passes in a row flagged the same defect: the
+ * eyes floated on a stalk above the cap, detached from the character's actual
+ * body. No amount of shrinking the gap or adding a connector fixed it, because
+ * the STRUCTURE was wrong — a face perched on top of a hat is never going to read
+ * as attached, no matter how solid the perch. The fix is to stop treating the cap
+ * as a head-topper and instead put the face on the BOTTLE ITSELF: eyes, brows and
+ * a big smile are built directly onto the upper shell wall, just above the label,
+ * using the shell's own lathed surface (`shellSurface()`, the same technique
+ * `hamburger.ts`'s `crownSurface` and `soup.ts`'s `bowlSurface` use for THEIR
+ * curved masses). The cap goes back to being what its name says — a cap, worn on
+ * top of the bottle that IS the head — with no face-bearing geometry on it at all.
  */
 
 import * as THREE from 'three';
@@ -88,22 +98,19 @@ const CAP_PROFILE: Array<[number, number]> = [
   [0.13, 0.85],
   [0, 0.86],       // rounded apex
 ];
-const CAP_TOP_F = 0.86;
-// The floating face's gap above the cap. Round 3 pushed this out to +0.26 with
-// nothing filling the gap in between — two dark eyeballs sitting in open air
-// read as insect eye-stalks, not a face attached to this character. Pulled back
-// in to +0.20 AND, more importantly, bridged with a solid `buildFaceStalk()`
-// connector (see below) so the face reads as perched on a raised nub of the
-// cap rather than floating disconnected from it.
-//
-// A FRESH independent art director still read this as "two googly stalk-eyes, no
-// brows, no mouth at all" — the previous pass's smile technically existed but its
-// lowest point cleared the cap apex by only 0.02R, so it sat almost fused into the
-// stalk/cap and never registered as a separate mouth shape. Pushed out further, to
-// +0.32, so the smile (enlarged below) gets real clearance above the cap; the
-// stalk itself grows to match automatically since it spans CAP_TOP_F to
-// FACE_FLOAT_F, so the face still reads as attached rather than detached.
-const FACE_FLOAT_F = CAP_TOP_F + 0.32;
+const CAP_TOP_F = 0.86; // the cap's own apex — a face landmark no longer, just the cap's shape
+
+// ── Face placement, ON the shell wall ───────────────────────────────────────
+// `EYE_Y`/`MOUTH_Y` are in the SAME absolute-fraction-of-R units as
+// `SHELL_PROFILE`'s own second column, so they can be fed straight into
+// `shellSurface()` below. Both sit in the straight cylindrical wall the profile
+// holds at full body radius from y=-0.78 to y=0.00 — clear of the label (which
+// spans -0.58 to -0.18) above it, and well below the shoulder taper (which
+// begins at 0.10) — the widest, flattest, most camera-facing stretch of the main
+// body wall, at the character's actual "chest/collar" height rather than in open
+// air above its hat.
+const EYE_Y = -0.03;
+const MOUTH_Y = -0.145;
 
 // Water fill, in ABSOLUTE fractions of R first (bottom to the fill line), then
 // re-expressed relative to its own sloshing pivot below.
@@ -128,28 +135,26 @@ const WATER_PIVOT_F = (WATER_BOTTOM_F + WATER_FILL_F) / 2;
 
 // ── Bespoke-limb geometry ────────────────────────────────────────────────────
 // An independent art director named the shared snowman-body capsule arms and ball
-// hands as the single biggest cast-wide tell. Kept OPAQUE here deliberately — the
-// file header's whole point is that `transmission` is reserved for the head, where
-// depth-write behaviour has been carefully reasoned through; giving the limbs their
-// own transmissive material would risk the exact "wrong sort order" failure that
-// section warns about, for a part of the silhouette that doesn't need it. Instead
-// the limbs read as "plastic" through low roughness alone, and pick up the head's
-// own grip-ridge language (see `waterbottle_cap_ridge` above) as their accent motif.
+// hands as the single biggest cast-wide tell; a follow-up pass recoloured/rescaled
+// the same smooth taper and the note came back a THIRD time — recolouring a shared
+// skeleton still reads as a shared skeleton. Round 4 fix: limbs are no longer a
+// smooth taper at all. They are a genuinely ribbed/bellows profile — the "squeezable
+// plastic hose" read the brief calls for, distinct in silhouette (not just material)
+// from every other character's limbs. Kept OPAQUE here deliberately — the file
+// header's whole point is that `transmission` is reserved for the head, where
+// depth-write behaviour has been carefully reasoned through.
 
-/** Tapered limb: a flat cap at the joint origin (plugs flush with no gap) taper to a
- * rounded tip — used for a sleek moulded-plastic "hose" read. */
-function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
+/** A ribbed, bellows-like limb segment: a flat cap at the joint origin (plugs
+ * flush with no gap), then a shaft that alternates between a narrower "waist" and
+ * a wider "rib" several times along its length before tapering to a rounded tip —
+ * a squeeze-bottle accordion hose, not a smooth tapered tube. `taperedLimb`'s own
+ * end-cap technique is reused so it still plugs cleanly into the rig's joints. */
+function ribbedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, ribCount = 4, segs = 14): THREE.Mesh {
   // Points MUST run bottom → top for LatheGeometry's automatic normals to face
   // outward — this file's own SHELL_PROFILE comment already documents the same
-  // rule. Getting it backwards was a round 1 defect: the real mesh got
-  // face-culled invisible and its outline shell rendered as a solid dark wedge.
-  // Bottom tip is a full rounded hemisphere; the TOP is a shallow dome rather than
-  // a hard flat disc — round 2 found that a flat cap, at the angle the rig's rest
-  // pose rotates the shoulder/hip to, reads as a flat flag/wing sticking out of
-  // the joint rather than blending into it. The dome keeps almost the whole
-  // length budget for the actual tapered shaft.
-  const capBot = Math.min(rBot, len * 0.45);
-  const capTopH = Math.min(rTop * 0.42, len * 0.16);
+  // rule; getting it backwards was a round 1 defect elsewhere in this file.
+  const capBot = Math.min(rBot, len * 0.32);
+  const capTopH = Math.min(rTop * 0.32, len * 0.12);
   const wallBotY = -(len - capBot);
   const wallTopY = -capTopH;
   const CAP = 5;
@@ -157,6 +162,19 @@ function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Materia
   for (let i = CAP; i >= 0; i--) {
     const a = (i / CAP) * Math.PI * 0.5;
     pts.push(new THREE.Vector2(capBot * Math.cos(a), wallBotY - capBot * Math.sin(a)));
+  }
+  // Ribbed shaft: `ribCount` bulge-waist pairs between the two end caps, radius
+  // interpolated from rBot to rTop along the way so the limb still reads as
+  // tapered overall (thick near the body, narrower toward the extremity) — the
+  // ribbing rides ON TOP of that taper rather than replacing it.
+  const shaftSpan = wallTopY - wallBotY;
+  const steps = ribCount * 2;
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const y = wallBotY + t * shaftSpan;
+    const base = THREE.MathUtils.lerp(rBot, rTop, t);
+    const isRib = i % 2 === 1; // odd steps bulge OUT, even steps pinch IN
+    pts.push(new THREE.Vector2(base * (isRib ? 1.16 : 0.88), y));
   }
   pts.push(new THREE.Vector2(rTop, wallTopY));
   const TCAP = 4;
@@ -237,28 +255,6 @@ function buildBottleFoot(FR: number, mat: THREE.Material, trimMat: THREE.Materia
   return g;
 }
 
-/**
- * A solid connector bridging the cap's apex up to the floating face pod — the
- * fix for "eyes read as insect antennae": two dark eyeballs sitting in open air
- * above the cap had nothing solid linking them back to the body. A squashed
- * ellipsoid, dark cap-coloured, centred so it overlaps the cap apex below and
- * the eyes' own lower edge above, with no visible gap in between.
- */
-function buildFaceStalk(R: number, mat: THREE.Material): THREE.Mesh {
-  const bottomF = CAP_TOP_F - 0.06; // sinks slightly into the cap — no seam
-  const topF = FACE_FLOAT_F - 0.14; // reaches up to just under the eyes
-  const midF = (bottomF + topF) / 2;
-  const baseRadius = R * 0.11;
-  const yScale = ((topF - bottomF) / 2) / (baseRadius / R); // ratio, not an absolute length
-  const stalk = new THREE.Mesh(new THREE.SphereGeometry(baseRadius, 14, 12), mat);
-  stalk.name = 'waterbottle_face_stalk';
-  stalk.position.y = midF * R;
-  stalk.scale.set(0.82, yScale, 0.82);
-  stalk.castShadow = true;
-  stalk.receiveShadow = true;
-  return stalk;
-}
-
 export class WaterBottleCharacter extends BaseCharacter {
   private rig: ChibiRig;
   private water: THREE.Group;
@@ -287,15 +283,15 @@ export class WaterBottleCharacter extends BaseCharacter {
         torso: WATER,
         limbRoughness: 0.4,
       },
-      // headFraction stays at the value already tuned for this character's own
-      // elongated head geometry (shoulder, neck, cap, then the floating face on top of
-      // that) — round 1 at the 0.46 default measured 2.39m against the 2.1m target, and
-      // this is what pulls the whole assembly back down; changing it here would reopen
-      // that regression. The NEW proportions below are what actually make this
-      // character read as "tall and narrow" per the brief: narrow shoulders, a close
-      // stance, and the thinnest limbs in the cast.
+      // `headFraction` is retuned for round 4: removing the floating face pod (it
+      // used to reach CAP_TOP_F+0.32 ≈ 1.18R above the head origin) pulled the
+      // character noticeably short of 2.1m, since the shell/cap alone top out
+      // around 0.86R. Grown back up to restore the target height now that the
+      // face lives on the shell wall instead of over the cap. The proportions
+      // below are what make this character read as "tall and narrow" per the
+      // brief: narrow shoulders, a close stance, and the thinnest limbs in the cast.
       proportions: {
-        headFraction: 0.40,
+        headFraction: 0.47,
         shoulderWidth: CHARACTER_HEIGHT * 0.13,  // narrowest shoulders in the cast
         stanceWidth: CHARACTER_HEIGHT * 0.075,   // closest, narrowest stance in the cast
         armRadius: CHARACTER_HEIGHT * 0.040,     // thinnest arms in the cast
@@ -309,6 +305,42 @@ export class WaterBottleCharacter extends BaseCharacter {
     const R = this.rig.headRadius;
     const head = this.rig.joints.head;
     const pt = (rF: number, yF: number) => new THREE.Vector2(rF * R, yF * R);
+
+    /** Exact surface point + outward normal on the shell at a given azimuth
+     * (`theta`) and absolute height fraction (`yF`, same units as
+     * `SHELL_PROFILE`'s own second column) — the single source of truth for the
+     * exterior, so the face lands exactly ON the shell instead of floating above
+     * or clipping through it. Same technique as `hamburger.ts`'s `crownSurface`
+     * and `soup.ts`'s `bowlSurface`. */
+    const shellSurface = (theta: number, yF: number): { pos: THREE.Vector3; normal: THREE.Vector3 } => {
+      let seg = SHELL_PROFILE[0];
+      let segNext = SHELL_PROFILE[1];
+      for (let i = 0; i < SHELL_PROFILE.length - 1; i++) {
+        if (yF >= SHELL_PROFILE[i][1] && yF <= SHELL_PROFILE[i + 1][1]) {
+          seg = SHELL_PROFILE[i];
+          segNext = SHELL_PROFILE[i + 1];
+          break;
+        }
+      }
+      const [r0, y0] = seg;
+      const [r1, y1] = segNext;
+      const t = y1 > y0 ? (yF - y0) / (y1 - y0) : 0;
+      const rFrac = r0 + (r1 - r0) * t;
+      const radius = rFrac * R;
+      const y = yF * R;
+
+      const dR = (r1 - r0) * R;
+      const dY = (y1 - y0) * R;
+      const n2 = new THREE.Vector2(dY, -dR);
+      if (n2.lengthSq() < 1e-8) n2.set(1, 0);
+      n2.normalize();
+
+      const nx = Math.sin(theta);
+      const nz = Math.cos(theta);
+      const pos = new THREE.Vector3(nx * radius, y, nz * radius);
+      const normal = new THREE.Vector3(nx * n2.x, n2.y, nz * n2.x).normalize();
+      return { pos, normal };
+    };
 
     // ── Materials ────────────────────────────────────────────────────────────
     const shellMat = glossyMat({ color: PLASTIC, roughness: 0.12, transmission: 0.6 });
@@ -440,7 +472,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     belt.receiveShadow = true;
     this.rig.joints.hips.add(belt);
 
-    this.buildFace(R);
+    this.buildFace(R, shellSurface);
     this.dressTorsoAsBottle();
     this.dressLimbs();
 
@@ -450,87 +482,79 @@ export class WaterBottleCharacter extends BaseCharacter {
   }
 
   /**
-   * Eyes sit above the cap on a solid stalk, not floating in open air.
+   * Structural fix, round 4: the face moves OFF the cap and onto the bottle's own
+   * body. Three straight rounds of independent art direction named the same
+   * defect no matter how the gap above the cap was tuned — "two dark balls on
+   * stalks read as insect antennae, not a face" — because floating a face above
+   * a hat is the wrong STRUCTURE, not a distance to tune. The bottle IS the head;
+   * this treats it that way: eyes, brows and a big smile are built directly onto
+   * the shell's own straight-wall surface (via `shellSurface`, this file's own
+   * lathe-sampling helper, the same technique `hamburger.ts`'s `crownSurface` and
+   * `soup.ts`'s `bowlSurface` use) at `EYE_Y`/`MOUTH_Y` — just above the label,
+   * on the widest, flattest, most camera-facing stretch of the main body. The cap
+   * goes back to being a plain cap, with no face-bearing geometry on it at all.
    *
-   * An independent art director called this out hard: "two dark balls on stalks
-   * ... read as insect antennae, not a face." The previous pass floated the face
-   * pod a full 0.26R above the cap with nothing but two thin sparkles bridging
-   * the gap — dark, ball-shaped eyes held up on visually-nothing is exactly an
-   * eye-stalk read. Fixed on three axes: the float distance is pulled in
-   * (`FACE_FLOAT_F`, see its own comment), a solid `buildFaceStalk()` connector
-   * now fills the gap so the face reads as perched on a raised nub of the cap
-   * rather than detached from it, and the sparkle trail — which visually doubled
-   * as a second, thinner "stalk" under the eyes — is retired in favour of that
-   * one solid connection. Eyes are also sized up so they read as a real face
-   * rather than two dots riding a long way above the body.
-   *
-   * Both eyes are still built from one mirrored loop at an identical `y=0`, and
-   * now additionally share the brow stroke's reference line, so any residual
-   * asymmetry in the render is the camera angle, not the geometry.
+   * Both eyes are built from one mirrored loop at an identical `theta`/`EYE_Y`,
+   * so any residual asymmetry in the render is the camera angle, not the geometry.
    */
-  private buildFace(R: number): void {
+  private buildFace(
+    R: number,
+    shellSurface: (theta: number, yF: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }
+  ): void {
     const head = this.rig.joints.head;
-    const face = this.rig.joints.face;
-    face.position.set(0, FACE_FLOAT_F * R, R * 0.04);
     const ink = PALETTE.ink;
 
-    const capMat = toonMat({ color: CAP, roughness: 0.4 });
-    head.add(buildFaceStalk(R, capMat));
-
+    const EYE_THETA = 0.40;
     const eyeMat = toonMat({ color: ink, roughness: 0.25 });
     const browMat = toonMat({ color: CAP, roughness: 0.4 }); // ties the brows to the cap material
-    for (const sx of [-1, 1]) {
-      // Enlarged from the previous pass (0.155R → 0.175R) and rounder (scale 0.62 →
-      // 0.68 on Z) — a fresh independent art director read the previous eyes as
-      // "googly stalk-eyes" with nothing else to anchor them as a face; bigger,
-      // rounder eyes plus a real brow and a real visible smile (below) are what
-      // turn that into a face rather than two dots.
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.175, 16, 14), eyeMat);
-      eye.position.set(sx * R * 0.32, 0, 0);
-      eye.scale.set(1, 1.08, 0.68);
-      eye.castShadow = true;
-      face.add(eye);
+    for (const sx of [-1, 1] as const) {
+      const { pos, normal } = shellSurface(sx * EYE_THETA, EYE_Y);
+      const outward = new THREE.Vector3(normal.x, 0, normal.z).normalize();
+      const eyeG = new THREE.Group();
+      eyeG.position.copy(pos).addScaledVector(outward, R * 0.02);
+      eyeG.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
+      head.add(eyeG);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.045, 10, 8), flatMat('#ffffff'));
-      glint.position.set(sx * R * 0.32 - R * 0.042, R * 0.052, R * 0.15);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.155, 16, 14), eyeMat);
+      eye.scale.set(1, 1.05, 0.6);
+      eye.castShadow = true;
+      eyeG.add(eye);
+
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.04, 10, 8), flatMat('#ffffff'));
+      glint.position.set(-R * 0.038, R * 0.045, R * 0.075);
       glint.userData.noOutline = true;
-      face.add(glint);
+      eyeG.add(glint);
 
       // Brow: a slight friendly lift outward (not a V — this bottle is cheerful,
-      // not fierce), on one shared Y so the pair reads as deliberately level.
-      // Thickened and lengthened, and lifted further above the (now bigger) eye so
-      // it reads as its own distinct stroke rather than grazing the eye's own bulge.
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.024, R * 0.17, 4, 8), browMat);
+      // not fierce), on one shared height so the pair reads as deliberately level.
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.022, R * 0.15, 4, 8), browMat);
       brow.name = 'waterbottle_brow';
       brow.rotation.z = Math.PI / 2 - sx * 0.18;
-      brow.position.set(sx * R * 0.32, R * 0.235, R * 0.06);
+      brow.position.set(0, R * 0.205, R * 0.05);
       brow.castShadow = true;
-      face.add(brow);
+      eyeG.add(brow);
     }
 
-    // Big, warm smile — per the brief's own spec for this character, and the single
-    // biggest miss two fresh independent art-director passes both named: "no mouth at
-    // all." The previous two attempts anchored the smile inside the same tight pod as
-    // the eyes, directly above the stalk connector — at that scale, an ink-black torus
-    // arc sitting right against the stalk's own dark-navy material had almost no colour
-    // contrast to read against, so it visually fused into the connector and vanished
-    // (confirmed by cropping a render: the "mouth" area showed only two dark flaps,
-    // not a smile). Fixed by moving the smile OFF the eye pod entirely and onto the
-    // cap's own front wall — a separate visual zone from the eyes/stalk clutter above —
-    // and giving it the label's bright near-white colour so it reads clearly against
-    // the dark matte cap, the same colour-contrast trick the label wrap already uses
-    // against the shell. Sits on the cap's straight cylindrical wall (CAP_PROFILE holds
-    // radius 0.30R from h 0.67 to 0.78) at the front, between the two grip ridges.
+    // Big, warm smile — per the brief's own spec for this character, and a
+    // repeated art-director miss when it lived up on the cap fused against the
+    // stalk. Sits centred below the eyes, on the same shell wall, in the label's
+    // bright near-white so it reads clearly against the richer WATER-blue shell.
+    const mouthPt = shellSurface(0, MOUTH_Y);
+    const mouthOutward = new THREE.Vector3(mouthPt.normal.x, 0, mouthPt.normal.z).normalize();
+    const mouthG = new THREE.Group();
+    mouthG.position.copy(mouthPt.pos).addScaledVector(mouthOutward, R * 0.022);
+    mouthG.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthOutward);
+    head.add(mouthG);
+
     const smileMat = toonMat({ color: LABEL, roughness: 0.4 });
     const smile = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.155, R * 0.034, 8, 20, Math.PI * 0.8),
+      new THREE.TorusGeometry(R * 0.165, R * 0.032, 8, 20, Math.PI * 0.8),
       smileMat
     );
     smile.name = 'waterbottle_smile';
-    smile.position.set(0, R * 0.735, R * 0.30 + R * 0.012);
     smile.rotation.z = Math.PI * 1.09;
     smile.castShadow = true;
-    head.add(smile);
+    mouthG.add(smile);
   }
 
   /**
@@ -613,21 +637,18 @@ export class WaterBottleCharacter extends BaseCharacter {
   }
 
   /**
-   * Bespoke limbs — an independent art director named the shared snowman-body
-   * capsule arms and ball hands as the biggest cast-wide tell. Water Bottle gets
-   * sleek pale-plastic tapered limbs, a hand shaped as a miniature of the head's
-   * own bottle cap (its grip-ridge rings are part of that shape's own identity,
-   * not a bolt-on), and a foot shaped as a rounded bottle base — every new shape
-   * a direct echo of this character's own silhouette, never a generic part
-   * recoloured. Kept fully opaque — see the block comment above the geometry
-   * helpers for why transmission stays reserved for the head.
-   *
-   * A previous pass added a dark `ridgeRing` at every shoulder/elbow/hip break —
-   * across all five bespoke-limb characters that stacked into exactly the
-   * "ball-jointed action figure" collar look an independent art director flagged
-   * as the cast's biggest problem. Removed here; the tapered limb's own silhouette
-   * change plus the colour break into the cap-shaped hand already read as "sleeve
-   * ends here" without extra hardware.
+   * Structural limb rebuild, round 4. Three independent art-director passes named
+   * the same root cause: every character shares the identical tapered-tube-and-
+   * ball-joint limb TOPOLOGY, and recolouring that shared skeleton doesn't fix it.
+   * Water Bottle's limbs are now genuinely RIBBED (`ribbedLimb`, a bellows/
+   * accordion profile, not a smooth taper) — a squeezable-plastic-hose read that
+   * is a different silhouette, not just a different colour, from every other
+   * character's limbs. The hand stays a miniature of the head's own bottle cap
+   * (its grip-ridge rings are part of that shape's own identity) and the foot
+   * stays a rounded bottle base — both already a direct echo of this character's
+   * own silhouette rather than a generic part recoloured. Kept fully opaque — see
+   * the block comment above the geometry helpers for why transmission stays
+   * reserved for the head.
    */
   private dressLimbs(): void {
     // Richer WATER blue, not the pale near-white shell tone — see the constructor's
@@ -640,19 +661,19 @@ export class WaterBottleCharacter extends BaseCharacter {
       switch (part) {
         case 'upperArmL':
         case 'upperArmR':
-          return taperedLimb(size.len, size.radius * 1.02, size.radius * 0.72, plasticMat);
+          return ribbedLimb(size.len, size.radius * 1.02, size.radius * 0.72, plasticMat, 3);
         case 'forearmL':
         case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.70, size.radius * 0.52, plasticMat);
+          return ribbedLimb(size.len, size.radius * 0.70, size.radius * 0.52, plasticMat, 3);
         case 'handL':
         case 'handR':
           return buildCapHand(size.radius, capMat, capDarkMat);
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.0, size.radius * 0.84, plasticMat);
+          return ribbedLimb(size.len, size.radius * 1.0, size.radius * 0.84, plasticMat, 3);
         case 'shinL':
         case 'shinR':
-          return taperedLimb(size.len, size.radius * 0.84, size.radius * 0.66, plasticMat);
+          return ribbedLimb(size.len, size.radius * 0.84, size.radius * 0.66, plasticMat, 3);
         case 'footL':
         case 'footR':
           return buildBottleFoot(size.radius, capDarkMat, plasticMat);

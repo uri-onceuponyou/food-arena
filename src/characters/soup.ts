@@ -45,8 +45,9 @@ const WOOD = '#8A5A34';          // ladle handle
 
 /**
  * Tapered limb segment: a flat cap at the joint origin (plugs flush into the
- * shoulder/hip, no gap) tapering down a straight wall to a rounded tip. Used for a
- * glazed-ceramic "sleeve" read — glossy, like the bowl exterior itself.
+ * shoulder/hip, no gap) tapering down a straight wall to a rounded tip. Reused here
+ * with near-equal top/bottom radii to build the bowl-handle arms and the stubby
+ * ceramic legs — glossy, like the bowl exterior itself.
  */
 function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
   // Points MUST run bottom → top for LatheGeometry's automatic normals to face
@@ -80,50 +81,64 @@ function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Materia
   return m;
 }
 
-/** A thin rust-trim ring at local Y `y` — the apron sash's colour, cinched at the
- * wrist/elbow/knee like a rolled sleeve or cuffed pant leg. */
-function cuffRing(y: number, radius: number, thickness: number, mat: THREE.Material): THREE.Mesh {
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, thickness, 8, 20), mat);
-  ring.name = 'limb_cuff';
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = y;
-  ring.castShadow = true;
-  ring.receiveShadow = true;
-  return ring;
+/**
+ * A small rounded ceramic knob capping the end of a handle — deliberately NOT a
+ * ball-fist. A bowl handle terminates as a rounded lip of the same moulded ceramic,
+ * not a separate hand shape grafted on; this cap also gives the ladle prop (on
+ * `handR`) somewhere to visually seat.
+ */
+function buildHandleCap(R: number, mat: THREE.Material): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(R * 0.92, 14, 12), mat);
+  m.name = 'soup_handle_cap';
+  m.scale.set(1.0, 0.86, 1.05);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
 }
 
 /**
- * A cloth oven mitt — a flat paddle shape with a separate thumb, deliberately NOT a
- * round fist, so the glazed-ceramic arm visibly ends in a fabric mitt rather than
- * continuing the same material all the way down (the material break the brief calls
- * for: ceramic sleeve → cloth mitt).
+ * A bowed ceramic handle segment: a TUBE along a curve (not a straight tapered
+ * lathe) that still starts at the joint origin and ends exactly `len` below it, so
+ * it plugs into the rig's fixed joint positions with no gap, but bows out to the
+ * side along the way — the structural fix for "every character shares the same
+ * tapered-tube limb". Capped at both ends with rounded ceramic knobs so there is
+ * never an open tube cross-section, and no separate "ball hand" reads at all: the
+ * upper-arm/forearm/hand chain is authored as one continuous curved loop of the
+ * bowl's own material, the strongest available "this is a handle, not an arm" cue.
  */
-function buildOvenMitt(R: number, side: 1 | -1, mat: THREE.Material): THREE.Group {
+function buildHandleArc(
+  len: number,
+  radius: number,
+  side: 1 | -1,
+  bowOut: number,
+  bowFwd: number,
+  mat: THREE.Material
+): THREE.Group {
   const g = new THREE.Group();
-  const paddle = new THREE.Mesh(new THREE.SphereGeometry(R * 0.98, 14, 12), mat);
-  paddle.scale.set(1.12, 0.62, 1.02);
-  paddle.castShadow = true;
-  paddle.receiveShadow = true;
-  g.add(paddle);
+  const start = new THREE.Vector3(0, 0, 0);
+  const mid = new THREE.Vector3(side * len * bowOut, -len * 0.5, len * bowFwd);
+  const end = new THREE.Vector3(0, -len, 0);
+  const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 14, radius, 10, false), mat);
+  tube.name = 'soup_handle_tube';
+  tube.castShadow = true;
+  tube.receiveShadow = true;
+  g.add(tube);
 
-  const cuffBand = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.66, R * 0.66, R * 0.34, 14, 1, true), mat);
-  cuffBand.name = 'mitt_cuff_band';
-  cuffBand.position.set(0, R * 0.42, 0);
-  cuffBand.castShadow = true;
-  cuffBand.receiveShadow = true;
-  g.add(cuffBand);
-
-  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.30, R * 0.34, 4, 8), mat);
-  thumb.position.set(side * R * 0.80, -R * 0.02, R * 0.18);
-  thumb.rotation.set(0.2, 0, side * 0.75);
-  thumb.castShadow = true;
-  thumb.receiveShadow = true;
-  g.add(thumb);
+  const capTop = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.02, 12, 10), mat);
+  capTop.position.copy(start);
+  capTop.castShadow = true;
+  g.add(capTop);
+  const capBot = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.9, 12, 10), mat);
+  capBot.position.copy(end);
+  capBot.castShadow = true;
+  g.add(capBot);
   return g;
 }
 
-/** A sturdy vendor's work boot — toe box, sole plate and an ankle cuff blending up
- * into the shin, dark against the pale ceramic limbs. */
+/** A sturdy little foot pad — a low, wide plate rather than a tall boot, echoing a
+ * heavy vessel resting on stubby feet directly under its own base, dark against the
+ * pale ceramic legs. */
 function buildWorkBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material): THREE.Group {
   const g = new THREE.Group();
   const upper = new THREE.Mesh(roundedBox(fw * 0.96, fw * 0.68, fw * 1.34, fw * 0.26, 3), bodyMat);
@@ -158,28 +173,30 @@ export class SoupCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: GLAZE_GREY,  // stoneware-grey sleeves — see the constant's own comment
-        hand: CERAMIC,     // cream cloth mitts, echoing the bowl's own ceramic tone
-        foot: '#3A2E24',   // dark boots — matches the reference bar's dark footwear
+        // A third independent art-director pass named the structural problem
+        // directly: every character shares the identical tube-and-ball-joint limb
+        // TOPOLOGY, colour changes notwithstanding. Soup's fix is structural, not a
+        // recolour — see `dressLimbs()` below, which replaces every slot. This
+        // palette is therefore only a fallback that is never actually rendered.
+        limb: CERAMIC,
+        hand: CERAMIC,
+        foot: '#3A2E24',
         torso: GLAZE_GREY,
         limbRoughness: 0.5,
       },
-      // A fresh independent art director scored Soup 4/10 and named the body plan
-      // directly: "one templated body reskinned with different heads" — every character
-      // took the rig's defaults. Soup is written as wide-bodied and low with a heavy
-      // planted base, so it gets the widest shoulders/stance and the thickest, stubbiest
-      // limbs in the cast (a tureen on stout little legs, not a bowl on a generic frame).
+      // Structural fix, round 4: the face was sitting on a narrow neck BELOW the
+      // bowl (a small creature wearing the bowl as a hat), and every character
+      // shared the same tube-and-ball-joint limbs. Two changes: `headFraction`
+      // grows so the wide bowl is unmistakably the dominant identity mass, and the
+      // limbs below are rebuilt from scratch as short bowl-handle arms and stubby
+      // pedestal legs rather than dressed versions of the shared tube topology.
       proportions: {
-        // Unchanged from the original — the bowl's own flared-rim profile already
-        // measures ~2.23m at this headFraction regardless (verified directly; it's a
-        // pre-existing property of the bowl shape, not something the new body
-        // proportions below affect), so there's no cheap win from nudging it further.
-        headFraction: 0.46,      // the bowl is WIDE and shallow, not tall
-        shoulderWidth: CHARACTER_HEIGHT * 0.27,  // widest body in the cast
-        stanceWidth: CHARACTER_HEIGHT * 0.165,   // widest, most heavily planted stance
-        armRadius: CHARACTER_HEIGHT * 0.074,     // thick, stubby
-        handRadius: CHARACTER_HEIGHT * 0.076,
-        legRadius: CHARACTER_HEIGHT * 0.088,     // thickest, stubbiest legs in the cast
+        headFraction: 0.42,                      // the bowl dominates the silhouette
+        shoulderWidth: CHARACTER_HEIGHT * 0.235,  // handles sit close, not arms-length
+        stanceWidth: CHARACTER_HEIGHT * 0.155,    // wide, heavily planted stance
+        armRadius: CHARACTER_HEIGHT * 0.095,      // thick handle stock
+        handRadius: CHARACTER_HEIGHT * 0.062,     // small rounded cap, not a mitt
+        legRadius: CHARACTER_HEIGHT * 0.105,      // thickest, stubbiest legs in the cast
       },
     });
     this.body.add(this.rig.joints.root);
@@ -203,23 +220,22 @@ export class SoupCharacter extends BaseCharacter {
     // placed through the same function so nothing floats off the curve or sinks
     // into it — the two failure modes named in the brief.
     //
-    // Round 2 defect: `bowlBaseR` was 1.6R — wider than the character was tall —
-    // so the flare read as a satellite dish dominating the whole silhouette, and
-    // the profile flared so early (from h≈0.16 on) that there was no real vertical
-    // wall left for the face to sit on; the eyes ended up small and low on the
-    // underside of the flare, barely visible. Fixed on two axes: `bowlBaseR` is
-    // cut by ~30% to a genuine "wide bowl" rather than a dish, and the profile now
-    // holds a real near-vertical WALL through h 0.16–0.58 (r grows much slower than
-    // h there) before flaring out toward the rim above it — giving the face a
-    // clearly visible, mostly-outward-facing surface below the flare instead of
-    // inside it.
+    // Round 4 defect, the one that survived three rounds of colour/radius fixes:
+    // the wall at the face's height (r≈0.52-0.58) was barely half the width of the
+    // rim flare above it (r=1.0) — a ~2x radius jump. At a glance that reads as TWO
+    // masses: a small head wearing a big flared bowl as a hat, with the eyes stuck
+    // on the small head below. Fixed by making the profile reach near-maximum
+    // radius EARLY (by h=0.55) and HOLD it through the whole belly where the face
+    // sits, so there is no narrower "neck" segment for the eyes to look detached
+    // on — only a small footed base at the very bottom (mostly hidden against the
+    // torso below) and a modest rolled lip at the very top.
     const BOWL_PROFILE: Array<[r: number, h: number]> = [
-      [0, 0], [0.36, 0], [0.40, 0.06], [0.46, 0.16], [0.52, 0.30],
-      [0.58, 0.44], [0.66, 0.58], [0.78, 0.72], [0.92, 0.86], [1.0, 1.0],
+      [0, 0], [0.34, 0], [0.40, 0.05], [0.60, 0.14], [0.82, 0.26],
+      [0.95, 0.40], [1.0, 0.55], [1.0, 0.76], [0.97, 0.86], [1.04, 0.94], [0.92, 1.0],
     ];
-    const bowlBaseR = R * 1.15;
+    const bowlBaseR = R * 1.18;
     const bowlH = R * 1.35;
-    const bowlBottomY = -R * 1.0; // head-local Y of the bowl's own base (h=0) — flush with the neck
+    const bowlBottomY = -R * 1.0; // head-local Y of the bowl's own base (h=0) — sunk into the torso below
 
     const bowlPoint = (rFrac: number, hFrac: number): THREE.Vector2 =>
       new THREE.Vector2(rFrac * bowlBaseR, bowlBottomY + hFrac * bowlH);
@@ -264,9 +280,10 @@ export class SoupCharacter extends BaseCharacter {
     bowl.receiveShadow = true;
     head.add(bowl);
 
-    // Rim trim — a thin contrasting band just under the flared rim lip, the
-    // "costume colour contrast" the reference bar calls for, echoed on the torso.
-    const trimTop = 0.82, trimBottom = 0.70;
+    // Rim trim — a thin contrasting band just under the rolled rim lip (the new
+    // profile's h 0.86-0.94 flare), the "costume colour contrast" the reference bar
+    // calls for, echoed on the torso.
+    const trimTop = 0.90, trimBottom = 0.80;
     const trimTopPt = bowlSurface(0, trimTop);
     const trimBotPt = bowlSurface(0, trimBottom);
     const trimRadiusTop = new THREE.Vector2(trimTopPt.pos.x, trimTopPt.pos.z).length() * 1.02;
@@ -293,7 +310,7 @@ export class SoupCharacter extends BaseCharacter {
     // ── Broth surface ────────────────────────────────────────────────────────
     // A shallow glossy disc filling the bowl's opening, set just below the rim so
     // it reads as liquid inside rather than a lid on top.
-    const brothH = 0.90;
+    const brothH = 0.95;
     const brothPt = bowlSurface(0, brothH);
     const brothRadius = new THREE.Vector2(brothPt.pos.x, brothPt.pos.z).length() * 0.90;
     this.brothSurface = new THREE.Mesh(new THREE.CircleGeometry(brothRadius, 32), brothMat);
@@ -385,13 +402,16 @@ export class SoupCharacter extends BaseCharacter {
     face.position.set(0, 0, 0); // features are authored directly on `head` in exact surface coords
     const head = this.rig.joints.head;
 
-    // EYE_H sits mid-wall (h 0.30-0.44 segment), well below the flare and well
-    // above the footed base — a clearly visible, mostly-outward-facing surface.
+    // Structural fix, round 4: EYE_H now sits at h=0.62, squarely inside the
+    // profile's h 0.55-0.76 plateau where the bowl holds its FULL rim-width radius
+    // (see BOWL_PROFILE's own comment) — the same wide wall the rim trim and the
+    // broth sit on, not a narrower transitional neck below it. The face is now ON
+    // the bowl's main body, not on a separate head-shaped mass underneath it.
     // Orientation still uses the flattened HORIZONTAL-outward direction rather
     // than the raw 3D normal, as a belt-and-braces fix against any residual
     // downward tilt in the wall segment.
     const EYE_THETA = 0.46;
-    const EYE_H = 0.37;
+    const EYE_H = 0.62;
     const irisMat = toonMat({ color: '#6B6E72', roughness: 0.3 }); // grey steam-toned, not ink-black
     const scleraMat = toonMat({ color: '#EDEDEA', roughness: 0.3 });
     const lidMat = toonMat({ color: '#B7BABD', roughness: 0.35 }); // between sclera and iris — a real shaded lid
@@ -452,8 +472,11 @@ export class SoupCharacter extends BaseCharacter {
     // costs quality. Kept true to the personality doc's intent, though: a thin, nearly
     // flat closed curve with just a hint of an upturn at the ends — calm and knowing
     // rather than a grin — so the unsettling-patient read from the eyes/lids survives.
-    // Sits centred (theta=0) below the eyes, in the same wall segment via `bowlSurface`.
-    const MOUTH_H = 0.225;
+    // Sits centred (theta=0) below the eyes, still inside the wide plateau (the
+    // profile holds full width from h=0.55) rather than down in the narrower
+    // ramp-up zone below it, so mouth and eyes read as one continuous face on one
+    // continuous wide wall.
+    const MOUTH_H = 0.48;
     const mouthPt = bowlSurface(0, MOUTH_H);
     const mouthOutward = new THREE.Vector3(mouthPt.pos.x, 0, mouthPt.pos.z).normalize();
     const mouth = new THREE.Group();
@@ -484,7 +507,7 @@ export class SoupCharacter extends BaseCharacter {
     // independent of the food mass — so an offset of `R*0.05` (~0.02m) barely
     // clears the CENTRE of a 0.16m-radius hand sphere: the whole prop was built
     // sitting inside the mitt, invisible. Fixed by sizing against handRadius.
-    const handRadius = CHARACTER_HEIGHT * 0.076; // must match the rig's own `proportions.handRadius`
+    const handRadius = CHARACTER_HEIGHT * 0.062; // must match the rig's own `proportions.handRadius`
     const hand = this.rig.joints.handR;
     const ladle = new THREE.Group();
     ladle.name = 'soup_ladle';
@@ -533,7 +556,7 @@ export class SoupCharacter extends BaseCharacter {
    */
   private dressTorsoAsSoup(): void {
     const height = CHARACTER_HEIGHT;
-    const shoulderWidth = height * 0.27; // must match the rig's own `proportions.shoulderWidth`
+    const shoulderWidth = height * 0.235; // must match the rig's own `proportions.shoulderWidth`
     const tw = shoulderWidth * 1.18;
     const torsoH = height * 0.28;
     const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85); // rig.ts's taper at t=0.5
@@ -587,51 +610,59 @@ export class SoupCharacter extends BaseCharacter {
   }
 
   /**
-   * Bespoke limbs — an independent art director named the shared snowman-body
-   * capsule arms and ball hands as the biggest cast-wide tell. Soup gets glazed-
-   * ceramic tapered "sleeves" (glossy, matching the bowl's own exterior material)
-   * ending in a genuinely different material: a matte cloth oven mitt, echoing the
-   * vendor apron the torso already wears. A dark work boot replaces the blocky
-   * default foot.
+   * Structural limb rebuild, round 4. Three independent art-director passes named
+   * the same root cause: every character shares the identical tapered-tube-and-
+   * ball-joint limb TOPOLOGY, and recolouring that shared skeleton doesn't fix it.
+   * Soup's brief: a wide heavy bowl doesn't need long tube arms and legs.
    *
-   * A previous pass added a `cuffRing` at every segment break (shoulder, elbow,
-   * hip) plus another on the boot — a thick, high-contrast trim-coloured torus
-   * right at each joint. Stacked across all five bespoke-limb characters that
-   * read as mechanical action-figure collars, a worse version of the exact
-   * "ball-jointed skeleton" problem this system exists to solve. Removed: the
-   * tapered limb's own silhouette change (thick shoulder to narrow wrist) plus
-   * the colour break into the mitt/boot already sells "sleeve ends here" without
-   * bolted-on hardware.
+   * Arms are now a pair of BOWED ceramic handles (`buildHandleArc`, a curved tube,
+   * not a straight taper) running shoulder→elbow→hand as one continuous loop of
+   * the bowl's own glossy ceramic material — reading as the bowl's own handles,
+   * not as arms bolted onto a generic frame. There is no separate "ball hand": the
+   * hand joint gets a small rounded cap of the same material, the loop's terminus.
+   *
+   * Legs are short, thick, near-uniform ceramic-stoneware posts — thigh and shin
+   * share one material and almost the same radius, so the knee never reads as a
+   * distinct jointed segment — ending in a low, wide dark foot pad directly under
+   * the bowl, echoing a heavy vessel standing on stubby feet rather than walking
+   * on legs.
    */
   private dressLimbs(): void {
-    // Grey glazed-stoneware sleeves (see GLAZE_GREY's own comment) — the fix for the
-    // cream/white limb convergence a fresh art-director pass named across Soup, Water
-    // Bottle and Sushi. Mitts move to cream to keep a genuine hand contrast without
-    // reintroducing an all-cream body.
-    const glazeMat = glossyMat({ color: GLAZE_GREY, roughness: 0.28 });
+    const handleMat = glossyMat({ color: CERAMIC, roughness: 0.22 }); // same material as the bowl itself
+    const legMat = toonMat({ color: CERAMIC_SHADE, roughness: 0.48 }); // matte stoneware pedestal
     const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });
-    const mittMat = toonMat({ color: CERAMIC, roughness: 0.55 }); // matte cream cloth, not glazed ceramic
     const bootMat = toonMat({ color: '#3A2E24', roughness: 0.7 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
         case 'upperArmL':
-        case 'upperArmR':
-          return taperedLimb(size.len, size.radius * 1.08, size.radius * 0.80, glazeMat);
-        case 'forearmL':
-        case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.78, size.radius * 0.58, glazeMat);
-        case 'handL':
-        case 'handR': {
-          const side = part === 'handL' ? 1 : -1;
-          return buildOvenMitt(size.radius, side, mittMat);
+        case 'upperArmR': {
+          const side = part === 'upperArmL' ? 1 : -1;
+          // Thinner than the rig's own arm radius and bowed hard outward — the
+          // point is to NOT read as a muscle/limb thickness at all, but as a
+          // moulded ceramic loop of roughly constant, modest thickness.
+          return buildHandleArc(size.len, size.radius * 0.60, side, 1.0, 0.10, handleMat);
         }
+        case 'forearmL':
+        case 'forearmR': {
+          const side = part === 'forearmL' ? 1 : -1;
+          // Bows the OTHER way relative to the upper arm, so the two segments
+          // together read as one D-shaped handle looping back toward the body
+          // rather than a straight tube bent once at a joint.
+          return buildHandleArc(size.len, size.radius * 0.52, side, -0.85, 0.12, handleMat);
+        }
+        case 'handL':
+        case 'handR':
+          return buildHandleCap(size.radius, handleMat);
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, glazeMat);
+          return taperedLimb(size.len, size.radius * 1.0, size.radius * 0.94, legMat);
         case 'shinL':
         case 'shinR':
-          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, glazeMat);
+          // Same material, near-identical radius to the thigh — no taper break at
+          // the knee, so the leg reads as one short stub post, not two tube
+          // segments joined at a visible ball joint.
+          return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.88, legMat);
         case 'footL':
         case 'footR':
           return buildWorkBoot(size.len, bootMat, trimMat);

@@ -31,11 +31,24 @@
  * symmetric about its own centre) with a hidden connector block pinned to -0.90R,
  * which cancels headCentreY's own offset almost exactly regardless of R. The same
  * fix generalises here without needing a hidden connector mesh at all: the stack's
- * own bottom (the patty's underside) is simply anchored at local y = BASE_Y ≈
- * -0.90*R, so `headCentreY + BASE_Y ≈ torsoTopY` — the patty sits right on top of
- * the dressed torso's own top surface, with a small fixed embed so no seam shows.
- * Every layer above (cheese, tomato, lettuce, crown) then stacks upward from there,
- * exactly like the original file, just re-based onto this anchor instead of y=0.
+ * own bottom (the patty's underside) is anchored at local y = BASE_Y.
+ *
+ * ── Structural fix, round 4: arms emerge from the SEAM, not the bun's middle ──
+ * A third independent art-director pass named the cast-wide problem directly, and
+ * for Hamburger specifically: arms should come out from between the bun layers,
+ * so the stack itself is the body, rather than being bolted onto a generic torso.
+ * Rounds 1-3 set `BASE_Y ≈ -0.90*R` so the patty's underside landed flush with the
+ * dressed torso's TOP surface — but the rig's shoulder joints are not at the
+ * torso's top; `ChibiRig` plants them at `torsoH * 0.78`, which is `torsoH * 0.22`
+ * BELOW the torso top. That gap meant the arms actually emerged from the middle of
+ * the bottom bun's OWN mass, with the patty/cheese/tomato/lettuce stack floating
+ * entirely above the arm line — "bolted to a torso" exactly as flagged, just a
+ * torso wearing a bun costume. `BASE_Y` now targets the SHOULDER height instead of
+ * the torso top (still derived the same way, just re-targeted — see its own
+ * comment below), so the patty's underside sinks down to where the arms actually
+ * pivot. The wider bottom bun (`bunR` in `dressTorso` below) still peeks out
+ * beyond the narrower patty at that height, so the arm reads as sprouting from the
+ * visible seam between the two buns, not from inside either one.
  */
 
 import * as THREE from 'three';
@@ -259,13 +272,26 @@ export class HamburgerCharacter extends BaseCharacter {
 
     // ── Vertical layout ──────────────────────────────────────────────────────
     // See the file-level comment for the full derivation. BASE_Y anchors the
-    // patty's underside right at the dressed torso's top surface; every layer
-    // above stacks upward from there. Layer thicknesses are compressed from the
-    // pre-rig file (which had no separate leg/torso budget eating into the total
-    // 2.1 m) by roughly the same ratio the rig's own leg+torso budget (54% of
-    // total height) leaves for everything mounted on `head` — tuned by render,
-    // not derived exactly, per the brief.
-    const BASE_Y = -R * 0.90;
+    // patty's underside at the rig's own SHOULDER height (not the torso top) so
+    // the arms emerge from the seam between the two buns. `torsoH`/`shoulderY`
+    // mirror `rig.ts`'s own (private) constants — the same "recompute locally,
+    // comment that it must match" convention `soup.ts`'s `dressTorsoAsSoup` and
+    // `waterbottle.ts`'s `dressTorsoAsBottle` already use to stay in sync with
+    // the rig without either file reaching into the other's internals.
+    const rigHeight = 1.95; // must match `proportions.height` above
+    const torsoH = rigHeight * 0.28;       // rig.ts: torsoH = height * 0.28
+    const shoulderDrop = torsoH * 0.22;    // rig.ts: shoulderY = torsoH * 0.78, i.e. 0.22*torsoH below the top
+    // headCentreY = torsoTopY + 0.86*R (rig.ts's own constant); solving
+    // headCentreY + BASE_Y = torsoTopY - shoulderDrop for BASE_Y lands the
+    // patty's BOTTOM edge exactly level with the shoulder joint. Rendered, that
+    // wasn't enough: the shoulder joint is the TOP of the visible arm mound (the
+    // arm mesh hangs DOWN from it), so the arm's own visible bulk still sat
+    // entirely below the patty, reading as attached to the bottom bun rather than
+    // to the seam. `SEAM_EMBED` pulls the patty (and everything above it) down
+    // further so the patty layer itself — not just its lower edge — surrounds the
+    // arm's attachment point, with the cheese poking out just above the arm mound.
+    const SEAM_EMBED = 0.15;
+    const BASE_Y = -R * 0.86 - shoulderDrop - SEAM_EMBED;
     const PATTY_H = 0.20;
     const CHEESE_H = 0.095;
     const TOMATO_H = 0.125;
@@ -327,6 +353,24 @@ export class HamburgerCharacter extends BaseCharacter {
       drip.name = 'cheese_drip';
       drip.position.set(Math.cos(a) * CHEESE_R * 0.97, cheeseY - len * 0.7, Math.sin(a) * CHEESE_R * 0.97);
       drip.scale.set(1, len / dripR, 1);
+      drip.castShadow = true;
+      drip.receiveShadow = true;
+      head.add(drip);
+    }
+
+    // Two long melted-cheese drips, positioned directly at the arm's own side
+    // (straight out to the left/right where the shoulders actually are) and
+    // reaching from the cheese layer DOWN PAST the patty's own underside — into
+    // the arm mound itself, not just down to its top edge — the visual bridge
+    // that sells "arms emerge from between the bun layers" rather than from a
+    // bare torso.
+    const dripTopY = cheeseY;
+    const dripBottomY = BASE_Y - 0.09; // sinks past the patty's underside, into the arm mound
+    const shoulderDripLen = Math.max(0.05, dripTopY - dripBottomY);
+    for (const sx of [-1, 1] as const) {
+      const drip = new THREE.Mesh(new THREE.CapsuleGeometry(CHEESE_R * 0.085, shoulderDripLen, 4, 8), cheeseMat);
+      drip.name = 'shoulder_cheese_drip';
+      drip.position.set(sx * CHEESE_R * 0.92, (dripTopY + dripBottomY) / 2, CHEESE_R * 0.14);
       drip.castShadow = true;
       drip.receiveShadow = true;
       head.add(drip);
