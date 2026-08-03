@@ -121,6 +121,71 @@ Remaining: burrito, donut, egg, hotdog, lollipop, pizza, soup, sushi, taco.
 
 ---
 
+## Wave 1.5 — viewport fairness (do this EARLY, it moves the camera)
+
+Uri's requirement: the game must also run on **mobile in landscape**, and desktop and
+mobile players must have **the same view abilities — same view distance, same
+proportions**. In a PvP brawler this is competitive fairness, not layout polish: seeing
+further than your opponent is a straightforward advantage.
+
+### This is already broken today, by default
+
+`src/render/camera.ts:70` is `new THREE.PerspectiveCamera(opts.fov ?? 34, aspect, ...)`.
+**three.js `fov` is the VERTICAL fov**, so vertical extent is fixed and horizontal extent
+scales linearly with aspect ratio — classic "Hor+" behaviour that nobody chose.
+
+Visible arena WIDTH, relative to 16:9:
+
+| Device | Aspect | Sees | hFOV |
+|---|---|---|---|
+| Ultrawide desktop | 21:9 | **+31%** | 71.0° |
+| Phone landscape | 19.5:9 | **+22%** | 67.0° |
+| Desktop baseline | 16:9 | — | 57.0° |
+| iPad | 4:3 | **−25%** | 44.4° |
+
+An ultrawide player sees **75% more arena width than an iPad player**. Fix this before
+tuning composition, or every framing decision gets made against a moving target.
+
+### The fix: fit a fixed world rectangle, don't fit the screen
+
+1. Define a **fair-play rectangle** in world units — the region guaranteed visible on
+   every device. Derive it from gameplay, not from a screen: the longest weapon range in
+   `rules.ts` plus reaction distance. Anything an opponent can hit you from must be on
+   screen on the narrowest supported aspect.
+2. Each resize, solve camera distance/fov so that rectangle is **fully contained at any
+   aspect** — fit by whichever axis is binding, not always by height.
+3. Screens wider than the design aspect then reveal extra space. Two options, pick one
+   and write it down: treat the surplus as **cosmetic bleed** (arena border and decor
+   only — never spawns, pickups, hazards or cover), or hard-mask it. Cosmetic bleed looks
+   far better than letterboxing and is what shipped mobile brawlers do; it only works if
+   the surplus is guaranteed non-informational, which is an ARENA LAYOUT constraint, so
+   the arena owners need to know about it.
+4. Add aspect-ratio isolation shots to the harness — render the same scene at 4:3, 16:9,
+   19.5:9, 21:9 and diff what is reachable. This is exactly the kind of thing that is
+   invisible until isolated, and we now have six instances of that lesson.
+
+### The rest of mobile parity — scope it now, build it later
+
+- **Safe areas.** Notches, rounded corners and the home indicator eat the HUD's corners
+  in landscape. The HUD is DOM/CSS, so `env(safe-area-inset-*)` applies directly — cheap
+  to do right, ugly to retrofit.
+- **Touch controls reserve screen space.** Twin virtual sticks sit in the lower corners
+  and thumbs physically occlude that area. That region must not be where gameplay-critical
+  information lives — another constraint on HUD and on the fair rectangle.
+- **Cap `devicePixelRatio`.** Phones report 3–4×; rendering the full post chain at native
+  DPR will melt a mobile GPU for no visible gain.
+- **Quality tiers.** The current pipeline runs IBL + SSAO + bloom + a normal pass. That is
+  a desktop budget. Mobile needs a tier that drops SSAO and probably bloom while keeping
+  the look recognisable — note that the art direction depends on saturation and contrast
+  passes, which are cheap, and on IBL, which is not.
+- **Input abstraction.** `src/game/input.ts` is DOM/keyboard today. Touch is a second
+  backend behind the same interface, not a rewrite — worth checking that boundary holds
+  before it calcifies.
+
+**Ordering note:** do the camera fit early (it changes framing, so every later visual
+judgement depends on it) and defer the rest until after Wave 3. But do NOT let the arena
+loops finalise layout without knowing the cosmetic-bleed constraint from step 3.
+
 ## Wave 4 — the things nobody has done yet
 
 - **Whole-arena scanner** as the real scoreboard. Element scores read higher than the
