@@ -99,17 +99,32 @@ function addShellDecal(parent: THREE.Object3D, theta: number, phi: number, embed
 
 /** Path (theta, phi-as-fraction-of-PI) for the crack landmark: a short, bold
  * zigzag on the temple/cheek, well clear of the eyes (theta ±0.50) and mouth
- * (theta 0) so it reads as a distinct scar rather than crowding the face. */
+ * (theta 0) so it reads as a distinct scar rather than crowding the face.
+ *
+ * Two defects compounded here. First, this originally ran theta 1.20-1.48 —
+ * nearly 90° round from front (the profile edge). At that theta the surface
+ * normal is almost perpendicular to the default camera, so the curved shading
+ * cue that makes every other decal (eyes, brows, mouth) read as "sitting on a
+ * dome" disappears: the segments render against the flat, blown-out rim-light
+ * band with no surrounding shell context, which read as a stray stick floating
+ * beside the head rather than a crack IN it. Second, only 3 long segments with
+ * large (~0.27 rad) theta swings drew one bold "V"/lightning-bolt shape, not a
+ * crack — real fractures are made of several SHORT irregular jags, not two
+ * long straight strokes. Fixed both: pulled in to theta 0.66-0.86 (clearly on
+ * the visible frontal dome, still outside the eyes' ±0.50 clear zone) and
+ * split into 5 short segments with small (~0.12-0.18 rad) alternating jags. */
 const CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
-  [1.28, 0.27], [1.48, 0.35], [1.20, 0.42], [1.42, 0.50],
+  [0.74, 0.13], [0.86, 0.19], [0.68, 0.24], [0.84, 0.30], [0.70, 0.36], [0.83, 0.41],
 ];
 
 /** Continuation of the crack onto the torso shell, same side (character's right
  * front), near the top where it emerges from under the neck. `eggSurface` and
  * `buildCrackLine` are both already generic in R, so this reuses them verbatim
- * against the torso's own smaller shell radius. */
+ * against the torso's own smaller shell radius. Theta band matches the
+ * repositioned `CRACK_PATH` above so the two segments read as one continuous
+ * crack running from head to torso instead of jumping sideways at the neck. */
 const TORSO_CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
-  [1.30, 0.08], [1.52, 0.18], [1.24, 0.29],
+  [0.80, 0.05], [0.68, 0.10], [0.82, 0.16],
 ];
 
 /**
@@ -285,10 +300,10 @@ export class EggCharacter extends BaseCharacter {
     // glow stripe on the first pass); instead it's one small, hot ember at the
     // crack's widest gap, right where the yolk peeks through.
     buildCrackLine(head, R, CRACK_PATH, {
-      thickness: R * 0.062, embed: R * 0.007, color: CRACK_DARK, roughness: 0.55,
+      thickness: R * 0.05, embed: R * 0.010, color: CRACK_DARK, roughness: 0.55,
     });
-    buildCrackLine(head, R, [CRACK_PATH[2], CRACK_PATH[3]], {
-      thickness: R * 0.026, embed: R * 0.017, color: NEON_ACCENT, roughness: 0.3,
+    buildCrackLine(head, R, [CRACK_PATH[4], CRACK_PATH[5]], {
+      thickness: R * 0.024, embed: R * 0.017, color: NEON_ACCENT, roughness: 0.3,
       emissive: NEON_ACCENT, emissiveIntensity: 1.0,
     });
 
@@ -425,23 +440,31 @@ export class EggCharacter extends BaseCharacter {
   private buildFace(head: THREE.Group, R: number): void {
     const EYE_THETA = 0.50;
     const EYE_PHI = 0.43 * Math.PI;
+    // At the old sizing every feature here (eyes, brows, mouth) sat well under
+    // half the size of the equivalent feature on any other character in the
+    // cast, and against a head this large and this plain (no shell texture,
+    // no costume) that read as a sparse, half-finished face rather than a
+    // deliberately minimal one. FS scales every feature up ~35% uniformly;
+    // positions are untouched, and the eyes stay well clear of collapsing
+    // into each other at this size (see the round-2 note below).
+    const FS = 1.35;
 
     for (const sx of [-1, 1] as const) {
       const eye = addShellDecal(head, sx * EYE_THETA, EYE_PHI, R * 0.012, R);
 
-      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.125, 16, 14), toonMat({ color: '#FFFFFF', roughness: 0.3 }));
+      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.125 * FS, 16, 14), toonMat({ color: '#FFFFFF', roughness: 0.3 }));
       white.scale.set(1, 1.08, 0.55);
       white.castShadow = true;
       eye.add(white);
 
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.062, 14, 12), toonMat({ color: INK, roughness: 0.25 }));
-      pupil.position.set(0, -R * 0.01, R * 0.06);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.062 * FS, 14, 12), toonMat({ color: INK, roughness: 0.25 }));
+      pupil.position.set(0, -R * 0.01, R * 0.06 * FS);
       pupil.scale.set(1, 1, 0.55);
       pupil.castShadow = true;
       eye.add(pupil);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.028, 8, 8), flatMat('#ffffff'));
-      glint.position.set(-sx * R * 0.03, R * 0.045, R * 0.10);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.028 * FS, 8, 8), flatMat('#ffffff'));
+      glint.position.set(-sx * R * 0.03, R * 0.045, R * 0.10 * FS);
       glint.userData.noOutline = true;
       eye.add(glint);
 
@@ -454,7 +477,7 @@ export class EggCharacter extends BaseCharacter {
       const browPhi = sx > 0 ? EYE_PHI - 0.205 : EYE_PHI - 0.135;
       const brow = addShellDecal(head, sx * EYE_THETA * 0.92, browPhi, R * 0.010, R);
       const creaseMesh = new THREE.Mesh(
-        roundedBox(R * 0.20, R * 0.040, R * 0.028, R * 0.018, 2),
+        roundedBox(R * 0.20 * FS, R * 0.040 * FS, R * 0.028 * FS, R * 0.018, 2),
         toonMat({ color: SHELL_SHADOW, roughness: 0.45 })
       );
       // (sign verified against a render: the naive -sx tilt read as angry —
@@ -472,7 +495,7 @@ export class EggCharacter extends BaseCharacter {
     // than a wide cartoon gasp.
     const mouth = addShellDecal(head, 0, 0.505 * Math.PI, R * 0.010, R);
     const mouthMesh = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.052, R * 0.019, 10, 16),
+      new THREE.TorusGeometry(R * 0.052 * FS, R * 0.019 * FS, 10, 16),
       toonMat({ color: INK, roughness: 0.3 })
     );
     mouthMesh.castShadow = true;

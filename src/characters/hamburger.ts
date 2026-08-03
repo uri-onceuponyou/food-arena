@@ -509,7 +509,14 @@ export class HamburgerCharacter extends BaseCharacter {
     // wrist/ankle, capped with a mini toasted bun for a hand and a mini seared
     // patty (grill mark included) for a foot — the same food language as the
     // stack on `head`, carried all the way down through the body.
-    const mittMat = toonMat({ color: PALETTE.cream, roughness: 0.68 });
+    // The mitt is documented as "a mini toasted bun for a hand", but the material
+    // wired up was PALETTE.cream — a near-white (#FFF3DE) that, on a rounded dome
+    // shape with no other detail, rendered as a pale, featureless blob at gameplay
+    // distance (a confirmed defect: it read as nothing, not as a hand). Bun gold
+    // actually matches the "toasted bun" description; sesame seeds (added on the
+    // mesh below, same technique as the crown's) are what finish selling the shape.
+    const mittMat = toonMat({ color: PALETTE.bun, roughness: 0.68 });
+    const mittSeedMat = toonMat({ color: PALETTE.cream, roughness: 0.75 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {
         case 'upperArmL': case 'upperArmR':
@@ -534,12 +541,42 @@ export class HamburgerCharacter extends BaseCharacter {
           // The bun crown's own mushroom-cap profile (narrow cuff, bulging
           // "knuckle", rounded tip) doubles perfectly as a mitt shape — flip it
           // so the narrow end sits at the wrist and the bulge/tip hang down.
-          const bun = new THREE.Mesh(bunDome(size.radius * 1.05, size.len * 0.86, 14), mittMat);
-          bun.rotation.x = Math.PI;
+          // Rotating a wrapper GROUP (rather than the mesh alone, as before)
+          // means a handful of sesame seeds can be placed in the same unflipped
+          // local frame `crownSurface` expects and still end up correctly
+          // oriented after the flip — without seeds, bun colour alone still read
+          // as a plain blob at gameplay distance, indistinguishable from the
+          // forearm above it.
+          //
+          // A 180°-about-X flip negates both Y and Z, so a seed placed at the
+          // crown's own theta=0 (its FRONT, +Z) ends up facing -Z — away from
+          // the camera — after the flip: round 1 of this fix placed seeds at
+          // the crown's seed thetas verbatim and every one of them vanished
+          // onto the mitt's hidden back face. `cos(theta) < 0` is what lands
+          // camera-side post-flip, so every spot here is chosen near theta=π.
+          const mittSize: CrownSize = { baseR: size.radius * 1.05, h: size.len * 0.86 };
+          const g = new THREE.Group();
+          const bun = new THREE.Mesh(bunDome(mittSize.baseR, mittSize.h, 14), mittMat);
           bun.name = `${part}_mesh`;
           bun.castShadow = true;
           bun.receiveShadow = true;
-          return bun;
+          g.add(bun);
+          const mittSeedSpots: Array<[number, number]> = [
+            [Math.PI, 0.30], [Math.PI - 0.5, 0.20], [Math.PI + 0.5, 0.20],
+            [Math.PI - 1.0, 0.32], [Math.PI + 1.0, 0.32],
+          ];
+          for (const [theta, hf] of mittSeedSpots) {
+            const { pos, normal } = crownSurface(mittSize, theta, hf);
+            const seed = new THREE.Mesh(seedGeo, mittSeedMat);
+            seed.name = 'mitt_seed';
+            seed.position.copy(pos).addScaledVector(normal, 0.006);
+            seed.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+            seed.scale.set(0.016, 0.03, 0.007);
+            seed.castShadow = true;
+            g.add(seed);
+          }
+          g.rotation.x = Math.PI;
+          return g;
         }
         case 'footL': case 'footR': {
           const g = new THREE.Group();

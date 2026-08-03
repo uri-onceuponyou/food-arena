@@ -172,9 +172,37 @@ export class TacoCharacter extends BaseCharacter {
     // open book: the front wall leans toward the camera, the back wall leans away.
     // From the front this still reads as a solid shell; from the side/back the "V"
     // itself is now the silhouette, with real width in every direction.
+    //
+    // ── Head-attachment fix (floating-head defect) ──────────────────────────
+    // `ChibiRig.headCentreY` places the head group's own origin at
+    // `torsoTopY + 0.86*R`, which assumes a mass extending roughly symmetrically
+    // ±R about that origin (true for a sphere-like donut ring or egg shell) —
+    // the same trap `hamburger.ts` and `hotdog.ts` document. The shell's hinge
+    // crease (its lowest point, at `yBot`) sits at head-local y = `hingeY`, so
+    // its ABSOLUTE y is `headCentreY + hingeY`. At the old `yBot = -R*0.85` that
+    // put the crease almost exactly ON `torsoTopY` (0.86R - 0.85R ≈ 0.01R) —
+    // which looks right IF the torso actually reached its own full nominal
+    // height. It doesn't: `dressTorso`'s `size.h` is read off the RIG's default
+    // torso mesh bounding box, which only spans ~0.92 of the real torso height
+    // (the sphere-derived default tapers before its poles), and this file's own
+    // torso fold shape only climbs to ~0.82-0.94 of THAT already-short `size.h`
+    // before its crimp teeth. Net effect: the tallest point of the dressed torso
+    // fold lands a good 15-20% of the torso height below `torsoTopY` — exactly
+    // the visible gap between shell and body the brief calls out, and it was
+    // invisible dead-on (idle_0) but opened up at yaw/mid-stride because the
+    // hinge crease is a narrow line (`halfWBot` wide), not a flat base, so a
+    // small viewing-angle change is enough to see past it into the gap behind.
+    // Fix: push the hinge crease further down (more negative `yBot`) so it sinks
+    // safely BELOW the torso fold's own tallest crimp teeth instead of sitting
+    // exactly at the torso's theoretical (but unreached) full height — the same
+    // "anchor the mass's own underside, not the rig's assumed centre" reasoning
+    // hamburger's BASE_Y and hotdog's neck block both use. `yTopBase` (the
+    // shell's opening/pod region) is untouched, so the visible silhouette above
+    // the crease — fillings, pod, face — is unaffected; only the hidden portion
+    // below the opening gets longer, self-embedding into the torso fold.
     const halfWBot = R * 0.16;
     const halfWTop = R * 0.92;
-    const yBot = -R * 0.85;
+    const yBot = -R * 1.20;
     const yTopBase = R * 0.55;
     const panelThickness = R * 0.16;
     const tilt = 0.44; // radians each panel splays from vertical
