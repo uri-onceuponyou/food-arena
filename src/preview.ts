@@ -48,7 +48,7 @@ const piece = params.get('piece') ?? 'character';
 const shotMode = params.get('shot') === '1';
 const showGrid = params.get('grid') === '1';
 const frozenTime = params.has('t') ? Number(params.get('t')) : null;
-const isArena = piece === 'arena';
+const isArena = piece === 'arena' || piece === 'prop';
 // arena only: 'gameplay' frames a combat-distance patch, 'overview' frames the whole map.
 const arenaView = params.get('view') === 'overview' ? 'overview' : 'gameplay';
 
@@ -204,7 +204,61 @@ function mountArena() {
 }
 const arenaCast: Array<{ model: CharacterModel; running: boolean }> = [];
 
-if (piece === 'character') {
+/**
+ * Frame a SINGLE arena prop, at gameplay camera pitch, with a character beside it
+ * for scale.
+ *
+ * Judging the whole arena at once means a critic averages everything and the score
+ * is dragged by whatever is weakest, so no individual element ever gets credit for
+ * improving. Isolating one element per critic loop — which is what the original
+ * brief asked for — gives tight, attributable feedback instead.
+ *
+ * Every cover prop group is named `cover:<kind>` by the arena's single addCover()
+ * choke point, so this needs no cooperation from the arena module.
+ */
+function mountProp() {
+  arena = createKitchenArena();
+  const built = arena.build();
+  stage.scene.add(built);
+
+  const kind = params.get('kind') ?? 'stove_island';
+  let target: THREE.Object3D | null = null;
+  built.traverse((o) => {
+    if (!target && o.name === `cover:${kind}`) target = o;
+  });
+  if (!target) {
+    label.textContent = `no prop named cover:${kind}`;
+    stage.rig.snapTo(0, 0);
+    return;
+  }
+
+  const box = new THREE.Box3().setFromObject(target);
+  const centre = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+
+  // Put a character beside it so the critic can judge scale and "does this read as
+  // cover I could hide behind" rather than guessing at an object floating alone.
+  if (params.get('chars') !== '0') {
+    const m = createCharacter('hamburger');
+    m.root.position.set(centre.x + size.x * 0.5 + 1.1, 0, centre.z + size.z * 0.35);
+    m.root.rotation.y = -Math.PI * 0.35;
+    m.play('idle');
+    arenaCast.push({ model: m, running: false });
+    stage.scene.add(m.root);
+  }
+
+  const spanMetres = Math.max(size.x, size.z) + 4.2;
+  stage.rig.frameMode = 'ground';
+  stage.rig.viewWidthUnits = spanMetres / 0.05;
+  stage.rig.pitchDeg = params.has('pitch') ? Number(params.get('pitch')) : 46;
+  stage.rig.snapTo(centre.x, centre.z);
+  stage.lighting.focus(centre.x, centre.z, 16);
+  label.textContent = `prop · ${kind}`;
+}
+
+if (piece === 'prop') {
+  mountProp();
+} else if (piece === 'character') {
   mountCharacter(subjectId);
   label.textContent = `${CHARACTERS[subjectId]?.name ?? subjectId} · ${anim}`;
 } else if (piece === 'roster') {
