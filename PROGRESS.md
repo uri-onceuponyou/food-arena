@@ -3,51 +3,145 @@
 Real-time 3D brawler in Three.js, rebuilding the 2D prototype's execution at the quality
 bar of **Brawl Stars** and **Zooba**.
 
-> **Resuming a session? Read this file and `git log` first, before anything else.**
-> Everything below reflects committed, pushed state. Do not redo a piece marked done.
+> **Resuming? Read this file and `git log` first.** Everything below reflects committed,
+> pushed state. Do not redo anything marked done.
 
 Remote: https://github.com/uri-onceuponyou/food-arena (auth works; push freely)
 Live progress page: https://claude.ai/code/artifact/e2831790-d411-476a-97ae-9245211d56f7
 
 ---
 
-## How to get running
+## THE WORKING MODEL — per-element critic loops
 
-```bash
-npm install
-npm run dev                 # http://localhost:5173  (MUST be running for screenshots)
-npx tsc --noEmit            # must stay clean
-node src/game/sim.test.mjs  # must stay 47/47
-```
+Uri's direction: **decompose everything to its smallest parts. One agent owns each
+element and runs its own build → critique → fix loop until an independent critic scores
+it 7/10.** Plus a periodic whole-arena scan to check the parts still add up.
 
-Screenshots (~2s each — **always run in the foreground**, never background them):
-```bash
-node tools/shoot.mjs --char donut --out-dir shots/donut/rN         # 13-shot review set
-node tools/shoot.mjs --url "http://localhost:5173/preview.html?piece=arena&t=2.4&shot=1" \
-  --out shots/arena/rN/gameplay.png --w 1300 --h 820
-node tools/compare.mjs --tile "a.png,b.png" --labels "a,b" --cols 2 --out sheet.png
-node tools/review.mjs --ours <png> --category character|gameplay --out shots/review/x  # blind A/B
-```
+This replaced whole-artefact judging, which had stalled: a critic scoring an entire
+arena averages everything, so the score is dragged by the weakest part and no individual
+improvement ever gets credit.
 
-Preview harness: `preview.html?piece=character|roster|arena&id=<id>&anim=<state>&yaw=<deg>&t=<sec>&shot=1`
-(`t` freezes animation deterministically; `chars=0` empties the arena; `tx`/`ty` re-aim the arena camera.)
+### Rules for running an element loop
+
+1. One agent owns one FILE SET. Parallel agents in the same file clobber each other —
+   the single hardest constraint, and why `kitchen.ts` is being split.
+2. Each round: improve → screenshot → **read the screenshot yourself** → build a blind
+   packet with `tools/review.mjs` → spawn a **FRESH** critic subagent → act on its named
+   fix → loop. Cap at 5 rounds.
+3. **Never reuse a critic.** A fresh one per round cannot anchor on its own earlier
+   verdicts.
+4. Tell the critic what to ignore: our shots may lack the HUD (preview harness), and are
+   full-body on a plain backdrop where references are often portrait crops. Those are
+   capture artifacts, not quality — say so explicitly or the score is measuring framing.
+5. Builder self-scores are NOT verdicts. They have run 2–4 points above independent
+   critics all project.
+
+### Element scoreboard
+
+| Element | Owner files | Status |
+|---|---|---|
+| **HUD** | `src/ui/hud.ts` | ✅ **Beat the shipped reference in a blind test** — critic scored the shipped side 5/10 and ours higher |
+| Lighting & post | `src/render/lighting.ts`, `stage.ts` | 5/10 after 5 rounds, capped |
+| Combat VFX | `src/game/vfx.ts` | loop running |
+| Arena (whole) | `src/arena/*` | 4/10 — being split into per-element modules |
+| Characters (whole) | `src/characters/*` | **PARKED at 4/10** — do not resume unless asked |
+
+### Score histories
+
+**Arena (whole):** 2/10 (unfair test — my error: empty arena, cropped, no characters) →
+7/10 self-scored (untested) → **3/10** first fair test → 4 → 5 → 4 → 4. Plateaued.
+
+**Characters (whole):** 3 → 4 → 4 → 4 → 4. Parked. What moved it: changing limb
+TOPOLOGY and where the FACE LIVES. What didn't: colour and proportion changes. A
+full-body-reference experiment was run to test whether the plateau was a framing
+artifact — **no score change**, so it was parked, not adopted.
+
+### Arena element loops — queued, blocked on the split
+
+`kitchen.ts` (2,495 lines) is being split into `props/counters.ts`, `props/storage.ts`,
+`props/smallProps.ts`, `floor.ts`, `hazards.ts`, `ambient.ts`, `shared.ts`. The split
+must be **behaviour-preserving**, proven by a numeric per-pixel diff of before/after
+renders (deterministic: frozen `t`, seeded texture LCG).
+
+Once landed, fan out one agent per module. Isolate a single prop with
+`preview.html?piece=prop&kind=<kind>` — gameplay pitch, character beside it for scale.
+Kinds: `stove_island prep_counter sink_counter fryer_counter freezer supply_barrel
+produce_crate_tall herb_crate flour_sacks stacked_pots spice_cart`.
+
+**Known cross-element conflict to resolve there:** `kitchen.ts` bakes its own soft radial
+cast-shadow decal under every prop. The lighting loop REGRESSED to 3/10 in one round
+because widening SSAO stacked a third soft darkening layer on top of that decal AND the
+real shadow map — a critic read the mush as one directionless blob. Now that real shadows
+are crisp, those decals are likely redundant and harmful. **Test removing them.** This is
+exactly what the whole-arena scan exists to catch: element owners optimising locally can
+fight each other.
 
 ---
 
-## Standing rules
+## THE PATTERN THAT KEEPS COSTING TIME
 
-- **`src/game/rules.ts` is the frozen design.** Import every gameplay constant from it;
-  never hardcode one. Uri later authorised deviating *where it demonstrably raises
-  quality* — deviations must be deliberate and recorded in the commit message.
-- **Judge rendered pixels, never descriptions.** Render it, `Read` the PNG, look.
-- **Builder self-scores are not verdicts.** Builders self-score 7–8.5/10; the independent
-  critic scored a character 4/10 and the arena 2/10. Only the critic's number counts.
-- **Give the critic a fair test.** The 2/10 arena verdict was partly my fault — I sent an
-  empty arena, cropped, with no characters, against reference frames full of brawlers.
-- **`reference/prototypes/` is gitignored and must never be published.** It was stripped
-  from all history (which also removed a Supabase key committed inside
-  `multiplayer-position-test.html`). Uri restored the files locally.
-- **One agent per file.** Parallel agents editing a shared file will clobber each other.
+**When a critic says "X isn't there", check whether X is rendering and INVISIBLE before
+concluding it is missing.** True cause three separate times:
+
+1. Sesame seeds placed at a mesh's front landed on its hidden back face — the mesh is
+   flipped 180° about X, which negates Z.
+2. Contact-shadow decals rendered at y=0.011 while floor tiles' top faces sit at y=0.015
+   — buried inside the floor, visible only through grout gaps.
+3. The HUD cooldown wipe was dark-on-dark against a dark card. Three critics reported
+   "no visible cooldown" across three rounds before it was root-caused.
+
+Related: arena textures were wired correctly and still invisible, because ±5–10% value
+swings get crushed once multiplied against dark saturated bases and pushed through the
+contrast pass. Needed 0.5–0.6 depth.
+
+## Other hard-won traps
+
+- `ChibiRig.headCentreY` assumes a head mass extending ~±R about its origin.
+  Non-spherical masses float or sink. Hamburger/HotDog anchor their underside at ≈ −0.90R.
+- `dressTorso`'s `size.h` is measured off the rig's DEFAULT torso bbox, ~92% of nominal
+  because that sphere tapers before its poles. Caused Taco's head gap, which *looked*
+  like a `headCentreY` problem and wasn't.
+- Lathe profiles MUST run bottom→top or normals invert and the mesh renders near-black.
+  Bit six characters at once.
+- Composing `rotation.x` then `rotation.y` does NOT rotate a flat plane about world up —
+  Euler angles are intrinsic and sequential, so the plane tips edge-on and vanishes from
+  a top-down camera. Use explicit quaternions.
+- Irradiance summed to ~3.7–3.8× before any material multiply, clipping pale surfaces to
+  white. A hemisphere fill with both endpoints near-full-bright acts as flat ambient and
+  destroys directional falloff.
+- Large flat single-quad mats have ONE normal — no lighting can give them internal
+  top-vs-side gradient. That needs baked texture/AO.
+
+---
+
+## How to run things
+
+```bash
+npm run dev                 # http://localhost:5173 — MUST be running for screenshots
+npx tsc --noEmit            # must stay clean
+node src/game/sim.test.mjs  # must stay 51/51
+```
+
+Screenshots (~2s; **always foreground** — backgrounding them stalled several agents):
+```bash
+node tools/shoot.mjs --char donut --out-dir shots/donut/rN
+node tools/shoot.mjs --url "<preview or game url>" --out x.png --w 1300 --h 820
+node tools/compare.mjs --tile "a.png,b.png" --labels "a,b" --cols 2 --out sheet.png
+node tools/review.mjs --ours <png> --category character|gameplay --out shots/review/x --n 2
+```
+
+Preview harness — `preview.html?`:
+- `piece=character&id=<id>&anim=<state>&yaw=<deg>&t=<sec>&shot=1&fill=<0-1>`
+- `piece=roster` — all 11 lined up
+- `piece=arena&t=<sec>&tx=<worldX>&ty=<worldY>&view=overview|gameplay&chars=0`
+- `piece=prop&kind=<kind>` — single prop, gameplay pitch, character for scale
+
+Real game — `/?simSpeed=<n>&player=<id>&enemy=<id>`. Static shots often miss brief
+effects; **script Playwright** to drive input and wait on a condition instead.
+
+**Judge the arena from PLAYER-CENTRED views** (`tx`/`ty`), never the arena centre.
+Centring on the pot filled the frame with the hazard and pushed cover out of shot, which
+depressed several rounds of scores for reasons that were my framing, not the arena.
 
 ---
 
@@ -55,188 +149,43 @@ Preview harness: `preview.html?piece=character|roster|arena&id=<id>&anim=<state>
 
 | Path | Role |
 |---|---|
-| `src/game/rules.ts` | Frozen design: 11 characters, every weapon, all balance numbers |
-| `src/game/{sim,state,combat,ai,movement}.ts` | Pure simulation, no Three.js. `stepMatch()` is the entry point; returns a typed event stream |
-| `src/game/sim.test.mjs` | 47 assertions, plain Node, no framework |
-| `src/render/{stage,camera,lighting,toon}.ts` | Renderer + post FX, camera rig, 3-point lighting, materials/outlines |
-| `src/characters/rig.ts` | **Shared ChibiRig** — body plan + all motion. Characters author only food mass, face, palette |
-| `src/characters/<id>.ts` | One file per character. `donut.ts` is the reference implementation |
-| `src/arena/kitchen.ts` | The arena: geometry, cover boxes, hazards, ambient life |
-| `src/preview.ts` | Isolated deterministic previews of any piece |
-| `tools/{shoot,compare,review,progress}.mjs` | Screenshots, contact sheets, blind A/B packets, progress page |
+| `src/game/rules.ts` | Frozen design — 11 characters, every weapon, all balance numbers |
+| `src/game/{sim,state,combat,ai,movement}.ts` | Pure simulation, no Three.js. `stepMatch()` returns a typed event stream |
+| `src/game/sim.test.mjs` | 51 assertions, plain Node |
+| `src/game/match.ts` | `GameSession` — the only place that talks to both sim and renderer |
+| `src/game/{input,vfx}.ts` | DOM input; pooled VFX driven off sim events |
+| `src/ui/hud.ts` | DOM/CSS HUD over the canvas |
+| `src/render/*` | Renderer, post FX, camera rig, lighting, materials |
+| `src/characters/rig.ts` | Shared ChibiRig — body plan, proportions, stance, motion |
+| `src/characters/<id>.ts` | One file per character; `donut.ts` is the reference pattern |
+| `src/arena/*` | Arena geometry, cover, hazards, textures, ambient |
+| `tools/*.mjs` | Screenshots, contact sheets, blind A/B packets, progress page |
 
-**Art direction** (verified against real reference, and it contradicts the brief's prose):
-Brawl Stars is **not** cel-shaded. It is smooth-shaded, hyper-saturated, high-key, with soft
-specular highlights — moulded vinyl toys — and almost no ink outline. `toonMat` therefore
-returns a `MeshStandardMaterial`; there is no filmic tonemapping (it desaturates); IBL +
-SSAO are on. See the header of `src/render/toon.ts`.
-
----
-
-## Status
-
-### Foundation — all done
-Scaffold · frozen design spec · render core (IBL, SSAO, high-key rig, saturation grade) ·
-preview harness · headless-WebGL screenshots · blind A/B compositor · 21 curated reference
-plates (`reference/images/curated/`, gitignored) · live progress page.
-
-### Characters — 11 of 11 modelled, all on the shared rig
-| Character | State | Note |
-|---|---|---|
-| Hamburger | ✅ | Richest food mass in the cast; bottom bun is its dressed torso |
-| Donut | ✅ | Reference implementation; dressed torso |
-| Taco | ✅ | Two-panel V-fold shell (a flat panel vanished edge-on) |
-| Burrito | ✅ | Up-facing opening so it reads under the steep camera |
-| Egg | ✅ | Torso built from the same `eggSurface` math as the head |
-| Lollipop | ✅ | Uses the rig's neck-to-head gap AS the stick |
-| Pizza | ✅ | Extruded wedge, crust rim hugging the dough's own boundary |
-| Sushi | ✅ | Two lathes sharing one seam vertex; overhanging salmon lid |
-| Soup | ✅ | Lathed bowl, ladle prop, deliberately no mouth |
-| Water Bottle | ✅ | Real transparency; water opaque inside a transmissive shell |
-| Hot Dog | ✅ | Mustard zigzag pushed along the sausage's true surface normal |
-
-### World & systems
-| Piece | State |
-|---|---|
-| Kitchen arena | ✅ round 2 — 7/10 (was 2/10). Danger zone is a glow ring, palette broken out of monochrome |
-| Match simulation | ✅ 47/47 tests |
-| Playable match (glue + HUD) | ✅ playable end-to-end |
-| Ability VFX | ⬜ not started |
-| Camera / game feel | ⬜ not started |
-| Menus (roster, results) | ⬜ not started |
+**Art direction** (verified against reference; contradicts the brief's own prose):
+Brawl Stars is **not** cel-shaded — it is smooth-shaded, hyper-saturated, high-key, with
+soft specular and almost no ink outline. `toonMat` returns a `MeshStandardMaterial`; no
+filmic tonemapping (it desaturates); IBL + SSAO on.
 
 ---
 
-## THE CRITIC LOOP — this is the active work
+## Standing constraints
 
-**CURRENT TARGET: get the ARENA to 6–7/10.** Uri redirected here after the character
-loop plateaued. Characters are PARKED at 4/10 — do not resume them without being asked. Run `tools/review.mjs` to build blind A/B packets, then spawn a
-fresh critic agent (no memory of prior rounds) to judge them.
+- `src/game/rules.ts` is the frozen design. Import every gameplay constant; never
+  hardcode one. Uri later authorised deviating *where it demonstrably raises quality* —
+  deviations must be deliberate and recorded in the commit message.
+- **Judge rendered pixels, never descriptions.** Render it, Read the PNG, look.
+- `reference/prototypes/` and `reference/images/` are gitignored and must never be
+  published. Prototypes were stripped from all history, which also removed a Supabase key
+  that had been committed inside `multiplayer-position-test.html`.
+- Verify before committing: `tsc` clean AND sim 51/51. I once pushed a broken tree by
+  letting `git add -A` sweep in a file an agent was mid-edit on.
 
-### Score history — always compare like-for-like
+## Next actions
 
-Same three characters (Hamburger / Water Bottle / Soup), same method, every round.
-
-| Round | Score | What the critic named |
-|---|---|---|
-| 1 | **3/10** | "Every character reuses the same snowman-body-plus-ball-joints skeleton with a different head glued on." Faces reading as errors (Soup's mismatched pupils, Bottle's uneven eye heights). No rim light / value steps. |
-| 2 | **4/10** | Still "one templated body reskinned with different heads" — because rounds had changed limb COLOUR and PROPORTION, not limb TOPOLOGY. Two characters had no mouth at all. |
-| 3 | **4/10** | Same complaint again. Faces "pasted on, not integrated" — Bottle's eyes floating on stalks above the cap, Soup's face on a neck BELOW the bowl. |
-| 4 | **4/10** | **RETRACTED the shared-limb complaint**: "The three do NOT share literally copy-pasted limb geometry ... three different constructions ... real, separate limb-sculpting effort per character." New gaps: no costume/wardrobe layer; flat materials with no secondary specular or texture; identical dead-front pose across the cast; Hamburger's held prop illegible. |
-| 5 | in progress | Costume/accessory layer + per-character `RigStance` + material fidelity. |
-
-### What actually moved the needle
-
-- Colour and proportion changes did NOT move the score (rounds 2–3, flat at 4).
-- Changing limb **topology** and **where the face lives** DID — it retired the
-  complaint that had dominated three rounds.
-- **Lesson: when the score stalls, the fix is structural, not cosmetic.**
-
-### ARENA loop (the active one)
-
-| Round | Score | Notes |
-|---|---|---|
-| 1 | **2/10** | **Unfair test — my error.** I sent an empty arena, cropped tight on the hazard, with NO characters, against reference frames full of brawlers. Its substantive points still stood. |
-| 2 | 7/10 self-scored | Danger zone changed from an opaque disc to a glow ring; palette broken out of monochrome. Never independently re-tested at this point. |
-| 3 (fair) | **3/10** | First like-for-like test: our in-game view WITH characters vs Brawl Stars gameplay frames WITH characters. No framing confound. |
-| 4 | 6/10 self-scored, **NOT yet independently tested** | Root-caused the missing AO (see below), added top rims / backsplashes / kick bands for vertical relief, floor dressing. |
-
-**NEXT ACTION: run the independent arena critic on `shots/arena/r20/gameplay.png`
-against the 3/10 baseline.** Use `node tools/review.mjs --ours shots/arena/r20/gameplay.png
---category gameplay --out shots/review/arena-rN --n 3`, then a FRESH critic agent.
-The 6/10 is the builder's own self-score and does not count.
-
-**Round 3's finding is functional, not aesthetic, and is the one that matters:**
-> "The cover objects have no height, no AO, no shadow separation from the floor, so a
-> player cannot tell at a glance whether they block movement or line of sight. In a
-> top-down arena brawler, that's a gameplay-legibility bug, not just a polish gap, and
-> it alone caps the score regardless of how appealing the palette is."
-
-Other findings worth keeping:
-- It rated our CHARACTER art "noticeably closer to par than the environment art" — the
-  arena is now the weaker half of the game.
-- The pot's apparent dominance is "a detail-density illusion, not a scale error."
-  **Do not shrink the pot** — give the rest of the frame something to compete with.
-- Praised and must not regress: the pot prop itself ("close to shippable quality on its
-  own") and the pale floor keeping characters visually separated ("a real, defensible
-  design choice for competitive clarity").
-
-Arena comparisons are inherently FAIRER than the character ones — top-down gameplay
-against top-down gameplay, same subject, same framing. Use `--category gameplay`.
-
-### CHARACTER loop — parked at 4/10
-
-Five rounds: 3 → 4 → 4 → 4 → 4. What moved it and what didn't is recorded above.
-
-A sixth experiment tested whether the plateau was a methodology artifact: reference
-crops were mostly tight PORTRAIT close-ups while ours are full-body, so critics were
-partly rewarding framing. Full-body reference crops were curated
-(`reference/images/curated/character_fullbody/`, and a fair subset in
-`fullbody_fair/` excluding Kung Fu Panda crossover assets, which are DreamWorks
-film-grade and would raise the bar unfairly). Result: **Hamburger scored 4/10 — no
-change.** Per Uri, the mechanism is parked, not adopted.
-
-Two reference sets were downloaded and REJECTED for lowering the bar, which Uri
-explicitly forbade: Food Gang (2D flat vector — on-subject but lower fidelity than
-ours) and Cats&Soup (2D painted idle game). Comparable-subject 3D references at
-equal-or-higher quality barely exist.
-
-Sharpest un-actioned character findings, if the loop ever resumes:
-1. Pose is the named #1 gap — "a static, symmetrical front-on mascot reads as a
-   placeholder/turntable render, not hero art, regardless of how good the shading gets."
-2. "No genuine dark value anywhere on the model" — wants a real core-shadow COLOUR,
-   not a darker tint of the same hue.
-3. Sesame seeds "read as a copy-paste array" — no scale/rotation variance.
-4. Our own preview presentation was penalised: "a placeholder two-tone sky background
-   with a flat ellipse shadow." That is the harness, not the art — cheap to fix.
-
-### Honest read on reaching 8
-
-Four rounds bought one point. The comparison images are hand-authored characters with
-fabric folds, fur shading and sculpted brow ridges, often shown as tight portrait
-crops that flatter that detail. 6–7 looks reachable through wardrobe, materials and
-posing. 8 is possible but not assured. Report real verdicts, including flat rounds —
-do not redefine success.
-
-### Running a round
-
-1. Render heroes: `preview.html?piece=character&id=<id>&anim=idle&yaw=15&t=1.5&shot=1&fill=0.78` at 760x950.
-2. `node tools/review.mjs --ours shots/<...>.png --category character --out shots/review/rN-<id> --n 1` per character.
-3. Spawn a FRESH critic agent (never reuse one — it must not remember prior rounds),
-   show it ONLY the sheet PNGs, forbid it from opening any `.json`.
-4. Tell it to judge design/execution, NOT framing — our renders are full-body on a
-   plain backdrop, theirs are often portrait crops, and that difference is not a
-   quality signal.
-5. Read the answer keys yourself afterward to confirm the shuffle held.
-6. Commit the verdict verbatim in the message. Feed the named gaps into the next round.
-
-## Next actions, in priority order
-
-1. **Land critic round 5** — costume/accessory layer and per-character stances are
-   in flight for all eleven. Then re-run the critic and record the score.
-2. **Material fidelity** — the critic's standing gap: "every material is a single
-   flat colour with no secondary specular or texture." Wants ceramic glaze specular,
-   glass refraction, a real speckled sesame texture rather than five floating ovals.
-3. **Verify the game actually plays well** — VFX and juice landed but nobody has
-   played a full match at real framerate and judged feel.
-4. **Arena** — sits at 7/10 from its own critic pass; not re-tested since.
-5. **Menus** — roster/character select and results screens do not exist.
-
-## Known issues
-
-- `ChibiRig.headCentreY` assumes a head mass extending ~±R about its origin.
-  Non-spherical masses float or sink. Hamburger/HotDog anchor their own underside at
-  about -0.90R; Taco needed a different fix (see below).
-- `dressTorso`'s `size.h` is measured off the rig's DEFAULT torso bounding box, which
-  is only ~92% of nominal because that sphere tapers before its poles. Character
-  torsos built to that figure can sit lower than expected — this caused Taco's head
-  gap, which looked like a headCentreY problem and was not.
-- Meshes flipped 180° about X to hang downward negate Z, so decals placed at a
-  surface's "front" land on the hidden back face (bit Hamburger's mitt seeds).
-- Lathe profiles MUST run bottom→top or normals invert and the mesh renders near
-  black (bit six characters at once).
-- `donut.ts`, `pizza.ts`, `egg.ts` carry local `dressTorso` copies from before the rig
-  exposed one. Could be de-duplicated.
-- Blindness is imperfect: a critic that recognises Brawl Stars/Zooba identifies the
-  reference by IP, not by quality. Critiques remain specific and actionable.
-- Arena AI: `moveToward` now slides around cover; regression test covers it.
+1. Land the arena split (behaviour-preserving, per-pixel diff proven).
+2. Fan out one agent per arena module, each looping to 7/10.
+3. Wire the periodic whole-arena scanner as the real scoreboard — element scores will
+   read higher than the whole, because a critic judging one barrel isn't weighing
+   composition or density. Optimising the easier metric is the risk to avoid.
+4. Resolve the authored-shadow-decal vs real-shadow conflict.
+5. Nobody has played a full match at real framerate and judged how it FEELS.

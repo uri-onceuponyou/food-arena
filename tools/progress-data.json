@@ -1,177 +1,146 @@
 {
   "title": "Food Fight Arena \u2014 Build",
-  "subtitle": "3D rebuild in Three.js, judged against Brawl Stars & Zooba",
+  "subtitle": "Per-element critic loops \u2014 each part built and judged independently",
   "active": {
-    "piece": "Playable match + final characters",
-    "detail": "Simulation, arena and 10 of 11 characters are done and pushed. Wiring the tested simulation to the renderer into a playable match; Soup is the last stub; Hamburger is being ported to the shared rig.",
+    "piece": "Per-element loops",
+    "detail": "Every element now has its own owner agent running its own build-critique-fix loop to 7/10, judged by a fresh independent critic each round. HUD has already beaten the shipped reference in a blind test. The arena is being split into per-element modules so its parts can loop in parallel too.",
     "round": 1
   },
   "groups": [
     {
-      "name": "Foundation",
+      "name": "Elements \u2014 own critic loop",
       "pieces": [
         {
-          "id": "F1",
-          "name": "Project scaffold",
+          "id": "E1",
+          "name": "HUD",
           "state": "done",
-          "note": "Vite + TS + Three 0.180, typecheck clean"
+          "note": "BEAT the shipped reference in a blind test"
         },
         {
-          "id": "F2",
-          "name": "Frozen design spec",
+          "id": "E2",
+          "name": "Lighting & post",
           "state": "done",
-          "note": "All 11 characters, every weapon, all balance numbers"
+          "note": "5/10 after 5 rounds; found irradiance clipping at 3.7x"
         },
         {
-          "id": "F3",
-          "name": "Render core",
-          "state": "done",
-          "note": "Vinyl-toy shading, high-key rig, thin outline, saturation grade (no filmic tonemap)"
+          "id": "E3",
+          "name": "Combat VFX",
+          "state": "active",
+          "note": "Projectiles, melee arcs, impacts"
         },
         {
-          "id": "F4",
-          "name": "Preview harness",
-          "state": "done",
-          "note": "Isolated, deterministic renders per piece"
+          "id": "E4",
+          "name": "Arena split",
+          "state": "active",
+          "note": "2,495-line file into per-element modules"
         },
         {
-          "id": "F5",
-          "name": "Screenshot pipeline",
-          "state": "done",
-          "note": "Headless WebGL verified producing real pixels"
+          "id": "E5",
+          "name": "Arena: floor",
+          "state": "queued",
+          "note": "Blocked on the split"
         },
         {
-          "id": "F6",
-          "name": "Blind A/B compositor",
-          "state": "done",
-          "note": "Shuffles ours/reference into A and B; key held separately"
+          "id": "E6",
+          "name": "Arena: counters",
+          "state": "queued",
+          "note": "Blocked on the split"
         },
         {
-          "id": "F7",
-          "name": "Reference imagery",
-          "state": "done",
-          "note": "21 verified-clean crops, marketing text removed so A/B stays blind"
+          "id": "E7",
+          "name": "Arena: storage props",
+          "state": "queued",
+          "note": "Blocked on the split"
         },
         {
-          "id": "F8",
-          "name": "Live progress page",
-          "state": "done",
-          "note": "This page"
+          "id": "E8",
+          "name": "Arena: small props",
+          "state": "queued",
+          "note": "Blocked on the split"
+        },
+        {
+          "id": "E9",
+          "name": "Arena: hazards",
+          "state": "queued",
+          "note": "Blocked on the split"
+        },
+        {
+          "id": "E10",
+          "name": "Arena: ambient",
+          "state": "queued",
+          "note": "Blocked on the split"
+        },
+        {
+          "id": "E11",
+          "name": "Whole-arena scanner",
+          "state": "queued",
+          "note": "The real scoreboard \u2014 checks the parts still add up"
         }
       ]
     },
     {
-      "name": "Characters",
+      "name": "Built and working",
+      "pieces": [
+        {
+          "id": "B1",
+          "name": "Frozen design spec",
+          "state": "done",
+          "note": "11 characters, every weapon, all balance numbers"
+        },
+        {
+          "id": "B2",
+          "name": "Match simulation",
+          "state": "done",
+          "note": "51/51 tests, pure logic, typed event stream"
+        },
+        {
+          "id": "B3",
+          "name": "Playable match",
+          "state": "done",
+          "note": "Input, camera, VFX, HUD, restart"
+        },
+        {
+          "id": "B4",
+          "name": "All 11 characters",
+          "state": "done",
+          "note": "Shared rig, per-character limbs, proportions, stances, costume"
+        },
+        {
+          "id": "B5",
+          "name": "Kitchen arena",
+          "state": "done",
+          "note": "22+ cover boxes, hazards, textures, ambient life"
+        },
+        {
+          "id": "B6",
+          "name": "Render core",
+          "state": "done",
+          "note": "IBL, SSAO, rim light, saturation grade"
+        },
+        {
+          "id": "B7",
+          "name": "Critic harness",
+          "state": "done",
+          "note": "Blind A/B packets with the answer key held separately"
+        }
+      ]
+    },
+    {
+      "name": "Parked",
       "pieces": [
         {
           "id": "P1",
-          "name": "Hamburger",
-          "state": "active",
-          "note": "Porting to the shared rig \u2014 last character off-plan"
-        },
-        {
-          "id": "P2",
-          "name": "Donut",
-          "state": "done",
-          "note": "Reference implementation of the shared ChibiRig"
-        },
-        {
-          "id": "P3",
-          "name": "Taco",
-          "state": "done",
-          "note": "Two-panel V-fold shell"
-        },
-        {
-          "id": "P4",
-          "name": "Burrito",
-          "state": "done",
-          "note": "On the rig"
-        },
-        {
-          "id": "P5",
-          "name": "Egg",
-          "state": "done",
-          "note": "Torso from the same eggSurface math as the head"
-        },
-        {
-          "id": "P6",
-          "name": "Lollipop",
-          "state": "done",
-          "note": "On the rig"
-        },
-        {
-          "id": "P7",
-          "name": "Pizza",
-          "state": "active",
-          "note": "Round 1 on the rig"
-        },
-        {
-          "id": "P8",
-          "name": "Sushi",
-          "state": "done",
-          "note": "On the rig"
-        },
-        {
-          "id": "P9",
-          "name": "Soup",
+          "name": "Character quality loop",
           "state": "queued",
-          "note": "LAST STUB \u2014 still a placeholder sphere"
-        },
-        {
-          "id": "P10",
-          "name": "Water Bottle",
-          "state": "done",
-          "note": "Real transparency; water opaque inside a transmissive shell"
-        },
-        {
-          "id": "P11",
-          "name": "Hot Dog",
-          "state": "done",
-          "note": "Mustard zigzag on the true surface normal"
-        }
-      ]
-    },
-    {
-      "name": "World & feel",
-      "pieces": [
-        {
-          "id": "P12",
-          "name": "Kitchen arena",
-          "state": "done",
-          "note": "Round 2 \u2014 7/10, up from 2/10"
-        },
-        {
-          "id": "P13",
-          "name": "Ability VFX",
-          "state": "queued",
-          "note": "Sim already emits the events to subscribe to"
-        },
-        {
-          "id": "P14",
-          "name": "Camera & juice",
-          "state": "queued",
-          "note": "Hit stop, shake, damage numbers"
-        },
-        {
-          "id": "P15",
-          "name": "HUD & menus",
-          "state": "active",
-          "note": "HUD landing with the playable match"
-        },
-        {
-          "id": "P16",
-          "name": "Gameplay integration",
-          "state": "active",
-          "note": "Wiring sim to renderer"
+          "note": "PARKED at 4/10 after five rounds \u2014 resume only if asked"
         }
       ]
     }
   ],
   "notes": [
-    "The game design is frozen. Damage, cooldowns, ranges, speeds and match structure are transcribed verbatim from the 2D prototype and must not be retuned.",
-    "The arena is the one sanctioned exception \u2014 layout and props are open, as long as a central hazard, physical cover and a slowing hazard survive.",
-    "Every piece is judged on rendered pixels in a blind A/B against real Brawl Stars and Zooba stills, never on a description of the work.",
-    "Art direction was corrected mid-flight: the brief said cel-shaded, but the reference plates show smooth-shaded high-key vinyl-toy surfaces with almost no outline. The brief says the bar wins over its own prose.",
-    "A shared chibi rig now underpins every character: the food is the head and identity mass, the rig supplies limbs, poses and one motion vocabulary so the cast reads as one production."
+    "Every element is judged by a FRESH critic each round, so it cannot anchor on its own earlier verdicts.",
+    "Builder self-scores are not verdicts \u2014 they have run 2-4 points above independent critics all project.",
+    "When a critic says \"X is not there\", check whether X is rendering and invisible before concluding it is missing. That has been the true cause three separate times.",
+    "Element scores will read higher than the whole, because a critic judging one prop is not weighing composition. The whole-arena scan stays the real measure."
   ]
 }

@@ -105,7 +105,7 @@
     overflow: hidden; border: 1px solid var(--line);
   }
   .meter__fill {
-    height: 100%; width: 71%;
+    height: 100%; width: 47%;
     background: linear-gradient(90deg, var(--lettuce), var(--accent));
     border-radius: 99px;
   }
@@ -221,227 +221,187 @@
   <header class="masthead">
     <span class="eyebrow">Live build status</span>
     <h1>Food Fight Arena — Build</h1>
-    <p class="sub">3D rebuild in Three.js, judged against Brawl Stars &amp; Zooba</p>
+    <p class="sub">Per-element critic loops — each part built and judged independently</p>
   </header>
 
   <div class="meter">
     <div class="meter__head">
-      <span>17 of 24 pieces approved</span>
-      <span>71%</span>
+      <span>9 of 19 pieces approved</span>
+      <span>47%</span>
     </div>
     <div class="meter__track"><div class="meter__fill"></div></div>
   </div>
 
   <div class="now">
     <span class="now__label"><span class="pulse"></span>Now building · round 1</span>
-    <span class="now__piece">Playable match + final characters</span>
-    <p class="now__detail">Simulation, arena and 10 of 11 characters are done and pushed. Wiring the tested simulation to the renderer into a playable match; Soup is the last stub; Hamburger is being ported to the shared rig.</p>
+    <span class="now__piece">Per-element loops</span>
+    <p class="now__detail">Every element now has its own owner agent running its own build-critique-fix loop to 7/10, judged by a fresh independent critic each round. HUD has already beaten the shipped reference in a blind test. The arena is being split into per-element modules so its parts can loop in parallel too.</p>
   </div>
 
   <section>
-    <h2>Foundation</h2>
+    <h2>Elements — own critic loop</h2>
     <ul class="pieces">
       <li class="piece piece--done">
-      <span class="piece__id">F1</span>
+      <span class="piece__id">E1</span>
       <span class="piece__body">
-        <span class="piece__name">Project scaffold</span>
-        <span class="piece__note">Vite + TS + Three 0.180, typecheck clean</span>
+        <span class="piece__name">HUD</span>
+        <span class="piece__note">BEAT the shipped reference in a blind test</span>
       </span>
       <span class="chip chip--done">approved</span>
     </li>
       <li class="piece piece--done">
-      <span class="piece__id">F2</span>
+      <span class="piece__id">E2</span>
+      <span class="piece__body">
+        <span class="piece__name">Lighting &amp; post</span>
+        <span class="piece__note">5/10 after 5 rounds; found irradiance clipping at 3.7x</span>
+      </span>
+      <span class="chip chip--done">approved</span>
+    </li>
+      <li class="piece piece--active">
+      <span class="piece__id">E3</span>
+      <span class="piece__body">
+        <span class="piece__name">Combat VFX</span>
+        <span class="piece__note">Projectiles, melee arcs, impacts</span>
+      </span>
+      <span class="chip chip--active">building</span>
+    </li>
+      <li class="piece piece--active">
+      <span class="piece__id">E4</span>
+      <span class="piece__body">
+        <span class="piece__name">Arena split</span>
+        <span class="piece__note">2,495-line file into per-element modules</span>
+      </span>
+      <span class="chip chip--active">building</span>
+    </li>
+      <li class="piece piece--queued">
+      <span class="piece__id">E5</span>
+      <span class="piece__body">
+        <span class="piece__name">Arena: floor</span>
+        <span class="piece__note">Blocked on the split</span>
+      </span>
+      <span class="chip chip--queued">queued</span>
+    </li>
+      <li class="piece piece--queued">
+      <span class="piece__id">E6</span>
+      <span class="piece__body">
+        <span class="piece__name">Arena: counters</span>
+        <span class="piece__note">Blocked on the split</span>
+      </span>
+      <span class="chip chip--queued">queued</span>
+    </li>
+      <li class="piece piece--queued">
+      <span class="piece__id">E7</span>
+      <span class="piece__body">
+        <span class="piece__name">Arena: storage props</span>
+        <span class="piece__note">Blocked on the split</span>
+      </span>
+      <span class="chip chip--queued">queued</span>
+    </li>
+      <li class="piece piece--queued">
+      <span class="piece__id">E8</span>
+      <span class="piece__body">
+        <span class="piece__name">Arena: small props</span>
+        <span class="piece__note">Blocked on the split</span>
+      </span>
+      <span class="chip chip--queued">queued</span>
+    </li>
+      <li class="piece piece--queued">
+      <span class="piece__id">E9</span>
+      <span class="piece__body">
+        <span class="piece__name">Arena: hazards</span>
+        <span class="piece__note">Blocked on the split</span>
+      </span>
+      <span class="chip chip--queued">queued</span>
+    </li>
+      <li class="piece piece--queued">
+      <span class="piece__id">E10</span>
+      <span class="piece__body">
+        <span class="piece__name">Arena: ambient</span>
+        <span class="piece__note">Blocked on the split</span>
+      </span>
+      <span class="chip chip--queued">queued</span>
+    </li>
+      <li class="piece piece--queued">
+      <span class="piece__id">E11</span>
+      <span class="piece__body">
+        <span class="piece__name">Whole-arena scanner</span>
+        <span class="piece__note">The real scoreboard — checks the parts still add up</span>
+      </span>
+      <span class="chip chip--queued">queued</span>
+    </li>
+    </ul>
+  </section>
+  <section>
+    <h2>Built and working</h2>
+    <ul class="pieces">
+      <li class="piece piece--done">
+      <span class="piece__id">B1</span>
       <span class="piece__body">
         <span class="piece__name">Frozen design spec</span>
-        <span class="piece__note">All 11 characters, every weapon, all balance numbers</span>
+        <span class="piece__note">11 characters, every weapon, all balance numbers</span>
       </span>
       <span class="chip chip--done">approved</span>
     </li>
       <li class="piece piece--done">
-      <span class="piece__id">F3</span>
+      <span class="piece__id">B2</span>
       <span class="piece__body">
-        <span class="piece__name">Render core</span>
-        <span class="piece__note">Vinyl-toy shading, high-key rig, thin outline, saturation grade (no filmic tonemap)</span>
+        <span class="piece__name">Match simulation</span>
+        <span class="piece__note">51/51 tests, pure logic, typed event stream</span>
       </span>
       <span class="chip chip--done">approved</span>
     </li>
       <li class="piece piece--done">
-      <span class="piece__id">F4</span>
+      <span class="piece__id">B3</span>
       <span class="piece__body">
-        <span class="piece__name">Preview harness</span>
-        <span class="piece__note">Isolated, deterministic renders per piece</span>
+        <span class="piece__name">Playable match</span>
+        <span class="piece__note">Input, camera, VFX, HUD, restart</span>
       </span>
       <span class="chip chip--done">approved</span>
     </li>
       <li class="piece piece--done">
-      <span class="piece__id">F5</span>
+      <span class="piece__id">B4</span>
       <span class="piece__body">
-        <span class="piece__name">Screenshot pipeline</span>
-        <span class="piece__note">Headless WebGL verified producing real pixels</span>
+        <span class="piece__name">All 11 characters</span>
+        <span class="piece__note">Shared rig, per-character limbs, proportions, stances, costume</span>
       </span>
       <span class="chip chip--done">approved</span>
     </li>
       <li class="piece piece--done">
-      <span class="piece__id">F6</span>
-      <span class="piece__body">
-        <span class="piece__name">Blind A/B compositor</span>
-        <span class="piece__note">Shuffles ours/reference into A and B; key held separately</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">F7</span>
-      <span class="piece__body">
-        <span class="piece__name">Reference imagery</span>
-        <span class="piece__note">21 verified-clean crops, marketing text removed so A/B stays blind</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">F8</span>
-      <span class="piece__body">
-        <span class="piece__name">Live progress page</span>
-        <span class="piece__note">This page</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-    </ul>
-  </section>
-  <section>
-    <h2>Characters</h2>
-    <ul class="pieces">
-      <li class="piece piece--active">
-      <span class="piece__id">P1</span>
-      <span class="piece__body">
-        <span class="piece__name">Hamburger</span>
-        <span class="piece__note">Porting to the shared rig — last character off-plan</span>
-      </span>
-      <span class="chip chip--active">building</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">P2</span>
-      <span class="piece__body">
-        <span class="piece__name">Donut</span>
-        <span class="piece__note">Reference implementation of the shared ChibiRig</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">P3</span>
-      <span class="piece__body">
-        <span class="piece__name">Taco</span>
-        <span class="piece__note">Two-panel V-fold shell</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">P4</span>
-      <span class="piece__body">
-        <span class="piece__name">Burrito</span>
-        <span class="piece__note">On the rig</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">P5</span>
-      <span class="piece__body">
-        <span class="piece__name">Egg</span>
-        <span class="piece__note">Torso from the same eggSurface math as the head</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">P6</span>
-      <span class="piece__body">
-        <span class="piece__name">Lollipop</span>
-        <span class="piece__note">On the rig</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-      <li class="piece piece--active">
-      <span class="piece__id">P7</span>
-      <span class="piece__body">
-        <span class="piece__name">Pizza</span>
-        <span class="piece__note">Round 1 on the rig</span>
-      </span>
-      <span class="chip chip--active">building</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">P8</span>
-      <span class="piece__body">
-        <span class="piece__name">Sushi</span>
-        <span class="piece__note">On the rig</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-      <li class="piece piece--queued">
-      <span class="piece__id">P9</span>
-      <span class="piece__body">
-        <span class="piece__name">Soup</span>
-        <span class="piece__note">LAST STUB — still a placeholder sphere</span>
-      </span>
-      <span class="chip chip--queued">queued</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">P10</span>
-      <span class="piece__body">
-        <span class="piece__name">Water Bottle</span>
-        <span class="piece__note">Real transparency; water opaque inside a transmissive shell</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-      <li class="piece piece--done">
-      <span class="piece__id">P11</span>
-      <span class="piece__body">
-        <span class="piece__name">Hot Dog</span>
-        <span class="piece__note">Mustard zigzag on the true surface normal</span>
-      </span>
-      <span class="chip chip--done">approved</span>
-    </li>
-    </ul>
-  </section>
-  <section>
-    <h2>World &amp; feel</h2>
-    <ul class="pieces">
-      <li class="piece piece--done">
-      <span class="piece__id">P12</span>
+      <span class="piece__id">B5</span>
       <span class="piece__body">
         <span class="piece__name">Kitchen arena</span>
-        <span class="piece__note">Round 2 — 7/10, up from 2/10</span>
+        <span class="piece__note">22+ cover boxes, hazards, textures, ambient life</span>
       </span>
       <span class="chip chip--done">approved</span>
     </li>
-      <li class="piece piece--queued">
-      <span class="piece__id">P13</span>
+      <li class="piece piece--done">
+      <span class="piece__id">B6</span>
       <span class="piece__body">
-        <span class="piece__name">Ability VFX</span>
-        <span class="piece__note">Sim already emits the events to subscribe to</span>
+        <span class="piece__name">Render core</span>
+        <span class="piece__note">IBL, SSAO, rim light, saturation grade</span>
+      </span>
+      <span class="chip chip--done">approved</span>
+    </li>
+      <li class="piece piece--done">
+      <span class="piece__id">B7</span>
+      <span class="piece__body">
+        <span class="piece__name">Critic harness</span>
+        <span class="piece__note">Blind A/B packets with the answer key held separately</span>
+      </span>
+      <span class="chip chip--done">approved</span>
+    </li>
+    </ul>
+  </section>
+  <section>
+    <h2>Parked</h2>
+    <ul class="pieces">
+      <li class="piece piece--queued">
+      <span class="piece__id">P1</span>
+      <span class="piece__body">
+        <span class="piece__name">Character quality loop</span>
+        <span class="piece__note">PARKED at 4/10 after five rounds — resume only if asked</span>
       </span>
       <span class="chip chip--queued">queued</span>
-    </li>
-      <li class="piece piece--queued">
-      <span class="piece__id">P14</span>
-      <span class="piece__body">
-        <span class="piece__name">Camera &amp; juice</span>
-        <span class="piece__note">Hit stop, shake, damage numbers</span>
-      </span>
-      <span class="chip chip--queued">queued</span>
-    </li>
-      <li class="piece piece--active">
-      <span class="piece__id">P15</span>
-      <span class="piece__body">
-        <span class="piece__name">HUD &amp; menus</span>
-        <span class="piece__note">HUD landing with the playable match</span>
-      </span>
-      <span class="chip chip--active">building</span>
-    </li>
-      <li class="piece piece--active">
-      <span class="piece__id">P16</span>
-      <span class="piece__body">
-        <span class="piece__name">Gameplay integration</span>
-        <span class="piece__note">Wiring sim to renderer</span>
-      </span>
-      <span class="chip chip--active">building</span>
     </li>
     </ul>
   </section>
@@ -449,72 +409,71 @@
   <section>
     <h2>Commits</h2>
     <ol class="log"><li class="commit">
+        <span class="commit__hash">a197619</span>
+        <span class="commit__subject">HUD element loop: 4/10 -&gt; beat the shipped reference in a blind test</span>
+        <span class="commit__when">7 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">1fc0ab8</span>
+        <span class="commit__subject">lighting element loop: 3/10 -&gt; 5/10 over 5 critic rounds</span>
+        <span class="commit__when">15 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">70a4d3b</span>
+        <span class="commit__subject">arena round 7: canvas textures on every material family</span>
+        <span class="commit__when">25 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">3230f2e</span>
+        <span class="commit__subject">preview: per-prop isolation mode for element-level critic loops</span>
+        <span class="commit__when">53 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">5ad636b</span>
+        <span class="commit__subject">camera: pull gameplay framing in 360u -&gt; 265u; judge from player-centred views</span>
+        <span class="commit__when">74 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">634e73f</span>
+        <span class="commit__subject">arena round 6: real cast shadows, exclusive hazard colour, depth clutter</span>
+        <span class="commit__when">80 minutes ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">3d77c01</span>
+        <span class="commit__subject">arena round 5: three visual languages for blocking / hazard / decoration</span>
+        <span class="commit__when">2 hours ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">2ed6423</span>
+        <span class="commit__subject">arena round 4: contact shadows were rendering INSIDE the floor</span>
+        <span class="commit__when">3 hours ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">b107323</span>
+        <span class="commit__subject">docs: arena is now the active loop; characters parked at 4/10</span>
+        <span class="commit__when">3 hours ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">b8df3dc</span>
+        <span class="commit__subject">render: real value structure — key-to-fill ratio up, AO strengthened</span>
+        <span class="commit__when">7 hours ago</span>
+      </li><li class="commit">
+        <span class="commit__hash">57cba51</span>
+        <span class="commit__subject">docs: record the critic loop — score history, what moved it, how to run a round</span>
+        <span class="commit__when">8 hours ago</span>
+      </li><li class="commit">
         <span class="commit__hash">f4ff77d</span>
         <span class="commit__subject">wip: costume/accessory layer + per-character stances (critic round 5 work)</span>
-        <span class="commit__when">58 seconds ago</span>
+        <span class="commit__when">8 hours ago</span>
       </li><li class="commit">
         <span class="commit__hash">bbb76d3</span>
         <span class="commit__subject">rig: per-character idle stance (critic gap — identical pose across the cast)</span>
-        <span class="commit__when">38 minutes ago</span>
+        <span class="commit__when">9 hours ago</span>
       </li><li class="commit">
         <span class="commit__hash">8df665e</span>
         <span class="commit__subject">characters: structural redesign after the score plateaued at 4/10</span>
-        <span class="commit__when">43 minutes ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">d961d6b</span>
-        <span class="commit__subject">fix: Taco head gap, Egg crack, Hamburger mitts — all root-caused</span>
-        <span class="commit__when">83 minutes ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">4e90f0c</span>
-        <span class="commit__subject">hotdog: dress the torso — no character now shows the bare rig default</span>
-        <span class="commit__when">2 hours ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">d948090</span>
-        <span class="commit__subject">characters: per-character rig proportions + expressive faces (six)</span>
-        <span class="commit__when">2 hours ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">4ff4742</span>
-        <span class="commit__subject">characters: strip joint hardware, fix Soup/Bottle/Sushi faces, reattach spatula</span>
-        <span class="commit__when">3 hours ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">1efacd9</span>
-        <span class="commit__subject">render: Fresnel rim light (critic gap 3)</span>
-        <span class="commit__when">3 hours ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">139c9ae</span>
-        <span class="commit__subject">characters: bespoke limbs + face fixes for six (critic's #1 gap)</span>
-        <span class="commit__when">3 hours ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">2e3d031</span>
-        <span class="commit__subject">P13+P14: ability VFX and game feel</span>
-        <span class="commit__when">3 hours ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">33c33a9</span>
-        <span class="commit__subject">rig: dressLimbs() — per-character limbs, after an independent 3/10 verdict</span>
-        <span class="commit__when">4 hours ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">4e4b8d5</span>
-        <span class="commit__subject">fix: AI no longer axis-locks against cover (+ regression test, 51/51)</span>
-        <span class="commit__when">4 hours ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">5e4847e</span>
-        <span class="commit__subject">docs: correct PROGRESS character table — 11/11 modelled, no stubs</span>
-        <span class="commit__when">11 hours ago</span>
-      </li><li class="commit">
-        <span class="commit__hash">6290cba</span>
-        <span class="commit__subject">P15+P16: the game is playable end to end</span>
-        <span class="commit__when">11 hours ago</span>
+        <span class="commit__when">9 hours ago</span>
       </li></ol>
   </section>
 
   <section>
     <h2>Standing constraints</h2>
     <ul class="notes">
-      <li>The game design is frozen. Damage, cooldowns, ranges, speeds and match structure are transcribed verbatim from the 2D prototype and must not be retuned.</li>
-      <li>The arena is the one sanctioned exception — layout and props are open, as long as a central hazard, physical cover and a slowing hazard survive.</li>
-      <li>Every piece is judged on rendered pixels in a blind A/B against real Brawl Stars and Zooba stills, never on a description of the work.</li>
-      <li>Art direction was corrected mid-flight: the brief said cel-shaded, but the reference plates show smooth-shaded high-key vinyl-toy surfaces with almost no outline. The brief says the bar wins over its own prose.</li>
-      <li>A shared chibi rig now underpins every character: the food is the head and identity mass, the rig supplies limbs, poses and one motion vocabulary so the cast reads as one production.</li>
+      <li>Every element is judged by a FRESH critic each round, so it cannot anchor on its own earlier verdicts.</li>
+      <li>Builder self-scores are not verdicts — they have run 2-4 points above independent critics all project.</li>
+      <li>When a critic says &quot;X is not there&quot;, check whether X is rendering and invisible before concluding it is missing. That has been the true cause three separate times.</li>
+      <li>Element scores will read higher than the whole, because a critic judging one prop is not weighing composition. The whole-arena scan stays the real measure.</li>
     </ul>
   </section>
 
