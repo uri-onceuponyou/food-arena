@@ -257,10 +257,35 @@ filmic tonemapping (it desaturates); IBL + SSAO on.
 - Verify before committing: `tsc` clean AND sim 51/51. I once pushed a broken tree by
   letting `git add -A` sweep in a file an agent was mid-edit on.
 
+## ⏸ PAUSED 2026-08-03 — READ THIS FIRST ON RESUME
+
+Everything is committed and pushed. `tsc` clean, sim 51/51, live game smoke-rendered
+with no runtime break. Working tree was clean at pause. **Nothing is half-finished.**
+
+Seven agents were stopped deliberately for the pause, all early enough that only the
+VFX one had written to disk (committed in `86f7838`). The other six had done nothing
+but read. **Re-dispatch them from scratch** — do not go looking for partial work:
+
+| Loop | Owns | Target |
+|---|---|---|
+| Burrito | `src/characters/burrito.ts` | 7/10 — silhouette reads as a blob |
+| Sushi | `src/characters/sushi.ts` | 7/10 — same |
+| Water Bottle | `src/characters/waterbottle.ts` | 7/10 — hardest case, a bottle is inherently a generic cylinder |
+| Lighting | `src/render/lighting.ts`, `stage.ts` | 7/10 — was building a neutral probe scene; needs a small `preview.ts` wiring change it does not own |
+| Cover props | `src/arena/props/*` | 7/10 — isolate per prop with `piece=prop&kind=` |
+| Floor | `src/arena/floor.ts` | 7/10 — texture blocker now cleared, so this is a fresh start |
+
+Each gets: exclusive file ownership, the loop protocol above, a FRESH critic per round,
+cap 5 rounds, and the traps from this file. The full prompts are reconstructable from
+the sections above — ownership + isolation mode + goal + protocol + traps.
+
+Then: the remaining **nine weapon stubs** in `src/vfx/weapons/` are wired to the generic
+fallback and ready for one agent each. `hamburger.ts` and `waterbottle.ts` are the two
+worked examples, chosen from opposite ends of the weapon space.
+
 ## Next actions
 
-1. **Six element loops are running** — floor, lighting, cover props, and Burrito / Sushi /
-   Water Bottle. Plus per-weapon VFX. Collect verdicts, commit what passes its gate.
+1. Re-dispatch the six loops above, plus the nine weapon agents.
 2. Wire the periodic whole-arena scanner as the real scoreboard — element scores will
    read higher than the whole, because a critic judging one barrel isn't weighing
    composition or density. **Optimising the easier metric is the standing risk of this
