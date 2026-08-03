@@ -15,7 +15,7 @@
 import { AI_CHASE_SPEED, AI_FLEE_HP_FRACTION, AI_FLEE_SPEED, AI_SLOW_MULTIPLIER, CHARACTERS } from './rules.ts';
 import type { GameEvent, MatchState } from './state.ts';
 import { attemptAttack } from './combat.ts';
-import { tryMove } from './movement.ts';
+import { moveToward } from './movement.ts';
 
 function pickHighestDamageWeapon(state: MatchState, adist: number): number | null {
   const enemy = state.enemy;
@@ -90,7 +90,10 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
     if (!aiFrozen) {
       enemy.facing = { x: -adx / adist, y: -ady / adist };
       const step = AI_FLEE_SPEED * dt * aiSlowMult;
-      tryMove(enemy, (-adx / adist) * step, (-ady / adist) * step, state.arena);
+      // Flee target is directly away from the player, so slide around cover toward
+      // that point rather than pinning against it.
+      moveToward(enemy, -adx / adist, -ady / adist, step, state.arena,
+        enemy.x - (adx / adist) * 400, enemy.y - (ady / adist) * 400);
       attemptedMove = true;
 
       const sniperIndex = pickSniperWeapon(state, adist);
@@ -102,7 +105,7 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
       attemptAttack(state, 'enemy', chosenIndex, events);
     } else if (!aiFrozen) {
       const step = AI_CHASE_SPEED * dt * aiSlowMult;
-      tryMove(enemy, (adx / adist) * step, (ady / adist) * step, state.arena);
+      moveToward(enemy, adx / adist, ady / adist, step, state.arena, player.x, player.y);
       attemptedMove = true;
     }
   }

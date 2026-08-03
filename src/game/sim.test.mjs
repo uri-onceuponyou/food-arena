@@ -397,6 +397,62 @@ console.log('\n8. Countdown -> playing transition (sanity)');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Summary
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. AI must not axis-lock against cover (regression)
+//
+// The shipped arena placed chokepoint props exactly on y = CENTRE.y, which is also
+// both spawn y-coordinates. With straight-line chase and per-axis collision, an AI
+// sharing the player's y pressed into the box forever: the x step was refused and
+// dy was exactly 0, so there was nothing to slide along. The fix makes a blocked
+// mover try both perpendiculars and take whichever ends up closer to its target.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n9. AI slides around cover instead of axis-locking');
+
+  // A wall squarely between the two fighters, both on the same y.
+  const arena = makeArena({
+    cover: [{ x: 1000, y: 1000, w: 120, h: 120, kind: 'wall' }],
+  });
+  const state = playingMatch(arena);
+  state.player.x = 1400; state.player.y = 1000;
+  state.enemy.x = 600;   state.enemy.y = 1000;
+  // Keep the AI in pure-chase mode: out of every weapon's range so it must walk.
+  const startX = state.enemy.x;
+  const startY = state.enemy.y;
+
+  // Long enough to actually REACH the wall AND get around it: chase speed is 0.07
+  // units/ms and the wall's near face is ~319 units away, so ~285 ticks just to
+  // arrive. An earlier version used 200 ticks and passed vacuously — the AI never
+  // made contact at all.
+  //
+  // Track the PEAK detour, not the final offset: a working AI rounds the obstacle
+  // and then converges back onto the player's row, so its final dy is ~0 whether it
+  // succeeded or was stuck. Asserting on final dy tested the wrong thing.
+  let peakDetour = 0;
+  let closest = Math.abs(state.player.x - state.enemy.x);
+  for (let i = 0; i < 900; i++) {
+    stepMatch(state, 16, noInput);
+    peakDetour = Math.max(peakDetour, Math.abs(state.enemy.y - startY));
+    closest = Math.min(closest, Math.hypot(state.player.x - state.enemy.x, state.player.y - state.enemy.y));
+  }
+
+  const wallNearFace = 1000 - 60 - state.enemy.size / 2; // ~919
+
+  check('AI made forward progress toward the player',
+    state.enemy.x > startX + 1,
+    `enemy.x ${startX} -> ${state.enemy.x}`);
+  check('AI detoured off the blocked axis to get around the wall',
+    peakDetour > 20,
+    `peak |dy| was ${peakDetour.toFixed(2)}`);
+  check('AI got PAST the wall rather than stalling at its face',
+    state.enemy.x > wallNearFace + 40,
+    `enemy.x ended ${state.enemy.x.toFixed(1)}, wall face ~${wallNearFace.toFixed(1)}`);
+  check('AI closed to weapon range of the player',
+    closest < 200,
+    `closest approach ${closest.toFixed(1)}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 console.log(`\n${pass} passed, ${fail} failed`);
