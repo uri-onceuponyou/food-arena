@@ -514,13 +514,19 @@ export function buildFloor(M: Materials): THREE.Group {
   g.add(north, south, west, east);
 
   // Spilled flour — a soft irregular patch near the west prep station.
-  const flour = mesh(new THREE.CircleGeometry(wu(38), 16), M.flour, 'floor_flour');
+  // 48 segments, not 16. At wu(38) (~1.9m) and scaled 1.4x, a 16-segment circle shows
+  // unmistakable straight polygon edges. Five separate critics across the floor loop
+  // described this exact decal as "a large soft-edged, faceted, semi-transparent
+  // banded shape" that matched no object, and one loop misattributed it to
+  // post-processing in stage.ts — post effects are screen-space and cannot produce
+  // hard facets, which is what identifies this as geometry.
+  const flour = mesh(new THREE.CircleGeometry(wu(38), 48), M.flour, 'floor_flour');
   flour.rotation.x = -Math.PI / 2;
   flour.scale.set(1, 1.4, 1);
   flour.position.set(wu(300), FLOOR_Y.decal, wu(500));
   noOutline(flour);
   g.add(flour);
-  const flourSpeck = mesh(new THREE.CircleGeometry(wu(16), 12), M.flour, 'floor_flour_speck');
+  const flourSpeck = mesh(new THREE.CircleGeometry(wu(16), 32), M.flour, 'floor_flour_speck');
   flourSpeck.rotation.x = -Math.PI / 2;
   flourSpeck.position.set(wu(330), FLOOR_Y.decal, wu(470));
   noOutline(flourSpeck);
@@ -533,7 +539,7 @@ export function buildFloor(M: Materials): THREE.Group {
   // the hub debris ring at pantry scale.
   const sackSpills: Array<[number, number]> = [[1175, 235], [ARENA_W - 1175, ARENA_H - 235]];
   sackSpills.forEach(([sx, sy], i) => {
-    const spill = mesh(new THREE.CircleGeometry(wu(34), 16), M.flour, 'floor_flour');
+    const spill = mesh(new THREE.CircleGeometry(wu(34), 48), M.flour, 'floor_flour');
     spill.rotation.x = -Math.PI / 2;
     spill.scale.set(1.25, 1, 1);
     const dy = i === 0 ? 95 : -95; // mirrored offset, clear of the sack CoverBox's own footprint
