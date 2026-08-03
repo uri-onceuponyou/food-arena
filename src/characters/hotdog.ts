@@ -166,6 +166,44 @@ export class HotDogCharacter extends BaseCharacter {
     this.body.add(this.rig.joints.root);
     this.head = this.rig.joints.head;
 
+    // ── Dressed torso ─────────────────────────────────────────────────────────
+    // An audit found HotDog was the last character still rendering ChibiRig's BARE
+    // DEFAULT torso — literally the "one templated body reskinned with different
+    // heads" the art director scored the cast 4/10 for. A split bun roll carries the
+    // head's own language down through the body: two lobes with a mustard seam
+    // between them, so the food identity runs the full height of the figure.
+    this.rig.dressTorso((size) => {
+      const g = new THREE.Group();
+      g.name = 'hotdog_torso';
+
+      const bunMat = toonMat({ color: PALETTE.bun, roughness: 0.85 });
+      const seamMat = toonMat({ color: PALETTE.mustard, roughness: 0.2 });
+
+      for (const sx of [-1, 1]) {
+        const lobe = new THREE.Mesh(
+          new THREE.CapsuleGeometry(size.w * 0.34, size.h * 0.62, 6, 16),
+          bunMat
+        );
+        lobe.position.set(sx * size.w * 0.26, size.h * 0.52, 0);
+        lobe.rotation.z = sx * 0.06;
+        lobe.castShadow = true;
+        lobe.receiveShadow = true;
+        g.add(lobe);
+      }
+
+      // Mustard seam down the split, sunk between the lobes so it reads as filling
+      // rather than as a stripe painted on top.
+      const seam = new THREE.Mesh(
+        new THREE.CapsuleGeometry(size.w * 0.09, size.h * 0.5, 4, 10),
+        seamMat
+      );
+      seam.position.set(0, size.h * 0.56, size.d * 0.12);
+      seam.castShadow = true;
+      g.add(seam);
+
+      return g;
+    });
+
     const R = this.rig.headRadius;
     const head = this.rig.joints.head;
 
