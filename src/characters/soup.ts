@@ -129,14 +129,12 @@ function buildWorkBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Mater
   sole.receiveShadow = true;
   g.add(sole);
 
-  const cuff = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.44, fw * 0.09, 8, 18), trimMat);
-  cuff.name = 'boot_cuff';
-  cuff.rotation.x = Math.PI / 2;
-  cuff.position.set(0, fw * 0.16, fw * 0.10);
-  cuff.castShadow = true;
-  cuff.receiveShadow = true;
-  g.add(cuff);
-
+  // No separate ankle-cuff ring: the boot's own dark colour against the pale
+  // ceramic leg already reads as a material break at the ankle. An earlier pass
+  // added a thick contrasting torus here too, and stacked across every limb
+  // joint it was exactly what an independent art director called out as
+  // "bolted-together hardware" — a worse version of the ball-jointed-skeleton
+  // problem this whole bespoke-limb system exists to solve.
   return g;
 }
 
@@ -172,30 +170,30 @@ export class SoupCharacter extends BaseCharacter {
     const brothMat = glossyMat({ color: BROTH, roughness: 0.12 });          // very wet broth
 
     // ── Bowl ─────────────────────────────────────────────────────────────────
-    // A true lathed bowl profile — wide flared rim, tapering to a small footed base
-    // — rather than a squashed sphere, so the silhouette reads unmistakably as a
-    // bowl (the wide-flare-then-footed-base shape is what a sphere can never give).
+    // A true lathed bowl profile — flared rim, tapering to a small footed base —
+    // rather than a squashed sphere, so the silhouette reads unmistakably as a
+    // bowl (the flare-then-footed-base shape is what a sphere can never give).
     // `BOWL_PROFILE`/`bowlSurface()` is the one source of truth for the exterior,
     // mirroring `hamburger.ts`'s crownSurface: every decal (rim trim, eyes) is
     // placed through the same function so nothing floats off the curve or sinks
     // into it — the two failure modes named in the brief.
-    // Round 1 defect: the profile flared so aggressively (r growing much faster than
-    // h) that its true outward surface normal in the eye zone pointed mostly
-    // DOWNWARD rather than outward — like the underside of a wide eave — so the
-    // eyes ended up embedded facing toward the ground and read as barely-visible
-    // dots. Round 1 also floated the whole bowl too high above the neck (bottomY
-    // was only -0.56R, versus every other character's food mass reaching down to
-    // roughly -0.9R to sit flush against it), leaving a visible gap, and let steam
-    // push the measured height to 2.31 m. Fixed by: a gentler, more sustained
-    // "belly" segment (h 0.22-0.38) where height grows faster than radius — giving
-    // a mostly-outward normal — placed BELOW the wide rim flare rather than at it;
-    // and by lowering + shortening the whole bowl to sit against the neck.
+    //
+    // Round 2 defect: `bowlBaseR` was 1.6R — wider than the character was tall —
+    // so the flare read as a satellite dish dominating the whole silhouette, and
+    // the profile flared so early (from h≈0.16 on) that there was no real vertical
+    // wall left for the face to sit on; the eyes ended up small and low on the
+    // underside of the flare, barely visible. Fixed on two axes: `bowlBaseR` is
+    // cut by ~30% to a genuine "wide bowl" rather than a dish, and the profile now
+    // holds a real near-vertical WALL through h 0.16–0.58 (r grows much slower than
+    // h there) before flaring out toward the rim above it — giving the face a
+    // clearly visible, mostly-outward-facing surface below the flare instead of
+    // inside it.
     const BOWL_PROFILE: Array<[r: number, h: number]> = [
-      [0, 0], [0.38, 0], [0.44, 0.08], [0.58, 0.22], [0.70, 0.38],
-      [0.82, 0.54], [0.94, 0.72], [1.0, 0.88], [0.95, 0.97], [1.0, 1.0],
+      [0, 0], [0.36, 0], [0.40, 0.06], [0.46, 0.16], [0.52, 0.30],
+      [0.58, 0.44], [0.66, 0.58], [0.78, 0.72], [0.92, 0.86], [1.0, 1.0],
     ];
-    const bowlBaseR = R * 1.6;
-    const bowlH = R * 1.3;
+    const bowlBaseR = R * 1.15;
+    const bowlH = R * 1.35;
     const bowlBottomY = -R * 1.0; // head-local Y of the bowl's own base (h=0) — flush with the neck
 
     const bowlPoint = (rFrac: number, hFrac: number): THREE.Vector2 =>
@@ -243,7 +241,7 @@ export class SoupCharacter extends BaseCharacter {
 
     // Rim trim — a thin contrasting band just under the flared rim lip, the
     // "costume colour contrast" the reference bar calls for, echoed on the torso.
-    const trimTop = 0.86, trimBottom = 0.74;
+    const trimTop = 0.82, trimBottom = 0.70;
     const trimTopPt = bowlSurface(0, trimTop);
     const trimBotPt = bowlSurface(0, trimBottom);
     const trimRadiusTop = new THREE.Vector2(trimTopPt.pos.x, trimTopPt.pos.z).length() * 1.02;
@@ -270,7 +268,7 @@ export class SoupCharacter extends BaseCharacter {
     // ── Broth surface ────────────────────────────────────────────────────────
     // A shallow glossy disc filling the bowl's opening, set just below the rim so
     // it reads as liquid inside rather than a lid on top.
-    const brothH = 0.80;
+    const brothH = 0.90;
     const brothPt = bowlSurface(0, brothH);
     const brothRadius = new THREE.Vector2(brothPt.pos.x, brothPt.pos.z).length() * 0.90;
     this.brothSurface = new THREE.Mesh(new THREE.CircleGeometry(brothRadius, 32), brothMat);
@@ -343,35 +341,32 @@ export class SoupCharacter extends BaseCharacter {
    * Grey steam-coloured eyes and NO mouth — the one genuinely unsettling-calm read
    * in the cast, kept and sharpened rather than removed.
    *
-   * An independent art director scored this face 3/10, calling it "two flat white
-   * ovals with black dot pupils of visibly different sizes... reads as an error, not
-   * a design choice." The two defects that reading points at: (1) nothing anchors
-   * the eye to the bowl surface — a sphere floating in front of a curve reads as
-   * stuck-on — and (2) with no mouth, the eyes carry the ENTIRE face, so a plain
-   * circle-on-circle reads as unfinished rather than deliberate. Fixed by giving each
-   * eye a heavy ceramic-toned LID — a shallow shell that caps the sclera's upper
-   * third and casts a real shadow line across it — plus a soft brow stroke above.
-   * The lid is what turns "two dots" into a sleepy, patient, INTENTIONAL stare: it is
-   * the single highest-leverage shape this character has, since there is no mouth to
-   * share the work. Both eyes remain exactly mirrored in size/position (this was
-   * already true in code — the mismatch the critic saw was in the FACE'S DESIGN, not
-   * mismatched numbers) but the identical sizing is now easy to verify at a glance
-   * because the lid gives each eye a real silhouette instead of a bare circle.
+   * With no mouth, the eyes carry the ENTIRE face, so they get top billing on the
+   * bowl: EYE_H now sits in the real near-vertical WALL segment the narrowed
+   * `BOWL_PROFILE` holds through h 0.16–0.58 (see the bowl comment above), where
+   * the true surface normal points mostly outward rather than down — a genuinely
+   * visible, camera-facing surface, not the underside of a flare. Eyes are sized
+   * up from the previous pass now that the bowl itself is ~30% narrower, so they
+   * read as prominent rather than lost against the ceramic. Each eye keeps its
+   * heavy ceramic-toned LID — a shallow shell that caps the sclera's upper third
+   * and casts a real shadow line — plus a soft brow stroke above: together they
+   * turn "two dots" into a deliberate, sleepy, PATIENT stare, the single highest-
+   * leverage shape this character has. Both eyes are built from one mirrored loop
+   * at identical size/height, so any residual asymmetry in the render is the
+   * camera angle, not the geometry.
    */
   private buildFace(R: number, bowlSurface: (theta: number, hFrac: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }): void {
     const face = this.rig.joints.face;
     face.position.set(0, 0, 0); // features are authored directly on `head` in exact surface coords
     const head = this.rig.joints.head;
 
-    // EYE_H sits in the belly segment (h 0.22-0.38), chosen because there height
-    // grows faster than radius — a mostly-outward true surface normal. Orientation
-    // still uses the flattened HORIZONTAL-outward direction rather than the raw 3D
-    // normal, though: even a mild residual downward tilt is enough to visibly
-    // angle a flattened sclera away from a roughly-eye-level camera, and a bowl's
-    // profile is easy to retune later, so this is a deliberate belt-and-braces fix
-    // rather than relying on getting the profile derivative exactly right.
-    const EYE_THETA = 0.5;
-    const EYE_H = 0.30;
+    // EYE_H sits mid-wall (h 0.30-0.44 segment), well below the flare and well
+    // above the footed base — a clearly visible, mostly-outward-facing surface.
+    // Orientation still uses the flattened HORIZONTAL-outward direction rather
+    // than the raw 3D normal, as a belt-and-braces fix against any residual
+    // downward tilt in the wall segment.
+    const EYE_THETA = 0.46;
+    const EYE_H = 0.37;
     const irisMat = toonMat({ color: '#6B6E72', roughness: 0.3 }); // grey steam-toned, not ink-black
     const scleraMat = toonMat({ color: '#EDEDEA', roughness: 0.3 });
     const lidMat = toonMat({ color: '#B7BABD', roughness: 0.35 }); // between sclera and iris — a real shaded lid
@@ -385,19 +380,19 @@ export class SoupCharacter extends BaseCharacter {
       eye.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
       head.add(eye);
 
-      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.135, 16, 14), scleraMat);
+      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.165, 16, 14), scleraMat);
       white.scale.set(1, 1, 0.55);
       white.castShadow = true;
       eye.add(white);
 
-      const iris = new THREE.Mesh(new THREE.SphereGeometry(R * 0.078, 14, 12), irisMat);
-      iris.position.set(0, 0, R * 0.05);
+      const iris = new THREE.Mesh(new THREE.SphereGeometry(R * 0.095, 14, 12), irisMat);
+      iris.position.set(0, 0, R * 0.06);
       iris.scale.set(1, 1, 0.55);
       iris.castShadow = true;
       eye.add(iris);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.024, 8, 8), flatMat('#ffffff'));
-      glint.position.set(-R * 0.025, R * 0.03, R * 0.09);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.029, 8, 8), flatMat('#ffffff'));
+      glint.position.set(-R * 0.030, R * 0.036, R * 0.11);
       glint.userData.noOutline = true;
       eye.add(glint);
 
@@ -407,21 +402,21 @@ export class SoupCharacter extends BaseCharacter {
       // curve" into a deliberate, sleepy, PATIENT stare — the single highest-
       // leverage shape available here, since there is no mouth to share the work.
       const lid = new THREE.Mesh(
-        new THREE.SphereGeometry(R * 0.152, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.30),
+        new THREE.SphereGeometry(R * 0.185, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.30),
         lidMat
       );
       lid.name = 'soup_eye_lid';
-      lid.position.set(0, R * 0.018, R * 0.018);
+      lid.position.set(0, R * 0.022, R * 0.022);
       lid.scale.set(1, 1, 0.62);
       lid.castShadow = true;
       eye.add(lid);
 
       // A soft brow stroke above the lid — flat, calm, not angled into a V (which
       // would read as annoyed rather than unsettling-calm).
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.016, R * 0.13, 4, 8), browMat);
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.019, R * 0.16, 4, 8), browMat);
       brow.name = 'soup_brow';
       brow.rotation.z = Math.PI / 2 + sx * 0.05;
-      brow.position.set(0, R * 0.135, R * 0.03);
+      brow.position.set(0, R * 0.165, R * 0.036);
       brow.castShadow = true;
       eye.add(brow);
     }
@@ -547,8 +542,17 @@ export class SoupCharacter extends BaseCharacter {
    * capsule arms and ball hands as the biggest cast-wide tell. Soup gets glazed-
    * ceramic tapered "sleeves" (glossy, matching the bowl's own exterior material)
    * ending in a genuinely different material: a matte cloth oven mitt, echoing the
-   * vendor apron the torso already wears. A dark work boot with a rust cuff replaces
-   * the blocky default foot.
+   * vendor apron the torso already wears. A dark work boot replaces the blocky
+   * default foot.
+   *
+   * A previous pass added a `cuffRing` at every segment break (shoulder, elbow,
+   * hip) plus another on the boot — a thick, high-contrast trim-coloured torus
+   * right at each joint. Stacked across all five bespoke-limb characters that
+   * read as mechanical action-figure collars, a worse version of the exact
+   * "ball-jointed skeleton" problem this system exists to solve. Removed: the
+   * tapered limb's own silhouette change (thick shoulder to narrow wrist) plus
+   * the colour break into the mitt/boot already sells "sleeve ends here" without
+   * bolted-on hardware.
    */
   private dressLimbs(): void {
     const ceramicMat = glossyMat({ color: CERAMIC, roughness: 0.25 });
@@ -559,31 +563,19 @@ export class SoupCharacter extends BaseCharacter {
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
         case 'upperArmL':
-        case 'upperArmR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 1.08, size.radius * 0.80, ceramicMat));
-          g.add(cuffRing(-size.len * 0.95, size.radius * 0.84, size.radius * 0.17, trimMat));
-          return g;
-        }
+        case 'upperArmR':
+          return taperedLimb(size.len, size.radius * 1.08, size.radius * 0.80, ceramicMat);
         case 'forearmL':
-        case 'forearmR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 0.78, size.radius * 0.58, ceramicMat));
-          g.add(cuffRing(-size.len * 0.90, size.radius * 0.64, size.radius * 0.16, trimMat));
-          return g;
-        }
+        case 'forearmR':
+          return taperedLimb(size.len, size.radius * 0.78, size.radius * 0.58, ceramicMat);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
           return buildOvenMitt(size.radius, side, mittMat);
         }
         case 'thighL':
-        case 'thighR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, ceramicMat));
-          g.add(cuffRing(-size.len * 0.94, size.radius * 0.92, size.radius * 0.17, trimMat));
-          return g;
-        }
+        case 'thighR':
+          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, ceramicMat);
         case 'shinL':
         case 'shinR':
           return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, ceramicMat);

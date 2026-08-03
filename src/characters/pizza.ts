@@ -170,14 +170,9 @@ function buildCrustBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Mate
   sole.receiveShadow = true;
   g.add(sole);
 
-  const cuff = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.42, fw * 0.10, 8, 18), trimMat);
-  cuff.name = 'boot_cuff';
-  cuff.rotation.x = Math.PI / 2;
-  cuff.position.set(0, fw * 0.18, fw * 0.10);
-  cuff.castShadow = true;
-  cuff.receiveShadow = true;
-  g.add(cuff);
-
+  // No separate ankle-cuff ring — the boot's own charred colour against the pale
+  // dough leg already reads as a material break at the ankle without a bolted-on
+  // collar (see the dressLimbs() comment for why these were removed cast-wide).
   return g;
 }
 
@@ -507,34 +502,32 @@ export class PizzaCharacter extends BaseCharacter {
   /**
    * Bespoke limbs — an independent art director named the shared snowman-body
    * capsule arms and ball hands as the biggest cast-wide tell. Pizza gets doughy
-   * tapered limbs (thick at the shoulder, narrower at the wrist, matching the crust's
-   * own matte roughness), a toasted-crust-rim cuff at each joint break, a
-   * pepperoni-red fist mitt with a crust-rim knuckle badge, and a charred-crust wedge
-   * boot with its own sole plate — all built from colours this file already declared.
+   * tapered limbs (thick at the shoulder, narrower at the wrist, matching the
+   * crust's own matte roughness), a pepperoni-red fist mitt with a crust-rim
+   * knuckle badge, and a charred-crust wedge boot with its own sole plate — all
+   * built from colours this file already declared.
+   *
+   * A previous pass also added a contrasting `cuffRing` at every shoulder/elbow/
+   * hip break plus another on the boot. Stacked across all five bespoke-limb
+   * characters that read as mechanical action-figure collars — a worse version
+   * of the exact "ball-jointed skeleton" problem this system exists to solve.
+   * Removed; the tapered limb's own thickness change plus the colour break into
+   * the mitt/boot already reads as "sleeve ends here" without bolted-on hardware.
    */
   private dressLimbs(): void {
     const doughMat = toonMat({ color: CRUST, roughness: 0.85 });
     const doughDarkMat = toonMat({ color: CRUST_RIM, roughness: 0.8 });
     const pepMat = glossyMat({ color: PEPPERONI, roughness: 0.18 });
     const charMat = toonMat({ color: CRUST_CHAR, roughness: 0.75 });
-    const cheeseMat = glossyMat({ color: CHEESE, roughness: 0.25 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
         case 'upperArmL':
-        case 'upperArmR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 1.32, size.radius * 0.94, doughMat));
-          g.add(cuffRing(-size.len * 0.96, size.radius * 0.98, size.radius * 0.22, doughDarkMat));
-          return g;
-        }
+        case 'upperArmR':
+          return taperedLimb(size.len, size.radius * 1.32, size.radius * 0.94, doughMat);
         case 'forearmL':
-        case 'forearmR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 0.92, size.radius * 0.60, doughMat));
-          g.add(cuffRing(-size.len * 0.90, size.radius * 0.68, size.radius * 0.19, cheeseMat));
-          return g;
-        }
+        case 'forearmR':
+          return taperedLimb(size.len, size.radius * 0.92, size.radius * 0.60, doughMat);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
@@ -551,12 +544,8 @@ export class PizzaCharacter extends BaseCharacter {
           return mitt;
         }
         case 'thighL':
-        case 'thighR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 1.22, size.radius * 0.96, doughMat));
-          g.add(cuffRing(-size.len * 0.95, size.radius * 1.0, size.radius * 0.22, doughDarkMat));
-          return g;
-        }
+        case 'thighR':
+          return taperedLimb(size.len, size.radius * 1.22, size.radius * 0.96, doughMat);
         case 'shinL':
         case 'shinR':
           return taperedLimb(size.len, size.radius * 0.96, size.radius * 0.78, doughMat);

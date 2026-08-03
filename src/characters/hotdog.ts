@@ -122,14 +122,9 @@ function buildBunBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Materi
   sole.receiveShadow = true;
   g.add(sole);
 
-  const cuff = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.46, fw * 0.09, 8, 18), trimMat);
-  cuff.name = 'boot_cuff';
-  cuff.rotation.x = Math.PI / 2;
-  cuff.position.set(0, fw * 0.17, fw * 0.10);
-  cuff.castShadow = true;
-  cuff.receiveShadow = true;
-  g.add(cuff);
-
+  // No separate ankle-cuff ring — the boot's own dark colour against the bun
+  // leg already reads as a material break at the ankle without a bolted-on
+  // collar (see the dressLimbs() comment for why these were removed cast-wide).
   return g;
 }
 
@@ -422,46 +417,41 @@ export class HotDogCharacter extends BaseCharacter {
   /**
    * Bespoke limbs — an independent art director named the shared snowman-body
    * capsule arms and ball hands as the biggest cast-wide tell. HotDog gets matte
-   * bun-coloured tapered limbs with glossy mustard "drizzle cuffs" at the wrist and
-   * knee (the same condiment language as the zigzag landmark on the sausage), a
-   * bundled sausage-link fist instead of a knuckled fist, and a wide stubby
-   * ketchup-trimmed boot matching this character's chunky proportions.
+   * bun-coloured tapered limbs, a bundled sausage-link fist instead of a
+   * knuckled fist, and a wide stubby boot matching this character's chunky
+   * proportions.
+   *
+   * A previous pass also added a glossy "drizzle cuff" at every shoulder/elbow/
+   * hip break plus another on the boot. Stacked across all five bespoke-limb
+   * characters that read as mechanical action-figure collars — a worse version
+   * of the exact "ball-jointed skeleton" problem this system exists to solve.
+   * Removed; the tapered limb's own thickness change plus the colour break into
+   * the sausage-link hand/boot already reads as "sleeve ends here" without
+   * bolted-on hardware. The mustard/ketchup condiment language still owns the
+   * cast's single boldest landmark — the zigzag stripe across the sausage.
    */
   private dressLimbs(): void {
     const bunMat = toonMat({ color: PALETTE.bun, roughness: 0.85 });
     const bunDarkMat = toonMat({ color: PALETTE.bunDark, roughness: 0.8 });
-    const mustardMat = glossyMat({ color: PALETTE.mustard, roughness: 0.15 });
     const ketchupMat = glossyMat({ color: PALETTE.ketchup, roughness: 0.15 });
     const sausageMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
         case 'upperArmL':
-        case 'upperArmR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 1.28, size.radius * 0.92, bunMat));
-          g.add(condimentCuff(-size.len * 0.96, size.radius * 0.96, size.radius * 0.20, bunDarkMat));
-          return g;
-        }
+        case 'upperArmR':
+          return taperedLimb(size.len, size.radius * 1.28, size.radius * 0.92, bunMat);
         case 'forearmL':
-        case 'forearmR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 0.90, size.radius * 0.64, bunMat));
-          g.add(condimentCuff(-size.len * 0.90, size.radius * 0.70, size.radius * 0.19, mustardMat));
-          return g;
-        }
+        case 'forearmR':
+          return taperedLimb(size.len, size.radius * 0.90, size.radius * 0.64, bunMat);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
           return buildSausageFingers(size.radius, side, sausageMat);
         }
         case 'thighL':
-        case 'thighR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 1.18, size.radius * 0.94, bunMat));
-          g.add(condimentCuff(-size.len * 0.95, size.radius * 0.98, size.radius * 0.20, bunDarkMat));
-          return g;
-        }
+        case 'thighR':
+          return taperedLimb(size.len, size.radius * 1.18, size.radius * 0.94, bunMat);
         case 'shinL':
         case 'shinR':
           return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.76, bunMat);

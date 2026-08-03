@@ -77,6 +77,10 @@ export interface ToonMatOptions {
    */
   roughness?: number;
   metalness?: number;
+  /** Fresnel rim light. On by default — set false for flat decals and eyes. */
+  rim?: boolean;
+  rimColor?: THREE.ColorRepresentation;
+  rimStrength?: number;
 }
 
 /**
@@ -109,7 +113,50 @@ export function toonMat(opts: ToonMatOptions): THREE.MeshStandardMaterial {
     m.emissive = new THREE.Color(opts.emissive);
     m.emissiveIntensity = opts.emissiveIntensity ?? 1;
   }
+  if (opts.rim !== false) applyRimLight(m, opts.rimColor, opts.rimStrength);
   return m;
+}
+
+/**
+ * Fresnel rim term, injected into a standard material's fragment shader.
+ *
+ * An independent art director's third named gap was "move past single flat toon
+ * gradients — add rim lighting and a couple more value steps per surface." A
+ * directional rim light only catches surfaces facing that one direction; a
+ * view-dependent Fresnel term lights every silhouette edge no matter how the
+ * character is rotated, which is what actually separates a form from the background
+ * at gameplay distance.
+ *
+ * Deliberately additive and subtle. This is edge definition, not a glow — an
+ * overdone rim is its own species of amateur.
+ */
+export function applyRimLight(
+  mat: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial,
+  color: THREE.ColorRepresentation = '#bfe4ff',
+  strength = 0.28
+): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.rimColor = { value: new THREE.Color(color) };
+    shader.uniforms.rimStrength = { value: strength };
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         uniform vec3 rimColor;
+         uniform float rimStrength;`
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+         // vNormal / vViewPosition are in view space, so the rim follows the camera
+         // and holds on every silhouette edge regardless of character rotation.
+         float rimDot = 1.0 - clamp(dot(normalize(vNormal), normalize(vViewPosition)), 0.0, 1.0);
+         float rim = pow(rimDot, 2.6) * rimStrength;
+         gl_FragColor.rgb += rimColor * rim;`
+      );
+  };
+  // Force a program recompile if this material was already used.
+  mat.needsUpdate = true;
 }
 
 /**

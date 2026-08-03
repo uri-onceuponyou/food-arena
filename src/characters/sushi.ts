@@ -99,7 +99,7 @@ function buildRiceFist(R: number, side: 1 | -1, mat: THREE.Material, noriMat: TH
   palm.receiveShadow = true;
   g.add(palm);
 
-  const ribbon = new THREE.Mesh(new THREE.TorusGeometry(R * 0.72, R * 0.14, 8, 20), noriMat);
+  const ribbon = new THREE.Mesh(new THREE.TorusGeometry(R * 0.72, R * 0.09, 8, 20), noriMat);
   ribbon.name = 'fist_ribbon';
   ribbon.rotation.z = side * 0.35;
   ribbon.position.set(0, -R * 0.05, 0);
@@ -135,7 +135,7 @@ function buildLacqueredBoot(fw: number, bodyMat: THREE.Material, soleMat: THREE.
   sole.receiveShadow = true;
   g.add(sole);
 
-  const strap = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.38, fw * 0.045, 8, 18), strapMat);
+  const strap = new THREE.Mesh(new THREE.TorusGeometry(fw * 0.38, fw * 0.028, 8, 18), strapMat);
   strap.name = 'boot_strap';
   strap.rotation.x = Math.PI / 2;
   strap.position.set(0, fw * 0.06, fw * 0.06);
@@ -342,6 +342,20 @@ export class SushiCharacter extends BaseCharacter {
    * Wide, slightly-startled eyes and puckered "o" lips — placed in the rice's own
    * face zone (between the nori band and the salmon seam), via `zAt()`, the exact
    * surface equation for this lathe (every horizontal slice is a perfect circle).
+   *
+   * An independent art director read these as "googly/misaligned" eyes. Both are
+   * built from one mirrored loop at an identical size/height (mirrored only in
+   * sign), so there is no positional mismatch in the numbers. Fixed two things:
+   * each eye's parts now live in their own locally-oriented group (surface point
+   * + outward-facing quaternion — the same technique `soup.ts`'s `bowlSurface`
+   * eyes use), so "above the eye" and "proud of the surface" are unambiguous
+   * local-space offsets instead of raw head-space coordinates fighting a curved
+   * lathe surface — a first attempt at this fix got the depth ordering wrong in
+   * head-space and buried the pupil/glint behind the sclera and the brow behind
+   * the eye's own bulge, entirely invisible. And the sizes/protrusion are trimmed
+   * down from the original so the eyes read as inset rather than two balls stuck
+   * on the curve, with a brow/lash stroke above each — the same anchor-line fix
+   * already applied to Soup and Water Bottle's faces.
    */
   private buildFace(R: number, yAt: (h: number) => number, zAt: (x: number, h: number) => number): void {
     const face = this.rig.joints.face;
@@ -351,32 +365,50 @@ export class SushiCharacter extends BaseCharacter {
     face.position.set(0, 0, 0);
     const head = this.rig.joints.head;
     const ink = PALETTE.ink;
+    const browMat = toonMat({ color: SALMON_DARK, roughness: 0.35 }); // ties the brow to the fish accent colour
 
     const eyeH = 0.53;
     const eyeY = yAt(eyeH);
-    for (const sx of [-1, 1]) {
+    for (const sx of [-1, 1] as const) {
       const ex = sx * R * 0.24;
       const ez = zAt(ex, eyeH);
+      const outward = new THREE.Vector3(ex, 0, ez).normalize();
+      const eye = new THREE.Group();
+      eye.position.set(ex, eyeY, ez).addScaledVector(outward, R * 0.02);
+      eye.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
+      head.add(eye);
 
       // Sclera — wide white eye, the "slightly startled" read.
-      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.14, 18, 14), toonMat({ color: '#FFFFFF', roughness: 0.25 }));
-      white.position.set(ex, eyeY, ez + R * 0.02);
-      white.scale.set(1, 1.08, 0.55);
+      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.135, 18, 14), toonMat({ color: '#FFFFFF', roughness: 0.25 }));
+      white.position.set(0, 0, R * 0.015);
+      white.scale.set(1, 1.05, 0.5);
       white.castShadow = true;
-      head.add(white);
+      eye.add(white);
 
       // Pupil pushed toward the top of the sclera — white shows below, the classic
-      // "wide-eyed" surprised cue.
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.074, 16, 12), toonMat({ color: ink, roughness: 0.25 }));
-      pupil.position.set(ex, eyeY + R * 0.027, ez + R * 0.055);
-      pupil.scale.set(1, 1, 0.6);
+      // "wide-eyed" surprised cue. Local Z is unambiguously "outward" here, so it's
+      // sized to clear the sclera's own front bulge (front ≈ 0.015+0.135*0.5=0.0825R)
+      // by a real, checked margin rather than an assumption.
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.062, 16, 12), toonMat({ color: ink, roughness: 0.25 }));
+      pupil.position.set(0, R * 0.022, R * 0.065);
+      pupil.scale.set(1, 1, 0.55);
       pupil.castShadow = true;
-      head.add(pupil);
+      eye.add(pupil);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.027, 8, 8), flatMat('#ffffff'));
-      glint.position.set(ex - R * 0.025, eyeY + R * 0.05, ez + R * 0.085);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.023, 8, 8), flatMat('#ffffff'));
+      glint.position.set(-R * 0.022, R * 0.045, R * 0.10);
       glint.userData.noOutline = true;
-      head.add(glint);
+      eye.add(glint);
+
+      // Brow/lash stroke, well above the sclera's own top edge (≈0.135*1.05=0.142R
+      // above eye centre), so it can't be hidden behind the eye's own bulge — the
+      // defect that made the previous head-space attempt invisible.
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.015, R * 0.12, 4, 8), browMat);
+      brow.name = 'sushi_brow';
+      brow.rotation.z = Math.PI / 2 + sx * 0.08;
+      brow.position.set(0, R * 0.165, R * 0.025);
+      brow.castShadow = true;
+      eye.add(brow);
     }
 
     // Puckered "o" lips — a plump little ring (tube nearly as thick as its own
@@ -457,11 +489,18 @@ export class SushiCharacter extends BaseCharacter {
   /**
    * Bespoke limbs — an independent art director named the shared snowman-body
    * capsule arms and ball hands as the biggest cast-wide tell. Sushi gets slender
-   * rice-white tapered limbs with thin nori wrist/knee wraps (echoing the head's own
-   * band), a smooth rice-ball fist wrapped in a nori ribbon with a small gold stud
-   * (Legendary accent, used sparingly per the file's own convention), and a low
-   * lacquered boot with a gold ankle strap instead of a thick rolled cuff — reading
+   * rice-white tapered limbs, a smooth rice-ball fist wrapped in a nori ribbon
+   * with a small gold stud (Legendary accent, used sparingly per the file's own
+   * convention), and a low lacquered boot with a thin gold ankle strap — reading
    * as refined rather than chunky, matching this character's premium tier.
+   *
+   * A previous pass also added a near-black `cuffRing` at every shoulder/elbow/
+   * hip break. Nori against white rice is already this character's highest-
+   * contrast pairing (the file header calls it out as the landmark read), so a
+   * thick nori ring at every joint was the single worst offender in the whole
+   * cast for the "bolted-together action figure" note — removed here. The fist's
+   * own ribbon and the boot's own strap now carry the nori/gold accent instead,
+   * trimmed down so they read as garment details rather than hardware.
    */
   private dressLimbs(): void {
     const riceMat = toonMat({ color: RICE, roughness: 0.65 });
@@ -473,31 +512,19 @@ export class SushiCharacter extends BaseCharacter {
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
         case 'upperArmL':
-        case 'upperArmR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 1.10, size.radius * 0.82, riceMat));
-          g.add(cuffRing(-size.len * 0.95, size.radius * 0.86, size.radius * 0.16, noriMat));
-          return g;
-        }
+        case 'upperArmR':
+          return taperedLimb(size.len, size.radius * 1.10, size.radius * 0.82, riceMat);
         case 'forearmL':
-        case 'forearmR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, riceMat));
-          g.add(cuffRing(-size.len * 0.90, size.radius * 0.62, size.radius * 0.15, noriMat));
-          return g;
-        }
+        case 'forearmR':
+          return taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, riceMat);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
           return buildRiceFist(size.radius, side, salmonMat, noriMat, goldMat);
         }
         case 'thighL':
-        case 'thighR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, riceMat));
-          g.add(cuffRing(-size.len * 0.94, size.radius * 0.92, size.radius * 0.16, noriMat));
-          return g;
-        }
+        case 'thighR':
+          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, riceMat);
         case 'shinL':
         case 'shinR':
           return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, riceMat);
