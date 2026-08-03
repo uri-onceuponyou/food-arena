@@ -62,15 +62,23 @@ Isolate first, then loop.
 
 | Element | Owner files | Status |
 |---|---|---|
-| **HUD** | `src/ui/hud.ts` | ✅ **Beat the shipped reference in a blind test** — critic scored the shipped side 5/10 and ours higher |
-| Floor | `src/arena/floor.ts` | 4.5/10, peak 6 — texture blocker now cleared, loop resumed |
-| Tile/prop textures | `src/arena/textures.ts` | ✅ frequency bug fixed, grain verified visible |
-| Lighting & post | `src/render/lighting.ts`, `stage.ts` | 5/10 capped — loop running, building a neutral probe scene |
-| Cover props | `src/arena/props/*` | 3,4,3,3,4 capped — loop running, per-prop isolation |
-| Hazards | `src/arena/hazards.ts` | 6,6.5,6,5,6 — capped by colour semiotics (every hue collided with a genre meaning). Now reworked to Uri's design: render grease/water plainly, react on contact |
-| Combat VFX | `src/game/vfx.ts`, `src/vfx/weapons/*` | 3,4,4,3,3.5 capped — per-weapon agents, one per weapon |
-| Burrito / Sushi / Water Bottle | `src/characters/<id>.ts` | loops running — the three the silhouette test named |
-| Characters (rest) | `src/characters/*` | **PARKED at 4/10** — do not resume unless asked |
+| **HUD** | `src/ui/hud.ts` | ✅ **Beat the shipped reference in a blind test** |
+| **Characters — bodies** | `rig.ts`, `bodies.ts`, all 11 | ✅ four archetypes; silhouettes now read distinctly |
+| **Viewport fairness** | `render/camera.ts` | ✅ 199.2wu guaranteed on every aspect, 0.00 spread |
+| **Weapon ranges** | `game/rules.ts` | ✅ retuned; characters 8.1% → ~13% of frame, fairness kept |
+| **Tile/prop textures** | `arena/textures.ts` | ✅ frequency bug fixed |
+| Floor | `arena/floor.ts` | 🅿️ **PARKED by Uri** — see the lead above |
+| Fog / safe zone | `game/match.ts`, `ui/hud.ts` | 🔴 **NO VISUAL AT ALL** — 50 HP/s, invisible. Being fixed |
+| Cover props | `arena/props/*`, `shared.ts` | 🔴 grounding 63% z-occluded — scores 3,4,3,3,4 are **void**. Being fixed |
+| Hazards | `arena/hazards.ts` | 🔴 rework never landed (ownership deadlock); shadows at world origin. Being fixed |
+| Combat VFX | `game/vfx.ts`, `vfx/weapons/*` | ⚠️ pipeline healthy, but burst is 2× character height — gates Wave 3 |
+| Lighting & post | `render/lighting.ts`, `stage.ts` | 5/10 — loop running on SSAO-is-a-no-op |
+| Characters (heads) | `characters/<id>.ts` | not yet looped; scope is now head+torso only |
+
+**Read this before spending a loop:** of the elements probed, **every plateau was a bug or
+an ownership deadlock, not a taste gap** — consistent with 3-of-4 historically. Probe
+first. A ~20k probe has repeatedly outperformed a ~300k critic loop, and the floor loop
+spent 309k for a score that did not move at all.
 
 ### Score histories
 
@@ -98,21 +106,35 @@ character beside it for scale. Kinds: `stove_island prep_counter sink_counter
 fryer_counter freezer supply_barrel produce_crate_tall herb_crate flour_sacks
 stacked_pots spice_cart`.
 
-**Known cross-element conflict, still unresolved:** the arena bakes its own soft radial
-cast-shadow decal under every prop, from back when real shadows were mushy. The lighting
-loop REGRESSED to 3/10 in one round because widening SSAO stacked a third soft darkening
-layer on top of that decal AND the real shadow map — a critic read the mush as one
-directionless blob. Now that real shadows are crisp, those decals are likely redundant
-and harmful. **Both the lighting and props loops have been asked to test removing them.**
-This is exactly what the whole-arena scan exists to catch: element owners optimising
-locally can fight each other.
+**RESOLVED, and the queued answer was BACKWARDS.** For months the note here read: "the
+baked cast-shadow decals are probably a redundant third darkening layer stacking with the
+shadow map and SSAO — test removing them." A probe finally ran the test and the answer is
+**do not remove them.**
+
+The decals sit at y = 0.017/0.019. Above them sit **opaque, depth-writing** planes —
+`floor_woodpad`, `floor_utility_pad`, `floor_teal_zone`, `floor_border` at 0.045–0.048,
+`floor_seam`/`floor_drain` at 0.062. Props are *deliberately placed on those pads*, so
+their grounding shadow is drawn underneath an opaque plane and never reaches the screen.
+Measured: only **~37% of contact-decal area is visible; 63% is z-occluded.** At shipped
+framing the spice cart and stacked pots standing on teal mats have **zero** shadow.
+
+So the "mushy directionless blob" that regressed lighting to 3/10 was the ~37% that leaks
+onto **bare tile**, un-anchored to the props standing on pads. Deleting the decals would
+have removed the main grounding cue and made it worse. The fix is two constants — raise
+the decals above the pad layer.
+
+**Every cover-props score (3,4,3,3,4) was measured on props with most of their grounding
+invisible. Those verdicts are void.** Re-baseline after the fix.
+
+The general lesson is the one this project keeps re-learning: a plausible explanation that
+nobody has actually tested will sit in a doc for months and get briefed to agents as fact.
 
 ---
 
 ## THE PATTERN THAT KEEPS COSTING TIME
 
 **When a critic says "X isn't there", check whether X is rendering and INVISIBLE before
-concluding it is missing.** True cause six separate times:
+concluding it is missing.** True cause NINE separate times:
 
 1. Sesame seeds placed at a mesh's front landed on its hidden back face — the mesh is
    flipped 180° about X, which negates Z.
@@ -126,6 +148,17 @@ concluding it is missing.** True cause six separate times:
    silently occlude anything behind or beneath them.
 6. Arena textures were wired correctly and still invisible — but see below, because the
    reason was NOT the one everyone assumed.
+7. **Prop grounding shadows buried under opaque floor pads.** Decals at y=0.017/0.019,
+   opaque depth-writing pads at 0.045–0.062, and props deliberately stand ON the pads —
+   63% of the shadow area never reaches the screen. This is instance #2 recurring at a
+   different height, which is why it is worth checking the WHOLE ground-layer stack, not
+   just the one surface you changed.
+8. **Both puddles' contact shadows rendered at world origin.** `buildContactShadow` was
+   added to a group that is never positioned, while the disc/surface/rim set absolute
+   world coords internally — so two 6.75m shadows stacked in the map's SW corner and the
+   actual puddles had none.
+9. **A slow-effect ring in the same cyan as the puddle it sits on.** Rendering correctly,
+   perfectly invisible — the dark-on-dark failure (#3) in a different colour.
 
 ### The probe technique — prove it, don't infer it
 
@@ -390,7 +423,7 @@ outline must be the darkest edge within a 200px radius.
 
 r3's exact diff is recoverable from git history — find it before re-deriving it by hand.
 
-### THE POST CHAIN IS CLAMPING COLOUR — probably a project-wide quality cap
+### ~~THE POST CHAIN IS CLAMPING COLOUR~~ — SUPERSEDED, see below
 
 `stage.ts` runs `HueSaturationEffect({ saturation: 0.32 })`. A pixel probe returned
 **`rgb(0, 161, 176)`** — red clamped to **zero** — from an albedo that had 47 red.
@@ -408,6 +441,30 @@ authored, hue semiotics were never really under the author's control.
 **Lighting/post owner: verify and fix this first.** It plausibly outranks every other
 lighting change. Note the art direction genuinely is hyper-saturated — the fix is a
 saturation curve that does not clip channels, not simply turning saturation down.
+
+### The colour-clamp finding did NOT hold up — measure before you compensate
+
+The `rgb(0,161,176)` probe above was real, but a later measurement of authored-vs-rendered
+swatches found **hue faithful to within 2° and no channel crushed to zero**:
+
+| swatch | authored | rendered | Δsat | Δhue |
+|---|---|---|---|---|
+| `grease #B08A2E` | h42 s0.74 | h41 s0.96 | +0.22 | −1° |
+| `waterRim #2FE8FF` | h187 s0.82 | h185 s0.99 | +0.17 | −2° |
+
+Caveat worth keeping: that measurement was taken with a lighting agent's in-flight grade
+in the tree, so it is possible the clamp was real and had just been fixed. Either way the
+conclusion for authors is the same — **hue is under your control; measure the current
+build rather than compensating for a clamp that may not be there.**
+
+So the hazards cap was NOT colour semiotics. `greaseRim #D6FF3A` is s0.77/v1.00 *before*
+any grade. The authored colours are simply neon, and the puddles read as MOBA pickup pads
+because that is what they were painted as. Five rounds were spent litigating "which hue
+means slow" while the file that owned the loud hue was out of that agent's scope.
+
+**The lesson is the general one:** a plausible mechanism measured once is a hypothesis,
+not a finding. This one was written into PROGRESS as fact and briefed to two agents before
+anything re-measured it.
 
 ### Critics can contradict each other into a standstill — use an objective test
 

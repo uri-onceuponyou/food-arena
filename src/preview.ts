@@ -89,8 +89,19 @@ const arenaFog = arenaView === 'overview' ? { near: 100, far: 260 } : { near: 40
  *
  * If the fair radius changes again, re-read halfW from `node tools/aspect.mjs` and
  * update this. It is deliberately ONE constant so that can never drift silently again.
+ *
+ * NOTE the sin(pitch) term, which a first version of this constant got wrong by 18%.
+ * `frameMode: 'ground'` does NOT frame `viewWidthUnits` of ground — `camera.ts`'s own
+ * comment records that it actually frames `viewWidthUnits / sin(pitch)`. So to put 578wu
+ * of real ground across the frame at the preview's 58° pitch, the value handed to the rig
+ * must be 578 × sin(58°) ≈ 490. Setting it to 578 framed 682wu instead.
+ *
+ * `mountProp()` deliberately ignores this and fits the camera to the individual prop —
+ * you cannot judge a barrel's detail at gameplay distance. That means **prop isolation
+ * views are NOT shipped scale**, and anything tuned there must be re-checked at
+ * `piece=arena` before it is believed.
  */
-const SHIPPED_SPAN = 578;
+const SHIPPED_SPAN = Math.round(578 * Math.sin((58 * Math.PI) / 180));
 
 const stage = new Stage({
   container,
