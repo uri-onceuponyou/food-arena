@@ -64,7 +64,10 @@ const KPAL = {
   woodSeam: '#9C6A38',
   flour: '#EFE6CE',
 
-  cabinet: '#B5793C',
+  // Pushed more saturated than the original muted tan — see the round-5 saturation
+  // note on `buildMaterials`: cabinets are some of the biggest cover surfaces in
+  // the arena, so their chroma does real work for the overall scene average.
+  cabinet: '#C1731E',
   cabinetDark: '#8A5A2E',
   butcherBlock: '#E4C48C',
   // Shifted from a neutral slate toward a visibly blue-teal steel — this surface is
@@ -74,23 +77,23 @@ const KPAL = {
   // head-on under this rig's key+hemisphere lighting, adds enough specular+clearcoat
   // energy on top of the albedo to blow straight past 1.0 and clip to white — only a
   // genuinely dark base survives with its hue intact once that highlight lands.
-  steel: '#2E4A5C',
-  steelDark: '#20313E',
+  steel: '#184F6E',
+  steelDark: '#0F2E40',
 
-  freezerBody: '#4FA0C2',
+  freezerBody: '#1F9FD1',
   freezerDoor: '#2E88AC',
   freezerTrim: '#2B2B2B',
   // Cold light spilling off the freezer onto the floor in front of its door.
   freezerGlow: '#8FE3FF',
 
-  crateWood: '#C08A46',
+  crateWood: '#CC7E23',
   crateSlat: '#5B3A22',
   burlap: '#D9C08A',
   burlapDark: '#B99D66',
 
   // Cool counterpoint crate — herbs/greens, not another warm produce box. Deep
   // teal-green body reads as "cold storage / fresh herbs" against the orange hub.
-  herbCrateWood: '#2F7A5E',
+  herbCrateWood: '#0E8560',
   herbCrateSlat: '#1E5641',
   herbLeafA: '#3FAE6E',
   herbLeafB: '#2E8F72',
@@ -98,8 +101,8 @@ const KPAL = {
 
   // Decorative tile band ringing the hub — a deliberate cool zone the eye can land
   // on before it reaches the warm scorch/hazard ring at the centre.
-  tealTile: '#3C99A6',
-  tealTileDark: '#2B7681',
+  tealTile: '#0CA8BC',
+  tealTileDark: '#087C8C',
 
   potMetal: '#888D95',
   potMetalDark: '#5B5F66',
@@ -117,6 +120,41 @@ const KPAL = {
   // edge of counters and backsplashes — the "chamfer that catches a different light
   // angle" cue. Never used as a body colour, so it stays legible as an edge accent.
   rimLight: '#F6DFA0',
+
+  // ── Round-5 visual-grammar accents ──────────────────────────────────────────
+  // A critic scored this arena 4/10 for having "one visual grammar applied
+  // uniformly" to blocking cover, the pot hazard, and flat floor decoration — no
+  // object carried a material/outline/shadow language reserved for its own
+  // category. The colours below exist ONLY to carry one of these three languages
+  // and are never reused across categories.
+
+  // BLOCKING — every single CoverBox's kick/base/backsplash band (stove islands,
+  // prep + service counters, freezer, crates, barrels) is repainted this one
+  // near-black plum, and ONLY cover ever uses it. A player should be able to tell
+  // "this collides" from the colour alone, anywhere in the arena, before reading
+  // shape at all.
+  coverPlinth: '#191320',
+
+  // HAZARD — replaces the old pale-gold "crisp ring" that sat almost exactly the
+  // tile's own hue+value (the critic's literal complaint: "faint warm glow,
+  // low-contrast against near-white tile"). A hard-edged black/amber caution-tape
+  // ring traced exactly on the real damage boundary, plus a hotter, more saturated
+  // glow underneath it.
+  hazardStripeBright: '#FFB300',
+  hazardStripeDark: '#241207',
+  hazardGlowHot: '#FF5A1E',
+
+  // Puddle (slow hazard) rims — same "hard bright edge" hazard grammar as the pot,
+  // but a distinct saturated hue per puddle so grease and water stay tellable
+  // apart at a glance. Never used anywhere else.
+  greaseRim: '#D6FF3A',
+  waterRim: '#2FE8FF',
+
+  // New mid-lane cover (see the four `supply_barrel`s below) — a bold saturated
+  // red body found nowhere else in the arena, so it reads as its own landmark
+  // rather than another tan crate.
+  barrelBody: '#C0281F',
+  barrelBodyDark: '#8E1B15',
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -199,6 +237,26 @@ function buildMaterials() {
     // Thin glossy cap trim along backsplash/counter top edges — the one bright,
     // slightly specular accent used purely as an edge highlight (see `addBacksplash`).
     rimLight: glossyMat({ color: KPAL.rimLight, roughness: 0.28 }),
+
+    // ── Round-5 visual-grammar materials ────────────────────────────────────────
+    // BLOCKING's one reserved material. Unlit (flatMat) rather than lit, so it
+    // reads as the same near-black plum from every angle and under every light
+    // change — a lit dark colour this size still picks up enough key-light lift to
+    // drift toward the same mid-brown/mid-slate every OTHER dark trim already used
+    // (cabinetDark, freezerTrim, crateSlat...), which is exactly the "no reserved
+    // material" problem being fixed here.
+    coverPlinth: flatMat(KPAL.coverPlinth),
+
+    // Hazard rim materials — hard-edged, fully opaque, unlit (so they read as a
+    // painted warning marking, not a lit surface that can wash out under the rig's
+    // key light the way the old pale-gold ring did).
+    greaseRim: flatMat(KPAL.greaseRim),
+    waterRim: flatMat(KPAL.waterRim),
+
+    // New mid-lane cover body — glossy like the pot's metal, but a bold saturated
+    // red found nowhere else in the arena.
+    barrelBody: glossyMat({ color: KPAL.barrelBody, roughness: 0.4 }),
+    barrelBodyDark: toonMat({ color: KPAL.barrelBodyDark, roughness: 0.55 }),
 
     // Fake ambient occlusion — a soft dark radial decal dropped under ROUND props
     // (the pot) so they read as sitting ON the floor with real contact darkening,
@@ -444,14 +502,17 @@ function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack
   cabinet.position.y = cabH / 2;
   g.add(cabinet);
 
-  const kick = mesh(roundedBox(wM * 0.98, 0.12, dM * 0.96 + 0.02, 0.02), M.cabinetDark, 'stove_kick');
+  // Kick + backsplash both use `coverPlinth` — the one material reserved for
+  // BLOCKING across every cover prop in the arena (see the KPAL note). Nothing
+  // hazard or decoration ever uses this colour, so it alone signals "this collides."
+  const kick = mesh(roundedBox(wM * 0.98, 0.12, dM * 0.96 + 0.02, 0.02), M.coverPlinth, 'stove_kick');
   kick.position.y = 0.06;
   g.add(kick);
 
   // Back wall + bright cap trim — see `addBacksplash`. Sits further back (-Z) than
   // the pan rack posts below, so on the island that has a rack this reads as "wall
   // behind the hanging pans" rather than clipping through them.
-  addBacksplash(g, M, wM, dM, cabH, M.cabinetDark, 0.46);
+  addBacksplash(g, M, wM, dM, cabH, M.coverPlinth, 0.46);
 
   // Top is deliberately narrower than the cabinet beneath it — from the steep
   // top-down gameplay camera the top face is almost all you see, so leaving a
@@ -516,7 +577,10 @@ function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.Group {
   body.position.y = h / 2;
   g.add(body);
 
-  const base = mesh(roundedBox(wM * 0.98, 0.16, dM * 0.98, 0.03), M.freezerTrim, 'freezer_base');
+  // `coverPlinth`, not `freezerTrim` — the freezer's foot band joins the same
+  // reserved BLOCKING material as every other cover prop's base (handle/vent below
+  // stay `freezerTrim`, since those are per-type accent detail, not the base cue).
+  const base = mesh(roundedBox(wM * 0.98, 0.16, dM * 0.98, 0.03), M.coverPlinth, 'freezer_base');
   base.position.y = 0.08;
   g.add(base);
 
@@ -571,8 +635,10 @@ function buildCrateSmall(M: Materials, wM: number, dM: number): THREE.Group {
   // CoverBox footprint) but a much smaller corner radius — the crate body's own
   // rounding (0.05) pulls its silhouette inward near y=0, while this flatter-cornered
   // foot doesn't, so it still visibly peeks out as a "pallet lip" the crate sits IN
-  // rather than on top of. Same trick `buildStoveIsland`'s kick band already uses.
-  const foot = mesh(roundedBox(wM, 0.09, dM, 0.03), M.crateSlat, 'crate_foot');
+  // rather than on top of. Same trick `buildStoveIsland`'s kick band already uses —
+  // and, as of round 5, the same reserved BLOCKING `coverPlinth` colour, not the
+  // crate's own slat colour.
+  const foot = mesh(roundedBox(wM, 0.09, dM, 0.03), M.coverPlinth, 'crate_foot');
   foot.position.y = 0.045;
   g.add(foot);
   const crate = mesh(roundedBox(wM, h, dM, 0.05), M.crateWood, 'crate_body');
@@ -601,7 +667,7 @@ function buildCrateSmall(M: Materials, wM: number, dM: number): THREE.Group {
 function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h1 = 0.5, h2 = 0.46;
-  const foot = mesh(roundedBox(wM, 0.09, dM, 0.03), M.crateSlat, 'crate_foot');
+  const foot = mesh(roundedBox(wM, 0.09, dM, 0.03), M.coverPlinth, 'crate_foot');
   foot.position.y = 0.045;
   g.add(foot);
   const bottom = mesh(roundedBox(wM, h1, dM, 0.05), M.crateWood, 'crate_bottom');
@@ -634,7 +700,7 @@ function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Group {
 function buildHerbCrate(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h = 0.82;
-  const foot = mesh(roundedBox(wM, 0.09, dM, 0.03), M.herbCrateSlat, 'crate_foot');
+  const foot = mesh(roundedBox(wM, 0.09, dM, 0.03), M.coverPlinth, 'crate_foot');
   foot.position.y = 0.045;
   g.add(foot);
   const crate = mesh(roundedBox(wM, h, dM, 0.05), M.herbCrateWood, 'crate_body');
@@ -696,10 +762,10 @@ function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBl
   const cabinet = mesh(roundedBox(wM * 0.98, h, dM * 0.94, 0.06), M.cabinet, 'prep_cabinet');
   cabinet.position.y = h / 2;
   g.add(cabinet);
-  const kick = mesh(roundedBox(wM * 0.98, 0.12, dM * 0.94 + 0.02, 0.02), M.cabinetDark, 'prep_kick');
+  const kick = mesh(roundedBox(wM * 0.98, 0.12, dM * 0.94 + 0.02, 0.02), M.coverPlinth, 'prep_kick');
   kick.position.y = 0.06;
   g.add(kick);
-  addBacksplash(g, M, wM, dM, h, M.cabinetDark, 0.3);
+  addBacksplash(g, M, wM, dM, h, M.coverPlinth, 0.3);
   const top = mesh(roundedBox(wM * 0.82, 0.08, dM * 0.72, 0.04), M.butcherBlock, 'prep_top');
   top.position.y = h + 0.04;
   g.add(top);
@@ -727,13 +793,13 @@ function buildServiceCounter(M: Materials, wM: number, dM: number, variant: 'fry
   const cabinet = mesh(roundedBox(wM * 0.98, h, dM * 0.95, 0.06), M.cabinetDark, 'service_cabinet');
   cabinet.position.y = h / 2;
   g.add(cabinet);
-  // The cabinet body here is ALREADY cabinetDark, so the kick needs a further step
-  // down in value (freezerTrim, near-black) to still read as a distinct foot band
-  // rather than disappearing into the body it's attached to.
-  const kick = mesh(roundedBox(wM * 0.98, 0.1, dM * 0.95 + 0.02, 0.02), M.freezerTrim, 'service_kick');
+  // The cabinet body here is ALREADY cabinetDark, so the kick uses the reserved
+  // BLOCKING `coverPlinth` (near-black) to read as a distinct foot band rather than
+  // disappearing into the body it's attached to.
+  const kick = mesh(roundedBox(wM * 0.98, 0.1, dM * 0.95 + 0.02, 0.02), M.coverPlinth, 'service_kick');
   kick.position.y = 0.05;
   g.add(kick);
-  addBacksplash(g, M, wM, dM, h, M.freezerTrim, 0.32);
+  addBacksplash(g, M, wM, dM, h, M.coverPlinth, 0.32);
   const top = mesh(roundedBox(wM * 0.8, 0.09, dM * 0.74, 0.05), M.steel, 'service_top');
   top.position.y = h + 0.045;
   g.add(top);
@@ -772,6 +838,10 @@ function buildServiceCounter(M: Materials, wM: number, dM: number, variant: 'fry
 function buildLanePots(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const base = Math.min(wM, dM);
+  // Reserved BLOCKING foot disc — see the `coverPlinth` note on `buildStoveIsland`.
+  const plinth = mesh(puck(base * 0.46, 0.05, 16), M.coverPlinth, 'stack_pot_plinth');
+  plinth.position.y = 0.025;
+  g.add(plinth);
   let y = 0;
   const radii = [base * 0.42, base * 0.34, base * 0.24];
   for (let i = 0; i < radii.length; i++) {
@@ -792,6 +862,12 @@ function buildLanePots(M: Materials, wM: number, dM: number): THREE.Group {
 function buildSpiceCart(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h = 0.62;
+  // Reserved BLOCKING skid plate under the wheels — same `coverPlinth` every other
+  // cover prop's foot band uses, so the cart reads as collidable at a glance even
+  // though its body colour (below) is its own cool teal, not a shared cover hue.
+  const skid = mesh(roundedBox(wM * 0.7, 0.05, dM * 0.7, 0.04), M.coverPlinth, 'cart_skid');
+  skid.position.y = 0.025;
+  g.add(skid);
   // Cool teal body, not the warm cabinetDark used everywhere else — this cart sits
   // dead-centre in the hub chokepoint and is one of the very few props guaranteed
   // to be on-screen in every gameplay frame, so its hue does real work for palette
@@ -816,6 +892,54 @@ function buildSpiceCart(M: Materials, wM: number, dM: number): THREE.Group {
     g.add(jar);
     jx += wM * 0.19;
   }
+  return g;
+}
+
+/**
+ * Supply barrel — new mid-lane cover (round 5's "open plaza" fix: the critic asked
+ * for 3-5 obstacles between the two spawns to break the dead-straight sightline
+ * that ran through the hub). A single bold cylinder in a saturated red found
+ * nowhere else in the arena, so it reads as its own landmark rather than another
+ * tan crate, carrying the same reserved BLOCKING `coverPlinth` foot+bung every other
+ * cover prop's base uses.
+ */
+function buildSupplyBarrel(M: Materials, wM: number, dM: number, opts?: { dark?: boolean }): THREE.Group {
+  const g = new THREE.Group();
+  const base = Math.min(wM, dM);
+  const r = base * 0.42;
+  const h = base * 0.62;
+
+  const plinth = mesh(puck(r * 1.04, 0.05, 20), M.coverPlinth, 'barrel_plinth');
+  plinth.position.y = 0.025;
+  g.add(plinth);
+
+  const body = mesh(puck(r, h, 20), opts?.dark ? M.barrelBodyDark : M.barrelBody, 'barrel_body');
+  body.position.y = 0.05 + h / 2;
+  g.add(body);
+
+  for (const frac of [0.26, 0.76]) {
+    const hoop = mesh(new THREE.TorusGeometry(r * 1.01, r * 0.08, 6, 18), M.potMetalDark, 'barrel_hoop');
+    hoop.rotation.x = Math.PI / 2;
+    hoop.position.y = 0.05 + h * frac;
+    g.add(hoop);
+  }
+
+  // Thin metal lid rim tracing the top edge — NOT a large dark disc. An earlier pass
+  // used a `coverPlinth` cap at 90% of the body's own radius, which from the steep
+  // top-down gameplay camera covered almost the whole top face and read as a hollow
+  // bucket interior rather than a barrel lid. This keeps the body's own red top face
+  // as the dominant colour, with only a thin rim + small centre bung in the
+  // reserved BLOCKING colour.
+  const lidRim = mesh(new THREE.TorusGeometry(r * 0.94, r * 0.07, 6, 20), M.potMetalDark, 'barrel_lid_rim');
+  lidRim.rotation.x = Math.PI / 2;
+  lidRim.position.y = 0.05 + h + 0.01;
+  g.add(lidRim);
+
+  const bung = mesh(puck(r * 0.22, 0.035, 14), M.coverPlinth, 'barrel_bung__no_outline');
+  bung.position.y = 0.05 + h + 0.018;
+  noOutline(bung);
+  g.add(bung);
+
   return g;
 }
 
@@ -994,19 +1118,65 @@ function makeHazardGlowTexture(): THREE.CanvasTexture {
   const cx = size / 2, cy = size / 2, R = size * 0.5;
   const ringNorm = 0.84;
 
+  // Round-5: re-tinted hotter and more saturated. The old peak (`255,240,195` —
+  // effectively pale near-white) is exactly what let this glow disappear into a
+  // near-white tile under additive blending; a saturated hot red-orange peak still
+  // reads as heat even where the additive sum lifts the floor's own bright channels.
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
-  g.addColorStop(0, 'rgba(255,140,60,0)');
-  g.addColorStop(Math.max(0, ringNorm - 0.22), 'rgba(255,120,50,0)');
-  g.addColorStop(ringNorm - 0.07, 'rgba(255,130,55,0.2)');
-  g.addColorStop(ringNorm - 0.02, 'rgba(255,214,140,0.65)');
-  g.addColorStop(ringNorm, 'rgba(255,240,195,0.95)');
-  g.addColorStop(ringNorm + 0.025, 'rgba(255,170,80,0.5)');
-  g.addColorStop(ringNorm + 0.09, 'rgba(255,110,40,0.16)');
-  g.addColorStop(1, 'rgba(255,90,30,0)');
+  g.addColorStop(0, 'rgba(255,90,30,0)');
+  g.addColorStop(Math.max(0, ringNorm - 0.22), 'rgba(255,70,20,0)');
+  g.addColorStop(ringNorm - 0.07, 'rgba(255,80,25,0.3)');
+  g.addColorStop(ringNorm - 0.02, 'rgba(255,110,20,0.7)');
+  g.addColorStop(ringNorm, 'rgba(255,60,10,1.0)');
+  g.addColorStop(ringNorm + 0.025, 'rgba(230,35,15,0.6)');
+  g.addColorStop(ringNorm + 0.09, 'rgba(190,20,10,0.22)');
+  g.addColorStop(1, 'rgba(160,15,10,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
 
   const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Tileable black/amber diagonal "caution tape" stripe — the hazard boundary's new
+ * hard edge. The old crisp ring used a flat pale-gold fill (`#FFDCA0`) composited
+ * with normal alpha blending at 0.8 opacity, which is nearly the SAME hue+value as
+ * the tile itself (`tileLight` is `#EAD3A8`) — that near-match, not the blend mode,
+ * is why it vanished into the floor ("faint warm glow, low-contrast against
+ * near-white tile"). A black/amber stripe pattern can't blend into a warm pale
+ * floor no matter how it's composited, which is the actual fix; the wide value gap
+ * (near-black stripes next to saturated amber ones) is what "unmissable" requires.
+ */
+function makeHazardStripeTexture(): THREE.CanvasTexture {
+  const w = 128, h = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = KPAL.hazardStripeDark;
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = KPAL.hazardStripeBright;
+  const stripeW = 20;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, w, h);
+  ctx.clip();
+  for (let x = -h; x < w + h; x += stripeW * 2) {
+    ctx.beginPath();
+    ctx.moveTo(x, h);
+    ctx.lineTo(x + h, 0);
+    ctx.lineTo(x + h + stripeW, 0);
+    ctx.lineTo(x + stripeW, h);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.needsUpdate = true;
   return tex;
 }
@@ -1047,11 +1217,18 @@ function buildHazardGround(M: Materials): HazardGround {
   glow.renderOrder = 2;
   g.add(glow);
 
-  // Crisp crest line right on the boundary — the "bright defined edge" the glow
-  // alone can't quite give at gameplay camera distance.
+  // HAZARD's reserved hard edge: a black/amber caution-tape ring traced EXACTLY on
+  // the real damage boundary (same `R` the gameplay hazard uses — see the file
+  // header on `buildHazardGround`). Opaque, normally-blended (not additive like
+  // `glow` above), roughly 8x wider than the old crisp line, so it cannot wash out
+  // against the pale floor the way the additive glow's near-white peak did.
+  const stripeHalfWidth = Math.max(0.09, R * 0.05);
+  const stripeTex = makeHazardStripeTexture();
+  const stripeRepeat = Math.max(8, Math.round((2 * Math.PI * R) / 1.0));
+  stripeTex.repeat.set(stripeRepeat, 1);
   const crisp = mesh(
-    new THREE.RingGeometry(R - 0.03, R + 0.03, 64),
-    flatMat('#FFDCA0', { transparent: true, opacity: 0.8 }),
+    new THREE.RingGeometry(R - stripeHalfWidth, R + stripeHalfWidth, 96),
+    new THREE.MeshBasicMaterial({ map: stripeTex }),
     'hazard_ring_crisp'
   );
   crisp.rotation.x = -Math.PI / 2;
@@ -1471,6 +1648,31 @@ export const createKitchenArena: ArenaFactory = () => {
     build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
   });
 
+  // ── Mid-lane supply barrels ───────────────────────────────────────────────────
+  // The straight run from each spawn to the hub was open floor along its centre
+  // line: the prep-station pairs above sit at y=420/580 (offset ±80 from the
+  // y=500 centreline), leaving a clear ~105-unit-wide channel a player could stand
+  // in at spawn and see straight down to the opposing spawn. These four barrels
+  // sit squarely IN that channel — two per lane, staggered front/back rather than
+  // one solid wall, so the sightline is broken twice and there's still room to
+  // dodge around each individually instead of the lane just being sealed.
+  addCover(propsGroup, cover, M, {
+    x: 250, y: 500, w: 60, h: 50, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 460, y: 500, w: 48, h: 46, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 250, y: ARENA_H - 500, w: 60, h: 50, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 460, y: ARENA_H - 500, w: 48, h: 46, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
+  });
+
   // ── Service counters (fryer south / sink north) ──────────────────────────────
   addCover(propsGroup, cover, M, {
     x: CENTER.x, y: 830, w: 150, h: 70, kind: 'fryer_counter',
@@ -1482,7 +1684,12 @@ export const createKitchenArena: ArenaFactory = () => {
   });
 
   root.add(propsGroup);
-  outlineGroup(propsGroup, 0.006);
+  // BLOCKING gets the heaviest ink line in the arena — roughly 2.5x the pot's own
+  // outline and far past anything decoration ever carries (decoration is never
+  // outlined at all; see `buildFloor`). A thin 0.006 line was invisible at gameplay
+  // camera distance next to the coverPlinth swap above; this is the other half of
+  // "a heavier outline than anything else" from the round-5 brief.
+  outlineGroup(propsGroup, 0.016);
 
   // ── Central hazard — the boiling pot ─────────────────────────────────────────
   const pot = buildPot(M);
@@ -1511,13 +1718,32 @@ export const createKitchenArena: ArenaFactory = () => {
 
   const puddleGroup = new THREE.Group();
   noOutline(puddleGroup);
-  for (const [p, mat] of [[puddleSouth, M.grease], [puddleNorth, M.water]] as const) {
+  // Every puddle gets the SAME hazard grammar as the pot: a hard, opaque, saturated
+  // rim traced exactly on its real slow-radius, in a hue reserved for hazard rims
+  // only (`greaseRim`/`waterRim` — never reused on cover or decoration). Without
+  // this the puddles were just another softly-shaded coloured disc, indistinguishable
+  // in kind from the tealTile floor patches.
+  for (const [p, mat, rimMat] of [
+    [puddleSouth, M.grease, M.greaseRim],
+    [puddleNorth, M.water, M.waterRim],
+  ] as const) {
+    const gp = groundPos(p.x, p.y);
     const disc = mesh(new THREE.CircleGeometry(wu(p.radius), 32), mat, 'puddle');
     disc.rotation.x = -Math.PI / 2;
-    const gp = groundPos(p.x, p.y);
     disc.position.set(gp.x, FLOOR_Y.decal, gp.z);
     noOutline(disc);
     puddleGroup.add(disc);
+
+    const rimW = wu(p.radius) * 0.14;
+    const rim = mesh(
+      new THREE.RingGeometry(wu(p.radius) - rimW, wu(p.radius) + rimW * 0.3, 40),
+      rimMat,
+      'puddle_hazard_rim'
+    );
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.set(gp.x, FLOOR_Y.fine, gp.z);
+    noOutline(rim);
+    puddleGroup.add(rim);
   }
   root.add(puddleGroup);
 
@@ -1543,7 +1769,10 @@ export const createKitchenArena: ArenaFactory = () => {
   const boardPos = groundPos(600, 760);
   board.position.set(boardPos.x, 0, boardPos.z);
   board.rotation.y = THREE.MathUtils.degToRad(20);
-  outlineGroup(board, 0.005);
+  // No outline here, deliberately: the chalkboard has no CoverBox — it's pure
+  // DECORATION — and decoration is never outlined anywhere else in the arena (see
+  // `buildFloor`). Outlining it would borrow BLOCKING's now much-heavier ink line
+  // and falsely suggest this collides.
   root.add(board);
 
   // ── Ambient dust ──────────────────────────────────────────────────────────────
