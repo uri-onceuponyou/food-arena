@@ -442,29 +442,77 @@ authored, hue semiotics were never really under the author's control.
 lighting change. Note the art direction genuinely is hyper-saturated — the fix is a
 saturation curve that does not clip channels, not simply turning saturation down.
 
-### The colour-clamp finding did NOT hold up — measure before you compensate
+### THE COLOUR GRADE WAS DESTROYING A FIFTH OF THE FRAME — found, retracted, re-confirmed
 
-The `rgb(0,161,176)` probe above was real, but a later measurement of authored-vs-rendered
-swatches found **hue faithful to within 2° and no channel crushed to zero**:
+**Status: real, fixed.** This finding was reported, then wrongly retracted by me, then
+confirmed with a much stronger measurement. The retraction happened because the probe
+that "disproved" it was taken with the lighting agent's in-flight FIX already in the tree.
+I noted that caveat at the time and under-weighted it. **Do not re-litigate this.**
 
-| swatch | authored | rendered | Δsat | Δhue |
-|---|---|---|---|---|
-| `grease #B08A2E` | h42 s0.74 | h41 s0.96 | +0.22 | −1° |
-| `waterRim #2FE8FF` | h187 s0.82 | h185 s0.99 | +0.17 | −2° |
+Measured with unlit `MeshBasicMaterial` swatches, so the pixel entering the composer IS
+the authored colour and lighting is out of the equation:
 
-Caveat worth keeping: that measurement was taken with a lighting agent's in-flight grade
-in the tree, so it is possible the clamp was real and had just been fixed. Either way the
-conclusion for authors is the same — **hue is under your control; measure the current
-build rather than compensating for a clamp that may not be there.**
+| authored | before | after |
+|---|---|---|
+| `freezerDoor` #2E88AC (46,136,172) | **(0,140,200)** | (4,145,204) |
+| `steel` #184F6E (24,79,110) | **(0,68,119)** | (2,68,117) |
+| `cabinet` #C1731E (193,115,30) | (233,99,**0**) hue −5.8° | (220,109,2) hue −1.8° |
+| `tileLight` #EAD3A8 (234,211,168) | (**255**,232,149) | (250,221,148) |
 
-So the hazards cap was NOT colour semiotics. `greaseRim #D6FF3A` is s0.77/v1.00 *before*
-any grade. The authored colours are simply neon, and the puddles read as MOBA pickup pads
-because that is what they were painted as. Five rounds were spent litigating "which hue
-means slow" while the file that owned the loud hue was out of that agent's scope.
+**8 of 12 palette colours lost a channel outright, and all 8 arrived at HSV saturation
+exactly 1.00** — an authored range of 0.56–0.89 collapsing onto a single value. Saturation
+had stopped being a dimension the palette could use at all. Across the whole frame: 9.39%
+of pixels with a channel pinned at 0, 10.60% pinned at 255.
 
-**The lesson is the general one:** a plausible mechanism measured once is a hypothesis,
-not a finding. This one was written into PROGRESS as fact and briefed to two agents before
-anything re-measured it.
+**Mechanism**, verified by dumping the generated `EffectPass` shader rather than inferred:
+`HueSaturationEffect` extrapolates each channel away from the arithmetic mean of **linear**
+RGB, and `postprocessing` runs it in linear light — the sRGB transfer is only inserted
+later, for contrast. In linear the mean is dominated by the brightest channel, so the
+dimmest goes negative at gain 1/(1.001−0.32)=1.47×, and nothing clamps in between
+(HalfFloat, one shader), so the negative survives to the framebuffer write.
+`BrightnessContrastEffect` compounded it: 1.22× about 0.5 in sRGB sends anything below
+23/255 to black and above 232/255 to white.
+
+Replaced by `ToyGradeEffect` (sRGB space, saturation about Rec.709 luma, per-pixel soft
+knee at the gain where the first channel would reach a bound). **0/12 clipped, max hue
+error 3.9°.** Saturation was NOT reduced — measured on-screen mean HSV saturation rose
+0.503 → 0.515.
+
+#### THE CONSTRAINT EVERY COLOUR AUTHOR NOW WORKS TO
+**Author the colour you actually want. Stop pre-compensating.** Hue arrives within ~4°,
+saturation is monotone in what you author, and the destruction threshold moved from
+**~47/255 down to ~10/255** (authored channels ≥12 survive; ≤8 still round to 0). Expect
+roughly +0.1 HSV saturation and essentially unchanged hue and value on screen.
+
+**Anything colour-tuned before this fix was tuned against a distortion and should be
+re-measured** — including the hazard palette, `KPAL.butcherBlock`/`cabinet` (~15% too hot
+in red: 5.94% of frame at R≥253 vs 0.27% in reference), and every "heavy orange grout"
+verdict. That complaint was never an albedo problem.
+
+### SSAO was contributing EXACTLY ZERO, at every framing, for the whole project
+
+A/B with the effect's blend skipped: **mean 0.0000/255, max 0, 0.00% of pixels** — in the
+live match, the character preview *and* the arena preview. One knob:
+`worldProximityThreshold: 0.5` rejects any tap whose linear-depth difference from the
+centre exceeds it, and on a 58°-pitched ground plane under a 300m far plane every tap
+exceeds 0.5m.
+
+**So every score this element ever received was a score without AO**, and the rounds that
+"pulled the radius back to fine-seam duty" (0.16→0.11→0.07) were tuning a dead pass.
+Revived it produces broad low-frequency floor dimming rather than contact seams (a
+character is ~70px tall at shipped framing) — precisely the third darkening layer that
+scored 3/10. Now off by default, kept behind `ao: true` with the dead knob repaired.
+
+### Three things all three lighting critics agreed on — none fixable in `lighting.ts`
+
+1. **Hero and floor share a hue family** (warm orange on warm terracotta), so hue does no
+   separation work. Both references solve this at the CHARACTER level, not globally.
+   → `floor.ts` / character owners.
+2. **Large flat surfaces have no internal gradient and physically cannot.** Measured
+   p90−p10 across the big apron quad: **0.003**. One normal, directional light, constant
+   output. The barrel's *curved* skirt by contrast ramps 0.276→0.323. Two of three critics
+   spent their #1 fix on this. It needs baked gradient/AO in the albedo.
+3. **Red is railed on the warm props** — safe to fix now the grade no longer distorts it.
 
 ### Critics can contradict each other into a standstill — use an objective test
 
