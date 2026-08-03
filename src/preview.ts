@@ -79,6 +79,19 @@ const background = bgParam ? Number(`0x${bgParam.replace('#', '')}`) : isArena ?
 // proportionally to how much ground the shot needs to show.
 const arenaFog = arenaView === 'overview' ? { near: 100, far: 260 } : { near: 40, far: 130 };
 
+/**
+ * Horizontal world span, in world units, that the SHIPPED game shows at 16:9.
+ *
+ * Derived from the fair-play camera rather than picked by eye: `tools/aspect.mjs`
+ * reports halfW = 289wu at 16:9 for the current FAIR_PLAY radius, so the full span is
+ * ~578wu. Isolation views must match this or a critic is scoring our harness, not the
+ * game — see the note at the `viewWidthUnits` call site.
+ *
+ * If the fair radius changes again, re-read halfW from `node tools/aspect.mjs` and
+ * update this. It is deliberately ONE constant so that can never drift silently again.
+ */
+const SHIPPED_SPAN = 578;
+
 const stage = new Stage({
   container,
   background,
@@ -87,7 +100,16 @@ const stage = new Stage({
     pitchDeg: params.has('pitch') ? Number(params.get('pitch')) : 58,
     yawDeg: params.has('yaw') ? Number(params.get('yaw')) : 0,
     frameMode: 'ground',
-    viewWidthUnits: arenaView === 'overview' ? 1600 : 265,
+    // SHIPPED_SPAN, not a hand-picked zoom. These isolation views sat at 265 while the
+    // game showed ~928wu, so every arena/floor/prop loop was judging at ~3.5x the zoom
+    // anyone plays at. That is not a cosmetic mismatch — re-shooting the floor at real
+    // framing sorted its work into three piles: the low-frequency lighting gradient
+    // SURVIVES and is the only thing carrying the floor at distance; tile bevels, the
+    // high-frequency grain and per-tile jitter VANISH entirely; and tile scale INVERTS
+    // (25wu, sized to look right at 265, puts 36 tiles across a real frame with ~1px
+    // joints — an aliasing generator). It also hid a decal z-fighting bug completely.
+    // Judge at the distance the game is played at, or the score measures the harness.
+    viewWidthUnits: arenaView === 'overview' ? 1600 : SHIPPED_SPAN,
     followLerp: 1,
   } : {
     pitchDeg: params.has('pitch') ? Number(params.get('pitch')) : 22,
@@ -291,7 +313,7 @@ function mountFloorOnly() {
   const ty = params.has('ty') ? Number(params.get('ty')) : 500;
   const c = groundPos(tx, ty);
   stage.rig.frameMode = 'ground';
-  stage.rig.viewWidthUnits = params.has('zoom') ? Number(params.get('zoom')) : 265;
+  stage.rig.viewWidthUnits = params.has('zoom') ? Number(params.get('zoom')) : SHIPPED_SPAN;
   stage.rig.pitchDeg = params.has('pitch') ? Number(params.get('pitch')) : 58;
   stage.rig.snapTo(c.x, c.z);
   stage.lighting.focus(c.x, c.z, 30);
