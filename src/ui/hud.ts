@@ -34,6 +34,12 @@ export interface Hud {
   setCharacters(playerId: CharacterId, enemyId: CharacterId): void;
   /** Position the floating name+health pills above each fighter's head. Pass null to hide one. */
   updateFloatingBars(player: ScreenPoint | null, enemy: ScreenPoint | null, player01: number, enemy01: number): void;
+  /** Spawn a rising, fading damage/heal number at a screen point. Pooled — safe to
+   * call as often as hits land, never allocates a new DOM node. */
+  spawnDamageNumber(point: ScreenPoint, amount: number, opts?: { heal?: boolean }): void;
+  /** Brief full-viewport radial flash, tinted `color` — reserved for genuinely
+   * screen-filling moments (Lollipop's Giant Lollipop). Always pointer-events:none. */
+  flashScreen(color: string): void;
   dispose(): void;
 }
 
@@ -107,6 +113,9 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         <div class="hud-float-name" data-el="float-enemy-name"></div>
         <div class="hud-float-bar"><div class="hud-float-fill" data-el="float-enemy-fill"></div></div>
       </div>
+
+      <div class="hud-dmg-layer" data-el="dmg-layer"></div>
+      <div class="hud-screenflash" data-el="screenflash"></div>
     </div>
   `;
 
@@ -135,6 +144,30 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const floatEnemyName = q<HTMLDivElement>('float-enemy-name');
   const floatPlayerFill = q<HTMLDivElement>('float-player-fill');
   const floatEnemyFill = q<HTMLDivElement>('float-enemy-fill');
+
+  const dmgLayer = q<HTMLDivElement>('dmg-layer');
+  const screenflashEl = q<HTMLDivElement>('screenflash');
+
+  // Pooled floating damage/heal numbers — pre-created once, cycled round-robin, so
+  // spawning one on every hit never allocates a DOM node.
+  const DMG_POOL_SIZE = 24;
+  const dmgPool: HTMLDivElement[] = [];
+  let dmgCursor = 0;
+  for (let i = 0; i < DMG_POOL_SIZE; i++) {
+    const el = document.createElement('div');
+    el.className = 'hud-dmg';
+    dmgLayer.appendChild(el);
+    dmgPool.push(el);
+  }
+
+  function hexToRgba(hex: string, alpha: number): string {
+    const c = hex.replace('#', '');
+    const full = c.length === 3 ? c.split('').map((ch) => ch + ch).join('') : c;
+    const r = parseInt(full.slice(0, 2), 16) || 0;
+    const g = parseInt(full.slice(2, 4), 16) || 0;
+    const b = parseInt(full.slice(4, 6), 16) || 0;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
 
   gameoverBtn.addEventListener('click', () => callbacks.onRestart());
 
@@ -223,6 +256,29 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       } else {
         floatEnemy.style.display = 'none';
       }
+    },
+
+    spawnDamageNumber(point, amount, opts) {
+      const el = dmgPool[dmgCursor];
+      dmgCursor = (dmgCursor + 1) % dmgPool.length;
+      const heal = !!opts?.heal;
+      const big = amount >= 15;
+      const medium = !big && amount >= 6;
+      el.style.setProperty('--x', `${point.x.toFixed(1)}px`);
+      el.style.setProperty('--y', `${point.y.toFixed(1)}px`);
+      el.textContent = heal ? `+${Math.round(amount)}` : `-${Math.round(amount)}`;
+      el.className = `hud-dmg ${big ? 'hud-dmg--big' : medium ? 'hud-dmg--medium' : 'hud-dmg--small'}${heal ? ' hud-dmg--heal' : ''}`;
+      // Force a reflow between resetting the class and re-adding `is-playing` so the
+      // CSS animation restarts even when this pooled element is reused mid-animation.
+      void el.offsetWidth;
+      el.classList.add('is-playing');
+    },
+
+    flashScreen(color) {
+      screenflashEl.style.setProperty('--flash-color', hexToRgba(color, 0.42));
+      screenflashEl.classList.remove('is-playing');
+      void screenflashEl.offsetWidth;
+      screenflashEl.classList.add('is-playing');
     },
 
     dispose() {
@@ -497,6 +553,60 @@ const CSS = `
 .hud-float-fill { height: 100%; transition: width 0.15s ease-out; }
 .hud-float--player .hud-float-fill { background: #3FCB86; }
 .hud-float--enemy .hud-float-fill { background: #E6493F; }
+
+/* ── Floating damage/heal numbers ─────────────────────────────────────────── */
+/* NEVER interactive: this layer sits over the whole canvas and a stray
+   pointer-events:auto here would silently swallow every click on the game below it. */
+.hud-dmg-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.hud-dmg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  color: #FFF3DE;
+  -webkit-text-stroke: 2px #1a1224;
+  text-shadow: 0 2px 0 rgba(0,0,0,0.4);
+  white-space: nowrap;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.hud-dmg.is-playing {
+  animation: hud-dmg-rise 0.85s cubic-bezier(0.15, 0.8, 0.3, 1) forwards;
+}
+@keyframes hud-dmg-rise {
+  0%   { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(0.55); opacity: 0; }
+  14%  { transform: translate(var(--x), var(--y)) translate(-50%, -66%) scale(1.18); opacity: 1; }
+  30%  { transform: translate(var(--x), var(--y)) translate(-50%, -76%) scale(1); opacity: 1; }
+  100% { transform: translate(var(--x), calc(var(--y) - 68px)) translate(-50%, -50%) scale(0.92); opacity: 0; }
+}
+.hud-dmg--small { font-size: 16px; }
+.hud-dmg--medium { font-size: 25px; color: #FFD873; }
+.hud-dmg--big { font-size: 36px; color: #FF6B5C; }
+.hud-dmg--heal { color: #6FE0A8; }
+
+/* ── Screen-filling ultimate flash (Giant Lollipop) ───────────────────────── */
+.hud-screenflash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.55), var(--flash-color, rgba(230,57,70,0.32)) 42%, rgba(230,57,70,0) 72%);
+}
+.hud-screenflash.is-playing {
+  animation: hud-screenflash-pop 0.46s ease-out forwards;
+}
+@keyframes hud-screenflash-pop {
+  0%   { opacity: 0; }
+  10%  { opacity: 0.85; }
+  100% { opacity: 0; }
+}
 
 @media (max-width: 720px) {
   .hud-fighter-name { font-size: 12px; }

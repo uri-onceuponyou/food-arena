@@ -33,6 +33,11 @@ import * as THREE from 'three';
 import { toonMat, roundedBox } from '../render/toon';
 import { CHARACTER_HEIGHT } from '../units';
 
+/** Attachment points `dressLimbs` can replace. */
+export type LimbPart =
+  | 'upperArmL' | 'upperArmR' | 'forearmL' | 'forearmR' | 'handL' | 'handR'
+  | 'thighL' | 'thighR' | 'shinL' | 'shinR' | 'footL' | 'footR';
+
 export interface RigPalette {
   /** Limb colour. Usually a tone from the character's own food palette. */
   limb: THREE.ColorRepresentation;
@@ -214,6 +219,9 @@ export class ChibiRig {
     const solid = (m: THREE.Mesh) => {
       m.castShadow = true;
       m.receiveShadow = true;
+      // Tagged so dressLimbs() can find and remove exactly the rig's own defaults
+      // without disturbing anything a character has added to the same joint.
+      m.userData.rigDefaultLimb = true;
       return m;
     };
 
@@ -285,6 +293,56 @@ export class ChibiRig {
       m.name = `${name}_mesh`;
       joint.add(m);
     }
+  }
+
+  /**
+   * Replace the default limb, hand and foot geometry with character-authored parts.
+   *
+   * ── Why this exists ────────────────────────────────────────────────────────
+   * An independent art director scored the cast 3/10 and named this as the single
+   * biggest problem: "every character reuses the same snowman-body-plus-ball-joints
+   * skeleton with a different head glued on." Sharing a SKELETON is correct — it buys
+   * poseability, one motion vocabulary and a consistent scale. Sharing the same
+   * capsule limbs and ball hands on every character is what reads as a template.
+   *
+   * So: keep the joints, replace the meshes. `build` is called once per attachment
+   * point and should return geometry sized to `size` (metres) hanging DOWN from the
+   * joint origin, matching how the defaults are built.
+   */
+  dressLimbs(build: (part: LimbPart, size: { len: number; radius: number }) => THREE.Object3D | null): void {
+    for (const [part, joint, spec] of this.limbSlots()) {
+      for (const child of [...joint.children]) {
+        const m = child as THREE.Mesh;
+        if (m.isMesh && m.userData.rigDefaultLimb) {
+          joint.remove(m);
+          m.geometry.dispose();
+        }
+      }
+      const replacement = build(part, spec);
+      if (replacement) joint.add(replacement);
+    }
+  }
+
+  private limbSlots(): Array<[LimbPart, THREE.Group, { len: number; radius: number }]> {
+    const j = this.joints;
+    const p = this.p;
+    const upper = p.height * 0.115;
+    const fore = p.height * 0.105;
+    const legH = p.height * 0.26;
+    return [
+      ['upperArmL', j.shoulderL, { len: upper, radius: p.armRadius }],
+      ['upperArmR', j.shoulderR, { len: upper, radius: p.armRadius }],
+      ['forearmL', j.elbowL, { len: fore, radius: p.armRadius * 0.92 }],
+      ['forearmR', j.elbowR, { len: fore, radius: p.armRadius * 0.92 }],
+      ['handL', j.handL, { len: p.handRadius * 2, radius: p.handRadius }],
+      ['handR', j.handR, { len: p.handRadius * 2, radius: p.handRadius }],
+      ['thighL', j.hipL, { len: legH * 0.52, radius: p.legRadius }],
+      ['thighR', j.hipR, { len: legH * 0.52, radius: p.legRadius }],
+      ['shinL', j.kneeL, { len: legH * 0.34, radius: p.legRadius * 0.9 }],
+      ['shinR', j.kneeR, { len: legH * 0.34, radius: p.legRadius * 0.9 }],
+      ['footL', j.footL, { len: p.legRadius * 2.3, radius: p.legRadius * 1.15 }],
+      ['footR', j.footR, { len: p.legRadius * 2.3, radius: p.legRadius * 1.15 }],
+    ];
   }
 
   /**
