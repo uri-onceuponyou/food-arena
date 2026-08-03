@@ -20,6 +20,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
 import { ChibiRig } from './rig';
+import { bodyType } from './bodies';
 
 const GLAZE = PALETTE.glaze;      // #FF9EC4
 const DOUGH = '#F0C070';
@@ -38,28 +39,6 @@ const LIMB_PINK = '#F0729B';
 const LIMB_PINK_DARK = '#D14E7C';
 
 const SPRINKLE_COLORS = ['#E63946', '#7CB518', '#FFC93C', '#7C4DFF', '#2E86D8', '#FFFFFF'];
-
-/**
- * Local stand-in for `ChibiRig`'s intended `dressTorso`/`torsoSize` — at the time of
- * writing `rig.ts` documents the pattern (see its torso comment) but does not yet
- * expose either, and this file is not allowed to touch `rig.ts`. Reads the real size
- * off the default torso mesh's geometry (so it stays correct even if rig proportions
- * are retuned later), then swaps it out for character geometry parented the same way
- * the default was — a child of `rig.joints.torso`, so it inherits the rig's own
- * breathing/lean/run animation for free.
- */
-function dressTorso(rig: ChibiRig, build: (size: { w: number; h: number; d: number }) => THREE.Object3D): void {
-  let size = { w: 0.42, h: 0.5, d: 0.32 };
-  const old = rig.torsoMesh;
-  if (old) {
-    old.geometry.computeBoundingBox();
-    const bb = old.geometry.boundingBox;
-    if (bb) size = { w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z };
-    old.parent?.remove(old);
-    old.geometry.dispose();
-  }
-  rig.joints.torso.add(build(size));
-}
 
 /**
  * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
@@ -136,21 +115,20 @@ export class DonutCharacter extends BaseCharacter {
         torso: DOUGH,
         limbRoughness: 0.72,
       },
-      // Round and bouncy, mid everything — proportions stay close to the shared rig
-      // defaults (unlike her five castmates, all pushed hard toward an extreme) so
-      // Donut reads as the cast's baseline "regular" body against which the wide
-      // Hamburger, lean Taco, tall Burrito, tiny Egg and gangly Lollipop all measure
-      // themselves as visibly different. Nudged up only slightly for a plumper,
-      // rounder read (a fraction bigger hands/head, a touch wider stance).
-      proportions: {
+      // Body: STUB archetype (see `bodies.ts`) — no torso at all, head straight
+      // onto the hips, very short thick limbs, wide stance. A donut is a ring:
+      // it has no neck and no waist to model, and giving it one was the reason
+      // this character read as "a torus balanced on the cast's standard body".
+      // As a STUB the ring IS the body and the whole silhouette is the landmark.
+      //
+      // `shoulderWidth` is a STUB-specific hand-fit: the arms have to clear the
+      // ring's outer radius (1.04R) at shoulder height, where the torus is
+      // ~0.86R wide. See the STUB notes in `bodies.ts`.
+      proportions: bodyType('stub', {
         height: 2.10,
-        headFraction: 0.47,
-        armRadius: 0.130,
-        handRadius: 0.168,
-        legRadius: 0.139,
-        shoulderWidth: 0.431,
-        stanceWidth: 0.252,
-      },
+        headFraction: 0.72,
+        shoulderWidth: 2.10 * 0.295,
+      }),
       // Bouncy and playful — hip popped out, head cocked, weight rocked back onto
       // her heels like she's mid-bounce. An art director's second pass named the
       // cast's identical dead-front symmetric pose as a top gap; Donut's read is
@@ -279,7 +257,12 @@ export class DonutCharacter extends BaseCharacter {
     // iced collar — glaze drips over the shoulders and sprinkles carry on down
     // from the head — so the food identity runs the full height of the model
     // instead of stopping dead at the neck.
-    dressTorso(this.rig, (size) => {
+    // NOTE: this is a no-op under the STUB archetype, which has no torso to
+    // dress — `rig.dressTorso` returns immediately and the ring above carries the
+    // whole body. It is kept intact rather than deleted because switching
+    // archetype is a supported one-line fix (see `bodies.ts`), and this is what
+    // Donut's body looks like the moment she has a torso again.
+    this.rig.dressTorso((size) => {
       const group = new THREE.Group();
       group.name = 'donut_torso';
 

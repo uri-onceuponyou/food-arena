@@ -27,6 +27,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig } from './rig';
+import { bodyType } from './bodies';
 
 const SHELL = PALETTE.egg;          // #FFF8EA — matte-ish porcelain
 const SHELL_SHADOW = '#E4D6AE';     // faint brow-crease shadow, subtle on purpose
@@ -126,28 +127,6 @@ const CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
 const TORSO_CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
   [0.80, 0.05], [0.68, 0.10], [0.82, 0.16],
 ];
-
-/**
- * Local stand-in for `ChibiRig`'s intended `dressTorso`/`torsoSize` — at the time of
- * writing `rig.ts` documents the pattern (see its torso comment) but does not yet
- * expose either, and this file is not allowed to touch `rig.ts`. Reads the real size
- * off the default torso mesh's geometry (so it stays correct even if rig proportions
- * are retuned later), then swaps it out for character geometry parented the same way
- * the default was — a child of `rig.joints.torso`, so it inherits the rig's own
- * breathing/lean/run animation for free.
- */
-function dressTorso(rig: ChibiRig, build: (size: { w: number; h: number; d: number }) => THREE.Object3D): void {
-  let size = { w: 0.42, h: 0.5, d: 0.32 };
-  const old = rig.torsoMesh;
-  if (old) {
-    old.geometry.computeBoundingBox();
-    const bb = old.geometry.boundingBox;
-    if (bb) size = { w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z };
-    old.parent?.remove(old);
-    old.geometry.dispose();
-  }
-  rig.joints.torso.add(build(size));
-}
 
 /**
  * A jagged crack line: a chain of thin boxes, each built its own oriented basis
@@ -253,21 +232,20 @@ export class EggCharacter extends BaseCharacter {
         torso: SHELL,
         limbRoughness: 0.5,
       },
-      // Small, delicate, thin limbs, dainty narrow stance, slightly shorter overall.
-      // `height` sits below the 2.1m cast norm (she's the smallest character) and
-      // radii/stance are pulled in hard — the thinnest limbs and narrowest stance in
-      // the cast bar Lollipop. `headFraction` stays close to her original value: an
-      // egg's silhouette IS mostly head, so that ratio carries her identity rather
-      // than needing to move.
-      proportions: {
-        height: 1.98,
-        headFraction: 0.46,
-        armRadius: 0.079,
-        handRadius: 0.103,
-        legRadius: 0.087,
-        shoulderWidth: 0.307,
-        stanceWidth: 0.139,
-      },
+      // Body: STUB archetype (see `bodies.ts`) — no torso, head on the hips,
+      // very short thick limbs. An egg's silhouette IS its shell; it has no
+      // waist and never did, and the old body was a torso invented purely
+      // because the rig insisted on one.
+      //
+      // `height` still sits under the 2.1m cast norm — she is the smallest
+      // character — and `shoulderWidth` is a STUB hand-fit: the shell is unusually
+      // wide at shoulder height (~0.96R, thanks to `BOTTOM_BULGE`), so the stock
+      // 0.32H would bury the upper arms inside it.
+      proportions: bodyType('stub', {
+        height: 2.02,
+        headFraction: 0.70,
+        shoulderWidth: 2.02 * 0.30,
+      }),
       // Timid, closed-in — elbows pulled tight against the body, shoulders barely
       // lifted, head ducked and turned away shyly. An art director's second pass
       // named the cast's identical dead-front symmetric pose as a top gap; Egg's
@@ -408,7 +386,11 @@ export class EggCharacter extends BaseCharacter {
     // just scaled down — with the crack motif continuing a short way down onto
     // it, so the identity runs the full height of the model instead of stopping
     // dead at the neck.
-    dressTorso(this.rig, (size) => {
+    // NOTE: a no-op under the STUB archetype, which has no torso — the head
+    // shell is the whole body. Kept intact because switching archetype is a
+    // supported one-line fix (see `bodies.ts`) and this is Egg's body the moment
+    // she has a torso again.
+    this.rig.dressTorso((size) => {
       const torsoR = size.w * 0.5;
       const halfH = 1.04 * torsoR;
       const bottomY = size.h * 0.05;

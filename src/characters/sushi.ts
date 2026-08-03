@@ -26,6 +26,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
+import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 
 const RICE = '#FFFDF6';        // warm-white sticky rice, not clinical pure white
@@ -184,14 +185,17 @@ export class SushiCharacter extends BaseCharacter {
       // identical parts under different heads. Sushi is written as compact and stout
       // with thick short limbs and a low wide stance, so shoulders pull IN (compact)
       // while the stance and limb thickness both go up (stout, planted).
-      proportions: {
-        headFraction: 0.46,
+      // Body: STANDARD archetype — the neutral chibi baseline (see `bodies.ts`).
+      // A nigiri is a compact block that still needs a waist under it, so the
+      // middle body suits it; the tweaks below keep Sushi's own "arms held close
+      // in, feet planted wide" read on top of the baseline.
+      proportions: bodyType('standard', {
         shoulderWidth: CHARACTER_HEIGHT * 0.16,  // narrow, compact — arms held close in
         stanceWidth: CHARACTER_HEIGHT * 0.15,    // low, wide stance
         armRadius: CHARACTER_HEIGHT * 0.068,     // thick
         handRadius: CHARACTER_HEIGHT * 0.088,    // big round rice-fist
         legRadius: CHARACTER_HEIGHT * 0.078,     // thick, stout
-      },
+      }),
       // Poised and refined — arms held close in rather than out, a slight
       // aloof over-the-shoulder glance. Distinct from every other stance in
       // this file's own cast slice: the only near-symmetric, closed-arm pose.
@@ -483,10 +487,12 @@ export class SushiCharacter extends BaseCharacter {
    * guaranteed to sit proud of that taper rather than sinking into it at any point.
    */
   private dressTorsoAsSushi(): void {
-    const height = CHARACTER_HEIGHT;
-    const shoulderWidth = height * 0.16; // must match the rig's own `proportions.shoulderWidth`
-    const tw = shoulderWidth * 1.18;
-    const torsoH = height * 0.28;
+    // Read off the rig, never hand-mirrored: body proportions come from an
+    // archetype (`bodies.ts`) now, so a hardcoded copy of a rig constant goes
+    // silently wrong the moment the archetype changes.
+    const m = this.rig.metrics;
+    const tw = m.torsoWidth;
+    const torsoH = m.torsoHeight;
     const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85); // rig.ts's taper at t=0.5
     const torsoHalfWidthMid = tw * 0.5 * taperMid;
     const beltRadius = torsoHalfWidthMid * 1.18; // safety margin over the tapered waist

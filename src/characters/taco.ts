@@ -23,6 +23,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig } from './rig';
+import { bodyType } from './bodies';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 const SHELL = '#F2A73E';       // toasted hard-shell gold — bright, saturated
@@ -128,21 +129,17 @@ export class TacoCharacter extends BaseCharacter {
         torso: SHELL,
         limbRoughness: 0.8,
       },
-      // Lean and angular, longer limbs, narrow stance. `height` runs well above the
-      // 2.1m cast norm — since arm/leg LENGTH is a fixed fraction of `height` in the
-      // shared rig, that's the only way to buy a genuinely longer-limbed read — while
-      // a smaller `headFraction` keeps overall silhouette height close to the cast
-      // norm rather than making Taco a giant. Radii and stance both pulled in hard for
-      // the angular, narrow-framed read.
-      proportions: {
-        height: 2.30,
-        headFraction: 0.40,
-        armRadius: 0.097,
-        handRadius: 0.133,
-        legRadius: 0.106,
-        shoulderWidth: 0.414,
-        stanceWidth: 0.179,
-      },
+      // Body: STOUT archetype (see `bodies.ts`) — short wide torso, thick short
+      // limbs, wide planted stance.
+      //
+      // This reverses an earlier hand-tune that pushed Taco "lean and angular,
+      // longer limbs" via `height: 2.30`, which was the only lever the old rig
+      // gave for limb length. A taco shell is a WIDE, low, heavy form; the lean
+      // body was fighting the food's own shape class, and the silhouette test
+      // showed it landing in the same generic middle as everything else anyway.
+      // `headFraction` is raised so the shell (which spans -1.20R to +0.85R, far
+      // from the spherical mass the rig assumes) still reaches cast height.
+      proportions: bodyType('stout', { headFraction: 0.59 }),
       // Leaning forward, eager — weight already committed toward the fight, both
       // fists cocked like she's about to toss filling. An art director's second
       // pass named the cast's identical dead-front symmetric pose as a top gap;

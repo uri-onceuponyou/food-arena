@@ -22,6 +22,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
+import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 
 const CERAMIC = '#F7F1E6';      // glazed bowl exterior — warm off-white, not clinical
@@ -217,14 +218,14 @@ export class SoupCharacter extends BaseCharacter {
       // grows so the wide bowl is unmistakably the dominant identity mass, and the
       // limbs below are rebuilt from scratch as short bowl-handle arms and stubby
       // pedestal legs rather than dressed versions of the shared tube topology.
-      proportions: {
-        headFraction: 0.42,                      // the bowl dominates the silhouette
-        shoulderWidth: CHARACTER_HEIGHT * 0.235,  // handles sit close, not arms-length
-        stanceWidth: CHARACTER_HEIGHT * 0.155,    // wide, heavily planted stance
-        armRadius: CHARACTER_HEIGHT * 0.095,      // thick handle stock
-        handRadius: CHARACTER_HEIGHT * 0.062,     // small rounded cap, not a mitt
-        legRadius: CHARACTER_HEIGHT * 0.105,      // thickest, stubbiest legs in the cast
-      },
+      // Body: STOUT archetype (see `bodies.ts`) — short wide torso, thick short
+      // limbs, low centre of mass. A bowl of soup is the heaviest, most planted
+      // thing on the roster and this is the archetype built for that read.
+      // `handRadius` stays small on purpose: these are handle caps, not mitts.
+      proportions: bodyType('stout', {
+        headFraction: 0.58,                     // the bowl dominates the silhouette
+        handRadius: CHARACTER_HEIGHT * 0.062,   // small rounded cap, not a mitt
+      }),
       // Serene and still — the calmest, most nearly-neutral stance in the cast,
       // matching the unsettling-patient no-mouth-then-mouth face. Distinct from
       // every other character's stance in this file's own slice: the only one
@@ -545,7 +546,7 @@ export class SoupCharacter extends BaseCharacter {
     // independent of the food mass — so an offset of `R*0.05` (~0.02m) barely
     // clears the CENTRE of a 0.16m-radius hand sphere: the whole prop was built
     // sitting inside the mitt, invisible. Fixed by sizing against handRadius.
-    const handRadius = CHARACTER_HEIGHT * 0.062; // must match the rig's own `proportions.handRadius`
+    const handRadius = this.rig.metrics.handRadius;
     const hand = this.rig.joints.handR;
     const ladle = new THREE.Group();
     ladle.name = 'soup_ladle';
@@ -593,10 +594,11 @@ export class SoupCharacter extends BaseCharacter {
    * into that taper at any point.
    */
   private dressTorsoAsSoup(): void {
-    const height = CHARACTER_HEIGHT;
-    const shoulderWidth = height * 0.235; // must match the rig's own `proportions.shoulderWidth`
-    const tw = shoulderWidth * 1.18;
-    const torsoH = height * 0.28;
+    // Read off the rig, never hand-mirrored: body proportions come from an
+    // archetype (`bodies.ts`) now, so a hardcoded copy of a rig constant goes
+    // silently wrong the moment the archetype changes.
+    const tw = this.rig.metrics.torsoWidth;
+    const torsoH = this.rig.metrics.torsoHeight;
     const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85); // rig.ts's taper at t=0.5
     const torsoHalfWidthMid = tw * 0.5 * taperMid;
     const beltRadius = torsoHalfWidthMid * 1.16;
@@ -629,9 +631,8 @@ export class SoupCharacter extends BaseCharacter {
    */
   private buildAccessories(R: number, bowlSurface: (theta: number, hFrac: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }): void {
     const head = this.rig.joints.head;
-    const height = CHARACTER_HEIGHT;
-    const shoulderWidth = height * 0.235; // must match rig's own proportions.shoulderWidth
-    const torsoH = height * 0.28;
+    const shoulderWidth = this.rig.metrics.shoulderWidth;
+    const torsoH = this.rig.metrics.torsoHeight;
 
     // ── Napkin bib ────────────────────────────────────────────────────────────
     // A tied cloth bib hanging from the neck over the chest, layered above the

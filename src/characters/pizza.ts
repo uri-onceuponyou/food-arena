@@ -19,6 +19,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
+import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 
 const CRUST = '#EFB868';       // baked dough slab
@@ -45,28 +46,6 @@ const SATCHEL_BUCKLE = '#D9B458';
 const MITT_RED = '#C23B2E';
 const MITT_CREAM = '#F7EFE0';
 const FLOUR_DUST = '#F7ECD3';
-
-/**
- * Local stand-in for `ChibiRig`'s intended `dressTorso`/`torsoSize` — at the time of
- * writing `rig.ts` documents the pattern (see its torso comment) but does not yet
- * expose either, and this file is not allowed to touch `rig.ts`. Reads the real size
- * off the default torso mesh's geometry (so it stays correct even if rig proportions
- * are retuned later), then swaps it out for character geometry parented the same way
- * the default was — a child of `rig.joints.torso`, so it inherits the rig's own
- * breathing/lean/run animation for free.
- */
-function dressTorso(rig: ChibiRig, build: (size: { w: number; h: number; d: number }) => THREE.Object3D): void {
-  let size = { w: 0.42, h: 0.5, d: 0.32 };
-  const old = rig.torsoMesh;
-  if (old) {
-    old.geometry.computeBoundingBox();
-    const bb = old.geometry.boundingBox;
-    if (bb) size = { w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z };
-    old.parent?.remove(old);
-    old.geometry.dispose();
-  }
-  rig.joints.torso.add(build(size));
-}
 
 /** Soft tapered barrel — the same visual language as the rig's own default torso
  * (fuller belly, narrower neck) but built locally so each character can own its
@@ -232,14 +211,18 @@ export class PizzaCharacter extends BaseCharacter {
       // wide at the top, tapering down — so shoulders go wide while the stance pulls
       // narrow underneath, echoing the wedge's own triangular silhouette down through
       // the whole body rather than stopping at the neck.
-      proportions: {
-        headFraction: 0.46,
+      // Body: STANDARD archetype — the neutral chibi baseline (see `bodies.ts`).
+      // Pizza is one of the two characters that keep it, because a wedge needs a
+      // real torso underneath to taper INTO and neither a stub nor a stilt body
+      // gives it one. The two tweaks are the wedge's own identity carried down
+      // through the body: broad at the shoulders, narrow at the feet.
+      proportions: bodyType('standard', {
         shoulderWidth: CHARACTER_HEIGHT * 0.26,  // broad shoulders — wide top of the wedge
         stanceWidth: CHARACTER_HEIGHT * 0.09,    // narrow stance — the wedge tapers to a point
         armRadius: CHARACTER_HEIGHT * 0.080,     // thick, doughy — chunkiest arms in the cast
         handRadius: CHARACTER_HEIGHT * 0.086,
         legRadius: CHARACTER_HEIGHT * 0.050,     // slimmer, tapering — continues the wedge's own narrowing
-      },
+      }),
       // Confident, presenting swagger — one hand planted on the hip (heavy elbow
       // tuck on the right), head cocked and turned toward camera. Distinct from
       // every other character in this file's own cast slice: the only one with a
@@ -382,7 +365,7 @@ export class PizzaCharacter extends BaseCharacter {
     // shoulders and a pepperoni continuing the topping motif — so the slice's
     // food language runs the full height of the model instead of stopping dead
     // at the neck.
-    dressTorso(this.rig, (size) => {
+    this.rig.dressTorso((size) => {
       const group = new THREE.Group();
       group.name = 'pizza_torso';
 
@@ -566,8 +549,11 @@ export class PizzaCharacter extends BaseCharacter {
    * disconnected from the body.
    */
   private buildAccessories(R: number, head: THREE.Group): void {
-    const shoulderWidth = CHARACTER_HEIGHT * 0.26; // must match rig's own proportions.shoulderWidth
-    const torsoH = CHARACTER_HEIGHT * 0.28;
+    // Read off the rig rather than hand-mirrored: body proportions now come from
+    // an archetype (`bodies.ts`), so any hardcoded copy of a rig constant goes
+    // silently wrong the moment the archetype changes.
+    const shoulderWidth = this.rig.metrics.shoulderWidth;
+    const torsoH = this.rig.metrics.torsoHeight;
 
     const leatherMat = toonMat({ color: SATCHEL_LEATHER, roughness: 0.78 });
     const trimMat = toonMat({ color: SATCHEL_TRIM, roughness: 0.72 });
@@ -635,7 +621,7 @@ export class PizzaCharacter extends BaseCharacter {
     // the existing pepperoni-red fist, which an earlier pass tried and found
     // unreadable at thumbnail scale since both were the same red hue. Cream
     // body with bold red trim stripes reads unmistakably as a quilted mitt.
-    const handRadius = CHARACTER_HEIGHT * 0.086; // must match rig's own proportions.handRadius
+    const handRadius = this.rig.metrics.handRadius;
     const mittMat = toonMat({ color: MITT_CREAM, roughness: 0.8 });
     const stripeMat = toonMat({ color: MITT_RED, roughness: 0.7 });
     const mittGroup = new THREE.Group();

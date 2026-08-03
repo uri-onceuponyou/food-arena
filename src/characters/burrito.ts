@@ -25,6 +25,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
 import { ChibiRig } from './rig';
+import { bodyType } from './bodies';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 const TORTILLA = '#F5EAD6';        // pale flour wrap — the dominant, matte mass
@@ -123,23 +124,16 @@ export class BurritoCharacter extends BaseCharacter {
         torso: TORTILLA_SHADE,
         limbRoughness: 0.78,
       },
-      // Tall and cylindrical, narrow shoulders, upright. `height` runs well above
-      // the cast norm (arm/leg length is a fixed fraction of `height` in the shared
-      // rig, so a genuinely taller frame is the only way to buy that read) while a
-      // small `headFraction` keeps the actual rendered top-of-head height close to
-      // the 2.1m norm rather than making Burrito a giant — the extra height goes
-      // into an elongated body instead. Shoulder width is pulled in hard, the one
-      // trait called out explicitly; radii stay close to the shared default so
-      // limbs read as true cylinders rather than tapered dough.
-      proportions: {
-        height: 2.35,
-        headFraction: 0.38,
-        armRadius: 0.122,
-        handRadius: 0.155,
-        legRadius: 0.132,
-        shoulderWidth: 0.306,
-        stanceWidth: 0.223,
-      },
+      // Body: LANKY archetype (see `bodies.ts`) — tall narrow torso, long thin
+      // limbs, narrow stance. A burrito is a long vertical tube, so the archetype
+      // IS the character's shape rather than a compromise with it.
+      //
+      // This replaces a hand-tuned `height: 2.35`, which was buying "tall" the
+      // only way the old rig allowed: limb length was a fixed fraction of height,
+      // so scaling the whole character was the sole route to longer legs. LANKY
+      // has real `legFraction`/`armFraction` knobs, so height goes back near the
+      // 2.1m cast norm and the tall read comes from proportion instead of size.
+      proportions: bodyType('lanky', { height: 2.05 }),
       // Tall and burly, chest out, planted wide — a bruiser's power stance. An art
       // director's second pass named the cast's identical dead-front symmetric
       // pose as a top gap; both arms swing wide here (rather than one tucked in
@@ -488,7 +482,12 @@ export class BurritoCharacter extends BaseCharacter {
    * ever change.
    */
   private dressTorso(R: number): void {
-    const torsoMesh = this.rig.torsoMesh!;
+    // Null under the STUB archetype, which has no torso at all (`bodies.ts`).
+    // Burrito is LANKY so it always has one today, but this used to be a non-null
+    // assertion and would be a hard crash — not a missing band — the moment
+    // someone tried STUB for a round, which is a supported one-line experiment.
+    const torsoMesh = this.rig.torsoMesh;
+    if (!torsoMesh) return;
     torsoMesh.geometry.computeBoundingBox();
     const tb = torsoMesh.geometry.boundingBox!;
     const torsoBaseY = torsoMesh.position.y + tb.min.y;

@@ -53,6 +53,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
+import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -310,21 +311,25 @@ export class WaterBottleCharacter extends BaseCharacter {
         torso: WATER,
         limbRoughness: 0.4,
       },
-      // `headFraction` is retuned for round 4: removing the floating face pod (it
-      // used to reach CAP_TOP_F+0.32 ≈ 1.18R above the head origin) pulled the
-      // character noticeably short of 2.1m, since the shell/cap alone top out
-      // around 0.86R. Grown back up to restore the target height now that the
-      // face lives on the shell wall instead of over the cap. The proportions
-      // below are what make this character read as "tall and narrow" per the
-      // brief: narrow shoulders, a close stance, and the thinnest limbs in the cast.
-      proportions: {
-        headFraction: 0.47,
-        shoulderWidth: CHARACTER_HEIGHT * 0.13,  // narrowest shoulders in the cast
-        stanceWidth: CHARACTER_HEIGHT * 0.075,   // closest, narrowest stance in the cast
-        armRadius: CHARACTER_HEIGHT * 0.040,     // thinnest arms in the cast
-        handRadius: CHARACTER_HEIGHT * 0.058,    // slender — a small cap, not a mitt
-        legRadius: CHARACTER_HEIGHT * 0.044,     // thinnest legs in the cast
-      },
+      // Body: STUB archetype (see `bodies.ts`) — no torso, head straight onto the
+      // hips, very short thick limbs, wide stance. This is the character Uri named
+      // when he called for the archetype: "one body type has very short legs and
+      // hands, no torso — would work for the bottle."
+      //
+      // It is also the fix the silhouette test demanded. A bottle is inherently a
+      // generic cylinder, and splitting it across a head AND a torso meant the
+      // outline was a cylinder interrupted by a waist — two mediocre reads instead
+      // of one. As a STUB the whole bottle is one continuous mass from cap to
+      // base, which is the only silhouette a bottle actually has.
+      //
+      // `headFraction` is large because the bottle now IS the body: the shell
+      // profile spans -0.94R to +0.90R, so R has to carry nearly the whole height.
+      // `shoulderWidth` is the STUB hand-fit — the shell wall is 0.58R at shoulder
+      // height, so the arms sit just outside it.
+      proportions: bodyType('stub', {
+        headFraction: 0.90,
+        shoulderWidth: CHARACTER_HEIGHT * 0.31,
+      }),
       // Upright and eager — chest forward, one arm raised as if reaching/
       // waving. Distinct from every other character's stance in this file's
       // own cast slice: the only one leaning back into an eager, alert posture.
@@ -605,10 +610,13 @@ export class WaterBottleCharacter extends BaseCharacter {
    * default torso mesh itself is kept and just scaled + decorated in place.
    */
   private dressTorsoAsBottle(): void {
-    const height = CHARACTER_HEIGHT;
-    const shoulderWidth = height * 0.13; // must match the rig's own `proportions.shoulderWidth`
-    const tw = shoulderWidth * 1.18;
-    const torsoH = height * 0.28;
+    // Nothing to dress under the STUB archetype (`bodies.ts`): there is no torso
+    // mesh and `torsoHeight` is 0, so every offset below would collapse onto the
+    // hip line. Kept intact because switching archetype is a supported one-line
+    // fix — this is the body Water Bottle wears the moment it has a torso again.
+    if (!this.rig.hasTorso) return;
+    const tw = this.rig.metrics.torsoWidth;
+    const torsoH = this.rig.metrics.torsoHeight;
     const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85); // rig.ts's taper at t=0.5
     const torsoHalfWidthMid = tw * 0.5 * taperMid;
 
@@ -653,8 +661,13 @@ export class WaterBottleCharacter extends BaseCharacter {
     shellSurface: (theta: number, yF: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }
   ): void {
     const head = this.rig.joints.head;
-    const shoulderWidth = CHARACTER_HEIGHT * 0.13; // must match rig's own proportions.shoulderWidth
-    const torsoH = CHARACTER_HEIGHT * 0.28;
+    const shoulderWidth = this.rig.metrics.shoulderWidth;
+    // Vertical scale for anything worn on the body. With a torso that is the
+    // torso's own height; on a STUB body (no torso — see `bodies.ts`) the torso
+    // joint has zero extent and every `torsoH * k` offset would pile up on the
+    // hip line, so the head mass's radius stands in for it. The fractions below
+    // are unchanged and land in the same places on the shell.
+    const torsoH = this.rig.hasTorso ? this.rig.metrics.torsoHeight : this.rig.headRadius;
 
     const strapMat = toonMat({ color: STRAP_FABRIC, roughness: 0.72 });
     const trimMat = toonMat({ color: STRAP_TRIM, roughness: 0.68 });
@@ -673,9 +686,15 @@ export class WaterBottleCharacter extends BaseCharacter {
     // reference every arm uses, so anchoring there — capped against the
     // measured torso only as a safety floor — keeps the pouch snug against the
     // body's own side instead of floating at arm's length.
-    this.rig.joints.root.updateMatrixWorld(true);
-    const torsoBB = new THREE.Box3().setFromObject(this.rig.joints.torso);
-    const torsoHalfW = Math.max(Math.abs(torsoBB.min.x), Math.abs(torsoBB.max.x));
+    // Only meaningful when there IS a torso: on a STUB body `joints.torso` holds
+    // nothing but the arm joints, so its bounding box measures the arms and would
+    // push the pouch out to the fingertips.
+    let torsoHalfW = 0;
+    if (this.rig.hasTorso) {
+      this.rig.joints.root.updateMatrixWorld(true);
+      const torsoBB = new THREE.Box3().setFromObject(this.rig.joints.torso);
+      torsoHalfW = Math.max(Math.abs(torsoBB.min.x), Math.abs(torsoBB.max.x));
+    }
     const hipX = -Math.max(shoulderWidth * 0.90, torsoHalfW * 0.85);
 
     // Strap + pouch: a SHORT strap from the shoulder straight down to the

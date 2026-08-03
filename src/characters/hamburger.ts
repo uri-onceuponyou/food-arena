@@ -58,6 +58,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox, RAMP_CHARACTER, OUTLINE_THIN } from '../render/toon';
 import { ChibiRig } from './rig';
+import { bodyType } from './bodies';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local geometry helpers — chunky rounded discs the shared kit doesn't provide.
@@ -251,15 +252,15 @@ export class HamburgerCharacter extends BaseCharacter {
       // as the single biggest remaining "template" tell despite per-character limb
       // geometry; `height` is deliberately below the 2.1m cast norm (short/squat) while
       // radii and stance run well above it (thick/planted).
-      proportions: {
-        height: 1.95,
-        headFraction: 0.50,
-        armRadius: 0.172,
-        handRadius: 0.195,
-        legRadius: 0.185,
-        shoulderWidth: 0.536,
-        stanceWidth: 0.312,
-      },
+      // Body: STOUT archetype (see `bodies.ts`) — short wide torso, thick short
+      // limbs, low centre of mass, widest stance in the cast. Exactly the read
+      // this character was hand-tuning toward before archetypes existed, so the
+      // preset replaces those numbers rather than fighting them.
+      //
+      // `headFraction` runs high because the whole burger stack is sized off R
+      // (see the vertical layout below): the food mass IS most of this character,
+      // and the stack is what has to reach the cast's standard height.
+      proportions: bodyType('stout', { height: 2.05, headFraction: 0.68 }),
       // Grill-master swagger: weight planted and leaning in over the flat-top,
       // one arm cocked back with the spatula ready, the other tucked in tight —
       // an art director's second pass named the cast's identical dead-front
@@ -312,30 +313,37 @@ export class HamburgerCharacter extends BaseCharacter {
     // ── Vertical layout ──────────────────────────────────────────────────────
     // See the file-level comment for the full derivation. BASE_Y anchors the
     // patty's underside at the rig's own SHOULDER height (not the torso top) so
-    // the arms emerge from the seam between the two buns. `torsoH`/`shoulderY`
-    // mirror `rig.ts`'s own (private) constants — the same "recompute locally,
-    // comment that it must match" convention `soup.ts`'s `dressTorsoAsSoup` and
-    // `waterbottle.ts`'s `dressTorsoAsBottle` already use to stay in sync with
-    // the rig without either file reaching into the other's internals.
-    const rigHeight = 1.95; // must match `proportions.height` above
-    const torsoH = rigHeight * 0.28;       // rig.ts: torsoH = height * 0.28
-    const shoulderDrop = torsoH * 0.22;    // rig.ts: shoulderY = torsoH * 0.78, i.e. 0.22*torsoH below the top
-    // headCentreY = torsoTopY + 0.86*R (rig.ts's own constant); solving
-    // headCentreY + BASE_Y = torsoTopY - shoulderDrop for BASE_Y lands the
-    // patty's BOTTOM edge exactly level with the shoulder joint. Rendered, that
-    // wasn't enough: the shoulder joint is the TOP of the visible arm mound (the
-    // arm mesh hangs DOWN from it), so the arm's own visible bulk still sat
+    // the arms emerge from the seam between the two buns.
+    //
+    // Solved from `rig.metrics` rather than from hand-mirrored copies of the
+    // rig's constants (which is what this used to do, down to a `const rigHeight
+    // = 1.95; // must match proportions.height above`). Bodies now come from an
+    // archetype, so any hardcoded mirror is a latent bug: it would still compile,
+    // still render, and quietly put the patty in the wrong place.
+    //
+    // In head-local space the head origin sits at `metrics.headCentreY`; the
+    // shoulder joint sits at `metrics.hipY + metrics.shoulderY`. The difference
+    // lands the patty's BOTTOM edge exactly level with the shoulder. Rendered,
+    // that wasn't enough: the shoulder joint is the TOP of the visible arm mound
+    // (the arm mesh hangs DOWN from it), so the arm's own visible bulk still sat
     // entirely below the patty, reading as attached to the bottom bun rather than
     // to the seam. `SEAM_EMBED` pulls the patty (and everything above it) down
     // further so the patty layer itself — not just its lower edge — surrounds the
     // arm's attachment point, with the cheese poking out just above the arm mound.
-    const SEAM_EMBED = 0.15;
-    const BASE_Y = -R * 0.86 - shoulderDrop - SEAM_EMBED;
-    const PATTY_H = 0.20;
-    const CHEESE_H = 0.095;
-    const TOMATO_H = 0.125;
-    const LETTUCE_H = 0.14;
-    const CROWN_H = 0.40;
+    const M = this.rig.metrics;
+    const SEAM_EMBED = R * 0.3077;
+    const BASE_Y = (M.hipY + M.shoulderY) - M.headCentreY - SEAM_EMBED;
+    // Layer heights are multiples of R so the whole stack scales with the head.
+    // They were absolute metres until the archetype retrofit, which made this the
+    // shortest character in the cast by 30cm — the stack could not grow with the
+    // rig, so every proportion change shrank the burger relative to its own body.
+    // The ratios below are the old constants divided by the old R (0.4875), so at
+    // that R the geometry is unchanged.
+    const PATTY_H = R * 0.4103;
+    const CHEESE_H = R * 0.1949;
+    const TOMATO_H = R * 0.2564;
+    const LETTUCE_H = R * 0.2872;
+    const CROWN_H = R * 0.8205;
 
     const PATTY_R = R * 0.60;
     const CHEESE_R = R * 0.72;
@@ -404,7 +412,7 @@ export class HamburgerCharacter extends BaseCharacter {
     // that sells "arms emerge from between the bun layers" rather than from a
     // bare torso.
     const dripTopY = cheeseY;
-    const dripBottomY = BASE_Y - 0.09; // sinks past the patty's underside, into the arm mound
+    const dripBottomY = BASE_Y - R * 0.1846; // sinks past the patty's underside, into the arm mound
     const shoulderDripLen = Math.max(0.05, dripTopY - dripBottomY);
     for (const sx of [-1, 1] as const) {
       const drip = new THREE.Mesh(new THREE.CapsuleGeometry(CHEESE_R * 0.085, shoulderDripLen, 4, 8), cheeseMat);

@@ -25,6 +25,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig } from './rig';
+import { bodyType } from './bodies';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 const CANDY_WHITE = '#FFFDF9';
@@ -142,19 +143,22 @@ export class LollipopCharacter extends BaseCharacter {
         torso: STICK,
         limbRoughness: 0.75,
       },
-      // Tall and gangly, very thin limbs, big head-to-body ratio. `headFraction` is
-      // the highest in the cast (a bobblehead-on-a-stick read: the candy disc IS
-      // most of her), paired with a taller-than-norm `height` for the gangly body
-      // underneath and the thinnest radii/stance in the cast.
-      proportions: {
+      // Body: STUB archetype (see `bodies.ts`) — no torso, head mounted low,
+      // very short limbs. This is the archetype's cleanest fit in the whole cast:
+      // a lollipop is literally a disc on a stick, and the stick already reaches
+      // past the head origin down to the hips (`stickBottomY` below), so it
+      // becomes the body outright. The torso it used to wear was a costume on an
+      // anatomy the food does not have.
+      //
+      // `shoulderWidth` is the cast's narrowest by a wide margin, and that is the
+      // STUB hand-fit doing its job: at shoulder height this character is a
+      // 0.19R stick, not a 0.9R ball, so the stock 0.32H would leave both arms
+      // hanging in mid-air unattached to anything.
+      proportions: bodyType('stub', {
         height: 2.00,
-        headFraction: 0.49,
-        armRadius: 0.072,
-        handRadius: 0.100,
-        legRadius: 0.080,
-        shoulderWidth: 0.290,
-        stanceWidth: 0.124,
-      },
+        headFraction: 0.72,
+        shoulderWidth: 2.00 * 0.085,
+      }),
       // Cocky and hip-shot — weight thrown hard onto one hip, one shoulder popped
       // up, head tilted with attitude. An art director's second pass named the
       // cast's identical dead-front symmetric pose as a top gap and named this
@@ -306,15 +310,29 @@ export class LollipopCharacter extends BaseCharacter {
     // suggested read) is Lollipop's: translucent, glossy candy-wrap plastic
     // flowing from a twisted knot at the neck down her back, with a hairline
     // Cyber trim along its hem echoing her own rarity accent.
-    const neck = this.rig.joints.neck;
+    // Parented to the HEAD, not the neck. On a STUB body the neck joint sits at
+    // the hips, so a cape hanging `capeH * 0.38` below it started at hip height
+    // and ran straight through the floor. Anchoring it under the candy disc —
+    // where a wrapper would actually be twisted shut — works on any archetype.
+    const capeAnchor = new THREE.Group();
+    capeAnchor.name = 'lollipop_cape_anchor';
+    capeAnchor.position.y = discBottomY;
+    head.add(capeAnchor);
+    const neck = capeAnchor;
     const capeMat = glossyMat({ color: CANDY_WHITE, roughness: 0.16, transparent: true, opacity: 0.6 });
     capeMat.side = THREE.DoubleSide; // seen edge-on/from behind at yaw 135/210, not just front
     const capeTrimMat = toonMat({ color: CYBER, roughness: 0.3, emissive: CYBER, emissiveIntensity: 0.5 });
     const twistMat = glossyMat({ color: CANDY_WHITE, roughness: 0.14 });
 
-    const capeR = R * 0.55;
+    // Sized to the STICK, not to a torso. At the old R*0.55 x R*1.55 this was a
+    // torso-scale cloak on a body that is 0.19R wide, and it rendered as a flat
+    // grey sheet hanging behind the candy and through the floor — the STUB body
+    // has no torso for a cloak to drape over. Cut down to a wrapper flare that
+    // hugs the stick just under the disc, which is what a real lollipop wrapper
+    // does anyway.
+    const capeR = stickR * 1.7;
     const capeArc = Math.PI * 0.85;
-    const capeH = R * 1.55;
+    const capeH = R * 0.52;
     const cape = new THREE.Mesh(curvedPanel(capeR, capeArc, capeH, Math.PI), capeMat);
     cape.name = 'lollipop_wrapper_cape';
     cape.position.y = -capeH * 0.38;
@@ -536,7 +554,12 @@ export class LollipopCharacter extends BaseCharacter {
    * constructed torso mesh rather than hand-copied layout constants.
    */
   private dressTorso(R: number): void {
-    const torsoMesh = this.rig.torsoMesh!;
+    // No torso under the STUB archetype (`bodies.ts`), so there is nothing to
+    // dress and `torsoMesh` is null — this used to be a non-null assertion and
+    // would now be a crash rather than a missing sash. Kept intact because
+    // switching archetype is a supported one-line fix.
+    const torsoMesh = this.rig.torsoMesh;
+    if (!torsoMesh) return;
     torsoMesh.geometry.computeBoundingBox();
     const tb = torsoMesh.geometry.boundingBox!;
     const torsoBaseY = torsoMesh.position.y + tb.min.y;

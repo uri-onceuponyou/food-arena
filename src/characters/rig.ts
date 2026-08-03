@@ -27,6 +27,12 @@
  * Proportions follow the reference: the head is ~45% of total height, limbs are
  * short and chunky, extremities are oversized. That ratio is what makes chibi
  * characters read as appealing rather than as scaled-down adults.
+ *
+ * ── Bodies come from `bodies.ts`, not from here ──────────────────────────────
+ * A character does NOT author a body. It picks one of four archetypes — STUB,
+ * STOUT, STANDARD, LANKY — via `bodyType()` and makes its head fit. See
+ * `bodies.ts` for why, and `RigProportions` below for the knobs each archetype
+ * sets.
  */
 
 import * as THREE from 'three';
@@ -75,10 +81,31 @@ export interface RigPalette {
   limbRoughness?: number;
 }
 
+/**
+ * Character proportions.
+ *
+ * ── Read this before adding a knob ──────────────────────────────────────────
+ * For most of this project every field here was a THICKNESS or a WIDTH —
+ * `armRadius`, `legRadius`, `shoulderWidth`, `stanceWidth`. There was no knob for
+ * torso size, torso presence or limb LENGTH, so the vertical skeleton (leg 0.26H,
+ * torso 0.28H, head mounted 0.86R above it) was hardcoded and IDENTICAL on all
+ * eleven characters. Rendering the cast as pure black silhouettes made that
+ * measurable: every body was the same shape and all identifying information lived
+ * in the head. Characters could not fix it even if they wanted to.
+ *
+ * The `*Fraction` fields below are the shape knobs that were missing. They are
+ * expressed as fractions of `height` so a character can change its overall size
+ * without re-deriving its proportions.
+ *
+ * **Do not hand-author these.** Pick one of the four archetypes in `bodies.ts`
+ * (`bodyType('stout', { ... })`) and tweak from there. Four deliberately
+ * contrasting bodies separate better in silhouette than eleven near-identical
+ * bespoke ones, and it keeps each character's scope to head + torso.
+ */
 export interface RigProportions {
   /** Total character height in metres. */
   height?: number;
-  /** Head mass as a fraction of total height. Reference sits around 0.42-0.48. */
+  /** Head mass as a fraction of total height. Reference chibi sits around 0.42-0.48. */
   headFraction?: number;
   /** Arm thickness in metres. */
   armRadius?: number;
@@ -90,6 +117,92 @@ export interface RigProportions {
   shoulderWidth?: number;
   /** How far apart the feet stand. */
   stanceWidth?: number;
+
+  // ── Shape knobs (added by the body-archetype work; see bodies.ts) ──────────
+
+  /**
+   * Torso height as a fraction of total height. Default 0.28.
+   *
+   * **`0` means NO TORSO** (the STUB archetype): the rig builds no default torso
+   * mass, `hasTorso` is false, `torsoSize.h` is 0, and the head mounts directly on
+   * the hips. Anything that dresses or measures the torso must check `hasTorso`
+   * first — `torsoMesh` is null in that case.
+   */
+  torsoFraction?: number;
+  /** Torso width (X extent) in metres. Default `shoulderWidth * 1.18`. */
+  torsoWidth?: number;
+  /** Torso depth (Z extent) in metres. Default `torsoWidth * 0.88`. */
+  torsoDepth?: number;
+  /** Leg length — hip pivot down to the ground — as a fraction of height. Default 0.26. */
+  legFraction?: number;
+  /** Total arm length — shoulder pivot to hand — as a fraction of height. Default 0.22. */
+  armFraction?: number;
+  /**
+   * Shoulder pivot height above the HIPS, as a fraction of height.
+   * Default `torsoFraction * 0.78`. Set it explicitly when there is no torso to
+   * hang the shoulders off, so the arms emerge from the food mass rather than
+   * from the ankles.
+   */
+  shoulderFraction?: number;
+  /**
+   * Head centre above the top of the torso, in HEAD RADII. Default 0.86.
+   *
+   * The rig assumes a head mass extending roughly ±R about its own origin. A
+   * character whose mass is not a sphere (Hamburger and HotDog anchor their
+   * underside at ≈ −0.90R) compensates in its own geometry, not here.
+   */
+  headMount?: number;
+  /**
+   * Ankle joint height above the ground, as a fraction of leg length. Default 0.14.
+   *
+   * Short thick legs need a bigger value: the foot mesh is sized off `legRadius`,
+   * so a stubby archetype with the default 0.14 drives its feet through the floor.
+   */
+  footClearance?: number;
+}
+
+/**
+ * Every derived length the rig computed internally, published so characters stop
+ * hardcoding copies of them.
+ *
+ * Before this existed, eight of the eleven character files carried lines like
+ * `const shoulderWidth = CHARACTER_HEIGHT * 0.23; // must match rig's own
+ * proportions.shoulderWidth` — a hand-maintained mirror that silently goes wrong
+ * the moment an archetype changes. Read `rig.metrics` instead.
+ */
+export interface RigMetrics {
+  height: number;
+  headFraction: number;
+  headRadius: number;
+  /** Absolute Y of the head group's origin, with feet at y=0. */
+  headCentreY: number;
+  /** Absolute Y of the hip pivot — also the top of the legs. */
+  hipY: number;
+  /** Hip pivot down to the ground. */
+  legLength: number;
+  /** Nominal torso height in metres. 0 when the archetype has no torso. */
+  torsoHeight: number;
+  torsoWidth: number;
+  torsoDepth: number;
+  /** Absolute Y of the top of the torso — where the neck joint sits. */
+  torsoTopY: number;
+  /** False for the STUB archetype: no default torso mass was built. */
+  hasTorso: boolean;
+  /** Shoulder pivot height in TORSO-LOCAL space (the torso joint origin is the hips). */
+  shoulderY: number;
+  shoulderWidth: number;
+  stanceWidth: number;
+  armRadius: number;
+  handRadius: number;
+  legRadius: number;
+  upperArmLength: number;
+  forearmLength: number;
+  thighLength: number;
+  shinLength: number;
+  /** Ankle joint height above the ground. */
+  ankleY: number;
+  /** Ground to the top of a nominal spherical head mass. Sanity-check against `height`. */
+  nominalHeight: number;
 }
 
 /**
@@ -133,7 +246,15 @@ export class ChibiRig {
   readonly joints: RigJoints;
   readonly headRadius: number;
   readonly headCentreY: number;
-  /** The default torso mesh, so characters can restyle or hide it. */
+  /** Every derived length, so characters never hardcode a copy. */
+  readonly metrics: RigMetrics;
+  /**
+   * False when the archetype has no torso (STUB). Check this before dressing,
+   * measuring or attaching to the torso — `torsoMesh` is null in that case and
+   * `torsoSize.h` is 0.
+   */
+  readonly hasTorso: boolean;
+  /** The default torso mesh, so characters can restyle or hide it. Null for STUB. */
   torsoMesh: THREE.Mesh | null = null;
   /** Per-character idle attitude, applied by restPose(). */
   stance: Required<RigStance>;
@@ -154,25 +275,38 @@ export class ChibiRig {
     };
     const pr = opts.proportions ?? {};
     const height = pr.height ?? CHARACTER_HEIGHT;
+    const shoulderWidth = pr.shoulderWidth ?? height * 0.20;
+    const torsoFraction = pr.torsoFraction ?? 0.28;
+    const torsoWidth = pr.torsoWidth ?? shoulderWidth * 1.18;
     this.p = {
       height,
       headFraction: pr.headFraction ?? 0.46,
       armRadius: pr.armRadius ?? height * 0.058,
       handRadius: pr.handRadius ?? height * 0.075,
       legRadius: pr.legRadius ?? height * 0.062,
-      shoulderWidth: pr.shoulderWidth ?? height * 0.20,
+      shoulderWidth,
       stanceWidth: pr.stanceWidth ?? height * 0.115,
+      torsoFraction,
+      torsoWidth,
+      torsoDepth: pr.torsoDepth ?? torsoWidth * 0.88,
+      legFraction: pr.legFraction ?? 0.26,
+      armFraction: pr.armFraction ?? 0.22,
+      shoulderFraction: pr.shoulderFraction ?? torsoFraction * 0.78,
+      headMount: pr.headMount ?? 0.86,
+      footClearance: pr.footClearance ?? 0.14,
     };
 
     const headH = height * this.p.headFraction;
-    // Layout from the ground up: feet/legs, then a short torso, then the head.
-    const legH = height * 0.26;
-    const torsoH = height * 0.28;
+    // Layout from the ground up: feet/legs, then the torso (which may be absent
+    // entirely), then the head.
+    const legH = height * this.p.legFraction;
+    const torsoH = height * this.p.torsoFraction;
     const hipY = legH;
     const torsoTopY = hipY + torsoH;
+    this.hasTorso = torsoH > 1e-4;
 
     this.headRadius = headH * 0.5;
-    this.headCentreY = torsoTopY + this.headRadius * 0.86;
+    this.headCentreY = torsoTopY + this.headRadius * this.p.headMount;
 
     const g = (name: string) => {
       const o = new THREE.Group();
@@ -207,9 +341,11 @@ export class ChibiRig {
       return j;
     };
 
-    const shoulderY = torsoH * 0.78;
-    const upperArmLen = height * 0.115;
-    const forearmLen = height * 0.105;
+    const shoulderY = height * this.p.shoulderFraction;
+    // Arm split keeps the rig's original 0.115/0.105 ratio (52.3% / 47.7%).
+    const armLen = height * this.p.armFraction;
+    const upperArmLen = armLen * 0.523;
+    const forearmLen = armLen - upperArmLen;
 
     const shoulderL = mk(torso, 'shoulderL', new THREE.Vector3(-this.p.shoulderWidth, shoulderY, 0));
     const shoulderR = mk(torso, 'shoulderR', new THREE.Vector3(this.p.shoulderWidth, shoulderY, 0));
@@ -218,8 +354,13 @@ export class ChibiRig {
     const handL = mk(elbowL, 'handL', new THREE.Vector3(0, -forearmLen, 0));
     const handR = mk(elbowR, 'handR', new THREE.Vector3(0, -forearmLen, 0));
 
-    const thighLen = legH * 0.52;
-    const shinLen = legH * 0.34;
+    // The ankle sits `footClearance` of the way up the leg, because the foot mesh
+    // hangs BELOW it and is sized off `legRadius`. Thigh/shin then split the rest
+    // in the rig's original 0.52 : 0.34 ratio.
+    const ankleY = legH * this.p.footClearance;
+    const boneLen = legH - ankleY;
+    const thighLen = boneLen * 0.605;
+    const shinLen = boneLen - thighLen;
     const hipL = mk(hips, 'hipL', new THREE.Vector3(-this.p.stanceWidth, 0, 0));
     const hipR = mk(hips, 'hipR', new THREE.Vector3(this.p.stanceWidth, 0, 0));
     const kneeL = mk(hipL, 'kneeL', new THREE.Vector3(0, -thighLen, 0));
@@ -231,6 +372,32 @@ export class ChibiRig {
       root, body, hips, torso, neck, head, face,
       shoulderL, shoulderR, elbowL, elbowR, handL, handR,
       hipL, hipR, kneeL, kneeR, footL, footR,
+    };
+
+    this.metrics = {
+      height,
+      headFraction: this.p.headFraction,
+      headRadius: this.headRadius,
+      headCentreY: this.headCentreY,
+      hipY,
+      legLength: legH,
+      torsoHeight: torsoH,
+      torsoWidth: this.p.torsoWidth,
+      torsoDepth: this.p.torsoDepth,
+      torsoTopY,
+      hasTorso: this.hasTorso,
+      shoulderY,
+      shoulderWidth: this.p.shoulderWidth,
+      stanceWidth: this.p.stanceWidth,
+      armRadius: this.p.armRadius,
+      handRadius: this.p.handRadius,
+      legRadius: this.p.legRadius,
+      upperArmLength: upperArmLen,
+      forearmLength: forearmLen,
+      thighLength: thighLen,
+      shinLength: shinLen,
+      ankleY,
+      nominalHeight: this.headCentreY + this.headRadius,
     };
 
     if (!opts.jointsOnly) {
@@ -278,26 +445,32 @@ export class ChibiRig {
     // so 0.12m-radius arms sank into the body and the whole character read as a pile
     // of overlapping dough balls. Limbs must sit clearly OUTSIDE the torso silhouette
     // for the body to read as a body.
-    const tw = this.p.shoulderWidth * 1.18;
-    const torsoGeo = new THREE.SphereGeometry(tw * 0.5, 20, 16);
-    // Taper: narrow at the shoulders, fuller at the waist, so it reads as a soft
-    // body rather than a capsule.
-    const pos = torsoGeo.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i);
-      const t = (y / (tw * 0.5) + 1) * 0.5; // 0 at bottom, 1 at top
-      const taper = 0.86 + 0.30 * Math.sin(t * Math.PI * 0.85);
-      pos.setX(i, pos.getX(i) * taper);
-      pos.setZ(i, pos.getZ(i) * taper * 0.88);
-      pos.setY(i, y * (torsoH / tw) * 0.92);
-    }
-    torsoGeo.computeVertexNormals();
+    //
+    // Skipped entirely for the STUB archetype (`torsoFraction: 0`), whose head mass
+    // mounts straight onto the hips.
+    if (this.hasTorso) {
+      const tw = this.p.torsoWidth;
+      const td = this.p.torsoDepth;
+      const torsoGeo = new THREE.SphereGeometry(tw * 0.5, 20, 16);
+      // Taper: narrow at the shoulders, fuller at the waist, so it reads as a soft
+      // body rather than a capsule.
+      const pos = torsoGeo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        const t = (y / (tw * 0.5) + 1) * 0.5; // 0 at bottom, 1 at top
+        const taper = 0.86 + 0.30 * Math.sin(t * Math.PI * 0.85);
+        pos.setX(i, pos.getX(i) * taper);
+        pos.setZ(i, pos.getZ(i) * taper * (td / tw));
+        pos.setY(i, y * (torsoH / tw) * 0.92);
+      }
+      torsoGeo.computeVertexNormals();
 
-    const torsoMesh = solid(new THREE.Mesh(torsoGeo, torsoMat));
-    torsoMesh.position.y = torsoH * 0.5;
-    torsoMesh.name = 'torso_mesh';
-    this.joints.torso.add(torsoMesh);
-    this.torsoMesh = torsoMesh;
+      const torsoMesh = solid(new THREE.Mesh(torsoGeo, torsoMat));
+      torsoMesh.position.y = torsoH * 0.5;
+      torsoMesh.name = 'torso_mesh';
+      this.joints.torso.add(torsoMesh);
+      this.torsoMesh = torsoMesh;
+    }
 
     // Segment helper: a capsule whose top sits at the joint origin and hangs down.
     const segment = (len: number, radius: number, mat: THREE.Material, name: string) => {
@@ -366,23 +539,20 @@ export class ChibiRig {
 
   private limbSlots(): Array<[LimbPart, THREE.Group, { len: number; radius: number }]> {
     const j = this.joints;
-    const p = this.p;
-    const upper = p.height * 0.115;
-    const fore = p.height * 0.105;
-    const legH = p.height * 0.26;
+    const m = this.metrics;
     return [
-      ['upperArmL', j.shoulderL, { len: upper, radius: p.armRadius }],
-      ['upperArmR', j.shoulderR, { len: upper, radius: p.armRadius }],
-      ['forearmL', j.elbowL, { len: fore, radius: p.armRadius * 0.92 }],
-      ['forearmR', j.elbowR, { len: fore, radius: p.armRadius * 0.92 }],
-      ['handL', j.handL, { len: p.handRadius * 2, radius: p.handRadius }],
-      ['handR', j.handR, { len: p.handRadius * 2, radius: p.handRadius }],
-      ['thighL', j.hipL, { len: legH * 0.52, radius: p.legRadius }],
-      ['thighR', j.hipR, { len: legH * 0.52, radius: p.legRadius }],
-      ['shinL', j.kneeL, { len: legH * 0.34, radius: p.legRadius * 0.9 }],
-      ['shinR', j.kneeR, { len: legH * 0.34, radius: p.legRadius * 0.9 }],
-      ['footL', j.footL, { len: p.legRadius * 2.3, radius: p.legRadius * 1.15 }],
-      ['footR', j.footR, { len: p.legRadius * 2.3, radius: p.legRadius * 1.15 }],
+      ['upperArmL', j.shoulderL, { len: m.upperArmLength, radius: m.armRadius }],
+      ['upperArmR', j.shoulderR, { len: m.upperArmLength, radius: m.armRadius }],
+      ['forearmL', j.elbowL, { len: m.forearmLength, radius: m.armRadius * 0.92 }],
+      ['forearmR', j.elbowR, { len: m.forearmLength, radius: m.armRadius * 0.92 }],
+      ['handL', j.handL, { len: m.handRadius * 2, radius: m.handRadius }],
+      ['handR', j.handR, { len: m.handRadius * 2, radius: m.handRadius }],
+      ['thighL', j.hipL, { len: m.thighLength, radius: m.legRadius }],
+      ['thighR', j.hipR, { len: m.thighLength, radius: m.legRadius }],
+      ['shinL', j.kneeL, { len: m.shinLength, radius: m.legRadius * 0.9 }],
+      ['shinR', j.kneeR, { len: m.shinLength, radius: m.legRadius * 0.9 }],
+      ['footL', j.footL, { len: m.legRadius * 2.3, radius: m.legRadius * 1.15 }],
+      ['footR', j.footR, { len: m.legRadius * 2.3, radius: m.legRadius * 1.15 }],
     ];
   }
 
@@ -400,6 +570,10 @@ export class ChibiRig {
    * inherits the rig's breathing, lean and run animation for free.
    */
   dressTorso(build: (size: { w: number; h: number; d: number }) => THREE.Object3D): void {
+    // STUB has no torso to dress. Silently doing nothing is deliberate: it lets a
+    // character keep its torso-dressing code intact so switching archetype is a
+    // one-line change, which is the supported fix when a body doesn't suit a head.
+    if (!this.hasTorso) return;
     const size = this.torsoSize;
     if (this.torsoMesh) {
       this.torsoMesh.parent?.remove(this.torsoMesh);
@@ -409,7 +583,15 @@ export class ChibiRig {
     this.joints.torso.add(build(size));
   }
 
-  /** Torso extents in metres, measured from the built mesh where available. */
+  /**
+   * Torso extents in metres, measured from the built mesh where available.
+   *
+   * **`h` is ~92% of `metrics.torsoHeight`**, not equal to it: the default barrel
+   * is a sphere that tapers before reaching its own poles, so its bounding box is
+   * shorter than the nominal joint spacing. This is a real trap — it once produced
+   * a floating head that looked exactly like a `headCentreY` bug and wasn't. The
+   * no-mesh fallback below returns the same 0.92 so both paths agree.
+   */
   get torsoSize(): { w: number; h: number; d: number } {
     const m = this.torsoMesh;
     if (m) {
@@ -419,10 +601,11 @@ export class ChibiRig {
         return { w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y, d: bb.max.z - bb.min.z };
       }
     }
+    if (!this.hasTorso) return { w: this.p.torsoWidth, h: 0, d: this.p.torsoDepth };
     return {
-      w: this.p.shoulderWidth * 1.18,
-      h: this.p.height * 0.28,
-      d: this.p.shoulderWidth * 1.04,
+      w: this.p.torsoWidth,
+      h: this.metrics.torsoHeight * 0.92,
+      d: this.p.torsoDepth,
     };
   }
 

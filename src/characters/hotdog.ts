@@ -25,6 +25,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
+import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0'
@@ -184,14 +185,27 @@ export class HotDogCharacter extends BaseCharacter {
       // parts under different heads. HotDog's own head mass is long and HORIZONTAL —
       // per the brief it needs a low, wide stance and stubby limbs underneath to
       // balance that width, or the body reads like a stick holding up a long log.
-      proportions: {
-        headFraction: 0.53,
-        shoulderWidth: CHARACTER_HEIGHT * 0.23,  // wide enough to visually support the sausage's span
-        stanceWidth: CHARACTER_HEIGHT * 0.16,    // low, wide stance — the widest paired with Soup
-        armRadius: CHARACTER_HEIGHT * 0.072,     // stubby, thick
-        handRadius: CHARACTER_HEIGHT * 0.092,    // biggest bundled fist in the cast
-        legRadius: CHARACTER_HEIGHT * 0.082,     // stubby, thick
-      },
+      // Body: LANKY archetype (see `bodies.ts`) — long thin limbs, tall narrow
+      // torso, narrow stance. A hot dog is the roster's other long tube, and the
+      // horizontal bun reads far better perched on a tall thin frame than on the
+      // squat one it had: the contrast between a WIDE head and a NARROW body is
+      // the silhouette, where before both were mid-sized and it read as a log on
+      // a lump.
+      //
+      // `height` runs above the 2.1m norm because this head mass is horizontal —
+      // its vertical extent is only ~0.5R above the head origin, not the ~1.0R
+      // the rig assumes — so the whole frame is scaled up to land the top of the
+      // bun at the cast's standard height. Measured, not guessed: `shoot.mjs
+      // --char hotdog` prints the real bounding height.
+      proportions: bodyType('lanky', {
+        height: 2.16,
+        shoulderWidth: CHARACTER_HEIGHT * 0.17,  // a touch wider than stock LANKY, to support the sausage's span
+        // LANKY's stock torso is 1.15x the shoulder width. On this character the
+        // torso is a dressed SPLIT BUN, and at that ratio it came out taller than
+        // it was wide and read as a plain capsule instead of two bun halves. A bun
+        // needs to be wider than it is deep to read as one at all.
+        torsoWidth: CHARACTER_HEIGHT * 0.17 * 1.45,
+      }),
       // Slouched and sleepy — weight dropped onto one hip, one shoulder
       // drooping low, head lolling to the side. Distinct from every other
       // character's stance in this file's own cast slice: the only one with a
@@ -516,8 +530,11 @@ export class HotDogCharacter extends BaseCharacter {
     head: THREE.Group,
     lobe: { LOBE_Y: number; LOBE_DZ: number; LOBE_TILT: number; LOBE_LEN: number; LOBE_D: number; LOBE_H: number }
   ): void {
-    const shoulderWidth = CHARACTER_HEIGHT * 0.23; // must match rig's own proportions.shoulderWidth
-    const torsoH = CHARACTER_HEIGHT * 0.28;
+    // Read off the rig, never hand-mirrored: body proportions come from an
+    // archetype (`bodies.ts`) now, so a hardcoded copy of a rig constant goes
+    // silently wrong the moment the archetype changes.
+    const shoulderWidth = this.rig.metrics.shoulderWidth;
+    const torsoH = this.rig.metrics.torsoHeight;
 
     const holsterMat = toonMat({ color: HOLSTER_LEATHER, roughness: 0.76 });
     const buckleMat = toonMat({ color: HOLSTER_BUCKLE, roughness: 0.32, metalness: 0.5 });
