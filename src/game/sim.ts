@@ -230,6 +230,12 @@ function applyWorldTick(state: MatchState, role: FighterRole, dt: number, attemp
   const fighter = state[role];
   if (!fighter.alive) return;
 
+  // Publish this tick's terrain slow strength for the renderer (see the field doc on
+  // `Fighter.terrainSlowFactor`). Purely an observation — same `terrainSlowFactor()`
+  // read `movePlayer` already uses to scale the player's own speed; storing its result
+  // doesn't change what it returns or who calls it for movement.
+  fighter.terrainSlowFactor = terrainSlowFactor(state, fighter);
+
   const def = CHARACTERS[fighter.characterId];
   const opponentRole = otherRole(role);
   const opponent = state[opponentRole];

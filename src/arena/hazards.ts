@@ -4,7 +4,14 @@
  * geometry only; their per-frame animation lives in `./ambient.ts`), its ground
  * marking (the scorched floor patch, the glow halo, and the black/amber caution-tape
  * ring traced exactly on the real damage boundary), and the grease/water slow-puddle
- * discs + their hazard-rim trim.
+ * discs.
+ *
+ * The two slow puddles are deliberately NOT trying to look like a "hazard" the way
+ * the pot's ring/glow do — see the design note above `buildPuddleVisual` for why.
+ * They're drawn to read as plain substances (spilled grease, spilled water); the
+ * "someone is standing in this and it's slowing them" feedback lives entirely on the
+ * CHARACTER instead (see `game/vfx.ts`'s slow tint/ring/splash), driven by the
+ * read-only `Fighter.terrainSlowFactor` the sim publishes each tick.
  *
  * None of these have a `CoverBox` — hazards are visual-only ground/area effects, not
  * collidable cover — so nothing here goes through `addCover`. The actual `HazardZone`
@@ -318,30 +325,37 @@ export function buildHazardGround(M: Materials): HazardGround {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Slowing hazard visual — grease/water puddle disc + a hard hazard-rim ring traced
-// exactly on the real slow radius. Same "hard bright edge" hazard grammar as the pot
-// (see `KPAL.greaseRim`/`KPAL.waterRim`), so a puddle never reads as just another
-// softly-shaded floor decal.
+// Slowing hazard visual — grease/water puddle discs.
 //
-// Round-1 (hazards) fix: a same-weight ring on its own was still getting missed
-// entirely in review — worst on the grease puddle, whose base colour (`KPAL.grease`,
-// a dark warm ochre) sits close enough in BOTH hue and value to the warm tile floor
-// (`KPAL.tileLight`/`tileDark`) that the two read as one surface at gameplay
-// distance, and neither puddle had a single glow/particle/icon cue the brief calls
-// for. The pot solved an almost identical "blends into the tile" problem with a hard
-// saturated glow UNDER an opaque caution-tape ring; puddles get the same two-part
-// fix (glow + hard rim) plus three more layers the pot doesn't need because its rim
-// is already unmissable on its own: a dark grounding halo (puddles previously had
-// NO contact shadow at all — nothing separated their edge from the floor), a
-// per-kind surface texture (an oily sheen for grease, ripples for water, so the disc
-// itself is never a single dead-flat colour fill), and small hazard-triangle icons
-// ringing the inside of the boundary — the SLOW category's own reserved "warning
-// icon" language, distinct from the pot's black/amber caution TAPE but doing the
-// same "instant read: hazard here, not decoration" job the reference bar's skull
-// icons do for its damage ooze (see `bs_05.png`).
+// ── Design change: puddles stopped trying to LOOK dangerous ────────────────────
+// Five critic rounds in a row plateaued at 6/10 chasing a colour that could mean
+// "this slows you" without colliding with an existing genre convention: magenta
+// reads as lethal, violet as loot, green as heal/toxic, yellow as ordinary floor,
+// cyan was already water. Every accent hue this file tried (see git history) ran
+// into one of those. The palette for a secondary non-lethal hazard is genuinely
+// exhausted — no hue was ever going to solve this.
 //
-// Every new layer below is built from scratch in THIS file (new canvas textures,
-// new `THREE.Mesh`/`MeshBasicMaterial` instances) rather than by mutating the
+// Uri's fix dissolves the problem instead of fighting it: the puddle's COLOUR
+// doesn't have to carry the "you'll be slowed here" meaning at all. A puddle now
+// only has to look like a puddle — plainly water or plainly grease. The "you are
+// currently slowed" feedback moved onto the CHARACTER instead (a cool tint, a
+// telegraph ring, splash particles at the feet — see `game/vfx.ts`), driven by the
+// `Fighter.terrainSlowFactor` observation `sim.ts` publishes each tick. That's where
+// a player is already looking when it matters, and it works identically whether the
+// slow came from this puddle or a weapon effect, so nothing about "which hazard is
+// this" needs to be decoded from hue at a glance.
+//
+// What's left below is only what makes a disc read as a SUBSTANCE rather than a
+// painted decal: a dark contact-AO halo grounding it against the floor (puddles
+// used to have none at all — a real fix, kept as-is), a per-kind surface texture
+// (an oily sheen for grease, ripples/caustics for water, so the disc is never a
+// single dead-flat colour fill), and a thin wet rim tracing the real edge so it
+// doesn't dissolve into the tile. No glow halo, no bold accent ring, no warning
+// icons, no full-disc accent tint — that entire "make this shout HAZARD" layer is
+// gone; it was fighting a battle the character-side feedback wins instead.
+//
+// Every layer below is built from scratch in THIS file (new canvas textures, new
+// `THREE.Mesh`/`MeshBasicMaterial` instances) rather than by mutating the
 // `mat`/`rimMat` instances the caller hands in — those are `shared.ts`'s
 // `M.grease`/`M.water`/`M.greaseRim`/`M.waterRim`, out of bounds for this file to
 // edit at the source, so nothing here touches their `.color`/`.map`/opacity.
@@ -354,45 +368,15 @@ function hexToRgb(hex: string): [number, number, number] {
   return [Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255)];
 }
 
-/** Generic version of `makeHazardGlowTexture` for the two slow-puddle hues — same
- * "bright defined edge with falloff on either side" shape (peak exactly at
- * `ringNorm`, aligned with where the caller places the real rim), parameterised by
- * colour instead of hard-coding the pot's hot red-orange. */
-function makePuddleGlowTexture(hex: string): THREE.CanvasTexture {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const cx = size / 2, cy = size / 2, R = size * 0.5;
-  const ringNorm = 0.82;
-  const [r, gCh, b] = hexToRgb(hex);
-  const rgba = (a: number) => `rgba(${r},${gCh},${b},${a})`;
-
-  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
-  grad.addColorStop(0, rgba(0));
-  grad.addColorStop(Math.max(0, ringNorm - 0.3), rgba(0));
-  grad.addColorStop(ringNorm - 0.08, rgba(0.25));
-  grad.addColorStop(ringNorm - 0.02, rgba(0.7));
-  grad.addColorStop(ringNorm, rgba(1.0));
-  grad.addColorStop(ringNorm + 0.03, rgba(0.55));
-  grad.addColorStop(ringNorm + 0.12, rgba(0.16));
-  grad.addColorStop(1, rgba(0));
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
-}
-
 /** Oily-sheen surface detail for the grease puddle — dark pooled blotches, a couple
- * of bright diagonal sheen streaks (tinted toward the caller's accent hue, never
- * plain white), and a few trapped air bubbles — so the disc reads as a THICK,
- * VISCOUS liquid instead of a flat colour fill. Alpha-blended on top of the base
- * disc. `accentHex` drives ONLY the sheen streak tint (see the round-2 note on
- * `GREASE_ACCENT` above `buildPuddleVisual`) — the dark pooled blotches stay neutral
- * regardless, since those are about VALUE contrast, not hue. */
-function makeGreaseSurfaceTexture(accentHex: string): THREE.CanvasTexture {
+ * of bright diagonal sheen streaks (tinted toward `highlightHex`, a warm light-catch
+ * colour — never plain white), and a few trapped air bubbles — so the disc reads as
+ * a THICK, VISCOUS liquid instead of a flat colour fill. Alpha-blended on top of the
+ * base disc. `highlightHex` drives ONLY the sheen streak tint (a light-catching
+ * highlight, same job `KPAL.rimLight` does on counter edges elsewhere in this arena
+ * — not a hazard accent) — the dark pooled blotches stay neutral regardless, since
+ * those are about VALUE contrast, not hue. */
+function makeGreaseSurfaceTexture(highlightHex: string): THREE.CanvasTexture {
   const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
@@ -416,7 +400,7 @@ function makeGreaseSurfaceTexture(accentHex: string): THREE.CanvasTexture {
     ctx.fill();
   }
 
-  const [lr, lg, lb] = hexToRgb(accentHex);
+  const [lr, lg, lb] = hexToRgb(highlightHex);
   ctx.strokeStyle = `rgba(${lr},${lg},${lb},0.4)`;
   ctx.lineWidth = size * 0.05;
   ctx.lineCap = 'round';
@@ -483,105 +467,6 @@ function makeWaterSurfaceTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-/**
- * Round-3 fix: a fresh critic scored the round-2 hazard (a caution-TRIANGLE +
- * exclamation mark, same glyph family real-world "imminent danger, do not enter"
- * signage uses) 6.5/10 for exactly this reason — a triangle+"!" reads as MAXIMUM
- * alarm, visually indistinguishable in severity from the reference bar's skull-
- * marked lethal ooze, even though this hazard only SLOWS a player. A player
- * glancing at this arena needs to triage "avoid entirely" (the pot) from "costs me
- * mobility" (these puddles) from the icon language alone, not just the color.
- * Fix: a ROUND badge (circles read as "status/information" in real-world signage,
- * triangles read as "warning/danger" — reserving the triangle shape for the pot
- * keeps that distinction meaningful).
- *
- * Round-4 fix: the round-3 hourglass glyph tried to put a SPECIFIC "you're being
- * slowed" story inside that round badge, but a fresh critic couldn't read it as
- * anything at all — "an ambiguous glyph (no skull, no exclamation, no spike)... a
- * clean purple/violet field... reads more like a capture point, buff pad, or
- * objective marker." A clever glyph that doesn't survive being 40 pixels tall next
- * to a running character is worse than a blunt one that does. Swapped for the single
- * boldest, most universally legible caution glyph there is — a solid exclamation
- * mark, the same "!" ISO general-warning signage uses for non-lethal cautions (wet
- * floor, moderate hazard) as opposed to the skull/triangle combo reserved for fatal
- * ones. The ROUND badge shape (kept from round-3) still does the "this is the lesser
- * category" job; the "!" now does the "but it is still unambiguously a hazard, not a
- * pickup" job the hourglass failed at. Shared by both puddles, tinted to each
- * puddle's own accent hue.
- */
-function makeHazardIconTexture(hex: string): THREE.CanvasTexture {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const cx = size / 2, cy = size / 2;
-  const badgeR = size * 0.42;
-
-  ctx.beginPath();
-  ctx.arc(cx, cy, badgeR + size * 0.05, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(18,13,6,0.95)';
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(cx, cy, badgeR, 0, Math.PI * 2);
-  ctx.fillStyle = hex;
-  ctx.fill();
-
-  // Bold exclamation mark — the single most universally legible caution glyph,
-  // sized to dominate the badge rather than sit as a small delicate detail.
-  ctx.fillStyle = 'rgba(18,13,6,0.95)';
-  const exW = size * 0.1;
-  ctx.beginPath();
-  const barTop = cy - badgeR * 0.62, barBottom = cy + badgeR * 0.05;
-  ctx.moveTo(cx - exW / 2, barTop);
-  ctx.lineTo(cx + exW / 2, barTop);
-  ctx.lineTo(cx + exW * 0.38, barBottom);
-  ctx.lineTo(cx - exW * 0.38, barBottom);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(cx, cy + badgeR * 0.42, exW * 0.6, 0, Math.PI * 2);
-  ctx.fill();
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
-}
-
-// Round-2 fix: a fresh critic scored the grease puddle 6/10 specifically because its
-// glow/icon accent (originally `KPAL.greaseRim`, `#D6FF3A`) reads as a saturated
-// YELLOW rather than a green — R=214 sits above both G and B — and this arena's whole
-// hub floor is itself a warm yellow/tan (`KPAL.tileLight`/`tileDark`, also R-highest).
-// Two R-highest, warm-family colours next to each other are exactly what fails the
-// "instant glance" test the brief asks for, no matter how bright the glow is: hue
-// distance, not brightness, is what actually separates a hazard from its floor (see
-// `bs_05.png` — magenta ooze on GREEN grass, near-maximum hue distance). `shared.ts`
-// is out of bounds here (that file owns `KPAL.greaseRim`, used elsewhere as the puddle's
-// literal boundary-ring material), so this reserved accent lives ENTIRELY in this
-// file and drives only the layers this file authors from scratch: the glow halo, the
-// warning icons, and the sheen-streak tint on the surface overlay.
-//
-// Round-3 fix: the round-2 choice (hot magenta-pink, `#FF33CC` — R and B both near
-// max, i.e. leaning straight toward RED) fixed the hue-distance-from-floor problem
-// but created a NEW one a fresh critic then caught: real-world hazard convention
-// reserves red/hot-pink for "maximum alarm, lethal" (this arena's own pot already
-// speaks that language via its red-orange glow), so a same-tier magenta made the
-// SLOW puddles visually indistinguishable in SEVERITY from the pot and from the
-// reference bar's skull-marked lethal ooze — no cue that this is a lesser "costs you
-// mobility" effect rather than "avoid entirely." Shifted from magenta to a
-// blue-violet instead, hue-distant from the floor and cooler than the pot's red.
-//
-// Round-4 fix: the blue-violet ALSO turned out to be the wrong family, for a third,
-// separate reason a fresh critic caught: in this exact genre, saturated purple is
-// its OWN strong convention — "Epic"/rare loot, buff auras, objective/capture-point
-// markers (this game's own roster screen uses purple for Epic rarity) — so a clean
-// violet circle with a soft badge icon read as "reward, not threat" regardless of
-// how correctly it avoided the floor and the pot's hues. Toxic GREEN replaces it:
-// still far from the warm tan floor (G-dominant vs the floor's R-dominant), still
-// far from the pot's red/amber and water's cyan, cooler than red/magenta (keeps the
-// round-3 severity fix), and — unlike purple — green's overwhelming existing
-// convention across the genre is poison/toxic/DO-NOT-STAND-HERE, never loot.
-const GREASE_ACCENT = '#33E077';
-
 export function buildPuddleVisual(
   M: Materials,
   px: number,
@@ -596,17 +481,15 @@ export function buildPuddleVisual(
   // Identity check, not a new prop: `mat`/`rimMat` are literally `M.grease`/
   // `M.greaseRim` or `M.water`/`M.waterRim` at every real call site (see
   // `kitchen.ts`) — comparing object identity against the same `M` the caller
-  // already handed in picks the right hue/texture set without a new parameter,
-  // which would mean editing `kitchen.ts`'s call sites (out of bounds for this file).
+  // already handed in picks the right per-kind surface texture without a new
+  // parameter, which would mean editing `kitchen.ts`'s call sites (out of bounds
+  // for this file).
   const isGrease = mat === M.grease;
-  // Water's `KPAL.waterRim` cyan already reads instantly against the warm floor (a
-  // fresh critic never flagged it) so it stays as the accent unchanged; grease gets
-  // the reserved `GREASE_ACCENT` instead of its own boundary-ring hue — see above.
-  const accentHex = isGrease ? GREASE_ACCENT : KPAL.waterRim;
 
-  // Grounding + a dark contrasting edge — puddles previously had NO AO at all, so
-  // (especially the grease one, whose base hue sits close to the tile's own) they
-  // floated free with no dark boundary separating them from the floor.
+  // Grounding — puddles previously had NO contact shadow at all, so they floated
+  // free with no dark boundary separating them from the floor. This is the one
+  // layer from the old hazard-signalling pass that was a genuine grounding fix
+  // rather than a colour escalation, so it's kept exactly as it was.
   g.add(buildContactShadow(M.contactShadow, R * 2, R * 2, 1.35));
 
   const disc = mesh(new THREE.CircleGeometry(R, 32), mat, 'puddle');
@@ -615,30 +498,12 @@ export function buildPuddleVisual(
   noOutline(disc);
   g.add(disc);
 
-  // Round-3 fix: a fresh critic read the grease disc's warm gold-orange base
-  // (`M.grease`, out of bounds to recolour at the source) plus the boundary-only
-  // glow below as "reward/pickup pad, not threat" — the ring told the right story
-  // but the WHOLE INTERIOR was still bare gold, since `makePuddleGlowTexture`
-  // deliberately fades to zero well before the centre (that's correct for the pot,
-  // whose centre is a dark scorch patch, but wrong here: the puddle's centre IS the
-  // hazard surface). A flat accent-tinted wash across the FULL disc — not just its
-  // rim — means there's no untouched gold interior left to misread as a buff zone.
-  if (isGrease) {
-    const tint = new THREE.Mesh(
-      new THREE.CircleGeometry(R * 0.99, 32),
-      new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.5, depthWrite: false })
-    );
-    tint.name = 'puddle_grease_tint__no_outline';
-    tint.rotation.x = -Math.PI / 2;
-    tint.position.set(gp.x, FLOOR_Y.decal + 0.005, gp.z);
-    tint.renderOrder = 1;
-    noOutline(tint);
-    g.add(tint);
-  }
-
   // Per-kind surface detail — an independent alpha-blended overlay, so the base
-  // `mat` instance handed in by the caller is never touched.
-  const surfTex = isGrease ? makeGreaseSurfaceTexture(accentHex) : makeWaterSurfaceTexture();
+  // `mat` instance handed in by the caller is never touched. This is what makes the
+  // disc read as an actual SUBSTANCE (thick pooled grease with an oily sheen, or
+  // disturbed water with ripples/caustics) rather than a flat colour fill — the only
+  // job this layer has now is "look like a puddle," not "signal danger."
+  const surfTex = isGrease ? makeGreaseSurfaceTexture(KPAL.rimLight) : makeWaterSurfaceTexture();
   const surf = new THREE.Mesh(
     new THREE.CircleGeometry(R * 0.97, 32),
     new THREE.MeshBasicMaterial({ map: surfTex, transparent: true, depthWrite: false })
@@ -650,78 +515,21 @@ export function buildPuddleVisual(
   noOutline(surf);
   g.add(surf);
 
-  // Bright glow halo, peaking exactly on the real slow-radius boundary — same
-  // "hard bright edge" language as the pot's hazard glow, recoloured per puddle so
-  // grease and water stay tellable apart from across the arena, not just up close.
-  const glowMat = new THREE.MeshBasicMaterial({
-    map: makePuddleGlowTexture(accentHex),
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  const glowR = (R / 0.82) * 1.02;
-  const glow = new THREE.Mesh(new THREE.PlaneGeometry(glowR * 2, glowR * 2), glowMat);
-  glow.name = 'puddle_glow__no_outline';
-  glow.rotation.x = -Math.PI / 2;
-  glow.position.set(gp.x, FLOOR_Y.fine - 0.004, gp.z);
-  glow.renderOrder = 2;
-  noOutline(glow);
-  g.add(glow);
-
-  // Hard hazard boundary, traced exactly on the real slow radius — split into TWO
-  // rings after the round-2 critique. A single ring filled with the caller's
-  // `rimMat` (`M.greaseRim`/`M.waterRim`, out of bounds to recolour at the source)
-  // was wide enough that it — not the new magenta/cyan glow+icons — was the biggest
-  // single patch of colour in the whole hazard, so grease still read as "yellow" no
-  // matter how the glow/icons were recoloured. Now: a thin trim EXACTLY on `R` in the
-  // caller's own material (still respects `shared.ts`'s ownership of that hue, still
-  // visibly present), plus a thick, bold, OPAQUE accent band just inside it in this
-  // file's own reserved colour — the same "hard edge you cannot miss" job the pot's
-  // caution tape does, just this hazard's own hue instead of black/amber, so grease's
-  // dominant read is finally the magenta accent, not the shared lime.
+  // Thin wet rim tracing the real edge, in the caller's own material (`M.greaseRim`/
+  // `M.waterRim` — `shared.ts`'s, out of bounds to recolour here). Just enough of a
+  // boundary line that the puddle's edge doesn't dissolve into the tile — the same
+  // "wet edge" a real spill leaves, not a hazard marking; there is deliberately no
+  // second bold accent band, glow halo or icon ring stacked on top of it any more.
   const trimW = R * 0.045;
   const trim = mesh(
     new THREE.RingGeometry(R - trimW, R + trimW, 40),
     rimMat,
-    'puddle_hazard_trim'
+    'puddle_wet_rim'
   );
   trim.rotation.x = -Math.PI / 2;
   trim.position.set(gp.x, FLOOR_Y.fine, gp.z);
   noOutline(trim);
   g.add(trim);
-
-  const accentBandW = R * 0.13;
-  const accentRing = mesh(
-    new THREE.RingGeometry(R - trimW - accentBandW * 2, R - trimW, 40),
-    new THREE.MeshBasicMaterial({ color: accentHex }),
-    'puddle_hazard_accent_ring__no_outline'
-  );
-  accentRing.rotation.x = -Math.PI / 2;
-  accentRing.position.set(gp.x, FLOOR_Y.fine - 0.001, gp.z);
-  noOutline(accentRing);
-  g.add(accentRing);
-
-  // Hazard-triangle icons ringing the inside of the boundary — five per puddle,
-  // evenly spaced, small enough not to crowd the disc but bold enough to read at a
-  // glance, the same "scattered warning glyphs across the hazard" cue the reference
-  // bar's skull icons give its damage ooze (see the file header).
-  const iconMat = new THREE.MeshBasicMaterial({
-    map: makeHazardIconTexture(accentHex),
-    transparent: true,
-    depthWrite: false,
-  });
-  const iconCount = 5;
-  const iconSize = R * 0.4;
-  for (let i = 0; i < iconCount; i++) {
-    const a = (i / iconCount) * Math.PI * 2 + (isGrease ? 0.2 : 0.85);
-    const icon = new THREE.Mesh(new THREE.PlaneGeometry(iconSize, iconSize), iconMat);
-    icon.name = 'puddle_icon__no_outline';
-    icon.rotation.x = -Math.PI / 2;
-    icon.position.set(gp.x + Math.cos(a) * R * 0.78, FLOOR_Y.fine + 0.006, gp.z + Math.sin(a) * R * 0.78);
-    icon.renderOrder = 3;
-    noOutline(icon);
-    g.add(icon);
-  }
 
   return g;
 }

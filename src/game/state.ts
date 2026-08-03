@@ -58,6 +58,17 @@ export interface Fighter {
   trailDropTimer: number;
   /** Match-elapsed-ms timestamp of the last time this fighter took damage. -Infinity if never. */
   lastDamagedAt: number;
+  /**
+   * Read-only OBSERVATION of the strongest terrain slow currently affecting this
+   * fighter — the exact same movement-speed multiplier `sim.ts`'s own
+   * `terrainSlowFactor()` already computes each tick (1 = unaffected, e.g. 0.45 while
+   * standing in a grease/water puddle or a Sticky Trail splat). Published purely so a
+   * renderer (see `game/vfx.ts`) can react to "this fighter is standing in a puddle"
+   * without recomputing hazard geometry itself. Never read by gameplay logic — the
+   * sim's actual movement math still calls `terrainSlowFactor()` directly, this field
+   * is a side-channel copy of that same result, not a new input to it.
+   */
+  terrainSlowFactor: number;
 }
 
 export function createFighter(
@@ -86,6 +97,7 @@ export function createFighter(
     regenTimer: 0,
     trailDropTimer: 0,
     lastDamagedAt: -Infinity,
+    terrainSlowFactor: 1,
   };
 }
 

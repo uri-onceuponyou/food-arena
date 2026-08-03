@@ -25,14 +25,14 @@ declare global {
      * driver `waitForFunction` on the exact frame a specific effect fires instead of
      * guessing at screenshot timing for effects that live well under a second.
      * Never read by game logic. */
-    __vfxQaCounts?: Record<'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam', number>;
+    __vfxQaCounts?: Record<'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash', number>;
   }
 }
 
-type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam';
+type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash';
 
 function bumpVfxQaCount(key: VfxQaKey): void {
-  window.__vfxQaCounts ??= { cast: 0, meleeArc: 0, impact: 0, death: 0, heal: 0, giantSlam: 0 };
+  window.__vfxQaCounts ??= { cast: 0, meleeArc: 0, impact: 0, death: 0, heal: 0, giantSlam: 0, puddleSplash: 0 };
   window.__vfxQaCounts[key]++;
 }
 
@@ -53,6 +53,35 @@ const GROUND_VFX_Y = 0.24;
 const STATUS_RING_Y = 0.3;
 const STUN_STAR_HEIGHT = CHARACTER_HEIGHT * 1.04;
 const STUN_STAR_RADIUS = 0.42;
+
+// ── Slow feedback (design change) ───────────────────────────────────────────────
+// The arena's grease/water puddles used to carry a whole "make this shout HAZARD"
+// visual language of their own (glow halo, bold accent ring, warning icons — see
+// `arena/hazards.ts`), chasing an accent colour that could mean "you'll be slowed
+// here" without colliding with an existing genre convention. Five critic rounds
+// plateaued at 6/10 doing that; every hue was already claimed by something else
+// (magenta = lethal, violet = loot, green = heal/toxic, yellow = ordinary floor,
+// cyan = water itself). Uri's fix: stop asking the PUDDLE's colour to carry that
+// meaning at all. A puddle just has to look like a puddle (see `hazards.ts`); the
+// "you are currently slowed" feedback moves onto the CHARACTER instead, where the
+// player is already looking. It has to read identically regardless of which of the
+// two slow sources caused it — a puddle underfoot (`Fighter.terrainSlowFactor`, the
+// sim's read-only per-tick observation) or a weapon's own `status.slowedUntil`
+// timer — so both are treated as one `slowed` signal below (see `sync()`).
+/** Cool, desaturated slate-blue — reads as "wet/cold/dragging" at a glance without
+ * competing with any character's own palette. */
+const SLOW_TINT_COLOR = new THREE.Color('#6C93A6');
+/** Tint-sprite footprint, in metres — sized to sit over the chibi rig's torso+head
+ * "identity mass" (see `characters/rig.ts`), deliberately short of the full body/legs,
+ * and kept at a moderate peak opacity (see `sync()`) so a character's own colours
+ * still read through the tint instead of being fully overwritten. */
+const SLOW_TINT_WIDTH = CHARACTER_HEIGHT * 0.62;
+const SLOW_TINT_HEIGHT = CHARACTER_HEIGHT * 0.82;
+const SLOW_TINT_CENTER_Y = CHARACTER_HEIGHT * 0.62;
+/** World-unit distance a fighter must travel (accumulated only while terrain-slowed)
+ * between puddle-splash bursts — a footstep-like cadence tied to actual movement,
+ * not a timer, so it naturally speeds up or stops with the fighter's own motion. */
+const PUDDLE_SPLASH_DIST_WU = 18;
 
 const WHITE = new THREE.Color('#ffffff');
 /** Deep desaturated ink, matching `render/toon.ts`'s outline colour (kept as a local
@@ -424,6 +453,9 @@ interface RingSlot {
 
 interface StatusVisual {
   slowRing: THREE.Mesh;
+  /** Camera-facing colour-shift sprite over the character's own body — see the
+   * "Slow feedback" design note above `SLOW_TINT_COLOR`. */
+  slowTint: THREE.Sprite;
   stunStars: THREE.Sprite[];
 }
 
@@ -463,6 +495,14 @@ export class VfxLayer {
   private readonly ringUnitGeo = new THREE.RingGeometry(0.62, 1, 40);
 
   private readonly statusByRole: Record<FighterRole, StatusVisual>;
+  /** Per-fighter footstep-distance tracking for puddle splashes (see
+   * `PUDDLE_SPLASH_DIST_WU`) — `lastX`/`lastY` start at `NaN` so the very first
+   * `sync()` call after construction/restart never reads a bogus huge "jump"
+   * distance from an uninitialised position. */
+  private readonly slowSplashState: Record<FighterRole, { lastX: number; lastY: number; distAccum: number }> = {
+    player: { lastX: NaN, lastY: NaN, distAccum: 0 },
+    enemy: { lastX: NaN, lastY: NaN, distAccum: 0 },
+  };
 
   constructor(scene: THREE.Scene) {
     this.group.name = 'vfx_layer';
@@ -525,6 +565,29 @@ export class VfxLayer {
       slowRing.renderOrder = 4;
       this.group.add(slowRing);
 
+      // Colour-shift sprite over the character's own body (see the design note above
+      // `SLOW_TINT_COLOR`). Reuses `glowTex` (the same soft radial dot every other
+      // particle in this layer uses) stretched non-uniformly via `scale`, rather than
+      // authoring a bespoke silhouette texture — a soft falloff reads fine at gameplay
+      // distance and this is not trying to be a precise cutout. `depthTest: false` is
+      // deliberate: the sprite's single flat plane sits at one depth, but the chibi
+      // rig's real silhouette is not flat, so testing against the real depth buffer
+      // would clip the tint unevenly (visible on one side of the body, missing on the
+      // other) instead of reading as one even wash over the character.
+      const tintMat = new THREE.SpriteMaterial({
+        map: this.glowTex,
+        color: SLOW_TINT_COLOR,
+        transparent: true,
+        opacity: 0,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const slowTint = new THREE.Sprite(tintMat);
+      slowTint.scale.set(SLOW_TINT_WIDTH, SLOW_TINT_HEIGHT, 1);
+      slowTint.visible = false;
+      slowTint.renderOrder = 8;
+      this.group.add(slowTint);
+
       const stunStars: THREE.Sprite[] = [];
       for (let i = 0; i < 3; i++) {
         const mat = new THREE.SpriteMaterial({
@@ -538,7 +601,7 @@ export class VfxLayer {
         this.group.add(star);
         stunStars.push(star);
       }
-      return { slowRing, stunStars };
+      return { slowRing, slowTint, stunStars };
     };
 
     this.statusByRole = { player: buildStatusVisual(), enemy: buildStatusVisual() };
@@ -605,21 +668,56 @@ export class VfxLayer {
       },
     );
 
-    // ── Status telegraphs: slow (ground ring) / stun (orbiting stars) ─────────
+    // ── Status telegraphs: slow (character tint + ground ring + puddle splash) /
+    // stun (orbiting stars) ────────────────────────────────────────────────────
     (['player', 'enemy'] as const).forEach((role) => {
       const fighter = state[role];
       const vis = this.statusByRole[role];
       const pos = groundPos(fighter.x, fighter.y);
 
-      const slowed = fighter.alive && state.elapsed < fighter.status.slowedUntil;
+      // Two independent slow SOURCES — a puddle underfoot (`terrainSlowFactor`, the
+      // sim's read-only per-tick observation; 1 = unaffected, see `state.ts`) and a
+      // weapon's own `status.slowedUntil` timer — deliberately read as one identical
+      // `slowed` signal below. The player shouldn't have to decode which source is
+      // active; see the design note above `SLOW_TINT_COLOR`.
+      const terrainSlowed = fighter.alive && fighter.terrainSlowFactor < 1;
+      const weaponSlowed = fighter.alive && state.elapsed < fighter.status.slowedUntil;
+      const slowed = terrainSlowed || weaponSlowed;
+
       vis.slowRing.visible = slowed;
+      vis.slowTint.visible = slowed;
       if (slowed) {
         vis.slowRing.position.set(pos.x, STATUS_RING_Y, pos.z);
         const pulse = 0.9 + Math.sin(state.elapsed * 0.0035) * 0.12;
         vis.slowRing.scale.setScalar(pulse);
         vis.slowRing.rotation.z = state.elapsed * 0.0012;
         (vis.slowRing.material as THREE.MeshBasicMaterial).opacity = 0.55;
+
+        vis.slowTint.position.set(pos.x, SLOW_TINT_CENTER_Y, pos.z);
+        const tintPulse = 0.42 + Math.sin(state.elapsed * 0.006) * 0.08;
+        (vis.slowTint.material as THREE.SpriteMaterial).opacity = tintPulse;
       }
+
+      // Splash particles at the feet — ONLY while a puddle is the cause (not a
+      // weapon slow) and only while actually moving through it, so this reads as
+      // "wading through liquid" rather than a generic status particle. Distance-
+      // accumulated rather than timer-based so the cadence tracks however fast the
+      // fighter is actually moving (and stops the instant they stop, even if still
+      // standing in the puddle).
+      const splash = this.slowSplashState[role];
+      if (terrainSlowed) {
+        if (Number.isFinite(splash.lastX)) {
+          splash.distAccum += Math.hypot(fighter.x - splash.lastX, fighter.y - splash.lastY);
+          while (splash.distAccum >= PUDDLE_SPLASH_DIST_WU) {
+            splash.distAccum -= PUDDLE_SPLASH_DIST_WU;
+            this.spawnPuddleSplash(pos.x, pos.z);
+          }
+        }
+      } else {
+        splash.distAccum = 0;
+      }
+      splash.lastX = fighter.x;
+      splash.lastY = fighter.y;
 
       const stunned = fighter.alive && state.elapsed < fighter.status.stunnedUntil;
       vis.stunStars.forEach((star, i) => {
@@ -839,6 +937,37 @@ export class VfxLayer {
       p.startScale = 0.22; p.endScale = 0.08;
       p.startOpacity = 0.9; p.endOpacity = 0; p.fadeEase = 1;
       p.mat.color.set('#6FE0A8');
+    }
+  }
+
+  /**
+   * Small splash burst at a fighter's feet — the "wading through liquid" motion cue
+   * for terrain slow (see `sync()`'s distance-accumulated splash cadence). Reuses the
+   * shared particle pool exactly like every other one-shot effect in this layer, so
+   * nothing new is allocated per spawn. Deliberately one neutral bright droplet
+   * colour for both puddles (not per-kind grease/water tinted) — this motion cue's
+   * job is "you're moving through liquid," not re-litigating which hazard this is.
+   */
+  private spawnPuddleSplash(xM: number, zM: number): void {
+    bumpVfxQaCount('puddleSplash');
+    const count = 3;
+    for (let i = 0; i < count; i++) {
+      const p = this.allocParticle();
+      const ang = (i / count) * Math.PI * 2 + Math.random() * 1.2;
+      const r = 0.05 + Math.random() * 0.08;
+      p.active = true;
+      p.life = 0;
+      p.maxLife = 0.26 + Math.random() * 0.1;
+      p.sprite.visible = true;
+      p.sprite.position.set(xM + Math.cos(ang) * r, 0.06, zM + Math.sin(ang) * r);
+      p.vx = Math.cos(ang) * 0.6;
+      p.vz = Math.sin(ang) * 0.6;
+      p.vy = 1.1 + Math.random() * 0.5;
+      p.gravity = -5.5;
+      p.startScale = 0.14 + Math.random() * 0.05;
+      p.endScale = 0.03;
+      p.startOpacity = 0.85; p.endOpacity = 0; p.fadeEase = 1;
+      p.mat.color.set('#BFE9FF');
     }
   }
 
@@ -1111,7 +1240,16 @@ export class VfxLayer {
     for (const role of ['player', 'enemy'] as const) {
       const vis = this.statusByRole[role];
       vis.slowRing.visible = false;
+      vis.slowTint.visible = false;
       vis.stunStars.forEach((s) => { s.visible = false; });
+      // Reset footstep-distance tracking too — see the `slowSplashState` field
+      // comment: stale `lastX`/`lastY` from the match just ended, carried into a
+      // fresh spawn position, would otherwise read as one huge instantaneous "jump"
+      // and could fire a splash burst on the very first tick of the new match.
+      const splash = this.slowSplashState[role];
+      splash.lastX = NaN;
+      splash.lastY = NaN;
+      splash.distAccum = 0;
     }
   }
 
@@ -1140,6 +1278,7 @@ export class VfxLayer {
       const vis = this.statusByRole[role];
       (vis.slowRing.material as THREE.Material).dispose();
       vis.slowRing.geometry.dispose();
+      (vis.slowTint.material as THREE.Material).dispose();
       vis.stunStars.forEach((s) => (s.material as THREE.Material).dispose());
     }
   }

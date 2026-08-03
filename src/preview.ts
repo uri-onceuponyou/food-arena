@@ -27,6 +27,8 @@ import type { AnimState, CharacterModel } from './characters/types';
 import { CHARACTER_HEIGHT, groundPos } from './units';
 import { toonMat, RAMP_SOFT, outlineGroup } from './render/toon';
 import { createKitchenArena } from './arena/kitchen';
+import { buildFloor } from './arena/floor';
+import { buildMaterials } from './arena/shared';
 import type { ArenaDefinition } from './arena/types';
 
 declare global {
@@ -48,7 +50,7 @@ const piece = params.get('piece') ?? 'character';
 const shotMode = params.get('shot') === '1';
 const showGrid = params.get('grid') === '1';
 const frozenTime = params.has('t') ? Number(params.get('t')) : null;
-const isArena = piece === 'arena' || piece === 'prop';
+const isArena = piece === 'arena' || piece === 'prop' || piece === 'floor';
 // arena only: 'gameplay' frames a combat-distance patch, 'overview' frames the whole map.
 const arenaView = params.get('view') === 'overview' ? 'overview' : 'gameplay';
 
@@ -256,7 +258,32 @@ function mountProp() {
   label.textContent = `prop · ${kind}`;
 }
 
-if (piece === 'prop') {
+/**
+ * The FLOOR, alone. No props, no hazards, no characters, no ambient.
+ *
+ * Five floor critic rounds all scored 3/10 and every one of them fixated on things
+ * that were not the floor — a neighbouring prop, a decal artifact, a shadow from
+ * something else. An element cannot be judged while the frame is full of other
+ * owners' work, so this gives the floor a genuinely clean slate.
+ */
+function mountFloorOnly() {
+  const M = buildMaterials();
+  const g = buildFloor(M);
+  stage.scene.add(g);
+  const tx = params.has('tx') ? Number(params.get('tx')) : 700;
+  const ty = params.has('ty') ? Number(params.get('ty')) : 500;
+  const c = groundPos(tx, ty);
+  stage.rig.frameMode = 'ground';
+  stage.rig.viewWidthUnits = params.has('zoom') ? Number(params.get('zoom')) : 265;
+  stage.rig.pitchDeg = params.has('pitch') ? Number(params.get('pitch')) : 58;
+  stage.rig.snapTo(c.x, c.z);
+  stage.lighting.focus(c.x, c.z, 30);
+  label.textContent = 'floor only';
+}
+
+if (piece === 'floor') {
+  mountFloorOnly();
+} else if (piece === 'prop') {
   mountProp();
 } else if (piece === 'character') {
   mountCharacter(subjectId);
