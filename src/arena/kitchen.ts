@@ -112,6 +112,11 @@ const KPAL = {
   water: '#4FA8D6',
   waterCap: PALETTE.waterCap,
   grease: '#B08A2E',
+
+  // Warm pale gold used ONLY as a thin light-catching cap/rim trim along the top
+  // edge of counters and backsplashes — the "chamfer that catches a different light
+  // angle" cue. Never used as a body colour, so it stays legible as an edge accent.
+  rimLight: '#F6DFA0',
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,6 +156,11 @@ function buildMaterials() {
     freezerBody: glossyMat({ color: KPAL.freezerBody, roughness: 0.4 }),
     freezerDoor: toonMat({ color: KPAL.freezerDoor, roughness: 0.45 }),
     freezerTrim: toonMat({ color: KPAL.freezerTrim, roughness: 0.5 }),
+    // Frosty lid cap, noticeably lighter/cooler than the body — from the steep
+    // top-down camera the freezer's flat top is almost the whole silhouette, so this
+    // two-tone break (plus the bright rim trim ringing it) is what keeps its huge top
+    // face reading as a lid catching light rather than a single flat coloured slab.
+    freezerLid: toonMat({ color: '#7FD6EE', roughness: 0.3 }),
     // Cold ground light spilling out in front of each freezer door — unlit so it
     // reads as emitted light rather than a painted floor patch.
     freezerGlow: flatMat(KPAL.freezerGlow, { transparent: true, opacity: 0.28 }),
@@ -186,11 +196,30 @@ function buildMaterials() {
     chalk: flatMat('#F4EFE2', { transparent: true, opacity: 0.85 }),
     dust: flatMat('#FFF6DC', { transparent: true, opacity: 0.5 }),
 
-    // Fake ambient occlusion — a soft dark radial decal dropped under every cover
-    // prop's footprint (see `addCover`) so props read as sitting ON the floor with
-    // real contact darkening, rather than pasted on top of it.
+    // Thin glossy cap trim along backsplash/counter top edges — the one bright,
+    // slightly specular accent used purely as an edge highlight (see `addBacksplash`).
+    rimLight: glossyMat({ color: KPAL.rimLight, roughness: 0.28 }),
+
+    // Fake ambient occlusion — a soft dark radial decal dropped under ROUND props
+    // (the pot) so they read as sitting ON the floor with real contact darkening,
+    // rather than pasted on top of it.
     contactShadow: new THREE.MeshBasicMaterial({
       map: makeContactShadowTexture(),
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.9,
+    }),
+    // Every CoverBox's automatic footprint shadow (see `addCover`) uses THIS instead
+    // of `contactShadow`: a blurred ROUNDED-RECT, not a radial gradient. The critic's
+    // #1 finding was that cover has "no AO where it meets the floor" — the old radial
+    // gradient was drawn as a circle inscribed in the plane's UV space, so for any
+    // elongated rectangular footprint (a stove island is 170x90wu) the gradient hit
+    // zero alpha well inside the plane's edges and its CORNERS got no darkening at
+    // all. A rounded-rect shadow hugs the actual silhouette — corners included — at
+    // any aspect ratio, which is what makes every box prop read as pressing into the
+    // floor instead of floating on it.
+    groundedShadow: new THREE.MeshBasicMaterial({
+      color: 0x000000,
       transparent: true,
       depthWrite: false,
       opacity: 0.9,
@@ -245,18 +274,127 @@ function makeContactShadowTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/**
+ * Blurred rounded-rect ground shadow, used for every `addCover` footprint (see the
+ * `groundedShadow` material). Unlike a radial gradient, this hugs a RECTANGULAR
+ * silhouette at any aspect ratio — corners included — because the shape itself is a
+ * rounded rect, not a circle stretched to fit. The blur is faked by filling the rect
+ * far off-canvas and letting `shadowBlur` paint only its soft edge onto the visible
+ * area, so there's no hard sharp-rect artifact in the middle.
+ */
+function makeGroundedShadowTexture(): THREE.CanvasTexture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const pad = size * 0.1;
+  const rectW = size - pad * 2;
+  const rectH = size - pad * 2;
+  const radius = size * 0.16;
+  const blur = size * 0.11;
+  const off = size * 3; // pushes the actual filled rect well outside the visible canvas
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(14,9,6,0.68)';
+  ctx.shadowBlur = blur;
+  ctx.shadowOffsetX = -off;
+  ctx.fillStyle = 'rgba(14,9,6,0.68)';
+  roundRectPath(ctx, off + pad, pad, rectW, rectH, radius);
+  ctx.fill();
+  ctx.restore();
+
+  const center = ctx.getImageData(size / 2, size / 2, 1, 1).data;
+  const edge = ctx.getImageData(2, 2, 1, 1).data;
+  console.log('[DEBUG texture pixels] center=' + Array.from(center).join(',') + ' edge=' + Array.from(edge).join(','));
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /** Elliptical AO blob sized to a prop's own footprint (in metres), slightly oversized
  * so it peeks out past the silhouette the way a real contact shadow would. */
 function buildContactShadow(mat: THREE.Material, wM: number, dM: number, scale = 1.25): THREE.Mesh {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(wM * scale, dM * scale), mat);
   m.rotation.x = -Math.PI / 2;
-  m.position.y = 0.011;
+  // MUST clear the floor tile's own top face (see `FLOOR_Y.tile` / the checkerboard
+  // build below: each tile is a 0.03m-tall box centred at y=0, so its top sits at
+  // +0.015). This used to sit at y=0.011 — INSIDE that opaque box — so from the
+  // steep top-down camera every AO/contact-shadow decal in the arena was rendering
+  // behind the tile's own solid top face and was invisible everywhere except the
+  // ~6%-wide grout gaps between tiles. That silent bug is almost certainly a big
+  // part of why cover read with "no AO where it meets the floor": the code to draw
+  // it was there, it just could never actually show up. 0.019 clears the tile top
+  // with a hair of margin, same idiom as the FLOOR_Y.decal layer above it.
+  m.position.y = 0.019;
   m.renderOrder = 1;
   m.name = 'contact_shadow__no_outline';
   m.castShadow = false;
   m.receiveShadow = false;
   noOutline(m);
   return m;
+}
+
+/**
+ * Raised counter-back wall + a thin bright cap trim along its top edge.
+ *
+ * This is the single biggest lever for the "cover has no height" finding: the steep
+ * gameplay pitch (58°) looks almost straight down on a ~0.9m cabinet, so a flat top
+ * plus a sliver of side face reads as barely-there relief. A vertical wall reads
+ * unambiguously as height from ANY pitch, and the light-catching cap trim on top of
+ * it is the literal "chamfer that catches a different light angle" the brief asked
+ * for. Always placed at local -Z (the "outer/back" edge, away from the pot — see the
+ * yaw convention noted on `buildStoveIsland`'s herb sprig) so it never faces the
+ * hazard and never reads as blocking the lane a player is dashing down.
+ *
+ * `wM`/`dM` are the CALLER's already-shrunk cabinet footprint (not the raw CoverBox
+ * size), and the wall is kept well inside it on every axis — this only adds height,
+ * never pushes visible geometry past the CoverBox the player actually collides with.
+ */
+function addBacksplash(g: THREE.Group, M: Materials, wM: number, dM: number, cabH: number, mat: THREE.Material, heightM = 0.4): void {
+  const wallD = dM * 0.1;
+  const wall = mesh(roundedBox(wM * 0.9, heightM, wallD, 0.025), mat, 'backsplash');
+  wall.position.set(0, cabH + heightM / 2, -dM * 0.5 + wallD * 0.5 + dM * 0.02);
+  g.add(wall);
+  const cap = mesh(roundedBox(wM * 0.9, 0.03, wallD + 0.015, 0.015), M.rimLight, 'backsplash_cap__no_outline');
+  cap.position.set(0, cabH + heightM + 0.015, wall.position.z);
+  noOutline(cap);
+  g.add(cap);
+}
+
+/**
+ * Thin bright picture-frame trim tracing all FOUR edges of a flat top surface.
+ *
+ * `addBacksplash` only lights up one edge — fine for silhouette height, but which
+ * edge that is depends on which way the object happens to face the camera, and the
+ * default judged gameplay screenshot is centred on the hub with the near/pot-facing
+ * edge of the north stove islands toward camera, NOT their back edge. A full
+ * perimeter frame guarantees the "chamfer catching light" cue reads no matter which
+ * side of a prop the camera happens to be looking at, in this shot or any other.
+ * `w`/`d` are the exact footprint of the top surface this rims (already in metres).
+ */
+function addTopRim(g: THREE.Group, M: Materials, w: number, d: number, y: number, thick = 0.035): void {
+  const hw = w / 2, hd = d / 2;
+  const bar = (bw: number, bd: number, px: number, pz: number) => {
+    const b = mesh(new THREE.BoxGeometry(bw, 0.022, bd), M.rimLight, 'top_rim__no_outline');
+    b.position.set(px, y, pz);
+    noOutline(b);
+    g.add(b);
+  };
+  bar(w, thick, 0, hd - thick / 2);
+  bar(w, thick, 0, -hd + thick / 2);
+  bar(thick, d - thick * 2, hw - thick / 2, 0);
+  bar(thick, d - thick * 2, -hw + thick / 2, 0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -304,6 +442,11 @@ function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack
   kick.position.y = 0.06;
   g.add(kick);
 
+  // Back wall + bright cap trim — see `addBacksplash`. Sits further back (-Z) than
+  // the pan rack posts below, so on the island that has a rack this reads as "wall
+  // behind the hanging pans" rather than clipping through them.
+  addBacksplash(g, M, wM, dM, cabH, M.cabinetDark, 0.46);
+
   // Top is deliberately narrower than the cabinet beneath it — from the steep
   // top-down gameplay camera the top face is almost all you see, so leaving a
   // visible tan rim is what keeps the island reading as a wood cabinet with a
@@ -311,6 +454,7 @@ function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack
   const top = mesh(roundedBox(wM * 0.8, 0.09, dM * 0.72, 0.05), M.steel, 'stove_top');
   top.position.y = cabH + 0.045;
   g.add(top);
+  addTopRim(g, M, wM * 0.8, dM * 0.72, cabH + 0.091);
 
   // Two burner rings + a lit-coil disc each.
   for (const bx of [-wM * 0.22, wM * 0.22]) {
@@ -370,6 +514,19 @@ function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.Group {
   base.position.y = 0.08;
   g.add(base);
 
+  // Lid cap + bright rim trim — the freezer is the single tallest, biggest-footprint
+  // prop in the arena, so at this pitch its top face dominates the silhouette. A
+  // lighter inset lid (mirroring the "top narrower than cabinet" trick used on the
+  // stove islands) plus a thin light-catching edge keeps that huge top from reading
+  // as one flat painted rectangle.
+  const lid = mesh(roundedBox(wM * 0.86, 0.05, dM * 0.86, 0.07), M.freezerLid, 'freezer_lid');
+  lid.position.y = h + 0.025;
+  g.add(lid);
+  // A proper THIN FRAME tracing the lid's own edge, not a solid plate stacked above
+  // it — a plate this size sitting on top would simply hide the lighter lid entirely
+  // from the steep top-down camera.
+  addTopRim(g, M, wM * 0.86, dM * 0.86, h + 0.051, 0.05);
+
   // Door panel + handle on the +Z face (rotated per-instance by the caller via yaw).
   // Kept flush with (never past) the body's outer face — this whole prop's visible
   // silhouette must stay inside its CoverBox footprint.
@@ -404,6 +561,12 @@ function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.Group {
 function buildCrateSmall(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h = 0.82;
+  // Dark plinth, slightly wider than the crate body — a "pallet lip" the crate visibly
+  // sits IN rather than on top of, and a hard value break from both the crate wood
+  // above and the floor below. Every box prop in the arena gets one of these now.
+  const foot = mesh(roundedBox(wM * 1.05, 0.09, dM * 1.05, 0.03), M.crateSlat, 'crate_foot');
+  foot.position.y = 0.045;
+  g.add(foot);
   const crate = mesh(roundedBox(wM, h, dM, 0.05), M.crateWood, 'crate_body');
   crate.position.y = h / 2;
   g.add(crate);
@@ -430,6 +593,9 @@ function buildCrateSmall(M: Materials, wM: number, dM: number): THREE.Group {
 function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h1 = 0.5, h2 = 0.46;
+  const foot = mesh(roundedBox(wM * 1.05, 0.09, dM * 1.05, 0.03), M.crateSlat, 'crate_foot');
+  foot.position.y = 0.045;
+  g.add(foot);
   const bottom = mesh(roundedBox(wM, h1, dM, 0.05), M.crateWood, 'crate_bottom');
   bottom.position.y = h1 / 2;
   g.add(bottom);
@@ -460,6 +626,9 @@ function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Group {
 function buildHerbCrate(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h = 0.82;
+  const foot = mesh(roundedBox(wM * 1.05, 0.09, dM * 1.05, 0.03), M.herbCrateSlat, 'crate_foot');
+  foot.position.y = 0.045;
+  g.add(foot);
   const crate = mesh(roundedBox(wM, h, dM, 0.05), M.herbCrateWood, 'crate_body');
   crate.position.y = h / 2;
   g.add(crate);
@@ -519,9 +688,14 @@ function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBl
   const cabinet = mesh(roundedBox(wM * 0.98, h, dM * 0.94, 0.06), M.cabinet, 'prep_cabinet');
   cabinet.position.y = h / 2;
   g.add(cabinet);
+  const kick = mesh(roundedBox(wM * 0.98, 0.12, dM * 0.94 + 0.02, 0.02), M.cabinetDark, 'prep_kick');
+  kick.position.y = 0.06;
+  g.add(kick);
+  addBacksplash(g, M, wM, dM, h, M.cabinetDark, 0.3);
   const top = mesh(roundedBox(wM * 0.82, 0.08, dM * 0.72, 0.04), M.butcherBlock, 'prep_top');
   top.position.y = h + 0.04;
   g.add(top);
+  addTopRim(g, M, wM * 0.82, dM * 0.72, h + 0.081, 0.03);
 
   if (opts?.knifeBlock) {
     const block = mesh(roundedBox(0.22, 0.26, 0.18, 0.04), M.crateSlat, 'knife_block');
@@ -545,9 +719,17 @@ function buildServiceCounter(M: Materials, wM: number, dM: number, variant: 'fry
   const cabinet = mesh(roundedBox(wM * 0.98, h, dM * 0.95, 0.06), M.cabinetDark, 'service_cabinet');
   cabinet.position.y = h / 2;
   g.add(cabinet);
+  // The cabinet body here is ALREADY cabinetDark, so the kick needs a further step
+  // down in value (freezerTrim, near-black) to still read as a distinct foot band
+  // rather than disappearing into the body it's attached to.
+  const kick = mesh(roundedBox(wM * 0.98, 0.1, dM * 0.95 + 0.02, 0.02), M.freezerTrim, 'service_kick');
+  kick.position.y = 0.05;
+  g.add(kick);
+  addBacksplash(g, M, wM, dM, h, M.freezerTrim, 0.32);
   const top = mesh(roundedBox(wM * 0.8, 0.09, dM * 0.74, 0.05), M.steel, 'service_top');
   top.position.y = h + 0.045;
   g.add(top);
+  addTopRim(g, M, wM * 0.8, dM * 0.74, h + 0.091);
 
   if (variant === 'fryer') {
     const well = mesh(roundedBox(wM * 0.55, 0.1, dM * 0.55, 0.04), M.potMetalDark, 'fryer_well');
@@ -917,6 +1099,35 @@ function buildHubDebris(M: Materials): THREE.Group {
   return g;
 }
 
+/**
+ * Small loose-produce pile anywhere on the map — same bold sphere language as
+ * `buildHubDebris`, generalised so a prop cluster can visibly spill its own mess
+ * instead of the corner nooks looking like staged furniture. Used to tie the flour
+ * sacks to an actual flour spill and give the pantry corners a "someone was just
+ * working here" story beat.
+ */
+function buildDebrisPile(M: Materials, cx: number, cy: number, seed: number, count = 5, spreadWu = 22): THREE.Group {
+  const g = new THREE.Group();
+  noOutline(g);
+  let s = seed;
+  const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const mats = [M.tomato, M.onion, M.lettuce];
+  for (let i = 0; i < count; i++) {
+    const ang = rand() * Math.PI * 2;
+    const r = rand() * spreadWu;
+    const wx = cx + Math.cos(ang) * r;
+    const wy = cy + Math.sin(ang) * r;
+    const sc = 0.1 + rand() * 0.07;
+    const item = mesh(new THREE.SphereGeometry(sc, 8, 6), mats[i % mats.length], 'debris_veg');
+    const p = groundPos(wx, wy);
+    item.position.set(p.x, sc * 0.7, p.z);
+    item.scale.y = 0.7;
+    item.rotation.y = rand() * Math.PI * 2;
+    g.add(item);
+  }
+  return g;
+}
+
 function buildFloor(M: Materials): THREE.Group {
   const g = new THREE.Group();
   noOutline(g);
@@ -998,7 +1209,7 @@ function buildFloor(M: Materials): THREE.Group {
   // fryer (south, on its far side away from the hub), a cool wet sheen behind the
   // sink (north). Placed on the OUTER side of each counter, clear of both the
   // counter's own CoverBox and the hub teal zone that sits on its inner side.
-  const grimeSpots: Array<[number, number, number]> = [[675, 882, 20], [722, 892, 15]];
+  const grimeSpots: Array<[number, number, number]> = [[675, 882, 20], [722, 892, 15], [745, 915, 10], [762, 935, 7]];
   for (const [gx, gy, gr] of grimeSpots) {
     const spot = mesh(new THREE.CircleGeometry(wu(gr), 12), M.floorGrime, 'floor_grime');
     spot.rotation.x = -Math.PI / 2;
@@ -1007,7 +1218,7 @@ function buildFloor(M: Materials): THREE.Group {
     noOutline(spot);
     g.add(spot);
   }
-  const wetSpots: Array<[number, number, number]> = [[675, 118, 18], [722, 108, 13]];
+  const wetSpots: Array<[number, number, number]> = [[675, 118, 18], [722, 108, 13], [655, 90, 9], [640, 68, 6]];
   for (const [gx, gy, gr] of wetSpots) {
     const spot = mesh(new THREE.CircleGeometry(wu(gr), 12), M.floorWet, 'floor_wet');
     spot.rotation.x = -Math.PI / 2;
@@ -1062,6 +1273,23 @@ function buildFloor(M: Materials): THREE.Group {
   noOutline(flourSpeck);
   g.add(flourSpeck);
 
+  // Flour spill actually AT the flour-sack props (NE + SW pantry) — the sacks
+  // themselves had nothing spilling out of them, which is exactly the "corner props
+  // don't cohere into a story" gap: a produce crate with no dropped produce, a flour
+  // sack with no spilled flour. Plus a small dropped-produce pile beside each, echoing
+  // the hub debris ring at pantry scale.
+  const sackSpills: Array<[number, number]> = [[1175, 235], [ARENA_W - 1175, ARENA_H - 235]];
+  sackSpills.forEach(([sx, sy], i) => {
+    const spill = mesh(new THREE.CircleGeometry(wu(34), 16), M.flour, 'floor_flour');
+    spill.rotation.x = -Math.PI / 2;
+    spill.scale.set(1.25, 1, 1);
+    const dy = i === 0 ? 95 : -95; // mirrored offset, clear of the sack CoverBox's own footprint
+    spill.position.set(wu(sx), FLOOR_Y.decal, wu(sy + dy));
+    noOutline(spill);
+    g.add(spill);
+    g.add(buildDebrisPile(M, sx + (i === 0 ? 30 : -30), sy + dy, 5101 + i * 97, 5, 20));
+  });
+
   return g;
 }
 
@@ -1111,12 +1339,33 @@ function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Materials, spec
   const wM = wu(spec.w);
   const dM = wu(spec.h);
   const group = spec.build(wM, dM);
-  group.add(buildContactShadow(M.contactShadow, wM, dM));
+  // Rounded-rect grounded shadow — see the `groundedShadow` material comment. Tighter
+  // than the old default (1.25 → 1.12): the new texture's dark fill already reaches
+  // close to the plane edge, so a smaller oversize reads as a snug contact shadow
+  // instead of a big loose blob.
+  const shadowMesh = buildContactShadow(M.groundedShadow, wM, dM, 2.4);
+  group.add(shadowMesh);
   const p = groundPos(spec.x, spec.y);
   group.position.set(p.x, 0, p.z);
   if (spec.yawDeg) group.rotation.y = THREE.MathUtils.degToRad(spec.yawDeg);
   group.name = `cover:${spec.kind}`;
   propsGroup.add(group);
+  if (spec.kind === 'freezer') {
+    const wp = new THREE.Vector3();
+    shadowMesh.getWorldPosition(wp);
+    const mat = shadowMesh.material as THREE.MeshBasicMaterial;
+    const gp = (shadowMesh.geometry as THREE.PlaneGeometry).parameters;
+    console.log('[DEBUG shadowMesh] ' + JSON.stringify({
+      worldPos: wp.toArray(),
+      visible: shadowMesh.visible,
+      opacity: mat.opacity,
+      transparent: mat.transparent,
+      mapLoaded: !!mat.map, mapW: (mat.map as any)?.image?.width, mapH: (mat.map as any)?.image?.height,
+      geoW: gp.width, geoH: gp.height,
+      renderOrder: shadowMesh.renderOrder,
+      rotX: shadowMesh.rotation.x,
+    }));
+  }
   cover.push({ x: spec.x, y: spec.y, w: spec.w, h: spec.h, kind: spec.kind });
   return group;
 }

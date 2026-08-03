@@ -109,8 +109,8 @@ plates (`reference/images/curated/`, gitignored) · live progress page.
 
 ## THE CRITIC LOOP — this is the active work
 
-Uri's standing instruction: **keep looping until an independent critic scores the
-characters 8–9/10.** Run `tools/review.mjs` to build blind A/B packets, then spawn a
+**CURRENT TARGET: get the ARENA to 6–7/10.** Uri redirected here after the character
+loop plateaued. Characters are PARKED at 4/10 — do not resume them without being asked. Run `tools/review.mjs` to build blind A/B packets, then spawn a
 fresh critic agent (no memory of prior rounds) to judge them.
 
 ### Score history — always compare like-for-like
@@ -131,6 +131,59 @@ Same three characters (Hamburger / Water Bottle / Soup), same method, every roun
 - Changing limb **topology** and **where the face lives** DID — it retired the
   complaint that had dominated three rounds.
 - **Lesson: when the score stalls, the fix is structural, not cosmetic.**
+
+### ARENA loop (the active one)
+
+| Round | Score | Notes |
+|---|---|---|
+| 1 | **2/10** | **Unfair test — my error.** I sent an empty arena, cropped tight on the hazard, with NO characters, against reference frames full of brawlers. Its substantive points still stood. |
+| 2 | 7/10 self-scored | Danger zone changed from an opaque disc to a glow ring; palette broken out of monochrome. Never independently re-tested at this point. |
+| 3 (fair) | **3/10** | First like-for-like test: our in-game view WITH characters vs Brawl Stars gameplay frames WITH characters. No framing confound. |
+| 4 | in progress | Cover legibility, shadow audit, floor dressing. |
+
+**Round 3's finding is functional, not aesthetic, and is the one that matters:**
+> "The cover objects have no height, no AO, no shadow separation from the floor, so a
+> player cannot tell at a glance whether they block movement or line of sight. In a
+> top-down arena brawler, that's a gameplay-legibility bug, not just a polish gap, and
+> it alone caps the score regardless of how appealing the palette is."
+
+Other findings worth keeping:
+- It rated our CHARACTER art "noticeably closer to par than the environment art" — the
+  arena is now the weaker half of the game.
+- The pot's apparent dominance is "a detail-density illusion, not a scale error."
+  **Do not shrink the pot** — give the rest of the frame something to compete with.
+- Praised and must not regress: the pot prop itself ("close to shippable quality on its
+  own") and the pale floor keeping characters visually separated ("a real, defensible
+  design choice for competitive clarity").
+
+Arena comparisons are inherently FAIRER than the character ones — top-down gameplay
+against top-down gameplay, same subject, same framing. Use `--category gameplay`.
+
+### CHARACTER loop — parked at 4/10
+
+Five rounds: 3 → 4 → 4 → 4 → 4. What moved it and what didn't is recorded above.
+
+A sixth experiment tested whether the plateau was a methodology artifact: reference
+crops were mostly tight PORTRAIT close-ups while ours are full-body, so critics were
+partly rewarding framing. Full-body reference crops were curated
+(`reference/images/curated/character_fullbody/`, and a fair subset in
+`fullbody_fair/` excluding Kung Fu Panda crossover assets, which are DreamWorks
+film-grade and would raise the bar unfairly). Result: **Hamburger scored 4/10 — no
+change.** Per Uri, the mechanism is parked, not adopted.
+
+Two reference sets were downloaded and REJECTED for lowering the bar, which Uri
+explicitly forbade: Food Gang (2D flat vector — on-subject but lower fidelity than
+ours) and Cats&Soup (2D painted idle game). Comparable-subject 3D references at
+equal-or-higher quality barely exist.
+
+Sharpest un-actioned character findings, if the loop ever resumes:
+1. Pose is the named #1 gap — "a static, symmetrical front-on mascot reads as a
+   placeholder/turntable render, not hero art, regardless of how good the shading gets."
+2. "No genuine dark value anywhere on the model" — wants a real core-shadow COLOUR,
+   not a darker tint of the same hue.
+3. Sesame seeds "read as a copy-paste array" — no scale/rotation variance.
+4. Our own preview presentation was penalised: "a placeholder two-tone sky background
+   with a flat ellipse shadow." That is the harness, not the art — cheap to fix.
 
 ### Honest read on reaching 8
 
