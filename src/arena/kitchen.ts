@@ -219,10 +219,10 @@ function buildMaterials() {
     // any aspect ratio, which is what makes every box prop read as pressing into the
     // floor instead of floating on it.
     groundedShadow: new THREE.MeshBasicMaterial({
-      color: 0x000000,
+      map: makeGroundedShadowTexture(),
       transparent: true,
       depthWrite: false,
-      opacity: 0.9,
+      opacity: 1,
     }),
   };
 }
@@ -291,31 +291,37 @@ function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
  * rounded rect, not a circle stretched to fit. The blur is faked by filling the rect
  * far off-canvas and letting `shadowBlur` paint only its soft edge onto the visible
  * area, so there's no hard sharp-rect artifact in the middle.
+ *
+ * `pad`/`blur` are deliberately SMALL fractions of the canvas (4% / 5%). A first pass
+ * used 10%/11%, which reads fine on its own but is wrong for how this is actually
+ * used: `addCover` sizes the plane only slightly larger than the prop's own footprint
+ * (a "snug" contact shadow, scale ~1.3), which means the prop's edge lands almost
+ * exactly where a wide feather is still ramping up from zero — so the one place a
+ * player actually looks (right where the prop meets the floor) was the FAINTEST part
+ * of the whole texture. A narrow feather keeps the interior at near-full alpha all
+ * the way out to just shy of the plane edge, so a snug oversize actually shows a
+ * crisp, visible dark edge instead of a barely-there haze.
  */
 function makeGroundedShadowTexture(): THREE.CanvasTexture {
   const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  const pad = size * 0.1;
+  const pad = size * 0.04;
   const rectW = size - pad * 2;
   const rectH = size - pad * 2;
-  const radius = size * 0.16;
-  const blur = size * 0.11;
+  const radius = size * 0.14;
+  const blur = size * 0.05;
   const off = size * 3; // pushes the actual filled rect well outside the visible canvas
 
   ctx.save();
-  ctx.shadowColor = 'rgba(14,9,6,0.68)';
+  ctx.shadowColor = 'rgba(14,9,6,0.88)';
   ctx.shadowBlur = blur;
   ctx.shadowOffsetX = -off;
-  ctx.fillStyle = 'rgba(14,9,6,0.68)';
+  ctx.fillStyle = 'rgba(14,9,6,0.88)';
   roundRectPath(ctx, off + pad, pad, rectW, rectH, radius);
   ctx.fill();
   ctx.restore();
-
-  const center = ctx.getImageData(size / 2, size / 2, 1, 1).data;
-  const edge = ctx.getImageData(2, 2, 1, 1).data;
-  console.log('[DEBUG texture pixels] center=' + Array.from(center).join(',') + ' edge=' + Array.from(edge).join(','));
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
@@ -561,10 +567,12 @@ function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.Group {
 function buildCrateSmall(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h = 0.82;
-  // Dark plinth, slightly wider than the crate body — a "pallet lip" the crate visibly
-  // sits IN rather than on top of, and a hard value break from both the crate wood
-  // above and the floor below. Every box prop in the arena gets one of these now.
-  const foot = mesh(roundedBox(wM * 1.05, 0.09, dM * 1.05, 0.03), M.crateSlat, 'crate_foot');
+  // Dark plinth, same NOMINAL width as the crate body above it (must never exceed the
+  // CoverBox footprint) but a much smaller corner radius — the crate body's own
+  // rounding (0.05) pulls its silhouette inward near y=0, while this flatter-cornered
+  // foot doesn't, so it still visibly peeks out as a "pallet lip" the crate sits IN
+  // rather than on top of. Same trick `buildStoveIsland`'s kick band already uses.
+  const foot = mesh(roundedBox(wM, 0.09, dM, 0.03), M.crateSlat, 'crate_foot');
   foot.position.y = 0.045;
   g.add(foot);
   const crate = mesh(roundedBox(wM, h, dM, 0.05), M.crateWood, 'crate_body');
@@ -593,7 +601,7 @@ function buildCrateSmall(M: Materials, wM: number, dM: number): THREE.Group {
 function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h1 = 0.5, h2 = 0.46;
-  const foot = mesh(roundedBox(wM * 1.05, 0.09, dM * 1.05, 0.03), M.crateSlat, 'crate_foot');
+  const foot = mesh(roundedBox(wM, 0.09, dM, 0.03), M.crateSlat, 'crate_foot');
   foot.position.y = 0.045;
   g.add(foot);
   const bottom = mesh(roundedBox(wM, h1, dM, 0.05), M.crateWood, 'crate_bottom');
@@ -626,7 +634,7 @@ function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Group {
 function buildHerbCrate(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const h = 0.82;
-  const foot = mesh(roundedBox(wM * 1.05, 0.09, dM * 1.05, 0.03), M.herbCrateSlat, 'crate_foot');
+  const foot = mesh(roundedBox(wM, 0.09, dM, 0.03), M.herbCrateSlat, 'crate_foot');
   foot.position.y = 0.045;
   g.add(foot);
   const crate = mesh(roundedBox(wM, h, dM, 0.05), M.herbCrateWood, 'crate_body');
@@ -1339,33 +1347,16 @@ function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Materials, spec
   const wM = wu(spec.w);
   const dM = wu(spec.h);
   const group = spec.build(wM, dM);
-  // Rounded-rect grounded shadow — see the `groundedShadow` material comment. Tighter
-  // than the old default (1.25 → 1.12): the new texture's dark fill already reaches
-  // close to the plane edge, so a smaller oversize reads as a snug contact shadow
-  // instead of a big loose blob.
-  const shadowMesh = buildContactShadow(M.groundedShadow, wM, dM, 2.4);
-  group.add(shadowMesh);
+  // Rounded-rect grounded shadow — see the `groundedShadow` material comment. 1.3x
+  // is snug against the redesigned texture's much narrower feather (see
+  // `makeGroundedShadowTexture`), so the prop's own edge sits in the near-full-alpha
+  // interior instead of the faint outer ramp.
+  group.add(buildContactShadow(M.groundedShadow, wM, dM, 1.3));
   const p = groundPos(spec.x, spec.y);
   group.position.set(p.x, 0, p.z);
   if (spec.yawDeg) group.rotation.y = THREE.MathUtils.degToRad(spec.yawDeg);
   group.name = `cover:${spec.kind}`;
   propsGroup.add(group);
-  if (spec.kind === 'freezer') {
-    const wp = new THREE.Vector3();
-    shadowMesh.getWorldPosition(wp);
-    const mat = shadowMesh.material as THREE.MeshBasicMaterial;
-    const gp = (shadowMesh.geometry as THREE.PlaneGeometry).parameters;
-    console.log('[DEBUG shadowMesh] ' + JSON.stringify({
-      worldPos: wp.toArray(),
-      visible: shadowMesh.visible,
-      opacity: mat.opacity,
-      transparent: mat.transparent,
-      mapLoaded: !!mat.map, mapW: (mat.map as any)?.image?.width, mapH: (mat.map as any)?.image?.height,
-      geoW: gp.width, geoH: gp.height,
-      renderOrder: shadowMesh.renderOrder,
-      rotX: shadowMesh.rotation.x,
-    }));
-  }
   cover.push({ x: spec.x, y: spec.y, w: spec.w, h: spec.h, kind: spec.kind });
   return group;
 }

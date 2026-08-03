@@ -139,7 +139,12 @@ Same three characters (Hamburger / Water Bottle / Soup), same method, every roun
 | 1 | **2/10** | **Unfair test — my error.** I sent an empty arena, cropped tight on the hazard, with NO characters, against reference frames full of brawlers. Its substantive points still stood. |
 | 2 | 7/10 self-scored | Danger zone changed from an opaque disc to a glow ring; palette broken out of monochrome. Never independently re-tested at this point. |
 | 3 (fair) | **3/10** | First like-for-like test: our in-game view WITH characters vs Brawl Stars gameplay frames WITH characters. No framing confound. |
-| 4 | in progress | Cover legibility, shadow audit, floor dressing. |
+| 4 | 6/10 self-scored, **NOT yet independently tested** | Root-caused the missing AO (see below), added top rims / backsplashes / kick bands for vertical relief, floor dressing. |
+
+**NEXT ACTION: run the independent arena critic on `shots/arena/r20/gameplay.png`
+against the 3/10 baseline.** Use `node tools/review.mjs --ours shots/arena/r20/gameplay.png
+--category gameplay --out shots/review/arena-rN --n 3`, then a FRESH critic agent.
+The 6/10 is the builder's own self-score and does not count.
 
 **Round 3's finding is functional, not aesthetic, and is the one that matters:**
 > "The cover objects have no height, no AO, no shadow separation from the floor, so a
