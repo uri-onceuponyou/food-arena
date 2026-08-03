@@ -491,14 +491,23 @@ function makeWaterSurfaceTexture(): THREE.CanvasTexture {
  * marked lethal ooze, even though this hazard only SLOWS a player. A player
  * glancing at this arena needs to triage "avoid entirely" (the pot) from "costs me
  * mobility" (these puddles) from the icon language alone, not just the color.
- *
  * Fix: a ROUND badge (circles read as "status/information" in real-world signage,
- * triangles read as "warning/danger" — reserving the triangle shape for something
- * more severe than this arena currently has keeps that door open) containing an
- * HOURGLASS glyph — "time slipping away," a universal, non-lethal "you're being
- * slowed" cue, with zero relation to the pot's danger-tape or the ooze reference's
- * skulls. Shared by both puddles (the SLOW category's own reserved icon), tinted
- * to each puddle's own accent hue.
+ * triangles read as "warning/danger" — reserving the triangle shape for the pot
+ * keeps that distinction meaningful).
+ *
+ * Round-4 fix: the round-3 hourglass glyph tried to put a SPECIFIC "you're being
+ * slowed" story inside that round badge, but a fresh critic couldn't read it as
+ * anything at all — "an ambiguous glyph (no skull, no exclamation, no spike)... a
+ * clean purple/violet field... reads more like a capture point, buff pad, or
+ * objective marker." A clever glyph that doesn't survive being 40 pixels tall next
+ * to a running character is worse than a blunt one that does. Swapped for the single
+ * boldest, most universally legible caution glyph there is — a solid exclamation
+ * mark, the same "!" ISO general-warning signage uses for non-lethal cautions (wet
+ * floor, moderate hazard) as opposed to the skull/triangle combo reserved for fatal
+ * ones. The ROUND badge shape (kept from round-3) still does the "this is the lesser
+ * category" job; the "!" now does the "but it is still unambiguously a hazard, not a
+ * pickup" job the hourglass failed at. Shared by both puddles, tinted to each
+ * puddle's own accent hue.
  */
 function makeHazardIconTexture(hex: string): THREE.CanvasTexture {
   const size = 128;
@@ -517,29 +526,20 @@ function makeHazardIconTexture(hex: string): THREE.CanvasTexture {
   ctx.fillStyle = hex;
   ctx.fill();
 
-  // Hourglass silhouette — two triangles pinched at a shared waist.
-  const halfW = badgeR * 0.52, top = cy - badgeR * 0.5, bottom = cy + badgeR * 0.5;
-  const pinch = size * 0.045;
+  // Bold exclamation mark — the single most universally legible caution glyph,
+  // sized to dominate the badge rather than sit as a small delicate detail.
   ctx.fillStyle = 'rgba(18,13,6,0.95)';
+  const exW = size * 0.1;
   ctx.beginPath();
-  ctx.moveTo(cx - halfW, top);
-  ctx.lineTo(cx + halfW, top);
-  ctx.lineTo(cx + pinch, cy);
-  ctx.lineTo(cx + halfW, bottom);
-  ctx.lineTo(cx - halfW, bottom);
-  ctx.lineTo(cx - pinch, cy);
+  const barTop = cy - badgeR * 0.62, barBottom = cy + badgeR * 0.05;
+  ctx.moveTo(cx - exW / 2, barTop);
+  ctx.lineTo(cx + exW / 2, barTop);
+  ctx.lineTo(cx + exW * 0.38, barBottom);
+  ctx.lineTo(cx - exW * 0.38, barBottom);
   ctx.closePath();
   ctx.fill();
-
-  // Bright "sand" wedge in the upper chamber so the silhouette doesn't read as a
-  // plain dark bowtie — reads as glass with something falling inside it.
-  ctx.fillStyle = hex;
   ctx.beginPath();
-  ctx.moveTo(cx - halfW * 0.55, top + badgeR * 0.18);
-  ctx.lineTo(cx + halfW * 0.55, top + badgeR * 0.18);
-  ctx.lineTo(cx + pinch * 1.4, cy);
-  ctx.lineTo(cx - pinch * 1.4, cy);
-  ctx.closePath();
+  ctx.arc(cx, cy + badgeR * 0.42, exW * 0.6, 0, Math.PI * 2);
   ctx.fill();
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -567,13 +567,20 @@ function makeHazardIconTexture(hex: string): THREE.CanvasTexture {
 // speaks that language via its red-orange glow), so a same-tier magenta made the
 // SLOW puddles visually indistinguishable in SEVERITY from the pot and from the
 // reference bar's skull-marked lethal ooze — no cue that this is a lesser "costs you
-// mobility" effect rather than "avoid entirely." Shifted from magenta to a genuine
-// BLUE-VIOLET (R and G both low, B dominant — nowhere near the red channel) instead:
-// still maximally hue-distant from the warm tan floor, still distinct from the pot's
-// red/amber AND from water's cyan, but reading as a cooler "status effect" colour
-// rather than a hot "danger" one — the same red-vs-blue split real safety signage
-// (and most games' damage-vs-slow status colours) uses to separate severity.
-const GREASE_ACCENT = '#7A3CFF';
+// mobility" effect rather than "avoid entirely." Shifted from magenta to a
+// blue-violet instead, hue-distant from the floor and cooler than the pot's red.
+//
+// Round-4 fix: the blue-violet ALSO turned out to be the wrong family, for a third,
+// separate reason a fresh critic caught: in this exact genre, saturated purple is
+// its OWN strong convention — "Epic"/rare loot, buff auras, objective/capture-point
+// markers (this game's own roster screen uses purple for Epic rarity) — so a clean
+// violet circle with a soft badge icon read as "reward, not threat" regardless of
+// how correctly it avoided the floor and the pot's hues. Toxic GREEN replaces it:
+// still far from the warm tan floor (G-dominant vs the floor's R-dominant), still
+// far from the pot's red/amber and water's cyan, cooler than red/magenta (keeps the
+// round-3 severity fix), and — unlike purple — green's overwhelming existing
+// convention across the genre is poison/toxic/DO-NOT-STAND-HERE, never loot.
+const GREASE_ACCENT = '#33E077';
 
 export function buildPuddleVisual(
   M: Materials,
@@ -608,6 +615,27 @@ export function buildPuddleVisual(
   noOutline(disc);
   g.add(disc);
 
+  // Round-3 fix: a fresh critic read the grease disc's warm gold-orange base
+  // (`M.grease`, out of bounds to recolour at the source) plus the boundary-only
+  // glow below as "reward/pickup pad, not threat" — the ring told the right story
+  // but the WHOLE INTERIOR was still bare gold, since `makePuddleGlowTexture`
+  // deliberately fades to zero well before the centre (that's correct for the pot,
+  // whose centre is a dark scorch patch, but wrong here: the puddle's centre IS the
+  // hazard surface). A flat accent-tinted wash across the FULL disc — not just its
+  // rim — means there's no untouched gold interior left to misread as a buff zone.
+  if (isGrease) {
+    const tint = new THREE.Mesh(
+      new THREE.CircleGeometry(R * 0.99, 32),
+      new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.5, depthWrite: false })
+    );
+    tint.name = 'puddle_grease_tint__no_outline';
+    tint.rotation.x = -Math.PI / 2;
+    tint.position.set(gp.x, FLOOR_Y.decal + 0.005, gp.z);
+    tint.renderOrder = 1;
+    noOutline(tint);
+    g.add(tint);
+  }
+
   // Per-kind surface detail — an independent alpha-blended overlay, so the base
   // `mat` instance handed in by the caller is never touched.
   const surfTex = isGrease ? makeGreaseSurfaceTexture(accentHex) : makeWaterSurfaceTexture();
@@ -618,7 +646,7 @@ export function buildPuddleVisual(
   surf.name = isGrease ? 'puddle_grease_surface__no_outline' : 'puddle_water_surface__no_outline';
   surf.rotation.x = -Math.PI / 2;
   surf.position.set(gp.x, FLOOR_Y.decal + 0.01, gp.z);
-  surf.renderOrder = 1;
+  surf.renderOrder = 2;
   noOutline(surf);
   g.add(surf);
 

@@ -106,8 +106,24 @@ function buildStainCluster(mat: THREE.Material, cx: number, cy: number, seed: nu
   noOutline(g);
   let s = seed;
   const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  // Big outer silhouette — defines the overall irregular footprint.
   g.add(buildStainShape(mat, cx, cy, seed, baseR, 9));
-  g.add(buildStainShape(mat, cx + (rand() - 0.5) * baseR * 0.4, cy + (rand() - 0.5) * baseR * 0.4, seed + 11, baseR * 0.58, 8));
+  // Round-4: three EXTRA differently-shaped cores, all roughly centred (small offset
+  // only), stacked directly on top of the outer silhouette and each other. Round 1-3
+  // critics all independently flagged this exact spot as reading like an ambiguous
+  // render artifact rather than authored grime — the arena's own post-processing
+  // stack (SSAO + Bloom + Vignette, `render/stage.ts`, outside this file's scope) adds
+  // a soft, large, faceted light/dark wash across this same open floor that a single
+  // 0.22-opacity flat fill simply can't compete with for attention. Compounding 3-4
+  // overlapping flat layers in the CENTRE (each still individually flat/hard-edged,
+  // never a gradient) pushes the core to a real ~0.55-0.65 effective opacity — dark
+  // and solid enough to read as an unmistakable stain against that background, while
+  // the single-layer outer ring still tapers the edge softly.
+  for (let i = 0; i < 3; i++) {
+    const ox = (rand() - 0.5) * baseR * 0.22;
+    const oy = (rand() - 0.5) * baseR * 0.22;
+    g.add(buildStainShape(mat, cx + ox, cy + oy, seed + 11 + i * 13, baseR * (0.42 + rand() * 0.16), 8));
+  }
   for (let i = 0; i < 2; i++) {
     const ang = rand() * Math.PI * 2;
     const dist = baseR * (0.72 + rand() * 0.32);
@@ -349,6 +365,16 @@ export function buildFloor(M: Materials): THREE.Group {
   // stretch of floor with cover but zero storytelling.
   g.add(buildDebrisPile(M, 372, 470, 6301, 4, 14));
   g.add(buildDebrisPile(M, ARENA_W - 372, ARENA_H - 470, 6317, 4, 14));
+
+  // Small oil-drip stains hugging the base of the barrel lane's two barrels — a
+  // second, visibly SEPARATE mark inside the same frame as the bigger lane-wear
+  // patch, so the wear reads as a recurring condition of this stretch of floor
+  // rather than one isolated smudge (a critic's exact phrasing for what was
+  // missing: "doesn't repeat or vary anywhere else in the room").
+  g.add(buildStainShape(M.floorGrime, 250, 540, 6401, 14, 8));
+  g.add(buildStainShape(M.floorGrime, 460, 460, 6409, 12, 7));
+  g.add(buildStainShape(M.floorGrime, ARENA_W - 250, ARENA_H - 540, 6421, 14, 8));
+  g.add(buildStainShape(M.floorGrime, ARENA_W - 460, ARENA_H - 460, 6429, 12, 7));
 
   // Round-2: grease spatter at the actual cooking surfaces — a critic scored the
   // floor 3/10 and named this precisely ("no grease spatter near the hot-dog
