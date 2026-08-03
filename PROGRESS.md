@@ -107,36 +107,78 @@ plates (`reference/images/curated/`, gitignored) · live progress page.
 
 ---
 
+## THE CRITIC LOOP — this is the active work
+
+Uri's standing instruction: **keep looping until an independent critic scores the
+characters 8–9/10.** Run `tools/review.mjs` to build blind A/B packets, then spawn a
+fresh critic agent (no memory of prior rounds) to judge them.
+
+### Score history — always compare like-for-like
+
+Same three characters (Hamburger / Water Bottle / Soup), same method, every round.
+
+| Round | Score | What the critic named |
+|---|---|---|
+| 1 | **3/10** | "Every character reuses the same snowman-body-plus-ball-joints skeleton with a different head glued on." Faces reading as errors (Soup's mismatched pupils, Bottle's uneven eye heights). No rim light / value steps. |
+| 2 | **4/10** | Still "one templated body reskinned with different heads" — because rounds had changed limb COLOUR and PROPORTION, not limb TOPOLOGY. Two characters had no mouth at all. |
+| 3 | **4/10** | Same complaint again. Faces "pasted on, not integrated" — Bottle's eyes floating on stalks above the cap, Soup's face on a neck BELOW the bowl. |
+| 4 | **4/10** | **RETRACTED the shared-limb complaint**: "The three do NOT share literally copy-pasted limb geometry ... three different constructions ... real, separate limb-sculpting effort per character." New gaps: no costume/wardrobe layer; flat materials with no secondary specular or texture; identical dead-front pose across the cast; Hamburger's held prop illegible. |
+| 5 | in progress | Costume/accessory layer + per-character `RigStance` + material fidelity. |
+
+### What actually moved the needle
+
+- Colour and proportion changes did NOT move the score (rounds 2–3, flat at 4).
+- Changing limb **topology** and **where the face lives** DID — it retired the
+  complaint that had dominated three rounds.
+- **Lesson: when the score stalls, the fix is structural, not cosmetic.**
+
+### Honest read on reaching 8
+
+Four rounds bought one point. The comparison images are hand-authored characters with
+fabric folds, fur shading and sculpted brow ridges, often shown as tight portrait
+crops that flatter that detail. 6–7 looks reachable through wardrobe, materials and
+posing. 8 is possible but not assured. Report real verdicts, including flat rounds —
+do not redefine success.
+
+### Running a round
+
+1. Render heroes: `preview.html?piece=character&id=<id>&anim=idle&yaw=15&t=1.5&shot=1&fill=0.78` at 760x950.
+2. `node tools/review.mjs --ours shots/<...>.png --category character --out shots/review/rN-<id> --n 1` per character.
+3. Spawn a FRESH critic agent (never reuse one — it must not remember prior rounds),
+   show it ONLY the sheet PNGs, forbid it from opening any `.json`.
+4. Tell it to judge design/execution, NOT framing — our renders are full-body on a
+   plain backdrop, theirs are often portrait crops, and that difference is not a
+   quality signal.
+5. Read the answer keys yourself afterward to confirm the shuffle held.
+6. Commit the verdict verbatim in the message. Feed the named gaps into the next round.
+
 ## Next actions, in priority order
 
-1. **Fix the AI axis-lock** (below) — it is the biggest thing between this and "fun".
-2. **Play it and judge feel** — a human at a real 60fps browser, not SwiftShader.
-3. **Ability VFX** — the sim already emits `weapon-fired`, `projectile-spawned`,
-   `hit-landed`, `splat-created`, `trail-mark-created`, `death`. Subscribe to those; the
-   sim must stay renderer-agnostic.
-4. **Game feel** — hit stop, screen shake (`rig.shake()` exists), damage numbers, death
-   effects. The reference's VFX are drawn bigger and brighter than the characters.
-5. **Independent critic pass** on the finished cast and the running game, via
-   `tools/review.mjs`. Report the real verdict, including losses.
+1. **Land critic round 5** — costume/accessory layer and per-character stances are
+   in flight for all eleven. Then re-run the critic and record the score.
+2. **Material fidelity** — the critic's standing gap: "every material is a single
+   flat colour with no secondary specular or texture." Wants ceramic glaze specular,
+   glass refraction, a real speckled sesame texture rather than five floating ovals.
+3. **Verify the game actually plays well** — VFX and juice landed but nobody has
+   played a full match at real framerate and judged feel.
+4. **Arena** — sits at 7/10 from its own critic pass; not re-tested since.
+5. **Menus** — roster/character select and results screens do not exist.
 
 ## Known issues
 
-- **AI axis-lock (gameplay bug, real).** The arena places spice-cart props exactly on
-  `y = CENTER.y`, which is also both spawn y-coordinates. `ai.ts`/`movement.ts` chase in a
-  straight line with no pathfinding, so when both fighters share a y the AI presses into
-  the box forever: `tryMove` blocks x, and dy is exactly 0 so there is nothing to slide
-  along. Diagonal approach routes around it. Fix by moving those props off the spawn
-  line, or by giving the AI a slide/juke when blocked.
-- **AI picks the highest-damage usable weapon and nothing else** — no kiting or
-  positioning, so it reads as a wall rather than an opponent. Faithful to the prototype,
-  but worth improving now that deviation is authorised.
-- Countdown digits render very large over the player and briefly obscure them.
-
-- `ChibiRig.headCentreY` assumes a head mass extending ~±R about its origin. Non-spherical
-  masses float or sink (Hot Dog's floated 0.33m). Hot Dog uses a hidden connector.
-- The rig torso is proportionally large for narrow characters (Water Bottle), reading
-  blob-ish from side/back. Would need per-character torso scaling on the rig.
-- `donut.ts`, `pizza.ts`, `egg.ts` carry local `dressTorso` copies from when the rig
-  helper didn't exist. It exists now — they could be de-duplicated.
-- Blindness in the A/B test is imperfect: a critic that recognises Brawl Stars identifies
-  the reference by IP, not by quality. The critiques are still specific and actionable.
+- `ChibiRig.headCentreY` assumes a head mass extending ~±R about its origin.
+  Non-spherical masses float or sink. Hamburger/HotDog anchor their own underside at
+  about -0.90R; Taco needed a different fix (see below).
+- `dressTorso`'s `size.h` is measured off the rig's DEFAULT torso bounding box, which
+  is only ~92% of nominal because that sphere tapers before its poles. Character
+  torsos built to that figure can sit lower than expected — this caused Taco's head
+  gap, which looked like a headCentreY problem and was not.
+- Meshes flipped 180° about X to hang downward negate Z, so decals placed at a
+  surface's "front" land on the hidden back face (bit Hamburger's mitt seeds).
+- Lathe profiles MUST run bottom→top or normals invert and the mesh renders near
+  black (bit six characters at once).
+- `donut.ts`, `pizza.ts`, `egg.ts` carry local `dressTorso` copies from before the rig
+  exposed one. Could be de-duplicated.
+- Blindness is imperfect: a critic that recognises Brawl Stars/Zooba identifies the
+  reference by IP, not by quality. Critiques remain specific and actionable.
+- Arena AI: `moveToward` now slides around cover; regression test covers it.
