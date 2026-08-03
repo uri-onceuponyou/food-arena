@@ -556,20 +556,26 @@ export class HamburgerCharacter extends BaseCharacter {
     // centre through it — gripping through the palm's centre made the dark
     // handle cross straight over the pale mitt sphere, coincidentally reading
     // as a second, misplaced limb.
-    spatula.position.set(0.16, -0.03, 0.10);
+    // Offset only slightly from the palm centre. It was previously pushed 0.16 out
+    // — about a full hand-radius — which worked against the old ball hand but left
+    // the prop visibly floating in mid-air once the hand became a smaller bun-cap
+    // mitt. A held prop must overlap the hand geometry, not merely start near it.
+    spatula.position.set(0.05, -0.02, 0.06);
     spatula.rotation.set(-0.5, 0.35, -0.4);
     this.rig.joints.handR.add(spatula);
 
     const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.42, 4, 8), spatulaHandleMat);
     handle.name = 'spatula_handle';
-    handle.position.set(0, 0.24, 0);
+    // Lowered so the handle's bottom end passes THROUGH the mitt rather than
+    // beginning at its surface — that overlap is what sells the grip.
+    handle.position.set(0, 0.15, 0);
     handle.castShadow = true;
     handle.receiveShadow = true;
     spatula.add(handle);
 
     const blade = new THREE.Mesh(roundedBox(0.4, 0.05, 0.5, 0.09, 3), spatulaBladeMat);
     blade.name = 'spatula_blade';
-    blade.position.set(0, 0.55, 0.06);
+    blade.position.set(0, 0.46, 0.06);
     blade.rotation.x = 0.3;
     blade.castShadow = true;
     blade.receiveShadow = true;
