@@ -360,6 +360,36 @@ worked examples, chosen from opposite ends of the weapon space.
    fixed by `footClearance`; several characters' custom foot geometry hangs a full
    segment below the ankle joint. Decide whether the RIG guarantees y=0 or characters do.
 
+### 🅿️ FLOOR IS PARKED until Uri returns (2026-08-04) — with a strong lead
+
+Uri: *"Re. Floor — we were at 6. We are missing something there."* Correct, and the score
+history says where it went. **Do not run a floor loop until this hypothesis is tested.**
+
+| loop | round | score | what changed |
+|---|---|---|---|
+| 1 | r1 | 4 | tile 100→40wu, wear zones |
+| 1 | r2 | 3 | grout-crevice AO grid |
+| 1 | **r3** | **6 ← peak** | **per-tile tonal noise via instanced vertex colour: macro sine "AO patch" + micro jitter** |
+| 1 | r4 | 3.5–4 | *same idea pushed harder* (noise 0.22→0.32), splatter snapped to grid |
+| 1 | r5 | 4.5 | within-tile pebble speckle |
+| 2 | r1–r4 | 4,4,4,4 | value/sat re-key, MID-band + aliasing removal |
+
+**Hypothesis: the 6 was LOW-BAND macro tonal variation at moderate strength, and r4
+overshot it.** Every later round then spent itself on sub-tile detail.
+
+This fits the independently-discovered zoom finding exactly: at shipped framing the
+low-frequency gradient is *the only thing that carries the floor*, and tile bevels, grain
+and jitter vanish. r3 accidentally found the right band; r4 pushed the right band too far
+and was scored down for it; loop 2 then optimised bands that do not survive at all.
+
+**Test tomorrow:** restore r3's macro variation at its ORIGINAL strength (0.22, not 0.32),
+keep loop 2's value/saturation re-key and its aliasing/MID-band fixes, and judge at
+`SHIPPED_SPAN` — which no floor round has ever been judged at. Use an objective
+acceptance test, not aesthetic critique: composite a mid-value character silhouette; its
+outline must be the darkest edge within a 200px radius.
+
+r3's exact diff is recoverable from git history — find it before re-deriving it by hand.
+
 ### THE POST CHAIN IS CLAMPING COLOUR — probably a project-wide quality cap
 
 `stage.ts` runs `HueSaturationEffect({ saturation: 0.32 })`. A pixel probe returned
