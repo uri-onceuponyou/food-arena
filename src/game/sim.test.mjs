@@ -18,6 +18,12 @@
 import { createMatch, stepMatch } from './sim.ts';
 import { CHARACTERS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS } from './rules.ts';
 
+// Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
+// `rules.ts` and moved once already (the 2026-08-03 retune, see `REACH`). Tests that
+// need a position "in range" or a dt "exactly one range of travel" DERIVE it from
+// the live weapon rather than hardcoding a rung, so a future rung change surfaces as
+// a real behavioural failure instead of a test that quietly stops testing anything.
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tiny test harness
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,6 +73,15 @@ function makeArena({ cover = [], hazards = [], width = 2000, height = 2000, maxS
 
 const noInput = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
 
+/** Hamburger's Patty Smash — the melee weapon tests 1, 2 and 7 all fire. */
+const SMASH = CHARACTERS.hamburger.weapons.find((w) => w.key === 'Smash');
+/**
+ * A separation comfortably inside Patty Smash's reach. 70% of range, so it is well
+ * clear of the range cutoff at either end and a cone check done at this distance is
+ * testing the CONE, not the range.
+ */
+const SMASH_IN_RANGE = Math.round(SMASH.range * 0.7);
+
 /** Fresh match, forced straight into 'playing' (skips the 5s countdown for focused tests). */
 function playingMatch(arena, playerChar = 'hamburger', enemyChar = 'donut') {
   const state = createMatch(arena, playerChar, enemyChar);
@@ -78,7 +93,7 @@ function playingMatch(arena, playerChar = 'hamburger', enemyChar = 'donut') {
 // 1. Melee cone: inside hits, outside misses.
 // ─────────────────────────────────────────────────────────────────────────────
 
-console.log('\n1. Melee cone check (Hamburger "Patty Smash": range 110, cone 80)');
+console.log(`\n1. Melee cone check (Hamburger "Patty Smash": range ${SMASH.range}, cone ${SMASH.cone})`);
 {
   const smashIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
   check('found Patty Smash on the roster', smashIndex !== -1);
@@ -90,7 +105,7 @@ console.log('\n1. Melee cone check (Hamburger "Patty Smash": range 110, cone 80)
     state.player.x = 0;
     state.player.y = 0;
     state.player.facing = { x: 1, y: 0 };
-    state.enemy.x = 80; // within range (110), angle 0 from facing
+    state.enemy.x = SMASH_IN_RANGE; // within range, angle 0 from facing
     state.enemy.y = 0;
 
     const events = stepMatch(state, 0, { move: { x: 0, y: 0 }, selectedWeapon: smashIndex, attack: true });
@@ -108,7 +123,10 @@ console.log('\n1. Melee cone check (Hamburger "Patty Smash": range 110, cone 80)
     state.player.y = 0;
     state.player.facing = { x: 1, y: 0 };
     state.enemy.x = 0;
-    state.enemy.y = 80; // perpendicular to facing -> 90 deg, outside 40 deg half-cone
+    // Perpendicular to facing -> 90 deg, outside the 40 deg half-cone. Deliberately
+    // the SAME distance as the in-cone case above, so the only thing that differs
+    // between the two is the angle.
+    state.enemy.y = SMASH_IN_RANGE;
 
     const enemyHpBefore = state.enemy.hp;
     const events = stepMatch(state, 0, { move: { x: 0, y: 0 }, selectedWeapon: smashIndex, attack: true });
@@ -132,7 +150,7 @@ console.log('\n2. Cooldown gating (Patty Smash: cooldown 650ms)');
   state.player.x = 0;
   state.player.y = 0;
   state.player.facing = { x: 1, y: 0 };
-  state.enemy.x = 80;
+  state.enemy.x = SMASH_IN_RANGE;
   state.enemy.y = 0;
 
   const first = stepMatch(state, 0, { move: { x: 0, y: 0 }, selectedWeapon: smashIndex, attack: true });
@@ -191,7 +209,8 @@ console.log('\n3. Slow and stun movement effects');
 // 4. Projectile expires exactly at its range.
 // ─────────────────────────────────────────────────────────────────────────────
 
-console.log('\n4. Projectile range expiry (Taco "Onion Bomb": range 200, speed 400)');
+const ONION = CHARACTERS.taco.weapons.find((w) => w.key === 'Onion');
+console.log(`\n4. Projectile range expiry (Taco "Onion Bomb": range ${ONION.range}, speed ${ONION.speed})`);
 {
   const onionIndex = CHARACTERS.taco.weapons.findIndex((w) => w.key === 'Onion');
   check('found Onion Bomb on the roster', onionIndex !== -1);
@@ -213,9 +232,12 @@ console.log('\n4. Projectile range expiry (Taco "Onion Bomb": range 200, speed 4
   check('projectile spawned', !!spawned);
   check('exactly one projectile in flight', state.projectiles.length === 1);
 
-  // speed 400 wu/s * 500ms / 1000 = 200 wu = exactly the weapon's range, with no
-  // floating-point remainder (500/1000 and 400*0.5 are both exact in binary fp).
-  const travelEvents = stepMatch(state, 500, { move: { x: 0, y: 0 }, selectedWeapon: onionIndex, attack: false });
+  // One step of exactly the weapon's full time-of-flight, so the projectile travels
+  // exactly its range. `SPEED` is derived as range/FLIGHT_MS, so this is 500 ms —
+  // and 500/1000 = 0.5 and 232*0.5 = 116 are both exact in binary fp, leaving no
+  // floating-point remainder to make the `traveled >= range` comparison ambiguous.
+  const flightMs = (ONION.range / ONION.speed) * 1000;
+  const travelEvents = stepMatch(state, flightMs, { move: { x: 0, y: 0 }, selectedWeapon: onionIndex, attack: false });
   const destroyed = travelEvents.find((e) => e.type === 'projectile-destroyed');
   check('projectile destroyed after travelling exactly its range', !!destroyed, JSON.stringify(travelEvents.map((e) => e.type)));
   check('destruction reason is "expired" (not a wall/target hit)', destroyed && destroyed.reason === 'expired');
@@ -321,7 +343,7 @@ console.log('\n7. Match ends on death with the correct winner');
     state.player.x = 0;
     state.player.y = 0;
     state.player.facing = { x: 1, y: 0 };
-    state.enemy.x = 80;
+    state.enemy.x = SMASH_IN_RANGE;
     state.enemy.y = 0;
     state.enemy.hp = 5; // less than Smash's 12 damage
 
@@ -448,9 +470,15 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   check('AI got PAST the wall rather than stalling at its face',
     state.enemy.x > wallNearFace + 40,
     `enemy.x ended ${state.enemy.x.toFixed(1)}, wall face ~${wallNearFace.toFixed(1)}`);
+  // Donut's only weapon is Candy Barrage, so "in range" means exactly its reach.
+  // Asserted against the live number rather than a slack constant: the AI stops
+  // walking the tick it is inside range, so a correct chase ends within one 16 ms
+  // step (0.07 * 16 = 1.1 wu) of the boundary, and anything looser would still pass
+  // if the AI stalled halfway.
+  const donutReach = CHARACTERS.donut.weapons[0].range;
   check('AI closed to weapon range of the player',
-    closest < 200,
-    `closest approach ${closest.toFixed(1)}`);
+    closest < donutReach + 2,
+    `closest approach ${closest.toFixed(1)}, Candy Barrage reach ${donutReach}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,17 +1,25 @@
 /**
- * FIXED GAME DESIGN — single source of truth.
+ * GAME DESIGN — single source of truth.
  *
- * Every number here is transcribed verbatim from the original 2D prototype
+ * Almost every number here is transcribed verbatim from the original 2D prototype
  * (`reference/prototypes/kitchen-gameplay-prototype.html`) and the roster screen
- * (`reference/prototypes/characters-screen.html`).
+ * (`reference/prototypes/characters-screen.html`). Character identity, ability
+ * behaviour, damage, cooldowns and match structure are unchanged.
  *
- * Per the build brief: the game design does not change. We are rebuilding how the
- * game is RENDERED and how it FEELS, not what it does. Character identity, ability
- * behaviour, damage, cooldowns, ranges, speeds and match structure are frozen.
+ * DO NOT tune these values for "game feel" on a hunch. If a value seems wrong, it is
+ * still the spec until a deviation is deliberately authorised and recorded here.
  *
- * DO NOT tune these values for "game feel". If a value seems wrong, it is still the
- * spec. The only sanctioned exception is arena geometry (see `arena.ts`), which the
- * brief explicitly opened up for redesign.
+ * ── AUTHORISED DEVIATION #1 (2026-08-03): weapon REACH and projectile SPEED ──────
+ *
+ * Every weapon `range` and ranged `speed` below is now derived from the `REACH` and
+ * `FLIGHT_MS` ladders instead of being a transcribed magic number. Uri's call; see
+ * that section for the full rationale. Nothing else moved: damage, cooldown, cone,
+ * pellet counts, effects, hit radii, movement speeds and arena geometry are all as
+ * they were. `PROTOTYPE_VIEWPORT` below is kept as the historical record of WHY the
+ * old ranges were what they were.
+ *
+ * The other sanctioned exception is arena geometry (see `arena.ts`), which the brief
+ * explicitly opened up for redesign.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,13 +28,22 @@
 
 /**
  * Prototype world was 900x600 "world units" with a 360x240 scrolling viewport.
- * We keep this unit system so every damage radius, range and speed below stays
- * numerically identical. The 3D arena is authored in these same units; the brief
- * allows the arena to grow, so WORLD_W/H are overridden by the loaded arena.
+ * We keep this unit system, so every damage radius, hit radius and movement speed
+ * below is numerically identical to the prototype's. (Weapon reach and projectile
+ * speed are the one exception — see `REACH` for why and by how much.) The 3D arena
+ * is authored in these same units; the brief allows the arena to grow, so WORLD_W/H
+ * are overridden by the loaded arena, which is 1400x1000.
  */
 export const PROTOTYPE_WORLD = { w: 900, h: 600 } as const;
 
-/** Prototype camera window, in world units. Drives our 3D camera framing distance. */
+/**
+ * Prototype camera window, in world units. HISTORICAL RECORD, not a live input — the
+ * 3D camera derives its framing from `FAIR_PLAY` in `render/camera.ts` instead.
+ *
+ * Kept because it is the evidence for the range retune: a 360 wu wide window paired
+ * with a 260 wu weapon means the 2D design always allowed an attacker to shoot you
+ * from off screen. See `REACH`.
+ */
 export const PROTOTYPE_VIEWPORT = { w: 360, h: 240 } as const;
 
 export const MATCH_DURATION_MS = 180_000; // 3:00
@@ -107,6 +124,152 @@ export const HOMING_TURN_RATE = 0.006;
 /** Projectile hit radii. */
 export const HIT_RADIUS_VS_PLAYER = PLAYER_SIZE * 0.6; // 25.2
 export const HIT_RADIUS_VS_ENEMY = 26;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WEAPON REACH — the range ladder
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Ranges used to be 11 scattered magic numbers between 90 and 260 wu, transcribed
+// from a 2D prototype that scrolled a 360x240 window. That pairing — a 260 wu weapon
+// inside a 360 wu window — means the original design ALWAYS allowed an attacker to
+// hit you from off screen. The 3D camera guarantees the opposite (`FAIR_PLAY` in
+// `render/camera.ts` fits a square of radius `maxRange + HIT_RADIUS_VS_PLAYER +
+// reaction` on every aspect ratio), and honouring the old 260 forced the camera out
+// to ~43 m, shrinking characters to 8% of frame height — a third of the Brawl Stars /
+// Zooba silhouette this project exists to hit.
+//
+// So the ranges were retuned for a camera that shows you your attacker.
+//
+// ── How the ladder was built ────────────────────────────────────────────────
+//
+// A uniform cut was rejected: it would have dragged melee down to ~49-65 wu, and a
+// fighter is PLAYER_SIZE = 42 wu across, so two of them would have had to overlap to
+// trade blows. Instead the ladder is anchored at BOTH ends and the old values were
+// mapped onto it monotonically, preserving every ratio that makes a character feel
+// different:
+//
+//   * MELEE is anchored to the BODY. Expressed in body-lengths (1 body = 42 wu),
+//     the old melee band was 2.1-2.9 bl — which is not melee, it is short range with
+//     a swing animation. The new band is 1.4-2.0 bl: genuine contact reach, the gap
+//     between two hitboxes running from ~0.4 to ~1.0 of a body width.
+//   * RANGED is anchored to the FAIR RADIUS. `rangedMax` is the single number that
+//     sets how far the camera has to pull back, so it is the tightest constraint in
+//     the file; everything else is spaced beneath it.
+//   * The melee:ranged spread is PRESERVED. Old max-ranged / max-melee = 260/120 =
+//     2.17; new = 140/84 = 1.67 against the heavy melee special and 140/70 = 2.00
+//     against a standard swing (old equivalent: 260/110 = 2.36). The gap at the
+//     BOUNDARY actually widens — shortest ranged / longest melee goes from 130/120 =
+//     1.08 to 98/84 = 1.17 — so "brawler vs shooter" reads more clearly, not less.
+//   * Per-character ORDER is preserved exactly. Where the naive band map collapsed
+//     two of one character's weapons onto the same rung, the shorter one was pushed
+//     down a rung (Taco's Onion Bomb, Burrito's Disc, Water Bottle's Spray and
+//     Glass). Every character keeps as many distinct ranges as it had, except Taco's
+//     Filling Toss and Double Toss, which were identical (220) in the original too.
+//
+// ── What this costs ─────────────────────────────────────────────────────────
+//
+// The longest weapon reaches 3.3 body-lengths instead of 6.2. That is the honest
+// price and it is real: a sniper reads as "clearly out-ranges the brawler" rather
+// than "shoots from across the room". Everything else about the fight is preserved,
+// because shrinking reach by 0.54 while the camera closes in by 1/0.62 leaves the
+// on-screen picture — how far a shot travels as a fraction of the frame, how long it
+// takes to get there — very close to unchanged, with the characters ~60% larger.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One body length, in world units. Every reach below is a multiple of this. */
+export const BODY_LENGTH = PLAYER_SIZE; // 42
+
+export const REACH = {
+  /** 1.38 bl — fast utility melee (Burrito's Roll Stun). A body-check. */
+  meleeQuick: 58,
+  /** 1.67 bl — the standard brawler swing. */
+  meleeStrong: 70,
+  /** 2.00 bl — slow, telegraphed, high-damage melee specials. */
+  meleeHeavy: 84,
+
+  /** 2.33 bl — sprays and close lobs; the first rung clear of every melee. */
+  rangedClose: 98,
+  /** 2.76 bl — the workhorse mid-range shot. */
+  rangedMid: 116,
+  /** 3.05 bl — long pokes and heavy single throws. */
+  rangedLong: 128,
+  /**
+   * 3.33 bl — the longest reach any weapon has, ultimates aside.
+   *
+   * THIS NUMBER SETS THE CAMERA. `FAIR_PLAY.radiusUnits` = this + 25.2 + 34.0 =
+   * 199.2 wu, and the camera distance is directly proportional to that. Raising it
+   * pushes the camera back and shrinks every character on screen; do not raise it
+   * without re-shooting `node tools/aspect.mjs` and looking at the result.
+   */
+  rangedMax: 140,
+
+  /**
+   * Lollipop's Giant Lollipop, and nothing else. DELIBERATELY NOT ON THE LADDER: it
+   * is anchored to the ARENA (1400x1000 wu, fog closing to r=545), not to the weapon
+   * ladder, because its whole design is "hits the whole map". It is excluded from
+   * the fair-play radius in `render/camera.ts` — covering it would demand a 918 wu
+   * radius — so its warning has to be the screen-filling slam VISUAL rather than
+   * sight of the caster.
+   *
+   * => CONSTRAINT ON THE VFX OWNER, and it got HEAVIER with this retune: the slam
+   * now reaches 2.0x the guaranteed-visible radius, where it used to reach 1.25x.
+   * The caster is off screen far more often, so the tell has to carry more weight.
+   */
+  ultimateSlam: 400,
+} as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECTILE FLIGHT — speed is derived, not authored
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// What a player actually perceives is TIME TO TARGET, not world units per second,
+// and time to target is what decides whether a shot is dodgeable at all. So the
+// authored number is the flight time and the speed falls out of it.
+//
+// This matters more than it looks: cutting range while holding speed fixed would
+// have halved every flight time, dropping most shots to ~1.3 evade windows
+// (EVADE_WINDOW = HIT_RADIUS_VS_PLAYER / PLAYER_SPEED = 210 ms — the time to move
+// your own hit radius out of the line of fire). That would have quietly undone the
+// very fairness the camera work exists to provide: seeing the shot is worthless if
+// it lands before you can move. Deriving speed from a preserved flight time keeps
+// every weapon exactly as dodgeable as it was, and — because the camera closed in by
+// the same factor the ranges shrank — keeps its apparent on-screen speed too.
+//
+// The four bands are the clusters the prototype's 22 range/speed pairs already fell
+// into (310, 381-447, 474-600, 813-867, 1733 ms). Every weapon keeps its band, so
+// snappy weapons stay snappy and floaty ones stay floaty. Raw wu/s ordering can
+// differ slightly from the old table where a weapon also changed rung — Taco's Onion
+// Bomb and Pizza's Dough/Tomato are the only two cases — because speed now follows
+// from reach x flight rather than being set by hand.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const FLIGHT_MS = {
+  /** 1.67 evade windows. Sprays and quick lobs. */
+  fast: 350,
+  /** 2.38 evade windows. The workhorse. */
+  normal: 500,
+  /** 4.2 evade windows. Big, readable, telegraphed shots. */
+  slow: 875,
+  /** 8.3 evade windows. Egg's Hatch! — a chick that waddles at you. */
+  drift: 1750,
+} as const;
+
+/** World units per second needed to cross `range` in `flightMs`. */
+const projectileSpeed = (range: number, flightMs: number): number =>
+  Math.round((range / flightMs) * 1000);
+
+/**
+ * The derived speed table. Named by the rung the weapon sits on, so a weapon's
+ * `range` and `speed` can never drift out of sync.
+ */
+export const SPEED = {
+  /** 280 wu/s */ closeFast: projectileSpeed(REACH.rangedClose, FLIGHT_MS.fast),
+  /** 196 wu/s */ close: projectileSpeed(REACH.rangedClose, FLIGHT_MS.normal),
+  /** 232 wu/s */ mid: projectileSpeed(REACH.rangedMid, FLIGHT_MS.normal),
+  /** 256 wu/s */ long: projectileSpeed(REACH.rangedLong, FLIGHT_MS.normal),
+  /** 160 wu/s */ maxSlow: projectileSpeed(REACH.rangedMax, FLIGHT_MS.slow),
+  /**  80 wu/s */ maxDrift: projectileSpeed(REACH.rangedMax, FLIGHT_MS.drift),
+} as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Weapon / character types
@@ -248,9 +411,9 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 7, health: 8, speed: 5 }, hasTrail: false,
     face: 'Closed happy eyes, small smile. Stacked bun/patty/lettuce/tomato silhouette.',
     weapons: [
-      { key: 'Smash', name: 'Patty Smash', type: 'melee', range: 110, damage: 12, cooldown: 650, cone: 80, color: '#FFC93C', effect: null, emoji: '🍖' },
-      { key: 'Tomato', name: 'Tomato Toss', type: 'ranged', range: 130, damage: 8, cooldown: 800, speed: 420, color: '#E63946', effect: 'slow', splatter: true, emoji: '🍅' },
-      { key: 'Lettuce', name: 'Lettuce Fling', type: 'ranged', range: 260, damage: 6, cooldown: 1100, speed: 320, color: '#7CB518', effect: 'stun', emoji: '🥬' },
+      { key: 'Smash', name: 'Patty Smash', type: 'melee', range: REACH.meleeStrong, damage: 12, cooldown: 650, cone: 80, color: '#FFC93C', effect: null, emoji: '🍖' },
+      { key: 'Tomato', name: 'Tomato Toss', type: 'ranged', range: REACH.rangedClose, damage: 8, cooldown: 800, speed: SPEED.closeFast, color: '#E63946', effect: 'slow', splatter: true, emoji: '🍅' },
+      { key: 'Lettuce', name: 'Lettuce Fling', type: 'ranged', range: REACH.rangedMax, damage: 6, cooldown: 1100, speed: SPEED.maxSlow, color: '#7CB518', effect: 'stun', emoji: '🥬' },
       { key: 'Onion', name: 'Onion Ring', type: 'self', damage: 0, cooldown: 6000, healAmount: 25, color: '#F4E9DA', effect: null, emoji: '🧅' },
     ],
     abilities: [
@@ -266,7 +429,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 6, health: 7, speed: 6 }, hasTrail: true,
     face: 'Crooked smile, sprinkles across a pink glaze torus.',
     weapons: [
-      { key: 'Candy', name: 'Candy Barrage', type: 'ranged', range: 200, damage: 4, cooldown: 900, speed: 380, color: '#FF6FA5', effect: null, pellets: 3, spreadDeg: 14, trailBoosted: true, emoji: '🍬' },
+      { key: 'Candy', name: 'Candy Barrage', type: 'ranged', range: REACH.rangedLong, damage: 4, cooldown: 900, speed: SPEED.long, color: '#FF6FA5', effect: null, pellets: 3, spreadDeg: 14, trailBoosted: true, emoji: '🍬' },
     ],
     abilities: [
       { emoji: '🍬', name: 'Candy Barrage', desc: 'Throws candies that chip away health' },
@@ -279,10 +442,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 8, health: 6, speed: 5 }, hasTrail: false,
     face: 'Trapezoid shell with a jagged crimped top edge; face floats completely outside the shell, to the side.',
     weapons: [
-      { key: 'Filling', name: 'Filling Toss', type: 'ranged', range: 220, damage: 12, cooldown: 900, speed: 380, color: '#6B3E26', effect: null, emoji: '🥩' },
-      { key: 'Onion', name: 'Onion Bomb', type: 'ranged', range: 200, damage: 7, cooldown: 750, speed: 400, color: '#B497D6', effect: null, emoji: '🧅' },
+      { key: 'Filling', name: 'Filling Toss', type: 'ranged', range: REACH.rangedLong, damage: 12, cooldown: 900, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '🥩' },
+      // Onion Bomb sits one rung below Filling/Double so Taco keeps two distinct
+      // ranges, exactly as it did at 200 vs 220.
+      { key: 'Onion', name: 'Onion Bomb', type: 'ranged', range: REACH.rangedMid, damage: 7, cooldown: 750, speed: SPEED.mid, color: '#B497D6', effect: null, emoji: '🧅' },
       {
-        key: 'Double', name: 'Double Toss', type: 'ranged', range: 220, damage: 0, cooldown: 2500, speed: 390, color: '#6B3E26', effect: null, emoji: '💥',
+        key: 'Double', name: 'Double Toss', type: 'ranged', range: REACH.rangedLong, damage: 0, cooldown: 2500, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '💥',
         comboParts: [
           { color: '#6B3E26', damage: 14, angle: -10, emoji: '🥩' },
           { color: '#B497D6', damage: 9, angle: 10, emoji: '🧅' },
@@ -301,10 +466,11 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 7, health: 6, speed: 6 }, hasTrail: false,
     face: 'White wrap, stands upright, toppings visible at the open end.',
     weapons: [
-      { key: 'Disc', name: 'Burrito Disc', type: 'ranged', range: 240, damage: 10, cooldown: 850, speed: 400, color: '#F4E9DA', effect: null, emoji: '🌯' },
-      { key: 'Roll', name: 'Roll Stun', type: 'melee', range: 90, damage: 4, cooldown: 1400, cone: 100, color: '#FFC93C', effect: 'stun', emoji: '🌀' },
+      // Disc sits one rung below Swarm so Burrito keeps its 240-vs-260 ordering.
+      { key: 'Disc', name: 'Burrito Disc', type: 'ranged', range: REACH.rangedLong, damage: 10, cooldown: 850, speed: SPEED.long, color: '#F4E9DA', effect: null, emoji: '🌯' },
+      { key: 'Roll', name: 'Roll Stun', type: 'melee', range: REACH.meleeQuick, damage: 4, cooldown: 1400, cone: 100, color: '#FFC93C', effect: 'stun', emoji: '🌀' },
       {
-        key: 'Swarm', name: 'Topping Swarm', type: 'ranged', range: 260, damage: 5, cooldown: 3000, speed: 300, color: '#7CB518', effect: null,
+        key: 'Swarm', name: 'Topping Swarm', type: 'ranged', range: REACH.rangedMax, damage: 5, cooldown: 3000, speed: SPEED.maxSlow, color: '#7CB518', effect: null,
         pellets: 4, spreadDeg: 55, homing: true,
         pelletColors: ['#7CB518', '#E63946', '#FFC93C', '#F4E9DA'],
         pelletEmojis: ['🥬', '🍅', '🧀', '🧅'],
@@ -323,9 +489,9 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 8, health: 6, speed: 4 }, hasTrail: false,
     face: 'Open eyes with highlights, straight neutral mouth.',
     weapons: [
-      { key: 'Tackle', name: 'Egg Tackle', type: 'melee', range: 100, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, emoji: '🥚' },
-      { key: 'Hatch', name: 'Hatch!', type: 'ranged', range: 260, damage: 5, cooldown: 2600, speed: 150, color: '#FFE9A8', effect: null, homing: true, peckHits: 3, peckInterval: 500, emoji: '🐣' },
-      { key: 'Shards', name: 'Shell Shards', type: 'ranged', range: 180, damage: 4, cooldown: 1000, speed: 380, color: '#F4E9DA', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💥' },
+      { key: 'Tackle', name: 'Egg Tackle', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, emoji: '🥚' },
+      { key: 'Hatch', name: 'Hatch!', type: 'ranged', range: REACH.rangedMax, damage: 5, cooldown: 2600, speed: SPEED.maxDrift, color: '#FFE9A8', effect: null, homing: true, peckHits: 3, peckInterval: 500, emoji: '🐣' },
+      { key: 'Shards', name: 'Shell Shards', type: 'ranged', range: REACH.rangedMid, damage: 4, cooldown: 1000, speed: SPEED.mid, color: '#F4E9DA', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💥' },
     ],
     abilities: [
       { emoji: '🥚', name: 'Egg Tackle', desc: 'Launches herself at the enemy for big damage - slow to charge up' },
@@ -339,8 +505,8 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 8, health: 5, speed: 6 }, hasTrail: false,
     face: 'Eyes on the stick, mouth on the candy. Concentric red/white swirl disc.',
     weapons: [
-      { key: 'Smash', name: 'Lollipop Smash', type: 'melee', range: 100, damage: 11, cooldown: 750, cone: 80, color: '#E63946', effect: null, emoji: '🔨' },
-      { key: 'Giant', name: 'Giant Lollipop', type: 'melee', range: 400, damage: 10, cooldown: 8000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
+      { key: 'Smash', name: 'Lollipop Smash', type: 'melee', range: REACH.meleeStrong, damage: 11, cooldown: 750, cone: 80, color: '#E63946', effect: null, emoji: '🔨' },
+      { key: 'Giant', name: 'Giant Lollipop', type: 'melee', range: REACH.ultimateSlam, damage: 10, cooldown: 8000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
     ],
     abilities: [
       { emoji: '🔨', name: 'Lollipop Smash', desc: 'Swings herself like a hammer for heavy damage' },
@@ -353,9 +519,9 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 6, health: 7, speed: 5 }, hasTrail: false,
     face: 'Closed eyes, smiling. Triangular slice with pepperoni and a crust base.',
     weapons: [
-      { key: 'Dough', name: 'Dough Balls', type: 'ranged', range: 200, damage: 5, cooldown: 850, speed: 360, color: '#FFE9A8', effect: 'slow', emoji: '⚪' },
-      { key: 'Tomato', name: 'Tomato Splat', type: 'ranged', range: 180, damage: 6, cooldown: 900, speed: 380, color: '#E63946', effect: null, splatter: true, emoji: '🍅' },
-      { key: 'Cheese', name: 'Cheese Blind', type: 'ranged', range: 170, damage: 4, cooldown: 1300, speed: 340, color: '#FFD873', effect: 'stun', emoji: '🧀' },
+      { key: 'Dough', name: 'Dough Balls', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 850, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '⚪' },
+      { key: 'Tomato', name: 'Tomato Splat', type: 'ranged', range: REACH.rangedMid, damage: 6, cooldown: 900, speed: SPEED.mid, color: '#E63946', effect: null, splatter: true, emoji: '🍅' },
+      { key: 'Cheese', name: 'Cheese Blind', type: 'ranged', range: REACH.rangedClose, damage: 4, cooldown: 1300, speed: SPEED.close, color: '#FFD873', effect: 'stun', emoji: '🧀' },
     ],
     abilities: [
       { emoji: '⚪', name: 'Dough Balls', desc: 'Throws dough balls that slow enemies down' },
@@ -369,10 +535,10 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 6, health: 5, speed: 7 }, hasTrail: false,
     face: 'Wide eyes, puckered lips. Rice cylinder banded with nori, salmon centre.',
     weapons: [
-      { key: 'Rice', name: 'Rice Spray', type: 'ranged', range: 160, damage: 2, cooldown: 700, speed: 420, color: '#FFFFFF', effect: null, pellets: 5, spreadDeg: 35, emoji: '🍚' },
-      { key: 'Seaweed', name: 'Seaweed Bait', type: 'ranged', range: 190, damage: 5, cooldown: 1000, speed: 350, color: '#7CB518', effect: 'slow', emoji: '🌿' },
-      { key: 'Fish', name: 'Fish Pile', type: 'melee', range: 100, damage: 6, cooldown: 1200, cone: 150, color: '#F4A261', effect: null, emoji: '🐟' },
-      { key: 'Catch', name: 'Big Catch', type: 'ranged', range: 240, damage: 9, cooldown: 3200, speed: 280, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, emoji: '🐡' },
+      { key: 'Rice', name: 'Rice Spray', type: 'ranged', range: REACH.rangedClose, damage: 2, cooldown: 700, speed: SPEED.closeFast, color: '#FFFFFF', effect: null, pellets: 5, spreadDeg: 35, emoji: '🍚' },
+      { key: 'Seaweed', name: 'Seaweed Bait', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 1000, speed: SPEED.mid, color: '#7CB518', effect: 'slow', emoji: '🌿' },
+      { key: 'Fish', name: 'Fish Pile', type: 'melee', range: REACH.meleeStrong, damage: 6, cooldown: 1200, cone: 150, color: '#F4A261', effect: null, emoji: '🐟' },
+      { key: 'Catch', name: 'Big Catch', type: 'ranged', range: REACH.rangedMax, damage: 9, cooldown: 3200, speed: SPEED.maxSlow, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, emoji: '🐡' },
     ],
     abilities: [
       { emoji: '🍚', name: 'Rice Spray', desc: 'Throws a spray of rice grains - each one chips away a little health' },
@@ -387,9 +553,9 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 7, health: 6, speed: 4 }, hasTrail: false,
     face: 'Gray steam-coloured eyes, no mouth. Wide bowl with rising steam.',
     weapons: [
-      { key: 'Splash', name: 'Soup Splash', type: 'ranged', range: 170, damage: 3, cooldown: 750, speed: 380, color: '#E8792A', effect: null, pellets: 3, spreadDeg: 25, emoji: '💦' },
-      { key: 'Noodle', name: 'Noodle Toss', type: 'ranged', range: 200, damage: 5, cooldown: 1000, speed: 340, color: '#FFE9A8', effect: 'slow', emoji: '🍜' },
-      { key: 'Dump', name: 'Soup Dump', type: 'melee', range: 110, damage: 16, cooldown: 3000, cone: 90, color: '#E8792A', effect: 'slow', emoji: '🌊' },
+      { key: 'Splash', name: 'Soup Splash', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 750, speed: SPEED.closeFast, color: '#E8792A', effect: null, pellets: 3, spreadDeg: 25, emoji: '💦' },
+      { key: 'Noodle', name: 'Noodle Toss', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 1000, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '🍜' },
+      { key: 'Dump', name: 'Soup Dump', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 3000, cone: 90, color: '#E8792A', effect: 'slow', emoji: '🌊' },
     ],
     abilities: [
       { emoji: '💦', name: 'Soup Splash', desc: 'Throws his soup liquid - each splash chips away a little health' },
@@ -403,10 +569,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 7, health: 7, speed: 5 }, hasTrail: false,
     face: 'Eyes floating above the cap, big smile. Translucent blue bottle with a darker cap.',
     weapons: [
-      { key: 'Spray', name: 'Water Spray', type: 'ranged', range: 180, damage: 3, cooldown: 850, speed: 380, color: '#BFEFFF', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💦' },
-      { key: 'Glass', name: 'Glass Shards', type: 'ranged', range: 200, damage: 7, cooldown: 1100, speed: 400, color: '#BFEFFF', effect: 'stun', emoji: '🧊' },
-      { key: 'Cap', name: 'Cap Shot', type: 'ranged', range: 220, damage: 6, cooldown: 900, speed: 420, color: '#1E90D8', effect: 'slow', emoji: '🔵' },
-      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: 120, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', emoji: '🌊' },
+      // Water Bottle is the only four-weapon fighter with three ranged slots, so
+      // Spray and Glass each drop a rung to keep all four reaches distinct.
+      { key: 'Spray', name: 'Water Spray', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 850, speed: SPEED.close, color: '#BFEFFF', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💦' },
+      { key: 'Glass', name: 'Glass Shards', type: 'ranged', range: REACH.rangedMid, damage: 7, cooldown: 1100, speed: SPEED.mid, color: '#BFEFFF', effect: 'stun', emoji: '🧊' },
+      { key: 'Cap', name: 'Cap Shot', type: 'ranged', range: REACH.rangedLong, damage: 6, cooldown: 900, speed: SPEED.long, color: '#1E90D8', effect: 'slow', emoji: '🔵' },
+      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', emoji: '🌊' },
     ],
     abilities: [
       { emoji: '💦', name: 'Water Spray', desc: 'Sprays water that slows enemies down a lot' },
@@ -421,9 +589,9 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 8, health: 6, speed: 7 }, hasTrail: false,
     face: 'Sleepy half-closed eyes, small smile. Sausage in a bun with a mustard zigzag.',
     weapons: [
-      { key: 'Mustard', name: 'Mustard Blast', type: 'ranged', range: 220, damage: 7, cooldown: 900, speed: 400, color: '#FFC93C', effect: null, emoji: '💛' },
-      { key: 'Ketchup', name: 'Ketchup Slip', type: 'ranged', range: 190, damage: 5, cooldown: 950, speed: 380, color: '#D62839', effect: 'slow', emoji: '🔴' },
-      { key: 'Slash', name: 'Bun Slash', type: 'melee', range: 100, damage: 11, cooldown: 650, cone: 75, color: '#FFC93C', effect: null, emoji: '⚔️' },
+      { key: 'Mustard', name: 'Mustard Blast', type: 'ranged', range: REACH.rangedLong, damage: 7, cooldown: 900, speed: SPEED.long, color: '#FFC93C', effect: null, emoji: '💛' },
+      { key: 'Ketchup', name: 'Ketchup Slip', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 950, speed: SPEED.mid, color: '#D62839', effect: 'slow', emoji: '🔴' },
+      { key: 'Slash', name: 'Bun Slash', type: 'melee', range: REACH.meleeStrong, damage: 11, cooldown: 650, cone: 75, color: '#FFC93C', effect: null, emoji: '⚔️' },
     ],
     abilities: [
       { emoji: '💛', name: 'Mustard Blast', desc: 'Burns enemies from a distance' },

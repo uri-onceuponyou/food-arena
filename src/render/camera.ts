@@ -33,20 +33,24 @@ import { CHARACTERS, HIT_RADIUS_VS_PLAYER, PLAYER_SPEED, TRAIL } from '../game/r
 // 1. LONGEST THREAT REACH — the greatest centre-to-centre distance from which an
 //    opponent can land a hit on you.
 //
-//      max weapon `range`            260 wu   (Lettuce Fling / Topping Swarm /
-//                                              Hatch!, tied — see `MAX_WEAPON_RANGE`)
+//      max weapon `range`            140 wu   (`REACH.rangedMax` — Lettuce Fling /
+//                                              Topping Swarm / Hatch! / Big Catch,
+//                                              tied. See `MAX_WEAPON_RANGE`)
 //    + HIT_RADIUS_VS_PLAYER         25.2 wu   projectiles spawn at the attacker's
 //                                              centre (combat.ts `origin`) and connect
 //                                              within this radius of yours, so the
 //                                              attacker's usable reach is range + this
 //    ------------------------------------
-//    = 285.2 wu
+//    = 165.2 wu
 //
 //    EXCLUDED: Lollipop's Giant Lollipop (`giantSlam`, range 400, cone 360°). It is
 //    an 8 s-cooldown map-scale ultimate whose warning is the screen-filling slam
-//    visual, not the sight of the caster; covering it would demand a 918 wu radius,
-//    i.e. 95% of the arena's width on screen at all times. => CONSTRAINT ON THE VFX
-//    OWNER: the giantSlam tell must be readable when the caster is OFF SCREEN.
+//    visual, not the sight of the caster; covering it would demand a 459 wu radius —
+//    a 918 wu square, two thirds of the 1400 wu arena's width, on screen at all
+//    times. => CONSTRAINT ON THE VFX OWNER: the giantSlam tell must be readable when
+//    the caster is OFF SCREEN. That constraint got HEAVIER with the 2026-08-03 range
+//    retune: the slam reaches 2.0x the guaranteed radius now, where it used to reach
+//    1.25x, so the caster is off screen far more of the time.
 //
 // 2. REACTION DISTANCE — a threat must be visible for long enough to be answered,
 //    not merely visible at the instant it connects.
@@ -59,24 +63,35 @@ import { CHARACTERS, HIT_RADIUS_VS_PLAYER, PLAYER_SPEED, TRAIL } from '../game/r
 //                    = 0.12 * 1.35 = 0.162 wu·ms⁻¹   (nothing in rules.ts moves faster)
 //      reaction dist = 0.162 * 210 = 34.0 wu
 //
-// 3. FAIR_PLAY.radiusUnits = 285.2 + 34.0 = 319.2 wu.
+// 3. FAIR_PLAY.radiusUnits = 165.2 + 34.0 = 199.2 wu.
 //
 //    Threat is radial (twin-stick, 360° facing), so the guaranteed region is the
 //    DISC of that radius — and a disc of radius R is contained in the view iff both
-//    half-extents are >= R. The rectangle is therefore the square 638.4 x 638.4 wu
-//    (31.9 x 31.9 m) centred ON THE PLAYER, not on the arena and not on the frame.
+//    half-extents are >= R. The rectangle is therefore the square 398.4 x 398.4 wu
+//    (19.9 x 19.9 m) centred ON THE PLAYER, not on the arena and not on the frame.
 //
 // ── What this costs, and the one knob ───────────────────────────────────────
 //
-// Honouring it pulls the camera from 14.4 m to 42.7 m at 16:9 (characters go from
-// 24% to 8% of frame height). That is forced by the frozen ranges: the prototype
-// used a 360x240 viewport with a 260 wu weapon, i.e. the 2D design always allowed
-// off-screen attackers. If that zoom is judged unshippable, the ONLY honest knob is
-// this radius, and the next defensible value down is the "react-in-time" criterion
-// (see the report): max MELEE reach + reaction = 120 + 25.2 + 34 = 179 wu, which
-// lets ranged fighters plink from off screen but still guarantees you see every
-// projectile for >= 2 evade windows before impact. Change `radiusUnits` here — never
-// by hardcoding a view width at a call site.
+// Honouring it puts the camera at 26.6 m at 16:9, where characters read at ~13% of
+// frame height — the Brawl Stars / Zooba band.
+//
+// It did not always. Against the ORIGINAL transcribed ranges (max 260 wu) this same
+// rule demanded R = 319.2 and a 42.7 m camera, which shrank characters to ~8% — a
+// third of their previous size. That was forced by a 2D design whose 360x240
+// scrolling viewport had always allowed off-screen attackers; the ranges were never
+// authored for a camera that guarantees you see who is shooting you. Rather than
+// weaken the guarantee, Uri's call (2026-08-03) was to retune the ranges for the
+// camera. `REACH` in `game/rules.ts` is that retune, and `rangedMax` there is the
+// number that actually sets this radius.
+//
+// So DO NOT tune framing here. `radiusUnits` stays derived from `rules.ts`; if the
+// camera needs to move, move `REACH.rangedMax` and let it fall out. The one escape
+// hatch, if a future cast needs genuinely long-range weapons back, is to weaken the
+// criterion itself to "react-in-time": max MELEE reach + reaction = 84 + 25.2 + 34 =
+// 143.2 wu, which would let ranged fighters plink from off screen while still
+// guaranteeing you see every projectile for >= 2 evade windows before impact. Note
+// that is a LOOSER rule but a SMALLER radius, i.e. an even closer camera — it buys
+// range, not framing. Either way: never hardcode a view width at a call site.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Longest `range` on any weapon that is not a map-scale ultimate, in world units. */
@@ -140,10 +155,10 @@ export const SUPPORTED_ASPECT = {
   /**
    * 21:9 — ultrawide desktop and 21:9 phones (Xperia). Wider than this is masked.
    *
-   * At the cap a player sees 1217 wu of arena width against 807 wu at 4:3, so up to
-   * 290 wu each side of the guaranteed square is BLEED. Everything that decides a
+   * At the cap a player sees 760 wu of arena width against 504 wu at 4:3, so up to
+   * 181 wu each side of the guaranteed square is BLEED. Everything that decides a
    * fight — cover, hazards, spawns, pickups, the fog edge — must be readable from
-   * inside the 638 wu square; anything that only becomes visible in the bleed must be
+   * inside the 398 wu square; anything that only becomes visible in the bleed must be
    * decoration with no collision and no gameplay effect.
    */
   max: 21 / 9,
@@ -244,8 +259,8 @@ export class CameraRig {
     this.subjectFill = opts.subjectFill ?? 0.62;
     this.targetHeight = opts.targetHeight ?? 0;
     this.fairRadiusUnits = opts.fairRadiusUnits ?? FAIR_PLAY.radiusUnits;
-    // Far plane must clear the fair framing: the camera sits ~50 m out at 4:3 and the
-    // far edge of the ground window is further again.
+    // Far plane must clear the fair framing: the camera sits ~31 m out at 4:3 (the
+    // widest-binding aspect) and the far edge of the ground window is further again.
     this.camera = new THREE.PerspectiveCamera(opts.fov ?? 34, this.aspect, 0.5, 300);
     this.camera.name = 'gameCamera';
     this.apply();
