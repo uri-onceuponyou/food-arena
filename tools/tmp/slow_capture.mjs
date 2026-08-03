@@ -78,14 +78,23 @@ async function main() {
   }
 }
 
-/** Track which movement keys are currently held so we only send the DIFF each poll
- * (repeated keydown on an already-down key is harmless but noisy). */
+/**
+ * This dev server's project directory is shared with other concurrent work outside
+ * this task (observed: files appearing under `src/vfx/weapons/` mid-run) — Vite
+ * watches the whole `src/` tree, and a change from that unrelated work can trigger a
+ * full page reload of OUR session, silently resetting `InputController`'s held-key
+ * state. A diff-only key sender would then never re-press anything (it thinks the
+ * keys are already down) and movement would just stop forever. So: unconditionally
+ * RE-ASSERT every wanted key's keydown on every poll (a repeat keydown on an
+ * already-down key is a harmless no-op for `InputController`, which tracks held keys
+ * in a `Set`) rather than diffing against local bookkeeping.
+ */
 class Keys {
   constructor(page) { this.page = page; this.held = new Set(); }
   async set(codes) {
     const want = new Set(codes);
     for (const c of this.held) if (!want.has(c)) await this.page.keyboard.up(c);
-    for (const c of want) if (!this.held.has(c)) await this.page.keyboard.down(c);
+    for (const c of want) await this.page.keyboard.down(c);
     this.held = want;
   }
   async releaseAll() { await this.set([]); }
@@ -104,6 +113,7 @@ async function run(browser) {
   const start = Date.now();
   let fired = false;
   let dead = false;
+  let lastLog = 0;
 
   while (Date.now() - start < holdMs) {
     const snap = await page.evaluate(() => ({
@@ -113,6 +123,11 @@ async function run(browser) {
     }));
     if (snap.splash > 0) { fired = true; break; }
     if (snap.deathCount > 0 || (snap.fighters && !snap.fighters.player.alive)) { dead = true; break; }
+
+    if (Date.now() - lastLog > 2000) {
+      lastLog = Date.now();
+      console.log(`  t=${((Date.now() - start) / 1000).toFixed(1)}s`, JSON.stringify(snap.fighters));
+    }
 
     if (snap.fighters) {
       const { player: p, enemy: e } = snap.fighters;
@@ -130,6 +145,33 @@ async function run(browser) {
         orbitAngle += 0.9;
         mx = Math.cos(orbitAngle);
         my = Math.sin(orbitAngle);
+
+        const codes = [];
+        if (mx > 0.3) codes.push('KeyD');
+        if (mx < -0.3) codes.push('KeyA');
+        if (my > 0.3) codes.push('KeyS');
+        if (my < -0.3) codes.push('KeyW');
+        await keys.set(codes);
+
+        // Splash particles have a fixed real-seconds lifetime that `updateEffects`
+        // advances by `rawDtSeconds` — which is ALREADY multiplied by `simSpeed` (see
+        // match.ts's `loop()`) — so at a high `simSpeed` a splash's actual WALL-CLOCK
+        // lifetime is proportionally short (a ~0.3s effect can fully decay in ~30ms at
+        // simSpeed=10). The coarse ~120ms `POLL_MS` steering cadence used to reach the
+        // puddle is far too slow to catch that; switch to the same tight polling
+        // `tools/tmp/vfx_capture.mjs` uses for exactly this reason once we're already
+        // inside and just need to catch the NEXT splash tick.
+        try {
+          await page.waitForFunction(
+            () => (window.__vfxQaCounts?.puddleSplash ?? 0) > 0,
+            null,
+            { timeout: Math.max(500, holdMs - (Date.now() - start)), polling: 8 },
+          );
+          fired = true;
+        } catch {
+          fired = false;
+        }
+        break;
       } else if (distToEnemy < DANGER_DIST) {
         // Blend "flee the enemy" with "still make progress toward the puddle" —
         // pure fleeing would never arrive, pure beelining is what got the player

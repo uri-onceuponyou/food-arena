@@ -1,0 +1,68 @@
+[
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=stove_island&shot=1",
+  "out": "shots/props/r0/stove_island.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=prep_counter&shot=1",
+  "out": "shots/props/r0/prep_counter.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=sink_counter&shot=1",
+  "out": "shots/props/r0/sink_counter.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=fryer_counter&shot=1",
+  "out": "shots/props/r0/fryer_counter.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=freezer&shot=1",
+  "out": "shots/props/r0/freezer.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=supply_barrel&shot=1",
+  "out": "shots/props/r0/supply_barrel.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=produce_crate_tall&shot=1",
+  "out": "shots/props/r0/produce_crate_tall.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=herb_crate&shot=1",
+  "out": "shots/props/r0/herb_crate.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=flour_sacks&shot=1",
+  "out": "shots/props/r0/flour_sacks.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=stacked_pots&shot=1",
+  "out": "shots/props/r0/stacked_pots.png",
+  "w": 900,
+  "h": 700
+ },
+ {
+  "url": "http://localhost:5173/preview.html?piece=prop&kind=spice_cart&shot=1",
+  "out": "shots/props/r0/spice_cart.png",
+  "w": 900,
+  "h": 700
+ }
+]

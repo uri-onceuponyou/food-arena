@@ -18,7 +18,7 @@ import type { CharacterModel } from '../characters/types';
 import { createMatch, stepMatch } from './sim';
 import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchState } from './state';
 import { otherRole } from './state';
-import { CHARACTER_IDS, CHARACTERS, type CharacterId } from './rules';
+import { CHARACTER_IDS, CHARACTERS, type CharacterId, type Weapon } from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 import { InputController } from './input';
 import { VfxLayer } from './vfx';
@@ -307,7 +307,7 @@ export class GameSession {
           model.play('attack', { weaponIndex: weaponIndex < 0 ? 0 : weaponIndex });
 
           if (weapon) {
-            this.vfx.spawnCastFlash(fighter.x, fighter.y, fighter.facing, weapon.color);
+            this.vfx.spawnCastFlash(fighter.x, fighter.y, fighter.facing, weapon, fighter.characterId);
             if (weapon.type === 'melee') {
               this.vfx.spawnMeleeArc(fighter.x, fighter.y, fighter.facing, weapon.range ?? 0, weapon.cone ?? 360, weapon.color);
             }
@@ -327,7 +327,24 @@ export class GameSession {
 
           const color = this.colorForDamageSource(ev.targetRole, ev.source);
           lastHitColor[ev.targetRole] = color;
-          this.vfx.spawnImpactBurst(ev.x, ev.y, color, ev.amount);
+
+          // Resolve the attacking weapon (if this hit came from one) so
+          // `spawnImpactBurst` can look up a bespoke per-weapon `impact()` hook
+          // (`vfx/weapons/`) — trail/hazard/fog hits have no weapon and always take
+          // the generic burst, exactly as before this system existed.
+          let impactSource: { weapon: Weapon; characterId: CharacterId; fromXWU: number; fromYWU: number } | undefined;
+          if (ev.source.kind === 'weapon') {
+            const attackerFighter = this.state[otherRole(ev.targetRole)];
+            const weaponKey = ev.source.weaponKey;
+            const weapon = CHARACTERS[attackerFighter.characterId].weapons.find((w) => w.key === weaponKey);
+            if (weapon) {
+              impactSource = {
+                weapon, characterId: attackerFighter.characterId,
+                fromXWU: attackerFighter.x, fromYWU: attackerFighter.y,
+              };
+            }
+          }
+          this.vfx.spawnImpactBurst(ev.x, ev.y, color, ev.amount, impactSource);
 
           const screenPos = this.projectPointToScreen(ev.x, ev.y, 1.3);
           if (screenPos) this.hud.spawnDamageNumber(screenPos, ev.amount);
@@ -496,6 +513,15 @@ export class GameSession {
     const playerPos = groundPos(this.state.player.x, this.state.player.y);
     this.stage.rig.follow(playerPos.x, playerPos.z);
     this.stage.lighting.focus(playerPos.x, playerPos.z, 30);
+
+    // TEMP DEBUG: ground-plane screen projections for scripted aim in
+    // tools/tmp/vfx_convert_capture.mjs (the floating HUD pill sits well above the
+    // head, which makes a Playwright driver systematically overshoot when raycasting
+    // mouse position back to the ground plane, per `buildInput()`'s aim math).
+    (window as any).__vfxDebugScreen = {
+      player: this.projectPointToScreen(this.state.player.x, this.state.player.y, 0),
+      enemy: this.projectPointToScreen(this.state.enemy.x, this.state.enemy.y, 0),
+    };
 
     this.hud.update(this.state, { selectedWeapon: this.input.selectedWeapon });
     this.hud.updateFloatingBars(
