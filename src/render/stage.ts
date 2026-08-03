@@ -13,7 +13,7 @@ import {
   HueSaturationEffect, BrightnessContrastEffect, BlendFunction,
 } from 'postprocessing';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { CameraRig, type CameraRigOptions } from './camera';
+import { CameraRig, SUPPORTED_ASPECT, type CameraRigOptions } from './camera';
 import { createLighting, type LightingRig } from './lighting';
 
 export interface StageOptions {
@@ -191,9 +191,43 @@ export class Stage {
     this.composer = composer;
   }
 
+  /**
+   * Size the drawing buffer, and — in a match — enforce the supported aspect band.
+   *
+   * The fair-play framing in `camera.ts` guarantees every device the same visible
+   * radius, and lets screens wider than the square's own ground aspect keep the
+   * surplus as cosmetic bleed. That bargain only holds while the bleed is bounded, so
+   * outside `SUPPORTED_ASPECT` the render is masked instead: a 32:9 desktop is
+   * pillarboxed to 21:9 and a portrait window is letterboxed to 4:3, rather than
+   * being handed (or denied) a third of the arena.
+   *
+   * Masking is deliberately limited to `frameMode: 'fair'`, i.e. to actual matches.
+   * The preview harness shoots portrait character plates (900x1100, 1200x1500) whose
+   * framing every character loop is calibrated against; banding those would silently
+   * re-crop every review shot in the project.
+   */
   resize(): void {
-    const w = this.container.clientWidth || window.innerWidth;
-    const h = this.container.clientHeight || window.innerHeight;
+    const cw = this.container.clientWidth || window.innerWidth;
+    const ch = this.container.clientHeight || window.innerHeight;
+    let w = cw;
+    let h = ch;
+
+    if (this.rig.frameMode === 'fair') {
+      const aspect = cw / Math.max(1, ch);
+      if (aspect > SUPPORTED_ASPECT.max) w = Math.round(ch * SUPPORTED_ASPECT.max);
+      else if (aspect < SUPPORTED_ASPECT.min) h = Math.round(cw / SUPPORTED_ASPECT.min);
+      // index.html styles the canvas `width:100%; height:100%`, which would stretch a
+      // masked buffer back over the whole container; inline px wins over that rule.
+      // Both the HUD (match.ts `projectToScreen`) and pointer input read the canvas's
+      // own bounding rect, so an offset canvas stays correctly aligned.
+      const style = this.canvas.style;
+      style.position = 'absolute';
+      style.left = `${Math.round((cw - w) / 2)}px`;
+      style.top = `${Math.round((ch - h) / 2)}px`;
+      style.width = `${w}px`;
+      style.height = `${h}px`;
+    }
+
     this.renderer.setSize(w, h, false);
     this.composer?.setSize(w, h);
     this.rig.setAspect(w / Math.max(1, h));

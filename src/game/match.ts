@@ -133,11 +133,18 @@ export class GameSession {
 
     // Same Stage recipe `preview.ts` uses for the arena's "gameplay" view — a
     // character/arena approved in preview must render identically in the real game.
+    //
+    // A MATCH uses `frameMode: 'fair'`, never a fixed `viewWidthUnits`: how much arena
+    // you can see is a balance number in a PvP brawler, so the rig fits the
+    // gameplay-derived fair-play square (`camera.ts` -> `FAIR_PLAY`) at whatever aspect
+    // the device has. `viewWidthUnits: 265` framed a constant WIDTH and let the visible
+    // DEPTH collapse with the aspect ratio — 287 wu of depth on a 4:3 tablet against
+    // 164 wu on a 21:9, i.e. the tablet saw 75% further forward for free.
     this.stage = new Stage({
       container: opts.container,
       background: 0xffcf8a,
       fog: { color: 0xffcf8a, near: 40, far: 130 },
-      camera: { pitchDeg: 58, yawDeg: 0, frameMode: 'ground', viewWidthUnits: 265 },
+      camera: { pitchDeg: 58, yawDeg: 0, frameMode: 'fair' },
     });
     this.stage.scene.add(this.arena.build());
 
