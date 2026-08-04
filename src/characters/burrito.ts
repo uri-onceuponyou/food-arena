@@ -14,9 +14,10 @@
  * camera, an UP-facing opening is far more legible than a forward-facing one would be,
  * so unlike Donut's hole (which faces +Z) this one faces +Y.
  *
- * The torso is dressed as a continuation of the wrap with foil peeled back at the
- * base — per the brief's note that the reference bar dresses bodies with contrasting
- * colours (red overalls, blue shirt, dark boots), not one flat costume colour.
+ * The head+torso loop replaced the old decorated-barrel torso with a continuation of
+ * the SAME tube (see `dressTorso`): head and torso are now one uncut ~2.5:1 vertical
+ * cylinder, which is the one proportion nothing else in the cast has, with a torn foil
+ * sleeve flared back over its lower half as the costume/silhouette break.
  */
 
 import * as THREE from 'three';
@@ -31,7 +32,14 @@ import { bodyType } from './bodies';
 const TORTILLA = '#F5EAD6';        // pale flour wrap — the dominant, matte mass
 const TORTILLA_SHADE = '#E4CFA0';  // toasted/shadow tone — rim, torso wrap-continuation
 const WRAP_BAND = '#E0562B';       // paper wrapper band + hands — vivid contrast colour
-const FOIL = '#E7EDEF';            // peeled foil — cool, bright, metallic
+// Foil. Warm-NEUTRAL silver rather than either extreme, and the value is the
+// load-bearing part: a first pass warmed this to #EFEBE0 to keep the character in
+// the cast's warm half, and at that value it landed within 4% of the tortilla it
+// wraps — the whole sleeve rendered, and was invisible, against the mass behind it.
+// This is ~22% darker than TORTILLA. The scene is deliberately high-key and the
+// contrast pass compresses the top end, so a gap that looks generous in the hex
+// arrives much smaller on screen — measured by rendering, not by reading the values.
+const FOIL = '#C4C0B5';
 const BOOT = '#7A5230';            // dark toasted-tortilla boots, grounds the pale body
 const RICE = PALETTE.cream;        // '#FFF3DE' — filling mound base
 const MEAT = PALETTE.patty;
@@ -49,24 +57,6 @@ const LIMB_AVOCADO = '#7DA33F';
 const LIMB_AVOCADO_DARK = '#587429';
 
 type Spot = readonly [angleDeg: number, radiusFrac: number];
-
-/**
- * A cloth strip curved around a cylinder of `radius`, spanning `arcRad` of angle
- * centred on `angleOffset` (radians, 0 = character-front/+Z), `height` tall. Used
- * for the poncho cape — a garment panel that hugs the torso's own curvature
- * rather than floating as a flat card in front of or behind it.
- */
-function curvedPanel(radius: number, arcRad: number, height: number, angleOffset = 0, segX = 20, segY = 6): THREE.BufferGeometry {
-  const geo = new THREE.PlaneGeometry(arcRad, height, segX, segY);
-  const pos = geo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) {
-    const theta = angleOffset + pos.getX(i);
-    const y = pos.getY(i);
-    pos.setXYZ(i, Math.sin(theta) * radius, y, Math.cos(theta) * radius);
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
 
 /**
  * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
@@ -112,6 +102,10 @@ export class BurritoCharacter extends BaseCharacter {
   private rig: ChibiRig;
   private toppings: THREE.Object3D[] = [];
   private toppingBaseRotZ: number[] = [];
+  /** Head-local Y and radius where the food tube ends, so `dressTorso` can
+   *  continue the SAME tube downward instead of guessing at a matching size. */
+  private headTubeBottomY = 0;
+  private headTubeBottomR = 0;
 
   constructor(def: CharacterDef) {
     super(def);
@@ -133,15 +127,26 @@ export class BurritoCharacter extends BaseCharacter {
       // so scaling the whole character was the sole route to longer legs. LANKY
       // has real `legFraction`/`armFraction` knobs, so height goes back near the
       // 2.1m cast norm and the tall read comes from proportion instead of size.
-      proportions: bodyType('lanky', { height: 2.05 }),
-      // Tall and burly, chest out, planted wide — a bruiser's power stance. An art
-      // director's second pass named the cast's identical dead-front symmetric
-      // pose as a top gap; both arms swing wide here (rather than one tucked in
-      // like most of this file's cast) since Burrito is the roster's physically
-      // biggest silhouette and should read that way even standing still.
+      // `shoulderWidth` is nudged out from LANKY's own 0.145H to 0.163H for one
+      // measured reason: the food tube now runs the full height (see `dressTorso`)
+      // and `bodies.ts` caps a torso's half-width below the shoulder pivot or the
+      // arms sink into the mass. At the stock width the tube had to neck in to
+      // 0.192m through the torso against 0.238m at the head, and that 20% step
+      // rendered as a cone, not a roll. Everything else is stock LANKY.
+      proportions: bodyType('lanky', { height: 2.05, shoulderWidth: 2.05 * 0.163 }),
+      // Arms held CLEAR of the body, with a deliberate asymmetry.
+      //
+      // The signs are the fix, not the magnitudes. `restPose()` sets
+      // `shoulderL.rotation.z = stance.shoulderL`, and `shoulderL` is the joint at
+      // x = -shoulderWidth; a POSITIVE z-rotation there swings the elbow toward +X,
+      // i.e. across the body. The old 0.62 / -0.60 pair was commented as "both arms
+      // swing wide" and was doing the exact opposite — pinning both arms against the
+      // tube. A blind critic reading the silhouette named the result directly: no
+      // arm-to-body negative space anywhere, so the outline is one solid slab.
+      // Negative-left / positive-right opens them.
       stance: {
-        shoulderL: 0.62, shoulderR: -0.60,
-        elbowL: -0.20, elbowR: -0.15,
+        shoulderL: -0.26, shoulderR: 0.19,
+        elbowL: -0.34, elbowR: -0.20,
         twist: -0.04, headTilt: 0.03, headTurn: 0.08,
         hipSway: 0.02, lean: -0.05,
       },
@@ -156,10 +161,21 @@ export class BurritoCharacter extends BaseCharacter {
     // A barrel-bulged cylinder rather than a straight tube — real burritos bulge
     // where they're stuffed. Built by displacing a plain CylinderGeometry's vertices
     // radially, the same technique rig.ts uses for the torso taper.
-    const botR = R * 0.56;
-    const topR = R * 0.62;
-    const bodyBottomY = -R * 0.85;
+    // Round 1 of the head+torso loop: the silhouette test called this a "generic
+    // blob", and the measured reason was proportion, not detail. The old tube was
+    // 1.35R tall by 1.39R wide — a barrel, i.e. as wide as it is tall — sitting on
+    // a separate tapered-sphere torso, so the outline read as a pill with a waist.
+    // A burrito's ONE non-negotiable property is that it is a long tube, so the
+    // mass now runs uncut from the fillings down to the hips (see `dressTorso`,
+    // which replaces the rig's barrel with a continuation of this same tube) and
+    // the tube tapers UP — narrow at the folded base, fat at the stuffed open end,
+    // which is what a real burrito does and what a plain cylinder never reads as.
+    const botR = R * 0.58;
+    const topR = R * 0.64;
+    const bodyBottomY = -R * 1.00;
     const bodyTopY = R * 0.50;
+    this.headTubeBottomY = bodyBottomY;
+    this.headTubeBottomR = botR;
     const bodyH = bodyTopY - bodyBottomY;
     const bulgeAmt = 0.12;
 
@@ -203,19 +219,40 @@ export class BurritoCharacter extends BaseCharacter {
     // Faces +Y (up), not +Z — under this game's steeply pitched-down camera an
     // up-facing opening reads far better than a forward-facing one across every yaw
     // angle, which is exactly what the 4-angle screenshot review checks for.
+    //
+    // The whole opening is CUT ON A SLANT. A tube capped by a level dome is
+    // symmetric in outline, and a symmetric outline is what the silhouette test
+    // called a blob; a slanted cut gives the top an unmistakable diagonal — the
+    // shape of a wrap sliced open — and it costs one group rotation. Everything
+    // below is authored in the opening's own frame (origin at the cut), so the
+    // rim, the mound and every topping tilt together and stay welded to each other.
+    const openEnd = new THREE.Group();
+    openEnd.name = 'burrito_open_end';
+    openEnd.position.y = bodyTopY;
+    openEnd.rotation.z = -0.30;
+    openEnd.rotation.x = 0.10;
+    head.add(openEnd);
+    // The rim is now the tube's WIDEST point (1.02x the wall, plus its own tube
+    // thickness) rather than tucked inside it at 0.92x. Round-1 silhouette read:
+    // the open end has to be the landmark, and a rim narrower than the wall it
+    // caps cannot be seen at all in outline — it just continues the cylinder.
     const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(topR * 0.92, R * 0.065, 10, 28),
+      new THREE.TorusGeometry(topR * 1.02, R * 0.075, 10, 28),
       toonMat({ color: TORTILLA_SHADE, roughness: 0.8 })
     );
     rim.name = 'burrito_rim';
     rim.rotation.x = -Math.PI / 2; // torus hole (default +Z) now points +Y
-    rim.position.y = bodyTopY;
     rim.castShadow = true;
     rim.receiveShadow = true;
-    head.add(rim);
+    openEnd.add(rim);
 
-    const domeCenterY = bodyTopY + R * 0.02;
-    const domeR = topR * 0.85;
+    // Overstuffed on purpose: the mound is now WIDER than the tube that holds it
+    // (1.04x the wall radius) and sits a little higher, so the fillings bulge out
+    // past the rim and break the tube's outline instead of hiding inside it. This
+    // is the whole reason for the open end — an opening you cannot see the edge of
+    // is not a landmark.
+    const domeCenterY = R * 0.05; // openEnd-local: the group already sits at bodyTopY
+    const domeR = topR * 1.04;
     const mound = new THREE.Mesh(
       // A dome cap (theta 0..~0.48π from the +Y pole) rather than a full sphere —
       // just the top bulge, like donut's proud-glaze trick.
@@ -226,7 +263,7 @@ export class BurritoCharacter extends BaseCharacter {
     mound.position.y = domeCenterY;
     mound.castShadow = true;
     mound.receiveShadow = true;
-    head.add(mound);
+    openEnd.add(mound);
 
     // Toppings seated ON the dome — each position solved against the dome's own
     // sphere equation (y = domeCenterY + sqrt(domeR^2 - r^2)) rather than eyeballed,
@@ -253,7 +290,7 @@ export class BurritoCharacter extends BaseCharacter {
       m.rotation.set(0.3, a, 0);
       m.castShadow = true;
       m.receiveShadow = true;
-      head.add(m);
+      openEnd.add(m);
       this.toppings.push(m);
       this.toppingBaseRotZ.push(m.rotation.z);
       return m;
@@ -270,21 +307,33 @@ export class BurritoCharacter extends BaseCharacter {
     // by interleaving all four types round-robin around the full circle, so every
     // angular slice the camera can see has a mix, never a monotone clump. Sizes also
     // trimmed down so adjacent pieces don't overlap into a single blob.
-    const meatGeo = new THREE.SphereGeometry(R * 0.15, 10, 8);
-    const tomatoGeo = new THREE.BoxGeometry(R * 0.14, R * 0.14, R * 0.14);
-    const cheeseGeo = new THREE.ConeGeometry(R * 0.065, R * 0.23, 6);
-    const lettuceGeo = new THREE.CapsuleGeometry(R * 0.04, R * 0.16, 4, 6);
-    const creamGeo = new THREE.SphereGeometry(R * 0.08, 10, 8);
+    // Sized up again in the head+torso round. A character is ~95px tall at shipped
+    // framing, so this whole mound is ~14px across — pieces below ~0.16R simply do
+    // not survive to the screen, and the "packed filling" read has to come from a
+    // few big saturated lumps rather than many small ones.
+    const meatGeo = new THREE.SphereGeometry(R * 0.25, 10, 8);
+    const tomatoGeo = new THREE.BoxGeometry(R * 0.23, R * 0.23, R * 0.23);
+    const cheeseGeo = new THREE.ConeGeometry(R * 0.115, R * 0.34, 6);
+    const lettuceGeo = new THREE.CapsuleGeometry(R * 0.075, R * 0.26, 4, 6);
+    const creamGeo = new THREE.SphereGeometry(R * 0.115, 10, 8);
 
-    const KIND_COUNT = 16; // 4 full trips around the four kinds below
+    // Fewer, bigger pieces. At the size a player sees a character the whole mound is
+    // ~14px across; sixteen pieces at that scale average into one mottled dome, which
+    // is the "reads as ice cream" note. Eight big ones keep a readable lump-and-gap
+    // rhythm. This is the same spatial-frequency lesson the floor learned: detail the
+    // size of the thing carrying it reads as a flat tint.
+    const KIND_COUNT = 8;
     const kinds = ['meat', 'tomato', 'cheese', 'lettuce'] as const;
     const spotsByKind: Record<(typeof kinds)[number], Spot[]> = { meat: [], tomato: [], cheese: [], lettuce: [] };
     for (let i = 0; i < KIND_COUNT; i++) {
       const deg = (i / KIND_COUNT) * 360 + ((i * 13) % 10); // near-even ring, deterministic jitter
-      const rFrac = 0.32 + (((i * 37) % 100) / 100) * 0.46; // 0.32..0.78, deterministic jitter
+      // Widened from 0.32..0.78 to reach the mound's own edge: the pieces that do
+      // the silhouette work are the ones that hang OVER the rim, and the old range
+      // stopped short of it so every topping stayed inside the tube's outline.
+      const rFrac = 0.30 + (((i * 37) % 100) / 100) * 0.66; // 0.30..0.96
       spotsByKind[kinds[i % kinds.length]].push([deg, rFrac]);
     }
-    const creamSpots: Spot[] = [[10, 0.2], [135, 0.22], [250, 0.18], [300, 0.24]];
+    const creamSpots: Spot[] = [[40, 0.18], [230, 0.20]];
 
     spotsByKind.meat.forEach((s, i) => {
       const m = placeOnDome(s, meatGeo, i % 3 === 0 ? meatDarkMat : meatMat, 'burrito_meat');
@@ -302,6 +351,92 @@ export class BurritoCharacter extends BaseCharacter {
     creamSpots.forEach((s) => {
       const m = placeOnDome(s, creamGeo, creamMat, 'burrito_cream');
       m.scale.set(1, 0.5, 1);
+    });
+
+    // ── The fold seam ────────────────────────────────────────────────────────
+    // A rolled tortilla has one overlapping edge running its whole length. Without
+    // it the tube is a machined cylinder, which a blind critic named exactly ("an
+    // untapered straight cylinder... reads as a rolled towel"). Placed off-centre so
+    // it does not sit behind the face, and solved against `wrapRadiusAt` so it hugs
+    // the bulge instead of floating off it at one height and sinking at another.
+    {
+      const seamMat = toonMat({ color: TORTILLA_SHADE, roughness: 0.82 });
+      const seamTheta = -0.85; // to her right of the face, still on the visible front
+      const steps = 7;
+      for (let i = 0; i < steps; i++) {
+        const t = i / (steps - 1);
+        const y = THREE.MathUtils.lerp(bodyBottomY + R * 0.10, bodyTopY - R * 0.06, t);
+        const rr = wrapRadiusAt(y) * 1.012;
+        // Drifts slightly around the tube as it climbs — a wrapped edge spirals, it
+        // does not run dead vertical.
+        const a = seamTheta + t * 0.30;
+        const lump = new THREE.Mesh(
+          new THREE.CapsuleGeometry(R * 0.036, R * 0.14, 4, 8),
+          seamMat
+        );
+        lump.name = 'burrito_fold_seam';
+        lump.position.set(Math.sin(a) * rr, y, Math.cos(a) * rr);
+        lump.rotation.z = 0.06;
+        lump.castShadow = true;
+        head.add(lump);
+      }
+    }
+
+    // ── Foil wrap, cut on the diagonal ────────────────────────────────────────
+    // The single most recognisable burrito image is a tortilla tube half out of its
+    // foil, and the foil's torn edge running DIAGONALLY across the roll. In outline
+    // the diagonal costs nothing on its own (it is a colour break), but the torn
+    // tabs peeling off it do break the silhouette, and in the lit render the
+    // diagonal is what stops a cream cylinder reading as a cream cylinder.
+    //
+    // Built by shearing an open cylinder's TOP ring only: every vertex above the
+    // mid-plane gets `y += FOIL_SLANT * x`, so the wrap keeps a level bottom and a
+    // slanted mouth. Radii are sampled off `wrapRadiusAt`, the same equation the
+    // face and every decal use, plus a real 3% wall clearance so it can never
+    // z-fight with the tortilla underneath.
+    const FOIL_SLANT = 0.38;
+    const foilBotY = bodyBottomY + R * 0.02;
+    // Kept BELOW the mouth (centred at -0.22R, reaching -0.39R at its lowest): the
+    // sheared edge peaks at foilTopY + FOIL_SLANT * maxRadius, so this is the
+    // highest the wrap can go without eating the face.
+    const foilTopY = -R * 0.56;
+    const foilH = foilTopY - foilBotY;
+    const foilGeo = new THREE.CylinderGeometry(
+      wrapRadiusAt(foilTopY) * 1.035,
+      wrapRadiusAt(foilBotY) * 1.035,
+      foilH, 30, 1, true
+    );
+    {
+      const pos = foilGeo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        if (pos.getY(i) > 0) pos.setY(i, pos.getY(i) + FOIL_SLANT * pos.getX(i));
+      }
+      foilGeo.computeVertexNormals();
+    }
+    const headFoilMat = toonMat({ color: FOIL, roughness: 0.22, metalness: 0.55, doubleSide: true });
+    const headFoil = new THREE.Mesh(foilGeo, headFoilMat);
+    headFoil.name = 'burrito_head_foil';
+    headFoil.position.y = (foilTopY + foilBotY) / 2;
+    headFoil.castShadow = true;
+    headFoil.receiveShadow = true;
+    head.add(headFoil);
+
+    // Torn tabs riding the diagonal edge — the silhouette break. Each sits at the
+    // sheared edge height for its own azimuth, so they trace the diagonal instead
+    // of ringing the tube at one level.
+    const tabMat = toonMat({ color: FOIL, roughness: 0.22, metalness: 0.55 });
+    [10, 58, 122, 190, 250, 312].forEach((deg, i) => {
+      const a = THREE.MathUtils.degToRad(deg);
+      const rr = wrapRadiusAt(foilTopY) * 1.035;
+      const x = Math.cos(a) * rr;
+      const z = Math.sin(a) * rr;
+      const h = R * (0.13 + 0.06 * (i % 3));
+      const tab = new THREE.Mesh(new THREE.ConeGeometry(rr * 0.24, h, 3), tabMat);
+      tab.name = 'burrito_foil_tab';
+      tab.position.set(x, foilTopY + FOIL_SLANT * x + h * 0.30, z);
+      tab.rotation.set(Math.sin(a) * 0.6, -a, -Math.cos(a) * 0.6);
+      tab.castShadow = true;
+      head.add(tab);
     });
 
     // ── Face: on the wrap's own front surface, mid-body ───────────────────────
@@ -368,8 +503,12 @@ export class BurritoCharacter extends BaseCharacter {
           cuff.castShadow = true;
           g.add(cuff);
           // The classic twisted-foil wrapper end — a cone tapering to a point.
-          const twist = new THREE.Mesh(new THREE.ConeGeometry(size.radius * 0.62, size.radius * 1.5, 8), foilMatLimb);
-          twist.position.y = -size.radius * 0.95;
+          // Blunted from a 0.62 x 1.5 spike. A pointed cone hanging off a short arm
+          // reads as a stick, not a hand — and the arms are now held clear of the
+          // body (see the stance note) so the hands are actually visible in outline
+          // for the first time, which is what exposed it.
+          const twist = new THREE.Mesh(new THREE.ConeGeometry(size.radius * 0.82, size.radius * 1.02, 8), foilMatLimb);
+          twist.position.y = -size.radius * 0.72;
           twist.name = `${part}_mesh`;
           twist.castShadow = true;
           twist.receiveShadow = true;
@@ -475,135 +614,131 @@ export class BurritoCharacter extends BaseCharacter {
   }
 
   /**
-   * Foil peeled back at the base, a paper wrapper band above it — the torso reads as
-   * a continuation of the wrap rather than a plain costume slab. Sized against the
-   * ACTUAL constructed torso mesh (via its bounding box) rather than hand-copied
-   * layout constants, so this stays correct even if the shared rig's proportions
-   * ever change.
+   * The torso IS the burrito — one uncut tube from the fillings down to the hips.
+   *
+   * ── Why this replaced a decorated barrel ────────────────────────────────────
+   * The cast-wide silhouette test named Burrito as one of three characters that
+   * "collapse into a generic blob", and the measurement says why. The food mass
+   * used to stop dead at the neck: a 1.35R-tall by 1.39R-wide tube (as wide as it
+   * is tall — a barrel, not a tube) perched on the rig's own tapered-sphere torso.
+   * Two round masses with a waist between them is a pill, and a pill is exactly
+   * what the black-on-white render showed.
+   *
+   * A burrito's single non-negotiable property is that it is LONG. Continuing the
+   * head's own tube through the torso gives a ~2.5:1 vertical cylinder — the one
+   * proportion no other character in the cast has — and it costs nothing in body
+   * plan, because the archetype still owns every joint, limb length and stance.
+   * `rig.dressTorso` exists for precisely this ("the strongest characters extend
+   * their food mass down through the BODY").
+   *
+   * The costume layer moves with it. A striped poncho over the tube was actively
+   * fighting the read — five horizontal colour bands across the middle of the one
+   * shape that has to read as continuous — so it is replaced by the thing a
+   * burrito actually wears: a foil sleeve over the lower half, torn open and
+   * flared back at its top edge, with the takeaway paper band around it. That is a
+   * real garment-scale silhouette break (the flare projects past the tube from
+   * every yaw) that also happens to be the character's own identity cue.
+   *
+   * Sizing rules obeyed here:
+   *  - the tube's radius is capped so it stays clear INSIDE the arms
+   *    (`shoulderWidth - armRadius * 1.28`); `bodies.ts` warns that a torso whose
+   *    half-width reaches the shoulder pivot turns the character into a pile of
+   *    overlapping dough balls, and this file has to respect that cap because it
+   *    is deliberately making the torso wider than the rig's own default.
+   *  - the tube's TOP is solved from `metrics.headCentreY` + the head tube's own
+   *    bottom, not from a hardcoded fraction, so an archetype change moves the
+   *    join rather than opening a gap.
    */
   private dressTorso(R: number): void {
-    // Null under the STUB archetype, which has no torso at all (`bodies.ts`).
-    // Burrito is LANKY so it always has one today, but this used to be a non-null
-    // assertion and would be a hard crash — not a missing band — the moment
-    // someone tried STUB for a round, which is a supported one-line experiment.
-    const torsoMesh = this.rig.torsoMesh;
-    if (!torsoMesh) return;
-    torsoMesh.geometry.computeBoundingBox();
-    const tb = torsoMesh.geometry.boundingBox!;
-    const torsoBaseY = torsoMesh.position.y + tb.min.y;
-    const torsoTopY = torsoMesh.position.y + tb.max.y;
-    const torsoMaxX = tb.max.x;
-    const torsoSpan = torsoTopY - torsoBaseY;
+    const m = this.rig.metrics;
+    // STUB has no torso (`bodies.ts`); `rig.dressTorso` no-ops there and every
+    // offset below would collapse onto the hip line, so bail before measuring.
+    if (!m.hasTorso) return;
 
+    const wrapMat = toonMat({ color: TORTILLA, roughness: 0.8 });
     const foilMat = toonMat({ color: FOIL, roughness: 0.25, metalness: 0.5 });
+    const foilShellMat = toonMat({ color: FOIL, roughness: 0.25, metalness: 0.5, doubleSide: true });
     const bandMat = toonMat({ color: WRAP_BAND, roughness: 0.72 });
 
-    // Paper wrapper band, snug around the lower-mid torso.
+    // Where the head's tube ends, in TORSO-LOCAL space (the torso joint's origin
+    // is the hip pivot, so subtract hipY from the world height).
+    const headBottomLocal = m.headCentreY + this.headTubeBottomY - m.hipY;
+    const maxR = Math.max(m.shoulderWidth - m.armRadius * 1.28, R * 0.34);
+    const tubeTopR = Math.min(this.headTubeBottomR, maxR);
+    const tubeBotR = tubeTopR * 0.82;   // the folded, tucked end
+    const yBot = -R * 0.16;             // dips below the hip pivot so no seam shows
+    const yTop = headBottomLocal + R * 0.12; // overlaps up into the head mass
+
+    this.rig.dressTorso(() => {
+      const g = new THREE.Group();
+      g.name = 'burrito_torso_tube';
+
+      // Lathe, wound bottom → top. Getting this backwards inverts the normals and
+      // the mesh renders near-black — the trap that bit six characters at once.
+      const pts: THREE.Vector2[] = [
+        new THREE.Vector2(0, yBot),
+        new THREE.Vector2(tubeBotR * 0.52, yBot + R * 0.045),
+        new THREE.Vector2(tubeBotR * 0.90, yBot + R * 0.14),
+        new THREE.Vector2(tubeBotR, yBot + R * 0.26),
+        new THREE.Vector2(tubeTopR * 0.99, (yBot + yTop) * 0.5),
+        new THREE.Vector2(tubeTopR, yTop),
+      ];
+      const tube = new THREE.Mesh(new THREE.LatheGeometry(pts, 28), wrapMat);
+      tube.name = 'burrito_torso_wrap';
+      tube.castShadow = true;
+      tube.receiveShadow = true;
+      g.add(tube);
+
+      // The tuck: a short diagonal fold across the base, the seam a real burrito
+      // shows where the tortilla is folded under. Cheap, and it stops the bottom
+      // of the tube reading as a machined cylinder.
+      const foldMat = toonMat({ color: TORTILLA_SHADE, roughness: 0.82 });
+      const fold = new THREE.Mesh(
+        new THREE.CapsuleGeometry(tubeBotR * 0.13, tubeBotR * 1.5, 4, 10),
+        foldMat
+      );
+      fold.name = 'burrito_tuck_fold';
+      fold.position.set(0, yBot + R * 0.30, tubeBotR * 0.90);
+      fold.rotation.z = Math.PI * 0.5 - 0.34;
+      fold.castShadow = true;
+      g.add(fold);
+
+      return g;
+    });
+
+    // ── Foil sleeve over the whole torso tube ────────────────────────────────
+    // A first pass ended the sleeve half way up and flared it into a torn collar.
+    // The render killed it: the flare sat exactly where the arms hang, so it read
+    // as a small grey ruffle rather than a silhouette break, and cool grey is the
+    // worst colour to spend at the character's widest point on a cast that owns
+    // the warm half of the wheel. The flare moved up to the HEAD tube's diagonal
+    // edge instead (where nothing occludes it), and down here the foil simply runs
+    // the full height, so head-foil and torso-foil read as one continuous wrap
+    // with one diagonal mouth.
+    const torso = this.rig.joints.torso;
+    const sleeve = new THREE.Mesh(
+      new THREE.CylinderGeometry(tubeTopR * 1.035, tubeBotR * 1.05, yTop - (yBot + R * 0.14), 28, 1, true),
+      foilShellMat
+    );
+    sleeve.name = 'burrito_foil_sleeve';
+    sleeve.position.y = (yTop + yBot + R * 0.14) * 0.5;
+    sleeve.castShadow = true;
+    sleeve.receiveShadow = true;
+    torso.add(sleeve);
+
+    // Takeaway paper band around the sleeve — the one hot, saturated ring on an
+    // otherwise pale character, and the cast owns the warm half of the wheel.
     const band = new THREE.Mesh(
-      new THREE.CylinderGeometry(torsoMaxX * 0.99, torsoMaxX * 1.03, torsoSpan * 0.2, 20, 1, true),
+      new THREE.CylinderGeometry(tubeTopR * 1.10, tubeTopR * 1.12, R * 0.34, 26, 1, true),
       bandMat
     );
     band.name = 'burrito_band';
-    band.position.y = torsoBaseY + torsoSpan * 0.46;
+    band.position.y = yBot + (yTop - yBot) * 0.30;
     band.castShadow = true;
     band.receiveShadow = true;
-    this.rig.joints.torso.add(band);
-
-    // Foil collar hugging the torso base, just below the band. Sized up from round 1
-    // (0.8/0.05 -> 0.98/0.075) — at the original size it was almost entirely hidden
-    // behind the rig's own oversized hands from the front, reading as a thin sliver.
-    const collar = new THREE.Mesh(
-      new THREE.TorusGeometry(torsoMaxX * 0.98, R * 0.075, 8, 20),
-      foilMat
-    );
-    collar.name = 'burrito_foil_collar';
-    collar.rotation.x = Math.PI / 2;
-    collar.position.y = torsoBaseY + torsoSpan * 0.06;
-    collar.castShadow = true;
-    collar.receiveShadow = true;
-    this.rig.joints.torso.add(collar);
-
-    // Peeled foil flaps below the collar — flared outward/down, alternating tilt so
-    // they read as torn foil rather than a uniform skirt. Round 2 defect: evenly
-    // spaced around the full 360 degrees, only one ever pointed anywhere near the
-    // camera at a time, so the front view (the primary read) showed barely a sliver.
-    // +X/+Z here maps to world a=0 -> +X (side), a=90 -> +Z (front) — so the angles
-    // below are deliberately clustered around 90 deg to bias flaps toward the front
-    // hemisphere, with two left at the back for coverage from behind.
-    const flapAngles = [20, 55, 90, 125, 160, 245, 300].map((d) => THREE.MathUtils.degToRad(d));
-    const flapGeo = new THREE.ConeGeometry(torsoMaxX * 0.42, torsoMaxX * 0.85, 3, 1, true);
-    flapAngles.forEach((a, i) => {
-      const pivot = new THREE.Group();
-      pivot.position.set(Math.cos(a) * torsoMaxX * 0.78, torsoBaseY, Math.sin(a) * torsoMaxX * 0.78);
-      pivot.rotation.y = -a;
-      pivot.rotation.x = 0.5 + (i % 2) * 0.22;
-      this.rig.joints.torso.add(pivot);
-
-      const flap = new THREE.Mesh(flapGeo, foilMat);
-      flap.name = 'burrito_foil_flap';
-      flap.position.y = -torsoMaxX * 0.4;
-      flap.castShadow = true;
-      flap.receiveShadow = true;
-      pivot.add(flap);
-    });
-
-    // ── Costume: fringed poncho cape ────────────────────────────────────────
-    // A second independent art-director pass named the total absence of any worn
-    // costume/accessory layer as the cast's single biggest remaining gap. A
-    // striped poncho draped over both shoulders and hanging down the back is a
-    // real garment silhouette break — visible from every yaw angle, not just the
-    // front — on top of the wrapper band and foil already dressing this torso.
-    // Sized and coloured to be visible from EVERY yaw angle, front included — a
-    // first pass wrapped only the back 115 deg (theta 76-284, centred on the
-    // spine) and coloured itself in the wrap's OWN tortilla tones, so it was
-    // invisible in the primary front-on review shot and blended into the body
-    // even from the back. Widened to 270 deg (a 90 deg front gap only, so it
-    // drapes over both shoulders and peeks past the arms from the front) and
-    // recoloured to a genuine contrasting serape palette instead of body tones.
-    const ponchoR = torsoMaxX * 1.26;
-    const ponchoArc = Math.PI * 1.5;
-    const ponchoH = torsoSpan * 0.7;
-    const ponchoCenterY = torsoBaseY + torsoSpan * 0.64;
-    const ponchoStripeColors = [RICE, TOMATO, WRAP_BAND, LETTUCE, BOOT]
-      .map((c) => toonMat({ color: c, roughness: 0.76 }));
-    const rows = ponchoStripeColors.length;
-    const rowH = ponchoH / rows;
-    for (let i = 0; i < rows; i++) {
-      const rowY = ponchoCenterY - ponchoH / 2 + rowH * (i + 0.5);
-      const row = new THREE.Mesh(curvedPanel(ponchoR, ponchoArc, rowH * 1.1, Math.PI), ponchoStripeColors[i]);
-      row.name = 'burrito_poncho_stripe';
-      row.position.y = rowY;
-      row.castShadow = true;
-      row.receiveShadow = true;
-      this.rig.joints.torso.add(row);
-    }
-
-    // Fringe tassels along the poncho's lower hem.
-    const fringeCount = 16;
-    const fringeY = ponchoCenterY - ponchoH / 2;
-    for (let i = 0; i < fringeCount; i++) {
-      const t = i / (fringeCount - 1);
-      const theta = Math.PI + (t - 0.5) * ponchoArc * 0.96;
-      const tassel = new THREE.Mesh(
-        new THREE.ConeGeometry(ponchoR * 0.032, ponchoR * 0.2, 6),
-        ponchoStripeColors[i % ponchoStripeColors.length]
-      );
-      tassel.name = 'burrito_poncho_fringe';
-      tassel.position.set(Math.sin(theta) * ponchoR, fringeY - ponchoR * 0.09, Math.cos(theta) * ponchoR);
-      tassel.rotation.z = Math.PI; // flip so the point hangs down, not up
-      tassel.castShadow = true;
-      this.rig.joints.torso.add(tassel);
-    }
-
-    // Woven cord — ties the poncho closed at the front, the small worn detail
-    // underneath the cape's own silhouette break.
-    const cordMat = toonMat({ color: BOOT, roughness: 0.6 });
-    const cordKnot = new THREE.Mesh(new THREE.TorusGeometry(ponchoR * 0.11, ponchoR * 0.032, 8, 16), cordMat);
-    cordKnot.name = 'burrito_poncho_cord';
-    cordKnot.position.set(0, ponchoCenterY + ponchoH * 0.18, ponchoR * 0.99);
-    cordKnot.castShadow = true;
-    this.rig.joints.torso.add(cordKnot);
+    torso.add(band);
   }
+
 
   protected onUpdate(ctx: AnimContext): void {
     this.rig.animate({

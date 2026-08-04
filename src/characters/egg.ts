@@ -98,6 +98,63 @@ function addShellDecal(parent: THREE.Object3D, theta: number, phi: number, embed
   return g;
 }
 
+/**
+ * ── The hatching split ───────────────────────────────────────────────────────
+ * The shell is cut in two along a sawtooth rim and the top piece is lifted clear,
+ * with the yolk glowing in the gap.
+ *
+ * This replaced a knit cap. The cap was a lilac dome perched off-centre near the
+ * crown, and at the size a player actually sees a character (~95px tall, so this
+ * dome was ~12px) it did not read as a hat — it read as a lump, and it broke the
+ * one thing Egg had going for it in the silhouette test, which is a clean ovoid.
+ * A sawtooth split is the opposite trade: it breaks the outline with a shape that
+ * only an egg has, and it is the character's own ability (`Hatch!`) made visible.
+ *
+ * `phiEdge` is the single source of truth for the rim. Both halves are clamped to
+ * it — the lower shell from below, the cap from above — so the teeth interlock
+ * exactly by construction rather than by two hand-tuned constants that drift.
+ */
+const RIM_PHI = 0.32 * Math.PI;   // how far down the crown the split runs
+// Tooth depth. At the size a player sees a character (~95px tall, so this head is
+// ~55px) a 0.075rad tooth was under two pixels and the rim read as a smooth line.
+// 0.14rad is ~4px of zigzag, which is the minimum that survives.
+const RIM_AMP = 0.14;
+const RIM_TEETH = 7;
+
+/** Triangle wave in [-1, 1] — the sawtooth rim, as a function of azimuth. */
+function rimEdge(theta: number): number {
+  const u = ((theta * RIM_TEETH) / (Math.PI * 2)) % 1;
+  const t = u < 0 ? u + 1 : u;
+  return RIM_PHI + RIM_AMP * (4 * Math.abs(t - 0.5) - 1);
+}
+
+/**
+ * A piece of eggshell: a sphere section pushed through `shellPoint`, with its
+ * boundary snapped to the sawtooth rim. `side` picks which half — `'lower'`
+ * clamps phi UP to the rim (the body of the egg), `'upper'` clamps it DOWN (the
+ * lifted lid).
+ */
+function shellPiece(R: number, side: 'lower' | 'upper', widthSeg = 64): THREE.BufferGeometry {
+  const phiMin = RIM_PHI - RIM_AMP;
+  const phiMax = RIM_PHI + RIM_AMP;
+  const geo = side === 'lower'
+    ? new THREE.SphereGeometry(1, widthSeg, 40, 0, Math.PI * 2, phiMin, Math.PI - phiMin)
+    : new THREE.SphereGeometry(1, widthSeg, 18, 0, Math.PI * 2, 0, phiMax);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).normalize();
+    const phi = Math.acos(THREE.MathUtils.clamp(v.y, -1, 1));
+    const theta = Math.atan2(v.x, v.z);
+    const edge = rimEdge(theta);
+    const newPhi = side === 'lower' ? Math.max(phi, edge) : Math.min(phi, edge);
+    const p = shellPoint(dirFromAngles(theta, newPhi), R);
+    pos.setXYZ(i, p.x, p.y, p.z);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
 /** Path (theta, phi-as-fraction-of-PI) for the crack landmark: a short, bold
  * zigzag on the temple/cheek, well clear of the eyes (theta ±0.50) and mouth
  * (theta 0) so it reads as a distinct scar rather than crowding the face.
@@ -243,17 +300,44 @@ export class EggCharacter extends BaseCharacter {
       // 0.32H would bury the upper arms inside it.
       proportions: bodyType('stub', {
         height: 2.02,
-        headFraction: 0.70,
-        shoulderWidth: 2.02 * 0.30,
+        // ── The arms were INSIDE the shell ──────────────────────────────────
+        // Measured: at the stock STUB `shoulderFraction` of 0.12 the shoulder
+        // pivot lands ~0.59 of the way down the ovoid, where `BOTTOM_BULGE`
+        // widens the shell to 1.15R = 0.83m — while `shoulderWidth` was 0.61m.
+        // Both arms were buried in the food mass, and a blind critic reading the
+        // silhouette reported flatly that this character "has no arms". It is the
+        // project's most-repeated failure (rendering, and invisible) wearing yet
+        // another costume.
+        //
+        // Fixed on both axes: raise the pivot to the ovoid's equator, where the
+        // shell is narrowest above the bulge, and widen the span past the shell
+        // there. `bodies.ts` says this per-character fit is expected on STUB
+        // rather than a failure of the preset — "an egg is 0.96R" is its own
+        // worked example, and that figure is for the equator, not the bulge.
+        shoulderFraction: 0.30,
+        // Settled by measurement, not arithmetic: removing the knit cap took ~0.15m
+        // off, raising the lid put some back, and `shoot.mjs --char egg` prints the
+        // real bounding height. 0.71 lands at ~2.2m, inside the cast's 2.2-2.35.
+        headFraction: 0.71,
+        // 0.44H, not 0.40H: at 0.40 the pivot cleared the shell but the upper arm's
+        // INNER half was still buried, so only the hands showed. The shell is 0.753m
+        // at the raised pivot height and the arm radius is 0.103m, so the span has to
+        // be at least 0.856m for the whole limb to sit outside the food.
+        shoulderWidth: 2.02 * 0.44,
       }),
       // Timid, closed-in — elbows pulled tight against the body, shoulders barely
       // lifted, head ducked and turned away shyly. An art director's second pass
       // named the cast's identical dead-front symmetric pose as a top gap; Egg's
       // read is the cast's most defensive/withdrawn stance, distinct from every
       // other character's more open posture in this file.
+      // Still timid — elbows bent, head ducked and turned away — but the arms now
+      // hang CLEAR of the shell. `restPose` maps `shoulderL` onto the rotation of
+      // the joint at x = -shoulderWidth, and a positive value there swings the arm
+      // ACROSS the body; the old +0.06 / -0.06 pair was closing what little gap
+      // there was. Negative-left / positive-right opens it.
       stance: {
-        shoulderL: 0.06, shoulderR: -0.06,
-        elbowL: -0.95, elbowR: -0.92,
+        shoulderL: -0.22, shoulderR: 0.18,
+        elbowL: -0.80, elbowR: -0.76,
         twist: 0.05, headTilt: 0.16, headTurn: 0.32,
         hipSway: 0.01, lean: 0.10,
       },
@@ -264,23 +348,59 @@ export class EggCharacter extends BaseCharacter {
     const R = this.rig.headRadius;
     const head = this.rig.joints.head;
 
-    // ── Shell: a true ovoid, not a sphere ─────────────────────────────────────
-    const shellGeo = new THREE.SphereGeometry(1, 40, 30);
-    {
-      const posAttr = shellGeo.attributes.position as THREE.BufferAttribute;
-      const dir = new THREE.Vector3();
-      for (let i = 0; i < posAttr.count; i++) {
-        dir.fromBufferAttribute(posAttr, i).normalize();
-        const p = shellPoint(dir, R);
-        posAttr.setXYZ(i, p.x, p.y, p.z);
-      }
-      shellGeo.computeVertexNormals();
-    }
-    const shell = new THREE.Mesh(shellGeo, toonMat({ color: SHELL, roughness: 0.35 }));
+    // ── Shell: a true ovoid, split along a sawtooth hatching rim ─────────────
+    const shell = new THREE.Mesh(shellPiece(R, 'lower'), toonMat({ color: SHELL, roughness: 0.35 }));
     shell.name = 'egg_shell';
     shell.castShadow = true;
     shell.receiveShadow = true;
     head.add(shell);
+
+    // Yolk filling the shell, sitting just inside the wall so it is only visible
+    // through the gap the lifted lid opens. This is the character's only warm,
+    // saturated area and the one that carries the Neon rarity — a pale shell on a
+    // pale limb set had no chroma anywhere, on a cast that owns the warm half of
+    // the wheel.
+    const yolkGeo = new THREE.SphereGeometry(1, 40, 20, 0, Math.PI * 2, 0, Math.PI * 0.58);
+    {
+      const pos = yolkGeo.attributes.position as THREE.BufferAttribute;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).normalize();
+        // Pulled in from 0.965R: at the previous inset the yolk poked through the
+        // shell wall on the side the lid tips toward, which a critic read as a
+        // separate yellow card intersecting the surface.
+        const p = shellPoint(v, R * 0.935);
+        pos.setXYZ(i, p.x, p.y, p.z);
+      }
+      yolkGeo.computeVertexNormals();
+    }
+    const yolkFill = new THREE.Mesh(
+      yolkGeo,
+      glossyMat({ color: YOLK, roughness: 0.18, emissive: YOLK, emissiveIntensity: 0.30 })
+    );
+    yolkFill.name = 'egg_yolk_fill';
+    yolkFill.castShadow = true;
+    yolkFill.receiveShadow = true;
+    head.add(yolkFill);
+
+    // The lid: the same shell surface, same rim, lifted and tipped back so the
+    // teeth separate. Kept small — a lid that lifts too far stops reading as
+    // "cracking" and starts reading as a hat, which is the failure this replaced.
+    const lid = new THREE.Group();
+    lid.name = 'egg_shell_lid';
+    // Lift and tilt are deliberately small. A blind critic reported "a detached
+    // shell shard floating clear of the head at upper-left" — at 0.215R of lift the
+    // far teeth cleared the lower rim entirely and read as debris rather than as a
+    // lid. Half that keeps every tooth overlapping its neighbour while still
+    // opening a visible gap on the near side.
+    lid.position.set(-R * 0.035, R * 0.105, -R * 0.015);
+    lid.rotation.set(-0.07, 0, 0.14);
+    head.add(lid);
+    const lidMesh = new THREE.Mesh(shellPiece(R, 'upper'), toonMat({ color: SHELL, roughness: 0.35 }));
+    lidMesh.name = 'egg_shell_lid_mesh';
+    lidMesh.castShadow = true;
+    lidMesh.receiveShadow = true;
+    lid.add(lidMesh);
 
     // ── Crack: the silhouette landmark ────────────────────────────────────────
     // Bold caramel-brown fracture line — high contrast against the pale shell,
@@ -355,29 +475,6 @@ export class EggCharacter extends BaseCharacter {
       tassel.castShadow = true;
       head.add(tassel);
     }
-
-    // Knit cap — a small dome-cap-plus-pompom perched near the top pole, well
-    // clear of the crack (theta 0.66-0.86), on a curved basis solved the exact
-    // same way as every other decal on this shell (`eggSurface`) so it can't
-    // float off or sink into the surface.
-    const capMat = toonMat({ color: '#CB9ED4', roughness: 0.6 });
-    const capPompomMat = toonMat({ color: YOLK, roughness: 0.55 });
-    const capBasis = eggSurface(-0.30, 0.10 * Math.PI, R);
-    const capR = R * 0.34;
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(capR, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.66), capMat);
-    cap.name = 'egg_cap';
-    cap.position.copy(capBasis.pos).addScaledVector(capBasis.normal, capR * 0.22);
-    cap.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), capBasis.normal);
-    cap.castShadow = true;
-    cap.receiveShadow = true;
-    head.add(cap);
-
-    const capPompom = new THREE.Mesh(new THREE.SphereGeometry(capR * 0.3, 10, 8), capPompomMat);
-    capPompom.name = 'egg_cap_pompom';
-    const capApex = new THREE.Vector3(0, capR, 0).applyQuaternion(cap.quaternion);
-    capPompom.position.copy(cap.position).add(capApex);
-    capPompom.castShadow = true;
-    head.add(capPompom);
 
     // ── Body: dress the torso ─────────────────────────────────────────────────
     // Two independent builder rounds both named the same gap: a themed head on a

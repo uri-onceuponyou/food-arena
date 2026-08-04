@@ -192,7 +192,14 @@ export class LollipopCharacter extends BaseCharacter {
     const discDepth = R * 0.26; // real thickness — a paper-thin disc would vanish to a
                                 // blade edge-on (idle_135/210), same failure Taco solved
     const discBottomY = discCenterY - discOuterR;
-    const stickR = R * 0.19;
+    // Widened from 0.19R. This is the character's FACE PLATE as much as it is a
+    // stick: `rules.ts` puts the eyes on the stick and the mouth on the candy, and
+    // at 0.19R the eyes came out ~3px at the size a player sees a character — a
+    // blind critic read the whole model as "an inanimate prop, not a mascot,"
+    // because the only thing on the huge disc was a small mouth arc. A real
+    // candy-stick mascot's stick is chunky; this is still slender against a disc
+    // more than three times its width, but the face now has room to exist.
+    const stickR = R * 0.285;
     const stickTopY = discCenterY - discOuterR * 0.5; // embeds into the disc's underside
     const stickBottomY = -neckGap * 1.12; // reaches past the neck join, into the torso —
                                            // no visible gap between stick and body
@@ -482,20 +489,20 @@ export class LollipopCharacter extends BaseCharacter {
     // is exactly the personality a genuine wink sells that a symmetric stare can't.
     for (const sx of [-1, 1]) {
       const winking = sx > 0;
-      const ex = sx * stickR * 0.68;
+      const ex = sx * stickR * 0.52;
       const ez = Math.sqrt(Math.max(0, stickR * stickR - ex * ex)) * 0.96;
 
       if (winking) {
         // A thin closed-lid arc instead of an open eyeball — flattened almost to a
         // line, with a slight upward curve so it reads as shut-and-smiling rather
         // than a flat dash.
-        const lid = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.5, 14, 12), eyeMat);
+        const lid = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.44, 14, 12), eyeMat);
         lid.position.set(ex, stickFaceY - stickR * 0.06, ez);
         lid.scale.set(1, 0.16, 0.55);
         lid.castShadow = true;
         face.add(lid);
       } else {
-        const eye = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.5, 14, 12), eyeMat);
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.44, 14, 12), eyeMat);
         eye.position.set(ex, stickFaceY, ez);
         eye.scale.set(1, 1.15, 0.55);
         eye.castShadow = true;

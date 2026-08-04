@@ -451,10 +451,16 @@ export class SoupCharacter extends BaseCharacter {
     // downward tilt in the wall segment.
     const EYE_THETA = 0.46;
     const EYE_H = 0.62;
-    const irisMat = toonMat({ color: '#6B6E72', roughness: 0.3 }); // grey steam-toned, not ink-black
+    // Darkened hard from #6B6E72. `rules.ts` calls for "grey steam-coloured eyes",
+    // and a mid-grey iris on a near-white sclera on a cream bowl is three values
+    // inside half a stop — a blind critic reported that at small size the face
+    // vanishes entirely and the character reads as an empty dish. This is still a
+    // cool grey rather than the cast's ink, so it keeps the steam association, but
+    // it now has the value separation an eye needs to survive at ~10px.
+    const irisMat = toonMat({ color: '#2B3138', roughness: 0.3 });
     const scleraMat = toonMat({ color: '#EDEDEA', roughness: 0.3 });
     const lidMat = toonMat({ color: '#B7BABD', roughness: 0.35 }); // between sclera and iris — a real shaded lid
-    const browMat = toonMat({ color: '#6E7276', roughness: 0.4 }); // groups with the iris as "the eye area"
+    const browMat = toonMat({ color: '#3A4149', roughness: 0.4 }); // groups with the iris as "the eye area"
 
     for (const sx of [-1, 1] as const) {
       const { pos } = bowlSurface(sx * EYE_THETA, EYE_H);
@@ -464,13 +470,13 @@ export class SoupCharacter extends BaseCharacter {
       eye.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
       head.add(eye);
 
-      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.165, 16, 14), scleraMat);
+      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.205, 16, 14), scleraMat);
       white.scale.set(1, 1, 0.55);
       white.castShadow = true;
       eye.add(white);
 
-      const iris = new THREE.Mesh(new THREE.SphereGeometry(R * 0.095, 14, 12), irisMat);
-      iris.position.set(0, 0, R * 0.06);
+      const iris = new THREE.Mesh(new THREE.SphereGeometry(R * 0.125, 14, 12), irisMat);
+      iris.position.set(0, 0, R * 0.075);
       iris.scale.set(1, 1, 0.55);
       iris.castShadow = true;
       eye.add(iris);
@@ -523,7 +529,7 @@ export class SoupCharacter extends BaseCharacter {
     mouth.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthOutward);
     head.add(mouth);
 
-    const mouthMat = toonMat({ color: '#5A5D61', roughness: 0.4 }); // groups with the grey iris/brow, not lip-pink
+    const mouthMat = toonMat({ color: '#343A41', roughness: 0.4 }); // groups with the (now darker) iris/brow, not lip-pink
     const mouthLine = new THREE.Mesh(
       new THREE.TorusGeometry(R * 0.085, R * 0.017, 8, 16, Math.PI * 0.55),
       mouthMat

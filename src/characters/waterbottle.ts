@@ -61,13 +61,25 @@ import { CHARACTER_HEIGHT } from '../units';
 // character's colours tie directly to its own ability VFX (Water Spray, Cap Shot —
 // see `game/rules.ts`), then adds two new tones the prototype palette has no room
 // for: a genuinely dark navy for the matte cap/boots, and a near-white for the label.
-const PLASTIC = PALETTE.water;      // '#BFEFFF' — pale, almost-white icy blue shell
-const WATER = PALETTE.waterCap;     // '#1E90D8' — richer, saturated liquid fill
-const WATER_DEEP = '#155F94';       // shaded underside tone, and the fill-line ring
+// Pushed off `PALETTE.water`'s #BFEFFF. A blind critic measured the problem
+// exactly: at that value and hue the shell sat on top of a light backdrop with
+// near-zero separation, and this character would vanish against a pale arena floor.
+// The shell is still clearly the LIGHTEST thing on the character (that is what sells
+// plastic against liquid) but it now carries real chroma of its own.
+const PLASTIC = '#96DCF4';
+const WATER = '#1478C4';            // richer, saturated liquid fill
+const WATER_DEEP = '#0E5185';       // shaded underside tone, and the fill-line ring
 const CAP = '#123A63';              // dark matte navy — the one place the eye can rest
 const CAP_DARK = '#0B2A49';
-const LABEL = '#F5FBFF';            // wraparound label — near white, breaks up the glass
-const LABEL_TRIM = PALETTE.waterCap; // trim rings on the label, ties back to the cap
+// The label was near-white, which spent the single largest opaque area on this
+// character for no chroma at all. It is now a hot sports-label orange: it is the
+// clearest "this is a drinks bottle" cue available, it is the complement of the
+// blue it sits on (so it is the most salient thing on the character), and the cast
+// owns the warm half of the wheel unopposed since the arena was re-keyed cool.
+// Water Bottle was the only character with no warm area anywhere on it.
+const LABEL = '#F0562A';            // wraparound sports label — saturated warm orange
+const LABEL_PALE = '#FFF6EC';       // the label's own wave stripe, and the smile
+const LABEL_TRIM = '#B8371A';       // trim rings on the label
 
 // ── Costume layer ────────────────────────────────────────────────────────────
 // A fresh independent art director named the missing costume/accessory layer as
@@ -88,59 +100,105 @@ const CARABINER_METAL = '#B6BEC4'; // brushed aluminium — genuinely new metaln
 // own identity shapes. Point order is bottom → top so LatheGeometry's automatic
 // normals face outward correctly.
 const SHELL_PROFILE: Array<[number, number]> = [
-  [0, -0.94],      // rounded bottom, closes to the axis automatically
-  [0.30, -0.92],
-  [0.52, -0.87],
-  [0.58, -0.78],   // main body radius reached
-  [0.58, 0.00],    // straight cylindrical wall
-  [0.55, 0.10],    // shoulder begins easing in
-  [0.38, 0.24],
-  [0.22, 0.36],    // neck reached
-  [0.195, 0.40],
-  [0.195, 0.58],   // straight neck
-  [0.24, 0.61],    // lip flare — where the cap will sit
-  [0.24, 0.64],
-  [0, 0.66],       // closes under the cap; the seam is fully hidden
+  [0, -0.98],      // rounded bottom, closes to the axis automatically
+  [0.30, -0.96],
+  [0.42, -0.91],
+  [0.455, -0.84],  // base heel
+  [0.468, -0.68],
+  [0.428, -0.50],  // ── grip waist: the pinch a drinks bottle has, and the one
+  [0.408, -0.34],  //    landmark a smooth cylinder can never have
+  [0.428, -0.18],
+  [0.468, -0.04],
+  [0.478, 0.16],   // upper body, full width
+  [0.458, 0.28],
+  [0.40, 0.40],    // shoulder
+  [0.27, 0.52],
+  [0.20, 0.60],    // neck reached
+  [0.19, 0.63],
+  [0.19, 0.70],    // straight neck — long, because a long neck is what separates a
+  [0.235, 0.73],   // bottle from a jar
+  [0.235, 0.76],
+  [0, 0.78],       // closes under the cap; the seam is fully hidden
 ];
 
 const CAP_PROFILE: Array<[number, number]> = [
-  [0.24, 0.64],    // matches the shell's lip exactly — no gap, no overlap
-  [0.30, 0.67],    // cap flares out over the lip
-  [0.30, 0.78],    // straight cap wall
-  [0.26, 0.82],    // taper toward the dome
-  [0.13, 0.85],
-  [0, 0.86],       // rounded apex
+  [0.235, 0.76],   // matches the shell's lip exactly — no gap, no overlap
+  [0.295, 0.79],   // cap flares out over the lip
+  [0.295, 0.89],   // straight cap wall
+  [0.255, 0.925],  // taper toward the shoulder of the cap
+  [0.20, 0.945],
+  [0.13, 0.955],
+  [0, 0.962],
 ];
-const CAP_TOP_F = 0.86; // the cap's own apex — a face landmark no longer, just the cap's shape
+/**
+ * The sports flip-spout. This is the one silhouette landmark a bottle can own that
+ * nothing else in the cast has: a small stepped nub standing proud of the cap, with
+ * a hinged lid flipped back off it.
+ *
+ * It matters more here than anywhere else in the cast. A bottle is a smooth vertical
+ * cylinder — inherently the most generic shape on the roster — so identity has to be
+ * bought from the parts that are NOT the cylinder: the cap, the label, the grip
+ * waist, and the water level. This is the cap's share.
+ */
+const SPOUT_PROFILE: Array<[number, number]> = [
+  [0.115, 0.95],
+  [0.115, 1.035],
+  [0.085, 1.06],
+  [0.085, 1.10],
+  [0, 1.115],
+];
 
 // ── Face placement, ON the shell wall ───────────────────────────────────────
 // `EYE_Y`/`MOUTH_Y` are in the SAME absolute-fraction-of-R units as
 // `SHELL_PROFILE`'s own second column, so they can be fed straight into
-// `shellSurface()` below. Both sit in the straight cylindrical wall the profile
-// holds at full body radius from y=-0.78 to y=0.00 — clear of the label (which
-// spans -0.58 to -0.18) above it, and well below the shoulder taper (which
-// begins at 0.10) — the widest, flattest, most camera-facing stretch of the main
-// body wall, at the character's actual "chest/collar" height rather than in open
-// air above its hat.
-const EYE_Y = -0.03;
-const MOUTH_Y = -0.145;
+// `shellSurface()` below. Both sit on the UPPER body — above the grip waist,
+// above the label, and below the shoulder taper — which is the widest,
+// most camera-facing stretch of wall the bottle has.
+const EYE_Y = 0.02;
+const MOUTH_Y = -0.13;
 
 // Water fill, in ABSOLUTE fractions of R first (bottom to the fill line), then
 // re-expressed relative to its own sloshing pivot below.
-const WATER_BOTTOM_F = -0.90;
-const WATER_FILL_F = -0.06;   // sits well above the label, below the shoulder — a
-                               // visibly "mostly full" bottle without hiding the fill
-                               // line behind the label wrap.
-const WATER_RADIUS_F = 0.51;  // inset from the shell's 0.58 body radius — a real wall
-                               // thickness, not a coincident surface (avoids z-fighting
-                               // between the shell and the liquid it contains).
-const WATER_PROFILE_ABS: Array<[number, number]> = [
-  [0, WATER_BOTTOM_F],
-  [0.24, -0.885],
-  [0.42, -0.84],
-  [WATER_RADIUS_F, -0.76],
-  [WATER_RADIUS_F, WATER_FILL_F],
-];
+const WATER_BOTTOM_F = -0.95;
+// Raised hard, and the label dropped to meet it. The water used to be a 0.12R
+// sliver between the label's top edge and the shoulder — the one feature that makes
+// a transparent bottle read as a WATER bottle, and almost none of it reached the
+// screen. There is now a ~0.55R block of saturated blue between the label and the
+// fill line, which is the tallest single colour area on the character.
+const WATER_FILL_F = 0.14;
+/**
+ * The liquid FOLLOWS the shell's own profile at 93%, rather than being a straight
+ * cylinder inside it.
+ *
+ * A cylinder had to be sized against the WAIST — the narrowest point it passes
+ * through — so it was a thin rod rattling around inside the widest parts of the
+ * bottle, and almost none of it was close enough to the wall to survive the
+ * shell's own tint and clearcoat. Following the profile keeps a real, constant
+ * wall thickness (so no z-fighting) while putting the liquid right up against the
+ * glass everywhere, which is the only way the colour actually reaches the screen.
+ */
+const WATER_INSET = 0.93;
+const WATER_PROFILE_ABS: Array<[number, number]> = (() => {
+  const pts: Array<[number, number]> = [[0, WATER_BOTTOM_F]];
+  for (const [r, y] of SHELL_PROFILE) {
+    if (y <= WATER_BOTTOM_F || y >= WATER_FILL_F) continue;
+    pts.push([r * WATER_INSET, y]);
+  }
+  // Close with the shell's interpolated radius exactly at the fill line.
+  let fillR = 0.4;
+  for (let i = 0; i < SHELL_PROFILE.length - 1; i++) {
+    const [r0, y0] = SHELL_PROFILE[i];
+    const [r1, y1] = SHELL_PROFILE[i + 1];
+    if (WATER_FILL_F >= y0 && WATER_FILL_F <= y1) {
+      const t = y1 > y0 ? (WATER_FILL_F - y0) / (y1 - y0) : 0;
+      fillR = (r0 + (r1 - r0) * t) * WATER_INSET;
+      break;
+    }
+  }
+  pts.push([fillR, WATER_FILL_F]);
+  return pts;
+})();
+const WATER_RADIUS_F = WATER_PROFILE_ABS[WATER_PROFILE_ABS.length - 1][0];
 // Pivot at the liquid's own mid-height, not the bottle's origin — rotating around
 // this point makes it visibly TIP like a real half-full container instead of
 // swinging like a pendulum hung from the bottle's base.
@@ -232,9 +290,14 @@ function ridgeRing(y: number, radius: number, thickness: number, mat: THREE.Mate
 // body, domed top) — the hand becomes a literal little bottle cap, the strongest
 // possible "this hand belongs to THIS character" read available, and it moves the
 // dark matte cap material down into the silhouette twice instead of once.
+// Rounded off from a hard-shouldered cap silhouette. A blind critic read the old
+// version as "a stack of three flat discs — a separate pile of bottle caps": the
+// straight 0.96 wall between two hard corners, plus two full-width grip rings, gave
+// the hand three parallel horizontal edges and no mass. It is still recognisably a
+// cap, just a fist-shaped one.
 const MINI_CAP_PROFILE: Array<[number, number]> = [
-  [0, -0.95], [0.35, -0.85], [0.85, -0.55], [0.96, -0.10],
-  [0.96, 0.30], [0.70, 0.62], [0.30, 0.80], [0, 0.90],
+  [0, -0.98], [0.42, -0.88], [0.78, -0.62], [0.94, -0.24],
+  [0.96, 0.08], [0.88, 0.40], [0.62, 0.68], [0.32, 0.86], [0, 0.94],
 ];
 
 function buildCapHand(R: number, mat: THREE.Material, ridgeMat: THREE.Material): THREE.Group {
@@ -245,9 +308,9 @@ function buildCapHand(R: number, mat: THREE.Material, ridgeMat: THREE.Material):
   body.castShadow = true;
   body.receiveShadow = true;
   g.add(body);
-  for (const yF of [-0.08, 0.14]) {
-    g.add(ridgeRing(yF * R, R * 0.99, R * 0.045, ridgeMat));
-  }
+  // One ridge, not two — two parallel rings at a hand's scale are what made this
+  // read as a stack rather than a fist.
+  g.add(ridgeRing(-0.02 * R, R * 0.985, R * 0.05, ridgeMat));
   return g;
 }
 
@@ -327,8 +390,16 @@ export class WaterBottleCharacter extends BaseCharacter {
       // `shoulderWidth` is the STUB hand-fit — the shell wall is 0.58R at shoulder
       // height, so the arms sit just outside it.
       proportions: bodyType('stub', {
-        headFraction: 0.90,
-        shoulderWidth: CHARACTER_HEIGHT * 0.31,
+        // Trimmed from 0.90. The reprofiled bottle is a taller SHAPE for the same R
+        // (longer neck plus a spout above the cap), and at 0.90 it measured 2.45m
+        // against a cast that sits at 2.2-2.35 — `shoot.mjs --char waterbottle`
+        // prints the real bounding height, which is the only way to settle this.
+        headFraction: 0.85,
+        // Pulled in from 0.31H with the shell: the reprofiled body is 0.525R at
+        // shoulder height instead of 0.58R, and `bodies.ts` is explicit that this
+        // number is a per-character fit on STUB rather than a preset value — the
+        // arms have to clear the FOOD, and the food just got narrower.
+        shoulderWidth: CHARACTER_HEIGHT * 0.25,
       }),
       // Upright and eager — chest forward, one arm raised as if reaching/
       // waving. Distinct from every other character's stance in this file's
@@ -410,8 +481,8 @@ export class WaterBottleCharacter extends BaseCharacter {
 
     // Grip ridges — thin rings around the cap wall, a shade darker, breaking up
     // what would otherwise be a featureless matte cylinder.
-    for (const yF of [0.71, 0.80]) {
-      const ridge = new THREE.Mesh(new THREE.TorusGeometry(R * 0.301, R * 0.012, 6, 24), capRidgeMat);
+    for (const yF of [0.815, 0.87]) {
+      const ridge = new THREE.Mesh(new THREE.TorusGeometry(R * 0.296, R * 0.013, 6, 24), capRidgeMat);
       ridge.name = 'waterbottle_cap_ridge';
       ridge.rotation.x = Math.PI / 2;
       ridge.position.y = R * yF;
@@ -419,33 +490,110 @@ export class WaterBottleCharacter extends BaseCharacter {
       head.add(ridge);
     }
 
-    // ── Label wrap ───────────────────────────────────────────────────────────
-    // Wrapped around the main cylindrical section of the body, sitting proud of the
-    // shell so it can never z-fight. This is the primary defence against the
-    // bottle vanishing into a similarly-blue background: a bright, fully opaque
-    // band breaks up the transparent silhouette regardless of what's behind it, and
-    // it doubles as the character's clearest "water bottle" identity cue.
-    const labelR = R * 0.60;
-    const labelTopF = -0.18;
-    const labelBotF = -0.58;
-    const labelH = (labelTopF - labelBotF) * R;
-    const label = new THREE.Mesh(
-      new THREE.CylinderGeometry(labelR, labelR, labelH, 28, 1, true),
-      labelMat
+    // ── Sports flip-spout ────────────────────────────────────────────────────
+    // The cap's share of the identity budget. A bottle body is the most generic
+    // shape on the roster, so the parts that are NOT the cylinder have to carry
+    // the read — and a stepped spout with its lid flipped back is a shape only a
+    // sports bottle has. It is also the character's only upward silhouette break.
+    const spout = new THREE.Mesh(
+      new THREE.LatheGeometry(SPOUT_PROFILE.map(([r, y]) => pt(r, y)), 20),
+      capRidgeMat
     );
+    spout.name = 'waterbottle_spout';
+    spout.castShadow = true;
+    spout.receiveShadow = true;
+    head.add(spout);
+
+    // The flipped-back lid: a small disc hinged off the spout's base, tipped away
+    // from the face. Set as an explicit quaternion rather than composed Euler
+    // angles — a flat disc rotated by rotation.x then rotation.y goes edge-on and
+    // disappears under this game's pitched-down camera, a trap this project has
+    // already paid for once.
+    const lidPivot = new THREE.Group();
+    lidPivot.name = 'waterbottle_spout_lid';
+    lidPivot.position.set(0, R * 0.955, -R * 0.115);
+    lidPivot.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -1.15);
+    head.add(lidPivot);
+
+    const lid = new THREE.Mesh(
+      new THREE.CylinderGeometry(R * 0.125, R * 0.125, R * 0.05, 18),
+      capMat
+    );
+    lid.position.set(0, 0, -R * 0.135);
+    lid.rotation.x = Math.PI / 2;
+    lid.castShadow = true;
+    lid.receiveShadow = true;
+    lidPivot.add(lid);
+
+    const hinge = new THREE.Mesh(
+      new THREE.CylinderGeometry(R * 0.022, R * 0.022, R * 0.11, 8),
+      capRidgeMat
+    );
+    hinge.rotation.z = Math.PI / 2;
+    hinge.castShadow = true;
+    lidPivot.add(hinge);
+
+    // ── Label wrap ───────────────────────────────────────────────────────────
+    // Wrapped around the LOWER body, below the grip waist, sitting proud of the
+    // shell so it can never z-fight. Two jobs: it is the character's clearest
+    // "drinks bottle" cue, and — now that it is a saturated warm orange rather
+    // than near-white — it is the only high-chroma area on an otherwise blue
+    // character, on a cast that owns the warm half of the wheel.
+    //
+    // It MOVED DOWN in the head+torso round. At its old span (-0.58 to -0.18) it
+    // covered the belly of the bottle and left the water a 0.12R sliver; a
+    // translucent bottle whose water you cannot see is just a translucent
+    // cylinder, which is precisely the "generic blob" the silhouette test named.
+    // Built as a lathe following SHELL_PROFILE at 1.025x, not as a straight
+    // cylinder. The body is not a cylinder any more — it has a grip waist — so a
+    // constant-radius band would stand proud at the pinch and sink into the shell
+    // above and below it. Same fix, same reason, as Sushi's nori band.
+    // Kept BELOW the grip waist (which pinches at -0.34 to -0.50): the waist is a
+    // silhouette landmark and a band over it would flatten it back out.
+    const labelTopF = -0.545;
+    const labelBotF = -0.90;
+    const LABEL_OUT = 1.025;
+    const labelPts: THREE.Vector2[] = [];
+    {
+      const steps = 10;
+      for (let i = 0; i <= steps; i++) {
+        const yF = labelBotF + (labelTopF - labelBotF) * (i / steps);
+        labelPts.push(new THREE.Vector2(shellSurface(0, yF).pos.length() === 0
+          ? 0 : Math.hypot(shellSurface(0, yF).pos.x, shellSurface(0, yF).pos.z) * LABEL_OUT, yF * R));
+      }
+    }
+    const label = new THREE.Mesh(new THREE.LatheGeometry(labelPts, 28), labelMat);
     label.name = 'waterbottle_label';
-    label.position.y = ((labelTopF + labelBotF) / 2) * R;
     label.castShadow = true;
     label.receiveShadow = true;
     head.add(label);
 
+    const labelRadiusAt = (yF: number) =>
+      Math.hypot(shellSurface(0, yF).pos.x, shellSurface(0, yF).pos.z) * LABEL_OUT;
+
     for (const yF of [labelBotF, labelTopF]) {
-      const trim = new THREE.Mesh(new THREE.TorusGeometry(labelR, R * 0.013, 6, 28), labelTrimMat);
+      const trim = new THREE.Mesh(new THREE.TorusGeometry(labelRadiusAt(yF), R * 0.016, 6, 28), labelTrimMat);
       trim.name = 'waterbottle_label_trim';
       trim.rotation.x = Math.PI / 2;
       trim.position.y = yF * R;
       trim.userData.noOutline = true;
       head.add(trim);
+    }
+
+    // A pale wave stripe across the label. At ~95px of character a printed logo is
+    // unreadable, but a single light band inside the orange survives as a value
+    // step and stops the label reading as one flat block.
+    {
+      const waveF = labelTopF - 0.10;
+      const wr = labelRadiusAt(waveF) * 1.006;
+      const wave = new THREE.Mesh(
+        new THREE.CylinderGeometry(wr, wr, R * 0.085, 28, 1, true),
+        toonMat({ color: LABEL_PALE, roughness: 0.5 })
+      );
+      wave.name = 'waterbottle_label_wave';
+      wave.position.y = waveF * R;
+      wave.userData.noOutline = true;
+      head.add(wave);
     }
 
     // ── Water fill ───────────────────────────────────────────────────────────
@@ -549,6 +697,9 @@ export class WaterBottleCharacter extends BaseCharacter {
     const EYE_THETA = 0.40;
     const eyeMat = toonMat({ color: ink, roughness: 0.25 });
     const browMat = toonMat({ color: CAP, roughness: 0.4 }); // ties the brows to the cap material
+    // The face sits on the transparent upper body with saturated blue water behind
+    // it, so ink eyes and a pale smile both hold their contrast; the previous
+    // placement had them over pale near-white label, where the smile vanished.
     for (const sx of [-1, 1] as const) {
       const { pos, normal } = shellSurface(sx * EYE_THETA, EYE_Y);
       const outward = new THREE.Vector3(normal.x, 0, normal.z).normalize();
@@ -588,7 +739,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     mouthG.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthOutward);
     head.add(mouthG);
 
-    const smileMat = toonMat({ color: LABEL, roughness: 0.4 });
+    const smileMat = toonMat({ color: LABEL_PALE, roughness: 0.4 });
     const smile = new THREE.Mesh(
       new THREE.TorusGeometry(R * 0.165, R * 0.032, 8, 20, Math.PI * 0.8),
       smileMat
@@ -651,86 +802,90 @@ export class WaterBottleCharacter extends BaseCharacter {
   }
 
   /**
-   * Costume layer: a crossbody sports strap with a hip pouch and a metal
-   * carabiner clip (the silhouette-breaking item), a thin retainer cord around
-   * the shoulder taper, and beaded condensation droplets on the lower shell —
-   * the "cold glass" surface detail the material-fidelity note calls for.
+   * Costume layer: a webbing carry-loop clipped to the bottle's neck, plus beaded
+   * condensation on the clear upper shell.
+   *
+   * ── Why the crossbody strap had to go ───────────────────────────────────────
+   * The previous accessory was a shoulder-to-hip strap with a hip pouch, anchored
+   * to `joints.torso`. That was authored for a body with a torso. Water Bottle is
+   * STUB — `hasTorso` is false, `torsoHeight` is 0, and `joints.torso` is an empty
+   * group sitting AT THE HIPS — so every `torsoH * k` offset was silently
+   * substituting the head radius, and the whole assembly rendered as a green hook
+   * floating beside the bottle's waist at hip height, half inside the shell. This
+   * is the same class of failure as Lollipop's cape hanging off `joints.neck` on a
+   * torso-less body and rendering as a grey sheet through the floor.
+   *
+   * A carry-loop is the accessory this character actually has, it hangs off the
+   * one part of the body that exists on STUB (the food mass itself), and it breaks
+   * the silhouette at the top where nothing occludes it.
    */
   private buildAccessories(
     R: number,
     shellSurface: (theta: number, yF: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }
   ): void {
     const head = this.rig.joints.head;
-    const shoulderWidth = this.rig.metrics.shoulderWidth;
-    // Vertical scale for anything worn on the body. With a torso that is the
-    // torso's own height; on a STUB body (no torso — see `bodies.ts`) the torso
-    // joint has zero extent and every `torsoH * k` offset would pile up on the
-    // hip line, so the head mass's radius stands in for it. The fractions below
-    // are unchanged and land in the same places on the shell.
-    const torsoH = this.rig.hasTorso ? this.rig.metrics.torsoHeight : this.rig.headRadius;
 
     const strapMat = toonMat({ color: STRAP_FABRIC, roughness: 0.72 });
     const trimMat = toonMat({ color: STRAP_TRIM, roughness: 0.68 });
     const metalMat = toonMat({ color: CARABINER_METAL, roughness: 0.28, metalness: 0.75 });
 
-    // `dressTorsoAsBottle` rescales the rig's default torso (0.92/1.10/0.92).
-    // Measuring its REAL half-width off the built mesh (root/hips/torso are all
-    // still at their identity rest transform here — `restPose()` runs at the
-    // very end of the constructor, so a world-space Box3 on `joints.torso`
-    // gives an exact local half-extent) fixed an earlier pass's under-estimate
-    // that buried the whole strap/pouch inside the body — but adding a flat
-    // clearance margin on TOP of that measurement overshot the other way,
-    // pushing the pouch out past the shoulder's own reach so it read as
-    // something HELD rather than WORN. The shoulder joint itself
-    // (`shoulderWidth`) is already the rig's own "clearly outside the torso"
-    // reference every arm uses, so anchoring there — capped against the
-    // measured torso only as a safety floor — keeps the pouch snug against the
-    // body's own side instead of floating at arm's length.
-    // Only meaningful when there IS a torso: on a STUB body `joints.torso` holds
-    // nothing but the arm joints, so its bounding box measures the arms and would
-    // push the pouch out to the fingertips.
-    let torsoHalfW = 0;
-    if (this.rig.hasTorso) {
-      this.rig.joints.root.updateMatrixWorld(true);
-      const torsoBB = new THREE.Box3().setFromObject(this.rig.joints.torso);
-      torsoHalfW = Math.max(Math.abs(torsoBB.min.x), Math.abs(torsoBB.max.x));
-    }
-    const hipX = -Math.max(shoulderWidth * 0.90, torsoHalfW * 0.85);
+    // Collar the loop hangs from — a webbing band around the neck, sized off the
+    // shell's own surface so it grips rather than floats.
+    const collarYF = 0.60;
+    const collarR = Math.hypot(shellSurface(0, collarYF).pos.x, shellSurface(0, collarYF).pos.z);
+    const collar = new THREE.Mesh(
+      new THREE.TorusGeometry(collarR * 1.06, R * 0.032, 8, 22),
+      strapMat
+    );
+    collar.name = 'waterbottle_neck_collar';
+    collar.rotation.x = Math.PI / 2;
+    collar.position.y = collarYF * R;
+    collar.castShadow = true;
+    collar.receiveShadow = true;
+    head.add(collar);
 
-    // Strap + pouch: a SHORT strap from the shoulder straight down to the
-    // waist on the SAME side — not a long diagonal across the whole chest,
-    // which read as a rigid rod in an earlier pass. Placement rule: the rig's
-    // thighs hang straight DOWN from y=0 in this same torso-local frame, so
-    // the pouch/strap low end stays at y ≥ torsoH*0.20 — above the hip line.
-    const pouchW = shoulderWidth * 0.62, pouchH = shoulderWidth * 0.62, pouchD = shoulderWidth * 0.34;
-    const hipPt = new THREE.Vector3(hipX, torsoH * 0.22, shoulderWidth * 0.12);
-    const shoulderPt = new THREE.Vector3(hipX * 0.97, torsoH * 0.80, shoulderWidth * 0.22);
-    const strap = strapArc(shoulderPt, hipPt, new THREE.Vector3(-shoulderWidth * 0.18, 0, shoulderWidth * 0.30), shoulderWidth * 0.065, strapMat);
-    strap.name = 'waterbottle_strap';
-    this.rig.joints.torso.add(strap);
+    // The loop itself: a webbing ring standing out to one side, clearly outside the
+    // bottle's own outline. Asymmetric on purpose — the cast's biggest repeated
+    // note is that every character is a dead-front symmetric statue.
+    const loop = new THREE.Mesh(
+      new THREE.TorusGeometry(R * 0.15, R * 0.030, 8, 20),
+      strapMat
+    );
+    loop.name = 'waterbottle_carry_loop';
+    loop.position.set(-collarR * 1.05 - R * 0.10, collarYF * R + R * 0.05, 0);
+    loop.rotation.y = Math.PI / 2;
+    loop.rotation.z = 0.45;
+    loop.castShadow = true;
+    loop.receiveShadow = true;
+    head.add(loop);
 
-    const pouch = new THREE.Mesh(roundedBox(pouchW, pouchH, pouchD, pouchW * 0.14, 3), trimMat);
-    pouch.name = 'waterbottle_pouch';
-    pouch.position.copy(hipPt);
-    pouch.rotation.set(0.05, 0.15, 0.06);
-    pouch.castShadow = true;
-    pouch.receiveShadow = true;
-    this.rig.joints.torso.add(pouch);
+    const loopTrim = new THREE.Mesh(
+      new THREE.TorusGeometry(R * 0.062, R * 0.026, 8, 16),
+      trimMat
+    );
+    loopTrim.name = 'waterbottle_loop_keeper';
+    loopTrim.position.set(-collarR * 1.02, collarYF * R + R * 0.01, 0);
+    loopTrim.rotation.y = Math.PI / 2;
+    loopTrim.castShadow = true;
+    head.add(loopTrim);
 
-    // Carabiner clip pinning the pouch to the strap — a genuinely new, high-
-    // metalness material this character doesn't otherwise carry anywhere on
-    // its body.
-    const carabiner = new THREE.Mesh(new THREE.TorusGeometry(pouchW * 0.28, pouchW * 0.06, 8, 16, Math.PI * 1.7), metalMat);
+    // Carabiner clipped through the loop — the one genuinely high-metalness
+    // material this character carries anywhere.
+    const carabiner = new THREE.Mesh(
+      new THREE.TorusGeometry(R * 0.085, R * 0.020, 8, 16, Math.PI * 1.7),
+      metalMat
+    );
     carabiner.name = 'waterbottle_carabiner';
-    carabiner.position.copy(hipPt).add(new THREE.Vector3(0, pouchH * 0.55, pouchD * 0.3));
-    carabiner.rotation.z = 0.4;
+    carabiner.position.set(-collarR * 1.05 - R * 0.24, collarYF * R + R * 0.02, 0);
+    carabiner.rotation.y = Math.PI / 2;
+    carabiner.rotation.z = 0.9;
     carabiner.castShadow = true;
-    this.rig.joints.torso.add(carabiner);
+    head.add(carabiner);
 
     // Retainer cord — a thin strap ring around the bottle's own shoulder taper,
     // echoing a sports-cap retainer strap. Built via `shellSurface` so it sits
     // exactly on the shell, never floating or sunk into the taper.
-    const cordYF = 0.20;
+    const cordYF = 0.42;
     const cordPt = shellSurface(0, cordYF).pos;
     const cordRadius = Math.hypot(cordPt.x, cordPt.z) * 1.05;
     const cord = new THREE.Mesh(new THREE.TorusGeometry(cordRadius, R * 0.014, 6, 24), trimMat);
@@ -740,12 +895,15 @@ export class WaterBottleCharacter extends BaseCharacter {
     cord.castShadow = true;
     head.add(cord);
 
-    // Condensation speckles — small beaded droplets on the lower shell, spread
-    // around the circumference clear of the face (EYE_THETA=0.40, MOUTH at 0).
+    // Condensation speckles — small beaded droplets on the CLEAR upper shell
+    // (above the label's -0.545 top edge), spread around the circumference clear
+    // of the face (EYE_THETA=0.40, MOUTH at 0). This is the stretch with water
+    // behind it, which is the only place a bead reads as condensation rather than
+    // as a speck on a printed label.
     const dropMat = flatMat('#EAFFFF', { transparent: true, opacity: 0.45 });
     const dropSpots: Array<[number, number, number]> = [
-      [0.9, -0.55, 0.026], [2.4, -0.42, 0.020], [4.2, -0.30, 0.017],
-      [1.6, -0.68, 0.022], [3.3, -0.50, 0.019], [5.4, -0.60, 0.024],
+      [0.9, -0.28, 0.026], [2.4, -0.12, 0.020], [4.2, 0.04, 0.017],
+      [1.6, -0.34, 0.022], [3.3, -0.20, 0.019], [5.4, 0.12, 0.024],
     ];
     for (const [theta, yF, sF] of dropSpots) {
       const { pos, normal } = shellSurface(theta, yF);

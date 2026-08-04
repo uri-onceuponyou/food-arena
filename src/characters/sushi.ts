@@ -31,9 +31,21 @@ import { CHARACTER_HEIGHT } from '../units';
 
 const RICE = '#FFFDF6';        // warm-white sticky rice, not clinical pure white
 const RICE_SHADE = '#F2ECDD';  // grain shading, a touch deeper
-const NORI = PALETTE.nori;     // #2B2B2B — near-black, the high-contrast landmark
-const SALMON = PALETTE.salmon; // #F4A261
-const SALMON_DARK = '#D97F45'; // fish striation lines
+// Lifted off `PALETTE.nori`'s near-black #2B2B2B to a dark seaweed GREEN. Two
+// measured reasons: (1) at near-black the torso sat about six value stops below
+// the cream head and a blind critic read the character as "a floating head with a
+// hole under it"; (2) real nori is green-black, and a hue there means the dark mass
+// is a material rather than a hole. Still the darkest thing on the character, so it
+// keeps its job as the high-contrast landmark.
+const NORI = '#2F4034';
+const NORI_DEEP = '#1E2B22';   // the maki's own rim, one step darker than the wall
+// Pushed off `PALETTE.salmon` (#F4A261, a pale peach) to a genuinely saturated
+// fish orange. Two reasons, both measured rather than aesthetic: the fish is now
+// the largest single colour area on the character (see the PROFILE rewrite below),
+// and the cast owns the warm half of the colour wheel unopposed since the arena was
+// re-keyed cool — a pale peach spends that position for nothing.
+const SALMON = '#F5854A';
+const SALMON_DARK = '#CE5C2E'; // fish striation lines
 const LIP = '#E8798F';         // puckered-lip coral
 const GOLD = RARITY_COLORS.Legendary; // #F4A300 — rarity accent, used sparingly
 
@@ -162,6 +174,9 @@ function buildLacqueredBoot(fw: number, bodyMat: THREE.Material, soleMat: THREE.
 export class SushiCharacter extends BaseCharacter {
   private rig: ChibiRig;
   private riceGrains: THREE.Object3D[] = [];
+  /** Set by `dressTorsoAsSushi`, read by `buildAccessories` — measured off the rig
+   *  rather than re-derived by hand in two places that could drift apart. */
+  private beltRadius = 0;
 
   constructor(def: CharacterDef) {
     super(def);
@@ -174,11 +189,17 @@ export class SushiCharacter extends BaseCharacter {
         // problem, and it's the character's own landmark shape) but the BODY moves to a
         // glossy nori-charcoal "wetsuit" — echoing the head's own nori band at body
         // scale — with pale rice-white boots inverting the old dark-boot convention.
-        limb: NORI,
-        hand: SALMON,      // contrasting fish-orange mitts, unchanged
-        foot: RICE,        // pale rice-white boots — inverted from the old dark-boot default
-        torso: NORI,
-        limbRoughness: 0.35, // glossy nori sheen, not matte rice
+        // Head+torso round: the limbs move from nori-charcoal to the fish's own
+        // saturated orange, and the boots invert to nori. The previous split put
+        // near-black on the limbs AND the torso AND a band across the head, so the
+        // silhouette test's "generic blob" was partly literal — most of the
+        // character was one dark value. Nothing else in the cast is orange-limbed,
+        // and it keeps this character firmly in the warm half of the wheel.
+        limb: SALMON,
+        hand: RICE,        // rice-ball fists, the head's own other material
+        foot: NORI,        // lacquered near-black boots ground the warm limbs
+        torso: NORI,       // carries the maki cut-face on the chest — see dressTorsoAsSushi
+        limbRoughness: 0.42,
       },
       // A fresh independent art director scored the cast 4/10 and named the body plan
       // directly: every character took the rig's defaults, so the bodies read as
@@ -190,7 +211,31 @@ export class SushiCharacter extends BaseCharacter {
       // middle body suits it; the tweaks below keep Sushi's own "arms held close
       // in, feet planted wide" read on top of the baseline.
       proportions: bodyType('standard', {
-        shoulderWidth: CHARACTER_HEIGHT * 0.16,  // narrow, compact — arms held close in
+        // `headFraction` up from STANDARD's 0.46: the nigiri is now a WIDE, LOW
+        // bed rather than a tall lathe (see the PROFILE rewrite), so it needs more
+        // radius to reach the same top-of-head. Measured with
+        // `shoot.mjs --char sushi`, which prints the real bounding height.
+        headFraction: 0.65,
+        // Two knobs nudged off STANDARD, and only because the head is flat. The rig
+        // sizes the whole character assuming a head ~2R tall; this one is 1.2R, so
+        // ~0.5m of nominal height simply does not exist and Sushi came out the
+        // shortest in the cast by a visible margin. Raising the hip and shoulder
+        // lines puts the same flat head back at ~2.1m top-of-head without inflating
+        // it into a dinner plate. Verified with `shoot.mjs --char sushi`.
+        legFraction: 0.29,
+        torsoFraction: 0.31,
+        // `headMount` is the fix for the trap `rig.ts` documents: the rig places
+        // the head centre `headRadius * headMount` above the torso top ASSUMING a
+        // mass that extends ~±R about its origin. This mass extends ±0.67R, so at
+        // the stock 0.86 the head floated a visible 0.14m clear of the body — which
+        // is exactly what the first render of this rewrite showed. 0.62 seats the
+        // rice bed's underside just inside the torso top.
+        headMount: 0.50,
+        // Out from 0.16H: the nigiri bed is now ~1.5x wider than the shoulders, and
+        // the maki-roll torso (see `dressTorsoAsSushi`) needs radius that
+        // `bodies.ts`'s "torso half-width must stay inside the shoulder pivot" rule
+        // only allows if the pivot moves out with it.
+        shoulderWidth: CHARACTER_HEIGHT * 0.19,
         stanceWidth: CHARACTER_HEIGHT * 0.15,    // low, wide stance
         armRadius: CHARACTER_HEIGHT * 0.068,     // thick
         handRadius: CHARACTER_HEIGHT * 0.088,    // big round rice-fist
@@ -234,15 +279,47 @@ export class SushiCharacter extends BaseCharacter {
     // than continuing its curve. Because both lathes are built from literally the
     // same point at the seam, there is no gap or float to solve for — it's exact by
     // construction, same technique as the bottom-bun/patty stack in hamburger.ts.
+    // ── Head+torso round: the nigiri had the wrong ASPECT, not the wrong detail ──
+    // The silhouette test named Sushi a "generic blob". Measured, the old head was
+    // 1.65R tall by 1.16R wide — TALLER than it was wide — with the salmon a domed
+    // cap on the top third. A dome on a tall round lathe is a mushroom, and that is
+    // exactly what the black-on-white render showed: a stalk with a cap.
+    //
+    // A nigiri is a BED. It is roughly twice as long as it is tall, noticeably
+    // shallower front-to-back than it is wide, and the fish is a flat slab draped
+    // over it that OVERHANGS the rice at the ends. Two changes buy all of that:
+    //
+    //  1. `SX`/`SZ` turn every horizontal slice from a circle into an ellipse —
+    //     stretched across, squashed in depth. Nothing else in the cast is wide-and-
+    //     low (Egg, Lollipop and Donut are tall-and-round, Soup is a bowl, Pizza a
+    //     wedge), so this alone is a silhouette nobody else can be confused with.
+    //  2. The salmon half of the profile now flares OUT sharply at the seam and then
+    //     runs nearly flat, so it reads as a slab with a drooping lip rather than a
+    //     dome continuing the rice's curve.
+    // A rice MOUND, curved all the way up. The straight-walled version (r held at
+    // 1.00 across a third of the height) rendered as a can with a lid — the profile
+    // has to be round for the mass to read as pressed rice rather than a container.
     const PROFILE: Array<[h: number, r: number]> = [
-      [0.00, 0.00], [0.02, 0.66], [0.08, 0.92], [0.16, 1.00],
-      [0.34, 1.00], [0.63, 0.78], // ← SEAM_H
-      [0.70, 0.92], [0.76, 1.06], [0.85, 0.88], [0.93, 0.55], [0.98, 0.22], [1.00, 0.00],
+      [0.00, 0.00], [0.05, 0.55], [0.14, 0.82], [0.30, 0.97],
+      [0.48, 1.00], [0.64, 0.97], [0.78, 0.86], [0.88, 0.60], [0.92, 0.00],
     ];
-    const SEAM_H = 0.63;
-    const SEAM_IDX = PROFILE.findIndex(([h]) => h === SEAM_H);
-    const SCALE_R = R * 0.58;
-    const SCALE_H = R * 1.65;
+    /** Height fraction where the fish slab's underside meets the rice — the top of
+     *  the face zone. Not a lathe seam any more; see the salmon block below. */
+    const SEAM_H = 0.60;
+    const SCALE_R = R * 0.50;
+    const SCALE_H = R * 1.06;
+    /** Horizontal ellipse: a nigiri is long across and shallow front-to-back.
+     *  With the fish's own 1.16x overhang this puts the head at ~1.56:1 wide-to-tall
+     *  — nothing else in the cast is wider than it is tall. */
+    // Widened and flattened again after a blind critic flagged Sushi and Soup as the
+    // one confusable pair on the silhouette sheet — "both a wide flat-topped dome on
+    // a squat two-legged body". Soup's bowl is a truncated cone that OPENS upward
+    // with a concave lip; the way to stop reading like it is to be a genuine slab, so
+    // the head goes to ~1.7:1 wide-to-tall. `headFraction` and `headMount` move with
+    // it to keep top-of-head near the cast's 2.2-2.35 (a flatter head reaches less
+    // far for the same radius — the arithmetic `rig.ts` warns about).
+    const SX = 1.72;
+    const SZ = 0.86;
 
     /** Linear-interpolated radius FRACTION (0-1) at a given height fraction. */
     const radiusFracAt = (hFrac: number): number => {
@@ -258,52 +335,86 @@ export class SushiCharacter extends BaseCharacter {
     };
     /** Actual local Y (metres) for a height fraction — content spans ±SCALE_H/2. */
     const yAt = (hFrac: number): number => hFrac * SCALE_H - SCALE_H / 2;
-    /** Actual local radius (metres) at a height fraction. */
+    /** Actual local radius (metres) at a height fraction, BEFORE the SX/SZ ellipse. */
     const rAt = (hFrac: number): number => radiusFracAt(hFrac) * SCALE_R;
-    /** Exact front-surface Z for a given local X at a height fraction (this is a
-     * lathe, so any horizontal slice is a perfect circle of radius rAt(hFrac)). */
-    const zAt = (x: number, hFrac: number): number => Math.sqrt(Math.max(0, rAt(hFrac) ** 2 - x * x));
+    /**
+     * Exact front-surface Z for a given local X at a height fraction.
+     *
+     * The masses live inside a group scaled (SX, 1, SZ), so a horizontal slice is an
+     * ELLIPSE with semi-axes (rAt*SX, rAt*SZ), not the circle the old one-line
+     * version assumed. Anything placed with the circle equation would have floated
+     * a long way off the front of the widened head — this is the same class of bug
+     * as the "decals floating above / buried inside the surface" failure elsewhere
+     * in the cast, so the surface equation moves with the shape.
+     */
+    const zAt = (x: number, hFrac: number): number => {
+      const a = rAt(hFrac) * SX;
+      const b = rAt(hFrac) * SZ;
+      if (a <= 1e-6) return 0;
+      const t = 1 - (x * x) / (a * a);
+      return t > 0 ? b * Math.sqrt(t) : 0;
+    };
+
+    // The food masses sit inside one scaled group so they can be authored in a plain
+    // circular frame; the face and every decal stay on `head` and use `zAt` above.
+    // Scaling a GROUP rather than each geometry also keeps the eyes, brows and lips
+    // perfectly round instead of stretching them 1.62x with the rice.
+    const mass = new THREE.Group();
+    mass.name = 'sushi_mass';
+    mass.scale.set(SX, 1, SZ);
+    head.add(mass);
 
     const latheGeo = (points: Array<[number, number]>) =>
       new THREE.LatheGeometry(points.map(([h, r]) => new THREE.Vector2(r * SCALE_R, yAt(h))), 32);
 
-    const rice = new THREE.Mesh(latheGeo(PROFILE.slice(0, SEAM_IDX + 1)), riceMat);
+    const rice = new THREE.Mesh(latheGeo(PROFILE), riceMat);
     rice.name = 'sushi_rice';
     rice.castShadow = true;
     rice.receiveShadow = true;
-    head.add(rice);
+    mass.add(rice);
 
-    const salmon = new THREE.Mesh(latheGeo(PROFILE.slice(SEAM_IDX)), salmonMat);
+    // ── The fish: a draped SLAB, not a lathe cap ─────────────────────────────
+    // Two rewrites have now tried making the salmon the top half of the rice's own
+    // lathe, and both produced a hat — first a hard hat, then a beret. The reason
+    // is structural: a surface of revolution sharing the rice's axis can only ever
+    // sit ON the rice, never hang OVER it, because a lathe is single-valued in y.
+    // A real nigiri's fish is a slab laid across the bed whose rounded ENDS
+    // overhang the rice and droop — and that overhang is the whole silhouette.
+    //
+    // So the fish is an ellipsoid, wider than the rice in every horizontal
+    // direction, with its lower half buried in the bed. Its ends stick out past
+    // the rice at the head's two widest points, which is precisely where a
+    // silhouette gains information.
+    const salmonGeo = new THREE.SphereGeometry(1, 32, 20);
+    salmonGeo.scale(SCALE_R * 1.16, SCALE_H * 0.23, SCALE_R * 1.06);
+    const salmon = new THREE.Mesh(salmonGeo, salmonMat);
     salmon.name = 'sushi_salmon';
+    salmon.position.y = yAt(0.80);
+    salmon.rotation.x = 0.09; // a slight forward droop, so it reads as laid on rather than moulded
     salmon.castShadow = true;
     salmon.receiveShadow = true;
-    head.add(salmon);
+    mass.add(salmon);
 
     // ── Nori band ────────────────────────────────────────────────────────────
-    // Wrapped around the rice's constant-radius wall (h 0.16–0.34, where PROFILE
-    // holds flat at r=1.00) — a slightly larger cylinder (1.03x) is therefore
-    // guaranteed proud of the rice everywhere along the band. This near-black band
-    // against warm-white rice is THE landmark.
-    const noriTop = yAt(0.34);
-    const noriBottom = yAt(0.16);
-    const noriRadius = SCALE_R * 1.03;
-    const nori = new THREE.Mesh(
-      new THREE.CylinderGeometry(noriRadius, noriRadius, noriTop - noriBottom, 32, 1, true),
-      noriMat
-    );
+    // A strip of seaweed hugging the base of the rice mound. It has to FOLLOW the
+    // mound's profile, not ring it at a constant radius: the rice is only 0.4-0.8 of
+    // full width down here, so a straight cylinder at 1.03x stood a long way proud
+    // and rendered as a hat brim — which is exactly what the previous render came
+    // back as, a chef's toque with a black brim. Built as a lathe over the same
+    // PROFILE, offset 4%, it reads as a wrapped strip instead.
+    const NORI_H0 = 0.04;
+    const NORI_H1 = 0.20;
+    const noriSteps = 6;
+    const noriPts: THREE.Vector2[] = [];
+    for (let i = 0; i <= noriSteps; i++) {
+      const h = NORI_H0 + (NORI_H1 - NORI_H0) * (i / noriSteps);
+      noriPts.push(new THREE.Vector2(rAt(h) * 1.04, yAt(h)));
+    }
+    const nori = new THREE.Mesh(new THREE.LatheGeometry(noriPts, 32), noriMat);
     nori.name = 'sushi_nori_band';
-    nori.position.y = (noriTop + noriBottom) / 2;
     nori.castShadow = true;
     nori.receiveShadow = true;
-    head.add(nori);
-    for (const y of [noriTop, noriBottom]) {
-      const cap = new THREE.Mesh(new THREE.CircleGeometry(noriRadius, 32), noriMat);
-      cap.name = 'sushi_nori_cap__no_outline';
-      cap.userData.noOutline = true;
-      cap.rotation.x = -Math.PI / 2;
-      cap.position.y = y;
-      head.add(cap);
-    }
+    mass.add(nori);
 
     // Small gold clasp on the band — a quiet Legendary-rarity accent, echoed on the
     // torso belt below so the two read as one costume detail.
@@ -313,54 +424,84 @@ export class SushiCharacter extends BaseCharacter {
     );
     clasp.name = 'sushi_clasp';
     clasp.rotation.x = Math.PI / 2;
-    clasp.position.set(0, (noriTop + noriBottom) / 2, noriRadius + R * 0.01);
+    // `rAt` is the UNSCALED lathe radius; the band's real front face is at
+    // `rAt * SZ` once `mass` squashes it in depth.
+    clasp.position.set(0, yAt(NORI_H1) - R * 0.02, rAt(NORI_H1 - 0.02) * SZ * 1.06);
     clasp.castShadow = true;
     head.add(clasp);
 
-    // Fish striations — short, flush stripes on the salmon's own surface (built from
-    // the same zAt() surface equation, embedded a hair proud rather than sticking out
-    // radially — round 1's radial capsules read as hair spikes and are exactly the
-    // mistake this avoids).
-    const stripeHs: Array<[number, number]> = [[-0.24, 0.73], [0.08, 0.76], [0.30, 0.72]];
-    for (const [sx, hMid] of stripeHs) {
-      const h0 = hMid - 0.04, h1 = hMid + 0.04;
-      const x = sx * SCALE_R * 0.7;
-      const p0 = new THREE.Vector3(x, yAt(h0), zAt(x, h0));
-      const p1 = new THREE.Vector3(x, yAt(h1), zAt(x, h1));
+    // ── Fish striations + glisten, on the SLAB's own surface ─────────────────
+    // These used to be solved against `zAt`, the rice lathe's surface equation.
+    // That is now the wrong surface: the fish is an ellipsoid sitting above the
+    // rice, and at the striations' own heights `rAt` has already closed to zero, so
+    // every stripe would have collapsed onto the head's centre axis and rendered
+    // buried inside the slab. Solved against the slab instead — the recurring
+    // "rendering but invisible" failure, caught by re-deriving rather than
+    // re-tuning.
+    const slabX = SCALE_R * 1.16 * SX;
+    const slabY = SCALE_H * 0.23;
+    const slabZ = SCALE_R * 1.06 * SZ;
+    const slabCY = yAt(0.80);
+    /** Top surface of the fish slab at a horizontal (x, z), or null if outside it. */
+    const slabTop = (x: number, z: number): number | null => {
+      const t = 1 - (x / slabX) ** 2 - (z / slabZ) ** 2;
+      return t > 0 ? slabCY + slabY * Math.sqrt(t) : null;
+    };
+
+    const stripeSpots: Array<[number, number]> = [[-0.46, 0.10], [0.0, -0.06], [0.46, 0.10]];
+    for (const [fx, fz] of stripeSpots) {
+      const x = fx * slabX;
+      const z0 = (fz - 0.30) * slabZ;
+      const z1 = (fz + 0.30) * slabZ;
+      const y0 = slabTop(x, z0);
+      const y1 = slabTop(x, z1);
+      if (y0 === null || y1 === null) continue;
+      const p0 = new THREE.Vector3(x, y0, z0);
+      const p1 = new THREE.Vector3(x, y1, z1);
       const mid = p0.clone().add(p1).multiplyScalar(0.5);
-      const outward = new THREE.Vector3(x, 0, (p0.z + p1.z) / 2).normalize();
-      mid.addScaledVector(outward, R * 0.006);
+      mid.y += R * 0.008;
       const dir = p1.clone().sub(p0).normalize();
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(R * 0.02, p0.distanceTo(p1) * 1.1, R * 0.012), salmonDarkMat);
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(R * 0.045, p0.distanceTo(p1) * 1.05, R * 0.014),
+        salmonDarkMat
+      );
       stripe.position.copy(mid);
       stripe.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
       stripe.userData.noOutline = true;
       head.add(stripe);
     }
 
-    // A wet glisten on the salmon's lip bulge — cheap, sells "wet" against the matte rice.
+    // A wet glisten on the slab — cheap, sells "wet" against the matte rice.
     {
-      const gx = -R * 0.18, gh = 0.76;
-      const glisten = new THREE.Mesh(new THREE.SphereGeometry(R * 0.045, 10, 8), flatMat('#ffffff', { transparent: true, opacity: 0.55 }));
-      glisten.position.set(gx, yAt(gh), zAt(gx, gh) + R * 0.01);
-      glisten.userData.noOutline = true;
-      head.add(glisten);
+      const gx = -slabX * 0.30, gz = slabZ * 0.22;
+      const gy = slabTop(gx, gz);
+      if (gy !== null) {
+        const glisten = new THREE.Mesh(
+          new THREE.SphereGeometry(R * 0.055, 10, 8),
+          flatMat('#ffffff', { transparent: true, opacity: 0.55 })
+        );
+        glisten.position.set(gx, gy + R * 0.008, gz);
+        glisten.scale.set(1.3, 0.35, 1.0);
+        glisten.userData.noOutline = true;
+        head.add(glisten);
+      }
     }
 
     // ── Rice grains ──────────────────────────────────────────────────────────
     // Small stretched capsules seated exactly on the rice's surface via zAt(), kept
-    // on the sides/back so they never compete with the face.
-    // Kept strictly below (h<0.16) or above (h>0.34) the nori band's own h-range —
-    // the band fully wraps the cylinder at a slightly larger radius, so a grain
-    // placed at the rice's own surface WITHIN that range would be swallowed inside
-    // it, invisible.
+    // on the sides/back so they never compete with the face. Kept strictly ABOVE
+    // the nori band's own h-range (0.03-0.20): the band wraps the rice at a
+    // slightly larger radius, so a grain placed at the rice's own surface inside
+    // that range would be swallowed inside it, invisible.
     const grainMat = toonMat({ color: RICE_SHADE, roughness: 0.7 });
     const grainSpots: Array<[number, number, 1 | -1]> = [
-      [0.34, 0.08, -1], [-0.36, 0.06, -1], [0.20, 0.12, -1], [-0.18, 0.05, -1],
-      [0.30, 0.40, -1], [-0.32, 0.38, -1], [0.20, 0.52, -1], [-0.22, 0.55, -1],
+      [0.36, 0.28, -1], [-0.38, 0.26, -1], [0.22, 0.34, -1], [-0.20, 0.24, -1],
+      [0.32, 0.46, -1], [-0.34, 0.44, -1], [0.22, 0.54, -1], [-0.24, 0.56, -1],
     ];
     for (const [gx, gh, side] of grainSpots) {
-      const x = gx * SCALE_R;
+      // x is a fraction of the head's REAL half-width, which the SX ellipse has
+      // already widened — without it every grain lands well inside the surface.
+      const x = gx * SCALE_R * SX;
       const z = side * (zAt(x, gh) + R * 0.006);
       const grain = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.026, R * 0.05, 3, 6), grainMat);
       grain.position.set(x, yAt(gh), z);
@@ -375,7 +516,7 @@ export class SushiCharacter extends BaseCharacter {
     this.buildFace(R, yAt, zAt);
     this.dressTorsoAsSushi();
     this.dressLimbs();
-    this.buildAccessories(R, yAt, zAt);
+    this.buildAccessories(R, yAt, rAt, zAt, SX, SZ);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -411,15 +552,33 @@ export class SushiCharacter extends BaseCharacter {
     const ink = PALETTE.ink;
     const browMat = toonMat({ color: SALMON_DARK, roughness: 0.35 }); // ties the brow to the fish accent colour
 
-    const eyeH = 0.53;
+    // Face zone is the clear rice between the nori band (tops at h 0.26) and the
+    // rice/salmon seam (h 0.62). The eyes spread wider than before because the head
+    // is now 1.62x wider than it is deep — at the old ±0.24R they sat in the middle
+    // third of a wide face and read as a narrow, pinched pair.
+    const eyeH = 0.44;
     const eyeY = yAt(eyeH);
     for (const sx of [-1, 1] as const) {
-      const ex = sx * R * 0.24;
+      const ex = sx * R * 0.34;
       const ez = zAt(ex, eyeH);
       const outward = new THREE.Vector3(ex, 0, ez).normalize();
       const eye = new THREE.Group();
       eye.position.set(ex, eyeY, ez).addScaledVector(outward, R * 0.02);
-      eye.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
+      // Built from an explicit basis rather than `setFromUnitVectors`, which picks
+      // the shortest arc and therefore leaves a different residual ROLL on each
+      // side. Every offset inside the eye group (pupil lift, glint, brow) is then
+      // rotated by a different amount per eye, and a blind critic read the pair as
+      // "one iris jammed into the inner corner — a lazy eye". Pinning local up to
+      // world up makes the two sides exact mirrors.
+      {
+        const fwd = outward.clone();
+        const worldUp = new THREE.Vector3(0, 1, 0);
+        const right = new THREE.Vector3().crossVectors(worldUp, fwd).normalize();
+        const up = new THREE.Vector3().crossVectors(fwd, right).normalize();
+        eye.quaternion.setFromRotationMatrix(
+          new THREE.Matrix4().makeBasis(right, up, fwd)
+        );
+      }
       head.add(eye);
 
       // Sclera — wide white eye, the "slightly startled" read.
@@ -457,7 +616,7 @@ export class SushiCharacter extends BaseCharacter {
 
     // Puckered "o" lips — a plump little ring (tube nearly as thick as its own
     // radius, for a pursed-lip read rather than a thin circle outline).
-    const mouthH = 0.42;
+    const mouthH = 0.30;
     const mouthY = yAt(mouthH);
     const mouthZ = zAt(0, mouthH) + R * 0.01;
     const lipMat = toonMat({ color: LIP, roughness: 0.4 });
@@ -475,129 +634,235 @@ export class SushiCharacter extends BaseCharacter {
   }
 
   /**
-   * Carries the rice + nori motif down onto the body. The rig's default torso is now
-   * recoloured nori-charcoal via the palette (see the constructor's own comment on the
-   * colour-convergence fix), so the belt inverts the head's own rice-with-a-nori-band
-   * motif into a nori-body-with-a-rice-band — a pale rice-white sash wrapping the dark
-   * torso, echoed by the same gold clasp used on the head. There is no `dressTorso`
-   * helper on the shared rig, so the belt is sized against the torso's own known
-   * geometry — `rig.ts` builds the torso as a tapered sphere of half-width
-   * `(shoulderWidth*1.18)*0.5` at its equator, scaled by a taper factor that peaks at
-   * ~1.123 around the vertical midpoint — with a further margin so the belt is
-   * guaranteed to sit proud of that taper rather than sinking into it at any point.
+   * Carries the sushi motif down onto the body — and gives the dark torso the one
+   * thing it was missing.
+   *
+   * The rig's torso is nori-charcoal, which on its own is a large low-chroma mass
+   * on a cast that owns the warm half of the wheel. A MAKI ROLL solves both
+   * problems at once: it is the other universally-recognised sushi form, so the
+   * character reads as "made of sushi" from head to hips rather than "a nigiri
+   * wearing a wetsuit", and its cut face is a bullseye of white rice around a hot
+   * salmon centre inside a dark nori ring — a big, high-contrast, warm graphic
+   * sitting at chest height, which is where the eye goes.
+   *
+   * It is a torso DRESSING, not a body: the archetype still owns every joint,
+   * limb length and stance. The roll's radius is capped at
+   * `shoulderWidth - armRadius * 1.15` for the reason `bodies.ts` spells out — a
+   * torso whose half-width reaches the shoulder pivot swallows the arms and the
+   * character reads as a pile of overlapping dough balls.
    */
   private dressTorsoAsSushi(): void {
     // Read off the rig, never hand-mirrored: body proportions come from an
     // archetype (`bodies.ts`) now, so a hardcoded copy of a rig constant goes
     // silently wrong the moment the archetype changes.
     const m = this.rig.metrics;
-    const tw = m.torsoWidth;
+    if (!m.hasTorso) return;
     const torsoH = m.torsoHeight;
     const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85); // rig.ts's taper at t=0.5
-    const torsoHalfWidthMid = tw * 0.5 * taperMid;
+    const torsoHalfWidthMid = m.torsoWidth * 0.5 * taperMid;
     const beltRadius = torsoHalfWidthMid * 1.18; // safety margin over the tapered waist
+    this.beltRadius = beltRadius;
     const beltY = torsoH * 0.52;
 
-    const riceBeltMat = toonMat({ color: RICE, roughness: 0.6 }); // pale, against the now nori-dark torso
-    const belt = new THREE.Mesh(new THREE.CylinderGeometry(beltRadius, beltRadius, torsoH * 0.22, 24, 1, true), riceBeltMat);
+    const riceMat = toonMat({ color: RICE, roughness: 0.72 });
+    const noriMat = glossyMat({ color: NORI, roughness: 0.3 });
+    const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });
+    const goldMat = toonMat({ color: GOLD, roughness: 0.3, metalness: 0.35 });
+
+    // ── Maki roll, lying on its side with the cut face forward ────────────────
+    // It has to REPLACE the rig's default torso, not sit inside it. A first pass
+    // added the roll alongside the stock tapered barrel (half-width 0.22m) at a
+    // radius of 0.17m and the whole thing rendered perfectly, entirely inside the
+    // barrel, invisible — the project's most-repeated failure, now instance
+    // fifteen. `rig.dressTorso` removes the default mesh, which is the only reason
+    // this is visible at all.
+    const rollR = Math.min(torsoH * 0.46, m.shoulderWidth - m.armRadius * 1.15);
+    const rollD = rollR * 1.34;                 // front-to-back length of the roll
+    // A perfectly round roll of this radius is shorter than the torso it stands in
+    // for, so the group is stretched along its own local Z — which the quaternion
+    // below maps to WORLD Y — until the roll fills the torso's height. The cut face
+    // becomes a slight upright oval, which still reads as maki.
+    const rollStretch = Math.min(1.35, (torsoH * 0.92) / (2 * rollR));
+
+    const roll = new THREE.Group();
+    roll.name = 'sushi_maki_roll';
+    roll.position.set(0, torsoH * 0.5, 0);
+    // Axis along Z so the cut face points at the camera. Set as an explicit
+    // quaternion rather than composed Euler angles — composing rotation.x then
+    // rotation.y on a disc is what has tipped planes edge-on elsewhere in this
+    // project and made them vanish from a top-down camera.
+    roll.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+    roll.scale.set(1, 1, rollStretch);
+
+    this.rig.dressTorso(() => roll);
+
+    const wall = new THREE.Mesh(new THREE.CylinderGeometry(rollR, rollR, rollD, 30, 1, true), noriMat);
+    wall.name = 'sushi_maki_wall';
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    roll.add(wall);
+
+    // Cut face: rice disc, salmon core, nori rim. Built as real discs stepped
+    // forward in Z rather than one textured plane — a flat card would go edge-on
+    // and vanish under this game's pitched-down camera.
+    const faceY = rollD * 0.5;
+    const riceFace = new THREE.Mesh(new THREE.CircleGeometry(rollR * 0.94, 30), riceMat);
+    riceFace.name = 'sushi_maki_rice_face';
+    riceFace.rotation.x = -Math.PI / 2;
+    riceFace.position.y = faceY + 0.001;
+    riceFace.castShadow = true;
+    roll.add(riceFace);
+
+    // Two fillings, not one. A single orange disc centred in a white ring on a dark
+    // ground is a fried egg — a blind critic named exactly that — and the difference
+    // between a fried egg and a maki cut face is that maki has SEVERAL fillings
+    // packed off-centre inside the rice.
+    const core = new THREE.Mesh(new THREE.CylinderGeometry(rollR * 0.30, rollR * 0.30, rollR * 0.10, 22), salmonMat);
+    core.name = 'sushi_maki_core';
+    core.position.set(rollR * 0.20, faceY + rollR * 0.04, -rollR * 0.12);
+    core.castShadow = true;
+    roll.add(core);
+
+    const core2 = new THREE.Mesh(
+      new THREE.CylinderGeometry(rollR * 0.20, rollR * 0.20, rollR * 0.10, 18),
+      toonMat({ color: '#7FBF4A', roughness: 0.45 })   // cucumber
+    );
+    core2.name = 'sushi_maki_core2';
+    core2.position.set(-rollR * 0.30, faceY + rollR * 0.04, rollR * 0.16);
+    core2.castShadow = true;
+    roll.add(core2);
+
+    // Thicker nori rim — on a real cut roll the seaweed is a bold ring, and a bold
+    // ring is also what tells the eye this is a slice of something.
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(rollR * 0.94, rollR * 0.105, 8, 30), toonMat({ color: NORI_DEEP, roughness: 0.4 }));
+    rim.name = 'sushi_maki_rim';
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = faceY;
+    rim.castShadow = true;
+    roll.add(rim);
+
+    // Back cap, so the roll is closed from behind.
+    const backCap = new THREE.Mesh(new THREE.CircleGeometry(rollR, 30), noriMat);
+    backCap.name = 'sushi_maki_back__no_outline';
+    backCap.userData.noOutline = true;
+    backCap.rotation.x = Math.PI / 2;
+    backCap.position.y = -faceY;
+    roll.add(backCap);
+
+    // ── Rice sash across the roll's lower edge ────────────────────────────────
+    const beltH = torsoH * 0.16;
+    const beltLowY = torsoH * 0.16;
+    const belt = new THREE.Mesh(new THREE.CylinderGeometry(beltRadius, beltRadius, beltH, 24, 1, true), riceMat);
     belt.name = 'sushi_torso_belt';
-    belt.position.y = beltY;
+    belt.position.y = beltLowY;
     belt.castShadow = true;
     belt.receiveShadow = true;
     this.rig.joints.torso.add(belt);
-    for (const dy of [-torsoH * 0.11, torsoH * 0.11]) {
-      const cap = new THREE.Mesh(new THREE.CircleGeometry(beltRadius, 24), riceBeltMat);
+    for (const dy of [-beltH * 0.5, beltH * 0.5]) {
+      const cap = new THREE.Mesh(new THREE.CircleGeometry(beltRadius, 24), riceMat);
       cap.name = 'sushi_torso_belt_cap__no_outline';
       cap.userData.noOutline = true;
       cap.rotation.x = -Math.PI / 2;
-      cap.position.y = beltY + dy;
+      cap.position.y = beltLowY + dy;
       this.rig.joints.torso.add(cap);
     }
 
     const clasp = new THREE.Mesh(
-      new THREE.BoxGeometry(beltRadius * 0.32, torsoH * 0.16, beltRadius * 0.14),
-      toonMat({ color: GOLD, roughness: 0.3, metalness: 0.35 })
+      new THREE.BoxGeometry(beltRadius * 0.32, beltH * 0.9, beltRadius * 0.14),
+      goldMat
     );
     clasp.name = 'sushi_torso_clasp';
-    clasp.position.set(0, beltY, beltRadius + torsoH * 0.02);
+    clasp.position.set(0, beltLowY, beltRadius + torsoH * 0.02);
     clasp.castShadow = true;
     this.rig.joints.torso.add(clasp);
   }
 
   /**
-   * Costume layer: a tied hachimaki headband — a thin ribbon wrap sitting in the
-   * clear band of rice between the nori belt and the salmon seam, with a knot and
-   * two trailing tails at the BACK of the head that project past the round rice
-   * silhouette (visible from the side/back angles, unlike anything else on this
-   * character's own face-forward front). A pair of chopsticks tucked into the
-   * torso sash is the smaller detail prop. Also adds a thin glossy highlight
-   * streak along the nori band's own top edge — the "glaze band" specular pop
-   * that sells wet seaweed rather than flat matte charcoal.
+   * Costume layer: a tied hachimaki headband — a thin red ribbon riding the nori
+   * band's upper edge, with a knot and two trailing tails at the BACK of the head
+   * that project past the rice's own profile (a real silhouette break from the
+   * side and back, where nothing else on this character sticks out). A pair of
+   * chopsticks tucked into the torso sash is the smaller detail prop, and a thin
+   * glossy sliver along the nori's top edge sells wet seaweed rather than flat
+   * matte charcoal.
+   *
+   * The ribbon MOVED in the head+torso round. It used to sit at h 0.46, in what
+   * was then clear rice; the wide-low nigiri rewrite turned that stretch into the
+   * only place a face fits, so the ribbon dropped onto the nori band's edge. It is
+   * built inside a group scaled (SX, 1, SZ) so it hugs the same ellipse as the
+   * head, exactly like the nori band it rides on.
    */
-  private buildAccessories(R: number, yAt: (h: number) => number, zAt: (x: number, h: number) => number): void {
+  private buildAccessories(
+    R: number,
+    yAt: (h: number) => number,
+    rAt: (h: number) => number,
+    zAt: (x: number, h: number) => number,
+    SX: number,
+    SZ: number
+  ): void {
     const head = this.rig.joints.head;
     const bandMat = toonMat({ color: HEADBAND, roughness: 0.55 });
     const knotMat = toonMat({ color: HEADBAND_DARK, roughness: 0.55 });
 
-    // Ribbon wrap: a full thin ring at a height that sits in clear rice — above
-    // the nori belt (h 0.16-0.34), below the rice/salmon seam (h=0.63).
-    const bandH = 0.46;
+    const ellipse = new THREE.Group();
+    ellipse.name = 'sushi_ribbon_ellipse';
+    ellipse.scale.set(SX, 1, SZ);
+    head.add(ellipse);
+
+    const bandH = 0.13;
     const bandY = yAt(bandH);
-    const bandR = zAt(0, bandH) * 1.035; // proud of the rice surface at this height
+    const bandR = rAt(bandH) * 1.055; // proud of both the rice and the nori band
     const band = new THREE.Mesh(
-      new THREE.CylinderGeometry(bandR, bandR, R * 0.05, 28, 1, true),
+      new THREE.CylinderGeometry(bandR, bandR, R * 0.05, 30, 1, true),
       bandMat
     );
     band.name = 'sushi_headband';
     band.position.y = bandY;
     band.castShadow = true;
-    head.add(band);
+    ellipse.add(band);
 
-    // Knot + tails at the back (theta = π, i.e. -Z) — the silhouette-breaking
-    // element: two tapered ribbon strips hanging down and flaring outward past
-    // the head's own round profile.
-    const knot = new THREE.Mesh(new THREE.SphereGeometry(R * 0.09, 12, 10), knotMat);
+    // Knot + tails at the BACK (-Z). Positioned against the real ellipse depth
+    // (`zAt` at x=0), not the lathe radius, so they sit against the head rather
+    // than 1.9x too far back.
+    const backZ = -zAt(0, bandH) * 1.06;
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(R * 0.10, 12, 10), knotMat);
     knot.name = 'sushi_headband_knot';
-    knot.position.set(0, bandY, -bandR);
+    knot.position.set(0, bandY, backZ);
     knot.scale.set(1.1, 0.85, 0.8);
     knot.castShadow = true;
     head.add(knot);
 
     for (const sx of [-1, 1] as const) {
-      const tail = new THREE.Mesh(roundedBox(R * 0.11, R * 0.34, R * 0.025, R * 0.02, 2), bandMat);
+      const tail = new THREE.Mesh(roundedBox(R * 0.12, R * 0.40, R * 0.028, R * 0.02, 2), bandMat);
       tail.name = 'sushi_headband_tail';
-      tail.position.set(sx * R * 0.09, bandY - R * 0.20, -bandR - R * 0.05);
+      tail.position.set(sx * R * 0.10, bandY - R * 0.24, backZ - R * 0.05);
       tail.rotation.set(0.25, 0, sx * 0.22);
       tail.castShadow = true;
       tail.receiveShadow = true;
       head.add(tail);
     }
 
-    // Glaze highlight streak along the nori band's own top edge — a bright,
-    // near-mirror sliver that reads as a photographed specular highlight on wet
-    // seaweed rather than the band's own flat glossy colour alone.
-    const noriTop = yAt(0.34);
+    // Glaze highlight streak along the nori band's own top edge.
     const highlightMat = glossyMat({ color: '#E8E8E8', roughness: 0.08 });
     const highlight = new THREE.Mesh(
-      new THREE.TorusGeometry(zAt(0, 0.32) * 1.005, R * 0.012, 6, 28, Math.PI * 0.5),
+      new THREE.TorusGeometry(rAt(0.15) * 1.02, R * 0.012, 6, 28, Math.PI * 0.5),
       highlightMat
     );
     highlight.name = 'sushi_nori_highlight';
     highlight.rotation.x = Math.PI / 2;
     highlight.rotation.z = Math.PI * 0.65; // front-ish arc, the side a key light would catch
-    highlight.position.y = noriTop - R * 0.02;
+    highlight.position.y = yAt(0.15);
     highlight.userData.noOutline = true;
-    head.add(highlight);
+    ellipse.add(highlight);
 
     // Chopsticks — a smaller detail prop, tucked crossed into the torso sash at
-    // the back, sized off the belt geometry `dressTorsoAsSushi` already built.
-    const height = CHARACTER_HEIGHT;
-    const shoulderWidth = height * 0.16;
-    const tw = shoulderWidth * 1.18;
-    const torsoH = height * 0.28;
-    const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85);
-    const beltRadius = tw * 0.5 * taperMid * 1.18;
-    const beltY = torsoH * 0.52;
+    // the back. Sized off `rig.metrics`, never off a hand-copied CHARACTER_HEIGHT
+    // fraction: this file used to re-derive `shoulderWidth * 1.18 * taper` by hand,
+    // which silently goes wrong the moment the archetype or a tweak moves.
+    const m = this.rig.metrics;
+    if (!m.hasTorso) return;
+    const beltRadius = this.beltRadius;
+    const beltY = m.torsoHeight * 0.52;
 
     const chopstickMat = toonMat({ color: CHOPSTICK, roughness: 0.5 });
     for (const sx of [-1, 1] as const) {
@@ -637,10 +902,13 @@ export class SushiCharacter extends BaseCharacter {
    * trimmed down so they read as garment details rather than hardware.
    */
   private dressLimbs(): void {
-    // Nori-charcoal limbs — see the constructor's own comment on the colour-
-    // convergence fix. Rice-white now lives on the boots (inverted from the old
-    // dark-boot default) and the fist stays salmon-orange (unchanged).
-    const noriLimbMat = glossyMat({ color: NORI, roughness: 0.32 });
+    // Head+torso round: the limbs are the FISH's orange, not nori charcoal. The
+    // rig palette above already says so; this block was still overriding it with
+    // near-black, which is why the first render of the rewrite still came back as a
+    // mostly-dark character with an orange hat. Nori is now confined to the maki
+    // torso, the head's base strip and the boots, where it works as an accent
+    // instead of as the character's dominant value.
+    const noriLimbMat = glossyMat({ color: SALMON, roughness: 0.34 });
     const noriAccentMat = glossyMat({ color: NORI, roughness: 0.3 });
     const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });
     const goldMat = toonMat({ color: GOLD, roughness: 0.3, metalness: 0.35 });
@@ -656,8 +924,10 @@ export class SushiCharacter extends BaseCharacter {
           return taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, noriLimbMat);
         case 'handL':
         case 'handR': {
+          // Rice-ball fists: white against the orange forearm, so the hands read as
+          // separate shapes at gameplay distance instead of merging into the limb.
           const side = part === 'handL' ? 1 : -1;
-          return buildRiceFist(size.radius, side, salmonMat, noriAccentMat, goldMat);
+          return buildRiceFist(size.radius, side, riceMat, noriAccentMat, goldMat);
         }
         case 'thighL':
         case 'thighR':
@@ -667,7 +937,9 @@ export class SushiCharacter extends BaseCharacter {
           return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, noriLimbMat);
         case 'footL':
         case 'footR':
-          return buildLacqueredBoot(size.len, riceMat, noriAccentMat, goldMat);
+          // Lacquered nori boots with a rice-pale sole — the dark value moves to
+          // the base of the figure, which is where it grounds rather than muddies.
+          return buildLacqueredBoot(size.len, noriAccentMat, riceMat, goldMat);
         default:
           return null;
       }
