@@ -292,6 +292,42 @@ giant orange "5" was composited over the subject of **every VFX measurement in t
 project**. One agent mis-read it as a character head. Now positioned at 22vh, clearing both
 the top status bar and the character mass.
 
+### MEASURE AGAINST A FROZEN SNAPSHOT — never the shared dev server
+
+Single-owner file sets stop agents CLOBBERING each other. They do nothing about
+**measurement**, because any render of this game includes the whole tree — so every probe
+run against the shared dev server also includes every peer's half-finished edits.
+
+That one cause has now produced, in different costumes:
+- a whole-arena scan silently contaminated by ~40 concurrent saves to `floor.ts`
+- `menu_accept` failing with "execution context destroyed" and being reported as a
+  regression when it was a peer's save reloading the page mid-run
+- one agent's syntax error 500ing the dev server for **every** agent at once
+- probes reading a `window.__stage` that a peer's screen had already disposed
+- an agent chasing a phantom gate failure all the way to `git stash`
+
+**`tools/snapshot.mjs` is the fix. Use it for anything you will report a number from.**
+
+```bash
+node tools/snapshot.mjs --json      # -> {"url": "http://localhost:PORT", ...}
+node tools/arena-scan.mjs --url $URL --out shots/scan/x
+node tools/perf.mjs --mode counts --url $URL
+PREVIEW_BASE=$URL node tools/tmp/menu_accept.mjs
+```
+
+It copies the tree to a temp dir, **symlinks** `node_modules` (no install, no 200MB copy),
+and serves on an OS-assigned free port — so two agents cannot collide on a guessed port
+either. Verified frozen: a file created after the snapshot starts is served by `:5173` and
+is invisible to the snapshot.
+
+**`--swap <path>` is the controlled-A/B mode**: everything frozen except the named file,
+symlinked back to the live tree, so exactly ONE thing moves. That is the experiment that
+proved "desaturate the environment" was the wrong instruction — it needs a stationary
+background to be meaningful at all.
+
+Rule of thumb: **edit on the shared tree, measure on a snapshot.** The shared `:5173` is
+fine for a quick look; it is not fit for anything you will quote.
+
 ### NEVER `git stash` during a multi-agent session
 
 An agent hit an apparently-failing gate, ran `git stash` to test whether it was
