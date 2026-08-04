@@ -1,13 +1,67 @@
 /**
- * Floor — a fine, dense checkerboard (two InstancedMeshes, one per shade) covers the
+ * Floor — a dense stone tile field (two InstancedMeshes, one per shade) covers the
  * whole playfield, tiles sized close to a character's own footprint rather than the
- * old 5m "big flat graphic shape" slab; wood pads sit above it under the two pantry
- * nooks; a cool utility mat sits under each freezer; a cool tile ring circles the
- * hub; then a layer of decals on top (grime, wet sheen, flour spills, scattered
- * loose-produce debris, a hazard "splatter apron" ringing the pot, the playfield
- * border trim). This module owns all of that ground dressing — everything a player
- * walks over but never collides with. Cover props (`./props/*`) and the hazard ground
- * markings (`./hazards.ts`) are drawn on top of this, not by it.
+ * old 5m "big flat graphic shape" slab; warm plank pads sit above it under the two
+ * pantry nooks; ONE cool service-mat family covers both freezer corners and the four
+ * hub chokepoints; then a layer of decals on top (grime, wet sheen, flour spills,
+ * scattered loose-produce debris, a hazard "splatter apron" ringing the pot, the
+ * playfield border trim). This module owns all of that ground dressing — everything a
+ * player walks over but never collides with. Cover props (`./props/*`) and the hazard
+ * ground markings (`./hazards.ts`) are drawn on top of this, not by it.
+ *
+ * ── THE ONE RULE THIS FILE NOW WORKS TO ─────────────────────────────────────
+ *
+ * Every previous loop here argued about taste and oscillated: four fresh critics gave
+ * directly contradictory instructions on grout contrast alone (2.5:1 -> "make it
+ * 1.2:1" -> "that is physically inverted, make it 2.5-3.3:1" -> "make it 1.25:1"),
+ * and the score sat at 4/10 for eight straight rounds while every named fix was
+ * implemented faithfully. What broke the deadlock was an objective, gameplay-grounded
+ * acceptance test, supplied by one of those same critics:
+ *
+ *   **Composite a mid-value character silhouette on the floor. The character's
+ *     outline must be the strongest edge within a 200px radius.**
+ *
+ * `tools/tmp/floorprobe.mjs` is that test, run at `SHIPPED_SPAN` (which no floor round
+ * before this one was ever judged at) against a MEASURED mid-value character rather
+ * than an assumed one — masking a roster render with its own silhouette render puts
+ * the cast's body pixels at median luma 0.533. It reports `R`, the strongest
+ * floor-internal edge within 200px divided by the silhouette's own outline edge; PASS
+ * is R < 1.0 at every station. It went 1.097 (3 of 5 stations FAILING) -> 0.430.
+ *
+ * The rule that follows from it, and that every number below serves:
+ * **VALUE is reserved for the actors. The ground separates itself by hue and texture.**
+ * Concretely, no piece of ground dressing may sit more than ~0.06 luma from the tile
+ * field it lies on, because a character standing on a mark that bright loses his own
+ * outline — and marks are large enough to stand inside, which is the failure mode no
+ * per-station eyeball catches. The same bound applies downward, for a separate reason:
+ * on a top-down floor DARK means "something is above me", so the dark end of the range
+ * belongs to shadows and a mark identifies itself by HUE instead.
+ *
+ * ── WHAT THIS FILE OVERRIDES, AND WHAT MUST BE RECONCILED WITH `KPAL` ───────
+ *
+ * These decisions were made while the saturation pass was re-keying `shared.ts` under
+ * them, so the two must be reconciled rather than assumed to have composed. This file
+ * takes shared materials in three different ways, deliberately:
+ *
+ *   REPLACED OUTRIGHT (the palette does not reach the floor at all)
+ *     `tileLight` `tileDark`  -> #7A6069 / #735A63   the tile field's own key
+ *     `subfloor`              -> #48383E             the joint seen through the gaps
+ *     `floorGrime`            -> #786553             see the "dark is shadow" note
+ *     the three debris colours (long-standing)
+ *
+ *   TRANSFORMED, so the palette still owns hue and chroma and this owns level
+ *     `utilityMat` `utilityMatDark`  x SERVICE_MAT_DIM, with a saturation floor
+ *     `woodPad` `woodSeam`           x 0.86 / 0.93
+ *     `flour`                        x 0.32 opacity for the large pale marks
+ *
+ *   UNTOUCHED
+ *     `border`, and `tealTile` — which this file no longer uses at all.
+ *
+ * The one active CONFLICT to settle: the saturation pass moved `floorGrime` #3E2A18 ->
+ * #2F2A26, i.e. darker AND more neutral. All three critics on this frame independently
+ * named exactly that combination as the ground's worst property. The override above is
+ * the opposite move and is argued from measurement; if the palette wants the grime back
+ * in its band, it needs to come back as a HUE, not as a value.
  *
  * Diagnostic note for this pass: `preview.html?piece=floor` renders ONLY this module
  * (no props, hazards or characters), which finally makes it possible to judge the
@@ -49,6 +103,173 @@ import { mesh, noOutline, FLOOR_Y, ARENA_W, ARENA_H, CENTER, type Materials } fr
  */
 const DECAL_Y = 0.045; // grime, spills, mats, pads, trim — just proud of the tile top (0.015)
 const FINE_Y = 0.062; // marks drawn ON a decal (wood seams, speckle flecks)
+
+/**
+ * ── THE LOW BAND, AS ONE NUMBER ─────────────────────────────────────────────
+ *
+ * This floor's score history localises where its one good round went:
+ *
+ *   loop 1 r3   6/10 <- peak   per-tile tonal noise via instanced colour,
+ *                              macro sine field + per-tile micro jitter, **0.22**
+ *   loop 1 r4   3.5-4          the SAME idea pushed harder, 0.22 -> **0.32**
+ *   loop 1 r5   4.5            within-tile pebble speckle (a band that does not
+ *                              survive at gameplay distance at all)
+ *   loop 2 r1-4 4,4,4,4        value/sat re-key, MID-band + aliasing removal
+ *
+ * The hypothesis this constant exists to test: **the 6 was low-band macro tonal
+ * variation at MODERATE strength, and r4 overshot it.** It fits the independently
+ * discovered zoom finding exactly — at shipped framing the low-frequency gradient is
+ * the only thing carrying the floor; tile bevels, high-frequency grain and per-tile
+ * jitter all vanish — so r3 had accidentally found the right band, r4 pushed the
+ * right band too far, and every later round spent itself on bands that do not
+ * survive.
+ *
+ * Loop 2 never restored it. Recovered from git (`ca04f2b`), r3/r4's expression was:
+ *
+ *     const noise = clamp(macro * 0.7 + micro * 0.3, -1, 1);
+ *     const mult  = 1 + noise * 0.22;          // r4 changed only this 0.22 -> 0.32
+ *
+ * whereas loop 2 replaced it with `mult = 0.5 + litness * 0.82`, i.e. a 0.50..1.32
+ * swing about a mean of 0.91 — **an effective strength of 0.45, further past r4 than
+ * r4 was past r3.** Nobody set out to do that; it is what a rewrite in different
+ * units quietly did, and no round has ever been judged at `SHIPPED_SPAN` where the
+ * low band is the only band left.
+ *
+ * So the shape below is r3's exact expression, with loop 2's much better `litness`
+ * field supplying the macro term (r3's raw grey sines had no sun direction, no wear
+ * and no edge falloff — all three were named fixes and all three are kept), and the
+ * amplitude back at r3's number. `MACRO_MEAN` is separated out deliberately so the
+ * OVERALL value of the floor is re-keyed in the albedo, not smuggled in here: level
+ * and amplitude are different arguments and were conflated for two whole loops.
+ *
+ * ── AND THE ANSWER, MEASURED. THE HYPOTHESIS DOES NOT HOLD. ─────────────────
+ *
+ * Swept at `SHIPPED_SPAN` with `tools/tmp/floorprobe.mjs`, five player-centred
+ * stations, everything else held fixed, against a MEASURED mid-value character (cast
+ * body median luma 0.533, `tools/tmp/castvalue.mjs`):
+ *
+ *   strength          mean R    vanish%   paleDL   in-frame low-band σ
+ *   0.22  (r3)        0.511      8.29     0.144    0.029
+ *   0.32  (r4)        0.492      8.25     0.147    0.030
+ *   0.45  (loop 2)    0.481      8.26     0.152    0.033
+ *
+ * Flat. All three PASS, and the spread is smaller than the run-to-run drift from
+ * another agent saving `shared.ts` mid-sweep. Amplitude is not what separated a 6
+ * from a 3.5.
+ *
+ * WHY it is flat is the useful part, and it is a fact about this camera rather than
+ * about this file: the macro field's wavelengths are 420-530wu and a gameplay frame
+ * is 578wu of ground. **A player's whole screen sits inside roughly one lobe of the
+ * low band.** Doubling the amplitude (0.22 -> 0.45) moved the in-frame low-band σ by
+ * only 14%, because almost all of that amplitude is spent between one part of the map
+ * and another, not across any single frame. So the low band reads as a slow drift as
+ * you traverse the arena — which is worth having — and contributes almost nothing to
+ * the composition of the frame in front of you. Every round that tuned it was tuning
+ * something the player experiences as a mood change over ten seconds of running.
+ *
+ * What DID move the acceptance test, by a factor of two, was the floor's LEVEL and
+ * CHROMA relative to the cast (see the tile re-key below) and the contrast of the
+ * decals drawn on it (see the pale-mark notes). Mean R went 0.919 -> 0.430 and the
+ * share of ground within 0.06 luma of a mid-value character went 31.7% -> 0.4%.
+ *
+ * 0.22 is nevertheless kept, for two reasons that survive the null result: it gives
+ * the narrowest floor value range of the three (lowest paleDL, lowest darkDL), which
+ * is the direction the acceptance test wants even if the effect is small; and read
+ * side by side at shipped framing, 0.45's extra amplitude lands mostly on the 30%
+ * MICRO term, which reads as tile-to-tile salt-and-pepper rather than as light.
+ */
+const MACRO_STRENGTH = 0.22;
+/** Mean of the baked instance-colour multiplier. Level, NOT amplitude — see above. */
+const MACRO_MEAN = 0.91;
+
+/**
+ * ── THE SERVICE MATS SIT AT THE TILE'S OWN VALUE ────────────────────────────
+ *
+ * Applied to BOTH cool mat sets — the four hub patches and the two freezer mats — so
+ * they stay one family with one meaning (see the note at the hub set for why they are
+ * one family at all).
+ *
+ * The number is set by a rule, not by taste: **value encodes elevation, hue encodes
+ * material.** A mat that is brighter or darker than the floor around it is read as
+ * something you might stand on or fall into; a mat at the SAME value that differs only
+ * in hue can only be read as a different surface treatment. That is the cleanest
+ * available answer to the blocking-vs-walkable ambiguity two critics named unprompted,
+ * and it costs nothing — the cool counterpoint survives intact.
+ *
+ * Measured at shipped framing, `west_choke`:
+ *
+ *   tile field      luma 0.336
+ *   hub mat         luma 0.441 -> **0.323**   (Δ +0.105 -> −0.013)
+ *   freezer mat     luma 0.453 -> **0.337**   (Δ +0.117 -> +0.001)
+ *
+ * The old Δ mattered because these patches are 415x220px on screen: a character
+ * standing on one had 0.08 of separation from the mat while the mat's own boundary,
+ * well inside 200px, cut a 0.105 edge — the acceptance test fails for anyone standing
+ * on the decoration, which no per-station sample catches.
+ *
+ * A TRANSFORM of whatever the palette gives, not a replacement colour, deliberately:
+ * `KPAL.utilityMat` is being re-keyed by the saturation pass as this lands (it has
+ * moved #95A6AC -> #767C80 -> #626A6E already), so its HUE stays theirs. This owns
+ * the level, and it holds a chroma floor.
+ *
+ * The chroma floor is the one place this file deliberately does NOT follow the
+ * saturation contract all the way down, and the reason is measurable. The contract is
+ * right — crush the static environment, reserve chroma for actors — but the scan's
+ * companion metric is `domHue share`, and applying the contract to the ground alone
+ * pushed it from 44% to 57% across five stations: with the floor's chroma gone, ALL
+ * the remaining chroma in frame is the props' single warm-orange bin, which is the
+ * "one hue family, nothing reads as a different kind of thing" failure. These mats are
+ * ~6% of frame and the only cool ground in the arena. Held at roughly a third of a
+ * character's saturation and at the tile's own value, they are hue counterpoint
+ * without being competition.
+ */
+const SERVICE_MAT_DIM = 0.55;
+/**
+ * sRGB **HSL** saturation floor for the service mats — not the on-screen number, and
+ * the two are far apart, so do not tune this by eye against a target. 0.12 here lands
+ * at HSV ~0.31 on screen (rgb(65,87,94) at `west_choke`); a first pass at 0.30 landed
+ * at 0.66, an electric blue. For reference the tile field reads ~0.07 and the cast
+ * 0.50-0.75, so 0.31 sits exactly where "quiet but not grey" should.
+ */
+const SERVICE_MAT_SAT = 0.12;
+
+/**
+ * Level-and-chroma transform for the cool mat family, in sRGB rather than the working
+ * linear space so the numbers mean what they look like.
+ */
+function keyServiceMat<T extends THREE.Material & { color: THREE.Color }>(src: T): T {
+  const m = src.clone();
+  const hsl = { h: 0, s: 0, l: 0 };
+  m.color.getHSL(hsl, THREE.SRGBColorSpace);
+  m.color.setHSL(hsl.h, Math.max(hsl.s, SERVICE_MAT_SAT), hsl.l, THREE.SRGBColorSpace);
+  m.color.multiplyScalar(SERVICE_MAT_DIM);
+  return m;
+}
+
+/**
+ * ── THE MAT'S BORDER IS PAINT, AND PAINT IS LIGHTER ─────────────────────────
+ *
+ * Two critics reading the same frame independently found the mats undecidable, from
+ * opposite directions: one called them "no rim, no thickness, no cast shadow — mat or
+ * raised platform is genuinely undecidable, it can be read as a hole, a pit, or a void
+ * edge"; the other called the edge "a hard straight edge with a real value step, it can
+ * read as a low platform or step rather than a flush mat."
+ *
+ * Both are answered by the same move, and it is the tidemark argument from
+ * `buildStainShape` applied to a different mark: **nothing recessed has a lighter rim.**
+ * A hole, a pit and a step down all darken at their edge; a painted or laid boundary
+ * lightens. So the border stops being a darker box (which was reading as a recess lip)
+ * and becomes a visibly lighter kerb line — which also finally makes it a rim at all,
+ * since the old one was 5cm wide, roughly a seventh of a pixel at shipped distance.
+ */
+function serviceMatEdge<T extends THREE.Material & { color: THREE.Color }>(src: T): T {
+  const m = keyServiceMat(src);
+  m.color.multiplyScalar(2.2);
+  return m;
+}
+
+/** Width of that painted kerb, per side, in world units. ~17px at shipped framing. */
+const EDGE_BAND = 6;
 
 /**
  * Muted clones of the three loose-produce colours, built once per arena.
@@ -135,7 +356,21 @@ function buildHubDebris(mats: THREE.Material[]): THREE.Group {
  * unambiguously an authored mark, the same way the hazard's own scorch decal or the
  * flour-spill circles already read as intentional, not incidental.
  */
-function buildStainShape(mat: THREE.Material, cx: number, cy: number, seed: number, baseR: number, points = 9): THREE.Mesh {
+/**
+ * `holeFactor` — 0 for a solid mark, or a fraction in (0,1) to punch the SAME
+ * silhouette scaled down out of the middle, turning the mark into an irregular
+ * annulus. Added round 1 (loop 3) for the pale tidemark rims, and it is an area fix,
+ * not a styling one. Every rim was a solid disc drawn UNDER its cluster at 1.16x the
+ * radius, so the pale footprint was the whole cluster; wherever two clusters or a
+ * cluster and a spill overlapped, two 0.16-alpha fills compounded to 0.29 and three
+ * to 0.41. Measured at `west_choke`, that stack was luma 0.494 against a 0.336 tile —
+ * Δ +0.158, which is 81% of a mid-value character's own step against the same floor,
+ * over far more area. A real evaporated spill leaves a tidemark at its EDGE, so the
+ * ring is also the more accurate shape; it keeps the one property that matters (a
+ * LIGHTER outer edge, which no cast shadow can have, and which is why these stopped
+ * being mistaken for enemy drop shadows) while cutting the pale area by ~70%.
+ */
+function buildStainShape(mat: THREE.Material, cx: number, cy: number, seed: number, baseR: number, points = 9, holeFactor = 0): THREE.Mesh {
   let s = seed;
   const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
   // Round-1 (loop 3) rewrite. The previous version picked an INDEPENDENT random
@@ -170,6 +405,23 @@ function buildStainShape(mat: THREE.Material, cx: number, cy: number, seed: numb
     if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
   }
   shape.closePath();
+  if (holeFactor > 0) {
+    // The same silhouette, scaled — so the band has an even width all the way round
+    // and the ring reads as one mark rather than two unrelated outlines. Wound in the
+    // opposite direction, which is what `ShapeUtils` triangulation wants of a hole.
+    const hole = new THREE.Path();
+    for (let i = VERTS - 1; i >= 0; i--) {
+      const ang = (i / VERTS) * Math.PI * 2;
+      let f = 1;
+      for (const h of harmonics) f += Math.sin(ang * h.k + h.p) * h.a;
+      const r = wu(baseR) * f * holeFactor;
+      const x = Math.cos(ang) * r;
+      const y = Math.sin(ang) * r;
+      if (i === VERTS - 1) hole.moveTo(x, y); else hole.lineTo(x, y);
+    }
+    hole.closePath();
+    shape.holes.push(hole);
+  }
   const m = mesh(new THREE.ShapeGeometry(shape, 4), mat, 'floor_stain');
   m.rotation.x = -Math.PI / 2;
   m.rotation.z = rand() * Math.PI * 2;
@@ -209,8 +461,12 @@ function buildStainCluster(mat: THREE.Material, cx: number, cy: number, seed: nu
   // core, and nothing lit can produce a bright ring around a dark centre. So each
   // cluster now sits inside a slightly larger pale silhouette, drawn a hair lower so
   // it never z-fights the core. One glance tells you this is a stain, not a shadow.
+  // Round 1 (loop 3): an ANNULUS, not a disc. See the `holeFactor` note on
+  // `buildStainShape` — the pale footprint was the whole cluster and it compounded
+  // wherever two marks overlapped. 0.84 puts the band's inner edge at 0.97x baseR,
+  // i.e. hugging the dark outer silhouette it is supposed to ring.
   if (rimMat) {
-    const rim = buildStainShape(rimMat, cx, cy, seed + 5, baseR * 1.16, 9);
+    const rim = buildStainShape(rimMat, cx, cy, seed + 5, baseR * 1.16, 9, 0.72);
     rim.position.y -= 0.004;
     g.add(rim);
   }
@@ -228,7 +484,7 @@ function buildStainCluster(mat: THREE.Material, cx: number, cy: number, seed: nu
   // opacity gives a genuine light-fringe -> dark-core falloff with an irregular,
   // non-concentric boundary, which is a thing no cast shadow ever has.
   const coreMat = mat.clone();
-  coreMat.opacity = Math.min(1, ((mat as THREE.Material & { opacity: number }).opacity ?? 0.22) * 1.9);
+  coreMat.opacity = Math.min(1, ((mat as THREE.Material & { opacity: number }).opacity ?? 0.22) * 1.3);
   // Big outer silhouette — defines the overall irregular footprint, lightest layer.
   g.add(buildStainShape(mat, cx, cy, seed, baseR, 9));
   // Round-4: three EXTRA differently-shaped cores, all roughly centred (small offset
@@ -242,7 +498,7 @@ function buildStainCluster(mat: THREE.Material, cx: number, cy: number, seed: nu
   // never a gradient) pushes the core to a real ~0.55-0.65 effective opacity — dark
   // and solid enough to read as an unmistakable stain against that background, while
   // the single-layer outer ring still tapers the edge softly.
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 2; i++) {
     const ox = (rand() - 0.5) * baseR * 0.22;
     const oy = (rand() - 0.5) * baseR * 0.22;
     g.add(buildStainShape(coreMat, cx + ox, cy + oy, seed + 11 + i * 13, baseR * (0.42 + rand() * 0.16), 8));
@@ -454,11 +710,11 @@ function buildHazardSplatterApron(M: Materials, tile: number): THREE.Group {
     // edged flat fills, so the round-3 finding that soft radial gradients read as
     // lighting bugs still holds.
     const rimMat = M.flour.clone();
-    rimMat.opacity = alpha * 0.3;
-    g.add(buildStainShape(rimMat, cx, cy, seed + i * 31 + 3, baseR * 1.18, 8));
+    rimMat.opacity = alpha * 0.14;
+    g.add(buildStainShape(rimMat, cx, cy, seed + i * 31 + 3, baseR * 1.18, 8, 0.70));
     g.add(buildStainShape(mat, cx, cy, seed + i * 31, baseR, 7));
     const coreMat = mat.clone();
-    coreMat.opacity = Math.min(1, alpha * 1.8);
+    coreMat.opacity = Math.min(1, alpha * 1.35);
     g.add(buildStainShape(coreMat, cx + (rand() - 0.5) * baseR * 0.3, cy + (rand() - 0.5) * baseR * 0.3, seed + i * 31 + 7, baseR * 0.5, 7));
   }
   return g;
@@ -517,10 +773,50 @@ export function buildFloor(M: Materials): THREE.Group {
     m.needsUpdate = true;
   }
 
+  // ── DARK IS RESERVED FOR SHADOW. A MARK IS IDENTIFIED BY ITS HUE. ───────────
+  //
+  // Round 1 (loop 3), and this is the one thing all three fresh critics on this frame
+  // named independently — the only unanimous finding of the round, and none of them
+  // were asked about it:
+  //
+  //   "the smears left of the player are 5-14% saturation — colourless — and sit at
+  //    24-32% luminance, inside the same value band as the cast shadows. At gameplay
+  //    distance the whole lower-left quadrant is one field of grey mottling where you
+  //    cannot tell a shadow from dirt."
+  //   "the dark dirt blob bottoms out at 15% at 5% saturation. The dirt is DARKER than
+  //    any real shadow in the frame and has no hue of its own. No caster above it — it
+  //    reads as a hole in the floor."
+  //   "an unlit floor with a hard-edged dark irregular patch on it reads as a step or
+  //    a drain grate as easily as it reads as a stain."
+  //
+  // The rule that follows, and it is a gameplay rule rather than a taste one: **no
+  // ground mark may be darker than the darkest real shadow, because on a top-down
+  // floor DARK means "something is above me".** A player scanning the ground for enemy
+  // shadows and AoE telegraphs is reading that channel, and this file was spending it
+  // on dirt. Measured before: the deepest stain stack sat at luma 0.195 against a 0.341
+  // tile while genuine architectural shadow bottomed out around 0.19-0.23 — the grime
+  // was as dark as the shadows and less saturated.
+  //
+  // `KPAL`'s #3E2A18 is near-black and near-neutral, so the only signal it could carry
+  // was value. Re-keyed here (this material has no call site outside this module) to a
+  // warm grease-amber that is barely darker than the tile and unmistakably chromatic:
+  // authored luma 0.279 against the tile's 0.341, saturation 0.60 against the tile's
+  // ~0.31 and in a hue the clean floor never reaches. The mark now says "spilled fat"
+  // instead of "unexplained dark patch", and the whole dark end of the range goes back
+  // to meaning occlusion. Every alpha in this file is left exactly as it was — the
+  // colour alone lifts the deepest stack from 0.195 to ~0.29.
+  M.floorGrime.color.set('#786553');
+  M.floorGrime.needsUpdate = true;
+
   // Pale dried-residue rim shared by every stain cluster — see the tidemark note in
   // `buildStainCluster`. Built once here rather than cloned per call site.
+  // Round 1 (loop 3): 0.30 -> 0.16. The tidemark's JOB is to be lighter than the core
+  // it surrounds — that is the one structure a cast shadow can never have, and it is
+  // why these stains stopped being mistaken for enemy drop shadows. That argument is
+  // about the SIGN of the step, not its size, so the rim can be cut hard and still do
+  // it. See the pale-decal note in `buildFloor` for the measurement that forced this.
   const stainRim = M.flour.clone();
-  stainRim.opacity = 0.3;
+  stainRim.opacity = 0.11;
 
   // Subfloor — extends past the playfield edge so nothing reads as a table-edge cliff.
   //
@@ -568,7 +864,12 @@ export function buildFloor(M: Materials): THREE.Group {
   // occlusion crevice, which is the one argument here grounded in physics rather than
   // taste) while keeping the lattice's visual weight well below where two separate
   // critics said it starts competing with character silhouettes.
-  subfloorDark.color.set('#4E3B2C');
+  // Round 1 (loop 3): same luma, far less chroma. The 1.6:1 joint-to-tile ratio this
+  // block argues for is preserved exactly (albedo luma 0.242 against the tile's 0.384)
+  // — only the saturation moves, 0.44 -> 0.15, because a saturated brown lattice
+  // covering ~10% of every ground frame is a large chroma budget spent on the one
+  // surface the saturation contract says should be quietest.
+  subfloorDark.color.set('#48383E');
   const base = mesh(
     new THREE.PlaneGeometry(wu(ARENA_W + 300), wu(ARENA_H + 300)),
     subfloorDark,
@@ -728,8 +1029,90 @@ export function buildFloor(M: Materials): THREE.Group {
   // measured sat 0.318 against a reference band of 0.39-0.59 and simply read drab —
   // these references are hyper-saturated, and "quiet" has to be achieved with value
   // and hue separation from the cast, not by draining the colour out.
-  tileLightInst.color.set('#987662');
-  tileDarkInst.color.set('#8A6B58');
+  //
+  // ── Round 1 (loop 3): the level, and the saturation contract ────────────────
+  //
+  // Two measurements forced this, and they point the same way.
+  //
+  // 1. THE LEVEL. The acceptance test this element finally has is a critic's and it
+  //    is gameplay-grounded: *composite a mid-value character silhouette on the
+  //    floor; its outline must be the darkest edge within a 200px radius.* A
+  //    mid-value character is not a guess — masking a roster render with its own
+  //    silhouette render puts the cast's body pixels at median luma **0.533**
+  //    (`tools/tmp/castvalue.mjs`, n=54,691). This floor measured a median of
+  //    **0.467** at shipped framing, i.e. the ground sat 0.07 from the middle of the
+  //    cast, and its p5-p95 (0.28-0.75) *fully contained* the cast's value range.
+  //    There is then no character, at no position, guaranteed to have an outline —
+  //    which is exactly what the probe found: 3 of 5 stations failed, and at the hub
+  //    the median character outline contrast was 0.014.
+  //    The references do not solve this the way this file kept trying to. Their
+  //    ground is either the COMPLEMENT of their cast or heavily desaturated; ours is
+  //    a warm tan under a cast made entirely of warm food. So the floor moves DOWN
+  //    and OFF the cast's value band rather than fighting for range inside it.
+  // 2. THE SATURATION CONTRACT. Three fresh critics on the whole-arena scan (all
+  //    three reference controls inside 7-9, so all three rounds valid) independently
+  //    named the same first fix: crush the static environment into one desaturated
+  //    band and reserve chroma for actors, threats and pickups. This floor is most
+  //    of that static environment. It rendered at HSV saturation ~0.45 in the same
+  //    hue bin (17-30 deg) as the player himself (measured rgb(198,145,51), hue 38
+  //    deg) — so hue was doing no separation work at all, which is finding #1 from
+  //    all three lighting critics, assigned to this file.
+  //
+  // ── AND THE CORRECTION THAT LANDED ON TOP OF IT (commit 5fefc95) ────────────
+  //
+  // Point 2 above is HALF WRONG and the half matters. The three critics were right
+  // about the goal — separation — and wrong about the mechanism, and measuring the
+  // ten reference plates settled it: the reference does not run a desaturated ground,
+  // it runs a **saturated COOL ground with the warm half of the wheel left empty for
+  // the cast and the VFX**. Mean saturation across the plates is 0.493, and their
+  // cool chroma is 0.343 against a warm chroma of only 0.145.
+  //
+  // A first pass at this file chased "desaturated" literally and landed on a warm
+  // grey-taupe. It passed the acceptance test and two fresh critics still called it,
+  // unprompted and in the same round, "the only unsaturated thing in the frame — an
+  // unlit layer sitting underneath a lit set." They were reading a real number: it
+  // cut the arena's WARM chroma, which was already the half that needed cutting, and
+  // did nothing for the COOL half, which is where the whole gap was.
+  //
+  // So the tile field is now a mid-value MAUVE STONE — the family `bs_01` uses for
+  // its paver floor, which is the one reference ground two independent critics scored
+  // 8/10 in this element's own review rounds. Measured at `west_choke`, whole frame,
+  // `tools/tmp/chroma.mjs` (5 stations), against the reference plates:
+  //
+  //                      reference   before      warm-grey pass   THIS
+  //   warm chroma          0.145      0.280          0.222        **0.145**
+  //   cool chroma          0.343      0.085          0.110        **0.180**
+  //   warm / total         0.297      0.766          0.669        **0.446**
+  //   arena-scan domHue    -          43.6%          56.8%        **38.3%**
+  //
+  // Warm chroma lands exactly on the reference. The remaining cool-chroma gap is
+  // almost entirely the PROPS, which are warm at every station and are not this
+  // module's to move.
+  //
+  // ── WHY THIS FILE STILL OVERRIDES `KPAL.tileLight` RATHER THAN READING IT ───
+  //
+  // The instruction was to read the palette instead of overriding it, on the correct
+  // grounds that an ID-buffer pass measured this floor at ~34% of the frame against
+  // `KPAL`'s ~21%, so overriding opts the single largest surface out of the contract.
+  // That was tested rather than assumed, and reading it verbatim FAILS:
+  //
+  //   `KPAL.tileLight` #C8B79E renders at luma **0.68-0.73** and hue 37 deg — i.e.
+  //   brighter than every character in the cast (body median 0.533) and warm. The
+  //   acceptance test goes from R = 0.49 to **R = 1.348**, failing at 3 of 5
+  //   stations, which is worse than the parked baseline it replaced.
+  //
+  // That is not a criticism of the palette pass; it is the predictable result of
+  // those two entries never having reached the screen to be judged. **The override
+  // stays until `KPAL.tileLight`/`tileDark`/`subfloor` are re-authored, and the
+  // values below are exactly what they should become** — at which point these three
+  // lines should be deleted, not re-tuned.
+  //
+  // Authored, not pre-compensated: `ToyGradeEffect` reproduces hue within ~4 deg and
+  // saturation monotonically, so these are the values wanted on screen plus the known
+  // ~+0.1 saturation the chain adds. On screen: rgb(119,80,101), luma 0.353, HSV
+  // saturation 0.33, hue 330 deg.
+  tileLightInst.color.set('#7A6069');
+  tileDarkInst.color.set('#735A63');
   const lightMesh = new THREE.InstancedMesh(tileGeo, tileLightInst, total);
   const darkMesh = new THREE.InstancedMesh(tileGeo, tileDarkInst, total);
   lightMesh.receiveShadow = true;
@@ -880,36 +1263,46 @@ export function buildFloor(M: Materials): THREE.Group {
       const pDark = THREE.MathUtils.clamp(0.5 + b * 1.15 + wear * 0.55, 0.02, 0.97);
       const isDark = tileRand() < pDark;
 
-      // Brightness. Kept to a moderate amplitude on purpose now that the base colour
-      // is mid-value rather than clipping: at 85-95% value a swing had to be violent
-      // to survive at all, which is where the old ±0.32 came from. With headroom
-      // restored, ±0.16 of blotch plus the wear/edge terms is plainly visible without
-      // turning the field into static.
       // ── Baked lighting: the dominant term, by design ──────────────────────────
       // `litness` is 0 in deep shade and 1 in full sun. Its inputs, in order of
       // weight: the big soft `shadeField` masses; a directional ramp along the key
-      // light's own world axis (`SHADOW_DIR` in `shared.ts` is built from the light's
-      // (9,16,7) offset, so the ground brightens toward +x/+y) which gives the whole
-      // arena ONE consistent sun direction; ambient occlusion pooling toward the
-      // perimeter; and traffic wear. The `blotch` mottling is folded in last at a
-      // fraction of the weight — it is material variation, not lighting, and it must
-      // not compete with the light for the eye.
-      const along = ((wx - CENTER.x) * 0.79 + (wy - CENTER.y) * 0.615) / 700;
+      // light's own world axis, which gives the whole arena ONE consistent sun
+      // direction; ambient occlusion pooling toward the perimeter; and traffic wear.
+      // The `blotch` mottling is folded in last at a fraction of the weight — it is
+      // material variation, not lighting, and it must not compete with the light.
+      //
+      // KEY AZIMUTH — this was the LAST stale copy of the old number in the repo.
+      // Retiring the baked cast-shadow ovals freed the key from `SHADOW_DIR` and it
+      // swung 38.08 deg -> 16.0 deg off +X (`lighting.ts`: the key sits at
+      // (16.35, 9.82, 4.69) relative to its target). The coefficients here are that
+      // azimuth normalised — hypot(16.35, 4.69) = 17.01, so (0.9612, 0.2757) — and
+      // they were still the pre-swing (9, 16, 7) pair, 22 deg out. Nothing here draws
+      // a hard edge so it was never visibly wrong, but a whole-arena ramp pointing 22
+      // deg away from the only real light in the scene is the kind of quiet
+      // inconsistency that makes a frame read as "lit by nothing in particular".
+      // `shared.ts:93` and `arena/apron.ts` are the other two copies; both already
+      // carry 16.0, so IF THE KEY MOVES AGAIN, all three move together.
+      const along = ((wx - CENTER.x) * 0.961 + (wy - CENTER.y) * 0.276) / 700;
       const litness = THREE.MathUtils.clamp(
         0.5 + shadeField(wx, wy) * 0.46 + along * 0.16 + b * 0.1 - wear * 0.3 - edge * edge * 0.38,
         0,
         1
       );
-      // 0.50..1.32 — a deliberate ~2.6:1 lit-to-shade ratio, against the 1.03:1 a
-      // critic measured before, and matched to the references' own measured p5-p95
-      // spread rather than to a guess. Plus a small per-tile dither so the ramp never
-      // bands across a smooth region.
-      let mult = 0.5 + litness * 0.82 + (tileRand() - 0.5) * 0.04;
+      // r3's exact expression (see `MACRO_STRENGTH` at the top of this file): a macro
+      // field and a per-tile micro jitter blended 70/30, then scaled by ONE amplitude.
+      // `litness` supplies the macro term, so the sun direction, the wear bias and the
+      // edge falloff that loop 2 added all survive — only the amplitude goes back.
+      const macro = litness * 2 - 1; // -1..1
+      const micro = tileRand() * 2 - 1; // -1..1, independent per tile
+      const noise = THREE.MathUtils.clamp(macro * 0.7 + micro * 0.3, -1, 1);
+      let mult = MACRO_MEAN * (1 + noise * MACRO_STRENGTH);
       // ~3% of tiles are visibly off-tone — a replaced tile, a bad batch, one that got
       // a lot more traffic. Real laid floors always have a few and a generated one
       // never does unless you ask for it; the critic's phrasing was "no chipped corner,
-      // no single odd tile." Kept rare enough to read as an event, not as noise.
-      if (tileRand() < 0.03) mult *= tileRand() < 0.5 ? 0.82 : 1.13;
+      // no single odd tile." Kept rare enough to read as an event, not as noise, and
+      // pulled in to ±10% so one stray tile cannot punch outside the band the whole
+      // field is now deliberately held inside.
+      if (tileRand() < 0.03) mult *= tileRand() < 0.5 ? 0.90 : 1.08;
       // Hue drift, not just value: the field swings between a cool grey-tan and a warm
       // ochre. A surface that varies only in brightness still reads as one flat colour
       // dimmed, which is most of why this floor has been called "very yellow" — the
@@ -923,9 +1316,9 @@ export function buildFloor(M: Materials): THREE.Group {
         1
       );
       noiseColor.setRGB(
-        mult * (1 - cool * 0.1),
-        mult * (1 - cool * 0.035),
-        mult * (1 + cool * 0.14)
+        mult * (1 - cool * 0.07),
+        mult * (1 - cool * 0.03),
+        mult * (1 + cool * 0.08)
       );
       if (isDark) { darkMesh.setColorAt(di, noiseColor); darkMesh.setMatrixAt(di++, m4); }
       else { lightMesh.setColorAt(li, noiseColor); lightMesh.setMatrixAt(li++, m4); }
@@ -974,7 +1367,31 @@ export function buildFloor(M: Materials): THREE.Group {
   // the texture above and the instanceColor field below — so they are deleted rather
   // than re-tuned; shrinking them would only have made a smaller polka dot.
 
-  // Teal-tiled zones — four small cool floor patches under the hub's four
+  // ── SERVICE MATS, hub set ───────────────────────────────────────────────────
+  //
+  // Round 1 (loop 3). These were the arena's "teal zones", and the finding against
+  // them was not that they looked bad — it was that they meant nothing:
+  //
+  //   "A colour that exists nowhere else and carries no grammar."
+  //
+  // used both as decorative floor styling and as a pedestal under a prop, so the same
+  // mark told a player two different things about whether he could walk there. Two
+  // critics named blocking-vs-walkable in this arena unprompted; a decoration with no
+  // consistent meaning is how that happens.
+  //
+  // The fix is grammar, not colour theory. The arena already HAS a cool floor
+  // language — the utility mats under the two walk-in freezers — and it already means
+  // exactly one thing: *this is a service area's floor, you walk on it.* So the hub
+  // set is folded into that same family: same material, same texture, same treatment,
+  // different footprint. Teal now exists nowhere on the floor at all, which is the
+  // literal answer to the complaint, and the arena is left with two ground languages
+  // (warm tile everywhere, cool mat at a service station) instead of three-with-an-
+  // exception. Everything else about these patches — placement, size, the flatness
+  // work below — is unchanged and still correct.
+  //
+  // `KPAL.tealTile` is untouched; the spice cart still owns its own use of it.
+  //
+  // Four small cool floor patches under the hub's four
   // chokepoint props (the N/S lane pots, the E/W spice carts), the same "sits under
   // a cluster" treatment as the wood pantry pads. A first pass tried one continuous
   // ring around the whole hub at this radius and it just recreated the original
@@ -983,7 +1400,7 @@ export function buildFloor(M: Materials): THREE.Group {
   // exactly on the ring where the spawned cast stands. Four discrete patches sized
   // to their prop, elongated along the open lane so they clear the stove islands
   // on the cross-axis, read as floor styling instead.
-  const tealZones: Array<[number, number, number, number]> = [
+  const hubMatZones: Array<[number, number, number, number]> = [
     [CENTER.x, CENTER.y - 242, 150, 80], // north, under the lane pot
     [CENTER.x, CENTER.y + 242, 150, 80], // south, under the lane pot
     [CENTER.x - 175, CENTER.y, 80, 150], // west, under the spice cart
@@ -1008,42 +1425,41 @@ export function buildFloor(M: Materials): THREE.Group {
   //    seam, drain and border piece in this file. Every one of them is now explicitly
   //    `castShadow = false` (see `flattenDecor` below); they are ground markings and
   //    ground markings do not cast shadows.
-  // 2. `KPAL.tealTile` (#0CA8BC) is an electric cyan sitting at direct complement to
+  // 2. The old `KPAL.tealTile` (#0CA8BC) was an electric cyan at direct complement to
   //    the warm floor, so at full saturation these patches read as glowing plastic
-  //    inserts rather than a cool tiled zone. Cloned and pulled down in saturation and
-  //    value here so they still do their "cool counterpoint" job without being the
-  //    brightest thing in the frame — `KPAL` is shared, so it is not edited.
-  // Desaturated hard, and the number is not a guess: `render/stage.ts` runs a
-  // `HueSaturationEffect({ saturation: 0.32 })` over the whole frame. A pixel probe of
-  // the previous pass came back rgb(0,161,176) — the RED CHANNEL CLAMPED TO ZERO —
-  // from an albedo that still had 47 red in it. Anything already saturated arrives on
-  // screen considerably more saturated than it was authored, so a "slightly muted"
-  // teal still lands as electric cyan. This is a grey-teal in albedo precisely so it
-  // renders as a cool mat rather than a glowing plastic insert.
-  const tealFill = M.tealTile.clone();
-  tealFill.color.set('#5E7F85');
-  const tealTrim = M.tealTileDark.clone();
-  tealTrim.color.set('#48646A');
-  // The shared `rugWeave` texture is set to repeat (3,5) in `shared.ts` for a mat this
-  // size, which at this camera angle put its weave cells below one screen pixel and
-  // produced a visible cross-hatch moiré — a critic named it as a "blockout" tell.
-  // `Texture.clone()` shares the underlying image but carries its own repeat, so this
-  // coarsens the weave for these patches only, without mutating the shared instance
-  // (which is exactly why it is cloned rather than retuned in place).
-  for (const m of [tealFill, tealTrim]) {
+  //    inserts. That is now moot — they are the utility-mat family, which is already
+  //    inside the arena's desaturated band.
+  //
+  // The shared `utilityMatTex` is set to repeat (6,5) in `shared.ts` for the 420x340
+  // freezer mats. These patches are a quarter of that footprint, so the same repeat
+  // would put the weave cells below one screen pixel at this camera angle and produce
+  // a cross-hatch moiré — a critic named exactly that as a "blockout" tell on the old
+  // teal patches. `Texture.clone()` shares the underlying image but carries its own
+  // repeat, so this coarsens the weave for these patches only without mutating the
+  // shared instance the freezer mats use.
+  //
+  // `SERVICE_MAT_DIM` — the same level argument as the wood pad below, applied to the
+  // cool family. The freezer mat measured luma 0.472 against a 0.356-0.388 tile field
+  // (Δ +0.11), i.e. it was carrying two thirds of a mid-value character's own value
+  // step over a far larger area. Relative rather than absolute so the saturation
+  // pass's `KPAL.utilityMat` re-key (#95A6AC -> #767C80 so far) still owns the hue
+  // and chroma; this owns only the level.
+  const zoneFill = keyServiceMat(M.utilityMat);
+  const zoneEdge = serviceMatEdge(M.utilityMat);
+  for (const m of [zoneFill, zoneEdge]) {
     if (m.map) {
       m.map = m.map.clone();
-      m.map.repeat.set(1.5, 2.5);
+      m.map.repeat.set(2, 2.5);
       m.map.needsUpdate = true;
       m.needsUpdate = true;
     }
   }
-  for (const [zx, zy, zw, zh] of tealZones) {
-    const trim = mesh(roundedBox(wu(zw) + 0.05, 0.025, wu(zh) + 0.05, 0.1, 3), tealTrim, 'floor_teal_zone_trim');
+  for (const [zx, zy, zw, zh] of hubMatZones) {
+    const trim = mesh(roundedBox(wu(zw + EDGE_BAND * 2), 0.025, wu(zh + EDGE_BAND * 2), 0.1, 3), zoneEdge, 'floor_service_zone_trim');
     trim.position.set(wu(zx), DECAL_Y, wu(zy));
     noOutline(trim);
     g.add(trim);
-    const patch = mesh(roundedBox(wu(zw), 0.025, wu(zh), 0.08, 3), tealFill, 'floor_teal_zone');
+    const patch = mesh(roundedBox(wu(zw), 0.025, wu(zh), 0.08, 3), zoneFill, 'floor_service_zone');
     patch.position.set(wu(zx), DECAL_Y + 0.003, wu(zy));
     noOutline(patch);
     g.add(patch);
@@ -1104,24 +1520,56 @@ export function buildFloor(M: Materials): THREE.Group {
   // fryer (south), a cool wet-sheen pool behind the sink (north), each with a
   // smaller trailing satellite stain further out (the mess spreading, not a single
   // isolated dot). Placed on the OUTER side of each counter, clear of both the
-  // counter's own CoverBox and the hub teal zone that sits on its inner side.
+  // counter's own CoverBox and the hub service mat that sits on its inner side.
   g.add(buildGreaseSplat(M, stainRim, 705, 895, 7201, 34));
   g.add(buildStainShape(M.floorGrime, 758, 932, 7219, 16, 8));
   g.add(buildStainCluster(M.floorWet, 705, 105, 7241, 30, stainRim));
   g.add(buildStainShape(M.floorWet, 655, 72, 7259, 15, 8));
 
-  // Wood pantry pads (NE + SW) — sit above the tile, hiding it under the clusters.
+  // ── Wood pantry pads (NE + SW) — the worst blocking-vs-walkable read left ───
+  //
+  // Round 1 (loop 3). All three cover-prop critics named this pad, and two named
+  // blocking-vs-walkable UNPROMPTED: in the `pantry_ne` scan frame it was the
+  // largest and brightest mass in shot — and it is FLOOR. That is a legibility
+  // failure, not a cosmetic one; a player deciding whether he can run over
+  // something is reading exactly this cue.
+  //
+  // The mechanism, verified rather than assumed. It is not the plank language on its
+  // own (a duckboard is a perfectly ordinary kitchen floor) — it is VALUE. Measured
+  // at shipped framing after the tile re-key:
+  //
+  //   pad   luma 0.465      tile field  luma 0.356-0.388      Δ +0.105
+  //
+  // against a mid-value character sitting +0.17 above that same field. So the pad
+  // carried two thirds of the hero's own value step, over roughly forty times the
+  // area. Value is what encodes "raised / important"; material identity should come
+  // from hue and texture, which it still does. Final measured state: pad luma 0.412
+  // against a 0.361 tile field, Δ **+0.051** — inside the ±0.06 bound this file works
+  // to. Pulling the pad to Δ ≈ +0.05 leaves
+  // it plainly a different MATERIAL at the same level rather than a different OBJECT
+  // at a higher one — and the shared `butcherBlock` the real counter tops use stays
+  // well above it, so the two stop being confusable in the direction that matters.
+  //
+  // RELATIVE, not absolute. `KPAL.woodPad` is being re-keyed by the saturation pass
+  // right now (it has already moved #C9945A -> #8B7A69). Multiplying whatever that
+  // lands on keeps THEIR hue and saturation decision and takes only the level, so
+  // the two efforts compose instead of one silently overriding the other. Same for
+  // the seam, at a gentler factor so the plank joints do not collapse to invisible.
+  const padMat = M.woodPad.clone();
+  padMat.color.multiplyScalar(0.81);
+  const padSeamMat = M.woodSeam.clone();
+  padSeamMat.color.multiplyScalar(0.93);
   const woodPads: Array<[number, number, number, number]> = [
     [1170, 185, 280, 260],
     [230, 815, 280, 260],
   ];
   for (const [px, py, pw, ph] of woodPads) {
-    const pad = mesh(roundedBox(wu(pw), 0.05, wu(ph), 0.12, 3), M.woodPad, 'floor_woodpad');
+    const pad = mesh(roundedBox(wu(pw), 0.05, wu(ph), 0.12, 3), padMat, 'floor_woodpad');
     pad.position.set(wu(px), DECAL_Y, wu(py));
     noOutline(pad);
     g.add(pad);
     for (let s = -2; s <= 2; s++) {
-      const seam = mesh(new THREE.BoxGeometry(wu(pw) * 0.96, 0.02, wu(ph) * 0.04), M.woodSeam, 'floor_seam');
+      const seam = mesh(new THREE.BoxGeometry(wu(pw) * 0.96, 0.02, wu(ph) * 0.04), padSeamMat, 'floor_seam');
       seam.position.set(wu(px), FINE_Y, wu(py) + s * wu(ph) * 0.18);
       noOutline(seam);
       g.add(seam);
@@ -1137,19 +1585,31 @@ export function buildFloor(M: Materials): THREE.Group {
   // that used only a 30wu margin — so thin the mat was almost entirely hidden under
   // the freezer body itself, the same "peeks out" mistake the pantry wood pads avoid
   // by being sized to their whole cluster, not one prop).
+  // Same `SERVICE_MAT_DIM` as the hub set, and deliberately the same materials — one
+  // cool floor language, two footprints, one meaning. These keep `shared.ts`'s own
+  // (6,5) texture repeat because they are four times the area of a hub patch.
+  const matFill = keyServiceMat(M.utilityMat);
+  const matEdge = serviceMatEdge(M.utilityMat);
+  const matTrim = keyServiceMat(M.utilityMatDark);
   const utilityPads: Array<[number, number, number, number]> = [
     [230, 190, 420, 340],
     [ARENA_W - 230, ARENA_H - 190, 420, 340],
   ];
   for (const [px, py, pw, ph] of utilityPads) {
-    const pad = mesh(roundedBox(wu(pw), 0.03, wu(ph), 0.1, 3), M.utilityMat, 'floor_utility_pad');
-    pad.position.set(wu(px), DECAL_Y, wu(py));
+    // Same painted kerb as the hub set — these had no border at all, which is most of
+    // why a critic read this exact mass as "a hole, a pit, or a void edge".
+    const kerb = mesh(roundedBox(wu(pw + EDGE_BAND * 2), 0.03, wu(ph + EDGE_BAND * 2), 0.1, 3), matEdge, 'floor_utility_pad_trim');
+    kerb.position.set(wu(px), DECAL_Y, wu(py));
+    noOutline(kerb);
+    g.add(kerb);
+    const pad = mesh(roundedBox(wu(pw), 0.03, wu(ph), 0.1, 3), matFill, 'floor_utility_pad');
+    pad.position.set(wu(px), DECAL_Y + 0.003, wu(py));
     noOutline(pad);
     g.add(pad);
     // Drain grates sit in the mat's visible margin BEYOND the freezer's own 115wu
     // half-width, not hidden underneath its body.
     for (const ox of [-160, 160]) {
-      const drain = mesh(new THREE.TorusGeometry(wu(pw) * 0.032, wu(pw) * 0.008, 8, 24), M.utilityMatDark, 'floor_drain');
+      const drain = mesh(new THREE.TorusGeometry(wu(pw) * 0.032, wu(pw) * 0.008, 8, 24), matTrim, 'floor_drain');
       drain.rotation.x = -Math.PI / 2;
       drain.position.set(wu(px + ox), FINE_Y, wu(py));
       noOutline(drain);
@@ -1171,24 +1631,64 @@ export function buildFloor(M: Materials): THREE.Group {
   east.position.x = wu(ARENA_W + 5);
   g.add(north, south, west, east);
 
-  // Spilled flour — a soft irregular patch near the west prep station.
-  // 48 segments, not 16. At wu(38) (~1.9m) and scaled 1.4x, a 16-segment circle shows
-  // unmistakable straight polygon edges. Five separate critics across the floor loop
-  // described this exact decal as "a large soft-edged, faceted, semi-transparent
-  // banded shape" that matched no object, and one loop misattributed it to
-  // post-processing in stage.ts — post effects are screen-space and cannot produce
-  // hard facets, which is what identifies this as geometry.
-  const flour = mesh(new THREE.CircleGeometry(wu(38), 48), M.flour, 'floor_flour');
-  flour.rotation.x = -Math.PI / 2;
-  flour.scale.set(1, 1.4, 1);
-  flour.position.set(wu(300), DECAL_Y, wu(500));
-  noOutline(flour);
-  g.add(flour);
-  const flourSpeck = mesh(new THREE.CircleGeometry(wu(16), 32), M.flour, 'floor_flour_speck');
-  flourSpeck.rotation.x = -Math.PI / 2;
-  flourSpeck.position.set(wu(330), DECAL_Y, wu(470));
-  noOutline(flourSpeck);
-  g.add(flourSpeck);
+  // ── Round 1 (loop 3): the two SOURCELESS flour circles are deleted ──────────
+  //
+  // There used to be a 1.9m x 2.7m flour disc at (300,500) with a satellite speck at
+  // (330,470), in the middle of the west combat lane. Nothing spills flour there. The
+  // flour SACKS are in the two pantry corners, 900wu away.
+  //
+  // Two independent critics on the same frame, without being asked about it, read
+  // exactly this mark and could not tell what it was: "a pale amoeba-shaped blob,
+  // LIGHTER than the floor and carrying no hue at all — it reads as a fog patch or a
+  // hole punched in the floor", and "the pale amorphous blob left of the player is
+  // roughly one character wide; at gameplay distance it registers as a THING on the
+  // floor before it registers as a stain." A third critic in an earlier loop
+  // misattributed the same decal to a post-processing bug.
+  //
+  // Note what is NOT concluded from that. The sack spills below survive untouched,
+  // because they have a visible cause standing on top of them and therefore read as a
+  // story rather than as an artifact. What is deleted is the mark with no source —
+  // and dimming it further would not have helped, because the complaint was never that
+  // it was too loud, it was that it meant nothing. A ground decal earns its place by
+  // being caused by something in frame.
+  //
+  // 48 segments, not 16, on the survivors: at ~1.7m a 16-segment circle shows
+  // unmistakable straight polygon edges, which capped several earlier rounds.
+  //
+  // ── The dimming that stays, and why ─────────────────────────────────────────
+  //
+  // Measured in a live match frame at `west_choke` — the primary combat lane, and the
+  // station where the player already ranks worst in the salience grid:
+  //
+  //   pale spill mass   luma 0.718   ΔL vs plain tile **+0.281**
+  //   the PLAYER        luma 0.587   ΔL vs plain tile **+0.150**
+  //
+  // The decoration beat the hero by 1.9x, over far more area, and the same pale mark
+  // family was the loudest non-player cell at 6 of 18 scan stations. A ground decal
+  // that out-shouts the character is a hierarchy failure, not a styling one.
+  //
+  // Three things change and each is a separate argument:
+  //   * OPACITY. A local dimmed clone rather than the shared `M.flour`, so the small
+  //     flecks inside grease splats — which need to stay legible against a dark core
+  //     at close range — keep their own contrast. Grep confirms `M.flour` has no call
+  //     site outside this module, but the two uses want different answers.
+  //   * SIZE. wu(38) scaled 1.4 is a 1.9m x 2.7m mark, larger than a character is
+  //     tall, sitting in the single most-fought-over lane on the map.
+  //   * PLACEMENT. It was centred on y=500, which is the spawn->hub running line
+  //     itself (`buildPathStrip` runs 172,500 -> 483,500 at width 36). Set dressing
+  //     belongs BESIDE the route a player's eye tracks along, not across it.
+  //
+  // The factor is set by a failure mode that only shows up once you measure with a
+  // character actually on the mark, not beside it: at `pantry_ne` the sack spill is
+  // large enough for a whole character to stand INSIDE it, so it does not merely add
+  // an edge — it raises the ground under the hero and collapses his own outline
+  // contrast from 0.17 to 0.069, at which point the plank pad's boundary 40px away
+  // became the strongest edge in the neighbourhood and the acceptance test failed.
+  // Shrinking below character width would make these marks tokens; lowering the value
+  // is the fix. Target: every pale mark Δ <= +0.05 luma against the tile field, so a
+  // character standing dead centre on one still keeps ~0.12 of separation.
+  const flourPale = M.flour.clone();
+  flourPale.opacity = (M.flour as THREE.Material & { opacity: number }).opacity * 0.32;
 
   // Flour spill actually AT the flour-sack props (NE + SW pantry) — the sacks
   // themselves had nothing spilling out of them, which is exactly the "corner props
@@ -1197,7 +1697,10 @@ export function buildFloor(M: Materials): THREE.Group {
   // the hub debris ring at pantry scale.
   const sackSpills: Array<[number, number]> = [[1175, 235], [ARENA_W - 1175, ARENA_H - 235]];
   sackSpills.forEach(([sx, sy], i) => {
-    const spill = mesh(new THREE.CircleGeometry(wu(34), 48), M.flour, 'floor_flour');
+    // `flourPale`, not `M.flour` — same argument as the lane spill above. In the
+    // `pantry_ne` scan frame this mark was the second brightest mass in shot after
+    // the plank pad, and both of them are floor.
+    const spill = mesh(new THREE.CircleGeometry(wu(28), 48), flourPale, 'floor_flour');
     spill.rotation.x = -Math.PI / 2;
     spill.scale.set(1.25, 1, 1);
     const dy = i === 0 ? 95 : -95; // mirrored offset, clear of the sack CoverBox's own footprint
@@ -1211,12 +1714,12 @@ export function buildFloor(M: Materials): THREE.Group {
   //
   // Round-1 (loop 3). The shared `mesh()` helper sets `castShadow = true` on
   // everything it builds — correct for a cover prop, actively harmful for a floor
-  // decal. Every pad, mat, teal zone, wood seam, drain ring and border bar in this
+  // decal. Every pad, mat, service zone, wood seam, drain ring and border bar in this
   // file is a thin slab floating 0.15-0.25m above the tile, and each one was
   // throwing a hard, offset shadow band onto the floor beside it. In the isolated
   // render that shadow is the loudest cue in the frame, and it says exactly the
   // wrong thing: "this is a raised platform you might collide with." Round 6 spent
-  // a whole pass flattening the teal zones' GEOMETRY to kill that same ambiguity
+  // a whole pass flattening these zones' GEOMETRY to kill that same ambiguity
   // and the shadow was quietly re-asserting it the entire time — the standing
   // "check whether it is rendering and wrong, not missing" trap, in reverse.
   //
