@@ -1,11 +1,69 @@
 # Launch plan — ready to fire on resume
 
 Written while paused at ~10% token budget. **Nothing here needs re-deriving.** Read this
-plus `PROGRESS.md`, then start at Wave 0.
+plus `PROGRESS.md`.
 
 Designed so a resumed session can run 8–10 hours across 2–3 sessions without hitting a
 token wall. The budget discipline in "Token management" is the part that makes that true
 — it is not optional advice, it is why the plan is shaped this way.
+
+---
+
+## ▶ START HERE — session limit hit 2026-08-04, resets 03:30 Asia/Jerusalem
+
+Everything is committed and pushed (73 commits), tree clean, `tsc` clean, sim 51/51,
+`tools/aspect.mjs` PASS, live game verified by screenshot.
+
+**Waves 0 and 1.5 are DONE.** Do not redo them: body archetypes, viewport fairness, the
+weapon-range rebalance, the colour-grade replacement, prop-shadow un-burying, the hazard
+rework, the impact-burst rescale and the fog visual have all landed. See the scoreboard in
+`PROGRESS.md`.
+
+### Re-dispatch these two first — cut off mid-loop, committed UNREVIEWED
+Both render correctly and pass gates, but **neither has been through a single critic
+round.** Treat every value in them as a first draft.
+
+| Loop | Owns | Where it stopped |
+|---|---|---|
+| **Arena apron** | `arena/apron.ts`, `kitchen.ts` | Built the apron; killed at the exact moment it was about to run its first blind critic. On the live render it reads noticeably **COOL against the warm kitchen** — open question, not a settled choice. |
+| **Cover props** | `arena/props/*` | Finished `counters.ts` + `storage.ts`, mid-way through `smallProps.ts` (spice cart). |
+
+**The props brief has changed and this is the important part:** now that grounding is
+un-buried, shadows are no longer the binding constraint. A fresh critic's top findings are
+**gameplay readability** — counters present a vertical face only ~0.6× character height
+with no toe-kick (the barrel at 1.2× is the one prop that reads correctly), and the
+walkable floor mats carry the *same* saturation, edge crispness and screen area as the
+solid cover beside them, so **a player cannot tell what stops a bullet from what they can
+run across.** Start there, not at shadows. Note this only became fixable now: saturation
+was not a usable axis while the grade collapsed everything to 1.00.
+
+### Then, in order
+1. **Floor** — 🅿️ parked by Uri until he returns, and there is a specific hypothesis
+   waiting in `PROGRESS.md` (the 6/10 was low-band macro variation; r4 overshot it). Do
+   not start a generic floor loop.
+2. **Wave 3 — nine per-weapon VFX agents.** Now unblocked: the shared burst was 2.25×
+   character height and is rescaled, and `window.__vfxSpawnTest` exists because driving a
+   specific hit through gameplay is unreliable (the AI kites; three probe attempts timed
+   out). Run **3 at a time**.
+3. **Cast decals + key azimuth, together.** Cast decals are now measurably removable
+   (0.74/255 over 3.0%, ablation indistinguishable at shipped framing) but were
+   deliberately kept, because `shared.ts`'s `SHADOW_DIR` is what pins the key azimuth.
+   Removing them *before* the azimuth rotates is a strict small loss. One agent should own
+   `shared.ts` + `lighting.ts` and land both — it unlocks a side-on key and raking
+   modelling that is currently impossible.
+4. **Character heads** — scope is now head + torso only; the archetypes own the bodies.
+5. **Whole-arena scanner**, then **motion filmstrip** (every character critique so far has
+   judged stills, yet "reads like a turntable render" is a complaint about motion).
+
+### What this session proved about method — apply it
+- **Probe before looping.** Every plateau probed turned out to be a bug or an ownership
+  deadlock, never a taste gap. A ~20k probe repeatedly beat a ~300k critic loop; the floor
+  loop spent 309k for a score that did not move at all.
+- **Define a measurable acceptance test before the first round**, or critics reverse each
+  other indefinitely. Both stop-rules fired correctly this session.
+- **A once-measured mechanism is a hypothesis, not a finding.** The colour clamp was
+  found, wrongly retracted on a probe taken with the fix already in the tree, then
+  re-confirmed. Two separate misattributions were caught only because someone re-measured.
 
 ---
 
