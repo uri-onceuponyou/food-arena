@@ -50,6 +50,32 @@ export const ARENA_HALF_DIAGONAL = Math.hypot(ARENA_W / 2, ARENA_H / 2); // ≈ 
  *
  * Uri's call: *"Start the circle bigger. So it touches first the arena after 5-7
  * seconds."* Set to 6, the middle of that range.
+ *
+ * ── Kept ABSOLUTE when the clock went 180 s -> 45 s (2026-08-05) ─────────────
+ *
+ * The obvious alternative was to make this a FRACTION of `MATCH_DURATION_MS`, since on
+ * a 45 s clock the ring is technically "closing" for 87% of the match instead of 97%.
+ * It stayed absolute, for three reasons:
+ *
+ *  1. It encodes a HUMAN duration, not a share of a match — how long a player gets to
+ *     land, orient and start moving before the map begins to shrink. Uri specified it
+ *     in seconds ("5-7 seconds"), and that intent does not scale with match length.
+ *  2. First contact is with the arena's furthest CORNER, which nobody is standing in
+ *     at t=6 s (both spawns sit on the centre line). The moments that actually matter
+ *     to a player are when the ring crosses the inscribed radius (500 wu — it starts
+ *     eating playfield rather than corners) and when it reaches its floor. Both are
+ *     functions of `MATCH_DURATION_MS` alone and land correctly at 45 s: 22.3 s and
+ *     42.0 s respectively. Fractionalising this constant would not move either.
+ *  3. As a fraction it misbehaves at both ends — 1/30th of the old 180 s clock is the
+ *     6 s it already was, but 1/30th of a hypothetical 20 s clock is 0.7 s, and the
+ *     derivation below divides by `1 - t/T`, so a fraction bakes a fixed ring-growth
+ *     multiplier in rather than letting the ring open wider as the clock shortens,
+ *     which is exactly the behaviour that keeps first contact where Uri asked for it.
+ *
+ * ⚠️ This must stay well below `MATCH_DURATION_MS`: the derivation below divides by
+ * `1 - FOG_FIRST_CONTACT_S * 1000 / MATCH_DURATION_MS`, which blows up as the two
+ * approach each other. At 45 s the divisor is 0.867; the assertion in
+ * `src/game/sim.test.mjs` guards the relationship.
  */
 export const FOG_FIRST_CONTACT_S = 6;
 
@@ -67,12 +93,23 @@ export const FOG_FIRST_CONTACT_S = 6;
  * the half-diagonal by then:
  *
  *     R0 = halfDiagonal / (1 − t / MATCH_DURATION)
- *        = 860.23 / (1 − 6/180)
- *        ≈ 890
+ *        = 860.23 / (1 − 6/45)
+ *        ≈ 993
  *
  * Derived from the arena dimensions and the match length rather than written as a literal,
  * so resizing the map or changing the match duration cannot silently re-create the
  * corners-fogged-from-birth bug.
+ *
+ * ⚠️ This VALUE MOVED on 2026-08-05, 890 -> 993, without this file's formula changing at
+ * all: `MATCH_DURATION_MS` went 180 s -> 45 s (see the rationale on that constant), and a
+ * shorter clock with first contact still pinned at 6 s necessarily means a larger opening
+ * ring, swept faster (4.9 -> 22.1 wu/s). Anything that hardcoded 890 — or that normalises
+ * the ring against a fixed arena extent rather than against `arena.maxSafeRadius` — is now
+ * wrong by 12%.
+ *
+ * The closing ring also has a FLOOR now (`rules.ts:MIN_SAFE_RADIUS`, 140 wu): it no longer
+ * reaches zero, because a zero ring made the last seconds of a full-length match a pure HP
+ * arithmetic race that the 100 HP player always lost.
  */
 export const MAX_SAFE_RADIUS = Math.round(
   ARENA_HALF_DIAGONAL / (1 - (FOG_FIRST_CONTACT_S * 1000) / MATCH_DURATION_MS)

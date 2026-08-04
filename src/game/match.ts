@@ -19,7 +19,7 @@ import { createFogRing, type FogRing } from '../arena/fogRing';
 import { createMatch, stepMatch } from './sim';
 import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchState } from './state';
 import { otherRole } from './state';
-import { CHARACTER_IDS, CHARACTERS, MATCH_DURATION_MS, type CharacterId, type Weapon } from './rules';
+import { CHARACTER_IDS, CHARACTERS, MATCH_DURATION_MS, MIN_SAFE_RADIUS, type CharacterId, type Weapon } from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 import { InputController } from './input';
 import { createPointerLock, type PointerLockController } from './pointerLock';
@@ -352,13 +352,18 @@ export class GameSession {
 
     if (this.qaFogRadius === null) return;
     const maxR = this.arena.maxSafeRadius;
-    const frac = THREE.MathUtils.clamp(this.qaFogRadius / maxR, 0, 1);
+    // The ring bottoms out at MIN_SAFE_RADIUS (see `rules.ts`), so a request below it
+    // has no corresponding moment on the clock to rewind to — clamp rather than hand
+    // back a fog state the sim would immediately overwrite on the next tick, which
+    // would read as a broken screenshot rather than an out-of-range parameter.
+    const wantR = THREE.MathUtils.clamp(this.qaFogRadius, MIN_SAFE_RADIUS, maxR);
+    const frac = THREE.MathUtils.clamp(wantR / maxR, 0, 1);
     this.state.phase = 'playing';
     this.state.countdownValue = 0;
     this.state.countdownTick = 0;
     this.state.startFlashTimer = 0;
     this.state.timeRemaining = MATCH_DURATION_MS * frac;
-    this.state.safeRadius = maxR * frac;
+    this.state.safeRadius = wantR;
   }
 
   /**

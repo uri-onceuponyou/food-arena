@@ -25,6 +25,7 @@ import {
   HIT_RADIUS_VS_PLAYER,
   HOMING_TURN_RATE,
   MATCH_DURATION_MS,
+  MIN_SAFE_RADIUS,
   PLAYER_MAX_HP,
   PLAYER_SIZE,
   PLAYER_SPEED,
@@ -96,7 +97,10 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInput): Gam
   if (state.phase === 'playing') {
     state.timeRemaining = Math.max(0, state.timeRemaining - dt);
     const progress = 1 - state.timeRemaining / MATCH_DURATION_MS;
-    state.safeRadius = state.arena.maxSafeRadius * (1 - progress);
+    // The floor is what makes the timeout rule below reachable at all: without it the
+    // ring reaches 0, nowhere costs 0 HP/s for the last seconds, and the smaller HP
+    // pool (always the player's) dies before the whistle. See `MIN_SAFE_RADIUS`.
+    state.safeRadius = Math.max(MIN_SAFE_RADIUS, state.arena.maxSafeRadius * (1 - progress));
   }
 
   // Ground-effect expiry runs unconditionally, matching the prototype (it is never
@@ -122,7 +126,63 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInput): Gam
   // one extra tick after a match technically ends).
   stepProjectiles(state, dt, events);
 
+  // Time limit. Resolved AFTER everything else in the tick, so a killing blow — or a
+  // projectile that was already in the air — landing on the final tick still decides
+  // the match as a knockout rather than being overridden by the clock.
+  if (state.phase === 'playing' && state.timeRemaining <= 0) {
+    resolveTimeout(state, events);
+  }
+
   return events;
+}
+
+/**
+ * End a match that ran out of clock.
+ *
+ * Until this existed, `stepMatch` decremented `timeRemaining` to 0 and then simply
+ * kept going: measured on the real sim, 110 of 110 forced-immortal matchups were
+ * still `phase: 'playing'`, `winner: null` after 360 s of a 180 s match. The clock
+ * ended nothing. In an ordinary match it *looked* decided only because the ring had
+ * closed to nothing and the fog had killed someone — which is the fairness half of
+ * the same bug, since the fog kills the 100 HP player a full second before the 150 HP
+ * enemy (measured: 2.00 s vs 3.00 s). `MIN_SAFE_RADIUS` removes that, and this
+ * decides what is left.
+ *
+ * ── The tiebreak, and why each rung ─────────────────────────────────────────
+ *
+ *  1. HIGHER HP **FRACTION**. Not absolute HP: `PLAYER_MAX_HP` is 100 and
+ *     `ENEMY_MAX_HP` is 150, so "most HP left" hands the enemy a 50 HP head start on
+ *     a criterion it did nothing to earn. The fraction is what "who is winning" means
+ *     when the two pools are different sizes.
+ *  2. ZONE CONTROL — nearer the ring's centre wins. A real, earned signal (holding the
+ *     middle is contested ground), deterministic, and it is what separates two
+ *     fighters who are level on HP.
+ *  3. THE HUMAN. Two fighters identical on both measures are indistinguishable by
+ *     every quantity the sim has; the tie goes to the player. Deliberately the
+ *     opposite of the behaviour this replaces, where the tie went to the enemy by
+ *     arithmetic.
+ *
+ * Note there is no `death` event and both fighters stay `alive` — a timeout is not a
+ * knockout, and consumers that read `state.winner` (HUD game-over card, trophy
+ * recording, audio director) all key off `match-ended`, which does fire.
+ */
+function resolveTimeout(state: MatchState, events: GameEvent[]): void {
+  const { player, enemy, arena } = state;
+  const playerFraction = player.maxHp > 0 ? player.hp / player.maxHp : 0;
+  const enemyFraction = enemy.maxHp > 0 ? enemy.hp / enemy.maxHp : 0;
+
+  let winner: FighterRole;
+  if (playerFraction !== enemyFraction) {
+    winner = playerFraction > enemyFraction ? 'player' : 'enemy';
+  } else {
+    const playerToCentre = Math.hypot(player.x - arena.center.x, player.y - arena.center.y);
+    const enemyToCentre = Math.hypot(enemy.x - arena.center.x, enemy.y - arena.center.y);
+    winner = playerToCentre <= enemyToCentre ? 'player' : 'enemy';
+  }
+
+  state.phase = 'ended';
+  state.winner = winner;
+  events.push({ type: 'match-ended', winner });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -263,13 +323,31 @@ function applyWorldTick(state: MatchState, role: FighterRole, dt: number, attemp
   // Sticky Trail: opponent standing on one of THIS fighter's marks takes a
   // one-time hit. Runs after this fighter's own drop above, so a mark dropped this
   // very tick can immediately damage an opponent already standing on it.
+  //
+  // ── The per-tick cap, and why marks are consumed either way ────────────────
+  // This loop used to apply damage once PER MARK, for every overlapping mark, in the
+  // same tick, with no cap. `TRAIL.radius` (22) is roughly double the ~11 wu a chasing
+  // AI covers between drops and up to 29 marks live at once, so a Donut that circles
+  // or gets held against cover stacks its entire trail onto one tile: measured, 29
+  // marks on one spot cost 87 HP in a single 16.67 ms tick across 29 simultaneous hit
+  // events. Undodgeable by construction — there is no reaction inside one frame.
+  //
+  // At most `TRAIL.maxHitsPerTick` marks may now damage a given victim per tick, so
+  // the worst tick the trail can produce is exactly `TRAIL.damage`. Every other mark
+  // the victim is standing in is still marked `damaged` — you tread the filling out of
+  // all of them, only one of them bites. That is what stops the cap from turning a
+  // dense pile into a slow drip that costs the same 87 HP over the next 29 ticks; the
+  // stack is spent, not queued.
   if (opponent.alive) {
+    let hitsThisTick = 0;
     for (const mark of state.trailMarks) {
       if (mark.ownerRole !== role || mark.damaged) continue;
-      if (Math.hypot(opponent.x - mark.x, opponent.y - mark.y) < TRAIL.radius) {
-        mark.damaged = true;
-        applyDamage(state, opponentRole, TRAIL.damage, null, { kind: 'trail', ownerRole: role }, events);
-      }
+      if (Math.hypot(opponent.x - mark.x, opponent.y - mark.y) >= TRAIL.radius) continue;
+      mark.damaged = true;
+      if (hitsThisTick >= TRAIL.maxHitsPerTick) continue;
+      hitsThisTick++;
+      applyDamage(state, opponentRole, TRAIL.damage, null, { kind: 'trail', ownerRole: role }, events);
+      if (!opponent.alive) break;
     }
   }
 

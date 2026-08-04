@@ -46,7 +46,61 @@ export const PROTOTYPE_WORLD = { w: 900, h: 600 } as const;
  */
 export const PROTOTYPE_VIEWPORT = { w: 360, h: 240 } as const;
 
-export const MATCH_DURATION_MS = 180_000; // 3:00
+/**
+ * ── AUTHORISED DEVIATION #2 (2026-08-05): MATCH LENGTH ──────────────────────
+ *
+ * Was 180_000 (3:00), transcribed from the prototype. Measured against the shipped
+ * arena with `tools/match-sim.mjs --all-matchups` (110 matchups, the real `sim.ts`,
+ * the real cover layout):
+ *
+ *   mean match          19.6 s      = 10.9% of a 180 s clock
+ *   longest of 110      28.8 s      = 16.0%
+ *   matches that ever reached the clock                 0 / 110
+ *   closing fog's share of ALL damage dealt             1.5%
+ *   ring radius when the median match ended             797 wu of a 890 wu opening
+ *
+ * So the entire closing-zone system — the ring, its HUD readouts, the fog damage
+ * model — was dead weight: it had barely started moving when every match was already
+ * over. A clock nobody reaches is not a clock.
+ *
+ * ── How 45 s was chosen ─────────────────────────────────────────────────────
+ *
+ * Swept 25/30/35/40/45/50/60/90/180 s through the real sim (the emulator in
+ * `tools/tmp/simlayer_clock_sweep.mjs` drives any schedule by writing the one field
+ * the ring derives from, so nothing had to be edited to measure it):
+ *
+ *      T      fog share of all damage      ring R when the median match ends
+ *     25 s          34.2%                             384 wu
+ *     30 s          19.0%                             444 wu
+ *     40 s           9.7%                             560 wu
+ *     45 s           8.1%                             598 wu
+ *     60 s           2.6%                             655 wu
+ *    180 s           1.5%                             797 wu
+ *
+ * Three constraints decided it, in this order:
+ *
+ *  1. THE CLOCK MUST NOT TRUNCATE A REAL FIGHT. The scripted player takes a mean
+ *     13.0 s just to reach contact (the arena's spawn separation — see
+ *     `docs/STATE.md` PART 2 #11 — is a known, separate problem), and the fight
+ *     itself then runs a mean 6.6 s. 45 s is 1.6x the longest natural match measured
+ *     (28.8 s) and 2.3x the mean. At 25-30 s the clock would be cutting off fights,
+ *     not stalemates — and the fog's damage share (19-34%) would make the zone a
+ *     co-primary damage source rather than a positional pressure.
+ *  2. THE RING MUST ACTUALLY BITE. At 45 s the fog goes from 1.5% to 8.1% of all
+ *     damage — a 5.4x increase — and the ring is inside the arena's inscribed radius
+ *     (500 wu, where it first starts cutting the playfield rather than the corners)
+ *     from t = 22.3 s, which is inside the top ~20% of matches by length.
+ *  3. IT MUST STILL BE OUTRUNNABLE. The ring's edge now sweeps at 22.1 wu/s against
+ *     a player speed of 120 wu/s. Beating the zone is a matter of noticing it, never
+ *     a footrace — which is the same property the 180 s clock had (4.9 wu/s).
+ *
+ * ⚠️ INTERLOCK: `src/arena/shared.ts` DERIVES the opening ring radius from this
+ * constant, so shortening the clock GROWS the opening ring (890 -> 993 wu) to keep
+ * the fog's first contact with the arena's corners pinned at t = 6 s. That is
+ * deliberate. Anything reading `arena.maxSafeRadius` as a fixed 890, or normalising a
+ * widget by a hardcoded arena size, will now be wrong — see the report.
+ */
+export const MATCH_DURATION_MS = 45_000; // 0:45
 export const COUNTDOWN_FROM = 5; // 5 → 4 → 3 → 2 → 1 → "START!"
 export const COUNTDOWN_START_FLASH_MS = 700; // "START!" hold before play begins
 
@@ -54,6 +108,29 @@ export const COUNTDOWN_START_FLASH_MS = 700; // "START!" hold before play begins
 export const MAX_SAFE_RADIUS = 545;
 export const FOG_TICK_MS = 300;
 export const FOG_DAMAGE = 15;
+
+/**
+ * FLOOR on the closing ring: `safeRadius` never shrinks below this.
+ *
+ * Without it the ring reaches zero at the final whistle, which means the last seconds
+ * of any match that goes the distance contain NO ground that costs 0 HP/s — and at
+ * that point the outcome is pure arithmetic, not play: both fighters burn the same
+ * FOG_DAMAGE per FOG_TICK_MS, so the one with the smaller HP pool dies first. That is
+ * always the player (PLAYER_MAX_HP 100 vs ENEMY_MAX_HP 150): measured on the real sim,
+ * with both fighters pinned and unable to attack, the player dies at 2.00 s and the
+ * enemy at 3.00 s. **Running the clock out was an arithmetically guaranteed loss**, and
+ * it pre-empted the timeout rule below — the tiebreak could never fire because the fog
+ * always resolved the match first.
+ *
+ * Value: the arena's central damage hazard (the boiling pot, `POT.dangerRadius` = 95)
+ * sits ON the arena centre, so the ring must clear it or "safe" ground does not exist.
+ * 95 + one body length (PLAYER_SIZE = 42) = 137, rounded to 140 — a 45 wu-wide safe
+ * annulus around the pot. `sim.test.mjs` asserts that relationship so a bigger pot
+ * cannot silently re-create the bug.
+ *
+ * This is the genre convention too: a battle-royale final circle is small, not empty.
+ */
+export const MIN_SAFE_RADIUS = 140;
 
 /** Central hazard (the boiling pot in the prototype). */
 export const POT = {
@@ -108,7 +185,26 @@ export const REGEN_AMOUNT = 2;
 export const SPLAT_DURATION_MS = 4000;
 export const SPLAT_RADIUS = 20;
 
-/** Donut's Sticky Trail (passive). */
+/**
+ * Donut's Sticky Trail (passive).
+ *
+ * ── AUTHORISED DEVIATION #3 (2026-08-05): the trail is now RATE-LIMITED ──────
+ *
+ * `dropIntervalMs` 160 against `durationMs` 4500 means up to 29 of one owner's marks
+ * can be alive at once, and `radius` 22 is far larger than the ~11 wu a chasing AI
+ * covers between drops — so a Donut that circles, or gets held against cover, piles
+ * its whole trail onto one tile. Every mark then damaged INDEPENDENTLY, all in the
+ * same tick, uncapped. Measured on the real sim: 29 marks stacked on one spot cost the
+ * victim **87 HP in a single 16.67 ms tick, across 29 simultaneous hit events** — 87%
+ * of a player's maximum HP, delivered inside one frame, with no possible reaction.
+ *
+ * The mechanic is kept and the *numbers below are unchanged*. What changed is in
+ * `sim.ts`: at most `maxHitsPerTick` marks may DAMAGE a given victim per tick, and any
+ * other mark the victim is standing in is consumed at the same time (you tread the
+ * filling out of all of them; only one of them bites). That converts an unbounded
+ * burst into a rate, without touching the trail's density, its look, or its total
+ * output in ordinary play — see the measured before/after in the commit message.
+ */
 export const TRAIL = {
   dropIntervalMs: 160,
   durationMs: 4500,
@@ -116,6 +212,12 @@ export const TRAIL = {
   damage: 3,
   speedBoost: 1.35,
   damageBoost: 1.5,
+  /**
+   * Hard cap on trail damage instances applied to ONE victim in ONE tick. 1, so the
+   * worst tick a Donut's trail can ever produce is exactly `damage` (3 HP) — down from
+   * 87 HP. Raising it re-opens the burst proportionally; it is a cap, not a rate.
+   */
+  maxHitsPerTick: 1,
 } as const;
 
 /** Homing projectile steering. Prototype: `turnAmount = min(1, 0.006 * dt)`. */

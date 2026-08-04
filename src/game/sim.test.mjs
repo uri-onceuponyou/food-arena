@@ -16,7 +16,10 @@
  */
 
 import { createMatch, stepMatch } from './sim.ts';
-import { CHARACTERS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS } from './rules.ts';
+import {
+  CHARACTERS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
+  MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, POT, TRAIL,
+} from './rules.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
 // `rules.ts` and moved once already (the 2026-08-03 retune, see `REACH`). Tests that
@@ -306,7 +309,10 @@ console.log('\n6. Fog damage tick rate');
   state.player.y = arena.center.y;
 
   // Force match progress to 50% so safeRadius = 545 * 0.5 = 272.5 < 400 -> player is outside.
-  state.timeRemaining = 90_000;
+  // DERIVED from the constant, not typed: MATCH_DURATION_MS moved 180 s -> 45 s on
+  // 2026-08-05 and a hardcoded 90_000 silently became 200% progress, which put the ring
+  // OUTSIDE the player and stopped this test testing fog at all.
+  state.timeRemaining = MATCH_DURATION_MS / 2;
 
   const hpStart = state.player.hp;
 
@@ -367,7 +373,7 @@ console.log('\n7. Match ends on death with the correct winner');
     state.player.x = arena.center.x + 400;
     state.player.y = arena.center.y;
     state.player.hp = 10; // less than one FOG_DAMAGE (15) tick
-    state.timeRemaining = 90_000; // 50% progress -> safeRadius 272.5 < 400
+    state.timeRemaining = MATCH_DURATION_MS / 2; // 50% progress -> safeRadius 272.5 < 400
 
     let events = [];
     for (let i = 0; i < 3; i++) events = stepMatch(state, 100, noInput); // 300ms total = one fog tick
@@ -412,7 +418,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   // reproduced faithfully rather than "corrected" to a clean 180000.
   check(
     'timeRemaining reset to full match duration, minus the transition tick\'s dt',
-    state.timeRemaining === 180_000 - 50,
+    state.timeRemaining === MATCH_DURATION_MS - 50,
     `timeRemaining=${state.timeRemaining}`,
   );
 }
@@ -479,6 +485,287 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   check('AI closed to weapon range of the player',
     closest < donutReach + 2,
     `closest approach ${closest.toFixed(1)}, Candy Barrage reach ${donutReach}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. THE CLOCK ENDS THE MATCH (regression)
+//
+// `stepMatch` decremented `timeRemaining` to 0 and had no time-limit branch at all.
+// Measured before the fix: 110 of 110 forced-immortal matchups were still
+// phase='playing', winner=null after 360 s of a 180 s match. In an ordinary match the
+// clock LOOKED decisive only because the ring had closed to zero and the fog had
+// killed someone — and it always killed the player first, because 100 HP at 50 HP/s
+// runs out a full second before 150 HP does. Timing out was a guaranteed player loss.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n10. Time limit terminates the match, and the tiebreak is not role-determined');
+
+  /** Fresh playing match with the clock about to expire and neither fighter able to act. */
+  function atTheWhistle(opts = {}) {
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena);
+    // Park both on the centre so the fog cannot interfere with what is being tested.
+    state.player.x = arena.center.x; state.player.y = arena.center.y;
+    state.enemy.x = arena.center.x; state.enemy.y = arena.center.y;
+    // Every weapon permanently on cooldown: `elapsed - Infinity` is -Infinity.
+    state.player.lastUsed = state.player.lastUsed.map(() => Infinity);
+    state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);
+    state.timeRemaining = 100;
+    Object.assign(state.player, opts.player ?? {});
+    Object.assign(state.enemy, opts.enemy ?? {});
+    return { arena, state };
+  }
+
+  // (a) It ends at all.
+  {
+    const { state } = atTheWhistle();
+    const events = stepMatch(state, 200, noInput);
+    check('clock expiry ends the match', state.phase === 'ended', `phase=${state.phase}`);
+    check('clock expiry names a winner', state.winner !== null, `winner=${state.winner}`);
+    check('clock expiry emits match-ended', !!events.find((e) => e.type === 'match-ended'));
+    check('a timeout is not a knockout: both fighters are still alive',
+      state.player.alive && state.enemy.alive);
+    check('a timeout emits no death event', !events.find((e) => e.type === 'death'));
+  }
+
+  // (b) A full immortal match terminates rather than running forever.
+  {
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = createMatch(arena, 'hamburger', 'donut');
+    state.player.hp = state.player.maxHp = 1e9;
+    state.enemy.hp = state.enemy.maxHp = 1e9;
+    let steps = 0;
+    while (state.phase !== 'ended' && steps < 4000) { stepMatch(state, 100, noInput); steps++; }
+    check('an unkillable-vs-unkillable match still ends', state.phase === 'ended', `after ${steps} steps`);
+    check('...and ends on the clock, not later', state.timeRemaining === 0);
+  }
+
+  // (c) THE FAIRNESS REGRESSION. Absolute HP favours the enemy; the HP FRACTION
+  //     favours the player. Any tiebreak that compares raw HP fails this.
+  {
+    const { state } = atTheWhistle({ player: { hp: 60 }, enemy: { hp: 75 } });
+    stepMatch(state, 200, noInput);
+    check(
+      `higher HP FRACTION wins, not higher HP (player ${60}/${PLAYER_MAX_HP}=0.60 beats enemy ${75}/${ENEMY_MAX_HP}=0.50)`,
+      state.winner === 'player',
+      `winner=${state.winner}`,
+    );
+  }
+  {
+    const { state } = atTheWhistle({ player: { hp: 50 }, enemy: { hp: 90 } });
+    stepMatch(state, 200, noInput);
+    check('lower HP fraction loses (player 0.50 vs enemy 0.60)', state.winner === 'enemy', `winner=${state.winner}`);
+  }
+
+  // (d) Level on HP -> zone control decides, and it can go either way. Two runs with
+  //     only the POSITIONS swapped: if the rule were role-determined both would agree.
+  {
+    const a = atTheWhistle();
+    a.state.player.x = a.arena.center.x + 10;
+    a.state.enemy.x = a.arena.center.x + 400;
+    stepMatch(a.state, 200, noInput);
+
+    const b = atTheWhistle();
+    b.state.player.x = b.arena.center.x + 400;
+    b.state.enemy.x = b.arena.center.x + 10;
+    stepMatch(b.state, 200, noInput);
+
+    check('level on HP: the fighter nearer the ring centre wins', a.state.winner === 'player', `winner=${a.state.winner}`);
+    check('level on HP: and it is genuinely positional, not role-determined',
+      b.state.winner === 'enemy', `winner=${b.state.winner}`);
+  }
+
+  // (e) A knockout on the very last tick is still a knockout.
+  {
+    const smashIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena);
+    state.player.x = arena.center.x; state.player.y = arena.center.y;
+    state.player.facing = { x: 1, y: 0 };
+    state.enemy.x = arena.center.x + SMASH_IN_RANGE; state.enemy.y = arena.center.y;
+    state.enemy.hp = 5;
+    state.timeRemaining = 1;
+    const events = stepMatch(state, 200, { move: { x: 0, y: 0 }, selectedWeapon: smashIndex, attack: true });
+    check('a killing blow on the final tick wins as a KNOCKOUT, not a timeout',
+      state.winner === 'player' && !!events.find((e) => e.type === 'death' && e.fighterRole === 'enemy'));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. THE CLOSING RING HAS A FLOOR (regression)
+//
+// A ring that reaches zero means the last seconds of a full-length match contain no
+// ground costing 0 HP/s, so the match is decided by which HP pool is smaller — always
+// the player's. Measured before the fix, both fighters pinned and unable to attack:
+// player dead at 2.00 s, enemy at 3.00 s. That also made section 10's tiebreak
+// unreachable, because the fog always resolved the match before the whistle.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n11. The closing ring never reaches zero');
+
+  check(
+    `MIN_SAFE_RADIUS (${MIN_SAFE_RADIUS}) clears the central damage hazard (${POT.dangerRadius}) by at least half a body`,
+    MIN_SAFE_RADIUS >= POT.dangerRadius + PLAYER_SIZE / 2,
+    `${MIN_SAFE_RADIUS} < ${POT.dangerRadius + PLAYER_SIZE / 2}`,
+  );
+
+  const arena = makeArena({ width: 2000, height: 2000 });
+  const state = playingMatch(arena);
+  state.player.hp = state.player.maxHp = 1e9;
+  state.enemy.hp = state.enemy.maxHp = 1e9;
+  let minSeen = Infinity;
+  for (let i = 0; i < 600 && state.phase === 'playing'; i++) {
+    stepMatch(state, 100, noInput);
+    minSeen = Math.min(minSeen, state.safeRadius);
+  }
+  check('safeRadius never drops below MIN_SAFE_RADIUS over a whole match',
+    minSeen >= MIN_SAFE_RADIUS - 1e-9, `min seen ${minSeen}`);
+
+  // The point of the floor: at the whistle there is still ground that costs nothing.
+  {
+    const st = playingMatch(makeArena({ width: 2000, height: 2000 }));
+    st.timeRemaining = 100;
+    // Stand in the safe annulus: outside the pot, inside the floored ring.
+    const r = (POT.dangerRadius + MIN_SAFE_RADIUS) / 2;
+    st.player.x = st.arena.center.x + r; st.player.y = st.arena.center.y;
+    st.enemy.x = st.arena.center.x - r; st.enemy.y = st.arena.center.y;
+    const hp0 = st.player.hp;
+    stepMatch(st, 99, noInput);
+    check('a fighter in the final annulus takes no fog damage at the whistle',
+      st.player.hp === hp0, `hp ${hp0} -> ${st.player.hp}, R=${st.safeRadius}`);
+  }
+
+  // The clock must stay far enough above the fog's first-contact time that
+  // `arena/shared.ts`'s `R0 = halfDiagonal / (1 - t/T)` stays well conditioned.
+  // FOG_FIRST_CONTACT_S lives in `arena/shared.ts`, which pulls in Three.js and cannot
+  // be imported here; 6 is duplicated deliberately and is checked by eye against it.
+  const FOG_FIRST_CONTACT_MS = 6000;
+  check('MATCH_DURATION_MS leaves the derived opening ring well conditioned (>= 4x first contact)',
+    MATCH_DURATION_MS >= FOG_FIRST_CONTACT_MS * 4,
+    `${MATCH_DURATION_MS} vs ${FOG_FIRST_CONTACT_MS * 4}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. STICKY TRAIL CANNOT BURST (regression)
+//
+// `applyWorldTick` damaged once PER MARK, for every overlapping mark, in the same
+// tick, uncapped. `TRAIL.radius` (22) is about double the ~11 wu a chasing AI covers
+// between drops, and up to ceil(durationMs/dropIntervalMs) marks live at once, so a
+// Donut that circles or is held against cover stacks its whole trail on one tile.
+// Measured before the fix: 87 HP in one 16.67 ms tick across 29 hit events.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n12. Sticky Trail is capped per tick');
+  const MAX_MARKS = Math.ceil(TRAIL.durationMs / TRAIL.dropIntervalMs);
+
+  function stackedMarks() {
+    const arena = makeArena({ width: 2000, height: 2000 });
+    // Enemy is deliberately NOT the Donut: the marks below are injected with
+    // ownerRole 'enemy' directly, and a live Donut would keep dropping FRESH marks
+    // every dropIntervalMs, which reads exactly like the stack dripping.
+    const state = playingMatch(arena, 'hamburger', 'hamburger');
+    state.player.x = arena.center.x; state.player.y = arena.center.y;
+    state.enemy.x = arena.center.x; state.enemy.y = arena.center.y;
+    // Enemy weapons permanently on cooldown so ONLY the trail can deal damage.
+    state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);
+    for (let i = 0; i < MAX_MARKS; i++) {
+      state.trailMarks.push({
+        id: 10_000 + i, ownerRole: 'enemy',
+        x: arena.center.x, y: arena.center.y,
+        expiresAt: state.elapsed + TRAIL.durationMs, damaged: false,
+      });
+    }
+    return state;
+  }
+
+  {
+    const state = stackedMarks();
+    const hp0 = state.player.hp;
+    const events = stepMatch(state, 16.667, noInput);
+    const trailHits = events.filter((e) => e.type === 'hit-landed' && e.source.kind === 'trail');
+    check(`${MAX_MARKS} stacked marks deal at most TRAIL.damage (${TRAIL.damage}) in one tick`,
+      hp0 - state.player.hp <= TRAIL.damage, `lost ${hp0 - state.player.hp} HP`);
+    check(`...via at most TRAIL.maxHitsPerTick (${TRAIL.maxHitsPerTick}) hit events`,
+      trailHits.length <= TRAIL.maxHitsPerTick, `${trailHits.length} events`);
+
+    // And the cap must not merely defer the burst: the whole overlapping stack is
+    // spent in that tick, so it cannot drip the same 87 HP out over the next 29 ticks.
+    let dripped = 0;
+    for (let i = 0; i < 60; i++) {
+      const hpBefore = state.player.hp;
+      stepMatch(state, 16.667, noInput);
+      dripped += hpBefore - state.player.hp;
+    }
+    check('the spent stack does not drip the same damage out over later ticks',
+      dripped === 0, `${dripped} HP over the following 60 ticks`);
+  }
+
+  // The mechanic still works: one mark under the opponent still hurts, once.
+  {
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena, 'hamburger', 'donut');
+    state.player.x = arena.center.x; state.player.y = arena.center.y;
+    state.enemy.x = arena.center.x + 800; state.enemy.y = arena.center.y;
+    state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);
+    state.trailMarks.push({
+      id: 99, ownerRole: 'enemy', x: arena.center.x, y: arena.center.y,
+      expiresAt: state.elapsed + TRAIL.durationMs, damaged: false,
+    });
+    const hp0 = state.player.hp;
+    stepMatch(state, 16.667, noInput);
+    check('a single trail mark still deals TRAIL.damage', hp0 - state.player.hp === TRAIL.damage,
+      `lost ${hp0 - state.player.hp}`);
+    const hp1 = state.player.hp;
+    stepMatch(state, 16.667, noInput);
+    check('...and only once', state.player.hp === hp1);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 13. MELEE FACING AT ZERO SEPARATION (regression)
+//
+// `dot = (facing . toTarget) / dist` with dist === 0 is NaN, and `NaN > cone/2` is
+// false, so a coned melee swing landed on a perfectly overlapping target no matter
+// where the attacker was pointing. The AI closes to literally zero separation, so aim
+// stopped mattering exactly where the fight is closest. See combat.ts for the defined
+// answer: coincident fighters have no bearing, so a DIRECTIONAL swing misses and an
+// OMNIDIRECTIONAL one (cone >= 360) still lands.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n13. Melee cone is well-defined at zero separation');
+  const smashIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash'); // cone 80
+  const giantIndex = CHARACTERS.lollipop.weapons.findIndex((w) => w.key === 'Giant');  // cone 360
+
+  function swing({ charId = 'hamburger', weaponIndex = smashIndex, dx = 0, dy = 0, facing = { x: 1, y: 0 } }) {
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena, charId, 'hamburger');
+    state.player.x = 500; state.player.y = 500;
+    state.player.facing = facing;
+    state.enemy.x = 500 + dx; state.enemy.y = 500 + dy;
+    // The enemy AI acts inside this same tick and, at zero separation, lands its own
+    // hits — so only the PLAYER's swing (targetRole 'enemy') is read here. Judging any
+    // `hit-landed` event measured the AI, not the cone.
+    state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);
+    const events = stepMatch(state, 0, { move: { x: 0, y: 0 }, selectedWeapon: weaponIndex, attack: true });
+    return {
+      hit: !!events.find((e) => e.type === 'hit-landed' && e.targetRole === 'enemy'),
+      fired: !!events.find((e) => e.type === 'weapon-fired' && e.fighterRole === 'player'),
+    };
+  }
+
+  const away = swing({ facing: { x: -1, y: 0 } });
+  check('coincident + coned weapon + facing away: NO hit', !away.hit);
+  check('coincident: the attempt still consumed the cooldown', away.fired);
+  check('coincident + coned weapon + facing "toward": also no hit (there is no bearing)',
+    !swing({ facing: { x: 1, y: 0 } }).hit);
+  check('coincident + OMNIDIRECTIONAL weapon (cone 360): still hits',
+    swing({ charId: 'lollipop', weaponIndex: giantIndex }).hit);
+
+  // Continuity: everything above the epsilon behaves exactly as it always did.
+  check('just off coincident, inside the cone: hits', swing({ dx: 0.001, facing: { x: 1, y: 0 } }).hit);
+  check('just off coincident, outside the cone: misses', swing({ dx: 0.001, facing: { x: -1, y: 0 } }).hit === false);
+  check('normal range, inside the cone: hits', swing({ dx: SMASH_IN_RANGE, facing: { x: 1, y: 0 } }).hit);
+  check('normal range, outside the cone: misses', swing({ dy: SMASH_IN_RANGE, facing: { x: 1, y: 0 } }).hit === false);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

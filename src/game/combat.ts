@@ -29,6 +29,17 @@ const RAD2DEG = 180 / Math.PI;
 const DEG2RAD = Math.PI / 180;
 
 /**
+ * Separation below which two fighters count as COINCIDENT and there is no bearing
+ * between them. See the melee block in `attemptAttack` for what that means.
+ *
+ * Deliberately a true-degeneracy epsilon rather than a play-scale distance: at any
+ * separation above it the bearing is a well-defined direction and the cone check does
+ * its normal job, so this rule governs exactly the case where the maths has no answer
+ * — not a "too close to swing" band, which would be a design change rather than a fix.
+ */
+const MELEE_COINCIDENT_EPS = 1e-6;
+
+/**
  * True if `role`'s character has a live Sticky Trail mark of its own underneath it.
  * Used both for the ranged trail-damage boost here and for the movement speed boost
  * in `sim.ts` (kept here so both call sites share one definition).
@@ -174,12 +185,41 @@ export function attemptAttack(
     if (dist > (w.range ?? 0)) return true; // "too far"
 
     const cone = w.cone ?? 360;
-    // Deliberately not divide-by-zero-guarded: at dist === 0 this produces NaN, and
-    // `NaN > cone/2` is false, so a melee hit on a perfectly overlapping target
-    // always lands regardless of facing — matching the prototype's literal math.
-    const dot = (attacker.facing.x * toTargetX + attacker.facing.y * toTargetY) / dist;
-    const angleTo = Math.acos(Math.max(-1, Math.min(1, dot))) * RAD2DEG;
-    if (angleTo > cone / 2) return true; // "wrong direction"
+
+    // ── WHAT FACING MEANS AT ZERO SEPARATION ──────────────────────────────────
+    //
+    // This used to be an unguarded division. At `dist === 0` it produced NaN, and
+    // `NaN > cone / 2` is false, so the cone check could not reject anything: a melee
+    // swing on a perfectly overlapping target landed regardless of where the attacker
+    // was pointing. The old comment called that prototype fidelity, and it is — but the
+    // AI closes to LITERALLY zero separation (measured: 1,582 of 160,642 ticks across
+    // 110 real matches sit at dist exactly 0, and 39 of 510 melee hits land inside
+    // 1 wu), so aim stopped being load-bearing at precisely the range where the fight
+    // is closest. An outcome decided by IEEE-754 NaN comparison semantics is not a
+    // rule; it is the absence of one.
+    //
+    // THE DEFINED ANSWER: two coincident fighters have no bearing between them — the
+    // vector from one to the other is the zero vector, which points nowhere, and no
+    // amount of facing can aim a swing along it. So:
+    //
+    //   * a DIRECTIONAL swing (cone < 360°) MISSES. It is aimed, and there is nothing
+    //     to aim at; the attempt is spent and the cooldown consumed, exactly like the
+    //     existing "too far" and "wrong direction" outcomes.
+    //   * an OMNIDIRECTIONAL swing (cone >= 360°, i.e. Lollipop's Giant Lollipop)
+    //     still LANDS. It needs no bearing by definition, so the degeneracy that stops
+    //     the others never arises for it.
+    //
+    // This is symmetric — the AI's own melee misses at zero separation too, so walking
+    // into the player is no longer free damage — and it restores the property that
+    // above the epsilon everything is continuous: approach from inside the cone and
+    // the swing lands right up to the last representable distance, approach from
+    // outside and it misses.
+    if (cone < 360) {
+      if (dist < MELEE_COINCIDENT_EPS) return true; // "coincident: no bearing to swing along"
+      const dot = (attacker.facing.x * toTargetX + attacker.facing.y * toTargetY) / dist;
+      const angleTo = Math.acos(Math.max(-1, Math.min(1, dot))) * RAD2DEG;
+      if (angleTo > cone / 2) return true; // "wrong direction"
+    }
 
     applyDamage(state, targetRole, w.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name }, events);
     return true;
