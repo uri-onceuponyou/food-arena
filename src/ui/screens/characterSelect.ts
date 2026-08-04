@@ -28,7 +28,7 @@ import {
 import type { Screen, ScreenContext } from './types';
 import { injectStyles, rgba } from './theme';
 import { burstConfetti, el } from './fx';
-import { getCharacterStage } from './charStage';
+import { getCharacterStage, PORTRAIT_BG_CSS } from './charStage';
 import { getCachedThumb, requestThumbnails } from './thumbs';
 import { abilityIcon, ensureIconStyles, icon } from '../icons';
 
@@ -364,24 +364,30 @@ const CSS = `
   border-radius: 18px;
   overflow: hidden;
   box-shadow: 0 5px 0 rgba(0,0,0,0.35);
-  background: #39b7e8;
+  /* Seen only for the frame before WebGL first presents. Imported from 'charStage.ts'
+     so the card and the renderer cannot disagree about the clear colour. */
+  background: ${PORTRAIT_BG_CSS};
 }
 .fa-chars .chars-hero-3d { position: absolute; inset: 0; }
-/* A lit set, not a blue rectangle.
-   Three layers, in order: a warm spotlight pool behind the character's head; a
-   corner vignette that pulls the panel's cool cyan back toward the menu's warm
-   palette so the viewport belongs to the same world as the chrome; and a bottom
-   scrim the nameplate sits on. Both critics named "flat unlit sky, nothing anchoring
-   the hero" as the gap between this and shipped work — this plus the contact shadow
-   in charStage.ts is that fix. */
+/* A NAMEPLATE SCRIM, and nothing else any more.
+   This used to be three layers doing the staging in CSS: a warm spotlight pool behind
+   the head, a red corner vignette, and a bottom scrim. The first two are gone, because
+   'charStage.ts' now builds the pool and the falloff as a real lit cyclorama and a real
+   floor, and painting a second set of them OVER the canvas would be two rooms in one
+   panel. The red one had a second cost: it was the largest warm wash in the menus,
+   dropped straight onto what is now the largest COOL surface, and 'docs/LESSONS.md' §8
+   is explicit that the reference reserves the warm half of the wheel for the CAST.
+
+   What survives is the part that was never staging: a scrim under the nameplate, which
+   is a legibility device. The hero name is cream with an ink stroke and the rarity chip
+   carries its own plate, so this is now light enough to keep the floor's own value
+   while still guaranteeing the type a dark ground. */
 .fa-chars .chars-hero-vignette {
   position: absolute;
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(52% 34% at 50% 30%, rgba(255,248,214,0.5), transparent 68%),
-    radial-gradient(120% 100% at 50% 40%, transparent 40%, rgba(193,39,45,0.42) 100%),
-    linear-gradient(0deg, rgba(20,13,30,0.78) 0%, rgba(20,13,30,0.32) 18%, transparent 38%);
+    linear-gradient(0deg, rgba(12,26,40,0.72) 0%, rgba(12,26,40,0.26) 15%, transparent 32%);
 }
 
 /* Equip lives HERE, on the hero, not in the action row. Two same-shaped pills side
@@ -726,9 +732,24 @@ const CSS = `
    an action row, so the card loses ~26px of ornament: a smaller glyph and a shorter
    rarity chip. Names stay — the card background already encodes rarity, nothing
    else encodes identity. */
+/* ⚠️ THIS BLOCK WAS UNCLOSED AT HEAD, AND THE PORTRAIT BREAKPOINT WAS NESTED IN IT.
+   Found by counting braces in the CSS template literal: +2, i.e. two blocks opened and
+   never closed, committed and shipped. The consequence was not cosmetic. Modern CSS
+   nesting made it PARSE — as
+       (max-height: 460px) AND (max-width: 700px)
+   — so every rule below fired only on a viewport that was both under 700px wide and
+   under 460px tall. A real portrait phone is 430x932: wide enough to match the first
+   condition and far too tall to match the second, so character select had NO portrait
+   layout at all and fell back to three landscape columns squeezed into 430px.
+
+   This is exactly the limit 'docs/LESSONS.md' §9 records for the module parser in
+   'menu_accept': the file is valid TypeScript, so nothing that reads TypeScript can see
+   it, and the five landscape-only viewports in the acceptance suite could never have
+   caught a portrait-only defect. */
 @media (max-height: 460px) {
   .fa-chars .chars-heading { display: none; }
-  
+}
+
 @media (max-width: 700px) {
   .fa-chars .chars-body {
     grid-template-columns: minmax(0, 1fr);
@@ -736,4 +757,24 @@ const CSS = `
   }
   .fa-chars .chars-detail { max-height: 34vh; }
   .fa-chars .chars-heading { display: none; }
-  `;
+  /* TOP-LEFT here, bottom-centre everywhere else, and the reason is the panel's shape
+     rather than a preference. In portrait the hero row is ~380px tall against a full
+     column's ~740, and the rig frames the subject to a fraction of the panel HEIGHT —
+     so the character and its podium move down into exactly the strip a bottom-centred
+     plate occupies, and the fighter's name lands across its own legs. This is the same
+     defect 'home.ts' fixed for the same reason; the panel's top-left is dead sky in
+     every framing the rig produces, because the camera pitches 20 degrees and targets
+     half the subject's height. */
+  .fa-chars .chars-hero-plate {
+    top: clamp(6px, 1.4vh, 12px);
+    bottom: auto;
+    inset-inline-end: auto;
+    align-items: flex-start;
+    padding-inline-start: clamp(8px, 2vw, 14px);
+  }
+  .fa-chars .chars-hero-plate .fa-rarity { align-self: flex-start; }
+  /* The bottom scrim was there for a bottom-centred plate. With the plate at the top it
+     is darkening a corner of the set for nothing. */
+  .fa-chars .chars-hero-vignette { background: none; }
+}
+`;

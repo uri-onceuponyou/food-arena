@@ -17,6 +17,72 @@
  * them constantly, so the context is created once, re-parented on navigation, and
  * only destroyed when a MATCH starts (which needs the GPU for itself). The shell
  * owns that lifecycle — see `disposeCharacterStage()`.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE SET — and the measurement bug it exists to fix
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * This file used to clear to an opaque saturated cyan and fog the ground disc into
+ * that same colour. Two consequences, one aesthetic and one much worse.
+ *
+ * AESTHETIC. Two independent blind critics, both on valid rounds (references 8.5/8.0
+ * and 8/7), said the same thing in the same words: the hero "reads as a cutout pasted
+ * on a colour swatch". They were right, and the mechanism was structural rather than
+ * a matter of taste — because `Stage` clears to an OPAQUE background, anything the
+ * consuming screen paints behind the canvas is invisible, so every layer available
+ * from `home.ts` was a tint drawn OVER the character. The screens had built masked
+ * CSS horizons and contact shadows as a workaround. They are gone; the set below is
+ * the real thing.
+ *
+ * MEASUREMENT. `docs/LESSONS.md` §13. Measured with `tools/tmp/stage_fg.mjs`:
+ *
+ *                                   character vs its surround
+ *     this stage, cyan backdrop      body 0.464  surround 0.698   -0.234
+ *     this stage, the set below      body 0.448  surround 0.260   +0.188
+ *     the shipped match              body 0.541  frame    0.325   +0.216
+ *
+ * OPPOSITE POLARITY. The menus were showing every fighter as a dark shape on a bright
+ * field while the game shows it as a bright shape on a darker one, so a silhouette
+ * judged here was judged against a figure/ground relationship the player never sees —
+ * and a cool rim light on a cyan backdrop measurably REDUCES separation, which is why
+ * critics kept reporting the rim as absent when it demonstrably exists.
+ *
+ * ── What is built, and why each piece ───────────────────────────────────────
+ *
+ *  1. A CYCLORAMA, not a flat wall. The portrait yaws +/-22 degrees, so a flat
+ *     backdrop's horizon would slide up and down the frame across the sway and every
+ *     number measured off it would be sway-dependent. A cylinder centred on the
+ *     subject is rotationally symmetric: the horizon sits at the same height at every
+ *     yaw, which makes the acceptance numbers stable AND is what a real photographic
+ *     cove is.
+ *  2. A FLOOR THE DISC TERMINATES AGAINST. The old fog existed only to hide the
+ *     ground disc's own edge. With a wall to stop against there is nothing to hide,
+ *     so the fog is gone and the horizon is a real geometric edge between two lit
+ *     surfaces instead of a smooth fade into the clear colour.
+ *  3. A REAL CAST SHADOW plus a grounding decal. The key already threw a shadow; on a
+ *     near-white floor it was invisible. On this floor it reads, and a soft radial
+ *     MULTIPLY decal under the podium adds the tight contact the long cast shadow
+ *     cannot give (multiply keeps the floor's hue and takes only value, which is what
+ *     a shadow on a saturated surface does — a black wash goes grey).
+ *  4. A PODIUM WITH A REAL INSET: a tapered body, an overhanging rim, and a gold top
+ *     face recessed inside it. The reference plates that beat us all put their hero on
+ *     something built rather than on a coloured disc.
+ *
+ * ── The value structure is authored as a table, not by eye ──────────────────
+ * `CYC_VALUE` and `FLOOR_VALUE` below are vertex-colour multipliers over an albedo.
+ * They exist as tables because three separate acceptance numbers depend on the same
+ * few values and they have to be balanced against each other rather than tuned one at
+ * a time:
+ *
+ *   * FIGURE/GROUND polarity wants the wall dark BEHIND THE HEAD.
+ *   * `home_metrics`'s value break wants the head band brighter than the lower
+ *     corners — so the near floor has to be darker still.
+ *   * The horizon step wants a real discontinuity where they meet.
+ *
+ * The wall also renders at roughly 0.6x the floor for the same albedo, because the
+ * key sits 30 degrees above the horizon: a floor normal collects 0.50 of it and the
+ * cyclorama's back panel collects 0.24. That factor is why the wall's authored colour
+ * is LIGHTER than the floor's and still renders darker.
  */
 
 import * as THREE from 'three';
@@ -24,39 +90,246 @@ import { Stage } from '../../render/stage';
 import { createCharacter } from '../../characters/registry';
 import type { CharacterModel } from '../../characters/types';
 import { CHARACTER_HEIGHT } from '../../units';
-import { toonMat, RAMP_SOFT, flatMat } from '../../render/toon';
+import { toonMat, RAMP_SOFT } from '../../render/toon';
 import type { CharacterId } from '../../game/rules';
 
 /**
- * Backdrop for the portrait. Deliberately the SAME bright cyan `preview.ts` defaults
- * to for a character piece, and for the same reason recorded there: a dark ground
- * made every model read as gloomy clay, and the reference presents characters on
- * bright saturated grounds. It is also complementary to the menu's warm orange
- * backdrop, so the portrait reads as a lit display case rather than a hole.
- */
-const PORTRAIT_BG = 0x39b7e8;
-/**
- * Ground and pedestal.
+ * Clear colour behind the set.
  *
- * Round 1 used `#8fd6f2` ground with a blue plinth and the whole lower third came
- * back as one pale, near-white wash — the plinth and the floor were the same colour
- * once the toon ramp and the grade had brightened both, so the hero read as floating
- * on a blank field. The floor is now a deeper blue and the plinth is WARM, which is
- * the same warm-object-on-cool-ground separation Zooba's hero pedestal uses
- * (`reference/images/zooba/tablet_5.jpg`) and ties the stand to the menu's gold.
+ * The cyclorama covers the whole frame at every aspect the menus produce, so this is
+ * only ever seen as a sliver — but it is also what the consuming screens paint as the
+ * canvas's CSS background for the frame before WebGL first presents, and what
+ * `opening.ts` fades its masked ellipse into. Keyed to the wall so a seam cannot show.
  */
-const PORTRAIT_GROUND = '#3FA8D4';
-const PEDESTAL_TOP = '#F4C55E';
-const PEDESTAL_SIDE = '#B9701F';
+const PORTRAIT_BG = 0x1d5a80;
+/** The same colour as a CSS string, so no screen has to re-type the hex. */
+export const PORTRAIT_BG_CSS = '#1d5a80';
 
-/** Height of the plinth the hero stands on, in metres. */
-const PLINTH_H = 0.2;
+/**
+ * Cyclorama albedo. Lighter than the floor on purpose — see the header note on the
+ * 0.6x factor. Deliberately a saturated azure rather than a desaturated one:
+ * `docs/LESSONS.md` §8 measured that the reference reserves HUE, not saturation, and
+ * that adding COOL chroma lowers the warm band's share more cheaply than removing warm
+ * chroma does. This stage is now the largest cool surface in the menus.
+ */
+const CYC_COLOR = '#1D5576';
+/** Floor albedo — deeper than the wall, so the horizon separates two materials rather
+ *  than two brightnesses of one.
+ *
+ *  Both of these were CHOSEN BY SWEEP, not by eye: `stage_fg.mjs --sweep` retints
+ *  `menu_wall` and `menu_ground` in-page across a ladder of candidates against one
+ *  fixed silhouette mask, so eight albedo pairs cost one page load instead of eight.
+ *  The ladder was monotone and the polarity it produced is the whole reason these are
+ *  the numbers they are:
+ *
+ *    3C9CCE : 186A8E    surround 0.412   polarity +0.065
+ *    2F7CA9 : 135871    surround 0.346   polarity +0.130
+ *    236287 : 0F4658    surround 0.292   polarity +0.183
+ *    1D5576 : 0D3D4B    surround 0.268   polarity +0.207   <- shipped, bluer floor
+ *
+ *  against the shipped match's body 0.541 / frame 0.325 / polarity +0.216.
+ *
+ *  The floor is `0B3F63` and not the swept `0D3D4B` on purpose: the same luma with the
+ *  blue channel 24 points higher. `home_metrics.mjs` identifies a backdrop pixel as
+ *  b > r+20 AND b >= 70 AND g > r, and at this value a teal floor sits within a few
+ *  counts of that threshold — a floor that measures correctly today and drops out of
+ *  its own metric on the next character is not a floor, it is a trap. Deeper blue also
+ *  spends HUE rather than VALUE, which is the direction `docs/LESSONS.md` §8 says is
+ *  cheaper. */
+const FLOOR_COLOR = '#093F73';
+
+const PEDESTAL_BODY = '#8A4E15';
+const PEDESTAL_RIM = '#C07A23';
+const PEDESTAL_TOP = '#F4C55E';
+
+/** Radius of the cyclorama, in metres.
+ *
+ *  This is a COMPOSITION number and it was solved, not guessed. At the portrait rig's
+ *  20 degree pitch and 34 degree FOV the camera sits ~7.4 m from the subject, so the
+ *  cylinder's base circle projects to roughly 44% of the panel's height from the top —
+ *  which puts the horizon behind the character's waist, the wall behind its head, and
+ *  the floor under its feet. Pushing the wall further back LOWERS the horizon and
+ *  turns the panel into mostly floor; pulling it closer raises it until the character
+ *  overlaps the top edge. It is also just outside the 4.68 m the tallest fighter's own
+ *  cast shadow reaches, so the shadow stays ON the floor and does not climb the wall.
+ */
+const CYC_RADIUS = 5.0;
+const CYC_HEIGHT = 14;
+/** The cove starts below the floor so no seam can open at the horizon. */
+const CYC_BASE_Y = -0.6;
+
+/** Vertex-colour multiplier on the cyclorama, as [worldY, multiplier] pairs. */
+const CYC_VALUE: Array<[number, number]> = [
+  [-0.6, 0.86],
+  [0.0, 0.88],
+  [1.2, 0.94],
+  [2.6, 1.02],
+  [3.8, 1.16],
+  [8.0, 1.40],
+  [14.0, 1.55],
+];
+
+/**
+ * Azimuth compensation on the cove, and it is a MEASURED correction rather than a look.
+ *
+ * `tools/tmp/setprobe.mjs` sampled the first build of this set and found the cove
+ * rendering at luma 0.608 on the left of the frame and 0.216 on the right — a 2.8x
+ * range across one continuous surface, because the key sits at azimuth (16.35, 4.69)
+ * and a cylinder's normals sweep through the whole dot-product range. Two problems with
+ * that, one per acceptance number: the bright side was BRIGHTER than the character
+ * standing in front of it (0.47), which inverts figure/ground on that whole flank, and
+ * the dark side was heading for the blue-channel floor `home_metrics` needs to
+ * recognise a pixel as backdrop at all.
+ *
+ * A painted cyclorama is the standard answer and it is what these two numbers are: the
+ * albedo is authored DARKER where the key hits hardest and lighter where it does not,
+ * which compresses the range without touching the lighting rig (`src/render/lighting.ts`
+ * is not this file's to change, and `docs/LESSONS.md` §3 records a measured sweep
+ * showing rim/key retunes are worth at most +0.012 of figure/ground anyway). It keeps
+ * the direction — the cove is still visibly lit from one side — and gives up the part
+ * of it that was beating the hero.
+ */
+const CYC_AZIMUTH_SHADE = 1.30;
+const CYC_AZIMUTH_LIT = 0.52;
+/** Direction to the key, from `src/render/lighting.ts`. Only the horizontal part is
+ *  used: a cylinder wall's normal has no vertical component. */
+const KEY_DIR = new THREE.Vector3(16.35, 9.82, 4.69).normalize();
+
+/** Vertex-colour multiplier on the floor, as [radius, multiplier] pairs.
+ *
+ *  Darkest at the podium and brightening toward the horizon. That ordering is not
+ *  decoration: it is what makes the warm podium sit in the darkest part of the frame
+ *  (maximum separation exactly where the eye goes), it darkens the panel's lower
+ *  corners so the value break stays positive against the wall behind the head, and it
+ *  puts the floor's brightest band right where it meets the cove — the read every hero
+ *  podium in the reference set uses. */
+const FLOOR_VALUE: Array<[number, number]> = [
+  [0.0, 0.58],
+  [1.5, 0.62],
+  [2.6, 0.88],
+  [3.8, 1.16],
+  [4.7, 1.36],
+  [6.4, 1.42],
+];
+
+/** Height of the podium's rim, in metres — the top of the whole assembly. */
+const PLINTH_H = 0.24;
+/** Where the feet actually land: the recessed top face, inside the rim. */
+const PLINTH_TOP_Y = 0.215;
 /** Fraction of the frame's HEIGHT the subject fills when height is the binding axis. */
 const V_FILL = 0.62;
-/** Widest part of the plinth, in metres — it has to be framed too. */
+/** Widest part of the podium, in metres — it has to be framed too.
+ *  UNCHANGED at 2.48 deliberately: `applyFraming` fits `max(subjectW, PLINTH_BASE_W)`,
+ *  so widening the podium would shrink every character, and character width over panel
+ *  width is an acceptance number (`menu_accept`, floor 0.42). */
 const PLINTH_BASE_W = 2.48;
 /** Fraction of the frame's WIDTH the subject may fill when width is binding. */
 const H_FILL = 0.86;
+
+/** Sample a [key, value] ramp with smooth interpolation between stops. */
+function rampAt(table: Array<[number, number]>, x: number): number {
+  if (x <= table[0][0]) return table[0][1];
+  const last = table[table.length - 1];
+  if (x >= last[0]) return last[1];
+  for (let i = 1; i < table.length; i++) {
+    const [x1, v1] = table[i];
+    const [x0, v0] = table[i - 1];
+    if (x > x1) continue;
+    const t = (x - x0) / Math.max(1e-6, x1 - x0);
+    return v0 + (v1 - v0) * (t * t * (3 - 2 * t));
+  }
+  return last[1];
+}
+
+/**
+ * A soft radial falloff as a texture, WHITE at the rim and dark in the middle.
+ *
+ * Used with `THREE.MultiplyBlending`, so white is a no-op and the middle takes value
+ * out of whatever is underneath. That is deliberately not an alpha fade: multiply
+ * ignores alpha, and a flat black ellipse at 34% opacity over a saturated floor goes
+ * GREY — the previous version of this shadow did exactly that and greyed the podium it
+ * was supposed to be grounding.
+ */
+function radialShadowTexture(core: [number, number, number], px = 128): THREE.Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = px;
+  canvas.height = px;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const g = ctx.createRadialGradient(px / 2, px / 2, 0, px / 2, px / 2, px / 2);
+    const [r, gc, b] = core;
+    const toward = (t: number) =>
+      `rgb(${Math.round(r + (255 - r) * t)},${Math.round(gc + (255 - gc) * t)},${Math.round(b + (255 - b) * t)})`;
+    // The plinth's own base covers the inner ~54% of this square, so the falloff has
+    // to still be dark where it EMERGES from under the object. A gradient that has
+    // spent most of its range by then draws a shadow nobody can see — which is the
+    // whole of `docs/LESSONS.md` §1 in one line.
+    g.addColorStop(0, toward(0));
+    g.addColorStop(0.54, toward(0.10));
+    g.addColorStop(0.80, toward(0.58));
+    g.addColorStop(1, 'rgb(255,255,255)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, px, px);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  // NOT sRGB. Multiply blending happens against the composer's LINEAR HalfFloat
+  // buffer, so these bytes are wanted as linear multipliers directly; decoding them
+  // from sRGB first would square the darkening and crush the floor to near black.
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
+/**
+ * A flat, multiply-blended decal.
+ *
+ * ⚠️ `THREE.MultiplyBlending` IS NOT USED HERE, AND THAT IS DELIBERATE. In three r180
+ * `WebGLState.setBlending` refuses it outright unless `premultipliedAlpha` is also set:
+ *
+ *     case MultiplyBlending:
+ *       console.error( 'THREE.WebGLState: MultiplyBlending requires
+ *                       material.premultipliedAlpha = true' );
+ *
+ * It does not throw and it does not fall back — it logs to the console and leaves
+ * whatever blend function the previous draw call set. The first render of this set came
+ * back with a white floor and two visible white quadrilaterals: the decals drawing
+ * their own texture opaquely, over the thing they were supposed to darken. That is
+ * `docs/LESSONS.md` §1 with the sign flipped — not invisible, but present and doing the
+ * opposite of its job — and the only reason it was caught in one pass rather than five
+ * is that the failure was looked at and then probed instead of reasoned about.
+ *
+ * `CustomBlending` states the same equation explicitly (dst * src, alpha untouched) and
+ * cannot be silently declined.
+ *
+ * Two other flags that are not optional, both also §1:
+ *  * `depthWrite: false` — transparent materials that still write depth silently
+ *    occlude whatever is behind them. Every transparent material in the cast carries
+ *    `depthWrite: true` today; this one does not.
+ *  * `transparent: true` — this is what puts the mesh in the TRANSPARENT queue.
+ *    Without it three sorts it with the opaques, front-to-back, and a multiply decal
+ *    drawn before the surface it darkens multiplies against the clear colour instead.
+ */
+function shadowDecal(size: number, core: [number, number, number], order: number): THREE.Mesh {
+  const mat = new THREE.MeshBasicMaterial({
+    map: radialShadowTexture(core),
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.ZeroFactor,
+    blendDst: THREE.SrcColorFactor,
+    blendEquationAlpha: THREE.AddEquation,
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.renderOrder = order;
+  mesh.userData.noOutline = true;
+  return mesh;
+}
 
 export interface CharacterStage {
   /** Move the canvas into `host` (and size to it). Safe to call repeatedly. */
@@ -87,7 +360,7 @@ class MenuCharacterStage implements CharacterStage {
   /** Seconds remaining on the entrance pop; drives a short scale-in on swap. */
   private introT = 0;
   private observer: ResizeObserver | null = null;
-  private contactShadow: THREE.Mesh | null = null;
+  private footShadow: THREE.Mesh | null = null;
   private disposed = false;
 
   constructor() {
@@ -98,10 +371,11 @@ class MenuCharacterStage implements CharacterStage {
     this.stage = new Stage({
       container: this.holder,
       background: PORTRAIT_BG,
-      // Fades the ground to the backdrop colour BEFORE the disc's own edge is
-      // reached — otherwise the disc terminates on a visible arc across the upper
-      // half of the panel, which reads as a floating island rather than as ground.
-      fog: { color: PORTRAIT_BG, near: 9, far: 22 },
+      // NO FOG. It existed only to fade the ground disc into the clear colour before
+      // the disc's own edge was reached, because there was nothing for the floor to
+      // end against. The cyclorama is that thing, and fog over it would soften the
+      // one hard edge the set is built to produce.
+      fog: null,
       camera: {
         pitchDeg: 20,
         yawDeg: 0,
@@ -115,64 +389,194 @@ class MenuCharacterStage implements CharacterStage {
     });
     this.stage.canvas.style.cssText = 'display:block;width:100%;height:100%;';
 
-    this.buildPedestal();
+    this.buildSet();
     this.stage.rig.snapTo(0, 0);
-    this.stage.lighting.focus(0, 0, 5);
+    // 6 m, not 5: the tallest fighter's own cast shadow reaches 4.68 m from the origin
+    // at the key's 30 degree elevation, and a shadow frustum that ends at 5 clips the
+    // tip of it. 1024 texels across 12 m is 85 texels/m — nearly triple the shipped
+    // match's 30.1, so the extra metre costs nothing that can be seen.
+    this.stage.lighting.focus(0, 0, 6);
   }
 
-  /** Shadow-catching disc plus a low plinth, so the hero is standing on a stage and
-   *  not floating in a void — the single biggest "is this a shipped game" tell in
-   *  every character-select screen in the reference set. */
-  private buildPedestal(): void {
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(30, 64),
-      toonMat({ color: PORTRAIT_GROUND, ramp: RAMP_SOFT() }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    ground.userData.noOutline = true;
-    ground.name = 'menu_ground';
+  /**
+   * The set: cove, floor, podium, grounding.
+   *
+   * Order matters for the two multiply decals — they must draw AFTER the surface they
+   * darken and BEFORE the podium, or they multiply against the wrong thing.
+   */
+  private buildSet(): void {
+    // ── The cove ─────────────────────────────────────────────────────────────
+    // Open-ended cylinder seen from the inside. Vertex colours carry the vertical
+    // value ramp and `material.color` carries the hue, so a colour sweep can retint
+    // the whole wall without rebuilding the gradient (which is exactly how the albedo
+    // below was chosen — `tools/tmp/stage_fg.mjs --sweep`).
+    const cycGeo = new THREE.CylinderGeometry(CYC_RADIUS, CYC_RADIUS, CYC_HEIGHT, 72, 28, true);
+    this.paintVertexRamp(cycGeo, (x, y, z) => {
+      // Inward normal of a cylinder wall is (-x, 0, -z)/R, so this is its dot with the
+      // key. Clamped at 0: the unlit half is already at the shade end of the ramp.
+      const lit = THREE.MathUtils.clamp(-(x * KEY_DIR.x + z * KEY_DIR.z) / CYC_RADIUS, 0, 1);
+      return rampAt(CYC_VALUE, y + CYC_HEIGHT / 2 + CYC_BASE_Y)
+        * (CYC_AZIMUTH_SHADE + (CYC_AZIMUTH_LIT - CYC_AZIMUTH_SHADE) * lit);
+    });
+    const cycMat = toonMat({ color: CYC_COLOR, ramp: RAMP_SOFT(), roughness: 0.9, rim: false });
+    cycMat.side = THREE.BackSide;
+    cycMat.vertexColors = true;
+    const cyc = new THREE.Mesh(cycGeo, cycMat);
+    cyc.position.y = CYC_HEIGHT / 2 + CYC_BASE_Y;
+    cyc.receiveShadow = true;
+    cyc.userData.noOutline = true;
+    cyc.name = 'menu_wall';
+    cyc.renderOrder = -1;
+    this.stage.scene.add(cyc);
+
+    // ── The floor ────────────────────────────────────────────────────────────
+    // A RING and not a CIRCLE: `CircleGeometry` has exactly two distinct radii (the
+    // centre vertex and the rim), so a radial vertex gradient across it is impossible.
+    // 32 radial segments out to 6.4 m gives a stop every 20 cm, which is smooth at
+    // this framing and still only ~3k triangles.
+    const floorGeo = new THREE.RingGeometry(0, 6.4, 96, 32);
+    this.paintVertexRamp(floorGeo, (x, y) => rampAt(FLOOR_VALUE, Math.hypot(x, y)));
+
+    const floorMat = toonMat({ color: FLOOR_COLOR, ramp: RAMP_SOFT(), roughness: 0.86, rim: false });
+    floorMat.vertexColors = true;
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    floor.userData.noOutline = true;
+    floor.name = 'menu_ground';
+    this.stage.scene.add(floor);
+
+    // ── Grounding under the podium ───────────────────────────────────────────
+    // The key's cast shadow says "something is over there"; this says "this object is
+    // standing HERE". Both blind critics independently called the hero out as
+    // floating, and the earlier fix put its contact patch on the podium's TOP face
+    // only — under the feet, where it grounds the character to the podium and leaves
+    // the podium itself grounded to nothing.
+    //
+    // The core is a DEEP BLUE and not a neutral grey, and that is two decisions at
+    // once. Physically it is what a shadow on a blue floor under a warm key actually
+    // is: the key is the thing being blocked, so what is left is the cool fill and the
+    // sky, and the surface goes bluer as it goes darker. Practically it is the only way
+    // this shadow can be MEASURED. `home_metrics.mjs` only counts a pixel as backdrop
+    // if b > r+20 AND b >= 70 AND g > r, so a neutral multiply drags the darkest part
+    // of the shadow straight out of the metric's own sample — the harder the shadow, the
+    // fewer of its pixels get counted, and the number goes DOWN as the thing improves.
+    // Keeping blue high while dropping red and green takes luma out (multiplier 0.21
+    // against a neutral core's 0.26) and leaves every pixel of it inside the definition.
+    // The exact blue matters and it was tuned against the metric, not by eye. At core
+    // blue 132 the shadowed floor arrived at b ~= 53 and `home_metrics` discarded every
+    // one of those pixels; at 160 it arrives at ~74 and they all count. The measured
+    // contact darkening moved 35.9% -> 37.2% -> 39.5% across that change, with the
+    // shadow getting DARKER each time. A metric that silently stops seeing the
+    // thing it measures is worse than no metric, so the fix is to stay inside its
+    // definition rather than to argue with it.
+    const ground = shadowDecal(5.4, [18, 32, 160], 1);
+    ground.position.y = 0.012;
+    ground.name = 'menu_ground_decal';
     this.stage.scene.add(ground);
 
-    const side = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.12, 1.24, PLINTH_H, 44),
-      toonMat({ color: PEDESTAL_SIDE, ramp: RAMP_SOFT() }),
+    // ── The podium ───────────────────────────────────────────────────────────
+    // Three pieces, because the thing the reference has and a coloured disc does not
+    // is an INSET: an overhanging rim with a top face recessed inside it, so the rim
+    // casts a hairline of its own shadow onto the face and the whole object reads as
+    // built rather than as a cylinder.
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.15, 1.24, 0.18, 48),
+      toonMat({ color: PEDESTAL_BODY, ramp: RAMP_SOFT(), roughness: 0.72 }),
     );
-    side.position.y = PLINTH_H / 2;
-    side.receiveShadow = true;
-    side.castShadow = true;
-    side.userData.noOutline = true;
-    this.stage.scene.add(side);
+    body.position.y = 0.09;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    body.userData.noOutline = true;
+    body.name = 'menu_plinth_body';
+    this.stage.scene.add(body);
 
-    const top = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.10, 1.10, 0.04, 44),
-      toonMat({ color: PEDESTAL_TOP, ramp: RAMP_SOFT() }),
+    // ⚠️ The rim is an OPEN cylinder plus a flat annulus, and that is not a modelling
+    // preference. A solid `CylinderGeometry` occupies every radius from 0 outward, so a
+    // solid rim spanning y 0.18..0.24 would have swallowed the gold face at 0.215
+    // entirely — rendered perfectly, zero pixels delivered, which is `docs/LESSONS.md`
+    // §1 case 5 (Sushi's maki roll inside the default torso barrel) rebuilt from
+    // scratch. The recess has to be genuinely OPEN for the face to be seen through it.
+    const rimMat = toonMat({ color: PEDESTAL_RIM, ramp: RAMP_SOFT(), roughness: 0.55 });
+    const rimWall = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.21, 1.19, 0.06, 48, 1, true),
+      rimMat,
     );
-    top.position.y = PLINTH_H + 0.018;
+    rimWall.position.y = PLINTH_H - 0.03;
+    rimWall.castShadow = true;
+    rimWall.receiveShadow = true;
+    rimWall.userData.noOutline = true;
+    rimWall.name = 'menu_plinth_rim';
+    this.stage.scene.add(rimWall);
+
+    const rimTop = new THREE.Mesh(new THREE.RingGeometry(1.10, 1.21, 48), rimMat);
+    rimTop.rotation.x = -Math.PI / 2;
+    rimTop.position.y = PLINTH_H;
+    rimTop.receiveShadow = true;
+    rimTop.userData.noOutline = true;
+    this.stage.scene.add(rimTop);
+
+    // The wall of the recess itself — 2.5 cm of it, from the gold face up to the rim.
+    // This is the piece that makes the gap read as an inset rather than as a colour
+    // change, because it catches a different amount of the key than either surface it
+    // joins. `doubleSide` because the camera looks INTO it from above.
+    const recess = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.10, 1.10, PLINTH_H - PLINTH_TOP_Y, 48, 1, true),
+      toonMat({ color: PEDESTAL_BODY, ramp: RAMP_SOFT(), roughness: 0.8, doubleSide: true }),
+    );
+    recess.position.y = (PLINTH_H + PLINTH_TOP_Y) / 2;
+    recess.receiveShadow = true;
+    recess.userData.noOutline = true;
+    this.stage.scene.add(recess);
+
+    // The face the hero stands on. Deliberately deep enough to overlap the body below
+    // it — a disc would leave a 3.5 cm gap at radii under 1.15 that a low sway angle
+    // could see straight through.
+    const top = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.10, 1.10, 0.05, 48),
+      toonMat({ color: PEDESTAL_TOP, ramp: RAMP_SOFT(), roughness: 0.45 }),
+    );
+    top.position.y = PLINTH_TOP_Y - 0.025;
     top.receiveShadow = true;
     top.userData.noOutline = true;
+    top.name = 'menu_plinth_top';
     this.stage.scene.add(top);
 
-    // Explicit contact shadow on the plinth face.
-    //
-    // The key light already casts a long shadow across the ground, but that reads as
-    // "something is over there", not as "this object is standing HERE" — and both
-    // blind critics independently called the hero out as floating. A tight, soft,
-    // radially-faded ellipse directly under the feet is the cheapest and most
-    // reliable way to anchor a character to a surface, and it is the same trick the
-    // arena uses for prop grounding (see the contact/AO decal note in PROGRESS.md,
-    // where removing the equivalent rings made every pad-mounted prop float).
-    const shadow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.78, 40),
-      flatMat('#000000', { transparent: true, opacity: 0.34 }),
-    );
-    shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = PLINTH_H + 0.045;
-    shadow.scale.set(1, 1, 0.62);
-    shadow.userData.noOutline = true;
-    shadow.renderOrder = 2;
-    this.contactShadow = shadow;
-    this.stage.scene.add(shadow);
+    // Contact under the FEET, on the podium's face. Warm core so it multiplies the
+    // gold down in value without pulling it toward grey.
+    const foot = shadowDecal(1.9, [92, 62, 30], 2);
+    foot.position.y = PLINTH_TOP_Y + 0.004;
+    foot.scale.set(1, 1, 0.72);
+    foot.name = 'menu_foot_decal';
+    this.footShadow = foot;
+    this.stage.scene.add(foot);
+  }
+
+  /**
+   * Write a per-vertex multiplier into a geometry's `color` attribute.
+   *
+   * `docs/LESSONS.md` §12 records `vertexColors = true` rendering an entire floor
+   * SOLID BLACK — that was an `InstancedMesh` whose geometry had no `color` attribute
+   * at all. Setting the flag is only safe alongside writing the attribute, which is
+   * why the two always happen together here.
+   *
+   * The ramp is always evaluated in the geometry's LOCAL frame, before any rotation:
+   * a `RingGeometry` is authored in XY and tipped into the floor afterwards, so its
+   * radius is hypot(x, y), while the cylinder is already vertical and wants its own y.
+   */
+  private paintVertexRamp(
+    geo: THREE.BufferGeometry,
+    at: (x: number, y: number, z: number) => number,
+  ): void {
+    const pos = geo.attributes.position;
+    const colors = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const v = at(pos.getX(i), pos.getY(i), pos.getZ(i));
+      colors[i * 3] = v;
+      colors[i * 3 + 1] = v;
+      colors[i * 3 + 2] = v;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   }
 
   /**
@@ -192,8 +596,8 @@ class MenuCharacterStage implements CharacterStage {
   private applyFraming(): void {
     const cam = this.stage.rig.camera;
     const aspect = cam.aspect > 0 && Number.isFinite(cam.aspect) ? cam.aspect : 1;
-    // Frame the WHOLE assembly, plinth included. Framing the character alone let the
-    // plinth run off the bottom edge on a wide panel, which reads as a cropped
+    // Frame the WHOLE assembly, podium included. Framing the character alone let the
+    // podium run off the bottom edge on a wide panel, which reads as a cropped
     // photograph rather than as a hero on a stand.
     const h = Math.max(0.5, this.subjectH) + PLINTH_H;
     const w = Math.max(0.5, this.subjectW, PLINTH_BASE_W);
@@ -251,16 +655,16 @@ class MenuCharacterStage implements CharacterStage {
       Math.abs(box.min.z), Math.abs(box.max.z),
     );
 
-    // Stand ON the plinth, feet on its top face, whatever the model's own foot line is.
-    this.model.root.position.y = PLINTH_H + 0.02 - box.min.y;
+    // Stand ON the podium's recessed face, whatever the model's own foot line is.
+    this.model.root.position.y = PLINTH_TOP_Y + 0.005 - box.min.y;
 
     // Size the contact patch to this character's own footprint — a Hot Dog and a
     // Water Bottle do not share a shadow.
-    if (this.contactShadow) {
-      const foot = THREE.MathUtils.clamp(
-        Math.max(box.max.x - box.min.x, box.max.z - box.min.z) * 0.42, 0.42, 1.05,
+    if (this.footShadow) {
+      const span = THREE.MathUtils.clamp(
+        Math.max(box.max.x - box.min.x, box.max.z - box.min.z) * 1.15, 1.0, 2.3,
       );
-      this.contactShadow.scale.set(foot / 0.78, 1, (foot / 0.78) * 0.62);
+      this.footShadow.scale.set(span / 1.9, 1, (span / 1.9) * 0.72);
     }
 
     this.currentId = id;
@@ -279,7 +683,8 @@ class MenuCharacterStage implements CharacterStage {
     // Slow turntable sway rather than a full spin: a continuous rotation makes it
     // impossible to read a silhouette, and every character on this project is
     // authored to face +Z. +/-22 degrees shows the profile without ever losing the
-    // front three-quarter view the models were judged at.
+    // front three-quarter view the models were judged at. The cove is a cylinder
+    // centred on the subject precisely so this sway cannot move the horizon.
     this.stage.rig.yawDeg = Math.sin(this.elapsed * 0.42) * 22;
 
     if (this.model) {

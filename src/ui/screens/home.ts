@@ -104,15 +104,43 @@
  *     One emoji was still shipping on the lobby of a build whose headline was "all 60
  *     emoji replaced".
  *
- * ── The staging is anchored to the RIG, not to a magic number ───────────────
- * The contact shadow and the floor pool have to sit under the plinth, and the plinth
- * does not land in the same place for every character: `charStage.applyFraming()`
- * scales by the whole assembly's height, so a tall fighter puts the disc higher in the
- * card. `syncStaging()` reads the portrait's own projected foot line out of
- * `charStage.info()` and drops from it by the plinth's apparent depth. That constant
- * is CALIBRATED OFF A RENDERED FRAME rather than derived — `docs/LESSONS.md` §6: two
- * agents once computed the same on-screen size as 13% and 7% by trigonometry when the
- * truth was 10.5%.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ROUND 3 — the staging moved into the RENDERER, and four CSS layers went away
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Round 2 built the horizon, the room and the contact shadow as masked CSS layers
+ * sitting ON TOP of the canvas, and said so plainly: they had to be, because `Stage`
+ * clears to an opaque colour and anything painted BEHIND the canvas is invisible. That
+ * was a workaround for a structural blocker, and it capped what the card could ever
+ * be — every layer available from here is a tint OVER the character, so all of them
+ * had to be low-alpha, none of them could be occluded by the hero, and none of them
+ * could cast anything.
+ *
+ * `charStage.ts` now builds a real set: a lit cyclorama, a floor the ground plane
+ * terminates against, a podium with a real inset, and a real cast shadow. So the four
+ * layers are DELETED rather than kept alongside it — two horizons in one card is worse
+ * than either alone, and the second one is drawn over the hero.
+ *
+ * Measured at 1600x900 with `tools/tmp/home_metrics.mjs`, CSS layers then 3D set — and
+ * BOTH SIDES ON THE SAME SNAPSHOT, with this file, `charStage.ts` and
+ * `characterSelect.ts` reverted to HEAD inside the frozen copy for the before run. Five
+ * peers are editing `src/characters/**` right now, so two snapshots taken an hour apart
+ * would not have been comparing the same cast (`docs/LESSONS.md` §5):
+ *
+ *   contact-shadow darkening under the podium ....... 39.6%  ->  39.5%
+ *   largest single luma STEP in the field (horizon) .. 7.78% ->  47.33%
+ *   value break, head band vs lower corners ......... 35.7%  ->  59.3%
+ *   field mean saturation ........................... 0.697  ->  0.944
+ *   text runs below WCAG AA ......................... 0 of 40 -> 0 of 40, min 5.97
+ *
+ * and the number none of the CSS could ever have moved, `tools/tmp/stage_fg.mjs`:
+ *
+ *   character vs surround, home ..................... -0.234 -> +0.188
+ *   character vs surround, character select ......... -0.241 -> +0.206
+ *
+ * against the shipped match's +0.216. See `docs/LESSONS.md` §13 — that inversion is why
+ * every silhouette judgement ever made on this screen was made against a figure/ground
+ * relationship the player never sees.
  */
 
 import { CHARACTERS, MATCH_DURATION_MS, RARITY_COLORS } from '../../game/rules';
@@ -122,7 +150,7 @@ import { XP_PER_LEVEL } from './profile';
 import type { Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
 import { burstConfetti, el } from './fx';
-import { getCharacterStage } from './charStage';
+import { getCharacterStage, PORTRAIT_BG_CSS } from './charStage';
 
 /** The one mode this build ships. Named here rather than in `rules.ts` because it is
  *  a piece of front-end copy, not a balance constant — but the DURATION beside it is
@@ -133,38 +161,6 @@ const MODE_NAME = '1v1 · Kitchen Rumble';
 function formatDuration(ms: number): string {
   const total = Math.round(ms / 1000);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-}
-
-/**
- * How far BELOW the portrait's projected foot line the plinth's front rim falls,
- * expressed in metres of subject height so it can be scaled by the rig's own framing.
- *
- * `charStage.info().feet` projects the model's `box.min.y`, which sits on the plinth's
- * TOP face. The disc's near rim is further down by the plinth's 0.2 m height plus the
- * apparent depth of its 1.24 m base circle seen at the portrait camera's 20 degree
- * pitch. Trigonometry says 0.2 + 1.24·sin20° = 0.62 m.
- *
- * **The rendered frame says 0.81, and the rendered frame wins** (`docs/LESSONS.md` §6:
- * two agents once computed the same on-screen size as 13% and 7% by trigonometry when
- * the truth was 10.5%). The trig is 30% low because the near rim is the part of the
- * plinth CLOSEST to the camera, so perspective magnifies it — the same reasoning that
- * gets the sign right on paper gets the magnitude wrong on screen.
- *
- * This was not an academic difference. At 0.568 the anchor landed at 0.875 of the card
- * when the disc's base is at 0.934, so the floor light and the contact shadow were
- * drawn ACROSS the disc's face instead of under it — the plinth came back bleached and
- * cut in half by a grey band, which is a worse result than the flat swatch it replaced.
- * `tools/tmp/home_metrics.mjs` now measures the disc's base off the rendered PNG and
- * reports `contactShadowError`, so this constant can never drift silently again.
- */
-const PLINTH_DROP_M = 0.806;
-
-/** Shape of the framing readout `charStage.info()` publishes. Declared locally rather
- *  than exported from `charStage.ts`, which this screen does not own. */
-interface StageFraming {
-  feet?: { x: number; y: number } | null;
-  fill?: number;
-  subject?: { w: number; h: number };
 }
 
 export function createHomeScreen(ctx: ScreenContext): Screen {
@@ -249,18 +245,14 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
       </aside>
 
       <!-- CENTRE: the equipped fighter, rendered by the game's own renderer.
-           The three layers between the canvas and the labels are the STAGE: a ray
-           burst behind the head, the room (key pool, floor pool, corner falloff) and
-           the contact shadow. They sit ON TOP of the canvas because the canvas is
-           opaque — 'Stage' clears to PORTRAIT_BG — so anything painted behind it would
-           be a textbook 'docs/LESSONS.md' §1: rendering, and invisible. Everything
-           here is therefore low-alpha and hue-led rather than a film over the hero. -->
+           There are no staging layers over the canvas any more. Round 2 had four of
+           them — a ray burst, a room, a horizon and a contact shadow — because
+           'Stage' clears opaque and nothing could be painted BEHIND the canvas. All
+           four are now real geometry inside 'charStage.ts', where they can be lit,
+           occluded by the hero, and cast. Everything between the canvas and the
+           labels here is a LABEL. -->
       <section class="home-stage" data-el="stage">
         <div class="home-stage-3d" data-el="stage3d"></div>
-        <div class="home-stage-burst"></div>
-        <div class="home-stage-floor" data-el="floor"></div>
-        <div class="home-stage-room"></div>
-        <div class="home-stage-contact" data-el="contact"></div>
         <div class="home-nameplate">
           <span class="fa-title home-hero-name" data-el="heroname"></span>
           <span class="fa-rarity" data-el="herorarity"></span>
@@ -302,51 +294,23 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   const heroName = q<HTMLSpanElement>('heroname');
   const heroRarity = q<HTMLSpanElement>('herorarity');
   const hint = q<HTMLDivElement>('hint');
-  const floor = q<HTMLDivElement>('floor');
-  const contact = q<HTMLDivElement>('contact');
 
   /**
-   * Put the floor and the contact shadow where the plinth actually IS.
+   * ROUND 2's `syncStaging()` LIVED HERE, and its removal is the point of round 3.
    *
-   * The critic's top finding was that the hero "sits on a colour swatch", and the fix
-   * for that is a floor the disc is standing on plus a shadow it is casting. Both have
-   * to be anchored, because the disc does not land at a fixed height: `applyFraming()`
-   * fits the whole assembly (character + plinth) to a fraction of the panel, so a
-   * taller fighter shrinks the plinth and lifts it. Hard-coding 86% would be correct
-   * for Hamburger and wrong for the other ten.
-   *
-   * `info()` is `charStage.ts`'s QA readout and this screen does not own that file, so
-   * the shape is asserted here at runtime rather than trusted: any missing or
-   * non-finite field falls back to the measured Hamburger position, which is a sane
-   * place for every character rather than a broken one.
+   * It read the portrait's own projected foot line out of `charStage.info()` and drove
+   * two CSS custom properties from it, so a masked horizon and a masked contact shadow
+   * could be positioned under whichever fighter was mounted — the plinth does not land
+   * at a fixed height, because `applyFraming()` fits the whole assembly and a taller
+   * fighter therefore lifts it. That was careful work and it is all obsolete: the
+   * horizon and the shadow are now geometry standing in the same world as the podium,
+   * so they are under it by construction rather than by calibration. The 0.806 m
+   * perspective constant it needed (trigonometry said 0.62; `docs/LESSONS.md` §6) went
+   * with it.
    */
-  let stagedW = -1;
-  let stagedH = -1;
-  let stagingT = 0;
   /** Which ability tile is showing its description. Survives a profile re-render;
    *  reset in `renderKit()` when the new fighter has fewer abilities. */
   let kitIndex = 0;
-
-  function syncStaging(force = false): void {
-    const w = stageHost.clientWidth;
-    const h = stageHost.clientHeight;
-    if (!force && w === stagedW && h === stagedH) return;
-    stagedW = w;
-    stagedH = h;
-
-    const info = stage.info() as StageFraming;
-    const feetY = info.feet && Number.isFinite(info.feet.y) ? info.feet.y : 0.725;
-    const fill = Number.isFinite(info.fill) ? (info.fill as number) : 0.62;
-    const assembly = info.subject && Number.isFinite(info.subject.h) ? info.subject.h + 0.2 : 2.5;
-    const drop = assembly > 0.1 ? (PLINTH_DROP_M * fill) / assembly : 0.14;
-    const disc = Math.min(0.965, Math.max(0.55, feetY + drop));
-    contact.style.setProperty('--home-disc', `${(disc * 100).toFixed(2)}%`);
-    // The horizon sits just above the plinth's FAR rim — the back of the base ellipse,
-    // which is one plinth-depth above the near rim. Behind that line the 3D ground is
-    // fogged to the backdrop colour and there is nothing to see, which is precisely why
-    // the card had no horizon to begin with.
-    floor.style.setProperty('--home-horizon', `${(Math.max(0.34, disc - 0.325) * 100).toFixed(2)}%`);
-  }
 
   /**
    * Row 1 — the trophy road.
@@ -515,10 +479,6 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     heroRarity.textContent = def.rarity;
     heroRarity.style.background = RARITY_COLORS[def.rarity];
     stage.show(def.id);
-    // `show()` re-frames synchronously, so the plinth's new screen position is already
-    // knowable — force the read rather than waiting for the size poll, otherwise the
-    // shadow sits under the previous fighter's disc for up to a quarter of a second.
-    syncStaging(true);
   }
 
   // Every flank card and every tab routes through one delegated handler, so adding a
@@ -562,22 +522,11 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   const unsubscribe = ctx.profile.onChange(render);
   render();
   stage.attachTo(stageHost);
-  // `attachTo` sizes the canvas and re-frames, so the first honest reading is here and
-  // not in `render()` — before the attach the host has no measured box at all.
-  syncStaging(true);
 
   return {
     root,
-    update(dt) {
-      stage.update(dt);
-      // The portrait's own ResizeObserver re-frames on any LAYOUT change, not only on
-      // a window resize, and this screen never hears about those. Polling the host's
-      // box four times a second is cheaper than a second observer and is guaranteed to
-      // agree with whatever the rig last computed.
-      stagingT += dt;
-      if (stagingT >= 0.25) { stagingT = 0; syncStaging(); }
-    },
-    resize() { stage.resize(); syncStaging(true); },
+    update(dt) { stage.update(dt); },
+    resize() { stage.resize(); },
     dispose() {
       unsubscribe();
       root.removeEventListener('click', onClick);
@@ -778,135 +727,35 @@ const CSS = `
   border: 4px solid var(--ink);
   border-radius: var(--radius-surface);
   overflow: hidden;
-  /* 'isolation' is load-bearing, not tidiness: the contact shadow below uses
-     'mix-blend-mode: multiply', and without an isolated stacking context it would
-     blend through the card and multiply against the menu backdrop. */
-  isolation: isolate;
   box-shadow:
     0 6px 0 rgba(0,0,0,0.40),
     0 12px 24px rgba(0,0,0,0.28),
     inset 0 3px 0 rgba(255,255,255,0.30);
   cursor: pointer;
-  background: #39b7e8;
+  /* Only ever seen for the frame before WebGL first presents. Imported from
+     'charStage.ts' rather than typed, because a card whose CSS backdrop and whose
+     renderer clear colour disagree flashes a different colour on every navigation. */
+  background: ${PORTRAIT_BG_CSS};
 }
 .fa-home .home-stage-3d { position: absolute; inset: 0; }
 
-/* ── The stage, in three layers ───────────────────────────────────────────── */
-/* A blind critic on the round-1 packet: "the burger and its gold disc sit on a flat
-   untextured light-blue rectangle ... the best asset on the screen reads as a cutout
-   pasted on a colour swatch." It asked for a value break, a radial burst behind the
-   bun and a real contact shadow.
+/* ── WHERE THE FOUR STAGING LAYERS WENT ───────────────────────────────────── */
+/* Round 2 painted a ray burst, a room, a horizon and a contact shadow here, as masked
+   CSS over the canvas, and the reason was structural rather than stylistic: 'Stage'
+   clears to an opaque colour, so a layer BEHIND the canvas is 'docs/LESSONS.md' §1 in
+   its purest form — perfectly rendered, permanently invisible. That forced every one of
+   them to be a low-alpha tint painted OVER the hero, which is a ceiling no amount of
+   tuning gets past: they could not be lit, could not be occluded by the character, and
+   could not cast anything.
 
-   Measurement ('tools/tmp/home_metrics.mjs') agreed with the DIAGNOSIS and disagreed
-   with the PRESCRIPTION, which is the trap 'docs/LESSONS.md' §3 names. The card
-   already broke 30.2% from the band behind the head to its lower corners — well past
-   the 15-20% asked for. What it measured at was 2.89% for the largest luma STEP
-   anywhere in the field and 0.3% for darkening under the plinth. In other words the
-   field was a smooth ramp with no edge in it and the disc was touching nothing. A
-   swatch and a lit room can post the same value break; what separates them is having
-   a horizon and a shadow, so that is what these three layers add.
+   All four are now geometry in 'charStage.ts'. Two shapes that were tried and rejected
+   in CSS are recorded there rather than lost, because both are the obvious idea and
+   both are wrong: a filled pool of light on the floor landed on the plinth and bleached
+   it, and a pool with a plinth-shaped hole wrapped AROUND the hole and crossed each
+   flank twice, reading as ripples on water. The 3D floor has neither problem because
+   the plinth OCCLUDES it instead of being drawn over.
 
-   All three sit ON TOP of the canvas. They have to: 'Stage' clears to an opaque
-   PORTRAIT_BG, so a layer behind the canvas is 'docs/LESSONS.md' §1 in its purest
-   form — perfectly rendered, permanently invisible. The consequence is that every
-   value here is low-alpha and works by HUE rather than by density, which is also what
-   the art direction wants: high-key, hyper-saturated, no dark vignette. */
-
-/* 1. The burst: rays AND the key pool, both masked into the same RING.
-      THE RING IS THE WHOLE TECHNIQUE. Every layer here paints over the character as
-      well as over the field, and the first pass proved what that costs: a 40%
-      near-white key pool centred on the bun bleached the one asset the critic called
-      shipped-grade. So the staging lives in the NEGATIVE SPACE — the mask is
-      transparent across the head and only opens up outside it, which turns the same
-      light from a film over the hero into a halo behind it. Same idiom as the shell's
-      own '.fa-rays', which already survives being screenshotted beside a Brawl Stars
-      plate. */
-.fa-home .home-stage-burst {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    repeating-conic-gradient(from 6deg at 50% 26%,
-      rgba(214,250,255,0.15) 0deg 5deg, transparent 5deg 17deg),
-    radial-gradient(60% 44% at 50% 26%,
-      rgba(150,238,255,0.34) 0 30%, rgba(120,230,255,0.14) 62%, transparent 84%);
-  -webkit-mask-image: radial-gradient(64% 48% at 50% 26%,
-    transparent 0 30%, #000 46%, #000 70%, transparent 96%);
-  mask-image: radial-gradient(64% 48% at 50% 26%,
-    transparent 0 30%, #000 46%, #000 70%, transparent 96%);
-}
-
-/* 2. The room: a key pool behind the head, a lit floor the plinth stands on, and a
-      cool falloff into the corners.
-
-      The falloff is COOL and not the warm red it replaced. 'docs/LESSONS.md' §8
-      measured that the reference reserves HUE rather than saturation — a saturated
-      cool ground with the warm half of the wheel left for the cast — and this card is
-      exactly that arrangement: a warm burger on a cool stage. Adding cool chroma also
-      costs less warm-band share than removing warm chroma does, which matters while
-      'docs/STATE.md' item 8 (cumulative desaturation) is still open.
-
-      '--home-disc' is the plinth's front rim as a percentage of the card's height,
-      written by 'syncStaging()' from the rig's own projected foot line. The fallback
-      is Hamburger's measured position, so a missing readout degrades to a slightly
-      misplaced floor rather than to no floor. */
-.fa-home .home-stage-room {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(122% 98% at 50% 24%,
-    transparent 40%, rgba(11,64,112,0.30) 72%, rgba(5,34,74,0.60) 100%);
-}
-
-/* 2b. THE HORIZON, and the mask is the reason it works.
-       Two shapes were tried before this one and both are worth recording, because both
-       are the obvious idea:
-
-       * A filled pool of light on the floor. It landed on the plinth and bleached it.
-       * A pool with a transparent core cut to the plinth's silhouette. The core has to
-         reach x=0.12..0.88 to cover the disc, so at the card's flanks the ring wrapped
-         AROUND the hole and crossed each flank twice — two concentric arcs that read as
-         ripples on water, not as a floor.
-
-       The shape that works is the one a real horizon has: a straight line that the
-       character STANDS IN FRONT OF. A horizontal mask lets it show only in the two
-       flanks, so it runs behind the hero and is occluded by them, and it never touches
-       the plinth or the character at all. The bright band at the line itself is the
-       floor catching the key light where it meets the back of the room — the same read
-       every hero podium in the reference set uses — and below it the ground turns over
-       into a deeper, MORE saturated blue rather than a grey one. */
-.fa-home .home-stage-floor {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(180deg,
-    transparent 0 calc(var(--home-horizon, 61%) - 0.5%),
-    rgba(186,248,255,0.52) var(--home-horizon, 61%),
-    rgba(120,232,252,0.34) calc(var(--home-horizon, 61%) + 2.4%),
-    rgba(34,152,212,0.28) calc(var(--home-horizon, 61%) + 14%),
-    rgba(16,116,180,0.36) 100%);
-  -webkit-mask-image: linear-gradient(90deg,
-    #000 0 18%, transparent 27%, transparent 73%, #000 82%);
-  mask-image: linear-gradient(90deg,
-    #000 0 18%, transparent 27%, transparent 73%, #000 82%);
-}
-
-/* 3. The contact shadow. 'multiply' rather than a black wash: multiplying keeps the
-      floor's hue and only takes value out of it, which is what a shadow on a saturated
-      surface does. A flat dark ellipse over this field goes grey — and the first pass
-      proved it, in both directions at once: 4.8% of the card's height of a
-      blue-GREY source read as a bank of fog rather than as contact, and it greyed the
-      plinth it was supposed to be grounding. Half the height and a saturated blue
-      source fixes both. It is a band you can point at, not a haze. */
-.fa-home .home-stage-contact {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  mix-blend-mode: multiply;
-  background: radial-gradient(34% 2.1% at 50% calc(var(--home-disc, 93%) + 2.4%),
-    rgba(30,96,150,0.92) 0 30%, rgba(96,164,205,0.62) 60%,
-    rgba(190,225,242,0.22) 80%, transparent 92%);
-}
+   Nothing replaced them here. Two horizons in one card is worse than either alone. */
 
 /* TOP-LEFT, not bottom-centre.
    The old nameplate was bottom-centred, and the bottom centre of this panel is where
@@ -1205,13 +1054,51 @@ const CSS = `
   .fa-home .fa-panel-title::after { display: none; }
 }
 
-/* Portrait phone. Parity, not identity: the hero and the CTA are what the screen is
-   for, and the flanks' destinations are still one tab away. */
+/* ── PORTRAIT PHONE, AND IT WAS BROKEN AT HEAD ────────────────────────────── */
+/* Measured at 430x932 (iPhone 15 Pro Max) with 'tools/tmp/portrait_probe.mjs': the
+   ENTIRE screen was laying out at 584 CSS px inside a 430 px viewport, so the tab bar,
+   the settings gear and START GAME were all simply off the right-hand edge and the hero
+   was cropped off-centre.
+
+   Two separate causes, and the second only becomes visible once the first is fixed:
+
+   1. THE TOP BAR SET THE WIDTH. It is one non-wrapping flex row — three status chips,
+      a three-tab segmented control and a gear — whose min-content width is ~584. A
+      '.fa-screen' grid track is 'auto', and an auto track's base size is its items'
+      min-content contribution, so the bar inflated the track and every row below it
+      inherited the inflated width. The hero card was a symptom, not the cause.
+   2. THE HERO CARD WOULD STILL OVERFLOW. It is 'height: 100%' plus 'aspect-ratio: 4/5',
+      which makes its width follow the row height — and a portrait row is ~760 px tall,
+      so 608 px of width. 'max-width: 100%' does not save it, because a grid item's
+      default 'min-width: auto' resolves to min-content, and for an aspect-ratio box with
+      a definite height min-content IS height x ratio. The floor beat the cap.
+      'align-self: center' is load-bearing in the fix: without it the item stretches, the
+      height becomes definite again, and the width goes straight back to 608.
+
+   WHY 315 ASSERTIONS MISSED IT: 'menu_accept''s five viewports are 1600x900, 1280x800,
+   1024x768, 844x390 and 2560x1080 — all landscape, none under 844 px wide, so this
+   breakpoint never fired in the suite. And the shell clips overflow, so
+   'document.scrollWidth' stayed at 430 and even the no-page-scroll assertion passed.
+   A defect can be 100% reproducible and still invisible to a suite that never asks. */
 @media (max-width: 700px) {
   .fa-home .home-middle { grid-template-columns: minmax(0, 1fr); }
   .fa-home .home-col { display: none; }
   .fa-home .home-mode { display: none; }
   .fa-home .home-bottom { flex-wrap: wrap; }
+  /* Two rows rather than one. The spacer goes because a flex spacer inside a wrapping
+     row pushes the wrap point around for no benefit; the chips take the first line and
+     the navigation takes the second. */
+  .fa-home .fa-topbar { flex-wrap: wrap; row-gap: 6px; }
+  .fa-home .fa-topbar-spacer { display: none; }
+  .fa-home .fa-tabs { flex: 1 1 auto; }
+  .fa-home .fa-tab { flex: 1 1 0; justify-content: center; padding: 0 6px; }
+  .fa-home .home-stage {
+    min-width: 0;
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+    align-self: center;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
