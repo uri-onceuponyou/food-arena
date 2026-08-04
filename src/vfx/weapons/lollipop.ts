@@ -28,20 +28,57 @@
  * `game/vfx.ts`'s own `spawnGiantSlamShockwave` flash/star-pop, which still fires
  * alongside this hook) is therefore a BONUS beat, not the tell.
  *
- * The tell is the two elements that reach the player wherever they are standing:
+ * The tell is the three elements that reach the player wherever they are standing:
  *
  *   1. `AOE FILL` — a red/white candy SWIRL painted across the ability's true
  *      `weapon.range` radius (20 m). Its radius is twice the guaranteed view radius,
  *      so whenever the slam can legally reach you, a large fraction of your screen —
  *      all of it, if you are inside ~10 m — turns into a rotating lollipop swirl.
  *      Screen-filling by construction, not by being "big near the caster".
- *   2. `RACING RIM` — a striped candy shock band expanding to that same radius, so
+ *   2. `BOUNDARY` — a hard two-tone candy line at the disc's edge. This is the single
+ *      strongest DIRECTIONAL cue in the whole effect and the reason the off-screen
+ *      case works at all: a circular arc points at its own centre, so the player reads
+ *      "it came from over there" off the curvature. A soft gradient does not.
+ *   3. `RACING RIM` — a striped candy shock band expanding to that same radius, so
  *      the boundary sweeps THROUGH the player. Motion at the screen edge is what the
  *      eye actually catches when the thing causing it is off frame.
  *
- * plus `SUGAR POPS` scattered over the whole disc and fired in order of distance, so
- * the wave arriving at YOUR feet has its own local particle beat even when the
- * epicentre is nowhere on screen.
+ * plus `SUGAR POPS` near the epicentre, as texture on the centre of the effect only.
+ *
+ * ── VERIFIED, NOT ASSUMED (2026-08-04) ────────────────────────────────────────
+ * Everything above was authored without ever being rendered. It has now been driven
+ * in the live game and looked at. The way to reproduce the off-screen case with no
+ * scripted aiming at all is `?player=donut&enemy=lollipop`: `ai.ts` picks the
+ * highest-damage weapon whose range covers the current distance, and since Smash
+ * (11 dmg) only reaches 70 wu while Giant (10 dmg) reaches 400, the AI closes from
+ * its 1080 wu spawn separation and fires the ultimate the first tick it is inside
+ * 400 wu — 20 m, against a widest guaranteed view half-extent of 14.45 m at 16:9 and
+ * 9.96 m at 4:3. The caster is off screen by construction. (`tools/tmp/lolliv.mjs`.)
+ *
+ * VERDICT: the tell passes. At 4:3, distance 398 wu, caster projecting to screen
+ * x=1284 in a 1200 px viewport, the frame is more than half filled with a red-and-
+ * white candy swirl whose boundary arc curves around the player, and the centre of
+ * that arc is the direction the slam came from. What did NOT survive contact with a
+ * render is recorded at each element below — the ink budget, the missing hard edge,
+ * the epicentre prop, and the pops.
+ *
+ * ONE THING THIS FILE CANNOT FIX, for whoever owns it next: the slam RESOLVES on the
+ * same sim tick it is cast (melee damage is instantaneous in `combat.ts`), so this is
+ * not a warning you can dodge — it is an attribution cue that arrives with the damage.
+ * The fairness argument in `render/camera.ts` reads as though the visual were a
+ * warning. It is not, and cannot be, without a wind-up in the SIM. What it does
+ * deliver is "something enormous just hit me, from over there", which is what an
+ * off-screen attacker actually owes you.
+ *
+ * REPRODUCING ANY OF THIS: `node tools/tmp/lolliv.mjs --mode incoming|self`. It
+ * replaces `performance.now` with a virtual clock (three's `Clock` reads it, and every
+ * sim/VFX delta derives from that clock), so an effect can be frozen and hand-cranked
+ * in exact millisecond slices. That matters more than it sounds: under the headless
+ * software renderer at `simSpeed > 1`, ONE rendered frame can consume 50 ms * simSpeed
+ * of effect time, and a 0.2 s effect then exists for a single frame. Sampling by
+ * wall-clock timeout misses it entirely and it looks like the effect is not rendering
+ * — which is exactly what happened here to `Smash.cast` before a garish-colour probe
+ * proved the pipeline was fine and the SAMPLING was wrong.
  *
  * ── SCALE DISCIPLINE ──────────────────────────────────────────────────────────
  * The shared impact burst was recently rescaled after measuring 4.72 m of effect
@@ -244,6 +281,42 @@ function buildRimBandTexture(): THREE.CanvasTexture {
   return finishTex(ctx);
 }
 
+/**
+ * A HARD, thin annulus at the very edge of the unit disc — the ability's boundary.
+ *
+ * The fill texture's own bright lip was supposed to do this job and does not: at 0.44
+ * material alpha the lip is a soft value change inside a soft field, and the first
+ * independent critic to see a render said so exactly — *"there is no outer boundary at
+ * all, the lower-left just dissolves into haze, so I cannot tell where safe ground
+ * begins"*, and named a crisp high-contrast rim arc as the single most valuable fix.
+ *
+ * That line is gameplay information, not decoration: it is the difference between
+ * "the slam reaches here" and "it doesn't", and it is also the cue a player uses to
+ * extrapolate the off-screen centre — a circular arc points at its own middle, a
+ * gradient does not. Hard alpha, feathered only enough to hide the 96-gon facets.
+ */
+function buildEdgeRingTexture(): THREE.CanvasTexture {
+  const size = 512;
+  const ctx = makeCanvasCtx(size);
+  const c = size / 2;
+  const g = ctx.createRadialGradient(c, c, 0, c, c, c);
+  g.addColorStop(0.0, 'rgba(255,255,255,0)');
+  // Band width is a two-critic interpolation, not a guess. The first said there was no
+  // edge at all; the second, shown this ring, called it "the single most legible thing
+  // in the frame" and then said it was about twice as thick as it needs to be and was
+  // starting to read as a painted racetrack line. Thinned ~a third from what that
+  // second critic saw. Do not thin it further without re-rendering: at R = 20 m this
+  // is a ~0.7 m band seen almost edge-on, and it turns into an aliasing generator well
+  // before it looks elegant.
+  g.addColorStop(0.966, 'rgba(255,255,255,0)');
+  g.addColorStop(0.976, 'rgba(255,255,255,1)');
+  g.addColorStop(0.991, 'rgba(255,255,255,1)');
+  g.addColorStop(1.0, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  return finishTex(ctx);
+}
+
 /** Soft radial dot for additive sugar dust. */
 function buildSugarTexture(): THREE.CanvasTexture {
   const size = 64;
@@ -261,6 +334,7 @@ function buildSugarTexture(): THREE.CanvasTexture {
 const swirlTex = buildSwirlTexture();
 const aoeFillTex = buildAoeFillTexture();
 const rimBandTex = buildRimBandTexture();
+const edgeRingTex = buildEdgeRingTexture();
 const sugarTex = buildSugarTexture();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -310,25 +384,56 @@ function materialPool<T extends THREE.Material>(size: number, build: () => T): (
 const nextFillMat = materialPool(3, () => new THREE.MeshBasicMaterial({
   map: aoeFillTex, color: CANDY_RED, transparent: true, opacity: 0.6, depthWrite: false,
 }));
-const nextSwirlMat = materialPool(6, () => new THREE.MeshBasicMaterial({
+// Each swirl consumer gets its OWN pool. They were sharing one pool of 6 and setting
+// `color` per spawn: two Smash casts (4 materials each) inside the ultimate's 1.0 s
+// life wrapped the ring and recoloured the live AOE swirl mid-flight, which would have
+// shown up as the ultimate turning red and blinking. Verified-by-rendering effects
+// should not be able to corrupt each other from a neighbouring weapon.
+const nextAoeSwirlMat = materialPool(2, () => new THREE.MeshBasicMaterial({
+  map: swirlTex, color: CANDY_WHITE, transparent: true, opacity: 0.5, depthWrite: false,
+}));
+const nextGiantSwirlMat = materialPool(2, () => new THREE.MeshBasicMaterial({
+  map: swirlTex, color: CANDY_RED, transparent: true, opacity: 0.9, depthWrite: false,
+}));
+const nextSwingMat = materialPool(6, () => new THREE.MeshBasicMaterial({
   map: swirlTex, color: CANDY_WHITE, transparent: true, opacity: 0.9, depthWrite: false,
 }));
 const nextRimMat = materialPool(3, () => new THREE.MeshBasicMaterial({
   map: rimBandTex, color: CANDY_WHITE, transparent: true, opacity: 1, depthWrite: false,
   blending: THREE.AdditiveBlending,
 }));
+// Two boundary rings, one saturated and one pale. Neither colour alone survives both
+// backgrounds this ability lands on — red carries the edge over the arena's pale tile
+// and white carries it over the effect's own red fill — so the boundary is authored as
+// a candy TWO-TONE line rather than betting on one of them.
+const nextEdgeRedMat = materialPool(4, () => new THREE.MeshBasicMaterial({
+  map: edgeRingTex, color: CANDY_RED, transparent: true, opacity: 1, depthWrite: false,
+}));
+const nextEdgeWhiteMat = materialPool(2, () => new THREE.MeshBasicMaterial({
+  map: edgeRingTex, color: CANDY_WHITE, transparent: true, opacity: 1, depthWrite: false,
+}));
 const nextStampMat = materialPool(10, () => new THREE.MeshBasicMaterial({
   map: swirlTex, color: CANDY_RED, transparent: true, opacity: 0.9, depthWrite: false,
 }));
 const nextChipRedMat = materialPool(14, () => new THREE.MeshBasicMaterial({ color: CANDY_RED, transparent: true, opacity: 1 }));
 const nextChipWhiteMat = materialPool(14, () => new THREE.MeshBasicMaterial({ color: CANDY_WHITE, transparent: true, opacity: 1 }));
-const nextSugarMat = materialPool(48, () => new THREE.SpriteMaterial({
+const nextSugarMat = materialPool(24, () => new THREE.SpriteMaterial({
   map: sugarTex, color: SUGAR_GLOW, transparent: true, opacity: 1, depthWrite: false,
   blending: THREE.AdditiveBlending,
 }));
 const nextMintMat = materialPool(12, () => new THREE.SpriteMaterial({
   map: sugarTex, color: CANDY_MINT, transparent: true, opacity: 1, depthWrite: false,
   blending: THREE.AdditiveBlending,
+}));
+// The ultimate's pops are NOT additive. They sit on top of the ultimate's own white
+// candy fill, and additive white-on-white is arithmetically invisible — the same
+// "rendering correctly, perfectly invisible" failure as a cyan ring on a cyan puddle.
+// Normal-blended saturated candy is the only thing that can read against that ground.
+const nextPopRedMat = materialPool(12, () => new THREE.SpriteMaterial({
+  map: sugarTex, color: CANDY_RED, transparent: true, opacity: 1, depthWrite: false,
+}));
+const nextPopMintMat = materialPool(5, () => new THREE.SpriteMaterial({
+  map: sugarTex, color: CANDY_MINT, transparent: true, opacity: 1, depthWrite: false,
 }));
 const nextGiantHeadMat = materialPool(2, () => new THREE.MeshBasicMaterial({ color: CANDY_WHITE, transparent: true, opacity: 1 }));
 const nextGiantStickMat = materialPool(2, () => new THREE.MeshBasicMaterial({ color: '#FBF7EE', transparent: true, opacity: 1 }));
@@ -442,25 +547,47 @@ function spawnSugarMote(
  * screen when the caster is, which is exactly the case the constraint at the top of
  * this file says we cannot rely on.
  *
+ * SIZED AND PLACED SO IT DOES NOT EAT THE CASTER. Measured at shipped framing on the
+ * first render of this file: at 1.15 CH radius, centred on the cast point, the head
+ * plus its swirl covered Lollipop completely for the whole 0.75 s — she was not
+ * merely hard to find, she was absent, and so was anything standing next to her. It
+ * now lands a body-length IN FRONT of her, at 0.66 CH, so the beat still reads as a
+ * giant candy slammed into the floor while the fighter it belongs to stays on screen.
+ *
  * The stick is oriented with a QUATERNION rather than composed Euler angles: laying
  * a Y-axis cylinder down along an arbitrary ground direction with `rotation.z` then
  * `rotation.y` is the same intrinsic-rotation trap that has already made one flat
  * plane vanish in this project.
  */
 function spawnGiantLollipop(ctx: WeaponVfxCtx, x: number, z: number, dirX: number, dirZ: number): void {
-  const headRadius = CHARACTER_HEIGHT * 1.15; // 2.42 m radius — genuinely giant
-  const stickLen = CHARACTER_HEIGHT * 2.3;
+  const headRadius = CHARACTER_HEIGHT * 0.85; // 1.79 m radius = 3.6 m across, vs a 2.1 m fighter
+  const stickLen = CHARACTER_HEIGHT * 1.7;
 
   const group = new THREE.Group();
-  group.position.set(x, 0, z);
+  // Push the whole prop clear of the caster along her facing. `ctx.position` is
+  // already 0.7 m ahead of her; this puts the head's NEAR edge roughly at her front.
+  const fwdLen = Math.hypot(dirX, dirZ) || 1;
+  const fwd = headRadius + CHARACTER_HEIGHT * 0.5;
+  group.position.set(x + (dirX / fwdLen) * fwd, 0, z + (dirZ / fwdLen) * fwd);
+
+  // A saturated rim just proud of the head. The head is red-and-white candy sitting
+  // inside a field of red-and-white candy, and the first critic to see it named that
+  // camouflage: the prop is the frame's most explicit pointer at where the slam came
+  // from, and it was disappearing into the stripes behind it. One flat ring separates
+  // it from anything.
+  const rimMat = nextEdgeRedMat();
+  const rim = new THREE.Mesh(unitDiscGeo, rimMat);
+  rim.scale.setScalar(headRadius * 1.16);
+  rim.position.y = 0.115;
+  rim.renderOrder = 12;
+  group.add(rim);
 
   const headMat = nextGiantHeadMat();
   const head = new THREE.Mesh(giantHeadGeo, headMat);
   head.scale.set(headRadius, 1, headRadius);
   group.add(head);
 
-  const swirlMat = nextSwirlMat();
-  swirlMat.color.set(CANDY_RED);
+  const swirlMat = nextGiantSwirlMat();
   const swirl = new THREE.Mesh(unitDiscGeo, swirlMat);
   swirl.scale.setScalar(headRadius * 0.99);
   swirl.position.y = 0.13;
@@ -493,10 +620,11 @@ function spawnGiantLollipop(ctx: WeaponVfxCtx, x: number, z: number, dirX: numbe
       const squash = 1 - 0.55 * (1 - u) * Math.cos(u * Math.PI * 1.2);
       group.scale.set(1 + (1 - squash) * 0.22, Math.max(0.25, squash), 1 + (1 - squash) * 0.22);
     }
-    const fade = t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
+    const fade = t < 0.45 ? 1 : 1 - (t - 0.45) / 0.55;
     headMat.opacity = fade;
     stickMat.opacity = fade;
-    swirlMat.opacity = 0.95 * fade;
+    swirlMat.opacity = 0.9 * fade;
+    rimMat.opacity = fade;
   });
 }
 
@@ -504,10 +632,17 @@ function spawnGiantLollipop(ctx: WeaponVfxCtx, x: number, z: number, dirX: numbe
 export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
   /**
    * Lollipop Smash — she swings herself like a hammer. The cast is the candy head
-   * whipping through the swing on its stick, with motion-blur ghosts behind it;
-   * `game/vfx.ts` still draws the real cone/range wedge underneath (this hook only
-   * replaces the generic pale circular cast FLASH), so the hitbox telegraph is
-   * unchanged and this is pure character on top of it.
+   * whipping through the swing on its stick; `game/vfx.ts` still draws the real
+   * cone/range wedge underneath (this hook only replaces the generic pale circular
+   * cast FLASH), so the hitbox telegraph is unchanged and this is pure character on
+   * top of it.
+   *
+   * Was four discs — a lead plus three motion-blur ghosts — at a 0.72 CH swing
+   * radius. Rendered at shipped framing that swept the SAME screen pixels as her own
+   * attack animation, in her own two colours: her model already whips a big red/white
+   * candy head through the swing, so the ghosts were invisible as separate objects and
+   * the whole loop bought nothing. Cut to a lead + one ghost, and pushed out to a
+   * radius that clears her silhouette, so the swing arc is somewhere her body is not.
    */
   Smash: {
     cast(ctx) {
@@ -518,27 +653,27 @@ export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
       const px = ctx.position.x - dirX * 0.75;
       const pz = ctx.position.z - dirZ * 0.75;
       const baseAng = Math.atan2(dirZ, dirX);
-      const swingRadius = CHARACTER_HEIGHT * 0.72;
+      const swingRadius = CHARACTER_HEIGHT * 1.15;
       // Half the weapon's REAL cone, so the swing matches the hitbox it telegraphs.
       const halfCone = THREE.MathUtils.degToRad((ctx.weapon.cone ?? 80) / 2);
-      const headRadius = CHARACTER_HEIGHT * 0.30; // 0.63 m radius = 1.26 m head
+      const headRadius = CHARACTER_HEIGHT * 0.34; // 0.71 m radius = 1.43 m head
 
-      // Head + 3 ghosts trailing behind it along the arc.
-      for (let g = 0; g < 4; g++) {
-        const lead = g * 0.055;
-        const mat = nextSwirlMat();
+      // Head + one ghost trailing behind it along the arc.
+      for (let g = 0; g < 2; g++) {
+        const lead = g * 0.05;
+        const mat = nextSwingMat();
         mat.color.set(g === 0 ? CANDY_WHITE : CANDY_RED);
         const disc = new THREE.Mesh(unitDiscGeo, mat);
-        disc.scale.setScalar(headRadius * (1 - g * 0.13));
+        disc.scale.setScalar(headRadius * (1 - g * 0.16));
         disc.renderOrder = 13;
-        const peak = g === 0 ? 0.98 : 0.4 - g * 0.09;
+        const peak = g === 0 ? 0.95 : 0.42;
         ctx.spawnTransient(disc, 0.2, (t) => {
           const u = THREE.MathUtils.clamp((t * 0.2 - lead) / 0.2, 0, 1);
           const e = 1 - Math.pow(1 - u, 2);
           const ang = baseAng - halfCone + e * halfCone * 2;
           disc.position.set(
             px + Math.cos(ang) * swingRadius,
-            THREE.MathUtils.lerp(CHARACTER_HEIGHT * 0.95, 0.42, e),
+            THREE.MathUtils.lerp(CHARACTER_HEIGHT * 0.8, 0.4, e),
             pz + Math.sin(ang) * swingRadius,
           );
           disc.rotation.y = ang * 1.6;
@@ -573,7 +708,7 @@ export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
       const sizeFactor = THREE.MathUtils.clamp(0.85 + ctx.damage * 0.03, 0.85, 1.6);
 
       spawnSugarMote(ctx, x, ctx.position.y, z,
-        CHARACTER_HEIGHT * 0.34 * sizeFactor, CHARACTER_HEIGHT * 0.8 * sizeFactor, 0.15, 0.1);
+        CHARACTER_HEIGHT * 0.3 * sizeFactor, CHARACTER_HEIGHT * 0.6 * sizeFactor, 0.15, 0.1);
 
       spawnSwirlStamp(ctx, x, z, CHARACTER_HEIGHT * 0.32 * sizeFactor, 0.5, 0.85);
 
@@ -620,33 +755,63 @@ export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
       const R = wu(ctx.weapon.range ?? 0);
 
       // ── 1. AOE FILL — the screen-filling half of the tell ────────────────────
+      //
+      // THE INK BUDGET. This layer is not alone: `game/vfx.ts` independently draws
+      // this weapon's real 360° melee wedge — a 20 m red disc at 0.88 opacity — over
+      // the same ground for the first 0.3 s. Rendered, the original 0.72 fill + 0.95
+      // white swirl stacked on that erased the arena outright: at the epicentre the
+      // caster, the target, the floor and the cover were all gone for half a second,
+      // and a tell that hides the fighters it is reporting on has stopped being
+      // feedback. Alpha here is now set so a fighter standing anywhere inside the
+      // disc still reads THROUGH it — that is the constraint, not a taste call.
       const fillMat = nextFillMat();
       const fill = new THREE.Mesh(unitDiscGeo, fillMat);
       fill.position.set(x, AOE_FILL_Y, z);
       fill.renderOrder = 10;
       fill.scale.setScalar(R * 0.12);
-      ctx.spawnTransient(fill, 1.15, (t) => {
+      ctx.spawnTransient(fill, 1.0, (t) => {
         const grow = 1 - Math.pow(1 - Math.min(1, t / 0.26), 3);
         fill.scale.setScalar(R * (0.12 + 0.88 * grow));
-        fillMat.opacity = 0.72 * (t < 0.45 ? 1 : 1 - (t - 0.45) / 0.55);
+        // Punch, then decay. The original held peak alpha to t=0.45 of a 1.15 s life,
+        // which rendered as ~500 ms of a completely static frame — it read as a state
+        // the arena was now in, not as an event that had just happened.
+        fillMat.opacity = 0.3 * (t < 0.2 ? 1 : Math.pow(1 - (t - 0.2) / 0.8, 1.5));
       });
+
+      // ...and its EDGE, as a hard two-tone candy line rather than a soft lip. See
+      // `buildEdgeRingTexture`. Both rings ride the fill's own growth curve, so the
+      // boundary is correct on every frame instead of only once the front lands, and
+      // the white one is inset so the pair reads as one striped border.
+      for (const [ringMat, inset, peak, order] of [
+        [nextEdgeRedMat(), 1.0, 0.95, 16],
+        [nextEdgeWhiteMat(), 0.974, 0.9, 17],
+      ] as const) {
+        const ring = new THREE.Mesh(unitDiscGeo, ringMat);
+        ring.position.set(x, AOE_RIM_Y + 0.01, z);
+        ring.renderOrder = order;
+        ring.scale.setScalar(R * 0.12 * inset);
+        ctx.spawnTransient(ring, 1.0, (t) => {
+          const grow = 1 - Math.pow(1 - Math.min(1, t / 0.26), 3);
+          ring.scale.setScalar(R * (0.12 + 0.88 * grow) * inset);
+          ringMat.opacity = peak * (t < 0.42 ? 1 : Math.pow(1 - (t - 0.42) / 0.58, 1.4));
+        });
+      }
 
       // ...with HER swirl on top of it. This is the element that makes the frame
       // say "Lollipop's ultimate" rather than "a large red circle", which is the
       // whole difference between a readable tell and a coloured warning.
-      const swirlMat = nextSwirlMat();
-      swirlMat.color.set(CANDY_WHITE);
+      const swirlMat = nextAoeSwirlMat();
       const swirl = new THREE.Mesh(unitDiscGeo, swirlMat);
       swirl.position.set(x, AOE_SWIRL_Y, z);
       swirl.renderOrder = 11;
       swirl.scale.setScalar(R * 0.12);
-      ctx.spawnTransient(swirl, 1.15, (t) => {
+      ctx.spawnTransient(swirl, 1.0, (t) => {
         const grow = 1 - Math.pow(1 - Math.min(1, t / 0.26), 3);
         swirl.scale.setScalar(R * (0.12 + 0.88 * grow));
         // Eases to a stop rather than spinning at constant rate — a spin-down reads
         // as something enormous coming to rest.
         swirl.rotation.y = (1 - Math.pow(1 - t, 2)) * 1.5;
-        swirlMat.opacity = 0.95 * (t < 0.5 ? 1 : 1 - (t - 0.5) / 0.5);
+        swirlMat.opacity = 0.4 * (t < 0.22 ? 1 : Math.pow(1 - (t - 0.22) / 0.78, 1.5));
       });
 
       // ── 2. RACING RIM — the half that reaches a player at the edge ───────────
@@ -663,25 +828,31 @@ export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
         rimMat.opacity = 0.95 * (1 - Math.pow(t, 2.4));
       });
 
-      // ── 3. SUGAR POPS across the whole disc, fired as the front reaches them ─
-      // Guarantees a LOCAL beat at the player's own feet no matter where inside the
-      // 20 m radius they are standing — the off-screen-caster case has to have
-      // something happening close to the camera, not only at the horizon.
-      const POPS = 22;
+      // ── 3. SUGAR POPS around the epicentre, fired as the front reaches them ──
+      //
+      // These used to be 22 pops spread by area over the WHOLE 20 m disc, on the
+      // claim that they guarantee a local beat at the player's own feet wherever they
+      // are standing. Rendered, that claim is arithmetically false and looked it: 22
+      // points over 1257 m² is one pop per 57 m², so the nearest one to a victim at
+      // the rim is metres away and reads as a lone speck. What actually sweeps past
+      // the player's feet is the RIM BAND, which is 5 m thick and unmissable — so the
+      // pops are now spent where their density is high enough to read at all, close
+      // in, supporting the epicentre beat rather than pretending to cover the disc.
+      const POPS = 10;
+      const POP_SPAN = 0.55; // fraction of R the pops occupy
       const GOLDEN = Math.PI * (3 - Math.sqrt(5));
       for (let i = 0; i < POPS; i++) {
-        // sqrt() spacing = uniform by AREA, so the outer ring (which is where a
-        // distant victim actually is) is not starved of pops.
-        const rad = R * Math.sqrt((i + 0.6) / POPS);
+        // sqrt() spacing = uniform by AREA within that inner disc.
+        const rad = R * POP_SPAN * Math.sqrt((i + 0.6) / POPS);
         const ang = i * GOLDEN;
         const px = x + Math.cos(ang) * rad;
         const pz = z + Math.sin(ang) * rad;
         const delay = (rad / R) * FRONT_TIME;
         spawnSugarMote(ctx, px, 0.55, pz,
-          CHARACTER_HEIGHT * 0.18, CHARACTER_HEIGHT * 0.62, 0.3, 0.55, nextSugarMat, delay);
+          CHARACTER_HEIGHT * 0.2, CHARACTER_HEIGHT * 0.68, 0.3, 0.55, nextPopRedMat, delay);
         if (i % 3 === 0) {
           spawnSugarMote(ctx, px, 0.5, pz,
-            CHARACTER_HEIGHT * 0.1, CHARACTER_HEIGHT * 0.3, 0.34, 0.7, nextMintMat, delay + 0.03);
+            CHARACTER_HEIGHT * 0.12, CHARACTER_HEIGHT * 0.34, 0.34, 0.7, nextPopMintMat, delay + 0.03);
         }
       }
 
@@ -701,7 +872,7 @@ export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
       const sizeFactor = THREE.MathUtils.clamp(0.9 + ctx.damage * 0.035, 0.9, 1.7);
 
       spawnSugarMote(ctx, x, ctx.position.y, z,
-        CHARACTER_HEIGHT * 0.4 * sizeFactor, CHARACTER_HEIGHT * 0.92 * sizeFactor, 0.18, 0.12);
+        CHARACTER_HEIGHT * 0.34 * sizeFactor, CHARACTER_HEIGHT * 0.62 * sizeFactor, 0.18, 0.12);
 
       spawnSwirlStamp(ctx, x, z, CHARACTER_HEIGHT * 0.42 * sizeFactor, 0.62, 0.9);
 
