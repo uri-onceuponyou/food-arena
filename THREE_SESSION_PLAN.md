@@ -5,27 +5,44 @@ one holds the ordering and the pacing.
 
 ---
 
-## The budget, from measured cost — not estimates
+## Budget — REVISED 2026-08-04 after Uri moved 5x → 20x
+
+**Tokens are no longer the binding constraint. CONTENTION is.** That is the whole change.
 
 | fact | source |
 |---|---|
-| A loop/build agent costs **~300k typical, ~470k worst** | observed: floor 309k, camera 201k, rebalance 207k, lighting 350k, menus 472k, economy 473k |
-| **6 concurrent burned 30 % of a session in 30 min** | measured, and it is why the cap exists |
-| **2 concurrent ≈ 10 %/30 min ≈ 20 %/h** | → a 5 h session is ~full at 2 sustained |
-| A ~20k **probe** has repeatedly beaten a ~300k **loop** | checker probe, silhouette render, aspect harness |
+| A loop/build agent costs **~300k typical, ~470k worst** | floor 309k, camera 201k, lighting 350k, menus 472k, economy 473k |
+| At 5x, **2 concurrent ≈ 20 %/h** — a 5 h session was ~full | measured |
+| At 20x, the equivalent burn rate is **~8 concurrent** | arithmetic |
+| **But 6 concurrent already caused real damage** | corrupted screenshots, HMR reloads wiping probes mid-run, one agent's save 500ing the dev server for everyone, and a `git stash` that briefly reverted two agents' work |
 
-**Total agent count is the budget. Concurrency only sets the rate.** Nine weapon agents
-cost ~2.7M whether run 6-up or 2-up.
+**None of those get better with more budget.** So the cap moves to **6, not 8**, and the
+limiter is now the shared dev server and file ownership.
 
-**Target: 2 concurrent, sustained. ~8 agents per session.** That is ~2.4M, which fits a
-5 h session with headroom for orchestration and for reading results.
+### Two classes of agent, capped differently
+- **Browser-heavy** (screenshots, critic loops, probes): **cap 6.** For anything with
+  sustained capture, start a private Vite (`npx vite --port 518x`) and pass `--url` to the
+  tools, rather than sharing :5173.
+- **Pure logic** (sim/economy/tests/docs, no rendering): effectively **uncapped** — these
+  never touch the contended resource.
 
-- **Under-pacing** looks like: one agent running, or none while waiting on a report.
-  Always have the next brief ready so a completing agent is replaced immediately.
-- **Over-pacing** looks like: 3+ concurrent, or two 470k-class agents at once. Treat a
-  screen/economy-class task as **1.5 agents** and pair it with something small.
+### Mitigations that make 6 safe (all already exist)
+1. `tools/tmp/menu_accept.mjs` now **parses all 88 modules in ~95 ms**, catching the
+   broken-save class that 500s the shared server. Run it early and often.
+2. HMR stubbing in any probe that holds page state — a peer's save otherwise reloads the
+   page mid-run. `tools/tmp/rake.mjs` shows the pattern.
+3. **Never `git stash`** — blast radius is the whole repo.
+4. Strict single-owner file sets. This is the hardest constraint and always has been.
 
----
+### What the extra budget actually buys
+Not more parallelism — **more thoroughness per unit of work**, and things previously
+ruled out on cost:
+- All 11 character head loops, rather than the 3 worst
+- Skins, including the per-character material-variant system that does not exist
+- More probe-first passes, which have consistently outperformed loops
+- Deeper verification: every plateau probed so far was a bug, so verification is the
+  highest-yield spend on this project
+- Re-running the whole-arena scanner after every element change instead of once
 
 ## Priority rationale — where the value has actually come from
 
