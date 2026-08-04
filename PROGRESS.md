@@ -588,6 +588,39 @@ scored 3/10. Now off by default, kept behind `ao: true` with the dead knob repai
    spent their #1 fix on this. It needs baked gradient/AO in the albedo.
 3. **Red is railed on the warm props** — safe to fix now the grade no longer distorts it.
 
+### An agent's LAST MESSAGE is not its state — check the tree
+
+I twice recorded work as unfinished based on where an agent said it was when stopped, and
+was twice wrong:
+- "sushi had just started" — it was already 1,147 complete lines.
+- "the reticle is still unfinished" — a finished, measurement-driven reticle had landed.
+
+An agent narrates the step it is *beginning*, and often completes several more before the
+stop takes effect. **Before writing a resume note, look at the diff and the line counts.**
+A stale note costs a whole re-dispatch, and worse, invites an agent to rebuild something
+that already works.
+
+### "Spawned inside the target" has a HEIGHT variant, not just a size one
+
+Sushi's blade was **correctly sized** — 2.74m, well clear of any fighter — but spawned at
+`IMPACT_HEIGHT` 1.15m, the middle of a fighter's mass, and its geometry is a **lens**:
+thin at the ends, widest in the middle. The target ate the middle third, so one continuous
+knife stroke rendered as two disconnected shards.
+
+Every earlier instance of this bug was a size error, so a scale-focused review passes right
+over it. **Check WHERE an effect spawns relative to the body, not only how big it is** —
+and note that a shape whose mass is concentrated where the occluder sits fails worse than
+a uniform one.
+
+### Lint a language by PARSING it, not by pattern-matching it
+
+The CSS-backtick guard was a regex. Widening it to cover `innerHTML` immediately
+false-positived on legitimate nested template literals — and a lint that cries wolf gets
+ignored, which is worse than no lint. The hole and the fix were the same mistake. It is
+now a parser that catches **every** syntax error across all 88 modules in ~95ms. Cheapest
+possible defence against 500ing the shared dev server, which this project has done to
+itself three times.
+
 ### SCORE THE REFERENCE AS A CONTROL — the instrument is not stable
 
 The menu loop caught something that reframes every score in this file. Critics see a blind
