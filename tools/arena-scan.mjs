@@ -426,9 +426,27 @@ const RAILS = [
     tol: 0.020, kind: 'chosen band', note: 'max-min per pixel; the raw colourfulness of the frame' },
   { key: 'warmShare', label: 'warm share of chroma', target: REF.warmShare, band: [0.12, 0.45],
     tol: 0.030, kind: 'chosen band', note: 'the reference reserves the warm half for the cast' },
-  { key: 'envWarmShare', label: 'ENV warm share', target: REF.warmShare, band: [0.0, REF.warmShare],
-    tol: 0.030, kind: 'derived', role: true,
-    note: 'ceiling is the reference whole-frame warm share INCLUDING its cast, so an environment alone above it is out of contract' },
+  // CEILING-ONLY, and the target is 0 deliberately — see below.
+  //
+  // This rail shipped with `target: REF.warmShare`, which made the DIRECTIONAL drift
+  // check treat 0.297 as a value to move TOWARD. That is backwards: 0.297 is the
+  // reference's WHOLE-FRAME warm share *including its cast*, so it is the point above
+  // which an environment alone is out of contract — a ceiling, exactly as the note said.
+  //
+  // The bug was not theoretical. On the shipped frame this rail reads 0.1226 while
+  // `envShareInCastBand` reads 0.1244 — the same quantity, differing only by the 60-90
+  // deg bin, which this arena measures at 0.00 — with OPPOSITE targets (0.297 vs 0).
+  // No arena can satisfy both, and the pair mathematically floored the headline metric
+  // at ~0.16 whatever the art did. So the instrument was penalising the precise move a
+  // blind critic prescribed and the hue-reservation contract requires: vacating warm
+  // hue from the environment so the cast can own it.
+  //
+  // Target 0 matches `envShareInCastBand` below and the contract itself — the ideal
+  // environment warm share under hue reservation IS zero. The band keeps 0.297 as the
+  // hard ceiling, so going ABOVE it still fails. LESSONS §13: validate the instrument.
+  { key: 'envWarmShare', label: 'ENV warm share', target: 0, band: [0.0, REF.warmShare],
+    tol: 0.030, kind: 'derived (ceiling-only)', role: true,
+    note: 'CEILING 0.297 = the reference whole-frame warm share INCLUDING its cast; an environment alone above it is out of contract. Lower is always better — warm is reserved for the cast.' },
   { key: 'hueOverlap', label: 'cast/env hue overlap', target: 0, band: [0, 0.45],
     tol: 0.050, kind: 'no reference figure — baseline-relative', role: true,
     note: 'SUM min(castShare,envShare) over 12 bins. 0 = disjoint hue occupancy' },
@@ -1281,6 +1299,13 @@ async function modeSelftest() {
   check('warm chroma 0.0784 -> 0.0783 (the measured noise floor)', verdictFor(agg({ warmChroma: 0.0784 }), agg({ warmChroma: 0.0783 }), 'warmChroma'), 'ok');
   check('meanSat 0.400 -> 0.300 (crosses the muddy floor)', verdictFor(agg({ meanSat: 0.400 }), agg({ meanSat: 0.300 }), 'meanSat'), 'REGRESSION');
   check('env warm share 0.20 -> 0.35 (breaches the 0.297 ceiling)', verdictFor(agg({}), agg({ envWarmShare: 0.35 }), 'envWarmShare'), 'REGRESSION');
+  // envWarmShare is CEILING-ONLY. It shipped with target 0.297, which made vacating warm
+  // hue from the environment — the move the hue-reservation contract requires, and the one
+  // a blind critic explicitly prescribed — register as a REGRESSION. It also contradicted
+  // envShareInCastBand, which measures nearly the same quantity with target 0, and the pair
+  // floored that headline metric at ~0.16 whatever the art did. These two lock the fix.
+  check('env warm share 0.20 -> 0.12 (vacating the cast band — the CONTRACT)', verdictFor(agg({}), agg({ envWarmShare: 0.12 }), 'envWarmShare'), 'ok');
+  check('env warm share 0.20 -> 0.00 (fully vacated, however large the move)', verdictFor(agg({}), agg({ envWarmShare: 0.0 }), 'envWarmShare'), 'ok');
   check('hue overlap 0.27 -> 0.60 (env moves onto the cast hue)', verdictFor(agg({}), agg({ hueOverlap: 0.60 }), 'hueOverlap'), 'REGRESSION');
   check('hue overlap 0.27 -> 0.10 (env moves off it)', verdictFor(agg({}), agg({ hueOverlap: 0.10 }), 'hueOverlap'), 'ok');
   check('arena warm chroma drifts further (advisory rail still gates)', verdictFor(agg({}), agg({ arenaWarmChroma: 0.040 }), 'arenaWarmChroma'), 'REGRESSION');
