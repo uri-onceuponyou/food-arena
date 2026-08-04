@@ -32,6 +32,16 @@ export interface HudFrameInfo {
    * hides the chevron.
    */
   safeArrow?: { at: ScreenPoint; angleRad: number } | null;
+  /**
+   * The aim reticle, in SCREEN space — `from` is the player's own projected position
+   * and `at` is where the virtual cursor is pointing.
+   *
+   * Only supplied while the mouse is POINTER-LOCKED (`src/game/pointerLock.ts`). Under
+   * lock the OS cursor is hidden by the browser, so without this the player is aiming
+   * at nothing they can see. When the cursor is free the OS cursor IS the reticle and
+   * this stays null, so the two can never be drawn at once.
+   */
+  aim?: { from: ScreenPoint; at: ScreenPoint } | null;
 }
 
 export interface Hud {
@@ -217,6 +227,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       </div>
       <div class="hud-safearrow-label" data-el="safearrow-label">RUN TO THE ZONE</div>
 
+      <!-- ── Aim reticle (pointer lock only) ─────────────────────────────────
+           Declared LATE in the stack so it paints over the radar, the weapon bar and
+           the fog wash: it is the one HUD element that is literally the player's
+           cursor, and a cursor that can be covered is worse than no cursor. -->
+      <div class="hud-aim-stick" data-el="aim-stick"></div>
+      <div class="hud-aim-reticle" data-el="aim-reticle">
+        <div class="hud-aim-dot"></div>
+      </div>
+
       <div class="hud-dmg-layer" data-el="dmg-layer"></div>
       <div class="hud-screenflash" data-el="screenflash"></div>
     </div>
@@ -270,6 +289,8 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const fogTickEl = q<HTMLDivElement>('fogtick');
   const safeArrowEl = q<HTMLDivElement>('safearrow');
   const safeArrowLabelEl = q<HTMLDivElement>('safearrow-label');
+  const aimStickEl = q<HTMLDivElement>('aim-stick');
+  const aimReticleEl = q<HTMLDivElement>('aim-reticle');
 
   // Pooled floating damage/heal numbers — pre-created once, cycled round-robin, so
   // spawning one on every hit never allocates a DOM node.
@@ -426,6 +447,36 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     }
   }
 
+  /**
+   * Draw the pointer-lock aim reticle.
+   *
+   * TWO elements, not one, and the split is what makes it read: a ring alone at a
+   * fixed radius is ambiguous about what it belongs to (it could be a pickup, a
+   * hazard tell, an enemy marker), while the stick joining it to the player's feet
+   * states "this is YOUR facing" without a legend. The stick is drawn from the
+   * player's projected ground point, so it also survives the camera's follow lerp
+   * pulling the character off exact frame centre.
+   */
+  function renderAim(frame: HudFrameInfo): void {
+    const aim = frame.aim ?? null;
+    if (!aim) {
+      aimStickEl.style.display = 'none';
+      aimReticleEl.style.display = 'none';
+      return;
+    }
+    const dx = aim.at.x - aim.from.x;
+    const dy = aim.at.y - aim.from.y;
+    const len = Math.hypot(dx, dy);
+    const deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    aimStickEl.style.display = 'block';
+    aimStickEl.style.width = `${len.toFixed(1)}px`;
+    aimStickEl.style.transform =
+      `translate(${aim.from.x.toFixed(1)}px, ${aim.from.y.toFixed(1)}px) rotate(${deg.toFixed(1)}deg)`;
+    aimReticleEl.style.display = 'flex';
+    aimReticleEl.style.transform =
+      `translate(${aim.at.x.toFixed(1)}px, ${aim.at.y.toFixed(1)}px) translate(-50%, -50%)`;
+  }
+
   return {
     setCharacters(playerId, enemyId) {
       playerCharId = playerId;
@@ -480,6 +531,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       }
 
       renderZone(state, frame);
+      renderAim(frame);
 
       if (state.phase === 'countdown') {
         countdownEl.style.display = 'flex';
@@ -1307,6 +1359,74 @@ const CSS = `
 @keyframes hud-lowhp-pulse-small {
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.6); }
+}
+
+/* ── Aim reticle (pointer lock only) ──────────────────────────────────────── */
+/* Under pointer lock the browser hides the OS cursor, so this IS the cursor. It has
+   to survive every background this arena can put behind it — cream tile, dark plum
+   props, the violet fog wash, a bright hazard — which is why every stroke is
+   white-on-near-black rather than a single tinted line. Deliberately NOT violet: that
+   hue is reserved project-wide for the closing fog. */
+.hud-aim-stick {
+  position: absolute;
+  /* Half the height, so transform-origin 0 50% pivots exactly on the player's
+     projected ground point rather than 1.5px below it. */
+  top: -1.5px;
+  left: 0;
+  display: none;
+  height: 3px;
+  transform-origin: 0 50%;
+  border-radius: 999px;
+  pointer-events: none;
+  will-change: transform, width;
+  /* Fades IN toward the reticle: solid at the player's feet it would read as a
+     tether or a beam (i.e. as something with gameplay meaning), and it would also sit
+     on top of the character's own silhouette. */
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.16) 45%, rgba(255,255,255,0.72) 100%);
+  box-shadow: 0 1px 0 rgba(20,14,28,0.45);
+}
+
+.hud-aim-reticle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid #FFFFFF;
+  /* Dark ring OUTSIDE the white one — the same belt-and-suspenders trick the safe-zone
+     chevron uses, so the reticle never disappears into a pale floor tile. */
+  box-shadow: 0 0 0 2px rgba(20,14,28,0.8), inset 0 0 0 1.5px rgba(20,14,28,0.55);
+  pointer-events: none;
+  will-change: transform;
+}
+/* Four cardinal ticks outside the ring. A bare ring at a fixed distance from a
+   character reads as a PICKUP or an ability radius in this genre — the ticks are what
+   make it unambiguously a crosshair, and they cost nothing to draw. */
+.hud-aim-reticle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  transform: translate(-50%, -50%);
+  background:
+    linear-gradient(#FFFFFF, #FFFFFF) 50% 0 / 3px 10px no-repeat,
+    linear-gradient(#FFFFFF, #FFFFFF) 50% 100% / 3px 10px no-repeat,
+    linear-gradient(#FFFFFF, #FFFFFF) 0 50% / 10px 3px no-repeat,
+    linear-gradient(#FFFFFF, #FFFFFF) 100% 50% / 10px 3px no-repeat;
+  filter: drop-shadow(0 0 2px rgba(20,14,28,0.95));
+}
+.hud-aim-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #F4A300;
+  box-shadow: 0 0 0 1.5px rgba(20,14,28,0.85);
 }
 
 /* ── Floating damage/heal numbers ─────────────────────────────────────────── */
