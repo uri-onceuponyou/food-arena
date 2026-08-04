@@ -1,0 +1,580 @@
+/**
+ * Menu design system — one stylesheet, injected once, shared by every screen.
+ *
+ * ── Where the look comes from ────────────────────────────────────────────────
+ * The palette, the warm halftone backdrop and the information architecture are the
+ * 2D prototypes' (`reference/prototypes/home-screen.html`,
+ * `characters-screen.html`). The EXECUTION is `src/ui/hud.ts`'s — the one element on
+ * this project that beat the shipped reference in a blind A/B test — so the idioms
+ * below are deliberately its idioms, not the prototypes':
+ *
+ *   * hard DOWNWARD shadows (`0 4px 0 rgba(0,0,0,.35)`), never the prototypes'
+ *     diagonal `4px 4px 0`. A down-shadow reads as a physical, pressable slab on a
+ *     touch screen; a diagonal one reads as a 2015 flat-design sticker.
+ *   * 3px ink borders on every raised surface, radius 12-18 on cards, 999 on pills.
+ *   * Rubik 800/900 for anything structural, Heebo for prose. Never a third face.
+ *   * press states MOVE the element down and eat their own shadow, so a tap has
+ *     physical feedback with no JS.
+ *
+ * ── Landscape and safe areas are first-class ────────────────────────────────
+ * Mobile landscape is a shipping target, so every screen is a `grid` whose padding
+ * is `--fa-safe-*` plus a gutter, every clamp is driven off `vh` rather than `vw`
+ * (landscape phones are HEIGHT-constrained: 390px tall is the tight case, not 844px
+ * wide), and every interactive element is at least `--tap` (44px) on its short axis.
+ *
+ * `--fa-safe-*` are declared on `:root`, which means a test can override them with
+ * an inline style on `<html>` and simulate a notch without a device — that is how
+ * the acceptance test for safe areas is actually run.
+ */
+
+const STYLE_ID = 'fa-screen-styles';
+
+/** Idempotent `<style>` injection, keyed by id — the same pattern `ui/hud.ts` uses.
+ *  Each screen module owns its own block and registers it on first mount, so a
+ *  screen that is never visited costs nothing. */
+export function injectStyles(id: string, css: string): void {
+  if (document.getElementById(id)) return;
+  const style = document.createElement('style');
+  style.id = id;
+  style.textContent = css;
+  document.head.appendChild(style);
+}
+
+export function ensureScreenStyles(): void {
+  injectStyles(STYLE_ID, CSS);
+}
+
+/** Convert `#rrggbb` to `rgba(r,g,b,a)`. Rarity colours arrive as hex from
+ *  `rules.ts` and several treatments need them at partial alpha. */
+export function rgba(hex: string, alpha: number): string {
+  const c = hex.replace('#', '');
+  const full = c.length === 3 ? c.split('').map((ch) => ch + ch).join('') : c;
+  const r = parseInt(full.slice(0, 2), 16) || 0;
+  const g = parseInt(full.slice(2, 4), 16) || 0;
+  const b = parseInt(full.slice(4, 6), 16) || 0;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+const CSS = `
+:root {
+  /* Real notch/home-indicator insets. Overridable inline on <html> for testing —
+     see the file header. */
+  --fa-safe-t: env(safe-area-inset-top, 0px);
+  --fa-safe-r: env(safe-area-inset-right, 0px);
+  --fa-safe-b: env(safe-area-inset-bottom, 0px);
+  --fa-safe-l: env(safe-area-inset-left, 0px);
+}
+
+.fa-root {
+  --ink: #1a1224;
+  --ink-2: #2a1d3a;
+  --cream: #FFF3DE;
+  --panel: rgba(255,243,222,0.94);
+  --gold: #F4A300;
+  --mustard: #FFC93C;
+  --mustard-hi: #FFDD6B;
+  --gold-shadow: #8a5c00;
+  --ketchup: #D62839;
+  --tomato: #E63946;
+  --lettuce: #7CB518;
+  --water: #1E90D8;
+
+  /* Minimum touch target. Apple/Google both say 44; a brawler menu played with a
+     thumb on a moving bus should not go below it, ever. */
+  --tap: 44px;
+  /* Vertical rhythm. vh-driven because landscape phones run out of HEIGHT first. */
+  --gap: clamp(6px, 1.3vh, 12px);
+  --gutter: clamp(10px, 1.6vw, 20px);
+  /* TWO radii, project-wide. Anything you press is a pill; anything you read off is
+     a 16px surface. Four competing radii on one screen was a named critic finding. */
+  --radius-surface: 16px;
+
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  /* Explicit, because the host #screens div is pointer-events:none — see the long
+     comment on it in index.html. A menu screen needs events; a live match does not
+     (below), and the match screen's own controls opt back in individually. */
+  pointer-events: auto;
+  font-family: 'Heebo', sans-serif;
+  color: var(--ink);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* While a match is live the shell keeps the layer mounted (the pause chip lives in
+   it) but everything decorative goes away and clicks fall through to the canvas. */
+.fa-root.is-ingame { pointer-events: none; }
+.fa-root.is-ingame .fa-bg,
+.fa-root.is-ingame .fa-dots,
+.fa-root.is-ingame .fa-rays { display: none; }
+
+/* ── Backdrop ─────────────────────────────────────────────────────────────── */
+/* Owned by the SHELL, not by any screen, so navigating never re-paints or flashes
+   the background — only the content above it changes. */
+.fa-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% -8%, #FFD98C 0%, transparent 46%),
+    linear-gradient(160deg, #F4A300 0%, #E85D2C 45%, #C1272D 100%);
+  background-color: #C1272D;
+}
+/* Comic halftone. 'multiply' keeps it a texture rather than a grey film. */
+.fa-dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(0,0,0,0.10) 2px, transparent 2px);
+  background-size: 24px 24px;
+  mix-blend-mode: multiply;
+}
+/* Speed lines behind the centre of the frame. Very low contrast on purpose: it has
+   to survive being screenshotted next to a Brawl Stars plate without reading as
+   noise, so it works as a subliminal focus ring, not as a pattern. */
+.fa-rays {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 200vmax;
+  height: 200vmax;
+  transform: translate(-50%, -50%);
+  background: repeating-conic-gradient(from 0deg, rgba(255,255,255,0.07) 0deg 3deg, transparent 3deg 15deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 0%, transparent 62%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 0%, transparent 62%);
+  animation: fa-rays-spin 90s linear infinite;
+}
+@keyframes fa-rays-spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+/* Screens stack here. */
+.fa-stack { position: absolute; inset: 0; }
+
+/* Navigation curtain. Screens are torn down and rebuilt (a single WebGL stage is
+   re-parented between them), so the swap is hidden behind an opaque wipe instead of
+   cross-fading two live screens — one 3D context cannot be in two places at once. */
+.fa-curtain {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: #140d1e;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease-out;
+}
+.fa-curtain.is-on { opacity: 1; pointer-events: auto; }
+
+/* ── Screen frame ─────────────────────────────────────────────────────────── */
+.fa-screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--gap);
+  padding:
+    calc(var(--fa-safe-t) + var(--gap))
+    calc(var(--fa-safe-r) + var(--gutter))
+    calc(var(--fa-safe-b) + var(--gap))
+    calc(var(--fa-safe-l) + var(--gutter));
+  animation: fa-screen-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes fa-screen-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.992); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── Top bar ──────────────────────────────────────────────────────────────── */
+.fa-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+}
+.fa-topbar-spacer { flex: 1 1 auto; min-width: 0; }
+
+/* Read-only status pill (name, wins, coins). */
+.fa-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 13px;
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.62rem, 1.4vh, 0.78rem);
+  white-space: nowrap;
+  color: var(--ink);
+}
+.fa-chip-em { font-size: 1.1em; line-height: 1; }
+.fa-chip-val { color: var(--ketchup); }
+.fa-chip--gem .fa-chip-val { color: var(--water); }
+
+/* Interactive version of the chip — used for Back and the settings gear. Height is
+   raised to the full tap target; the visual pill stays 34px via padding so the
+   layout does not look chunkier than the read-only chips beside it. */
+.fa-iconbtn {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: var(--tap);
+  height: var(--tap);
+  padding: 0 12px;
+  cursor: pointer;
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.7rem, 1.6vh, 0.9rem);
+  color: var(--ink);
+  transition: transform 0.08s, box-shadow 0.08s, background 0.12s;
+}
+.fa-iconbtn:hover { background: #FFFFFF; }
+.fa-iconbtn:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.35); }
+
+/* Segmented tab bar.
+   The height is the tap target PLUS the container's own 3px border on each side —
+   otherwise the buttons inside come out 6px short of 44 and the whole bar fails the
+   touch-target check while looking exactly right. */
+.fa-tabs {
+  display: flex;
+  min-height: calc(var(--tap) + 6px);
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+}
+.fa-tab {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  color: var(--ink);
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.74rem, 1.9vh, 1.02rem);
+  letter-spacing: 0.02em;
+  min-height: var(--tap);
+  padding: 0 clamp(10px, 1.6vw, 22px);
+  border-inline-start: 2px solid rgba(26,18,36,0.15);
+  transition: background 0.12s, color 0.12s;
+}
+.fa-tab:first-child { border-inline-start: none; }
+.fa-tab:hover:not(.is-active) { background: rgba(255,201,60,0.4); }
+.fa-tab.is-active { background: var(--mustard); }
+.fa-tab[disabled] { opacity: 0.45; cursor: default; }
+.fa-tab[disabled]:hover { background: transparent; }
+
+/* ── Panels ───────────────────────────────────────────────────────────────── */
+.fa-panel {
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-surface);
+  box-shadow: 0 5px 0 rgba(0,0,0,0.35);
+  padding: clamp(8px, 1.5vh, 14px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+.fa-panel--flush { padding: 0; overflow: hidden; }
+
+.fa-panel-title {
+  margin: 0;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: clamp(0.72rem, 1.7vh, 0.95rem);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(26,18,36,0.62);
+}
+
+/* Screen headline. Cream on ink stroke — the same treatment the HUD countdown and
+   the prototypes' <h1> both use, which is what makes menu and match feel like one
+   product rather than two. */
+.fa-title {
+  margin: 0;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: clamp(1rem, 3.1vh, 1.75rem);
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+  color: var(--cream);
+  -webkit-text-stroke: 3px var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 4px 0 var(--ink), 0 10px 18px rgba(0,0,0,0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.fa-btn {
+  appearance: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 0 clamp(14px, 2vw, 30px);
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.8rem, 1.9vh, 1.1rem);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 4px 0 var(--gold-shadow);
+  transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
+  white-space: nowrap;
+}
+.fa-btn:hover { filter: brightness(1.06); }
+.fa-btn:active { transform: translateY(4px); box-shadow: 0 0 0 var(--gold-shadow); }
+.fa-btn[disabled] { opacity: 0.5; cursor: default; filter: none; }
+.fa-btn[disabled]:active { transform: none; box-shadow: 0 4px 0 var(--gold-shadow); }
+
+/* The single loudest control on any screen. Breathes so the eye lands on it first,
+   exactly like the prototype's START GAME.
+   Sized deliberately larger than round 1: a critic measured it at ~17% of frame
+   width and 6.4% of height against a ~22-25% / 11-13% reference norm, and noted it
+   carried less visual weight than the disabled nav around it. It now also has a
+   real material — inner top highlight, thick bottom lip, outer glow and a contact
+   shadow onto the background — instead of being a flat fill. */
+.fa-btn--primary {
+  font-size: clamp(1rem, 3vh, 1.7rem);
+  min-height: clamp(var(--tap), 9.5vh, 78px);
+  padding: 0 clamp(24px, 3.6vw, 58px);
+  border-width: 4px;
+  box-shadow:
+    inset 0 3px 0 rgba(255,255,255,0.7),
+    0 7px 0 var(--gold-shadow),
+    0 10px 22px rgba(0,0,0,0.4),
+    0 0 26px rgba(255,201,60,0.5);
+  animation: fa-btn-pulse 1.8s ease-in-out infinite;
+}
+.fa-btn--primary:active {
+  transform: translateY(7px);
+  box-shadow: inset 0 3px 0 rgba(255,255,255,0.7), 0 0 0 var(--gold-shadow);
+}
+/* Character select's FIGHT!: the only object in its corner, so it gets the full
+   width allowance a shipped CTA has. */
+.fa-btn--hero { min-width: clamp(150px, 22vw, 380px); }
+.fa-btn--primary:active { animation: none; }
+@keyframes fa-btn-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+
+.fa-btn--green {
+  background: linear-gradient(180deg, #A6E24A 0%, var(--lettuce) 100%);
+  box-shadow: 0 4px 0 #43690b;
+}
+.fa-btn--green:active { box-shadow: 0 0 0 #43690b; }
+
+.fa-btn--quiet {
+  background: linear-gradient(180deg, #FFFFFF 0%, #EFE2CC 100%);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.35);
+}
+.fa-btn--quiet:active { box-shadow: 0 0 0 rgba(0,0,0,0.35); }
+
+/* Left-aligned nav row (Foods / Shop / Items ...). */
+.fa-menuitem {
+  appearance: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 12px;
+  text-align: start;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.74rem, 1.7vh, 0.95rem);
+  color: var(--ink);
+  background: #FFFFFF;
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.3);
+  transition: transform 0.1s, background 0.12s, box-shadow 0.1s;
+}
+.fa-menuitem-em { font-size: 1.25em; line-height: 1; width: 1.3em; text-align: center; }
+.fa-menuitem:hover { background: var(--mustard-hi); transform: translateX(3px); }
+.fa-menuitem:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.3); }
+.fa-menuitem[disabled] { opacity: 0.55; cursor: default; }
+.fa-menuitem[disabled]:hover { background: #FFFFFF; transform: none; }
+.fa-menuitem-soon {
+  margin-inline-start: auto;
+  font-size: 0.62em;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(26,18,36,0.45);
+}
+
+/* ── Scrolling regions ────────────────────────────────────────────────────── */
+/* The page itself NEVER scrolls (body is overflow:hidden). Anything that can
+   overflow scrolls inside its own box, which is the only way a landscape phone and
+   an ultrawide desktop can share one layout. */
+.fa-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(26,18,36,0.4) transparent;
+}
+.fa-scroll::-webkit-scrollbar { width: 8px; }
+.fa-scroll::-webkit-scrollbar-track { background: transparent; }
+.fa-scroll::-webkit-scrollbar-thumb {
+  background: rgba(26,18,36,0.35);
+  border-radius: 999px;
+}
+
+/* ── Level / progress bar ─────────────────────────────────────────────────── */
+.fa-level {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.fa-level-label {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: clamp(0.68rem, 1.6vh, 0.9rem);
+  color: var(--cream);
+  text-shadow: 0 2px 0 var(--ink);
+  white-space: nowrap;
+}
+/* Taller than round 1's 16px hairline, and it carries its own numeric readout —
+   a critic called the old bar "invisible for what is core progression". */
+.fa-level-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 40px;
+  height: clamp(20px, 3vh, 26px);
+  background: var(--panel);
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+}
+.fa-level-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: repeating-linear-gradient(45deg, var(--lettuce) 0 10px, #9BE03A 10px 20px);
+  transition: width 0.4s ease-out;
+}
+.fa-level-xp {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.56rem, 1.3vh, 0.72rem);
+  letter-spacing: 0.03em;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+/* ── Stat bars (character select) ─────────────────────────────────────────── */
+.fa-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fa-stat-label {
+  flex: 0 0 auto;
+  width: clamp(58px, 8vw, 92px);
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.64rem, 1.45vh, 0.8rem);
+  white-space: nowrap;
+}
+.fa-stat-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 14px;
+  background: #FFFFFF;
+  border: 2.5px solid var(--ink);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.fa-stat-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.32s cubic-bezier(0.2, 0.9, 0.3, 1);
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0) 45%);
+  background-blend-mode: overlay;
+}
+.fa-stat-val {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: end;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: clamp(0.62rem, 1.4vh, 0.78rem);
+  color: rgba(26,18,36,0.7);
+}
+
+/* ── Rarity badge ─────────────────────────────────────────────────────────── */
+/* Colour comes from RARITY_COLORS in rules.ts via inline style — never hardcoded
+   here, so a balance/roster change can't silently desync the menu from the game. */
+.fa-rarity {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  height: 19px;
+  padding: 0 9px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: 0.6rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #FFFFFF;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.45);
+  white-space: nowrap;
+}
+
+/* ── Confetti (select / win celebration) ──────────────────────────────────── */
+.fa-confetti-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 90;
+}
+.fa-confetti {
+  position: absolute;
+  top: 34%;
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+  animation: fa-confetti-fall 1.4s ease-in forwards;
+}
+@keyframes fa-confetti-fall {
+  to { transform: translate(var(--x, 0px), 70vh) rotate(520deg); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fa-screen, .fa-btn--primary, .fa-rays, .fa-confetti { animation: none !important; }
+}
+`;

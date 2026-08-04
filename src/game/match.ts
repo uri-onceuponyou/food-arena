@@ -46,6 +46,16 @@ export interface GameSessionOptions {
   hudRoot: HTMLElement;
   playerCharacterId?: CharacterId;
   enemyCharacterId?: CharacterId;
+  /**
+   * Fired whenever the match crosses a phase boundary, including the reset back to
+   * `countdown` on restart.
+   *
+   * Exists so the screen layer (`ui/screens/matchScreen.ts`) can react to a match
+   * ending — bank the result on the player profile, reveal the "back to menu"
+   * button — WITHOUT polling `MatchState` from outside or reaching into the HUD.
+   * The session stays the only owner of match state; this is the one-way edge out.
+   */
+  onPhase?: (phase: MatchState['phase'], winner: FighterRole | null) => void;
 }
 
 const DEFAULT_PLAYER: CharacterId = 'hamburger';
@@ -90,6 +100,21 @@ export class GameSession {
   private raf = 0;
   private disposed = false;
   private readyFired = false;
+
+  /**
+   * Pause.
+   *
+   * Deliberately NOT "stop the rAF loop": the canvas would then hold a stale frame
+   * that any resize, tab switch or DPR change would blank, and the HUD's own CSS
+   * animations would keep running over a frozen picture. Instead the loop keeps
+   * running and simply skips the simulation, so the last live frame stays composited
+   * and correct. `THREE.Clock.getDelta()` is still consumed every frame, which is
+   * what makes resuming seamless — no accumulated multi-second delta to absorb.
+   */
+  private isPaused = false;
+
+  /** Last phase handed to `opts.onPhase`, so the callback fires on TRANSITIONS only. */
+  private lastPhase: MatchState['phase'] | null = null;
 
   private readonly raycaster = new THREE.Raycaster();
   private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -201,6 +226,19 @@ export class GameSession {
   /** Start a brand-new match: fresh sim state, fresh models, camera snapped back. */
   restart(): void {
     this.spawnMatch();
+    this.isPaused = false;
+  }
+
+  get paused(): boolean {
+    return this.isPaused;
+  }
+
+  pause(): void {
+    this.isPaused = true;
+  }
+
+  resume(): void {
+    this.isPaused = false;
   }
 
   resize(): void {
@@ -253,6 +291,11 @@ export class GameSession {
       this.state.phase === 'playing',
       this.stage.rig,
     );
+
+    // A restart re-enters `countdown`, which is a real transition the screen layer
+    // has to see (it hides the post-match "back to menu" button again).
+    this.lastPhase = null;
+    this.notifyPhase();
   }
 
   /** Apply the QA-only `?fogRadius=` / `?px=` / `?py=` overrides to a fresh match.
@@ -527,6 +570,13 @@ export class GameSession {
     return { at, angleRad: Math.atan2(sy, sx) };
   }
 
+  /** Fire `opts.onPhase` on transitions only — never every frame. */
+  private notifyPhase(): void {
+    if (this.state.phase === this.lastPhase) return;
+    this.lastPhase = this.state.phase;
+    this.opts.onPhase?.(this.state.phase, this.state.winner);
+  }
+
   private readonly handleResize = (): void => this.resize();
 
   /** Exponential decay toward zero, used for the visual-only knockback offset.
@@ -548,6 +598,15 @@ export class GameSession {
 
     const rawDtSeconds = Math.min(this.clock.getDelta(), 1 / 20) * this.simSpeed;
     const rawDtMs = rawDtSeconds * 1000;
+
+    // Paused: keep the frame composited (see `isPaused`) but advance nothing. dt 0
+    // so the camera's follow lerp and shake decay hold too — a drifting camera over
+    // a frozen world reads as a hitch, not as a pause.
+    if (this.isPaused) {
+      this.stage.render(0);
+      this.raf = requestAnimationFrame(this.loop);
+      return;
+    }
 
     // ── Hit-stop dt accounting ────────────────────────────────────────────────
     // See the field comments above for the full "borrow it back" invariant. Short
@@ -575,6 +634,7 @@ export class GameSession {
     const input = this.buildInput();
     const events = stepMatch(this.state, stepDtMs, input);
     this.handleEvents(events);
+    this.notifyPhase();
 
     const playerMoved = this.state.player.x !== prevPlayer.x || this.state.player.y !== prevPlayer.y;
     const enemyMoved = this.state.enemy.x !== prevEnemy.x || this.state.enemy.y !== prevEnemy.y;

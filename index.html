@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <!-- viewport-fit=cover is REQUIRED for env(safe-area-inset-*) to report anything
+       other than 0 on iOS. Without it the menus and the HUD would happily draw their
+       corners under the notch and the home indicator in landscape. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#C1272D" />
   <title>Food Fight Arena</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,16 +14,38 @@
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; height: 100%; overflow: hidden; background: #16101f; font-family: 'Heebo', sans-serif; }
-    #game { position: fixed; inset: 0; }
+    /* The page itself must NEVER scroll. Anything that can overflow scrolls inside
+       its own box (`.fa-scroll`) — the only way one layout survives both a 844x390
+       phone in landscape and a 2560x1080 ultrawide. */
+    body { position: fixed; inset: 0; overscroll-behavior: none; }
+    /* ── Layer stack, stated explicitly ──────────────────────────────────────
+       game 0  <  hud 20  <  screens 40  <  boot 200.
+       These used to be implicit in DOM order plus the z-index each layer's own
+       root happened to carry, which is fragile: the post-match "back to menu"
+       button MUST paint and hit-test above the HUD's full-viewport game-over
+       scrim, and that ordering deserves to be a decision rather than an accident. */
+    #game { position: fixed; inset: 0; z-index: 0; }
     canvas { display: block; width: 100%; height: 100%; }
     /* pointer-events:none so mouse/click input passes through to the canvas below;
        the interactive bits (e.g. the Play Again button) re-enable it themselves. */
-    #hud { position: fixed; inset: 0; pointer-events: none; }
+    #hud { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
+    /* Menu / screen layer.
+       pointer-events:none is LOAD-BEARING, not tidiness. This div covers the whole
+       viewport at all times, including during a match when it holds nothing but the
+       pause chip. With the default `auto` it becomes the hit target for every
+       pointer event in the frame, and the game canvas underneath receives NOTHING —
+       measured as 0 mousemove and 0 mousedown reaching the canvas mid-match, which
+       silently disabled firing AND aim-facing at once (input.ts never sees a mouse,
+       so `mouseNdc` stays null, so match.ts never builds an aim vector, so the
+       fighter's facing freezes). Interactive children opt back in with
+       `pointer-events: auto` — the exact pattern `ui/hud.ts` already uses one layer
+       down, where the same trap is called out in its own comments. */
+    #screens { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
     #boot {
       position: fixed; inset: 0; display: grid; place-items: center;
       color: #FFF3DE; font-family: 'Rubik', sans-serif; font-weight: 800; letter-spacing: 0.04em;
       background: radial-gradient(circle at 50% 35%, #4a2a5e 0%, #16101f 70%);
-      z-index: 50; transition: opacity .4s ease;
+      z-index: 200; transition: opacity .4s ease;
     }
     #boot.hidden { opacity: 0; pointer-events: none; }
   </style>
@@ -27,6 +53,7 @@
 <body>
   <div id="game"></div>
   <div id="hud"></div>
+  <div id="screens"></div>
   <div id="boot">Heating the kitchen…</div>
   <script type="module" src="/src/main.ts"></script>
 </body>

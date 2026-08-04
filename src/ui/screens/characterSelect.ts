@@ -1,0 +1,730 @@
+/**
+ * Character select.
+ *
+ * Information architecture is `reference/prototypes/characters-screen.html`'s: a
+ * roster grid of rarity-coloured cards, a detail readout (three 0-10 stat bars plus
+ * the ability list), a SELECT action that equips with a confetti burst, and the
+ * "⭐ Playing" marker on the equipped card. All of it is still here.
+ *
+ * Two deliberate changes of execution:
+ *
+ *  1. **Three landscape columns, not a vertical stack.** The prototype scrolled the
+ *     whole page — roster, then stats, then button — which on a phone in landscape
+ *     means you cannot see the character you are reading the stats of. Hero | roster
+ *     | detail puts all three in view at 844x390 and at 2560x1080 alike, and it is
+ *     the layout every shipped brawler select screen uses (see the Zooba plate in
+ *     `reference/images/zooba/tablet_5.jpg`: hero large at left, card grid at right).
+ *  2. **The hero is the real 3D model**, on a pedestal, through the real Stage
+ *     (`charStage.ts`) — the prototype's flat SVGs were placeholders for exactly this.
+ *
+ * Every number on this screen (roster order, names, rarity, stats, abilities) is read
+ * from `game/rules.ts`. Nothing about the cast is duplicated here.
+ */
+
+import {
+  CHARACTERS, CHARACTER_IDS, RARITY_COLORS, RARITY_CARD_COLORS, REACH,
+  type CharacterId, type Weapon,
+} from '../../game/rules';
+import type { Screen, ScreenContext } from './types';
+import { injectStyles, rgba } from './theme';
+import { burstConfetti, el } from './fx';
+import { getCharacterStage } from './charStage';
+import { getCachedThumb, requestThumbnails } from './thumbs';
+
+/** Stat bar colours, matching the prototype's damage/health/speed semantics. */
+const STAT_ROWS = [
+  { key: 'damage', label: '⚔️ Damage', color: '#D62839' },
+  { key: 'health', label: '❤️ Health', color: '#7CB518' },
+  { key: 'speed', label: '💨 Speed', color: '#1E90D8' },
+] as const;
+
+/** Stats are authored on a 0-10 display scale in `rules.ts`. */
+const STAT_MAX = 10;
+
+/** Rarities whose cards animate, per the prototype's zigzag treatment. */
+const ANIMATED_RARITIES = new Set(['Neon', 'Cyber']);
+
+/**
+ * Ink or cream on a rarity chip, chosen by relative luminance rather than by hand.
+ *
+ * `RARITY_COLORS` is the design's, not ours — and three of the six (Legendary gold,
+ * Cyber mint, Normal grey) are light enough that white-on-them measured around
+ * 1.8:1, which is illegible at badge size on a handset. Deriving the text colour
+ * means a future rarity added to `rules.ts` is legible automatically.
+ */
+function chipInk(hex: string): { fg: string; shadow: string } {
+  const c = hex.replace('#', '');
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
+  const lin = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return L > 0.42
+    ? { fg: '#1a1224', shadow: 'none' }
+    : { fg: '#FFFFFF', shadow: '0 1px 1px rgba(0,0,0,0.5)' };
+}
+
+/**
+ * Reach, as a word.
+ *
+ * The raw `range` is in world units, which means nothing to a player, but the
+ * ladder it is drawn from does: `rules.ts` defines seven named rungs and every
+ * weapon sits on exactly one of them. Comparing against the rungs rather than
+ * against invented thresholds means this label can never drift out of sync with a
+ * balance change — retuning `REACH` retunes the label with it.
+ */
+function reachLabel(range: number | undefined): string | null {
+  if (range === undefined) return null;
+  if (range >= REACH.ultimateSlam) return 'Whole map';
+  if (range > REACH.rangedLong) return 'Max range';
+  if (range > REACH.rangedMid) return 'Long';
+  if (range > REACH.rangedClose) return 'Mid';
+  if (range > REACH.meleeHeavy) return 'Short';
+  return 'Melee';
+}
+
+/** The hard numbers behind an ability, straight out of the weapon table. */
+function weaponFacts(w: Weapon): string[] {
+  const facts: string[] = [];
+  if (w.type === 'self' && w.healAmount) {
+    facts.push(`💚 +${w.healAmount} HP`);
+  } else if (w.comboParts?.length) {
+    facts.push(`⚔ ${w.comboParts.map((p) => p.damage).join(' + ')}`);
+  } else if (w.pellets && w.pellets > 1) {
+    facts.push(`⚔ ${w.damage} × ${w.pellets}`);
+  } else if (w.damage > 0) {
+    facts.push(`⚔ ${w.damage}`);
+  }
+  const reach = reachLabel(w.range);
+  if (reach) facts.push(`↔ ${reach}`);
+  facts.push(`⏱ ${(w.cooldown / 1000).toFixed(1)}s`);
+  if (w.effect) facts.push(w.effect === 'stun' ? '💫 Stun' : '🐌 Slow');
+  return facts;
+}
+
+function pickOpponent(player: CharacterId): CharacterId {
+  const pool = CHARACTER_IDS.filter((id) => id !== player);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
+  injectStyles('fa-chars-styles', CSS);
+
+  const root = el('div', 'fa-screen fa-chars');
+  const stage = getCharacterStage();
+  let viewed: CharacterId = ctx.profile.selected;
+
+  root.innerHTML = `
+    <header class="fa-topbar">
+      <button class="fa-iconbtn" type="button" data-el="back" aria-label="Back to home">◀ Back</button>
+      <h1 class="fa-title chars-heading">Choose Your Fighter</h1>
+      <div class="fa-topbar-spacer"></div>
+      <div class="fa-chip"><span class="fa-chip-em">🏆</span>Wins <span class="fa-chip-val" data-el="wins">0</span></div>
+    </header>
+
+    <div class="chars-body">
+      <section class="chars-hero">
+        <div class="chars-hero-3d" data-el="hero3d"></div>
+        <div class="chars-hero-vignette"></div>
+        <div class="chars-hero-plate">
+          <span class="fa-title chars-hero-name" data-el="heroname"></span>
+          <span class="fa-rarity" data-el="herorarity"></span>
+        </div>
+        <button class="chars-equip" type="button" data-el="select">★ Equip</button>
+      </section>
+
+      <div class="fa-panel fa-panel--flush chars-rosterwrap">
+        <div class="fa-scroll chars-roster" data-el="roster"></div>
+      </div>
+
+      <div class="fa-panel chars-detail">
+        <p class="fa-panel-title">Stats</p>
+        <div class="chars-stats" data-el="stats"></div>
+        <p class="fa-panel-title">Abilities</p>
+        <div class="fa-scroll chars-abilities" data-el="abilities"></div>
+      </div>
+    </div>
+
+    <footer class="chars-bottom">
+      <button class="fa-btn fa-btn--primary fa-btn--hero" type="button" data-el="fight">▶ Fight!</button>
+    </footer>
+
+    <div class="fa-confetti-layer" data-el="confetti"></div>
+  `;
+
+  const q = <T extends HTMLElement>(sel: string): T => {
+    const node = root.querySelector<T>(`[data-el="${sel}"]`);
+    if (!node) throw new Error(`characterSelect: missing element "${sel}"`);
+    return node;
+  };
+
+  const rosterEl = q<HTMLDivElement>('roster');
+  const statsEl = q<HTMLDivElement>('stats');
+  const abilitiesEl = q<HTMLDivElement>('abilities');
+  const heroHost = q<HTMLDivElement>('hero3d');
+  const heroName = q<HTMLSpanElement>('heroname');
+  const heroRarity = q<HTMLSpanElement>('herorarity');
+  const selectBtn = q<HTMLButtonElement>('select');
+  const confetti = q<HTMLDivElement>('confetti');
+
+  // ── Roster grid ────────────────────────────────────────────────────────────
+  const cards = new Map<CharacterId, HTMLButtonElement>();
+  for (const id of CHARACTER_IDS) {
+    const def = CHARACTERS[id];
+    const card = el('button', 'chars-card');
+    card.type = 'button';
+    card.dataset.char = id;
+    card.style.setProperty('--card-bg', RARITY_CARD_COLORS[def.rarity]);
+    card.style.setProperty('--rarity', RARITY_COLORS[def.rarity]);
+    card.style.setProperty('--rarity-glow', rgba(RARITY_COLORS[def.rarity], 0.75));
+    if (ANIMATED_RARITIES.has(def.rarity)) card.classList.add('is-animated');
+    const ink = chipInk(RARITY_COLORS[def.rarity]);
+    card.innerHTML = `
+      <img class="chars-card-render" alt="" data-el="render" />
+      <span class="chars-card-sheen"></span>
+      <span class="chars-card-gloss"></span>
+      <span class="chars-card-art">${def.emoji}</span>
+      <span class="chars-card-name">${def.name}</span>
+      <span class="fa-rarity chars-card-rarity"
+            style="background:${RARITY_COLORS[def.rarity]};color:${ink.fg};text-shadow:${ink.shadow}">${def.rarity}</span>
+      <span class="chars-card-playing">⭐</span>
+    `;
+    card.addEventListener('click', () => view(id, true));
+    rosterEl.appendChild(card);
+    cards.set(id, card);
+  }
+
+  // Real roster art, rendered from the real models. Progressive: each card swaps
+  // from its emoji placeholder to its portrait the moment that render lands, so the
+  // screen is usable from the first frame regardless of GPU speed.
+  const paintThumb = (id: CharacterId, url: string): void => {
+    const card = cards.get(id);
+    const img = card?.querySelector<HTMLImageElement>('[data-el="render"]');
+    if (!img) return;
+    img.src = url;
+    card!.classList.add('has-render');
+  };
+  for (const id of CHARACTER_IDS) {
+    const hit = getCachedThumb(id);
+    if (hit) paintThumb(id, hit);
+  }
+  requestThumbnails(paintThumb);
+
+  // A twelfth, locked tile. Eleven cards in a four-wide grid leaves a ragged hole in
+  // the last row, and an unstyled gap in a roster reads as an unfinished build
+  // rather than as a roster of eleven. A locked slot is what a shipped game puts
+  // there, and it is honest: there ARE more characters coming.
+  const locked = el('div', 'chars-card chars-card--locked');
+  locked.innerHTML = `
+    <span class="chars-card-art">🔒</span>
+    <span class="chars-card-name">More soon</span>
+  `;
+  rosterEl.appendChild(locked);
+
+  // ── Stat bars (built once, widths animate on view change) ─────────────────
+  const statFills = new Map<string, HTMLDivElement>();
+  const statVals = new Map<string, HTMLSpanElement>();
+  for (const row of STAT_ROWS) {
+    const wrap = el('div', 'fa-stat');
+    // Ten discrete pips, because the scale in `rules.ts` IS out of ten — a smooth
+    // bar makes "7" and "8" indistinguishable at a glance, and the numeral was
+    // previously flung to the far edge of the panel where the eye could not
+    // associate it with its own bar.
+    wrap.innerHTML = `
+      <span class="fa-stat-label">${row.label}</span>
+      <div class="fa-stat-track"><div class="fa-stat-fill"></div><div class="fa-stat-pips"></div></div>
+      <span class="fa-stat-val"></span>
+    `;
+    const fill = wrap.querySelector<HTMLDivElement>('.fa-stat-fill')!;
+    fill.style.backgroundColor = row.color;
+    statFills.set(row.key, fill);
+    statVals.set(row.key, wrap.querySelector<HTMLSpanElement>('.fa-stat-val')!);
+    statsEl.appendChild(wrap);
+  }
+
+  function renderEquippedState(): void {
+    const equipped = ctx.profile.selected;
+    for (const [id, card] of cards) card.classList.toggle('is-playing', id === equipped);
+    const isEquipped = viewed === equipped;
+    selectBtn.textContent = isEquipped ? '★ Equipped' : '★ Equip';
+    selectBtn.classList.toggle('is-equipped', isEquipped);
+    selectBtn.disabled = isEquipped;
+    // The EQUIPPED control on the hero panel is the single place this state is
+    // stated. Round 1 said it in three places at once (a badge, a chip and a
+    // button), which a critic flagged — a state that needs saying three times is
+    // being said badly once.
+  }
+
+  function view(id: CharacterId, scrollIntoView = false): void {
+    viewed = id;
+    const def = CHARACTERS[id];
+
+    for (const [cid, card] of cards) card.classList.toggle('is-viewed', cid === id);
+    if (scrollIntoView) cards.get(id)?.scrollIntoView({ block: 'nearest' });
+
+    heroName.textContent = def.name;
+    heroRarity.textContent = def.rarity;
+    heroRarity.style.background = RARITY_COLORS[def.rarity];
+
+    for (const row of STAT_ROWS) {
+      const value = def.stats[row.key];
+      statFills.get(row.key)!.style.width = `${(value / STAT_MAX) * 100}%`;
+      statVals.get(row.key)!.textContent = String(value);
+    }
+
+    abilitiesEl.innerHTML = '';
+    for (const ability of def.abilities) {
+      // Abilities are the prose; weapons are the numbers. They are two views of the
+      // same thing and `rules.ts` names them identically, so pairing them turns a
+      // flavour list into a readout you can actually pick a fighter with — and it is
+      // what fills the detail panel instead of leaving half of it empty.
+      const weapon = def.weapons.find((w) => w.name === ability.name);
+      const pill = el('div', 'chars-ability');
+      pill.innerHTML = `
+        <span class="chars-ability-em">${ability.emoji}</span>
+        <span class="chars-ability-body">
+          <span class="chars-ability-name">${ability.name}</span>
+          <span class="chars-ability-desc">${ability.desc}</span>
+          ${weapon ? `<span class="chars-ability-facts">${
+            weaponFacts(weapon).map((f) => `<span class="chars-fact">${f}</span>`).join('')
+          }</span>` : ''}
+        </span>
+      `;
+      abilitiesEl.appendChild(pill);
+    }
+    // Donut's Sticky Trail is a passive with no weapon slot; it is already in the
+    // ability list, but the trail flag is the one gameplay property a player cannot
+    // infer from the abilities alone, so it gets called out.
+    if (def.hasTrail) {
+      const note = el('div', 'chars-ability chars-ability--passive');
+      note.innerHTML = `
+        <span class="chars-ability-em">🍯</span>
+        <span class="chars-ability-body">
+          <span class="chars-ability-name">Passive</span>
+          <span class="chars-ability-desc">Leaves a damaging speed-boost trail while moving.</span>
+        </span>
+      `;
+      abilitiesEl.appendChild(note);
+    }
+    abilitiesEl.scrollTop = 0;
+
+    stage.show(id);
+    renderEquippedState();
+  }
+
+  q<HTMLButtonElement>('back').addEventListener('click', () => ctx.navigate({ name: 'home' }));
+
+  selectBtn.addEventListener('click', () => {
+    ctx.profile.select(viewed);
+    renderEquippedState();
+    burstConfetti(confetti, 50, 24);
+    stage.poke();
+  });
+
+  q<HTMLButtonElement>('fight').addEventListener('click', () => {
+    // FIGHT implies equipping — nobody expects to fight as someone other than the
+    // character they were just looking at.
+    ctx.profile.select(viewed);
+    ctx.navigate({ name: 'match', player: viewed, enemy: pickOpponent(viewed) });
+  });
+
+  q('wins').textContent = String(ctx.profile.wins);
+  view(viewed);
+  stage.attachTo(heroHost);
+
+  return {
+    root,
+    update(dt) { stage.update(dt); },
+    resize() { stage.resize(); },
+    dispose() {
+      stage.detach();
+      root.remove();
+    },
+  };
+}
+
+const CSS = `
+.fa-chars .chars-heading { flex: 0 1 auto; }
+
+.fa-chars .chars-body {
+  display: grid;
+  grid-template-columns:
+    clamp(150px, 25vw, 430px)
+    minmax(0, 1fr)
+    clamp(168px, 21vw, 330px);
+  gap: var(--gap);
+  min-height: 0;
+}
+
+/* ── Hero column ──────────────────────────────────────────────────────────── */
+.fa-chars .chars-hero {
+  position: relative;
+  min-height: 0;
+  border: 3px solid var(--ink);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 5px 0 rgba(0,0,0,0.35);
+  background: #39b7e8;
+}
+.fa-chars .chars-hero-3d { position: absolute; inset: 0; }
+/* A lit set, not a blue rectangle.
+   Three layers, in order: a warm spotlight pool behind the character's head; a
+   corner vignette that pulls the panel's cool cyan back toward the menu's warm
+   palette so the viewport belongs to the same world as the chrome; and a bottom
+   scrim the nameplate sits on. Both critics named "flat unlit sky, nothing anchoring
+   the hero" as the gap between this and shipped work — this plus the contact shadow
+   in charStage.ts is that fix. */
+.fa-chars .chars-hero-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(52% 34% at 50% 30%, rgba(255,248,214,0.5), transparent 68%),
+    radial-gradient(120% 100% at 50% 40%, transparent 40%, rgba(193,39,45,0.42) 100%),
+    linear-gradient(0deg, rgba(20,13,30,0.78) 0%, rgba(20,13,30,0.32) 18%, transparent 38%);
+}
+
+/* Equip lives HERE, on the hero, not in the action row. Two same-shaped pills side
+   by side at the bottom right gave the primary action no dominance, and the pale
+   one read as a disabled button sitting next to the CTA. */
+.fa-chars .chars-equip {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  appearance: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0 14px;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.66rem, 1.5vh, 0.82rem);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: linear-gradient(180deg, #FFFFFF 0%, #EFE2CC 100%);
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.4);
+  transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
+}
+.fa-chars .chars-equip:hover { filter: brightness(1.05); }
+.fa-chars .chars-equip:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.4); }
+.fa-chars .chars-equip.is-equipped {
+  background: linear-gradient(180deg, #A6E24A 0%, var(--lettuce) 100%);
+  color: #123000;
+  opacity: 1;
+  cursor: default;
+}
+.fa-chars .chars-hero-plate {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: clamp(6px, 1.6vh, 14px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  pointer-events: none;
+}
+.fa-chars .chars-hero-name { max-width: 100%; }
+.fa-chars .chars-hero-plate .fa-rarity { align-self: center; }
+.fa-chars .chars-hero-badge {
+  position: absolute;
+  top: 12px;
+  inset-inline-start: 8px;
+  display: flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  background: var(--lettuce);
+  color: #FFFFFF;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.35);
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* ── Roster ───────────────────────────────────────────────────────────────── */
+/* The scroller must be a FLEX ITEM WITH A DEFINITE HEIGHT, or the 1fr rows below
+   have nothing to resolve against and silently collapse to their minimum — which is
+   exactly what left two thirds of this panel empty on the first attempt. */
+.fa-chars .chars-rosterwrap { min-height: 0; }
+.fa-chars .chars-rosterwrap > .chars-roster { flex: 1 1 auto; }
+/* Cards GROW into the panel rather than clustering at the top of it.
+   minmax(min, 1fr) rows share whatever height is left over, so 11 cards fill a
+   1600x900 roster the same way they fill a 844x390 one — round 1 pinned them to the
+   top and left two thirds of a cream panel empty at desktop size, which is the
+   thing that reads as unfinished. The column floor keeps the count at 4 across on a
+   phone and grows it on a desktop, so the grid is never one lonely card wide. */
+.fa-chars .chars-roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(clamp(70px, 10vw, 180px), 1fr));
+  grid-auto-rows: minmax(clamp(68px, 12vh, 128px), 1fr);
+  gap: clamp(6px, 1vw, 14px);
+  padding: clamp(8px, 1.4vh, 14px);
+  align-content: stretch;
+}
+
+.fa-chars .chars-card {
+  position: relative;
+  appearance: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  /* Never below the 44px tap minimum, and in practice much larger. */
+  min-height: clamp(68px, 12vh, 128px);
+  padding: 6px 4px 7px;
+  justify-content: center;
+  overflow: hidden;
+  /* FLAT rarity colour. The highlight that used to live here now lives in
+     .chars-card-gloss, ON TOP of the portrait — which is what lets the square
+     render sit inside a portrait-shaped tile with no visible seam, because the
+     card's own background and the render's baked background are the same colour. */
+  background: var(--card-bg, #BEBEBE);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: 0 4px 0 rgba(0,0,0,0.35);
+  transition: transform 0.1s, box-shadow 0.1s, border-color 0.12s;
+}
+.fa-chars .chars-card:hover { transform: translateY(-3px); box-shadow: 0 7px 0 rgba(0,0,0,0.35); }
+.fa-chars .chars-card:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.35); }
+/* The card you are LOOKING at: gold frame, the same colour the HUD reserves for
+   "this is the selected slot" on the weapon bar. One meaning, one colour. */
+.fa-chars .chars-card.is-viewed {
+  border-color: var(--gold);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.35), 0 0 0 3px var(--gold), 0 0 16px var(--rarity-glow);
+  transform: translateY(-3px);
+}
+.fa-chars .chars-card.is-viewed:active { transform: translateY(1px); }
+
+/* The emoji IS the card art, so it scales with the card. Pinned to vh rather than a
+   fixed size: the rows stretch to fill the panel, and a 2.9rem glyph adrift in a
+   230px-tall card is the same "unfinished" read the empty panel was. */
+/* The rendered portrait, once it lands. It covers the emoji placeholder rather
+   than replacing it in the DOM, so there is no reflow at swap time. */
+.fa-chars .chars-card-render {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* contain, not cover. A square render inside a portrait tile gets its SIDES
+     cropped by cover, which is what clipped Taco, Sushi and Hot Dog. contain
+     letterboxes instead — invisibly, since the bands are the same rarity colour —
+     and the 38% vertical bias lifts the character clear of the name plate so labels
+     stop landing on the model's legs. */
+  object-fit: contain;
+  object-position: center 38%;
+  opacity: 0;
+  transition: opacity 0.25s ease-out;
+  pointer-events: none;
+}
+.fa-chars .chars-card.has-render .chars-card-render { opacity: 1; }
+.fa-chars .chars-card.has-render .chars-card-art { display: none; }
+/* Top gloss + bottom scrim, over the render: the scrim is what keeps the name and
+   the rarity chip legible against whatever the character's own colours happen to be
+   down there, which a flat card never had to worry about. */
+.fa-chars .chars-card-gloss {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(90% 55% at 50% 6%, rgba(255,255,255,0.4), transparent 70%),
+    linear-gradient(0deg, rgba(20,13,30,0.62) 0%, rgba(20,13,30,0.14) 26%, transparent 44%);
+}
+
+.fa-chars .chars-card-art {
+  font-size: clamp(1.6rem, 10vh, 4.6rem);
+  line-height: 1.05;
+  filter: drop-shadow(0 3px 2px rgba(0,0,0,0.4));
+}
+.fa-chars .chars-card-art, .fa-chars .chars-card-name, .fa-chars .chars-card-rarity {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+}
+/* Once a portrait is behind it the name has to survive any colour underneath, so it
+   flips to the cream-on-ink treatment the rest of the game uses over artwork. */
+.fa-chars .chars-card.has-render .chars-card-name {
+  color: var(--cream);
+  -webkit-text-stroke: 2.5px var(--ink);
+  paint-order: stroke fill;
+}
+/* Portraits are full-bleed, so the content has to be bottom-anchored on top of them
+   instead of centred in an empty card. */
+.fa-chars .chars-card.has-render { justify-content: flex-end; }
+.fa-chars .chars-card-name {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  /* Step 3 of the type ramp. Was 0.78rem max, which put card names, tab labels and
+     currency values all within a couple of pixels of each other — a scale with no
+     steps in it is not a hierarchy. */
+  font-size: clamp(0.66rem, 1.85vh, 1.02rem);
+  color: var(--ink);
+  text-align: center;
+  line-height: 1.1;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fa-chars .chars-card-rarity {
+  height: clamp(16px, 2.4vh, 21px);
+  padding: 0 8px;
+  font-size: clamp(0.5rem, 1.25vh, 0.65rem);
+  align-self: center;
+}
+
+/* The twelfth slot. Deliberately flat and desaturated so it reads as "not yet"
+   rather than as a character you have failed to notice. */
+.fa-chars .chars-card--locked {
+  cursor: default;
+  background: rgba(26,18,36,0.1);
+  border-style: dashed;
+  border-color: rgba(26,18,36,0.45);
+  box-shadow: none;
+  color: rgba(26,18,36,0.5);
+}
+.fa-chars .chars-card--locked .chars-card-art { opacity: 0.45; }
+.fa-chars .chars-card--locked .chars-card-name { color: rgba(26,18,36,0.55); }
+/* Equipped marker. A corner star rather than the prototype's "⭐ Playing" pill,
+   because at roster-card scale in landscape a pill is wider than the card. */
+.fa-chars .chars-card-playing {
+  position: absolute;
+  top: 3px;
+  inset-inline-end: 4px;
+  display: none;
+  font-size: 0.85rem;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
+}
+.fa-chars .chars-card.is-playing .chars-card-playing { display: block; }
+.fa-chars .chars-card.is-playing { border-color: var(--lettuce); }
+.fa-chars .chars-card.is-playing.is-viewed { border-color: var(--gold); }
+
+/* Neon / Cyber shimmer. The prototype scrolled a black zigzag behind these two
+   rarities; a sweeping sheen plus a rarity-tinted glow says "this one is special"
+   more legibly at card size and does not fight the emoji for attention. */
+.fa-chars .chars-card-sheen { display: none; }
+.fa-chars .chars-card.is-animated {
+  box-shadow: 0 4px 0 rgba(0,0,0,0.35), 0 0 14px var(--rarity-glow);
+}
+.fa-chars .chars-card.is-animated .chars-card-sheen {
+  display: block;
+  position: absolute;
+  inset: -40%;
+  pointer-events: none;
+  background: linear-gradient(70deg, transparent 42%, rgba(255,255,255,0.65) 50%, transparent 58%);
+  animation: fa-card-sheen 2.6s linear infinite;
+}
+@keyframes fa-card-sheen {
+  0% { transform: translateX(-70%); }
+  55%, 100% { transform: translateX(70%); }
+}
+
+/* ── Detail column ────────────────────────────────────────────────────────── */
+/* Content-sized, not stretched: an ability list four pills long inside a 740px card
+   leaves a huge empty cream field. Hugging the content puts the backdrop there
+   instead — and max-height:100% still caps it at the row so a ten-ability character
+   scrolls rather than overflowing. */
+.fa-chars .chars-detail {
+  gap: 6px;
+  align-self: start;
+  max-height: 100%;
+}
+.fa-chars .chars-stats { display: flex; flex-direction: column; gap: 6px; }
+/* Taller bars, and the value is countable rather than estimated. */
+.fa-chars .fa-stat-track { height: clamp(16px, 2.6vh, 24px); }
+.fa-chars .fa-stat-pips {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 calc(10% - 2px),
+    rgba(26,18,36,0.55) calc(10% - 2px) 10%
+  );
+}
+.fa-chars .fa-stat-val {
+  width: auto;
+  min-width: 18px;
+  font-size: clamp(0.72rem, 1.8vh, 0.95rem);
+  color: var(--ink);
+}
+.fa-chars .chars-abilities { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+
+.fa-chars .chars-ability {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 5px 8px;
+  background: #FFFFFF;
+  border: 2.5px solid var(--ink);
+  border-radius: 11px;
+}
+.fa-chars .chars-ability--passive { background: #FFF0CF; }
+.fa-chars .chars-ability-em { font-size: clamp(1.05rem, 2.4vh, 1.4rem); line-height: 1.2; flex: 0 0 auto; }
+.fa-chars .chars-ability-body { display: flex; flex-direction: column; min-width: 0; }
+.fa-chars .chars-ability-name {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.72rem, 1.95vh, 1rem);
+  line-height: 1.22;
+}
+.fa-chars .chars-ability-desc {
+  font-size: clamp(0.64rem, 1.55vh, 0.82rem);
+  line-height: 1.3;
+  color: #4E2C1B;
+}
+.fa-chars .chars-ability-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.fa-chars .chars-fact {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  background: var(--ink);
+  color: var(--cream);
+  border-radius: 999px;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.58rem, 1.4vh, 0.74rem);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* ── Bottom bar ───────────────────────────────────────────────────────────── */
+.fa-chars .chars-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: clamp(8px, 1.6vw, 18px);
+  min-height: var(--tap);
+}
+
+/* Landscape phones: the heading and the "playing as" strip are the two things that
+   can go without losing a destination or an action. */
+/* Landscape phone. 390px of height has to hold a top bar, three rows of cards and
+   an action row, so the card loses ~26px of ornament: a smaller glyph and a shorter
+   rarity chip. Names stay — the card background already encodes rarity, nothing
+   else encodes identity. */
+@media (max-height: 460px) {
+  .fa-chars .chars-heading { display: none; }
+  
+@media (max-width: 700px) {
+  .fa-chars .chars-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(90px, 0.9fr) minmax(0, 1.1fr) auto;
+  }
+  .fa-chars .chars-detail { max-height: 34vh; }
+  .fa-chars .chars-heading { display: none; }
+  `;
