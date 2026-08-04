@@ -767,32 +767,6 @@ export function buildContactShadow(mat: THREE.Material, wM: number, dM: number, 
   return m;
 }
 
-/**
- * RETIRED — builds nothing, and is kept only as a compiling shim for its two remaining
- * callers, `arena/hazards.ts` and `arena/props/smallProps.ts`, which are owned by other
- * agents and could not be edited in the same change.
- *
- * This used to build the baked directional cast-shadow blob: a soft feathered oval
- * trailing away from a prop along `SHADOW_DIR`, added when the real shadow map was too
- * faint at gameplay zoom to ground anything. That stopped being true. Ablated in the
- * live game at shipped framing, the whole family of 32 of these measured mean
- * 0.13/255 over 0.75% of pixels and the ablated render is indistinguishable from the
- * full one — while the fixed direction they were baked to was, single-handedly,
- * what pinned the key light's azimuth. See the `SHADOW_DIR` note at the top of the file.
- *
- * OWNERS OF `hazards.ts` / `props/smallProps.ts`: drop your `buildDirectionalShadowMesh`
- * calls and the import, and this shim can go with them. Nothing else references it.
- */
-export function buildDirectionalShadowMesh(
-  _M: Materials,
-  _length: number,
-  _width: number,
-  _yawDeg = 0,
-  _startDist = 0,
-  _material?: THREE.Material
-): THREE.Object3D {
-  return new THREE.Object3D();
-}
 
 /** Counter-rotates the fixed world `SHADOW_DIR` into a group's local (pre-yaw) space,
  * so `addCover` can offset a prop's contact ring along the light direction whichever

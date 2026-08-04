@@ -23,7 +23,7 @@ import * as THREE from 'three';
 import { flatMat, outlineGroup } from '../render/toon';
 import { wu, groundPos } from '../units';
 import { POT } from '../game/rules';
-import { puck, mesh, noOutline, buildContactShadow, buildDirectionalShadowMesh, FLOOR_Y, KPAL, type Materials } from './shared';
+import { puck, mesh, noOutline, buildContactShadow, FLOOR_Y, KPAL, type Materials } from './shared';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Central pot assembly — the hazard's visual, kept separate from `addCover` since
@@ -51,11 +51,17 @@ export function buildPot(M: Materials): PotAssembly {
   // broad hazard scorch, so the heaviest object in the arena visibly presses into
   // the floor rather than floating on top of it.
   g.add(buildContactShadow(M.contactShadow, bodyR * 2.1, bodyR * 2.1, 1));
-  // Baked directional shadow — the pot is the single tallest object in the arena and
-  // has no CoverBox (so it never runs through `addCover`), but it's exactly the kind
-  // of "hard geometry floating on the floor" prop the round-6 critic flagged, so it
-  // gets the same treatment by hand. Never yawed, so no counter-rotation needed.
-  g.add(buildDirectionalShadowMesh(M, Math.max(1.1, bodyH * 1.1), Math.max(0.6, bodyR * 0.85), 0, bodyR * 1.25));
+  // The pot used to also get a hand-placed BAKED directional shadow here, because it is
+  // the tallest object in the arena and has no CoverBox (so it never runs through
+  // `addCover`). That whole system is retired: ablation measured the baked cast decals at
+  // mean 0.127/255 over 0.75% of pixels — five faint slivers, most of them underneath the
+  // prop that cast them — while the real shadow map now does the job properly. Removing
+  // them is also what freed the key azimuth, which was pinned to `SHADOW_DIR` so that
+  // real and baked shadows would agree.
+  //
+  // The contact ring above is deliberately kept and is NOT part of that retirement: it is
+  // worth 17-30x the cast blob, and it got stronger once the cast decals stopped
+  // overdrawing it (2.25 -> 2.98/255). Removing contact rings makes props float.
 
   const base = mesh(puck(bodyR * 0.5, 0.06, 24), M.potMetalDark, 'pot_stove_base');
   base.position.y = 0.03;

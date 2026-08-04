@@ -106,10 +106,30 @@ character beside it for scale. Kinds: `stove_island prep_counter sink_counter
 fryer_counter freezer supply_barrel produce_crate_tall herb_crate flour_sacks
 stacked_pots spice_cart`.
 
-**RESOLVED, and the queued answer was BACKWARDS.** For months the note here read: "the
-baked cast-shadow decals are probably a redundant third darkening layer stacking with the
-shadow map and SSAO — test removing them." A probe finally ran the test and the answer is
-**do not remove them.**
+**RESOLVED — and the answer differs by DECAL TYPE. Read which one before acting.**
+
+There are two baked families and they had opposite verdicts. Conflating them is exactly
+how this sat unresolved for months.
+
+| family | measured | verdict |
+|---|---|---|
+| **CONTACT / AO rings** | 2.25 → **2.98/255 over ~10%** | **KEEP.** Removing them makes every pad-mounted prop float. |
+| **CAST shadow ovals** | n=32, **0.127/255 over 0.75%** | **REMOVED.** The diff was five faint slivers, most under the prop that cast them. |
+
+The old note read "the baked cast-shadow decals are probably a redundant third darkening
+layer — test removing them", and for the CONTACT rings that guess was backwards. The
+section below is about the CONTACT rings.
+
+Retiring the CAST decals is also what **freed the key azimuth**, which had been pinned to
+`SHADOW_DIR` so real and baked shadows would point the same way. The key then swung
+38.08° → 16.0°, which measurably improved modelling (a barrel's terminator ramp +26%; the
+shaded fraction of a visible vertical cylinder 19% → 38%) with no shadow-merge regression
+— shadowed ground area went *down*, 8.16% → 7.28%. The contact rings got **stronger** as a
+side effect, since nothing overdraws them any more.
+
+**Two stale duplicates of the old azimuth remain**, both 22° out and neither drawing a
+hard edge, so neither is visibly wrong yet: `arena/floor.ts` ~line 891 (parked — fix when
+the floor resumes) and `arena/apron.ts:214` (relayed to its owner).
 
 The decals sit at y = 0.017/0.019. Above them sit **opaque, depth-writing** planes —
 `floor_woodpad`, `floor_utility_pad`, `floor_teal_zone`, `floor_border` at 0.045–0.048,
@@ -242,6 +262,12 @@ Needed 0.5–0.6 depth.
   top-vs-side gradient. That needs baked texture/AO.
 
 ---
+
+### Probes during a multi-agent session must stub Vite's HMR client
+
+Any Playwright probe that holds in-page state across steps will be wiped mid-run: every
+save by another agent triggers a full page reload. One agent lost three sweeps before
+working this out. `tools/tmp/rake.mjs` shows the pattern.
 
 ## How to run things
 
