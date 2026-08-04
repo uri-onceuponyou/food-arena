@@ -1,5 +1,9 @@
 # Three-session plan (~15 h) — priorities and budget
 
+> **HISTORICAL.** Superseded by `docs/STATE.md`. Kept for the budget derivation and the
+> record of Uri's decisions.
+
+
 Written 2026-08-04. Companion to `LAUNCH_PLAN.md`; that file holds the resume state, this
 one holds the ordering and the pacing.
 

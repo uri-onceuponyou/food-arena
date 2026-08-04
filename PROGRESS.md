@@ -1,5 +1,10 @@
 # Food Fight Arena — Build Progress
 
+> **SUPERSEDED IN PART.** `CLAUDE.md` is the entry point, `docs/STATE.md` has
+> current state, and `docs/LESSONS.md` supersedes the trap lists below. This file is kept
+> for its historical narrative and per-element score histories.
+
+
 Real-time 3D brawler in Three.js, rebuilding the 2D prototype's execution at the quality
 bar of **Brawl Stars** and **Zooba**.
 

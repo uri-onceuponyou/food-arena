@@ -1,5 +1,9 @@
 # Launch plan — ready to fire on resume
 
+> **HISTORICAL.** Superseded by `docs/STATE.md` (state) and `docs/LESSONS.md` (learnings).
+> Kept for the body-archetype decision record and the original wave plan.
+
+
 Written while paused at ~10% token budget. **Nothing here needs re-deriving.** Read this
 plus `PROGRESS.md`.
 
