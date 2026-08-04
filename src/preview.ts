@@ -43,6 +43,40 @@ interface PreviewApi {
   setYaw(deg: number): void;
   setTime(seconds: number): void;
   info(): Record<string, unknown>;
+  /**
+   * Deterministically advance the character to `seconds` since the animation
+   * started, and render. See `advanceTo` for why this exists and why callers
+   * should sample in increasing `t`.
+   */
+  frameAt(seconds: number, opts?: { anim?: AnimState; remount?: boolean }): Record<string, unknown>;
+  /**
+   * Sample named joint positions (in the character's own local space) across a
+   * time span. The numeric half of motion review — see `traceMotion`.
+   */
+  trace(opts?: { anim?: AnimState; t0?: number; t1?: number; samples?: number }): MotionTrace;
+}
+
+/** One sampled instant of a motion trace. */
+export interface MotionSample {
+  t: number;
+  /** Joint name → [x, y, z] in the character root's local frame (feet at y=0). */
+  joints: Record<string, [number, number, number]>;
+  /** `rig_body` scale, which is where squash/stretch lives. */
+  bodyScale: [number, number, number];
+  /**
+   * Lowest point of the whole model, in metres, with feet nominally at y=0.
+   *
+   * `types.ts` convention #1 is "feet at y=0", and the cast already violates it by
+   * -0.08 to -0.25 m standing still. Any motion change that drops the body has to
+   * be checked against this or characters sink through the floor while running.
+   */
+  minY: number;
+}
+
+export interface MotionTrace {
+  id: string;
+  anim: string;
+  samples: MotionSample[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -420,10 +454,111 @@ if (silhouette) applySilhouette();
 
 window.addEventListener('resize', () => stage.resize());
 
+// ── Motion review harness ────────────────────────────────────────────────────
+//
+// Every character critique on this project has judged a STILL, yet the recurring
+// complaint — "reads like a turntable render" — is a complaint about MOTION.
+// Nothing here changes what the game does; it makes the time axis capturable.
+//
+// The `t=` URL param already gave one deterministic frame per page load, which is
+// enough for a single still and far too slow for a 12-frame strip (12 WebGL
+// contexts, ~2s each). These two entry points sweep the SAME deterministic clock
+// inside one page instead.
+//
+// `advanceTo` only ever steps FORWARD unless asked to remount, and that is
+// load-bearing rather than an optimisation: the one-shot states (attack, hit,
+// death) are armed by `play()` at mount time, so t=0 is the start of the one-shot
+// and the only way to rewind is to build a fresh model. Sample in increasing t and
+// a whole strip costs one mount.
+
+/** Joints worth tracking. Names are set by `ChibiRig`'s constructor. */
+const TRACE_JOINTS = [
+  'rig_body', 'hips', 'torso', 'neck', 'head',
+  'shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'handL', 'handR',
+  'hipL', 'hipR', 'kneeL', 'kneeR', 'footL', 'footR',
+];
+
+function jointMap(): Map<string, THREE.Object3D> {
+  const m = new Map<string, THREE.Object3D>();
+  model?.root.traverse((o) => {
+    if (!m.has(o.name) && TRACE_JOINTS.includes(o.name)) m.set(o.name, o);
+  });
+  return m;
+}
+
+function advanceTo(seconds: number, opts?: { anim?: AnimState; remount?: boolean }) {
+  const wantAnim = opts?.anim ?? anim;
+  const needsReset = opts?.remount || wantAnim !== anim || seconds < simTime - 1e-6 || !model;
+  if (needsReset) {
+    anim = wantAnim;
+    mountCharacter(subjectId);
+    if (silhouette) applySilhouette();
+    simTime = 0;
+    // A zero-length step, so t=0 is the animation's first frame rather than
+    // whatever pose the constructor happened to leave behind. Without this the
+    // first cell of every filmstrip showed `restPose()` and silently lied about
+    // the start of the cycle.
+    advance(0);
+  }
+  // 1/120 to match the `t=` param's own sub-stepping, so both paths agree exactly.
+  const h = 1 / 120;
+  const steps = Math.max(0, Math.round((seconds - simTime) / h));
+  for (let i = 0; i < steps; i++) advance(h);
+}
+
+function frameAt(seconds: number, opts?: { anim?: AnimState; remount?: boolean }) {
+  advanceTo(seconds, opts);
+  // Post FX (SMAA/bloom) need a couple of settled frames, same as the `t=` path.
+  stage.render(0);
+  stage.render(0);
+  return { t: +simTime.toFixed(4), anim, id: subjectId };
+}
+
+/**
+ * Sample joint positions across a span, in the character's OWN local frame.
+ *
+ * Deliberately camera-independent: arc curvature, anticipation and settle are
+ * properties of the motion, and measuring them off screen pixels would fold in
+ * perspective, framing and the post chain. Positions come back relative to
+ * `model.root`, whose origin is the character's feet.
+ */
+function traceMotion(opts?: { anim?: AnimState; t0?: number; t1?: number; samples?: number }): MotionTrace {
+  const t0 = opts?.t0 ?? 0;
+  const t1 = opts?.t1 ?? 1;
+  const n = Math.max(2, Math.round(opts?.samples ?? 48));
+  advanceTo(0, { anim: opts?.anim ?? anim, remount: true });
+  const joints = jointMap();
+  const body = joints.get('rig_body');
+  const samples: MotionSample[] = [];
+  const v = new THREE.Vector3();
+  const box = new THREE.Box3();
+  for (let i = 0; i < n; i++) {
+    const t = t0 + ((t1 - t0) * i) / (n - 1);
+    advanceTo(t);
+    model!.root.updateMatrixWorld(true);
+    const rec: Record<string, [number, number, number]> = {};
+    for (const [name, obj] of joints) {
+      v.setFromMatrixPosition(obj.matrixWorld);
+      model!.root.worldToLocal(v);
+      rec[name] = [+v.x.toFixed(5), +v.y.toFixed(5), +v.z.toFixed(5)];
+    }
+    box.setFromObject(model!.root);
+    samples.push({
+      t: +t.toFixed(5),
+      minY: +box.min.y.toFixed(4),
+      joints: rec,
+      bodyScale: body ? [+body.scale.x.toFixed(5), +body.scale.y.toFixed(5), +body.scale.z.toFixed(5)] : [1, 1, 1],
+    });
+  }
+  return { id: subjectId, anim: opts?.anim ?? anim, samples };
+}
+
 window.__preview = {
   setAnim(a) { anim = a; model?.play(a); },
   setYaw(deg) { stage.rig.yawDeg = deg; stage.rig.apply(); },
   setTime(seconds) { simTime = seconds; },
+  frameAt,
+  trace: traceMotion,
   info() {
     const box = model ? new THREE.Box3().setFromObject(model.root) : null;
     return {
