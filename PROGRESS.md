@@ -588,6 +588,30 @@ scored 3/10. Now off by default, kept behind `ao: true` with the dead knob repai
    spent their #1 fix on this. It needs baked gradient/AO in the albedo.
 3. **Red is railed on the warm props** — safe to fix now the grade no longer distorts it.
 
+### SCORE THE REFERENCE AS A CONTROL — the instrument is not stable
+
+The menu loop caught something that reframes every score in this file. Critics see a blind
+A/B packet: our work against real shipped reference plates. **They also score the reference
+side.** Across three fresh critics on the *same reference library*:
+
+| critic | score it gave the REFERENCE |
+|---|---|
+| menu round 1 | 8–9/10 |
+| menu round 2 (home) | 8–9/10 |
+| menu round 2 (character select) | **4/10 and 5/10** |
+
+**A four-point spread on the control.** That critic also ranked our menu *above* the
+shipped reference. Nothing about the reference changed; only the judge did.
+
+**So a round where the reference scores outside ~7–9 is measuring the critic, not the
+work, and must be discarded rather than acted on.** Record the reference-side score every
+round and treat it as a calibration check. This is cheap — the critic already produces it.
+
+This probably explains a good share of the oscillation documented above, and it means
+single-round scores anywhere in this file should be read as noisy. Trust: (1) named,
+specific, reproducible gaps, (2) objective acceptance tests, (3) trends across rounds —
+in that order. The bare number is the weakest signal we have.
+
 ### Critics can contradict each other into a standstill — use an objective test
 
 The floor scored 4, 4, 4, 4 across four fresh critics while every named fix was
