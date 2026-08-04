@@ -231,6 +231,21 @@ inside doc comments.)
   reads as "outplayed" or "cheated".
 - **Pointer lock cannot be tested here at all.** Playwright's Chromium refuses
   `requestPointerLock()` headless, headed, and with automation flags stripped.
+- **Playwright's Chromium never blurs a page.** Measured: zero `blur` events and
+  `document.hasFocus() === true` across a same-context tab switch, a cross-context
+  `bringToFront()`, and `Emulation.setFocusEmulationEnabled: false`. So alt-tab-with-a-key-held,
+  and the whole pointer-lock blur→pause path, can only ever be tested by *dispatching* the
+  event — never by provoking one. Sibling of the pointer-lock refusal, and the same rule
+  applies: test up to the boundary, then say where the boundary is.
+- **A QA parameter can manufacture a bug that does not exist.** `?px=`/`?py=` place a fighter
+  *exactly* where asked and do not validate against cover, so `px=850` drops the 42wu fighter
+  inside a 50wu `CoverBox`. `tryMove` tests the **destination** for overlap and does no
+  depenetration, so every step from inside is refused — **permanently, silently, on both axes.**
+  That was reported as "WASD is dead on HEAD" and cost a full investigation to overturn. The
+  general lesson: when a probe shows the game broken, **suspect the probe's own setup before
+  the game**, and instrument the *edge* between subsystems (`window.__matchDebug` now mirrors
+  input→sim) so "the input never arrived" and "the sim refused to act on it" cannot be
+  confused again.
 - **Frame time cannot be measured here.** SwiftShader is a CPU rasteriser; ~9–10 fps means
   nothing. Use draw calls, fill, program links, texture residency — all hardware-independent.
 - **A slow harness fabricates false negatives.** Polling an analyser from rAF at
