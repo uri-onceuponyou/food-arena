@@ -140,7 +140,34 @@ sources now agree. Flag if you prefer the current look.
 
 ---
 
-## 6. Audio — does it sound *good*?
+## 6. The review library has no lobby plates — menu scores are measuring the wrong thing
+
+**Why it needs you.** This one needs images only you can supply. `reference/images/curated/` has
+no lobby / hero-select category, so round 2 of the home work was scored against **two in-match
+combat frames**. The critic flagged it unprompted, without being told: *"neither comparison panel
+is a lobby, so nothing on these sheets tests the lobby's layout, chrome, or type against a real
+lobby reference."*
+
+Round 1 happened to draw two lobby-ish tablet plates and scored our home 6.5 against 8.5/8.0.
+Round 2 drew combat frames and scored it 6.0 against 8/7. **Some of that movement is the
+comparison changing, not the screen.**
+
+**Assumed.** Menu work now leads with objective metrics (contrast ratios, value structure,
+type hierarchy) and treats critic rounds as a secondary signal, because the primary one is
+compromised. That is a workaround, not a fix.
+
+**What would fix it.** 3–4 screenshots of Brawl Stars / Zooba **lobby and hero-select** screens
+dropped into `reference/images/`. They stay gitignored and are never committed or published, per
+the permanent security constraint.
+
+**Related, and cheaper — I can do this one without you if you'd rather:** our review packets are
+shot against a **first-run profile** — 0 trophies, 0 wins, 0 XP, empty bars. A critic reads that
+as an unshipped game, and so would a store screenshot. Shooting packets against a seeded
+mid-progression profile is a harness change, not a design one. Say the word and it happens.
+
+---
+
+## 7. Audio — does it sound *good*?
 
 **Why it needs you.** Structure is measured (319 assertions from real rendered samples); taste
 is not. Specifically: does the synthesised room read as a *kitchen* rather than a small box, and
@@ -150,7 +177,7 @@ does Hamburger at 767 Hz read as "heavy" or merely "muffled"?
 
 ---
 
-## 7. Pointer lock — cannot be tested here at all
+## 8. Pointer lock — cannot be tested here at all
 
 **Why it needs you.** Playwright's Chromium refuses `requestPointerLock()` unconditionally —
 headless, headed, and with automation flags stripped. **The multi-monitor case that prompted the
@@ -161,7 +188,7 @@ responsive, given Chrome's ~1 s re-acquisition limit?
 
 ---
 
-## 8. Feel — the things a screenshot cannot capture
+## 9. Feel — the things a screenshot cannot capture
 
 Carried from the previous session, still true, still unanswerable here:
 
