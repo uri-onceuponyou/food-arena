@@ -260,6 +260,15 @@ export class GameSession {
     // Give the mouse back whenever the match freezes — a pause menu the player cannot
     // click is worse than no pause menu. Deliberate, so it does not read as a loss.
     this.pointerLock.release();
+    // ...and clear the aim reticle in the same breath. `loop()` returns early while
+    // paused and never calls `hud.update()` again, so without this the virtual cursor
+    // freezes on screen NEXT TO the real OS cursor the release just handed back —
+    // two cursors, one of them a ghost that no longer tracks the mouse.
+    this.hud.update(this.state, {
+      selectedWeapon: this.input.selectedWeapon,
+      safeArrow: this.safeArrow(),
+      aim: null,
+    });
   }
 
   resume(): void {

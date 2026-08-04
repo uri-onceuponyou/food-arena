@@ -37,18 +37,28 @@ import { readdir, readFile } from 'node:fs/promises';
  * inside that literal (writing `.fa-screen` in a CSS comment, say) silently
  * terminates the string and turns the whole module into a syntax error — which
  * presents as a Vite 500 and a blank page, not as anything a screenshot would show.
- * It has cost three round-trips already, so it is now a check.
+ * It has cost FOUR round-trips now, so it is a check.
+ *
+ * Coverage is every module in the project that ships CSS this way, not just the
+ * screens directory: `src/ui/hud.ts` and `src/game/pointerLock.ts` have exactly the
+ * same shape and exactly the same failure mode, and a 500 in either takes the dev
+ * server down for every other agent in the repo. Deliberately still ONE `record()`
+ * call so the total check count does not move.
  */
 async function lintCssLiterals() {
   const dir = 'src/ui/screens';
-  const files = (await readdir(dir)).filter((f) => f.endsWith('.ts'));
+  const paths = (await readdir(dir))
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => `${dir}/${f}`)
+    .concat(['src/ui/hud.ts', 'src/game/pointerLock.ts']);
   const offenders = [];
-  for (const f of files) {
-    const src = await readFile(`${dir}/${f}`, 'utf8');
+  for (const p of paths) {
+    const src = await readFile(p, 'utf8').catch(() => null);
+    if (src === null) continue;
     const m = src.match(/const CSS = `([\s\S]*?)\n`;/);
     if (!m) continue;
     for (const line of m[1].split('\n')) {
-      if (line.includes('`')) offenders.push(`${f}: ${line.trim().slice(0, 70)}`);
+      if (line.includes('`')) offenders.push(`${p}: ${line.trim().slice(0, 70)}`);
     }
   }
   record('static', '-', 'no-backtick-in-css', offenders.length === 0, offenders.slice(0, 3).join(' | '));

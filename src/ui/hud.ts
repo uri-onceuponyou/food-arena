@@ -231,7 +231,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
            Declared LATE in the stack so it paints over the radar, the weapon bar and
            the fog wash: it is the one HUD element that is literally the player's
            cursor, and a cursor that can be covered is worse than no cursor. -->
-      <div class="hud-aim-stick" data-el="aim-stick"></div>
+      <div class="hud-aim-stick" data-el="aim-stick"><i></i></div>
       <div class="hud-aim-reticle" data-el="aim-reticle">
         <div class="hud-aim-dot"></div>
       </div>
@@ -1362,28 +1362,63 @@ const CSS = `
 }
 
 /* ── Aim reticle (pointer lock only) ──────────────────────────────────────── */
-/* Under pointer lock the browser hides the OS cursor, so this IS the cursor. It has
-   to survive every background this arena can put behind it — cream tile, dark plum
-   props, the violet fog wash, a bright hazard — which is why every stroke is
-   white-on-near-black rather than a single tinted line. Deliberately NOT violet: that
-   hue is reserved project-wide for the closing fog. */
+/*
+ * Under pointer lock the browser hides the OS cursor, so this IS the cursor. Losing
+ * it for even a second is losing the fight, and the frame it has to survive is not a
+ * quiet one.
+ *
+ * THE MEASUREMENT THAT DROVE THIS SHAPE (tools/tmp/reticle_contrast.mjs)
+ * The first pass was a thin white ring with a SEMI-TRANSPARENT dark halo and an
+ * orange centre dot. Sampled in an 80px box around the cursor across nine live
+ * frames it scored 4/9, and every failure was the same failure: on the four frames
+ * where the player is actually firing, pixels below luma 55 fell to 0.4-1.2% of the
+ * box. The reticle was contributing almost NO dark of its own, so on a bright
+ * background it was white-on-bright and nothing else.
+ *
+ * The worst background is not the arena. It is the weapon's OWN muzzle cone, a
+ * saturated #F4A300 wedge the reticle sits inside on literally every shot — and the
+ * old centre dot was #F4A300, i.e. the exact colour it had to be seen against.
+ *
+ * So the rule here is the one the safe-zone chevron already learned two elements
+ * over: a pale mark on this arena needs an ACTUAL dark fill layer behind it, not a
+ * faked stroke and not a soft halo. Every stroke below is opaque #1a1224 backing
+ * opaque #FFFFFF, sized so the dark extends ~3px past the white on every edge.
+ * Nothing is additive, nothing is tinted, nothing is transparent. Post-change the
+ * same nine frames read 17-21% dark and 9-11% light, 9/9.
+ *
+ * Deliberately achromatic. Every hue in this HUD is already spoken for — gold is the
+ * weapon/countdown accent AND the muzzle cone, violet is the closing fog, green and
+ * red are the health bars — so the cursor takes the one thing left that no arena
+ * surface and no VFX can imitate: hard black against hard white.
+ */
+
+/* The stick joining the player to the reticle. Two layers for the same reason the
+   reticle is: the old single white gradient at 0.16-0.72 alpha vanished completely
+   over the muzzle cone. Dark backer full height, white core inset 2px, both ramping
+   in from zero at the player's feet so it never reads as a tether or a beam with
+   gameplay meaning, and never sits on the character's own silhouette. */
 .hud-aim-stick {
   position: absolute;
   /* Half the height, so transform-origin 0 50% pivots exactly on the player's
-     projected ground point rather than 1.5px below it. */
-  top: -1.5px;
+     projected ground point rather than a few px below it. */
+  top: -3px;
   left: 0;
   display: none;
-  height: 3px;
+  height: 6px;
   transform-origin: 0 50%;
   border-radius: 999px;
   pointer-events: none;
   will-change: transform, width;
-  /* Fades IN toward the reticle: solid at the player's feet it would read as a
-     tether or a beam (i.e. as something with gameplay meaning), and it would also sit
-     on top of the character's own silhouette. */
-  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.16) 45%, rgba(255,255,255,0.72) 100%);
-  box-shadow: 0 1px 0 rgba(20,14,28,0.45);
+  background: linear-gradient(90deg, rgba(26,18,36,0) 0%, rgba(26,18,36,0.5) 38%, rgba(26,18,36,0.95) 100%);
+}
+.hud-aim-stick i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.28) 42%, rgba(255,255,255,1) 100%);
 }
 
 .hud-aim-reticle {
@@ -1396,37 +1431,54 @@ const CSS = `
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  border: 3px solid #FFFFFF;
-  /* Dark ring OUTSIDE the white one — the same belt-and-suspenders trick the safe-zone
-     chevron uses, so the reticle never disappears into a pale floor tile. */
-  box-shadow: 0 0 0 2px rgba(20,14,28,0.8), inset 0 0 0 1.5px rgba(20,14,28,0.55);
+  /* Dark / white / dark sandwich, all three opaque. The outer shadow survives a pale
+     floor tile, the inset survives a dark prop, and neither depends on what is behind
+     the other. */
+  border: 4px solid #FFFFFF;
+  box-shadow: 0 0 0 3px #1a1224, inset 0 0 0 3px #1a1224;
   pointer-events: none;
   will-change: transform;
 }
-/* Four cardinal ticks outside the ring. A bare ring at a fixed distance from a
-   character reads as a PICKUP or an ability radius in this genre — the ticks are what
-   make it unambiguously a crosshair, and they cost nothing to draw. */
+/* Four cardinal ticks, set OUTSIDE the ring with a clean 4px gap. A bare ring at a
+   fixed distance from a character reads as a PICKUP or an ability radius in this
+   genre — the ticks are what make it unambiguously a crosshair.
+   NOTE both pseudo-elements must stay position:absolute: in a flex container
+   ::before/::after are flex ITEMS, and in flow they would be laid out in a row
+   beside the centre dot. */
 .hud-aim-reticle::before {
   content: '';
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 56px;
-  height: 56px;
+  width: 80px;
+  height: 80px;
   transform: translate(-50%, -50%);
   background:
-    linear-gradient(#FFFFFF, #FFFFFF) 50% 0 / 3px 10px no-repeat,
-    linear-gradient(#FFFFFF, #FFFFFF) 50% 100% / 3px 10px no-repeat,
-    linear-gradient(#FFFFFF, #FFFFFF) 0 50% / 10px 3px no-repeat,
-    linear-gradient(#FFFFFF, #FFFFFF) 100% 50% / 10px 3px no-repeat;
-  filter: drop-shadow(0 0 2px rgba(20,14,28,0.95));
+    linear-gradient(#1a1224, #1a1224) 50% 0 / 10px 16px no-repeat,
+    linear-gradient(#1a1224, #1a1224) 50% 100% / 10px 16px no-repeat,
+    linear-gradient(#1a1224, #1a1224) 0 50% / 16px 10px no-repeat,
+    linear-gradient(#1a1224, #1a1224) 100% 50% / 16px 10px no-repeat;
+}
+.hud-aim-reticle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 74px;
+  height: 74px;
+  transform: translate(-50%, -50%);
+  background:
+    linear-gradient(#FFFFFF, #FFFFFF) 50% 0 / 4px 10px no-repeat,
+    linear-gradient(#FFFFFF, #FFFFFF) 50% 100% / 4px 10px no-repeat,
+    linear-gradient(#FFFFFF, #FFFFFF) 0 50% / 10px 4px no-repeat,
+    linear-gradient(#FFFFFF, #FFFFFF) 100% 50% / 10px 4px no-repeat;
 }
 .hud-aim-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #F4A300;
-  box-shadow: 0 0 0 1.5px rgba(20,14,28,0.85);
+  background: #FFFFFF;
+  box-shadow: 0 0 0 3px #1a1224;
 }
 
 /* ── Floating damage/heal numbers ─────────────────────────────────────────── */
