@@ -139,6 +139,14 @@ export const audio = {
     setEnabled(on: boolean): void {
       getMusic().setEnabled(on);
     },
+    /** Fade out and pause — the menus-to-match handoff. Resumes with fadeIn(). */
+    fadeOut(seconds?: number): void {
+      getMusic().fadeOut(seconds);
+    },
+    /** Resume from where it stopped and fade back up. */
+    fadeIn(seconds?: number): void {
+      getMusic().fadeIn(seconds);
+    },
     /** Pull the theme down under a match without stopping it. */
     duck(factor?: number): void {
       getMusic().duck(factor);

@@ -29,6 +29,7 @@ import type { Route, RouteName, Screen, ScreenContext } from './types';
 import { PlayerProfile } from './profile';
 import { ensureScreenStyles } from './theme';
 import { disposeCharacterStage } from './charStage';
+import { audio } from '../../audio';
 import { createHomeScreen } from './home';
 import { createCharacterSelectScreen } from './characterSelect';
 import { createMatchScreen } from './matchScreen';
@@ -143,6 +144,17 @@ export function createShell(opts: ShellOptions): Shell {
     // live contexts plus a full post chain is the one combination that will stutter
     // on a phone, and it is entirely avoidable.
     if (route.name === 'match') disposeCharacterStage();
+
+    // The theme is MENU music: it stops for a fight and comes back afterwards.
+    // Faded rather than cut — pausing a track mid-phrase is audible as a click and
+    // reads as a bug. `fadeIn()` resumes from where it stopped rather than restarting,
+    // so bouncing between menus never rewinds the track to the top.
+    //
+    // Done here, at the route transition, rather than inside the match: the shell is
+    // the only place that knows both sides of the handoff, and combat SFX are a
+    // separate bus that is unaffected either way.
+    if (route.name === 'match') audio.music.fadeOut();
+    else audio.music.fadeIn();
 
     root.classList.toggle('is-ingame', route.name === 'match');
     current = build(route);

@@ -91,6 +91,8 @@ class MusicPlayer {
   /** Set when play() was asked for but blocked; retried on the next unlock. */
   private wanted = false;
   private listeners = new Set<() => void>();
+  /** Invalidates a pending fade-out pause when a fade-in overtakes it. */
+  private fadeToken = 0;
 
   /** Build the element + graph once. Safe to call repeatedly. */
   private ensureGraph(): boolean {
@@ -186,6 +188,36 @@ class MusicPlayer {
     this.emit();
   }
 
+  /**
+   * Fade the theme out and pause it — for entering a match.
+   *
+   * A hard `pause()` on a track that is mid-phrase is audible as a click and reads as
+   * a bug. This ramps the gain down first and only pauses once silent, so the handoff
+   * from menu music to combat is clean. Playback intent is NOT cleared, so `fadeIn()`
+   * on the way back to the menus resumes rather than restarting the track.
+   */
+  fadeOut(seconds = 0.6): void {
+    if (!this.el || this.el.paused) return;
+    this.applyGain(0, seconds);
+    const el = this.el;
+    window.setTimeout(() => {
+      // Only pause if nothing asked us to come back in the meantime.
+      if (this.fadeToken === token) el.pause();
+    }, seconds * 1000 + 40);
+    const token = ++this.fadeToken;
+  }
+
+  /** Resume and fade back to the set level — for returning to the menus. */
+  fadeIn(seconds = 0.8): void {
+    this.fadeToken++;
+    if (!this.state.enabled) return;
+    if (!this.ensureGraph() || !this.el) return;
+    if (this.gain) this.gain.gain.value = 0;
+    const p = this.el.play();
+    if (p && typeof p.catch === 'function') p.catch(() => undefined);
+    this.applyGain(undefined, seconds);
+  }
+
   /** Duck to a fraction of the set level — for a match, a pause sheet, a cutscene. */
   duck(factor = 0.35): void {
     this.applyGain(this.state.volume * Math.min(1, Math.max(0, factor)));
@@ -200,7 +232,7 @@ class MusicPlayer {
     return () => this.listeners.delete(fn);
   }
 
-  private applyGain(explicit?: number): void {
+  private applyGain(explicit?: number, rampSeconds = 0.08): void {
     if (!this.gain) return;
     const engine = getAudioEngine();
     const ctx = engine.context;
@@ -211,7 +243,7 @@ class MusicPlayer {
         this.gain.gain.cancelScheduledValues(t);
         this.gain.gain.setValueAtTime(this.gain.gain.value, t);
         // Short ramp so a slider drag never clicks — same discipline as master.
-        this.gain.gain.linearRampToValueAtTime(target, t + 0.08);
+        this.gain.gain.linearRampToValueAtTime(target, t + rampSeconds);
       } else {
         this.gain.gain.value = target;
       }
