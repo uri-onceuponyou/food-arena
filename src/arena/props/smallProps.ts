@@ -22,11 +22,10 @@ import {
   noOutline,
   addTopRim,
   buildContactShadow,
-  buildDirectionalShadowMesh,
   KPAL,
   type Materials,
 } from '../shared';
-import { addCoverPlinth, addRoundCoverPlinth, addCoverSides, addCoverCap, COVER_BODY_FRAC } from './counters';
+import { addCoverPlinth, addRoundCoverPlinth, addCoverSides, addCoverCap, COVER_BODY_FRAC, COUNTER_TOP_Y } from './counters';
 
 /**
  * Third step down the spice cart's violet ladder — see the same note in
@@ -55,8 +54,12 @@ export function buildSpiceCart(M: Materials, wM: number, dM: number): THREE.Grou
   const g = new THREE.Group();
   const bw = wM * COVER_BODY_FRAC, bd = dM * COVER_BODY_FRAC;
   const y0 = addCoverPlinth(g, M, wM, dM, 0.18);
-  const capT = 0.1;
-  const bodyTop = 1.62;
+  const capT = 0.12;
+  // Round-10: pinned to `COUNTER_TOP_Y` (was a loose 1.62m = 0.77x a character, below
+  // the committed floor of 0.94x). A kitchen trolley IS counter height, and one shared
+  // number across the whole cover family is what makes the arena read with a single
+  // cover height rather than a scatter of near-misses.
+  const bodyTop = COUNTER_TOP_Y;
 
   // Light wheels read AGAINST the near-black plinth band rather than being buried at
   // ground level under the body, which is where the old 0.06m ones were — invisible
@@ -144,12 +147,14 @@ export function buildSupplyBarrel(M: Materials, wM: number, dM: number, opts?: {
   const g = new THREE.Group();
   const base = Math.min(wM, dM);
   const r = base * 0.42;
-  // 0.64 (was 0.62) lands the 60x50wu barrels' crown on the same COUNTER_TOP_Y the
-  // whole counter family now shares, so the arena reads with one cover height rather
-  // than a scatter.
-  const h = base * 0.64;
-
+  // Round-10: the height is now ABSOLUTE, not a fraction of the footprint. The two
+  // barrel sizes (60x50wu and 48x46wu) previously came out 1.78m and 1.65m tall, i.e.
+  // the arena's "one cover height" already had a 13cm scatter inside a single prop
+  // kind. Deriving it from `COUNTER_TOP_Y` makes every barrel exactly counter height
+  // and lets the radius keep carrying the size difference, which is the axis a drum
+  // should vary on anyway.
   const y0 = addRoundCoverPlinth(g, M, r * 1.08, 0.18);
+  const h = COUNTER_TOP_Y - y0;
   // Round props get their own RADIAL grounding decal on top of `addCover`'s
   // rounded-rect one — a rect's corners are the wrong shape under a cylinder, which
   // is the grounding complaint that survives at `piece=prop` zoom.
@@ -212,24 +217,38 @@ export function buildExhaustPipe(M: Materials): THREE.Group {
   const g = new THREE.Group();
   noOutline(g);
   const postH = 2.4;
-  const post = mesh(puck(0.09, postH, 12), M.steelDark, 'pipe_post');
-  post.position.y = postH / 2;
+  // r3: a BASE FLANGE. Two blind critics in a row flagged this pipe as an unreadable
+  // floating object — "reads as a floating detached stick, no base contact", "tall thin
+  // vertical with a shadow, but no base plinth and no footprint... pepper mill? rolling
+  // pin? bollard?" — and both then had to guess whether it was interactive. A 9cm-radius
+  // dark cylinder viewed from a 58deg camera shows almost no ground contact, so the eye
+  // has nothing to plant it with. A wider stepped foot gives it a real footprint AND
+  // says "bolted down, walk around it". It is still DECORATION, so it deliberately does
+  // NOT get the near-black `coverPlinthPanel` band that means BLOCKING.
+  const footR = 0.3;
+  const foot = mesh(puck(footR, 0.1, 14), M.freezerTrim, 'pipe_foot');
+  foot.position.y = 0.05;
+  g.add(foot);
+  const footStep = mesh(puck(footR * 0.66, 0.09, 14), M.steelDark, 'pipe_foot_step');
+  footStep.position.y = 0.13;
+  g.add(footStep);
+  const post = mesh(puck(0.13, postH, 12), M.steelDark, 'pipe_post');
+  post.position.y = 0.17 + postH / 2;
   g.add(post);
   for (let i = 0; i < 3; i++) {
-    const band = mesh(new THREE.TorusGeometry(0.1, 0.014, 6, 14), M.freezerTrim, 'pipe_band__no_outline');
+    const band = mesh(new THREE.TorusGeometry(0.15, 0.022, 6, 14), M.freezerTrim, 'pipe_band__no_outline');
     band.rotation.x = Math.PI / 2;
-    band.position.y = 0.42 + i * 0.72;
+    band.position.y = 0.6 + i * 0.72;
     noOutline(band);
     g.add(band);
   }
   const elbow = mesh(puck(0.12, 0.18, 12), M.freezerTrim, 'pipe_elbow');
-  elbow.position.y = postH;
+  elbow.position.y = 0.17 + postH;
   g.add(elbow);
   const cap = mesh(puck(0.15, 0.05, 14), M.steelDark, 'pipe_cap');
-  cap.position.y = postH + 0.115;
+  cap.position.y = 0.17 + postH + 0.115;
   g.add(cap);
-  g.add(buildContactShadow(M.contactShadow, 0.3, 0.3, 1.5));
-  g.add(buildDirectionalShadowMesh(M, Math.max(1.2, postH * 0.85), 0.5, 0, 0.25));
+  g.add(buildContactShadow(M.contactShadow, 0.75, 0.75, 1.4));
   return g;
 }
 
@@ -237,8 +256,13 @@ export function buildExhaustPipe(M: Materials): THREE.Group {
  * Hanging order-tag sign on a thin post — the "signage" half of the round-6 kitchen-
  * motif suggestion. Meant for the open mid-lane: the lane view was called the emptiest
  * composition, and this gives it a distinct silhouette between the supply barrels and
- * the hub without adding any new collision. `yawDeg` matches the caller's own mirror
- * flip so the pennant always faces the same way relative to the lane it sits in.
+ * the hub without adding any new collision.
+ *
+ * `yawDeg` is now unused and kept only so `kitchen.ts` (a different owner's file) keeps
+ * compiling: it existed solely to counter-rotate this prop's baked directional cast
+ * shadow, and `shared.ts` retired that whole decal family in round 9 after measuring
+ * it at mean 0.13/255 over 0.75% of pixels. The three calls this module made to
+ * `buildDirectionalShadowMesh` are gone, as that file's own note asked.
  */
 export function buildHangingSign(M: Materials, yawDeg = 0): THREE.Group {
   const g = new THREE.Group();
@@ -259,24 +283,18 @@ export function buildHangingSign(M: Materials, yawDeg = 0): THREE.Group {
   pennant.position.set(0, postH + 0.02, 0.23);
   g.add(pennant);
   g.add(buildContactShadow(M.contactShadow, 0.24, 0.24, 1.5));
-  g.add(buildDirectionalShadowMesh(M, Math.max(0.9, postH * 0.7), 0.4, yawDeg, 0.2));
   return g;
 }
 
 /**
- * Chalkboard menu — freestanding, thin, decorative only. Always placed at a fixed
- * 20 deg yaw by the caller (see the layout in `../kitchen.ts`); the baked cast shadow
- * below has that same 20 deg hardcoded into its own counter-rotation, matching the
- * `addCover` convention where the shadow's yaw must equal whatever rotation the
- * caller applies to the returned group afterward.
+ * Chalkboard menu — freestanding, thin, decorative only. Placed at a fixed 20 deg yaw
+ * by the caller (see the layout in `../kitchen.ts`). It used to carry a baked cast
+ * shadow with that same 20 deg hardcoded into a counter-rotation; that decal family is
+ * retired (see `buildHangingSign`), so only the radial contact ring remains.
  */
 export function buildChalkboardMenu(M: Materials): THREE.Group {
   const board = new THREE.Group();
   board.add(buildContactShadow(M.contactShadow, 0.55, 0.32, 1));
-  // yawDeg here must match the board's OWN `rotation.y = 20deg` set by the caller —
-  // the shadow direction is a world-space constant, so it has to be counter-rotated by
-  // however much this particular group gets spun, same as every `addCover` prop.
-  board.add(buildDirectionalShadowMesh(M, 0.75, 0.4, 20, 0.45));
   const legMat = M.crateSlat;
   for (const sx of [-0.24, 0.24]) {
     const leg = mesh(puck(0.02, 0.62, 6), legMat, 'chalkboard_leg');

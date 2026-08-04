@@ -77,13 +77,77 @@ import { puck, mesh, noOutline, addBacksplash, addTopRim, type Materials } from 
 // is a per-kind height table this file can no longer keep in sync.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Minimum solid height for anything that owns a CoverBox — 0.75x a character. */
-export const COVER_MIN_H = CHARACTER_HEIGHT * 0.75;
+/**
+ * ── THE COMMITTED HEIGHT RATIO ──────────────────────────────────────────────────
+ * Round-10 acceptance criterion, fixed BEFORE the first critic round so no future
+ * critic can push it back and forth (see PROGRESS's note on the floor loop, which
+ * burned four rounds implementing each critic's fix and having the next demand its
+ * reverse):
+ *
+ *   **every prop that owns a CoverBox presents a solid mass >= 0.94 x CHARACTER_HEIGHT,
+ *   and a height : min-footprint aspect ratio >= 0.40.**
+ *
+ * The first number comes from the one datapoint we have that is not a taste call: the
+ * supply barrel is the single prop a blind critic said reads correctly as cover, and it
+ * was the tallest-relative-to-a-character thing in the arena. The second exists because
+ * height alone is not enough — a 1.7m box on a 4.5m-square footprint is still a slab
+ * with a lid when seen from a 58deg camera, which is the mechanism behind "blocking vs
+ * walkable is indistinguishable." Both are checked in `tools/tmp/heights.mjs`.
+ *
+ * ── Round 10, r2: what a critic actually measures when it says "too short" ──────
+ * A blind critic given r1 (every prop verified at 0.94-1.07x by `tools/tmp/heights.mjs`)
+ * still reported the counters at "~0.6-0.7x character height... a slab you vault, not
+ * cover." It was not misreading the metres; it was measuring the right thing. Its own
+ * note says why: *"the freezer's top surface occupies roughly 350,000 px of screen
+ * while its front face occupies about 50,000 — a 7:1 ratio. Your eye resolves that as
+ * a pool or a platform."*
+ *
+ * **Perceived height on a 58deg top-down camera is a prop's front-face screen extent
+ * over its top-face screen extent, not its height in metres.** For a box of height H
+ * and depth D that ratio is (H*cos58) / (D*sin58) = 0.62 * H/D. Reading 1:1 would need
+ * H = 1.6*D — 7.2m on a stove island. Metric height alone cannot get there, which is
+ * exactly why five rounds of raising it never moved the verdict.
+ *
+ * So this round buys the ratio three ways at once: more height, a tall BACKSPLASH WALL
+ * that converts top area into a second vertical band, and clutter that breaks the
+ * remaining top plane.
+ *
+ * ── The ceiling I thought existed does not ─────────────────────────────────────
+ * r1 capped cover at ~2.2m on the theory that taller cover would hide a player from
+ * their own player-centred camera. That was wrong, and the reason is collision:
+ * `CHARACTER_RADIUS` is 1.05m, so a character's centre can never get closer than
+ * 1.05m to a CoverBox face. Their head (2.1m) is hidden only when 1.05 <
+ * (H - 2.1)/tan(58deg), i.e. only when **H > 3.78m**. Nothing here is remotely near
+ * that. Their chest (~1.2m) is clipped when H > 2.88m — which is the "cut off at the
+ * shoulders behind a crate" read the reference has and the critic correctly named as
+ * the definitive tell that an arena has cover rather than furniture.
+ */
+export const COVER_MIN_H = CHARACTER_HEIGHT * 0.95;
 
 /** Top working surface of every counter-family prop. One number, so stove islands,
  * prep counters and service counters all read as the same piece of furniture height
- * rather than three near-misses. */
-export const COUNTER_TOP_Y = CHARACTER_HEIGHT * 0.85;
+ * rather than three near-misses — and the barrels and the spice cart are pinned to it
+ * too, so the whole arena reads with ONE cover height.
+ *
+ * 0.85 -> 0.95 (r1) -> 1.15 (r2). 2.415m: above a character's head, below the 2.88m
+ * where cover starts clipping a character's chest and far below the 3.78m where one
+ * could actually vanish. See the ceiling note above. */
+export const COUNTER_TOP_Y = CHARACTER_HEIGHT * 1.15;
+
+/**
+ * Height of the raised back wall on every counter-family prop.
+ *
+ * This is the single biggest lever on the front-face : top-face ratio the r1 critic
+ * measured, and it is worth more than the same metres spent on the counter body: a
+ * 0.9m wall standing on a 2.4m counter puts a SECOND vertical band on the prop at
+ * 2.4-3.3m, which is above every character's head, so it also finally makes cover
+ * clip a character standing behind it. Spending those 0.9m on the body instead would
+ * add the same vertical extent but leave the enormous flat top plane untouched.
+ *
+ * 0.26-0.30 -> 0.9. `shared.ts`'s `addBacksplash` keeps the wall at 90% of the width
+ * and well inside the depth, so nothing leaves the CoverBox.
+ */
+export const BACKSPLASH_H = 0.9;
 
 /** Height of the reserved BLOCKING base band. ~5px at shipped framing (0.0222 m/px),
  * which is enough for a hard dark line under every solid object and small enough that
@@ -108,6 +172,90 @@ export const COVER_BODY_FRAC = 0.95;
 
 /** Share of a two-tone body given to its darker lower band. */
 const COVER_LOWER_FRAC = 0.34;
+
+/**
+ * Recolour of an existing shared material, keeping its texture `map` and every other
+ * property. Cached per `Materials` instance (a `WeakMap`, so a hot-reloaded arena's
+ * materials and their clones are collected together) — the same lifetime rule the rest
+ * of `buildMaterials` follows, and the reason this is not a module-level singleton the
+ * way `storage.ts`'s untextured `herbSkirt` can afford to be.
+ *
+ * ── Why any cap needs recolouring at all, measured ──────────────────────────────
+ * The prep counter's top slab is one of the biggest single surfaces in the arena and
+ * it renders at p10 212.4 / p50 216.0 / p90 218.0 — a **5.6/255 spread with 18.9% of
+ * its pixels at R >= 253.** `butcherBlock` carries a butcher-block texture and a
+ * `roughness` of 0.5, and neither reaches the screen: the surface is bright enough to
+ * clip, and a clipped face is a flat face by construction. That is finding #4 ("flat
+ * single-value faces") in its most literal form, and unlike the apron quad it is NOT
+ * the one-normal problem — there is real texture here that simply has no headroom.
+ *
+ * This is deliberately NOT the "butcherBlock/cabinet are 15% too hot in red" claim
+ * PROGRESS records as tested and DISPROVED. That claim was about whole-FRAME red
+ * clipping and it was correctly rejected (cutting both moved frame R>=253 from 4.50%
+ * to 4.47%; the real culprit was `rimLight`). This is a local, per-surface measurement
+ * of tonal headroom, it is a different quantity, and it is why only the two CAP
+ * surfaces move — the shared `KPAL` entries are untouched.
+ */
+const capTints = new WeakMap<Materials, Map<string, THREE.Material>>();
+export function tinted(M: Materials, base: THREE.Material, hex: string): THREE.Material {
+  let byHex = capTints.get(M);
+  if (!byHex) { byHex = new Map(); capTints.set(M, byHex); }
+  const hit = byHex.get(hex);
+  if (hit) return hit;
+  const m = base.clone() as THREE.MeshStandardMaterial;
+  m.color.set(hex);
+  byHex.set(hex, m);
+  return m;
+}
+
+/** Prep counter top. `butcherBlock` (#E4C48C) with ~12% of its value taken back, so the
+ * block texture and the key light both have somewhere to go. */
+const prepCap = (M: Materials) => tinted(M, M.butcherBlock, '#C9AD7B');
+
+/** Stove island top.
+ *
+ * `cabinet` (#C1731E) rendered rgb(244,118,14) — S 0.944 with red one step from the
+ * rail, the same no-headroom problem as the prep cap one notch less severe. r1 took it
+ * to '#AE6820'; r2's critic then measured the remaining half of the problem, which is
+ * hue rather than headroom: the lit cap and the lit floor tile land **within 3 degrees
+ * of each other**, and the cap is the single biggest surface on the arena's most
+ * numerous cover prop. Pushed up in value and ~13 degrees toward amber, so it clears
+ * the terracotta on both axes while staying recognisably the arena's warm accent. */
+const stoveCap = (M: Materials) => tinted(M, M.cabinet, '#CE8C2E');
+
+/**
+ * ── THE COUNTER BODY, and the one thing two independent critics both measured ──
+ *
+ * r1's critic: *"the props are separated from the floor only by hue... the counters'
+ * cream tops are within a couple of value steps of the tile."*
+ * r2's critic, with numbers: lit counter top rgb(226,106,7) luma 130 against lit floor
+ * tile rgb(196,133,95) luma 147, **hue within 3 degrees**; counter side wall
+ * rgb(115,53,16) luma 67 against shadowed floor rgb(101,67,39) luma 74 — **7 points of
+ * 255**. Two fresh critics, no shared context, same finding, and the second one
+ * measured it. That is the strongest signal this loop produced, and unlike the height
+ * complaint it never reversed.
+ *
+ * The mechanism is that `cabinetDark`/`crateSlat` are warm mid-browns and `floor.ts`'s
+ * terracotta tile is a warm mid-brown. The arena's primary cover and its ground are
+ * literally the same colour family, so the ONLY thing separating a counter from the
+ * floor is a crisp geometric edge — and edges are the first cue lost at gameplay zoom,
+ * in motion, and under the fog overlay.
+ *
+ * The floor is not this agent's file, so the props move. Rather than pick an arbitrary
+ * new hue, the body extends the grammar the arena already reserves for BLOCKING:
+ * `coverPlinthPanel`'s near-black plum. The whole solid mass now runs plum-grey from
+ * the ground up — desaturated (S ~0.2 against the floor's ~0.5), cool (plum against
+ * terracotta), and dark — with the bright, saturated CAP left as the only identity
+ * colour. One rule a player can learn in a second: **a dark plum mass under a bright
+ * cap is a thing that stops bullets.**
+ *
+ * Value alone would not have been enough: the shadowed floor is itself at luma 74, so
+ * a merely-darker body collides again the moment it is in shade. Hue and saturation
+ * are what hold in shadow, and they only became usable when the post chain stopped
+ * collapsing every colour to HSV saturation 1.00.
+ */
+const coverBody = (M: Materials) => tinted(M, M.cabinetDark, '#4B3F4E');
+const coverSkirt = (M: Materials) => tinted(M, M.crateSlat, '#3A3040');
 
 /**
  * Near-black base band at the FULL CoverBox footprint. Returns the Y the body above
@@ -237,36 +385,51 @@ function buildHerbSprig(M: Materials, scale = 1): THREE.Group {
 export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack?: boolean }): THREE.Group {
   const g = new THREE.Group();
   const bw = wM * COVER_BODY_FRAC, bd = dM * COVER_BODY_FRAC;
-  const capT = 0.11;
+  const capT = 0.15;
   const y0 = addCoverPlinth(g, M, wM, dM);
   const sideTop = COUNTER_TOP_Y - capT;
 
   // DARK sides, BRIGHT overhanging cap — see `addCoverCap`. `cabinet` (the arena's
   // saturated orange) is now the CAP only; the vertical faces drop two steps down the
   // same warm ladder, which is what gives the box a top-vs-side value break.
-  addCoverSides(g, bw, bd, y0, sideTop - y0, M.cabinetDark, M.crateSlat, 0.06, 'stove_cabinet');
-  addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, M.cabinet, 'stove_counter');
+  addCoverSides(g, bw, bd, y0, sideTop - y0, coverBody(M), coverSkirt(M), 0.06, 'stove_cabinet');
+  addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, stoveCap(M), 'stove_counter');
 
   // Back wall + bright cap trim — see `addBacksplash`. Sits further back (-Z) than
   // the pan rack posts below, so on the island that has a rack this reads as "wall
   // behind the hanging pans" rather than clipping through them.
-  addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, M.coverPlinthPanel, 0.3);
+  addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, coverBody(M), BACKSPLASH_H);
 
-  // Hob plate laid ON the counter, not sunk into a frame. The old version was a
-  // smaller steel slab inset below a bright orange rim, which a critic read as "a
-  // sink/trough you might fall into" rather than a work surface.
-  const hob = mesh(roundedBox(wM * 0.6, 0.06, dM * 0.52, 0.03), M.steelDark, 'stove_hob');
-  hob.position.y = COUNTER_TOP_Y + 0.03;
+  // ── Hob plate — round-10 rebuild ────────────────────────────────────────────
+  // Measured at shipped framing, the old hob rendered rgb(18,51,76), **luma 45.6**,
+  // against its own counter cap at luma 137: a 91-value drop, hard-edged, filling
+  // ~55% of the counter's top face. A large flat rectangle that dark on a lit
+  // surface is a HOLE — the same read the barrel's pure-black bung got, at ten times
+  // the screen area. Worse for this round specifically: luma 45.6 is within 11 of the
+  // reserved `coverPlinthPanel` BLOCKING band (luma 34.9), so the arena's one colour
+  // that is supposed to mean "this stops a bullet" was also appearing as a big flat
+  // panel lying flat on top of cover, i.e. exactly the flat-coloured-rectangle
+  // language the walkable floor mats use. Two grammars collided on one surface.
+  //
+  // Now: a smaller MID-grey plate with real thickness, standing proud of the cap with
+  // a brighter lip around it, so it reads as a hotplate sitting ON the counter.
+  const hobW = wM * 0.32, hobD = dM * 0.36;
+  const hobT = 0.12;
+  const hobLip = mesh(roundedBox(hobW + 0.1, hobT * 0.6, hobD + 0.1, 0.03), M.potMetal, 'stove_hob_lip');
+  hobLip.position.y = COUNTER_TOP_Y + hobT * 0.3;
+  g.add(hobLip);
+  const hob = mesh(roundedBox(hobW, hobT, hobD, 0.03), M.potMetalDark, 'stove_hob');
+  hob.position.y = COUNTER_TOP_Y + hobT / 2;
   g.add(hob);
 
   // Two burner rings + a lit-coil disc each.
-  for (const bx of [-wM * 0.18, wM * 0.18]) {
+  for (const bx of [-wM * 0.14, wM * 0.14]) {
     const ring = mesh(new THREE.TorusGeometry(0.17, 0.03, 8, 20), M.potMetalDark, 'burner_ring');
     ring.rotation.x = Math.PI / 2;
-    ring.position.set(bx, COUNTER_TOP_Y + 0.07, 0);
+    ring.position.set(bx, COUNTER_TOP_Y + hobT + 0.02, 0);
     g.add(ring);
     const coil = mesh(puck(0.12, 0.02, 16), M.potMetal, 'burner_coil');
-    coil.position.set(bx, COUNTER_TOP_Y + 0.07, 0);
+    coil.position.set(bx, COUNTER_TOP_Y + hobT + 0.02, 0);
     g.add(coil);
   }
 
@@ -280,19 +443,19 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   if (opts?.panRack) {
     const postH = 0.8;
     const post = mesh(roundedBox(0.05, postH, 0.05, 0.02), M.freezerTrim, 'rack_post');
-    post.position.set(-wM * 0.32, COUNTER_TOP_Y + postH / 2, -dM * 0.38);
+    post.position.set(-wM * 0.32, COUNTER_TOP_Y + postH / 2, -dM * 0.26);
     g.add(post);
     const bar = mesh(roundedBox(wM * 0.5, 0.045, 0.045, 0.02), M.freezerTrim, 'rack_bar');
-    bar.position.set(-wM * 0.05, COUNTER_TOP_Y + postH, -dM * 0.38);
+    bar.position.set(-wM * 0.05, COUNTER_TOP_Y + postH, -dM * 0.26);
     g.add(bar);
     let px = -wM * 0.28;
     for (const pr of [0.16, 0.13, 0.15]) {
       const chain = mesh(puck(0.008, 0.16, 6), M.potMetalDark, 'pan_chain');
-      chain.position.set(px, COUNTER_TOP_Y + postH - 0.1, -dM * 0.38);
+      chain.position.set(px, COUNTER_TOP_Y + postH - 0.1, -dM * 0.26);
       noOutline(chain);
       g.add(chain);
       const pan = mesh(puck(pr, 0.045, 16), M.potMetal, 'hanging_pan');
-      pan.position.set(px, COUNTER_TOP_Y + postH - 0.2, -dM * 0.38);
+      pan.position.set(px, COUNTER_TOP_Y + postH - 0.2, -dM * 0.26);
       g.add(pan);
       px += wM * 0.24;
     }
@@ -313,21 +476,31 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
 export function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBlock?: boolean; rollingPin?: boolean }): THREE.Group {
   const g = new THREE.Group();
   const bw = wM * COVER_BODY_FRAC, bd = dM * COVER_BODY_FRAC;
-  const capT = 0.1;
+  const capT = 0.14;
   const y0 = addCoverPlinth(g, M, wM, dM);
   const sideTop = COUNTER_TOP_Y - capT;
 
-  addCoverSides(g, bw, bd, y0, sideTop - y0, M.cabinetDark, M.crateSlat, 0.06, 'prep_cabinet');
+  addCoverSides(g, bw, bd, y0, sideTop - y0, coverBody(M), coverSkirt(M), 0.06, 'prep_cabinet');
   // Butcher block is the brightest surface in the warm palette — the perfect cap for
-  // a prop whose sides are now two steps down the same ladder.
-  addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, M.butcherBlock, 'prep_top');
-  addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, M.coverPlinthPanel, 0.26);
+  // a prop whose sides are now two steps down the same ladder. See `prepCap` for why
+  // it is used at a lower value than the shared `KPAL` entry.
+  addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, prepCap(M), 'prep_top');
+  addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, coverBody(M), BACKSPLASH_H);
 
   // Always-present cutting board + a few chopped-veg cubes, off-centre so it never
   // collides with either the knife block or the bowl/pin below.
+  //
+  // Round-10: this was 3.5cm thick in `crateWood` and rendered rgb(248,133,16) — S
+  // 0.934 with red one step off the rail — i.e. a hard-edged, fully saturated, flat
+  // orange RECTANGLE lying flat on the counter with no measurable thickness. That is
+  // the visual language of a floor decal, and the whole point of this round is that
+  // the player must be able to tell a painted rectangle from a solid object. It is now
+  // a 9cm slab (thick enough to throw its own shadow line and show an edge from the
+  // gameplay pitch) in the calmer `woodPad` tone, so it reads as a board someone put
+  // down rather than a colour printed on the counter.
   const boardY = COUNTER_TOP_Y;
-  const board = mesh(roundedBox(wM * 0.3, 0.035, dM * 0.5, 0.03), M.crateWood, 'prep_cutting_board');
-  board.position.set(-wM * 0.2, boardY, 0);
+  const board = mesh(roundedBox(wM * 0.3, 0.09, dM * 0.5, 0.025), M.woodPad, 'prep_cutting_board');
+  board.position.set(-wM * 0.2, boardY + 0.045, 0);
   g.add(board);
   // Round-7 fix: these used to be four separate chips spread evenly across the
   // board — a critic flagged small isolated coloured items on counters as
@@ -347,7 +520,7 @@ export function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { 
         choppedMats[choppedIdx % choppedMats.length],
         'prep_chopped_veg'
       );
-      chip.position.set(-wM * 0.2 + (px + jx) * wM * 0.3, boardY + 0.013 * sc, (pz + jz) * dM * 0.3);
+      chip.position.set(-wM * 0.2 + (px + jx) * wM * 0.3, boardY + 0.09 + 0.013 * sc, (pz + jz) * dM * 0.3);
       chip.rotation.y = choppedIdx * 0.8;
       g.add(chip);
       choppedIdx++;
@@ -395,43 +568,55 @@ export function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { 
 export function buildServiceCounter(M: Materials, wM: number, dM: number, variant: 'fryer' | 'sink'): THREE.Group {
   const g = new THREE.Group();
   const bw = wM * COVER_BODY_FRAC, bd = dM * COVER_BODY_FRAC;
-  const capT = 0.11;
+  const capT = 0.15;
   const y0 = addCoverPlinth(g, M, wM, dM);
   const sideTop = COUNTER_TOP_Y - capT;
 
-  addCoverSides(g, bw, bd, y0, sideTop - y0, M.cabinetDark, M.crateSlat, 0.06, 'service_cabinet');
+  addCoverSides(g, bw, bd, y0, sideTop - y0, coverBody(M), coverSkirt(M), 0.06, 'service_cabinet');
   // Stainless cap — the one bright NEUTRAL top in the counter family, so fryer/sink
   // stay distinguishable from the stove islands (orange cap) and the prep counters
   // (butcher-block cap) without the sides having to differ. Consistent dark sides
   // across all cover is the point; identity lives on the top plane, which is also the
   // plane that dominates the frame at this camera pitch.
   addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, M.potMetal, 'service_top');
-  addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, M.coverPlinthPanel, 0.28);
+  addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, coverBody(M), BACKSPLASH_H);
+
+  // Both variants get a bright metal LIP standing proud of the counter around their
+  // dark well/basin. Same round-10 reason as the stove hob: a flat dark rectangle
+  // sitting flush in a lit top face reads as a hole punched through the mesh, and any
+  // large flat single-value rectangle on cover is the walkable-floor-decal language
+  // this round exists to stop borrowing.
+  // A lighter tint of the cap's own metal, not `potMetal` itself — the service cap IS
+  // `potMetal`, so an untinted lip would be invisible against it.
+  const lipT = 0.07;
+  const lip = mesh(roundedBox(wM * 0.66, lipT, dM * 0.66, 0.03), tinted(M, M.potMetal, '#B7BEC6'), 'service_well_lip');
+  lip.position.y = COUNTER_TOP_Y + lipT / 2;
+  g.add(lip);
 
   if (variant === 'fryer') {
     const well = mesh(roundedBox(wM * 0.55, 0.1, dM * 0.55, 0.04), M.potMetalDark, 'fryer_well');
-    well.position.y = COUNTER_TOP_Y - 0.025;
+    well.position.y = COUNTER_TOP_Y + lipT - 0.025;
     noOutline(well);
     g.add(well);
     const basket = mesh(roundedBox(wM * 0.4, 0.22, dM * 0.4, 0.03), M.steelDark, 'fryer_basket');
-    basket.position.y = COUNTER_TOP_Y + 0.115;
+    basket.position.y = COUNTER_TOP_Y + lipT + 0.115;
     g.add(basket);
     const handleBar = mesh(puck(0.015, wM * 0.5, 8), M.steelDark, 'fryer_handle');
     handleBar.rotation.z = Math.PI / 2;
-    handleBar.position.set(0, COUNTER_TOP_Y + 0.255, 0);
+    handleBar.position.set(0, COUNTER_TOP_Y + lipT + 0.255, 0);
     noOutline(handleBar);
     g.add(handleBar);
   } else {
     const basin = mesh(roundedBox(wM * 0.6, 0.14, dM * 0.55, 0.05), M.steelDark, 'sink_basin');
-    basin.position.y = COUNTER_TOP_Y - 0.025;
+    basin.position.y = COUNTER_TOP_Y + lipT - 0.025;
     noOutline(basin);
     g.add(basin);
     const faucetPost = mesh(puck(0.025, 0.32, 8), M.steel, 'faucet_post');
-    faucetPost.position.set(0, COUNTER_TOP_Y + 0.155, -dM * 0.2);
+    faucetPost.position.set(0, COUNTER_TOP_Y + lipT + 0.155, -dM * 0.2);
     g.add(faucetPost);
     const faucetArc = mesh(new THREE.TorusGeometry(0.14, 0.02, 6, 12, Math.PI), M.steel, 'faucet_arc');
     faucetArc.rotation.set(0, Math.PI / 2, 0);
-    faucetArc.position.set(0, COUNTER_TOP_Y + 0.295, -dM * 0.08);
+    faucetArc.position.set(0, COUNTER_TOP_Y + lipT + 0.295, -dM * 0.08);
     g.add(faucetArc);
   }
 
