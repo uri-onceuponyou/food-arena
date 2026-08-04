@@ -216,11 +216,27 @@ export class PizzaCharacter extends BaseCharacter {
       // real torso underneath to taper INTO and neither a stub nor a stilt body
       // gives it one. The two tweaks are the wedge's own identity carried down
       // through the body: broad at the shoulders, narrow at the feet.
+      // `armRadius` was 0.080H — nearly 40% above STANDARD's own 0.058 — while
+      // `armFraction` stayed at the archetype's 0.22, which makes the upper arm
+      // 0.24m long and 0.44m across. That is not a thick arm, it is a PANCAKE:
+      // rendered, both upper arms read as flat tan flippers stuck to the ribs,
+      // and the hand spheres at 0.086H read as loose tomatoes rather than as the
+      // ends of limbs. A knob tweaked past the point where the archetype's own
+      // length still supports it stops being a tweak. Both are back near stock;
+      // the wedge identity is carried by the shoulder/stance ratio, which is
+      // where it belongs — it costs the limbs nothing.
+      //
+      // `torsoWidth` is pinned rather than left to STANDARD's own 1.18x of the
+      // shoulder span, because this character deliberately runs its shoulders
+      // 30% wide for the wedge read — and the archetype's ratio then dragged the
+      // WAIST out to match, giving a barrel nearly as broad as the shoulders. A
+      // head only reads as the hero form if the body under it is smaller.
       proportions: bodyType('standard', {
         shoulderWidth: CHARACTER_HEIGHT * 0.26,  // broad shoulders — wide top of the wedge
+        torsoWidth: CHARACTER_HEIGHT * 0.26 * 0.82, // narrow waist — do NOT track the wide shoulders
         stanceWidth: CHARACTER_HEIGHT * 0.09,    // narrow stance — the wedge tapers to a point
-        armRadius: CHARACTER_HEIGHT * 0.080,     // thick, doughy — chunkiest arms in the cast
-        handRadius: CHARACTER_HEIGHT * 0.086,
+        armRadius: CHARACTER_HEIGHT * 0.062,     // a touch thicker than stock, still a limb
+        handRadius: CHARACTER_HEIGHT * 0.074,
         legRadius: CHARACTER_HEIGHT * 0.050,     // slimmer, tapering — continues the wedge's own narrowing
       }),
       // Confident, presenting swagger — one hand planted on the hip (heavy elbow
@@ -373,9 +389,14 @@ export class PizzaCharacter extends BaseCharacter {
       const bodyHalfD = size.d * 0.58;
       const bodyBottomY = size.h * 0.02;
       const bodyTopY = size.h * 1.05;
+      // Baked a full step DARKER than the head's crust. Both critics who saw the
+      // pale version said the same thing — "a shapeless pale-yellow dough blob in
+      // the same value family as the slice's crust, so there is no head/body
+      // separation". A chibi needs its head to win the first read outright, and
+      // value is the cheapest way to give it that.
       const doughBody = new THREE.Mesh(
         torsoBarrel(bodyHalfW, bodyTopY - bodyBottomY, bodyHalfD, 0.26),
-        toonMat({ color: CRUST, roughness: 0.85 })
+        toonMat({ color: CRUST_RIM, roughness: 0.85 })
       );
       doughBody.name = 'pizza_torso_crust';
       doughBody.position.y = (bodyTopY + bodyBottomY) / 2;
@@ -383,90 +404,63 @@ export class PizzaCharacter extends BaseCharacter {
       doughBody.receiveShadow = true;
       group.add(doughBody);
 
-      // Chest badge: a SMALLER echo of the head's own wedge (curved crust base,
-      // sharp point), worn apex-down like a pendant on the chest rather than
-      // covering the whole torso. A first pass built this as a full-width bib
-      // and it read as a stiff funnel/collar wrapping the neck; narrowing it to
-      // a badge that leaves bare crust body visible on both sides reads as a
-      // garment ON a body instead of a robot collar.
-      const apexY = size.h * 0.30;
-      const baseY = size.h * 0.88;
-      const halfW = bodyHalfW * 0.60;
-      const bulge = (baseY - apexY) * 0.30;
-      const cornerY = baseY - (baseY - apexY) * 0.10;
-      const badgeShape = (scale: number): THREE.Shape => {
-        const midY = (apexY + baseY) / 2;
-        const sc = (y: number) => midY + (y - midY) * scale;
-        const s = new THREE.Shape();
-        s.moveTo(0, sc(apexY));
-        s.lineTo(halfW * scale, sc(cornerY));
-        s.quadraticCurveTo(0, sc(baseY + bulge), -halfW * scale, sc(cornerY));
-        s.lineTo(0, sc(apexY));
-        return s;
-      };
-
-      // Depths trimmed down from a first pass that pushed the badge proud enough
-      // to read as a satchel bulging off the chest at an angle — this sits
-      // closer to flush, like a patch on the crust rather than a strapped-on
-      // slab.
-      const badgeDepth = bodyHalfD * 0.14;
-      const rim = new THREE.Mesh(
-        new THREE.ExtrudeGeometry(badgeShape(1.0), { depth: badgeDepth, bevelEnabled: true, bevelThickness: badgeDepth * 0.25, bevelSize: badgeDepth * 0.25, bevelSegments: 2, curveSegments: 16 }),
-        toonMat({ color: CRUST_RIM, roughness: 0.83 })
+      // ── There is NO chest wedge here, and that is the point ──────────────
+      //
+      // Two passes tried to put a miniature slice on this torso and both failed
+      // in different ways. Apex-down, its bright curved edge landed dead centre
+      // on the belly and read as a giant FROWNING MOUTH. Apex-up — a faithful
+      // miniature of the head — a blind critic read it as "a second, smaller
+      // pizza triangle pinned to the belly, an accidental duplicate head growing
+      // out of the hips."
+      //
+      // The lesson generalises past this file: **repeating the head's own
+      // silhouette on the torso does not reinforce identity, it competes with
+      // it.** The head is already an unmistakable triangle; a second triangle
+      // below it only splits the viewer's first read between two candidates.
+      //
+      // So the torso stops trying to be a pizza and does the job it is actually
+      // needed for — separating from the head in VALUE and WIDTH so the slice is
+      // clearly the biggest, brightest form on the character. It is baked a
+      // deeper golden brown than the head's pale crust, it is narrower (see
+      // `torsoWidth` in the constructor), and the one worn thing on it is a
+      // horizontal sauce-red waist sash, whose direction and colour share
+      // nothing with the wedge above.
+      const sashY = size.h * 0.30;
+      const sashH = size.h * 0.26;
+      const sash = new THREE.Mesh(
+        torsoBarrel(bodyHalfW * 1.03, sashH, bodyHalfD * 1.03, 0.06),
+        toonMat({ color: SAUCE, roughness: 0.55 })
       );
-      rim.name = 'pizza_torso_rim';
-      rim.position.z = bodyHalfD * 0.60;
-      rim.castShadow = true;
-      rim.receiveShadow = true;
-      group.add(rim);
+      sash.name = 'pizza_torso_sash';
+      sash.position.y = sashY;
+      sash.castShadow = true;
+      sash.receiveShadow = true;
+      group.add(sash);
 
-      const cheeseDepth = bodyHalfD * 0.09;
-      const badgeFrontZ = bodyHalfD * 0.60 + badgeDepth;
-      const cheeseBadge = new THREE.Mesh(
-        new THREE.ExtrudeGeometry(badgeShape(0.78), { depth: cheeseDepth, bevelEnabled: true, bevelThickness: cheeseDepth * 0.3, bevelSize: cheeseDepth * 0.3, bevelSegments: 2, curveSegments: 16 }),
-        glossyMat({ color: CHEESE, roughness: 0.28 })
+      const sashTrim = new THREE.Mesh(
+        torsoBarrel(bodyHalfW * 1.045, sashH * 0.20, bodyHalfD * 1.045, 0.06),
+        toonMat({ color: MITT_CREAM, roughness: 0.7 })
       );
-      cheeseBadge.name = 'pizza_torso_cheese';
-      cheeseBadge.position.z = badgeFrontZ;
-      cheeseBadge.castShadow = true;
-      cheeseBadge.receiveShadow = true;
-      group.add(cheeseBadge);
+      sashTrim.name = 'pizza_torso_sash_trim';
+      sashTrim.position.y = sashY + sashH * 0.44;
+      sashTrim.castShadow = true;
+      group.add(sashTrim);
 
-      // Cheese drips off the badge's top corners, over the shoulders. Two
-      // earlier passes anchored these against `baseY`, but the badge's actual
-      // top boundary is a CURVE that bulges above `baseY` at its centre and
-      // only meets `cornerY` right at the corners — anchoring against the
-      // nominal (non-curved) value left both attempts poking up through the
-      // rim as visible spikes. Anchored well below `cornerY` instead — a flat,
-      // conservative floor that sits under the curve everywhere near these
-      // corner-ish x positions — so only the bottom of each sphere is ever
-      // visible, hanging down over the crust body.
-      const dripAnchorY = cornerY - (baseY - apexY) * 0.14;
-      const dripR = bodyHalfD * 0.06;
-      const dripXs = [-halfW * 0.92, -halfW * 0.60, halfW * 0.60, halfW * 0.92];
-      for (let i = 0; i < dripXs.length; i++) {
-        const len = bodyHalfD * (0.10 + (i % 2) * 0.05);
-        const drip = new THREE.Mesh(new THREE.SphereGeometry(dripR, 10, 10), glossyMat({ color: CHEESE, roughness: 0.28 }));
-        drip.name = 'pizza_torso_drip';
-        drip.position.set(dripXs[i], dripAnchorY - len, badgeFrontZ + cheeseDepth * 0.6 + dripR * 0.6);
-        drip.scale.set(1, len / dripR, 1);
-        drip.castShadow = true;
-        drip.receiveShadow = true;
-        group.add(drip);
-      }
-
-      // A single pepperoni on the badge, continuing the topping motif onto the
-      // body without crowding the smaller shape.
-      const pep = new THREE.Mesh(
-        new THREE.CylinderGeometry(bodyHalfD * 0.10, bodyHalfD * 0.11, bodyHalfD * 0.06, 14),
-        glossyMat({ color: PEPPERONI, roughness: 0.18 })
-      );
-      pep.name = 'pizza_torso_pepperoni';
-      pep.rotation.x = Math.PI / 2;
-      pep.position.set(halfW * 0.05, (apexY + baseY) / 2 + bulge * 0.2, badgeFrontZ + cheeseDepth * 0.5 + bodyHalfD * 0.03);
-      pep.castShadow = true;
-      pep.receiveShadow = true;
-      group.add(pep);
+      // ── There is no chest pepperoni either ──────────────────────────────
+      // A single small red disc centred on a bare belly does not read as a
+      // topping; it reads as a NAVEL, or a button. Anything round, small, dark
+      // and dead-centre on a torso will. The sash already carries this
+      // character's red and carries it as a BAND, which cannot be mistaken for
+      // anatomy.
+      //
+      // NOTE for anything mounted on this torso later: `bodyHalfD` is the value
+      // handed to `torsoBarrel`, and that helper then applies a bulge of up to
+      // 1.16x, so the body's real front face sits well past it. A badge parked
+      // at `bodyHalfD * 0.58` was *entirely inside the mesh* and rendered as a
+      // 2 mm gold nub on a bare belly. Measure
+      // `doughBody.geometry.computeBoundingBox()` → `boundingBox.max.z`; do not
+      // approximate. Same trap as the buried sesame seeds and the buried brow —
+      // three times in this cast now.
 
       return group;
     });
@@ -701,12 +695,16 @@ export class PizzaCharacter extends BaseCharacter {
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
+        // The shoulder flare was 1.32x radius on a segment only ~1.9 radii LONG,
+        // so the upper arm came out wider than it was tall and read as a flipper
+        // rather than as the top of a limb. Flare pulled back to 1.10 so the
+        // taper still reads without the segment going square.
         case 'upperArmL':
         case 'upperArmR':
-          return taperedLimb(size.len, size.radius * 1.32, size.radius * 0.94, doughMat);
+          return taperedLimb(size.len, size.radius * 1.10, size.radius * 0.90, doughMat);
         case 'forearmL':
         case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.92, size.radius * 0.60, doughMat);
+          return taperedLimb(size.len, size.radius * 0.90, size.radius * 0.62, doughDarkMat);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
@@ -724,10 +722,10 @@ export class PizzaCharacter extends BaseCharacter {
         }
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.22, size.radius * 0.96, doughMat);
+          return taperedLimb(size.len, size.radius * 1.14, size.radius * 0.94, doughMat);
         case 'shinL':
         case 'shinR':
-          return taperedLimb(size.len, size.radius * 0.96, size.radius * 0.78, doughMat);
+          return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.76, doughDarkMat);
         case 'footL':
         case 'footR':
           return buildCrustBoot(size.len, charMat, doughDarkMat);

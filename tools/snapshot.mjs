@@ -26,6 +26,18 @@
  *
  * ## Use
  *
+ * ⚠️ THE SERVER DIES WITH THE SHELL THAT STARTED IT. Backgrounding it in one tool call
+ * and measuring in the next does NOT work — the process is reaped when its spawning shell
+ * exits, and the death presents as ERR_CONNECTION_REFUSED, which reads exactly like a
+ * broken build. That cost one agent two full render batches. **Start the snapshot and run
+ * the measurement in the SAME invocation:**
+ *
+ *   URL=$(node tools/snapshot.mjs --json | python3 -c "import json,sys;print(json.load(sys.stdin)['url'])") \
+ *     && node tools/arena-scan.mjs --url "$URL" --out shots/scan/x
+ *
+ * (that form works because --json exits after printing, leaving Vite parented to the same
+ * shell; keep the whole chain in one command.)
+ *
  *   node tools/snapshot.mjs                 # freeze + serve, print URL, hold until Ctrl-C
  *   node tools/snapshot.mjs --json          # machine-readable {url, port, dir}
  *   node tools/snapshot.mjs --swap src/arena/floor.ts   # freeze, but keep this file LIVE

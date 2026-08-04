@@ -124,9 +124,18 @@ export class DonutCharacter extends BaseCharacter {
       // `shoulderWidth` is a STUB-specific hand-fit: the arms have to clear the
       // ring's outer radius (1.04R) at shoulder height, where the torus is
       // ~0.86R wide. See the STUB notes in `bodies.ts`.
+      //
+      // `legFraction` is nudged up from STUB's 0.15. A blind critic reading the
+      // silhouette said the feet were "two indistinct pink stubs hidden under
+      // the ring's overhang, so the silhouette is essentially a circle" — a ring
+      // 2.0R wide overhangs 0.15H legs completely, which is the one place this
+      // archetype's proportions fight a very large food mass. 0.20 is still by
+      // far the shortest leg in the cast and STUB's read is untouched; the feet
+      // just clear the ring now, so the circle has something under it.
       proportions: bodyType('stub', {
         height: 2.10,
         headFraction: 0.72,
+        legFraction: 0.20,
         shoulderWidth: 2.10 * 0.295,
       }),
       // Bouncy and playful — hip popped out, head cocked, weight rocked back onto
@@ -180,9 +189,21 @@ export class DonutCharacter extends BaseCharacter {
     // Seated ON the glaze surface, not floating above it — an earlier character
     // shipped with visibly detached toppings and it read as broken immediately.
     const sprinkleGeo = new THREE.CapsuleGeometry(R * 0.028, R * 0.075, 4, 6);
+    /**
+     * The rectangle the face occupies on the front of the ring. Sprinkles that
+     * land inside it are skipped.
+     *
+     * Not fussiness: a bright unrelated dot next to a mouth or between two eyes
+     * gets read as part of the expression at the size a player sees, and a
+     * purple lozenge sitting on the corner of the smile is a facial feature the
+     * character did not ask for. Reference art keeps a clean margin around every
+     * face for the same reason.
+     */
+    const inFaceZone = (x: number, y: number) => Math.abs(x) < R * 0.66 && y > -R * 0.80 && y < R * 0.28;
     for (let i = 0; i < 26; i++) {
       const a = (i / 26) * Math.PI * 2 + (i % 3) * 0.35;
       const rr = ringR + (((i * 37) % 100) / 100 - 0.5) * tubeR * 0.85;
+      if (inFaceZone(Math.cos(a) * rr, Math.sin(a) * rr)) continue;
       const mat = flatMat(SPRINKLE_COLORS[i % SPRINKLE_COLORS.length]);
       const s = new THREE.Mesh(sprinkleGeo, mat);
       s.userData.noOutline = true;
@@ -426,7 +447,7 @@ export class DonutCharacter extends BaseCharacter {
       }
     });
 
-    this.buildFace(R);
+    this.buildFace(R, ringR, tubeR);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -437,29 +458,91 @@ export class DonutCharacter extends BaseCharacter {
    * Face features sit around the hole on the front of the ring. Built as real
    * geometry with depth rather than flat decals — `types.ts` convention #6 was
    * relaxed precisely because flat stickers were capping quality.
+   *
+   * ── The face was FLOATING, and the shadows proved it ──────────────────────
+   * `rig.joints.face` is parked at `headRadius * 0.82`, which assumes a roughly
+   * spherical head whose front surface is about there. A torus is nowhere near
+   * that: at the radius the eyes sit on, this ring's glazed front face is only
+   * ~0.38R forward, so every feature hung ~0.25R — about 0.19 m — out in open
+   * air. Dead-on it looked fine, which is exactly why it survived; at any yaw
+   * the eyes visibly detached and cast their own drop shadows onto the dough
+   * behind them.
+   *
+   * Every feature is now placed against the REAL glaze surface via
+   * `glazeFrontZ`, which solves the same offset/squash the sprinkles already
+   * solve rather than guessing a constant — so the face cannot drift if the
+   * ring's proportions are ever retuned.
    */
-  private buildFace(R: number): void {
+  private buildFace(R: number, ringR: number, tubeR: number): void {
     const face = this.rig.joints.face;
     const ink = PALETTE.ink;
 
-    const eyeGeo = new THREE.SphereGeometry(R * 0.115, 16, 14);
+    /**
+     * Head-local Z of the ring's OUTERMOST front surface at radius `hypot(x, y)`,
+     * converted into `face`-local space.
+     *
+     * There are two surfaces here and which one is in front depends on where you
+     * are across the tube — that is the whole reason the ring renders as a pink
+     * outer band, a gold middle band and a pink inner band rather than as solid
+     * icing. The dough torus is a plain tube of radius `tubeR` centred at z=0.
+     * The glaze torus is 1.04x thicker, squashed to 0.78 in Z and pushed forward
+     * 0.16 tube radii, so it wins near the tube's inner and outer edges and LOSES
+     * across the middle, where the bare dough pokes through.
+     *
+     * A first fix at this solved only the glaze and buried the smile: the mouth
+     * sits in the gold band, where the surface it needed to clear was the dough,
+     * a full 0.05R further forward. Taking the max of both is what makes the
+     * answer independent of which band a feature happens to land in.
+     */
+    const surfaceZ = (x: number, y: number, proud: number): number => {
+      const d = Math.hypot(x, y);
+      const ud = (d - ringR) / tubeR;
+      const zDough = tubeR * Math.sqrt(Math.max(0, 1 - ud * ud));
+      const ug = (d - ringR) / (tubeR * 1.04);
+      const zGlaze = tubeR * (0.16 + 1.04 * 0.78 * Math.sqrt(Math.max(0, 1 - ug * ug)));
+      return Math.max(zDough, zGlaze) + proud - face.position.z;
+    };
+
+    // ── The HOLE was acting as the mouth ─────────────────────────────────────
+    // With the eyes at +0.30R and the smile at -0.30R, the ring's hole sat
+    // exactly between them — and a hole is the darkest, highest-contrast feature
+    // on the whole model, so a blind critic read it as the mouth and the real
+    // smile as a stray mark low and off to the right. The face was losing to the
+    // geometry.
+    //
+    // Dropping the whole face below the hole fixes it structurally rather than
+    // by fighting for attention: eyes at -0.06R, mouth at -0.60R, so the hole is
+    // now clearly ABOVE the eyes where it reads as what it is — a hole in a
+    // donut — and the three ink features form one compact group in the lower
+    // half of the ring. The eyes also move outward to sit on the gold dough band
+    // rather than on the pink inner slope, where they were being crowded.
+    //
+    // Both eyes are the SAME size now. The 0.72 squint on one side was meant as
+    // a half-wink; every independent read of it came back as "the painted eyes
+    // are unequal in size and sit at different heights", which is the exact
+    // failure `taco.ts` already documented — a subtle size difference reads as a
+    // mistake, not as acting. The asymmetry lives entirely in the brows.
+    const eyeGeo = new THREE.SphereGeometry(R * 0.125, 16, 14);
     const eyeMat = toonMat({ color: ink, roughness: 0.25 });
     for (const sx of [-1, 1]) {
-      // Right eye (sx>0) squints slightly under its cocked brow — a real wink-lite
-      // read rather than the mirrored, matched-everything face this shipped with. A
-      // second independent art-director pass named facial acting as the cast's
-      // biggest remaining appeal gap, and perfectly symmetric brows/eyes were exactly
-      // the kind of "no personality, just present" feature that scored badly.
-      const squint = sx > 0 ? 0.72 : 1;
+      const squint = 1;
+      const eyeX = sx * R * 0.44;
+      const eyeY = -R * 0.06;
+      // Centre sits ON the surface, so a little over half the ball stands proud —
+      // an eye set flush into the icing reads as a printed dot, and one pushed
+      // out past its own radius reads as detached.
+      const eyeZ = surfaceZ(eyeX, eyeY, R * 0.015);
       const eye = new THREE.Mesh(eyeGeo, eyeMat);
-      eye.position.set(sx * R * 0.36, R * 0.30, -R * 0.16);
+      eye.position.set(eyeX, eyeY, eyeZ);
       eye.scale.set(1, 1.15 * squint, 0.6);
       eye.castShadow = true;
       face.add(eye);
 
       // Specular catchlight — the single cheapest trick for making eyes feel alive.
+      const glintX = eyeX - sx * R * 0.038;
+      const glintY = eyeY + R * 0.048;
       const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.038, 10, 8), flatMat('#ffffff'));
-      glint.position.set(sx * R * 0.36 - R * 0.035, R * 0.345 * squint, -R * 0.10);
+      glint.position.set(glintX, glintY, eyeZ + R * 0.055);
       glint.userData.noOutline = true;
       face.add(glint);
 
@@ -467,24 +550,31 @@ export class DonutCharacter extends BaseCharacter {
       // sits higher and cocks harder, the left stays low and nearly flat, so the
       // crooked smile below reads as ONE character's deliberate smirk instead of a
       // matched, interchangeable pair of brows either side of it.
-      const browY = sx > 0 ? R * 0.54 : R * 0.47;
+      const browY = eyeY + (sx > 0 ? R * 0.25 : R * 0.18);
       const browTilt = sx > 0 ? 0.36 : 0.04;
       const brow = new THREE.Mesh(
         new THREE.CapsuleGeometry(R * 0.021, R * 0.14, 4, 8),
         toonMat({ color: PALETTE.ink, roughness: 0.4 })
       );
-      brow.position.set(sx * R * 0.36, browY, -R * 0.155);
+      brow.position.set(eyeX, browY, surfaceZ(eyeX, browY, R * 0.012));
       brow.rotation.z = Math.PI / 2 - sx * browTilt;
       brow.castShadow = true;
       face.add(brow);
     }
 
     // Crooked smile — asymmetric on purpose, per Donut's described personality.
+    const smileX = R * 0.03;
+    const smileY = -R * 0.52;
     const smile = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.20, R * 0.035, 8, 20, Math.PI * 0.85),
+      new THREE.TorusGeometry(R * 0.22, R * 0.038, 8, 20, Math.PI * 0.85),
       toonMat({ color: ink, roughness: 0.3 })
     );
-    smile.position.set(R * 0.03, -R * 0.30, -R * 0.14);
+    // Sampled at the arc's DEEPEST point, not its centre. The mouth is a 0.20R
+    // arc lying across a curved tube, so its extremes sit on surfaces up to
+    // 0.09R apart; sampling anywhere but the frontmost of them leaves part of
+    // the stroke buried, which is exactly how a first attempt at this lost all
+    // but a sliver of the smile.
+    smile.position.set(smileX, smileY, surfaceZ(smileX, smileY - R * 0.10, R * 0.02));
     smile.rotation.set(0, 0, Math.PI * 1.08);
     smile.castShadow = true;
     face.add(smile);

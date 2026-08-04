@@ -6,15 +6,25 @@
  * file authors only the food mass on `rig.joints.head`, the face and a palette.
  *
  * Identity is fixed by `rules.ts`: Taco, Rare rarity, Filling Toss / Onion Bomb /
- * Double Toss. The written description ("trapezoid shell, jagged crimped top edge,
- * face floats outside the shell to the side") is a personality guide rather than a
- * literal spec, per the brief — but the trapezoid-with-crimped-top IS kept as the
- * silhouette landmark, since it is exactly the shape that reads as "hard-shell taco"
- * at a glance. The floating face is realised as a second, smaller fold of the same
- * toasted shell fused onto the main shell's edge rather than a literally detached
- * head: it still reads as "the face lives outside the shell, off to the side" (the
- * eyes/mouth are nowhere near the shell's own front face), but a chunk of it is
- * physically embedded in the main mass so it doesn't read as a floating defect.
+ * Double Toss.
+ *
+ * ── Where this file departs from the written description, and why ────────────
+ * The 2D note reads "trapezoid shell, jagged crimped top edge, face floats
+ * outside the shell to the side". All three were implemented literally and all
+ * three were wrong on screen:
+ *
+ *   - the TRAPEZOID read as a paper bag; a taco's signature is a crescent, so
+ *     the wall outline is now a U with two horns and a dipped mouth;
+ *   - the JAGGED crimp read as a crown, because tall spikes are the loudest
+ *     thing in any silhouette and became the shape people named. It is a small
+ *     ripple now;
+ *   - the FLOATING FACE read as a second head — a pale ball with eyes sitting
+ *     beside a brown mass, so the eye picked the ball as the character and the
+ *     shell as scenery. The face is now front and centre on the near wall.
+ *
+ * The brief explicitly allows treating these notes as personality guides rather
+ * than literal specs. What is kept is the intent behind them: a hard, crisp,
+ * fried shape with an open crimped mouth and a cheeky expression.
  */
 
 import * as THREE from 'three';
@@ -28,7 +38,11 @@ import { bodyType } from './bodies';
 // ── Palette ──────────────────────────────────────────────────────────────────
 const SHELL = '#F2A73E';       // toasted hard-shell gold — bright, saturated
 const SHELL_DARK = '#D07F1E';  // shadow / crease tone
-const POD = '#F7BB57';         // the face-pod fold — a shade warmer/lighter than the shell
+// The cheek pad's tone. Deliberately only a HAIR lighter than SHELL: at a
+// bigger gap the pad stopped reading as a swelling in the wall and started
+// reading as a separate pale ball sitting inside a container, which put the
+// character's identity back on the wrong object again.
+const POD = '#F4AE46';
 const MEAT = PALETTE.patty;        // '#6B3E26'
 const MEAT_DARK = PALETTE.pattyDark; // '#4E2C1B'
 const TOMATO = PALETTE.tomato;       // '#E63946'
@@ -47,26 +61,62 @@ const LIMB_SHELL = '#C1522B';
 const LIMB_SHELL_DARK = '#8F3A1D';
 
 /**
- * Trapezoid shell outline: a narrow crease at the bottom (the fold) widening to an
- * open mouth at the top, with a jagged zigzag baked directly into the top edge. Baking
- * the crimp into the outline (rather than gluing separate teeth on afterward) means
- * the whole shell — crimp included — is one solid mesh that can never read as toppings
- * floating detached from the surface they should sit on.
+ * Shell wall outline: a rounded fold at the bottom rising to a wide open mouth,
+ * with a gently SCALLOPED top edge.
+ *
+ * ── Why this replaced a jagged trapezoid ────────────────────────────────────
+ * The first version was a narrow-bottomed trapezoid whose top edge carried
+ * sharp triangular teeth 0.30R tall. Rendered as a black silhouette it read as
+ * a CROWN, and in colour it read as a torn paper bag — the one thing it never
+ * read as was a taco. Two causes, both in this outline:
+ *
+ *   1. Tall sharp spikes are the loudest thing in a silhouette, so they became
+ *      the shape the eye named. A real hard-shell taco has a crimped edge, and
+ *      "crimped" is a small repeating WAVE, not a row of fangs. Scallops carry
+ *      the same crinkle-fried read at a fraction of the silhouette budget.
+ *   2. The bottom came to a near point (0.16R half-width), which is a wedge —
+ *      pizza's shape, and pizza is in the same five-character cohort. A taco
+ *      folds around a ROUNDED bottom; that curve is the half of the outline
+ *      that actually distinguishes the two foods, and it was missing.
+ *
+ * ── Then it read as a PAPER BAG, and the missing thing was the arc ──────────
+ * A blind critic's verdict on the scalloped-trapezoid version was exact: "the
+ * shell is a flat rectangular slab with a straight vertical fold — there is no
+ * taco arc anywhere in the silhouette." True. Rounding only the bottom left the
+ * sides near-vertical for most of their run and the mouth dead flat, which is
+ * an envelope. A taco's signature is a CRESCENT: two horns up at the corners,
+ * the opening dipping between them, the mass bellying out below.
+ *
+ * So the top edge now dips parabolically to `dipFrac` of the wall height at
+ * centre, and the outer edges bow OUT on their way down before turning into the
+ * bowl. That single change is what puts a nameable food shape in the outline —
+ * and it also opens a window in the middle of the near wall for the fillings to
+ * show through, which no amount of moving the fillings could achieve while the
+ * rim was a straight line above them.
+ *
+ * Baking the crimp into the outline rather than gluing teeth on afterward keeps
+ * the whole wall one solid mesh, so no part of it can float off the surface.
  */
-function tacoShellShape(halfWBot: number, halfWTop: number, yBot: number, yTop: number, teeth: number, toothH: number): THREE.Shape {
+function tacoShellShape(halfW: number, yBot: number, yTop: number, dipFrac: number, crimp: number): THREE.Shape {
   const shape = new THREE.Shape();
-  shape.moveTo(-halfWBot, yBot);
-  shape.lineTo(-halfWTop, yTop);
-  const span = halfWTop * 2;
-  for (let i = 0; i <= teeth; i++) {
-    const x = -halfWTop + (span * i) / teeth;
-    const peak = i % 2 === 0;
-    const h = peak ? toothH * (0.7 + 0.45 * Math.abs(Math.sin(i * 1.9))) : toothH * 0.24;
-    shape.lineTo(x, yTop + h);
+  const h = yTop - yBot;
+  const dip = h * dipFrac;
+  shape.moveTo(-halfW, yTop);
+  // Outer edge: sweeps down and slightly OUT before turning into the bowl, so
+  // the widest point of the wall is up near the horns rather than at the waist.
+  shape.quadraticCurveTo(-halfW * 1.05, yBot + h * 0.36, -halfW * 0.60, yBot + h * 0.04);
+  shape.quadraticCurveTo(0, yBot - h * 0.06, halfW * 0.60, yBot + h * 0.04);
+  shape.quadraticCurveTo(halfW * 1.05, yBot + h * 0.36, halfW, yTop);
+  // Top edge DIPS toward the centre — this is the crescent. Walked right → left
+  // as a fine polyline with a small ripple riding on it, which gives the crimped
+  // fried edge without the ripple ever becoming the shape the eye names.
+  const N = 12;
+  for (let i = 1; i <= N; i++) {
+    const t = i / N;
+    const x = halfW - 2 * halfW * t;
+    const u = x / halfW;
+    shape.lineTo(x, yTop - dip * (1 - u * u) + crimp * Math.abs(Math.sin(t * Math.PI * 3)));
   }
-  shape.lineTo(halfWTop, yTop);
-  shape.lineTo(halfWBot, yBot);
-  shape.lineTo(-halfWBot, yBot);
   return shape;
 }
 
@@ -139,16 +189,26 @@ export class TacoCharacter extends BaseCharacter {
       // showed it landing in the same generic middle as everything else anyway.
       // `headFraction` is raised so the shell (which spans -1.20R to +0.85R, far
       // from the spherical mass the rig assumes) still reaches cast height.
-      proportions: bodyType('stout', { headFraction: 0.59 }),
+      // `headFraction` is raised because a folded shell is nothing like the ±R
+      // sphere the rig assumes: the mass runs from -1.05R to about +0.5R once
+      // the walls are tilted back, so R has to grow for the crimp to reach the
+      // cast's ~2.10 m standing height. Verified with `shoot.mjs --char taco`,
+      // which prints the real bounding height — not guessed.
+      proportions: bodyType('stout', { headFraction: 0.52 }),
       // Leaning forward, eager — weight already committed toward the fight, both
       // fists cocked like she's about to toss filling. An art director's second
       // pass named the cast's identical dead-front symmetric pose as a top gap;
       // this is the most forward-committed lean in this file's cast, matching
       // a character built entirely around throwing things.
+      // `headTurn` pushed from -0.05 to -0.24: a wide flat-fronted mass presented
+      // dead square to camera reads as a signboard. Turning it a little shows the
+      // fold's own thickness and the far wall behind the near one, which is what
+      // makes the shape read as a container with a front and a back rather than
+      // as a cut-out.
       stance: {
         shoulderL: 0.20, shoulderR: -0.45,
         elbowL: -0.75, elbowR: -0.85,
-        twist: 0.05, headTilt: -0.05, headTurn: -0.05,
+        twist: 0.05, headTilt: -0.07, headTurn: -0.24,
         hipSway: -0.04, lean: 0.16,
       },
     });
@@ -208,49 +268,96 @@ export class TacoCharacter extends BaseCharacter {
     // shell's opening/pod region) is untouched, so the visible silhouette above
     // the crease — fillings, pod, face — is unaffected; only the hidden portion
     // below the opening gets longer, self-embedding into the torso fold.
-    const halfWBot = R * 0.16;
-    const halfWTop = R * 0.92;
-    const yBot = -R * 1.20;
-    const yTopBase = R * 0.55;
-    const panelThickness = R * 0.16;
-    const tilt = 0.44; // radians each panel splays from vertical
+    // Wider and shorter than the first two passes. A taco is a WIDE, low form;
+    // at 0.94R half-width over a 1.67R span the shell came out taller than it
+    // was broad, which is most of why it kept reading as a container rather
+    // than as food.
+    const halfWTop = R * 1.06;
+    const yBot = -R * 0.95;
+    // ── The two walls are DIFFERENT HEIGHTS, and that is the load-bearing part ─
+    // Built identical, the near wall's rim always sits higher on screen than
+    // anything in the fold behind it — so the fillings, the one thing that says
+    // "this is a taco and not a paper bag", were completely occluded and only
+    // two stray lettuce tips cleared the crimp. Dropping the FRONT wall and
+    // raising the back one opens the mouth toward the camera: meat, tomato and
+    // lettuce now stack visibly above the near rim, in that order, with the tall
+    // back wall behind them as the backdrop that keeps them reading as contained.
+    const frontTopY = R * 0.48;
+    const backTopY = R * 0.76;
+    const panelThickness = R * 0.17;
     const hingeY = yBot;
 
-    const shellShape = tacoShellShape(halfWBot, halfWTop, yBot, yTopBase, 9, R * 0.3);
-    const shellGeo = new THREE.ExtrudeGeometry(shellShape, {
-      depth: panelThickness, bevelEnabled: false, curveSegments: 1,
-    });
-    shellGeo.translate(0, 0, -panelThickness / 2);
-    shellGeo.computeVertexNormals();
+    // ── Which way the walls lean, and why it is a LIGHTING decision ──────────
+    // Both walls used to splay symmetrically about vertical: front +0.44 rad
+    // (top toward camera), back -0.44. Rotating a panel's top toward the camera
+    // tips its outward normal DOWN — away from a key light that comes from above
+    // — so the front wall, the single largest surface on this character and the
+    // one nearest the lens, rendered as a huge flat near-black-brown mass filling
+    // the middle of the frame. The bright orange the eye actually found was the
+    // BACK wall behind it, which is why the shape read as a crown: the only lit
+    // part of the shell was its rear crimp.
+    //
+    // Both walls now lean BACK, the front only slightly and the back much
+    // further. That does three things at once: the front wall's normal tilts UP
+    // toward both the key and a camera pitched 58 degrees down, so it is lit and
+    // presents its full area; the fold still opens (the walls differ by ~21
+    // degrees) but opens up-and-away, which is exactly the direction the gameplay
+    // camera looks INTO; and the fillings end up on the far side of the front
+    // wall's top edge where they read as sitting IN the shell.
+    const frontTilt = -0.26;
+    const backTilt = -0.62;
 
-    // Front wall — the dominant, camera-facing panel. Everything else (fillings, the
-    // face pod) is parented under it so those features inherit its tilt for free and
-    // stay correctly attached at every angle instead of needing separate hinge math.
+    // The NEAR wall dips hard (0.34) — that dip is the window the fillings read
+    // through. The far wall barely dips (0.14) so it stands up behind them as a
+    // solid backdrop; give both the same dip and the toppings lose their
+    // background and float against the sky.
+    const wallGeo = (yTop: number, dipFrac: number): THREE.BufferGeometry => {
+      const g = new THREE.ExtrudeGeometry(tacoShellShape(halfWTop, yBot, yTop, dipFrac, R * 0.06), {
+        depth: panelThickness, bevelEnabled: false, curveSegments: 8,
+      });
+      g.translate(0, 0, -panelThickness / 2);
+      g.computeVertexNormals();
+      return g;
+    };
+
+    // Front wall — the dominant, camera-facing panel, and now the surface the
+    // FACE lives on. Everything mounted on it inherits its tilt for free.
     const frontPivot = new THREE.Group();
     frontPivot.name = 'shell_front_pivot';
     frontPivot.position.set(0, hingeY, 0);
-    frontPivot.rotation.x = tilt;
+    frontPivot.rotation.x = frontTilt;
     head.add(frontPivot);
-    const frontMesh = new THREE.Mesh(shellGeo, shellMat);
+    const frontMesh = new THREE.Mesh(wallGeo(frontTopY, 0.34), shellMat);
     frontMesh.name = 'taco_shell_front';
     frontMesh.position.set(0, -hingeY, 0); // re-centres the shape's own yBot back onto the hinge
     frontMesh.castShadow = true;
     frontMesh.receiveShadow = true;
     frontPivot.add(frontMesh);
 
-    // Back wall — same geometry, tilted the opposite way, a shade darker so it reads
-    // as the shadowed inner wall of the fold rather than a plain duplicate.
+    // Back wall — same geometry, leaning further back, a shade darker so it reads
+    // as the shadowed far wall of the fold rather than a plain duplicate.
     const backPivot = new THREE.Group();
     backPivot.name = 'shell_back_pivot';
     backPivot.position.set(0, hingeY, 0);
-    backPivot.rotation.x = -tilt;
+    backPivot.rotation.x = backTilt;
     head.add(backPivot);
-    const backMesh = new THREE.Mesh(shellGeo, shellDarkMat);
+    const backMesh = new THREE.Mesh(wallGeo(backTopY, 0.14), shellDarkMat);
     backMesh.name = 'taco_shell_back';
     backMesh.position.set(0, -hingeY, 0);
     backMesh.castShadow = true;
     backMesh.receiveShadow = true;
     backPivot.add(backMesh);
+
+    // Everything loose in the fold rides a pivot bisecting the two walls, so
+    // filling positions can be authored in plain "up the trough" coordinates
+    // instead of each one needing its own hinge solve.
+    const troughPivot = new THREE.Group();
+    troughPivot.name = 'taco_trough';
+    troughPivot.position.set(0, hingeY, 0);
+    troughPivot.rotation.x = (frontTilt + backTilt) / 2;
+    head.add(troughPivot);
+    /** Back-wall length from the hinge to the crimped mouth. */
+    const troughLen = backTopY - yBot;
 
     // ── Fillings: meat, tomato, lettuce, a wink of onion ────────────────────────
     // Sit in the gap between the two walls (z spans from the back wall toward the
@@ -258,121 +365,150 @@ export class TacoCharacter extends BaseCharacter {
     // floating. Positions are given in "natural" (untilted) head-space coordinates —
     // the fillings themselves stay untilted, independent of either wall, which is
     // exactly right for something loose sitting in the pocket between them.
-    // Round 2 defect: meat sat too low/shallow (fy<=0.28, fz<=0.2) and was completely
-    // hidden behind the front wall's crimp from every camera angle tested — only the
-    // lettuce read. Raised into the same upper "peeking over the crimp" band the
-    // lettuce and tomato occupy, low RGB choices swapped for a bit of extra spread so
-    // it still forms a visible base layer under them rather than an equal-height mush.
+    // Coordinates are now TROUGH-local: `fy` is a fraction of the wall length
+    // from the fold (1.0 = the crimped mouth), `fz` a small offset across the
+    // gap between the walls. Authoring in the tilted frame is what lets the
+    // stack be layered meat → tomato → lettuce by a single number, and it is
+    // self-correcting if either wall angle is ever retuned.
+    //
+    // The meat band is packed dense and wide on purpose: it is what fills the
+    // opening. The previous build left the fold's interior empty, and an empty
+    // fold under a downward-facing wall is just a dark hole.
+    // The `fy` band is set against the FRONT wall's rim, which in trough
+    // coordinates sits at about 0.85 — anything below that is behind the near
+    // wall and contributes nothing. Meat starts right at the waterline so a
+    // little brown reads under the brighter toppings without the fold looking
+    // like it is overflowing with beef.
     const meatSpots: Array<[number, number, number, THREE.Material]> = [
-      [-0.5, 0.3, 0.24, meatMat], [-0.1, 0.46, 0.32, meatDarkMat], [0.3, 0.34, 0.22, meatMat],
-      [0.58, 0.2, 0.14, meatDarkMat], [0.0, 0.2, 0.3, meatMat], [-0.32, 0.16, 0.14, meatDarkMat],
+      [-0.62, 0.86, 0.24, meatMat], [-0.30, 0.90, 0.08, meatDarkMat], [0.02, 0.88, 0.28, meatMat],
+      [0.34, 0.90, 0.10, meatDarkMat], [0.64, 0.86, 0.24, meatMat], [-0.16, 0.84, 0.34, meatDarkMat],
+      [0.48, 0.84, 0.34, meatMat], [-0.48, 0.84, 0.02, meatDarkMat],
     ];
     for (const [fx, fy, fz, mat] of meatSpots) {
-      const blob = new THREE.Mesh(new THREE.SphereGeometry(R * 0.22, 12, 10), mat);
+      // Smaller than the first pass. At 0.23R the meat blobs were the largest
+      // objects in the fold and rendered as a row of chocolate truffles; the
+      // toppings should sit UNDER the brighter vegetables, not dominate them.
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(R * 0.185, 12, 10), mat);
       blob.name = 'taco_meat';
-      blob.scale.set(1.15, 0.85, 0.9);
-      blob.position.set(fx * halfWTop, fy * R, fz * R);
+      blob.scale.set(1.15, 0.85, 0.95);
+      blob.position.set(fx * halfWTop, fy * troughLen, fz * R);
       blob.castShadow = true;
       blob.receiveShadow = true;
-      head.add(blob);
+      troughPivot.add(blob);
       this.fillings.push(blob);
       this.fillingBaseRotZ.push(blob.rotation.z);
     }
 
-    const tomatoSpots: Array<[number, number, number]> = [
-      [-0.62, 0.46, 0.3], [-0.24, 0.52, 0.36], [0.14, 0.48, 0.32],
-      [0.46, 0.42, 0.22], [0.6, 0.28, 0.16], [-0.46, 0.3, 0.12],
+    // ── Vary the size, or a filling row is just a row ────────────────────────
+    // A critic on the previous build called the toppings "a row of
+    // near-identical brown spheres that read as generic lumps". Correct: every
+    // meat blob was one radius and every tomato one cube, so the fold read as a
+    // texture rather than as ingredients. One dominant tomato wedge now anchors
+    // the row and the rest step down from it.
+    const tomatoSpots: Array<[number, number, number, number]> = [
+      [-0.62, 0.96, 0.20, 1.55], [-0.26, 0.98, 0.06, 0.85], [0.12, 0.97, 0.26, 1.0],
+      [0.46, 0.99, 0.08, 0.8], [0.70, 0.94, 0.20, 1.15], [-0.44, 0.94, 0.00, 0.75],
     ];
-    for (const [fx, fy, fz] of tomatoSpots) {
-      const bit = new THREE.Mesh(new THREE.BoxGeometry(R * 0.19, R * 0.19, R * 0.19), tomatoMat);
+    for (const [fx, fy, fz, scale] of tomatoSpots) {
+      const s = R * 0.17 * scale;
+      const bit = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), tomatoMat);
       bit.name = 'taco_tomato';
-      bit.position.set(fx * halfWTop, fy * R, fz * R);
+      bit.position.set(fx * halfWTop, fy * troughLen, fz * R);
       bit.rotation.set(0.3, 0.5, 0.2 + fx);
       bit.castShadow = true;
       bit.receiveShadow = true;
-      head.add(bit);
+      troughPivot.add(bit);
       this.fillings.push(bit);
       this.fillingBaseRotZ.push(bit.rotation.z);
     }
 
-    const lettuceSpots: Array<[number, number, number, number]> = [
-      [-0.74, 0.52, 0.16, 0.3], [-0.42, 0.6, 0.32, -0.15], [-0.12, 0.64, 0.22, 0.25], [0.18, 0.62, 0.34, -0.2],
-      [0.44, 0.56, 0.14, 0.2], [0.7, 0.48, -0.04, -0.25], [-0.58, 0.38, -0.06, 0.1], [0.56, 0.32, -0.08, -0.1],
+    // Lettuce is the only filling that clears the crimp, so it is the one that
+    // states "this shell is FULL" in silhouette. Kept to the top band.
+    // `burst` shreds stand nearly UPRIGHT and reach past the horns; the rest lie
+    // across the fold. Two spiky green bursts breaking the outline is what makes
+    // the crown of this silhouette specific instead of a flat lumpy line.
+    const lettuceSpots: Array<[number, number, number, number, boolean]> = [
+      [-0.72, 1.02, 0.12, 0.3, false], [-0.40, 1.05, 0.24, -0.30, true], [-0.10, 1.04, 0.04, 0.25, false],
+      [0.22, 1.06, 0.22, -0.34, true], [0.52, 1.04, 0.06, 0.2, false], [0.74, 1.00, 0.16, -0.25, false],
+      [-0.56, 1.00, 0.28, 0.1, false], [0.36, 0.99, -0.04, -0.1, false],
     ];
     for (let i = 0; i < lettuceSpots.length; i++) {
-      const [fx, fy, fz, tilt2] = lettuceSpots[i];
-      const shred = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.045, R * 0.26, 4, 6), i % 2 === 0 ? lettuceMatA : lettuceMatB);
+      const [fx, fy, fz, tilt2, burst] = lettuceSpots[i];
+      const shred = new THREE.Mesh(
+        new THREE.CapsuleGeometry(R * (burst ? 0.055 : 0.045), R * (burst ? 0.27 : 0.26), 4, 6),
+        i % 2 === 0 ? lettuceMatA : lettuceMatB
+      );
       shred.name = 'taco_lettuce';
-      shred.position.set(fx * halfWTop, fy * R, fz * R);
-      shred.rotation.set(Math.PI / 2 + tilt2 * 0.6, 0, tilt2);
+      shred.position.set(fx * halfWTop, fy * troughLen, fz * R);
+      // Bursts stand up but are RAKED, not vertical — two dead-upright green
+      // capsules read as candles on a cake rather than as leaves.
+      shred.rotation.set(burst ? 0.55 : Math.PI / 2 + tilt2 * 0.6, 0, tilt2 + (burst ? tilt2 * 2.2 : 0));
       shred.castShadow = true;
       shred.receiveShadow = true;
-      head.add(shred);
+      troughPivot.add(shred);
       this.fillings.push(shred);
       this.fillingBaseRotZ.push(shred.rotation.z);
     }
 
     // A few onion slivers tucked among the meat — ties visually to the Onion Bomb
-    // ability's projectile colour. Raised alongside the meat fix above (round 2 had
-    // these buried too), and enlarged in round 4 — at the original R*0.1/R*0.028 size
-    // they were nearly invisible against the meat, the one filling that didn't
-    // register at gameplay distance.
-    const onionSpots: Array<[number, number, number]> = [[-0.22, 0.42, 0.3], [0.36, 0.48, 0.34], [0.06, 0.24, 0.38]];
+    // ability's projectile colour, and the only cool-leaning hue in the fold.
+    const onionSpots: Array<[number, number, number]> = [[-0.22, 0.94, 0.30], [0.36, 0.96, 0.30], [0.06, 0.90, 0.34]];
     for (const [fx, fy, fz] of onionSpots) {
       const sliver = new THREE.Mesh(new THREE.TorusGeometry(R * 0.14, R * 0.042, 6, 12, Math.PI * 1.3), onionMat);
       sliver.name = 'taco_onion';
-      sliver.position.set(fx * halfWTop, fy * R, fz * R);
+      sliver.position.set(fx * halfWTop, fy * troughLen, fz * R);
       sliver.rotation.set(0.4, 0.7, fx);
       sliver.castShadow = true;
       sliver.receiveShadow = true;
-      head.add(sliver);
+      troughPivot.add(sliver);
       this.fillings.push(sliver);
       this.fillingBaseRotZ.push(sliver.rotation.z);
     }
 
-    // ── Face pod ─────────────────────────────────────────────────────────────
-    // A second, smaller fold of shell fused onto the front wall's right edge — well
-    // embedded (its centre sits inside the wall's own footprint), with roughly a third
-    // of its volume protruding, so the landmark is unmistakably attached rather than
-    // literally floating, while still reading as its own lobe living outside the main
-    // shell surface. Parented under the front wall so it inherits the fold's tilt.
-    const podR = R * 0.4;
-    const podCenter = new THREE.Vector3(R * 0.55, R * 0.18, R * 0.08);
-    const pod = new THREE.Mesh(new THREE.SphereGeometry(podR, 20, 16), podMat);
-    pod.name = 'taco_face_pod';
-    pod.scale.set(1, 1.04, 0.92);
-    pod.position.copy(podCenter);
-    pod.castShadow = true;
-    pod.receiveShadow = true;
-    frontMesh.add(pod);
+    // ── Face: ON THE SHELL, not beside it ────────────────────────────────────
+    // The brief's 2D note ("the face floats outside the shell to the side") was
+    // implemented literally as a separate sphere fused to the shell's right
+    // edge. Rendered, that is not a quirk, it is a SECOND HEAD: a smooth pale
+    // ball with two eyes and a grin, sitting next to a large brown mass, which
+    // the eye reads as the character and the shell as scenery it is carrying.
+    // Nothing about "taco" survived that read.
+    //
+    // The face goes where a character's face goes — front and centre on the
+    // biggest surface it owns, which after the lean fix above is the front wall
+    // and is now lit. The wall's slight backward tilt aims the face up toward a
+    // camera pitched 58 degrees down, so it presents MORE area than a vertical
+    // face would, not less. A soft cheek pad keeps the features from sitting on
+    // a dead-flat plane.
+    // Sits low, in the BOWL of the U, where the wall is solid. The rim above it
+    // now dips toward the centre, so a face placed any higher would run out of
+    // wall in the middle of its own forehead.
+    const faceY = yBot + (frontTopY - yBot) * 0.34;
+    const faceZ = panelThickness / 2;
 
-    // A few small crimp teeth along the pod's upper-outer rim, echoing the main
-    // shell's zigzag in miniature — without these the pod read as a plain ball
-    // stuck to the character rather than another fold of the same toasted shell.
-    // A cone's origin is its geometric CENTRE (half the height either side), so to
-    // get a tip that actually pokes past the sphere surface the object must be
-    // centred AT that surface (radius podR), not pulled inward — the first attempt
-    // put the centre at 0.82*podR, which left the tip at just 0.97*podR: fully
-    // swallowed by the sphere and invisible.
-    const toothGeo = new THREE.ConeGeometry(podR * 0.14, podR * 0.34, 4);
-    for (let i = 0; i < 4; i++) {
-      const a = -0.55 + i * 0.42; // sweeps the upper-outer quarter, toward +X/+Z
-      const dir = new THREE.Vector3(Math.sin(a) * 0.9, 0.62, Math.cos(a) * 0.55 + 0.35).normalize();
-      const tooth = new THREE.Mesh(toothGeo, shellDarkMat);
-      tooth.name = 'taco_pod_crimp';
-      tooth.position.copy(dir).multiplyScalar(podR * 1.0);
-      tooth.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-      tooth.castShadow = true;
-      pod.add(tooth);
-    }
+    // Cheek pad: a shallow lens of slightly lighter shell proud of the wall, so
+    // the face area has its own soft form under the features instead of reading
+    // as decals on a flat card.
+    // Domed harder than the first pass (0.20 → 0.34). A critic reading the flat
+    // version said the face "looks like a decal rather than a head — no brow,
+    // cheek or jaw form under it", which is what a 0.20 lens on a flat panel
+    // gives you: features with correct depth sitting on nothing.
+    const PAD_R = R * 0.58;
+    const PAD = { sx: 1.28, sy: 0.66, sz: 0.26 };
+    const cheek = new THREE.Mesh(new THREE.SphereGeometry(PAD_R, 20, 16), podMat);
+    cheek.name = 'taco_face_pad';
+    cheek.scale.set(PAD.sx, PAD.sy, PAD.sz);
+    cheek.position.set(0, faceY, faceZ - R * 0.02);
+    cheek.castShadow = true;
+    cheek.receiveShadow = true;
+    frontMesh.add(cheek);
 
     // `face` normally rides the head's own front surface; nothing in the rig's
     // per-frame animate() ever touches its transform, so re-parenting it onto the
-    // front wall (it inherits the tilt) and re-anchoring it onto the pod is safe, and
-    // keeps every feature below in simple pod-local coordinates.
+    // front wall (it inherits the fold's tilt) is safe and keeps every feature
+    // below in simple wall-local coordinates.
     frontMesh.add(this.rig.joints.face);
-    this.rig.joints.face.position.copy(podCenter);
-    this.buildFace(podR);
+    this.rig.joints.face.position.set(0, faceY, faceZ + R * 0.10);
+    this.buildFace(PAD_R, { ...PAD, originZ: -R * 0.12 });
 
     // ── Torso: a second, smaller shell fold, not the rig's bare default ball ──
     // Taco never authored a torso, so it was rendering the shared rig's plain
@@ -386,10 +522,9 @@ export class TacoCharacter extends BaseCharacter {
     this.rig.dressTorso((size) => {
       const group = new THREE.Group();
       group.name = 'taco_torso_fold';
-      const halfWBotT = size.w * 0.16;
-      const halfWTopT = size.w * 0.50;
-      const toothHT = size.h * 0.10;
-      const shapeT = tacoShellShape(halfWBotT, halfWTopT, 0, size.h * 0.82, 6, toothHT);
+      const halfWTopT = size.w * 0.52;
+      const toothHT = size.h * 0.05;
+      const shapeT = tacoShellShape(halfWTopT, 0, size.h * 0.82, 0.24, toothHT);
       const thicknessT = size.d * 0.85;
       const geoT = new THREE.ExtrudeGeometry(shapeT, { depth: thicknessT, bevelEnabled: false, curveSegments: 1 });
       geoT.translate(0, 0, -thicknessT / 2);
@@ -409,12 +544,22 @@ export class TacoCharacter extends BaseCharacter {
       // dangling off its low end is the small worn detail underneath it.
       const sashColors = ['#C1432B', '#F5EAD6', '#2E8C86', '#C1432B', '#F5EAD6', '#2E8C86', '#C1432B']
         .map((c) => toonMat({ color: c, roughness: 0.72 }));
-      const sashA = new THREE.Vector3(-halfWTopT * 0.85, size.h * 0.92, thicknessT * 0.56);
-      const sashB = new THREE.Vector3(halfWTopT * 0.68, size.h * 0.02, thicknessT * 0.56);
+      // Endpoints pulled in from 0.85/0.68 and lifted off the hip line: with the
+      // band's own width added perpendicular to its run, the old anchors put both
+      // ends outside the torso silhouette and the low end down among the thighs,
+      // so the sash read as a separate object slung over the character rather
+      // than as cloth lying on it.
+      const sashA = new THREE.Vector3(-halfWTopT * 0.66, size.h * 0.90, thicknessT * 0.56);
+      const sashB = new THREE.Vector3(halfWTopT * 0.52, size.h * 0.16, thicknessT * 0.56);
       const sashDir = sashB.clone().sub(sashA);
       const sashLen = sashDir.length();
       sashDir.normalize();
-      const sashWidth = size.w * 0.30;
+      // Narrowed from 0.30w. At that width the seven-stripe band was wider than
+      // the torso is deep and ran the full diagonal of the body, so the serape
+      // — an accessory — was the single largest block of colour on the
+      // character and covered the shell fold it is supposed to decorate. A sash
+      // reads as a sash because it is NARROW against what it crosses.
+      const sashWidth = size.w * 0.19;
       const sashQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), sashDir);
       const segCount = 7;
       const segLen = (sashLen / segCount) * 1.18; // slight overlap so segments read as one continuous band
@@ -517,11 +662,17 @@ export class TacoCharacter extends BaseCharacter {
           return g;
         }
         case 'footL': case 'footR': {
+          // Was a `radius*2.2 x len*0.85 x radius*2.6` slab hung at -len*0.5:
+          // 0.45 m across and 0.54 m deep on a 2.1 m character, with its
+          // underside 0.21 m BELOW y=0. Two separate defects in one mesh — it
+          // read as a house brick rather than a foot, and it broke the "feet at
+          // y=0" convention harder than anything else in this cohort (which also
+          // inflated every measured height for this character by that 0.21 m).
           const foot = new THREE.Mesh(
-            roundedBox(size.radius * 2.2, size.len * 0.85, size.radius * 2.6, size.radius * 0.22, 3),
+            roundedBox(size.radius * 1.85, size.len * 0.55, size.radius * 2.15, size.radius * 0.30, 3),
             limbShellDarkMat
           );
-          foot.position.set(0, -size.len * 0.5, size.radius * 0.55);
+          foot.position.set(0, -size.len * 0.26, size.radius * 0.5);
           foot.name = `${part}_mesh`;
           foot.castShadow = true;
           foot.receiveShadow = true;
@@ -542,11 +693,26 @@ export class TacoCharacter extends BaseCharacter {
    * personality that matches a taco throwing filling and onion bombs. Built as real
    * shaded geometry with depth, not flat decals, per the relaxed face convention.
    */
-  private buildFace(podR: number): void {
+  private buildFace(F: number, pad: { sx: number; sy: number; sz: number; originZ: number }): void {
     const face = this.rig.joints.face;
     const ink = PALETTE.ink;
     const eyeMat = toonMat({ color: ink, roughness: 0.25 });
     const browMat = toonMat({ color: SHELL_DARK, roughness: 0.7 });
+
+    /**
+     * Z of the cheek pad's front surface directly in front of (x, y), in
+     * `face`-local space. Every feature is placed against this rather than
+     * against a guessed constant — the same discipline the shell's own crimp
+     * and the sprinkles on `donut.ts` use. Guessing this offset is what buried
+     * a brow inside the old face pod and left the sesame seeds on
+     * `hamburger.ts` floating, twice.
+     */
+    const padZ = (x: number, y: number, proud: number): number => {
+      const u = x / (F * pad.sx);
+      const v = y / (F * pad.sy);
+      const d = Math.sqrt(Math.max(0, 1 - u * u - v * v));
+      return pad.originZ + F * pad.sz * d + proud;
+    };
 
     // Round 2 defect: at offset 0.4*podR with radii up to 0.46*podR each, the two eyes'
     // combined radius (0.84*podR) exceeded their 0.8*podR separation and they visually
@@ -560,34 +726,38 @@ export class TacoCharacter extends BaseCharacter {
     // only) carries the "mischievous, about to throw something spicy" asymmetry
     // instead, and a raised brow is unambiguous in a way a slightly smaller pupil
     // is not.
-    const eyeSize = 0.33;
+    const eyeSize = 0.27;
     for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(podR * eyeSize, 16, 14), eyeMat);
-      eye.position.set(sx * podR * 0.52, podR * 0.14, podR * 0.68);
-      eye.scale.set(1, 1.2, 0.6);
+      const ex = sx * F * 0.44;
+      const ey = F * 0.08;
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(F * eyeSize, 16, 14), eyeMat);
+      eye.position.set(ex, ey, padZ(ex, ey, -F * 0.06));
+      eye.scale.set(1, 1.2, 0.55);
       eye.castShadow = true;
       face.add(eye);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(podR * 0.11, 10, 8), flatMat('#ffffff'));
-      glint.position.set(sx * podR * 0.52 - podR * 0.08, podR * 0.24, podR * 0.82);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(F * 0.10, 10, 8), flatMat('#ffffff'));
+      glint.position.set(ex - sx * F * 0.09, ey + F * 0.13, padZ(ex, ey, F * 0.06));
       glint.userData.noOutline = true;
       face.add(glint);
     }
 
     // One eyebrow cocked up over the left eye — a mischievous, "about to throw
-    // something spicy" look. Round 2 defect: placed at a z-depth (0.68*podR) shallower
-    // than the pod sphere's own surface at that (x,y) (~0.76*podR), so it was buried
-    // almost entirely inside the pod and invisible. Pushed out just proud of the true
-    // surface instead of a flat guessed offset.
-    const browX = -podR * 0.52;
-    const browY = podR * 0.42;
-    const browSurfaceZ = podR * Math.sqrt(Math.max(0, 1 - (browX / podR) ** 2 - (browY / podR) ** 2));
+    // something spicy" look.
+    //
+    // Thinner and much closer to the eye than the first pass. Two fat brown
+    // ovals sitting high and wide on a round pale pad do not read as brows at
+    // all: they read as EARS, and the whole face came back as a teddy bear
+    // rather than a taco. A brow reads as a brow by being a thin stroke that
+    // nearly touches the eye it belongs to.
+    const browX = -F * 0.44;
+    const browY = F * 0.40;
     const brow = new THREE.Mesh(
-      new THREE.CapsuleGeometry(podR * 0.055, podR * 0.3, 4, 8),
+      new THREE.CapsuleGeometry(F * 0.036, F * 0.32, 4, 8),
       browMat
     );
     brow.name = 'brow';
-    brow.position.set(browX, browY, browSurfaceZ + podR * 0.05);
+    brow.position.set(browX, browY, padZ(browX, browY, F * 0.04));
     brow.rotation.z = Math.PI / 2 + 0.35;
     brow.castShadow = true;
     face.add(brow);
@@ -597,25 +767,26 @@ export class TacoCharacter extends BaseCharacter {
     // the cast as reading "unfinished" rather than deliberate; this eye now has a real
     // brow too, it's just NOT the one doing the acting, so the mischievous raise above
     // stays unambiguous instead of reading as two brows that happen to differ.
-    const browX2 = podR * 0.52;
-    const browY2 = podR * 0.30;
-    const browSurfaceZ2 = podR * Math.sqrt(Math.max(0, 1 - (browX2 / podR) ** 2 - (browY2 / podR) ** 2));
+    const browX2 = F * 0.44;
+    const browY2 = F * 0.31;
     const brow2 = new THREE.Mesh(
-      new THREE.CapsuleGeometry(podR * 0.05, podR * 0.28, 4, 8),
+      new THREE.CapsuleGeometry(F * 0.032, F * 0.30, 4, 8),
       browMat
     );
     brow2.name = 'brow';
-    brow2.position.set(browX2, browY2, browSurfaceZ2 + podR * 0.05);
+    brow2.position.set(browX2, browY2, padZ(browX2, browY2, F * 0.04));
     brow2.rotation.z = Math.PI / 2 - 0.06;
     brow2.castShadow = true;
     face.add(brow2);
 
     // Crooked, wide-open grin.
+    const smileX = F * 0.04;
+    const smileY = -F * 0.40;
     const smile = new THREE.Mesh(
-      new THREE.TorusGeometry(podR * 0.42, podR * 0.09, 8, 20, Math.PI * 0.8),
+      new THREE.TorusGeometry(F * 0.40, F * 0.085, 8, 20, Math.PI * 0.8),
       toonMat({ color: ink, roughness: 0.3 })
     );
-    smile.position.set(podR * 0.04, -podR * 0.42, podR * 0.6);
+    smile.position.set(smileX, smileY, padZ(smileX, smileY - F * 0.20, F * 0.02));
     smile.rotation.set(0, 0, Math.PI * 1.08);
     smile.castShadow = true;
     face.add(smile);

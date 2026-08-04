@@ -60,6 +60,16 @@ import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox, RAMP_CHARACTER, 
 import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
 
+/**
+ * Limb-only toasted-crust tones, a genuine value step below the bun.
+ *
+ * Kept out of `PALETTE` on purpose: this is a per-character separation between
+ * the FOOD MASS and the BODY carrying it, not a shared ingredient colour. See
+ * the palette block in the constructor for the defect that forced it.
+ */
+const LIMB_TOAST = '#B26E2A';
+const LIMB_TOAST_DARK = '#8E5320';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Local geometry helpers — chunky rounded discs the shared kit doesn't provide.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -240,7 +250,15 @@ export class HamburgerCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: PALETTE.bun,      // stubby bun-coloured arms, per the original design
+        // ── The limbs are NOT bun-coloured any more ─────────────────────────
+        // `PALETTE.bun` and `PALETTE.bunDark` are #E8A33D and #D98E3D — 6% apart
+        // in value and identical in hue — and they were on the arms, the legs,
+        // the torso AND the crown. A blind critic's read was that "from the neck
+        // down it's one undifferentiated orange mass": true, because it was
+        // literally one colour. A deeper toasted-crust tone drops the limbs a
+        // real value step below the food mass so the burger stack is what the
+        // eye picks up first, which is the whole job of a chibi body.
+        limb: LIMB_TOAST,
         hand: PALETTE.cream,    // cream mitts
         foot: PALETTE.pattyDark, // dark little feet
         torso: PALETTE.bunDark,  // fallback only — dressTorso() replaces this mesh below
@@ -298,17 +316,38 @@ export class HamburgerCharacter extends BaseCharacter {
     // dark plastic reads as "tool", sells Patty Smash as an ability, and gives the
     // silhouette a landmark nothing else in a roster of round food blobs would have.
     const spatulaHandleMat = toonMat({ color: '#3B2A22', roughness: 0.55 });
-    const spatulaBladeMat = toonMat({ color: '#CDD3DC', roughness: 0.28, metalness: 0.55 });
-    const spatulaSlotMat = toonMat({ color: '#4A5058', roughness: 0.4, metalness: 0.3 });
+    // Metalness was 0.55 and the blade rendered as a near-BLACK wedge in every
+    // shot — a metal with no strong environment reflection has almost no diffuse
+    // term left to light, so the one prop that is supposed to be the roster's
+    // silhouette landmark read as an axe head cut out of the sky. This is the
+    // "rendering but invisible" failure in its dark-on-light costume. Steel is
+    // now carried by a bright albedo and a tight specular, not by metalness.
+    const spatulaBladeMat = toonMat({ color: '#E9EEF5', roughness: 0.3, metalness: 0.06 });
+    const spatulaSlotMat = toonMat({ color: '#8F98A4', roughness: 0.45, metalness: 0 });
     // Apron — the costume layer. A second independent art-director pass named the
     // complete absence of any costume/accessory layer as the cast's top remaining
     // gap: personality was coming entirely from the food mass, with nothing worn.
     // A bib apron is the single most legible costume for a short-order cook — hard
     // straight edges and a real pocket break the bottom bun's round silhouette,
     // and it reads instantly even at gameplay distance.
-    const apronMat = toonMat({ color: '#D2453A', roughness: 0.78 });
-    const apronTrimMat = toonMat({ color: '#FFF8EE', roughness: 0.7 });
-    const apronPocketMat = toonMat({ color: '#B9382E', roughness: 0.78 });
+    //
+    // ── The apron was RED, and red is already a burger layer ─────────────────
+    // At #D2453A it sat within a few units of `PALETTE.tomato` (#E63946), so the
+    // tomato slice and the apron fused into one continuous red cylinder running
+    // from the lettuce down to the shoes — and because the apron is the widest
+    // thing on the model it also hid the bottom bun completely. Rendered, the
+    // character read as "a bun balanced on a red barrel", i.e. a burger with no
+    // bottom half at all. Colliding a costume colour with a FOOD colour costs
+    // more than the costume buys.
+    //
+    // Cream body with a deep-red hem/tie keeps the cook read (it is still
+    // unmistakably an apron), moves the garment a full value step AWAY from
+    // every bun/patty/tomato tone instead of into one, and the narrower, shorter
+    // panel below now leaves the toasted bottom bun visible at both sides and
+    // underneath — so the stack reads as a whole burger again.
+    const apronMat = toonMat({ color: '#FFF3DE', roughness: 0.8 });
+    const apronTrimMat = toonMat({ color: '#B5342B', roughness: 0.72 });
+    const apronPocketMat = toonMat({ color: '#B5342B', roughness: 0.78 });
 
     // ── Vertical layout ──────────────────────────────────────────────────────
     // See the file-level comment for the full derivation. BASE_Y anchors the
@@ -345,12 +384,27 @@ export class HamburgerCharacter extends BaseCharacter {
     const LETTUCE_H = R * 0.2872;
     const CROWN_H = R * 0.8205;
 
+    // ── Radii carry the SILHOUETTE, and they were all within 20% of each other ─
+    // Rendered as pure black, this character was a featureless column: crown
+    // 0.66R, cheese 0.72R, frill 0.74R and the bottom bun below them all landed
+    // inside a 12% band, so the six-layer stack that is the entire point of a
+    // burger contributed nothing to the outline. It was the only one of these
+    // five whose silhouette a viewer could not name.
+    //
+    // A burger reads from its STEP PROFILE: a broad domed crown overhanging a
+    // narrower patty, with the lettuce frill flaring out past both. Those three
+    // now span 0.60R to 0.88R, which puts real scallops on the edge, and the
+    // wider crown also buys a ~20% bigger face (`faceScale` is derived from
+    // `CROWN_BASE_R`) at a framing where the face is a few dozen pixels.
     const PATTY_R = R * 0.60;
-    const CHEESE_R = R * 0.72;
-    const TOMATO_R = R * 0.64;
-    const LETTUCE_BASE_R = R * 0.54;
-    const LETTUCE_FRILL_R = R * 0.74;
-    const CROWN_BASE_R = R * 0.66;
+    const CHEESE_R = R * 0.74;
+    const TOMATO_R = R * 0.63;
+    const LETTUCE_BASE_R = R * 0.56;
+    // The frill must stay INSIDE the crown's own radius at mouth height
+    // (~0.81R, see `crownSurface` at hFrac 0.25) or a leaf sits in front of the
+    // face. 0.78R is the largest flare that clears it.
+    const LETTUCE_FRILL_R = R * 0.78;
+    const CROWN_BASE_R = R * 0.82;
 
     const pattyY = BASE_Y;
     const cheeseY = pattyY + PATTY_H;
@@ -451,17 +505,49 @@ export class HamburgerCharacter extends BaseCharacter {
     lettuceBase.receiveShadow = true;
     head.add(lettuceBase);
 
-    const frillCount = 16;
-    const frillCenterY = lettuceY + LETTUCE_H * 0.62;
-    const frillR = 0.1 * (LETTUCE_FRILL_R / 0.68);
+    // ── Ruffled leaves, NOT a ring of identical peas ─────────────────────────
+    // A blind critic reading this character named its worst defect as an
+    // unintended SECOND FACE: the bun carries the real one, and directly below
+    // it the layer band drew another dark horizontal smile-shape at the same
+    // scale, so the eye kept landing on the wrong one. The mechanism was this
+    // loop — sixteen equal blobs at one radius and one height traced a perfectly
+    // even horizontal line all the way round the model, and an even horizontal
+    // line under a face is a mouth.
+    //
+    // Nine leaves of deliberately unequal size, radius and height break that
+    // line into a ruffle. Irregularity is doing real work here, not decoration:
+    // the defect was the REGULARITY.
+    //
+    // Sized carefully: a first attempt at this went to 0.15 base radius on a
+    // 0.88R ring and the leaves came out as 0.34 m green boulders standing
+    // FURTHER forward than the crown's own face surface — so one of them parked
+    // itself directly over the mouth. Breaking up a false mouth is worthless if
+    // the fix hides the real one. The band now sits inside the face's radius by
+    // construction (see `LETTUCE_FRILL_R` above, held below the crown's radius
+    // at mouth height) and the leaves are back to a believable leaf size.
+    const frillCount = 12;
+    const frillCenterY = lettuceY + LETTUCE_H * 0.52;
+    const frillR = 0.088 * (LETTUCE_FRILL_R / 0.68);
     for (let i = 0; i < frillCount; i++) {
-      const a = (i / frillCount) * Math.PI * 2;
-      const wobble = ((i % 3) * 0.025 - 0.025) * (LETTUCE_FRILL_R / 0.68);
-      const frill = new THREE.Mesh(new THREE.SphereGeometry(frillR, 8, 8), i % 2 === 0 ? lettuceMatA : lettuceMatB);
+      const a = (i / frillCount) * Math.PI * 2 + 0.35;
+      // Deterministic but incommensurate jitter, so no two neighbours match and
+      // the pattern never resolves into a repeat.
+      // Jitter bands are tight on purpose. At ±0.12 of the ring radius the
+      // outermost leaves lost contact with the band behind them and read as
+      // peas floating in mid-air next to the burger — irregularity has to stay
+      // inside the shape it is varying.
+      const sizeJ = 0.78 + 0.42 * Math.abs(Math.sin(i * 2.399));
+      const radJ = 0.95 + 0.09 * Math.abs(Math.cos(i * 1.71));
+      const yJ = (Math.sin(i * 3.13) * 0.5 + Math.sin(i * 1.09) * 0.5) * LETTUCE_H * 0.26;
+      const frill = new THREE.Mesh(new THREE.SphereGeometry(frillR * sizeJ, 10, 8), i % 2 === 0 ? lettuceMatA : lettuceMatB);
       frill.name = 'lettuce_frill';
-      frill.position.set(Math.cos(a) * LETTUCE_FRILL_R, frillCenterY + wobble, Math.sin(a) * LETTUCE_FRILL_R);
-      frill.scale.set(1, 0.5, 0.85);
-      frill.rotation.y = a;
+      frill.position.set(
+        Math.cos(a) * LETTUCE_FRILL_R * radJ,
+        frillCenterY + yJ,
+        Math.sin(a) * LETTUCE_FRILL_R * radJ
+      );
+      frill.scale.set(1, 0.62, 0.8);
+      frill.rotation.set(Math.sin(i * 2.11) * 0.35, a, Math.cos(i * 1.87) * 0.30);
       frill.castShadow = true;
       frill.receiveShadow = true;
       head.add(frill);
@@ -582,7 +668,9 @@ export class HamburgerCharacter extends BaseCharacter {
     this.rig.dressTorso((size) => {
       const group = new THREE.Group();
       group.name = 'bottom_bun';
-      const bunR = size.w * 0.58;
+      // Narrower than the crown above it, so the stack steps IN at the waist and
+      // back OUT at the bottom bun instead of running straight down.
+      const bunR = size.w * 0.53;
       const bunH = size.h * 1.02;
       const bottomBun = new THREE.Mesh(roundedPuck(bunR, bunH, bunR * 0.28), bunDarkMat);
       bottomBun.name = 'bottom_bun_mesh';
@@ -592,10 +680,14 @@ export class HamburgerCharacter extends BaseCharacter {
       group.add(bottomBun);
 
       // ── Apron: the costume layer ─────────────────────────────────────────
+      // Narrower and shorter than the first pass: the bib now covers the front
+      // of the bun instead of wrapping most of its circumference, so the bun's
+      // own gold reads at both sides and along the bottom and the burger keeps
+      // its lowest layer.
       const apronR = bunR * 1.05;
-      const apronArc = Math.PI * 0.62;
-      const apronH = bunH * 0.92;
-      const apronY = size.h * 0.02 - bunH * 0.06;
+      const apronArc = Math.PI * 0.50;
+      const apronH = bunH * 0.70;
+      const apronY = size.h * 0.02 + bunH * 0.06;
       const apron = new THREE.Mesh(curvedPanel(apronR, apronArc, apronH), apronMat);
       apron.name = 'apron_bib';
       apron.position.y = apronY;
@@ -639,13 +731,13 @@ export class HamburgerCharacter extends BaseCharacter {
       // of the bib itself (visible from the back/side yaw angles too).
       const tieTheta = -apronArc * 0.62;
       const tieBase = new THREE.Vector3(Math.sin(tieTheta) * apronR * 1.03, apronY - apronH * 0.2, Math.cos(tieTheta) * apronR * 1.03);
-      const tieKnot = new THREE.Mesh(new THREE.SphereGeometry(apronR * 0.13, 10, 8), apronMat);
+      const tieKnot = new THREE.Mesh(new THREE.SphereGeometry(apronR * 0.13, 10, 8), apronTrimMat);
       tieKnot.name = 'apron_tie_knot';
       tieKnot.position.copy(tieBase);
       tieKnot.castShadow = true;
       group.add(tieKnot);
       for (const sx of [-1, 1] as const) {
-        const loop = new THREE.Mesh(new THREE.CapsuleGeometry(apronR * 0.06, apronR * 0.24, 4, 8), apronMat);
+        const loop = new THREE.Mesh(new THREE.CapsuleGeometry(apronR * 0.06, apronR * 0.24, 4, 8), apronTrimMat);
         loop.name = 'apron_tie_loop';
         loop.position.copy(tieBase);
         loop.position.x += sx * apronR * 0.15;
@@ -673,12 +765,14 @@ export class HamburgerCharacter extends BaseCharacter {
     // mesh below, same technique as the crown's) are what finish selling the shape.
     const mittMat = toonMat({ color: PALETTE.bun, roughness: 0.68 });
     const mittSeedMat = toonMat({ color: PALETTE.cream, roughness: 0.75 });
+    const limbMat = toonMat({ color: LIMB_TOAST, ramp: RAMP_CHARACTER(), roughness: 0.85 });
+    const limbDarkMat = toonMat({ color: LIMB_TOAST_DARK, ramp: RAMP_CHARACTER(), roughness: 0.85 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {
         case 'upperArmL': case 'upperArmR':
         case 'thighL': case 'thighR': {
           const geo = taperedSegment(size.len, size.radius * 1.2, size.radius * 0.84, 10);
-          const m = new THREE.Mesh(geo, bunMat);
+          const m = new THREE.Mesh(geo, limbMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -687,7 +781,7 @@ export class HamburgerCharacter extends BaseCharacter {
         case 'forearmL': case 'forearmR':
         case 'shinL': case 'shinR': {
           const geo = taperedSegment(size.len, size.radius * 0.84, size.radius * 0.64, 10);
-          const m = new THREE.Mesh(geo, bunDarkMat);
+          const m = new THREE.Mesh(geo, limbDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -778,8 +872,13 @@ export class HamburgerCharacter extends BaseCharacter {
     // silhouette instead of edge-on sliver at the default viewing angle.
     const spatula = new THREE.Group();
     spatula.name = 'spatula';
-    spatula.position.set(0.06, -0.02, 0.08);
-    spatula.rotation.set(-0.3, 0.2, -0.25);
+    // Held more UPRIGHT than the first pass. Angled out at -0.25 about Z the
+    // blade swung across to the character's side and read — a critic's word —
+    // as "a giant cleaver", because a broad flat head cantilevered sideways off
+    // a short handle is a cleaver's silhouette, not a turner's. Standing it up
+    // puts the handle visibly in the fist with the blade above it.
+    spatula.position.set(0.06, -0.02, 0.10);
+    spatula.rotation.set(-0.42, 0.26, -0.05);
     this.rig.joints.handR.add(spatula);
 
     const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.46, 4, 8), spatulaHandleMat);

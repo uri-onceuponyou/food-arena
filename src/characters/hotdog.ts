@@ -41,9 +41,18 @@ const CYBER = RARITY_COLORS.Cyber; // '#00E5B0'
 const HOLSTER_LEATHER = '#6B4226';
 const HOLSTER_TRIM = '#4A2E1A';
 const HOLSTER_BUCKLE = '#C9A227';
-const BANDANA = '#3E6B8A';      // cool contrast neckerchief — a fresh hue against the warm bun/meat palette
-const BANDANA_TRIM = '#2A4C63';
+const BANDANA_TRIM = '#2A4C63'; // the one cool accent on an otherwise all-warm body
 const GRILL_MARK = '#7A4A1E';   // toasted griddle stripes on the bun
+/**
+ * Limb-only tones. Every limb, hand, boot AND the torso used to be exactly
+ * `PALETTE.bun` — the same colour as the head's own bun — so the whole figure
+ * below the neck was one flat orange column with no joints and no separation
+ * from the food mass. These lean toward the sausage's own red rather than
+ * repeating the neutral toasted tan `hamburger.ts` uses, so the two warm-bodied
+ * characters in this cohort do not converge on one limb colour a third time.
+ */
+const LIMB_BUN = '#BE7040';
+const LIMB_BUN_DARK = '#96522C';
 
 /** Tapered limb: a flat cap at the joint origin (plugs flush, no gap) taper to a
  * rounded tip — the bun's own matte roughness, no capsule uniformity. */
@@ -174,9 +183,9 @@ export class HotDogCharacter extends BaseCharacter {
     // CHARACTER_HEIGHT instead of the model coming in visibly short.
     this.rig = new ChibiRig({
       palette: {
-        limb: PALETTE.bun,
+        limb: LIMB_BUN,
         hand: PALETTE.sausage,
-        foot: PALETTE.bunDark,
+        foot: LIMB_BUN_DARK,
         torso: PALETTE.bun,
         limbRoughness: 0.8,
       },
@@ -210,10 +219,16 @@ export class HotDogCharacter extends BaseCharacter {
       // drooping low, head lolling to the side. Distinct from every other
       // character's stance in this file's own cast slice: the only one with a
       // real forward slump and asymmetric shoulder droop.
+      // `headTilt` was 0.24 rad — 14 degrees on a food mass that is nearly TWICE
+      // as wide as it is tall, so the tilt showed up as the whole sausage sliding
+      // off one side of the body and read as drunk rather than sleepy. A wide
+      // horizontal mass needs a much smaller angle than a round one to express
+      // the same amount of attitude; the slouch is carried by `lean` and the
+      // dropped shoulder instead, where it costs the silhouette nothing.
       stance: {
         shoulderL: 0.10, shoulderR: -0.38,
         elbowL: -0.12, elbowR: -0.58,
-        twist: 0.22, headTilt: 0.24, headTurn: -0.10,
+        twist: 0.22, headTilt: 0.05, headTurn: -0.10,
         hipSway: 0.09, lean: 0.16,
       },
     });
@@ -226,34 +241,109 @@ export class HotDogCharacter extends BaseCharacter {
     // heads" the art director scored the cast 4/10 for. A split bun roll carries the
     // head's own language down through the body: two lobes with a mustard seam
     // between them, so the food identity runs the full height of the figure.
+    //
+    // ── Round 1 rebuild: two fat tan capsules read as BUTTOCKS ───────────────
+    // The first split-bun torso used two capsules of radius 0.34w whose combined
+    // span (0.62m) was wider than the torso is tall, in exactly the same
+    // `PALETTE.bun` tan as every limb, hand and boot on the model. Rendered, the
+    // lower two thirds of this character was one continuous unbroken tan mass
+    // and the two smooth rounded lobes read unmistakably as a bare backside.
+    // The head carries ALL of the red-and-yellow that makes a hot dog a hot dog;
+    // the body carried none of it.
+    //
+    // The fix is the same one the head already uses: put a SAUSAGE in the bun.
+    // Narrower lobes, and a glossy red sausage standing proud in the split with
+    // its own mustard zigzag down the front. The torso now states the character's
+    // identity in its own right, and the vertical red stripe breaks the tan
+    // column in both hue and value at the widest part of the silhouette.
     this.rig.dressTorso((size) => {
       const g = new THREE.Group();
       g.name = 'hotdog_torso';
 
       const bunMat = toonMat({ color: PALETTE.bun, roughness: 0.85 });
-      const seamMat = toonMat({ color: PALETTE.mustard, roughness: 0.2 });
+      const bunShadeMat = toonMat({ color: PALETTE.bunDark, roughness: 0.85 });
+      const meatMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 });
+      const seamMat = glossyMat({ color: PALETTE.mustard, roughness: 0.15 });
 
+      const lobeR = size.w * 0.19;
+      const lobeLen = size.h * 0.50;
       for (const sx of [-1, 1]) {
         const lobe = new THREE.Mesh(
-          new THREE.CapsuleGeometry(size.w * 0.34, size.h * 0.62, 6, 16),
-          bunMat
+          new THREE.CapsuleGeometry(lobeR, lobeLen, 6, 16),
+          sx > 0 ? bunMat : bunShadeMat
         );
-        lobe.position.set(sx * size.w * 0.26, size.h * 0.52, 0);
-        lobe.rotation.z = sx * 0.06;
+        lobe.position.set(sx * size.w * 0.33, size.h * 0.54, -size.d * 0.06);
+        lobe.rotation.z = sx * 0.05;
+        lobe.scale.z = 0.9;
         lobe.castShadow = true;
         lobe.receiveShadow = true;
         g.add(lobe);
       }
 
-      // Mustard seam down the split, sunk between the lobes so it reads as filling
-      // rather than as a stripe painted on top.
-      const seam = new THREE.Mesh(
-        new THREE.CapsuleGeometry(size.w * 0.09, size.h * 0.5, 4, 10),
-        seamMat
-      );
-      seam.position.set(0, size.h * 0.56, size.d * 0.12);
-      seam.castShadow = true;
-      g.add(seam);
+      // The sausage itself — the whole point of the rebuild. Sits forward of the
+      // lobes so it is never swallowed by them at any yaw the game camera uses.
+      // Length and centre chosen so the sausage's LOWER cap clears the hip line.
+      // A first pass used 0.64h centred at 0.52h, which — once the capsule's own
+      // two hemispherical caps are counted — made the mesh taller than the torso
+      // itself and pushed its bottom end down to y=0, i.e. between the thighs.
+      // Total height here is `sausLen + 2*sausR` and it is kept inside `size.h`.
+      // ── Fat enough to BE the chest ───────────────────────────────────────
+      // A first pass made this a slim stripe down the middle at 0.20 of the
+      // torso width, and a blind critic looking at the result still called the
+      // body "untouched default-orange mannequin geometry in the exact same hue
+      // and value as the bun". A narrow accent does not change what a body IS.
+      // At 0.30 the sausage is the widest single form on the torso and the bun
+      // lobes become a jacket at its sides, which is the read: a hot dog whose
+      // meat runs all the way down, not a mannequin with a decal.
+      const sausR = size.w * 0.30;
+      const sausLen = size.h * 0.44;
+      const sausCY = size.h * 0.58;
+      const sausZ = size.d * 0.20;
+      const sausage = new THREE.Mesh(new THREE.CapsuleGeometry(sausR, sausLen, 6, 16), meatMat);
+      sausage.name = 'hotdog_torso_sausage';
+      sausage.position.set(0, sausCY, sausZ);
+      sausage.castShadow = true;
+      sausage.receiveShadow = true;
+      g.add(sausage);
+
+      // Mustard zigzag down the sausage's front, built the same way as the head's
+      // (segments plus joint spheres so the corners have no notch), just running
+      // vertically instead of horizontally.
+      const zzTop = sausCY + sausLen * 0.46;
+      const zzBot = sausCY - sausLen * 0.46;
+      const zzAmp = sausR * 0.52;
+      const zzThick = sausR * 0.20;
+      const N = 6;
+      const zzPts: THREE.Vector3[] = [];
+      for (let i = 0; i < N; i++) {
+        const t = i / (N - 1);
+        const sign = i === 0 || i === N - 1 ? 0 : (i % 2 === 1 ? 1 : -1);
+        const x = sign * zzAmp;
+        // Ride the sausage's circular cross-section and push out along its own
+        // surface normal, so the stripe stays proud of the meat at every vertex.
+        const zOut = Math.sqrt(Math.max(0, sausR * sausR - x * x));
+        const n = new THREE.Vector2(x / sausR, zOut / sausR);
+        zzPts.push(new THREE.Vector3(x + n.x * zzThick * 0.5, zzBot + t * (zzTop - zzBot), sausZ + zOut + n.y * zzThick * 0.5));
+      }
+      const jointGeo = new THREE.SphereGeometry(zzThick * 0.55, 8, 8);
+      for (const p of zzPts) {
+        const j = new THREE.Mesh(jointGeo, seamMat);
+        j.name = 'hotdog_torso_mustard_joint';
+        j.userData.noOutline = true;
+        j.position.copy(p);
+        g.add(j);
+      }
+      const up = new THREE.Vector3(0, 1, 0);
+      for (let i = 0; i < zzPts.length - 1; i++) {
+        const a = zzPts[i], b = zzPts[i + 1];
+        const dir = new THREE.Vector3().subVectors(b, a);
+        const seg = new THREE.Mesh(new THREE.CapsuleGeometry(zzThick * 0.5, dir.length(), 4, 8), seamMat);
+        seg.name = 'hotdog_torso_mustard_seg';
+        seg.userData.noOutline = true;
+        seg.position.copy(a).addScaledVector(dir, 0.5);
+        seg.quaternion.setFromUnitVectors(up, dir.clone().normalize());
+        g.add(seg);
+      }
 
       return g;
     });
@@ -413,26 +503,33 @@ export class HotDogCharacter extends BaseCharacter {
     face.position.z = R * 0.38;
 
     const lidMat = toonMat({ color: ink, roughness: 0.3 });
-    const eyeY = sausY + sausR * 0.34;
+    // ── The face was too SMALL for the mass carrying it ──────────────────────
+    // A blind critic described it as "a tiny face squeezed onto the lower third
+    // of the sausage". The sausage is the widest single form in this cohort —
+    // roughly 3.7R across — and the features were sized as if it were a normal
+    // head, so at the ~10.5% of frame height a player actually sees the character
+    // at, the expression was a few pixels of ink on a large red tube. Everything
+    // below is scaled up about 35% and the eyes pushed wider apart.
+    const eyeY = sausY + sausR * 0.30;
 
     for (const sx of [-1, 1]) {
-      const lid = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.026, R * 0.15, 4, 8), lidMat);
+      const lid = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.034, R * 0.20, 4, 8), lidMat);
       lid.name = 'lid';
       lid.rotation.z = Math.PI / 2; // level — a mirrored tilt read as an angry V-brow, not sleepy
-      lid.position.set(sx * R * 0.24, eyeY, R * 0.02);
+      lid.position.set(sx * R * 0.32, eyeY, R * 0.02);
       lid.castShadow = true;
       face.add(lid);
 
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.05, 10, 8), lidMat);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.068, 10, 8), lidMat);
       pupil.name = 'pupil';
-      pupil.position.set(sx * R * 0.24, eyeY - R * 0.065, -R * 0.01);
+      pupil.position.set(sx * R * 0.32, eyeY - R * 0.086, -R * 0.01);
       pupil.scale.set(1, 0.85, 0.7);
       pupil.castShadow = true;
       face.add(pupil);
 
       // Specular catchlight — cheapest trick for making even a sleepy eye feel alive.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.018, 8, 6), flatMat('#ffffff'));
-      glint.position.set(sx * R * 0.24 - R * 0.018, eyeY - R * 0.05, R * 0.025);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.024, 8, 6), flatMat('#ffffff'));
+      glint.position.set(sx * R * 0.32 - sx * R * 0.024, eyeY - R * 0.068, R * 0.03);
       glint.userData.noOutline = true;
       face.add(glint);
 
@@ -442,10 +539,10 @@ export class HotDogCharacter extends BaseCharacter {
       // as both lid and brow. A separate stroke, mustard-toned rather than ink-black
       // so it doesn't fuse into the lid below it, keeps the same level/unbothered
       // angle (no V-tilt) so the laid-back personality isn't disturbed.
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.018, R * 0.14, 4, 8), toonMat({ color: PALETTE.mustard, roughness: 0.4 }));
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.024, R * 0.19, 4, 8), toonMat({ color: PALETTE.mustard, roughness: 0.4 }));
       brow.name = 'brow';
       brow.rotation.z = Math.PI / 2;
-      brow.position.set(sx * R * 0.24, eyeY + R * 0.095, R * 0.01);
+      brow.position.set(sx * R * 0.32, eyeY + R * 0.125, R * 0.01);
       brow.castShadow = true;
       face.add(brow);
     }
@@ -453,11 +550,11 @@ export class HotDogCharacter extends BaseCharacter {
     // Small closed-lip smile — calm and symmetric-ish rather than crooked, to
     // match the "laid-back, unbothered" personality rather than a mischievous one.
     const mouth = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.14, R * 0.028, 8, 16, Math.PI * 0.68),
+      new THREE.TorusGeometry(R * 0.19, R * 0.036, 8, 16, Math.PI * 0.68),
       lidMat
     );
     mouth.name = 'mouth';
-    mouth.position.set(0, sausY - sausR * 0.02, R * 0.05);
+    mouth.position.set(0, sausY - sausR * 0.12, R * 0.05);
     mouth.rotation.z = Math.PI * 1.08;
     mouth.castShadow = true;
     face.add(mouth);
@@ -602,31 +699,24 @@ export class HotDogCharacter extends BaseCharacter {
     buckle.castShadow = true;
     this.rig.joints.torso.add(buckle);
 
-    // Bandana: a knotted triangular neckerchief at the base of the neck — the
-    // "patterned fabric panel" detail item, a cool hue breaking up the warm
-    // bun/meat/condiment palette.
-    const bandanaMat = toonMat({ color: BANDANA, roughness: 0.62 });
+    // ── The bandana is GONE, deliberately ────────────────────────────────────
+    // It was a flat, solid, downward-pointing blue triangle mounted on the front
+    // centre of an otherwise bare tan body. On a chibi with no clothing anywhere
+    // else, that shape in that place reads as UNDERWEAR — it was the first thing
+    // the eye landed on in every render, and no amount of retinting fixes a
+    // silhouette that specific. It also now sits exactly where the torso sausage
+    // and its mustard zigzag do (see `dressTorso`), which is a far stronger
+    // statement of who this character is than a neckerchief that never reached
+    // the neck. The bandolier + holster below remain as the worn costume layer.
+    //
+    // Shoulder-strap anchors below still read off the rig, never hand-mirrored.
     const bandanaTrimMat = toonMat({ color: BANDANA_TRIM, roughness: 0.55 });
-    const bTopY = torsoH * 0.96;
-    const triShape = new THREE.Shape();
-    triShape.moveTo(-shoulderWidth * 0.30, bTopY);
-    triShape.lineTo(shoulderWidth * 0.30, bTopY);
-    triShape.lineTo(0, bTopY - shoulderWidth * 0.42);
-    triShape.lineTo(-shoulderWidth * 0.30, bTopY);
-    const bandanaDepth = shoulderWidth * 0.03;
-    const bandana = new THREE.Mesh(
-      new THREE.ExtrudeGeometry(triShape, { depth: bandanaDepth, bevelEnabled: true, bevelThickness: bandanaDepth * 0.4, bevelSize: bandanaDepth * 0.4, bevelSegments: 2, curveSegments: 8 }),
-      bandanaMat
-    );
-    bandana.name = 'hotdog_bandana';
-    bandana.position.z = shoulderWidth * 0.55;
-    bandana.castShadow = true;
-    bandana.receiveShadow = true;
-    this.rig.joints.torso.add(bandana);
-
-    const knot = new THREE.Mesh(new THREE.SphereGeometry(shoulderWidth * 0.06, 10, 8), bandanaTrimMat);
-    knot.name = 'hotdog_bandana_knot';
-    knot.position.set(0, bTopY, -shoulderWidth * 0.50);
+    // A small knot of the same cool hue survives as a shoulder cord tie, behind
+    // the bandolier's upper anchor — keeps one non-warm accent on the body
+    // without putting a fabric panel on the character's crotch.
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(shoulderWidth * 0.07, 10, 8), bandanaTrimMat);
+    knot.name = 'hotdog_strap_knot';
+    knot.position.set(shoulderWidth * 0.60, torsoH * 0.78, shoulderWidth * 0.24);
     knot.castShadow = true;
     this.rig.joints.torso.add(knot);
 
@@ -682,8 +772,8 @@ export class HotDogCharacter extends BaseCharacter {
    * cast's single boldest landmark — the zigzag stripe across the sausage.
    */
   private dressLimbs(): void {
-    const bunMat = toonMat({ color: PALETTE.bun, roughness: 0.85 });
-    const bunDarkMat = toonMat({ color: PALETTE.bunDark, roughness: 0.8 });
+    const bunMat = toonMat({ color: LIMB_BUN, roughness: 0.85 });
+    const bunDarkMat = toonMat({ color: LIMB_BUN_DARK, roughness: 0.8 });
     const ketchupMat = glossyMat({ color: PALETTE.ketchup, roughness: 0.15 });
     const sausageMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 });
 
@@ -692,9 +782,13 @@ export class HotDogCharacter extends BaseCharacter {
         case 'upperArmL':
         case 'upperArmR':
           return taperedLimb(size.len, size.radius * 1.28, size.radius * 0.92, bunMat);
+        // Lower segments step DOWN a value into `bunDark`. Every limb, hand, boot
+        // and the torso were one identical `PALETTE.bun` tan, so the whole body
+        // below the head was a single unbroken flat mass with no joint reading at
+        // all — the reason it looked naked rather than simply plain.
         case 'forearmL':
         case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.90, size.radius * 0.64, bunMat);
+          return taperedLimb(size.len, size.radius * 0.90, size.radius * 0.64, bunDarkMat);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
@@ -705,7 +799,7 @@ export class HotDogCharacter extends BaseCharacter {
           return taperedLimb(size.len, size.radius * 1.18, size.radius * 0.94, bunMat);
         case 'shinL':
         case 'shinR':
-          return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.76, bunMat);
+          return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.76, bunDarkMat);
         case 'footL':
         case 'footR':
           return buildBunBoot(size.len, bunDarkMat, ketchupMat);
