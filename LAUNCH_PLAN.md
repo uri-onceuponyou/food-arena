@@ -9,31 +9,36 @@ token wall. The budget discipline in "Token management" is the part that makes t
 
 ---
 
-## ▶ START HERE — state as of 2026-08-04, Uri away ~2h
+## ▶ START HERE — paused 2026-08-04 (token limit), 93 commits, all pushed
 
-79 commits, all pushed. `tsc` clean, sim 51/51, `tools/aspect.mjs` PASS (0.00wu spread),
-live game verified by screenshot. **Waves 0 and 1.5 are DONE — do not redo them.**
+`tsc` clean, sim 51/51, working tree clean. **Waves 0 and 1.5 are DONE — do not redo.**
 
-### Landed since the plan was written
-| | evidence |
+### Landed this session
+Body archetypes · viewport fairness (199.2wu on every aspect) · weapon-range rebalance ·
+**colour grade replaced** (was destroying a fifth of every frame) · **SSAO dropped**
+(measured exactly 0.0000/255 project-wide) · raking key light (+26% modelling) ·
+**fog/safe-zone visual** (previously killed you at 50 HP/s with NO visual) · prop
+grounding un-buried · cover props readability · hazards + slow feedback · impact burst
+rescale · **menu shell + home + character select** · **the entire audio pillar from zero**
+· **Uri's theme "Bounce and Bash"** · 7 of 11 bespoke weapon VFX verified.
+
+### ⚠️ Committed but UNREVIEWED — verify before trusting (commit 93)
+Three agents were stopped mid-task. All of this typechecks and passes sim; none has been
+critiqued, and each was interrupted mid-thought.
+
+| Files | State |
 |---|---|
-| Body archetypes (4, replacing one shared body) | silhouettes now read distinctly |
-| Viewport fairness | 199.2wu guaranteed on every aspect, 0.00 spread |
-| Weapon-range rebalance | characters 8.1% → ~13% of frame, fairness kept |
-| **Colour grade replaced** | was destroying a fifth of the frame: 8/12 palette colours lost a channel, all arriving at saturation exactly 1.00. Now 0/12 clipped |
-| **SSAO dropped** | measured exactly 0.0000/255 at every framing, for the whole project |
-| **Fog / safe zone visual** | was 50 HP/s with NO renderer at all |
-| Prop grounding un-buried | contact decals 1.99 → 7.14/255 |
-| Hazard rework landed | had been a total no-op from an ownership deadlock |
-| Impact burst rescaled | was 2.25× character height; gated Wave 3 |
-| Cast decals retired + key swung to raking | barrel terminator ramp +26% |
-| Cover props | 4 → 5 → **6** → 5; heights 0.32–0.98× → 1.15–1.69× char height |
+| `vfx/weapons/{burrito,egg}` | agent was mid-sentence on an egg ground-crack |
+| `vfx/weapons/{hotdog,sushi}` | had *just started writing sushi* — assume incomplete |
+| `game/input.ts`, `ui/hud.ts` | pointer lock; its own last note was the reticle "reads but is too quiet for a busy frame" |
 
-### Running right now
-- **Arena apron** (`apron.ts`, `kitchen.ts`) — uncommitted but typechecking. Was told the
-  stale key azimuth at `apron.ts:214` needs updating to the new 16.0° (`Math.hypot(16.35,
-  4.69)`), and that raking light now rewards apron geometry with real relief far more than
-  flat planes.
+**Re-dispatch all three with verification-first briefs.** The weapon agents must check the
+two bugs that were present in FOUR of the five finished weapon files: effects spawned
+INSIDE the target (size against the HEAD at ~1.2–1.5m, not the torso; launch debris from a
+contact ring) and pooled-material state leaks (SET initial opacity, never READ it off a
+pooled material). Pointer lock must keep `tools/tmp/menu_accept.mjs` at 113/113 — it can
+break probes that drive real mouse events at absolute coordinates, and a QA escape hatch
+was part of its brief.
 
 ### Do these next, in order (Uri, 2026-08-04)
 
