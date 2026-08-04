@@ -59,6 +59,34 @@ come from.
 
 ---
 
+## SCREENS — status, and Uri's unfreeze (2026-08-04)
+
+> *"They can be unfrozen to improve quality."*
+
+The prototypes are now **reference, not specification**, for the menu screens: deviate from
+their layout and information architecture wherever it demonstrably raises quality. Same
+authorisation `rules.ts` already has. Preserve intent, not arrangement.
+
+**Built, with scores:**
+
+| screen | score | note |
+|---|---|---|
+| Home | **4/10, 4/10** | weakest thing shipped; the loop STOPPED early because two critics reversed each other, so it never converged |
+| Character select | 4–5 → **6/10** | roster cards are real 3D renders now |
+| Trophy road | 5, 5, **6/10** | reference control 7/7/7 every round, so the number is trustworthy |
+| Match screen | — | never scored on its own |
+
+**Not built at all** (all four have prototypes): **settings**, shop, skins, and the
+**opening/splash** screen.
+
+**Sequencing — icons must land first.** Emoji-as-icons is the named #1 defect on these
+exact screens, quantified by one critic at ~1 full point with no layout change. Polishing
+home before the icons land means judging it with its worst element still in place and
+re-running the round afterwards. So: icons → then home polish + settings, together.
+
+Settings is more than cosmetic — `M` mutes today with nothing announcing it exists, and
+audio, keybinds and the mobile quality tiers all currently have no home.
+
 ## SESSION 2 — mobile, and the known-weak elements
 
 **Touch input is a missing PILLAR, not a feature.** Mobile landscape is a stated target,
