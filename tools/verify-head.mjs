@@ -71,12 +71,30 @@ function walk(d, out = []) {
     if (e === 'node_modules' || e.startsWith('.')) continue;
     const p = join(d, e);
     if (statSync(p).isDirectory()) walk(p, out);
-    else if (['.ts', '.tsx', '.mjs', '.js'].includes(extname(p))) out.push(p);
+    else if (['.ts', '.tsx', '.mjs', '.js', '.html'].includes(extname(p))) out.push(p);
   }
   return out;
 }
 
 const SPEC = /(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/g;
+
+/**
+ * HTML asset references — `<script src>` and `<link href>`.
+ *
+ * Added after `tools/arena-dump.html` (COMMITTED) was found loading
+ * `/tools/arena-dump.js` (UNTRACKED). On a fresh clone that 404s, so
+ * `match-sim.mjs --refresh-arena` hangs until it times out. It is the exact
+ * failure this tool exists to catch — HEAD importing something not in HEAD —
+ * and it slipped through THREE separate gaps at once:
+ *
+ *   1. only `src/` was walked, never `tools/`
+ *   2. only `.ts/.tsx/.mjs/.js` were read, never `.html`
+ *   3. only RELATIVE specifiers matched; this one is root-absolute (`/tools/...`)
+ *
+ * External URLs and Vite's own virtual paths are skipped rather than guessed at:
+ * a lint that cries wolf gets ignored (see the note above, and LESSONS §9).
+ */
+const HTML_ASSET = /<(?:script|link)\b[^>]*?\b(?:src|href)\s*=\s*["']([^"']+)["']/gi;
 
 /**
  * Strip comments before scanning.
@@ -97,15 +115,42 @@ function stripComments(src) {
 }
 
 let missing = 0;
-for (const file of walk(join(dir, 'src'))) {
-  const src = stripComments(readFileSync(file, 'utf8'));
-  for (const [, spec] of src.matchAll(SPEC)) {
-    const base = resolve(dirname(file), spec);
-    const hit = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`,
-                 join(base, 'index.ts'), join(base, 'index.js')].some(existsSync);
-    if (!hit) {
-      fail(`${file.slice(dir.length + 1)} imports '${spec}' — NOT IN THE COMMITTED TREE`);
-      missing++;
+
+/** Resolve a specifier the way Vite would: `/x` against the root, `./x` against the file. */
+function resolveSpec(file, spec) {
+  return spec.startsWith('/') ? join(dir, spec.slice(1)) : resolve(dirname(file), spec);
+}
+function resolves(base) {
+  return [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`,
+          join(base, 'index.ts'), join(base, 'index.js')].some(existsSync);
+}
+
+// `tools/` is walked as well as `src/`: arena-dump.html lives there, and a committed
+// tool importing an untracked scratch probe out of tools/tmp/ is the same bug.
+for (const root of ['src', 'tools']) {
+  for (const file of walk(join(dir, root))) {
+    const raw = readFileSync(file, 'utf8');
+    const rel = file.slice(dir.length + 1);
+
+    if (extname(file) === '.html') {
+      for (const [, spec] of raw.matchAll(HTML_ASSET)) {
+        // Skip anything not resolvable to a file on disk at build time.
+        if (/^(?:https?:)?\/\//i.test(spec) || spec.startsWith('data:') || spec.startsWith('#')) continue;
+        if (!spec.startsWith('/') && !spec.startsWith('.')) continue; // bare/virtual — Vite's business
+        if (!resolves(resolveSpec(file, spec))) {
+          fail(`${rel} loads '${spec}' — NOT IN THE COMMITTED TREE`);
+          missing++;
+        }
+      }
+      continue;
+    }
+
+    const src = stripComments(raw);
+    for (const [, spec] of src.matchAll(SPEC)) {
+      if (!resolves(resolveSpec(file, spec))) {
+        fail(`${rel} imports '${spec}' — NOT IN THE COMMITTED TREE`);
+        missing++;
+      }
     }
   }
 }
