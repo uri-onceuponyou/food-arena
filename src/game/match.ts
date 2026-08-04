@@ -19,6 +19,7 @@ import { createFogRing, type FogRing } from '../arena/fogRing';
 import { createMatch, stepMatch } from './sim';
 import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchState } from './state';
 import { otherRole } from './state';
+import { boxesOverlap } from './movement';
 import { CHARACTER_IDS, CHARACTERS, MATCH_DURATION_MS, MIN_SAFE_RADIUS, type CharacterId, type Weapon } from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 import { InputController } from './input';
@@ -42,7 +43,52 @@ declare global {
      * shockwave, which is real but brief (and shorter still under `?simSpeed=`),
      * rather than guessing at screenshot timing. Never read by game logic. */
     __vfxDebugGiantSlamCount?: number;
+    /** QA-only mirror of the INPUT → SIM edge. See `MatchDebug`. */
+    __matchDebug?: MatchDebug;
   }
+}
+
+/**
+ * QA-only, never read by game logic — the instrument that exists because
+ * "WASD does not move the player" was reported, investigated and NOT diagnosed with
+ * nothing to look at between the DOM and the fighter's position.
+ *
+ * Every field is one link in that chain, in order, so a probe can name the broken
+ * link instead of guessing at it:
+ *
+ *   phase/paused   is the sim even stepping?
+ *   moveX/moveY    did the keyboard reach `MatchInput.move`? (non-zero here with a
+ *                  stationary fighter means the break is in the SIM, not in input —
+ *                  which is exactly what the 2026-08 report turned out to be)
+ *   attack         did the mouse reach `MatchInput.attack`?
+ *   facingX/Y      did the aim pipeline (mouse → NDC → raycast → direction) survive?
+ *   pointerLocked  which of the two cursor models is live
+ *   qaSpawnInsideCover
+ *                  a `?px=/?py=` that teleported the fighter INTO a CoverBox. There
+ *                  is no depenetration anywhere in `movement.ts` — `tryMove` tests
+ *                  the DESTINATION for overlap, and from inside a box every
+ *                  destination within one step still overlaps — so such a fighter is
+ *                  pinned for the rest of the match while input flows perfectly.
+ *
+ * Mutated in place, never reallocated: it is written every frame and this project
+ * tracks per-frame allocation (1,697 B/frame) as a number worth keeping.
+ */
+export interface MatchDebug {
+  phase: MatchState['phase'];
+  winner: FighterRole | null;
+  paused: boolean;
+  moveX: number;
+  moveY: number;
+  attack: boolean;
+  facingX: number;
+  facingY: number;
+  /** `1`-`4` / the HUD weapon bar. Zero-based, as `MatchInput.selectedWeapon`. */
+  selectedWeapon: number;
+  pointerLocked: boolean;
+  /** Description of the offending CoverBox, or null. Set once, at spawn. */
+  qaSpawnInsideCover: string | null;
+  /** Frames the loop has run. Lets a probe prove the loop is alive while paused. */
+  frames: number;
 }
 
 export interface GameSessionOptions {
@@ -155,6 +201,13 @@ export class GameSession {
   private readonly qaPlayerX = numberFromQuery('px');
   private readonly qaPlayerY = numberFromQuery('py');
 
+  /** QA mirror of the input → sim edge. Allocated once; see `MatchDebug`. */
+  private readonly debug: MatchDebug = {
+    phase: 'countdown', winner: null, paused: false,
+    moveX: 0, moveY: 0, attack: false, facingX: 0, facingY: 0, selectedWeapon: 0,
+    pointerLocked: false, qaSpawnInsideCover: null, frames: 0,
+  };
+
   // ── Hit-stop bookkeeping ──────────────────────────────────────────────────
   // On a solid hit we withhold most of this frame's (and the next few frames')
   // sim-time budget from `stepMatch`, so the simulation (and character animation,
@@ -244,6 +297,7 @@ export class GameSession {
     this.enemyModel = createCharacter(this.enemyId);
     this.spawnMatch();
 
+    window.__matchDebug = this.debug;
     window.addEventListener('resize', this.handleResize);
     this.raf = requestAnimationFrame(this.loop);
   }
@@ -292,6 +346,7 @@ export class GameSession {
   dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    if (window.__matchDebug === this.debug) delete window.__matchDebug;
     window.removeEventListener('resize', this.handleResize);
     this.pointerLock.dispose();
     this.input.dispose();
@@ -349,6 +404,7 @@ export class GameSession {
   private applyQaSetup(): void {
     if (this.qaPlayerX !== null) this.state.player.x = this.qaPlayerX;
     if (this.qaPlayerY !== null) this.state.player.y = this.qaPlayerY;
+    if (this.qaPlayerX !== null || this.qaPlayerY !== null) this.checkQaSpawn();
 
     if (this.qaFogRadius === null) return;
     const maxR = this.arena.maxSafeRadius;
@@ -364,6 +420,42 @@ export class GameSession {
     this.state.startFlashTimer = 0;
     this.state.timeRemaining = MATCH_DURATION_MS * frac;
     this.state.safeRadius = wantR;
+  }
+
+  /**
+   * `?px=/?py=` places the fighter at EXACTLY the requested point — that exactness is
+   * the whole reason the parameter exists (shooting "standing on the pot rim" or
+   * "one step inside the fog" repeatably). It is deliberately NOT nudged to a legal
+   * position here, because a QA parameter that silently moves the subject is a worse
+   * instrument than one that occasionally lands somewhere useless.
+   *
+   * But landing inside a `CoverBox` is not "useless", it is INDISTINGUISHABLE FROM
+   * BROKEN INPUT, and it cost a real investigation:
+   *
+   *   `?px=850&py=500` puts the 42 wu fighter 25 wu from the centre of the
+   *   `spice_cart` box at (875,500,50,50) — overlapping, since 25 < (42+50)/2 = 46.
+   *   `movement.ts:tryMove` tests the DESTINATION for overlap and does no
+   *   depenetration, so every ~2-6 wu step from inside still overlaps and is refused,
+   *   on both axes, forever. Measured: WASD and the arrow keys move the fighter 0.0 wu
+   *   over 2 s each, while `MatchInput.move` is a correct ±1 the whole time and the AI
+   *   walks normally. It reads exactly like "the keyboard is dead".
+   *
+   * So: say so, once, loudly, and publish it for probes. See `MatchDebug`.
+   */
+  private checkQaSpawn(): void {
+    const p = this.state.player;
+    const box = this.arena.cover.find((o) => boxesOverlap(p.x, p.y, p.size, p.size, o.x, o.y, o.w, o.h));
+    this.debug.qaSpawnInsideCover = box
+      ? `${box.kind ?? 'cover'} @(${box.x},${box.y}) ${box.w}x${box.h}`
+      : null;
+    if (box) {
+      console.warn(
+        `[QA] ?px=${p.x}&py=${p.y} places the player INSIDE cover "${box.kind ?? 'cover'}" ` +
+        `@(${box.x},${box.y}) ${box.w}x${box.h}. There is no depenetration in movement.ts, ` +
+        `so the fighter cannot move at all — input is fine, the sim is refusing every step. ` +
+        `Pick a point at least ${((p.size + Math.max(box.w, box.h)) / 2).toFixed(0)} wu from that centre.`,
+      );
+    }
   }
 
   /**
@@ -661,6 +753,22 @@ export class GameSession {
 
   private readonly handleResize = (): void => this.resize();
 
+  /** Refresh the QA mirror. Mutates one preallocated object — see `MatchDebug`. */
+  private publishDebug(moveX: number, moveY: number, attack: boolean): void {
+    const d = this.debug;
+    d.phase = this.state.phase;
+    d.winner = this.state.winner;
+    d.paused = this.isPaused;
+    d.moveX = moveX;
+    d.moveY = moveY;
+    d.attack = attack;
+    d.facingX = this.state.player.facing.x;
+    d.facingY = this.state.player.facing.y;
+    d.selectedWeapon = this.input.selectedWeapon;
+    d.pointerLocked = this.input.pointerLocked;
+    d.frames++;
+  }
+
   /** Exponential decay toward zero, used for the visual-only knockback offset.
    * Deliberately driven by `rawDtSeconds` (real/simSpeed time, NOT hit-stop-scaled)
    * so the nudge still reads as a snappy pop even while the sim is frozen. */
@@ -685,6 +793,10 @@ export class GameSession {
     // so the camera's follow lerp and shake decay hold too — a drifting camera over
     // a frozen world reads as a hitch, not as a pause.
     if (this.isPaused) {
+      // Published from inside the paused branch too, with the axes forced to zero:
+      // "the loop is alive and deliberately not stepping" and "the loop has stopped"
+      // are otherwise the same picture from outside.
+      this.publishDebug(0, 0, false);
       this.stage.render(0);
       this.raf = requestAnimationFrame(this.loop);
       return;
@@ -721,6 +833,9 @@ export class GameSession {
     // neither reads anything the other writes.
     this.audio.handleEvents(events, this.state);
     this.notifyPhase();
+    // AFTER the step, so `facing` is what `applyAim` actually committed rather than
+    // what was asked for — the aim pipeline's output, not its input.
+    this.publishDebug(input.move.x, input.move.y, input.attack === true);
 
     const playerMoved = this.state.player.x !== prevPlayer.x || this.state.player.y !== prevPlayer.y;
     const enemyMoved = this.state.enemy.x !== prevEnemy.x || this.state.enemy.y !== prevEnemy.y;
