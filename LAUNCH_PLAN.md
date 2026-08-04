@@ -9,61 +9,70 @@ token wall. The budget discipline in "Token management" is the part that makes t
 
 ---
 
-## ▶ START HERE — session limit hit 2026-08-04, resets 03:30 Asia/Jerusalem
+## ▶ START HERE — state as of 2026-08-04, Uri away ~2h
 
-Everything is committed and pushed (73 commits), tree clean, `tsc` clean, sim 51/51,
-`tools/aspect.mjs` PASS, live game verified by screenshot.
+79 commits, all pushed. `tsc` clean, sim 51/51, `tools/aspect.mjs` PASS (0.00wu spread),
+live game verified by screenshot. **Waves 0 and 1.5 are DONE — do not redo them.**
 
-**Waves 0 and 1.5 are DONE.** Do not redo them: body archetypes, viewport fairness, the
-weapon-range rebalance, the colour-grade replacement, prop-shadow un-burying, the hazard
-rework, the impact-burst rescale and the fog visual have all landed. See the scoreboard in
-`PROGRESS.md`.
+### Landed since the plan was written
+| | evidence |
+|---|---|
+| Body archetypes (4, replacing one shared body) | silhouettes now read distinctly |
+| Viewport fairness | 199.2wu guaranteed on every aspect, 0.00 spread |
+| Weapon-range rebalance | characters 8.1% → ~13% of frame, fairness kept |
+| **Colour grade replaced** | was destroying a fifth of the frame: 8/12 palette colours lost a channel, all arriving at saturation exactly 1.00. Now 0/12 clipped |
+| **SSAO dropped** | measured exactly 0.0000/255 at every framing, for the whole project |
+| **Fog / safe zone visual** | was 50 HP/s with NO renderer at all |
+| Prop grounding un-buried | contact decals 1.99 → 7.14/255 |
+| Hazard rework landed | had been a total no-op from an ownership deadlock |
+| Impact burst rescaled | was 2.25× character height; gated Wave 3 |
+| Cast decals retired + key swung to raking | barrel terminator ramp +26% |
+| Cover props | 4 → 5 → **6** → 5; heights 0.32–0.98× → 1.15–1.69× char height |
 
-### Re-dispatch these two first — cut off mid-loop, committed UNREVIEWED
-Both render correctly and pass gates, but **neither has been through a single critic
-round.** Treat every value in them as a first draft.
+### Running right now
+- **Arena apron** (`apron.ts`, `kitchen.ts`) — uncommitted but typechecking. Was told the
+  stale key azimuth at `apron.ts:214` needs updating to the new 16.0° (`Math.hypot(16.35,
+  4.69)`), and that raking light now rewards apron geometry with real relief far more than
+  flat planes.
 
-| Loop | Owns | Where it stopped |
-|---|---|---|
-| **Arena apron** | `arena/apron.ts`, `kitchen.ts` | Built the apron; killed at the exact moment it was about to run its first blind critic. On the live render it reads noticeably **COOL against the warm kitchen** — open question, not a settled choice. |
-| **Cover props** | `arena/props/*` | Finished `counters.ts` + `storage.ts`, mid-way through `smallProps.ts` (spice cart). |
-
-**The props brief has changed and this is the important part:** now that grounding is
-un-buried, shadows are no longer the binding constraint. A fresh critic's top findings are
-**gameplay readability** — counters present a vertical face only ~0.6× character height
-with no toe-kick (the barrel at 1.2× is the one prop that reads correctly), and the
-walkable floor mats carry the *same* saturation, edge crispness and screen area as the
-solid cover beside them, so **a player cannot tell what stops a bullet from what they can
-run across.** Start there, not at shadows. Note this only became fixable now: saturation
-was not a usable axis while the grade collapsed everything to 1.00.
-
-### Then, in order
-1. **Floor** — 🅿️ parked by Uri until he returns, and there is a specific hypothesis
-   waiting in `PROGRESS.md` (the 6/10 was low-band macro variation; r4 overshot it). Do
-   not start a generic floor loop.
-2. **Wave 3 — nine per-weapon VFX agents.** Now unblocked: the shared burst was 2.25×
-   character height and is rescaled, and `window.__vfxSpawnTest` exists because driving a
-   specific hit through gameplay is unreliable (the AI kites; three probe attempts timed
-   out). Run **3 at a time**.
-3. **Cast decals + key azimuth, together.** Cast decals are now measurably removable
-   (0.74/255 over 3.0%, ablation indistinguishable at shipped framing) but were
-   deliberately kept, because `shared.ts`'s `SHADOW_DIR` is what pins the key azimuth.
-   Removing them *before* the azimuth rotates is a strict small loss. One agent should own
-   `shared.ts` + `lighting.ts` and land both — it unlocks a side-on key and raking
-   modelling that is currently impossible.
-4. **Character heads** — scope is now head + torso only; the archetypes own the bodies.
-5. **Whole-arena scanner**, then **motion filmstrip** (every character critique so far has
+### Do these next, in order
+1. **Verify the three weapon VFX** — `lollipop.ts`, `soup.ts`, `pizza.ts` are committed
+   but were authored WITHOUT ever being rendered or judged (their agents were stopped
+   while building verification probes). Re-dispatch with **verification-only** briefs; do
+   not re-author. **Lollipop is the highest-stakes check in the queue:** its `giantSlam`
+   tell must be readable with the caster OFF SCREEN, and that single assumption is what
+   keeps the fair-play radius at 199.2wu instead of ~918wu, which would undo the entire
+   range rebalance.
+2. **The remaining six weapons** — burrito, donut, egg, hotdog, sushi, taco. Run 2 at a
+   time (see the corrected budget rule below).
+3. **Character heads** — scope is head + torso only; archetypes own the bodies.
+4. **Whole-arena scanner**, then **motion filmstrip** (every character critique so far has
    judged stills, yet "reads like a turntable render" is a complaint about motion).
 
-### What this session proved about method — apply it
-- **Probe before looping.** Every plateau probed turned out to be a bug or an ownership
-  deadlock, never a taste gap. A ~20k probe repeatedly beat a ~300k critic loop; the floor
-  loop spent 309k for a score that did not move at all.
-- **Define a measurable acceptance test before the first round**, or critics reverse each
-  other indefinitely. Both stop-rules fired correctly this session.
-- **A once-measured mechanism is a hypothesis, not a finding.** The colour clamp was
-  found, wrongly retracted on a probe taken with the fix already in the tree, then
-  re-confirmed. Two separate misattributions were caught only because someone re-measured.
+### Waiting on Uri — do not start without him
+**Floor is PARKED.** There is a specific hypothesis in `PROGRESS.md` (the 6/10 was
+low-band macro variation; r4 overshot it at 0.32 vs 0.22). Three further floor items were
+named by all three prop critics and should be folded into that same session:
+- the pantry's **orange plank pad shares hue and material with the counter tops** — now
+  the single worst blocking-vs-walkable confusion left in the arena
+- `floor_drain` reads as a collider or pickup, not a floor marking
+- the **teal mats mean "run across me" in one place and "solid object" in another**, being
+  used both as decoration and as pedestals under props
+- plus a stale copy of the old key azimuth at ~line 891
+
+### CORRECTED budget rule — this one is load-bearing
+Measured: **6 concurrent agents burned 30% of a session in 30 minutes.** Each agent costs
+~300k regardless of scheduling, so **total agent count is the budget; concurrency only
+sets the rate.**
+
+| concurrency | burn | over a 4h session |
+|---|---|---|
+| 6 | ~30% / 30min | 240% ✗ |
+| 3 | ~15% / 30min | 120% ✗ |
+| **2** | ~10% / 30min | **80%** ✓ |
+
+**Hold at 2.** Available budget is not a reason to widen — Wave 3 alone is ~2.7M whether
+run 6-up or 2-up. The decision that matters is *which* work gets an agent.
 
 ---
 
