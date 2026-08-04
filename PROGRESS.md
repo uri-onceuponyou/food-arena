@@ -263,6 +263,26 @@ Needed 0.5–0.6 depth.
 
 ---
 
+### NEVER `git stash` during a multi-agent session
+
+An agent hit an apparently-failing gate, ran `git stash` to test whether it was
+pre-existing, and momentarily reverted **two other agents' uncommitted in-flight work**.
+It restored everything within ~2 minutes and nothing was permanently lost, but the blast
+radius of that command is the entire repo, and the failure it was chasing was a phantom
+(see below). To test whether something is pre-existing, use `git stash push -- <specific
+files>`, a scratch worktree, or just ask the coordinator.
+
+### A "failing gate" during a multi-agent session is probably the HMR race
+
+`tools/aspect.mjs` reported `window.__fairView is not a function`. It was NOT a
+regression — re-running it after the fact passes with 0.00wu spread. Another agent's save
+triggers a Vite full reload, and any probe that reads in-page state mid-flight sees it
+briefly undefined.
+
+**Cost of not knowing this:** one agent lost three probe sweeps to it, and another chased
+the phantom all the way to `git stash`. Before reporting a gate as broken, re-run it once
+the repo is quiet.
+
 ### Probes during a multi-agent session must stub Vite's HMR client
 
 Any Playwright probe that holds in-page state across steps will be wiped mid-run: every
