@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>HUD harness</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #6b4a2f; }
+      /* A mid warm ground under the HUD so contrast judgements are made against
+         something arena-like rather than white. */
+    </style>
+  </head>
+  <body>
+    <div id="hud"></div>
+    <script type="module">
+      // Isolated DOM harness for src/ui/hud.ts. The radar is pure DOM/CSS, so this
+      // renders EXACTLY what the game renders for that widget, without paying ~40 s of
+      // SwiftShader boot per sample — and it lets a probe drive `maxSafeRadius` and the
+      // clock directly, which is how the fix gets verified at more than one
+      // MATCH_DURATION_MS without editing rules.ts (owned by a peer).
+      import { createHud } from '/src/ui/hud.ts';
+      import { MATCH_DURATION_MS } from '/src/game/rules.ts';
+      import { FAIR_PLAY } from '/src/render/camera.ts';
+
+      // Published so a probe never has to hardcode either of them.
+      window.__matchDurationMs = MATCH_DURATION_MS;
+      window.__fairRadiusUnits = FAIR_PLAY.radiusUnits;
+
+      // ?touch=1 reproduces what src/game/touch.ts puts on <html> on a touch-capable
+      // device, which is what moves the radar out of the bottom-right thumb zone.
+      if (new URLSearchParams(location.search).has('touch')) {
+        document.documentElement.classList.add('fa-touch-capable', 'fa-touch');
+      }
+
+      const hud = createHud(document.getElementById('hud'), { onRestart() {} });
+
+      function fighter(id, x, y, hp, maxHp) {
+        return {
+          role: 'player', characterId: id, x, y, hp, maxHp, alive: hp > 0,
+          facing: 0, speed: 0, lastUsed: [0, 0, 0, 0], statuses: [], vx: 0, vy: 0,
+        };
+      }
+
+      window.__hudSet = (o) => {
+        const aw = o.arenaW ?? 1400;
+        const ah = o.arenaH ?? 1000;
+        const state = {
+          phase: o.phase ?? 'playing',
+          elapsed: o.elapsed ?? 0,
+          countdownValue: 0,
+          countdownTick: 0,
+          startFlashTimer: 0,
+          timeRemaining: o.timeRemaining ?? 0,
+          safeRadius: o.safeRadius,
+          player: fighter('hamburger', o.px ?? 700, o.py ?? 780, o.php ?? 100, 100),
+          enemy: fighter('donut', o.ex ?? 1240, o.ey ?? 500, o.ehp ?? 150, 150),
+          projectiles: [], splats: [], trailMarks: [],
+          winner: o.winner ?? null,
+          arena: {
+            id: 'kitchen', displayName: 'Kitchen',
+            width: aw, height: ah,
+            center: { x: aw / 2, y: ah / 2 },
+            maxSafeRadius: o.maxSafeRadius,
+            playerSpawn: { x: 160, y: ah / 2 }, enemySpawn: { x: aw - 160, y: ah / 2 },
+            cover: [], hazards: [], build() {},
+          },
+          nextId: 1,
+        };
+        hud.update(state, { selectedWeapon: 0, safeArrow: null, aim: null });
+        return true;
+      };
+
+      window.__harnessReady = true;
+    </script>
+  </body>
+</html>

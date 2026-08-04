@@ -11,8 +11,21 @@
  */
 
 import { audio } from '../audio';
-import { CHARACTERS, FOG_DAMAGE, FOG_TICK_MS, MATCH_DURATION_MS, type CharacterId, type Weapon } from '../game/rules';
+import {
+  CHARACTERS,
+  FOG_DAMAGE,
+  FOG_TICK_MS,
+  MATCH_DURATION_MS,
+  MIN_SAFE_RADIUS,
+  type CharacterId,
+  type Weapon,
+} from '../game/rules';
 import type { FighterRole, MatchState } from '../game/state';
+// The guaranteed-visible radius. It lives with the camera because the camera is what
+// guarantees it, but it is a GAMEPLAY number — "how far can this player possibly see"
+// — and the zone warning is calibrated against it so the pill and the 3D fog curtain
+// never disagree about whether the edge is something you can look at. See imminentMs.
+import { FAIR_PLAY } from '../render/camera';
 import { abilityIcon, ensureIconStyles, hydratePortraits, icon, portraitMarkup } from './icons';
 
 export interface HudCallbacks {
@@ -112,6 +125,26 @@ function formatDuration(ms: number): string {
 }
 
 const LOW_HP_FRACTION = 0.25;
+
+/**
+ * Slack around the opening safe circle in the radar's world window, as a fraction of
+ * its radius. See the long note in `renderZone`'s radar section.
+ *
+ * It buys two things and costs one. It guarantees the zone boundary is several pixels
+ * INSIDE the card at t=0 rather than exactly on its border (a boundary drawn on the
+ * border is indistinguishable from one that has been clipped away), and it keeps a
+ * band of fog visible from the opening frame so the widget never reads as "solid
+ * cream, nothing happening". It costs zoom: the whole map is drawn 1/(1+margin)
+ * smaller, so the final ring at MIN_SAFE_RADIUS shrinks with it.
+ *
+ * SIZED FOR THE SMALLEST CARD, not the desktop one. Clearance at t=0 is
+ * `halfCardPx * margin / (1 + margin)`, so the 105px card the phone and short-viewport
+ * media queries drop to gets 45% less of it than the 152px desktop card. At 0.06 that
+ * was 3.0px there — measured, the disc's own outer glow washed straight over it and
+ * the opening frame had no visible fog at all on a phone, which is the exact bug this
+ * whole change exists to remove. 0.14 gives 6.4px at 105px and 9.3px at 152px.
+ */
+const RADAR_MARGIN = 0.14;
 
 function setBar(fill: HTMLElement, text: HTMLElement, hp: number, maxHp: number): void {
   const frac = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
@@ -226,10 +259,16 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       <div class="hud-radar" data-el="radar">
         <div class="hud-radar-map" data-el="radar-map">
           <div class="hud-radar-safe" data-el="radar-safe"></div>
-          <!-- Drawn OVER the safe disc: at match start the disc is wider than the map
-               and the widget would otherwise be a blank cream card with two dots on
-               it. A grid makes it read as a map in every state. -->
-          <div class="hud-radar-grid"></div>
+          <!-- The PLAYFIELD's own rectangle, drawn OVER the safe disc.
+               The card is a window on MORE world than the arena (see renderZone for
+               why), so without this there is nothing telling the player where the
+               walls are: "inside the map but in the fog" and "not the map at all"
+               would be the same violet pixels. Its stroke and its grid both have to
+               read on cream AND on violet, because the disc sweeps across this
+               rectangle during a match. -->
+          <div class="hud-radar-arena" data-el="radar-arena">
+            <div class="hud-radar-grid"></div>
+          </div>
           <div class="hud-radar-dot hud-radar-dot--enemy" data-el="radar-enemy"></div>
           <div class="hud-radar-dot hud-radar-dot--player" data-el="radar-player"></div>
         </div>
@@ -306,6 +345,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const zoneBarEl = q<HTMLDivElement>('zone-bar');
   const radarEl = q<HTMLDivElement>('radar');
   const radarSafeEl = q<HTMLDivElement>('radar-safe');
+  const radarArenaEl = q<HTMLDivElement>('radar-arena');
   const radarPlayerEl = q<HTMLDivElement>('radar-player');
   const radarEnemyEl = q<HTMLDivElement>('radar-enemy');
   const radarCapEl = q<HTMLDivElement>('radar-cap');
@@ -412,29 +452,76 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const FOG_DPS = Math.round((FOG_DAMAGE / FOG_TICK_MS) * 1000);
 
   /**
+   * How long before the edge arrives the zone pill starts its alarm.
+   *
+   * ## Why this is a DISTANCE converted to time, and not a time
+   *
+   * It used to be a flat 12 s, and the comment beside it justified that as "roughly
+   * 57 wu of grace" — true only at the 180 s clock's 4.9 wu/s sweep. The clock is now
+   * 45 s and `MAX_SAFE_RADIUS` derives from it, so the edge sweeps 22.1 wu/s and the
+   * same 12 s buys **265 wu**. Two things go wrong at once at that size:
+   *
+   *  1. It cries wolf. 265 wu of a 993 wu opening ring is most of the standing
+   *     positions inside it, so the alarm animation would be running for a large
+   *     share of every match — and `docs/LESSONS.md` §9's lesson is that a warning
+   *     which cries wolf gets ignored, which is worse than no warning.
+   *  2. It warns about something INVISIBLE. The camera guarantees the player sees
+   *     `FAIR_PLAY.radiusUnits` (199.2 wu) in every direction and no more. At 265 wu
+   *     the pill would be flashing about a curtain that is off screen and stays off
+   *     screen for another three seconds — the HUD and the world disagreeing, which
+   *     is exactly the failure `tools/arena-scan.mjs` exists to catch.
+   *
+   * So: alarm when the edge crosses into the radius the player is GUARANTEED to be
+   * able to see, which makes the pill and the 3D curtain say the same thing at the
+   * same moment. Capped at the old 12 s, because on a long clock that distance is
+   * 40 s away and an alarm running for a fifth of a match is the cry-wolf failure
+   * again from the other end. Both terms are derived; neither is a magic number.
+   *
+   *   45 s clock:   199.2 / (993/45000)  = 9.0 s
+   *   180 s clock:  199.2 / (890/180000) = 40.3 s -> capped to 12 s (unchanged)
+   */
+  function imminentMs(maxR: number): number {
+    const shrinkPerMs = maxR / MATCH_DURATION_MS; // world units of radius per ms
+    if (shrinkPerMs <= 0) return 0;
+    return Math.min(12_000, FAIR_PLAY.radiusUnits / shrinkPerMs);
+  }
+
+  /**
    * Everything the zone readouts need, derived from the sim state alone.
    *
-   * `sim.ts` shrinks the ring as `safeRadius = maxSafeRadius * timeRemaining /
-   * MATCH_DURATION_MS` — a continuous linear close, NOT the stepped "next circle" of
-   * a battle royale. So there is no "next shrink" to count down to; the useful number
-   * is when the edge will sweep over WHERE THE PLAYER IS STANDING, which inverts that
-   * same formula. If the shrink schedule in `sim.ts` ever stops being linear in time,
-   * this inversion has to change with it.
+   * `sim.ts` shrinks the ring as
+   *   `safeRadius = max(MIN_SAFE_RADIUS, maxSafeRadius * (1 - matchProgress))`
+   * — a continuous linear close with a FLOOR, not the stepped "next circle" of a
+   * battle royale. So there is no "next shrink" to count down to; the useful number is
+   * when the edge will sweep over WHERE THE PLAYER IS STANDING, which inverts that
+   * formula. If the schedule in `sim.ts` ever stops being linear in time, this
+   * inversion has to change with it.
+   *
+   * ⚠️ The floor is why `holds` exists. `MIN_SAFE_RADIUS` arrived with the 45 s clock,
+   * and it means the edge STOPS. For anyone standing inside the final ring the naive
+   * inversion `(safeRadius - dist) / shrinkPerMs` keeps returning a positive number
+   * forever: a countdown that never reaches zero and describes an event that never
+   * happens. Detect it and say so instead.
    */
   function zoneInfo(state: MatchState): {
     outside: boolean;
     radius01: number;
     /** ms until the edge reaches the player's current spot; null once outside. */
     msUntilEdge: number | null;
+    /** The ring's floor is outside the player: the edge will never reach them. */
+    holds: boolean;
   } {
     const maxR = state.arena.maxSafeRadius;
     const dist = Math.hypot(state.player.x - state.arena.center.x, state.player.y - state.arena.center.y);
     const outside = dist > state.safeRadius;
     const shrinkPerMs = maxR / MATCH_DURATION_MS; // world units of radius per ms
+    const holds = dist <= MIN_SAFE_RADIUS;
     return {
       outside,
+      holds,
       radius01: maxR > 0 ? Math.max(0, Math.min(1, state.safeRadius / maxR)) : 0,
-      msUntilEdge: outside || shrinkPerMs <= 0 ? null : (state.safeRadius - dist) / shrinkPerMs,
+      msUntilEdge:
+        outside || holds || shrinkPerMs <= 0 ? null : (state.safeRadius - dist) / shrinkPerMs,
     };
   }
 
@@ -442,12 +529,9 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     const live = state.phase === 'playing';
     const info = zoneInfo(state);
     const danger = live && info.outside && state.player.alive;
+    const maxR = state.arena.maxSafeRadius;
 
-    zoneEl.classList.toggle('is-danger', danger);
-    // Warn BEFORE it costs HP. The edge sweeps at maxSafeRadius / MATCH_DURATION_MS
-    // ~= 4.7 wu/s, so 12 s is roughly 57 wu of grace — comfortably more than the
-    // guaranteed view radius gives you to notice the curtain arriving on its own.
-    zoneEl.classList.toggle('is-imminent', !danger && info.msUntilEdge !== null && info.msUntilEdge < 12_000);
+    zoneEl.classList.toggle('is-imminent', !danger && info.msUntilEdge !== null && info.msUntilEdge < imminentMs(maxR));
     zoneBarEl.style.width = `${(info.radius01 * 100).toFixed(1)}%`;
 
     if (danger) {
@@ -481,31 +565,96 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // "the ring is closing toward you" or "the ring closes in 8 seconds", and a
       // player who does not already understand the mechanic cannot tell which.
       // "REACHES YOU 0:08" states the relationship to the player and has one reading.
+      //
+      // "FINAL RING" is the `holds` case: the player is standing inside the ring's
+      // floor, so the edge is never going to arrive and a countdown would be a lie.
+      // It reports where they are standing relative to the SCHEDULE and still makes
+      // no claim about the ground — a hazard can sit in the final ring, and one does
+      // (the pot is on the arena centre).
       zoneValueEl.textContent = info.msUntilEdge !== null
         ? `REACHES YOU ${formatTime(info.msUntilEdge)}`
-        : 'CLOSING';
+        : info.holds
+          ? 'FINAL RING'
+          : 'CLOSING';
     }
 
     // ── Radar ────────────────────────────────────────────────────────────────
-    // Percentages against the arena's own extents, so the whole widget is correct
-    // for any arena size without a magic scale factor. The map box's aspect ratio is
-    // pinned to the arena's in CSS, which is what keeps the safe circle circular.
+    //
+    // ## The card is a window on MORE WORLD THAN THE ARENA, and it has to be
+    //
+    // The obvious mapping — card rectangle == arena rectangle — is what this widget
+    // used to do, and it made the radar carry NO zone information for most of every
+    // match. The reason is structural, not a tuning slip:
+    //
+    //   arena/shared.ts derives  MAX_SAFE_RADIUS = halfDiagonal / (1 - tContact/T)
+    //
+    // That is DELIBERATELY larger than the arena's own half-diagonal, so the corners
+    // are not inside lethal fog from t=0 (they used to be, permanently). Which means
+    // the opening circle always STRICTLY CONTAINS the playfield. Mapped card==arena,
+    // it was 142% of the box wide at t=0 and stayed >=100% until t=13.3s of a 45s
+    // match. Measured on rendered pixels: the widget was a FLAT CREAM RECTANGLE whose
+    // classified pixels did not change AT ALL between t=0 and t=6s, and the zone edge
+    // was still off the card at t=0, t=6s AND t=11.3s — against a mean match length
+    // of 19.6s. Clamping the disc to 100% does not fix that; a clamped disc is still
+    // a flat rectangle.
+    //
+    // And it gets worse, not better, as the clock shortens: T went 180s -> 45s this
+    // session and MAX_SAFE_RADIUS is derived from T, so the opening ring grew 890 ->
+    // 993 wu. Nothing below is allowed to hardcode either number.
+    //
+    // So: zoom out until the boundary is on the card, and draw the arena's own
+    // rectangle inside the fog field. What the player then reads is the DANGER
+    // closing in from outside the map — which is the thing they need, and the thing
+    // that is still true when the safe circle is bigger than the map.
+    //
+    // ## Sizing the window
+    //
+    // Horizontally, fit the whole zone circle (plus a small margin) so the boundary
+    // is always on the card. Vertically, fit only the ARENA: fitting the circle on
+    // the short axis too would need a ~1.4x wider window again and would shrink the
+    // playfield to under half the card for a signal that is already carried by the
+    // left/right edges and the corners. Early in a match the disc's top and bottom
+    // arcs therefore run off the card — that is the deliberate trade, and the +x edge
+    // is on-card at every instant of every clock.
+    //
+    // The card's ASPECT is pinned to the arena's in CSS (152x109 for 1400x1000), so
+    // the world window is given that same aspect and the safe circle stays a circle.
     const aw = state.arena.width;
     const ah = state.arena.height;
-    const pct = (v: number, span: number) => `${((v / span) * 100).toFixed(2)}%`;
-    radarSafeEl.style.left = pct(state.arena.center.x, aw);
-    radarSafeEl.style.top = pct(state.arena.center.y, ah);
-    // Diameter as a % of WIDTH for both axes — the box has the arena's aspect, so a
-    // square in those terms is a square on screen, and the circle stays a circle.
-    const diaPct = ((state.safeRadius * 2) / aw) * 100;
-    radarSafeEl.style.width = `${diaPct.toFixed(2)}%`;
-    radarSafeEl.style.paddingBottom = '0';
-    radarSafeEl.style.height = `${((state.safeRadius * 2) / ah) * 100}%`;
-    radarPlayerEl.style.left = pct(state.player.x, aw);
-    radarPlayerEl.style.top = pct(state.player.y, ah);
+    const cx = state.arena.center.x;
+    const cy = state.arena.center.y;
+    const cardAspect = aw / ah;
+    // Half-extents the window must cover, measured from the FOG's centre (which is
+    // not required to be the arena rectangle's centre).
+    const needHalfW = Math.max(maxR, cx, aw - cx) * (1 + RADAR_MARGIN);
+    const needHalfH = Math.max(cy, ah - cy) * (1 + RADAR_MARGIN);
+    const worldW = Math.max(2 * needHalfW, 2 * needHalfH * cardAspect);
+    const worldH = worldW / cardAspect;
+    // World point -> percentage across the card. The window is centred on the fog's
+    // centre, so that point is 50%/50%.
+    const wx = (x: number) => `${(50 + ((x - cx) / worldW) * 100).toFixed(2)}%`;
+    const wy = (y: number) => `${(50 + ((y - cy) / worldH) * 100).toFixed(2)}%`;
+    const spanW = (v: number) => `${((v / worldW) * 100).toFixed(2)}%`;
+    const spanH = (v: number) => `${((v / worldH) * 100).toFixed(2)}%`;
+
+    radarSafeEl.style.left = wx(cx);
+    radarSafeEl.style.top = wy(cy);
+    radarSafeEl.style.width = spanW(state.safeRadius * 2);
+    radarSafeEl.style.height = spanH(state.safeRadius * 2);
+
+    // The playfield rectangle, over the disc. Width and height are set from the SAME
+    // window as the disc, so "the ring has reached the wall" is something the widget
+    // shows geometrically instead of asserting in words.
+    radarArenaEl.style.left = wx(aw / 2);
+    radarArenaEl.style.top = wy(ah / 2);
+    radarArenaEl.style.width = spanW(aw);
+    radarArenaEl.style.height = spanH(ah);
+
+    radarPlayerEl.style.left = wx(state.player.x);
+    radarPlayerEl.style.top = wy(state.player.y);
     radarPlayerEl.style.display = state.player.alive ? 'block' : 'none';
-    radarEnemyEl.style.left = pct(state.enemy.x, aw);
-    radarEnemyEl.style.top = pct(state.enemy.y, ah);
+    radarEnemyEl.style.left = wx(state.enemy.x);
+    radarEnemyEl.style.top = wy(state.enemy.y);
     radarEnemyEl.style.display = state.enemy.alive ? 'block' : 'none';
     radarEl.classList.toggle('is-danger', danger);
     radarCapEl.textContent = danger ? 'GET INSIDE' : 'SAFE ZONE';
@@ -643,14 +792,31 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         const loserRole: FighterRole = winnerRole === 'player' ? 'enemy' : 'player';
         const winnerChar = CHARACTERS[state[winnerRole].characterId];
         const loserChar = CHARACTERS[state[loserRole].characterId];
+        // ── "defeated" is only true of a KNOCKOUT ─────────────────────────────
+        // `sim.ts` now ends a match that runs out of clock, and it does so WITHOUT a
+        // death: `resolveTimeout` picks a winner on HP fraction, then zone control,
+        // then the human, and deliberately leaves both fighters `alive`. So a timeout
+        // is exactly the case where nobody defeated anybody, and that is also the
+        // case a player is most likely to want explained — they are looking at a
+        // result screen with two living fighters on it. Both fighters still standing
+        // is the tell, and it costs one comparison.
+        const timedOut = state.player.alive && state.enemy.alive;
         gameoverSubtitleEl.innerHTML =
           `<span class="hud-go-emoji">${portraitMarkup(state[winnerRole].characterId, { crop: 'head' })}</span>${winnerChar.name}` +
-          `<span class="hud-go-vs">defeated</span>` +
+          `<span class="hud-go-vs">${timedOut ? 'outlasted' : 'defeated'}</span>` +
           `<span class="hud-go-emoji">${portraitMarkup(state[loserRole].characterId, { crop: 'head' })}</span>${loserChar.name}`;
         hydratePortraits(gameoverSubtitleEl, { generate: false });
 
         const elapsedMs = Math.max(0, MATCH_DURATION_MS - state.timeRemaining);
-        gameoverStatsEl.innerHTML = `${icon('timer')} Match time ${formatDuration(elapsedMs)}`;
+        // On a timeout, say WHY. "Match time 0:45" alone reads as a knockout that
+        // happened to take the whole clock, which is the one thing it is not. This
+        // deliberately does NOT name the tiebreak: `resolveTimeout` runs three rungs
+        // (HP fraction, then zone control, then the human), and a HUD that asserts
+        // "decided on health" would be wrong on two of them and would have to be kept
+        // in step with a rule it does not own.
+        gameoverStatsEl.innerHTML = timedOut
+          ? `${icon('timer')} Time up — no knockout`
+          : `${icon('timer')} Match time ${formatDuration(elapsedMs)}`;
       } else {
         gameoverEl.style.display = 'none';
       }
@@ -911,11 +1077,20 @@ const CSS = `
   padding: 5px 9px 6px;
   box-shadow: 0 3px 0 rgba(0,0,0,0.45);
 }
+/* gap 4, not 8. With justify-content: space-between the gap only binds at the row's
+   MINIMUM width, which is precisely the case that was broken: measured on a rendered
+   frame, "REACHES YOU 0:16" overflowed the plate by 7px and "-50 HP/s" by 6px, on all
+   five supported viewports, so the tail of the value sat on raw world pixels. That
+   defeats the reason the plate is opaque at all (see .hud-zone). The pill cannot
+   simply grow — at tablet-4:3 and phone-19.5:9 there are only 10px between it and the
+   nameplates either side — so the 7px comes out of the gap and the value's tracking
+   instead, which changes nothing about the pill's footprint, its type sizes or its
+   wording. Verified 0px overflow at 5 viewports x 3 states by tools/tmp/hud_fit.mjs. */
 .hud-zone-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
 }
 .hud-zone-label {
   font-family: 'Rubik', sans-serif;
@@ -930,7 +1105,10 @@ const CSS = `
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
   font-size: 11px;
-  letter-spacing: 0.02em;
+  /* 0, not 0.02em. See .hud-zone-row: 0.02em on 11px is 0.22px per character and
+     bought nothing, while over a 16-character value it was 3.5px of the 7px that put
+     this text outside its own plate. */
+  letter-spacing: 0;
   color: #EFE2FF;
   white-space: nowrap;
 }
@@ -973,8 +1151,15 @@ const CSS = `
 /* THE answer to "the boundary is usually off screen". The guaranteed view radius
    is 199.2 wu on a 1400x1000 wu map, so for most of a match the ring is nowhere
    near the frame and the 3D curtain cannot help. This shows the whole map at once:
-   violet field = lethal, cream disc = safe, green dot = you. Bottom-right, the
-   genre's habitual minimap corner, clear of the weapon bar and both nameplates. */
+   violet field = lethal, cream disc = safe, tan rectangle = the playfield's walls,
+   green dot = you. Bottom-right, the genre's habitual minimap corner, clear of the
+   weapon bar and both nameplates.
+
+   The card shows MORE than the arena on purpose — see renderZone. The three fills
+   are the same three the world uses, which is what stops the widget and the 3D
+   boundary telling different stories: the field is arena/fogRing.ts's own
+   FIELD_COLOR 0x2A0B47, and the disc's ring is within a few points of its
+   CREST_COLOR. */
 .hud-radar {
   position: absolute;
   right: calc(var(--fa-safe-r, 0px) + 16px);
@@ -1003,7 +1188,11 @@ html.fa-touch-capable .hud-radar {
 .hud-radar-map {
   position: relative;
   width: 152px;
-  /* Pinned to the arena's 1400x1000 aspect so the safe disc renders as a circle. */
+  /* Pinned to the arena's 1400x1000 aspect so the safe disc renders as a circle.
+     renderZone gives its world window this SAME aspect (worldH = worldW / (aw/ah)),
+     which is what lets the disc be sized as a percentage on each axis independently
+     and still come out round. If the arena is ever reshaped, this pair moves with it
+     — as does the 105x75 pair in the media queries at the bottom of this sheet. */
   height: 109px;
   border: 3px solid #1a1224;
   border-radius: 10px;
@@ -1011,7 +1200,9 @@ html.fa-touch-capable .hud-radar {
      danger field — no separate overlay to get the z-order wrong. Deliberately the
      same near-black violet the 3D field uses, and deliberately DARKER than the safe
      disc, so the radar teaches the same "dark = death, bright = live" reading the
-     world does. */
+     world does. Since the card now shows a margin of world OUTSIDE the playfield,
+     this fill also stands for out-of-bounds: both are places not to be, and the
+     playfield rectangle is what separates them. */
   background: #2A0B47;
   box-shadow: 0 3px 0 rgba(0,0,0,0.35), inset 0 0 0 1px rgba(233,166,255,0.4);
   overflow: hidden;
@@ -1021,16 +1212,55 @@ html.fa-touch-capable .hud-radar {
   transform: translate(-50%, -50%);
   border-radius: 50%;
   background: #F2E0BE;
-  box-shadow: inset 0 0 0 2px #E9A6FF, 0 0 10px 2px rgba(233,166,255,0.85);
+  /* The INSET ring is the boundary; the outer glow only makes it findable. It used to
+     be 0 0 10px 2px, which bled ~12px of near-cream luma into the fog field — more
+     than the entire t=0 clearance on the 105px card, so the one moment the boundary
+     is nearest the card edge was also the moment the glow hid it. Halved: still a hot
+     edge, a third of the bleed. */
+  box-shadow: inset 0 0 0 2px #E9A6FF, 0 0 6px 1px rgba(233,166,255,0.75);
   transition: width 0.2s linear, height 0.2s linear;
 }
+/* ── The playfield rectangle ───────────────────────────────────────────────
+   Positioned and sized from JS against the same world window as the disc.
+
+   COLOUR IS THE WHOLE PROBLEM HERE, and it is the one this project gets wrong most
+   often (docs/LESSONS.md section 1: sixteen times, the HUD among them). This stroke
+   is drawn over BOTH fills — cream (luma 224) early, violet field (luma 24) late —
+   because the disc sweeps across it during a match. A near-black stroke like the
+   card's own border would be crisp on the cream and INVISIBLE on the field; a pale
+   one would do the reverse. 8C7A5E sits at luma ~124, roughly 100 from each — measured
+   on rendered pixels at 101 over cream and 102 over the field — so it survives both.
+   It is also deliberately neither violet (reserved project-wide for the fog) nor cream
+   (that fill means SAFE).
+
+   Drawn as an INSET shadow rather than a border so the element's box IS the arena
+   rectangle — a real border would inset the content box by 2px and put the grid
+   child 2px out of register with the walls it is meant to subdivide. */
+.hud-radar-arena {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 2px #8C7A5E;
+  pointer-events: none;
+}
+/* Subdivisions of the PLAYFIELD, so it reads as a map and not as a plain rectangle,
+   and so a dot's position can be estimated rather than only compared. Same two-sided
+   contrast problem as the stroke above, same answer. The old grid was a 22%
+   near-black and it measured, on rendered pixels, 45 luma of separation on the cream
+   and **1** on the fog field — invisible, the same dark-on-dark failure that hid this
+   HUD's cooldown wipe from three critics. It never showed before because the fog only
+   reached the playfield in the last seconds of a 180s match; on the 45s clock it
+   arrives while there is still a fight going on. Mixing toward the wall colour
+   instead measures 24 on cream and 25 on the field: quieter than the old grid was at
+   its best, present in both states, and still an order below the walls' own 100 so it
+   subdivides rather than competes. */
 .hud-radar-grid {
   position: absolute;
   inset: 0;
   pointer-events: none;
   background:
-    repeating-linear-gradient(90deg, rgba(26,18,36,0.22) 0 1px, rgba(0,0,0,0) 1px 25%),
-    repeating-linear-gradient(0deg, rgba(26,18,36,0.22) 0 1px, rgba(0,0,0,0) 1px 33.34%);
+    repeating-linear-gradient(90deg, rgba(140,122,94,0.45) 0 1px, rgba(0,0,0,0) 1px 25%),
+    repeating-linear-gradient(0deg, rgba(140,122,94,0.45) 0 1px, rgba(0,0,0,0) 1px 33.34%);
 }
 .hud-radar-dot {
   position: absolute;
