@@ -10,6 +10,7 @@
  * `MatchState` back in the `countdown` phase) just works without any extra wiring.
  */
 
+import { audio } from '../audio';
 import { CHARACTERS, FOG_DAMAGE, FOG_TICK_MS, MATCH_DURATION_MS, type CharacterId, type Weapon } from '../game/rules';
 import type { FighterRole, MatchState } from '../game/state';
 
@@ -227,6 +228,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       </div>
       <div class="hud-safearrow-label" data-el="safearrow-label">RUN TO THE ZONE</div>
 
+      <!-- ── Mute state ──────────────────────────────────────────────────────
+           M toggles mute (see game/input.ts). It was landing SILENTLY, which
+           makes it a coin flip: press it during a quiet second and there is no way
+           to tell whether it worked, whether the key is even bound, or which state
+           you are now in. It matters most under pointer lock, where the OS volume
+           mixer is no longer one cursor-move away — that is why the hotkey exists.
+           So: latched while muted, a brief confirmation when sound comes back. -->
+      <div class="hud-mute" data-el="mute"></div>
+
       <!-- ── Aim reticle (pointer lock only) ─────────────────────────────────
            Declared LATE in the stack so it paints over the radar, the weapon bar and
            the fog wash: it is the one HUD element that is literally the player's
@@ -291,6 +301,41 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const safeArrowLabelEl = q<HTMLDivElement>('safearrow-label');
   const aimStickEl = q<HTMLDivElement>('aim-stick');
   const aimReticleEl = q<HTMLDivElement>('aim-reticle');
+  const muteEl = q<HTMLDivElement>('mute');
+
+  // ── Mute indicator ─────────────────────────────────────────────────────────
+  // Driven off `audio.onChange` rather than off the keypress, which is the whole
+  // point: this reflects the ENGINE's state, so it is correct no matter who changed
+  // it — the M hotkey, a future settings screen, or the mute persisted in
+  // localStorage from a previous session. `audio/index.ts` recommends exactly this
+  // pattern for the same reason.
+  //
+  // Muted is LATCHED, not a toast: it is a state you can sit in for a whole match and
+  // then wonder why the game is silent. Unmuting only needs the transient
+  // confirmation, so that one clears itself.
+  let muteTimer = 0;
+  let mutedShown: boolean | null = null;
+  function renderMute(): void {
+    const m = audio.isMuted();
+    if (m === mutedShown) return;
+    const first = mutedShown === null;
+    mutedShown = m;
+    window.clearTimeout(muteTimer);
+    if (m) {
+      muteEl.textContent = '🔇 MUTED · M';
+      muteEl.classList.add('is-on');
+      muteEl.classList.remove('is-ok');
+      return;
+    }
+    // Nothing to confirm on the very first paint of an unmuted session — that would
+    // put a "sound on" badge on screen at the start of every single match.
+    if (first) { muteEl.classList.remove('is-on', 'is-ok'); return; }
+    muteEl.textContent = '🔊 SOUND ON · M';
+    muteEl.classList.add('is-on', 'is-ok');
+    muteTimer = window.setTimeout(() => muteEl.classList.remove('is-on', 'is-ok'), 1500);
+  }
+  const offAudio = audio.onChange(renderMute);
+  renderMute();
 
   // Pooled floating damage/heal numbers — pre-created once, cycled round-robin, so
   // spawning one on every hit never allocates a DOM node.
@@ -620,6 +665,10 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
     dispose() {
       gameoverBtn.removeEventListener('click', () => callbacks.onRestart());
+      window.clearTimeout(muteTimer);
+      // The audio engine outlives the match, so a HUD that does not unsubscribe leaks
+      // a closure onto a dead DOM tree for every match the player plays.
+      offAudio();
       root.innerHTML = '';
     },
   };
@@ -1360,6 +1409,42 @@ const CSS = `
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.6); }
 }
+
+/* ── Mute state ───────────────────────────────────────────────────────────── */
+/* Bottom-left, stacked directly above the 44px pause chip (matchScreen.ts puts that
+   at safe-b + 14). Every other edge of the frame is spoken for: nameplates top-left
+   and top-right, clock top-centre, weapon bar bottom-centre, radar bottom-right, and
+   the pointer-lock capture chip bottom-centre at safe-b + 104. This band is also well
+   clear of the plus-or-minus 60px around frame centre that the input regression probe
+   drives real mouse events through.
+   pointer-events stays none - it is a readout, not a control. The click target for
+   audio belongs in Settings; this only has to answer "did that do anything". */
+.hud-mute {
+  position: absolute;
+  left: calc(var(--fa-safe-l, 0px) + 14px);
+  bottom: calc(var(--fa-safe-b, 0px) + 68px);
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.14s ease-out, transform 0.14s ease-out;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: #FFF3DE;
+  background: rgba(26,18,36,0.9);
+  border: 3px solid #1a1224;
+  border-radius: 999px;
+  padding: 5px 12px;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.hud-mute.is-on { opacity: 1; transform: none; }
+/* Gold ring only while actually muted. The unmute confirmation is transient and does
+   not need to claim the accent colour the weapon bar and countdown already own. */
+.hud-mute.is-on:not(.is-ok) { border-color: #F4A300; }
 
 /* ── Aim reticle (pointer lock only) ──────────────────────────────────────── */
 /*

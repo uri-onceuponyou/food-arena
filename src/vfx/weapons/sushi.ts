@@ -267,14 +267,43 @@ const fading = (color: string, opacity: number) => new THREE.MeshBasicMaterial({
   color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false,
 });
 
+/**
+ * The blade's own material: `fading`, plus `depthTest: false`.
+ *
+ * MEASURED, not assumed. The cut is spawned at `game/vfx.ts`'s `IMPACT_HEIGHT` of
+ * 1.15 m, which is the middle of a fighter's mass — so with normal depth testing the
+ * target ate the middle third of its own cut, and because `bladeGeo` is a LENS (thin
+ * at the ends, widest in the middle) the only parts that survived were its two
+ * thinnest tips. Probed against Donut, the widest head in the cast: a 2.74 m stroke
+ * rendered as two disconnected cyan shards either side of the body, which reads as
+ * debris, not as a slice. That is the file's signature effect and the one thing doing
+ * identity work Sushi's silhouette cannot do for itself.
+ *
+ * Drawing over the target is the correct picture rather than a cheat: a cut passes
+ * THROUGH the thing it cuts, and on a 58°-pitched camera a straight line crossing the
+ * body is exactly how that reads. `game/vfx.ts:721` already sets `depthTest: false`
+ * for the same class of reason — a flat plane at one depth cannot be depth-tested
+ * sensibly against the chibi rig's non-flat silhouette without clipping unevenly.
+ *
+ * Scoped to the blade alone. Everything else in this file — grains, slabs, straps,
+ * the nori mat, the cut roll's halves — launches from a contact ring already clear of
+ * the silhouette and was verified to read WITH depth testing on, so none of them
+ * needs or gets this.
+ */
+const bladeMat = (color: string, opacity: number) => new THREE.MeshBasicMaterial({
+  color, transparent: true, opacity, side: THREE.DoubleSide,
+  depthWrite: false, depthTest: false,
+});
+
 /** Rice grains in flight and scattering — the highest-churn pool in the file, since
  * Rice Spray puts five pellets in the air on a 700 ms cooldown. */
 const nextGrainMat = materialPool(56, () => new THREE.MeshBasicMaterial({
   color: RICE, transparent: true, opacity: 1, depthWrite: false,
 }));
-/** The blade core and its cool halo. */
-const nextBladeMat = materialPool(12, () => fading(BLADE, 1));
-const nextHaloMat = materialPool(12, () => fading(BLADE_HALO, 0.5));
+/** The blade core and its cool halo — see `bladeMat` for why these two alone skip
+ * the depth test. */
+const nextBladeMat = materialPool(12, () => bladeMat(BLADE, 1));
+const nextHaloMat = materialPool(12, () => bladeMat(BLADE_HALO, 0.5));
 /** Nori: sheet segments, straps, the ground mat, and their lit edges. */
 const nextNoriMat = materialPool(28, () => fading(NORI, 1));
 const nextNoriEdgeMat = materialPool(28, () => fading(NORI_LIT, 1));
@@ -381,12 +410,18 @@ function spawnCut(
   const halo = new THREE.Mesh(bladeGeo, haloMat);
   halo.scale.set(2.9, 1, 1.02);
   halo.position.y = -CH * 0.006;
+  // Both skip the depth test, so their 6 mm height difference no longer decides which
+  // wins — the draw order has to be stated. Without this the wide dim halo can sort in
+  // front of the narrow bright core and grey out the very edge the cut is made of.
+  halo.renderOrder = 0;
   group.add(halo);
 
   const coreMat = nextBladeMat();
   coreMat.color.set(BLADE);
   coreMat.opacity = 1;
-  group.add(new THREE.Mesh(bladeGeo, coreMat));
+  const core = new THREE.Mesh(bladeGeo, coreMat);
+  core.renderOrder = 1;
+  group.add(core);
 
   ctx.spawnTransient(group, life, (t) => {
     // Wipes across in the first eighth of its life — a knife stroke is one frame of

@@ -33,35 +33,61 @@ import { readdir, readFile } from 'node:fs/promises';
 /**
  * Static guard, run before the browser starts.
  *
- * Every screen module ends in `const CSS = ` + a template literal. A stray backtick
- * inside that literal (writing `.fa-screen` in a CSS comment, say) silently
- * terminates the string and turns the whole module into a syntax error — which
- * presents as a Vite 500 and a blank page, not as anything a screenshot would show.
- * It has cost FOUR round-trips now, so it is a check.
+ * THE TRAP. Several modules build their markup and their CSS as template literals. A
+ * stray backtick inside one — writing `.fa-screen` in a CSS comment, or naming a
+ * module in an HTML comment — silently terminates the string and turns the whole file
+ * into a syntax error. That presents as a Vite 500 and a blank page for EVERY agent in
+ * the repo, and as nothing at all in a screenshot. It has now cost five round-trips.
  *
- * Coverage is every module in the project that ships CSS this way, not just the
- * screens directory: `src/ui/hud.ts` and `src/game/pointerLock.ts` have exactly the
- * same shape and exactly the same failure mode, and a 500 in either takes the dev
- * server down for every other agent in the repo. Deliberately still ONE `record()`
- * call so the total check count does not move.
+ * WHY THIS IS NO LONGER A REGEX. The first version matched `const CSS = ` + literal
+ * and scanned its lines for a backtick. That guard was standing right next to the
+ * hole it did not cover: the very next backtick to break `hud.ts` went into its
+ * `root.innerHTML = ` markup literal instead. Widening the regex to `innerHTML` then
+ * immediately produced FALSE positives, because `characterSelect.ts` legitimately
+ * nests template literals inside `${...}` interpolations — and a lint that cries wolf
+ * on valid code gets ignored, which is worse than the hole.
+ *
+ * Both failures are the same mistake: pattern-matching a language instead of parsing
+ * it. So it parses. `ts.createSourceFile` yields `parseDiagnostics` directly, which is
+ * exactly and only "would this file compile", with no notion of what a backtick is —
+ * so it catches every variant of the trap AND every other syntax error, and cannot
+ * false-positive on valid nesting. Measured: 88 files in ~95 ms, which is why it can
+ * cover all of `src/` rather than a hand-maintained list that would go stale the first
+ * time someone adds a module.
+ *
+ * `tsc` also catches this, but only if it is run BEFORE the file is saved — by the
+ * time anyone runs it the dev server is already down. This runs first, before the
+ * browser even launches. Still ONE `record()` call, so the total check count does not
+ * move.
  */
 async function lintCssLiterals() {
-  const dir = 'src/ui/screens';
-  const paths = (await readdir(dir))
-    .filter((f) => f.endsWith('.ts'))
-    .map((f) => `${dir}/${f}`)
-    .concat(['src/ui/hud.ts', 'src/game/pointerLock.ts']);
+  const { default: ts } = await import('typescript');
+  const roots = ['src'];
+  const paths = [];
+  const walk = async (dir) => {
+    for (const ent of await readdir(dir, { withFileTypes: true })) {
+      const p = `${dir}/${ent.name}`;
+      if (ent.isDirectory()) await walk(p);
+      else if (ent.name.endsWith('.ts')) paths.push(p);
+    }
+  };
+  for (const r of roots) await walk(r);
+
   const offenders = [];
   for (const p of paths) {
     const src = await readFile(p, 'utf8').catch(() => null);
     if (src === null) continue;
-    const m = src.match(/const CSS = `([\s\S]*?)\n`;/);
-    if (!m) continue;
-    for (const line of m[1].split('\n')) {
-      if (line.includes('`')) offenders.push(`${p}: ${line.trim().slice(0, 70)}`);
+    const sf = ts.createSourceFile(p, src, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+    for (const d of sf.parseDiagnostics ?? []) {
+      const { line } = sf.getLineAndCharacterOfPosition(d.start ?? 0);
+      offenders.push(`${p}:${line + 1} ${ts.flattenDiagnosticMessageText(d.messageText, ' ')}`);
     }
   }
-  record('static', '-', 'no-backtick-in-css', offenders.length === 0, offenders.slice(0, 3).join(' | '));
+  // A guard that silently matches nothing is worse than no guard — that is how the
+  // innerHTML hole stayed open. Assert it actually looked at something.
+  const ok = offenders.length === 0 && paths.length >= 20;
+  record('static', '-', 'no-backtick-in-css', ok,
+    offenders.length ? offenders.slice(0, 3).join(' | ') : `${paths.length} modules parsed clean`);
 }
 
 const BASE = process.env.PREVIEW_BASE ?? 'http://localhost:5173';
