@@ -65,6 +65,18 @@ escape hatch (it breaks probes driving real mouse events at absolute coordinates
    **whole-arena scanner** and the **motion filmstrip** — motion is still entirely
    unassessed, yet "reads like a turntable render" is a complaint about motion.
 
+### Decided by Uri
+
+- **`ROSTER_GATED = false` stays, for now** (2026-08-04): *"fine for now, we are evaluating
+  the game."* Every character remains playable while the game is being judged on feel. The
+  unlock model is complete and tested behind that one constant, so flipping it later is a
+  one-line change, not a rebuild. **Consequence to respect: do NOT ship the shop while this
+  is false.** With everything already owned, every box is a guaranteed coin loss (Hamburger
+  Box: 900 coins in, ~138 EV out) — shipping it would ship a trap.
+- **Replace the emoji icons** (2026-08-04). Six independent blind critics named
+  emoji-as-icons the #1 defect, the last three calling it disqualifying, and one quantified
+  it at ~1 full point with no layout change. Agent running.
+
 ### Open decisions Uri still owns
 - **Emoji icons.** Both menu critics named emoji-as-icons the loudest remaining tell, but
   `hud.ts` uses emoji throughout and is the one element that BEAT the shipped reference.
