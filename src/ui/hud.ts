@@ -17,6 +17,18 @@ import { abilityIcon, ensureIconStyles, hydratePortraits, icon, portraitMarkup }
 
 export interface HudCallbacks {
   onRestart: () => void;
+  /**
+   * A weapon slot was tapped/clicked. THE TOUCH EQUIVALENT OF THE `1`-`4` KEYS: a phone
+   * has no digit row, so without this a mobile player is locked to slot 1 for the whole
+   * match and three quarters of every character is unreachable.
+   *
+   * The slots only accept pointer events once the player has actually touched the
+   * screen (see `html.fa-touch` in the CSS). That is deliberate and load-bearing: this
+   * bar sits at bottom-centre, which is a perfectly ordinary place for a desktop player
+   * to be aiming, and a slot that claimed clicks unconditionally would eat fire clicks
+   * on a machine with no touchscreen at all.
+   */
+  onSelectWeapon?: (index: number) => void;
 }
 
 export interface ScreenPoint {
@@ -376,6 +388,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         <div class="hud-weapon-timer" data-role="timer"></div>
         <div class="hud-weapon-key">${i + 1}</div>
       `;
+      // `pointerdown`, not `click`: a tap has to register on the way DOWN in a fight,
+      // and this one listener covers finger, pen and mouse without the touch/mouse
+      // double-fire a `touchstart` + `click` pair would produce. Bound once per match
+      // when the slots are built, never per frame.
+      slot.addEventListener('pointerdown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        callbacks.onSelectWeapon?.(i);
+      });
       weaponsEl.appendChild(slot);
       return {
         root: slot,
@@ -730,11 +751,15 @@ const CSS = `
   background: linear-gradient(180deg, rgba(10,6,16,0.5), rgba(10,6,16,0));
 }
 
+/* Safe areas, on every edge the HUD touches. A landscape phone eats 44px of the
+   leading edge to the notch and ~21px of the trailing bottom to the home indicator,
+   and the viewport-fit=cover meta in index.html is what makes those readable. All of
+   them carry a 0px fallback, so a desktop is pixel-identical to before. */
 .hud-topbar {
   position: absolute;
-  top: 14px;
-  left: 14px;
-  right: 14px;
+  top: calc(var(--fa-safe-t, 0px) + 14px);
+  left: calc(var(--fa-safe-l, 0px) + 14px);
+  right: calc(var(--fa-safe-r, 0px) + 14px);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -952,12 +977,28 @@ const CSS = `
    genre's habitual minimap corner, clear of the weapon bar and both nameplates. */
 .hud-radar {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
+  right: calc(var(--fa-safe-r, 0px) + 16px);
+  bottom: calc(var(--fa-safe-b, 0px) + 16px);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+/* ── ...except on touch, where that corner belongs to a thumb ───────────────
+   The fair-play work already reserves the lower corners as thumb-occlusion space, and
+   the radar is the single most gameplay-critical readout in the frame: it is the whole
+   answer to "where is the closing zone" for the ~70% of a match when the boundary is
+   outside the guaranteed 199.2 wu view. A right thumb resting on the aim stick covers
+   it completely, so on touch it moves up the right edge — clear of the enemy nameplate
+   above (~90px tall) and clear of the thumb arc below.
+
+   Keyed on CAPABILITY, not on the first finger: on a phone the corner is a thumb zone
+   from the opening frame, and moving it only once someone touches means the first thing
+   a player ever sees is the radar sitting under the aim hint. */
+html.fa-touch-capable .hud-radar {
+  top: calc(var(--fa-safe-t, 0px) + 96px);
+  bottom: auto;
+  right: calc(var(--fa-safe-r, 0px) + 12px);
 }
 .hud-radar-map {
   position: relative;
@@ -1154,9 +1195,13 @@ const CSS = `
 }
 
 /* ── Weapon bar ───────────────────────────────────────────────────────────── */
+/* Bottom-CENTRE, which on a phone in landscape is the one band along the bottom edge
+   that neither thumb rests on — the sticks live in the two lower corners. It is also
+   the only HUD element a touch player has to be able to HIT rather than read, which is
+   why it is the one that opts back into pointer events. */
 .hud-weapons {
   position: absolute;
-  bottom: 18px;
+  bottom: calc(var(--fa-safe-b, 0px) + 18px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -1186,6 +1231,32 @@ const CSS = `
   transform: translateY(-3px);
   box-shadow: 0 6px 0 rgba(0,0,0,0.35), 0 0 10px rgba(244,163,0,0.7);
 }
+
+/* ── The ONE control in this HUD that claims pointer events ────────────────
+   .hud-root is pointer-events:none for a load-bearing reason — a full-viewport layer
+   with the default auto becomes the hit target for every pointer event in the frame
+   and starves the canvas of firing AND aim-facing at once. That has shipped once. So
+   the opt-in is per-slot, 58x58 (well over the 44px minimum), and gated on
+   html.fa-touch, which game/touch.ts only sets after a REAL finger has been seen. A
+   mouse-only machine never reaches this rule at all. */
+html.fa-touch .hud-weapon-slot {
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+/* A tap has to acknowledge itself even when the slot it hit is still cooling — with no
+   press state, a mis-hit and a dead control look identical. */
+html.fa-touch .hud-weapon-slot:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.35);
+}
+html.fa-touch .hud-weapon-slot.is-selected:active { transform: translateY(-1px); }
+/* The digit badge is a keyboard legend. On a device with no keyboard it is a small lie
+   about how the game is played, so the slot keeps its plate and loses the key cap.
+   Capability again, not first-touch: it should never be there to begin with, and a
+   badge that vanishes the moment you touch the screen is worse than one that was never
+   drawn. A touchscreen LAPTOP keeps its badges, because its keys work. */
+html.fa-touch-capable .hud-weapon-key { display: none; }
 /* One-shot pop the instant a weapon comes off cooldown — an unmistakable "usable
    now" beat, not just a border-colour change that's easy to miss mid-fight. */
 .hud-weapon-slot.is-flash { animation: hud-weapon-ready-flash 0.35s ease-out; }

@@ -36,9 +36,23 @@
  *
  * `?aimMode=free` keeps the offset but clamps it to the viewport rectangle instead,
  * so the two models can be compared side by side without a rebuild.
+ *
+ * ── THIRD BACKEND: TOUCH ────────────────────────────────────────────────────
+ * `src/game/touch.ts` adds twin virtual sticks for mobile landscape. It is a BACKEND
+ * behind this same interface, not a mode: nothing here switches off when a finger
+ * appears, so a laptop with a touchscreen keeps its mouse and its keyboard while the
+ * sticks are live. The merge rules are stated at each accessor below, and they are all
+ * the same rule — whichever device the player is actually using wins, and neither can
+ * silence the other.
+ *
+ * The aim stick publishes a screen-space UNIT DIRECTION, which is converted to px here
+ * (against `aimRadiusPx()`, the one owner of that number) and republished through
+ * `aimOffsetPx` — the exact channel pointer lock already uses. So `match.ts` and the
+ * HUD reticle never learn that touch exists, and the two aim models cannot drift apart.
  */
 
 import { audio } from '../audio';
+import { createTouchControls, type TouchControls } from './touch';
 
 const MOVE_KEYS = {
   left: ['KeyA', 'ArrowLeft'],
@@ -83,10 +97,16 @@ export class InputController {
   /** `?aimMode=free` clamps to the viewport rect instead of the aim disc. */
   private readonly freeAim: boolean;
 
+  /** Twin virtual sticks. Inert (and installs nothing at all) without touch support. */
+  private readonly touch: TouchControls;
+  /** Reused for the touch aim offset so polling it every frame allocates nothing. */
+  private readonly touchOffset = { x: 0, y: 0 };
+
   constructor(private readonly canvas: HTMLElement) {
     const sens = queryNumber('aimSens');
     this.sensitivity = sens !== null && sens > 0 ? Math.min(6, sens) : 1;
     this.freeAim = new URLSearchParams(location.search).get('aimMode') === 'free';
+    this.touch = createTouchControls({ canvas });
 
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
@@ -107,8 +127,25 @@ export class InputController {
     return this.weaponIndex;
   }
 
+  /**
+   * Pick a weapon slot directly. Exists for the HUD's weapon bar, which is the touch
+   * equivalent of the `1`-`4` keys — there is no keyboard on a phone, and a weapon you
+   * cannot select is a weapon you do not have.
+   */
+  selectWeapon(index: number): void {
+    if (!Number.isInteger(index) || index < 0 || index >= this.weaponCount) return;
+    this.weaponIndex = index;
+  }
+
+  /** True once the player has actually used touch. QA/diagnostics only. */
+  get touchEngaged(): boolean {
+    return this.touch.engaged;
+  }
+
+  /** Either fire control. Held mouse OR a finger on the aim stick — never one or the
+   * other, so a hybrid device can use whichever is in the player's hand. */
   get attackHeld(): boolean {
-    return this.mouseDown;
+    return this.mouseDown || this.touch.firing;
   }
 
   /** Normalized device coords of the last known mouse position, or null before any
@@ -130,6 +167,18 @@ export class InputController {
    * anything but the character makes the aim stick visibly detach from its own pivot.
    */
   get aimOffsetPx(): { x: number; y: number } | null {
+    // Touch wins while a direction has been given, because on a device with both, the
+    // finger is the thing that just moved. The unit direction becomes an offset at the
+    // FULL aim radius rather than a proportional one: magnitude is normalised away by
+    // `applyAim` and cannot mean anything, and pinning the reticle to the ring is what
+    // the desktop stick's hard clamp already does at full deflection.
+    const dir = this.touch.aimDir();
+    if (dir) {
+      const r = this.aimRadiusPx();
+      this.touchOffset.x = dir.x * r;
+      this.touchOffset.y = dir.y * r;
+      return this.touchOffset;
+    }
     return this.locked ? { x: this.offX, y: this.offY } : null;
   }
 
@@ -164,6 +213,13 @@ export class InputController {
     if (this.keyDown(MOVE_KEYS.right)) x += 1;
     if (this.keyDown(MOVE_KEYS.up)) y -= 1;
     if (this.keyDown(MOVE_KEYS.down)) y += 1;
+    // Additive, then re-clamped, rather than "one backend wins": a held key and a
+    // pushed stick on the same axis must not cancel to zero, and neither device is
+    // allowed to lock the other out mid-match. In practice only one is ever non-zero.
+    if (this.touch.moving) {
+      x = Math.max(-1, Math.min(1, x + this.touch.move.x));
+      y = Math.max(-1, Math.min(1, y + this.touch.move.y));
+    }
     return { x, y };
   }
 
@@ -171,6 +227,7 @@ export class InputController {
   reset(): void {
     this.keys.clear();
     this.mouseDown = false;
+    this.touch.reset();
     if (this.locked) {
       this.offX = 0;
       this.offY = -this.aimRadiusPx();
@@ -178,6 +235,7 @@ export class InputController {
   }
 
   dispose(): void {
+    this.touch.dispose();
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
@@ -241,6 +299,12 @@ export class InputController {
   };
 
   private readonly onMouseMove = (e: MouseEvent): void => {
+    // A moving mouse takes the aim back from a stick that was used earlier — LAST
+    // DEVICE WINS, and it has to, because the touch aim deliberately survives the
+    // finger lifting. On a hybrid laptop, without this one call, a single tap leaves
+    // the mouse permanently unable to aim again. Above the pointer-lock branch on
+    // purpose: a captured mouse is still a mouse, and hybrids can reach that path.
+    this.touch.clearAim();
     if (this.locked) {
       // Under pointer lock clientX/clientY are frozen and meaningless; deltas are the
       // only real signal the browser still provides.
@@ -269,6 +333,9 @@ export class InputController {
   private readonly onBlur = (): void => {
     this.keys.clear();
     this.mouseDown = false;
+    // A finger held while the app is backgrounded never sends its `touchend`, so
+    // without this the fighter walks into a wall for as long as the player is away.
+    this.touch.reset();
   };
 
   private readonly onContextMenu = (e: Event): void => {

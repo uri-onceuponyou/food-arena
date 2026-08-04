@@ -215,7 +215,13 @@ export class GameSession {
     this.stage.scene.add(this.fogRing.root);
 
     this.vfx = new VfxLayer(this.stage.scene);
-    this.hud = createHud(opts.hudRoot, { onRestart: () => this.restart() });
+    // `onSelectWeapon` is the touch equivalent of the 1-4 keys — the HUD's weapon bar
+    // is the only control a phone player has for it. Reads `this.input` lazily, which
+    // is why it may be wired before the controller below exists.
+    this.hud = createHud(opts.hudRoot, {
+      onRestart: () => this.restart(),
+      onSelectWeapon: (index) => this.input.selectWeapon(index),
+    });
     this.hud.setCharacters(this.playerId, this.enemyId);
 
     this.input = new InputController(this.stage.canvas);
