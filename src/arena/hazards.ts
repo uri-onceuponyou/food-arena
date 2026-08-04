@@ -175,11 +175,18 @@ function makeScorchTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d')!;
   const cx = size / 2, cy = size / 2;
 
+  // Round 11: same alphas, same luma band, MORE chroma (HSL 0.61 -> 0.85 on the core
+  // stop). This apron is one of the two surfaces the saturation contract explicitly
+  // lets the arena spend warm chroma on — it is the hazard's own burn mark — and it is
+  // where the budget freed by taking warm hue off the counter rim trim, the plank pads
+  // and the brass pot stack is re-spent, so the whole-frame warm rail holds flat
+  // instead of dropping while 19.1% of environment chroma leaves the cast's band.
+  // Nothing about the mark's VALUE moves, so it still cannot be mistaken for a shadow.
   const base = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.5);
-  base.addColorStop(0, 'rgba(58,26,14,0.5)');
-  base.addColorStop(0.5, 'rgba(66,32,16,0.26)');
-  base.addColorStop(0.78, 'rgba(74,38,18,0.08)');
-  base.addColorStop(1, 'rgba(74,38,18,0)');
+  base.addColorStop(0, 'rgba(66,22,6,0.70)');
+  base.addColorStop(0.5, 'rgba(76,28,8,0.40)');
+  base.addColorStop(0.78, 'rgba(86,34,9,0.14)');
+  base.addColorStop(1, 'rgba(86,34,9,0)');
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, size, size);
 
@@ -193,8 +200,8 @@ function makeScorchTexture(): THREE.CanvasTexture {
     const br = size * (0.03 + rand() * 0.08);
     const g = ctx.createRadialGradient(bx, by, 0, bx, by, br);
     const alpha = 0.14 + rand() * 0.2;
-    g.addColorStop(0, `rgba(32,16,9,${alpha})`);
-    g.addColorStop(1, 'rgba(32,16,9,0)');
+    g.addColorStop(0, `rgba(40,13,4,${alpha})`);
+    g.addColorStop(1, 'rgba(40,13,4,0)');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(bx, by, br, 0, Math.PI * 2);
@@ -221,10 +228,24 @@ function makeHazardGlowTexture(): THREE.CanvasTexture {
   // effectively pale near-white) is exactly what let this glow disappear into a
   // near-white tile under additive blending; a saturated hot red-orange peak still
   // reads as heat even where the additive sum lifts the floor's own bright channels.
+  // ── Round 11: the INSIDE of the ring stopped being empty ────────────────────
+  // The ring marked the damage boundary and the disc it encloses — the ground that
+  // actually hurts you — was drawn at alpha 0. So the hazard's area read as a line,
+  // not as a region, which is the opposite of every telegraph convention in the genre.
+  // Filling it with a low, soft warm wash costs almost nothing in the salience grid
+  // (that metric weights LOCAL CONTRAST at 0.5, and a wide gradient has none) while
+  // making the damage footprint legible as a footprint.
+  //
+  // It also pays for itself in the colour budget. This arena's warm chroma had to come
+  // back up after 19.1% of environment chroma left the cast's hue band, and the
+  // saturation contract is explicit that 0-60 deg belongs to *the cast, the hazards and
+  // the VFX* — so a hazard is the one place the environment may spend warm freely, and
+  // the one place spending it improves readability rather than costing it.
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
-  g.addColorStop(0, 'rgba(255,90,30,0)');
-  g.addColorStop(Math.max(0, ringNorm - 0.22), 'rgba(255,70,20,0)');
-  g.addColorStop(ringNorm - 0.07, 'rgba(255,80,25,0.3)');
+  g.addColorStop(0, 'rgba(255,110,35,0.09)');
+  g.addColorStop(Math.max(0, ringNorm - 0.42), 'rgba(255,95,28,0.13)');
+  g.addColorStop(Math.max(0, ringNorm - 0.22), 'rgba(255,80,22,0.20)');
+  g.addColorStop(ringNorm - 0.07, 'rgba(255,80,25,0.38)');
   g.addColorStop(ringNorm - 0.02, 'rgba(255,110,20,0.7)');
   g.addColorStop(ringNorm, 'rgba(255,60,10,1.0)');
   g.addColorStop(ringNorm + 0.025, 'rgba(230,35,15,0.6)');
@@ -294,7 +315,16 @@ export function buildHazardGround(M: Materials): HazardGround {
 
   // Scorched floor patch — organic, mostly transparent, sits at the same layer as
   // every other floor decal (puddles, wood pads).
+  // Every material built outside `buildMaterials` reaches `tools/tmp/matcover.mjs` as
+  // `(unnamed)` and — because that tool keys its rows on name+hex — the whole family
+  // below collapsed into ONE row reading `(unnamed) #FFFFFF`, measured at 7.5% of
+  // frame at hue 20 deg. That is the third-largest surface in the game sitting inside
+  // the cast's own hue band, and no report named it; `tools/tmp/whomat.mjs` had to be
+  // written to break the row apart. Naming them costs one string each and has no
+  // rendering effect (`THREE.Material.name`), and it makes the hazard's contribution
+  // to the arena's colour budget attributable on the next run instead of the one after.
   const scorchMat = new THREE.MeshBasicMaterial({ map: makeScorchTexture(), transparent: true, depthWrite: false });
+  scorchMat.name = 'hazard:scorch';
   const scorch = new THREE.Mesh(new THREE.PlaneGeometry(R * 2.15, R * 2.15), scorchMat);
   scorch.rotation.x = -Math.PI / 2;
   scorch.position.y = FLOOR_Y.decal;
@@ -310,6 +340,7 @@ export function buildHazardGround(M: Materials): HazardGround {
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
+  glowMat.name = 'hazard:glow';
   const glow = new THREE.Mesh(new THREE.PlaneGeometry(glowPlaneR * 2, glowPlaneR * 2), glowMat);
   glow.rotation.x = -Math.PI / 2;
   glow.position.y = FLOOR_Y.fine;
@@ -325,9 +356,11 @@ export function buildHazardGround(M: Materials): HazardGround {
   const stripeTex = makeHazardStripeTexture();
   const stripeRepeat = Math.max(8, Math.round((2 * Math.PI * R) / 1.0));
   stripeTex.repeat.set(stripeRepeat, 1);
+  const stripeMat = new THREE.MeshBasicMaterial({ map: stripeTex });
+  stripeMat.name = 'hazard:stripe';
   const crisp = mesh(
     new THREE.RingGeometry(R - stripeHalfWidth, R + stripeHalfWidth, 96),
-    new THREE.MeshBasicMaterial({ map: stripeTex }),
+    stripeMat,
     'hazard_ring_crisp'
   );
   crisp.rotation.x = -Math.PI / 2;
@@ -341,7 +374,8 @@ export function buildHazardGround(M: Materials): HazardGround {
   const wispCount = 7;
   for (let i = 0; i < wispCount; i++) {
     const a = (i / wispCount) * Math.PI * 2 + 0.35;
-    const wispMat = flatMat('#FFE6B8', { transparent: true, opacity: 0.28 });
+    const wispMat = flatMat('#FFCE7A', { transparent: true, opacity: 0.30 });
+    wispMat.name = 'hazard:wisp';
     const wisp = mesh(new THREE.ConeGeometry(R * 0.1, R * 0.36, 8, 1, true), wispMat, 'hazard_wisp__no_outline');
     noOutline(wisp);
     wisp.position.set(Math.cos(a) * R * 0.96, 0.04, Math.sin(a) * R * 0.96);
@@ -561,7 +595,15 @@ export function buildPuddleVisual(
   // disc read as an actual SUBSTANCE (thick pooled grease with an oily sheen, or
   // disturbed water with ripples/caustics) rather than a flat colour fill — the only
   // job this layer has now is "look like a puddle," not "signal danger."
-  const surfTex = isGrease ? makeGreaseSurfaceTexture(KPAL.rimLight) : makeWaterSurfaceTexture();
+  // Round 11: this used to read `KPAL.rimLight`, on the (correct at the time) logic
+  // that the sheen streak is the same "edge catching a warm light" job the counter
+  // trim does. `rimLight` has since moved to cool steel — it was the single loudest
+  // non-player cell in the arena and it wore the cast's own hue — and a COOL sheen on
+  // a grease pool would read as water, i.e. it would tell the player the wrong thing
+  // about which hazard he is standing in. Pinned to `flameCore` instead, which is the
+  // warm light-catch this puddle is actually lit by and is reserved chroma, so the
+  // link is to a colour that cannot drift out from under it for hierarchy reasons.
+  const surfTex = isGrease ? makeGreaseSurfaceTexture(KPAL.flame) : makeWaterSurfaceTexture();
   const surf = new THREE.Mesh(
     new THREE.CircleGeometry(R * 0.97, 32),
     new THREE.MeshBasicMaterial({ map: surfTex, transparent: true, depthWrite: false })

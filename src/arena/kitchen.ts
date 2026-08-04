@@ -277,7 +277,13 @@ export const createKitchenArena: ArenaFactory = () => {
   // from the round-5 brief. The pot is inside `propsGroup` now precisely so it gets
   // this line too: it blocks, so it has to carry the arena's blocking cue (it used
   // to ink itself at 0.006, which is what decoration-weight ink looks like).
-  outlineGroup(propsGroup, 0.016);
+  //
+  // `{ merge: true }` bakes every prop's outline hull into ONE mesh instead of one per
+  // prop. Measured: **−45 draw calls per frame** against a per-pixel image change of
+  // 0.0002/255, i.e. free. It is safe here precisely because this is a single
+  // whole-group call at one thickness and one colour — the merge path can only combine
+  // hulls that share a material.
+  outlineGroup(propsGroup, 0.016, undefined, { merge: true });
 
   // Hazard ground marking (visual only — not collidable, not a CoverBox). Scorch +
   // glow ring + heat wisps, radius driven directly off POT.dangerRadius so it always

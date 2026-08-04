@@ -256,20 +256,24 @@ const SHADOW_DIR = { x: -16.35 / SHADOW_DIR_LEN, z: -4.69 / SHADOW_DIR_LEN };
 // player-centred gameplay stations, it showed that MOST of the frame is not this
 // file's to move, which is not what the brief that commissioned this change assumed:
 //
-//   OWNED ELSEWHERE (~53% of frame) — these entries are overridden downstream, so
-//   editing them here changes NOTHING on screen:
-//     floor.ts        tileLight -> #987662 (14.6%), tileDark -> #8A6B58 (9.1%),
-//                     subfloor -> #4E3B2C (7.1%), tealTile -> #5E7F85 (3.2%)
-//     counters.ts     cabinet -> #CE8C2E `stoveCap` (7.3%), cabinetDark -> #4B3F4E
-//                     `coverBody` (4.4%), butcherBlock -> #C9AD7B `prepCap` (3.2%),
-//                     crateSlat -> #3A3040 `coverSkirt` (1.8%)
-//     storage.ts      freezerLid -> #3E8399 `roofMat` (3.5%)
-//   OWNED HERE (~21% of frame): utilityMat 6.1%, woodPad 3.4%, coverPlinthPanel
-//     1.9%, potMetalDark 1.6%, rimLight 1.5%, steelDark 1.4%, flour 1.1%, steel
-//     0.8%, potMetal 0.8%, woodSeam 0.7%, spiceCartBody 0.6%, barrelBodyDark 0.5%,
-//     herbCrateWood 0.5%, burlap 0.5%, freezerBody 0.2%, crateWood 0.2% ...
-//   plus the three grounding-decal materials (9.7% combined), whose colour is the
-//     tint they blend TOWARD, not a surface colour.
+//   OWNED ELSEWHERE — these entries are overridden downstream, so editing them here
+//   changes NOTHING on screen. Re-measured round 11 (6 stations, 1600x900); the hexes
+//   below are the ones actually in the tree, because a stale quote here has already
+//   sent one round chasing a colour that no longer existed:
+//     floor.ts        tileLight (13.0%) / tileDark (13.2%) / subfloor (1.8%) /
+//                     floorGrime (2.4%) / woodPad+woodSeam level+chroma transform
+//     counters.ts     cabinet -> #6F8CAE `stoveCap` (6.2%), cabinetDark -> `coverBody`
+//                     (5.2%), butcherBlock -> `prepCap` (1.6%), crateSlat ->
+//                     `coverSkirt` (2.2%)
+//     storage.ts      freezerLid -> `roofMat`, crateWood -> `lidMat`, potMetal ->
+//                     the lane-pot stack
+//   OWNED HERE: the grounding decals (10.1% combined — `groundedShadowStrong` alone is
+//     7.3%, the third-largest surface in the game), utilityMat 8.4% (via floor.ts's
+//     level transform, but the hue and chroma are this file's), coverPlinthPanel 1.8%,
+//     potMetal 1.6%, rimLight 1.3%, steelDark 1.2%, flour 1.1%, burlap 0.9%, ...
+//   The grounding decals' colour is the tint they blend TOWARD, not a surface colour —
+//     which is exactly why it was overlooked for so long, and why it turned out to be
+//     the cheapest cool chroma in the arena. See `SHADOW_TINT`.
 //
 // The entries below are still re-keyed even where they are currently overridden, so
 // that the day an override is removed the palette already holds the right answer —
@@ -300,24 +304,134 @@ const SHADOW_DIR = { x: -16.35 / SHADOW_DIR_LEN, z: -4.69 / SHADOW_DIR_LEN };
 //                                                             | 7/18 -> **10/18, +0.022**
 //   + storage.ts freezer roof in band   39.5 -> 35.5 (mean 29.8)
 //
-// The two constants in `props/counters.ts` are the single biggest remaining lever in
-// the arena and they are worth more than everything in this file combined: `stoveCap`
-// #CE8C2E arrives at rgb(243,146,11) — HSV saturation 0.95, value 0.95 — over 7.2% of
-// the frame, and `prepCap` #C9AD7B at luma 193 over 3.2%. Against a floor now re-keyed
-// to luma ~89 they are the only surfaces left that out-shout the player, and they flip
-// the saturation metric positive on their own.
+// That prediction was acted on and it landed: `props/counters.ts` took `stoveCap` from
+// #CE8C2E (rgb(243,146,11), HSV 0.95, 7.2% of frame) to the cool #6F8CAE it carries
+// today, and `prepCap` from #C9AD7B at luma 193 down into band. **DO NOT re-derive
+// those two — they are done, and the hexes quoted in older notes no longer exist.**
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ROUND 11 — THE HUE CONTRACT, AND THE MEASUREMENT THAT SETTLED THE WARM RAIL
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// The contract above is right and is now finished rather than re-argued. What this
+// round adds is the number every previous round was missing: WHERE the reference's
+// saturation actually lives, measured per plate rather than as one pooled average.
+//
+//   plate   meanSat   warm    cool    warm/total
+//   bs_01    0.541    0.018   0.521     0.034     <- the plate this floor is keyed to
+//   bs_02    0.447    0.025   0.422     0.055
+//   bs_03    0.708    0.610   0.095     0.865     <- OUTLIER, and it moves the mean
+//   bs_04    0.377    0.082   0.294     0.218
+//   ...      median   0.097   0.348
+//
+// **The recorded reference warm chroma of 0.145 is an artefact of ONE plate.** The
+// plate MEDIAN is 0.097, and the two cool-ground plates that scored 8/10 in this
+// project's own review rounds run 0.018 and 0.025 — a QUARTER of ours (0.064). Every
+// plate's saturation comes from its COOL half: cool chroma median 0.348 against our
+// 0.252, and meanSat 0.493 against our 0.324, which is below all eleven plates.
+//
+// So the answer to "the frame is under-chromatic but must not become warm-heavy" is
+// not a compromise, it is a measurement: **spend the entire deficit on the cool half
+// and hold warm flat.** This round does exactly that, and it does not desaturate one
+// surface (LESSONS §8 — do not become the fourth critic to prescribe that).
+//
+// ── Where the reference actually keeps its chroma, sampled off bs_01 ──────────
+//   mauve paver ground   37.4% of frame   rgb(153,84,108)  hue 339  HSV 0.45  luma 104
+//   teal bush mass                        rgb( 19,133,162) hue 192  HSV 0.88  luma 111
+//   VIOLET BARREL (blocking)              rgb(104, 91,224) hue 246  HSV 0.59  luma 103
+//   pale crate  (blocking)                rgb(161,152,227) hue 247  HSV 0.33  luma 159
+//
+// Ours, measured the same way (`tools/tmp/matcover.mjs`, 6 stations):
+//   tile field  26.2% of frame  rgb(123,86,105)  hue 330  HSV 0.30  luma 93
+//   coverBody    5.2%           rgb( 44,31, 42)  hue 309  HSV 0.30  luma 35
+//   coverSkirt   2.2%           rgb( 33,25, 36)  hue 284  HSV 0.31  luma 27
+//   plinthPanel  1.8%           rgb( 33,21, 46)  hue 269  HSV 0.54  luma 25
+//
+// **Our blocking props render at luma 27-35 where the reference's render at 103-159.**
+// That is the blind critic's finding word for word — *"the only thing selling them as
+// blocking volume is the near-black skirt, which is a darker value than anything in a
+// shipped brawler environment"* — and it is also most of the missing cool chroma,
+// because a near-black surface cannot carry any.
+//
+// ── The three hue families, and they are now disjoint ────────────────────────
+//   WALKABLE   the tile field (rose-mauve, 330-340) and every mat/pad (teal-blue,
+//              198-206). Saturated, mid-value, never dark.
+//   BLOCKING   every CoverBox body, skirt and plinth: VIOLET, 258-268, saturated,
+//              in a three-step value ramp under a bright cap. Nothing else is violet.
+//   CAST       0-60 deg, left to the characters, the hazards and the VFX.
+// The blocking-vs-walkable cue therefore has its HUE half back (STATE.md item 9,
+// DECISIONS-FOR-URI §5): 71 deg between the ground's rose and the cover's violet, on
+// top of the value ramp. Both were previously in the plum family and value alone
+// carried it, which two independent sources called a defect.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+// THE TRADE-OFF CURVE, MEASURED — READ THIS BEFORE ADDING WARM CHROMA BACK
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// This round was steered by two of `arena-scan`'s rails at once and they pull in
+// opposite directions, so it was landed by walking the curve rather than by picking a
+// number. Five full 18-station runs, same tree, same stations:
+//
+//   variant   frame warm   envInCastBand   playerRank(med)   top cells in cast hue
+//   BEFORE      0.0642        0.1906            33.5                37%
+//   a           0.0502        0.0914            21.5                15%
+//   b           0.0670        0.1341            26.5                26%
+//   c           0.0752        0.1519            27.0                30%
+//   d           0.0664        0.1353            24.0                30%
+//   e           0.0594        0.1200            22.5                17%
+//   SHIPPED     0.0599        0.1244            23.0                24%
+//
+// `e -> SHIPPED` is not on the warm curve at all: it is the tile field taken back 8%
+// in VALUE at unchanged hue and chroma, because `tools/tmp/floorprobe.mjs` — the
+// floor's own gameplay acceptance test — failed at `pantry_ne` (R 1.053, PASS is
+// R < 1.0) once the ground rose to luma 106 and started sharing the cast's value band.
+// It cost 0.004 of the collision metric and bought R 0.713 -> 0.536 with all five
+// stations passing and vanish% 14.4 -> 4.6. **Run that probe after ANY floor change;
+// the colour scanner cannot see this failure mode at all.**
+//
+// **Every unit of warm chroma added to the ENVIRONMENT costs hierarchy, monotonically.**
+// That is not a tuning artefact, it is arithmetic: whole-frame warm chroma is
+// env-warm + cast-warm + HUD-warm, the cast is 0.49% of frame and contributes 0.0031,
+// so the only way to raise warm chroma is to put it in the environment — and every warm
+// pixel in the environment is inside the cast's own +/-30 deg band by construction.
+//
+// The one lever that is NOT on this curve is LUMA. `d -> SHIPPED` is the same warm
+// surfaces at 75-78% value: it cost 0.007 of warm chroma and bought 13 points of
+// top-cell collision, because a warm surface only competes with the cast when it shares
+// the cast's VALUE as well as its hue. Spend warm chroma DARK; never at luma ~150.
+//
+// TWO RAILS IN `arena-scan` CONTRADICT EACH OTHER, and that is why two of them are red
+// on an otherwise all-green pass. On the shipped frame:
+//     envShareInCastBand = 0.1200   target 0        (env chroma in the cast's bins)
+//     envWarmShare       = 0.1179   target 0.297    (env chroma at hue < 60)
+// They differ only by the 60-90 deg bin, which this arena measures at 0.00 — **they are
+// the same quantity with opposite targets.** No arena can satisfy both, and the pair
+// floors `envShareInCastBand` at ~0.16 whatever the art does. Flagged for Uri; do NOT
+// try to clear it by warming the environment.
 // ═════════════════════════════════════════════════════════════════════════════
 
 export const KPAL = {
   // ── Floor family ────────────────────────────────────────────────────────────
-  // NOTE: `floor.ts` clones and overrides `tileLight`/`tileDark`/`subfloor` (it is
-  // PARKED, and its overrides are the single largest hue-band offender in the game
-  // — 30.7% of the frame at hue ~21 deg, sat ~0.51). These values are the band this
-  // palette wants; the floor owner has to adopt them for anything to change.
-  tileLight: '#C8B79E',
-  tileDark: '#BCAA92',
-  subfloor: '#5A4C40',
-  border: '#4A3B31',
+  // These four now MATCH `floor.ts`'s overrides rather than contradicting them (the
+  // floor still clones and overrides `tileLight`/`tileDark`/`subfloor`, so the day
+  // that override is retired the palette already holds the right answer — see the
+  // note above `tileLightInst` in that file).
+  //
+  // Rose-mauve, and DELIBERATELY not rotated. `bs_01`'s ground is hue 339 at HSV 0.45
+  // and this element's own review rounds scored that plate 8/10 twice; the defect was
+  // never the hue, it was that ours arrived at HSV 0.30 — 26% of every frame carrying
+  // a third less chroma than the single surface it was copied from. Priced with
+  // `tools/tmp/caphex.mjs` before it was written, then corrected once against the
+  // rendered PNG: #9D657B measured HSV 0.52 at shipped framing and read as bubblegum
+  // rather than fired clay, so it came down one step. #966779 lands on the plate.
+  tileLight: '#8A5F6F',
+  tileDark: '#825969',
+  // The joint seen through the grout gaps. Holds the ~1.7:1 albedo ratio to the tile
+  // that four contradictory critics were finally split down the middle on (see the
+  // `subfloorDark` note in `floor.ts`) — the ratio is unchanged, only the chroma moves.
+  subfloor: '#513841',
+  border: '#4A2F3C',
 
   // The pantry plank pad. This was the arena's single worst blocking-vs-walkable
   // confusion and all three cover-prop critics named it: measured, it rendered
@@ -335,9 +449,29 @@ export const KPAL = {
   // saturation far enough that hue stops carrying information at all (rendered ~0.28
   // against the cap's 0.95). A near-neutral warm grey plank pad reads as floor from
   // any distance; a saturated warm one reads as a counter top lying down.
-  woodPad: '#7B7169',
-  woodSeam: '#5F564F',
-  flour: '#E4DAC4',
+  //
+  // ── Round 11: it stopped being timber, and the reason is a number ────────────
+  // The escape-by-saturation above worked and still lost, because the metric that
+  // matters is not this surface's own chroma, it is how much of the frame sits in the
+  // cast's hue band. Measured: these pads are **6.0% of every frame** — the single
+  // largest surface the arena spends inside 0-90 deg after the hazard itself — arriving
+  // rgb(120,104,88), hue 30, at the same luma (106) as the tile they lie on and 8 deg
+  // from the player's own bun. Two of the six worst hue-collision stations in the arena
+  // are the two pantry corners, and this is what is in them (`pantry_ne` 0.260,
+  // `pantry_sw` 0.267 of env chroma inside the cast band).
+  //
+  // Three rounds tried to make warm timber quiet enough. It cannot be: at any chroma
+  // that still reads as timber it is still the cast's hue, and quieting it only trades
+  // the collision for the "muddy" verdict. So it stops being timber. It is now painted
+  // service decking — the cool blue-grey every commercial kitchen actually has under a
+  // pantry rack — which puts it in the WALKABLE family with the mats instead of in the
+  // cast's. Priced first: arrives rgb(64,107,132), hue 202, HSV 0.52, **luma 100**, so
+  // it keeps the one property that was right (a pad at the tile's own value, which is
+  // what puts a character back at maximum contrast against his ground) and swaps the
+  // one that was wrong.
+  woodPad: '#577182',
+  woodSeam: '#405663',
+  flour: '#E8C98A',
 
   // Pushed more saturated than the original muted tan — see the round-5 saturation
   // note on `buildMaterials`: cabinets are some of the biggest cover surfaces in
@@ -355,14 +489,19 @@ export const KPAL = {
   // A percentage over a whole frame says how much is clipped, never what is doing
   // it; the mask is one command and settles it.
   // DEAD ENTRIES, kept in band deliberately. `props/counters.ts` clones all three
-  // through `tinted()` and overrides the colour (`stoveCap` #CE8C2E, `coverBody`
-  // #4B3F4E, `prepCap` #C9AD7B), so these reach the screen at ZERO pixels and no
+  // through `tinted()` and overrides the colour (see `stoveCap` / `coverBody` /
+  // `prepCap` there — that file is the only place their live hexes exist, and quoting
+  // them here has gone stale twice), so these reach the screen at ZERO pixels and no
   // change here is visible. They are re-keyed anyway so the palette is coherent if
   // those overrides are ever retired — and recorded as dead so no future round
   // spends itself arguing about them, which has now happened twice.
   cabinet: '#A5804A',
-  cabinetDark: '#6B5A4A',
-  butcherBlock: '#C0B096',
+  // BLOCKING's body colour. `props/counters.ts` clones this through `tinted()` for
+  // every CoverBox side (`coverBody`), which is 5.2% of every frame — so the value
+  // here is dead but the one it is overridden with is the second-biggest prop surface
+  // in the arena. Kept in the same violet family so the two files agree.
+  cabinetDark: '#6B5A7A',
+  butcherBlock: '#A08B66',
   // Blue-teal steel — this surface sits front-and-centre on every stove/service top,
   // so its hue is one of the levers pulling the hub out of the orange/tan band. Kept
   // DARK for the exposure reason it always was: a flat glossy top this size, viewed
@@ -388,10 +527,30 @@ export const KPAL = {
   // RESERVED CHROMA — this is emitted light, not a surface. Left alone.
   freezerGlow: '#8FE3FF',
 
-  crateWood: '#9C8467',
-  crateSlat: '#4A4038',
-  burlap: '#9E9482',
-  burlapDark: '#847C6E',
+  crateWood: '#8D6020',
+  // BLOCKING's skirt band — `props/counters.ts` overrides this to `coverSkirt`, the
+  // middle rung of the three-step ramp. Same violet family as `cabinetDark`.
+  crateSlat: '#4A4058',
+  // The arena's DELIBERATE warm note: the reference plates' warm chroma is 0.097
+  // (median), not zero, and the sacks are where that budget is spent now that the
+  // plank pads, the counter rim trim and the brass pot stack have left the cast's band.
+  //
+  // ── The correction that only the RENDERED FRAME caught ──────────────────────
+  // A first pass opened these up to #C29233 and the numbers all improved. The PNG did
+  // not: the sacks came out a bright orange mass at luma 149 — **the hamburger's own
+  // hue AND his own luma, at several times his area**, sitting right behind him at
+  // `pantry_sw`. That is the exact defect this whole round exists to remove, arrived
+  // at from the opposite direction, and no aggregate in the scanner reports it because
+  // in aggregate it reads as "more warm chroma", which is what the warm rail asks for.
+  //
+  // The fix is that CHROMA and LUMA are separable and only one of them was the problem.
+  // #926E26 is #C29233 scaled to 75% value: HSL saturation 0.584 -> 0.587, i.e. the
+  // warm chroma budget is untouched to three decimal places, while luma drops 149 -> 112
+  // and the sacks stop occupying the player's own value band. **Warm chroma is cheap;
+  // warm chroma AT THE CAST'S LUMA is what costs the hierarchy.** Every warm surface in
+  // this palette is now keyed that way.
+  burlap: '#926E26',
+  burlapDark: '#7A551A',
 
   // Cool counterpoint crate — herbs/greens, not another warm produce box. Reads as
   // "cold storage / fresh herbs" against the warm hub. #0E8560 rendered at HSV sat
@@ -401,7 +560,7 @@ export const KPAL = {
   herbCrateSlat: '#215947',
   herbLeafA: '#45A972',
   herbLeafB: '#309079',
-  potteryWarm: '#8E6E5C',
+  potteryWarm: '#8C4C22',
 
   // Decorative tile band ringing the hub — a cool zone the eye can land on before it
   // reaches the warm scorch/hazard ring at the centre. `floor.ts` overrides both
@@ -410,8 +569,13 @@ export const KPAL = {
   tealTile: '#2E8E9C',
   tealTileDark: '#226E7C',
 
-  potMetal: '#888D95',
-  potMetalDark: '#4E5966',
+  // The hazard pot's drum. Measured, `#888D95` arrived rgb(111,120,128) — **HSL
+  // saturation 0.071, below the scanner's own 0.15 grey gate**, i.e. 1.6% of every
+  // frame contributing literally zero chroma in either direction. "Cold grey steel" is
+  // the right read and it does not require being achromatic; this is the same steel
+  // with a blue in it, which is the cheapest cool chroma in the palette.
+  potMetal: '#6E8A9E',
+  potMetalDark: '#3E5A73',
   flame: '#FFB238',
   flameCore: '#FFE9A8',
 
@@ -432,9 +596,16 @@ export const KPAL = {
   // Both are authored BELOW the intended on-screen values: this rig's lighting plus
   // `stage.ts`'s grade add roughly +0.15 saturation and +0.13 value between the
   // authored albedo and the pixel.
+  // Round 11: the grease pool keeps its value and gains chroma (HSL 0.33 -> 0.60 at an
+  // unchanged luma of ~132). It is one of the two places the arena is ALLOWED to be
+  // warm — the contract reserves 0-60 deg for the cast, the HAZARDS and the VFX — and
+  // a slow-hazard reading unmistakably as hot oil is a gameplay win, not a hierarchy
+  // cost, because its salience is a floor decal's, not a highlight's. This is where
+  // the warm chroma that leaves the rim trim, the plank pads and the brass pots is
+  // re-spent, which is what keeps the whole-frame warm rail flat instead of dropping.
   water: '#3F86A8',
   waterCap: PALETTE.waterCap,
-  grease: '#A08350',
+  grease: '#B0802C',
 
   // Warm gold used ONLY as a thin light-catching cap/rim trim along the top edge of
   // counters and backsplashes — the "chamfer that catches a different light angle"
@@ -472,7 +643,25 @@ export const KPAL = {
   // ~142, which lands it near 170. With the floor now re-keyed to luma ~89 that is
   // still a 80-point step against the plum backsplash it edges, i.e. unambiguously a
   // lit chamfer, without being the loudest pixel on screen.
-  rimLight: '#A0906F',
+  //
+  // ── Round 11: the value was never the problem. THE HUE WAS. ─────────────────
+  // A blind critic scoring the arena 6/10 against a reference at 8.5 named three
+  // elements as the whole of its top fix, and this is the second of them, described
+  // without any access to this file: *"the tan-yellow strip running along the front of
+  // both counters."* The scanner independently agreed — the two loudest non-player
+  // cells at `fryer_south` measure rgb(198,160,100) and rgb(188,155,99), hue 36-38,
+  // which is THIS material to within rounding (rgb(199,168,95), hue 42, luma 169), and
+  // it wears the player's own hue.
+  //
+  // Three rounds of value cuts could not fix that, because a chamfer highlight has to
+  // be bright — it is the "edge catching a different light angle" cue the whole
+  // counter rebuild is built on, and the same critic's SECOND fix asks for MORE of it
+  // (*"a chamfered top edge carrying a bright rim"*). So the brightness stays and the
+  // hue goes: this is now the cool steel edge a stainless counter actually has.
+  // Priced: arrives rgb(126,162,190), hue 206, luma 156 — 13 luma quieter than the
+  // gold it replaces, still 78 clear of the violet backsplash it edges, and it moves
+  // 1.3% of frame out of the cast's band and into the cool half rather than to grey.
+  rimLight: '#78899A',
 
   // ── Round-5 visual-grammar accents ──────────────────────────────────────────
   // A critic scored this arena 4/10 for having "one visual grammar applied
@@ -486,14 +675,33 @@ export const KPAL = {
   // near-black plum, and ONLY cover ever uses it. A player should be able to tell
   // "this collides" from the colour alone, anywhere in the arena, before reading
   // shape at all.
-  coverPlinth: '#191320',
+  //
+  // ── Round 11: it is no longer NEAR-BLACK, and that was a measured defect ─────
+  // The blind critic: *"The only thing selling them as blocking volume is the
+  // near-black skirt, which is a darker value than anything in a shipped brawler
+  // environment."* Checked against the shipped environment rather than argued:
+  // `bs_01`'s violet blocking barrels render at luma **103** and its blocking crates
+  // at **159**; ours rendered at **25**. There is no near-black anywhere in either
+  // reference plate.
+  //
+  // Two separate costs, both measured. (1) A luma-25 band under a luma-169 trim pins
+  // the salience grid's local-contrast term at its ceiling inside one cell, and those
+  // are exactly the cells that outranked the player at 15 of 18 stations. (2) A
+  // near-black surface cannot carry chroma at all, so 3.6% of the frame was
+  // contributing nothing to a frame measured as under-chromatic overall.
+  //
+  // Lifted to a violet that is still unambiguously the darkest band on any prop
+  // (arrives luma 39 against a floor at 108 and a cap at 143) and now genuinely
+  // saturated — HSL 0.53. It is also the anchor of the three-step ramp the same critic
+  // asked for; see `props/counters.ts`, where the whole ladder is set out.
+  coverPlinth: '#2E2440',
   // Round-7: the backsplash WALL specifically (see `coverPlinthPanel` in
   // `buildMaterials`) needs a touch more headroom than the reserved trim colour
   // above — a texture `map` is multiplicative against the base colour, and
-  // `coverPlinth` is dark enough (RGB ~25,19,32) that even a strong texture has
-  // almost no absolute range left to show. A little lighter, still unmistakably the
-  // same near-black plum family, so the panel-seam texture actually reads.
-  coverPlinthPanel: '#332A3D',
+  // `coverPlinth` is dark enough that even a strong texture has almost no absolute
+  // range left to show. A little lighter, still unmistakably the same violet family,
+  // so the panel-seam texture actually reads.
+  coverPlinthPanel: '#4A3660',
 
   // HAZARD — replaces the old pale-gold "crisp ring" that sat almost exactly the
   // tile's own hue+value (the critic's literal complaint: "faint warm glow,
@@ -526,8 +734,8 @@ export const KPAL = {
   // from chroma. Nothing in the arena reads these as a warning any more. Note these
   // are authored below the intended on-screen chroma on purpose: `stage.ts`'s grade
   // pushes saturation UP, so an "already muted" colour still arrives with life in it.
-  greaseRim: '#7E6738',
-  waterRim: '#5C8496',
+  greaseRim: '#8A6A22',
+  waterRim: '#4A8AA6',
 
   // New mid-lane cover (see the four `supply_barrel`s below) — round-7 RECOLOUR:
   // a critic mistook this prop for an explosive hazard and marked the arena down
@@ -604,8 +812,18 @@ export const KPAL = {
   // sit at floor value put the character back at maximum contrast against his
   // ground, and a walkable surface reading as floor is what it should have been
   // doing anyway.
-  utilityMat: '#5A6E78',
-  utilityMatDark: '#43555E',
+  //
+  // ── Round 11: the level was right and the chroma was not ────────────────────
+  // Everything above about VALUE stands and is untouched — these pads still sit at the
+  // tile's own luma, for the measured reason recorded above. What moves is chroma:
+  // #5A6E78 is HSL 0.14, and after `floor.ts`'s `keyServiceMat` it arrived at HSL 0.28
+  // over **8.4% of the frame** — the arena's single biggest cool ground, spending less
+  // than a third of the chroma the reference's equivalent mass carries (`bs_01`'s bush
+  // field: HSL 0.79). Cool chroma is the half of the wheel this arena is short on and
+  // the half it is allowed to spend freely, and this is the largest surface that can
+  // spend it without touching a value relationship anything depends on.
+  utilityMat: '#4B7186',
+  utilityMatDark: '#375868',
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -893,10 +1111,22 @@ export function buildMaterials() {
   // and `butcherBlock` — the two entries every previous colour round spent itself
   // arguing about — reach the screen at effectively ZERO pixels, because
   // `props/counters.ts` clones both through `tinted()` and overrides the colour
-  // (`prepCap` #C9AD7B, `stoveCap` #CE8C2E). Same for `tileLight`/`tileDark`/
-  // `subfloor`/`tealTile`, all overridden inside `floor.ts`. Clones keep the name,
-  // so a probe that reports name AND rendered hex shows the override rather than
-  // silently crediting the palette for a colour it no longer controls.
+  // (`prepCap`, `stoveCap`). Same for `tileLight`/`tileDark`/`subfloor`/`tealTile`,
+  // all overridden inside `floor.ts`. Clones keep the name, so a probe that reports
+  // name AND rendered hex shows the override rather than silently crediting the
+  // palette for a colour it no longer controls.
+  //
+  // ── Its one known blind spot, found round 11 ────────────────────────────────
+  // Materials built OUTSIDE this factory get no name, and `matcover` keys its rows on
+  // name+hex — so every `MeshBasicMaterial({ map, transparent })` in `hazards.ts` and
+  // `fogRing.ts` collapses into ONE row reading `(unnamed) #FFFFFF`, which measured
+  // **7.5% of frame at hue 20 deg**: the third-largest surface in the game, sitting
+  // inside the cast's own hue band, with nothing in the report naming it. It is
+  // actually the grease pool, the water pool, the pot's scorch apron, its caution ring
+  // and the fog, averaged together. `tools/tmp/whomat.mjs` was built to break that row
+  // apart (it walks the scene and prints mesh names per material); the hazard
+  // materials are now named at their construction site so the next run does not need
+  // it.
   for (const [key, m] of Object.entries(mats)) (m as THREE.Material).name = `kpal:${key}`;
 
   return mats;
@@ -953,21 +1183,35 @@ export function noOutline<T extends THREE.Object3D>(o: T): T {
  *
  * It is also the more physically honest choice under this rig — the fill is a sky
  * hemisphere, so what a real contact shadow occludes is the WARM key while the cool
- * bounce keeps arriving. It is deliberately only just cool enough to measure: a
- * visibly blue halo under every prop would be its own defect.
+ * bounce keeps arriving.
+ *
+ * ── Round 11: cool-NEUTRAL was half the idea. It is now cool-CHROMATIC. ────────
+ * rgba(10,10,17) is HSL saturation 0.26 at luma 10, and blended over the floor it
+ * arrived at HSL **0.155** across the three decal materials' combined **10.1% of the
+ * frame** — barely above the scanner's 0.15 grey gate. So the tenth of every frame
+ * that these decals own was, in chroma terms, dead space sitting on top of the
+ * arena's most chromatic surface and diluting it.
+ *
+ * A deep INDIGO instead of a cool near-neutral fixes that without changing what the
+ * decal does: the alpha, the falloff, the offset and the luma are all untouched, so
+ * every grounding measurement above still holds. Both reference plates do exactly
+ * this — `bs_01` and `bs_02` shade with a saturated violet, never with grey — and it
+ * is the same physical argument one step further: what a contact shadow leaves behind
+ * IS the sky's own colour, and this rig's sky is blue.
  */
-const SHADOW_TINT = (alpha: number) => `rgba(10,10,17,${alpha})`;
+const SHADOW_TINT = (alpha: number) => `rgba(16,10,36,${alpha})`;
 
 function makeContactShadowTexture(): THREE.CanvasTexture {
   const size = 128;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  // Tint: COOL-neutral, not warm-black. See `SHADOW_TINT` note below.
+  // Tint: deep INDIGO, not warm-black and not grey. See the `SHADOW_TINT` note above —
+  // these stops share that constant's reasoning and must move with it.
   const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, 'rgba(10,10,17,0.55)');
-  g.addColorStop(0.55, 'rgba(10,10,17,0.28)');
-  g.addColorStop(1, 'rgba(10,10,17,0)');
+  g.addColorStop(0, SHADOW_TINT(0.55));
+  g.addColorStop(0.55, SHADOW_TINT(0.28));
+  g.addColorStop(1, SHADOW_TINT(0));
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
   const tex = new THREE.CanvasTexture(canvas);

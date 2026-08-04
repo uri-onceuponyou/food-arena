@@ -308,7 +308,12 @@ export function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Grou
   // MORE saturated of the pair rather than the less. Now rgb(202,177,130), luma 179,
   // sat 0.36: still unmistakably the crate's bright cap (64 luma over the pad), still
   // bare pine, no longer the loudest thing in the pantry.
-  const lidMat = tinted(M, M.crateWood, '#BFAE96');
+  // Round 11: same luma band, more chroma (HSL 0.24 -> 0.37). Bare pine is one of the
+  // two places the arena deliberately keeps warm chroma — small, mid-value, never in
+  // the salience grid's top cells — so it pays part of what the rim trim, the plank
+  // pads and the brass stack give back. The 64-luma step over the pad below it, which
+  // is what this constant exists for, is unchanged.
+  const lidMat = tinted(M, M.crateWood, '#B49560');
   addCoverSides(g, bw, bd, y0, h1 - capT, M.cabinetDark, M.crateSlat, 0.05, 'crate_bottom');
   addCoverCap(g, wM, dM, y0 + h1, capT, lidMat, 'crate_bottom_lid');
 
@@ -451,7 +456,7 @@ export function buildFlourSack(M: Materials, wM: number, dM: number): THREE.Grou
   // band (81) that made a `crateSlat` deck read as a hole.
   const kick = addCoverPlinth(g, M, wM, dM, 0.1);
   const deckH = 0.34;
-  const deckMat = tinted(M, M.crateSlat, '#A89478');
+  const deckMat = tinted(M, M.crateSlat, '#96681F');
   const deck = mesh(roundedBox(wM * 0.98, deckH, dM * 0.98, 0.03), deckMat, 'sack_pallet');
   deck.position.y = kick + deckH / 2;
   g.add(deck);
@@ -534,8 +539,23 @@ export function buildFlourSack(M: Materials, wM: number, dM: number): THREE.Grou
 export function buildLanePots(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
   const base = Math.min(wM, dM);
-  const brass = tinted(M, M.potMetal, '#B08A3C');
-  const brassDark = tinted(M, M.potMetalDark, '#6E5324');
+  // ── Round 11: brass -> VERDIGRIS, and the semantic above is untouched ────────
+  // The whole point of this pair is "NOT the hazard's cold grey steel", and patinated
+  // copper satisfies that at least as well as brass does — it is still an aged copper
+  // vessel, still nothing like the pot's drum, still its own landmark. What forced the
+  // move is that brass was the arena's most saturated warm object after the hazard
+  // itself: measured, `#B08A3C` arrived rgb(124,87,15) — HSL saturation **0.75**, hue
+  // **40 deg**, which is the hamburger's own bun to within two degrees — over 0.8% of
+  // frame across three stacked drums that read as one bright gold mass. A blind
+  // critic's headline finding was that the environment spends the cast's exact hue on
+  // its most attention-grabbing elements; on chroma-per-pixel this was the worst
+  // offender per unit area in the arena.
+  // Priced first: `#2E8F82` arrives rgb(12,98,87), hue 172, HSV 0.88, **HSL 0.78** —
+  // so the prop keeps every bit of its loudness and simply spends it on the half of
+  // the wheel the environment is allowed to own. It is also the arena's only 170-deg
+  // hue, 22 deg off the herb crate and 21 off the freezer, so it stays a landmark.
+  const brass = tinted(M, M.potMetal, '#2E8F82');
+  const brassDark = tinted(M, M.potMetalDark, '#215F58');
 
   // A square wooden crate base, NOT the hazard's round dark foot. This also gives the
   // prop the same near-black plinth ledge every other CoverBox has.

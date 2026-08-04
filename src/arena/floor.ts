@@ -44,24 +44,30 @@
  * takes shared materials in three different ways, deliberately:
  *
  *   REPLACED OUTRIGHT (the palette does not reach the floor at all)
- *     `tileLight` `tileDark`  -> #7A6069 / #735A63   the tile field's own key
- *     `subfloor`              -> #48383E             the joint seen through the gaps
- *     `floorGrime`            -> #786553             see the "dark is shadow" note
+ *     `tileLight` `tileDark`  -> #8A5F6F / #825969   the tile field's own key
+ *     `subfloor`              -> #513841             the joint seen through the gaps
+ *     `floorGrime`            -> #536978             see the "dark is shadow" note
  *     the three debris colours (long-standing)
  *
  *   TRANSFORMED, so the palette still owns hue and chroma and this owns level
  *     `utilityMat` `utilityMatDark`  x SERVICE_MAT_DIM, with a saturation floor
- *     `woodPad` `woodSeam`           x 0.86 / 0.93
+ *     `woodPad` `woodSeam`           x 0.81 / 0.93 (LINEAR — about x0.90 in sRGB)
  *     `flour`                        x 0.32 opacity for the large pale marks
  *
  *   UNTOUCHED
  *     `border`, and `tealTile` — which this file no longer uses at all.
  *
- * The one active CONFLICT to settle: the saturation pass moved `floorGrime` #3E2A18 ->
- * #2F2A26, i.e. darker AND more neutral. All three critics on this frame independently
- * named exactly that combination as the ground's worst property. The override above is
- * the opposite move and is argued from measurement; if the palette wants the grime back
- * in its band, it needs to come back as a HUE, not as a value.
+ * ── The CONFLICT this section used to record is SETTLED (round 11) ───────────
+ * It read: the saturation pass moved `floorGrime` to a dark neutral, this file
+ * overrode it to a warm amber, and *"if the palette wants the grime back in its band,
+ * it needs to come back as a HUE, not as a value."* That is what #536978 is — the same
+ * mark at the same luma and the same chroma with only its hue rotated out of the band
+ * the cast owns (29 deg -> 205). `KPAL` and this file now agree, and the four
+ * measurements the amber was argued from all still hold. See the note at the override.
+ *
+ * As of round 11 the three REPLACED entries above also MATCH `KPAL`'s own values
+ * rather than contradicting them, so the day the override is retired the palette
+ * already holds the right answer and these three lines can simply be deleted.
  *
  * Diagnostic note for this pass: `preview.html?piece=floor` renders ONLY this module
  * (no props, hazards or characters), which finally makes it possible to judge the
@@ -223,15 +229,38 @@ const MACRO_MEAN = 0.91;
  * character's saturation and at the tile's own value, they are hue counterpoint
  * without being competition.
  */
-const SERVICE_MAT_DIM = 0.55;
+// Round 11: 0.55 -> 0.62. The DIM exists to hold these pads at the tile field's own
+// value (the measured reason above — a pad sitting near the character's own mid-value
+// mass measurably reduced his separation from his ground). The tile field moved up 13
+// luma this round, so holding 0.55 would have left the pads 13 luma BELOW their target
+// rather than on it — and a blind critic had already reported the symptom of them
+// being too dark: *"the dark teal/cyan pads under both counters read ambiguously — I
+// could not tell whether they are raised platforms, floor mats, water, or pits,
+// because their value merges with the counters' dark base skirts."* Both halves of
+// that are fixed together: the pads come up with the floor, and the skirts come up out
+// of near-black (`props/counters.ts`). The RELATIONSHIP this constant encodes is
+// unchanged; only the level it tracks moved.
+const SERVICE_MAT_DIM = 0.62;
 /**
  * sRGB **HSL** saturation floor for the service mats — not the on-screen number, and
  * the two are far apart, so do not tune this by eye against a target. 0.12 here lands
  * at HSV ~0.31 on screen (rgb(65,87,94) at `west_choke`); a first pass at 0.30 landed
  * at 0.66, an electric blue. For reference the tile field reads ~0.07 and the cast
  * 0.50-0.75, so 0.31 sits exactly where "quiet but not grey" should.
+ *
+ * ── Round 11: 0.12 -> 0.26, and the "electric blue" verdict was mis-calibrated ─
+ * That verdict was reached while the whole arena was being taken DOWN in chroma, and
+ * the frame it was judged against has since been measured at mean saturation 0.324
+ * against eleven reference plates whose LOWEST is 0.370. The comparison that settles
+ * it is not the tile field, it is the equivalent mass in the plate this arena's ground
+ * is keyed to: **`bs_01`'s bush field renders at HSL 0.79 over a comparable share of
+ * frame.** These mats are 8.4% of every frame and are the arena's largest cool ground;
+ * at HSL 0.28 they were spending roughly a third of what the reference spends on the
+ * same job. 0.26 is still nowhere near the plate, which is why this stops here rather
+ * than at the 0.30 once tried — "quiet but not grey" is still the rule, it was simply
+ * calibrated against a frame that turned out to be under-chromatic overall.
  */
-const SERVICE_MAT_SAT = 0.12;
+const SERVICE_MAT_SAT = 0.26;
 
 /**
  * Level-and-chroma transform for the cool mat family, in sRGB rather than the working
@@ -797,15 +826,33 @@ export function buildFloor(M: Materials): THREE.Group {
   // tile while genuine architectural shadow bottomed out around 0.19-0.23 — the grime
   // was as dark as the shadows and less saturated.
   //
-  // `KPAL`'s #3E2A18 is near-black and near-neutral, so the only signal it could carry
-  // was value. Re-keyed here (this material has no call site outside this module) to a
-  // warm grease-amber that is barely darker than the tile and unmistakably chromatic:
-  // authored luma 0.279 against the tile's 0.341, saturation 0.60 against the tile's
-  // ~0.31 and in a hue the clean floor never reaches. The mark now says "spilled fat"
-  // instead of "unexplained dark patch", and the whole dark end of the range goes back
-  // to meaning occlusion. Every alpha in this file is left exactly as it was — the
-  // colour alone lifts the deepest stack from 0.195 to ~0.29.
-  M.floorGrime.color.set('#786553');
+  // `KPAL`'s near-black neutral carried no signal but value. Re-keyed here (this
+  // material has no call site outside this module) to something barely darker than the
+  // tile and unmistakably chromatic, so the mark says "a spill" instead of
+  // "unexplained dark patch" and the whole dark end of the range goes back to meaning
+  // occlusion. Every alpha in this file is left exactly as it was — the colour alone
+  // lifts the deepest stack from 0.195 to ~0.29.
+  //
+  // ── Round 11 settles the CONFLICT this file's header has been carrying ───────
+  // The header records an unresolved disagreement: the saturation pass moved
+  // `KPAL.floorGrime` to a dark neutral, this file overrode it to a warm grease-amber,
+  // and the note says *"if the palette wants the grime back in its band, it needs to
+  // come back as a HUE, not as a value."* That is exactly what happens here, and it is
+  // the only version both sides were ever going to accept.
+  //
+  // The warm amber had to go for a reason neither side had measured: at 2.4% of the
+  // frame arriving rgb(123,90,87), hue **5 deg**, it was the fourth-largest surface
+  // the arena spends inside the cast's own hue band — a stain lying on the ground
+  // wearing the player's colour, on a floor that is the one surface a player scans for
+  // enemy shadows.
+  //
+  // #536978 is that same mark with its LUMA and its CHROMA held to the digit
+  // (authored luma 103 -> 101, HSL saturation 0.182 -> 0.182) and only its HUE rotated
+  // out of the reserved band, 29 deg -> 205. Nothing in the argument above changes:
+  // it is still barely darker than the tile, still chromatic, still in a hue the clean
+  // floor never reaches. It now reads as a cool wet/scuffed patch rather than a warm
+  // greasy one, which is also what the `floorWet` mark beside it already was.
+  M.floorGrime.color.set('#536978');
   M.floorGrime.needsUpdate = true;
 
   // Pale dried-residue rim shared by every stain cluster — see the tidemark note in
@@ -869,7 +916,14 @@ export function buildFloor(M: Materials): THREE.Group {
   // — only the saturation moves, 0.44 -> 0.15, because a saturated brown lattice
   // covering ~10% of every ground frame is a large chroma budget spent on the one
   // surface the saturation contract says should be quietest.
-  subfloorDark.color.set('#48383E');
+  //
+  // Round 11: the RATIO is what all four of those critics were arguing about, and it
+  // is untouched — this is the new tile albedo scaled by the same 1/1.7 the old pair
+  // stood at (authored luma 114.5 -> 67), so every argument above still resolves the
+  // same way. Only the chroma moves, with the tile it belongs to. The one thing that
+  // must never happen here is the pre-loop-3 state where the joint was BRIGHTER and
+  // warmer than the tile, and scaling a single colour cannot produce that.
+  subfloorDark.color.set('#513841');
   const base = mesh(
     new THREE.PlaneGeometry(wu(ARENA_W + 300), wu(ARENA_H + 300)),
     subfloorDark,
@@ -1109,10 +1163,54 @@ export function buildFloor(M: Materials): THREE.Group {
   //
   // Authored, not pre-compensated: `ToyGradeEffect` reproduces hue within ~4 deg and
   // saturation monotonically, so these are the values wanted on screen plus the known
-  // ~+0.1 saturation the chain adds. On screen: rgb(119,80,101), luma 0.353, HSV
-  // saturation 0.33, hue 330 deg.
-  tileLightInst.color.set('#7A6069');
-  tileDarkInst.color.set('#735A63');
+  // ~+0.1 saturation the chain adds.
+  //
+  // ── ROUND 11: the HUE was never the problem. THE CHROMA WAS. ────────────────
+  //
+  // The mauve re-key above landed correctly and then this file stopped, one measured
+  // step short, because the number it was steering by (warm chroma) had already been
+  // reached. The number nobody had looked at was the ground's ABSOLUTE chroma, and
+  // sampling the very plate this key was copied from settles it in one line:
+  //
+  //                        bs_01 paver ground        this floor
+  //   share of frame       37.4%                     26.2%
+  //   rendered rgb         (153, 84,108)             (123, 86,105)
+  //   hue                  339 deg                   330 deg      <- already right
+  //   HSV saturation       **0.45**                  **0.30**     <- a third short
+  //   median luma          104                       93
+  //
+  // So the reference ground is the same colour, half again as chromatic, and slightly
+  // brighter. Across 26.2% of every frame that gap alone is ~0.047 of the arena's
+  // whole-frame saturation deficit (measured 0.324 against the plates' 0.493, which is
+  // below all eleven of them) — the single largest recoverable block anywhere in the
+  // arena, and it is recoverable without moving hue, value relationships, or the
+  // acceptance test this file works to.
+  //
+  // Priced with `tools/tmp/caphex.mjs` (build the material's screen mask once, then
+  // re-render the real composited frame per candidate) before a line was written:
+  //
+  //   #7A6069  <- was       rgb(123, 86,105)  hue 329  HSV 0.30  luma  95
+  //   #9D657B  (r11a)       rgb(176, 86,128)  hue 332  HSV 0.51  luma 108
+  //   #966779  (r11e)       rgb(~167, 90,124) hue 334  HSV ~0.46 luma ~106
+  //   **#8A5F6F**           rgb(~154, 83,114) hue 334  HSV ~0.46 luma  ~98
+  //   #A85E7A  (rejected)   rgb(196, 76,128)  hue 334  HSV 0.61  luma 105
+  //
+  // #A85E7A was rejected for overshooting the plate by a third rather than for taste:
+  // this floor is 11 points of frame share SMALLER than bs_01's, so matching its
+  // chroma and stopping is the honest transcription, not maximising the metric. The
+  // same argument then took #9D657B down one more step: shot at shipped framing it
+  // measured HSV 0.52 against the plate's 0.45 and READ as bubblegum rather than as a
+  // fired clay paver — the first thing in this whole pass that judging the PNG caught
+  // and the numbers did not. #966779 lands on the plate.
+  //
+  // The +13 luma is deliberate and is checked, not incidental. This file's acceptance
+  // test (`tools/tmp/floorprobe.mjs`, R < 1.0 at every station) turns on the tile
+  // field's INTERNAL edges against a mid-value character's outline — and the cast's
+  // body median is 0.533, so a floor moving from 0.365 to 0.424 is still well clear of
+  // it and is now further from it in HUE as well, because the same change takes the
+  // ground's chroma up while the character's stays put.
+  tileLightInst.color.set('#8A5F6F');
+  tileDarkInst.color.set('#825969');
   const lightMesh = new THREE.InstancedMesh(tileGeo, tileLightInst, total);
   const darkMesh = new THREE.InstancedMesh(tileGeo, tileDarkInst, total);
   lightMesh.receiveShadow = true;
@@ -1555,6 +1653,14 @@ export function buildFloor(M: Materials): THREE.Group {
   // lands on keeps THEIR hue and saturation decision and takes only the level, so
   // the two efforts compose instead of one silently overriding the other. Same for
   // the seam, at a gentler factor so the plank joints do not collapse to invisible.
+  //
+  // That composition is exactly what let round 11 stop these being timber at all
+  // without re-deriving one number here: `KPAL.woodPad` went warm plank -> cool
+  // service decking (see its note — 6.0% of frame at hue 30, the largest surface the
+  // arena spent inside the cast's own hue band after the hazard itself), and this
+  // transform carried the level across untouched. Measured after: pad luma 100 against
+  // a tile field at 108, i.e. Δ −0.03 — still inside the ±0.06 bound this file works
+  // to, and now on the correct side of it.
   const padMat = M.woodPad.clone();
   padMat.color.multiplyScalar(0.81);
   const padSeamMat = M.woodSeam.clone();

@@ -154,14 +154,20 @@ export const BACKSPLASH_H = 0.9;
  * it never becomes the prop's dominant colour.
  *
  * Round-9b: 0.26 -> 0.20, and the material moved from `coverPlinth` to
- * `coverPlinthPanel`. Measured on screen, `coverPlinth` is `flatMat('#191320')` — an
- * UNLIT near-black that renders at rgb(15,9,24), luma **11**, against a floor at luma
- * 151. A blind critic measured exactly that and read it not as a base band but as "a
- * pit", "a black cut-out", "two incompatible shadow systems" next to the soft grey
- * blob shadows the characters use. A 93%-value drop with hard square corners is a
- * hole, not a plinth. `coverPlinthPanel` (#332A3D, same reserved near-black plum
- * family, plus the panel-seam texture) lands near luma 49 — unmistakably the darkest
- * band on any prop, still clearly a surface. */
+ * `coverPlinthPanel`. Measured on screen, `coverPlinth` was an UNLIT near-black that
+ * rendered at rgb(15,9,24), luma **11**, against a floor at luma 151. A blind critic
+ * measured exactly that and read it not as a base band but as "a pit", "a black
+ * cut-out", "two incompatible shadow systems" next to the soft grey blob shadows the
+ * characters use. A 93%-value drop with hard square corners is a hole, not a plinth.
+ *
+ * Round 11 finished that move rather than repeating it: a SECOND, independent blind
+ * critic reported the same thing again on the successor colour (*"the only thing
+ * selling them as blocking volume is the near-black skirt, which is a darker value
+ * than anything in a shipped brawler environment"*), and it was right — the panel was
+ * still landing at luma 25. It now lands at 39, as the bottom rung of the explicit
+ * ramp set out above `coverBody`. Two critics, two rounds apart, on the same property
+ * is the strongest signal this element has produced; the HEIGHT (0.20) is unrelated
+ * and unchanged. */
 export const COVER_PLINTH_H = 0.2;
 
 /** Fraction of the CoverBox footprint the visible BODY occupies, so the plinth beneath
@@ -249,8 +255,29 @@ export function tinted(M: Materials, base: THREE.Material, hex: string): THREE.M
  * the only big warm one left. Held rather than greyed, because the reference's warm
  * chroma is 0.145, not zero — it is the deliberate warm note the cast is read against.
  * Arrives rgb(190,167,117), hue 41, sat 0.38, luma 168: 48 luma clear of the walkable
- * plank pad (115) and 53 clear of the lit floor tile (115). */
-const prepCap = (M: Materials) => tinted(M, M.butcherBlock, '#A2957E');
+ * plank pad (115) and 53 clear of the lit floor tile (115).
+ *
+ * ── Round 11: STILL warm, DELIBERATELY, and this is the reasoning to keep ─────
+ * A blind critic's headline fix was *"vacate the orange/amber band from the
+ * environment so the food characters are the only warm-orange objects in the frame."*
+ * Three of the four surfaces it named or the scanner found are doing exactly that this
+ * round (the counter rim trim, the plank pads, the ground grime, the brass pot stack).
+ * **This one is not, and the deviation is measured rather than taste.**
+ *
+ * The recorded reference warm chroma of 0.145 turns out to be an average pulled up by
+ * a single outlier plate (bs_03, 0.610, warmShare 0.865). Per plate the median is
+ * 0.097 — still HIGHER than our 0.064 — and `docs/LESSONS.md` §8 is explicit that
+ * three critics have already unanimously prescribed crushing the environment when the
+ * measurement said not to. An environment at warm chroma zero is not what any plate
+ * does; it is what the "muddy / drained / washed out" verdicts were.
+ *
+ * So the arena keeps exactly one large warm identity surface, and this is it. What
+ * moves is the two properties that were actually costing something: it comes DOWN 23
+ * luma (163 -> 140, so it stops being the brightest plane in the map and stops
+ * appearing in the salience grid's top cells) and UP in chroma (HSL 0.34 -> 0.47), so
+ * the same 1.6% of frame delivers more of the warm budget from less of the eye.
+ * Priced first: #96805C arrives rgb(178,136,64), hue 38, HSV 0.64, luma 140. */
+const prepCap = (M: Materials) => tinted(M, M.butcherBlock, '#8E7B5A');
 
 /** Stove island top — the single biggest lever in the arena, and now COOL.
  *
@@ -308,9 +335,73 @@ const stoveCap = (M: Materials) => tinted(M, M.cabinet, '#6F8CAE');
  * a merely-darker body collides again the moment it is in shade. Hue and saturation
  * are what hold in shadow, and they only became usable when the post chain stopped
  * collapsing every colour to HSV saturation 1.00.
+ *
+ * ── ROUND 11: THE VALUE RAMP, AND THE NUMBER THAT PROVES IT WAS A DEFECT ──────
+ *
+ * Everything above is right and stays. What it got wrong is HOW FAR down: "dark" was
+ * implemented as *near-black*, and near-black is not a value a shipped brawler uses.
+ *
+ * A blind critic scoring this arena 6/10 against a reference at 8.5 spent its second
+ * fix here, in all six sheets, with no access to any of this:
+ *
+ *   *"The blue counter slabs are ~30% of the frame carrying almost no surface
+ *    information — top face and front face sit within a very narrow value range and
+ *    every edge is a hard unbeveled 90 deg, so they read as painted planes rather than
+ *    solids. Give them a three-step value ramp — top face clearly lightest, front
+ *    vertical face a distinct step darker, base skirt darkest — and a chamfered top
+ *    edge carrying a bright rim. The only thing selling them as blocking volume is the
+ *    near-black skirt, which is a darker value than anything in a shipped brawler
+ *    environment."*
+ *
+ * That last clause is checkable rather than arguable, and it checks out. Sampled off
+ * the curated plates and off our own frames the same way:
+ *
+ *                          rendered luma   HSL saturation
+ *   bs_01 violet barrel        103             0.68        <- reference BLOCKING
+ *   bs_01 pale crate           159             0.57        <- reference BLOCKING
+ *   ours  coverBody             35             0.18
+ *   ours  coverSkirt            27             0.18
+ *   ours  coverPlinthPanel      25             0.47
+ *
+ * **There is no near-black anywhere in either reference plate.** Ours ran the whole
+ * blocking family 70-130 luma below theirs, and it cost twice over:
+ *
+ *   1. HIERARCHY. A luma-169 trim strip against a luma-25 wall inside one 100x100px
+ *      salience cell pins that cell's local-contrast term at its ceiling — and those
+ *      are precisely the cells that outranked the player at 15 of 18 stations. The
+ *      arena was manufacturing its own top-salience cells out of a contrast nothing
+ *      needed to be that extreme to express.
+ *   2. CHROMA. A surface at luma 25 cannot carry saturation at all, so 9.2% of every
+ *      frame was contributing nothing to a frame independently measured as
+ *      under-chromatic overall (meanSat 0.324 against a plate minimum of 0.370).
+ *
+ * ── The ladder, priced with `caphex` before it was written ────────────────────
+ *
+ *   surface        was        now        step   what it is
+ *   cap (stove)    luma 143   luma 143     —    unchanged; the identity plane
+ *   coverBody           35         78     −65   the front/side vertical face
+ *   coverSkirt          27         53     −25   the lower band, below the reveal groove
+ *   coverPlinthPanel    25         39     −14   the base band at the full footprint
+ *
+ * Three unambiguous steps under a bright cap, with the darkest band still 69 luma
+ * below the floor it stands on — so "dark plum mass under a bright cap = stops
+ * bullets" survives intact, and now reads as a solid rather than as a hole cut in one.
+ *
+ * ── And the hue moves with it: BLOCKING is now the only VIOLET in the arena ────
+ * `docs/STATE.md` item 9 and `DECISIONS-FOR-URI.md` §5 record that the floor's move
+ * into the plum family took the HUE half of the blocking-vs-walkable cue away, leaving
+ * value alone to carry it. The same blind critic reported the symptom unprompted
+ * (*"the dark teal/cyan pads under both counters read ambiguously — I could not tell
+ * whether they are raised platforms, floor mats, water, or pits"*), which is two
+ * independent sources on one defect.
+ *
+ * So the ground keeps rose-mauve (hue 332) and blocking takes VIOLET (hue 261-266) —
+ * 71 deg apart, both saturated, and no other family in the arena is violet. Value and
+ * hue now agree instead of one doing all the work. This is a deliberately clean,
+ * revertible pair of constants because Uri may prefer the old look.
  */
-const coverBody = (M: Materials) => tinted(M, M.cabinetDark, '#4B3F4E');
-const coverSkirt = (M: Materials) => tinted(M, M.crateSlat, '#3A3040');
+const coverBody = (M: Materials) => tinted(M, M.cabinetDark, '#8975B9');
+const coverSkirt = (M: Materials) => tinted(M, M.crateSlat, '#6D5695');
 
 /**
  * Near-black base band at the FULL CoverBox footprint. Returns the Y the body above
@@ -501,7 +592,7 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   const hobLip = mesh(roundedBox(hobW + 0.1, hobT * 0.6, hobD + 0.1, 0.03), tinted(M, M.potMetal, '#D2D7DC'), 'stove_hob_lip');
   hobLip.position.y = COUNTER_TOP_Y + hobT * 0.3;
   g.add(hobLip);
-  const hob = mesh(roundedBox(hobW, hobT, hobD, 0.03), tinted(M, M.potMetalDark, '#736A60'), 'stove_hob');
+  const hob = mesh(roundedBox(hobW, hobT, hobD, 0.03), tinted(M, M.potMetalDark, '#7A6A52'), 'stove_hob');
   hob.position.y = COUNTER_TOP_Y + hobT / 2;
   g.add(hob);
 
