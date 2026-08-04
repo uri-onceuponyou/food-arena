@@ -198,6 +198,13 @@
       "w": 150,
       "h": 70,
       "kind": "sink_counter"
+    },
+    {
+      "x": 700,
+      "y": 500,
+      "w": 104,
+      "h": 104,
+      "kind": "boiling_pot"
     }
   ],
   "hazards": [

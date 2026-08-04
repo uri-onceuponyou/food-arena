@@ -13,22 +13,41 @@
  * CHARACTER instead (see `game/vfx.ts`'s slow tint/ring/splash), driven by the
  * read-only `Fighter.terrainSlowFactor` the sim publishes each tick.
  *
- * None of these have a `CoverBox` — hazards are visual-only ground/area effects, not
- * collidable cover — so nothing here goes through `addCover`. The actual `HazardZone`
- * entries (radius, damage, slow factor) stay in `kitchen.ts`, which positions
- * everything this module builds to match those numbers exactly.
+ * The GROUND treatments here (scorch, glow, caution ring, puddles) have no `CoverBox`
+ * — they are visual-only area effects and must stay walkable, which is the whole
+ * point of a hazard you can step into. `buildPot` is the exception: the pot is a
+ * 2.6m-radius, 2.53m-tall opaque vessel and it IS solid, so `kitchen.ts` builds it
+ * through `addCover` like any other blocking prop (see the long note at that call
+ * site for the measurements, and for why the damage ring still fires). Nothing in
+ * this file registers collision itself; the actual `HazardZone` entries (radius,
+ * damage, slow factor) and the pot's `CoverBox` all live in `kitchen.ts`, which
+ * positions everything this module builds to match those numbers exactly.
  */
 
 import * as THREE from 'three';
-import { flatMat, outlineGroup } from '../render/toon';
+import { flatMat } from '../render/toon';
 import { wu, groundPos } from '../units';
 import { POT } from '../game/rules';
 import { puck, mesh, noOutline, buildContactShadow, FLOOR_Y, KPAL, type Materials } from './shared';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Central pot assembly — the hazard's visual, kept separate from `addCover` since
-// the pot has no collision box (matching the prototype: dangerRadius already keeps
-// players well clear of the body before they'd ever touch it).
+// Central pot assembly.
+//
+// This block used to say the pot deliberately had no collision box, "matching the
+// prototype: dangerRadius already keeps players well clear of the body before they'd
+// ever touch it". That was false and it was the bug: `POT.dangerRadius` only makes
+// `sim.ts` apply damage, it never pushes anybody out, so fighters walked into the
+// body and vanished — 0.0% of the silhouette visible at the pot centre, head
+// included, measured at shipped framing. `kitchen.ts` now registers a
+// `POT.bodyRadius * 2` CoverBox for this group via `addCover`; the derivation and
+// the proof that the damage ring still fires are at that call site.
+//
+// Two consequences for the geometry below:
+//   - the group is a child of `propsGroup`, so it takes the arena's 0.016 BLOCKING
+//     ink line along with every other cover prop. It must not ink itself as well.
+//   - `addCover` adds its own rounded, direction-offset grounding decal, exactly as
+//     it does for the spice carts and barrels, which also keep their own tighter
+//     contact ring. Both are kept here for the same reason (see below).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface PotAssembly {
@@ -52,7 +71,7 @@ export function buildPot(M: Materials): PotAssembly {
   // the floor rather than floating on top of it.
   g.add(buildContactShadow(M.contactShadow, bodyR * 2.1, bodyR * 2.1, 1));
   // The pot used to also get a hand-placed BAKED directional shadow here, because it is
-  // the tallest object in the arena and has no CoverBox (so it never runs through
+  // the tallest object in the arena and had no CoverBox (so it never ran through
   // `addCover`). That whole system is retired: ablation measured the baked cast decals at
   // mean 0.127/255 over 0.75% of pixels — five faint slivers, most of them underneath the
   // prop that cast them — while the real shadow map now does the job properly. Removing
@@ -129,7 +148,12 @@ export function buildPot(M: Materials): PotAssembly {
     bubbles.push(bub);
   }
 
-  outlineGroup(solid, 0.006);
+  // No `outlineGroup(solid, 0.006)` here any more. 0.006 is decoration weight — it
+  // is the exact line `kitchen.ts` calls "invisible at gameplay camera distance" —
+  // and the pot now BLOCKS, so it has to carry the arena's reserved blocking ink.
+  // `kitchen.ts` adds this group to `propsGroup` and inks the whole set at 0.016 in
+  // one pass; inking here as well would just stack a second, thinner hull inside it
+  // (`outlineGroup` skips `*__outline` meshes, so the two do not cancel).
 
   return { group: g, steam, bubbles, flame, flameCore };
 }

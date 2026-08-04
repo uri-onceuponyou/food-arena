@@ -11,7 +11,10 @@
  *     four cardinal lanes open, each with a small chokepoint prop sitting in the
  *     lane mouth. This is the classic "danger in the middle, cover on the corners"
  *     BS arena hub — you can dash straight up a lane, but the diagonals are blocked
- *     and the hub itself is lethal to linger in.
+ *     and the hub itself is lethal to linger in. The pot itself is SOLID (see the
+ *     `boiling_pot` CoverBox below): the burning ground is the ring around it, not
+ *     the vessel, so the middle of the map is a pillar you fight around rather than
+ *     a hole fighters vanish into.
  *   - Two big WALK-IN FREEZERS anchor the NW/SE corners: single huge landmark props
  *     that fully block sightlines and give a hard flank route around the hub.
  *   - Two PANTRY clusters (crates + flour sacks) anchor the NE/SW corners: several
@@ -220,23 +223,66 @@ export const createKitchenArena: ArenaFactory = () => {
     build: (w, d) => buildServiceCounter(M, w, d, 'sink'),
   });
 
-  root.add(propsGroup);
-  // BLOCKING gets the heaviest ink line in the arena — roughly 2.5x the pot's own
-  // outline and far past anything decoration ever carries (decoration is never
-  // outlined at all; see `buildFloor`). A thin 0.006 line was invisible at gameplay
-  // camera distance next to the coverPlinth swap above; this is the other half of
-  // "a heavier outline than anything else" from the round-5 brief.
-  outlineGroup(propsGroup, 0.016);
-
   // ── Central hazard — the boiling pot ─────────────────────────────────────────
+  //
+  // The pot IS cover. It used to be the one solid-looking mass in the arena with no
+  // CoverBox at all, on the reasoning (written into `hazards.ts`) that "dangerRadius
+  // already keeps players well clear of the body before they'd ever touch it". The
+  // sim does no such thing — `POT.dangerRadius` only applies damage, it never pushes
+  // anyone out — so a fighter walked straight into a 2.6m-radius, 2.53m-tall opaque
+  // cylinder and DISAPPEARED. Measured at shipped framing, 1600x900, with the player
+  // parked by `?px=/?py=` (`tools/tmp/potvis.mjs`):
+  //
+  //     pot centre        0.0% of the fighter's silhouette visible, head 0.0%
+  //     on the rim (r=52) 1.6% (N) .. 76.4% (SE), head 5.5% .. 44.3%
+  //     at r=68           45.2% .. 101.4%, head 98.2% .. 102.1%
+  //     at r=95 (the ring) 93.0% .. 101.3%, head 98% ..
+  //
+  // and the closing fog funnels BOTH fighters here at the end of every match.
+  //
+  // ── Why a CoverBox and not a visual fix ──────────────────────────────────────
+  // The alternative was to stop the pot swallowing (transparent broth, a shorter
+  // vessel) so a fighter reads as standing IN the boiling pot. Three numbers killed
+  // it: the pot's rim/broth surface sits at 2.53m, `CHARACTER_HEIGHT` is 2.10m, so
+  // the fighter is 0.43m SHORTER than the vessel — no material change reaches them,
+  // only cutting the arena's tallest landmark to roughly waist height would, and
+  // that is a redesign of the hub, not a bug fix.
+  //
+  // ── And the damage mechanic survives, which is the whole question ────────────
+  // `sim.ts` damages any fighter whose CENTRE is within `POT.dangerRadius` = 95wu.
+  // Collision is AABB vs AABB with a 42wu fighter, so a 104wu box blocks centres
+  // only inside |dx| < 73 AND |dy| < 73. 73 < 95: a fighter can stand flush against
+  // the pot on any cardinal side and still burn, in a band 22wu (1.10m) deep —
+  // wider than the fighter's own radius. 36.7% of the damage disc stays standable.
+  // If the box were >= 148wu the hazard could never fire again; it is 104.
+  //
+  // The box is `POT.bodyRadius * 2` — the exact same rules constant `buildPot`
+  // sizes the mesh from, so the collision box cannot drift from the visual. An AABB
+  // around a cylinder is flush on the cardinals and stands off by 21.5wu (1.07m) on
+  // the diagonals; that is the AABB tax every round prop pays, and it costs nothing
+  // in truthfulness because the thing a player reads danger off is the caution-tape
+  // ring traced on r=95, not the pot's own edge.
   const pot = buildPot(M);
   const potPos = groundPos(CENTER.x, CENTER.y);
-  pot.group.position.set(potPos.x, 0, potPos.z);
-  root.add(pot.group);
+  addCover(propsGroup, cover, M, {
+    x: CENTER.x, y: CENTER.y, w: POT.bodyRadius * 2, h: POT.bodyRadius * 2, kind: 'boiling_pot',
+    build: () => pot.group,
+  });
+
+  root.add(propsGroup);
+  // BLOCKING gets the heaviest ink line in the arena — far past anything decoration
+  // ever carries (decoration is never outlined at all; see `buildFloor`). A thin
+  // 0.006 line was invisible at gameplay camera distance next to the coverPlinth
+  // swap above; this is the other half of "a heavier outline than anything else"
+  // from the round-5 brief. The pot is inside `propsGroup` now precisely so it gets
+  // this line too: it blocks, so it has to carry the arena's blocking cue (it used
+  // to ink itself at 0.006, which is what decoration-weight ink looks like).
+  outlineGroup(propsGroup, 0.016);
 
   // Hazard ground marking (visual only — not collidable, not a CoverBox). Scorch +
   // glow ring + heat wisps, radius driven directly off POT.dangerRadius so it always
-  // matches the real hazard exactly.
+  // matches the real hazard exactly. Stays on `root`, NOT in `propsGroup`: it is a
+  // floor decal and must never take the blocking ink line.
   const hazardGround = buildHazardGround(M);
   hazardGround.group.position.set(potPos.x, 0, potPos.z);
   root.add(hazardGround.group);
