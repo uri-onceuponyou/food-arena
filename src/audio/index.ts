@@ -26,6 +26,7 @@
 import { AudioEngine, type AudioState } from './engine';
 import { MatchAudio, type MatchAudioOptions } from './director';
 import { uiClick } from './sounds';
+import { getMusic } from './music';
 
 let engineInstance: AudioEngine | null = null;
 
@@ -104,6 +105,50 @@ export const audio = {
   /** Audible feedback while dragging a volume slider. */
   previewClick(): void {
     getAudioEngine().play(uiClick(), { key: 'ui' });
+  },
+
+  /**
+   * The theme, "Bounce and Bash" — the one real asset in this pillar.
+   *
+   * Separate from `setVolume`/`setMuted` on purpose: music has its OWN level
+   * (people routinely want music under effects) but routes through the same bus,
+   * so the global mute above silences it too. A settings screen wants both.
+   *
+   * `play()` before a user gesture is safe — the browser blocks it, the rejection
+   * is swallowed, and the intent is retried on unlock.
+   */
+  music: {
+    play(): void {
+      getMusic().play();
+    },
+    pause(): void {
+      getMusic().pause();
+    },
+    isPlaying(): boolean {
+      return getMusic().isPlaying();
+    },
+    getVolume(): number {
+      return getMusic().getVolume();
+    },
+    setVolume(v: number): void {
+      getMusic().setVolume(v);
+    },
+    isEnabled(): boolean {
+      return getMusic().isEnabled();
+    },
+    setEnabled(on: boolean): void {
+      getMusic().setEnabled(on);
+    },
+    /** Pull the theme down under a match without stopping it. */
+    duck(factor?: number): void {
+      getMusic().duck(factor);
+    },
+    unduck(): void {
+      getMusic().unduck();
+    },
+    onChange(fn: () => void): () => void {
+      return getMusic().onChange(fn);
+    },
   },
 };
 

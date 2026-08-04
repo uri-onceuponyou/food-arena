@@ -652,6 +652,19 @@ export class AudioEngine {
     return this.ctx;
   }
 
+  /**
+   * The bus input node, or null before unlock.
+   *
+   * Exposed so MUSIC can join the same chain as every synthesised voice — it feeds
+   * `input`, which means it passes the identical soft-clip limiter and the identical
+   * master gain. Global mute therefore silences music provably, without `music.ts`
+   * knowing anything about how mute is implemented. Music carries its own level in a
+   * gain node BEFORE this point, so "music quieter than effects" stays expressible.
+   */
+  get busInput(): GainNode | null {
+    return this.chain?.input ?? null;
+  }
+
   // ── Internals ─────────────────────────────────────────────────────────────
 
   private applyMasterGain(rampSeconds: number): void {

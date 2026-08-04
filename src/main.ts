@@ -23,6 +23,7 @@
  */
 
 import { createShell } from './ui/screens/shell';
+import { audio } from './audio';
 import { PlayerProfile } from './ui/screens/profile';
 import { CHARACTER_IDS, type CharacterId } from './game/rules';
 import type { Route } from './ui/screens/types';
@@ -63,6 +64,15 @@ const shell = createShell({
 });
 
 shell.navigate(bootRoute(profile));
+
+// Start the theme. This is deliberately unconditional and deliberately not awaited:
+// browsers block audio until a user gesture, so this call is expected to be refused on
+// a cold load. The refusal is swallowed and the intent remembered, and `music.ts`
+// retries once the engine reports `running` — which the engine's own gesture listeners
+// keep pursuing, since a first gesture can itself be rejected. Net effect: music starts
+// the moment the player touches anything, from any boot route, with no call site
+// needing to know about autoplay policy.
+audio.music.play();
 
 const boot = document.getElementById('boot')!;
 requestAnimationFrame(() => boot.classList.add('hidden'));
