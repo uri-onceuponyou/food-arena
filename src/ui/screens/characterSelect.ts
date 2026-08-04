@@ -30,12 +30,13 @@ import { injectStyles, rgba } from './theme';
 import { burstConfetti, el } from './fx';
 import { getCharacterStage } from './charStage';
 import { getCachedThumb, requestThumbnails } from './thumbs';
+import { abilityIcon, ensureIconStyles, icon } from '../icons';
 
 /** Stat bar colours, matching the prototype's damage/health/speed semantics. */
 const STAT_ROWS = [
-  { key: 'damage', label: '⚔️ Damage', color: '#D62839' },
-  { key: 'health', label: '❤️ Health', color: '#7CB518' },
-  { key: 'speed', label: '💨 Speed', color: '#1E90D8' },
+  { key: 'damage', icon: 'damage', label: 'Damage', color: '#D62839' },
+  { key: 'health', icon: 'health', label: 'Health', color: '#7CB518' },
+  { key: 'speed', icon: 'speed', label: 'Speed', color: '#1E90D8' },
 ] as const;
 
 /** Stats are authored on a 0-10 display scale in `rules.ts`. */
@@ -85,18 +86,18 @@ function reachLabel(range: number | undefined): string | null {
 function weaponFacts(w: Weapon): string[] {
   const facts: string[] = [];
   if (w.type === 'self' && w.healAmount) {
-    facts.push(`💚 +${w.healAmount} HP`);
+    facts.push(`${icon('heal')} +${w.healAmount} HP`);
   } else if (w.comboParts?.length) {
-    facts.push(`⚔ ${w.comboParts.map((p) => p.damage).join(' + ')}`);
+    facts.push(`${icon('damage')} ${w.comboParts.map((p) => p.damage).join(' + ')}`);
   } else if (w.pellets && w.pellets > 1) {
-    facts.push(`⚔ ${w.damage} × ${w.pellets}`);
+    facts.push(`${icon('damage')} ${w.damage} × ${w.pellets}`);
   } else if (w.damage > 0) {
-    facts.push(`⚔ ${w.damage}`);
+    facts.push(`${icon('damage')} ${w.damage}`);
   }
   const reach = reachLabel(w.range);
-  if (reach) facts.push(`↔ ${reach}`);
-  facts.push(`⏱ ${(w.cooldown / 1000).toFixed(1)}s`);
-  if (w.effect) facts.push(w.effect === 'stun' ? '💫 Stun' : '🐌 Slow');
+  if (reach) facts.push(`${icon('range')} ${reach}`);
+  facts.push(`${icon('timer')} ${(w.cooldown / 1000).toFixed(1)}s`);
+  if (w.effect) facts.push(w.effect === 'stun' ? `${icon('stun')} Stun` : `${icon('slow')} Slow`);
   return facts;
 }
 
@@ -107,6 +108,7 @@ function pickOpponent(player: CharacterId): CharacterId {
 
 export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
   injectStyles('fa-chars-styles', CSS);
+  ensureIconStyles();
 
   const root = el('div', 'fa-screen fa-chars');
   const stage = getCharacterStage();
@@ -114,10 +116,10 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
 
   root.innerHTML = `
     <header class="fa-topbar">
-      <button class="fa-iconbtn" type="button" data-el="back" aria-label="Back to home">◀ Back</button>
+      <button class="fa-iconbtn" type="button" data-el="back" aria-label="Back to home">${icon('back')} Back</button>
       <h1 class="fa-title chars-heading">Choose Your Fighter</h1>
       <div class="fa-topbar-spacer"></div>
-      <div class="fa-chip"><span class="fa-chip-em">🏆</span>Wins <span class="fa-chip-val" data-el="wins">0</span></div>
+      <div class="fa-chip"><span class="fa-chip-em">${icon('medal')}</span>Wins <span class="fa-chip-val" data-el="wins">0</span></div>
     </header>
 
     <div class="chars-body">
@@ -128,7 +130,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
           <span class="fa-title chars-hero-name" data-el="heroname"></span>
           <span class="fa-rarity" data-el="herorarity"></span>
         </div>
-        <button class="chars-equip" type="button" data-el="select">★ Equip</button>
+        <button class="chars-equip" type="button" data-el="select">${icon('star')} Equip</button>
       </section>
 
       <div class="fa-panel fa-panel--flush chars-rosterwrap">
@@ -144,7 +146,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     </div>
 
     <footer class="chars-bottom">
-      <button class="fa-btn fa-btn--primary fa-btn--hero" type="button" data-el="fight">▶ Fight!</button>
+      <button class="fa-btn fa-btn--primary fa-btn--hero" type="button" data-el="fight">${icon('play')} Fight!</button>
     </footer>
 
     <div class="fa-confetti-layer" data-el="confetti"></div>
@@ -181,11 +183,11 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       <img class="chars-card-render" alt="" data-el="render" />
       <span class="chars-card-sheen"></span>
       <span class="chars-card-gloss"></span>
-      <span class="chars-card-art">${def.emoji}</span>
+      <span class="chars-card-art">${icon('avatar')}</span>
       <span class="chars-card-name">${def.name}</span>
       <span class="fa-rarity chars-card-rarity"
             style="background:${RARITY_COLORS[def.rarity]};color:${ink.fg};text-shadow:${ink.shadow}">${def.rarity}</span>
-      <span class="chars-card-playing">⭐</span>
+      <span class="chars-card-playing">${icon('star')}</span>
     `;
     card.addEventListener('click', () => view(id, true));
     rosterEl.appendChild(card);
@@ -214,7 +216,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
   // there, and it is honest: there ARE more characters coming.
   const locked = el('div', 'chars-card chars-card--locked');
   locked.innerHTML = `
-    <span class="chars-card-art">🔒</span>
+    <span class="chars-card-art">${icon('lock')}</span>
     <span class="chars-card-name">More soon</span>
   `;
   rosterEl.appendChild(locked);
@@ -229,7 +231,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     // previously flung to the far edge of the panel where the eye could not
     // associate it with its own bar.
     wrap.innerHTML = `
-      <span class="fa-stat-label">${row.label}</span>
+      <span class="fa-stat-label">${icon(row.icon)} ${row.label}</span>
       <div class="fa-stat-track"><div class="fa-stat-fill"></div><div class="fa-stat-pips"></div></div>
       <span class="fa-stat-val"></span>
     `;
@@ -244,7 +246,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     const equipped = ctx.profile.selected;
     for (const [id, card] of cards) card.classList.toggle('is-playing', id === equipped);
     const isEquipped = viewed === equipped;
-    selectBtn.textContent = isEquipped ? '★ Equipped' : '★ Equip';
+    selectBtn.innerHTML = isEquipped ? `${icon('star')} Equipped` : `${icon('star')} Equip`;
     selectBtn.classList.toggle('is-equipped', isEquipped);
     selectBtn.disabled = isEquipped;
     // The EQUIPPED control on the hero panel is the single place this state is
@@ -279,7 +281,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       const weapon = def.weapons.find((w) => w.name === ability.name);
       const pill = el('div', 'chars-ability');
       pill.innerHTML = `
-        <span class="chars-ability-em">${ability.emoji}</span>
+        <span class="chars-ability-em">${abilityIcon(ability.emoji)}</span>
         <span class="chars-ability-body">
           <span class="chars-ability-name">${ability.name}</span>
           <span class="chars-ability-desc">${ability.desc}</span>
@@ -296,7 +298,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     if (def.hasTrail) {
       const note = el('div', 'chars-ability chars-ability--passive');
       note.innerHTML = `
-        <span class="chars-ability-em">🍯</span>
+        <span class="chars-ability-em">${icon('honey')}</span>
         <span class="chars-ability-body">
           <span class="chars-ability-name">Passive</span>
           <span class="chars-ability-desc">Leaves a damaging speed-boost trail while moving.</span>
@@ -669,7 +671,7 @@ const CSS = `
   border-radius: 11px;
 }
 .fa-chars .chars-ability--passive { background: #FFF0CF; }
-.fa-chars .chars-ability-em { font-size: clamp(1.05rem, 2.4vh, 1.4rem); line-height: 1.2; flex: 0 0 auto; }
+.fa-chars .chars-ability-em { font-size: clamp(1.35rem, 3.2vh, 1.85rem); line-height: 1.2; flex: 0 0 auto; }
 .fa-chars .chars-ability-body { display: flex; flex-direction: column; min-width: 0; }
 .fa-chars .chars-ability-name {
   font-family: 'Rubik', sans-serif;
@@ -691,16 +693,23 @@ const CSS = `
 .fa-chars .chars-fact {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
   padding: 1px 6px;
   background: var(--ink);
   color: var(--cream);
+  /* Ink plate: flip the icon outline, or a stroke-only mark (the range arrows) draws
+     ink on ink and disappears completely. */
+  --fa-ic-ink: #FFF3DE;
   border-radius: 999px;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.58rem, 1.4vh, 0.74rem);
+  font-size: clamp(0.64rem, 1.6vh, 0.82rem);
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
+/* The glyph runs a little larger than its own text. 11px was measured to be below the
+   floor for any mark with internal structure. */
+.fa-chars .chars-fact .fa-ic { font-size: 1.25em; }
 
 /* ── Bottom bar ───────────────────────────────────────────────────────────── */
 .fa-chars .chars-bottom {

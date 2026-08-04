@@ -50,27 +50,31 @@ import {
 } from '../../game/economy';
 import type { Screen, ScreenContext } from './types';
 import { injectStyles, rgba } from './theme';
+import {
+  containerIcon, emojiIcon, ensureIconStyles, hydratePortraits, icon, portraitMarkup,
+} from '../icons';
 import { burstConfetti, el } from './fx';
 
 export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
   injectStyles('fa-trophy-styles', CSS);
+  ensureIconStyles();
 
   const root = el('div', 'fa-screen fa-tr');
   const profile = ctx.profile;
 
   root.innerHTML = `
     <header class="fa-topbar">
-      <button class="fa-iconbtn" type="button" data-el="back" aria-label="Back to home">◀ Back</button>
+      <button class="fa-iconbtn" type="button" data-el="back" aria-label="Back to home">${icon('back')} Back</button>
       <h1 class="fa-title tr-heading">Trophy Road</h1>
       <div class="fa-topbar-spacer"></div>
-      <div class="fa-chip"><span class="fa-chip-em">🪙</span><span data-el="coins">0</span></div>
-      <div class="fa-chip fa-chip--gem"><span class="fa-chip-em">💎</span><span data-el="gems">0</span></div>
+      <div class="fa-chip"><span class="fa-chip-em">${icon('coin')}</span><span data-el="coins">0</span></div>
+      <div class="fa-chip fa-chip--gem"><span class="fa-chip-em">${icon('gem')}</span><span data-el="gems">0</span></div>
     </header>
 
     <div class="tr-body">
       <section class="tr-hero">
         <div class="tr-hero-count">
-          <span class="tr-hero-em">🏆</span>
+          <span class="tr-hero-em">${icon('trophy')}</span>
           <span class="tr-hero-num" data-el="trophies">0</span>
           <span class="tr-delta" data-el="delta"></span>
         </div>
@@ -84,7 +88,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
             <span class="fa-level-xp" data-el="fillxp"></span>
           </div>
         </div>
-        <button class="fa-btn fa-btn--green tr-claimall" type="button" data-el="claimall">✨ Claim</button>
+        <button class="fa-btn fa-btn--green tr-claimall" type="button" data-el="claimall">${icon('sparkle')} Claim</button>
       </section>
 
       <div class="fa-panel fa-panel--flush tr-roadwrap">
@@ -96,7 +100,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
       <div class="tr-inventory" data-el="inventory"></div>
       <div class="tr-bottom-actions">
         <button class="fa-iconbtn tr-odds" type="button" data-el="oddsbtn">ⓘ Drop rates</button>
-        <button class="fa-btn fa-btn--quiet tr-storebtn" type="button" data-el="storebtn">💎 Get Gems</button>
+        <button class="fa-btn fa-btn--quiet tr-storebtn" type="button" data-el="storebtn">${icon('gem')} Get Gems</button>
       </div>
     </footer>
 
@@ -150,7 +154,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
       const pin = el('div', 'tr-pin');
       pin.dataset.el = 'pin';
       pin.innerHTML = `
-        <span class="tr-pin-dot">📍</span>
+        <span class="tr-pin-dot">${icon('pin')}</span>
         <span class="tr-pin-label">${trophies.toLocaleString()}</span>
       `;
       track.appendChild(pin);
@@ -171,6 +175,9 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     if (!pinPlaced) placePin();
 
     roadEl.appendChild(track);
+    // Character nodes carry real portraits; fill in whatever is cached and subscribe
+    // for the rest as `thumbs.ts` renders them.
+    hydratePortraits(track);
     measureTrack();
     if (centreOnPin) centrePin();
   }
@@ -251,10 +258,16 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
         : `<span class="tr-status">${(m.trophies - trophies).toLocaleString()} to go</span>`;
 
     node.innerHTML = `
-      <span class="tr-node-req">🏆 ${m.trophies.toLocaleString()}</span>
-      <span class="tr-node-medal"><span class="tr-node-em">${face.emoji}</span></span>
+      <span class="tr-node-req">${icon('trophy')} ${m.trophies.toLocaleString()}</span>
+      <span class="tr-node-medal"><span class="tr-node-em">${
+        m.reward.type === 'character' ? portraitMarkup(m.reward.id, { crop: 'head' })
+          : m.reward.type === 'container' ? containerIcon(m.reward.kind)
+          : emojiIcon(face.emoji)
+      }</span></span>
       <span class="tr-node-title">${face.title}</span>
-      ${face.payoutNote ? `<span class="tr-node-note">${face.payoutNote}</span>` : ''}
+      ${face.payoutNote ? `<span class="tr-node-note">${
+        face.payoutNote.replace('\u{1FA99}', icon('coin'))
+      }</span>` : ''}
       ${status}
     `;
     return node;
@@ -285,15 +298,20 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     if (claims > 0) {
       q('nextlabel').textContent = 'Ready now';
       q('nextval').innerHTML = claims > 1
-        ? `✨ ${claims} road rewards to claim`
-        : '✨ 1 road reward — tap it on the track';
+        ? `${icon('sparkle')} ${claims} road rewards to claim`
+        : `${icon('sparkle')} 1 road reward — tap it on the track`;
     } else if (progress.next) {
-      const face = milestoneFace(progress.next.reward, profile.unlocked);
+      const nextReward = progress.next.reward;
+      const face = milestoneFace(nextReward, profile.unlocked);
       q('nextlabel').textContent = 'Next reward';
-      q('nextval').innerHTML = `${face.emoji} ${face.title}`;
+      q('nextval').innerHTML = `${
+        nextReward.type === 'character' ? portraitMarkup(nextReward.id, { crop: 'head' })
+          : nextReward.type === 'container' ? containerIcon(nextReward.kind)
+          : emojiIcon(face.emoji)
+      } ${face.title}`;
     } else {
       q('nextlabel').textContent = 'Road complete';
-      q('nextval').textContent = '🏁 Master of the Kitchen';
+      q('nextval').innerHTML = `${icon('flag')} Master of the Kitchen`;
     }
 
     // The bar measures the CURRENT SEGMENT (previous node to next node), so its
@@ -305,7 +323,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     // label is now the one quantity the fill actually represents.
     q('fillxp').textContent = progress.next
       ? `${(progress.next.trophies - profile.trophies).toLocaleString()} to next reward`
-      : `Road complete — ${roadEnd().toLocaleString()} 🏆`;
+      : `Road complete — ${roadEnd().toLocaleString()}`;
 
     // TWO or more, never one.
     //
@@ -314,7 +332,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     // the real target. At two or more it is a distinct BULK action ("Claim 6") that
     // the track cannot offer, so it earns its place. At one, the node IS the answer.
     claimAllBtn.style.display = claims > 1 ? '' : 'none';
-    claimAllBtn.textContent = `✨ Claim ${claims}`;
+    claimAllBtn.innerHTML = `${icon('sparkle')} Claim ${claims}`;
 
     renderInventory();
   }
@@ -333,7 +351,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     if (held.length === 0) {
       const wins = profile.winsToNextChest;
       const hint = el('p', 'tr-inv-empty');
-      hint.innerHTML = `📦 <strong>${wins}</strong> more ${wins === 1 ? 'win' : 'wins'} for a free Chest`;
+      hint.innerHTML = `${icon('chest')} <strong>${wins}</strong> more ${wins === 1 ? 'win' : 'wins'} for a free Chest`;
       invEl.appendChild(hint);
       return;
     }
@@ -345,7 +363,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
       btn.type = 'button';
       btn.dataset.open = kind;
       btn.innerHTML = `
-        <span class="tr-open-em">${def.emoji}</span>
+        <span class="tr-open-em">${containerIcon(kind)}</span>
         <span class="tr-open-body">
           <span class="tr-open-name">${def.name}</span>
           <span class="tr-open-cta">Open</span>
@@ -372,22 +390,44 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     sheetCard.innerHTML = '';
   }
 
+  /**
+   * Icons for a reward's lines, in exactly the order `describeReward()` emits them:
+   * characters, then containers, then coins, then gems.
+   *
+   * Built from the `Reward` rather than from the emoji `describeReward` hands back,
+   * because the model uses the SAME burger emoji for the Hamburger fighter and for
+   * the Hamburger Box. An emoji lookup cannot tell those apart; the call site can,
+   * and does.
+   */
+  function rewardIcons(reward: Reward): string[] {
+    const out: string[] = [];
+    for (const id of reward.characters) out.push(portraitMarkup(id, { crop: 'head' }));
+    for (const [kind, n] of Object.entries(reward.containers) as [ContainerKind, number][]) {
+      if (n) out.push(containerIcon(kind));
+    }
+    if (reward.coins > 0) out.push(icon('coin'));
+    if (reward.gems > 0) out.push(icon('gem'));
+    return out;
+  }
+
   /** The prototype's reveal card, on the real model. */
   function showReward(reward: Reward, heading: string): void {
     const lines = describeReward(reward);
     if (lines.length === 0) return;
+    const marks = rewardIcons(reward);
     const [lead, ...rest] = lines;
     openSheet(`
       <div class="tr-reveal">
-        <div class="tr-reveal-em">${lead.emoji}</div>
+        <div class="tr-reveal-em">${marks[0] ?? emojiIcon(lead.emoji)}</div>
         <p class="tr-reveal-kicker">${heading}</p>
         <p class="tr-reveal-name">${lead.label}</p>
         ${rest.length > 0 ? `<div class="tr-reveal-more">${
-          rest.map((l) => `<span class="tr-reveal-chip">${l.emoji} ${l.label}</span>`).join('')
+          rest.map((l, i) => `<span class="tr-reveal-chip">${marks[i + 1] ?? emojiIcon(l.emoji)} ${l.label}</span>`).join('')
         }</div>` : ''}
         <button class="fa-btn fa-btn--primary tr-sheet-close" type="button" data-el="close">Nice!</button>
       </div>
     `, 'reveal');
+    hydratePortraits(sheetCard);
     burstConfetti(confetti, 50, 28);
   }
 
@@ -415,7 +455,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
         .join(' · ');
       return `
         <section class="tr-odds-block">
-          <h3 class="tr-odds-title">${def.emoji} ${def.name}</h3>
+          <h3 class="tr-odds-title">${containerIcon(kind)} ${def.name}</h3>
           <p class="tr-odds-blurb">${def.blurb}</p>
           <ul class="tr-odds-list">${rows}</ul>
           ${pools ? `<p class="tr-odds-pool">${pools}</p>` : ''}
@@ -426,7 +466,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     openSheet(`
       <div class="tr-sheet-head">
         <p class="tr-sheet-title">Drop rates</p>
-        <button class="fa-iconbtn tr-sheet-x" type="button" data-el="close" aria-label="Close">✕</button>
+        <button class="fa-iconbtn tr-sheet-x" type="button" data-el="close" aria-label="Close">${icon('close')}</button>
       </div>
       <div class="fa-scroll tr-sheet-scroll">
         <p class="tr-sheet-note">Every percentage below is read directly from the reward
@@ -450,17 +490,17 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     const cards = storeProducts().map((p) => {
       const bonus = bonusPercent(p);
       const extras: string[] = [];
-      if (p.coins) extras.push(`🪙 ${p.coins.toLocaleString()}`);
+      if (p.coins) extras.push(`${icon('coin')} ${p.coins.toLocaleString()}`);
       if (p.container) {
-        extras.push(`${CONTAINERS[p.container.kind].emoji} ${CONTAINERS[p.container.kind].name}`);
+        extras.push(`${containerIcon(p.container.kind)} ${CONTAINERS[p.container.kind].name}`);
       }
       return `
         <div class="tr-sku${p.oneTime ? ' is-featured' : ''}">
           ${bonus > 0 ? `<span class="tr-sku-bonus">+${bonus}%</span>` : ''}
           ${p.oneTime ? '<span class="tr-sku-bonus tr-sku-once">ONE TIME</span>' : ''}
-          <span class="tr-sku-em">${p.emoji}</span>
+          <span class="tr-sku-em">${p.container ? containerIcon(p.container.kind) : emojiIcon(p.emoji)}</span>
           <span class="tr-sku-name">${p.name}</span>
-          <span class="tr-sku-gems">💎 ${p.gems.toLocaleString()}</span>
+          <span class="tr-sku-gems">${icon('gem')} ${p.gems.toLocaleString()}</span>
           ${extras.length > 0 ? `<span class="tr-sku-extra">+ ${extras.join(' + ')}</span>` : ''}
           <button class="tr-sku-buy" type="button" disabled>${live ? formatPrice(p.priceUsdCents) : `${formatPrice(p.priceUsdCents)} · Soon`}</button>
         </div>
@@ -469,11 +509,11 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
 
     openSheet(`
       <div class="tr-sheet-head">
-        <p class="tr-sheet-title">💎 Gem Store</p>
-        <button class="fa-iconbtn tr-sheet-x" type="button" data-el="close" aria-label="Close">✕</button>
+        <p class="tr-sheet-title">${icon('gem')} Gem Store</p>
+        <button class="fa-iconbtn tr-sheet-x" type="button" data-el="close" aria-label="Close">${icon('close')}</button>
       </div>
       <div class="fa-scroll tr-sheet-scroll">
-        <p class="tr-soon">🚧 Purchases are not available yet — nothing here can be bought.
+        <p class="tr-soon">${icon('cone')} Purchases are not available yet — nothing here can be bought.
         Every gem in the game is earned on the Trophy Road and out of chests.</p>
         <div class="tr-skus">${cards}</div>
       </div>
@@ -546,7 +586,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
   const last = profile.lastMatch;
   if (last && !last.seen) {
     const sign = last.trophies > 0 ? '+' : '';
-    deltaEl.textContent = `${sign}${last.trophies} 🏆`;
+    deltaEl.innerHTML = `${sign}${last.trophies} ${icon('trophy')}`;
     deltaEl.className = `tr-delta is-on ${last.trophies > 0 ? 'is-up' : last.trophies < 0 ? 'is-down' : 'is-flat'}`;
     profile.markLastMatchSeen();
   }
@@ -826,7 +866,42 @@ const CSS = `
     0 3px 0 rgba(0,0,0,0.35),
     0 0 16px var(--node-glow, transparent);
 }
-.fa-tr .tr-node.is-character .tr-node-em { font-size: clamp(1.2rem, 6vh, 3.4rem); }
+/* Every non-character icon gets its own cream field inside a CLAIMABLE node.
+   Three separate blind critics reported that the coin on the trophy road "does not
+   match" the coin in the top-bar chip. It is the identical SVG; what differs is what
+   is behind it. A claimable node fills gold, so a gold coin on it is a same-hue,
+   same-value collision — and it happens in precisely the state the player is supposed
+   to be drawn to. The medal keeps its gold FILL (fill = state, ring = rarity, which is
+   a contract an earlier critic round established), and the icon gets a disc of its own
+   inside it, so the mark reads identically at every node state and at every size. */
+.fa-tr .tr-node.is-claimable:not(.is-character) .tr-node-em {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76%;
+  height: 76%;
+  border-radius: 50%;
+  background: #FFF8EA;
+  box-shadow: inset 0 0 0 2px rgba(26,18,36,0.22);
+}
+
+/* A character node's portrait FILLS its medallion.
+   Round 1 dropped a whole standing body into a 50px box inside a 96px white ring,
+   and a blind critic called the result an unreadable smear — correctly: the character
+   was about 40px tall inside a widget twice that size, with the rest of the medal
+   spent on empty fill. Head-cropped and edge-to-edge, the same widget becomes the
+   fighter medallion the reference uses, and the medal's own ring keeps carrying
+   rarity exactly as before. */
+.fa-tr .tr-node.is-character .tr-node-em {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  font-size: 0;
+}
+.fa-tr .tr-node.is-character .tr-node-em .fa-ic-portrait { width: 100%; height: 100%; }
+.fa-tr .tr-node.is-character .tr-node-medal { overflow: hidden; }
+/* Keep the claimed-state tick outside the clipped medal. */
+.fa-tr .tr-node.is-character.is-claimed .tr-node-medal { overflow: visible; }
 
 /* THREE node states, and only three.
    locked    = cream fill, quiet
@@ -1103,6 +1178,14 @@ const CSS = `
 }
 .fa-tr .tr-reveal { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
 .fa-tr .tr-reveal-em { font-size: clamp(3rem, 12vh, 5.6rem); line-height: 1; margin-bottom: 4px; }
+.fa-tr .tr-reveal-em .fa-ic-portrait {
+  border: 3px solid var(--ink);
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+}
+/* Every chip in a multi-line reward, and every held-container button, is a dark or
+   mid-tone plate; the icons' ink outline has to flip there or it vanishes into the
+   plate. This is the dark-on-dark failure this project has now shipped three times. */
+.fa-tr .tr-reveal-chip { --fa-ic-ink: #FFF3DE; }
 .fa-tr .tr-reveal-kicker {
   margin: 0;
   font-family: 'Rubik', sans-serif;

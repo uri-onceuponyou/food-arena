@@ -13,6 +13,7 @@
 import { audio } from '../audio';
 import { CHARACTERS, FOG_DAMAGE, FOG_TICK_MS, MATCH_DURATION_MS, type CharacterId, type Weapon } from '../game/rules';
 import type { FighterRole, MatchState } from '../game/state';
+import { abilityIcon, ensureIconStyles, hydratePortraits, icon, portraitMarkup } from './icons';
 
 export interface HudCallbacks {
   onRestart: () => void;
@@ -117,6 +118,7 @@ interface WeaponSlotEls {
 
 export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   ensureStyles();
+  ensureIconStyles();
 
   root.innerHTML = `
     <div class="hud-root">
@@ -322,7 +324,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     mutedShown = m;
     window.clearTimeout(muteTimer);
     if (m) {
-      muteEl.textContent = '🔇 MUTED · M';
+      muteEl.innerHTML = icon('mute') + '<span>MUTED · M</span>';
       muteEl.classList.add('is-on');
       muteEl.classList.remove('is-ok');
       return;
@@ -330,7 +332,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     // Nothing to confirm on the very first paint of an unmuted session — that would
     // put a "sound on" badge on screen at the start of every single match.
     if (first) { muteEl.classList.remove('is-on', 'is-ok'); return; }
-    muteEl.textContent = '🔊 SOUND ON · M';
+    muteEl.innerHTML = icon('sound') + '<span>SOUND ON · M</span>';
     muteEl.classList.add('is-on', 'is-ok');
     muteTimer = window.setTimeout(() => muteEl.classList.remove('is-on', 'is-ok'), 1500);
   }
@@ -370,7 +372,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       slot.className = 'hud-weapon-slot';
       slot.innerHTML = `
         <div class="hud-weapon-cooldown"></div>
-        <div class="hud-weapon-emoji">${w.emoji}</div>
+        <div class="hud-weapon-emoji">${abilityIcon(w.emoji)}</div>
         <div class="hud-weapon-timer" data-role="timer"></div>
         <div class="hud-weapon-key">${i + 1}</div>
       `;
@@ -431,7 +433,24 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       zoneLabelEl.textContent = '\u25B2 OUTSIDE THE ZONE';
       zoneValueEl.textContent = `−${FOG_DPS} HP/s`;
     } else {
-      zoneLabelEl.textContent = 'SAFE ZONE';
+      // ── Deliberately NOT the words "SAFE ZONE" ──────────────────────────────
+      // A whole-arena scan found this pill landing inside the boiling pot's danger
+      // ring at pot_south framing: a label reading SAFE, drawn over the one patch of
+      // floor that kills you. The critic's read was that a player under pressure
+      // would route around the place they are supposed to stand.
+      //
+      // Two changes answer it, and neither moves the pill (its position is earned —
+      // it sits under the clock because the safe radius IS a function of time
+      // remaining, so the two are one column of the same number):
+      //
+      //  1. This readout is about the SCHEDULE, not about the ground beneath it. It
+      //     now says when the edge arrives and never asserts that anywhere is safe.
+      //     The radar keeps the words SAFE ZONE, because the radar labels a PLACE —
+      //     the cream disc on the map — and that label is true there.
+      //  2. The plate is opaque (see the CSS). At 78% alpha the hazard ring showed
+      //     THROUGH the pill, so both meanings occupied the same pixels; an opaque
+      //     plate occludes instead, and the superposition cannot happen at all.
+      zoneLabelEl.textContent = 'ZONE CLOSES';
       // Shown during the countdown too, not just while playing: the ring's schedule is
       // already fixed then, so previewing "how long this spot stays safe" is honest,
       // and it beats a phase-dependent placeholder that teaches the player nothing.
@@ -527,11 +546,16 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       playerCharId = playerId;
       playerName.textContent = CHARACTERS[playerId].name;
       enemyName.textContent = CHARACTERS[enemyId].name;
-      playerEmoji.textContent = CHARACTERS[playerId].emoji;
-      enemyEmoji.textContent = CHARACTERS[enemyId].emoji;
-      floatPlayerEmoji.textContent = CHARACTERS[playerId].emoji;
-      floatEnemyEmoji.textContent = CHARACTERS[enemyId].emoji;
+      playerEmoji.innerHTML = portraitMarkup(playerId, { crop: 'head' });
+      enemyEmoji.innerHTML = portraitMarkup(enemyId, { crop: 'head' });
+      floatPlayerEmoji.innerHTML = portraitMarkup(playerId, { crop: 'head' });
+      floatEnemyEmoji.innerHTML = portraitMarkup(enemyId, { crop: 'head' });
       buildWeaponSlots(CHARACTERS[playerId].weapons);
+      // generate:false is load bearing. This runs at match start; standing up an
+      // offscreen renderer here to make a 24px badge would be a hitch in a live
+      // fight. Character select has already warmed the shared cache in every real
+      // flow, so this is a cache read. See ui/icons/portraits.ts.
+      hydratePortraits(root, { generate: false });
     },
 
     update(state, frame) {
@@ -599,12 +623,13 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         const winnerChar = CHARACTERS[state[winnerRole].characterId];
         const loserChar = CHARACTERS[state[loserRole].characterId];
         gameoverSubtitleEl.innerHTML =
-          `<span class="hud-go-emoji">${winnerChar.emoji}</span>${winnerChar.name}` +
+          `<span class="hud-go-emoji">${portraitMarkup(state[winnerRole].characterId, { crop: 'head' })}</span>${winnerChar.name}` +
           `<span class="hud-go-vs">defeated</span>` +
-          `<span class="hud-go-emoji">${loserChar.emoji}</span>${loserChar.name}`;
+          `<span class="hud-go-emoji">${portraitMarkup(state[loserRole].characterId, { crop: 'head' })}</span>${loserChar.name}`;
+        hydratePortraits(gameoverSubtitleEl, { generate: false });
 
         const elapsedMs = Math.max(0, MATCH_DURATION_MS - state.timeRemaining);
-        gameoverStatsEl.textContent = `⏱ Match time ${formatDuration(elapsedMs)}`;
+        gameoverStatsEl.innerHTML = `${icon('timer')} Match time ${formatDuration(elapsedMs)}`;
       } else {
         gameoverEl.style.display = 'none';
       }
@@ -754,6 +779,10 @@ const CSS = `
 }
 .hud-fighter--player .hud-fighter-emoji { border: 2px solid #3FCB86; }
 .hud-fighter--enemy .hud-fighter-emoji { border: 2px solid #E6493F; }
+/* The badge used to hold a 16px emoji inside a 24px well. A rendered portrait fills
+   the whole well instead, which is a 50% bigger picture in the same layout box and is
+   the treatment every shipped brawler gives its fighter chips. */
+.hud-fighter-emoji .fa-ic-portrait { width: 100%; height: 100%; vertical-align: top; }
 
 .hud-fighter-name {
   font-family: 'Rubik', sans-serif;
@@ -847,11 +876,15 @@ const CSS = `
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: rgba(26,18,36,0.78);
-  border: 3px solid #1a1224;
+  /* OPAQUE, not 78% alpha. This pill can land on top of the boiling pot's danger
+     ring at some framings, and a translucent plate let the ring read straight through
+     a zone readout. Chrome that the world shows through is chrome the player can
+     misread as world paint. It also buys legibility for an 11px readout for free. */
+  background: #1a1224;
+  border: 3px solid #0e0916;
   border-radius: 12px;
   padding: 5px 9px 6px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  box-shadow: 0 3px 0 rgba(0,0,0,0.45);
 }
 .hud-zone-row {
   display: flex;
@@ -1310,7 +1343,19 @@ const CSS = `
   text-transform: uppercase;
   color: #FFF3DE;
 }
-.hud-go-emoji { font-size: 20px; line-height: 1; }
+.hud-go-emoji {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  font-size: 26px;
+  line-height: 1;
+}
+.hud-go-emoji .fa-ic-portrait {
+  width: 100%;
+  height: 100%;
+  vertical-align: top;
+  border: 2px solid #1a1224;
+}
 .hud-go-vs {
   font-weight: 500;
   font-size: 12px;
@@ -1386,6 +1431,7 @@ const CSS = `
 }
 .hud-float--player .hud-float-emoji { border: 1.5px solid #3FCB86; }
 .hud-float--enemy .hud-float-emoji { border: 1.5px solid #E6493F; }
+.hud-float-emoji .fa-ic-portrait { width: 100%; height: 100%; vertical-align: top; }
 
 .hud-float-bar {
   width: 68px;
@@ -1425,6 +1471,9 @@ const CSS = `
   bottom: calc(var(--fa-safe-b, 0px) + 68px);
   display: flex;
   align-items: center;
+  gap: 5px;
+  /* Dark plate: flip the icon outline so the speaker mark does not draw ink on ink. */
+  --fa-ic-ink: #FFF3DE;
   opacity: 0;
   transform: translateY(4px);
   transition: opacity 0.14s ease-out, transform 0.14s ease-out;

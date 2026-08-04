@@ -23,6 +23,7 @@
  */
 
 import { CHARACTERS, RARITY_COLORS } from '../../game/rules';
+import { ensureIconStyles, emojiIcon, hydratePortraits, icon, portraitMarkup } from '../icons';
 import { milestoneFace, nextMilestone } from '../../game/economy';
 import { XP_PER_LEVEL } from './profile';
 import type { Screen, ScreenContext } from './types';
@@ -32,22 +33,23 @@ import { getCharacterStage } from './charStage';
 
 export function createHomeScreen(ctx: ScreenContext): Screen {
   injectStyles('fa-home-styles', CSS);
+  ensureIconStyles();
 
   const root = el('div', 'fa-screen fa-home');
   const stage = getCharacterStage();
 
   root.innerHTML = `
     <header class="fa-topbar">
-      <div class="fa-chip"><span class="fa-chip-em">🙂</span><span data-el="name"></span></div>
-      <div class="fa-chip"><span class="fa-chip-em">🏆</span><span class="fa-chip-val" data-el="trophies">0</span></div>
-      <div class="fa-chip home-chip-coin"><span class="fa-chip-em">🪙</span><span data-el="coins">0</span></div>
+      <div class="fa-chip"><span class="fa-chip-em">${icon('avatar')}</span><span data-el="name"></span></div>
+      <div class="fa-chip"><span class="fa-chip-em">${icon('trophy')}</span><span class="fa-chip-val" data-el="trophies">0</span></div>
+      <div class="fa-chip home-chip-coin"><span class="fa-chip-em">${icon('coin')}</span><span data-el="coins">0</span></div>
       <div class="fa-topbar-spacer"></div>
       <nav class="fa-tabs">
         <button class="fa-tab is-active" type="button">Home</button>
         <button class="fa-tab" type="button" data-go="characters">Foods</button>
         <button class="fa-tab" type="button" data-go="trophies">Trophies</button>
       </nav>
-      <button class="fa-iconbtn" type="button" data-el="settings" aria-label="Settings">⚙️</button>
+      <button class="fa-iconbtn" type="button" data-el="settings" aria-label="Settings">${icon('gear')}</button>
     </header>
 
     <div class="home-middle">
@@ -55,12 +57,12 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
         <div class="home-deals">
           <p class="fa-panel-title">Trophy Road</p>
           <button class="home-deal" type="button" data-go="trophies">
-            <span class="home-deal-icon" data-el="dealicon">📦</span>
+            <span class="home-deal-icon" data-el="dealicon">${icon('chest')}</span>
             <span class="home-deal-info">
               <span class="home-deal-title" data-el="dealtitle">Next reward</span>
               <span class="home-deal-sub" data-el="dealsub"></span>
             </span>
-            <span class="home-deal-price" data-el="dealprice">🏆</span>
+            <span class="home-deal-price" data-el="dealprice">${icon('trophy')}</span>
           </button>
         </div>
       </aside>
@@ -86,7 +88,7 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
         </div>
         <span class="fa-level-label" data-el="lvnext">Lv 2</span>
       </div>
-      <button class="fa-btn fa-btn--primary" type="button" data-el="start">▶ Start Game</button>
+      <button class="fa-btn fa-btn--primary" type="button" data-el="start">${icon('play')} Start Game</button>
     </footer>
 
     <div class="fa-confetti-layer" data-el="confetti"></div>
@@ -113,8 +115,11 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   function renderRoadCard(): void {
     const claims = ctx.profile.claimable.length;
     if (claims > 0) {
-      q('dealicon').textContent = '✨';
-      q('dealtitle').textContent = claims > 1 ? `${claims} rewards ready` : 'Reward ready';
+      q('dealicon').innerHTML = icon('sparkle');
+      // Short on purpose: the title ellipsises inside this narrow rail card, and a
+      // blind critic read the truncated "14 rewards rea..." as the loudest unfinished
+      // tell on the screen. The sub-line already says "Tap to claim".
+      q('dealtitle').textContent = claims > 1 ? `${claims} rewards` : 'Reward ready';
       q('dealsub').textContent = 'Tap to claim';
       q('dealprice').textContent = 'CLAIM';
       root.querySelector('.home-deal')?.classList.add('is-ready');
@@ -123,17 +128,22 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     root.querySelector('.home-deal')?.classList.remove('is-ready');
     const next = nextMilestone(ctx.profile.trophies);
     if (!next) {
-      q('dealicon').textContent = '🏁';
+      q('dealicon').innerHTML = icon('flag');
       q('dealtitle').textContent = 'Road complete';
       q('dealsub').textContent = 'Every reward claimed';
-      q('dealprice').textContent = `🏆 ${ctx.profile.trophies.toLocaleString()}`;
+      q('dealprice').innerHTML = `${icon('trophy')} ${ctx.profile.trophies.toLocaleString()}`;
       return;
     }
     const face = milestoneFace(next.reward, ctx.profile.unlocked);
-    q('dealicon').textContent = face.emoji;
+    // A character milestone shows the real 3D portrait; everything else is a symbol
+    // with no in-world counterpart, so it is a drawn icon. See `ui/icons/index.ts`.
+    q('dealicon').innerHTML = next.reward.type === 'character'
+      ? portraitMarkup(next.reward.id, { crop: 'head' })
+      : emojiIcon(face.emoji);
+    hydratePortraits(root);
     q('dealtitle').textContent = face.title;
     q('dealsub').textContent = `${(next.trophies - ctx.profile.trophies).toLocaleString()} trophies to go`;
-    q('dealprice').textContent = `🏆 ${next.trophies.toLocaleString()}`;
+    q('dealprice').innerHTML = `${icon('trophy')} ${next.trophies.toLocaleString()}`;
   }
 
   function render(): void {
@@ -286,7 +296,7 @@ const CSS = `
   0%, 100% { box-shadow: 0 3px 0 rgba(0,0,0,0.3), 0 0 0 rgba(124,181,24,0); }
   50% { box-shadow: 0 3px 0 rgba(0,0,0,0.3), 0 0 16px rgba(166,226,74,0.85); }
 }
-.fa-home .home-deal-icon { font-size: 1.4rem; line-height: 1; }
+.fa-home .home-deal-icon { font-size: 1.4rem; line-height: 1; flex: 0 0 auto; }
 .fa-home .home-deal-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .fa-home .home-deal-title {
   font-family: 'Rubik', sans-serif; font-weight: 800; font-size: 0.78rem;
@@ -294,6 +304,8 @@ const CSS = `
 }
 .fa-home .home-deal-sub { font-size: 0.66rem; font-weight: 600; color: #4E2C1B; }
 .fa-home .home-deal-price {
+  display: flex; align-items: center; gap: 4px;
+  --fa-ic-ink: #FFF3DE;
   font-family: 'Rubik', sans-serif; font-weight: 800; font-size: 0.72rem;
   background: var(--ink); color: var(--cream);
   border-radius: 999px; padding: 3px 9px; white-space: nowrap;

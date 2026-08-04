@@ -28,24 +28,26 @@ import type { MatchPhase } from '../../game/state';
 import type { Route, Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
 import { el } from './fx';
+import { ensureIconStyles, icon } from '../icons';
 
 export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   if (route.name !== 'match') throw new Error('createMatchScreen: wrong route');
   injectStyles('fa-match-styles', CSS);
+  ensureIconStyles();
 
   const root = el('div', 'fa-screen-bare fa-match');
   root.innerHTML = `
     <div class="match-corner">
-      <button class="match-chip" type="button" data-el="pause" aria-label="Pause">⏸</button>
-      <button class="fa-btn fa-btn--quiet match-exit" type="button" data-el="exit">◀ Menu</button>
+      <button class="match-chip" type="button" data-el="pause" aria-label="Pause">${icon('pause')}</button>
+      <button class="fa-btn fa-btn--quiet match-exit" type="button" data-el="exit">${icon('back')} Menu</button>
     </div>
 
     <div class="match-sheet" data-el="sheet">
       <div class="match-sheet-card">
         <p class="match-sheet-title">Paused</p>
-        <button class="fa-btn fa-btn--primary" type="button" data-el="resume">▶ Resume</button>
-        <button class="fa-btn fa-btn--quiet" type="button" data-el="change">🍟 Change Fighter</button>
-        <button class="fa-btn fa-btn--quiet" type="button" data-el="quit">🏠 Quit to Home</button>
+        <button class="fa-btn fa-btn--primary" type="button" data-el="resume">${icon('play')} Resume</button>
+        <button class="fa-btn fa-btn--quiet" type="button" data-el="change">${icon('swap')} Change Fighter</button>
+        <button class="fa-btn fa-btn--quiet" type="button" data-el="quit">${icon('home')} Quit to Home</button>
       </div>
     </div>
   `;
@@ -87,7 +89,7 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   function setPaused(on: boolean): void {
     if (on) session.pause(); else session.resume();
     sheet.classList.toggle('is-open', on);
-    pauseBtn.textContent = on ? '▶' : '⏸';
+    pauseBtn.innerHTML = on ? icon('play') : icon('pause');
   }
 
   pauseBtn.addEventListener('click', () => setPaused(!session.paused));
@@ -151,6 +153,7 @@ const CSS = `
   font-size: 1.05rem;
   line-height: 1;
   color: var(--cream);
+  --fa-ic-ink: #FFF3DE;
   background: rgba(26,18,36,0.78);
   border: 3px solid #1a1224;
   border-radius: 14px;
