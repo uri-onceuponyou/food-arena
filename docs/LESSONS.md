@@ -313,6 +313,13 @@ and treated as fact has cost this project real time — twice.
   in one invocation.
 - `window.__stage` is a single slot overwritten by the last `Stage` constructed; on menus
   that is a throwaway thumbnail generator which then disposes.
+- **An ID buffer must be READ in the space it was WRITTEN.** `renderer.outputColorSpace` is
+  sRGB, so linear-written IDs are transfer-encoded on the way to the framebuffer and every ID
+  quantises into the wrong slot. This produced a confident, entirely **fictional** list of
+  zero-pixel meshes — hotdog's bun and sausage, pizza's cheese, soup's broth — and an agent
+  came close to "fixing" meshes that were never broken. Forcing the pass to linear showed all
+  of them fine. Any probe that encodes data as colour must disable the transfer, or it is
+  measuring the transfer. See §13: an instrument that lies plausibly is worse than none.
 
 ---
 

@@ -201,3 +201,49 @@ Carried from the previous session, still true, still unanswerable here:
 **The two most valuable bug reports on this project came from you simply playing it** — clicks
 not firing, and the character not facing the cursor. Both were invisible to `tsc`, to the
 assertions, and to every screenshot. That is still the highest-yield thing you can do.
+
+---
+
+## 10. Icons — two need a SUBJECT change, and that is a design call, not a drawing one
+
+**This answers `docs/STATE.md` Part 3 item 6** ("whether the icons need another pass"). Measured
+answer: **no more redrawing.** Identify-at-real-size went **21.7 → 24.0 of 28** and mutual swaps
+**4 → 0**, but the instructive part is what did *not* work — **21 of 28 icons were already
+perfect, and 8 of 14 redraws measured WORSE and were reverted** (`wrap` 3/3→1/3 across three
+attempts, `meat` 3/3→1/3, `slash` and `shards` 3/3→2/3).
+
+Two icons resist drawing entirely, because the problem is the **subject**, not the execution:
+
+- **`mustardblast`.** Four attempts. It and `ketchupslip` are both squeeze bottles differing only
+  in **hue and chirality** — and at the shipped 20px, hue is a tint and chirality is not a mass.
+  They are one icon drawn twice. Making them a true mirror pair took them from 7/7 + 4/7 to
+  **1/6 + 1/6, swapping with each other.**
+  **❓ Recommendation: give Mustard Blast the hot dog itself with a mustard stripe** — a silhouette
+  nothing else in the set owns.
+- **`cap`.** Five drafts (disc, dome-with-teeth, cap-on-neck, ¾ crown) all scored 0–1 of 3. A
+  bottle cap has no distinguishing mass at 20px.
+  **❓ Recommendation: a water droplet with a spinning motion arc** — or accept 1/3.
+
+**Never tested at all, and worth knowing:** the 37 `UI_ICONS` (coin, gem, chest, gear) have never
+been measured, and one judge read a food icon as "coin" — so **cross-set collisions between the
+two icon families are unmeasured**.
+
+---
+
+## 11. The cast's legs — longer legs change every silhouette
+
+**Why it needs you.** Arms are fixed (buried limb groups **50 → 26**, mean wasted footprint
+37.1% → 27.4%). Legs barely moved, **73 → 61**, and the arithmetic says tuning cannot finish it:
+the camera looks **down** (58° in game), so a mass above the hips projects *over* the legs however
+wide they stand. On Hamburger the knee would need to move **0.545 m forward** to clear the bun.
+Widening even backfires — Soup's shins went **0.653 → 0.000** under the bowl's overhang.
+
+The only lever with the right sign is **`legFraction`** on the STOUT and STUB archetypes. A pass
+is running now, targeting roughly 0.25 → 0.31 and 0.15 → 0.20.
+
+**Assumed.** That longer legs are worth it, because the silhouette is the *only* thing that reads
+at the ~10.5% of frame height a character occupies in game.
+
+**❓ This changes the proportions of every character in the cast** — it is the most visible
+single change of the session. **Reverting is one constant per archetype.** Look at the roster
+silhouette before/after and say if you hate it.
