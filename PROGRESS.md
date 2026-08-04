@@ -263,6 +263,34 @@ Needed 0.5–0.6 depth.
 
 ---
 
+### Character on-screen size: ~10.5% of frame height (settled)
+
+Two agents disagreed and BOTH were wrong, in opposite directions. Measured directly off a
+clean 1600x900 live-game frame: the hamburger spans ~95px ≈ **10.5%**, inside the 10-13%
+reference band. So the framing after the range rebalance is fine — no further camera or
+range change is needed on these grounds.
+
+- **13% was too high.** It came from `characterHeight / frameHeightAtThatDistance`, which
+  ignores that the camera is pitched 58°. A vertical object is foreshortened.
+- **7% was too low.** It applied the full foreshortening factor (sin 32° ≈ 0.53), which is
+  right for a thin vertical stick and wrong for a chibi — the head is a sphere and barely
+  foreshortens at all.
+
+**Measure this off a rendered frame, not by trigonometry.** Both analytic attempts failed
+because the shape of the subject decides the answer. And beware: it could not be measured
+at all until the countdown overlay bug below was fixed.
+
+### The HUD countdown was covering the player — and corrupting every VFX measurement
+
+`.hud-countdown` used `inset: 0` with `align-items: center`. The camera keeps the player at
+frame centre, so a 140px opaque numeral — 15% of frame height — sat **directly on the
+player** for the whole pre-match countdown.
+
+Worse, VFX probes are captured at `simSpeed`≈0 where the countdown never advances, so a
+giant orange "5" was composited over the subject of **every VFX measurement in the
+project**. One agent mis-read it as a character head. Now positioned at 22vh, clearing both
+the top status bar and the character mass.
+
 ### NEVER `git stash` during a multi-agent session
 
 An agent hit an apparently-failing gate, ran `git stash` to test whether it was

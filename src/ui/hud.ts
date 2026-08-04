@@ -1137,7 +1137,17 @@ const CSS = `
   position: absolute;
   inset: 0;
   display: none;
-  align-items: center;
+  /* Vertically ABOVE the player, not centred on them. The camera keeps the player at
+     frame centre, so align-items:center put a 140px opaque numeral — 15% of frame
+     height — directly over your own character for the whole pre-match countdown, exactly
+     when you are orienting. It also silently corrupted every VFX probe in the project:
+     captures are taken at simSpeed~0 where the countdown never advances, so a giant
+     orange "5" was composited over the subject of every measurement, and one agent
+     mis-read it as a character head.
+     22vh clears the top status bar (which ends ~12vh) and sits above the character mass
+     (~45-58vh), so nothing important is occluded at any point. */
+  align-items: flex-start;
+  padding-top: 22vh;
   justify-content: center;
   font-family: 'Rubik', sans-serif;
   font-weight: 900;
