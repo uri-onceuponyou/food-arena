@@ -40,10 +40,16 @@ These are not style preferences. Every one of them exists because breaking it co
    Judging a description instead of an image is this project's most common failure.
 
 4. **When something "isn't there", assume it is rendering and INVISIBLE.**
-   True cause **sixteen** separate times. See `docs/LESSONS.md` §1 for all sixteen.
+   True cause **seventeen** separate times. See `docs/LESSONS.md` §1 for all seventeen —
+   and note the seventeenth was a *recurrence* of the sixth, because the original fix
+   corrected the anchor without ever measuring that pixels reached the screen.
 
 5. **Probe before you loop.** Every plateau ever probed here turned out to be a **bug**,
-   not a taste gap. A ~20k probe has repeatedly beaten a ~300k critic loop.
+   not a taste gap — now **six for six**. A probe has repeatedly beaten a ~300k critic loop.
+   **And validate the instrument against a known input before believing it on an unknown
+   one** — the preview harness rendered characters at the *opposite* figure/ground polarity
+   to the match, so every character packet ever judged was scored against a relationship the
+   player never sees (`docs/LESSONS.md` §13).
 
 6. **Score the reference side every critic round.** Outside ~7–9 means the round measured
    the critic, not the work — **discard it before acting**, not afterwards. Stop the moment

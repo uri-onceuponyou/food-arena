@@ -6,10 +6,10 @@ Everything below was paid for. Reading this is cheaper than re-learning any of i
 
 ## 1. "It isn't there" almost always means it IS there and is INVISIBLE
 
-**True cause sixteen separate times.** Assume rendering-but-invisible *first*, and prove it
+**True cause seventeen separate times.** Assume rendering-but-invisible *first*, and prove it
 with an unmissable probe rather than reasoning about it.
 
-The sixteen, grouped by mechanism — the variety is the point:
+The first sixteen, grouped by mechanism — the variety is the point:
 
 **Occluded or buried**
 1. Sesame seeds placed at a mesh's "front" landed on its hidden back face (the mesh is
@@ -51,6 +51,18 @@ Transparent materials without `depthWrite: false` still write depth and silently
 The ground layer stack is crowded — floor pads 0.045–0.048, seams 0.062, baked shadows
 0.068–0.07, prop kicks 0.08.
 
+**The seventeenth — and it is a RECURRENCE, which is the real lesson**
+17. Water Bottle's belt: **3,974 px of footprint, 0 px delivered.** This is case 6 coming back
+    *after its own fix*. Case 6 moved the strap off `joints.torso` (an empty group at the hips
+    on a STUB body); the repair re-anchored it to `joints.hips` — still inside a body spanning
+    x[−0.56 … 0.53]. **Fixing the anchor is not the same as verifying the result reaches the
+    screen.** A fix for an invisibility bug must be closed out by measuring delivered pixels,
+    or it silently re-lands in the same class.
+
+Corollary found at the same time: **every transparent material in the entire cast carries
+`depthWrite: true`** — the exact silent-occluder trap named two paragraphs above, present
+project-wide and never swept for.
+
 ### The probe technique
 Replace the thing with something **unmissable** — a garish 4×4 red/cyan checker, a 5× scale,
 a 10-second lifetime — and render. This *disproved* a five-round theory in ten minutes: the
@@ -89,6 +101,15 @@ the control, with that critic ranking our menu *above* shipped Brawl Stars.
   recent 4/10 were measurably false — "props float over dark violet nothing" was disproved
   by 100% apron coverage at luma 34.7. That is the invisible-render trap *in reverse*:
   absence reported where there is presence.
+  **Second, larger instance:** a critic scored the cast 3–5 against a reference at 9 and named
+  one cause — *"add a cool back-rim light; none of the 3D panels has one."* A rim light already
+  existed (`#addcff`, intensity 1.70, azimuth −126°), **identical in preview and in the match**,
+  and a measured sweep showed retuning it was worth **at most +0.012 of figure/ground before it
+  inverts** — past intensity ~3.4–6.0 separation drops *below* switching the rim off entirely,
+  because the rim lights the floor faster than it lights the fighter. The critic's *observation*
+  (limbs vanish into torsos) was correct and valuable; its *mechanism* was wrong, and the true
+  cause was a sign error in nine of eleven stance blocks. **Take the symptom, re-derive the
+  cause.**
 - Trust order: **named reproducible gaps > objective acceptance tests > trends > the bare
   number.**
 
@@ -277,3 +298,30 @@ and treated as fact has cost this project real time — twice.
   in one invocation.
 - `window.__stage` is a single slot overwritten by the last `Stage` constructed; on menus
   that is a throwaway thumbnail generator which then disposes.
+
+---
+
+## 13. The harness can invert the very thing you are measuring
+
+`src/preview.ts` set the character backdrop to a saturated cyan `0x39b7e8`. Measured:
+
+| | character vs background |
+|---|---|
+| **preview harness** | character is **darker** — edge 0.438 vs surround 0.839, contrast **−0.40** |
+| **the real match** | character is **lighter** — edge 0.571 vs surround 0.301, contrast **+0.27** |
+
+**Opposite polarity.** Every character packet ever judged on this project was scored against a
+figure/ground relationship the player never sees — and a *cool* rim light on a *cyan* backdrop
+reduced apparent separation by 0.035, which is precisely why critics kept reporting the rim as
+absent. The asset was fine; the darkroom had the wrong safelight.
+
+This is the sibling of §5 (measurement contamination) and §6 (judge at shipped framing), and it
+is worse than both: contamination adds noise and wrong framing adds bias, but **an inverted
+harness flips the sign of the answer.** Before trusting any A/B, confirm the harness reproduces
+the *polarity* of the shipped view, not merely its subject.
+
+**The general form: validate the instrument against a known input before believing it on an
+unknown one.** Two of this project's most expensive detours were instrument faults that no
+number of additional rounds could ever have found — five rounds tuning a low-frequency gradient
+whose wavelengths (420–530wu) exceed the frame (578wu), and every character round judged
+against inverted contrast.
