@@ -90,7 +90,7 @@ export const createKitchenArena: ArenaFactory = () => {
   // hazard, and is never read by the sim — it is cosmetic bleed in the sense
   // `camera.ts`'s SURPLUS POLICY means it. See `./apron.ts` for why it reaches 760 wu
   // past every bound and why the boundary is a raised kerb rather than a drop-off.
-  root.add(buildApron());
+  if (!location.search.includes('apron=0')) root.add(buildApron());
 
   // ── Central stove hub ────────────────────────────────────────────────────────
   const HUB_ISLAND_W = 170, HUB_ISLAND_H = 90;
