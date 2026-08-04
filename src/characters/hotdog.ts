@@ -51,8 +51,28 @@ const GRILL_MARK = '#7A4A1E';   // toasted griddle stripes on the bun
  * repeating the neutral toasted tan `hamburger.ts` uses, so the two warm-bodied
  * characters in this cohort do not converge on one limb colour a third time.
  */
-const LIMB_BUN = '#BE7040';
-const LIMB_BUN_DARK = '#96522C';
+// ── Figure/ground: this character fails the project's own >= 0.10 floor ───────
+// Measured at shipped framing (`tools/tmp/shipframe.mjs`): edge luma minus a 4px
+// surround ring = **0.0740**, against donut 0.2063 and pizza 0.1926. A rim-light
+// sweep across 0 / 0.85 / 1.70 / 3.40 / 6.0 / 10.0 moved it by at most **0.0000**
+// and went NEGATIVE past 3.4, because the rim lights the floor faster than it
+// lights the fighter. There is no lighting setting that fixes this — the body
+// simply sits at luma 0.424 against a floor at 0.325, and separation you do not
+// have in the albedo cannot be added later.
+//
+// So the values move. The bun is the largest area on the character and was
+// PALETTE.bun (#E8A33D, luma 0.67) with limbs at #BE7040 (luma 0.49) — the limbs
+// were the problem, sitting only 0.16 above the floor across a third of the
+// silhouette. Both limb tones go up roughly a value step; the sausage stays
+// exactly where it is because the red IS the identity and it is a minority of
+// the area.
+const LIMB_BUN = '#E5A473';
+const LIMB_BUN_DARK = '#C68A54';
+/** A lighter bun than `PALETTE.bun` for THIS character's own mass — see above.
+ *  Kept local rather than pushed into the shared palette: Hamburger's bun is not
+ *  the one failing the contrast floor, and its stack is tuned around the shared
+ *  value. */
+const BUN_LIGHT = '#FBD08A';
 
 /** Tapered limb: a flat cap at the joint origin (plugs flush, no gap) taper to a
  * rounded tip — the bun's own matte roughness, no capsule uniformity. */
@@ -149,16 +169,44 @@ function strapArc(from: THREE.Vector3, to: THREE.Vector3, bow: THREE.Vector3, ra
 
 /** A chunky bun-dark boot with a ketchup-trim sole and cuff, wide and stubby to
  * match the sausage/bun proportions rather than the rig's thin default wedge. */
-function buildBunBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material): THREE.Group {
+function buildBunBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material, groundLocalY: number): THREE.Group {
   const g = new THREE.Group();
-  const upper = new THREE.Mesh(roundedBox(fw * 1.0, fw * 0.66, fw * 1.36, fw * 0.24, 3), bodyMat);
-  upper.position.set(0, -fw * 0.10, fw * 0.22);
+  // ── The sole was a PLATE, not a sole ────────────────────────────────────────
+  // It was built WIDER (1.10 vs 1.00), LONGER (1.58 vs 1.36) and lower than the
+  // boot above it, in a saturated trim colour — so from the front it read as a
+  // bright red flat plate protruding past the toe and out below the shoe, which is
+  // exactly how a blind pass described it. A sole is a RIM: inset from the upper on
+  // every axis except thickness, so it reads as the boot's own edge.
+  //
+  // `groundLocalY` is the foot joint's own distance above the floor, negated —
+  // i.e. the local y at which the world floor sits. Seating the sole's underside
+  // there fixes `types.ts` convention #1 ("feet at y=0"), which the whole cast was
+  // violating by -0.08 to -0.25 m. It has to be passed in because `dressLimbs` hands
+  // the builder a SIZE and not a position, and `rig.metrics.ankleY` is the only
+  // place that knows the answer.
+  // ── Fit the boot BETWEEN the floor and its own original top ─────────────────
+  // Seating the sole on the floor (which is what fixes `types.ts` convention #1)
+  // pushes everything above it up, and on a STOUT body the shin is only 0.116m long
+  // while the boot is 0.42m tall — so a first pass at this raised the boot's top
+  // ABOVE THE KNEE and swallowed the shin whole (soup's shins measured 0.653
+  // delivered before, 0.000 after). The boot has to get shorter, not just higher.
+  //
+  // `avail` is the room between the floor and where the boot's top used to sit;
+  // `k` squashes the boot vertically to fit it. Widths are untouched, so it reads
+  // as the same chunky boot, just not one that is taller than the leg wearing it.
+  const avail = -groundLocalY + fw * 0.22;
+  const k = Math.min(1, avail / (fw * 0.86));
+  const SOLE_H = fw * 0.16 * k;
+  const UPPER_H = fw * 0.70 * k;
+  const soleY = groundLocalY + SOLE_H / 2;
+  const upper = new THREE.Mesh(roundedBox(fw * 1.0, UPPER_H, fw * 1.36, Math.min(fw * 0.24, UPPER_H * 0.45), 3), bodyMat);
+  upper.position.set(0, groundLocalY + SOLE_H + UPPER_H / 2, fw * 0.22);
   upper.castShadow = true;
   upper.receiveShadow = true;
   g.add(upper);
 
-  const sole = new THREE.Mesh(roundedBox(fw * 1.10, fw * 0.20, fw * 1.58, fw * 0.09, 2), trimMat);
-  sole.position.set(0, -fw * 0.46, fw * 0.30);
+  const sole = new THREE.Mesh(roundedBox(fw * 0.96, SOLE_H, fw * 1.30, fw * 0.07, 2), trimMat);
+  sole.position.set(0, soleY, fw * 0.22);
   sole.castShadow = true;
   sole.receiveShadow = true;
   g.add(sole);
@@ -186,7 +234,7 @@ export class HotDogCharacter extends BaseCharacter {
         limb: LIMB_BUN,
         hand: PALETTE.sausage,
         foot: LIMB_BUN_DARK,
-        torso: PALETTE.bun,
+        torso: BUN_LIGHT,
         limbRoughness: 0.8,
       },
       // A fresh independent art director scored the cast 4/10 and named the body plan
@@ -208,7 +256,7 @@ export class HotDogCharacter extends BaseCharacter {
       // --char hotdog` prints the real bounding height.
       proportions: bodyType('lanky', {
         height: 2.16,
-        shoulderWidth: CHARACTER_HEIGHT * 0.17,  // a touch wider than stock LANKY, to support the sausage's span
+        shoulderWidth: CHARACTER_HEIGHT * 0.21,  // a touch wider than stock LANKY, to support the sausage's span
         // LANKY's stock torso is 1.15x the shoulder width. On this character the
         // torso is a dressed SPLIT BUN, and at that ratio it came out taller than
         // it was wide and read as a plain capsule instead of two bun halves. A bun
@@ -225,8 +273,13 @@ export class HotDogCharacter extends BaseCharacter {
       // horizontal mass needs a much smaller angle than a round one to express
       // the same amount of attitude; the slouch is carried by `lean` and the
       // dropped shoulder instead, where it costs the silhouette nothing.
+      // `shoulderR` -0.38 swings the right arm ACROSS the body, and it put the
+      // right forearm behind the torso bun at 0.216 delivered. -0.12 keeps the
+      // asymmetry (this character's lean and twist are authored and deliberate —
+      // see `lean: 0.16` below, which is NOT a defect) without burying a limb to
+      // get it. `shoulderL` 0.10 is also inward, just mildly; zeroed.
       stance: {
-        shoulderL: 0.10, shoulderR: -0.38,
+        shoulderL: -0.20, shoulderR: -0.12,
         elbowL: -0.12, elbowR: -0.58,
         twist: 0.22, headTilt: 0.05, headTurn: -0.10,
         hipSway: 0.09, lean: 0.16,
@@ -260,8 +313,8 @@ export class HotDogCharacter extends BaseCharacter {
       const g = new THREE.Group();
       g.name = 'hotdog_torso';
 
-      const bunMat = toonMat({ color: PALETTE.bun, roughness: 0.85 });
-      const bunShadeMat = toonMat({ color: PALETTE.bunDark, roughness: 0.85 });
+      const bunMat = toonMat({ color: BUN_LIGHT, roughness: 0.85 });
+      const bunShadeMat = toonMat({ color: PALETTE.bun, roughness: 0.85 });
       const meatMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 });
       const seamMat = glossyMat({ color: PALETTE.mustard, roughness: 0.15 });
 
@@ -383,7 +436,7 @@ export class HotDogCharacter extends BaseCharacter {
     // ── Materials — every part gets its own roughness so the model reads as
     // bread + meat + sauce, not one plastic shader repeated in different colours
     // (that was the single biggest criticism of an earlier character here). ───
-    const bunMat = toonMat({ color: PALETTE.bun, roughness: 0.85 }); // dry, matte-baked crust
+    const bunMat = toonMat({ color: BUN_LIGHT, roughness: 0.85 }); // dry, matte-baked crust — see BUN_LIGHT
     const sausageMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 }); // taut, faintly greasy skin
     const mustardMat = glossyMat({ color: PALETTE.mustard, roughness: 0.15 }); // wettest surface on the model
     const ketchupMat = glossyMat({ color: PALETTE.ketchup, roughness: 0.15 });
@@ -391,7 +444,7 @@ export class HotDogCharacter extends BaseCharacter {
       color: CYBER, roughness: 0.4, metalness: 0.3, emissive: CYBER, emissiveIntensity: 0.45,
     });
     this.glowMats.push(glowMat);
-    const neckMat = toonMat({ color: PALETTE.bun, roughness: 0.85 }); // matches the bun exactly — reads as its base, not a separate collar
+    const neckMat = toonMat({ color: BUN_LIGHT, roughness: 0.85 }); // matches the bun exactly — reads as its base, not a separate collar
 
     // ── Neck block — bridges the bun down to the torso. Narrower than the bun
     // lobes above it, so it stays hidden behind their footprint at every angle
@@ -802,7 +855,7 @@ export class HotDogCharacter extends BaseCharacter {
           return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.76, bunDarkMat);
         case 'footL':
         case 'footR':
-          return buildBunBoot(size.len, bunDarkMat, ketchupMat);
+          return buildBunBoot(size.len, bunDarkMat, ketchupMat, size.groundY);
         default:
           return null;
       }

@@ -101,12 +101,37 @@ if (shotMode) document.body.classList.add('shot');
 const container = document.getElementById('stage')!;
 const label = document.getElementById('label')!;
 
-// Bright studio backdrop by default. A dark ground made every model read as gloomy
-// clay; the reference presents characters on bright, saturated grounds and that
-// materially changes how the shading is perceived. The arena brings its own warm
-// kitchen palette, so it gets a warmer sky default instead of the character-preview cyan.
+/**
+ * Character-preview backdrop. **Matched to the SHIPPED match's figure/ground, and
+ * that is the entire point of the value.**
+ *
+ * This was `0x39b7e8` (saturated cyan) with a `#8fd6f2` ground, on the reasoning that
+ * "the reference presents characters on bright, saturated grounds". Measured, that
+ * backdrop inverts the polarity the game actually ships:
+ *
+ *   | frame                       | body luma | background luma | body - background |
+ *   |-----------------------------|-----------|-----------------|-------------------|
+ *   | real match (donut)          | 0.5411    | 0.3250          | **+0.216**        |
+ *   | preview, old cyan (donut)   | 0.5575    | 0.8120          | **-0.255**        |
+ *   | preview, old cyan (hotdog)  | 0.4132    | 0.8273          | **-0.414**        |
+ *
+ * So every character packet ever judged on this project was judged with the figure
+ * DARKER than the ground while the game shows it LIGHTER — the one comparison a
+ * silhouette/read critique depends on, backwards. Anything tuned to separate against
+ * bright cyan is tuned against a frame that does not exist.
+ *
+ * `3d2b21` / `4a382c` was picked by sweeping candidates in-page
+ * (`tools/tmp/bgsweep.mjs`) and reading the same two numbers back. On donut — the
+ * character the shipped-framing reference was measured on — it lands at background
+ * luma **0.3301** against the match's 0.3250 and contrast **+0.2224** against +0.216.
+ * Warm, because the arena is a warm kitchen and the reference reserves the warm half
+ * of the wheel for the cast (`docs/LESSONS.md` §8); dark, because that is what the
+ * floor measures at, not because dark backdrops flatter models.
+ *
+ * The arena piece keeps its own warm sky — it brings a real floor with it.
+ */
 const bgParam = params.get('bg');
-const background = bgParam ? Number(`0x${bgParam.replace('#', '')}`) : isArena ? 0xffcf8a : 0x39b7e8;
+const background = bgParam ? Number(`0x${bgParam.replace('#', '')}`) : isArena ? 0xffcf8a : 0x3d2b21;
 
 // The arena is tens of metres across — the tight fog tuned for small preview subjects
 // would grey out most of a gameplay shot and nearly all of an overview. Push it out
@@ -172,9 +197,12 @@ const stage = new Stage({
 // A shadow-catching disc, so models are judged with real contact shadows rather
 // than floating in a void. The arena piece brings its own floor, so it skips this.
 if (!isArena) {
+  // Ground albedo is chosen with the backdrop above, not independently: it fills most
+  // of a character frame, so it — not the sky — is what sets `frameLuma`. See the
+  // `background` note for the measurement.
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(14, 64),
-    toonMat({ color: params.get('ground') ? `#${params.get('ground')}` : '#8fd6f2', ramp: RAMP_SOFT() })
+    toonMat({ color: params.get('ground') ? `#${params.get('ground')}` : '#4a382c', ramp: RAMP_SOFT() })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;

@@ -235,7 +235,11 @@ export class SushiCharacter extends BaseCharacter {
         // the maki-roll torso (see `dressTorsoAsSushi`) needs radius that
         // `bodies.ts`'s "torso half-width must stay inside the shoulder pivot" rule
         // only allows if the pivot moves out with it.
-        shoulderWidth: CHARACTER_HEIGHT * 0.19,
+        // 0.19H -> 0.225H. Both forearms measure 0.489 / 0.493 delivered — on the
+        // wrong side of the 0.50 floor by a hair, with 0.21-0.23 of each covered by
+        // the nigiri bed. The elbow tuck was already relaxed (see `stance` below);
+        // this is the remaining 0.03-0.04m the measurement asks for.
+        shoulderWidth: CHARACTER_HEIGHT * 0.225,
         stanceWidth: CHARACTER_HEIGHT * 0.15,    // low, wide stance
         armRadius: CHARACTER_HEIGHT * 0.068,     // thick
         handRadius: CHARACTER_HEIGHT * 0.088,    // big round rice-fist
@@ -245,8 +249,12 @@ export class SushiCharacter extends BaseCharacter {
       // aloof over-the-shoulder glance. Distinct from every other stance in
       // this file's own cast slice: the only near-symmetric, closed-arm pose.
       stance: {
+        // Elbows -0.58 -> -0.40. Both forearms delivered 0.466 / 0.452 at idle and
+        // 0.189 / 0.176 at run — under the floor in both states, tucked in behind
+        // the nigiri. The shoulders are already correct (near-zero, so the arms
+        // hang where the rig puts them); it was only the elbow tuck.
         shoulderL: 0.04, shoulderR: -0.04,
-        elbowL: -0.58, elbowR: -0.58,
+        elbowL: -0.40, elbowR: -0.40,
         twist: -0.07, headTilt: 0.11, headTurn: -0.22,
         hipSway: 0.02, lean: -0.02,
       },
@@ -472,13 +480,18 @@ export class SushiCharacter extends BaseCharacter {
     }
 
     // A wet glisten on the slab — cheap, sells "wet" against the matte rice.
+    // Hoisted and given `depthWrite: false` — a transparent material that still
+    // writes depth is a silent occluder (`docs/LESSONS.md` §1), and every
+    // transparent material in the cast carried the default `true`.
+    const glintMat = flatMat('#ffffff', { transparent: true, opacity: 0.55 });
+    glintMat.depthWrite = false;
     {
       const gx = -slabX * 0.30, gz = slabZ * 0.22;
       const gy = slabTop(gx, gz);
       if (gy !== null) {
         const glisten = new THREE.Mesh(
           new THREE.SphereGeometry(R * 0.055, 10, 8),
-          flatMat('#ffffff', { transparent: true, opacity: 0.55 })
+          glintMat
         );
         glisten.position.set(gx, gy + R * 0.008, gz);
         glisten.scale.set(1.3, 0.35, 1.0);

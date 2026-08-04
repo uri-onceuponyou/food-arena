@@ -278,14 +278,40 @@ export class HamburgerCharacter extends BaseCharacter {
       // `headFraction` runs high because the whole burger stack is sized off R
       // (see the vertical layout below): the food mass IS most of this character,
       // and the stack is what has to reach the cast's standard height.
-      proportions: bodyType('stout', { height: 2.05, headFraction: 0.68 }),
+      proportions: bodyType('stout', {
+        height: 2.05,
+        headFraction: 0.68,
+        // 0.25H -> 0.30H. Measured, not styled: the burger stack is 0.534m
+        // half-wide at shoulder height and the shoulder pivot sat at 0.512m, so
+        // the upper arm STARTED inside the food and everything below it was
+        // deeper still — delivered footprint 0.241 (upper arm), 0.000 (forearm),
+        // 0.130 (mitt). 0.615m puts the pivot 0.08m outside the mass, which is
+        // about 0.4 of an arm radius: the arm still overlaps the body at the
+        // shoulder (so it reads as attached) and clears it everywhere below.
+        //
+        // This is only safe because `bodies.ts` no longer ties `torsoWidth` to
+        // `shoulderWidth` — before that, widening the shoulders by 0.10m widened
+        // the bottom bun by 0.16m and the arm ended up exactly as buried.
+        shoulderWidth: 2.05 * 0.30,
+      }),
       // Grill-master swagger: weight planted and leaning in over the flat-top,
       // one arm cocked back with the spatula ready, the other tucked in tight —
       // an art director's second pass named the cast's identical dead-front
       // symmetric pose as a top gap, and Hamburger's read (short-order cook,
       // mid-flip) is the most physically confident stance in this file's cast.
+      //
+      // ── The left arm was inside the burger ──────────────────────────────────
+      // `shoulderL` was +0.46, and `docs/LESSONS.md` §12 is explicit about what a
+      // positive value there does: `shoulderL` is the joint at x = -shoulderWidth,
+      // so a POSITIVE z-rotation swings that arm ACROSS the body. "Tucked in
+      // tight" was authored as a pose and rendered as a deletion — the silhouette
+      // shot `shots/probe/sil/hamburger.png` has no left arm at all.
+      //
+      // The swagger is kept; it is now carried by the ELBOW (which still tucks
+      // hard at -0.95) and by the asymmetry between the two shoulders, rather
+      // than by burying one whole limb. Both shoulders now open outward.
       stance: {
-        shoulderL: 0.46, shoulderR: -0.58,
+        shoulderL: -0.16, shoulderR: -0.26,
         elbowL: -0.95, elbowR: -0.22,
         twist: -0.12, headTilt: -0.07, headTurn: 0.20,
         hipSway: 0.06, lean: 0.06,
@@ -312,6 +338,10 @@ export class HamburgerCharacter extends BaseCharacter {
     const seedMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER(), roughness: 0.75 }); // dry toasted sesame
     const faceMat = toonMat({ color: PALETTE.ink, ramp: RAMP_CHARACTER(), roughness: 0.42 });
     const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.45 });
+    // `depthWrite: false`: a transparent material that still writes depth is a
+    // SILENT OCCLUDER — `docs/LESSONS.md` §1 names it explicitly, and every
+    // transparent material in the cast was carrying the default `true`.
+    blushMat.depthWrite = false;
     // Spatula — the held prop. Deliberately NOT a food material: brushed metal +
     // dark plastic reads as "tool", sells Patty Smash as an ability, and gives the
     // silhouette a landmark nothing else in a roster of round food blobs would have.
@@ -322,7 +352,12 @@ export class HamburgerCharacter extends BaseCharacter {
     // silhouette landmark read as an axe head cut out of the sky. This is the
     // "rendering but invisible" failure in its dark-on-light costume. Steel is
     // now carried by a bright albedo and a tight specular, not by metalness.
-    const spatulaBladeMat = toonMat({ color: '#E9EEF5', roughness: 0.3, metalness: 0.06 });
+    // #E9EEF5 is luma 0.93 — within a few percent of the top of the range, so the
+    // blade had no headroom to shade INTO and every lit angle resolved to "white".
+    // #B9C4D2 is luma 0.76: still unmistakably bright steel against the burger's
+    // warm palette, with room for both a highlight and a turn into shadow. Paired
+    // with the curl below, that is what makes it stop reading as a flat plate.
+    const spatulaBladeMat = toonMat({ color: '#B9C4D2', roughness: 0.3, metalness: 0.06 });
     const spatulaSlotMat = toonMat({ color: '#8F98A4', roughness: 0.45, metalness: 0 });
     // Apron — the costume layer. A second independent art-director pass named the
     // complete absence of any costume/accessory layer as the cast's top remaining
@@ -684,10 +719,22 @@ export class HamburgerCharacter extends BaseCharacter {
       // of the bun instead of wrapping most of its circumference, so the bun's
       // own gold reads at both sides and along the bottom and the burger keeps
       // its lowest layer.
+      // ── The apron hung BELOW the bun, over the legs ──────────────────────────
+      // `roundedPuck` spans 0..height, so the bun runs from `size.h * 0.02` UP.
+      // The apron was a `curvedPanel`, which is centred on its own origin, placed
+      // at `size.h * 0.02 + bunH * 0.06` — so a 0.70*bunH panel centred there hung
+      // 0.30*bunH BELOW the bun's own bottom edge, into the thigh space. Measured:
+      // the thighs delivered 0.006 and 0.075 of their footprint and the shins
+      // 0.000 and 0.154, which is the cast-wide "feet with no legs" read
+      // (`docs/STATE.md` Finding 2) with a garment, not a bun, doing the burying.
+      //
+      // Centring the panel on the bun's own mid-height puts the whole bib on the
+      // bun, where a bib belongs, and hands the legs back their space.
       const apronR = bunR * 1.05;
       const apronArc = Math.PI * 0.50;
       const apronH = bunH * 0.70;
-      const apronY = size.h * 0.02 + bunH * 0.06;
+      const bunBaseY = size.h * 0.02;
+      const apronY = bunBaseY + bunH * 0.50;
       const apron = new THREE.Mesh(curvedPanel(apronR, apronArc, apronH), apronMat);
       apron.name = 'apron_bib';
       apron.position.y = apronY;
@@ -714,11 +761,18 @@ export class HamburgerCharacter extends BaseCharacter {
 
       // Neck straps rising from the bib's top corners — reads as "tied behind
       // the neck" without needing a literal loop back there.
+      // Two blind critics reported these as FLOATING, and an ID-buffer render
+      // (`tools/tmp/islands.mjs`) confirmed it: they were their own connected
+      // components in the silhouette, 857 px and 510 px of apron hanging in space.
+      // The cause was the same off-by-a-panel as the bib — the strap was centred
+      // 0.62 of a bib-height above a bib whose own top edge was only 0.50 above
+      // that origin, so it started ABOVE the garment it is tied to. Longer, and
+      // seated lower, so its bottom third is inside the bib by construction.
       for (const sx of [-1, 1] as const) {
-        const strap = new THREE.Mesh(new THREE.CapsuleGeometry(apronR * 0.075, apronH * 0.5, 4, 8), apronMat);
+        const strap = new THREE.Mesh(new THREE.CapsuleGeometry(apronR * 0.075, apronH * 0.62, 4, 8), apronMat);
         strap.name = 'apron_strap';
         const baseTheta = sx * apronArc * 0.42;
-        strap.position.set(Math.sin(baseTheta) * apronR, apronY + apronH * 0.62, Math.cos(baseTheta) * apronR);
+        strap.position.set(Math.sin(baseTheta) * apronR, apronY + apronH * 0.50, Math.cos(baseTheta) * apronR);
         strap.rotation.z = sx * 0.55;
         strap.rotation.x = -0.3;
         strap.castShadow = true;
@@ -771,7 +825,14 @@ export class HamburgerCharacter extends BaseCharacter {
       switch (part) {
         case 'upperArmL': case 'upperArmR':
         case 'thighL': case 'thighR': {
-          const geo = taperedSegment(size.len, size.radius * 1.2, size.radius * 0.84, 10);
+          // 10 radial segments -> 20. A blind critic judging the home screen at 1:1
+          // named "faceted shoulder normals", and on this character specifically
+          // that is arithmetic: STOUT has the thickest limbs in the cast
+          // (`armRadius` 0.174m, so this segment is 0.21m across), and 10 segments
+          // put a 36-degree crease every 65px at menu size. The rest of the cast
+          // gets away with 10 because their limbs are half the width. Costs ~8
+          // meshes x ~120 extra triangles against a 295k-triangle match.
+          const geo = taperedSegment(size.len, size.radius * 1.2, size.radius * 0.84, 20);
           const m = new THREE.Mesh(geo, limbMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -780,7 +841,7 @@ export class HamburgerCharacter extends BaseCharacter {
         }
         case 'forearmL': case 'forearmR':
         case 'shinL': case 'shinR': {
-          const geo = taperedSegment(size.len, size.radius * 0.84, size.radius * 0.64, 10);
+          const geo = taperedSegment(size.len, size.radius * 0.84, size.radius * 0.64, 20);
           const m = new THREE.Mesh(geo, limbDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -833,7 +894,12 @@ export class HamburgerCharacter extends BaseCharacter {
           const footR = size.radius * 1.55;
           const footH = size.len * 0.62;
           const foot = new THREE.Mesh(roundedPuck(footR, footH, footR * 0.32, 16), pattyDarkMat);
-          foot.position.set(0, -footH, footR * 0.32);
+          // Seated on the floor via `size.groundY` (the joint-local y of the world
+          // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1
+          // is "feet at y=0" and the whole cast was 0.08-0.25 m under it; `Math.min`
+          // keeps the authored droop as the floor for the value so this can only ever
+          // raise a foot, never sink one.
+          foot.position.set(0, Math.max(size.groundY, -footH), footR * 0.32);
           foot.name = `${part}_mesh`;
           foot.castShadow = true;
           foot.receiveShadow = true;
@@ -916,6 +982,33 @@ export class HamburgerCharacter extends BaseCharacter {
       depth: 0.032, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 2, curveSegments: 10,
     });
     bladeGeo.translate(0, 0, -0.016);
+    // ── The curl the comment above promised, actually built ────────────────────
+    // Two independent blind critics called this object a "flat white unshaded
+    // slab" / "flat untextured slab" — and they were describing geometry, not
+    // material. An extruded 2D shape is PLANAR: every point on its broad face
+    // shares one normal, so the whole blade resolves to exactly one shading value
+    // no matter how it is lit. There is nothing a light can do about that, which
+    // is why the earlier metalness pass did not help either.
+    //
+    // Bending the face progressively about X — more curl further from the ferrule,
+    // like real pressed sheet steel — gives the normal somewhere to travel, so the
+    // face carries a gradient and the leading edge catches a highlight the neck
+    // does not. This is the same lesson as `docs/LESSONS.md` §1 case 16 (Taco's
+    // front wall) read forwards instead of backwards: a large single-normal
+    // surface renders as one flat value, and whether that value is near-black or
+    // near-white it reads as a slab either way.
+    {
+      const pos = bladeGeo.attributes.position as THREE.BufferAttribute;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i);
+        const t = THREE.MathUtils.clamp(v.y / 0.66, 0, 1);
+        const bend = t * t * 0.55;               // 0 at the neck, ~31 deg at the tip
+        const c = Math.cos(bend), s = Math.sin(bend);
+        pos.setXYZ(i, v.x, v.y * c - v.z * s, v.y * s + v.z * c);
+      }
+      pos.needsUpdate = true;
+    }
     bladeGeo.computeVertexNormals();
     const blade = new THREE.Mesh(bladeGeo, spatulaBladeMat);
     blade.name = 'spatula_blade';

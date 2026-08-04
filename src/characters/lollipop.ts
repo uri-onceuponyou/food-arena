@@ -157,15 +157,53 @@ export class LollipopCharacter extends BaseCharacter {
       proportions: bodyType('stub', {
         height: 2.00,
         headFraction: 0.72,
-        shoulderWidth: 2.00 * 0.085,
+        // ── 0.085H -> 0.20H, and the reason is NOT the stick ────────────────────
+        // The old value was reasoned from the stick's own radius, and the
+        // reasoning was sound about the stick and wrong about the character: at
+        // shoulder height this body measures 0.366m half-wide, because the wrapper
+        // cape and the petal cuff are out there too. The pivot at 0.170m was
+        // therefore 0.196m INSIDE the silhouette — `handL`'s world x came out at
+        // -0.02m, dead on the body centre-line, inside the stick — and the left
+        // arm delivered 0.001 of its upper arm and 0.000 of its forearm.
+        // `shots/probe/sil/lollipop.png` has nothing at all on the left side.
+        shoulderWidth: 2.00 * 0.185,
+        // ── STUB's widened 0.225H stance is wrong for a character this narrow ────
+        // Every other STUB mass is 0.5-1.0m wide at hip height and needed the legs
+        // pushed out from under it. This one is a 0.41m stick, so 0.45m of stance
+        // put BOTH legs entirely off the body: measured, 12,409 px of limb in its
+        // own connected component. 0.135H straddles the stick — the thigh's inner
+        // edge lands inside it and its outer edge proud of it — which is the same
+        // window the arms are fitted to, just on a much narrower body.
+        // ── NARROWER than the archetype, not wider ──────────────────────────────
+        // STUB's stance was widened to 0.225H to get four bottom-heavy masses off
+        // their own legs. This character is the exception: below the hip line its
+        // body is a 0.41m STICK, and at 0.16H the right thigh's inner edge already
+        // sat 0.013m OUTSIDE it — the leg was only joined to the character by the
+        // wrapper cape's inverted-hull outline, which is to say by the rendering
+        // bug fixed further down this file. Removing that black slab revealed a
+        // latent detachment worth 12,635 px; 0.145H closes it properly, with both
+        // thighs overlapping the stick. Measured 0 px detached at idle, 1 px at run.
+        stanceWidth: 2.00 * 0.145,
+        // Same override as Donut's, for the opposite mass: STUB's raised 0.26 is
+        // right for a bottom-heavy food, but this character's food is a DISC on a
+        // stick and the disc's underside starts at y=0.93m. Lifting the pivot
+        // walks the arms up into the candy; 0.18 keeps them on the stick, where
+        // the body actually is.
+        shoulderFraction: 0.18,
       }),
       // Cocky and hip-shot — weight thrown hard onto one hip, one shoulder popped
       // up, head tilted with attitude. An art director's second pass named the
       // cast's identical dead-front symmetric pose as a top gap and named this
       // exact read ("cocky and hip-shot") as the target for Lollipop specifically;
       // `hipSway` is pushed well past every other character in this file's cast.
+      // `shoulderL` +0.70 was the largest inward swing in the cast, on the
+      // narrowest body in the cast — the left hand ended up at world x = -0.02m,
+      // i.e. through the stick and out the other side. The cocky hip-shot read is
+      // carried by `hipSway` 0.20 and `twist` 0.30, both untouched and both still
+      // the most extreme in the cast; it never needed the arm to be inside the
+      // character.
       stance: {
-        shoulderL: 0.70, shoulderR: -0.10,
+        shoulderL: -0.14, shoulderR: 0.12,
         elbowL: -0.30, elbowR: -0.55,
         twist: 0.30, headTilt: -0.28, headTurn: -0.35,
         hipSway: 0.20, lean: -0.06,
@@ -288,6 +326,16 @@ export class LollipopCharacter extends BaseCharacter {
     // "petals", echoing real candy-stick wrapper twists and doubling as the torso's
     // contrasting costume accent (per the brief: dress the body in contrasting
     // colours, not one flat tone).
+    // ── DO NOT SHRINK THIS WITHOUT RE-MEASURING THE LEGS ───────────────────────
+    // At `stickR * 1.3` each cone reaches 2.15 stick-radii (0.44m) from the axis,
+    // past the thigh's own outer edge — so it does bury part of the left leg. It is
+    // also, measurably, the only thing CONNECTING the right leg to the body: below
+    // the hip line this character is a 0.41m stick and the legs stand 0.64m apart,
+    // so with the cuff narrowed to 0.55 the right leg became its own connected
+    // component (12,608 px detached at idle, 13,284 at run) — a strictly worse
+    // failure than the burial it was meant to fix. Tried and reverted; the real fix
+    // is longer legs on the STUB archetype, which is called out in the handover
+    // rather than attempted here.
     const petalGeo = new THREE.ConeGeometry(stickR * 1.3, R * 0.18, 3, 1, true);
     const petalMatA = toonMat({ color: CANDY_RED, roughness: 0.68 });
     const petalMatB = toonMat({ color: CANDY_WHITE, roughness: 0.68 });
@@ -328,6 +376,10 @@ export class LollipopCharacter extends BaseCharacter {
     const neck = capeAnchor;
     const capeMat = glossyMat({ color: CANDY_WHITE, roughness: 0.16, transparent: true, opacity: 0.6 });
     capeMat.side = THREE.DoubleSide; // seen edge-on/from behind at yaw 135/210, not just front
+    // A transparent material that still writes depth is a silent occluder
+    // (`docs/LESSONS.md` §1) — and this one is a DoubleSide panel wrapped around the
+    // stick, so it was punching a hole through the character's own body from behind.
+    capeMat.depthWrite = false;
     const capeTrimMat = toonMat({ color: CYBER, roughness: 0.3, emissive: CYBER, emissiveIntensity: 0.5 });
     const twistMat = glossyMat({ color: CANDY_WHITE, roughness: 0.14 });
 
@@ -342,9 +394,25 @@ export class LollipopCharacter extends BaseCharacter {
     const capeH = R * 0.52;
     const cape = new THREE.Mesh(curvedPanel(capeR, capeArc, capeH, Math.PI), capeMat);
     cape.name = 'lollipop_wrapper_cape';
-    cape.position.y = -capeH * 0.38;
+    // ── The cape rendered as a near-BLACK SLAB on both sides of the stick ───────
+    // Two separate mechanisms, both of them `docs/LESSONS.md` §1:
+    //
+    //  1. `depthWrite` (fixed on the material above).
+    //  2. THE INVERTED HULL. `outlineGroup` gives every mesh a BackSide copy of its
+    //     own geometry, pushed out along the normals. That is correct for a solid:
+    //     you see the ink only where the hull escapes the silhouette. This is not a
+    //     solid — it is a PLANE. A plane's back face is the same plane, so its hull
+    //     is a full-size opaque black copy of the cape sitting a hair behind it,
+    //     which is precisely the dark grey trapezoid visible either side of the
+    //     stick in `shots/probe/front/lollipop.png`. Ink cannot outline a surface
+    //     with no interior.
+    //
+    // The same reasoning applies to the trim, which is already `noOutline` for the
+    // z-fighting reason and gets the geometric one for free.
+    cape.userData.noOutline = true;
     cape.castShadow = true;
     cape.receiveShadow = true;
+    cape.position.y = -capeH * 0.38;
     neck.add(cape);
 
     const capeTrim = new THREE.Mesh(curvedPanel(capeR * 1.01, capeArc * 0.97, capeH * 0.045, Math.PI), capeTrimMat);
@@ -439,7 +507,12 @@ export class LollipopCharacter extends BaseCharacter {
             roundedBox(size.radius * 1.6, size.len * 0.55, size.radius * 2.6, size.radius * 0.28, 3),
             toonMat({ color: BOOT, roughness: 0.55 })
           );
-          boot.position.set(0, -size.len * 0.42, size.radius * 0.55);
+          // Seated on the floor via `size.groundY` (the joint-local y of the world
+          // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1
+          // is "feet at y=0" and the whole cast was 0.08-0.25 m under it; `Math.min`
+          // keeps the authored droop as the floor for the value so this can only ever
+          // raise a foot, never sink one.
+          boot.position.set(0, Math.max(size.groundY + size.len * 0.275, -size.len * 0.42), size.radius * 0.55);
           boot.name = `${part}_mesh`;
           boot.castShadow = true;
           boot.receiveShadow = true;
@@ -543,10 +616,15 @@ export class LollipopCharacter extends BaseCharacter {
     mouth.castShadow = true;
     face.add(mouth);
 
+    // Hoisted and given `depthWrite: false` — a transparent material that still
+    // writes depth is a silent occluder (`docs/LESSONS.md` §1), and every
+    // transparent material in the cast carried the default `true`.
+    const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.5 });
+    blushMat.depthWrite = false;
     for (const sx of [-1, 1]) {
       const blush = new THREE.Mesh(
         new THREE.SphereGeometry(R * 0.07, 10, 8),
-        flatMat('#FF9EC4', { transparent: true, opacity: 0.5 })
+        blushMat
       );
       blush.position.set(sx * discOuterR * 0.48, discCenterY - discOuterR * 0.12, ribbonFrontZ + R * 0.01);
       blush.scale.set(1, 0.7, 0.3);

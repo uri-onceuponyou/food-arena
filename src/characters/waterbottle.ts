@@ -23,9 +23,16 @@
  *      reads as flat or invisible. Keeping the water opaque-but-glossy sidesteps
  *      that entirely and still looks convincingly wet.
  *
- * The default preview background (0x39b7e8, a bright sky blue) is the worst case for
- * a blue translucent character — it is the exact "vanishes against the backdrop"
- * trap the brief calls out. Held off by: a full ink outline on the shell/cap/label
+ * The old preview background (0x39b7e8, a bright sky blue) was the worst case for a
+ * blue translucent character — the exact "vanishes against the backdrop" trap the
+ * brief calls out. **That backdrop was itself the bug**: measured, it put the figure
+ * DARKER than the ground (-0.40 contrast) while the shipped match puts it LIGHTER
+ * (+0.27), so this character was hardened against a frame the game never renders.
+ * `preview.ts` now uses a warm mid-dark ground matching the match's own polarity.
+ * The defences below are kept — they are correct for a translucent character on any
+ * ground — but note that this character still measures the WORST figure/ground in
+ * the cast against the real polarity (+0.054 body-minus-frame), which is a genuine
+ * open item rather than a solved one. Held off by: a full ink outline on the shell/cap/label
  * (opaque regardless of transmission), a bright near-white label wrap breaking up
  * the transparent mass, a saturated water fill colour distinct from the pale shell,
  * and a dark matte cap anchoring the silhouette.
@@ -404,8 +411,13 @@ export class WaterBottleCharacter extends BaseCharacter {
       // Upright and eager — chest forward, one arm raised as if reaching/
       // waving. Distinct from every other character's stance in this file's
       // own cast slice: the only one leaning back into an eager, alert posture.
+      // `shoulderL` +0.46 and `shoulderR` -0.12 are both INWARD swings
+      // (`docs/LESSONS.md` §12). On a 0.46m-wide bottle with a 0.52m shoulder span
+      // that is the whole margin and more: both forearms measured 0.002 and 0.004
+      // delivered — two limbs at effectively zero pixels, the same defect this
+      // file already fixed once for the shoulder strap.
       stance: {
-        shoulderL: 0.46, shoulderR: -0.12,
+        shoulderL: -0.15, shoulderR: 0.12,
         elbowL: -0.18, elbowR: -0.46,
         twist: -0.06, headTilt: -0.05, headTurn: 0.12,
         hipSway: 0.015, lean: -0.05,
@@ -636,6 +648,7 @@ export class WaterBottleCharacter extends BaseCharacter {
 
     // A few small bubbles for cheap life — see `onUpdate` for the drift.
     const bubbleMat = flatMat('#EAFFFF', { transparent: true, opacity: 0.55 });
+    bubbleMat.depthWrite = false; // transparent + depthWrite is a silent occluder — §1
     const bubbleSpots: Array<[number, number, number, number]> = [
       [0.18, -0.55, 0.10, 0.045],
       [-0.22, -0.35, -0.08, 0.035],
@@ -652,14 +665,38 @@ export class WaterBottleCharacter extends BaseCharacter {
       this.bubbleBaseY.push(rel(yF));
     }
 
-    // ── Belt — a small dressed-body accent for the side/back angles where the
-    // torso peeks out from behind the bottle's narrower profile.
-    const belt = new THREE.Mesh(new THREE.TorusGeometry(R * 0.30, R * 0.026, 8, 24), toonMat({ color: CAP_DARK, roughness: 0.55 }));
+    // ── Belt ──────────────────────────────────────────────────────────────────
+    //
+    // ── This is `docs/LESSONS.md` §1 case 6, RECURRING AFTER ITS OWN FIX ────────
+    // Case 6 is this file's shoulder strap: anchored to `joints.torso`, which on a
+    // STUB body is an empty group AT THE HIPS, so it drew as a hook beside the
+    // waist. That was fixed. The belt was then written against `joints.hips` —
+    // a real joint, in the right place for a belt on a body that HAS a waist — and
+    // this character does not have one. Measured: 3,974 px of footprint, **0 px
+    // delivered**. The hips sit at y=0.315m and the bottle's own shell reaches down
+    // to y=0.26m, so a 0.268m torus there is inside 0.35m of plastic. The
+    // seventeenth instance of the lesson, and the second on this object.
+    //
+    // The fix is not another joint — it is to put the belt where the character
+    // actually has a waist. `SHELL_PROFILE` has one: the GRIP WAIST at yF -0.50 to
+    // -0.34, the pinch that makes this read as a drinks bottle rather than a
+    // cylinder. Sizing the ring off `shellSurface` at that height (rather than off
+    // a guessed fraction of R) means it cannot drift inside the shell again if the
+    // profile is ever retuned — the same single-source-of-truth rule the face and
+    // the label already follow.
+    const BELT_YF = -0.42;
+    const beltSeat = shellSurface(0, BELT_YF);
+    const beltR = Math.hypot(beltSeat.pos.x, beltSeat.pos.z);
+    const belt = new THREE.Mesh(
+      new THREE.TorusGeometry(beltR * 1.02, R * 0.030, 8, 28),
+      toonMat({ color: CAP_DARK, roughness: 0.55 })
+    );
     belt.name = 'waterbottle_belt';
     belt.rotation.x = Math.PI / 2;
+    belt.position.y = beltSeat.pos.y;
     belt.castShadow = true;
     belt.receiveShadow = true;
-    this.rig.joints.hips.add(belt);
+    head.add(belt);
 
     this.buildFace(R, shellSurface);
     this.dressTorsoAsBottle();
@@ -901,6 +938,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     // behind it, which is the only place a bead reads as condensation rather than
     // as a speck on a printed label.
     const dropMat = flatMat('#EAFFFF', { transparent: true, opacity: 0.45 });
+    dropMat.depthWrite = false; // transparent + depthWrite is a silent occluder — §1
     const dropSpots: Array<[number, number, number]> = [
       [0.9, -0.28, 0.026], [2.4, -0.12, 0.020], [4.2, 0.04, 0.017],
       [1.6, -0.34, 0.022], [3.3, -0.20, 0.019], [5.4, 0.12, 0.024],

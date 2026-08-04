@@ -323,7 +323,20 @@ export class EggCharacter extends BaseCharacter {
         // INNER half was still buried, so only the hands showed. The shell is 0.753m
         // at the raised pivot height and the arm radius is 0.103m, so the span has to
         // be at least 0.856m for the whole limb to sit outside the food.
-        shoulderWidth: 2.02 * 0.44,
+        // 0.44H -> 0.395H. The previous fix over-corrected: measured, the left arm
+        // sat as its own connected component, 4,494 px of limb with background
+        // between it and the shell (`shots/probe/front/egg.png` shows it plainly),
+        // and its inner edge was 0.101m clear of the food. This is the far side of
+        // the same window the 0.40H note below is reasoning about — the arm has to
+        // OVERLAP the shell at the pivot to read as attached, not merely avoid it.
+        // 0.798m puts the upper arm's inner edge inside the shell while its outer
+        // edge stays proud.
+        shoulderWidth: 2.02 * 0.395,
+        // The shell reaches almost to the floor, so at STUB's 0.225H stance the
+        // thighs and shins measured 0.000 delivery — completely inside the food.
+        // Widened here rather than in the archetype because no other STUB mass is
+        // this deep.
+        stanceWidth: 2.02 * 0.275,
       }),
       // Timid, closed-in — elbows pulled tight against the body, shoulders barely
       // lifted, head ducked and turned away shyly. An art director's second pass
@@ -335,8 +348,11 @@ export class EggCharacter extends BaseCharacter {
       // the joint at x = -shoulderWidth, and a positive value there swings the arm
       // ACROSS the body; the old +0.06 / -0.06 pair was closing what little gap
       // there was. Negative-left / positive-right opens it.
+      // Magnitudes reduced with `shoulderWidth` above: the signs stay (they are
+      // what opened the arms in the first place) but -0.22 / +0.18 on a pivot that
+      // was already outside the shell is what detached them.
       stance: {
-        shoulderL: -0.22, shoulderR: 0.18,
+        shoulderL: -0.07, shoulderR: 0.06,
         elbowL: -0.80, elbowR: -0.76,
         twist: 0.05, headTilt: 0.16, headTurn: 0.32,
         hipSway: 0.01, lean: 0.10,
@@ -572,7 +588,12 @@ export class EggCharacter extends BaseCharacter {
             roundedBox(size.radius * 1.7, size.len * 0.5, size.radius * 1.15, size.radius * 0.3, 3),
             crackFootMat
           );
-          chip.position.set(0, -size.len * 0.36, size.radius * 0.25);
+          // Seated on the floor via `size.groundY` (the joint-local y of the world
+          // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1
+          // is "feet at y=0" and the whole cast was 0.08-0.25 m under it; `Math.min`
+          // keeps the authored droop as the floor for the value so this can only ever
+          // raise a foot, never sink one.
+          chip.position.set(0, Math.max(size.groundY + size.len * 0.25, -size.len * 0.36), size.radius * 0.25);
           chip.rotation.y = Math.PI / 5;
           chip.name = `${part}_mesh`;
           chip.castShadow = true;

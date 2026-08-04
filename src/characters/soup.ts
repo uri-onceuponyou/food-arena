@@ -167,16 +167,44 @@ function strapArc(from: THREE.Vector3, to: THREE.Vector3, bow: THREE.Vector3, ra
 /** A sturdy little foot pad — a low, wide plate rather than a tall boot, echoing a
  * heavy vessel resting on stubby feet directly under its own base, dark against the
  * pale ceramic legs. */
-function buildWorkBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material): THREE.Group {
+function buildWorkBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material, groundLocalY: number): THREE.Group {
   const g = new THREE.Group();
-  const upper = new THREE.Mesh(roundedBox(fw * 0.96, fw * 0.68, fw * 1.34, fw * 0.26, 3), bodyMat);
-  upper.position.set(0, -fw * 0.12, fw * 0.22);
+  // ── The sole was a PLATE, not a sole ────────────────────────────────────────
+  // It was built WIDER (1.10 vs 1.00), LONGER (1.58 vs 1.36) and lower than the
+  // boot above it, in a saturated trim colour — so from the front it read as a
+  // bright red flat plate protruding past the toe and out below the shoe, which is
+  // exactly how a blind pass described it. A sole is a RIM: inset from the upper on
+  // every axis except thickness, so it reads as the boot's own edge.
+  //
+  // `groundLocalY` is the foot joint's own distance above the floor, negated —
+  // i.e. the local y at which the world floor sits. Seating the sole's underside
+  // there fixes `types.ts` convention #1 ("feet at y=0"), which the whole cast was
+  // violating by -0.08 to -0.25 m. It has to be passed in because `dressLimbs` hands
+  // the builder a SIZE and not a position, and `rig.metrics.ankleY` is the only
+  // place that knows the answer.
+  // ── Fit the boot BETWEEN the floor and its own original top ─────────────────
+  // Seating the sole on the floor (which is what fixes `types.ts` convention #1)
+  // pushes everything above it up, and on a STOUT body the shin is only 0.116m long
+  // while the boot is 0.42m tall — so a first pass at this raised the boot's top
+  // ABOVE THE KNEE and swallowed the shin whole (soup's shins measured 0.653
+  // delivered before, 0.000 after). The boot has to get shorter, not just higher.
+  //
+  // `avail` is the room between the floor and where the boot's top used to sit;
+  // `k` squashes the boot vertically to fit it. Widths are untouched, so it reads
+  // as the same chunky boot, just not one that is taller than the leg wearing it.
+  const avail = -groundLocalY + fw * 0.22;
+  const k = Math.min(1, avail / (fw * 0.86));
+  const SOLE_H = fw * 0.16 * k;
+  const UPPER_H = fw * 0.70 * k;
+  const soleY = groundLocalY + SOLE_H / 2;
+  const upper = new THREE.Mesh(roundedBox(fw * 0.96, UPPER_H, fw * 1.34, Math.min(fw * 0.26, UPPER_H * 0.45), 3), bodyMat);
+  upper.position.set(0, groundLocalY + SOLE_H + UPPER_H / 2, fw * 0.22);
   upper.castShadow = true;
   upper.receiveShadow = true;
   g.add(upper);
 
-  const sole = new THREE.Mesh(roundedBox(fw * 1.04, fw * 0.20, fw * 1.56, fw * 0.09, 2), trimMat);
-  sole.position.set(0, -fw * 0.48, fw * 0.30);
+  const sole = new THREE.Mesh(roundedBox(fw * 0.92, SOLE_H, fw * 1.28, fw * 0.07, 2), trimMat);
+  sole.position.set(0, soleY, fw * 0.22);
   sole.castShadow = true;
   sole.receiveShadow = true;
   g.add(sole);
@@ -225,13 +253,24 @@ export class SoupCharacter extends BaseCharacter {
       proportions: bodyType('stout', {
         headFraction: 0.58,                     // the bowl dominates the silhouette
         handRadius: CHARACTER_HEIGHT * 0.062,   // small rounded cap, not a mitt
+        // 0.25H -> 0.305H. The bowl is 0.32-0.34m half-wide at shoulder height and
+        // the pivot sat at 0.52m, which sounds clear — but the bowl FLARES, so the
+        // mass above the pivot projects down over the arm from this camera and
+        // both upper arms delivered only 0.556 / 0.508, both forearms 0.276 /
+        // 0.246, and both hands 0.200 / 0.386. Measuring the mass at the pivot's
+        // own height under-reads a flared food; the screen-space overlap does not.
+        shoulderWidth: CHARACTER_HEIGHT * 0.305,
       }),
       // Serene and still — the calmest, most nearly-neutral stance in the cast,
       // matching the unsettling-patient no-mouth-then-mouth face. Distinct from
       // every other character's stance in this file's own slice: the only one
       // with almost no shoulder/elbow swing or head turn at all.
+      // Both shoulders were swung inward (positive-left and negative-right are
+      // both "across the body"), which on a bowl this wide is 0.10m of extra
+      // burial for nothing. Signs flipped; the serene, near-neutral read is
+      // preserved by keeping the magnitudes the smallest in the cast.
       stance: {
-        shoulderL: 0.08, shoulderR: -0.06,
+        shoulderL: -0.14, shoulderR: 0.14,
         elbowL: -0.14, elbowR: -0.10,
         twist: 0.02, headTilt: 0.03, headTurn: 0.0,
         hipSway: 0.0, lean: 0.0,
@@ -404,6 +443,9 @@ export class SoupCharacter extends BaseCharacter {
       head.add(group);
 
       const mat = toonMat({ color: STEAM, roughness: 0.9, transparent: true, opacity: 0.3 }) as THREE.MeshStandardMaterial;
+      // Steam that writes depth punches a hole in whatever is behind it — and what
+      // is behind it is this character's own face. `docs/LESSONS.md` §1.
+      mat.depthWrite = false;
       this.steamMats.push(mat);
       // Three stacked, slightly offset capsules per wisp — a cheap curling-smoke read
       // without needing a real particle system.
@@ -826,7 +868,7 @@ export class SoupCharacter extends BaseCharacter {
           return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.88, legMat);
         case 'footL':
         case 'footR':
-          return buildWorkBoot(size.len, bootMat, trimMat);
+          return buildWorkBoot(size.len, bootMat, trimMat, size.groundY);
         default:
           return null;
       }

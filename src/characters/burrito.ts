@@ -133,7 +133,21 @@ export class BurritoCharacter extends BaseCharacter {
       // arms sink into the mass. At the stock width the tube had to neck in to
       // 0.192m through the torso against 0.238m at the head, and that 20% step
       // rendered as a cone, not a roll. Everything else is stock LANKY.
-      proportions: bodyType('lanky', { height: 2.05, shoulderWidth: 2.05 * 0.163 }),
+      // ── The arms had gone all the way through the window and out the far side ─
+      // `docs/STATE.md` Finding 7: the fix for a buried limb overshoots into a
+      // DETACHED one, and Burrito is the clearest case in the cast. Its arms
+      // delivered 0.93-1.01 of their own footprint — which reads as a triumph
+      // until you measure WHY: an ID-buffer render (`tools/tmp/islands.mjs`) shows
+      // both arms as their own connected components, 7,619 px and 7,454 px of limb
+      // with visible background between them and the tortilla. Nothing was
+      // occluding them because nothing was touching them.
+      //
+      // 0.163H -> 0.135H. The wrap is 0.239m half-wide at shoulder height and the
+      // pivot sat at 0.340m with an 0.086m arm radius, so the arm's INNER edge was
+      // still 0.015m clear of the body. 0.277m puts that inner edge inside the
+      // wrap and leaves the outer edge proud of it — the straddle, not either edge
+      // of the window.
+      proportions: bodyType('lanky', { height: 2.05, shoulderWidth: 2.05 * 0.135 }),
       // Arms held CLEAR of the body, with a deliberate asymmetry.
       //
       // The signs are the fix, not the magnitudes. `restPose()` sets
@@ -144,8 +158,12 @@ export class BurritoCharacter extends BaseCharacter {
       // tube. A blind critic reading the silhouette named the result directly: no
       // arm-to-body negative space anywhere, so the outline is one solid slab.
       // Negative-left / positive-right opens them.
+      // Magnitudes cut hard for the same reason as `shoulderWidth` above: these
+      // signs are correct (negative-left / positive-right opens the arms outward)
+      // and were the right fix for the original burial, but -0.26 / +0.19 on top
+      // of an already-wide pivot is what pushed the hands 0.27m clear of the body.
       stance: {
-        shoulderL: -0.26, shoulderR: 0.19,
+        shoulderL: -0.04, shoulderR: 0.03,
         elbowL: -0.34, elbowR: -0.20,
         twist: -0.04, headTilt: 0.03, headTurn: 0.08,
         hipSway: 0.02, lean: -0.05,
@@ -396,10 +414,20 @@ export class BurritoCharacter extends BaseCharacter {
     // z-fight with the tortilla underneath.
     const FOIL_SLANT = 0.38;
     const foilBotY = bodyBottomY + R * 0.02;
-    // Kept BELOW the mouth (centred at -0.22R, reaching -0.39R at its lowest): the
-    // sheared edge peaks at foilTopY + FOIL_SLANT * maxRadius, so this is the
-    // highest the wrap can go without eating the face.
-    const foilTopY = -R * 0.56;
+    // ── This was NOT below the mouth, and it ate half the face ─────────────────
+    // Measured: the `face` joint group delivers **0.465** of its own footprint —
+    // 53.5% of every eye, brow and mouth pixel is drawn and then covered. The
+    // arithmetic in the previous note stopped one term short. The foil sits at
+    // 1.035x the tortilla radius while the face features are placed at 0.90-0.94x
+    // (they hug the tube), so the foil is IN FRONT of the face everywhere the two
+    // overlap on screen — and the mouth's torus (R*0.17 major + R*0.055 tube about
+    // -0.22R) actually reaches down to -0.445R, not the -0.39R assumed here, while
+    // the sheared edge climbs to foilTopY + 0.38 * maxRadius ~= foilTopY + 0.13R.
+    //
+    // -0.70R puts the highest point of the wrap at ~-0.57R, clear of the mouth's
+    // true bottom with margin. The torn tabs are handled separately below, because
+    // they stand proud of the edge and were the other half of the overlap.
+    const foilTopY = -R * 0.70;
     const foilH = foilTopY - foilBotY;
     const foilGeo = new THREE.CylinderGeometry(
       wrapRadiusAt(foilTopY) * 1.035,
@@ -430,7 +458,13 @@ export class BurritoCharacter extends BaseCharacter {
       const rr = wrapRadiusAt(foilTopY) * 1.035;
       const x = Math.cos(a) * rr;
       const z = Math.sin(a) * rr;
-      const h = R * (0.13 + 0.06 * (i % 3));
+      // Tab height now scales with how SIDE-ON the tab is, which serves both
+      // masters at once: the tabs that actually break the SILHOUETTE are the ones
+      // near +-X (they stick out past the body's outline), and the ones near +Z are
+      // the ones that were climbing over the mouth while contributing nothing to
+      // the outline. So the side tabs get taller than before and the front tabs get
+      // shorter. `i` is kept only to keep the pattern from being perfectly regular.
+      const h = R * (0.10 + 0.13 * Math.abs(Math.cos(a)) + 0.012 * (i % 3));
       const tab = new THREE.Mesh(new THREE.ConeGeometry(rr * 0.24, h, 3), tabMat);
       tab.name = 'burrito_foil_tab';
       tab.position.set(x, foilTopY + FOIL_SLANT * x + h * 0.30, z);
@@ -599,12 +633,17 @@ export class BurritoCharacter extends BaseCharacter {
     mouth.castShadow = true;
     face.add(mouth);
 
+    // Hoisted and given `depthWrite: false` — a transparent material that still
+    // writes depth is a silent occluder (`docs/LESSONS.md` §1), and every
+    // transparent material in the cast carried the default `true`.
+    const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.5 });
+    blushMat.depthWrite = false;
     for (const sx of [-1, 1]) {
       const cx = sx * R * 0.44;
       const cy = -R * 0.08;
       const cheek = new THREE.Mesh(
         new THREE.SphereGeometry(R * 0.06, 10, 8),
-        flatMat('#FF9EC4', { transparent: true, opacity: 0.5 })
+        blushMat
       );
       cheek.position.set(cx, cy, surfaceZ(cx, cy) * 0.92);
       cheek.scale.set(1, 0.7, 0.3);

@@ -64,6 +64,21 @@ export interface RigStance {
   lean?: number;
 }
 
+/**
+ * What `dressLimbs` tells a builder about the slot it is filling.
+ *
+ * `groundY` is the joint-local y of the world floor. It exists because bespoke
+ * boots had no way to know where the ground was and every one of them was authored
+ * by eye, leaving the whole cast standing 0.08-0.25 m below y=0 against
+ * `types.ts` convention #1.
+ */
+export interface LimbSize {
+  len: number;
+  radius: number;
+  /** Joint-local y of the world floor (negative). */
+  groundY: number;
+}
+
 /** Attachment points `dressLimbs` can replace. */
 export type LimbPart =
   | 'upperArmL' | 'upperArmR' | 'forearmL' | 'forearmR' | 'handL' | 'handR'
@@ -542,10 +557,20 @@ export class ChibiRig {
 
     // Feet: oversized rounded wedges, pushed forward so the character reads as
     // standing on something rather than balancing on pegs.
+    //
+    // ── Seated ON the floor, not through it ────────────────────────────────────
+    // `types.ts` convention #1 is "feet at y=0" and the whole cast was violating it
+    // by -0.08 to -0.25 m standing still. The default was `-fw * 0.18`, which puts
+    // the wedge's underside `fw * 0.54` below the ankle while the ankle itself only
+    // sits `legLength * footClearance` above the ground — on STANDARD that is
+    // 0.076 m of clearance against 0.162 m of overhang, so the foot is 0.085 m into
+    // the floor before any animation touches it. Seating the underside at exactly
+    // -ankleY is the whole fix, and it is expressed in terms of `metrics` so it
+    // stays right when an archetype retunes `footClearance` or `legRadius`.
     for (const [joint, name] of [[this.joints.footL, 'footL'], [this.joints.footR, 'footR']] as const) {
       const fw = this.p.legRadius * 2.3;
       const m = solid(new THREE.Mesh(roundedBox(fw, fw * 0.72, fw * 1.5, fw * 0.3, 4), footMat));
-      m.position.set(0, -fw * 0.18, fw * 0.28);
+      m.position.set(0, Math.max(-this.metrics.ankleY + fw * 0.36, -fw * 0.18), fw * 0.28);
       m.name = `${name}_mesh`;
       joint.add(m);
     }
@@ -565,7 +590,7 @@ export class ChibiRig {
    * point and should return geometry sized to `size` (metres) hanging DOWN from the
    * joint origin, matching how the defaults are built.
    */
-  dressLimbs(build: (part: LimbPart, size: { len: number; radius: number }) => THREE.Object3D | null): void {
+  dressLimbs(build: (part: LimbPart, size: LimbSize) => THREE.Object3D | null): void {
     for (const [part, joint, spec] of this.limbSlots()) {
       for (const child of [...joint.children]) {
         const m = child as THREE.Mesh;
@@ -579,22 +604,30 @@ export class ChibiRig {
     }
   }
 
-  private limbSlots(): Array<[LimbPart, THREE.Group, { len: number; radius: number }]> {
+  private limbSlots(): Array<[LimbPart, THREE.Group, LimbSize]> {
     const j = this.joints;
     const m = this.metrics;
+    // Every slot carries the same `groundY`: the joint-local height of the WORLD
+    // FLOOR. Only the foot slots have any use for it, but it costs nothing to pass
+    // and it is the number a boot builder needs and could not previously obtain —
+    // `dressLimbs` handed out a SIZE and no position, so every bespoke boot in the
+    // cast guessed its own seat and every one of them guessed low. Foot joints sit
+    // `ankleY` above the ground; for the others it is only meaningful as "how far
+    // down the world floor is", which is what the sign says.
+    const groundY = -m.ankleY;
     return [
-      ['upperArmL', j.shoulderL, { len: m.upperArmLength, radius: m.armRadius }],
-      ['upperArmR', j.shoulderR, { len: m.upperArmLength, radius: m.armRadius }],
-      ['forearmL', j.elbowL, { len: m.forearmLength, radius: m.armRadius * 0.92 }],
-      ['forearmR', j.elbowR, { len: m.forearmLength, radius: m.armRadius * 0.92 }],
-      ['handL', j.handL, { len: m.handRadius * 2, radius: m.handRadius }],
-      ['handR', j.handR, { len: m.handRadius * 2, radius: m.handRadius }],
-      ['thighL', j.hipL, { len: m.thighLength, radius: m.legRadius }],
-      ['thighR', j.hipR, { len: m.thighLength, radius: m.legRadius }],
-      ['shinL', j.kneeL, { len: m.shinLength, radius: m.legRadius * 0.9 }],
-      ['shinR', j.kneeR, { len: m.shinLength, radius: m.legRadius * 0.9 }],
-      ['footL', j.footL, { len: m.legRadius * 2.3, radius: m.legRadius * 1.15 }],
-      ['footR', j.footR, { len: m.legRadius * 2.3, radius: m.legRadius * 1.15 }],
+      ['upperArmL', j.shoulderL, { len: m.upperArmLength, radius: m.armRadius, groundY }],
+      ['upperArmR', j.shoulderR, { len: m.upperArmLength, radius: m.armRadius, groundY }],
+      ['forearmL', j.elbowL, { len: m.forearmLength, radius: m.armRadius * 0.92, groundY }],
+      ['forearmR', j.elbowR, { len: m.forearmLength, radius: m.armRadius * 0.92, groundY }],
+      ['handL', j.handL, { len: m.handRadius * 2, radius: m.handRadius, groundY }],
+      ['handR', j.handR, { len: m.handRadius * 2, radius: m.handRadius, groundY }],
+      ['thighL', j.hipL, { len: m.thighLength, radius: m.legRadius, groundY }],
+      ['thighR', j.hipR, { len: m.thighLength, radius: m.legRadius, groundY }],
+      ['shinL', j.kneeL, { len: m.shinLength, radius: m.legRadius * 0.9, groundY }],
+      ['shinR', j.kneeR, { len: m.shinLength, radius: m.legRadius * 0.9, groundY }],
+      ['footL', j.footL, { len: m.legRadius * 2.3, radius: m.legRadius * 1.15, groundY }],
+      ['footR', j.footR, { len: m.legRadius * 2.3, radius: m.legRadius * 1.15, groundY }],
     ];
   }
 

@@ -67,10 +67,10 @@
  * | `headFraction`  | 0.76 | 0.50  | 0.46     | 0.40  |
  * | `torsoFraction` | 0    | 0.24  | 0.28     | 0.30  |
  * | `legFraction`   | 0.15 | 0.25  | 0.26     | 0.33  |
- * | `armFraction`   | 0.13 | 0.175 | 0.22     | 0.30  |
+ * | `armFraction`   | 0.19 | 0.175 | 0.22     | 0.30  |
  * | torso width     | —    | 0.39  | 0.24     | 0.17  |
  * | `shoulderWidth` | 0.32 | 0.25  | 0.20     | 0.145 |
- * | `stanceWidth`   | 0.16 | 0.155 | 0.115    | 0.062 |
+ * | `stanceWidth`   | 0.225| 0.215 | 0.115    | 0.062 |
  * | `armRadius`     | .062 | 0.085 | 0.058    | 0.040 |
  * | `legRadius`     | .075 | 0.098 | 0.062    | 0.043 |
  *
@@ -112,6 +112,24 @@ export interface BodyArchetype {
   readonly armRadiusF: number;
   readonly handRadiusF: number;
   readonly legRadiusF: number;
+  /**
+   * Torso width as a fraction of HEIGHT. Takes precedence over `torsoWidthRatio`.
+   *
+   * ── Why this exists ────────────────────────────────────────────────────────
+   * `torsoWidthRatio` is a multiple of `shoulderWidth`, so widening the shoulders
+   * silently widened the WAIST by the same proportion — and widening the shoulders
+   * is the standard fix for an arm buried in the food mass. The two changes fight:
+   * the arm moves out, the body it has to clear follows it out, and the character
+   * ends up exactly as buried but wider. Recorded as a known defect in
+   * `docs/STATE.md`; measured on Hamburger, where freeing the arms costs +0.12m of
+   * shoulder and would have bought the bottom bun +0.19m of extra half-width.
+   *
+   * Every archetype's value here is its OWN previous product (`shoulderWidthF *
+   * torsoWidthRatio`), so the default cast is unchanged to the millimetre and only
+   * the coupling is gone.
+   */
+  readonly torsoWidthF: number;
+  /** Legacy: torso width as a multiple of `shoulderWidth`. Only used if `torsoWidthF` is 0. */
   readonly torsoWidthRatio: number;
   readonly torsoDepthRatio: number;
 }
@@ -128,8 +146,8 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
    *
    * `shoulderFraction` matters more here than anywhere else. With no torso the
    * default (`torsoFraction * 0.78`) would be zero and the arms would sprout from
-   * the ankles. 0.12 puts the shoulder pivot about a fifth of the way up the head
-   * mass.
+   * the ankles. 0.26 puts the shoulder pivot a quarter of the way up the head mass,
+   * ABOVE its widest point — see the measurement note below for why 0.12 did not.
    *
    * **`shoulderWidth` almost always needs a per-character tweak on STUB, and that
    * is expected rather than a failure of the preset.** With no torso, the arms
@@ -139,26 +157,59 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
    * 0.84R at the default head size) — start there, render, and move it until the
    * upper arm is neither buried in the mass nor floating clear of it. This is the
    * single most common thing to get wrong on this archetype.
+   *
+   * ── `shoulderFraction` 0.12 -> 0.26, and `stanceWidthF` 0.16 -> 0.225 ────────
+   * Both were measured, not guessed (`tools/tmp/limbcheck.mjs`, which renders each
+   * joint group alone and again with it hidden, and reports the share of its own
+   * footprint that the food mass covers).
+   *
+   * At 0.12 the arm pivot sits about a fifth of the way up the food — which on
+   * every bottom-heavy STUB mass is at or below its widest point, so the upper arm
+   * starts inside the food and the forearm is deeper still. Egg had already
+   * discovered this and overridden to 0.30 after a critic reported it had no arms;
+   * Water Bottle had not, and measured forearm delivery of **0.002 and 0.004** —
+   * two limbs at effectively zero pixels. 0.26 puts the pivot above the widest
+   * point on all four STUB masses.
+   *
+   * The stance is the same failure on the legs (Finding 2): hips at 0.16H = 0.34m
+   * against masses 0.32-0.72m wide at hip height, so on Donut, Egg and Lollipop the
+   * thighs and shins measured 0.00-0.09 delivery — the cast-wide "feet with no
+   * legs" read. Note this cannot be fixed by lowering the mass alone: the camera
+   * looks DOWN (22 deg in preview, 58 deg in game), so anything above the hips
+   * projects over the legs regardless of where its bottom edge sits.
    */
   stub: {
     note: 'No torso — head on the hips, very short thick limbs, wide stance.',
     headFraction: 0.76,
     legFraction: 0.15,
     torsoFraction: 0,
-    armFraction: 0.13,
-    shoulderFraction: 0.12,
+    // ── 0.13 -> 0.19, with `handRadiusF` down from 0.078 ────────────────────────
+    // Water Bottle's forearms measured 0.005 and 0.005 delivered while sitting
+    // essentially CLEAR of the food (screen overlap with the mass: 0.003 and
+    // 0.000). Nothing about the food was hiding them — the character's own HAND
+    // was. At 0.13H the whole arm is 0.273m, so the forearm is 0.130m long against
+    // an 0.164m-radius hand ball centred on the wrist: the mitt is wider than the
+    // limb is long and simply contains it. The same arithmetic hides Egg's
+    // forearms (0.36 delivered).
+    //
+    // This is the invisible-render family again (`docs/LESSONS.md` §1) with the
+    // occluder being a sibling limb rather than the food, which is why every fix
+    // aimed at the food mass left it untouched.
+    armFraction: 0.19,
+    shoulderFraction: 0.26,
     headMount: 0.95,
     // Very short, very thick legs: at the stock 0.14 the feet — which are sized
     // off `legRadius`, not off leg length — go straight through the floor. Nearly
     // half the leg is ankle here, which is exactly the "no legs, just feet" read.
     footClearance: 0.52,
     shoulderWidthF: 0.32,
-    stanceWidthF: 0.16,
+    stanceWidthF: 0.225,
     armRadiusF: 0.062,
-    handRadiusF: 0.078,
+    handRadiusF: 0.068,
     legRadiusF: 0.075,
     // Unused (no torso) but kept sane so a character that flips to another
     // archetype for a round doesn't inherit nonsense.
+    torsoWidthF: 0.32 * 1.18,
     torsoWidthRatio: 1.18,
     torsoDepthRatio: 0.88,
   },
@@ -190,10 +241,17 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     // lowest point within ~0.2m of y=0 across all three STOUT characters.
     footClearance: 0.44,
     shoulderWidthF: 0.25,
-    stanceWidthF: 0.155,
+    // 0.155 -> 0.215. Same measurement as STUB's: a STOUT torso is 0.39H wide and
+    // the hips sat at 0.155H, so all three STOUT characters' thighs and shins were
+    // inside the food (hamburger 0.006/0.000, taco 0.012/0.000, soup 0.312/0.653).
+    // STOUT is the archetype whose whole read is "heavy and planted", and a planted
+    // character stands WIDE — this is the one place where the fix for the bug and
+    // the fix for the silhouette are the same change.
+    stanceWidthF: 0.215,
     armRadiusF: 0.085,
     handRadiusF: 0.095,
     legRadiusF: 0.098,
+    torsoWidthF: 0.25 * 1.55,
     torsoWidthRatio: 1.55,
     torsoDepthRatio: 0.88,
   },
@@ -218,6 +276,7 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     armRadiusF: 0.058,
     handRadiusF: 0.075,
     legRadiusF: 0.062,
+    torsoWidthF: 0.20 * 1.18,
     torsoWidthRatio: 1.18,
     torsoDepthRatio: 0.88,
   },
@@ -250,6 +309,7 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     armRadiusF: 0.040,
     handRadiusF: 0.060,
     legRadiusF: 0.043,
+    torsoWidthF: 0.145 * 1.15,
     torsoWidthRatio: 1.15,
     torsoDepthRatio: 0.92,
   },
@@ -273,7 +333,11 @@ export function bodyType(name: BodyArchetypeName, tweaks: RigProportions = {}): 
   const a = BODY_ARCHETYPES[name];
   const height = tweaks.height ?? CHARACTER_HEIGHT;
   const shoulderWidth = tweaks.shoulderWidth ?? height * a.shoulderWidthF;
-  const torsoWidth = tweaks.torsoWidth ?? shoulderWidth * a.torsoWidthRatio;
+  // Torso width is a fraction of HEIGHT, not a multiple of `shoulderWidth`. See
+  // `torsoWidthF` — the coupling meant "move the arm out of the food" also moved
+  // the food out after it. `torsoWidthRatio` is the pre-decoupling fallback.
+  const torsoWidth = tweaks.torsoWidth
+    ?? (a.torsoWidthF ? height * a.torsoWidthF : shoulderWidth * a.torsoWidthRatio);
   return {
     height,
     headFraction: a.headFraction,

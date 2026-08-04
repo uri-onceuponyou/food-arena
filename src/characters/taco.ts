@@ -195,6 +195,16 @@ export class TacoCharacter extends BaseCharacter {
       // cast's ~2.10 m standing height. Verified with `shoot.mjs --char taco`,
       // which prints the real bounding height — not guessed.
       proportions: bodyType('stout', { headFraction: 0.52 }),
+      // ── Both elbows were tucked INSIDE the shell ────────────────────────────
+      // The old -0.75 / -0.85 elbows plus a +0.20 / -0.45 shoulder pair swung both
+      // forearms across the body and behind the shell: measured delivery 0.286
+      // (left forearm) and 0.000 (right forearm, i.e. every pixel of it occluded),
+      // with the right mitt down at 0.344. "Both fists cocked" was authored and
+      // never reached the screen.
+      //
+      // The eager, forward-committed read is carried by `lean` (0.16, still the
+      // most forward-committed in the cast) and by the shoulders' remaining
+      // asymmetry, not by folding the arms into the food.
       // Leaning forward, eager — weight already committed toward the fight, both
       // fists cocked like she's about to toss filling. An art director's second
       // pass named the cast's identical dead-front symmetric pose as a top gap;
@@ -206,8 +216,8 @@ export class TacoCharacter extends BaseCharacter {
       // makes the shape read as a container with a front and a back rather than
       // as a cut-out.
       stance: {
-        shoulderL: 0.20, shoulderR: -0.45,
-        elbowL: -0.75, elbowR: -0.85,
+        shoulderL: -0.05, shoulderR: 0.16,
+        elbowL: -0.50, elbowR: -0.45,
         twist: 0.05, headTilt: -0.07, headTurn: -0.24,
         hipSway: -0.04, lean: 0.16,
       },
@@ -672,7 +682,12 @@ export class TacoCharacter extends BaseCharacter {
             roundedBox(size.radius * 1.85, size.len * 0.55, size.radius * 2.15, size.radius * 0.30, 3),
             limbShellDarkMat
           );
-          foot.position.set(0, -size.len * 0.26, size.radius * 0.5);
+          // Seated on the floor via `size.groundY` (the joint-local y of the world
+          // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1
+          // is "feet at y=0" and the whole cast was 0.08-0.25 m under it; `Math.min`
+          // keeps the authored droop as the floor for the value so this can only ever
+          // raise a foot, never sink one.
+          foot.position.set(0, Math.max(size.groundY + size.len * 0.275, -size.len * 0.26), size.radius * 0.5);
           foot.name = `${part}_mesh`;
           foot.castShadow = true;
           foot.receiveShadow = true;

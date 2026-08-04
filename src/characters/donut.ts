@@ -136,15 +136,38 @@ export class DonutCharacter extends BaseCharacter {
         height: 2.10,
         headFraction: 0.72,
         legFraction: 0.20,
-        shoulderWidth: 2.10 * 0.295,
+        // 0.295H -> 0.345H. Measured: the ring is 0.619m half-wide at shoulder
+        // height and the pivot sat at 0.620m — exactly ON the surface, so the whole
+        // upper arm was inside the dough (delivery 0.46 left, 0.09 right).
+        shoulderWidth: 2.10 * 0.345,
+        // ── A RING is widest at its own CENTRE, so STUB's new 0.26 is wrong here ──
+        // `bodies.ts` raised STUB's `shoulderFraction` from 0.12 to 0.26 because
+        // every other STUB mass (bottle, egg, lollipop stick) is widest LOW, so
+        // lifting the pivot lifts it clear. A torus is the opposite: at 0.12 the
+        // pivot sits 0.47m below the ring centre where the ring measures 0.62m
+        // across, and at 0.26 it rises to 0.17m below centre where it measures
+        // 0.79m. The archetype's fix would have cost this character 0.17m of extra
+        // burial, which is why it is overridden rather than inherited.
+        shoulderFraction: 0.12,
+        // The ring is 0.81m wide and STUB's stance (even widened to 0.225H) leaves
+        // the thighs at 0.278-0.317 delivered. 0.26H is as far as this can go before
+        // the legs leave the dough entirely and detach.
+        stanceWidth: 2.10 * 0.26,
       }),
       // Bouncy and playful — hip popped out, head cocked, weight rocked back onto
       // her heels like she's mid-bounce. An art director's second pass named the
       // cast's identical dead-front symmetric pose as a top gap; Donut's read is
       // the cast's "sweetest"/most carefree attitude, distinct from every other
       // stance in this file's cast.
+      // Both shoulders swung INWARD, and on this body that is a deletion rather
+      // than a pose: `docs/LESSONS.md` §12 — `shoulderL` is the joint at
+      // x = -shoulderWidth, so POSITIVE z there swings the arm across the body,
+      // and NEGATIVE does the same on the right. +0.55 / -0.15 folded both arms
+      // into a 0.62m-wide ring of dough. Signs flipped so both open outward; the
+      // bouncy hip-shot read is carried by `hipSway` and `twist`, which are
+      // untouched.
       stance: {
-        shoulderL: 0.55, shoulderR: -0.15,
+        shoulderL: -0.12, shoulderR: 0.10,
         elbowL: -0.55, elbowR: -0.65,
         twist: 0.22, headTilt: 0.22, headTurn: -0.30,
         hipSway: 0.12, lean: -0.03,

@@ -232,7 +232,13 @@ export class PizzaCharacter extends BaseCharacter {
       // WAIST out to match, giving a barrel nearly as broad as the shoulders. A
       // head only reads as the hero form if the body under it is smaller.
       proportions: bodyType('standard', {
-        shoulderWidth: CHARACTER_HEIGHT * 0.26,  // broad shoulders — wide top of the wedge
+        // 0.26H -> 0.235H. Pizza passes at idle and FAILS at run: measured, the
+        // left arm breaks off into its own 9,032 px connected component during the
+        // stride (`--anims run`), because the run cycle's own arm swing adds to a
+        // pivot that was already 0.095m clear of the body at rest. The idle-only
+        // baseline could not see this, which is exactly why the acceptance test
+        // now samples both.
+        shoulderWidth: CHARACTER_HEIGHT * 0.235, // broad shoulders — wide top of the wedge
         torsoWidth: CHARACTER_HEIGHT * 0.26 * 0.82, // narrow waist — do NOT track the wide shoulders
         stanceWidth: CHARACTER_HEIGHT * 0.09,    // narrow stance — the wedge tapers to a point
         armRadius: CHARACTER_HEIGHT * 0.062,     // a touch thicker than stock, still a limb
@@ -244,8 +250,16 @@ export class PizzaCharacter extends BaseCharacter {
       // every other character in this file's own cast slice: the only one with a
       // strong asymmetric hand-on-hip read.
       stance: {
-        shoulderL: 0.22, shoulderR: -0.42,
-        elbowL: -0.28, elbowR: -0.64,
+        // `shoulderR` -0.42 is an INWARD swing on the right (`docs/LESSONS.md` §12),
+        // and the wedge is at its widest on that side: the right upper arm, forearm
+        // and mitt measured 0.867 / 0.382 / 0.692 with 0.165-0.380 of each covered
+        // by the dough. +0.10 opens it. The left stays as authored — it is the arm
+        // that was already clear, and over-opening it is what detached it at run.
+        shoulderL: 0.22, shoulderR: 0.10,
+        // -0.64 -> -0.46 on the right: at -0.64 the right forearm tucked behind the
+        // wedge and delivered exactly 0.500 of its footprint, sitting on the
+        // acceptance floor with no margin, and dropping to 0.206 at run.
+        elbowL: -0.28, elbowR: -0.46,
         twist: 0.16, headTilt: -0.09, headTurn: 0.20,
         hipSway: -0.045, lean: 0.04,
       },
@@ -368,7 +382,9 @@ export class PizzaCharacter extends BaseCharacter {
       head.add(pep);
       this.pepperoni.push(pep);
       // A faint grease glisten on top of each — the specular pop that sells "wet".
-      const glisten = new THREE.Mesh(new THREE.SphereGeometry(R * 0.016, 8, 6), flatMat('#ffffff', { transparent: true, opacity: 0.5 }));
+      const glistenMat = flatMat('#ffffff', { transparent: true, opacity: 0.5 });
+      glistenMat.depthWrite = false; // transparent + depthWrite is a silent occluder — §1
+      const glisten = new THREE.Mesh(new THREE.SphereGeometry(R * 0.016, 8, 6), glistenMat);
       glisten.position.set(px - R * 0.02, py + R * 0.02, cheeseFrontZ + R * 0.04);
       glisten.userData.noOutline = true;
       head.add(glisten);
@@ -509,10 +525,15 @@ export class PizzaCharacter extends BaseCharacter {
     face.add(smile);
 
     // Rosy cheeks — small, warm, cheap charm that reads well at chibi scale.
+    // Hoisted and given `depthWrite: false` — a transparent material that still
+    // writes depth is a silent occluder (`docs/LESSONS.md` §1), and every
+    // transparent material in the cast carried the default `true`.
+    const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.55 });
+    blushMat.depthWrite = false;
     for (const sx of [-1, 1]) {
       const cheekBlush = new THREE.Mesh(
         new THREE.SphereGeometry(R * 0.06, 10, 8),
-        flatMat('#FF9EC4', { transparent: true, opacity: 0.55 })
+        blushMat
       );
       cheekBlush.position.set(sx * R * 0.42, -R * 0.18, localZ - R * 0.01);
       cheekBlush.scale.set(1, 0.7, 0.3);
@@ -568,12 +589,27 @@ export class PizzaCharacter extends BaseCharacter {
     // there — capped against the measured torso only as a safety floor for
     // unusually wide waists — keeps the bag snug against the body's own side
     // instead of floating at arm's length.
+    // ── `setFromObject(joints.torso)` MEASURES THE ARMS ────────────────────────
+    // `shoulderL` and `shoulderR` are CHILDREN of the torso joint, and `Box3` walks
+    // the whole subtree — so `torsoHalfW` was the half-width of the torso PLUS both
+    // outstretched arms (0.65m against a real torso of 0.29m). The cap that was
+    // added to stop the bag floating at arm's length was therefore computed FROM
+    // arm's length, and the bag went straight back out there: measured, this
+    // character's torso group reaches x = +0.72m and its right upper arm, forearm
+    // and mitt deliver 0.867 / 0.382 / 0.692, with 0.17-0.38 of each covered by an
+    // accessory. Excluding the two arm subtrees is the whole fix.
     this.rig.joints.root.updateMatrixWorld(true);
-    const torsoBB = new THREE.Box3().setFromObject(this.rig.joints.torso);
-    const torsoHalfW = Math.max(Math.abs(torsoBB.min.x), Math.abs(torsoBB.max.x));
+    const torsoBB = new THREE.Box3();
+    for (const c of this.rig.joints.torso.children) {
+      if (c === this.rig.joints.shoulderL || c === this.rig.joints.shoulderR) continue;
+      torsoBB.expandByObject(c);
+    }
+    const torsoHalfW = torsoBB.isEmpty()
+      ? this.rig.metrics.torsoWidth * 0.5
+      : Math.max(Math.abs(torsoBB.min.x), Math.abs(torsoBB.max.x));
     // Positive X — the RIGHT side, opposite the oven mitt on `handL` below, so
     // the two accessories don't compete for the same patch of silhouette.
-    const bagX = Math.max(shoulderWidth * 0.88, torsoHalfW * 0.85);
+    const bagX = Math.max(shoulderWidth * 0.80, torsoHalfW * 0.92);
 
     // Satchel bag: hangs on a SHORT strap from the shoulder straight down to
     // the waist on the SAME side — not a long diagonal across the whole chest,
@@ -581,8 +617,11 @@ export class PizzaCharacter extends BaseCharacter {
     // height (clear of the hip line where the rig's own thighs hang straight
     // down from y=0).
     const bagW = shoulderWidth * 0.40, bagH = shoulderWidth * 0.42, bagD = shoulderWidth * 0.24;
-    const bagPt = new THREE.Vector3(bagX, torsoH * 0.22, shoulderWidth * 0.10);
-    const shoulderPt = new THREE.Vector3(bagX * 0.97, torsoH * 0.80, shoulderWidth * 0.16);
+    // Pushed BEHIND the arm in z rather than sharing its plane. A messenger bag
+    // rides behind the hip; at z = +0.10 * shoulderWidth this one was coplanar with
+    // the arm that hangs past it, so the two could only take turns being visible.
+    const bagPt = new THREE.Vector3(bagX, torsoH * 0.22, -shoulderWidth * 0.38);
+    const shoulderPt = new THREE.Vector3(bagX * 0.97, torsoH * 0.80, -shoulderWidth * 0.04);
     const strap = strapArc(shoulderPt, bagPt, new THREE.Vector3(shoulderWidth * 0.10, 0, shoulderWidth * 0.22), shoulderWidth * 0.055, leatherMat);
     strap.name = 'pizza_satchel_strap';
     this.rig.joints.torso.add(strap);
