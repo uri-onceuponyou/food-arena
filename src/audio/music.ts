@@ -103,6 +103,13 @@ class MusicPlayer {
     if (this.source) return true;
 
     if (!this.el) {
+      // Deliberately NEVER appended to the DOM. `createMediaElementSource` works on a
+      // detached element, and keeping it out of the document means no stray default
+      // controls, no layout participation, and nothing for a CSS change to disturb.
+      // Consequence worth knowing when debugging: `document.querySelectorAll('audio')`
+      // finds NOTHING even while the theme is playing. Verify through the audio graph
+      // (`window.__audio.connectTap`) instead — a differential measurement with music
+      // enabled vs disabled is the reliable check, and reads 0.0222 RMS vs exactly 0.
       const el = document.createElement('audio');
       el.src = TRACK_URL;
       el.loop = true;
