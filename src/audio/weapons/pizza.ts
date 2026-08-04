@@ -36,7 +36,7 @@
  * measured as an unrelated 47.9 Hz artefact for exactly that reason.
  */
 
-import { centsJitter, longest, noiseBurst, tone } from '../synth';
+import { centsJitter, longest, noiseBurst, tone, transient } from '../synth';
 import type { CharacterWeaponSfxMap, WeaponSfxCtx } from './types';
 
 /**
@@ -57,6 +57,20 @@ function discusThrow(c: WeaponSfxCtx, spinHz: number, weight: number): number {
     attack: 0.035,
     hold: 0.1,
     duration,
+    drive: 1.5,
+    // THE ONE LAYER IN THE GAME WHOSE ROOM IS RATIONED, and for a measured reason.
+    //
+    // Reverb fills in a tremolo's troughs: the reflections of one peak arrive during
+    // the next dip, and a flutter whose dips are filled is not a flutter. At a flat
+    // wet 0.26 the probe's demodulator read these discs spinning at depth 0.12-0.24
+    // against an authored 0.85 — the LFO was connected, working, and inaudible, which
+    // is this project's signature failure wearing a new hat.
+    //
+    // The send therefore scales INVERSELY with spin rate, which is also the physics:
+    // the faster the flutter, the shorter its period, and the less room it can carry
+    // before consecutive peaks smear into each other. Cheese (12 Hz) keeps a real
+    // room; Tomato (26 Hz) gets under half of it.
+    wet: 0.1 * Math.min(1, 16 / spinHz),
     // The spin. Rate climbs slightly as the plate is released, depth is deep enough
     // to be unmistakable without gating the sound into fragments.
     tremolo: { rate: [spinHz * 0.88, spinHz], depth: 0.85 },
@@ -69,6 +83,7 @@ function discusThrow(c: WeaponSfxCtx, spinHz: number, weight: number): number {
     peak: 0.16,
     attack: 0.0008,
     duration: 0.018,
+    wet: 0.1,
   });
   return longest(air, edge);
 }
@@ -92,15 +107,27 @@ export const pizzaWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.34,
         attack: 0.004,
         duration: 0.13,
+        drive: 1.8,
+        wet: 0.24,
       });
+      // A DULL transient: the tick corner is at 1.6 kHz and the snap is low, so raw
+      // dough still has an onset without acquiring an edge it should not have. The
+      // depth pass added this everywhere; here it had to be added without moving the
+      // weapon off its own acceptance bound (`--mode identity` requires this to stay
+      // the dullest impact in the game, under 1400 Hz).
+      const tr = transient(c, { peak: 0.34, freq: 1600, snap: 660, snapMs: 18, wet: 0.1 });
       const body = tone(c, {
         type: 'sine',
         freq: [150 * j, 58 * j],
         peak: 0.5,
         attack: 0.003,
-        duration: 0.16,
+        duration: 0.18,
+        drive: 2.8,
+        voices: 2,
+        detuneCents: 18,
+        wet: 0.14,
       });
-      return longest(flop, body);
+      return longest(flop, tr, body);
     },
   },
 
@@ -116,22 +143,37 @@ export const pizzaWeaponSfx: CharacterWeaponSfxMap = {
       // attack time (1 ms here vs 6-20 ms in `soup.ts`) and the length.
       const slap = noiseBurst(c, {
         filter: 'bandpass',
-        freq: [2400 * j, 620 * j],
+        freq: [1350 * j, 400 * j],
         q: 1.4,
-        peak: 0.42,
+        peak: 0.34,
         attack: 0.001,
         duration: 0.07,
+        drive: 2,
+        wet: 0.2,
       });
       const pulp = noiseBurst(c, {
         filter: 'lowpass',
+        poles: 24,
         freq: [900, 240],
         q: 2.6,
-        peak: 0.24,
+        peak: 0.3,
         attack: 0.008,
         duration: 0.15,
+        drive: 1.7,
+        wet: 0.26,
       });
-      const body = tone(c, { type: 'sine', freq: [200 * j, 76 * j], peak: 0.42, duration: 0.12 });
-      return longest(slap, pulp, body);
+      const tr = transient(c, { peak: 0.34, freq: 2000, snap: 900, snapMs: 13, wet: 0.1 });
+      const body = tone(c, {
+        type: 'sine',
+        freq: [200 * j, 72 * j],
+        peak: 0.62,
+        duration: 0.18,
+        drive: 3.2,
+        voices: 2,
+        detuneCents: 16,
+        wet: 0.14,
+      });
+      return longest(slap, pulp, tr, body);
     },
   },
 
@@ -153,16 +195,23 @@ export const pizzaWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.3,
         attack: 0.01,
         duration: 0.2,
+        drive: 1.6,
+        wet: 0.26,
       });
       const slack = tone(c, {
         type: 'triangle',
         freq: [300 * j, 110 * j],
-        peak: 0.3,
+        peak: 0.32,
         attack: 0.012,
         hold: 0.25,
         duration: 0.34,
+        drive: 2.4,
+        voices: 2,
+        detuneCents: 20,
+        wet: 0.18,
       });
-      return longest(flap, slack);
+      const tr = transient(c, { peak: 0.26, freq: 1800, snap: 760, snapMs: 16, wet: 0.1 });
+      return longest(flap, slack, tr);
     },
   },
 };

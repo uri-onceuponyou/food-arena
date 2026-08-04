@@ -37,7 +37,17 @@
  * special).
  */
 
-import { droplets, grainCloud, longest, noiseBurst, rand, centsJitter, tone, type SynthCtx } from '../synth';
+import {
+  centsJitter,
+  droplets,
+  grainCloud,
+  longest,
+  noiseBurst,
+  rand,
+  tone,
+  transient,
+  type SynthCtx,
+} from '../synth';
 import type { CharacterWeaponSfxMap, WeaponSfxCtx } from './types';
 
 /** The steam tail. Long, quiet, high — heat, not hiss. */
@@ -54,6 +64,9 @@ function steam(s: SynthCtx, level: number, duration: number): number {
     // A slow attack is what stops this reading as a transient. Steam rises.
     attack: duration * 0.35,
     duration,
+    // The wettest send in the file. Steam is the part of a Soup hit that is meant to
+    // hang in the room after the splash has gone.
+    wet: 0.55,
   });
 }
 
@@ -74,18 +87,45 @@ function splashBody(s: SynthCtx, size: number, duration: number, peak: number): 
     poles: 24,
     // High Q is the "cavity" — this is what separates a splash from a noise burst.
     q: 2.4 + size * 2,
-    peak,
+    // 0.72 of the layer level, not all of it. A 24 dB/oct resonant splash at full
+    // level raises the spectral floor across 200-1700 Hz, which is exactly where the
+    // mass's saturation harmonics live — measured, it buried four of the body's six
+    // partials and Soup's heaviest hit scored the same as a bare sine plus noise.
+    peak: peak * 0.72,
     attack: 0.006 + size * 0.012,
     duration,
+    drive: 1.8,
+    wet: 0.3,
   });
+  // Detuned and saturated, like every body in the game since the depth pass — a
+  // splash still needs mass under it, and a bare sine measured as one spectral peak.
+  // Drive stays moderate here: heavy saturation puts harmonics in the 300-900 Hz
+  // region, which would drag Soup UP the brightness ladder and straight into Water
+  // Bottle's rung. Soup being dark is the identity, so this is the one body in the
+  // roster whose drive is capped by a measurement rather than by taste.
   const mass = tone(s, {
     type: 'sine',
     freq: [(190 - size * 60) * j, (68 - size * 22) * j],
-    peak: peak * (0.7 + size * 0.5),
+    peak: peak * (0.85 + size * 0.55),
     attack: 0.005,
     duration: duration * 0.75,
+    drive: 2.5,
+    voices: 2,
+    detuneCents: 16,
+    wet: 0.14,
   });
-  return longest(wet, mass);
+  // A soft, LOW transient. Soup's design says "resonance instead of transient", and
+  // that stays true — this has no click in it at all (the snap is at 520 Hz, an
+  // octave below anything else in the roster) and exists only so the splash has a
+  // moment of onset rather than fading in from nothing.
+  const onset = transient(s, {
+    peak: 0.22 + size * 0.12,
+    freq: 1150,
+    snap: 460,
+    snapMs: 18,
+    wet: 0.12,
+  });
+  return longest(wet, mass, onset);
 }
 
 export const soupWeaponSfx: CharacterWeaponSfxMap = {
@@ -104,14 +144,16 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.46,
         attack: 0.012,
         duration: 0.12,
+        drive: 1.8,
+        wet: 0.24,
       });
-      const drips = droplets(c, { count: 2, spread: 0.07, freq: [620, 980], peak: 0.2 });
+      const drips = droplets(c, { count: 2, spread: 0.07, freq: [620, 980], peak: 0.2, wet: 0.3 });
       return longest(gloop, drips);
     },
     impact(c: WeaponSfxCtx): number {
-      const body = splashBody(c, 0.15, 0.2, 0.42);
-      const drips = droplets(c, { count: 4, spread: 0.16, freq: [560, 1150], peak: 0.16 });
-      const heat = steam(c, 0.05, 0.34);
+      const body = splashBody(c, 0.24, 0.2, 0.44);
+      const drips = droplets(c, { count: 4, spread: 0.16, freq: [480, 900], peak: 0.14, wet: 0.3 });
+      const heat = steam(c, 0.035, 0.34);
       return longest(body, drips, heat);
     },
   },
@@ -127,6 +169,8 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.42,
         attack: 0.01,
         duration: 0.16,
+        drive: 1.7,
+        wet: 0.26,
       });
       // The slurp: a downward bend, opposite to the droplets, so the throw and the
       // splash it becomes are not the same gesture twice.
@@ -136,6 +180,8 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.16,
         attack: 0.02,
         duration: 0.18,
+        drive: 2,
+        wet: 0.16,
       });
       return longest(whip, slurp);
     },
@@ -143,15 +189,17 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
       // A wet SLAP — a strand landing has a leading edge a splash does not.
       const slap = noiseBurst(c, {
         filter: 'bandpass',
-        freq: [1900, 700],
+        freq: [1400, 560],
         q: 1.6,
-        peak: 0.3,
+        peak: 0.26,
         attack: 0.0015,
         duration: 0.05,
+        drive: 1.8,
+        wet: 0.18,
       });
       const body = splashBody(c, 0.35, 0.26, 0.44);
-      const drips = droplets(c, { count: 3, spread: 0.2, freq: [500, 950], peak: 0.13 });
-      const heat = steam(c, 0.06, 0.42);
+      const drips = droplets(c, { count: 3, spread: 0.2, freq: [440, 820], peak: 0.12, wet: 0.3 });
+      const heat = steam(c, 0.04, 0.42);
       return longest(slap, body, drips, heat);
     },
   },
@@ -173,7 +221,17 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
         last = Math.max(last, t + d);
         noiseBurst(
           { ...c, when: c.when + Math.max(0, t) },
-          { filter: 'lowpass', poles: 24, freq: [f * 2.2, f * 0.6], q: 4.5, peak: 0.32, attack: 0.008, duration: d },
+          {
+            filter: 'lowpass',
+            poles: 24,
+            freq: [f * 2.2, f * 0.6],
+            q: 4.5,
+            peak: 0.32,
+            attack: 0.008,
+            duration: d,
+            drive: 1.6,
+            wet: 0.28,
+          },
         );
       }
       const swell = tone(c, {
@@ -182,6 +240,10 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.3,
         attack: 0.12,
         duration: 0.4,
+        drive: 2,
+        voices: 2,
+        detuneCents: 14,
+        wet: 0.2,
       });
       return longest(last, swell);
     },
@@ -189,11 +251,11 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
       // The heaviest wet hit in the game. Everything scales up: lower cutoff, more
       // drips, a longer steam tail than any other Soup weapon.
       const body = splashBody(c, 1, 0.42, 0.62);
-      const drips = droplets(c, { count: 7, spread: 0.34, freq: [420, 1000], peak: 0.18 });
+      const drips = droplets(c, { count: 7, spread: 0.34, freq: [380, 820], peak: 0.16, wet: 0.34 });
       // A few bits of solid — the noodles and vegetables in the broth. Kept sparse
       // and low so this never crosses into Taco's brittle territory.
-      const bits = grainCloud(c, { count: 5, spread: 0.26, freq: [700, 1900], peak: 0.12, q: 4 });
-      const heat = steam(c, 0.11, 0.75);
+      const bits = grainCloud(c, { count: 5, spread: 0.26, freq: [600, 1500], peak: 0.1, q: 4, wet: 0.3 });
+      const heat = steam(c, 0.075, 0.75);
       return longest(body, drips, bits, heat);
     },
   },

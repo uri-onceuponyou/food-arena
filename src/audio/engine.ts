@@ -41,7 +41,7 @@
  * frame that produced events.
  */
 
-import { makeRng, type Rng, type SoundFn, type SynthCtx } from './synth';
+import { convolver, makeRng, type Rng, type SoundFn, type SynthCtx } from './synth';
 
 /** localStorage keys. Namespaced so they can't collide with the profile's. */
 const LS_VOLUME = 'fa.audio.volume';
@@ -110,11 +110,35 @@ const RETRIGGER_GAINS = [1, 0.62, 0.42, 0.3, 0.22];
 export interface MasterChain {
   /** Where every voice connects. */
   input: GainNode;
+  /**
+   * The shared REVERB SEND. Every voice that wants a room feeds this; there is
+   * exactly ONE convolution for the whole page behind it, not one per voice.
+   * `null` when the reverb is disabled (the mobile low-quality tier, and the dry
+   * control in `--mode depth`).
+   */
+  wetIn: GainNode | null;
   /** Static soft-clip curve — see `buildMasterChain`. */
   limiter: WaveShaperNode;
   /** Volume × mute. Last node before the destination. */
   master: GainNode;
 }
+
+/**
+ * Level of the reverb RETURN, folded in once for the whole game.
+ *
+ * Per-sound `wet` amounts (`synth.ts`) decide the balance BETWEEN layers; this one
+ * number decides how much room the game has at all, and living on the return means
+ * changing it does not require re-tuning a single sound.
+ *
+ * Set by measurement, not by ear alone. At the first value tried (0.85) the room was
+ * measurably LOUDER than the dry body 75 ms into an ordinary impact, which is what
+ * "drowning in reverb" looks like in numbers: it flattened the measured pitch
+ * envelope of every hit, because by then the thing being measured was mostly its own
+ * reflections. At 0.5 the room sits about 22 dB under the dry peak — present in the
+ * A/B (`--mode depth` renders every sound twice, with the bus and without) and never
+ * competing with the hit that caused it.
+ */
+const REVERB_RETURN = 0.5;
 
 /** Summed signal level below which the soft clip is exactly transparent. */
 const CLIP_KNEE = 0.7;
@@ -169,17 +193,48 @@ function clipCurve(ctx: BaseAudioContext): Float32Array {
  * worth anything if they run through the real graph.
  *
  * ```
- * voices -> input -> preClip -> softClip -> master (volume x mute) -> destination
+ * voices -> input ---------------------> preClip -> softClip -> master (vol x mute) -> dest
+ *        \-> wetIn -> convolver -> ret -/^
  * ```
  *
  * `master` is deliberately LAST. Mute is then provably silent — gain 0 multiplies
- * everything downstream of the non-linearity, so no tail can leak past it — and the
- * clip curve always sees the same level whatever the player set the slider to, so
- * the mix does not change character with volume.
+ * everything downstream of the non-linearity AND downstream of the reverb return, so
+ * no tail of any kind can leak past it — and the clip curve always sees the same
+ * level whatever the player set the slider to, so the mix does not change character
+ * with volume.
+ *
+ * **The reverb return re-enters at `input`, not after the limiter.** That ordering is
+ * what makes the room part of the mix rather than a layer painted over it: a loud
+ * frame ducks its own reverb along with everything else, which is what stops the
+ * tail from swelling up out of a busy fight. It also means the room is inside every
+ * existing assertion — mute, volume scaling and the clip ceiling all cover it for
+ * free, with no new trust placed anywhere.
  */
-export function buildMasterChain(ctx: BaseAudioContext, destination?: AudioNode): MasterChain {
+export function buildMasterChain(
+  ctx: BaseAudioContext,
+  destination?: AudioNode,
+  reverb = true,
+): MasterChain {
   const input = ctx.createGain();
   input.gain.value = 1;
+
+  // ONE convolution for the page. A per-voice convolver would be twenty of them on a
+  // busy frame, which is the single most expensive thing this pillar could do to a
+  // phone; a send bus makes the room cost exactly the same whether one sound is
+  // playing or twenty.
+  let wetIn: GainNode | null = null;
+  if (reverb) {
+    try {
+      wetIn = ctx.createGain();
+      wetIn.gain.value = 1;
+      const ret = ctx.createGain();
+      ret.gain.value = REVERB_RETURN;
+      wetIn.connect(convolver(ctx)).connect(ret).connect(input);
+    } catch {
+      // A missing/failing ConvolverNode must cost the room, never the game.
+      wetIn = null;
+    }
+  }
 
   const preClip = ctx.createGain();
   preClip.gain.value = 1 / CLIP_SPAN;
@@ -194,7 +249,7 @@ export function buildMasterChain(ctx: BaseAudioContext, destination?: AudioNode)
   master.gain.value = 0;
 
   input.connect(preClip).connect(limiter).connect(master).connect(destination ?? ctx.destination);
-  return { input, limiter, master };
+  return { input, wetIn, limiter, master };
 }
 
 /** Perceptual volume curve. A linear slider maps to a squashed gain so the useful
@@ -216,10 +271,25 @@ export interface AudioEngineOptions {
   maxVoices?: number;
   /** Persist volume/mute to localStorage. Off for tests. */
   persist?: boolean;
+  /**
+   * Build the shared reverb bus. Default true.
+   *
+   * Two real uses. (1) `tools/audio-probe.mjs --mode depth` renders the SAME sound
+   * with it on and off, which is the only way to prove the room is contributing
+   * energy rather than merely being wired up — the exact failure mode this project
+   * has paid for eleven times. (2) It is the low-quality tier's off switch: the
+   * convolution is the only per-sample cost in this pillar worth turning off on a
+   * weak phone, and because every sound reaches it through the optional `wet` on
+   * `SynthCtx`, switching it off changes nothing else and breaks nothing.
+   */
+  reverb?: boolean;
 }
 
 interface LiveVoice {
   node: GainNode;
+  /** This voice's reverb send, if it has one. Released with the voice — see
+   * `release()` for why cutting the send does NOT cut the tail. */
+  wet: GainNode | null;
   /** Context time this voice is finished and can be pruned. */
   end: number;
   priority: Priority;
@@ -236,6 +306,7 @@ export class AudioEngine {
 
   private readonly maxVoices: number;
   private readonly persist: boolean;
+  private readonly reverb: boolean;
   private readonly injected: BaseAudioContext | null;
   private readonly injectedDestination: AudioNode | null;
   /** True when running on an `OfflineAudioContext` — no gestures, no real clock. */
@@ -259,6 +330,7 @@ export class AudioEngine {
   constructor(opts: AudioEngineOptions = {}) {
     this.maxVoices = opts.maxVoices ?? DEFAULT_MAX_VOICES;
     this.persist = opts.persist ?? true;
+    this.reverb = opts.reverb ?? true;
     this.injected = opts.context ?? null;
     this.injectedDestination = opts.destination ?? null;
     this.offline =
@@ -415,7 +487,7 @@ export class AudioEngine {
   private attachContext(ctx: BaseAudioContext): void {
     this.ctx = ctx;
     try {
-      this.chain = buildMasterChain(ctx, this.injectedDestination ?? undefined);
+      this.chain = buildMasterChain(ctx, this.injectedDestination ?? undefined, this.reverb);
       this.applyMasterGain(0);
       this.syncState();
     } catch (err) {
@@ -508,26 +580,52 @@ export class AudioEngine {
     const when = Math.max(now, ctx.currentTime) + LOOKAHEAD + (opts.delay ?? 0);
 
     // Per-voice bus: gain → (optional pan) → master input.
+    const level = Math.max(0, (opts.gain ?? 1) * throttleGain);
     const voiceGain = ctx.createGain();
-    voiceGain.gain.value = Math.max(0, (opts.gain ?? 1) * throttleGain);
+    voiceGain.gain.value = level;
+
+    const panWanted = opts.pan !== undefined && typeof ctx.createStereoPanner === 'function';
+    const panAt = Math.max(-1, Math.min(1, opts.pan ?? 0));
 
     let tail: AudioNode = voiceGain;
-    if (opts.pan !== undefined && typeof ctx.createStereoPanner === 'function') {
+    if (panWanted) {
       const panner = ctx.createStereoPanner();
-      panner.pan.value = Math.max(-1, Math.min(1, opts.pan));
+      panner.pan.value = panAt;
       voiceGain.connect(panner);
       tail = panner;
     }
     tail.connect(this.chain.input);
 
+    // The voice's reverb SEND mirrors the dry path: same level, same pan.
+    //
+    // Same LEVEL so distance attenuation and the retrigger duck reach the room too —
+    // otherwise a far-off hit would arrive quiet and drenched, which reads as louder,
+    // not further. Same PAN so the room stays on the same side as the event; an
+    // unpanned send would drag every sound back toward centre and quietly weaken the
+    // spatialisation the director works to produce (`--mode negative` asserts a 2.5x
+    // channel ratio, and it is measured downstream of this).
+    let voiceWet: GainNode | null = null;
+    if (this.chain.wetIn) {
+      voiceWet = ctx.createGain();
+      voiceWet.gain.value = level;
+      if (panWanted) {
+        const wetPan = ctx.createStereoPanner();
+        wetPan.pan.value = panAt;
+        voiceWet.connect(wetPan).connect(this.chain.wetIn);
+      } else {
+        voiceWet.connect(this.chain.wetIn);
+      }
+    }
+
     const rng: Rng = makeRng(opts.seed ?? ((Math.random() * 0xffffffff) | 0));
-    const synth: SynthCtx = { ctx, dest: voiceGain, when, rng };
+    const synth: SynthCtx = { ctx, dest: voiceGain, wet: voiceWet ?? undefined, when, rng };
 
     let duration = 0;
     try {
       duration = sound(synth) || 0;
     } catch (err) {
       voiceGain.disconnect();
+      voiceWet?.disconnect();
       throw err;
     }
     // Detuning a whole voice after the fact isn't possible without re-authoring
@@ -536,7 +634,7 @@ export class AudioEngine {
     // same perceptual job.
     const end = when + duration / detune + 0.05;
 
-    this.voices.push({ node: voiceGain, end, priority });
+    this.voices.push({ node: voiceGain, wet: voiceWet, end, priority });
     this.counters.started++;
 
     if (!this.offline) {
@@ -578,12 +676,31 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Tear a voice down: silence, then disconnect, both dry and wet.
+   *
+   * Cutting the wet SEND does not cut the reverb TAIL — the convolver has already
+   * consumed those samples and rings out on the shared bus for the remaining ~190 ms
+   * of the impulse response. That is deliberate and is what lets a sound have a room
+   * around it without paying one of the twenty voice slots to hear it: the voice's
+   * declared duration covers the sound, and the room outlives it for free. It also
+   * means a STOLEN voice still decays into the room instead of stopping dead, which
+   * is the difference between a stolen voice being unnoticeable and being a click.
+   */
   private release(v: LiveVoice): void {
     try {
       // Silence first, then disconnect — a voice stolen mid-sound must not click.
       v.node.gain.cancelScheduledValues(0);
       v.node.gain.value = 0;
       v.node.disconnect();
+    } catch {
+      /* already gone */
+    }
+    if (!v.wet) return;
+    try {
+      v.wet.gain.cancelScheduledValues(0);
+      v.wet.gain.value = 0;
+      v.wet.disconnect();
     } catch {
       /* already gone */
     }

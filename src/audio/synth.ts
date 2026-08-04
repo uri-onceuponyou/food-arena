@@ -23,18 +23,72 @@
  * spectral centroid — instead of asserting that a function was called. See
  * `tools/audio-probe.mjs`.
  *
+ * ── WHY THIS FILE GREW: "they are very shallow and similar" (Uri, 2026-08-04) ────
+ *
+ * The first version of this layer had exactly two ways to make a sound: a filtered
+ * noise burst and a bare oscillator. That is enough to make something audible and
+ * nowhere near enough to make something feel like a physical object, and the gap was
+ * measurable rather than a matter of taste. Rendered through the production chain and
+ * analysed (`tools/audio-probe.mjs --mode depth`):
+ *
+ *   * `generic.impact(16)` — the most-heard sound in the game — resolved to exactly
+ *     **ONE spectral peak** (129 Hz). A bare `sine` control scores the same 1. The
+ *     pitched layer of every impact in the game had the harmonic structure of a test
+ *     tone, because it *was* a test tone with an envelope on it.
+ *   * Every texture layer measured **spectral flatness 0.70-0.80**, against 0.699 for
+ *     a single unshaped bandpass-noise control. Same story one layer up: the crunch
+ *     was noise, and only noise.
+ *   * Every sound's measured **-66 dBFS extent was SHORTER than its own declared
+ *     duration** — post-declared energy was zero across the whole catalogue. There
+ *     was no tail anywhere, and no sense of a room at all.
+ *   * **rt20 spanned 18-88 ms for the entire catalogue.** Everything decayed inside a
+ *     tenth of a second, which is the measurable form of "the mix has one texture".
+ *
+ * So four primitives were added, each aimed at one of those numbers, and each is
+ * asserted on rendered samples rather than assumed:
+ *
+ *   1. `drive` — WAVESHAPING. A `tanh` saturator on the oscillator BEFORE its
+ *      envelope. This is the single biggest change: it turns one partial into a
+ *      harmonic series, and it is also the only reason a hit has any low end on a
+ *      phone. A 45 Hz sine is inaudible on a phone speaker; its saturation harmonics
+ *      at 135/225/315 Hz are not, and the ear reconstructs the missing fundamental
+ *      from them. "No low end" and "too little harmonic content" are the same fix.
+ *   2. `voices`/`detuneCents` — DETUNED STACKS. Two or three oscillators a few cents
+ *      apart beat against each other, which is the difference between a tone and a
+ *      thing that is vibrating.
+ *   3. `ring` — RING MODULATION. Multiplies the oscillator by another, producing
+ *      INHARMONIC sidebands. Struck glass, hard candy and thin plastic are all
+ *      inharmonic; a harmonic series can never sound like them.
+ *   4. `modes()` — MODAL RESONANCE. A bank of independently-decaying partials at
+ *      chosen ratios, higher modes decaying faster. This is how a real object rings,
+ *      and it is what makes Donut's ring and Lollipop's candy read as objects rather
+ *      than as EQ settings.
+ *
+ * ...plus the one that fixes "everything is dry": a synthesised impulse response and
+ * a per-voice reverb SEND (`wet`), described under `impulseResponse()` below.
+ *
  * ── Scheduling discipline ───────────────────────────────────────────────────────
  *
  * Every node is created, scheduled and forgotten. Web Audio source nodes are
  * one-shot by specification (`start()` may be called once), so there is no such
  * thing as reusing an oscillator — the pooling that matters here is (a) the shared
- * noise buffer built once per context, and (b) the voice budget in `engine.ts`.
- * Nothing in this file allocates a buffer.
+ * noise buffer built once per context, (b) the shared saturation curves and impulse
+ * response, also once per context, and (c) the voice budget in `engine.ts`.
  *
  * `exponentialRampToValueAtTime` can never touch zero, so every decay lands on
  * `SILENCE` and is then hard-zeroed with a `setValueAtTime` — otherwise a node's
  * gain stays at a small non-zero value forever and a few hundred of them add up to
  * an audible noise floor.
+ *
+ * ── Node cost, because mobile is a target ───────────────────────────────────────
+ *
+ * Every primitive here reports honestly in `--mode depth`'s node census, which
+ * counts real `ctx.create*` calls per sound and fails the build if any single sound
+ * exceeds its budget. Saturation costs ONE `WaveShaperNode` on top of a tone;
+ * `voices: 2` costs one extra oscillator; the reverb costs ONE convolver for the
+ * WHOLE PAGE (it lives on the master bus, not on the voice) plus one gain per voice.
+ * The expensive primitive is and always was `grainCloud`, which is why it is the one
+ * with a documented count ceiling.
  */
 
 /** The floor an exponential ramp decays to (it may not reach 0). -80 dBFS. */
@@ -69,6 +123,16 @@ export interface SynthCtx {
    * (already panned and level-matched), so a sound never needs to know about the
    * master bus, the limiter, or the mute state. */
   dest: AudioNode;
+  /**
+   * The REVERB SEND for this voice, or `undefined` if the engine has no reverb bus
+   * (the mobile low-quality tier, and the dry control in `--mode depth`).
+   *
+   * Optional by design. A sound written against `dest` alone still works and just
+   * comes out dry, so the reverb can be switched off wholesale without touching a
+   * single sound — which is exactly what a quality tier needs to be able to do.
+   * Use it through `wet` on `NoiseOpts`/`ToneOpts`, or `sendWet()` directly.
+   */
+  wet?: AudioNode;
   /** Context time this sound starts at. Always >= `ctx.currentTime`. */
   when: number;
   /** Per-event variation. Call it as many times as you like. */
@@ -77,7 +141,11 @@ export interface SynthCtx {
 
 /** A scheduled sound. Returns its total duration in SECONDS, tail included — the
  * engine uses this to know when the voice is free again, so under-reporting it
- * truncates your own sound's cleanup and over-reporting it wastes a voice slot. */
+ * truncates your own sound's cleanup and over-reporting it wastes a voice slot.
+ *
+ * The reverb tail is deliberately NOT counted: it rings out on the shared bus after
+ * the voice has been released, which is what lets a sound have a room around it
+ * without paying for one of the twenty voice slots to hear it. */
 export type SoundFn = (s: SynthCtx) => number;
 
 /** Uniform sample in `[lo, hi)`. */
@@ -127,6 +195,190 @@ export function noiseBuffer(ctx: BaseAudioContext): AudioBuffer {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Waveshaping / saturation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `tanh` saturation curves, cached per context and per drive amount.
+ *
+ * **Why this is the most important primitive added in the depth pass.** A sine has
+ * one partial. Measured on the shipped catalogue before this existed, `impact(16)`'s
+ * body resolved to exactly one spectral peak at 129 Hz — the same count a bare sine
+ * control scores — which is precisely what "sounds synthetic" means in a spectrum.
+ * Pushing that sine through `tanh(drive·x)` generates a full odd-harmonic series, so
+ * the same note becomes a thing with a timbre.
+ *
+ * It is also, and separately, the ONLY way this game has any low end on a phone. An
+ * impact body sweeping to 45 Hz is inaudible on a phone speaker no matter how loud
+ * it is scheduled; its saturation harmonics at 135/225/315 Hz are perfectly audible,
+ * and the ear reconstructs the missing fundamental from them. The two complaints
+ * "too little harmonic content" and "no low end" have one fix.
+ *
+ * The curve is normalised by `tanh(drive)` so the peak stays at 1 and `peak` in the
+ * envelope keeps meaning what it says — otherwise every saturated layer would also
+ * quietly get quieter, and the whole mix would drift as drive was tuned.
+ */
+const saturationCurves = new WeakMap<BaseAudioContext, Map<number, Float32Array>>();
+
+export function saturationCurve(ctx: BaseAudioContext, drive: number): Float32Array {
+  let perCtx = saturationCurves.get(ctx);
+  if (!perCtx) {
+    perCtx = new Map();
+    saturationCurves.set(ctx, perCtx);
+  }
+  // Quantise the key so per-event jitter on `drive` cannot spawn a thousand tables.
+  const d = Math.max(0.05, Math.round(drive * 20) / 20);
+  const cached = perCtx.get(d);
+  if (cached) return cached;
+  const n = 1024;
+  const curve = new Float32Array(n);
+  const norm = Math.tanh(d);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = Math.tanh(d * x) / norm;
+  }
+  perCtx.set(d, curve);
+  return curve;
+}
+
+/** A `WaveShaperNode` carrying `saturationCurve(drive)`. `2x` oversampling: enough
+ * to keep the harmonics this generates from folding back as aliasing, and half the
+ * cost of `4x`, which matters when a busy frame has twenty voices. */
+export function saturator(ctx: BaseAudioContext, drive: number): WaveShaperNode {
+  const ws = ctx.createWaveShaper();
+  ws.curve = saturationCurve(ctx, drive) as WaveShaperNode['curve'];
+  ws.oversample = '2x';
+  return ws;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The room
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** How long the synthesised kitchen impulse response runs, in seconds. */
+const IR_SECONDS = 0.26;
+/** Time for the diffuse tail to fall 60 dB. A small hard-surfaced room, not a hall.
+ * Deliberately short: the acceptance test in `--mode offline` cross-checks every
+ * sound's measured -66 dBFS extent against its declared duration, and a long tail
+ * would make every sound in the game measure as over-running itself. A kitchen is
+ * genuinely this short, and a brawler cannot afford a hit to still be audible when
+ * the next one lands. */
+const IR_RT60 = 0.19;
+
+const impulseResponses = new WeakMap<BaseAudioContext, AudioBuffer>();
+
+/**
+ * A synthesised stereo impulse response — the game's only sense of space, and it
+ * costs zero bytes of download.
+ *
+ * "Everything is dry" was measurable, not a matter of taste: before this existed,
+ * every sound in the catalogue had a -66 dBFS extent SHORTER than its own declared
+ * duration. There was no energy after the envelope at all, anywhere, so every sound
+ * was pasted onto the frame rather than happening in a place.
+ *
+ * The response is built in three parts, which is what a small hard room actually
+ * does and what a plain exponential noise burst does not:
+ *
+ *  1. **Pre-delay** (~5 ms of silence). Separates the source from its room, which is
+ *     what stops reverb from thickening the transient it is supposed to sit behind.
+ *  2. **Early reflections** — a handful of discrete taps at 7-46 ms with alternating
+ *     signs, at DIFFERENT times in the two channels. This is the part the ear
+ *     actually uses to judge room size, and the inter-channel difference is what
+ *     makes the room wide. A mono IR sounds like a filter, not a space.
+ *  3. **Diffuse tail** — decorrelated noise under an exponential decay, progressively
+ *     lowpassed so the tail darkens as it dies (a one-pole whose coefficient walks
+ *     toward 1). Tile and steel are bright, so the damping is mild.
+ *
+ * Deterministic by construction (fixed seed), so `--mode variation`'s "same seed
+ * renders identically" assertion still holds to within a float32 ULP with the room
+ * in the signal path.
+ */
+export function impulseResponse(ctx: BaseAudioContext): AudioBuffer {
+  const cached = impulseResponses.get(ctx);
+  if (cached) return cached;
+  const sr = ctx.sampleRate;
+  const n = Math.floor(sr * IR_SECONDS);
+  const buf = ctx.createBuffer(2, n, sr);
+  const predelay = Math.floor(sr * 0.005);
+  // ln(1000) = 6.9078 — the decay constant that lands 60 dB down at IR_RT60.
+  const k = 6.9078 / (IR_RT60 * sr);
+
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    const rng = makeRng(ch === 0 ? 0x1e5f21 : 0x77a3d1);
+
+    // (3) diffuse tail, with progressive damping.
+    let lp = 0;
+    for (let i = predelay; i < n; i++) {
+      const t = i - predelay;
+      // Damping coefficient walks from 0.30 to 0.72 across the tail: the room gets
+      // duller as it decays, which is what absorption does.
+      const a = 0.3 + 0.42 * (t / (n - predelay));
+      const white = rng() * 2 - 1;
+      lp = lp * a + white * (1 - a);
+      d[i] = lp * Math.exp(-k * t);
+    }
+
+    // (2) early reflections, laid ON TOP of the tail. Times differ per channel by a
+    // few samples — that difference IS the width.
+    const taps = ch === 0
+      ? [0.0071, 0.0132, 0.0198, 0.0281, 0.0367, 0.0458]
+      : [0.0083, 0.0119, 0.0214, 0.0263, 0.0389, 0.0441];
+    for (let e = 0; e < taps.length; e++) {
+      const i = predelay + Math.floor(taps[e] * sr);
+      if (i >= n) continue;
+      const sign = e % 2 === 0 ? 1 : -1;
+      d[i] += sign * 0.62 * Math.exp(-k * (i - predelay) * 0.55);
+    }
+  }
+
+  // Normalise to a known peak so `wet` amounts mean the same thing on every device
+  // and in every render. `ConvolverNode.normalize` is switched OFF in `convolver()`
+  // for exactly this reason: its own normalisation is by total power, which changes
+  // if the IR is ever re-tuned, and a wet send that silently re-levels itself is not
+  // something a measurement can pin down.
+  let peak = 0;
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
+  }
+  const g = peak > 0 ? 0.6 / peak : 1;
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < n; i++) d[i] *= g;
+  }
+
+  impulseResponses.set(ctx, buf);
+  return buf;
+}
+
+/** The shared room. ONE of these exists per page — it lives on the master bus in
+ * `engine.ts`, never on a voice, so twenty simultaneous sounds cost one convolution
+ * and not twenty. */
+export function convolver(ctx: BaseAudioContext): ConvolverNode {
+  const c = ctx.createConvolver();
+  c.normalize = false;
+  c.buffer = impulseResponse(ctx);
+  return c;
+}
+
+/**
+ * Route a node into this voice's reverb send at `amount`.
+ *
+ * Silently does nothing when the engine has no reverb bus, which is the whole point
+ * of the optional `wet` on `SynthCtx`: a sound never has to ask whether the room
+ * exists, and switching the room off for a low-end phone is one flag in `engine.ts`
+ * rather than an edit to every sound in the game.
+ */
+export function sendWet(s: SynthCtx, node: AudioNode, amount: number): void {
+  if (!s.wet || !(amount > 0)) return;
+  const g = s.ctx.createGain();
+  g.gain.value = amount;
+  node.connect(g);
+  g.connect(s.wet);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Envelopes
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -143,6 +395,14 @@ export interface EnvOpts {
   hold?: number;
   /** `exp` for a natural percussive tail, `lin` for a mechanical fade. */
   curve?: 'exp' | 'lin';
+  /**
+   * How much of this layer goes to the shared room, 0..1. Roughly: 0.05-0.12 for a
+   * transient (a click wants to stay tight and dry or it turns to mush), 0.12-0.25
+   * for a body, 0.25-0.5 for something that is meant to sound distant or wet.
+   *
+   * No-op when the engine has no reverb bus.
+   */
+  wet?: number;
 }
 
 /**
@@ -220,6 +480,16 @@ export interface NoiseOpts extends EnvOpts {
   /** Ride an amplitude modulation on top of the envelope — see `tremolo`. This is
    * how a spinning object is made to sound like it is spinning. */
   tremolo?: { rate: number | readonly [number, number]; depth: number };
+  /**
+   * Saturation drive applied AFTER the filter, 0 for none.
+   *
+   * On noise this is a thickener rather than a harmonic generator: `tanh` squashes
+   * the peaks of a Gaussian-ish signal toward its RMS, which raises the perceived
+   * density of a crunch without raising its peak. A crunch at drive 2.5 sounds
+   * heavier at the same measured peak level, which is exactly what a small speaker
+   * needs.
+   */
+  drive?: number;
 }
 
 /**
@@ -242,6 +512,12 @@ export function noiseBurst(s: SynthCtx, o: NoiseOpts): number {
     : env;
   if (head !== env) (head as GainNode).connect(env);
 
+  // Saturation sits between the filter and the envelope: shaping a constant-level
+  // signal gives a stable timbre, where shaping the already-enveloped signal would
+  // make the drive fall away with the decay and the harmonics move as it dies.
+  const shaped: AudioNode = o.drive ? saturator(ctx, o.drive) : head;
+  if (shaped !== head) (shaped as WaveShaperNode).connect(head);
+
   if (o.filter) {
     const makeFilter = (q: number): BiquadFilterNode => {
       const filt = ctx.createBiquadFilter();
@@ -254,14 +530,15 @@ export function noiseBurst(s: SynthCtx, o: NoiseOpts): number {
       // Split the resonance across the two stages, or a cascaded Q of (say) 4 twice
       // over rings like a filter sweep instead of just being steep.
       const q = Math.sqrt(Math.max(0.1, o.q ?? 1));
-      src.connect(makeFilter(q)).connect(makeFilter(q)).connect(head);
+      src.connect(makeFilter(q)).connect(makeFilter(q)).connect(shaped);
     } else {
-      src.connect(makeFilter(o.q ?? 1)).connect(head);
+      src.connect(makeFilter(o.q ?? 1)).connect(shaped);
     }
   } else {
-    src.connect(head);
+    src.connect(shaped);
   }
   env.connect(dest);
+  sendWet(s, env, o.wet ?? 0);
 
   src.start(when, offset, o.duration + 0.02);
   src.stop(when + o.duration + 0.02);
@@ -277,30 +554,162 @@ export interface ToneOpts extends EnvOpts {
    * saw/square so it reads as a body rather than a buzz. */
   lowpass?: number | readonly [number, number];
   freqCurve?: 'exp' | 'lin';
+  /**
+   * Saturation drive, 0 or absent for a clean oscillator.
+   *
+   * **This is the knob that fixes "shallow" on a pitched layer.** A `sine` at drive 0
+   * measures as exactly one spectral peak — the same count as a test tone, which is
+   * what it is. At drive 2-3 the same sine measures 4-7 peaks and reads as an object.
+   * See the file header for the measurement this was derived from.
+   */
+  drive?: number;
+  /**
+   * Number of detuned oscillators stacked, 1-3. Stacked voices beat against each
+   * other at a few Hz, which is the difference between a tone and something
+   * physically vibrating. Costs one extra oscillator per voice above the first.
+   */
+  voices?: number;
+  /** Total detune spread across the stack, in cents. 8-25 is a body; past ~40 it
+   * reads as two separate notes. */
+  detuneCents?: number;
+  /**
+   * Ring-modulate the oscillator by a sine at this frequency (or sweep).
+   *
+   * True ring modulation — the carrier is fully suppressed and what comes out is the
+   * SUM and DIFFERENCE frequencies only. Those are INHARMONIC, which no amount of
+   * saturation or filtering can produce, and inharmonicity is exactly what the ear
+   * uses to identify struck glass, hard candy and thin plastic. Lollipop's candy and
+   * Water Bottle's shell are both built on it, and nothing else in the roster is.
+   */
+  ring?: number | readonly [number, number];
 }
 
 /** Pitched oscillator with an optional pitch sweep — thumps, blips, chirps, stings. */
 export function tone(s: SynthCtx, o: ToneOpts): number {
   const { ctx, dest, when } = s;
-  const osc = ctx.createOscillator();
-  osc.type = o.type ?? 'sine';
-  applyRamp(osc.frequency, o.freq, when, o.duration, o.freqCurve ?? 'exp');
-
   const env = envelope(ctx, when, o);
+
+  // Saturation, then (optionally) ring modulation, then the envelope. Order matters:
+  // saturating BEFORE the ring mod keeps the inharmonic sidebands from being folded
+  // back into a harmonic series by the shaper.
+  let head: AudioNode = env;
+  if (o.ring !== undefined) {
+    // A gain node whose gain is driven from ±1 by an LFO, with a static value of 0,
+    // multiplies its input by that LFO — i.e. true ring modulation, carrier fully
+    // suppressed. (The same node used with a non-zero static value would be tremolo;
+    // see `tremoloNode` for why that distinction has bitten this project already.)
+    const ringGain = ctx.createGain();
+    ringGain.gain.value = 0;
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    applyRamp(lfo.frequency, o.ring, when, o.duration, 'exp');
+    lfo.connect(ringGain.gain);
+    lfo.start(when);
+    lfo.stop(when + o.duration + 0.02);
+    ringGain.connect(env);
+    head = ringGain;
+  }
+  if (o.drive) {
+    const ws = saturator(ctx, o.drive);
+    ws.connect(head);
+    head = ws;
+  }
   if (o.lowpass !== undefined) {
     const filt = ctx.createBiquadFilter();
     filt.type = 'lowpass';
     filt.Q.value = 0.7;
     applyRamp(filt.frequency, o.lowpass, when, o.duration);
-    osc.connect(filt).connect(env);
-  } else {
-    osc.connect(env);
+    filt.connect(head);
+    head = filt;
   }
-  env.connect(dest);
 
-  osc.start(when);
-  osc.stop(when + o.duration + 0.02);
+  const stack = Math.max(1, Math.min(3, Math.round(o.voices ?? 1)));
+  const spread = o.detuneCents ?? 0;
+  for (let i = 0; i < stack; i++) {
+    const osc = ctx.createOscillator();
+    osc.type = o.type ?? 'sine';
+    // Spread the stack symmetrically about the authored pitch: -s/2 .. +s/2.
+    const cents = stack === 1 ? 0 : (i / (stack - 1) - 0.5) * spread;
+    const mul = Math.pow(2, cents / 1200);
+    if (typeof o.freq === 'number') applyRamp(osc.frequency, o.freq * mul, when, o.duration, o.freqCurve ?? 'exp');
+    else applyRamp(osc.frequency, [o.freq[0] * mul, o.freq[1] * mul], when, o.duration, o.freqCurve ?? 'exp');
+    // Level-compensate the stack so `peak` keeps meaning the same thing whether a
+    // layer is one oscillator or three.
+    if (stack > 1) {
+      const g = ctx.createGain();
+      g.gain.value = 1 / stack;
+      osc.connect(g).connect(head);
+    } else {
+      osc.connect(head);
+    }
+    osc.start(when);
+    osc.stop(when + o.duration + 0.02);
+  }
+
+  env.connect(dest);
+  sendWet(s, env, o.wet ?? 0);
   return o.duration;
+}
+
+export interface ModeSpec {
+  /** Partial frequency as a MULTIPLE of the fundamental. Integer ratios read as a
+   * pitched/harmonic object (a struck tube); irrational ones read as metal, glass or
+   * hard candy. */
+  ratio: number;
+  /** Relative amplitude, 0..1. */
+  gain: number;
+  /** This partial's decay as a multiple of the fundamental's. Real objects damp
+   * their high modes fastest, so anything above ~1 sounds backwards. */
+  decay: number;
+}
+
+export interface ModesOpts {
+  /** Fundamental in Hz, or `[from, to]` for a struck object that also bends. */
+  freq: number | readonly [number, number];
+  /** How long the FUNDAMENTAL rings. Higher modes are shorter by their `decay`. */
+  duration: number;
+  peak: number;
+  attack?: number;
+  modes: readonly ModeSpec[];
+  drive?: number;
+  wet?: number;
+}
+
+/**
+ * A bank of independently-decaying partials — MODAL SYNTHESIS, and the layer that
+ * makes a sound say WHAT WAS HIT rather than just that something was.
+ *
+ * A struck object does not produce a harmonic series with one envelope on it: it
+ * produces a set of resonant modes at ratios fixed by its geometry, each losing
+ * energy at its own rate, with the high modes dying first. That last detail is most
+ * of the effect — a bank of partials sharing one envelope sounds like a chord, and
+ * the same bank with staggered decays sounds like an object.
+ *
+ * Used by the three characters whose identity is a RESONANCE rather than a texture:
+ * Donut's ring (near-harmonic, long), Lollipop's hard candy (inharmonic, glassy) and
+ * Water Bottle's hollow plastic shell (a squat, strongly damped low mode). Nothing
+ * else in the roster rings, which is exactly why they are separable by ear.
+ *
+ * Costs one oscillator + one gain per mode, so keep banks to 3-5 partials.
+ */
+export function modes(s: SynthCtx, o: ModesOpts): number {
+  let longest = 0;
+  for (const m of o.modes) {
+    const dur = o.duration * m.decay;
+    longest = Math.max(longest, dur);
+    const f: number | readonly [number, number] =
+      typeof o.freq === 'number' ? o.freq * m.ratio : [o.freq[0] * m.ratio, o.freq[1] * m.ratio];
+    tone(s, {
+      type: 'sine',
+      freq: f,
+      peak: o.peak * m.gain,
+      attack: o.attack ?? 0.0015,
+      duration: dur,
+      drive: o.drive,
+      wet: o.wet,
+    });
+  }
+  return longest;
 }
 
 /**
@@ -347,6 +756,61 @@ export function tremoloNode(
   return g;
 }
 
+export interface TransientOpts {
+  peak: number;
+  /** Where the noise tick sits. 4-6 kHz is a hard surface; 2-3 kHz is soft/meaty. */
+  freq?: number;
+  /** The pitched snap's starting frequency; it sweeps down an octave and a half.
+   * Omit for a pure noise tick (rarely what you want — see below). */
+  snap?: number;
+  /** Snap length. Under ~6 ms reads as part of the click; over ~25 ms reads as a
+   * separate little bleep. */
+  snapMs?: number;
+  wet?: number;
+}
+
+/**
+ * THE TRANSIENT LAYER — a few milliseconds that tell the ear the exact instant
+ * something happened.
+ *
+ * Two components, and the second is the one that is usually missing:
+ *
+ *  1. A very short high-passed noise TICK. On its own this is a "tss": it marks the
+ *     instant but carries no information about what made it.
+ *  2. A pitched SNAP — a fast downward-swept triangle, saturated. This is what gives
+ *     a click a *pitch*, and it is the difference between a hit and a hiss. Measured:
+ *     the shipped generic impact's transient was noise alone and its onset spectrum
+ *     carried 0.22-0.29 of its energy above 3 kHz with no peak structure at all,
+ *     which is a definition of "sounds like a beep or a hiss".
+ *
+ * Deliberately dry by default (`wet` 0.06). Reverb on a transient smears the one
+ * thing the transient exists to do.
+ */
+export function transient(s: SynthCtx, o: TransientOpts): number {
+  const f = o.freq ?? 5000;
+  const tick = noiseBurst(s, {
+    filter: 'highpass',
+    freq: f,
+    q: 0.9,
+    peak: o.peak,
+    attack: 0.0004,
+    duration: 0.007,
+    wet: o.wet ?? 0.06,
+  });
+  if (!o.snap) return tick;
+  const snapDur = (o.snapMs ?? 14) / 1000;
+  const snap = tone(s, {
+    type: 'triangle',
+    freq: [o.snap, o.snap * 0.38],
+    peak: o.peak * 0.72,
+    attack: 0.0006,
+    duration: snapDur,
+    drive: 2.2,
+    wet: o.wet ?? 0.06,
+  });
+  return longest(tick, snap);
+}
+
 export interface GrainOpts {
   /** How many grains. 10-20 reads as a shatter; 3-5 as a few pieces landing. */
   count: number;
@@ -361,6 +825,20 @@ export interface GrainOpts {
   /** Grains later in the window get quieter by this factor at the end of the
    * spread, so a shatter decays instead of rattling flat. */
   decay?: number;
+  /**
+   * Multiply every grain's centre frequency by a factor that walks from `[0]` to
+   * `[1]` across the spread.
+   *
+   * This is what separates a cloud that is BREAKING from a cloud that is UNROLLING.
+   * Taco's shell fragments all come from the same brittle break, so its band stays
+   * put; Burrito's tortilla ribbon comes apart progressively along its length, so its
+   * band walks downward as the strip unwinds. Same primitive, different gesture, and
+   * the difference is audible and measurable rather than a matter of EQ.
+   */
+  freqShift?: readonly [number, number];
+  /** Saturation on each grain. Thickens a crunch without raising its peak. */
+  drive?: number;
+  wet?: number;
 }
 
 /**
@@ -377,21 +855,25 @@ export interface GrainOpts {
 export function grainCloud(s: SynthCtx, o: GrainOpts): number {
   const [gMinMs, gMaxMs] = o.grainMs ?? [4, 11];
   const decay = o.decay ?? 0.35;
+  const shift = o.freqShift;
   for (let i = 0; i < o.count; i++) {
     // Slight bias toward the front of the window: a shatter is dense at the start
     // and sparse at the end, never uniform.
     const t = Math.pow(s.rng(), 1.5) * o.spread;
     const dur = rand(s.rng, gMinMs, gMaxMs) / 1000;
     const level = o.peak * (1 - (t / o.spread) * (1 - decay)) * rand(s.rng, 0.55, 1);
+    const walk = shift ? shift[0] + (shift[1] - shift[0]) * (t / o.spread) : 1;
     noiseBurst(
       { ...s, when: s.when + t },
       {
         filter: 'bandpass',
-        freq: rand(s.rng, o.freq[0], o.freq[1]),
+        freq: rand(s.rng, o.freq[0], o.freq[1]) * walk,
         q: o.q ?? 6,
         peak: level,
         attack: 0.0008,
         duration: dur,
+        drive: o.drive,
+        wet: o.wet,
       },
     );
   }
@@ -407,7 +889,14 @@ export function grainCloud(s: SynthCtx, o: GrainOpts): number {
  */
 export function droplets(
   s: SynthCtx,
-  o: { count: number; spread: number; freq: readonly [number, number]; rise?: number; peak: number },
+  o: {
+    count: number;
+    spread: number;
+    freq: readonly [number, number];
+    rise?: number;
+    peak: number;
+    wet?: number;
+  },
 ): number {
   const rise = o.rise ?? 2.6;
   let last = 0;
@@ -424,6 +913,7 @@ export function droplets(
         peak: o.peak * rand(s.rng, 0.5, 1),
         attack: 0.002,
         duration: dur,
+        wet: o.wet,
       },
     );
   }

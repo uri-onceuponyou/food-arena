@@ -18,24 +18,61 @@
  *    not a placeholder. An empty map is a legal, working file.
  * 3. Add two lines to `index.ts` (import + spread). That is the only shared edit, and
  *    it is the same two lines `vfx/weapons/index.ts` needs.
- * 4. **Match the VFX that already exists.** Seven characters have bespoke VFX under
+ * 4. **Match the VFX that already exists.** Every character has bespoke VFX under
  *    `src/vfx/weapons/`, and each of those files opens with a paragraph naming that
  *    weapon's physical identity — a soup splash spreads and steams, a pizza slice is
- *    a flat spinning plate, a taco shell breaks into brittle fragments. That
- *    paragraph is the sound design brief. Audio and VFX disagreeing about what an
- *    object IS is worse than either being plain.
- * 5. **Then prove it.** Add the weapon to `tools/audio-probe.mjs`'s catalogue table
- *    with the acceptance numbers you expect (RMS floor, duration, spectral centroid
- *    band) and run it. A hook that is registered but silent is the single most likely
- *    way to fail here, and it is invisible without a measurement.
+ *    a flat spinning plate, a taco shell breaks into brittle fragments, a burrito is
+ *    a ribbon that unrolls. That paragraph is the sound design brief. Do not invent a
+ *    separate identity: audio and VFX disagreeing about what an object IS is worse
+ *    than either being plain.
+ * 5. **Then prove it.** `tools/audio-probe.mjs --mode identity` discovers every
+ *    registered impact from this registry automatically, so a new voice is measured
+ *    the moment it is added — but it also has to EARN A RUNG on the roster ladder
+ *    (below), and `--mode depth` will hold it to the layer contract. A hook that is
+ *    registered but silent is the single most likely way to fail here, and it is
+ *    invisible without a measurement.
+ *
+ * ── ALL ELEVEN ARE NOW CONVERTED. Adding a weapon means finding a GAP. ──────────
+ *
+ * When only three characters had voices this section could say "pick an axis". It no
+ * longer can: every rung of the spectral-centroid ladder is occupied and every device
+ * is spoken for. See `./index.ts` for the full table of who owns what. A new weapon
+ * has to fit inside its character's existing rung — Sushi's fourth weapon must still
+ * sound like Sushi — and the probe's 55-pair separation check is what enforces that.
  *
  * ── What makes a voice distinct ─────────────────────────────────────────────────
- * Not loudness, and not EQ alone. The three worked examples separate along axes the
- * ear resolves independently, and each is measurable:
- *   * `soup.ts`   — LOW spectral centroid, upward-chirping droplets, a steam tail.
- *   * `pizza.ts`  — a whoosh with real amplitude modulation on it (the disc spins).
- *   * `taco.ts`   — HIGH spectral centroid built from a cloud of discrete grains.
- * Pick an axis before you pick a filter frequency.
+ *
+ * Not loudness, and not EQ alone. Every character owns a POSITION on the ladder AND a
+ * DEVICE nobody else uses, because eleven things cannot be separated on one axis. The
+ * two pairs that sit closest in brightness are deliberately the two separated hardest
+ * on a second axis the ear resolves independently:
+ *   * Taco vs Sushi — both bright; NOISE versus near-PITCH (spectral structure).
+ *   * Donut vs Lollipop — both resonant; near-HARMONIC versus RING-MODULATED.
+ * Pick an axis before you pick a filter frequency, and check `index.ts` first to see
+ * which axes are already taken.
+ *
+ * ── THE LAYER CONTRACT: every hit owes four layers ──────────────────────────────
+ *
+ * Uri played the game and said the SFX were *"very shallow and similar"*. "Similar"
+ * was the authoring gap above. "Shallow" was synthesis, and `--mode depth` now holds
+ * every hit to a floor that a single layer cannot reach, however rich that layer is:
+ *
+ *   1. A TRANSIENT — `transient()`. Tick AND pitched snap; a tick alone is a hiss.
+ *   2. A BODY with a real PITCH ENVELOPE — measured at >= 1.25x from onset to 30%
+ *      through. A static-frequency tone scores exactly 1.00 and fails.
+ *   3. HARMONIC CONTENT — >= 3 discrete partials. Use `drive` (saturation),
+ *      `voices`/`detuneCents`, `ring`, or `modes()`. A bare sine scores 1; the same
+ *      sine at drive 2.5 scores 7.
+ *   4. LOW END — the sub-300 Hz band must peak at >= 25% of the loudest band on
+ *      anything doing 8 damage or more. Short is fine; absent is not. A hit with no
+ *      low layer is inaudible as a hit on a phone speaker.
+ *
+ * Plus the room, which you get for free: pass `wet` on any layer and it goes to the
+ * shared reverb send. 0.05-0.12 for a transient, 0.12-0.25 for a body, 0.25-0.5 for
+ * something wet or distant.
+ *
+ * The one thing to know before writing a number: the probe measures layer structure on
+ * a DRY render and the room on an A/B, so a heavy `wet` will not fake any of the four.
  */
 
 import type { CharacterId, Weapon } from '../../game/rules';

@@ -27,7 +27,7 @@
  *                         the only thing that makes a combo feel like a combo.
  */
 
-import { centsJitter, grainCloud, longest, noiseBurst, tone, type SynthCtx } from '../synth';
+import { centsJitter, grainCloud, longest, noiseBurst, tone, transient, type SynthCtx } from '../synth';
 import type { CharacterWeaponSfxMap, WeaponSfxCtx } from './types';
 
 /**
@@ -46,15 +46,33 @@ function shellShatter(s: SynthCtx, size: number, dry: number): number {
     peak: 0.55 + size * 0.3,
     attack: 0.0006,
     duration: 0.03,
+    drive: 2.2,
+    wet: 0.12,
+  });
+  // A pitched snap under the crack. Added in the depth pass: the crack alone put all
+  // of its onset energy above 3 kHz with no peak structure at all, which is the
+  // spectral signature of a hiss rather than of something breaking.
+  const snap = transient(s, {
+    peak: 0.44 + size * 0.2,
+    freq: 5200 * j,
+    snap: (2900 - size * 500) * j,
+    snapMs: 8,
+    wet: 0.1,
   });
   const fragments = grainCloud(s, {
-    count: Math.round(9 + size * 9),
+    // 8 + 7, down from 9 + 9. Double Toss calls this twice and each grain is four
+    // nodes, so the old counts cost 192 nodes for ONE voice against a 20-voice
+    // budget — see the node census in `--mode depth`. Brittleness is carried by the
+    // irregularity of the grains, not by how many there are.
+    count: Math.round(7 + size * 6),
     spread: 0.14 + size * 0.1,
     grainMs: [3, 9 - dry * 3],
-    freq: [2200 + dry * 900, 7200 + dry * 2200],
+    freq: [2700 + dry * 900, 8000 + dry * 2200],
     q: 7,
     peak: 0.34 + size * 0.16,
     decay: 0.28,
+    drive: 1.6,
+    wet: 0.26,
   });
   // Body, and only as much as the weapon has filling. Onion (`dry` 1) is nearly all
   // shell, so it gets almost none — which is what stops the three weapons from being
@@ -64,12 +82,16 @@ function shellShatter(s: SynthCtx, size: number, dry: number): number {
       ? tone(s, {
           type: 'sine',
           freq: [(190 - size * 60) * j, (72 - size * 22) * j],
-          peak: 0.3 + size * 0.35,
+          peak: 0.24 + size * 0.26,
           attack: 0.002,
           duration: 0.08 + size * 0.1,
+          drive: 2.6,
+          voices: 2,
+          detuneCents: 16,
+          wet: 0.14,
         })
       : 0;
-  return longest(crack, fragments, body);
+  return longest(crack, snap, fragments, body);
 }
 
 export const tacoWeaponSfx: CharacterWeaponSfxMap = {
@@ -86,9 +108,18 @@ export const tacoWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.44,
         attack: 0.03,
         duration: 0.16,
+        drive: 1.6,
+        wet: 0.26,
       });
-      const flakes = grainCloud(c, { count: 4, spread: 0.1, freq: [3000, 7000], peak: 0.11, q: 8 });
-      const push = tone(c, { type: 'sine', freq: [260 * j, 130 * j], peak: 0.14, duration: 0.1 });
+      const flakes = grainCloud(c, { count: 4, spread: 0.1, freq: [3000, 7000], peak: 0.11, q: 8, wet: 0.28 });
+      const push = tone(c, {
+        type: 'sine',
+        freq: [260 * j, 130 * j],
+        peak: 0.14,
+        duration: 0.1,
+        drive: 2,
+        wet: 0.12,
+      });
       return longest(heave, flakes, push);
     },
     impact(c: WeaponSfxCtx): number {
@@ -107,6 +138,7 @@ export const tacoWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.36,
         attack: 0.02,
         duration: 0.12,
+        wet: 0.28,
       });
       return toss;
     },
@@ -121,6 +153,8 @@ export const tacoWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.26,
         attack: 0.006,
         duration: 0.1,
+        drive: 1.7,
+        wet: 0.24,
       });
       return longest(shatter, puff);
     },
@@ -139,12 +173,30 @@ export const tacoWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.44,
         attack: 0.025,
         duration: 0.15,
+        drive: 1.6,
+        wet: 0.26,
       });
       const b = noiseBurst(
         { ...c, when: c.when + 0.055 },
-        { filter: 'bandpass', freq: [820 * j, 2100 * j], q: 2, peak: 0.38, attack: 0.02, duration: 0.13 },
+        {
+          filter: 'bandpass',
+          freq: [820 * j, 2100 * j],
+          q: 2,
+          peak: 0.38,
+          attack: 0.02,
+          duration: 0.13,
+          drive: 1.6,
+          wet: 0.26,
+        },
       );
-      const push = tone(c, { type: 'sine', freq: [240 * j, 118 * j], peak: 0.16, duration: 0.12 });
+      const push = tone(c, {
+        type: 'sine',
+        freq: [240 * j, 118 * j],
+        peak: 0.16,
+        duration: 0.12,
+        drive: 2,
+        wet: 0.12,
+      });
       return longest(a, 0.055 + b, push);
     },
     impact(c: WeaponSfxCtx): number {
