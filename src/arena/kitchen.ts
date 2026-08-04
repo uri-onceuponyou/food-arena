@@ -53,6 +53,7 @@ import { groundPos } from '../units';
 import { POT, PUDDLE_SLOW_FACTOR } from '../game/rules';
 import { buildMaterials, noOutline, ARENA_W, ARENA_H, CENTER, MAX_SAFE_RADIUS, addCover } from './shared';
 import { buildFloor } from './floor';
+import { buildApron } from './apron';
 import { buildPot, buildHazardGround, buildPuddleVisual } from './hazards';
 import { buildDustField, createAmbientUpdate } from './ambient';
 import { buildStoveIsland, buildPrepCounter, buildServiceCounter } from './props/counters';
@@ -81,6 +82,15 @@ export const createKitchenArena: ArenaFactory = () => {
 
   // ── Floor ────────────────────────────────────────────────────────────────────
   root.add(buildFloor(M));
+
+  // ── Apron — everything OUTSIDE the 1400x1000 playfield ───────────────────────
+  // Added to `root`, deliberately NOT to `propsGroup`: `propsGroup` is the set that
+  // gets `outlineGroup()` below, i.e. the arena's reserved "this collides" ink line,
+  // and no part of the apron collides with anything. It registers no CoverBox, has no
+  // hazard, and is never read by the sim — it is cosmetic bleed in the sense
+  // `camera.ts`'s SURPLUS POLICY means it. See `./apron.ts` for why it reaches 760 wu
+  // past every bound and why the boundary is a raised kerb rather than a drop-off.
+  root.add(buildApron());
 
   // ── Central stove hub ────────────────────────────────────────────────────────
   const HUB_ISLAND_W = 170, HUB_ISLAND_H = 90;
