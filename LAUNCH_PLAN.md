@@ -35,19 +35,37 @@ live game verified by screenshot. **Waves 0 and 1.5 are DONE — do not redo the
   4.69)`), and that raking light now rewards apron geometry with real relief far more than
   flat planes.
 
-### Do these next, in order
-1. **Verify the three weapon VFX** — `lollipop.ts`, `soup.ts`, `pizza.ts` are committed
-   but were authored WITHOUT ever being rendered or judged (their agents were stopped
-   while building verification probes). Re-dispatch with **verification-only** briefs; do
-   not re-author. **Lollipop is the highest-stakes check in the queue:** its `giantSlam`
-   tell must be readable with the caster OFF SCREEN, and that single assumption is what
-   keeps the fair-play radius at 199.2wu instead of ~918wu, which would undo the entire
-   range rebalance.
-2. **The remaining six weapons** — burrito, donut, egg, hotdog, sushi, taco. Run 2 at a
-   time (see the corrected budget rule below).
-3. **Character heads** — scope is head + torso only; archetypes own the bodies.
-4. **Whole-arena scanner**, then **motion filmstrip** (every character critique so far has
-   judged stills, yet "reads like a turntable render" is a complaint about motion).
+### Do these next, in order (Uri, 2026-08-04)
+
+1. **Finish the weapons** — burrito+egg and hotdog+sushi are the last four; agents running.
+   That completes the per-weapon VFX pass (7 of 11 done before this).
+2. **Economy data model + trophy road, TOGETHER.** Uri asked for trophy road first and
+   economy after, but trophy road IS a reward track that grants chests and currency — so
+   building its UI on no data model means retrofitting it immediately. Build the model
+   (currency, chest/box types, reward tables, unlock + progression state, persistence)
+   with trophy road as its first consumer.
+   The design already exists: `reference/prototypes/trophy-road-screen.html` and
+   `shop-screen.html`. **`reference/` is gitignored — read only, never copy into `src/`,
+   never commit.** `src/ui/screens/profile.ts` already does localStorage and holds
+   `profile.wins`, so extend rather than replace it.
+   Default unless Uri says otherwise: **earn-only currency, no real-money purchase flow.**
+3. **Shop + chests/boxes UI** on the settled model. Both critics penalised dead UI, so
+   nothing ships with buttons that do not buy.
+4. **Settings** — currently a dead control on home ("coming soon"), needs no economy, and
+   is where keybinds and the mobile quality tiers have to live anyway.
+5. **Audio for the remaining weapons**, once the audio agent reports its authoring pattern.
+6. **Character heads** (scope: head + torso only; archetypes own the bodies), then the
+   **whole-arena scanner** and the **motion filmstrip** — motion is still entirely
+   unassessed, yet "reads like a turntable render" is a complaint about motion.
+
+### Open decisions Uri still owns
+- **Emoji icons.** Both menu critics named emoji-as-icons the loudest remaining tell, but
+  `hud.ts` uses emoji throughout and is the one element that BEAT the shipped reference.
+  Replacing them means a drawn icon set covering the HUD too.
+- **giantSlam.** Its tell is readable with the caster off screen (verified), but the slam
+  resolves on the same tick it is cast, so it cannot be dodged. Whether an instantaneous
+  unavoidable map-scale hit from an unseen attacker is acceptable design is a real
+  question; giving it a wind-up in the sim would make the visual a true warning.
 
 ### Waiting on Uri — do not start without him
 **Floor is PARKED.** There is a specific hypothesis in `PROGRESS.md` (the 6/10 was
