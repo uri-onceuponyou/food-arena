@@ -9,36 +9,38 @@ token wall. The budget discipline in "Token management" is the part that makes t
 
 ---
 
-## ▶ START HERE — paused 2026-08-04 (token limit), 93 commits, all pushed
+## ▶ START HERE — paused 2026-08-04 (tokens), 97 commits, all pushed
 
-`tsc` clean, sim 51/51, working tree clean. **Waves 0 and 1.5 are DONE — do not redo.**
+`tsc` clean, sim 51/51, working tree clean, no agents running.
+**Waves 0 and 1.5 are DONE — do not redo.**
 
-### Landed this session
-Body archetypes · viewport fairness (199.2wu on every aspect) · weapon-range rebalance ·
-**colour grade replaced** (was destroying a fifth of every frame) · **SSAO dropped**
-(measured exactly 0.0000/255 project-wide) · raking key light (+26% modelling) ·
-**fog/safe-zone visual** (previously killed you at 50 HP/s with NO visual) · prop
-grounding un-buried · cover props readability · hazards + slow feedback · impact burst
-rescale · **menu shell + home + character select** · **the entire audio pillar from zero**
-· **Uri's theme "Bounce and Bash"** · 7 of 11 bespoke weapon VFX verified.
+### Landed
+Body archetypes · viewport fairness · weapon-range rebalance · **colour grade replaced**
+(was destroying a fifth of every frame) · **SSAO dropped** (measured exactly 0.0000/255
+project-wide) · raking key light · **fog/safe-zone visual** (previously killed you at
+50 HP/s with NO visual) · prop grounding un-buried · cover props readability · hazards +
+slow feedback · **menu shell + home + character select** · **pointer-lock input fix**
+(a full-screen overlay was swallowing every click AND freezing aim-facing) · **the entire
+audio pillar from zero** · **Uri's theme, verified audible and stopping for fights**.
 
-### ⚠️ Committed but UNREVIEWED — verify before trusting (commit 93)
-Three agents were stopped mid-task. All of this typechecks and passes sim; none has been
-critiqued, and each was interrupted mid-thought.
+### Weapons — all 11 authored, 7 fully verified
+`hamburger waterbottle soup pizza taco donut lollipop` verified.
+`burrito egg hotdog` were verified as reading correctly by an agent that made **no edits**
+to them — provisionally good. **`sushi` is the one still unverified.**
 
-| Files | State |
-|---|---|
-| `vfx/weapons/{burrito,egg}` | agent was mid-sentence on an egg ground-crack |
-| `vfx/weapons/{hotdog,sushi}` | had *just started writing sushi* — assume incomplete |
-| `game/input.ts`, `ui/hud.ts` | pointer lock; its own last note was the reticle "reads but is too quiet for a busy frame" |
+Both bugs to re-check on sushi, present in FOUR of five earlier weapon files:
+effects spawned INSIDE the target (size against the **HEAD**, ~1.2–1.5m, not the 0.82m
+torso; launch debris from a contact ring) and **pooled-material state leaks** (SET initial
+opacity, never READ it off a pooled material — otherwise every particle spawns invisible
+once the pool wraps). Prove absence by warming pools 3–5× before probing.
 
-**Re-dispatch all three with verification-first briefs.** The weapon agents must check the
-two bugs that were present in FOUR of the five finished weapon files: effects spawned
-INSIDE the target (size against the HEAD at ~1.2–1.5m, not the torso; launch debris from a
-contact ring) and pooled-material state leaks (SET initial opacity, never READ it off a
-pooled material). Pointer lock must keep `tools/tmp/menu_accept.mjs` at 113/113 — it can
-break probes that drive real mouse events at absolute coordinates, and a QA escape hatch
-was part of its brief.
+### ⚠️ Unreviewed (commit 97)
+`game/match.ts`, `ui/hud.ts`, `tools/tmp/menu_accept.mjs` — the pointer-lock agent was
+stopped mid-way through "the match.ts pause wiring and the widened backtick guard".
+Its earlier note stands: **the reticle "reads but is too quiet for a busy frame"** — under
+pointer lock the OS cursor is hidden, so the reticle is the player's only aiming
+reference. Verify `menu_accept.mjs` is still 113/113 and that pointer lock has a QA
+escape hatch (it breaks probes driving real mouse events at absolute coordinates).
 
 ### Do these next, in order (Uri, 2026-08-04)
 
