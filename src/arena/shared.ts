@@ -9,11 +9,10 @@
  *   - The `KPAL` colour palette and `buildMaterials()` (the `Materials` type/factory
  *     every builder takes as its first argument).
  *   - Tiny geometry helpers (`puck`, `mesh`, `noOutline`) used by every builder.
- *   - The baked contact-shadow / cast-shadow decal system (`buildContactShadow`,
- *     `buildDirectionalShadowMesh`) and the two shared cover-prop trim helpers
- *     (`addBacksplash`, `addTopRim`).
+ *   - The baked contact-shadow decal system (`buildContactShadow`) and the two
+ *     shared cover-prop trim helpers (`addBacksplash`, `addTopRim`).
  *   - `addCover()` — the single place a `CoverBox` gets registered AND its matching
- *     visual (body + AO + cast shadow) gets built, used by `kitchen.ts`'s layout.
+ *     visual (body + contact AO ring) gets built, used by `kitchen.ts`'s layout.
  *
  * This module owns no gameplay layout (no coordinates for any specific prop) and no
  * per-prop visual design — it is pure infrastructure for the modules that do.
@@ -49,37 +48,50 @@ export const CENTER = { x: ARENA_W / 2, y: ARENA_H / 2 }; // 700, 500
 export const MAX_SAFE_RADIUS = 850;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Baked shadow direction — a round-6 fix for the critic's #1 finding: cover props
-// carry `castShadow=true` (every mesh built through the shared `mesh()` helper below
-// already sets it), but at gameplay zoom their real-time shadow-map contribution
-// shrinks to a faint sliver against the bright cream tile, so props still read as
-// floating. Rather than fight that subtlety, every cover prop (via `addCover`) and
-// the pot ALSO get an authored, guaranteed-visible directional shadow decal — see
-// `buildDirectionalShadowMesh`. Its direction is fixed to match the key light's
-// authored offset in `render/lighting.ts` (`(9, 16, 7)` relative to its target — that
-// file is out of bounds for this arena, so the direction is baked in here instead of
-// read at runtime). A shadow falls AWAY from the light, i.e. toward -X/-Z.
+// Ground-shadow direction, and the round-9 removal of the baked CAST decals.
 //
-// ── Round-8 ablation, so the next owner does not have to re-run it ────────────
-// With the decals finally un-buried (see `BAKED_SHADOW_Y`), hiding each family in
-// turn at shipped framing and diffing measures what each is actually worth:
-//   contact/AO decals : mean 3.92/255 over 13.7% of pixels — LOAD-BEARING. Hiding
-//                       them makes every prop standing on a floor pad float again.
-//   cast decals       : mean 0.74/255 over 3.0% of pixels — and the ablation render
-//                       is essentially indistinguishable from the full frame. The
-//                       real shadow map now does this job properly.
-// (Both numbers are ~5x what an earlier probe measured, because that probe ran while
-// the decals were still 63% z-occluded. Any verdict from before the lift is void.)
+// ── What this direction is for now ────────────────────────────────────────────
+// One thing only: `addCover` offsets each prop's contact/AO ring a fraction of its
+// own overhang along it, so the grounding band stays tight on the LIT side and runs
+// a little further on the shaded side. That is what makes the ring read as
+// light-driven contact darkening rather than a symmetric grey halo.
 //
-// So the cast decals are removable. They are kept for now for ONE reason worth
-// stating: this fixed `SHADOW_DIR` is why the key light's azimuth cannot rotate —
-// swinging the key would put real and baked shadows in different directions. Deleting
-// `buildDirectionalShadowMesh` frees that azimuth, and raking light across every prop
-// in the arena is worth far more than 0.74/255. That is a lighting-owner change, and
-// removing these BEFORE the azimuth moves is a small strict loss, so the two need to
-// land together.
-const SHADOW_DIR_LEN = Math.hypot(9, 7);
-const SHADOW_DIR = { x: -9 / SHADOW_DIR_LEN, z: -7 / SHADOW_DIR_LEN };
+// It is the key light's azimuth, duplicated. `render/lighting.ts` is out of bounds
+// for this module, so the number is copied rather than read at runtime: the key sits
+// at (16.35, 9.82, 4.69) relative to its target, and a shadow falls AWAY from the
+// light. IF THAT AZIMUTH MOVES, MOVE THIS. Two other files carry the same duplicate
+// and are owned elsewhere — `arena/apron.ts` (`SHADOW_X`/`SHADOW_Y`, its kerb contact
+// band) and `arena/floor.ts` (the `along` term in its baked litness ramp) — and both
+// are still on the OLD azimuth (38.1 deg from +X; this one is 16.0), so both are 22
+// deg out. Neither draws a hard shadow edge — apron.ts shades a soft one-sided kerb
+// band, floor.ts a whole-arena low-frequency ramp — so neither is visibly wrong at 22
+// deg, but they should be brought across.
+//
+// ── The cast decals are GONE, and why ─────────────────────────────────────────
+// Rounds 6-8 gave every cover prop, the pot and several small props a second baked
+// decal on top of the AO ring: a soft feathered oval trailing away from the prop
+// along this direction, standing in for a real cast shadow back when the shadow map
+// was mushy. It is not needed any more, and it was actively holding the rig back.
+//
+// Ablated at shipped framing, player-centred, in the live game (hide the family,
+// re-render, per-pixel diff — `tools/tmp/rake.mjs --mode ablate`):
+//
+//   contact/AO decals  mean 2.25/255 over 8.5% of pixels — LOAD-BEARING, KEPT.
+//                      The diff image is a tight dark band hugging every prop's
+//                      footprint. Hiding them makes every pad-mounted prop float.
+//   cast decals        mean 0.13/255 over 0.75% of pixels — REMOVED. The diff image
+//                      is five faint slivers, most of them under the prop that casts
+//                      them. The shadow map does this job properly now.
+//
+// The 0.13 was never the point, though. This direction being FROZEN is what stopped
+// the key light's azimuth from moving at all, because rotating it would have pointed
+// the real shadows one way and 32 baked ones another. With the cast decals gone the
+// azimuth is free, and swinging the key side-on buys raking modelling on every curved
+// surface in the arena — measured +21% terminator ramp on the barrel's skirt — which
+// is worth incomparably more than 0.13/255. Removing these without moving the key
+// would have been a small strict loss, which is why the two landed as one change.
+const SHADOW_DIR_LEN = Math.hypot(16.35, 4.69);
+const SHADOW_DIR = { x: -16.35 / SHADOW_DIR_LEN, z: -4.69 / SHADOW_DIR_LEN };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kitchen palette — extends the shared character PALETTE with arena-only tones so
@@ -513,18 +525,6 @@ export function buildMaterials() {
       opacity: 1,
     }),
 
-    // Baked directional cast-shadow blob — see `buildDirectionalShadowMesh`. Reuses
-    // the same soft radial gradient as `contactShadow` (its feather still looks right
-    // once the plane is stretched long-and-thin) at a lower opacity so it reads as a
-    // soft ground shadow trailing away from the prop, not another AO ring stacked on
-    // top of the real contact shadow.
-    castShadowDecal: new THREE.MeshBasicMaterial({
-      map: makeCastShadowTexture(),
-      transparent: true,
-      depthWrite: false,
-      opacity: 0.7,
-    }),
-
     // Round-7: stronger, wider-spread grounding pair reserved for `LARGE_COVER_KINDS`
     // (see `addCover` and the texture notes above `makeGroundedShadowTextureStrong`).
     groundedShadowStrong: new THREE.MeshBasicMaterial({
@@ -532,12 +532,6 @@ export function buildMaterials() {
       transparent: true,
       depthWrite: false,
       opacity: 1,
-    }),
-    castShadowDecalStrong: new THREE.MeshBasicMaterial({
-      map: makeCastShadowTextureStrong(),
-      transparent: true,
-      depthWrite: false,
-      opacity: 0.88,
     }),
   };
 
@@ -668,28 +662,6 @@ function makeGroundedShadowTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-/** Bolder radial gradient than `makeContactShadowTexture` — that one was tuned for a
- * subtle AO ring sitting almost entirely UNDER the prop that casts it, but the baked
- * directional shadow (`buildDirectionalShadowMesh`) has to read clearly on its own,
- * out on open floor, at gameplay zoom. Same soft-edged radial shape (so it still looks
- * right once stretched into a long oval), just noticeably darker at the core. */
-function makeCastShadowTexture(): THREE.CanvasTexture {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, 'rgba(18,12,7,0.8)');
-  g.addColorStop(0.45, 'rgba(18,12,7,0.6)');
-  g.addColorStop(0.8, 'rgba(18,12,7,0.22)');
-  g.addColorStop(1, 'rgba(18,12,7,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
-}
-
 /**
  * Round-7 "Strong" variant of `makeGroundedShadowTexture`, reserved for the large
  * structural cover pieces (stove islands, freezers, prep/service counters — see
@@ -739,30 +711,12 @@ function makeGroundedShadowTextureStrong(): THREE.CanvasTexture {
   return tex;
 }
 
-/** Strong companion to `makeCastShadowTexture` — darker core, wider mid-alpha
- * shelf, used only for `LARGE_COVER_KINDS` (see `addCover`). */
-function makeCastShadowTextureStrong(): THREE.CanvasTexture {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, 'rgba(12,8,5,0.92)');
-  g.addColorStop(0.4, 'rgba(12,8,5,0.75)');
-  g.addColorStop(0.75, 'rgba(12,8,5,0.34)');
-  g.addColorStop(1, 'rgba(12,8,5,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
-}
-
 /**
- * Y height of EVERY baked grounding decal in the arena (contact/AO ring and the
- * directional cast blob, which sits `0.002` below it to preserve their original
- * draw order). This is one number because it has been wrong twice for the same
- * reason and the fix must be impossible to apply to only half of them.
+ * Y height of every baked grounding decal in the arena. Only the contact/AO ring is
+ * left (the directional cast blob that used to sit 0.002 below it is gone — see the
+ * `SHADOW_DIR` note at the top of this file), but the constant stays because this
+ * height has been wrong twice, both times by being buried under something opaque, and
+ * it must keep being one number that a future decal cannot be added without.
  *
  * ── The history, because the number looks arbitrary and is not ──────────────────
  *
@@ -784,10 +738,12 @@ function makeCastShadowTextureStrong(): THREE.CanvasTexture {
  * onto bare tile — un-anchored to anything, which is precisely the "mushy
  * directionless blob" a lighting round was once scored down for.
  *
- * That measurement also settles a question this project had queued for a long time
- * ("are these baked decals a redundant third darkening layer now that real shadows
- * are crisp — delete them?"). The answer is NO: they were never redundant, they were
- * mostly INVISIBLE, and the fraction that showed was the least useful fraction.
+ * That measurement also half-settles a question this project had queued for a long
+ * time ("are these baked decals a redundant third darkening layer now that real
+ * shadows are crisp — delete them?"). The answer split once they were measured on
+ * screen rather than argued about: the CONTACT ring was never redundant, it was mostly
+ * INVISIBLE, and the fraction that showed was the least useful fraction — so it stays.
+ * The CAST blob genuinely was redundant and is gone (round 9, see `SHADOW_DIR`).
  *
  * 0.07 is chosen as a window, not a taste call: above the highest opaque floor layer
  * (`floor.ts`'s `FINE_Y` = 0.062) and below the lowest prop kick/plinth (~0.08), so a
@@ -812,153 +768,57 @@ export function buildContactShadow(mat: THREE.Material, wM: number, dM: number, 
 }
 
 /**
- * Baked directional ground shadow — a soft, feathered oval that STARTS beyond the
- * prop's own `buildContactShadow` AO ring and trails further out along the FIXED
- * world-space direction the key light casts in (`SHADOW_DIR`). Unlike the AO ring
- * (which only says "touching the floor"), this one visibly points away from the
- * light — the actual cue a real cast shadow gives — and, being an authored decal
- * rather than the renderer's real-time shadow map, it stays clearly visible at any
- * camera zoom instead of shrinking to a faint sliver against the bright tile.
+ * RETIRED — builds nothing, and is kept only as a compiling shim for its two remaining
+ * callers, `arena/hazards.ts` and `arena/props/smallProps.ts`, which are owned by other
+ * agents and could not be edited in the same change.
  *
- * `yawDeg` must be the SAME 0/180 flip the caller applies to the whole prop group —
- * the shadow direction is a world-space constant (the light doesn't rotate with the
- * prop), so the offset is counter-rotated into the group's local space here, and the
- * group's own yaw rotates it right back to the correct world direction.
+ * This used to build the baked directional cast-shadow blob: a soft feathered oval
+ * trailing away from a prop along `SHADOW_DIR`, added when the real shadow map was too
+ * faint at gameplay zoom to ground anything. That stopped being true. Ablated in the
+ * live game at shipped framing, the whole family of 32 of these measured mean
+ * 0.13/255 over 0.75% of pixels and the ablated render is indistinguishable from the
+ * full one — while the fixed direction they were baked to was, single-handedly,
+ * what pinned the key light's azimuth. See the `SHADOW_DIR` note at the top of the file.
  *
- * `startDist` is the distance from the group's origin to where the blob should BEGIN
- * — the caller must size this to clear the prop's own (usually 1.3x-oversized) AO
- * ring, or the two decals sit almost exactly on top of each other and the AO (drawn
- * later, more opaque) simply hides this one entirely. That was a real round-6 bug:
- * an early version measured only the prop's bare silhouette edge, which the AO ring
- * already covers, so the "directional" shadow rendered fully invisible underneath it.
+ * OWNERS OF `hazards.ts` / `props/smallProps.ts`: drop your `buildDirectionalShadowMesh`
+ * calls and the import, and this shim can go with them. Nothing else references it.
  */
-const X_AXIS = new THREE.Vector3(1, 0, 0);
-const Y_AXIS = new THREE.Vector3(0, 1, 0);
-
 export function buildDirectionalShadowMesh(
-  M: Materials,
-  length: number,
-  width: number,
-  yawDeg = 0,
-  startDist = 0,
-  material: THREE.Material = M.castShadowDecal
-): THREE.Mesh {
-  const { x: localX, z: localZ } = localShadowDir(yawDeg);
-
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(length, width), material);
-  // Two rotations composed as QUATERNIONS, not sequential Euler `rotation.x`/`.y` —
-  // Euler angles apply intrinsically (each axis is the mesh's OWN, already-tilted
-  // axis from the previous step), so setting `.y` after `.x` spins the plane about
-  // its now-horizontal local Y axis and tips it up into a vertical sliver instead of
-  // spinning the flat plane around the world's up axis. That was a real round-6 bug:
-  // every baked shadow rendered edge-on and invisible from the top-down camera.
-  // Quaternion multiplication order `spin * flat` applies `flat` first (lie the plane
-  // down) and `spin` second as a genuine world-space rotation about (world) +Y.
-  const qFlat = new THREE.Quaternion().setFromAxisAngle(X_AXIS, -Math.PI / 2);
-  const spinAngle = Math.atan2(-localZ, localX);
-  const qSpin = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, spinAngle);
-  m.quaternion.multiplyQuaternions(qSpin, qFlat);
-  const offset = startDist + length / 2;
-  // A hair BELOW the contact ring (see `BAKED_SHADOW_Y`) so the two keep the draw
-  // order they have always had: where they overlap, the tighter/darker AO ring wins.
-  m.position.set(localX * offset, BAKED_SHADOW_Y - 0.002, localZ * offset);
-  m.renderOrder = 2;
-  m.name = 'cast_shadow__no_outline';
-  m.castShadow = false;
-  m.receiveShadow = false;
-  noOutline(m);
-  return m;
+  _M: Materials,
+  _length: number,
+  _width: number,
+  _yawDeg = 0,
+  _startDist = 0,
+  _material?: THREE.Material
+): THREE.Object3D {
+  return new THREE.Object3D();
 }
 
-/** Counter-rotates the fixed world `SHADOW_DIR` into a group's local (pre-yaw) space —
- * shared by `buildDirectionalShadowMesh` and `buildCoverCastShadow` so both agree on
- * exactly the same direction. */
+/** Counter-rotates the fixed world `SHADOW_DIR` into a group's local (pre-yaw) space,
+ * so `addCover` can offset a prop's contact ring along the light direction whichever
+ * way the prop itself is yawed. */
 function localShadowDir(yawDeg: number): { x: number; z: number } {
   const yawRad = THREE.MathUtils.degToRad(yawDeg);
   const c = Math.cos(-yawRad), s = Math.sin(-yawRad);
   return { x: SHADOW_DIR.x * c + SHADOW_DIR.z * s, z: -SHADOW_DIR.x * s + SHADOW_DIR.z * c };
 }
 
-/** Approximate prop height (metres) per CoverBox `kind`, used only to scale the baked
- * directional shadow's length (see `buildDirectionalShadowMesh`). Deliberately coarse
- * — this is a stylised drop shadow, not a physically exact one — so a rough per-kind
- * height is enough to keep tall props (the freezer) throwing a visibly longer shadow
- * than short ones (a supply barrel) without threading real height data through every
- * individual builder function. */
-const COVER_SHADOW_HEIGHT: Record<string, number> = {
-  stove_island: 1.5,
-  freezer: 2.05,
-  herb_crate: 0.82,
-  produce_crate_tall: 0.96,
-  flour_sacks: 0.95,
-  prep_counter: 1.05,
-  supply_barrel: 0.6,
-  stacked_pots: 0.9,
-  spice_cart: 0.68,
-  fryer_counter: 1.15,
-  sink_counter: 1.2,
-};
-
 /**
  * Round-7 grounding fix. The critic's finding was specific: small props (barrels,
- * crates, the lane pots) already show a consistent AO + cast shadow, but "the
+ * crates, the lane pots) already show a consistent grounding ring, but "the
  * larger structural pieces (the counters/platforms, which matter most for the
  * 'is this a wall' read) mostly rely on a darker side-face rather than a separate
  * ground-contact shadow falling onto the floor beyond their footprint." These are
  * exactly the CoverBox `kind`s tall/wide enough that a steep top-down camera mostly
  * shows their flat top, with only a thin riser visible at the near edge — the same
  * kinds the file header already calls out as needing a vertical `addBacksplash`
- * wall for the same reason. They get the wider, higher-contrast AO + cast-shadow
- * pair (see `makeGroundedShadowTextureStrong`/`makeCastShadowTextureStrong`) so the
- * grounding shadow actually pokes out past the body and its kick, instead of the
+ * wall for the same reason. They get the wider, higher-contrast AO ring (see
+ * `makeGroundedShadowTextureStrong`) so the grounding shadow actually pokes out past
+ * the body and its kick, instead of the
  * thin sliver the base (small-prop-tuned) texture would leave visible on something
  * this big.
  */
 const LARGE_COVER_KINDS = new Set(['stove_island', 'freezer', 'prep_counter', 'fryer_counter', 'sink_counter']);
-
-/** `buildDirectionalShadowMesh`, sized from a cover prop's footprint + its looked-up
- * approximate height — the single call site `addCover` uses so every registered cover
- * box gets one automatically and it can't be forgotten on a future prop. */
-function buildCoverCastShadow(M: Materials, wM: number, dM: number, kind: string, yawDeg = 0): THREE.Mesh {
-  const heightM = COVER_SHADOW_HEIGHT[kind] ?? 1.0;
-  const isLarge = LARGE_COVER_KINDS.has(kind);
-  // ~0.72 approximates 1 / tan(the key light's ~54.5° elevation) — see SHADOW_DIR.
-  // Large structural pieces get a visibly LONGER, WIDER trailing shadow on top of
-  // the stronger texture — see the `LARGE_COVER_KINDS` note above.
-  const length = Math.max(0.6, heightM * 0.85 + 0.3) * (isLarge ? 1.2 : 1);
-  const width = Math.max(0.4, Math.min(wM, dM) * (isLarge ? 0.62 : 0.5));
-  // Distance from the group's centre to ITS OWN rectangular footprint's edge along the
-  // shadow direction, plus a small margin so the blob reads as trailing AWAY from the
-  // prop rather than sitting under it.
-  //
-  // That margin used to be MULTIPLICATIVE (`edgeReach * 1.35`, 1.55 for large kinds),
-  // which is a gap proportional to the prop's own WIDTH. On a supply barrel
-  // (edgeReach ≈ 1.9m) that is a ~0.7m offset and looks fine, which is why it survived
-  // review; on the freezer (230x190wu, edgeReach 7.29m) the identical rule puts the
-  // blob's near edge 11.3m from a box whose half-width is 5.75m — about 5.5m of clean
-  // floor between the prop and the thing claiming to be its shadow, which at shipped
-  // framing is ~19% of the frame width and reads as an unrelated dark oval lying
-  // nearby, not as grounding. A cast shadow's offset is set by the light's elevation
-  // and the prop's HEIGHT — which is exactly what `length` above is already derived
-  // from — and has nothing to do with how wide the prop is, so the clearance must not
-  // scale with the footprint either. An absolute margin, tied to the shadow's own
-  // length and capped, keeps the near edge just clear of the silhouette at every size.
-  //
-  // It no longer has to clear `addCover`'s oversized AO ring the way the old comment
-  // claimed: the two decals have distinct `renderOrder`s (contact 1, cast 2) and both
-  // run `depthWrite: false`, so the cast blob draws OVER the AO ring where they
-  // overlap instead of being swallowed by it. Overlap right at the prop's edge is
-  // wanted anyway — that is where contact darkening belongs.
-  const { x: localX, z: localZ } = localShadowDir(yawDeg);
-  const hw = wM / 2, hd = dM / 2;
-  const edgeReach = Math.min(
-    Math.abs(localX) > 1e-4 ? hw / Math.abs(localX) : hw,
-    Math.abs(localZ) > 1e-4 ? hd / Math.abs(localZ) : hd
-  );
-  const startDist = edgeReach + THREE.MathUtils.clamp(length * 0.25, 0.12, 0.6);
-  const material = isLarge ? M.castShadowDecalStrong : M.castShadowDecal;
-  return buildDirectionalShadowMesh(M, length, width, yawDeg, startDist, material);
-}
 
 /**
  * Raised counter-back wall + a thin bright cap trim along its top edge.
@@ -1044,7 +904,7 @@ export function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Material
   // is snug against the redesigned texture's much narrower feather (see
   // `makeGroundedShadowTexture`), so the prop's own edge sits in the near-full-alpha
   // interior instead of the faint outer ramp. `LARGE_COVER_KINDS` (see the round-7
-  // note above `buildCoverCastShadow`) get a bigger oversize AND the wider/darker
+  // note above `LARGE_COVER_KINDS`) get a bigger oversize AND the wider/darker
   // `groundedShadowStrong` texture, so the shadow visibly clears the prop's own body
   // instead of staying hidden under it — the exact "counters/platforms... rely on a
   // darker side-face rather than a separate ground-contact shadow" gap.
@@ -1068,10 +928,10 @@ export function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Material
   ao.position.x += aoDir.x * wM * (aoScale - 1) * 0.42;
   ao.position.z += aoDir.z * dM * (aoScale - 1) * 0.42;
   group.add(ao);
-  // Baked directional shadow — see `buildCoverCastShadow` / the round-6 shadow note on
-  // `SHADOW_DIR`. Added here, in the ONE place every CoverBox is registered, so it is
-  // physically impossible to add new cover without it also getting a cast shadow.
-  group.add(buildCoverCastShadow(M, wM, dM, spec.kind, spec.yawDeg ?? 0));
+  // No baked cast shadow any more. The one that used to be added here measured
+  // 0.13/255 across the frame while its frozen direction pinned the key light's
+  // azimuth in place — see the `SHADOW_DIR` note at the top of this file. The real
+  // shadow map casts it now.
   const p = groundPos(spec.x, spec.y);
   group.position.set(p.x, 0, p.z);
   if (spec.yawDeg) group.rotation.y = THREE.MathUtils.degToRad(spec.yawDeg);

@@ -79,14 +79,13 @@ export function createLighting(opts?: {
   // regardless of orientation. A hemisphere light only models form if its ends differ
   // in VALUE, not merely in hue.
   //
-  // MEASURED CONFLICT, still live: `src/arena/shared.ts` (owned elsewhere) bakes its
-  // own soft radial grounding + cast-shadow decals under every prop, from when real
-  // shadows were mushy. A/B-toggling them at runtime at shipped framing measures the
-  // cast-shadow decals at mean 0.15/255 over 0.57% of pixels — effectively invisible,
-  // pure cost — and the grounding decals at 2.31/255 over 8.0%, where they are the
-  // symmetric grey halo that muddies this rig's now-crisp directional shadow. See
-  // shots/light2/decals/crop_sheet.png. This file cannot change them; the lever here
-  // is to make the real shadow long, dark and unambiguous enough to win.
+  // RESOLVED (round 9), and it unblocked the azimuth below. `src/arena/shared.ts` used
+  // to bake TWO families of decal under every prop, from when real shadows were mushy:
+  // a contact/AO ring and a directional CAST blob. Ablation at shipped framing put the
+  // cast blobs at mean 0.13/255 over 0.75% of pixels — invisible, pure cost — against
+  // 2.25/255 over 8.5% for the contact rings, which are genuinely load-bearing and
+  // stay. The cast blobs have been deleted. The contact rings have NOT, and must not
+  // be: they are what keeps a prop standing on an opaque floor pad from floating.
   //
   // ── ELEVATION IS THE FIGURE/GROUND KNOB, AND IT WAS THE UNTOUCHED ONE ──────
   // Five rounds tuned this light's INTENSITY and never moved its ANGLE. At the old
@@ -113,8 +112,58 @@ export function createLighting(opts?: {
   // which is what makes the light direction legible at a glance, and it cuts blown
   // highlights (up-facing surfaces stop being the ones nearest the ceiling of the
   // range): pixels with a channel pinned at 255 fall from 1.15% at 34 deg to 0.29%.
+  //
+  // ── AND THE AZIMUTH IS THE MODELLING KNOB — round 9 ────────────────────────
+  // Elevation is fixed here; only the azimuth moved, from 38.1 deg to 16.0 deg (both
+  // measured from +X toward +Z, at the same 19.65 m distance and the same 30 deg
+  // elevation). The camera rig sits at yaw 0, i.e. at +Z looking toward -Z, so its own
+  // azimuth is 90 deg: the key has gone from 52 deg off the view axis to 74 deg off it,
+  // which is most of the way to a pure side light.
+  //
+  // Why that is the one lever left for MODELLING. Three critics independently named
+  // the same #1 gap — surfaces with no internal gradient — and for a FLAT quad it is
+  // unfixable here (one normal, one directional light: measured p90-p10 of 0.003). But
+  // a CURVED vertical surface has a terminator, and where that terminator lands is set
+  // purely by azimuth. For a vertical cylinder the terminator sits at screen-x
+  // -sin(azimuth) of its own radius, so the visible half that is in shade goes:
+  //
+  //   azimuth 38.1 deg .... 19% shaded      azimuth 14 deg .... 38% shaded
+  //   azimuth 30 deg ...... 25% shaded      azimuth  6 deg .... 45% shaded
+  //   azimuth 20 deg ...... 33% shaded      azimuth  0 deg .... 50% shaded
+  //
+  // At 38 deg almost the whole visible curve was on the lit side of the terminator,
+  // which is exactly "no internal gradient". Measured in the live game at shipped
+  // framing on a supply barrel's curved skirt (`tools/tmp/rake.mjs --mode sweep`),
+  // p90-p10 across its own pixels:
+  //
+  //   az 38.1 .... 0.243 (shipped)          az 20 ...... 0.295  (+21%)
+  //   az 30 ...... 0.269                    az 14 ...... 0.309  (+27%)
+  //   az 25 ...... 0.280                    az  6 ...... 0.315  (+30%)
+  //
+  // It is also what makes the shadow READ. This rig pitches 58 deg, so a shadow thrown
+  // along world -Z is foreshortened to ~0.53x on screen while one along -X is seen at
+  // full length. Azimuth therefore lengthens shadows on screen without touching
+  // elevation: the player's own cast shadow grows 6528 -> 7558 px (+16%) at az 20.
+  //
+  // WHERE IT WAS STOPPED, and why 16 and not 0. The cost is figure/ground: a more
+  // side-on key puts part of the hero in shade too, so hero-vs-floor mean separation
+  // falls 0.212 -> 0.182 (az 20) -> 0.154 (az 6), against an acceptance floor of 0.10.
+  // Normalising both curves, gain-minus-cost peaks flat across az 14-20 and falls away
+  // on either side, and the modelling curve is already 90% saturated by az 14. 16 deg
+  // sits in that plateau and keeps the drift from the two baked azimuth duplicates in
+  // `arena/floor.ts` and `arena/apron.ts` (both still on the old 38 deg, both owned
+  // elsewhere, neither a hard edge) as small as it can be while still buying the move.
+  //
+  // The regression this could have caused, checked explicitly because this element
+  // once dropped to 3/10 from adjacent props' shadows merging into floor-wide haze:
+  // it did not happen. Isolating the real shadow map on ground pixels only (render
+  // with `key.castShadow` off, diff, morphological open to strip the grout lattice),
+  // shadowed ground area FALLS 7.61% -> 7.67% -> 7.21% across az 38 -> 20 -> 14, the
+  // largest connected shadow component holds flat at 22.1% -> 23.8% -> 22.5% of all
+  // shadow area, and the component count does not collapse. Elevation is what sets
+  // shadow LENGTH and it did not move, which is why there is nothing here to merge.
   const key = new THREE.DirectionalLight(0xfff4de, 5.3);
-  key.position.set(13.4, 9.8, 10.5);
+  key.position.set(16.35, 9.82, 4.69);
   key.castShadow = true;
   key.shadow.mapSize.set(mapSize, mapSize);
   key.shadow.camera.near = 1;
@@ -181,7 +230,9 @@ export function createLighting(opts?: {
     cam.bottom = -r;
     cam.updateProjectionMatrix();
     key.target.position.set(x, 0, z);
-    key.position.set(x + 13.4, 9.8, z + 10.5);
+    // Must stay identical to the authored offset above — this is the one that actually
+    // runs in a match, since `focus()` is called every frame.
+    key.position.set(x + 16.35, 9.82, z + 4.69);
     key.target.updateMatrixWorld();
   };
   focus(0, 0, shadowRadius);
