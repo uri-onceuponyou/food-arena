@@ -154,9 +154,14 @@ function rayShape(halfWidth: number): THREE.Shape {
 }
 
 // ── Projectile plate sizes, as fractions of a fighter ───────────────────────────
-const SLICE_LEN = CH * 0.26;      // 0.55 m — a quarter of a fighter, tip to crust
-const DOUGH_R = CH * 0.135;       // 0.28 m radius — same span as the slice
-const SHEET_R = CH * 0.15;        // 0.32 m half-width
+// Sized against what they REPLACE, which is the measurement that was missing: the
+// generic projectile in `game/vfx.ts` is `SphereGeometry(wu(10))`, a 1.0 m ball. At
+// the original values these plates spanned 0.55-0.64 m, so every bespoke Pizza
+// projectile was SMALLER than the generic one it improved on. Still comfortably
+// under a fighter (2.10 m) and under the 1.74 m typical impact.
+const SLICE_LEN = CH * 0.30;      // 0.63 m — a quarter of a fighter, tip to crust
+const DOUGH_R = CH * 0.16;        // 0.34 m radius -> 0.67 m across
+const SHEET_R = CH * 0.18;        // 0.38 m half-width
 
 const sliceGeo = flatShapeGeo(sliceShape(SLICE_LEN, 0.44), 8);
 const sheetGeo = flatShapeGeo(sheetShape(SHEET_R), 8);
@@ -179,7 +184,10 @@ const doughGeo = (() => {
     const x = pos.getX(i);
     const z = pos.getZ(i);
     const a = Math.atan2(z, x);
-    const k = 1 + Math.sin(a * 3) * 0.07 + Math.sin(a * 7 + 1.3) * 0.045;
+    // Deeper than the original 0.07/0.045. At that amplitude, rendered at shipped
+    // framing, the disc was a smooth ~45 px blob and its rotation was undetectable
+    // frame to frame — which is the one thing this out-of-round shape exists to do.
+    const k = 1 + Math.sin(a * 3) * 0.13 + Math.sin(a * 7 + 1.3) * 0.075;
     pos.setX(i, x * k);
     pos.setZ(i, z * k);
   }
@@ -436,21 +444,21 @@ function spawnGroundSplat(
   blob.rotation.y = Math.random() * TWO_PI;
   group.add(blob);
 
-  const rayMeshes: THREE.Mesh[] = [];
   for (let i = 0; i < rays; i++) {
     const ray = new THREE.Mesh(rayGeo, mat);
     ray.rotation.y = (i / rays) * TWO_PI + Math.random() * 0.7;
     ray.scale.set(0.7 + Math.random() * 0.4, 1, 1.0 + Math.random() * 0.4);
     group.add(ray);
-    rayMeshes.push(ray);
   }
 
   ctx.spawnTransient(group, life, (t) => {
     // Snaps out over the first fifth of its life, then holds and fades — a splat
-    // lands instantly, it doesn't grow.
+    // lands instantly, it doesn't grow. (The per-ray `scale.y = grow` that used to
+    // live here was dead code: `rayGeo` is authored FLAT IN XZ, so its Y is the
+    // surface normal and scaling it changes nothing on screen. The group scale
+    // already animates the whole splat, rays included.)
     const grow = 1 - Math.pow(1 - Math.min(1, t * 5), 3);
     group.scale.set(radius * grow, 1, radius * grow);
-    for (const r of rayMeshes) r.scale.y = grow;
     mat.opacity = startOpacity * (t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45);
   });
 }
@@ -523,8 +531,10 @@ function buildDough(color: string): THREE.Group {
   group.add(top);
   // Off-centre flour patch — the asymmetry that makes a round plate's spin visible.
   const patch = new THREE.Mesh(unitDiscGeo, flourPatchMat);
-  patch.scale.setScalar(DOUGH_R * 0.3);
-  patch.position.set(DOUGH_R * 0.36, CH * 0.011, -DOUGH_R * 0.24);
+  // 0.3 -> 0.44: at 0.3 the patch was ~0.17 m, about 12 px on screen, and could not
+  // do the job it is here for (making a round plate's spin legible).
+  patch.scale.setScalar(DOUGH_R * 0.44);
+  patch.position.set(DOUGH_R * 0.4, CH * 0.011, -DOUGH_R * 0.26);
   group.add(patch);
   return group;
 }
@@ -599,7 +609,7 @@ export const pizzaWeaponVfx: CharacterWeaponVfxMap = {
         mat.opacity = 0.95 * (t < 0.5 ? 1 : 1 - (t - 0.5) / 0.5);
       });
 
-      spawnTriangleFlash(ctx, '#FFF3D2', CH * 0.28 * s, 0.14);
+      spawnTriangleFlash(ctx, '#FFF3D2', CH * 0.30 * s, 0.18);
 
       for (let i = 0; i < 10; i++) {
         const ang = (i / 10) * TWO_PI + Math.random() * 0.5;
@@ -613,7 +623,7 @@ export const pizzaWeaponVfx: CharacterWeaponVfxMap = {
       for (let i = 0; i < 4; i++) {
         spawnChip(
           ctx, ctx.position, '#EFD9A6',
-          Math.random() * TWO_PI, (1.1 + Math.random() * 1.1) * s,
+          Math.random() * TWO_PI, (1.9 + Math.random() * 1.3) * s,
           (0.55 + Math.random() * 0.35) * s, 0.4 + Math.random() * 0.14,
         );
       }
@@ -690,14 +700,22 @@ export const pizzaWeaponVfx: CharacterWeaponVfxMap = {
     // which is the whole shape-language argument for the weapon.
     impact(ctx) {
       const s = impactScale(ctx.damage);
-      spawnTriangleFlash(ctx, '#FFB27A', CH * 0.38 * s, 0.13);
+      // Flash: was `#FFB27A` for 0.13 s — a warm mid-value orange over a warm floor,
+      // gone before anyone saw it. A near-white core is the only element in a
+      // red-sauce-on-terracotta hit that is not competing inside the same hue stack.
+      spawnTriangleFlash(ctx, '#FFE7CC', CH * 0.40 * s, 0.18);
       spawnGroundSplat(ctx, ctx.color, CH * 0.22 * s, 4, 0.55, 0.9);
 
       for (let i = 0; i < 5; i++) {
         const ang = (i / 5) * TWO_PI + Math.random() * 0.6;
+        // Thrown hard enough to CLEAR THE BODY. At the old 1.3-2.4 m/s over a 0.4 s
+        // life the chips travelled ~0.6-1.0 m and spent their whole life inside the
+        // fighter's own silhouette, where a top-down camera hides them completely —
+        // the debris was there and unreadable, which is this project's most repeated
+        // failure in its subtlest form.
         spawnChip(
           ctx, ctx.position, ctx.color,
-          ang, (1.3 + Math.random() * 1.1) * s,
+          ang, (2.2 + Math.random() * 1.4) * s,
           (0.75 + Math.random() * 0.45) * s, 0.4 + Math.random() * 0.14,
         );
       }
@@ -782,7 +800,19 @@ export const pizzaWeaponVfx: CharacterWeaponVfxMap = {
     // must NOT swallow the body, so nothing here reaches even one character height.
     impact(ctx) {
       const s = impactScale(ctx.damage);
-      const headY = CH * 0.72;
+      // RENDERED AND INVISIBLE, instance N of this project's most repeated bug. The
+      // sheet used to be ~0.65 m across, placed at `CH * 0.72` — which is the head
+      // CENTRE. `ChibiRig`'s default `headFraction` 0.46 gives a head radius of about
+      // 0.48 m, i.e. a 0.96 m ball, so a 0.33 m-radius plate spawned entirely INSIDE
+      // the target's head and was depth-culled away to nothing. The signature beat of
+      // the character's stun ability drew zero pixels.
+      //
+      // Fixed by geometry, not by turning depth off: the plate now starts just above
+      // the crown of a nominal head and is wider than the head is, so from this
+      // game's tilted top-down camera it visibly caps the face — then sags down over
+      // it. Still ~1.4 m at peak, well under a 2.10 m fighter and under the generic
+      // burst's 1.74 m typical, so it blinds the head without swallowing the body.
+      const headY = CH * 0.96;
 
       const mat = nextSheetMat();
       mat.color.set(ctx.color);
@@ -796,21 +826,22 @@ export const pizzaWeaponVfx: CharacterWeaponVfxMap = {
       back.position.y = -CH * 0.008;
       sheet.add(back);
       sheet.position.set(ctx.position.x, headY, ctx.position.z);
-      // `sheetGeo` is 0.63 m across already, so this is a MULTIPLIER: ~0.70 m at
-      // peak, which covers a head and not a body.
-      const span = 1.05 * s;
+      // `sheetGeo` is 0.76 m across, so this is a MULTIPLIER: ~1.37 m at peak, i.e.
+      // ~1.4x a nominal head radius all the way round — the margin that makes the
+      // plate read as a sheet OVER the face rather than a disc lost inside it.
+      const span = 1.8 * s;
       ctx.spawnTransient(sheet, 0.5, (t) => {
         const g = THREE.MathUtils.lerp(span * 0.4, span, 1 - Math.pow(1 - Math.min(1, t * 3.5), 3));
         // Sags and slides down off the face as it lets go.
         sheet.scale.set(g, 1, g * (1 - t * 0.25));
-        sheet.position.y = headY - t * t * CH * 0.3;
+        sheet.position.y = headY - t * t * CH * 0.34;
         orientPlate(sheet, ctx.direction, t * 1.2, 0.35 + t * 0.5);
         const fade = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
         mat.opacity = 0.95 * fade;
         backMat.opacity = 0.6 * fade;
       });
 
-      spawnTriangleFlash(ctx, '#FFF0B0', CH * 0.24 * s, 0.12);
+      spawnTriangleFlash(ctx, '#FFF6D8', CH * 0.26 * s, 0.17);
 
       for (let i = 0; i < 4; i++) {
         const smat = nextSheetMat();

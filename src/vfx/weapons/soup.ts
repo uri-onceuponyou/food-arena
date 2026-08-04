@@ -109,12 +109,17 @@ const SPLAT_Y = 0.27;
 // compare against the generic burst's 1.74 m typical / 3.0 m cap.
 const SPLASH_MARK_RADIUS = CH * 0.30;  // 1.26 m across — and THREE of these land together
 const NOODLE_MARK_RADIUS = CH * 0.34;  // 1.43 m across
-const DUMP_MARK_RADIUS = CH * 0.62;    // 2.60 m across — Soup's largest element, under the cap
+const DUMP_MARK_RADIUS = CH * 0.55;    // 2.31 m across — Soup's largest element, under the cap
 
 const DROP_RADIUS = CH * 0.042;        // 0.088 m — a droplet, ~4 px at shipped framing
-const BLOB_RADIUS = CH * 0.062;        // 0.13 m — the Splash projectile's head
+/** The Splash projectile's head. MEASURED against what it replaces: `game/vfx.ts`'s
+ * generic projectile is `SphereGeometry(wu(10))` — a 1.0 m ball. At the original
+ * `CH * 0.062` the gout head was 0.26 m across, so swapping the bespoke visual in
+ * made the projectile nearly 4x SMALLER than the generic one it was improving on,
+ * and at shipped framing it rendered as a ~10 px bead. */
+const BLOB_RADIUS = CH * 0.085;        // 0.18 m radius -> ~0.50 m gout, half the generic ball
 
-const NOODLE_LENGTH = CH * 0.34;       // 0.71 m
+const NOODLE_LENGTH = CH * 0.40;       // 0.84 m
 const NOODLE_THICKNESS = CH * 0.024;   // 0.05 m radius -> 0.10 m thick
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,7 +155,14 @@ function buildSplatGeometry(seed: number, tendrilCount: number): THREE.BufferGeo
   const p0 = rnd() * Math.PI * 2, p1 = rnd() * Math.PI * 2, p2 = rnd() * Math.PI * 2;
   const tendrils: Array<[number, number, number]> = [];
   for (let i = 0; i < tendrilCount; i++) {
-    tendrils.push([rnd() * Math.PI * 2, 0.30 + rnd() * 0.5, 0.075 + rnd() * 0.06]);
+    // Amplitude/width MEASURED, not guessed: at the original 0.30-0.80 amplitude and
+    // 0.075-0.135 angular width these were needles 80% longer than the blob and ~5°
+    // wide, and because the outline is normalised to its longest point (below) the
+    // BODY then shrank to ~55% of the stated radius. The rendered result was a hard
+    // 5-pointed starburst — indistinguishable from `game/vfx.ts`'s generic star decal
+    // and not liquid at all. Shorter and much wider reads as a fluid edge with
+    // fingers, and keeps the body at ~78% of the stated radius.
+    tendrils.push([rnd() * Math.PI * 2, 0.14 + rnd() * 0.20, 0.16 + rnd() * 0.14]);
   }
 
   const radii: number[] = [];
@@ -209,10 +221,30 @@ dropGeo.scale(0.78, 0.78, 1.4);
  * compression column, splash crowns). */
 const blobGeo = new THREE.SphereGeometry(1, 10, 8);
 
-/** Open-ended cone, wide at the base and tapering to a point at +Y — a rising steam
- * wisp, the same silhouette `arena/hazards.ts` uses for the boiling pot's steam so
- * the two read as the same substance. */
-const steamGeo = new THREE.ConeGeometry(1, 2.4, 7, 1, true);
+/**
+ * Steam puff. This was a 7-sided open `ConeGeometry`, and rendering it settled the
+ * question: a hard-edged 7-gon cone at 0.34 alpha does not read as vapour, it reads
+ * as a pale angular SHARD — i.e. exactly like the debris from the generic burst it is
+ * supposed to distinguish Soup from. A soft radial sprite is what vapour needs, and a
+ * `Sprite` also removes the last orientation risk in the file (it is always
+ * camera-facing, so it can never be caught edge-on the way a quad can).
+ */
+const steamTex = (() => {
+  const size = 64;
+  const cvs = document.createElement('canvas');
+  cvs.width = cvs.height = size;
+  const c2d = cvs.getContext('2d')!;
+  const g = c2d.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(255,255,255,0.95)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.52)');
+  g.addColorStop(0.78, 'rgba(255,255,255,0.14)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  c2d.fillStyle = g;
+  c2d.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+})();
 
 /** One wavy noodle strand, ~1 unit long along Z, so `scale.setScalar(NOODLE_LENGTH)`
  * gives a strand of that length with proportional thickness. Three authored curves
@@ -264,16 +296,28 @@ const nextCoreMat = materialPool(10, () => flatLiquid(BROTH_HOT, 0.9));
 const nextBrothMat = materialPool(28, () => flatLiquid('#E8792A', 0.95));
 const nextHotMat = materialPool(14, () => flatLiquid(BROTH_HOT, 0.95));
 const nextNoodleMat = materialPool(16, () => flatLiquid(NOODLE_PALE, 1));
+/**
+ * PROJECTILE BODIES get their own pools, and nothing ever animates their opacity.
+ *
+ * They used to draw from the pools above — which are handed round-robin to a stream
+ * of droplets and strands that each fade THEMSELVES to zero. A projectile in flight
+ * therefore shared a material with a droplet spawned a moment later, and vanished
+ * mid-flight the instant that droplet faded out. Three pellets shedding a drip every
+ * ~0.06 s wrap a 28-slot pool in well under a second, so this was not a rare race.
+ */
+const nextBodyBrothMat = materialPool(6, () => flatLiquid('#E8792A', 1));
+const nextBodyHotMat = materialPool(6, () => flatLiquid(BROTH_HOT, 1));
+const nextBodyNoodleMat = materialPool(12, () => flatLiquid(NOODLE_PALE, 1));
 /** Steam: NORMAL blending at low alpha, not additive — additive white over this
  * arena's bright warm floor blows straight to a clipped highlight and stops reading
  * as vapour at all. */
-const nextSteamMat = materialPool(14, () => new THREE.MeshBasicMaterial({
-  color: STEAM_COLOR, transparent: true, opacity: 0.34, depthWrite: false, side: THREE.DoubleSide,
+const nextSteamMat = materialPool(16, () => new THREE.SpriteMaterial({
+  map: steamTex, color: STEAM_COLOR, transparent: true, opacity: 0.5, depthWrite: false,
 }));
 /** The one additive element: a brief hot flash at the moment of contact, so a hit
  * still PUNCHES rather than just oozing. */
 const nextFlashMat = materialPool(8, () => new THREE.MeshBasicMaterial({
-  color: '#FFD9A0', transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending,
+  color: '#FFF4DF', transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending,
 }));
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,7 +352,13 @@ function spawnDroplet(
 ): void {
   const mesh = new THREE.Mesh(dropGeo, hot ? nextHotMat() : nextBrothMat());
   const mat = mesh.material as THREE.MeshBasicMaterial;
-  const baseOpacity = mat.opacity;
+  // SET, never READ. Every droplet fades its own pooled material to ~0 and leaves it
+  // there; reading that as the next droplet's starting opacity meant that once the
+  // pool had wrapped once — about a second of firing — every droplet in the game
+  // spawned already invisible. The drips are most of Soup's liquid vocabulary, so
+  // this quietly deleted the effect's whole identity a second into every match.
+  const baseOpacity = 0.95;
+  mat.opacity = baseOpacity;
   mesh.position.set(ox, oy, oz);
   const gravity = -9.4;
   ctx.spawnTransient(mesh, life, (t, e) => {
@@ -337,18 +387,20 @@ function spawnDroplet(
  * be confused with a cold terrain puddle.
  */
 function spawnSteam(ctx: WeaponVfxCtx, x: number, y: number, z: number, radius: number, rise: number, life: number): void {
-  const mesh = new THREE.Mesh(steamGeo, nextSteamMat());
-  const mat = mesh.material as THREE.MeshBasicMaterial;
+  const sprite = new THREE.Sprite(nextSteamMat());
+  const mat = sprite.material;
+  mat.opacity = 0;
   const drift = (Math.random() - 0.5) * radius * 1.6;
   const driftZ = (Math.random() - 0.5) * radius * 1.6;
-  mesh.position.set(x, y, z);
-  mesh.scale.set(radius * 0.45, radius * 0.5, radius * 0.45);
-  ctx.spawnTransient(mesh, life, (t) => {
+  sprite.renderOrder = 9;
+  sprite.position.set(x, y, z);
+  sprite.scale.set(radius * 1.1, radius * 1.1, 1);
+  ctx.spawnTransient(sprite, life, (t) => {
     const e = 1 - Math.pow(1 - t, 2);
-    mesh.position.set(x + drift * e, y + rise * e, z + driftZ * e);
-    const s = radius * (0.45 + e * 0.75);
-    mesh.scale.set(s, radius * (0.5 + e * 1.1), s);
-    mat.opacity = 0.34 * Math.sin(Math.min(1, t * 1.35) * Math.PI) * 1.1;
+    sprite.position.set(x + drift * e, y + rise * e, z + driftZ * e);
+    const s = radius * (1.1 + e * 1.5);
+    sprite.scale.set(s, s, 1);
+    mat.opacity = 0.5 * Math.sin(Math.min(1, t * 1.3) * Math.PI);
   });
 }
 
@@ -383,9 +435,15 @@ function spawnSpillMark(ctx: WeaponVfxCtx, x: number, z: number, radius: number,
 
   const spread = (t: number): number => (t < 0.34 ? 1 - Math.pow(1 - t / 0.34, 2.2) : 1);
 
+  // The mark must be VISIBLY GOING somewhere from the moment you see it. Held at
+  // 0.9 opacity for most of its life (`1 - t^2.4` barely moves before t=0.6) it was a
+  // flat opaque organic blob lying in the ground plane — which is the exact grammar
+  // this arena's PERMANENT floor-spill decals are drawn in, and a blind critic duly
+  // read it as terrain, and then as a burning-area hazard to walk around. Fading from
+  // the first frame is what separates "an event happened here" from "this is floor".
   ctx.spawnTransient(rim, life, (t) => {
     rim.scale.setScalar(radius * THREE.MathUtils.lerp(0.35, 1, spread(t)));
-    rimMat.opacity = 0.9 * (1 - Math.pow(t, 2.4));
+    rimMat.opacity = 0.82 * (1 - Math.pow(t, 1.5));
   });
   ctx.spawnTransient(core, life * 0.86, (t) => {
     core.scale.setScalar(radius * THREE.MathUtils.lerp(0.18, 0.62, spread(t)));
@@ -393,16 +451,26 @@ function spawnSpillMark(ctx: WeaponVfxCtx, x: number, z: number, radius: number,
   });
 }
 
-/** The instant of contact: a small additive hot flash. Kept deliberately smaller than
+/**
+ * The instant of contact: a small additive hot flash. Kept deliberately smaller than
  * the spill mark it sits on — the mass of this effect belongs on the GROUND, and an
  * airborne bloom over the target is exactly what made the old generic burst swallow
- * the character it was giving feedback about. */
+ * the character it was giving feedback about.
+ *
+ * It is, however, the ONLY high-value element in the whole effect, and it was pitched
+ * so warm (`#FFD9A0`) and so short (0.13 s) that a blind critic looking at a frame
+ * 0.18 s after the hit reported the impact as having no punch at all and read the
+ * remaining ground mark as permanent terrain. Broth is orange, the soup fighter is
+ * orange and this arena's floor is orange — a near-white core is the one thing in
+ * this file that is not competing in that hue stack, so it has to survive long enough
+ * to be seen.
+ */
 function spawnContactFlash(ctx: WeaponVfxCtx, x: number, y: number, z: number, radius: number): void {
   const flash = new THREE.Mesh(blobGeo, nextFlashMat());
   const mat = flash.material as THREE.MeshBasicMaterial;
   flash.position.set(x, y, z);
   flash.scale.set(radius, radius * 0.55, radius);
-  ctx.spawnTransient(flash, 0.13, (t) => {
+  ctx.spawnTransient(flash, 0.19, (t) => {
     const s = radius * THREE.MathUtils.lerp(0.9, 1.7, t);
     flash.scale.set(s, s * 0.5, s);
     mat.opacity = 0.9 * (1 - t) * (1 - t);
@@ -421,6 +489,7 @@ function spawnNoodleStrand(
 ): void {
   const mesh = new THREE.Mesh(nextNoodleGeo(), nextNoodleMat());
   const mat = mesh.material as THREE.MeshBasicMaterial;
+  mat.opacity = 1;                     // SET, never read — see `spawnDroplet`.
   mesh.position.set(ox, oy, oz);
   mesh.scale.setScalar(length);
   const gravity = -9.4;
@@ -454,19 +523,19 @@ function spawnNoodleStrand(
 function buildBrothGout(color: string): THREE.Group {
   const group = new THREE.Group();
 
-  const head = new THREE.Mesh(dropGeo, nextBrothMat());
+  const head = new THREE.Mesh(dropGeo, nextBodyBrothMat());
   (head.material as THREE.MeshBasicMaterial).color.set(color);
   head.scale.setScalar(BLOB_RADIUS);
   head.position.z = BLOB_RADIUS * 0.4;
   group.add(head);
 
-  const cap = new THREE.Mesh(blobGeo, nextHotMat());
+  const cap = new THREE.Mesh(blobGeo, nextBodyHotMat());
   cap.scale.setScalar(BLOB_RADIUS * 0.5);
   cap.position.set(BLOB_RADIUS * 0.25, BLOB_RADIUS * 0.4, BLOB_RADIUS * 0.85);
   group.add(cap);
 
   for (let i = 0; i < 2; i++) {
-    const bead = new THREE.Mesh(dropGeo, nextBrothMat());
+    const bead = new THREE.Mesh(dropGeo, nextBodyBrothMat());
     (bead.material as THREE.MeshBasicMaterial).color.set(color);
     const s = BLOB_RADIUS * (0.44 - i * 0.13);
     bead.scale.setScalar(s);
@@ -539,8 +608,8 @@ const Splash = {
   impact(ctx: WeaponVfxCtx): void {
     const { x, z } = ctx.position;
 
-    spawnContactFlash(ctx, x, ctx.position.y * 0.55, z, CH * 0.16);
-    spawnSpillMark(ctx, x, z, SPLASH_MARK_RADIUS, 0.42);
+    spawnContactFlash(ctx, x, ctx.position.y * 0.55, z, CH * 0.19);
+    spawnSpillMark(ctx, x, z, SPLASH_MARK_RADIUS, 0.38);
 
     // The crown: droplets thrown up and outward from the contact ring, not radial
     // debris — a liquid hitting a surface throws a ring of small drops UP first and
@@ -606,7 +675,7 @@ function buildNoodleWad(color: string): THREE.Group {
   const group = new THREE.Group();
   const strands: THREE.Mesh[] = [];
   for (let i = 0; i < 3; i++) {
-    const strand = new THREE.Mesh(nextNoodleGeo(), nextNoodleMat());
+    const strand = new THREE.Mesh(nextNoodleGeo(), nextBodyNoodleMat());
     (strand.material as THREE.MeshBasicMaterial).color.set(color);
     strand.scale.setScalar(NOODLE_LENGTH * 0.62);
     strand.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
@@ -618,7 +687,7 @@ function buildNoodleWad(color: string): THREE.Group {
     group.add(strand);
     strands.push(strand);
   }
-  const broth = new THREE.Mesh(blobGeo, nextBrothMat());
+  const broth = new THREE.Mesh(blobGeo, nextBodyBrothMat());
   broth.scale.setScalar(BLOB_RADIUS * 0.62);
   group.add(broth);
   group.userData.__strands = strands;
@@ -670,8 +739,8 @@ const Noodle = {
   impact(ctx: WeaponVfxCtx): void {
     const { x, z } = ctx.position;
 
-    spawnContactFlash(ctx, x, ctx.position.y * 0.55, z, CH * 0.15);
-    spawnSpillMark(ctx, x, z, NOODLE_MARK_RADIUS, 0.55);
+    spawnContactFlash(ctx, x, ctx.position.y * 0.55, z, CH * 0.18);
+    spawnSpillMark(ctx, x, z, NOODLE_MARK_RADIUS, 0.48);
 
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * Math.PI * 2 + Math.random() * 0.7;
@@ -850,8 +919,8 @@ const Dump = {
       colMat.opacity = 0.95 * (1 - Math.pow(t, 2.5));
     });
 
-    spawnContactFlash(ctx, x, ctx.position.y * 0.5, z, CH * 0.24);
-    spawnSpillMark(ctx, x, z, DUMP_MARK_RADIUS, 0.85);
+    spawnContactFlash(ctx, x, ctx.position.y * 0.5, z, CH * 0.30);
+    spawnSpillMark(ctx, x, z, DUMP_MARK_RADIUS, 0.62);
 
     // A big crown, thrown wide. Individually these stay droplet-sized — the volume
     // read comes from COUNT, not from any one element being large.
