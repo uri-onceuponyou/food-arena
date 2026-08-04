@@ -129,7 +129,8 @@ side effect, since nothing overdraws them any more.
 
 **Two stale duplicates of the old azimuth remain**, both 22° out and neither drawing a
 hard edge, so neither is visibly wrong yet: `arena/floor.ts` ~line 891 (parked — fix when
-the floor resumes) and `arena/apron.ts:214` (relayed to its owner).
+the floor resumes). `arena/apron.ts` was ALREADY FIXED — it reads `Math.hypot(16.35,
+4.69)`, matching `lighting.ts:166` and `shared.ts:93`. **Only `floor.ts` remains.**
 
 The decals sit at y = 0.017/0.019. Above them sit **opaque, depth-writing** planes —
 `floor_woodpad`, `floor_utility_pad`, `floor_teal_zone`, `floor_border` at 0.045–0.048,
@@ -587,6 +588,23 @@ scored 3/10. Now off by default, kept behind `ao: true` with the dead knob repai
    output. The barrel's *curved* skirt by contrast ramps 0.276→0.323. Two of three critics
    spent their #1 fix on this. It needs baked gradient/AO in the albedo.
 3. **Red is railed on the warm props** — safe to fix now the grade no longer distorts it.
+
+### An INVALID critic round already drove real work — check the control BEFORE acting
+
+The apron's round 1 scored the reference plates **6, 6, 5** — below the ~7–9 valid band,
+so by this file's own rule that round should have been **discarded**. It was not. It drove
+**the two largest rewrites** the apron received.
+
+The rule is only worth having if the control is checked *before* the fix is implemented,
+not afterwards when reconciling scores. Read the reference-side score first; if it is out
+of band, stop and re-run rather than acting on the critique.
+
+Related, from the same report: **do not take a critic's stated mechanism at face value.**
+The apron's final critic scored 4/10 with three reasons, and two failed verification —
+"props float over dark violet nothing" was measurably false (100% apron coverage of that
+quadrant, floor present at luma 34.7/255; the fog canopy had crushed it). That is the
+"rendering but invisible" trap **in reverse**: a critic reporting absence where there is
+presence. The third reason was real and was kept.
 
 ### An agent's LAST MESSAGE is not its state — check the tree
 

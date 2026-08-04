@@ -13,35 +13,48 @@
  * `tools/tmp/apronshot.mjs` shoots a fixed set of ten LIVE-GAME frames from legal
  * player positions — every bound, two corners, the spawn, a centre control and one
  * inside the closing-fog death zone — at 4:3, 16:9 and 21:9.
- * `tools/tmp/undressed.mjs` then counts pixels that are BOTH locally flat (15x15 luma
+ * `tools/tmp/undressed*.mjs` then counts pixels that are BOTH locally flat (15x15 luma
  * range <= 7/255) AND coloured like something that lives off the playfield.
  *
- * The number that matters is the WARM term — flat pixels in the scene clear colour or
- * in `floor.ts`'s bare subfloor skirt, i.e. the actual undressed background this
- * module exists to remove. All three states measured on the SAME build of the game,
- * apron switched off with `?apron=0` (`kitchen.ts`):
+ * ── READ THIS BEFORE YOU RUN THE TOOL, IT HAS THREE VARIANTS AND THEY DISAGREE ─────
  *
- *                                  apron off     r1        r3 (this)
- *     mean, 9 edge frames            31.75%     3.84%       3.26%
- *     worst single edge frame        40.08%     9.03%       8.87%
- *     centre control (no apron)       6.88%     6.88%       6.88%
+ * There are three scripts and picking the wrong one will look like a 6x regression:
  *
- * The control is the point of the table: it contains no apron at all, and the test
- * still calls 6.88% of it undressed, because the classifier cannot tell flat warm
- * playfield tile from flat warm background. That is the metric's own false-positive
- * floor, so the edge frames sitting BELOW it means the warm-band problem is closed and
- * further rounds cannot be scored on this number. What rounds 2+ actually spend
- * themselves on is the QUALITY of the boundary, which no pixel count measures — that
- * needs a critic, and the verdicts are quoted where the decisions they drove live.
+ *     undressed_nofog.mjs   WARM term only (clear colour + bare subfloor skirt).
+ *                           *** THIS IS THE ACCEPTANCE TEST. ***
+ *     undressed_fogonly.mjs VIOLET term only — see the caveat below.
+ *     undressed.mjs         the SUM of the two. Not the acceptance test.
+ *
+ * The WARM term is the actual undressed background this module exists to remove.
+ * Re-measured 2026-08-04 on the current build, both states shot from the identical
+ * ten frames, apron switched off with `?apron=0` (`kitchen.ts`):
+ *
+ *                                  apron off     apron on (this build)
+ *     mean, 9 edge frames            28.61%          2.96%
+ *     worst single edge frame        39.79%          6.62%   (spawn)
+ *     centre control (no apron)       4.12%          4.11%
+ *
+ * The control is the point of the table: it contains no apron at all in EITHER state,
+ * and the test still calls ~4.1% of it undressed, because the classifier cannot tell
+ * flat warm playfield tile from flat warm background. That is the metric's own
+ * false-positive floor, and it is unchanged between the two states, which is what says
+ * the test is measuring the apron and not the build. Eight of the nine edge frames now
+ * sit at or below that floor, so the warm-band problem is CLOSED and further rounds
+ * cannot be scored on this number. The "apron off" column also confirms the original
+ * complaint that created this module — edge frames 30-50% undressed — at 28.6% mean.
+ *
+ * What later rounds actually spend themselves on is the QUALITY of the boundary, which
+ * no pixel count measures. That needs a critic, and the verdicts are quoted where the
+ * decisions they drove live.
  *
  * One caveat worth keeping, because it will mislead whoever reads the tool next: the
- * same tool also counts flat VIOLET pixels, and that term gets WORSE as the apron gets
- * better (r1 10.0% -> r2 14.9%). `FLAT_RANGE` is an absolute luma threshold, so
- * halving the apron's albedo — which is the single biggest thing round 2 did, on the
- * critic's own instruction — halves its absolute local contrast and doubles the number
- * of windows that fall under the threshold. It is measuring the darkening, not a
- * regression. Judge the violet term by eye, or fix the tool to use a relative
- * threshold; do not tune the apron against it.
+ * VIOLET term gets WORSE as the apron gets better (r1 10.0% -> r2 14.9%; it measures
+ * 14.6% mean now). `FLAT_RANGE` is an absolute luma threshold, so halving the apron's
+ * albedo — which is the single biggest thing round 2 did, on the critic's own
+ * instruction — halves its absolute local contrast and doubles the number of windows
+ * that fall under the threshold. It is measuring the darkening, not a regression.
+ * Judge the violet term by eye, or fix the tool to use a relative threshold; do not
+ * tune the apron against it.
  *
  * ── How far out this has to reach ───────────────────────────────────────────────
  *
@@ -98,6 +111,28 @@
  *
  * Do not warm the apron. If a future round wants the boundary to read harder, the lever
  * is value or silhouette, not hue.
+ *
+ * ── CONTESTED as of r5, and deliberately NOT resolved by implementing either side ──
+ *
+ * The r5 critic — the only one in this module's history with a verified in-band
+ * reference control (7 and 8; see the loop section at the bottom) — read the SAME
+ * relationship the opposite way. It agreed the fiction is right ("a stainless-steel
+ * back-of-house beyond a warm terracotta floor is a legitimate read", and it noted the
+ * cool notes already inside the play space) but judged the execution to land as an
+ * unconsidered default: "hue 208 at sat 0.30 and luminance 50-65 with no
+ * orientation-based value split is, pixel for pixel, indistinguishable from default
+ * unlit proxy geometry ... a player does not perceive stainless steel; they perceive
+ * the art stops here." Its fix was hue 28-38 at sat 0.15-0.22.
+ *
+ * Both verdicts are quoted here in full because the honest state is a TIE between one
+ * uncalibrated critic and one calibrated one, and the project's rule for that is to
+ * stop, not to implement whichever spoke last. What neither side disputes is the
+ * direction of travel: every critic across five rounds has asked for MORE separation
+ * between the two families, and three of the four axes that carry it (value, texture,
+ * silhouette) are uncontested. If you are spending a round here, spend it on those.
+ * Anyone who does decide to move the hue must re-run the fair-play argument from
+ * scratch — the cool cast is currently load-bearing for "nothing out here is cover",
+ * and warming it to hue 28-38 puts the apron into the play space's own hue family.
  *
  * The two alternatives were considered and rejected on geometry, not taste:
  *
@@ -163,14 +198,73 @@
  *
  * ── Where the loop got to, and the two things left that are NOT this file's ─────
  *
- * Four blind critic rounds, a fresh critic each time, judged in the live game at
+ * Five blind critic rounds, a fresh critic each time, judged in the live game at
  * shipped framing from legal player positions. Our score on the same west-boundary
  * frame, against a shipped-brawler reference on the other side of the sheet:
  *
- *     r1  4 / 4 / 3     hue only; crates read as cover
- *     r2  6 / 6 / 3     value cliff + texture scale + palette rebuilt on KPAL
- *     r3  6 / 6 / 5     open shelving replaces the low runs behind the boundary
- *     r4  see the loop log            ranks interlocked, kerb re-valued, posts thinned
+ *     r1  4 / 4 / 3     hue only; crates read as cover        REF 6 / 6 / 5
+ *     r2  6 / 6 / 3     value cliff + texture scale + KPAL    REF not recorded
+ *     r3  6 / 6 / 5     open shelving behind the boundary     REF not recorded
+ *     r4  see the loop log   ranks interlocked, kerb re-valued, posts thinned
+ *     r5  4 / 4         no change made — see the STOP below   REF 7 / 8
+ *
+ * ── THE LOOP IS STOPPED. Read this before spending a sixth round. ──────────────
+ *
+ * `PROGRESS.md` requires the REFERENCE side to be scored every round as a calibration
+ * control, and a round whose reference lands outside ~7-9 to be discarded as measuring
+ * the critic rather than the work. Applying that rule to this module's own history is
+ * uncomfortable and worth stating plainly:
+ *
+ *   - r1's references scored 6, 6, 5 — BELOW the band. By the project's own rule that
+ *     round should have been discarded, yet it drove the two largest rewrites here
+ *     (crates -> linear runs, and the value cliff). They both look right in the frame
+ *     and both are defended on geometry elsewhere in this file, so they stand — but
+ *     they are not the calibrated evidence they read as.
+ *   - r2, r3 and r4 never recorded a reference score at all, so NONE of them can be
+ *     calibrated after the fact.
+ *   - r5 is the only round with a verified in-band control: 7 (Brawl Stars) and
+ *     8 (Zooba), on a two-sheet packet with our frame on side A of one sheet and side
+ *     B of the other. It scored us 4 and 4, and it independently noticed the two
+ *     sheets carried the same capture and scored them identically — an internal
+ *     consistency check that the number is at least stable.
+ *
+ * r5's named #1 fix was to REVERSE the hue decision this module is built on: "replace
+ * the steel-blue albedo (hue ~208, sat 0.30) with the arena's own warm neutral (hue
+ * 28-38, sat 0.15-0.22)". That is the direct opposite of the r2 verdict quoted in the
+ * cool/warm section above, which called the cool exterior "the strongest thing about
+ * the image". Two critics reversing each other on the same axis is the documented
+ * signal to STOP rather than to implement the newer one — this project has already
+ * burned four flat rounds on `floor.ts` doing exactly that, each round implementing
+ * the previous critic's fix and the next critic demanding its reverse.
+ *
+ * So r5 changed no geometry and no colour. Its other two named mechanisms were checked
+ * against the pixels rather than implemented, and neither survived:
+ *
+ *   1. "No continuous ground plane in the lower-left — the props sit over dark violet
+ *      nothing and float." FALSE, and measured: `tools/tmp/apron_coverage.mjs` puts
+ *      apron coverage of that quadrant at 100.0%, with the service floor present under
+ *      every mass at median luma 34.7/255. The plane is continuous; the fog canopy has
+ *      crushed it to near-black. This is the project's standing "rendering but
+ *      invisible" trap arriving from the other direction — a critic reporting absence
+ *      where the thing is present and unlit — so verify before you act on it.
+ *   2. "Dead / flat, no internal relief." Not supported at the scale that matters.
+ *      `tools/tmp/apron_gradient.mjs` measures the LOW-band internal gradient over the
+ *      apron's own pixels (p90-p10 of 24px block means, blocks >=90% apron) at
+ *      0.18-0.31 on every clean edge frame, against the 0.003 that the old flat apron
+ *      quad measured and that made this trap famous. Even under the fog canopy it is
+ *      0.0825. Per-frame luma histograms agree: the service floor sits at 45-49 in the
+ *      west frame with the masses standing on it at 66 and 82, and at 61 vs ~80 in the
+ *      south frame. The critic's contrary reading came from a single local sample pair
+ *      (63.7 vs 61.1) that does not generalise.
+ *
+ * The ONE part of r5 that is real, reproducible and NOT a reversal is narrower than
+ * its verdict: rank A specifically is the tightest case in the module. Its `jitter` of
+ * 0.74 was set by measurement to protect the south-bound value cliff (see `rank(82,...)`)
+ * and the cost of that choice is that its run tops land within ~10% of the service
+ * floor's albedo — and both are horizontal, so one directional key cannot separate them
+ * either. Derived from the constants: run top ~(56,63,71) against floor ~(51,57,65) at
+ * d=82. That is a genuine trade, it is deliberate, and whoever revisits it must move
+ * BOTH numbers together or simply re-break the cliff that `jitter` exists to hold.
  *
  * Two findings from those rounds are real, were reproduced by more than one critic,
  * and cannot be answered from this file. Do not spend another apron round on them:
@@ -210,6 +304,31 @@
  * for attention" failure the value cliff exists to remove. Left alone deliberately.
  * If it is ever worth fixing, the lever is a lower bound on the canopy's alpha or a
  * contrast floor in `fogRing.ts`, which this module does not own.
+ *
+ * ── AND THE CORNERS ARE NEVER SEEN IN CLEAN LIGHT AT ALL. Not ours to fix either ──
+ *
+ * Found while trying to shoot a corner without the canopy, which turns out to be
+ * impossible in a real match. `MAX_SAFE_RADIUS` is 850 wu about the arena centre and
+ * the arena's own half-diagonal is 860, so the safe circle NEVER contains its own
+ * corners — not even at t=0 with the zone fully open. A player standing in the NW
+ * corner is 830 wu from centre, i.e. 20 wu inside the boundary at match start, and the
+ * camera reaches 470 wu further out, so essentially all corner apron is under the
+ * violet canopy for the entire match. Measured: the NW corner frame is pixel-identical
+ * at `?fogRadius=850` and `?fogRadius=4000`, because `match.ts:applyQaSetup` clamps
+ * `fogRadius / maxSafeRadius` to 1 — there is no QA route to an unfogged corner.
+ *
+ * This is DELIBERATE and already documented at the constant — `shared.ts` pulls the
+ * radius in "so the very corners start just outside the opening safe zone, matching
+ * the prototype's ratio". Do not file it as a bug. The consequence for this module is
+ * simply that it changes where the apron may be judged:
+ *
+ *   - A corner frame is judged through a 0.72-alpha near-black violet plane, so it
+ *     cannot tell you anything about hue, value or contrast. Judge apron work on the
+ *     four BOUND frames (`w_mid`, `n_mid`, `s_mid`, `spawn`) and treat the corner and
+ *     fog frames as silhouette-and-structure checks only.
+ *   - It is also why the corner frames dominate the VIOLET term of the acceptance
+ *     test while contributing almost nothing to the WARM one (0.37% and 0.18%): there
+ *     is nothing undressed out there, it is simply dark.
  *
  * ── Cost ────────────────────────────────────────────────────────────────────────
  *
