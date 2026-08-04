@@ -220,19 +220,54 @@ export function createLighting(opts?: {
   const ambient = new THREE.AmbientLight(0xffffff, 0.025);
   group.add(ambient);
 
+  // ── The focus point is QUANTISED, and that is load-bearing ─────────────────
+  //
+  // `match.ts` calls `focus()` every frame with the player's exact position, so the
+  // shadow frustum used to translate by a fraction of a texel 60 times a second.
+  // Two consequences, one cosmetic and one now structural:
+  //
+  //  * COSMETIC: a sub-texel slide re-rasterises every shadow edge in the arena
+  //    against a slightly different grid each frame, which is the classic shadow
+  //    "swim" — static cover whose ink edge crawls while the player walks.
+  //  * STRUCTURAL: `Stage` no longer re-renders the shadow map unconditionally
+  //    (`shadowMap.autoUpdate = false`); it re-renders when something that the map
+  //    depends on has changed. A frustum that moves every frame makes that test
+  //    always true, so the whole saving would evaporate on a stationary scene.
+  //
+  // Snapping to whole multiples of `SNAP_TEXELS` shadow texels fixes both. The
+  // quantum is derived from the live frustum, so it is 4 * 68m / 2048 = 13.3 cm in a
+  // match and proportionally finer in every closer preview framing. The cost is that
+  // the box centre can sit up to half a quantum (6.6 cm) off the player, against
+  // `MATCH_SHADOW_RADIUS_M`'s own 3.7 m of derived margin — three orders of
+  // magnitude of headroom.
+  //
+  // This is a WORLD-space snap, not an exact light-space texel snap (which would
+  // need the light basis and buys the last few percent of stability). Stated plainly
+  // because the difference matters if anyone chases the residual shimmer further.
+  const SNAP_TEXELS = 4;
+  let lastX = NaN;
+  let lastZ = NaN;
+  let lastR = NaN;
+
   const focus = (x: number, z: number, radius = shadowRadius) => {
     const cam = key.shadow.camera;
     // Clamped, not trusted: see `MATCH_SHADOW_RADIUS_M`. `match.ts` asks for 30.
     const r = Math.max(radius, minFocusRadius);
+    const step = (SNAP_TEXELS * 2 * r) / mapSize;
+    const sx = Math.round(x / step) * step;
+    const sz = Math.round(z / step) * step;
+    if (sx === lastX && sz === lastZ && r === lastR) return;
+    lastX = sx; lastZ = sz; lastR = r;
+
     cam.left = -r;
     cam.right = r;
     cam.top = r;
     cam.bottom = -r;
     cam.updateProjectionMatrix();
-    key.target.position.set(x, 0, z);
+    key.target.position.set(sx, 0, sz);
     // Must stay identical to the authored offset above — this is the one that actually
     // runs in a match, since `focus()` is called every frame.
-    key.position.set(x + 16.35, 9.82, z + 4.69);
+    key.position.set(sx + 16.35, 9.82, sz + 4.69);
     key.target.updateMatrixWorld();
   };
   focus(0, 0, shadowRadius);

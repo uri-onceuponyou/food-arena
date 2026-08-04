@@ -14,6 +14,7 @@ import {
 } from 'postprocessing';
 import { CameraRig, SUPPORTED_ASPECT, type CameraRigOptions } from './camera';
 import { createLighting, MATCH_SHADOW_RADIUS_M, type LightingRig } from './lighting';
+import { renderTier } from './toon';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE GRADE — a saturation curve that cannot clip a channel
@@ -214,8 +215,34 @@ export interface StageOptions {
   background?: THREE.ColorRepresentation;
   /** Distance fog tint. Set null to disable. */
   fog?: { color: THREE.ColorRepresentation; near: number; far: number } | null;
-  postFx?: boolean;
+  /**
+   * Post chain. `true` is the full chain; `false` skips the composer entirely.
+   *
+   * `'grade'` is the cheap middle: `ToyGradeEffect` + vignette in ONE `EffectPass`,
+   * with no bloom and no SMAA. It exists because the grade IS the look — ablation
+   * puts it at mean 19.39/255 over 99.99% of pixels for zero extra draw calls, since
+   * it merges into a pass that has to run anyway — while bloom and SMAA are 19 of
+   * the post chain's 20 draws and ~85% of its fill. Anything that renders a
+   * thumbnail or an offscreen plate wants the colour identity without the cost.
+   */
+  postFx?: boolean | 'grade';
   shadows?: boolean;
+  /**
+   * Shadow map resolution. Defaults to a DENSITY, not a constant — see the
+   * derivation in the constructor. Pass a number only to pin it.
+   */
+  shadowMapSize?: number;
+  /**
+   * Demote shadow casters whose world radius is smaller than this many shadow-map
+   * texels. Default 2.5; 0 disables. See `auditShadowCaster`.
+   */
+  shadowCasterMinTexels?: number;
+  /**
+   * This Stage renders offscreen and is never the thing on screen — a thumbnail
+   * generator, a plate renderer. It stays out of the `window.__stage` QA slot so a
+   * probe never measures it by accident.
+   */
+  offscreen?: boolean;
   /** Image-based lighting. On by default — it is what gives surfaces their sheen. */
   environment?: boolean;
   environmentIntensity?: number;
@@ -229,22 +256,75 @@ export interface StageOptions {
   maxPixelRatio?: number;
 }
 
+/**
+ * Every Stage ever built that has not been disposed.
+ *
+ * `window.__stage` used to be a single slot assigned by each constructor, so the
+ * LAST Stage built won — which on a menu is `thumbs.ts`'s offscreen generator, and
+ * that one then disposes itself. Every QA probe reading `__stage` on a menu route
+ * was therefore reading a DEAD Stage: `tools/perf.mjs` duly reported the trophy road
+ * as a 448x448 buffer with 0 meshes and shadows off, which describes the thumbnail
+ * generator's corpse and not the screen.
+ *
+ * The slot is now a getter over this registry, preferring a live Stage that is
+ * actually on screen. `tools/perf.mjs` installs an identical shim before the app
+ * boots; when it does, `ensureRegistry` finds `__stages` already present and leaves
+ * it alone, so the two cannot fight.
+ */
+const STAGES: Stage[] = [];
+
+function canvasOnScreen(stage: Stage): boolean {
+  const c = stage.canvas;
+  if (!c?.isConnected) return false;
+  // `isConnected` is not enough: `thumbs.ts` parks its generator host at
+  // left:-9999px, which is connected, laid out and 448 px wide. Only an intersection
+  // with the viewport tells the two apart.
+  const r = c.getBoundingClientRect();
+  return r.width > 1 && r.height > 1 && r.right > 0 && r.bottom > 0
+    && r.left < window.innerWidth && r.top < window.innerHeight;
+}
+
+function ensureRegistry(): void {
+  if (typeof window === 'undefined') return;
+  const w = window as unknown as { __stages?: unknown };
+  if (w.__stages) return; // a probe already installed its own registry
+  w.__stages = STAGES;
+  Object.defineProperty(window, '__stage', {
+    configurable: true,
+    get() {
+      const live = STAGES.filter((s) => !s.disposed && !s.offscreen);
+      return live.filter(canvasOnScreen).pop() ?? live.pop()
+        ?? STAGES.filter((s) => !s.disposed).pop();
+    },
+    set() { /* registration happens in the constructor */ },
+  });
+}
+
 export class Stage {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene: THREE.Scene;
   readonly rig: CameraRig;
   readonly lighting: LightingRig;
   readonly canvas: HTMLCanvasElement;
+  /** True once `dispose()` has run. Read by QA probes to skip dead stages. */
+  disposed = false;
+  /** Never the thing on screen — see `StageOptions.offscreen`. */
+  readonly offscreen: boolean;
   private composer: EffectComposer | null = null;
   private container: HTMLElement;
-  private disposed = false;
   private envMap: THREE.Texture | null = null;
   private useAO = false;
+  private shadowsOn = false;
+  /** Fingerprint of everything the shadow map depends on, from the last frame. */
+  private shadowSig = -1;
+  private shadowCasterMinTexels: number;
   /** The colour grade, exposed so a probe can sweep it without a rebuild. */
   grade: ToyGradeEffect | null = null;
 
   constructor(opts: StageOptions = {}) {
     this.useAO = opts.ao === true;
+    this.offscreen = opts.offscreen === true;
+    this.shadowCasterMinTexels = opts.shadowCasterMinTexels ?? 2.5;
     this.container = opts.container ?? document.body;
     this.canvas = opts.canvas ?? document.createElement('canvas');
     if (!this.canvas.parentElement) this.container.appendChild(this.canvas);
@@ -260,9 +340,30 @@ export class Stage {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, opts.maxPixelRatio ?? 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping; // handled in post
+    // ── The shadow map does NOT re-render every frame any more ────────────────
+    //
+    // `shadowMap.autoUpdate` was never set, so it was three's default `true` and the
+    // WHOLE shadow map re-rendered on every single frame. Measured in a live match
+    // at 1300x740 with `renderer.info.autoReset = false` (the only way to read a
+    // post-processed frame's real total — see `tools/tmp/perfpass_probe.mjs`):
+    //
+    //   frame with the shadow pass ....... 692 draws
+    //   same frame, shadow map frozen .... 390 draws
+    //   => the shadow pass IS 302 draws, 43.6% of the whole frame
+    //
+    // ...for an arena that does not move. `render()` now recomputes the map only
+    // when something it depends on has actually changed. Read `scheduleShadowUpdate`
+    // before assuming that means "only when the player moves": the honest accounting
+    // is that during play the two fighters move every frame and each is ~85 casters,
+    // so a match still pays most of this. What it removes is every frame where
+    // nothing moves — menus, the results overlay, thumbnail and preview plates — and
+    // it is what makes the focus quantisation in `lighting.ts` worth anything.
     if (opts.shadows !== false) {
+      this.shadowsOn = true;
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.shadowMap.autoUpdate = false;
+      this.renderer.shadowMap.needsUpdate = true;
     }
 
     this.scene = new THREE.Scene();
@@ -276,9 +377,23 @@ export class Stage {
     // The shadow box only has to cover a whole ultrawide game viewport in an actual
     // match; every preview framing is closer and focuses its own tighter box, so
     // forcing the match minimum on those would only coarsen their shadows.
-    this.lighting = createLighting(
-      this.rig.frameMode === 'fair' ? { minFocusRadius: MATCH_SHADOW_RADIUS_M } : undefined,
-    );
+    const isMatch = this.rig.frameMode === 'fair';
+    const subject = this.rig.frameMode === 'subject';
+    this.lighting = createLighting({
+      minFocusRadius: isMatch ? MATCH_SHADOW_RADIUS_M : undefined,
+      // A subject framing is ONE character on a pedestal at the origin. The rig's
+      // 22 m default box was sized for a ground framing, and at the key's 30° the
+      // longest shadow a 2.5 m character throws is ~4.3 m — so 8 m is generous and
+      // the other 14 were spending texels on empty floor. This is what makes 1024
+      // safe below: 1024 across 16 m is 64 texels/m, DOUBLE the 30.1 texels/m the
+      // shipped match renders at, off a quarter of the memory.
+      shadowRadius: subject ? 8 : undefined,
+      shadowMapSize: opts.shadowMapSize ?? this.defaultShadowMapSize(isMatch),
+    });
+    // Casters are only culled by size in an actual match — see `auditShadowCaster`.
+    // Every other framing is a review plate or a menu portrait: closer, denser, and
+    // the place where somebody is deliberately looking for small detail.
+    if (!isMatch) this.shadowCasterMinTexels = opts.shadowCasterMinTexels ?? 0;
     this.scene.add(this.lighting.group);
 
     // ── Image-based lighting ─────────────────────────────────────────────────
@@ -315,7 +430,10 @@ export class Stage {
     // keep — in fact sharpen — the crisp reflected highlight that sells moulded vinyl.
     if (opts.environment !== false) {
       const pmrem = new THREE.PMREMGenerator(this.renderer);
-      pmrem.compileEquirectangularShader();
+      // NOT `compileEquirectangularShader()`. That warms the equirect-to-cubemap
+      // material, which `fromScene` never touches — it renders the scene into the
+      // cube faces directly. It was one wasted program link per Stage, and a program
+      // link is a synchronous 10-60 ms stall on a mobile driver.
       const envScene = buildGradientEnvironment();
       this.envMap = pmrem.fromScene(envScene, 0.035).texture;
       this.scene.environment = this.envMap;
@@ -329,20 +447,65 @@ export class Stage {
       pmrem.dispose();
     }
 
-    if (opts.postFx !== false) this.buildPost();
+    if (opts.postFx !== false) this.buildPost(opts.postFx === 'grade');
     this.resize();
 
     // QA-only handle, same spirit as match.ts's `__vfxDebug*`. Never read by game
     // code — it exists so a Playwright probe can measure the post chain and toggle
     // scene layers (e.g. the arena's baked shadow decals) without a rebuild.
     if (typeof window !== 'undefined') {
-      (window as unknown as { __stage?: Stage }).__stage = this;
+      ensureRegistry();
+      STAGES.push(this);
+      // If a probe installed its own registry first, its `__stage` setter is what
+      // does the registering. Assigning is a no-op against our own getter.
+      try { (window as unknown as { __stage?: Stage }).__stage = this; } catch { /* our getter is read-only */ }
     }
   }
 
-  private buildPost(): void {
+  /**
+   * Shadow map size, as a DENSITY rather than a constant.
+   *
+   * It was a flat 2048 for every Stage in the project, which is 16 MB of render
+   * target — and the menus and the thumbnail generator were each paying it for a
+   * character framed at 5 m. The match's own density is the reference point:
+   * 2048 texels across a 68 m box is 30.1 texels/m, and that is the number every
+   * shadow in the game has been judged at.
+   *
+   *   match (r = 34 m) ............ 2048 @ 30.1 texels/m — exactly what shipped
+   *   arena preview (r = 30 m) .... 2048 (unchanged — prop loops judge here)
+   *   floor preview (r = 16 m) .... 2048 (unchanged)
+   *   subject framings (r = 8 m) .. 1024 @ 64 texels/m, i.e. SHARPER than before
+   *                                 (2048 over the rig's old 22 m box was 46.5) for
+   *                                 a quarter of the memory
+   *
+   * That covers the menu portrait, `preview.html?piece=character`, and anything else
+   * framing a single subject. Ground-framed plates keep 2048 outright: they are what
+   * the prop and floor loops are judged on, and a review harness that renders softer
+   * than the game is a harness that lies. On the `low` tier the whole scale halves —
+   * a phone gets 4 MB instead of 16, on a screen a third of the size the density was
+   * chosen for.
+   */
+  private defaultShadowMapSize(isMatch: boolean): number {
+    const tierScale = renderTier() === 'low' ? 0.5 : 1;
+    const base = !isMatch && this.rig.frameMode === 'subject' ? 1024 : 2048;
+    return Math.max(512, Math.round(base * tierScale));
+  }
+
+  private buildPost(gradeOnly: boolean): void {
+    const lowTier = renderTier() === 'low';
+    // Antialiasing, and WHICH kind, is decided here rather than at the SMAA pass.
+    //
+    // `antialias: true` on the renderer does nothing once a composer exists — the
+    // scene is drawn into the composer's own buffer, not the default framebuffer —
+    // so SMAA has been carrying all of it. SMAA is 3 draws but 2.89 Mpx of fill,
+    // 53% of the whole post chain, plus two LUT textures and two program links.
+    // Where it is not worth that, hardware MSAA on the composer's buffer is: it
+    // resolves on-chip on every tile-based mobile GPU and costs no pass, no program
+    // and no texture.
+    const msaa = gradeOnly || lowTier ? 4 : 0;
     const composer = new EffectComposer(this.renderer, {
       frameBufferType: THREE.HalfFloatType,
+      multisampling: msaa,
     });
     composer.addPass(new RenderPass(this.scene, this.rig.camera));
 
@@ -401,7 +564,9 @@ export class Stage {
       });
     }
 
-    // Bloom only on genuinely hot highlights. The threshold is high on purpose:
+    // ── Bloom — kept, and here is why, because it was on the block ────────────
+    //
+    // Bloom only fires on genuinely hot highlights. The threshold is high on purpose:
     // at 0.72 it was haloing plain white geometry (sesame seeds glowed like LEDs).
     // Reopened slightly, 0.88 -> 0.80, once the grade's highlight shoulder stopped
     // large pale surfaces from sitting at the top of the range: the threshold is in
@@ -409,7 +574,30 @@ export class Stage {
     // reach it. Worth the 0.08 because the bleed is also what lifts the deepest
     // shadows without flattening anything (measured p05 luminance 0.218 -> 0.241),
     // and every reference plate has visible bloom while ours had none.
-    const bloom = new BloomEffect({
+    //
+    // THE COST CASE AGAINST IT, and what re-measuring actually found. The perf pass
+    // put bloom at 16 draws and 1.6 Mpx of fill per frame for mean 0.1132/255 over
+    // 0.64% of pixels at the brightest matchup, and called it "the SSAO of this
+    // chain". SSAO was EXACTLY 0.0000/255 over 0.00% of pixels, at every framing in
+    // the project. Bloom is not that, and that difference is the whole argument:
+    // 0.1132 is small, but it is a real thing happening in the places the art
+    // direction cares about most.
+    //
+    // The obvious cheapening was tried and REJECTED on measurement. Dropping the
+    // mipmap chain from 8 levels to 5 saves 6 draws and ~0.4 Mpx — and moves the
+    // image by mean 0.0729/255 (max 176) on the arena plate and 0.2900/255 on the
+    // character plate. Those are the same order as bloom's ENTIRE contribution, i.e.
+    // three quarters of the cheapening's saving comes out of the effect's actual
+    // output, because the wide top levels are what a soft halo IS. Six draws of 692
+    // is 0.9% of a frame; this project's rule is that a perf win which changes the
+    // look is not a win, and 0.9% does not buy an exception.
+    //
+    // So bloom ships unchanged on the `high` tier, and on `low` it goes ENTIRELY:
+    // 16 draws and 30% of the post chain's fill is the wrong thing for a phone to
+    // spend on 0.64% of pixels, and this is a decision about which device pays,
+    // not a re-tune of a look that was arrived at deliberately. The grade — 99.99%
+    // of pixels for zero extra draws — is untouched on both.
+    const bloom = gradeOnly || lowTier ? null : new BloomEffect({
       intensity: 0.30,
       luminanceThreshold: 0.80,
       luminanceSmoothing: 0.20,
@@ -438,11 +626,18 @@ export class Stage {
       blendFunction: BlendFunction.NORMAL,
     });
 
-    const effects = ssao
-      ? [ssao, bloom, grade, vignette]
-      : [bloom, grade, vignette];
+    const effects: Effect[] = [];
+    if (ssao) effects.push(ssao);
+    if (bloom) effects.push(bloom);
+    effects.push(grade, vignette);
     composer.addPass(new EffectPass(this.rig.camera, ...effects));
-    composer.addPass(new EffectPass(this.rig.camera, new SMAAEffect()));
+
+    // SMAA where it earns its fill; 4x MSAA (set on the composer above) everywhere
+    // else. Not "no antialiasing" — a hyper-saturated toy palette against a dark
+    // floor is exactly the content that shows stair-stepping worst.
+    if (!gradeOnly && !lowTier) {
+      composer.addPass(new EffectPass(this.rig.camera, new SMAAEffect()));
+    }
     this.composer = composer;
   }
 
@@ -491,13 +686,196 @@ export class Stage {
   render(dtSeconds: number): void {
     if (this.disposed) return;
     this.rig.update(dtSeconds);
+    if (this.shadowsOn) this.scheduleShadowUpdate();
     if (this.composer) this.composer.render(dtSeconds);
     else this.renderer.render(this.scene, this.rig.camera);
   }
 
+  /** Force the shadow map to re-render on the next frame. For a caller that changes
+   *  something the fingerprint below cannot see — a geometry rewritten in place, a
+   *  material's alpha test, a light re-coloured. */
+  markShadowsDirty(): void {
+    this.renderer.shadowMap.needsUpdate = true;
+    this.shadowSig = -1;
+  }
+
+  /**
+   * Decide whether the shadow map has to be re-rendered this frame.
+   *
+   * ── Why a fingerprint and not a timer ────────────────────────────────────────
+   * Every cheaper policy is wrong in a way that shows. A fixed cadence ("every other
+   * frame") makes the shadow trail the character by a frame, which is exactly the
+   * artefact a shadow exists to prevent. A "player moved" test misses the enemy, the
+   * idle bob, and every VFX caster. So this hashes the things the shadow map is a
+   * pure function of — the shadow frustum, and the world matrix and visibility of
+   * every caster — and re-renders when that changes. No lag, ever.
+   *
+   * Matrices are brought up to date FIRST, deliberately. The decision has to be made
+   * before `renderer.render()` runs the shadow pass, and reading last frame's
+   * matrices would reintroduce the one-frame lag the fingerprint exists to avoid.
+   * `updateMatrixWorld` is idempotent, so the renderer's own call a moment later
+   * finds nothing dirty.
+   *
+   * WHAT THIS DOES NOT CATCH, stated so nobody has to rediscover it: a caster whose
+   * GEOMETRY is rewritten in place without its matrix moving. Nothing in the game
+   * does that today — `fogRing` and the VFX meshes that rewrite `position` buffers
+   * all have `castShadow = false` — and `markShadowsDirty()` is the escape hatch if
+   * that ever changes.
+   */
+  private scheduleShadowUpdate(): void {
+    this.scene.updateMatrixWorld();
+
+    const cam = this.lighting.key.shadow.camera;
+    const key = this.lighting.key;
+    let h = 2166136261;
+    const mix = (v: number): void => { h = Math.imul(h ^ (v | 0), 16777619); };
+    // 1 mm quantisation: finer than a shadow texel by a factor of 30, so this cannot
+    // hide a movement that would change a single texel of the map.
+    const mixF = (v: number): void => mix(Math.round(v * 1000));
+
+    mixF(cam.left); mixF(cam.right); mixF(cam.top); mixF(cam.bottom);
+    mixF(cam.near); mixF(cam.far);
+    mixF(key.position.x); mixF(key.position.y); mixF(key.position.z);
+    mixF(key.target.position.x); mixF(key.target.position.y); mixF(key.target.position.z);
+
+    const minRadius = this.shadowCasterMinTexels > 0
+      ? this.shadowCasterMinTexels * ((cam.right - cam.left) / Math.max(1, key.shadow.mapSize.x))
+      : 0;
+
+    // `traverseVisible` and not `traverse`: three's shadow pass stops descending at
+    // an invisible node, so an object under a hidden parent contributes nothing and
+    // must not contribute to the fingerprint either.
+    this.scene.traverseVisible((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.castShadow) return;
+      if (minRadius > 0 && this.auditShadowCaster(m, minRadius)) return;
+      const e = m.matrixWorld.elements;
+      mix(m.id);
+      mixF(e[12]); mixF(e[13]); mixF(e[14]);
+      mixF(e[0]); mixF(e[2]); mixF(e[5]); mixF(e[8]); mixF(e[10]);
+    });
+
+    if (h !== this.shadowSig) {
+      this.shadowSig = h;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+  }
+
+  /**
+   * Demote a caster whose shadow cannot resolve on this shadow map. Returns true if
+   * it was demoted.
+   *
+   * The threshold is expressed in SHADOW TEXELS, not metres, so it scales with the
+   * map: 2.5 texels is 8.3 cm of world radius in a match (68 m across 2048). An
+   * object below it covers under five texels across — and `lighting.ts` runs
+   * `shadow.radius = 0.4` PCF soft filtering on top, which smears a five-texel blob
+   * into nothing.
+   *
+   * Measured on a live match: 109 of the 636 casters fall under 8 cm — sesame seeds,
+   * chopped-veg cubes, mitt studs — and demoting them takes the frame from 692 to
+   * 625 draws, 9.7%, every frame.
+   *
+   * MATCH FRAMING ONLY, and that restriction is the result of a measurement, not
+   * caution. Run on `preview.html?piece=character` — a plate that never calls
+   * `focus()`, so it keeps the rig's whole default box — the same 2.5 texels became
+   * an 11 cm threshold and started eating the lettuce and the patty, and the
+   * character lost its self-shadowing (0.98/255 over 5.1% of the plate, and
+   * obviously wrong to look at). A review plate is exactly where someone is hunting
+   * for small detail, so it pays for all of it.
+   *
+   * Audited once per mesh and cached: the traversal above only reaches meshes that
+   * still cast, so a demoted one is never re-examined.
+   */
+  private auditShadowCaster(m: THREE.Mesh, minRadius: number): boolean {
+    if (m.userData.__shadowLod) return false;
+    m.userData.__shadowLod = 1;
+    const geo = m.geometry;
+    if (!geo) return false;
+    if (!geo.boundingSphere) geo.computeBoundingSphere();
+    const r = geo.boundingSphere?.radius;
+    if (!r) return false;
+    const e = m.matrixWorld.elements;
+    const scale = Math.max(
+      Math.hypot(e[0], e[1], e[2]),
+      Math.hypot(e[4], e[5], e[6]),
+      Math.hypot(e[8], e[9], e[10]),
+    );
+    if (r * scale >= minRadius) return false;
+    m.castShadow = false;
+    return true;
+  }
+
+  /**
+   * Tear the Stage down completely — and, crucially, RELEASE THE GL CONTEXT.
+   *
+   * ── The bug this fixes was a white screen, not a frame rate ──────────────────
+   * `dispose()` used to be `composer.dispose(); renderer.dispose();`. Neither of
+   * those releases a WebGL context: three's `dispose()` removes its event listeners
+   * and empties its own caches, and that is all. Measured over
+   * home -> match -> home -> match -> home (`tools/perf.mjs --mode leak`):
+   *
+   *   6 contexts created, 6 LIVE, 0 lost, +1 orphan DOM canvas per round trip,
+   *   heap +5.4 MB per cycle
+   *
+   * Chrome caps a process at ~16 live contexts and mobile Safari lower, and when the
+   * cap is hit the browser kills the OLDEST context — so the symptom is not "the
+   * ninth match fails", it is "the menu portrait you left behind goes black, and
+   * later the match does". Roughly eight menu/match round trips of ordinary play.
+   *
+   * The four things that were missing, in the order they have to happen:
+   *   1. dispose the scene's own GPU resources while the context is still alive;
+   *   2. dispose the PMREM environment map, which is a render target and is NOT
+   *      reachable from the scene graph once `scene.environment` is cleared;
+   *   3. `renderer.forceContextLoss()` — the ONLY thing that actually hands the
+   *      context back, via `WEBGL_lose_context`;
+   *   4. remove the canvas from the DOM, or the orphan keeps its backing store.
+   */
   dispose(): void {
+    if (this.disposed) return;
     this.disposed = true;
+
     this.composer?.dispose();
+    this.composer = null;
+    this.grade = null;
+
+    // three disposes NOTHING for you on teardown — not a geometry, not a material,
+    // not a texture. Walk it once, de-duplicated, because materials and their maps
+    // are shared across hundreds of meshes here (the arena's palette, `toon.ts`'s
+    // one outline material per group).
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    this.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh && !(o as THREE.Points).isPoints && !(o as THREE.Line).isLine) return;
+      if (m.geometry) geometries.add(m.geometry);
+      const mat = m.material;
+      if (Array.isArray(mat)) for (const x of mat) materials.add(x);
+      else if (mat) materials.add(mat);
+    });
+    for (const g of geometries) g.dispose();
+    for (const mat of materials) {
+      for (const v of Object.values(mat as unknown as Record<string, unknown>)) {
+        if (v && (v as THREE.Texture).isTexture) (v as THREE.Texture).dispose();
+      }
+      mat.dispose();
+    }
+    this.scene.clear();
+
+    // Reachable from nothing else once the scene is cleared: `PMREMGenerator` hands
+    // back a render-target texture, and 16 MB of shadow map lives on the light.
+    this.scene.environment = null;
+    this.scene.background = null;
+    this.envMap?.dispose();
+    this.envMap = null;
+    this.lighting.key.shadow.dispose();
+
     this.renderer.dispose();
+    // The line that fixes the leak. Must come after `dispose()`, which detaches the
+    // context-lost handler that would otherwise log and set `_isContextLost`.
+    this.renderer.forceContextLoss();
+    this.canvas.remove();
+
+    const i = STAGES.indexOf(this);
+    if (i >= 0) STAGES.splice(i, 1);
   }
 }

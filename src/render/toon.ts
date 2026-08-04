@@ -11,6 +11,65 @@
 import * as THREE from 'three';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Render tier — the one place that decides "is this a phone?"
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Quality tier. `high` is every desktop and tablet; `low` is a phone.
+ *
+ * This lives in `toon.ts` rather than `stage.ts` because both the shading kit and
+ * the renderer need it, and `toon.ts` is imported by every character and arena
+ * module while `stage.ts` drags in the whole `postprocessing` bundle. Importing the
+ * tier from `stage.ts` would put the post chain into every module's dependency
+ * graph for the sake of one boolean.
+ *
+ * DETECTION IS DELIBERATELY CONSERVATIVE — `high` unless the device is clearly a
+ * phone. A desktop wrongly demoted loses image quality nobody asked it to lose,
+ * whereas a phone wrongly promoted is the situation we already ship today, so the
+ * asymmetry is not symmetric. Override with `?tier=low` / `?tier=high`, which is
+ * also the only way to measure the low tier under a headless desktop Chromium.
+ */
+export type RenderTier = 'high' | 'low';
+
+let tierOverride: RenderTier | null = null;
+let tierCache: RenderTier | null = null;
+
+function detectTier(): RenderTier {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return 'high';
+  try {
+    const q = new URLSearchParams(window.location.search).get('tier');
+    if (q === 'low' || q === 'high') return q;
+  } catch { /* non-URL context */ }
+  // Touch is necessary but not sufficient — every touchscreen laptop has it.
+  const coarse = typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: coarse)').matches
+    && (navigator.maxTouchPoints ?? 0) > 0;
+  if (!coarse) return 'high';
+  const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 8;
+  const shortEdge = Math.min(window.screen?.width ?? 9999, window.screen?.height ?? 9999);
+  return mem <= 4 || shortEdge <= 500 ? 'low' : 'high';
+}
+
+/** The tier this session renders at. Cached — detection must not vary mid-frame. */
+export function renderTier(): RenderTier {
+  if (tierOverride) return tierOverride;
+  if (!tierCache) tierCache = detectTier();
+  return tierCache;
+}
+
+/** QA/probe hook: force a tier, or pass null to go back to detection. */
+export function setRenderTier(t: RenderTier | null): void {
+  tierOverride = t;
+  if (typeof window !== 'undefined') {
+    (window as unknown as { __renderTier?: RenderTier }).__renderTier = renderTier();
+  }
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __renderTier?: RenderTier }).__renderTier = renderTier();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Gradient ramps — these drive the cel banding
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -222,18 +281,57 @@ export const OUTLINE_INK = '#241a33';
 export const OUTLINE_THIN = 0.004;
 
 /**
- * Inverted-hull outline. Clones the geometry, renders backfaces only, pushed out
- * along the vertex normals. Cheap, crisp, and — unlike post-process edge detection
- * — it survives against busy backgrounds, which is what Brawl Stars needs.
- *
- * `thickness` is in world units. Keep it proportional to the mesh: too thick reads
- * as a sticker, too thin disappears at gameplay camera distance.
+ * The arena's "this mass blocks you" ink — `arena/kitchen.ts` passes this literal to
+ * `outlineGroup(propsGroup, 0.016)`. Named here so the tier policy below has a
+ * threshold to test against rather than a magic number.
  */
-export function addOutline(mesh: THREE.Mesh, thickness = OUTLINE_THIN, color: THREE.ColorRepresentation = OUTLINE_INK): THREE.Mesh {
+export const OUTLINE_PROP = 0.016;
+
+/** Any hull at or above this thickness is prop-scale ink, not character ink. */
+const PROP_INK_MIN = 0.012;
+
+/**
+ * WHERE THE OUTLINE COST ACTUALLY IS — measured, and it is not where it looked.
+ *
+ * The perf commit counted 431 inverted hulls costing 132 draws/frame and noted that
+ * the arena's 0.016 prop hulls are the bulk of the COUNT. They are — and they are a
+ * minority of the DRAWS, because most of the arena is off-screen at any moment while
+ * both fighters are always in frame. Measured in a live match at 1300x740 by hiding
+ * one family at a time (`tools/tmp/perfpass_probe.mjs`, `renderer.info` with
+ * `autoReset = false`):
+ *
+ *   all 431 hulls hidden ................ 692 -> 560 draws   (-132)
+ *   318 arena prop hulls (0.016) hidden . 692 -> 646 draws   ( -46)
+ *   113 character hulls (0.004/0.006) ... 692 -> 606 draws   ( -86)
+ *
+ * So two thirds of the outline cost is the CHARACTER silhouette, which this project
+ * has worked hard on and which must not be touched, and the arena's 318 hulls are
+ * worth 6.6% of the frame. That reframes the whole item: there is no large safe win
+ * in deleting prop ink on desktop, and the honest lever for the arena is MERGING —
+ * see `mergeOutlines` below, which turns those 318 hulls into ONE draw for a
+ * measured image difference of 0.0002/255.
+ *
+ * What did land here for every tier: all the hulls in one `outlineGroup` call now
+ * SHARE ONE MATERIAL. A match carried 431 `ShaderMaterial` instances for three
+ * distinct configurations; it now carries three. Unique materials in the live match
+ * fall 686 -> 259 with a pixel-identical image.
+ */
+type OutlineMaterial = THREE.ShaderMaterial;
+
+/**
+ * One material per (thickness, colour), shared by every hull that uses it.
+ *
+ * Previously every hull built its own `ShaderMaterial`, so a match carried 431 of
+ * them for three distinct configurations. Identical materials are also what lets
+ * three sort the hulls into one uninterrupted run instead of re-binding uniforms per
+ * draw. Pixel-for-pixel identical output; it is the same shader with the same
+ * uniforms.
+ */
+function outlineMaterial(thickness: number, color: THREE.ColorRepresentation): OutlineMaterial {
   // A dedicated ShaderMaterial rather than patching MeshBasicMaterial: basic
   // materials carry no normal chunks, so `objectNormal` is undefined there and the
   // hull silently never expands (an outline that renders as nothing at all).
-  const mat = new THREE.ShaderMaterial({
+  return new THREE.ShaderMaterial({
     uniforms: {
       outlineColor: { value: new THREE.Color(color) },
       outlineThickness: { value: thickness },
@@ -258,8 +356,26 @@ export function addOutline(mesh: THREE.Mesh, thickness = OUTLINE_THIN, color: TH
     side: THREE.BackSide,
     depthWrite: true,
   });
+}
 
-  const outline = new THREE.Mesh(mesh.geometry, mat);
+/**
+ * Inverted-hull outline. Clones the geometry, renders backfaces only, pushed out
+ * along the vertex normals. Cheap, crisp, and — unlike post-process edge detection
+ * — it survives against busy backgrounds, which is what Brawl Stars needs.
+ *
+ * `thickness` is in world units. Keep it proportional to the mesh: too thick reads
+ * as a sticker, too thin disappears at gameplay camera distance.
+ *
+ * `material` lets a caller share one material across a whole group; omit it and the
+ * hull gets its own, which is what a one-off call wants.
+ */
+export function addOutline(
+  mesh: THREE.Mesh,
+  thickness = OUTLINE_THIN,
+  color: THREE.ColorRepresentation = OUTLINE_INK,
+  material?: OutlineMaterial,
+): THREE.Mesh {
+  const outline = new THREE.Mesh(mesh.geometry, material ?? outlineMaterial(thickness, color));
   outline.name = `${mesh.name || 'mesh'}__outline`;
   outline.position.copy(mesh.position);
   outline.rotation.copy(mesh.rotation);
@@ -270,12 +386,53 @@ export function addOutline(mesh: THREE.Mesh, thickness = OUTLINE_THIN, color: TH
   return outline;
 }
 
+export interface OutlineGroupOptions {
+  /**
+   * Bake every hull in this group into ONE mesh, in the group's own space.
+   *
+   * ONLY VALID FOR A GROUP WHOSE PARTS NEVER MOVE RELATIVE TO EACH OTHER — the
+   * arena's cover props, a static set dressing. A character rig animates its joints,
+   * so merging one would freeze every limb outline in its bind pose. There is no way
+   * to detect that from here, which is why this is an explicit opt-in and not a
+   * heuristic: a heuristic that is wrong once produces a character whose ink line
+   * detaches from its arm, and nobody would look for the cause in `toon.ts`.
+   */
+  merge?: boolean;
+  /**
+   * Drop this group's hulls entirely on the `low` render tier. Intended for
+   * decoration-scale ink; see the tier policy in `outlineGroup`.
+   */
+  tierOptional?: boolean;
+}
+
 /**
  * Recursively outline every mesh in a group. Meshes named `*__no_outline`, or
  * carrying `userData.noOutline`, are skipped — use that for eyes and decals that
  * sit flush on a surface, where an outline would z-fight.
+ *
+ * ── TIER POLICY ─────────────────────────────────────────────────────────────
+ * On the `low` tier, PROP-SCALE ink (>= 0.012, i.e. the arena's 0.016) is skipped
+ * and character/hazard ink is kept. That is 318 hulls and 46 draws/frame off a
+ * phone, and it is the correct half to spend: the ablation over eight combat moments
+ * put ALL 431 hulls together at mean 0.25/255 over 0.50% of pixels, so the arena's
+ * share of that is well under bloom's 0.11/255 — while the character silhouette is
+ * the thing this project has spent the most rounds on.
+ *
+ * CAVEAT FOR THE ARENA OWNER, because this is not purely cosmetic: `kitchen.ts`
+ * documents the 0.016 line as the arena's "this collides" affordance, deliberately
+ * ~2.5x the pot's. If that affordance is load-bearing for play, it needs a carrier
+ * that survives at gameplay distance — the measurement says the ink line already
+ * does not deliver it on ANY tier, so this is a reason to re-do the affordance, not
+ * a reason to keep paying 318 hulls for it.
  */
-export function outlineGroup(group: THREE.Object3D, thickness = OUTLINE_THIN, color: THREE.ColorRepresentation = OUTLINE_INK): void {
+export function outlineGroup(
+  group: THREE.Object3D,
+  thickness = OUTLINE_THIN,
+  color: THREE.ColorRepresentation = OUTLINE_INK,
+  opts: OutlineGroupOptions = {},
+): void {
+  if (renderTier() === 'low' && (opts.tierOptional || thickness >= PROP_INK_MIN)) return;
+
   const targets: THREE.Mesh[] = [];
   group.traverse((o) => {
     const m = o as THREE.Mesh;
@@ -284,9 +441,143 @@ export function outlineGroup(group: THREE.Object3D, thickness = OUTLINE_THIN, co
     if (m.name.endsWith('__no_outline') || m.name.endsWith('__outline')) return;
     targets.push(m);
   });
-  for (const m of targets) {
-    m.parent?.add(addOutline(m, thickness, color));
+  if (!targets.length) return;
+
+  const mat = outlineMaterial(thickness, color);
+  if (opts.merge) {
+    const merged = bakeHulls(group, targets, mat);
+    if (merged) {
+      // `addOutline` puts a hull one step BEFORE its source mesh; a merged hull has
+      // to sit before all of them.
+      merged.renderOrder = Math.min(...targets.map((m) => m.renderOrder ?? 0)) - 1;
+      group.add(merged);
+      return;
+    }
+    // Fall through to per-mesh hulls if the geometry set could not be baked.
   }
+  for (const m of targets) {
+    m.parent?.add(addOutline(m, thickness, color, mat));
+  }
+}
+
+/**
+ * Collapse the hulls already created under `root` into one mesh per (thickness,
+ * colour), in `root`'s own space.
+ *
+ * The retrofit form of `outlineGroup(..., { merge: true })`, for a caller that
+ * cannot change its `outlineGroup` call — e.g. an arena assembler that builds its
+ * props, outlines them, and only later knows the set is final. Same contract, same
+ * warning: the parts must not move relative to `root`.
+ *
+ * ── MEASURED, on the live match, so the arena owner does not have to ────────
+ * Running this on the `arena:kitchen` root only — the static cover and the pot, and
+ * NOT either fighter (`tools/tmp/merge_probe.mjs`):
+ *
+ *   321 hulls -> 2 meshes
+ *   frame 625 -> 580 draw calls  (-45, i.e. -7.2%)
+ *   image: mean 0.0002182/255, max 21, 0.0025% of pixels — the noise floor
+ *
+ * That is the whole arena's ink line for two draw calls, with no visible change.
+ * `src/arena/**` is owned elsewhere, so this is not wired up: the one-line change is
+ * `outlineGroup(propsGroup, 0.016, undefined, { merge: true })` at `kitchen.ts:229`.
+ *
+ * Returns the number of draw calls removed.
+ */
+export function mergeOutlines(root: THREE.Object3D): number {
+  const byKey = new Map<string, { mat: OutlineMaterial; meshes: THREE.Mesh[] }>();
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || !m.name.endsWith('__outline')) return;
+    const mat = m.material as OutlineMaterial;
+    if (!mat?.uniforms?.outlineThickness) return;
+    const key = `${mat.uniforms.outlineThickness.value}|${(mat.uniforms.outlineColor.value as THREE.Color).getHexString()}`;
+    const e = byKey.get(key) ?? { mat, meshes: [] };
+    e.meshes.push(m);
+    byKey.set(key, e);
+  });
+
+  let removed = 0;
+  for (const { mat, meshes } of byKey.values()) {
+    if (meshes.length < 2) continue;
+    const merged = bakeHulls(root, meshes, mat);
+    if (!merged) continue;
+    for (const m of meshes) m.removeFromParent();
+    root.add(merged);
+    removed += meshes.length - 1;
+  }
+  return removed;
+}
+
+/**
+ * Bake `meshes` into a single geometry expressed in `space`'s local frame.
+ *
+ * Only `position` and `normal` survive — they are the only two attributes the hull
+ * shader reads, so the merge also drops every UV and vertex-colour buffer the source
+ * geometries carried, which is where most of the memory saving comes from.
+ *
+ * The view-space expansion contract is preserved: the shader still offsets by a
+ * CONSTANT `outlineThickness` after transforming the (re-normalised) baked normal,
+ * so a source mesh that was scaled 3x still gets the same ink width as one that
+ * was not — which was the whole reason the expansion lives in view space.
+ */
+function bakeHulls(space: THREE.Object3D, meshes: THREE.Mesh[], mat: OutlineMaterial): THREE.Mesh | null {
+  space.updateMatrixWorld(true);
+  const toLocal = new THREE.Matrix4().copy(space.matrixWorld).invert();
+
+  const parts: Array<{ geo: THREE.BufferGeometry; m: THREE.Matrix4 }> = [];
+  let vTotal = 0;
+  let iTotal = 0;
+  for (const mesh of meshes) {
+    const geo = mesh.geometry;
+    const pos = geo?.getAttribute('position') as THREE.BufferAttribute | undefined;
+    if (!pos || !geo.getAttribute('normal')) return null;
+    mesh.updateMatrixWorld(true);
+    parts.push({ geo, m: new THREE.Matrix4().multiplyMatrices(toLocal, mesh.matrixWorld) });
+    vTotal += pos.count;
+    iTotal += geo.index ? geo.index.count : pos.count;
+  }
+  if (!parts.length) return null;
+
+  const position = new Float32Array(vTotal * 3);
+  const normal = new Float32Array(vTotal * 3);
+  const index = vTotal > 65535 ? new Uint32Array(iTotal) : new Uint16Array(iTotal);
+  const v = new THREE.Vector3();
+  const nm = new THREE.Matrix3();
+  let vOff = 0;
+  let iOff = 0;
+  for (const { geo, m } of parts) {
+    const p = geo.getAttribute('position') as THREE.BufferAttribute;
+    const n = geo.getAttribute('normal') as THREE.BufferAttribute;
+    nm.getNormalMatrix(m);
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).applyMatrix4(m);
+      position[(vOff + i) * 3] = v.x; position[(vOff + i) * 3 + 1] = v.y; position[(vOff + i) * 3 + 2] = v.z;
+      v.fromBufferAttribute(n, i).applyMatrix3(nm).normalize();
+      normal[(vOff + i) * 3] = v.x; normal[(vOff + i) * 3 + 1] = v.y; normal[(vOff + i) * 3 + 2] = v.z;
+    }
+    if (geo.index) {
+      const src = geo.index;
+      for (let i = 0; i < src.count; i++) index[iOff + i] = src.getX(i) + vOff;
+      iOff += src.count;
+    } else {
+      for (let i = 0; i < p.count; i++) index[iOff + i] = vOff + i;
+      iOff += p.count;
+    }
+    vOff += p.count;
+  }
+
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(position, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
+  out.setIndex(new THREE.BufferAttribute(index, 1));
+  out.computeBoundingSphere();
+
+  const mesh = new THREE.Mesh(out, mat);
+  mesh.name = `${space.name || 'group'}__outline`;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.renderOrder = Math.min(...meshes.map((m) => m.renderOrder ?? 0));
+  return mesh;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
