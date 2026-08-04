@@ -16,6 +16,7 @@
 import * as THREE from 'three';
 import type { FighterRole, MatchState, Projectile, Splat, TrailMark, Vec2 } from './state';
 import { SPLAT_RADIUS, TRAIL } from './rules';
+import { CHARACTERS } from './rules';
 import type { CharacterId, Weapon } from './rules';
 import { CHARACTER_HEIGHT, groundPos, wu } from '../units';
 import { flatMat } from '../render/toon';
@@ -45,7 +46,7 @@ declare global {
      *
      * Published by `VfxLayer`'s constructor, cleared by `dispose()`.
      */
-    __vfxSpawnTest?: (kind: 'impact' | 'death' | 'cast', xWU: number, yWU: number, amount?: number, color?: string) => void;
+    __vfxSpawnTest?: (kind: 'impact' | 'death' | 'cast', xWU: number, yWU: number, amount?: number, color?: string, who?: CharacterId, weaponKey?: string) => void;
     /** QA-only per-tick fighter snapshot, refreshed every `sync()` call — lets a
      * Playwright driver steer input off real positions/HP/terrain-slow state instead
      * of guessing from rendered pixels (e.g. to script a player walking into a puddle
@@ -745,10 +746,20 @@ export class VfxLayer {
     this.statusByRole = { player: buildStatusVisual(), enemy: buildStatusVisual() };
 
     // QA-only on-demand spawn — see the `__vfxSpawnTest` declaration above.
-    window.__vfxSpawnTest = (kind, xWU, yWU, amount = 14, color = '#FFC93C') => {
+    window.__vfxSpawnTest = (kind, xWU, yWU, amount = 14, color = '#FFC93C', who, weaponKey) => {
       if (kind === 'impact') this.spawnImpactBurst(xWU, yWU, color, amount);
       else if (kind === 'death') this.spawnDeathBurst(xWU, yWU, color);
-      else this.spawnCastFlash(xWU, yWU, { x: 1, y: 0 }, { key: 'qa', name: 'qa', type: 'ranged', range: 100, damage: amount, cooldown: 1, color, effect: null } as unknown as Weapon, 'hamburger');
+      else {
+        // `who`/`weaponKey` let a probe drive a SPECIFIC character's bespoke hook. Without
+        // them this hardcoded 'hamburger' + a synthetic 'qa' weapon, so every per-weapon
+        // agent had to build its own workaround to see its own effect at all — and driving
+        // a real hit through gameplay is unreliable (the AI kites; probes have timed out
+        // waiting). Falls back to the old behaviour when omitted.
+        const id = who ?? 'hamburger';
+        const real = weaponKey ? CHARACTERS[id]?.weapons?.find((w: Weapon) => w.key === weaponKey) : undefined;
+        const weapon = real ?? ({ key: 'qa', name: 'qa', type: 'ranged', range: 100, damage: amount, cooldown: 1, color, effect: null } as unknown as Weapon);
+        this.spawnCastFlash(xWU, yWU, { x: 1, y: 0 }, weapon, id);
+      }
     };
   }
 
@@ -797,7 +808,6 @@ export class VfxLayer {
             characterId: owner.characterId,
             spawnTransient: (obj, life, onUpdate) => this.spawnTransientObject(obj, life, onUpdate),
           };
-          (window as any).__bespokeVfxDebug = ((window as any).__bespokeVfxDebug ?? 0) + 1; // TEMP DEBUG
           const obj = bespoke.projectile(ctx);
           obj.userData.weaponVfx = bespoke;
           return obj;
@@ -1074,7 +1084,6 @@ export class VfxLayer {
         characterId,
         spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
       };
-      (window as any).__bespokeVfxDebugCast = ((window as any).__bespokeVfxDebugCast ?? 0) + 1; // TEMP DEBUG
       bespoke(ctx);
       return;
     }
@@ -1209,7 +1218,6 @@ export class VfxLayer {
         characterId: source.characterId,
         spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
       };
-      (window as any).__bespokeVfxDebugImpact = ((window as any).__bespokeVfxDebugImpact ?? 0) + 1; // TEMP DEBUG
       bespoke(ctx);
       return;
     }

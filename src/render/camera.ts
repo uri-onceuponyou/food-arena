@@ -44,8 +44,20 @@ import { CHARACTERS, HIT_RADIUS_VS_PLAYER, PLAYER_SPEED, TRAIL } from '../game/r
 //    = 165.2 wu
 //
 //    EXCLUDED: Lollipop's Giant Lollipop (`giantSlam`, range 400, cone 360°). It is
-//    an 8 s-cooldown map-scale ultimate whose warning is the screen-filling slam
-//    visual, not the sight of the caster; covering it would demand a 459 wu radius —
+//    an 8 s-cooldown map-scale ultimate whose screen-filling slam visual tells you what
+//    hit you and roughly where it came from, without needing the caster in frame.
+//
+//    NOTE — this was verified in 2026-08-04 and the exclusion holds, but NOT for the
+//    reason originally written here. The word "warning" was wrong: the slam resolves on
+//    the SAME sim tick it is cast (melee damage is instantaneous in `combat.ts`), so the
+//    visual cannot be dodged. It is an ATTRIBUTION cue that arrives with the damage, not
+//    a warning that precedes it. Verified readable at 4:3 — the narrowest supported
+//    aspect and therefore the binding case — with the caster 395 wu away and projecting
+//    off screen; a blind critic traced the boundary arc back to within ~80 px of the
+//    caster's true position. Whether an instantaneous, unavoidable, map-scale hit from
+//    an unseen attacker is acceptable DESIGN is a separate question, raised with Uri.
+//
+//    Covering it instead would demand a 459 wu radius —
 //    a 918 wu square, two thirds of the 1400 wu arena's width, on screen at all
 //    times. => CONSTRAINT ON THE VFX OWNER: the giantSlam tell must be readable when
 //    the caster is OFF SCREEN. That constraint got HEAVIER with the 2026-08-03 range
