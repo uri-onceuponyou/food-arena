@@ -1,0 +1,104 @@
+{
+  "mode": "ablate",
+  "viewport": {
+    "W": 1300,
+    "H": 740,
+    "DPR": 1
+  },
+  "scenes": {
+    "match": {
+      "baseline": {
+        "draws": 696,
+        "fillPx": 1631919706
+      },
+      "effects": [
+        {
+          "name": "BloomEffect",
+          "mean": 0.0305,
+          "max": 113,
+          "pct": 0.2,
+          "restoreDelta": 0,
+          "drawsSaved": 16,
+          "fillMPxSaved": 1.6
+        },
+        {
+          "name": "ToyGradeEffect",
+          "mean": 17.6997,
+          "max": 98,
+          "pct": 99.99,
+          "restoreDelta": 0,
+          "drawsSaved": 0,
+          "fillMPxSaved": 0
+        },
+        {
+          "name": "VignetteEffect",
+          "mean": 0.1557,
+          "max": 43,
+          "pct": 1.55,
+          "restoreDelta": 0,
+          "drawsSaved": 0,
+          "fillMPxSaved": 0
+        },
+        {
+          "name": "SMAAEffect",
+          "mean": 0.2746,
+          "max": 156,
+          "pct": 1.18,
+          "restoreDelta": 0
+        }
+      ],
+      "passes": [
+        {
+          "name": "EffectPass(Bloom+ToyGrade+Vignette)",
+          "mean": 17.7372,
+          "max": 122,
+          "pct": 99.99,
+          "drawsSaved": 17,
+          "fillMPxSaved": 2.57,
+          "restoreDelta": 0
+        },
+        {
+          "name": "EffectPass(SMAA)",
+          "mean": 0.2946,
+          "max": 156,
+          "pct": 1.18,
+          "drawsSaved": 3,
+          "fillMPxSaved": 2.89,
+          "restoreDelta": 0
+        }
+      ],
+      "skipValue": 9,
+      "shadows": {
+        "mean": 4.5875,
+        "max": 136,
+        "pct": 14.35,
+        "drawsSaved": 302,
+        "mapSize": 2048,
+        "lights": 1
+      },
+      "ibl": {
+        "mean": 16.6473,
+        "max": 132,
+        "pct": 96.6
+      },
+      "outlines": {
+        "mean": 0.259,
+        "max": 220,
+        "pct": 0.5,
+        "count": 431,
+        "drawsSaved": 132
+      }
+    }
+  },
+  "meta": {
+    "at": "2026-08-04T17:36:37.263Z",
+    "base": "http://localhost:5188",
+    "viewport": {
+      "W": 1300,
+      "H": 740,
+      "DPR": 1
+    },
+    "frames": 60,
+    "rasteriser": "swiftshader-cpu"
+  }
+}

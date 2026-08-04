@@ -1,0 +1,195 @@
+{
+  "mode": "alloc",
+  "scenes": {
+    "match": {
+      "frames": 120,
+      "sampledBytesPerFrame": 1697,
+      "netHeapGrowthPerFrame": 4141,
+      "heapBefore": 19283032,
+      "heapAfter": 19780008,
+      "topAllocators": [
+        {
+          "fn": "loop",
+          "url": "/src/game/match.ts",
+          "line": 484,
+          "bytes": 108308,
+          "bytesPerFrame": 903
+        },
+        {
+          "fn": "_Object3D",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 7690,
+          "bytes": 22720,
+          "bytesPerFrame": 189
+        },
+        {
+          "fn": "sort",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 36041,
+          "bytes": 6740,
+          "bytesPerFrame": 56
+        },
+        {
+          "fn": "applyWorldTick",
+          "url": "/src/game/sim.ts",
+          "line": 138,
+          "bytes": 6456,
+          "bytesPerFrame": 54
+        },
+        {
+          "fn": "setMaterial",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 37195,
+          "bytes": 4880,
+          "bytesPerFrame": 41
+        },
+        {
+          "fn": "pct",
+          "url": "/src/ui/hud.ts",
+          "line": 304,
+          "bytes": 3888,
+          "bytesPerFrame": 32
+        },
+        {
+          "fn": "(V8 API)",
+          "url": "",
+          "line": 0,
+          "bytes": 3716,
+          "bytesPerFrame": 31
+        },
+        {
+          "fn": "evaluate",
+          "url": "",
+          "line": 305,
+          "bytes": 3176,
+          "bytesPerFrame": 26
+        },
+        {
+          "fn": "refreshMaterialUniforms",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 39435,
+          "bytes": 3096,
+          "bytesPerFrame": 26
+        },
+        {
+          "fn": "projectPointToScreen",
+          "url": "/src/game/match.ts",
+          "line": 429,
+          "bytes": 3000,
+          "bytesPerFrame": 25
+        },
+        {
+          "fn": "multiplyMatrices",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 6652,
+          "bytes": 2880,
+          "bytesPerFrame": 24
+        },
+        {
+          "fn": "multiplyMatrices",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 6652,
+          "bytes": 2672,
+          "bytesPerFrame": 22
+        },
+        {
+          "fn": "toLowerCase",
+          "url": "",
+          "line": 0,
+          "bytes": 2112,
+          "bytesPerFrame": 18
+        },
+        {
+          "fn": "setProgram",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 40855,
+          "bytes": 2064,
+          "bytesPerFrame": 17
+        },
+        {
+          "fn": "setValueM4",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 34237,
+          "bytes": 2064,
+          "bytesPerFrame": 17
+        },
+        {
+          "fn": "push",
+          "url": "",
+          "line": 0,
+          "bytes": 1832,
+          "bytesPerFrame": 15
+        },
+        {
+          "fn": "(PARSER)",
+          "url": "",
+          "line": 0,
+          "bytes": 1568,
+          "bytesPerFrame": 13
+        },
+        {
+          "fn": "predicate",
+          "url": "",
+          "line": 3,
+          "bytes": 1488,
+          "bytesPerFrame": 12
+        },
+        {
+          "fn": "projectObject",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 40593,
+          "bytes": 1440,
+          "bytesPerFrame": 12
+        },
+        {
+          "fn": "setMaterial",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 37195,
+          "bytes": 1440,
+          "bytesPerFrame": 12
+        }
+      ],
+      "byFile": [
+        {
+          "file": "/src/game/match.ts",
+          "bytesPerFrame": 938
+        },
+        {
+          "file": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "bytesPerFrame": 479
+        },
+        {
+          "file": "(native/host)",
+          "bytesPerFrame": 166
+        },
+        {
+          "file": "/src/game/sim.ts",
+          "bytesPerFrame": 63
+        },
+        {
+          "file": "/src/ui/hud.ts",
+          "bytesPerFrame": 32
+        },
+        {
+          "file": "/src/game/vfx.ts",
+          "bytesPerFrame": 10
+        },
+        {
+          "file": "/src/game/movement.ts",
+          "bytesPerFrame": 9
+        }
+      ]
+    }
+  },
+  "meta": {
+    "at": "2026-08-04T17:31:31.198Z",
+    "base": "http://localhost:5188",
+    "viewport": {
+      "W": 1300,
+      "H": 740,
+      "DPR": 1
+    },
+    "frames": 120,
+    "rasteriser": "swiftshader-cpu"
+  }
+}

@@ -1,0 +1,516 @@
+{
+  "mode": "boot",
+  "scenes": {
+    "match": {
+      "msToReady": 8703,
+      "msToSettle": 33537,
+      "nav": {
+        "domContentLoaded": 1676,
+        "load": 8684
+      },
+      "cpuProfileTotalMs": 33530,
+      "proceduralTextureMs": 633,
+      "proceduralTexturePctOfCpu": 1.9,
+      "canvas2d": {
+        "count": 39,
+        "megapixels": 2.38
+      },
+      "programs": {
+        "created": 32,
+        "linked": 32,
+        "shadersCompiled": 64,
+        "linkMsUnsafe": 0
+      },
+      "textureBytes": {
+        "content": 5452724,
+        "renderTarget": 74379856,
+        "total": 99755524
+      },
+      "byFile": [
+        {
+          "file": "(native)",
+          "ms": 24996.2,
+          "pct": 74.5
+        },
+        {
+          "file": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "ms": 7645.1,
+          "pct": 22.8
+        },
+        {
+          "file": "/src/arena/textures.ts",
+          "ms": 633.2,
+          "pct": 1.9
+        },
+        {
+          "file": "/src/vfx/weapons/taco.ts",
+          "ms": 142.3,
+          "pct": 0.4
+        },
+        {
+          "file": "/src/game/match.ts",
+          "ms": 59,
+          "pct": 0.2
+        },
+        {
+          "file": "/src/ui/hud.ts",
+          "ms": 10.2,
+          "pct": 0
+        },
+        {
+          "file": "/node_modules/.vite/deps/postprocessing.js",
+          "ms": 8.4,
+          "pct": 0
+        },
+        {
+          "file": "/src/arena/apron.ts",
+          "ms": 5.4,
+          "pct": 0
+        },
+        {
+          "file": "/src/arena/floor.ts",
+          "ms": 3.9,
+          "pct": 0
+        },
+        {
+          "file": "/src/arena/kitchen.ts",
+          "ms": 3,
+          "pct": 0
+        },
+        {
+          "file": "/src/characters/hamburger.ts",
+          "ms": 3,
+          "pct": 0
+        },
+        {
+          "file": "/src/game/vfx.ts",
+          "ms": 2.4,
+          "pct": 0
+        },
+        {
+          "file": "/src/render/stage.ts",
+          "ms": 1.8,
+          "pct": 0
+        },
+        {
+          "file": "/src/characters/rig.ts",
+          "ms": 1.8,
+          "pct": 0
+        },
+        {
+          "file": "/src/render/toon.ts",
+          "ms": 1.5,
+          "pct": 0
+        },
+        {
+          "file": "/src/arena/fogRing.ts",
+          "ms": 1.5,
+          "pct": 0
+        },
+        {
+          "file": "/src/arena/shared.ts",
+          "ms": 1.2,
+          "pct": 0
+        },
+        {
+          "file": "/src/arena/props/counters.ts",
+          "ms": 0.9,
+          "pct": 0
+        },
+        {
+          "file": "/src/render/camera.ts",
+          "ms": 0.9,
+          "pct": 0
+        },
+        {
+          "file": "/src/characters/donut.ts",
+          "ms": 0.9,
+          "pct": 0
+        }
+      ],
+      "byFunction": [
+        {
+          "fn": "(idle)",
+          "url": "(native)",
+          "line": 0,
+          "ms": 24373.2
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 4084.1
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 2646.6
+        },
+        {
+          "fn": "makeTileWearTexture",
+          "url": "/src/arena/textures.ts",
+          "line": 28,
+          "ms": 632.3
+        },
+        {
+          "fn": "(program)",
+          "url": "(native)",
+          "line": 0,
+          "ms": 574.2
+        },
+        {
+          "fn": "WebGLRenderer.setSize",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 40126,
+          "ms": 391.3
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 183.5
+        },
+        {
+          "fn": "(anonymous)",
+          "url": "/src/vfx/weapons/taco.ts",
+          "line": 40,
+          "ms": 142
+        },
+        {
+          "fn": "projectToScreen",
+          "url": "/src/game/match.ts",
+          "line": 416,
+          "ms": 23.8
+        },
+        {
+          "fn": "(garbage collector)",
+          "url": "(native)",
+          "line": 0,
+          "ms": 23.5
+        },
+        {
+          "fn": "projectPointToScreen",
+          "url": "/src/game/match.ts",
+          "line": 429,
+          "ms": 23.5
+        },
+        {
+          "fn": "WebGLRenderer.renderBufferDirect",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 40314,
+          "ms": 15.3
+        },
+        {
+          "fn": "loop",
+          "url": "/src/game/match.ts",
+          "line": 484,
+          "ms": 9.9
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 8.1
+        },
+        {
+          "fn": "copyArray",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 34135,
+          "ms": 7.5
+        },
+        {
+          "fn": "renderObject",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 36700,
+          "ms": 7.2
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 7.2
+        },
+        {
+          "fn": "setProgram",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 40855,
+          "ms": 6.9
+        },
+        {
+          "fn": "HTMLCanvasElement.getContext",
+          "url": "(native)",
+          "line": 250,
+          "ms": 6.6
+        },
+        {
+          "fn": "multiplyMatrices",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 6652,
+          "ms": 6.6
+        }
+      ]
+    },
+    "home": {
+      "msToReady": 10795,
+      "msToSettle": 10795,
+      "nav": {
+        "domContentLoaded": 823,
+        "load": 1990
+      },
+      "cpuProfileTotalMs": 12030,
+      "proceduralTextureMs": 663,
+      "proceduralTexturePctOfCpu": 5.5,
+      "canvas2d": {
+        "count": 7,
+        "megapixels": 0.86
+      },
+      "programs": {
+        "created": 50,
+        "linked": 50,
+        "shadersCompiled": 100,
+        "linkMsUnsafe": 0
+      },
+      "textureBytes": {
+        "content": 725008,
+        "renderTarget": 71841640,
+        "total": 95635320
+      },
+      "byFile": [
+        {
+          "file": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "ms": 9677.5,
+          "pct": 80.4
+        },
+        {
+          "file": "(native)",
+          "ms": 1660.7,
+          "pct": 13.8
+        },
+        {
+          "file": "/src/ui/screens/thumbs.ts",
+          "ms": 662.7,
+          "pct": 5.5
+        },
+        {
+          "file": "/src/ui/screens/home.ts",
+          "ms": 5.6,
+          "pct": 0
+        },
+        {
+          "file": "/src/vfx/weapons/taco.ts",
+          "ms": 3.4,
+          "pct": 0
+        },
+        {
+          "file": "/node_modules/.vite/deps/postprocessing.js",
+          "ms": 3.1,
+          "pct": 0
+        },
+        {
+          "file": "/src/characters/hamburger.ts",
+          "ms": 2.8,
+          "pct": 0
+        },
+        {
+          "file": "/src/characters/rig.ts",
+          "ms": 2.5,
+          "pct": 0
+        },
+        {
+          "file": "/src/render/stage.ts",
+          "ms": 1.9,
+          "pct": 0
+        },
+        {
+          "file": "/src/render/toon.ts",
+          "ms": 1.9,
+          "pct": 0
+        },
+        {
+          "file": "/src/characters/registry.ts",
+          "ms": 0.9,
+          "pct": 0
+        },
+        {
+          "file": "/src/vfx/weapons/donut.ts",
+          "ms": 0.6,
+          "pct": 0
+        },
+        {
+          "file": "/src/vfx/weapons/lollipop.ts",
+          "ms": 0.6,
+          "pct": 0
+        },
+        {
+          "file": "/src/main.ts",
+          "ms": 0.6,
+          "pct": 0
+        },
+        {
+          "file": "/src/ui/screens/shell.ts",
+          "ms": 0.6,
+          "pct": 0
+        },
+        {
+          "file": "/src/characters/types.ts",
+          "ms": 0.6,
+          "pct": 0
+        },
+        {
+          "file": "/src/game/rules.ts",
+          "ms": 0.3,
+          "pct": 0
+        },
+        {
+          "file": "/src/ui/icons/food.ts",
+          "ms": 0.3,
+          "pct": 0
+        },
+        {
+          "file": "/src/vfx/weapons/egg.ts",
+          "ms": 0.3,
+          "pct": 0
+        },
+        {
+          "file": "/src/vfx/weapons/pizza.ts",
+          "ms": 0.3,
+          "pct": 0
+        }
+      ],
+      "byFunction": [
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 3382.6
+        },
+        {
+          "fn": "HTMLCanvasElement.getContext",
+          "url": "(native)",
+          "line": 250,
+          "ms": 1290.6
+        },
+        {
+          "fn": "WebGLRenderer.setSize",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 40126,
+          "ms": 1188.1
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 1054.6
+        },
+        {
+          "fn": "WebGLRenderer.setSize",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 40126,
+          "ms": 740.2
+        },
+        {
+          "fn": "WebGLRenderer.setSize",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 40126,
+          "ms": 476.4
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 463.5
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 442
+        },
+        {
+          "fn": "generate",
+          "url": "/src/ui/screens/thumbs.ts",
+          "line": 31,
+          "ms": 420.7
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 395.4
+        },
+        {
+          "fn": "getExtension",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 33727,
+          "ms": 369.1
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 364.5
+        },
+        {
+          "fn": "(idle)",
+          "url": "(native)",
+          "line": 0,
+          "ms": 315.1
+        },
+        {
+          "fn": "generate",
+          "url": "/src/ui/screens/thumbs.ts",
+          "line": 31,
+          "ms": 241.9
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 229.4
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 184.7
+        },
+        {
+          "fn": "getExtension",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 33727,
+          "ms": 84.7
+        },
+        {
+          "fn": "onFirstUse",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 35313,
+          "ms": 76.3
+        },
+        {
+          "fn": "WebGLState",
+          "url": "/node_modules/.vite/deps/chunk-SCGUQBHX.js",
+          "line": 36757,
+          "ms": 72.2
+        },
+        {
+          "fn": "(program)",
+          "url": "(native)",
+          "line": 0,
+          "ms": 36.3
+        }
+      ]
+    }
+  },
+  "meta": {
+    "at": "2026-08-04T17:32:45.279Z",
+    "base": "http://localhost:5188",
+    "viewport": {
+      "W": 1300,
+      "H": 740,
+      "DPR": 1
+    },
+    "frames": 60,
+    "rasteriser": "swiftshader-cpu"
+  }
+}

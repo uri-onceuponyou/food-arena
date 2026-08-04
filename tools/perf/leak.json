@@ -1,0 +1,115 @@
+{
+  "mode": "leak",
+  "steps": [
+    {
+      "label": "boot: home",
+      "heapMB": 16.24,
+      "contextsCreated": 2,
+      "contextsLive": 2,
+      "canvases": 2,
+      "canvasesInDom": 2,
+      "geometries": 78,
+      "textures": 28,
+      "programs": 12,
+      "texUploadBytes": 72566648,
+      "screen": "home"
+    },
+    {
+      "label": "characters",
+      "heapMB": 13.64,
+      "contextsCreated": 2,
+      "contextsLive": 2,
+      "canvases": 1,
+      "canvasesInDom": 1,
+      "geometries": 78,
+      "textures": 28,
+      "programs": 12,
+      "texUploadBytes": 41754390,
+      "screen": "characters"
+    },
+    {
+      "label": "home (2nd)",
+      "heapMB": 13.46,
+      "contextsCreated": 2,
+      "contextsLive": 2,
+      "canvases": 1,
+      "canvasesInDom": 1,
+      "geometries": 78,
+      "textures": 28,
+      "programs": 12,
+      "texUploadBytes": 63640862,
+      "screen": "home"
+    },
+    {
+      "label": "match",
+      "heapMB": 19.96,
+      "contextsCreated": 3,
+      "contextsLive": 3,
+      "canvases": 1,
+      "canvasesInDom": 1,
+      "geometries": 351,
+      "textures": 45,
+      "programs": 27,
+      "texUploadBytes": 111333674,
+      "screen": "match"
+    },
+    {
+      "label": "home (3rd)",
+      "heapMB": 19.19,
+      "contextsCreated": 4,
+      "contextsLive": 4,
+      "canvases": 2,
+      "canvasesInDom": 2,
+      "geometries": 78,
+      "textures": 28,
+      "programs": 12,
+      "texUploadBytes": 114781056,
+      "screen": "home"
+    },
+    {
+      "label": "match (2nd)",
+      "heapMB": 25.54,
+      "contextsCreated": 5,
+      "contextsLive": 5,
+      "canvases": 2,
+      "canvasesInDom": 2,
+      "geometries": 341,
+      "textures": 45,
+      "programs": 27,
+      "texUploadBytes": 162473868,
+      "screen": "match"
+    },
+    {
+      "label": "home (4th)",
+      "heapMB": 24.23,
+      "contextsCreated": 6,
+      "contextsLive": 6,
+      "canvases": 3,
+      "canvasesInDom": 3,
+      "geometries": 78,
+      "textures": 28,
+      "programs": 12,
+      "texUploadBytes": 165921250,
+      "screen": "home"
+    }
+  ],
+  "verdict": {
+    "heapDeltaMB": 10.77,
+    "contextsLeaked": 4,
+    "canvasesLeaked": 2,
+    "contextsCreatedTotal": 6,
+    "texUploadBytesTotal": 165921250
+  },
+  "errors": [],
+  "meta": {
+    "at": "2026-08-04T17:28:28.987Z",
+    "base": "http://localhost:5188",
+    "viewport": {
+      "W": 1300,
+      "H": 740,
+      "DPR": 1
+    },
+    "frames": 60,
+    "rasteriser": "swiftshader-cpu"
+  }
+}

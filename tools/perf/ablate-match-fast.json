@@ -1,0 +1,141 @@
+{
+  "mode": "ablate",
+  "viewport": {
+    "W": 1300,
+    "H": 740,
+    "DPR": 1
+  },
+  "scenes": {
+    "match-fast": {
+      "baseline": {
+        "draws": 693,
+        "fillPx": 1629033706
+      },
+      "effects": [
+        {
+          "name": "BloomEffect",
+          "mean": 0.0351,
+          "max": 143,
+          "pct": 0.24,
+          "restoreDelta": 0,
+          "drawsSaved": 16,
+          "fillMPxSaved": 1.6
+        },
+        {
+          "name": "ToyGradeEffect",
+          "mean": 17.7719,
+          "max": 103,
+          "pct": 99.99,
+          "restoreDelta": 0,
+          "drawsSaved": 0,
+          "fillMPxSaved": 0
+        },
+        {
+          "name": "VignetteEffect",
+          "mean": 0.1586,
+          "max": 43,
+          "pct": 1.67,
+          "restoreDelta": 0,
+          "drawsSaved": 0,
+          "fillMPxSaved": 0
+        },
+        {
+          "name": "SMAAEffect",
+          "mean": 0.2663,
+          "max": 158,
+          "pct": 1.11,
+          "restoreDelta": 0
+        }
+      ],
+      "passes": [
+        {
+          "name": "EffectPass(Bloom+ToyGrade+Vignette)",
+          "mean": 17.7994,
+          "max": 112,
+          "pct": 99.99,
+          "drawsSaved": 17,
+          "fillMPxSaved": 2.57,
+          "restoreDelta": 0
+        },
+        {
+          "name": "EffectPass(SMAA)",
+          "mean": 0.2862,
+          "max": 158,
+          "pct": 1.11,
+          "drawsSaved": 3,
+          "fillMPxSaved": 2.89,
+          "restoreDelta": 0
+        }
+      ],
+      "skipValue": 9,
+      "shadows": {
+        "mean": 4.7296,
+        "max": 134,
+        "pct": 14.41,
+        "drawsSaved": 302,
+        "mapSize": 2048,
+        "lights": 1
+      },
+      "ibl": {
+        "mean": 16.7727,
+        "max": 141,
+        "pct": 97.03
+      },
+      "outlines": {
+        "mean": 0.254,
+        "max": 220,
+        "pct": 0.49,
+        "count": 431,
+        "drawsSaved": 132
+      },
+      "samples": 6,
+      "effectsWorstOfSamples": [
+        {
+          "name": "BloomEffect",
+          "mean": 0.0674,
+          "max": 96,
+          "pct": 0.44,
+          "restoreDelta": 0,
+          "drawsSaved": 16,
+          "fillMPxSaved": 1.6
+        },
+        {
+          "name": "ToyGradeEffect",
+          "mean": 19.1199,
+          "max": 117,
+          "pct": 99.99,
+          "restoreDelta": 0,
+          "drawsSaved": 0,
+          "fillMPxSaved": 0
+        },
+        {
+          "name": "VignetteEffect",
+          "mean": 0.1638,
+          "max": 43,
+          "pct": 1.8,
+          "restoreDelta": 0,
+          "drawsSaved": 0,
+          "fillMPxSaved": 0
+        },
+        {
+          "name": "SMAAEffect",
+          "mean": 0.3258,
+          "max": 158,
+          "pct": 1.3,
+          "restoreDelta": 0
+        }
+      ]
+    }
+  },
+  "meta": {
+    "at": "2026-08-04T17:39:19.894Z",
+    "base": "http://localhost:5188",
+    "viewport": {
+      "W": 1300,
+      "H": 740,
+      "DPR": 1
+    },
+    "frames": 60,
+    "rasteriser": "swiftshader-cpu"
+  }
+}
