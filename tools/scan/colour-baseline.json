@@ -1,0 +1,5838 @@
+{
+  "base": "http://localhost:52964",
+  "viewport": [
+    1600,
+    900
+  ],
+  "player": "hamburger",
+  "enemy": "donut",
+  "simSpeed": "0.02",
+  "generated": "2026-08-04T22:11:06.952Z",
+  "reference": {
+    "source": "reference/images/curated/gameplay — 11 curated Brawl Stars / Zooba plates",
+    "method": "tools/tmp/chroma.mjs, reproduced exactly by colourBudget() below",
+    "meanSat": 0.493,
+    "meanSatMin": 0.37,
+    "meanSatMax": 0.694,
+    "chroma": 0.325,
+    "warmChroma": 0.145,
+    "coolChroma": 0.343,
+    "warmShare": 0.297,
+    "muddy": 0.302
+  },
+  "aggregate": {
+    "stations": 18,
+    "stationsWithRole": 18,
+    "stationIds": [
+      "spawn_west",
+      "west_lane",
+      "west_choke",
+      "pot_south",
+      "pot_diagonal",
+      "hub_north",
+      "freezer_nw",
+      "pantry_ne",
+      "pantry_sw",
+      "freezer_se",
+      "fryer_south",
+      "edge_west",
+      "grease_near",
+      "grease_in",
+      "water_near",
+      "fog_boundary",
+      "fog_inside",
+      "fog_late"
+    ],
+    "values": {
+      "meanSat": 0.3239,
+      "meanChroma": 0.208,
+      "warmChroma": 0.0642,
+      "coolChroma": 0.252,
+      "warmShare": 0.2142,
+      "arenaMeanSat": 0.3196,
+      "arenaWarmChroma": 0.0584,
+      "arenaCoolChroma": 0.2535,
+      "arenaWarmShare": 0.1971,
+      "hudWarmChroma": 0.0058,
+      "hudCoolChroma": -0.0015,
+      "envWarmChroma": 0.0554,
+      "envCoolChroma": 0.2531,
+      "envWarmShare": 0.1893,
+      "envMeanSatWithin": 0.3177,
+      "castWarmChroma": 0.003,
+      "castMeanSatWithin": 0.7241,
+      "castCoveragePct": 0.475,
+      "hueOverlap": 0.238,
+      "envShareInCastBand": 0.1906,
+      "envChromaInCastBand": 0.05589,
+      "hueSeparationDeg": 107.3,
+      "playerRankMedian": 33.5,
+      "playerRankMean": 28.4,
+      "clippedLowPct": 0.114,
+      "clippedHighPct": 0.398
+    },
+    "binChromaAll": [
+      0.01763,
+      0.04653,
+      0.00121,
+      0.00002,
+      0.00096,
+      0.00881,
+      0.07259,
+      0.02465,
+      0.02945,
+      0.04953,
+      0.01815,
+      0.04658
+    ],
+    "castBinShare": [
+      0.1773,
+      0.7128,
+      0.0284,
+      0.0008,
+      0.0008,
+      0.0004,
+      0.008,
+      0.011,
+      0.0041,
+      0.0101,
+      0.0146,
+      0.0317
+    ],
+    "envBinShare": [
+      0.0474,
+      0.1418,
+      0.0004,
+      0,
+      0.001,
+      0.0279,
+      0.2633,
+      0.0704,
+      0.0844,
+      0.123,
+      0.0621,
+      0.1783
+    ],
+    "topCellsInCastBand": 0.37
+  },
+  "rails": [
+    {
+      "key": "meanSat",
+      "label": "mean saturation",
+      "value": 0.3239,
+      "target": 0.493,
+      "band": [
+        0.37,
+        0.694
+      ],
+      "kind": "measured",
+      "note": "below 0.302 is the reading three critics called muddy; every plate is >= 0.370",
+      "status": "FAIL",
+      "why": "below band 0.370"
+    },
+    {
+      "key": "warmChroma",
+      "label": "warm chroma 0-60",
+      "value": 0.0642,
+      "target": 0.145,
+      "band": [
+        0.0725,
+        0.21749999999999997
+      ],
+      "kind": "chosen band",
+      "note": "absolute, not a share. 0.067 = the recorded overshoot",
+      "status": "FAIL",
+      "why": "below band 0.072"
+    },
+    {
+      "key": "coolChroma",
+      "label": "cool chroma 60-360",
+      "value": 0.252,
+      "target": 0.343,
+      "band": [
+        0.1715,
+        0.5145000000000001
+      ],
+      "kind": "chosen band",
+      "note": "adding cool is the cheap lever — LESSONS §8",
+      "status": "PASS",
+      "why": ""
+    },
+    {
+      "key": "meanChroma",
+      "label": "mean chroma",
+      "value": 0.208,
+      "target": 0.325,
+      "band": [
+        0.1625,
+        0.48750000000000004
+      ],
+      "kind": "chosen band",
+      "note": "max-min per pixel; the raw colourfulness of the frame",
+      "status": "PASS",
+      "why": ""
+    },
+    {
+      "key": "warmShare",
+      "label": "warm share of chroma",
+      "value": 0.2142,
+      "target": 0.297,
+      "band": [
+        0.12,
+        0.45
+      ],
+      "kind": "chosen band",
+      "note": "the reference reserves the warm half for the cast",
+      "status": "PASS",
+      "why": ""
+    },
+    {
+      "key": "envWarmShare",
+      "label": "ENV warm share",
+      "value": 0.1893,
+      "target": 0.297,
+      "band": [
+        0,
+        0.297
+      ],
+      "kind": "derived",
+      "note": "ceiling is the reference whole-frame warm share INCLUDING its cast, so an environment alone above it is out of contract",
+      "status": "PASS",
+      "why": ""
+    },
+    {
+      "key": "hueOverlap",
+      "label": "cast/env hue overlap",
+      "value": 0.238,
+      "target": 0,
+      "band": [
+        0,
+        0.45
+      ],
+      "kind": "no reference figure — baseline-relative",
+      "note": "SUM min(castShare,envShare) over 12 bins. 0 = disjoint hue occupancy",
+      "status": "PASS",
+      "why": ""
+    },
+    {
+      "key": "envShareInCastBand",
+      "label": "ENV chroma in cast band",
+      "value": 0.1906,
+      "target": 0,
+      "band": [
+        0,
+        0.4
+      ],
+      "kind": "no reference figure — baseline-relative",
+      "note": "fraction of environment chroma inside the cast dominant bin +/-30 deg",
+      "status": "PASS",
+      "why": ""
+    },
+    {
+      "key": "arenaMeanSat",
+      "label": "(arena only) mean sat",
+      "value": 0.3196,
+      "target": 0.493,
+      "band": [
+        0.37,
+        0.694
+      ],
+      "kind": "HUD-free, advisory",
+      "note": "the HUD is 13.4% of frame; this is the arena on its own",
+      "status": "WARN",
+      "why": "below band 0.370"
+    },
+    {
+      "key": "arenaWarmChroma",
+      "label": "(arena only) warm chroma",
+      "value": 0.0584,
+      "target": 0.145,
+      "band": [
+        0.0725,
+        0.21749999999999997
+      ],
+      "kind": "HUD-free, advisory",
+      "note": "~25% of whole-frame warm chroma is HUD furniture, not arena",
+      "status": "WARN",
+      "why": "below band 0.072"
+    },
+    {
+      "key": "arenaCoolChroma",
+      "label": "(arena only) cool chroma",
+      "value": 0.2535,
+      "target": 0.343,
+      "band": [
+        0.1715,
+        0.5145000000000001
+      ],
+      "kind": "HUD-free, advisory",
+      "note": "",
+      "status": "PASS",
+      "why": ""
+    }
+  ],
+  "stations": [
+    {
+      "id": "spawn_west",
+      "x": 160,
+      "y": 500,
+      "fog": 850,
+      "note": "player spawn, looking down the west lane",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=160&py=500&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 36,
+        "playerSalience": 0.4576,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.7421,
+            "rgb": [
+              159,
+              130,
+              124
+            ],
+            "sat": 0.423,
+            "sd": 0.28,
+            "hueDeg": 10.3,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.7294,
+            "rgb": [
+              155,
+              130,
+              127
+            ],
+            "sat": 0.385,
+            "sd": 0.271,
+            "hueDeg": 6.4,
+            "hueBin": 0,
+            "inCastBand": false
+          },
+          {
+            "cell": "15,7",
+            "salience": 0.7207,
+            "rgb": [
+              175,
+              155,
+              117
+            ],
+            "sat": 0.448,
+            "sd": 0.212,
+            "hueDeg": 39.3,
+            "hueBin": 1,
+            "inCastBand": true
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.341,
+          "ringLuma": 0.318,
+          "deltaLuma": 0.023,
+          "playerSat": 0.256,
+          "ringSat": 0.24
+        },
+        "medianLuma": 0.33,
+        "hueHist": [
+          0.041,
+          0.16,
+          0.005,
+          0,
+          0.003,
+          0.009,
+          0.275,
+          0.089,
+          0.082,
+          0.085,
+          0.056,
+          0.194
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.275,
+        "clippedLowPct": 0.03,
+        "clippedHighPct": 0.37,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.267,
+            "meanSatWithin": 0.267,
+            "meanChroma": 0.1612,
+            "meanChromaWithin": 0.1612,
+            "meanLumaWithin": 0.3317,
+            "warmChroma": 0.0519,
+            "coolChroma": 0.2062,
+            "totalChroma": 0.2581,
+            "warmShare": 0.2012,
+            "binChroma": [
+              0.01057,
+              0.04137,
+              0.00136,
+              0.00002,
+              0.00071,
+              0.00221,
+              0.07109,
+              0.02298,
+              0.02125,
+              0.02205,
+              0.01447,
+              0.05005
+            ],
+            "binShare": [
+              0.0409,
+              0.1603,
+              0.0053,
+              0.0001,
+              0.0027,
+              0.0086,
+              0.2754,
+              0.089,
+              0.0823,
+              0.0854,
+              0.056,
+              0.1939
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 278.7
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2657,
+            "meanSatWithin": 0.2657,
+            "meanChroma": 0.167,
+            "meanChromaWithin": 0.167,
+            "meanLumaWithin": 0.3324,
+            "warmChroma": 0.043,
+            "coolChroma": 0.2142,
+            "totalChroma": 0.2572,
+            "warmShare": 0.1672,
+            "binChroma": [
+              0.00714,
+              0.03587,
+              0.00035,
+              0.00002,
+              0,
+              0.00001,
+              0.08664,
+              0.01827,
+              0.01883,
+              0.0233,
+              0.01514,
+              0.05165
+            ],
+            "binShare": [
+              0.0278,
+              0.1395,
+              0.0013,
+              0.0001,
+              0,
+              0,
+              0.3368,
+              0.071,
+              0.0732,
+              0.0906,
+              0.0589,
+              0.2008
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 270
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7672,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5923,
+            "meanLumaWithin": 0.6057,
+            "warmChroma": 0.0032,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.9538,
+            "binChroma": [
+              0.0005,
+              0.00266,
+              0.00011,
+              0.00001,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.15,
+              0.8039,
+              0.0319,
+              0.0017,
+              0,
+              0,
+              0.0026,
+              0.0011,
+              0,
+              0,
+              0,
+              0.0088
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.4
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.2624,
+            "meanSatWithin": 0.2635,
+            "meanChroma": 0.1644,
+            "meanChromaWithin": 0.1651,
+            "meanLumaWithin": 0.3313,
+            "warmChroma": 0.0399,
+            "coolChroma": 0.214,
+            "totalChroma": 0.2539,
+            "warmShare": 0.157,
+            "binChroma": [
+              0.00665,
+              0.03321,
+              0.00024,
+              0.00001,
+              0,
+              0.00001,
+              0.08663,
+              0.01827,
+              0.01883,
+              0.0233,
+              0.01514,
+              0.05162
+            ],
+            "binShare": [
+              0.0262,
+              0.1308,
+              0.001,
+              0,
+              0,
+              0,
+              0.3412,
+              0.072,
+              0.0742,
+              0.0918,
+              0.0596,
+              0.2033
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 268.4
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.1705,
+            "envShareInCastBand": 0.158,
+            "envChromaInCastBand": 0.0401,
+            "hueSeparationDeg": 129,
+            "castHueDeg": 37.4,
+            "envHueDeg": 268.4
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.0013,
+            "meanChroma": -0.0058,
+            "warmChroma": 0.0089,
+            "coolChroma": -0.008
+          }
+        }
+      }
+    },
+    {
+      "id": "west_lane",
+      "x": 340,
+      "y": 500,
+      "fog": 850,
+      "note": "primary combat lane: barrels, prep counters, spill decals",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=340&py=500&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.435,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 42,
+        "playerSalience": 0.4733,
+        "topOther": [
+          {
+            "cell": "15,8",
+            "salience": 0.7627,
+            "rgb": [
+              142,
+              139,
+              155
+            ],
+            "sat": 0.484,
+            "sd": 0.266,
+            "hueDeg": 251.3,
+            "hueBin": 8,
+            "inCastBand": false
+          },
+          {
+            "cell": "14,8",
+            "salience": 0.7242,
+            "rgb": [
+              125,
+              133,
+              158
+            ],
+            "sat": 0.482,
+            "sd": 0.24,
+            "hueDeg": 225.5,
+            "hueBin": 7,
+            "inCastBand": false
+          },
+          {
+            "cell": "7,8",
+            "salience": 0.7106,
+            "rgb": [
+              145,
+              121,
+              114
+            ],
+            "sat": 0.427,
+            "sd": 0.321,
+            "hueDeg": 13.5,
+            "hueBin": 0,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.357,
+          "ringLuma": 0.403,
+          "deltaLuma": -0.046,
+          "playerSat": 0.266,
+          "ringSat": 0.294
+        },
+        "medianLuma": 0.347,
+        "hueHist": [
+          0.05,
+          0.186,
+          0.005,
+          0,
+          0.003,
+          0.008,
+          0.254,
+          0.134,
+          0.098,
+          0.042,
+          0.113,
+          0.108
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.254,
+        "clippedLowPct": 0.11,
+        "clippedHighPct": 0.32,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2992,
+            "meanSatWithin": 0.2992,
+            "meanChroma": 0.1914,
+            "meanChromaWithin": 0.1914,
+            "meanLumaWithin": 0.3537,
+            "warmChroma": 0.0692,
+            "coolChroma": 0.2247,
+            "totalChroma": 0.294,
+            "warmShare": 0.2356,
+            "binChroma": [
+              0.01466,
+              0.05459,
+              0.00137,
+              0.00004,
+              0.00087,
+              0.00237,
+              0.07467,
+              0.0393,
+              0.02893,
+              0.01233,
+              0.03321,
+              0.03163
+            ],
+            "binShare": [
+              0.0499,
+              0.1857,
+              0.0047,
+              0.0001,
+              0.003,
+              0.008,
+              0.254,
+              0.1337,
+              0.0984,
+              0.042,
+              0.113,
+              0.1076
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 272.1
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3014,
+            "meanSatWithin": 0.3014,
+            "meanChroma": 0.1985,
+            "meanChromaWithin": 0.1985,
+            "meanLumaWithin": 0.356,
+            "warmChroma": 0.0597,
+            "coolChroma": 0.2366,
+            "totalChroma": 0.2963,
+            "warmShare": 0.2014,
+            "binChroma": [
+              0.01117,
+              0.04849,
+              0.00036,
+              0.00003,
+              0.00011,
+              0.00025,
+              0.09896,
+              0.03627,
+              0.02546,
+              0.009,
+              0.03358,
+              0.03258
+            ],
+            "binShare": [
+              0.0377,
+              0.1637,
+              0.0012,
+              0.0001,
+              0.0004,
+              0.0008,
+              0.334,
+              0.1224,
+              0.0859,
+              0.0304,
+              0.1133,
+              0.11
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 257
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7684,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5931,
+            "meanLumaWithin": 0.6071,
+            "warmChroma": 0.0032,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.9531,
+            "binChroma": [
+              0.00051,
+              0.00265,
+              0.00011,
+              0,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1532,
+              0.7999,
+              0.0341,
+              0,
+              0,
+              0,
+              0,
+              0.0039,
+              0,
+              0,
+              0,
+              0.009
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.2
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.2981,
+            "meanSatWithin": 0.2994,
+            "meanChroma": 0.1959,
+            "meanChromaWithin": 0.1968,
+            "meanLumaWithin": 0.3549,
+            "warmChroma": 0.0565,
+            "coolChroma": 0.2364,
+            "totalChroma": 0.2929,
+            "warmShare": 0.1929,
+            "binChroma": [
+              0.01066,
+              0.04584,
+              0.00025,
+              0.00003,
+              0.00011,
+              0.00025,
+              0.09896,
+              0.03626,
+              0.02546,
+              0.009,
+              0.03358,
+              0.03256
+            ],
+            "binShare": [
+              0.0364,
+              0.1565,
+              0.0009,
+              0.0001,
+              0.0004,
+              0.0008,
+              0.3378,
+              0.1238,
+              0.0869,
+              0.0307,
+              0.1146,
+              0.1111
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 255.7
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.2067,
+            "envShareInCastBand": 0.1938,
+            "envChromaInCastBand": 0.05675,
+            "hueSeparationDeg": 141.5,
+            "castHueDeg": 37.2,
+            "envHueDeg": 255.7
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": -0.0022,
+            "meanChroma": -0.0071,
+            "warmChroma": 0.0095,
+            "coolChroma": -0.0119
+          }
+        }
+      }
+    },
+    {
+      "id": "west_choke",
+      "x": 400,
+      "y": 500,
+      "fog": 850,
+      "note": "the mid-lane chokepoint between the two supply barrels",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=400&py=500&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 43,
+        "playerSalience": 0.46,
+        "topOther": [
+          {
+            "cell": "14,8",
+            "salience": 0.7479,
+            "rgb": [
+              123,
+              139,
+              173
+            ],
+            "sat": 0.535,
+            "sd": 0.237,
+            "hueDeg": 220.8,
+            "hueBin": 7,
+            "inCastBand": false
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.7408,
+            "rgb": [
+              145,
+              130,
+              144
+            ],
+            "sat": 0.46,
+            "sd": 0.277,
+            "hueDeg": 304,
+            "hueBin": 10,
+            "inCastBand": false
+          },
+          {
+            "cell": "9,8",
+            "salience": 0.7203,
+            "rgb": [
+              97,
+              124,
+              160
+            ],
+            "sat": 0.489,
+            "sd": 0.255,
+            "hueDeg": 214.3,
+            "hueBin": 7,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.317,
+          "ringLuma": 0.393,
+          "deltaLuma": -0.076,
+          "playerSat": 0.319,
+          "ringSat": 0.279
+        },
+        "medianLuma": 0.345,
+        "hueHist": [
+          0.074,
+          0.197,
+          0.004,
+          0,
+          0.003,
+          0.008,
+          0.246,
+          0.145,
+          0.084,
+          0.039,
+          0.093,
+          0.107
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.246,
+        "clippedLowPct": 0.21,
+        "clippedHighPct": 0.34,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3169,
+            "meanSatWithin": 0.3169,
+            "meanChroma": 0.2053,
+            "meanChromaWithin": 0.2053,
+            "meanLumaWithin": 0.3578,
+            "warmChroma": 0.0844,
+            "coolChroma": 0.2272,
+            "totalChroma": 0.3116,
+            "warmShare": 0.2709,
+            "binChroma": [
+              0.02318,
+              0.06123,
+              0.00134,
+              0.00005,
+              0.00084,
+              0.00237,
+              0.07651,
+              0.04522,
+              0.02632,
+              0.01227,
+              0.02892,
+              0.03336
+            ],
+            "binShare": [
+              0.0744,
+              0.1965,
+              0.0043,
+              0.0002,
+              0.0027,
+              0.0076,
+              0.2455,
+              0.1451,
+              0.0845,
+              0.0394,
+              0.0928,
+              0.107
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 276.7
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3226,
+            "meanSatWithin": 0.3226,
+            "meanChroma": 0.2131,
+            "meanChromaWithin": 0.2131,
+            "meanLumaWithin": 0.3585,
+            "warmChroma": 0.0779,
+            "coolChroma": 0.2398,
+            "totalChroma": 0.3176,
+            "warmShare": 0.2452,
+            "binChroma": [
+              0.01959,
+              0.0583,
+              0.00036,
+              0.00004,
+              0.00011,
+              0.00023,
+              0.10431,
+              0.03851,
+              0.02395,
+              0.00917,
+              0.02905,
+              0.03402
+            ],
+            "binShare": [
+              0.0617,
+              0.1835,
+              0.0011,
+              0.0001,
+              0.0003,
+              0.0007,
+              0.3284,
+              0.1212,
+              0.0754,
+              0.0289,
+              0.0915,
+              0.1071
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 260.5
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7549,
+            "meanChroma": 0.0025,
+            "meanChromaWithin": 0.5891,
+            "meanLumaWithin": 0.5967,
+            "warmChroma": 0.0031,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.9526,
+            "binChroma": [
+              0.0005,
+              0.0026,
+              0.00011,
+              0.00001,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1527,
+              0.7998,
+              0.0328,
+              0.0018,
+              0,
+              0,
+              0.0026,
+              0.0011,
+              0,
+              0,
+              0,
+              0.0091
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.3
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.3193,
+            "meanSatWithin": 0.3207,
+            "meanChroma": 0.2105,
+            "meanChromaWithin": 0.2115,
+            "meanLumaWithin": 0.3575,
+            "warmChroma": 0.0748,
+            "coolChroma": 0.2396,
+            "totalChroma": 0.3144,
+            "warmShare": 0.2379,
+            "binChroma": [
+              0.01909,
+              0.0557,
+              0.00025,
+              0.00004,
+              0.00011,
+              0.00023,
+              0.1043,
+              0.0385,
+              0.02395,
+              0.00917,
+              0.02905,
+              0.03399
+            ],
+            "binShare": [
+              0.0607,
+              0.1772,
+              0.0008,
+              0.0001,
+              0.0003,
+              0.0007,
+              0.3318,
+              0.1225,
+              0.0762,
+              0.0292,
+              0.0924,
+              0.1081
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 259
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.2516,
+            "envShareInCastBand": 0.2387,
+            "envChromaInCastBand": 0.07504,
+            "hueSeparationDeg": 138.3,
+            "castHueDeg": 37.3,
+            "envHueDeg": 259
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": -0.0057,
+            "meanChroma": -0.0078,
+            "warmChroma": 0.0065,
+            "coolChroma": -0.0126
+          }
+        }
+      }
+    },
+    {
+      "id": "pot_south",
+      "x": 700,
+      "y": 640,
+      "fog": 850,
+      "note": "pot 140wu north of the player — hazard in frame, not filling it",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=700&py=640&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 7,
+        "playerSalience": 0.6141,
+        "topOther": [
+          {
+            "cell": "8,8",
+            "salience": 0.813,
+            "rgb": [
+              174,
+              149,
+              105
+            ],
+            "sat": 0.589,
+            "sd": 0.256,
+            "hueDeg": 38.3,
+            "hueBin": 1,
+            "inCastBand": true
+          },
+          {
+            "cell": "7,8",
+            "salience": 0.7921,
+            "rgb": [
+              162,
+              136,
+              98
+            ],
+            "sat": 0.611,
+            "sd": 0.293,
+            "hueDeg": 35.6,
+            "hueBin": 1,
+            "inCastBand": true
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.6905,
+            "rgb": [
+              146,
+              116,
+              123
+            ],
+            "sat": 0.392,
+            "sd": 0.276,
+            "hueDeg": 346,
+            "hueBin": 11,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.332,
+          "ringLuma": 0.361,
+          "deltaLuma": -0.029,
+          "playerSat": 0.366,
+          "ringSat": 0.326
+        },
+        "medianLuma": 0.354,
+        "hueHist": [
+          0.118,
+          0.14,
+          0.004,
+          0,
+          0.003,
+          0.007,
+          0.251,
+          0.095,
+          0.098,
+          0.05,
+          0.053,
+          0.181
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.251,
+        "clippedLowPct": 0.38,
+        "clippedHighPct": 0.6,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3342,
+            "meanSatWithin": 0.3342,
+            "meanChroma": 0.2261,
+            "meanChromaWithin": 0.2261,
+            "meanLumaWithin": 0.3579,
+            "warmChroma": 0.0848,
+            "coolChroma": 0.2439,
+            "totalChroma": 0.3287,
+            "warmShare": 0.2579,
+            "binChroma": [
+              0.03875,
+              0.046,
+              0.00118,
+              0.00003,
+              0.00095,
+              0.00232,
+              0.08249,
+              0.03138,
+              0.0323,
+              0.01642,
+              0.01749,
+              0.05934
+            ],
+            "binShare": [
+              0.1179,
+              0.14,
+              0.0036,
+              0.0001,
+              0.0029,
+              0.0071,
+              0.251,
+              0.0955,
+              0.0983,
+              0.05,
+              0.0532,
+              0.1806
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 290.6
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3284,
+            "meanSatWithin": 0.3284,
+            "meanChroma": 0.2317,
+            "meanChromaWithin": 0.2317,
+            "meanLumaWithin": 0.3607,
+            "warmChroma": 0.0847,
+            "coolChroma": 0.2385,
+            "totalChroma": 0.3232,
+            "warmShare": 0.2621,
+            "binChroma": [
+              0.04109,
+              0.04362,
+              0.00017,
+              0.00002,
+              0.00021,
+              0.00015,
+              0.08338,
+              0.0324,
+              0.03029,
+              0.00944,
+              0.01845,
+              0.06401
+            ],
+            "binShare": [
+              0.1271,
+              0.1349,
+              0.0005,
+              0.0001,
+              0.0006,
+              0.0005,
+              0.258,
+              0.1002,
+              0.0937,
+              0.0292,
+              0.0571,
+              0.198
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 294.6
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7701,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5929,
+            "meanLumaWithin": 0.6075,
+            "warmChroma": 0.0032,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.9547,
+            "binChroma": [
+              0.00052,
+              0.00265,
+              0.00011,
+              0,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1553,
+              0.7994,
+              0.0326,
+              0,
+              0,
+              0,
+              0,
+              0.003,
+              0,
+              0.0009,
+              0,
+              0.0088
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.1
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.3251,
+            "meanSatWithin": 0.3265,
+            "meanChroma": 0.2291,
+            "meanChromaWithin": 0.2301,
+            "meanLumaWithin": 0.3596,
+            "warmChroma": 0.0815,
+            "coolChroma": 0.2384,
+            "totalChroma": 0.3199,
+            "warmShare": 0.2549,
+            "binChroma": [
+              0.04058,
+              0.04096,
+              0.00006,
+              0.00002,
+              0.00021,
+              0.00015,
+              0.08338,
+              0.03239,
+              0.03029,
+              0.00944,
+              0.01845,
+              0.06398
+            ],
+            "binShare": [
+              0.1268,
+              0.128,
+              0.0002,
+              0.0001,
+              0.0007,
+              0.0005,
+              0.2606,
+              0.1012,
+              0.0947,
+              0.0295,
+              0.0577,
+              0.2
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 292.6
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.2677,
+            "envShareInCastBand": 0.255,
+            "envChromaInCastBand": 0.0816,
+            "hueSeparationDeg": 104.5,
+            "castHueDeg": 37.1,
+            "envHueDeg": 292.6
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.0058,
+            "meanChroma": -0.0056,
+            "warmChroma": 0.0001,
+            "coolChroma": 0.0054
+          }
+        }
+      }
+    },
+    {
+      "id": "pot_diagonal",
+      "x": 570,
+      "y": 430,
+      "fog": 850,
+      "note": "hub diagonal: pot + stove island + spice cart + lane pots together",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=570&py=430&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.435,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 30,
+        "playerSalience": 0.5488,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.745,
+            "rgb": [
+              135,
+              139,
+              130
+            ],
+            "sat": 0.434,
+            "sd": 0.28,
+            "hueDeg": 86.7,
+            "hueBin": 2,
+            "inCastBand": false
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.7428,
+            "rgb": [
+              164,
+              134,
+              130
+            ],
+            "sat": 0.407,
+            "sd": 0.257,
+            "hueDeg": 7.1,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.7417,
+            "rgb": [
+              161,
+              126,
+              130
+            ],
+            "sat": 0.446,
+            "sd": 0.267,
+            "hueDeg": 353.1,
+            "hueBin": 11,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.327,
+          "ringLuma": 0.384,
+          "deltaLuma": -0.058,
+          "playerSat": 0.348,
+          "ringSat": 0.396
+        },
+        "medianLuma": 0.337,
+        "hueHist": [
+          0.211,
+          0.154,
+          0.003,
+          0,
+          0.001,
+          0.007,
+          0.267,
+          0.081,
+          0.063,
+          0.038,
+          0.055,
+          0.12
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.267,
+        "clippedLowPct": 0.35,
+        "clippedHighPct": 0.74,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3687,
+            "meanSatWithin": 0.3687,
+            "meanChroma": 0.2471,
+            "meanChromaWithin": 0.2471,
+            "meanLumaWithin": 0.3569,
+            "warmChroma": 0.1326,
+            "coolChroma": 0.2305,
+            "totalChroma": 0.3631,
+            "warmShare": 0.3652,
+            "binChroma": [
+              0.07661,
+              0.056,
+              0.00115,
+              0.00004,
+              0.00053,
+              0.00252,
+              0.09701,
+              0.02955,
+              0.02277,
+              0.01363,
+              0.01987,
+              0.0434
+            ],
+            "binShare": [
+              0.211,
+              0.1542,
+              0.0032,
+              0.0001,
+              0.0014,
+              0.0069,
+              0.2672,
+              0.0814,
+              0.0627,
+              0.0375,
+              0.0547,
+              0.1195
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 313.3
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.367,
+            "meanSatWithin": 0.367,
+            "meanChroma": 0.2572,
+            "meanChromaWithin": 0.2572,
+            "meanLumaWithin": 0.3626,
+            "warmChroma": 0.1278,
+            "coolChroma": 0.234,
+            "totalChroma": 0.3619,
+            "warmShare": 0.3533,
+            "binChroma": [
+              0.07609,
+              0.05175,
+              0.00015,
+              0.00004,
+              0.00006,
+              0.00009,
+              0.10892,
+              0.02666,
+              0.02037,
+              0.00945,
+              0.01688,
+              0.05139
+            ],
+            "binShare": [
+              0.2103,
+              0.143,
+              0.0004,
+              0.0001,
+              0.0002,
+              0.0003,
+              0.301,
+              0.0737,
+              0.0563,
+              0.0261,
+              0.0467,
+              0.142
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 309.6
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7649,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5901,
+            "meanLumaWithin": 0.6044,
+            "warmChroma": 0.0031,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.953,
+            "binChroma": [
+              0.00049,
+              0.00265,
+              0.00011,
+              0,
+              0,
+              0,
+              0.00001,
+              0.00001,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1481,
+              0.805,
+              0.0335,
+              0,
+              0,
+              0,
+              0.0024,
+              0.002,
+              0,
+              0,
+              0,
+              0.009
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.3
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.3637,
+            "meanSatWithin": 0.3653,
+            "meanChroma": 0.2546,
+            "meanChromaWithin": 0.2557,
+            "meanLumaWithin": 0.3616,
+            "warmChroma": 0.1247,
+            "coolChroma": 0.2339,
+            "totalChroma": 0.3586,
+            "warmShare": 0.3478,
+            "binChroma": [
+              0.0756,
+              0.0491,
+              0.00004,
+              0.00004,
+              0.00006,
+              0.00009,
+              0.10891,
+              0.02666,
+              0.02037,
+              0.00945,
+              0.01688,
+              0.05136
+            ],
+            "binShare": [
+              0.2108,
+              0.1369,
+              0.0001,
+              0.0001,
+              0.0002,
+              0.0003,
+              0.3037,
+              0.0743,
+              0.0568,
+              0.0264,
+              0.0471,
+              0.1432
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 306.9
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.2985,
+            "envShareInCastBand": 0.3478,
+            "envChromaInCastBand": 0.12474,
+            "hueSeparationDeg": 90.4,
+            "castHueDeg": 37.3,
+            "envHueDeg": 306.9
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.0017,
+            "meanChroma": -0.0101,
+            "warmChroma": 0.0048,
+            "coolChroma": -0.0035
+          }
+        }
+      }
+    },
+    {
+      "id": "hub_north",
+      "x": 700,
+      "y": 320,
+      "fog": 850,
+      "note": "north lane mouth, stacked pots, sink counter beyond",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=700&py=320&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 18,
+        "playerSalience": 0.5763,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.7789,
+            "rgb": [
+              180,
+              144,
+              125
+            ],
+            "sat": 0.507,
+            "sd": 0.249,
+            "hueDeg": 20.7,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.7594,
+            "rgb": [
+              169,
+              140,
+              125
+            ],
+            "sat": 0.472,
+            "sd": 0.256,
+            "hueDeg": 20.5,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "6,8",
+            "salience": 0.6868,
+            "rgb": [
+              180,
+              123,
+              67
+            ],
+            "sat": 0.644,
+            "sd": 0.204,
+            "hueDeg": 29.7,
+            "hueBin": 0,
+            "inCastBand": true
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.281,
+          "ringLuma": 0.321,
+          "deltaLuma": -0.04,
+          "playerSat": 0.347,
+          "ringSat": 0.304
+        },
+        "medianLuma": 0.364,
+        "hueHist": [
+          0.053,
+          0.139,
+          0.004,
+          0,
+          0.003,
+          0.008,
+          0.355,
+          0.065,
+          0.059,
+          0.04,
+          0.091,
+          0.184
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.355,
+        "clippedLowPct": 0.13,
+        "clippedHighPct": 0.37,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3197,
+            "meanSatWithin": 0.3197,
+            "meanChroma": 0.2196,
+            "meanChromaWithin": 0.2196,
+            "meanLumaWithin": 0.369,
+            "warmChroma": 0.0606,
+            "coolChroma": 0.255,
+            "totalChroma": 0.3156,
+            "warmShare": 0.1921,
+            "binChroma": [
+              0.01682,
+              0.04381,
+              0.00113,
+              0.00001,
+              0.00089,
+              0.00241,
+              0.11193,
+              0.02061,
+              0.01868,
+              0.01274,
+              0.02857,
+              0.05801
+            ],
+            "binShare": [
+              0.0533,
+              0.1388,
+              0.0036,
+              0,
+              0.0028,
+              0.0076,
+              0.3546,
+              0.0653,
+              0.0592,
+              0.0404,
+              0.0905,
+              0.1838
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 271.3
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.311,
+            "meanSatWithin": 0.311,
+            "meanChroma": 0.2248,
+            "meanChromaWithin": 0.2248,
+            "meanLumaWithin": 0.3764,
+            "warmChroma": 0.0518,
+            "coolChroma": 0.2552,
+            "totalChroma": 0.307,
+            "warmShare": 0.1687,
+            "binChroma": [
+              0.01494,
+              0.03684,
+              0.00011,
+              0,
+              0.00013,
+              0.00023,
+              0.11991,
+              0.02002,
+              0.01669,
+              0.00828,
+              0.02498,
+              0.06483
+            ],
+            "binShare": [
+              0.0487,
+              0.12,
+              0.0004,
+              0,
+              0.0004,
+              0.0008,
+              0.3906,
+              0.0652,
+              0.0544,
+              0.027,
+              0.0814,
+              0.2112
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 266.3
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7642,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5908,
+            "meanLumaWithin": 0.6055,
+            "warmChroma": 0.0031,
+            "coolChroma": 0.0001,
+            "totalChroma": 0.0033,
+            "warmShare": 0.9544,
+            "binChroma": [
+              0.00051,
+              0.00263,
+              0.0001,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1536,
+              0.8008,
+              0.0315,
+              0,
+              0.0015,
+              0,
+              0.0024,
+              0.0012,
+              0,
+              0,
+              0,
+              0.009
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.4
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.3077,
+            "meanSatWithin": 0.309,
+            "meanChroma": 0.2223,
+            "meanChromaWithin": 0.2233,
+            "meanLumaWithin": 0.3754,
+            "warmChroma": 0.0486,
+            "coolChroma": 0.255,
+            "totalChroma": 0.3037,
+            "warmShare": 0.1602,
+            "binChroma": [
+              0.01444,
+              0.0342,
+              0.00001,
+              0,
+              0.00013,
+              0.00023,
+              0.1199,
+              0.02002,
+              0.01669,
+              0.00828,
+              0.02498,
+              0.0648
+            ],
+            "binShare": [
+              0.0475,
+              0.1126,
+              0,
+              0,
+              0.0004,
+              0.0008,
+              0.3948,
+              0.0659,
+              0.055,
+              0.0273,
+              0.0823,
+              0.2134
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 264.9
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.1731,
+            "envShareInCastBand": 0.1601,
+            "envChromaInCastBand": 0.04865,
+            "hueSeparationDeg": 132.5,
+            "castHueDeg": 37.4,
+            "envHueDeg": 264.9
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.0087,
+            "meanChroma": -0.0052,
+            "warmChroma": 0.0088,
+            "coolChroma": -0.0002
+          }
+        }
+      }
+    },
+    {
+      "id": "freezer_nw",
+      "x": 430,
+      "y": 240,
+      "fog": 850,
+      "note": "NW walk-in freezer + exhaust pipe, seen from the lane",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=430&py=240&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 51,
+        "playerSalience": 0.4501,
+        "topOther": [
+          {
+            "cell": "8,8",
+            "salience": 0.7877,
+            "rgb": [
+              132,
+              145,
+              156
+            ],
+            "sat": 0.53,
+            "sd": 0.285,
+            "hueDeg": 207.5,
+            "hueBin": 6,
+            "inCastBand": false
+          },
+          {
+            "cell": "14,8",
+            "salience": 0.7563,
+            "rgb": [
+              126,
+              131,
+              159
+            ],
+            "sat": 0.503,
+            "sd": 0.254,
+            "hueDeg": 230.9,
+            "hueBin": 7,
+            "inCastBand": false
+          },
+          {
+            "cell": "0,3",
+            "salience": 0.7138,
+            "rgb": [
+              20,
+              141,
+              179
+            ],
+            "sat": 0.847,
+            "sd": 0.194,
+            "hueDeg": 194.3,
+            "hueBin": 6,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.361,
+          "ringLuma": 0.336,
+          "deltaLuma": 0.024,
+          "playerSat": 0.291,
+          "ringSat": 0.322
+        },
+        "medianLuma": 0.334,
+        "hueHist": [
+          0.01,
+          0.058,
+          0.003,
+          0,
+          0.002,
+          0.006,
+          0.674,
+          0.08,
+          0.03,
+          0.023,
+          0.012,
+          0.102
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.674,
+        "clippedLowPct": 0.04,
+        "clippedHighPct": 0.33,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.4032,
+            "meanSatWithin": 0.4032,
+            "meanChroma": 0.2712,
+            "meanChromaWithin": 0.2712,
+            "meanLumaWithin": 0.3654,
+            "warmChroma": 0.027,
+            "coolChroma": 0.3723,
+            "totalChroma": 0.3993,
+            "warmShare": 0.0677,
+            "binChroma": [
+              0.00385,
+              0.02318,
+              0.00118,
+              0.00002,
+              0.00079,
+              0.00235,
+              0.26933,
+              0.03213,
+              0.01203,
+              0.00919,
+              0.00476,
+              0.04054
+            ],
+            "binShare": [
+              0.0096,
+              0.058,
+              0.003,
+              0.0001,
+              0.002,
+              0.0059,
+              0.6744,
+              0.0804,
+              0.0301,
+              0.023,
+              0.0119,
+              0.1015
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 209.6
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3927,
+            "meanSatWithin": 0.3927,
+            "meanChroma": 0.2744,
+            "meanChromaWithin": 0.2744,
+            "meanLumaWithin": 0.3733,
+            "warmChroma": 0.0165,
+            "coolChroma": 0.3725,
+            "totalChroma": 0.3889,
+            "warmShare": 0.0423,
+            "binChroma": [
+              0.0006,
+              0.01585,
+              0.00012,
+              0.00001,
+              0.00005,
+              0.00018,
+              0.28414,
+              0.02609,
+              0.00784,
+              0.00571,
+              0.00459,
+              0.04373
+            ],
+            "binShare": [
+              0.0015,
+              0.0408,
+              0.0003,
+              0,
+              0.0001,
+              0.0005,
+              0.7306,
+              0.0671,
+              0.0202,
+              0.0147,
+              0.0118,
+              0.1124
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 209
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7657,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5909,
+            "meanLumaWithin": 0.6073,
+            "warmChroma": 0.0031,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.9511,
+            "binChroma": [
+              0.00048,
+              0.00266,
+              0.0001,
+              0.00001,
+              0.00001,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1465,
+              0.8047,
+              0.0311,
+              0.0027,
+              0.0016,
+              0,
+              0.0045,
+              0,
+              0,
+              0,
+              0,
+              0.0089
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.5
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.3893,
+            "meanSatWithin": 0.391,
+            "meanChroma": 0.2718,
+            "meanChromaWithin": 0.273,
+            "meanLumaWithin": 0.3723,
+            "warmChroma": 0.0133,
+            "coolChroma": 0.3723,
+            "totalChroma": 0.3856,
+            "warmShare": 0.0345,
+            "binChroma": [
+              0.00012,
+              0.0132,
+              0.00002,
+              0,
+              0.00004,
+              0.00018,
+              0.28412,
+              0.02609,
+              0.00784,
+              0.00571,
+              0.00459,
+              0.0437
+            ],
+            "binShare": [
+              0.0003,
+              0.0342,
+              0,
+              0,
+              0.0001,
+              0.0005,
+              0.7368,
+              0.0677,
+              0.0203,
+              0.0148,
+              0.0119,
+              0.1133
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 209.1
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.048,
+            "envShareInCastBand": 0.0345,
+            "envChromaInCastBand": 0.01334,
+            "hueSeparationDeg": 171.6,
+            "castHueDeg": 37.5,
+            "envHueDeg": 209.1
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.0105,
+            "meanChroma": -0.0032,
+            "warmChroma": 0.0105,
+            "coolChroma": -0.0002
+          }
+        }
+      }
+    },
+    {
+      "id": "pantry_ne",
+      "x": 1150,
+      "y": 330,
+      "fog": 850,
+      "note": "NE pantry cluster: crates, herb crate, flour sacks, on its plank pad",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=1150&py=330&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 48,
+        "playerSalience": 0.3829,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.727,
+            "rgb": [
+              163,
+              135,
+              121
+            ],
+            "sat": 0.448,
+            "sd": 0.287,
+            "hueDeg": 20,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.7054,
+            "rgb": [
+              160,
+              133,
+              128
+            ],
+            "sat": 0.389,
+            "sd": 0.261,
+            "hueDeg": 9.4,
+            "hueBin": 0,
+            "inCastBand": false
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.6786,
+            "rgb": [
+              148,
+              118,
+              127
+            ],
+            "sat": 0.399,
+            "sd": 0.274,
+            "hueDeg": 342,
+            "hueBin": 11,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.401,
+          "ringLuma": 0.412,
+          "deltaLuma": -0.011,
+          "playerSat": 0.227,
+          "ringSat": 0.217
+        },
+        "medianLuma": 0.388,
+        "hueHist": [
+          0.042,
+          0.258,
+          0.005,
+          0,
+          0.005,
+          0.088,
+          0.131,
+          0.023,
+          0.038,
+          0.048,
+          0.064,
+          0.298
+        ],
+        "dominantHueDeg": 330,
+        "dominantHueShare": 0.298,
+        "clippedLowPct": 0.01,
+        "clippedHighPct": 0.33,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2522,
+            "meanSatWithin": 0.2522,
+            "meanChroma": 0.1769,
+            "meanChromaWithin": 0.1769,
+            "meanLumaWithin": 0.3848,
+            "warmChroma": 0.0721,
+            "coolChroma": 0.1682,
+            "totalChroma": 0.2403,
+            "warmShare": 0.3001,
+            "binChroma": [
+              0.01004,
+              0.06208,
+              0.00116,
+              0.00001,
+              0.00114,
+              0.02124,
+              0.03156,
+              0.00544,
+              0.00917,
+              0.01147,
+              0.01546,
+              0.07156
+            ],
+            "binShare": [
+              0.0418,
+              0.2583,
+              0.0048,
+              0,
+              0.0048,
+              0.0884,
+              0.1313,
+              0.0226,
+              0.0381,
+              0.0477,
+              0.0643,
+              0.2978
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 344.6
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.253,
+            "meanSatWithin": 0.253,
+            "meanChroma": 0.1877,
+            "meanChromaWithin": 0.1877,
+            "meanLumaWithin": 0.3955,
+            "warmChroma": 0.0652,
+            "coolChroma": 0.1767,
+            "totalChroma": 0.2419,
+            "warmShare": 0.2695,
+            "binChroma": [
+              0.0064,
+              0.05878,
+              0.00014,
+              0,
+              0.0008,
+              0.02399,
+              0.03883,
+              0.00343,
+              0.00772,
+              0.0103,
+              0.01396,
+              0.07756
+            ],
+            "binShare": [
+              0.0265,
+              0.243,
+              0.0006,
+              0,
+              0.0033,
+              0.0992,
+              0.1605,
+              0.0142,
+              0.0319,
+              0.0426,
+              0.0577,
+              0.3206
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 341.3
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7695,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5937,
+            "meanLumaWithin": 0.6087,
+            "warmChroma": 0.0032,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.954,
+            "binChroma": [
+              0.00049,
+              0.00268,
+              0.00011,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1466,
+              0.8074,
+              0.0336,
+              0,
+              0,
+              0,
+              0.0036,
+              0,
+              0,
+              0,
+              0,
+              0.0089
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.3
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.2497,
+            "meanSatWithin": 0.2508,
+            "meanChroma": 0.1851,
+            "meanChromaWithin": 0.1859,
+            "meanLumaWithin": 0.3946,
+            "warmChroma": 0.062,
+            "coolChroma": 0.1766,
+            "totalChroma": 0.2386,
+            "warmShare": 0.2599,
+            "binChroma": [
+              0.00592,
+              0.0561,
+              0.00002,
+              0,
+              0.0008,
+              0.02399,
+              0.03881,
+              0.00343,
+              0.00772,
+              0.0103,
+              0.01396,
+              0.07753
+            ],
+            "binShare": [
+              0.0248,
+              0.2351,
+              0.0001,
+              0,
+              0.0034,
+              0.1006,
+              0.1627,
+              0.0144,
+              0.0324,
+              0.0432,
+              0.0585,
+              0.325
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 339.3
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.2725,
+            "envShareInCastBand": 0.26,
+            "envChromaInCastBand": 0.06204,
+            "hueSeparationDeg": 58,
+            "castHueDeg": 37.3,
+            "envHueDeg": 339.3
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": -0.0008,
+            "meanChroma": -0.0108,
+            "warmChroma": 0.0069,
+            "coolChroma": -0.0085
+          }
+        }
+      }
+    },
+    {
+      "id": "pantry_sw",
+      "x": 270,
+      "y": 665,
+      "fog": 850,
+      "note": "SW pantry cluster + a real prep counter in the same frame",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=270&py=665&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.435,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 43,
+        "playerSalience": 0.4137,
+        "topOther": [
+          {
+            "cell": "8,8",
+            "salience": 0.7323,
+            "rgb": [
+              165,
+              148,
+              121
+            ],
+            "sat": 0.407,
+            "sd": 0.245,
+            "hueDeg": 36.8,
+            "hueBin": 1,
+            "inCastBand": true
+          },
+          {
+            "cell": "7,8",
+            "salience": 0.726,
+            "rgb": [
+              199,
+              174,
+              134
+            ],
+            "sat": 0.521,
+            "sd": 0.195,
+            "hueDeg": 36.9,
+            "hueBin": 1,
+            "inCastBand": true
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.6924,
+            "rgb": [
+              152,
+              120,
+              126
+            ],
+            "sat": 0.407,
+            "sd": 0.279,
+            "hueDeg": 348.8,
+            "hueBin": 11,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.375,
+          "ringLuma": 0.377,
+          "deltaLuma": -0.001,
+          "playerSat": 0.244,
+          "ringSat": 0.217
+        },
+        "medianLuma": 0.376,
+        "hueHist": [
+          0.048,
+          0.245,
+          0.006,
+          0,
+          0.004,
+          0.009,
+          0.097,
+          0.083,
+          0.101,
+          0.054,
+          0.143,
+          0.21
+        ],
+        "dominantHueDeg": 30,
+        "dominantHueShare": 0.245,
+        "clippedLowPct": 0.03,
+        "clippedHighPct": 0.32,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2406,
+            "meanSatWithin": 0.2406,
+            "meanChroma": 0.1616,
+            "meanChromaWithin": 0.1616,
+            "meanLumaWithin": 0.3596,
+            "warmChroma": 0.0681,
+            "coolChroma": 0.1644,
+            "totalChroma": 0.2325,
+            "warmShare": 0.2928,
+            "binChroma": [
+              0.01114,
+              0.05694,
+              0.00131,
+              0.00003,
+              0.00086,
+              0.0022,
+              0.02262,
+              0.01937,
+              0.02346,
+              0.01263,
+              0.03321,
+              0.04873
+            ],
+            "binShare": [
+              0.0479,
+              0.2449,
+              0.0056,
+              0.0001,
+              0.0037,
+              0.0095,
+              0.0973,
+              0.0833,
+              0.1009,
+              0.0543,
+              0.1428,
+              0.2096
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 327.4
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2298,
+            "meanSatWithin": 0.2298,
+            "meanChroma": 0.1644,
+            "meanChromaWithin": 0.1644,
+            "meanLumaWithin": 0.3646,
+            "warmChroma": 0.0611,
+            "coolChroma": 0.1605,
+            "totalChroma": 0.2216,
+            "warmShare": 0.2759,
+            "binChroma": [
+              0.00813,
+              0.05302,
+              0.0003,
+              0.00003,
+              0.00011,
+              0.00004,
+              0.02512,
+              0.02025,
+              0.02201,
+              0.00702,
+              0.03182,
+              0.05377
+            ],
+            "binShare": [
+              0.0367,
+              0.2393,
+              0.0013,
+              0.0001,
+              0.0005,
+              0.0002,
+              0.1134,
+              0.0914,
+              0.0993,
+              0.0317,
+              0.1436,
+              0.2426
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 326.5
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7669,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5922,
+            "meanLumaWithin": 0.6072,
+            "warmChroma": 0.0031,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.951,
+            "binChroma": [
+              0.0005,
+              0.00264,
+              0.00012,
+              0,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1518,
+              0.7992,
+              0.0362,
+              0,
+              0,
+              0,
+              0,
+              0.0039,
+              0,
+              0,
+              0,
+              0.009
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.2
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.2265,
+            "meanSatWithin": 0.2275,
+            "meanChroma": 0.1618,
+            "meanChromaWithin": 0.1625,
+            "meanLumaWithin": 0.3636,
+            "warmChroma": 0.058,
+            "coolChroma": 0.1603,
+            "totalChroma": 0.2183,
+            "warmShare": 0.2657,
+            "binChroma": [
+              0.00763,
+              0.05038,
+              0.00018,
+              0.00003,
+              0.00011,
+              0.00004,
+              0.02512,
+              0.02024,
+              0.02201,
+              0.00702,
+              0.03182,
+              0.05374
+            ],
+            "binShare": [
+              0.0349,
+              0.2308,
+              0.0008,
+              0.0001,
+              0.0005,
+              0.0002,
+              0.1151,
+              0.0927,
+              0.1008,
+              0.0321,
+              0.1458,
+              0.2462
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 324.7
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.2794,
+            "envShareInCastBand": 0.2665,
+            "envChromaInCastBand": 0.05819,
+            "hueSeparationDeg": 72.5,
+            "castHueDeg": 37.2,
+            "envHueDeg": 324.7
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.0108,
+            "meanChroma": -0.0028,
+            "warmChroma": 0.007,
+            "coolChroma": 0.0039
+          }
+        }
+      }
+    },
+    {
+      "id": "freezer_se",
+      "x": 1000,
+      "y": 700,
+      "fog": 850,
+      "note": "SE walk-in freezer (mirror)",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=1000&py=700&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.797,
+        "castCells": 456
+      },
+      "metrics": {
+        "playerRank": 31,
+        "playerSalience": 0.5257,
+        "topOther": [
+          {
+            "cell": "14,8",
+            "salience": 0.8135,
+            "rgb": [
+              86,
+              149,
+              175
+            ],
+            "sat": 0.7,
+            "sd": 0.249,
+            "hueDeg": 197.5,
+            "hueBin": 6,
+            "inCastBand": false
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.8009,
+            "rgb": [
+              106,
+              148,
+              166
+            ],
+            "sat": 0.633,
+            "sd": 0.259,
+            "hueDeg": 198,
+            "hueBin": 6,
+            "inCastBand": false
+          },
+          {
+            "cell": "15,7",
+            "salience": 0.7546,
+            "rgb": [
+              65,
+              160,
+              191
+            ],
+            "sat": 0.745,
+            "sd": 0.208,
+            "hueDeg": 194.8,
+            "hueBin": 6,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.284,
+          "ringLuma": 0.321,
+          "deltaLuma": -0.037,
+          "playerSat": 0.357,
+          "ringSat": 0.378
+        },
+        "medianLuma": 0.356,
+        "hueHist": [
+          0.036,
+          0.079,
+          0.003,
+          0,
+          0.002,
+          0.006,
+          0.508,
+          0.093,
+          0.048,
+          0.029,
+          0.042,
+          0.152
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.508,
+        "clippedLowPct": 0.13,
+        "clippedHighPct": 0.33,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3734,
+            "meanSatWithin": 0.3734,
+            "meanChroma": 0.2533,
+            "meanChromaWithin": 0.2533,
+            "meanLumaWithin": 0.3596,
+            "warmChroma": 0.0428,
+            "coolChroma": 0.327,
+            "totalChroma": 0.3698,
+            "warmShare": 0.1156,
+            "binChroma": [
+              0.01343,
+              0.02934,
+              0.00128,
+              0.00003,
+              0.00091,
+              0.0022,
+              0.18779,
+              0.03425,
+              0.01793,
+              0.0109,
+              0.01567,
+              0.05604
+            ],
+            "binShare": [
+              0.0363,
+              0.0793,
+              0.0034,
+              0.0001,
+              0.0025,
+              0.0059,
+              0.5079,
+              0.0926,
+              0.0485,
+              0.0295,
+              0.0424,
+              0.1516
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 226
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3758,
+            "meanSatWithin": 0.3758,
+            "meanChroma": 0.2681,
+            "meanChromaWithin": 0.2681,
+            "meanLumaWithin": 0.3679,
+            "warmChroma": 0.0404,
+            "coolChroma": 0.332,
+            "totalChroma": 0.3724,
+            "warmShare": 0.1085,
+            "binChroma": [
+              0.01715,
+              0.02325,
+              0.00028,
+              0.00003,
+              0.0001,
+              0.00007,
+              0.20153,
+              0.03397,
+              0.01543,
+              0.00549,
+              0.01489,
+              0.06023
+            ],
+            "binShare": [
+              0.046,
+              0.0624,
+              0.0007,
+              0.0001,
+              0.0003,
+              0.0002,
+              0.5412,
+              0.0912,
+              0.0414,
+              0.0147,
+              0.04,
+              0.1617
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 223.8
+          },
+          "cast": {
+            "px": 456,
+            "pctOfFrame": 0.792,
+            "meanSat": 0.0051,
+            "meanSatWithin": 0.6469,
+            "meanChroma": 0.0037,
+            "meanChromaWithin": 0.4656,
+            "meanLumaWithin": 0.5129,
+            "warmChroma": 0.0038,
+            "coolChroma": 0.0013,
+            "totalChroma": 0.0051,
+            "warmShare": 0.7377,
+            "binChroma": [
+              0.00074,
+              0.00302,
+              0.0001,
+              0.00001,
+              0.00001,
+              0,
+              0.00001,
+              0,
+              0.00008,
+              0.00009,
+              0.00033,
+              0.00071
+            ],
+            "binShare": [
+              0.146,
+              0.5917,
+              0.0197,
+              0.0016,
+              0.0011,
+              0,
+              0.0029,
+              0,
+              0.015,
+              0.0175,
+              0.0646,
+              0.1398
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 21.9
+          },
+          "env": {
+            "px": 57144,
+            "pctOfFrame": 99.208,
+            "meanSat": 0.3706,
+            "meanSatWithin": 0.3736,
+            "meanChroma": 0.2644,
+            "meanChromaWithin": 0.2665,
+            "meanLumaWithin": 0.3668,
+            "warmChroma": 0.0366,
+            "coolChroma": 0.3307,
+            "totalChroma": 0.3673,
+            "warmShare": 0.0998,
+            "binChroma": [
+              0.0164,
+              0.02023,
+              0.00017,
+              0.00002,
+              0.00009,
+              0.00007,
+              0.20151,
+              0.03397,
+              0.01535,
+              0.0054,
+              0.01456,
+              0.05952
+            ],
+            "binShare": [
+              0.0447,
+              0.0551,
+              0.0005,
+              0.0001,
+              0.0003,
+              0.0002,
+              0.5486,
+              0.0925,
+              0.0418,
+              0.0147,
+              0.0396,
+              0.162
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 223.3
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.3127,
+            "envShareInCastBand": 0.1003,
+            "envChromaInCastBand": 0.0368,
+            "hueSeparationDeg": 158.6,
+            "castHueDeg": 21.9,
+            "envHueDeg": 223.3
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": -0.0024,
+            "meanChroma": -0.0148,
+            "warmChroma": 0.0024,
+            "coolChroma": -0.005
+          }
+        }
+      }
+    },
+    {
+      "id": "fryer_south",
+      "x": 560,
+      "y": 790,
+      "fog": 850,
+      "note": "fryer counter, chalkboard, stacked pots, south apron edge",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=560&py=790&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.435,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 17,
+        "playerSalience": 0.5427,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.7691,
+            "rgb": [
+              198,
+              160,
+              100
+            ],
+            "sat": 0.64,
+            "sd": 0.212,
+            "hueDeg": 36.7,
+            "hueBin": 1,
+            "inCastBand": true
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.7541,
+            "rgb": [
+              188,
+              155,
+              99
+            ],
+            "sat": 0.61,
+            "sd": 0.216,
+            "hueDeg": 37.8,
+            "hueBin": 1,
+            "inCastBand": true
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.6824,
+            "rgb": [
+              147,
+              118,
+              127
+            ],
+            "sat": 0.394,
+            "sd": 0.278,
+            "hueDeg": 341.4,
+            "hueBin": 11,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.294,
+          "ringLuma": 0.327,
+          "deltaLuma": -0.033,
+          "playerSat": 0.266,
+          "ringSat": 0.264
+        },
+        "medianLuma": 0.376,
+        "hueHist": [
+          0.052,
+          0.237,
+          0.004,
+          0,
+          0.003,
+          0.04,
+          0.131,
+          0.059,
+          0.077,
+          0.058,
+          0.076,
+          0.262
+        ],
+        "dominantHueDeg": 330,
+        "dominantHueShare": 0.262,
+        "clippedLowPct": 0.07,
+        "clippedHighPct": 0.34,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2709,
+            "meanSatWithin": 0.2709,
+            "meanChroma": 0.1804,
+            "meanChromaWithin": 0.1804,
+            "meanLumaWithin": 0.356,
+            "warmChroma": 0.0739,
+            "coolChroma": 0.1823,
+            "totalChroma": 0.2562,
+            "warmShare": 0.2884,
+            "binChroma": [
+              0.0132,
+              0.06069,
+              0.00115,
+              0.00002,
+              0.00088,
+              0.01025,
+              0.03348,
+              0.01517,
+              0.01969,
+              0.01489,
+              0.01953,
+              0.06722
+            ],
+            "binShare": [
+              0.0515,
+              0.2369,
+              0.0045,
+              0.0001,
+              0.0034,
+              0.04,
+              0.1307,
+              0.0592,
+              0.0769,
+              0.0581,
+              0.0762,
+              0.2624
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 330.5
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2711,
+            "meanSatWithin": 0.2711,
+            "meanChroma": 0.1916,
+            "meanChromaWithin": 0.1916,
+            "meanLumaWithin": 0.3694,
+            "warmChroma": 0.0762,
+            "coolChroma": 0.1813,
+            "totalChroma": 0.2575,
+            "warmShare": 0.296,
+            "binChroma": [
+              0.01193,
+              0.06429,
+              0.00024,
+              0,
+              0.00016,
+              0.00804,
+              0.0425,
+              0.01346,
+              0.01778,
+              0.01025,
+              0.01846,
+              0.07037
+            ],
+            "binShare": [
+              0.0463,
+              0.2497,
+              0.0009,
+              0,
+              0.0006,
+              0.0312,
+              0.1651,
+              0.0523,
+              0.069,
+              0.0398,
+              0.0717,
+              0.2733
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 331.8
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0032,
+            "meanSatWithin": 0.749,
+            "meanChroma": 0.0025,
+            "meanChromaWithin": 0.5735,
+            "meanLumaWithin": 0.5901,
+            "warmChroma": 0.0031,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0032,
+            "warmShare": 0.9523,
+            "binChroma": [
+              0.00046,
+              0.00261,
+              0.00011,
+              0,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1413,
+              0.8109,
+              0.0331,
+              0.0015,
+              0,
+              0,
+              0,
+              0.0039,
+              0,
+              0,
+              0,
+              0.0093
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.6
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.2678,
+            "meanSatWithin": 0.269,
+            "meanChroma": 0.1892,
+            "meanChromaWithin": 0.19,
+            "meanLumaWithin": 0.3685,
+            "warmChroma": 0.0731,
+            "coolChroma": 0.1811,
+            "totalChroma": 0.2543,
+            "warmShare": 0.2877,
+            "binChroma": [
+              0.01147,
+              0.06167,
+              0.00013,
+              0,
+              0.00016,
+              0.00804,
+              0.0425,
+              0.01345,
+              0.01778,
+              0.01025,
+              0.01846,
+              0.07034
+            ],
+            "binShare": [
+              0.0451,
+              0.2426,
+              0.0005,
+              0,
+              0.0006,
+              0.0316,
+              0.1672,
+              0.0529,
+              0.0699,
+              0.0403,
+              0.0726,
+              0.2766
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 330
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.3014,
+            "envShareInCastBand": 0.2882,
+            "envChromaInCastBand": 0.07327,
+            "hueSeparationDeg": 67.6,
+            "castHueDeg": 37.6,
+            "envHueDeg": 330
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": -0.0002,
+            "meanChroma": -0.0112,
+            "warmChroma": -0.0023,
+            "coolChroma": 0.001
+          }
+        }
+      }
+    },
+    {
+      "id": "edge_west",
+      "x": 70,
+      "y": 500,
+      "fog": 850,
+      "note": "hard west edge — apron/kerb occupies a third of the frame",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=70&py=500&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 37,
+        "playerSalience": 0.4459,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.7632,
+            "rgb": [
+              167,
+              134,
+              128
+            ],
+            "sat": 0.426,
+            "sd": 0.266,
+            "hueDeg": 9.2,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.7482,
+            "rgb": [
+              161,
+              134,
+              130
+            ],
+            "sat": 0.389,
+            "sd": 0.26,
+            "hueDeg": 7.7,
+            "hueBin": 0,
+            "inCastBand": false
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.7178,
+            "rgb": [
+              146,
+              117,
+              126
+            ],
+            "sat": 0.405,
+            "sd": 0.294,
+            "hueDeg": 341.4,
+            "hueBin": 11,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.375,
+          "ringLuma": 0.348,
+          "deltaLuma": 0.027,
+          "playerSat": 0.257,
+          "ringSat": 0.199
+        },
+        "medianLuma": 0.316,
+        "hueHist": [
+          0.027,
+          0.074,
+          0.004,
+          0,
+          0.002,
+          0.008,
+          0.239,
+          0.084,
+          0.136,
+          0.231,
+          0.023,
+          0.172
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.239,
+        "clippedLowPct": 0.1,
+        "clippedHighPct": 0.38,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2954,
+            "meanSatWithin": 0.2954,
+            "meanChroma": 0.1744,
+            "meanChromaWithin": 0.1744,
+            "meanLumaWithin": 0.3174,
+            "warmChroma": 0.0286,
+            "coolChroma": 0.256,
+            "totalChroma": 0.2845,
+            "warmShare": 0.1004,
+            "binChroma": [
+              0.00754,
+              0.02103,
+              0.00113,
+              0.00001,
+              0.00066,
+              0.00228,
+              0.06812,
+              0.02398,
+              0.03869,
+              0.06572,
+              0.00657,
+              0.04881
+            ],
+            "binShare": [
+              0.0265,
+              0.0739,
+              0.004,
+              0,
+              0.0023,
+              0.008,
+              0.2394,
+              0.0843,
+              0.136,
+              0.231,
+              0.0231,
+              0.1715
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 268.3
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2931,
+            "meanSatWithin": 0.2931,
+            "meanChroma": 0.1789,
+            "meanChromaWithin": 0.1789,
+            "meanLumaWithin": 0.3166,
+            "warmChroma": 0.0191,
+            "coolChroma": 0.2635,
+            "totalChroma": 0.2826,
+            "warmShare": 0.0676,
+            "binChroma": [
+              0.00422,
+              0.0149,
+              0.00011,
+              0,
+              0,
+              0.00001,
+              0.08231,
+              0.02,
+              0.04011,
+              0.0636,
+              0.00644,
+              0.05094
+            ],
+            "binShare": [
+              0.0149,
+              0.0527,
+              0.0004,
+              0,
+              0,
+              0,
+              0.2912,
+              0.0707,
+              0.1419,
+              0.225,
+              0.0228,
+              0.1802
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 263.4
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7683,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5931,
+            "meanLumaWithin": 0.6073,
+            "warmChroma": 0.0032,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.9541,
+            "binChroma": [
+              0.00049,
+              0.00266,
+              0.00011,
+              0,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1494,
+              0.8046,
+              0.0333,
+              0,
+              0,
+              0,
+              0,
+              0.0037,
+              0,
+              0,
+              0,
+              0.0089
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.2
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.2898,
+            "meanSatWithin": 0.2911,
+            "meanChroma": 0.1763,
+            "meanChromaWithin": 0.1771,
+            "meanLumaWithin": 0.3153,
+            "warmChroma": 0.016,
+            "coolChroma": 0.2634,
+            "totalChroma": 0.2793,
+            "warmShare": 0.0571,
+            "binChroma": [
+              0.00373,
+              0.01223,
+              0,
+              0,
+              0,
+              0.00001,
+              0.08231,
+              0.01998,
+              0.04011,
+              0.0636,
+              0.00644,
+              0.05091
+            ],
+            "binShare": [
+              0.0133,
+              0.0438,
+              0,
+              0,
+              0,
+              0,
+              0.2947,
+              0.0715,
+              0.1436,
+              0.2277,
+              0.023,
+              0.1823
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 262.6
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.0697,
+            "envShareInCastBand": 0.0571,
+            "envChromaInCastBand": 0.01596,
+            "hueSeparationDeg": 134.6,
+            "castHueDeg": 37.2,
+            "envHueDeg": 262.6
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.0023,
+            "meanChroma": -0.0045,
+            "warmChroma": 0.0095,
+            "coolChroma": -0.0075
+          }
+        }
+      }
+    },
+    {
+      "id": "grease_near",
+      "x": 430,
+      "y": 805,
+      "fog": 850,
+      "note": "grease puddle off-centre, as you approach it",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=430&py=805&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 51,
+        "playerSalience": 0.4093,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.7232,
+            "rgb": [
+              166,
+              134,
+              128
+            ],
+            "sat": 0.424,
+            "sd": 0.268,
+            "hueDeg": 9.5,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.7061,
+            "rgb": [
+              159,
+              132,
+              128
+            ],
+            "sat": 0.389,
+            "sd": 0.264,
+            "hueDeg": 7.7,
+            "hueBin": 0,
+            "inCastBand": false
+          },
+          {
+            "cell": "0,6",
+            "salience": 0.6852,
+            "rgb": [
+              174,
+              154,
+              119
+            ],
+            "sat": 0.419,
+            "sd": 0.214,
+            "hueDeg": 38.2,
+            "hueBin": 1,
+            "inCastBand": true
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.385,
+          "ringLuma": 0.352,
+          "deltaLuma": 0.032,
+          "playerSat": 0.262,
+          "ringSat": 0.222
+        },
+        "medianLuma": 0.382,
+        "hueHist": [
+          0.038,
+          0.328,
+          0.004,
+          0,
+          0.007,
+          0.159,
+          0.059,
+          0.044,
+          0.059,
+          0.057,
+          0.057,
+          0.187
+        ],
+        "dominantHueDeg": 30,
+        "dominantHueShare": 0.328,
+        "clippedLowPct": 0.11,
+        "clippedHighPct": 0.34,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.295,
+            "meanSatWithin": 0.295,
+            "meanChroma": 0.1977,
+            "meanChromaWithin": 0.1977,
+            "meanLumaWithin": 0.3707,
+            "warmChroma": 0.1027,
+            "coolChroma": 0.1781,
+            "totalChroma": 0.2808,
+            "warmShare": 0.3658,
+            "binChroma": [
+              0.01073,
+              0.09198,
+              0.00115,
+              0.00002,
+              0.00208,
+              0.04465,
+              0.01647,
+              0.01243,
+              0.01666,
+              0.01607,
+              0.01605,
+              0.05247
+            ],
+            "binShare": [
+              0.0382,
+              0.3276,
+              0.0041,
+              0.0001,
+              0.0074,
+              0.159,
+              0.0587,
+              0.0443,
+              0.0593,
+              0.0572,
+              0.0571,
+              0.1869
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 4.2
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2898,
+            "meanSatWithin": 0.2898,
+            "meanChroma": 0.2039,
+            "meanChromaWithin": 0.2039,
+            "meanLumaWithin": 0.3797,
+            "warmChroma": 0.0984,
+            "coolChroma": 0.1765,
+            "totalChroma": 0.2749,
+            "warmShare": 0.3579,
+            "binChroma": [
+              0.01019,
+              0.08821,
+              0.00014,
+              0.00001,
+              0.00133,
+              0.04249,
+              0.02458,
+              0.00934,
+              0.01549,
+              0.01018,
+              0.01511,
+              0.05784
+            ],
+            "binShare": [
+              0.0371,
+              0.3209,
+              0.0005,
+              0,
+              0.0048,
+              0.1546,
+              0.0894,
+              0.034,
+              0.0563,
+              0.037,
+              0.055,
+              0.2104
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 3.6
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7687,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5934,
+            "meanLumaWithin": 0.6076,
+            "warmChroma": 0.0032,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.9544,
+            "binChroma": [
+              0.0005,
+              0.00266,
+              0.00011,
+              0,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1523,
+              0.802,
+              0.033,
+              0,
+              0,
+              0,
+              0,
+              0.0037,
+              0,
+              0,
+              0,
+              0.0089
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.2
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.2864,
+            "meanSatWithin": 0.2877,
+            "meanChroma": 0.2013,
+            "meanChromaWithin": 0.2022,
+            "meanLumaWithin": 0.3787,
+            "warmChroma": 0.0952,
+            "coolChroma": 0.1764,
+            "totalChroma": 0.2716,
+            "warmShare": 0.3507,
+            "binChroma": [
+              0.00969,
+              0.08555,
+              0.00003,
+              0.00001,
+              0.00133,
+              0.04249,
+              0.02458,
+              0.00933,
+              0.01549,
+              0.01018,
+              0.01511,
+              0.05781
+            ],
+            "binShare": [
+              0.0357,
+              0.315,
+              0.0001,
+              0,
+              0.0049,
+              0.1565,
+              0.0905,
+              0.0343,
+              0.057,
+              0.0375,
+              0.0556,
+              0.2129
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 2.1
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.3634,
+            "envShareInCastBand": 0.3508,
+            "envChromaInCastBand": 0.09527,
+            "hueSeparationDeg": 35.1,
+            "castHueDeg": 37.2,
+            "envHueDeg": 2.1
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.0052,
+            "meanChroma": -0.0062,
+            "warmChroma": 0.0043,
+            "coolChroma": 0.0016
+          }
+        }
+      }
+    },
+    {
+      "id": "grease_in",
+      "x": 560,
+      "y": 900,
+      "fog": 850,
+      "note": "STANDING IN the grease puddle — the slowed player read",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=560&py=900&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 6,
+        "playerSalience": 0.596,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.7322,
+            "rgb": [
+              152,
+              145,
+              139
+            ],
+            "sat": 0.407,
+            "sd": 0.255,
+            "hueDeg": 27.7,
+            "hueBin": 0,
+            "inCastBand": false
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.7133,
+            "rgb": [
+              139,
+              145,
+              143
+            ],
+            "sat": 0.385,
+            "sd": 0.246,
+            "hueDeg": 160,
+            "hueBin": 5,
+            "inCastBand": false
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.6925,
+            "rgb": [
+              133,
+              127,
+              137
+            ],
+            "sat": 0.4,
+            "sd": 0.274,
+            "hueDeg": 276,
+            "hueBin": 9,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.452,
+          "ringLuma": 0.352,
+          "deltaLuma": 0.1,
+          "playerSat": 0.469,
+          "ringSat": 0.234
+        },
+        "medianLuma": 0.379,
+        "hueHist": [
+          0.034,
+          0.19,
+          0.004,
+          0,
+          0.006,
+          0.079,
+          0.121,
+          0.018,
+          0.055,
+          0.053,
+          0.09,
+          0.35
+        ],
+        "dominantHueDeg": 330,
+        "dominantHueShare": 0.35,
+        "clippedLowPct": 0.07,
+        "clippedHighPct": 0.36,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2502,
+            "meanSatWithin": 0.2502,
+            "meanChroma": 0.1715,
+            "meanChromaWithin": 0.1715,
+            "meanLumaWithin": 0.3672,
+            "warmChroma": 0.0531,
+            "coolChroma": 0.1836,
+            "totalChroma": 0.2367,
+            "warmShare": 0.2243,
+            "binChroma": [
+              0.00806,
+              0.04501,
+              0.00103,
+              0.00004,
+              0.00138,
+              0.01875,
+              0.02856,
+              0.00424,
+              0.01302,
+              0.01253,
+              0.02122,
+              0.0828
+            ],
+            "binShare": [
+              0.0341,
+              0.1902,
+              0.0044,
+              0.0002,
+              0.0058,
+              0.0792,
+              0.1207,
+              0.0179,
+              0.055,
+              0.0529,
+              0.0897,
+              0.3499
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 331.6
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2357,
+            "meanSatWithin": 0.2357,
+            "meanChroma": 0.1709,
+            "meanChromaWithin": 0.1709,
+            "meanLumaWithin": 0.3696,
+            "warmChroma": 0.0432,
+            "coolChroma": 0.1777,
+            "totalChroma": 0.2209,
+            "warmShare": 0.1955,
+            "binChroma": [
+              0.00472,
+              0.03847,
+              0.00001,
+              0.00003,
+              0.00062,
+              0.0166,
+              0.03201,
+              0.00443,
+              0.01079,
+              0.00613,
+              0.02193,
+              0.08514
+            ],
+            "binShare": [
+              0.0214,
+              0.1742,
+              0,
+              0.0001,
+              0.0028,
+              0.0751,
+              0.1449,
+              0.02,
+              0.0488,
+              0.0278,
+              0.0993,
+              0.3855
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 329
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0024,
+            "meanSatWithin": 0.5445,
+            "meanChroma": 0.0014,
+            "meanChromaWithin": 0.3146,
+            "meanLumaWithin": 0.6871,
+            "warmChroma": 0.0014,
+            "coolChroma": 0.0009,
+            "totalChroma": 0.0023,
+            "warmShare": 0.6237,
+            "binChroma": [
+              0.00051,
+              0.00094,
+              0,
+              0.00001,
+              0.00001,
+              0.00002,
+              0.00028,
+              0.00036,
+              0.00002,
+              0.00003,
+              0.00006,
+              0.00009
+            ],
+            "binShare": [
+              0.2186,
+              0.4052,
+              0,
+              0.0044,
+              0.0048,
+              0.0075,
+              0.1205,
+              0.1544,
+              0.0095,
+              0.0124,
+              0.025,
+              0.0376
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 25.5
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.2333,
+            "meanSatWithin": 0.2344,
+            "meanChroma": 0.1695,
+            "meanChromaWithin": 0.1702,
+            "meanLumaWithin": 0.3682,
+            "warmChroma": 0.0417,
+            "coolChroma": 0.1768,
+            "totalChroma": 0.2185,
+            "warmShare": 0.191,
+            "binChroma": [
+              0.00421,
+              0.03753,
+              0.00001,
+              0.00002,
+              0.00061,
+              0.01658,
+              0.03173,
+              0.00407,
+              0.01077,
+              0.0061,
+              0.02187,
+              0.08505
+            ],
+            "binShare": [
+              0.0193,
+              0.1717,
+              0,
+              0.0001,
+              0.0028,
+              0.0759,
+              0.1452,
+              0.0186,
+              0.0493,
+              0.0279,
+              0.1001,
+              0.3892
+            ],
+            "dominantBin": 11,
+            "dominantHueDeg": 330,
+            "hueDeg": 328.6
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.425,
+            "envShareInCastBand": 0.191,
+            "envChromaInCastBand": 0.04175,
+            "hueSeparationDeg": 56.9,
+            "castHueDeg": 25.5,
+            "envHueDeg": 328.6
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.0145,
+            "meanChroma": 0.0006,
+            "warmChroma": 0.0099,
+            "coolChroma": 0.0059
+          }
+        }
+      }
+    },
+    {
+      "id": "water_near",
+      "x": 970,
+      "y": 195,
+      "fog": 850,
+      "note": "water puddle off-centre, as you approach it",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=970&py=195&fogRadius=850&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.434,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 37,
+        "playerSalience": 0.4384,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.7765,
+            "rgb": [
+              164,
+              152,
+              147
+            ],
+            "sat": 0.501,
+            "sd": 0.251,
+            "hueDeg": 17.6,
+            "hueBin": 0,
+            "inCastBand": false
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.7163,
+            "rgb": [
+              165,
+              136,
+              130
+            ],
+            "sat": 0.389,
+            "sd": 0.253,
+            "hueDeg": 10.3,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "15,8",
+            "salience": 0.6917,
+            "rgb": [
+              149,
+              126,
+              123
+            ],
+            "sat": 0.392,
+            "sd": 0.273,
+            "hueDeg": 6.9,
+            "hueBin": 0,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.344,
+          "ringLuma": 0.367,
+          "deltaLuma": -0.023,
+          "playerSat": 0.244,
+          "ringSat": 0.241
+        },
+        "medianLuma": 0.383,
+        "hueHist": [
+          0.032,
+          0.202,
+          0.004,
+          0,
+          0.006,
+          0.132,
+          0.227,
+          0.063,
+          0.036,
+          0.034,
+          0.07,
+          0.195
+        ],
+        "dominantHueDeg": 180,
+        "dominantHueShare": 0.227,
+        "clippedLowPct": 0.04,
+        "clippedHighPct": 0.34,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2706,
+            "meanSatWithin": 0.2706,
+            "meanChroma": 0.1874,
+            "meanChromaWithin": 0.1874,
+            "meanLumaWithin": 0.3771,
+            "warmChroma": 0.0606,
+            "coolChroma": 0.1979,
+            "totalChroma": 0.2585,
+            "warmShare": 0.2344,
+            "binChroma": [
+              0.00832,
+              0.05228,
+              0.00112,
+              0.00001,
+              0.0016,
+              0.03406,
+              0.05869,
+              0.01622,
+              0.00918,
+              0.00871,
+              0.018,
+              0.05028
+            ],
+            "binShare": [
+              0.0322,
+              0.2023,
+              0.0043,
+              0,
+              0.0062,
+              0.1318,
+              0.2271,
+              0.0628,
+              0.0355,
+              0.0337,
+              0.0697,
+              0.1945
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 290.6
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.2566,
+            "meanSatWithin": 0.2566,
+            "meanChroma": 0.1862,
+            "meanChromaWithin": 0.1862,
+            "meanLumaWithin": 0.3788,
+            "warmChroma": 0.0524,
+            "coolChroma": 0.1909,
+            "totalChroma": 0.2433,
+            "warmShare": 0.2152,
+            "binChroma": [
+              0.00513,
+              0.04722,
+              0.00012,
+              0,
+              0.00087,
+              0.0319,
+              0.07102,
+              0.00867,
+              0.00501,
+              0.0046,
+              0.01762,
+              0.05112
+            ],
+            "binShare": [
+              0.0211,
+              0.1941,
+              0.0005,
+              0,
+              0.0036,
+              0.1311,
+              0.2919,
+              0.0356,
+              0.0206,
+              0.0189,
+              0.0724,
+              0.2101
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 274.8
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7679,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5928,
+            "meanLumaWithin": 0.6068,
+            "warmChroma": 0.0032,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.954,
+            "binChroma": [
+              0.0005,
+              0.00266,
+              0.00011,
+              0,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.15,
+              0.804,
+              0.0334,
+              0,
+              0,
+              0,
+              0,
+              0.0037,
+              0,
+              0,
+              0,
+              0.0089
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.2
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.2532,
+            "meanSatWithin": 0.2543,
+            "meanChroma": 0.1836,
+            "meanChromaWithin": 0.1844,
+            "meanLumaWithin": 0.3778,
+            "warmChroma": 0.0492,
+            "coolChroma": 0.1908,
+            "totalChroma": 0.24,
+            "warmShare": 0.205,
+            "binChroma": [
+              0.00463,
+              0.04456,
+              0.00001,
+              0,
+              0.00087,
+              0.0319,
+              0.07102,
+              0.00866,
+              0.00501,
+              0.0046,
+              0.01762,
+              0.05109
+            ],
+            "binShare": [
+              0.0193,
+              0.1857,
+              0,
+              0,
+              0.0036,
+              0.1329,
+              0.296,
+              0.0361,
+              0.0209,
+              0.0192,
+              0.0734,
+              0.2129
+            ],
+            "dominantBin": 6,
+            "dominantHueDeg": 180,
+            "hueDeg": 269.6
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.2176,
+            "envShareInCastBand": 0.205,
+            "envChromaInCastBand": 0.0492,
+            "hueSeparationDeg": 127.6,
+            "castHueDeg": 37.2,
+            "envHueDeg": 269.6
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": 0.014,
+            "meanChroma": 0.0012,
+            "warmChroma": 0.0082,
+            "coolChroma": 0.007
+          }
+        }
+      }
+    },
+    {
+      "id": "fog_boundary",
+      "x": 1090,
+      "y": 500,
+      "fog": 420,
+      "note": "safe-zone wall ~30wu ahead of the player",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=1090&py=500&fogRadius=420&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.768,
+        "castCells": 444
+      },
+      "metrics": {
+        "playerRank": 2,
+        "playerSalience": 0.8338,
+        "topOther": [
+          {
+            "cell": "8,8",
+            "salience": 0.8403,
+            "rgb": [
+              160,
+              126,
+              147
+            ],
+            "sat": 0.538,
+            "sd": 0.312,
+            "hueDeg": 322.9,
+            "hueBin": 10,
+            "inCastBand": false
+          },
+          {
+            "cell": "7,8",
+            "salience": 0.7836,
+            "rgb": [
+              144,
+              120,
+              112
+            ],
+            "sat": 0.428,
+            "sd": 0.322,
+            "hueDeg": 15,
+            "hueBin": 0,
+            "inCastBand": false
+          },
+          {
+            "cell": "6,7",
+            "salience": 0.6959,
+            "rgb": [
+              156,
+              133,
+              92
+            ],
+            "sat": 0.348,
+            "sd": 0.207,
+            "hueDeg": 38.4,
+            "hueBin": 1,
+            "inCastBand": true
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.398,
+          "ringLuma": 0.346,
+          "deltaLuma": 0.052,
+          "playerSat": 0.486,
+          "ringSat": 0.356
+        },
+        "medianLuma": 0.217,
+        "hueHist": [
+          0.032,
+          0.099,
+          0.004,
+          0,
+          0.002,
+          0.006,
+          0.127,
+          0.052,
+          0.078,
+          0.52,
+          0.04,
+          0.04
+        ],
+        "dominantHueDeg": 270,
+        "dominantHueShare": 0.52,
+        "clippedLowPct": 0.03,
+        "clippedHighPct": 0.41,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3797,
+            "meanSatWithin": 0.3797,
+            "meanChroma": 0.2156,
+            "meanChromaWithin": 0.2156,
+            "meanLumaWithin": 0.2997,
+            "warmChroma": 0.0492,
+            "coolChroma": 0.3254,
+            "totalChroma": 0.3746,
+            "warmShare": 0.1313,
+            "binChroma": [
+              0.01196,
+              0.03723,
+              0.00144,
+              0.00002,
+              0.0008,
+              0.00224,
+              0.04771,
+              0.01936,
+              0.02905,
+              0.19489,
+              0.01485,
+              0.01506
+            ],
+            "binShare": [
+              0.0319,
+              0.0994,
+              0.0038,
+              0.0001,
+              0.0021,
+              0.006,
+              0.1274,
+              0.0517,
+              0.0775,
+              0.5203,
+              0.0396,
+              0.0402
+            ],
+            "dominantBin": 9,
+            "dominantHueDeg": 270,
+            "hueDeg": 276.8
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.3823,
+            "meanSatWithin": 0.3823,
+            "meanChroma": 0.2231,
+            "meanChromaWithin": 0.2231,
+            "meanLumaWithin": 0.3044,
+            "warmChroma": 0.0435,
+            "coolChroma": 0.3345,
+            "totalChroma": 0.3781,
+            "warmShare": 0.1152,
+            "binChroma": [
+              0.00931,
+              0.03423,
+              0.00041,
+              0.00001,
+              0.00007,
+              0.00007,
+              0.05249,
+              0.01903,
+              0.02698,
+              0.20465,
+              0.01554,
+              0.01528
+            ],
+            "binShare": [
+              0.0246,
+              0.0905,
+              0.0011,
+              0,
+              0.0002,
+              0.0002,
+              0.1388,
+              0.0503,
+              0.0714,
+              0.5413,
+              0.0411,
+              0.0404
+            ],
+            "dominantBin": 9,
+            "dominantHueDeg": 270,
+            "hueDeg": 275.8
+          },
+          "cast": {
+            "px": 444,
+            "pctOfFrame": 0.771,
+            "meanSat": 0.0049,
+            "meanSatWithin": 0.6388,
+            "meanChroma": 0.0038,
+            "meanChromaWithin": 0.4873,
+            "meanLumaWithin": 0.476,
+            "warmChroma": 0.0034,
+            "coolChroma": 0.0014,
+            "totalChroma": 0.0049,
+            "warmShare": 0.7044,
+            "binChroma": [
+              0.00066,
+              0.00279,
+              0.00011,
+              0,
+              0,
+              0,
+              0.00001,
+              0,
+              0.00024,
+              0.00051,
+              0.00034,
+              0.00023
+            ],
+            "binShare": [
+              0.1342,
+              0.5702,
+              0.0229,
+              0,
+              0,
+              0,
+              0.0017,
+              0.0009,
+              0.0494,
+              0.1051,
+              0.0689,
+              0.0467
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 17.2
+          },
+          "env": {
+            "px": 57156,
+            "pctOfFrame": 99.229,
+            "meanSat": 0.3773,
+            "meanSatWithin": 0.3803,
+            "meanChroma": 0.2193,
+            "meanChromaWithin": 0.221,
+            "meanLumaWithin": 0.3031,
+            "warmChroma": 0.0401,
+            "coolChroma": 0.3331,
+            "totalChroma": 0.3732,
+            "warmShare": 0.1074,
+            "binChroma": [
+              0.00866,
+              0.03144,
+              0.00029,
+              0.00001,
+              0.00007,
+              0.00007,
+              0.05248,
+              0.01902,
+              0.02674,
+              0.20414,
+              0.0152,
+              0.01506
+            ],
+            "binShare": [
+              0.0232,
+              0.0843,
+              0.0008,
+              0,
+              0.0002,
+              0.0002,
+              0.1406,
+              0.051,
+              0.0717,
+              0.547,
+              0.0407,
+              0.0403
+            ],
+            "dominantBin": 9,
+            "dominantHueDeg": 270,
+            "hueDeg": 275
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.3464,
+            "envShareInCastBand": 0.1083,
+            "envChromaInCastBand": 0.04039,
+            "hueSeparationDeg": 102.2,
+            "castHueDeg": 17.2,
+            "envHueDeg": 275
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": -0.0026,
+            "meanChroma": -0.0075,
+            "warmChroma": 0.0057,
+            "coolChroma": -0.0091
+          }
+        }
+      }
+    },
+    {
+      "id": "fog_inside",
+      "x": 1240,
+      "y": 500,
+      "fog": 420,
+      "note": "standing INSIDE the death zone, 50 HP/s",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=1240&py=500&fogRadius=420&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.507,
+        "castCells": 288
+      },
+      "metrics": {
+        "playerRank": 8,
+        "playerSalience": 0.7126,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.8393,
+            "rgb": [
+              143,
+              107,
+              135
+            ],
+            "sat": 0.601,
+            "sd": 0.336,
+            "hueDeg": 313.3,
+            "hueBin": 10,
+            "inCastBand": false
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.828,
+            "rgb": [
+              135,
+              105,
+              134
+            ],
+            "sat": 0.588,
+            "sd": 0.334,
+            "hueDeg": 302,
+            "hueBin": 10,
+            "inCastBand": false
+          },
+          {
+            "cell": "4,5",
+            "salience": 0.7524,
+            "rgb": [
+              160,
+              98,
+              190
+            ],
+            "sat": 0.645,
+            "sd": 0.198,
+            "hueDeg": 280.4,
+            "hueBin": 9,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.24,
+          "ringLuma": 0.179,
+          "deltaLuma": 0.061,
+          "playerSat": 0.458,
+          "ringSat": 0.488
+        },
+        "medianLuma": 0.179,
+        "hueHist": [
+          0.027,
+          0.047,
+          0.002,
+          0,
+          0.001,
+          0.004,
+          0,
+          0.015,
+          0.265,
+          0.602,
+          0.024,
+          0.013
+        ],
+        "dominantHueDeg": 270,
+        "dominantHueShare": 0.602,
+        "clippedLowPct": 0.03,
+        "clippedHighPct": 0.34,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.4548,
+            "meanSatWithin": 0.4548,
+            "meanChroma": 0.2371,
+            "meanChromaWithin": 0.2371,
+            "meanLumaWithin": 0.2441,
+            "warmChroma": 0.0331,
+            "coolChroma": 0.4177,
+            "totalChroma": 0.4508,
+            "warmShare": 0.0734,
+            "binChroma": [
+              0.01199,
+              0.02111,
+              0.00109,
+              0.00003,
+              0.00067,
+              0.00177,
+              0.00006,
+              0.0068,
+              0.11949,
+              0.27139,
+              0.01061,
+              0.00583
+            ],
+            "binShare": [
+              0.0266,
+              0.0468,
+              0.0024,
+              0.0001,
+              0.0015,
+              0.0039,
+              0.0001,
+              0.0151,
+              0.265,
+              0.602,
+              0.0235,
+              0.0129
+            ],
+            "dominantBin": 9,
+            "dominantHueDeg": 270,
+            "hueDeg": 277.6
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.4301,
+            "meanSatWithin": 0.4301,
+            "meanChroma": 0.2176,
+            "meanChromaWithin": 0.2176,
+            "meanLumaWithin": 0.2413,
+            "warmChroma": 0.0308,
+            "coolChroma": 0.3937,
+            "totalChroma": 0.4245,
+            "warmShare": 0.0725,
+            "binChroma": [
+              0.00893,
+              0.02183,
+              0.00026,
+              0,
+              0.00001,
+              0,
+              0.00326,
+              0.00632,
+              0.12883,
+              0.23679,
+              0.01022,
+              0.00805
+            ],
+            "binShare": [
+              0.021,
+              0.0514,
+              0.0006,
+              0,
+              0,
+              0,
+              0.0077,
+              0.0149,
+              0.3035,
+              0.5578,
+              0.0241,
+              0.019
+            ],
+            "dominantBin": 9,
+            "dominantHueDeg": 270,
+            "hueDeg": 275.9
+          },
+          "cast": {
+            "px": 288,
+            "pctOfFrame": 0.5,
+            "meanSat": 0.0024,
+            "meanSatWithin": 0.485,
+            "meanChroma": 0.0013,
+            "meanChromaWithin": 0.2646,
+            "meanLumaWithin": 0.61,
+            "warmChroma": 0.0014,
+            "coolChroma": 0.0009,
+            "totalChroma": 0.0023,
+            "warmShare": 0.6132,
+            "binChroma": [
+              0.00138,
+              0.00006,
+              0.00001,
+              0,
+              0.00001,
+              0,
+              0,
+              0.00001,
+              0,
+              0.00011,
+              0.00024,
+              0.00052
+            ],
+            "binShare": [
+              0.5872,
+              0.0259,
+              0.0053,
+              0.0013,
+              0.006,
+              0,
+              0,
+              0.0034,
+              0,
+              0.0467,
+              0.1038,
+              0.2204
+            ],
+            "dominantBin": 0,
+            "dominantHueDeg": 0,
+            "hueDeg": 3.3
+          },
+          "env": {
+            "px": 57312,
+            "pctOfFrame": 99.5,
+            "meanSat": 0.4277,
+            "meanSatWithin": 0.4298,
+            "meanChroma": 0.2163,
+            "meanChromaWithin": 0.2173,
+            "meanLumaWithin": 0.2394,
+            "warmChroma": 0.0293,
+            "coolChroma": 0.3928,
+            "totalChroma": 0.4222,
+            "warmShare": 0.0694,
+            "binChroma": [
+              0.00755,
+              0.02176,
+              0.00025,
+              0,
+              0,
+              0,
+              0.00326,
+              0.00631,
+              0.12883,
+              0.23668,
+              0.00998,
+              0.00753
+            ],
+            "binShare": [
+              0.0179,
+              0.0516,
+              0.0006,
+              0,
+              0,
+              0,
+              0.0077,
+              0.015,
+              0.3052,
+              0.5607,
+              0.0236,
+              0.0178
+            ],
+            "dominantBin": 9,
+            "dominantHueDeg": 270,
+            "hueDeg": 275.5
+          },
+          "collision": {
+            "castBandDeg": [
+              330,
+              0,
+              30
+            ],
+            "hueOverlap": 0.1359,
+            "envShareInCastBand": 0.0873,
+            "envChromaInCastBand": 0.03684,
+            "hueSeparationDeg": 87.8,
+            "castHueDeg": 3.3,
+            "envHueDeg": 275.5
+          },
+          "castBandBins": [
+            11,
+            0,
+            1
+          ],
+          "hudDelta": {
+            "meanSat": 0.0247,
+            "meanChroma": 0.0195,
+            "warmChroma": 0.0023,
+            "coolChroma": 0.024
+          }
+        }
+      }
+    },
+    {
+      "id": "fog_late",
+      "x": 700,
+      "y": 340,
+      "fog": 200,
+      "note": "late match, ring closed to 200wu around the pot",
+      "url": "http://localhost:52964/?player=hamburger&enemy=donut&px=700&py=340&fogRadius=200&simSpeed=0.02&pointerLock=0",
+      "view": {
+        "aspect": 1.7777777777777777,
+        "distanceM": 26.62180487238515,
+        "binding": "depth",
+        "nearUnits": 199.21999999999997,
+        "farUnits": 199.21999999999997,
+        "halfWidthUnits": 289.3903127215572,
+        "halfWidthAtFairEdgeUnits": 221.04855884748974,
+        "guaranteedRadiusUnits": 199.21999999999997
+      },
+      "ok": true,
+      "errors": [],
+      "matte": {
+        "buffer": [
+          1600,
+          900
+        ],
+        "castRoots": 2,
+        "castRootNames": [
+          "character:hamburger",
+          "character:donut"
+        ],
+        "castPxPctFullRes": 0.435,
+        "castCells": 249
+      },
+      "metrics": {
+        "playerRank": 4,
+        "playerSalience": 0.7333,
+        "topOther": [
+          {
+            "cell": "7,8",
+            "salience": 0.8327,
+            "rgb": [
+              194,
+              151,
+              114
+            ],
+            "sat": 0.628,
+            "sd": 0.232,
+            "hueDeg": 27.8,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "8,8",
+            "salience": 0.823,
+            "rgb": [
+              182,
+              147,
+              113
+            ],
+            "sat": 0.588,
+            "sd": 0.24,
+            "hueDeg": 29.6,
+            "hueBin": 0,
+            "inCastBand": true
+          },
+          {
+            "cell": "14,8",
+            "salience": 0.7362,
+            "rgb": [
+              130,
+              86,
+              151
+            ],
+            "sat": 0.617,
+            "sd": 0.279,
+            "hueDeg": 280.6,
+            "hueBin": 9,
+            "inCastBand": false
+          }
+        ],
+        "centreContrast": {
+          "playerLuma": 0.383,
+          "ringLuma": 0.358,
+          "deltaLuma": 0.025,
+          "playerSat": 0.467,
+          "ringSat": 0.415
+        },
+        "medianLuma": 0.303,
+        "hueHist": [
+          0.061,
+          0.077,
+          0.003,
+          0,
+          0.002,
+          0.005,
+          0.066,
+          0.15,
+          0.164,
+          0.399,
+          0.019,
+          0.053
+        ],
+        "dominantHueDeg": 270,
+        "dominantHueShare": 0.399,
+        "clippedLowPct": 0.18,
+        "clippedHighPct": 0.6,
+        "colour": {
+          "all": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.4383,
+            "meanSatWithin": 0.4383,
+            "meanChroma": 0.2657,
+            "meanChromaWithin": 0.2657,
+            "meanLumaWithin": 0.3249,
+            "warmChroma": 0.0602,
+            "coolChroma": 0.3749,
+            "totalChroma": 0.4352,
+            "warmShare": 0.1384,
+            "binChroma": [
+              0.02655,
+              0.03369,
+              0.00114,
+              0.00001,
+              0.0008,
+              0.00237,
+              0.02856,
+              0.06536,
+              0.07142,
+              0.17378,
+              0.00822,
+              0.02327
+            ],
+            "binShare": [
+              0.061,
+              0.0774,
+              0.0026,
+              0,
+              0.0018,
+              0.0054,
+              0.0656,
+              0.1502,
+              0.1641,
+              0.3993,
+              0.0189,
+              0.0535
+            ],
+            "dominantBin": 9,
+            "dominantHueDeg": 270,
+            "hueDeg": 274.4
+          },
+          "arena": {
+            "px": 57600,
+            "pctOfFrame": 100,
+            "meanSat": 0.4463,
+            "meanSatWithin": 0.4463,
+            "meanChroma": 0.2809,
+            "meanChromaWithin": 0.2809,
+            "meanLumaWithin": 0.3268,
+            "warmChroma": 0.0593,
+            "coolChroma": 0.384,
+            "totalChroma": 0.4433,
+            "warmShare": 0.1338,
+            "binChroma": [
+              0.03008,
+              0.02923,
+              0.00011,
+              0,
+              0.0001,
+              0.00019,
+              0.02849,
+              0.07088,
+              0.07122,
+              0.18221,
+              0.00819,
+              0.02259
+            ],
+            "binShare": [
+              0.0679,
+              0.0659,
+              0.0003,
+              0,
+              0.0002,
+              0.0004,
+              0.0643,
+              0.1599,
+              0.1607,
+              0.411,
+              0.0185,
+              0.051
+            ],
+            "dominantBin": 9,
+            "dominantHueDeg": 270,
+            "hueDeg": 274.1
+          },
+          "cast": {
+            "px": 249,
+            "pctOfFrame": 0.432,
+            "meanSat": 0.0033,
+            "meanSatWithin": 0.7735,
+            "meanChroma": 0.0026,
+            "meanChromaWithin": 0.5925,
+            "meanLumaWithin": 0.6094,
+            "warmChroma": 0.0032,
+            "coolChroma": 0.0002,
+            "totalChroma": 0.0033,
+            "warmShare": 0.9507,
+            "binChroma": [
+              0.00052,
+              0.00265,
+              0.00011,
+              0,
+              0,
+              0,
+              0,
+              0.00002,
+              0,
+              0,
+              0,
+              0.00003
+            ],
+            "binShare": [
+              0.1554,
+              0.7952,
+              0.0331,
+              0,
+              0,
+              0,
+              0,
+              0.0074,
+              0,
+              0,
+              0,
+              0.0089
+            ],
+            "dominantBin": 1,
+            "dominantHueDeg": 30,
+            "hueDeg": 37.1
+          },
+          "env": {
+            "px": 57351,
+            "pctOfFrame": 99.568,
+            "meanSat": 0.4429,
+            "meanSatWithin": 0.4449,
+            "meanChroma": 0.2783,
+            "meanChromaWithin": 0.2796,
+            "meanLumaWithin": 0.3255,
+            "warmChroma": 0.0561,
+            "coolChroma": 0.3838,
+            "totalChroma": 0.44,
+            "warmShare": 0.1276,
+            "binChroma": [
+              0.02957,
+              0.02658,
+              0,
+              0,
+              0.0001,
+              0.00019,
+              0.02849,
+              0.07086,
+              0.07122,
+              0.18221,
+              0.00819,
+              0.02256
+            ],
+            "binShare": [
+              0.0672,
+              0.0604,
+              0,
+              0,
+              0.0002,
+              0.0004,
+              0.0648,
+              0.1611,
+              0.1619,
+              0.4142,
+              0.0186,
+              0.0513
+            ],
+            "dominantBin": 9,
+            "dominantHueDeg": 270,
+            "hueDeg": 273.5
+          },
+          "collision": {
+            "castBandDeg": [
+              0,
+              30,
+              60
+            ],
+            "hueOverlap": 0.1439,
+            "envShareInCastBand": 0.1276,
+            "envChromaInCastBand": 0.05615,
+            "hueSeparationDeg": 123.6,
+            "castHueDeg": 37.1,
+            "envHueDeg": 273.5
+          },
+          "castBandBins": [
+            0,
+            1,
+            2
+          ],
+          "hudDelta": {
+            "meanSat": -0.008,
+            "meanChroma": -0.0152,
+            "warmChroma": 0.0009,
+            "coolChroma": -0.0091
+          }
+        }
+      }
+    }
+  ]
+}
