@@ -62,8 +62,10 @@ export function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.G
   // was a ~10% value step, i.e. no step at all on screen — measured.
   addCoverSides(g, bw, bd, y0, bodyTop - capT - y0, M.steel, M.steelDark, 0.09, 'freezer_body');
 
-  // ── The roof, and why it is no longer the brightest plane in the arena ────────
-  // Measured at prop framing before this change: the `freezerLid` roof rendered
+  // ── The roof, and the value it has to clear ───────────────────────────────────
+  // HISTORY — superseded by the measured table further down; kept because it records
+  // what the failure looked like each time. Measured at prop framing: the `freezerLid`
+  // roof rendered
   // rgb(93,227,249) — **luma 200.4, V 0.976, blue one step off the rail** — while the
   // walkable `utility_mat` it stands on rendered luma 184.9. **15 luma between a
   // 11.5 x 9.5m solid roof and the floor pad under it**, both flat, both crisp-edged,
@@ -73,9 +75,10 @@ export function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.G
   // value cue telling it which of two big pale cyan rectangles stops a bullet.
   //
   // Two changes, both here rather than in `shared.ts` (not this agent's file):
-  //   1. the roof drops to a mid cyan-steel, so it sits BELOW the pale mat and well
-  //      above its own walls (luma 98) — the prop now owns a real value ladder
-  //      instead of two clipped planes;
+  //   1. the roof leaves the clipped near-white cyan for a keyed value that clears the
+  //      pad it stands on by a wide margin in BOTH directions — the prop now owns a real
+  //      value ladder instead of two clipped planes. See the table below for the number,
+  //      which has had to move twice;
   //   2. a raised PARAPET kerb rings it. A roof bounded by a raised edge is a
   //      building; a plane that runs flat to its own boundary is a floor. It is also
   //      the one piece of "chamfered edge" geometry that survives shipped framing
@@ -85,7 +88,42 @@ export function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.G
   // leaves the cue dependent on a single channel. Down another step so the roof is
   // also unambiguously darker than the pad and unambiguously brighter than its own
   // walls (luma 74): a three-rung ladder on the axis that survives everything.
-  const roofMat = tinted(M, M.freezerLid, '#3E8399');
+  //
+  // ── THIS CONSTANT HAS GONE STALE TWICE. RE-MEASURE BEFORE YOU TRUST IT. ────────
+  // Every number in the paragraph above was true when it was written and none of them
+  // is true now, because the surface this is keyed against — `floor.ts`'s WALKABLE
+  // utility pad — has been re-keyed twice underneath it, both times by a different
+  // agent. That is the whole story of this constant, and it is why the measurement is
+  // recorded here rather than the conclusion.
+  //
+  // Sampled at the `freezer_nw` scan station with `tools/tmp/caphex.mjs`, which reports
+  // what a material ARRIVES at rather than what it was authored as:
+  //
+  //   generation   BLOCKING freezer roof          WALKABLE utility pad        gap
+  //   r1  #4FA8C4  luma 152                       luma 153                    1   <- bug
+  //   r2  #3E8399  luma 117  hue 194  sat 0.89    luma 109  hue 198 sat 0.44   8   <- bug
+  //   now #4A9DB8  luma 143  hue 193  sat 0.89    luma  78  hue 199 sat 0.44  65
+  //                                              (bright variant, luma 117)   26
+  //
+  // The r2 pair is the documented blocking-vs-walkable failure envelope almost exactly
+  // (within ~3 deg of hue and ~10 luma), with the roof BRIGHTER than the pad rather than
+  // darker as intended — and it is not a small surface: at this station the roof is 13.8%
+  // of the frame and the pad it stands on is 17.7%, so the failure was two enormous cyan
+  // rectangles with nothing but saturation between them.
+  //
+  // The pad is now TWO variants, luma 78 (17.7% of frame) and luma 117 (1.7%), so any
+  // roof value between ~90 and ~110 is trapped between them. The only positions with
+  // real clearance are above both or below the freezer's own steel walls (50), and below
+  // the walls inverts the prop. So the roof goes clearly ABOVE: luma 143, which is 65
+  // clear of the dominant pad, 26 clear of the bright one, and 93 above its own walls —
+  // the bright cap the cover grammar asks for, with the biggest margin available in
+  // either direction.
+  //
+  // Chroma is deliberately KEPT at 0.89. Cool chroma is the half of the wheel the ten
+  // reference plates run at full strength (0.343) and this arena is at 72% of that even
+  // after this pass, so quieting a cool surface is the one move the saturation contract
+  // explicitly forbids. VALUE, not saturation, was wrong here — twice.
+  const roofMat = tinted(M, M.freezerLid, '#4A9DB8');
   addCoverCap(g, wM, dM, bodyTop, capT, roofMat, 'freezer_lid');
 
   const parapetH = 0.24, parapetT = Math.min(wM, dM) * 0.05;
@@ -262,7 +300,15 @@ export function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Grou
   // everything to HSV 1.00 (see PROGRESS). A pale pine lid at roughly S 0.4 against a
   // pad at S 0.81 is unmistakable at any zoom, keeps the crate's bright cap, and reads
   // as bare untreated crate timber rather than the pad's varnished decking.
-  const lidMat = tinted(M, M.crateWood, '#DEBE87');
+  //
+  // Re-measured at `pantry_ne` after the floor re-key: '#DEBE87' was arriving
+  // rgb(232,192,97) — **luma 194, sat 0.58** — against a plank pad that has since fallen
+  // to luma 115 / sat 0.24. So the pad went quiet and the lid did not, leaving it the
+  // brightest plane in the arena once the prep-counter cap comes down to 168, and the
+  // MORE saturated of the pair rather than the less. Now rgb(202,177,130), luma 179,
+  // sat 0.36: still unmistakably the crate's bright cap (64 luma over the pad), still
+  // bare pine, no longer the loudest thing in the pantry.
+  const lidMat = tinted(M, M.crateWood, '#BFAE96');
   addCoverSides(g, bw, bd, y0, h1 - capT, M.cabinetDark, M.crateSlat, 0.05, 'crate_bottom');
   addCoverCap(g, wM, dM, y0 + h1, capT, lidMat, 'crate_bottom_lid');
 
@@ -394,9 +440,18 @@ export function buildFlourSack(M: Materials, wM: number, dM: number): THREE.Grou
   // all from the gameplay pitch, so the whole assembly had nothing under it saying
   // "solid". 0.34m of deck plus visible bearer blocks is what a pallet actually looks
   // like and is thick enough to show an edge at shipped framing.
+  // r5, and the same stale-measurement story as the freezer roof: the deck was lifted
+  // to '#B08A5E' to clear the cast-shadow band, and it did — but sampled at `pantry_ne`
+  // it now arrives rgb(175,118,47), **luma 125 / hue 33 / sat 0.73**, against the
+  // WALKABLE plank pad it stands on at luma 115 / hue 31 / sat 0.24. Ten luma and TWO
+  // degrees of hue: a solid pallet and a painted floor pad, in the documented failure
+  // envelope, separated by saturation alone. Opened up to rgb(158,130,83) — luma 133,
+  // sat 0.47 — which doubles the value gap to 18 and takes a third of the chroma out of
+  // a warm surface the reference has no room for, while staying clear of the shadow
+  // band (81) that made a `crateSlat` deck read as a hole.
   const kick = addCoverPlinth(g, M, wM, dM, 0.1);
   const deckH = 0.34;
-  const deckMat = tinted(M, M.crateSlat, '#B08A5E');
+  const deckMat = tinted(M, M.crateSlat, '#A89478');
   const deck = mesh(roundedBox(wM * 0.98, deckH, dM * 0.98, 0.03), deckMat, 'sack_pallet');
   deck.position.y = kick + deckH / 2;
   g.add(deck);

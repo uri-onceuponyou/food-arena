@@ -208,20 +208,75 @@ export function tinted(M: Materials, base: THREE.Material, hex: string): THREE.M
   return m;
 }
 
-/** Prep counter top. `butcherBlock` (#E4C48C) with ~12% of its value taken back, so the
- * block texture and the key light both have somewhere to go. */
-const prepCap = (M: Materials) => tinted(M, M.butcherBlock, '#C9AD7B');
-
-/** Stove island top.
+/**
+ * ── THE HUE CONTRACT, and why the two cap constants were the whole game ─────────
  *
- * `cabinet` (#C1731E) rendered rgb(244,118,14) — S 0.944 with red one step from the
- * rail, the same no-headroom problem as the prep cap one notch less severe. r1 took it
- * to '#AE6820'; r2's critic then measured the remaining half of the problem, which is
- * hue rather than headroom: the lit cap and the lit floor tile land **within 3 degrees
- * of each other**, and the cap is the single biggest surface on the arena's most
- * numerous cover prop. Pushed up in value and ~13 degrees toward amber, so it clears
- * the terracotta on both axes while staying recognisably the arena's warm accent. */
-const stoveCap = (M: Materials) => tinted(M, M.cabinet, '#CE8C2E');
+ * `tools/tmp/matcover.mjs` (an ID-buffer pass reporting each material's exact share of
+ * frame and the colour it ARRIVES at after lighting + the grade) settled a scoping
+ * argument that three rounds of critique could not. Measured over the arena scan's own
+ * stations, the two constants below owned more of the screen than the whole of `KPAL`'s
+ * warm half put together:
+ *
+ *   kpal:cabinet      #CE8C2E  7.3% of frame   rgb(243,146,9)   hue  35  sat 0.96  luma 157
+ *   kpal:butcherBlock #C9AD7B  3.2% of frame   rgb(240,195,94)  hue  42  sat 0.61  luma 197
+ *
+ * The first is the loudest single environment surface in the game and the second is the
+ * brightest. Both arena critics, independently, spent their #1 fix on the same sentence:
+ * *"the two large counter slabs — get the saturated orange off them."*
+ *
+ * ── The contract is NOT "desaturate" — that was tried three times and measured wrong ─
+ * The ten curated reference plates run mean saturation 0.493, COOL chroma 0.343, WARM
+ * chroma 0.145. Three dutiful desaturation rounds had taken this arena to 0.302 — below
+ * every plate — by cutting the cool half for free, which is exactly the "muddy /
+ * drained" both critics reported. **The reference reserves HUE, not saturation: a
+ * saturated COOL ground at full chroma with the warm half of the wheel left empty for
+ * the cast and the VFX.** Measured over the same 18 stations before this change, the
+ * arena ran warm chroma 0.241 (66% ABOVE reference) against cool 0.153 (55% BELOW), and
+ * 7.3% of the frame in one warm surface at saturation 0.96 is most of the reason.
+ *
+ * So the stove cap leaves the warm half rather than being greyed, and the prep cap —
+ * the arena's remaining large warm identity surface — is held at reference chroma
+ * instead of being taken to grey. `tools/tmp/simfix.mjs` (overrides materials in the
+ * live page and re-runs `arena-scan`'s own salience analysis) priced every candidate
+ * before a line was written; the pair below moved playerRank mean 35.2 -> 27.2 and
+ * flipped player-minus-surround saturation from -0.017 to +0.023 on their own.
+ */
+
+/** Prep counter top — the arena's one large surface that stays WARM.
+ *
+ * `butcherBlock` (#E4C48C) at -12% value was still arriving at luma 197 / sat 0.61 over
+ * 3.2% of the frame: the brightest plane in the map and, after the stove cap moves cool,
+ * the only big warm one left. Held rather than greyed, because the reference's warm
+ * chroma is 0.145, not zero — it is the deliberate warm note the cast is read against.
+ * Arrives rgb(190,167,117), hue 41, sat 0.38, luma 168: 48 luma clear of the walkable
+ * plank pad (115) and 53 clear of the lit floor tile (115). */
+const prepCap = (M: Materials) => tinted(M, M.butcherBlock, '#A2957E');
+
+/** Stove island top — the single biggest lever in the arena, and now COOL.
+ *
+ * `cabinet` (#C1731E) arrived rgb(243,146,9): HSV saturation **0.96**, value 0.95, red
+ * railed and blue crushed to 9, over **7.3% of every frame** — on the most numerous
+ * cover prop in the map. Five earlier rounds moved it along the warm ladder
+ * (#AE6820 -> #CE8C2E) and each time it came back railed, because the problem was never
+ * headroom: it was that the arena's largest cover slab was sitting in the same half of
+ * the colour wheel as the cast.
+ *
+ * Slate steel-blue, arriving rgb(94,152,208), hue 209, sat 0.55, val 0.82, luma 144.
+ * A commercial range top is steel, so this costs nothing in read; what it buys is that
+ * 7.3% of the frame moves out of the warm band and INTO the half the reference keeps at
+ * full chroma. Measured: warm 0-60 deg share 0.624 -> 0.517 with saturation deliberately
+ * NOT crushed.
+ *
+ * Hue 209 rather than the freezer's cyan on purpose. This arena has form for large flat
+ * pale-cyan planes reading as water (a blind critic opened on the freezer with *"on first
+ * look I read it as a swimming pool"*), and 209 also holds it 10-22 deg off the walkable
+ * teal/utility pads at 187-199 — on top of the 26-35 luma it already clears them by.
+ *
+ * ── Why not simply take it further down ────────────────────────────────────────────
+ * A lower-chroma variant (#7A8CA8, sat 0.42 at the same luma) was simulated: it bought
+ * 0.4 of playerRank and 0.007 of player-minus-surround saturation, for measurably less
+ * cool chroma. That is the trade the "muddy" verdicts came from, so it was rejected. */
+const stoveCap = (M: Materials) => tinted(M, M.cabinet, '#6F8CAE');
 
 /**
  * ── THE COUNTER BODY, and the one thing two independent critics both measured ──
@@ -352,8 +407,8 @@ export function addCoverCap(
 }
 
 /**
- * Small potted herb garnish — deliberately cool-green against every warm cabinet/
- * cabinetDark surface it sits on. Cheap, bold-shaped (a pot + a leaf cluster, no
+ * Small potted herb garnish — a saturated green against the slate cap it stands on and
+ * the plum body below it. Cheap, bold-shaped (a pot + a leaf cluster, no
  * fine detail) so it still reads at gameplay camera distance, and it is the one
  * prop guaranteed to sit on every stove island — i.e. always in the gameplay shot.
  *
@@ -389,9 +444,10 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   const y0 = addCoverPlinth(g, M, wM, dM);
   const sideTop = COUNTER_TOP_Y - capT;
 
-  // DARK sides, BRIGHT overhanging cap — see `addCoverCap`. `cabinet` (the arena's
-  // saturated orange) is now the CAP only; the vertical faces drop two steps down the
-  // same warm ladder, which is what gives the box a top-vs-side value break.
+  // DARK sides, BRIGHT overhanging cap — see `addCoverCap`. The cap is the only plane
+  // carrying this prop's identity colour and it is now cool steel rather than the
+  // arena's saturated orange (see `stoveCap`); the plum vertical faces render ~100 luma
+  // below it, which is what gives the box its top-vs-side value break.
   addCoverSides(g, bw, bd, y0, sideTop - y0, coverBody(M), coverSkirt(M), 0.06, 'stove_cabinet');
   addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, stoveCap(M), 'stove_counter');
 
@@ -411,14 +467,41 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   // panel lying flat on top of cover, i.e. exactly the flat-coloured-rectangle
   // language the walkable floor mats use. Two grammars collided on one surface.
   //
-  // Now: a smaller MID-grey plate with real thickness, standing proud of the cap with
-  // a brighter lip around it, so it reads as a hotplate sitting ON the counter.
+  // r10 gave it a smaller MID-grey plate with real thickness and a brighter lip, and a
+  // fresh blind critic measured that the fix only got halfway: *"the grey griddle plates
+  // on the blue counters are the darkest large shapes in the midfield and read as HOLES
+  // IN THE FLOOR rather than as surface detail on solid cover — and they use the same
+  // grey as the pot's corrugated drum, so one material is doing two unrelated jobs."*
+  //
+  // Both halves check out on the pixels:
+  //   - `potMetalDark` arrives at luma 85 against a counter cap at 144. The drop went
+  //     91 -> 59, which is better and still a hard-edged dark rectangle over a third of
+  //     the counter's top face.
+  //   - the LIP that exists specifically to stop that read is `potMetal`, which arrives
+  //     at luma 92 here. **Seven luma brighter than the thing it is supposed to frame** —
+  //     the cue was authored and then never checked against a render.
+  //   - `potMetal`/`potMetalDark` ARE the boiling-pot hazard's own materials. Cover and
+  //     damage sharing a material is the same class of bug `buildLanePots` was rebuilt
+  //     to fix, and it survived here because the hob was thought of as machinery rather
+  //     than as part of a cover prop.
+  //
+  // So both surfaces leave the hazard's palette through `tinted()` and are authored as a
+  // real ladder instead of inheriting one. Measured on screen after the change:
+  //
+  //   griddle  rgb(117,102,81)   luma 104  hue  35  sat 0.31   <- warm cast iron
+  //   cap      rgb(94,152,208)   luma 144  hue 209  sat 0.55
+  //   lip      rgb(150,170,178)  luma 166  hue 197  sat 0.16   <- bright steel
+  //
+  // Griddle < cap < lip, so the plate reads as recessed INTO a lit surface rather than
+  // punched through it, and the warm hue puts it 174 degrees off the hazard pot's cold
+  // grey drum. The burner rings stay on the shared dark metal — they are 6cm tori, far
+  // too small to read as a panel.
   const hobW = wM * 0.32, hobD = dM * 0.36;
   const hobT = 0.12;
-  const hobLip = mesh(roundedBox(hobW + 0.1, hobT * 0.6, hobD + 0.1, 0.03), M.potMetal, 'stove_hob_lip');
+  const hobLip = mesh(roundedBox(hobW + 0.1, hobT * 0.6, hobD + 0.1, 0.03), tinted(M, M.potMetal, '#D2D7DC'), 'stove_hob_lip');
   hobLip.position.y = COUNTER_TOP_Y + hobT * 0.3;
   g.add(hobLip);
-  const hob = mesh(roundedBox(hobW, hobT, hobD, 0.03), M.potMetalDark, 'stove_hob');
+  const hob = mesh(roundedBox(hobW, hobT, hobD, 0.03), tinted(M, M.potMetalDark, '#736A60'), 'stove_hob');
   hob.position.y = COUNTER_TOP_Y + hobT / 2;
   g.add(hob);
 
@@ -481,9 +564,9 @@ export function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { 
   const sideTop = COUNTER_TOP_Y - capT;
 
   addCoverSides(g, bw, bd, y0, sideTop - y0, coverBody(M), coverSkirt(M), 0.06, 'prep_cabinet');
-  // Butcher block is the brightest surface in the warm palette — the perfect cap for
-  // a prop whose sides are now two steps down the same ladder. See `prepCap` for why
-  // it is used at a lower value than the shared `KPAL` entry.
+  // Butcher block is the arena's one large WARM surface — see `prepCap` for why it is
+  // held at reference chroma here rather than greyed with the rest of the environment,
+  // and why it runs well below the shared `KPAL` entry's value.
   addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, prepCap(M), 'prep_top');
   addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, coverBody(M), BACKSPLASH_H);
 
@@ -573,11 +656,15 @@ export function buildServiceCounter(M: Materials, wM: number, dM: number, varian
   const sideTop = COUNTER_TOP_Y - capT;
 
   addCoverSides(g, bw, bd, y0, sideTop - y0, coverBody(M), coverSkirt(M), 0.06, 'service_cabinet');
-  // Stainless cap — the one bright NEUTRAL top in the counter family, so fryer/sink
-  // stay distinguishable from the stove islands (orange cap) and the prep counters
-  // (butcher-block cap) without the sides having to differ. Consistent dark sides
-  // across all cover is the point; identity lives on the top plane, which is also the
-  // plane that dominates the frame at this camera pitch.
+  // Stainless cap — the DARKEST and least saturated top in the counter family, so
+  // fryer/sink stay distinguishable from the stove islands and the prep counters
+  // without the sides having to differ. Consistent dark sides across all cover is the
+  // point; identity lives on the top plane, which is also the plane that dominates the
+  // frame at this camera pitch. Measured, the three caps now read as a proper ladder
+  // rather than three hues: service `potMetal` luma 92 sat 0.18 / stove slate luma 144
+  // sat 0.55 / prep butcher-block luma 168 sat 0.38. The stove cap moving cool put it
+  // in the same half of the wheel as this one (see `stoveCap`), which is why the gap
+  // that separates them is now 52 luma and 0.37 of saturation rather than hue.
   addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, M.potMetal, 'service_top');
   addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, coverBody(M), BACKSPLASH_H);
 
