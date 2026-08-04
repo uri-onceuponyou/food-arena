@@ -20,6 +20,7 @@ import type { PlayerProfile } from './profile';
 export type Route =
   | { name: 'home' }
   | { name: 'characters' }
+  | { name: 'trophies' }
   | { name: 'match'; player: CharacterId; enemy: CharacterId };
 
 export type RouteName = Route['name'];

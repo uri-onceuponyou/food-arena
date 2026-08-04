@@ -188,6 +188,211 @@ async function auditScreen(page, vp, screen, { safe }) {
   record(vp.name, screen, 'controls-present', data.controlCount >= 3, `${data.controlCount} controls`);
 }
 
+/**
+ * ── Economy acceptance, added with the trophy road ──────────────────────────
+ *
+ * The model itself is asserted 172 ways under plain Node in
+ * `src/game/economy/economy.test.mjs`. What CANNOT be asserted there — and is
+ * therefore asserted here, in a real browser — is that the screen is wired to the
+ * model at all, and that the three states the road can be in each produce honest UI:
+ *
+ *  1. CLAIM. A player with unclaimed trophies sees claimable nodes, tapping one pops
+ *     the reveal card, and the balance actually moves. This is the check that would
+ *     have caught "the button renders but nothing happens", which is the single
+ *     defect both menu critics punished.
+ *  2. OPEN. A held chest opens and pays out; an empty inventory draws NO open button
+ *     (a control that cannot work must not be drawn).
+ *  3. STORE. Every real-money product is DISABLED and the sheet says purchases are
+ *     unavailable. This is the one place a "coming soon" claim can be verified rather
+ *     than trusted, and it is deliberately asserted in both directions: the buttons
+ *     must be disabled AND the copy must say so.
+ *  4. ODDS. The published drop rates render, and the 0.01% row is not rounded to 0% —
+ *     which is a compliance statement, not a formatting preference.
+ *
+ * State is seeded through localStorage before boot rather than played into, because
+ * reaching 200 trophies through the UI is 14 real matches.
+ */
+async function auditEconomy(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
+
+  // A player at 200 trophies with two chests in hand and nothing claimed.
+  //
+  // The `if (!existing)` guard is load-bearing, not defensive: `addInitScript` runs on
+  // EVERY navigation, so an unguarded seed would silently restore this blob on the
+  // reload below and the persistence check would pass no matter how broken saving was.
+  await page.addInitScript(() => {
+    if (localStorage.getItem('food-arena.profile.v1')) return;
+    localStorage.setItem('food-arena.profile.v1', JSON.stringify({
+      name: 'QA', wins: 9, losses: 3, xp: 400, selected: 'hamburger',
+      economy: {
+        trophies: 200, bestTrophies: 200, coins: 1000, gems: 40,
+        containers: { chest: 2, hamburgerBox: 0, pineappleBox: 0, redBox: 0, fireBox: 0 },
+        claimed: [], unlocked: ['hamburger'], winsTowardChest: 1,
+        lastMatch: null, seed: 987654, rolls: 0,
+      },
+    }));
+  });
+
+  let step = 'boot';
+  try {
+    await page.goto(`${BASE}/?screen=trophies`, { waitUntil: 'networkidle', timeout: 45000 });
+    await page.waitForFunction('window.__screen === "trophies"', null, { timeout: 45000 });
+    await page.waitForTimeout(300);
+
+    step = 'seeded state renders';
+    const seeded = await page.evaluate(() => ({
+      trophies: document.querySelector('[data-el="trophies"]')?.textContent,
+      coins: document.querySelector('[data-el="coins"]')?.textContent,
+      claimable: document.querySelectorAll('.tr-node.is-claimable').length,
+      nodes: document.querySelectorAll('.tr-node').length,
+      pins: document.querySelectorAll('.tr-pin').length,
+      opens: document.querySelectorAll('[data-open]').length,
+    }));
+    record('economy', 'trophies', 'model-drives-screen', seeded.trophies === '200', `showed "${seeded.trophies}"`);
+    record('economy', 'trophies', 'road-renders-every-node', seeded.nodes >= 30, `${seeded.nodes} nodes`);
+    record('economy', 'trophies', 'exactly-one-you-are-here-pin', seeded.pins === 1, `${seeded.pins} pins`);
+    record('economy', 'trophies', 'reached-nodes-are-claimable', seeded.claimable >= 5, `${seeded.claimable} claimable`);
+    record('economy', 'trophies', 'held-chests-draw-an-open-button', seeded.opens === 1, `${seeded.opens} open buttons`);
+
+    step = 'claim a milestone';
+    const coinsBefore = await page.evaluate(() =>
+      Number((document.querySelector('[data-el="coins"]')?.textContent ?? '0').replace(/,/g, '')));
+    await page.click('.tr-node.is-claimable');
+    await page.waitForSelector('.tr-sheet.is-open .tr-reveal', { timeout: 5000 });
+    record('economy', 'trophies', 'claim-opens-the-reveal', true, '');
+    await page.click('.tr-sheet .fa-btn--primary', { force: true }); // force: the CTA pulses forever, so it is never 'stable'
+    await page.waitForTimeout(150);
+    const afterClaim = await page.evaluate(() => ({
+      open: document.querySelector('.tr-sheet')?.classList.contains('is-open'),
+      claimable: document.querySelectorAll('.tr-node.is-claimable').length,
+      claimed: document.querySelectorAll('.tr-node.is-claimed').length,
+      coins: Number((document.querySelector('[data-el="coins"]')?.textContent ?? '0').replace(/,/g, '')),
+    }));
+    record('economy', 'trophies', 'reveal-closes', afterClaim.open === false);
+    record('economy', 'trophies', 'claimed-node-changes-state', afterClaim.claimed >= 1
+      && afterClaim.claimable === seeded.claimable - 1,
+      `${afterClaim.claimed} claimed / ${afterClaim.claimable} left`);
+
+    step = 'claim the rest';
+    await page.click('[data-el="claimall"]', { force: true });
+    await page.waitForSelector('.tr-sheet.is-open .tr-reveal', { timeout: 5000 });
+    await page.click('.tr-sheet .fa-btn--primary', { force: true }); // force: the CTA pulses forever, so it is never 'stable'
+    await page.waitForTimeout(150);
+    const afterAll = await page.evaluate(() => ({
+      claimable: document.querySelectorAll('.tr-node.is-claimable').length,
+      coins: Number((document.querySelector('[data-el="coins"]')?.textContent ?? '0').replace(/,/g, '')),
+      claimAllVisible: (document.querySelector('[data-el="claimall"]')?.getBoundingClientRect().height ?? 0) > 0,
+    }));
+    record('economy', 'trophies', 'claim-all-clears-the-road', afterAll.claimable === 0,
+      `${afterAll.claimable} left`);
+    record('economy', 'trophies', 'claiming-moves-the-balance', afterAll.coins > coinsBefore,
+      `${coinsBefore} -> ${afterAll.coins}`);
+    // The one control that must NOT linger once it has nothing to do.
+    record('economy', 'trophies', 'claim-all-hides-when-empty', afterAll.claimAllVisible === false);
+
+    step = 'open a chest';
+    // Claiming the road handed over more chests, so the count is read rather than
+    // assumed — asserting a literal here would be asserting the milestone table.
+    const chestsHeld = await page.evaluate(() =>
+      Number(document.querySelector('.tr-open-count')?.textContent ?? '0'));
+    await page.click('[data-open="chest"]');
+    await page.waitForSelector('.tr-sheet.is-open .tr-reveal', { timeout: 5000 });
+    await page.click('.tr-sheet .fa-btn--primary', { force: true }); // force: the CTA pulses forever, so it is never 'stable'
+    await page.waitForTimeout(150);
+    const afterOpen = await page.evaluate(() => ({
+      count: Number(document.querySelector('.tr-open-count')?.textContent ?? '0'),
+      coins: Number((document.querySelector('[data-el="coins"]')?.textContent ?? '0').replace(/,/g, '')),
+    }));
+    record('economy', 'trophies', 'opening-consumes-exactly-one-chest',
+      chestsHeld > 0 && afterOpen.count === chestsHeld - 1, `${chestsHeld} -> ${afterOpen.count}`);
+    record('economy', 'trophies', 'opening-pays-out', afterOpen.coins >= afterAll.coins,
+      `${afterAll.coins} -> ${afterOpen.coins}`);
+
+    step = 'empty inventory draws no open button';
+    // Drain whatever is held, of any kind — the road hands out boxes as well as
+    // chests, so a chest-only loop leaves the inventory non-empty and tests nothing.
+    for (let guard = 0; guard < 20; guard++) {
+      const remaining = await page.evaluate(() => document.querySelectorAll('[data-open]').length);
+      if (remaining === 0) break;
+      await page.click('[data-open]');
+      await page.waitForSelector('.tr-sheet.is-open', { timeout: 5000 });
+      await page.click('.tr-sheet .fa-btn--primary', { force: true });
+      await page.waitForTimeout(110);
+    }
+    const empty = await page.evaluate(() => ({
+      opens: document.querySelectorAll('[data-open]').length,
+      hint: document.querySelector('.tr-inv-empty')?.textContent?.trim() ?? '',
+    }));
+    record('economy', 'trophies', 'no-open-button-with-nothing-to-open', empty.opens === 0,
+      `${empty.opens} still drawn`);
+    record('economy', 'trophies', 'empty-inventory-explains-itself', /win/i.test(empty.hint), empty.hint);
+
+    step = 'the gem store is honest';
+    await page.click('[data-el="storebtn"]');
+    await page.waitForSelector('.tr-sheet.is-open .tr-skus', { timeout: 5000 });
+    const store = await page.evaluate(() => {
+      const buys = [...document.querySelectorAll('.tr-sku-buy')];
+      return {
+        products: buys.length,
+        enabled: buys.filter((b) => !b.disabled).length,
+        notice: document.querySelector('.tr-soon')?.textContent?.trim() ?? '',
+        prices: buys.filter((b) => /\$/.test(b.textContent)).length,
+      };
+    });
+    record('economy', 'store', 'products-are-listed', store.products >= 4, `${store.products} SKUs`);
+    record('economy', 'store', 'NO-purchase-button-is-live', store.enabled === 0,
+      `${store.enabled} enabled`);
+    record('economy', 'store', 'unavailability-is-stated-in-words',
+      /not available|coming soon/i.test(store.notice), store.notice.slice(0, 80));
+    record('economy', 'store', 'prices-are-still-shown', store.prices === store.products);
+    await page.click('.tr-sheet [data-el="close"]');
+    await page.waitForTimeout(120);
+
+    step = 'drop rates are published';
+    await page.click('[data-el="oddsbtn"]');
+    await page.waitForSelector('.tr-sheet.is-open .tr-odds-list', { timeout: 5000 });
+    const odds = await page.evaluate(() => {
+      const pct = [...document.querySelectorAll('.tr-odds-pct')].map((n) => n.textContent.trim());
+      return {
+        blocks: document.querySelectorAll('.tr-odds-block').length,
+        rows: pct.length,
+        zeroRows: pct.filter((p) => p === '0%').length,
+        hasTinyRow: pct.includes('0.01%'),
+      };
+    });
+    record('economy', 'odds', 'every-container-publishes-its-table', odds.blocks === 5, `${odds.blocks} blocks`);
+    record('economy', 'odds', 'rows-render', odds.rows >= 15, `${odds.rows} rows`);
+    // A real 0.01% chance published as "0%" is a false statement about a paid
+    // randomised item, not a rounding choice.
+    record('economy', 'odds', 'no-real-chance-is-rounded-to-zero', odds.zeroRows === 0, `${odds.zeroRows} rows read 0%`);
+    record('economy', 'odds', 'sub-tenth-percent-rows-survive', odds.hasTinyRow === true);
+    await page.click('.tr-sheet [data-el="close"]');
+
+    step = 'progress survives a reload';
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForFunction('window.__screen === "trophies"', null, { timeout: 30000 });
+    await page.waitForTimeout(250);
+    const persisted = await page.evaluate(() => ({
+      claimable: document.querySelectorAll('.tr-node.is-claimable').length,
+      claimed: document.querySelectorAll('.tr-node.is-claimed').length,
+      opens: document.querySelectorAll('[data-open]').length,
+    }));
+    record('economy', 'trophies', 'claims-persist-across-a-reload',
+      persisted.claimable === 0 && persisted.claimed >= 5,
+      `${persisted.claimed} claimed, ${persisted.claimable} claimable`);
+    record('economy', 'trophies', 'spent-chests-stay-spent', persisted.opens === 0);
+
+    record('economy', '-', 'economy-flow', true, 'claim / open / store / odds / reload');
+  } catch (err) {
+    record('economy', '-', 'economy-flow', false, `failed at "${step}": ${String(err).split('\n')[0]}`);
+  }
+  record('economy', '-', 'no-console-errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+  await page.close();
+}
+
 async function run() {
   const flowOnly = process.argv.includes('--flow-only');
   await lintCssLiterals();
@@ -200,7 +405,7 @@ async function run() {
       page.on('pageerror', (e) => errs.push(String(e)));
       page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
 
-      for (const screen of ['home', 'characters']) {
+      for (const screen of ['home', 'characters', 'trophies']) {
         await page.goto(`${BASE}/?screen=${screen}`, { waitUntil: 'networkidle', timeout: 45000 });
         await page.waitForFunction('window.__previewReady === true', null, { timeout: 45000 });
         await page.waitForTimeout(250);
@@ -308,13 +513,39 @@ async function run() {
         record('flow', 'home', 'cta-is-hit-target', top, 'elementFromPoint over START GAME');
       }
 
-      record('flow', '-', 'round-trip', true, 'home -> characters -> match -> home');
+      step = 'home -> trophy road';
+      await page.click('[data-go="trophies"]', { force: true });
+      await page.waitForFunction('window.__screen === "trophies" && window.__screenReady === true', null, { timeout: 20000 });
+
+      step = 'no stale celebration for a match that never finished';
+      {
+        // The flow QUITS from the pause menu, so no result was ever banked. The
+        // road must therefore show no trophy delta — a screen that congratulates
+        // you for a match you abandoned is worse than one that says nothing, and
+        // the `lastMatch.seen` flag is the only thing standing between them.
+        const state = await page.evaluate(() => ({
+          delta: document.querySelector('[data-el="delta"]')?.textContent ?? '',
+          trophies: document.querySelector('[data-el="trophies"]')?.textContent ?? '',
+        }));
+        record('flow', 'trophies', 'no-delta-for-an-abandoned-match', state.delta === '',
+          `delta = "${state.delta}"`);
+        record('flow', 'trophies', 'trophy-count-renders', /^[\d,]+$/.test(state.trophies),
+          `trophies = "${state.trophies}"`);
+      }
+
+      step = 'trophies -> home';
+      await page.click('[data-el="back"]', { force: true });
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
+
+      record('flow', '-', 'round-trip', true, 'home -> characters -> match -> home -> trophies -> home');
     } catch (err) {
       record('flow', '-', 'round-trip', false, `failed at "${step}": ${String(err).split('\n')[0]}`);
     }
     record('flow', '-', 'no-console-errors', errs.length === 0, errs.slice(0, 3).join(' | '));
     await page.close();
   }
+
+  await auditEconomy(browser);
 
   await browser.close();
 

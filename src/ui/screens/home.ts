@@ -23,6 +23,7 @@
  */
 
 import { CHARACTERS, RARITY_COLORS } from '../../game/rules';
+import { milestoneFace, nextMilestone } from '../../game/economy';
 import { XP_PER_LEVEL } from './profile';
 import type { Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
@@ -38,12 +39,13 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   root.innerHTML = `
     <header class="fa-topbar">
       <div class="fa-chip"><span class="fa-chip-em">🙂</span><span data-el="name"></span></div>
-      <div class="fa-chip"><span class="fa-chip-em">🏆</span>Wins <span class="fa-chip-val" data-el="wins">0</span></div>
+      <div class="fa-chip"><span class="fa-chip-em">🏆</span><span class="fa-chip-val" data-el="trophies">0</span></div>
       <div class="fa-chip home-chip-coin"><span class="fa-chip-em">🪙</span><span data-el="coins">0</span></div>
       <div class="fa-topbar-spacer"></div>
       <nav class="fa-tabs">
         <button class="fa-tab is-active" type="button">Home</button>
         <button class="fa-tab" type="button" data-go="characters">Foods</button>
+        <button class="fa-tab" type="button" data-go="trophies">Trophies</button>
       </nav>
       <button class="fa-iconbtn" type="button" data-el="settings" aria-label="Settings">⚙️</button>
     </header>
@@ -51,15 +53,15 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     <div class="home-middle">
       <aside class="home-rail">
         <div class="home-deals">
-          <p class="fa-panel-title">Good deals</p>
-          <div class="home-deal">
-            <span class="home-deal-icon">📦</span>
+          <p class="fa-panel-title">Trophy Road</p>
+          <button class="home-deal" type="button" data-go="trophies">
+            <span class="home-deal-icon" data-el="dealicon">📦</span>
             <span class="home-deal-info">
-              <span class="home-deal-title">1 Chest</span>
-              <span class="home-deal-sub">10k+ coins</span>
+              <span class="home-deal-title" data-el="dealtitle">Next reward</span>
+              <span class="home-deal-sub" data-el="dealsub"></span>
             </span>
-            <span class="home-deal-price">🪙 359</span>
-          </div>
+            <span class="home-deal-price" data-el="dealprice">🏆</span>
+          </button>
         </div>
       </aside>
 
@@ -102,11 +104,44 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   const heroRarity = q<HTMLSpanElement>('herorarity');
   const hint = q<HTMLDivElement>('hint');
 
+  /**
+   * The rail card. Round 2 carried a fake shop offer here ("1 Chest — 🪙 359") for a
+   * shop that does not exist; this is the same slot doing real work — the next
+   * trophy-road node, how far away it is, and a claim badge when something is
+   * waiting. Everything it says comes off `game/economy/`.
+   */
+  function renderRoadCard(): void {
+    const claims = ctx.profile.claimable.length;
+    if (claims > 0) {
+      q('dealicon').textContent = '✨';
+      q('dealtitle').textContent = claims > 1 ? `${claims} rewards ready` : 'Reward ready';
+      q('dealsub').textContent = 'Tap to claim';
+      q('dealprice').textContent = 'CLAIM';
+      root.querySelector('.home-deal')?.classList.add('is-ready');
+      return;
+    }
+    root.querySelector('.home-deal')?.classList.remove('is-ready');
+    const next = nextMilestone(ctx.profile.trophies);
+    if (!next) {
+      q('dealicon').textContent = '🏁';
+      q('dealtitle').textContent = 'Road complete';
+      q('dealsub').textContent = 'Every reward claimed';
+      q('dealprice').textContent = `🏆 ${ctx.profile.trophies.toLocaleString()}`;
+      return;
+    }
+    const face = milestoneFace(next.reward, ctx.profile.unlocked);
+    q('dealicon').textContent = face.emoji;
+    q('dealtitle').textContent = face.title;
+    q('dealsub').textContent = `${(next.trophies - ctx.profile.trophies).toLocaleString()} trophies to go`;
+    q('dealprice').textContent = `🏆 ${next.trophies.toLocaleString()}`;
+  }
+
   function render(): void {
     const def = CHARACTERS[ctx.profile.selected];
     q('name').textContent = ctx.profile.name;
-    q('wins').textContent = String(ctx.profile.wins);
+    q('trophies').textContent = ctx.profile.trophies.toLocaleString();
     q('coins').textContent = ctx.profile.coins.toLocaleString();
+    renderRoadCard();
     q('lv').textContent = `Lv ${ctx.profile.level}`;
     q('lvnext').textContent = `Lv ${ctx.profile.level + 1}`;
     q<HTMLDivElement>('lvfill').style.width = `${(ctx.profile.levelProgress01 * 100).toFixed(1)}%`;
@@ -124,6 +159,7 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     if (!target) return;
     const go = target.dataset.go;
     if (go === 'characters') ctx.navigate({ name: 'characters' });
+    else if (go === 'trophies') ctx.navigate({ name: 'trophies' });
   };
   root.addEventListener('click', onClick);
 
@@ -208,17 +244,47 @@ const CSS = `
    with one compact roadmap card, and the next critic named THAT the single most
    damaging element for the same reason: it announces the build is incomplete.
    Two independent critics reaching the same verdict twice is not taste, so the
-   unbuilt destinations are simply not advertised. When Shop/Skins/Settings exist
-   they get real entries here.
+   unbuilt destinations are simply not advertised.
+
+   ⚠️ BUG FIXED HERE (economy pass): this note was never closed, so the browser
+   treated everything down to the next comment terminator as one comment and EVERY
+   .home-deal rule below was silently dead. The card has been rendering unstyled
+   since round 2. Nothing about it is visible to tsc or to the sim tests, and a
+   screenshot only shows "that card looks a bit plain".
+
+   The card itself now carries the Trophy Road's next node, which is a real
+   destination with a real number on it — it used to advertise a chest for 359 coins
+   in a shop that does not exist. */
 .fa-home .home-deal {
+  appearance: none;
+  cursor: pointer;
   display: flex;
   align-items: center;
   gap: 7px;
+  width: 100%;
+  /* Full tap target: it is a navigation control now, not a poster. */
+  min-height: var(--tap);
   padding: 6px 7px;
+  text-align: start;
+  color: var(--ink);
   background: linear-gradient(180deg, #FFE9A8, var(--mustard));
   border: 3px solid var(--ink);
   border-radius: var(--radius-surface);
   box-shadow: 0 3px 0 rgba(0,0,0,0.3);
+  transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
+}
+.fa-home .home-deal:hover { filter: brightness(1.05); }
+.fa-home .home-deal:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.3); }
+/* Something is waiting to be collected — the one state on this screen that should
+   pull the eye away from START GAME, and only while it is true. */
+.fa-home .home-deal.is-ready {
+  background: linear-gradient(180deg, #A6E24A 0%, var(--lettuce) 100%);
+  animation: fa-home-ready 1.6s ease-in-out infinite;
+}
+.fa-home .home-deal.is-ready .home-deal-sub { color: #16300a; }
+@keyframes fa-home-ready {
+  0%, 100% { box-shadow: 0 3px 0 rgba(0,0,0,0.3), 0 0 0 rgba(124,181,24,0); }
+  50% { box-shadow: 0 3px 0 rgba(0,0,0,0.3), 0 0 16px rgba(166,226,74,0.85); }
 }
 .fa-home .home-deal-icon { font-size: 1.4rem; line-height: 1; }
 .fa-home .home-deal-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
@@ -322,5 +388,9 @@ const CSS = `
   .fa-home .home-middle { grid-template-columns: minmax(0, 1fr); }
   .fa-home .home-rail { display: none; }
   .fa-home .home-bottom { flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fa-home .home-deal.is-ready { animation: none !important; }
 }
 `;

@@ -32,6 +32,7 @@ import { disposeCharacterStage } from './charStage';
 import { audio } from '../../audio';
 import { createHomeScreen } from './home';
 import { createCharacterSelectScreen } from './characterSelect';
+import { createTrophyRoadScreen } from './trophyRoad';
 import { createMatchScreen } from './matchScreen';
 
 declare global {
@@ -105,6 +106,7 @@ export function createShell(opts: ShellOptions): Shell {
     switch (route.name) {
       case 'home': return createHomeScreen(ctx);
       case 'characters': return createCharacterSelectScreen(ctx);
+      case 'trophies': return createTrophyRoadScreen(ctx);
       case 'match': return createMatchScreen(ctx, route);
     }
   }

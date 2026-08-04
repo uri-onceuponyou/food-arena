@@ -11,7 +11,7 @@
  * `tools/tmp/` drives `http://localhost:5173/?player=…&enemy=…` and waits on
  * `window.__gameReady`. Rather than break all of it, the boot route is derived:
  *
- *   * `?screen=home|characters|match` — explicit, wins over everything.
+ *   * `?screen=home|characters|trophies|match` — explicit, wins over everything.
  *   * otherwise, if ANY match-only QA parameter is present (`player`, `enemy`,
  *     `simSpeed`, `fogRadius`, `px`, `py`) boot straight into the match, exactly as
  *     before. Those parameters have no meaning anywhere else, so their presence is
@@ -51,6 +51,7 @@ function bootRoute(profile: PlayerProfile): Route {
     return { name: 'match', player, enemy: characterParam('enemy', enemyFallback) };
   }
   if (params.get('screen') === 'characters') return { name: 'characters' };
+  if (params.get('screen') === 'trophies') return { name: 'trophies' };
   return { name: 'home' };
 }
 
