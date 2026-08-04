@@ -14,7 +14,14 @@
  *     both axes — no cropped characters.
  *  5. FLOW. boot -> home -> character select -> match (window.__gameReady) ->
  *     back to home, with zero console errors along the way.
- *  6. INPUT PASSTHROUGH. This one exists because of a shipped regression: the
+ *  6a. HERO FILL. The home screen's largest measured defect was that its hero panel
+ *     was ~1.8x wider than tall, and `charStage` frames the subject off whichever
+ *     axis binds — always height on a panel that shape — so the surplus width was
+ *     guaranteed to be empty backdrop. See `MIN_HERO_WIDTH_FRAC`.
+ *  6b. NOTHING IS DEAD. Every control on the settings screen is asserted to move the
+ *     thing it names, read back off the audio engine rather than off the UI that drew
+ *     it, and the title card is asserted to unlock audio and to never trap a probe.
+ *  7. INPUT PASSTHROUGH. This one exists because of a shipped regression: the
  *     full-viewport `#screens` layer defaulted to `pointer-events: auto` and became
  *     the hit target for every pointer event, so the game canvas received ZERO
  *     mousemove and ZERO mousedown during a match. That silently disabled firing
@@ -117,6 +124,35 @@ function record(vp, screen, check, ok, detail = '') {
   if (!ok) failures++;
 }
 
+/**
+ * How many controls a screen must draw for its layout to be a screen at all.
+ *
+ * Per-screen, not a global 3, because the OPENING title card legitimately has exactly
+ * one control — that is the whole design of a title card, and asserting three would be
+ * asserting a house style rather than a defect.
+ */
+const MIN_CONTROLS = { opening: 1, default: 3 };
+
+/**
+ * ── HOW MUCH OF THE HERO PANEL THE HERO ACTUALLY OCCUPIES ───────────────────
+ *
+ * The objective acceptance test for the home screen's largest defect, added because
+ * `PROGRESS.md` is explicit that an element with no measurable test oscillates at its
+ * own noise floor — which is exactly what happened here: two blind critics reversed
+ * each other and the loop stopped rather than converged.
+ *
+ * The defect was that the hero panel spanned the full width of the middle row, and
+ * `charStage.applyFraming()` sizes the subject off whichever axis BINDS — always
+ * height on a panel wider than it is tall. So every extra pixel of panel width was
+ * guaranteed to be empty backdrop, and the character measured ~26% of its own panel's
+ * width. This asserts the fix rather than the taste: the character's projected box has
+ * to cover a real fraction of the panel it is standing in, on every viewport.
+ *
+ * Measured on the rebuilt screen at 0.55-0.75. The floor is set well below that, at a
+ * value the OLD layout could not reach, so it fails on a regression and not on noise.
+ */
+const MIN_HERO_WIDTH_FRAC = 0.42;
+
 /** Every check that can run against a mounted menu screen. */
 async function auditScreen(page, vp, screen, { safe }) {
   const data = await page.evaluate(({ MIN_TAP, safe }) => {
@@ -183,9 +219,21 @@ async function auditScreen(page, vp, screen, { safe }) {
     const inFrame = pts.every((p) => p && p.x >= -0.005 && p.x <= 1.005 && p.y >= -0.005 && p.y <= 1.005);
     record(vp.name, screen, 'hero-in-frame', inFrame && h.cameraOk === true,
       `fill=${h.fill} feet=${JSON.stringify(h.feet)} crown=${JSON.stringify(h.crown)} L=${JSON.stringify(h.left)} R=${JSON.stringify(h.right)}`);
+
+    // See MIN_HERO_WIDTH_FRAC. Home and the title card are the two screens whose whole
+    // point is the hero; character select frames its own column and is not this
+    // screen's business.
+    if (screen.startsWith('home') || screen.startsWith('opening')) {
+      const wFrac = Math.abs(h.right.x - h.left.x);
+      const hFrac = Math.abs(h.feet.y - h.crown.y);
+      record(vp.name, screen, 'hero-fills-its-panel', wFrac >= MIN_HERO_WIDTH_FRAC,
+        `width=${wFrac.toFixed(3)} (min ${MIN_HERO_WIDTH_FRAC}) height=${hFrac.toFixed(3)}`);
+    }
   }
 
-  record(vp.name, screen, 'controls-present', data.controlCount >= 3, `${data.controlCount} controls`);
+  const minControls = MIN_CONTROLS[screen.split('+')[0]] ?? MIN_CONTROLS.default;
+  record(vp.name, screen, 'controls-present', data.controlCount >= minControls,
+    `${data.controlCount} controls (min ${minControls})`);
 }
 
 /**
@@ -393,6 +441,201 @@ async function auditEconomy(browser) {
   await page.close();
 }
 
+/**
+ * ── The title card ──────────────────────────────────────────────────────────
+ *
+ * Three properties, and two of them are safety properties rather than design ones:
+ *
+ *  1. A bare `/` shows it. That is a change to the boot route, so it is asserted
+ *     rather than assumed.
+ *  2. **It cannot trap anything.** With no input at all it continues to home on its
+ *     own. This is the check that stops a title card from hanging every probe in
+ *     `tools/` that navigates to `/` — including this file's own flow test.
+ *  3. It collects the gesture that unlocks Web Audio. Before the tap the engine is
+ *     `idle` by browser policy; after it, it must not be. `running` OR `failed` both
+ *     count: headless Chromium has no audio device, and asserting `running` would be
+ *     asserting the CI machine's hardware rather than this screen's behaviour.
+ */
+async function auditOpening(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
+
+  let step = 'boot';
+  try {
+    step = 'a bare / shows the title card';
+    await page.goto(`${BASE}/?hold=120000`, { waitUntil: 'networkidle', timeout: 45000 });
+    await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
+    record('opening', 'opening', 'bare-slash-shows-the-title-card', true, '');
+
+    step = 'audio is locked before the gesture';
+    const before = await page.evaluate(() => window.__audio?.stats().state ?? 'no-engine');
+
+    step = 'tapping start enters the game';
+    await page.click('[data-el="start"]', { force: true });
+    await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
+    record('opening', 'opening', 'start-enters-the-game', true, '');
+
+    const after = await page.evaluate(() => window.__audio?.stats().state ?? 'no-engine');
+    record('opening', 'opening', 'the-tap-unlocks-audio', after !== 'idle',
+      `${before} -> ${after}`);
+
+    step = 'it continues on its own with no input';
+    // The anti-hang guarantee, at a real (short) duration. Nothing is clicked, no key
+    // is pressed: the screen has to leave by itself or this times out.
+    await page.goto(`${BASE}/?hold=600`, { waitUntil: 'networkidle', timeout: 45000 });
+    await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
+    await page.waitForFunction('window.__screen === "home"', null, { timeout: 15000 });
+    record('opening', 'opening', 'auto-continues-with-no-input', true, 'no click, no key');
+
+    step = 'an explicit screen request still wins';
+    await page.goto(`${BASE}/?screen=home`, { waitUntil: 'networkidle', timeout: 45000 });
+    await page.waitForFunction('window.__screen === "home"', null, { timeout: 20000 });
+    record('opening', 'opening', 'screen-param-skips-it', true, '?screen=home');
+
+    record('opening', '-', 'opening-flow', true, 'boot / tap / auto / bypass');
+  } catch (err) {
+    record('opening', '-', 'opening-flow', false, `failed at "${step}": ${String(err).split('\n')[0]}`);
+  }
+  record('opening', '-', 'no-console-errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+  await page.close();
+}
+
+/**
+ * ── Settings ────────────────────────────────────────────────────────────────
+ *
+ * The screen exists to make audio reachable, so what is asserted is that each control
+ * MOVES THE THING IT CLAIMS TO MOVE, read back off `window.__audio` (the engine's own
+ * QA handle) rather than off the UI that just drew it. Both menu critics punished
+ * dead UI; this is the only way to prove a control is not dead, and it is the same
+ * shape as the trophy road's "the balance actually moves" check.
+ *
+ * `M` is asserted in the other direction too: the hotkey belongs to `game/input.ts`,
+ * so a settings screen that did not subscribe to `audio.onChange` would sit there
+ * showing a stale toggle. That is a lie about the mix, not a cosmetic bug.
+ *
+ * The reset button is opened and CANCELLED, never confirmed: confirming reloads the
+ * page, and a suite that wipes its own state mid-run is a suite that cannot be
+ * trusted about what it measured.
+ */
+async function auditSettings(browser) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
+
+  const stats = () => page.evaluate(() => ({
+    volume: window.__audio?.stats().volume ?? -1,
+    muted: window.__audio?.stats().muted ?? null,
+  }));
+  const switchOn = (name) => page.evaluate(
+    (n) => document.querySelector(`[data-toggle="${n}"]`)?.getAttribute('aria-checked') === 'true',
+    name,
+  );
+
+  let step = 'boot';
+  try {
+    await page.goto(`${BASE}/?screen=settings`, { waitUntil: 'networkidle', timeout: 45000 });
+    await page.waitForFunction('window.__screen === "settings"', null, { timeout: 45000 });
+
+    step = 'the volume slider moves the bus';
+    const v0 = (await stats()).volume;
+    await page.evaluate(() => {
+      const el = document.querySelector('[data-range="sfx"]');
+      el.value = '0.31';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const v1 = (await stats()).volume;
+    record('settings', 'settings', 'volume-slider-moves-the-bus', Math.abs(v1 - 0.31) < 0.02,
+      `${v0} -> ${v1}`);
+    // And the UI reads the engine back rather than its own input event.
+    const shown = await page.evaluate(() => document.querySelector('[data-el="sfxval"]')?.textContent);
+    record('settings', 'settings', 'volume-readout-matches', shown === '31%', `showed "${shown}"`);
+
+    step = 'the mute toggle mutes';
+    const m0 = (await stats()).muted;
+    await page.click('[data-toggle="mute"]');
+    const m1 = (await stats()).muted;
+    record('settings', 'settings', 'mute-toggle-mutes', m1 === !m0, `${m0} -> ${m1}`);
+    record('settings', 'settings', 'mute-toggle-reflects-state', (await switchOn('mute')) === m1);
+
+    step = 'the M hotkey moves the toggle';
+    // The other direction: `game/input.ts` owns M, and a screen that did not
+    // subscribe to audio.onChange would show a stale switch after this.
+    await page.evaluate(() => window.__audio.engine.toggleMuted());
+    await page.waitForTimeout(80);
+    const m2 = (await stats()).muted;
+    record('settings', 'settings', 'external-mute-updates-the-ui', (await switchOn('mute')) === m2,
+      `engine muted=${m2}`);
+    if (m2) { await page.click('[data-toggle="mute"]'); }
+
+    step = 'the music toggle is independent of the master';
+    const musicWas = await switchOn('music');
+    await page.click('[data-toggle="music"]');
+    await page.waitForTimeout(60);
+    record('settings', 'settings', 'music-toggle-flips', (await switchOn('music')) === !musicWas);
+    await page.click('[data-toggle="music"]');
+
+    step = 'reduce motion applies and persists';
+    const motionWas = await switchOn('motion');
+    await page.click('[data-toggle="motion"]');
+    await page.waitForTimeout(60);
+    const applied = await page.evaluate(() =>
+      document.documentElement.classList.contains('fa-reduce-motion'));
+    record('settings', 'settings', 'reduce-motion-applies', applied === !motionWas,
+      `html.fa-reduce-motion = ${applied}`);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForFunction('window.__screen === "settings"', null, { timeout: 30000 });
+    const survived = await page.evaluate(() =>
+      document.documentElement.classList.contains('fa-reduce-motion'));
+    record('settings', 'settings', 'reduce-motion-persists', survived === applied,
+      `after reload = ${survived}`);
+    // Put it back, so this test does not silently change what every later screenshot
+    // in the repo looks like.
+    if (survived !== motionWas) {
+      await page.click('[data-toggle="motion"]');
+      await page.waitForTimeout(60);
+    }
+
+    step = 'the controls reference names the mute key';
+    // The stated reason this section exists: M mutes the whole game and, before this
+    // screen, nothing in the product said so.
+    const caps = await page.evaluate(() =>
+      [...document.querySelectorAll('.set-cap')].map((n) => n.textContent.trim()));
+    record('settings', 'settings', 'controls-list-the-mute-key', caps.includes('M'),
+      caps.join(' '));
+    record('settings', 'settings', 'controls-list-movement', ['W', 'A', 'S', 'D'].every((k) => caps.includes(k)));
+
+    step = 'reset is behind a confirm';
+    const openBefore = await page.evaluate(() => !document.querySelector('[data-el="confirm"]').hidden);
+    await page.click('[data-el="reset"]');
+    const openAfter = await page.evaluate(() => !document.querySelector('[data-el="confirm"]').hidden);
+    record('settings', 'settings', 'reset-asks-first', openBefore === false && openAfter === true);
+    await page.click('[data-el="cancel"]');
+    const closed = await page.evaluate(() => document.querySelector('[data-el="confirm"]').hidden);
+    record('settings', 'settings', 'reset-can-be-cancelled', closed === true);
+
+    step = 'NO control on this screen is dead';
+    // Every button must either be a toggle, a navigation, or the reset pair. A
+    // control that matches none of those is one nobody wired up — which is the exact
+    // defect both menu critics named, in the one place a settings screen invites it.
+    const orphans = await page.evaluate(() => [...document.querySelectorAll('.fa-settings button')]
+      .filter((b) => !b.hasAttribute('data-toggle') && !b.hasAttribute('data-el'))
+      .map((b) => b.className));
+    record('settings', 'settings', 'no-unwired-controls', orphans.length === 0, orphans.join(' | '));
+
+    step = 'back returns home';
+    await page.click('[data-el="back"]', { force: true });
+    await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
+    record('settings', '-', 'settings-flow', true, 'audio / motion / reset / back');
+  } catch (err) {
+    record('settings', '-', 'settings-flow', false, `failed at "${step}": ${String(err).split('\n')[0]}`);
+  }
+  record('settings', '-', 'no-console-errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+  await page.close();
+}
+
 async function run() {
   const flowOnly = process.argv.includes('--flow-only');
   await lintCssLiterals();
@@ -405,8 +648,13 @@ async function run() {
       page.on('pageerror', (e) => errs.push(String(e)));
       page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
 
-      for (const screen of ['home', 'characters', 'trophies']) {
-        await page.goto(`${BASE}/?screen=${screen}`, { waitUntil: 'networkidle', timeout: 45000 });
+      for (const screen of ['opening', 'home', 'characters', 'trophies', 'settings']) {
+        // `hold` pins the title card open. Without it the screen navigates itself to
+        // home after 4.5s and every measurement below races that timer — see the
+        // comment on `holdMs()` in `opening.ts`. The auto-continue is asserted at its
+        // real duration in `auditOpening()`.
+        const hold = screen === 'opening' ? '&hold=120000' : '';
+        await page.goto(`${BASE}/?screen=${screen}${hold}`, { waitUntil: 'networkidle', timeout: 45000 });
         await page.waitForFunction('window.__previewReady === true', null, { timeout: 45000 });
         await page.waitForTimeout(250);
 
@@ -443,8 +691,22 @@ async function run() {
     page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
     let step = 'boot';
     try {
+      // Through the front door: a bare `/` is the title card now, and the flow test is
+      // the one place that should exercise the same path a player takes rather than
+      // jumping past it with `?screen=`.
       await page.goto(`${BASE}/`, { waitUntil: 'networkidle', timeout: 45000 });
-      await page.waitForFunction('window.__screen === "home"', null, { timeout: 45000 });
+      await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
+      await page.click('[data-el="start"]', { force: true });
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 45000 });
+
+      step = 'the gear reaches settings';
+      // It said "Settings coming soon" for two review rounds. A dead control on the
+      // lobby is the defect both menu critics named, so its liveness is asserted.
+      await page.click('[data-el="settings"]', { force: true });
+      await page.waitForFunction('window.__screen === "settings" && window.__screenReady === true', null, { timeout: 20000 });
+      await page.click('[data-el="done"]', { force: true });
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
+      record('flow', 'home', 'gear-opens-settings', true, 'home -> settings -> home');
 
       step = 'home->characters';
       await page.click('[data-el="start"]', { force: true });
@@ -545,6 +807,8 @@ async function run() {
     await page.close();
   }
 
+  await auditOpening(browser);
+  await auditSettings(browser);
   await auditEconomy(browser);
 
   await browser.close();

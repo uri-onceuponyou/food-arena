@@ -31,6 +31,8 @@ import { ensureScreenStyles } from './theme';
 import { disposeCharacterStage } from './charStage';
 import { audio } from '../../audio';
 import { createHomeScreen } from './home';
+import { createOpeningScreen } from './opening';
+import { applyStoredSettings, createSettingsScreen } from './settings';
 import { createCharacterSelectScreen } from './characterSelect';
 import { createTrophyRoadScreen } from './trophyRoad';
 import { createMatchScreen } from './matchScreen';
@@ -68,6 +70,11 @@ const CURTAIN_MS = 140;
 
 export function createShell(opts: ShellOptions): Shell {
   ensureScreenStyles();
+  // Preferences the player set on the settings screen, re-applied before the first
+  // screen mounts. Done here rather than inside `settings.ts`'s factory because a
+  // preference that only takes effect once you have visited the screen that sets it
+  // is not a preference.
+  applyStoredSettings();
 
   const root = document.createElement('div');
   root.className = 'fa-root';
@@ -104,9 +111,11 @@ export function createShell(opts: ShellOptions): Shell {
 
   function build(route: Route): Screen {
     switch (route.name) {
+      case 'opening': return createOpeningScreen(ctx);
       case 'home': return createHomeScreen(ctx);
       case 'characters': return createCharacterSelectScreen(ctx);
       case 'trophies': return createTrophyRoadScreen(ctx);
+      case 'settings': return createSettingsScreen(ctx);
       case 'match': return createMatchScreen(ctx, route);
     }
   }

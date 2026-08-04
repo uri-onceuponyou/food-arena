@@ -11,15 +11,20 @@
  * `tools/tmp/` drives `http://localhost:5173/?player=…&enemy=…` and waits on
  * `window.__gameReady`. Rather than break all of it, the boot route is derived:
  *
- *   * `?screen=home|characters|trophies|match` — explicit, wins over everything.
+ *   * `?screen=opening|home|characters|trophies|settings|match` — explicit, wins over
+ *     everything.
  *   * otherwise, if ANY match-only QA parameter is present (`player`, `enemy`,
  *     `simSpeed`, `fogRadius`, `px`, `py`) boot straight into the match, exactly as
  *     before. Those parameters have no meaning anywhere else, so their presence is
  *     an unambiguous statement of intent.
  *   * otherwise, home.
  *
- * A bare `/` therefore shows the menu (the correct new behaviour) while every
- * existing screenshot and measurement script keeps working untouched.
+ *   * otherwise, the OPENING title card, which continues to home on the first tap or
+ *     on its own timer.
+ *
+ * A bare `/` therefore shows the title card and then the menu (the correct new
+ * behaviour) while every existing screenshot and measurement script keeps working
+ * untouched, because every one of them names a screen or passes a match parameter.
  */
 
 import { createShell } from './ui/screens/shell';
@@ -52,7 +57,14 @@ function bootRoute(profile: PlayerProfile): Route {
   }
   if (params.get('screen') === 'characters') return { name: 'characters' };
   if (params.get('screen') === 'trophies') return { name: 'trophies' };
-  return { name: 'home' };
+  if (params.get('screen') === 'settings') return { name: 'settings' };
+  if (params.get('screen') === 'home') return { name: 'home' };
+  // A bare `/` is a cold launch, so it gets the title card. Everything above is an
+  // explicit request for a specific screen and is honoured unchanged — which is what
+  // keeps `?screen=home` and every `?player=…` probe under `tools/` working exactly as
+  // before. The title card also auto-continues (see `opening.ts`), so nothing that
+  // navigates to `/` and waits for the home screen can hang on it.
+  return { name: 'opening' };
 }
 
 const profile = new PlayerProfile();

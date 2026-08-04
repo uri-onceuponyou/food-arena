@@ -18,9 +18,17 @@ import type { PlayerProfile } from './profile';
  * without a global, and it is why `match` is a route and not a mode flag.
  */
 export type Route =
+  /**
+   * The title card. Boot-only: nothing navigates *back* to it, because a splash you
+   * can reach twice is a splash you are trapped in. Its real job is not decoration —
+   * it is the place the player's FIRST GESTURE is collected, which is what unlocks
+   * Web Audio (see `opening.ts`).
+   */
+  | { name: 'opening' }
   | { name: 'home' }
   | { name: 'characters' }
   | { name: 'trophies' }
+  | { name: 'settings' }
   | { name: 'match'; player: CharacterId; enemy: CharacterId };
 
 export type RouteName = Route['name'];

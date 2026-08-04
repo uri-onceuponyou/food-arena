@@ -192,20 +192,25 @@ const CSS = `
 }
 .fa-topbar-spacer { flex: 1 1 auto; min-width: 0; }
 
-/* Read-only status pill (name, wins, coins). */
+/* Read-only status pill (name, trophies, coins).
+   Sized UP from 34px/0.78rem. A player's trophy and coin counts are core lobby
+   information and they were rendering as the smallest type on the screen — smaller
+   than the tab labels beside them and than every body line in the panels below — so
+   the hierarchy said they were the least important thing in the frame. 40px still
+   sits inside the top bar's 44px minimum, so nothing about the bar's height moves. */
 .fa-chip {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 13px;
+  gap: 7px;
+  height: 40px;
+  padding: 0 15px;
   background: var(--panel);
   border: 3px solid var(--ink);
   border-radius: 999px;
   box-shadow: 0 3px 0 rgba(0,0,0,0.35);
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.62rem, 1.4vh, 0.78rem);
+  font-size: clamp(0.7rem, 1.7vh, 0.95rem);
   white-space: nowrap;
   color: var(--ink);
 }
@@ -242,34 +247,55 @@ const CSS = `
 /* Segmented tab bar.
    The height is the tap target PLUS the container's own 3px border on each side —
    otherwise the buttons inside come out 6px short of 44 and the whole bar fails the
-   touch-target check while looking exactly right. */
+   touch-target check while looking exactly right.
+
+   ── The track is INK, and that is a fix, not a style change ──────────────────
+   It used to be '--panel' — cream — which made it one more cream pill in a row of
+   cream pills on a cream-and-orange backdrop. Two trophy-road critics independently
+   filed the same unactioned finding: *"Home / Foods / Trophies is the
+   lowest-contrast element on the lobby."* The text contrast was never the problem
+   (ink on cream is 12:1); the problem was that neither the BAR nor the SELECTED tab
+   separated from anything, so the one piece of navigation on the screen read as
+   decoration.
+
+   A dark track fixes both at once: the bar now separates from the warm backdrop, and
+   the active tab is a bright mustard slab inside a dark frame rather than a slightly
+   yellower cream next to cream. It is also the HUD's idiom — dark plate, bright
+   state — and the HUD is the one element on this project that beat the shipped
+   reference in a blind test. */
 .fa-tabs {
   display: flex;
   min-height: calc(var(--tap) + 6px);
-  background: var(--panel);
+  padding: 3px;
+  background: var(--ink);
   border: 3px solid var(--ink);
   border-radius: 999px;
   overflow: hidden;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35), inset 0 2px 6px rgba(0,0,0,0.5);
 }
 .fa-tab {
   appearance: none;
   border: none;
   cursor: pointer;
   background: transparent;
-  color: var(--ink);
+  color: rgba(255,243,222,0.78);
+  --fa-ic-ink: var(--cream);
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
   font-size: clamp(0.74rem, 1.9vh, 1.02rem);
   letter-spacing: 0.02em;
   min-height: var(--tap);
   padding: 0 clamp(10px, 1.6vw, 22px);
-  border-inline-start: 2px solid rgba(26,18,36,0.15);
+  border-radius: 999px;
   transition: background 0.12s, color 0.12s;
 }
-.fa-tab:first-child { border-inline-start: none; }
-.fa-tab:hover:not(.is-active) { background: rgba(255,201,60,0.4); }
-.fa-tab.is-active { background: var(--mustard); }
+.fa-tab:hover:not(.is-active) { background: rgba(255,243,222,0.16); color: var(--cream); }
+.fa-tab.is-active {
+  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
+  color: var(--ink);
+  --fa-ic-ink: var(--ink);
+  box-shadow: 0 2px 0 var(--gold-shadow);
+}
 .fa-tab[disabled] { opacity: 0.45; cursor: default; }
 .fa-tab[disabled]:hover { background: transparent; }
 
@@ -577,4 +603,16 @@ const CSS = `
 @media (prefers-reduced-motion: reduce) {
   .fa-screen, .fa-btn--primary, .fa-rays, .fa-confetti { animation: none !important; }
 }
+
+/* The same stop, as an explicit preference rather than an OS one.
+   'settings.ts' toggles this class on <html> and persists it; 'applyStoredSettings()'
+   re-applies it at boot from the shell, so the choice holds before the settings
+   screen has ever been mounted. Kept as a SEPARATE block from the media query above,
+   not merged with a comma, so neither can silently disable the other if one selector
+   turns out to be unsupported — and so any other owner can join in by adding
+   ':root.fa-reduce-motion' beside their own 'prefers-reduced-motion' rule. */
+:root.fa-reduce-motion .fa-screen,
+:root.fa-reduce-motion .fa-btn--primary,
+:root.fa-reduce-motion .fa-rays,
+:root.fa-reduce-motion .fa-confetti { animation: none !important; }
 `;
