@@ -1,0 +1,227 @@
+{
+  "id": "kitchen",
+  "displayName": "The Kitchen",
+  "width": 1400,
+  "height": 1000,
+  "center": {
+    "x": 700,
+    "y": 500
+  },
+  "maxSafeRadius": 890,
+  "playerSpawn": {
+    "x": 160,
+    "y": 500
+  },
+  "enemySpawn": {
+    "x": 1240,
+    "y": 500
+  },
+  "cover": [
+    {
+      "x": 525,
+      "y": 350,
+      "w": 170,
+      "h": 90,
+      "kind": "stove_island"
+    },
+    {
+      "x": 875,
+      "y": 350,
+      "w": 170,
+      "h": 90,
+      "kind": "stove_island"
+    },
+    {
+      "x": 525,
+      "y": 650,
+      "w": 170,
+      "h": 90,
+      "kind": "stove_island"
+    },
+    {
+      "x": 875,
+      "y": 650,
+      "w": 170,
+      "h": 90,
+      "kind": "stove_island"
+    },
+    {
+      "x": 700,
+      "y": 258,
+      "w": 55,
+      "h": 55,
+      "kind": "stacked_pots"
+    },
+    {
+      "x": 700,
+      "y": 742,
+      "w": 55,
+      "h": 55,
+      "kind": "stacked_pots"
+    },
+    {
+      "x": 525,
+      "y": 500,
+      "w": 50,
+      "h": 50,
+      "kind": "spice_cart"
+    },
+    {
+      "x": 875,
+      "y": 500,
+      "w": 50,
+      "h": 50,
+      "kind": "spice_cart"
+    },
+    {
+      "x": 230,
+      "y": 190,
+      "w": 230,
+      "h": 190,
+      "kind": "freezer"
+    },
+    {
+      "x": 1170,
+      "y": 810,
+      "w": 230,
+      "h": 190,
+      "kind": "freezer"
+    },
+    {
+      "x": 1120,
+      "y": 150,
+      "w": 90,
+      "h": 90,
+      "kind": "herb_crate"
+    },
+    {
+      "x": 280,
+      "y": 850,
+      "w": 90,
+      "h": 90,
+      "kind": "herb_crate"
+    },
+    {
+      "x": 1230,
+      "y": 140,
+      "w": 80,
+      "h": 80,
+      "kind": "produce_crate_tall"
+    },
+    {
+      "x": 170,
+      "y": 860,
+      "w": 80,
+      "h": 80,
+      "kind": "produce_crate_tall"
+    },
+    {
+      "x": 1175,
+      "y": 235,
+      "w": 110,
+      "h": 70,
+      "kind": "flour_sacks"
+    },
+    {
+      "x": 225,
+      "y": 765,
+      "w": 110,
+      "h": 70,
+      "kind": "flour_sacks"
+    },
+    {
+      "x": 340,
+      "y": 420,
+      "w": 160,
+      "h": 55,
+      "kind": "prep_counter"
+    },
+    {
+      "x": 340,
+      "y": 580,
+      "w": 160,
+      "h": 55,
+      "kind": "prep_counter"
+    },
+    {
+      "x": 1060,
+      "y": 580,
+      "w": 160,
+      "h": 55,
+      "kind": "prep_counter"
+    },
+    {
+      "x": 1060,
+      "y": 420,
+      "w": 160,
+      "h": 55,
+      "kind": "prep_counter"
+    },
+    {
+      "x": 250,
+      "y": 500,
+      "w": 60,
+      "h": 50,
+      "kind": "supply_barrel"
+    },
+    {
+      "x": 460,
+      "y": 500,
+      "w": 48,
+      "h": 46,
+      "kind": "supply_barrel"
+    },
+    {
+      "x": 1150,
+      "y": 500,
+      "w": 60,
+      "h": 50,
+      "kind": "supply_barrel"
+    },
+    {
+      "x": 940,
+      "y": 500,
+      "w": 48,
+      "h": 46,
+      "kind": "supply_barrel"
+    },
+    {
+      "x": 700,
+      "y": 830,
+      "w": 150,
+      "h": 70,
+      "kind": "fryer_counter"
+    },
+    {
+      "x": 700,
+      "y": 170,
+      "w": 150,
+      "h": 70,
+      "kind": "sink_counter"
+    }
+  ],
+  "hazards": [
+    {
+      "x": 700,
+      "y": 500,
+      "radius": 95,
+      "kind": "damage",
+      "damage": 8,
+      "tickMs": 250
+    },
+    {
+      "x": 560,
+      "y": 900,
+      "radius": 50,
+      "kind": "slow",
+      "slowFactor": 0.45
+    },
+    {
+      "x": 840,
+      "y": 100,
+      "radius": 50,
+      "kind": "slow",
+      "slowFactor": 0.45
+    }
+  ]
+}

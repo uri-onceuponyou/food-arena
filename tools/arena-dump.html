@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>arena gameplay dump</title></head>
+<body>
+<pre id="out">building…</pre>
+<!--
+  Dumps the GAMEPLAY-RELEVANT half of the real arena definition.
+
+  Why a page and not a Node import: `src/arena/kitchen.ts` builds Three.js geometry
+  eagerly, so it cannot be imported by Node's bare type-stripping loader the way
+  `src/game/*.ts` can. But everything the SIM reads from an arena is plain data
+  (`src/arena/types.ts`: width/height/center/maxSafeRadius/spawns/cover/hazards).
+  So we build it once in a browser, serialise those fields, and from then on the
+  match simulation can be driven entirely in Node against the REAL layout — no
+  hand-maintained fixture that can silently drift from `kitchen.ts`.
+
+  Read by `tools/match-sim.mjs --refresh-arena --url <snapshot url>`.
+-->
+<script type="module" src="/tools/arena-dump.js"></script>
+</body>
+</html>
