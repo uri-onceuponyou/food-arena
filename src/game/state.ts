@@ -56,6 +56,21 @@ export interface Fighter {
   fogTimer: number;
   regenTimer: number;
   trailDropTimer: number;
+  /**
+   * Which way this fighter is currently going AROUND an obstacle: +1, -1, or 0 for
+   * "not detouring". Persisted BETWEEN ticks, which is the whole point.
+   *
+   * `moveToward` re-decides its detour direction every tick from local geometry. When
+   * the local geometry flips — which it does constantly while sliding along a corner —
+   * the decision flips with it and the mover alternates between two headings forever
+   * instead of getting anywhere. That is exactly what was measured: the enemy wedged in
+   * the 0.5wu notch between `stacked_pots` and `sink_counter` at ~(749,227), alternating
+   * N and SE for the entire match, unable to reach 52% of the map.
+   *
+   * Committing to a side and HOLDING it until real progress resumes is what makes going
+   * around something work at all. Not gameplay-visible; pure movement state.
+   */
+  detourSign: number;
   /** Match-elapsed-ms timestamp of the last time this fighter took damage. -Infinity if never. */
   lastDamagedAt: number;
   /**
@@ -96,6 +111,7 @@ export function createFighter(
     fogTimer: 0,
     regenTimer: 0,
     trailDropTimer: 0,
+    detourSign: 0,
     lastDamagedAt: -Infinity,
     terrainSlowFactor: 1,
   };

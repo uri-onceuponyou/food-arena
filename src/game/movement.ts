@@ -102,21 +102,40 @@ export function moveToward(
   // tryMove reports movement while the mover creeps along the obstacle face at a
   // fraction of its speed and never actually gets around. Judge real progress
   // toward the target instead.
-  if (startDist - direct.d >= step * 0.35) return true;
+  if (startDist - direct.d >= step * 0.35) {
+    // Real progress toward the target: whatever we were going around, we are past it.
+    fighter.detourSign = 0;
+    return true;
+  }
 
   // Blocked. Commit to a perpendicular even though it makes the straight-line
   // distance WORSE — that is what going around something means, and it is why a
   // greedy "pick whichever candidate ends up closest" rule can never escape: every
   // detour scores worse than pressing into the wall, so greedy picks the wall.
   //
-  // Sign is chosen deterministically (never randomly, so it cannot dither between
-  // two choices on alternating ticks): prefer the side the target already lies on,
-  // and when the approach is perfectly axis-aligned — the exact case that caused the
-  // original lock — fall back to a fixed direction.
-  const perpDot = -dirY * (targetX - startX) + dirX * (targetY - startY);
-  const primary = perpDot >= 0 ? 1 : -1;
-
-  for (const sign of [primary, -primary]) {
+  // ── Two bugs lived here, and they compounded ────────────────────────────────
+  //
+  // 1. The side was chosen as
+  //        perpDot = -dirY*(targetX-startX) + dirX*(targetY-startY)
+  //    but BOTH call sites in `ai.ts` pass `dir = normalize(target - start)`. That
+  //    makes this a vector crossed with ITSELF — identically zero at every call
+  //    site — so `primary` was always +1 and the "deterministic side preference"
+  //    decided nothing. The AI detoured the same way around every obstacle.
+  //
+  // 2. Even with a real preference, the choice was re-made from scratch every tick.
+  //    Local geometry flips constantly while sliding along a corner, so the decision
+  //    flips with it and the mover alternates between two headings forever.
+  //
+  // Measured before this fix, over 180s per cell against a motionless immortal
+  // player: the enemy never reached 52% of standable cells, INCLUDING the player's
+  // own spawn, and finished every match wedged at ~(749,227) in the 0.5wu notch
+  // between `stacked_pots` and `sink_counter`, alternating N and SE.
+  //
+  // The fix is both halves: score the two sides by ACTUAL displacement (the only
+  // informative signal available here — `tryMove` returning true merely means
+  // "moved at all", which this function already documents as the wrong test), then
+  // PERSIST the winner on the fighter until real progress resumes above.
+  const candidate = (sign: number) => {
     fighter.x = startX;
     fighter.y = startY;
     // Bias the detour slightly forward so the mover rounds the corner instead of
@@ -124,10 +143,37 @@ export function moveToward(
     const px = -dirY * sign + dirX * 0.3;
     const py = dirX * sign + dirY * 0.3;
     const m = Math.hypot(px, py) || 1;
-    if (tryMove(fighter, (px / m) * step, (py / m) * step, arena)) return true;
+    tryMove(fighter, (px / m) * step, (py / m) * step, arena);
+    return { x: fighter.x, y: fighter.y, moved: Math.hypot(fighter.x - startX, fighter.y - startY) };
+  };
+
+  // Already committed to a side? Keep it while it still buys real movement. Holding a
+  // slightly worse side beats re-deciding into a dither — the mover needs several ticks
+  // in one direction to actually clear an obstacle.
+  if (fighter.detourSign !== 0) {
+    const held = candidate(fighter.detourSign);
+    if (held.moved >= step * 0.35) {
+      fighter.x = held.x;
+      fighter.y = held.y;
+      return true;
+    }
+    // That side is now blocked too — an inside corner. Fall through and re-choose.
   }
 
-  // Fully boxed in: keep whatever the direct attempt managed.
+  const a = candidate(1);
+  const b = candidate(-1);
+  const best = a.moved >= b.moved ? { sign: 1, r: a } : { sign: -1, r: b };
+
+  if (best.r.moved >= step * 0.35) {
+    fighter.detourSign = best.sign;
+    fighter.x = best.r.x;
+    fighter.y = best.r.y;
+    return true;
+  }
+
+  // Fully boxed in: keep whatever the direct attempt managed, and drop the commitment
+  // so the next tick is free to choose again rather than re-trying a dead side.
+  fighter.detourSign = 0;
   fighter.x = direct.x;
   fighter.y = direct.y;
   return direct.x !== startX || direct.y !== startY;
