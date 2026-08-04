@@ -22,7 +22,7 @@ import * as THREE from 'three';
 import type { CoverBox } from './types';
 import { toonMat, glossyMat, flatMat, roundedBox, RAMP_SOFT } from '../render/toon';
 import { wu, groundPos } from '../units';
-import { PALETTE } from '../game/rules';
+import { PALETTE, MATCH_DURATION_MS } from '../game/rules';
 import {
   makeTileWearTexture,
   makeWoodGrainTexture,
@@ -42,10 +42,41 @@ export const ARENA_W = 1400;
 export const ARENA_H = 1000;
 export const CENTER = { x: ARENA_W / 2, y: ARENA_H / 2 }; // 700, 500
 
-// Half-diagonal of the playfield ≈ 860.2; pulled in slightly so the very corners
-// start just outside the opening safe zone, matching the prototype's ratio where
-// MAX_SAFE_RADIUS (545) sat almost exactly on its own half-diagonal (540.8).
-export const MAX_SAFE_RADIUS = 850;
+/** Half-diagonal of the playfield — the distance to its FARTHEST point, a corner. */
+export const ARENA_HALF_DIAGONAL = Math.hypot(ARENA_W / 2, ARENA_H / 2); // ≈ 860.23
+
+/**
+ * Seconds of play before the closing ring first cuts into the playfield.
+ *
+ * Uri's call: *"Start the circle bigger. So it touches first the arena after 5-7
+ * seconds."* Set to 6, the middle of that range.
+ */
+export const FOG_FIRST_CONTACT_S = 6;
+
+/**
+ * Opening safe radius, DERIVED rather than hand-picked.
+ *
+ * The previous value (850) was **smaller than the arena's own half-diagonal (860.2)**, so
+ * the safe circle never contained its own corners: the NW corner sits at 831 from centre
+ * and was therefore inside the lethal fog **from t=0, for the entire match.** Corners were
+ * permanently unusable space, and there was no way to see one un-fogged at all — which
+ * also meant no frame of a corner could be judged for hue or value.
+ *
+ * `sim.ts` shrinks linearly: `safeRadius = maxSafeRadius × (1 − matchProgress)`. So to put
+ * first contact at `FOG_FIRST_CONTACT_S`, solve for the radius that has decayed to exactly
+ * the half-diagonal by then:
+ *
+ *     R0 = halfDiagonal / (1 − t / MATCH_DURATION)
+ *        = 860.23 / (1 − 6/180)
+ *        ≈ 890
+ *
+ * Derived from the arena dimensions and the match length rather than written as a literal,
+ * so resizing the map or changing the match duration cannot silently re-create the
+ * corners-fogged-from-birth bug.
+ */
+export const MAX_SAFE_RADIUS = Math.round(
+  ARENA_HALF_DIAGONAL / (1 - (FOG_FIRST_CONTACT_S * 1000) / MATCH_DURATION_MS)
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ground-shadow direction, and the round-9 removal of the baked CAST decals.
@@ -66,6 +97,11 @@ export const MAX_SAFE_RADIUS = 850;
 // deg out. Neither draws a hard shadow edge — apron.ts shades a soft one-sided kerb
 // band, floor.ts a whole-arena low-frequency ramp — so neither is visibly wrong at 22
 // deg, but they should be brought across.
+//
+// CORRECTION (verified against the tree): `apron.ts` is ALREADY on the new azimuth — it
+// reads `Math.hypot(16.35, 4.69)`, matching this file and `lighting.ts:166`. Only
+// `floor.ts` is still stale, and it is parked. This note claimed otherwise for a while,
+// and a brief written from it sent an agent to "fix" something already correct.
 //
 // ── The cast decals are GONE, and why ─────────────────────────────────────────
 // Rounds 6-8 gave every cover prop, the pot and several small props a second baked
