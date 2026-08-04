@@ -747,18 +747,26 @@ export class VfxLayer {
 
     // QA-only on-demand spawn — see the `__vfxSpawnTest` declaration above.
     window.__vfxSpawnTest = (kind, xWU, yWU, amount = 14, color = '#FFC93C', who, weaponKey) => {
-      if (kind === 'impact') this.spawnImpactBurst(xWU, yWU, color, amount);
+      // Resolve a real Weapon up front: BOTH the impact and cast paths consult the
+      // bespoke registry through it, and passing nothing means every QA spawn silently
+      // falls back to the generic burst. A first version of this hook wired only the cast
+      // path, so `kind:'impact'` still could not reach anything in `vfx/weapons/` — which
+      // is the single most common thing a per-weapon agent needs to look at.
+      const qaId = who ?? 'hamburger';
+      const qaWeapon = weaponKey ? CHARACTERS[qaId]?.weapons?.find((w: Weapon) => w.key === weaponKey) : undefined;
+
+      if (kind === 'impact') {
+        this.spawnImpactBurst(xWU, yWU, color, amount, qaWeapon ? { weapon: qaWeapon, characterId: qaId } : undefined);
+      }
       else if (kind === 'death') this.spawnDeathBurst(xWU, yWU, color);
       else {
         // `who`/`weaponKey` let a probe drive a SPECIFIC character's bespoke hook. Without
-        // them this hardcoded 'hamburger' + a synthetic 'qa' weapon, so every per-weapon
-        // agent had to build its own workaround to see its own effect at all — and driving
-        // a real hit through gameplay is unreliable (the AI kites; probes have timed out
-        // waiting). Falls back to the old behaviour when omitted.
-        const id = who ?? 'hamburger';
-        const real = weaponKey ? CHARACTERS[id]?.weapons?.find((w: Weapon) => w.key === weaponKey) : undefined;
-        const weapon = real ?? ({ key: 'qa', name: 'qa', type: 'ranged', range: 100, damage: amount, cooldown: 1, color, effect: null } as unknown as Weapon);
-        this.spawnCastFlash(xWU, yWU, { x: 1, y: 0 }, weapon, id);
+        // them this falls back to a synthetic 'qa' weapon on 'hamburger', which is the
+        // pre-existing behaviour. Driving a real hit through gameplay is not a workable
+        // alternative: fighters spawn 1080wu apart, every weapon reaches at most 140wu,
+        // and probes have timed out waiting for the AI to close.
+        const weapon = qaWeapon ?? ({ key: 'qa', name: 'qa', type: 'ranged', range: 100, damage: amount, cooldown: 1, color, effect: null } as unknown as Weapon);
+        this.spawnCastFlash(xWU, yWU, { x: 1, y: 0 }, weapon, qaId);
       }
     };
   }
