@@ -22,7 +22,13 @@ import { otherRole } from './state';
 import { CHARACTER_IDS, CHARACTERS, MATCH_DURATION_MS, type CharacterId, type Weapon } from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 import { InputController } from './input';
+import { createPointerLock, type PointerLockController } from './pointerLock';
 import { VfxLayer } from './vfx';
+// Audio is a SECOND, independent consumer of the same `GameEvent[]` stream the VFX
+// layer runs on — see `src/audio/director.ts`. It never touches the sim, never
+// touches the renderer, and every call into it is failure-tolerant by contract, so
+// an audio problem degrades to silence rather than to a stalled frame.
+import { createMatchAudio, type MatchAudio } from '../audio';
 import { createHud, type Hud, type ScreenPoint } from '../ui/hud';
 
 declare global {
@@ -86,8 +92,10 @@ export class GameSession {
   private readonly stage: Stage;
   private readonly arena = createKitchenArena();
   private readonly vfx: VfxLayer;
+  private readonly audio: MatchAudio = createMatchAudio();
   private readonly hud: Hud;
   private readonly input: InputController;
+  private readonly pointerLock: PointerLockController;
   private readonly fogRing: FogRing;
   private readonly playerId: CharacterId;
   private readonly enemyId: CharacterId;
@@ -213,6 +221,17 @@ export class GameSession {
     this.input = new InputController(this.stage.canvas);
     this.input.setWeaponCount(CHARACTERS[this.playerId].weapons.length);
 
+    // Mouse capture. Everything it needs from the session is already public — it
+    // pauses and resumes through the SAME `pause()`/`resume()` the screen layer's
+    // pause chip uses, so there is exactly one notion of "the match is frozen".
+    // No-ops entirely on touch devices and under `?pointerLock=0`.
+    this.pointerLock = createPointerLock({
+      target: this.stage.canvas,
+      pause: () => this.pause(),
+      resume: () => this.resume(),
+      onLockChange: (locked) => this.input.setPointerLocked(locked),
+    });
+
     // Placeholders assigned for real by spawnMatch() below (kept non-null for TS).
     this.state = createMatch(this.arena, this.playerId, this.enemyId);
     this.playerModel = createCharacter(this.playerId);
@@ -226,7 +245,10 @@ export class GameSession {
   /** Start a brand-new match: fresh sim state, fresh models, camera snapped back. */
   restart(): void {
     this.spawnMatch();
-    this.isPaused = false;
+    // Via resume(), not `isPaused = false`, so a restart re-captures the mouse. The
+    // only caller is the HUD's Play Again button, so the request carries the user
+    // gesture the Pointer Lock API requires.
+    this.resume();
   }
 
   get paused(): boolean {
@@ -235,10 +257,17 @@ export class GameSession {
 
   pause(): void {
     this.isPaused = true;
+    // Give the mouse back whenever the match freezes — a pause menu the player cannot
+    // click is worse than no pause menu. Deliberate, so it does not read as a loss.
+    this.pointerLock.release();
   }
 
   resume(): void {
     this.isPaused = false;
+    // A no-op unless the player opted into capture. If the request is refused — most
+    // often because Escape deliberately does NOT grant user activation — `pointerLock`
+    // pauses again and asks for a click, rather than running the match uncaptured.
+    this.pointerLock.engage();
   }
 
   resize(): void {
@@ -249,6 +278,7 @@ export class GameSession {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.handleResize);
+    this.pointerLock.dispose();
     this.input.dispose();
     this.hud.dispose();
     this.vfx.dispose();
@@ -275,6 +305,7 @@ export class GameSession {
     this.enemyModel.play('idle');
 
     this.vfx.clear();
+    this.audio.reset();
     this.input.reset();
     this.hitStopBudgetMs = 0;
     this.hitStopBankedMs = 0;
@@ -315,6 +346,22 @@ export class GameSession {
     this.state.safeRadius = maxR * frac;
   }
 
+  /**
+   * Where the aim cursor is on screen, and where it pivots from — or null when the
+   * mouse is free, in which case the OS cursor is the reticle and the HUD draws none.
+   *
+   * Recomputed every frame rather than cached, because the pivot is the PLAYER's
+   * projected position: it moves with the character, the camera's follow lerp and
+   * screen shake, and a reticle anchored to a stale pivot visibly lags its own owner.
+   */
+  private aimCursor(): { from: ScreenPoint; at: ScreenPoint } | null {
+    const off = this.input.aimOffsetPx;
+    if (!off) return null;
+    const from = this.projectPointToScreen(this.state.player.x, this.state.player.y, 0);
+    if (!from) return null;
+    return { from, at: { x: from.x + off.x, y: from.y + off.y } };
+  }
+
   /** Gather this tick's raw input and turn it into a `MatchInput` the sim understands. */
   private buildInput(): MatchInput {
     const playing = this.state.phase === 'playing';
@@ -323,7 +370,18 @@ export class GameSession {
 
     let aim: { x: number; y: number } | undefined;
     if (playing) {
-      const ndc = this.input.mouseNdc;
+      // Pointer-locked: the virtual cursor's screen point, converted to NDC here so
+      // everything downstream — raycast, ground hit, direction-from-player — is the
+      // exact same code path the free cursor has always taken.
+      const cursor = this.aimCursor();
+      let ndc = this.input.mouseNdc;
+      if (cursor) {
+        const rect = this.stage.canvas.getBoundingClientRect();
+        ndc = {
+          x: ((cursor.at.x - rect.left) / rect.width) * 2 - 1,
+          y: -(((cursor.at.y - rect.top) / rect.height) * 2 - 1),
+        };
+      }
       if (ndc) {
         this.raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.stage.rig.camera);
         const hit = this.raycaster.ray.intersectPlane(this.groundPlane, this.rayHit);
@@ -574,6 +632,10 @@ export class GameSession {
   private notifyPhase(): void {
     if (this.state.phase === this.lastPhase) return;
     this.lastPhase = this.state.phase;
+    // Hand the mouse back the moment the match is decided: the HUD's own Play Again
+    // button and the screen layer's "back to menu" both need a real cursor, and both
+    // appear on exactly this transition.
+    this.pointerLock.setMatchActive(this.state.phase !== 'ended');
     this.opts.onPhase?.(this.state.phase, this.state.winner);
   }
 
@@ -634,6 +696,10 @@ export class GameSession {
     const input = this.buildInput();
     const events = stepMatch(this.state, stepDtMs, input);
     this.handleEvents(events);
+    // Second consumer of the same tick's events (the first being `handleEvents`
+    // above, which drives VFX/HUD/hit-stop). Order between the two is irrelevant —
+    // neither reads anything the other writes.
+    this.audio.handleEvents(events, this.state);
     this.notifyPhase();
 
     const playerMoved = this.state.player.x !== prevPlayer.x || this.state.player.y !== prevPlayer.y;
@@ -702,6 +768,10 @@ export class GameSession {
     this.hud.update(this.state, {
       selectedWeapon: this.input.selectedWeapon,
       safeArrow: this.safeArrow(),
+      // Null unless pointer-locked — see `HudFrameInfo.aim`. Computed for every phase,
+      // not just 'playing', so the countdown is not five seconds of an invisible
+      // cursor with nothing on screen to orient by.
+      aim: this.aimCursor(),
     });
     this.hud.updateFloatingBars(
       this.projectToScreen(this.playerModel, this.state.player.alive),
