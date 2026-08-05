@@ -45,8 +45,107 @@ declare global {
     __vfxDebugGiantSlamCount?: number;
     /** QA-only mirror of the INPUT → SIM edge. See `MatchDebug`. */
     __matchDebug?: MatchDebug;
+    /** QA-only mirror of the EVENT → FEEL edge. See `FeelDebug`. */
+    __feelDebug?: FeelDebug;
+    /**
+     * QA-only: run one synthetic `GameEvent` through the REAL `handleEvents` path —
+     * every feel channel at once (impact VFX, camera kick, hit-stop, knockback,
+     * damage number), arbitrated exactly as a sim-emitted event would be.
+     *
+     * `window.__vfxSpawnTest` already fires one VFX effect on demand, and that is not
+     * the same question. A hit is a MULTI-CHANNEL event and this project has already
+     * paid for measuring channels separately: Giant Lollipop's three passes each
+     * looked reasonable alone and together repainted 85.3% of the player
+     * (`docs/LESSONS.md` §7). Driving a real hit through gameplay is unreliable —
+     * fighters spawn 1080 wu apart, weapons reach <= 140 wu, and probes have timed
+     * out waiting (`docs/TOOLS.md`) — so a probe that wants to compare a 2-damage
+     * chip against an 18-damage smash has no repeatable way to produce either.
+     *
+     * Deliberately takes a whole `GameEvent` rather than `(damage)`: the response is
+     * a function of `source.kind` as much as of `amount` (fog gets no burst and no
+     * shake; trail/hazard get no hit-stop), and a hook that could only express one of
+     * those would measure a path the player never takes.
+     *
+     * Published by the constructor, cleared by `dispose()`. Never called by game logic.
+     */
+    __feelEvent?: (ev: GameEvent) => void;
   }
 }
+
+/**
+ * QA-only, never read by game logic — the EVENT → FEEL edge, in the same spirit as
+ * `MatchDebug`'s INPUT → SIM edge and for the same reason.
+ *
+ * `stepMatch()` returns a typed `GameEvent[]` with two independent consumers (this
+ * file's `handleEvents`, and `audio/director.ts`). Nothing published which events
+ * arrived or which feedback channels answered them, so "this event has no visual
+ * response" and "this event never fires" were the same picture from outside. That is
+ * exactly the shape the audio pillar's worst bug had: a match ending on the clock and
+ * the FINAL RING had no sound at all, and it survived because 95.3% of real ticks
+ * carry no events, so a census taken by eye sees nothing either way.
+ *
+ * `events` is keyed the way `tools/tmp/feel_census.mjs` keys its Node-side census —
+ * `hit-landed:weapon`, `projectile-destroyed:hit-cover` — so the two tables join. The
+ * census is the DENOMINATOR (what the sim emits over 110 matches); this is the
+ * NUMERATOR (what the renderer did about it). Neither is trustworthy alone.
+ *
+ * Mutated in place, never reallocated, with every key present from construction — it
+ * is written every frame and this project tracks per-frame allocation.
+ */
+export interface FeelDebug {
+  /** `GameEvent` arrivals, keyed as `feel_census.mjs` keys them. */
+  events: Record<string, number>;
+  /** Feedback channels fired, by channel. A key in `events` with zero movement in
+   * ANY of these across a whole match is a gap, not a taste call. */
+  responses: {
+    vfx: number;
+    shake: number;
+    hitStop: number;
+    knockback: number;
+    damageNumber: number;
+    screenFlash: number;
+  };
+  /** Live hit-stop state, refreshed every frame — see the `hitStop*` fields. */
+  hitStopBudgetMs: number;
+  hitStopBankedMs: number;
+  /**
+   * The freeze the LAST `triggerHitStop` asked for, in ms.
+   *
+   * `hitStopBudgetMs` cannot answer that question: `triggerHitStop` takes a `Math.max`
+   * against whatever is already queued (so five Rice Spray pellets do not compound
+   * into a multi-hundred-ms freeze), which means the live budget is a running maximum
+   * and a probe reading it after a 2-damage chip sees whatever the last big hit
+   * queued. That is not a hypothetical — it made this file's own probe report an
+   * identical 70 ms for every rung of a 2..18 damage ladder, i.e. a dynamic range of
+   * exactly 1.00x, which is a confidently wrong answer about the channel under test.
+   */
+  lastHitStopMs: number;
+  /** Last frame's real budget vs what actually reached `stepMatch`, in ms. Their
+   * RATIO is the freeze: 1.0 is normal time, `HITSTOP_TRICKLE` is a full freeze, and
+   * anything above 1.0 is the banked time being repaid. */
+  rawDtMs: number;
+  stepDtMs: number;
+  /** Frames since the match began in each of the three dt regimes. `frozen +
+   * repaying` over `frames` is the share of the match that is not running at 1x —
+   * the number that says whether hit-stop reads as a punch or as a stutter. */
+  frames: number;
+  frozenFrames: number;
+  repayingFrames: number;
+  /** Largest `amount` seen on a `hit-landed`, and the largest shake it asked for.
+   * Both are peaks over the match, so a single number says whether the loud end of
+   * the range is ever actually reached in play. */
+  peakHitAmount: number;
+  peakShakeM: number;
+}
+
+/** Every key `FeelDebug.events` can carry, allocated up front so the record never
+ * grows at runtime. Mirrors `tools/tmp/feel_census.mjs`'s keying exactly. */
+const FEEL_EVENT_KEYS = [
+  'countdown-tick', 'match-started', 'match-ended', 'weapon-fired', 'weapon-fired:giantSlam',
+  'projectile-spawned', 'projectile-destroyed:hit-target', 'projectile-destroyed:hit-cover',
+  'projectile-destroyed:expired', 'hit-landed:weapon', 'hit-landed:trail', 'hit-landed:hazard',
+  'hit-landed:fog', 'heal', 'death', 'splat-created', 'trail-mark-created',
+] as const;
 
 /**
  * QA-only, never read by game logic — the instrument that exists because
@@ -227,6 +326,15 @@ export class GameSession {
     pointerLocked: false, qaSpawnInsideCover: null, frames: 0,
   };
 
+  /** QA mirror of the event → feel edge. Allocated once; see `FeelDebug`. */
+  private readonly feel: FeelDebug = {
+    events: Object.fromEntries(FEEL_EVENT_KEYS.map((k) => [k, 0])),
+    responses: { vfx: 0, shake: 0, hitStop: 0, knockback: 0, damageNumber: 0, screenFlash: 0 },
+    hitStopBudgetMs: 0, hitStopBankedMs: 0, lastHitStopMs: 0, rawDtMs: 0, stepDtMs: 0,
+    frames: 0, frozenFrames: 0, repayingFrames: 0,
+    peakHitAmount: 0, peakShakeM: 0,
+  };
+
   // ── Hit-stop bookkeeping ──────────────────────────────────────────────────
   // On a solid hit we withhold most of this frame's (and the next few frames')
   // sim-time budget from `stepMatch`, so the simulation (and character animation,
@@ -246,6 +354,14 @@ export class GameSession {
    * the freeze ends — high enough that the catch-up resolves in a couple of frames
    * (reads as a snappy "unfreeze"), not a slow-motion limp back to normal speed. */
   private static readonly HITSTOP_CATCHUP_RATE = 3;
+  /**
+   * Hard ceiling on a single camera kick, in metres. See `kick()` for why it lives
+   * here rather than in `camera.ts`: the shake is a translation of the whole camera,
+   * so it moves the fair-play window and `tools/aspect.mjs` is structurally blind to
+   * it. 0.40 m is 8.0 wu against a guaranteed radius of 199.2 wu — 4.0%, and only for
+   * the two or three frames a kick survives.
+   */
+  private static readonly SHAKE_MAX_M = 0.40;
 
   // ── Visual-only knockback ────────────────────────────────────────────────
   // The sim never moves a fighter on a hit (see combat.ts), so this nudges only the
@@ -317,6 +433,8 @@ export class GameSession {
     this.spawnMatch();
 
     window.__matchDebug = this.debug;
+    window.__feelDebug = this.feel;
+    window.__feelEvent = (ev: GameEvent) => this.handleEvents([ev]);
     window.addEventListener('resize', this.handleResize);
     this.raf = requestAnimationFrame(this.loop);
   }
@@ -366,6 +484,8 @@ export class GameSession {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     if (window.__matchDebug === this.debug) delete window.__matchDebug;
+    if (window.__feelDebug === this.feel) delete window.__feelDebug;
+    delete window.__feelEvent;
     window.removeEventListener('resize', this.handleResize);
     this.pointerLock.dispose();
     this.input.dispose();
@@ -402,6 +522,11 @@ export class GameSession {
     this.projectileOrigins.clear();
     this.hitStopBudgetMs = 0;
     this.hitStopBankedMs = 0;
+    for (const k of Object.keys(this.feel.events)) this.feel.events[k] = 0;
+    this.feel.responses.vfx = 0; this.feel.responses.shake = 0; this.feel.responses.hitStop = 0;
+    this.feel.responses.knockback = 0; this.feel.responses.damageNumber = 0; this.feel.responses.screenFlash = 0;
+    this.feel.frames = 0; this.feel.frozenFrames = 0; this.feel.repayingFrames = 0;
+    this.feel.peakHitAmount = 0; this.feel.peakShakeM = 0; this.feel.lastHitStopMs = 0;
     this.knockback.player.x = 0; this.knockback.player.z = 0;
     this.knockback.enemy.x = 0; this.knockback.enemy.z = 0;
 
@@ -572,6 +697,25 @@ export class GameSession {
    * Spray landing at once) don't compound into a multi-hundred-ms freeze. */
   private triggerHitStop(ms: number): void {
     this.hitStopBudgetMs = Math.max(this.hitStopBudgetMs, ms);
+    this.feel.responses.hitStop++;
+    this.feel.lastHitStopMs = ms;
+  }
+
+  /** Camera kick. The ONE way this file reaches `rig.shake` — routed through here so
+   * `FeelDebug` counts every kick and records the peak, and so the amplitude cap
+   * below cannot be bypassed by a new call site.
+   *
+   * ⚠️ `amount` is a camera TRANSLATION in metres and it moves the guaranteed view
+   * window with it: `camera.ts` adds `shakeOffset` to both the eye and the look-at,
+   * so a kick of A metres momentarily costs A metres off the fair-play radius on the
+   * side it moves toward. `SHAKE_MAX_M` bounds that at ~1% of the 199.2 wu guarantee.
+   * `tools/aspect.mjs` cannot see this — it reads `__fairView()`, which is computed
+   * from `computeDistance()` and never sees the shake — so the bound has to be here. */
+  private kick(amount: number, decay?: number): void {
+    const a = Math.min(amount, GameSession.SHAKE_MAX_M);
+    this.stage.rig.shake(a, decay);
+    this.feel.responses.shake++;
+    if (a > this.feel.peakShakeM) this.feel.peakShakeM = a;
   }
 
   /** Nudge a fighter's VISUAL model away from an attack source. Sim positions are
@@ -586,6 +730,7 @@ export class GameSession {
     const kb = this.knockback[targetRole];
     kb.x += (dx / mag) * impulse;
     kb.z += (dy / mag) * impulse;
+    this.feel.responses.knockback++;
   }
 
   /** React to this tick's sim events: attack/hit/death animations, ability VFX, hit
@@ -599,6 +744,14 @@ export class GameSession {
     const lastHitColor: Partial<Record<FighterRole, string>> = {};
 
     for (const ev of events) {
+      // QA census of the event → feel edge. Keyed exactly as `feel_census.mjs` keys
+      // the Node-side census so the two tables join — see `FeelDebug`.
+      const feelKey =
+        ev.type === 'hit-landed' ? `hit-landed:${ev.source.kind}`
+        : ev.type === 'projectile-destroyed' ? `projectile-destroyed:${ev.reason}`
+        : ev.type;
+      if (feelKey in this.feel.events) this.feel.events[feelKey]++;
+
       switch (ev.type) {
         case 'weapon-fired': {
           const model = ev.fighterRole === 'player' ? this.playerModel : this.enemyModel;
@@ -618,10 +771,13 @@ export class GameSession {
             // can see the sum; adding another cast-time beat belongs there, not
             // here.
             this.vfx.spawnWeaponCast(fighter.x, fighter.y, fighter.facing, weapon, fighter.characterId);
+            this.feel.responses.vfx++;
             if (weapon.giantSlam) {
               // Everything a giant slam does that is NOT this layer's to draw.
+              this.feel.events['weapon-fired:giantSlam']++;
               this.hud.flashScreen(weapon.color);
-              this.stage.rig.shake(0.55, 2.6);
+              this.feel.responses.screenFlash++;
+              this.kick(0.55, 2.6);
               this.triggerHitStop(120);
               window.__vfxDebugGiantSlamCount = (window.__vfxDebugGiantSlamCount ?? 0) + 1;
             }
@@ -630,7 +786,17 @@ export class GameSession {
         }
         case 'hit-landed': {
           const model = ev.targetRole === 'player' ? this.playerModel : this.enemyModel;
-          model.play('hit');
+          // ⚠️ `intensity` is passed and is currently IGNORED — `CharacterModel.play`
+          // declares `opts.intensity` (characters/types.ts) and `BaseCharacter.play`
+          // does not read it. It is passed anyway, deliberately, because this is where
+          // the number is known and because the flash is the single loudest channel in
+          // the whole hit and it is measurably FLAT: firing a fog hit (the one branch
+          // that plays 'hit' and does nothing else) changes 4,122 px at 2 damage and
+          // 4,094 px at 18 — 0.99x across a 9x damage range, while every other channel
+          // at least tries. Wiring it is one line in `applyHitFlash`, in a file this
+          // owner does not have; see the report accompanying this commit. Until then
+          // this call site is correct and inert rather than absent and forgotten.
+          model.play('hit', { intensity: THREE.MathUtils.clamp(ev.amount / 12, 0.25, 1) });
 
           const color = this.colorForDamageSource(ev.targetRole, ev.source);
           lastHitColor[ev.targetRole] = color;
@@ -647,8 +813,8 @@ export class GameSession {
           // `hud.update()`. See `ui/hud.ts` -> `flashFogTick`.
           if (ev.source.kind === 'fog') {
             const fogPos = this.projectPointToScreen(ev.x, ev.y, 1.3);
-            if (fogPos) this.hud.spawnDamageNumber(fogPos, ev.amount, { fog: true });
-            if (ev.targetRole === 'player') this.hud.flashFogTick();
+            if (fogPos) { this.hud.spawnDamageNumber(fogPos, ev.amount, { fog: true }); this.feel.responses.damageNumber++; }
+            if (ev.targetRole === 'player') { this.hud.flashFogTick(); this.feel.responses.screenFlash++; }
             break;
           }
 
@@ -669,21 +835,50 @@ export class GameSession {
             }
           }
           this.vfx.spawnImpactBurst(ev.x, ev.y, color, ev.amount, impactSource);
+          this.feel.responses.vfx++;
+          if (ev.amount > this.feel.peakHitAmount) this.feel.peakHitAmount = ev.amount;
 
           const screenPos = this.projectPointToScreen(ev.x, ev.y, 1.3);
-          if (screenPos) this.hud.spawnDamageNumber(screenPos, ev.amount);
+          if (screenPos) { this.hud.spawnDamageNumber(screenPos, ev.amount); this.feel.responses.damageNumber++; }
 
-          // Screen shake scales with the actual damage — a Rice Spray tick barely
-          // registers, a Soup Dump or Giant Lollipop hit rattles the camera. Ambient
-          // ticks (fog/hazard/trail) shake less and never trigger hit-stop, so the
-          // game doesn't stutter every 300ms from standing in the fog.
+          // ── DYNAMIC RANGE, and why these two curves were re-derived ───────────
+          //
+          // Uri, after playing the build: *"it still seems like it's flat. one tone,
+          // maybe two, monotonic."* That was said about audio, and the same
+          // `hit-landed` event drives these. Measured with `tools/tmp/feel_probe.mjs`
+          // on a frozen snapshot, hand-cranking the real loop one 60 fps frame at a
+          // time, against the game's own damage range (`rules.ts`: 2..18, a 9.0x
+          // input):
+          //
+          //     channel                 at 2 dmg   at 18 dmg   delivered range
+          //     camera kick             6.3 px      21.4 px       3.44x
+          //     hit-stop                42 ms       70 ms         1.69x
+          //     character hit flash     4122 px     4094 px       0.99x   <- flat
+          //     impact burst pixels     4096        3621          0.88x   <- inverted
+          //
+          // A 9x input arriving as 1.69x is not a taste gap, it is compression: the
+          // smallest hit in the game freezes the world for 60% as long as the largest
+          // one. And the flash — which `tools/tmp/feel_probe.mjs` isolates by firing a
+          // FOG hit, the one `hit-landed` branch that plays `'hit'` and nothing else —
+          // is the loudest channel of the lot and is bit-identical at both ends.
+          //
+          // So both curves are re-derived with a much lower floor and a higher ceiling.
+          // The floor matters more than the ceiling: `feel_census` counts 21.5 weapon
+          // hits in a 16.0 s match, one every 0.74 s, so what the SMALLEST hit costs is
+          // paid ~20 times a match and is most of what "monotonic" is describing.
+          //
+          // Total freeze goes DOWN while range goes UP — at the census's damage
+          // distribution (p25 4, median 6, p75 9, p95 16) mean freeze moves 51.5 ms ->
+          // 44.6 ms, i.e. 6.9% -> 6.0% of match time spent not running at 1x, against
+          // 1.69x -> 4.8x of range. More punch, less stutter, and both are counted:
+          // `FeelDebug.frozenFrames` / `repayingFrames`.
           const isWeaponHit = ev.source.kind === 'weapon';
-          const shakeBase = THREE.MathUtils.clamp(0.05 + ev.amount * 0.011, 0.05, 0.5);
+          const shakeBase = THREE.MathUtils.clamp(0.012 + ev.amount * 0.0175, 0.012, GameSession.SHAKE_MAX_M);
           const targetBias = ev.targetRole === 'player' ? 1.25 : 1;
-          this.stage.rig.shake(shakeBase * targetBias * (isWeaponHit ? 1 : 0.45));
+          this.kick(shakeBase * targetBias * (isWeaponHit ? 1 : 0.45));
 
           if (isWeaponHit) {
-            this.triggerHitStop(THREE.MathUtils.clamp(38 + ev.amount * 1.8, 40, 80));
+            this.triggerHitStop(THREE.MathUtils.clamp(10 + ev.amount * 4.6, 16, 105));
           }
 
           if (ev.source.kind === 'weapon') {
@@ -721,8 +916,9 @@ export class GameSession {
         case 'heal': {
           const fighter = this.state[ev.fighterRole];
           this.vfx.spawnHealPulse(fighter.x, fighter.y);
+          this.feel.responses.vfx++;
           const screenPos = this.projectPointToScreen(fighter.x, fighter.y, 1.6);
-          if (screenPos) this.hud.spawnDamageNumber(screenPos, ev.amount, { heal: true });
+          if (screenPos) { this.hud.spawnDamageNumber(screenPos, ev.amount, { heal: true }); this.feel.responses.damageNumber++; }
           break;
         }
         case 'death': {
@@ -731,7 +927,8 @@ export class GameSession {
           const fighter = this.state[ev.fighterRole];
           const color = lastHitColor[ev.fighterRole] ?? '#FFFFFF';
           this.vfx.spawnDeathBurst(fighter.x, fighter.y, color);
-          this.stage.rig.shake(0.42, 3);
+          this.feel.responses.vfx++;
+          this.kick(0.42, 3);
           this.triggerHitStop(90);
           break;
         }
@@ -872,6 +1069,17 @@ export class GameSession {
       stepDtMs = rawDtMs;
     }
     const stepDtSeconds = stepDtMs / 1000;
+
+    // QA mirror of the freeze itself. `stepDtMs / rawDtMs` is the one number that says
+    // whether hit-stop is happening at all and how much of the match is spent not
+    // running at 1x — see `FeelDebug`.
+    this.feel.rawDtMs = rawDtMs;
+    this.feel.stepDtMs = stepDtMs;
+    this.feel.hitStopBudgetMs = this.hitStopBudgetMs;
+    this.feel.hitStopBankedMs = this.hitStopBankedMs;
+    this.feel.frames++;
+    if (stepDtMs < rawDtMs * 0.5) this.feel.frozenFrames++;
+    else if (stepDtMs > rawDtMs * 1.05) this.feel.repayingFrames++;
 
     const prevPlayer = { x: this.state.player.x, y: this.state.player.y };
     const prevEnemy = { x: this.state.enemy.x, y: this.state.enemy.y };

@@ -1867,11 +1867,32 @@ export class VfxLayer {
     // This is load-bearing beyond this call site: nine per-weapon `vfx/weapons/*`
     // agents each tune a bespoke effect against this generic recipe as their
     // reference for "how big is a hit", so an error here gets paid for nine times.
-    const sizeFactor = THREE.MathUtils.clamp(0.85 + amount * 0.035, 0.85, 2.0);
-    // Fewer, bigger shards (see the shard loop's comment in `burst`) — round 2 used
-    // up to 11 small ones per hit; they averaged into more glow instead of reading as
-    // individual debris.
-    this.burst(origin, color, sizeFactor, Math.round(THREE.MathUtils.clamp(3 + amount * 0.16, 3, 6)));
+    //
+    // ── The curve was re-derived for DYNAMIC RANGE, not for size ────────────────
+    //
+    // The old curve, `clamp(0.85 + amount * 0.035, 0.85, 2.0)`, spans 0.92 at the
+    // smallest authored damage in `rules.ts` (2) to 1.48 at the largest (18): a 1.61x
+    // response to a 9.0x input. Measured end to end on a frozen snapshot
+    // (`tools/tmp/feel_probe.mjs`), the delivered change was worse than compressed, it
+    // was INVERTED — 4,096 changed pixels at 2 damage against 3,621 at 18. The
+    // mechanism is that the burst is white and centred on a victim who is
+    // simultaneously flashing white from `BaseCharacter.applyHitFlash`, so the extra
+    // size a hard hit buys is spent painting white over white.
+    //
+    // The floor is the important half. `feel_census` counts 21.5 weapon hits in a
+    // 16.0 s match — one every 0.74 s — so a chip's burst is most of what is on screen
+    // most of the time, and at 0.92 it was 92% of the size of the game's hardest
+    // possible hit. Dropping the floor to 0.57 makes a chip read as a tick and leaves
+    // the top of the range free to mean something.
+    //
+    // The 2.0 CEILING is unchanged and is load-bearing: `spawnDeathBurst` uses 2.6 and
+    // its doc says that number is "a bit more than the hardest possible hit", so the
+    // ordering only survives while this cap stays where it is.
+    const sizeFactor = THREE.MathUtils.clamp(0.42 + amount * 0.075, 0.42, 2.0);
+    // Shard count widened on the same argument: 3->6 (2.0x) becomes 2->8 (4.0x). Two
+    // chunks off a 2-damage chip and eight off an 18-damage smash is a difference a
+    // player can see without counting; three against six is not.
+    this.burst(origin, color, sizeFactor, Math.round(THREE.MathUtils.clamp(1 + amount * 0.4, 2, 8)));
   }
 
   /**
@@ -2293,6 +2314,24 @@ export class VfxLayer {
       flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
       flash.startScale = 0.5 * sizeFactor; flash.endScale = 1.15 * sizeFactor;
       flash.startOpacity = 1; flash.endOpacity = 0; flash.fadeEase = 1.4;
+      // ── 0.30 is UNCHANGED, and that is a result, not an omission ──────────────
+      //
+      // This was changed to 0.08 and reverted. The argument for changing it was sound
+      // on paper: this sprite is ADDITIVE at `IMPACT_HEIGHT`, i.e. composited straight
+      // onto the victim, and the hue contract at the top of this file says a transient
+      // must clear the CAST's luma of 0.302 by >= 0.15 UPWARD with the white-mix named
+      // as "what buys the separation" — but `match.ts` fires `model.play('hit')` for
+      // the same event and `BaseCharacter.applyHitFlash` lerps the whole character 85%
+      // toward white, so the surface this lands on is near 1.0, not 0.302. Additive
+      // white on white should be clipping, not separation.
+      //
+      // Measured, it is not. A whiteout counter (share of the victim's own box at >=
+      // 246 on all three channels, `tools/tmp/feel_probe.mjs`) reads 0.3% before and
+      // 0.3% after, at 2 damage and at 18, and the judgement frames are
+      // indistinguishable at gameplay scale. So the premise really is false and the
+      // consequence really is unobservable, and shipping a look change into a shared
+      // file on an argument its own instrument cannot see is how this project acquired
+      // most of `docs/LESSONS.md`. Left alone; the falsified premise is reported.
       flash.mat.color.set(color).lerp(WHITE, 0.3);
     }
 
