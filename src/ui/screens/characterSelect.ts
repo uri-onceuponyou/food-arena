@@ -276,13 +276,14 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     // displayed number rather than a second evaluation of the model is exactly how a
     // readout starts lying.
     const gain = maxed ? '' : `
-      <span class="chars-lv-gain">${icon('health')} +${nextHp - hp}
-        <span class="chars-lv-sep">·</span> ${icon('damage')} +${Math.round((nextDmg / dmg - 1) * 100)}%</span>`;
+      <span class="chars-lv-gain"><span class="chars-lv-item">${icon('health')} +${nextHp - hp}</span
+        ><span class="chars-lv-item">${icon('damage')} +${Math.round((nextDmg / dmg - 1) * 100)}%</span></span>`;
 
     levelEl.innerHTML = `
       <div class="chars-lv-head">
         <span class="chars-lv-badge${maxed ? ' is-max' : ''}">Lv ${level}${maxed ? '' : ` / ${LEVEL_MAX}`}</span>
-        <span class="chars-lv-now">${icon('health')} ${hp} HP<span class="chars-lv-sep">·</span>${icon('damage')} ×${dmg.toFixed(2)}</span>
+        <span class="chars-lv-now"><span class="chars-lv-item">${icon('health')} ${hp} HP</span
+          ><span class="chars-lv-item">${icon('damage')} x${dmg.toFixed(2)}</span></span>
       </div>
       ${gain}
       <button class="chars-lv-btn" type="button" data-el="upgrade"${maxed || !affordable ? ' disabled' : ''}>${
@@ -856,7 +857,20 @@ const CSS = `
 /* The NEXT-level preview is green because it is a gain, and it is the one run on this
    panel that is not simply a fact. 2E7D32 on the panel's near-white plate is 5.4:1. */
 .fa-chars .chars-lv-gain { color: #2E7D32; }
-.fa-chars .chars-lv-sep { opacity: 0.45; padding: 0 2px; }
+/* ── THE SEPARATOR WAS A MIDDLE DOT AT 0.45 OPACITY, AND PIXELS CAUGHT IT ────
+   menu_accept passed it at all six viewports and in portrait; screen_metrics.mjs
+   measured the two runs at 1.87:1 and 2.93:1 against a 4.5 floor. Exactly the
+   inherited-opacity case that instrument exists to see, and the third time this project
+   has shipped one — the trophy road's claimed nodes and its status pill were the others.
+   It was also a raw U+00B7, an OS-drawn glyph on a screen whose whole icon pass exists to
+   have none. Both problems have the same fix: the dot was never carrying meaning, only
+   spacing, so it is a flex gap now and there is no run to fail.
+
+   (And writing THIS note is how the file's own warning about backticks inside a CSS
+   template literal got proved a fourth time. There are none below this line.) */
+.fa-chars .chars-lv-now,
+.fa-chars .chars-lv-gain { display: inline-flex; flex-wrap: wrap; gap: 2px 10px; }
+.fa-chars .chars-lv-item { display: inline-flex; align-items: center; gap: 3px; }
 .fa-chars .chars-lv-btn {
   appearance: none;
   cursor: pointer;
