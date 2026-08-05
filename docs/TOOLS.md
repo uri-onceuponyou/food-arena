@@ -4,11 +4,53 @@ Sixteen tools. Almost every one was built to answer a question that had already 
 time. **Prefer reaching for one of these over inventing a new probe.**
 
 ```bash
-npm run dev        # http://localhost:5173 — SHARED. Fine for a quick look, never for a number.
+npm run dev        # http://localhost:5173 — SHARED. Fine for a quick look, never for a number,
+                   # and NEVER for actually playing (see below).
 npx tsc --noEmit
 node src/game/sim.test.mjs            # 51
 node src/game/economy/economy.test.mjs # 173
 ```
+
+---
+
+## 🎮 To PLAY the game while agents are working
+
+```bash
+node tools/tmp/playtest.mjs          #  ▶  http://localhost:4321
+```
+
+**Do not play on `localhost:5173`.** Nothing in `src/` calls `import.meta.hot.accept`, so every
+save by every agent becomes a Vite **full page reload**; and nothing in `src/` calls
+`history.pushState`, so the URL never changes as you navigate — a reload therefore re-derives the
+boot route from the original bare `/` and lands on **opening → home**. Mid-match, that presents
+exactly as *"the game crashed and started over from the home screen."*
+
+Measured on the shared dev server on 2026-08-05, one 7.7-minute session, no intervention:
+**16 document loads — 15 Vite `full-reload` frames**, every one naming a peer's file
+(`src/audio/director.ts` ×8, `src/game/ai.ts` ×6, `src/audio/sounds.ts` ×1). They are **bursty**:
+nothing for the first 323 s, then **15 reloads in 140 s — one every 9.3 s**, against a **45 s
+match**. Evidence: `shots/crash/wild/` (`before.png` is a live match at 0:45;
+`after-reload-3.png` is the home screen) and `shots/crash/wild/report.json`.
+The same 12-round-trip drive against `playtest.mjs`'s production build over the same period:
+**1 load, 0 reloads, 0 websocket frames** (`shots/crash/prod/report.json`).
+
+`playtest.mjs` freezes the tree, runs `vite build`, and serves the **production bundle** — which
+contains no HMR client and opens no websocket, so no save can reach it. It **detaches into its own
+session**, so unlike `tools/snapshot.mjs` it survives the shell that started it.
+
+```bash
+node tools/tmp/playtest.mjs              # freeze the working tree, build, serve, print the URL
+node tools/tmp/playtest.mjs --from head  # build the COMMITTED tree instead
+node tools/tmp/playtest.mjs              # re-run to pick up the latest work
+node tools/tmp/playtest.mjs --status
+node tools/tmp/playtest.mjs --stop
+```
+
+`tools/tmp/reload_watch.mjs` is the instrument that proved it: it leaves the real Vite HMR client
+in place (which `journey.mjs` deliberately stubs out at line 224, making every e2e run so far
+**structurally blind** to this failure) and logs every websocket frame, unload, GL context and
+error to `sessionStorage`, so the record survives the reload it is catching.
+`--trips N` reuses it as a menu↔match round-trip stress.
 
 ---
 
