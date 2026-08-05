@@ -173,9 +173,21 @@ Reference plates live in `reference/images/curated/` — `gameplay_topdown/` for
 ## Working with subagents
 
 - **~300–500k tokens per build/loop agent. Total agent count is the budget; concurrency only sets the rate.**
-- ⚠️ **There is a 200-agent PER-SESSION spawn cap, and one session exhausted it.** Budget agents like
-  a finite resource, and keep the cap of **6 concurrent** actually saturated — dispatching reactively
-  one-at-a-time wastes the scarcer resource, which is wall-clock, not agents.
+- ⚠️ **The spawn cap is per PROCESS, not per conversation — `/clear` does NOT reset it.** A fresh
+  context inherited an exhausted pool from the previous 8–10 h run and the first fan-out of the
+  session died on `Subagent spawn limit reached (200 of 200)` before a single file was touched.
+  Two ways out, and prefer the first:
+  - **Raise the ceiling durably** — an `env` block in `~/.claude/settings.json`:
+    `"env": { "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION": "800" }`. Set 2026-08-05, because 200 was
+    exhausted by one session. Per-invocation equivalent: `CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION=800 claude`.
+  - **Restart the terminal** — a new `claude` process gets a fresh counter. Do it at a moment when
+    nothing is uncommitted; the cost is every in-flight agent dying mid-file.
+  - ⚠️ **`Workflow`-dispatched agents draw from a DIFFERENT pool** and were still available with the
+    `Agent` pool at 200/200 (probed, returned `ALIVE`). That is the escape hatch when a restart is not
+    worth it — but workflow agents are **not resumable via `SendMessage`**, so the "assess the tree and
+    resume" recovery below does not apply to them.
+- Budget agents like a finite resource, and keep the cap of **6 concurrent** actually saturated —
+  dispatching reactively one-at-a-time wastes the scarcer resource, which is wall-clock, not agents.
 - Every brief must carry: the owned file set, the snapshot rule, "never `git stash`", the
   known-bad-input rule, the ±1.4 critic floor, and the relevant traps from `docs/LESSONS.md`.
 - **An agent's last message is not its state.** It narrates the step it is *beginning* and often
