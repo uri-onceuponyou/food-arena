@@ -8,6 +8,33 @@ Answer any subset. Unanswered items stay on the stated assumption.
 
 ---
 
+## The answer sheet — everything at a glance
+
+You can settle most of this with one word each. Detail is in the numbered sections below.
+
+| # | question | in force now | my recommendation | cost to reverse |
+|---|---|---|---|---|
+| **6** | **⚠️ Lobby reference plates** | none exist | **only you can fix this — it blocks all menu scoring** | drop 3–4 screenshots in |
+| **12** | Game got harder, 62.1% → 51.3% | the harder version | **keep** — the points came from deleting a bug | `ENEMY_MAX_HP` 130 restores it |
+| **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
+| **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
+| **11** | Longer legs — every silhouette changed | longer | **keep** — legs now exist at all | 2 constants + 1 row/archetype |
+| **5** | Floor hue as the blocking cue | restored | **keep** — two sources agreed it was a defect | six constants |
+| **7** | Audio: the mix's top is flat | as-is | **drop the flow stings 4–5 dB** | levels only |
+| **4** | `ROSTER_GATED` | off | **yours** — shop is built and honest either way | one flag |
+| **2** | Timeout tiebreak | HP fraction → zone → you | **keep** (it now actually fires) | a few lines |
+| **3** | Trail damage cap | 1 per tick | **keep** | one constant |
+| **8** | Pointer lock | shipped as built | **cannot be tested here at all** — needs your browser | — |
+| **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
+
+**If you only do one thing:** play it for ten minutes. The two most valuable bug reports this
+project has ever had came from exactly that, and both were invisible to every gate here.
+
+**If you only answer one thing:** #6. Three consecutive menu rounds scored our lobby against
+in-match combat frames, and both critics flagged it unprompted.
+
+---
+
 ## How to read this
 
 | field | meaning |
