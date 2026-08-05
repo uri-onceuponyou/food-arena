@@ -73,14 +73,41 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
 
   const adx = player.x - enemy.x;
   const ady = player.y - enemy.y;
-  const adist = Math.hypot(adx, ady) || 1;
+  const separation = Math.hypot(adx, ady);
+  // `|| 1` keeps the historical range-check behaviour at zero separation (0 and 1 are
+  // both inside every weapon's range), but it must NOT be used to derive a direction —
+  // see `hasBearing`.
+  const adist = separation || 1;
   const now = state.elapsed;
+
+  /**
+   * COINCIDENT FIGHTERS HAVE NO BEARING, so there is nothing to face.
+   *
+   * This used to be decided by a floating-point accident rather than by a rule. With
+   * `adist = hypot(0,0) || 1 === 1`, `facing = {x: 0/1, y: 0/1}` is the ZERO VECTOR, and
+   * `combat.ts:spawnProjectile` turns that into an angle with `Math.atan2(0, 0)` — which
+   * is exactly 0, so every ranged shot a cornered AI fired at a perfectly overlapping
+   * player flew DUE EAST. Not toward the player, not in the direction the AI had been
+   * moving: east, because that is what `atan2` returns for the origin.
+   *
+   * `combat.ts` already answers the melee half of this deliberately (a directional swing
+   * misses at zero separation because it is aimed and there is nothing to aim along; an
+   * omnidirectional one still lands). The ranged half gets the matching rule here, and it
+   * is the same rule `sim.ts:applyAim` has always applied to the PLAYER: a zero-length
+   * aim vector leaves the previous facing untouched. So a coincident AI keeps pointing
+   * wherever it last genuinely faced, and its shot goes there. Defined, deterministic,
+   * consistent with the player, and — unlike due east — not a lie about where it aimed.
+   *
+   * `createFighter` seeds a unit facing, and nothing else in the sim ever writes a zero
+   * one, so `facing` is now non-zero for the whole life of a match by construction.
+   */
+  const hasBearing = separation > 1e-6;
 
   const fleeing = enemy.hp < enemy.maxHp * AI_FLEE_HP_FRACTION;
   const aiSlowMult = now < enemy.status.slowedUntil ? AI_SLOW_MULTIPLIER : 1;
   const aiFrozen = now < enemy.status.stunnedUntil;
 
-  if (!aiFrozen) {
+  if (!aiFrozen && hasBearing) {
     enemy.facing = { x: adx / adist, y: ady / adist };
   }
 
@@ -88,7 +115,9 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
 
   if (fleeing) {
     if (!aiFrozen) {
-      enemy.facing = { x: -adx / adist, y: -ady / adist };
+      // Same rule as above: at zero separation "directly away from the player" is not a
+      // direction either, so keep the facing rather than manufacture one.
+      if (hasBearing) enemy.facing = { x: -adx / adist, y: -ady / adist };
       const step = AI_FLEE_SPEED * dt * aiSlowMult;
       // Flee target is directly away from the player, so slide around cover toward
       // that point rather than pinning against it.

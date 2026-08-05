@@ -394,25 +394,51 @@ async function auditPointerLockBoundary(browser) {
 }
 
 /**
- * The QA footgun that produced the 2026-08 "WASD is dead" report.
+ * The QA footgun that produced the 2026-08 "WASD is dead" report — and the fix for it.
  *
  * `?px=850&py=500` puts the 42 wu fighter 25 wu from the centre of the `spice_cart`
- * CoverBox at (875,500,50,50) — overlapping, since 25 < (42+50)/2 = 46 — and
- * `movement.ts:tryMove` tests the DESTINATION for overlap with no depenetration, so
- * every step from inside is refused on both axes forever. Input is perfect throughout.
- * Measured band along y=500: pinned for 829 < px < 921 (spice_cart) and 895 < px < 985
- * (`supply_barrel` at (940,500,48,46)); free either side.
+ * CoverBox at (875,500,50,50), which is an overlap since 25 < (42+50)/2 = 46. `?px=`/`?py=`
+ * deliberately does not validate against cover, so a QA URL really can bury a fighter.
+ *
+ * WHAT USED TO HAPPEN: `movement.ts:tryMove` tested only the DESTINATION for overlap and
+ * did no depenetration, so every step from inside was refused on both axes, forever,
+ * silently — while the input layer was perfect the whole time. Measured band along y=500:
+ * pinned for 829 < px < 921 (spice_cart) and 895 < px < 985 (`supply_barrel` at
+ * (940,500,48,46)); free either side. Those bands are retained here because they are the
+ * evidence for why this guard exists, and because the boundary landing exactly where burial
+ * depth exceeds one step (PLAYER_SPEED 0.12 wu/ms x the loop's 50 ms dt clamp = 6 wu) is
+ * what identified the mechanism.
+ *
+ * WHAT HAPPENS NOW: `tryMove` pushes a fighter that is already inside a box back out along
+ * its axis of least penetration before resolving the step, so all three cases below MOVE.
+ *
+ * TWO ASSERTIONS, AND ONLY ONE OF THEM INVERTED:
+ *   * `-cover-flag` still asserts `checkQaSpawn()` WARNS about the two buried cases.
+ *     Depenetration rescues the fighter; it does not turn a bad QA coordinate into a good
+ *     one, and a probe author still needs to be told. `spawnsInsideCover` drives this and
+ *     nothing else now — the old `pinned` name is gone precisely because it meant two
+ *     things and only one of them was still true.
+ *   * `-movement` is inverted: every case must now travel, and the buried ones must also
+ *     end up outside the box they started in.
+ *
+ * The escape is gated on the fighter TRYING to move, which preserves a diagnostic this
+ * project has already spent: parking a fighter inside the pot with `?px=`/`?py=` and
+ * photographing it is how "a fighter inside the pot is 0.0% visible" was proven. Parked and
+ * left alone, it still stays exactly where it was put. `src/game/sim.test.mjs` §15 holds
+ * that case, plus the two invariants that stop depenetration becoming its own bug class:
+ * a fighter moving in the open gains no lateral drift, and one pressed exactly on a
+ * collision boundary is not pushed off it.
  */
 async function auditQaSpawnGuard(browser) {
   const G = 'qa-spawn';
   const CASES = [
-    { px: 850, py: 500, pinned: true, why: 'inside spice_cart (875,500,50,50)' },
-    { px: 960, py: 500, pinned: true, why: 'inside supply_barrel (940,500,48,46)' },
+    { px: 850, py: 500, spawnsInsideCover: true, box: { x: 875, y: 500, w: 50, h: 50 }, why: 'inside spice_cart (875,500,50,50)' },
+    { px: 960, py: 500, spawnsInsideCover: true, box: { x: 940, y: 500, w: 48, h: 46 }, why: 'inside supply_barrel (940,500,48,46)' },
     // Genuinely open floor. The first draft of this case used (700,760) and the guard
     // immediately caught it: `stacked_pots` is at (700,742) 55x55, so 760 is 18 wu from
     // its centre against a 48.5 wu half-sum. That is the same mistake the 2026-08 report
     // made, caught in one run — which is the entire point of the flag.
-    { px: 700, py: 950, pinned: false, why: 'open floor south of the fryer counter' },
+    { px: 700, py: 950, spawnsInsideCover: false, box: null, why: 'open floor south of the fryer counter' },
   ];
   for (const c of CASES) {
     const page = await newPage(browser);
@@ -423,16 +449,43 @@ async function auditQaSpawnGuard(browser) {
       await page.close(); continue;
     }
     const d = await dbg(page);
+    // UNCHANGED, deliberately: the spawn point is still a bad one and must still be flagged.
     record(G, `px=${c.px},py=${c.py}-cover-flag`,
-      (d.qaSpawnInsideCover !== null) === c.pinned,
+      (d.qaSpawnInsideCover !== null) === c.spawnsInsideCover,
       `qaSpawnInsideCover=${d.qaSpawnInsideCover} (${c.why})`);
 
     const r = await holdKey(page, 'KeyA');
     record(G, `px=${c.px},py=${c.py}-input-reaches-sim`, r.axesX === -1,
-      `MatchInput.move.x = ${r.axesX} — input is fine even when the fighter cannot move`);
+      `MatchInput.move.x = ${r.axesX} — the input layer was never the problem here`);
+    // INVERTED: nothing is frozen any more. The two cases assert different things on
+    // purpose, and the difference is the interesting part.
+    //
+    // Open floor asserts DIRECTION: KeyA must carry the fighter west, because that is the
+    // control working.
+    //
+    // A buried fighter asserts only that it is no longer stuck, because the escape is
+    // MINIMUM-TRANSLATION and minimum translation does not care which way you wanted to go.
+    // `?px=960` is 20 wu east of `supply_barrel`'s centre, so the shortest way out is 25 wu
+    // EAST (against 65 wu west), and the fighter is deposited on the barrel's east face —
+    // where KeyA then presses straight back into it and legitimately moves nothing. Net
+    // displacement is +25 wu, the fighter is free, and demanding a westward dx here would be
+    // demanding that depenetration read the player's mind and take the longer exit through
+    // more geometry. Direction is asserted on the open case; freedom is asserted here.
+    const netWu = Math.hypot(r.dx, r.dy);
     record(G, `px=${c.px},py=${c.py}-movement`,
-      c.pinned ? Math.abs(r.dx) < 1 : r.dx < -MOVED_WU,
-      `dx = ${r.dx.toFixed(1)} wu, expected ${c.pinned ? 'pinned' : 'moving'}`);
+      c.spawnsInsideCover ? netWu >= MOVED_WU : r.dx < -MOVED_WU,
+      c.spawnsInsideCover
+        ? `moved ${netWu.toFixed(1)} wu net (want >=${MOVED_WU}) — no longer frozen; escape is min-translation, not player-intent`
+        : `dx = ${r.dx.toFixed(1)} wu, want <=-${MOVED_WU}`);
+    // And a buried fighter must actually be OUT, not merely jiggling inside the box.
+    // `rules.ts:PLAYER_SIZE` = 42; the collision test is centre-distance < half-sum.
+    if (c.box) {
+      const p = (await fighters(page)).player;
+      const inside = Math.abs(p.x - c.box.x) < (42 + c.box.w) / 2 &&
+        Math.abs(p.y - c.box.y) < (42 + c.box.h) / 2;
+      record(G, `px=${c.px},py=${c.py}-escaped-the-box`, !inside,
+        `ended at (${p.x.toFixed(1)},${p.y.toFixed(1)}) vs ${c.why}`);
+    }
     await page.close();
   }
 }

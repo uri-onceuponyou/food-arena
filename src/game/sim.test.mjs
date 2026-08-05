@@ -16,6 +16,10 @@
  */
 
 import { createMatch, stepMatch } from './sim.ts';
+// Section 16 drives the AI for a single tick without the rest of `stepMatch`, which is
+// the only way to observe a projectile fired at zero separation before the projectile
+// step in that same tick resolves and deletes it. See the note on `coincidentAI`.
+import { stepAI } from './ai.ts';
 import {
   CHARACTERS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, POT, TRAIL,
@@ -766,6 +770,330 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   check('just off coincident, outside the cone: misses', swing({ dx: 0.001, facing: { x: -1, y: 0 } }).hit === false);
   check('normal range, inside the cone: hits', swing({ dx: SMASH_IN_RANGE, facing: { x: 1, y: 0 } }).hit);
   check('normal range, outside the cone: misses', swing({ dy: SMASH_IN_RANGE, facing: { x: 1, y: 0 } }).hit === false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 14. GLOBAL NAVIGATION (regression)
+//
+// Greedy local avoidance is a hill-climber on straight-line distance. It escapes any
+// obstacle whose detour eventually shortens that distance, and provably cannot escape one
+// whose only route lengthens it first — there is no local signal saying which way is out,
+// and both perpendiculars look equally wrong.
+//
+// The shipped arena contains exactly that shape, around the PLAYER'S OWN SPAWN. Measured
+// on the real sim before `movement.ts` grew a flow field, with the player parked motionless
+// and immortal on its own spawn: the enemy walked 2,968 wu, parked at the east face of a
+// prep counter and oscillated 38 wu in y for the remaining 25 s of a 45 s match, closest
+// approach 284 wu against a reach of 153 wu — for all 11 enemy characters, every time.
+//
+// The fixtures below are the two shapes that separate a router from a hill-climber. They
+// are deliberately synthetic: they must keep testing the ALGORITHM after the arena peer
+// moves the furniture, which a fixture copied from `kitchen.ts` would not.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n14. The AI routes around obstacles a greedy rule cannot escape');
+
+  /** Run the AI at a motionless, immortal player and report how close it ever got. */
+  function chase(arena, px, py, ms = 40_000, enemyChar = 'donut') {
+    const state = playingMatch(arena, 'hamburger', enemyChar);
+    state.player.x = px; state.player.y = py;
+    state.player.hp = 1e9; state.player.maxHp = 1e9;
+    state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+    // Park the enemy's weapons on cooldown so it always chooses to MOVE. Otherwise the
+    // test stops being about navigation the moment anything comes into range.
+    let best = Infinity;
+    let insideCover = 0;
+    const t0 = state.elapsed;
+    while (state.elapsed - t0 < ms) {
+      state.player.x = px; state.player.y = py;
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => state.elapsed);
+      stepMatch(state, 16.667, noInput);
+      best = Math.min(best, Math.hypot(state.enemy.x - px, state.enemy.y - py));
+      for (const o of arena.cover) {
+        if (Math.abs(state.enemy.x - o.x) < (state.enemy.size + o.w) / 2 &&
+            Math.abs(state.enemy.y - o.y) < (state.enemy.size + o.h) / 2) { insideCover++; break; }
+      }
+    }
+    return { best, insideCover, x: state.enemy.x, y: state.enemy.y };
+  }
+
+  // ── (a) The alcove. A wall with a barrel bridging the only straight approach, so the
+  // route must first travel AWAY from the target. This is the shipped arena's shape.
+  {
+    const arena = makeArena({
+      width: 1400, height: 1000,
+      cover: [
+        { x: 340, y: 420, w: 160, h: 55 },   // upper counter
+        { x: 340, y: 580, w: 160, h: 55 },   // lower counter
+        { x: 250, y: 500, w: 60, h: 50 },    // the barrel that seals the gap between them
+      ],
+    });
+    arena.playerSpawn = { x: 160, y: 500 };
+    arena.enemySpawn = { x: 1240, y: 500 };
+    const r = chase(arena, 160, 500);
+    check('alcove: the AI ARRIVES at the player behind a sealed straight approach',
+      r.best < 30, `closest ${r.best.toFixed(0)}wu, ended at (${r.x.toFixed(0)},${r.y.toFixed(0)})`);
+    check('alcove: it never ends a tick inside cover', r.insideCover === 0, `${r.insideCover} ticks inside`);
+  }
+
+  // ── (b) A concave pocket with its MOUTH FACING AWAY from the approach. The back wall
+  // faces the enemy, so every route in first travels further from the target than the wall
+  // it is standing on, for longer than in (a). Verified discriminating: against the tree as
+  // committed before this layer landed, the AI stops on the back wall 241 wu out.
+  //
+  // Nothing this shape exists in `kitchen.ts` today. It is here so an arena that grows one
+  // is covered before it ships — and because a fixture copied from the real arena would
+  // stop testing the algorithm the moment the arena peer moves the furniture.
+  const U_POCKET = [
+    { x: 700, y: 500, w: 40, h: 400 },   // back wall, on the side the enemy comes from
+    { x: 540, y: 320, w: 360, h: 40 },   // top arm, reaching west
+    { x: 540, y: 680, w: 360, h: 40 },   // bottom arm
+  ];
+  {
+    const arena = makeArena({ width: 1400, height: 1000, cover: U_POCKET });
+    arena.enemySpawn = { x: 1240, y: 500 };
+    const r = chase(arena, 500, 500);
+    check('U-pocket with its mouth facing away: the AI still gets in',
+      r.best < 30, `closest ${r.best.toFixed(0)}wu, ended at (${r.x.toFixed(0)},${r.y.toFixed(0)})`);
+    check('U-pocket: it never ends a tick inside cover', r.insideCover === 0, `${r.insideCover} ticks inside`);
+  }
+
+  // ── (c) Degrade, do not break. A target sealed inside a box NOTHING can enter must not
+  // send the AI back to pressing on the nearest wall: it should route to the closest point
+  // the map allows and fight from there. The shipped kitchen really has two such pockets —
+  // 114x63 wu each, 1.9% of all legal standing space, sealed by two prep counters and two
+  // supply barrels — so this is a real shape, not a hypothetical.
+  //
+  // Nested inside the U above, so reaching even the nearest approach point requires
+  // routing: it is the compound case, and the plain "give up and go greedy" answer fails it.
+  {
+    const arena = makeArena({
+      width: 1400, height: 1000,
+      cover: [
+        ...U_POCKET,
+        { x: 500, y: 430, w: 180, h: 40 },
+        { x: 500, y: 570, w: 180, h: 40 },
+        { x: 430, y: 500, w: 40, h: 180 },
+        { x: 570, y: 500, w: 40, h: 180 },
+      ],
+    });
+    arena.enemySpawn = { x: 1240, y: 500 };
+    // The four inner boxes leave a 58x58 wu island of legal centres around (500,500) with
+    // no way in; the nearest legal standing point outside is 112 wu due north, inside a
+    // donut's 153 wu reach. So "as close as the map allows" is also "in range".
+    const r = chase(arena, 500, 500);
+    check('sealed target: the AI routes to it and closes to within weapon reach',
+      r.best <= 153, `closest ${r.best.toFixed(0)}wu`);
+    check('sealed target: it does not clip into the box', r.insideCover === 0, `${r.insideCover} ticks inside`);
+  }
+
+  // ── (d) An open field must still be walked STRAIGHT. A router that is 100% reliable and
+  // takes scenic routes is a different bug, and this is the cheapest way to catch it.
+  {
+    const arena = makeArena({ width: 1400, height: 1000, cover: [] });
+    const state = playingMatch(arena, 'hamburger', 'donut');
+    state.player.x = 200; state.player.y = 500;
+    state.player.hp = 1e9; state.player.maxHp = 1e9;
+    state.enemy.x = 1200; state.enemy.y = 500;
+    let maxDrift = 0;
+    for (let i = 0; i < 300; i++) {
+      state.player.x = 200; state.player.y = 500;
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => state.elapsed);
+      stepMatch(state, 16.667, noInput);
+      maxDrift = Math.max(maxDrift, Math.abs(state.enemy.y - 500));
+    }
+    // 247 wu before the descent broke ties on Euclidean distance: an 8-connected BFS has a
+    // Chebyshev metric, whose level sets are plateaus a naive descent walks diagonally.
+    check('open ground: the route is a straight line (lateral drift under one body width)',
+      maxDrift < PLAYER_SIZE, `max drift ${maxDrift.toFixed(1)}wu`);
+    check('open ground: it actually closed the distance', state.enemy.x < 1200 - 200, `x=${state.enemy.x.toFixed(0)}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 15. DEPENETRATION — a fighter inside cover must get out, not freeze (regression)
+//
+// `tryMove` tests the DESTINATION for overlap and never tests where the fighter already
+// is, so a fighter that ends up inside a box was frozen permanently and silently on BOTH
+// axes: every step from inside also overlaps, so every step is refused, with no event and
+// no error. Unreachable by a player today (spawns are clear, knockback is visual-only) and
+// reachable the moment anyone lands sim knockback, a dash, a pull, or a prop over a spawn.
+//
+// The numbers below are the real repro found by the input agent, not an invention:
+// `?px=850&py=500` puts a 42 wu fighter 25 wu from the centre of `spice_cart`
+// (875,500,50,50), and 25 < (42+50)/2 = 46.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n15. A fighter buried inside cover escapes instead of freezing');
+
+  // Both are the SHIPPED boxes, copied exactly, because the repro coordinates below are
+  // only meaningful against the real extents.
+  const SPICE_CART = { x: 875, y: 500, w: 50, h: 50 };
+  const SUPPLY_BARREL = { x: 940, y: 500, w: 48, h: 46 };
+
+  function buried(px, py, move = { x: 0, y: 0 }, ticks = 1, box = SPICE_CART) {
+    const arena = makeArena({ width: 1400, height: 1000, cover: [box] });
+    const state = playingMatch(arena);
+    state.player.x = px; state.player.y = py;
+    state.enemy.x = 100; state.enemy.y = 100;       // out of the way
+    for (let i = 0; i < ticks; i++) stepMatch(state, 16.667, { move, selectedWeapon: 0, attack: false });
+    const overlapping = Math.abs(state.player.x - box.x) < (PLAYER_SIZE + box.w) / 2 &&
+      Math.abs(state.player.y - box.y) < (PLAYER_SIZE + box.h) / 2;
+    return { x: state.player.x, y: state.player.y, overlapping };
+  }
+
+  {
+    // The exact documented case. Half-sums are 46 on both axes, so at (850,500) the
+    // penetration is 46-25 = 21 wu on x against 46-0 = 46 wu on y: the way out is -x.
+    const r = buried(850, 500, { x: -1, y: 0 });
+    check('buried at the documented ?px=850&py=500: no longer overlapping after one tick',
+      !r.overlapping, `ended at (${r.x.toFixed(1)},${r.y.toFixed(1)})`);
+    check('...pushed out along the axis of LEAST penetration (21wu on x vs 46wu on y)',
+      approx(r.y, 500) && r.x < 850, `(${r.x.toFixed(1)},${r.y.toFixed(1)})`);
+  }
+  {
+    // And once out, the controls work again — which is the actual symptom that was reported.
+    const r = buried(850, 500, { x: -1, y: 0 }, 30);
+    check('a buried fighter can move again afterwards', r.x < 800 && !r.overlapping, `x=${r.x.toFixed(1)}`);
+  }
+  {
+    // Dead centre of a box that is WIDER than it is tall: half-sums 45 on x and 44 on y, so
+    // the shallower axis is y and the escape must be vertical even though the fighter is
+    // walking horizontally. This is the assertion that would catch an axis mix-up; the
+    // square spice cart above cannot, because at its centre the two axes tie.
+    const r = buried(940, 500, { x: 1, y: 0 }, 1, SUPPLY_BARREL);
+    check('buried dead centre: escapes along the shallower axis (y), not the way it is walking',
+      !r.overlapping && Math.abs(r.y - 500) > Math.abs(r.x - 940), `(${r.x.toFixed(1)},${r.y.toFixed(1)})`);
+  }
+  {
+    // THE DIAGNOSTIC THIS MUST NOT DESTROY. `?px=`/`?py=` deliberately does not validate
+    // against cover, and an arena agent used exactly that to park a fighter inside the pot
+    // and photograph it — which is how "a fighter inside the pot is 0.0% visible" was
+    // proven. Escaping is therefore gated on the fighter TRYING to move: parked and left
+    // alone, it stays precisely where it was put, and the camera still sees what it was
+    // pointed at.
+    const r = buried(850, 500, { x: 0, y: 0 }, 120);
+    check('a fighter PARKED inside cover and given no input stays put (QA photography)',
+      r.x === 850 && r.y === 500 && r.overlapping, `(${r.x},${r.y}) overlapping=${r.overlapping}`);
+  }
+  {
+    // The invariant that matters more than any of the above: a fighter walking in the open
+    // must not be nudged sideways by so much as a float. Depenetration runs on every
+    // `tryMove` with input, so a bug here would make the whole game drift.
+    const r = buried(400, 400, { x: 1, y: 0 }, 60);
+    check('a fighter moving in the OPEN gains no lateral drift at all',
+      r.y === 400 && r.x > 400, `(${r.x},${r.y})`);
+  }
+  {
+    // Standing legally against the box's face must not be disturbed either, INCLUDING while
+    // pushing into it: the collision test is strict `<`, so exactly at the boundary is not
+    // an overlap and there is nothing to resolve.
+    const edgeX = SPICE_CART.x - (PLAYER_SIZE + SPICE_CART.w) / 2;   // 829
+    const r = buried(edgeX, 500, { x: 1, y: 0 }, 10);
+    check('a fighter pressed exactly on the collision boundary is not pushed off it',
+      r.x === edgeX && r.y === 500, `(${r.x},${r.y}) expected (${edgeX},500)`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 16. RANGED FACING AT ZERO SEPARATION (regression)
+//
+// The melee half of this was made a rule in section 13. The ranged half was still an
+// accident: `ai.ts` derived facing as `{x: adx/adist, y: ady/adist}` with
+// `adist = hypot(0,0) || 1`, which is the ZERO VECTOR, and `combat.ts:spawnProjectile`
+// turns that into a heading with `Math.atan2(0, 0)` — exactly 0, so a cornered AI's shot
+// flew DUE EAST. The rule now matches `sim.ts:applyAim`'s treatment of the player: a
+// zero-length aim leaves the previous facing untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n16. Ranged AI facing is well-defined at zero separation');
+
+  /**
+   * Coincident fighters, AI pre-pointed somewhere unambiguous, one tick of AI ONLY.
+   *
+   * `stepAI` rather than `stepMatch` deliberately: at exactly zero separation a projectile
+   * is inside its target's hit radius the instant it spawns, so `stepProjectiles` — which
+   * runs later in the same `stepMatch` tick — resolves and deletes it before any assertion
+   * can read its velocity. Driving `ai.ts` directly is the only way to observe the heading
+   * the AI actually chose, which is the quantity under test. (It also makes the point that
+   * the DAMAGE at zero separation was never the bug: the shot connects whichever way it is
+   * pointed. What flew due east was the thing the player watches.)
+   */
+  function coincidentAI(facing) {
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena, 'hamburger', 'taco');   // taco: all three weapons ranged
+    state.player.x = 900; state.player.y = 900;
+    state.enemy.x = 900; state.enemy.y = 900;
+    state.enemy.facing = { x: facing.x, y: facing.y };
+    const events = [];
+    stepAI(state, 16.667, events);
+    return { state, events };
+  }
+
+  {
+    const { state } = coincidentAI({ x: 0, y: -1 });
+    check('coincident: the AI keeps its previous facing rather than adopting (0,0)',
+      state.enemy.facing.x === 0 && state.enemy.facing.y === -1,
+      JSON.stringify(state.enemy.facing));
+  }
+  {
+    const { state } = coincidentAI({ x: -1, y: 0 });
+    check('coincident: facing is preserved whichever way it pointed',
+      state.enemy.facing.x === -1 && state.enemy.facing.y === 0,
+      JSON.stringify(state.enemy.facing));
+  }
+  {
+    // The bug, stated as the thing a player would see: a projectile leaving due east
+    // regardless of where the shooter was pointing.
+    const { state, events } = coincidentAI({ x: 0, y: -1 });
+    const shots = state.projectiles;
+    check('coincident: the AI still fires', events.some((e) => e.type === 'weapon-fired'),
+      JSON.stringify(events.map((e) => e.type)));
+    check('coincident: a projectile is actually spawned', shots.length > 0, `${shots.length} projectiles`);
+    const dueEast = shots.filter((p) => p.vx > 0 && Math.abs(p.vy) < 1e-9);
+    check('coincident: no shot flies DUE EAST by atan2(0,0) accident', dueEast.length === 0,
+      shots.map((p) => `(${p.vx.toFixed(1)},${p.vy.toFixed(1)})`).join(' '));
+    check('coincident: every shot flies along the facing that was actually held',
+      shots.length > 0 && shots.every((p) => p.vy < 0),
+      shots.map((p) => `(${p.vx.toFixed(1)},${p.vy.toFixed(1)})`).join(' '));
+  }
+  {
+    // End to end, through the real `stepMatch`: the shot still LANDS. The rule change must
+    // not quietly make a cornered AI harmless.
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena, 'hamburger', 'taco');
+    state.player.x = 900; state.player.y = 900;
+    state.enemy.x = 900; state.enemy.y = 900;
+    state.enemy.facing = { x: 0, y: -1 };
+    const events = stepMatch(state, 16.667, noInput);
+    check('coincident: the shot still lands on the player through the full step',
+      events.some((e) => e.type === 'hit-landed' && e.targetRole === 'player'),
+      JSON.stringify(events.map((e) => e.type)));
+  }
+  {
+    // Continuity: a real bearing still overrides the old facing, immediately.
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena, 'hamburger', 'taco');
+    state.player.x = 900; state.player.y = 700;
+    state.enemy.x = 900; state.enemy.y = 900;
+    state.enemy.facing = { x: 1, y: 0 };
+    stepMatch(state, 16.667, noInput);
+    check('a real separation still re-points the AI at the player',
+      approx(state.enemy.facing.x, 0) && approx(state.enemy.facing.y, -1),
+      JSON.stringify(state.enemy.facing));
+  }
+  {
+    // And a stunned AI still does not re-point, coincident or not.
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena, 'hamburger', 'taco');
+    state.player.x = 900; state.player.y = 700;
+    state.enemy.x = 900; state.enemy.y = 900;
+    state.enemy.facing = { x: 1, y: 0 };
+    state.enemy.status.stunnedUntil = state.elapsed + 5000;
+    stepMatch(state, 16.667, noInput);
+    check('a stunned AI does not re-point at all', state.enemy.facing.x === 1 && state.enemy.facing.y === 0,
+      JSON.stringify(state.enemy.facing));
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
