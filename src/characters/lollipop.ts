@@ -26,6 +26,8 @@ import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
+import { CHARACTER_HEIGHT } from '../units';
+import { curl, localBounds, massAnchor } from './appendages';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 const CANDY_WHITE = '#FFFDF9';
@@ -154,6 +156,15 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   return geo;
 }
 
+/**
+ * This character's own height, as a multiple of the cast's.
+ *
+ * It was the metre literal 2.00 until `CHARACTER_HEIGHT` moved. A literal here is
+ * a silent opt-out of every cast-wide size decision: six of the eleven carried one,
+ * so raising the cast height would have scaled five characters and left six behind.
+ */
+const H = CHARACTER_HEIGHT * 0.952;
+
 export class LollipopCharacter extends BaseCharacter {
   private rig: ChibiRig;
 
@@ -183,7 +194,7 @@ export class LollipopCharacter extends BaseCharacter {
       // 0.19R stick, not a 0.9R ball, so the stock 0.32H would leave both arms
       // hanging in mid-air unattached to anything.
       proportions: bodyType('stub', {
-        height: 2.00,
+        height: H,
         headFraction: 0.72,
         // ── 0.085H -> 0.20H, and the reason is NOT the stick ────────────────────
         // The old value was reasoned from the stick's own radius, and the
@@ -201,7 +212,7 @@ export class LollipopCharacter extends BaseCharacter {
         // half-width, and 0.185H = 0.370 m sat just outside the far end — measured,
         // the entire right arm was its own connected component (4,038 px at idle,
         // 4,400 at run) while the left one, pulled in by `hipSway`, was not.
-        shoulderWidth: 2.00 * 0.17,
+        shoulderWidth: H * 0.17,
         // ── STUB's widened 0.225H stance is wrong for a character this narrow ────
         // Every other STUB mass is 0.5-1.0m wide at hip height and needed the legs
         // pushed out from under it. This one is a 0.41m stick, so 0.45m of stance
@@ -225,7 +236,7 @@ export class LollipopCharacter extends BaseCharacter {
         // connected component, 8,406 px at idle. The stance is what pays for that
         // overlap on this character, so the stance is what has to move with it.
         // 0.11H restores a 0.10 m (~25 px) bridge on both sides.
-        stanceWidth: 2.00 * 0.145,
+        stanceWidth: H * 0.145,
         // Same override as Donut's, for the opposite mass: STUB's raised 0.26 is
         // right for a bottom-heavy food, but this character's food is a DISC on a
         // stick and the disc's underside starts at y=0.93m. Lifting the pivot
@@ -254,6 +265,13 @@ export class LollipopCharacter extends BaseCharacter {
         // and are untouched.
         twist: 0.30, headTilt: -0.13, headTurn: -0.35,
         hipSway: 0.20, lean: -0.06,
+        // Splay ONLY. This character's `stanceWidth` is the narrowest override in
+        // the cast (0.11H) and it is narrow BECAUSE the thigh has to straddle a
+        // 0.41 m stick to stay attached — two previous rounds moved it inward for
+        // exactly that reason and the second one had to move it again after the leg
+        // radius halved. Splay leaves the hip pivot, and therefore that overlap,
+        // exactly where it is. Measured: 0.1358 -> 0.1759 at 0.5 rad, islands 1.
+        splay: 0.46,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -615,9 +633,45 @@ export class LollipopCharacter extends BaseCharacter {
       }
     });
 
+    this.buildSilhouetteEvents(R);
+
     outlineGroup(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
+  }
+
+  /**
+   * SILHOUETTE EVENTS — the wrapper twist.
+   *
+   * Lollipop measured **hull deficiency 0.1377 with ZERO appendages** at the shipped
+   * facing: at yaw 90 the candy disc is edge-on, so the whole character is a tall
+   * flat slab. The one thing every wrapped lollipop in the world has, and this one
+   * did not, is the twisted cellophane above the disc — and it is the ideal shape
+   * for this camera, because the two tails leave the mass sideways at the widest
+   * point rather than climbing over it.
+   *
+   * `WRAPPER_INK` is deliberate on both counts: it is the cape and collar's own
+   * near-black cellophane, so this reads as the same material the character is
+   * already wearing, and it keeps the two new events inside the dark rung rather
+   * than adding a third light mass to a character that is mostly white and red.
+   */
+  private buildSilhouetteEvents(R: number): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+    const wrapMat = toonMat({ color: WRAPPER_INK, roughness: 0.42, doubleSide: true });
+
+    for (const [azimuth, k, rise] of [[Math.PI * 0.5, 1.0, 0.62], [-Math.PI * 0.5, 0.82, 0.44]] as const) {
+      const { at, out } = massAnchor(head, box, { azimuth, height01: 0.86, inset: 0.26 });
+      const pts = [
+        at.clone(),
+        at.clone().addScaledVector(out, R * 0.22 * k).add(new THREE.Vector3(0, R * 0.18 * rise, 0)),
+        at.clone().addScaledVector(out, R * 0.46 * k).add(new THREE.Vector3(0, R * 0.34 * rise, 0)),
+        at.clone().addScaledVector(out, R * 0.58 * k).add(new THREE.Vector3(0, R * 0.60 * rise, 0)),
+      ];
+      const tail = curl(wrapMat, pts, { rBase: R * 0.115, rTip: R * 0.038 });
+      tail.name = 'lollipop_wrapper_twist';
+      head.add(tail);
+    }
   }
 
   /**

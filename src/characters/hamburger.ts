@@ -59,6 +59,8 @@ import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox, RAMP_CHARACTER, OUTLINE_THIN } from '../render/toon';
 import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
+import { CHARACTER_HEIGHT } from '../units';
+import { aim, blade as leafBlade, knob, localBounds, massAnchor, rod } from './appendages';
 
 /**
  * Limb-only toasted-crust tones, a genuine value step below the bun.
@@ -283,6 +285,15 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   return geo;
 }
 
+/**
+ * This character's own height, as a multiple of the cast's.
+ *
+ * It was the metre literal 2.05 until `CHARACTER_HEIGHT` moved. A literal here is
+ * a silent opt-out of every cast-wide size decision: six of the eleven carried one,
+ * so raising the cast height would have scaled five characters and left six behind.
+ */
+const H = CHARACTER_HEIGHT * 0.976;
+
 export class HamburgerCharacter extends BaseCharacter {
   private rig: ChibiRig;
 
@@ -320,7 +331,7 @@ export class HamburgerCharacter extends BaseCharacter {
       // (see the vertical layout below): the food mass IS most of this character,
       // and the stack is what has to reach the cast's standard height.
       proportions: bodyType('stout', {
-        height: 2.05,
+        height: H,
         headFraction: 0.68,
         // 0.25H -> 0.30H. Measured, not styled: the burger stack is 0.534m
         // half-wide at shoulder height and the shoulder pivot sat at 0.512m, so
@@ -333,7 +344,13 @@ export class HamburgerCharacter extends BaseCharacter {
         // This is only safe because `bodies.ts` no longer ties `torsoWidth` to
         // `shoulderWidth` — before that, widening the shoulders by 0.10m widened
         // the bottom bun by 0.16m and the arm ended up exactly as buried.
-        shoulderWidth: 2.05 * 0.30,
+        shoulderWidth: H * 0.30,
+        // 0.215H -> 0.30H. STOUT's own note says a planted character stands wide and
+        // that this is the one place where the silhouette fix and the burial fix are
+        // the same change; the shipped facing says it was not wide enough. Moved in
+        // this file rather than in `bodies.ts` so soup and taco each carry their own
+        // measurement.
+        stanceWidth: H * 0.30,
       }),
       // Grill-master swagger: weight planted and leaning in over the flat-top,
       // one arm cocked back with the spatula ready, the other tucked in tight —
@@ -365,6 +382,10 @@ export class HamburgerCharacter extends BaseCharacter {
         elbowL: -0.95, elbowR: -0.22,
         twist: -0.12, headTilt: -0.07, headTurn: 0.20,
         hipSway: 0.06, lean: 0.06,
+        // Grill-master weight, planted. Measured at the shipped facing: hull
+        // deficiency 0.1156 base -> 0.1283 at splay alone -> 0.1542 with the wider
+        // stance under it, islands 1 throughout.
+        splay: 0.34,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -1153,11 +1174,77 @@ export class HamburgerCharacter extends BaseCharacter {
       blade.add(slotBack);
     }
 
+    this.buildSilhouetteEvents();
+
     // Outline: a whisper, per render/toon.ts — the reference bar carries almost
     // no ink line.
     outlineGroup(this.root, OUTLINE_THIN);
     this.collectFlashTargets();
     this.rig.restPose();
+  }
+
+  /**
+   * SILHOUETTE EVENTS — two lettuce points and a diner pick.
+   *
+   * Hamburger measured **hull deficiency 0.1062 with ZERO appendages** at the
+   * shipped facing — a stack of discs seen from above is a circle. It already
+   * carries a spatula in `handR` and a lettuce frill inside the stack, and neither
+   * registered: the frill is a continuous skirt, which the metric's morphological
+   * opening keeps as CORE (it is not thin at its neck, it is thin all over and
+   * attached along its whole length), and the spatula sits in front of the buns
+   * where it overlaps them from this camera.
+   *
+   * Two distinct leaf POINTS instead of a continuous frill, aimed out along the
+   * mass's own measured box, plus the pick that every diner burger is served with.
+   * The pick is the one deliberately VERTICAL element in this pass: it earns only
+   * cos 58 = 0.53 of a screen-metre, but it starts above the top bun where there is
+   * nothing left to be occluded by, and it is the single most legible "this is a
+   * served burger" mark available.
+   */
+  private buildSilhouetteEvents(): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+    const size = box.getSize(new THREE.Vector3());
+    const rStack = Math.max(size.x, size.z) * 0.5;
+
+    // ── Lettuce points ────────────────────────────────────────────────────────
+    // At the frill's own height, angled out and slightly down so they read as
+    // leaves flopping past the bun rather than as fins.
+    // ROUND 2: THREE points, not two, and one of them is at the back. The first
+    // pair sat at +-0.42/0.62 PI — the character's own left and right — which is
+    // exactly the axis the top bun projects along at the shipped facing, and both
+    // measured zero: hamburger's only appendage was the pick. The third leaf at
+    // ~PI is on the free axis. They also flop UP-and-out now rather than down,
+    // because down is into the bun's own projected shadow.
+    const leafMat = toonMat({ color: LETTUCE_FRILL, roughness: 0.72 });
+    const leaves: Array<[number, number, number]> = [
+      [Math.PI * 0.42, 1.22, 0.06],
+      [-Math.PI * 0.66, 1.02, -0.10],
+      [Math.PI * 0.98, 1.16, 0.10],
+    ];
+    for (const [azimuth, len, lift] of leaves) {
+      const { at, out } = massAnchor(head, box, { azimuth, height01: 0.46, inset: 0.20 });
+      const g = new THREE.Group();
+      g.name = 'hamburger_lettuce_point';
+      aim(g, at, out.clone().add(new THREE.Vector3(0, lift, 0)).normalize(), Math.PI * 0.5);
+      g.add(leafBlade(leafMat, {
+        len: rStack * len, halfWidth: rStack * 0.28, thick: rStack * 0.035, curl: -0.20, waist: 1.35,
+      }));
+      head.add(g);
+    }
+
+    // ── The pick ──────────────────────────────────────────────────────────────
+    const pick = new THREE.Group();
+    pick.name = 'hamburger_pick';
+    const { at } = massAnchor(head, box, { azimuth: -Math.PI * 0.35, height01: 0.93, inset: 0.62 });
+    aim(pick, at, new THREE.Vector3(0.20, 1, 0.10).normalize());
+    head.add(pick);
+    pick.add(rod(toonMat({ color: MITT_BUN, roughness: 0.55 }), {
+      len: rStack * 0.52, rBase: rStack * 0.045, rTip: rStack * 0.038,
+    }));
+    const olive = knob(toonMat({ color: PALETTE.tomato, roughness: 0.34 }), rStack * 0.11);
+    olive.position.y = rStack * 0.52;
+    pick.add(olive);
   }
 
   protected onUpdate(ctx: AnimContext): void {

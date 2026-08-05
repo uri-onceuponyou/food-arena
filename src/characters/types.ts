@@ -93,6 +93,17 @@ export abstract class BaseCharacter implements CharacterModel {
   protected attackDuration = 0.36;
   protected attackWeaponIndex = 0;
   protected hitT = -1;
+  /**
+   * 0-1, how hard the hit that started `hitT` was. See `applyHitFlash`.
+   *
+   * `match.ts` has been passing `intensity` on every `play('hit', ...)` for some
+   * time and `play` was dropping it on the floor, which is why the flash measured a
+   * dynamic range of **1.00x — bit-identical** across a 9.0x damage span while the
+   * camera kick managed 3.4x and the hit-stop 1.7x. It is the loudest channel in the
+   * game and it said exactly the same thing about a 2-damage chip and an 18-damage
+   * near-kill.
+   */
+  protected hitIntensity = 1;
   protected deathT = -1;
 
   /** Materials that should flash white on hit. Populated by `collectFlashTargets`. */
@@ -134,6 +145,7 @@ export abstract class BaseCharacter implements CharacterModel {
         break;
       case 'hit':
         this.hitT = 0;
+        this.hitIntensity = THREE.MathUtils.clamp(opts?.intensity ?? 1, 0, 1);
         break;
       case 'death':
         this.deathT = 0;
@@ -192,10 +204,15 @@ export abstract class BaseCharacter implements CharacterModel {
       y += strike * 0.05;
     }
 
-    // Hit: sharp recoil backwards.
+    // Hit: sharp recoil backwards, scaled by the same intensity as the flash.
+    //
+    // Kept on a gentler curve than the flash (0.45 + 0.55x rather than x^1.5): the
+    // flash is a colour channel and can afford to nearly vanish on a chip, but a
+    // recoil that nearly vanishes reads as the hit not registering at all. A light
+    // hit still moves 0.58 of a heavy one.
     if (this.hitT >= 0) {
       const p = this.hitT / 0.26;
-      const k = Math.sin(p * Math.PI) * (1 - p * 0.35);
+      const k = Math.sin(p * Math.PI) * (1 - p * 0.35) * (0.45 + 0.55 * this.hitIntensity);
       lean -= k * 0.30;
       sx += k * 0.10;
       sy -= k * 0.10;
@@ -226,12 +243,44 @@ export abstract class BaseCharacter implements CharacterModel {
     }
   }
 
+  /**
+   * The white hit flash, scaled by how hard the hit was.
+   *
+   * ── Both numbers below are measured, not chosen ──────────────────────────────
+   * `tools/tmp/flashread.mjs` applies exactly this lerp in the live match at the
+   * shipped camera and reports what is LEFT of the character afterwards. At the old
+   * fixed 0.85 the flash does not merely brighten the character, it deletes the
+   * entire value pass for 0.26 s on every hit:
+   *
+   *   character   range 0 -> 0.85     p05 0 -> 0.85     0.10-wide steps
+   *   egg         0.9027 -> 0.0373    0.081 -> 0.952    10 -> 6
+   *   hamburger   0.7892 -> 0.0782    0.109 -> 0.898    10 -> 7
+   *   donut       0.7752 -> 0.1162    0.079 -> 0.866    10 -> 9
+   *
+   * That is the dark rung the whole cast was re-graded to get (p05 0.273 -> 0.157
+   * against a reference 0.097, paid for with 21% of figure/ground) going to white,
+   * at full strength, on a chip.
+   *
+   * The same probe corrected the assumption behind the fix, which is why it was
+   * worth running: figure/ground **improves** with the flash (hamburger dL 0.204 ->
+   * 0.489) because a white character on this floor separates harder than a graded
+   * one. The flash does not cost the OUTLINE; it costs everything inside it. And
+   * that gain saturates early — 0.15 of flash buys 41% of the total dL, 0.85 buys
+   * the last 12% for 90% of the ladder.
+   *
+   * So: ceiling **0.55** rather than 0.85 (roughly triples what survives at maximum
+   * damage — egg's range 0.037 -> ~0.14 — for dL 0.50 against 0.505, i.e. nothing),
+   * and an exponent of 1.5 on intensity so the FLOOR is genuinely light. `match.ts`
+   * clamps intensity to 0.25-1.0, so the flash now spans 0.069-0.55, a range of
+   * **8.0x against a 9.0x damage input** — the channel finally says something.
+   */
   private applyHitFlash(): void {
     const active = this.hitT >= 0;
     const k = active ? Math.max(0, 1 - this.hitT / 0.26) : 0;
+    const peak = 0.55 * Math.pow(this.hitIntensity, 1.5);
     for (const { mat, baseEmissive } of this.flashMats) {
       if (!baseEmissive || !mat.emissive) continue;
-      mat.emissive.copy(baseEmissive).lerp(new THREE.Color(0xffffff), k * 0.85);
+      mat.emissive.copy(baseEmissive).lerp(new THREE.Color(0xffffff), k * peak);
     }
   }
 

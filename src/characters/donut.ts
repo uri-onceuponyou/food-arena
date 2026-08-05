@@ -21,6 +21,8 @@ import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
 import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
+import { CHARACTER_HEIGHT } from '../units';
+import { aim, curl, knob, localBounds, massAnchor } from './appendages';
 
 const GLAZE = PALETTE.glaze;      // #FF9EC4
 const DOUGH = '#F5CE86';
@@ -126,6 +128,15 @@ function torsoBarrel(halfW: number, height: number, halfD: number, taper: number
   return geo;
 }
 
+/**
+ * This character's own height, as a multiple of the cast's.
+ *
+ * It was the metre literal 2.10 until `CHARACTER_HEIGHT` moved. A literal here is
+ * a silent opt-out of every cast-wide size decision: six of the eleven carried one,
+ * so raising the cast height would have scaled five characters and left six behind.
+ */
+const H = CHARACTER_HEIGHT * 1.0;
+
 export class DonutCharacter extends BaseCharacter {
   private rig: ChibiRig;
   private sprinkles: THREE.Object3D[] = [];
@@ -160,7 +171,7 @@ export class DonutCharacter extends BaseCharacter {
       // `headFraction` 0.72 -> 0.685 pays for the extra 0.04H of leg so the ring
       // does not grow: STUB's own rewrite makes the same trade at the same rate.
       proportions: bodyType('stub', {
-        height: 2.10,
+        height: H,
         headFraction: 0.685,
         // 0.295H -> 0.345H. Measured: the ring is 0.619m half-wide at shoulder
         // height and the pivot sat at 0.620m — exactly ON the surface, so the whole
@@ -173,7 +184,7 @@ export class DonutCharacter extends BaseCharacter {
         // delivered). 0.325H is the middle of a window only 0.084 m wide, which is what
         // a torus gives you: inner edge 0.552 m inside the ring's 0.589 m, outer edge
         // 0.224 m proud of it.
-        shoulderWidth: 2.10 * 0.325,
+        shoulderWidth: H * 0.325,
         // ── A RING is widest at its own CENTRE, so STUB's new 0.26 is wrong here ──
         // `bodies.ts` raised STUB's `shoulderFraction` from 0.12 to 0.26 because
         // every other STUB mass (bottle, egg, lollipop stick) is widest LOW, so
@@ -191,7 +202,12 @@ export class DonutCharacter extends BaseCharacter {
         // hung 0.031 m OUTSIDE the only mass they could attach to, and at run the
         // whole left arm-and-leg became its own connected component, 19,248 px
         // detached. That is the second edge of the same window round 1 documented.
-        stanceWidth: 2.10 * 0.20,
+        // 0.20H -> 0.28H. The 0.20 was measured against a ring whose half-width at
+        // the hip line is 0.504 m — the leg had to overlap the dough to stay
+        // attached. That constraint is unchanged and 0.28H = 0.588 m still clears
+        // it on the inside edge; what changes is that the outside edge now leaves
+        // the ring's shadow, which is where the outline gets its notch.
+        stanceWidth: H * 0.28,
       }),
       // Bouncy and playful — hip popped out, head cocked, weight rocked back onto
       // her heels like she's mid-bounce. An art director's second pass named the
@@ -210,6 +226,11 @@ export class DonutCharacter extends BaseCharacter {
         elbowL: -0.55, elbowR: -0.65,
         twist: 0.22, headTilt: 0.22, headTurn: -0.30,
         hipSway: 0.12, lean: -0.03,
+        // Bouncy still reads with the feet apart — arguably better, since a rocked-
+        // back weight needs a base to be rocked back ON. Measured at the shipped
+        // facing: hull deficiency 0.1291 base -> 0.1368 at splay alone -> 0.1591
+        // with the wider stance under it, islands 1 throughout.
+        splay: 0.32,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -510,10 +531,80 @@ export class DonutCharacter extends BaseCharacter {
     });
 
     this.buildFace(R, ringR, tubeR);
+    this.buildSilhouetteEvents(R);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
+  }
+
+  /**
+   * SILHOUETTE EVENTS — four icing drips and a beanie tail.
+   *
+   * Donut measured **hull deficiency 0.1207 with ZERO appendages** at the shipped
+   * facing. The ring's HOLE — the one feature that would make this outline
+   * unmistakable — is a real, large piece of negative space and it contributes
+   * nothing at the facing the player looks at, because at yaw 90 the torus is
+   * edge-on and the hole closes. That is measurable: 0.1799 head-on against 0.1207
+   * in profile, and the difference is almost exactly the hole.
+   *
+   * So the events have to be things that survive the ring turning edge-on. Drips
+   * running off the glaze at four azimuths do: whichever way the character faces,
+   * two of the four are broadside to camera. They are `curl`s rather than straight
+   * rods so they hook as they fall, which is what makes icing read as icing.
+   *
+   * The beanie's tail is the fifth, and it is the one that does the most work,
+   * because it leaves the mass HORIZONTALLY at head height where the ring is
+   * widest — see `appendages.ts` for why that direction is worth roughly twice a
+   * vertical one at a 58 deg camera. The existing pompom moves onto its tip.
+   */
+  private buildSilhouetteEvents(R: number): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+
+    // ── Icing drips ───────────────────────────────────────────────────────────
+    const dripMat = toonMat({ color: GLAZE, roughness: 0.34 });
+    const drips: Array<[number, number, number]> = [
+      [Math.PI * 0.46, 0.52, 1.00],
+      [-Math.PI * 0.40, 0.44, 0.78],
+      [Math.PI * 0.90, 0.48, 0.86],
+      [-Math.PI * 0.86, 0.40, 0.66],
+    ];
+    for (const [azimuth, height01, k] of drips) {
+      const { at, out } = massAnchor(head, box, { azimuth, height01, inset: 0.22 });
+      const pts = [
+        at.clone(),
+        at.clone().addScaledVector(out, R * 0.16 * k).add(new THREE.Vector3(0, -R * 0.20 * k, 0)),
+        at.clone().addScaledVector(out, R * 0.30 * k).add(new THREE.Vector3(0, -R * 0.44 * k, 0)),
+        at.clone().addScaledVector(out, R * 0.26 * k).add(new THREE.Vector3(0, -R * 0.62 * k, 0)),
+      ];
+      const d = curl(dripMat, pts, { rBase: R * 0.085, rTip: R * 0.030 });
+      d.name = 'donut_icing_drip';
+      head.add(d);
+    }
+
+    // ── Beanie tail ───────────────────────────────────────────────────────────
+    const beanieMat = toonMat({ color: BEANIE, roughness: 0.8 });
+    const { at, out } = massAnchor(head, box, { azimuth: -Math.PI * 0.68, height01: 0.90, inset: 0.30 });
+    const tailPts = [
+      at.clone(),
+      at.clone().addScaledVector(out, R * 0.32).add(new THREE.Vector3(0, R * 0.16, 0)),
+      at.clone().addScaledVector(out, R * 0.62).add(new THREE.Vector3(0, R * 0.10, 0)),
+      at.clone().addScaledVector(out, R * 0.80).add(new THREE.Vector3(0, -R * 0.10, 0)),
+    ];
+    const tail = curl(beanieMat, tailPts, { rBase: R * 0.085, rTip: R * 0.048 });
+    tail.name = 'donut_beanie_tail';
+    head.add(tail);
+    // The apex pompom MOVES here rather than a second one being added — one hat,
+    // one bobble, and the light rung it carries keeps its area and its colour.
+    const apexPompom = head.getObjectByName('donut_beanie_pompom');
+    if (apexPompom) apexPompom.parent?.remove(apexPompom);
+    const bob = new THREE.Mesh(new THREE.SphereGeometry(R * 0.125, 12, 10), toonMat({ color: POMPOM, roughness: 0.7 }));
+    bob.name = 'donut_beanie_pompom';
+    bob.position.copy(tailPts[3]);
+    bob.castShadow = true;
+    bob.receiveShadow = true;
+    head.add(bob);
   }
 
   /**

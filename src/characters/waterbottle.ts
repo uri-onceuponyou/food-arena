@@ -62,6 +62,7 @@ import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
+import { aim, blade as lidBlade, curl, knob, localBounds, loop, massAnchor, rod } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -439,6 +440,11 @@ export class WaterBottleCharacter extends BaseCharacter {
         // number is a per-character fit on STUB rather than a preset value — the
         // arms have to clear the FOOD, and the food just got narrower.
         shoulderWidth: CHARACTER_HEIGHT * 0.25,
+        // 0.225H -> 0.30H. STUB's own value was set to get four bottom-heavy masses
+        // off their own legs; this is the same argument taken one step further for
+        // the outline, and it stops short of x1.5 because that is where this
+        // character measured a second island.
+        stanceWidth: CHARACTER_HEIGHT * 0.30,
       }),
       // Upright and eager — chest forward, one arm raised as if reaching/
       // waving. Distinct from every other character's stance in this file's
@@ -453,6 +459,11 @@ export class WaterBottleCharacter extends BaseCharacter {
         elbowL: -0.18, elbowR: -0.46,
         twist: -0.06, headTilt: -0.05, headTurn: 0.12,
         hipSway: 0.015, lean: -0.05,
+        // Measured at the shipped facing: 0.1187 base -> 0.1414 at splay alone ->
+        // 0.1805 with the wider stance under it. `st1.5_sp0.35` was the one
+        // combination that put this character on TWO islands, so the stance below
+        // stops at x1.33 and the splay carries the rest.
+        splay: 0.36,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -734,6 +745,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     this.dressTorsoAsBottle();
     this.dressLimbs();
     this.buildAccessories(R, shellSurface);
+    this.buildSilhouetteEvents(R);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -899,6 +911,101 @@ export class WaterBottleCharacter extends BaseCharacter {
    * one part of the body that exists on STUB (the food mass itself), and it breaks
    * the silhouette at the top where nothing occludes it.
    */
+  /**
+   * SILHOUETTE EVENTS — a carry loop and a flip nozzle.
+   *
+   * Water Bottle measured the **worst hull deficiency in the cast at the shipped
+   * facing, 0.0991, with ZERO appendages**. A bottle is a surface of revolution, so
+   * it is a blob from every angle by construction — it is the one character whose
+   * outline cannot be fixed by turning it round.
+   *
+   * The two things a real sports bottle has that break that outline are a carry
+   * loop and a raised nozzle, and they are the right two for this camera as well as
+   * for the food: the loop leaves the shell HORIZONTALLY at the neck (worth 0.85-1.0
+   * of a screen-metre against a vertical element's 0.53), and the nozzle sits above
+   * the cap where the shell has already stopped, so nothing can occlude it.
+   *
+   * Materials are this file's own: the loop is `CARABINER_METAL`, which the strap
+   * clip already introduced, and the nozzle is `CAP_DARK`, so neither adds a hue to
+   * a character whose palette was deliberately closed.
+   */
+  private buildSilhouetteEvents(R: number): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+
+    // ── Carry loop ────────────────────────────────────────────────────────────
+    {
+      // Down to the shoulder of the bottle and bigger. At 0.80 of the height the
+      // shell is already narrowing into the cap, so the loop sat in the cap's own
+      // projected shadow and measured nothing; at 0.68 it leaves the widest part.
+      const { at, out } = massAnchor(head, box, { azimuth: -Math.PI * 0.52, height01: 0.68, inset: 0.08 });
+      const g = new THREE.Group();
+      g.name = 'waterbottle_carry_loop';
+      aim(g, at, out.clone().add(new THREE.Vector3(0, 0.22, 0)).normalize());
+      g.add(loop(glossyMat({ color: CARABINER_METAL, roughness: 0.32, metalness: 0.35 }), {
+        radius: R * 0.50, tube: R * 0.105, arc: Math.PI * 1.35,
+      }));
+      head.add(g);
+    }
+
+    // ── Flip lid, open ────────────────────────────────────────────────────────
+    // ROUND 2. The loop and the nozzle took this character 0.0991 -> 0.1943, just
+    // short of the six-plate floor of 0.2007, and both sit on the same side. This
+    // is the third event and it is deliberately at the BACK, which is the azimuth
+    // that projects to screen-X at the shipped facing (see `appendages.ts`) — the
+    // one place on a surface of revolution that nothing else can cover.
+    {
+      const box = localBounds(head);
+      const { at, out } = massAnchor(head, box, { azimuth: Math.PI * 0.92, height01: 0.94, inset: 0.20 });
+      const g = new THREE.Group();
+      g.name = 'waterbottle_flip_lid';
+      aim(g, at, out.clone().add(new THREE.Vector3(0, 0.20, 0)).normalize(), Math.PI * 0.5);
+      g.add(lidBlade(toonMat({ color: CAP, roughness: 0.42, doubleSide: true }), {
+        len: R * 0.46, halfWidth: R * 0.30, thick: R * 0.045, curl: 0.18, waist: 0.95,
+      }));
+      head.add(g);
+    }
+
+    // ── Flip nozzle ───────────────────────────────────────────────────────────
+    {
+      const nozzle = new THREE.Group();
+      nozzle.name = 'waterbottle_nozzle';
+      const { at } = massAnchor(head, box, { azimuth: Math.PI * 0.9, height01: 0.985, inset: 0.55 });
+      aim(nozzle, at, new THREE.Vector3(0.10, 0.62, -0.78).normalize());
+      head.add(nozzle);
+      nozzle.add(rod(toonMat({ color: CAP_DARK, roughness: 0.45 }), {
+        len: R * 0.38, rBase: R * 0.115, rTip: R * 0.080,
+      }));
+      const tip = knob(toonMat({ color: CAP, roughness: 0.4 }), R * 0.095);
+      tip.position.y = R * 0.38;
+      nozzle.add(tip);
+    }
+
+    // ── The straw ─────────────────────────────────────────────────────────────
+    // A bent sports straw out of the cap, kicked hard sideways. It is here because
+    // the carry loop measured **zero appendages** at both facings however large it
+    // was made: a torus lying against a surface of revolution stays inside that
+    // surface's own projection at a 58 deg camera, whatever its radius. A rod
+    // leaving the TOP — where the shell has already ended and nothing is left to
+    // project over it — is the mechanism that works, and this character had the
+    // most obvious possible excuse for one.
+    {
+      const box = localBounds(head);
+      const { at } = massAnchor(head, box, { azimuth: Math.PI * 0.05, height01: 0.99, inset: 0.55 });
+      const pts = [
+        at.clone(),
+        at.clone().add(new THREE.Vector3(R * 0.04, R * 0.20, -R * 0.04)),
+        at.clone().add(new THREE.Vector3(R * 0.28, R * 0.30, -R * 0.14)),
+        at.clone().add(new THREE.Vector3(R * 0.60, R * 0.30, -R * 0.22)),
+      ];
+      const straw = curl(glossyMat({ color: LABEL, roughness: 0.3 }), pts, {
+        rBase: R * 0.075, rTip: R * 0.062,
+      });
+      straw.name = 'waterbottle_straw';
+      head.add(straw);
+    }
+  }
+
   private buildAccessories(
     R: number,
     shellSurface: (theta: number, yF: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }

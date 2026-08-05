@@ -27,6 +27,7 @@ import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
+import { aim, blade as finBlade, localBounds, massAnchor, rod } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
 const RICE = '#FFFDF6';        // warm-white sticky rice, not clinical pure white
@@ -275,7 +276,8 @@ export class SushiCharacter extends BaseCharacter {
         // the nigiri bed. The elbow tuck was already relaxed (see `stance` below);
         // this is the remaining 0.03-0.04m the measurement asks for.
         shoulderWidth: CHARACTER_HEIGHT * 0.225,
-        stanceWidth: CHARACTER_HEIGHT * 0.15,    // low, wide stance
+        // 0.15H -> 0.21H — "low, wide stance", now measured rather than asserted.
+        stanceWidth: CHARACTER_HEIGHT * 0.19,
         armRadius: CHARACTER_HEIGHT * 0.068,     // thick
         handRadius: CHARACTER_HEIGHT * 0.088,    // big round rice-fist
         // 0.078H -> 0.064H. Still the thickest leg on a STANDARD body (the
@@ -300,6 +302,13 @@ export class SushiCharacter extends BaseCharacter {
         elbowL: -0.40, elbowR: -0.40,
         twist: -0.07, headTilt: 0.11, headTurn: -0.22,
         hipSway: 0.02, lean: -0.02,
+        // Measured at the shipped facing: 0.1475 base -> 0.1811 at splay alone ->
+        // 0.2057 with the wider stance under it, which is the first time this
+        // character clears the six-plate reference floor of 0.2007 on proportions
+        // alone. Islands stayed at 1 throughout, which matters here: the arms are
+        // held by an INWARD elbow tuck (see above) and opening them detaches
+        // 12,499 px, so the legs were the only span left to spend.
+        splay: 0.38,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -573,6 +582,7 @@ export class SushiCharacter extends BaseCharacter {
     this.dressTorsoAsSushi();
     this.dressLimbs();
     this.buildAccessories(R, yAt, rAt, zAt, SX, SZ);
+    this.buildSilhouetteEvents(R);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -928,14 +938,57 @@ export class SushiCharacter extends BaseCharacter {
     const beltRadius = this.beltRadius;
     const beltY = m.torsoHeight * 0.52;
 
-    const chopstickMat = toonMat({ color: CHOPSTICK, roughness: 0.5 });
-    for (const sx of [-1, 1] as const) {
-      const stick = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.012, R * 0.02, R * 0.62, 8), chopstickMat);
-      stick.name = 'sushi_chopstick';
-      stick.position.set(sx * beltRadius * 0.30, beltY + R * 0.10, -beltRadius * 0.85);
-      stick.rotation.set(0.35, 0, sx * 0.30);
-      stick.castShadow = true;
-      this.rig.joints.torso.add(stick);
+    // ── The belt chopsticks are GONE, and where they went is the finding ──────
+    // They were 0.012-0.02 R thick, tucked behind the belt at `-0.85 * beltRadius`,
+    // i.e. on the back of a torso that sits under a nigiri bed 1.5x wider than the
+    // shoulders. At the match camera's 58 deg the bed projects straight down over
+    // all of it: measured, this character scored **zero appendages** at the shipped
+    // facing with these in place. The pair now stands IN the rice — same prop, same
+    // material, somewhere it can be seen. See `buildSilhouetteEvents`.
+    void beltRadius; void beltY; void R;
+  }
+
+  /**
+   * SILHOUETTE EVENTS — the chopstick pair, stood up in the rice, and a tail fin.
+   *
+   * Sushi measured **hull deficiency 0.1420 with ZERO appendages** at the shipped
+   * facing. The nigiri is a smooth wide dome on a smooth barrel: two convex shapes
+   * stacked, which is the definition of a mask with nothing in it.
+   *
+   * A chopstick is the ideal appendage for this metric and it is not a coincidence:
+   * the metric counts what survives an opening at 0.045 of the subject's height, so
+   * it is looking for things that are LONG and THIN, and a chopstick is nothing
+   * else. The pair is splayed apart in azimuth as well as tilted, so they read as
+   * two events rather than one, and they lean back off the face.
+   *
+   * The fin is the second, and it is the one that works when the sticks are
+   * foreshortened: it leaves the topping sideways at the widest point of the whole
+   * character.
+   */
+  private buildSilhouetteEvents(R: number): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+
+    const stickMat = toonMat({ color: CHOPSTICK, roughness: 0.5 });
+    for (const [azimuth, lean, len] of [[-Math.PI * 0.80, 0.62, 0.72], [-Math.PI * 0.96, 0.44, 0.62]] as const) {
+      const { at, out } = massAnchor(head, box, { azimuth, height01: 0.86, inset: 0.42 });
+      const g = new THREE.Group();
+      g.name = 'sushi_chopstick';
+      aim(g, at, out.clone().multiplyScalar(lean).add(new THREE.Vector3(0, 1, 0)).normalize());
+      g.add(rod(stickMat, { len: R * len, rBase: R * 0.055, rTip: R * 0.032, seg: 7 }));
+      head.add(g);
+    }
+
+    // ── Tail fin ──────────────────────────────────────────────────────────────
+    {
+      const { at, out } = massAnchor(head, box, { azimuth: Math.PI * 0.52, height01: 0.72, inset: 0.16 });
+      const g = new THREE.Group();
+      g.name = 'sushi_tail_fin';
+      aim(g, at, out.clone().add(new THREE.Vector3(0, 0.40, 0)).normalize(), Math.PI * 0.5);
+      g.add(finBlade(toonMat({ color: SALMON, roughness: 0.36 }), {
+        len: R * 0.52, halfWidth: R * 0.34, thick: R * 0.035, curl: 0.10, waist: 1.4,
+      }));
+      head.add(g);
     }
   }
 

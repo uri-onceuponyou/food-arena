@@ -23,6 +23,7 @@ import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
+import { aim, knob, localBounds, loop, massAnchor, rod } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
 const CERAMIC = '#F7F1E6';      // glazed bowl exterior — warm off-white, not clinical
@@ -303,6 +304,19 @@ export class SoupCharacter extends BaseCharacter {
         // Kept soup-local rather than pushed into the archetype: hamburger and taco
         // share STOUT and neither has been re-measured for it. See the hand-off.
         armFraction: 0.245,
+        // 0.215H -> 0.30H. STOUT is the archetype whose whole read is "heavy and
+        // planted", and the bowl is 0.61 m across: at the old width the legs sat
+        // under the middle of it and this camera projected the bowl straight down
+        // over both. Kept character-local rather than pushed into `bodies.ts` —
+        // hamburger and taco share STOUT and are moved by their own files, each
+        // with its own measurement.
+        // 0.30H -> 0.275H after `tools/tmp/castbox.mjs` measured what the widening
+        // costs on the OTHER axis: the model's widest point against
+        // `HIT_RADIUS_VS_PLAYER`. Soup was the cast's widest at 1.135 of it. The
+        // 0.025H back is worth ~0.06 m of overhang and ~0.01 of hull deficiency
+        // against a 0.115 margin over the reference floor — cheap, and it is the
+        // difference between the size rise costing hit-feel and not.
+        stanceWidth: CHARACTER_HEIGHT * 0.275,
       }),
       // Serene and still — the calmest, most nearly-neutral stance in the cast,
       // matching the unsettling-patient no-mouth-then-mouth face. Distinct from
@@ -317,6 +331,11 @@ export class SoupCharacter extends BaseCharacter {
         elbowL: -0.14, elbowR: -0.10,
         twist: 0.02, headTilt: 0.03, headTurn: 0.0,
         hipSway: 0.0, lean: 0.0,
+        // A heavy vessel stands on a wide base. Measured at the shipped facing
+        // (`limbmatch --mode proto --spec plant`): hull deficiency 0.1057 base,
+        // 0.1431 at splay 0.35 alone, 0.1778 with the widened stance under it —
+        // and islands stayed at 1 the whole way, so nothing came off the bowl.
+        splay: 0.34,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -464,6 +483,7 @@ export class SoupCharacter extends BaseCharacter {
     this.dressTorsoAsSoup();
     this.dressLimbs();
     this.buildAccessories(R, bowlSurface);
+    this.buildSilhouetteEvents();
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -833,6 +853,120 @@ export class SoupCharacter extends BaseCharacter {
     highlight.name = 'soup_glaze_highlight';
     highlight.userData.noOutline = true;
     head.add(highlight);
+  }
+
+  /**
+   * SILHOUETTE EVENTS — two crock ears and a standing ladle.
+   *
+   * Soup measured **hull deficiency 0.1003 and ZERO appendages** at the shipped
+   * facing, the second-worst outline in the cast against a six-plate Brawl Stars
+   * floor of 0.2007 and a median appendage count of 2.5. Look at
+   * `shots/limbmatch/before/chars/soup.yaw90.png` and the reason is not subtle: at
+   * 58 deg the camera is looking INTO the bowl, so the character is a filled circle
+   * of broth with a leg stub under it and nothing else.
+   *
+   * It already carried a ladle in the hand, a spare ladle on a back-sling and a
+   * napkin bib, all of which are described in this file as silhouette-breaking, and
+   * the measured appendage count was still zero — because every one of them sits on
+   * the TORSO, and the torso is underneath a 0.61 m bowl that this camera projects
+   * straight down over. That is the whole lesson of `appendages.ts`: the event has
+   * to leave the mass HORIZONTALLY, from the mass's own widest point.
+   *
+   * So: two ears on the bowl (a crock has handles; this one now looks like a crock
+   * rather than a mixing bowl), and the ladle that was buried on the back is stood
+   * up IN the broth with its handle out over the rim. All three are placed against
+   * `localBounds(head)` — the bowl as it was actually built by the lathe — rather
+   * than against a remembered radius.
+   */
+  private buildSilhouetteEvents(): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+    const size = box.getSize(new THREE.Vector3());
+    const rBowl = Math.max(size.x, size.z) * 0.5;
+
+    // ── Crock ears ────────────────────────────────────────────────────────────
+    // Glazed in the bowl's own ceramic with the rim band's rust on the inner face,
+    // so they read as part of the vessel rather than as bolted-on props.
+    // ROUND 2: `height01` 0.66 -> 0.94 and half again the size. At 0.66 the ears
+    // sat on the bowl's waist, and at the shipped facing the bowl's own rim
+    // projects DOWN over everything below it — measured, soup came back with one
+    // appendage and both ears contributed none of it. At the rim there is nothing
+    // above them left to be occluded by. See the azimuth note in `appendages.ts`.
+    const earMat = toonMat({ color: CERAMIC, roughness: 0.34 });
+    for (const side of [-1, 1] as const) {
+      // ROUND 5, and the instrument caught this one rather than the eye: changing
+      // the ear radius by a quarter (0.34 -> 0.42 of the bowl) moved soup's hull
+      // deficiency by **0.0000 at both facings, to four decimals**. Something that
+      // does not move when everything around it does is not contributing at all
+      // (`docs/LESSONS.md` §5) — the ears were hugging the bowl's outer wall, and
+      // at 58 deg the bowl's own rim projects down over its wall, so they were
+      // inside the silhouette however big they got. Tilting them up off the rim is
+      // what makes them shape rather than decoration.
+      const { at, out } = massAnchor(head, box, { azimuth: side * Math.PI * 0.5, height01: 0.90, inset: 0.10 });
+      const ear = loop(earMat, { radius: rBowl * 0.46, tube: rBowl * 0.12, arc: Math.PI * 1.15 });
+      const g = new THREE.Group();
+      g.name = 'soup_crock_ear';
+      aim(g, at, out.clone().add(new THREE.Vector3(0, 0.45, 0)).normalize());
+      g.add(ear);
+      head.add(g);
+    }
+
+    // ── The standing ladle ────────────────────────────────────────────────────
+    // Out of the broth at the back quarter, leaning away from the face so it never
+    // competes with it. The handle is the event; the scoop only says what it is.
+    const ladle = new THREE.Group();
+    ladle.name = 'soup_standing_ladle';
+    // ROUND 2: moved to dead astern (azimuth ~PI, i.e. the character's own back) and
+    // lengthened. At the shipped facing that is the axis that projects to screen-X,
+    // where the bowl cannot cover it at any height; at -0.72PI it was still half on
+    // the occluded axis.
+    const { at, out } = massAnchor(head, box, { azimuth: Math.PI * 0.94, height01: 0.86, inset: 0.30 });
+    // ROUND 4: laid down to ~15 deg off horizontal. Standing it up cost 0.78 m of
+    // TOTAL MODEL HEIGHT (2.26 -> 3.04 m against a cast band of 2.10-2.41), and it
+    // was never the efficient direction anyway: at 58 deg pitch a vertical metre is
+    // worth 0.53 of a screen-metre and a horizontal one 0.85-1.00.
+    const dir = out.clone().multiplyScalar(1.00).add(new THREE.Vector3(0, 0.28, 0)).normalize();
+    aim(ladle, at, dir);
+    head.add(ladle);
+    ladle.add(rod(toonMat({ color: WOOD, roughness: 0.6 }), {
+      len: rBowl * 0.95, rBase: rBowl * 0.095, rTip: rBowl * 0.065,
+    }));
+    const cap = knob(toonMat({ color: RIM_TRIM, roughness: 0.45 }), rBowl * 0.105);
+    cap.position.y = rBowl * 0.95;
+    ladle.add(cap);
+
+    // ── The spoon ─────────────────────────────────────────────────────────────
+    // A second utensil, laid across the rim on the character's own left, and it is
+    // here because the EARS are not doing the job the ears were built for. The
+    // instrument said so before the eye did: changing their radius by a quarter
+    // moved this character's hull deficiency by 0.0000 at both facings, so they are
+    // decoration, not shape. Rather than tune a shape that has already proved it
+    // cannot escape the bowl's own projection, this reuses the mechanism that
+    // demonstrably works on this character — a thin rod leaving the rim, exactly
+    // like the ladle, on the axis the ladle does not cover.
+    const spoon = new THREE.Group();
+    spoon.name = 'soup_spoon';
+    // Aimed UP-and-out rather than out-and-up, and that is the whole difference on
+    // this character. The ears sit on the bowl's wall and reach sideways, and both a
+    // 25% size rise and a whole extra utensil moved hull deficiency by <= 0.0001 at
+    // either facing: the bowl's RIM is its widest point AND its highest, so at 58 deg
+    // it projects down over its own wall and swallows anything mounted there. Only
+    // something that climbs past the rim escapes — which is exactly why the ladle,
+    // the one element aimed steeply upward, is carrying this character on its own.
+    const sp = massAnchor(head, box, { azimuth: Math.PI * 0.44, height01: 0.97, inset: 0.22 });
+    aim(spoon, sp.at, sp.out.clone().multiplyScalar(0.55).add(new THREE.Vector3(0, 1.0, 0)).normalize());
+    head.add(spoon);
+    spoon.add(rod(toonMat({ color: WOOD, roughness: 0.6 }), {
+      len: rBowl * 0.86, rBase: rBowl * 0.075, rTip: rBowl * 0.058,
+    }));
+    const bowlEnd = new THREE.Mesh(new THREE.SphereGeometry(rBowl * 0.13, 12, 10),
+      glossyMat({ color: '#C7CDD4', roughness: 0.3, metalness: 0.4 }));
+    bowlEnd.name = 'soup_spoon_bowl';
+    bowlEnd.scale.set(1, 0.42, 1.25);
+    bowlEnd.position.y = rBowl * 0.86;
+    bowlEnd.castShadow = true;
+    bowlEnd.receiveShadow = true;
+    spoon.add(bowlEnd);
   }
 
   protected onUpdate(ctx: AnimContext): void {

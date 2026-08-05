@@ -28,6 +28,8 @@ import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
+import { CHARACTER_HEIGHT } from '../units';
+import { aim, blade as shardBlade, localBounds, massAnchor } from './appendages';
 
 const SHELL = PALETTE.egg;          // #FFF8EA — matte-ish porcelain. THE LID keeps this.
 // ── Egg was the worst character in the cast on every value axis ──────────────
@@ -80,9 +82,30 @@ const LIMB_LILAC_SHADOW = '#150E22';
  * one step darker than `LIMB_LILAC` so the limbs still separate from it where they
  * touch — the value pass's own rule that a chain has to ALTERNATE, not ramp.
  * `GARMENT_LIT` is the rolled rim, which is the piece the key light actually hits.
+ *
+ * ── #1A1228 -> #241A38, and the patch is narrowed: SOFTENED, not reverted ────
+ * A blind critic named this garment as its second-biggest defect, unprompted and
+ * without knowing it was new: *"a crushed near-black hemisphere with a hard
+ * purple-rimmed edge cutting the body exactly in half"*. Rendered at match size
+ * (`shots/limbmatch/before/chars/egg.yaw90.png`) that is exactly what it is — from
+ * the shipped facing you are looking at the back of the head, so a patch spanning
+ * 137 deg of azimuth from the crown to the equator IS half the circle.
+ *
+ * Reverting was the other option and it was rejected on arithmetic rather than
+ * taste. `p05` is a PERCENTILE: it passes as long as 5% of the character's pixels
+ * sit below luma 0.18, and the garment was covering far more than 5%. So the patch
+ * can lose most of its area and lift a whole value step and still hold the gate
+ * this character had no other way to pass (`p05` 0.270 -> 0.060 against <= 0.180,
+ * on a head that is 93.7% of the character). Three changes, all in that direction:
+ * the azimuth span 137 deg -> 101 deg, the top edge dropped off the crown
+ * (`PHI_TOP` 0.16PI -> 0.30PI) so the egg's own dome stays pale and unbroken, and
+ * the tone up one rung to sit WITH `LIMB_LILAC` instead of a step under it — the
+ * limbs now separate from the garment by their shadow tone rather than by the
+ * garment being the darkest thing on the model. Verified with
+ * `valuescan --mode gate`, not assumed; the measured cost is in the report.
  */
-const GARMENT = '#1A1228';
-const GARMENT_LIT = '#332748';
+const GARMENT = '#241A38';
+const GARMENT_LIT = '#3E3157';
 /** Yolk-gold hands, deepened. At #FFC23C they were a sixth light mass. */
 const YOLK_HAND = '#3A2408';
 
@@ -359,6 +382,15 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   return geo;
 }
 
+/**
+ * This character's own height, as a multiple of the cast's.
+ *
+ * It was the metre literal 2.02 until `CHARACTER_HEIGHT` moved. A literal here is
+ * a silent opt-out of every cast-wide size decision: six of the eleven carried one,
+ * so raising the cast height would have scaled five characters and left six behind.
+ */
+const H = CHARACTER_HEIGHT * 0.962;
+
 export class EggCharacter extends BaseCharacter {
   private rig: ChibiRig;
 
@@ -388,7 +420,7 @@ export class EggCharacter extends BaseCharacter {
       // wide at shoulder height (~0.96R, thanks to `BOTTOM_BULGE`), so the stock
       // 0.32H would bury the upper arms inside it.
       proportions: bodyType('stub', {
-        height: 2.02,
+        height: H,
         // ── The arms were INSIDE the shell ──────────────────────────────────
         // Measured: at the stock STUB `shoulderFraction` of 0.12 the shoulder
         // pivot lands ~0.59 of the way down the ovoid, where `BOTTOM_BULGE`
@@ -420,12 +452,12 @@ export class EggCharacter extends BaseCharacter {
         // OVERLAP the shell at the pivot to read as attached, not merely avoid it.
         // 0.798m puts the upper arm's inner edge inside the shell while its outer
         // edge stays proud.
-        shoulderWidth: 2.02 * 0.395,
+        shoulderWidth: H * 0.395,
         // The shell reaches almost to the floor, so at STUB's 0.225H stance the
         // thighs and shins measured 0.000 delivery — completely inside the food.
         // Widened here rather than in the archetype because no other STUB mass is
         // this deep.
-        stanceWidth: 2.02 * 0.275,
+        stanceWidth: H * 0.275,
       }),
       // Timid, closed-in — elbows pulled tight against the body, shoulders barely
       // lifted, head ducked and turned away shyly. An art director's second pass
@@ -445,6 +477,14 @@ export class EggCharacter extends BaseCharacter {
         elbowL: -0.80, elbowR: -0.76,
         twist: 0.05, headTilt: 0.16, headTurn: 0.32,
         hipSway: 0.01, lean: 0.10,
+        // Splay ONLY, and the stance is deliberately left alone. Egg is the one
+        // character whose `stanceWidth` cannot be widened at all: measured
+        // (`limbmatch --mode proto --spec plant`) it goes to TWO islands at x1.2,
+        // because the shell reaches almost to the floor and moving the hip pivot
+        // out takes the thigh off the only mass it can attach to. Splay moves the
+        // FOOT and leaves the pivot where it is, and islands stayed at 1 all the
+        // way to 0.5 rad. Hull deficiency 0.107 -> 0.1351 on splay alone.
+        splay: 0.42,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -713,6 +753,7 @@ export class EggCharacter extends BaseCharacter {
     });
 
     this.buildFace(R);
+    this.buildSilhouetteEvents(R);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -766,6 +807,60 @@ export class EggCharacter extends BaseCharacter {
    * half of the costume and reads at character-select framing) and the cowl is the
    * half that reaches the match.
    */
+  /**
+   * SILHOUETTE EVENTS — three shell shards, mid-hatch.
+   *
+   * Egg has the worst outline in the cast at BOTH facings: hull deficiency 0.0995
+   * at the shipped facing and **0.0613** head-on, against a six-plate Brawl Stars
+   * floor of 0.2007. Read the mask in `shots/limbmatch/before/chars/egg.yaw0.png`
+   * and there is nothing to interpret — it is a disc.
+   *
+   * The previous pass established what does NOT work here, and the reason is worth
+   * keeping in front of whoever reads this next: a drooping hood point on the back
+   * of the CROWN moved hull deficiency by 0.0003, because at the crown the convex
+   * hull is already generous and an addition reaching 0.7R along the surface normal
+   * is still inside it. The place where that stops being true is the EQUATOR — the
+   * ovoid is at its widest there, so the hull is tight against the shell and a
+   * horizontal protrusion leaves it on its first millimetre. That is a property of
+   * the shape, not of the ornament, and it is why these are shards at the shoulder
+   * line rather than anything on top.
+   *
+   * Three, at three different lengths and azimuths, so no two merge into one
+   * component under the metric's opening. `rules.ts` gives this character Shell
+   * Shards and Hatch! — a shell mid-break is the read the kit already asked for.
+   */
+  private buildSilhouetteEvents(R: number): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+
+    const shardMat = toonMat({ color: SHELL, roughness: 0.4 });
+    const shardShadeMat = toonMat({ color: SHELL_BODY, roughness: 0.42 });
+    // ROUND 3: four, half again as long, half again as wide, and much closer to
+    // HORIZONTAL. The first version aimed them out-and-UP at up to 0.75 of vertical,
+    // which on an ovoid means climbing along a surface that is curving away — the
+    // tips stayed inside the hull and the whole set was worth 0.1662 at the shipped
+    // facing against a 0.2007 floor. Lift is now 0.20-0.55 and the fourth sits at
+    // the crack, where the shell is genuinely coming apart.
+    const spec = [
+      { azimuth: Math.PI * 0.50, height01: 0.74, len: 0.90, lift: 0.40, mat: shardMat },
+      { azimuth: -Math.PI * 0.50, height01: 0.66, len: 0.74, lift: 0.22, mat: shardShadeMat },
+      { azimuth: Math.PI * 0.97, height01: 0.70, len: 0.86, lift: 0.34, mat: shardMat },
+      { azimuth: Math.PI * 0.10, height01: 0.90, len: 0.66, lift: 0.55, mat: shardShadeMat },
+    ];
+    for (const sp of spec) {
+      const { at, out } = massAnchor(head, box, { azimuth: sp.azimuth, height01: sp.height01, inset: 0.20 });
+      const g = new THREE.Group();
+      g.name = 'egg_shell_shard';
+      aim(g, at, out.clone().add(new THREE.Vector3(0, sp.lift, 0)).normalize(), Math.PI * 0.5);
+      // `waist: 0.75` keeps the sides nearly straight, so it reads as a snapped
+      // plate of shell rather than as a leaf.
+      g.add(shardBlade(sp.mat, {
+        len: R * sp.len, halfWidth: R * 0.36, thick: R * 0.050, waist: 0.75,
+      }));
+      head.add(g);
+    }
+  }
+
   private buildCowl(R: number): void {
     const head = this.rig.joints.head;
     const cloth = toonMat({ color: GARMENT, roughness: 0.62, doubleSide: true });
@@ -787,9 +882,12 @@ export class EggCharacter extends BaseCharacter {
     // The working size is roughly a third of that, and the cape is gone: it was
     // the piece reaching down over the legs, which is the scarf's own recorded
     // mistake (`scarfPhi`, above) repeated one layer up.
-    const T0 = 0.62 * Math.PI;
-    const T1 = 1.38 * Math.PI;
-    const PHI_TOP = 0.16 * Math.PI;
+    // Narrowed and dropped off the crown after a blind critic called the result a
+    // near-black hemisphere cutting the body in half — see the note on `GARMENT`
+    // for why softening rather than reverting still holds the p05 gate.
+    const T0 = 0.72 * Math.PI;
+    const T1 = 1.28 * Math.PI;
+    const PHI_TOP = 0.30 * Math.PI;
     const PHI_RIM = 0.50 * Math.PI;   // the equator — the garment never reaches the legs
 
     // ── The hood ──────────────────────────────────────────────────────────────
@@ -819,10 +917,10 @@ export class EggCharacter extends BaseCharacter {
       for (let i = 0; i <= N; i++) {
         const t = T0 + (T1 - T0) * (i / N);
         const s = eggSurface(t, PHI_RIM, R);
-        pts.push(s.pos.clone().addScaledVector(s.normal, R * 0.125));
+        pts.push(s.pos.clone().addScaledVector(s.normal, R * 0.085));
       }
       const rim = new THREE.Mesh(
-        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, R * 0.055, 8, false),
+        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, R * 0.042, 8, false),
         clothLit
       );
       rim.name = 'egg_hood_rim';
@@ -848,9 +946,9 @@ export class EggCharacter extends BaseCharacter {
     // WORN rather than as a shadow. Neon, because that is Egg's rarity accent and
     // the crack seam is the only other place it appears.
     for (const sx of [-1, 1] as const) {
-      const p = eggSurface(sx * 0.62 * Math.PI, PHI_RIM - 0.02, R);
+      const p = eggSurface(sx * 0.72 * Math.PI, PHI_RIM - 0.02, R);
       const clasp = new THREE.Mesh(new THREE.SphereGeometry(R * 0.05, 12, 10), glossyMat({ color: NEON_ACCENT, roughness: 0.25 }));
-      clasp.position.copy(p.pos).addScaledVector(p.normal, R * 0.125);
+      clasp.position.copy(p.pos).addScaledVector(p.normal, R * 0.085);
       clasp.name = 'egg_cowl_clasp';
       clasp.castShadow = true;
       head.add(clasp);

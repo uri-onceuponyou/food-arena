@@ -27,6 +27,8 @@ import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
 import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
+import { CHARACTER_HEIGHT } from '../units';
+import { aim, blade as peelBlade, localBounds, massAnchor } from './appendages';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 const TORTILLA = '#F5EAD6';        // pale flour wrap — the dominant, matte mass
@@ -114,6 +116,15 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   return geo;
 }
 
+/**
+ * This character's own height, as a multiple of the cast's.
+ *
+ * It was the metre literal 2.05 until `CHARACTER_HEIGHT` moved. A literal here is
+ * a silent opt-out of every cast-wide size decision: six of the eleven carried one,
+ * so raising the cast height would have scaled five characters and left six behind.
+ */
+const H = CHARACTER_HEIGHT * 0.976;
+
 export class BurritoCharacter extends BaseCharacter {
   private rig: ChibiRig;
   private toppings: THREE.Object3D[] = [];
@@ -164,14 +175,19 @@ export class BurritoCharacter extends BaseCharacter {
       // wrap and leaves the outer edge proud of it — the straddle, not either edge
       // of the window.
       proportions: bodyType('lanky', {
-        height: 2.05,
+        height: H,
         // 0.135H -> 0.115H. LANKY's torso is 0.167H wide, i.e. 0.171 m half-width,
         // and at 0.135H the arm's INNER edge sat at 0.189 m — outside the only mass
         // it can attach to. At the rearward extreme of the run the whole left arm
         // became its own connected component, 10,060 px. 0.115H puts the inner edge
         // at 0.148 m, inside the torso, while the outer edge is still 0.153 m proud
         // of it.
-        shoulderWidth: 2.05 * 0.105,
+        shoulderWidth: H * 0.105,
+        // 0.062H -> 0.087H. LANKY's stance is narrow on purpose — "the whole figure
+        // reads as a vertical line" — and a vertical line is exactly the outline
+        // this pass exists to break. Still the second-narrowest in the cast, so the
+        // archetype's read survives; the splay above does most of the work.
+        stanceWidth: H * 0.087,
       }),
       // Arms held CLEAR of the body, with a deliberate asymmetry.
       //
@@ -192,6 +208,12 @@ export class BurritoCharacter extends BaseCharacter {
         elbowL: -0.34, elbowR: -0.20,
         twist: -0.04, headTilt: 0.03, headTurn: 0.08,
         hipSway: 0.02, lean: -0.05,
+        // The largest single response in the cast: hull deficiency 0.178 -> 0.2189
+        // at splay 0.5 at the shipped facing and 0.1451 -> 0.2894 head-on, both
+        // from the splay alone, both with islands at 1. A tube on two narrow legs
+        // has more to gain from the legs leaving the tube's shadow than anything
+        // else here does.
+        splay: 0.46,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -598,9 +620,46 @@ export class BurritoCharacter extends BaseCharacter {
       }
     });
 
+    this.buildSilhouetteEvents(R);
+
     outlineGroup(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
+  }
+
+  /**
+   * SILHOUETTE EVENTS — three peeled corners of foil.
+   *
+   * Burrito already had the third-best outline in the cast at the shipped facing
+   * (0.1717, one appendage), and the same shape head-on was 0.1354 with the wrap
+   * reading as a plain cylinder. Foil peeled back off the top is the one thing a
+   * wrapped burrito does that a cylinder does not, and the file already carries
+   * `FOIL` for it.
+   *
+   * Three, at three lengths, curled out and up so each leaves the tube on the
+   * horizontal — the direction worth 0.85-1.0 of a screen-metre at this camera
+   * against a vertical element's 0.53 (`appendages.ts`).
+   */
+  private buildSilhouetteEvents(R: number): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+    const foilMat = glossyMat({ color: FOIL, roughness: 0.30, metalness: 0.25 });
+
+    const spec = [
+      { azimuth: Math.PI * 0.54, len: 0.78, lift: 0.55 },
+      { azimuth: -Math.PI * 0.48, len: 0.62, lift: 0.34 },
+      { azimuth: Math.PI * 0.96, len: 0.70, lift: 0.68 },
+    ];
+    for (const sp of spec) {
+      const { at, out } = massAnchor(head, box, { azimuth: sp.azimuth, height01: 0.74, inset: 0.20 });
+      const g = new THREE.Group();
+      g.name = 'burrito_foil_peel';
+      aim(g, at, out.clone().add(new THREE.Vector3(0, sp.lift, 0)).normalize(), Math.PI * 0.5);
+      g.add(peelBlade(foilMat, {
+        len: R * sp.len, halfWidth: R * 0.30, thick: R * 0.028, curl: 0.30, waist: 1.1,
+      }));
+      head.add(g);
+    }
   }
 
   /** Eager, open-mouthed grin — a Rare brawler ready to roll into a fight. */

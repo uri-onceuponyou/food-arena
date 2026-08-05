@@ -34,6 +34,8 @@ import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
+import { CHARACTER_HEIGHT } from '../units';
+import { aim, blade as leafBlade, localBounds, massAnchor } from './appendages';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 // ── The value ladder ─────────────────────────────────────────────────────────
@@ -229,7 +231,11 @@ export class TacoCharacter extends BaseCharacter {
       // the walls are tilted back, so R has to grow for the crimp to reach the
       // cast's ~2.10 m standing height. Verified with `shoot.mjs --char taco`,
       // which prints the real bounding height — not guessed.
-      proportions: bodyType('stout', { headFraction: 0.52 }),
+      // `stanceWidth` 0.215H -> 0.30H, the same widening soup and hamburger take,
+      // measured on this character: hull deficiency 0.2217 base -> 0.28 at stance
+      // x1.5 with splay, islands 1 throughout, and it is the change that takes the
+      // yaw-0 read off 0.1898.
+      proportions: bodyType('stout', { headFraction: 0.52, stanceWidth: CHARACTER_HEIGHT * 0.275 }),
       // ── Both elbows were tucked INSIDE the shell ────────────────────────────
       // The old -0.75 / -0.85 elbows plus a +0.20 / -0.45 shoulder pair swung both
       // forearms across the body and behind the shell: measured delivery 0.286
@@ -257,6 +263,9 @@ export class TacoCharacter extends BaseCharacter {
         elbowL: -0.50, elbowR: -0.45,
         twist: 0.05, headTilt: -0.07, headTurn: -0.24,
         hipSway: -0.04, lean: 0.16,
+        // Forward-committed AND planted — the throw needs a base. Measured:
+        // 0.2217 -> 0.2395 at splay alone -> 0.28 with the wider stance under it.
+        splay: 0.34,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -736,6 +745,8 @@ export class TacoCharacter extends BaseCharacter {
       }
     });
 
+    this.buildSilhouetteEvents();
+
     outlineGroup(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
@@ -843,6 +854,44 @@ export class TacoCharacter extends BaseCharacter {
     smile.rotation.set(0, 0, Math.PI * 1.08);
     smile.castShadow = true;
     face.add(smile);
+  }
+
+  /**
+   * SILHOUETTE EVENTS — two lettuce sprigs out of the shell's open top.
+   *
+   * Taco has the best outline in the cast at the shipped facing (hull deficiency
+   * 0.2158, two appendages — already inside the six-plate Brawl Stars band) and the
+   * WORST asymmetry between facings: 0.1847 with ZERO appendages at yaw 0, because
+   * a folded shell presented square-on is a slab. These are the cheapest fix that
+   * is also the most obviously right for the food: a taco's filling sticks out of
+   * the top, and this one's did not.
+   *
+   * Deliberately only two, at different heights and different lengths. The metric
+   * counts DISTINCT protrusions, and a fringe of eight would merge into one core
+   * under the morphological opening exactly the way hamburger's lettuce frill did.
+   */
+  private buildSilhouetteEvents(): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+    const size = box.getSize(new THREE.Vector3());
+    const scale = Math.max(size.x, size.z) * 0.5;
+
+    const sprigMat = toonMat({ color: LETTUCE, roughness: 0.7 });
+    const sprigDarkMat = toonMat({ color: LETTUCE_DARK, roughness: 0.7 });
+    const spec = [
+      { azimuth: Math.PI * 0.52, height01: 0.88, len: 0.70, mat: sprigMat },
+      { azimuth: -Math.PI * 0.60, height01: 0.80, len: 0.58, mat: sprigDarkMat },
+    ];
+    for (const s of spec) {
+      const { at, out } = massAnchor(head, box, { azimuth: s.azimuth, height01: s.height01, inset: 0.30 });
+      const g = new THREE.Group();
+      g.name = 'taco_filling_sprig';
+      aim(g, at, out.clone().multiplyScalar(1.00).add(new THREE.Vector3(0, 0.30, 0)).normalize(), Math.PI * 0.5);
+      g.add(leafBlade(s.mat, {
+        len: scale * s.len, halfWidth: scale * 0.22, thick: scale * 0.03, curl: 0.22, waist: 1.3,
+      }));
+      head.add(g);
+    }
   }
 
   protected onUpdate(ctx: AnimContext): void {

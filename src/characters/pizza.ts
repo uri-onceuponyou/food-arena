@@ -20,6 +20,7 @@ import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
+import { curl, localBounds, massAnchor } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
 // ── "Tan-on-tan": the whole character was one value ──────────────────────────
@@ -271,7 +272,10 @@ export class PizzaCharacter extends BaseCharacter {
         // now samples both.
         shoulderWidth: CHARACTER_HEIGHT * 0.235, // broad shoulders — wide top of the wedge
         torsoWidth: CHARACTER_HEIGHT * 0.26 * 0.82, // narrow waist — do NOT track the wide shoulders
-        stanceWidth: CHARACTER_HEIGHT * 0.09,    // narrow stance — the wedge tapers to a point
+        // 0.09H -> 0.135H. Still the second-narrowest in the cast, so the wedge's
+        // own taper still reads; the point of the change is that the feet now
+        // arrive somewhere the crust is not already covering.
+        stanceWidth: CHARACTER_HEIGHT * 0.135,
         armRadius: CHARACTER_HEIGHT * 0.062,     // a touch thicker than stock, still a limb
         handRadius: CHARACTER_HEIGHT * 0.074,
         legRadius: CHARACTER_HEIGHT * 0.050,     // slimmer, tapering — continues the wedge's own narrowing
@@ -299,6 +303,12 @@ export class PizzaCharacter extends BaseCharacter {
         elbowL: -0.28, elbowR: -0.46,
         twist: 0.16, headTilt: -0.09, headTurn: 0.20,
         hipSway: -0.045, lean: 0.04,
+        // The presenting swagger needs a base under it. Pizza responds to splay
+        // more than to stance — measured at the shipped facing, splay 0.5 alone is
+        // 0.1786 against stance x1.5's 0.1546 — because the wedge tapers, so
+        // moving the hip pivot out moves it into thinner mass while rotating the
+        // leg moves only the foot. 0.1945 with both.
+        splay: 0.44,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -521,6 +531,7 @@ export class PizzaCharacter extends BaseCharacter {
     this.buildFace(R, cheeseFrontZ);
     this.dressLimbs();
     this.buildAccessories(R, head);
+    this.buildSilhouetteEvents(R);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -600,6 +611,54 @@ export class PizzaCharacter extends BaseCharacter {
    * the wedge's own broad shoulders in X, so nothing sinks into a leg or floats
    * disconnected from the body.
    */
+  /**
+   * SILHOUETTE EVENTS — three cheese strings off the crust.
+   *
+   * Pizza is the cast's biggest facing asymmetry after taco: **0.2187 head-on and
+   * 0.1435 in profile, with ZERO appendages at either**. A wedge is a flat slab, so
+   * at the shipped facing it turns edge-on and every bit of the shape that makes it
+   * legible from the front disappears at once.
+   *
+   * Cheese pulling off a slice is the one silhouette event this food has that is
+   * not a property of the wedge's outline, so it survives the turn. Three strands,
+   * different lengths, at azimuths spread far enough apart that no two merge into a
+   * single component under the metric's morphological opening — the same failure
+   * that made hamburger's continuous lettuce frill count as core.
+   */
+  private buildSilhouetteEvents(R: number): void {
+    const head = this.rig.joints.head;
+    const box = localBounds(head);
+    const cheeseMat = toonMat({ color: CHEESE, roughness: 0.4 });
+
+    // ROUND 2: four strands, one per quadrant, and roughly twice the reach. The
+    // first three measured **zero** appendages at either facing — they were short
+    // enough to lie along the crust rim, which is the one place a strand cannot
+    // break an outline. `appendages.ts` sets the bar: an event has to clear the
+    // core by more than the metric's opening radius, ~0.10 m of world here, and
+    // 0.19 m of outward reach against a wedge that is itself 0.4 m thick was not
+    // it. The azimuths now include one at ~0 and one at ~PI, which is what a slab
+    // needs — edge-on at the shipped facing, the strands perpendicular to its face
+    // are the only ones on the free screen axis.
+    const spec: Array<[number, number, number]> = [
+      [Math.PI * 0.08, 0.34, 1.00],
+      [Math.PI * 0.55, 0.42, 0.86],
+      [-Math.PI * 0.50, 0.30, 0.72],
+      [Math.PI * 0.96, 0.28, 0.92],
+    ];
+    for (const [azimuth, height01, k] of spec) {
+      const { at, out } = massAnchor(head, box, { azimuth, height01, inset: 0.14 });
+      const pts = [
+        at.clone(),
+        at.clone().addScaledVector(out, R * 0.40 * k).add(new THREE.Vector3(0, -R * 0.18 * k, 0)),
+        at.clone().addScaledVector(out, R * 0.72 * k).add(new THREE.Vector3(0, -R * 0.46 * k, 0)),
+        at.clone().addScaledVector(out, R * 0.68 * k).add(new THREE.Vector3(0, -R * 0.80 * k, 0)),
+      ];
+      const str = curl(cheeseMat, pts, { rBase: R * 0.085, rTip: R * 0.030 });
+      str.name = 'pizza_cheese_string';
+      head.add(str);
+    }
+  }
+
   private buildAccessories(R: number, head: THREE.Group): void {
     // Read off the rig rather than hand-mirrored: body proportions now come from
     // an archetype (`bodies.ts`), so any hardcoded copy of a rig constant goes

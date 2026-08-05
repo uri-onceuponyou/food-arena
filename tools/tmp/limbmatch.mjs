@@ -577,6 +577,12 @@ function analyse(res, opts) {
     detachedPx++;
   }
   const islands = sizes.filter((n) => n >= 8).length;
+  // ISLAND SIZES, not just the count. `detachedPx` only counts pixels owned by a
+  // LIMB joint, so a floating prop — a drip anchored into a torus's hole, a lid
+  // anchored off the end of a bottle cap — reports `detachedPx 0` and is invisible
+  // in the headline row. Five characters shipped exactly that in one round of this
+  // pass. This is the number that catches it.
+  const islandSizes = sizes.filter((n, i) => n >= 8 && i !== mainId).sort((a2, b2) => b2 - a2);
 
   // per-limb summary, gated on a footprint that scales with the fighter's own size
   const footMin = opts.footMin || Math.max(8, Math.round(0.0025 * (sil ? sil.areaPx : 1) * 4));
@@ -597,9 +603,13 @@ function analyse(res, opts) {
     wastedPct: +((100 * wasted) / Math.max(1, tot)).toFixed(1),
     buried: buried.map((p) => p.part),
     fails: fails.map((p) => `${p.part}:${p.foot}/${p.ratio}`),
-    detachedPx, detached, islands,
+    detachedPx, detached, islands, islandSizes,
     limbShareOfSilhouette: +(outMass / Math.max(1, total)).toFixed(4),
-    silhouette: sil && { hullDeficiency: sil.hullDeficiency, appendages: sil.appendages, appendageShare: sil.appendageShare, coreShare: sil.coreShare, appendageSizes: sil.appendageSizes.slice(0, 6), areaPx: sil.areaPx, heightPx: sil.heightPx, openingRadiusPx: sil.openingRadiusPx },
+    // `widthPx` is RECORDED, not used by any threshold. The reference plates run
+    // 63-89 px wide at a 136 px height (0.46-0.65 W/H) and a stance change is the
+    // one lever that can walk straight out of that band while every other number
+    // improves, so the aspect has to be on the same row as the numbers it pays for.
+    silhouette: sil && { hullDeficiency: sil.hullDeficiency, appendages: sil.appendages, appendageShare: sil.appendageShare, coreShare: sil.coreShare, appendageSizes: sil.appendageSizes.slice(0, 6), areaPx: sil.areaPx, heightPx: sil.heightPx, widthPx: sil.widthPx, aspectWH: +(sil.widthPx / sil.heightPx).toFixed(3), openingRadiusPx: sil.openingRadiusPx },
     parts: res.parts,
     _mask: mask, _cw: cw, _ch: ch, _sil: sil, _owner: owner, _names: names,
   };
@@ -687,7 +697,8 @@ async function modeChars() {
           const s = an.silhouette;
           console.log(`${id.padEnd(12)} yaw ${String(yawDeg).padStart(3)}  h ${String(an.charHeightPx).padStart(3)}px  ` +
             `wasted ${String(an.wastedPct).padStart(5)}%  buried ${String(an.buried.length).padStart(2)}/${an.parts.filter((p) => LIMB_PARTS.includes(p.part)).length}  ` +
-            `detach ${String(an.detachedPx).padStart(4)}px  hullDef ${String(s ? s.hullDeficiency : '—').padStart(6)}  ` +
+            `detach ${String(an.detachedPx).padStart(4)}px  isl ${String(an.islands)}${an.islandSizes.length ? '(' + an.islandSizes.slice(0, 3).join(',') + ')' : ''}  ` +
+            `hullDef ${String(s ? s.hullDeficiency : '—').padStart(6)}  ` +
             `app ${String(s ? s.appendages : '—').padStart(2)}  core ${String(s ? s.coreShare : "—").padStart(6)}  ` +
             `limbShare ${an.limbShareOfSilhouette}`);
         }
@@ -747,8 +758,21 @@ async function modeControl() {
   check('flinging raises appendage count or hull deficiency',
     F.silhouette.appendages > N.silhouette.appendages || F.silhouette.hullDeficiency > N.silhouette.hullDeficiency,
     `app ${N.silhouette.appendages}->${F.silhouette.appendages}, hullDef ${N.silhouette.hullDeficiency}->${F.silhouette.hullDeficiency}`);
-  check('burying lowers hull deficiency or leaves it', B.silhouette.hullDeficiency <= N.silhouette.hullDeficiency + 0.005,
-    `${N.silhouette.hullDeficiency} -> ${B.silhouette.hullDeficiency}`);
+  // ── This assertion USED to be "burying lowers hull deficiency", and it was wrong ──
+  // It held only while the hand was a vertex of the character's own convex hull, so
+  // that hiding it shrank the hull as fast as it shrank the area. The moment burrito
+  // grew foil peels that reach further out than its mitt does, the hand stopped being
+  // on the hull and the arithmetic inverted: hull deficiency is `1 - area/hull`, so
+  // removing area that was INSIDE the hull must RAISE it. Measured 0.4102 -> 0.4235,
+  // and the instrument was right both times — the assertion encoded an assumption
+  // about the SUBJECT, not a property of burial.
+  //
+  // What burial actually guarantees, on any subject: the silhouette loses area, and
+  // it cannot gain a protrusion. Both are checked instead.
+  check('burying removes silhouette area', B.silhouette.areaPx < N.silhouette.areaPx,
+    `areaPx ${N.silhouette.areaPx} -> ${B.silhouette.areaPx}`);
+  check('burying cannot ADD an appendage', B.silhouette.appendages <= N.silhouette.appendages,
+    `app ${N.silhouette.appendages} -> ${B.silhouette.appendages}`);
   await writeFile(join(OUT, 'control.json'), JSON.stringify(rows, null, 2));
   console.log(`\n${pass} pass, ${fail} fail · overlays in ${dir}/ — LOOK AT THEM`);
   process.exit(fail ? 1 : 0);
@@ -1000,7 +1024,29 @@ async function modeProto() {
   const st = STATIONS[STATION];
   const SPEC = get('--spec', null);
   let candidates;
-  if (SPEC === 'split') {
+  if (SPEC === 'plant') {
+    // ── SPLAY vs SPAN ────────────────────────────────────────────────────────
+    // `--spec split` sweeps the hip JOINT's x offset, which moves the top of the
+    // leg away from the mass it has to stay attached to — that is the knob whose
+    // shoulder twin detaches four of five characters, and on donut and lollipop
+    // it is the knob two previous rounds had to move the OTHER way to reattach a
+    // leg. This sweeps the alternative: leave the hip pivot where it is and
+    // rotate the whole leg outward about z, so only the FOOT travels. The ankle
+    // cancels 60% of it for the same reason `rig.ts`'s run branch does — the
+    // default foot is a plank hanging below the ankle and it has to stay flat.
+    //
+    // `hipL` sits at x = -stanceWidth, so a NEGATIVE z swings it outward
+    // (`docs/LESSONS.md` §12, stated there for the shoulder twin).
+    const splay = (s) => [['hipL', 'z', -s], ['hipR', 'z', s],
+      ['kneeL', 'z', -s * 0.25], ['kneeR', 'z', s * 0.25],
+      ['footL', 'z', s * 0.6], ['footR', 'z', -s * 0.6]];
+    candidates = [{ name: 'base', deltas: [] }];
+    for (const sp of [1.3, 1.5]) candidates.push({ name: `stance${sp}`, posMul: [['hipL', 'x', sp], ['hipR', 'x', sp]] });
+    for (const s of [0.20, 0.35, 0.50]) candidates.push({ name: `splay${s}`, deltas: splay(s) });
+    for (const [sp, s] of [[1.2, 0.25], [1.3, 0.35], [1.5, 0.35], [1.3, 0.50]]) {
+      candidates.push({ name: `st${sp}_sp${s}`, posMul: [['hipL', 'x', sp], ['hipR', 'x', sp]], deltas: splay(s) });
+    }
+  } else if (SPEC === 'split') {
     candidates = [{ name: 'base', deltas: [] }];
     for (const sp of [1.3, 1.6, 1.9, 2.2]) candidates.push({ name: `stance${sp}`, posMul: [['hipL', 'x', sp], ['hipR', 'x', sp]] });
     for (const sp of [1.3, 1.6, 1.9]) candidates.push({ name: `shoulder${sp}`, posMul: [['shoulderL', 'x', sp], ['shoulderR', 'x', sp]] });
@@ -1038,11 +1084,12 @@ async function modeProto() {
             for (let j = 0; j < mask.length; j++) { if (!mask[j]) continue; tot++; if (!mm[j]) outMass++; }
             const cc = S.components(mask, cw, ch);
             return { name: r.name, hullDeficiency: sil.hullDeficiency, appendages: sil.appendages,
-              heightPx: sil.heightPx, islands: cc.sizes.filter((n) => n >= 8).length,
+              heightPx: sil.heightPx, widthPx: sil.widthPx, aspectWH: +(sil.widthPx / sil.heightPx).toFixed(3),
+              islands: cc.sizes.filter((n) => n >= 8).length,
               limbShare: +(outMass / Math.max(1, tot)).toFixed(4) };
           });
           for (const r of out[id][yawDeg]) {
-            console.log(`${id.padEnd(12)} yaw ${String(yawDeg).padStart(3)}  ${String(r.name).padEnd(24)} hullDef ${String(r.hullDeficiency).padStart(6)}  app ${String(r.appendages).padStart(2)}  islands ${r.islands}  limbShare ${r.limbShare}  h ${r.heightPx}`);
+            console.log(`${id.padEnd(12)} yaw ${String(yawDeg).padStart(3)}  ${String(r.name).padEnd(24)} hullDef ${String(r.hullDeficiency).padStart(6)}  app ${String(r.appendages).padStart(2)}  islands ${r.islands}  limbShare ${r.limbShare}  h ${r.heightPx}  w/h ${r.aspectWH}`);
           }
         }
       } catch (e) { console.error(`✗ ${id}: ${e}`); } finally { if (page) await page.close(); }

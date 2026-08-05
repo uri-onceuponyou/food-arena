@@ -26,6 +26,7 @@ import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
+import { aim, curl, knob, localBounds, massAnchor, rod } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0'
@@ -249,6 +250,15 @@ function buildBunBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Materi
   return g;
 }
 
+/**
+ * This character's own height, as a multiple of the cast's.
+ *
+ * It was the metre literal 2.16 until `CHARACTER_HEIGHT` moved. A literal here is
+ * a silent opt-out of every cast-wide size decision: six of the eleven carried one,
+ * so raising the cast height would have scaled five characters and left six behind.
+ */
+const H = CHARACTER_HEIGHT * 1.029;
+
 export class HotDogCharacter extends BaseCharacter {
   private rig: ChibiRig;
   private glowMats: THREE.MeshStandardMaterial[] = [];
@@ -287,7 +297,7 @@ export class HotDogCharacter extends BaseCharacter {
       // bun at the cast's standard height. Measured, not guessed: `shoot.mjs
       // --char hotdog` prints the real bounding height.
       proportions: bodyType('lanky', {
-        height: 2.16,
+        height: H,
         // 0.21H -> 0.175H, with `torsoWidth` widened below to meet it. Same defect as
         // burrito: inner edge 0.348 m against a 0.259 m torso half-width, so the right
         // arm detached at run (9,073 px, one stride phase). Both numbers move because
@@ -298,6 +308,9 @@ export class HotDogCharacter extends BaseCharacter {
         // it was wide and read as a plain capsule instead of two bun halves. A bun
         // needs to be wider than it is deep to read as one at all.
         torsoWidth: CHARACTER_HEIGHT * 0.17 * 1.75,
+        // 0.062H -> 0.087H, matching burrito on the same archetype. Small, and
+        // measured as small — see the `splay` note in `stance`.
+        stanceWidth: CHARACTER_HEIGHT * 0.087,
       }),
       // Slouched and sleepy — weight dropped onto one hip, one shoulder
       // drooping low, head lolling to the side. Distinct from every other
@@ -319,6 +332,15 @@ export class HotDogCharacter extends BaseCharacter {
         elbowL: -0.12, elbowR: -0.58,
         twist: 0.22, headTilt: 0.05, headTurn: -0.10,
         hipSway: 0.09, lean: 0.16,
+        // HotDog is the character proportions cannot fix and the measurement says
+        // so plainly: across ten stance/splay combinations at the shipped facing it
+        // moved 0.1787 -> 0.1872, a total of 0.0085, while burrito on the same
+        // archetype moved 0.046. The reason is that this character is already a
+        // vertical bar whose legs are visible — there is no burial left to undo, so
+        // spreading the base buys almost nothing. The splay is kept because it is
+        // free and it matches the rest of the cast's footing; the outline work is
+        // done by `buildSilhouetteEvents`.
+        splay: 0.34,
       },
     });
     this.body.add(this.rig.joints.root);
@@ -567,6 +589,7 @@ export class HotDogCharacter extends BaseCharacter {
     this.buildFace(R, SAUS_Y, SAUS_R);
     this.dressLimbs();
     this.buildAccessories(R, head, { LOBE_Y, LOBE_DZ, LOBE_TILT, LOBE_LEN, LOBE_D, LOBE_H });
+    this.buildSilhouetteEvents(R);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -711,6 +734,94 @@ export class HotDogCharacter extends BaseCharacter {
    * the material-fidelity note calls for, so the bread reads as griddled rather
    * than one flat matte tan.
    */
+  /**
+   * SILHOUETTE EVENTS — a mustard bottle in the holster and a bandana tail.
+   *
+   * HotDog is the one character where the proportion levers do essentially nothing:
+   * ten stance and splay combinations moved its hull deficiency by 0.0085 in total
+   * at the shipped facing, against burrito's 0.046 on the same archetype. It is
+   * already a vertical bar with visible legs, so there is no buried limb to
+   * recover — its 0.1805 is honest and it is still below the six-plate reference
+   * floor of 0.2007. Everything it gains has to come from geometry that leaves the
+   * bun sideways.
+   *
+   * Two, and both are already implied by what this character wears: the holster it
+   * has been carrying since the costume pass now has something IN it, and the
+   * bandana has a tail. `HOLSTER_LEATHER` and `BANDANA_TRIM` are its own colours,
+   * so no new hue enters a deliberately all-warm palette except the cool bandana
+   * accent that was already there.
+   */
+  private buildSilhouetteEvents(R: number): void {
+    const torso = this.rig.joints.torso;
+    const head = this.rig.joints.head;
+
+    // ── The mustard bottle, holstered ─────────────────────────────────────────
+    // On the TORSO, not the head, and angled down and out: it has to clear the bun
+    // lobes, which is exactly what the sushi belt-chopsticks failed to do.
+    {
+      const box = localBounds(torso);
+      const { at, out } = massAnchor(torso, box, { azimuth: -Math.PI * 0.42, height01: 0.34, inset: 0.05 });
+      const g = new THREE.Group();
+      g.name = 'hotdog_mustard_bottle';
+      aim(g, at, out.clone().multiplyScalar(1.05).add(new THREE.Vector3(0, -0.55, 0)).normalize());
+      torso.add(g);
+      g.add(rod(glossyMat({ color: PALETTE.mustard, roughness: 0.18 }), {
+        len: R * 0.52, rBase: R * 0.115, rTip: R * 0.085,
+      }));
+      const nozzle = rod(toonMat({ color: HOLSTER_TRIM, roughness: 0.45 }), {
+        len: R * 0.18, rBase: R * 0.055, rTip: R * 0.028,
+      });
+      nozzle.position.y = R * 0.52;
+      g.add(nozzle);
+      const cap = knob(toonMat({ color: HOLSTER_LEATHER, roughness: 0.5 }), R * 0.085);
+      g.add(cap);
+    }
+
+    // ── Fried-onion curls ─────────────────────────────────────────────────────
+    // ROUND 3, and they exist for the HEAD-ON facing specifically. The bottle and
+    // the bandana tail both sit on the character's back quarter, which is the axis
+    // that projects to screen-X at the shipped facing and straight into the body at
+    // yaw 0 — measured, hotdog came back with 3 appendages in profile and ZERO
+    // head-on. These two are on the sausage's own ends, which is the free axis
+    // there, and they are the one topping this character was missing.
+    {
+      const box = localBounds(head);
+      for (const [azimuth, k] of [[Math.PI * 0.52, 1.0], [-Math.PI * 0.54, 0.82]] as const) {
+        const { at, out } = massAnchor(head, box, { azimuth, height01: 0.62, inset: 0.16 });
+        const pts = [
+          at.clone(),
+          at.clone().addScaledVector(out, R * 0.30 * k).add(new THREE.Vector3(0, R * 0.10 * k, 0)),
+          at.clone().addScaledVector(out, R * 0.54 * k).add(new THREE.Vector3(0, -R * 0.06 * k, 0)),
+          at.clone().addScaledVector(out, R * 0.52 * k).add(new THREE.Vector3(0, -R * 0.34 * k, 0)),
+        ];
+        const onion = curl(toonMat({ color: BUN_LIGHT, roughness: 0.66 }), pts, {
+          rBase: R * 0.095, rTip: R * 0.045,
+        });
+        onion.name = 'hotdog_onion_curl';
+        head.add(onion);
+      }
+    }
+
+    // ── The bandana tail ──────────────────────────────────────────────────────
+    // Off the back of the sausage at head height, where this character is at its
+    // widest and nothing is in front of it.
+    {
+      const box = localBounds(head);
+      const { at, out } = massAnchor(head, box, { azimuth: Math.PI * 0.86, height01: 0.30, inset: 0.18 });
+      const pts = [
+        at.clone(),
+        at.clone().addScaledVector(out, R * 0.26).add(new THREE.Vector3(0, -R * 0.06, 0)),
+        at.clone().addScaledVector(out, R * 0.52).add(new THREE.Vector3(0, -R * 0.24, 0)),
+        at.clone().addScaledVector(out, R * 0.62).add(new THREE.Vector3(0, -R * 0.50, 0)),
+      ];
+      const tail = curl(toonMat({ color: BANDANA_TRIM, roughness: 0.72, doubleSide: true }), pts, {
+        rBase: R * 0.11, rTip: R * 0.035,
+      });
+      tail.name = 'hotdog_bandana_tail';
+      head.add(tail);
+    }
+  }
+
   private buildAccessories(
     R: number,
     head: THREE.Group,

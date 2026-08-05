@@ -62,6 +62,41 @@ export interface RigStance {
   hipSway?: number;
   /** Forward/back lean about X, radians. */
   lean?: number;
+  /**
+   * LEG SPLAY, radians — the whole leg swung OUTWARD about z from the hip pivot,
+   * with the knee carrying a further 0.25 of it and the ankle cancelling all of it
+   * so the sole stays flat on the floor.
+   *
+   * ── Why this exists, and why it is not `stanceWidth` ────────────────────────
+   * At the match camera's 58 deg pitch a metre of VERTICAL offset buys 0.53 of a
+   * screen-metre and a metre of HORIZONTAL offset buys 0.85-1.00, so the only
+   * cheap way to put shape into the outline is to spread the character sideways.
+   * `stanceWidth` does that by moving the hip PIVOT, which is the same knob two
+   * previous rounds had to move the other way on donut and lollipop to stop a leg
+   * detaching from the only mass it can attach to — and whose shoulder twin
+   * detaches the mitts on four of five characters at x1.3.
+   *
+   * Splay moves only the FOOT. Measured across all eleven at the shipped facing
+   * (`limbmatch --mode proto --spec plant`), hull deficiency at splay 0.35 rad
+   * against stance x1.5 for the same character:
+   *
+   *   pizza  0.1658 vs 0.1546   sushi 0.1811 vs 0.1741   burrito 0.2083 vs 0.1852
+   *
+   * — more shape, from the knob that cannot detach anything, because the hip
+   * pivot's overlap with the food mass is exactly what it was. Islands stayed at 1
+   * for every character at every splay tried, including the two whose stance
+   * cannot be widened at all.
+   *
+   * The hip line DROPS to pay for it: a leg rotated `s` off vertical is
+   * `legLength * (1 - cos s)` shorter, and leaving that uncompensated floats the
+   * boots off the floor (2-4 cm, ~3 px at match framing, and `groundY` — which
+   * every bespoke boot in the cast seats itself against — would silently become
+   * wrong). The constructor solves `hipY` from the splayed chain instead, so the
+   * foot JOINT lands at exactly the ankle height it always did and every derived
+   * metric moves with it. The character loses that same 2-4 cm of total height,
+   * which is 1-2% and is the correct read for a wider stance anyway.
+   */
+  splay?: number;
 }
 
 /**
@@ -353,6 +388,7 @@ export class ChibiRig {
       headTurn: st.headTurn ?? -0.13,
       hipSway: st.hipSway ?? 0.035,
       lean: st.lean ?? 0,
+      splay: st.splay ?? 0,
     };
     const pr = opts.proportions ?? {};
     const height = pr.height ?? CHARACTER_HEIGHT;
@@ -407,7 +443,23 @@ export class ChibiRig {
     // entirely), then the head.
     const legH = height * this.p.legFraction;
     const torsoH = height * this.p.torsoFraction;
-    const hipY = legH;
+    // ── The leg chain is solved BEFORE the hip line, because splay moves it ─────
+    // See `RigStance.splay`. A leg rotated `s` off vertical reaches less far down,
+    // so the hip has to come to meet the floor or the boots hang in the air and
+    // `groundY` — the number every bespoke boot in the cast seats itself against —
+    // becomes quietly wrong. Solving `hipY` from the splayed chain keeps the foot
+    // JOINT at exactly the ankle height it has always had, at any splay, and every
+    // absolute Y published on `metrics` moves with it rather than drifting apart.
+    //
+    // The knee carries 0.25 of the splay (see `restPose`), hence the 1.25 factor.
+    const THIGH_SHARE = 0.55;
+    const ankleY = legH * this.p.footClearance;
+    const boneLen = legH - ankleY;
+    const thighLen = boneLen * THIGH_SHARE;
+    const shinLen = boneLen - thighLen;
+    const sp = this.stance.splay;
+    const legReach = thighLen * Math.cos(sp) + shinLen * Math.cos(sp * 1.25);
+    const hipY = ankleY + legReach;
     const torsoTopY = hipY + torsoH;
     this.hasTorso = torsoH > 1e-4;
 
@@ -473,11 +525,10 @@ export class ChibiRig {
     // every character whose shin ratio was <= 0.31 failed the limb-visibility test
     // and every one at >= 0.70 passed, with no overlap. Moving the split evens the
     // two segments' odds and costs the thigh nothing it needs.
-    const THIGH_SHARE = 0.55;
-    const ankleY = legH * this.p.footClearance;
-    const boneLen = legH - ankleY;
-    const thighLen = boneLen * THIGH_SHARE;
-    const shinLen = boneLen - thighLen;
+    //
+    // (`THIGH_SHARE`, `ankleY`, `boneLen`, `thighLen` and `shinLen` are now solved
+    // further up, alongside `hipY`, because `RigStance.splay` makes the hip line
+    // depend on them.)
     const hipL = mk(hips, 'hipL', new THREE.Vector3(-this.p.stanceWidth, 0, 0));
     const hipR = mk(hips, 'hipR', new THREE.Vector3(this.p.stanceWidth, 0, 0));
     const kneeL = mk(hipL, 'kneeL', new THREE.Vector3(0, -thighLen, 0));
@@ -779,12 +830,20 @@ export class ChibiRig {
     j.shoulderR.rotation.set(0.06, 0, s.shoulderR);
     j.elbowL.rotation.set(s.elbowL, 0, -0.16);
     j.elbowR.rotation.set(s.elbowR, 0, 0.12);
-    j.hipL.rotation.set(0.03, 0, 0.05);
-    j.hipR.rotation.set(-0.02, 0, -0.04);
-    j.kneeL.rotation.set(0.10, 0, 0);
-    j.kneeR.rotation.set(0.05, 0, 0);
-    j.footL.rotation.set(0, 0, 0);
-    j.footR.rotation.set(0, 0, 0);
+    // ── Legs ────────────────────────────────────────────────────────────────────
+    // The authored 0.05 / -0.04 are both INWARD (`docs/LESSONS.md` §12: `hipL` sits
+    // at x = -stanceWidth, so a POSITIVE z swings it across the body) — the rest
+    // pose was very slightly knock-kneed. `splay` opens against that, the knee
+    // carries a further quarter of it, and the ankle cancels the WHOLE splay so the
+    // sole stays flat; the constructor has already lowered the hip line to match, so
+    // the foot joint is at the same height it would be at splay 0.
+    const sp = s.splay;
+    j.hipL.rotation.set(0.03, 0, 0.05 - sp);
+    j.hipR.rotation.set(-0.02, 0, -0.04 + sp);
+    j.kneeL.rotation.set(0.10, 0, -sp * 0.25);
+    j.kneeR.rotation.set(0.05, 0, sp * 0.25);
+    j.footL.rotation.set(0, 0, sp * 1.25);
+    j.footR.rotation.set(0, 0, -sp * 1.25);
     // Weight shift + counter-rotation through the spine.
     j.hips.rotation.set(0, 0, s.hipSway);
     j.torso.rotation.z = -0.05;
