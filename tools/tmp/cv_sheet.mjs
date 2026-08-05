@@ -24,7 +24,7 @@ const CAP = 104;                      // caption bar height above each panel
 const GUT = 22;
 const SHEET_W = PW * 2 + GUT * 3;
 const HEAD = 268;
-const FOOT = 486;
+const FOOT = 552;
 const SHEET_H = HEAD + (CAP + PH + GUT) * 2 + FOOT;
 
 const BG = '#0C0D14';
@@ -41,6 +41,36 @@ const svg = (w, h, body) => Buffer.from(
 
 // The field's total ground area against the single 300 mass. Computed, not asserted:
 // an earlier draft's caption said "the same hiding area" and it is 80%, not 100%.
+/**
+ * The largest axis-aligned square in the shipped kitchen that is clear of cover AND
+ * outside the endgame keep-out, on a 5 wu lattice. Computed here rather than quoted,
+ * because it is the fact that decides whether the AI's 168 wu limit costs anything:
+ * if the map already caps a patch below the limit, the limit is free.
+ */
+function largestLegalSquare() {
+  const step = 5;
+  const halfDiag = Math.hypot(ARENA.width / 2, ARENA.height / 2);
+  const maxSafe = Math.round(halfDiag / (1 - 6000 / 45000));   // arena/shared.ts formula
+  const keepout = Math.max(120, maxSafe * 0.25);               // rules.ts concealmentKeepoutRadius
+  const nx = Math.floor(ARENA.width / step) + 1;
+  const ny = Math.floor(ARENA.height / step) + 1;
+  const blocked = (x, y) => ARENA.cover.some((c) => Math.abs(x - c.x) < c.w / 2 && Math.abs(y - c.y) < c.h / 2)
+    || Math.hypot(x - ARENA.center.x, y - ARENA.center.y) < keepout;
+  const dp = [];
+  let best = 0, bi = 0, bj = 0;
+  for (let i = 0; i < nx; i++) {
+    dp.push(new Int32Array(ny));
+    for (let j = 0; j < ny; j++) {
+      if (blocked(i * step, j * step)) { dp[i][j] = 0; continue; }
+      dp[i][j] = (i === 0 || j === 0) ? 1 : Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]) + 1;
+      if (dp[i][j] > best) { best = dp[i][j]; bi = i; bj = j; }
+    }
+  }
+  const side = (best - 1) * step;
+  return { side, cx: Math.round(bi * step - side / 2), cy: Math.round(bj * step - side / 2), keepout };
+}
+const LEGAL = largestLegalSquare();
+
 const fieldPct = Math.round(D.results.d.patches.reduce((a, p) => a + p.s * p.s, 0) / (300 * 300) * 100);
 const f = D.results.a.fair;
 const FRAME_W_WU = f.halfWidthUnits * 2;
@@ -221,12 +251,15 @@ const footer = svg(SHEET_W, FOOT,
   + `<text x="${TX}" y="158" font-size="23" fill="${INK}">· The patches are real meshes at real world coordinates, projected by the game's own camera.</text>`
   + `<text x="${TX}" y="188" font-size="23" fill="${INK}">  Nothing is composited on: the dimension arrows land on the rendered white outlines.</text>`
   + `<text x="${TX}" y="218" font-size="23" fill="${INK}">· 120 wu = ${(120 / FRAME_W_WU * 100).toFixed(0)}% of the visible width · 168 wu = ${(168 / FRAME_W_WU * 100).toFixed(0)}% · 300 wu = ${(300 / FRAME_W_WU * 100).toFixed(0)}% of it and ${(300 / FRAME_D_WU * 100).toFixed(0)}% of the visible depth.</text>`
-  + `<text x="${TX}" y="270" font-size="30" font-weight="800" fill="${INK}">What it does not</text>`
-  + `<text x="${TX}" y="310" font-size="23" fill="${INK}">· The plates, trays and crates are a MOCK built for this image — the arena's own materials and</text>`
-  + `<text x="${TX}" y="340" font-size="23" fill="${INK}">  lighting, but no arena ships a concealment region yet, so this is not shipped art.</text>`
-  + `<text x="${TX}" y="370" font-size="23" fill="${INK}">· It says nothing about whether hiding is FUN — only how much room the AI constraint leaves.</text>`
-  + `<text x="${TX}" y="400" font-size="23" fill="${WARN}">· Attacking destroys the object you hid under (your §29c answer). That punishes a camper who</text>`
-  + `<text x="${TX}" y="430" font-size="23" fill="${WARN}">  shoots — but a player who hides in the red square and never attacks still breaks the AI.</text>`);
+  + `<text x="${TX}" y="248" font-size="23" fill="${OK}">· AND THE MAP ALREADY CAPS YOU BELOW 300. The largest square anywhere in this kitchen that is</text>`
+  + `<text x="${TX}" y="278" font-size="23" fill="${OK}">  clear of cover and outside the ${LEGAL.keepout.toFixed(0)} wu endgame keep-out is ${LEGAL.side} wu, jammed against the west wall.</text>`
+  + `<text x="${TX}" y="308" font-size="23" fill="${OK}">  So the AI's 168 wu limit is giving up much less than the number makes it sound like.</text>`
+  + `<text x="${TX}" y="360" font-size="30" font-weight="800" fill="${INK}">What it does not</text>`
+  + `<text x="${TX}" y="400" font-size="23" fill="${INK}">· The plates, trays and crates are a MOCK built for this image — the arena's own materials and</text>`
+  + `<text x="${TX}" y="430" font-size="23" fill="${INK}">  lighting, but no arena ships a concealment region yet, so this is not shipped art.</text>`
+  + `<text x="${TX}" y="460" font-size="23" fill="${INK}">· It says nothing about whether hiding is FUN — only how much room the AI constraint leaves.</text>`
+  + `<text x="${TX}" y="490" font-size="23" fill="${WARN}">· Attacking destroys the object you hid under (your §29c answer). That punishes a camper who</text>`
+  + `<text x="${TX}" y="520" font-size="23" fill="${WARN}">  shoots — but a player who hides in the red square and never attacks still breaks the AI.</text>`);
 
 await sharp({ create: { width: SHEET_W, height: SHEET_H, channels: 4, background: BG } })
   .composite([
