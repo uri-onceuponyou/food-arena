@@ -157,6 +157,24 @@ export const audio = {
     onChange(fn: () => void): () => void {
       return getMusic().onChange(fn);
     },
+    /**
+     * `null` when healthy; a string when the TRACK ITSELF could not be loaded.
+     *
+     * Worth a settings screen's attention, and worth more than it looks. A 404 on the
+     * theme is indistinguishable from an autoplay block everywhere else in this API:
+     * `isPlaying()` returns `true`, `isEnabled()` returns `true`, `getState()` returns
+     * `'running'`, and the bus carries exactly 0.000000 RMS. That combination shipped —
+     * every menu on the deployed build was silent because the track URL was written as
+     * an absolute literal and lost the deploy base (see `music.ts`). This is the only
+     * call that can tell you so.
+     */
+    getLoadError(): string | null {
+      return getMusic().getLoadError();
+    },
+    /** The URL actually requested. Base-dependent — see the warning in `music.ts`. */
+    getTrackUrl(): string {
+      return getMusic().getTrackUrl();
+    },
   },
 };
 
@@ -189,6 +207,20 @@ declare global {
         volume: number;
         muted: boolean;
       };
+      /**
+       * The theme's real state, for a probe that cannot see it any other way.
+       *
+       * The element is deliberately never appended to the DOM (`music.ts`), so
+       * `document.querySelectorAll('audio')` finds NOTHING even while it plays — and a
+       * failed load looks identical to a healthy one through every other flag. This is
+       * the surface `tools/tmp/aud_menu_silence.mjs` asserts against.
+       */
+      music: {
+        url: string;
+        error: string | null;
+        playing: boolean;
+        enabled: boolean;
+      };
     };
   }
 }
@@ -209,6 +241,14 @@ function publishQaHandle(engine: AudioEngine): void {
       volume: engine.getVolume(),
       muted: engine.isMuted(),
     }),
+    // A getter, not a snapshot: the handle is published once at engine construction and
+    // read by probes many seconds later, after the track has had time to fail. Reading
+    // `getMusic()` lazily also keeps the index -> music -> index cycle resolving at call
+    // time rather than at module evaluation, exactly as `music.ts`'s own import does.
+    get music() {
+      const m = getMusic();
+      return { url: m.getTrackUrl(), error: m.getLoadError(), playing: m.isPlaying(), enabled: m.isEnabled() };
+    },
   };
 }
 

@@ -3008,11 +3008,26 @@ async function modeLive(browser) {
    * detector therefore sees one continuous sound from the first note to the last and
    * reports "1 burst" for a countdown that emitted six.
    *
-   * This is not a music bug and nothing about `music.ts` changes: a URL that boots
-   * straight into a match (which is what this probe does) legitimately bypasses the
-   * menu's fade-out. It is an instrument problem, and the fix is the instrument's —
-   * measure the SFX in isolation, then put the theme back and prove it was really
-   * there, which is a stronger check than the one that was silently passing before.
+   * ⚠️ REVERSED 2026-08-06. The paragraph that stood here is kept verbatim below,
+   * because it is the record of an instrument seeing a real defect and arguing it away:
+   *
+   *   > "This is not a music bug and nothing about `music.ts` changes: a URL that boots
+   *   > straight into a match (which is what this probe does) legitimately bypasses the
+   *   > menu's fade-out. It is an instrument problem, and the fix is the instrument's —
+   *   > measure the SFX in isolation, then put the theme back and prove it was really
+   *   > there, which is a stronger check than the one that was silently passing before."
+   *
+   * It WAS a music bug. This probe measured the theme playing over a fight, wrote down
+   * that it was legitimate, and worked around it — and then **Uri answered §17 with
+   * "During matches off"**, which makes "boots straight into a match" not a special case
+   * but the exact case that matters: `171c2d2` made the URL name the screen, so a RELOAD
+   * mid-match now lands here too. `music.ts` gained a `suppressed` flag; the deep-linked
+   * theme is gone.
+   *
+   * So the assertion is inverted. It no longer says "the theme is playing here"; it says
+   * the theme must NOT be, which is the rule Uri set, guarded at the one route where it
+   * was actually broken. The theme's routing through the shared bus — the claim the old
+   * assertion was really making — is still proven, in §4b, where it can be.
    */
   const musicOn = await page.evaluate(async () => {
     const m = await import('/src/audio/index.ts');
@@ -3020,7 +3035,10 @@ async function modeLive(browser) {
     m.audio.music.setEnabled(false);
     return was;
   });
-  check('the theme is playing and routed through the shared bus', musicOn === true, `isPlaying=${musicOn}`);
+  // OLD, until 2026-08-06:
+  //   check('the theme is playing and routed through the shared bus', musicOn === true, …)
+  check('the theme is SILENT on a deep-linked match — Uri, §17: "During matches off"',
+    musicOn === false, `isPlaying=${musicOn}`);
   await page.waitForTimeout(400);
 
   // Gapless capture: every 2048-sample block of the master output, regardless of
@@ -3184,6 +3202,16 @@ async function modeLive(browser) {
   await page.evaluate(async () => {
     const m = await import('/src/audio/index.ts');
     m.audio.music.setEnabled(true);
+    // ⚠️ `setEnabled(true)` alone is NO LONGER ENOUGH, and the reason is the point of
+    // this whole section. Since the §17 fix the theme is SUPPRESSED for the duration of
+    // a match, and this probe is sitting inside one — so `setEnabled(true)` correctly
+    // records the intent and correctly refuses to sound, and the differential below
+    // would read ~0 for a completely healthy build.
+    //
+    // `fadeIn()` is the exact call `ui/screens/shell.ts` mount() makes on every non-match
+    // route, i.e. it is what LEAVING the match does. Navigating for real is not an option
+    // here: §5 measures the render loop and needs the match still running.
+    m.audio.music.fadeIn(0.2);
     window.__recReset();
   });
   await page.waitForTimeout(1200);
