@@ -614,6 +614,83 @@ export function matchStart(): SoundFn {
   };
 }
 
+/**
+ * The ring reaching its floor — `MIN_SAFE_RADIUS`, the moment the fog STOPS closing.
+ *
+ * This state did not exist when the catalogue was written: the ring used to shrink to
+ * zero, so there was never a moment when it stopped. `sim.ts` now floors it at 140 wu
+ * and the HUD calls the resulting state "FINAL RING". Measured against the shipped
+ * arena (`maxSafeRadius` 993) the floor is reached at play-time **t=38.66 s of 45 s**,
+ * so this fires once, roughly six seconds before the whistle, and never again.
+ *
+ * **How often that happens today: never.** `tools/tmp/audio_census.mjs` ran 363 real
+ * matches across three player policies and the longest was 25.1 s of play — the ring
+ * floor was reached in 0 of them, and only forcing both fighters immortal gets there
+ * (121/121, at play-time 38.65 s against the 38.66 s schedule). That is a fact about
+ * the AI and the pacing, not about this sound: the state exists in `sim.ts`, a human
+ * who kites can reach it, and a cue that only exists once someone finally gets there
+ * is not a cue anyone will remember to add later.
+ *
+ * Deliberately a RELEASE rather than an alarm, and that is the whole design argument:
+ * everything else the zone does is pressure (`fogTick` is a nag with no transient at
+ * all), and the one thing this event means is that the pressure has stopped growing.
+ * A descending fifth that lands on a held pedal is the opposite gesture to `castSelf`
+ * and `matchStart`, which are the only two RISING shapes in the game.
+ *
+ * Centre-panned and Critical at the call site for the same reason as the countdown:
+ * this is a fact about the match, not an object in the world, so it has no position.
+ */
+export function ringFloor(): SoundFn {
+  return (s) => {
+    const j = centsJitter(s.rng, 18);
+    // The announcement: a descending perfect fifth. Two notes, not three — a triad
+    // would read as a verdict, and the match is not over.
+    [587.33, 392].forEach((f, i) => {
+      tone(
+        { ...s, when: s.when + i * 0.16 },
+        {
+          type: 'triangle',
+          freq: f * j,
+          peak: 0.26,
+          attack: 0.008,
+          hold: 0.25,
+          duration: 0.38,
+          voices: 2,
+          detuneCents: 11,
+          wet: 0.34,
+        },
+      );
+    });
+    // The pedal the fifth lands on. This is the "and it stays there" half: a long,
+    // saturated low note that outlasts the chime instead of decaying with it.
+    const pedal = tone(s, {
+      type: 'sine',
+      freq: [196 * j, 98 * j],
+      peak: 0.34,
+      attack: 0.02,
+      hold: 0.3,
+      duration: 0.72,
+      drive: 2.2,
+      voices: 2,
+      detuneCents: 15,
+      wet: 0.28,
+    });
+    // The wind dying. Same band `fogTick` lives in, swept DOWN and out — the zone's
+    // own texture, resolving. Wet, because the zone is the room closing in and this is
+    // the room stopping.
+    const settle = noiseBurst(s, {
+      filter: 'bandpass',
+      freq: [2200, 620],
+      q: 0.8,
+      peak: 0.12,
+      attack: 0.06,
+      duration: 0.66,
+      wet: 0.55,
+    });
+    return longest(0.38 + 0.16, pedal, settle);
+  };
+}
+
 /** Win: a major arpeggio up. Loss: a minor one down. */
 export function matchEnd(won: boolean): SoundFn {
   const notes = won ? [523.25, 659.25, 783.99, 1046.5] : [659.25, 587.33, 493.88, 392];
@@ -636,6 +713,125 @@ export function matchEnd(won: boolean): SoundFn {
       );
     });
     return 0.4 + notes.length * 0.1;
+  };
+}
+
+/**
+ * The match ending ON THE CLOCK, with both fighters still standing.
+ *
+ * ── Why this is a separate sound and not `matchEnd` with a different mood ───────
+ *
+ * `sim.ts` gained `resolveTimeout` this session. Before it, the clock ended nothing —
+ * `phase` stayed `'playing'` forever and in practice the fog decided every long match,
+ * so the ONLY way a match could end was a knockout and `matchEnd` was a complete
+ * vocabulary. It is not any more. The HUD already stopped saying "defeated" for this
+ * case because nobody was defeated, and audio holds the same line: a player who just
+ * ran out of clock while alive must not hear the sound of being knocked out.
+ *
+ * Same reachability caveat as `ringFloor`: 0 of 363 scripted matches reached the
+ * whistle (longest 25.1 s of a 45 s clock), and only forcing both fighters immortal
+ * produces a timeout. The ending is real, deterministic and tested; it is the AI that
+ * does not currently let a match get there.
+ *
+ * The whistle is the distinguishing layer and it is doing real work, not decoration.
+ * `matchEnd` is four sustained notes with no noise in it at all; this opens with a
+ * resonant, warbling band of noise at 2.9 kHz — a referee's whistle — which puts it in
+ * a completely different part of the spectrum before a single note is played. Measured
+ * through the production chain, the two separate by roughly 3x on spectral centroid,
+ * which is a wider gap than any pair in the eleven-character identity ladder.
+ *
+ * The verdict still follows, and still differs win from loss: a timeout is not a draw
+ * (`GameEvent.match-ended` requires a non-null winner — see `docs/DECISIONS-FOR-URI.md`
+ * §2, where the draw question is parked for Uri). It is deliberately three notes rather
+ * than `matchEnd`'s four, and it arrives after the whistle rather than opening the
+ * sound, so "the clock decided this" is heard BEFORE "and you won".
+ */
+export function matchEndTimeout(won: boolean): SoundFn {
+  const notes = won ? [523.25, 659.25, 1046.5] : [587.33, 493.88, 392];
+  /** How long the whistle occupies before the verdict starts. */
+  const WHISTLE = 0.62;
+  return (s) => {
+    // Two blasts, the second shorter — the universal "time" gesture. The tremolo is
+    // what makes it a whistle rather than a kettle: a real pea whistle warbles at a
+    // few tens of Hz, and `--mode coverage` asserts that modulation is measurable
+    // rather than merely requested.
+    const blast = (at: number, dur: number): number => {
+      noiseBurst(
+        { ...s, when: s.when + at },
+        {
+          filter: 'bandpass',
+          freq: 2900,
+          // Q and level are set together and were measured together. At q=16 the
+          // passband is ~180 Hz wide, so the layer PEAKED loud and carried almost no
+          // ENERGY: its share of the 1.97-3.96 kHz band came out at 6.2%, BELOW the
+          // 8.5% that `matchEnd`'s square-wave harmonics put there by accident. A
+          // whistle that measures duller than the sound it is supposed to distinguish
+          // itself from is the invisible-render failure in audio form
+          // (`docs/LESSONS.md` §1) — present in the code, absent from the output.
+          q: 10,
+          peak: 0.7,
+          attack: 0.012,
+          hold: 0.45,
+          duration: dur,
+          // 0.7, not 0.5. `tremoloNode` oscillates about `1 - depth/2`, so depth 0.5 is
+          // only a 0.75 +/- 0.25 swing.
+          tremolo: { rate: 24, depth: 0.7 },
+          // 0.06, and this is the whole reason the warble is measurable at all.
+          //
+          // At 0.22 a matched A/B — this exact layer rendered with the tremolo ON and
+          // OFF at five identical seeds — demodulated to 26.9 Hz and 28.7 Hz. The same
+          // number. The LFO was connected, running, and contributing nothing an
+          // instrument could find, which is this project's signature failure
+          // (`docs/LESSONS.md` §1) in its audio form.
+          //
+          // `weapons/pizza.ts` had already found and documented the mechanism: reverb
+          // FILLS A TREMOLO'S TROUGHS, because the reflections of one peak arrive during
+          // the next dip. Its send scales as `0.1 * min(1, 16/spinHz)`, which at this
+          // 24 Hz rate gives 0.067. A whistle blast is a close, dry, loud thing anyway,
+          // so the physics and the measurement agree.
+          wet: 0.06,
+        },
+      );
+      return at + dur;
+    };
+    blast(0, 0.26);
+    const whistleEnd = blast(0.36, 0.22);
+    // A low buzzer under both blasts, so the whistle has a body and reads as an
+    // announcement over a PA rather than as something small and shrill. Deliberately
+    // well under the whistle: at 0.22 it was the loudest thing in the first 0.6 s and
+    // it carries no modulation, which is what flattened the warble measurement.
+    const buzz = tone(s, {
+      type: 'sawtooth',
+      freq: [150, 132],
+      lowpass: [1100, 420],
+      peak: 0.14,
+      attack: 0.01,
+      hold: 0.5,
+      duration: 0.58,
+      drive: 1.8,
+      voices: 2,
+      detuneCents: 22,
+      wet: 0.2,
+    });
+    // The verdict, after the whistle.
+    notes.forEach((f, i) => {
+      tone(
+        { ...s, when: s.when + WHISTLE + i * 0.1 },
+        {
+          type: won ? 'square' : 'sawtooth',
+          freq: f,
+          lowpass: won ? [3600, 2200] : [1600, 500],
+          peak: 0.24,
+          attack: 0.008,
+          hold: 0.3,
+          duration: 0.36,
+          voices: 2,
+          detuneCents: won ? 9 : 16,
+          wet: 0.34,
+        },
+      );
+    });
+    return longest(whistleEnd, buzz, WHISTLE + (notes.length - 1) * 0.1 + 0.36);
   };
 }
 

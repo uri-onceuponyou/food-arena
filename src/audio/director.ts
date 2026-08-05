@@ -35,9 +35,34 @@
  * moving, and a 5-pellet spread emits five spawn events for one trigger pull. The
  * cast is voiced from `weapon-fired`, which fires exactly once per attack regardless
  * of pellet count, and the splat/trail are represented by the impact that made them.
+ *
+ * Measured rather than assumed — `tools/tmp/audio_census.mjs` runs the real `sim.ts`
+ * over 121 matchups and counts what the stream actually contains. Per match at the
+ * 45 s clock: 36.8 `projectile-spawned`, 14.3 `trail-mark-created` and 2.6
+ * `splat-created` against 27.5 `weapon-fired` and 33.2 `hit-landed`. Voicing the three
+ * silent kinds would add 54 voices per match to a mix that currently carries 62.
+ *
+ * ── State that is NOT in the event stream ───────────────────────────────────────
+ *
+ * `GameEvent` does not carry everything a player needs to hear. Two cases, both new
+ * this session, both handled by reading `MatchState` directly:
+ *
+ *   * The ring reaching `MIN_SAFE_RADIUS` — see `watchZone`. There is no event for it.
+ *   * A match ending on the CLOCK rather than by knockout — `match-ended` fires for
+ *     both and carries no reason, so the discriminant is that both fighters are still
+ *     alive. See the `'match-ended'` case.
+ *
+ * ── A swing that hits and a swing that misses ───────────────────────────────────
+ *
+ * `combat.ts` pushes `weapon-fired` UNCONDITIONALLY, before any range or cone test —
+ * and melee at zero separation now MISSES for a coned weapon, so point-blank whiffs
+ * are a real and newly-common outcome. There is deliberately no separate "whiff"
+ * sound: a connect is `weapon-fired` + `hit-landed` and a whiff is `weapon-fired`
+ * alone, so the impact layer IS the difference. `tools/audio-probe.mjs --mode coverage`
+ * measures that separation rather than assuming it.
  */
 
-import { CHARACTERS, type CharacterId, type Weapon } from '../game/rules';
+import { CHARACTERS, MIN_SAFE_RADIUS, REGEN_AMOUNT, type CharacterId, type Weapon } from '../game/rules';
 import type { GameEvent, MatchState, FighterRole } from '../game/state';
 import { otherRole } from '../game/state';
 import { Priority, type AudioEngine } from './engine';
@@ -69,6 +94,25 @@ const MIN_DISTANCE_GAIN = 0.32;
  * (`FOG_TICK_MS`), which is a nag, not a rhythm. */
 const FOG_MIN_INTERVAL_MS = 900;
 
+/**
+ * Minimum gap between two REGEN heal ticks being voiced.
+ *
+ * Out-of-combat regen emits a `heal` event every `REGEN_TICK_MS` (200 ms) for
+ * `REGEN_AMOUNT` (2 HP), so a fighter healing from low health emits up to ~50 of them
+ * in a row. 200 ms is comfortably OUTSIDE the engine's 110 ms retrigger window, so
+ * nothing throttled them: measured, five events 200 ms apart produced five voices of a
+ * rising triad — the "one sound stuttering" failure the retrigger table exists to
+ * prevent, arriving through the one gap the table cannot cover.
+ *
+ * 520 ms = 2.6 x `REGEN_TICK_MS`, so every third tick is voiced and consecutive voices
+ * never overlap (`heal()` is 390 ms long).
+ *
+ * Deliberately keyed on the AMOUNT, not on the event: Hamburger's Onion Ring heals 25
+ * HP on a 6 s cooldown and is a decision the player made, so it is never throttled. A
+ * regen tick is the game breathing; a 25 HP heal is a play.
+ */
+const HEAL_MIN_INTERVAL_MS = 520;
+
 export interface MatchAudioOptions {
   /** Which fighter is the local listener. Always `player` in the shipped game;
    * parameterised because a spectator or replay view would move it. */
@@ -78,6 +122,11 @@ export interface MatchAudioOptions {
 export class MatchAudio {
   private readonly listenerRole: FighterRole;
   private lastFogSoundAt = -Infinity;
+  private lastHealSoundAt = -Infinity;
+  /** One-shot latch for the ring reaching `MIN_SAFE_RADIUS`. See `watchZone`. */
+  private ringFloored = false;
+  /** Guard against an arena whose ring starts at its own floor. See `watchZone`. */
+  private sawRingAboveFloor = false;
 
   constructor(
     private readonly engine: AudioEngine,
@@ -91,8 +140,20 @@ export class MatchAudio {
    * loop, and a bad sound must cost silence, not a frame.
    */
   handleEvents(events: readonly GameEvent[], state: MatchState): void {
-    if (events.length === 0) return;
     try {
+      // Deliberately BEFORE the early-out on an empty batch, and that ordering is the
+      // whole reason the early-out is gone.
+      //
+      // Not everything the player needs to hear is an event. The ring reaching its
+      // floor is a threshold crossed by a continuously-varying number in `MatchState`,
+      // and the tick it crosses on is overwhelmingly likely to carry no events at all:
+      // measured by `tools/tmp/audio_census.mjs` over 121 matchups of the real sim,
+      // 7,547 of 158,992 ticks carry any event — **95.3% of ticks are empty**. The old
+      // `if (events.length === 0) return` would therefore have dropped this cue about
+      // nineteen times out of twenty, silently, which is precisely the
+      // wired-but-produces-nothing failure this project keeps paying for
+      // (`docs/LESSONS.md` §1). The cost of the change is one float compare per frame.
+      this.watchZone(state);
       for (const ev of events) this.handleEvent(ev, state);
     } catch (err) {
       // The engine already swallows per-sound failures; this catches anything in the
@@ -101,9 +162,55 @@ export class MatchAudio {
     }
   }
 
-  /** Call on match restart so per-match throttles do not carry across. */
+  /** Call on match restart so per-match throttles and one-shot latches do not carry
+   * across. With `MATCH_DURATION_MS` at 45 s this happens roughly four times as often
+   * per hour as it used to, so a latch that failed to clear would now be four times as
+   * visible — it would silence the final-ring cue for every match after the first. */
   reset(): void {
     this.lastFogSoundAt = -Infinity;
+    this.lastHealSoundAt = -Infinity;
+    this.ringFloored = false;
+    this.sawRingAboveFloor = false;
+  }
+
+  // ── State the event stream does not carry ─────────────────────────────────
+
+  /**
+   * The ring reaching `MIN_SAFE_RADIUS` — the moment the fog stops closing.
+   *
+   * `sim.ts` floors the safe radius rather than letting it reach zero, so there is now
+   * a permanent safe annulus and a moment at which the squeeze STOPS. The HUD renders
+   * that state as "FINAL RING". It is not in `GameEvent` — the sim emits no event for
+   * it — so audio derives it from the same number the HUD reads.
+   *
+   * Latched, and one-shot per match: `safeRadius` sits AT the floor for every remaining
+   * tick (measured: 6.34 s of a 45 s match, ~380 ticks), so an unlatched test would
+   * fire the cue several hundred times.
+   *
+   * `sawRingAboveFloor` guards the degenerate case where an arena's `maxSafeRadius` is
+   * already <= the floor: without it, such an arena would announce "the ring has
+   * stopped" on the first playing tick, which is true but useless. The shipped arena is
+   * 993 wu against a 140 wu floor, so this only ever matters for a future arena.
+   *
+   * The HUD's "FINAL RING" label is deliberately NOT what is voiced here. That label is
+   * PLAYER-RELATIVE (`dist <= MIN_SAFE_RADIUS` — am I standing inside the final ring),
+   * so it flickers on and off as the player walks, and a sound tied to it would nag
+   * every time they crossed the line. This is the SCHEDULE fact, which happens exactly
+   * once and at a deterministic time.
+   */
+  private watchZone(state: MatchState): void {
+    if (this.ringFloored) return;
+    if (state.phase !== 'playing') return;
+    // A number rather than an exact equality: `safeRadius` is clamped with `Math.max`,
+    // so it lands exactly on the floor — but an arena or schedule change should not
+    // silently break the cue, and a half-unit band costs nothing.
+    if (state.safeRadius > MIN_SAFE_RADIUS + 0.5) {
+      this.sawRingAboveFloor = true;
+      return;
+    }
+    if (!this.sawRingAboveFloor) return;
+    this.ringFloored = true;
+    this.engine.play(S.ringFloor(), { priority: Priority.Critical });
   }
 
   // ── Dispatch ──────────────────────────────────────────────────────────────
@@ -118,9 +225,27 @@ export class MatchAudio {
         this.engine.play(S.matchStart(), { priority: Priority.Critical });
         break;
 
-      case 'match-ended':
-        this.engine.play(S.matchEnd(ev.winner === this.listenerRole), { priority: Priority.Critical });
+      case 'match-ended': {
+        // A KNOCKOUT and a TIMEOUT are the same event and must not be the same sound.
+        //
+        // `resolveTimeout` in `sim.ts` is new this session: a match can now end on the
+        // clock with BOTH fighters alive, decided on HP fraction. It pushes no `death`
+        // event and leaves both fighters `alive`, which is exactly the discriminant
+        // used here — the sim does not carry a reason on the event, and adding one
+        // would mean widening `GameEvent` in `state.ts`, which this pillar does not
+        // own. Both fighters standing is a complete and sufficient test: any knockout
+        // ending has a dead fighter by construction.
+        //
+        // `=== true` rather than a truthiness test on purpose, so a partial/duck-typed
+        // state (the offline probe builds one) takes the knockout path rather than
+        // silently reclassifying every ending.
+        const timeout = state.player.alive === true && state.enemy.alive === true;
+        const won = ev.winner === this.listenerRole;
+        this.engine.play(timeout ? S.matchEndTimeout(won) : S.matchEnd(won), {
+          priority: Priority.Critical,
+        });
         break;
+      }
 
       case 'weapon-fired':
         this.playCast(ev.fighterRole, ev.weaponKey, state);
@@ -131,6 +256,10 @@ export class MatchAudio {
         break;
 
       case 'heal': {
+        // See `HEAL_MIN_INTERVAL_MS`. A regen tick is throttled; a deliberate heal
+        // (Hamburger's 25 HP Onion Ring) always plays.
+        if (ev.amount <= REGEN_AMOUNT && state.elapsed - this.lastHealSoundAt < HEAL_MIN_INTERVAL_MS) break;
+        this.lastHealSoundAt = state.elapsed;
         const f = state[ev.fighterRole];
         this.engine.play(S.heal(), { ...this.place(f.x, f.y, state), key: 'heal' });
         break;

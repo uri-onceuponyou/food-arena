@@ -35,12 +35,23 @@
  *             and measure what comes out: every event type that should be audible is,
  *             every one that should not be is bit-zero, panning follows position,
  *             distance attenuates, and the throttles fire.
+ *   coverage  The MAP: every member of the `GameEvent` union in `state.ts` against the
+ *             sound it produces, cross-checked against the union parsed out of the
+ *             source so a new event kind cannot arrive unvoiced and unnoticed. Then the
+ *             sim states that arrived with the 45 s clock — a match ending on the CLOCK
+ *             rather than by knockout, and the ring reaching `MIN_SAFE_RADIUS` — each
+ *             proved distinguishable by an 8-band spectral distance stated as a
+ *             multiple of the instrument's OWN noise floor. Then the MIX: every sound's
+ *             level referred back to the soft clip's input, and the worst tick that
+ *             really happens (measured by `tools/tmp/audio_census.mjs` over 363 real
+ *             matches) summed and checked for clipping, with a deliberately impossible
+ *             pile-up as the control that must fail.
  *   live      Run the ACTUAL GAME in a browser, tap the master bus post-volume with
  *             an AnalyserNode, and measure the waveform while a real match plays.
  *             This is the only mode that proves the wiring, the autoplay unlock and
  *             the event stream all work together.
  *
- * Usage:  node tools/audio-probe.mjs [--mode all|offline|identity|depth|negative|variation|budget|dispatch|live]
+ * Usage:  node tools/audio-probe.mjs [--mode all|offline|identity|depth|negative|variation|budget|dispatch|coverage|live]
  *         (dev server must be running on :5173)
  */
 
@@ -464,7 +475,62 @@ window.__dsp = (() => {
     };
   }
 
-  function analyse(chans, sr) {
+  /**
+   * Normalised energy across 8 logarithmic bands, 60 Hz - 16 kHz, summing to 1.
+   *
+   * The distinguishability instrument. A spectral CENTROID is one number and two very
+   * different sounds can share it (a dark thud plus a bright tick averages to the same
+   * place as a mid-band buzz), so "these two are different" cannot rest on it alone.
+   * An 8-band profile compared with an L1 distance is bounded in [0, 2], is
+   * level-independent by construction (it is normalised), and — the part that matters —
+   * has a CALIBRATION available: two renders of the SAME sound at different seeds give
+   * the instrument's own noise floor, so a claimed separation can be stated as a
+   * multiple of it rather than as a bare number nobody chose (docs/LESSONS.md section 13).
+   *
+   * Framed and energy-weighted exactly like the centroid function, for the same reason: a
+   * percussive sound spends most of its samples decaying, and an unweighted analysis
+   * measures the tail.
+   */
+  function bandProfile(x, sr, nB = 8) {
+    const { onset, duration } = extent(x, sr);
+    const out = new Array(nB).fill(0);
+    if (duration <= 0) return out;
+    const N = 2048, hop = 1024;
+    const start = Math.floor(onset * sr);
+    const stop = Math.min(x.length, Math.floor((onset + duration) * sr));
+    const LO = 60, HI = 16000;
+    const edges = [];
+    for (let b = 0; b <= nB; b++) edges.push(LO * Math.pow(HI / LO, b / nB));
+    let total = 0;
+    for (let p = start; p + N <= stop || p === start; p += hop) {
+      const re = new Float64Array(N), im = new Float64Array(N);
+      for (let i = 0; i < N; i++) {
+        const v = p + i < x.length ? x[p + i] : 0;
+        re[i] = v * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1)));
+      }
+      fft(re, im);
+      for (let k = 1; k < N / 2; k++) {
+        const hz = k * sr / N;
+        if (hz < LO || hz > HI) continue;
+        const e = re[k] * re[k] + im[k] * im[k];
+        let b = Math.floor((Math.log(hz / LO) / Math.log(HI / LO)) * nB);
+        if (b < 0) b = 0; else if (b >= nB) b = nB - 1;
+        out[b] += e;
+        total += e;
+      }
+    }
+    if (total <= 0) return out;
+    for (let b = 0; b < nB; b++) out[b] /= total;
+    return out;
+  }
+
+  /**
+   * analyse() reports the MONO SUM's peak, which is the right number for "is this
+   * audible" and the WRONG number for "does this clip": a hard-panned voice puts all
+   * its energy in one channel, and averaging two channels halves it. peakMax is the
+   * loudest sample in ANY channel, which is what a converter sees.
+   */
+  function analyse(chans, sr, opt) {
     const mono = new Float64Array(chans[0].length);
     for (let i = 0; i < mono.length; i++) {
       let s = 0; for (const c of chans) s += c[i];
@@ -475,15 +541,21 @@ window.__dsp = (() => {
     const per = chans.map((c) => stats(c));
     return {
       peak: st.peak, rms: st.rms,
+      peakL: per[0] ? per[0].peak : 0,
+      peakR: per[1] ? per[1].peak : 0,
+      peakMax: per.reduce((a, p) => Math.max(a, p.peak), 0),
       onset: ex.onset, duration: ex.duration,
       centroid: centroid(mono, sr),
       mod: envelopeMod(mono, sr),
       left: per[0] ? per[0].rms : 0,
       right: per[1] ? per[1].rms : 0,
+      // Opt-in: an extra framed FFT pass per render, and --mode identity makes ~200
+      // of them. Only --mode coverage needs it.
+      bands: opt && opt.bands ? bandProfile(mono, sr) : null,
     };
   }
 
-  return { analyse, stats, extent, centroid, envelopeMod, layers, windowRms, bandPeaks, partials, pitchSlope, lowFrac };
+  return { analyse, stats, extent, centroid, envelopeMod, layers, windowRms, bandPeaks, partials, pitchSlope, lowFrac, bandProfile };
 })();
 `;
 
@@ -519,7 +591,12 @@ async function installHarness(page) {
     const weapons = await import('/src/audio/weapons/index.ts');
     const rules = await import('/src/game/rules.ts');
     const director = await import('/src/audio/director.ts');
-    window.__A = { audio, sounds, weapons, rules, director };
+    // `engine.ts` directly, not through the package index: `gainForVolume` is the
+    // master chain's own curve and `--mode coverage` refers every measured level back
+    // through it. Hardcoding 0.62 in the probe would make the mix table lie the moment
+    // anyone retunes MASTER_TRIM.
+    const engineMod = await import('/src/audio/engine.ts');
+    window.__A = { audio, sounds, weapons, rules, director, engineMod };
 
     /**
      * Render one sound through a REAL AudioEngine on an OfflineAudioContext — same
@@ -543,7 +620,7 @@ async function installHarness(page) {
       });
       const buf = await ctx.startRendering();
       const chans = [buf.getChannelData(0), buf.getChannelData(1)];
-      const a = window.__dsp.analyse(chans, sr);
+      const a = window.__dsp.analyse(chans, sr, opt);
       return { scheduled, declared, ...a, samples: null };
     };
 
@@ -565,13 +642,60 @@ async function installHarness(page) {
       const md = new director.MatchAudio(engine);
       const state = {
         elapsed: opt.elapsed ?? 1000,
-        player: { role: 'player', characterId: opt.playerId ?? 'soup', x: 0, y: 0, hp: opt.playerHp ?? 100, maxHp: 100 },
-        enemy: { role: 'enemy', characterId: opt.enemyId ?? 'taco', x: 100, y: 0, hp: 150, maxHp: 150 },
+        // `phase`/`safeRadius`/`alive` are absent unless a caller asks for them, so
+        // every assertion written before the sim gained `resolveTimeout` and
+        // `MIN_SAFE_RADIUS` keeps measuring exactly what it measured before: the
+        // director's own discriminants are `=== true` and `=== 'playing'`, so an
+        // absent field takes the old path.
+        ...(opt.phase !== undefined ? { phase: opt.phase } : {}),
+        ...(opt.safeRadius !== undefined ? { safeRadius: opt.safeRadius } : {}),
+        player: {
+          role: 'player', characterId: opt.playerId ?? 'soup',
+          x: opt.playerX ?? 0, y: opt.playerY ?? 0,
+          hp: opt.playerHp ?? 100, maxHp: 100,
+          ...(opt.playerAlive !== undefined ? { alive: opt.playerAlive } : {}),
+        },
+        enemy: {
+          role: 'enemy', characterId: opt.enemyId ?? 'taco', x: 100, y: 0, hp: 150, maxHp: 150,
+          ...(opt.enemyAlive !== undefined ? { alive: opt.enemyAlive } : {}),
+        },
       };
       md.handleEvents(events, state);
       const buf = await ctx.startRendering();
-      const a = window.__dsp.analyse([buf.getChannelData(0), buf.getChannelData(1)], sr);
-      return { ...a, started: engine.counters.started, dropped: engine.counters.droppedThrottle };
+      const a = window.__dsp.analyse([buf.getChannelData(0), buf.getChannelData(1)], sr, opt);
+      return { ...a, started: engine.counters.started, dropped: engine.counters.droppedThrottle,
+        droppedBudget: engine.counters.droppedBudget };
+    };
+
+    /**
+     * Drive a sequence of TICKS through the real director with a real, shrinking
+     * `safeRadius` and — deliberately — NO EVENTS on any of them.
+     *
+     * This is the assertion that the state-derived final-ring cue cannot be faked. The
+     * director used to `return` immediately on an empty event batch; measured over 121
+     * matchups a real match produces ~120 events across ~2,700 ticks, so the tick on
+     * which the ring crosses its floor almost certainly carries nothing. If the cue
+     * only fires when something else happens to be happening, it is not wired to the
+     * ring at all.
+     */
+    window.__renderZone = async (radii, opt = {}) => {
+      const sr = 44100;
+      const ctx = new OfflineAudioContext(2, Math.ceil(sr * (opt.seconds ?? 3)), sr);
+      const engine = new audio.AudioEngine({ context: ctx, persist: false });
+      const md = new director.MatchAudio(engine);
+      const mk = (r) => ({
+        elapsed: 1000, phase: opt.phase ?? 'playing', safeRadius: r,
+        player: { role: 'player', characterId: 'soup', x: 0, y: 0, hp: 100, maxHp: 100, alive: true },
+        enemy: { role: 'enemy', characterId: 'taco', x: 100, y: 0, hp: 150, maxHp: 150, alive: true },
+      });
+      for (const r of radii) md.handleEvents([], mk(r));
+      if (opt.reset) {
+        md.reset();
+        for (const r of radii) md.handleEvents([], mk(r));
+      }
+      const buf = await ctx.startRendering();
+      const a = window.__dsp.analyse([buf.getChannelData(0), buf.getChannelData(1)], sr, opt);
+      return { ...a, started: engine.counters.started };
     };
 
     /** Two batches at two virtual times, to exercise the director's own throttles. */
@@ -694,6 +818,15 @@ const CATALOGUE = [
   { id: 'generic.matchStart', expr: `S.matchStart()` },
   { id: 'generic.matchEnd.win', expr: `S.matchEnd(true)` },
   { id: 'generic.matchEnd.lose', expr: `S.matchEnd(false)` },
+  // Both arrived with the 45 s clock: a match can now end ON THE CLOCK with both
+  // fighters alive, and the ring now floors at MIN_SAFE_RADIUS instead of closing to
+  // zero. They are in the standard catalogue, not only in `--mode coverage`, so they
+  // carry the same declared-duration and prompt-onset assertions as everything else —
+  // the engine frees a voice on its DECLARED duration, and a sound that outlives its
+  // own declaration is cut off mid-tail.
+  { id: 'generic.matchEndTimeout.win', expr: `S.matchEndTimeout(true)` },
+  { id: 'generic.matchEndTimeout.lose', expr: `S.matchEndTimeout(false)` },
+  { id: 'generic.ringFloor', expr: `S.ringFloor()` },
   { id: 'generic.uiClick', expr: `S.uiClick()` },
 ];
 
@@ -1494,6 +1627,518 @@ async function modeDispatch(page) {
     flood.dropped >= 4 && flood.started === 5, `voices=${flood.started} throttled=${flood.dropped}`);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// coverage — the event map, the sim states that arrived with the 45 s clock, the mix
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Measured by `tools/tmp/audio_census.mjs` over the REAL `src/game/sim.ts`, 121
+ * matchups per policy, at `MATCH_DURATION_MS = 45 s`. Quoted here so the thresholds
+ * below are traceable to a number rather than to a guess, and so a future clock change
+ * that invalidates them is visible.
+ */
+const CENSUS = {
+  perMatch: {
+    'countdown-tick': 5.0, 'match-started': 1.0, 'match-ended': 1.0,
+    'weapon-fired': 27.49, 'projectile-spawned': 36.84, 'projectile-destroyed': 36.16,
+    'hit-landed': 33.21, heal: 0.02, death: 1.0, 'splat-created': 2.6,
+    'trail-mark-created': 14.26,
+  },
+  /** The loudest single 16.7 ms tick found anywhere in 363 matches: a 5-pellet Rice
+   *  Spray landing on the LOCAL player (so every impact carries a `hurt` layer too)
+   *  while both fighters cast. 15 director voice requests. */
+  worstTickVoices: 15,
+  maxTrailHitsPerTick: 2,
+};
+
+/** The master chain's own constants, mirrored from `src/audio/engine.ts`. */
+const CLIP = { knee: 0.7, ceil: 1.2, span: 3 };
+
+/**
+ * Recover the summed level AT THE LIMITER INPUT from a peak measured at the master
+ * output. That is the only place the question "is the mix gain-staged correctly"
+ * has an answer: the soft-clip curve is transparent below `knee` and compressing
+ * above it, so a sound's headroom is `knee / level`, and a sound already past the
+ * knee on its own is one that will squash everything it lands with.
+ *
+ * This is the direct descendant of the bug in `docs/STATE.md`: a compressor eating
+ * 8.2 dB on a signal 6 dB below its own threshold. A static curve cannot do that —
+ * but only a measurement can show it is not doing it.
+ */
+function preLimiterLevel(peakOut, masterGain) {
+  const y = peakOut / masterGain;
+  if (y <= CLIP.knee) return y;
+  const t = (y - CLIP.knee) / (CLIP.ceil - CLIP.knee);
+  if (t >= 1) return Infinity; // beyond the curve's asymptote — impossible in practice
+  return CLIP.knee + (CLIP.ceil - CLIP.knee) * Math.atanh(t);
+}
+const dB = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+/** L1 distance between two normalised 8-band profiles. Bounded [0, 2]. */
+const bandDist = (a, b) => a.reduce((s, v, i) => s + Math.abs(v - b[i]), 0);
+
+async function modeCoverage(page) {
+  console.log('\n── coverage: every GameEvent kind, the new sim states, and the mix ──');
+  const run = (list, opt) => page.evaluate(([l, o]) => window.__renderEvents(l, o), [list, opt ?? {}]);
+  const masterGain = await page.evaluate(() => window.__A.engineMod.gainForVolume(1));
+
+  // ── 1. THE MAP. Every GameEvent kind, and what it produces. ─────────────
+  //
+  // `GameEvent` is a closed union in `src/game/state.ts`. The table below must name
+  // every member of it — the last assertion in this block compares this list against
+  // the union parsed out of the source, so a NEW event kind added by the sim cannot
+  // land without an audio decision being made about it. That is the failure this
+  // whole mode exists to prevent: the sim changed materially this session and audio
+  // was written before any of it existed.
+  const hit = (over) => ({
+    type: 'hit-landed', targetRole: 'enemy', amount: 12, effect: null,
+    source: { kind: 'weapon', weaponKey: 'Splash', weaponName: 'Soup Splash' }, x: 100, y: 0, ...over,
+  });
+  const MAP = [
+    { kind: 'countdown-tick', expect: 'voiced', sound: 'countdownTick(value)', events: [{ type: 'countdown-tick', value: 3 }] },
+    { kind: 'match-started', expect: 'voiced', sound: 'matchStart()', events: [{ type: 'match-started' }] },
+    { kind: 'match-ended', expect: 'voiced', sound: 'matchEnd(won) | matchEndTimeout(won)', events: [{ type: 'match-ended', winner: 'player' }] },
+    { kind: 'weapon-fired', expect: 'voiced', sound: 'weapon cast (bespoke or generic)', events: [{ type: 'weapon-fired', fighterRole: 'player', weaponKey: 'Splash' }] },
+    { kind: 'projectile-spawned', expect: 'silent', sound: '— represented by weapon-fired', events: [{ type: 'projectile-spawned', id: 2, ownerRole: 'player', weaponKey: 'Splash', x: 5, y: 0, color: '#E8792A', emoji: '💦' }] },
+    { kind: 'projectile-destroyed:hit-cover', expect: 'voiced', sound: 'coverThud()', events: [{ type: 'projectile-destroyed', id: 1, reason: 'hit-cover', x: 60, y: 0 }] },
+    { kind: 'projectile-destroyed:hit-target', expect: 'silent', sound: '— the hit-landed voices it', events: [{ type: 'projectile-destroyed', id: 1, reason: 'hit-target', x: 60, y: 0 }] },
+    { kind: 'projectile-destroyed:expired', expect: 'silent', sound: '— a shot fading out at max range', events: [{ type: 'projectile-destroyed', id: 1, reason: 'expired', x: 60, y: 0 }] },
+    { kind: 'hit-landed:weapon', expect: 'voiced', sound: 'weapon impact (bespoke or generic)', events: [hit()] },
+    { kind: 'hit-landed:weapon(on me)', expect: 'voiced', sound: 'impact + hurt(health)', events: [hit({ targetRole: 'player', x: 0 })] },
+    { kind: 'hit-landed:trail', expect: 'voiced', sound: 'trailTick()', events: [hit({ source: { kind: 'trail', ownerRole: 'enemy' } })] },
+    { kind: 'hit-landed:hazard', expect: 'voiced', sound: 'hazardTick()', events: [hit({ source: { kind: 'hazard' } })] },
+    { kind: 'hit-landed:fog', expect: 'voiced', sound: 'fogTick(), throttled to 900 ms', events: [hit({ source: { kind: 'fog' }, targetRole: 'player', x: 0 })] },
+    { kind: 'heal', expect: 'voiced', sound: 'heal()', events: [{ type: 'heal', fighterRole: 'player', amount: 2 }] },
+    { kind: 'death', expect: 'voiced', sound: 'death()', events: [{ type: 'death', fighterRole: 'enemy' }] },
+    { kind: 'splat-created', expect: 'silent', sound: '— the impact that made it', events: [{ type: 'splat-created', x: 40, y: 0 }] },
+    { kind: 'trail-mark-created', expect: 'silent', sound: '— fires every few hundred ms while moving', events: [{ type: 'trail-mark-created', ownerRole: 'player', x: 20, y: 0 }] },
+  ];
+
+  console.log('\n  EVENT COVERAGE MAP                                            per match   peakMax     rms  voices');
+  for (const row of MAP) {
+    const r = await run(row.events);
+    const rate = CENSUS.perMatch[row.kind.split(':')[0]];
+    console.log(
+      `  ${row.kind.padEnd(30)} ${row.sound.padEnd(30)} ${(rate ?? 0).toFixed(2).padStart(7)}  ${r.peakMax.toFixed(4)} ${r.rms.toFixed(5)}  ${String(r.started).padStart(3)}`,
+    );
+    if (row.expect === 'voiced') {
+      check(`map: ${row.kind} is VOICED`, r.peakMax > 0.01 && r.started > 0,
+        `peak=${r.peakMax.toFixed(4)} voices=${r.started}`);
+    } else {
+      check(`map: ${row.kind} is deliberately SILENT`, r.peakMax === 0 && r.started === 0,
+        `peak=${r.peakMax} voices=${r.started}`);
+    }
+  }
+
+  // Every member of the `GameEvent` union, parsed out of the source rather than
+  // listed by hand. A new event kind must not be able to arrive unvoiced and
+  // unnoticed — which is exactly what happened to `resolveTimeout` and the ring floor
+  // this session, and cost this whole investigation.
+  //
+  // `?raw`, not a plain fetch. Vite TRANSPILES `/src/game/state.ts` on the way out and
+  // a type-only union erases to nothing, so the obvious version of this parsed an empty
+  // string, found zero kinds, and PASSED — a vacuous green exactly like the SPA-fallback
+  // trap in `docs/LESSONS.md` §12. The count is printed and asserted non-empty so it
+  // cannot happen again.
+  const unionKinds = await page.evaluate(async () => {
+    const mod = await import('/src/game/state.ts?raw');
+    const src = mod.default;
+    const start = src.indexOf('export type GameEvent =');
+    const end = src.indexOf(';', src.indexOf('trail-mark-created'));
+    const body = src.slice(start, end);
+    return [...body.matchAll(/type:\s*'([a-z-]+)'/g)].map((m) => m[1]);
+  });
+  check('the GameEvent union was actually parsed (not a vacuous pass)',
+    unionKinds.length >= 8, `${unionKinds.length} kinds parsed out of state.ts`);
+  const covered = new Set(MAP.map((r) => r.kind.split(':')[0]));
+  const missing = unionKinds.filter((k) => !covered.has(k));
+  console.log(`\n  GameEvent union has ${unionKinds.length} kinds; the map covers ${covered.size}`);
+  check('every GameEvent kind in state.ts has a coverage-map decision',
+    missing.length === 0, missing.length ? `uncovered: ${missing.join(', ')}` : `${unionKinds.length} kinds`);
+
+  // ── 2. THE NEW SIM STATES ────────────────────────────────────────────────
+  console.log('\n  ── states that arrived with the 45 s clock ──');
+
+  /**
+   * Mean 8-band profile over `n` renders, plus the instrument's OWN noise floor: the
+   * mean pairwise distance between those n renders of the SAME thing. Every
+   * separation claimed below is stated as a multiple of that floor, so it cannot be a
+   * number nobody chose (`docs/LESSONS.md` §13 — validate the instrument against a
+   * known input before believing it on an unknown one).
+   */
+  const meanBands = (rs) => rs[0].bands.map((_, i) => rs.reduce((s, r) => s + r.bands[i], 0) / rs.length);
+  /** Deterministic 3-vs-3 splits of six renders. See `selfFloor`. */
+  const SPLITS = [[[0, 1, 2], [3, 4, 5]], [[0, 2, 4], [1, 3, 5]], [[0, 3, 5], [1, 2, 4]]];
+  /**
+   * The instrument's own noise floor, measured as the SAME KIND OF QUANTITY as the
+   * number it calibrates: the L1 distance between two MEAN profiles of the same sound.
+   *
+   * The first version averaged pairwise distances between INDIVIDUAL renders, and that
+   * is a different quantity — `fogTick` is two noise bursts with no pitched layer, so
+   * single renders scatter by 0.34 while their means scatter by an order less. Comparing
+   * a mean-to-mean distance against a render-to-render floor rejected a genuine 1.14
+   * separation as noise. The halves here are of THREE renders against the six the cross
+   * distance uses, so the floor is measured on a noisier sample than the thing it
+   * gates — deliberately conservative.
+   */
+  const selfFloor = (runs) => {
+    let s = 0;
+    for (const [a, b] of SPLITS) s += bandDist(meanBands(a.map((i) => runs[i])), meanBands(b.map((i) => runs[i])));
+    return s / SPLITS.length;
+  };
+  const profile = async (list, opt, n = 6) => {
+    const runs = [];
+    for (let i = 0; i < n; i++) runs.push(await run(list, { ...(opt ?? {}), bands: true }));
+    const bands = meanBands(runs);
+    return {
+      bands, self: selfFloor(runs),
+      peakMax: runs.reduce((s, r) => s + r.peakMax, 0) / n,
+      rms: runs.reduce((s, r) => s + r.rms, 0) / n,
+      centroid: runs.reduce((s, r) => s + r.centroid, 0) / n,
+      duration: runs.reduce((s, r) => s + r.duration, 0) / n,
+      modDepth: runs.reduce((s, r) => s + r.mod.depth, 0) / n,
+      modHz: runs.reduce((s, r) => s + r.mod.hz, 0) / n,
+    };
+  };
+  const separated = (label, a, b, factor = 4) => {
+    const d = bandDist(a.bands, b.bands);
+    const floor = Math.max(a.self, b.self, 1e-6);
+    console.log(`    ${label.padEnd(52)} L1=${d.toFixed(3)}  self=${floor.toFixed(3)}  x${(d / floor).toFixed(1)}   centroid ${Math.round(a.centroid)} vs ${Math.round(b.centroid)} Hz`);
+    check(`${label} (>= ${factor}x the instrument's own noise floor)`, d >= floor * factor,
+      `L1=${d.toFixed(3)} floor=${floor.toFixed(3)} ratio=${(d / floor).toFixed(1)}`);
+    return d;
+  };
+
+  // (a) A match ending on the CLOCK must not sound like a knockout. `resolveTimeout`
+  //     pushes no `death` event and leaves both fighters alive; that is the
+  //     discriminant the director uses, so it is the one exercised here.
+  const ended = (winner) => [{ type: 'match-ended', winner }];
+  const ko = { playerAlive: false, enemyAlive: true, seconds: 2.5 };
+  const to = { playerAlive: true, enemyAlive: true, seconds: 2.5 };
+  const koWin = await profile(ended('player'), { ...ko, playerAlive: true, enemyAlive: false });
+  const koLose = await profile(ended('enemy'), ko);
+  const toWin = await profile(ended('player'), to);
+  const toLose = await profile(ended('enemy'), to);
+  console.log(`    knockout  win peak=${koWin.peakMax.toFixed(4)} dur=${koWin.duration.toFixed(2)}s   lose peak=${koLose.peakMax.toFixed(4)} dur=${koLose.duration.toFixed(2)}s`);
+  console.log(`    timeout   win peak=${toWin.peakMax.toFixed(4)} dur=${toWin.duration.toFixed(2)}s   lose peak=${toLose.peakMax.toFixed(4)} dur=${toLose.duration.toFixed(2)}s  whistle mod=${toWin.modHz.toFixed(1)}Hz depth=${toWin.modDepth.toFixed(2)}`);
+  check('a timeout ending is audible at all', toWin.peakMax > 0.02 && toLose.peakMax > 0.02,
+    `win=${toWin.peakMax.toFixed(4)} lose=${toLose.peakMax.toFixed(4)}`);
+  separated('timeout WIN vs knockout WIN', toWin, koWin);
+  separated('timeout LOSS vs knockout LOSS', toLose, koLose);
+  separated('timeout WIN vs timeout LOSS (verdict still readable)', toWin, toLose, 2);
+  // The whistle is the layer doing the separating, so prove it is really a WHISTLE and
+  // not just a band of noise. Two claims, both about the layer rather than the sound:
+  //
+  //  1. It warbles. A pea whistle does; the tremolo is authored at 24 Hz. Measured over
+  //     the WHOLE 1.11 s sound the detector reports 9.6 Hz, and that is the detector
+  //     being right: the whistle occupies only the first 0.62 s and the verdict notes
+  //     that follow carry no modulation at all, so the dominant envelope feature across
+  //     the full span is the two-blast structure, not the warble. Rendering a 0.6 s
+  //     context truncates the buffer to the whistle alone and asks the question that was
+  //     actually meant. (`docs/LESSONS.md` §13: an instrument pointed at the wrong window
+  //     returns a plausible number for the wrong thing.)
+  //     0.27 s, not 0.6 s: the sound has TWO blasts with a 0.10 s gap between them, and
+  //     that gap is a far bigger envelope feature than the warble riding on top of it.
+  //     Measured over both blasts the detector returns 8.3 Hz — a harmonic of the
+  //     2.8 Hz blast structure — which is the detector correctly reporting the loudest
+  //     modulation in its window and the window being the wrong one. One blast, one
+  //     question.
+  //
+  //     And the claim is made on the FREQUENCY'S STABILITY ACROSS SEEDS, not on the
+  //     depth. The depth figure was tried first and a control killed it: `fogTick` is
+  //     bandpassed noise with no tremolo anywhere in it and it reads depth 0.110, more
+  //     than DOUBLE the whistle's 0.047. A bandpass at Q=10 passes ~290 Hz, and filtered
+  //     noise has a randomly fluctuating envelope of its own, so the demodulator finds
+  //     something in every noise burst — raising the authored depth from 0.7 to 0.85
+  //     moved the measurement by 0.001, which is how it is known the number is floored
+  //     by the noise and says nothing about the tremolo. What separates a real
+  //     modulation from that is CONSISTENCY: a coherent 24 Hz LFO lands in the same bin
+  //     every render, and a noise artefact does not.
+  const modSweep = async (expr, seconds) => {
+    const hz = [];
+    for (let i = 0; i < 5; i++) hz.push((await renderById(page, expr, { seconds, volume: 1, seed: 1000 + i * 7919 })).mod.hz);
+    const mean = hz.reduce((a, b) => a + b, 0) / hz.length;
+    return { hz, mean, sd: Math.sqrt(hz.reduce((s, v) => s + (v - mean) ** 2, 0) / hz.length) };
+  };
+  //
+  //     The control has to be MATCHED, and the first two attempts were not. `fogTick`
+  //     reads 53.8 Hz with an sd of 3.4 — more STABLE than the whistle, at a rate set by
+  //     its own filter bandwidth rather than by any modulation — so "the whistle's rate
+  //     is stable" is not the discriminator either. The only control that isolates the
+  //     tremolo is the SAME LAYER with the tremolo removed: identical filter, Q, level,
+  //     duration and seed, one line different. Reconstructed here rather than exported
+  //     from `sounds.ts`, because the shipped sound must not grow a test-only variant.
+  const blast = (trem) => `(s) => W.audio.noiseBurst(s, { filter: 'bandpass', freq: 2900, q: 10,`
+    + ` peak: 0.7, attack: 0.012, hold: 0.45, duration: 0.26,`
+    + (trem ? ` tremolo: { rate: 24, depth: 0.7 },` : ``)
+    + ` wet: 0.06 })`;
+  const withTrem = await modSweep(blast(true), 0.3);
+  const noTrem = await modSweep(blast(false), 0.3);
+  const whistleMod = await modSweep(`S.matchEndTimeout(true)`, 0.27);
+  console.log(`    matched A/B on the whistle layer, 5 seeds each:`);
+  console.log(`      tremolo ON : ${withTrem.hz.map((h) => h.toFixed(1)).join(' ')} Hz  (mean ${withTrem.mean.toFixed(1)}, sd ${withTrem.sd.toFixed(1)})`);
+  console.log(`      tremolo OFF: ${noTrem.hz.map((h) => h.toFixed(1)).join(' ')} Hz  (mean ${noTrem.mean.toFixed(1)}, sd ${noTrem.sd.toFixed(1)})`);
+  console.log(`    the shipped sound: ${whistleMod.hz.map((h) => h.toFixed(1)).join(' ')} Hz  (mean ${whistleMod.mean.toFixed(1)})`);
+  //     And the discriminator is the SPREAD, not the mean. Measured, the unmodulated
+  //     control's mean sits at 27.3 Hz — right next to the authored 24 — purely by
+  //     chance, because the demodulator returns SOMETHING for every noise burst. What it
+  //     cannot fake is landing in the same bin every time: with the tremolo on, five
+  //     seeds give sd 0.9 Hz; with it off, sd 8.6 Hz. A mean-based test would have
+  //     passed the control and been worthless.
+  check('the tremolo reaches the output: with it ON, five seeds agree on 24 Hz',
+    Math.abs(withTrem.mean - 24) <= 5 && withTrem.sd <= 2,
+    `mean ${withTrem.mean.toFixed(1)} Hz sd ${withTrem.sd.toFixed(1)} vs authored 24`);
+  check('CONTROL: with the tremolo OFF the same layer agrees on nothing',
+    noTrem.sd >= 4, `mean ${noTrem.mean.toFixed(1)} Hz sd ${noTrem.sd.toFixed(1)}`);
+  check('the shipped timeout whistle carries that warble',
+    Math.abs(whistleMod.mean - 24) <= 8, `mean ${whistleMod.mean.toFixed(1)} Hz vs authored 24`);
+  // Duration is the other discriminator, and the most robust one: the whistle makes the
+  // timeout ending structurally longer, which no amount of spectral similarity can hide.
+  check('a timeout ending is measurably longer than a knockout',
+    toWin.duration > koWin.duration * 1.4 && toLose.duration > koLose.duration * 1.4,
+    `win ${koWin.duration.toFixed(2)}s -> ${toWin.duration.toFixed(2)}s, loss ${koLose.duration.toFixed(2)}s -> ${toLose.duration.toFixed(2)}s`);
+  //  2. It lives where a whistle lives. Band 5 of the 8-band profile spans 1.97-3.96 kHz
+  //     and the whistle is authored at 2.9 kHz; `matchEnd` has no noise layer at all, so
+  //     this names the MECHANISM of the separation measured above rather than restating it.
+  //     Compared over the SAME 0.6 s window in both endings. Over the full sound the
+  //     comparison is unfair in the timeout's favour-then-against: the whistle occupies
+  //     only the first half, and the verdict notes that follow are shared between the
+  //     two. Truncating the render to 0.6 s asks "in the window where the whistle plays,
+  //     is it there" — which is the question.
+  const koHead = await renderById(page, `S.matchEnd(true)`, { seconds: 0.6, volume: 1, bands: true });
+  const toHead = await renderById(page, `S.matchEndTimeout(true)`, { seconds: 0.6, volume: 1, bands: true });
+  console.log(`    1.97-3.96 kHz share over the first 0.6 s: timeout ${(toHead.bands[5] * 100).toFixed(1)}%  knockout ${(koHead.bands[5] * 100).toFixed(1)}%`);
+  check('the whistle dominates the 2-4 kHz band the knockout ending only grazes',
+    toHead.bands[5] > koHead.bands[5] * 2, `${(toHead.bands[5] * 100).toFixed(1)}% vs ${(koHead.bands[5] * 100).toFixed(1)}%`);
+
+  // (b) The ring reaching MIN_SAFE_RADIUS. State-derived: driven here through the real
+  //     director on ticks carrying NO EVENTS AT ALL, which is the case that matters —
+  //     ~96% of real ticks are empty and the crossing tick is almost certainly one.
+  const zone = (radii, opt) => page.evaluate(([r, o]) => window.__renderZone(r, o), [radii, opt ?? {}]);
+  const closing = [900, 600, 300, 160, 141, 140, 140, 140, 140, 140];
+  const ring = await zone(closing, { seconds: 3 });
+  console.log(`    ring floor: voices=${ring.started} peak=${ring.peakMax.toFixed(4)} dur=${ring.duration.toFixed(2)}s over ${closing.length} EMPTY ticks`);
+  check('the ring reaching its floor is audible', ring.peakMax > 0.02 && ring.started > 0,
+    `peak=${ring.peakMax.toFixed(4)} voices=${ring.started}`);
+  check('the final-ring cue fires EXACTLY ONCE, not once per tick at the floor',
+    ring.started === 1, `voices=${ring.started} over ${closing.filter((r) => r <= 140).length} ticks at the floor`);
+  const never = await zone([900, 600, 300, 160, 145], { seconds: 3 });
+  check('the cue does NOT fire while the ring is still closing', never.started === 0, `voices=${never.started}`);
+  const inCountdown = await zone(closing, { phase: 'countdown', seconds: 3 });
+  check('the cue does not fire during the countdown', inCountdown.started === 0, `voices=${inCountdown.started}`);
+  // A ring that starts AT its floor (a hypothetical small arena) must not announce
+  // itself on tick one — see `watchZone`'s `sawRingAboveFloor`.
+  const degenerate = await zone([140, 140, 140, 140], { seconds: 3 });
+  check('a ring that starts at its own floor does not announce itself',
+    degenerate.started === 0, `voices=${degenerate.started}`);
+  // The latch must clear on `reset()`, or every match after the first is silent here.
+  // At a 45 s clock that is ~4x as many matches per hour as it used to be.
+  const afterReset = await zone(closing, { reset: true, seconds: 3 });
+  check('reset() re-arms the final-ring latch for the next match',
+    afterReset.started === 2, `voices=${afterReset.started} (1 per match over 2 matches)`);
+
+  const fog = await profile([hit({ source: { kind: 'fog' }, targetRole: 'player', x: 0 })], { seconds: 2.5 });
+  const start = await profile([{ type: 'match-started' }], { seconds: 2.5 });
+  const ringP = { bands: null, self: 0 };
+  {
+    const runs = [];
+    for (let i = 0; i < 6; i++) runs.push(await zone(closing, { seconds: 3, bands: true }));
+    ringP.bands = meanBands(runs);
+    ringP.self = selfFloor(runs);
+    ringP.centroid = runs.reduce((a, r) => a + r.centroid, 0) / 6;
+  }
+  separated('final ring vs a fog tick (release, not another nag)', ringP, fog);
+  separated('final ring vs match START (the game\'s only other flow sting)', ringP, start);
+
+  // (c) A melee swing that CONNECTS versus one that WHIFFS. `combat.ts` pushes
+  //     `weapon-fired` unconditionally and melee at zero separation now MISSES for a
+  //     coned weapon, so point-blank whiffs are newly common. There is no separate
+  //     whiff sound by design — the impact IS the difference — so measure the
+  //     difference rather than assuming it.
+  const swing = [{ type: 'weapon-fired', fighterRole: 'player', weaponKey: 'Smash' }];
+  const connect = [...swing, hit({ amount: 12, source: { kind: 'weapon', weaponKey: 'Smash', weaponName: 'Patty Smash' }, x: 60 })];
+  const whiffP = await profile(swing, { playerId: 'hamburger', seconds: 2 });
+  const connectP = await profile(connect, { playerId: 'hamburger', seconds: 2 });
+  console.log(`    melee whiff peak=${whiffP.peakMax.toFixed(4)} rms=${whiffP.rms.toFixed(5)}   connect peak=${connectP.peakMax.toFixed(4)} rms=${connectP.rms.toFixed(5)}`);
+  separated('melee CONNECT vs melee WHIFF', connectP, whiffP, 3);
+  check('a connect is louder than a whiff', connectP.peakMax > whiffP.peakMax * 1.3,
+    `${whiffP.peakMax.toFixed(4)} -> ${connectP.peakMax.toFixed(4)}`);
+
+  // ── 3. THE MIX ───────────────────────────────────────────────────────────
+  //
+  // `docs/STATE.md`: "Audio compressor eating 8.2 dB on a signal 6 dB BELOW its own
+  // threshold. The whole game would simply have been quiet." That class of bug is
+  // measurable, and this is the measurement. Every level below is taken at the MASTER
+  // OUTPUT of the production chain at volume 1.0, then referred back to the limiter's
+  // input, which is the only place "gain-staged correctly" means anything.
+  console.log('\n  ── mix: levels at the master output, volume 1.0 (master gain %s) ──'.replace('%s', masterGain.toFixed(4)));
+  console.log('    sound                          peakMax   pre-limiter   headroom to knee    rms');
+  const MIX = CATALOGUE.map((c) => ({ id: c.id, expr: c.expr }));
+  const levels = [];
+  for (const m of MIX) {
+    const r = await renderById(page, m.expr, { volume: 1, seconds: 2.5 });
+    const pre = preLimiterLevel(r.peakMax, masterGain);
+    const head = dB(CLIP.knee / pre);
+    levels.push({ id: m.id, peak: r.peakMax, pre, head, rms: r.rms });
+    console.log(`    ${m.id.padEnd(30)} ${r.peakMax.toFixed(4)}      ${pre.toFixed(4)}      ${head >= 0 ? '+' : ''}${head.toFixed(1)} dB     ${r.rms.toFixed(5)}`);
+  }
+  const loudest = levels.reduce((a, b) => (b.pre > a.pre ? b : a));
+  const quietest = levels.reduce((a, b) => (b.pre < a.pre ? b : a));
+  const hot = levels.filter((l) => l.pre > CLIP.knee);
+  console.log(`    AUTHORED spread ${dB(loudest.pre / quietest.pre).toFixed(1)} dB (${loudest.id} ${loudest.pre.toFixed(3)} -> ${quietest.id} ${quietest.pre.toFixed(3)})`);
+  console.log(`    DELIVERED spread ${dB(Math.max(...levels.map((l) => l.peak)) / Math.min(...levels.map((l) => l.peak))).toFixed(1)} dB at the master output`);
+  console.log(`    ${hot.length}/${levels.length} sounds are above the soft-clip knee ON THEIR OWN, worst-case (gain 1.0, centre)`);
+
+  // ── What the soft clip is actually doing, and to what ──────────────────
+  //
+  // The knee is at 0.7 and the curve asymptotes at 1.2, so there are only 4.7 dB of
+  // curve above the knee to absorb everything from 0.7 upward. Measured, the sounds
+  // the DIRECTOR plays at gain 1.0 — the centre-panned match-flow stings, the ultimate
+  // and the local player's own death — all sit above it, and the curve therefore
+  // COMPRESSES THE TOP OF THE GAME'S DYNAMIC HIERARCHY TOWARD ONE LEVEL. That is
+  // reported as a number rather than asserted away, because how loud the game should be
+  // is a taste call and `docs/DECISIONS-FOR-URI.md` §7 parks taste.
+  //
+  // Everything else in the game reaches this bus through `place()`, whose distance gain
+  // is at most 1 and typically well under it, so an ordinary hit is quieter than the
+  // table above says. The table is the WORST case by construction.
+  const FULL_GAIN = ['generic.castGiantSlam', 'generic.death', 'generic.ringFloor',
+    'generic.matchStart', 'generic.matchEnd.win', 'generic.matchEnd.lose',
+    'generic.matchEndTimeout.win', 'generic.matchEndTimeout.lose', 'generic.countdownTick'];
+  const flow = levels.filter((l) => FULL_GAIN.includes(l.id)).sort((a, b) => b.pre - a.pre);
+  console.log('    sounds the director plays at FULL level (centre, gain 1.0):');
+  for (const l of flow) {
+    console.log(`      ${l.id.padEnd(30)} authored ${l.pre.toFixed(3)}  delivered ${l.peak.toFixed(4)} FS   soft clip takes ${dB(l.peak / (l.pre * masterGain)).toFixed(1)} dB`);
+  }
+  const flowAuthored = dB(flow[0].pre / flow[flow.length - 1].pre);
+  const flowDelivered = dB(flow[0].peak / flow[flow.length - 1].peak);
+  console.log(`      -> authored ${flowAuthored.toFixed(1)} dB apart, delivered ${flowDelivered.toFixed(1)} dB apart`);
+
+  // The claims that CAN be made honestly, and that a future tuning pass must not break.
+  check('the loudness ORDER survives the soft clip (no pair is inverted)',
+    flow.every((l, i) => i === 0 || flow[i - 1].peak >= l.peak - 1e-9),
+    flow.map((l) => `${l.id.split('.').pop()}=${l.peak.toFixed(3)}`).join(' '));
+  check('the ultimate is still the loudest thing in the game at the output',
+    loudest.id === 'generic.castGiantSlam' &&
+    levels.every((l) => l.id === 'generic.castGiantSlam' || l.peak <= levels.find((x) => x.id === 'generic.castGiantSlam').peak),
+    `giantSlam=${levels.find((l) => l.id === 'generic.castGiantSlam').peak.toFixed(4)} FS`);
+  check('the ultimate is at least 3 dB above an ordinary impact at the output',
+    dB(levels.find((l) => l.id === 'generic.castGiantSlam').peak / levels.find((l) => l.id === 'generic.impact.small').peak) >= 3,
+    `${dB(levels.find((l) => l.id === 'generic.castGiantSlam').peak / levels.find((l) => l.id === 'generic.impact.small').peak).toFixed(1)} dB`);
+  check('the delivered catalogue still spans a real dynamic range (>= 12 dB)',
+    dB(Math.max(...levels.map((l) => l.peak)) / Math.min(...levels.map((l) => l.peak))) >= 12,
+    `${dB(Math.max(...levels.map((l) => l.peak)) / Math.min(...levels.map((l) => l.peak))).toFixed(1)} dB`);
+  // The ceiling is structural, not a hope: the soft-clip curve asymptotes at
+  // CLIP_CEIL and the master gain follows it, so nothing the game can do reaches 0 dBFS.
+  check('the chain cannot digitally clip: ceil x master < 1.0',
+    CLIP.ceil * masterGain < 1, `${(CLIP.ceil * masterGain).toFixed(3)} FS`);
+  check('nothing in the catalogue reaches 0 dBFS at the master output',
+    levels.every((l) => l.peak < 1), `max=${Math.max(...levels.map((l) => l.peak)).toFixed(4)} FS`);
+
+  // The worst tick that really happens. Straight out of the census: a 5-pellet Rice
+  // Spray landing on the LOCAL player (so every impact carries a `hurt` layer) while
+  // both fighters cast. Re-based so the listener sits at the origin — the director
+  // only ever uses offsets from the listener.
+  const rice = (i) => hit({
+    targetRole: 'player', amount: 2, x: -1 + i * 0.2, y: 0,
+    source: { kind: 'weapon', weaponKey: 'Rice', weaponName: 'Rice Spray' },
+  });
+  // Exactly the tick the census found, minus the kinds that are deliberately silent:
+  // 2 casts + 5 Rice pellets on the player (impact + hurt each) + 3 on the enemy = 15.
+  const worstTick = [
+    { type: 'weapon-fired', fighterRole: 'player', weaponKey: 'Catch' },
+    { type: 'weapon-fired', fighterRole: 'enemy', weaponKey: 'Rice' },
+    ...Array.from({ length: 5 }, (_, i) => rice(i)),
+    ...Array.from({ length: 3 }, (_, i) => hit({
+      targetRole: 'enemy', amount: 2, x: 40 + i, y: 0,
+      source: { kind: 'weapon', weaponKey: 'Catch', weaponName: 'Fish Catch' },
+    })),
+  ];
+  const busy = await run(worstTick, { volume: 1, playerId: 'sushi', enemyId: 'sushi', seconds: 2.5 });
+  const busyPre = preLimiterLevel(busy.peakMax, masterGain);
+  const onePellet = await run([rice(0)], { volume: 1, playerId: 'sushi', enemyId: 'sushi', seconds: 2.5 });
+  console.log(`\n    worst REAL tick (census: ${CENSUS.worstTickVoices} voice requests): voices=${busy.started} throttled=${busy.dropped} budget-dropped=${busy.droppedBudget}`);
+  console.log(`      peakMax=${busy.peakMax.toFixed(4)} FS   pre-limiter=${busyPre.toFixed(3)}   headroom to knee ${dB(CLIP.knee / busyPre).toFixed(1)} dB`);
+  console.log(`      vs ONE pellet: peak x${(busy.peakMax / onePellet.peakMax).toFixed(2)}, rms x${(busy.rms / onePellet.rms).toFixed(2)} (unducked ${busy.started} voices would be far more)`);
+  // The number that matters is GAIN REDUCTION, not whether the knee was crossed. The
+  // curve is a tanh: 0.9 dB past a knee at 0.7 costs 0.01 dB, so "above the knee" and
+  // "being squashed" are entirely different claims and only the second is a defect.
+  // The bug this whole section exists for was 8.2 dB of reduction on a signal BELOW
+  // its threshold; the honest test is therefore on the dB, measured.
+  const busyGR = dB(busy.peakMax / (busyPre * masterGain));
+  console.log(`      soft clip takes ${busyGR.toFixed(2)} dB off it`);
+  check('the census worst tick reaches the director as the voices it should',
+    busy.started === CENSUS.worstTickVoices && busy.droppedBudget === 0,
+    `voices=${busy.started} expected=${CENSUS.worstTickVoices} budget-dropped=${busy.droppedBudget}`);
+  check('the worst tick that really happens does not digitally clip', busy.peakMax < 1,
+    `peak=${busy.peakMax.toFixed(4)} FS`);
+  check('the soft clip is effectively transparent on the worst tick that really happens',
+    busyGR > -0.5, `${busyGR.toFixed(2)} dB, pre-limiter ${busyPre.toFixed(3)} vs knee ${CLIP.knee}`);
+  // The retrigger table ducks each repeat rather than dropping it, so 15 voices must
+  // NOT arrive as 15 stacked impacts. Phase-aligned linear stacking would be 15x one
+  // pellet; the measured figure is what the duck plus phase incoherence deliver.
+  check('the worst tick is DUCKED, not stacked (15 voices arrive under 5x one pellet)',
+    busy.peakMax < onePellet.peakMax * 5,
+    `x${(busy.peakMax / onePellet.peakMax).toFixed(2)} of one pellet, from ${busy.started} voices (linear stacking would be x${busy.started})`);
+
+  // CONTROL. The transparency claim above is only worth anything if this instrument CAN
+  // report gain reduction — "no clipping" from a detector that would say that about
+  // anything is this project's most expensive recurring mistake (`docs/LESSONS.md` §13:
+  // validate the instrument against a KNOWN input before believing it on an unknown one).
+  // A 16-damage impact driven 5x is not a state the game can reach; it is there to make
+  // the detector prove it works.
+  const ctrl = await renderById(page, `S.impact(16)`, { volume: 1, gain: 5, seconds: 2.5 });
+  const ctrlPre = preLimiterLevel(ctrl.peakMax, masterGain);
+  const ctrlGR = dB(ctrl.peakMax / (ctrlPre * masterGain));
+  // `preLimiterLevel` returns Infinity when the measured output is past the curve's own
+  // asymptote — which happens here because the WaveShaper is 2x oversampled and can
+  // overshoot `CLIP_CEIL` slightly. That is the correct answer to "what input produced
+  // this", and it is reported as such rather than as a number.
+  const ctrlPreStr = Number.isFinite(ctrlPre) ? ctrlPre.toFixed(3) : `>${CLIP.span} (past the curve)`;
+  console.log(`    CONTROL — one impact driven x5 (unreachable): peak=${ctrl.peakMax.toFixed(4)} pre-limiter=${ctrlPreStr} soft clip takes ${Number.isFinite(ctrlGR) ? `${ctrlGR.toFixed(1)} dB` : '>14 dB'}`);
+  check('CONTROL: the detector reports heavy gain reduction on a deliberately overdriven input',
+    !(ctrlGR > -6), `${Number.isFinite(ctrlGR) ? `${ctrlGR.toFixed(1)} dB` : 'past the curve'} at pre-limiter ${ctrlPreStr}`);
+  check('CONTROL: even that does not digitally clip', ctrl.peakMax < 1, `peak=${ctrl.peakMax.toFixed(4)} FS`);
+  // Reported, not asserted: even a physically impossible pile-up of the biggest sound in
+  // the game barely engages the curve, because the retrigger table drops repeats 6+ and
+  // ducks the rest. The voice budget and the throttle are doing the work the limiter is
+  // usually credited with.
+  const slam = { type: 'weapon-fired', fighterRole: 'player', weaponKey: 'Giant' };
+  const pile = await run(Array.from({ length: 12 }, () => slam), { volume: 1, playerId: 'lollipop', seconds: 2.5 });
+  const pilePre = preLimiterLevel(pile.peakMax, masterGain);
+  console.log(`    12 simultaneous ultimates: voices=${pile.started} throttled=${pile.dropped} peak=${pile.peakMax.toFixed(4)} pre-limiter=${pilePre.toFixed(3)} soft clip takes ${dB(pile.peakMax / (pilePre * masterGain)).toFixed(2)} dB`);
+  check('12 simultaneous ultimates still do not digitally clip', pile.peakMax < 1, `peak=${pile.peakMax.toFixed(4)} FS`);
+
+  // Trail damage used to fire up to 30 hit events in ONE tick (`docs/STATE.md`), which
+  // this layer would have met with 30 voice requests. `TRAIL.maxHitsPerTick` caps it at
+  // 1 PER FIGHTER, so 2 per tick is the real worst case. Both numbers measured, because
+  // the interesting question is what the OLD behaviour did to the mix — the retrigger
+  // throttle was silently absorbing it, which is why nobody heard the bug.
+  const trailHit = (i) => hit({ source: { kind: 'trail', ownerRole: 'enemy' }, amount: 3, x: 30 + i, y: 0 });
+  const nowTrail = await run([trailHit(0), trailHit(1)], { volume: 1, seconds: 2 });
+  const oldTrail = await run(Array.from({ length: 30 }, (_, i) => trailHit(i)), { volume: 1, seconds: 2 });
+  console.log(`    trail: capped (2/tick) voices=${nowTrail.started} peak=${nowTrail.peakMax.toFixed(4)}   uncapped (30/tick, the old bug) voices=${oldTrail.started} throttled=${oldTrail.dropped} peak=${oldTrail.peakMax.toFixed(4)}`);
+  check('the capped trail tick is quiet and unthrottled', nowTrail.started === 2 && nowTrail.dropped === 0,
+    `voices=${nowTrail.started} throttled=${nowTrail.dropped}`);
+  check('the OLD 30-hit trail tick was absorbed by the retrigger throttle, not stacked',
+    oldTrail.started === 5 && oldTrail.dropped === 25,
+    `voices=${oldTrail.started} throttled=${oldTrail.dropped}`);
+  check('even the old uncapped trail tick did not clip', oldTrail.peakMax < 1, `peak=${oldTrail.peakMax.toFixed(4)}`);
+
+  // Out-of-combat regen ticks every REGEN_TICK_MS = 200 ms, which is OUTSIDE the
+  // engine's 110 ms retrigger window — so nothing throttles it and a full regen from
+  // low health is ~50 rising triads back to back. Measured, then throttled in the
+  // director; this asserts the throttle.
+  const healSeq = await page.evaluate(() => window.__renderEventSeq(
+    [0, 0.2, 0.4, 0.6, 0.8].map((t) => ({
+      at: t, elapsed: 1000 + t * 1000,
+      events: [{ type: 'heal', fighterRole: 'player', amount: 2 }],
+    })),
+  ));
+  console.log(`    five 200 ms regen ticks: voices=${healSeq.started}`);
+  check('a run of regen ticks is throttled, not one rising triad every 200 ms',
+    healSeq.started <= 3, `voices=${healSeq.started} from 5 heal events over 800 ms`);
+}
+
 /**
  * The end-to-end check: a REAL match, the REAL wiring, and an AnalyserNode reading
  * the master bus. Everything above proves the sounds exist; only this proves the
@@ -1764,7 +2409,7 @@ async function modeLive(browser) {
 
 const browser = await chromium.launch({ args: LAUNCH_ARGS });
 try {
-  const wantsOffline = ['all', 'offline', 'identity', 'depth', 'negative', 'variation', 'budget', 'dispatch'].includes(MODE);
+  const wantsOffline = ['all', 'offline', 'identity', 'depth', 'negative', 'variation', 'budget', 'dispatch', 'coverage'].includes(MODE);
   if (wantsOffline) {
     // The home screen: no match, no sim, nothing competing for CPU while rendering.
     const page = await newPage(browser, `${BASE}/?screen=home`);
@@ -1776,6 +2421,7 @@ try {
     if (MODE === 'all' || MODE === 'variation') await modeVariation(page);
     if (MODE === 'all' || MODE === 'budget') await modeBudget(page);
     if (MODE === 'all' || MODE === 'dispatch') await modeDispatch(page);
+    if (MODE === 'all' || MODE === 'coverage') await modeCoverage(page);
     await page.close();
   }
   if (MODE === 'all' || MODE === 'live') await modeLive(browser);
