@@ -1254,7 +1254,12 @@ They only become a real coin sink when that flag flips, which is still **§4, an
 You supplied five menu plates. They are in `reference/images/curated/menus/`, **gitignored and verified
 invisible to git** (`.gitignore:19`).
 
-`bs_home` · `bs_roster_grid` · `bs_character_detail` · `zb_character_detail` · `zb_progression`
+`bs_home` · `bs_roster_grid` · `bs_character_detail` · `zb_character_detail` · `zb_progression` ·
+**`zb_home`**
+
+⚠️ `zb_home` contains Uri's own account details (display name, signed-in username, a friend's name).
+It is gitignored and stays local, which is correct — **those strings must never appear in a report,
+a packet, or any committed file.** Refer to it by filename only.
 
 **This unblocks all menu scoring.** Three consecutive menu rounds had been scored against *in-match
 combat frames*, and both critics flagged it unprompted every time. The re-score in flight has them.
@@ -1276,6 +1281,18 @@ independently reached the same conclusion by measurement: *"rarity cannot be giv
 job in this roster at a price worth paying — §26 should resolve on one of its other two branches."*
 **Two independent routes, same answer.** That is now a one-constant change in `economy/tuning.ts`
 whenever you say so.
+
+### ✅ `zb_home` confirms the level range you picked — **Zooba's max is 15**
+
+Its hero card reads **"MAX · 15 · 343/680"**. You asked for *"levels 1–15"* without reference to
+hand; that is **exactly Zooba's ladder**, and Brawl Stars' is 1–11. So the range that shipped sits
+right where the genre puts it — not a number we invented and then had to defend.
+
+The progress display is the part we do not have: **343/680 toward the next step**, on the home screen,
+on the character you are about to play. Ours shows a level with no sense of how close the next one is.
+
+`zb_home` is also the **second home plate**, so home goes from the weakest-covered element to the
+best-covered — two independent games to compare against instead of one.
 
 ### `zb_character_detail` is a blueprint for the level UI we just shipped
 
