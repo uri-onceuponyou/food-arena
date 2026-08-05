@@ -63,6 +63,13 @@
  *   • `stationsHash` the station TABLE, not just its names. Four of the eighteen were
  *                 once inside a `CoverBox`; a run taken before that fix must not be
  *                 quoted after it.
+ *   • `contentHash` a hash OF THE PAYLOAD, so the stamp is BOUND to the rows underneath
+ *                 it. Without it the stamp was a plain field anyone could copy: measured,
+ *                 a probe pasted one file's `__meta` onto another's rows and the gate
+ *                 accepted it and printed a full eleven-character table of fiction.
+ *   • `jobs`      the parallelism. ⚠️ Resolved BEFORE the `dl.rows.jsonl` stamp is written,
+ *                 not after — it used to be assigned twelve lines later, so the one file
+ *                 that survives a killed run recorded `jobs: undefined`.
  *   • `ids`, `argv`, `runId`, `startedAt`/`finishedAt`.
  *
  * ── THE SAME SHAPE, TWICE MORE, in this same file ────────────────────────────
@@ -79,6 +86,22 @@
  *     the gate rather than reported as a number. The primary numbers are UNCHANGED, on
  *     purpose: peers are mid-A/B against this instrument right now and silently moving
  *     a metric under them is the fault this file exists to stop.
+ *
+ * ── `dLcontact`, AND WHAT IT COSTS TO ADD IT ─────────────────────────────────
+ * `weakBoundaryPct` gates on the parts' WHOLE-PART MEDIANS while the contacts it weights
+ * by are counted at the BOUNDARY, and `--selftest` section L now proves that wrong in both
+ * directions on inputs whose answer is not in dispute. `vlAdjacency` therefore reports a
+ * second quantity, `dLcontact`, on the same merged owner map. **`dL` is byte-for-byte
+ * unchanged and the gate's VERDICT is still `dL`'s** — the new number is printed alongside
+ * as `weakBc%` plus a per-character `flip` count, never instead.
+ *
+ * ⚠️ Adding it DID move `toolHash` (08c4b7b1a6f62942 -> 80f2f4a0be275444), because the
+ * hash covers exactly what `chars.json` and `dl.json` CONTAIN and they now contain more.
+ * That is the guard working, not a bug: an existing cache is REFUSED loudly rather than
+ * compared silently across two different tools. A peer mid-A/B must re-measure the BEFORE
+ * side. `--mode chars` is 11 page boots; `--mode dl` is 198 and there is no shortcut.
+ * The alternative — leaving the hash still — would have been a silent cross-tool compare,
+ * which is the single failure this file was built to make impossible.
  *
  * ── The two-clear-colour matte ───────────────────────────────────────────────
  * Borrowed from `tools/arena-scan.mjs`'s `CAST_MATTE`, not re-invented: hide the
@@ -298,6 +321,40 @@ const toolHash = () => sha(
  */
 const stationsHash = () => sha(JSON.stringify(STATIONS)).slice(0, 16);
 
+/**
+ * ── THE STAMP MUST BE BOUND TO THE ROWS IT DESCRIBES ─────────────────────────
+ *
+ * `__meta` was a plain JSON field with nothing tying it to the payload. MEASURED: a
+ * probe copied `gate_head3/chars.json`'s `__meta` verbatim onto `shots/vl/dl.json` — a
+ * pre-value-pass file measured on the OLD station table by an OLDER tool — and
+ * `--mode gate --reuse --as-of <that srcId>` ACCEPTED it and printed a full
+ * eleven-character table. Every dl column in it was fiction, and nothing in the output
+ * distinguished it from a real run.
+ *
+ * That is the same defect `c3e3fbc` closed one level down, and `fc3d048`'s new
+ * hand-recovery path from `dl.rows.jsonl` is a standing invitation to hit it: the moment
+ * someone assembles a `dl.json` out of a partial JSONL, the natural next move is to paste
+ * a stamp onto it.
+ *
+ * So the stamp now carries a hash OF THE PAYLOAD, and the gate recomputes it from the
+ * bytes it actually read. A stamp lifted off another file no longer matches the rows
+ * underneath it.
+ *
+ * Scoped to the payload and nothing else — `__meta` is stripped before hashing, so a
+ * stamp cannot hash itself, and the two files hash their own natural payload (`chars.json`
+ * the character map, `dl.json` the rows array). Key order survives `JSON.parse`, which is
+ * what makes recompute-and-compare exact rather than approximate; the selftest proves it
+ * on a real round trip rather than assuming it.
+ */
+const contentHash = (payload) => sha(JSON.stringify(payload)).slice(0, 16);
+
+/** `chars.json` / `dl.json` -> the payload their stamp must describe. */
+export function payloadOf(parsed) {
+  if (parsed && Array.isArray(parsed.rows)) return parsed.rows;
+  const { __meta, ...rest } = parsed ?? {};
+  return rest;
+}
+
 async function buildMeta(mode, base, extra = {}) {
   const t0 = new Date().toISOString();
   const src = base ? await fetchSrcId(base, { verbose: true }) : { srcId: null, srcFiles: 0, srcMissing: 0 };
@@ -328,6 +385,21 @@ export function auditMeta(meta, want, label) {
     return bad;
   }
   if (!meta.srcId) bad.push(`${L}meta.srcId is null — the run never reached a server`);
+  // ── THE STAMP MUST DESCRIBE THESE ROWS, not merely be well-formed ──────────
+  // `want.contentHash` is recomputed by the caller from the bytes it just read. A stamp
+  // copied off another file was accepted before this existed — measured, not imagined.
+  if (want.contentHash !== undefined) {
+    if (!meta.contentHash) {
+      bad.push(`${L}the stamp is not BOUND to the rows (no meta.contentHash) — written by a`
+        + ' valuescan older than the stamp-binding fix, so it could have been copied here from'
+        + ' another file. That was demonstrated on this repo, not hypothesised. Re-run, or if you'
+        + ' are recovering rows from dl.rows.jsonl set contentHash yourself and own the claim.');
+    } else if (meta.contentHash !== want.contentHash) {
+      bad.push(`${L}contentHash ${meta.contentHash} != ${want.contentHash} recomputed from the file`
+        + ' — this stamp describes SOME OTHER measurement. Either the rows were edited after they'
+        + ' were stamped, or the stamp was lifted off a different file.');
+    }
+  }
   if (meta.toolHash !== want.toolHash) {
     bad.push(`${L}toolHash ${meta.toolHash} != ${want.toolHash} — the metric itself changed since this was measured`);
   }
@@ -907,6 +979,7 @@ async function modeChars() {
   meta.finishedAt = new Date().toISOString();
   // `__meta` and not `meta`, so a character called `meta` could never collide with it,
   // and so an older reader that iterates ids sees an obviously non-character key.
+  meta.contentHash = contentHash(out);
   await writeFile(join(OUT, 'chars.json'), JSON.stringify({ ...out, __meta: meta }, null, 2));
   console.log(`\nwrote ${OUT}/chars.json and ${dir}/*.{matte,value,parts}.png`);
   console.log(`srcId ${meta.srcId}  toolHash ${meta.toolHash}  stations ${meta.stationsHash}  run ${meta.runId}`);
@@ -933,10 +1006,7 @@ async function modeDl() {
   // self-describing and can be audited by exactly the same `auditMeta` as a complete
   // one. It is never read automatically — recovering from it is a decision a human
   // makes, out loud — but it can no longer be lost.
-  const ROWS_PATH = join(OUT, 'dl.rows.jsonl');
-  writeFileSync(ROWS_PATH, `${JSON.stringify({ __meta: meta })}\n`);
-  const browser = await chromium.launch({ args: LAUNCH_ARGS });
-  const rows = [];
+  //
   // ── PARALLELISM, and the reason the default is 1 ──────────────────────────
   // 11 characters x 18 stations = 198 full page boots, and a boot under SwiftShader is
   // ~60s on this machine — 3.3 hours serial. `--jobs N` runs N pages at once.
@@ -947,8 +1017,25 @@ async function modeDl() {
   // default stays 1, the chosen value is stamped into `meta.jobs`, and the agreement
   // between a serial run and a parallel one is a fact to be MEASURED rather than
   // assumed — see the commit message for the paired comparison this was validated on.
+  //
+  // ⚠️ `JOBS` IS RESOLVED HERE, ABOVE THE SIDECAR WRITE, AND THAT ORDER IS THE POINT.
+  // It used to be assigned twelve lines BELOW the `writeFileSync` — so the recovery file,
+  // added by the same commit that calls `--jobs` a change to the measurement box, stamped
+  // everything about the run EXCEPT its parallelism. A run launched `--jobs 3` wrote
+  // `jobs: undefined` into the one file that survives being killed.
   const JOBS = Math.max(1, Number(get('--jobs', 1)));
   meta.jobs = JOBS;
+  const ROWS_PATH = join(OUT, 'dl.rows.jsonl');
+  // `contentHash: null`, EXPLICITLY. The rows are appended after this line exists, so a
+  // prefix stamp cannot describe them and must not pretend to. The gate REFUSES a null
+  // contentHash, which is exactly the intended friction: assembling a `dl.json` by hand
+  // out of this file is legitimate, and it now requires the assembler to compute
+  // `sha256(JSON.stringify(rows)).slice(0,16)` themselves and thereby ASSERT that those
+  // rows are the ones this stamp describes. What it can no longer be is a stamp lifted
+  // off some other file and dropped on top.
+  writeFileSync(ROWS_PATH, `${JSON.stringify({ __meta: { ...meta, contentHash: null } })}\n`);
+  const browser = await chromium.launch({ args: LAUNCH_ARGS });
+  const rows = [];
   const queue = [];
   for (const id of IDS) for (const st of jobs) queue.push({ id, st });
   let next = 0;
@@ -1003,6 +1090,7 @@ async function modeDl() {
   rows.sort((a, b) => (IDS.indexOf(a.id) - IDS.indexOf(b.id))
     || (jobs.findIndex((s) => s.id === a.station) - jobs.findIndex((s) => s.id === b.station)));
   meta.finishedAt = new Date().toISOString();
+  meta.contentHash = contentHash(rows);
   await writeFile(join(OUT, 'dl.json'), JSON.stringify({ rows, __meta: meta }, null, 2));
   const inval = rows.filter((r) => r.valid === false);
   console.log(`\nwrote ${OUT}/dl.json  (${rows.filter((r) => !r.error).length} ok, ${rows.filter((r) => r.error).length} failed,`
@@ -1400,6 +1488,136 @@ function selftest() {
   check('luma(0,255,0) = 0.7152', +VL.luma(0, 255, 0).toFixed(4), 0.7152, 1e-4);
   check('luma(0,0,255) = 0.0722', +VL.luma(0, 0, 255).toFixed(4), 0.0722, 1e-4);
 
+  console.log('\nL. dL vs dLcontact — the metric caught returning a confident WRONG answer, BOTH ways');
+  // Lifted verbatim from `tools/tmp/p5_dlprobe.mjs`, which is where these were derived.
+  // `weakBoundaryPct` gates on `dL = |p50(A) - p50(B)|` — the parts' WHOLE-PART medians —
+  // while the contacts it weights by are counted AT THE BOUNDARY. The perceptual question
+  // the gate stands in for is "does the eye see an edge where A meets B", and that is a
+  // property of the pixels AT THE CONTACT. The two are the same number only when both
+  // parts are roughly uniform, and the cast is not.
+  //
+  // ⚠️ A GUARD THAT HAS NOT BEEN SHOWN TO FAIL ON THE BUG IT GUARDS AGAINST IS NOT A
+  // GUARD. Sections A-K all assert that the tool is RIGHT. These four assert that the OLD
+  // quantity is WRONG on inputs whose answer is not in dispute, and that the new one is
+  // right on the same inputs. Every expected value is derived by hand in the comment.
+  {
+    const W = 40, H = 40;
+    /** Two vertical slabs, A the left half, B the right half. */
+    const slabs = (fa, fb) => {
+      const A = new Uint8Array(W * H), B = new Uint8Array(W * H), luma = new Float64Array(W * H);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const j = y * W + x;
+        if (x < W / 2) { A[j] = 1; luma[j] = fa(x, y); } else { B[j] = 1; luma[j] = fb(x, y); }
+      }
+      return VL.adjacency([A, B], ['A', 'B'], W, H, luma, 8);
+    };
+
+    // L1. FALSE NEGATIVE. A is half 0.10 and half 0.90, arranged so the 0.90 band is the
+    //     column that TOUCHES B; B is uniform 0.50. A's median is 0.50 by construction, so
+    //     the whole-part medians are IDENTICAL and dL is 0.000 — while the boundary is a
+    //     hard |0.90 - 0.50| = 0.40 step nobody could miss.
+    let r = slabs((x) => (x >= W / 4 ? 0.90 : 0.10), () => 0.50);
+    let p = r.pairs[0];
+    check('L1 hard 0.40 step at the seam: contacts = H', p.contacts, H);
+    check('L1 A p50 (half 0.10, half 0.90) is 0.50', r.stats[0].p50, 0.50, 1e-4);
+    check('L1 dL SAYS NO EDGE (the bug)', p.dL, 0.0, 1e-9);
+    check('L1 dLcontact SAYS 0.400 (the truth)', p.dLcontact, 0.40, 1e-3);
+    check('L1 ...A-side band mean is the touching column, 0.90', p.cA, 0.90, 1e-4);
+    check('L1 ...B-side band mean is the touching column, 0.50', p.cB, 0.50, 1e-4);
+    check('L1 ...each band is exactly one column of 40 px', [p.cpxA, p.cpxB], [40, 40]);
+
+    // L2. FALSE POSITIVE, the exact reverse. A ramps 0.10 -> 0.50 and B ramps 0.50 -> 0.90,
+    //     CONTINUOUS across the seam: the two touching columns are both 0.50, so there is
+    //     no edge at all. Medians are 0.30 and 0.70, so dL reports a confident 0.400.
+    r = slabs((x) => 0.10 + (0.40 * x) / (W / 2 - 1), (x) => 0.50 + (0.40 * (x - W / 2)) / (W / 2 - 1));
+    p = r.pairs[0];
+    check('L2 seamless ramp: A p50 ~0.30', r.stats[0].p50, 0.30, 0.011);
+    check('L2 seamless ramp: B p50 ~0.70', r.stats[1].p50, 0.70, 0.011);
+    check('L2 dL SAYS STRONG EDGE (the bug)', p.dL, 0.40, 0.021);
+    check('L2 dLcontact SAYS 0.000 (the truth)', p.dLcontact, 0.0, 0.011);
+
+    // L3. THE CONTROL. Two uniform slabs — the case where the median IS the contact, so the
+    //     two must agree exactly. Without this, L1/L2 would also pass for a dLcontact that
+    //     is simply always different from dL.
+    r = slabs(() => 0.20, () => 0.65);
+    check('L3 uniform slabs: dL == dLcontact == 0.45', [r.pairs[0].dL, r.pairs[0].dLcontact], [0.45, 0.45]);
+
+    // L4. THE minContacts GATE IS A CLIFF, NOT A TAPER — one pixel of contact flips a pair
+    //     between "counted at full weight" and "does not exist", taking its whole weight out
+    //     of BOTH the numerator and the denominator of weakBoundaryPct.
+    const A = new Uint8Array(W * H), B = new Uint8Array(W * H);
+    const luma = new Float64Array(W * H).fill(0.5);
+    for (let y = 0; y < 8; y++) { A[y * W + 10] = 1; B[y * W + 11] = 1; }
+    check('L4 8 contacts at minContacts=8 -> the pair EXISTS', VL.adjacency([A, B], ['A', 'B'], W, H, luma, 8).pairs.length, 1);
+    check('L4 the same 8 at minContacts=9 -> the pair VANISHES', VL.adjacency([A, B], ['A', 'B'], W, H, luma, 9).pairs.length, 0);
+
+    // L5. A pixel in a CONCAVE corner touches the same neighbour part on two sides. It must
+    //     be weighted ONCE, or the boundary mean silently over-weights concave geometry —
+    //     which is most of a limb-to-torso join.
+    //
+    //     Hand-derived. A is the 4x4 block x,y in [4,8); B is the 2x2 block x,y in [6,8),
+    //     written second, so B OWNS the overlap (the same rule the live merged owner map
+    //     uses: a later group overwrites an earlier one). A therefore owns an L of 12 px.
+    //       A-side band: (5,6) (5,7) down B's left face, (6,5) (7,5) across its top = 4 px,
+    //                    none of which touches B twice.
+    //       B-side band: (6,6) — which touches A on its LEFT and ABOVE — plus (7,6) and
+    //                    (6,7); (7,7) touches only background. = 3 px.
+    //     Counting per touching EDGE instead of per distinct neighbour would report the
+    //     B-side band as 4, pulling the mean toward whatever the corner pixel happens to be.
+    {
+      const M = 12, Am = new Uint8Array(M * M), Bm = new Uint8Array(M * M);
+      const lu = new Float64Array(M * M);
+      for (let y = 4; y < 8; y++) for (let x = 4; x < 8; x++) { Am[y * M + x] = 1; lu[y * M + x] = 0.2; }
+      for (let y = 6; y < 8; y++) for (let x = 6; x < 8; x++) { Bm[y * M + x] = 1; lu[y * M + x] = 0.8; }
+      const rr = VL.adjacency([Am, Bm], ['A', 'B'], M, M, lu, 1).pairs[0];
+      check('L5 concave corner: the shared edge count is 4', rr.contacts, 4);
+      check('L5 concave corner: A-side band is 4 px', rr.cpxA, 4);
+      check('L5 concave corner: B-side band is 3 px, NOT 4 — the corner counts once', rr.cpxB, 3);
+      check('L5 concave corner: dLcontact is the real 0.60 step', rr.dLcontact, 0.60, 1e-4);
+    }
+  }
+
+  console.log('\nM. THE STAMP IS BOUND TO THE ROWS — a stamp copied off another file is REFUSED');
+  // MEASURED, not imagined. `gate_head3/chars.json`'s `__meta` was copied verbatim onto
+  // `shots/vl/dl.json` — a pre-value-pass file measured on the OLD station table by an
+  // OLDER tool — and `--mode gate --reuse --as-of <that srcId>` ACCEPTED it and printed a
+  // full eleven-character table with minDL, n<.10, nInv and worstStn columns. Every dl
+  // column in it was fiction, and nothing in the output distinguished it from a real run.
+  {
+    const rowsA = [{ id: 'egg', station: 'pot_south', dL: 0.1923 }, { id: 'taco', station: 'pot_south', dL: 0.0812 }];
+    const rowsB = [{ id: 'egg', station: 'pot_south', dL: 0.4110 }, { id: 'taco', station: 'pot_south', dL: 0.3900 }];
+    const base = {
+      tool: 'valuescan', mode: 'dl', srcId: 'aaaaaaaaaaaaaaaa', toolHash: 'tttttttttttttttt',
+      stationsHash: 'ssssssssssssssss', ids: ['egg', 'taco'], finishedAt: '2026-08-05T17:00:00Z',
+    };
+    const want = (rows) => ({
+      toolHash: 'tttttttttttttttt', stationsHash: 'ssssssssssssssss',
+      ids: ['egg', 'taco'], srcId: 'aaaaaaaaaaaaaaaa', contentHash: contentHash(rows),
+    });
+    const stampA = { ...base, contentHash: contentHash(rowsA) };
+    check('a stamp over ITS OWN rows is ACCEPTED', auditMeta(stampA, want(rowsA), 'f').length, 0);
+    check('THE FORGERY: that same stamp over OTHER rows is REFUSED', auditMeta(stampA, want(rowsB), 'f').length > 0, true);
+    check('THE OLD SHAPE: a stamp with NO contentHash is REFUSED', auditMeta(base, want(rowsA), 'f').length > 0, true);
+    // ...and only when the caller actually recomputed one. `auditMeta` stays usable by a
+    // caller that has no payload in hand (the selftest's own section G does exactly that).
+    check('a caller that recomputes NOTHING is not forced into a false refusal',
+      auditMeta(base, { ...want(rowsA), contentHash: undefined }, 'f').length, 0);
+    // One edited value in one row must move it — otherwise the binding is decorative.
+    const edited = JSON.parse(JSON.stringify(rowsA)); edited[1].dL = 0.0813;
+    check('editing ONE row value by 0.0001 moves the content hash', contentHash(edited) !== contentHash(rowsA), true);
+    check('re-serialising the SAME rows does not move it', contentHash(JSON.parse(JSON.stringify(rowsA))), contentHash(rowsA));
+    // The round trip the gate actually performs: write pretty-printed with `__meta` last,
+    // read back, strip, rehash. If key order did not survive `JSON.parse` this would fail,
+    // and the whole binding would be a coin flip — so it is asserted, not assumed.
+    const onDisk = JSON.stringify({ rows: rowsA, __meta: stampA }, null, 2);
+    check('the hash survives the WRITE -> PARSE -> STRIP round trip',
+      contentHash(payloadOf(JSON.parse(onDisk))), contentHash(rowsA));
+    const charsOnDisk = JSON.stringify({ egg: { shipped: { ladder: { range: 0.7 } } }, taco: { shipped: {} }, __meta: stampA }, null, 2);
+    check('payloadOf strips __meta from a chars-shaped file',
+      Object.keys(payloadOf(JSON.parse(charsOnDisk))), ['egg', 'taco']);
+    check('payloadOf returns the ROWS from a dl-shaped file', payloadOf(JSON.parse(onDisk)).length, 2);
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   return fail === 0 ? 0 : 1;
 }
@@ -1438,8 +1656,12 @@ const GATES = [
   // while attributing a shared hostile station to the station.
   { key: 'dlBelow10', label: 'stations with dL < 0.10 (of the VALID 18)', max: 1, target: 0,
     why: "this project's own recorded lighting standard: figure/ground >= 0.10, |dL| < 0.05 = none. NOT a reference figure — said out loud. One station is allowed because `grease_in` fails for 9 of 11 and is an ARENA fix. Stations where the mask and the value disagree (the fighter is occluded) contribute NO number and are counted in the nInv column — they used to contribute the OCCLUDER'S luma, which is what made this key fail for all eleven characters on both sides of the value pass." },
+  // ⚠️ READ THE SHAPE OF THIS ONE BEFORE ACTING ON A MOVE IN IT. It is a CLIFF, and it is
+  // built on the parts' WHOLE-PART medians while the contacts it weights by are counted at
+  // the BOUNDARY. `dLcontact` and the `weakBc%`/`flip` columns exist because of that; the
+  // verdict below is still `dL`'s, deliberately, because peers A/B against it.
   { key: 'weakBoundaryPct', label: 'part boundary below 0.10 dL', max: 15, target: 5,
-    why: 'CHOSEN, not measured — no reference equivalent exists because the plates cannot be part-segmented. Calibrated off the cast: soup already reads 5.1%.' },
+    why: 'CHOSEN, not measured — no reference equivalent exists because the plates cannot be part-segmented. Calibrated off the cast: soup already reads 5.1%. ⚠️ A CLIFF, NOT A BAND: contact-weighted count over a hard 0.10, so its step = the contact share of any pair near the threshold (pizza 32.7 pp, waterbottle 36.7, burrito 23.5, sushi 16.0). Measured: pizza head|torso moved 0.0142 of luma and this moved 33 pp. ⚠️ And dL is the whole-part median, not the boundary — see the weakBc%/flip columns and --selftest section L. The 15 cap was calibrated on dL and does NOT transfer to weakBc%.' },
 ];
 
 /**
@@ -1506,9 +1728,11 @@ async function modeGate() {
     want.srcId = live.srcId;
     proof = `PROVEN against the live tree at ${BASE} (srcId ${live.srcId}, ${live.srcFiles} paths)`;
   }
+  // Recomputed from the bytes just read, so a stamp that describes some other file's
+  // rows is caught here rather than printed as an eleven-character table.
   const refusals = [
-    ...auditMeta(chars.__meta, want, 'chars.json'),
-    ...auditMeta(dlFile.__meta, want, 'dl.json'),
+    ...auditMeta(chars.__meta, { ...want, contentHash: contentHash(payloadOf(chars)) }, 'chars.json'),
+    ...auditMeta(dlFile.__meta, { ...want, contentHash: contentHash(payloadOf(dlFile)) }, 'dl.json'),
   ];
   if (chars.__meta && dlFile.__meta && chars.__meta.srcId && chars.__meta.srcId !== dlFile.__meta.srcId) {
     refusals.push('chars.json and dl.json were measured against DIFFERENT TREES'
@@ -1545,9 +1769,23 @@ async function modeGate() {
     console.log(`  ${g.label.padEnd(34)} ${g.min != null ? '>= ' + g.min : '<= ' + g.max}  (target ${g.target})`);
     console.log(`  ${' '.repeat(34)} ${g.why}`);
   }
-  console.log('\nchar          range   p05  steps  minDL  n<.10   nInv  weakB%  worstStn        verdict');
+  // ── STATE THE METRIC'S SHAPE BEFORE ANYONE ACTS ON A MOVE IN IT ───────────
+  // `CLAUDE.md` rule 10. Two separate warnings, both measured, both previously unrecorded.
+  console.log('  ⚠️ weakB% IS A CLIFF, NOT A BAND. It is a contact-weighted COUNT over a hard 0.10');
+  console.log('     threshold, so its step size is the CONTACT SHARE of whichever pair sits near the');
+  console.log('     threshold — not the size of any value change. Measured: pizza head|torso moved');
+  console.log('     0.1095 -> 0.0953 (0.0142 of luma, 3.6x the 8-bit floor, invisible) and weakB% went');
+  console.log('     8.0 -> 41.0. Per-character cliff = the dominant pair\'s share: pizza 32.7, water-');
+  console.log('     bottle 36.7, burrito 23.5, sushi 16.0 pp. DO NOT REPORT A SMALLER MOVE AS A RESULT.');
+  console.log('  ⚠️ weakB% is built on dL = |p50(A)-p50(B)|, the parts\' WHOLE-PART medians, while the');
+  console.log('     contacts are counted at the boundary. Those are the same number only when both');
+  console.log('     parts are uniform. weakBc% is the same count on dLcontact — the boundary-local');
+  console.log('     step — and `flip` is how many pairs the two DISAGREE about, per character, never');
+  console.log('     aggregated. Steer on the per-pair dLcontact (floor 0.0039); read weakB% as history.\n');
+  console.log('char          range   p05  steps  minDL  n<.10   nInv  weakB%  weakBc%  flip  worstStn        verdict');
   let failing = 0;
   const out = [];
+  let uniformN = 0, uniformWorst = 0, uniformWorstAt = null;
   for (const id of IDS) {
     const c = chars[id];
     if (!c || !c.shipped || c.shipped.error) { console.log(`${id.padEnd(13)} NO DATA`); failing++; continue; }
@@ -1564,9 +1802,32 @@ async function modeGate() {
     const A = (c.ss && c.ss.adjacent) || [];
     const tot = A.reduce((s, p) => s + p.contacts, 0);
     const weakPct = tot ? (100 * A.filter((p) => p.dL < 0.10).reduce((s, p) => s + p.contacts, 0)) / tot : 0;
+    // The SAME count on the boundary-local step. Reported ALONGSIDE, never instead of —
+    // peers are mid-A/B against `weakBoundaryPct` and the verdict below is still its.
+    const haveC = A.filter((p) => p.dLcontact != null);
+    const weakPctC = haveC.length && tot
+      ? (100 * haveC.filter((p) => p.dLcontact < 0.10).reduce((s, p) => s + p.contacts, 0)) / tot : null;
+    const flips = haveC.filter((p) => (p.dL < 0.10) !== (p.dLcontact < 0.10)).length;
+    // THE CONSTRUCTION CHECK, on live data: where both parts ARE roughly uniform the two
+    // quantities are the same thing and must agree. A disagreement there is an
+    // implementation fault, not a finding — which is the only way to tell the two apart.
+    const byName = Object.fromEntries(((c.ss && c.ss.parts) || []).map((p) => [p.part, p]));
+    for (const p of haveC) {
+      const sp = (q) => (byName[q] && byName[q].p90 != null && byName[q].p10 != null ? byName[q].p90 - byName[q].p10 : null);
+      const sa = sp(p.a), sb = sp(p.b);
+      if (sa == null || sb == null || sa >= 0.15 || sb >= 0.15) continue;
+      uniformN++;
+      const d = Math.abs(p.dL - p.dLcontact);
+      if (d > uniformWorst) { uniformWorst = d; uniformWorstAt = `${id} ${p.a}|${p.b}`; }
+    }
     const dlBelow10 = my.filter((r) => r.dL < 0.10).length;
     const worstStation = my.length ? my.reduce((a, b) => (a.dL <= b.dL ? a : b)).station : null;
-    const v = { range: L.range, p05: L.p05, steps10: L.steps.j10, minDL, dlBelow10, weakBoundaryPct: +weakPct.toFixed(1) };
+    const v = {
+      range: L.range, p05: L.p05, steps10: L.steps.j10, minDL, dlBelow10,
+      weakBoundaryPct: +weakPct.toFixed(1),
+      weakBoundaryPctContact: weakPctC == null ? null : +weakPctC.toFixed(1),
+      verdictFlips: flips,
+    };
     const fails = GATES.filter((g) => {
       const x = v[g.key];
       if (x == null) return true;
@@ -1576,8 +1837,20 @@ async function modeGate() {
     out.push({ id, ...v, stationsScored: my.length, stationsInvalid: nInvalid, worstStation, fails });
     console.log(`${id.padEnd(13)}${v.range.toFixed(3).padStart(6)}${v.p05.toFixed(3).padStart(6)}${String(v.steps10).padStart(7)}` +
       `${(minDL == null ? '  —' : minDL.toFixed(3)).padStart(7)}${String(dlBelow10).padStart(7)}${String(nInvalid).padStart(7)}` +
-      `${v.weakBoundaryPct.toFixed(1).padStart(8)}  ${String(worstStation).padEnd(13)} ` +
+      `${v.weakBoundaryPct.toFixed(1).padStart(8)}${(weakPctC == null ? '—' : weakPctC.toFixed(1)).padStart(9)}` +
+      `${String(flips).padStart(6)}  ${String(worstStation).padEnd(13)} ` +
       (fails.length ? `FAIL: ${fails.join(', ')}` : 'PASS'));
+  }
+  // The construction check's verdict, printed whether it passes or fails. A silent
+  // agreement check is a guard nobody can see working.
+  if (uniformN) {
+    const ok = uniformWorst <= 0.02;
+    console.log(`\n  CONSTRUCTION CHECK  ${uniformN} pairs where BOTH parts are near-uniform (p90-p10 < 0.15),`);
+    console.log(`  ${' '.repeat(18)}i.e. where dL and dLcontact are the same quantity by construction:`);
+    console.log(`  ${' '.repeat(18)}max |dL - dLcontact| = ${uniformWorst.toFixed(4)} at ${uniformWorstAt}  ${ok ? '≤ 0.02 OK' : '> 0.02 ✗ THE NEW METRIC IS WRONG, NOT THE CAST'}`);
+  } else {
+    console.log('\n  CONSTRUCTION CHECK  no near-uniform pair on this run — the agreement between dL and');
+    console.log(`  ${' '.repeat(18)}dLcontact is UNTESTED on this data. Do not read that as agreement.`);
   }
   const meta = {
     srcId: chars.__meta.srcId, toolHash: chars.__meta.toolHash, stationsHash: chars.__meta.stationsHash,

@@ -240,9 +240,43 @@ function vlPartStat(luma, owned, W, H) {
 /**
  * ── "does the limb separate from the thing it touches" ───────────────────────
  * For every pair of parts that actually SHARE A SCREEN-SPACE BORDER (a 4-neighbour
- * contact), the absolute difference of their median values. Contact-gated on purpose:
- * a hand being the same value as a foot is irrelevant; a hand being the same value as
- * the torso it is drawn against is the entire finding.
+ * contact). Contact-gated on purpose: a hand being the same value as a foot is
+ * irrelevant; a hand being the same value as the torso it is drawn against is the
+ * entire finding.
+ *
+ * TWO different quantities are reported for every pair, and they are NOT interchangeable:
+ *
+ *   dL         |p50(A) - p50(B)| over each part's WHOLE mask. The original. Kept
+ *              byte-for-byte because peers A/B against it and silently moving a metric
+ *              under a running comparison is the fault this instrument exists to stop.
+ *
+ *   dLcontact  |mean(A's pixels that touch B) - mean(B's pixels that touch A)|, computed
+ *              on the SAME merged owner map the 'contacts' count already comes from.
+ *
+ * ⚠️ THEY ARE THE SAME NUMBER ONLY WHEN BOTH PARTS ARE ROUGHLY UNIFORM, and the cast
+ * is not. 'tools/tmp/p5_dlprobe.mjs' proved 'dL' wrong in BOTH directions by
+ * construction, and 'valuescan --selftest' section L now carries the proof:
+ *   • a part that is half 0.10 and half 0.90, with the 0.90 band against a uniform 0.50
+ *     neighbour, is a HARD 0.40 STEP the eye cannot miss — 'dL' reports 0.000.
+ *   • two ramps that are CONTINUOUS across the seam — no edge at all — have medians
+ *     0.30 and 0.70, so 'dL' reports a confident 0.400.
+ * Measured on live HEAD across 4 characters and 35 reported pairs, the two disagree on
+ * the 0.10 verdict for 11 of them (31%), including the pair that produces 32.7 of
+ * pizza's 41.0 'weakBoundaryPct' points.
+ *
+ * ⚠️ AND 'weakBoundaryPct' — the gate key built on 'dL' — IS A CLIFF, NOT A BAND. It is a
+ * contact-weighted COUNT over a hard 0.10 threshold, so its step size equals the contact
+ * share of whichever pair happens to sit near the threshold, not the size of any value
+ * change. Measured on real commits: pizza's head|torso moved 0.1095 -> 0.0953 — 0.0142 of
+ * luma, 3.6x the 8-bit floor and below anything a player can see — and weakBoundaryPct
+ * moved 8.0 -> 41.0. **Never report a weakBoundaryPct move smaller than that character's
+ * own cliff (pizza 32.7 pp, waterbottle 36.7, burrito 23.5, sushi 16.0) as a result.**
+ * The number to steer on is the per-pair 'dLcontact', whose floor is the 8-bit
+ * quantisation of the framebuffer, 1/255 = 0.0039.
+ *
+ * 'cA'/'cB' (the two contact-band means) and 'cpxA'/'cpxB' (how many pixels each band
+ * holds) are reported too, so 'dLcontact' can be audited rather than trusted. A band of a
+ * handful of pixels is a weak reading and says so by its own count.
  */
 function vlAdjacency(partMasks, names, W, H, luma, minContacts) {
   const minC = minContacts == null ? 8 : minContacts;
@@ -264,13 +298,60 @@ function vlAdjacency(partMasks, names, W, H, luma, minContacts) {
     if (x < W - 1) bump(owner[j], owner[j + 1]);
     if (y < H - 1) bump(owner[j], owner[j + W]);
   }
+
+  // ── THE CONTACT BANDS ──────────────────────────────────────────────────────
+  // One pass. For each owned pixel, the SET of distinct other owners among its four
+  // neighbours; the pixel's luma is added once per distinct neighbour-owner, to the side
+  // of that pair it belongs to. Counting once per distinct owner rather than once per
+  // touching edge matters: a pixel in a corner touches the same neighbour twice and would
+  // otherwise be double-weighted, which is a silent bias toward concave boundaries.
+  //
+  // 'contacts' above deliberately still counts right/down EDGES and is untouched — it is
+  // the weight 'weakBoundaryPct' has always used, and a pair's weight must not move
+  // because the tool learned to measure a second thing.
+  const band = new Map();
+  const nb = [0, 0, 0, 0];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const j = y * W + x;
+    const o = owner[j];
+    if (o < 0) continue;
+    let k = 0;
+    if (x > 0) nb[k++] = owner[j - 1];
+    if (x < W - 1) nb[k++] = owner[j + 1];
+    if (y > 0) nb[k++] = owner[j - W];
+    if (y < H - 1) nb[k++] = owner[j + W];
+    for (let i = 0; i < k; i++) {
+      const p = nb[i];
+      if (p < 0 || p === o) continue;
+      let dup = false;
+      for (let q = 0; q < i; q++) if (nb[q] === p) { dup = true; break; }
+      if (dup) continue;
+      const key = o < p ? o + ':' + p : p + ':' + o;
+      let e = band.get(key);
+      if (!e) { e = { sA: 0, nA: 0, sB: 0, nB: 0 }; band.set(key, e); }
+      if (o < p) { e.sA += luma[j]; e.nA++; } else { e.sB += luma[j]; e.nB++; }
+    }
+  }
+
   const pairs = [];
   for (const [k, c] of contacts) {
     if (c < minC) continue;
     const [a, b] = k.split(':').map(Number);
     if (stats[a].p50 == null || stats[b].p50 == null) continue;
-    pairs.push({ a: names[a], b: names[b], contacts: c, dL: +Math.abs(stats[a].p50 - stats[b].p50).toFixed(4) });
+    const e = band.get(k);
+    const cA = e && e.nA ? e.sA / e.nA : null;
+    const cB = e && e.nB ? e.sB / e.nB : null;
+    pairs.push({
+      a: names[a], b: names[b], contacts: c,
+      dL: +Math.abs(stats[a].p50 - stats[b].p50).toFixed(4),
+      dLcontact: cA == null || cB == null ? null : +Math.abs(cA - cB).toFixed(4),
+      cA: cA == null ? null : +cA.toFixed(4), cB: cB == null ? null : +cB.toFixed(4),
+      cpxA: e ? e.nA : 0, cpxB: e ? e.nB : 0,
+    });
   }
+  // Sorted by 'dL', UNCHANGED — every recorded reading of this table quotes "the tightest
+  // three pairs" in this order, and re-sorting on the new column would silently rewrite
+  // what those sentences mean.
   pairs.sort((p, q) => p.dL - q.dL);
   return { pairs, stats };
 }

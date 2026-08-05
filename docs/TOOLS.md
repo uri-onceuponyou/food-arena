@@ -326,7 +326,8 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/audio-probe.mjs --mode all` | **389** | ⚠️ `--mode live` is flaky under load; judge by depth 91 / identity 77 |
 | `node tools/arena-scan.mjs --selftest` | **105** | colour-budget metric + the station-placement guard |
 | `node tools/match-sim.mjs --selftest` | **15** | the scripted policies, against a hand-derivable answer |
-| `node tools/tmp/valuescan.mjs --selftest` | **78** | value-ladder metric on synthetic frames. ⚠️ Was **57** until `c3e3fbc`/`fc3d048`; a run reporting 57 is an OLD TREE, not a pass |
+| `node tools/tmp/valuescan.mjs --selftest` | **105** | value-ladder metric on synthetic frames. ⚠️ Was **57** until `c3e3fbc`/`fc3d048` and **78** until the `dLcontact` pass; a run reporting 57 or 78 is an OLD TREE, not a pass. §L and §M are the two known-bad-input proofs — §L shows `dL` returning a confident **wrong** answer in both directions, §M shows a `__meta` stamp lifted off another file being **refused** |
+| `node tools/tmp/p5_dlprobe.mjs` | **12** | the derivation behind §L. `--live <dir>` recomputes `dLcontact` for all 11 characters from an existing `--mode chars` output **with no browser**, and refuses any character whose recovered owner map does not reproduce the recorded contact counts exactly |
 | `tools/tmp/quality_api.mjs` · `dpr_probe.mjs` | **20** · **24** | render tiers and the DPR cap |
 | `node tools/perf.mjs --mode leak` | contexts flat at **1** | the leak that white-screened after ~8 round trips |
 | `node tools/tmp/settle_validate.mjs` | **22** | the shared PAINT condition — correct at any machine speed, not merely longer |
@@ -383,10 +384,37 @@ is provable) · `status_{census,grace_sweep,ab_report}.mjs` · `rules_census.mjs
 
 ### ⚠️ Known instrument limits — read before trusting a number
 
+- **`weakBoundaryPct` IS A CLIFF, NOT A BAND, and it is built on the WRONG QUANTITY.** Two separate
+  faults in one gate key, both measured, neither previously recorded:
+  - **The cliff.** It is a contact-weighted *count* over a hard 0.10 threshold, so its step size is
+    the **contact share of whichever pair sits near the threshold**, not the size of any value
+    change. Measured on real commits: pizza's `head|torso` moved **0.1095 → 0.0953** — 0.0142 of
+    luma, 3.6× the 8-bit floor and invisible — and `weakBoundaryPct` moved **8.0 → 41.0**. The
+    per-character cliff is that character's dominant weak pair: pizza **32.7 pp**, waterbottle
+    **36.7**, burrito **23.5**, sushi **16.0**. **Never report a smaller move as a result.**
+  - **The wrong quantity.** It gates on `dL = |p50(A) − p50(B)|`, the parts' **whole-part medians**,
+    while the contacts it weights by are counted **at the boundary**. Those coincide only when both
+    parts are uniform. `valuescan --selftest` §L proves `dL` wrong in both directions by
+    construction, and on live HEAD the two disagree about the 0.10 verdict on **30 of 90 pairs**
+    (`p5_dlprobe --live`), with per-character flip counts of 0 (waterbottle) to 5 (hotdog).
+    **Steer on the per-pair `dLcontact`** (floor **0.0039**, the 8-bit quantisation of `value.png`),
+    not on either aggregate. ⚠️ And the **15% cap was calibrated on the `dL` distribution** — it does
+    **not** transfer to `weakBoundaryPctContact`, which is printed alongside for comparison only.
 - **`limbcheck` measures the preview's 22°; the match camera is 58°.** At 58°, idle passes go
   **8/11 → 0/11**. Idle *ranking* survives (ρ 0.927); **run ranking does not** (ρ 0.673). And the
   shipped spawn faces every character at **profile to camera**, burying 5.3 of ~15 joints against
   0.8 in the pose `limbcheck` uses — its pose is the **best** case.
+- ⚠️ **The "93.3% identical" clone-census figure for `limbcheck_pitch` OVERSTATES the divergence.**
+  The old wording, kept because it is what several packets quote: *"`limbcheck.mjs` and
+  `limbcheck_pitch.mjs` are 93.3% identical, while the latter's header claims byte-identity — every
+  22°-vs-58° comparison rests on that claim."* **Measured by diffing the two files:** 25 differing
+  lines, of which the only **executable** ones are (a) `const PITCH = Number(get('--pitch', 22))`,
+  (b) one extra `console.log` banner, (c) `&pitch=${PITCH}` on the preview URL. Everything else that
+  differs is comment prose, and the census's ratio is a *line* count over a file that is mostly
+  comment. `src/preview.ts:185` defaults the character piece to `pitchDeg: 22`, so `limbcheck` **is**
+  `limbcheck_pitch --pitch 22`, and the header's claim — explicitly scoped to "the chroma key, the
+  hide-vs-isolate diff, the connected-component detachment test, the pass rule" — is **true**.
+  The **real** limitation is the row above: 22° is not the match camera. That one stands.
 - **`menu_accept` is only partly snapshot-isolated** — its CSS lint parses the **live** tree, so a
   peer mid-save fails your run on a file you never opened.
 - **`<id>.canvas.png` has never been HUD-free** — Playwright element screenshots capture the
