@@ -43,6 +43,24 @@ is spent just walking to contact.** 25–30 s pushed fog to 19–34% of all dama
 **Note this interacts with the navigation work now in flight.** If spawn separation (STATE.md #11)
 gets fixed and that 13.0 s of walking drops, 45 s becomes generous and should be revisited.
 
+### ⚠️ New evidence, and it cuts BOTH ways
+
+Measured since, over **363 real matches** (121 matchups × 3 policies):
+
+- **The timeout tiebreak and the FINAL RING were reached in 0 of 363 matches.** Longest match is
+  25.1 s of play; the ring floor arrives at **t=38.66 s**. Both were built today, both are correct,
+  and **neither currently ever happens.** Only forcing both fighters immortal reaches them (121/121).
+  → argues the clock is **too long**.
+- **`REGEN_DELAY_MS = 10_000` against a mean play length of 16.2 s** → out-of-combat regen fires
+  **0.02 times per match**. A whole mechanic, and the sound written for it, is dead content.
+  → also argues **too long**.
+- But **13.0 s of the mean match is still walking**, and an arena-layout pass is cutting exactly
+  that right now. → argues it will be **too long again** once that lands.
+
+A balance audit is sweeping every remaining `rules.ts` constant for the same 180 s-era assumption,
+and will report which conclusions flip if mean match length moves. **This is the single question in
+this file where more of my measurement genuinely helps, so expect a firmer recommendation shortly.**
+
 **Related sub-question — answered, tell me if you disagree.** `FOG_FIRST_CONTACT_S` stays an
 **absolute 6 s** rather than scaling with the clock. Reasoning: it encodes a human duration you
 specified in seconds, and first contact is with an arena *corner* nobody stands in. What actually
@@ -174,6 +192,40 @@ is not. Specifically: does the synthesised room read as a *kitchen* rather than 
 does Hamburger at 767 Hz read as "heavy" or merely "muffled"?
 
 **Assumed.** Unchanged. Not touched without a human ear.
+
+### Evidence gathered since — not a verdict, but the room question now has a number
+
+The reverb return is doing measurable work **and is filling the tremolo's troughs**: at `wet: 0.22`
+a 24 Hz warble was completely undetectable against an unmodulated control, and only became
+measurable at `wet: 0.06`. `weapons/pizza.ts` had already hit this and rations its send inversely
+with spin rate. So if the room reads as *"a small box"* rather than *"a kitchen"*, there is a
+concrete lead: the current impulse (~190 ms) is **short enough to smear fast detail while too short
+to read as a large space** — the worst of both. Not changed; it is a taste call about the whole
+game's acoustic space. The Hamburger / 767 Hz question is untouched — nothing measured bears on it.
+
+### ❓ A NEW audio question, with numbers, and there is no free fix
+
+**The soft clip is flattening the top of the mix.** Eleven of 22 sounds sit above the knee *on
+their own*, and every centre-panned match-flow sting does:
+
+| sound | authored | delivered | soft clip takes |
+|---|---|---|---|
+| `castGiantSlam` (the ultimate) | 3.006 | 0.7439 FS | **−8.0 dB** |
+| `death` | 1.532 | 0.7225 FS | −2.4 dB |
+| `ringFloor` | 1.470 | 0.7168 FS | −2.1 dB |
+| `matchEnd.win` | 1.290 | 0.6905 FS | −1.3 dB |
+| `matchStart` | 1.017 | 0.6080 FS | −0.3 dB |
+
+**Authored 13.0 dB apart; delivered 5.0 dB apart.** The ultimate's authored level is 8 dB
+fictional — cutting it by 7 dB would change what you hear by ~0.5 dB. Nothing clips (the chain
+*structurally cannot* reach 0 dBFS), order is preserved, and the ultimate is still the loudest
+sound and still 3.6 dB above an ordinary impact — all asserted.
+
+**The choice, and there is no third option:** keep today's loudness and accept a compressed top,
+**or** drop the flow stings 4–5 dB so the ultimate is genuinely the biggest sound in the game.
+Raising the master trim to compensate would break the no-clipping guarantee. **Recommendation:
+drop the stings** — an ultimate that does not feel like an ultimate is the more expensive loss.
+Not done, because how loud the game should be is taste.
 
 ---
 
