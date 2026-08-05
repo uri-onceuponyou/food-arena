@@ -1201,10 +1201,70 @@ visible at the pixel — and it is fixable without any critic at all.
 
 ---
 
-## 26. ⚠️ Rarity now buys nothing, and costs 4.5× to level
+## 26. ✅ ANSWERED AND SHIPPED — rarity costs the SAME to level as everything else
 
-This is the direct consequence of *"match how common games do it"*, and it is the one thing from the
-level build that needs you.
+> **Uri, 2026-08-05: *"26 - go"*.** Then again on 2026-08-06: *"as far as i understand in all other
+> games it means nothing besides the rarity to obtain it."*
+
+**Landed.** `rarityCostMultiplier` is **1.0 across every tier** (`68cac7a`), and the player-facing
+copy that still contradicted it was fixed in `33a0048`. **Nothing here needs you. Do not re-decide it.**
+
+| tier | multiplier | cost to max, before | after |
+|---|---|---|---|
+| Normal | 1.0 → 1.0 | 44,770 | **44,770** (unchanged) |
+| Rare | 1.35 → 1.0 | 60,440 | 44,770 |
+| Epic | 1.8 → 1.0 | 80,590 | 44,770 |
+| Legendary | 2.45 → 1.0 | 109,690 | 44,770 |
+| Neon | 3.3 → 1.0 | 147,750 | 44,770 |
+| Cyber | 4.5 → 1.0 | 201,460 | **44,770** (−77.8%) |
+
+Tier spread **156,690 coins (4.50×) → 0**. Whole roster 1,208,810 → 492,470 coins.
+
+⚠️ **But do not read that as an economy-wide loosening.** Normal *was* the 1.0× tier, so **the
+cheapest path through the game did not move by a single coin.** Nothing was made easier; a penalty
+was removed from the people who had been paying it.
+
+**Verified by mutation, not by grep:** setting the ladder back to 1.0→4.5 and re-fingerprinting every
+box price, box odd, trophy-road reward, store product, duplicate value, match payout and starting
+balance leaves **all of them identical**, while `costToMax(Cyber)` *does* move — so the probe is live
+rather than inert. `levels.ts:44` is the only consumer.
+
+### 🚨 The defect this uncovered, and it is the interesting part
+
+The constant was flattened yesterday. **The sentence describing it to players was not.**
+`RARITY_MEANING` — rendered by **both** `shop.ts:511` and `trophyRoad.ts:586` on the **drop-rate
+sheet, the one screen this product treats as a legal disclosure** — still read:
+
+> *"Rarity sets how hard a fighter is to find **and how much it costs to level up**"*
+
+It stopped being true in the same commit that wrote *"It no longer affects levelling cost at all"*
+into a comment **three lines above it**. **168 shop assertions and 220 economy assertions passed over
+it**, because `shop_accept` re-derives every *number* on the screen and this was the one part of the
+disclosure that was **prose**. Now derived from `LEVEL_UP` and guarded in both places, each guard
+shown to FAIL on the wrong sentence.
+
+**The general lesson, which is worth more than the fix:** a battery that checks every number will
+sail past a false *claim*. Where a screen makes a promise in words, the words need deriving too.
+
+### The old recommendation is WITHDRAWN, and the reason is recorded
+
+This entry used to recommend *"make rarer kits more DISTINCTIVE"* as the way to give rarity a job.
+**That was measured and rejected** — `rules.ts:2370` records eight candidate kits tested with
+**0 of 55 pairs indistinguishable** and no balance change shipped. Uri's answer supersedes it
+anyway: rarity is **acquisition rarity only**, which is the genre norm and needs no job beyond it.
+
+<details>
+<summary>The original entry, kept because the reasoning was sound and only the premise changed</summary>
+
+The argument was that in Clash Royale, cost scaling is a *consequence* of copy scarcity — rare cards
+are hard to *find*, and the cost reflects it. Here there is no scarcity mechanic behind it, so once
+you own a rare character, rarity was a **pure penalty**: same power, 4.5× the price. Three ways out
+were offered — keep it, flatten the cost, or make rarer kits more distinctive — and the third was
+recommended on the grounds that Brawl Stars' rarest brawlers are not stronger, they are *weirder*.
+**Uri chose the second.** The guard that mattered still stands either way: "more distinctive" must
+never quietly mean "stronger", or rarity becomes power through the back door.
+
+</details>
 
 **What shipped, and it is genre-faithful:** rarity no longer grants power (tier spread **20.7 pp →
 4.0 pp**, below the ~9 pp noise floor), and instead scales **upgrade cost** 1.0× → 4.5× — Normal

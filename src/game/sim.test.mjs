@@ -2569,9 +2569,16 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
   // *"Match how common games do it. There is a reason for it."* The reason is his own
   // §22 answer — this becomes humans vs. humans, and **rarity-as-power is pay-to-win
   // that skill cannot close.** Brawl Stars brawlers and Clash Royale cards are balanced
-  // at equal level; rarity there governs ACQUISITION and UPGRADE COST. So it does here:
+  // at equal level; rarity there governs ACQUISITION and UPGRADE COST.
+  //
+  // ⚠️ CORRECTED 2026-08-06. The old wording read: "So it does here:
   // `economy/tuning.ts:LEVEL_UP.rarityCostMultiplier` charges a Cyber 4.5x a Normal to
-  // reach the same level, and `rules.ts` DEVIATION #12 flattened the power ramp.
+  // reach the same level". That is FALSE — the multiplier is now 1.0 across every tier
+  // (`68cac7a`, DECISIONS §26; Uri: "it means nothing besides the rarity to obtain it").
+  // Rarity here governs ACQUISITION ONLY. `rules.ts` DEVIATION #12 flattened the power
+  // ramp and the cost ramp is flat too, so a Cyber and a Normal cost an identical 44,770
+  // coins to max. The half of the Clash Royale comparison that survives is the first
+  // half: balanced at equal level.
   //
   // MEASURED, 110 matchups x 32 seeds, `smart2` (`tools/tmp/roster_lab.mjs`):
   //   tier means   BEFORE  40.4 · 41.7 · 46.3 · 50.0 · 58.7 · 61.1   spread 20.7 pp

@@ -2082,11 +2082,23 @@ export function speedMultiplier(id: CharacterId): number {
 //   **the level span must comfortably exceed the rarity span, and rarity must pay for its
 //   power somewhere other than in power — namely in what a level COSTS.**
 //
-// That second half lives in `economy/tuning.ts:LEVEL_UP.rarityCostMultiplier`, which is
-// Clash Royale's rarity-scaled upgrade cost transplanted onto a game where rarity also
-// grants base power. The trade it makes legible: a rare character is the better long-run
-// investment, a common one is far cheaper to max. Both of Uri's answers stay true —
-// rarer IS stronger like for like (§13), and investment DOES overcome rarity (§22).
+// ⚠️ CORRECTED 2026-08-06 — THAT SECOND HALF NO LONGER EXISTS, and the old wording is
+// kept here because it was wrong on BOTH of its claims and someone will otherwise
+// re-derive it. It read: "That second half lives in
+// `economy/tuning.ts:LEVEL_UP.rarityCostMultiplier`, which is Clash Royale's
+// rarity-scaled upgrade cost transplanted onto a game where rarity also grants base
+// power. The trade it makes legible: a rare character is the better long-run investment,
+// a common one is far cheaper to max."
+//
+//   1. Rarity does NOT grant base power — DEVIATION #12 flattened it (DECISIONS §24b),
+//      tier spread 20.7 pp -> 4.0 pp, below the ~9 pp noise floor.
+//   2. Rarity does NOT scale upgrade cost — `rarityCostMultiplier` is 1.0 across every
+//      tier (`68cac7a`, DECISIONS §26). Every character costs 44,770 coins to max.
+//
+// So there is no trade to make legible: rarity is ACQUISITION RARITY ONLY, which is what
+// Uri asked for ("it means nothing besides the rarity to obtain it") and is the genre
+// norm. §22's answer stands untouched — investment overcomes rarity, now trivially,
+// because rarity costs nothing extra to invest in.
 
 /** A brand-new character. Levels are 1-based so "Lv 1" is the floor, never "Lv 0". */
 export const LEVEL_MIN = 1;
@@ -2366,10 +2378,19 @@ export function powerIndex(id: CharacterId): number {
 //
 // Rarity cannot be given a distinctiveness job in this roster at a price worth paying.
 // The variety is already there — it simply is not where rarity is, and rarity is fixed
-// identity (`CharacterDef.face`: "which food, which rarity" is not ours to move). So §26
-// resolves on one of its other two branches — flatten `LEVEL_UP.rarityCostMultiplier`, or
-// keep rarity as prestige and acquisition — and that call is Uri's, in `economy/tuning.ts`,
-// which this pass does not own.
+// identity (`CharacterDef.face`: "which food, which rarity" is not ours to move).
+//
+// ✅ RESOLVED 2026-08-06 — Uri took the FLATTEN branch. The paragraph above used to end
+// "So §26 resolves on one of its other two branches ... and that call is Uri's", which
+// presented this as an open choice. It is not: `LEVEL_UP.rarityCostMultiplier` is 1.0
+// across every tier (`68cac7a`), so every character costs an identical 44,770 coins to
+// max, and rarity is ACQUISITION RARITY ONLY. Uri: "as far as i understand in all other
+// games it means nothing besides the rarity to obtain it."
+//
+// The measurement above is what made that answer cheap to give, so it is kept in full:
+// the distinctiveness branch was tested and REJECTED — eight candidate kits, 0 of 55
+// pairs indistinguishable, no balance change shipped. Anyone tempted to revive "make
+// rarer kits weirder" should read it first.
 //
 // **Do not re-derive this.** `node tools/tmp/kit_lab.mjs --seeds 32 --json <out>` is the
 // whole measurement and `tools/tmp/stage_kit.mjs` is how a candidate roster is built.
