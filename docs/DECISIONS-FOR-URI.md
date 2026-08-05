@@ -15,8 +15,8 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | # | question | in force now | my recommendation | cost to reverse |
 |---|---|---|---|---|
 | **6** | **⚠️ Lobby reference plates** | none exist | **only you can fix this — it blocks all menu scoring** | drop 3–4 screenshots in |
-| **12** | ⚠️ **Game is now MUCH harder: 51.2% → 31.8%** | the harder version | **your call — this one is big** | `ENEMY_MAX_HP` ≈123 restores it |
-| **15** | Should a fleeing enemy shoot at you? | it fires backwards | **measured at a further −25.9pp — parked, not landed** | a two-word patch |
+| **12** | Game got harder: 51.2% → 31.8% | — | ✅ **ANSWERED — land the 4th bug + `ENEMY_MAX_HP` 90 → ~52.8%** | in flight |
+| **15** | Should a fleeing enemy shoot at you? | — | ✅ **ANSWERED — yes, land it** (with §12's HP 90) | in flight |
 | **16** | Soup lost its red band, egg went cream, cast p95 is +0.027 over reference | shipped | **look at it — these are looks, not measurements** | per-character, self-contained |
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
 | **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | no concealment | **your call — this is a feature, not an art pass** | new mechanic |
@@ -30,7 +30,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **4** | `ROSTER_GATED` | off | **yours** — shop is built and honest either way | one flag |
 | **2** | Timeout tiebreak | HP fraction → zone → you | **keep** (it now actually fires) | a few lines |
 | **3** | Trail damage cap | 1 per tick | **keep** | one constant |
-| **13** | Rarity runs backwards; the stat card is fiction | as built | **decide if rarity means power** — half the grid is settled at select | a real build, not a tune |
+| **13** | Rarity runs backwards; the stat card is fiction | — | ✅ **ANSWERED — rarity MEANS power; build real health + speed** | in flight |
 | **14** | Portrait phones: 65% black bars | letterboxed to 4:3 | **prompt to rotate** — or rethink the fairness model | one prompt, or a model rework |
 | **8** | Pointer lock | shipped as built | ✅ **ANSWERED — Uri: "works good"** | — |
 | **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
