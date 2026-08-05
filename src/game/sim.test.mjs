@@ -19,7 +19,11 @@ import { createMatch, stepMatch } from './sim.ts';
 // Section 16 drives the AI for a single tick without the rest of `stepMatch`, which is
 // the only way to observe a projectile fired at zero separation before the projectile
 // step in that same tick resolves and deletes it. See the note on `coincidentAI`.
-import { stepAI } from './ai.ts';
+// Section 20 asserts the enemy's half of rules that were already tested on the player's
+// half. `pressValue` is imported rather than re-derived for the same reason
+// `statusReadyAt` is: a copy of the driver's ranking arithmetic would only test the copy,
+// and the whole point of that check is that the key and the sim cannot drift apart.
+import { pressValue, stepAI } from './ai.ts';
 // Section 17 needs the real damage path to prove that taking a hit restarts the
 // out-of-combat delay — modelling `lastDamagedAt` by hand would test the model.
 // Section 19 fires Lollipop's slam directly, because the thing under test is that it
@@ -1104,7 +1108,15 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       JSON.stringify(state.enemy.facing));
   }
   {
-    // And a stunned AI still does not re-point, coincident or not.
+    // ⚠️ CHANGED ON PURPOSE, 2026-08-05, and stated rather than deleted.
+    //
+    // This used to assert "a stunned AI does not re-point at all", which was never a
+    // rule — it was a side effect of `ai.ts` gating the facing on `aiFrozen` along with
+    // everything else, and it is exactly the asymmetry §20(a) removes. The rule is that
+    // AIM IS NOT MOVEMENT: `sim.ts:applyAim` re-points a stunned PLAYER every tick and
+    // only `speed` goes to 0, so a stunned enemy re-points too. What still holds, and is
+    // what section 16 is actually about, is the ZERO-SEPARATION rule below it — the
+    // absence of a bearing is what preserves a facing, not the presence of a stun.
     const arena = makeArena({ width: 2000, height: 2000 });
     const state = playingMatch(arena, 'hamburger', 'taco');
     state.player.x = 900; state.player.y = 700;
@@ -1112,7 +1124,22 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     state.enemy.facing = { x: 1, y: 0 };
     state.enemy.status.stunnedUntil = state.elapsed + 5000;
     stepMatch(state, 16.667, noInput);
-    check('a stunned AI does not re-point at all', state.enemy.facing.x === 1 && state.enemy.facing.y === 0,
+    check('a stunned AI re-points at the player, exactly as a stunned player re-aims',
+      approx(state.enemy.facing.x, 0) && approx(state.enemy.facing.y, -1),
+      JSON.stringify(state.enemy.facing));
+  }
+  {
+    // …and the zero-separation rule outranks it: coincident AND stunned still keeps the
+    // facing it held, because there is no bearing to adopt.
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena, 'hamburger', 'taco');
+    state.player.x = 900; state.player.y = 900;
+    state.enemy.x = 900; state.enemy.y = 900;
+    state.enemy.facing = { x: 1, y: 0 };
+    state.enemy.status.stunnedUntil = state.elapsed + 5000;
+    stepAI(state, 16.667, []);
+    check('coincident AND stunned: still no bearing, so still no re-point',
+      state.enemy.facing.x === 1 && state.enemy.facing.y === 0,
       JSON.stringify(state.enemy.facing));
   }
 }
@@ -1668,16 +1695,20 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   // Lollipop is the only fighter in the roster with no `ranged` weapon at all. That is a
   // legitimate archetype and it is NOT what this ratchet is guarding. What it guards is
   // the consequence: `ai.ts:pickSniperWeapon` — the ONLY weapon picker the flee branch
-  // can reach — requires `w.type === 'ranged'`, so an AI of a melee-only character
-  // cannot attack at all while it is fleeing (below AI_FLEE_HP_FRACTION of its pool).
-  // Exactly the same shape as the `self`-weapon hole fixed in DEVIATION #7, and it is
-  // still open. One character in that hole is a design choice; two is a pattern nobody
-  // decided on.
+  // could reach — required `w.type === 'ranged'`, so an AI of a melee-only character
+  // could not attack at all while fleeing (below AI_FLEE_HP_FRACTION of its pool).
+  // Exactly the same shape as the `self`-weapon hole fixed in DEVIATION #7.
+  //
+  // ✅ CLOSED. `ai.ts` now has ONE selector whose `allow` is `Record<WeaponType, boolean>`,
+  // so every call site names every category and `tsc` refuses a fourth. §20(c) asserts
+  // the behaviour. This check stays because the ARCHETYPE is what made the hole visible:
+  // if a second melee-only character ever arrives, the driver work it depends on should
+  // be re-read rather than assumed.
   const meleeOnly = CHARACTER_IDS.filter((id) =>
     !CHARACTERS[id].weapons.some((w) => w.type === 'ranged'));
   check('exactly one character has no ranged weapon, and it is Lollipop',
     meleeOnly.length === 1 && meleeOnly[0] === 'lollipop',
-    `melee-only: [${meleeOnly.join(', ')}] — ai.ts:pickSniperWeapon can return nothing for any of these while fleeing`);
+    `melee-only: [${meleeOnly.join(', ')}] — every AI branch must be able to select a weapon for these`);
 
   // ── (d) …SO ITS SWING HAS TO BE THE BEST SWING ────────────────────────────
   //
@@ -1769,16 +1800,14 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   // implements exactly that — `movePlayer` reads `stunnedUntil` and `attemptAttack` is
   // called unconditionally, so a stunned player is rooted and keeps shooting.
   //
-  // ⚠️ `ai.ts:stepAI` does NOT: it gates `chosenIndex` on `aiFrozen`, so a stunned AI is
+  // `ai.ts:stepAI` used NOT to: it gated `chosenIndex` on `aiFrozen`, so a stunned AI was
   // rooted AND silenced. Measured (`tools/tmp/stun_symmetry.mjs`): over one full 2000 ms
-  // stun, with both fighters pinned in range, a stunned player fires 100% of its shots
-  // and a stunned AI fires 0% — 11 of 11 characters, in that direction, every time.
-  // Priced on a staged sim (`tools/tmp/roster_table.mjs --sim`): removing the asymmetry
-  // costs the player 9.5 pp of aggregate win rate under `smart2` and moves individual
-  // matchups by up to 84.4 pp. It is NOT fixed here — `ai.ts` is not this owner's file
-  // and a 9.5 pp swing is a declared difficulty change, which `DECISIONS §12` reserves.
-  // This check asserts the side that matches the documented rule, so that whichever way
-  // the divergence is resolved it has to be resolved deliberately.
+  // stun, with both fighters pinned in range, a stunned player fired 100% of its shots
+  // and a stunned AI fired 0% — 11 of 11 characters, in that direction, every time.
+  //
+  // ✅ CLOSED, and declared rather than compensated for: §20(a) asserts the AI half of
+  // the same rule, and the win-rate consequence is written up in `DECISIONS §12` where
+  // `ENEMY_MAX_HP` — the dial that would offset it — is reserved for Uri.
   {
     const arena = makeArena({ width: 2000, height: 2000, maxSafeRadius: 100000 });
     const state = playingMatch(arena, 'hamburger', 'donut');
@@ -1794,6 +1823,275 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     check('a stunned PLAYER is rooted but not silenced — the rule is a movement lock',
       fired && state.player.x === x0,
       `fired=${fired}, moved ${(state.player.x - x0).toFixed(3)}wu`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 20. THE DRIVER — the same rules, in both hands
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `combat.ts:attemptAttack` is shared, so the two sides RESOLVE an attack identically.
+// That guarantees nothing about which attacks each side gets to ATTEMPT, and `ai.ts` had
+// quietly narrowed the enemy's side four separate times — a heal only the player could
+// use (`07a4e3a`), a stun that also silenced, a flee branch that could select nothing at
+// all for a melee-only character, and a flee branch that aimed backwards.
+//
+// Everything below drives the real `stepAI` / `stepMatch`. Nothing asserts the shape of
+// the code; each check puts the AI in a specific state and asserts what it does. That
+// matters here more than anywhere else in this file: all four defects were invisible to
+// `tsc`, to 143 assertions, and to every screenshot, and three of them were found only
+// by pointing an instrument at the enemy's half of a rule that was already tested on the
+// player's half.
+{
+  console.log('\n20. The AI plays by the same rules it is judged by');
+
+  const OPEN = 1e6;
+  const TICK = 16.667;
+  /** Fresh AI fixture: `charId` in the ENEMY seat, both fighters pinned `d` apart, every
+   *  cooldown ready, nothing on the floor and no ring in reach — so the only thing that
+   *  can decide the tick is the branch under test. */
+  function aiFixture(charId, { d = 60, opponent = 'donut', flee = false } = {}) {
+    const arena = makeArena({ width: 4000, height: 4000, maxSafeRadius: OPEN });
+    const state = playingMatch(arena, opponent, charId);
+    state.enemy.x = 2000; state.enemy.y = 2000;
+    state.player.x = 2000 + d; state.player.y = 2000;
+    state.player.hp = 1e9; state.player.maxHp = 1e9;
+    if (flee) state.enemy.hp = state.enemy.maxHp * (AI_FLEE_HP_FRACTION - 0.05);
+    state.enemy.lastUsed = state.enemy.lastUsed.map(() => -1e9);
+    return state;
+  }
+  /** One `stepAI` tick. Returns what the AI did with it. */
+  function aiTick(state) {
+    const before = { x: state.enemy.x, y: state.enemy.y };
+    const events = [];
+    state.elapsed += TICK;
+    stepAI(state, TICK, events);
+    return {
+      fired: events.filter((e) => e.type === 'weapon-fired' && e.fighterRole === 'enemy').map((e) => e.weaponKey),
+      moved: Math.hypot(state.enemy.x - before.x, state.enemy.y - before.y),
+      facing: state.enemy.facing,
+    };
+  }
+
+  // ── (a) A STUN LOCKS MOVEMENT. IT DOES NOT SILENCE. ───────────────────────
+  //
+  // `rules.ts` says it once — "stunned = movement locked to 0" — and `sim.ts:movePlayer`
+  // implements exactly that: a stunned player still aims, still fires, and only its
+  // `speed` goes to 0 (§19(g) asserts that half). `ai.ts` read the same flag as "the
+  // enemy's turn does not happen", gating the facing, the heal, the whole flee branch
+  // and the chase branch's weapon choice on it.
+  //
+  // The measurement that found it (`tools/tmp/stun_symmetry.mjs`, one full 2000 ms stun,
+  // both fighters pinned in range): the stunned PLAYER fired 100% of its shots and the
+  // stunned AI fired 0%, for 11 of 11 characters. The same probe now reports 0 of 11
+  // asymmetric. A roster-wide loop rather than one character, because it WAS roster-wide.
+  {
+    const silenced = [];
+    const walked = [];
+    const lookedAway = [];
+    for (const id of CHARACTER_IDS) {
+      const state = aiFixture(id);
+      state.enemy.status.stunnedUntil = state.elapsed + STUN_DURATION_MS;
+      const r = aiTick(state);
+      if (r.fired.length === 0) silenced.push(id);
+      if (r.moved > 1e-9) walked.push(id);
+      if (r.facing.x < 0.99) lookedAway.push(`${id} ${r.facing.x.toFixed(2)}`);
+    }
+    check('a stunned AI still fires — all 11, exactly as a stunned player does',
+      silenced.length === 0, `silenced: [${silenced.join(', ')}]`);
+    check('a stunned AI does not move — the lock is a movement lock and it still bites',
+      walked.length === 0, `moved: [${walked.join(', ')}]`);
+    check('a stunned AI still aims at the player, because aim is not movement',
+      lookedAway.length === 0, `facing away: [${lookedAway.join(', ')}]`);
+  }
+  {
+    // The FLEE branch was gated on the same flag as a whole block, so it needs its own
+    // check: fixing only the chase branch would leave a stunned, wounded AI silent.
+    const silenced = [];
+    const walked = [];
+    for (const id of CHARACTER_IDS) {
+      const state = aiFixture(id, { flee: true });
+      state.enemy.status.stunnedUntil = state.elapsed + STUN_DURATION_MS;
+      const r = aiTick(state);
+      if (r.fired.length === 0) silenced.push(id);
+      if (r.moved > 1e-9) walked.push(id);
+    }
+    check('a stunned AI in the FLEE branch fires too, and still cannot move',
+      silenced.length === 0 && walked.length === 0,
+      `silenced: [${silenced.join(', ')}] · moved: [${walked.join(', ')}]`);
+  }
+
+  // ── (b) THE DRIVER'S RANKING KEY IS THE DAMAGE IT DELIVERS ────────────────
+  //
+  // Both drivers ranked weapons by the authored `damage` field, which is per-PELLET,
+  // per-PECK, and for a combo weapon is not the damage at all — Taco's Double Toss is
+  // authored 0 and delivers 23. So the key and the quantity it was trying to maximise
+  // were different numbers, and multi-part weapons were systematically under-used.
+  //
+  // `ai.ts:pressValue` now answers "what does one press deliver from here", including
+  // the part `pellets x damage` gets wrong: `combat.ts` fans pellet i out at
+  // `(i - (n-1)/2) * spreadDeg` and an off-axis pellet passes `d sin(theta)` wide, so it
+  // stops landing past `HIT_RADIUS_VS_PLAYER / |sin theta|`. Sushi's Rice Spray is worth
+  // 6 at 40 wu and 2 at 58.
+  //
+  // This asserts the estimate against the SIM, not against a copy of its arithmetic:
+  // every offensive weapon of every character, at every band the AI decides in, fired
+  // through the real `attemptAttack` and flown by the real `stepProjectiles`.
+  {
+    const BANDS = [40, 58, 70, 84, 98, 116, 128, 140];
+    /** Damage one press actually puts on the player, measured. `phase = 'ended'` parks
+     *  the playing block (aim, movement, `stepAI`, world tick) while leaving
+     *  `stepProjectiles` running — it is deliberately never gated on phase — so the only
+     *  thing moving in the fixture is the shot under test. */
+    function delivered(charId, wi, d) {
+      const state = aiFixture(charId, { d });
+      state.enemy.facing = { x: 1, y: 0 };
+      state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+      let dealt = 0;
+      const take = (evs) => {
+        for (const ev of evs) {
+          if (ev.type === 'hit-landed' && ev.targetRole === 'player' && ev.source?.kind === 'weapon') dealt += ev.amount;
+        }
+      };
+      const fired = [];
+      attemptAttack(state, 'enemy', wi, fired);
+      take(fired);
+      state.phase = 'ended';
+      for (let t = 0; t < 4000 && state.projectiles.length; t += TICK) {
+        state.player.x = 2000 + d; state.player.y = 2000;
+        take(stepMatch(state, TICK, noInput));
+      }
+      return dealt;
+    }
+
+    const wrong = [];
+    let cells = 0;
+    for (const id of CHARACTER_IDS) {
+      CHARACTERS[id].weapons.forEach((w, i) => {
+        if (w.type === 'self') return;
+        for (const d of BANDS) {
+          if (d > (w.range ?? Infinity)) continue;
+          cells++;
+          const got = delivered(id, i, d);
+          const est = pressValue(w, d);
+          if (Math.abs(got - est) > 1e-9) wrong.push(`${id}/${w.key}@${d} sim ${got} vs key ${est}`);
+        }
+      });
+    }
+    check(`the driver's ranking key equals what the sim delivers, in all ${cells} weapon-band cells`,
+      wrong.length === 0, wrong.slice(0, 6).join(' · '));
+
+    // And the two weapons the old key demonstrably lost. Behavioural: the real `stepAI`
+    // choosing for itself, with everything off cooldown and in range.
+    const picks = (id, d) => aiTick(aiFixture(id, { d })).fired;
+    check('the AI picks Burrito\'s 4-pellet Topping Swarm (delivers 20) over its Disc (10)',
+      picks('burrito', 98).includes('Swarm'), `picked [${picks('burrito', 98).join(', ')}]`);
+    check('the AI picks Taco\'s Double Toss (authored damage 0, delivers 23) over Filling Toss (12)',
+      picks('taco', 98).includes('Double'), `picked [${picks('taco', 98).join(', ')}]`);
+  }
+
+  // ── (c) EVERY BRANCH CAN SELECT A WEAPON, FOR EVERY CHARACTER ─────────────
+  //
+  // Three selection helpers, three silent category exclusions (see the header of
+  // `ai.ts`). There is now one selector whose `allow` is `Record<WeaponType, boolean>`,
+  // so a fourth category cannot be added to `rules.ts` without `tsc` demanding that
+  // every call site says what it does with it. These are the behavioural half.
+  {
+    const silent = [];
+    for (const id of CHARACTER_IDS) {
+      // 60 wu is inside every character's shortest reach, so "nothing fired" here can
+      // only mean the branch could not SELECT — never that nothing was in range. That
+      // distinction is the whole finding: a metric that conflates "cannot" with
+      // "nothing to" reports a defect that is not there, and hides one that is.
+      const reach = CHARACTERS[id].weapons.filter((w) => w.type !== 'self' && 60 <= (w.range ?? Infinity)).length;
+      if (reach === 0) { silent.push(`${id} (nothing reaches 60wu)`); continue; }
+      if (aiTick(aiFixture(id, { d: 60, flee: true })).fired.length === 0) silent.push(id);
+    }
+    check('every character can attack from the FLEE branch, including the melee-only one',
+      silent.length === 0, `selected nothing: [${silent.join(', ')}]`);
+
+    // The type-level guard has a runtime shadow: every weapon TYPE the roster defines
+    // must be observable coming out of the driver. `self` is §18(d)'s hole, `ranged` was
+    // never in doubt, and `melee` is the one the flee branch could not reach.
+    const seen = new Set();
+    for (const id of CHARACTER_IDS) {
+      for (const opts of [{ d: 60 }, { d: 60, flee: true }, { d: 128 }]) {
+        for (const key of aiTick(aiFixture(id, opts)).fired) {
+          seen.add(CHARACTERS[id].weapons.find((w) => w.key === key).type);
+        }
+      }
+      const heal = CHARACTERS[id].weapons.find((w) => w.type === 'self');
+      if (heal) {
+        const state = aiFixture(id);
+        state.enemy.hp = state.enemy.maxHp * AI_SELF_HEAL_HP_FRACTION - 1;
+        for (const key of aiTick(state).fired) seen.add(CHARACTERS[id].weapons.find((w) => w.key === key).type);
+      }
+    }
+    const types = new Set(CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons.map((w) => w.type)));
+    check('the driver can be observed firing every weapon TYPE the roster defines',
+      [...types].every((t) => seen.has(t)),
+      `roster has [${[...types].join(', ')}], driver reached [${[...seen].join(', ')}]`);
+  }
+
+  // ── (d) …AND "FLEE AND SNIPE" STILL DOES NOT SNIPE ────────────────────────
+  //
+  // ⚠️ AN OPEN DEFECT, PINNED RATHER THAN FIXED — the same device §19(g) used while the
+  // stun asymmetry was out of its owner's scope. Selecting a weapon (c) and DELIVERING
+  // with it are two things, and only the first is fixed.
+  //
+  // The flee branch points `facing` directly AWAY from the player and then calls
+  // `attemptAttack`, which resolves BOTH the melee cone and the projectile heading off
+  // `attacker.facing`. So every straight shot a retreating enemy takes flies away from
+  // it. Measured (`tools/tmp/flee_probe.mjs`, 8 s below the threshold at 60 wu): 8 of 11
+  // characters deliver ZERO damage from the branch, and every point of damage in the
+  // table comes from the three HOMING weapons, which curve back on their own. Lollipop —
+  // the character (c) was written for — now selects and swings 11 times and connects
+  // once, with the 360-degree slam that needs no bearing.
+  //
+  // WHY IT IS NOT FIXED HERE. Deleting the aim line is a two-word patch and it is priced,
+  // paired on the same 32 seeds: aggregate player win 31.8% -> 5.9% under `smart2`
+  // (-25.9 pp, on top of the -19.3 pp the three landed fixes cost). The mechanism is a
+  // threshold, not a slope — AI damage per match goes 59.7-111.0 to 98.1-113.5 against a
+  // 100 HP player, so every character in the roster crosses the pool at once. At 5.9% the
+  // roster table stops discriminating at all (strength sd 20.6 -> 6.8 pp), so it would
+  // also blind the instrument the next balance pass depends on. `DECISIONS §12` is where
+  // a difficulty change of that size is decided, and `ENEMY_MAX_HP` is Uri's dial.
+  //
+  // The assertion is the DIAGNOSIS, stated so precisely that it must fail the moment
+  // anyone changes the aim — at which point they are made to come and read this.
+  {
+    const homing = [];
+    const straight = [];
+    let retreated = 0;
+    for (const id of CHARACTER_IDS) {
+      const state = aiFixture(id, { d: 60, flee: true });
+      const x0 = state.enemy.x;
+      const byWeapon = {};
+      // Only the PLAYER is pinned: the enemy must be free to retreat, because what is
+      // under test is what it does while genuinely fleeing.
+      for (let t = 0; t < 4000; t += TICK) {
+        state.player.x = 2000 + 60; state.player.y = 2000;
+        state.player.hp = 1e9; state.player.maxHp = 1e9;
+        state.enemy.hp = state.enemy.maxHp * (AI_FLEE_HP_FRACTION - 0.05);
+        for (const ev of stepMatch(state, TICK, noInput)) {
+          if (ev.type === 'hit-landed' && ev.targetRole === 'player' && ev.source?.kind === 'weapon') {
+            byWeapon[ev.source.weaponKey] = (byWeapon[ev.source.weaponKey] ?? 0) + ev.amount;
+          }
+        }
+      }
+      for (const [key, dmg] of Object.entries(byWeapon)) {
+        const w = CHARACTERS[id].weapons.find((k) => k.key === key);
+        // A 360-degree cone needs no bearing, so it is not evidence either way.
+        if (w.cone >= 360) continue;
+        (w.homing ? homing : straight).push(`${id}/${key} ${dmg}`);
+      }
+      if (state.enemy.x < x0) retreated++;
+    }
+    check('a fleeing AI lands ONLY its homing weapons — the branch aims away from the target',
+      straight.length === 0 && homing.length > 0,
+      `straight-line hits that should be impossible: [${straight.join(', ')}] · homing: [${homing.join(', ')}]`);
+    check('and it is genuinely fleeing while it does it — all 11 retreat',
+      retreated === CHARACTER_IDS.length, `${retreated}/${CHARACTER_IDS.length} moved away from the player`);
   }
 }
 
