@@ -1775,3 +1775,50 @@ for 65 tiles, judges drift toward a **bijection** despite the instruction, produ
 chains. `mustardblast`→`patty`→`cap` appears there while the same glyphs score 4/5 and 5/5 with zero
 confusion on the 28-tile plate. **The 65-plate is authoritative for which pairs COLLIDE across
 families — not for per-icon scores.**
+
+---
+
+## 33. 🔴 §17's bug is FIXED and REDEPLOYED — and your "now" was you, not the code
+
+> *"i can't hear on menus as well now."*
+
+**You were right, it was real, and it was only ever broken on the thing you play.**
+
+`src/audio/music.ts` set the track URL as a **hand-written string literal**, `'/audio/…'`. Vite
+rewrites the asset URLs it *resolves* at build time — imports, and `/x` inside HTML and CSS — but it
+**does not rewrite string literals in TypeScript**. So under `DEPLOY_BASE=/food-arena/` every other
+asset shipped as `/food-arena/assets/…` and **the theme alone shipped unbased**, asking the host for
+`/audio/…` and getting a **404**. The mp3 had been deployed correctly the whole time; only the
+request was wrong. **It was the only absolute asset path in all of `src/`.**
+
+Measured on the live page before the fix: `rms 0.000000`, `MediaError 4`, `404`. Autoplay was
+**cleared, not assumed** — the audio engine was running fine.
+
+⚠️ **"It never worked" is the honest answer to your "now".** The URL had no base in *any* revision,
+and the first deploy postdates the theme. **Your "now" is you moving from local play to the deploy** —
+which is exactly why your reports are worth more than our gates: you are the only one testing the
+thing we actually ship.
+
+**Fixed, and redeployed.** Rebuild it in your browser (hard refresh) and the menu theme should play.
+
+**A second bug fell out of the same investigation:** a deep-linked or reloaded `?screen=match` was
+**starting the theme over the fight** on your first tap. Now off on every path, per your *"during
+matches off"*.
+
+### ❓ One question for you, because it cannot be tested here
+
+There is **no Safari in this environment**, and you play on a phone. Two iOS-specific causes remain
+possible *in addition* to the 404 that was fixed:
+
+> **On your phone: is the side silent/ringer switch off? And after a hard refresh, do you now hear
+> the menu theme?**
+
+If it is still silent with the ringer on, it is `webkitAudioContext` resume timing and needs a
+different fix.
+
+### 🔴 And a separate gap that may be part of what you meant
+
+**The menu buttons have no click sound at all.** `uiClick()` exists but is only ever called by the
+settings sliders — **every other button in the game is silent when tapped.** If *"can't hear on
+menus"* partly meant taps rather than music, that gap is real, it is unrelated to the 404, and it is
+now on the list.

@@ -205,6 +205,48 @@ reference, used to score characters. `gameplay_topdown` existed and was not used
 categories and prints the actual draw.
 ---
 
+## 3b. 🚨 NOTHING HERE HAD EVER MEASURED A *BASED* BUILD — the deployed artefact was untested
+
+Uri: *"i can't hear on menus as well now."* The third bug in this project's history found by him
+simply playing it, and like the other two it was invisible to every gate.
+
+**`src/audio/music.ts` set `TRACK_URL` as a hand-written string literal, `'/audio/…'`.**
+**Vite rewrites the asset URLs it RESOLVES at build time — imports, and `/x` inside HTML and CSS.
+It does not rewrite string literals in TypeScript.** So under `DEPLOY_BASE=/food-arena/` every other
+asset shipped as `/food-arena/assets/…` and the track alone shipped **unbased**, requesting
+`https://<host>/audio/…` and getting a **404**. The mp3 was deployed correctly the whole time; only
+the request was wrong. **It was the only absolute asset path in all of `src/`.**
+
+Measured on the live deployed page in a real browser: `rms 0.000000` over 60 blocks,
+`engine=running`, `MediaError 4`, `GET …/audio/bounce-and-bash.mp3 → 404`. **Autoplay was formally
+CLEARED, not assumed** — the context was running. The leading hypothesis was wrong and the probe
+said so.
+
+### Why 427 audio assertions could never have caught it
+
+1. **`OfflineAudioContext` has no media element**, so no offline assertion can ever see the theme.
+2. **Every live audio instrument points at a server rooted at `/` — where the bug does not exist.**
+
+→ **The general rule, and it is not only about audio: measure the artefact you SHIP, on the PATH you
+ship it to.** A whole class of defect — base paths, absolute URLs, service-worker scopes, CORS,
+manifest links — is *invisible* at `/` and *only* exists under a deploy base. This project had
+`verify-head.mjs` for "does the committed tree build" and nothing at all for "does the built bundle
+work where it is served from."
+
+*(And "it never worked" is the honest answer to Uri's "now" — `TRACK_URL` had no base in any
+revision. His "now" is him moving from local play to the deploy. **A user's timeline is evidence
+about the user, not about the code.**)*
+
+### The instrument lied first, and was caught only by a control it did not need to have
+
+The new guard's first static server **served the build root for paths outside the base**, so the
+BASED leg reported **SOUND** on a bundle that provably contained the broken literal. It was caught
+only because the deployed artefact had already been measured directly. **Instrument fault #20** —
+and the pattern is now familiar enough to state as a rule: *a harness that is more forgiving than
+production will certify a bug as fixed.*
+
+---
+
 ## 4. Verify the artefact you are shipping
 
 `tsc --noEmit` and the tests run against the **working tree**, including untracked files.

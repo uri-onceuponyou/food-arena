@@ -140,7 +140,7 @@ every push.**
 | `tools/arena-scan.mjs` | **The whole-arena scoreboard.** 18 player-centred stations through the live game. Reports `playerRank` in a 16×9 salience grid, player-vs-surround luma/saturation, a hue histogram, channel clipping — **and the cumulative colour budget nobody was watching**: absolute mean saturation / warm chroma / cool chroma measured the same way the reference figures were, split ENVIRONMENT vs CAST by an exact matte, with a hue-collision number. `--list`, `--only`, `--sim-speed 0.02` for byte-comparable runs. See the colour-budget block below. |
 | `tools/aspect.mjs` | Viewport fairness. Must PASS at **0.00wu spread** across 4:3 → 32:9 → portrait. |
 | `tools/perf.mjs` | `--mode counts\|ablate\|alloc\|boot\|leak`. `--json` baselines, `--baseline` regression gate. **Hardware-independent numbers only** — it refuses to print timings as performance without `--unsafe-timing`. |
-| `tools/audio-probe.mjs` | `--mode all\|depth\|identity\|live`. **319 assertions from real rendered samples** via `OfflineAudioContext` on the production path. |
+| `tools/audio-probe.mjs` | `--mode all\|depth\|identity\|live`. **427 assertions from real rendered samples** via `OfflineAudioContext` on the production path. ⚠️ **`OfflineAudioContext` has no media element, so NO offline assertion can ever see the theme track** — that is how a 404 on the deployed build survived every one of them (`docs/LESSONS.md` §3b). |
 | `tools/match-sim.mjs` | Real `sim.ts` in Node. `--all-matchups`, `--policy idle\|smart`, `--pathmap`, `--fog`, `--ranges`, `--occlusion`. A 180s match costs ~4ms. |
 | `tools/match-play.mjs` | Drives the real game boot → menus → combat → result, sampling the HUD's own DOM. |
 | `tools/tmp/journey.mjs` | **The only end-to-end gate.** `match-play` × N round trips in ONE page session, so it can see what LEAKS between a match and the menus — GL contexts, errors, profile state. Every gate above it is a unit gate, and HEAD was unbootable for 24 commits with all of them green. `--trips`, `--viewport portrait`, `--mode timeout\|idle`. |
@@ -330,7 +330,7 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `tools/tmp/shop_accept.mjs` | **168** | every displayed price/odd re-derived in Node |
 | `tools/tmp/name_accept.mjs` | **29** | name sanitiser, both entry paths |
 | `tools/tmp/chip_probe.mjs` | **72** | pause chip vs thumb zone, 6 viewports × 2 states |
-| `node tools/audio-probe.mjs --mode all` | **389** | ⚠️ `--mode live` is flaky under load; judge by depth 91 / identity 77 |
+| `node tools/audio-probe.mjs --mode all` | **427** | ⚠️ `--mode live`'s countdown-onset checks are **pre-existing load flake, PROVEN not assumed** — untouched HEAD on a clean isolated server gave **29/29, 27/29, 26/29 on three consecutive runs**. Do not attribute them to your change without that control. Judge by **depth 91 / identity 78**. |
 | `node tools/arena-scan.mjs --selftest` | **105** | colour-budget metric + the station-placement guard |
 | `node tools/match-sim.mjs --selftest` | **15** | the scripted policies, against a hand-derivable answer |
 | `node tools/tmp/valuescan.mjs --selftest` | **105** | value-ladder metric on synthetic frames. ⚠️ Was **57** until `c3e3fbc`/`fc3d048` and **78** until the `dLcontact` pass; a run reporting 57 or 78 is an OLD TREE, not a pass. §L and §M are the two known-bad-input proofs — §L shows `dL` returning a confident **wrong** answer in both directions, §M shows a `__meta` stamp lifted off another file being **refused** |
