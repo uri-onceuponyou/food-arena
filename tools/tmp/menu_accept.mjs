@@ -30,6 +30,10 @@
  *     asserted here with real (not synthetic) mouse events routed through the
  *     browser's own hit testing, in BOTH directions: the canvas must receive events
  *     during a match, and the menus' own buttons must still receive theirs.
+ *  8. THE SHOP IS HONEST WHILE IT CANNOT SELL. Added with `src/ui/screens/shop.ts`.
+ *     Every box is currently a strict loss (its best possible payout is below its own
+ *     price, in all four), so no purchase control may be live — and the screen has to
+ *     say so. Both halves are asserted, the same way the gem store's are.
  *
  * Usage: node tools/tmp/menu_accept.mjs [--flow-only]
  */
@@ -648,7 +652,7 @@ async function run() {
       page.on('pageerror', (e) => errs.push(String(e)));
       page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
 
-      for (const screen of ['opening', 'home', 'characters', 'trophies', 'settings']) {
+      for (const screen of ['opening', 'home', 'characters', 'trophies', 'shop', 'settings']) {
         // `hold` pins the title card open. Without it the screen navigates itself to
         // home after 4.5s and every measurement below races that timer — see the
         // comment on `holdMs()` in `opening.ts`. The auto-continue is asserted at its
@@ -799,7 +803,49 @@ async function run() {
       await page.click('[data-el="back"]', { force: true });
       await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
 
-      record('flow', '-', 'round-trip', true, 'home -> characters -> match -> home -> trophies -> home');
+      step = 'home -> shop';
+      // ── The shop, and why it is asserted HERE rather than trusted ─────────────
+      // It is reachable from the lobby, and while it cannot sell it has to be honest
+      // about that. `ROSTER_GATED` is false, so `ownedSet()` is the whole roster, so
+      // every character pull in every box resolves to its duplicate coin value — and
+      // every box's BEST possible payout is below its own price (900 in / 520 best,
+      // 3200 / 900, 5600 / 2200, 12000 / 2200). Nothing may therefore be purchasable.
+      //
+      // Asserted in both directions, exactly like the gem store above: every purchase
+      // control must be DISABLED at the DOM level, and the copy must say so in words.
+      // A live-looking Buy button that no-ops is the defect both menu critics punished.
+      await page.click('[data-go="shop"]', { force: true });
+      await page.waitForFunction('window.__screen === "shop" && window.__screenReady === true', null, { timeout: 20000 });
+      {
+        const shop = await page.evaluate(() => {
+          const buys = [...document.querySelectorAll('[data-buy]')];
+          return {
+            cards: document.querySelectorAll('.shop-card').length,
+            odds: document.querySelectorAll('.shop-odds-row').length,
+            buys: buys.length,
+            live: buys.filter((b) => !b.disabled).length,
+            priced: buys.filter((b) => /\d/.test(b.textContent)).length,
+            notice: document.querySelector('.shop-notice')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+          };
+        });
+        record('flow', 'shop', 'lobby-tab-reaches-the-shop', true, 'home -> shop');
+        record('flow', 'shop', 'every-container-has-a-card', shop.cards === 5, `${shop.cards} cards`);
+        // The drop table sits ON the cards rather than behind a tap, so a compliance
+        // surface is never one modal away from every screenshot and every battery.
+        record('flow', 'shop', 'drop-rates-are-published', shop.odds >= 15, `${shop.odds} odds rows`);
+        record('flow', 'shop', 'NO-purchase-button-is-live', shop.buys > 0 && shop.live === 0,
+          `${shop.live} of ${shop.buys} enabled`);
+        record('flow', 'shop', 'prices-are-still-shown', shop.priced === shop.buys,
+          `${shop.priced}/${shop.buys} carry a number`);
+        record('flow', 'shop', 'unavailability-is-stated-in-words',
+          /\b(not|nothing|no)\b[^.]{0,40}\bfor sale\b/i.test(shop.notice), shop.notice.slice(0, 90));
+      }
+
+      step = 'shop -> home';
+      await page.click('[data-el="back"]', { force: true });
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
+
+      record('flow', '-', 'round-trip', true, 'home -> characters -> match -> home -> trophies -> home -> shop -> home');
     } catch (err) {
       record('flow', '-', 'round-trip', false, `failed at "${step}": ${String(err).split('\n')[0]}`);
     }

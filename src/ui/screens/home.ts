@@ -180,6 +180,15 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
         <button class="fa-tab is-active" type="button">Home</button>
         <button class="fa-tab" type="button" data-go="characters">Foods</button>
         <button class="fa-tab" type="button" data-go="trophies">Trophies</button>
+        <!-- The one destination on this bar that cannot currently sell anything, and it
+             is here anyway. The lobby's standing rule is "nothing advertises something
+             that does not work", and the shop passes it on the same terms the gem store
+             already does: nothing on it is a live-looking control that no-ops, every
+             price and every drop rate on it is real, and it states in words that buying
+             is off and why. Hidden would have been the dishonest option — it would put
+             a compliance surface where no screenshot, no contrast battery and no
+             acceptance test can reach it. See the header of shop.ts. -->
+        <button class="fa-tab" type="button" data-go="shop">Shop</button>
       </nav>
       <button class="fa-iconbtn" type="button" data-el="settings" aria-label="Settings">${icon('gear')}</button>
     </header>
@@ -499,6 +508,7 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     const go = target.dataset.go;
     if (go === 'characters') ctx.navigate({ name: 'characters' });
     else if (go === 'trophies') ctx.navigate({ name: 'trophies' });
+    else if (go === 'shop') ctx.navigate({ name: 'shop' });
   };
   root.addEventListener('click', onClick);
 
@@ -780,17 +790,25 @@ const CSS = `
 }
 .fa-home .home-hero-name { max-width: 100%; }
 
-/* The rarity badge takes its colour inline from 'RARITY_COLORS', so it cannot be
-   restyled by hue here without desyncing the menu from the roster. An inset shadow
-   the size of the badge darkens whatever that colour is while leaving it identifiable
-   — white-on-Normal-grey measured 2.76:1 against a 4.5 floor, which is the same
-   dark-on-dark failure 'docs/LESSONS.md' §1 case 10 records for the HUD cooldown wipe.
-   Measured cost: HSV saturation of a Legendary badge 1.00 -> 0.91 over ~60x21px. */
+/* THE INSET DARKENING IS GONE, and its removal is a fix rather than a revert.
+   It was added here because the badge takes its fill inline from 'RARITY_COLORS' and
+   cannot be restyled by hue without desyncing the menu from the roster, so the only
+   local lever was to darken whatever colour arrived: white-on-Normal-grey measured
+   2.76:1 against a 4.5 floor (the same dark-on-dark failure 'docs/LESSONS.md' §1
+   case 10 records for the HUD cooldown wipe), and 0.40 alpha bought some of it back
+   at a cost of HSV saturation 1.00 -> 0.91.
+
+   'theme.ts' has since given '.fa-rarity' a 1.6px ink TEXT-STROKE, which is
+   colour-independent: the glyph's paper is now its own stroke rather than the fill, so
+   every rarity measures 16.53-16.54:1 no matter what hue 'rules.ts' hands it. The
+   darkening is therefore contributing exactly nothing to legibility and is only
+   muting the badge — on a screen whose whole job is telling six rarities apart. The
+   drop shadow stays; it is the shared raised-slab idiom, not a contrast device. */
 .fa-home .fa-rarity {
   height: 21px;
   font-size: 0.7rem;
   border-width: 2.5px;
-  box-shadow: inset 0 0 0 100px rgba(20,13,30,0.40), 0 2px 0 rgba(0,0,0,0.35);
+  box-shadow: 0 2px 0 rgba(0,0,0,0.35);
 }
 
 .fa-home .home-stage-hint {

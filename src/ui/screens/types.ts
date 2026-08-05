@@ -28,6 +28,15 @@ export type Route =
   | { name: 'home' }
   | { name: 'characters' }
   | { name: 'trophies' }
+  /**
+   * Boxes, their prices and their published drop rates.
+   *
+   * A route rather than a modal on the trophy road, because it is a destination with
+   * its own scroll region, its own bottom bar and its own responsive layout — and
+   * because a compliance surface that only exists inside a sheet is a surface no
+   * screenshot, no contrast battery and no acceptance test ever sees.
+   */
+  | { name: 'shop' }
   | { name: 'settings' }
   | { name: 'match'; player: CharacterId; enemy: CharacterId };
 

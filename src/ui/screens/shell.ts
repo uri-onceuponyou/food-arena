@@ -35,6 +35,7 @@ import { createOpeningScreen } from './opening';
 import { applyStoredSettings, createSettingsScreen } from './settings';
 import { createCharacterSelectScreen } from './characterSelect';
 import { createTrophyRoadScreen } from './trophyRoad';
+import { createShopScreen } from './shop';
 import { createMatchScreen } from './matchScreen';
 
 declare global {
@@ -115,6 +116,9 @@ export function createShell(opts: ShellOptions): Shell {
       case 'home': return createHomeScreen(ctx);
       case 'characters': return createCharacterSelectScreen(ctx);
       case 'trophies': return createTrophyRoadScreen(ctx);
+      // Pure DOM, no WebGL: the shop defines no `update()`, so mounting it stops the
+      // shell's rAF loop entirely rather than ticking an idle portrait behind it.
+      case 'shop': return createShopScreen(ctx);
       case 'settings': return createSettingsScreen(ctx);
       case 'match': return createMatchScreen(ctx, route);
     }

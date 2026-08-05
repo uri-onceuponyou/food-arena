@@ -11,8 +11,8 @@
  * `tools/tmp/` drives `http://localhost:5173/?player=…&enemy=…` and waits on
  * `window.__gameReady`. Rather than break all of it, the boot route is derived:
  *
- *   * `?screen=opening|home|characters|trophies|settings|match` — explicit, wins over
- *     everything.
+ *   * `?screen=opening|home|characters|trophies|shop|settings|match` — explicit, wins
+ *     over everything.
  *   * otherwise, if ANY match-only QA parameter is present (`player`, `enemy`,
  *     `simSpeed`, `fogRadius`, `px`, `py`) boot straight into the match, exactly as
  *     before. Those parameters have no meaning anywhere else, so their presence is
@@ -57,6 +57,7 @@ function bootRoute(profile: PlayerProfile): Route {
   }
   if (params.get('screen') === 'characters') return { name: 'characters' };
   if (params.get('screen') === 'trophies') return { name: 'trophies' };
+  if (params.get('screen') === 'shop') return { name: 'shop' };
   if (params.get('screen') === 'settings') return { name: 'settings' };
   if (params.get('screen') === 'home') return { name: 'home' };
   // A bare `/` is a cold launch, so it gets the title card. Everything above is an
