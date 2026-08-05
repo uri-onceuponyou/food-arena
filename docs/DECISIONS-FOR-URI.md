@@ -14,7 +14,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 
 | # | question | in force now | my recommendation | cost to reverse |
 |---|---|---|---|---|
-| **6** | **⚠️ Lobby reference plates** | none exist | **only you can fix this — it blocks all menu scoring** | drop 3–4 screenshots in |
+| **6** | Lobby reference plates | — | ✅ **RESOLVED — Uri supplied 5 plates** | done |
 | **12** | Game got harder | — | ✅ **DONE — flee fix + `ENEMY_MAX_HP` 90. Shipped at 52.2%** | landed |
 | **15** | Should a fleeing enemy shoot at you? | — | ✅ **DONE — it aims at you now** | landed |
 | **16** | Soup lost its red band, egg went cream, cast p95 is +0.027 over reference | shipped | **look at it — these are looks, not measurements** | per-character, self-contained |
@@ -1245,3 +1245,53 @@ statement of what rarity actually buys.
 
 **Coin-bought boxes are strictly dominated** while `ROSTER_GATED` is false — 900 coins returns 138 EV.
 They only become a real coin sink when that flag flips, which is still **§4, and still yours.**
+
+
+---
+
+## 27. ✅ §6 RESOLVED — and two of your plates confirm today's decisions
+
+You supplied five menu plates. They are in `reference/images/curated/menus/`, **gitignored and verified
+invisible to git** (`.gitignore:19`).
+
+`bs_home` · `bs_roster_grid` · `bs_character_detail` · `zb_character_detail` · `zb_progression`
+
+**This unblocks all menu scoring.** Three consecutive menu rounds had been scored against *in-match
+combat frames*, and both critics flagged it unprompted every time. The re-score in flight has them.
+
+### `bs_character_detail` independently confirms §24b
+
+Brawl Stars shows rarity as **"EPIC"** — a small purple word tucked under the role label
+("MARKSMAN"). It is **not a stat, not a bar, not a number.** The stat panel next to it lists only
+**HEALTH 6000 · ATTACK 2800 · SUPER**, and above them **POWER 11 / MAX 11** as a pip bar.
+
+That is exactly the structure you asked for with *"match how common games do it"* — rarity is a
+**label**, power is a **level**. Your reversal was right, and the shipped reference proves it rather
+than my arguing it.
+
+⚠️ **It also sharpens §26.** In Brawl Stars, rarity carries *no* mechanical job at all — not power,
+and not an upgrade-cost penalty either. So of §26's three options, the plate supports **flattening
+`rarityCostMultiplier` to 1.0** and letting rarity be pure acquisition-and-prestige. The kit pass
+independently reached the same conclusion by measurement: *"rarity cannot be given a distinctiveness
+job in this roster at a price worth paying — §26 should resolve on one of its other two branches."*
+**Two independent routes, same answer.** That is now a one-constant change in `economy/tuning.ts`
+whenever you say so.
+
+### `zb_character_detail` is a blueprint for the level UI we just shipped
+
+Worth comparing against what landed today:
+
+| Zooba does | we do |
+|---|---|
+| level **13** with a **314/340 progress bar** | level number — check we show progress to next |
+| HEALTH **8025** / DAMAGE **5598** / SPEED **102** — real numbers **plus** segmented bars | 0–10 integer bars only |
+| a prominent yellow **UPGRADES** CTA beside SELECT, with a badge count | upgrade control shipped — compare prominence |
+| weapons as **separate named cards** (BOW RAPID FIRE · SPEAR SINGLE SHOT · BOMB THROW) | weapons not surfaced on the card |
+| left nav: Info · Upgrades · Items · Weapons · Skins | single panel |
+
+And `bs_roster_grid` shows **power level as a circled number on every card**, with green **"+"** pips
+where an upgrade is affordable — a legible "you have something to spend" signal we do not have.
+
+**None of this is queued yet** — it is a comparison, not a decision. But it is the first time this
+project has had a picture of what the destination looks like for these screens, and it will make the
+next menu pass measurable instead of speculative.
