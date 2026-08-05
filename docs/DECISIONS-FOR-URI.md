@@ -21,6 +21,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
 | **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | no concealment | **your call — this is a feature, not an art pass** | new mechanic |
 | **19** | Back out of a live match abandons it silently · mid-match reload restarts it | abandon · restart | **two small feel calls** | one line each |
+| **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
 | **11** | Longer legs — every silhouette changed | longer | **keep** — legs now exist at all | 2 constants + 1 row/archetype |
@@ -772,3 +773,52 @@ measured rather than assumed — the profile only banks on `phase === 'ended'`.
 **One number is chosen rather than measured:** a lost GPU context now shows a notice immediately and
 a Reload button after **3 s**. There is no data on how long a real restore takes on your hardware, so
 if you ever see that button appear during normal play, that grace period is too short.
+
+
+---
+
+## 20. The cast is going to get wider, and you should see it
+
+**This is the clearest measured gap in the game**, and for the first time a blind critic and an
+instrument calibrated against real reference plates arrived at the *same quantity* from opposite
+directions.
+
+Measured in the live match, at the match camera and the **shipped spawn facing** — not the 22° preview
+pose every previous character judgement used:
+
+| | our cast | Brawl Stars (6 hand-verified plates) |
+|---|---|---|
+| hull deficiency | **0.1379** | min **0.2007**, median 0.2617 |
+| shape events on the outline | **0.5** — *zero on 8 of 11* | median **2.5** |
+
+The critic, blind, said it in words: *"Break the circular top-down outline… roughly a quarter to a
+third of the outline area should come from non-body parts. Every character in the fox game has 3–5
+shape events on its outline. The egg has zero."* Characters scored **3.25** against a reference side
+of 7.75. The bar is 7+.
+
+**Why this is proceeding without you.** Your standing instruction is to match Brawl Stars and Zooba,
+and the reference plates are the specification — they are simply wider-stanced and carry more outline
+detail than ours. Two things make it safe to act: it is **revertible per character** (self-contained
+constants), and **you will get a before/after sheet of all eleven at match size** to judge in 30
+seconds.
+
+**What is actually changing:** stance widened from the **hips** (measured: soup 0.106 → 0.202,
+hamburger 0.115 → 0.175), plus distinctive protruding features — a brim, a straw, a fin, a curl of
+peel. ⚠️ Widening the **shoulders** instead was tried and rejected: it **detaches the mitts** on four of
+five characters, confirmed by rendering it.
+
+**The one number you may want to overrule:** at the magnitude that reaches the reference floor, a
+STOUT stance is **1.4–2.0 m wide on a 2.1 m character.** That is a big proportion change. If it looks
+wrong to you on the sheet, say so — it is one constant per character.
+
+### Two related items, both already routed
+
+- **Egg's cowl.** It bought the `p05` gate that was this project's #1 red item (0.270 → **0.060**) —
+  but at match size it reads as a **two-tone sphere**, and the critic independently called out *"a
+  crushed near-black hemisphere with a hard purple-rimmed edge cutting the body exactly in half."*
+  Keep / soften / revert is being decided with your eye in mind, and will be reported.
+- **The characters are drawn 25–35% too small.** Brawl Stars draws a brawler at 14–21% of frame
+  height; ours are 11–15%. Measured by hand at native pixels *and* named independently by the critic.
+  That lives in the camera's fair-play radius and is routed there — ⚠️ but it is guarded by
+  `aspect.mjs`, a **competitive-fairness** gate, so it may prove impossible without breaking the
+  guarantee that every viewport sees the same distance in every direction.

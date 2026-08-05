@@ -130,10 +130,43 @@ saturated than the environment** and the frame sits below the reference. Value i
 
 </details>
 
-**2. `limbcheck` has been measuring the wrong camera.** *(Now the #1 red item, and owned.)* At the match's 58°: idle passes **8/11 → 0/11**,
+**2. ✅ RESOLVED — `limbcheck` was measuring the wrong camera, and replacing it found the real problem.**
+
+`tools/tmp/limbmatch.mjs` (`--selftest` 27/27, `--mode control` 8/8 **in the live game**) now measures at
+the match camera (58°) and the **shipped spawn facing**, and adds three numbers that — uniquely among
+this project's character metrics — **can also be computed on a reference plate**, because they are
+properties of the mask.
+
+**The new #1 red item is SILHOUETTE, and it is the strongest signal this project has produced:**
+
+| | cast | reference (6 hand-verified BS plates) |
+|---|---|---|
+| hull deficiency | **0.1379** mean | min **0.2007**, median 0.2617 |
+| appendages | **0.5** — *zero on eight of eleven* | median **2.5** |
+| wasted footprint | 64.0% | — |
+
+**10 of 11 are below the weakest reference plate**, while `limbcheck` @22° says 9 of 11 *pass* on the
+same tree. And a blind critic, in the same round, independently named the same quantity: *"roughly a
+quarter to a third of the outline area should come from non-body parts… every character in the fox
+game has 3–5 shape events on its outline. The egg has zero."* **A reference-calibrated instrument and
+a blind critic converged from opposite directions** — that had not happened before here.
+
+Two hypotheses are already priced: **pose is worth nothing** (no rotation puts a limb outside the
+mass — soup got *worse*), and **span works but only from the hips** (stance ×2.2: soup 0.106 → 0.202;
+widening shoulders instead **detaches the mitts**). Owned and in flight.
+
+Also corrected: **faces do NOT vanish at match framing.** At 58° and yaw 0, hamburger's eyes and mouth
+are legible at 181 px. They vanish at the *facing*, not the framing — that item was filed against the
+wrong cause.
+
+<details><summary>The original finding, for the record</summary>
+
+**`limbcheck` has been measuring the wrong camera.** At the match's 58°: idle passes **8/11 → 0/11**,
 mean wasted footprint **17.7% → 53.8%**. Idle *ranking* survives (ρ 0.927) so priorities were sound;
 **run ranking does not** (ρ 0.673). And at the shipped spawn facing every character sits at **exact
 profile to camera**, burying 5.3 of ~15 joints against 0.8 in the pose `limbcheck` uses.
+
+</details>
 
 ## 🟠 In flight as this was written
 
