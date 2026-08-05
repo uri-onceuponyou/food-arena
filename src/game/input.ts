@@ -143,6 +143,7 @@ export class InputController {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
     canvas.addEventListener('mousemove', this.onMouseMove);
     canvas.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
@@ -271,6 +272,7 @@ export class InputController {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.canvas.removeEventListener('mousemove', this.onMouseMove);
     this.canvas.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('mouseup', this.onMouseUp);
@@ -368,6 +370,25 @@ export class InputController {
     // A finger held while the app is backgrounded never sends its `touchend`, so
     // without this the fighter walks into a wall for as long as the player is away.
     this.touch.reset();
+  };
+
+  /**
+   * The SAME drop, on the signal a phone actually raises.
+   *
+   * `blur` is a desktop-shaped event. Backgrounding a browser on a phone — the app
+   * switcher, a call, the notification shade — reliably fires `visibilitychange`;
+   * whether it also fires `blur` is per-platform, and the whole point of the reset
+   * above is that being wrong about it leaves the fighter running with no finger on
+   * the glass. Measured on HEAD (`tools/tmp/touchfeel.mjs --mode interrupt`): a
+   * `visibilitychange` with the stick held at full deflection left the sim receiving
+   * `moveX = 1.00`, because nothing was listening.
+   *
+   * Belt and braces, the same way `pointerLock.ts` keeps its own `blur` handler
+   * alongside `pointerlockchange` — the cost is one no-op call per tab switch and the
+   * failure it covers is a lost fight.
+   */
+  private readonly onVisibilityChange = (): void => {
+    if (document.visibilityState === 'hidden') this.onBlur();
   };
 
   private readonly onContextMenu = (e: Event): void => {

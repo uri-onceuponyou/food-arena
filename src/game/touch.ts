@@ -281,13 +281,51 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
   // panning scrolls nothing, double-tap zooms the canvas, and long-press pops a
   // selection callout mid-fight. `touch-action: none` is the one that actually stops
   // the compositor from claiming the gesture before JS sees it.
+  //
+  // Applied to the canvas AND to the element holding it, for the same reason
+  // `ownsTarget` accepts both: on a letterboxed viewport most of the game surface a
+  // thumb can reach is not the canvas.
+  const surface = opts.canvas.parentElement;
   const prevTouchAction = opts.canvas.style.touchAction;
+  const prevSurfaceTouchAction = surface ? surface.style.touchAction : '';
   opts.canvas.style.touchAction = 'none';
+  if (surface) surface.style.touchAction = 'none';
 
-  /** Is this touch on the game surface, or on a real control that owns it? */
+  /**
+   * Is this touch on the game surface, or on a real control that owns it?
+   *
+   * Three things count as the game surface, and the third is the one a portrait phone
+   * lives or dies on:
+   *   * the canvas itself,
+   *   * anything inside it,
+   *   * an element that CONTAINS the canvas — `#game`, `body`, `html`. Every overlay
+   *     layer in this app is `pointer-events: none` by construction (see
+   *     `index.html`'s layer stack), so an ancestor of the canvas being the topmost
+   *     hit-test target means nothing was painted over that point at all. That is
+   *     bare game surface by any reading.
+   *
+   * ── Why the third case is not a nicety ─────────────────────────────────────
+   * `stage.ts` LETTERBOXES any viewport outside `SUPPORTED_ASPECT`, which is what buys
+   * the 0.00 wu viewport-fairness guarantee. At 390x844 — an ordinary phone held
+   * upright — the canvas is 390x293 inside an 844 px viewport. Measured
+   * (`tools/tmp/touchfeel.mjs --mode hitmap`): **83.3% of the bottom 38% of the frame,
+   * i.e. the entire thumb band and BOTH resting-position hints, hit-tests to `#game`
+   * rather than to the canvas.** Under a canvas-only rule every one of those touches
+   * was discarded, so a portrait player was shown two rings labelled MOVE and
+   * AIM & FIRE over dead pixels and neither of them did anything at all — a full-
+   * deflection drag from the move hint's own centre reached the sim as `moveX = 0.000`.
+   *
+   * This changes NOTHING about viewport fairness: the letterbox is inert black owned by
+   * the game, `aspect.mjs` measures the camera's ground window and this cannot reach it,
+   * and `DECISIONS §14` (how hard to letterbox portrait, or whether to prompt a
+   * rotation instead) is untouched and still Uri's. It cannot steal a control either —
+   * a control over the point IS the hit-test target, and a control fails all three
+   * cases.
+   */
   function ownsTarget(target: EventTarget | null): boolean {
     if (!(target instanceof Node)) return false;
-    return target === opts.canvas || opts.canvas.contains(target);
+    const c = opts.canvas;
+    return target === c || c.contains(target) || target.contains(c);
   }
 
   function radius(): number {
@@ -324,6 +362,59 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
   }
 
   const scratch: TouchVec = { x: 0, y: 0 };
+
+  /**
+   * Identifiers of touches that landed on the game surface and found their zone
+   * already occupied, in arrival order. Newest is adopted first.
+   *
+   * ── The defect this exists to close ────────────────────────────────────────
+   * Measured on HEAD with real CDP touch events (`touchfeel.mjs --mode interrupt`):
+   * with a finger owning the movement stick and a second finger down in the same zone,
+   * lifting the OWNER correctly released the stick — and then dragging the surviving
+   * finger to full deflection reached the sim as **(0.000, 0.000)**. The player has a
+   * thumb on the glass, in the movement zone, pushed all the way out, and the fighter
+   * does not move until they lift it and put it back down. On the aim stick the same
+   * path stops firing.
+   *
+   * It is not a contrived two-hands case. Re-planting a thumb is a ROLL, not a hop:
+   * the new contact routinely registers before the old one lifts, and every one of
+   * those re-plants died silently.
+   *
+   * The adopted finger re-bases the stick AT ITS CURRENT POSITION rather than
+   * inheriting the released base. Inheriting would fling the fighter to full
+   * deflection in whatever direction the spare finger happened to be sitting — a
+   * lurch, from an input the player did not make. Re-basing means movement passes
+   * through zero and the thumb pushes again from where it already is, which is what
+   * a floating stick does everywhere else in this module.
+   */
+  const spare: number[] = [];
+
+  function forgetSpare(id: number): void {
+    const i = spare.indexOf(id);
+    if (i >= 0) spare.splice(i, 1);
+  }
+
+  function findLive(list: TouchList, id: number): Touch | null {
+    for (let i = 0; i < list.length; i++) if (list[i].identifier === id) return list[i];
+    return null;
+  }
+
+  /** Hand a just-released stick to a finger that is still down in its zone. */
+  function adopt(stick: StickState, leftZone: boolean, live: TouchList): void {
+    for (let i = spare.length - 1; i >= 0; i--) {
+      const t = findLive(live, spare[i]);
+      // A spare that is no longer in `touches` has already gone; drop it either way.
+      if (!t) { spare.splice(i, 1); continue; }
+      if ((t.clientX < window.innerWidth * ZONE_SPLIT) !== leftZone) continue;
+      spare.splice(i, 1);
+      stick.id = t.identifier;
+      stick.baseX = t.clientX;
+      stick.baseY = t.clientY;
+      stick.curX = t.clientX;
+      stick.curY = t.clientY;
+      return;
+    }
+  }
 
   function updateMove(): void {
     if (moveStick.id === null) {
@@ -414,7 +505,15 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
 
       const leftZone = t.clientX < window.innerWidth * ZONE_SPLIT;
       const stick = leftZone ? moveStick : aimStick;
-      if (stick.id !== null) continue; // that stick already has a finger
+      if (stick.id !== null) {
+        // That stick already has a finger. Bank this one: if the owner lifts while
+        // this is still down, the stick is handed over instead of dying. Claimed for
+        // `preventDefault` purposes too — it is on the game surface, so the browser
+        // must not be allowed to turn it into a scroll or a compatibility click.
+        if (!spare.includes(t.identifier)) spare.push(t.identifier);
+        claimed = true;
+        continue;
+      }
 
       stick.id = t.identifier;
       stick.baseX = t.clientX;
@@ -457,6 +556,10 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
         aimStick.curX = t.clientX;
         aimStick.curY = t.clientY;
         mine = true;
+      } else if (spare.includes(t.identifier)) {
+        // A banked finger. It drives nothing yet, but it is ours, so the browser does
+        // not get to reinterpret its drag as a gesture.
+        mine = true;
       }
     }
     if (!mine) return;
@@ -466,6 +569,12 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
     ev.preventDefault();
   };
 
+  /**
+   * `touchend` AND `touchcancel`. The second is not a rare path on a phone — it is
+   * what fires when an incoming call, a notification shade, a system gesture or a
+   * palm rejection interrupts a touch — and a stick left held through one runs the
+   * fighter into a wall with no finger on the screen.
+   */
   const onTouchEnd = (ev: TouchEvent): void => {
     if (disposed) return;
     let mine = false;
@@ -473,17 +582,23 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
       const t = ev.changedTouches[i];
       if (t.identifier === moveStick.id) {
         moveStick.id = null;
+        adopt(moveStick, true, ev.touches);
         mine = true;
       } else if (t.identifier === aimStick.id) {
         // Aim DIRECTION deliberately survives the lift — the fighter keeps facing where
         // it was pointed, exactly as a desktop player's facing survives releasing the
         // mouse button. Only firing stops.
         aimStick.id = null;
+        adopt(aimStick, false, ev.touches);
+        mine = true;
+      } else if (spare.includes(t.identifier)) {
+        forgetSpare(t.identifier);
         mine = true;
       }
     }
     if (!mine) return;
     updateMove();
+    updateAim();
     kick();
   };
 
@@ -507,6 +622,10 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
     reset(): void {
       moveStick.id = null;
       aimStick.id = null;
+      // Banked fingers go too. `reset()` means "the player is not in control any
+      // more" (restart, blur, backgrounded), and re-arming a stick from a finger that
+      // was down before that happened is exactly the stale state it exists to clear.
+      spare.length = 0;
       move.x = 0;
       move.y = 0;
       hasAim = false;
@@ -521,7 +640,9 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
       window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', onTouchEnd);
       window.removeEventListener('touchcancel', onTouchEnd);
+      spare.length = 0;
       opts.canvas.style.touchAction = prevTouchAction;
+      if (surface) surface.style.touchAction = prevSurfaceTouchAction;
       // Both flags are match-scoped. A stale `fa-touch` would leave the next match's
       // weapon bar claiming pointer events before anyone has touched it.
       document.documentElement.classList.remove('fa-touch', 'fa-touch-capable');
