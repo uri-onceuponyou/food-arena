@@ -107,6 +107,61 @@ export interface ToonMatOptions {
 /**
  * The default character / prop surface.
  *
+ * ── "NO MATERIAL VARIATION" IS NOT AN AUTHORING GAP. MEASURED. ──────────────
+ *
+ * A canonical-rubric baseline re-score (43 rounds, 43 valid) put one mechanism at the
+ * top of four of five elements: *"surfaces are flat and unlit — no material variation,
+ * no contact shadow, no depth"*, named by 6/6 critics on the HUD band, 6/6 on home,
+ * 5/6 on character select, 4/6 on the arena. This function is the shared material
+ * factory, so the finding points here. `docs/LESSONS.md` §3: take the observation,
+ * re-derive the mechanism.
+ *
+ * `tools/tmp/matvar.mjs --mode census`, live match, hamburger at pot_south:
+ *
+ *   255 materials · 94 MeshStandardMaterial + 18 MeshPhysicalMaterial + 140 basic
+ *   **33 DISTINCT roughness values**, 0.16 .. 0.98 · 36 distinct
+ *   (roughness, metalness, envMapIntensity) triples · 38 standard materials on a
+ *   character, carrying 20 distinct roughness values
+ *
+ * The variation is authored. It is not arriving. `--mode chart` drops spheres into the
+ * live match at the shipped camera, lights and post chain, sized to a fighter's
+ * measured 147 px, and reads each one's specular headroom (its own P99 - P50):
+ *
+ *   roughness   0.08    0.25    0.52    0.75    0.95
+ *   specHead    0.328   0.400   0.166   0.055   0.034
+ *
+ * **A ten-fold collapse between 0.25 and 0.75 — and 53% of the cast's surfaces are
+ * authored at 0.6 or above.** Rendered and LOOKED AT (`shots/matvar/chart.png`): 0.75
+ * and 0.95 are the same matte ball. More than half this game's materials live where
+ * the parameter that distinguishes them does nothing, which is "coloured paper" in one
+ * number.
+ *
+ * ⚠️ AND THE PER-MATERIAL FIX FOR IT DOES NOT EXIST IN THIS CONFIGURATION.
+ * `material.envMapIntensity` is the documented knob for making one surface glossier
+ * than another. Driving it x0 / x2 / x4 across all 112 standard materials on one
+ * frozen frame produces a **BYTE-IDENTICAL image** — dMean 0.0000, dMax 0, 0.00% of
+ * pixels — while `scene.environmentIntensity` at x0 moves the frame by 30.7/255.
+ * Root cause, `three/build/three.module.js:17340`:
+ *
+ *     if ( material.isMeshStandardMaterial && material.envMap === null
+ *          && scene.environment !== null ) {
+ *       m_uniforms.envMapIntensity.value = scene.environmentIntensity;
+ *     }
+ *
+ * Every material here relies on `scene.environment` and none sets its own `envMap`, so
+ * three overwrites the per-material value with the scene's on every single draw. The
+ * property assigns without error and reads back correctly. `docs/LESSONS.md` §1 —
+ * not missing, silently ignored. **To make it live, a material must be given
+ * `envMap = scene.environment` explicitly**, and then its intensity is its own (note
+ * that the default of 1 is not the scene's 0.32, so anything doing this has to carry
+ * the 0.32 itself or it will jump three stops).
+ *
+ * Two levers were then priced and both were turned down, in `stage.ts`: brighter,
+ * smaller IBL specular panels at constant irradiance moved specular headroom by ~0.007
+ * at every roughness (these are dielectrics at metalness 0, so F0 is fixed at 0.04 and
+ * the visible highlight is the DIRECT lights' lobe, not the environment's); and SSAO
+ * delivers the contact shadow but costs a second full geometry pass, +314 draws/frame.
+ *
  * ── Why this is NOT MeshToonMaterial ────────────────────────────────────────
  * The brief said "toon/cel-shaded", but the actual Brawl Stars reference frames
  * (see `reference/images/curated/`) are not cel-shaded at all. They are smooth-shaded,
@@ -150,6 +205,35 @@ export function toonMat(opts: ToonMatOptions): THREE.MeshStandardMaterial {
  *
  * Deliberately additive and subtle. This is edge definition, not a glow — an
  * overdone rim is its own species of amateur.
+ *
+ * ── IT IS ALSO THE SINGLE LARGEST MATERIAL LEVER IN THE FRAME. MEASURED. ────
+ * `tools/tmp/haloprobe.mjs`, 4 characters x 2 stations, the rim ablated on ONE frozen
+ * frame per sample so nothing else differs (mask from the direct render):
+ *
+ *   rimStrength      0        0.14      0.28 (shipped)     5.6 (validation)
+ *   hero dLedge   0.0512     0.0696         0.0851              0.2193
+ *   hero dL       0.1062     0.1169         0.1270              0.2573
+ *   p05           0.082      0.105          0.119               0.274
+ *   clipShare     0.0141     0.0164         0.0176              0.1903
+ *
+ * **Switching it off costs 40% of the cast's edge figure/ground** — more than any
+ * other single thing measured in this file set, and it is the term that makes the
+ * silhouette pass's work visible against the floor. The validation row is the ceiling
+ * and shows why it is not simply turned up: at 5.6 the cast's share above luma 0.94
+ * reaches 0.1903 against a reference band whose MAXIMUM is 0.0929, p05 blows through
+ * the <= 0.180 gate, and the value ladder loses a step.
+ *
+ * ⚠️ TWO GAPS, MEASURED AND NOT ACTED ON, because they need an 11-character clipping
+ * run this pass did not have the budget for:
+ *   1. `strength` is 0.28 on **all 33 materials that carry it** — a lever worth 40% of
+ *      edge separation, applied identically to bread, glass, meat and metal. It is
+ *      itself a source of the sameness the critics named.
+ *   2. `glossyMat` never calls this. So the 18 MeshPhysicalMaterials — lollipop, the
+ *      water bottle, glaze, broth, i.e. exactly the surfaces that most want a wet edge
+ *      — are the ONLY ones in the game with no edge response at all. Adding it is a
+ *      one-line change and it lands on the four characters whose near-white clipping
+ *      was hardest won (lollipop 0.1610 -> 0.0175, sushi, soup, egg), so it must be
+ *      gated on a per-character `clipShare` run and not merged blind.
  */
 export function applyRimLight(
   mat: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial,
@@ -159,6 +243,14 @@ export function applyRimLight(
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.rimColor = { value: new THREE.Color(color) };
     shader.uniforms.rimStrength = { value: strength };
+    // QA HANDLE, zero cost, and it exists because of a specific measurement problem.
+    // The rim is the brightest thing on a silhouette EDGE, and bloom's halo is fed by
+    // exactly those pixels — so "how much of the glow outside the character is the
+    // rim's fault" is a question worth asking. Without this, answering it needs two
+    // page loads on two trees, and `docs/LESSONS.md` §5 records what a two-load A/B is
+    // worth while peers are mid-edit. With it, a probe drives rim and no-rim on ONE
+    // frozen frame, one uniform apart. Never read by game code.
+    (mat.userData as { rimUniforms?: unknown }).rimUniforms = shader.uniforms;
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',

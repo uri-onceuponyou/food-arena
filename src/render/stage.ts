@@ -287,6 +287,67 @@ function buildGradientEnvironment(): THREE.Scene {
     m.lookAt(0, 0, 0);
     scene.add(m);
   };
+
+  // ── SMALLER AND BRIGHTER, AT CONSTANT IRRADIANCE ─────────────────────────
+  //
+  // Six independent critics named "surfaces are flat and unlit — no material
+  // variation" as the top defect on four of five elements, and the diagnosis is NOT
+  // the one the words suggest. `tools/tmp/matvar.mjs --mode census` on a live match:
+  // 112 standard materials carrying **33 distinct roughness values** from 0.16 to
+  // 0.98, 36 distinct (roughness, metalness, envMapIntensity) triples. The variation
+  // is authored. It is not arriving.
+  //
+  // `--mode chart` drops spheres into the live match at the shipped camera, the
+  // shipped lights and the shipped post chain, sized to a fighter's measured 147 px,
+  // and reads each one's specular headroom (P99 - P50 of its own pixels):
+  //
+  //   roughness   0.08    0.25    0.52    0.75    0.95
+  //   specHead    0.328   0.400   0.166   0.055   0.034
+  //
+  // A TEN-FOLD COLLAPSE between 0.25 and 0.75, and **53% of the cast's surfaces are
+  // authored at 0.6 or above** — i.e. more than half the game's materials live in the
+  // range where the parameter that is supposed to distinguish them does nothing. That
+  // is "no material variation" precisely: not absent authoring, an absent response.
+  // Rendered and LOOKED AT (`shots/matvar/chart.png`): 0.75 and 0.95 are the same
+  // matte ball, and it is the "coloured paper" a critic named.
+  //
+  // ⚠️ AND THE OBVIOUS PER-MATERIAL FIX DOES NOT EXIST. `material.envMapIntensity` is
+  // the documented knob for exactly this. Driving it x0 / x2 / x4 across all 112
+  // materials produces a **BYTE-IDENTICAL frame** — dMean 0.0000, dMax 0, 0.00% of
+  // pixels — while `scene.environmentIntensity` at x0 moves the frame by 30.7/255.
+  // Root cause, `three/build/three.module.js:17340`:
+  //
+  //     if ( material.isMeshStandardMaterial && material.envMap === null
+  //          && scene.environment !== null ) {
+  //       m_uniforms.envMapIntensity.value = scene.environmentIntensity;
+  //     }
+  //
+  // Every material here relies on `scene.environment` and none sets its own `envMap`,
+  // so three OVERWRITES the per-material value with the scene's on every draw. The
+  // property assigns without error, reads back correctly, and is discarded. That is
+  // `docs/LESSONS.md` §1 in its nastiest costume — not missing, silently ignored.
+  //
+  // ⚠️ AND THE PANELS ARE NOT THE LEVER EITHER — TRIED, MEASURED, REVERTED.
+  // The obvious next move is that these panels are the specular source, so making
+  // them smaller and brighter should sharpen every highlight in the game at constant
+  // fill. It is even principled: a highlight's brightness is the source's RADIANCE
+  // while a surface's fill is its IRRADIANCE (radiance x solid angle), so holding the
+  // product fixed and raising the first should buy sheen for free. Driven at
+  // **peak x3, area /3** (7x7 @ 3.2 -> 4.04x4.04 @ 9.6, and 6x4 @ 1.15 ->
+  // 3.46x2.31 @ 3.45), same chart, same fifteen spheres, same screen positions:
+  //
+  //   roughness    0.08     0.25     0.52     0.75     0.95
+  //   specHead   0.328 -> 0.321   0.400 -> 0.395   0.166 -> 0.159   0.055 -> 0.053   0.034 -> 0.034
+  //
+  // Nothing, at every roughness, in both directions. The reason is arithmetic: these
+  // materials are dielectrics at metalness 0, so F0 is fixed at 0.04, and the IBL
+  // specular arrives as 0.04 x radiance x `environmentIntensity` 0.32 = 1.3% of the
+  // panel. The highlight a viewer actually sees on a sphere here is the DIRECT
+  // lights' GGX lobe (key 3.5 + front 2.2), not the environment's reflection. So the
+  // panels are worth their place in the diffuse balance and are worth nothing as a
+  // sheen control, and the honest record of that is this paragraph rather than a
+  // shipped change that moves no number. Left exactly as they were.
+  //
   // Keyed to `lighting.ts`'s key at (+x, +y, +z) so the reflected highlight and the
   // diffuse terminator agree about where the light is.
   panel(5.5, 9.0, 4.5, 7, 7, 3.2);
@@ -336,9 +397,10 @@ export interface StageOptions {
   environment?: boolean;
   environmentIntensity?: number;
   /**
-   * Screen-space ambient occlusion. **OFF by default — see `buildPost`.** It was
-   * measured to contribute EXACTLY ZERO at every framing this project renders, so
-   * leaving it on bought nothing and cost a NormalPass plus a 16-tap AO pass.
+   * Screen-space ambient occlusion. **OFF by default, and the reason is now a PRICE
+   * rather than a doubt** — see `buildPost`. It delivers the contact shadow six
+   * critics asked for, its acne is fixed, and it costs a second full geometry pass:
+   * +314 draw calls and +79% triangles per frame. Opt in knowingly.
    */
   ao?: boolean;
   /**
@@ -937,10 +999,104 @@ export class Stage {
     // stacked on the arena's authored decals and the real shadow map, that a critic
     // read as one directionless blob and that scored this element 3/10.
     //
-    // Kept behind `ao: true` with the dead knob repaired, so a future close-range
-    // camera can turn it on knowingly rather than rediscovering the same trap.
+    // ── 2026-08-05: TURNED ON, AND THE REJECTION ABOVE HAD A SECOND DEFECT UNDER IT ─
+    //
+    // A canonical-rubric baseline re-score (43 rounds, 43 valid, instrument validated
+    // in both directions) put ONE mechanism at the top of four of five elements:
+    // "surfaces are flat and unlit — no material variation, NO CONTACT SHADOW, no
+    // depth", named by 6/6 critics on the HUD band, 6/6 on home, 5/6 on character
+    // select and 4/6 on the arena. The paragraph above rejected this pass on a single
+    // critic saying the opposite ("one directionless blob"), so the evidence has
+    // reversed and the decision has to be re-taken rather than inherited.
+    //
+    // ⚠️ AND THE REPAIRED PASS IS STILL NOT SHIPPABLE AS IT WAS CONFIGURED. Turning it
+    // on measures beautifully and LOOKS BROKEN, which is exactly what non-negotiable #3
+    // exists to catch. `tools/tmp/haloprobe.mjs`, hamburger + hotdog at pot_south,
+    // AO ablated by BLEND OPACITY on one frozen frame (never by blend FUNCTION —
+    // `docs/LESSONS.md` §12):
+    //
+    //   contact, 2-8 px outside the hero's own matte ...... -0.03798
+    //   the same ground, 14-26 px out ..................... -0.01072
+    //   gradient .......................................... -0.02726
+    //   hero dLedge .......................... 0.0920 -> 0.1180   (+28%)
+    //   value steps @0.10 .................... 6.50 -> 7.50
+    //
+    // ...and every tile grout line in the arena grew a heavy black speckled fringe
+    // (`shots/halo/ao/floor_ab.png`, AO off above / on below, 4x nearest-neighbour).
+    // Good numbers, worse frame.
+    //
+    // `tools/tmp/aotune.mjs` (selftest 11/11) separates the two with a metric per
+    // defect, because a single "mean darkening" figure cannot tell them apart and
+    // "mean darkening" is precisely what the earlier round rejected this pass on:
+    //   CONTACT  the band difference above — smooth, localised at the base.
+    //   ACNE     mean |Laplacian| of the AO difference map over open ground 40+ px
+    //            from the hero, where a correct AO has nothing to draw at all. A
+    //            constant field and a linear ramp both score EXACTLY zero (asserted),
+    //            so contact cannot leak into this number; speckle scores high.
+    //   HAZE     mean darkening over that same far region — the "broad low-frequency
+    //            dimming of the whole floor" the earlier round named, kept as its own
+    //            column so acne cannot be traded for haze unnoticed.
+    //
+    //   config                        contact      haze       acne   contact/acne
+    //   as it was configured         -0.02739  -0.01134   0.009682          2.83
+    //   bias 0.10                    -0.02151  -0.00244   0.002908          7.40
+    //   bias 0.20                    -0.01882  -0.00041   0.000623         30.23
+    //   bias 0.35                    -0.01497  -0.00018   0.000239         62.73
+    //   bias 0.20 + material int 1.5 -0.02818  -0.00063   0.000881         32.00  <- shipped
+    //   bias 0.35 + radius .25 i 1.8 -0.01647  -0.00140   0.001978          8.33
+    //
+    // The chosen row keeps MORE contact than the configuration that produced the
+    // acne (-0.02818 against -0.02739) for **91% less acne and 94% less haze**.
+    // Rendered and looked at at 4x (`shots/aotune/hamburger.sheet.png`): on open
+    // floor it is indistinguishable from AO off, and the grout fringe is gone.
+    //
+    // ── AND IT STILL DOES NOT SHIP, ON A PRICE RATHER THAN A DOUBT ────────────
+    // `node tools/perf.mjs --mode counts`, same frozen tree, AO the only difference:
+    //
+    //                          HEAD        with AO
+    //   draw calls              804          1,118      +314   (+39%)
+    //   triangles           383,450        685,128              (+79%)
+    //   post-chain fill    5.46 Mpx     306.99 Mpx      5.7x -> 319x the draw buffer
+    //   programs linked          32             37
+    //   GPU memory          94.80 MB      115.41 MB     +21.7%
+    //
+    //   PER PASS, with AO:  RenderPass 784 · **NormalPass 312 draws / 301,676 tris**
+    //                       · EffectPass(SSAO+Bloom+Grade+Vignette) 19 · SMAA 3
+    //
+    // SSAO in postprocessing needs a normal buffer, and a normal buffer means RENDERING
+    // THE WHOLE SCENE A SECOND TIME. That is not a knob — `resolutionScale` cuts the
+    // fill and leaves all 312 draws — so the contact costs 39% of the frame's draw
+    // calls. This project's standing rule is that a perf change which moves the look is
+    // not a win; the converse binds just as hard, and 0.027 of contact does not buy a
+    // second geometry pass.
+    //
+    // ⚠️ THE CHEAP IMPLEMENTATION ALREADY EXISTS AND IS SIMPLY TOO WEAK. `src/arena/`
+    // bakes a contact-occlusion layer whose band an arena pass measured at |dL| 0.0491
+    // against a reference target of 0.1238 taken off real barrels — a shortfall of
+    // 0.0747. AO's whole marginal contribution here is 0.0273. **Raising the baked
+    // decal layer roughly 2.5x delivers more than this pass does, for zero extra draw
+    // calls**, and that file has a different owner. Handed over with the numbers rather
+    // than reached for.
+    //
+    // What IS kept below is the tuning, so that whoever enables `ao: true` next gets
+    // the configuration that does not speckle rather than rediscovering it.
+    //
+    // `bias` is documented as "eliminates artifacts caused by depth discontinuities"
+    // and defaults to 0.025; this floor is a stack of decals at y 0.045-0.08
+    // (`docs/LESSONS.md` §1), so its seams ARE depth discontinuities and 0.025 was
+    // never going to survive them. The intensity that pays the contact back is
+    // `ssaoMaterial.intensity`, which is a DIFFERENT number from the constructor's
+    // `intensity` — the latter scales the AO buffer in the blend and is already 2.4,
+    // the former lives inside the occlusion sum and has no constructor option at all,
+    // so it sat at its default 1 unnoticed.
+    //
+    // ⚠️ HIGH TIER ONLY. A NormalPass plus a 16-tap AO pass is the wrong thing for a
+    // phone, and `TierProfile` has no `ao` field — `src/render/quality.ts` has another
+    // owner. `tier.smaa` is true on `high` and only `high`, and it is already one of
+    // the four flags `applyQuality` rebuilds the chain on, so gating here follows a
+    // tier change correctly. A dedicated `TierProfile.ao` belongs in `quality.ts`.
     let ssao: SSAOEffect | null = null;
-    if (this.useAO) {
+    if (this.useAO && !gradeOnly && tier.smaa) {
       const normalPass = new NormalPass(this.scene, this.rig.camera);
       composer.addPass(normalPass);
       ssao = new SSAOEffect(this.rig.camera, normalPass.texture, {
@@ -957,8 +1113,16 @@ export class Stage {
         rings: 5,
         radius: 0.07,
         intensity: 2.4,
+        // 0.20, not the library default 0.025 — see the table above. This is the one
+        // knob that separates the contact from the seam acne.
+        bias: 0.20,
         resolutionScale: 0.85,
       });
+      // NOT the same number as `intensity` above, and that is the whole reason the
+      // contact had to be bought back somewhere: `intensity` scales the finished AO
+      // buffer at blend time, while this one sits inside the occlusion sum, has no
+      // constructor option, and was silently at its default of 1.
+      ssao.ssaoMaterial.intensity = 1.5;
     }
 
     // ── Bloom — kept, and here is why, because it was on the block ────────────
@@ -971,6 +1135,25 @@ export class Stage {
     // reach it. Worth the 0.08 because the bleed is also what lifts the deepest
     // shadows without flattening anything (measured p05 luminance 0.218 -> 0.241),
     // and every reference plate has visible bloom while ours had none.
+    //
+    // ⚠️ THE SENTENCE ABOVE IS FALSE AND THE NUMBER IS KEPT ANYWAY. Read the effect
+    // order at the bottom of this function: `effects.push(grade, vignette)` runs AFTER
+    // bloom, in ONE `EffectPass`, so bloom's input is the RAW render and the highlight
+    // shoulder cannot stop anything from reaching it. The stated justification for
+    // 0.88 -> 0.80 describes a mechanism that does not exist. Re-derived rather than
+    // inherited (`tools/tmp/haloprobe.mjs`, 4 characters x 2 stations, every bloom
+    // setting driven on ONE frozen frame per sample so the rows differ by one knob):
+    //
+    //   threshold        bloom halo   deposit on the character   value steps @0.10
+    //   0.80 (shipped)      0.00344                   0.00478                 6.50
+    //   0.88                0.00206                   0.00259                 6.75
+    //   0.92                0.00156                   0.00184                 6.75
+    //
+    // Raising it is worth -40% of halo and a quarter of a value step, and it is NOT
+    // taken: the baseline re-score's dominant finding across four of five elements is
+    // "surfaces are flat and UNLIT", so spending bloom to buy 0.0014 of luma at the
+    // silhouette is the wrong direction on the strongest evidence this project has.
+    // The setting stays; its false rationale does not.
     //
     // THE COST CASE AGAINST IT, and what re-measuring actually found. The perf pass
     // put bloom at 16 draws and 1.6 Mpx of fill per frame for mean 0.1132/255 over
@@ -1014,7 +1197,52 @@ export class Stage {
     // gamut-relative: the curve spends the headroom a pixel actually has instead of
     // applying a fixed gain and letting the framebuffer amputate the overflow.
     //
-    // ── 2026-08-05: the dark end, measured per pass ──────────────────────────
+    // ── THE "27% OF THE VALUE GAP IS THE POST CHAIN" ITEM IS CLOSED, AND THE SIGN
+    //    HAS FLIPPED. Do not re-open it from `docs/STATE.md`'s figure. ─────────────
+    //
+    // That number was measured at contrast 0.62, with NO shadow toe, on the PRE-albedo
+    // cast. All three have since moved, so it was re-derived rather than inherited
+    // (`tools/tmp/haloprobe.mjs`, 4 characters x 2 stations, every configuration
+    // driven on ONE frozen frame per sample, mask from the DIRECT render):
+    //
+    //                                  THEN (recorded)      NOW (measured)
+    //   whole chain, cast P05        0.272 -> 0.304        0.1817 -> 0.1191
+    //                                  i.e. +0.032 COST       i.e. -0.063 GAIN
+    //   whole chain, cast range      0.657 -> 0.593        0.7139 -> 0.7770
+    //                                  i.e. -0.064 COST       i.e. +0.063 GAIN
+    //
+    // The post chain is now the LARGEST single contributor to the cast's dark end, not
+    // a drain on it. Per element, as a change in the character's own P05 against the
+    // shipped frame (negative = deeper darks, which is the direction wanted):
+    //
+    //   element            then      now     what changed
+    //   SMAA              +0.032   +0.030    nothing — and it is not removable
+    //   bloom             +0.020   +0.007    the albedo pass took the cast's share
+    //                                        above luma 0.94 from 0.1007 to 0.0275,
+    //                                        i.e. it removed 73% of bloom's own
+    //                                        trigger population
+    //   contrast S-curve  -0.046   -0.063    0.62 -> 0.72
+    //   shadow toe            n/a  -0.040    new since that measurement
+    //   vignette           0.000    0.000    exactly zero on a centred fighter, twice
+    //   highlight shoulder 0.000    0.000    on P05 — but see below, it is NOT idle
+    //
+    // SMAA IS THE WHOLE OF WHAT REMAINS, AND IT IS NOT RECOVERABLE. It is the high
+    // tier's antialiasing (MSAA does the same job on medium/low), and the +0.030 is
+    // largely the metric measuring itself: P05 is the fifth percentile of a ~130 px
+    // fighter whose one-pixel perimeter is ~5% of its area, so an AA pass that blends
+    // the bright floor into the outermost ring moves exactly the percentile being
+    // watched. The reference plates are captured game frames carrying their OWN
+    // antialiasing, and `valuescan --mode ref` resamples them to our fighter's height,
+    // so our AA'd P05 is compared against their AA'd P05. Removing ours would not
+    // close a gap; it would break the comparison.
+    //
+    // The shoulder's real job is not P05 at all: ablating it (`highlightKnee` -> 1)
+    // leaves P05 unmoved and takes the cast's share above luma 0.94 from 0.0176 to
+    // 0.0675 — nearly 4x, and clean past the reference band's 0.0929 maximum — while
+    // whole-frame clipped-high goes 0.020% -> 1.514%. It is holding the near-white
+    // guard, not the dark one.
+    //
+    // ── The original finding, for the record ─────────────────────────────────
     // `tools/tmp/valuescan.mjs` put our cast's P95 at 0.896 against a reference P95 of
     // 0.896 — identical — and our P05 at 0.304 against 0.097. The cast has NO DARK
     // RUNG, and 27% of that gap was measured to be the post chain rather than the art.
