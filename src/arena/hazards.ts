@@ -440,6 +440,114 @@ function hexToRgb(hex: string): [number, number, number] {
   return [Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255)];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE GREASE POOL'S VALUE — the one arena number that costs nine characters their
+// worst station
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `tools/tmp/valuescan.mjs --mode dl` measured all 11 characters at all 18
+// `arena-scan` stations, on each character's EXACT matte rather than on a salience
+// block. 187 of 198 readings clear the project's own >= 0.10 figure/ground standard,
+// mean +0.27 — and the failures do not scatter. They pile onto one station:
+//
+//     grease_in      mean dL 0.082      9 of 11 characters below 0.10
+//     grease_near    mean dL 0.254      0 of 11 below
+//
+// Standing IN the pool is the only place in the arena where the hero stops separating
+// from the ground, and it is the same place for nine different characters. That makes
+// it an ARENA fact wearing a character costume — `valuescan.mjs`'s own gate says so
+// out loud, allowing exactly one failing station per character *because* this one
+// "fails for 9 of 11 and is an ARENA fix". Repainting eleven characters for one disc
+// is the local-optimum trap in `docs/LESSONS.md` §7.
+//
+// Measured with `tools/tmp/greasekey.mjs` (one page load per character at grease_in,
+// sim frozen, the disc's colour driven live, the puddle's own pixels attributed by
+// frontmost surface). Mean over the four WORST characters — hotdog, waterbottle,
+// taco, lollipop:
+//
+//   L (HSL)   hex        mean dL   n >= 0.10   ground L   puddle L   puddle HSV S   puddle-vs-tile
+//   0.431 *   #B0802C     0.014       0/4       0.621      0.539        0.921           +0.128
+//   0.381     #9C7127     0.057       0/4       0.577      0.488        0.910           +0.077
+//   0.351     #8F6824     0.083       2/4       0.551      0.456        0.900           +0.046
+//   0.321     #835F21     0.108       2/4       0.526      0.427        0.887           +0.016
+//   0.291     #77561E     0.131       3/4       0.502      0.398        0.869           -0.013
+//   0.261     #6B4E1B     0.151       4/4       0.481      0.372        0.847           -0.039   <- chosen
+//   0.231     #5E4518     0.173       4/4       0.459      0.346        0.812           -0.065
+//
+// ⚠️ THE LEVER IS VALUE, NOT SATURATION. `docs/LESSONS.md` §8, now falsified four
+// times: the arena measures mean saturation 0.4272 against a reference 0.493 and the
+// cast is 1.8x more saturated than its environment (0.765 vs 0.425). There is nothing
+// here to desaturate, and the table above is the proof that this change does not —
+// HSV saturation moves 0.921 -> 0.847 as a *consequence* of the darkening (delivered,
+// after lighting and grade), while the authored HSL saturation is held EXACTLY at
+// `KPAL.grease`'s own 0.600. Only L moves.
+//
+// ⚠️ AND IT MUST STILL READ AS A SPILL. `PUDDLE_SLOW_FACTOR` is 0.45 and terrain slow
+// is 14.6-17.2% of play; a puddle that has dissolved into the tile is a mechanic the
+// player cannot see. The last column is that check, and it is why this stops at 0.261
+// rather than continuing to 0.231: the pool goes from +0.128 ABOVE the tile to -0.039
+// BELOW it — it does not pass through the tile's value and vanish, it crosses to the
+// other side and reads as a dark oily pool, which is what spilled grease looks like.
+// Its boundary is still carried by a VALUE step (0.039, plus the wet rim, plus the
+// contact-AO halo) and not by hue alone, which is the failure mode `docs/LESSONS.md`
+// §1 case 11 records ("slow-effect ring in the same cyan as the puddle it sits on").
+//
+// AS SHIPPED, all eleven characters, HEAD and this change driven on the SAME frozen
+// frame (`tools/tmp/postablate.mjs --pair --station grease_in`), so the two rows differ
+// by one material colour and four grade uniforms and by nothing else:
+//
+//   grease_in dL >= 0.10   BEFORE 1 of 11      AFTER 11 of 11      mean 0.066 -> 0.234
+//
+// and the attribution inside that: the puddle alone takes the mean to 0.210, the grade's
+// new shadow toe alone takes it to 0.068. This is the puddle's fix, not the grade's.
+// Per character, before -> after: hotdog -0.019 -> 0.124, waterbottle -0.020 -> 0.157,
+// lollipop 0.043 -> 0.172, taco 0.048 -> 0.228, soup 0.060 -> 0.251, pizza 0.062 -> 0.201,
+// donut 0.064 -> 0.240, burrito 0.077 -> 0.214, sushi 0.081 -> 0.248, hamburger 0.099 ->
+// 0.298, egg 0.233 -> 0.436.
+//
+// ⚠️ ONE AUTHORED RELATIONSHIP IS INVERTED BY THIS AND IT IS DELIBERATE, SO SAY SO.
+// `KPAL.greaseRim` (#8A6A22, HSL L 0.335) was authored as the DARKER meniscus below the
+// pool body's 0.431 — "well down in value ... so the boundary comes from a VALUE step
+// against the tile". With the body at 0.261 the rim is now the LIGHTER of the two, and
+// it reads as a wet edge catching the key rather than as a dark trough (rendered and
+// looked at: `shots/ship/grease_in.png`). That is arguably the better read on a pool
+// that is now darker than its floor — a dark ring around a dark disc is how the "is
+// that a hole?" complaint in `docs/DECISIONS-FOR-URI.md` §5 gets re-earned — but it is
+// `shared.ts`'s value to set, not this file's. If the palette owner disagrees, dropping
+// `KPAL.greaseRim` by the same 0.17 restores the original ordering in one line.
+//
+// WHY IT IS DONE HERE AND NOT IN `KPAL`. `shared.ts` has a different owner this
+// session, and one-owner-per-file-set is the hardest constraint on this project
+// (CLAUDE.md §8). More importantly this is not a palette fact, it is a FIGURE/GROUND
+// fact about the one surface a fighter stands on top of: `KPAL.grease` is still the
+// pool's hue and chroma, and this is the pool's own value key relative to it. Derived
+// at runtime from whatever `KPAL.grease` currently is, so a future palette move
+// carries this with it instead of silently stranding a hardcoded hex.
+//
+// `M.grease` reaches exactly one call site (`kitchen.ts` -> `buildPuddleVisual`), so
+// the clone below cannot affect anything else in the arena; `floor.ts`'s stove-grease
+// splats use `M.floorGrime`/`stainRim` and are untouched.
+const GREASE_BODY_L_DROP = 0.17;
+
+/**
+ * `mat` with its HSL lightness pulled down by `drop`, hue and saturation held.
+ *
+ * ⚠️ `THREE.ColorManagement` is ENABLED (three r180), so `new Color('#B0802C')` stores
+ * LINEAR-sRGB and a bare `getHSL()` would report the lightness of the linear value,
+ * not of the authored swatch — a silently different number, and the darkening would
+ * land somewhere other than where it was measured. Both calls therefore name
+ * `SRGBColorSpace` explicitly, which is the space `greasekey.mjs` drove the sweep in.
+ */
+function darkenedBody(mat: THREE.Material, drop: number): THREE.Material {
+  const src = mat as THREE.MeshStandardMaterial;
+  if (!src.color) return mat;
+  const out = src.clone() as THREE.MeshStandardMaterial;
+  const hsl = { h: 0, s: 0, l: 0 };
+  out.color.getHSL(hsl, THREE.SRGBColorSpace);
+  out.color.setHSL(hsl.h, hsl.s, Math.max(0.02, hsl.l - drop), THREE.SRGBColorSpace);
+  return out;
+}
+
 /** Oily-sheen surface detail for the grease puddle — dark pooled blotches, a couple
  * of bright diagonal sheen streaks (tinted toward `highlightHex`, a warm light-catch
  * colour — never plain white), and a few trapped air bubbles — so the disc reads as
@@ -566,6 +674,11 @@ export function buildPuddleVisual(
   // parameter, which would mean editing `kitchen.ts`'s call sites (out of bounds
   // for this file).
   const isGrease = mat === M.grease;
+  // The pool's own value key. See the `GREASE_BODY_L_DROP` note above: grease only —
+  // the water pool is the north hazard, no character fails a station on it (mean dL
+  // +0.274 at `water_near`), and it is already the darker of the two after the round
+  // that pulled both bodies down.
+  const bodyMat = isGrease ? darkenedBody(mat, GREASE_BODY_L_DROP) : mat;
 
   // Grounding — puddles previously had NO contact shadow at all, so they floated
   // free with no dark boundary separating them from the floor.
@@ -584,7 +697,7 @@ export function buildPuddleVisual(
   shadow.position.z = gp.z;
   g.add(shadow);
 
-  const disc = mesh(new THREE.CircleGeometry(R, 32), mat, 'puddle');
+  const disc = mesh(new THREE.CircleGeometry(R, 32), bodyMat, 'puddle');
   disc.rotation.x = -Math.PI / 2;
   disc.position.set(gp.x, FLOOR_Y.decal, gp.z);
   noOutline(disc);

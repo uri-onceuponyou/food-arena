@@ -78,6 +78,9 @@ uniform float satAmount;
 uniform float satKnee;
 uniform float contrastAmount;
 uniform float highlightKnee;
+uniform float shadowToe;
+uniform float toeKnee;
+uniform float toeChromaKeep;
 
 /* Identity below k, asymptotic to 1 above it. C1 continuous at the join. */
 float softKnee(const in float x, const in float k) {
@@ -94,6 +97,77 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // specifically not a filmic tonemap (nothing here desaturates).
   float m = max(c.r, max(c.g, c.b));
   if (m > highlightKnee) c *= softKnee(m, highlightKnee) / m;
+
+  // ── Shadow toe — the shoulder's mirror, and the reason it exists ──
+  // Measured against 27 reference plates: our P95 is 0.896 and the reference's P95 is
+  // 0.896 — the light end is ALREADY RIGHT. The whole deficit is at the bottom (P05
+  // 0.304 against 0.097; every one of 18 Brawl Stars plates puts 5% of the character
+  // below 0.18 and not one of ours did). So range has to be bought at the dark end,
+  // and opening the shoulder to buy it at the top was measured and REJECTED: knee
+  // 0.82 -> 0.92 recovers +0.019 of range and takes whole-frame clipped-high from
+  // 0.06% of pixels to 2.50%, a 40x regression on the exact number this grade was
+  // written to fix (the raw render clips 2.33%; the shoulder is what holds it at 0.06).
+  //
+  // Driven by LUMA, not by the max channel, because luma is the quantity the ladder
+  // metric measures; a saturated dark red sits at luma 0.20 with a max channel of 0.47,
+  // and a max-channel toe would walk straight past it. smoothstep reaches the knee with
+  // ZERO derivative, so the join is C1 and there is no banding edge where the toe stops.
+  //
+  // ── AND IT SUBTRACTS BEFORE IT SCALES, WHICH IS THE WHOLE DESIGN ──
+  // The obvious implementation is a uniform SCALE, and the first one here was. A scale
+  // leaves hue and HSV saturation exactly alone, so it looks like a pure VALUE lever —
+  // but tools/arena-scan.mjs, the gate that exists on this project precisely to catch
+  // cumulative colour loss, does not measure HSV saturation. It measures ABSOLUTE
+  // chroma (max-min)/255, which is LINEAR in the scale, and HSL saturation, which is
+  // scale-invariant below L=0.5 and strictly falls above it. Measured: the scale form
+  // cost -0.0238 of mean chroma against a rail whose tolerance is 0.020, and it took a
+  // saturation raise to 0.86 to buy that back, which then overshot the COOL chroma rail
+  // by 0.042. One correct change, two gates, and no setting satisfied both.
+  //
+  // Removing the same luma as a SUBTRACTION instead leaves (max-min) untouched, so
+  // absolute chroma is preserved exactly and HSL saturation RISES slightly. The catch
+  // is the gamut: subtracting from a channel that is already near zero clips it, which
+  // is the exact failure this grade was written to fix. So the subtraction is limited
+  // to 85% of the DARKEST channel, and whatever luma that leaves unremoved is taken by
+  // a scale, which cannot produce a negative. Bright, low-chroma pixels (most of this
+  // floor) therefore get the pure chroma-preserving form; deep saturated pixels, which
+  // have no headroom to subtract from, fall back to the old behaviour on the remainder.
+  //
+  // ── AND WHY toeChromaKeep IS 0.55 AND NOT 1 ──
+  // The two forms fail OPPOSITE colour rails, and this is arithmetic, not taste:
+  // chroma = saturation x f(luma), so lowering luma must lower chroma OR raise
+  // saturation. There is no third option and arena-scan has a drift rail against each.
+  // Swept with tools/tmp/gradechroma.mjs, six stations, one page load each, the gate's
+  // own colourBudget, HEAD as an explicit control row:
+  //
+  //   keep    d meanChroma   d coolChroma   d meanSat        (tolerance is 0.020 each)
+  //   0.00       -0.0238        -0.0000       -0.0002        chroma rail FAILS
+  //   0.25       -0.0196        +0.0068       +0.0058
+  //   0.40       -0.0169        +0.0110       +0.0095
+  //   0.55       -0.0142        +0.0151       +0.0133        <- shipped, ~0.004 margin both
+  //   0.70       -0.0113        +0.0192       +0.0173
+  //   1.00       -0.0054        +0.0275       +0.0254        cool rail FAILS
+  //
+  // toeChromaKeep does not change the luma removed — that is fixed by shadowToe and
+  // toeKnee — so the value ladder is the same at every row above. It only chooses
+  // which of the two colour rails absorbs it.
+  //
+  // NOTE FOR ANYONE EDITING THIS COMMENT: this whole shader lives inside a JS template
+  // literal, so a single backtick here terminates the string and 500s the dev server
+  // for every agent in the repo (docs/LESSONS.md section 9 — it has bitten five times,
+  // and this comment is the fifth). No backticks below this line.
+  {
+    float ly = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float t = clamp(ly / max(toeKnee, 1e-4), 0.0, 1.0);
+    // Fraction of this pixel's luma the toe wants to remove. 0 at and above the knee.
+    float k = 1.0 - mix(1.0 - shadowToe, 1.0, t * t * (3.0 - 2.0 * t));
+    float want = k * ly;
+    float mn = min(c.r, min(c.g, c.b));
+    float off = toeChromaKeep * min(want, 0.85 * mn);   // chroma-preserving part
+    c -= off;
+    float rest = max(want - off, 0.0);     // whatever the gamut would not allow
+    c *= max(1.0 - rest / max(ly - off, 1e-4), 0.0);
+  }
 
   // Bounded contrast. smoothstep is monotone [0,1] -> [0,1], so mixing toward it can
   // never push a channel out of range: mid-tones steepen, ends compress.
@@ -119,7 +193,10 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 `;
 
 export class ToyGradeEffect extends Effect {
-  constructor({ saturation = 0.70, contrast = 0.62, knee = 0.55, highlightKnee = 0.82 } = {}) {
+  constructor({
+    saturation = 0.70, contrast = 0.62, knee = 0.55, highlightKnee = 0.82,
+    shadowToe = 0, toeKnee = 0.50, toeChromaKeep = 1,
+  } = {}) {
     super('ToyGradeEffect', TOY_GRADE_SHADER, {
       blendFunction: BlendFunction.SRC,
       uniforms: new Map<string, THREE.Uniform>([
@@ -127,6 +204,9 @@ export class ToyGradeEffect extends Effect {
         ['satKnee', new THREE.Uniform(knee)],
         ['contrastAmount', new THREE.Uniform(contrast)],
         ['highlightKnee', new THREE.Uniform(highlightKnee)],
+        ['shadowToe', new THREE.Uniform(shadowToe)],
+        ['toeKnee', new THREE.Uniform(toeKnee)],
+        ['toeChromaKeep', new THREE.Uniform(toeChromaKeep)],
       ]),
     });
     // Grade in display-encoded space. `EffectPass` inserts the sRGB transfer for us.
@@ -141,6 +221,15 @@ export class ToyGradeEffect extends Effect {
   set knee(v: number) { this.uniforms.get('satKnee')!.value = v; }
   get highlightKnee(): number { return this.uniforms.get('highlightKnee')!.value as number; }
   set highlightKnee(v: number) { this.uniforms.get('highlightKnee')!.value = v; }
+  /** Depth of the shadow toe, 0..1. 0 is exactly the identity. */
+  get shadowToe(): number { return this.uniforms.get('shadowToe')!.value as number; }
+  set shadowToe(v: number) { this.uniforms.get('shadowToe')!.value = v; }
+  /** Luma at and above which the toe is exactly the identity. */
+  get toeKnee(): number { return this.uniforms.get('toeKnee')!.value as number; }
+  set toeKnee(v: number) { this.uniforms.get('toeKnee')!.value = v; }
+  /** 0 = remove luma by SCALE, 1 = remove it by SUBTRACTION as far as the gamut allows. */
+  get toeChromaKeep(): number { return this.uniforms.get('toeChromaKeep')!.value as number; }
+  set toeChromaKeep(v: number) { this.uniforms.get('toeChromaKeep')!.value = v; }
 }
 
 /**
@@ -733,7 +822,107 @@ export class Stage {
     // replace and the picture is nonetheless LESS clipped, because these units are
     // gamut-relative: the curve spends the headroom a pixel actually has instead of
     // applying a fixed gain and letting the framebuffer amputate the overflow.
-    const grade = new ToyGradeEffect({ saturation: 0.70, contrast: 0.62, knee: 0.55, highlightKnee: 0.82 });
+    //
+    // ── 2026-08-05: the dark end, measured per pass ──────────────────────────
+    // `tools/tmp/valuescan.mjs` put our cast's P95 at 0.896 against a reference P95 of
+    // 0.896 — identical — and our P05 at 0.304 against 0.097. The cast has NO DARK
+    // RUNG, and 27% of that gap was measured to be the post chain rather than the art.
+    //
+    // `tools/tmp/postablate.mjs` then took the chain apart on one frozen frame, one
+    // knob at a time, every row confirmed by image diff. Mean over the cast at
+    // pot_south, as a change in the character's own P05 (negative = deeper darks):
+    //
+    //   SMAA .................. +0.032   edge blend, bright floor bleeding into the
+    //                                    fighter's outline. NOT removable — it is the
+    //                                    high tier's AA, and MSAA does the same thing
+    //                                    on medium/low.
+    //   bloom ................. +0.020   halo. Every partial trim measured bought less
+    //                                    than 0.006 of it, and bloom is art direction
+    //                                    (every reference plate has it, ours had none).
+    //   contrast S-curve ...... -0.046   ALREADY FIGHTING FOR US. The only part of the
+    //                                    chain pulling the right way.
+    //   vignette ..............  0.000   exactly zero on a centred fighter.
+    //   highlight shoulder ....  0.000   costs P95, not P05.
+    //
+    // So the post chain is not "eating" the dark end through the grade — the grade is
+    // the only thing clawing it back, and the eaters are two passes that cannot be
+    // deleted. The recovery therefore has to be a NEW pull at the bottom, which is
+    // what `shadowToe` is (see the shader). Measured, same probe, same frame:
+    //
+    //   config                          ΔP05     Δrange      ΔdL   clip0   clip255
+    //   HEAD                           +0.000    +0.000   +0.000    0.11      0.03
+    //   toe .28 @ .62                  -0.044    +0.044   +0.019    0.11      0.02
+    //   toe .28 @ .62 + contrast .72   -0.052    +0.060   +0.023    0.16      0.03
+    //   highlightKnee .82 -> .92       +0.000    +0.018   +0.006    0.13      2.48  <- rejected
+    //   lighting: fill .50 -> .30      -0.009    +0.006   -0.002    0.11      0.02  <- rejected
+    //
+    // AS SHIPPED, over all eleven characters at pot_south, with HEAD and this change
+    // driven on the SAME frozen frame so the two differ by nothing else at all
+    // (`tools/tmp/postablate.mjs --pair`):
+    //
+    //   P05    0.315 -> 0.280      range  0.584 -> 0.619      dL  0.226 -> 0.247
+    //   P95    0.899 -> 0.899  — the light end is untouched, which is the point:
+    //                            our P95 already equals the reference's 0.896.
+    //
+    // Every one of the eleven improved on both range and P05, and two gained a value
+    // step (pizza 5 -> 6, hotdog 6 -> 7). The shipped figure is smaller than the
+    // `+ contrast .72` row above because that row did not survive the colour gate; see
+    // the note on the constructor call below for what it cost and what it was worth.
+    //
+    // The last two rows are the two obvious alternatives, priced and turned down.
+    // Opening the highlight shoulder buys range at the end that is ALREADY CORRECT and
+    // takes clipped-high from 0.06% of the frame to 2.50%. Dropping the hemisphere
+    // fill — `lighting.ts`'s "shadow floor", the most obvious non-post lever on the
+    // cast's dark end — buys a fifth as much AND costs figure/ground, because it
+    // darkens the floor the fighter is standing on at the same time.
+    //
+    // ⚠️ The rim light is deliberately not in that table. A measured sweep put the
+    // whole available gain from retuning it at +0.012 before it INVERTS (past intensity
+    // ~3.4-6.0 separation drops BELOW switching it off, because it lights the floor
+    // faster than it lights the fighter). It was not touched.
+    // ── ONE knob changed, and here is why it is only one ────────────────────
+    // `saturation`, `knee` and `highlightKnee` are untouched, and `contrast` is back at
+    // its shipped 0.62. All three were moved during this pass and all three were put
+    // back, because the colour gate priced them and they were not worth what they cost:
+    //
+    //   candidate (6 arena-scan stations, `tools/tmp/gradechroma.mjs`)
+    //                                  ΔmeanSat  Δchroma  ΔcoolChroma   Δrange
+    //   contrast .62 -> .72             +0.0151  +0.0088      +0.0160   +0.016
+    //   saturation .70 -> .86           +0.0274  +0.0228      +0.0264    0.000
+    //
+    // Saturation buys NO range at all — it is applied about luma, so `dot(d, rec709)`
+    // is 0 and the pixel's luma is algebraically unchanged; measured, P05/P95/range are
+    // identical at 0.70, 0.82, 0.86 and 0.90 (`tools/tmp/postablate.mjs`, five
+    // characters, four rows agreeing to three decimals). It was only ever bought to pay
+    // back chroma the toe was spending, and once the toe stopped spending chroma it had
+    // no job.
+    //
+    // ⚠️ CONTRAST 0.72 IS THE ONE THING LEFT ON THE TABLE, AND IT IS A GATE DECISION,
+    // NOT AN ART ONE. It is worth a further **+0.016 of range** on top of everything
+    // below (measured, three characters: hamburger +0.057 vs +0.040, taco +0.048 vs
+    // +0.034, hotdog +0.056 vs +0.038) — a third of the whole recovery. It costs
+    // +0.0160 of `coolChroma`, whose entire drift budget is 0.0200 and which the toe
+    // has already spent 0.0159 of. `coolChroma` sits at 0.3505 against a target of
+    // 0.343: it is a rail this arena has already MET, being asked to stay met while
+    // `meanSat` (0.408, target 0.493) is asked to rise — and since this arena is ~87%
+    // cool chroma, those are the same number pulling in opposite directions. This
+    // change takes the side that keeps the gate green. See the report for Uri.
+    //
+    // Worth recording as a shape, not just a number: this arena is ~87% cool chroma, so
+    // ANY global saturation move pushes `meanSat` (0.408, target 0.493, needs to rise)
+    // and `coolChroma` (0.3505, target 0.343, already there) in the same direction and
+    // the two rails cannot both be satisfied. That is a real property of the instrument
+    // pair and it is in the report to Uri.
+    //
+    // The stronger toes were rendered and LOOKED AT at shipped framing
+    // (`shots/gradechroma/v3/sheet.png`) and rejected on the art direction, not on a
+    // number: `.40@.68` takes mean luma to 0.303 and the arena stops reading HIGH-KEY,
+    // which is a stated pillar of the reference. `.28@.60` is the deepest toe that
+    // still leaves the frame bright.
+    const grade = new ToyGradeEffect({
+      saturation: 0.70, contrast: 0.62, knee: 0.55, highlightKnee: 0.82,
+      shadowToe: 0.28, toeKnee: 0.60, toeChromaKeep: 0.55,
+    });
     this.grade = grade;
 
     // Barely-there vignette; the reference has essentially none.
