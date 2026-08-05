@@ -1408,6 +1408,20 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     ],
   },
 
+  // ⚠️ THE PLAINEST KIT IN THE ROSTER, AND IT IS THE RAREST TIER. Every one of these
+  // three weapons is `plain` — the only character with no pellets, homing, peck, combo,
+  // splatter, slam, trail or heal anywhere in its kit (`kitSignature`, asserted in
+  // `sim.test.mjs` §24(c)). Measured over 3,520 matches it also sits below the roster's
+  // mean behavioural distinctiveness (1.17 against 1.36), and the nearest neighbour the
+  // fingerprint gives it — Sushi, at 0.62 — is the same character its static kit
+  // signature shares two of three weapon shapes with.
+  //
+  // ⚠️ **EIGHT REPLACEMENT KITS WERE MEASURED AND ALL EIGHT WERE REFUSED.** Read the
+  // "KIT DISTINCTIVENESS" section at the bottom of this file BEFORE retuning this
+  // character: not one of them raised matchup-profile divergence, six of eight blew the
+  // rarity tier-spread guard past 10 pp at constant kit output, and the one that held the
+  // guard bought +0.046 of behavioural spread against a 0.030 noise floor. The reason is
+  // not this character; it is that the roster's behavioural space is already full.
   hotdog: {
     id: 'hotdog', name: 'Hot Dog', emoji: '🌭', rarity: 'Cyber',
     stats: { damage: 9, health: 6, speed: 8 }, hasTrail: false,
@@ -1807,7 +1821,193 @@ export function damageStatFor(id: CharacterId): number {
  * of strength and moves several of them the WRONG WAY — being slower is worth something
  * to a fighter the scripted player has to walk to. A near-inert, non-monotone term would
  * make this index worse, not more complete.
+ *
+ * ⚠️ **AND `kitDps` IS A WEAKER PROXY FOR POWER THAN IT LOOKS — MEASURED 2026-08-05.**
+ * The distinctiveness sweep below (`tools/tmp/kit_lab.mjs`) built eight Hot Dog kits that
+ * all hold `kitDps` inside 29.8–31.0 (shipped: 29.96) and therefore all render the SAME
+ * `damage` bar of 9 on the card. Measured strength across them ran **33.1% to 75.2%** —
+ * a 42 pp span at constant modelled output. What moved it was REACH and press CADENCE,
+ * neither of which this index or `kitDps` contains. Do not treat either as a balance
+ * gate; they are a card derivation and a sketch, in that order.
  */
 export function powerIndex(id: CharacterId): number {
   return kitDps(id) * healthMultiplier(id);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KIT DISTINCTIVENESS — measured, and why NOTHING in this file changed for it
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── CONSIDERED AND REFUSED (2026-08-05): "rarity buys DISTINCTIVENESS" ──────
+//
+// `DECISIONS §24b` took rarity's power away (tier spread 20.7 pp -> 4.0 pp) and §26 asked
+// the obvious follow-up: if rarity no longer buys power, and it costs 4.5x to level, let
+// it buy CHARACTER instead — "the rarest brawlers are not stronger, they are weirder".
+// This section is the measurement that came back, and it says do not do it here.
+//
+// The instrument is `tools/tmp/kit_lab.mjs` (`--selftest` 10/10). It scores two things on
+// the same 3,520 matches that produce the balance guard, so a distinctiveness number and
+// the tier spread it must not move can never come from two different runs:
+//
+//   MATCHUP-PROFILE DIVERGENCE  each character's role-symmetric win vector against the
+//                               other ten, MEAN-CENTRED (so "stronger" is not "more
+//                               distinctive"), compared pairwise as an RMSD in pp.
+//   BEHAVIOURAL FINGERPRINT     nine realised quantities — engagement distance, melee
+//                               share, damage per press, press rate, stun/slow share,
+//                               single-weapon focus, mobility, time to first damage.
+//
+// ── IT WAS CALIBRATED AGAINST KNOWN INPUTS FIRST, AND THAT CHANGED THE ANSWER ──
+//
+//   a LITERAL clone   (`stage_kit.mjs --clone hamburger:hotdog`)   2.10 pp
+//   a UNIFORM roster  (all eleven given one character's kit)       2.58 pp roster mean
+//   the SHIPPED roster                                           25.42 pp roster mean
+//   the noise floor   (same character, disjoint seed halves)       6.04 pp
+//
+// The clone is what corrected the floor: the first derivation divided the split-half
+// figure by 2 instead of sqrt(2), which would have reported two characters that are
+// IDENTICAL BY CONSTRUCTION as 4.6 pp apart. `docs/LESSONS.md` §13, paid for again.
+//
+// ── FINDING 1: THE ROSTER IS ALREADY WELL SPREAD, AND IT IS NOT CLOSE ───────
+//
+// Mean pairwise correlation between matchup profiles is **-0.026**: knowing how one
+// character does against the roster tells you nothing about how any other does. **0 of 55
+// pairs are indistinguishable**, and the closest genuine pair (Donut ~ Lollipop, 11.65 pp)
+// sits 5.5x further apart than the measured clone. A roster of eleven copies of one
+// character reads 2.58 pp on the same instrument. There are no clones here.
+//
+// ── FINDING 2: THE SETTLED MATCHUPS ARE KIT-DRIVEN, BUT NOT BY SIMILARITY ───
+//
+// The uniform roster settles **0 of 110** cells. So a settled matchup is not something the
+// arena, the clock or the player/enemy pool asymmetry produces on its own — it needs two
+// DIFFERENT characters, which is the case for acting on the roster rather than the map.
+//
+// But the differences that produce them are concentrated, not distributed: **8 of the 17
+// involve Hamburger**, whose halves are 15.0% in the player's hands against 65.6% in the
+// AI's — a 50.6 pp role split, twice the next largest in the roster. Six of its eight are
+// the same cell shape, "player-Hamburger loses >= 95%". That is one 70 HP glass cannon
+// meeting the scripted driver, and making some OTHER character weirder cannot reach it.
+//
+// ── FINDING 3: DISTINCTIVENESS IS NOT ALIGNED WITH RARITY ───────────────────
+//
+//   tier        Normal  Rare  Epic  Legendary  Neon  Cyber
+//   divergence   23.4   25.8  25.5     27.8    26.8  **23.3**   <- rarest is LOWEST
+//   behaviour     1.48   1.12  1.24     1.30    1.20   **1.76**  <- rarest is HIGHEST
+//
+// The two axes disagree, and neither is monotone in rarity. Cyber's behavioural lead is
+// Lollipop alone — 2.35 against Hot Dog's 1.17, which is what averages to the tier's 1.76.
+// Hot Dog sits below the roster mean of 1.36, and its nearest behavioural neighbour is
+// Sushi at 0.62.
+//
+// **And Hot Dog is structurally the plainest kit in the game**, which needs no simulation
+// at all: `kitSignature` below shows it is the ONLY character whose every weapon is
+// `plain` — no pellets, no homing, no peck, no combo, no splatter, no slam, no trail, no
+// heal. It shares two of its three weapon signatures with Sushi, which is exactly the pair
+// the 3,520-match fingerprint independently names. A static property of this file and a
+// behavioural measurement converged on the same character; `sim.test.mjs` §24 pins it.
+//
+// ── FINDING 4: AND IT CANNOT BE FIXED CHEAPLY, BECAUSE DISTINCTIVENESS AND ──
+//              POWER ARE THE SAME LEVER
+//
+// Eight Hot Dog kits, every one holding `kitDps` at the shipped card value (damage bar 9,
+// 29.8–31.0 HP/s), 110 matchups x 32 seeds each, paired:
+//
+//   candidate          hotdog  tierSPREAD  settled   rosterDiv  rosterBehaviour
+//   shipped             51.2%    3.98 pp    17/110     25.42 pp      1.361
+//   long-range Mustard  72.2%   12.66 pp    17/110     24.55 pp      1.340
+//   …bigger + slower    72.5%   12.81 pp    18/110     24.46 pp      1.345
+//   …both guns at max   66.4%   10.08 pp    17/110     24.27 pp      1.341
+//   fast gun            33.1%   13.13 pp    18/110     25.36 pp      1.416
+//   long-range + hp 4   41.1%   11.25 pp    16/110     24.78 pp      1.347
+//   fast gun  + hp 8    75.2%   15.62 pp    21/110     24.56 pp      1.408
+//   fast gun  + hp 7    58.0%  **5.86 pp**  18/110     24.83 pp      1.408
+//   fast gun, half dose 46.1%    6.64 pp    17/110     25.08 pp      1.378
+//
+// Three things in that table decided it:
+//
+//  1. **NOT ONE CANDIDATE RAISES MATCHUP-PROFILE DIVERGENCE.** All eight lower it, and all
+//     eight lower Hot Dog's own. Every corner it can be moved to is already occupied —
+//     the long-range builds land at engagement distance 70 wu, in the middle of Taco 65,
+//     Pizza 66, Burrito 67 and Sushi 69; the fast gun lands at 4.78 damage per press,
+//     next to Pizza's 4.68. With eleven characters over six real behavioural axes, the
+//     space is full. That is the same conclusion Finding 1 reaches from the other side.
+//  2. **THE GUARD MOVES FIRST AND MOVES MOST.** Six of eight leave the tier spread at
+//     10–16 pp, outside the ~9 pp aggregate floor — at CONSTANT modelled kit output. The
+//     only compensating lever is the card's integer `health` bar, worth 7–12 pp a point
+//     (see `HEALTH_PER_STAT`), and for Hot Dog some of its values are not even available:
+//     health 5 puts its stat total on 22, which Lollipop and Sushi already hold, dropping
+//     the roster to FIVE distinct totals — below the >= 6 `sim.test.mjs` §22(g) requires.
+//     So the finest admissible step either side of the shipped 6 is +-1 point = 7-12 pp of
+//     one character = 3.5-6 pp of its two-character tier, against a window of about 5 pp.
+//     A compensating lever quantised as coarsely as the thing it has to cancel.
+//  3. **THE ONE CANDIDATE THAT LANDS THE GUARD BUYS ALMOST NOTHING.** `fast gun + hp 7`
+//     holds 5.86 pp and raises roster behavioural spread +0.046 against a measured floor
+//     of 0.030 — resolvable, and 1.5x its own noise. It pays for that with -0.59 pp of
+//     profile divergence, +1 settled matchup, a 47% increase in the guard Uri had just
+//     driven to 4.0 pp, and a Hot Dog whose new identity is "presses 37% faster and hits
+//     34% softer". That is `DECISIONS §26`'s own definition of a wash ("distinctiveness up
+//     and settled up is a wash"), so it is recorded here rather than shipped.
+//
+// ── ONE CHANGE THAT LOOKED FREE AND IS NOT ──────────────────────────────────
+//
+// Hot Dog's Ketchup Slip already draws a floor slick in `src/vfx/weapons/hotdog.ts`, so
+// `splatter: true` looked like a mechanic the art was already promising. It is not: that
+// file explicitly designs the slick as a 0.8 s hard-cornered POLYLINE so it cannot be
+// confused with "the hazard puddles that slow fighters", and `splatter` would spawn the
+// generic 2.0 m round splat the same comment names as the thing to avoid. Checked in the
+// peer's file rather than assumed.
+//
+// ── WHAT THIS MEANS FOR `DECISIONS §26` ────────────────────────────────────
+//
+// Rarity cannot be given a distinctiveness job in this roster at a price worth paying.
+// The variety is already there — it simply is not where rarity is, and rarity is fixed
+// identity (`CharacterDef.face`: "which food, which rarity" is not ours to move). So §26
+// resolves on one of its other two branches — flatten `LEVEL_UP.rarityCostMultiplier`, or
+// keep rarity as prestige and acquisition — and that call is Uri's, in `economy/tuning.ts`,
+// which this pass does not own.
+//
+// **Do not re-derive this.** `node tools/tmp/kit_lab.mjs --seeds 32 --json <out>` is the
+// whole measurement and `tools/tmp/stage_kit.mjs` is how a candidate roster is built.
+
+/**
+ * The mechanics the weapon model offers beyond damage/cooldown/range, for one weapon.
+ *
+ * Exported so `sim.test.mjs` §24 asserts the roster's variety against the SAME derivation
+ * the record above quotes, rather than against a second copy of it that can drift.
+ */
+export function weaponMechanics(w: Weapon): string[] {
+  const out: string[] = [];
+  if (w.pellets !== undefined && w.pellets > 1) out.push('pellets');
+  if (w.homing) out.push('homing');
+  if (w.peckHits !== undefined) out.push('peck');
+  if (w.comboParts !== undefined) out.push('combo');
+  if (w.splatter) out.push('splatter');
+  if (w.giantSlam) out.push('slam');
+  if (w.trailBoosted) out.push('trailBoost');
+  if (w.healAmount !== undefined) out.push('heal');
+  return out;
+}
+
+/** Every mechanic `weaponMechanics` can name. The roster is asserted to use all of them. */
+export const WEAPON_MECHANICS = [
+  'pellets', 'homing', 'peck', 'combo', 'splatter', 'slam', 'trailBoost', 'heal',
+] as const;
+
+/**
+ * A character's kit as a set of SHAPES rather than numbers: for each weapon, its type, the
+ * named `REACH` rung it sits on, the status it applies, and which mechanics it uses.
+ *
+ * This is the part of "how distinctive is this character" that a unit test can reach.
+ * Damage and cooldown are deliberately excluded — two characters differing only in those
+ * are the same character with different numbers, which is exactly what this is for.
+ * Sorted, so weapon ORDER is not mistaken for a difference.
+ */
+export function kitSignature(id: CharacterId): string[] {
+  const rungs = Object.keys(REACH) as (keyof typeof REACH)[];
+  return CHARACTERS[id].weapons
+    .map((w) => {
+      const rung = rungs.find((k) => REACH[k] === w.range) ?? 'none';
+      const mech = weaponMechanics(w).join('+') || 'plain';
+      return `${w.type}:${rung}:${w.effect ?? 'none'}:${mech}`;
+    })
+    .sort();
 }

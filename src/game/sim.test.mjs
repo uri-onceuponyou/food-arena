@@ -46,6 +46,10 @@ import {
   // `sim.ts` that stopped applying them cannot leave this section green.
   LEVEL_MIN, LEVEL_MAX, LEVEL_HEALTH_PER_LEVEL, LEVEL_DAMAGE_PER_LEVEL,
   clampLevel, levelHealthMultiplier, levelDamageMultiplier,
+  // Section 24: the roster's kit VARIETY. Same rule again — the signature is derived in
+  // `rules.ts` and imported, because the "KIT DISTINCTIVENESS" record in that file quotes
+  // it and a second copy here could quietly stop agreeing with the thing it documents.
+  kitSignature, weaponMechanics, WEAPON_MECHANICS,
 } from './rules.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
@@ -2746,6 +2750,107 @@ console.log('\n23. Character levels');
     check('a level-1 match is tick-for-tick and hit-for-hit identical to a pre-levels one',
       a.ticks === b.ticks && a.trace === b.trace && a.hp === b.hp,
       `${a.ticks}/${b.ticks} ticks, hp ${a.hp} vs ${b.hp}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 24. THE ROSTER'S KIT VARIETY — the half of "distinctiveness" a unit test can reach
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `DECISIONS §26` proposed that rarity should buy DISTINCTIVENESS now that it no longer
+// buys power. `tools/tmp/kit_lab.mjs` measured it over 3,520 matches and the full result
+// is recorded in `rules.ts`'s "KIT DISTINCTIVENESS" section. Two of its findings are
+// properties of `rules.ts` alone, so they belong here rather than in a probe nobody runs:
+// the outcome half needs 3,520 matches and cannot live in a unit test, exactly as §22(h)
+// already says about the rarity ramp.
+//
+//   MEASURED, for the record this section guards the inputs to:
+//     mean pairwise matchup-profile correlation   **-0.026**   (uncorrelated)
+//     pairs indistinguishable at 32 seeds          **0 / 55**
+//     closest genuine pair (donut ~ lollipop)      11.65 pp, against a measured
+//                                                  literal clone at 2.10 pp
+//     a UNIFORM roster (all eleven cloned)          2.58 pp, settled 0/110
+{
+  console.log('\n24. The roster has real kit variety (the structural half of DECISIONS §26)');
+
+  // ── (a) NO TWO CHARACTERS HAVE THE SAME KIT ───────────────────────────────
+  //
+  // The measured version of this is "0 of 55 pairs are indistinguishable over 3,520
+  // matches". This is its structural shadow and it is worth having on its own: a pair
+  // that collides HERE is two characters that cannot possibly play differently, and the
+  // instrument that would notice takes 70 s and a staged tree to run.
+  {
+    const seen = new Map();
+    const collisions = [];
+    for (const id of CHARACTER_IDS) {
+      const sig = kitSignature(id).join(' | ');
+      if (seen.has(sig)) collisions.push(`${seen.get(sig)} == ${id}`);
+      else seen.set(sig, id);
+    }
+    check('no two characters share a kit signature — the roster contains no clones',
+      collisions.length === 0, collisions.join(' · '));
+  }
+
+  // ── (b) THE ROSTER SPANS ITS OWN DESIGN SPACE ─────────────────────────────
+  //
+  // Every optional mechanic the weapon model defines is used by somebody. A mechanic with
+  // no user is dead content — `rules.ts` has had three of those already (the AI could not
+  // reach `self` weapons, the regen delay was unreachable, the pot was standable-around)
+  // and every one of them was invisible until something counted.
+  {
+    const users = Object.fromEntries(WEAPON_MECHANICS.map((m) => [m,
+      CHARACTER_IDS.filter((id) => CHARACTERS[id].weapons.some((w) => weaponMechanics(w).includes(m)))]));
+    const unused = WEAPON_MECHANICS.filter((m) => users[m].length === 0);
+    check('every mechanic the weapon model defines is used by at least one character',
+      unused.length === 0, `unused: [${unused.join(', ')}]`);
+  }
+
+  // ── (c) ⚠️ A PINNED DIAGNOSIS, NOT A PASSING GATE ─────────────────────────
+  //
+  // **Exactly one character's kit uses no mechanic at all, and it is the Cyber-tier Hot
+  // Dog** — three weapons, all `plain`. This is written the way §19(c) and §20(d) are
+  // written, as a guard on an OPEN and DELIBERATE state: eight replacement kits were built
+  // and measured, none raised matchup-profile divergence, six of eight blew the rarity
+  // tier-spread guard past 10 pp at constant kit output, and the one that held it bought
+  // +0.046 of behavioural spread against a 0.030 floor. The full table is in `rules.ts`.
+  //
+  // It is asserted in BOTH directions on purpose. If a future pass gives Hot Dog a
+  // mechanic this fails, and whoever fixes it has to read the record and re-measure the
+  // guard — which is the entire point. If a SECOND character is flattened to `plain`, it
+  // fails too, and that is a genuine regression.
+  {
+    const plain = CHARACTER_IDS.filter((id) =>
+      CHARACTERS[id].weapons.every((w) => weaponMechanics(w).length === 0));
+    check('exactly one kit is entirely plain, and it is Hot Dog — a pinned diagnosis, see rules.ts',
+      plain.length === 1 && plain[0] === 'hotdog',
+      `entirely plain: [${plain.join(', ')}] — read "KIT DISTINCTIVENESS" in rules.ts before changing this`);
+    check('…and it is the rarest tier, which is why DECISIONS §26 asked the question at all',
+      CHARACTERS.hotdog.rarity === RARITY_ORDER[RARITY_ORDER.length - 1],
+      `hotdog is ${CHARACTERS.hotdog.rarity}, rarest is ${RARITY_ORDER[RARITY_ORDER.length - 1]}`);
+  }
+
+  // ── (d) THE SIGNATURE IS A SHAPE, NOT A NUMBER ────────────────────────────
+  //
+  // (a) is only worth anything if the signature ignores damage and cooldown: two
+  // characters differing only in those ARE the same character with different numbers, and
+  // a signature that separated them would report a roster of clones as varied. Driven
+  // rather than asserted about — this is the instrument-validation rule (`docs/LESSONS.md`
+  // §13) applied to a derivation in `rules.ts`.
+  {
+    const before = kitSignature('hotdog').join(' | ');
+    const w = CHARACTERS.hotdog.weapons[0];
+    const dmg0 = w.damage, cd0 = w.cooldown;
+    // `CHARACTERS` is a plain mutable object at runtime, which is the only reason this is
+    // possible. It is restored on the next line and the restoration is itself checked —
+    // a fixture that leaves the roster edited would poison every section after it, and
+    // this is the last section in the file only by accident.
+    w.damage = dmg0 * 3; w.cooldown = cd0 * 3;
+    const after = kitSignature('hotdog').join(' | ');
+    w.damage = dmg0; w.cooldown = cd0;
+    check('tripling a weapon\'s damage and cooldown does NOT change its kit signature',
+      after === before, `${before}  ->  ${after}`);
+    check('…and the fixture put the weapon back exactly as it found it',
+      w.damage === dmg0 && w.cooldown === cd0 && kitSignature('hotdog').join(' | ') === before);
   }
 }
 
