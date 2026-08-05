@@ -92,3 +92,34 @@ run, when cached thumbnails made the capture 0.3 s faster than the animation.
 - **Every agent should validate its instrument against a known input before believing it.** This
   session found **eight** instruments returning confident wrong answers — including two that an
   agent caught in its own tooling mid-task.
+
+---
+
+## ⚠️ A record correction: commit `9854f2c` is mislabelled
+
+`9854f2c` is titled *"docs: Uri played it — pointer lock answered, and audio is a BUILD not a tune"*.
+**It actually contains 19 files** — all eleven character files, `src/game/vfx.ts` (+425),
+`src/game/match.ts`, `src/render/stage.ts`, `src/audio/{engine,synth}.ts` and two weapon files —
+i.e. **six agents' uncommitted work**, none of which its message mentions.
+
+**Cause, and it was the orchestrator's.** Agents restoring their file sets ran
+`git checkout wip/… -- <paths>`, which **stages** those paths. A later `git add docs/… &&
+git commit` then swept the entire index. The staged work was type-clean and gate-green at that
+moment, so nothing broke — but the git log is this project's primary source, and that commit
+describes none of what it carries.
+
+**Not rewritten deliberately.** It is pushed and six agents have working trees based on it;
+rewriting shared history to tidy a message would cost far more than the mislabel. The content has
+since been measured and documented properly by the agents that owned it:
+
+| swept file | measured afterwards by |
+|---|---|
+| `src/audio/{engine,synth}.ts` | `9890cbe` — the Nyquist clamp proven audible at 44.1 kHz |
+| `src/render/stage.ts` | the grade pass — `contrast` 0.72 measured at +0.0143, not the claimed +0.016 |
+| `src/game/vfx.ts`, `match.ts`, weapons | the VFX pass — matte fixed, Giant Lollipop 89.6% → 9.7% |
+| `src/characters/*.ts` | the value-ladder pass |
+
+**The procedural fix, in force from `8501dd0` onward:** commit with **pathspec form**
+(`git commit -F - -- <paths>`), which commits only the named paths **regardless of the index**, and
+check `git diff --cached --name-only` before committing. Never `git add X && git commit` while
+peers may have staged their own restores.
