@@ -3003,37 +3003,76 @@ console.log('\n23. Character levels');
       `hp ${before} -> ${state.player.hp} (expected +${heal.healAmount})`);
   }
 
-  // ── (e) ⚠️ THE SECOND STALE EXCLUSION, IN THE SAME SIX-LINE FUNCTION ──────
+  // ── (e) ⚠️ THE SECOND STALE EXCLUSION — FIXED, AND IT NAMED THE WRONG CAST ─
   //
   // `4105116` proved the authored `damage` field is not what a press delivers — it is
   // per-PELLET, per-PECK, and for a combo weapon it is not the damage at all — and its own
   // commit message says **"both drivers ranked weapons by authored damage"**. It fixed
   // `ai.ts` (`pressValue`, validated against the sim in all 183 cells by §20(b)) and the
-  // fix never crossed to `scripted_player.mjs:bestWeapon`, which still ranks by `w.damage`.
+  // fix never crossed to `scripted_player.mjs:bestWeapon`. That crossing has now been made
+  // (driver rev 4): `bestWeapon` ranks by `pressValue`, and the authored key survives only
+  // behind `--damage-ranking-key`, so every pre-fix figure still reproduces byte-identically.
   //
-  // So the two drivers rank the same kit differently TODAY, and this pins exactly whose:
-  // the two characters `4105116` named by name. Both directions again — a kit change that
-  // adds a third mis-ranked character, or a driver fix that removes these two, must come
-  // back through here.
+  // ⚠️ THE OLD ASSERTION, KEPT VERBATIM BECAUSE IT PASSED AND WAS WRONG:
+  //
+  //     check('ranking a kit by authored `damage` picks the wrong weapon for exactly
+  //            Taco and Burrito', mis.length === 2 && ...)
+  //
+  // …over `BANDS` with the FULL kit eligible at every band. That model has no cooldowns in
+  // it, and cooldowns are the whole difference: on a live tick the eligible set is a
+  // SUBSET, and three more characters flip inside a subset. Measured on real playing ticks
+  // across the roster, the two keys disagree for **five** characters, not two — taco 3.7%
+  // of ticks, burrito 0.9%, soup 0.6%, waterbottle 0.6%, sushi 0.1% — and `rules.ts` and
+  // this file were the two places that said "exactly the two characters that commit named".
+  //
+  // The mis-rank is therefore enumerated over ELIGIBLE SUBSETS, which is what the driver
+  // actually faces. Both directions still: a kit change that adds a sixth, or a driver
+  // change that removes one, must come back through here.
   {
     const BANDS = [20, 40, 60, 80, 120, 160, 200, 260];
     const mis = [];
+    const pairs = [];
+    for (const id of CHARACTER_IDS) {
+      const ws = CHARACTERS[id].weapons.filter((w) => w.type !== 'self');
+      // Every non-empty subset: a cooldown is exactly "this weapon is not in the set".
+      let hit = false;
+      for (let m = 1; m < (1 << ws.length); m++) {
+        const sub = ws.filter((_, i) => m & (1 << i));
+        for (const d of BANDS) {
+          const elig = sub.filter((w) => d <= (w.range ?? Infinity));
+          if (!elig.length) continue;
+          // First-wins on a tie, matching both implementations' strict `>`.
+          let byDamage = elig[0], byPress = elig[0];
+          for (const w of elig) if ((w.damage ?? 0) > (byDamage.damage ?? 0)) byDamage = w;
+          for (const w of elig) if (pressValue(w, d) > pressValue(byPress, d)) byPress = w;
+          if (byDamage !== byPress) {
+            if (!hit) { mis.push(id); pairs.push(`${id}:${byDamage.key}->${byPress.key}`); hit = true; }
+            break;
+          }
+        }
+        if (hit) break;
+      }
+    }
+    const WANT = ['taco', 'burrito', 'sushi', 'soup', 'waterbottle'];
+    check('ranking a kit by authored `damage` mis-ranks FIVE characters once cooldowns are in it',
+      mis.length === WANT.length && WANT.every((id) => mis.includes(id)),
+      `mis-ranked by the damage key: [${mis.join(', ')}] — want [${WANT.join(', ')}]; first cell each: ${pairs.join(' ')}`);
+    // …and the claim that the FULL-kit model finds only two, which is why it was believed.
+    const misFullKit = [];
     for (const id of CHARACTER_IDS) {
       const ws = CHARACTERS[id].weapons.filter((w) => w.type !== 'self');
       for (const d of BANDS) {
         const elig = ws.filter((w) => d <= (w.range ?? Infinity));
         if (!elig.length) continue;
-        // First-wins on a tie, matching both implementations' strict `>`.
         let byDamage = elig[0], byPress = elig[0];
         for (const w of elig) if ((w.damage ?? 0) > (byDamage.damage ?? 0)) byDamage = w;
         for (const w of elig) if (pressValue(w, d) > pressValue(byPress, d)) byPress = w;
-        if (byDamage !== byPress) { mis.push(id); break; }
+        if (byDamage !== byPress) { misFullKit.push(id); break; }
       }
     }
-    check('ranking a kit by authored `damage` picks the wrong weapon for exactly Taco and Burrito',
-      mis.length === 2 && mis.includes('taco') && mis.includes('burrito'),
-      `mis-ranked by the damage key: [${mis.join(', ')}] — `
-      + '`scripted_player.mjs:bestWeapon` still uses that key; see rules.ts');
+    check('…and with EVERY weapon off cooldown it finds only two — that gap is why "two" was believed',
+      misFullKit.length === 2 && misFullKit.includes('taco') && misFullKit.includes('burrito'),
+      `full-kit model: [${misFullKit.join(', ')}]`);
   }
 }
 

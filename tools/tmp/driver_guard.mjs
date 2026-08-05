@@ -315,7 +315,13 @@ if (!args['no-e2e']) {
     async function ladder(simDir, { navCountdownBug, decideDuringCountdown }) {
       const { createMatch, stepMatch } = await import(`${simDir}/game/sim.ts`);
       const RULES = await import(`${simDir}/game/rules.ts`);
-      const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, REACH } = RULES;
+      // The ranking key and the heal threshold must come from the SAME staged sim as
+      // `CHARACTERS`, for the same reason `CHARACTERS` does: `ai.ts:pressValue` is keyed
+      // on weapon object identity and silently degrades to the authored `damage` key for
+      // a kit it has never seen. Two staged sims live in this one process, so the
+      // driver's own argv-based resolution cannot pick the right one — inject it.
+      const { pressValue } = await import(`${simDir}/game/ai.ts`);
+      const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, REACH, AI_SELF_HEAL_HP_FRACTION } = RULES;
       const A = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
       const HALF = Math.hypot(A.width / 2, A.height / 2);
       const arena = {
@@ -326,6 +332,7 @@ if (!args['no-e2e']) {
       const drv = createScriptedPlayer({
         CHARACTERS, REACH, arena, hazard: arena.hazards.find((h) => h.kind === 'damage'),
         navCountdownBug, decideDuringCountdown,
+        pressValue, selfHealHpFraction: AI_SELF_HEAL_HP_FRACTION,
       });
       const out = {};
       for (const p of CHARACTER_IDS) for (const e of CHARACTER_IDS) {
@@ -370,6 +377,188 @@ if (!args['no-e2e']) {
     console.log(`\n  e2e · fixed driver: ${moved.length}/110 matchups moved on COUNTDOWN_FROM 5 -> 3`);
     console.log(`  e2e · historical driver: ${histMoved.length}/110 moved on the SAME edit — every one of them RNG alignment, not the game\n`);
   }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 5. RANK — `bestWeapon` ranks by DELIVERED press value, not authored `damage`
+// ═════════════════════════════════════════════════════════════════════════════
+/**
+ * Fault 4. `4105116` proved the authored `damage` field is not what a press delivers —
+ * it is per-PELLET, per-PECK, and for a combo weapon it is not the damage at all — fixed
+ * `ai.ts` (`pressValue`, validated against the real combat path in all 183 weapon-band
+ * cells by `sim.test.mjs` §20(b)), and the fix never crossed to `bestWeapon`.
+ *
+ * ⚠️ THIS RUNS ON THE SHIPPED ROSTER, NOT A SYNTHETIC KIT, and that is the point: the
+ * claim being pinned is about specific characters, and a stub kit would only pin the stub.
+ *
+ * ⚠️ AND IT PINS **FIVE** CHARACTERS, NOT TWO. `rules.ts` and `sim.test.mjs` §25(e) both
+ * said "exactly Taco and Burrito". That is true only of a kit with EVERY weapon off
+ * cooldown. On a live tick the eligible set is a SUBSET, and three more characters flip
+ * inside a subset — measured over the whole roster on real playing ticks: soup 0.6% of
+ * ticks (Noodle->Splash), waterbottle 0.6% (Cap/Glass->Spray), sushi 0.1% (Fish->Rice).
+ * The `cd` column below is what makes that reachable here.
+ */
+const SHIPPED = await import(`${ROOT}/src/game/rules.ts`);
+const SHIPPED_AI = await import(`${ROOT}/src/game/ai.ts`);
+{
+  const mk = (opts) => createScriptedPlayer({
+    CHARACTERS: SHIPPED.CHARACTERS, REACH: SHIPPED.REACH, arena: FAKE_ARENA, ...opts,
+  });
+  const fixed = mk({});
+  const historical = mk({ damageRankingKey: true, noPlayerHeal: true });
+
+  /** A playing state at `d` wu with every weapon in `cd` just fired (so: on cooldown). */
+  const at = (id, cd = []) => ({
+    phase: 'playing', elapsed: 1_000_000, safeRadius: 900,
+    player: {
+      x: 0, y: 0, characterId: id, hp: 100, maxHp: 100,
+      lastUsed: SHIPPED.CHARACTERS[id].weapons.map((w) => (cd.includes(w.key) ? 1_000_000 : -1e9)),
+    },
+    enemy: { x: 0, y: 0, characterId: id, lastUsed: [] },
+  });
+  const keyOf = (drv, id, d, cd = []) => {
+    const i = drv.bestWeapon(at(id, cd), d);
+    return i === null ? null : SHIPPED.CHARACTERS[id].weapons[i].key;
+  };
+
+  // id, distance, weapons held on cooldown, what the FIXED key picks, what the OLD key picks
+  const CELLS = [
+    ['taco', 50, [], 'Double', 'Filling'],            // authored 0, delivers 23 vs 12
+    ['burrito', 50, [], 'Swarm', 'Disc'],             // 4-pellet homing: authored 5, delivers 20 vs 10
+    ['soup', 50, ['Dump'], 'Splash', 'Noodle'],       // subset-only: delivers 9 vs 5
+    ['waterbottle', 50, ['Mega'], 'Spray', 'Glass'],  // subset-only: delivers 9 vs 7
+    ['sushi', 20, ['Catch'], 'Rice', 'Fish'],         // subset-only AND close-range-only: 10 vs 6
+  ];
+  for (const [id, d, cd, want, old] of CELLS) {
+    ok(`rank: ${id} at ${d} wu picks ${want} (what a press DELIVERS)`,
+      keyOf(fixed, id, d, cd) === want, `picked ${keyOf(fixed, id, d, cd)}`);
+    // DETECTION — the historical key must still pick the wrong one, or the check above
+    // is only proving that both keys happen to agree today.
+    ok(`detection: the AUTHORED-damage key still picks ${old} for ${id} at ${d} wu`,
+      keyOf(historical, id, d, cd) === old, `picked ${keyOf(historical, id, d, cd)}`);
+  }
+  ok('rank: the fixed and historical keys really do differ on all five characters',
+    CELLS.every(([id, d, cd, want, old]) => want !== old
+      && keyOf(fixed, id, d, cd) !== keyOf(historical, id, d, cd)),
+    'a kit change has made one of these cells agree — re-derive the cell, do not delete it');
+
+  // ── The ranking key must be the one `sim.test.mjs` §20(b) validated ────────
+  ok('rank: the driver\'s ranking key IS `ai.ts:pressValue`, not a copy of its arithmetic',
+    SHIPPED.CHARACTER_IDS.every((id) => SHIPPED.CHARACTERS[id].weapons.every((w) => {
+      for (const d of [0, 20, 40, 60, 80, 120, 160, 200, 260]) {
+        if (fixed.rankKey(w, d) !== SHIPPED_AI.pressValue(w, d)) return false;
+      }
+      return true;
+    })),
+    'the driver is ranking by something other than pressValue');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 6. HEAL — the player presses it on `ai.ts:rankHeal`'s three conditions, and
+  //    on NONE of the others
+  // ═══════════════════════════════════════════════════════════════════════════
+  /**
+   * Fault 3, and the reason the "delete one line" repair is a DIFFERENT, WORSE fix.
+   * Onion Ring is authored `damage: 0`, so making `self` eligible for the OFFENSIVE
+   * ranking presses it whenever nothing else is available — at any hp, including full.
+   * Measured over 3,520 matches: 484 presses for 4,051 HP (8.37 HP per 25 HP press,
+   * 66.5% thrown away) against the gated version's 332 presses for 8,254 HP (24.86 HP,
+   * 99.4% efficient). Fewer presses, twice the healing. The three conditions ARE the fix.
+   */
+  const HB = SHIPPED.CHARACTERS.hamburger.weapons;
+  const SELF = HB.findIndex((w) => w.type === 'self');
+  const HEAL = HB[SELF].healAmount;
+  const FRAC = SHIPPED.AI_SELF_HEAL_HP_FRACTION;
+  /** All offensive weapons on cooldown, so the ONLY thing left to reach for is the heal. */
+  const ALL_OFFENSIVE = HB.filter((w) => w.type !== 'self').map((w) => w.key);
+  const hb = (hp, { cd = [], maxHp = 70 } = {}) => ({
+    phase: 'playing', elapsed: 1_000_000, safeRadius: 900,
+    player: {
+      x: 0, y: 0, characterId: 'hamburger', hp, maxHp,
+      lastUsed: HB.map((w) => (cd.includes(w.key) ? 1_000_000 : -1e9)),
+    },
+    enemy: { x: 0, y: 0, characterId: 'hamburger', lastUsed: [] },
+  });
+
+  ok('heal: a hurt player Hamburger with the heal ready presses it',
+    fixed.bestWeapon(hb(30), 50) === SELF, `picked ${fixed.bestWeapon(hb(30), 50)}, want ${SELF}`);
+  ok('heal: …and it OUTRANKS an in-range offensive weapon, rather than losing to it',
+    fixed.healWeapon(hb(30)) === SELF && fixed.bestWeapon(hb(30), 50) === SELF);
+  ok('heal: at FULL hp with every offensive weapon on cooldown it presses NOTHING',
+    fixed.bestWeapon(hb(70, { cd: ALL_OFFENSIVE }), 50) === null,
+    `picked ${fixed.bestWeapon(hb(70, { cd: ALL_OFFENSIVE }), 50)} — this is the 66.5%-waste bug`);
+  ok(`heal: just above the ${FRAC * 100}% threshold it is NOT pressed`,
+    fixed.healWeapon(hb(Math.floor(70 * FRAC) + 1)) === null);
+  ok(`heal: at the ${FRAC * 100}% threshold exactly it IS pressed`,
+    fixed.healWeapon(hb(Math.floor(70 * FRAC))) === SELF);
+  ok('heal: it is not pressed when it would OVERHEAL',
+    fixed.healWeapon(hb(70 - HEAL + 1)) === null, `hp ${70 - HEAL + 1}/70, heal ${HEAL}`);
+  ok('heal: it is not pressed while on cooldown',
+    fixed.healWeapon(hb(30, { cd: ['Onion'] })) === null);
+  // The counterfactual is INERT for ten of the eleven characters — which is why the whole
+  // 50.6 pp lands on one. If this ever fails, a second `self` weapon has been authored and
+  // every Hamburger-shaped number in the repo needs re-reading.
+  {
+    const others = SHIPPED.CHARACTER_IDS.filter((id) => id !== 'hamburger');
+    const hurt = (id) => {
+      const s = at(id);
+      s.player.hp = 1; s.player.maxHp = 100;
+      return s;
+    };
+    ok('heal: the branch is inert for all ten characters that own no `self` weapon',
+      others.every((id) => fixed.healWeapon(hurt(id)) === null),
+      `fired for [${others.filter((id) => fixed.healWeapon(hurt(id)) !== null).join(', ')}]`);
+  }
+  // A `self` weapon travels nowhere, so line of sight is not one of its preconditions.
+  {
+    const blocked = createScriptedPlayer({
+      CHARACTERS: SHIPPED.CHARACTERS, REACH: SHIPPED.REACH,
+      arena: { ...FAKE_ARENA, cover: [{ x: 0, y: 0, w: 400, h: 400 }] },
+    });
+    const s = hb(30);
+    s.player.x = -300; s.player.y = 0; s.enemy = { x: 300, y: 0, characterId: 'hamburger', lastUsed: [] };
+    const inp = blocked.POLICY_FNS.smart2(null)(s);
+    ok('heal: it fires with NO line of sight — LOS is not a precondition of a self weapon',
+      inp.selectedWeapon === SELF && inp.attack === true,
+      `selectedWeapon ${inp.selectedWeapon} attack ${inp.attack} (los blocked: ${!blocked.lineOfSight(-300, 0, 300, 0)})`);
+  }
+  // DETECTION — the historical driver must still be structurally unable to press it.
+  ok('detection: the HISTORICAL driver still cannot press the heal at any hp',
+    [1, 20, 30, 34, 35, 45, 69, 70].every((hp) => historical.healWeapon(hb(hp)) === null
+      && historical.bestWeapon(hb(hp), 50) !== SELF
+      && historical.bestWeapon(hb(hp, { cd: ALL_OFFENSIVE }), 50) !== SELF),
+    'the `--no-player-heal` flag no longer reproduces the exclusion');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 7. THE RANKING KEY IS VALIDATED AGAINST THE KIT IT IS RANKING
+  // ═══════════════════════════════════════════════════════════════════════════
+  /**
+   * `ai.ts:pressValue` is keyed on weapon OBJECT IDENTITY and falls back to `w.damage`
+   * for a weapon it has never seen. So a driver handed a `--sim <staged>` kit while
+   * holding the SHIPPED key would rank by the authored damage with nothing printed —
+   * fault 4, restored by accident. The known-bad input is a kit with identical VALUES
+   * and different identity; it must throw, not degrade.
+   */
+  const FOREIGN = JSON.parse(JSON.stringify(SHIPPED.CHARACTERS));
+  const mkForeign = (opts) => createScriptedPlayer({
+    CHARACTERS: FOREIGN, REACH: SHIPPED.REACH, arena: FAKE_ARENA, ...opts,
+  });
+  let threw = false;
+  try { mkForeign({}); } catch { threw = true; }
+  ok('rankkey: a kit the press-value key does not recognise THROWS rather than degrading',
+    threw, 'the driver silently fell back to the authored `damage` key');
+  let threw2 = false;
+  try { mkForeign({ damageRankingKey: true }); } catch { threw2 = true; }
+  ok('rankkey: …but the HISTORICAL driver needs no press key, so it still binds',
+    !threw2, '`--damage-ranking-key` must stay usable on any kit');
+  let threw3 = false;
+  try { mkForeign({ pressValue: SHIPPED_AI.pressValue }); } catch { threw3 = true; }
+  ok('rankkey: detection — the validation really is identity-based, not value-based',
+    threw3, 'injecting the SHIPPED key for a value-identical foreign kit should still throw');
+  let threw4 = false;
+  try {
+    createScriptedPlayer({ CHARACTERS: FAKE_CHARS, REACH: REACH_STUB, arena: FAKE_ARENA });
+  } catch { threw4 = true; }
+  ok('rankkey: a kit with no compound weapon binds fine (both keys are identical there)', !threw4);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

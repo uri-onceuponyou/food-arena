@@ -1356,10 +1356,22 @@ export const RARITY_CARD_COLORS: Record<Rarity, string> = {
 // `4105116` proved the authored `damage` field is not what a press delivers, and its own
 // commit message says *"both drivers ranked weapons by authored damage"*. It fixed `ai.ts`
 // (`pressValue`, checked against the sim in all 183 weapon-band cells by `sim.test.mjs`
-// §20(b)) and the fix never crossed to `bestWeapon`, which still ranks by `w.damage`. So
-// the two drivers rank the same kit differently today, for exactly the two characters that
-// commit named — Taco's Double Toss (authored 0, delivers 23) and Burrito's Topping Swarm
-// (authored 5, delivers 20) — at 5 of 8 separation bands. Pinned in `sim.test.mjs` §25(e).
+// §20(b)) and the fix never crossed to `bestWeapon`, which still ranks by `w.damage`.
+//
+// ⚠️ THE OLD WORDING, KEPT BECAUSE IT PASSED A TEST AND WAS STILL WRONG: *"the two
+// drivers rank the same kit differently today, for exactly the two characters that commit
+// named — Taco's Double Toss (authored 0, delivers 23) and Burrito's Topping Swarm
+// (authored 5, delivers 20) — at 5 of 8 separation bands."*
+//
+// **It is FIVE characters, not two, and the missing dimension is COOLDOWNS.** "Exactly
+// two" is what you get from a model in which every weapon is eligible at every band. On a
+// live tick the eligible set is a SUBSET, and three more characters flip inside a subset.
+// Measured on real playing ticks across the roster (`tools/tmp/p3_rankdiv.mjs`, 8 seeds x
+// 110 matchups, player side, with a self-comparison control at 0 divergent ticks):
+// taco 3.7% of ticks (Onion/Filling -> Double), burrito 0.9% (Disc -> Swarm), soup 0.6%
+// (Noodle -> Splash), waterbottle 0.6% (Cap/Glass -> Spray), sushi 0.1% (Fish/Seaweed ->
+// Rice); hamburger/donut/egg/lollipop/pizza/hotdog are 0. `sim.test.mjs` §25(e) now
+// enumerates ELIGIBLE SUBSETS and pins all five, keeping the old assertion above it.
 //
 // ── ⚠️ THE FINDING BEHIND THE FINDING, AND IT IS THE EXPENSIVE ONE ──────────
 //

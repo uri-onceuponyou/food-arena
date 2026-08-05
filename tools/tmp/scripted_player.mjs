@@ -44,25 +44,87 @@
  * completely fictitious balance result: large, consistent, reproducible, and entirely
  * an artefact of RNG alignment. `docs/LESSONS.md` §13 in its purest form.
  *
+ * ── The two faults in `bestWeapon`, landed together on 2026-08-05 ───────────
+ *
+ * Both live in the same six-line function, both are *"a rule stated once in the codebase
+ * and implemented differently in the instrument"*, and landing one without the other
+ * would have re-based the roster twice. Measured, 32 seeds x 110 matchups, `smart2`,
+ * shipped arena, PAIRED on identical seeds (an exact quantity — not the ~9 pp aggregate
+ * floor):
+ *
+ * **3. THE PLAYER COULD NOT PRESS A HEAL.** `bestWeapon` opened with
+ * `if (w.type === 'self') return;` — the exact mirror of the defect `07a4e3a` fixed in
+ * `ai.ts` (`pickHighestDamageWeapon` skipped `'self'`, so the AI could never heal on the
+ * same character the player healed with). Same weapon, same character, same one-line
+ * exclusion, other side of the match. Hamburger owns the roster's only `self` weapon and
+ * its smallest pool, so it cost **50.6 pp of role split on exactly one character** and
+ * **8 of the 17 settled matchups**. `docs/LESSONS.md` §15 is this bug.
+ *
+ * ⚠️ **AND THE ONE-LINE DELETION IS A DIFFERENT, WORSE FIX.** `docs/STATE.md` used to
+ * say *"one line … worth settled 17 -> 14"*. Deleting the exclusion ALONE measures
+ * settled **13**, tier spread **9.14 pp**, Hamburger **53.9%** — not 14/16.56/70.6 — and
+ * **wastes 66.5% of every heal**: Onion Ring is authored `damage: 0`, so a damage-ranked
+ * `bestWeapon` reaches it whenever every offensive weapon is on cooldown or out of range,
+ * *including at full HP*. Measured over 3,520 matches: 484 presses for 4,051 HP (8.37 HP
+ * per 25 HP press) against the gated version's 332 presses for 8,254 HP (24.86 HP per
+ * press, 99.4% efficient). **Fewer presses, twice the healing.**
+ * So the heal is a branch AHEAD of the offensive ranking, gated on `ai.ts:rankHeal`'s own
+ * three conditions — off cooldown, at or below `AI_SELF_HEAL_HP_FRACTION`, would not
+ * overheal — rather than an entry in it. The rule is stated once, in `ai.ts`, and this
+ * file now spells the player's half of it the same way.
+ *
+ * **4. IT RANKED BY AUTHORED `damage`, WHICH IS PER-PELLET.** `4105116` proved this and
+ * fixed `ai.ts` (`pressValue`, validated against the real combat path in all 183
+ * weapon-band cells by `sim.test.mjs` §20(b)); the fix never crossed to `bestWeapon`.
+ * **This is the BIGGER of the two by matchup count** — on its own it moves **40 of 110
+ * matchups, max |Δ| 46.9 pp** (`taco>donut` 9.4% -> 56.3%) against the heal's 10 — and
+ * **it names the wrong characters.** `rules.ts` and `sim.test.mjs` §25(e) said "exactly
+ * Taco and Burrito"; that is true only of a kit with every weapon off cooldown. On a live
+ * tick the eligible set is a SUBSET, and over eligible subsets the two keys disagree for
+ * **five** characters: taco (Filling/Onion->Double), burrito (Disc->Swarm),
+ * sushi (Fish/Seaweed->Rice), soup (Noodle->Splash), waterbottle (Cap/Glass->Spray).
+ *
+ * ── What is DELIBERATELY not fixed: `preferredRange` ────────────────────────
+ *
+ * `preferredRange` (below) carries the SAME damage-ranking key and sets `band`, which
+ * decides close/strafe/back-off in `smart`/`smart2` — i.e. the movement target. It is left
+ * on the authored key ON PURPOSE: every figure in the pass that landed the two fixes above
+ * holds `band` at its shipped value, so changing it here would invalidate all of them at
+ * once. It is an unmeasured third rung, and it should be measured before it is moved.
+ * (The `type !== 'self'` exclusion there is CORRECT — a `self` weapon has no `range` and
+ * must not set the band.)
+ *
  * ── Reproducing the historical driver ───────────────────────────────────────
  *
- * Both faults stay reachable BY FLAG, never by default, so any figure recorded before
- * 2026-08-05 can still be reproduced and shown to be what it is:
+ * Every fault stays reachable BY FLAG, never by default, so any figure recorded before
+ * the fix can still be reproduced BYTE-IDENTICALLY and shown to be what it is:
  *
  *     --nav-countdown-bug          fault 1 (the latched sideways detour)
  *     --decide-during-countdown    fault 2 (the re-seeding decision loop)
+ *     --no-player-heal             fault 3 (the player cannot press a heal)
+ *     --damage-ranking-key         fault 4 (rank by authored per-pellet `damage`)
  *
- * `parseDriverFlags(args)` reads both, so every tool spells them the same way.
+ * `parseDriverFlags(args)` reads all four, so every tool spells them the same way, and
+ * any of them sets `isHistorical`.
  *
  * ── Guard ───────────────────────────────────────────────────────────────────
  *
  * `node tools/tmp/driver_guard.mjs` fails if a SIXTH copy of this driver appears, if
- * a tool that carries its own copy loses the countdown guard, or if the decision
- * stream at the whistle ever becomes a function of countdown length again.
+ * a tool that carries its own copy loses the countdown guard, if the decision stream at
+ * the whistle ever becomes a function of countdown length again, or if either
+ * `bestWeapon` fault comes back — and each of those checks is ALSO run against the
+ * historical driver and must FAIL there.
  */
 
-/** 1 = pre-2026-08-05. 2 = range-before-LOS (`match-sim.mjs` rev 2). 3 = + both countdown guards. */
-export const DRIVER_REV = 3;
+/**
+ * 1 = pre-2026-08-05. 2 = range-before-LOS (`match-sim.mjs` rev 2). 3 = + both countdown
+ * guards. 4 = + `bestWeapon` ranks by delivered press value and can press the heal.
+ *
+ * ⚠️ REV 4 RE-BASES EVERY BALANCE FIGURE THIS DRIVER HAS EVER PRINTED that involves
+ * Hamburger, Taco, Burrito, Sushi, Soup or Water Bottle. That is the point of the pass,
+ * not a side effect — but a rev-3 baseline JSON is not comparable to a rev-4 run.
+ */
+export const DRIVER_REV = 4;
 
 /** mulberry32. Identical stream to the copies this file replaces — do not "improve" it. */
 export function rng(seed) {
@@ -83,12 +145,89 @@ export function axesToward(fromX, fromY, toX, toY) {
   return { x: q(dx / m), y: q(dy / m) };
 }
 
-/** Every tool spells the two reproduction flags the same way, or the flags are useless. */
+/** Every tool spells the four reproduction flags the same way, or the flags are useless. */
 export function parseDriverFlags(args) {
   return {
     navCountdownBug: !!args['nav-countdown-bug'],
     decideDuringCountdown: !!args['decide-during-countdown'],
+    noPlayerHeal: !!args['no-player-heal'],
+    damageRankingKey: !!args['damage-ranking-key'],
   };
+}
+
+/**
+ * ── RESOLVING `pressValue` WITHOUT HARD-IMPORTING THE SHIPPED TREE ──────────
+ *
+ * `pressValue` is keyed on weapon OBJECT IDENTITY (`ai.ts`'s `PRESS_VALUE` is a
+ * `Map<Weapon, PressProfile>` built from its own `CHARACTERS` import), and it falls back
+ * to `w.damage` for a weapon it does not recognise. So a driver that hard-imported
+ * `src/game/ai.ts` while the CALLER handed it a `--sim <staged>` `CHARACTERS` would
+ * silently rank the staged kit by the authored key — which is precisely fault 4, restored
+ * by accident, with nothing printed. That is the same shape as every bug this file exists
+ * to prevent, so it is resolved the same way `CHARACTERS` and `REACH` are: from the
+ * caller's sim, not from the shared tree.
+ *
+ * Every Node balance tool in `tools/` spells the sim dir identically —
+ * `const SIM_DIR = String(args.sim ?? \`${ROOT}/src/game\`)` — so the dir is read off
+ * `process.argv` here and the matching `ai.ts` / `rules.ts` are loaded once, at module
+ * load, in the same process. A tool that needs something else (two staged sims in one
+ * process, as `driver_guard.mjs`'s E2E does) passes `pressValue` and
+ * `selfHealHpFraction` explicitly, which always wins.
+ *
+ * ⚠️ AND THE FALLBACK IS NOT TRUSTED: `createScriptedPlayer` VALIDATES the resolved key
+ * against the caller's own kit and THROWS if it does not recognise it (see
+ * `assertRankKeyKnowsKit`). A silent degradation to the authored key is exactly the
+ * failure mode, so it is made loud instead of likely.
+ */
+const SIM_DIR_ON_ARGV = (() => {
+  const i = process.argv.indexOf('--sim');
+  const v = i >= 0 ? process.argv[i + 1] : null;
+  return v && !v.startsWith('--') ? v : null;
+})();
+const RESOLVED_SIM_DIR = SIM_DIR_ON_ARGV
+  ? new URL(SIM_DIR_ON_ARGV.startsWith('/') ? SIM_DIR_ON_ARGV : `${process.cwd()}/${SIM_DIR_ON_ARGV}`, 'file://').href
+  : new URL('../../src/game', import.meta.url).href;
+
+let RESOLVED_PRESS_VALUE = null;
+let RESOLVED_SELF_HEAL_FRACTION = null;
+try {
+  ({ pressValue: RESOLVED_PRESS_VALUE } = await import(`${RESOLVED_SIM_DIR}/ai.ts`));
+  ({ AI_SELF_HEAL_HP_FRACTION: RESOLVED_SELF_HEAL_FRACTION } = await import(`${RESOLVED_SIM_DIR}/rules.ts`));
+} catch {
+  // Left null. A caller that never ranks a compound weapon does not need it; one that
+  // does gets a thrown error naming the fix, never a quietly wrong ranking.
+}
+
+/**
+ * A weapon whose ONE PRESS delivers something other than its authored `damage`: a combo,
+ * a multi-pellet fan, or a multi-peck swing. This reads the weapon's own fields — it does
+ * not re-implement `pressValue`'s arithmetic, which is stated once in `ai.ts`.
+ */
+const isCompoundWeapon = (w) => !!w.comboParts || (w.pellets ?? 1) > 1 || (w.peckHits ?? 1) > 1;
+
+/**
+ * KNOWN-BAD-INPUT VALIDATION for the ranking key itself.
+ *
+ * `pressValue` returns exactly `w.damage` for a weapon it has never seen. For a weapon it
+ * HAS seen, a compound weapon's value at separation 0 is strictly greater than its
+ * authored damage (every part lands). So: if the kit has compound weapons and the key
+ * agrees with the authored damage on ALL of them, the key is looking at a different
+ * `CHARACTERS` than the caller is, and every ranking it produces is fault 4 wearing the
+ * fix's name. One compound weapon that disagrees is proof the map is the right one.
+ */
+function assertRankKeyKnowsKit(rankKey, CHARACTERS) {
+  const compound = [];
+  for (const id of Object.keys(CHARACTERS)) {
+    for (const w of CHARACTERS[id].weapons) if (w.type !== 'self' && isCompoundWeapon(w)) compound.push(w);
+  }
+  if (!compound.length) return;                       // no compound weapon: the two keys are identical
+  if (compound.some((w) => rankKey(w, 0) !== (w.damage ?? 0))) return;
+  throw new Error(
+    'createScriptedPlayer: the press-value ranking key does not recognise this kit '
+    + `(${compound.length} compound weapons, every one of them reading back its authored damage). `
+    + `Resolved from ${RESOLVED_SIM_DIR}. Pass \`pressValue\` (and \`selfHealHpFraction\`) from the same `
+    + 'sim your `CHARACTERS` came from, or run with `--damage-ranking-key` if you meant the historical driver.',
+  );
 }
 
 /**
@@ -102,31 +241,99 @@ export function parseDriverFlags(args) {
 export function createScriptedPlayer({
   CHARACTERS, REACH, arena, hazard = null,
   navCountdownBug = false, decideDuringCountdown = false,
+  noPlayerHeal = false, damageRankingKey = false,
+  pressValue = null, selfHealHpFraction = null,
 }) {
   if (!CHARACTERS || !REACH) throw new Error('createScriptedPlayer: CHARACTERS and REACH are required');
   if (!arena) throw new Error('createScriptedPlayer: arena is required');
   const HAZ = hazard ?? (arena.hazards ?? []).find((h) => h.kind === 'damage') ?? null;
   const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
 
+  /**
+   * THE RANKING KEY — fault 4.
+   *
+   * `pressValue(w, adist)` is what ONE PRESS delivers from here, and it is validated
+   * against the real combat path in all 183 weapon-band cells by `sim.test.mjs` §20(b).
+   * The authored `damage` field is per-PELLET, per-PECK, and for a combo weapon is not
+   * the damage at all — Taco's Double Toss is authored 0 and delivers 23.
+   */
+  const press = pressValue ?? RESOLVED_PRESS_VALUE;
+  const rankKey = damageRankingKey
+    ? (w) => w.damage ?? 0
+    : (w, d) => {
+      if (!press) {
+        throw new Error('createScriptedPlayer: no `pressValue` available — pass one, or use `--damage-ranking-key`.');
+      }
+      return press(w, d);
+    };
+  if (!damageRankingKey) assertRankKeyKnowsKit(rankKey, CHARACTERS);
+
+  /** `ai.ts:AI_SELF_HEAL_HP_FRACTION` — the same threshold, read from the same sim. */
+  const HEAL_HP_FRACTION = selfHealHpFraction ?? RESOLVED_SELF_HEAL_FRACTION;
+
   const maxNormalRange = (id) =>
     Math.max(...CHARACTERS[id].weapons.filter((w) => (w.range ?? 0) <= REACH.rangedMax).map((w) => w.range ?? 0), 0);
 
+  /**
+   * ⚠️ STILL ON THE AUTHORED `damage` KEY, DELIBERATELY. See the header: this sets `band`,
+   * i.e. the MOVEMENT target, and every figure in the pass that fixed `bestWeapon` holds
+   * `band` at its shipped value. Moving it is an unmeasured third rung — measure it, then
+   * move it, in that order. (`type !== 'self'` here is correct: a `self` weapon has no
+   * `range` and must not set the band.)
+   */
   function preferredRange(id) {
     const ws = CHARACTERS[id].weapons.filter((w) => w.type !== 'self' && (w.range ?? 0) <= REACH.rangedMax);
     if (!ws.length) return maxNormalRange(id);
     return ws.reduce((best, w) => ((w.damage ?? 0) > (best.damage ?? 0) ? w : best)).range ?? 0;
   }
 
-  /** Highest DAMAGE that is off cooldown and in range. Never picks a weapon for its STATUS. */
+  /**
+   * FAULT 3, FIXED — the player's half of `ai.ts:rankHeal`, and only that.
+   *
+   * The counterfactual this encodes is precisely *"the player uses the heal exactly as
+   * well as the AI already does"*: `ai.ts:rankHeal`'s OWN three conditions, on the player's
+   * hp instead of the enemy's. It is deliberately NOT a hand-tuned policy — a new policy's
+   * result would be a tuning artefact rather than a measurement of the game.
+   *
+   * ⚠️ AND IT IS A BRANCH, NOT AN ENTRY IN THE RANKING. Onion Ring is authored `damage: 0`,
+   * so simply making `self` eligible for the offensive ranking presses it whenever nothing
+   * else is available — at ANY hp, including full — and throws away 66.5% of the healing.
+   * The three conditions are what make one press worth 24.86 HP instead of 8.37.
+   */
+  function healWeapon(state) {
+    if (noPlayerHeal) return null;
+    const p = state.player;
+    const ws = CHARACTERS[p.characterId].weapons;
+    const slot = ws.findIndex((w) => w.type === 'self');
+    if (slot < 0) return null;
+    const w = ws[slot];
+    const heal = w.healAmount ?? 0;
+    if (heal <= 0) return null;
+    if (state.elapsed - p.lastUsed[slot] < w.cooldown) return null;              // on cooldown
+    if (HEAL_HP_FRACTION === null || HEAL_HP_FRACTION === undefined) {
+      throw new Error('createScriptedPlayer: no `AI_SELF_HEAL_HP_FRACTION` available — pass `selfHealHpFraction`.');
+    }
+    if (p.hp > p.maxHp * HEAL_HP_FRACTION) return null;                          // not hurt enough
+    if (p.maxHp - p.hp < heal) return null;                                      // would overheal
+    return slot;
+  }
+
+  /**
+   * The heal if `ai.ts:rankHeal` would take it; otherwise the highest DELIVERED press value
+   * that is off cooldown and in range. Never picks an offensive weapon for its STATUS.
+   */
   function bestWeapon(state, d) {
     const p = state.player;
     const ws = CHARACTERS[p.characterId].weapons;
-    let best = null, bestDmg = -Infinity;
+    const healSlot = healWeapon(state);
+    if (healSlot !== null) return healSlot;
+    let best = null, bestScore = -Infinity;
     ws.forEach((w, i) => {
-      if (w.type === 'self') return;
+      if (w.type === 'self') return;                  // ranked by `healWeapon`, never offensively
       if (state.elapsed - p.lastUsed[i] < w.cooldown) return;
       if (d > (w.range ?? Infinity)) return;
-      if ((w.damage ?? 0) > bestDmg) { bestDmg = w.damage ?? 0; best = i; }
+      const s = rankKey(w, d);
+      if (s > bestScore) { bestScore = s; best = i; }
     });
     return best;
   }
@@ -351,8 +558,12 @@ export function createScriptedPlayer({
         move: nav(state, target.x, target.y),
         aim: { x: e.x - p.x, y: e.y - p.y },
         selectedWeapon: idx ?? 0,
-        // Don't spend cooldowns on shots that cannot reach OR cannot arrive.
-        attack: idx !== null && (los || CHARACTERS[p.characterId].weapons[idx].type === 'melee'),
+        // Don't spend cooldowns on shots that cannot reach OR cannot arrive. A `self`
+        // weapon travels nowhere, so line of sight is not one of its preconditions —
+        // gating the heal on LOS would be a second, invented rule.
+        attack: idx !== null
+          && (los || CHARACTERS[p.characterId].weapons[idx].type === 'melee'
+            || CHARACTERS[p.characterId].weapons[idx].type === 'self'),
       };
     };
   }
@@ -402,10 +613,13 @@ export function createScriptedPlayer({
     DRIVER_REV,
     POLICY_FNS,
     POLICY_NAMES: Object.keys(POLICY_FNS),
-    makeNav, lineOfSight, bestWeapon, preferredRange, maxNormalRange, axesToward,
+    makeNav, lineOfSight, bestWeapon, healWeapon, rankKey, preferredRange, maxNormalRange, axesToward,
     createDecisionLoop,
-    flags: { navCountdownBug, decideDuringCountdown },
+    /** Which sim the ranking key and the heal threshold were resolved from. */
+    rankKeySource: pressValue ? 'injected' : RESOLVED_SIM_DIR,
+    selfHealHpFraction: HEAL_HP_FRACTION,
+    flags: { navCountdownBug, decideDuringCountdown, noPlayerHeal, damageRankingKey },
     /** True when this driver is reproducing a historical defect and its numbers are NOT current. */
-    isHistorical: navCountdownBug || decideDuringCountdown,
+    isHistorical: navCountdownBug || decideDuringCountdown || noPlayerHeal || damageRankingKey,
   };
 }
