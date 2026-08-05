@@ -630,7 +630,32 @@ if (args.list) {
   process.exit(0);
 }
 
-const BASE = args.url ?? process.env.SCAN_BASE ?? 'http://localhost:5187';
+/**
+ * Where to measure — and it must NEVER be guessed silently.
+ *
+ * `PREVIEW_BASE` was missing from this chain. `tools/tmp/with_snapshot.mjs` injects
+ * exactly that variable into every child it runs, so the canonical "measure a frozen
+ * snapshot" idiom —
+ *
+ *     node tools/tmp/with_snapshot.mjs -- node tools/arena-scan.mjs ...
+ *
+ * — silently fell through to the hardcoded `localhost:5187` and measured **whatever
+ * happened to be listening on that port**. During a six-agent fan-out that is another
+ * agent's tree, or a stale leaked server from hours ago. The run succeeds, writes a
+ * SUMMARY, and reports confident numbers about a build nobody asked about.
+ *
+ * That is `docs/LESSONS.md` §5 with the contamination inside the instrument rather than
+ * in the tree: a tool that is 90% snapshot-isolated invites you to trust the 10% that
+ * is not.
+ *
+ * The default is kept for the documented "run your own vite on 5187" workflow, but it is
+ * now ANNOUNCED. A measurement tool may pick a default; it may not pick one quietly.
+ */
+const BASE = args.url ?? process.env.PREVIEW_BASE ?? process.env.SCAN_BASE ?? 'http://localhost:5187';
+if (!args.url && !process.env.PREVIEW_BASE && !process.env.SCAN_BASE && !args.list && !args.selftest) {
+  console.warn(`\n  ⚠ no --url, PREVIEW_BASE or SCAN_BASE — falling back to ${BASE}`);
+  console.warn('    If you meant to measure a snapshot, this is measuring something else.\n');
+}
 const W = Number(args.w ?? 1600);
 const H = Number(args.h ?? 900);
 const PLAYER = args.player ?? 'hamburger';
@@ -1779,7 +1804,19 @@ export const ErrorOverlay=class{}; export default {};`;
   }
 
   const okResults = results.filter((r) => r.ok);
-  const agg = okResults.length ? aggregate(results) : null;
+
+  // A sweep that measured NOTHING must not look like a sweep that measured everything.
+  // Reported after an arena pass: "a run where every station failed still exited 0 and
+  // wrote a SUMMARY". Whatever the path, the guard is one line and the failure mode —
+  // a confident-looking SUMMARY.txt built from zero frames — is exactly the kind this
+  // project keeps paying for. Loud and early beats a plausible artefact.
+  if (!okResults.length) {
+    console.error(`\n✗ every station failed (${failures} of ${results.length}). Nothing was measured.`);
+    console.error(`  Base URL was ${BASE} — check it is serving the tree you meant.`);
+    process.exit(2);
+  }
+
+  const agg = aggregate(results);
   const rails = agg ? railStatus(agg) : [];
 
   const report = {
