@@ -2052,4 +2052,37 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 @media (max-height: 640px) {
   .hud-radar-map { width: 105px; height: 75px; }
 }
+
+/* ── Narrow PORTRAIT: the tray and the radar cannot share the bottom edge ───
+   A real defect, measured at committed HEAD and predating every screen change in
+   this session: at 390x844 the weapon tray and the radar card overlapped by 33x46
+   px with slot 4 drawn BEHIND the radar. It is pure geometry, not a device
+   property, and the whole of it is three lines of arithmetic:
+
+     tray right edge = W/2 + (4 x 46 + 3 x 10) / 2 = W/2 + 107   [46px slots <=720]
+     radar left edge = W - safe-r - 16 - 105                     [105px card <=720]
+     overlap         = 228 - W/2, i.e. zero at W = 456
+
+   Measured against that prediction on the live game: 48px at 360, 33px at 390,
+   13px at 430 — exact at all three. The 460px breakpoint is that 456 plus four
+   pixels of slack for a portrait side inset. Above it nothing moves, and the
+   whole band sits inside the max-width:720px regime above, so there is no width
+   at which the 58px slot / 152px card pair can reach this rule.
+
+   The radar is LIFTED rather than either box narrowed, because both sizes are
+   load-bearing: 46px is the touch floor for the one HUD control a phone must be
+   able to hit, and the 105px card is what the radar rebuild derived its zone
+   geometry and its 8C7A5E stroke luma against. safe-b + 84 clears the tray
+   (18 + 46 = 64) by 20px, which also clears the selected slot's 3px lift and its
+   glow, and it stays clear of .hud-mute, which is bottom-LEFT at safe-b + 68.
+
+   Deliberately NOT keyed on touch. html.fa-touch-capable already moves the radar
+   to the top right and beats this rule on specificity (0,2,1 against 0,1,0), so a
+   real phone is untouched; this is the desktop browser at a portrait window and
+   every headless probe in tools/, which is the framing the defect was photographed
+   in. Asserted at 0px by tools/tmp/menu_accept_portrait.mjs at all three widths,
+   in both DOM states and with a portrait notch injected. */
+@media (max-width: 460px) {
+  .hud-radar { bottom: calc(var(--fa-safe-b, 0px) + 84px); }
+}
 `;

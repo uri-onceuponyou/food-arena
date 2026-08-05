@@ -15,16 +15,35 @@
  * | section | why it is here |
  * |---|---|
  * | Audio | Fully wired to `src/audio`. Four real controls plus the engine's own state. |
+ * | Graphics | Fully wired to `src/render/quality.ts`. See the section below. |
  * | Controls | The real bindings, read from what `game/input.ts` actually listens for. Read-only, because nothing in the engine can rebind them yet — and this is the ONLY place in the product that tells a player `M` mutes. |
  * | Game | One toggle, applied by this file, persisted by this file. |
  * | Danger zone | Wipes the saved profile and reboots. Destructive, so it is behind a confirm. |
  *
- * ── What is deliberately NOT here ───────────────────────────────────────────
- * **Graphics / quality tiers.** `THREE_SESSION_PLAN.md` puts mobile quality tiers in
- * session 2; the renderer currently exposes no tier to choose. A three-button
- * Low/Medium/High row that changes no pixel is precisely the defect above, so the
- * section is absent rather than fake. `SECTIONS` below is a plain list of rendered
- * blocks — adding it later is one function and one entry.
+ * ── Graphics: what unblocked it, and the one thing it has to admit ──────────
+ * This section used to be absent, and the reason was written down here: the renderer
+ * exposed no tier, so a Low/Medium/High row would have changed no pixel — which is
+ * precisely the dead-UI defect two blind critics punished. `src/render/quality.ts`
+ * landed that tier with a measured DPR cap, so the row is now real: every choice moves
+ * pixel ratio, the post chain and the shadow map on every live Stage the moment it is
+ * tapped, and persists to `food-arena.quality.v1`.
+ *
+ * Two honesty obligations come with it, and both are discharged IN THE UI rather than
+ * only in this comment, because a control that quietly half-works is the same defect
+ * wearing a different hat:
+ *
+ *  1. **Ink outlines are baked at build time.** `outlineGroup` bakes hull meshes when a
+ *     character or the arena is CONSTRUCTED, so `propInk` (the one knob that separates
+ *     `low` from the other two) cannot change on a scene that already exists. Pixel
+ *     ratio, post chain and shadow map all change instantly. The note under the row
+ *     says exactly that, in those terms.
+ *  2. **`?tier=` wins.** `forcedTier()` overrides the stored choice for the whole
+ *     session, so while a URL override is in force the row would be lying about what
+ *     it controls. It is therefore DISABLED and says why — the same treatment the gem
+ *     store's real-money SKUs get, and for the same reason.
+ *
+ * Nothing is called at boot: `renderTier()` reads storage lazily, so this screen is a
+ * reader and a writer of a preference that already applies without it.
  *
  * ── The audio API's own warnings, honoured ──────────────────────────────────
  * `audio.getState()` is `'idle'` until the page has been touched. A volume slider
@@ -37,6 +56,13 @@
  */
 
 import { audio } from '../../audio';
+// `render/quality.ts` has ZERO imports, deliberately, so a menu screen can read and
+// write the render tier for the price of one string — without pulling three.js or the
+// `postprocessing` bundle into the menu graph. See that file's header.
+import {
+  QUALITY_CHOICES, qualityChoice, setQualityChoice, qualityLabel,
+  detectedTier, forcedTier, tierProfile, onQualityChange, type QualityChoice,
+} from '../../render/quality';
 import { ensureIconStyles, icon } from '../icons';
 import type { Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
@@ -176,6 +202,31 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
        <span class="set-range-val" data-el="${name}val">100%</span>
      </span>`;
 
+  /**
+   * One cell of the quality segmented control.
+   *
+   * `data-quality` is the wiring the click handler reads. `data-el` is there as well,
+   * on purpose: `menu_accept`'s "NO control on this screen is dead" assertion defines a
+   * live control as one carrying `data-toggle` or `data-el`, and these are live. Adding
+   * the attribute is how the row passes that check WITHOUT the check being weakened —
+   * which matters, because two peer agents are running that suite as their commit gate.
+   *
+   * `auto` carries a second line naming what it resolved to on this device. A row whose
+   * default option is an unexplained "Auto" is a row that cannot be reasoned about, and
+   * detection here is deliberately asymmetric (see `detectTier`), so which side it
+   * landed on is exactly the thing a player needs to see.
+   */
+  const segment = (c: QualityChoice): string => {
+    const name = qualityLabel(c);
+    const resolved = c === 'auto' ? qualityLabel(detectedTier()) : '';
+    return `<button class="set-seg-btn" type="button" role="radio" aria-checked="false"
+        aria-label="${resolved ? `${name} (${resolved})` : name}"
+        data-el="quality-${c}" data-quality="${c}">
+        <span class="set-seg-name">${name}</span>
+        ${resolved ? `<span class="set-seg-auto">(${resolved})</span>` : ''}
+      </button>`;
+  };
+
   root.innerHTML = `
     <header class="fa-topbar">
       <button class="fa-iconbtn" type="button" data-el="back">${icon('back')} Back</button>
@@ -191,6 +242,18 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
         ${row(icon('mute'), 'Mute everything', 'Same as pressing M in a match', toggle('mute', 'Mute everything'))}
         ${row(noteIcon(), 'Music', 'The menu and lobby theme', toggle('music', 'Music'))}
         ${row(noteIcon(), 'Music volume', 'Sits under the effects', slider('music', 'Music volume'))}
+      </section>
+
+      <section class="fa-panel set-section">
+        <p class="fa-panel-title">Graphics</p>
+        <p class="set-locked" data-el="qualitypin" hidden></p>
+        <div class="set-seg" role="radiogroup" aria-label="Graphics quality" data-el="qualityrow">
+          ${QUALITY_CHOICES.map((c) => segment(c)).join('')}
+        </div>
+        <p class="set-note" data-el="qualityblurb"></p>
+        <p class="set-note">Resolution, bloom and shadows change the moment you tap.
+          Ink outlines are drawn when a fighter or the kitchen is built, so those pick
+          up a new setting the next time one loads.</p>
       </section>
 
       <section class="fa-panel set-section">
@@ -246,6 +309,7 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
     root.querySelector<HTMLButtonElement>(`[data-toggle="${name}"]`)!;
   const rangeEl = (name: string): HTMLInputElement =>
     root.querySelector<HTMLInputElement>(`[data-range="${name}"]`)!;
+  const qualityRow = q<HTMLDivElement>('qualityrow');
 
   const pct = (v: number): string => `${Math.round(v * 100)}%`;
 
@@ -265,6 +329,40 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
    * `document.activeElement` is skipped for ranges so a repaint triggered by the
    * drag itself cannot fight the thumb the finger is holding.
    */
+  /**
+   * Paint the graphics row from `render/quality.ts`, never from local state.
+   *
+   * Same one-direction rule the audio controls follow: `?tier=` and any other surface
+   * that calls `setQualityChoice` are both invisible to this screen, so the only way
+   * the row can never lie is to re-read the module every time.
+   */
+  function renderQuality(): void {
+    const pinned = forcedTier();
+    const choice = qualityChoice();
+    for (const btn of qualityRow.querySelectorAll<HTMLButtonElement>('[data-quality]')) {
+      const on = btn.dataset.quality === choice;
+      btn.setAttribute('aria-checked', on ? 'true' : 'false');
+      btn.classList.toggle('is-on', on);
+      // A URL override wins for the whole session, so while one is in force this
+      // control cannot do what it says. Disabled and explained, not hidden: hiding it
+      // would leave a player who followed a `?tier=` link with no way to find out why
+      // the setting they remember choosing is not the one they are getting.
+      btn.disabled = pinned !== null;
+    }
+    const pin = q('qualitypin');
+    if (pinned) {
+      pin.textContent = `This session is pinned to ${qualityLabel(pinned)} by a ?tier= link in the `
+        + 'address bar, so this control is switched off. Reload without it to choose.';
+      pin.hidden = false;
+    } else {
+      pin.hidden = true;
+    }
+    const profile = tierProfile();
+    q('qualityblurb').textContent = choice === 'auto' && !pinned
+      ? `Auto picked ${profile.label} on this device. ${profile.blurb}`
+      : profile.blurb;
+  }
+
   function render(): void {
     const muted = audio.isMuted();
     const state = audio.getState();
@@ -302,6 +400,15 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
   // ── Wiring ────────────────────────────────────────────────────────────────
 
   const onToggle = (ev: Event): void => {
+    // `setQualityChoice` IS the entire write path: it persists to
+    // `food-arena.quality.v1` and applies to every live Stage by subscription. There
+    // is deliberately nothing else to call here.
+    const seg = (ev.target as HTMLElement).closest<HTMLElement>('[data-quality]');
+    if (seg) {
+      setQualityChoice(seg.dataset.quality as QualityChoice);
+      renderQuality();
+      return;
+    }
     const btn = (ev.target as HTMLElement).closest<HTMLElement>('[data-toggle]');
     if (!btn) return;
     switch (btn.dataset.toggle) {
@@ -404,7 +511,13 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
 
   const offAudio = audio.onChange(render);
   const offMusic = audio.music.onChange(render);
+  // Another surface CAN change the tier under this screen — `setRenderTier` is exposed
+  // on `window.__quality` for probes, and nothing stops a future in-match control. Same
+  // reason `audio.onChange` is subscribed: a screen that does not listen sits there
+  // showing a stale radio, which is a lie about the renderer.
+  const offQuality = onQualityChange(renderQuality);
   render();
+  renderQuality();
 
   return {
     root,
@@ -412,6 +525,7 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
     dispose() {
       offAudio();
       offMusic();
+      offQuality();
       body.removeEventListener('scroll', updateFade);
       root.removeEventListener('click', onToggle);
       root.removeEventListener('input', onRange);
@@ -601,6 +715,68 @@ const CSS = `
   border: 3px solid var(--ink);
   background: var(--mustard);
 }
+
+/* ── Graphics: segmented control ──────────────────────────────────────────── */
+/* Four equal cells rather than a dropdown: the whole ladder is four items, and a
+   segmented row shows what the alternatives ARE without a tap. Each cell is its own
+   button so the 44px tap floor is met per option instead of per row. */
+.fa-settings .set-seg { display: flex; gap: 6px; align-items: stretch; }
+.fa-settings .set-seg-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--tap);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px 2px;
+  cursor: pointer;
+  /* A button does NOT inherit font-family. A control that forgets to name one ships
+     in Arial, which is invisible to tsc and to all 315 menu assertions and is exactly
+     what tools/tmp/screen_metrics.mjs's off-face check found on the home screen. */
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.7rem, 1.5vh, 0.82rem);
+  line-height: 1.1;
+  color: var(--ink);
+  background: #FFFFFF;
+  border: 2.5px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.28);
+  transition: background 0.12s, transform 0.1s;
+}
+/* WRAPS rather than ellipsises. Measured at 390px portrait: a nowrap cell rendered
+   the longest option as "Battery s..." — an option a player cannot read is an option
+   that is not offered, and the row is only four items wide. Wrapping to two lines
+   costs 12px of panel height and is legible at every viewport; "Balanced" and
+   "Battery" are both ~52px inside a 78px cell at the narrowest phone, so no word ever
+   has to be broken and break-word is only a floor. */
+.fa-settings .set-seg-name { max-width: 100%; overflow-wrap: break-word; }
+/* What 'auto' actually resolved to, at 11.2px minimum — the floor screen_metrics
+   enforces, so it can never drift into a size that is present but unreadable.
+   NOTE the single quotes: a backtick anywhere in this literal, INCLUDING in a comment,
+   terminates the string and 500s the dev server for every agent in the repo. That is
+   docs/LESSONS.md section 9, it has now bitten seven times, and it bit here. */
+.fa-settings .set-seg-auto {
+  font-size: clamp(0.7rem, 1.2vh, 0.78rem);
+  font-weight: 700;
+  color: rgba(26,18,36,0.72);
+}
+.fa-settings .set-seg-btn.is-on {
+  background: linear-gradient(180deg, var(--mustard-hi), var(--mustard));
+  box-shadow: 0 3px 0 var(--gold-shadow);
+}
+.fa-settings .set-seg-btn:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,0.28); }
+/* ── The disabled state is a COLOUR, never an opacity ──────────────────────
+   docs/LESSONS.md section 1 case 10: a dark-on-dark HUD cooldown wipe had three
+   critics across three rounds report "no visible cooldown". Dimming these cells with
+   opacity would composite the ink toward its own paper and drop the label under AA on
+   the one row whose entire job, while pinned, is to be READ and explain itself. So the
+   plate changes hue and value instead and the ink stays solid: measured 12.4:1 for the
+   label on D9D4CE and 5.95:1 for the sub-line, against 18.3:1 and 7.3:1 when live. */
+.fa-settings .set-seg-btn:disabled { cursor: default; background: #D9D4CE; box-shadow: 0 3px 0 rgba(0,0,0,0.18); }
+.fa-settings .set-seg-btn.is-on:disabled { background: #E4D2A8; }
 
 /* ── Controls reference ───────────────────────────────────────────────────── */
 .fa-settings .set-keys { display: flex; flex-direction: column; gap: 3px; }
