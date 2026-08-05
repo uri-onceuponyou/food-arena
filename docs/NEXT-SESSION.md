@@ -1,108 +1,98 @@
 # Start here — continuation prompt
 
-Paste the block below into a fresh session. Everything it references is committed.
+Paste the block below into a fresh session. Everything it references is committed and pushed.
 
 ---
 
 ```
 Continue work on Food Fight Arena (/Users/uribishansky/claude-code/food-arena).
 
-Read CLAUDE.md first, then docs/STATE.md, docs/DECISIONS-FOR-URI.md, docs/LESSONS.md,
-docs/TOOLS.md. Do not re-derive anything they record — 125 commits of a previous session
-paid for every line, including nineteen instruments that were caught returning confident
-wrong answers.
+Read CLAUDE.md first, then docs/STATE.md (PART 0b especially), docs/DECISIONS-FOR-URI.md
+(sections 28-33 are Uri's newest answers), docs/LESSONS.md, docs/TOOLS.md. Do not re-derive
+anything they record.
 
 GOAL: match the visual and gameplay quality of Brawl Stars and Zooba. The bar is an
 independent critic scoring 7+/10 in a blind A/B against real reference plates.
 
-WHERE WE ARE — the first scores that can be trusted (canonical rubric, 43 rounds, 43 valid,
-instrument validated both directions):
+WHERE WE ARE — and read this before choosing what to work on:
 
-  cast in match  4.33   arena 5.17   home 5.17   HUD 5.67   (references 8.00-8.50)
+  arena (action)  5.00    cast in match  3.83    (references 8.00-8.50)
 
-Every gap is 4.6-6.5x the critic's own resolution floor, so unlike the whole prior history
-of this project, a real improvement WILL be visible in the score.
-
-METHOD — fan out subagents, each owning ONE exclusive file set:
-  * probe before you loop (eight for eight: every plateau ever probed here was a BUG)
-  * define a measurable acceptance test BEFORE round 1, and state its resolution floor
-  * improve -> screenshot -> READ THE PNG with the Read tool -> blind packet via
-    tools/review.mjs --rubric canonical -> fresh critic -> act on its single highest-impact
-    NAMED fix, after probing the mechanism
-  * cap 3-4 rounds; score the reference side every round (outside 7-9 = discard)
-  * two critics reversing -> stop and probe instead
-
-Critics here name SYMPTOMS accurately and MECHANISMS badly — four passes have now beaten
-their critics by refusing them and probing (a shadow-bias claim worth 0.0003; "ambient
-dominating the key" an order of magnitude too small; a "visible side face" on a 1.7px riser;
-"cut ambient 40%" measured backwards). But when two critics name the SAME mechanism
-unprompted, take it seriously — that convergence produced the silhouette finding.
-
-THE NON-NEGOTIABLES ARE IN CLAUDE.md. The ones that cost the most when broken:
-  * verify-head.mjs before every push (HEAD was unbootable for 24 commits)
-  * measure on a frozen snapshot: with_snapshot.mjs -- <cmd> --url {URL}
-  * VALIDATE EVERY INSTRUMENT AGAINST A KNOWN-BAD INPUT — a guard not shown to FAIL on the
-    bug it guards against is not a guard (tools/tmp/sentinel.mjs encodes this)
-  * the blind critic has a MEASURED ±1.4 floor and a round is n=1, not n=2
-  * never git stash; never git commit --amend; commit with pathspec form
-  * budget: ~300-500k tokens per agent, cap 6 CONCURRENT and KEEP IT SATURATED, and there
-    is a 200-agent PER-SESSION cap that the last session exhausted
+⚠️ THE LAST SESSION MOVED EVERY OBJECTIVE METRIC AND ZERO POINTS OF SCORE. The acceptance
+test (share of playfield above luma 0.70) went 2.40% -> 13.58%, past the reference median,
+4.7x its own floor — and 22 fresh critics scored the result flat. It was honestly measured
+and it was NOT THE BINDING CONSTRAINT. That is LESSONS §6b, and it is the single most
+important thing to understand before spending another pass.
 
 START HERE, in this order:
 
-  1. THE GAME DRAWS NO HIGHLIGHTS. Three independent probes converged on one mechanism:
-     the Fresnel rim reaches 1.402% of pixels, prop faces carry one flat value each, and
-     share of playfield above luma 0.80 is ours 0.67-1.68% vs reference 2.39-19.06% —
-     NON-OVERLAPPING. Root cause: `Material.clone()` does not copy `onBeforeCompile`, and
-     `applyRimLight` is called from exactly ONE site inside `toonMat`, so all 54 clone
-     sites in src/ silently drop the rim. Fix with a `cloneToon()` helper in
-     src/render/toon.ts. NOT the ground plane (apron.ts:830 declines it on purpose).
-     ⚠️ The old "raise the contact decal 2.5x" lead is FALSIFIED — it compared an ablation
-     delta of one layer to the reference's total shipped contact contrast. Like-for-like,
-     ours already MATCHES Brawl Stars. Do not spend a round on it.
+  1. 🔴 THE FLOOR PLANE. 9 of 14 arena critics named it UNPROMPTED — "a flat, untextured
+     pink-and-blue checkerboard with hard unmodulated tile lines", "a HARD, UNBLENDED
+     STRAIGHT SEAM between the two colours", "characters sit on it like decals". It is the
+     one surface every pass was structurally forbidden to touch: apron.ts:830 passes
+     rim:false deliberately, and floorprobe (5/5) breaks on any global floor value change.
+     Converges with an independent pixel measurement — 63.44% of frame is flat ground with
+     ZERO normalMaps project-wide.
+     ⚠️ PROBE BEFORE YOU LOOP. bs_04's ground is ALSO a smooth flat plane, so the lever is
+     most likely the tile GRID and the colour SEAM, not surface detail. And our floor is
+     already brighter than every reference ground (p50 0.449 vs 0.26-0.42), and tile scale
+     INVERTS at shipped zoom.
 
-  2. tools/tmp/scripted_player.mjs — the "one line" fix is a DIFFERENT, WORSE fix. Deleting
-     `if (w.type === 'self') return;` alone gives settled 13 / tier spread 9.14pp and wastes
-     66.5% of every heal; it must be gated on ai.ts:rankHeal's own three conditions. And the
-     SECOND bug is bigger: ranking by authored `damage` moves 40 of 110 matchups, max 46.9pp,
-     and mis-ranks FIVE characters not two. Land both, keep both old behaviours behind flags.
-     Then Hamburger: healAmount 25 -> 18 gives spread 8.05pp, settled 14 — but the binding
-     constraint then moves to LEGENDARY AT THE BOTTOM, not Hamburger at the top.
+  2. 🔴 The pale-blue foreground counter reads as "an unfinished placeholder block" to ~8
+     critics, and it HARD-CROPS the character it overlaps. Hypothesis worth probing: the
+     prop-albedo pass may have made it worse by raising a big blank slab's top face.
 
-  3. Kitchen concealment — APPROVED BY URI, UNSTARTED. "add bushes but make it relevant to
-     kitchen, for example plates you can hide under." Our 21.36% reproduces, but the
-     "35-45% reference" HAS NO INSTRUMENT — it is one critic's prose and three of the four
-     plates do not show it. The gap is GRAIN not area: ~2 objects deliver our whole share,
-     every solid prop is one height (2.415m). ⚠️ The sim contains ZERO randomness — an
-     accuracy ROLL would destroy the determinism under every balance number. Step 0 is the
-     inert mechanism, proven bit-identical exactly as LEVEL_MIN was.
+  3. 🟠 Cast: the per-part instrument now exists and works. 12 parts scored on hamburger,
+     worst first — decoration 3/9, face-overall 3.5/9, eyes 3/8.5, feet 3/8.5, prop 3/8.5.
+     Findings are specific in a way no whole-character round ever produced: our eyes have
+     0% of pixels above 0.85 luma against the reference's 35.2%; the bib measures Δ0.001
+     luma across its whole height where the reference ramps 0.880 -> 0.667 AND rotates
+     warmer. ⚠️ Uri is sending per-character rejects — READ THEM FIRST.
 
-  4. Cast value ladder — the "regressions" are ONE src/render/ COMMIT, not two character
-     commits: a 9-tree paired bisect puts pizza and waterbottle both inside ce49cd3..47feb9a,
-     whose only character-rendering commit is 086ff5f (the key-light front fill). And
-     weakBoundaryPct MEASURES THE WRONG QUANTITY (whole-part medians, not the boundary) —
-     fix the metric before dispatching any character agent. burrito and sushi regressed
-     MORE than pizza and were never named. The 171 dl rows never existed on disk.
+  4. 🟠 dlBelow10: a cast pass fixed p05 roster-wide (11/11 FAIL -> 0/11) and range (6/11
+     -> 0/11) and PAID figure/ground (1/11 -> 6/11). 17 fixed, 5 created, nobody chose the
+     trade. 6 of 7 failures are at FOG stations where figure and ground both collapse
+     toward the veil — an arena fix, not a cast fix.
 
-STILL NEEDS URI (docs/DECISIONS-FOR-URI.md): §17 music during matches and hurt level, §19
-back out of a live match, §4 ROSTER_GATED, §14 portrait, §10 two icons need a SUBJECT
-change, §16/§20 looks to eyeball. Park anything else that needs his judgement and move on —
-he runs long unattended sessions and does not want to be blocked on.
+  5. 🟠 Concealment step 0 is landed and INERT (bit-identical, 0 differing ticks in
+     3,283,873). It needs 5 out-of-set files to become visible — arena/types.ts,
+     ui/hud.ts:757, game/match.ts:1191, arena-dump.js, arena_probe's extractor AND its
+     --verify normaliser (both BLIND to concealment today).
 
-He plays at https://uri-onceuponyou.github.io/food-arena/ (no HMR, works on a phone).
-The two most valuable bug reports this project has ever had came from him playing it.
+METHOD — the rules that earned their place last session:
+  * probe before you loop — NINE for nine: every plateau ever probed here was a BUG
+  * an acceptance test proves you moved the thing you NAMED, not that it was the thing.
+    Ask what fraction of the frame your metric governs and what is EXCLUDED from it BY
+    POLICY (LESSONS §6b)
+  * a BASELINE is itself a measurement — comparing against an unvalidated one manufactures
+    a regression as convincingly as a real bug
+  * ask of every assertion: WHAT IMPLEMENTATION WOULD FAIL THIS? If you cannot name one it
+    is a comment with a tick next to it (LESSONS §13, the tautological guard)
+  * measure the artefact you SHIP, on the PATH you ship it to (LESSONS §3b — a 404 on the
+    deployed build survived 427 audio assertions because every one pointed at "/")
+  * a round is n=1, the critic floor is ±1.4, and a cross-session before/after needs the
+    identical-sheet control run alongside it
+
+STILL NEEDS URI: §29a (bush size — screenshot sent, awaiting his read), §33 (does the menu
+theme play on his phone now, and is the ringer switch off), §16 (per-character rejects, he
+is sending them), §28 (heal integer, after he plays more).
+
+He plays at https://uri-onceuponyou.github.io/food-arena/ — REDEPLOYED with the audio fix
+and the new lobby. The three most valuable bug reports this project has ever had came from
+him playing it, and the newest one exposed a whole untested class.
 ```
 
 ---
 
 ## Notes for whoever pastes it
 
-- **Uri's answers this session** are recorded in `DECISIONS-FOR-URI.md`: rarity is **not** power and
-  costs nothing extra to level (§24b/§26), the AI **scales to the player's level** (§22), levels are
-  **1–15** (§22), difficulty is **~52%** with the flee-aim bug fixed (§12/§15), and he supplied the
-  six menu reference plates (§6). Do not reopen these.
-- **`docs/pages-workflow.yml`** is a ready-to-paste GitHub Actions deploy. It is not live because the
-  token lacks `workflow` scope; until it is, republish by building with `DEPLOY_BASE=/food-arena/`
-  and pushing `dist/` to the `gh-pages` branch.
-- **Optional:** `github.com/cloudai-x/threejs-skills` — materials/lighting/postprocessing are relevant
-  to item 1; loaders and animation cover nothing here. Audited at r160+, we are on 0.180.0.
+- **`docs/STATE.md` PART 0b** is the honest account of the session that moved metrics and not the
+  score. Read it before proposing a render pass.
+- **Uri's answers are §30–§33** in `DECISIONS-FOR-URI.md`. Landscape only (§14). Rarity is
+  acquisition-only and the level tax is gone (§26). Concealment is **fully hidden**, the theme is
+  **plates and kitchen objects — NOT bushes**, and **attacking breaks your cover** (§29–30).
+- ⚠️ **The word "bushes" is banned.** Every older doc uses it; Uri has twice said kitchen objects.
+- ⚠️ **This repo is PUBLIC and describing the reference plates counts as publishing them.** Breached
+  once on 2026-08-06 and scrubbed. Describe the compositional ROLE, never the artwork.
+- **Open tasks 7–17** carry the routed defects: the gate-count guard, the icon collisions, the
+  missing menu click sounds, `menu_accept`'s hero-fill assertion blocking a full-bleed lobby.
