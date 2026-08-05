@@ -104,8 +104,27 @@ export const MATCH_DURATION_MS = 45_000; // 0:45
 export const COUNTDOWN_FROM = 5; // 5 → 4 → 3 → 2 → 1 → "START!"
 export const COUNTDOWN_START_FLASH_MS = 700; // "START!" hold before play begins
 
-/** Closing fog ring. safeRadius = MAX_SAFE_RADIUS * (1 - matchProgress). */
+/**
+ * HISTORICAL RECORD, not a live input — and the doc comment here used to claim
+ * otherwise. **Nothing imports this.** `sim.ts` reads `arena.maxSafeRadius` (see the
+ * block comment above `createMatch`), `arena/shared.ts` exports its own
+ * `MAX_SAFE_RADIUS` DERIVED from `MATCH_DURATION_MS` (993 at the 45 s clock), and
+ * `arena/kitchen.ts` imports that one. 545 is the prototype's figure for its 900x600
+ * arena; it has had no consumer since the arena grew to 1400x1000.
+ *
+ * The old comment also stated the formula wrong: the live one is
+ * `max(MIN_SAFE_RADIUS, arena.maxSafeRadius * (1 - matchProgress))` — it has a FLOOR.
+ * Kept, like `PROTOTYPE_VIEWPORT`, as the record of where the number came from.
+ */
 export const MAX_SAFE_RADIUS = 545;
+
+/**
+ * 15 HP per 300 ms = **50 HP/s** outside the ring. Deliberately left alone by the
+ * 2026-08-05 constant audit: a damage RATE against an HP POOL is scale-invariant, so
+ * the clock change cannot mistune it. What it does mean is that the pools are not
+ * symmetric — 100 HP survives 2.0 s in the fog and 150 HP survives 3.0 s — which is
+ * exactly the unfairness `MIN_SAFE_RADIUS` below exists to keep out of the endgame.
+ */
 export const FOG_TICK_MS = 300;
 export const FOG_DAMAGE = 15;
 
@@ -132,7 +151,28 @@ export const FOG_DAMAGE = 15;
  */
 export const MIN_SAFE_RADIUS = 140;
 
-/** Central hazard (the boiling pot in the prototype). */
+/**
+ * Central hazard (the boiling pot in the prototype). 8 HP per 250 ms = 32 HP/s.
+ *
+ * ⚠️ MEASURED DEAD IN EFFECT, and NOT because of these numbers — do not "fix" it by
+ * raising `damage`. `arena/hazards.ts` now registers the pot as a SOLID CoverBox of
+ * `bodyRadius * 2` (104x104) because a fighter standing inside the mesh was 0.0%
+ * visible. That fix is correct, and it silently ate the hazard: `movement.ts:tryMove`
+ * refuses any destination whose 42 wu body overlaps the box, so a fighter's CENTRE can
+ * never get closer than `bodyRadius + PLAYER_SIZE/2` = 73 wu. Measured
+ * (`tools/tmp/pot_burn_area.mjs`):
+ *
+ *   standable share of the burn disc          26.2%
+ *   burn band on axis (0 deg / 90 deg)        22.0 wu wide
+ *   burn band on the diagonal (45 deg)        ZERO — nearest standable point is 103.3 wu
+ *   matches that took ANY pot damage           1.0% (smart) · 0.6% (chase) · 0.0% (idle)
+ *   pot share of all damage dealt              0.1%
+ *
+ * Widening it is a BALANCE change and it is BOXED IN at both ends: `dangerRadius` must
+ * exceed 73 to burn anyone at all, and `MIN_SAFE_RADIUS` (140) must clear
+ * `dangerRadius + PLAYER_SIZE/2`, so the usable window is 73 < dangerRadius <= 119.
+ * `sim.test.mjs` section 17(c) asserts both ends. Parked for Uri.
+ */
 export const POT = {
   x: 450,
   y: 300,
@@ -168,12 +208,123 @@ export const AI_SLOW_MULTIPLIER = 0.35;
 // Status effects
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * ⚠️ MEASURED, NOT CHANGED — the 2026-08-05 constant audit found a real defect here and
+ * deliberately left the numbers alone, because every available fix is a balance change.
+ * Read this before touching either value.
+ *
+ * **A weapon whose COOLDOWN is shorter than the status it applies holds that status up
+ * by itself, indefinitely.** 4 of 5 stun weapons and 8 of 10 slow weapons do
+ * (`tools/tmp/stunlock_probe.mjs`): Hamburger's Tomato Toss re-applies a 2500 ms slow
+ * every 800 ms — 3.13x uptime — and Pizza's Cheese Blind re-applies a 2000 ms stun,
+ * which locks movement to ZERO, every 1300 ms.
+ *
+ * Measured over 11,000 real matches (`tools/tmp/rules_census.mjs`):
+ *
+ *   share of ENGAGED time movement-locked      31.4% (smart) · 33.5% (chase)
+ *   share of ENGAGED time slowed               47.4% (smart) · 45.6% (chase)
+ *   stun applications landing on an ALREADY-stunned target   65.7%
+ *   longest UNBROKEN movement lock             mean 1.74 s · p90 5.53 s · max 11.02 s
+ *   longest UNBROKEN slow                      mean 2.77 s · p90 6.63 s · max 11.57 s
+ *   matchups producing a >=4 s unbroken lock   47 of 110 (worst named case: Pizza's
+ *                                              Cheese Blind holds an enemy for 10.37 s)
+ *
+ * against a mean engagement of 6.0 s. That is the Sticky Trail burst
+ * (AUTHORISED DEVIATION #3) in slow motion: undodgeable by construction.
+ *
+ * ── Why the obvious fix is the wrong one ────────────────────────────────────
+ *
+ * Cutting `STUN_DURATION_MS` was swept and it is EXPENSIVE, because the 100 HP player
+ * needs the lock against a 150 HP enemy more than the enemy needs it:
+ *
+ *      STUN_DURATION_MS   2000    1600    1300    1000     800
+ *      player win rate   54.1%   52.5%   49.3%   43.5%   42.2%    (smart)
+ *      stun-lock rate    65.7%   60.1%   34.3%    6.3%    0.9%
+ *
+ * -10.6 pp at 1000 ms. Cutting `SLOW_DURATION_MS` is cheaper (-0.9 pp at 900 ms) but
+ * barely helps: slowed time only falls 2802 -> 2309 ms, because the binding constraint
+ * is the APPLICATION RATE, not the duration.
+ *
+ * The genre fix is a re-application rule — diminishing returns or a brief immunity
+ * window after a status expires — which lives in `combat.ts:applyDamage`, not here, and
+ * removes the lock without removing the effect. Parked in `docs/DECISIONS-FOR-URI.md`.
+ * `sim.test.mjs` section 17(d) RATCHETS the locker counts so this cannot get worse
+ * silently. The largest `STUN_DURATION_MS` that makes a solo lock impossible is
+ * 1100 ms (the shortest stun-applying cooldown in the roster); for slow it is 800 ms.
+ */
 export const SLOW_DURATION_MS = 2500;
 export const SLOW_MOVE_MULTIPLIER = 0.45;
 export const STUN_DURATION_MS = 2000; // stunned = movement locked to 0
 
-/** Out-of-combat regeneration. */
-export const REGEN_DELAY_MS = 10_000; // since last damage taken
+/**
+ * Out-of-combat regeneration.
+ *
+ * ── AUTHORISED DEVIATION #4 (2026-08-05): REGEN_DELAY_MS 10_000 -> 4_000 ────
+ *
+ * The delay was transcribed from the prototype against its 180 s clock and never
+ * re-checked against a FIGHT. It is not the clock that has to contain it — it is the
+ * gap between two hits, and that gap was never measured.
+ *
+ * Measured on the real sim (`tools/tmp/rules_census.mjs`, 11,000 matches: 110 matchups
+ * x 25 seeds x 4 scripted policies, shipped arena, 45 s clock):
+ *
+ *                                    smart     chase     idle      kite
+ *   fighters that EVER regenerated    1.9%      0.1%    0/5500    10.1%
+ *   regen ticks / fighter / match     0.053     0.005     0.000    1.35
+ *   HP regained / fighter / match      0.11      0.01      0.00     2.68
+ *
+ * The mechanic, the `heal` event it emits and the throttled rising triad
+ * `audio/director.ts` plays for it were DEAD CONTENT. Nothing was broken; the trigger
+ * was simply unreachable, because a 10 s stretch without taking a hit does not exist
+ * inside a fight whose ENGAGED portion averages 6.0 s. Measured directly: the longest
+ * out-of-combat gap a fighter achieves once it has been damaged at all is p50 0.93 s,
+ * p90 5.85 s — so 10 s sits at the 97.7th percentile of the only distribution that
+ * can ever fire it.
+ *
+ * ── How 4_000 was chosen ────────────────────────────────────────────────────
+ *
+ * Swept 10/6/5/4/3.5/3/2.5/2 s through the real sim on a staged copy of `rules.ts`
+ * (`tools/tmp/rules_sweep.mjs`, 880 matches per row per policy):
+ *
+ *      delay   fighters that regen (smart/chase)   HP/fighter   Δ win rate, per matchup
+ *     10_000            1.9%  /  0.1%                 0.12       — (baseline)
+ *      6_000            9.1%  /  6.6%                 1.45       max 12.5pp, mean 0.11pp
+ *      5_000           13.0%  / 12.7%                 2.33       max 12.5pp, mean 0.23pp
+ *      4_000           21.9%  / 19.0%                 3.90       max  0.0pp, mean 0.00pp
+ *      3_000           29.9%  / 24.5%                 5.90       max 12.5pp, mean 0.80pp
+ *      2_000           39.2%  / 33.0%                 8.94       max 25.0pp, mean 1.48pp
+ *
+ * Two criteria, in this order:
+ *
+ *  1. IT MUST BE ABLE TO FIRE. Target: at least one fighter in five sees it in a
+ *     match, so the mechanic and its sound are part of the game rather than trivia.
+ *     4 s is the LONGEST delay that clears that bar (5 s reaches only 13%).
+ *  2. IT MUST NOT REBALANCE ANYTHING. 4 s leaves all 110 per-matchup player win rates
+ *     BIT-IDENTICAL on all three attacking policies (smart 54.1% -> 54.1%, chase
+ *     49.5% -> 49.5%, kite 16.8% -> 16.8%). 3.9 HP per fighter per match is below the
+ *     granularity that flips an outcome.
+ *
+ * ⚠️ THE RIGHT DENOMINATOR IS THE OUT-OF-COMBAT GAP, NOT THE CLOCK. `MATCH_DURATION_MS`
+ * moved 180 s -> 45 s and play length barely moved with it (18.8 s -> 17.9 s), because
+ * no match ever reached the old clock. This value is therefore NOT safe from the arena
+ * work in flight (`docs/STATE.md` PART 2 #11: cut the 1,080 wu spawn gap). Re-measured
+ * at 4_000 against synthetic shorter-gap arenas, fighters that ever regenerate:
+ *
+ *              spawn gap 1080 (shipped)   gap 801   gap 320
+ *   smart              21.9%                58.1%     20.3%
+ *   chase              19.0%                 5.8%      2.4%
+ *
+ * — it collapses under an aggressive player (the fight ends before any gap opens) and
+ * can rise under a positional one. The direction is NOT monotone, so do not reason
+ * about it: re-run `node tools/tmp/rules_sweep.mjs --vary REGEN_DELAY_MS --values ...`
+ * after the layout lands and re-pick against criterion 1. The sweep is one command.
+ *
+ * `REGEN_TICK_MS` and `REGEN_AMOUNT` are UNCHANGED and must stay so: `audio/director.ts`
+ * keys its heal throttle on both (`HEAL_MIN_INTERVAL_MS` = 2.6 x REGEN_TICK_MS, and the
+ * regen-vs-deliberate-heal split is `amount <= REGEN_AMOUNT`), and `tools/audio-probe.mjs`
+ * asserts that throttle.
+ */
+export const REGEN_DELAY_MS = 4_000; // since last damage taken
 export const REGEN_TICK_MS = 200;
 export const REGEN_AMOUNT = 2;
 
@@ -516,6 +667,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Smash', name: 'Patty Smash', type: 'melee', range: REACH.meleeStrong, damage: 12, cooldown: 650, cone: 80, color: '#FFC93C', effect: null, emoji: '🍖' },
       { key: 'Tomato', name: 'Tomato Toss', type: 'ranged', range: REACH.rangedClose, damage: 8, cooldown: 800, speed: SPEED.closeFast, color: '#E63946', effect: 'slow', splatter: true, emoji: '🍅' },
       { key: 'Lettuce', name: 'Lettuce Fling', type: 'ranged', range: REACH.rangedMax, damage: 6, cooldown: 1100, speed: SPEED.maxSlow, color: '#7CB518', effect: 'stun', emoji: '🥬' },
+      // ⚠️ THE ONLY `self` WEAPON IN THE ROSTER, AND THE AI CANNOT USE IT. `ai.ts`
+      // reaches weapons through `pickHighestDamageWeapon` (skips `type === 'self'`) and
+      // `pickSniperWeapon` (requires `type === 'ranged'`), so there is no code path by
+      // which an enemy Hamburger ever heals. Measured: 0 fires across 11 matchups /
+      // 17,677 ticks, and 0.00 uses per match on both sides of every census run. The
+      // human player CAN use it — `combat.ts:attemptAttack` handles `self` correctly and
+      // heals 25 HP — so this is an ASYMMETRY, not a dead weapon: slot 4 works for you
+      // and never for the opponent. The fix is in `ai.ts`, not here. Parked for Uri.
       { key: 'Onion', name: 'Onion Ring', type: 'self', damage: 0, cooldown: 6000, healAmount: 25, color: '#F4E9DA', effect: null, emoji: '🧅' },
     ],
     abilities: [

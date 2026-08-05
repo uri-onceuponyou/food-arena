@@ -20,9 +20,13 @@ import { createMatch, stepMatch } from './sim.ts';
 // the only way to observe a projectile fired at zero separation before the projectile
 // step in that same tick resolves and deletes it. See the note on `coincidentAI`.
 import { stepAI } from './ai.ts';
+// Section 17 needs the real damage path to prove that taking a hit restarts the
+// out-of-combat delay — modelling `lastDamagedAt` by hand would test the model.
+import { applyDamage } from './combat.ts';
 import {
-  CHARACTERS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
+  CHARACTERS, CHARACTER_IDS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, POT, TRAIL,
+  REGEN_DELAY_MS, REGEN_TICK_MS, REGEN_AMOUNT, STUN_DURATION_MS, SLOW_DURATION_MS,
 } from './rules.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
@@ -1093,6 +1097,222 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     stepMatch(state, 16.667, noInput);
     check('a stunned AI does not re-point at all', state.enemy.facing.x === 1 && state.enemy.facing.y === 0,
       JSON.stringify(state.enemy.facing));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 17. OUT-OF-COMBAT REGEN CAN ACTUALLY FIRE (regression)
+//
+// `REGEN_DELAY_MS` was 10_000, transcribed against the prototype's 180 s clock and
+// never re-checked against a FIGHT. Measured on the real sim across 11,000 matches at
+// the shipped 45 s clock (`tools/tmp/rules_census.mjs`, 110 matchups x 25 seeds x 4
+// scripted policies): out-of-combat regen fired for 1.9% of fighters under `smart`,
+// 0.1% under `chase` and 0 of 5,500 under `idle` — 0.053 ticks and 0.11 HP per fighter
+// per match. The mechanic, its `heal` event, and the throttled rising triad
+// `audio/director.ts` plays for it were all DEAD CONTENT: nothing was broken, the
+// trigger was simply unreachable, because a 10 s stretch without taking a hit does not
+// exist inside a fight whose ENGAGED portion averages 6.0 s.
+//
+// The guard below is an OUTCOME test, not a threshold on the constant (docs/LESSONS.md
+// §13 — prefer a metric that asks whether the thing ever happens over one that asks
+// about a symptom). It runs whole matches with a hit-and-run player — the exact
+// behaviour out-of-combat regen exists to reward — and requires regen to actually
+// deliver HP. Measured on THIS fixture, by staged sweep:
+//
+//   REGEN_DELAY_MS   10 s   8 s   6 s   5 s   4 s   3 s
+//   fighters healed   0/22  1/22  4/22  7/22  9/22  15/22
+//
+// so the assertion below (>= 3 of 22) fails at every value from 8 s up and passes at
+// the shipped 4 s with 3x margin. The fixture is deliberately synthetic — it must keep
+// testing the RULE after the arena peer moves the furniture (same reasoning as §14).
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log(`\n17. Out-of-combat regen fires, and is reachable inside a real match (delay ${REGEN_DELAY_MS}ms)`);
+
+  const regenArena = makeArena({
+    width: 1400, height: 1000, maxSafeRadius: 993,
+    cover: [
+      { x: 500, y: 500, w: 180, h: 60 },
+      { x: 900, y: 500, w: 180, h: 60 },
+      { x: 700, y: 260, w: 60, h: 180 },
+      { x: 700, y: 740, w: 60, h: 180 },
+    ],
+  });
+
+  // ── (a) the mechanism, with the enemy neutralised ─────────────────────────
+  //
+  // Pinned in the far corner and permanently on cooldown, so the ONLY thing that can
+  // move the player's HP is regen. The player sits on the arena centre, which the ring
+  // never reaches (`MIN_SAFE_RADIUS`), so the fog cannot contribute either.
+  {
+    function tickIsolated(state) {
+      state.enemy.x = 1350; state.enemy.y = 950;
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => state.elapsed);
+      return stepMatch(state, 16.667, noInput);
+    }
+
+    const state = playingMatch(regenArena);
+    state.player.x = 700; state.player.y = 620;
+    state.player.hp = 60;
+    state.player.lastDamagedAt = state.elapsed;
+    const t0 = state.elapsed;
+
+    let earlyHeals = 0;
+    while (state.elapsed - t0 < REGEN_DELAY_MS - 50) {
+      for (const ev of tickIsolated(state)) if (ev.type === 'heal') earlyHeals++;
+    }
+    check(`no regen inside REGEN_DELAY_MS (${REGEN_DELAY_MS}ms since the last hit)`,
+      earlyHeals === 0 && state.player.hp === 60, `heals=${earlyHeals} hp=${state.player.hp}`);
+
+    let firstHealAt = null;
+    let firstAmount = null;
+    while (firstHealAt === null && state.elapsed - t0 < REGEN_DELAY_MS + 6 * REGEN_TICK_MS) {
+      for (const ev of tickIsolated(state)) {
+        if (ev.type === 'heal' && firstHealAt === null) { firstHealAt = state.elapsed - t0; firstAmount = ev.amount; }
+      }
+    }
+    check('regen starts one REGEN_TICK_MS after the delay elapses',
+      firstHealAt !== null && firstHealAt >= REGEN_DELAY_MS
+        && firstHealAt <= REGEN_DELAY_MS + REGEN_TICK_MS + 17,
+      `first heal at +${firstHealAt === null ? 'never' : Math.round(firstHealAt)}ms, expected ~${REGEN_DELAY_MS + REGEN_TICK_MS}ms`);
+    check(`one regen tick heals REGEN_AMOUNT (${REGEN_AMOUNT})`, firstAmount === REGEN_AMOUNT, `amount=${firstAmount}`);
+
+    // Rate: REGEN_AMOUNT per REGEN_TICK_MS, i.e. 10 HP/s. Allow one tick of slack for
+    // where the 16.667ms step lands relative to the 200ms accumulator.
+    const hpBefore = state.player.hp;
+    const tRate = state.elapsed;
+    while (state.elapsed - tRate < 1000) tickIsolated(state);
+    const perSecond = state.player.hp - hpBefore;
+    const expected = REGEN_AMOUNT * (1000 / REGEN_TICK_MS);
+    check(`regen rate is REGEN_AMOUNT/REGEN_TICK_MS (${expected} HP/s)`,
+      Math.abs(perSecond - expected) <= REGEN_AMOUNT, `${perSecond} HP in 1s, expected ${expected}`);
+
+    // Any damage restarts the clock — the property that makes this "out of combat"
+    // rather than "a passive trickle".
+    const events = [];
+    applyDamage(state, 'player', 5, null, { kind: 'fog' }, events);
+    let healsAfterHit = 0;
+    const tHit = state.elapsed;
+    while (state.elapsed - tHit < REGEN_DELAY_MS - 50) {
+      for (const ev of tickIsolated(state)) if (ev.type === 'heal') healsAfterHit++;
+    }
+    check('taking damage restarts the out-of-combat delay', healsAfterHit === 0, `heals=${healsAfterHit}`);
+  }
+
+  // ── (b) the outcome guard: does it EVER fire in a real match? ──────────────
+  {
+    /** Close while healthy, break contact while hurt. Deterministic; no RNG anywhere. */
+    function hitAndRun() {
+      return (st) => {
+        const p = st.player, e = st.enemy;
+        const d = Math.hypot(p.x - e.x, p.y - e.y) || 1;
+        const ws = CHARACTERS[p.characterId].weapons;
+        let slot = null;
+        let bestDmg = -Infinity;
+        ws.forEach((w, i) => {
+          if (w.type === 'self') return;
+          if (st.elapsed - p.lastUsed[i] < w.cooldown) return;
+          if (d > (w.range ?? Infinity)) return;
+          if ((w.damage ?? 0) > bestDmg) { bestDmg = w.damage ?? 0; slot = i; }
+        });
+        const hurt = p.hp < p.maxHp * 0.7;
+        const sgn = hurt ? -1 : 1;
+        const q = (v) => (v > 0.35 ? 1 : v < -0.35 ? -1 : 0);
+        return {
+          move: { x: q((sgn * (e.x - p.x)) / d), y: q((sgn * (e.y - p.y)) / d) },
+          aim: { x: e.x - p.x, y: e.y - p.y },
+          selectedWeapon: slot ?? 0,
+          attack: slot !== null && !hurt,
+        };
+      };
+    }
+
+    let healedFighters = 0;
+    let totalFighters = 0;
+    let hpFromRegen = 0;
+    for (const id of CHARACTER_IDS) {
+      const state = createMatch(regenArena, id, 'donut');
+      const act = hitAndRun();
+      const got = { player: 0, enemy: 0 };
+      let since = Infinity;
+      let input = noInput;
+      while (state.phase !== 'ended' && state.elapsed < MATCH_DURATION_MS + 6000) {
+        if (since >= 150) { input = act(state); since = 0; }
+        const evs = stepMatch(state, 16.667, input);
+        since += 16.667;
+        for (const ev of evs) {
+          if (ev.type !== 'heal' || ev.amount > REGEN_AMOUNT) continue;
+          // A `self` weapon (Hamburger's 25 HP Onion Ring) also emits `heal`; only the
+          // ticks NOT accompanied by a self-weapon fire are regen.
+          const selfFired = evs.some((x) => x.type === 'weapon-fired' && x.fighterRole === ev.fighterRole
+            && CHARACTERS[state[ev.fighterRole].characterId].weapons.find((w) => w.key === x.weaponKey)?.type === 'self');
+          if (!selfFired) got[ev.fighterRole] += ev.amount;
+        }
+      }
+      for (const role of ['player', 'enemy']) {
+        totalFighters++;
+        if (got[role] > 0) healedFighters++;
+        hpFromRegen += got[role];
+      }
+    }
+    check('out-of-combat regen reaches a hit-and-run fighter in a real match',
+      healedFighters >= 3,
+      `${healedFighters}/${totalFighters} fighters regenerated (${hpFromRegen} HP) — 0/22 is what a 10s delay produced`);
+  }
+
+  // ── (c) the relationships that keep the two ground hazards reachable ───────
+  //
+  // Both were found DEAD-in-effect by the same audit and neither is fixed here, but a
+  // relationship that is currently TRUE and load-bearing should not be allowed to
+  // silently stop being true.
+  {
+    // The pot is registered as a SOLID CoverBox of `POT.bodyRadius * 2` by
+    // `arena/hazards.ts`, so `movement.ts:tryMove` refuses any destination whose 42wu
+    // body overlaps it. A fighter's CENTRE can therefore never be closer than
+    // bodyRadius + PLAYER_SIZE/2 — and if that exceeds `dangerRadius` the hazard cannot
+    // burn anybody at all, from any bearing. Measured today: only 26.2% of the burn
+    // disc is standable, and a 45-degree approach never burns.
+    check('the boiling pot has a standable burn band at all (dangerRadius > bodyRadius + half a body)',
+      POT.dangerRadius > POT.bodyRadius + PLAYER_SIZE / 2,
+      `dangerRadius ${POT.dangerRadius} <= ${POT.bodyRadius + PLAYER_SIZE / 2}`);
+
+    // And the ring floor caps how big that band may grow: section 11 already asserts
+    // MIN_SAFE_RADIUS >= dangerRadius + PLAYER_SIZE/2, so the two together pin
+    // dangerRadius into a window. Record the window so a change to either end is
+    // visibly a change to both.
+    check('the pot burn band fits between the fighter body and the ring floor',
+      POT.bodyRadius + PLAYER_SIZE / 2 < POT.dangerRadius && POT.dangerRadius <= MIN_SAFE_RADIUS - PLAYER_SIZE / 2,
+      `${POT.bodyRadius + PLAYER_SIZE / 2} < ${POT.dangerRadius} <= ${MIN_SAFE_RADIUS - PLAYER_SIZE / 2}`);
+  }
+
+  // ── (d) status-lock RATCHET ───────────────────────────────────────────────
+  //
+  // A weapon whose COOLDOWN is shorter than the status it applies holds that status up
+  // by itself, forever. Measured on the real sim: 4 of 5 stun weapons and 8 of 10 slow
+  // weapons do, worst observed unbroken movement lock 10.37 s (Pizza's Cheese Blind,
+  // 1300 ms cooldown against a 2000 ms stun = 1.54x uptime), and 47 of 110 chase
+  // matchups produce a lock of 4 s or more against a mean ENGAGEMENT of 6.0 s.
+  //
+  // Cutting `STUN_DURATION_MS` is NOT the fix — swept, it costs the player 10.6 pp of
+  // win rate at 1000 ms because the 100 HP player needs the lock against a 150 HP enemy
+  // more than the enemy needs it. That is a balance decision and it is parked in
+  // `docs/DECISIONS-FOR-URI.md`. What this asserts is only that it must not get WORSE:
+  // a ratchet on the count, not an endorsement of it.
+  {
+    const lockers = { stun: 0, slow: 0 };
+    const totals = { stun: 0, slow: 0 };
+    for (const id of CHARACTER_IDS) {
+      for (const w of CHARACTERS[id].weapons) {
+        if (w.effect !== 'stun' && w.effect !== 'slow') continue;
+        totals[w.effect]++;
+        const duration = w.effect === 'stun' ? STUN_DURATION_MS : SLOW_DURATION_MS;
+        if (w.cooldown < duration) lockers[w.effect]++;
+      }
+    }
+    check('no MORE weapons can hold a stun up by themselves than already do (ratchet, currently 4 of 5)',
+      lockers.stun <= 4, `${lockers.stun} of ${totals.stun} stun weapons re-fire inside STUN_DURATION_MS (${STUN_DURATION_MS}ms)`);
+    check('no MORE weapons can hold a slow up by themselves than already do (ratchet, currently 8 of 10)',
+      lockers.slow <= 8, `${lockers.slow} of ${totals.slow} slow weapons re-fire inside SLOW_DURATION_MS (${SLOW_DURATION_MS}ms)`);
   }
 }
 
