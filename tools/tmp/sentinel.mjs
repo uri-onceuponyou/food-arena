@@ -64,9 +64,18 @@
  * metric that reads the harness instead of the subject, a sign-flipped metric — and
  * FAILS on each. A guard that passes on the bug it guards against is not a guard.
  *
+ * ⚠️ For `VL.adjacency` the broken instrument is not a stand-in — it is a MUTANT OF THE
+ * REAL SOURCE. `valuelib.mjs` keeps every formula in one `VL_SRC` string precisely so
+ * that Node and the page run the same code, and that string can be string-substituted
+ * and re-evaluated. So the five mutations below are the actual shipped function with one
+ * expression changed, not a hand-written imitation of it that could be wrong in a way the
+ * original is not. `mutantVL([])` — a rebuild with NO substitution — is asserted to
+ * reproduce the real `VL` exactly, because a mutation harness that changes the answer on
+ * its own would make every refusal below meaningless.
+ *
  * Usage:
  *   node tools/tmp/sentinel.mjs              # run the registry + the clone census
- *   node tools/tmp/sentinel.mjs --selftest   # prove the three assertions on known-bad input
+ *   node tools/tmp/sentinel.mjs --selftest   # prove the four assertions on known-bad input
  *   node tools/tmp/sentinel.mjs --clones     # census only
  */
 
@@ -76,7 +85,7 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 
-import { VL } from './valuelib.mjs';
+import { VL, VL_SRC } from './valuelib.mjs';
 import { frameStats, assertFrame, CaptureRefused } from './settle.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
@@ -151,10 +160,29 @@ export function orders({ name, metric, lower, higher, minGap = 1e-4, why }) {
 /**
  * SELF-PAIR — the same input twice. A difference reported here is the instrument's
  * own floor, and any claimed noise floor below it is fiction.
+ *
+ * ⚠️ `identity` is NOT optional decoration — without it this check proves ONLY
+ * determinism. `holds({ a, b: a })` compares `metric(a)` against `metric(a)`, which for
+ * any pure function is zero no matter WHAT the function returns. The row named
+ * "figureGround reports ZERO on a figure identical to its ground" passed for its whole
+ * life while asserting nothing of the kind: a `figureGround` that returned a confident
+ * 0.42 separation on an identical field would have sailed through it. That is the exact
+ * shape of the nineteen instruments — a green row that would look the same if the thing
+ * it names were broken (`docs/LESSONS.md` §13, "a healthy dashboard is not evidence of
+ * health"). When the answer on a self-identical input is known by construction, pass it,
+ * and the returned VALUE is checked against it as well as against itself.
  */
-export function selfPair({ name, metric, a, maxDelta = 0, why }) {
+export function selfPair({ name, metric, a, maxDelta = 0, identity, why }) {
   const r = holds({ name, metric, a, b: a, maxDelta, why });
-  return { ...r, kind: 'SELF-PAIR' };
+  if (identity === undefined || !r.ok) return { ...r, kind: 'SELF-PAIR' };
+  const off = Math.abs(num(r.a) - identity);
+  return {
+    ...r,
+    kind: 'SELF-PAIR',
+    ok: Number.isFinite(off) && off <= maxDelta,
+    detail: `${r.detail}; and the IDENTITY answer: ${r.a} vs required ${identity} `
+      + `(off by ${off}, must be <= ${maxDelta})`,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,6 +214,60 @@ function fgField(fig, grd) {
   }
   return { W, H, mask, luma };
 }
+
+// ── VL.adjacency fixtures ────────────────────────────────────────────────────
+// Two vertical slabs: part `A` owns the left half, part `B` the right. Their only
+// contact is the seam at x = W/2, so the "contact band" is exactly one column on each
+// side and every expected number below can be derived by hand. The construction is
+// lifted from `tools/tmp/p5_dlprobe.mjs`, which is where these cases were derived.
+//
+// ⚠️ `adjacency` reports TWO quantities and they are NOT interchangeable:
+//   dL         |p50(A) - p50(B)| over each part's WHOLE mask — a DISTRIBUTION statistic
+//   dLcontact  |mean(A's touching pixels) - mean(B's touching pixels)| — a SPATIAL one
+// On live HEAD they give a different 0.10 verdict on 30 of 90 pairs, so a fixture that
+// cannot tell them apart guards neither. Every row below is chosen so the two answer
+// DIFFERENTLY, which is what makes each one discriminating.
+const ADJ_W = 40;
+const ADJ_H = 40;
+
+/** `fA(x,y)` sets the luma of A's pixels, `fB` of B's. */
+function adjField(fA, fB) {
+  const A = new Uint8Array(ADJ_W * ADJ_H);
+  const B = new Uint8Array(ADJ_W * ADJ_H);
+  const luma = new Float64Array(ADJ_W * ADJ_H);
+  for (let y = 0; y < ADJ_H; y++) {
+    for (let x = 0; x < ADJ_W; x++) {
+      const j = y * ADJ_W + x;
+      if (x < ADJ_W / 2) { A[j] = 1; luma[j] = fA(x, y); } else { B[j] = 1; luma[j] = fB(x, y); }
+    }
+  }
+  return { A, B, luma };
+}
+
+/** The one pair `adjacency` finds in an `adjField`. `vl` so the selftest can pass a mutant. */
+function adjPair(f, vl = VL) {
+  return vl.adjacency([f.A, f.B], ['A', 'B'], ADJ_W, ADJ_H, f.luma, 8).pairs[0];
+}
+
+// A's pixels are the SAME MULTISET in both — half 0.10, half 0.90, median 0.50 — mirrored
+// so that the half TOUCHING B is bright in one and dark in the other. B is a uniform 0.60.
+// Measured: dL 0.1000 in BOTH (blind to the mirror, as a distribution statistic must be);
+// dLcontact 0.3000 vs 0.5000 (sees it, as a boundary statistic must).
+const ADJ_MIRROR_BRIGHT = adjField((x) => (x < 10 ? 0.10 : 0.90), () => 0.60);
+const ADJ_MIRROR_DARK = adjField((x) => (x < 10 ? 0.90 : 0.10), () => 0.60);
+
+// The two cases that falsify `dL` by construction, from p5_dlprobe / valuescan section L.
+// HARD_STEP: a 0.40 step the eye cannot miss   -> dL 0.0000, dLcontact 0.4000.
+// SEAMLESS:  two ramps CONTINUOUS at the seam  -> dL 0.4000, dLcontact 0.0000.
+const ADJ_HARD_STEP = adjField((x) => (x < 10 ? 0.10 : 0.90), () => 0.50);
+const ADJ_SEAMLESS = adjField(
+  (x) => 0.10 + (0.40 * x) / (ADJ_W / 2 - 1),
+  (x) => 0.50 + (0.40 * (x - ADJ_W / 2)) / (ADJ_W / 2 - 1),
+);
+
+// The negative control: one uniform field, arbitrarily cut in two. There is no boundary
+// here in any sense, and both columns must say so.
+const ADJ_FLAT = adjField(() => 0.50, () => 0.50);
 
 /**
  * A 320x180 frame with a bright player block, so `gridDL` has something to find.
@@ -285,6 +367,91 @@ async function registry() {
       metric: ({ W, H, mask, luma }) => VL.figureGround(luma, W, H, mask, { ringFrac: 0.30, edgeR: 2 }).dL,
       a: fgField(0.5, 0.5),
       maxDelta: 1e-9,
+      // Added, not decoration: without it this row asserted only that figureGround is
+      // deterministic — metric(a) vs metric(a) is zero for ANY pure function, so a
+      // figureGround returning a confident 0.42 on an identical field passed this row.
+      // Measured on the real VL: exactly 0.
+      identity: 0,
+    }),
+    // ── VL.adjacency ─────────────────────────────────────────────────────────
+    // The metric that fails 5 of 11 characters and that aims every character agent, and
+    // until now the only member of the value-ladder core with NO sentinel of any kind.
+    // Six rows, because `dL` and `dLcontact` are different quantities that disagree on
+    // 30 of 90 live pairs, and a single row cannot be discriminating for both.
+    moves({
+      name: 'VL.adjacency.dLcontact SEES which side of A touches B',
+      why: 'the whole reason the column exists. A is the SAME MULTISET in both fixtures — half '
+        + '0.10, half 0.90 — mirrored so the touching half is bright in one and dark in the other. '
+        + 'A dLcontact that does not move here is not measuring the boundary, and the boundary is '
+        + 'the entire perceptual claim ("does the eye see an edge where A meets B").',
+      metric: (f) => adjPair(f).dLcontact,
+      a: ADJ_MIRROR_BRIGHT,   // 0.3000
+      b: ADJ_MIRROR_DARK,     // 0.5000
+      // 0.10 against a measured 0.20, and 26x the metric's own floor. RESOLUTION FLOOR of
+      // dLcontact is 0.0039 — the 8-bit quantisation of valuescan's value.png, which is
+      // where the live numbers are read from. Nothing here asserts inside that.
+      minDelta: 0.10,
+    }),
+    holds({
+      name: 'VL.adjacency.dL is blind to that same mirror — it is a DISTRIBUTION statistic',
+      why: 'dL is PINNED, not endorsed. valuelib keeps it byte-for-byte because peers A/B against '
+        + 'it and moving a metric under a running comparison is the fault this instrument exists to '
+        + 'stop. Same multiset, same median, so dL MUST read 0.1000 both times; if it ever moves '
+        + 'here someone has redefined dL in place and every recorded weakBoundaryPct silently '
+        + 'changed meaning. This is the pin. It is the sibling of the ladder\'s pixel-order row.',
+      metric: (f) => adjPair(f).dL,
+      a: ADJ_MIRROR_BRIGHT,
+      b: ADJ_MIRROR_DARK,
+      maxDelta: 1e-9,
+    }),
+    orders({
+      name: 'VL.adjacency.dLcontact ranks a HARD SEAM above a SEAMLESS RAMP (dL ranks them BACKWARDS)',
+      why: 'the §13 polarity check, live in the instrument the next wave steers by. A hard 0.40 step '
+        + 'at the seam and a pair of ramps that are CONTINUOUS across it — no edge at all. Measured: '
+        + 'dLcontact 0.0000 -> 0.4000, correct; dL 0.4000 -> 0.0000, EXACTLY INVERTED. A sign error '
+        + 'is the one fault more rounds can never find, because every round agrees and all of them '
+        + 'are backwards — and this one is not hypothetical, it is what dL does on this input today.',
+      metric: (f) => adjPair(f).dLcontact,
+      lower: ADJ_SEAMLESS,     // 0.0000
+      higher: ADJ_HARD_STEP,   // 0.4000
+      minGap: 0.30,
+    }),
+    orders({
+      name: 'VL.adjacency.cA is A\'s OWN contact band, not B\'s',
+      why: 'cA/cB exist so dLcontact can be audited rather than trusted, and dLcontact is an '
+        + 'ABSOLUTE difference — so swapping the two bands leaves it completely unchanged and is '
+        + 'invisible to every other row here. What it changes is WHICH PART a character agent is '
+        + 'told to move: read the wrong way round, the brief says darken the torso when the head is '
+        + 'the bright side. cA belongs to the lower-indexed part; on the mirror fixtures that is A, '
+        + 'whose touching column is 0.10 in one and 0.90 in the other.',
+      metric: (f) => adjPair(f).cA,
+      lower: ADJ_MIRROR_DARK,     // 0.1000
+      higher: ADJ_MIRROR_BRIGHT,  // 0.9000
+      minGap: 0.50,
+    }),
+    selfPair({
+      name: 'VL.adjacency reports ZERO dLcontact on one uniform field cut in two',
+      why: 'the negative control. A boundary found where there is none makes every small dLcontact '
+        + 'unfalsifiable — and weakBoundaryPct is a CLIFF over a hard 0.10, so a constant offset '
+        + 'anywhere in this path moves a character\'s score by its whole contact share (pizza 32.7 pp) '
+        + 'without any pixel changing.',
+      metric: (f) => adjPair(f).dLcontact,
+      a: ADJ_FLAT,
+      maxDelta: 1e-9,
+      identity: 0,
+    }),
+    holds({
+      name: 'VL.adjacency.contacts is a GEOMETRY count, blind to luma',
+      why: 'contacts is the WEIGHT in weakBoundaryPct, so a wrong count rewrites every percentage '
+        + 'ever recorded without touching a single dL. Same masks, wildly different luma (a flat '
+        + 'field vs a hard 0.40 seam) must give the same 40 right-edge contacts. It also guards the '
+        + 'minContacts CLIFF from below: valuescan section L4 shows 8 contacts at minContacts=8 is a '
+        + 'pair and the same 8 at 9 is no pair at all, so anything that suppresses contacts does not '
+        + 'shade a number, it deletes the pair from BOTH sides of the ratio.',
+      metric: (f) => adjPair(f).contacts,
+      a: ADJ_FLAT,
+      b: ADJ_HARD_STEP,
+      maxDelta: 0,
     }),
     moves({
       name: 'VL.gridDL responds to a hero/ground step',
@@ -427,6 +594,52 @@ export async function cloneCensus() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MUTANTS — the real instrument, with one expression changed
+//
+// `valuelib.mjs` holds every formula in a single `VL_SRC` string so Node and the page run
+// identical code. That makes a real mutation cheap: substitute one expression, re-evaluate,
+// and you have the SHIPPED function with a plausible bug in it — not a hand-written
+// imitation that could differ from the original in ways the mutation never touched.
+//
+// Each anchor is matched EXACTLY and a miss THROWS. That matters more than it looks: if
+// valuelib is refactored and an anchor stops matching, a silently-skipped mutation would
+// turn every refusal below into a pass, which is the "guard whose coverage shrank when a
+// bug was fixed" failure mode this file was written for.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function mutantVL(muts) {
+  const saved = globalThis.VL;
+  let src = VL_SRC;
+  for (const [from, to] of muts) {
+    if (!src.includes(from)) throw new Error(`mutation anchor no longer present in VL_SRC: ${from}`);
+    src = src.split(from).join(to);
+  }
+  try {
+    new Function(src)();          // eslint-disable-line no-new-func
+    return globalThis.VL;
+  } finally {
+    globalThis.VL = saved;        // the real VL is never left replaced
+  }
+}
+
+const ADJ_DL_CONTACT = 'dLcontact: cA == null || cB == null ? null : +Math.abs(cA - cB).toFixed(4),';
+const ADJ_DL = 'dL: +Math.abs(stats[a].p50 - stats[b].p50).toFixed(4),';
+const ADJ_BAND_SIDE = 'if (o < p) { e.sA += luma[j]; e.nA++; } else { e.sB += luma[j]; e.nB++; }';
+const ADJ_BUMP_RIGHT = 'if (x < W - 1) bump(owner[j], owner[j + 1]);';
+
+/** dLcontact quietly becomes an ALIAS of dL — the "simplify the duplicate column" regression. */
+const MUT_ALIAS = [[ADJ_DL_CONTACT, 'dLcontact: +Math.abs(stats[a].p50 - stats[b].p50).toFixed(4),']];
+/** dL is "fixed" in place to the contact band — silently rewriting every running A/B. */
+const MUT_REVERSE_ALIAS = [[ADJ_DL, 'dL: cA == null || cB == null ? null : +Math.abs(cA - cB).toFixed(4),']];
+/** The two contact bands accumulate onto the wrong sides. dLcontact is UNCHANGED (it is an abs). */
+const MUT_SIDE_SWAP = [[ADJ_BAND_SIDE, 'if (o < p) { e.sB += luma[j]; e.nB++; } else { e.sA += luma[j]; e.nA++; }']];
+/** A constant offset in the boundary path — separation reported where there is none. */
+const MUT_OFFSET = [[ADJ_DL_CONTACT, 'dLcontact: cA == null || cB == null ? null : +(Math.abs(cA - cB) + 0.42).toFixed(4),']];
+/** "Only count a contact where there is actually a step" — a plausible optimisation that
+ *  makes the WEIGHT depend on the values it is supposed to weight. */
+const MUT_LUMA_GATED_CONTACTS = [[ADJ_BUMP_RIGHT, 'if (x < W - 1 && luma[j] !== luma[j + 1]) bump(owner[j], owner[j + 1]);']];
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SELFTEST — every assertion, against an instrument that is BROKEN in its own way
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -523,6 +736,81 @@ function selftest() {
     !moves({ name: 'x', metric: () => NaN, a: 1, b: 2 }).ok, 'refused');
   t('a metric returning undefined fails HOLDS rather than comparing undefined to undefined',
     !holds({ name: 'x', metric: () => undefined, a: 1, b: 2, maxDelta: 0 }).ok, 'refused');
+
+  console.log('\n── SELF-PAIR proves DETERMINISM ONLY unless an identity is named ──\n');
+
+  // The gap that was live in this file: `holds({ a, b: a })` compares metric(a) against
+  // metric(a), which is zero for any pure function REGARDLESS of what it returns. The row
+  // named "figureGround reports ZERO on a figure identical to its ground" asserted no such
+  // thing until `identity` existed. Both halves are proved here, because a check that
+  // cannot be shown to accept is as untrustworthy as one that cannot be shown to refuse.
+  const confidentlyWrong = () => 0.42;
+  t('a metric returning 0.42 on a SELF-IDENTICAL input passes SELF-PAIR without an identity',
+    selfPair({ name: 'x', metric: confidentlyWrong, a: 1, maxDelta: 1e-9 }).ok,
+    'accepted — THIS IS THE GAP, and it is why `identity` is not optional');
+  t('...and is REFUSED the moment the identity answer is named',
+    !selfPair({ name: 'x', metric: confidentlyWrong, a: 1, maxDelta: 1e-9, identity: 0 }).ok, 'refused');
+  t('a metric that DOES return the identity answer still passes',
+    selfPair({ name: 'x', metric: () => 0, a: 1, maxDelta: 1e-9, identity: 0 }).ok, 'accepted');
+
+  console.log('\n── VL.adjacency, against MUTANTS OF ITS OWN SOURCE ──\n');
+
+  // The harness's own control, first. A rebuild with NO substitution must reproduce the
+  // real VL exactly; if evaluating VL_SRC a second time changed anything, every refusal
+  // below would be evidence about the harness rather than about the mutation.
+  const rebuilt = mutantVL([]);
+  t('mutantVL([]) — an UNMUTATED rebuild — reproduces the real VL.adjacency exactly',
+    JSON.stringify(adjPair(ADJ_MIRROR_BRIGHT, rebuilt)) === JSON.stringify(adjPair(ADJ_MIRROR_BRIGHT)),
+    'identical pair record');
+  t('...and the real VL is left in place, not replaced by the mutant',
+    globalThis.VL === VL && adjPair(ADJ_HARD_STEP).dLcontact === 0.40, 'VL intact, dLcontact 0.4');
+
+  // Each mutation is stated with the row it must break. A mutation that breaks EVERY row
+  // would prove nothing about which row is load-bearing, so the rows it must NOT break are
+  // asserted too — that is the difference between a suite and a tripwire.
+  const dLc = (vl) => (f) => adjPair(f, vl).dLcontact;
+  const dLw = (vl) => (f) => adjPair(f, vl).dL;
+  const cA = (vl) => (f) => adjPair(f, vl).cA;
+  const nC = (vl) => (f) => adjPair(f, vl).contacts;
+
+  const ALIAS = mutantVL(MUT_ALIAS);
+  t('dLcontact ALIASED to dL fails the MOVES row (mirror: 0.1 vs 0.1)',
+    !moves({ name: 'x', metric: dLc(ALIAS), a: ADJ_MIRROR_BRIGHT, b: ADJ_MIRROR_DARK, minDelta: 0.10 }).ok,
+    'refused');
+  t('dLcontact ALIASED to dL fails the ORDERS row — it INVERTS it (0.4 vs 0.0)',
+    !orders({ name: 'x', metric: dLc(ALIAS), lower: ADJ_SEAMLESS, higher: ADJ_HARD_STEP, minGap: 0.30 }).ok,
+    'refused');
+  t('...and that same mutant is ACCEPTED by the dL pin, which is correct — it never touched dL',
+    holds({ name: 'x', metric: dLw(ALIAS), a: ADJ_MIRROR_BRIGHT, b: ADJ_MIRROR_DARK, maxDelta: 1e-9 }).ok,
+    'accepted — each row answers for its own quantity');
+
+  const REV = mutantVL(MUT_REVERSE_ALIAS);
+  t('dL "FIXED" in place to the contact band fails the dL pin (0.3 vs 0.5)',
+    !holds({ name: 'x', metric: dLw(REV), a: ADJ_MIRROR_BRIGHT, b: ADJ_MIRROR_DARK, maxDelta: 1e-9 }).ok,
+    'refused');
+
+  const SWAP = mutantVL(MUT_SIDE_SWAP);
+  t('the two contact BANDS swapped fails the cA ORDERS row (0.6 vs 0.6)',
+    !orders({ name: 'x', metric: cA(SWAP), lower: ADJ_MIRROR_DARK, higher: ADJ_MIRROR_BRIGHT, minGap: 0.50 }).ok,
+    'refused');
+  t('...and is INVISIBLE to dLcontact, which is exactly why the cA row has to exist',
+    orders({ name: 'x', metric: dLc(SWAP), lower: ADJ_SEAMLESS, higher: ADJ_HARD_STEP, minGap: 0.30 }).ok,
+    'accepted — |cA-cB| is an ABSOLUTE difference and cannot see a swap');
+
+  const OFF = mutantVL(MUT_OFFSET);
+  t('a CONSTANT 0.42 OFFSET in dLcontact fails the SELF-PAIR row',
+    !selfPair({ name: 'x', metric: dLc(OFF), a: ADJ_FLAT, maxDelta: 1e-9, identity: 0 }).ok, 'refused');
+  t('...and would have PASSED it without the identity — the gap, on a real mutant',
+    selfPair({ name: 'x', metric: dLc(OFF), a: ADJ_FLAT, maxDelta: 1e-9 }).ok,
+    'accepted: 0.42 vs 0.42 is a difference of zero');
+
+  const GATED = mutantVL(MUT_LUMA_GATED_CONTACTS);
+  t('LUMA-GATED contacts fails the contacts row (the flat pair vanishes entirely)',
+    !holds({ name: 'x', metric: nC(GATED), a: ADJ_FLAT, b: ADJ_HARD_STEP, maxDelta: 0 }).ok, 'refused');
+
+  t('a vanished mutation ANCHOR throws rather than silently skipping the mutation',
+    (() => { try { mutantVL([['this text is not in VL_SRC', 'x']]); return false; } catch { return true; } })(),
+    'refused');
 
   console.log('\n── the CLONE census, on a synthetic pair ──\n');
   const base = Array.from({ length: 400 }, (_, i) => `const someIdentifier${i} = compute(${i}, 'x');`);

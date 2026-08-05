@@ -336,7 +336,7 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/tmp/rarity_aa.mjs` | 0 below AA of **43** | `.fa-rarity` per rarity × home + character select × 3 viewports, **both** contrast models |
 | `node tools/shoot.mjs --selftest` | **6** | the capture path itself |
 | `node tools/tmp/snapsweep.mjs --selftest` | **5** | age parser for the leaked-snapshot sweeper |
-| `node tools/tmp/sentinel.mjs` | **17** + 10 live | ⚠️ **the meta-guard.** MOVES / HOLDS / ORDERS / SELF-PAIR — each kind run against an instrument broken that way and REFUSED there |
+| `node tools/tmp/sentinel.mjs` | **32** + 16 live | ⚠️ **the meta-guard.** MOVES / HOLDS / ORDERS / SELF-PAIR — each kind run against an instrument broken that way and REFUSED there. `VL.adjacency` covered as of the 32/16 counts, on **MUTANTS OF `VL_SRC` ITSELF** (5: dLcontact aliased to dL, dL "fixed" to the band, the bands swapped, a constant offset, luma-gated contacts) — plus its own control that an unmutated rebuild reproduces the real `VL` exactly. ⚠️ **`selfPair` without `identity` proves DETERMINISM ONLY** — `metric(a)` vs `metric(a)` is zero for any pure function, so name the identity answer whenever it is known |
 | `node tools/tmp/driver_guard.mjs` | **86** | no 14th copy of the scripted driver; SHARED entries checked from the registry; RANK/HEAL/RANKKEY added with driver rev 4 |
 | `node tools/tmp/capture_audit.mjs` | **43/43 owned** | 0 exposed, 14 `css-immune` (claimed by annotation, mechanically refused if the file screenshots) |
 | `node tools/tmp/kit_lab.mjs --selftest` | **10** | matchup-profile divergence + behavioural fingerprint, calibrated on a literal clone |
