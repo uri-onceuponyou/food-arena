@@ -46,6 +46,7 @@ import { mkdtempSync, rmSync, symlinkSync, existsSync, readFileSync, readdirSync
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, extname } from 'node:path';
 import net from 'node:net';
+import ts from 'typescript';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const args = process.argv.slice(2);
@@ -114,6 +115,43 @@ function stripComments(src) {
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1'); // line comments, sparing the // in a URL
 }
 
+/**
+ * PARSE the module, do not pattern-match it. `docs/LESSONS.md` §9.
+ *
+ * The regex version of this check walked `tools/` for the first time and immediately
+ * cried wolf on `tools/tmp/capture_audit.mjs`, which is a CLASSIFIER: its selftest
+ * fixtures are template literals containing example source, so they hold text like
+ * `import { stepMatch } from '../../src/game/sim.js'` as DATA. Three false failures,
+ * on a tool whose whole job is parsing other tools.
+ *
+ * That is exactly the failure §9 records twice already — a comment-stripping regex
+ * reporting two doc comments, and a CSS backtick guard that false-positived on nested
+ * template literals — and its recorded conclusion is that a lint which cries wolf gets
+ * ignored, which is worse than no lint.
+ *
+ * `typescript` is already a dependency, `ts.createSourceFile` parses `.mjs`/`.js` fine,
+ * and two other tools here already use it. A string literal that happens to contain an
+ * import statement is simply not an ImportDeclaration node, so this cannot be fooled by
+ * fixtures, examples or documentation — and it needs no comment-stripping either.
+ */
+function moduleSpecifiers(file, source) {
+  const out = [];
+  const kind = ['.ts', '.tsx'].includes(extname(file)) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, /* parents */ false, kind);
+  const take = (node) => {
+    if (node && ts.isStringLiteral(node) && node.text.startsWith('.')) out.push(node.text);
+  };
+  const visit = (node) => {
+    // static `import x from '…'` and `export … from '…'`
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) take(node.moduleSpecifier);
+    // dynamic `import('…')`
+    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) take(node.arguments[0]);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
+
 let missing = 0;
 
 /** Resolve a specifier the way Vite would: `/x` against the root, `./x` against the file. */
@@ -145,8 +183,7 @@ for (const root of ['src', 'tools']) {
       continue;
     }
 
-    const src = stripComments(raw);
-    for (const [, spec] of src.matchAll(SPEC)) {
+    for (const spec of moduleSpecifiers(file, raw)) {
       if (!resolves(resolveSpec(file, spec))) {
         fail(`${rel} imports '${spec}' — NOT IN THE COMMITTED TREE`);
         missing++;
