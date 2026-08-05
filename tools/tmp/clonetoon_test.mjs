@@ -167,8 +167,16 @@ ok('T22 a MeshBasicMaterial clones with no rim and no throw',
    () => cb.isMeshBasicMaterial === true && !patched(cb) && cb.color.getHex() === 0x00ff00);
 ok('T23 asking for a rim on a normal-less material throws',
    () => { try { cloneToon(basic, { rim: true }); return false; } catch { return true; } });
-// glossyMat does not call applyRimLight (see toon.ts) — inherit must respect that.
-ok('T24 glossyMat has no rim to inherit', () => !patched(cloneToon(glossyMat({ color: '#ff00ff' }))));
+// glossyMat's rim is opt-IN (toon.ts records the per-character clipShare run that
+// decided that) — inherit must respect both settings.
+ok('T24 glossyMat defaults to NO rim, and the clone inherits none',
+   () => !patched(glossyMat({ color: '#ff00ff' })) && !patched(cloneToon(glossyMat({ color: '#ff00ff' }))));
+ok('T24b glossyMat({ rim: true }) gets one, and the clone carries it', () => {
+  const g = glossyMat({ color: '#ff00ff', rim: true, rimStrength: 0.2 });
+  return patched(g) && compile(cloneToon(g)).uniforms.rimStrength.value === 0.2;
+});
+ok('T24c glossyMat({ rim: false }) is explicit and still off',
+   () => !patched(glossyMat({ color: '#ff00ff', rim: false })));
 
 // applyRimLight on a physical material is still supported (lead 3's one-liner).
 const phys = glossyMat({ color: '#ff00ff' });

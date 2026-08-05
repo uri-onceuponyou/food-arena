@@ -380,6 +380,44 @@ export function cloneToon<T extends THREE.Material>(
  * Glossy variant with a specular pop. MeshToonMaterial has no specular, so for
  * things that need a wet/candy/glass highlight (lollipop, water bottle, glaze,
  * broth) use this physical material with low roughness and a clamped palette.
+ *
+ * ── `rim` IS OPT-IN HERE AND OPT-OUT IN `toonMat`. THAT ASYMMETRY IS MEASURED. ──
+ * `applyRimLight`'s own note records the gap: all 18 `MeshPhysicalMaterial`s in the
+ * game — lollipop, the water bottle, glaze, broth, i.e. exactly the surfaces that most
+ * want a wet edge — are the ONLY lit materials with no edge response at all. It also
+ * records why it was not simply switched on: those materials sit on the four characters
+ * whose near-white clipping was hardest won.
+ *
+ * THE PER-CHARACTER RUN IT WAS GATED ON IS DONE (`tools/tmp/p1_castmat.mjs`,
+ * `shots/p1/castmat.json`). One frozen frame per character at shipped gameplay framing,
+ * on the character's own two-clear-colour matte, the same Fresnel patch at the same
+ * default 0.28, with BOTH controls at exactly 0.0000 (a null re-render, and a
+ * patched-with-strength-0 leg that proves the recompile alone moves nothing).
+ * `clipShare` = share of the matte above luma 0.94; reference MEDIAN 0.0249, band
+ * MAXIMUM 0.0929:
+ *
+ *   character    clipShare        verdict
+ *   lollipop     0.0202 -> 0.0221  PASS   dMean 5.29/255 over 32.1% of the matte
+ *   sushi        0.0337 -> 0.0337  PASS   unchanged; dMean 5.75 over 39.3%
+ *   hamburger    0.0145 -> 0.0145  PASS
+ *   egg          0.0174 -> 0.0174  PASS   but worth nothing — dMean 0.33 over 1.67%
+ *                                         of the matte; egg's physical materials are
+ *                                         tiny yolk beads
+ *   soup         0.0883 -> 0.0976  FAIL   clears the band MAXIMUM of 0.0929
+ *
+ * The value ladder survives on all five (range 0.755-0.863 against a >=0.636 rail, p05
+ * 0.079-0.130 against <=0.180, steps10 = 10/10).
+ *
+ * SO IT DEFAULTS **OFF**, and switching it on is a per-call-site decision in
+ * `src/characters/**` — another owner's file set. **Turn it on for lollipop, sushi and
+ * hamburger; leave egg alone because it buys nothing there; and do NOT turn it on for
+ * soup's ceramic and broth** — soup sits at 0.0883 on HEAD, the closest character in
+ * the cast to the near-white ceiling, which is its own problem regardless of this knob.
+ * Re-run `node tools/tmp/valuescan.mjs --mode gate` (11/11) after any of it.
+ *
+ * A default of ON was considered and refused: it would ship a known `valuescan` failure
+ * on soup in exchange for a lever worth 2.76-3.40% of the frame, and this project's own
+ * rule is that a gate is not traded away for a change nobody has looked at yet.
  */
 export function glossyMat(opts: {
   color: THREE.ColorRepresentation;
@@ -390,6 +428,10 @@ export function glossyMat(opts: {
   transmission?: number;
   emissive?: THREE.ColorRepresentation;
   emissiveIntensity?: number;
+  /** Fresnel rim light. **OFF by default here** — see the note above for why. */
+  rim?: boolean;
+  rimColor?: THREE.ColorRepresentation;
+  rimStrength?: number;
 }): THREE.MeshPhysicalMaterial {
   const m = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(opts.color),
@@ -405,6 +447,9 @@ export function glossyMat(opts: {
     m.emissive = new THREE.Color(opts.emissive);
     m.emissiveIntensity = opts.emissiveIntensity ?? 1;
   }
+  // Opt-IN, unlike `toonMat`'s opt-out. `=== true`, not truthiness, so this cannot be
+  // switched on by a stray object spread.
+  if (opts.rim === true) applyRimLight(m, opts.rimColor, opts.rimStrength);
   return m;
 }
 

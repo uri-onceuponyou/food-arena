@@ -102,11 +102,12 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // Measured against 27 reference plates: our P95 is 0.896 and the reference's P95 is
   // 0.896 — the light end is ALREADY RIGHT. The whole deficit is at the bottom (P05
   // 0.304 against 0.097; every one of 18 Brawl Stars plates puts 5% of the character
-  // below 0.18 and not one of ours did). So range has to be bought at the dark end,
-  // and opening the shoulder to buy it at the top was measured and REJECTED: knee
-  // 0.82 -> 0.92 recovers +0.019 of range and takes whole-frame clipped-high from
-  // 0.06% of pixels to 2.50%, a 40x regression on the exact number this grade was
-  // written to fix (the raw render clips 2.33%; the shoulder is what holds it at 0.06).
+  // below 0.18 and not one of ours did). So range has to be bought at the dark end.
+  //
+  // ⚠️ Opening the shoulder to buy range at the TOP was measured and rejected —
+  // but NOT for the reason that was recorded here for four months. The correction,
+  // three measurements and a reference-plate control, is on ToyGradeEffect below,
+  // out of the shader source so it is not compiled on every program build.
   //
   // Driven by LUMA, not by the max channel, because luma is the quantity the ladder
   // metric measures; a saturated dark red sits at luma 0.20 with a max channel of 0.47,
@@ -192,6 +193,80 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 }
 `;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// `highlightKnee` — the shoulder, RE-PRICED. Read this before touching the 0.82.
+//
+// Three independent probes put the project's #1 defect at "the game draws no
+// highlights": the Fresnel rim reaches 1.402% of pixels, prop faces carry one flat
+// value each, and share of playfield above luma 0.80 is ours 0.67-1.68% against a
+// reference 2.39-19.06%, non-overlapping. The shoulder is the obvious first suspect,
+// it is one number, and it is the wrong place to spend the pass — for a reason that
+// is NOT the one this file recorded.
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠️ THE OLD WORDING, KEPT BECAUSE THE CONCLUSION SURVIVES AND THE REASON DOES NOT:
+//   *"…and opening the shoulder to buy it at the top was measured and REJECTED: knee
+//   0.82 -> 0.92 recovers +0.019 of range and takes whole-frame clipped-high from
+//   0.06% of pixels to 2.50%, a 40x regression on the exact number this grade was
+//   written to fix (the raw render clips 2.33%; the shoulder is what holds it at 0.06)."*
+//
+// ── THE "40x REGRESSION" IS AN ARTEFACT OF THE METRIC, MEASURED THREE WAYS ──
+// tools/tmp/kneeprice.mjs (selftest 21/21), paired on ONE frozen frame via
+// stage.render(0) inside a single synchronous evaluate, so the content cannot drift:
+// the shipped-vs-shipped-again drift control is EXACTLY 0.0000 on every quantity.
+//
+//   1. THE NUMBER IS "ANY CHANNEL AT EXACTLY 255" (postablate.mjs:267-273), and this
+//      shoulder is ASYMPTOTIC to 1.0 — softKnee returns k + head*(1-exp(...)), which
+//      reaches 1.0 only at infinity. At knee 0.82 a pre-shoulder max channel of 1.63 is
+//      needed to round to 255. **The metric is very nearly a detector for "is a soft
+//      shoulder present", not a measure of lost highlight.** At the >=250 threshold —
+//      the one that survives a resample and the one a viewer could see — the whole
+//      canvas moves 3.98% -> 5.12% between the shipped knee and FULL ABLATION. 1.29x,
+//      not 40x.
+//   2. THE PIXELS IT COUNTS ARE ONE FLAT ORANGE SURFACE MOVING ONE CODE. Of the
+//      52,306 newly channel-clipped pixels at knee 0.92, 45,856 (88%) were
+//      rgb(254,128,34) in the shipped frame — the pot hazard's soup fill, going
+//      254 -> 255 on RED ONLY. Rendered as a false-colour overlay and LOOKED AT
+//      (shots/knee/newclip.png): the pot disc, a few hazard-stripe specks, and one
+//      highlight on the bun. Luma-clipping (share above 0.94) over the whole canvas
+//      moves 0.0049% -> 0.0076%. Nothing goes white; a saturated orange pins one channel.
+//   3. THE REFERENCE CLIPS CHANNELS FAR HARDER THAN WE DO — the control neither side
+//      of this argument had taken. Same code, same crop, native resolution, no resize,
+//      6 gameplay_topdown plates vs 8 of our action frames:
+//
+//        playfield crop   ch>=255            ch>=250            all-255
+//        reference        1.70 - 18.93%      2.70 - 26.65%      0.027 - 1.46%
+//        ours             0.044 -  0.51%     0.38 -  3.00%      0.000%
+//
+//      2.50% is INSIDE the reference band, near its bottom. And the bias runs our way:
+//      the plates are JPEG phone screenshots upscaled 1.33-1.43x, and resampling only
+//      DESTROYS hard 255s — so their true channel clipping is if anything higher.
+//      ⚠️ We do not produce a single all-channel-white pixel in the playfield. Every
+//      plate does.
+//
+// ── SO WHY THE KNOB STILL DID NOT LAND: IT BUYS ALMOST NOTHING ──
+// The rejection was right and its stated reason was not. Paired, frozen, playfield crop
+// (0.05,0.16,0.95,0.86), drift control exactly 0.0000:
+//
+//   knee     p95      hi80      hi70    ch>=255(whole canvas)
+//   0.82    0.5850   1.3948%   1.9438%   0.0626%   <- shipped
+//   0.88    0.5964   1.4429%   1.9548%   3.5985%
+//   0.92    0.6056   1.4593%   1.9576%   3.6949%
+//   1.00    0.6208   1.4761%   1.9651%   4.7160%   <- fully ablated
+//
+// The reference playfield MINIMUM is p95 0.7320 and hi80 2.43%. Opening the shoulder
+// ALL THE WAY buys 24% of the p95 gap and 8% of the hi80 gap to that minimum — about
+// 3% of the gap to the reference MEDIAN. There are no highlights up there to recover:
+// the whole cliff between 0.86 and 0.88 is one orange disc changing by one code.
+// ⚠️ This also corrects a p6 probe figure: that probe measured the ablation as
+// +0.72pp of hi80 on a LIVE sim, and on a genuinely frozen frame it is +0.081pp —
+// 9x smaller. Its own report flags the contamination; this is what it cost.
+//
+// → RE-PRICE THIS AFTER THE ALBEDO PASS, NOT BEFORE. The knob is cheap, reversible
+//   (one number, live at window.__stage.grade.highlightKnee) and now lands inside
+//   the reference band rather than outside it — but it can only redistribute highlights
+//   that exist, and today the arena draws none. Spending it now also makes the albedo
+//   pass's own measurements harder to read.
+//
 export class ToyGradeEffect extends Effect {
   constructor({
     saturation = 0.70, contrast = 0.62, knee = 0.55, highlightKnee = 0.82,
@@ -1238,9 +1313,17 @@ export class Stage {
     //
     // The shoulder's real job is not P05 at all: ablating it (`highlightKnee` -> 1)
     // leaves P05 unmoved and takes the cast's share above luma 0.94 from 0.0176 to
-    // 0.0675 — nearly 4x, and clean past the reference band's 0.0929 maximum — while
-    // whole-frame clipped-high goes 0.020% -> 1.514%. It is holding the near-white
-    // guard, not the dark one.
+    // 0.0675 — nearly 4x — while whole-frame clipped-high goes 0.020% -> 1.514%. It is
+    // holding the near-white guard, not the dark one.
+    //
+    // ⚠️ ONE CLAUSE STRUCK FROM THAT SENTENCE, because it was arithmetically false and
+    // it was load-bearing: it read *"nearly 4x, and clean past the reference band's
+    // 0.0929 maximum"*. **0.0675 is BELOW 0.0929.** Fully ablating the shoulder leaves
+    // the cast INSIDE the reference band, not past it. The 4x is real; the breach was
+    // not. See the shoulder's own note at the top of this file for the three
+    // measurements that re-priced this knob, and note the cast rail (a matte quantity)
+    // and whole-frame clipped-high (a canvas quantity) are DIFFERENT QUANTITIES that
+    // have been swapped for each other twice in this file's history.
     //
     // ── The original finding, for the record ─────────────────────────────────
     // `tools/tmp/valuescan.mjs` put our cast's P95 at 0.896 against a reference P95 of
@@ -1273,6 +1356,15 @@ export class Stage {
     //   toe .28 @ .62                  -0.044    +0.044   +0.019    0.11      0.02
     //   toe .28 @ .62 + contrast .72   -0.052    +0.060   +0.023    0.16      0.03
     //   highlightKnee .82 -> .92       +0.000    +0.018   +0.006    0.13      2.48  <- rejected
+    //                                          ⚠️ still rejected, but NOT for that 2.48.
+    //                                          See the shoulder's note at the top of the
+    //                                          file: 2.48% is "any channel at exactly
+    //                                          255" on a shoulder that is asymptotic to
+    //                                          1.0, it is one orange surface moving one
+    //                                          code, and the reference's own band on the
+    //                                          same measurement is 1.35-16.36%. The real
+    //                                          reason is +0.018 of range for 8% of the
+    //                                          hi80 gap.
     //   lighting: fill .50 -> .30      -0.009    +0.006   -0.002    0.11      0.02  <- rejected
     //
     // AS SHIPPED, over all eleven characters at pot_south, with HEAD and this change
@@ -1290,7 +1382,13 @@ export class Stage {
     //
     // The last two rows are the two obvious alternatives, priced and turned down.
     // Opening the highlight shoulder buys range at the end that is ALREADY CORRECT and
-    // takes clipped-high from 0.06% of the frame to 2.50%. Dropping the hemisphere
+    // takes clipped-high from 0.06% of the frame to 2.50%.
+    // ⚠️ THAT SECOND CLAUSE IS NOT A REASON — see the re-price on `ToyGradeEffect`. The
+    // 0.06% is what a shoulder ASYMPTOTIC TO 1.0 does to a "channel === 255" counter by
+    // construction, and 2.50% is inside the reference's own 1.35-16.36% band on the same
+    // measurement. The first clause is the reason, and it survives: the shoulder is
+    // still refused because it buys ~8% of the hi80 gap, not because of the clipping.
+    // Dropping the hemisphere
     // fill — `lighting.ts`'s "shadow floor", the most obvious non-post lever on the
     // cast's dark end — buys a fifth as much AND costs figure/ground, because it
     // darkens the floor the fighter is standing on at the same time.
@@ -1379,6 +1477,10 @@ export class Stage {
     //      clipped-LOW 0.110% -> 0.155%, clipped-HIGH 0.053% -> 0.066%. Against the
     //      2.50% that got `highlightKnee` 0.92 rejected, and the raw render's 2.33%
     //      high. Both tails stay ~1.5 orders under the untouched render.
+    //      ⚠️ "~1.5 orders under the untouched render" is no longer obviously a virtue:
+    //      the RAW render's 2.33% is inside the reference's own 1.35-16.36% band on this
+    //      exact measurement and our shipped 0.06% is 22x below its minimum. Read this
+    //      row as "the shoulder is intact", not as "less clipping is better".
     //
     // AND THE THREE THINGS NO NUMBER ANSWERS, looked at rather than inferred
     // (`shots/contrastab/head_png/_sheet.*.png`, 4x nearest-neighbour so adjacent
