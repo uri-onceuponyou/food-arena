@@ -82,9 +82,22 @@ derives from it. Everything else lives against play length and **engaged time (~
 clock change did not touch.
 
 **So the clock is not too long — the closing schedule is too slow.** The whistle only decides when a
-match *ends*; `FOG_FIRST_CONTACT_S` and the linear close decide when the ring *bites*. Making it
-bite at 20–25 s is a **schedule** change in `arena/shared.ts`, and it lets 45 s keep its proper role
-as a backstop. Shortening the clock instead costs three things:
+match *ends*; `FOG_FIRST_CONTACT_S` and the linear close decide when the ring *bites*.
+
+**⚠️ Correction: that schedule change CANNOT be made in `arena/shared.ts`, and the arithmetic is
+conclusive.** I recorded `shared.ts` as the lever; the arena-layout agent then proved it is not. The
+corner-safety invariant — the thing that stops the arena's corners being in lethal fog at t=0 — pins
+the bite time at
+
+```
+t_bite = 0.4187 · T + 0.5813 · FOG_FIRST_CONTACT_S
+```
+
+At T = 45 s that is **22.3 s**, and driving `FOG_FIRST_CONTACT_S` all the way to **zero** only
+reaches **18.8 s** — while breaking the invariant. **The real lever is a non-linear close in
+`sim.ts`** (hold the opening radius until first contact, then sweep), not a constant in `shared.ts`.
+
+Shortening the clock instead costs three things:
 
 1. **Below 40 s the clock starts deciding matches** — −3.0 pp of player win rate at 35 s, −10.6 pp at
    30 s, because fog is a flat 50 HP/s against unequal HP pools.
