@@ -2978,8 +2978,17 @@ console.log('\n23. Character levels');
     check('…and it is the roster\'s smallest HP pool, so the heal is worth more to it than to anyone',
       maxHpFor('hamburger', PLAYER_MAX_HP) === Math.min(...pools),
       `hamburger ${maxHpFor('hamburger', PLAYER_MAX_HP)} HP, roster min ${Math.min(...pools)}`);
-    check('…the heal restores over a third of that pool in one press',
-      heal.healAmount / maxHpFor('hamburger', PLAYER_MAX_HP) > 1 / 3,
+    // ⚠️ THE OLD ASSERTION, KEPT BECAUSE IT ENCODED A NUMBER THAT HAS BEEN CHANGED ON
+    // PURPOSE: `'…the heal restores over a THIRD of that pool in one press'`, i.e.
+    // `heal.healAmount / pool > 1/3`. True at `healAmount: 25` (0.357). The driver fix
+    // that finally let the player press this weapon measured it at **70.9% strength and a
+    // 15.94 pp rarity tier spread**, so `healAmount` was priced down 25 -> 18 (3.06 pp of
+    // strength per HP; 18 is the only rung under the ~9 pp spread floor). 18/70 = 0.257.
+    // The RATIO is still the point — it is why one line in an instrument was worth 50.6 pp
+    // on this character and nothing anywhere else — so the threshold moves rather than
+    // going away, and it stays well clear of a rounding error.
+    check('…the heal restores over a quarter of that pool in one press',
+      heal.healAmount / maxHpFor('hamburger', PLAYER_MAX_HP) > 1 / 4,
       `${heal.healAmount} of ${maxHpFor('hamburger', PLAYER_MAX_HP)} HP`);
   }
 

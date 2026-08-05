@@ -1398,23 +1398,73 @@ export const RARITY_CARD_COLORS: Record<Rarity, string> = {
 // under-plays exactly one character — the one `DECISIONS §13` had already flagged as the
 // strongest in the game before any of this.
 //
-// ── WHAT IS DONE, AND WHAT IS DELIBERATELY NOT ──────────────────────────────
+// ── ✅ BOTH DONE. THE OLD PLAN, KEPT SO THE SEQUENCE IS LEGIBLE ─────────────
 //
-//   * NOT the driver. Fixing `bestWeapon` re-bases every balance figure in the repo that
-//     touches Hamburger, Taco or Burrito, and `driver_guard.mjs` (60 assertions) is built
-//     to make that a deliberate act. It is one line plus a flag, and it is handed over
-//     with the numbers above rather than smuggled into a measurement pass.
-//   * NOT Hamburger's vitals. 70.6% is measured against a counterfactual instrument, not
-//     against the shipped one. Retuning a character to satisfy a driver that does not yet
-//     exist is the same mistake `4105116` refused to make with Pizza — *"retuning Pizza
-//     here would be tuning around a driver bug"* — and any change to `stats.health` moves
-//     the rarity guard by 7-12 pp a point (`6447a68`, Finding 4.3).
-//   * NOT the terrain-slow fix. Priced on the block at `SPLAT_DURATION_MS`; it regresses
-//     the settled count 17 -> 19 and is worth 0.6 pp of this split.
+// The block below said *"NOT the driver … NOT Hamburger's vitals … so the sequence is:
+// land the driver fix, re-measure, and THEN decide what Hamburger should be."* That was
+// right, and both halves have now been done, in that order:
 //
-// So the sequence is: land the driver fix, re-measure, and THEN decide what Hamburger
-// should be — with the tier-spread guard read on every iteration, because on this
-// character it is the binding constraint and not the win rate.
+//   * The driver: `bestWeapon` ranks by `ai.ts:pressValue` and presses the heal on
+//     `ai.ts:rankHeal`'s three conditions (driver rev 4, `driver_guard.mjs` 86
+//     assertions, `--no-player-heal` / `--damage-ranking-key` reproduce the old figures
+//     BYTE-IDENTICALLY — verified 110/110 cells on both policies before anything else).
+//   * The vitals: `healAmount` 25 -> 18, below. NOT `stats.health` — the heal IS the
+//     character, and it is the only lever that reaches it without moving the vitals that
+//     `6447a68` measured at 7-12 pp of rarity guard per point.
+//   * STILL NOT the terrain-slow fix. Priced on the block at `SPLAT_DURATION_MS`; it
+//     regresses the settled count 17 -> 19 and is worth 0.6 pp of this split.
+//
+// ── THE LADDER `healAmount: 18` WAS PICKED OFF ──────────────────────────────
+//
+// `tools/tmp/stage_weapon.mjs` + `roster_lab.mjs --seeds 32 --policies smart2`, shipped
+// arena, fixed driver, paired on identical seeds. VALIDATED FIRST with a NO-OP STAGING
+// CONTROL: an unchanged staged copy reproduces the unstaged run **110/110 cells
+// bit-identical** (settled 14, aggregate 56.7898%), so nothing in the harness is moving.
+//
+//     healAmount   hamburger strength   TIER SPREAD   settled   aggregate
+//        25 (was)        70.9%            15.94 pp      14        56.8%
+//        22              63.1%            12.34 pp      14        56.5%
+//        20              60.6%            11.25 pp      15        56.7%
+//     >> 18              53.4%           **8.05 pp**    14        57.6%   <<
+//        15              40.3%             9.53 pp      13        57.9%
+//
+// ⚠️ HOW MUCH OF THAT IS RESOLVED, STATED BEFORE IT IS USED. Strength, tier spread,
+// settled and aggregate are all AGGREGATES with a **~9 pp floor**, so NO SINGLE ADJACENT
+// RUNG IS RESOLVED (18 vs 20 is 2.8 pp of strength and 3.2 pp of spread — inside it).
+// The evidence is the MONOTONE five-point ladder spanning 30.6 pp, whose slope is
+// **3.06 pp of strength per 1 HP** — so `healAmount` is resolvable to about **±3 HP** and
+// no finer. 18 is the argmin of the spread ladder and the only rung whose spread clears
+// the floor; the exact integer inside 15..21 is a judgement call, and it is logged as one.
+// The PAIRED per-matchup delta is a DIFFERENT, EXACT quantity: 25 -> 18 moves **13 of 110
+// cells, max |Δ| 62.5 pp**, and every one of the 13 involves Hamburger (6 as player, 7 as
+// AI) — which is what a change to one character's only heal must look like.
+//
+// Two levers deliberately NOT reached for, both measured and both dead ends:
+//   * COOLDOWN IS INERT. 6000 -> 12000 ms moves Hamburger 70.9 -> 70.5% and the spread
+//     15.94 -> 15.62 pp, because a match is only ~11.9 s of play and it is the FIRST
+//     press that decides.
+//   * THE KIT IS VIOLENT. Patty Smash 12 -> 9 damage costs **34 pp of strength**
+//     (70.9 -> 36.9%), i.e. ~11 pp per point of authored damage. Not a tuning knob.
+//
+// ── 🚨 AND THE BINDING CONSTRAINT HAS NOW MOVED OFF HAMBURGER ───────────────
+//
+// This block, `docs/STATE.md` and the tier-spread guard all framed the spread as a
+// HAMBURGER problem. **That framing expired the moment the fix landed.** At
+// `healAmount: 18` the tiers read:
+//
+//     Normal 53.0 · Rare 52.3 · Epic 53.0 · Legendary **45.0** · Neon 49.5 · Cyber 48.7
+//
+// The 8.05 pp spread is set by **LEGENDARY AT THE BOTTOM** — Sushi 43.8%, Water Bottle
+// 46.3% — not by Normal at the top. Sushi is the weakest character in the game in every
+// driver variant measured (43.6-45.2% across six), and it is the ONLY tier now more than
+// a floor away from the mean. The next balance pass is a SUSHI/LEGENDARY pass, not a
+// Hamburger one, and lowering `healAmount` further makes the spread WORSE (15 -> 9.53 pp),
+// because Normal then falls past Legendary on the other side.
+//
+// Separately, the fixed driver re-based DIFFICULTY: aggregate player win 49.5% -> 56.8%,
+// consistently across every heal-capable variant. The game did not change; the
+// measurement of it did. **Every past "aggregate ~= 50%" statement now reads ~= 57% for a
+// competent player** — which puts `DECISIONS §12`'s parked difficulty dial back in play.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1441,7 +1491,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // 1.08 times a match by the AI. That is the whole of Hamburger's 50.6 pp role split
       // and 8 of the 17 settled matchups — see "THE HAMBURGER ROLE SPLIT" above before
       // touching any number on this character.
-      { key: 'Onion', name: 'Onion Ring', type: 'self', damage: 0, cooldown: 6000, healAmount: 25, color: '#F4E9DA', effect: null, emoji: '🧅' },
+      // ⚠️ `healAmount` WAS 25 AND IS NOW 18. The heal is the whole character: priced at
+      // **3.06 pp of strength per 1 HP** on a monotone five-point ladder (25 -> 70.9%,
+      // 22 -> 63.1, 20 -> 60.6, 18 -> 53.4, 15 -> 40.3). 18 is the only rung whose rarity
+      // tier spread clears the ~9 pp floor (8.05 pp) and it holds settled at 14/110.
+      // Resolvable to ±3 HP and no finer — see the ladder above before moving it, and do
+      // NOT reach for the cooldown (measured inert) or Patty Smash (measured violent).
+      { key: 'Onion', name: 'Onion Ring', type: 'self', damage: 0, cooldown: 6000, healAmount: 18, color: '#F4E9DA', effect: null, emoji: '🧅' },
     ],
     abilities: [
       { emoji: '🍅', name: 'Tomato Toss', desc: 'Slows enemies down' },
