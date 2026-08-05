@@ -15,7 +15,8 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | # | question | in force now | my recommendation | cost to reverse |
 |---|---|---|---|---|
 | **6** | **⚠️ Lobby reference plates** | none exist | **only you can fix this — it blocks all menu scoring** | drop 3–4 screenshots in |
-| **12** | Game got harder, 62.1% → 51.3% | the harder version | **keep** — the points came from deleting a bug | `ENEMY_MAX_HP` 130 restores it |
+| **12** | ⚠️ **Game is now MUCH harder: 51.2% → 31.8%** | the harder version | **your call — this one is big** | `ENEMY_MAX_HP` ≈123 restores it |
+| **15** | Should a fleeing enemy shoot at you? | it fires backwards | **measured at a further −25.9pp — parked, not landed** | a two-word patch |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
 | **11** | Longer legs — every silhouette changed | longer | **keep** — legs now exist at all | 2 constants + 1 row/archetype |
@@ -593,3 +594,49 @@ guarantee on the other side of it.
 
 **Recommendation: (3)**, unless you want portrait to be a first-class orientation — in which case
 it is (2), and that needs the fairness model rethought rather than relaxed.
+
+
+---
+
+## 15. Should a fleeing enemy be able to shoot at you? (and the difficulty that came with §12)
+
+**Why it needs you.** Three driver bugs landed in `4105116`, each a case of a rule stated once in
+`rules.ts` and implemented differently in `ai.ts`. Together they cost **51.2% → 31.8%** of player
+win rate (scripted skilled) and **13.8% → 4.1%** (naive). That is far bigger than the ~9 pp §12
+was written about, so **§12's calibration is superseded** and re-measured against the current tree:
+
+| `ENEMY_MAX_HP` | 150 (shipped) | 130 | 115 | 100 |
+|---|---|---|---|---|
+| player win | **31.8%** | 45.7% | 58.3% | 76.3% |
+
+**≈123 restores the pre-change 51.2%.** The dial is still yours and still untouched.
+
+### And a fourth bug, measured and deliberately NOT landed
+
+**The flee branch has never actually sniped.** It points `facing` directly *away* from you and then
+fires along it — and `combat.ts` resolves both the melee cone and the projectile heading off
+`attacker.facing`. So **8 of 11 characters deal literally zero damage from the branch called "flee
+and snipe"**; every point in the table comes from the three *homing* weapons curving back.
+
+The fix is a **two-word deletion**, and it costs **another −25.9 pp, to 5.9%** — more than all three
+landed fixes combined. Four reasons it was written up instead of shipped:
+
+1. It is **2.4× the shift §12 already has parked for you.**
+2. The mechanism is a **cliff, not a slope** — AI damage per match goes 59.7–111.0 to 98.1–113.5
+   against your 100 HP pool, so **every character crosses it at once.** That makes it an HP-pool
+   question, i.e. yours.
+3. At 5.9% the roster instrument **saturates** (strength sd 20.6 → 6.8 pp) and the next balance pass
+   goes blind.
+4. On the fixed tree, `ENEMY_MAX_HP` 150 → **90** puts it back at 52.8%.
+
+`node tools/tmp/ai_ladder.mjs <dir>` emits the exact patch, so the decision comes with its diff.
+
+**⚠️ One visual consequence if you take it:** `match.ts:546` rotates the model to `facing`, so a
+fleeing enemy would **backpedal facing you** instead of turning its back. That is what you already
+do (mouse aim + WASD away) and it is the genre norm — but it is a look, and it is worth seeing
+before deciding.
+
+### Pizza is now 9.2, and it is not a Pizza problem
+
+It was carrying itself on the stun bug twice over. **Worth its own pass — but after you settle the
+above**, because the flee decision moves it again.
