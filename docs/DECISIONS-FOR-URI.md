@@ -1480,3 +1480,109 @@ tension worth knowing before the patches are placed, not after.
 
 **Cost to change any of this:** the mechanic is inert until an arena declares regions, so all three
 answers are still cheap. Once patches ship, (1) becomes a re-layout.
+
+---
+
+## 30. ✅ URI'S ANSWERS, 2026-08-06 — eight settled, two deferred, one new bug
+
+Verbatim answers, with what each one changes. **Do not reopen these.**
+
+### ✅ §29b — FULLY HIDDEN. And it is NOT bushes.
+
+> *"it's supposed to be plates and other kitchen objects you can hide under — fully hidden.
+> Bushes don't make sense in a kitchen."*
+
+**Two decisions in one sentence, and the second is a correction every document here needs.**
+
+1. **Fully hidden.** While concealed, the enemy's **radar blip, HP bar AND model** are all hidden.
+   Not the half-measure I recommended. `Fighter.concealed` is already published for exactly this
+   (`ui/hud.ts:757`, `game/match.ts:1191`, plus the model in the renderer).
+2. 🚨 **THE THEME IS PLATES AND KITCHEN OBJECTS, NOT BUSHES.** Every doc in this repo — this file,
+   `STATE.md`, `LESSONS.md`, the commit log — says *"bushes"*, because that is what the reference
+   game uses and what the original §18 framing borrowed. **Uri has never asked for bushes.** He said
+   *"make it relevant to kitchen"* the first time and has now said it plainly a second time. The
+   word is banned going forward: **concealment objects are plates, pot lids, crates, stacked trays.**
+
+### ✅ §29c — attacking from cover BREAKS the cover and reveals you
+
+> *"attacking from under it will break it and reveal you. You can also step out and attack."*
+
+**This is stronger than the genre norm and better.** In Brawl Stars firing from a bush merely
+reveals you; the bush survives. Here the concealment object is **destroyed**, so:
+
+- concealment is a **consumable, per-object resource** — one ambush per plate, then it is gone
+- there is a real **tactical choice**: ambush from cover and spend it, or step out and keep it
+- ⚠️ **and it partially self-solves the AI-denial problem in §29a** — a camper who ever attacks
+  destroys their own hiding place. It does **not** fully solve it: a player who hides and never
+  attacks still breaks an AI that cannot search. §29a stands.
+
+### 🖼️ §29a — screenshot requested, being produced
+
+> *"send a screenshot so i can evaluate"*
+
+Fair — "168 wu" is not a thing anyone can picture. A rendered comparison at **shipped match
+framing** is in flight: candidate plate sizes against a character for scale, including one
+deliberately over the limit so the failure is visible rather than described.
+
+### ✅ §26 — rarity is acquisition rarity ONLY. The 4.5× level cost is therefore WRONG.
+
+> *"as far as i understand in all other games it means nothing besides the rarity to obtain it."*
+
+Correct, and that is the genre norm. It closes the loop opened by §24b: rarity grants **no power**
+(already landed) and must therefore also cost **nothing extra to level**. The **4.5× cost multiplier
+is a leftover from when rarity was power** and is now a pure tax on owning a rarer character.
+→ **Action: remove it.** `src/game/economy/tuning.ts`.
+
+### ✅ §14 — LANDSCAPE ONLY
+
+> *"i think the game should be landscape. Portrait can't serve the game. When it will be in an app,
+> we'll force landscape."*
+
+Settled. Portrait gets a **rotate prompt**, not a playable layout.
+⚠️ **Do not delete the portrait work** — `menu_accept_portrait` (219 assertions) and the portrait
+thumb band stay as they are. They cost real time to get right, the rotate prompt still needs a
+correctly laid-out portrait screen to live on, and an app wrapper forcing landscape is a future
+state, not the current one.
+
+### ✅ §10 — change the two icons' subjects
+
+> *"do it"*
+
+### ⏸️ §28 — DEFERRED by Uri
+
+> *"leveling it after I play some more"*
+
+`healAmount` stays at **18**. He will decide after playing. Nothing is blocked.
+
+### ⏸️ §16 — DEFERRED by Uri
+
+> *"i'll send tomorrow thorough rejects on all characters."*
+
+**Do not run a character-look pass before that arrives.** Per-character art notes from Uri outrank
+any critic round, and starting one now risks doing work he is about to reject by name.
+
+### 🔴 §17 — ANSWERED, **and it contains a NEW BUG REPORT**
+
+> *"i can't hear on menus as well now. During matches off."*
+
+- **Music during matches: OFF.** Settled — matches stay as they are.
+- 🚨 **"I can't hear on menus as well now" is a DEFECT REPORT, not a preference.** Menus are
+  supposed to have audio. "as well" and "now" both point at a regression. **This is being
+  investigated as a bug.** It is the third bug in this project's history found by Uri simply
+  playing it, and the previous two were invisible to every gate here.
+
+### ❓ §19 — MY QUESTION WAS UNCLEAR. Re-asked plainly below.
+
+> *"not sure what you meant"*
+
+My fault — I asked it in terms of the code rather than the experience. Concretely:
+
+**You are in the middle of a match. You press the browser Back button (or the phone's back
+gesture). What should happen?**
+
+- **(a) what it does today** — the match is abandoned immediately and silently. You are back on the
+  menu, the fight is gone, no confirmation, no result.
+- **(b) the alternative** — Back opens the **pause sheet** instead, and you choose whether to quit.
+
+Today's behaviour is (a) purely because the pause sheet lives in a file a different agent owned at
+the time — **not** because anyone decided it. It is one line either way.
