@@ -1720,3 +1720,58 @@ stay cheap.**
 The five smaller items — panel differentiation, depth/shadows, pictorial icons, killing the hero
 card, hierarchy — are still most of the gap, are all reachable from one file, and are being done
 regardless, so the screen improves even if the world needs a second pass.
+
+---
+
+## 32. ✅ §10 CLOSED — and the unmeasured thing it flagged was a swap on the CURRENCY
+
+Uri: *"do it"*. Done, `92ee601`. Per-icon deltas, paired on identical tile positions (**exact**):
+
+| icon | before | after |
+|---|---|---|
+| `mustardblast` → **the hot dog itself** | 0/6 | **4/5** |
+| `cap` → **the cap in flight, edge-on** | 0/3 | **3/5** |
+| `coin` → **struck face is a star** | 0/3 | 1/3 |
+| mutual swaps on the 65-icon plate | coin↔honey, boxRed↔gift | **none** |
+
+⚠️ **The aggregate move is INSIDE its own floor and is not being claimed** — food plate 18.0 → 20.8
+of 28, cross-family 47.0 → 49.0 of 65, against judge-to-judge floors of ~3.1 and ~4.0. The per-icon
+counts above are the evidence; the totals are not.
+
+### 🔴 The real find: the game's MONEY read as a weapon
+
+§10 recorded that *one judge had once read a food icon as "coin"* and flagged cross-family collisions
+as **never measured**. Measured now, and it was the reverse and unanimous: **the currency scored 0/3
+and all three judges answered *"a pot of honey"***, while `honey`'s own miss answered *"a gold coin"*.
+**A mutual swap between the game's money and a weapon glyph** — on a monetisation surface.
+
+**Neither family measured alone can find this.** A judge shown only food icons cannot answer "coin".
+That is exactly why the gap existed. Hue cannot fix it either — money must be gold and honey must
+look like honey; the collision was the **construction**, a gold mass with a pale horizontal band.
+Striking a star into the coin face took *"a pot of honey"* from 3/3 to 0/3 and the swap is gone.
+
+### §10's own parked recommendation for `cap` was REFUSED, with a measurement
+
+§10 suggested *"a water droplet with a spinning motion arc"*. **Cap Shot ships in Water Bottle's
+four-slot bar directly beside Water Spray, whose glyph is `droplets`** (`rules.ts:1800-1807`). That
+is precisely the construction that collapsed `mustardblast`/`ketchupslip` to 1/6 + 1/6 — two glyphs
+differing only in a detail that vanishes at 20 px. Built anyway to check: at 20 px the arc
+disappears and the tile is a droplet. `droplets` scores **6/6**, so the trade would spend the set's
+strongest glyph on its weakest. **Refused on the number, not on taste.**
+
+Also built and reverted: `cap` with motion strokes read as **"a fish" 3 of 3** — a blue body with two
+strokes off one end, and `fish` is in the same registry. *Worse* than the 0/3 it replaced, whose
+misreads at least scattered.
+
+### Still open, routed rather than churned
+
+`shards` reads as *"a double-headed arrow"* 3/3 — a **cross-family collision with the UI `range`
+chip**. And `boxBurger`/`boxRed`/`boxFire` each read as `gift` 3/3: box↔box is by design, **box→gift
+is not**. Left alone deliberately — §10's own history is that redraws break more than they fix
+(8 of 14 measured worse and were reverted).
+
+⚠️ **A limit of the 65-tile plate worth knowing before anyone reads its numbers:** with 65 candidates
+for 65 tiles, judges drift toward a **bijection** despite the instruction, producing displacement
+chains. `mustardblast`→`patty`→`cap` appears there while the same glyphs score 4/5 and 5/5 with zero
+confusion on the 28-tile plate. **The 65-plate is authoritative for which pairs COLLIDE across
+families — not for per-icon scores.**

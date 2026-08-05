@@ -8,7 +8,7 @@ npm run dev        # http://localhost:5173 — SHARED. Fine for a quick look, ne
                    # and NEVER for actually playing (see below).
 npx tsc --noEmit
 node src/game/sim.test.mjs            # 253
-node src/game/economy/economy.test.mjs # 220
+node src/game/economy/economy.test.mjs # 227
 ```
 
 ---
@@ -94,6 +94,13 @@ reads like a broken camera and is not. Point it at a snapshot. Three agents hit 
 
 `--swap <path>` freezes everything *except* one file (symlinked live). This is the only way
 a before/after A/B means anything while other work is in flight.
+
+⚠️ **`--swap` DOES NOT WORK ON AN HTML FILE CARRYING AN INLINE MODULE SCRIPT, and the failure
+looks exactly like a broken build.** Vite's html-proxy keys on the **resolved (live)** path while
+serving the **snapshot** path, so the two disagree, the page 500s, and `__ready` never fires. Found
+by the icon pass on `tools/tmp/icon_legibility.html`. **Workaround: edit the HTML *before* freezing**
+rather than swapping it. This is the same family as the other snapshot traps above — a tool that is
+90% isolated invites you to trust the 10% that is not (`docs/LESSONS.md` §5).
 
 ### `tools/verify-head.mjs` — verify the COMMITTED tree
 ```bash
@@ -315,7 +322,7 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `npx tsc --noEmit` | clean | ⚠️ the **working tree**, incl. peers' half-saved files |
 | `node tools/verify-head.mjs` | OK | **the COMMITTED tree** — the only one that matters before a push |
 | `node src/game/sim.test.mjs` | **253** | sim, combat, AI, navigation, status, concealment rules |
-| `node src/game/economy/economy.test.mjs` | **220** | economy, seeded and deterministic |
+| `node src/game/economy/economy.test.mjs` | **227** | economy, seeded and deterministic. ⚠️ Was 220 before `33a0048` added the rarity-sentence derivation |
 | `node tools/aspect.mjs` | PASS, **0.00wu** | viewport fairness — point at a **snapshot** |
 | `tools/tmp/menu_accept.mjs` | **361** | 5 landscape viewports × screens, + the CSS-backtick parse |
 | `tools/tmp/menu_accept_portrait.mjs` | **219** | portrait + the nested-`@media` lint. **Opt-in, not folded in** |
