@@ -37,15 +37,9 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { createScriptedPlayer, parseDriverFlags, DRIVER_REV } from './scripted_player.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
-
-const { createMatch, stepMatch } = await import(`${ROOT}/src/game/sim.ts`);
-const RULES = await import(`${ROOT}/src/game/rules.ts`);
-const {
-  CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, PLAYER_SIZE, MIN_SAFE_RADIUS,
-  HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY, REACH, POT, PUDDLE_SLOW_FACTOR,
-} = RULES;
 
 function parseArgs(argv) {
   const out = {};
@@ -60,6 +54,26 @@ function parseArgs(argv) {
   return out;
 }
 const args = parseArgs(process.argv);
+
+/**
+ * Which sim to drive. This tool used to hardcode the WORKING TREE, which every peer
+ * tool in this family had already stopped doing: it means a peer's half-saved
+ * `src/game/ai.ts` lands inside a run and there is no way to hold the sim still across
+ * a before/after (`docs/LESSONS.md` §5 — measurement contamination is a separate
+ * problem from write conflicts). `--sim <dir>` points at a `stage_rules.mjs` copy or a
+ * `git archive` of HEAD; `--arena <path>` pairs with it.
+ *
+ * The layout parser (`--from-src`) still reads `src/arena/` from the working tree,
+ * because that is its SUBJECT. Stated here rather than left implicit: when part of a
+ * tool reads the working tree and part reads a frozen copy, it has to say so.
+ */
+const SIM_DIR = String(args.sim ?? `${ROOT}/src/game`);
+const { createMatch, stepMatch } = await import(`${SIM_DIR}/sim.ts`);
+const RULES = await import(`${SIM_DIR}/rules.ts`);
+const {
+  CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, PLAYER_SIZE, MIN_SAFE_RADIUS,
+  HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY, REACH, POT, PUDDLE_SLOW_FACTOR,
+} = RULES;
 const DT = Number(args.dt ?? 16.667);
 const TAG = String(args.tag ?? 'run');
 const POLICY = String(args.policy ?? 'smart');
@@ -423,175 +437,43 @@ if (args.occl) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// scripted player — a reduced copy of match-sim.mjs's `smart`, same decisions
+// scripted player — IMPORTED, not copied
 // ─────────────────────────────────────────────────────────────────────────────
-function axesToward(fx, fy, tx, ty) {
-  const dx = tx - fx, dy = ty - fy;
-  const m = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
-  const q = (v) => (v > 0.35 ? 1 : v < -0.35 ? -1 : 0);
-  return { x: q(dx / m), y: q(dy / m) };
-}
-function bestWeapon(state, d) {
-  const p = state.player;
-  const ws = CHARACTERS[p.characterId].weapons;
-  let best = null, bestDmg = -Infinity;
-  ws.forEach((w, i) => {
-    if (w.type === 'self') return;
-    if (state.elapsed - p.lastUsed[i] < w.cooldown) return;
-    if (d > (w.range ?? Infinity)) return;
-    const dmg = w.damage ?? 0;
-    if (dmg > bestDmg) { bestDmg = dmg; best = i; }
-  });
-  return best;
-}
-function preferredRange(id) {
-  const ws = CHARACTERS[id].weapons.filter((w) => w.type !== 'self' && (w.range ?? 0) <= REACH.rangedMax);
-  if (!ws.length) return maxNormalRange(id);
-  return ws.reduce((b, w) => ((w.damage ?? 0) > (b.damage ?? 0) ? w : b)).range ?? 0;
-}
-function lineOfSight(x0, y0, x1, y1) {
-  const d = Math.hypot(x1 - x0, y1 - y0);
-  const n = Math.max(1, Math.ceil(d / 4));
-  for (let i = 1; i <= n; i++) {
-    const x = x0 + ((x1 - x0) * i) / n, y = y0 + ((y1 - y0) * i) / n;
-    if (arena.cover.some((o) => Math.abs(x - o.x) < (12 + o.w) / 2 && Math.abs(y - o.y) < (12 + o.h) / 2)) return false;
-  }
-  return true;
-}
-function makeNav() {
-  const hist = [];
-  let detourUntil = -1, detourSign = 1;
-  return function walk(state, tx, ty) {
-    const p = state.player;
-    hist.push({ t: state.elapsed, x: p.x, y: p.y });
-    while (hist.length && state.elapsed - hist[0].t > 1500) hist.shift();
-    if (state.elapsed > detourUntil && hist.length > 4 && state.elapsed - hist[0].t > 1200) {
-      const net = Math.hypot(p.x - hist[0].x, p.y - hist[0].y);
-      if (net < 45) { detourSign = -detourSign; detourUntil = state.elapsed + 900; hist.length = 0; }
-    }
-    let ax = tx, ay = ty;
-    if (state.elapsed < detourUntil) {
-      const ang = Math.atan2(ty - p.y, tx - p.x) + detourSign * (Math.PI / 2);
-      ax = p.x + Math.cos(ang) * 150; ay = p.y + Math.sin(ang) * 150;
-    }
-    return axesToward(p.x, p.y, ax, ay);
-  };
-}
-function smartPolicy() {
-  const nav = makeNav();
-  return (state) => {
-    const p = state.player, e = state.enemy;
-    const d = dist(p.x, p.y, e.x, e.y);
-    const idx = bestWeapon(state, d);
-    const band = preferredRange(p.characterId) * 0.85;
-    const los = lineOfSight(p.x, p.y, e.x, e.y);
-    const cx = arena.center.x, cy = arena.center.y;
-    const dc = dist(p.x, p.y, cx, cy), R = state.safeRadius;
-    let target;
-    if (dc > R - 30) {
-      target = { x: cx, y: cy };
-      if (HAZ_POT && R < HAZ_POT.radius + 20) {
-        const ang = Math.atan2(p.y - cy, p.x - cx), r = Math.max(0, R - 10);
-        target = { x: cx + Math.cos(ang) * r, y: cy + Math.sin(ang) * r };
-      }
-    } else if (HAZ_POT && dist(p.x, p.y, HAZ_POT.x, HAZ_POT.y) < HAZ_POT.radius + 15 && R > HAZ_POT.radius + 40) {
-      const ang = Math.atan2(p.y - HAZ_POT.y, p.x - HAZ_POT.x);
-      target = { x: HAZ_POT.x + Math.cos(ang) * (HAZ_POT.radius + 60), y: HAZ_POT.y + Math.sin(ang) * (HAZ_POT.radius + 60) };
-    } else if (!los) {
-      const ang = Math.atan2(e.y - p.y, e.x - p.x) + Math.PI / 2;
-      target = { x: p.x + Math.cos(ang) * 150, y: p.y + Math.sin(ang) * 150 };
-    } else if (d > band) { target = { x: e.x, y: e.y }; }
-    else if (d < band * 0.5) {
-      const ang = Math.atan2(p.y - e.y, p.x - e.x);
-      target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
-    } else {
-      const ang = Math.atan2(p.y - e.y, p.x - e.x) + Math.PI / 2;
-      target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
-    }
-    return {
-      move: nav(state, target.x, target.y),
-      aim: { x: e.x - p.x, y: e.y - p.y },
-      selectedWeapon: idx ?? 0,
-      attack: idx !== null && (los || CHARACTERS[p.characterId].weapons[idx].type === 'melee'),
-    };
-  };
-}
-function chasePolicy() {
-  const nav = makeNav();
-  return (state) => {
-    const p = state.player, e = state.enemy;
-    const w = bestWeapon(state, dist(p.x, p.y, e.x, e.y));
-    return { move: nav(state, e.x, e.y), aim: { x: e.x - p.x, y: e.y - p.y }, selectedWeapon: w ?? 0, attack: true };
-  };
-}
-
 /**
- * `smart`, with ONE clause reordered — and the reason is worth more than the policy.
+ * 163 lines used to sit here, described as "a reduced copy of match-sim.mjs's `smart`,
+ * same decisions". It stopped being the same decisions on 2026-08-05, when
+ * `match-sim.mjs` fixed a real defect this copy could not receive: the stuck detector
+ * ran during the COUNTDOWN, when `sim.ts:movePlayer` is not called at all, so it read
+ * "1.5 s of walking, 0 wu covered", latched a 900 ms perpendicular detour, and whatever
+ * was still latched at the whistle was walked SIDEWAYS. +567 ms on the derivable arena.
  *
- * `match-sim.mjs`'s `smart` tests line-of-sight BEFORE it tests range, and its own comment
- * says what it meant to do: *"In range but shooting a counter. A player flanks; they do not
- * stand there emptying cooldowns into furniture."* Because the test runs first, it fires at
- * ANY distance — and across 1080 wu of a map carrying 27 CoverBoxes, something is always in
- * the line. Traced tick by tick, the `smart` player is in `STRAFE-noLOS` for **the entire
- * match**: it walks perpendicular until it hits a wall and then stands there.
+ * And this copy was the SOURCE for four more: `status_census.mjs` and `roster_table.mjs`
+ * lifted it verbatim, and `roster_sweep.mjs` / `status_grace_sweep.mjs` shell out to
+ * those. One stale driver, five instruments, and the numbers behind this project's
+ * balance record.
  *
- * So the recorded "time to first contact" is not a closing time at all. It is
- * `AI route length / AI_CHASE_SPEED` — the enemy walking the whole way on its own at
- * 70 wu/s — plus wherever the strafing bot happened to park. That makes it exquisitely
- * sensitive to which prop stops the strafe, which is why two layouts with the SAME route
- * length (1140 wu) and the same runway can score 8.8 s and 15.1 s.
+ * The driver is now stated ONCE, in `tools/tmp/scripted_player.mjs`.
+ * `--nav-countdown-bug` and `--decide-during-countdown` reproduce the historical
+ * behaviour exactly, so any figure this tool has printed is still re-derivable.
+ * `node tools/tmp/driver_guard.mjs` asserts a sixth copy cannot appear.
  *
- * `smart2` moves the range test in front of the LOS test, so the player closes while it has
- * no shot and only flanks once it is in range and blocked. Both are reported: `smart` for
- * comparability with every number on record, `smart2` for what the geometry actually does.
+ * ⚠️ This tool drives the policies with NO seeded stream (fixed 150 ms reaction, no
+ * jitter), which is why `POLICY_FNS[...]()` is called without an rnd. The nav's initial
+ * `detourSign` is +1 in that case, exactly as it has always been here — preserving it
+ * is what makes this file's before/after measure the countdown fix ALONE.
  */
-function smart2Policy() {
-  const nav = makeNav();
-  return (state) => {
-    const p = state.player, e = state.enemy;
-    const d = dist(p.x, p.y, e.x, e.y);
-    const idx = bestWeapon(state, d);
-    const band = preferredRange(p.characterId) * 0.85;
-    const los = lineOfSight(p.x, p.y, e.x, e.y);
-    const cx = arena.center.x, cy = arena.center.y;
-    const dc = dist(p.x, p.y, cx, cy), R = state.safeRadius;
-    let target;
-    if (dc > R - 30) {
-      target = { x: cx, y: cy };
-      if (HAZ_POT && R < HAZ_POT.radius + 20) {
-        const ang = Math.atan2(p.y - cy, p.x - cx), r = Math.max(0, R - 10);
-        target = { x: cx + Math.cos(ang) * r, y: cy + Math.sin(ang) * r };
-      }
-    } else if (HAZ_POT && dist(p.x, p.y, HAZ_POT.x, HAZ_POT.y) < HAZ_POT.radius + 15 && R > HAZ_POT.radius + 40) {
-      const ang = Math.atan2(p.y - HAZ_POT.y, p.x - HAZ_POT.x);
-      target = { x: HAZ_POT.x + Math.cos(ang) * (HAZ_POT.radius + 60), y: HAZ_POT.y + Math.sin(ang) * (HAZ_POT.radius + 60) };
-    } else if (d > band) {
-      target = { x: e.x, y: e.y };                       // CLOSE first — the reordered clause
-    } else if (!los) {
-      const ang = Math.atan2(e.y - p.y, e.x - p.x) + Math.PI / 2;
-      target = { x: p.x + Math.cos(ang) * 150, y: p.y + Math.sin(ang) * 150 };
-    } else if (d < band * 0.5) {
-      const ang = Math.atan2(p.y - e.y, p.x - e.x);
-      target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
-    } else {
-      const ang = Math.atan2(p.y - e.y, p.x - e.x) + Math.PI / 2;
-      target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
-    }
-    return {
-      move: nav(state, target.x, target.y),
-      aim: { x: e.x - p.x, y: e.y - p.y },
-      selectedWeapon: idx ?? 0,
-      attack: idx !== null && (los || CHARACTERS[p.characterId].weapons[idx].type === 'melee'),
-    };
-  };
-}
-const POLICIES = { smart: smartPolicy, smart2: smart2Policy, chase: chasePolicy, idle: () => () => IDLE };
+const DRIVER_FLAGS = parseDriverFlags(args);
+const driver = createScriptedPlayer({ CHARACTERS, REACH, arena, hazard: HAZ_POT, ...DRIVER_FLAGS });
+const { POLICY_FNS, createDecisionLoop } = driver;
 
 function runMatch(playerId, enemyId, policy = POLICY, overrideArena = arena) {
   const state = createMatch(overrideArena, playerId, enemyId);
-  const decide = (POLICIES[policy] ?? smartPolicy)();
+  const decide = (POLICY_FNS[policy] ?? POLICY_FNS.smart)();
+  // The reaction cadence AND its countdown guard live in `scripted_player.mjs`.
+  // No jitter here: this tool has always used a flat 150 ms and no seeded stream.
+  const loop = createDecisionLoop({ decide, reactBase: 150 });
   let input = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
-  let sinceDecision = Infinity, sinceSample = Infinity;
+  let sinceSample = Infinity;
   const SAMPLE_MS = 100;
   const engageRange = Math.max(maxNormalRange(playerId) + HIT_RADIUS_VS_ENEMY, maxNormalRange(enemyId) + HIT_RADIUS_VS_PLAYER);
   const eReach = maxNormalRange(enemyId);
@@ -603,7 +485,7 @@ function runMatch(playerId, enemyId, policy = POLICY, overrideArena = arena) {
   const dmg = {};
   const dmgToPlayer = {};
   while (state.phase !== 'ended' && state.elapsed < HARD_CAP) {
-    if (sinceDecision >= 150) { input = decide(state); sinceDecision = 0; }
+    input = loop.next(state, DT);
     const evs = stepMatch(state, DT, input);
     for (const ev of evs) {
       if (ev.type !== 'hit-landed') continue;
@@ -614,7 +496,7 @@ function runMatch(playerId, enemyId, policy = POLICY, overrideArena = arena) {
     enemyTravel += Math.hypot(state.enemy.x - ex0, state.enemy.y - ey0);
     playerTravel += Math.hypot(state.player.x - px0, state.player.y - py0);
     ex0 = state.enemy.x; ey0 = state.enemy.y; px0 = state.player.x; py0 = state.player.y;
-    sinceDecision += DT; sinceSample += DT;
+    sinceSample += DT;
     if (sinceSample >= SAMPLE_MS && state.phase === 'playing') {
       sinceSample = 0;
       const d = dist(state.player.x, state.player.y, state.enemy.x, state.enemy.y);

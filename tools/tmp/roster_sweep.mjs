@@ -21,6 +21,21 @@
  * The collateral column is the one that decides most of these. `docs/LESSONS.md`: 8 of
  * 14 icon "fixes" measured worse and were reverted — a change is not free because it
  * helped the thing it was aimed at.
+ *
+ * ── DRIVER ──────────────────────────────────────────────────────────────────
+ *
+ * This file has no driver of its own: every row is a `roster_table.mjs` subprocess, so
+ * it inherits `tools/tmp/scripted_player.mjs` and both of its countdown guards. That is
+ * also how it inherited the DEFECT — until 2026-08-05 the driver ran its stuck detector
+ * through the countdown, and every sweep row this tool has printed carries it.
+ *
+ * ⚠️ A `--baseline` JSON produced before that date is NOT comparable with a row produced
+ * now. `roster_table.mjs` stamps `driverRev` into every JSON precisely so a stale record
+ * is identifiable mechanically: an unstamped file is pre-fix. To compare against one
+ * anyway, re-run the baseline with `--nav-countdown-bug --decide-during-countdown`.
+ *
+ * Both sides of every comparison here are already staged copies, so the driver is the
+ * only remaining way two rows can differ by something that is not the candidate.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync } from 'node:fs';
@@ -40,6 +55,10 @@ const TARGET = String(args.target);
 const POLICIES = String(args.policies ?? 'smart2').split(',');
 const SEEDS = String(args.seeds ?? 16);
 const JOBS = Number(args.jobs ?? 4);
+/** Forwarded verbatim to every roster_table row, so a PRE-FIX sweep can be reproduced
+ *  end to end. Both sides of a comparison must use the same driver. */
+const DRIVER_ARGS = ['nav-countdown-bug', 'decide-during-countdown'].filter((k) => args[k]).map((k) => `--${k}`);
+if (DRIVER_ARGS.length) console.error(`⚠️ HISTORICAL DRIVER: ${DRIVER_ARGS.join(' ')} — reproduction only, NOT a current number`);
 const OUT = String(args.out ?? '/tmp/rsweep2');
 mkdirSync(OUT, { recursive: true });
 
@@ -72,7 +91,7 @@ await new Promise((done) => {
       const c = cells[cursor++];
       active++;
       const ch = spawn('node', [`${ROOT}/tools/tmp/roster_table.mjs`,
-        '--sim', `${c.r.dir}/game`, '--seeds', SEEDS, '--policies', c.p, '--json', c.json], { stdio: 'ignore' });
+        '--sim', `${c.r.dir}/game`, '--seeds', SEEDS, '--policies', c.p, '--json', c.json, ...DRIVER_ARGS], { stdio: 'ignore' });
       ch.on('exit', () => { active--; next(); });
     }
   };

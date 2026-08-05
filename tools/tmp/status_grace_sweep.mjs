@@ -16,6 +16,22 @@
  * Row 0 is the CONTROL and it is not "no change": at ratio 0 the no-refresh half of the
  * rule is still in force, which is how much of the fix comes free without any grace at
  * all. To measure against the true BEFORE, pass `--baseline <census json>`.
+ *
+ * ── DRIVER ──────────────────────────────────────────────────────────────────
+ *
+ * No driver of its own: every row is a `status_census.mjs` subprocess, so it inherits
+ * `tools/tmp/scripted_player.mjs` and both countdown guards. It inherited the DEFECT the
+ * same way — until 2026-08-05 the stuck detector ran through the countdown, and every
+ * grace row printed before then carries it.
+ *
+ * ⚠️ `--baseline <census json>` written before that date is NOT comparable with a row
+ * produced now: `status_census.mjs` stamps `driverRev` into its JSON, and an unstamped
+ * file is pre-fix. Re-run such a baseline with `--nav-countdown-bug
+ * --decide-during-countdown` if you need the old comparison back.
+ *
+ * The grace sweep is the one place where this matters most quietly: the rows differ by
+ * a STATUS DURATION, and a driver whose latched detour changes how soon contact happens
+ * changes how much status is applied at all.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync } from 'node:fs';
@@ -36,6 +52,11 @@ const args = (() => {
 
 const POLICIES = String(args.policies ?? 'smart,chase');
 const SEEDS = String(args.seeds ?? 8);
+/** Forwarded verbatim to every census row, so a PRE-FIX sweep can be reproduced end to
+ *  end rather than only argued about. Both sides of a comparison must use the same
+ *  driver or the sweep is measuring the driver. */
+const DRIVER_ARGS = ['nav-countdown-bug', 'decide-during-countdown'].filter((k) => args[k]).map((k) => `--${k}`);
+if (DRIVER_ARGS.length) console.error(`⚠️ HISTORICAL DRIVER: ${DRIVER_ARGS.join(' ')} — reproduction only, NOT a current number`);
 const STUN_D = 2000, SLOW_D = 2500;
 
 /**
@@ -59,7 +80,7 @@ for (const { stun, slow, label } of ROWS) {
     `STUN_GRACE_MS=${stun}`, `SLOW_GRACE_MS=${slow}`], { stdio: 'inherit' });
   const out = `/tmp/gsweep/${tag}.json`;
   execFileSync('node', [`${ROOT}/tools/tmp/status_census.mjs`,
-    '--sim', `${dir}/game`, '--seeds', SEEDS, '--policies', POLICIES, '--json', out], { stdio: 'ignore' });
+    '--sim', `${dir}/game`, '--seeds', SEEDS, '--policies', POLICIES, '--json', out, ...DRIVER_ARGS], { stdio: 'ignore' });
   rows.push({ label, stun, slow, data: JSON.parse(readFileSync(out, 'utf8')) });
 }
 
