@@ -13,10 +13,25 @@
  * 110 matchups x N seeds x 3 policies through `stepMatch`, reading state and the
  * event stream every tick. Nothing here models the sim; it observes it.
  *
- * The scripted player is `tools/match-sim.mjs`'s, verbatim in shape, plus a SEEDED
- * jitter on reaction time and aim so seeds produce genuinely different matches
- * rather than N copies of one deterministic run. Seed 0 is jitter-free and
- * reproduces `match-sim.mjs` exactly, which is the instrument's own control.
+ * The scripted player is `tools/tmp/scripted_player.mjs` — IMPORTED, not copied. This
+ * file used to carry its own verbatim transcription of `tools/match-sim.mjs`'s driver,
+ * and `status_census.mjs` was then copied FROM here, which is how one stale driver
+ * reached ten instruments (`docs/LESSONS.md` §5, commit d9753ff). A seeded jitter on
+ * reaction time still layers on top so seeds produce genuinely different matches rather
+ * than N copies of one deterministic run; seed 0 is jitter-free and reproduces
+ * `match-sim.mjs` exactly, which is the instrument's own control.
+ *
+ * ⚠️ EVERY FIGURE THIS TOOL PRINTED BEFORE 2026-08-05 CARRIES THE COUNTDOWN DETOUR.
+ * The stuck detector ran during the COUNTDOWN, when `sim.ts:movePlayer` is not called at
+ * all, so it read "1.5 s of walking, 0 wu covered" and latched a 900 ms perpendicular
+ * detour that was walked SIDEWAYS at the whistle. The decision loop also DECIDED during
+ * the countdown, drawing seeded RNG, so the stream at the whistle was a function of
+ * countdown length. Both faults are reproducible by flag:
+ *
+ *     --nav-countdown-bug --decide-during-countdown
+ *
+ * which reproduce this tool's pre-fix JSON BYTE-IDENTICALLY on a frozen sim. An UNSTAMPED
+ * JSON (no `driverRev`) is pre-fix.
  *
  * ⚠️ `match-sim.mjs` documents its scripted player as "the shape of a match, not a
  * skill benchmark" — perfect information, fixed reaction. So this measures WHAT THE
@@ -25,11 +40,12 @@
  *
  *   node tools/tmp/rules_census.mjs --seeds 30
  *   node tools/tmp/rules_census.mjs --seeds 30 --policies smart --json out.json
- *   node tools/tmp/rules_census.mjs --seeds 8 --arena tools/tmp/arena.frozen.json
+ *   node tools/tmp/rules_census.mjs --seeds 8 --sim /tmp/frozen/src/game --arena tools/arena.gameplay.json
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createScriptedPlayer, rng, parseDriverFlags, DRIVER_REV } from './scripted_player.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -58,7 +74,16 @@ const {
   COUNTDOWN_FROM, COUNTDOWN_START_FLASH_MS, FOG_DAMAGE, FOG_TICK_MS,
 } = RULES;
 
-const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/tmp/arena.frozen.json`);
+/**
+ * ⚠️ The default used to be `tools/tmp/arena.frozen.json`, which is not in this repo and
+ * never has been on `main`: it exists only inside the unmerged WIP commit `b3dda69`. So
+ * the tool as committed could not run at all without `--arena`, and `cf3e30d`'s figures
+ * — which name that file as their arena, "frozen at 8359a4f" — are not re-derivable from
+ * anything on the branch. Default is now the tracked dump every other tool in this family
+ * uses; `git show b3dda69:tools/tmp/arena.frozen.json` recovers the old one if a figure
+ * from that pass ever has to be reproduced exactly.
+ */
+const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
 if (!existsSync(ARENA_PATH)) { console.error(`no arena at ${ARENA_PATH}`); process.exit(1); }
 const ARENA_DATA = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
 // `arena.maxSafeRadius` is DERIVED from MATCH_DURATION_MS in `arena/shared.ts`, so a
@@ -79,220 +104,26 @@ const POLICIES = String(args.policies ?? 'idle,smart,chase').split(',');
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// seeded rng — mulberry32
+// the hand on the controls — ONE implementation, imported
 // ─────────────────────────────────────────────────────────────────────────────
-function rng(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+/**
+ * `tools/tmp/scripted_player.mjs` owns the policies, the nav and the reaction cadence.
+ * This file used to transcribe all three; `status_census.mjs` was then copied from that
+ * transcription, and the copy is what kept the countdown defect alive after
+ * `match-sim.mjs` had already fixed it. `rng`, `POLICY_FNS`, `makeNav`, `lineOfSight`,
+ * `bestWeapon`, `preferredRange` and `axesToward` all now come from there, so this file
+ * cannot drift from `match-sim.mjs` again without the drift being a diff in ONE file.
+ */
+const DRIVER = createScriptedPlayer({
+  CHARACTERS, REACH, arena, hazard: HAZ, ...parseDriverFlags(args),
+});
+const { POLICY_FNS, maxNormalRange } = DRIVER;
+
+if (DRIVER.isHistorical) {
+  console.log('\n  ⚠️  HISTORICAL DRIVER — reproducing a defect fixed on 2026-08-05.');
+  console.log(`      ${DRIVER.flags.navCountdownBug ? 'nav-countdown-bug ' : ''}${DRIVER.flags.decideDuringCountdown ? 'decide-during-countdown' : ''}`);
+  console.log('      These numbers are NOT current. They exist to re-derive an old figure.\n');
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// the hand on the controls — match-sim.mjs's policies, plus seeded jitter
-// ─────────────────────────────────────────────────────────────────────────────
-const maxNormalRange = (id) =>
-  Math.max(...CHARACTERS[id].weapons.filter((w) => (w.range ?? 0) <= REACH.rangedMax).map((w) => w.range ?? 0), 0);
-
-function preferredRange(id) {
-  const ws = CHARACTERS[id].weapons.filter((w) => w.type !== 'self' && (w.range ?? 0) <= REACH.rangedMax);
-  if (!ws.length) return maxNormalRange(id);
-  return ws.reduce((best, w) => ((w.damage ?? 0) > (best.damage ?? 0) ? w : best)).range ?? 0;
-}
-
-function axesToward(fromX, fromY, toX, toY) {
-  const dx = toX - fromX, dy = toY - fromY;
-  const m = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
-  const q = (v) => (v > 0.35 ? 1 : v < -0.35 ? -1 : 0);
-  return { x: q(dx / m), y: q(dy / m) };
-}
-
-function bestWeapon(state, d) {
-  const p = state.player;
-  const ws = CHARACTERS[p.characterId].weapons;
-  let best = null, bestDmg = -Infinity;
-  ws.forEach((w, i) => {
-    if (w.type === 'self') return;
-    if (state.elapsed - p.lastUsed[i] < w.cooldown) return;
-    if (d > (w.range ?? Infinity)) return;
-    if ((w.damage ?? 0) > bestDmg) { bestDmg = w.damage ?? 0; best = i; }
-  });
-  return best;
-}
-
-function lineOfSight(x0, y0, x1, y1) {
-  const d = Math.hypot(x1 - x0, y1 - y0);
-  const n = Math.max(1, Math.ceil(d / 4));
-  for (let i = 1; i <= n; i++) {
-    const x = x0 + ((x1 - x0) * i) / n;
-    const y = y0 + ((y1 - y0) * i) / n;
-    if (arena.cover.some((o) => Math.abs(x - o.x) < (12 + o.w) / 2 && Math.abs(y - o.y) < (12 + o.h) / 2)) return false;
-  }
-  return true;
-}
-
-function makeNav(rnd) {
-  const hist = [];
-  let detourUntil = -1, detourSign = rnd() < 0.5 ? 1 : -1;
-  return function walk(state, targetX, targetY) {
-    const p = state.player;
-    hist.push({ t: state.elapsed, x: p.x, y: p.y });
-    while (hist.length && state.elapsed - hist[0].t > 1500) hist.shift();
-    if (state.elapsed > detourUntil && hist.length > 4 && state.elapsed - hist[0].t > 1200) {
-      if (Math.hypot(p.x - hist[0].x, p.y - hist[0].y) < 45) {
-        detourSign = -detourSign; detourUntil = state.elapsed + 900; hist.length = 0;
-      }
-    }
-    let tx = targetX, ty = targetY;
-    if (state.elapsed < detourUntil) {
-      const ang = Math.atan2(targetY - p.y, targetX - p.x) + detourSign * (Math.PI / 2);
-      tx = p.x + Math.cos(ang) * 150; ty = p.y + Math.sin(ang) * 150;
-    }
-    return axesToward(p.x, p.y, tx, ty);
-  };
-}
-
-const POLICY_FNS = {
-  idle: () => () => ({ move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false }),
-
-  chase: (rnd) => {
-    const nav = makeNav(rnd);
-    return (state) => {
-      const p = state.player, e = state.enemy;
-      const d = dist(p.x, p.y, e.x, e.y);
-      return {
-        move: nav(state, e.x, e.y),
-        aim: { x: e.x - p.x, y: e.y - p.y },
-        selectedWeapon: bestWeapon(state, d) ?? 0,
-        attack: true,
-      };
-    };
-  },
-
-  smart: (rnd) => {
-    const nav = makeNav(rnd);
-    return (state) => {
-      const p = state.player, e = state.enemy;
-      const d = dist(p.x, p.y, e.x, e.y);
-      const idx = bestWeapon(state, d);
-      const band = preferredRange(p.characterId) * 0.85;
-      const los = lineOfSight(p.x, p.y, e.x, e.y);
-      const cx = arena.center.x, cy = arena.center.y;
-      const dc = dist(p.x, p.y, cx, cy);
-      const R = state.safeRadius;
-      let target;
-      if (dc > R - 30) {
-        target = { x: cx, y: cy };
-        if (HAZ && R < HAZ.radius + 20) {
-          const ang = Math.atan2(p.y - cy, p.x - cx);
-          const r = Math.max(0, R - 10);
-          target = { x: cx + Math.cos(ang) * r, y: cy + Math.sin(ang) * r };
-        }
-      } else if (HAZ && dist(p.x, p.y, HAZ.x, HAZ.y) < HAZ.radius + 15 && R > HAZ.radius + 40) {
-        const ang = Math.atan2(p.y - HAZ.y, p.x - HAZ.x);
-        target = { x: HAZ.x + Math.cos(ang) * (HAZ.radius + 60), y: HAZ.y + Math.sin(ang) * (HAZ.radius + 60) };
-      } else if (!los) {
-        const ang = Math.atan2(e.y - p.y, e.x - p.x) + Math.PI / 2;
-        target = { x: p.x + Math.cos(ang) * 150, y: p.y + Math.sin(ang) * 150 };
-      } else if (d > band) {
-        target = { x: e.x, y: e.y };
-      } else if (d < band * 0.5) {
-        const ang = Math.atan2(p.y - e.y, p.x - e.x);
-        target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
-      } else {
-        const ang = Math.atan2(p.y - e.y, p.x - e.x) + Math.PI / 2;
-        target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
-      }
-      return {
-        move: nav(state, target.x, target.y),
-        aim: { x: e.x - p.x, y: e.y - p.y },
-        selectedWeapon: idx ?? 0,
-        attack: idx !== null && (los || CHARACTERS[p.characterId].weapons[idx].type === 'melee'),
-      };
-    };
-  },
-
-  /**
-   * SURVIVE — the ceiling on human passivity: circle inside the safe disc at max speed,
-   * stay outside the pot, and never let the AI (70 wu/s chase against the player's 120)
-   * close. It exists for ONE question — is the 45 s whistle reachable at all by a human,
-   * or only by making both fighters immortal? `kite` answers "a player who merely runs
-   * away dies to the fog"; this answers "and a player who runs away CORRECTLY?".
-   */
-  survive: (rnd) => {
-    // ANALOG axes, not the 8-direction keyboard quantisation the other policies use:
-    // the shipped twin sticks (`src/game/touch.ts`) are analog, so this is a real input
-    // a real player can produce, not an oracle. No `nav` detour either — its stuck
-    // detector fights a policy whose whole job is to keep moving.
-    let jitter = rnd() * Math.PI * 2;
-    return (state) => {
-      const p = state.player, e = state.enemy;
-      const cx = arena.center.x, cy = arena.center.y;
-      const R = state.safeRadius;
-      const potR = HAZ ? HAZ.radius : 0;
-      let vx = 0, vy = 0;
-      // 1. away from the enemy, hardest when close
-      const de = Math.hypot(p.x - e.x, p.y - e.y) || 1;
-      const wEnemy = Math.min(3, 260 / de);
-      vx += ((p.x - e.x) / de) * wEnemy;
-      vy += ((p.y - e.y) / de) * wEnemy;
-      // 2. toward the ring centre, hardest near the edge
-      const dc = Math.hypot(p.x - cx, p.y - cy) || 1;
-      const margin = R - dc;
-      const wRing = margin < 140 ? 4 * (1 - Math.max(0, margin) / 140) : 0;
-      vx += ((cx - p.x) / dc) * wRing;
-      vy += ((cy - p.y) / dc) * wRing;
-      // 3. out of the pot
-      if (HAZ) {
-        const dp = Math.hypot(p.x - HAZ.x, p.y - HAZ.y) || 1;
-        if (dp < potR + 45) { const w = 3; vx += ((p.x - HAZ.x) / dp) * w; vy += ((p.y - HAZ.y) / dp) * w; }
-      }
-      // 4. a tangential component so "away from the enemy" does not walk into a wall
-      jitter += 0.03;
-      vx += Math.cos(jitter) * 0.5; vy += Math.sin(jitter) * 0.5;
-      const m = Math.max(Math.abs(vx), Math.abs(vy)) || 1;
-      return {
-        move: { x: Math.max(-1, Math.min(1, vx / m)), y: Math.max(-1, Math.min(1, vy / m)) },
-        aim: { x: e.x - p.x, y: e.y - p.y },
-        selectedWeapon: 0,
-        attack: false,
-      };
-    };
-  },
-
-  /**
-   * KITE — the policy the others cannot express: never close, always retreat, use the
-   * self-heal, and keep the ring at arm's length. It exists to answer "dead against the
-   * script, or dead against a human?" for the regen / timeout / final-ring family. A
-   * human who is losing plays roughly this.
-   */
-  kite: (rnd) => {
-    const nav = makeNav(rnd);
-    return (state) => {
-      const p = state.player, e = state.enemy;
-      const cx = arena.center.x, cy = arena.center.y;
-      const R = state.safeRadius;
-      const dc = dist(p.x, p.y, cx, cy);
-      // Run from the enemy, biased back toward the ring centre so the fog does not do
-      // the enemy's job for it.
-      const away = Math.hypot(p.x - e.x, p.y - e.y) || 1;
-      const wRing = dc > R - 90 ? 2.2 : 0.6;
-      const fx = ((p.x - e.x) / away) * 1.4 + ((cx - p.x) / 600) * wRing;
-      const fy = ((p.y - e.y) / away) * 1.4 + ((cy - p.y) / 430) * wRing;
-      const selfSlot = CHARACTERS[p.characterId].weapons.findIndex((w) => w.type === 'self');
-      const canSelf = selfSlot >= 0 && state.elapsed - p.lastUsed[selfSlot] >= CHARACTERS[p.characterId].weapons[selfSlot].cooldown;
-      return {
-        move: nav(state, p.x + fx * 200, p.y + fy * 200),
-        aim: { x: e.x - p.x, y: e.y - p.y },
-        selectedWeapon: canSelf ? selfSlot : 0,
-        attack: canSelf,
-      };
-    };
-  },
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // one instrumented match
@@ -302,15 +133,13 @@ function runMatch(playerId, enemyId, policy, seed) {
   const state = createMatch(arena, playerId, enemyId);
   const decide = POLICY_FNS[policy](rnd);
   // Seed 0 is jitter-free: reproduces match-sim.mjs exactly.
-  const reactBase = 150;
-  const reactJit = seed === 0 ? 0 : 60;
+  // The cadence — including the countdown guard — lives in the shared driver.
+  const loop = DRIVER.createDecisionLoop({
+    decide, reactBase: 150, reactJit: seed === 0 ? 0 : 60, rnd,
+  });
 
   const pReach = maxNormalRange(playerId), eReach = maxNormalRange(enemyId);
   const engageRange = Math.max(pReach + HIT_RADIUS_VS_ENEMY, eReach + HIT_RADIUS_VS_PLAYER);
-
-  let input = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
-  let sinceDecision = Infinity;
-  let nextReact = reactBase;
 
   const m = {
     playerId, enemyId, policy, seed,
@@ -366,11 +195,7 @@ function runMatch(playerId, enemyId, policy, seed) {
   const HARD_CAP = MATCH_DURATION_MS * 1.6 + 20000;
 
   while (state.phase !== 'ended' && state.elapsed < HARD_CAP) {
-    if (sinceDecision >= nextReact) {
-      input = decide(state);
-      sinceDecision = 0;
-      nextReact = reactBase + (rnd() * 2 - 1) * reactJit;
-    }
+    const input = loop.next(state, DT);
     const wasPlaying = state.phase === 'playing';
     // Snapshot pre-tick status ends so an application is detectable.
     const pre = {
@@ -380,7 +205,6 @@ function runMatch(playerId, enemyId, policy, seed) {
 
     const evs = stepMatch(state, DT, input);
     m.ticks++;
-    sinceDecision += DT;
 
     for (const ev of evs) {
       switch (ev.type) {
@@ -572,9 +396,14 @@ function quant(xs, q) { if (!xs.length) return 0; const a = [...xs].sort((x, y) 
 console.log(`\n╔══ RULES CENSUS ══ ${nMatches} matches · ${SEEDS} seeds × 110 matchups × ${POLICIES.length} policies · ${elapsedS.toFixed(1)}s`);
 console.log(`║ clock ${MATCH_DURATION_MS / 1000}s · arena ${arena.width}x${arena.height} maxSafeRadius ${arena.maxSafeRadius} · spawn gap ${Math.round(dist(arena.playerSpawn.x, arena.playerSpawn.y, arena.enemySpawn.x, arena.enemySpawn.y))}wu`);
 console.log(`║ sim ${SIM_DIR === `${ROOT}/src/game` ? 'working tree' : SIM_DIR}`);
+console.log(`║ driver rev ${DRIVER_REV}${DRIVER.isHistorical ? `  ⚠️ HISTORICAL: ${Object.entries(DRIVER.flags).filter(([, v]) => v).map(([k]) => k).join(' ')}` : ''}`);
 console.log(`╚══════════════════════════════════════════════════════════════════════════\n`);
 
-const summary = { clockMs: MATCH_DURATION_MS, nMatches, policies: {} };
+/** An UNSTAMPED JSON is pre-2026-08-05 and carries the countdown detour. */
+const summary = {
+  clockMs: MATCH_DURATION_MS, nMatches, policies: {},
+  driverRev: DRIVER_REV, driverFlags: DRIVER.flags, sim: SIM_DIR, arena: ARENA_PATH,
+};
 
 for (const policy of POLICIES) {
   const rows = byPolicy[policy];

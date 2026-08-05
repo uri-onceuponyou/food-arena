@@ -18,18 +18,32 @@
  * every status event it carried was refused. Where one step carries several status hits
  * on the same target, at most one of them can have been the writer.
  *
+ * ── THE DRIVER IS IMPORTED, AND IT USED TO BE A STALE COPY ─────────────────
+ *
+ * The hand on the controls was a verbatim hand-copy of `audio_census.mjs`'s, which was
+ * itself a stale copy of `tools/match-sim.mjs`'s scripted player: the stuck detector ran
+ * during the COUNTDOWN, when `sim.ts:movePlayer` is never called, so it read "1.5 s of
+ * walking, 0 wu covered", latched a perpendicular detour and walked it SIDEWAYS at the
+ * whistle (`docs/LESSONS.md` §5). A REFUSAL RATE is a rate per unit of engagement, so a
+ * driver that changes when engagement starts changes the number this file exists to
+ * print.
+ *
+ * It now comes from `tools/tmp/scripted_player.mjs`. `--nav-countdown-bug
+ * --decide-during-countdown` reproduce the pre-fix walk. `smart` here NEVER meant the
+ * `smart` decision tree — it meant a chase that holds fire out of range — so it is kept
+ * as an explicit ALIAS (to `smart2`, which carries the same firing discipline) rather
+ * than silently re-pointed.
+ *
  *   node tools/tmp/audio_shrug_census.mjs
  *   node tools/tmp/audio_shrug_census.mjs --policy idle
+ *   node tools/tmp/audio_shrug_census.mjs --sim /tmp/frozen/src/game
  */
 
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createScriptedPlayer, parseDriverFlags, DRIVER_REV } from './scripted_player.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
-const ARENA_CACHE = `${ROOT}/tools/arena.gameplay.json`;
-
-const { createMatch, stepMatch } = await import(`${ROOT}/src/game/sim.ts`);
-const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS } = await import(`${ROOT}/src/game/rules.ts`);
 
 const args = (() => {
   const o = {};
@@ -43,53 +57,47 @@ const args = (() => {
   return o;
 })();
 
+/** `--sim <dir>` freezes the sim; without it a peer's half-saved `src/game/` lands in a run. */
+const SIM_DIR = String(args.sim ?? `${ROOT}/src/game`);
+const ARENA_CACHE = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
+const { createMatch, stepMatch } = await import(`${SIM_DIR}/sim.ts`);
+const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, REACH } = await import(`${SIM_DIR}/rules.ts`);
+
 const DT = Number(args.dt ?? 16.667);
 const POLICY = String(args.policy ?? 'smart');
+/** 0 = decide every tick, which is what this file has always done. */
+const REACT_MS = Number(args.react ?? 0);
 
 if (!existsSync(ARENA_CACHE)) {
-  console.error('No arena cache. Run once:  node tools/match-sim.mjs --refresh-arena --url $URL');
+  console.error(`No arena cache at ${ARENA_CACHE}. Run once:  node tools/match-sim.mjs --refresh-arena --url $URL`);
   process.exit(1);
 }
 const ARENA = { ...JSON.parse(readFileSync(ARENA_CACHE, 'utf8')), build: () => null, update: () => {} };
 
-/** The same simple hand on the controls `audio_census.mjs` uses. */
+const DRIVER_FLAGS = parseDriverFlags(args);
+const DRIVER = createScriptedPlayer({
+  CHARACTERS, REACH, arena: ARENA,
+  hazard: (ARENA.hazards ?? []).find((h) => h.kind === 'damage') ?? null,
+  ...DRIVER_FLAGS,
+});
+if (DRIVER.isHistorical) {
+  console.log('\n  \u26a0\ufe0f  HISTORICAL DRIVER — reproducing a defect fixed on 2026-08-05. These numbers are NOT current.\n');
+}
+
+/**
+ * The same hand on the controls `audio_census.mjs` uses — which is now the SHARED one.
+ * `smart` and `flee` are ALIASES kept so no recorded figure changes meaning silently;
+ * see the header. `--legacy-smart-as <policy>` re-points `smart` for a sweep.
+ */
+const POLICY_ALIAS = { smart: String(args['legacy-smart-as'] ?? 'smart2'), flee: 'kite', smartTree: 'smart' };
+const resolvePolicy = (p) => POLICY_ALIAS[p] ?? p;
+
 function makePlayer(policy) {
-  let detourUntil = -1;
-  let detourSign = 1;
-  const hist = [];
-  return (state) => {
-    const p = state.player;
-    const e = state.enemy;
-    if (policy === 'idle') return { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
-    hist.push({ t: state.elapsed, x: p.x, y: p.y });
-    while (hist.length && state.elapsed - hist[0].t > 1500) hist.shift();
-    if (state.elapsed > detourUntil && hist.length > 4 && state.elapsed - hist[0].t > 1200) {
-      if (Math.hypot(p.x - hist[0].x, p.y - hist[0].y) < 24) {
-        detourUntil = state.elapsed + 700;
-        detourSign = -detourSign;
-      }
-    }
-    let dx = e.x - p.x;
-    let dy = e.y - p.y;
-    const d = Math.hypot(dx, dy) || 1;
-    if (state.elapsed < detourUntil) { const t = dx; dx = -dy * detourSign; dy = t * detourSign; }
-    const m = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
-    const q = (v) => (v > 0.35 ? 1 : v < -0.35 ? -1 : 0);
-    const ws = CHARACTERS[p.characterId].weapons;
-    let slot = null; let bestDmg = -Infinity;
-    ws.forEach((w, i) => {
-      if (w.type === 'self') return;
-      if (state.elapsed - p.lastUsed[i] < w.cooldown) return;
-      if (d > (w.range ?? Infinity)) return;
-      if ((w.damage ?? 0) > bestDmg) { bestDmg = w.damage ?? 0; slot = i; }
-    });
-    return {
-      move: { x: q(dx / m), y: q(dy / m) },
-      aim: { x: (e.x - p.x) / d, y: (e.y - p.y) / d },
-      selectedWeapon: slot ?? 0,
-      attack: slot !== null,
-    };
-  };
+  const name = resolvePolicy(policy);
+  const fn = DRIVER.POLICY_FNS[name];
+  if (!fn) throw new Error(`unknown policy ${policy} -> ${name} (have: ${DRIVER.POLICY_NAMES.join(', ')})`);
+  const loop = DRIVER.createDecisionLoop({ decide: fn(null), reactBase: REACT_MS, reactJit: 0, rnd: null });
+  return (state) => loop.next(state, DT);
 }
 
 const KEY = { stun: 'stunnedUntil', slow: 'slowedUntil' };
@@ -264,7 +272,7 @@ const sorted = [...totals.gaps].sort((a, b) => a - b);
 const pct = (q) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : NaN);
 const withRef = perMatch.filter((m) => m.ref > 0).length;
 
-console.log(`policy=${POLICY}  matches=${totals.matches}  total sim time=${mins.toFixed(1)} min`);
+console.log(`policy=${POLICY} -> ${resolvePolicy(POLICY)}  matches=${totals.matches}  total sim time=${mins.toFixed(1)} min  ·  driver rev ${DRIVER_REV}${DRIVER.isHistorical ? '  ⚠️ HISTORICAL' : ''}  ·  sim ${SIM_DIR === `${ROOT}/src/game` ? 'working tree' : SIM_DIR}`);
 console.log(`status hits:        landed ${land}  (stun ${totals.landed.stun}, slow ${totals.landed.slow})`);
 console.log(`                   REFUSED ${ref}  (stun ${totals.refused.stun}, slow ${totals.refused.slow})`);
 console.log(`refusal share:      ${((100 * ref) / Math.max(1, ref + land)).toFixed(1)}% of all status hits`);

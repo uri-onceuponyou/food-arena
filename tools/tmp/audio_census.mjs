@@ -25,20 +25,35 @@
  * have. The mirror is small, and `tools/audio-probe.mjs --mode coverage` asserts the two
  * agree on which kinds are voiced, so it cannot silently drift.
  *
+ * ── THE DRIVER IS IMPORTED, AND IT USED TO BE A STALE COPY ─────────────────
+ *
+ * The hand on the controls was a verbatim hand-copy of `tools/match-sim.mjs`'s scripted
+ * player, carrying a defect `match-sim.mjs` had already fixed on 2026-08-05: the stuck
+ * detector ran during the COUNTDOWN, when `sim.ts:movePlayer` is never called, so it read
+ * "1.5 s of walking, 0 wu covered", latched a perpendicular detour and walked it SIDEWAYS
+ * at the whistle. Every event RATE below is a function of when contact happens, so the
+ * defect was inside the measurement, not beside it (`docs/LESSONS.md` §5).
+ *
+ * It now comes from `tools/tmp/scripted_player.mjs`. Two changes, different in kind:
+ *   * THE FIX — reachable in reverse by `--nav-countdown-bug --decide-during-countdown`.
+ *   * A POLICY REDEFINITION — the local hand was none of the shared policies (24 wu /
+ *     700 ms detour instead of 45 / 900). `smart` here NEVER meant the `smart` decision
+ *     tree; it meant a chase that holds fire out of range. It is kept as an explicit
+ *     ALIAS so no recorded "policy=smart" figure changes meaning silently, and it
+ *     resolves to `smart2` — the corrected tree, which carries the same firing discipline.
+ *     `flee` aliases to the shared `kite`, which is the same idea with tuned constants.
+ *
  *   node tools/tmp/audio_census.mjs                    # default sweep
  *   node tools/tmp/audio_census.mjs --policy idle      # matches that reach the whistle
  *   node tools/tmp/audio_census.mjs --json out.json
+ *   node tools/tmp/audio_census.mjs --sim /tmp/frozen/src/game --arena /tmp/frozen/tools/arena.gameplay.json
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createScriptedPlayer, rng, parseDriverFlags, DRIVER_REV } from './scripted_player.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
-const ARENA_CACHE = `${ROOT}/tools/arena.gameplay.json`;
-
-const { createMatch, stepMatch } = await import(`${ROOT}/src/game/sim.ts`);
-const RULES = await import(`${ROOT}/src/game/rules.ts`);
-const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, MIN_SAFE_RADIUS, FOG_TICK_MS, TRAIL } = RULES;
 
 const args = (() => {
   const o = {};
@@ -52,14 +67,35 @@ const args = (() => {
   return o;
 })();
 
+/** `--sim <dir>` freezes the sim: a peer mid-save in `src/game/` otherwise lands inside a
+ *  run, which is exactly how `arena_probe.mjs` contaminated its own audit. */
+const SIM_DIR = String(args.sim ?? `${ROOT}/src/game`);
+const ARENA_CACHE = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
+const { createMatch, stepMatch } = await import(`${SIM_DIR}/sim.ts`);
+const RULES = await import(`${SIM_DIR}/rules.ts`);
+const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, MIN_SAFE_RADIUS, FOG_TICK_MS, TRAIL, REACH } = RULES;
+
 const DT = Number(args.dt ?? 16.667);
 const POLICY = String(args.policy ?? 'smart');
+/** 0 = decide every tick, which is what this file has always done. `--react 150` imposes
+ *  the reaction cadence the rest of the driver's consumers use. */
+const REACT_MS = Number(args.react ?? 0);
 
 if (!existsSync(ARENA_CACHE)) {
-  console.error(`No arena cache. Run once:  node tools/match-sim.mjs --refresh-arena --url $URL`);
+  console.error(`No arena cache at ${ARENA_CACHE}. Run once:  node tools/match-sim.mjs --refresh-arena --url $URL`);
   process.exit(1);
 }
 const ARENA = { ...JSON.parse(readFileSync(ARENA_CACHE, 'utf8')), build: () => null, update: () => {} };
+
+const DRIVER_FLAGS = parseDriverFlags(args);
+const DRIVER = createScriptedPlayer({
+  CHARACTERS, REACH, arena: ARENA,
+  hazard: (ARENA.hazards ?? []).find((h) => h.kind === 'damage') ?? null,
+  ...DRIVER_FLAGS,
+});
+if (DRIVER.isHistorical) {
+  console.log('\n  ⚠️  HISTORICAL DRIVER — reproducing a defect fixed on 2026-08-05. These numbers are NOT current.\n');
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The director's dispatch, mirrored. One line per `GameEvent` kind.
@@ -91,72 +127,31 @@ const ALL_KINDS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A hand on the controls. Deliberately simple — this measures EVENT RATES, not skill.
+// A hand on the controls — the SHARED one. This measures EVENT RATES, not skill.
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * `smart` and `flee` are ALIASES, not policies. This file's `smart` has always been a
+ * chase that holds fire out of range, never the `smart` decision tree, and `flee` was a
+ * local retreat-and-heal hand. Re-pointing either name at a different shared policy would
+ * silently redefine every figure recorded under it, so the mapping is explicit and
+ * `--legacy-smart-as <policy>` re-points it for a sweep.
+ *
+ * `flee` existed to reach the WHISTLE: the aggressive and idle policies both end every
+ * match by knockout well inside 45 s, so neither ever exercises `resolveTimeout` or the
+ * ring's `MIN_SAFE_RADIUS` floor — the two sim states this census was written to find.
+ * The shared `kite` is the same idea, and is the one the balance tools use.
+ */
+const POLICY_ALIAS = { smart: String(args['legacy-smart-as'] ?? 'smart2'), flee: 'kite', smartTree: 'smart' };
+const resolvePolicy = (p) => POLICY_ALIAS[p] ?? p;
+
 function makePlayer(policy) {
-  let detourUntil = -1;
-  let detourSign = 1;
-  const hist = [];
-  return (state) => {
-    const p = state.player;
-    const e = state.enemy;
-    if (policy === 'idle') return { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
-
-    // `flee` exists to reach the WHISTLE. The aggressive and idle policies both end
-    // every match by knockout well inside 45 s, so neither ever exercises
-    // `resolveTimeout` or the ring's `MIN_SAFE_RADIUS` floor — the two sim states this
-    // census was written to find. A player who runs, heals and never shoots is the
-    // cheapest way to make a long match happen without falsifying the sim.
-    if (policy === 'flee') {
-      const away = Math.hypot(p.x - e.x, p.y - e.y) || 1;
-      const cx = state.arena.center.x;
-      const cy = state.arena.center.y;
-      // Run from the enemy, but bias toward the ring centre so the fog does not simply
-      // finish the job the enemy could not.
-      const fx = ((p.x - e.x) / away) * 0.6 + ((cx - p.x) / 700) * 1.4;
-      const fy = ((p.y - e.y) / away) * 0.6 + ((cy - p.y) / 500) * 1.4;
-      const fm = Math.max(Math.abs(fx), Math.abs(fy)) || 1;
-      const qq = (v) => (v > 0.35 ? 1 : v < -0.35 ? -1 : 0);
-      const selfSlot = CHARACTERS[p.characterId].weapons.findIndex((w) => w.type === 'self');
-      const canSelf = selfSlot >= 0 && state.elapsed - p.lastUsed[selfSlot] >= CHARACTERS[p.characterId].weapons[selfSlot].cooldown;
-      return {
-        move: { x: qq(fx / fm), y: qq(fy / fm) },
-        selectedWeapon: canSelf ? selfSlot : 0,
-        attack: canSelf,
-      };
-    }
-
-    hist.push({ t: state.elapsed, x: p.x, y: p.y });
-    while (hist.length && state.elapsed - hist[0].t > 1500) hist.shift();
-    if (state.elapsed > detourUntil && hist.length > 4 && state.elapsed - hist[0].t > 1200) {
-      if (Math.hypot(p.x - hist[0].x, p.y - hist[0].y) < 24) {
-        detourUntil = state.elapsed + 700;
-        detourSign = -detourSign;
-      }
-    }
-    let dx = e.x - p.x;
-    let dy = e.y - p.y;
-    const d = Math.hypot(dx, dy) || 1;
-    if (state.elapsed < detourUntil) { const t = dx; dx = -dy * detourSign; dy = t * detourSign; }
-    const m = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
-    const q = (v) => (v > 0.35 ? 1 : v < -0.35 ? -1 : 0);
-
-    // Pick the highest-damage weapon in range and off cooldown.
-    const ws = CHARACTERS[p.characterId].weapons;
-    let slot = null; let bestDmg = -Infinity;
-    ws.forEach((w, i) => {
-      if (w.type === 'self') return;
-      if (state.elapsed - p.lastUsed[i] < w.cooldown) return;
-      if (d > (w.range ?? Infinity)) return;
-      if ((w.damage ?? 0) > bestDmg) { bestDmg = w.damage ?? 0; slot = i; }
-    });
-    return {
-      move: { x: q(dx / m), y: q(dy / m) },
-      aim: { x: (e.x - p.x) / d, y: (e.y - p.y) / d },
-      selectedWeapon: slot ?? 0,
-      attack: slot !== null,
-    };
-  };
+  const name = resolvePolicy(policy);
+  const fn = DRIVER.POLICY_FNS[name];
+  if (!fn) throw new Error(`unknown policy ${policy} -> ${name} (have: ${DRIVER.POLICY_NAMES.join(', ')})`);
+  /** No seeded stream: `makeNav(null)` keeps the historical initial `detourSign` of +1,
+   *  so the before/after measures the countdown fix rather than a re-roll. */
+  const loop = DRIVER.createDecisionLoop({ decide: fn(null), reactBase: REACT_MS, reactJit: 0, rnd: null });
+  return (state) => loop.next(state, DT);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -261,7 +256,8 @@ const median = durations.length ? durations[durations.length >> 1] : 0;
 const mean = durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
 
 const n = results.length;
-console.log(`\n══ event census · ${n} matchups · policy=${POLICY} · clock=${MATCH_DURATION_MS / 1000}s · dt=${DT.toFixed(2)}ms ══\n`);
+console.log(`\n══ event census · ${n} matchups · policy=${POLICY} -> ${resolvePolicy(POLICY)} · clock=${MATCH_DURATION_MS / 1000}s · dt=${DT.toFixed(2)}ms ══`);
+console.log(`   driver rev ${DRIVER_REV}${DRIVER.isHistorical ? '  ⚠️ HISTORICAL' : ''} · sim ${SIM_DIR === `${ROOT}/src/game` ? 'working tree' : SIM_DIR}\n`);
 console.log(`endings          knockout ${knockouts}  timeout ${timeouts}  UNRESOLVED ${unresolved}`);
 console.log(`PLAY length      mean ${(mean / 1000).toFixed(1)}s  median ${(median / 1000).toFixed(1)}s  max ${(durations[durations.length - 1] / 1000).toFixed(1)}s   (clock ${MATCH_DURATION_MS / 1000}s, excludes the ${(RULES.COUNTDOWN_FROM)}s countdown)`);
 console.log(`ring reached its floor (${MIN_SAFE_RADIUS} wu) in ${ringFloored}/${n} matches`);
@@ -290,7 +286,8 @@ console.log(`  worst tick: ${JSON.stringify(worst.worstTick?.map((e) => e.type +
 
 if (args.json) {
   writeFileSync(String(args.json), JSON.stringify({
-    policy: POLICY, clockMs: MATCH_DURATION_MS, n, knockouts, timeouts, unresolved,
+    policy: POLICY, resolvedPolicy: resolvePolicy(POLICY), driverRev: DRIVER_REV, driverFlags: DRIVER_FLAGS, sim: SIM_DIR,
+    clockMs: MATCH_DURATION_MS, n, knockouts, timeouts, unresolved,
     meanMs: mean, medianMs: median, ringFloored, total, totalHits, totalDestroy,
     maxEventsPerTick: maxEv, maxVoicesPerTick: worst.maxVoicesPerTick,
     maxTrailHitsPerTick: maxTrail, maxWeaponHitsPerTick: maxWeaponHits,
