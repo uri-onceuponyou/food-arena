@@ -958,7 +958,24 @@ export interface Weapon {
   healAmount?: number;
 }
 
-/** Display-only stats from the roster screen (0-10 scale). Not used in combat math. */
+/**
+ * The character card, on the roster screen's 0-10 scale.
+ *
+ * ⚠️ **THIS USED TO SAY "Not used in combat math", AND FOR TWO OF THE THREE AXES IT WAS
+ * TRUE.** Every character had identical HP and identical movement speed; the card drew
+ * three bars and two of them described nothing. As of AUTHORISED DEVIATION #10 all three
+ * are real, and they run in two different directions:
+ *
+ *   `health`  AUTHORED here; the sim reads it (`maxHpFor`). Bigger bar, bigger pool.
+ *   `speed`   AUTHORED here; the sim reads it (`speedFor`). Bigger bar, faster. Capped —
+ *             `SPEED_TOP_STAT` maps to `PLAYER_SPEED` and nothing may exceed it.
+ *   `damage`  DERIVED from the weapon table (`damageStatFor`), because `weapons` is and
+ *             remains the single source of truth for damage. Do not hand-edit it: change
+ *             a weapon and re-derive, or `sim.test.mjs` §22(f) fails.
+ *
+ * §22 asserts every one of those sentences against the real `createMatch` / `stepMatch` /
+ * `stepAI`, so the card cannot quietly become fiction again.
+ */
 export interface DisplayStats {
   damage: number;
   health: number;
@@ -1162,16 +1179,18 @@ export const RARITY_CARD_COLORS: Record<Rarity, string> = {
 // so the residual is negative. `ENEMY_MAX_HP` is the difficulty dial and is
 // UNTOUCHED — it is parked for Uri in `DECISIONS §12`.
 //
-// ⚠️ AND THE PLAYER-SIDE HALF OF LOLLIPOP IS NOT FIXED, because it cannot be from
-// this file. Player-Lollipop went 7.2% -> 13.1% for a 45% damage increase, and
-// still loses 8 of its 10 matchups at <=5%. Its problem in the player's hands is
-// not output, it is CROSSING 1,080 wu WITH 100 HP TO REACH 70 wu: it absorbs
-// 102.4 HP of weapon damage per match against a 100 HP pool (only Soup, at 102.6,
-// takes more, and Soup is the other bottom-of-roster character). The lever would be
-// per-character health or movement speed — and `CharacterDef.stats` is
-// display-only ("Not used in combat math"), so no such lever exists. Every
-// character in this game has identical HP and identical speed; the only exception
-// in the whole roster is Donut's `TRAIL.speedBoost`. See the report.
+// ⚠️ THE PLAYER-SIDE HALF OF LOLLIPOP WAS NOT FIXED HERE, AND THE LEVER IT ASKED
+// FOR NOW EXISTS. Player-Lollipop went 7.2% -> 13.1% for a 45% damage increase and
+// still lost 8 of its 10 matchups at <=5%. Its problem was never output: it was
+// CROSSING 1,080 wu WITH 100 HP TO REACH 70 wu, absorbing 102.4 HP of weapon damage
+// per match against a 100 HP pool. This comment then said "the lever would be
+// per-character health or movement speed — and `CharacterDef.stats` is display-only,
+// so no such lever exists."
+//
+// ✅ AUTHORISED DEVIATION #10 BUILT IT. Lollipop is authored `health: 8` — a 120 HP
+// pool against the roster's 70 — and measures 45.9% strength, up 24.8 pp, without a
+// single weapon number changing. That is the shape of the whole roster now: the kit
+// says what a character DOES and the vitals say how long it gets to do it.
 //
 // ── WHAT WAS DELIBERATELY LEFT ALONE ────────────────────────────────────────
 //
@@ -1204,7 +1223,7 @@ export const RARITY_CARD_COLORS: Record<Rarity, string> = {
 export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   hamburger: {
     id: 'hamburger', name: 'Hamburger', emoji: '🍔', rarity: 'Normal',
-    stats: { damage: 7, health: 8, speed: 5 }, hasTrail: false,
+    stats: { damage: 10, health: 3, speed: 5 }, hasTrail: false,
     face: 'Closed happy eyes, small smile. Stacked bun/patty/lettuce/tomato silhouette.',
     weapons: [
       { key: 'Smash', name: 'Patty Smash', type: 'melee', range: REACH.meleeStrong, damage: 12, cooldown: 650, cone: 80, color: '#FFC93C', effect: null, emoji: '🍖' },
@@ -1229,7 +1248,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   donut: {
     id: 'donut', name: 'Donut', emoji: '🍩', rarity: 'Normal',
-    stats: { damage: 6, health: 7, speed: 6 }, hasTrail: true,
+    stats: { damage: 4, health: 6, speed: 6 }, hasTrail: true,
     face: 'Crooked smile, sprinkles across a pink glaze torus.',
     weapons: [
       { key: 'Candy', name: 'Candy Barrage', type: 'ranged', range: REACH.rangedLong, damage: 4, cooldown: 900, speed: SPEED.long, color: '#FF6FA5', effect: null, pellets: 3, spreadDeg: 14, trailBoosted: true, emoji: '🍬' },
@@ -1242,7 +1261,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   taco: {
     id: 'taco', name: 'Taco', emoji: '🌮', rarity: 'Rare',
-    stats: { damage: 8, health: 6, speed: 5 }, hasTrail: false,
+    stats: { damage: 9, health: 3, speed: 5 }, hasTrail: false,
     face: 'Trapezoid shell with a jagged crimped top edge; face floats completely outside the shell, to the side.',
     weapons: [
       { key: 'Filling', name: 'Filling Toss', type: 'ranged', range: REACH.rangedLong, damage: 12, cooldown: 900, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '🥩' },
@@ -1266,7 +1285,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   burrito: {
     id: 'burrito', name: 'Burrito', emoji: '🌯', rarity: 'Rare',
-    stats: { damage: 7, health: 6, speed: 6 }, hasTrail: false,
+    stats: { damage: 6, health: 7, speed: 7 }, hasTrail: false,
     face: 'White wrap, stands upright, toppings visible at the open end.',
     weapons: [
       // Disc sits one rung below Swarm so Burrito keeps its 240-vs-260 ordering.
@@ -1289,7 +1308,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   egg: {
     id: 'egg', name: 'Egg', emoji: '🥚', rarity: 'Neon',
-    stats: { damage: 8, health: 6, speed: 4 }, hasTrail: false,
+    stats: { damage: 7, health: 9, speed: 4 }, hasTrail: false,
     face: 'Open eyes with highlights, straight neutral mouth.',
     weapons: [
       { key: 'Tackle', name: 'Egg Tackle', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, emoji: '🥚' },
@@ -1305,7 +1324,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   lollipop: {
     id: 'lollipop', name: 'Lollipop', emoji: '🍭', rarity: 'Cyber',
-    stats: { damage: 8, health: 5, speed: 6 }, hasTrail: false,
+    stats: { damage: 7, health: 8, speed: 7 }, hasTrail: false,
     face: 'Eyes on the stick, mouth on the candy. Concentric red/white swirl disc.',
     weapons: [
       // ── AUTHORISED DEVIATION #8 (2026-08-05): LOLLIPOP — see the block above
@@ -1321,7 +1340,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   pizza: {
     id: 'pizza', name: 'Pizza', emoji: '🍕', rarity: 'Neon',
-    stats: { damage: 6, health: 7, speed: 5 }, hasTrail: false,
+    stats: { damage: 4, health: 10, speed: 5 }, hasTrail: false,
     face: 'Closed eyes, smiling. Triangular slice with pepperoni and a crust base.',
     weapons: [
       { key: 'Dough', name: 'Dough Balls', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 850, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '⚪' },
@@ -1337,7 +1356,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   sushi: {
     id: 'sushi', name: 'Sushi', emoji: '🍣', rarity: 'Legendary',
-    stats: { damage: 6, health: 5, speed: 7 }, hasTrail: false,
+    stats: { damage: 9, health: 5, speed: 8 }, hasTrail: false,
     face: 'Wide eyes, puckered lips. Rice cylinder banded with nori, salmon centre.',
     weapons: [
       { key: 'Rice', name: 'Rice Spray', type: 'ranged', range: REACH.rangedClose, damage: 2, cooldown: 700, speed: SPEED.closeFast, color: '#FFFFFF', effect: null, pellets: 5, spreadDeg: 35, emoji: '🍚' },
@@ -1355,7 +1374,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   soup: {
     id: 'soup', name: 'Soup', emoji: '🍲', rarity: 'Epic',
-    stats: { damage: 7, health: 6, speed: 4 }, hasTrail: false,
+    stats: { damage: 6, health: 9, speed: 4 }, hasTrail: false,
     face: 'Gray steam-coloured eyes, no mouth. Wide bowl with rising steam.',
     weapons: [
       { key: 'Splash', name: 'Soup Splash', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 750, speed: SPEED.closeFast, color: '#E8792A', effect: null, pellets: 3, spreadDeg: 25, emoji: '💦' },
@@ -1371,7 +1390,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   waterbottle: {
     id: 'waterbottle', name: 'Water Bottle', emoji: '💧', rarity: 'Legendary',
-    stats: { damage: 7, health: 7, speed: 5 }, hasTrail: false,
+    stats: { damage: 8, health: 6, speed: 6 }, hasTrail: false,
     face: 'Eyes floating above the cap, big smile. Translucent blue bottle with a darker cap.',
     weapons: [
       // Water Bottle is the only four-weapon fighter with three ranged slots, so
@@ -1391,7 +1410,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   hotdog: {
     id: 'hotdog', name: 'Hot Dog', emoji: '🌭', rarity: 'Cyber',
-    stats: { damage: 8, health: 6, speed: 7 }, hasTrail: false,
+    stats: { damage: 9, health: 7, speed: 8 }, hasTrail: false,
     face: 'Sleepy half-closed eyes, small smile. Sausage in a bun with a mustard zigzag.',
     weapons: [
       { key: 'Mustard', name: 'Mustard Blast', type: 'ranged', range: REACH.rangedLong, damage: 7, cooldown: 900, speed: SPEED.long, color: '#FFC93C', effect: null, emoji: '💛' },
@@ -1408,3 +1427,263 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
 /** Rarity display order, lowest → highest. */
 export const RARITY_ORDER: Rarity[] = ['Normal', 'Rare', 'Epic', 'Legendary', 'Neon', 'Cyber'];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VITALS — the character card, made real
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── AUTHORISED DEVIATION #10 (2026-08-05): PER-CHARACTER HEALTH AND SPEED ────
+//
+// **`CharacterDef.stats` used to say "Not used in combat math", and it was telling the
+// truth about two of its three axes.** Every character in this game had identical HP and
+// identical movement speed; the only per-character movement difference in the whole roster
+// was Donut's `TRAIL.speedBoost`. The card on character select drew three bars, and two of
+// them described nothing.
+//
+// This section is Uri's answer to `DECISIONS §13`: **rarity means power, so build real
+// stats.** Three things had to be true at once and they pull against each other.
+//
+// ── 1. THE CARD IS NOW THE SOURCE, NOT A DESCRIPTION ────────────────────────
+//
+// `health` and `speed` are AUTHORED here and the SIM READS THEM. That direction matters:
+// a display value derived from the sim can still drift into meaninglessness (it did — see
+// the structural argument below), whereas a sim driven BY the display value cannot
+// disagree with it, ever, by construction. `damage` runs the other way — the weapon table
+// is and stays the source of truth for damage, so the card's damage bar is DERIVED from
+// the kit by `kitDps` below. `sim.test.mjs` §22 asserts all three directions, so the card
+// cannot become fiction again without a red gate.
+//
+// ⚠️ THE OLD EVIDENCE THAT IT WAS FICTION IS ITSELF WITHDRAWN, and the replacement is
+// better. `DECISIONS §13(b)` recorded ρ = 0.327 between the card's stat total and measured
+// strength; the driver audit (`d9753ff`) could not reproduce it — same tool, same seeds,
+// same commit gives 0.395, and today's tree gives 0.462. Do not quote 0.327. The claim
+// survives on an argument that does not depend on a number that moves: **the card's stat
+// total took only FIVE distinct values across eleven characters, with FIVE of them tied at
+// 19.** With n = 11 significance needs ρ ≈ 0.62. A statistic with five levels and a
+// five-way tie in the middle cannot discriminate the roster *even in principle*, whatever
+// its correlation happens to measure this week.
+//
+// ── 2. THE ROLE DIAL HAD TO SURVIVE ─────────────────────────────────────────
+//
+// `PLAYER_MAX_HP` / `ENEMY_MAX_HP` were per-ROLE constants, and `ENEMY_MAX_HP` is Uri's
+// difficulty dial — he had just turned it to 90 (DEVIATION #9). So per-character health is
+// a MULTIPLIER ON the role base, never a replacement for it: the dial still scales the
+// whole roster exactly as it did, and `maxHpFor` is the only place the two combine.
+//
+// ── 3. NOTHING MAY GO FASTER THAN THE CAMERA THINKS IT CAN ──────────────────
+//
+// `render/camera.ts` derives the fair-play radius partly from
+// `MAX_CLOSING_SPEED = PLAYER_SPEED * TRAIL.speedBoost`, commented **"nothing in rules.ts
+// moves faster"** — and that guarantee (you always see the fighter who is shooting you) is
+// the reason the whole weapon-range ladder was retuned in the first place. A speed
+// multiplier above 1 would have quietly falsified it, in a file this pass does not own.
+//
+// So the speed scale is anchored at the TOP: `SPEED_TOP_STAT` maps to exactly 1.0 and
+// every slower character scales DOWN. `PLAYER_SPEED` stops being "the speed" and becomes
+// "the speed cap", the camera's claim stays literally true, `FAIR_PLAY.radiusUnits` does
+// not move, and `tools/aspect.mjs` still passes at 0.00 wu spread. `sim.test.mjs` §22
+// asserts the cap directly, because a comment in another file is not a guard.
+//
+// ⚠️ IT IS NOT FREE, AND THE BILL IS PACING — but the bill was paid twice over. Anchoring
+// at the top means the roster MEAN speed falls, and `099119a` had just spent a whole
+// commit buying 2.0 s of dead time back. Measured on that same instrument
+// (`tools/tmp/pacing_ladder.mjs`, paired against the pre-vitals tree, 880 matches):
+//
+//                            smart2              chase
+//   the approach          +0.35 s            +0.35 s     <- what speed costs
+//   engaged time          +0.95 s            +0.40 s     <- what health buys
+//   DUTY CYCLE            +2.1 pp            +1.1 pp     <- the net, and it is POSITIVE
+//
+// Bigger pools mean longer fights, and longer fights are more fight per session even
+// though the walk to them got 0.35 s longer. The one figure that got worse is the
+// approach, which is inside the ~0.8 s the project treats as the pacing resolution floor.
+//
+// ── WHAT THIS DELIVERED, measured (110 matchups x 32 seeds, paired) ─────────
+//
+//                              before        after
+//   SETTLED matchups (smart2)  43/110      **22/110**    `DECISIONS §13(c)`'s headline
+//   roster strength sd          24.7 pp       12.4 pp
+//   rarity monotonic?             NO          **YES**    40.4 / 41.7 / 46.3 / 50.0 /
+//                                                        58.7 / 61.1 across the six tiers
+//   aggregate player win        52.2%         51.8%      Uri's difficulty, untouched
+//
+// ⚠️ TWO HONEST CAVEATS, both stated rather than buried:
+//   * The ramp was fitted on `smart2`, the corrected skilled player. Under `chase` — the
+//     naive charge-straight-in policy — the roster is FLATTER (settled 71 -> 57, sd
+//     27.6 -> 18.1) but the rarity ramp is NOT monotone. Pizza is why and it cannot be
+//     fixed from here: it is already at `health: 10`, the top of the card's own scale.
+//   * `chase` aggregate falls 45.0% -> 36.6%. That is 8.4 pp, just inside the ~9 pp band
+//     this project treats as unresolvable for an aggregate, and it is one policy of two.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The 0-10 scale the character card draws its bars on. `src/ui` renders `value / 10`. */
+export const STAT_MAX_DISPLAY = 10;
+
+/**
+ * The `health` stat that means "the role's base pool, unmodified". A character authored
+ * at exactly this value has `maxHp === PLAYER_MAX_HP` (or `ENEMY_MAX_HP`), so the roster
+ * still has a defined centre and `ENEMY_MAX_HP` still means what its own comment says.
+ */
+export const HEALTH_BASELINE_STAT = 6;
+
+/**
+ * How much one point of the card's `health` bar is worth, as a fraction of the role pool.
+ *
+ * MEASURED, not picked. `tools/tmp/vitals_probe.mjs` holds the whole roster at neutral and
+ * moves one character's one stat: at the first value tried (0.14) a single point was worth
+ * **9 to 17 pp of that character's strength**, which is far too coarse to shape a six-tier
+ * ramp out of eleven characters — the fit could not place a tier without overshooting the
+ * one below it. 0.10 halves that and lets the roster use the card's FULL 1-10 range
+ * (authored 3..10 = 70% to 140% of the role pool) instead of huddling around the middle.
+ *
+ * ⚠️ It is still coarse. One point moves a character 7-12 pp, so the tier ramp cannot be
+ * tuned finer than about 10 pp per character. That is a property of an integer display
+ * scale being the source of truth, and it is the price of the card being unable to lie.
+ */
+export const HEALTH_PER_STAT = 0.10;
+
+/**
+ * The `speed` stat that means `PLAYER_SPEED` exactly. **This is a CAP, not a centre** —
+ * see point 3 above. Nothing in the roster may be authored above it, and `sim.test.mjs`
+ * §22 fails if anything is.
+ */
+export const SPEED_TOP_STAT = 8;
+
+/**
+ * How much one point of the card's `speed` bar costs, as a fraction of `PLAYER_SPEED`.
+ *
+ * ── SPEED IS A NEARLY INERT BALANCE LEVER, AND THAT IS A MEASUREMENT ────────
+ *
+ * This was expected to be the second axis that breaks the settled matchups. It is not.
+ * `tools/tmp/vitals_probe.mjs`, one character at a time on a neutral roster, cutting that
+ * character's speed by 20% (stat 8 -> 4):
+ *
+ *   hamburger -2.5pp   taco -3.1   burrito -5.6   sushi  0.0   waterbottle +1.2
+ *   pizza     -3.7     hotdog -4.4  |  egg -10.0   soup +3.2   lollipop -0.6
+ *   donut    -26.9  <- and this one is not speed, it is the Sticky Trail
+ *
+ * **Nine of eleven move by under 6 pp, and the response is not even monotone**: two get
+ * BETTER at a 20% cut (Soup +3.2, Water Bottle +1.2) and four get better at a 10% one
+ * (Lollipop +7.5, Soup, Egg, Water Bottle). Being slower is worth something to a fighter
+ * the scripted player has to walk to. Only Donut responds strongly, and Donut is the
+ * character whose damage and whose own `TRAIL.speedBoost` are both functions of movement:
+ * that is the trail responding, not speed as a stat.
+ *
+ * ── So why keep the axis at all, and why this size ──────────────────────────
+ *
+ * Because a bar that moves nothing is the defect this whole deviation exists to fix, and
+ * because "how fast does this character feel" is exactly the kind of question
+ * `docs/LESSONS.md` §10 says an instrument cannot answer. The axis is kept, honestly
+ * scaled, and sized by the one cost that IS measurable: every point below
+ * `SPEED_TOP_STAT` lengthens the approach for both fighters in every matchup that
+ * character appears in. 0.03 across the authored 4..8 band puts the roster mean
+ * multiplier at 0.94, which measures **+0.35 s of approach** — inside the ~0.8 s this
+ * project treats as the pacing resolution floor, and repaid with interest by the extra
+ * engaged time the bigger pools buy (see the duty-cycle table above).
+ *
+ * Do not raise it hoping for balance. It was tried at 0.05 and the roster did not care.
+ */
+export const SPEED_PER_STAT = 0.03;
+
+/** This character's HP as a fraction of its role's base pool. */
+export function healthMultiplier(id: CharacterId): number {
+  return 1 + (CHARACTERS[id].stats.health - HEALTH_BASELINE_STAT) * HEALTH_PER_STAT;
+}
+
+/** This character's movement as a fraction of the speed cap. Always <= 1 — see point 3. */
+export function speedMultiplier(id: CharacterId): number {
+  return 1 - (SPEED_TOP_STAT - CHARACTERS[id].stats.speed) * SPEED_PER_STAT;
+}
+
+/**
+ * The HP pool a `role` fighter of this character starts with.
+ *
+ * `roleBaseHp` is passed in rather than looked up so this function has no idea which role
+ * it is serving: `sim.ts` supplies `PLAYER_MAX_HP` or `ENEMY_MAX_HP` and the difficulty
+ * dial keeps working unchanged, on top of the per-character multiplier rather than
+ * instead of it. Rounded, because HP is displayed and a fighter on 68.4 HP reads as a bug.
+ */
+export function maxHpFor(id: CharacterId, roleBaseHp: number): number {
+  return Math.round(roleBaseHp * healthMultiplier(id));
+}
+
+/**
+ * The movement speed (wu/ms) a fighter of this character moves at, given the base speed
+ * for what it is doing — `PLAYER_SPEED` for a human, `AI_CHASE_SPEED` / `AI_FLEE_SPEED`
+ * for the driver.
+ *
+ * ⚠️ IT SCALES THE AI TOO, DELIBERATELY. A speed stat that only applied in the player's
+ * hands would make `strength` — the role-symmetric index the roster is judged on — respond
+ * at half rate to half the roster's stats, and would be exactly the asymmetry `ai.ts` has
+ * had to have surgically removed four times.
+ */
+export function speedFor(id: CharacterId, roleBaseSpeed: number): number {
+  return roleBaseSpeed * speedMultiplier(id);
+}
+
+/**
+ * SUSTAINED KIT OUTPUT, HP/s, with everything cycling off cooldown at a range where every
+ * part lands. This is what the card's `damage` bar is derived from, and it is the one axis
+ * that runs sim -> card rather than card -> sim, because `weapons` is and remains the
+ * single source of truth for damage.
+ *
+ * It prices a PRESS, not the authored `damage` field, and those are different numbers:
+ * `damage` is per-PELLET and per-PECK, and for a combo weapon it is 0 (Taco's Double Toss
+ * is authored 0 and delivers 23). `ai.ts:pressValue` is the exact, sim-validated version
+ * of the same idea — 183 of 183 weapon-band cells exact — but it is a function of
+ * SEPARATION and lives downstream of this file, so what is used here is its `always` term:
+ * the damage a press lands at any range the weapon reaches at all. `sim.test.mjs` §22
+ * asserts this against `pressValue` at point-blank so the two cannot drift apart.
+ *
+ * Heals are excluded: a heal is not damage, and the one `self` weapon in the roster is
+ * already visible on the card as an ability.
+ */
+export function kitDps(id: CharacterId): number {
+  let dps = 0;
+  for (const w of CHARACTERS[id].weapons) {
+    if (w.type === 'self') continue;
+    const perPress = w.comboParts
+      ? w.comboParts.reduce((sum, p) => sum + p.damage, 0)
+      : w.damage * (w.peckHits ?? 1) * (w.pellets ?? 1);
+    dps += (perPress / w.cooldown) * 1000;
+  }
+  return dps;
+}
+
+/**
+ * HP/s per point on the card's `damage` bar.
+ *
+ * Set so the roster spans the whole top of the scale without clipping: the strongest kit
+ * (Hamburger, 33.9 HP/s) lands on 9.69 and rounds to exactly 10, and the weakest (Donut,
+ * 13.3) lands on 4. A coarser divisor compresses the roster into fewer bar heights, and
+ * the card having too few distinct values is precisely the defect §22(g) exists to catch.
+ */
+export const DPS_PER_DAMAGE_POINT = 3.5;
+
+/** The card's `damage` bar for this character, derived from its kit. 1-10. */
+export function damageStatFor(id: CharacterId): number {
+  return Math.max(1, Math.min(STAT_MAX_DISPLAY, Math.round(kitDps(id) / DPS_PER_DAMAGE_POINT)));
+}
+
+/**
+ * "How much fight is in this character" as ONE number: offence × durability. `kitDps` is
+ * the HP/s the kit can put out; `healthMultiplier` is how long it lasts while doing it.
+ * The product is the quantity that actually decides an exchange, and it is what the
+ * trophy road is selling when it sells a rarer character.
+ *
+ * ⚠️ **IT IS A MODEL, AND IT IS STATED AS ONE.** The measurement is
+ * `tools/tmp/roster_lab.mjs`'s `strength` — 7,040 matches through the real `stepMatch`,
+ * which cannot live in a unit test. This exists so `sim.test.mjs` §22(h) can assert the
+ * INPUT to the rarity promise even though the outcome has to be measured elsewhere. When
+ * the two disagree, the measurement is right and this is the thing that needs fixing.
+ *
+ * Speed is deliberately NOT a term. Measured one character at a time on a neutral roster
+ * (`tools/tmp/vitals_probe.mjs`), a 20% speed cut moves most of the roster by under 3 pp
+ * of strength and moves several of them the WRONG WAY — being slower is worth something
+ * to a fighter the scripted player has to walk to. A near-inert, non-monotone term would
+ * make this index worse, not more complete.
+ */
+export function powerIndex(id: CharacterId): number {
+  return kitDps(id) * healthMultiplier(id);
+}

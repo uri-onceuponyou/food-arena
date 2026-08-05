@@ -48,6 +48,7 @@ import {
   CHARACTERS,
   CHARACTER_IDS,
   HIT_RADIUS_VS_PLAYER,
+  speedFor,
   type Weapon,
   type WeaponType,
 } from './rules.ts';
@@ -533,7 +534,7 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
     // it. Aim is set once, at the player, in the facing block above — read it before
     // re-introducing anything that turns a retreating fighter's aim with its feet.
     if (!rooted) {
-      const step = AI_FLEE_SPEED * dt * aiSlowMult;
+      const step = speedFor(enemy.characterId, AI_FLEE_SPEED) * dt * aiSlowMult;
       // Flee target is directly away from the player, so slide around cover toward
       // that point rather than pinning against it — now bent back inside the ring, which
       // is the whole reason a retreating AI used to run itself into the fog. At zero
@@ -562,7 +563,7 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
     if (chosenIndex !== null) {
       attemptAttack(state, 'enemy', chosenIndex, events);
     } else if (!rooted) {
-      const step = AI_CHASE_SPEED * dt * aiSlowMult;
+      const step = speedFor(enemy.characterId, AI_CHASE_SPEED) * dt * aiSlowMult;
       steer(adx / adist, ady / adist, player.x, player.y);
       moveToward(enemy, STEER.dirX, STEER.dirY, step, state.arena, STEER.navX, STEER.navY);
       attemptedMove = true;

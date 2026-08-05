@@ -26,6 +26,7 @@ import {
   HOMING_TURN_RATE,
   MATCH_DURATION_MS,
   MIN_SAFE_RADIUS,
+  maxHpFor,
   PLAYER_MAX_HP,
   PLAYER_SIZE,
   PLAYER_SPEED,
@@ -34,6 +35,7 @@ import {
   REGEN_DELAY_MS,
   REGEN_TICK_MS,
   SLOW_MOVE_MULTIPLIER,
+  speedFor,
   SPLAT_DURATION_MS,
   SPLAT_RADIUS,
   TRAIL,
@@ -77,8 +79,12 @@ export function createMatch(arena: ArenaDefinition, playerCharacterId: Character
     startFlashTimer: 0,
     timeRemaining: MATCH_DURATION_MS,
     safeRadius: arena.maxSafeRadius,
-    player: createFighter('player', playerCharacterId, arena.playerSpawn, PLAYER_MAX_HP, PLAYER_SIZE, { x: 1, y: 0 }),
-    enemy: createFighter('enemy', enemyCharacterId, arena.enemySpawn, ENEMY_MAX_HP, ENEMY_SIZE, { x: -1, y: 0 }),
+    // ── PER-CHARACTER POOLS, ON TOP OF THE ROLE DIAL (rules.ts DEVIATION #10) ──
+    // `maxHpFor` multiplies the ROLE base by the character's own `stats.health`, so
+    // `ENEMY_MAX_HP` keeps scaling the whole roster exactly as it did — a per-character
+    // pool that replaced the role constant would have taken Uri's difficulty dial away.
+    player: createFighter('player', playerCharacterId, arena.playerSpawn, maxHpFor(playerCharacterId, PLAYER_MAX_HP), PLAYER_SIZE, { x: 1, y: 0 }),
+    enemy: createFighter('enemy', enemyCharacterId, arena.enemySpawn, maxHpFor(enemyCharacterId, ENEMY_MAX_HP), ENEMY_SIZE, { x: -1, y: 0 }),
     projectiles: [],
     splats: [],
     trailMarks: [],
@@ -275,7 +281,11 @@ function movePlayer(state: MatchState, dt: number, input: MatchInput, _events: G
   if (now < player.status.slowedUntil) speedMult *= SLOW_MOVE_MULTIPLIER;
   const frozen = now < player.status.stunnedUntil;
 
-  const speed = frozen ? 0 : PLAYER_SPEED * dt * speedMult;
+  // `speedFor` scales `PLAYER_SPEED` by this character's own `stats.speed` — and it can
+  // only scale DOWN (rules.ts `SPEED_TOP_STAT` is a cap, not a centre), so
+  // `render/camera.ts`'s "nothing in rules.ts moves faster than PLAYER_SPEED *
+  // TRAIL.speedBoost" — the claim its whole fair-play radius rests on — stays true.
+  const speed = frozen ? 0 : speedFor(player.characterId, PLAYER_SPEED) * dt * speedMult;
   // Deliberately NOT normalized as a vector — each axis scales independently, so
   // diagonal movement is faster than cardinal movement, exactly like the
   // prototype's raw WASD handling.

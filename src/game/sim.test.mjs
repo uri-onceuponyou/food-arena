@@ -36,7 +36,12 @@ import {
   COUNTDOWN_FROM, COUNTDOWN_START_FLASH_MS,
   REGEN_DELAY_MS, REGEN_TICK_MS, REGEN_AMOUNT, STUN_DURATION_MS, SLOW_DURATION_MS,
   STUN_GRACE_MS, SLOW_GRACE_MS,
-  AI_FLEE_HP_FRACTION, AI_HAZARD_MARGIN, AI_SELF_HEAL_HP_FRACTION,
+  AI_FLEE_HP_FRACTION, AI_HAZARD_MARGIN, AI_SELF_HEAL_HP_FRACTION, REACH,
+  // Section 22: the card and the sim are the same numbers now, so the accessors are
+  // imported rather than re-derived — a copy of `maxHpFor`'s arithmetic in the test
+  // would pass forever against a `sim.ts` that had stopped calling it.
+  maxHpFor, speedFor, healthMultiplier, speedMultiplier, kitDps, damageStatFor, powerIndex,
+  HEALTH_BASELINE_STAT, SPEED_TOP_STAT, STAT_MAX_DISPLAY, RARITY_ORDER,
 } from './rules.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
@@ -579,10 +584,15 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   //     disagreement unbuildable (they do when the pools are within ~2 HP of each other,
   //     because then no pair of HP values can separate absolute from fraction).
   {
-    const bigRole = ENEMY_MAX_HP >= PLAYER_MAX_HP ? 'enemy' : 'player';
+    // ⚠️ THE POOLS ARE THE FIGHTERS', NOT THE ROLE CONSTANTS' (rules.ts DEVIATION #10).
+    // `PLAYER_MAX_HP` / `ENEMY_MAX_HP` are the role BASES now, and every character scales
+    // them — so which side holds the bigger pool depends on the two CHARACTERS in the
+    // fixture, not on the two constants. Read it off the match that was actually created.
+    const probe = atTheWhistle().state;
+    const bigRole = probe.enemy.maxHp >= probe.player.maxHp ? 'enemy' : 'player';
     const smallRole = bigRole === 'enemy' ? 'player' : 'enemy';
-    const bigMax = Math.max(PLAYER_MAX_HP, ENEMY_MAX_HP);
-    const smallMax = Math.min(PLAYER_MAX_HP, ENEMY_MAX_HP);
+    const bigMax = Math.max(probe.player.maxHp, probe.enemy.maxHp);
+    const smallMax = Math.min(probe.player.maxHp, probe.enemy.maxHp);
     // The bigger pool gets more ABSOLUTE HP by exactly 1, which forces the smaller pool
     // to hold the higher FRACTION whenever the pools differ by more than 1/0.6 HP.
     const bigHp = 0.6 * bigMax;
@@ -594,16 +604,17 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       `higher HP FRACTION wins, not higher HP (${smallRole} ${smallHp}/${smallMax}=${(smallHp / smallMax).toFixed(2)} ` +
       `beats ${bigRole} ${bigHp}/${bigMax}=${(bigHp / bigMax).toFixed(2)})`,
       disagree && state.winner === smallRole,
-      disagree ? `winner=${state.winner}` : `POOLS TOO CLOSE (${PLAYER_MAX_HP} vs ${ENEMY_MAX_HP}): absolute and fraction cannot be made to disagree — this check no longer tests anything, go and read it`,
+      disagree ? `winner=${state.winner}` : `POOLS TOO CLOSE (${probe.player.maxHp} vs ${probe.enemy.maxHp}): absolute and fraction cannot be made to disagree — this check no longer tests anything, go and read it`,
     );
   }
   {
     // The mirror, same derivation: the bigger pool now also holds the higher fraction, so
     // both criteria agree and the winner must be the bigger pool's owner either way.
-    const bigRole = ENEMY_MAX_HP >= PLAYER_MAX_HP ? 'enemy' : 'player';
+    const probe = atTheWhistle().state;
+    const bigRole = probe.enemy.maxHp >= probe.player.maxHp ? 'enemy' : 'player';
     const smallRole = bigRole === 'enemy' ? 'player' : 'enemy';
-    const bigMax = Math.max(PLAYER_MAX_HP, ENEMY_MAX_HP);
-    const smallMax = Math.min(PLAYER_MAX_HP, ENEMY_MAX_HP);
+    const bigMax = Math.max(probe.player.maxHp, probe.enemy.maxHp);
+    const smallMax = Math.min(probe.player.maxHp, probe.enemy.maxHp);
     const { state } = atTheWhistle({ [bigRole]: { hp: 0.6 * bigMax }, [smallRole]: { hp: 0.5 * smallMax } });
     stepMatch(state, 200, noInput);
     check('lower HP fraction loses (0.50 against 0.60)', state.winner === bigRole, `winner=${state.winner}`);
@@ -1478,8 +1489,11 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       const events = [];
       applyDamage(state, 'player', 10, 'stun', src, events);
       applyDamage(state, 'player', 10, 'stun', src, events); // status refused, damage not
+      // Against the fighter's OWN pool: per-character health (rules.ts DEVIATION #10)
+      // means `PLAYER_MAX_HP` is the role BASE, not any particular fighter's maximum.
+      // The rule under test is "full damage", which is a statement about the delta.
       check('a hit whose status is refused still deals its full damage',
-        state.player.hp === PLAYER_MAX_HP - 20, `hp ${state.player.hp}`);
+        state.player.hp === maxHpFor(state.player.characterId, PLAYER_MAX_HP) - 20, `hp ${state.player.hp}`);
       check("and still emits hit-landed carrying the weapon's authored effect",
         events.length === 2 && events.every((e) => e.type === 'hit-landed' && e.effect === 'stun'),
         JSON.stringify(events.map((e) => `${e.type}:${e.effect}`)));
@@ -1610,12 +1624,18 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       stepAI(state, 16.667, events);
       return events.filter((e) => e.type === 'weapon-fired' && e.weaponKey === heal.key).length;
     };
+    // ⚠️ AGAINST THE ENEMY FIGHTER'S OWN POOL. `rules.ts` states the rule as a FRACTION of
+    // max HP, and per-character health (DEVIATION #10) means an enemy Hamburger's pool is
+    // `maxHpFor('hamburger', ENEMY_MAX_HP)`, not `ENEMY_MAX_HP`. Reading the role base here
+    // put the "hurt" probe ABOVE the character's own half-HP line and the check failed for
+    // a reason that was not the behaviour under test.
+    const POOL = maxHpFor('hamburger', ENEMY_MAX_HP);
     check('a hurt AI Hamburger uses its Onion Ring — it never could before',
-      firesAt(ENEMY_MAX_HP * AI_SELF_HEAL_HP_FRACTION - 1) === 1, 'no self-weapon fire at half HP');
+      firesAt(POOL * AI_SELF_HEAL_HP_FRACTION - 1) === 1, `no self-weapon fire at half of ${POOL} HP`);
     check('a healthy AI Hamburger saves it rather than spending a 6 s cooldown for nothing',
-      firesAt(ENEMY_MAX_HP - 1) === 0, `it healed at ${ENEMY_MAX_HP - 1}/${ENEMY_MAX_HP}`);
+      firesAt(POOL - 1) === 0, `it healed at ${POOL - 1}/${POOL}`);
     check('and it never overheals — it waits until the whole heal fits',
-      firesAt(ENEMY_MAX_HP - (heal.healAmount - 1)) === 0,
+      firesAt(POOL - (heal.healAmount - 1)) === 0,
       `it healed ${heal.healAmount} HP into a ${heal.healAmount - 1} HP hole`);
   }
 
@@ -2249,7 +2269,9 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
     end.timers.every((arr) => arr.every((t) => t === 0)));
 
   check('both fighters are at full HP and alive',
-    end.hp[0] === PLAYER_MAX_HP && end.hp[1] === ENEMY_MAX_HP && end.alive[0] && end.alive[1]);
+    end.hp[0] === maxHpFor('hamburger', PLAYER_MAX_HP) && end.hp[1] === maxHpFor('donut', ENEMY_MAX_HP)
+    && end.alive[0] && end.alive[1],
+    `player ${end.hp[0]} enemy ${end.hp[1]}`);
 
   check('nothing exists in the world: no projectiles, splats or trail marks',
     end.world.every((n) => n === 0));
@@ -2257,6 +2279,269 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
   check('the ring is still at its opening radius and the match clock has not started',
     end.safeRadius === arena.maxSafeRadius && end.timeRemaining === MATCH_DURATION_MS,
     `safeRadius=${end.safeRadius} timeRemaining=${end.timeRemaining}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 22. THE CARD IS THE SIM — `CharacterDef.stats` is no longer display-only
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `DisplayStats` used to be documented "Not used in combat math", and that was true of
+// two of its three axes: every character had identical HP and identical movement speed,
+// and the card drew two bars that described nothing. `rules.ts` AUTHORISED DEVIATION #10
+// makes them real, and this section is what stops them becoming fiction again.
+//
+// Each axis has a DIRECTION and the direction is asserted, not assumed:
+//
+//   health, speed   card -> sim.  Authored on the card; `sim.ts` and `ai.ts` read them
+//                   through `maxHpFor` / `speedFor`. A display value derived from the sim
+//                   can still drift into meaninglessness; a sim driven BY the display
+//                   value cannot disagree with it.
+//   damage          sim -> card.  `weapons` is and stays the single source of truth for
+//                   damage, so the bar is DERIVED from the kit by `damageStatFor`.
+//
+// Everything below drives the real `createMatch` / `stepMatch` / `stepAI`. Nothing here
+// asserts the shape of `rules.ts` — an assertion that `healthMultiplier` returns what its
+// own formula says would pass forever against a `sim.ts` that had stopped calling it.
+{
+  console.log('\n22. The character card is the simulation (per-character health and speed)');
+  const TICK = 16.667;
+  const OPEN = 1e6;
+
+  // ── (a) HEALTH REACHES THE SIM, FOR BOTH ROLES ────────────────────────────
+  {
+    const wrongP = [], wrongE = [];
+    for (const id of CHARACTER_IDS) {
+      const m = createMatch(makeArena({ maxSafeRadius: OPEN }), id, id);
+      if (m.player.maxHp !== maxHpFor(id, PLAYER_MAX_HP)) wrongP.push(`${id} ${m.player.maxHp}`);
+      if (m.enemy.maxHp !== maxHpFor(id, ENEMY_MAX_HP)) wrongE.push(`${id} ${m.enemy.maxHp}`);
+      if (m.player.hp !== m.player.maxHp || m.enemy.hp !== m.enemy.maxHp) wrongP.push(`${id} not at full`);
+    }
+    check('every character spawns with ITS OWN pool, in both roles',
+      wrongP.length === 0 && wrongE.length === 0, `player [${wrongP.join(', ')}] enemy [${wrongE.join(', ')}]`);
+
+    // The bar's ORDER is the pool's order. This is the whole promise the card makes, and
+    // it is a stronger statement than "the numbers differ" — a roster where the bars and
+    // the pools disagreed on which character is tougher would pass the check above.
+    const byBar = [...CHARACTER_IDS].sort((a, b) => CHARACTERS[a].stats.health - CHARACTERS[b].stats.health);
+    const bad = byBar.filter((id, i) => i > 0
+      && maxHpFor(id, PLAYER_MAX_HP) < maxHpFor(byBar[i - 1], PLAYER_MAX_HP));
+    check('a bigger health BAR always means a bigger pool — the card cannot lie about the order',
+      bad.length === 0, `out of order: [${bad.join(', ')}]`);
+
+    check('and nobody is authored into a pool of nothing',
+      CHARACTER_IDS.every((id) => maxHpFor(id, PLAYER_MAX_HP) >= 1 && maxHpFor(id, ENEMY_MAX_HP) >= 1),
+      `min player pool ${Math.min(...CHARACTER_IDS.map((id) => maxHpFor(id, PLAYER_MAX_HP)))}`);
+  }
+
+  // ── (b) URI'S DIFFICULTY DIAL SURVIVED ────────────────────────────────────
+  //
+  // `ENEMY_MAX_HP` is a per-ROLE constant and `DECISIONS §12`/`§15` is where it is
+  // decided. Per-character health had to go ON TOP of it, never instead of it, or the
+  // change would have quietly taken the dial away. The property that makes it still a
+  // dial is that it scales the whole roster together: `maxHpFor` must be LINEAR in its
+  // base, so halving the role pool halves every character's pool.
+  {
+    const off = CHARACTER_IDS.filter((id) =>
+      Math.abs(maxHpFor(id, 200) - 2 * maxHpFor(id, 100)) > 1);  // >1 is rounding, not drift
+    check('the role dial still scales the WHOLE roster — maxHpFor is linear in the role pool',
+      off.length === 0, `not proportional: [${off.join(', ')}]`);
+    check('…and a character at the baseline stat is exactly the role pool, so the dial keeps its meaning',
+      CHARACTER_IDS.every((id) => CHARACTERS[id].stats.health !== HEALTH_BASELINE_STAT
+        || maxHpFor(id, ENEMY_MAX_HP) === ENEMY_MAX_HP));
+  }
+
+  // ── (c) SPEED REACHES THE SIM — MEASURED, NOT COMPUTED ────────────────────
+  //
+  // Driven through the real `movePlayer`: a straight run across open ground with no
+  // slow, no trail and no cover, so the only thing that can decide the distance is the
+  // character's own speed.
+  {
+    const run = (id) => {
+      const arena = makeArena({ width: 8000, height: 8000, maxSafeRadius: OPEN });
+      const state = playingMatch(arena, id, 'donut');
+      state.player.x = 4000; state.player.y = 4000;
+      state.enemy.x = 100; state.enemy.y = 100;      // far enough that the AI never arrives
+      const x0 = state.player.x;
+      for (let t = 0; t < 60; t++) {
+        state.player.hp = 1e9; state.player.maxHp = 1e9;
+        // ⚠️ Donut's Sticky Trail multiplies its speed AGAIN (`TRAIL.speedBoost`) from the
+        // second tick onward — measured, it walks 139.5 wu where its own speed says 108.0.
+        // That is a different mechanic and it has its own tests; clearing the marks each
+        // tick is what makes this a measurement of `speedFor` and nothing else. (d) below
+        // asserts the two STACKED, which is the case `camera.ts` actually depends on.
+        state.trailMarks.length = 0;
+        stepMatch(state, TICK, { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: false });
+      }
+      return state.player.x - x0;
+    };
+    const wrong = [];
+    for (const id of CHARACTER_IDS) {
+      const expected = speedFor(id, PLAYER_SPEED) * TICK * 60;
+      if (Math.abs(run(id) - expected) > 1e-6) wrong.push(`${id} moved ${run(id).toFixed(3)} vs ${expected.toFixed(3)}`);
+    }
+    check('every character MOVES at its own speed through the real movePlayer',
+      wrong.length === 0, wrong.slice(0, 3).join(' · '));
+
+    // Not all the same — otherwise the check above passes on a roster where the axis
+    // exists in the code and not in the design.
+    const speeds = new Set(CHARACTER_IDS.map((id) => speedFor(id, PLAYER_SPEED).toFixed(6)));
+    check('…and they are not all the same speed — the axis exists in the ROSTER, not just the code',
+      speeds.size > 1, `${speeds.size} distinct speeds across ${CHARACTER_IDS.length} characters`);
+  }
+
+  // ── (d) THE CAP. `render/camera.ts` DEPENDS ON THIS AND CANNOT ASSERT IT ──
+  //
+  // `camera.ts` derives the fair-play radius — the guarantee that you can always see the
+  // fighter shooting you — partly from `MAX_CLOSING_SPEED = PLAYER_SPEED *
+  // TRAIL.speedBoost`, commented "nothing in rules.ts moves faster". That is now a claim
+  // ABOUT THE ROSTER, and it is a claim in a file this pass does not own, so it is
+  // asserted here. A single character authored one point over the cap would silently
+  // shrink the guarantee for everybody and no gate anywhere else would notice.
+  {
+    const over = CHARACTER_IDS.filter((id) => CHARACTERS[id].stats.speed > SPEED_TOP_STAT);
+    check('no character is authored above SPEED_TOP_STAT — the cap is the cap',
+      over.length === 0, `above the cap: [${over.join(', ')}]`);
+    check('…so nothing in the roster moves faster than PLAYER_SPEED',
+      CHARACTER_IDS.every((id) => speedFor(id, PLAYER_SPEED) <= PLAYER_SPEED + 1e-12),
+      `fastest ${Math.max(...CHARACTER_IDS.map((id) => speedFor(id, PLAYER_SPEED)))} vs cap ${PLAYER_SPEED}`);
+    // The binding case is Donut, the only character whose speed is multiplied again.
+    const fastest = Math.max(...CHARACTER_IDS.map((id) =>
+      speedFor(id, PLAYER_SPEED) * (CHARACTERS[id].hasTrail ? TRAIL.speedBoost : 1)));
+    check('…and not even on its own Sticky Trail: camera.ts\'s MAX_CLOSING_SPEED is still an upper bound',
+      fastest <= PLAYER_SPEED * TRAIL.speedBoost + 1e-12,
+      `fastest achievable ${fastest.toFixed(6)} vs camera bound ${(PLAYER_SPEED * TRAIL.speedBoost).toFixed(6)}`);
+    check('every multiplier is positive and at most 1 — a speed stat can only cost, never buy',
+      CHARACTER_IDS.every((id) => speedMultiplier(id) > 0 && speedMultiplier(id) <= 1)
+      && CHARACTER_IDS.every((id) => healthMultiplier(id) > 0));
+  }
+
+  // ── (e) THE AI GETS THE SAME SPEEDS — the asymmetry trap, pre-empted ──────
+  //
+  // `ai.ts` has had a rule stated once and implemented twice surgically removed from it
+  // FOUR times (see that file's header). A speed stat that applied only in the player's
+  // hands would be the fifth, and it would be invisible: `strength` is the mean of the
+  // two roles, so the roster would simply respond at half rate and look like a weak
+  // lever rather than a broken one.
+  {
+    const run = (id) => {
+      const arena = makeArena({ width: 8000, height: 8000, maxSafeRadius: OPEN });
+      const state = playingMatch(arena, 'donut', id);
+      state.enemy.x = 4000; state.enemy.y = 4000;
+      state.player.x = 4000 + REACH.rangedMax * 4; state.player.y = 4000;   // out of every reach
+      const x0 = state.enemy.x;
+      for (let t = 0; t < 60; t++) {
+        state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);    // never fires, always moves
+        state.elapsed += TICK;
+        stepAI(state, TICK, []);
+      }
+      return Math.abs(state.enemy.x - x0);
+    };
+    const travel = Object.fromEntries(CHARACTER_IDS.map((id) => [id, run(id)]));
+    const ratioOff = CHARACTER_IDS.filter((id) =>
+      Math.abs(travel[id] / travel.hotdog - speedMultiplier(id) / speedMultiplier('hotdog')) > 0.02);
+    check('the AI moves at ITS character\'s speed too — the stat is not player-only',
+      ratioOff.length === 0,
+      CHARACTER_IDS.map((id) => `${id} ${travel[id].toFixed(1)}wu`).join(' · '));
+  }
+
+  // ── (f) THE DAMAGE BAR IS THE KIT ─────────────────────────────────────────
+  {
+    const wrong = CHARACTER_IDS.filter((id) => CHARACTERS[id].stats.damage !== damageStatFor(id));
+    check('every damage bar equals what the weapon table delivers — the card is derived, not authored',
+      wrong.length === 0,
+      wrong.map((id) => `${id} card ${CHARACTERS[id].stats.damage} vs kit ${damageStatFor(id)} (${kitDps(id).toFixed(1)} HP/s)`).join(' · '));
+
+    // `kitDps` prices a PRESS, and the authored `damage` field is not that (per-pellet,
+    // per-peck, and 0 for a combo weapon). `ai.ts:pressValue` is the sim-validated
+    // version of the same idea — §20(b) checks it against the real combat path in every
+    // weapon-band cell — so the two are cross-checked here at point blank, where every
+    // off-axis pellet still lands and the two definitions must coincide exactly.
+    const drift = [];
+    for (const id of CHARACTER_IDS) {
+      for (const w of CHARACTERS[id].weapons) {
+        if (w.type === 'self') continue;
+        const mine = w.comboParts
+          ? w.comboParts.reduce((s, p) => s + p.damage, 0)
+          : w.damage * (w.peckHits ?? 1) * (w.pellets ?? 1);
+        if (Math.abs(mine - pressValue(w, 0)) > 1e-9) drift.push(`${id}/${w.key} ${mine} vs ${pressValue(w, 0)}`);
+      }
+    }
+    check('…and kitDps prices a PRESS the same way the driver\'s sim-validated key does',
+      drift.length === 0, drift.slice(0, 4).join(' · '));
+
+    check('every bar is on the card\'s own 1..STAT_MAX_DISPLAY scale',
+      CHARACTER_IDS.every((id) => ['damage', 'health', 'speed'].every((k) => {
+        const v = CHARACTERS[id].stats[k];
+        return Number.isInteger(v) && v >= 1 && v <= STAT_MAX_DISPLAY;
+      })));
+  }
+
+  // ── (g) THE CARD CAN DISCRIMINATE THE ROSTER — the structural check ───────
+  //
+  // ⚠️ THE EVIDENCE THAT THE CARD WAS FICTION IS ITSELF WITHDRAWN, so this asserts the
+  // replacement rather than the original. `DECISIONS §13(b)` recorded ρ = 0.327 between
+  // the card's stat total and measured strength; the driver audit could not reproduce it
+  // (0.395 on the same tool, same seeds, same commit; 0.462 today). A correlation that
+  // moves cannot be a gate.
+  //
+  // What does not move: with n = 11 significance needs ρ ≈ 0.62, and the old card's stat
+  // total took **five distinct values across eleven characters with five of them tied at
+  // 19**. A statistic with five levels and a five-way tie in the middle cannot rank the
+  // roster EVEN IN PRINCIPLE, whatever its correlation happens to be this week. That is a
+  // property of the numbers alone, so it is assertable — and it is the honest form of
+  // "the card is fiction".
+  {
+    const totals = CHARACTER_IDS.map((id) =>
+      CHARACTERS[id].stats.damage + CHARACTERS[id].stats.health + CHARACTERS[id].stats.speed);
+    const distinct = new Set(totals).size;
+    const largestTie = Math.max(...[...new Set(totals)].map((t) => totals.filter((x) => x === t).length));
+    check(`the card's stat total distinguishes the roster: >= 7 distinct values, no tie bigger than 3`,
+      distinct >= 7 && largestTie <= 3,
+      `${distinct} distinct totals across ${CHARACTER_IDS.length} characters, largest tie ${largestTie} `
+      + `(the old card: 5 distinct, largest tie 5)`);
+  }
+
+  // ── (h) THE DESIGN RULE THAT PRODUCES THE RARITY RAMP ────────────────────
+  //
+  // The trophy road is built as a PROGRESSION — roughly 13 hours of play to reach the
+  // rarer tiers — and it used to sell a DOWNGRADE: measured, Normal 68.6 against Epic
+  // 12.5. Uri's answer to `DECISIONS §13(a)` was "rarity means power", and the roster
+  // now delivers it: MONOTONIC across all six tiers under `smart2`, 40.4 -> 61.1.
+  //
+  // ⚠️ THAT SENTENCE CANNOT BE ASSERTED HERE, AND AN EARLIER DRAFT OF THIS CHECK TRIED.
+  // Measured strength is a 7,040-match quantity; `tools/tmp/roster_lab.mjs` owns it and
+  // prints MONOTONIC yes/no on every run. The draft asserted a MODEL instead —
+  // `powerIndex`, kit output x durability — and the model does not reproduce the
+  // measurement: on the roster that measures monotone, `powerIndex` puts Neon BELOW
+  // Legendary. Asserting it would have made a false statement a gate, and the next person
+  // to satisfy the gate would have made the game worse. The model is kept in `rules.ts`,
+  // labelled as a model, because it is a useful sketch; it is not a guard.
+  //
+  // What IS assertable is the DESIGN RULE the ramp was built from, and it is the whole
+  // reason per-character health was the right lever: **health compensates the kit.**
+  // Rarity in this roster is fixed and the kits are not aligned to it — Hamburger, the
+  // free Normal starter, has the roster's strongest kit (33.9 HP/s) and Pizza, a Neon,
+  // has the weakest (15.6) — so the ONLY way rarity can mean power is for durability to
+  // run opposite to output. It does, and that is a property of `rules.ts` alone.
+  {
+    const dps = CHARACTER_IDS.map((id) => kitDps(id));
+    const hp = CHARACTER_IDS.map((id) => healthMultiplier(id));
+    const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+    const mx = mean(dps), my = mean(hp);
+    const cov = dps.reduce((s, x, i) => s + (x - mx) * (hp[i] - my), 0);
+    const sx = Math.sqrt(dps.reduce((s, x) => s + (x - mx) ** 2, 0));
+    const sy = Math.sqrt(hp.reduce((s, y) => s + (y - my) ** 2, 0));
+    const rho = cov / (sx * sy);
+    check('health COMPENSATES the kit: the strongest kits are the frailest (rho <= -0.4)',
+      rho <= -0.4, `rho = ${rho.toFixed(3)} between kit HP/s and health multiplier`);
+
+    // …and the compensation is big enough to be worth something. A roster where every
+    // multiplier sat between 0.98 and 1.02 would satisfy every check above and change
+    // nothing about the game.
+    const lo = Math.min(...hp), hi = Math.max(...hp);
+    check('…and the durability axis has real range — the toughest pool is >= 1.6x the frailest',
+      hi / lo >= 1.6, `${(lo * 100).toFixed(0)}% .. ${(hi * 100).toFixed(0)}% of the role pool = ${(hi / lo).toFixed(2)}x`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

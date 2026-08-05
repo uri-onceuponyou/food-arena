@@ -729,7 +729,10 @@ function printOne(r) {
 // THE KNOWN INPUT
 //   arena     1400x1000, no hazards, fog parked at r=5000 so the ring never fires
 //   player    hamburger at (200,500). `hasTrail: false`, so no trail speed boost can
-//             perturb the arithmetic. PLAYER_SPEED = 0.12 wu/ms.
+//             perturb the arithmetic. Its speed is `speedFor('hamburger', PLAYER_SPEED)`
+//             — DERIVED, not the constant: `rules.ts` AUTHORISED DEVIATION #10 made
+//             `PLAYER_SPEED` the CAP rather than the speed, and every character now
+//             scales it by its own `stats.speed`. See the note above `IDEAL_MS`.
 //   enemy     lollipop, PINNED at (1000,500), immortal, and held on cooldown — a piece
 //             of scenery. So time-to-contact is the player's closure ALONE and depends
 //             on neither the AI's pathing nor its damage. (Holding the cooldowns is not
@@ -772,7 +775,21 @@ if (args.selftest) {
 
   const D0 = 800;
   const ENGAGE = Math.max(maxNormalRange('hamburger') + HIT_RADIUS_VS_ENEMY, maxNormalRange('lollipop') + HIT_RADIUS_VS_PLAYER);
-  const IDEAL_MS = (D0 - ENGAGE) / PLAYER_SPEED;
+  /**
+   * ⚠️ RE-DERIVED, NOT WEAKENED (2026-08-05). This was `(D0 - ENGAGE) / PLAYER_SPEED`, and
+   * that was exactly right while every character moved at `PLAYER_SPEED`. `rules.ts`
+   * AUTHORISED DEVIATION #10 gave each character its own `stats.speed`, so `PLAYER_SPEED`
+   * is now the speed CAP and the fixture's Hamburger walks at 0.91 of it — the derived
+   * answer moved 5283 -> 5806 ms and four of these fifteen assertions went red against a
+   * sim that is behaving correctly.
+   *
+   * The fix is to derive from the CHARACTER, which is what the surrounding prose always
+   * claimed the number was ("the player's closure ALONE"). Confirmed the failure was the
+   * assertion and not a regression: `--sim-ref 34278ae` passes 15/15 with this same
+   * derivation, because there `speedFor` returns exactly `PLAYER_SPEED`.
+   */
+  const PLAYER_WU_PER_MS = RULES.speedFor ? RULES.speedFor('hamburger', PLAYER_SPEED) : PLAYER_SPEED;
+  const IDEAL_MS = (D0 - ENGAGE) / PLAYER_WU_PER_MS;
   // One sampler period plus one tick: the sampler can only report contact at its own
   // grid, and movement is quantised to 0.12*dt = 2.0 wu per tick.
   const TOL = SAMPLE_MS + DT;
@@ -849,10 +866,11 @@ if (args.selftest) {
       t1 === null || t1 > IDEAL_MS * 1.5,
       `measured ${t1 === null ? 'never made contact' : `${t1}ms = ${(t1 / IDEAL_MS).toFixed(2)}x the truth`}`);
 
-    // The mechanism, not the symptom. In 3 s the player CAN close 360 wu (0.12 wu/ms).
-    const CAN_CLOSE = 3000 * PLAYER_SPEED;
+    // The mechanism, not the symptom. In 3 s the player CAN close its own speed x 3000 ms
+    // — derived per character for the same reason `IDEAL_MS` is; see the note there.
+    const CAN_CLOSE = 3000 * PLAYER_WU_PER_MS;
     const c2 = closedBy(r2, 3000), c1 = closedBy(r1, 3000);
-    check('B/blocked · rev 2 closes the gap at very nearly PLAYER_SPEED',
+    check('B/blocked · rev 2 closes the gap at very nearly the player\'s own speed',
       c2 > CAN_CLOSE * 0.9, `closed ${c2.toFixed(0)}wu of a possible ${CAN_CLOSE.toFixed(0)}wu in 3s`);
     // ⚠️ RELATIVE TO REV 2, NOT TO AN ABSOLUTE FRACTION — and the reason is worth
     // knowing, because it is the same trap this whole selftest exists to catch.

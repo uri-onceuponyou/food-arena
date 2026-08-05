@@ -73,10 +73,12 @@ const {
  * unchanged on both sides of the change that introduces them, and a "before" JSON stays
  * comparable to an "after" one.
  */
-const hpOf = (id, role) =>
-  typeof RULES.maxHpFor === 'function' ? RULES.maxHpFor(id, role) : (role === 'player' ? PLAYER_MAX_HP : ENEMY_MAX_HP);
+const hpOf = (id, role) => {
+  const base = role === 'player' ? PLAYER_MAX_HP : ENEMY_MAX_HP;
+  return typeof RULES.maxHpFor === 'function' ? RULES.maxHpFor(id, base) : base;
+};
 const speedOf = (id) =>
-  typeof RULES.playerSpeedFor === 'function' ? RULES.playerSpeedFor(id) : PLAYER_SPEED;
+  typeof RULES.speedFor === 'function' ? RULES.speedFor(id, PLAYER_SPEED) : PLAYER_SPEED;
 
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
 if (!existsSync(ARENA_PATH) && !args.selftest) { console.error(`no arena at ${ARENA_PATH}`); process.exit(1); }
