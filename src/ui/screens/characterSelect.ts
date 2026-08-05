@@ -526,10 +526,24 @@ const CSS = `
    at 30px and a head at 30px.
 
    10% and not 50%: 'cover' distributes its overflow according to object-position, and
-   at a 10% bias the landscape crop takes 3% off the top and 25% off the bottom. The
-   render already leaves 8% of clear frame above the head (TOP_PAD), so the head keeps
-   ~5% of clearance in the tightest crop the layout can produce. Asserted per character
-   per viewport by 'chars_metrics.mjs''s FACE-OUT / HEAD-OUT columns, not eyeballed. */
+   at a 10% bias the landscape crop takes 3% off the top and 25% off the bottom.
+
+   WHAT THIS ELEMENT IS REALLY PROMISING, restated because the previous version of this
+   note promised something the render cannot deliver. It said the head keeps ~5% of
+   clearance because the render leaves 8% of clear frame above it (TOP_PAD) — and TOP_PAD
+   is not a guarantee. It is a PREFERENCE that 'thumbs.ts' gives up, by design, whenever a
+   character wears its face low enough that the only other way to lift it off this card's
+   own nameplate is to zoom out and hand back the fill. Four of eleven spend it (egg,
+   waterbottle, donut, lollipop) and their heads are deliberately cropped by 8-17%.
+
+   The promise that IS kept, and that this object-position is chosen against, is about the
+   FACE. These three card aspects (0.814 / 1.172 / 0.793) show three different windows of
+   the 416x496 source, and their intersection is x [0.027 .. 0.973], y [0.028 .. 0.744];
+   'thumbs.ts' solves every character's framing so the projected face box lands inside it,
+   with the vertical aimed at 0.70. Change this percentage or a card's padding and that
+   window moves — re-measure it with 'tools/tmp/faceframe.mjs' and feed the result back
+   into FACE_SAFE, rather than assuming the faces will follow. Asserted per character per
+   viewport by 'chars_metrics.mjs''s FACE-OUT column, not eyeballed. */
 .fa-chars .chars-card-render {
   position: absolute;
   inset: 0;

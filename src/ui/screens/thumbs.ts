@@ -115,11 +115,81 @@ const TOP_PAD = 0.08;
 const FACE_FLOOR = 0.66;
 /** ...and this is what it is allowed to cost. Rather than zoom back out — which would
  *  have taken Lollipop from 1.9x to 1.2x and undone the whole point — the frame slides
- *  DOWN over the mass by up to this fraction. Only the two characters whose faces sit
- *  low on their own bodies ever pay it, and both are round, so the top they lose reads
- *  as a crop rather than as damage. Capped well under TOP_PAD's guarantee that the
- *  corners of the frame stay clear, which `chars_metrics.mjs` keys the background from. */
+ *  DOWN over the mass by up to this fraction. The characters whose faces sit low on their
+ *  own bodies are the ones that pay it — two when this was written, four now that egg's
+ *  and waterbottle's real face data exists — and they are round, so the top they lose
+ *  reads as a crop rather than as damage.
+ *
+ *  ⚠️ THESE TWO ARE THE **ZOOM** TERM ONLY, and they are deliberately frozen at the
+ *  values that produced the measured fill (mean 60.9% / 58.8% / 62.1%). Every character's
+ *  `subjectHeight` is still solved from exactly these numbers, so the framing repair
+ *  below cannot give any of that back by accident. Where the frame is finally PLACED is
+ *  now decided by `FACE_FLOOR_PX` / `HEAD_CROP_MAX`. */
 const HEAD_CROP = 0.08;
+
+/**
+ * ── The clamp above is solved in world Y, and the card crops PIXELS ──────────
+ *
+ * `FACE_FLOOR` constrains `faceBox.min.y` — a world height. What a card actually cuts is
+ * the PROJECTED face rectangle, and the two are not the same thing, because the face box
+ * has depth and this camera pitches 12 degrees. Measured across the cast, the projected
+ * bottom of the face lands **4 to 21 points of frame height BELOW** where the world-Y
+ * clamp believes it is:
+ *
+ *     world-Y floor          0.660 for everyone
+ *     projected bottom       hotdog 0.489 · hamburger 0.607 · sushi 0.627 · burrito 0.699
+ *                            lollipop 0.699 · taco 0.713 · donut 0.726 · soup 0.733
+ *                            pizza 0.760 · waterbottle 0.778 · EGG 0.869
+ *
+ * The three worst crossed the card edge — egg, pizza and waterbottle were the FACE-OUT
+ * failures — and the rule could not see it, because the quantity it checks was inside its
+ * own limit the whole time. So the placement is now solved against the projected rect: it
+ * is the only thing that answers the question the card asks.
+ *
+ * ── What the render must fit inside ─────────────────────────────────────────
+ * `object-fit: cover` at three shipped card aspects (0.814 / 1.172 / 0.793) shows three
+ * different windows of this 416x496 source. Their INTERSECTION is what every card is
+ * guaranteed to show, measured off the real screen at the real viewports
+ * (`tools/tmp/faceframe.mjs`, cached in `shots/roster/cards.json`):
+ *
+ *     desktop      x [0.015 .. 0.985]   y [0.000 .. 1.000]
+ *     phone-land   x [0.000 .. 1.000]   y [0.028 .. 0.744]   <- the vertical crop
+ *     portrait     x [0.027 .. 0.973]   y [0.000 .. 1.000]   <- the horizontal crop
+ *     ---------------------------------------------------------------
+ *     SAFE         x [0.027 .. 0.973]   y [0.028 .. 0.744]
+ *
+ * A face outside that box is a FACE-OUT at some viewport BY CONSTRUCTION — no render
+ * required to know it. Kept a touch inside the measured window so a future 4px change to
+ * a card's padding cannot silently start clipping faces.
+ */
+const FACE_SAFE = { x0: 0.035, x1: 0.965, y0: 0.045, y1: 0.725 };
+/** Where the projected bottom of the face is AIMED. Paid for by sliding the frame down
+ *  (free) and never by zooming out (not free) — `FACE_SAFE.y1` is the hard backstop that
+ *  may spend zoom, and across all eleven it never has to. */
+const FACE_FLOOR_PX = 0.70;
+/**
+ * How far the frame may slide down over the mass, 0.08 -> 0.18.
+ *
+ * This is the clamp that had to widen, and the reason is arithmetic rather than taste.
+ * From the top of the head to the bottom of the projected face measures 0.846 of the
+ * frame on egg and 0.858 on waterbottle. A frame can hold that and still land the face at
+ * `FACE_FLOOR_PX` only if it may slide by span - FACE_FLOOR_PX, i.e. 0.146 and 0.158.
+ * At the old 0.08 cap the only remaining currency is zoom, and zoom was priced:
+ *
+ *     to reach the HARD bound (0.725) at HEAD_CROP 0.08
+ *       egg          x1.051 zoom-out  ->  fill 70.4% -> 63.7%
+ *       waterbottle  x1.066 zoom-out  ->  fill 60.5% -> 53.2%
+ *
+ * Both of those are below the floor this framing is required to hold, so the slide is the
+ * only affordable currency and the cap simply had to be wide enough to buy the fix. At
+ * 0.18 nothing in the cast reaches the zoom path at all, and `subjectHeight` is
+ * bit-identical to before for all eleven.
+ *
+ * What it costs is the top of the head, and on the two that pay it the top of the head is
+ * blank shell (egg's crown) and a bottle cap. What it ALSO costs is `TOP_PAD`'s promise
+ * that the top corners of the frame stay clear — which is why `thumbMeta.bg` exists.
+ */
+const HEAD_CROP_MAX = 0.18;
 /** How much of the frame height the framed band occupies. */
 const FILL_V = 0.92;
 /**
@@ -143,9 +213,35 @@ const FILL_V = 0.92;
 const WIDTH_ALLOW = 1.15;
 
 const cache = new Map<CharacterId, string>();
+/** Post-grade background, keyed by the AUTHORED card colour — six entries, not eleven.
+ *  Sampled once per colour from a background-only frame; see `ThumbMeta.bg`. */
+const gradedBg = new Map<string, [number, number, number]>();
 /** Every listener waiting on the batch in flight. Cleared when it finishes. */
 const pending: Array<(id: CharacterId, url: string) => void> = [];
 let generating = false;
+
+/**
+ * Mean colour of the rendered frame, via an 8x8 downsample.
+ *
+ * Not one pixel: the grade lays a gentle falloff across the frame (~5/255 corner to
+ * corner), so any single sample is a corner of a gradient rather than the colour. Not
+ * `toDataURL` either — that PNG-encodes 206k pixels to read three numbers. `drawImage`
+ * into an 8x8 makes the driver do the filtering, and the renderer is built with
+ * `preserveDrawingBuffer: true`, which is what makes the canvas readable at all.
+ */
+function samplePixel(canvas: HTMLCanvasElement): [number, number, number] {
+  const N = 8;
+  const c = document.createElement('canvas');
+  c.width = N; c.height = N;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  if (!g) return [0, 0, 0];
+  g.drawImage(canvas, 0, 0, N, N);
+  const d = g.getImageData(0, 0, N, N).data;
+  let r = 0, gg = 0, b = 0;
+  for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; }
+  const n = d.length / 4;
+  return [Math.round(r / n), Math.round(gg / n), Math.round(b / n)];
+}
 
 declare global {
   interface Window {
@@ -180,6 +276,23 @@ export interface ThumbMeta {
   head: ThumbRect | null;
   /** The rig's face joint subtree, or `null` if the model mounts its face elsewhere. */
   face: ThumbRect | null;
+  /**
+   * The card's baked background, AFTER the colour grade, as `[r, g, b]` 0-255.
+   *
+   * ⚠️ Read this rather than guessing where the background is. `chars_metrics.mjs` used to
+   * key it off the 1px border ring, which broke the moment art bled off the card (zero
+   * figure pixels for four of eleven), and then off the TOP CORNER STRIPS, which relied on
+   * `TOP_PAD` keeping them clear — an assumption `HEAD_CROP_MAX` deliberately breaks, and
+   * which was ALREADY broken before it: waterbottle's cap reached x=326 in the top rows,
+   * taking the strip's std to 46.4 and the key's threshold to 139.9 against everyone
+   * else's 26. That is `docs/LESSONS.md` §13 twice over — an instrument reporting a
+   * catastrophe that is really its own precondition failing.
+   *
+   * The generator does not have to guess: it renders one background-only frame per card
+   * colour (six, reusing the composer warm-up frame that already existed) and reads the
+   * result. Exact, location-free, and it cannot be broken by any future framing change.
+   */
+  bg: [number, number, number] | null;
   /** World-space landmarks, so a framing rule can be designed against real numbers. */
   world: {
     minY: number; maxY: number; halfWidth: number;
@@ -188,8 +301,14 @@ export interface ThumbMeta {
     /** Where the crop started, and the half-width that was fitted above it. */
     yCut: number; upperHalfWidth: number;
   };
-  /** What the camera was actually set to. */
-  frame: { subjectHeight: number; subjectFill: number; targetHeight: number };
+  /** What the camera was actually set to. `headroom` is the clear air above the top of
+   *  the head as a fraction of the frame (negative = the head is cropped, capped at
+   *  `HEAD_CROP_MAX`); `pan` is the lateral slide in metres, non-zero only where a face
+   *  would otherwise leave the card. */
+  frame: {
+    subjectHeight: number; subjectFill: number; targetHeight: number;
+    headroom: number; pan: number;
+  };
 }
 
 export function getCachedThumb(id: CharacterId): string | undefined {
@@ -418,41 +537,127 @@ async function renderOne(stage: Stage, id: CharacterId): Promise<void> {
   const yCut = Math.max(box.min.y, Math.min(box.min.y + WAIST_FRAC * H, faceBottom - FACE_PAD * H));
   const framedH = Math.max(0.4, yTop - yCut);
 
-  // Two passes, because the width has to be measured along an axis the camera decides
-  // and the camera's DISTANCE then depends on that width. Only the distance changes
-  // between the passes — pitch and yaw are fixed — so the right axis read after pass 1
-  // is the one pass 2 renders with.
-  const frame = (visibleH: number): void => {
-    // Where the top of the frame sits, in world metres. Preferred: TOP_PAD of clear
-    // air above the head. Lowered — cropping the mass — only as far as it takes to
-    // lift the bottom of the face off the nameplate, and never past HEAD_CROP.
-    let frameTop = yTop + TOP_PAD * visibleH;
-    if (faceBox) {
-      frameTop = Math.max(
-        Math.min(frameTop, faceBox.min.y + FACE_FLOOR * visibleH),
-        yTop - HEAD_CROP * visibleH,
-      );
-    }
+  const cam = stage.rig.camera;
+  /** Camera right axis. Horizontal by construction (`lookAt` with world up), and
+   *  constant — only the rig's DISTANCE changes between passes, never its rotation. */
+  const right = new THREE.Vector3();
+
+  /**
+   * Point the rig at a frame `visibleH` metres tall whose top edge is at `frameTop`,
+   * shifted `pan` metres along the camera's right axis.
+   *
+   * `pan` translates the look-at point and the camera together, so it is a pure lateral
+   * slide of the frame — no orbit, no change of scale, and therefore free. `snapTo`
+   * takes a point on the ground plane and `targetHeight` supplies the height, which is
+   * why the pan only has to fill in x and z.
+   */
+  const place = (visibleH: number, frameTop: number, pan: number): void => {
     stage.rig.subjectFill = 1;
     stage.rig.subjectHeight = visibleH;
     stage.rig.targetHeight = frameTop - visibleH / 2;
-    stage.rig.snapTo(0, 0);
+    stage.rig.snapTo(pan * right.x, pan * right.z);
+    // What `WebGLRenderer.render` will do anyway. Done here because the framing solve
+    // below projects through these matrices BEFORE anything is rendered, and a stale
+    // `matrixWorldInverse` silently measures the previous character's camera.
+    cam.updateMatrixWorld(true);
+    cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
   };
-  frame(framedH / FILL_V);
-  const right = new THREE.Vector3().setFromMatrixColumn(stage.rig.camera.matrixWorld, 0).normalize();
+
+  // Two passes to find the ZOOM, because the width has to be measured along an axis the
+  // camera decides and the camera's DISTANCE then depends on that width. Only the
+  // distance changes between the passes — pitch and yaw are fixed — so the right axis
+  // read after pass 1 is the one pass 2 renders with.
+  place(framedH / FILL_V, yTop + TOP_PAD * (framedH / FILL_V), 0);
+  right.setFromMatrixColumn(cam.matrixWorld, 0).normalize();
   const upperHalfW = halfWidthAbove(model.root, yCut, right);
-  // Whichever of the three binds. The third term is the one the clamp inside `frame`
-  // cannot solve on its own: sliding down is capped at HEAD_CROP, so a face that still
-  // will not clear the nameplate at that cap has to be met by zooming out instead. It
-  // binds on Donut and Lollipop only, at ~12%, and on nobody else.
-  frame(Math.max(
+  // Whichever of the three binds. UNCHANGED, deliberately: this is the only expression
+  // that sets scale, so freezing it is what guarantees the framing repair below cannot
+  // hand back any of the measured fill. The third term is the zoom backstop for a face
+  // that will not clear the nameplate even at the full slide.
+  const visibleH = Math.max(
     framedH / FILL_V,
     (2 * upperHalfW) / (ASPECT * WIDTH_ALLOW),
     faceBox ? (yTop - faceBox.min.y) / (FACE_FLOOR + HEAD_CROP) : 0,
-  ));
+  );
 
-  stage.scene.background = new THREE.Color(RARITY_CARD_COLORS[CHARACTERS[id].rarity]);
+  /**
+   * Place the frame so the PROJECTED face lands inside `FACE_SAFE`.
+   *
+   * Two free knobs and one expensive one, tried in that order:
+   *   1. slide DOWN (`frameTop`), up to `HEAD_CROP_MAX` — buys vertical headroom for the
+   *      face by spending the top of the head;
+   *   2. slide SIDEWAYS (`pan`) — buys horizontal room by spending nothing at all, since
+   *      the subject is wider than the frame on everyone it fires for;
+   *   3. zoom out — the backstop, and the only one that costs fill. Across all eleven
+   *      characters it never fires; it exists so the guarantee is a guarantee.
+   *
+   * Iterative rather than closed-form because moving the camera changes the projection
+   * that decided to move it (parallax on a box with real depth). Three passes converge to
+   * well under a pixel; the loop is bounded so a pathological rig cannot hang the menu.
+   */
+  let frameTop = yTop + TOP_PAD * visibleH;
+  let pan = 0;
+  let zoom = visibleH;
+  if (faceBox) {
+    const slideFloor = () => yTop - HEAD_CROP_MAX * zoom;
+    for (let pass = 0; pass < 4; pass++) {
+      // (1) Vertical. Aim the projected bottom of the face at FACE_FLOOR_PX, sliding the
+      //     frame down over the mass and stopping at the cap.
+      frameTop = yTop + TOP_PAD * zoom;
+      for (let i = 0; i < 3; i++) {
+        place(zoom, frameTop, pan);
+        const f = projectBox(faceBox, cam, SIZE_W, SIZE_H);
+        const over = (f.y + f.h) / SIZE_H - FACE_FLOOR_PX;
+        if (over <= 0) break;
+        // Two floors under the slide, and the second one is not optional: sliding far
+        // enough carries the TOP of the face off the top edge, which is a FACE-OUT in the
+        // other direction. A sweep at HEAD_CROP_MAX 0.26 produced exactly that on egg
+        // (FACE-OUT T2 at the landscape phone) before this guard existed.
+        const room = Math.max(0, (f.y / SIZE_H - FACE_SAFE.y0) * zoom);
+        const next = Math.max(slideFloor(), frameTop - Math.min(over * zoom, room));
+        if (Math.abs(next - frameTop) < 1e-4) break;
+        frameTop = next;
+      }
+      place(zoom, frameTop, pan);
+      const f = projectBox(faceBox, cam, SIZE_W, SIZE_H);
+
+      // (2) Horizontal. The minimum shift that brings the face inside the safe window;
+      //     zero for ten of eleven. Egg pays it because its head is turned 30 degrees in
+      //     the idle pose sampled here and its face is 0.83 of the frame wide, so the
+      //     turn alone carries the far eye off the right edge.
+      const overR = (f.x + f.w) - FACE_SAFE.x1 * SIZE_W;
+      const overL = FACE_SAFE.x0 * SIZE_W - f.x;
+      const metresPerPx = (zoom * ASPECT) / SIZE_W;
+      if (overR > 0 && overL < 0) pan += Math.min(overR, -overL) * metresPerPx;
+      else if (overL > 0 && overR < 0) pan -= Math.min(overL, -overR) * metresPerPx;
+
+      // (3) Zoom, only for what neither slide can reach.
+      const tooWide = f.w / ((FACE_SAFE.x1 - FACE_SAFE.x0) * SIZE_W);
+      const bottom = (f.y + f.h) / SIZE_H;
+      const tooLow = bottom > FACE_SAFE.y1
+        ? (bottom + HEAD_CROP_MAX) / (FACE_SAFE.y1 + HEAD_CROP_MAX)
+        : 1;
+      const grow = Math.max(tooWide, tooLow);
+      if (grow <= 1.001) break;
+      zoom *= grow;
+    }
+  }
+  place(zoom, frameTop, pan);
+
+  const cardHex = RARITY_CARD_COLORS[CHARACTERS[id].rarity];
+  stage.scene.background = new THREE.Color(cardHex);
   stage.lighting.focus(0, 0, 4);
+
+  // The card colour AFTER the grade, sampled from a frame with nothing in it but the
+  // background — see `ThumbMeta.bg`. This reuses the composer warm-up render rather than
+  // adding one (reading back a half-initialised composer target gives a black card), so
+  // it costs one extra frame per CARD COLOUR, six in the whole batch.
+  if (!gradedBg.has(cardHex)) {
+    model.root.visible = false;
+    stage.render(0);
+    gradedBg.set(cardHex, samplePixel(stage.canvas));
+    model.root.visible = true;
+  }
 
   // Two frames: the first one warms the post chain's buffers, and reading back a
   // half-initialised composer target gives a black card.
@@ -461,7 +666,6 @@ async function renderOne(stage: Stage, id: CharacterId): Promise<void> {
   const url = stage.canvas.toDataURL('image/png');
 
   // QA metadata, after the render so the camera matrices are the ones that drew it.
-  const cam = stage.rig.camera;
   const hips = model.root.getObjectByName('hips');
   const shoulder = model.root.getObjectByName('shoulderL');
   const wv = new THREE.Vector3();
@@ -470,6 +674,7 @@ async function renderOne(stage: Stage, id: CharacterId): Promise<void> {
     subject: projectBox(box, cam, SIZE_W, SIZE_H),
     head: headBox ? projectBox(headBox, cam, SIZE_W, SIZE_H) : null,
     face: faceBox ? projectBox(faceBox, cam, SIZE_W, SIZE_H) : null,
+    bg: gradedBg.get(cardHex) ?? null,
     world: {
       minY: +box.min.y.toFixed(4), maxY: +box.max.y.toFixed(4),
       halfWidth: +Math.max(Math.abs(box.min.x), Math.abs(box.max.x)).toFixed(4),
@@ -484,6 +689,8 @@ async function renderOne(stage: Stage, id: CharacterId): Promise<void> {
       subjectHeight: +stage.rig.subjectHeight.toFixed(4),
       subjectFill: +stage.rig.subjectFill.toFixed(4),
       targetHeight: +stage.rig.targetHeight.toFixed(4),
+      headroom: +((frameTop - yTop) / zoom).toFixed(4),
+      pan: +pan.toFixed(4),
     },
   };
 

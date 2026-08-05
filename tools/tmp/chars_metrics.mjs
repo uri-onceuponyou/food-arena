@@ -377,6 +377,7 @@ async function measureRoster() {
 
   for (const card of cards) {
     const id = card.dataset.char;
+    const published = meta[id]?.bg ?? null;
     const cr = card.getBoundingClientRect();
     const cs = getComputedStyle(card);
     const bw = (v) => parseFloat(v) || 0;
@@ -445,7 +446,30 @@ async function measureRoster() {
     const bstd = Math.sqrt(vsum / bn);
     // Fixed floor: the grade puts a gentle falloff across the frame, measured at ~5/255
     // corner to corner, so 26 clears it with room while still keying a dark outline.
-    const thr = Math.max(26, 3 * bstd);
+    let thr = Math.max(26, 3 * bstd);
+
+    // ── THE THIRD BACKGROUND MODEL, and the last one that can ever be needed ────
+    // The two before it both keyed the background from a PLACE and both were eventually
+    // wrong about that place. The border ring stopped being background when art started
+    // bleeding off the card (zero figure pixels for four of eleven). The top corner
+    // strips relied on `TOP_PAD` keeping them clear — and they were ALREADY not clear
+    // when this file was written: waterbottle's cap reaches x=326 in the top rows, which
+    // took its strip std to 46.4 and its threshold to 139.9 against everyone else's 26,
+    // i.e. it was keying that one character against a five-times-looser rule than the
+    // rest of the cast and reporting the result as a comparable percentage.
+    //
+    // `thumbs.ts` now publishes the post-grade card colour in `__thumbMeta[id].bg`,
+    // sampled from a frame rendered with the model hidden. That is not an assumption
+    // about where the background is; it is the background. The strip model is kept and
+    // printed beside it as a cross-check — on a character whose strips ARE clean the two
+    // must agree to a couple of units, and that is what says the published value is real.
+    const stripBg = [Math.round(br), Math.round(bg2), Math.round(bb)];
+    let bgSource = 'strip';
+    if (published) {
+      br = published[0]; bg2 = published[1]; bb = published[2];
+      thr = 26;
+      bgSource = 'published';
+    }
 
     // Element -> drawn-image geometry, per the object-fit / object-position spec.
     // Solved BEFORE the key, because the headline number counts only the figure pixels
@@ -488,6 +512,10 @@ async function measureRoster() {
     }
     rec.src = {
       w: NW, h: NH, bg: [Math.round(br), Math.round(bg2), Math.round(bb)],
+      bgSource, stripBg,
+      // How far the two models disagree. Small = the published value is confirmed by an
+      // independent measurement; large = the strips are contaminated and always were.
+      bgDelta: +Math.hypot(stripBg[0] - br, stripBg[1] - bg2, stripBg[2] - bb).toFixed(1),
       bgStd: +bstd.toFixed(1), thr: +thr.toFixed(1),
       topResidual: +(topHit / bn).toFixed(4),
     };
@@ -755,9 +783,16 @@ async function run() {
         const clip = fmt(o), hclip = fmt(ho), fclip = fmt(fo);
         console.log(`    ${c.id.padEnd(12)} fill ${(c.fillFrac * 100).toFixed(1).padStart(5)}%  kept ${((c.keptFrac ?? 1) * 100).toFixed(0).padStart(3)}%  bbox ${c.figure.w.toFixed(0)}x${c.figure.h.toFixed(0)}`
           + `  face ${(c.facePx ?? 0).toFixed(0).padStart(3)}x${(c.faceWPx ?? 0).toFixed(0).padStart(3)}`
-          + `  fig-out[${clip || 'none'}]  FACE-OUT[${fclip || 'none'}]  bgStd ${c.src.bgStd}`);
+          + `  fig-out[${clip || 'none'}]  FACE-OUT[${fclip || 'none'}]`
+          + `  bg ${c.src.bgSource}${c.src.bgSource === 'published' ? ` (strip d${c.src.bgDelta}, std ${c.src.bgStd})` : ` std ${c.src.bgStd}`}`);
         if (fclip) hard++;
       }
+      // The strip model's own health, printed whether or not it is being used: a std
+      // over ~12 means the top corners hold art, which is exactly the precondition the
+      // second background model assumed and the framing is now allowed to break.
+      const dirty = withR.filter((c) => c.src.bgStd > 12).map((c) => `${c.id}:${c.src.bgStd}`);
+      console.log(`  strip-model health  ${dirty.length ? `CONTAMINATED ${dirty.join(', ')}` : 'clean on all 11'}`
+        + `   max |published-strip| ${Math.max(...withR.map((c) => c.src.bgDelta ?? 0)).toFixed(1)}`);
     }
     const noRender = g.cards.filter((c) => !c.hasRender);
     if (noRender.length) { console.log(`  !! NO RENDER: ${noRender.map((c) => c.id).join(', ')}`); hard++; }
