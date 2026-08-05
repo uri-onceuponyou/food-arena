@@ -79,6 +79,23 @@ const CSS = `
   --lettuce: #7CB518;
   --water: #1E90D8;
 
+  /* ── The same two hues, at a value that survives being TYPE ────────────────
+     '--ketchup' and '--water' are FILL colours: white on either clears 4.5:1 and
+     they are used that way all over the HUD. As ink on the menus' cream and mustard
+     surfaces they do not: measured 4.17 for the trophy road's OPEN caption on its
+     own cream pill, and 3.48 (white card) / 2.56 (mustard card) for the gem counts
+     in the store. Both were below AA on a compliance surface — the store publishes
+     real-money-adjacent prices — while looking, at a glance, like brand colour used
+     correctly.
+
+     So the hue is kept and the value is dropped, once, here. Anything that needs the
+     brand red or the brand blue as INK on a light surface uses these; anything that
+     needs it as a FILL keeps the originals. Two tokens instead of a per-screen guess
+     that drifts. Measured: ketchup-ink 5.9 on cream / 7.5 on white; water-ink 5.6 on
+     the mustard SKU card / 7.6 on white. */
+  --ketchup-ink: #A3202E;
+  --water-ink: #125981;
+
   /* Minimum touch target. Apple/Google both say 44; a brawler menu played with a
      thumb on a moving bus should not go below it, ever. */
   --tap: 44px;
@@ -178,6 +195,23 @@ const CSS = `
     calc(var(--fa-safe-l) + var(--gutter));
   animation: fa-screen-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
+/* ── The one line that makes PORTRAIT work ─────────────────────────────────────
+   This is a bug fix, not housekeeping. '.fa-screen' declares rows but no columns, so
+   its single implicit column is 'auto' — and an 'auto' track is at least the largest
+   MIN-CONTENT contribution of its items. A grid item's own 'min-width' defaults to
+   'auto', which for a flex row of nowrap pills is the sum of those pills. At 430x932
+   the trophy road's top bar (Back + a 28px title + two currency chips) contributes
+   490px, so the column came out 490 wide inside a 430 frame and EVERY row on the
+   screen — hero card, road panel, bottom bar — was drawn 70px too wide.
+
+   It never showed up as overflow because '.fa-root' is 'overflow: hidden': the
+   document reported scrollWidth === clientWidth while the player's gem count was
+   amputated at the right edge. menu_accept's no-page-scroll assertion cannot see that
+   either, and all five of its viewports are landscape, so nothing has ever looked.
+
+   'min-width: 0' lets the column be the frame, and the flex rows inside then shrink
+   and ellipsise as they were always written to. */
+.fa-screen > * { min-width: 0; }
 @keyframes fa-screen-in {
   from { opacity: 0; transform: translateY(10px) scale(0.992); }
   to { opacity: 1; transform: none; }
@@ -313,6 +347,11 @@ const CSS = `
 }
 .fa-panel--flush { padding: 0; overflow: hidden; }
 
+/* 0.62 measured 4.85:1 on the cream panel — over the AA floor by 0.35, which is no
+   headroom at all: the settings scroller's own bottom fade was enough to push it to
+   3.93 and it was the last failing run in the whole battery. A section label wants to
+   be quieter than its content, not marginal; 0.8 measures 7.8:1 and is still plainly
+   subordinate to the 900-weight ink beside it. */
 .fa-panel-title {
   margin: 0;
   font-family: 'Rubik', sans-serif;
@@ -320,7 +359,7 @@ const CSS = `
   font-size: clamp(0.72rem, 1.7vh, 0.95rem);
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: rgba(26,18,36,0.62);
+  color: rgba(26,18,36,0.8);
 }
 
 /* Screen headline. Cream on ink stroke — the same treatment the HUD countdown and
@@ -480,7 +519,7 @@ const CSS = `
 .fa-level-label {
   font-family: 'Rubik', sans-serif;
   font-weight: 900;
-  font-size: clamp(0.68rem, 1.6vh, 0.9rem);
+  font-size: clamp(0.69rem, 1.6vh, 0.9rem);
   color: var(--cream);
   text-shadow: 0 2px 0 var(--ink);
   white-space: nowrap;
@@ -512,7 +551,7 @@ const CSS = `
   justify-content: center;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.56rem, 1.3vh, 0.72rem);
+  font-size: clamp(0.69rem, 1.4vh, 0.76rem);
   letter-spacing: 0.03em;
   color: var(--ink);
   pointer-events: none;
@@ -529,7 +568,7 @@ const CSS = `
   width: clamp(58px, 8vw, 92px);
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.64rem, 1.45vh, 0.8rem);
+  font-size: clamp(0.69rem, 1.45vh, 0.8rem);
   white-space: nowrap;
 }
 .fa-stat-track {
@@ -555,7 +594,7 @@ const CSS = `
   text-align: end;
   font-family: 'Rubik', sans-serif;
   font-weight: 900;
-  font-size: clamp(0.62rem, 1.4vh, 0.78rem);
+  font-size: clamp(0.69rem, 1.4vh, 0.78rem);
   color: rgba(26,18,36,0.7);
 }
 
@@ -566,13 +605,13 @@ const CSS = `
   display: inline-flex;
   align-items: center;
   align-self: flex-start;
-  height: 19px;
+  height: 21px;
   padding: 0 9px;
   border: 2px solid var(--ink);
   border-radius: 999px;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: 0.6rem;
+  font-size: 0.7rem;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: #FFFFFF;

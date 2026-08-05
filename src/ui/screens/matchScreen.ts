@@ -11,10 +11,26 @@
  * free, so that is where the pause chip and the post-match menu button live, both
  * inside `env(safe-area-inset-*)`.
  *
- * That corner is also where a virtual movement stick will eventually go (see the
- * mobile-parity section of `LAUNCH_PLAN.md`). When touch controls land, this chip
- * has to move — most likely to a small pause glyph tucked under the radar. Recorded
- * here so it is a known trade rather than a surprise.
+ * ── ...and why the pause chip now moves on touch ────────────────────────────
+ * The trade this header used to record as a future problem has arrived: `game/touch.ts`
+ * ships twin FLOATING sticks, and the move stick spawns wherever a thumb lands
+ * anywhere in the left half of the screen (`ZONE_SPLIT = 0.5`). A 44px chip parked at
+ * the bottom-left corner is therefore sitting inside the move stick's own resting
+ * position — a thumb reaching to walk hits Pause instead, mid-fight.
+ *
+ * Both lower corners belong to thumbs, so "move it to the other corner" is not
+ * available; `hud.ts` had the identical problem with the radar and solved it by
+ * moving UP the trailing edge. This does the mirror of that on the leading edge:
+ * on touch the chip sits directly under the player nameplate, which is the one band
+ * of the frame that no HUD element and no thumb occupies.
+ *
+ * Keyed on `html.fa-touch-capable` — the same class `hud.ts` keys the radar on, set
+ * from device capability rather than from the first finger, so the layout is right on
+ * the opening frame instead of jumping once someone touches. On a mouse there is no
+ * thumb zone and nothing moves.
+ *
+ * The post-match Menu button stays in the corner: it only exists after the match is
+ * decided, when there is no stick to collide with.
  *
  * ── z-order ─────────────────────────────────────────────────────────────────
  * The HUD's game-over card draws a full-viewport scrim at z-index 20 with
@@ -37,8 +53,14 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
 
   const root = el('div', 'fa-screen-bare fa-match');
   root.innerHTML = `
+    <!-- The chip is NOT inside .match-corner. It has to be positioned against the
+         screen so it can move out of the thumb zone on touch, and .match-corner is
+         itself absolutely positioned — so nesting it there made 'top: 96px' resolve
+         against the corner and put the chip 140px BELOW the bottom of the frame.
+         Measured, not reasoned about: tools/tmp/thumbzone.mjs. -->
+    <button class="match-chip" type="button" data-el="pause" aria-label="Pause">${icon('pause')}</button>
+
     <div class="match-corner">
-      <button class="match-chip" type="button" data-el="pause" aria-label="Pause">${icon('pause')}</button>
       <button class="fa-btn fa-btn--quiet match-exit" type="button" data-el="exit">${icon('back')} Menu</button>
     </div>
 
@@ -142,6 +164,10 @@ const CSS = `
 /* Full 44px tap target even though the glyph is small — this is the one control a
    player reaches for while already frustrated. */
 .fa-match .match-chip {
+  position: absolute;
+  inset-inline-start: calc(var(--fa-safe-l, 0px) + 14px);
+  bottom: calc(var(--fa-safe-b, 0px) + 14px);
+  pointer-events: auto;
   appearance: none;
   cursor: pointer;
   display: flex;
@@ -163,10 +189,27 @@ const CSS = `
 .fa-match .match-chip:hover { background: rgba(58,40,80,0.9); }
 .fa-match .match-chip:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.35); }
 
+/* ── Out of the left thumb zone ────────────────────────────────────────────────
+   See the header. 96px clears the player nameplate (topbar top 14 + name pill ~30 +
+   gap 5 + health bar 26 = ~75) and the chip's own 44px ends around 140 — comfortably
+   above the arc a thumb sweeps from the bottom edge, and it is the same offset
+   'hud.ts' uses to lift the radar off the opposite corner, so the two chrome
+   elements sit on one line across the frame instead of at two arbitrary heights. */
+html.fa-touch-capable .fa-match .match-chip {
+  position: absolute;
+  inset-inline-start: calc(var(--fa-safe-l, 0px) + 14px);
+  top: calc(var(--fa-safe-t, 0px) + 96px);
+  bottom: auto;
+}
+
 /* Only after the match is decided. Before that, leaving is a pause-menu decision,
    not a one-tap accident during a fight. */
 .fa-match .match-exit { display: none; }
 .fa-match.is-ended .match-exit { display: flex; animation: fa-match-exit-in 0.3s ease-out 0.35s backwards; }
+/* ...and once it IS decided, pause means nothing, so the corner belongs to Menu
+   alone. That is also what keeps the two controls from sharing one spot now that the
+   chip is positioned against the screen rather than nested beside the button. */
+.fa-match.is-ended .match-chip { display: none; }
 @keyframes fa-match-exit-in {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }

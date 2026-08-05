@@ -29,7 +29,7 @@
  * `game/economy/`. There is not one economy literal in this file.
  */
 
-import { CHARACTERS, RARITY_COLORS, type CharacterId } from '../../game/rules';
+import { CHARACTERS, RARITY_COLORS, type CharacterId, type Rarity } from '../../game/rules';
 import {
   CONTAINERS,
   CONTAINER_KINDS,
@@ -54,6 +54,75 @@ import {
   containerIcon, emojiIcon, ensureIconStyles, hydratePortraits, icon, portraitMarkup,
 } from '../icons';
 import { burstConfetti, el } from './fx';
+
+/**
+ * ── Making the container ladder RANKABLE, without renaming anything ──────────
+ *
+ * The five containers are a strict ladder — Chest, Hamburger Box, Purple Pineapple
+ * Box, Big Smile Box, Purple Fire Box — and NOTHING on screen said so. Their names
+ * mix a food, a colour-plus-food, a facial expression and a colour-plus-element, so
+ * no reader can order them; STATE.md records this as "an unrankable rarity ladder
+ * that mixes themes into a rank sequence". On the road it was worse than unrankable:
+ * four of the five draw the same box silhouette, and a claimed node greyscales its
+ * icon, so three consecutive container nodes rendered as three identical grey boxes.
+ *
+ * The names are `economy/tuning.ts`'s and are not this file's to change (and
+ * `economy.test.mjs` asserts against them). The RANK, though, is not naming — it is
+ * derivable, and it is derivable from the same table the roller uses:
+ *
+ *   floor rarity = the character rarity a box pays out most often
+ *   rank         = position when the five are sorted by that floor, then by how much
+ *                  of the box is characters at all (which is what puts the
+ *                  currency-heavy free Chest below the Hamburger Box despite both
+ *                  bottoming out at Normal)
+ *
+ * So it cannot drift from the odds, exactly like `containerOdds()` itself: retune a
+ * box and its position on the ladder moves with it. Rendered as pips plus the floor
+ * rarity's own colour, which is the one visual channel this screen has NOT already
+ * spent (fill = claim state, ring = character rarity — a contract an earlier critic
+ * round established and this deliberately does not cross).
+ */
+const RARITY_ORDER: Rarity[] = ['Normal', 'Rare', 'Epic', 'Legendary', 'Neon', 'Cyber'];
+
+interface ContainerTier {
+  rank: number;
+  of: number;
+  floor: Rarity | null;
+}
+
+const TIERS: Record<string, ContainerTier> = (() => {
+  const scored = CONTAINER_KINDS.map((kind) => {
+    const rows = containerOdds(kind).filter((r) => r.rarity);
+    let floor: Rarity | null = null;
+    let best = -1;
+    let charShare = 0;
+    for (const r of rows) {
+      charShare += r.percent;
+      if (r.percent > best) { best = r.percent; floor = r.rarity ?? null; }
+    }
+    return { kind, floor, charShare };
+  });
+  scored.sort((a, b) => {
+    const ra = a.floor ? RARITY_ORDER.indexOf(a.floor) : -1;
+    const rb = b.floor ? RARITY_ORDER.indexOf(b.floor) : -1;
+    return ra - rb || a.charShare - b.charShare;
+  });
+  const out: Record<string, ContainerTier> = {};
+  scored.forEach((s, i) => { out[s.kind] = { rank: i + 1, of: scored.length, floor: s.floor }; });
+  return out;
+})();
+
+/** Rank pips for one container, coloured by the rarity it bottoms out at. */
+function tierPips(kind: ContainerKind, opts: { label?: boolean } = {}): string {
+  const t = TIERS[kind];
+  if (!t) return '';
+  const colour = t.floor ? RARITY_COLORS[t.floor] : 'var(--ink)';
+  const pips = Array.from({ length: t.of }, (_, i) => `<i class="tr-pip${i < t.rank ? ' is-on' : ''}"></i>`).join('');
+  const aria = `Tier ${t.rank} of ${t.of}${t.floor ? `, ${t.floor} or better` : ''}`;
+  return `<span class="tr-tier" style="--pip:${colour}" role="img" aria-label="${aria}">${pips}${
+    opts.label && t.floor ? `<span class="tr-tier-txt">${t.floor}+</span>` : ''
+  }</span>`;
+}
 
 export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
   injectStyles('fa-trophy-styles', CSS);
@@ -99,7 +168,12 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     <footer class="tr-bottom">
       <div class="tr-inventory" data-el="inventory"></div>
       <div class="tr-bottom-actions">
-        <button class="fa-iconbtn tr-odds" type="button" data-el="oddsbtn">ⓘ Drop rates</button>
+        <!-- The mark was a raw U+24D8. It is not an emoji, so the emoji sweep passed
+             it, but it is still an OS-drawn glyph that Rubik does not carry: the
+             reader's fallback font decides what it looks like, which is the exact
+             thing 65 authored icons exist to stop. The chest is what the sheet is
+             ABOUT, and it ties the button to the inventory row beside it. -->
+        <button class="fa-iconbtn tr-odds" type="button" data-el="oddsbtn">${icon('chest')} Drop rates</button>
         <button class="fa-btn fa-btn--quiet tr-storebtn" type="button" data-el="storebtn">${icon('gem')} Get Gems</button>
       </div>
     </footer>
@@ -251,8 +325,14 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
       node.style.setProperty('--node-glow', rgba(colour, 0.55));
     }
 
+    // The tick is an authored icon in a span, not a CSS `content: '✓'`.
+    //
+    // Generated content cannot hold SVG, so the claimed state was drawing a raw U+2713
+    // — an OS-drawn glyph on a screen whose whole icon pass exists to have none, and
+    // one that cannot take `--fa-ic-ink` so it could not flip on the green disc it
+    // sits on.
     const status = isClaimed
-      ? '<span class="tr-status is-done">✓ Claimed</span>'
+      ? `<span class="tr-status is-done">${icon('check')} Claimed</span>`
       : canClaim
         ? '<span class="tr-status is-ready">Claim</span>'
         : `<span class="tr-status">${(m.trophies - trophies).toLocaleString()} to go</span>`;
@@ -263,8 +343,9 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
         m.reward.type === 'character' ? portraitMarkup(m.reward.id, { crop: 'head' })
           : m.reward.type === 'container' ? containerIcon(m.reward.kind)
           : emojiIcon(face.emoji)
-      }</span></span>
+      }</span>${isClaimed ? `<span class="tr-node-tick">${icon('check')}</span>` : ''}</span>
       <span class="tr-node-title">${face.title}</span>
+      ${m.reward.type === 'container' ? tierPips(m.reward.kind) : ''}
       ${face.payoutNote ? `<span class="tr-node-note">${
         face.payoutNote.replace('\u{1FA99}', icon('coin'))
       }</span>` : ''}
@@ -303,26 +384,42 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     } else if (progress.next) {
       const nextReward = progress.next.reward;
       const face = milestoneFace(nextReward, profile.unlocked);
+      const toGo = progress.next.trophies - profile.trophies;
       q('nextlabel').textContent = 'Next reward';
       q('nextval').innerHTML = `${
         nextReward.type === 'character' ? portraitMarkup(nextReward.id, { crop: 'head' })
           : nextReward.type === 'container' ? containerIcon(nextReward.kind)
           : emojiIcon(face.emoji)
-      } ${face.title}`;
+      } ${face.title} <span class="tr-togo">${icon('trophy')} ${toGo.toLocaleString()} to go</span>`;
     } else {
       q('nextlabel').textContent = 'Road complete';
       q('nextval').innerHTML = `${icon('flag')} Master of the Kitchen`;
     }
 
-    // The bar measures the CURRENT SEGMENT (previous node to next node), so its
-    // label has to be the segment too.
+    // ── THE BAR AND ITS LABEL MUST BE THE SAME QUANTITY ────────────────────────
     //
-    // Round 3 filled it segment-relative but labelled it "205 / 220", which a critic
-    // read — correctly — as claiming 93% while the fill sat at 51%. A progress bar
-    // that disagrees with its own number is worse than a bar with no number, so the
-    // label is now the one quantity the fill actually represents.
+    // Third attempt, and the first one that can be checked by the person reading it.
+    //
+    //  * Round 3 filled the bar segment-relative and labelled it "205 / 220" — total
+    //    trophies. A critic read that as claiming 93% next to a fill sitting at 51%.
+    //  * Round 4 replaced the fraction with a REMAINING COUNT, "30 to next reward",
+    //    which removed the contradiction by removing the check: a count has no
+    //    denominator, so a bar sitting at 90% next to the number 30 cannot be
+    //    reconciled by any reader. STATE.md recorded exactly that ("a progress bar
+    //    reading ~100% while labelled 30 to next reward") and it is the same family
+    //    as a HUD pill saying "safe" over a ring meaning "lethal".
+    //
+    // The fill is `progress01`, which is (trophies - from) / (to - from). So the
+    // label is now literally those two numbers. 270 / 300 next to a 90% bar is a
+    // statement a player can verify at a glance, and `screen_metrics.mjs` asserts
+    // exactly that: |measured fill - label fraction| must stay under 0.02, with the
+    // expected fraction derived INDEPENDENTLY from the road's own node thresholds.
+    //
+    // The actionable number — how many more trophies — did not disappear; it moved
+    // up beside the reward it belongs to, in the same "N to go" vocabulary the nodes
+    // on the track already use.
     q('fillxp').textContent = progress.next
-      ? `${(progress.next.trophies - profile.trophies).toLocaleString()} to next reward`
+      ? `${(profile.trophies - progress.from).toLocaleString()} / ${(progress.to - progress.from).toLocaleString()}`
       : `Road complete — ${roadEnd().toLocaleString()}`;
 
     // TWO or more, never one.
@@ -366,7 +463,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
         <span class="tr-open-em">${containerIcon(kind)}</span>
         <span class="tr-open-body">
           <span class="tr-open-name">${def.name}</span>
-          <span class="tr-open-cta">Open</span>
+          <span class="tr-open-cta">Open ${tierPips(kind)}</span>
         </span>
         <span class="tr-open-count">${count}</span>
       `;
@@ -443,9 +540,19 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
   function showOdds(): void {
     const sections = CONTAINER_KINDS.map((kind) => {
       const def = CONTAINERS[kind];
+      // The rarity colour is a SWATCH, never the ink.
+      //
+      // Measured on the shipped sheet: Cyber #00E5B0 on white is 1.64:1, Legendary
+      // 2.08, Normal 2.76, Neon 3.20, Rare 3.81 — every single coloured row below AA,
+      // on the one surface in this product that is a legal disclosure. The rarity
+      // palette is authored for FILLS behind white type (see RARITY_CARD_COLORS); it
+      // was never a text palette. A 10px dot carries the same channel at full chroma
+      // and the label goes back to ink at 12:1.
       const rows = containerOdds(kind).map((r) => `
         <li class="tr-odds-row">
-          <span class="tr-odds-what"${r.rarity ? ` style="color:${RARITY_COLORS[r.rarity]}"` : ''}>${r.label}</span>
+          <span class="tr-odds-what">${
+            r.rarity ? `<i class="tr-odds-dot" style="background:${RARITY_COLORS[r.rarity]}"></i>` : ''
+          }${r.label}</span>
           <span class="tr-odds-pct">${formatPercent(r.percent)}</span>
         </li>
       `).join('');
@@ -455,7 +562,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
         .join(' · ');
       return `
         <section class="tr-odds-block">
-          <h3 class="tr-odds-title">${containerIcon(kind)} ${def.name}</h3>
+          <h3 class="tr-odds-title">${containerIcon(kind)} ${def.name} ${tierPips(kind, { label: true })}</h3>
           <p class="tr-odds-blurb">${def.blurb}</p>
           <ul class="tr-odds-list">${rows}</ul>
           ${pools ? `<p class="tr-odds-pool">${pools}</p>` : ''}
@@ -496,8 +603,10 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
       }
       return `
         <div class="tr-sku${p.oneTime ? ' is-featured' : ''}">
-          ${bonus > 0 ? `<span class="tr-sku-bonus">+${bonus}%</span>` : ''}
-          ${p.oneTime ? '<span class="tr-sku-bonus tr-sku-once">ONE TIME</span>' : ''}
+          ${bonus > 0 || p.oneTime ? `<span class="tr-sku-flags">
+            ${bonus > 0 ? `<span class="tr-sku-bonus">+${bonus}%</span>` : ''}
+            ${p.oneTime ? '<span class="tr-sku-bonus tr-sku-once">ONE TIME</span>' : ''}
+          </span>` : ''}
           <span class="tr-sku-em">${p.container ? containerIcon(p.container.kind) : emojiIcon(p.emoji)}</span>
           <span class="tr-sku-name">${p.name}</span>
           <span class="tr-sku-gems">${icon('gem')} ${p.gems.toLocaleString()}</span>
@@ -669,16 +778,18 @@ const CSS = `
 .fa-tr .tr-nextlabel {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.56rem, 1.3vh, 0.7rem);
+  font-size: clamp(0.69rem, 1.3vh, 0.74rem);
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: rgba(26,18,36,0.6);
+  /* 0.6 measured 4.28:1 on the mustard card at desktop and 2.08:1 in portrait,
+     where the strip's gradient is darkest under this line. 0.82 clears AA on both. */
+  color: rgba(26,18,36,0.82);
   white-space: nowrap;
 }
 .fa-tr .tr-nextval {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.68rem, 1.7vh, 0.92rem);
+  font-size: clamp(0.72rem, 1.7vh, 0.95rem);
   color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
@@ -833,8 +944,8 @@ const CSS = `
 .fa-tr .tr-node-req {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.56rem, 1.6vh, 0.82rem);
-  color: rgba(26,18,36,0.72);
+  font-size: clamp(0.69rem, 1.6vh, 0.86rem);
+  color: rgba(26,18,36,0.85);
   white-space: nowrap;
 }
 .fa-tr .tr-node-medal {
@@ -910,11 +1021,24 @@ const CSS = `
                with the same green the road uses for progress, which made a wall of
                green compete with the ONE gold node the player should be tapping.
                The filled spine already carries "how far I have come". */
-.fa-tr .tr-node.is-claimed { opacity: 0.78; }
+/* ── "Claimed" is dimmed BY PART, never by a layer opacity ───────────────────
+   This used to be a 0.78 layer opacity on the whole node, which is the single most
+   expensive line this screen had. A container opacity composites the type together
+   with its own plate, so it lowers the contrast of every run underneath it and no
+   computed style anywhere reports that it happened: the threshold labels measured
+   3.87-4.34:1 and the Claimed pill 2.02:1, all of them below AA, all of them looking
+   correct in the source. It is precisely the "inherited opacity" case
+   screen_metrics.mjs had to be built to see.
+
+   The state reads exactly as before — grey medal, desaturated icon, quieter title,
+   green tick — because those were always what carried it. The layer opacity was
+   carrying nothing except the contrast loss. */
 .fa-tr .tr-node.is-claimed .tr-node-medal { background: #E6DAC4; }
-.fa-tr .tr-node.is-claimed .tr-node-em { filter: grayscale(0.55); }
-.fa-tr .tr-node.is-claimed .tr-node-medal::after {
-  content: '✓';
+.fa-tr .tr-node.is-claimed .tr-node-em { filter: grayscale(0.55); opacity: 0.85; }
+.fa-tr .tr-node.is-claimed .tr-node-title { color: rgba(26,18,36,0.66); }
+.fa-tr .tr-node.is-claimed .tr-node-req { color: rgba(26,18,36,0.82); }
+.fa-tr .tr-node.is-claimed .tr-tier { opacity: 0.6; }
+.fa-tr .tr-node-tick {
   position: absolute;
   right: -3px;
   bottom: -3px;
@@ -924,12 +1048,11 @@ const CSS = `
   width: clamp(16px, 2.6vh, 24px);
   height: clamp(16px, 2.6vh, 24px);
   background: var(--lettuce);
-  color: #FFFFFF;
+  --fa-ic-ink: #FFFFFF;
   border: 2px solid var(--ink);
   border-radius: 50%;
-  font-family: 'Rubik', sans-serif;
-  font-weight: 900;
-  font-size: clamp(0.5rem, 1.4vh, 0.72rem);
+  font-size: clamp(0.6rem, 1.6vh, 0.86rem);
+  z-index: 2;
 }
 .fa-tr .tr-node.is-claimable .tr-node-medal {
   background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
@@ -942,15 +1065,15 @@ const CSS = `
 .fa-tr .tr-node-title {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.58rem, 1.9vh, 1rem);
+  font-size: clamp(0.69rem, 1.9vh, 1rem);
   line-height: 1.15;
   max-width: 100%;
 }
 .fa-tr .tr-node-note {
-  font-size: clamp(0.52rem, 1.3vh, 0.7rem);
+  font-size: clamp(0.69rem, 1.3vh, 0.74rem);
   line-height: 1.15;
-  font-weight: 600;
-  color: rgba(26,18,36,0.78);
+  font-weight: 700;
+  color: rgba(26,18,36,0.82);
 }
 .fa-tr .tr-status {
   margin-top: 2px;
@@ -960,12 +1083,57 @@ const CSS = `
   background: #FFFFFF;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.52rem, 1.35vh, 0.72rem);
+  font-size: clamp(0.69rem, 1.35vh, 0.76rem);
   white-space: nowrap;
   color: var(--ink);
 }
-.fa-tr .tr-status.is-done { background: var(--lettuce); color: #FFFFFF; }
+/* White on '--lettuce' is 2.47:1 before the node's own dimming and measured 2.02:1
+   after — the worst run on the screen, repeated once per claimed node (eight of them
+   at desktop). Ink on the identical green is 7.0:1 and it matches the ready pill's
+   ink beside it, so the two status colours now differ by HUE alone, which is the
+   distinction the design was already making. */
+.fa-tr .tr-status.is-done {
+  background: var(--lettuce);
+  color: var(--ink);
+  --fa-ic-ink: var(--ink);
+}
 .fa-tr .tr-status.is-ready { background: var(--gold); color: var(--ink); }
+/* The pill holds an icon plus a word now, not a glyph plus a word. */
+.fa-tr .tr-status { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── Container rank ───────────────────────────────────────────────────────────
+   Five pips, filled up to this box's position in the ladder, tinted with the rarity
+   it bottoms out at. Deliberately NOT another badge: the node already carries a
+   threshold, a medal, a title and a status pill, and a sixth labelled object would
+   make the node the busiest thing on a screen whose subject is the road. A pip row
+   is readable at 3px per dot and is the one thing on the node that answers "is this
+   one better than that one". */
+.fa-tr .tr-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  line-height: 1;
+}
+.fa-tr .tr-pip {
+  width: clamp(4px, 0.8vh, 6px);
+  height: clamp(4px, 0.8vh, 6px);
+  border-radius: 50%;
+  background: rgba(26,18,36,0.16);
+  box-shadow: inset 0 0 0 1px rgba(26,18,36,0.28);
+}
+.fa-tr .tr-pip.is-on {
+  background: var(--pip, var(--ink));
+  box-shadow: inset 0 0 0 1px rgba(26,18,36,0.55);
+}
+.fa-tr .tr-tier-txt {
+  margin-inline-start: 5px;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.69rem, 1.4vh, 0.78rem);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(26,18,36,0.72);
+}
 
 /* Claimable nodes are the only interactive thing on the track, so they get the whole
    press vocabulary the rest of the menu uses — and a pulse, because a reward waiting
@@ -1021,7 +1189,7 @@ const CSS = `
   border-radius: 999px;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.56rem, 1.5vh, 0.8rem);
+  font-size: clamp(0.69rem, 1.5vh, 0.82rem);
   white-space: nowrap;
 }
 
@@ -1048,8 +1216,12 @@ const CSS = `
   margin: 0;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.62rem, 1.5vh, 0.8rem);
+  font-size: clamp(0.69rem, 1.5vh, 0.82rem);
   color: var(--cream);
+  /* A drop shadow sits UNDER the glyph, so the type still meets the orange backdrop
+     on three sides. An ink stroke encloses it — same treatment as '.fa-title'. */
+  -webkit-text-stroke: 2px var(--ink);
+  paint-order: stroke fill;
   text-shadow: 0 2px 0 rgba(26,18,36,0.75);
   white-space: nowrap;
 }
@@ -1080,16 +1252,21 @@ const CSS = `
 .fa-tr .tr-open-name {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.6rem, 1.4vh, 0.76rem);
+  font-size: clamp(0.69rem, 1.4vh, 0.8rem);
   white-space: nowrap;
 }
 .fa-tr .tr-open-cta {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.52rem, 1.2vh, 0.64rem);
+  font-size: clamp(0.69rem, 1.2vh, 0.72rem);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--ketchup);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  /* --ketchup as INK on this pill's cream gradient measured 4.17:1. See the token's
+     comment in theme.ts: same hue, value dropped, 5.9:1. */
+  color: var(--ketchup-ink);
 }
 .fa-tr .tr-open-count {
   display: flex;
@@ -1104,10 +1281,10 @@ const CSS = `
   border-radius: 999px;
   font-family: 'Rubik', sans-serif;
   font-weight: 900;
-  font-size: 0.66rem;
+  font-size: 0.7rem;
 }
 
-.fa-tr .tr-odds { font-size: clamp(0.6rem, 1.4vh, 0.78rem); }
+.fa-tr .tr-odds { font-size: clamp(0.69rem, 1.4vh, 0.8rem); }
 
 /* ── Sheets (reveal / drop rates / store) ─────────────────────────────────── */
 .fa-tr .tr-sheet {
@@ -1157,7 +1334,8 @@ const CSS = `
 .fa-tr .tr-sheet-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; padding-inline-end: 4px; }
 .fa-tr .tr-sheet-note, .fa-tr .tr-soon {
   margin: 0;
-  font-size: clamp(0.64rem, 1.5vh, 0.8rem);
+  font-size: clamp(0.69rem, 1.5vh, 0.82rem);
+  font-weight: 700;
   line-height: 1.35;
   color: #4E2C1B;
 }
@@ -1190,10 +1368,12 @@ const CSS = `
   margin: 0;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.6rem, 1.4vh, 0.78rem);
+  font-size: clamp(0.69rem, 1.4vh, 0.8rem);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(26,18,36,0.6);
+  /* Measured 4.49:1 against a 4.5 floor — one hundredth short, which is exactly the
+     kind of number a critic never finds and an instrument always does. */
+  color: rgba(26,18,36,0.75);
 }
 .fa-tr .tr-reveal-name {
   margin: 0;
@@ -1226,22 +1406,33 @@ const CSS = `
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
   font-size: clamp(0.74rem, 1.8vh, 0.94rem);
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
-.fa-tr .tr-odds-blurb { margin: 2px 0 6px; font-size: clamp(0.58rem, 1.35vh, 0.72rem); color: #4E2C1B; }
+.fa-tr .tr-odds-blurb { margin: 2px 0 6px; font-size: clamp(0.69rem, 1.35vh, 0.76rem); font-weight: 600; color: #4E2C1B; }
 .fa-tr .tr-odds-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .fa-tr .tr-odds-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: clamp(0.6rem, 1.4vh, 0.76rem);
+  font-size: clamp(0.69rem, 1.4vh, 0.8rem);
 }
-.fa-tr .tr-odds-what { font-weight: 700; }
+.fa-tr .tr-odds-what { font-weight: 700; display: flex; align-items: center; gap: 7px; }
+/* The rarity channel, moved off the ink and onto a swatch — see showOdds(). */
+.fa-tr .tr-odds-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(26,18,36,0.55);
+}
 .fa-tr .tr-odds-pct {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
-.fa-tr .tr-odds-pool { margin: 6px 0 0; font-size: clamp(0.54rem, 1.25vh, 0.66rem); color: rgba(26,18,36,0.62); }
+.fa-tr .tr-odds-pool { margin: 6px 0 0; font-size: clamp(0.69rem, 1.25vh, 0.74rem); font-weight: 600; color: rgba(26,18,36,0.7); }
 
 /* Store */
 .fa-tr .tr-skus { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }
@@ -1258,33 +1449,47 @@ const CSS = `
   text-align: center;
 }
 .fa-tr .tr-sku.is-featured { background: linear-gradient(180deg, #FFE9A8, var(--mustard)); }
-.fa-tr .tr-sku-bonus {
+/* Both badges in ONE positioned row.
+   They were each absolutely positioned at the same 'top: -8px; inset-inline-end: 6px',
+   so on the starter bundle — the only SKU that carries both — the green bonus badge
+   and the red ONE TIME badge were stacked exactly on top of each other. Measured as a
+   3.65:1 run: ink on ketchup, which is a combination this file never authored. */
+.fa-tr .tr-sku-flags {
   position: absolute;
   top: -8px;
   inset-inline-end: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.fa-tr .tr-sku-bonus {
   padding: 2px 8px;
   background: var(--lettuce);
-  color: #FFFFFF;
+  /* White on lettuce is 2.47:1 — the same defect as the claimed status pill, and it
+     is carrying a percentage a buyer is meant to compare. */
+  color: var(--ink);
   border: 2px solid var(--ink);
   border-radius: 999px;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: 0.56rem;
+  font-size: 0.7rem;
 }
-.fa-tr .tr-sku-once { background: var(--ketchup); }
+.fa-tr .tr-sku-once { background: var(--ketchup); color: #FFFFFF; }
 .fa-tr .tr-sku-em { font-size: 1.6rem; line-height: 1; }
 .fa-tr .tr-sku-name {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.6rem, 1.4vh, 0.74rem);
+  font-size: clamp(0.69rem, 1.4vh, 0.78rem);
 }
 .fa-tr .tr-sku-gems {
   font-family: 'Rubik', sans-serif;
   font-weight: 900;
   font-size: clamp(0.72rem, 1.8vh, 0.92rem);
-  color: var(--water);
+  /* 3.48:1 on the white cards and 2.56:1 on the mustard starter card as '--water'.
+     Same hue at a value that survives being type — see theme.ts. */
+  color: var(--water-ink);
 }
-.fa-tr .tr-sku-extra { font-size: clamp(0.52rem, 1.2vh, 0.64rem); color: #4E2C1B; }
+.fa-tr .tr-sku-extra { font-size: clamp(0.69rem, 1.2vh, 0.72rem); font-weight: 600; color: #4E2C1B; }
 /* Disabled on purpose and permanently, until a payment processor exists. It reads
    as unavailable rather than as broken, and it carries the price so the offer is
    still legible. */
@@ -1301,8 +1506,8 @@ const CSS = `
   border-radius: 999px;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: clamp(0.56rem, 1.3vh, 0.7rem);
-  color: rgba(26,18,36,0.62);
+  font-size: clamp(0.69rem, 1.3vh, 0.74rem);
+  color: rgba(26,18,36,0.72);
   cursor: not-allowed;
 }
 
@@ -1314,6 +1519,17 @@ const CSS = `
   .fa-tr .tr-heading { display: none; }
   .fa-tr .tr-nextlabel { display: none; }
   .fa-tr .tr-node-note { display: none; }
+  /* The CLAIMED pill goes too, and only the claimed one.
+     Raising every label to an 11px floor added ~9px to each node, which at 390px tall
+     pushed the two lanes into the rail between them — the threshold captions were
+     measured sitting ON the green spine at 3.2:1 — and pushed the lower lane's pills
+     through the bottom of the panel. Something had to leave, and the claimed pill is
+     the one line on the node that is pure duplication: the medal beside it is already
+     grey, its icon is already desaturated and it already carries a green tick. The
+     gold "Claim" and the "N to go" countdown both stay, because those are the two
+     states the player can still act on. */
+  .fa-tr .tr-status.is-done { display: none; }
+  .fa-tr .tr-node { gap: 2px; }
 }
 
 /* Portrait phone. The bottom bar wraps rather than crushing the inventory. */
@@ -1321,6 +1537,19 @@ const CSS = `
   .fa-tr .tr-hero { flex-wrap: wrap; }
   .fa-tr .tr-hero-next { flex-basis: 100%; order: 3; }
   .fa-tr .tr-bottom { flex-wrap: wrap; }
+}
+
+/* ── Narrow portrait ──────────────────────────────────────────────────────────
+   With '.fa-screen > * { min-width: 0 }' in theme.ts the top bar can finally shrink,
+   and what it shrinks is the one item that carries no information the screen does
+   not already give: the heading. At 430px the bar is Back + "Trophy Road" at 28px +
+   two currency chips = 490px of content, so leaving the title in means either
+   ellipsising it to "Trophy R..." or squeezing the counts the player came here to
+   read. The hero strip below is a trophy icon beside a four-digit number above a
+   road made of trophy thresholds; nobody arrives here unsure what screen they are on.
+   Same reasoning as the existing max-height rule, on the other axis. */
+@media (max-width: 520px) {
+  .fa-tr .tr-heading { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

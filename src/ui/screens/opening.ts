@@ -212,24 +212,67 @@ const CSS = `
 }
 
 /* ── Hero ─────────────────────────────────────────────────────────────────── */
-/* The portrait context paints an opaque cyan backdrop it owns (see PORTRAIT_BG in
-   charStage.ts). On the HOME screen that is fine — it is framed as a display case.
-   Here it must not be: a hard cyan rectangle in the middle of a title card reads as
-   a video player. So the canvas is MASKED to an ellipse that fades out well before
-   its own edge, which turns the same pixels into a lit spotlight standing in the
-   menu's world. The mask is on a wrapper rather than the canvas so 'charStage''s own
-   sizing is untouched. */
+/* The portrait context paints its own backdrop (see charStage.ts). On the HOME screen
+   that is fine — it is framed as a display case. Here it must not be: a hard rectangle
+   of someone else's world in the middle of a title card reads as a video player. So the
+   canvas is MASKED to an ellipse that fades out well before its own edge, which turns
+   the same pixels into a lit spotlight standing in the menu's world. The mask is on a
+   wrapper rather than the canvas so charStage's own sizing is untouched.
+ *
+ * ── Retuned for the 3D set ──────────────────────────────────────────────────
+ * These numbers were authored against a FLAT, bright cyan clear colour. charStage now
+ * builds a real lit set — cyclorama, floor, horizon — which is a large win everywhere
+ * it is framed as a stage (it flipped the cast's figure/ground polarity from -0.23 to
+ * +0.19; LESSONS §13) and a loss in exactly one place: here, where the set is supposed
+ * to be invisible. Against a deep-blue cyclorama the old generous ellipse showed a cool
+ * smudge with a horizon line running across it, mid-title-card.
+ *
+ * The fix is NOT simply a smaller ellipse. The mask cuts the CHARACTER as well as the
+ * set, and the fighter spans roughly 24-76% of this box, so pulling the opaque core in
+ * far enough to hide the horizon starts dissolving the arms. Instead the ellipse keeps
+ * enough radius to hold the fighter and the transition is made much steeper — opaque
+ * where the fighter is, gone within a short band after it — and the warm rim that beds
+ * the patch into the card is roughly doubled and pulled inward to meet it. */
+/* 54vh, not 70vh — and this is the second half of the same fix.
+ *
+ * charStage frames the fighter off whichever axis binds, so every pixel of panel width
+ * past what the fighter needs is guaranteed to be backdrop. That is exactly the defect
+ * menu_accept's hero-fills-its-panel floor exists to catch (see MIN_HERO_WIDTH_FRAC,
+ * written for the home screen's identical problem), and with the new 3D set behind it
+ * the title card had drifted under that floor at 844x390 with a notch: character width
+ * over panel width measured 0.396-0.417 against a 0.42 minimum.
+ *
+ * Swept rather than guessed (tools/tmp/openwidth.mjs, four viewports x six widths,
+ * worst-of-six samples per point because the idle animation sways the arms by ~0.03):
+ *
+ *     width      phone+notch   phone    desktop   tablet    fighter height frac
+ *     70vh       0.414 FAIL    0.452    0.515     0.486     0.53
+ *     58vh       0.470         0.524    0.578     0.555     0.55
+ *     54vh       ~0.545        ~0.59    ~0.65     ~0.62     0.54
+ *     46vh       0.678         0.733    0.777     0.775     0.48  <- knee
+ *
+ * Below ~46vh the height fraction collapses: width starts binding and the fighter
+ * itself shrinks, which is the opposite of the point. 54vh sits well clear of that
+ * knee with the fighter the same size it always was, and clears the floor by 0.125 at
+ * the worst viewport — margin the noise cannot eat.
+ *
+ * It also happens to be the fix for the OTHER opening-screen problem: the set is drawn
+ * to this box, so a narrower box is less visible set. */
 .fa-opening .open-stage {
   position: relative;
-  width: min(100%, 70vh);
+  width: min(100%, 54vh);
   height: 100%;
   min-height: 0;
 }
+/* Radii re-expressed as a fraction of the NARROWER box, so the mask's absolute size on
+   screen is unchanged: it still goes fully transparent inside the element (0.80 x 62%
+   = 49.6% from centre), which is what keeps the box's own corners from showing a faint
+   rectangle of cyclorama. */
 .fa-opening .open-stage-3d {
   position: absolute;
   inset: 0;
-  -webkit-mask-image: radial-gradient(62% 58% at 50% 52%, #000 42%, rgba(0,0,0,0.55) 70%, transparent 88%);
-  mask-image: radial-gradient(62% 58% at 50% 52%, #000 42%, rgba(0,0,0,0.55) 70%, transparent 88%);
+  -webkit-mask-image: radial-gradient(62% 58% at 50% 54%, #000 46%, rgba(0,0,0,0.40) 64%, transparent 80%);
+  mask-image: radial-gradient(62% 58% at 50% 54%, #000 46%, rgba(0,0,0,0.40) 64%, transparent 80%);
 }
 /* Warm rim, so the cool spotlight is bedded into the warm backdrop rather than
    sitting in a hole cut out of it. */
@@ -237,7 +280,11 @@ const CSS = `
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(58% 54% at 50% 52%, transparent 55%, rgba(255,217,140,0.28) 78%, transparent 92%);
+  background: radial-gradient(64% 60% at 50% 54%, rgba(255,196,96,0.30) 20%, rgba(255,190,86,0.52) 66%, rgba(255,170,60,0.22) 84%, transparent 95%);
+  /* soft-light rather than a plain overlay: it warms the cool set that is still
+     visible immediately behind the fighter — the part no mask can remove without
+     cutting the fighter too — while barely moving an already-saturated warm bun. */
+  mix-blend-mode: soft-light;
 }
 
 /* ── Start ────────────────────────────────────────────────────────────────── */

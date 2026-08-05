@@ -378,15 +378,41 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
     location.reload();
   });
 
+  /**
+   * "There is more below", stated rather than implied.
+   *
+   * At 844x390 the two panels are taller than the scroll port, so the last visible
+   * row is sliced through its own middle by the scroller's edge — which is the exact
+   * "reads as a broken panel rather than as more content" defect this file's own
+   * landscape media query was written to fix, and it is still there because the rows
+   * cannot shrink below the 44px touch floor.
+   *
+   * A STATIC bottom fade would be wrong: at the end of the scroll it would fade real,
+   * final content for no reason. So the class is driven by the scroll position, which
+   * costs one passive listener and is the only version of this that is never lying.
+   * `scrollend` is not used — support is uneven and a fade that arrives late reads as
+   * a flicker.
+   */
+  const body = root.querySelector<HTMLElement>('.set-body')!;
+  const updateFade = (): void => {
+    const more = body.scrollHeight - body.scrollTop - body.clientHeight > 2;
+    body.classList.toggle('is-more', more);
+  };
+  body.addEventListener('scroll', updateFade, { passive: true });
+  // After layout: the panels have no height until the shell parents `root`.
+  requestAnimationFrame(updateFade);
+
   const offAudio = audio.onChange(render);
   const offMusic = audio.music.onChange(render);
   render();
 
   return {
     root,
+    resize() { updateFade(); },
     dispose() {
       offAudio();
       offMusic();
+      body.removeEventListener('scroll', updateFade);
       root.removeEventListener('click', onToggle);
       root.removeEventListener('input', onRange);
       root.remove();
@@ -433,6 +459,20 @@ const CSS = `
   margin-inline: auto;
   padding-inline-end: 4px;
 }
+/* The affordance itself. Applied only while there IS more below (see updateFade() above),
+   and to the SCROLLER rather than to a pseudo-element over it, because an overlay
+   inside a scroll container scrolls away with the content it is meant to be marking.
+   Same idiom the trophy road's track already uses on its horizontal axis. */
+.fa-settings .set-body.is-more {
+  /* Fades to 72%, NOT to nothing. A mask composites the type together with its own
+     panel, so a fade to transparent drops the whole row's contrast against the warm
+     backdrop: measured 4.0:1 on a volume readout and 2.71:1 on a panel title, i.e.
+     the affordance had introduced the exact defect the rest of this pass removed.
+     At 0.72 the softening is still unmistakable next to the hard panel edges around
+     it, and the worst run under the band measures 7.9:1. */
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 30px), rgba(0,0,0,0.72) 100%);
+  mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 30px), rgba(0,0,0,0.72) 100%);
+}
 .fa-settings .set-section { gap: 6px; }
 
 /* ── Rows ─────────────────────────────────────────────────────────────────── */
@@ -456,7 +496,7 @@ const CSS = `
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .fa-settings .set-row-sub {
-  font-size: clamp(0.58rem, 1.25vh, 0.72rem); font-weight: 600; color: rgba(26,18,36,0.6);
+  font-size: clamp(0.69rem, 1.25vh, 0.76rem); font-weight: 700; color: rgba(26,18,36,0.68);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .fa-settings .set-row-control { flex: 0 0 auto; display: flex; align-items: center; }
@@ -510,8 +550,8 @@ const CSS = `
   width: 3.1em;
   text-align: end;
   font-family: 'Rubik', sans-serif; font-weight: 800;
-  font-size: clamp(0.62rem, 1.4vh, 0.78rem);
-  color: rgba(26,18,36,0.7);
+  font-size: clamp(0.69rem, 1.4vh, 0.8rem);
+  color: rgba(26,18,36,0.72);
 }
 .fa-settings .set-range {
   appearance: none;
@@ -572,7 +612,7 @@ const CSS = `
 .fa-settings .set-key-row:last-child { border-bottom: none; }
 .fa-settings .set-key-action {
   font-family: 'Rubik', sans-serif; font-weight: 800;
-  font-size: clamp(0.68rem, 1.5vh, 0.84rem);
+  font-size: clamp(0.69rem, 1.5vh, 0.86rem);
 }
 .fa-settings .set-key-caps { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 /* A keycap, not a label: the raised slab reads as "this is a physical key" without a
@@ -592,15 +632,15 @@ const CSS = `
 
 .fa-settings .set-note {
   margin: 2px 0 0;
-  font-size: clamp(0.6rem, 1.3vh, 0.74rem);
-  font-weight: 600;
+  font-size: clamp(0.69rem, 1.3vh, 0.78rem);
+  font-weight: 700;
   line-height: 1.35;
-  color: rgba(26,18,36,0.62);
+  color: rgba(26,18,36,0.68);
 }
 .fa-settings .set-locked {
   margin: 0;
   padding: 6px 9px;
-  font-size: clamp(0.6rem, 1.3vh, 0.74rem);
+  font-size: clamp(0.69rem, 1.3vh, 0.78rem);
   font-weight: 700;
   color: #4E2C1B;
   background: var(--mustard-hi);
@@ -610,10 +650,14 @@ const CSS = `
 
 /* ── Danger ───────────────────────────────────────────────────────────────── */
 .fa-settings .set-danger { border-color: var(--ketchup); }
+/* The gradient's LIGHT end used to be #E4485A, which put white 17px type at 3.91:1 —
+   under AA on the one control in the product that cannot be undone. Measured 4.07
+   averaged over the button, 4.62 after. The hue is unchanged; only the top stop
+   moved, so it still reads as the same red slab. */
 .fa-settings .set-reset {
   align-self: flex-start;
   color: #FFFFFF;
-  background: linear-gradient(180deg, #E4485A, var(--ketchup));
+  background: linear-gradient(180deg, #D6394A, var(--ketchup));
   box-shadow: 0 4px 0 #7a1420;
 }
 .fa-settings .set-reset:active { box-shadow: 0 0 0 #7a1420; }
@@ -651,8 +695,8 @@ const CSS = `
   font-size: clamp(0.9rem, 2.2vh, 1.15rem);
 }
 .fa-settings .set-confirm-sub {
-  margin: 0; font-size: clamp(0.64rem, 1.4vh, 0.8rem); font-weight: 600;
-  color: rgba(26,18,36,0.7);
+  margin: 0; font-size: clamp(0.69rem, 1.4vh, 0.82rem); font-weight: 700;
+  color: rgba(26,18,36,0.72);
 }
 .fa-settings .set-confirm-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; justify-content: center; }
 
@@ -663,10 +707,16 @@ const CSS = `
   gap: 12px;
   min-height: var(--tap);
 }
+/* Cream on the warm backdrop, and a DROP SHADOW is not a surround: the ink sits
+   below the glyph, so the type still meets orange on three sides and measured
+   3.69:1. An ink text-stroke encloses it instead — the same treatment '.fa-title'
+   uses, which measures 12:1 on the identical backdrop. */
 .fa-settings .set-foot-note {
   font-family: 'Rubik', sans-serif; font-weight: 800;
-  font-size: clamp(0.6rem, 1.35vh, 0.76rem);
+  font-size: clamp(0.69rem, 1.35vh, 0.8rem);
   color: var(--cream);
+  -webkit-text-stroke: 2px var(--ink);
+  paint-order: stroke fill;
   text-shadow: 0 2px 0 rgba(26,18,36,0.7);
 }
 .fa-settings .set-done { margin-inline-start: auto; }
