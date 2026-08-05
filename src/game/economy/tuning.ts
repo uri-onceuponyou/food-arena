@@ -216,29 +216,47 @@ export const LEVEL_UP = {
   growth: 1.32,
 
   /**
-   * ── RARITY PAYS FOR ITS POWER HERE, AND THIS IS THE LOAD-BEARING NUMBER ───
+   * ── FLAT, DELIBERATELY. RARITY COSTS NOTHING EXTRA ──────────────────────────
    *
-   * This game grants power for rarity (`DECISIONS §13`) AND power for level (§22). Two
-   * power axes with nothing else differing would make a rarer character strictly better
-   * forever. Clash Royale's answer — which is the one adopted — is that **rarity is paid
-   * for in upgrade cost**: a Legendary costs multiples of a Common to bring to the same
-   * level.
+   * ⚠️ This was a 1.0x -> 4.5x ladder, and the reasoning behind it is kept below because
+   * it was coherent and it was still wrong.
    *
-   * So the trade a player actually faces is legible: **a Cyber is the better character and
-   * a Normal is the cheaper one to max.** Uri's *"level 15 Normal should beat level 1
-   * Cyber"* holds because the level span (2.89x effective power) dwarfs the rarity span
-   * (20.7 pp), and §13 also holds because at EQUAL level the rarer character still wins.
+   * THE OLD ARGUMENT: the game granted power for rarity AND power for level, so a rarer
+   * character would be strictly better forever unless something else differed. Clash
+   * Royale's answer is that rarity is paid for in upgrade cost, so the ladder was set at
+   * ~1.35x per tier — Cyber 4.5x Normal, close to Clash Royale's own Common-to-Legendary
+   * gold ratio.
    *
-   * The ladder is ~1.35x per tier, which lands Cyber at 4.5x Normal — close to Clash
-   * Royale's own Common-to-Legendary gold ratio over a full ladder.
+   * WHY IT NO LONGER APPLIES. `DECISIONS §24b`: Uri reversed rarity-as-power, because in
+   * a game heading for humans-vs-humans it is pay-to-win, and it is the one imbalance
+   * skill cannot close. Tier spread is now **3.98 pp against a ~9 pp noise floor** — flat
+   * to the limit of the instrument. So the premise the ladder existed to correct is gone,
+   * and what was left was a **pure penalty**: same power, 4.5x the price, once you own the
+   * character. In Clash Royale that cost scaling is a CONSEQUENCE OF COPY SCARCITY — rare
+   * cards are hard to FIND. This game has no scarcity mechanic behind it.
+   *
+   * TWO INDEPENDENT ROUTES REACHED THE SAME ANSWER (§26, §27):
+   *   * Uri's own Brawl Stars reference plate shows rarity as the word "EPIC" under the
+   *     ROLE label — not a stat, not a bar, not a cost. It carries no mechanical job at all.
+   *   * A kit-distinctiveness pass built a validated metric, found 0 of 55 character pairs
+   *     indistinguishable, tested eight candidate kits and shipped no balance change,
+   *     concluding rarity could not be given a distinctiveness job at a price worth paying.
+   *
+   * SO RARITY'S JOB IS ACQUISITION AND PRESTIGE. It decides how hard a character is to
+   * OBTAIN — trophy-road position and drop rate — and nothing else. Levelling costs the
+   * same for everyone, which is what "anyone can get there; it costs time, not luck" means.
+   *
+   * ⚠️ Kept as a per-rarity map rather than collapsed to a constant, so restoring a ladder
+   * is a value edit rather than a signature change — and so this comment stays attached to
+   * the decision it explains.
    */
   rarityCostMultiplier: {
     Normal: 1.0,
-    Rare: 1.35,
-    Epic: 1.8,
-    Legendary: 2.45,
-    Neon: 3.3,
-    Cyber: 4.5,
+    Rare: 1.0,
+    Epic: 1.0,
+    Legendary: 1.0,
+    Neon: 1.0,
+    Cyber: 1.0,
   } as Record<Rarity, number>,
 
   /** Prices are rounded to this, so they read as prices rather than as arithmetic. */
@@ -348,7 +366,8 @@ export interface ContainerEntry {
  * — that is Uri's *"match how common games do it"* answer, and the measured tier spread
  * is 4.0 pp, inside the ~9 pp the project treats as unresolvable. What rarity governs is
  * how hard a fighter is to OBTAIN (its position on the road, its odds in a box) and how
- * expensive it is to LEVEL (`LEVEL_UP.rarityCostMultiplier`, 1.0x to 4.5x).
+ * hard it is to OBTAIN. It no longer affects levelling cost at all (§26 flattened
+ * `LEVEL_UP.rarityCostMultiplier` to 1.0 across every tier).
  *
  * This string is rendered on the drop-rate sheet, which is the one surface in the product
  * that is a legal disclosure — so the sentence that says what the player is actually

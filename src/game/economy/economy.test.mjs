@@ -780,12 +780,27 @@ console.log('\n13. Character levels');
     const id = CHARACTER_IDS.find((c) => CHARACTERS[c].rarity === tier);
     return id ? { tier, id, coins: costToMax(id).coins } : null;
   }).filter(Boolean);
-  check('cost to max RISES with rarity, tier by tier',
-    byTier.every((row, i) => i === 0 || row.coins > byTier[i - 1].coins),
-    byTier.map((r) => `${r.tier} ${r.coins.toLocaleString()}`).join(' < '));
-  check('the rarest character costs at least 3x the commonest to max',
-    byTier[byTier.length - 1].coins >= byTier[0].coins * 3,
-    `${byTier[byTier.length - 1].coins} vs ${byTier[0].coins}`);
+  // ⚠️ INVERTED, NOT DELETED. These two asserted the OPPOSITE rule until `DECISIONS §26`:
+  //
+  //     'cost to max RISES with rarity, tier by tier'
+  //     'the rarest character costs at least 3x the commonest to max'
+  //
+  // They were correct for the design in force when they were written — rarity granted
+  // power, so it was paid for in upgrade cost, Clash-Royale style. §24b reversed
+  // rarity-as-power (it is pay-to-win in a game heading for humans-vs-humans, and it is the
+  // one imbalance skill cannot close), which left the cost ladder as a PURE PENALTY: same
+  // power, 4.5x the price. Two independent routes then agreed it should go — Uri's own
+  // reference plate shows rarity carrying no mechanical job at all, and a kit pass proved by
+  // measurement that rarity could not be given a distinctiveness job either.
+  //
+  // The old wording is kept above so the reversal is legible in the file rather than only in
+  // the git log. This is the fifth assertion this project has inverted rather than dropped.
+  check('cost to max is IDENTICAL across every rarity tier',
+    byTier.every((row) => row.coins === byTier[0].coins),
+    byTier.map((r) => `${r.tier} ${r.coins.toLocaleString()}`).join(' · '));
+  check('no tier is cheaper or dearer to max than any other — rarity buys acquisition, not price',
+    Math.max(...byTier.map((r) => r.coins)) === Math.min(...byTier.map((r) => r.coins)),
+    `spread ${Math.max(...byTier.map((r) => r.coins)) - Math.min(...byTier.map((r) => r.coins))} coins`);
 
   // ── (c) A total the player can verify by adding up their own receipts ─────
   //
