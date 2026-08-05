@@ -261,7 +261,14 @@ export const POT = {
   damage: 8,
 } as const;
 
-/** Standing-water hazard: slows anyone inside it. */
+/**
+ * Standing-water hazard: slows anyone inside it.
+ *
+ * ⚠️ Today it slows the PLAYER only — see the block on `SPLAT_DURATION_MS` below, which
+ * carries the measurement, the price and the reason it is parked. The shipped arena has
+ * two of these (r=50, at 560,900 and 840,100), so the defect is not confined to the
+ * `splatter` weapons.
+ */
 export const PUDDLE_SLOW_FACTOR = 0.45;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -711,7 +718,60 @@ export const REGEN_AMOUNT = 2;
 // Ground effects
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Splatter left by `splatter: true` weapons — slows anyone standing in it. */
+/**
+ * Splatter left by `splatter: true` weapons — slows anyone standing in it.
+ *
+ * ── ⚠️ "ANYONE" IS NOT TRUE TODAY, AND THE SAME IS TRUE OF `PUDDLE_SLOW_FACTOR` ──
+ *
+ * MEASURED AND PARKED, 2026-08-05. Both of this file's terrain-slow rules are stated
+ * for *anyone*, and both are implemented ONCE — in `sim.ts:movePlayer`, which is the
+ * only caller of `terrainSlowFactor()` that scales a speed. `ai.ts:stepAI` builds its
+ * own `aiSlowMult` out of the STATUS slow alone. **The enemy walks through every puddle
+ * and every splat in the game at full speed.**
+ *
+ * That is the fifth instance of `ai.ts`'s oldest shape — a rule stated once here and
+ * implemented twice — and the first that nobody had counted. `Fighter.terrainSlowFactor`
+ * makes it visible in the type: the sim computes the value for BOTH fighters every tick
+ * and `state.ts` documents it as *"never read by gameplay logic"*, which is exactly true
+ * and is exactly the problem.
+ *
+ * PROVEN WITH A ONE-TICK CONTROL, not by reading the source (`sim.test.mjs` §25(a), and
+ * `tools/tmp/burger_lab.mjs --selftest`). Both fighters pinned 900 wu apart — past every
+ * weapon in the roster, so the AI is in its chase-MOVE branch — one tick stepped, flooded
+ * floor against dry floor, everything else byte-identical:
+ *
+ *     player   2.0000 -> 0.9000 wu/tick   ratio 0.450000 = PUDDLE_SLOW_FACTOR
+ *     enemy    1.1667 -> 1.1667 wu/tick   ratio 1.000000
+ *
+ * ⚠️ THE OBVIOUS VERSION OF THAT CONTROL IS CONFOUNDED and was written first: two whole
+ * matches, travel per tick, reads the enemy at **1.096** — above 1, which no movement rule
+ * in this sim can produce. A flood slows the player, so the match it produces is a
+ * different match. A two-run ratio is a speed measurement only if everything except speed
+ * is held (`docs/LESSONS.md` §13).
+ *
+ * ── WHY IT IS PARKED RATHER THAN FIXED ──────────────────────────────────────
+ *
+ * The fix is three lines (a pure `terrainSlowAt()` here, imported by `ai.ts` into
+ * `aiSlowMult`) and it was staged and measured — 110 matchups x 32 seeds, smart2, paired:
+ *
+ *     rung                       settled   tier spread   aggregate   cells moved
+ *     shipped                    17/110      3.98 pp       49.5%          —
+ *     AI obeys terrain slow      19/110      5.55 pp       50.9%     36/110, max 34.4 pp
+ *
+ * **It regresses the settled-matchup count, which is a hard guard.** The two new cells are
+ * `lollipop>hamburger` 6.3 -> 0.0 and `lollipop>pizza` 65.6 -> 100.0 — the second because
+ * Pizza's Tomato Splat finally does something in the PLAYER's hands (Pizza's role split
+ * goes -23.1 -> -35.0 pp). The other guards hold: the tier spread stays inside the ~9 pp
+ * noise floor and the aggregate moves 1.4 pp, inside its own.
+ *
+ * So it is a real defect with a real cost, and it is NOT the Hamburger role split it was
+ * hunted for: it moves that split 50.6 -> 50.0 pp. Whoever owns `sim.ts` should land it
+ * the moment the settled count can afford +2 — the honest place for it is
+ * `sim.ts:movePlayer`'s own `terrainSlowFactor()` being shared with `ai.ts` through
+ * `movement.ts`, which exists precisely so the two sides can share a movement rule
+ * without an import cycle. `sim.test.mjs` §25(a) is a guard in BOTH directions, so
+ * landing it fails the test and forces the record to be re-read.
+ */
 export const SPLAT_DURATION_MS = 4000;
 export const SPLAT_RADIUS = 20;
 
@@ -1217,6 +1277,132 @@ export const RARITY_CARD_COLORS: Record<Rarity, string> = {
 //     the best kit, and it is the Normal-tier starter. That is a design question
 //     (should the free starter be the strongest?), not a defect, and it goes to Uri
 //     with the rarity roll-up in the report.
+//     ⚠️ See "THE HAMBURGER ROLE SPLIT" immediately below. That paragraph turned out
+//     to be right for a reason nobody had measured, and the number it quotes was
+//     being produced by an instrument that cannot play the character.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// THE HAMBURGER ROLE SPLIT (2026-08-05) — it is the INSTRUMENT, and behind it is a
+// real balance problem pointing the other way. NO BALANCE CHANGE IS MADE HERE.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `6447a68` closed the kit-distinctiveness question and handed over one finding: **8 of
+// the 17 remaining settled matchups involve Hamburger**, whose halves are 15.0% in the
+// player's hands against 65.6% in the AI's — **a 50.6 pp role split, twice the next
+// largest in the roster** — and six of the eight are the same cell shape,
+// *"player-Hamburger loses >= 95%"*. It called that *"a vitals/driver interaction"*.
+//
+//   `tools/tmp/burger_lab.mjs` (--selftest 16/16) · `tools/tmp/stage_sim.mjs`
+//   110 matchups x 32 seeds, policy smart2, shipped arena, paired on identical seeds.
+//   VALIDATED FIRST: `--roster` reproduces `roster_lab.mjs` **110 of 110 cells
+//   bit-identical** and its three guards to the digit — settled 17/110, rarity tier
+//   spread 3.98 pp, aggregate 49.5%. The guards and the finding come out of the SAME
+//   run, so they can never be taken from two different measurements.
+//
+// ── WHERE THE TWO HALVES ACTUALLY DIVERGE ───────────────────────────────────
+//
+// Nine realised quantities, both halves, side by side. One row is not like the others:
+//
+//     quantity                    PLAYER hands    AI hands
+//     win rate                          15.0%       65.6%
+//     damage dealt / match               85.2       106.5
+//     damage taken / match               74.0        83.4
+//     HP fraction left                  0.011       0.130
+//  >> SELF-HEAL HP / match               0.0        27.0   <<
+//     mean separation wu                433.5       394.6
+//     time to first damage s             6.39        6.43
+//     stuns started on opponent          1.17        1.44
+//     slows started on opponent          1.07        1.40
+//
+// Engagement distance, opening, status application and damage taken are all within a
+// few percent. The AI restores **27.0 HP a match** and the player restores **zero**.
+//
+// ── PROVEN FROM BOTH ENDS, BECAUSE ONE END IS A CORRELATION ─────────────────
+//
+//     rung                                        player   AI    split
+//     shipped                                      15.0%  65.6%  +50.6 pp
+//     CONTROL: the AI cannot heal (`ALLOW_HEAL`)   15.0%  11.3%   -3.7 pp
+//     the PLAYER heals, on `ai.ts:rankHeal`'s
+//       own three conditions                       75.6%  65.6%  -10.0 pp
+//
+// Take the heal off the AI and the split inverts. Give it to the player and the split
+// inverts the other way. **The split is the self-heal, and nothing else measured moves
+// it** — the terrain-slow defect recorded on `SPLAT_DURATION_MS` is worth 0.6 pp of it.
+//
+// ── AND THE DRIVER THAT CANNOT PRESS IT IS THE SCRIPTED PLAYER ──────────────
+//
+// `tools/tmp/scripted_player.mjs:bestWeapon` opens with `if (w.type === 'self') return;`.
+// Every shipped measurement policy except `kite` therefore cannot press a heal, and
+// Hamburger owns the roster's ONLY `self` weapon.
+//
+// **That is the exact mirror of the FIRST defect in `ai.ts`'s list** (`07a4e3a`:
+// `pickHighestDamageWeapon` skipped `type === 'self'`, so the AI could never heal on the
+// same character the player healed with). Same weapon, same character, same one-line
+// category exclusion, other side of the match. The shape has left `ai.ts` and moved into
+// the instrument that judges `ai.ts`.
+//
+// It costs 50.6 pp on exactly one character for two reasons, both asserted in
+// `sim.test.mjs` §25(c): Hamburger is the only owner of a `self` weapon, and it has the
+// roster's SMALLEST pool (70 HP as player, 63 as AI), so 25 HP on a 6 s cooldown is a
+// third of the pool per press and a measured 32% effective-HP increase.
+//
+// AND THE SIM IS NOT AT FAULT: §25(d) drives a hurt player Hamburger's Onion Ring through
+// the ordinary input path and it heals, and `match.ts` calls
+// `setWeaponCount(weapons.length)`, so the slot is bound to key `4` and to the HUD weapon
+// bar. **A human can press it. Only the measurement cannot.**
+//
+// ── A SECOND STALE EXCLUSION, IN THE SAME SIX-LINE FUNCTION ─────────────────
+//
+// `4105116` proved the authored `damage` field is not what a press delivers, and its own
+// commit message says *"both drivers ranked weapons by authored damage"*. It fixed `ai.ts`
+// (`pressValue`, checked against the sim in all 183 weapon-band cells by `sim.test.mjs`
+// §20(b)) and the fix never crossed to `bestWeapon`, which still ranks by `w.damage`. So
+// the two drivers rank the same kit differently today, for exactly the two characters that
+// commit named — Taco's Double Toss (authored 0, delivers 23) and Burrito's Topping Swarm
+// (authored 5, delivers 20) — at 5 of 8 separation bands. Pinned in `sim.test.mjs` §25(e).
+//
+// ── ⚠️ THE FINDING BEHIND THE FINDING, AND IT IS THE EXPENSIVE ONE ──────────
+//
+// Fixing the instrument does not just close the split. It reveals what the split was
+// hiding, and this is the number that matters:
+//
+//     rung                        settled   tier spread   aggregate   hamburger strength
+//     shipped                     17/110      3.98 pp       49.5%          40.3%
+//     player presses the heal     14/110    **16.56 pp**     55.1%        **70.6%**
+//
+// Only 10 of 110 cells move (all of them Hamburger's player half — the counterfactual is
+// inert for every character with no `self` weapon, asserted in the tool's selftest), and
+// four of the six *"player-Hamburger loses >= 95%"* cells stop being settled. **Settled
+// falls 17 -> 14, which is the thing the pass was for.**
+//
+// But played with its own heal, Hamburger is the strongest character in the game by 14 pp,
+// and it is Normal tier with only one tier-mate, so the Normal roll-up goes 48.4% -> 62.0%
+// and the rarity tier spread goes **3.98 pp -> 16.56 pp — nearly double the ~9 pp noise
+// floor, and four times the guard Uri drove to 4.0 pp in `§24b`.**
+//
+// `docs/LESSONS.md` §13 in its purest form: *"AI stalled: 0.0%" was true for months.*
+// "Hamburger wins 15% in the player's hands" is true of the instrument and false of the
+// game, and the roster's balance has been fitted for two passes against a measurement that
+// under-plays exactly one character — the one `DECISIONS §13` had already flagged as the
+// strongest in the game before any of this.
+//
+// ── WHAT IS DONE, AND WHAT IS DELIBERATELY NOT ──────────────────────────────
+//
+//   * NOT the driver. Fixing `bestWeapon` re-bases every balance figure in the repo that
+//     touches Hamburger, Taco or Burrito, and `driver_guard.mjs` (60 assertions) is built
+//     to make that a deliberate act. It is one line plus a flag, and it is handed over
+//     with the numbers above rather than smuggled into a measurement pass.
+//   * NOT Hamburger's vitals. 70.6% is measured against a counterfactual instrument, not
+//     against the shipped one. Retuning a character to satisfy a driver that does not yet
+//     exist is the same mistake `4105116` refused to make with Pizza — *"retuning Pizza
+//     here would be tuning around a driver bug"* — and any change to `stats.health` moves
+//     the rarity guard by 7-12 pp a point (`6447a68`, Finding 4.3).
+//   * NOT the terrain-slow fix. Priced on the block at `SPLAT_DURATION_MS`; it regresses
+//     the settled count 17 -> 19 and is worth 0.6 pp of this split.
+//
+// So the sequence is: land the driver fix, re-measure, and THEN decide what Hamburger
+// should be — with the tier-spread guard read on every iteration, because on this
+// character it is the binding constraint and not the win rate.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1236,6 +1422,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // 11 matchups / 17,677 ticks — while the human player used the same slot for 25 HP.
       // A live ASYMMETRY, not dead content. Fixed in `ai.ts` (`pickSelfHealWeapon`); see
       // AUTHORISED DEVIATION #7 above for the threshold and what it measured.
+      //
+      // ⚠️ AND IT CAME BACK, MIRRORED, IN THE INSTRUMENT. `scripted_player.mjs:bestWeapon`
+      // carries the same one-line exclusion on the PLAYER's side, so every balance figure
+      // in this repo has been measured with this weapon pressed 0 times by the player and
+      // 1.08 times a match by the AI. That is the whole of Hamburger's 50.6 pp role split
+      // and 8 of the 17 settled matchups — see "THE HAMBURGER ROLE SPLIT" above before
+      // touching any number on this character.
       { key: 'Onion', name: 'Onion Ring', type: 'self', damage: 0, cooldown: 6000, healAmount: 25, color: '#F4E9DA', effect: null, emoji: '🧅' },
     ],
     abilities: [

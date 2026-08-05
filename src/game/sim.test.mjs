@@ -50,6 +50,10 @@ import {
   // `rules.ts` and imported, because the "KIT DISTINCTIVENESS" record in that file quotes
   // it and a second copy here could quietly stop agreeing with the thing it documents.
   kitSignature, weaponMechanics, WEAPON_MECHANICS,
+  // Section 25: the terrain-slow rule. `PUDDLE_SLOW_FACTOR` is imported rather than
+  // written as `0.45` because the section's whole claim is that ONE stated rule reaches
+  // only ONE of the two fighters — a literal here would still pass if the constant moved.
+  PUDDLE_SLOW_FACTOR, SPLAT_RADIUS,
 } from './rules.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
@@ -2851,6 +2855,185 @@ console.log('\n23. Character levels');
       after === before, `${before}  ->  ${after}`);
     check('…and the fixture put the weapon back exactly as it found it',
       w.damage === dmg0 && w.cooldown === cd0 && kitSignature('hotdog').join(' | ') === before);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 25. THE HAMBURGER ROLE SPLIT — and the rule that is STILL implemented twice
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `6447a68` found that 8 of the 17 remaining settled matchups involve Hamburger, whose
+// halves are **15.0% in the player's hands against 65.6% in the AI's — a 50.6 pp role
+// split, twice the next largest in the roster** — and called it *"a vitals/driver
+// interaction, not a kit-variety one"*. It was probed with `tools/tmp/burger_lab.mjs`
+// (16 selftest assertions, `--roster` reproducing `roster_lab.mjs` 110/110 bit-identical)
+// and the answer is TWO separate things pointing in opposite directions. The full record
+// is in `rules.ts` under "THE HAMBURGER ROLE SPLIT"; this section pins the four inputs a
+// unit test can reach, and (a) is a diagnosis rather than a passing gate.
+//
+//   MEASURED, 110 matchups x 32 seeds, policy smart2, paired on identical seeds:
+//     shipped                        player 15.0%  AI 65.6%   split +50.6 pp
+//     AI cannot heal (control)       player 15.0%  AI 11.3%   split  -3.7 pp
+//     player heals on ai.ts's rule   player 75.6%  AI 65.6%   split -10.0 pp
+//   The split is the SELF-HEAL, proven from both ends — and the driver that cannot press
+//   it is the SCRIPTED PLAYER, not `ai.ts`. See `rules.ts`.
+{
+  console.log('\n25. The Hamburger role split, and the terrain-slow rule (see rules.ts)');
+
+  // ── (a) ⚠️ A PINNED DIAGNOSIS: TERRAIN SLOW REACHES THE PLAYER AND NOT THE AI ──
+  //
+  // `rules.ts` states the rule twice, in prose, for BOTH ground effects, and both times
+  // for *anyone*: "Standing-water hazard: slows anyone inside it" and "Splatter left by
+  // `splatter: true` weapons — slows anyone standing in it". It is implemented ONCE, in
+  // `sim.ts:movePlayer`, which is the only caller of `terrainSlowFactor()` that scales a
+  // speed. `ai.ts:stepAI` builds its own `aiSlowMult` from the STATUS slow alone. So the
+  // enemy walks through every puddle and every splat in the game at full speed.
+  //
+  // This is the fifth instance of this file's oldest shape — a rule stated once in
+  // `rules.ts` and implemented twice — and the first one nobody had counted.
+  //
+  // THE CONTROL IS ONE TICK WIDE, ON PURPOSE. The obvious version (flood the arena, run
+  // two whole matches, compare travel per tick) reads the enemy at **ratio 1.096**, above
+  // 1, which no movement rule in the sim can produce: a flood slows the player, so the
+  // match it produces is a different match. Here both fighters are pinned 900 wu apart —
+  // past every weapon in the roster, so the AI is guaranteed to be in its chase-MOVE
+  // branch — one tick is stepped, and the only difference between the two runs is the
+  // floor. The ratio then has an arithmetic answer and is asserted EXACTLY.
+  //
+  // Asserted in BOTH directions, in the idiom of §20(d) and §24(c). It is priced and
+  // parked, not unknown: the three-line fix was staged and measured (settled 17 -> 19,
+  // rarity tier spread 3.98 -> 5.55 pp, aggregate 49.5 -> 50.9%, 36 of 110 cells moved,
+  // max |Δ| 34.4 pp) and refused against the hard settled guard. If a future pass lands
+  // it, this fails, and whoever fixes it has to read the record and re-measure.
+  {
+    const oneTick = (hazards) => {
+      // `maxSafeRadius` far outside the arena so the ring never steers, and the flood is
+      // `kind: 'slow'`, which `dangerSteer` deliberately ignores — so no hazard steering
+      // is in play on either side and the tick measures speed and nothing else.
+      const state = playingMatch(makeArena({ hazards, maxSafeRadius: 50_000 }), 'hotdog', 'hotdog');
+      state.player.x = 600; state.player.y = 1000;
+      state.enemy.x = 1500; state.enemy.y = 1000;
+      const p0x = state.player.x, p0y = state.player.y, e0x = state.enemy.x, e0y = state.enemy.y;
+      stepMatch(state, 16.667, { move: { x: 1, y: 0 }, aim: { x: 1, y: 0 }, selectedWeapon: 0, attack: false });
+      return {
+        player: Math.hypot(state.player.x - p0x, state.player.y - p0y),
+        enemy: Math.hypot(state.enemy.x - e0x, state.enemy.y - e0y),
+        seenPlayer: state.player.terrainSlowFactor,
+        seenEnemy: state.enemy.terrainSlowFactor,
+      };
+    };
+    const dry = oneTick([]);
+    const wet = oneTick([{ x: 1000, y: 1000, radius: 50_000, kind: 'slow', slowFactor: PUDDLE_SLOW_FACTOR }]);
+
+    check('terrain control: both fighters move on a dry floor (a zero makes every ratio vacuous)',
+      dry.player > 0 && dry.enemy > 0, `player ${dry.player.toFixed(4)} enemy ${dry.enemy.toFixed(4)} wu/tick`);
+    // The SIM ITSELF sees the flood under both fighters. That is what makes the next two
+    // checks a statement about who the rule is APPLIED to, not about who is standing in it.
+    check('terrain control: the sim observes the flood under BOTH fighters',
+      wet.seenPlayer === PUDDLE_SLOW_FACTOR && wet.seenEnemy === PUDDLE_SLOW_FACTOR
+      && dry.seenPlayer === 1 && dry.seenEnemy === 1,
+      `wet player ${wet.seenPlayer} enemy ${wet.seenEnemy}`);
+    check('the PLAYER is slowed by terrain, at exactly PUDDLE_SLOW_FACTOR',
+      approx(wet.player / dry.player, PUDDLE_SLOW_FACTOR, 1e-9),
+      `ratio ${(wet.player / dry.player).toFixed(9)} vs ${PUDDLE_SLOW_FACTOR}`);
+    check('the AI is NOT — a pinned diagnosis, measured and priced; read rules.ts before fixing',
+      approx(wet.enemy / dry.enemy, 1, 1e-9),
+      `ratio ${(wet.enemy / dry.enemy).toFixed(9)} — if this now reads ${PUDDLE_SLOW_FACTOR} the defect was fixed; `
+      + 'update the record in rules.ts and re-measure settled/tier spread');
+  }
+
+  // ── (b) THE BLAST RADIUS OF (a), AS A PROPERTY OF `rules.ts` ──────────────
+  //
+  // Two things make terrain: the arena's `kind: 'slow'` hazards, and the `splatter`
+  // weapons. Exactly two weapons in the roster carry `splatter`, so (a) is worth most to
+  // exactly two characters — and one of them is Hamburger, which is why it surfaced here.
+  {
+    const splatters = [];
+    for (const id of CHARACTER_IDS) {
+      for (const w of CHARACTERS[id].weapons) if (w.splatter) splatters.push(`${id}:${w.key}`);
+    }
+    check('exactly two weapons in the roster leave a slowing splat, and they are Hamburger\'s and Pizza\'s',
+      splatters.length === 2 && splatters.includes('hamburger:Tomato') && splatters.includes('pizza:Tomato'),
+      `splatter weapons: [${splatters.join(', ')}]`);
+    check('…and a splat is smaller than a fighter, so standing in one is a decision, not an area denial',
+      SPLAT_RADIUS < PLAYER_SIZE, `SPLAT_RADIUS ${SPLAT_RADIUS} vs PLAYER_SIZE ${PLAYER_SIZE}`);
+  }
+
+  // ── (c) WHY ONE LINE IN AN INSTRUMENT WAS WORTH 50.6 pp, AND ONLY HERE ────
+  //
+  // `scripted_player.mjs:bestWeapon` opens with `if (w.type === 'self') return;`. That is
+  // one line, in one function, and it is the exact mirror of the FIRST defect this file's
+  // §19 records (`07a4e3a`: `pickHighestDamageWeapon` skipped `'self'`, so the AI could
+  // never heal on the same character the player healed with). It cost 50.6 pp on exactly
+  // one character because of the two facts below, and on nobody else because of the first.
+  {
+    const withSelf = CHARACTER_IDS.filter((id) => CHARACTERS[id].weapons.some((w) => w.type === 'self'));
+    check('exactly one character owns a `self` weapon, and it is Hamburger',
+      withSelf.length === 1 && withSelf[0] === 'hamburger', `self-weapon owners: [${withSelf.join(', ')}]`);
+    // The heal is 25 HP on the SMALLEST pool in the roster. That ratio is the reason the
+    // exclusion is worth a role split rather than a rounding error: measured 27.0 HP a
+    // match in the AI's hands against 83.4 damage taken — a 32% effective-HP increase.
+    const pools = CHARACTER_IDS.map((id) => maxHpFor(id, PLAYER_MAX_HP));
+    const heal = CHARACTERS.hamburger.weapons.find((w) => w.type === 'self');
+    check('…and it is the roster\'s smallest HP pool, so the heal is worth more to it than to anyone',
+      maxHpFor('hamburger', PLAYER_MAX_HP) === Math.min(...pools),
+      `hamburger ${maxHpFor('hamburger', PLAYER_MAX_HP)} HP, roster min ${Math.min(...pools)}`);
+    check('…the heal restores over a third of that pool in one press',
+      heal.healAmount / maxHpFor('hamburger', PLAYER_MAX_HP) > 1 / 3,
+      `${heal.healAmount} of ${maxHpFor('hamburger', PLAYER_MAX_HP)} HP`);
+  }
+
+  // ── (d) THE SIM LETS THE PLAYER HEAL — so (c) is an INSTRUMENT gap, not a defect ──
+  //
+  // This is the check that decides which of the two possible stories is true. §19 already
+  // proves the AI can heal. If the sim refused the player the same weapon, the 50.6 pp
+  // would be a real game defect; it does not, `match.ts` calls
+  // `setWeaponCount(weapons.length)` so the slot is bound to key `4` and to the HUD bar,
+  // and the gap is entirely in the scripted player used to MEASURE the game.
+  {
+    const state = playingMatch(makeArena(), 'hamburger', 'donut');
+    const onionIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.type === 'self');
+    const heal = CHARACTERS.hamburger.weapons[onionIndex];
+    state.player.hp = state.player.maxHp - heal.healAmount;
+    const before = state.player.hp;
+    const events = stepMatch(state, 0, { move: { x: 0, y: 0 }, selectedWeapon: onionIndex, attack: true });
+    check('a hurt PLAYER Hamburger can press its Onion Ring through the ordinary input path',
+      state.player.hp === before + heal.healAmount
+      && events.some((e) => e.type === 'heal' && e.fighterRole === 'player'),
+      `hp ${before} -> ${state.player.hp} (expected +${heal.healAmount})`);
+  }
+
+  // ── (e) ⚠️ THE SECOND STALE EXCLUSION, IN THE SAME SIX-LINE FUNCTION ──────
+  //
+  // `4105116` proved the authored `damage` field is not what a press delivers — it is
+  // per-PELLET, per-PECK, and for a combo weapon it is not the damage at all — and its own
+  // commit message says **"both drivers ranked weapons by authored damage"**. It fixed
+  // `ai.ts` (`pressValue`, validated against the sim in all 183 cells by §20(b)) and the
+  // fix never crossed to `scripted_player.mjs:bestWeapon`, which still ranks by `w.damage`.
+  //
+  // So the two drivers rank the same kit differently TODAY, and this pins exactly whose:
+  // the two characters `4105116` named by name. Both directions again — a kit change that
+  // adds a third mis-ranked character, or a driver fix that removes these two, must come
+  // back through here.
+  {
+    const BANDS = [20, 40, 60, 80, 120, 160, 200, 260];
+    const mis = [];
+    for (const id of CHARACTER_IDS) {
+      const ws = CHARACTERS[id].weapons.filter((w) => w.type !== 'self');
+      for (const d of BANDS) {
+        const elig = ws.filter((w) => d <= (w.range ?? Infinity));
+        if (!elig.length) continue;
+        // First-wins on a tie, matching both implementations' strict `>`.
+        let byDamage = elig[0], byPress = elig[0];
+        for (const w of elig) if ((w.damage ?? 0) > (byDamage.damage ?? 0)) byDamage = w;
+        for (const w of elig) if (pressValue(w, d) > pressValue(byPress, d)) byPress = w;
+        if (byDamage !== byPress) { mis.push(id); break; }
+      }
+    }
+    check('ranking a kit by authored `damage` picks the wrong weapon for exactly Taco and Burrito',
+      mis.length === 2 && mis.includes('taco') && mis.includes('burrito'),
+      `mis-ranked by the damage key: [${mis.join(', ')}] — `
+      + '`scripted_player.mjs:bestWeapon` still uses that key; see rules.ts');
   }
 }
 

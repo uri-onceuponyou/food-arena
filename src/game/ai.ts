@@ -32,6 +32,44 @@
  * so out loud, and `sim.test.mjs` §20 asserts the symmetry behaviourally rather than by
  * inspection — §20(d) in particular is now a guard on the FIXED behaviour, having been
  * written originally as a guard on the defect.
+ *
+ * ── THE FIFTH, FOUND 2026-08-05, MEASURED AND PARKED ────────────────────────
+ *
+ *   * TERRAIN SLOW REACHES THE PLAYER AND NOT THE ENEMY. `rules.ts` states it twice, in
+ *     prose, and both times for *anyone* — `PUDDLE_SLOW_FACTOR` ("slows anyone inside
+ *     it") and `SPLAT_DURATION_MS` ("slows anyone standing in it"). It is implemented
+ *     once, in `sim.ts:movePlayer`, the only caller of `terrainSlowFactor()` that scales
+ *     a speed. `aiSlowMult` below is built out of the STATUS slow alone, so the enemy
+ *     crosses every puddle and every splat in the game at full speed.
+ *
+ *     Proven with a one-tick control rather than by reading the source (`sim.test.mjs`
+ *     §25(a)): both fighters pinned 900 wu apart so the AI is in its chase-MOVE branch,
+ *     flooded floor against dry floor, everything else byte-identical — **player ratio
+ *     0.450000, enemy ratio 1.000000.**
+ *
+ *     NOT FIXED HERE, and the reason is a number rather than a preference: the three-line
+ *     fix was staged and measured over 110 matchups x 32 seeds and it regresses the
+ *     settled-matchup count 17 -> 19, which is a hard guard. The price and the two cells
+ *     it costs are on the `SPLAT_DURATION_MS` block in `rules.ts`. §25(a) is a guard in
+ *     BOTH directions, so landing the fix fails the test and forces the record to be
+ *     re-read.
+ *
+ * ── AND THE SHAPE HAS LEFT THIS FILE ────────────────────────────────────────
+ *
+ * Defect 1 above — a heal only one side could reach — **recurred, mirrored, in the
+ * instrument**: `tools/tmp/scripted_player.mjs:bestWeapon` carries `if (w.type ===
+ * 'self') return;`, so the scripted PLAYER cannot press the roster's only heal while
+ * this file's `rankHeal` presses it 1.08 times a match. Measured: Hamburger's role split
+ * is 15.0% / 65.6%, and it is that line and nothing else — take the heal off this file
+ * and the split goes to -3.7 pp; give it to the player and it goes to -10.0 pp. Defect 2
+ * (ranking by the authored `damage` field) is also still live there, for Taco and
+ * Burrito — `4105116`'s own message says *"BOTH drivers ranked weapons by authored
+ * damage"*, and it fixed one of them.
+ *
+ * The generalisation is worth more than either fix: **"a rule stated once and implemented
+ * twice" is not a property of this file. It is a property of having two drivers**, and one
+ * of them is the thing that measures the other. See "THE HAMBURGER ROLE SPLIT" in
+ * `rules.ts` and `sim.test.mjs` §25.
  */
 
 import {
