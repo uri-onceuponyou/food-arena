@@ -101,7 +101,80 @@ export const PROTOTYPE_VIEWPORT = { w: 360, h: 240 } as const;
  * widget by a hardcoded arena size, will now be wrong — see the report.
  */
 export const MATCH_DURATION_MS = 45_000; // 0:45
-export const COUNTDOWN_FROM = 5; // 5 → 4 → 3 → 2 → 1 → "START!"
+
+/**
+ * ── AUTHORISED DEVIATION #8 (2026-08-05): COUNTDOWN_FROM 5 -> 3 ─────────────
+ *
+ * `COUNTDOWN_FROM * 1000 + COUNTDOWN_START_FLASH_MS` is the ONLY block of a match in
+ * which the simulation is, by construction, incapable of doing anything: `stepMatch`
+ * gates `applyAim`, `attemptAttack`, `movePlayer`, `stepAI` and `applyWorldTick` on
+ * `phase === 'playing'`, so during the countdown the two fighters stand on their spawns
+ * and no code path can change that. It was **5,700 ms**.
+ *
+ * ── What that was worth, measured ───────────────────────────────────────────
+ *
+ * `tools/tmp/pacing_ladder.mjs` (110 matchups x 8 seeds x 4 policies = 3,520 matches,
+ * shipped arena) reports the shape of a match from the moment PLAY is pressed, against
+ * a denominator that INCLUDES the countdown — which no instrument here did before, so
+ * the number below had never been printed:
+ *
+ *                                          policy `smart2`      policy `chase`
+ *   countdown                                 5.68 s               5.68 s
+ *   then the approach                         5.33 s               5.31 s
+ *   => FIRST CONTACT AT                      11.01 s              10.99 s
+ *   engaged (either fighter can reach)        5.86 s               4.00 s
+ *   disengagement after first contact         0.61 s               0.03 s
+ *   DUTY CYCLE (engaged / session)            31.6%                26.3%
+ *
+ * So **62.6% of the session is dead time, and the countdown is 51.6% of that dead
+ * time** — a larger block than the walk it precedes. It is also the only one of the
+ * three with no mechanism behind it: the approach is where the flow field works and
+ * where positioning happens; the countdown is a number going down.
+ *
+ * ── Why 3, and why nothing else in this block moved ─────────────────────────
+ *
+ * 3 is the genre's count, which is the brief's bar (Brawl Stars, Zooba). The 700 ms
+ * "START!" hold is KEPT: it is the readable whistle, and cutting it buys 0.7 s of a
+ * quantity already fixed by 2.0 s while making the one legible moment in the sequence
+ * harder to see. `COUNTDOWN_START_FLASH_MS` is therefore deliberately untouched.
+ *
+ * ── What it costs: NOTHING, and that is proven rather than argued ───────────
+ *
+ * Nothing in `stepMatch` reads absolute `elapsed`. `lastUsed`, `lastDamagedAt` and both
+ * status stamps are initialised to `-Infinity` in `state.ts:createFighter`; `fogTimer`,
+ * `regenTimer`, `trailDropTimer` and `hazardTimers` are accumulators from 0; `expiresAt`
+ * on splats and trail marks is always `elapsed + duration`. So the countdown can only
+ * translate the clock, never change the match.
+ *
+ * Measured PAIRED on the ladder above — same arena, same seeds, same matchups:
+ *
+ *   policy    player win        per-matchup |Δ|        matchups moved
+ *   smart2    27.2% -> 27.2%    max 0.0 pp             **0 of 110**
+ *   chase     18.8% -> 18.8%    max 0.0 pp             **0 of 110**
+ *   kite       0.0% ->  0.0%    max 0.0 pp             **0 of 110**
+ *   survive    0.8% ->  0.8%    max 0.0 pp             **0 of 110**
+ *
+ * Every one of the 3,520 matches is bit-identical. This is the rare case where a
+ * pacing change has a provable zero balance cost, and `sim.test.mjs` section 21 now
+ * asserts the property that makes it so ("the countdown leaves no residue"), so a
+ * future change that gives the countdown a side effect fails loudly instead of quietly
+ * re-pricing the roster.
+ *
+ * ── What it buys ───────────────────────────────────────────────────────────
+ *
+ *   first contact, session clock   11.01 s -> **9.01 s**   (chase 10.99 -> 8.99)
+ *   duty cycle                     31.6%   -> **35.8%**    (chase 26.3% -> 30.3%)
+ *   session length                 17.46 s -> 15.46 s
+ *
+ * ⚠️ MAKES STALE: every figure quoted against the old 5.7 s pre-match. Named ones —
+ * `tools/tmp/hudshot.mjs`'s "5,700 ms" comment, the HUD pass's "5.7 s = 31.8% of a
+ * 17.9 s fight / 24.2% of the session", and the audio pass's 6.55 s whistle-to-first-
+ * sound gap (that one is a MATCH-CLOCK figure and is unmoved; what changes is how much
+ * silence precedes it). `src/audio/sounds.ts:countdownTick` indexes its pitch ladder as
+ * `steps[5 - value]`, which still rises with three ticks (698/784/784 Hz) but now uses
+ * only the top of a five-rung ladder — flagged to the audio owner, not changed here.
+ */
+export const COUNTDOWN_FROM = 3; // 3 → 2 → 1 → "START!"
 export const COUNTDOWN_START_FLASH_MS = 700; // "START!" hold before play begins
 
 /**

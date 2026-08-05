@@ -854,18 +854,35 @@ if (args.selftest) {
     const c2 = closedBy(r2, 3000), c1 = closedBy(r1, 3000);
     check('B/blocked · rev 2 closes the gap at very nearly PLAYER_SPEED',
       c2 > CAN_CLOSE * 0.9, `closed ${c2.toFixed(0)}wu of a possible ${CAN_CLOSE.toFixed(0)}wu in 3s`);
+    // ⚠️ RELATIVE TO REV 2, NOT TO AN ABSOLUTE FRACTION — and the reason is worth
+    // knowing, because it is the same trap this whole selftest exists to catch.
+    // Rev 1's defect includes the COUNTDOWN DETOUR (see `makeNav`), and how much of
+    // that 900 ms detour is still latched at the whistle is a function of
+    // `countdownMs mod ~1200`. So the residue moves when `COUNTDOWN_FROM` moves:
+    // measured -102 wu at the old 5.7 s countdown and +69 wu at 3.7 s (DEVIATION #8
+    // in `rules.ts`). The old bound `c1 < CAN_CLOSE * 0.05` was therefore calibrated
+    // to one countdown length and failed on a change it has no business noticing.
+    // What is actually invariant — and is the property under test — is that rev 1
+    // does NOT approach while rev 2 does. Stated as a ratio, that holds at every
+    // countdown length: -0.29x at 5.7 s, 0.20x at 3.7 s, against a bound of 0.33x.
     check('B/blocked · rev 1 closes ~nothing while 634wu out of range — it walks sideways',
-      c1 < CAN_CLOSE * 0.05, `closed ${c1.toFixed(0)}wu of a possible ${CAN_CLOSE.toFixed(0)}wu in 3s`);
+      c1 < c2 / 3, `rev1 closed ${c1.toFixed(0)}wu vs rev2 ${c2.toFixed(0)}wu of a possible ${CAN_CLOSE.toFixed(0)}wu in 3s`);
     check('B/blocked · rev 1 is not merely stuck — it travels while closing nothing',
       r1.playerTravelWU > 500, `travelled ${r1.playerTravelWU}wu`);
   }
 
   // 3. The countdown is not silently counted as walking time.
+  //    The bound used to be a literal `+ 4000`, which was the 5.7 s countdown written
+  //    down as a number. `COUNTDOWN_FROM` moved to 3 (rules.ts DEVIATION #8) and this
+  //    assertion failed on a change it exists to be indifferent to. Derived now, and
+  //    tightened while it was being fixed: the gap is not merely "big", it is EXACTLY
+  //    the countdown, to within the tick the sampler runs on.
   {
     const r = trial(CLEAR, 'smart');
-    check('elapsed and match-clock contact differ by the countdown, and both are reported',
-      r.timeToContactMs > r.timeToContactPlayMs + 4000,
-      `elapsed ${r.timeToContactMs}ms, match clock ${r.timeToContactPlayMs}ms`);
+    const COUNTDOWN_MS = RULES.COUNTDOWN_FROM * 1000 + RULES.COUNTDOWN_START_FLASH_MS;
+    check('elapsed and match-clock contact differ by EXACTLY the countdown, and both are reported',
+      Math.abs((r.timeToContactMs - r.timeToContactPlayMs) - COUNTDOWN_MS) <= 2 * DT,
+      `elapsed ${r.timeToContactMs}ms - match clock ${r.timeToContactPlayMs}ms = ${r.timeToContactMs - r.timeToContactPlayMs}ms vs countdown ${COUNTDOWN_MS}ms`);
   }
 
   console.log(`\n   ${pass}/${pass + fail} assertions passed\n`);

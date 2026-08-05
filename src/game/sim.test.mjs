@@ -33,6 +33,7 @@ import { applyDamage, attemptAttack, statusReadyAt } from './combat.ts';
 import {
   CHARACTERS, CHARACTER_IDS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, POT, TRAIL,
+  COUNTDOWN_FROM, COUNTDOWN_START_FLASH_MS,
   REGEN_DELAY_MS, REGEN_TICK_MS, REGEN_AMOUNT, STUN_DURATION_MS, SLOW_DURATION_MS,
   STUN_GRACE_MS, SLOW_GRACE_MS,
   AI_FLEE_HP_FRACTION, AI_HAZARD_MARGIN, AI_SELF_HEAL_HP_FRACTION,
@@ -415,12 +416,19 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   const arena = makeArena();
   const state = createMatch(arena, 'hamburger', 'donut');
   check('match starts in countdown', state.phase === 'countdown');
-  check('countdown starts at COUNTDOWN_FROM', state.countdownValue === 5);
+  // Was `=== 5`, a hardcode that outlived the constant it claimed to be checking: this
+  // assertion's own NAME says COUNTDOWN_FROM, and it went to 3 in DEVIATION #8. A test
+  // that names a constant and compares against a literal stops testing anything the
+  // moment the constant moves — it only tells you the literal is still the literal.
+  check('countdown starts at COUNTDOWN_FROM', state.countdownValue === COUNTDOWN_FROM,
+    `countdownValue=${state.countdownValue} COUNTDOWN_FROM=${COUNTDOWN_FROM}`);
 
   let sawMatchStarted = false;
   let sawFinalTick = false;
-  // 5s countdown + 700ms START! flash = 5700ms. Step in 50ms increments.
-  for (let i = 0; i < 120; i++) {
+  // COUNTDOWN_FROM x 1000 + the START! flash, stepped in 50 ms increments with plenty
+  // of headroom — derived, so this loop cannot silently stop reaching the whistle.
+  const countdownSteps = Math.ceil((COUNTDOWN_FROM * 1000 + COUNTDOWN_START_FLASH_MS) / 50) + 20;
+  for (let i = 0; i < countdownSteps; i++) {
     const events = stepMatch(state, 50, noInput);
     if (events.find((e) => e.type === 'countdown-tick' && e.value === 0)) sawFinalTick = true;
     if (events.find((e) => e.type === 'match-started')) sawMatchStarted = true;
@@ -2093,6 +2101,98 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     check('and it is genuinely fleeing while it does it — all 11 retreat',
       retreated === CHARACTER_IDS.length, `${retreated}/${CHARACTER_IDS.length} moved away from the player`);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 21. The countdown leaves NO RESIDUE — the property that makes its length free.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `COUNTDOWN_FROM` went 5 -> 3 (AUTHORISED DEVIATION #8) on the claim that the length
+// of the countdown cannot move balance. That claim was verified empirically — 3,520
+// paired matches, 0 of 110 matchups moved on any of four policies — but an empirical
+// result is not a guard. These assertions are the guard: they state the STRUCTURAL
+// reason the claim holds, so a future change that gives the countdown a side effect
+// (fighters that may walk before the whistle, a pre-match hazard tick, a status applied
+// on spawn) fails HERE, loudly, instead of silently re-pricing the whole roster.
+//
+// The reason is that nothing in `stepMatch` reads absolute `elapsed`: every cooldown,
+// status and damage stamp starts at `-Infinity` and every timer is an accumulator from
+// zero, so translating the clock cannot change a comparison. What that looks like from
+// the outside is: at the whistle, the match is in EXACTLY its initial state.
+console.log('\n21. The countdown leaves no residue (why its length is balance-free)');
+{
+  const arena = makeArena();
+  const state = createMatch(arena, 'hamburger', 'donut');
+
+  // An input that would do something if the countdown ever let it: full movement, a
+  // firing press, and an aim. `stepMatch` must ignore all three until the whistle.
+  const liveInput = { move: { x: 1, y: 1 }, selectedWeapon: 0, attack: true, aim: { x: 0, y: 1 } };
+  const spawn = { px: state.player.x, py: state.player.y, ex: state.enemy.x, ey: state.enemy.y };
+  const facing0 = { x: state.player.facing.x, y: state.player.facing.y };
+
+  // ⚠️ THE TICK THAT BLOWS THE WHISTLE IS ITSELF A PLAYING TICK. `stepMatch` runs
+  // `stepCountdown` and then a SEPARATE `if (state.phase === 'playing')` — not an else —
+  // so the frame that flips the phase also aims, fires, moves and steps the world (that
+  // is deliberate and section 8 asserts the `timeRemaining` half of it). Snapshotting
+  // "after the countdown" therefore reads one frame of live match and reports it as
+  // residue. The subject here is the state at the END OF THE COUNTDOWN, which is the
+  // state at the TOP of the transition tick — so the loop captures before each step and
+  // stops on `match-started`, and the events set excludes that final tick.
+  const DT = 16.667;
+  const seen = new Set();
+  const snapshot = () => ({
+    elapsed: state.elapsed,
+    px: state.player.x, py: state.player.y, ex: state.enemy.x, ey: state.enemy.y,
+    fx: state.player.facing.x, fy: state.player.facing.y,
+    lastUsed: [state.player.lastUsed.slice(), state.enemy.lastUsed.slice()],
+    stamps: [state.player, state.enemy].map((f) => [f.status.slowedUntil, f.status.stunnedUntil, f.lastDamagedAt]),
+    timers: [state.player, state.enemy].map((f) => [f.fogTimer, f.regenTimer, f.trailDropTimer, ...f.hazardTimers]),
+    hp: [state.player.hp, state.enemy.hp], alive: [state.player.alive, state.enemy.alive],
+    world: [state.projectiles.length, state.splats.length, state.trailMarks.length],
+    safeRadius: state.safeRadius, timeRemaining: state.timeRemaining,
+  });
+
+  let end = null;              // state at the end of the countdown
+  let elapsedAtWhistle = null;
+  for (let i = 0; i < 2000 && state.phase === 'countdown'; i++) {
+    end = snapshot();
+    const evs = stepMatch(state, DT, liveInput);
+    if (evs.some((e) => e.type === 'match-started')) { elapsedAtWhistle = state.elapsed; break; }
+    for (const ev of evs) seen.add(ev.type);
+  }
+
+  check('the countdown lasts COUNTDOWN_FROM x 1000 + COUNTDOWN_START_FLASH_MS (to within a tick)',
+    elapsedAtWhistle !== null && Math.abs(elapsedAtWhistle - (COUNTDOWN_FROM * 1000 + COUNTDOWN_START_FLASH_MS)) <= DT,
+    `whistle at ${elapsedAtWhistle?.toFixed(1)}ms, derived ${COUNTDOWN_FROM * 1000 + COUNTDOWN_START_FLASH_MS}ms`);
+
+  check('the ONLY event a pre-whistle tick can emit is countdown-tick',
+    [...seen].every((t) => t === 'countdown-tick'),
+    `emitted [${[...seen].join(', ')}]`);
+
+  check('a held move+attack+aim moves NEITHER fighter off its spawn',
+    end.px === spawn.px && end.py === spawn.py && end.ex === spawn.ex && end.ey === spawn.ey);
+
+  check('…and does not turn the player either — aim is gated with the rest',
+    end.fx === facing0.x && end.fy === facing0.y);
+
+  check('no weapon was consumed: every cooldown is still untouched at -Infinity',
+    end.lastUsed.every((arr) => arr.every((t) => t === -Infinity)));
+
+  check('no status, no damage stamp: all six are still -Infinity',
+    end.stamps.every((arr) => arr.every((t) => t === -Infinity)));
+
+  check('every per-fighter accumulator is still zero (fog / regen / trail / hazard)',
+    end.timers.every((arr) => arr.every((t) => t === 0)));
+
+  check('both fighters are at full HP and alive',
+    end.hp[0] === PLAYER_MAX_HP && end.hp[1] === ENEMY_MAX_HP && end.alive[0] && end.alive[1]);
+
+  check('nothing exists in the world: no projectiles, splats or trail marks',
+    end.world.every((n) => n === 0));
+
+  check('the ring is still at its opening radius and the match clock has not started',
+    end.safeRadius === arena.maxSafeRadius && end.timeRemaining === MATCH_DURATION_MS,
+    `safeRadius=${end.safeRadius} timeRemaining=${end.timeRemaining}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
