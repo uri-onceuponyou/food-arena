@@ -1,0 +1,80 @@
+# Deploy the game to GitHub Pages so Uri can play it on a real device.
+#
+# Uri: "perhaps we can deploy it somewhere so i can play without being interrupted
+# from changing files? In addition it will allow me to evaluate mobile"
+#
+# Both halves matter and they are different problems:
+#
+#   * NO HMR. The shared dev server reloads the page whenever any agent saves a file,
+#     which Uri correctly reported as the game "crashing mid-flight and starting over
+#     from homescreen". A built bundle has no HMR client at all, so it cannot happen.
+#   * A REAL PHONE. Brawl Stars and Zooba are phone games first, and this project's
+#     mobile pillar has only ever been judged by a headless harness. Playwright never
+#     blurs, synthesises zero compatibility mouse events, and rasterises on SwiftShader
+#     so frame time is unmeasurable (docs/LESSONS.md §10). A URL on Uri's own phone
+#     answers questions no probe here can.
+#
+# `tools/tmp/playtest.mjs` already solves the first half locally. This solves both,
+# from anywhere, without a machine being awake.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: read the repo, write only the Pages deployment.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race. `cancel-in-progress: false` because a half-finished
+# Pages deploy is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # `npm run build` is `tsc --noEmit && vite build`, so a type error fails the
+      # deploy rather than shipping a broken bundle.
+      #
+      # DEPLOY_BASE is set ONLY here. Locally it is unset and vite.config.ts falls back
+      # to '/', which is what every tool in tools/ expects.
+      - name: Build
+        env:
+          DEPLOY_BASE: /food-arena/
+        run: npm run build
+
+      # A project site has no server-side routing, so a deep link would 404. The app
+      # decodes `?screen=<name>` (see src/ui/screens/shell.ts), which needs no rewrite
+      # rule — but a 404.html that serves the app keeps a mistyped path from dead-ending.
+      - name: SPA fallback
+        run: cp dist/index.html dist/404.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
