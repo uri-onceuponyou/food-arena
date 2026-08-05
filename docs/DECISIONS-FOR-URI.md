@@ -23,7 +23,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **19** | Back out of a live match abandons it silently · mid-match reload restarts it | abandon · restart | **two small feel calls** | one line each |
 | **22** | **Character levels 1–15** | being built | ✅ **ANSWERED — AI scales to the player's level** | in flight |
 | **23** | ⚠️ PvP makes `PLAYER_MAX_HP` ≠ `ENEMY_MAX_HP` **unfair by definition** | 100 vs 90 | **your §12 dial has a shelf life** | a roadmap item |
-| **24** | Investment beats rarity → so **rarity must scale levelling COST** | being built | ✅ **answered; the cost curve is the consequence** | in flight |
+| **24** | Rarity vs level | being rebuilt | ✅ **ANSWERED — pure genre pattern: rarity ≠ power at equal level.** Reverses part of §13 | in flight |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
@@ -33,7 +33,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **4** | `ROSTER_GATED` | off | **yours** — shop is built and honest either way | one flag |
 | **2** | Timeout tiebreak | HP fraction → zone → you | **keep** (it now actually fires) | a few lines |
 | **3** | Trail damage cap | 1 per tick | **keep** | one constant |
-| **13** | Rarity runs backwards; the stat card is fiction | — | ✅ **DONE — rarity is monotonic; settled matchups 70 → 22** | landed |
+| **13** | Rarity runs backwards; the stat card is fiction | — | ⚠️ **PARTLY REVERSED by §24** — keep per-character stats, drop the rarity ramp | in flight |
 | **14** | Portrait phones: 65% black bars | letterboxed to 4:3 | **prompt to rotate** — or rethink the fairness model | one prompt, or a model rework |
 | **8** | Pointer lock | shipped as built | ✅ **ANSWERED — Uri: "works good"** | — |
 | **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
@@ -1100,3 +1100,53 @@ to zero at equal level (the pure genre pattern), which would undo §13.
 - A **top-end sanity check**: ~+5%/level over 14 steps is ~1.7× on HP *and* damage simultaneously,
   i.e. roughly **2.9× effective combat power** against an unlevelled opponent. That is a big number
   and it needs to not break anything.
+
+
+---
+
+## 24b. ⚠️ REVERSAL — rarity does not grant power, and the reason is your own §22 answer
+
+**Uri:** *"Match how common games do it. There is a reason for it."*
+
+He is right, and I had it wrong. My §24 compromise — rarity grants power *and* costs more to level —
+is **withdrawn**. The pure genre pattern is being built instead.
+
+### The reason, stated because it is the whole point
+
+**Rarity-as-power is pay-to-win, and it is the one imbalance that skill cannot close.** A player who
+got a Cyber has a permanent edge over an equally-skilled, equally-invested player who did not.
+
+That is tolerable in a single-player game and **fatal in a competitive one** — and §22 says this game
+is *"eventually humans vs. humans."* Which is exactly why every game in this genre puts rarity on
+**acquisition** rather than on **strength**: Brawl Stars brawlers differ wildly in kit and are roughly
+balanced at equal power level; Clash Royale's rarity sets how many copies a card needs, not what it
+does.
+
+**Levels are a legitimate power axis precisely because anyone can reach them** — they cost time, not
+luck.
+
+### What changes, and what is kept
+
+**§13/§21 did two things and only one is being undone.**
+
+| | verdict |
+|---|---|
+| **per-character health and speed as real stats** | ✅ **KEPT** — this was the actual prize: **settled matchups 70 → 22 of 110**, because the matchup matrix finally had a second axis. Must not regress. |
+| **those stats correlating with rarity tier** | ❌ **REMOVED** — the ramp Normal 40.4 → Cyber 61.1 flattens. |
+
+**The distinction that matters: characters should differ in *shape*, not in *total*.** The card
+already gets this right — Hamburger **10/3/5** (glass cannon), Pizza **4/10/5** (wall). Those are
+trade-offs at comparable totals. What goes is any tendency for the *totals* to climb with rarity.
+
+**Rarity keeps two real jobs**, and they are the ones that make it feel valuable: how hard a character
+is to **obtain**, and how expensive it is to **level**. That half of §24 survives — it is the genre
+pattern, and it is what makes a rare character an investment rather than an advantage.
+
+### The one thing that could still come back to you
+
+If flattening rarity turns out to cost the **settled-matchup count**, that is a real tension between
+two of your goals — a balanced roster and a varied one — and you will get the numbers rather than a
+silent trade.
+
+*(§13 remains correct about the defect it found: the trophy road was selling a downgrade and the stat
+card was fiction. Both are fixed. Only the "rarity = power" remedy is reversed.)*
