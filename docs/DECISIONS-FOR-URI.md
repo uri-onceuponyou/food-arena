@@ -21,6 +21,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
 | **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | no concealment | **your call — this is a feature, not an art pass** | new mechanic |
 | **19** | Back out of a live match abandons it silently · mid-match reload restarts it | abandon · restart | **two small feel calls** | one line each |
+| **22** | **Character levels 1–15** — requested by Uri; who else scales? | being built | **the enemy-scaling call will come back to you** | in flight |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
@@ -945,3 +946,49 @@ the card could not discriminate, and it is gone.
 **One visual consequence of §15 to watch for when you next play:** a fleeing enemy now backpedals
 **facing you** rather than turning its back, because the model rotates to `facing`. Genre-normal, and
 it is what you already do — but you will notice it.
+
+
+---
+
+## 22. Character levels 1–15 — requested, in flight, and one call will come back to you
+
+**Uri, verbatim:** *"I want the ability to improve characters in levels. 1–15, each level improves
+damage and HP. To increase levels you need to spend coins/anything else. Add this and let's also
+make sure the entire game economics is done."*
+
+Being built as one vertical slice — model, sim, and both screens under one owner, because a level
+system split across two agents produces two half-systems. Banked in phases so nothing is trapped:
+model → sim → UI → completeness audit.
+
+### ⚠️ The one that will come back to you: **who else levels up?**
+
+You tuned difficulty to **52.2%** an hour ago, after §12 sat parked for most of a day. **A level
+system makes win rate a function of player level** — so unless the enemy scales too, the game is
+trivially easy by level 15 and the number you just chose stops meaning anything.
+
+You will get a **win-rate curve across levels 1→15**, not a single number. A flat ~52% across the
+range is the obvious target, but the *shape* is yours: a game that gets slightly easier as you invest
+is a legitimate reward, and a game that stays exactly level is a legitimate discipline. The default
+shipped will be defensible and stated, not silent.
+
+### The second interaction, and it is the interesting one
+
+**Rarity became monotonic in strength an hour ago** (§13/§21: Normal 40.4 → Cyber 61.1). Levels are a
+**second power axis on top of that one.** So: *should a level-15 Normal beat a level-1 Cyber?*
+
+Both answers work, and they are different games. "Yes" means investment beats rarity and your free
+starter stays viable forever. "No" means rarity is a hard ceiling and the trophy road is the real
+progression. What must not happen is the answer arriving **by accident** — that is exactly how the old
+roster ended up with the free starter as the strongest character in the game. **The crossover will be
+measured and parked for you.**
+
+### "The entire game economics is done"
+
+Treated as a completeness audit rather than an extension: sources and sinks (levelling is a large new
+sink — it must not starve unlocking, or vice versa), the cost-versus-strength curve, and pacing
+**re-measured honestly** — the recorded ~13 hours to the last unlock was measured against a
+**45-second** match, and mean play length is now **~11.7 s**, so that figure is stale by construction.
+
+Two existing properties are protected: the shop still ships **visible and disabled** with its refusal
+stated in the model's own arithmetic, and `ROSTER_GATED` is still never read (availability is
+*derived*) — so **§4 remains your call and is not pre-empted by this work.**
