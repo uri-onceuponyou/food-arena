@@ -491,6 +491,33 @@ playing it. This is squarely that kind of question.
 
 ## 13. Power runs BACKWARDS against rarity, and the character card is fiction
 
+> ## ⚠️ CORRECTED — the instruments that produced this section were contaminated
+>
+> An audit (`d9753ff`) found **ten** instruments sharing a stale driver whose stuck detector
+> ran during the countdown. All three tools behind this section were among them. Verdicts,
+> measured paired on identical seeds against a frozen `git archive` sim:
+>
+> | claim | verdict |
+> |---|---|
+> | **(c) 53 of 110 settled** | **SHIFTS — and it is WORSE: 70 of 110. 64% of the grid.** |
+> | **(b) ρ = 0.327** | **WITHDRAWN** — does not reproduce (0.395 same conditions; 0.462 today) |
+> | (a) rarity runs backwards | **stands**, but every tier number below is wrong |
+> | "Hamburger is first in every measurement" | **FALSE — Taco is first** (83.3 vs 75.5) |
+>
+> **(c) decomposes exactly:** the driver fix alone 53 → 63, sim drift alone 53 → 59,
+> combined **70**. And "fixing Lollipop moved it 53 → 52" came from the bad instrument.
+>
+> **(b)'s claim survives with a better argument that no number can move:** with n=11,
+> significance needs ρ ≈ 0.62 — but the card's stat total takes only **five distinct values
+> across eleven characters, six of them tied at 19.** It cannot discriminate *even in
+> principle*. (Also: the text below says "four axes"; `STAT_ROWS` has **three**.)
+>
+> **Corrected tier means:** Cyber 29.5 → **41.5**, Neon 34.8 → **25.3**, Epic 12.5 → **24.7**.
+>
+> ✅ **Uri has answered this section: rarity MEANS power, build real health and speed.**
+> The build is in flight and is using the corrected figures.
+
+
 **Why it needs you.** The roster was measured per character for the first time — 110 matchups ×
 32 seeds, each character scored in the player's hands *and* in the AI's. Three findings, and all
 three are design questions rather than defects.

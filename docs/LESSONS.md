@@ -241,6 +241,45 @@ That is a *derived* bound, not a guess, and it self-adjusts — a long measureme
 out to protect itself. Sweeping 21 leaked servers on that rule took load 38.4 → 33.4 and left all
 four live snapshots untouched. Dry run is the default, because the failure mode is destroying work.
 
+
+### One stale COPY of a driver contaminated ten instruments, and the count was wrong by 2×
+
+The fix landed in `match-sim.mjs` on 2026-08-05: the scripted player's **stuck detector runs during
+the countdown**, walking it sideways for **+567 ms** at the whistle. It never reached
+`arena_probe.mjs` — and four other tools had lifted that driver verbatim.
+
+**The brief said five files. `grep -l detourUntil tools/` returned thirteen.** Ten carried the
+defect. Five still do. And a **fourteenth copy was born during the audit**, by a peer who could not
+edit the files being fixed and correctly copied from a *good* source — caught by the new guard on its
+first run.
+
+What it cost, paired on identical seeds against a frozen sim:
+
+| tool | delta |
+|---|---|
+| `arena_probe --matchups` | **110/110 matchups changed** in all three policies |
+| `status_census` | 37/110 moved, max **50.0 pp**; median play −10.3% |
+| `roster_table` | 58/110 moved, max **34.4 pp** — while the *aggregate* moved 0.8 pp, inside the noise floor |
+
+**That last row is the trap in one line.** The aggregate was clean. Fifty-eight individual matchups
+were not. An instrument can be right about the number you are watching and wrong about every number
+underneath it — so **a paired per-matchup delta and an aggregate delta are different quantities, and
+conflating them hides exactly this.**
+
+**A second fault in the same driver is subtler and worse:** it *decides* during the countdown,
+drawing seeded RNG. So changing the countdown length **re-seeds every match** — a change that moved
+the approach by **+0.01 s** appeared to move **38 of 110 matchups by up to 50 pp.** Any timing change
+can manufacture a large, consistent, reproducible, entirely fictitious balance result.
+
+→ **Do not fix a copied bug in the copy. Delete the copies.** `tools/tmp/scripted_player.mjs` is now
+the single implementation, both historical faults are reachable by flag so every "before" reproduces
+**byte-identically**, and `driver_guard.mjs` (49 assertions) fails if a fourteenth appears. **Every
+check also runs against the historical driver and must FAIL there** — a guard that passes on the bug
+it guards against is not a guard.
+
+**And re-derive history before building on it.** `ed8de35`'s "Lollipop was pulled out of last place"
+does not survive its own tree: with the fixed driver at that commit, Lollipop is last again. It holds
+on HEAD — but it held *then* for a reason the instrument invented.
 ---
 
 ## 6. Scale, zoom and framing decide what is worth building
