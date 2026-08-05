@@ -369,6 +369,71 @@ export interface StageOptions {
  */
 const STAGES: Stage[] = [];
 
+/**
+ * A rolling record of every GL context event this document has seen.
+ *
+ * ── Why a log and not just a flag ───────────────────────────────────────────────
+ * A lost context is invisible in every artefact this project produces: `tsc` cannot
+ * see it, no assertion fires, and a screenshot of it is a black rectangle that looks
+ * like a hundred other black rectangles. `docs/LESSONS.md` §10 records that the two
+ * most valuable bug reports on this project came from Uri simply playing it — so the
+ * useful thing to build is not a guard, it is EVIDENCE. When he says "it went black",
+ * `window.__glLog` answers whether the GPU dropped the context, how many times, on
+ * which canvas, and whether it ever came back.
+ *
+ * Capped, because a driver that is resetting in a loop must not also be a memory leak.
+ */
+interface GlLogEntry {
+  t: number;
+  type: 'lost' | 'restored' | 'creationerror';
+  /** Drawing-buffer size at the time, as a cheap identity for WHICH canvas. */
+  size: string;
+  offscreen: boolean;
+  detail?: string;
+}
+const GL_LOG_MAX = 24;
+
+declare global {
+  interface Window {
+    /** See `GlLogEntry`. QA/bug-report diagnostic; never read by game code. */
+    __glLog?: GlLogEntry[];
+  }
+}
+
+/**
+ * Record a context event and broadcast it.
+ *
+ * The broadcast is a plain DOM `CustomEvent` on `window` rather than a callback the
+ * Stage's owner has to wire up, for one reason: the layer that should TELL the player
+ * (`ui/screens/shell.ts`) does not construct the Stage — `charStage.ts`, `thumbs.ts`
+ * and `game/match.ts` do, and two of those are transient. An event decouples "the GPU
+ * dropped us" from "somebody says so on screen" without `render/` learning that a UI
+ * exists.
+ *
+ * `offscreen` rides in the detail so a listener can ignore a thumbnail generator's
+ * context — that one is genuinely not worth interrupting the player for, and it is
+ * also the one most likely to be sacrificed first when a browser starts reclaiming
+ * contexts.
+ */
+function noteGlEvent(stage: Stage, type: GlLogEntry['type'], detail?: string): void {
+  if (typeof window === 'undefined') return;
+  const entry: GlLogEntry = {
+    t: Date.now(),
+    type,
+    size: `${stage.canvas.width}x${stage.canvas.height}`,
+    offscreen: stage.offscreen,
+    ...(detail ? { detail } : {}),
+  };
+  const log = (window.__glLog ??= []);
+  log.push(entry);
+  if (log.length > GL_LOG_MAX) log.shift();
+  try {
+    window.dispatchEvent(new CustomEvent(`fa:webglcontext${type}`, {
+      detail: { stage, offscreen: stage.offscreen, entry },
+    }));
+  } catch { /* an ancient engine without CustomEvent must still lose a context quietly */ }
+}
+
 function canvasOnScreen(stage: Stage): boolean {
   const c = stage.canvas;
   if (!c?.isConnected) return false;
@@ -404,6 +469,14 @@ export class Stage {
   readonly canvas: HTMLCanvasElement;
   /** True once `dispose()` has run. Read by QA probes to skip dead stages. */
   disposed = false;
+  /**
+   * True between `webglcontextlost` and `webglcontextrestored`.
+   *
+   * While it is set there is no GPU to draw with: `render()` is a no-op and the canvas
+   * is transparent black. Public because the only useful reaction to it lives outside
+   * `render/` — see `noteGlEvent`.
+   */
+  contextLost = false;
   /** Never the thing on screen — see `StageOptions.offscreen`. */
   readonly offscreen: boolean;
   private composer: EffectComposer | null = null;
@@ -420,6 +493,10 @@ export class Stage {
   /** A caller's explicit `shadowMapSize`. Pinned means pinned — a tier change must not move it. */
   private readonly pinnedShadowMapSize: number | null;
   private unsubscribeQuality: (() => void) | null = null;
+  /** IBL settings, remembered: the environment map has to be REBUILT after a context
+   *  loss and the constructor's `opts` are long gone by then. See `buildEnvironment`. */
+  private readonly envEnabled: boolean;
+  private readonly envIntensity: number;
   /** Fingerprint of everything the shadow map depends on, from the last frame. */
   private shadowSig = -1;
   private shadowCasterMinTexels: number;
@@ -437,7 +514,19 @@ export class Stage {
     // `postFx: false` needs no flag of its own: it leaves `composer` null, and
     // `applyQuality` only ever rebuilds a chain that already exists.
     this.gradeOnly = opts.postFx === 'grade';
+    this.envEnabled = opts.environment !== false;
+    this.envIntensity = opts.environmentIntensity ?? 0.32;
     if (!this.canvas.parentElement) this.container.appendChild(this.canvas);
+
+    // BEFORE the renderer, deliberately: `webglcontextcreationerror` fires DURING
+    // `getContext`, i.e. inside the constructor below, so a listener attached
+    // afterwards can never see it. three logs the reason to the console and then
+    // throws a bare "Error creating WebGL context"; this is what puts the driver's
+    // own statusMessage somewhere a bug report can quote it. That case is real on the
+    // devices this has not been tested on — Chrome kills the OLDEST context once a
+    // process passes ~16 (see `dispose`), and the next Stage to be built is the one
+    // that fails.
+    this.canvas.addEventListener('webglcontextcreationerror', this.onContextCreationError, false);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -539,27 +628,17 @@ export class Stage {
     // gives diffuse irradiance that genuinely varies with surface orientation (it
     // reinforces the key instead of filling it in), while the bright panels inside it
     // keep — in fact sharpen — the crisp reflected highlight that sells moulded vinyl.
-    if (opts.environment !== false) {
-      const pmrem = new THREE.PMREMGenerator(this.renderer);
-      // NOT `compileEquirectangularShader()`. That warms the equirect-to-cubemap
-      // material, which `fromScene` never touches — it renders the scene into the
-      // cube faces directly. It was one wasted program link per Stage, and a program
-      // link is a synchronous 10-60 ms stall on a mobile driver.
-      const envScene = buildGradientEnvironment();
-      this.envMap = pmrem.fromScene(envScene, 0.035).texture;
-      this.scene.environment = this.envMap;
-      // Held at the same number as the uniform box it replaces, so this change is a
-      // change of SHAPE, not of exposure.
-      this.scene.environmentIntensity = opts.environmentIntensity ?? 0.32;
-      envScene.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.isMesh) { m.geometry?.dispose(); (m.material as THREE.Material)?.dispose(); }
-      });
-      pmrem.dispose();
-    }
+    this.buildEnvironment();
 
     if (opts.postFx !== false) this.buildPost(opts.postFx === 'grade');
     this.resize();
+
+    // ── Context loss ─────────────────────────────────────────────────────────
+    // three attaches its own handlers in the WebGLRenderer constructor above, so ours
+    // run second — which is exactly what `onContextRestored` needs, since it may only
+    // touch the GPU after three has re-initialised it.
+    this.canvas.addEventListener('webglcontextlost', this.onContextLost, false);
+    this.canvas.addEventListener('webglcontextrestored', this.onContextRestored, false);
 
     // QA-only handle, same spirit as match.ts's `__vfxDebug*`. Never read by game
     // code — it exists so a Playwright probe can measure the post chain and toggle
@@ -577,6 +656,118 @@ export class Stage {
     // character and arena module would then be inside.
     this.unsubscribeQuality = onQualityChange(() => this.applyQuality());
   }
+
+  /**
+   * Build (or REBUILD) the image-based lighting.
+   *
+   * Extracted from the constructor for one reason, and it is not tidiness: this is the
+   * single piece of GPU state in the whole Stage that cannot survive a context loss.
+   * `PMREMGenerator.fromScene` hands back a RENDER-TARGET texture — its pixels were
+   * computed on the GPU and there is no `texture.image` anywhere on the CPU side. When
+   * a context is restored, three throws away its entire `WebGLProperties` map and
+   * re-uploads every texture from its `image`; a render-target texture has none, so
+   * the binding silently falls back to an empty one and the whole scene loses its
+   * diffuse irradiance and its specular sheen.
+   *
+   * MEASURED, `tools/tmp/glloss_probe.mjs`, live match at `simSpeed=0.02` so the frame
+   * is frozen and the only variable is the loss:
+   *
+   *   frame mean before the loss ....... 76.291 / 255   (drift control over the same
+   *   frame mean after restore ......... 60.641 / 255    span: 0.007, so this is 2200x
+   *   -> the restored frame is 20.5% DARKER, permanently   the noise floor)
+   *
+   * Reproduced to a hundredth on a second loss/restore cycle (-15.650 then -15.657).
+   * That is `docs/LESSONS.md` §1 in its nastiest form: not a black screen anyone would
+   * report, just a quietly wrong image that never comes back.
+   */
+  private buildEnvironment(): void {
+    if (!this.envEnabled) return;
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    // NOT `compileEquirectangularShader()`. That warms the equirect-to-cubemap
+    // material, which `fromScene` never touches — it renders the scene into the
+    // cube faces directly. It was one wasted program link per Stage, and a program
+    // link is a synchronous 10-60 ms stall on a mobile driver.
+    const envScene = buildGradientEnvironment();
+    this.envMap = pmrem.fromScene(envScene, 0.035).texture;
+    this.scene.environment = this.envMap;
+    // Held at the same number as the uniform box it replaces, so this change is a
+    // change of SHAPE, not of exposure.
+    this.scene.environmentIntensity = this.envIntensity;
+    envScene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) { m.geometry?.dispose(); (m.material as THREE.Material)?.dispose(); }
+    });
+    pmrem.dispose();
+  }
+
+  private readonly onContextCreationError = (e: Event): void => {
+    const reason = (e as Event & { statusMessage?: string }).statusMessage ?? '';
+    noteGlEvent(this, 'creationerror', reason || 'no statusMessage');
+  };
+
+  /**
+   * The context is gone.
+   *
+   * `preventDefault()` is the whole ballgame: without it the browser will NEVER fire
+   * `webglcontextrestored`, and the canvas is black for the lifetime of the document.
+   * three's own handler already calls it — verified in `three.module.js:15852` and
+   * measured true by `glloss_probe.mjs` before this handler existed — so this call is
+   * belt and braces rather than the fix. It is kept anyway because three removes its
+   * listener in `renderer.dispose()`, and because the requirement deserves to be
+   * stated somewhere the next person will read.
+   */
+  private readonly onContextLost = (e: Event): void => {
+    // `dispose()` ends with `forceContextLoss()`, which fires this event on purpose.
+    // Recovering from a deliberate teardown would resurrect a Stage nobody wants.
+    if (this.disposed) return;
+    e.preventDefault();
+    this.contextLost = true;
+    noteGlEvent(this, 'lost');
+  };
+
+  /**
+   * The context is back — but nothing that lived only on the GPU is.
+   *
+   * three has already run its own handler by the time this fires (it registered first,
+   * in the `WebGLRenderer` constructor) so the GL context is re-initialised and every
+   * geometry, material and CPU-backed texture will re-upload lazily. Three things will
+   * NOT come back on their own, and all three were measured wrong before this existed:
+   *
+   *   1. THE ENVIRONMENT MAP — a render target with no CPU image. See
+   *      `buildEnvironment`: worth 15.65/255 of frame mean, permanently.
+   *   2. THE SHADOW MAP — `shadowMap.autoUpdate` is false here (see the constructor),
+   *      and three faithfully preserves `needsUpdate: false` across the restore, so
+   *      the shadow pass never runs again and every shadow samples an uninitialised
+   *      depth target. `markShadowsDirty()` is the documented escape hatch for exactly
+   *      "something changed that the fingerprint cannot see", and a new GL context is
+   *      the largest such change there is. LOOKED AT, not inferred: in
+   *      `shots/glloss/before/0{5,6}-menu-*.png` the character-select portrait's
+   *      contact shadow on the pedestal is present before the loss and GONE after the
+   *      restore. That framing is the worst case precisely because it is STATIC — the
+   *      fingerprint in `scheduleShadowUpdate` never changes, so nothing ever asks for
+   *      a redraw. A match hides it: the fighters move every frame, the fingerprint
+   *      changes, and the map redraws by accident.
+   *   3. THE PIXEL RATIO / SIZE — cheap to reassert, and free insurance against a
+   *      restore that arrives with a different backing store.
+   *
+   * The post chain is deliberately NOT rebuilt. Its render targets are recreated by
+   * three on first bind and its LUTs are CPU-backed, so a rebuild would cost two
+   * program links (10-60 ms each on a mobile driver, at the exact moment the device is
+   * already in trouble) and would swap `this.grade` for a new object under anything
+   * holding a reference. Measured: with the two repairs above and no rebuild, the
+   * restored frame matches the pre-loss frame to within the drift control.
+   */
+  private readonly onContextRestored = (): void => {
+    if (this.disposed) return;
+    this.contextLost = false;
+    this.renderer.setPixelRatio(this.effectivePixelRatio());
+    this.envMap?.dispose();
+    this.envMap = null;
+    this.buildEnvironment();
+    this.markShadowsDirty();
+    this.resize();
+    noteGlEvent(this, 'restored');
+  };
 
   /**
    * The pixel ratio this Stage may draw at.
@@ -1094,7 +1285,18 @@ export class Stage {
 
   render(dtSeconds: number): void {
     if (this.disposed) return;
+    // The camera keeps tracking through a blackout; only the DRAW is skipped.
+    //
+    // Deliberately in that order. `rig.update` is a damped follow and costs nothing on
+    // the CPU, so ticking it through the loss means the first restored frame is
+    // already framed correctly — freezing it instead would leave the camera however
+    // many seconds behind the player and then glide to catch up, in full view, at the
+    // exact moment the player is trying to work out what just happened.
     this.rig.update(dtSeconds);
+    // No GPU to draw with. three's own `render()` early-returns while the context is
+    // lost, but `composer.render()` does not — it would walk the whole post chain
+    // binding dead render targets once per frame, for as long as the loss lasts.
+    if (this.contextLost) return;
     if (this.shadowsOn) this.scheduleShadowUpdate();
     if (this.composer) this.composer.render(dtSeconds);
     else this.renderer.render(this.scene, this.rig.camera);
@@ -1248,40 +1450,64 @@ export class Stage {
     this.unsubscribeQuality?.();
     this.unsubscribeQuality = null;
 
+    // `forceContextLoss()` at the end of this method fires a REAL `webglcontextlost`
+    // on this canvas. The handlers guard on `this.disposed` (already true) so they
+    // would no-op anyway, but taking them off is what stops a teardown ever being
+    // logged and broadcast as a GPU failure — the player must not be told the
+    // graphics died because they walked out of a match.
+    this.canvas.removeEventListener('webglcontextlost', this.onContextLost, false);
+    this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored, false);
+    this.canvas.removeEventListener('webglcontextcreationerror', this.onContextCreationError, false);
+
     this.composer?.dispose();
     this.composer = null;
     this.grade = null;
 
-    // three disposes NOTHING for you on teardown — not a geometry, not a material,
-    // not a texture. Walk it once, de-duplicated, because materials and their maps
-    // are shared across hundreds of meshes here (the arena's palette, `toon.ts`'s
-    // one outline material per group).
-    const geometries = new Set<THREE.BufferGeometry>();
-    const materials = new Set<THREE.Material>();
-    this.scene.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (!m.isMesh && !(o as THREE.Points).isPoints && !(o as THREE.Line).isLine) return;
-      if (m.geometry) geometries.add(m.geometry);
-      const mat = m.material;
-      if (Array.isArray(mat)) for (const x of mat) materials.add(x);
-      else if (mat) materials.add(mat);
-    });
-    for (const g of geometries) g.dispose();
-    for (const mat of materials) {
-      for (const v of Object.values(mat as unknown as Record<string, unknown>)) {
-        if (v && (v as THREE.Texture).isTexture) (v as THREE.Texture).dispose();
+    // ── The resource walk is GUARDED, and that is not paranoia ────────────────
+    // Everything from here to `this.scene.clear()` is a best-effort tidy of a few
+    // hundred shared objects, and the three lines AFTER it are the ones that actually
+    // hand the GL context back. Ordered naively, a single throw anywhere in the walk —
+    // one exotic material, one getter that objects to being enumerated — skips
+    // `forceContextLoss()` and LEAKS THE WHOLE CONTEXT. That is the exact failure this
+    // method was written to fix: Chrome caps a process at ~16 live contexts and kills
+    // the OLDEST when the cap is hit, so the symptom is not "this teardown failed", it
+    // is "eight round trips later, the menu portrait went black". The cleanup is
+    // therefore allowed to fail; the handback is not.
+    try {
+      // three disposes NOTHING for you on teardown — not a geometry, not a material,
+      // not a texture. Walk it once, de-duplicated, because materials and their maps
+      // are shared across hundreds of meshes here (the arena's palette, `toon.ts`'s
+      // one outline material per group).
+      const geometries = new Set<THREE.BufferGeometry>();
+      const materials = new Set<THREE.Material>();
+      this.scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh && !(o as THREE.Points).isPoints && !(o as THREE.Line).isLine) return;
+        if (m.geometry) geometries.add(m.geometry);
+        const mat = m.material;
+        if (Array.isArray(mat)) for (const x of mat) materials.add(x);
+        else if (mat) materials.add(mat);
+      });
+      for (const g of geometries) g.dispose();
+      for (const mat of materials) {
+        for (const v of Object.values(mat as unknown as Record<string, unknown>)) {
+          if (v && (v as THREE.Texture).isTexture) (v as THREE.Texture).dispose();
+        }
+        mat.dispose();
       }
-      mat.dispose();
-    }
-    this.scene.clear();
+      this.scene.clear();
 
-    // Reachable from nothing else once the scene is cleared: `PMREMGenerator` hands
-    // back a render-target texture, and 16 MB of shadow map lives on the light.
-    this.scene.environment = null;
-    this.scene.background = null;
-    this.envMap?.dispose();
-    this.envMap = null;
-    this.lighting.key.shadow.dispose();
+      // Reachable from nothing else once the scene is cleared: `PMREMGenerator` hands
+      // back a render-target texture, and 16 MB of shadow map lives on the light.
+      this.scene.environment = null;
+      this.scene.background = null;
+      this.envMap?.dispose();
+      this.envMap = null;
+      this.lighting.key.shadow.dispose();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[stage] resource teardown threw; releasing the context anyway:', err);
+    }
 
     this.renderer.dispose();
     // The line that fixes the leak. Must come after `dispose()`, which detaches the

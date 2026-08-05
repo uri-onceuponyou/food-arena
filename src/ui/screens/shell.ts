@@ -4,7 +4,57 @@
  * ── The shape, and why ──────────────────────────────────────────────────────
  * One live screen at a time; a tagged-union `Route` names it and carries its
  * arguments; a factory table turns a route into a `Screen`. That is the entire
- * router. No paths, no history stack, no lifecycle hooks beyond `dispose`.
+ * router. No paths, no lifecycle hooks beyond `dispose`.
+ *
+ * ── SESSION CONTINUITY: the URL names the screen ────────────────────────────
+ * This file used to touch `history` nowhere at all — `grep -rn "history\.\|popstate"
+ * src/` returned zero hits across the whole project. The URL therefore never changed
+ * as the player moved through the game, and `main.ts:bootRoute` re-derived the boot
+ * route from the ORIGINAL bare `/` on every document load. So ANY reload — a Vite HMR
+ * full-reload (measured at one every 9.3 s on the shared dev server, against a 45 s
+ * match), a refresh, a restored tab, a mobile tab eviction, a renderer crash — landed
+ * the player on the home screen.
+ *
+ * Uri reported it as *"the game is crashing mid-flight and starting over from
+ * homescreen."* HMR was the trigger and `tools/tmp/playtest.mjs` removed it; THIS was
+ * the mechanism that made it look like a crash, and it is what makes the app survive
+ * a reload at all.
+ *
+ * Every mount now writes `?screen=<name>` (plus `player`/`enemy` for a match), which
+ * is the contract `main.ts` already decodes — so the fix needs no change there, and
+ * every existing `?player=…` probe under `tools/` keeps working untouched.
+ *
+ *   * ALL OTHER QUERY PARAMETERS ARE PRESERVED. `simSpeed`, `fogRadius`, `px`, `py`,
+ *     `tier`, `aimMode`, `pointerLock`, `hold` and `apron` are read lazily by six
+ *     different modules; a router that "tidied" the URL would silently break most of
+ *     the tool suite. `tools/tmp/nav_history_probe.mjs` group 5 is the guard.
+ *   * The first mount REPLACES, so the app is never one Back away from a blank tab.
+ *   * Leaving the title card REPLACES too. It is boot-only ("a splash you can reach
+ *     twice is a splash you are trapped in" — `types.ts`), so pushing it would make
+ *     Back from home land on a splash that immediately auto-continues to home again.
+ *   * Everything else PUSHES, so Back and the Android hardware back button move the
+ *     player one screen out, including out of a match.
+ *
+ * ── ...and what "resume" means for a MATCH, which is a decision ─────────────
+ * A match is the one route that cannot be restored. It is a live simulation with no
+ * serialised form anywhere in the project, and inventing one — fighter positions, HP,
+ * cooldowns, statuses, fog radius, the event stream, VFX pools, audio state — buys a
+ * fight the player did not set up, at a disadvantage they cannot see, with a corrupt
+ * match as its failure mode.
+ *
+ * So a reload of a match URL re-enters the SAME MATCHUP as a FRESH match. That keeps
+ * the only durable part of the state — the player's stated intent, "fight this
+ * matchup" — and throws away the part that was never recoverable. Nothing is lost by
+ * it: `matchScreen.ts` banks a result only on `phase === 'ended'`, so an interrupted
+ * match was never recorded either way (measured, `nav_history_probe.mjs` group 3:
+ * wins/losses identical across the interruption).
+ *
+ * ── RENDER ROBUSTNESS: a lost GL context ────────────────────────────────────
+ * `render/stage.ts` broadcasts `fa:webglcontextlost` / `fa:webglcontextrestored` when
+ * the GPU drops (or returns) a context. This file is what the player sees: a notice
+ * over the black canvas, and — if it has not come back after a grace period — a
+ * Reload button. That button is only a real recovery BECAUSE of the history work
+ * above: before it, "reload" meant "lose your screen and start again at home".
  *
  * The reason it can be this small is that the hard part of a game shell is not
  * routing — it is **resource handoff**. There is exactly one GPU and two things that
@@ -26,6 +76,7 @@
  */
 
 import type { Route, RouteName, Screen, ScreenContext } from './types';
+import { CHARACTER_IDS, type CharacterId } from '../../game/rules';
 import { PlayerProfile } from './profile';
 import { ensureScreenStyles } from './theme';
 import { disposeCharacterStage } from './charStage';
@@ -46,8 +97,125 @@ declare global {
     __screenReady?: boolean;
     /** QA-only navigation handle, same spirit as `?simSpeed=` in `match.ts`. */
     __shell?: { navigate(route: Route): void; route(): Route };
+    /**
+     * QA-only FAULT INJECTION, same spirit as `__shell` above. Each key is a
+     * countdown of how many times to throw at that seam:
+     *
+     *     window.__shellFault = { build: 1 };   // the next screen fails to construct
+     *
+     * It exists because the three hardening paths below — a screen that throws while
+     * building, one that throws in `update()`, one that throws in `dispose()` — are
+     * otherwise untestable without committing a deliberately broken screen module,
+     * and this project's rule is that a probe which fails before and passes after IS
+     * the deliverable. Costs one property read per seam.
+     */
+    __shellFault?: { build?: number; update?: number; dispose?: number } | null;
   }
 }
+
+/** Every route name, as data, so a value off `history.state` can be validated. */
+const ROUTE_NAMES: readonly string[] = [
+  'opening', 'home', 'characters', 'trophies', 'shop', 'settings', 'match',
+];
+
+function isCharacterId(v: unknown): v is CharacterId {
+  return typeof v === 'string' && (CHARACTER_IDS as readonly string[]).includes(v);
+}
+
+/**
+ * Validate an untrusted value into a `Route`, or refuse.
+ *
+ * `history.state` outlives the code that wrote it — a restored tab can hand this file
+ * a state object written by a previous BUILD of the game, and a hand-edited URL can
+ * hand it anything at all. `build()` would then index a factory table with a name
+ * that is not in it (returning `undefined` for a `Screen`) or hand `startGame` a
+ * character id that does not exist. Both are the black-screen-forever failure this
+ * whole pass exists to remove, so nothing crosses this boundary unvalidated.
+ */
+function parseRoute(raw: unknown): Route | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const name = (raw as { name?: unknown }).name;
+  if (typeof name !== 'string' || !ROUTE_NAMES.includes(name)) return null;
+  if (name === 'match') {
+    const { player, enemy } = raw as { player?: unknown; enemy?: unknown };
+    return isCharacterId(player) && isCharacterId(enemy) ? { name, player, enemy } : null;
+  }
+  return { name } as Route;
+}
+
+/**
+ * The route a URL describes, or null.
+ *
+ * `main.ts` owns the BOOT decoding (it has extra rules this must not duplicate: a
+ * bare `/` is a cold launch and gets the title card, and any match-only QA parameter
+ * on its own means "go straight to a match"). This is the narrower question a
+ * `popstate` asks — *what does this history entry say?* — and the two agree on the
+ * one thing that matters, the `?screen=` contract.
+ *
+ * Only reached when a history entry carries no state of ours: an entry created before
+ * this code shipped, or one produced by someone editing the address bar.
+ */
+function routeFromSearch(search: string): Route | null {
+  const p = new URLSearchParams(search);
+  const name = p.get('screen');
+  if (name === null || !ROUTE_NAMES.includes(name)) return null;
+  if (name === 'match') {
+    const player = p.get('player');
+    const enemy = p.get('enemy');
+    return isCharacterId(player) && isCharacterId(enemy) ? { name, player, enemy } : null;
+  }
+  return { name } as Route;
+}
+
+function sameRoute(a: Route, b: Route): boolean {
+  if (a.name !== b.name) return false;
+  if (a.name === 'match' && b.name === 'match') return a.player === b.player && a.enemy === b.enemy;
+  return true;
+}
+
+/** How a navigation should move the history stack. `none` = the browser already did. */
+type HistoryMode = 'push' | 'replace' | 'none';
+
+/**
+ * The URL for a route — the CURRENT url with `screen` (and the match's own arguments)
+ * overwritten, and everything else left exactly as it was. See the header: the six
+ * modules that read QA parameters lazily all depend on this being additive.
+ *
+ * `player`/`enemy` are deleted off a non-match route because they would be a lie
+ * there — the roster writes the player's pick to the profile, not to the URL — and
+ * `main.ts` only reads them when `screen=match`.
+ */
+function routeUrl(route: Route): string {
+  const p = new URLSearchParams(window.location.search);
+  p.set('screen', route.name);
+  if (route.name === 'match') {
+    p.set('player', route.player);
+    p.set('enemy', route.enemy);
+  } else {
+    p.delete('player');
+    p.delete('enemy');
+  }
+  const q = p.toString();
+  return `${window.location.pathname}${q ? `?${q}` : ''}${window.location.hash}`;
+}
+
+function writeHistory(route: Route, mode: HistoryMode): void {
+  if (mode === 'none') return;
+  try {
+    const state = { fa: 1, route };
+    if (mode === 'push') window.history.pushState(state, '', routeUrl(route));
+    else window.history.replaceState(state, '', routeUrl(route));
+  } catch {
+    // `pushState` throws a SecurityError on `file://` and inside a sandboxed iframe,
+    // and some embedded webviews rate-limit it. A game that will not start because it
+    // could not update its address bar is a worse bug than the one this fixes.
+  }
+}
+
+/** How long a lost GL context may stay lost before the player is offered a way out. */
+const GL_NOTICE_GRACE_MS = 3000;
+/** Consecutive throws from a screen's `update()` before the menu loop is given up on. */
+const MAX_UPDATE_FAILURES = 10;
 
 export interface ShellOptions {
   /** `#game` — where a match mounts its WebGL canvas. */
@@ -102,6 +270,29 @@ export function createShell(opts: ShellOptions): Shell {
   let swapping = false;
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
+  /** A `popstate` that arrived mid-swap. See `onPopState`. */
+  let queuedPop: Route | null = null;
+  /** Consecutive `update()` throws from the mounted screen. */
+  let updateFailures = 0;
+
+  /** One place that decides what "the app hit a problem" does. Never rethrows. */
+  function report(what: string, err: unknown): void {
+    // eslint-disable-next-line no-console
+    console.error(`[shell] ${what}:`, err);
+  }
+
+  /**
+   * QA fault injection — see `Window.__shellFault`. Returns true once per credit.
+   * A missing/absent global is the only path 99.999% of runs ever take.
+   */
+  function faulting(seam: 'build' | 'update' | 'dispose'): boolean {
+    const f = window.__shellFault;
+    if (!f) return false;
+    const n = f[seam];
+    if (typeof n !== 'number' || n <= 0) return false;
+    f[seam] = n - 1;
+    return true;
+  }
 
   const ctx: ScreenContext = {
     navigate,
@@ -111,6 +302,7 @@ export function createShell(opts: ShellOptions): Shell {
   };
 
   function build(route: Route): Screen {
+    if (faulting('build')) throw new Error(`__shellFault: build ${route.name}`);
     switch (route.name) {
       case 'opening': return createOpeningScreen(ctx);
       case 'home': return createHomeScreen(ctx);
@@ -122,6 +314,13 @@ export function createShell(opts: ShellOptions): Shell {
       case 'settings': return createSettingsScreen(ctx);
       case 'match': return createMatchScreen(ctx, route);
     }
+    // Unreachable by the type system and NOT unreachable in fact. A `Route` can arrive
+    // from `history.state` written by an older build, or from a QA handle. Without
+    // this the switch falls through, `build` returns `undefined`, and the caller dies
+    // on `screen.root` — one line PAST the try/catch that exists to handle exactly
+    // this, leaving an empty stack behind an opaque curtain. Fail where it can be
+    // caught.
+    throw new Error(`unknown route "${String((route as { name?: unknown }).name)}"`);
   }
 
   function stopLoop(): void {
@@ -147,18 +346,46 @@ export function createShell(opts: ShellOptions): Shell {
       // hero on every menu, intermittently, depending on frame timing.
       const dt = Math.min(Math.max(0, (t - lastT) / 1000), 1 / 20);
       lastT = t;
-      current?.update?.(dt);
+      // A throw inside `update()` used to end the loop outright — no rethrow, no
+      // reschedule, no message. The menu's 3D portrait simply froze forever while the
+      // DOM around it stayed perfectly interactive, which is the hardest possible
+      // version of `docs/LESSONS.md` §1 to diagnose: nothing is missing, nothing is
+      // broken, one thing has just stopped moving. One bad frame is now survivable;
+      // ten in a row is a real fault and the loop is stopped LOUDLY instead of
+      // silently, leaving a usable menu rather than a dead one.
+      try {
+        if (faulting('update')) throw new Error('__shellFault: update');
+        current?.update?.(dt);
+        updateFailures = 0;
+      } catch (err) {
+        updateFailures++;
+        if (updateFailures === 1) report(`screen "${currentRoute.name}" update() threw`, err);
+        if (updateFailures >= MAX_UPDATE_FAILURES) {
+          report(`screen "${currentRoute.name}" update() threw ${updateFailures} frames running — stopping the menu loop`, err);
+          stopLoop();
+          return;
+        }
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
   }
 
-  function mount(route: Route): void {
-    currentRoute = route;
+  function mount(route: Route, mode: HistoryMode): void {
     // Free the menu's WebGL context BEFORE the match asks for one of its own. Two
     // live contexts plus a full post chain is the one combination that will stutter
     // on a phone, and it is entirely avoidable.
-    if (route.name === 'match') disposeCharacterStage();
+    //
+    // Guarded for the same reason the music is: this is a GPU teardown, i.e. the one
+    // call in this function most likely to fail on a device that is ALREADY in
+    // trouble, and it must not be able to stop the match from starting.
+    if (route.name === 'match') {
+      try {
+        disposeCharacterStage();
+      } catch (err) {
+        report('disposeCharacterStage() threw', err);
+      }
+    }
 
     // The theme is MENU music: it stops for a fight and comes back afterwards.
     // Faded rather than cut — pausing a track mid-phrase is audible as a click and
@@ -168,14 +395,45 @@ export function createShell(opts: ShellOptions): Shell {
     // Done here, at the route transition, rather than inside the match: the shell is
     // the only place that knows both sides of the handoff, and combat SFX are a
     // separate bus that is unaffected either way.
-    if (route.name === 'match') audio.music.fadeOut();
-    else audio.music.fadeIn();
+    //
+    // Guarded because a music transition must never be able to stop a screen from
+    // mounting. The audio engine is a whole subsystem with its own worklets and its
+    // own autoplay-policy retries; "the theme failed to fade" is not a reason for the
+    // player to end up looking at an empty stack.
+    try {
+      if (route.name === 'match') audio.music.fadeOut();
+      else audio.music.fadeIn();
+    } catch (err) {
+      report('music transition threw', err);
+    }
 
     root.classList.toggle('is-ingame', route.name === 'match');
-    current = build(route);
-    stack.appendChild(current.root);
+
+    // ── The screen is built BEFORE anything commits to it ─────────────────────
+    // `unmount()` has already run, so at this instant there is no screen in the DOM
+    // and `.fa-curtain` is opaque. A throw from here used to leave exactly that on
+    // screen — forever, with `swapping` latched true so every later navigation was a
+    // silent no-op. A black rectangle and a dead router, from one bad constructor.
+    let screen: Screen;
+    try {
+      screen = build(route);
+    } catch (err) {
+      mountFailed(route, err);
+      return;
+    }
+
+    currentRoute = route;
+    current = screen;
+    stack.appendChild(screen.root);
+    writeHistory(route, mode);
+    // A screen that mounts is a screen that has a live GL context, so whatever the
+    // last one lost is no longer the player's problem. This is also what clears the
+    // notice when a Stage is DISPOSED while lost — no `restored` event ever arrives
+    // for that one.
+    hideGlNotice();
 
     window.__screen = route.name;
+    updateFailures = 0;
     if (current.update) startLoop(); else stopLoop();
 
     // `tools/shoot.mjs` was written for `preview.html` and waits on
@@ -191,32 +449,239 @@ export function createShell(opts: ShellOptions): Shell {
     }
   }
 
+  // ── The "something broke" surface ─────────────────────────────────────────
+  // Styled inline rather than through `theme.ts`. Two reasons, and the first is the
+  // load-bearing one: this markup exists precisely for the moments when the app is
+  // already in trouble, and a panel that depends on a stylesheet having been injected
+  // is a panel that can fail for the same reason as the thing it is reporting. The
+  // second is that it is built LAZILY — nothing is in the DOM until a GL context is
+  // actually lost — so no acceptance battery ever measures it and no screen has to
+  // know it exists.
+
+  function cardStyles(el: HTMLElement): void {
+    el.style.cssText = [
+      'pointer-events:auto', 'background:#FFF3DE', 'color:#1a1224',
+      'border-radius:16px', 'padding:18px 22px', 'max-width:min(92vw,420px)',
+      'text-align:center', 'box-shadow:0 10px 30px rgba(0,0,0,0.45)',
+      "font-family:'Rubik',sans-serif",
+    ].join(';');
+  }
+
+  function scrimStyles(el: HTMLElement): void {
+    // `pointer-events:none` on the scrim and `auto` on the card, deliberately: a lost
+    // portrait context on a menu must not lock the menu, and a lost context mid-match
+    // must not swallow the pause chip. Only the card itself takes clicks.
+    el.style.cssText = [
+      'position:absolute', 'inset:0', 'z-index:120', 'display:grid',
+      'place-items:center', 'padding:16px', 'background:rgba(20,13,30,0.72)',
+      'pointer-events:none',
+    ].join(';');
+  }
+
+  function reloadButton(label: string): HTMLButtonElement {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.style.cssText = [
+      'min-height:44px', 'min-width:140px', 'margin-top:14px', 'padding:0 20px',
+      'border:0', 'border-radius:999px', 'background:#F4A300', 'color:#1a1224',
+      "font-family:'Rubik',sans-serif", 'font-weight:800', 'font-size:16px',
+      'cursor:pointer',
+    ].join(';');
+    b.addEventListener('click', () => window.location.reload());
+    return b;
+  }
+
+  /** The last-resort screen: home itself could not be built. */
+  function fatalPanel(err: unknown): HTMLElement {
+    const wrap = document.createElement('div');
+    scrimStyles(wrap);
+    wrap.style.background = '#16101f';
+    wrap.dataset.el = 'fa-fatal';
+    const card = document.createElement('div');
+    cardStyles(card);
+    const h = document.createElement('div');
+    h.textContent = 'The kitchen would not open';
+    h.style.cssText = 'font-weight:800;font-size:18px';
+    const p = document.createElement('div');
+    p.textContent = String((err as Error)?.message ?? err ?? 'unknown error');
+    p.style.cssText = "margin-top:8px;font-size:13px;opacity:0.75;font-family:'Heebo',sans-serif;word-break:break-word";
+    card.append(h, p, reloadButton('Reload'));
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  let glNotice: HTMLElement | null = null;
+  let glNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Tell the player the GPU dropped the game's graphics.
+   *
+   * Immediately, because the alternative is a black canvas that reads as a crash —
+   * which is the exact report this whole pass started from. The way OUT only appears
+   * after a grace period: the overwhelmingly common case is a context that the browser
+   * restores within a second or two, and offering "Reload" to somebody whose game is
+   * about to fix itself would trade a blink for a lost match.
+   */
+  function showGlNotice(): void {
+    if (disposed || glNotice) return;
+    const wrap = document.createElement('div');
+    scrimStyles(wrap);
+    wrap.dataset.el = 'fa-gl-notice';
+    const card = document.createElement('div');
+    cardStyles(card);
+    const h = document.createElement('div');
+    h.textContent = 'Graphics interrupted';
+    h.style.cssText = 'font-weight:800;font-size:18px';
+    const sub = document.createElement('div');
+    sub.textContent = 'The device took the graphics back. Restoring…';
+    sub.style.cssText = "margin-top:6px;font-size:14px;opacity:0.8;font-family:'Heebo',sans-serif";
+    const btn = reloadButton('Reload');
+    btn.style.display = 'none';
+    card.append(h, sub, btn);
+    wrap.appendChild(card);
+    root.appendChild(wrap);
+    glNotice = wrap;
+    glNoticeTimer = setTimeout(() => {
+      glNoticeTimer = null;
+      if (!glNotice) return;
+      sub.textContent = 'The graphics have not come back. Reloading returns you to this same screen.';
+      btn.style.display = 'inline-block';
+    }, GL_NOTICE_GRACE_MS);
+  }
+
+  function hideGlNotice(): void {
+    if (glNoticeTimer !== null) { clearTimeout(glNoticeTimer); glNoticeTimer = null; }
+    glNotice?.remove();
+    glNotice = null;
+  }
+
+  /** A thumbnail generator's context is not worth interrupting the player for. */
+  function isOffscreenGl(ev: Event): boolean {
+    return (ev as CustomEvent<{ offscreen?: boolean }>).detail?.offscreen === true;
+  }
+  function onGlLost(ev: Event): void { if (!isOffscreenGl(ev)) showGlNotice(); }
+  function onGlRestored(ev: Event): void { if (!isOffscreenGl(ev)) hideGlNotice(); }
+
+  /**
+   * A screen refused to be built. Fall back rather than leave the app on a curtain.
+   *
+   * Home is the fallback because it is the one screen with no arguments, no WebGL
+   * requirement it does not share with every other menu, and nothing to be wrong
+   * about. If HOME is the thing that threw there is nowhere left to go, and the honest
+   * answer is a panel that says so and offers a reload — which, now that the URL names
+   * the screen, is a real attempt at recovery rather than a trip back to the start.
+   */
+  function mountFailed(route: Route, err: unknown): void {
+    report(`screen "${route.name}" failed to mount`, err);
+    stack.innerHTML = '';
+    if (route.name !== 'home') {
+      // `replace`, not `push`: the URL must end up naming the screen the player is
+      // actually looking at, and the route that failed should not be one Back away.
+      mount({ name: 'home' }, 'replace');
+      return;
+    }
+    current = null;
+    currentRoute = { name: 'home' };
+    window.__screen = 'home';
+    stopLoop();
+    stack.appendChild(fatalPanel(err));
+  }
+
   function unmount(): void {
     stopLoop();
-    current?.dispose();
+    try {
+      if (faulting('dispose')) throw new Error('__shellFault: dispose');
+      current?.dispose();
+    } catch (err) {
+      // A screen that cannot clean itself up must not stop the next one mounting. It
+      // may leak a listener or a GL context; the alternative is that the player is
+      // stuck on the screen that is already misbehaving.
+      report(`screen "${currentRoute.name}" dispose() threw`, err);
+    }
     current = null;
     // Screens are responsible for their own DOM, but a screen that threw partway
     // through construction may have left something behind.
     stack.innerHTML = '';
   }
 
-  function navigate(route: Route): void {
-    if (disposed || swapping) return;
+  /** Which way this navigation should move the history stack. */
+  function historyModeFor(route: Route): HistoryMode {
+    // The title card is boot-only, so its entry is REPLACED on the way out. Pushing
+    // it would make Back from home land on a splash that immediately auto-continues
+    // to home — a Back button that visibly does nothing.
+    if (currentRoute.name === 'opening') return 'replace';
+    // Re-selecting the screen you are on is not a place you can go Back to.
+    if (sameRoute(route, currentRoute)) return 'replace';
+    return 'push';
+  }
+
+  function go(route: Route, mode: HistoryMode): void {
     swapping = true;
     window.__screenReady = false;
     curtain.classList.add('is-on');
     pendingTimer = setTimeout(() => {
       pendingTimer = null;
-      unmount();
-      mount(route);
-      curtain.classList.remove('is-on');
-      swapping = false;
-      window.__screenReady = true;
+      // `finally`, because `swapping` latching true is the single worst failure this
+      // file can have: it does not break a screen, it breaks EVERY FUTURE
+      // NAVIGATION, silently, with the curtain still up. `mount` has its own fallback
+      // and this is the belt to its braces.
+      try {
+        unmount();
+        mount(route, mode);
+      } catch (err) {
+        report('navigation threw', err);
+      } finally {
+        curtain.classList.remove('is-on');
+        swapping = false;
+        window.__screenReady = true;
+        drainQueuedPop();
+      }
     }, CURTAIN_MS);
   }
 
-  const onResize = (): void => current?.resize?.();
+  function navigate(route: Route): void {
+    if (disposed || swapping) return;
+    go(route, historyModeFor(route));
+  }
+
+  /**
+   * Back / forward, including the Android hardware back button.
+   *
+   * A `popstate` is not a request — the browser has ALREADY moved the URL — so unlike
+   * a tap it cannot simply be dropped when a swap is in flight, or the address bar and
+   * the screen would disagree from then on. It is queued instead and drained when the
+   * curtain lifts, which is what makes hammering Back on a phone safe.
+   */
+  const onPopState = (ev: PopStateEvent): void => {
+    if (disposed) return;
+    const state = ev.state as { route?: unknown } | null;
+    const route = parseRoute(state?.route)
+      ?? routeFromSearch(window.location.search)
+      ?? { name: 'home' };
+    if (sameRoute(route, currentRoute)) return;
+    if (swapping) { queuedPop = route; return; }
+    go(route, 'none');
+  };
+
+  function drainQueuedPop(): void {
+    const route = queuedPop;
+    queuedPop = null;
+    if (!route || disposed || sameRoute(route, currentRoute)) return;
+    go(route, 'none');
+  }
+
+  const onResize = (): void => {
+    try {
+      current?.resize?.();
+    } catch (err) {
+      report(`screen "${currentRoute.name}" resize() threw`, err);
+    }
+  };
   window.addEventListener('resize', onResize);
+  window.addEventListener('popstate', onPopState);
+  window.addEventListener('fa:webglcontextlost', onGlLost);
+  window.addEventListener('fa:webglcontextrestored', onGlRestored);
 
   window.__shell = { navigate, route: () => currentRoute };
 
@@ -224,8 +689,18 @@ export function createShell(opts: ShellOptions): Shell {
     navigate(route) {
       // First mount skips the curtain — there is nothing to hide yet, and the boot
       // overlay in index.html is already covering the frame.
+      //
+      // It REPLACES rather than pushes, for two reasons. The boot route was derived
+      // from this very URL by `main.ts`, so pushing would be a duplicate entry; and
+      // more importantly it means the app is never one Back away from a blank tab,
+      // which on Android is the difference between "back goes home" and "back closes
+      // the game".
       if (!current) {
-        mount(route);
+        // The title card is the one route whose URL is left alone: `/` already means
+        // "cold launch", `main.ts` already answers it with the title card, and writing
+        // `?screen=opening` would make a refresh during the 4.5 s splash replay the
+        // splash instead of getting on with it.
+        mount(route, route.name === 'opening' ? 'none' : 'replace');
         window.__screenReady = true;
         return;
       }
@@ -236,6 +711,10 @@ export function createShell(opts: ShellOptions): Shell {
       disposed = true;
       if (pendingTimer !== null) clearTimeout(pendingTimer);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('fa:webglcontextlost', onGlLost);
+      window.removeEventListener('fa:webglcontextrestored', onGlRestored);
+      hideGlNotice();
       unmount();
       disposeCharacterStage();
       root.remove();
