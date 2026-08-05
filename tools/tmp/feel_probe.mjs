@@ -331,6 +331,190 @@ async function installHarness(page) {
         };
       },
       /**
+       * The VFX LAYER'S OWN delivered footprint, by same-instant ablation.
+       *
+       * ⚠️ THIS EXISTS BECAUSE `diff()` IS STRUCTURALLY SATURATED FOR THIS QUESTION,
+       * and the saturation is measurable rather than theoretical. `diff()` counts
+       * pixels that differ from a PRE-EVENT baseline, and a `hit-landed` moves three
+       * things inside the same box at the same time: the impact burst, the
+       * character's white hit flash (`characters/types.ts:applyHitFlash`) and the
+       * knockback that displaces the whole silhouette. A pixel the flash has already
+       * changed cannot be changed a second time by the burst, so the burst's
+       * contribution is only ever counted where it lands OUTSIDE the flash.
+       *
+       * The proof is in this file's own PART 3, on HEAD, and it is unambiguous:
+       *
+       *     fog    2 dmg (flash only, NO world VFX)   3904 px
+       *     weapon 2 dmg (flash PLUS the whole burst) 3879 px
+       *
+       * Adding an entire impact burst moved the counter by −25 px, i.e. by less than
+       * the 197 px idle noise floor. The same counter also made `occlusion()` report
+       * ratios BELOW 1.00 (0.92-0.97), which is arithmetically impossible for a real
+       * occlusion ratio and is the tell that it was saturating.
+       *
+       * So the burst is measured against ITSELF instead of against a stale baseline:
+       * render the frame, hide the selected VFX objects, render again, and count the
+       * pixels that moved between those two renders. Both captures are the same
+       * instant of the same frozen frame, so the character flash, the knockback, the
+       * fog ring's drift and every other sim motion are IDENTICAL in both and cancel
+       * exactly. What is left is the VFX layer's delivered, occlusion-correct
+       * footprint — the quantity "how big is this hit's effect" was always meant to
+       * be.
+       *
+       * `filter`: 'all' | 'decal' (renderOrder 5, the impact star ground mark) |
+       * 'rings' (6) | 'sprites' (10/11 — flash, streaks, shards). Per-element numbers
+       * are MARGINAL contributions and do not sum to 'all' where elements overlap;
+       * 'all' is the headline.
+       *
+       * SAVE/RESTORE is mandatory and is checked by a control (`vfxIsoRestoreOk`):
+       * `vfx/weapons/*` hands out materials from module-level pools that outlive
+       * `clear()`, and f12c9de records a restore bug in exactly this shape silently
+       * inflating every later row of a probe in this family.
+       */
+      vfxIso(box, region, filter) {
+        let layer = null;
+        stage.scene.traverse((o) => { if (o.name === 'vfx_layer') layer = o; });
+        if (!layer) return null;
+        const ro = (o) => o.renderOrder;
+        const wanted = [];
+        layer.traverse((o) => {
+          if ((!o.isSprite && !o.isMesh) || !o.visible) return;
+          if (filter === 'all'
+            || (filter === 'decal' && ro(o) === 5)
+            || (filter === 'rings' && ro(o) === 6)
+            || (filter === 'sprites' && (ro(o) === 10 || ro(o) === 11))) wanted.push(o);
+        });
+        const a = grab();
+        for (const o of wanted) o.visible = false;
+        const b = grab();
+        for (const o of wanted) o.visible = true;
+        let region_ = 0, box_ = 0, boxTotal = 0, regionTotal = 0, sum = 0;
+        for (let i = 0, p = 0; i < a.length; i += 4, p++) {
+          const x = p % rw, y = (p / rw) | 0;
+          const inB = box && x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1;
+          const inR = region && x >= region.x0 && x <= region.x1 && y >= region.y0 && y <= region.y1;
+          if (inB) boxTotal++;
+          if (inR) regionTotal++;
+          if (!inR && !inB) continue;
+          const d = Math.max(
+            Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]),
+          );
+          if (d < delta) continue;
+          if (inR) { region_++; sum += d; }
+          if (inB) box_++;
+        }
+        return {
+          region: region_, box: box_, regionTotal, boxTotal,
+          boxShare: boxTotal ? +(box_ / boxTotal).toFixed(3) : 0,
+          meanDelta: region_ ? +(sum / region_).toFixed(1) : 0,
+          objects: wanted.length,
+        };
+      },
+      /**
+       * RULE 1 OF THE HUE CONTRACT, measured at the instant it is about — and it has
+       * never been measurable before, because both of its operands move during a hit.
+       *
+       * `game/vfx.ts` requires a transient combat effect to clear "the cast's measured
+       * luma (0.302) by >= 0.15 in HSL lightness, UPWARD". 0.302 is a figure from a
+       * frame with NO hit in it. At the only instant the rule matters the victim is
+       * also flashing white, so the rule was being checked against a cast luma that is
+       * false exactly when it counts — which is why the predecessor pass tried to drop
+       * the burst's white-mix, could not observe any difference, and reverted.
+       *
+       * Both operands are read here from ONE frame, mid-hit, by ablation: the burst
+       * population is the pixels that move when the VFX layer is hidden, the cast
+       * population is the pixels that move when the character models are hidden (then
+       * eroded twice, so no antialiased boundary pixel counts as cast). The luma of the
+       * cast is therefore the FLASHED cast, which is the surface the burst actually
+       * lands on.
+       */
+      rule1() {
+        let layer = null;
+        stage.scene.traverse((o) => { if (o.name === 'vfx_layer') layer = o; });
+        const vfx = [];
+        if (layer) layer.traverse((o) => { if ((o.isSprite || o.isMesh) && o.visible) vfx.push(o); });
+        const casts = [];
+        stage.scene.traverse((o) => { if (typeof o.name === 'string' && o.name.startsWith('character:') && o.visible) casts.push(o); });
+        if (!vfx.length || !casts.length) return null;
+        const hsl = (r, g, b) => {
+          r /= 255; g /= 255; b /= 255;
+          const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+          let h = 0;
+          if (d > 1e-6) {
+            if (mx === r) h = ((g - b) / d) % 6;
+            else if (mx === g) h = (b - r) / d + 2;
+            else h = (r - g) / d + 4;
+            h *= 60; if (h < 0) h += 360;
+          }
+          const l = (mx + mn) / 2;
+          return [h, d < 1e-6 ? 0 : d / (1 - Math.abs(2 * l - 1)), l];
+        };
+        const stats = (img, idx) => {
+          let sx = 0, sy = 0, ss = 0, sl = 0;
+          for (const p of idx) {
+            const i = p * 4;
+            const [h, s, l] = hsl(img[i], img[i + 1], img[i + 2]);
+            const a = (h * Math.PI) / 180;
+            sx += Math.cos(a) * s; sy += Math.sin(a) * s; ss += s; sl += l;
+          }
+          const n = idx.length || 1;
+          let hm = (Math.atan2(sy, sx) * 180) / Math.PI; if (hm < 0) hm += 360;
+          return { n: idx.length, hue: +hm.toFixed(1), sat: +(ss / n).toFixed(3), luma: +(sl / n).toFixed(4) };
+        };
+        const maskOf = (a, b) => {
+          const out = [];
+          for (let i = 0, p = 0; i < a.length; i += 4, p++) {
+            const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]));
+            if (d >= delta) out.push(p);
+          }
+          return out;
+        };
+        const shipped = grab();
+        for (const o of vfx) o.visible = false;
+        const noVfx = grab();
+        for (const o of vfx) o.visible = true;
+        const burstIdx = maskOf(shipped, noVfx);
+        for (const o of casts) o.visible = false;
+        const noCast = grab();
+        for (const o of casts) o.visible = true;
+        // Erode the cast mask twice so the population is pure cast, not boundary blend.
+        const set = new Uint8Array(rw * rh);
+        for (const p of maskOf(shipped, noCast)) set[p] = 1;
+        for (let pass = 0; pass < 2; pass++) {
+          const nxt = new Uint8Array(set.length);
+          for (let y = 1; y < rh - 1; y++) {
+            for (let x = 1; x < rw - 1; x++) {
+              const p = y * rw + x;
+              if (set[p] && set[p - 1] && set[p + 1] && set[p - rw] && set[p + rw]) nxt[p] = 1;
+            }
+          }
+          set.set(nxt);
+        }
+        const castIdx = [];
+        for (let p = 0; p < set.length; p++) if (set[p]) castIdx.push(p);
+        if (!burstIdx.length || castIdx.length < 100) return null;
+        const burst = stats(shipped, burstIdx);
+        const cast = stats(shipped, castIdx);
+        return { burst, cast, dL: +(burst.luma - cast.luma).toFixed(4) };
+      },
+      /** Count the currently-live VFX objects by class — a hardware-independent
+       * complexity counter (peak concurrent particles / draws), so "more range" can
+       * be shown not to have been bought with more objects. */
+      vfxCensus() {
+        let layer = null;
+        stage.scene.traverse((o) => { if (o.name === 'vfx_layer') layer = o; });
+        if (!layer) return null;
+        let decal = 0, rings = 0, sprites = 0, other = 0;
+        layer.traverse((o) => {
+          if ((!o.isSprite && !o.isMesh) || !o.visible) return;
+          if (o.renderOrder === 5) decal++;
+          else if (o.renderOrder === 6) rings++;
+          else if (o.renderOrder === 10 || o.renderOrder === 11) sprites++;
+          else other++;
+        });
+        return { decal, rings, sprites, other, total: decal + rings + sprites + other };
+      },
+      /**
        * Advance the WHOLE GAME by one 16.67 ms frame.
        *
        * ⚠️ This replaces an earlier version that advanced only `updateEffects` and
@@ -515,16 +699,60 @@ async function main() {
     log(`  countdown-tick (no world VFX)    ${pad(inertDiff.inRegion, 12)}${inertDiff.n}   (want ~noise)`);
     log(`  hit-landed, 18 dmg (the loudest) ${pad(loudDiff.inRegion, 12)}${loudDiff.n}   (want >> noise)`);
     log(`  camera kick from that hit        ${pad(loudKick.px + ' px', 12)}(want > 0)`);
-    const instrumentOk = nullDiff.inRegion <= 40 && loudDiff.inRegion > Math.max(400, idleDiff.inRegion * 4) && loudKick.px > 0;
-    log(instrumentOk ? '  → INSTRUMENT VALID' : '  → INSTRUMENT INVALID — every number below is untrustworthy');
-    if (!instrumentOk) failures++;
+    let instrumentOk = nullDiff.inRegion <= 40 && loudDiff.inRegion > Math.max(400, idleDiff.inRegion * 4) && loudKick.px > 0;
+    log(instrumentOk ? '  → diff() VALID' : '  → diff() INVALID — every number below is untrustworthy');
+
+    // ── VFX ISOLATION: four known-input controls before believing `vfxIso` ───────
+    // The ablation counter has one failure mode that would be invisible in its own
+    // output — leaving an object hidden, which reads as "the effect got smaller".
+    // Control D is the direct test for it and it is the one f12c9de's restore bug
+    // would have failed.
+    const iso = (b, r, f) => page.evaluate(([bb, rr, ff]) => window.__feel.vfxIso(bb, rr, ff), [b, r, f]);
+    await page.evaluate(() => window.__feel.reset());
+    await page.evaluate(() => window.__feel.setBase());
+    // A: an EMPTY vfx layer must ablate to nothing.
+    const isoEmpty = await iso(box, region, 'all');
+    // B: a fog hit fires the character flash and NO world VFX at all. This is the
+    //    control that separates "the burst" from "the flash", and it is the one that
+    //    exposes `diff()`'s saturation — `diff` reads thousands here, `vfxIso` must
+    //    read ~0.
+    await page.evaluate(([ev]) => window.__feelEvent(ev), [hitEvent(18, P.x, P.y, 'fog')]);
+    await page.evaluate(() => window.__feel.steps(2));
+    const fogDiff = await D(box, region);
+    const isoFog = await iso(box, region, 'all');
+    // C: the loudest weapon hit must ablate to a large positive number.
+    await page.evaluate(() => window.__feel.reset());
+    await page.evaluate(() => window.__feel.setBase());
+    await page.evaluate(([ev]) => window.__feelEvent(ev), [hitEvent(18, P.x, P.y)]);
+    await page.evaluate(() => window.__feel.steps(2));
+    // D: RESTORE INTEGRITY. `diff` on both sides of a `vfxIso` must be identical —
+    //    anything else means an object or a material was left modified.
+    const beforeIso = await D(box, region);
+    const isoLoud = await iso(box, region, 'all');
+    const afterIso = await D(box, region);
+    await page.evaluate(() => window.__feel.reset());
+
+    log('\n══ INSTRUMENT VALIDATION — VFX ISOLATION (same-instant ablation) ══════════');
+    log(`  A empty layer, nothing spawned        vfxIso ${pad(isoEmpty.region, 8)}(want ~0)`);
+    log(`  B fog 18 dmg — FLASH, no world VFX    vfxIso ${pad(isoFog.region, 8)}(want ~0)   ·  diff() says ${fogDiff.inRegion}`);
+    log(`  C weapon 18 dmg — the loudest burst   vfxIso ${pad(isoLoud.region, 8)}(want >> 0) ·  diff() says ${beforeIso.inRegion}`);
+    log(`  D restore integrity, diff before/after       ${pad(beforeIso.inRegion + '/' + afterIso.inRegion, 8)}(want equal)`);
+    const isoOk = isoEmpty.region <= 40 && isoFog.region <= 60 && isoLoud.region > 400
+      && Math.abs(beforeIso.inRegion - afterIso.inRegion) <= Math.max(60, idleDiff.inRegion);
+    log(isoOk ? '  → vfxIso VALID' : '  → vfxIso INVALID — the burst columns below are untrustworthy');
+    log(`\n  ⚠️ B vs C is the saturation `
+      + `— diff() reads ${fogDiff.inRegion} px for a hit with NO burst at all.`);
+    if (!instrumentOk || !isoOk) failures++;
+    instrumentOk = instrumentOk && isoOk;
     if (args.selftest) { await browser.close(); process.exit(instrumentOk ? 0 : 1); }
 
     // ── The ladder ─────────────────────────────────────────────────────────────
     log('\n══ PART 2 — IMPACT DELIVERY vs DAMAGE (hand-cranked, shipped handler) ═════');
-    log(`${pad('dmg', 6)}${pad('peak px', 10)}${pad('meanΔ', 8)}${pad('on-victim', 11)}${pad('WHITEOUT', 10)}${pad('kick px', 10)}${pad('kick m', 9)}${pad('kick wu', 9)}${pad('hitstop', 9)}`
-      + `${pad('occl all', 10)}${pad('occl decal', 12)}px at frame ${FRAMES.join('/')}`);
-    log('-'.repeat(160));
+    log('  BURST px / BURST victim% come from `vfxIso` (the layer ablated against itself).');
+    log('  peak px / on-victim are the OLD saturated counter, kept only so the git log compares.');
+    log(`${pad('dmg', 6)}${pad('BURST px', 10)}${pad('BURSTΔ', 8)}${pad('BURST vic%', 12)}${pad('decal', 8)}${pad('rings', 8)}${pad('sprites', 9)}${pad('objs', 6)}`
+      + `${pad('| peak px', 11)}${pad('on-victim', 11)}${pad('WHITEOUT', 10)}${pad('kick px', 9)}${pad('hitstop', 9)}burst px at frame ${FRAMES.join('/')}`);
+    log('-'.repeat(180));
     const ladder = [];
     for (const dmg of LADDER) {
       await page.evaluate(() => window.__feel.reset());
@@ -535,10 +763,17 @@ async function main() {
       const kick = await page.evaluate(() => window.__feel.kickPx());
       const kickWu = await page.evaluate(() => window.__feel.kickWu());
       const series = [];
+      const isoSeries = [];
       let peak = { inRegion: -1 };
       let peakClip = 0;
       let f = 0;
-      let occAll = null, occDecal = null;
+      // The burst's own peak, its frame, and the element split TAKEN AT THAT FRAME.
+      // A fixed frame is wrong here: measured on HEAD, a 2-damage chip peaks at frame
+      // 5 and an 18-damage smash at frame 18, because the shards are still inside the
+      // epicentre early and only reach their own footprint later. Sampling both at one
+      // frame would compare a chip at its peak with a smash before it has spread.
+      let isoPeak = { region: -1 }; let isoPeakFrame = 0;
+      let split = null; let census = null; let rule1 = null;
       for (const target of FRAMES) {
         await page.evaluate((n) => window.__feel.steps(n), target - f);
         f = target;
@@ -546,40 +781,66 @@ async function main() {
         series.push(d.inRegion);
         if (d.inRegion > peak.inRegion) peak = d;
         if (d.clipShare > peakClip) peakClip = d.clipShare;
-        if (target === 2) {
-          // Occlusion measured on the frame the burst is fully spawned. `all` asks
-          // whether the burst as a whole is being eaten by geometry; `decal` isolates
-          // the ground star mark, which is centred UNDER a victim who is standing on
-          // it — the arrangement LESSONS §1 case 8 is about.
-          occAll = await page.evaluate(([b, r]) => window.__feel.occlusion(b, r, 'all'), [box, region]);
-          occDecal = await page.evaluate(([b, r]) => window.__feel.occlusion(b, r, 'decal'), [box, region]);
-          if (SHOT.includes(dmg)) {
-            await page.evaluate(() => window.__feel.stillFrame());
-            await page.screenshot({ path: `${OUT}/hit-${String(dmg).padStart(2, '0')}dmg.png` });
-          }
+        const isoAll = await page.evaluate(([b, r]) => window.__feel.vfxIso(b, r, 'all'), [box, region]);
+        isoSeries.push(isoAll.region);
+        // Rule 1 is a statement about the INSTANT of impact, so it is read at frame 2
+        // (burst fully spawned, character flash still near peak) rather than at the
+        // burst's own pixel peak, which can be 200-300 ms later.
+        if (target === 2) rule1 = await page.evaluate(() => window.__feel.rule1());
+        if (isoAll.region > isoPeak.region) {
+          isoPeak = isoAll; isoPeakFrame = target;
+          split = {
+            decal: (await page.evaluate(([b, r]) => window.__feel.vfxIso(b, r, 'decal'), [box, region])).region,
+            rings: (await page.evaluate(([b, r]) => window.__feel.vfxIso(b, r, 'rings'), [box, region])).region,
+            sprites: (await page.evaluate(([b, r]) => window.__feel.vfxIso(b, r, 'sprites'), [box, region])).region,
+          };
+          census = await page.evaluate(() => window.__feel.vfxCensus());
+        }
+        if (SHOT.includes(dmg) && (target === 2 || target === 5)) {
+          await page.evaluate(() => window.__feel.stillFrame());
+          await page.screenshot({ path: `${OUT}/hit-${String(dmg).padStart(2, '0')}dmg-f${target}.png` });
         }
       }
       const row = {
         dmg, peak: peak.inRegion, regionTotal: peak.regionTotal, meanDelta: peak.regionMeanDelta,
-        boxShare: peak.boxShare, clipShare: peakClip, wholeFrame: peak.n, occAll, occDecal,
+        boxShare: peak.boxShare, clipShare: peakClip, wholeFrame: peak.n,
+        burstPx: isoPeak.region, burstBoxShare: isoPeak.boxShare, burstMeanDelta: isoPeak.meanDelta,
+        burstPeakFrame: isoPeakFrame, split, census, rule1,
         kickPx: kick.px, kickM: kick.amountM, kickWu,
         hitStopMs: +(after.lastHitStopMs).toFixed(1),
         responses: Object.fromEntries(Object.entries(after.responses).map(([k, v]) => [k, v - before.responses[k]])),
-        series,
+        series, isoSeries,
       };
       ladder.push(row);
-      log(`${pad(dmg, 6)}${pad(peak.inRegion, 10)}${pad(peak.regionMeanDelta, 8)}${pad((peak.boxShare * 100).toFixed(1) + '%', 11)}${pad((peakClip * 100).toFixed(1) + '%', 10)}`
-        + `${pad(kick.px, 10)}${pad(kick.amountM.toFixed(3), 9)}${pad(kickWu.toFixed(1), 9)}${pad(row.hitStopMs.toFixed(0) + 'ms', 9)}`
-        + `${pad(occAll ? occAll.ratio + 'x' : '-', 10)}${pad(occDecal ? `${occDecal.delivered}/${occDecal.possible} ${occDecal.ratio}x` : '-', 12)}${series.join(' / ')}`);
+      log(`${pad(dmg, 6)}${pad(isoPeak.region, 10)}${pad(isoPeak.meanDelta, 8)}${pad((isoPeak.boxShare * 100).toFixed(1) + '%', 12)}`
+        + `${pad(split.decal, 8)}${pad(split.rings, 8)}${pad(split.sprites, 9)}${pad(census.total, 6)}`
+        + `${pad('| ' + peak.inRegion, 11)}${pad((peak.boxShare * 100).toFixed(1) + '%', 11)}${pad((peakClip * 100).toFixed(1) + '%', 10)}`
+        + `${pad(kick.px, 9)}${pad(row.hitStopMs.toFixed(0) + 'ms', 9)}${isoSeries.join(' / ')}`);
     }
 
     // ── Dynamic range: the direct measurement of "one tone, monotonic" ──────────
     const lo = ladder[0], hi = ladder[ladder.length - 1];
     const ratio = (a, b) => (a > 0 ? +(b / a).toFixed(2) : Infinity);
     log(`\n  DAMAGE INPUT RANGE        ${lo.dmg} -> ${hi.dmg}  =  ${ratio(lo.dmg, hi.dmg)}x`);
-    log(`  delivered, peak px        ${pad(lo.peak + ' -> ' + hi.peak, 22)}${ratio(lo.peak, hi.peak)}x`);
+    log(`  delivered, BURST px       ${pad(lo.burstPx + ' -> ' + hi.burstPx, 22)}${ratio(lo.burstPx, hi.burstPx)}x   <- the isolated channel`);
+    log(`  delivered, peak px        ${pad(lo.peak + ' -> ' + hi.peak, 22)}${ratio(lo.peak, hi.peak)}x   (old saturated counter)`);
     log(`  delivered, camera kick    ${pad(lo.kickPx + ' -> ' + hi.kickPx + ' px', 22)}${ratio(lo.kickPx, hi.kickPx)}x`);
     log(`  delivered, hit-stop       ${pad(lo.hitStopMs.toFixed(0) + ' -> ' + hi.hitStopMs.toFixed(0) + ' ms', 22)}${ratio(lo.hitStopMs, hi.hitStopMs)}x`);
+    log(`\n  VICTIM'S OWN BOX repainted BY THE BURST   ${(lo.burstBoxShare * 100).toFixed(1)}% at ${lo.dmg} dmg`
+      + `  ->  ${(hi.burstBoxShare * 100).toFixed(1)}% at ${hi.dmg} dmg`);
+    const med = ladder.find((r) => r.dmg === 6);
+    if (med) log(`  ... and ${(med.burstBoxShare * 100).toFixed(1)}% at the census MEDIAN damage of 6`);
+
+    // ── The hue contract's rule 1, measured mid-hit on both operands ────────────
+    log('\n══ HUE CONTRACT RULE 1, AT THE INSTANT OF IMPACT ═════════════════════════');
+    log('  "a transient must clear the CAST\'s luma by >= 0.15 UPWARD" — both operands');
+    log('  ablated out of the SAME frame at frame 2, so the cast luma is the FLASHED cast.');
+    log(`${pad('dmg', 6)}${pad('burst L', 10)}${pad('burst hue', 11)}${pad('cast L', 10)}${pad('cast hue', 10)}${pad('dL', 9)}verdict`);
+    for (const r of ladder) {
+      if (!r.rule1) { log(`${pad(r.dmg, 6)}(not measurable)`); continue; }
+      const v = r.rule1.dL >= 0.15 ? 'PASS' : r.rule1.dL <= -0.15 ? 'PASS (downward)' : 'FAIL';
+      log(`${pad(r.dmg, 6)}${pad(r.rule1.burst.luma, 10)}${pad(r.rule1.burst.hue, 11)}${pad(r.rule1.cast.luma, 10)}${pad(r.rule1.cast.hue, 10)}${pad(r.rule1.dL, 9)}${v}`);
+    }
 
     // A fresh match before PART 3 — see `freshMatch`. Every measurement below is then
     // taken within ~3 s of sim time of a known-good starting state.
@@ -596,8 +857,8 @@ async function main() {
     // it at both ends of the damage ladder is the direct measurement of whether the
     // loudest channel in the whole system scales with the hit at all.
     log('\n══ PART 3 — CHANNEL ISOLATION BY DAMAGE SOURCE ═══════════════════════════');
-    log(`${pad('source', 14)}${pad('dmg', 6)}${pad('peak px', 10)}${pad('on-victim', 11)}${pad('WHITEOUT', 10)}${pad('kick px', 10)}${pad('hitstop', 9)}responses`);
-    log('-'.repeat(110));
+    log(`${pad('source', 14)}${pad('dmg', 6)}${pad('BURST px', 10)}${pad('BURST vic%', 12)}${pad('peak px', 10)}${pad('on-victim', 11)}${pad('WHITEOUT', 10)}${pad('kick px', 10)}${pad('hitstop', 9)}responses`);
+    log('-'.repeat(132));
     const sources = [];
     for (const [kind, dmg] of [['weapon', 2], ['weapon', 18], ['trail', 8], ['hazard', 8], ['fog', 2], ['fog', 18]]) {
       await page.evaluate(() => window.__feel.reset());
@@ -609,12 +870,15 @@ async function main() {
       let peak = { inRegion: -1, boxShare: 0 };
       let peakClip = 0;
       let f = 0;
+      let isoPeak = { region: -1, boxShare: 0 };
       for (const target of FRAMES) {
         await page.evaluate((n) => window.__feel.steps(n), target - f);
         f = target;
         const d = await D3(box3, region3);
         if (d.inRegion > peak.inRegion) peak = d;
         if (d.clipShare > peakClip) peakClip = d.clipShare;
+        const isoAll = await page.evaluate(([b, r]) => window.__feel.vfxIso(b, r, 'all'), [box3, region3]);
+        if (isoAll.region > isoPeak.region) isoPeak = isoAll;
         if (target === 2 && kind === 'fog') {
           await page.evaluate(() => window.__feel.stillFrame());
           await page.screenshot({ path: `${OUT}/flash-only-${String(dmg).padStart(2, '0')}dmg.png` });
@@ -623,8 +887,10 @@ async function main() {
       const hs = after.responses.hitStop === before.responses.hitStop ? 0 : after.lastHitStopMs;
       const resp = Object.fromEntries(Object.entries(after.responses)
         .map(([k, v]) => [k, v - before.responses[k]]).filter(([, v]) => v > 0));
-      sources.push({ kind, dmg, peak: peak.inRegion, boxShare: peak.boxShare, clipShare: peakClip, kickPx: kick.px, hitStopMs: hs, resp });
-      log(`${pad(kind === 'fog' ? 'fog (FLASH ONLY)' : kind, 16)}${pad(dmg, 6)}${pad(peak.inRegion, 10)}${pad((peak.boxShare * 100).toFixed(1) + '%', 11)}${pad((peakClip * 100).toFixed(1) + '%', 10)}${pad(kick.px, 10)}`
+      sources.push({ kind, dmg, peak: peak.inRegion, boxShare: peak.boxShare, clipShare: peakClip,
+        burstPx: isoPeak.region, burstBoxShare: isoPeak.boxShare, kickPx: kick.px, hitStopMs: hs, resp });
+      log(`${pad(kind === 'fog' ? 'fog (FLASH ONLY)' : kind, 16)}${pad(dmg, 6)}${pad(isoPeak.region, 10)}${pad((isoPeak.boxShare * 100).toFixed(1) + '%', 12)}`
+        + `${pad(peak.inRegion, 10)}${pad((peak.boxShare * 100).toFixed(1) + '%', 11)}${pad((peakClip * 100).toFixed(1) + '%', 10)}${pad(kick.px, 10)}`
         + `${pad(hs.toFixed(0) + 'ms', 9)}${JSON.stringify(resp)}`);
     }
     const fogLo = sources.find((s) => s.kind === 'fog' && s.dmg === 2);

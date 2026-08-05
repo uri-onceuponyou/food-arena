@@ -52,9 +52,59 @@ export interface WeaponVfxCtx {
    * the frozen game design every bespoke effect should key off of, so re-skinning a
    * weapon's colour in `rules.ts` doesn't require touching this file too. */
   color: string;
-  /** Damage carried by this instance: `Weapon.damage` for `cast`/`projectile`, the
-   * resolved per-hit amount for `impact` (matches what the generic burst scales its
-   * own size by — see `spawnImpactBurst` in `game/vfx.ts`). */
+  /**
+   * Damage carried by this instance: `Weapon.damage` for `cast`/`projectile`, the
+   * resolved per-hit amount for `impact` (`amount * attacker.damageMul`, so character
+   * levels and the trail boost both reach here).
+   *
+   * ⚠️ **SEVEN FILES CARRY A STALE COPY OF THE GENERIC SIZE CURVE. NOT FIXED — READ
+   * THIS BEFORE TOUCHING ANY OF THEM.**
+   *
+   * `donut`, `burrito`, `egg`, `hotdog`, `sushi`, `pizza` and `taco` each define
+   *
+   *     impactScale(d) = clamp(0.85 + d * 0.035, 0.85, CAP)
+   *
+   * and each documents it, in near-identical words, as *"deliberately the same curve
+   * `game/vfx.ts` re-derived for the generic burst"*. **That claim stopped being true
+   * in `9a5703d`**, which re-derived the generic curve to `clamp(0.42 + d * 0.075,
+   * 0.42, 2.0)` for dynamic range and did not reach the copies. This is
+   * `docs/LESSONS.md` §5's "one stale COPY of a driver contaminated ten instruments"
+   * recurring in shipped source rather than in tools.
+   *
+   * The size response across the authored damage span (2 -> 18, a 9.0x input):
+   *
+   *     game/vfx.ts generic     0.57 -> 1.77   **3.11x**
+   *     donut   (cap 1.25)      0.92 -> 1.25    1.36x
+   *     burrito (cap 1.35)      0.92 -> 1.35    1.47x
+   *     hotdog/sushi/pizza      0.92 -> 1.40    1.52x
+   *     egg/taco (cap 1.45)     0.92 -> 1.45    1.58x
+   *     lollipop (two curves)   0.91 -> 1.39 / 0.97 -> 1.53
+   *     hamburger               1.10 -> 1.90    1.73x
+   *     waterbottle             1.12 -> 2.08    1.86x
+   *     **soup, all three hooks — reads `ctx.damage` NOWHERE. 1.00x.**
+   *
+   * And it is not a corner: **27 of 33 weapons take a bespoke `impact()`**, so the
+   * generic burst — the one that got the range fix — is reached by six.
+   *
+   * ── Why it is REPORTED and not fixed here ──────────────────────────────────────
+   *
+   * Because a straight swap is measurably a regression at the small end, and the
+   * measurement already exists. Damage is near-constant per weapon (`combat.ts` passes
+   * `w.damage * damageMul`), so `impactScale` is effectively a per-weapon CONSTANT —
+   * changing the curve rescales every weapon's shipped effect once. The new curve is
+   * smaller than the old one below ~11 damage (x0.62 at 2, x0.82 at 6), and `f12c9de`
+   * had just spent a pass lifting bespoke impacts off a ~300 px delivered-pixel floor
+   * (`waterbottle.Glass` 264 -> 479; `egg.Shards` measures 288-349 today). Sushi's Rice
+   * (2 dmg), Soup's Splash/Spray (3) and Pizza's Cheese (4) would all drop 39-62% in
+   * area and land back under it.
+   *
+   * The fix, when someone takes it, is one function here and eleven call sites — the
+   * copies get DELETED, not patched (§5 again) — plus a per-weapon FLOOR taken from
+   * `tools/tmp/vfx_wcov.mjs` run at each weapon's own damage before and after, since
+   * that tool already measures delivered pixels and cast repaint per weapon and grew
+   * `--volley` precisely because repeated measurement of unchanged code spreads
+   * +/-10-20% at ~300 px.
+   */
   damage: number;
   /** The full frozen weapon definition, in case an effect wants to react to more
    * than colour/damage (`range`, `cone`, `effect`, `splatter`, `pellets`, ...).
