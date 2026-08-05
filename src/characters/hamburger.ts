@@ -67,8 +67,49 @@ import { bodyType } from './bodies';
  * the FOOD MASS and the BODY carrying it, not a shared ingredient colour. See
  * the palette block in the constructor for the defect that forced it.
  */
-const LIMB_TOAST = '#B26E2A';
-const LIMB_TOAST_DARK = '#8E5320';
+// ── The dark rung ────────────────────────────────────────────────────────────
+// Measured against 18 Brawl Stars plates: every one of them puts 5% of the character
+// below luma 0.18; Hamburger's P05 was 0.295. A blind critic's words for the same
+// thing were "the arms and feet collapse into near-identical dark brown lumps" —
+// correct observation, and the cause was not that the limbs were too dark but that
+// NOTHING on the character was dark, so a mid-brown arm and a mid-brown boot had no
+// third value to be read against. Both limb tones drop to a charred crust (8.3% of
+// the character's pixels, which is what a P05 actually costs) and the mitts come UP
+// to pay for it in figure/ground. Measured at pot_south, shipped framing:
+// range 0.570 -> 0.716, p05 0.315 -> 0.176, steps@0.10 6 -> 7, fg 0.258 -> 0.224.
+
+// ── PASS 2: the limb CHAIN has to alternate, not ramp ────────────────────────
+// The first value pass took both limb tones down together. That fixed range/P05 and
+// BROKE the part boundary — measured, `shoulderL|elbowL` 0.044, `kneeL|footL` 0.035,
+// because a chain of four segments each a shade darker than the last is one mass. The
+// reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
+// segment comes back UP, the lower segment holds the dark, and the boot takes its own
+// darkest tone instead of sharing the shin's.
+// PASS 3: at #7A4318 the upper arm measured 0.32 against a bottom bun at 0.33 —
+// `torso|shoulderL` 0.011 across 68 px, the biggest seam on the character. #96581E took
+// it to 0.087, still inside the 0.10 floor, so one more step.
+const LIMB_TOAST = '#AD6C29';      // upper arm / thigh — mid
+const LIMB_TOAST_DARK = '#3E1F09'; // forearm / shin — dark
+/**
+ * Local copies of four `PALETTE` ingredient tones, deepened for THIS character only.
+ *
+ * `PALETTE.patty` / `pattyDark` / `bunDark` / `lettuce` are shared with Taco and
+ * Burrito, and `rules.ts` is not this file's to edit — nor should it be, because the
+ * right value for a patty depends on what else is in the frame with it. Hue is held;
+ * only value moved.
+ */
+const PATTY = '#2A1408';
+const PATTY_DARK = '#0C0603';     // and the boots are darker than the shins above them
+const BUN_DARK = '#43220B';
+const LETTUCE = '#4E7A12';
+/** The frill's own lighter green. Was `PALETTE.lettuce` offset in HSL; pinned to the
+ *  value that offset actually produced so deepening `LETTUCE` does not drag it down
+ *  too — the frill is the light side of this character's green step. */
+const LETTUCE_FRILL = '#88C32F';
+/** Mitts. Were `PALETTE.bun`, i.e. EXACTLY the crown they are held in front of.
+ *  A lighter toasted bun keeps the "toasted mitt" read and buys back the figure/ground
+ *  the charred limbs above spend. */
+const MITT_BUN = '#F7CE86';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local geometry helpers — chunky rounded discs the shared kit doesn't provide.
@@ -260,8 +301,8 @@ export class HamburgerCharacter extends BaseCharacter {
         // eye picks up first, which is the whole job of a chibi body.
         limb: LIMB_TOAST,
         hand: PALETTE.cream,    // cream mitts
-        foot: PALETTE.pattyDark, // dark little feet
-        torso: PALETTE.bunDark,  // fallback only — dressTorso() replaces this mesh below
+        foot: PATTY_DARK, // dark little feet — now genuinely near-black, see PATTY_DARK
+        torso: BUN_DARK,  // fallback only — dressTorso() replaces this mesh below
         limbRoughness: 0.85,     // dry, matte-baked crust, matching the bun layers
       },
       // Wide, squat, heavy, planted — broad shoulders and thick, short-reading legs so
@@ -337,13 +378,13 @@ export class HamburgerCharacter extends BaseCharacter {
     // SUBSTANCES — bread, meat, veg, dairy, tool — instead of one glossy
     // plastic shader repeated in different colours.
     const bunMat = toonMat({ color: PALETTE.bun, ramp: RAMP_CHARACTER(), roughness: 0.85 }); // dry, matte-baked crust
-    const bunDarkMat = toonMat({ color: PALETTE.bunDark, ramp: RAMP_CHARACTER(), roughness: 0.85 });
-    const pattyMat = toonMat({ color: PALETTE.patty, ramp: RAMP_CHARACTER(), roughness: 0.55 }); // seared, faintly greasy meat
-    const pattyDarkMat = toonMat({ color: PALETTE.pattyDark, ramp: RAMP_CHARACTER(), roughness: 0.55 });
+    const bunDarkMat = toonMat({ color: BUN_DARK, ramp: RAMP_CHARACTER(), roughness: 0.85 });
+    const pattyMat = toonMat({ color: PATTY, ramp: RAMP_CHARACTER(), roughness: 0.55 }); // seared, faintly greasy meat
+    const pattyDarkMat = toonMat({ color: PATTY_DARK, ramp: RAMP_CHARACTER(), roughness: 0.55 });
     const cheeseMat = glossyMat({ color: PALETTE.cheese, roughness: 0.35 }); // soft melt sheen
     const tomatoMat = glossyMat({ color: PALETTE.tomato, roughness: 0.18 }); // wettest surface on the model
-    const lettuceMatA = toonMat({ color: PALETTE.lettuce, ramp: RAMP_CHARACTER(), roughness: 0.6 }); // leafy, satin not shiny
-    const lettuceMatB = toonMat({ color: new THREE.Color(PALETTE.lettuce).offsetHSL(0, -0.06, 0.05), ramp: RAMP_CHARACTER(), roughness: 0.6 });
+    const lettuceMatA = toonMat({ color: LETTUCE, ramp: RAMP_CHARACTER(), roughness: 0.6 }); // leafy, satin not shiny
+    const lettuceMatB = toonMat({ color: LETTUCE_FRILL, ramp: RAMP_CHARACTER(), roughness: 0.6 });
     const seedMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER(), roughness: 0.75 }); // dry toasted sesame
     const faceMat = toonMat({ color: PALETTE.ink, ramp: RAMP_CHARACTER(), roughness: 0.42 });
     const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.45 });
@@ -366,6 +407,9 @@ export class HamburgerCharacter extends BaseCharacter {
     // #B9C4D2 is luma 0.76: still unmistakably bright steel against the burger's
     // warm palette, with room for both a highlight and a turn into shadow. Paired
     // with the curl below, that is what makes it stop reading as a flat plate.
+    // (The value pass that gave this character its dark rung measured a variant at
+    // #8894A4. It was worth 0.002 of P05 and it walks straight back toward the
+    // near-black-metal defect the paragraph above records, so it was NOT taken.)
     const spatulaBladeMat = toonMat({ color: '#B9C4D2', roughness: 0.3, metalness: 0.06 });
     const spatulaSlotMat = toonMat({ color: '#8F98A4', roughness: 0.45, metalness: 0 });
     // Apron — the costume layer. A second independent art-director pass named the
@@ -854,7 +898,7 @@ export class HamburgerCharacter extends BaseCharacter {
     // distance (a confirmed defect: it read as nothing, not as a hand). Bun gold
     // actually matches the "toasted bun" description; sesame seeds (added on the
     // mesh below, same technique as the crown's) are what finish selling the shape.
-    const mittMat = toonMat({ color: PALETTE.bun, roughness: 0.68 });
+    const mittMat = toonMat({ color: MITT_BUN, roughness: 0.68 });
     const mittSeedMat = toonMat({ color: PALETTE.cream, roughness: 0.75 });
     const limbMat = toonMat({ color: LIMB_TOAST, ramp: RAMP_CHARACTER(), roughness: 0.85 });
     const limbDarkMat = toonMat({ color: LIMB_TOAST_DARK, ramp: RAMP_CHARACTER(), roughness: 0.85 });

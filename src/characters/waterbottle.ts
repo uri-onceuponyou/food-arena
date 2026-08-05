@@ -102,7 +102,14 @@ const CAP = '#3E6EA3';              // matte navy — still the darkest area, no
 // ladder is shell 0.893 -> water/limb 0.625 -> deep 0.481 -> cap 0.407 -> boot 0.268,
 // a span of 0.625 against 0.664 before this change, with every step preserved and in
 // the same order.
-const CAP_DARK = '#26496F';
+// …and this is where the cast's dark rung goes on Water Bottle. `CAP_DARK` already
+// dresses the belt, spout, cap ridges and boots — 10.8% of the character's pixels in
+// one constant — so taking it to a near-black navy is a one-line change that buys the
+// whole P05. Measured at pot_south, shipped framing: range 0.645 -> 0.710,
+// p05 0.217 -> 0.151, steps@0.10 6 -> 7, figure/ground 0.161 -> 0.144. The ladder note
+// above still holds — the ORDER of the five bands is unchanged, the bottom one just
+// finally reaches the reference's dark end (18 of 18 BS plates sit below 0.18).
+const CAP_DARK = '#0E1F35';
 // The label was near-white, which spent the single largest opaque area on this
 // character for no chroma at all. It is now a hot sports-label orange: it is the
 // clearest "this is a drinks bottle" cue available, it is the complement of the
@@ -122,7 +129,7 @@ const LABEL_TRIM = '#B8371A';       // trim rings on the label
 // cape or backpack does on the reference roster — plus a thin retainer cord
 // around the shoulder taper as a smaller "sports-cap strap" detail.
 const STRAP_FABRIC = '#2E7D5B';    // sporty webbing — a fresh hue not used elsewhere on this character
-const STRAP_TRIM = '#1F5A40';
+const STRAP_TRIM = '#0C2418';      // near-black webbing trim, part of the same dark rung
 const CARABINER_METAL = '#B6BEC4'; // brushed aluminium — genuinely new metalness on this character
 
 // ── Bottle silhouette, in fractions of headRadius (R) ───────────────────────

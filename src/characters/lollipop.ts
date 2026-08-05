@@ -32,7 +32,30 @@ const CANDY_WHITE = '#FFFDF9';
 const CANDY_RED = '#E63946';
 const STICK = '#FBF7EE';       // matte paper stick
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0' — restrained trim accent only
-const BOOT = '#2A2140';        // dark, near-ink boots — grounds the pale/red palette
+// ── The WRAPPER is the dark rung ─────────────────────────────────────────────
+// Measured (`tools/tmp/valuescan.mjs`): Lollipop's range already passed, but its P05
+// was 0.291 and it carried the LARGEST SINGLE INVISIBLE SEAM in the whole cast —
+// `head|hips` at ΔL 0.012 across 130 px. The cause was one shared constant: the candy
+// swirl on the head and the wrapper collar on the hips were both `CANDY_RED`, so the
+// character's waist simply did not exist.
+//
+// The wrapper is the natural place for the dark end — it is the one part of a lollipop
+// that is not candy, it is 12.2% of the character's pixels across cape + collar +
+// petals, and taking it to near-black makes the collar a hard edge against the swirl
+// above it. The choker follows it down and the swirl sits one step deeper so the disc
+// reads as candy in shadow rather than a flat red plate. Measured at pot_south,
+// shipped framing: range 0.656 -> 0.782, p05 0.316 -> 0.191, steps@0.10 6 -> 7,
+// figure/ground 0.259 -> 0.204.
+const WRAPPER_INK = '#120818';  // cape, collar, petals — near-black cellophane
+const CHOKER_INK = '#180C1E';
+// PASS 2, and this one is a REVERSAL. Taking the swirl down to #9C2028 read as a
+// bigger P05 and measured as a disaster: the head's median fell to 0.47 while the
+// wrapper collar sat at 0.41, so `head|hips` — the largest seam in the cast at 130 px
+// — stayed invisible and `face|head` joined it. Weak boundary went 38.1% -> 83.4%.
+// The swirl goes back to CANDY_RED and the SEPARATION is bought on the other side
+// instead, by taking the collar's trim down with the collar. 
+const SWIRL_RED = CANDY_RED;    // the disc's ribbon, both faces
+const BOOT = '#0C0814';        // near-ink boots — grounds the pale/red palette
 // Limb-only frosted-teal family, a tint of Lollipop's own Cyber accent. A second
 // independent art-director pass named Lollipop, Egg and Burrito as all converging
 // on pale cream/white limbs with dark boots — the disc/stick stay their candy-white
@@ -40,7 +63,9 @@ const BOOT = '#2A2140';        // dark, near-ink boots — grounds the pale/red 
 // the body carries real hue instead of reading as another pale mass, and it ties
 // directly to her own rarity accent rather than borrowing a hue from elsewhere.
 const LIMB_TEAL = '#8FE0C9';
-const LIMB_TEAL_DARK = '#57B296';
+// PASS 3. Measured: the boot DELIVERS 0.37 despite a #0C0814 albedo (its own sole and
+// trim are pale), so darkening it further buys nothing — the SHIN moves instead.
+const LIMB_TEAL_DARK = '#7ACBB0';
 
 /**
  * Archimedean spiral ribbon: a band of constant width whose centreline radius grows
@@ -138,7 +163,10 @@ export class LollipopCharacter extends BaseCharacter {
     this.rig = new ChibiRig({
       palette: {
         limb: LIMB_TEAL,
-        hand: CANDY_RED,
+        // PASS 3: red mitts measured 0.35 against a boot at 0.37 — `handL|footL` 0.014.
+        // White candy mitts are also the reference's own grammar (light extremities on a
+        // mid body) and this character already owns that white.
+        hand: CANDY_WHITE,
         foot: BOOT,
         torso: STICK,
         limbRoughness: 0.75,
@@ -284,7 +312,9 @@ export class LollipopCharacter extends BaseCharacter {
       depth: discDepth * 0.55, bevelEnabled: true, bevelThickness: R * 0.008, bevelSize: R * 0.008, bevelSegments: 2, curveSegments: 1,
     });
     const ribbonDepth = discDepth * 0.55;
-    const ribbonMat = glossyMat({ color: CANDY_RED, roughness: 0.12, emissive: CANDY_RED, emissiveIntensity: 0.12 });
+    // Colour drops to SWIRL_RED; the emissive deliberately stays at the brighter
+    // CANDY_RED so the swirl keeps its candy glow while its diffuse value steps down.
+    const ribbonMat = glossyMat({ color: SWIRL_RED, roughness: 0.12, emissive: CANDY_RED, emissiveIntensity: 0.12 });
     const ribbon = new THREE.Mesh(ribbonGeo, ribbonMat);
     ribbon.name = 'lollipop_swirl';
     ribbon.position.set(0, discCenterY, discDepth / 2 - ribbonDepth * 0.2);
@@ -365,7 +395,7 @@ export class LollipopCharacter extends BaseCharacter {
     // no longer load-bearing and can stop covering 100% of both thighs (`hipL`
     // delivered 0.006 of a 1,426 px footprint with the cuff reaching 0.44 m).
     const petalGeo = new THREE.ConeGeometry(stickR * 0.55, R * 0.18, 3, 1, true);
-    const petalMatA = toonMat({ color: CANDY_RED, roughness: 0.68 });
+    const petalMatA = toonMat({ color: WRAPPER_INK, roughness: 0.68 });
     const petalMatB = toonMat({ color: CANDY_WHITE, roughness: 0.68 });
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
@@ -395,7 +425,7 @@ export class LollipopCharacter extends BaseCharacter {
       const collarH = this.rig.metrics.thighLength * 0.55;
       const collar = new THREE.Mesh(
         new THREE.CylinderGeometry(collarR, collarR * 0.82, collarH, 18, 1, false),
-        toonMat({ color: CANDY_RED, roughness: 0.68 })
+        toonMat({ color: WRAPPER_INK, roughness: 0.68 })
       );
       collar.name = 'lollipop_wrapper_collar';
       collar.position.y = collarH * 0.16;
@@ -404,7 +434,7 @@ export class LollipopCharacter extends BaseCharacter {
       this.rig.joints.hips.add(collar);
       const collarTrim = new THREE.Mesh(
         new THREE.TorusGeometry(collarR * 0.99, R * 0.022, 6, 22),
-        toonMat({ color: CANDY_WHITE, roughness: 0.6 })
+        toonMat({ color: WRAPPER_INK, roughness: 0.6 })
       );
       collarTrim.name = 'lollipop_wrapper_collar_trim';
       collarTrim.rotation.x = Math.PI / 2;
@@ -436,7 +466,7 @@ export class LollipopCharacter extends BaseCharacter {
     capeAnchor.position.y = discBottomY;
     head.add(capeAnchor);
     const neck = capeAnchor;
-    const capeMat = glossyMat({ color: CANDY_WHITE, roughness: 0.16, transparent: true, opacity: 0.6 });
+    const capeMat = glossyMat({ color: WRAPPER_INK, roughness: 0.16, transparent: true, opacity: 0.6 });
     capeMat.side = THREE.DoubleSide; // seen edge-on/from behind at yaw 135/210, not just front
     // A transparent material that still writes depth is a silent occluder
     // (`docs/LESSONS.md` §1) — and this one is a DoubleSide panel wrapped around the
@@ -494,7 +524,7 @@ export class LollipopCharacter extends BaseCharacter {
 
     // Choker — a slim candy-cane ring around the stick, the small worn detail
     // underneath the cape's own silhouette break.
-    const chokerMat = toonMat({ color: CANDY_RED, roughness: 0.5 });
+    const chokerMat = toonMat({ color: CHOKER_INK, roughness: 0.5 });
     const choker = new THREE.Mesh(new THREE.TorusGeometry(stickR * 1.15, stickR * 0.16, 8, 18), chokerMat);
     choker.name = 'lollipop_choker';
     choker.rotation.x = Math.PI / 2;

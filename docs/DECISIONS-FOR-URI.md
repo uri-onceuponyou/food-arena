@@ -20,13 +20,13 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
 | **11** | Longer legs — every silhouette changed | longer | **keep** — legs now exist at all | 2 constants + 1 row/archetype |
 | **5** | Floor hue as the blocking cue | restored | **keep** — two sources agreed it was a defect | six constants |
-| **7** | Audio: the mix's top is flat | as-is | **drop the flow stings 4–5 dB** | levels only |
+| **7** | Audio | as-is | ✅ **ANSWERED — "flat, monotonic, no splash on a tomato hit"** → now a build, not a tune | see §7 |
 | **4** | `ROSTER_GATED` | off | **yours** — shop is built and honest either way | one flag |
 | **2** | Timeout tiebreak | HP fraction → zone → you | **keep** (it now actually fires) | a few lines |
 | **3** | Trail damage cap | 1 per tick | **keep** | one constant |
 | **13** | Rarity runs backwards; the stat card is fiction | as built | **decide if rarity means power** — half the grid is settled at select | a real build, not a tune |
 | **14** | Portrait phones: 65% black bars | letterboxed to 4:3 | **prompt to rotate** — or rethink the fairness model | one prompt, or a model rework |
-| **8** | Pointer lock | shipped as built | **cannot be tested here at all** — needs your browser | — |
+| **8** | Pointer lock | shipped as built | ✅ **ANSWERED — Uri: "works good"** | — |
 | **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
 
 **If you only do one thing:** play it for ten minutes. The two most valuable bug reports this
@@ -307,6 +307,42 @@ does Hamburger at 767 Hz read as "heavy" or merely "muffled"?
 
 **Assumed.** Unchanged. Not touched without a human ear.
 
+---
+
+### ✅ ANSWERED — Uri played it, and the answer is none of the things that were measured
+
+> **"It still seems like it's flat. One tone, maybe two, monotonic. I would expect a splash sound
+> when I throw a tomato and it hits, for example. More depth. More realism as much as possible."**
+
+**That is a different problem from everything this pillar had been measuring.** Four candidates had
+been prepared from measurement — the room reading as a small box, the soft clip flattening the mix,
+Hamburger's 767 Hz reading muffled, and sparse event coverage. **None of them is what he heard.**
+The real complaint is two things, and both are *build* work rather than tuning:
+
+**(a) The sounds have no material identity.** A tomato should *splat wetly*; glass should *shatter*;
+dough should *thud*. Right now a tomato hit is not distinguishable as a tomato hit. Note the
+coverage map's wording: impacts are *"bespoke **or** generic"* — so a weapon without a bespoke
+impact falls through to one generic sound, and that is almost certainly what he is hearing.
+
+**(b) The synthesis is too simple to carry realism.** *"One tone, maybe two"* is a literal
+description: a voice built from one or two oscillators and an envelope cannot sound like a splash.
+A splash is **filtered noise with a fast transient and a wet tail**, not a pitch.
+
+⚠️ **The constraint that shapes any fix:** this pillar is **procedural, with zero assets except the
+theme**. So the answer is not sampled splashes — it is layered synthesis (transient / body / tail,
+noise beds, filtered bursts), which is entirely achievable and is what "one or two tones" is
+missing.
+
+**Also note what this reframes.** `--mode identity` (77 assertions) proves sounds are
+*distinguishable from each other*. Uri's report proves distinguishable is **not** the same as
+*right for the material* — the same shape as this project's recurring lesson that a measurement can
+be perfectly true and still not answer the question you care about.
+
+**Still open from the original entry, and now lower priority than the above:** whether the room
+reads as a kitchen, and whether the soft-clip flattening (authored 13 dB apart, delivered 5 dB
+apart) should be spent by dropping the flow stings 4–5 dB. **Recommendation: do (a) and (b) first** —
+if every impact is one generic tone, no amount of room or headroom will fix "flat".
+
 ### Evidence gathered since — not a verdict, but the room question now has a number
 
 The reverb return is doing measurable work **and is filling the tremolo's troughs**: at `wet: 0.22`
@@ -343,7 +379,18 @@ Not done, because how loud the game should be is taste.
 
 ---
 
-## 8. Pointer lock — cannot be tested here at all
+## 8. Pointer lock — ✅ ANSWERED: Uri confirms it works
+
+**Uri, playing on a real browser: "Mouse capturing works good."** That closes this. No harness in this
+repo could ever have answered it — Playwright's Chromium refuses `requestPointerLock()`
+unconditionally, headless, headed, and with automation flags stripped. Everything below is kept as
+the record of why it was unanswerable.
+
+---
+
+### (original entry)
+
+## 8b. Pointer lock — could not be tested here
 
 **Why it needs you.** Playwright's Chromium refuses `requestPointerLock()` unconditionally —
 headless, headed, and with automation flags stripped. **The multi-monitor case that prompted the

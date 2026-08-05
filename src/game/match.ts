@@ -176,6 +176,25 @@ export class GameSession {
   private readonly projectVec = new THREE.Vector3();
 
   /**
+   * Live projectiles, keyed by sim id, for the one thing `projectile-destroyed`
+   * cannot tell us on its own.
+   *
+   * That event carries `{ id, reason, x, y }` and nothing else — no weapon, no colour,
+   * no velocity — because `sim.ts` splices the projectile out of `state.projectiles`
+   * in the same call that pushes it, so by the time this file sees the event the
+   * object is gone. `spawnCoverScuff` needs the colour (so a scuff reads as *that*
+   * shot) and the travel direction (so the sparks come back off the surface rather
+   * than fanning at random), and both are reconstructible from the `projectile-spawned`
+   * event that must have preceded it: direction is simply destroy-position minus
+   * spawn-position.
+   *
+   * Bounded by construction — every entry is deleted on `projectile-destroyed`, which
+   * `sim.ts` guarantees for every projectile it ever creates (hit / cover / expiry are
+   * the only three exits, and all three route through `removeProjectile`).
+   */
+  private readonly projectileOrigins = new Map<number, { color: string; x: number; y: number }>();
+
+  /**
    * QA-only fast-forward: `?simSpeed=8` on the page URL advances the sim faster than
    * real time. Defaults to 1 (no effect) for real play. Exists because a software
    * (SwiftShader) renderer makes each frame expensive, and our own per-frame dt is
@@ -377,6 +396,10 @@ export class GameSession {
     this.vfx.clear();
     this.audio.reset();
     this.input.reset();
+    // A match can end with shots still in the air, and those never emit a
+    // `projectile-destroyed` — the whole `MatchState` is replaced above. Without this
+    // the map keeps one entry per unresolved shot, forever, across every restart.
+    this.projectileOrigins.clear();
     this.hitStopBudgetMs = 0;
     this.hitStopBankedMs = 0;
     this.knockback.player.x = 0; this.knockback.player.z = 0;
@@ -586,12 +609,17 @@ export class GameSession {
           model.play('attack', { weaponIndex: weaponIndex < 0 ? 0 : weaponIndex });
 
           if (weapon) {
-            this.vfx.spawnCastFlash(fighter.x, fighter.y, fighter.facing, weapon, fighter.characterId);
-            if (weapon.type === 'melee') {
-              this.vfx.spawnMeleeArc(fighter.x, fighter.y, fighter.facing, weapon.range ?? 0, weapon.cone ?? 360, weapon.color);
-            }
+            // ONE call, deliberately. This used to fan out to three independent
+            // `vfx` methods — cast flash, melee arc, giant-slam shockwave — each
+            // authored and measured alone, and for Giant Lollipop the three
+            // together repainted 75.7% of the frame while every one of them looked
+            // reasonable in isolation (`docs/LESSONS.md` §7). The arbitration now
+            // lives in `vfx.ts`'s `spawnWeaponCast`, which is the only place that
+            // can see the sum; adding another cast-time beat belongs there, not
+            // here.
+            this.vfx.spawnWeaponCast(fighter.x, fighter.y, fighter.facing, weapon, fighter.characterId);
             if (weapon.giantSlam) {
-              this.vfx.spawnGiantSlamShockwave(fighter.x, fighter.y, weapon.color, weapon.range ?? 0);
+              // Everything a giant slam does that is NOT this layer's to draw.
               this.hud.flashScreen(weapon.color);
               this.stage.rig.shake(0.55, 2.6);
               this.triggerHitStop(120);
@@ -665,6 +693,29 @@ export class GameSession {
             const owner = this.state[ev.source.ownerRole];
             this.applyKnockback(ev.targetRole, owner.x, owner.y, 0.03);
           }
+          break;
+        }
+        case 'projectile-spawned': {
+          // Only so `projectile-destroyed` can reconstruct colour + direction — see
+          // `projectileOrigins`. Nothing is drawn here: `vfx.sync()` builds the
+          // in-flight visual from `state.projectiles` on the same tick.
+          this.projectileOrigins.set(ev.id, { color: ev.color, x: ev.x, y: ev.y });
+          break;
+        }
+        case 'projectile-destroyed': {
+          const origin = this.projectileOrigins.get(ev.id);
+          this.projectileOrigins.delete(ev.id);
+          // `hit-target` already brings a full impact burst via the `hit-landed` that
+          // fires alongside it, and `expired` is a shot fading out at max range —
+          // see `vfx.ts`'s `spawnCoverScuff` for why only cover gets a mark, and why
+          // that matches what `audio/director.ts` already does with `coverThud()`.
+          if (ev.reason !== 'hit-cover') break;
+          this.vfx.spawnCoverScuff(
+            ev.x, ev.y,
+            origin?.color ?? '#FFFFFF',
+            origin ? ev.x - origin.x : 0,
+            origin ? ev.y - origin.y : 0,
+          );
           break;
         }
         case 'heal': {

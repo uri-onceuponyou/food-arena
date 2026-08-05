@@ -36,38 +36,10 @@
  *     say so. Both halves are asserted, the same way the gem store's are.
  *
  * Usage: node tools/tmp/menu_accept.mjs [--flow-only]
- *
- * ── WHY EVERY WAIT HERE GOES THROUGH `settle.mjs` ───────────────────────────
- * This file measures GEOMETRY, and `getBoundingClientRect()` includes transforms.
- * `.fa-screen` runs `fa-screen-in 0.26s`, whose first keyframe is
- * `translateY(10px) scale(0.992)` — so a tap target read during the entry animation
- * measures 43.65px against this file's own 43.5px floor, and every control's rect
- * sits 10px low against a +/-1px safe-area tolerance. Neither `window.__screenReady`
- * nor `window.__previewReady` means the animation is over: the first is set in the
- * same tick the curtain drops, the second two rAFs into the same animation. Playwright
- * `click({force:true})` also SKIPS its own stability check, so a forced click issued
- * mid-animation aims at a coordinate the button has already left.
- * `settleScreen()` waits for the page's own rendered state instead of a flag or a
- * clock. See `tools/tmp/settle.mjs` and `tools/tmp/settle_validate.mjs`.
  */
 
 import { chromium } from 'playwright';
 import { readdir, readFile } from 'node:fs/promises';
-import { settleScreen } from './settle.mjs';
-
-/**
- * Wait for a route AND for it to be on screen.
- *
- * The flag alone is not enough — see the header. Every `__screenReady` wait in this
- * file goes through here so there is one condition, not fourteen.
- */
-async function atScreen(page, screen, timeout = 20000) {
-  await page.waitForFunction(
-    `window.__screen === ${JSON.stringify(screen)} && window.__screenReady === true`,
-    null, { timeout },
-  );
-  return settleScreen(page, { label: screen, timeout: Math.max(timeout, 30000) });
-}
 
 /**
  * Static guard, run before the browser starts.
@@ -320,7 +292,6 @@ async function auditEconomy(browser) {
   try {
     await page.goto(`${BASE}/?screen=trophies`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "trophies"', null, { timeout: 45000 });
-    await settleScreen(page, { label: 'economy/trophies' });
     await page.waitForTimeout(300);
 
     step = 'seeded state renders';
@@ -455,7 +426,6 @@ async function auditEconomy(browser) {
     step = 'progress survives a reload';
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction('window.__screen === "trophies"', null, { timeout: 30000 });
-    await settleScreen(page, { label: 'economy/trophies-reload' });
     await page.waitForTimeout(250);
     const persisted = await page.evaluate(() => ({
       claimable: document.querySelectorAll('.tr-node.is-claimable').length,
@@ -501,7 +471,6 @@ async function auditOpening(browser) {
     step = 'a bare / shows the title card';
     await page.goto(`${BASE}/?hold=120000`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
-    await settleScreen(page, { label: 'opening' });
     record('opening', 'opening', 'bare-slash-shows-the-title-card', true, '');
 
     step = 'audio is locked before the gesture';
@@ -509,7 +478,7 @@ async function auditOpening(browser) {
 
     step = 'tapping start enters the game';
     await page.click('[data-el="start"]', { force: true });
-    await atScreen(page, "home", 20000);
+    await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
     record('opening', 'opening', 'start-enters-the-game', true, '');
 
     const after = await page.evaluate(() => window.__audio?.stats().state ?? 'no-engine');
@@ -522,13 +491,11 @@ async function auditOpening(browser) {
     await page.goto(`${BASE}/?hold=600`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
     await page.waitForFunction('window.__screen === "home"', null, { timeout: 15000 });
-    await settleScreen(page, { label: 'opening->home' });
     record('opening', 'opening', 'auto-continues-with-no-input', true, 'no click, no key');
 
     step = 'an explicit screen request still wins';
     await page.goto(`${BASE}/?screen=home`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "home"', null, { timeout: 20000 });
-    await settleScreen(page, { label: 'screen-param-home' });
     record('opening', 'opening', 'screen-param-skips-it', true, '?screen=home');
 
     record('opening', '-', 'opening-flow', true, 'boot / tap / auto / bypass');
@@ -575,7 +542,6 @@ async function auditSettings(browser) {
   try {
     await page.goto(`${BASE}/?screen=settings`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "settings"', null, { timeout: 45000 });
-    await settleScreen(page, { label: 'settings' });
 
     step = 'the volume slider moves the bus';
     const v0 = (await stats()).volume;
@@ -625,7 +591,6 @@ async function auditSettings(browser) {
       `html.fa-reduce-motion = ${applied}`);
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction('window.__screen === "settings"', null, { timeout: 30000 });
-    await settleScreen(page, { label: 'settings-return' });
     const survived = await page.evaluate(() =>
       document.documentElement.classList.contains('fa-reduce-motion'));
     record('settings', 'settings', 'reduce-motion-persists', survived === applied,
@@ -666,7 +631,7 @@ async function auditSettings(browser) {
 
     step = 'back returns home';
     await page.click('[data-el="back"]', { force: true });
-    await atScreen(page, "home", 20000);
+    await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
     record('settings', '-', 'settings-flow', true, 'audio / motion / reset / back');
   } catch (err) {
     record('settings', '-', 'settings-flow', false, `failed at "${step}": ${String(err).split('\n')[0]}`);
@@ -695,10 +660,7 @@ async function run() {
         const hold = screen === 'opening' ? '&hold=120000' : '';
         await page.goto(`${BASE}/?screen=${screen}${hold}`, { waitUntil: 'networkidle', timeout: 45000 });
         await page.waitForFunction('window.__previewReady === true', null, { timeout: 45000 });
-        // NOT a 250ms sleep. `__previewReady` fires two rAFs after mount, i.e. two
-        // frames into a 260ms entry animation, so the sleep was 70ms of margin on a
-        // race. This waits for the rendered state instead.
-        await settleScreen(page, { label: vp.name + '/' + screen });
+        await page.waitForTimeout(250);
 
         // Pass 1: real (zero) insets.
         await page.evaluate(() => {
@@ -738,24 +700,21 @@ async function run() {
       // jumping past it with `?screen=`.
       await page.goto(`${BASE}/`, { waitUntil: 'networkidle', timeout: 45000 });
       await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
-      // Before a FORCED click: force SKIPS Playwright's own stability check, so a
-      // click issued during fa-screen-in aims where the button no longer is.
-      await settleScreen(page, { label: 'flow/opening' });
       await page.click('[data-el="start"]', { force: true });
-      await atScreen(page, "home", 45000);
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 45000 });
 
       step = 'the gear reaches settings';
       // It said "Settings coming soon" for two review rounds. A dead control on the
       // lobby is the defect both menu critics named, so its liveness is asserted.
       await page.click('[data-el="settings"]', { force: true });
-      await atScreen(page, "settings", 20000);
+      await page.waitForFunction('window.__screen === "settings" && window.__screenReady === true', null, { timeout: 20000 });
       await page.click('[data-el="done"]', { force: true });
-      await atScreen(page, "home", 20000);
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
       record('flow', 'home', 'gear-opens-settings', true, 'home -> settings -> home');
 
       step = 'home->characters';
       await page.click('[data-el="start"]', { force: true });
-      await atScreen(page, "characters", 20000);
+      await page.waitForFunction('window.__screen === "characters" && window.__screenReady === true', null, { timeout: 20000 });
 
       step = 'pick a different fighter';
       await page.click('.chars-card[data-char="lollipop"]');
@@ -802,7 +761,7 @@ async function run() {
       step = 'match->home';
       await page.click('[data-el="pause"]');
       await page.click('[data-el="quit"]');
-      await atScreen(page, "home", 20000);
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
 
       step = 'equipped fighter persisted';
       const equipped = await page.evaluate(() =>
@@ -822,7 +781,7 @@ async function run() {
 
       step = 'home -> trophy road';
       await page.click('[data-go="trophies"]', { force: true });
-      await atScreen(page, "trophies", 20000);
+      await page.waitForFunction('window.__screen === "trophies" && window.__screenReady === true', null, { timeout: 20000 });
 
       step = 'no stale celebration for a match that never finished';
       {
@@ -842,7 +801,7 @@ async function run() {
 
       step = 'trophies -> home';
       await page.click('[data-el="back"]', { force: true });
-      await atScreen(page, "home", 20000);
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
 
       step = 'home -> shop';
       // ── The shop, and why it is asserted HERE rather than trusted ─────────────
@@ -856,7 +815,7 @@ async function run() {
       // control must be DISABLED at the DOM level, and the copy must say so in words.
       // A live-looking Buy button that no-ops is the defect both menu critics punished.
       await page.click('[data-go="shop"]', { force: true });
-      await atScreen(page, "shop", 20000);
+      await page.waitForFunction('window.__screen === "shop" && window.__screenReady === true', null, { timeout: 20000 });
       {
         const shop = await page.evaluate(() => {
           const buys = [...document.querySelectorAll('[data-buy]')];
@@ -884,7 +843,7 @@ async function run() {
 
       step = 'shop -> home';
       await page.click('[data-el="back"]', { force: true });
-      await atScreen(page, "home", 20000);
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 20000 });
 
       record('flow', '-', 'round-trip', true, 'home -> characters -> match -> home -> trophies -> home -> shop -> home');
     } catch (err) {

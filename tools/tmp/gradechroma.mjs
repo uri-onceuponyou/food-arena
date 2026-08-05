@@ -95,7 +95,18 @@ const CANDIDATES = [
   { label: 'K1.00 toe.28@.60', sat: 0.70, contrast: 0.62, toe: 0.28, tk: 0.60, keep: 1.00 },
   { label: 'K0.40 toe.34@.64', sat: 0.70, contrast: 0.62, toe: 0.34, tk: 0.64, keep: 0.40 },
   { label: 'K0.40 toe.22@.56', sat: 0.70, contrast: 0.62, toe: 0.22, tk: 0.56, keep: 0.40 },
+  // ── CONTRAST, re-priced after `8a91f7c` made `coolChroma` one-sided ──────────
+  // `K0.55 toe.28@.60` above IS the shipped config, so it is the control these three
+  // are read against — NOT `table[0]`, which is the pre-toe HEAD. The delta the gate
+  // will see is (row - K0.55), and the summary below prints both so the two cannot be
+  // confused. Contrast was priced once before and dropped on a rail that has since
+  // been shown to punish the move its own note recommends.
+  { label: 'C0.68 K0.55 toe.28', sat: 0.70, contrast: 0.68, toe: 0.28, tk: 0.60, keep: 0.55 },
+  { label: 'C0.72 K0.55 toe.28', sat: 0.70, contrast: 0.72, toe: 0.28, tk: 0.60, keep: 0.55 },
+  { label: 'C0.80 K0.55 toe.28', sat: 0.70, contrast: 0.80, toe: 0.28, tk: 0.60, keep: 0.55 },
 ];
+/** The shipped configuration, and therefore the row every candidate is priced against. */
+const CONTROL_LABEL = 'K0.55 toe.28@.60';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // `colourBudget`, copied from `tools/arena-scan.mjs` so the numbers are the gate's.
@@ -302,6 +313,7 @@ const table = CANDIDATES.map((c) => {
   };
 });
 const base = table[0];
+const control = table.find((t) => t.label === CONTROL_LABEL) ?? base;
 console.log(`\nshipped grade in the served tree: ${JSON.stringify(shippedU)}`);
 console.log('\nMEAN over the 6 stations — WebGL buffer, no DOM HUD, so read the DELTAS\n');
 console.log('candidate                    meanSat  chroma    warm    cool  warmShr    luma |   dSat  dChroma   dWarm  dShare');
@@ -311,6 +323,17 @@ for (const t of table) {
     `${t.warmChroma.toFixed(4).padStart(8)}${t.coolChroma.toFixed(4).padStart(8)}${t.warmShare.toFixed(4).padStart(9)}` +
     `${t.meanLuma.toFixed(4).padStart(8)} | ${s(t.meanSat - base.meanSat).padStart(7)}${s(t.meanChroma - base.meanChroma).padStart(9)}` +
     `${s(t.warmChroma - base.warmChroma).padStart(8)}${s(t.warmShare - base.warmShare).padStart(8)}`);
+}
+// The delta the GATE will see, which is against the SHIPPED grade rather than against
+// the pre-toe HEAD. Printing only the `table[0]` column once made a candidate look as
+// though it spent the toe's chroma twice over.
+console.log(`\nSAME ROWS PRICED AGAINST THE SHIPPED GRADE (${control.label}) — this is what arena-scan compares\n`);
+console.log('candidate                      dSat  dChroma    dWarm    dCool   dShare    dLuma');
+for (const t of table) {
+  const s = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(4)}`;
+  console.log(`${t.label.padEnd(28)}${s(t.meanSat - control.meanSat).padStart(9)}${s(t.meanChroma - control.meanChroma).padStart(9)}` +
+    `${s(t.warmChroma - control.warmChroma).padStart(9)}${s(t.coolChroma - control.coolChroma).padStart(9)}` +
+    `${s(t.warmShare - control.warmShare).padStart(9)}${s(t.meanLuma - control.meanLuma).padStart(9)}`);
 }
 await writeFile(join(OUT, 'gradechroma.json'), JSON.stringify({ shippedU, table }, null, 2));
 console.log(`\nwrote ${OUT}/gradechroma.json`);

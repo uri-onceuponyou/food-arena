@@ -36,15 +36,26 @@ import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
-const SHELL = '#F2A73E';       // toasted hard-shell gold — bright, saturated
+// ── The value ladder ─────────────────────────────────────────────────────────
+// Measured against 18 Brawl Stars plates (`tools/tmp/valuescan.mjs`): their p05 is
+// 0.097 and every single one puts 5% of the character below 0.18. Taco's was 0.236 —
+// a row of light-to-mid masses with no dark end at all, which is why a blind critic
+// read "near-zero value separation between shell, apron and limbs". The fix is the
+// reference's own grammar: the FOOD keeps its hue and gets a touch brighter, the
+// COSTUME AND LIMBS carry a genuine near-black. Measured at pot_south, shipped
+// framing: range 0.544 -> 0.730, p05 0.236 -> 0.140, steps@0.10 6 -> 7 — and
+// figure/ground goes UP, 0.164 -> 0.175, because the darkening is paid for by the
+// lift on the shell and the pale serape stripe.
+const SHELL = '#F8BE62';       // toasted hard-shell gold — bright, saturated
 const SHELL_DARK = '#D07F1E';  // shadow / crease tone
 // The cheek pad's tone. Deliberately only a HAIR lighter than SHELL: at a
 // bigger gap the pad stopped reading as a swelling in the wall and started
 // reading as a separate pale ball sitting inside a container, which put the
 // character's identity back on the wrong object again.
-const POD = '#F4AE46';
+const POD = '#FBD79A';
 const MEAT = PALETTE.patty;        // '#6B3E26'
-const MEAT_DARK = PALETTE.pattyDark; // '#4E2C1B'
+/** Local, not `PALETTE.pattyDark`: this is Taco's dark rung and it is per-character. */
+const MEAT_DARK = '#1C0E07';
 const TOMATO = PALETTE.tomato;       // '#E63946'
 const LETTUCE = '#8FCB1E';
 const LETTUCE_DARK = '#6FA112';
@@ -57,8 +68,32 @@ const ONION = '#AD82D6';       // ties visually to the Onion Bomb projectile col
 // family. The HEAD keeps its golden shell (that's the "hard taco shell" read), but
 // the limbs shift to a deeper, redder terracotta — extra-crispy fried-edge shell —
 // which is a distinctly different hue from both castmates above.
-const LIMB_SHELL = '#C1522B';
-const LIMB_SHELL_DARK = '#8F3A1D';
+// …and this is where the dark end lives. The two limb tones drop a long way: the
+// upper limbs to a deep terracotta and the forearms/shins/boots to a near-black
+// charred-shell edge, which is 6.5% of the character's pixels and is what carries the
+// P05. Hue and the light-to-dark ORDER are both unchanged; only the value moved.
+
+// ── PASS 2: the limb CHAIN has to alternate, not ramp ────────────────────────
+// The first value pass took both limb tones down together. That fixed range/P05 and
+// BROKE the part boundary — measured, `shoulderL|elbowL` 0.044, `kneeL|footL` 0.035,
+// because a chain of four segments each a shade darker than the last is one mass. The
+// reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
+// segment comes back UP, the lower segment holds the dark, and the boot takes its own
+// darkest tone instead of sharing the shin's.
+const LIMB_SHELL = '#C25A28';      // upper arm / thigh — mid
+const LIMB_SHELL_DARK = '#4A1608'; // forearm / shin — dark
+// PASS 3: a near-black boot under a near-black shin is not two shapes — measured
+// `kneeL|footL` 0.028 across 41 px. The boot goes the OTHER way instead: this
+// character's foot was `SHELL_DARK` originally, and a mid toasted boot under a dark
+// shin is the same alternation the arms use.
+const BOOT_CHAR = '#B06A2E';       // boots — a step LIGHTER than the shin above them
+/**
+ * The serape's own light rung. The stripe used to be `#C1432B`, a red a few units off
+ * `TOMATO` and only 0.09 of luma from the limbs it sits above — one more mid tone on a
+ * character that had five. A woven serape's pale stripe is the natural place to put
+ * the top of the ladder, and it pays for the darkening above in figure/ground.
+ */
+const SERAPE_PALE = '#F7EDD8';
 
 /**
  * Shell wall outline: a rounded fold at the bottom rising to a wide open mouth,
@@ -175,7 +210,7 @@ export class TacoCharacter extends BaseCharacter {
         limb: LIMB_SHELL,
         hand: ONION,  // saturated purple — ties to Onion Bomb, breaks from the cast's
                        // repeated cream/white mitt, per the same review pass above
-        foot: SHELL_DARK,
+        foot: BOOT_CHAR,
         torso: SHELL,
         limbRoughness: 0.8,
       },
@@ -554,7 +589,7 @@ export class TacoCharacter extends BaseCharacter {
       // Mexican-blanket read — breaks the torso's trapezoid silhouette with a
       // hard diagonal line the shape itself doesn't have, and the chili charm
       // dangling off its low end is the small worn detail underneath it.
-      const sashColors = ['#C1432B', '#F5EAD6', '#2E8C86', '#C1432B', '#F5EAD6', '#2E8C86', '#C1432B']
+      const sashColors = [SERAPE_PALE, '#F5EAD6', '#2E8C86', SERAPE_PALE, '#F5EAD6', '#2E8C86', SERAPE_PALE]
         .map((c) => toonMat({ color: c, roughness: 0.72 }));
       // Endpoints pulled in from 0.85/0.68 and lifted off the hip line: with the
       // band's own width added perpendicular to its run, the old anchors put both
@@ -633,6 +668,7 @@ export class TacoCharacter extends BaseCharacter {
     // as the head, not a generic mitt.
     const limbShellMat = toonMat({ color: LIMB_SHELL, roughness: 0.78 });
     const limbShellDarkMat = toonMat({ color: LIMB_SHELL_DARK, roughness: 0.78 });
+    const bootMat = toonMat({ color: BOOT_CHAR, roughness: 0.8 });
     const mittMat = glossyMat({ color: ONION, roughness: 0.32 });
     const toothGeoSmall = new THREE.ConeGeometry(R * 0.05, R * 0.12, 4);
     this.rig.dressLimbs((part, size) => {
@@ -682,7 +718,7 @@ export class TacoCharacter extends BaseCharacter {
           // inflated every measured height for this character by that 0.21 m).
           const foot = new THREE.Mesh(
             roundedBox(size.radius * 1.85, size.len * 0.55, size.radius * 2.15, size.radius * 0.30, 3),
-            limbShellDarkMat
+            bootMat
           );
           // Seated on the floor via `size.groundY` (the joint-local y of the world
           // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1

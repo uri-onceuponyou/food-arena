@@ -27,7 +27,15 @@ import { CHARACTER_HEIGHT } from '../units';
 
 const CERAMIC = '#F7F1E6';      // glazed bowl exterior — warm off-white, not clinical
 const CERAMIC_SHADE = '#E2D8C4'; // interior shadow / underside
-const RIM_TRIM = '#B5432A';      // takeout-bowl rust-red trim band, contrast accent
+// ── The dark rung ────────────────────────────────────────────────────────────
+// `tools/tmp/valuescan.mjs --mode ref`: every one of eighteen Brawl Stars plates puts
+// 5% of the character below luma 0.18. Not one of ours did. Soup's own part structure
+// was already the cast's healthiest (5.1% weak boundary), so this is the SMALLEST
+// change that gives it a dark end: the rust-red band it already wears goes from a
+// mid-value accent to a near-black one. Measured at pot_south, shipped framing:
+// range 0.652 -> 0.791, p05 0.317 -> 0.177, figure/ground 0.194 -> 0.174.
+// Its 10.8% of the character is what buys the P05 — a dark rung has to carry AREA.
+const RIM_TRIM = '#3A1009';      // takeout-bowl band, near-black rust — Soup's dark rung
 // Limb/torso body colour. A fresh independent art director scored Soup 4/10 and named
 // the cast-wide colour convergence directly: Soup, Water Bottle and Sushi all ended up
 // with cream/white tapered limbs and dark boots, reading as the same parts reskinned.
@@ -52,6 +60,8 @@ const WOOD = '#8A5A34';          // ladle handle
 // its handle pokes up past the shoulder line the way a cape or backpack does on
 // the reference roster — plus a tied napkin bib layered over the existing apron
 // sash as a smaller fabric-panel detail.
+/** Boots. Deepened with `RIM_TRIM` so the dark rung reaches the ground, not just the sash. */
+const BOOT_STONE = '#160F0B';
 const BIB = '#FBF7EE';       // pale napkin cloth, warmer than pure white
 const SLING = '#6B4226';     // leather sling strap
 const SLING_DARK = '#4A2E1A';
@@ -248,7 +258,7 @@ export class SoupCharacter extends BaseCharacter {
         // palette is therefore only a fallback that is never actually rendered.
         limb: CERAMIC,
         hand: CERAMIC,
-        foot: '#3A2E24',
+        foot: BOOT_STONE,
         torso: GLAZE_GREY,
         limbRoughness: 0.5,
       },
@@ -874,7 +884,7 @@ export class SoupCharacter extends BaseCharacter {
     const handleMat = glossyMat({ color: CERAMIC, roughness: 0.22 }); // same material as the bowl itself
     const legMat = toonMat({ color: CERAMIC_SHADE, roughness: 0.48 }); // matte stoneware pedestal
     const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });
-    const bootMat = toonMat({ color: '#3A2E24', roughness: 0.7 });
+    const bootMat = toonMat({ color: BOOT_STONE, roughness: 0.7 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {

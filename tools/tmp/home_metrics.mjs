@@ -38,6 +38,7 @@ import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
+import { settleScreen, waitForFaded, captureSettled } from './settle.mjs';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle',
@@ -170,9 +171,23 @@ async function run() {
 
   await page.goto(`${base}/?screen=home`, { waitUntil: 'networkidle', timeout: 45000 });
   await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 45000 });
-  // Past the 4.2s hint fade AND past the entrance animation, so what is measured is the
-  // screen's steady state — which is the state a critic is shown.
+  // ── THE FLAG IS NOT THE CONDITION ───────────────────────────────────────────
+  // `shell.ts:navigate` sets `__screenReady` in the SAME TICK it drops the curtain, and
+  // `.fa-screen` then runs `fa-screen-in 0.26s` from opacity 0 over the orange
+  // `.fa-bg`. Every contrast ratio this file reports is measured against "the pixels
+  // actually behind it", so a frame captured inside that fade compresses every one of
+  // them. The 6000ms sleep below was long enough on this machine and was never the
+  // condition — see `tools/tmp/settle_validate.mjs`, which shows the flag firing at
+  // effective opacity 0.000 with `#boot` still at 1.000.
+  await settleScreen(page, { label: 'home' });
+  // The hint fade IS a timed content transition — `home.ts` does
+  // `setTimeout(() => hint.classList.add('is-faded'), 4200)` plus a 0.6s CSS
+  // transition — so no paint condition can predict it. The sleep stays as a FLOOR and
+  // the element's own opacity is the condition, so a slow machine waits longer instead
+  // of measuring a half-faded hint. (Several viewports `display:none` the hint; that
+  // counts as faded.)
   await page.waitForTimeout(6000);
+  await waitForFaded(page, '.fa-home .home-stage-hint');
 
   const dom = await page.evaluate(() => {
     const vis = (n) => {
@@ -216,7 +231,7 @@ async function run() {
     };
   });
 
-  await page.screenshot({ path: shot, timeout: 90_000 });
+  await captureSettled(page, { path: shot, label: 'home', tool: 'home_metrics', timeout: 90_000 });
   await browser.close();
 
   const { data, info } = await sharp(shot).removeAlpha().raw().toBuffer({ resolveWithObject: true });

@@ -15,6 +15,7 @@
  */
 
 import * as THREE from 'three';
+import { CHARACTER_HEIGHT, CHARACTER_RADIUS } from '../../units';
 import type { CharacterWeaponVfxMap } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -23,6 +24,35 @@ import type { CharacterWeaponVfxMap } from './types';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SHARD_RADIUS = 0.09;
+
+/**
+ * ── The same defect as `hamburger.ts`, and for the same reason ─────────────────
+ *
+ * These two files are the original reference conversions and predate the rest of the
+ * directory's "every dimension is a fraction of `CHARACTER_HEIGHT`" discipline. Both
+ * sized their beats against the PROJECTILE's own radius. Measured at shipped framing
+ * (`tools/tmp/vfx_wcov.mjs`, 800x450 readback, peak slice):
+ *
+ *                        shipped   +nodepth   +scale4   occl    size
+ *     Glass.cast             21        21       174    1.00x    8.3x
+ *     Glass.impact           78       132       753    1.69x    9.7x
+ *
+ * against the generic path's 735 / 3,102. The cast is purely SIZE (occlusion 1.00x —
+ * four slivers 0.15 m tall). The impact is BOTH: a 1.69x occlusion ratio means ~41%
+ * of it never reached the screen, because eleven shards and the crack flash all spawn
+ * at `ctx.position` — which is the hit point, i.e. INSIDE the body that was hit — and
+ * have to fly out of a silhouette whose visible half-width is ~0.55 m before they can
+ * be seen at all. That is `docs/LESSONS.md` §1's repeat offender ("start outside the
+ * silhouette, not inside it"), and scaling this up without also moving it out would
+ * have produced a bigger invisible effect.
+ *
+ * So: shards start on the RIM (`IMPACT_RIM`) and are sized in `GLASS_UNIT`s.
+ */
+const GLASS_UNIT = CHARACTER_HEIGHT * 0.075; // 0.158 m
+/** Radius the shatter is born on. `CHARACTER_RADIUS` is the sim's collision radius
+ * (1.05 m); 0.5 of it puts the shards at the edge of the visible silhouette rather
+ * than at its centre, without throwing them so wide they stop reading as this hit. */
+const IMPACT_RIM = CHARACTER_RADIUS * 0.5;
 /** An octahedron stretched into a thin sliver — angular and faceted, the opposite
  * silhouette language from Tomato's rounded blob geometry. This IS the "hard and
  * brittle" identity; everything else in this file is built to move debris shaped
@@ -41,7 +71,10 @@ function materialPool<T extends THREE.Material>(size: number, build: () => T): (
   return () => pool[i++ % size];
 }
 
-const nextShardMat = materialPool(24, () => new THREE.MeshBasicMaterial({ color: '#BFEFFF', transparent: true, opacity: 0.8 }));
+// `depthWrite: false` — THREE defaults it true even on a `transparent` material, so
+// without it every shard silently occludes whatever is behind it
+// (`docs/LESSONS.md` §1's silent-occluder trap).
+const nextShardMat = materialPool(24, () => new THREE.MeshBasicMaterial({ color: '#BFEFFF', transparent: true, opacity: 0.8, depthWrite: false }));
 const nextGlintMat = materialPool(8, () => new THREE.MeshBasicMaterial({
   color: '#FFFFFF', transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false,
 }));
@@ -127,27 +160,39 @@ export const waterbottleWeaponVfx: CharacterWeaponVfxMap = {
     // Tomato's soft settling splatter.
     impact(ctx) {
       const origin = ctx.position;
+      /** Scale that turns one `shardGeo` (built at `SHARD_RADIUS`) into one
+       * `GLASS_UNIT`. Everything below is in units, not in shard-radii. */
+      const U = GLASS_UNIT / SHARD_RADIUS;
 
+      // The crack flash: 0.30 -> 0.72 units (~0.11 -> 0.26 m of radius on a 2.10 m
+      // character). Was 2 -> 7 GLINT radii = 0.043 -> 0.151 m.
       const flash = new THREE.Mesh(glintGeo, nextFlashMat());
       flash.position.copy(origin);
-      flash.scale.setScalar(2);
+      flash.scale.setScalar(1.25 * U);
       ctx.spawnTransient(flash, 0.14, (t) => {
-        flash.scale.setScalar(THREE.MathUtils.lerp(2, 7, t));
+        flash.scale.setScalar(THREE.MathUtils.lerp(1.25, 3.0, t) * U);
         (flash.material as THREE.MeshBasicMaterial).opacity = 0.95 * (1 - t);
       });
 
       const sizeFactor = THREE.MathUtils.clamp(1 + ctx.damage * 0.06, 1, 2.4);
       const shardCount = 11;
       for (let i = 0; i < shardCount; i++) {
-        const ang = Math.random() * Math.PI * 2;
+        // Evenly spaced plus jitter rather than fully random: eleven uniform draws
+        // clump, and a clumped shatter starting on a rim reads as one blob leaving
+        // one side rather than as glass breaking.
+        const ang = (i / shardCount) * Math.PI * 2 + Math.random() * 0.5;
         const speed = (1.6 + Math.random() * 2.4) * sizeFactor;
         const mat = nextShardMat();
         mat.color.set(ctx.color);
         const shard = new THREE.Mesh(shardGeo, mat);
-        const scale = (0.4 + Math.random() * 0.55) * sizeFactor;
+        // 0.42 -> 0.85 units per sliver (was 0.4-0.95 SHARD radii).
+        const scale = (0.42 + Math.random() * 0.43) * U * sizeFactor;
         shard.scale.setScalar(scale);
-        shard.position.copy(origin);
-        const ox = origin.x, oy = origin.y, oz = origin.z;
+        // Born on the rim of the silhouette, not at the hit point inside it.
+        const ox = origin.x + Math.cos(ang) * IMPACT_RIM;
+        const oy = origin.y;
+        const oz = origin.z + Math.sin(ang) * IMPACT_RIM;
+        shard.position.set(ox, oy, oz);
         const vy = 1.1 + Math.random() * 1.6;
         const gravity = -9;
         const spinX = (Math.random() - 0.5) * 22;
@@ -170,21 +215,26 @@ export const waterbottleWeaponVfx: CharacterWeaponVfxMap = {
     // angular and cold, distinct from the generic soft circular flash (and from
     // Tomato's soft red squeeze cue).
     cast(ctx) {
+      // 2.3x the old linear size. `game/vfx.ts`'s subordinate muzzle anchor now
+      // carries the "a weapon fired" beat for every bespoke cast, so this only has to
+      // read as GLASS on top of it — but at 0.15-0.90 cluster scale the four slivers
+      // spanned ~0.15 m total and delivered 21 px, which is not "quiet", it is absent.
+      const U = GLASS_UNIT / SHARD_RADIUS;
       const cluster = buildShardCluster(ctx.color);
       cluster.position.copy(ctx.position);
-      cluster.scale.setScalar(0.15);
+      cluster.scale.setScalar(0.35 * U);
       ctx.spawnTransient(cluster, 0.16, (t) => {
         const grow = Math.min(1, t * 2.2);
         const shrink = t > 0.55 ? 1 - (t - 0.55) * 2.2 : 1;
-        cluster.scale.setScalar(THREE.MathUtils.clamp(0.15 + grow * 0.75, 0.05, 1) * Math.max(0, shrink));
+        cluster.scale.setScalar(THREE.MathUtils.clamp(0.35 + grow * 0.75, 0.1, 1.15) * U * Math.max(0, shrink));
         cluster.rotation.y = t * 5;
       });
 
       const flash = new THREE.Mesh(glintGeo, nextFlashMat());
       flash.position.copy(ctx.position);
-      flash.scale.setScalar(1.2);
+      flash.scale.setScalar(0.8 * U);
       ctx.spawnTransient(flash, 0.12, (t) => {
-        flash.scale.setScalar(THREE.MathUtils.lerp(1.2, 3, t));
+        flash.scale.setScalar(THREE.MathUtils.lerp(0.8, 1.9, t) * U);
         (flash.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - t);
       });
     },

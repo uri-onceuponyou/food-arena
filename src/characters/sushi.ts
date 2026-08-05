@@ -37,15 +37,49 @@ const RICE_SHADE = '#F2ECDD';  // grain shading, a touch deeper
 // hole under it"; (2) real nori is green-black, and a hue there means the dark mass
 // is a material rather than a hole. Still the darkest thing on the character, so it
 // keeps its job as the high-contrast landmark.
-const NORI = '#2F4034';
-const NORI_DEEP = '#1E2B22';   // the maki's own rim, one step darker than the wall
+// ── The dark rung ────────────────────────────────────────────────────────────
+// Sushi's GLOBAL range already passed (0.670 against a 0.636 floor). Its problem was
+// LOCAL: 68.8% of its part boundary was under 0.10 apart, and it was concentrated on
+// the two biggest seams on the model — `head|torso` 0.091 across 119 px and
+// `torso|shoulderL` 0.082 across 92 px. Both are the same fact: the salmon head, the
+// salmon limbs and the belted torso were three tones inside a tenth of a stop.
+//
+// So the nori goes properly black. It dresses the maki wall, the maki rim, the boots,
+// the head's base strip and (see `dressLimbs`) the limbs, which is ~16% of the
+// character — enough AREA to be a P05 rather than a detail. Measured at pot_south,
+// shipped framing: range 0.671 -> 0.800, p05 0.308 -> 0.179, steps@0.10 6 -> 7,
+// figure/ground 0.237 -> 0.199. p50 is UNCHANGED at 0.618: this is a ladder, not a
+// darkening.
+const NORI = '#0E1712';
+const NORI_DEEP = '#070C09';   // the maki's own rim, one step darker than the wall
 // Pushed off `PALETTE.salmon` (#F4A261, a pale peach) to a genuinely saturated
 // fish orange. Two reasons, both measured rather than aesthetic: the fish is now
 // the largest single colour area on the character (see the PROFILE rewrite below),
 // and the cast owns the warm half of the colour wheel unopposed since the arena was
 // re-keyed cool — a pale peach spends that position for nothing.
-const SALMON = '#F5854A';
-const SALMON_DARK = '#CE5C2E'; // fish striation lines
+const SALMON = '#E0722F';
+/**
+ * The limbs, and ONLY the limbs. This partly reverses a documented earlier decision
+ * ("the limbs move from nori-charcoal to the fish's own saturated orange") and the
+ * reason is measured: with salmon limbs, `torso|shoulderL` was 0.082 across 92 px and
+ * `head|torso` 0.091 across 119 px — the two largest seams on the character, both
+ * invisible. The earlier revert was made because near-black on the limbs AND the torso
+ * AND a head band left "most of the character one dark value"; that is checked here
+ * rather than assumed, and it does not happen — the head's 57% of salmon is untouched,
+ * p50 stays exactly 0.618, and figure/ground stays 0.199. See the NORI block above.
+ */
+const LIMB_NORI = '#0C1410';
+
+// ── PASS 2: the limb CHAIN has to alternate, not ramp ────────────────────────
+// The first value pass took both limb tones down together. That fixed range/P05 and
+// BROKE the part boundary — measured, `shoulderL|elbowL` 0.044, `kneeL|footL` 0.035,
+// because a chain of four segments each a shade darker than the last is one mass. The
+// reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
+// segment comes back UP, the lower segment holds the dark, and the boot takes its own
+// darkest tone instead of sharing the shin's.
+/** Upper arm / thigh. Nori stays on the forearm, shin and boots. */
+const LIMB_SALMON_DEEP = '#8A3A18';
+const SALMON_DARK = '#6A2208'; // fish striation lines — a real step under the flesh, not a tint
 const LIP = '#E8798F';         // puckered-lip coral
 const GOLD = RARITY_COLORS.Legendary; // #F4A300 — rarity accent, used sparingly
 
@@ -57,9 +91,9 @@ const GOLD = RARITY_COLORS.Legendary; // #F4A300 — rarity accent, used sparing
 // item — the tails project past the head's own round silhouette from the back/
 // side the way a cape or backpack does on the reference roster — plus a pair of
 // chopsticks tucked into the torso sash as a smaller detail prop.
-const HEADBAND = '#B23A2E';      // chef's-headband red
+const HEADBAND = '#4E1209';      // chef's-headband red, deep enough to be part of the dark rung
 const HEADBAND_DARK = '#8A2A20'; // knot shading
-const CHOPSTICK = '#C99A52';     // pale bamboo
+const CHOPSTICK = '#5A4020';     // scorched bamboo
 
 /**
  * Tapered limb segment: a flat cap at the joint origin (plugs flush into the
@@ -195,7 +229,7 @@ export class SushiCharacter extends BaseCharacter {
         // silhouette test's "generic blob" was partly literal — most of the
         // character was one dark value. Nothing else in the cast is orange-limbed,
         // and it keeps this character firmly in the warm half of the wheel.
-        limb: SALMON,
+        limb: LIMB_SALMON_DEEP,  // joint balls take the UPPER-limb tone; nori is the cuff/shin
         hand: RICE,        // rice-ball fists, the head's own other material
         foot: NORI,        // lacquered near-black boots ground the warm limbs
         torso: NORI,       // carries the maki cut-face on the chest — see dressTorsoAsSushi
@@ -938,7 +972,8 @@ export class SushiCharacter extends BaseCharacter {
     // mostly-dark character with an orange hat. Nori is now confined to the maki
     // torso, the head's base strip and the boots, where it works as an accent
     // instead of as the character's dominant value.
-    const noriLimbMat = glossyMat({ color: SALMON, roughness: 0.34 });
+    const noriLimbMat = glossyMat({ color: LIMB_NORI, roughness: 0.34 });
+    const upperLimbMat = glossyMat({ color: LIMB_SALMON_DEEP, roughness: 0.34 });
     const noriAccentMat = glossyMat({ color: NORI, roughness: 0.3 });
     const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });
     const goldMat = toonMat({ color: GOLD, roughness: 0.3, metalness: 0.35 });
@@ -948,7 +983,7 @@ export class SushiCharacter extends BaseCharacter {
       switch (part) {
         case 'upperArmL':
         case 'upperArmR':
-          return taperedLimb(size.len, size.radius * 1.10, size.radius * 0.82, noriLimbMat);
+          return taperedLimb(size.len, size.radius * 1.10, size.radius * 0.82, upperLimbMat);
         case 'forearmL':
         case 'forearmR':
           return taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, noriLimbMat);
@@ -961,7 +996,7 @@ export class SushiCharacter extends BaseCharacter {
         }
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, noriLimbMat);
+          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, upperLimbMat);
         case 'shinL':
         case 'shinR':
           return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, noriLimbMat);

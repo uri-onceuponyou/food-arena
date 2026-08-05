@@ -41,7 +41,6 @@
 
 import { chromium } from 'playwright';
 import { readdir, readFile } from 'node:fs/promises';
-import { settleScreen } from './settle.mjs';
 
 const BASE = process.env.PREVIEW_BASE ?? 'http://localhost:5173';
 const LAUNCH_ARGS = [
@@ -476,14 +475,8 @@ async function auditMenus(browser) {
       await page.goto(`${BASE}/?screen=${screen}${hold}`, { waitUntil: 'networkidle', timeout: 45000 });
       // eslint-disable-next-line no-await-in-loop
       await page.waitForFunction('window.__previewReady === true', null, { timeout: 45000 });
-      // NOT a 250ms sleep. `__previewReady` is set two rAFs after mount, i.e. two frames
-      // into `.fa-screen`'s 260ms `fa-screen-in`, whose first keyframe is
-      // `translateY(10px) scale(0.992)`. `getBoundingClientRect()` INCLUDES transforms,
-      // so every rect this file asserts — 44px tap targets, safe-area edges, the HUD
-      // collision boxes — would be read 0.8% small and 10px low. This waits for the
-      // page's own rendered state instead of a clock. See tools/tmp/settle.mjs.
       // eslint-disable-next-line no-await-in-loop
-      await settleScreen(page, { label: vp.name + '/' + screen });
+      await page.waitForTimeout(250);
 
       // eslint-disable-next-line no-await-in-loop
       await page.evaluate(() => {
