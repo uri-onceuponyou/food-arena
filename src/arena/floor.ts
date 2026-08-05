@@ -86,7 +86,7 @@
  */
 
 import * as THREE from 'three';
-import { roundedBox } from '../render/toon';
+import { roundedBox, cloneToon } from '../render/toon';
 import { wu, groundPos } from '../units';
 import { mesh, noOutline, FLOOR_Y, ARENA_W, ARENA_H, CENTER, type Materials } from './shared';
 
@@ -285,7 +285,7 @@ const SERVICE_MAT_SAT = 0.26;
  * linear space so the numbers mean what they look like.
  */
 function keyServiceMat<T extends THREE.Material & { color: THREE.Color }>(src: T): T {
-  const m = src.clone();
+  const m = cloneToon(src);
   const hsl = { h: 0, s: 0, l: 0 };
   m.color.getHSL(hsl, THREE.SRGBColorSpace);
   m.color.setHSL(hsl.h, Math.max(hsl.s, SERVICE_MAT_SAT), hsl.l, THREE.SRGBColorSpace);
@@ -390,11 +390,11 @@ function buildDebrisMats(M: Materials): THREE.Material[] {
   // `render/stage.ts` runs a global `HueSaturationEffect({ saturation: 0.32 })`, so
   // anything authored as "already a bit muted" still arrives on screen vivid — the
   // first pass at these values was measurably the most saturated thing in the frame.
-  const berry = M.debrisBerry.clone();
+  const berry = cloneToon(M.debrisBerry);
   berry.color.set('#4E4757'); // near-neutral plum-grey — still not red, no longer neon
-  const onion = M.onion.clone();
+  const onion = cloneToon(M.onion);
   onion.color.set('#A89C88');
-  const lettuce = M.lettuce.clone();
+  const lettuce = cloneToon(M.lettuce);
   lettuce.color.set('#697A55');
   return [berry, onion, lettuce];
 }
@@ -1297,7 +1297,7 @@ export function buildFloor(M: Materials): THREE.Group {
   // the grounds that a near-black lattice at this spatial frequency saws through
   // character silhouettes and shimmers in the far field. A joint wants to be a TONAL
   // step, with the chamfer providing the actual sense of depth.
-  const subfloorDark = M.subfloor.clone();
+  const subfloorDark = cloneToon(M.subfloor);
   // Round-4: DARK, and warm rather than neutral. Chasing an earlier critic's
   // "collapse the joint contrast" note took this too far in the opposite direction —
   // a later one measured the seam at ~#8a8078 against tiles at L121-130 and correctly
@@ -1451,8 +1451,8 @@ export function buildFloor(M: Materials): THREE.Group {
   // attribute this tile geometry doesn't have; that attribute reads as unbound
   // (0,0,0) in WebGL, which multiplied every tile to solid black — a prior round lost
   // time to exactly this.
-  const tileLightInst = M.tileLight.clone();
-  const tileDarkInst = M.tileDark.clone();
+  const tileLightInst = cloneToon(M.tileLight);
+  const tileDarkInst = cloneToon(M.tileDark);
   // Mid-value warm ceramic, ~40% darker and noticeably less yellow than `KPAL`'s
   // #EAD3A8/#D8B586. These numbers are measured, not eyeballed: `tools/_measure_light`
   // puts the four curated gameplay plates at mean HSV value 0.56-0.76 (sat 0.39-0.59),
@@ -2106,9 +2106,9 @@ export function buildFloor(M: Materials): THREE.Group {
   // transform carried the level across untouched. Measured after: pad luma 100 against
   // a tile field at 108, i.e. Δ −0.03 — still inside the ±0.06 bound this file works
   // to, and now on the correct side of it.
-  const padMat = M.woodPad.clone();
+  const padMat = cloneToon(M.woodPad);
   padMat.color.multiplyScalar(0.81);
-  const padSeamMat = M.woodSeam.clone();
+  const padSeamMat = cloneToon(M.woodSeam);
   padSeamMat.color.multiplyScalar(0.93);
   const woodPads: Array<[number, number, number, number]> = [
     [1170, 185, 280, 260],

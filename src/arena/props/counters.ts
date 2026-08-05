@@ -17,7 +17,7 @@
  */
 
 import * as THREE from 'three';
-import { toonMat, roundedBox } from '../../render/toon';
+import { toonMat, roundedBox, cloneToon } from '../../render/toon';
 import { PALETTE } from '../../game/rules';
 import { CHARACTER_HEIGHT } from '../../units';
 import { puck, mesh, noOutline, addBacksplash, addTopRim, type Materials } from '../shared';
@@ -200,6 +200,31 @@ const COVER_LOWER_FRAC = 0.34;
  * to 4.47%; the real culprit was `rimLight`). This is a local, per-surface measurement
  * of tonal headroom, it is a different quantity, and it is why only the two CAP
  * surfaces move — the shared `KPAL` entries are untouched.
+ *
+ * ── ⚠️ THIS FUNCTION RENDERED EVERY BIG PROP SURFACE IN THE ARENA WITH NO RIM ──
+ * `Material.clone()` calls `copy()`, which names 40+ properties and **not**
+ * `onBeforeCompile` (`three/src/materials/Material.js:940-976`, verified in the
+ * installed 0.180.0). `applyRimLight` is called from exactly ONE site — `toonMat` —
+ * and nothing re-applied it after a clone, so every material this function has ever
+ * returned came back with the Fresnel term silently stripped. `render/toon.ts` itself
+ * calls that term *"the single largest material lever in the frame"*, and switching it
+ * off costs 40% of the cast's edge figure/ground.
+ *
+ * This one call site owns SEVEN of the arena's biggest surfaces — `stoveCap`,
+ * `prepCap`, `coverBody`, `coverSkirt` here, `roofMat`, `lidMat`, `deckMat` in
+ * `storage.ts` — which between them are ~15% of a typical frame. Probe `p1` measured
+ * the class: delivered rim = **1.402% of the frame**, only 33 of 112 lit materials
+ * still carrying one, and the smoking gun is `kpal:woodPad` appearing TWICE in one
+ * frame under the same name — the original WITH the rim at 0.805% of frame and its
+ * clone WITHOUT at 2.501%. `docs/LESSONS.md` §1: not missing, silently ignored.
+ *
+ * `cloneToon` (`src/render/toon.ts`) re-applies it from `userData.rim`, which
+ * `applyRimLight` now records synchronously precisely so a build-time clone can rebuild
+ * it. INHERIT is the default and is what is wanted here: the `glossyMat` bases this
+ * function is also called with (`potMetal` for `hobLip` / `serviceLip` / `brass`) carry
+ * no rim, so they clone exactly as before. Zero draw calls and zero new GL programs —
+ * `customProgramCacheKey()` returns the `onBeforeCompile` source, so every rimmed
+ * material shares one compiled program.
  */
 const capTints = new WeakMap<Materials, Map<string, THREE.Material>>();
 export function tinted(M: Materials, base: THREE.Material, hex: string): THREE.Material {
@@ -207,7 +232,7 @@ export function tinted(M: Materials, base: THREE.Material, hex: string): THREE.M
   if (!byHex) { byHex = new Map(); capTints.set(M, byHex); }
   const hit = byHex.get(hex);
   if (hit) return hit;
-  const m = base.clone() as THREE.MeshStandardMaterial;
+  const m = cloneToon(base) as THREE.MeshStandardMaterial;
   m.color.set(hex);
   byHex.set(hex, m);
   return m;
