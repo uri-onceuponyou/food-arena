@@ -25,6 +25,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **2** | Timeout tiebreak | HP fraction → zone → you | **keep** (it now actually fires) | a few lines |
 | **3** | Trail damage cap | 1 per tick | **keep** | one constant |
 | **13** | Rarity runs backwards; the stat card is fiction | as built | **decide if rarity means power** — half the grid is settled at select | a real build, not a tune |
+| **14** | Portrait phones: 65% black bars | letterboxed to 4:3 | **prompt to rotate** — or rethink the fairness model | one prompt, or a model rework |
 | **8** | Pointer lock | shipped as built | **cannot be tested here at all** — needs your browser | — |
 | **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
 
@@ -510,3 +511,38 @@ weaker than its own basic attack, which was categorically a defect; everything a
 against an AI that chases at 70, so a human can dictate engagement far better than any policy here
 does. The **AI-hands** column is the driver-neutral one, because all eleven characters share one
 driver there.
+
+---
+
+## 14. Portrait phones get 35% game and 65% black bars
+
+**Why it needs you.** Found by the first end-to-end play-through of the shipped path. At
+**390×844** — an ordinary phone held upright — the canvas renders **292 px tall inside an 844 px
+viewport**. Roughly **two thirds of the screen is flat black.** Screenshot:
+`shots/e2e/portrait/03_portrait_countdown.png`.
+
+**This is deliberate and documented, not a bug.** `stage.ts:resize()` masks anything outside
+`SUPPORTED_ASPECT` (4:3 → 21:9) when `frameMode` is `'fair'`, and the whole viewport-fairness
+guarantee depends on it: `aspect.mjs` passes at **0.00wu spread across every viewport** *because*
+extreme aspects are letterboxed rather than given more or less of the world to see. That fairness
+property was hard-won — it once found a live bug where forward visibility was **below every melee
+range**, so you could be hit from off screen.
+
+**But the trade is severe on the one platform the touch controls were built for.** The twin
+floating sticks are proven at 46/46 with real touch events, the phone HUD is a shipped layout, and
+quality tiers exist for phones — and then portrait play happens in a third of the screen. **No
+shipped mobile brawler letterboxes portrait this hard.**
+
+**Assumed.** Unchanged. Nothing here is a defect to fix — it is a design trade with a real
+guarantee on the other side of it.
+
+**❓ Three options, in increasing cost:**
+1. **Keep it.** Fairness is exact, the game is legible, portrait is a secondary orientation.
+2. **Widen `SUPPORTED_ASPECT` toward portrait** and accept that a portrait player sees a different
+   amount of world — which breaks the 0.00wu guarantee and reopens the "hit from off screen" risk
+   the fairness work was built to close.
+3. **Rotate-to-landscape prompt on portrait phones**, the way most brawlers do. Cheapest of the
+   three that keeps fairness intact, and honest about the constraint rather than hiding it.
+
+**Recommendation: (3)**, unless you want portrait to be a first-class orientation — in which case
+it is (2), and that needs the fairness model rethought rather than relaxed.
