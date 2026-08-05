@@ -111,11 +111,11 @@ Not style preferences. Every one exists because breaking it cost hours.
 
 ```bash
 npx tsc --noEmit                          # clean
-node src/game/sim.test.mjs                # 218
+node src/game/sim.test.mjs                # 219
 node src/game/economy/economy.test.mjs    # 220
 node tools/aspect.mjs                     # PASS, 0.00wu — competitive fairness, not a nicety
 node tools/verify-head.mjs                # the committed tree builds
-node tools/tmp/driver_guard.mjs           # 60 — no 14th copy of the scripted driver
+node tools/tmp/driver_guard.mjs           # 86 — no 14th copy, + both `bestWeapon` faults
 node tools/tmp/sentinel.mjs               # 17 selftest + 10 live
 PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept.mjs          # 361
 PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept_portrait.mjs # 219

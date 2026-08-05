@@ -7,7 +7,7 @@ time. **Prefer reaching for one of these over inventing a new probe.**
 npm run dev        # http://localhost:5173 — SHARED. Fine for a quick look, never for a number,
                    # and NEVER for actually playing (see below).
 npx tsc --noEmit
-node src/game/sim.test.mjs            # 155
+node src/game/sim.test.mjs            # 219
 node src/game/economy/economy.test.mjs # 173
 ```
 
@@ -314,7 +314,7 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 |---|---|---|
 | `npx tsc --noEmit` | clean | ⚠️ the **working tree**, incl. peers' half-saved files |
 | `node tools/verify-head.mjs` | OK | **the COMMITTED tree** — the only one that matters before a push |
-| `node src/game/sim.test.mjs` | **155** | sim, combat, AI, navigation, status rules |
+| `node src/game/sim.test.mjs` | **219** | sim, combat, AI, navigation, status rules |
 | `node src/game/economy/economy.test.mjs` | **173** | economy, seeded and deterministic |
 | `node tools/aspect.mjs` | PASS, **0.00wu** | viewport fairness — point at a **snapshot** |
 | `tools/tmp/menu_accept.mjs` | **361** | 5 landscape viewports × screens, + the CSS-backtick parse |
@@ -337,7 +337,7 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/shoot.mjs --selftest` | **6** | the capture path itself |
 | `node tools/tmp/snapsweep.mjs --selftest` | **5** | age parser for the leaked-snapshot sweeper |
 | `node tools/tmp/sentinel.mjs` | **17** + 10 live | ⚠️ **the meta-guard.** MOVES / HOLDS / ORDERS / SELF-PAIR — each kind run against an instrument broken that way and REFUSED there |
-| `node tools/tmp/driver_guard.mjs` | **60** | no 14th copy of the scripted driver; SHARED entries checked from the registry |
+| `node tools/tmp/driver_guard.mjs` | **86** | no 14th copy of the scripted driver; SHARED entries checked from the registry; RANK/HEAL/RANKKEY added with driver rev 4 |
 | `node tools/tmp/capture_audit.mjs` | **43/43 owned** | 0 exposed, 14 `css-immune` (claimed by annotation, mechanically refused if the file screenshots) |
 | `node tools/tmp/kit_lab.mjs --selftest` | **10** | matchup-profile divergence + behavioural fingerprint, calibrated on a literal clone |
 | `node tools/tmp/level_lab.mjs --selftest` | **7** | the level ladder and its win-rate curve |
@@ -350,7 +350,7 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/tmp/touchfeel.mjs` | **79** | stick bearings, dead zone, multi-touch, `touchcancel` |
 | `tools/tmp/nav_history_probe.mjs` | **44** | URL names the screen · reload lands there · back/forward · query params survive · a throwing screen cannot freeze the router |
 | `tools/tmp/glloss_probe.mjs` | **29** | forces a REAL context loss via `WEBGL_lose_context`; asserts the restored frame is the SAME frame against a drift control |
-| `node tools/tmp/driver_guard.mjs` | **60** | ⚠️ **This row said 49 and duplicated the row above it** — two counts for one gate, so either could be "confirmed" by reading the other. Measured 60 (driver rev 3). Fails if a **14th** copy of the scripted driver appears, or a fixed copy loses its guard. Every check also runs against the historical driver and must FAIL there |
+| `node tools/tmp/driver_guard.mjs` | **86** | ⚠️ **This row said 49 and duplicated the row above it** — two counts for one gate, so either could be "confirmed" by reading the other. Measured **86** (driver rev 4 — the RANK, HEAL and RANKKEY sections landed with the `bestWeapon` fix; it was 60 at rev 3). Fails if a **14th** copy of the scripted driver appears, or a fixed copy loses its guard. Every check also runs against the historical driver and must FAIL there |
 | `tools/tmp/floorprobe.mjs` | **5/5** | the floor's own gameplay test — breaks on any global value change |
 | `tools/tmp/chars_metrics.mjs` | ALL CLEAN | roster card fill, face-in-card, WCAG |
 | `tools/tmp/screen_metrics.mjs` | ALL CLEAN | settings/opening/trophies + `--screens home`, 3 viewports, WCAG from pixels |
