@@ -115,6 +115,93 @@ against a known-bad input. The most consequential:
 
 ---
 
+---
+
+# PART 0b — 🚨 THE SESSION THAT MOVED EVERY OBJECTIVE METRIC AND ZERO POINTS OF SCORE
+
+**Read this before choosing what to work on.** 22 fresh critics, 22 valid rounds, 0 discarded,
+every reference panel in 7–9, canonical rubric, `gameplay_topdown` plates only, HEAD `56ccb62`.
+
+| element | baseline | now | delta | floor | clears? |
+|---|---|---|---|---|---|
+| arena (action frame) | 5.17 ± 0.41 | **5.00 ± 0.63** | −0.17 | 0.60 | **NO** |
+| cast in match | 4.33 ± 0.52 | **3.83 ± 0.41** | −0.50 | 0.53 | **NO** |
+
+**`hi70` moved 4.7 floors — 2.40% → 13.58%, past the reference median — and the score moved
+nothing.** That was the acceptance test defined before round 1, honestly measured, and passed
+convincingly. **It was not the binding constraint.** This is `docs/LESSONS.md` §7 in its purest form
+so far: an objective test can be well-chosen, cleanly measured, and still not be the thing.
+
+### The drift control, and why it is ALSO not a result
+
+The same **byte-identical** baseline sheets, re-scored by fresh critics six hours later, read
+**0.42 (arena) / 0.58 (cast) LOWER**. That would mean a cross-session wobble of ~0.5 that is not the
+game. **But it does not clear its own floor either** — at σ=0.50 with n=6 vs n=4 the SE is 0.323, so
+those are **1.30σ and 1.80σ**. *Suggestive, not established.* **8 critics per arm would settle it**,
+which is cheap and worth doing before any future before/after spans a session boundary.
+
+⚠️ So the correct reading of today is: **no measurable change in either direction, and a live
+hypothesis that the instrument itself drifts across sessions.** Do not report today's work as a
+regression — and do not report it as a win.
+
+## THE ACTIONABLE OUTPUT — three mechanisms critics named UNPROMPTED
+
+`docs/LESSONS.md` §3: when two critics name the same mechanism unprompted, take it seriously.
+
+### 🔴 1. THE FLOOR PLANE — **9 of 14 arena critics**, and we deliberately never touched it
+
+> *"a flat, untextured pink-and-blue checkerboard with hard unmodulated tile lines and no surface
+> detail or contact shading, so the characters sit on it like decals rather than in a built
+> environment"* · *"a **hard, unblended straight seam** between the two colours"* · *"the vast empty
+> grid-tiled floor is flat and prop-less across most of the frame"*
+
+`e4734e2` raised prop **top faces**. `apron.ts:830` passes `rim: false` to the ground **on purpose**,
+and the arena agent was explicitly told to leave `tileLight`/`tileDark`/`subfloor` alone because
+`floorprobe` breaks on a global floor value change. **Every one of these critics is looking at the
+one surface nobody was allowed to touch.**
+
+**And it converges with a measurement taken independently, from pixels:** p1 found **63.44% of a
+gameplay frame is a flat ground plane**, with **zero normalMaps project-wide**. Two signals, one
+surface. ⚠️ But `bs_04`'s ground is *also* smooth — so the lever is most likely the **hard tile grid
+and the unblended colour seam**, not surface detail. Probe before looping.
+
+### 🔴 2. ONE PROP READS AS AN UNFINISHED PLACEHOLDER — **~8 critics**, arena *and* cast
+
+> *"the giant untextured pale-blue box in the foreground looks like an unfinished placeholder block"*
+> · *"the huge blank ice-block slab in the lower-left crops the frame with nothing on it"* ·
+> *"untextured, unlit and unshadowed, and it **hard-crops the character it overlaps**"*
+
+⚠️ **Consider that `e4734e2` may have made this worse.** Raising a big blank slab's top face into
+the 0.72–0.82 band makes it *more* prominent, not less. That is a plausible mechanism for cast
+4.33 → 3.83 — which does not clear the floor, so it is a hypothesis, not a finding. **Probe it.**
+
+### 🟠 3. THE TRAIL STILL EATS THE CAST — and the previous fix's rationale is FALSIFIED
+
+`b967242` fixed the trail's **hue** (0.7° from the floor → 22.4°). The occlusion complaint **did not
+move**: 5 of 6 critics on the old frame (*"opaque flat-pink cloud swallows both fighters"*), **5 of 6
+on the new** (*"a large flat semi-transparent red blob that covers a third of the play space"*).
+**Hue was never the binding constraint — AREA and OPACITY are.**
+
+## And my own frame read was REFUTED on both halves — recorded because the error is instructive
+
+The orchestrator eyeballed a frame and claimed the character was *"~5% of frame height"* and *"the
+right-hand third is empty tile"*. Measured off ruled frames (`cr_geom.mjs`, 17/17 selftest):
+
+- character height is **10.6–12.6%** (donut 10.6–11.9, taco 9.2, hamburger 12.6) against plates at
+  **11.7–14.4%**. We sit at or just under the low end. **The eyeball was wrong by ~2×** — the exact
+  documented trap (*"two agents computed 13% and 7%; the truth is ~10.5%"*), committed again.
+- per-third occupancy **L 33.6 / C 47.6 / R 38.7**, min-third ÷ whole **0.825** against a plate band
+  of **0.712–0.918**. Whole-frame occupancy **rose** 32.73 → 40.74, into the plate range.
+- ⚠️ **And the frame looked at was the wrong artefact entirely** — `shots/knee2/shipped.png` is a
+  `kneeprice` probe frame: no HUD, no opponent, no VFX, one idle character. Precisely the idle
+  content that costs ~1 point and that `baseline_capture.mjs` exists to stop scoring.
+
+**But the perception was picking up something real that the metric cannot express:** occupancy scores
+one big value-varied slab the same as many small props. *"Not emptier in value"* and *"emptier in
+content"* are both true, and the gap between them **is** convergence 2.
+
+---
+
 # PART 2 — PENDING, ranked
 
 ## 🔴 1. Flat, unlit surfaces — the #1 defect. **THE MECHANISM IS NOW KNOWN: the game draws no highlights.**

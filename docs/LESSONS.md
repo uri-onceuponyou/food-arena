@@ -352,6 +352,48 @@ on HEAD — but it held *then* for a reason the instrument invented.
 
 ---
 
+## 6b. A well-chosen acceptance test can pass by 4.7 floors and move the score ZERO
+
+The clearest instance yet, and it cost a whole session's render work to learn.
+
+The #1 defect was diagnosed as *"the game draws no highlights"* by three independent probes, from
+three different directions. The acceptance test was defined **before round 1**, exactly as this file
+demands: **share of playfield above luma 0.70**, ours against six reference plates, identical crop,
+identical code. It read **2.40%** against a reference band of 6.65–19.06%.
+
+The work landed it at **13.58% — past the reference median, 4.7× the metric's own floor.** Frame
+saturation went *up*. Cast figure/ground rose 21%. Ten of thirteen colour rails moved closer.
+
+**Then 22 fresh critics scored it and nothing moved: arena 5.17 → 5.00, cast 4.33 → 3.83, neither
+clearing a ±0.6 floor.**
+
+The test was not wrong, not gamed, and not badly measured. **It simply was not the binding
+constraint.** What the critics were actually looking at — 9 of 14 of them, unprompted — was the
+**ground plane**, the one surface the pass had deliberately been told not to touch.
+
+→ **An acceptance test proves you moved the thing you named. It does not prove the thing you named
+was the thing.** Before spending a pass on a metric, ask what fraction of the frame it governs and
+whether anything is *excluded* from it by policy — here, 63.44% of the frame was a flat ground plane
+that `apron.ts:830` and `floorprobe`'s pass condition both protected from change. **A metric with a
+carve-out that large is measuring the minority of the picture.**
+
+This is the sibling of §7 (local optima fighting each other) and its sharper form: not two passes
+cancelling, but one pass succeeding completely against a target that did not matter.
+
+### Corollary — a BASELINE is itself a measurement, and a cross-session one may drift
+
+The same round re-scored the **byte-identical** baseline sheets with fresh critics six hours later
+and read **0.42 / 0.58 lower**. That is only **1.30σ / 1.80σ** at σ=0.50 with n=6 vs 4 — *suggestive,
+not established*, and **8 critics per arm would settle it**.
+
+Two things follow regardless. First, **the recorded baseline reproduced**, which is reassuring.
+Second, **an apparent regression of ~0.5 across a session boundary may be the instrument**, so any
+before/after that spans one needs the identical-sheet control run alongside it. Without that control
+this round would have been reported as *"the render pass made the cast worse"* — a conclusion two
+earlier passes on this project reached and that was never once true.
+
+---
+
 ## 7. Local optima fight each other; watch the sum
 
 The per-element loop model has a structural flaw that was recorded as a risk from the start
