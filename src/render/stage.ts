@@ -14,7 +14,7 @@ import {
 } from 'postprocessing';
 import { CameraRig, SUPPORTED_ASPECT, type CameraRigOptions } from './camera';
 import { createLighting, MATCH_SHADOW_RADIUS_M, type LightingRig } from './lighting';
-import { renderTier } from './toon';
+import { noteGpu, onQualityChange, tierProfile, type TierProfile } from './quality';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE GRADE — a saturation curve that cannot clip a channel
@@ -252,7 +252,14 @@ export interface StageOptions {
    * leaving it on bought nothing and cost a NormalPass plus a 16-tap AO pass.
    */
   ao?: boolean;
-  /** Cap the device pixel ratio. Screenshots use 2 for crisp critic review. */
+  /**
+   * Cap the device pixel ratio. Screenshots use 2 for crisp critic review.
+   *
+   * This is a caller's ADDITIONAL ceiling, never a floor: the effective ratio is
+   * `min(devicePixelRatio, this, tier.pixelRatioCap)`. A review harness asking for 2
+   * on a phone still gets the phone's tier cap, because the alternative is a harness
+   * that renders at a resolution the game never uses.
+   */
   maxPixelRatio?: number;
 }
 
@@ -315,6 +322,15 @@ export class Stage {
   private envMap: THREE.Texture | null = null;
   private useAO = false;
   private shadowsOn = false;
+  /** The quality knobs this Stage was last built/applied with. */
+  private profile: TierProfile = tierProfile();
+  /** The caller's own pixel-ratio ceiling, if it gave one. Never a floor — see `StageOptions`. */
+  private readonly maxPixelRatio: number;
+  /** `postFx === 'grade'` — remembered so the chain can be rebuilt on a tier change. */
+  private gradeOnly = false;
+  /** A caller's explicit `shadowMapSize`. Pinned means pinned — a tier change must not move it. */
+  private readonly pinnedShadowMapSize: number | null;
+  private unsubscribeQuality: (() => void) | null = null;
   /** Fingerprint of everything the shadow map depends on, from the last frame. */
   private shadowSig = -1;
   private shadowCasterMinTexels: number;
@@ -327,6 +343,11 @@ export class Stage {
     this.shadowCasterMinTexels = opts.shadowCasterMinTexels ?? 2.5;
     this.container = opts.container ?? document.body;
     this.canvas = opts.canvas ?? document.createElement('canvas');
+    this.maxPixelRatio = opts.maxPixelRatio ?? Infinity;
+    this.pinnedShadowMapSize = opts.shadowMapSize ?? null;
+    // `postFx: false` needs no flag of its own: it leaves `composer` null, and
+    // `applyQuality` only ever rebuilds a chain that already exists.
+    this.gradeOnly = opts.postFx === 'grade';
     if (!this.canvas.parentElement) this.container.appendChild(this.canvas);
 
     this.renderer = new THREE.WebGLRenderer({
@@ -337,7 +358,8 @@ export class Stage {
       // Required so Playwright's toDataURL/screenshot sees the drawn frame.
       preserveDrawingBuffer: true,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, opts.maxPixelRatio ?? 2));
+    this.renderer.setPixelRatio(this.effectivePixelRatio());
+    this.reportGpu();
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping; // handled in post
     // ── The shadow map does NOT re-render every frame any more ────────────────
@@ -358,7 +380,7 @@ export class Stage {
     // so a match still pays most of this. What it removes is every frame where
     // nothing moves — menus, the results overlay, thumbnail and preview plates — and
     // it is what makes the focus quantisation in `lighting.ts` worth anything.
-    if (opts.shadows !== false) {
+    if (opts.shadows !== false && this.profile.shadows) {
       this.shadowsOn = true;
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -460,6 +482,96 @@ export class Stage {
       // does the registering. Assigning is a no-op against our own getter.
       try { (window as unknown as { __stage?: Stage }).__stage = this; } catch { /* our getter is read-only */ }
     }
+
+    // Subscription, not a back-reference: `quality.ts` has no imports and must never
+    // learn that `Stage` exists, or the dependency graph acquires a cycle that every
+    // character and arena module would then be inside.
+    this.unsubscribeQuality = onQualityChange(() => this.applyQuality());
+  }
+
+  /**
+   * The pixel ratio this Stage may draw at.
+   *
+   * ── The bug this closes ─────────────────────────────────────────────────────
+   * This used to be `min(devicePixelRatio, opts.maxPixelRatio ?? 2)`, i.e. a flat cap
+   * of 2 for every device in the world. Phones report **DPR 3 to 4**, so a phone was
+   * drawing 1688x780 where its own screen wanted 2532x1170 — the cap was doing real
+   * work already — but 2 was chosen for desktop screenshot crispness and nothing ever
+   * asked whether a phone should pay it. At this project's measured post-chain
+   * overdraw of 5.7x, the difference between DPR 2 and DPR 1.25 on a phone is
+   * 1.32 Mpx of buffer shaded ~6 times versus 0.51 Mpx — the single largest
+   * hardware-independent lever mobile has.
+   *
+   * `maxPixelRatio` stays a caller ceiling and never a floor: a review harness that
+   * pins 2 still gets the tier cap on a phone. `min` of everything, always.
+   */
+  private effectivePixelRatio(): number {
+    const dpr = typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1);
+    return Math.min(dpr, this.maxPixelRatio, this.profile.pixelRatioCap);
+  }
+
+  /**
+   * Hand the GPU's own name to `quality.ts`, once.
+   *
+   * DIAGNOSTIC ONLY — nothing picks a tier from it. It cannot be a detection signal
+   * because the first Stage is built before any GL context exists, and a tier that
+   * changed after the scene was built would be a tier that half-applied (ink outlines
+   * are baked at build time). It is here so a settings row and a bug report can say
+   * *which* device made the choice.
+   */
+  private reportGpu(): void {
+    try {
+      const gl = this.renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      noteGpu(ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : null);
+    } catch {
+      // Some browsers gate the extension behind a privacy setting. Not important.
+    }
+  }
+
+  /**
+   * Re-apply the quality tier to a Stage that is already on screen.
+   *
+   * Called from the `onQualityChange` subscription, i.e. whenever the player moves the
+   * graphics control in settings. Three things move immediately and one cannot:
+   *
+   *   * PIXEL RATIO — `setPixelRatio` + `resize()`. Instant, and the only part of this
+   *     the player will actually see move while the settings screen is open.
+   *   * SHADOW MAP — `lighting.setShadowMapSize()` disposes the old render target and
+   *     lets three allocate the new one on the next shadow render. `markShadowsDirty()`
+   *     forces that render, because the fingerprint in `scheduleShadowUpdate` hashes
+   *     the FRUSTUM and the casters and neither of them changed.
+   *   * POST CHAIN — disposed and rebuilt on the SAME renderer. No new canvas, no new
+   *     context: `perf --mode leak` must stay flat at 1 through a tier change, and it
+   *     is measured doing so.
+   *   * INK OUTLINES — cannot move. `outlineGroup` bakes hull meshes at build time.
+   *     They pick the new tier up when the next character or arena is constructed,
+   *     which for a menu-route settings screen is the next match.
+   */
+  private applyQuality(): void {
+    if (this.disposed) return;
+    const next = tierProfile();
+    const prev = this.profile;
+    if (next.tier === prev.tier) return;
+    this.profile = next;
+
+    this.renderer.setPixelRatio(this.effectivePixelRatio());
+
+    if (this.shadowsOn && this.pinnedShadowMapSize === null
+        && next.shadowMapScale !== prev.shadowMapScale) {
+      this.lighting.setShadowMapSize(this.defaultShadowMapSize(this.rig.frameMode === 'fair'));
+      this.markShadowsDirty();
+    }
+
+    const postDiffers = next.bloom !== prev.bloom || next.smaa !== prev.smaa
+      || next.msaaSamples !== prev.msaaSamples || next.halfFloatBuffers !== prev.halfFloatBuffers;
+    if (this.composer && postDiffers) {
+      this.composer.dispose();
+      this.composer = null;
+      this.buildPost(this.gradeOnly);
+    }
+
+    this.resize();
   }
 
   /**
@@ -481,18 +593,22 @@ export class Stage {
    * That covers the menu portrait, `preview.html?piece=character`, and anything else
    * framing a single subject. Ground-framed plates keep 2048 outright: they are what
    * the prop and floor loops are judged on, and a review harness that renders softer
-   * than the game is a harness that lies. On the `low` tier the whole scale halves —
-   * a phone gets 4 MB instead of 16, on a screen a third of the size the density was
-   * chosen for.
+   * than the game is a harness that lies.
+   *
+   * The tier scales the whole thing: `medium` 0.75 and `low` 0.5, so a match's map is
+   * 2048 / 1536 / 1024 and its render target 16 / 9 / 4 MB. The second, quieter effect
+   * is the good one — `auditShadowCaster` expresses its cull threshold in TEXELS, so
+   * halving the map doubles the world radius below which a caster is demoted (8.3 cm
+   * -> 16.6 cm in a match) and more sub-pixel casters drop out of the shadow pass with
+   * no extra knob.
    */
   private defaultShadowMapSize(isMatch: boolean): number {
-    const tierScale = renderTier() === 'low' ? 0.5 : 1;
     const base = !isMatch && this.rig.frameMode === 'subject' ? 1024 : 2048;
-    return Math.max(512, Math.round(base * tierScale));
+    return Math.max(512, Math.round(base * this.profile.shadowMapScale));
   }
 
   private buildPost(gradeOnly: boolean): void {
-    const lowTier = renderTier() === 'low';
+    const tier = this.profile;
     // Antialiasing, and WHICH kind, is decided here rather than at the SMAA pass.
     //
     // `antialias: true` on the renderer does nothing once a composer exists — the
@@ -502,9 +618,10 @@ export class Stage {
     // Where it is not worth that, hardware MSAA on the composer's buffer is: it
     // resolves on-chip on every tile-based mobile GPU and costs no pass, no program
     // and no texture.
-    const msaa = gradeOnly || lowTier ? 4 : 0;
+    const smaa = !gradeOnly && tier.smaa;
+    const msaa = smaa ? 0 : Math.max(4, tier.msaaSamples);
     const composer = new EffectComposer(this.renderer, {
-      frameBufferType: THREE.HalfFloatType,
+      frameBufferType: tier.halfFloatBuffers ? THREE.HalfFloatType : THREE.UnsignedByteType,
       multisampling: msaa,
     });
     composer.addPass(new RenderPass(this.scene, this.rig.camera));
@@ -592,12 +709,12 @@ export class Stage {
     // is 0.9% of a frame; this project's rule is that a perf win which changes the
     // look is not a win, and 0.9% does not buy an exception.
     //
-    // So bloom ships unchanged on the `high` tier, and on `low` it goes ENTIRELY:
+    // So bloom ships unchanged on `high` and `medium`, and on `low` it goes ENTIRELY:
     // 16 draws and 30% of the post chain's fill is the wrong thing for a phone to
     // spend on 0.64% of pixels, and this is a decision about which device pays,
     // not a re-tune of a look that was arrived at deliberately. The grade — 99.99%
-    // of pixels for zero extra draws — is untouched on both.
-    const bloom = gradeOnly || lowTier ? null : new BloomEffect({
+    // of pixels for zero extra draws — is untouched on all three.
+    const bloom = gradeOnly || !tier.bloom ? null : new BloomEffect({
       intensity: 0.30,
       luminanceThreshold: 0.80,
       luminanceSmoothing: 0.20,
@@ -634,8 +751,11 @@ export class Stage {
 
     // SMAA where it earns its fill; 4x MSAA (set on the composer above) everywhere
     // else. Not "no antialiasing" — a hyper-saturated toy palette against a dark
-    // floor is exactly the content that shows stair-stepping worst.
-    if (!gradeOnly && !lowTier) {
+    // floor is exactly the content that shows stair-stepping worst. MSAA is the right
+    // substitute rather than a cheaper post AA: it resolves on-chip on every
+    // tile-based mobile GPU, so it costs no pass, no program and no texture, which is
+    // exactly the three things SMAA costs.
+    if (smaa) {
       composer.addPass(new EffectPass(this.rig.camera, new SMAAEffect()));
     }
     this.composer = composer;
@@ -833,6 +953,11 @@ export class Stage {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+
+    // Before anything else: a listener holding `this` is a Stage that cannot be
+    // collected, and one that would try to rebuild a post chain on a dead context.
+    this.unsubscribeQuality?.();
+    this.unsubscribeQuality = null;
 
     this.composer?.dispose();
     this.composer = null;

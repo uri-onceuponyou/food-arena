@@ -1438,16 +1438,58 @@ html.fa-touch-capable .hud-radar {
   gap: 10px;
 }
 
-/* A light, warm plate — not the dark card used everywhere else in this HUD — is a
-   deliberate exception: readiness has to read from the icon itself (bright emoji =
+/* A LIGHT plate — not the dark card used everywhere else in this HUD — is a
+   deliberate exception: readiness has to read from the icon itself (bright icon =
    usable), and a dark cooldown wedge sweeping over a DARK card is nearly invisible
    (measured — see the fix note on .hud-weapon-cooldown below). A light plate is
-   the one background dark-on-dark contrast actually resolves against. */
+   the one background dark-on-dark contrast actually resolves against.
+
+   ── IT WAS LIGHT AND WARM. IT IS NOW LIGHT AND COOL, AND THAT IS A MEASUREMENT ──
+   The plate was FFF3DE, a cream at hue 38 degrees. The arena has since been re-keyed
+   onto three disjoint hue families — walkable rose-mauve ~334, blocking violet, and
+   0-60 degrees RESERVED FOR THE CAST — and this plate was sitting squarely in the band
+   the whole environment had just been cleared out of.
+
+   What that cost, measured by ablation on the live game at shipped framing
+   (tools/tmp/hud_hue.mjs, hide one element and re-shoot, so the number is net of what
+   the element was covering):
+
+     whole DOM HUD ......... 24.7% of the frame's total warm chroma
+     .hud-weapon-slot ...... 11.3%   from 13,456 px, i.e. 1.4% of the frame
+     .hud-radar-map .........  7.2%
+     .hud-weapon-key ........  0.7%
+     .hud-timer .............  0.2%
+
+   The tray was the single loudest thing in the cast's own hue band that was not the
+   cast, at eight times its share of the frame's area. Independently, a blind critic
+   listed "the golden donut prop at bottom-center" among three objects stealing
+   attention from the player — and THERE IS NO SUCH PROP. It was this plate, read as
+   arena furniture. That is the finding: at shipped framing the tray was competing with
+   the world rather than sitting on top of it.
+
+   EFEAF7 keeps everything the cream was chosen for and moves only the hue:
+     * still light — luma 236 against the cream's 244, so the near-opaque wedge
+       (rgba(20,14,28,0.88)) reads exactly as before; that is the one property this
+       plate exists for;
+     * hue 263 degrees, out of the cast band entirely, and into the same violet family
+       as every other card in this HUD (241a30, 2a1b3a, 2A0B47) — so it now reads as
+       UI rather than as a prop;
+     * it is NOT the radar's cream, which means SAFE and is calibrated against the
+       fog field's luma; and it is not the fog's own pink-violet E9A6FF.
+     * bonus, unlooked-for: the amber selection border F4A300 and the amber key badge
+       now sit on a complementary plate instead of a near-neighbour, so the "this
+       weapon is armed" cue gains hue contrast it did not have.
+
+   The radar's cream safe disc (F2E0BE, 7.2% above) was DELIBERATELY LEFT ALONE. Its
+   colour is load-bearing in a way this one's was not: cream there means SAFE, the
+   playfield stroke 8C7A5E was picked at luma ~124 to survive over both that cream and
+   the near-black fog field, and violet is reserved project-wide for the fog. Re-keying
+   it would need all three re-derived together. It is a separate pass, not a one-liner. */
 .hud-weapon-slot {
   position: relative;
   width: 58px;
   height: 58px;
-  background: #FFF3DE;
+  background: #EFEAF7;
   border: 3px solid #1a1224;
   border-radius: 16px;
   display: flex;
@@ -1987,7 +2029,17 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
   .hud-healthbar { height: 18px; }
   .hud-timer { font-size: 16px; padding: 4px 12px; }
   .hud-weapon-slot { width: 46px; height: 46px; border-radius: 13px; }
-  .hud-weapon-emoji { font-size: 20px; }
+  /* 24px, not 20px, and this is the whole of a measured legibility fix.
+     An icon pass scored identify-at-real-size across all 28 weapon glyphs and found
+     the binding constraint was not the artwork — it was THIS rule. Every failure it
+     recorded was measured at 20px, which is the size every phone gets, inside a 46px
+     slot that had 13px of dead padding on each side. 24px spends 4 of those 26 spare
+     pixels: the glyph grows 20%, the padding is still 11px a side, and the slot, the
+     bar and the layout are untouched (verified: menu_accept 315/315, and no overflow
+     at any of the five viewports). The desktop rule above it is 26px in a 58px slot —
+     so this also closes most of a gap where the platform with the SMALLER screen was
+     being handed the proportionally smaller icon. */
+  .hud-weapon-emoji { font-size: 24px; }
   .hud-countdown { font-size: 90px; }
   .hud-gameover-card { padding: 26px 32px; }
   .hud-gameover-title { font-size: 34px; }

@@ -9,65 +9,27 @@
  */
 
 import * as THREE from 'three';
+import { tierProfile as currentTierProfile } from './quality';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Render tier — the one place that decides "is this a phone?"
+// Render tier — re-exported, not owned
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Quality tier. `high` is every desktop and tablet; `low` is a phone.
+ * The tier now lives in `./quality`, which has NO imports at all — so a menu screen
+ * can read and write the player's graphics preference without pulling three.js in,
+ * and every character and arena module still gets `renderTier()` from here for the
+ * price of one string comparison.
  *
- * This lives in `toon.ts` rather than `stage.ts` because both the shading kit and
- * the renderer need it, and `toon.ts` is imported by every character and arena
- * module while `stage.ts` drags in the whole `postprocessing` bundle. Importing the
- * tier from `stage.ts` would put the post chain into every module's dependency
- * graph for the sake of one boolean.
+ * Re-exported rather than moved silently: `renderTier` / `setRenderTier` /
+ * `RenderTier` have been imported from `toon.ts` since the two-tier scaffold landed,
+ * and this keeps every one of those call sites working.
  *
- * DETECTION IS DELIBERATELY CONSERVATIVE — `high` unless the device is clearly a
- * phone. A desktop wrongly demoted loses image quality nobody asked it to lose,
- * whereas a phone wrongly promoted is the situation we already ship today, so the
- * asymmetry is not symmetric. Override with `?tier=low` / `?tier=high`, which is
- * also the only way to measure the low tier under a headless desktop Chromium.
+ * Override with `?tier=low|medium|high` — also the only way to measure a lower tier
+ * under a headless desktop Chromium.
  */
-export type RenderTier = 'high' | 'low';
-
-let tierOverride: RenderTier | null = null;
-let tierCache: RenderTier | null = null;
-
-function detectTier(): RenderTier {
-  if (typeof window === 'undefined' || typeof navigator === 'undefined') return 'high';
-  try {
-    const q = new URLSearchParams(window.location.search).get('tier');
-    if (q === 'low' || q === 'high') return q;
-  } catch { /* non-URL context */ }
-  // Touch is necessary but not sufficient — every touchscreen laptop has it.
-  const coarse = typeof window.matchMedia === 'function'
-    && window.matchMedia('(pointer: coarse)').matches
-    && (navigator.maxTouchPoints ?? 0) > 0;
-  if (!coarse) return 'high';
-  const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 8;
-  const shortEdge = Math.min(window.screen?.width ?? 9999, window.screen?.height ?? 9999);
-  return mem <= 4 || shortEdge <= 500 ? 'low' : 'high';
-}
-
-/** The tier this session renders at. Cached — detection must not vary mid-frame. */
-export function renderTier(): RenderTier {
-  if (tierOverride) return tierOverride;
-  if (!tierCache) tierCache = detectTier();
-  return tierCache;
-}
-
-/** QA/probe hook: force a tier, or pass null to go back to detection. */
-export function setRenderTier(t: RenderTier | null): void {
-  tierOverride = t;
-  if (typeof window !== 'undefined') {
-    (window as unknown as { __renderTier?: RenderTier }).__renderTier = renderTier();
-  }
-}
-
-if (typeof window !== 'undefined') {
-  (window as unknown as { __renderTier?: RenderTier }).__renderTier = renderTier();
-}
+export { renderTier, setRenderTier, tierProfile } from './quality';
+export type { RenderTier } from './quality';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gradient ramps — these drive the cel banding
@@ -399,8 +361,8 @@ export interface OutlineGroupOptions {
    */
   merge?: boolean;
   /**
-   * Drop this group's hulls entirely on the `low` render tier. Intended for
-   * decoration-scale ink; see the tier policy in `outlineGroup`.
+   * Drop this group's hulls entirely on any tier that clears `propInk` (today:
+   * `low`). Intended for decoration-scale ink; see the tier policy in `outlineGroup`.
    */
   tierOptional?: boolean;
 }
@@ -411,8 +373,9 @@ export interface OutlineGroupOptions {
  * sit flush on a surface, where an outline would z-fight.
  *
  * ── TIER POLICY ─────────────────────────────────────────────────────────────
- * On the `low` tier, PROP-SCALE ink (>= 0.012, i.e. the arena's 0.016) is skipped
- * and character/hazard ink is kept. That is 318 hulls and 46 draws/frame off a
+ * On a tier whose profile clears `propInk` (today: `low` only), PROP-SCALE ink
+ * (>= 0.012, i.e. the arena's 0.016) is skipped and character/hazard ink is kept.
+ * That is 318 hulls and 46 draws/frame off a
  * phone, and it is the correct half to spend: the ablation over eight combat moments
  * put ALL 431 hulls together at mean 0.25/255 over 0.50% of pixels, so the arena's
  * share of that is well under bloom's 0.11/255 — while the character silhouette is
@@ -431,7 +394,7 @@ export function outlineGroup(
   color: THREE.ColorRepresentation = OUTLINE_INK,
   opts: OutlineGroupOptions = {},
 ): void {
-  if (renderTier() === 'low' && (opts.tierOptional || thickness >= PROP_INK_MIN)) return;
+  if (!currentTierProfile().propInk && (opts.tierOptional || thickness >= PROP_INK_MIN)) return;
 
   const targets: THREE.Mesh[] = [];
   group.traverse((o) => {

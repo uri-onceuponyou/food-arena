@@ -18,6 +18,20 @@ export interface LightingRig {
   ambient: THREE.AmbientLight;
   /** Re-aim the shadow frustum around a world position (follows the action). */
   focus(x: number, z: number, radius?: number): void;
+  /**
+   * Re-resolution the shadow map, for a live quality-tier change.
+   *
+   * Not just `key.shadow.mapSize.set(n, n)`. Two things have to happen with it:
+   *   1. the existing render target must be DISPOSED, or three keeps drawing into the
+   *      old one at the old size and the setting silently does nothing;
+   *   2. the focus quantum has to be recomputed. `focus()` snaps the frustum centre to
+   *      whole multiples of `SNAP_TEXELS` shadow texels, and the texel size is derived
+   *      from `mapSize` — a stale quantum would put the snap grid at the wrong pitch,
+   *      which is the shadow-swim artefact the snapping exists to prevent.
+   * The cached last-focus is cleared too, so the next `focus()` cannot early-out on
+   * coordinates that were snapped against the old grid.
+   */
+  setShadowMapSize(size: number): void;
 }
 
 /**
@@ -70,7 +84,9 @@ export function createLighting(opts?: {
 
   const minFocusRadius = opts?.minFocusRadius ?? 0;
   const shadowRadius = Math.max(opts?.shadowRadius ?? 22, minFocusRadius);
-  const mapSize = opts?.shadowMapSize ?? 2048;
+  // `let`, not `const`: a live quality-tier change re-resolutions the map, and the
+  // focus quantum below is a function of this number. See `setShadowMapSize`.
+  let mapSize = opts?.shadowMapSize ?? 2048;
 
   // Warm key — the sun, and the dominant. History worth keeping: an earlier rig had
   // the FILL dominant, which produced a mean frame value of ~0.87 against a reference
@@ -272,5 +288,19 @@ export function createLighting(opts?: {
   };
   focus(0, 0, shadowRadius);
 
-  return { group, key, fill, rim, ambient, focus };
+  const setShadowMapSize = (size: number): void => {
+    const n = Math.max(256, Math.round(size));
+    if (n === mapSize) return;
+    mapSize = n;
+    // Order matters: dispose the OLD target while its size is still what three has on
+    // the GPU, then set the new size. three reallocates on the next shadow render.
+    key.shadow.dispose();
+    key.shadow.map = null;
+    key.shadow.mapSize.set(n, n);
+    lastX = NaN;
+    lastZ = NaN;
+    lastR = NaN;
+  };
+
+  return { group, key, fill, rim, ambient, focus, setShadowMapSize };
 }
