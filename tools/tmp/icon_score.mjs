@@ -13,7 +13,14 @@
  */
 import { readFileSync } from 'node:fs';
 
-/** Forced-choice candidate text -> icon name. Fixed before any judge ran. */
+/** Forced-choice candidate text -> icon name. Fixed before any judge ran.
+ *
+ *  ⚠️ LOOKUPS GO THROUGH `subjectOf()`, NEVER THROUGH THIS OBJECT DIRECTLY. The scorer
+ *  lowercases every judge answer before matching, and `'a close X'` below carries a
+ *  capital X — so a judge who answered that tile *exactly right* was scored WRONG. The
+ *  `--selftest` added below caught it on its first run, one line after this map grew to
+ *  65 subjects; before that this instrument had never been shown a known-bad input at
+ *  all. CLAUDE.md non-negotiable #6. */
 const SUBJECT = {
   'a hammer or mallet': 'hammer',
   'seaweed': 'seaweed',
@@ -38,12 +45,74 @@ const SUBJECT = {
   'a wedge of cheese': 'cheese',
   'a breaking wave': 'wave',
   'glass shards': 'shards',
-  'a mustard squeeze bottle': 'mustardblast',
+  // SUBJECT CHANGED (DECISIONS-FOR-URI §10, Uri: "do it"). The glyph is no longer a bottle.
+  // The before/after rounds therefore differ by exactly this one candidate string — stated
+  // rather than hidden, because it means the two rounds are not byte-identical tasks.
+  'a hot dog with mustard': 'mustardblast',
   'water droplets': 'droplets',
   'a sword slash': 'slash',
   'dough balls': 'dough',
   'a lettuce leaf': 'lettuce',
+
+  // ── The 37 UI_ICONS. Added for the CROSS-FAMILY round. ────────────────────
+  // docs/DECISIONS-FOR-URI.md §10: these had never been measured, and one judge
+  // answered "coin" to a FOOD icon — so the two families' collisions with each other
+  // were unmeasured, which is a worse defect than any single glyph, because a food
+  // icon and a currency icon carry opposite meanings in the same screen.
+  // Written from each icon's own comment in `ui.ts`, not from any judge's output.
+  'a gold coin': 'coin',
+  'a cut gemstone': 'gem',
+  'a trophy cup': 'trophy',
+  'a five-pointed star': 'star',
+  'a sparkle / twinkle': 'sparkle',
+  'a chequered finish flag': 'flag',
+  'a map pin': 'pin',
+  'a treasure chest': 'chest',
+  'a loot box with a burger on it': 'boxBurger',
+  'a purple loot box': 'boxPineapple',
+  'a red loot box with a bow': 'boxRed',
+  'a dark loot box with a flame on it': 'boxFire',
+  'a wrapped gift': 'gift',
+  'a gear / cog': 'gear',
+  'a padlock': 'lock',
+  'a play button triangle': 'play',
+  'a pause button': 'pause',
+  'a back arrow': 'back',
+  'a close X': 'close',
+  'a tick / checkmark': 'check',
+  'a house': 'home',
+  'two circling swap arrows': 'swap',
+  'a muted speaker': 'mute',
+  'a speaker with sound waves': 'sound',
+  'a traffic cone': 'cone',
+  "a chef's hat": 'chefhat',
+  'a person wearing a chef hat': 'avatar',
+  'a sword': 'damage',
+  'a red heart': 'health',
+  'a lightning bolt': 'speed',
+  'a double-headed arrow': 'range',
+  'a stopwatch': 'timer',
+  'a green heart with a cross': 'heal',
+  'a big star with a small star beside it': 'stun',
+  'a snail shell spiral': 'slow',
+  'a medal on ribbons': 'medal',
+  'a party popper': 'party',
 };
+
+/** Confusions that are DESIGNED IN and are therefore not defects.
+ *
+ *  `ui.ts` states it outright: the four purchasable boxes "share one silhouette and
+ *  differ by colourway plus a lid emblem, so they read as a family and as a ladder —
+ *  which is what they are." A judge who calls the purple box the red box has read the
+ *  design correctly and picked the wrong rung. Scoring that as a swap would report the
+ *  intent as a bug. Declared BEFORE any judge ran, so it cannot be tuned afterwards.
+ *  Nothing else is exempt — `health`/`heal` are NOT exempt, because a heart that means
+ *  "damage taken" and a heart that means "healing" are opposite meanings. */
+const BY_DESIGN = new Set(['boxBurger', 'boxPineapple', 'boxRed', 'boxFire']);
+
+/** Case-insensitive subject lookup — see the warning on `SUBJECT`. */
+const SUBJECT_LC = new Map(Object.entries(SUBJECT).map(([t, n]) => [t.toLowerCase().trim(), n]));
+const subjectOf = (raw) => SUBJECT_LC.get(String(raw).toLowerCase().trim());
 
 /**
  * Free-form normalisation, applied identically to every run so the before/after delta is
@@ -90,7 +159,13 @@ const FREE = {
   wave: ['wave', 'breaking wave', 'ocean wave', 'wave curl'],
   shards: ['shards', 'glass shards', 'ice shards', 'broken glass', 'shattered glass'],
   cap: ['bottle cap', 'cap', 'crown cap'],
-  mustardblast: ['mustard bottle', 'mustard', 'mustard squeeze bottle', 'squeeze bottle'],
+  // Subject changed from a squeeze bottle to the hot dog itself. The old bottle answers
+  // are kept above the new ones rather than deleted: a free-form round scored before the
+  // change is still scored by the same rulebook, which is the only way its number stays
+  // comparable. CLAUDE.md — "change it and keep the old wording above it with the reason".
+  //   was: ['mustard bottle', 'mustard', 'mustard squeeze bottle', 'squeeze bottle']
+  mustardblast: ['mustard bottle', 'mustard', 'mustard squeeze bottle', 'squeeze bottle',
+    'hot dog', 'hotdog', 'hot dog with mustard', 'sausage in a bun', 'hot dog in a bun'],
   ketchupslip: ['ketchup bottle', 'ketchup', 'ketchup squeeze bottle', 'sauce bottle', 'squeeze bottle'],
   // A judge who writes "claw slash mark" or "scratch marks" HAS identified a slash; the
   // first scoring pass counted those wrong, which was a scorer bug rather than an icon
@@ -104,6 +179,88 @@ const FREE = {
   egg: ['egg'],
   honey: ['honey', 'honey pot', 'pot of honey', 'honey jar', 'jar of honey'],
 };
+
+/**
+ * ── SELFTEST: the known-bad-input check this instrument shipped without ──────
+ *
+ * `CLAUDE.md` non-negotiable #6 — a guard that has not been shown to FAIL on the thing
+ * it guards against is not a guard. This scorer was believed for a whole icon pass
+ * without ever being shown a wrong answer sheet, so:
+ *
+ *   PERFECT   every tile answered with its own subject      -> must be n/n, no swaps
+ *   SHIFTED   every tile answered with the NEXT tile's       -> must be 0/n
+ *   SELF-PAIR two icons answered as each other, rest perfect -> must report exactly
+ *             that one swap, and nothing else
+ *   BLANK     no answers at all                              -> must be 0/n
+ *
+ * The SELF-PAIR case is the one that matters: a scorer that counts misses but cannot
+ * see a MUTUAL confusion is exactly the bare count `docs/LESSONS.md` §3 warns about,
+ * and it would have reported the mustardblast/ketchupslip collapse as "no change".
+ *
+ *   node tools/tmp/icon_score.mjs --selftest
+ */
+if (process.argv[2] === '--selftest') {
+  const names = Object.values(SUBJECT);
+  const rev = new Map(Object.entries(SUBJECT).map(([text, n]) => [n, text]));
+  const tiles = names.map((name, i) => ({ i: i + 1, name }));
+  const N = tiles.length;
+  let pass = 0, fail = 0;
+  const check = (label, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label}  got ${JSON.stringify(got)}`);
+    ok ? pass++ : fail++;
+  };
+  /** Re-implements the scorer's forced-choice path over synthetic answers. */
+  const run = (lines) => {
+    const answers = new Map();
+    for (const line of lines) {
+      const m = line.match(/^\s*(\d+)\s*[.):]\s*(.+?)\s*$/);
+      if (m) answers.set(Number(m[1]), m[2].toLowerCase().trim());
+    }
+    let hit = 0;
+    const conf = new Map();
+    for (const { i, name } of tiles) {
+      const raw = answers.get(i) ?? '(blank)';
+      const given = subjectOf(raw) ?? `?${raw}`;
+      if (given === name) hit++;
+      else conf.set(`${name} <-> ${given}`, (conf.get(`${name} <-> ${given}`) ?? 0) + 1);
+    }
+    const swaps = [];
+    const seen = new Set();
+    for (const k of conf.keys()) {
+      const [x, y] = k.split(' <-> ');
+      if (conf.has(`${y} <-> ${x}`) && !seen.has(`${y} <-> ${x}`)) { seen.add(k); swaps.push(`${x} <-> ${y}`); }
+    }
+    return { hit, swaps: swaps.sort() };
+  };
+  const perfect = tiles.map((t) => `${t.i}. ${rev.get(t.name)}`);
+  check('PERFECT scores n/n', run(perfect).hit, N);
+  check('PERFECT reports no swap', run(perfect).swaps, []);
+  check('SHIFTED scores 0', run(tiles.map((t, k) => `${t.i}. ${rev.get(tiles[(k + 1) % N].name)}`)).hit, 0);
+  check('BLANK scores 0', run([]).hit, 0);
+  // SELF-PAIR: swap the answers on tiles 1 and 2 only.
+  const paired = [...perfect];
+  paired[0] = `1. ${rev.get(tiles[1].name)}`;
+  paired[1] = `2. ${rev.get(tiles[0].name)}`;
+  const sp = run(paired);
+  check('SELF-PAIR scores n-2', sp.hit, N - 2);
+  check('SELF-PAIR reports exactly one swap', sp.swaps, [[tiles[0].name, tiles[1].name].sort().join(' <-> ')]);
+  // A ONE-WAY miss must NOT be reported as a swap.
+  const oneWay = [...perfect];
+  oneWay[0] = `1. ${rev.get(tiles[1].name)}`;
+  check('ONE-WAY miss is not a swap', run(oneWay).swaps, []);
+  // An unrecognised answer string must miss, not silently pass.
+  const junk = [...perfect];
+  junk[0] = '1. a thing i have never heard of';
+  check('UNKNOWN answer scores as a miss', run(junk).hit, N - 1);
+  // ⚠️ REGRESSION CASE. `'a close X'` is stored with a capital X and every judge answer
+  // is lowercased before matching, so the raw-object lookup scored a CORRECT answer as
+  // wrong. That is what dropped PERFECT to 64/65 the first time this selftest ran.
+  const shout = tiles.map((t) => `${t.i}. ${rev.get(t.name).toUpperCase()}`);
+  check('CASE-INSENSITIVE: shouted answers still score n/n', run(shout).hit, N);
+  console.log(`\nselftest ${pass} pass / ${fail} fail  (subjects: ${N})`);
+  process.exit(fail ? 1 : 0);
+}
 
 const runs = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const confusion = new Map(); // "truth->given" -> count
@@ -122,7 +279,7 @@ for (const run of runs) {
     const raw = answers.get(i) ?? '(blank)';
     let given;
     if (run.mode === 'forced') {
-      given = SUBJECT[raw] ?? `?${raw}`;
+      given = subjectOf(raw) ?? `?${raw}`;
     } else {
       const list = FREE[name] ?? [];
       given = freeVariants(raw).some((v) => list.includes(v)) ? name : `?${raw}`;
@@ -138,7 +295,11 @@ for (const run of runs) {
       confusion.set(k, (confusion.get(k) ?? 0) + 1);
     }
   }
-  console.log(`${run.judge}  ${run.mode.padEnd(6)}  ${run.plate.padEnd(16)}  ${hit}/28`);
+  // `/28` was hardcoded here, which was correct while `food` was the only set that could
+  // be rendered. The cross-family plate is 65 tiles, so a fixed denominator would have
+  // silently reported 24/65 as 24/28 — the kind of confident wrong answer non-negotiable
+  // #6 is about. Denominator now comes from the key.
+  console.log(`${run.judge}  ${run.mode.padEnd(6)}  ${run.plate.padEnd(16)}  ${hit}/${key.tiles.length}`);
   for (const m of misses) console.log(`      MISS  ${m}`);
   console.log('');
 }
@@ -151,6 +312,27 @@ for (const [name, p] of rows) {
   console.log(name.padEnd(14) + `${p.hit}/${p.seen}`.padEnd(11) + wrong);
 }
 
+// ── CROSS-FAMILY roll-up. Only meaningful on the `all` plate. ────────────────
+// The question §10 parked is not "how legible is the set" but "does a FOOD icon get
+// read as a UI icon, or the reverse" — a food glyph answered "coin" is a worse defect
+// than an unnameable one, because currency and weapons carry opposite meanings on the
+// same screen. Reported separately from the aggregate: CLAUDE.md #10, a paired
+// per-item count and an aggregate are different quantities.
+const FOOD_SET = new Set(Object.keys(FREE));
+const isFood = (n) => FOOD_SET.has(n);
+const cross = [];
+for (const [k, v] of confusion) {
+  const [truth, given] = k.split(' <-> ');
+  if (given.startsWith('?')) continue;
+  if (isFood(truth) !== isFood(given)) cross.push([`${truth} (${isFood(truth) ? 'food' : 'ui'}) -> ${given} (${isFood(given) ? 'food' : 'ui'})`, v]);
+}
+if (cross.length) {
+  console.log('\nCROSS-FAMILY misreads (a food icon named as a UI icon, or the reverse):');
+  for (const [k, v] of cross.sort((x, y) => y[1] - x[1])) console.log(`  x${v}  ${k}`);
+} else {
+  console.log('\nCROSS-FAMILY misreads: none');
+}
+
 // ── Mutual swaps: the pairs the acceptance test forbids. ─────────────────────
 console.log('\nSWAPS (forced-choice arm; A named as B while B named as A):');
 const seen = new Set();
@@ -160,6 +342,11 @@ for (const k of confusion.keys()) {
   const back = `${b} <-> ${a}`;
   if (confusion.has(back) && !seen.has(back)) {
     seen.add(k);
+    // The four purchasable boxes are one silhouette in four colourways ON PURPOSE.
+    if (BY_DESIGN.has(a) && BY_DESIGN.has(b)) {
+      console.log(`  ${a} <-> ${b}   (${confusion.get(k)} + ${confusion.get(back)})  [BY DESIGN — one silhouette, four colourways; not a defect]`);
+      continue;
+    }
     anySwap = true;
     console.log(`  ${a} <-> ${b}   (${confusion.get(k)} + ${confusion.get(back)})`);
   }

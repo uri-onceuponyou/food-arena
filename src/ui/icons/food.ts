@@ -314,11 +314,55 @@ export const FOOD_ICONS: Record<string, string> = {
    *  depth and an up-direction; the notches are cut into the skirt's silhouette at 2.8
    *  units rather than into a rim at 1.8; and the cream inset on the top face is a large
    *  mass rather than a ring, so it cannot read as concentric. If this still fails it is
-   *  the icon to raise with Uri, because the remaining move is to change what it depicts. */
+   *  the icon to raise with Uri, because the remaining move is to change what it depicts.
+   *
+   *  ── IT DID STILL FAIL, IT WAS RAISED, AND URI ANSWERED "do it" ──────────────
+   *  `DECISIONS-FOR-URI.md` §10/§30. That five-draft version measured **2/6** across two
+   *  fresh blind plates (0/3 on the 28-icon food plate, 2/3 on the 65-icon cross-family
+   *  plate) and its wrong answers were "a pot of honey", "water droplets", "an onion",
+   *  "a play button triangle" — three of which are other icons in the same registry.
+   *
+   *  ⚠️ §10's PARKED RECOMMENDATION WAS A WATER DROPLET WITH A SPIN ARC, AND IT IS
+   *  REFUSED HERE ON MEASUREMENT. Two reasons, both new since §10 was written:
+   *   1. `rules.ts:1800-1807` — Cap Shot ships in Water Bottle's FOUR-SLOT BAR beside
+   *      Water Spray, whose glyph is `droplets`. So the recommendation puts two droplets
+   *      side by side in one bar, which is precisely the construction that collapsed
+   *      `mustardblast`/`ketchupslip` from 7/7 + 4/7 to 1/6 + 1/6.
+   *   2. It was BUILT AND RENDERED (a single fat droplet with a spin arc) and at 20px the
+   *      arc vanished: the tile is a droplet. `droplets` currently scores **6/6** — the
+   *      trade would spend one of the set's strongest glyphs to repair one of its weakest.
+   *
+   *  What ships instead is the cap IN FLIGHT, edge-on: a very flat disc (rx 8.4, ry 2.9 —
+   *  aspect 2.9, against `coin`'s 1.3 and every other disc in the set) with a visible
+   *  skirt, tilted 13°, plus two motion strokes. The flat horizontal LENS is the point.
+   *  Every failed draft — face-on disc, ¾ crown, dome-with-teeth, cap-on-neck — kept the
+   *  round mass that `coin`, `gear`, `slow`, `patty` and `lollipop` already own, and the
+   *  measured misreads followed the mass every time. Nothing in either icon family is a
+   *  flat lens, so this cannot swap into anything even when it is not named.
+   *
+   *  ⚠️ Judge this on SWAPS, not on the name. §10 pre-authorised "or accept 1/3": a bottle
+   *  cap has no nameable mass at 20px and six drafts say so. What the four-slot bar
+   *  actually needs is that it not read as one of its neighbours.
+   *
+   *  ── THE MOTION STROKES WERE BUILT, MEASURED AND REMOVED ─────────────────────
+   *  The first flat-lens draft carried two short `waterHi` strokes off its trailing edge
+   *  to say "in flight". Three blind judges named it **"a fish" 3 of 3** — a flat blue
+   *  body with two small strokes off one end is a fish with a tail, and `fish` is in this
+   *  same registry. That is strictly worse than the drawing it replaced, whose 0/3
+   *  misreads at least scattered across three different subjects; a UNANIMOUS misread
+   *  onto one neighbour is a swap forming, which is this file's oldest rule.
+   *  Removed. The lens carries no appendage of any kind now, and the pale inset is a wide
+   *  BAND rather than a small ellipse — the small ellipse was reading as an eye, which is
+   *  the other half of what made a fish. Tilt is +9° rather than -13° for the same reason:
+   *  a blue body angled down-left is a fish swimming.
+   *  ⚠️ Do not add a motion mark back to this glyph. It has been tried and measured. */
   cap: `
-<path d="M3.4 9h17.2v5.6L18.4 17.8 16.2 14.6 14 17.8 11.8 14.6 9.6 17.8 7.4 14.6 5.2 17.8 3.4 14.6z" fill="${P.water}"/>
-<ellipse cx="12" cy="9" rx="8.6" ry="4.6" fill="${P.water}"/>
-<ellipse cx="12" cy="8.8" rx="4.4" ry="2.3" fill="${P.iceHi}" stroke-width="1.4"/>`,
+<g transform="rotate(9 12 12.4)">
+<ellipse cx="12" cy="15" rx="9.2" ry="3.2" fill="#12669E"/>
+<path d="M2.8 12h18.4v3H2.8z" fill="#12669E" stroke="none"/>
+<ellipse cx="12" cy="12" rx="9.2" ry="3.2" fill="${P.water}"/>
+<ellipse cx="12" cy="11.8" rx="5.6" ry="1.5" fill="${P.iceHi}" stroke-width="1.3"/>
+</g>`,
 
   /** Mustard Blast — the mirror of `ketchupslip`, on purpose: hot dog carries both, and a
    *  matched pair of squeeze bottles reads as one weapon FAMILY where two identically
@@ -344,15 +388,37 @@ export const FOOD_ICONS: Record<string, string> = {
    *  or emission shape; four attempts say so. The fix is to stop drawing two bottles — give
    *  Mustard Blast a different object (the hot dog itself, with a mustard stripe, is the
    *  obvious candidate) — and that changes what an icon DEPICTS, which is Uri's call rather
-   *  than a drawing decision. */
+   *  than a drawing decision.
+   *
+   *  ── URI ANSWERED "do it" (DECISIONS-FOR-URI.md §30) ─────────────────────────
+   *  The bottle scored **0/6** on two fresh blind plates — the worst glyph in either
+   *  family, and worse than the 4/7 §10 recorded. It was named "a hammer or mallet" x3,
+   *  "a sword slash", "a fish caught on a hook", "a chunk of meat on the bone". Note what
+   *  that is NOT: it is no longer swapping with `ketchupslip` (3/3 and 2/3 in the same
+   *  runs). The bottle stopped being confusable and became simply unreadable — a rotated
+   *  bottle with a thin zigzag is a stick with a blob on it, and at 20px a stick with a
+   *  blob on it is a mallet.
+   *
+   *  So: the hot dog itself. Three horizontal bands of maximally separated hue and value —
+   *  tan bun, red-brown sausage, saturated mustard zigzag — in a silhouette nothing else
+   *  in either family owns. The specific choices, each against a measured failure:
+   *   * HORIZONTAL, and the only horizontal-elongated glyph in the set. `wrap` is the
+   *     one neighbouring elongated mass and it sits at 45°; `wrap` was read as "a sword
+   *     slash" 3/3 and "a hammer or mallet" 2/3 in these same runs, i.e. the diagonal bar
+   *     is already spoken for.
+   *   * The SAUSAGE PROTRUDES past the bun at both ends. `chick`'s lesson — a shape whose
+   *     outline is broken by something sticking out past it cannot read as a plain blob.
+   *   * The mustard is a ZIGZAG at 2.8 units, not a stripe. `slash`'s lesson: parallel
+   *     repetition survives any pixel budget because it does not depend on resolving any
+   *     one stroke. A straight stripe would be a 2.3px line and would vanish.
+   *  ⚠️ It deliberately echoes Hot Dog's own face (`rules.ts`: "Sausage in a bun with a
+   *  mustard zigzag"). That is a feature — the weapon bar's first slot showing the
+   *  character's signature — and the two never share a screen at this size: portraits are
+   *  round 3D renders on the roster, this is a flat glyph in the HUD. */
   mustardblast: `
-<g transform="rotate(38 13 14)">
-<path d="M10 8.8h7.4a2.1 2.1 0 0 1 2.1 2.1v8.4a2.1 2.1 0 0 1-2.1 2.1H10a2.1 2.1 0 0 1-2.1-2.1v-8.4A2.1 2.1 0 0 1 10 8.8z" fill="${P.mustard}"/>
-<path d="M11.9 3.4h3.6v5.4h-3.6z" fill="${P.mustard}"/>
-<path d="M12.5 1.6h2.4v1.9h-2.4z" fill="#C98A00"/>
-<path d="M8.8 12.6h9.8" stroke="${P.ink}" stroke-width="2"/>
-</g>
-<path d="M2 8.2 5.4 6.4 2.6 4 6.2 2.2" stroke="${P.mustard}" stroke-width="2.4"/>`,
+<path d="M7.2 11.4h9.6a4.3 4.3 0 0 1 0 8.6H7.2a4.3 4.3 0 0 1 0-8.6z" fill="#E8B15C"/>
+<path d="M5 6.6h14a3.7 3.7 0 0 1 0 7.4H5a3.7 3.7 0 0 1 0-7.4z" fill="#C2452F"/>
+<path d="M5.6 12 9 8.8 12.4 12 15.8 8.8 19.2 12" stroke="${P.mustard}" stroke-width="2.8"/>`,
 
   /** Ketchup Slip. A round red mass is just Tomato Toss with its leaf removed, which
    *  a blind legibility test duly confused. A squeeze bottle with a squirt is a

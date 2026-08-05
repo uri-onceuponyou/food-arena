@@ -57,7 +57,15 @@ function rng(a) {
   };
 }
 
-let names = set === 'ui' ? Object.keys(UI_ICONS) : Object.keys(FOOD_ICONS);
+/* `all` renders BOTH families into one plate. It exists because
+   docs/DECISIONS-FOR-URI.md §10 recorded that the 37 UI_ICONS had never been measured at
+   all, and that one judge answered "coin" to a FOOD icon — i.e. cross-family collisions
+   were unmeasured. Measuring each family alone cannot find them: a judge shown only food
+   icons can never answer "coin". The two key sets do not overlap (index.ts merges them
+   into one flat REGISTRY), so a single concatenated name list is unambiguous. */
+let names = set === 'all'
+  ? [...Object.keys(UI_ICONS), ...Object.keys(FOOD_ICONS)]
+  : set === 'ui' ? Object.keys(UI_ICONS) : Object.keys(FOOD_ICONS);
 if (only) names = only.split(',');
 const r = rng(seed);
 for (let i = names.length - 1; i > 0; i--) {

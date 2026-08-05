@@ -61,10 +61,31 @@ export const UI_ICONS: Record<string, string> = {
      complaint it was fixed for. Two changes: the disc is an ELLIPSE, so it is a struck
      coin lying at a tilt rather than any flat circle, and the bevel now steps through
      three clearly separated tones so the face reads as raised metal. */
+  /* ⚠️ THE CREAM INSET IS NOW A STAR, AND THAT IS THE THIRD TIME THIS FACE HAS MOVED.
+     The first CROSS-FAMILY blind round — the one `DECISIONS-FOR-URI.md` §10 recorded as
+     never having been run — put all 65 icons on one plate, and the currency lost:
+
+       coin  0/3, and all three judges answered "A POT OF HONEY".
+       honey 2/3, and the miss answered "a gold coin".
+
+     That is a MUTUAL SWAP between the game's primary currency and a weapon glyph, at
+     20px, and neither family measured alone could ever have found it — a judge shown
+     only food icons cannot answer "coin", and a judge shown only UI icons cannot answer
+     "honey". It is a worse defect than any single unreadable glyph, because a coin and a
+     Sticky Trail carry opposite meanings on the same screen.
+
+     Hue cannot fix it: the currency must be gold and honey must look like honey. What
+     collided was the CONSTRUCTION — both were a gold rounded mass with a pale horizontal
+     band across the middle (`honey`'s mustardHi belly band, this coin's cream ellipse).
+     A five-pointed star is the same amount of ink in a shape no vessel can have, and it
+     says "currency" rather than "concentric", which is also the fault the round-1 bevel
+     was rewritten for. A COIN STACK was drawn and rendered first and was WORSE — three
+     stacked ellipses at 20px are a stack of pancakes, i.e. nearer to `honey`'s banded jar
+     than the single coin was. Rejected before any judge saw it. */
   coin: `
 <ellipse cx="12" cy="14.2" rx="9" ry="7" fill="#7F4E00"/>
 <ellipse cx="12" cy="11.2" rx="9" ry="7" fill="#D98200"/>
-<ellipse cx="12" cy="11.2" rx="5.9" ry="4.4" fill="#FFEFC0" stroke-width="1.4"/>
+<path d="${starPath(5, 5.6, 2.4, 12, 11.4)}" fill="#FFEFC0" stroke-width="1.4"/>
 <path d="M8.2 8.6a7 5.4 0 0 1 3.4-2.3" stroke="${P.white}" stroke-width="1.7"/>`,
 
   gem: `
