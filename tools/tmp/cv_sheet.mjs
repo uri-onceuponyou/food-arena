@@ -39,6 +39,9 @@ const svg = (w, h, body) => Buffer.from(
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
   + `<style>text{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;}</style>${body}</svg>`);
 
+// The field's total ground area against the single 300 mass. Computed, not asserted:
+// an earlier draft's caption said "the same hiding area" and it is 80%, not 100%.
+const fieldPct = Math.round(D.results.d.patches.reduce((a, p) => a + p.s * p.s, 0) / (300 * 300) * 100);
 const f = D.results.a.fair;
 const FRAME_W_WU = f.halfWidthUnits * 2;
 const FRAME_D_WU = f.nearUnits + f.farUnits;
@@ -135,10 +138,10 @@ function annotate(id) {
   }
   if (id === 'd') {
     s += calloutBox(CX, CY, CW, [
-      'THE SAME HIDING AREA, BROKEN UP',
-      'Five patches of 110–130 wu. Every one is AI-legal — and',
-      'the reference game delivers its cover exactly this way:',
-      'dozens of small objects, not two or three big masses.',
+      `FIVE SMALL PATCHES — ${fieldPct}% of the 300's area`,
+      'Every one is AI-legal, and the reference game delivers its',
+      'cover exactly this way: dozens of small objects rather than',
+      'two or three big masses. Our arena has ~2 per frame today.',
     ], OK);
   }
   return svg(PW, PH, s);
@@ -176,7 +179,7 @@ const CAPTIONS = {
   a: ['120 wu — SAFE', 'Well inside the AI limit', OK],
   b: ['168 wu — THE LIMIT', 'The largest patch the AI can still work', WARN],
   c: ['300 wu — OVER THE LIMIT', 'Breaks the AI, and its far edge is off the top of the frame', BAD],
-  d: ['A FIELD OF SMALL ONES', '5 × 110–130 wu — the recommendation', OK],
+  d: ['A FIELD OF SMALL ONES', '5 × 110–130 wu — the recommended shape', OK],
 };
 
 const panels = [];
