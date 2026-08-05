@@ -240,6 +240,21 @@ export function applyRimLight(
   color: THREE.ColorRepresentation = '#bfe4ff',
   strength = 0.28
 ): void {
+  // ── The rim's PARAMETERS, recorded SYNCHRONOUSLY, so a clone can rebuild it ──
+  // `rimUniforms` below is only written from inside `onBeforeCompile`, i.e. at first
+  // render — so it does not exist yet on a material that is cloned at build time, and
+  // there is otherwise no way to ask a material "what rim were you given?". Everything
+  // stored here is JSON-safe on purpose: `Material.copy()` runs
+  // `JSON.parse(JSON.stringify(userData))` (`three/src/materials/Material.js:974`), so
+  // this record — and only this record — survives a `.clone()`. See `cloneToon`.
+  // The colour is normalised to a hex number, which is 8-bit exact for every call site
+  // in this game (all of them take the default) and is the one ColorRepresentation that
+  // survives the round trip: a `THREE.Color` JSON-stringifies to `{r,g,b}`, which
+  // `new THREE.Color()` cannot read back.
+  (mat.userData as { rim?: { color: number; strength: number } }).rim = {
+    color: new THREE.Color(color).getHex(),
+    strength,
+  };
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.rimColor = { value: new THREE.Color(color) };
     shader.uniforms.rimStrength = { value: strength };
@@ -270,6 +285,95 @@ export function applyRimLight(
   };
   // Force a program recompile if this material was already used.
   mat.needsUpdate = true;
+}
+
+/**
+ * Clone a material AND carry its Fresnel rim across. **Use this instead of
+ * `material.clone()` anywhere a `toonMat` material is being copied.**
+ *
+ * ── WHY THIS EXISTS: `Material.clone()` SILENTLY DROPS THE RIM ──────────────
+ * `three/src/materials/Material.js` `copy()` names 40+ properties and **not**
+ * `onBeforeCompile` (verified in the installed 0.180.0). `applyRimLight` is the only
+ * thing that ever sets it, and nothing re-applied it after a clone — so every cloned
+ * `toonMat` rendered with no rim at all, while looking entirely plausible.
+ * `docs/LESSONS.md` §1: not missing, silently ignored.
+ *
+ * Measured on HEAD before this landed: **33 of 112** lit materials still carried a
+ * live rim uniform, agreed by two independent instruments (`matvar --mode census` and
+ * a `renderer.properties` handle count), against **54 material-clone sites in `src/`**.
+ * The delivered rim — every live rim uniform driven to strength 6, bloom ablated, one
+ * frozen frame, pixels moving >1/255 — reached **1.402% of the frame**
+ * (`tools/tmp/p1_rimlook.mjs`; resolution floor ±0.005 pp from a two-page-load drift
+ * control). The smoking gun was `kpal:woodPad` appearing TWICE in one frame under the
+ * same name: the original with the rim (0.805% of frame), its clone without (2.501%).
+ *
+ * ── WHAT IT COSTS: NOTHING ──────────────────────────────────────────────────
+ * Zero draw calls and zero new GL programs. `Material.customProgramCacheKey()` returns
+ * `this.onBeforeCompile.toString()` (`Material.js:541`) and `WebGLPrograms` pushes that
+ * straight into the cache key (`WebGLPrograms.js:361,411`), so every material patched
+ * by `applyRimLight` produces the SAME key and shares one compiled program. Only the
+ * uniform container is per-material — `materialProperties.uniforms = parameters.uniforms`,
+ * set once per (material, program) in `WebGLRenderer.js:2086`.
+ *
+ * ── THE THREE TRAPS THIS FUNCTION IS SHAPED AROUND ──────────────────────────
+ *  1. **It must be possible to DECLINE the rim, and it must never be turned on
+ *     silently.** `src/arena/apron.ts:830` passes `rim: false` deliberately: on a ground
+ *     plane seen at 32° of grazing the Fresnel term becomes a broad wash across the far
+ *     half of the apron, the opposite of the recession that bake is building. So the
+ *     default here is **inherit** — a source with no rim yields a clone with no rim —
+ *     and `{ rim: false }` declines one the source does have.
+ *  2. **`Material.copy()` deep-JSON-copies `userData`** (`Material.js:974`), so cloning
+ *     a material that has ALREADY RENDERED hands the clone a dead, JSON-mangled
+ *     `rimUniforms` object. That is worse than useless: `haloprobe.mjs`, `matvar.mjs`,
+ *     `rimcheck.mjs` and `p1_matresp.mjs` all count a rim by testing
+ *     `userData.rimUniforms`, and would count that corpse as a live rim. It is detached
+ *     across the clone and restored, so the clone never receives one.
+ *  3. **`Texture.clone()` shares its `source`** — but `Material.copy()` does not clone
+ *     textures at all, it copies the reference, which is what we want (no second GPU
+ *     upload). Do not "improve" that: three caches uploaded textures BY SOURCE, so a
+ *     cloned texture whose `.image` is then written overwrites the ORIGINAL albedo.
+ *
+ * Generic over `THREE.Material` on purpose, so it is a drop-in for `.clone()` at a call
+ * site that does not know whether it holds a standard material or a basic one — a
+ * material that never had a rim simply clones.
+ */
+export function cloneToon<T extends THREE.Material>(
+  src: T,
+  opts: {
+    /** `false` declines the rim; `true` forces one on; omitted inherits the source's. */
+    rim?: boolean;
+    rimColor?: THREE.ColorRepresentation;
+    rimStrength?: number;
+  } = {},
+): T {
+  type RimSpec = { color: number; strength: number };
+  const srcData = src.userData as { rim?: RimSpec; rimUniforms?: unknown };
+  const spec = srcData.rim;
+
+  // Trap 2: keep the live uniform handle out of the JSON deep copy entirely.
+  const liveUniforms = srcData.rimUniforms;
+  if (liveUniforms !== undefined) delete srcData.rimUniforms;
+  const out = src.clone() as T;
+  if (liveUniforms !== undefined) srcData.rimUniforms = liveUniforms;
+
+  const wantRim = opts.rim ?? spec !== undefined;
+  if (!wantRim) {
+    delete (out.userData as { rim?: RimSpec }).rim;
+    return out;
+  }
+  const lit = out as unknown as THREE.MeshStandardMaterial;
+  if (!lit.isMeshStandardMaterial) {
+    // A rim on a MeshBasicMaterial is a no-op with a cost: `applyRimLight` patches
+    // `<dithering_fragment>` and reads `vNormal`, and a basic shader has neither.
+    // Nothing in `src/` does this today; refuse loudly rather than ship a dead patch.
+    throw new Error('cloneToon: rim requested on a material with no normals');
+  }
+  applyRimLight(
+    lit,
+    opts.rimColor ?? spec?.color,
+    opts.rimStrength ?? spec?.strength,
+  );
+  return out;
 }
 
 /**
