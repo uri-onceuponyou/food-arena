@@ -62,7 +62,60 @@ export interface ProfileData {
   economy: EconomyState;
 }
 
-const DEFAULT_NAME = 'Chef';
+export const DEFAULT_NAME = 'Chef';
+
+/**
+ * Longest player name, in code units.
+ *
+ * 16 is what the lobby badge holds: `home.ts` draws the name inside a `.fa-chip` in a
+ * non-wrapping top bar, and that bar is the element `menu_accept_portrait.mjs` exists
+ * because of — a single run that refuses to wrap sets the grid track and lays the
+ * whole screen out wider than a 360px phone. So the cap is a LAYOUT constraint, not a
+ * style preference, and it is enforced on the way in AND on the way out of storage.
+ */
+export const NAME_MAX = 16;
+
+/**
+ * ── The one free-text field in the product ──────────────────────────────────
+ * Everything a player types here becomes displayed text, so it is normalised in
+ * exactly one place and both entry points go through it: `setName()` for what is
+ * typed, and `load()` for what comes back out of `localStorage` — a hand-edited or
+ * migrated blob is user input too, and the old loader trusted it enough to run
+ * `.slice(0, 16)` on whatever it found.
+ *
+ * What it does, in this order — and THE ORDER IS THE POINT:
+ *
+ *  1. Every run of whitespace collapses to ONE space. This runs first because `\n`
+ *     and `\t` are control characters too, and stripping them before collapsing turns
+ *     a pasted `"Chef\nBoyardee"` into `"ChefBoyardee"` — two words silently welded
+ *     together. Collapsing first turns it into `"Chef Boyardee"`, which is what the
+ *     player meant. (Caught by `tools/tmp/name_accept.mjs`, which had it the other
+ *     way round and failed.) It also means a name cannot be padded out to 16 spaces
+ *     and render as a blank badge.
+ *  2. `\p{Cc}` control and `\p{Cf}` format characters are removed. The second class is
+ *     the one that is not cosmetic: U+202E RIGHT-TO-LEFT OVERRIDE reverses the
+ *     rendering of everything after it, so a name can rewrite the text NEXT to it on
+ *     screen. Nothing here reaches `innerHTML` — `home.ts` writes `textContent` and
+ *     the settings field is written through `.value`, both of which escape by
+ *     construction — so this is not the XSS guard. It is the DISPLAY guard, which is
+ *     the attack an escaped string still allows.
+ *  3. Trim, cap at `NAME_MAX`, trim again — the second trim is for the case where the
+ *     cap lands on a space.
+ *
+ * An empty result becomes `DEFAULT_NAME` rather than being rejected: a player who
+ * clears the field has to end up with a legible badge either way, and "your name is
+ * now Chef" is a better answer than a silent refusal or an empty pill.
+ */
+export function sanitizeName(raw: unknown): string {
+  if (typeof raw !== 'string') return DEFAULT_NAME;
+  const clean = raw
+    .replace(/\s+/g, ' ')
+    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+    .trim()
+    .slice(0, NAME_MAX)
+    .trim();
+  return clean.length > 0 ? clean : DEFAULT_NAME;
+}
 
 function isCharacterId(v: unknown): v is CharacterId {
   return typeof v === 'string' && (CHARACTER_IDS as readonly string[]).includes(v);
@@ -96,8 +149,7 @@ function load(): ProfileData {
     if (parsed.economy === undefined) adoptLegacyBalance(economy, parsed);
 
     return {
-      name: typeof parsed.name === 'string' && parsed.name.trim()
-        ? parsed.name.slice(0, 16) : DEFAULT_NAME,
+      name: sanitizeName(parsed.name),
       wins: Math.floor(num(parsed.wins, 0)),
       losses: Math.floor(num(parsed.losses, 0)),
       xp: Math.floor(num(parsed.xp, 0)),
@@ -161,6 +213,23 @@ export class PlayerProfile {
     if (this.data.selected === id) return;
     this.data.selected = id;
     this.commit();
+  }
+
+  /**
+   * Rename the player.
+   *
+   * Takes RAW input and returns the name that was actually stored, so a caller can
+   * put the canonical value back in its field without re-implementing the rules —
+   * see `sanitizeName` for what those are. No-ops (and still returns the name) when
+   * the sanitised value is unchanged, so holding a key down does not write
+   * `localStorage` once per repeat or notify every listener for nothing.
+   */
+  setName(raw: string): string {
+    const next = sanitizeName(raw);
+    if (next === this.data.name) return next;
+    this.data.name = next;
+    this.commit();
+    return next;
   }
 
   /**

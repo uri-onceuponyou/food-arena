@@ -8,10 +8,10 @@
  * `ui/hud.ts` already occupies the top-left (player nameplate), the top-centre
  * (clock + zone strip), the top-right (enemy nameplate), the bottom-centre (weapon
  * bar) and the bottom-right (radar). The bottom-LEFT is the only corner it leaves
- * free, so that is where the pause chip and the post-match menu button live, both
- * inside `env(safe-area-inset-*)`.
+ * free, so that is where the post-match menu button lives, inside
+ * `env(safe-area-inset-*)`.
  *
- * ── ...and why the pause chip now moves on touch ────────────────────────────
+ * ── ...and why the pause chip is NOT in that corner ─────────────────────────
  * The trade this header used to record as a future problem has arrived: `game/touch.ts`
  * ships twin FLOATING sticks, and the move stick spawns wherever a thumb lands
  * anywhere in the left half of the screen (`ZONE_SPLIT = 0.5`). A 44px chip parked at
@@ -20,14 +20,22 @@
  *
  * Both lower corners belong to thumbs, so "move it to the other corner" is not
  * available; `hud.ts` had the identical problem with the radar and solved it by
- * moving UP the trailing edge. This does the mirror of that on the leading edge:
- * on touch the chip sits directly under the player nameplate, which is the one band
- * of the frame that no HUD element and no thumb occupies.
+ * moving UP the trailing edge. This does the mirror of that on the leading edge: the
+ * chip sits directly under the player nameplate, which is the one band of the frame
+ * that no HUD element and no thumb occupies.
  *
- * Keyed on `html.fa-touch-capable` — the same class `hud.ts` keys the radar on, set
- * from device capability rather than from the first finger, so the layout is right on
- * the opening frame instead of jumping once someone touches. On a mouse there is no
- * thumb zone and nothing moves.
+ * ── ONE position, not two ───────────────────────────────────────────────────
+ * The first version of that fix moved the chip only under `html.fa-touch-capable` and
+ * left it in the bottom-left corner everywhere else, on the reasoning that a mouse has
+ * no thumb zone. That is true and it is still the wrong call: it made the game's one
+ * escape hatch live in two different places depending on a capability bit the player
+ * cannot see, and a hybrid laptop (touchscreen + mouse, which is the case
+ * `game/input.ts` is explicitly built for) picks the touch layout while the player is
+ * using the mouse. There is no reading of the frame in which the chip's position is
+ * information, so it does not move. Measured cost of standardising on the raised
+ * position: nothing — `tools/tmp/thumbzone.mjs` clears the zone in both states and
+ * `tools/tmp/chip_probe.mjs` shows zero overlap with any HUD landmark at every
+ * viewport, portrait and landscape.
  *
  * The post-match Menu button stays in the corner: it only exists after the match is
  * decided, when there is no stick to collide with.
@@ -46,6 +54,17 @@ import { injectStyles } from './theme';
 import { el } from './fx';
 import { ensureIconStyles, icon } from '../icons';
 
+/**
+ * The key that opens and closes the pause sheet, as `KeyboardEvent.key`.
+ *
+ * Exported for `ui/screens/settings.ts`, whose Controls reference used to hard-code
+ * the string "Esc" beside six other bindings it also hard-coded. Every one of those is
+ * now read from the module that listens for it — `game/input.ts` owns movement, the
+ * weapon digits and mute; this owns pause — so the reference cannot drift from the
+ * game. See the header of `game/input.ts` for why that mattered enough to change.
+ */
+export const PAUSE_KEY = 'Escape';
+
 export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   if (route.name !== 'match') throw new Error('createMatchScreen: wrong route');
   injectStyles('fa-match-styles', CSS);
@@ -54,10 +73,10 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   const root = el('div', 'fa-screen-bare fa-match');
   root.innerHTML = `
     <!-- The chip is NOT inside .match-corner. It has to be positioned against the
-         screen so it can move out of the thumb zone on touch, and .match-corner is
-         itself absolutely positioned — so nesting it there made 'top: 96px' resolve
-         against the corner and put the chip 140px BELOW the bottom of the frame.
-         Measured, not reasoned about: tools/tmp/thumbzone.mjs. -->
+         screen so it can sit clear of the thumb zone, and .match-corner is itself
+         absolutely positioned — so nesting it there made 'top: 96px' resolve against
+         the corner and put the chip 140px BELOW the bottom of the frame. Measured,
+         not reasoned about: tools/tmp/thumbzone.mjs. -->
     <button class="match-chip" type="button" data-el="pause" aria-label="Pause">${icon('pause')}</button>
 
     <div class="match-corner">
@@ -122,7 +141,7 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
 
   // Escape toggles pause — desktop players reach for it before they look for a chip.
   const onKey = (ev: KeyboardEvent): void => {
-    if (ev.key !== 'Escape') return;
+    if (ev.key !== PAUSE_KEY) return;
     ev.preventDefault();
     setPaused(!session.paused);
   };
@@ -162,11 +181,24 @@ const CSS = `
 }
 
 /* Full 44px tap target even though the glyph is small — this is the one control a
-   player reaches for while already frustrated. */
+   player reaches for while already frustrated.
+
+   ── Out of the left thumb zone, in EVERY input state ────────────────────────
+   See the header. 96px clears the player nameplate (topbar top 14 + name pill ~30 +
+   gap 5 + health bar 26 = ~75) and the chip's own 44px ends around 140 — comfortably
+   above the arc a thumb sweeps from the bottom edge, and it is the same offset
+   'hud.ts' uses to lift the radar off the opposite corner, so the two chrome elements
+   sit on one line across the frame instead of at two arbitrary heights.
+
+   There is deliberately no 'html.fa-touch-capable' variant of this rule any more. A
+   control that changes corner on a capability bit is a control the player has to
+   re-find, and the hybrid case (touchscreen laptop driven by a mouse) got the touch
+   layout anyway. One position, asserted by 'tools/tmp/chip_probe.mjs' in both DOM
+   states at six viewports. */
 .fa-match .match-chip {
   position: absolute;
   inset-inline-start: calc(var(--fa-safe-l, 0px) + 14px);
-  bottom: calc(var(--fa-safe-b, 0px) + 14px);
+  top: calc(var(--fa-safe-t, 0px) + 96px);
   pointer-events: auto;
   appearance: none;
   cursor: pointer;
@@ -188,19 +220,6 @@ const CSS = `
 }
 .fa-match .match-chip:hover { background: rgba(58,40,80,0.9); }
 .fa-match .match-chip:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.35); }
-
-/* ── Out of the left thumb zone ────────────────────────────────────────────────
-   See the header. 96px clears the player nameplate (topbar top 14 + name pill ~30 +
-   gap 5 + health bar 26 = ~75) and the chip's own 44px ends around 140 — comfortably
-   above the arc a thumb sweeps from the bottom edge, and it is the same offset
-   'hud.ts' uses to lift the radar off the opposite corner, so the two chrome
-   elements sit on one line across the frame instead of at two arbitrary heights. */
-html.fa-touch-capable .fa-match .match-chip {
-  position: absolute;
-  inset-inline-start: calc(var(--fa-safe-l, 0px) + 14px);
-  top: calc(var(--fa-safe-t, 0px) + 96px);
-  bottom: auto;
-}
 
 /* Only after the match is decided. Before that, leaving is a pause-menu decision,
    not a one-tap accident during a fight. */

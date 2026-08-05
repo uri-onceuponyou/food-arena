@@ -14,11 +14,22 @@
  *
  * | section | why it is here |
  * |---|---|
+ * | Player | The name on the lobby badge. The one free-text field in the product; `profile.ts` owns the cap and the sanitiser, this file owns the field. |
  * | Audio | Fully wired to `src/audio`. Four real controls plus the engine's own state. |
  * | Graphics | Fully wired to `src/render/quality.ts`. See the section below. |
- * | Controls | The real bindings, read from what `game/input.ts` actually listens for. Read-only, because nothing in the engine can rebind them yet — and this is the ONLY place in the product that tells a player `M` mutes. |
+ * | Controls | The real bindings, IMPORTED from the modules that listen for them (see `KEYMAP`). Read-only, because nothing in the engine can rebind them yet — and this is the ONLY place in the product that tells a player `M` mutes. |
  * | Game | One toggle, applied by this file, persisted by this file. |
  * | Danger zone | Wipes the saved profile and reboots. Destructive, so it is behind a confirm. |
+ *
+ * ── The name field, and the two ways a name can break a screen ──────────────
+ * A settings screen is where a player expects to find their own name, so that is
+ * where it is. Everything that makes it safe lives one layer down in `profile.ts`
+ * (`NAME_MAX`, `sanitizeName`) because storage validates the same string on the way
+ * back out; what THIS file owns is that the value never reaches the DOM as markup.
+ * It does not: the field is written through `.value` and read through `.value`, and
+ * `home.ts` renders it with `textContent`. There is no `innerHTML` path for a name
+ * anywhere in the product, and the row below is deliberately built from a static
+ * string with no interpolation so there cannot be one by accident.
  *
  * ── Graphics: what unblocked it, and the one thing it has to admit ──────────
  * This section used to be absent, and the reason was written down here: the renderer
@@ -63,6 +74,12 @@ import {
   QUALITY_CHOICES, qualityChoice, setQualityChoice, qualityLabel,
   detectedTier, forcedTier, tierProfile, onQualityChange, type QualityChoice,
 } from '../../render/quality';
+// The bindings the game actually listens for. See the KEYMAP block below — this used
+// to be a copy maintained by hand in this file.
+import { MOVE_KEYS, MUTE_KEY, MAX_WEAPON_SLOT_KEY, type MoveDirection } from '../../game/input';
+import { CHARACTERS, CHARACTER_IDS } from '../../game/rules';
+import { PAUSE_KEY } from './matchScreen';
+import { NAME_MAX } from './profile';
 import { ensureIconStyles, icon } from '../icons';
 import type { Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
@@ -123,23 +140,83 @@ export function applyStoredSettings(): void {
 
 // ── The real keyboard map ────────────────────────────────────────────────────
 //
-// Transcribed from what `src/game/input.ts` and `src/ui/screens/matchScreen.ts`
-// actually listen for, not from a design document. Kept as data so the day the
-// engine grows a rebinding table this becomes a `.map()` over it and the markup
-// below does not change.
+// This list used to be a hand-transcribed COPY of bindings owned by `game/input.ts`,
+// with a comment admitting it and naming the fix: export the table there and delete
+// this. That is what happened. Every row below is now DERIVED from the module that
+// actually listens for the key —
 //
-// ⚠️ This is a COPY of bindings owned by `game/input.ts`. It is a copy because that
-// file exposes its map as a module-private `const` and is owned elsewhere; the fix
-// is for it to export the table, at which point this list should be deleted rather
-// than maintained.
+//   * movement, the weapon digits and mute .... `game/input.ts`
+//   * pause ................................... `./matchScreen.ts`
+//   * how many weapon slots a digit can reach . `game/rules.ts`
+//
+// so the screen cannot drift from the game, and the day the engine grows a rebinding
+// table the only thing that changes is where `MOVE_KEYS` comes from.
+//
+// (The two mappings were checked against each other before they were collapsed, and
+// they had NOT drifted: W/A/S/D + arrows, M, 1-4 and Esc all matched what the code
+// listened for. This is a pre-emptive fix, not a bug report.)
+//
+// `matchScreen.ts` is already in this bundle — `shell.ts` imports it statically
+// alongside this file — so taking one string constant from it costs nothing.
+
+/** The order the four directions are read out in: reading order on the keycaps. */
+const MOVE_ORDER: readonly MoveDirection[] = ['up', 'left', 'down', 'right'];
+
+/**
+ * `KeyboardEvent.code` (a physical key position) -> the glyph printed on that key.
+ *
+ * This translation is the reason `input.ts` exports codes rather than labels: a code
+ * is layout-independent and a label is not, so the game keeps the unambiguous thing
+ * and the presentation layer owns the pretty one.
+ */
+function keyCap(code: string): string {
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  switch (code) {
+    case 'ArrowUp': return '↑';
+    case 'ArrowDown': return '↓';
+    case 'ArrowLeft': return '←';
+    case 'ArrowRight': return '→';
+    case 'Escape': return 'Esc';
+    case 'Space': return 'Space';
+    default: return code;
+  }
+}
+
+/**
+ * One row per BINDING RANK: everything each direction lists first ("Move"), then
+ * everything it lists second ("Move (alt)"), and so on. Generic rather than two
+ * hard-coded rows, so adding a third alternate to `MOVE_KEYS` draws a third row
+ * instead of silently going unmentioned.
+ */
+function moveRows(): Array<{ action: string; keys: string[] }> {
+  const depth = Math.max(...MOVE_ORDER.map((d) => MOVE_KEYS[d].length));
+  const rows: Array<{ action: string; keys: string[] }> = [];
+  for (let i = 0; i < depth; i++) {
+    const keys = MOVE_ORDER
+      .map((d) => MOVE_KEYS[d][i])
+      .filter((code): code is string => typeof code === 'string')
+      .map(keyCap);
+    if (keys.length > 0) rows.push({ action: i === 0 ? 'Move' : 'Move (alt)', keys });
+  }
+  return rows;
+}
+
+/** The digits that can ever select something: `input.ts` accepts 1..9, and
+ *  `setWeaponCount()` bounds it at the equipped fighter's real weapon count, so the
+ *  honest answer is the fattest kit on the roster. */
+function weaponSlotCaps(): string[] {
+  const most = Math.max(...CHARACTER_IDS.map((id) => CHARACTERS[id].weapons.length));
+  return Array.from({ length: Math.min(most, MAX_WEAPON_SLOT_KEY) }, (_, i) => String(i + 1));
+}
+
 const KEYMAP: ReadonlyArray<{ action: string; keys: string[] }> = [
-  { action: 'Move', keys: ['W', 'A', 'S', 'D'] },
-  { action: 'Move (alt)', keys: ['↑', '←', '↓', '→'] },
+  ...moveRows(),
   { action: 'Aim', keys: ['Mouse'] },
   { action: 'Fire', keys: ['Click'] },
-  { action: 'Switch weapon', keys: ['1', '2', '3', '4'] },
-  { action: 'Mute / unmute', keys: ['M'] },
-  { action: 'Pause', keys: ['Esc'] },
+  { action: 'Switch weapon', keys: weaponSlotCaps() },
+  { action: 'Mute / unmute', keys: [keyCap(MUTE_KEY)] },
+  { action: 'Pause', keys: [keyCap(PAUSE_KEY)] },
 ];
 
 /**
@@ -235,6 +312,27 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
     </header>
 
     <div class="fa-scroll set-body">
+      <section class="fa-panel set-section">
+        <p class="fa-panel-title">Player</p>
+        <!-- NOTHING is interpolated into this row. The current name is written to
+             '.value' in render(), which cannot be parsed as markup — see the header. -->
+        <div class="set-row">
+          <span class="set-row-label">
+            <span class="set-row-icon">${icon('avatar')}</span>
+            <span class="set-row-text">
+              <span class="set-row-title">Name</span>
+              <span class="set-row-sub">On your lobby badge</span>
+            </span>
+          </span>
+          <span class="set-row-control set-name-wrap">
+            <input class="set-name" type="text" data-el="name" aria-label="Player name"
+                   maxlength="${NAME_MAX}" autocomplete="off" autocapitalize="words"
+                   spellcheck="false" enterkeyhint="done" />
+            <span class="set-name-count" data-el="namecount"></span>
+          </span>
+        </div>
+      </section>
+
       <section class="fa-panel set-section">
         <p class="fa-panel-title">Audio</p>
         <p class="set-locked" data-el="audiostate" hidden></p>
@@ -363,9 +461,22 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
       : profile.blurb;
   }
 
+  /** The `n/16` readout beside the field. Written from whatever is IN the field, not
+   *  from the profile, so it counts what the player can see themselves typing. */
+  function renderNameCount(value: string): void {
+    q('namecount').textContent = `${value.length}/${NAME_MAX}`;
+  }
+
   function render(): void {
     const muted = audio.isMuted();
     const state = audio.getState();
+
+    // Same rule the sliders follow: never fight a control the player is holding. A
+    // repaint mid-edit would drop the caret to the end of the field, or — worse —
+    // replace a half-typed name with the sanitised version of itself.
+    const nameEl = q<HTMLInputElement>('name');
+    if (document.activeElement !== nameEl) nameEl.value = ctx.profile.name;
+    renderNameCount(nameEl.value);
 
     const sfx = rangeEl('sfx');
     if (document.activeElement !== sfx) sfx.value = String(audio.getVolume());
@@ -433,6 +544,16 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
 
   const onRange = (ev: Event): void => {
     const input = ev.target as HTMLInputElement;
+    if (input.dataset.el === 'name') {
+      // Commits on every keystroke — "changes save as you make them" is printed in
+      // the footer of this screen and has to be true of every control on it. The
+      // FIELD is left exactly as typed: running the sanitiser over it here would
+      // delete a space the instant it is pressed and drop the caret, so the canonical
+      // value is written back on `change` (blur or Enter) instead.
+      ctx.profile.setName(input.value);
+      renderNameCount(input.value);
+      return;
+    }
     const v = Number(input.value);
     if (!Number.isFinite(v)) return;
     if (input.dataset.range === 'sfx') {
@@ -446,6 +567,35 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
     render();
   };
   root.addEventListener('input', onRange);
+
+  /**
+   * The name field's settle step.
+   *
+   * `change` fires on blur and on Enter, which is exactly when a player has finished
+   * saying what they meant — so this is where the stored value is echoed BACK into
+   * the field. That is the only honest version of the control: `setName` collapses
+   * whitespace, strips control and bidi-format characters and caps the length, and a
+   * field still showing "  Chef  " after storing "Chef" is a control disagreeing with
+   * its own model. Ranges fire `change` too and are filtered out by the dataset test.
+   */
+  const onCommit = (ev: Event): void => {
+    const input = ev.target as HTMLInputElement;
+    if (input.dataset.el !== 'name') return;
+    input.value = ctx.profile.setName(input.value);
+    renderNameCount(input.value);
+  };
+  root.addEventListener('change', onCommit);
+
+  // Enter means done. Without this the field keeps focus and the settle step above
+  // never runs until the player happens to tap elsewhere — and on a phone the
+  // keyboard's own "done" key produces exactly this event.
+  const onNameKey = (ev: KeyboardEvent): void => {
+    const input = ev.target as HTMLInputElement | null;
+    if (!input || input.dataset.el !== 'name' || ev.key !== 'Enter') return;
+    ev.preventDefault();
+    input.blur();
+  };
+  root.addEventListener('keydown', onNameKey);
 
   q<HTMLButtonElement>('back').addEventListener('click', () => ctx.navigate({ name: 'home' }));
   q<HTMLButtonElement>('done').addEventListener('click', () => ctx.navigate({ name: 'home' }));
@@ -529,6 +679,8 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
       body.removeEventListener('scroll', updateFade);
       root.removeEventListener('click', onToggle);
       root.removeEventListener('input', onRange);
+      root.removeEventListener('change', onCommit);
+      root.removeEventListener('keydown', onNameKey);
       root.remove();
     },
   };
@@ -561,6 +713,15 @@ const CSS = `
      rows 152/120, sections 152 tall holding 302. After: rows 328/120, and the body
      scrolls as it was always supposed to. */
   grid-auto-rows: min-content;
+  /* Each panel is as tall as ITS OWN content, not as tall as the tallest panel beside
+     it. A grid item defaults to 'stretch', which made every short section into a card
+     with a large empty area under its last row — Game was a ~330px card holding one
+     44px row, and adding the one-row Player section made a second. This project has
+     punished exactly that twice ("emptiness is its own unfinished signal", home r1),
+     and it was invisible to all 361 menu assertions and to every contrast number,
+     because nothing was wrong with anything that was drawn. Only the screenshot
+     showed it. Ragged column bottoms are the correct look for cards on a backdrop. */
+  align-items: start;
   align-content: start;
   /* Centred when it fits, top-aligned when it does not. 'safe' is what makes that
      second half true — a plain 'center' in a scroll container pushes the first row
@@ -614,6 +775,53 @@ const CSS = `
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .fa-settings .set-row-control { flex: 0 0 auto; display: flex; align-items: center; }
+
+/* ── Name field ───────────────────────────────────────────────────────────── */
+/* A RECESSED plate, where every other control on this screen is a raised one. That is
+   the whole visual grammar of the design system doing one job: a raised slab with a
+   down-shadow says "press me", and a field you type into is the one control here that
+   is not pressed. The inset highlight is the same idiom inverted, so it still reads as
+   part of the set rather than as a web form dropped into a game.
+
+   Full 44px on the short axis, like every other control, even though the acceptance
+   suite only measures buttons — a name field on a phone that is 36px tall is a name
+   field that takes two taps. */
+.fa-settings .set-name-wrap { gap: 8px; }
+.fa-settings .set-name {
+  width: clamp(112px, 14vw, 184px);
+  min-width: 0;
+  height: var(--tap);
+  padding: 0 10px;
+  /* An input does NOT inherit font-family either — the same trap that shipped
+     '.home-track-sub' in Arial and that screen_metrics' off-face check exists for. */
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.72rem, 1.6vh, 0.9rem);
+  color: var(--ink);
+  background: #FFF6E6;
+  border: 2.5px solid var(--ink);
+  border-radius: 10px;
+  box-shadow: inset 0 2px 0 rgba(26,18,36,0.14);
+}
+.fa-settings .set-name:focus-visible {
+  outline: 3px solid var(--mustard);
+  outline-offset: 1px;
+}
+/* Same treatment as the volume readouts beside it, so the two quiet numbers on this
+   screen are one thing rather than two. Measured at 7.29:1 by screen_metrics, against
+   7.30 computed by hand from the same two colours — which is this run's validation of
+   the instrument on a known input, per docs/LESSONS.md section 13.
+
+   The FIELD's own text is not measurable there: an input's value is not a text node,
+   so no DOM walk sees it. Ink #1a1224 on #FFF6E6 computes to 16.9:1, and it is
+   labelled here as hand-computed rather than measured. */
+.fa-settings .set-name-count {
+  width: 3.1em;
+  text-align: end;
+  font-family: 'Rubik', sans-serif; font-weight: 800;
+  font-size: clamp(0.69rem, 1.4vh, 0.8rem);
+  color: rgba(26,18,36,0.72);
+}
 
 /* Everything that routes through the master bus goes quiet-looking when it is muted,
    so the screen and the speakers never disagree. Targeted at the CONTROLS rather than

@@ -54,12 +54,44 @@
 import { audio } from '../audio';
 import { createTouchControls, type TouchControls } from './touch';
 
-const MOVE_KEYS = {
+/** The four axes `moveAxes()` reads. Order inside each list is preference order:
+ *  index 0 is the primary binding, everything after it is an alternate. */
+export type MoveDirection = 'left' | 'right' | 'up' | 'down';
+
+/**
+ * ── THE KEYBOARD MAP, AND IT IS EXPORTED ON PURPOSE ─────────────────────────
+ * `ui/screens/settings.ts` draws a Controls reference, and until now it carried a
+ * hand-transcribed COPY of this table with a comment saying so. Two copies of one
+ * mapping is a defect waiting for the day they disagree — and a settings screen that
+ * lies about the controls is worse than one that omits them. So this is the single
+ * source of truth and the screen renders off it.
+ *
+ * Values are `KeyboardEvent.code`, which is what `onKeyDown` stores: a PHYSICAL key
+ * position, independent of the layout the OS has loaded, so `KeyW` is the key above
+ * `KeyS` on QWERTY and on AZERTY alike. Turning a code into the glyph printed on the
+ * cap is a presentation problem and stays in the UI layer — this file has no business
+ * knowing that `ArrowLeft` draws as an arrow.
+ */
+export const MOVE_KEYS: Readonly<Record<MoveDirection, readonly string[]>> = {
   left: ['KeyA', 'ArrowLeft'],
   right: ['KeyD', 'ArrowRight'],
   up: ['KeyW', 'ArrowUp'],
   down: ['KeyS', 'ArrowDown'],
-} as const;
+};
+
+/** Mute / unmute. See `onKeyDown` — deliberately on the keydown edge, gated on
+ *  `repeat`, and the only way out of the audio while the pointer is captured. */
+export const MUTE_KEY = 'KeyM';
+
+/**
+ * The highest weapon slot a digit key can select.
+ *
+ * `onKeyDown` reads `Number(e.key)` — the CHARACTER, not the code, because a slot
+ * number is one of the few places where what is printed on the key is the thing the
+ * player means. No character in `rules.ts` carries more than 4 weapons, and the extra
+ * headroom costs nothing; `setWeaponCount()` is what actually bounds it at runtime.
+ */
+export const MAX_WEAPON_SLOT_KEY = 9;
 
 /** Aim-ring radius as a fraction of the viewport's short axis, with px bounds. */
 const AIM_RADIUS_FRACTION = 0.155;
@@ -282,14 +314,14 @@ export class InputController {
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     this.keys.add(e.code);
     const n = Number(e.key);
-    if (Number.isInteger(n) && n >= 1 && n <= 9) {
+    if (Number.isInteger(n) && n >= 1 && n <= MAX_WEAPON_SLOT_KEY) {
       const idx = n - 1;
       if (idx < this.weaponCount) this.weaponIndex = idx;
     }
     // Mute. Deliberately on the KEYDOWN edge and gated on `repeat`, so holding M does
     // not strobe the mix. Under pointer lock this is the only way out of the audio —
     // the OS volume mixer is no longer one cursor-move away.
-    if (e.code === 'KeyM' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.code === MUTE_KEY && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
       audio.toggleMuted();
     }
   };
