@@ -1633,3 +1633,30 @@ hero is a **new scene**, not a CSS change. It is the largest lever and the large
 the one item that cannot be reached from `src/ui/screens/home.ts` alone. If it turns out to be
 expensive, the fallback — panel differentiation, depth, icons, killing the hero card — is most of
 the gap and is all reachable from the one file.
+
+### ✅ The backdrop is APPROVED — Uri wants the 3D world
+
+> *"Perhaps we should also create a background image or even better a background 3d world."*
+
+The item flagged above as *"may need Uri"* is settled, and he prefers the **3D world** over a flat
+image. Two facts that make this much cheaper than it sounds:
+
+1. **`src/ui/screens/charStage.ts` already builds a real 3D set** behind the hero — its own header
+   describes *"a lit cyclorama, a floor, the ground plane"*, and records that a previous pass
+   deliberately moved four elements out of CSS overlays into **real geometry**, because `Stage`
+   clears opaque and nothing can be painted *behind* the canvas. The place to put a world already
+   exists and is already lit.
+2. **We already own a kitchen.** `createKitchenArena()` is a complete dressed 3D environment.
+   **Brawl Stars' own lobby backdrop is a game environment, not bespoke art** — so rendering a
+   reduced, dimmed slice of our own arena behind the hero gives a real world for a fraction of the
+   cost of authoring one, *and* makes the lobby and the match read as the same place.
+
+⚠️ **The constraint is draw calls, and it is real.** `preview-arena` is **1,700 draw calls against a
+match's 696** — a full arena behind the hero would cost more than playing the game. It needs a
+reduced set (a few hero props, the floor, the cyclorama; not the layout), priced with
+`tools/perf.mjs --mode counts` before it ships. **Home is the first screen on a phone and has to
+stay cheap.**
+
+The five smaller items — panel differentiation, depth/shadows, pictorial icons, killing the hero
+card, hierarchy — are still most of the gap, are all reachable from one file, and are being done
+regardless, so the screen improves even if the world needs a second pass.
