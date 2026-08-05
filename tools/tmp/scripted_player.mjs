@@ -187,7 +187,20 @@ export function createScriptedPlayer({
     /** Nothing at all. The control: what does the AI do to a target that never acts? */
     idle: () => () => ({ move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false }),
 
-    /** Run at the enemy and hold fire. The naive human's first 30 seconds. */
+    /**
+     * Run at the enemy **with the trigger held down**. The naive human's first 30 seconds.
+     *
+     * ⚠️ THE DOC USED TO SAY "and hold fire", AND THE CODE HAS ALWAYS SAID `attack: true`.
+     * The comment was transcribed from `rules_census.mjs` when this file was extracted and
+     * was wrong there too, so **every `chase` figure in this project's history was measured
+     * with the trigger down** — including the ladders in `4105116` and `d9753ff`.
+     *
+     * No behaviour is changed here and none should be: `chase` is the naive-player control
+     * and its numbers are only meaningful as a continuous series. Firing constantly IS the
+     * naive hand. The comment was the defect, and a comment that contradicts its own code is
+     * exactly the class `docs/LESSONS.md` §9 keeps paying for — a peer quoted a broken
+     * instrument's number in `hud.ts` as proof only hours ago.
+     */
     chase: (rnd = null) => {
       const nav = makeNav(rnd);
       return (state) => {

@@ -344,9 +344,20 @@ mix nobody would call good. Recording a **real** match's event stream and replay
 high band is not decaying too fast — **it never arrives**, which is precisely where a splash's
 identity lives.
 
-**And the mix is silent most of the time.** Across 121 real matchups: mean play length **9.60 s**,
-and the mean gap between the start whistle and the first combat sound is **6.55 s — 69.9% of the
+**And the mix is silent most of the time.** Across 121 real matchups: mean play length **11.7 s**,
+and the mean gap between the start whistle and the first combat sound is **5.00 s — 47% of the
 match, in one unbroken silence**, with the music faded out and no ambience at all.
+
+> ⚠️ **CORRECTED (`47feb9a`).** This was first recorded as **6.55 s / 69.9%** and reported to Uri as
+> fact. That figure came from `audio_mix_record.mjs`, which carried a stale driver whose stuck
+> detector ran during the countdown. Two separate errors were stacked in it: the fix itself takes
+> **1.90 s** off (121/121 matchups moved, paired), and the old tool's answer was **a function of
+> countdown length** — 6.55 / 6.17 / 6.04 / 6.55 s at `COUNTDOWN_FROM` 5 / 3 / 8 / 12, i.e. 0.51 s
+> of spread from a quantity `sim.test.mjs` §21 proves the sim cannot see. With the fixed driver all
+> four trees give **5.00 s, identical to the last digit.**
+>
+> **The conclusion survives; the number did not.** 5.00 s of silence in an 11.7 s match is still an
+> enormous unbroken hole with the music faded out, so the ambience bed's justification stands.
 
 **Two suspects formally cleared, so nobody re-opens them:**
 - **The soft clip is not the problem.** It reduces **2.00%** of signal by more than 0.5 dB, and the

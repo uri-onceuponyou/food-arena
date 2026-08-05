@@ -107,11 +107,13 @@ const REGISTRY = {
     note: 'peer file, born fixed — lifted from pacing_ladder.mjs',
   },
   // ── declared debt, outside this pass's file set ───────────────────────────
-  'tools/tmp/rules_census.mjs': { state: 'STALE', note: 'status_census was copied FROM this; same defect, both faults' },
-  'tools/tmp/policy_trace.mjs': { state: 'STALE', note: 'nav only; no seeded stream, so fault 1 only' },
-  'tools/tmp/audio_census.mjs': { state: 'STALE', note: 'audio event rates; nav variant with a 700 ms detour' },
-  'tools/tmp/audio_mix_record.mjs': { state: 'STALE', note: 'same nav variant as audio_census' },
-  'tools/tmp/audio_shrug_census.mjs': { state: 'STALE', note: 'same nav variant as audio_census' },
+  // Converted in 47feb9a. `grep -l detourUntil tools/` now returns 7: the source, this
+  // guard, 3 INDEPENDENT_FIXED and 2 GATED_AT_CALLSITE. ZERO STALE COPIES REMAIN.
+  'tools/tmp/rules_census.mjs': { state: 'SHARED' },
+  'tools/tmp/policy_trace.mjs': { state: 'SHARED' },
+  'tools/tmp/audio_census.mjs': { state: 'SHARED' },
+  'tools/tmp/audio_mix_record.mjs': { state: 'SHARED' },
+  'tools/tmp/audio_shrug_census.mjs': { state: 'SHARED' },
 };
 
 /** The nav's own name for its latch. Every copy in this repo has carried it verbatim. */
@@ -137,11 +139,7 @@ for (const abs of walk(`${ROOT}/tools`)) {
     'a new copy of the scripted player appeared. Import tools/tmp/scripted_player.mjs '
     + 'instead, or register it here with a state and a reason.');
   if (!reg) continue;
-  if (reg.state === 'SHARED') {
-    ok(`census: ${rel} still imports the shared driver`, src.includes("from './scripted_player.mjs'"));
-    ok(`census: ${rel} carries no private copy of the nav`, !/function makeNav\s*\(/.test(src),
-      'a local makeNav reappeared beside the import');
-  } else if (reg.state === 'INDEPENDENT_FIXED' || reg.state === 'GATED_AT_CALLSITE') {
+  if (reg.state === 'INDEPENDENT_FIXED' || reg.state === 'GATED_AT_CALLSITE') {
     ok(`census: ${rel} still carries its countdown guard`, src.includes(reg.guard),
       `expected to find \`${reg.guard}\``);
     if (reg.guard2) {
@@ -150,10 +148,30 @@ for (const abs of walk(`${ROOT}/tools`)) {
     }
   }
 }
+/**
+ * SHARED is checked from the REGISTRY, never from the fingerprint sweep.
+ *
+ * ⚠️ THIS BRANCH USED TO BE DEAD CODE, and it was dead in the one direction that
+ * mattered. The sweep above skips any file without `detourUntil` — and a file that
+ * CORRECTLY imports `scripted_player.mjs` does not contain that string. So every
+ * properly-converted tool dropped out of the census before its SHARED assertions ran,
+ * and `arena_probe`, `status_census` and `roster_table` were never once checked by the
+ * guard written to protect them.
+ *
+ * It was caught by an arithmetic tell rather than a failure: when a peer converted
+ * `roster_lab.mjs` mid-pass, the assertion count silently fell 49 → 41. A guard whose
+ * coverage SHRINKS when you fix something is measuring the bug, not the property.
+ */
 for (const [rel, v] of Object.entries(REGISTRY)) {
-  if (v.optional) continue;   // untracked peer scratch: absence is not a regression
+  if (v.optional && !existsSync(`${ROOT}/${rel}`)) continue;  // untracked peer scratch
   ok(`census: registered file ${rel} exists`, existsSync(`${ROOT}/${rel}`),
     'registered but missing — delete the entry or restore the file');
+  if (v.state !== 'SHARED' || !existsSync(`${ROOT}/${rel}`)) continue;
+  const src = readFileSync(`${ROOT}/${rel}`, 'utf8');
+  ok(`census: ${rel} still imports the shared driver`, src.includes("scripted_player.mjs"),
+    'a SHARED tool stopped importing the one driver implementation');
+  ok(`census: ${rel} carries no private copy of the nav`, !/function makeNav\s*\(/.test(src),
+    'a local makeNav reappeared beside the import');
 }
 const stale = Object.entries(REGISTRY).filter(([, v]) => v.state === 'STALE').map(([k]) => k);
 if (args.strict) for (const rel of stale) ok(`census(strict): ${rel} is fixed`, false, REGISTRY[rel].note);
@@ -359,7 +377,7 @@ for (const [rel, v] of Object.entries(REGISTRY)) {
   console.log(`  ${mark} ${v.state.padEnd(18)} ${rel}${v.note ? `   ${v.note}` : ''}`);
 }
 if (stale.length) {
-  console.log(`\n  ⚠️ ${stale.length} STALE copies remain, all outside the file set of the pass that wrote this guard.`);
+  console.log(`\n  ⚠️ ${stale.length} STALE copies remain.`);
   console.log(`     They are LISTED so the debt cannot grow silently; \`--strict\` fails on them.`);
   console.log(`     Every figure they have printed carries the countdown detour.`);
 }
