@@ -62,7 +62,7 @@
  */
 
 import * as THREE from 'three';
-import { wu, groundPos } from '../units';
+import { wu, groundPos, CHARACTER_HEIGHT } from '../units';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Look
@@ -119,9 +119,86 @@ const GROUND_Y = 0.34;
  */
 const CANOPY_Y = 3.2;
 
-/** Curtain height in metres. Tall enough to stay in frame from well outside the
- * guaranteed view radius, faint enough up top that it never hides a fighter. */
-const WALL_HEIGHT_M = 6.5;
+/**
+ * Curtain height in metres — a CEILING now, not a constant. See `curtainHeight()`.
+ *
+ * Tall enough to stay in frame from well outside the guaranteed view radius, faint
+ * enough up top that it never hides a fighter.
+ */
+const WALL_HEIGHT_MAX_M = 6.5;
+
+/**
+ * Curtain height for a given ring radius, and the reason it stopped being a constant.
+ *
+ * `rules.ts` gained `MIN_SAFE_RADIUS = 140`, so the ring now STOPS at 7 m instead of
+ * closing to nothing. This module was authored and measured when the ring spent every
+ * match between 400 and 990 wu, and its header commits to an objective acceptance
+ * test: *"every surface INSIDE the boundary is bit-for-bit unchanged. Currently
+ * 0.0%."* Re-run across the ring's whole range (`tools/tmp/vfx_finalring.mjs`, which
+ * toggles just the curtain and unprojects every changed pixel back onto the ground
+ * plane to ask whether it landed inside the boundary):
+ *
+ *     safeRadius   curtain px   of which INSIDE the boundary
+ *          990          0            0     ( 0.0% )
+ *          600          0            0     ( 0.0% )
+ *          400       5953           24     ( 0.4% )
+ *          260      38631          249     ( 0.6% )
+ *          180      55410         1593     ( 2.9% )
+ *          140      57201        10307     (18.0% )   <-- MIN_SAFE_RADIUS
+ *
+ * After this function, same probe, same stations:
+ *
+ *     safeRadius   curtain px   INSIDE      change
+ *          400       5948           25      cap still binds, untouched
+ *          260      24032          263      ~flat
+ *          180      14860          448      -72%
+ *          140       8366         1306      -87%   (2.9% of frame -> 0.36%)
+ *
+ * **At the final ring the boundary repaints 10,307 pixels of SAFE GROUND** — 2.9% of
+ * the whole frame. The test passes everywhere the ring used to go and fails at the
+ * one radius that is new.
+ *
+ * The cause is proportion, not position, and it is geometry rather than taste: a
+ * vertical wall of height h standing at radius r, seen from a camera pitched p, has
+ * its top edge project INWARD by `h / tan(p)`. At p = 58 deg that is 0.625h — a fixed
+ * 4.06 m for a 6.5 m wall. Against a 49.5 m radius that annulus is 8% of the safe
+ * disc and invisible; against a 7 m radius it is 58% of it, so the wall swallows most
+ * of the ground the player is supposed to be standing on.
+ *
+ * Tying the height to the radius holds that ratio constant instead. The floor is one
+ * CHARACTER_HEIGHT: a barrier shorter than a fighter stops reading as a barrier, and
+ * it is the natural unit for "how tall does a wall have to be to mean something in
+ * this game". The 0.30 factor makes the ceiling bind at r >= 21.7 m (433 wu), so
+ * **nothing changes for the first ~78% of a match** — this only ever engages in the
+ * endgame the constant was never measured against.
+ *
+ * Nothing is lost by shortening it there, either. The curtain exists to give the
+ * boundary a SILHOUETTE that survives at distance, when the crest band on the floor
+ * has foreshortened away; at the final ring the whole boundary is on screen at once
+ * and the crest is doing that job directly.
+ */
+function curtainHeight(radiusM: number): number {
+  return THREE.MathUtils.clamp(radiusM * 0.30, CHARACTER_HEIGHT, WALL_HEIGHT_MAX_M);
+}
+
+/**
+ * Seconds the whole boundary takes to fade out when it stops being active.
+ *
+ * It used to disappear in a single frame, because `update()`'s `active` flag is
+ * `phase === 'playing'` and nothing interpolated it. That was fine when a match could
+ * only end in a knockout at a wide radius, where the fog owned a sliver of the frame.
+ * Two sim changes broke it together: `resolveTimeout` means a match can now end on the
+ * clock with both fighters alive, and it ends at `MIN_SAFE_RADIUS` — where the
+ * boundary is measured to be carrying **21.4% of the frame's luminance** (hide
+ * `fog_boundary` and the frame brightens by that much; 12.7% at 180 wu, 1.4% at 260,
+ * 0.0% at 600 and beyond, where the ring is off screen). Deleting a fifth of the
+ * frame's light in a single frame reads as a rendering fault, not as a match ending.
+ *
+ * Deliberately asymmetric: the fade only applies on the way OUT. Fading the boundary
+ * IN would mean the first moments of lethal ground are drawn as not-quite-lethal, and
+ * a zone visual may never under-state danger.
+ */
+const FADE_OUT_SECONDS = 0.5;
 
 /** Ring resolution. 128 keeps the inner edge visually smooth at r = 850 wu. */
 const SEG = 128;
@@ -254,6 +331,10 @@ function makeCurtainTexture(): THREE.CanvasTexture {
 interface Annulus {
   mesh: THREE.Mesh;
   setRadius(safeRadiusUnits: number): void;
+  /** Scale every baked per-vertex alpha by `k` — the material `opacity` uniform
+   * multiplies `vColor.a` under `USE_COLOR_ALPHA`, so one number fades the whole
+   * band without rewriting the colour attribute. Used by the end-of-match fade. */
+  setOpacity(k: number): void;
   dispose(): void;
 }
 
@@ -342,6 +423,9 @@ function buildAnnulus(specs: RingSpec[], y: number, renderOrder: number, name: s
       }
       posAttr.needsUpdate = true;
     },
+    setOpacity(k: number) {
+      mat.opacity = k;
+    },
     dispose() {
       geo.dispose();
       mat.dispose();
@@ -411,16 +495,36 @@ export function createFogRing(centerUnits: { x: number; y: number }): FogRing {
 
   root.add(canopy.mesh);
 
+  // End-of-match fade state — see `FADE_OUT_SECONDS`. `lastElapsed` tracks the real
+  // clock `update()` is handed so the ramp is time-based rather than frame-based
+  // (SwiftShader runs at a few fps here and a real device at 60; a per-frame decrement
+  // would fade over wildly different durations on the two).
+  let fade = 0;
+  let lastElapsed = 0;
+
   return {
     root,
 
     update(safeRadiusUnits, elapsedSeconds, active, camera) {
-      root.visible = active && safeRadiusUnits > 0;
+      // Clamp the delta: the first call after a match starts, and any tab-visibility
+      // stall, hands over a huge jump. (`docs/LESSONS.md` §12 records a negative first
+      // rAF delta NaN-ing the portrait camera permanently — same class of trap.)
+      const dt = Math.min(0.25, Math.max(0, elapsedSeconds - lastElapsed));
+      lastElapsed = elapsedSeconds;
+
+      const wanted = active && safeRadiusUnits > 0;
+      // Snap ON, ramp OFF — a zone visual may never under-state danger, so it is only
+      // ever allowed to be late to leave, never late to arrive.
+      fade = wanted ? 1 : Math.max(0, fade - dt / FADE_OUT_SECONDS);
+
+      root.visible = fade > 0.002;
       if (!root.visible) return;
 
       const safeR = Math.max(0, safeRadiusUnits);
       ground.setRadius(safeR);
       canopy.setRadius(safeR);
+      ground.setOpacity(fade);
+      canopy.setOpacity(fade);
 
       // Slide the canopy directly AWAY from the camera by height / tan(pitch), which
       // is exactly the amount that makes a point at `CANOPY_Y` project onto the same
@@ -434,8 +538,12 @@ export function createFogRing(centerUnits: { x: number; y: number }): FogRing {
       canopy.mesh.position.set(-Math.sin(yaw) * back, CANOPY_Y, -Math.cos(yaw) * back);
 
       const rm = wu(safeR);
-      wall.scale.set(rm, WALL_HEIGHT_M, rm);
-      wall.position.y = WALL_HEIGHT_M / 2;
+      // Height is a function of the radius now — see `curtainHeight()` for the
+      // measured reason (18% of the curtain's own pixels landed on SAFE ground at
+      // MIN_SAFE_RADIUS with the old constant).
+      const wallH = curtainHeight(rm);
+      wall.scale.set(rm, wallH, rm);
+      wall.position.y = wallH / 2;
 
       // Keep the streaks a roughly constant world size as the ring closes, so the
       // curtain never turns into either a smear or a picket fence, and drift them
@@ -446,7 +554,7 @@ export function createFogRing(centerUnits: { x: number; y: number }): FogRing {
 
       // Slow breathing pulse — a static wall reads as scenery, a pulsing one reads as
       // a threat. Small enough that it never flickers into looking like a VFX hit.
-      wallMat.opacity = 0.82 + 0.1 * Math.sin(elapsedSeconds * 2.1);
+      wallMat.opacity = (0.82 + 0.1 * Math.sin(elapsedSeconds * 2.1)) * fade;
     },
 
     dispose() {

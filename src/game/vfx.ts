@@ -11,14 +11,42 @@
  * cached geometry/materials) that get reconfigured and reused — nothing is allocated
  * per frame or per spawn, matching the discipline the projectile/splat/trail pools
  * already established.
+ *
+ * ── GameEvent kinds this layer deliberately does NOT draw ──────────────────────
+ *
+ * The event stream has two consumers (this and `audio/`), and they do not have to
+ * cover the same set. Recorded here so "no visual" is never mistaken for "nobody
+ * looked":
+ *
+ * - **`match-ended` from `resolveTimeout`** — a match can now end on the clock with
+ *   BOTH fighters alive. No world-space VFX, on purpose: every effect in this file is
+ *   anchored to a world position (a hit, a cast, a death) and a timeout has none.
+ *   `sim.ts` emits no `death` and leaves both fighters `alive`, so a death burst would
+ *   be a lie about what happened. The moment is carried by the HUD clock, the
+ *   game-over card and audio's own cue. What this layer owes the timeout is to stop
+ *   cleanly — see `arena/fogRing.ts`'s `FADE_OUT_SECONDS`, which exists because the
+ *   boundary used to vanish in one frame while carrying 27% of the frame's luminance.
+ * - **`countdown-tick` / `match-started`** — HUD moments with no world position. Same
+ *   reasoning.
+ * - **`projectile-destroyed` with reason `hit-cover` or `expired`** — currently
+ *   nothing at all: the mesh is removed by `syncPool` and the projectile simply
+ *   blinks out. `hit-target` is covered, because `hit-landed` fires alongside it and
+ *   brings the impact burst. This one is a GAP, not a decision — a shot that stops
+ *   dead on a counter should scuff it. Left for a round that can measure the result.
  */
 
 import * as THREE from 'three';
 import type { FighterRole, MatchState, Projectile, Splat, TrailMark, Vec2 } from './state';
 import { SPLAT_RADIUS, TRAIL } from './rules';
+// The sim's own predicate for "may this status be applied yet", exported by
+// `combat.ts` specifically so this layer can render the shrug-off window without
+// re-deriving the arithmetic (see its doc comment). Importing it rather than copying
+// `until + grace` means a change to the rule cannot silently desync the visual from
+// the mechanic — which is how `docs/LESSONS.md` §7 got ten contradicting elements.
+import { statusReadyAt } from './combat';
 import { CHARACTERS } from './rules';
 import type { CharacterId, Weapon } from './rules';
-import { CHARACTER_HEIGHT, groundPos, wu } from '../units';
+import { CHARACTER_HEIGHT, CHARACTER_RADIUS, groundPos, wu } from '../units';
 import { flatMat } from '../render/toon';
 // Per-weapon bespoke VFX extension point (see `vfx/weapons/types.ts` for the full
 // `WeaponVfx` contract). `getWeaponVfx()` returns `undefined` for any weapon with no
@@ -46,7 +74,22 @@ declare global {
      *
      * Published by `VfxLayer`'s constructor, cleared by `dispose()`.
      */
-    __vfxSpawnTest?: (kind: 'impact' | 'death' | 'cast', xWU: number, yWU: number, amount?: number, color?: string, who?: CharacterId, weaponKey?: string) => void;
+    __vfxSpawnTest?: (kind: VfxSpawnTestKind, xWU: number, yWU: number, amount?: number, color?: string, who?: CharacterId, weaponKey?: string) => void;
+    /**
+     * QA-only handle on the live `VfxLayer`, in the same spirit as `window.__stage`
+     * and `window.__audio`. Never read by game logic.
+     *
+     * `__vfxSpawnTest` fires ONE effect and returns nothing; a coverage probe needs
+     * to hand-crank `updateEffects()` in exact millisecond slices (see
+     * `tools/tmp/lolliv.mjs`'s virtual clock) and to drive `sync()` with a synthetic
+     * `MatchState` so the sim-owned pools (projectiles / splats / trail marks) and
+     * the status telegraphs (slow ring + tint, stun stars) can be measured without
+     * waiting on real gameplay — fighters spawn 1080wu apart and every weapon reaches
+     * at most 140wu, so probes that wait for a real hit time out.
+     *
+     * Published by the constructor, cleared by `dispose()`.
+     */
+    __vfxLayer?: VfxLayer;
     /** QA-only per-tick fighter snapshot, refreshed every `sync()` call — lets a
      * Playwright driver steer input off real positions/HP/terrain-slow state instead
      * of guessing from rendered pixels (e.g. to script a player walking into a puddle
@@ -57,6 +100,17 @@ declare global {
 
 type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash';
 
+/**
+ * Every kind `window.__vfxSpawnTest` can fire. Deliberately the SAME set as
+ * `VfxQaKey`: the QA counter and the QA spawner covering different subsets is how a
+ * coverage audit ends up with blind spots, and this file's own history says the
+ * blind spot is where the bug lives (`docs/LESSONS.md` §1). The first version wired
+ * only `impact`/`death`/`cast`, so `meleeArc`, `heal`, `giantSlam` and
+ * `puddleSplash` — four of the seven counted effects — could not be fired on demand
+ * at all and had never been measured.
+ */
+type VfxSpawnTestKind = VfxQaKey;
+
 function bumpVfxQaCount(key: VfxQaKey): void {
   window.__vfxQaCounts ??= { cast: 0, meleeArc: 0, impact: 0, death: 0, heal: 0, giantSlam: 0, puddleSplash: 0 };
   window.__vfxQaCounts[key]++;
@@ -64,10 +118,45 @@ function bumpVfxQaCount(key: VfxQaKey): void {
 
 /** Metres off the ground projectiles fly at — roughly chest height on the cast. */
 const PROJECTILE_HEIGHT = 0.5;
-/** Ground-decal layer heights, kept above the arena's own decal layer (0.15m) so
- * splats/trail marks never z-fight the kitchen floor's puddles/scorch marks. */
-const SPLAT_Y = 0.17;
-const TRAIL_Y = 0.19;
+
+/**
+ * Clearance every flat VFX decal in this file is expressed against, in metres.
+ *
+ * ── Do not take this number from a comment, including this one ─────────────────
+ *
+ * The old heights (SPLAT 0.17, TRAIL 0.19, GROUND_VFX 0.24) were chosen against a
+ * documented stack of "floor pads 0.045-0.048, seams 0.062, baked shadows
+ * 0.068-0.07, prop kicks 0.08, arena decals 0.15-0.25". That stack has moved. Walked
+ * live out of the running scene (`tools/tmp/vfx_layers.mjs`, which transforms all
+ * eight bbox corners rather than trusting a constant), the arena's floor-level
+ * OPAQUE, DEPTH-WRITING geometry now tops out at:
+ *
+ *     puddle disc          0.150   pipe_foot_step   0.175   cover_plinth   0.200
+ *     foot meshes          0.159   debris_veg       0.182   floor_drain    0.230
+ *     hub_debris_veg       0.172   cart_wheel       0.190   puddle_wet_rim 0.250
+ *                                                           hazard_ring    0.252
+ *
+ * Counting only in-arena meshes (the apron's 784 pieces sit outside the playfield),
+ * the number of opaque depth-writing surfaces standing ABOVE each old decal plane
+ * was **62 at SPLAT_Y, 39 at TRAIL_Y, 17 at GROUND_VFX_Y** — every one of them a
+ * place where a splat, a sticky-trail mark or a melee arc is silently clipped. At
+ * 0.30 the only things left above are raised prop BODIES (pot crate, sack pallet,
+ * chalkboard leg), which a ground decal is supposed to go behind.
+ *
+ * Cost of the lift: a ground decal at height h on a 58-degree camera appears
+ * `h / tan(58)` = 0.625h further from the camera than the point it marks, so moving
+ * 0.17 -> 0.30 adds 0.081 m ≈ 1.6 world units of registration error — under 4% of a
+ * 42 wu character. Cheap against 62 clipping surfaces.
+ *
+ * The tiny separations between the four planes below are DOCUMENTATION, not
+ * z-fighting insurance: every material in this layer sets `depthWrite: false`, so
+ * VFX decals cannot occlude or z-fight each other at all, and their mutual layering
+ * is decided by `renderOrder` (3/4 status rings, 5 wedges, 6 rings, 10/11 sprites).
+ */
+const GROUND_CLEAR_Y = 0.30;
+/** Ground-decal layer heights. See `GROUND_CLEAR_Y` for how these were derived. */
+const SPLAT_Y = GROUND_CLEAR_Y;
+const TRAIL_Y = GROUND_CLEAR_Y + 0.01;
 
 // ── Ability VFX layer heights/sizes (metres) ────────────────────────────────────
 /** Chest-ish height for impact flashes/shards, so hits read as landing ON the
@@ -75,10 +164,129 @@ const TRAIL_Y = 0.19;
 const IMPACT_HEIGHT = 1.15;
 const CAST_HEIGHT = 1.25;
 /** Above splats/trail marks so melee sweeps and impact rings always render on top. */
-const GROUND_VFX_Y = 0.24;
-const STATUS_RING_Y = 0.3;
-const STUN_STAR_HEIGHT = CHARACTER_HEIGHT * 1.04;
-const STUN_STAR_RADIUS = 0.42;
+const GROUND_VFX_Y = GROUND_CLEAR_Y + 0.02;
+const STATUS_RING_Y = GROUND_CLEAR_Y + 0.04;
+/**
+ * Orbiting stun stars — geometry, and why it moved.
+ *
+ * The old pair (height 1.04x, radius 0.42 m) put three sprites in a 0.42 m circle
+ * around a head whose own radius is ~0.48 m: **the whole orbit was inside the head.**
+ * That is survivable for an opaque decal and fatal for this one, because these sprites
+ * are ADDITIVE and the head is the brightest, warmest surface in the frame — additive
+ * `#FFE75E` over a bun at `rgb(254,191,109)` clips to white and disappears into it.
+ * `docs/LESSONS.md` §1 names exactly this ("additive blending over this bright warm
+ * floor makes a wash, not a core"); nobody had checked it against the CAST.
+ *
+ * It measured as a spawned-but-unreadable effect, which is the tell: 369 delivered
+ * pixels at mean delta 47 against the slow ring's 1,856 at 116 — and an ablation put
+ * the occlusion ratio at **1.01x**, i.e. nothing was hiding them. Not buried, washed
+ * out. The judgement frame at the stun's own peak showed a completely ordinary
+ * character.
+ *
+ * So the orbit is now WIDER than the head instead of narrower, which puts each star
+ * against floor or backdrop for most of its circle. Height stays at the head top and
+ * is deliberately NOT raised further: `match.ts`'s floating HP bar sits at
+ * `CHARACTER_HEIGHT + 0.35` = 2.45 m, and it is DOM composited over the canvas, so
+ * anything drawn up there is behind an opaque pill.
+ */
+const STUN_STAR_HEIGHT = CHARACTER_HEIGHT;
+const STUN_STAR_RADIUS = 0.85;
+/**
+ * Sprite size in metres, and the star count, both set by measurement rather than by
+ * eye — and note the pixel count went DOWN on the way to being readable, which is
+ * why "delivered pixels" alone is never the whole test.
+ *
+ *   before (glowTex, r 0.42, scale 0.34, x3)   369 px, mean delta 47 — invisible in
+ *                                              the judgement frame; a soft additive
+ *                                              blob composited inside the bun
+ *   after  (starTex, r 0.85, scale 0.50, x3)   181 px, mean delta 84 — VISIBLE, two
+ *                                              distinct sparkles clear of the body
+ *
+ * Half the pixels, twice the contrast, and the difference between "measurable" and
+ * "readable". `starTex` fills far less of its own quad than `glowTex` does (a 0.16
+ * core plus thin spikes against a full radial gradient), so the same footprint buys
+ * fewer lit pixels — but they are hard-edged pixels on the floor instead of a
+ * gradient dissolving into a clipping highlight.
+ *
+ * 0.68 m and four stars is then a straight legibility bump on top of that: ~1.85x the
+ * area each and a fourth point to close the ring, so it reads as an orbit rather than
+ * as two unrelated sparkles. 0.68 m is 32% of a character, the same band the puddle
+ * splash (0.58-0.78) was re-scaled to after the same kind of measurement.
+ */
+const STUN_STAR_SCALE = 0.68;
+const STUN_STAR_COUNT = 4;
+
+// ── Status shrug-off ("ward") telegraph ─────────────────────────────────────────
+/**
+ * `combat.ts` refuses a stun/slow that is already running AND for `STUN_GRACE_MS` /
+ * `SLOW_GRACE_MS` (500 ms each) after it expires. That bounded the worst movement lock
+ * from 11.02 s to 2.00 s and re-application from 61.2% to 0.0% — and it is invisible.
+ *
+ * **Nothing is not the same as immune.** A refused stun currently draws no stun ring,
+ * which is *correct* and *useless*: a Cheese Blind that visibly does nothing reads as a
+ * bug in the game, not as a rule to play around. This is the same failure as
+ * `docs/LESSONS.md` §1 case 10, where a dark-on-dark cooldown wipe had three critics
+ * across three rounds report "no visible cooldown".
+ *
+ * So the rule gets TWO signals, and they answer different questions:
+ *
+ *  - **The STATE** — a dashed band at the feet of any fighter inside a grace window.
+ *    This is the one that makes the rule playable: an attacker can see the target is
+ *    currently immune *before* spending a stun on them. It is drawn only during GRACE,
+ *    never while the status is active, because an active status already has a loud
+ *    telegraph of its own (frost ring + body tint, or orbiting stars) and stacking a
+ *    third ring on it is clutter, not information.
+ *  - **The INSTANT** — the band pops bright, scaled up and tinted to the colour of the
+ *    effect that just bounced. This is what separates "shrugged off" from "missed": a
+ *    miss produces no `hit-landed` at all and therefore no impact burst; a refused hit
+ *    produces the full burst (damage still lands) PLUS this pop.
+ *
+ * ── Why DASHED, and why achromatic ─────────────────────────────────────────────
+ *
+ * The visual grammar is "same family, broken ring" = *this effect, not landing*. Broken
+ * rather than differently-coloured because every hue on this floor is already claimed
+ * (`arena/shared.ts`: rose 330-340 walkable, violet 258-268 blocking, 0-60 cast) and
+ * the slow ring already owns near-white. Structure is free; hue is not. The resting
+ * band is achromatic and dim, and only the POP borrows the refused effect's colour —
+ * so the persistent state costs zero chroma budget and the instant carries the
+ * information about *which* effect bounced.
+ *
+ * It counter-rotates against the slow ring on purpose: the two can be on screen at
+ * once (a slow that is active on one fighter, a grace window on the other) and
+ * opposite spin is readable at gameplay distance where a radius difference is not.
+ */
+/**
+ * Radii, and a note that this file earned the hard way TWICE IN ONE SESSION.
+ *
+ * First cut was 0.40-0.56 m, sized by eye as "a small band at the feet". Measured:
+ * **2 delivered pixels, and 128 with depth testing off — a 64x occlusion ratio.** The
+ * band was drawn entirely underneath the fighter standing on it, exactly like the heal
+ * pulse and the puddle splash repaired a few hundred lines above. A ground ring at a
+ * character's feet has to clear the character, and on this camera that means outside
+ * ~0.6 m, not inside it.
+ *
+ * 0.70-0.92 sits just outside the slow ring's 0.64-0.86, which is the pair already
+ * proven to deliver (1,850 px at a 1.06x occlusion ratio). The two are never active on
+ * the same fighter — the band draws only during GRACE, after the status has expired —
+ * so the near-identical radius costs nothing, and on two different fighters at once
+ * the dashes and the opposite spin carry the distinction.
+ */
+const WARD_RING_INNER = 0.70;
+const WARD_RING_OUTER = 0.92;
+const WARD_DASHES = 7;
+/** Fraction of each dash cell that is solid. 0.55 keeps the gaps unmistakable at
+ * gameplay distance — a finer dash reads as a solid ring and loses the whole cue. */
+const WARD_DASH_DUTY = 0.55;
+/** Resting alpha of the band. 0.6 against the ACTIVE slow ring's 0.9 — the grace
+ * state is real information but it is not urgent, and a resting band as loud as an
+ * active status would flatten the difference between "you are stunned" and "a stun
+ * would not land right now". */
+const WARD_RESTING_OPACITY = 0.6;
+/** Seconds the refusal pop takes to fall back to the resting band. Deliberately
+ * shorter than `STUN_GRACE_MS` so the pop reads as an event inside the state rather
+ * than as the state itself. */
+const WARD_POP_SECONDS = 0.32;
+const WARD_NEUTRAL = new THREE.Color('#F2F6FF');
 
 // ── Slow feedback (design change) ───────────────────────────────────────────────
 // The arena's grease/water puddles used to carry a whole "make this shout HAZARD"
@@ -147,6 +355,69 @@ const SLOW_RING_DARK = '#1D2740';
  * not a timer, so it naturally speeds up or stops with the fighter's own motion. */
 const PUDDLE_SPLASH_DIST_WU = 18;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// THE HUE CONTRACT FOR VFX — measured, and it is NOT the one people assume
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// The arena splits the wheel three ways (`arena/shared.ts` ~L362):
+//   WALKABLE  rose-mauve 330-340 (tile field) + teal-blue 198-206 (mats/pads)
+//   BLOCKING  violet 258-268 — every CoverBox body, skirt and plinth
+//   CAST      0-60 deg
+//
+// The standing assumption is that 0-60 is "reserved for the cast" and that VFX should stay
+// out of it. **It is not.** `arena/shared.ts` L601 and `arena/hazards.ts` L241 both
+// state the grant in the same words: *0-60 deg is reserved for the cast, the HAZARDS
+// and the VFX.* What must stay out of the warm band is the ENVIRONMENT, and it does —
+// measured `envWarmShare` 0.1102, `envShareInCastBand` 0.1148.
+//
+// So hue cannot be the axis that separates an effect from a character: by contract
+// they share it. **VALUE is the axis.** Measured on the shipped frame at shipped
+// framing (`tools/tmp/vfx_hue.mjs`, cast matte 1.44% of frame — inside arena-scan's
+// 0.2-3% validity band):
+//
+//     population   hue    sat     luma
+//     CAST         358    0.478   0.302     warm share of its own chroma 0.466
+//     ENV          240    0.397   0.337     warm share 0.052
+//
+// The cast lives at luma 0.302. Every transient effect in this file lands ABOVE it:
+//
+//     effect            hue    luma   |dL vs cast|   % of the CAST's pixels it repaints
+//     cast flash        17    0.685      0.383            2.8%
+//     impact  (dmg 6)   29    0.582      0.280           19.7%
+//     impact  (dmg 18)  17    0.497      0.195           29.4%
+//     death            346    0.532      0.230           47.6%
+//     heal              67    0.563      0.261            0.9%
+//     melee arc         39    0.520      0.218            1.9%
+//     puddle splash    353    0.585      0.283            0.5%
+//     giant slam       352    0.709      0.407           85.3%   <-- see below
+//
+// ── THE RULE, and it is checkable ──────────────────────────────────────────────
+//
+//  1. A transient combat effect MAY sit in 0-60. It must clear the cast's measured
+//     luma (0.302) by >= 0.15 in HSL lightness, UPWARD. Every effect above does, by
+//     0.195-0.407. This is why flashes/rings/streaks are mixed toward `WHITE` and
+//     `SPARK_COLOR` is a pale gold rather than a saturated one — the white-mix is not
+//     decoration, it is what buys the separation.
+//  2. An effect may not repaint more than ~1/3 of the cast's own pixels unless it is
+//     a death or an ultimate. Ordinary hits measure 0.5-29.4%; death 47.6% is earned.
+//  3. PERSISTENT ground marks (splats, trail marks) are environment, not transients,
+//     and the grant reaches them only because they are HAZARDS. They must be spent
+//     DARK: `arena/shared.ts` measured the trade-off curve and found a warm surface
+//     only competes with the cast when it shares the cast's VALUE as well as its hue.
+//     `splatMat` at luma 0.44 honours that; `trailMats.enemy` (#FFD27A, luma 0.74)
+//     does not, and `trailMats.player` (#FF9EC4, hue 336) sits in the WALKABLE rose
+//     family while meaning "this ground damages you". Both are left alone on purpose:
+//     the same two hexes are duplicated in `match.ts:colorForDamageSource` to tint the
+//     damage numbers, so changing them here alone would desync the two. Flagged, not
+//     fixed.
+//  4. Nothing in this file may enter BLOCKING violet 258-268. Nothing does — `INK`
+//     (264) is only ever a MIX TARGET at 0.14 strength, never a fill.
+//
+// Verified with `node tools/arena-scan.mjs --url $URL --baseline
+// tools/scan/colour-baseline.json`: no colour regressions, and hue overlap /
+// env-in-cast-band both moved TOWARD target.
+// ═══════════════════════════════════════════════════════════════════════════════
+
 const WHITE = new THREE.Color('#ffffff');
 /** Deep desaturated ink, matching `render/toon.ts`'s outline colour (kept as a local
  * literal rather than an import — this module has no other reason to depend on the
@@ -194,6 +465,20 @@ function syncPool<T extends { id: number }>(
       pool.delete(id);
     }
   }
+}
+
+/**
+ * Turn off depth writing on a transparent material and say so at the call site.
+ *
+ * `render/toon.ts`'s `flatMat` has no `depthWrite` option, and three's default is
+ * `true` — so every `flatMat(..., { transparent: true })` in this project is a silent
+ * occluder until something like this is applied. Kept as a named helper rather than
+ * an inline assignment so the sweep is greppable: `noDepthWrite(` should appear on
+ * every transparent `flatMat` in this file, and a new one without it is a bug.
+ */
+function noDepthWrite<T extends THREE.Material>(mat: T): T {
+  mat.depthWrite = false;
+  return mat;
 }
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
@@ -441,6 +726,39 @@ function buildShardTexture(): THREE.CanvasTexture {
 }
 
 /**
+ * Dashed annulus in the XZ plane — `dashes` arcs of `duty` fill each, centred on the
+ * origin. Built as geometry rather than as a texture on a `RingGeometry` because
+ * three's ring UVs map over the bounding SQUARE, not around the circumference, so a
+ * striped texture would come out radial instead of angular.
+ */
+function buildDashedAnnulusGeometry(inner: number, outer: number, dashes: number, duty: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const cell = (Math.PI * 2) / dashes;
+  const span = cell * duty;
+  const seg = 6;
+  let v = 0;
+  for (let d = 0; d < dashes; d++) {
+    const a0 = d * cell;
+    for (let i = 0; i <= seg; i++) {
+      const a = a0 + (i / seg) * span;
+      positions.push(Math.sin(a) * inner, 0, Math.cos(a) * inner);
+      positions.push(Math.sin(a) * outer, 0, Math.cos(a) * outer);
+    }
+    for (let i = 0; i < seg; i++) {
+      const b = v + i * 2;
+      indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+    }
+    v += (seg + 1) * 2;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
  * Flat filled wedge (pie-slice), apex at the local origin, spanning `coneDeg`
  * symmetrically about local +Z, out to `radiusM`. `coneDeg = 360` degenerates into a
  * full disc — exactly what Lollipop's Giant Lollipop (cone: 360) needs. Built in the
@@ -563,6 +881,15 @@ interface StatusVisual {
    * "Slow feedback" design note above `SLOW_TINT_COLOR`. */
   slowTint: THREE.Sprite;
   stunStars: THREE.Sprite[];
+  /** Dashed "this fighter is shrugging status off" band — see the `WARD_*` block. */
+  wardRing: THREE.Mesh;
+  wardMat: THREE.MeshBasicMaterial;
+  /** Seconds left on the refusal pop; 0 = resting. Advanced by `updateEffects` on the
+   * hit-stop-free clock, exactly like every other one-shot in this layer, so the pop
+   * still reads during the freeze a solid hit causes. */
+  wardPop: number;
+  /** Colour the current pop is tinted to — the refused effect's own. */
+  wardPopColor: THREE.Color;
 }
 
 export class VfxLayer {
@@ -600,10 +927,30 @@ export class VfxLayer {
 
   // Splat/trail records don't carry a source colour (see `state.ts`), so these use one
   // fixed tint each rather than trying to recover the weapon that made them.
-  private readonly splatMat = flatMat('#C2461F', { transparent: true, opacity: 0.55 });
+  //
+  // ⚠️ `noDepthWrite()` is LOAD-BEARING, not tidiness. `render/toon.ts`'s `flatMat`
+  // takes `transparent`/`opacity`/`doubleSide` and never touches `depthWrite`, so a
+  // `transparent: true` material built through it keeps three's default of `true` —
+  // the exact silent-occluder trap `docs/LESSONS.md` §1 records, which was found
+  // present on every transparent material in the character cast and had never been
+  // swept for here. These three were carrying it.
+  //
+  // What it cost: three sorts transparent objects by `renderOrder` first, and splats
+  // and trail marks are created by `syncPool` with the default renderOrder 0, so they
+  // draw BEFORE `contact_shadow` and `apron_grounding` (both renderOrder 1, both at
+  // 0.00-0.07 m). A depth-writing splat therefore punched a hole in the contact
+  // shadows and prop-grounding decals underneath it — and buried prop grounding is
+  // itself a bug this project already found and deliberately reversed a decision over
+  // (LESSONS §1 case 3, "63% of prop grounding buried").
+  //
+  // A material-level census could not catch it either: these meshes only exist while
+  // the sim holds live splats/trail marks, so a scene walk on a fresh match reports
+  // "0 transparent-and-depth-writing in the VFX layer" and is telling the truth about
+  // an empty pool.
+  private readonly splatMat = noDepthWrite(flatMat('#C2461F', { transparent: true, opacity: 0.55 }));
   private readonly trailMats: Record<FighterRole, THREE.Material> = {
-    player: flatMat('#FF9EC4', { transparent: true, opacity: 0.6 }),
-    enemy: flatMat('#FFD27A', { transparent: true, opacity: 0.6 }),
+    player: noDepthWrite(flatMat('#FF9EC4', { transparent: true, opacity: 0.6 })),
+    enemy: noDepthWrite(flatMat('#FFD27A', { transparent: true, opacity: 0.6 })),
   };
 
   // ── Ability VFX pools ──────────────────────────────────────────────────────
@@ -621,6 +968,8 @@ export class VfxLayer {
   // camera framing this game uses versus the shipped references it's judged
   // against; a thicker band reads unmistakably as a shockwave rim instead.
   private readonly ringUnitGeo = new THREE.RingGeometry(0.62, 1, 40);
+  /** One shared dashed annulus for both roles' ward bands — see the `WARD_*` block. */
+  private readonly wardGeo = buildDashedAnnulusGeometry(WARD_RING_INNER, WARD_RING_OUTER, WARD_DASHES, WARD_DASH_DUTY);
 
   private readonly statusByRole: Record<FighterRole, StatusVisual>;
   /** Per-fighter footstep-distance tracking for puddle splashes (see
@@ -630,6 +979,24 @@ export class VfxLayer {
   private readonly slowSplashState: Record<FighterRole, { lastX: number; lastY: number; distAccum: number }> = {
     player: { lastX: NaN, lastY: NaN, distAccum: 0 },
     enemy: { lastX: NaN, lastY: NaN, distAccum: 0 },
+  };
+
+  /**
+   * Last `sync()`'s answer to "could a stun/slow have landed on this fighter", plus
+   * where they were standing.
+   *
+   * `spawnImpactBurst` is called from `match.ts`'s `hit-landed` handler, which knows
+   * the weapon (and therefore its authored `effect`) but not the target's timers;
+   * `sync()` knows the timers but not the weapon. This is the one field that lets the
+   * two meet, and it needs no change to `match.ts` or to the event payload.
+   *
+   * The role lookup is EXACT, not a nearest-neighbour guess: `combat.ts:applyDamage`
+   * pushes `hit-landed` with `x: target.x, y: target.y`, so the hit's coordinates are
+   * the target's own position for that tick.
+   */
+  private statusSnapshot: Record<FighterRole, { x: number; y: number; stunReady: boolean; slowReady: boolean }> = {
+    player: { x: NaN, y: NaN, stunReady: true, slowReady: true },
+    enemy: { x: NaN, y: NaN, stunReady: true, slowReady: true },
   };
 
   constructor(scene: THREE.Scene) {
@@ -728,19 +1095,41 @@ export class VfxLayer {
       this.group.add(slowTint);
 
       const stunStars: THREE.Sprite[] = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < STUN_STAR_COUNT; i++) {
         const mat = new THREE.SpriteMaterial({
-          map: this.glowTex, color: '#FFE75E', transparent: true, opacity: 0,
+          // `starTex`, not `glowTex`. These are called stun STARS and were drawing as
+          // soft round dots — the "every particle is a soft additive circle, no shape
+          // vocabulary" complaint this file already answered everywhere else. The
+          // starburst texture exists three fields up; a spiked silhouette also
+          // survives the additive wash far better than a radial blob, because its
+          // spikes carry hard edges instead of a gradient that fades into whatever is
+          // behind it.
+          map: this.starTex, color: '#FFE75E', transparent: true, opacity: 0,
           depthWrite: false, blending: THREE.AdditiveBlending,
         });
         const star = new THREE.Sprite(mat);
-        star.scale.set(0.34, 0.34, 1);
+        star.scale.set(STUN_STAR_SCALE, STUN_STAR_SCALE, 1);
         star.visible = false;
         star.renderOrder = 11;
         this.group.add(star);
         stunStars.push(star);
       }
-      return { slowRing, slowRingDark, slowTint, stunStars };
+
+      const wardMat = new THREE.MeshBasicMaterial({
+        color: WARD_NEUTRAL, transparent: true, opacity: 0,
+        side: THREE.DoubleSide, depthWrite: false,
+      });
+      const wardRing = new THREE.Mesh(this.wardGeo, wardMat);
+      wardRing.visible = false;
+      // Below the slow ring's pair (3/4) — during a slow's own grace the two can be
+      // adjacent, and the ACTIVE telegraph must win.
+      wardRing.renderOrder = 2;
+      this.group.add(wardRing);
+
+      return {
+        slowRing, slowRingDark, slowTint, stunStars,
+        wardRing, wardMat, wardPop: 0, wardPopColor: new THREE.Color(WARD_NEUTRAL),
+      };
     };
 
     this.statusByRole = { player: buildStatusVisual(), enemy: buildStatusVisual() };
@@ -759,6 +1148,24 @@ export class VfxLayer {
         this.spawnImpactBurst(xWU, yWU, color, amount, qaWeapon ? { weapon: qaWeapon, characterId: qaId } : undefined);
       }
       else if (kind === 'death') this.spawnDeathBurst(xWU, yWU, color);
+      else if (kind === 'heal') this.spawnHealPulse(xWU, yWU);
+      else if (kind === 'puddleSplash') {
+        // Takes METRES (it is called from `sync()` with an already-converted
+        // position), unlike every other entry here — convert so one probe can use
+        // one coordinate convention throughout.
+        const m = groundPos(xWU, yWU);
+        this.spawnPuddleSplash(m.x, m.z);
+      }
+      else if (kind === 'meleeArc') {
+        this.spawnMeleeArc(
+          xWU, yWU, { x: 1, y: 0 },
+          qaWeapon?.range ?? 70, qaWeapon?.cone ?? 80,
+          qaWeapon?.color ?? color,
+        );
+      }
+      else if (kind === 'giantSlam') {
+        this.spawnGiantSlamShockwave(xWU, yWU, qaWeapon?.color ?? color, qaWeapon?.range ?? 400);
+      }
       else {
         // `who`/`weaponKey` let a probe drive a SPECIFIC character's bespoke hook. Without
         // them this falls back to a synthetic 'qa' weapon on 'hamburger', which is the
@@ -769,6 +1176,7 @@ export class VfxLayer {
         this.spawnCastFlash(xWU, yWU, { x: 1, y: 0 }, weapon, qaId);
       }
     };
+    window.__vfxLayer = this;
   }
 
   sync(state: MatchState): void {
@@ -966,6 +1374,43 @@ export class VfxLayer {
       splash.lastX = fighter.x;
       splash.lastY = fighter.y;
 
+      // ── Status shrug-off band (see the `WARD_*` block) ──────────────────────
+      // `statusReadyAt` is the sim's own predicate, imported rather than copied.
+      const stunReady = state.elapsed >= statusReadyAt(fighter, 'stun');
+      const slowReady = state.elapsed >= statusReadyAt(fighter, 'slow');
+      this.statusSnapshot[role] = { x: fighter.x, y: fighter.y, stunReady, slowReady };
+
+      // GRACE only — the window where the effect has expired but cannot be re-applied
+      // and nothing else is telegraphing. While a status is ACTIVE its own telegraph
+      // (frost ring + tint, or orbiting stars) already says "this is running", so the
+      // band would be a third ring saying the same thing.
+      const inStunGrace = fighter.alive && !stunReady && state.elapsed >= fighter.status.stunnedUntil;
+      const inSlowGrace = fighter.alive && !slowReady && state.elapsed >= fighter.status.slowedUntil;
+      const warded = inStunGrace || inSlowGrace;
+      const popT = vis.wardPop > 0 ? vis.wardPop / WARD_POP_SECONDS : 0;
+      vis.wardRing.visible = warded || popT > 0;
+      if (vis.wardRing.visible) {
+        vis.wardRing.position.set(pos.x, STATUS_RING_Y - 0.02, pos.z);
+        // Counter-rotating against the slow ring's `+state.elapsed * 0.0012`.
+        //
+        // ⚠️ `rotation.Y`, not `.z`. The slow rings are `RingGeometry` — authored in
+        // the XY plane and laid flat with `rotation.x = -PI/2` — so their LOCAL z has
+        // become world up and spinning them about z turns them in the ground plane.
+        // This band is `buildDashedAnnulusGeometry`, authored directly in XZ with no
+        // rotation at all, so its local y IS world up. Copying the slow ring's
+        // `rotation.z` here tipped a horizontal disc onto its edge and it measured
+        // **37 delivered pixels against an expected ~740** — near-zero projected area,
+        // which reads exactly like an occlusion bug and is not one. Sibling of the
+        // Euler trap in `docs/LESSONS.md` §12.
+        vis.wardRing.rotation.y = -state.elapsed * 0.0019;
+        // The pop scales the band up and fades it back down onto the resting state.
+        vis.wardRing.scale.setScalar(1 + 0.5 * popT);
+        vis.wardMat.opacity = warded
+          ? WARD_RESTING_OPACITY + (1 - WARD_RESTING_OPACITY) * popT
+          : popT;
+        vis.wardMat.color.copy(WARD_NEUTRAL).lerp(vis.wardPopColor, popT);
+      }
+
       const stunned = fighter.alive && state.elapsed < fighter.status.stunnedUntil;
       vis.stunStars.forEach((star, i) => {
         star.visible = stunned;
@@ -1034,6 +1479,14 @@ export class VfxLayer {
       const s = THREE.MathUtils.lerp(r.startScale, r.targetScale, easeOutCubic(t));
       r.mesh.scale.set(s, s, s);
       r.mat.opacity = r.startOpacity * (1 - t);
+    }
+
+    // Ward-band refusal pops. On this clock, not `sync()`'s, for the same reason
+    // every other one-shot here is: a solid hit triggers hit-stop, and the feedback
+    // for that hit must not freeze along with the world.
+    for (const role of ['player', 'enemy'] as const) {
+      const vis = this.statusByRole[role];
+      if (vis.wardPop > 0) vis.wardPop = Math.max(0, vis.wardPop - dtSeconds);
     }
 
     // Bespoke per-weapon transients (`vfx/weapons/` hooks via `ctx.spawnTransient`)
@@ -1208,6 +1661,19 @@ export class VfxLayer {
     bumpVfxQaCount('impact');
     const origin = groundPos(xWU, yWU);
 
+    // ── Was this hit's STATUS shrugged off? ─────────────────────────────────────
+    // Runs before the bespoke branch on purpose: a weapon with its own `impact()`
+    // hook must still show the refusal, and no author of a bespoke hook should have
+    // to know this rule exists.
+    //
+    // `applyDamage` deals full damage whether or not the status lands and emits the
+    // same `hit-landed` either way — "the event describes what the weapon DOES, and
+    // whether the target happened to be immune is read off the target's own timers".
+    // So this is the only place the two facts are both available.
+    if (source?.weapon.effect === 'stun' || source?.weapon.effect === 'slow') {
+      this.flagStatusRefused(xWU, yWU, source.weapon.effect, source.weapon.color);
+    }
+
     const bespoke = source && getWeaponVfx(source.characterId, source.weapon.key)?.impact;
     if (bespoke && source) {
       let dirX = 0;
@@ -1264,6 +1730,35 @@ export class VfxLayer {
     this.burst(origin, color, sizeFactor, Math.round(THREE.MathUtils.clamp(3 + amount * 0.16, 3, 6)));
   }
 
+  /**
+   * Pop the ward band if this hit's status was refused by `combat.ts`'s grace rule.
+   *
+   * Resolves the target by position: `applyDamage` pushes `hit-landed` with the
+   * target's own `x`/`y`, and `sync()` cached both fighters' positions from the same
+   * tick, so the match is exact rather than a nearest-neighbour guess. A 1 wu
+   * tolerance covers nothing but float noise — if neither fighter matches (a stale
+   * snapshot on the very first tick, when both are NaN), this does nothing, which is
+   * the correct failure: no signal beats a wrong one.
+   *
+   * The pop is tinted to the WEAPON's colour, not to a fixed per-effect colour. The
+   * player's question at that instant is "which of my attacks just bounced", and the
+   * weapon colour is the one they already associate with it — the same colour the
+   * impact burst around it is wearing.
+   */
+  private flagStatusRefused(xWU: number, yWU: number, effect: 'stun' | 'slow', weaponColor: string): void {
+    for (const role of ['player', 'enemy'] as const) {
+      const snap = this.statusSnapshot[role];
+      if (!Number.isFinite(snap.x)) continue;
+      if (Math.hypot(snap.x - xWU, snap.y - yWU) > 1) continue;
+      const ready = effect === 'stun' ? snap.stunReady : snap.slowReady;
+      if (ready) return; // it landed — nothing to say
+      const vis = this.statusByRole[role];
+      vis.wardPop = WARD_POP_SECONDS;
+      vis.wardPopColor.set(weaponColor).lerp(WHITE, 0.35);
+      return;
+    }
+  }
+
   /** Bigger burst + scatter + a bright pop for a death — the biggest non-ultimate
    * moment in a match, so it deliberately outsizes even a hard hit. 2.6 against
    * `spawnImpactBurst`'s 2.0 cap keeps that ordering after the burst rescale (see the
@@ -1275,25 +1770,64 @@ export class VfxLayer {
     this.burst(origin, color, 2.6, 9, { life: 1.35 });
   }
 
-  /** Gentle rising sparkle for a heal (Hamburger's Onion Ring). */
+  /**
+   * Rising sparkle column for a heal (Hamburger's Onion Ring).
+   *
+   * ── This was an INVISIBLE-RENDER instance and it is fixed by geometry, not size ──
+   *
+   * Measured at shipped framing on a frozen clock (`tools/tmp/vfx_ablate.mjs`), the
+   * previous version delivered **37 changed pixels** at 800x450 — about 150 px at
+   * 1600x900, spread over five particles, i.e. roughly a 5x5 px smudge each — and it
+   * fell below the visibility floor before the first 16 ms slice. The judgement frame
+   * showed two faint green specks on the character's left edge and nothing else.
+   *
+   * The ablation says *why*, which matters because the two causes need opposite fixes:
+   *
+   *     shipped 37 px | depthTest off 179 px (4.84x) | scale x4 717 px (19.4x)
+   *
+   * A 4.84x jump from disabling depth alone means the sparkles were **inside the
+   * fighter**. They were: the ring radius was 0.25-0.60 m and the outward drift added
+   * only 0.3 m/s x 0.95 s, so no particle ever left a body whose visible half-width is
+   * ~0.55 m; and the rise (vy 0.8-1.2, gravity +0.15) totalled ~0.83 m from a 0.85 m
+   * start, topping out at ~1.7 m against a 2.1 m character — under the head the whole
+   * time. Scaling them up, which is the obvious reading of "37 px", would have made a
+   * BIGGER invisible effect: additive green composited inside a warm orange bun clips
+   * to white and reads as nothing.
+   *
+   * So the ring now starts OUTSIDE the silhouette and the column finishes ABOVE the
+   * head, where the sparkles sit against floor and sky instead of against the
+   * character they are describing. Size is raised too (the puddle-splash precedent
+   * below says ~0.5 m is the floor of legibility at this camera), but the geometry is
+   * the actual repair.
+   */
   spawnHealPulse(xWU: number, yWU: number): void {
     bumpVfxQaCount('heal');
     const origin = groundPos(xWU, yWU);
-    for (let i = 0; i < 5; i++) {
+    const count = 7;
+    for (let i = 0; i < count; i++) {
       const p = this.allocParticle();
-      const ang = (i / 5) * Math.PI * 2 + Math.random() * 0.6;
-      const r = 0.25 + Math.random() * 0.35;
+      const ang = (i / count) * Math.PI * 2 + Math.random() * 0.5;
+      // Outside the body's visible half-width (~0.55 m) from the first frame, so no
+      // particle ever has to survive being composited over the character.
+      const r = 0.66 + Math.random() * 0.3;
       p.active = true;
       p.life = 0;
-      p.maxLife = 0.7 + Math.random() * 0.25;
+      p.maxLife = 0.72 + Math.random() * 0.22;
       p.sprite.visible = true;
-      p.sprite.position.set(origin.x + Math.cos(ang) * r, IMPACT_HEIGHT - 0.3, origin.z + Math.sin(ang) * r);
-      p.vx = Math.cos(ang) * 0.3;
-      p.vz = Math.sin(ang) * 0.3;
-      p.vy = 0.8 + Math.random() * 0.4;
-      p.gravity = 0.15; // slight upward drift that gently loses momentum, not falls
-      p.startScale = 0.22; p.endScale = 0.08;
-      p.startOpacity = 0.9; p.endOpacity = 0; p.fadeEase = 1;
+      // Start low (knee height) and end above the head: a column that travels the
+      // fighter's whole height reads as "being healed" in a way a cloud hovering at
+      // chest height does not, and it spends most of its life clear of the silhouette.
+      p.sprite.position.set(origin.x + Math.cos(ang) * r, CHARACTER_HEIGHT * 0.22, origin.z + Math.sin(ang) * r);
+      p.vx = Math.cos(ang) * 0.22;
+      p.vz = Math.sin(ang) * 0.22;
+      p.vy = 2.0 + Math.random() * 0.45;
+      p.gravity = -0.45; // rises fast, gently loses momentum — never falls back
+      p.startScale = 0.46 + Math.random() * 0.14; p.endScale = 0.14;
+      p.startOpacity = 0.95; p.endOpacity = 0; p.fadeEase = 1;
+      // Mint green: hue 150, luma 0.66. Outside the cast's 0-60 band, outside the
+      // arena's walkable rose (330-340) and blocking violet (255-285), and 0.36 of
+      // lightness above the measured cast luma of 0.302 — see the hue-contract note
+      // at the head of this file's colour block.
       p.mat.color.set('#6FE0A8');
     }
   }
@@ -1315,21 +1849,49 @@ export class VfxLayer {
    * its entire life, everywhere the puddle disc covers it. Verified by temporarily
    * blowing the particles up to multi-second lifetimes and still seeing nothing
    * render — confirms occlusion, not a timing/capture artifact.
+   *
+   * ── AND THAT FIX WAS NOT ENOUGH: the second occluder was the FIGHTER ─────────────
+   *
+   * This is `docs/LESSONS.md` §1 case 17 exactly — a fix for an invisibility bug that
+   * was never closed out by measuring delivered pixels, so the same class re-landed.
+   * Clearing the puddle disc solved the puddle disc and nothing else. Measured at
+   * shipped framing on a frozen clock (`tools/tmp/vfx_ablate.mjs`):
+   *
+   *     shipped 44 px | depthTest off 620 px (14.1x) | scale x4 3706 px (84x)
+   *
+   * **14x.** 93% of this effect never reached the screen, and the judgement frame at
+   * its own peak millisecond contained no droplet at all. The cause is arithmetic: the
+   * ring radius was 0.05-0.13 m and the outward speed 0.6 m/s over a 0.30-0.42 s life,
+   * so the furthest any droplet ever got from the fighter's centre was ~0.38 m —
+   * inside a body whose visible half-width is ~0.55 m, seen from a camera pitched 58
+   * degrees down onto it. The particles were fine. They were behind the character,
+   * every single one, for their entire lives.
+   *
+   * The repair is the same as the heal pulse's: **start on the RIM of the footprint,
+   * not at its centre, and leave fast enough to stay clear.** A splash you kick up
+   * belongs beside your feet anyway, not inside your shins.
    */
   private spawnPuddleSplash(xM: number, zM: number): void {
     bumpVfxQaCount('puddleSplash');
-    const count = 4;
+    const count = 5;
     for (let i = 0; i < count; i++) {
       const p = this.allocParticle();
-      const ang = (i / count) * Math.PI * 2 + Math.random() * 1.2;
-      const r = 0.05 + Math.random() * 0.08;
+      const ang = (i / count) * Math.PI * 2 + Math.random() * 1.0;
+      // Rim of the fighter's own footprint. `CHARACTER_RADIUS` is the sim's collision
+      // radius (1.05 m); 0.6 of it clears the visible silhouette without throwing the
+      // droplets so wide they stop reading as this fighter's splash.
+      const r = CHARACTER_RADIUS * (0.58 + Math.random() * 0.16);
       p.active = true;
       p.life = 0;
       p.maxLife = 0.3 + Math.random() * 0.12;
       p.sprite.visible = true;
       p.sprite.position.set(xM + Math.cos(ang) * r, STATUS_RING_Y, zM + Math.sin(ang) * r);
-      p.vx = Math.cos(ang) * 0.6;
-      p.vz = Math.sin(ang) * 0.6;
+      // 2.2 m/s outward (was 0.6): over the same life that is another 0.7-0.9 m, so a
+      // droplet ENDS at ~1.4 m from centre instead of ~0.38 m. The whole arc is now
+      // outside the silhouette rather than the whole arc being inside it.
+      const outward = 2.2 + Math.random() * 0.6;
+      p.vx = Math.cos(ang) * outward;
+      p.vz = Math.sin(ang) * outward;
       p.vy = 1.1 + Math.random() * 0.5;
       p.gravity = -5.5;
       // ~3x the first pass (was 0.20-0.26 shrinking to 0.03). Measured against the
@@ -1640,6 +2202,11 @@ export class VfxLayer {
       vis.slowRingDark.visible = false;
       vis.slowTint.visible = false;
       vis.stunStars.forEach((s) => { s.visible = false; });
+      vis.wardRing.visible = false;
+      vis.wardPop = 0;
+      // A stale snapshot carried into a fresh match would let the first hit of the
+      // new match consult the previous match's timers.
+      this.statusSnapshot[role] = { x: NaN, y: NaN, stunReady: true, slowReady: true };
       // Reset footstep-distance tracking too — see the `slowSplashState` field
       // comment: stale `lastX`/`lastY` from the match just ended, carried into a
       // fresh spawn position, would otherwise read as one huge instantaneous "jump"
@@ -1654,6 +2221,7 @@ export class VfxLayer {
   dispose(): void {
     this.clear();
     delete window.__vfxSpawnTest;
+    if (window.__vfxLayer === this) delete window.__vfxLayer;
     this.projectileGeo.dispose();
     this.splatGeo.dispose();
     this.trailGeo.dispose();
@@ -1674,6 +2242,7 @@ export class VfxLayer {
     this.wedgeGeoCache.forEach((g) => g.dispose());
     this.wedgeGeoCache.clear();
     this.ringUnitGeo.dispose();
+    this.wardGeo.dispose();
     for (const role of ['player', 'enemy'] as const) {
       const vis = this.statusByRole[role];
       (vis.slowRing.material as THREE.Material).dispose();
@@ -1682,6 +2251,7 @@ export class VfxLayer {
       vis.slowRingDark.geometry.dispose();
       (vis.slowTint.material as THREE.Material).dispose();
       vis.stunStars.forEach((s) => (s.material as THREE.Material).dispose());
+      vis.wardMat.dispose();
     }
   }
 
