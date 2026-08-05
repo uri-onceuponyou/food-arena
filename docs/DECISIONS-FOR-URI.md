@@ -21,7 +21,8 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
 | **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | no concealment | **your call — this is a feature, not an art pass** | new mechanic |
 | **19** | Back out of a live match abandons it silently · mid-match reload restarts it | abandon · restart | **two small feel calls** | one line each |
-| **22** | **Character levels 1–15** — requested by Uri; who else scales? | being built | **the enemy-scaling call will come back to you** | in flight |
+| **22** | **Character levels 1–15** | being built | ✅ **ANSWERED — AI scales to the player's level** | in flight |
+| **23** | ⚠️ PvP makes `PLAYER_MAX_HP` ≠ `ENEMY_MAX_HP` **unfair by definition** | 100 vs 90 | **your §12 dial has a shelf life** | a roadmap item |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
@@ -960,7 +961,22 @@ Being built as one vertical slice — model, sim, and both screens under one own
 system split across two agents produces two half-systems. Banked in phases so nothing is trapped:
 model → sim → UI → completeness audit.
 
-### ⚠️ The one that will come back to you: **who else levels up?**
+### ✅ ANSWERED — **the AI scales to the player's level**
+
+> *"The game eventually should be humans vs. humans. We will incorporate AI players to enrich. They
+> need to be adjusted to the player's level."*
+
+So the win-rate curve across 1→15 is now a **verification, not a question**: it should come out
+**flat** at ~52%, and a non-flat curve is a defect rather than a shape to park. Mechanically it is
+the cheap path — `maxHpFor(id, roleBaseHp)` is linear in its base and asserted to be, so the same
+level multiplier goes to both sides.
+
+**The more important half is architectural**, and it is written up as §23: an AI opponent is a
+*stand-in for a human*, which means difficulty belongs in **decision quality, not in stats**.
+
+<details><summary>The original open question, for the record</summary>
+
+### The one that will come back to you: **who else levels up?**
 
 You tuned difficulty to **52.2%** an hour ago, after §12 sat parked for most of a day. **A level
 system makes win rate a function of player level** — so unless the enemy scales too, the game is
@@ -970,6 +986,8 @@ You will get a **win-rate curve across levels 1→15**, not a single number. A f
 range is the obvious target, but the *shape* is yours: a game that gets slightly easier as you invest
 is a legitimate reward, and a game that stays exactly level is a legitimate discipline. The default
 shipped will be defensible and stated, not silent.
+
+</details>
 
 ### The second interaction, and it is the interesting one
 
@@ -992,3 +1010,36 @@ sink — it must not starve unlocking, or vice versa), the cost-versus-strength 
 Two existing properties are protected: the shop still ships **visible and disabled** with its refusal
 stated in the model's own arithmetic, and `ROSTER_GATED` is still never read (availability is
 *derived*) — so **§4 remains your call and is not pre-empted by this work.**
+
+
+---
+
+## 23. ⚠️ Your §12 dial has a shelf life, and it is worth knowing now rather than later
+
+You answered §22 with *"the game eventually should be humans vs. humans."* That has a consequence
+worth stating plainly, because it is not obvious and it is cheap to design around **now** and
+expensive later.
+
+**Today `PLAYER_MAX_HP` is 100 and `ENEMY_MAX_HP` is 90.** They are separate **role** constants, and
+that 10% asymmetry exists purely as a difficulty dial — the one you used two hours ago to answer §12.
+
+**In humans versus humans, that asymmetry cannot exist.** Both sides are players; any role-based stat
+difference is unfair by definition. So the dial is **temporary scaffolding**, and the level system is
+being built **symmetric by construction** so that removing it later is a *deletion* rather than a
+refactor. Nothing new will depend on the two sides having different bases.
+
+### The better version of the same lever
+
+If difficulty can be delivered through **AI decision quality** rather than an HP handicap, that is
+strictly better for where this game is going: `ENEMY_MAX_HP` could return to 100 while keeping your
+~52% target, and the AI would then be an honest stand-in for a human of the same level rather than a
+deliberately weakened one.
+
+That is plausible rather than proven. The AI driver has had three passes this session and its
+competence is now well characterised — three real bugs fixed, and a fourth (the flee branch firing
+backwards) that you chose to land. So the question is *answerable*, and the level agent has been
+asked to report the size of the lever if its measurements reveal it. **Nobody will build it without
+you** — it is a roadmap item, not a pending change.
+
+**Nothing needs deciding today.** This is recorded so that when PvP arrives, the 90 is understood as
+a dial that was always meant to come out, rather than a balance number someone is afraid to touch.
