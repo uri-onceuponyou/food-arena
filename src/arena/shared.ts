@@ -511,13 +511,16 @@ export const KPAL = {
   // change here is visible. They are re-keyed anyway so the palette is coherent if
   // those overrides are ever retired — and recorded as dead so no future round
   // spends itself arguing about them, which has now happened twice.
-  cabinet: '#A5804A',
+  // Round 13: re-keyed to the new `stoveCap` family for the reason this block already
+  // states — still ZERO pixels, still not worth a round of argument.
+  cabinet: '#94C5FF',
   // BLOCKING's body colour. `props/counters.ts` clones this through `tinted()` for
   // every CoverBox side (`coverBody`), which is 5.2% of every frame — so the value
   // here is dead but the one it is overridden with is the second-biggest prop surface
   // in the arena. Kept in the same violet family so the two files agree.
   cabinetDark: '#6B5A7A',
-  butcherBlock: '#A08B66',
+  // Round 13: likewise re-keyed to the new `prepCap`. ZERO pixels.
+  butcherBlock: '#EDC277',
   // Blue-teal steel — this surface sits front-and-centre on every stove/service top,
   // so its hue is one of the levers pulling the hub out of the orange/tan band. Kept
   // DARK for the exposure reason it always was: a flat glossy top this size, viewed
@@ -529,21 +532,46 @@ export const KPAL = {
   // sat 0.94 with its RED CHANNEL AT 4 — i.e. below the ~8/255 floor where a channel
   // rounds to zero and the surface stops holding its own hue. Lifted off that floor
   // and pulled well down in chroma; still unmistakably the arena's cold steel.
-  steel: '#215B7D',
-  steelDark: '#1A4660',
+  //
+  // ── Round 13: still dark, but no longer in the near-black class ──────────────
+  // These are the freezer's VERTICAL walls, so they do not belong in the highlight
+  // band the caps just moved into — but measured they were rendering luma 56 / 66 with
+  // the RED CHANNEL AT 5 and 16, i.e. the very channel-floor failure the paragraph
+  // above was written to fix, still live. `bs_01`'s darkest BLOCKING surface renders at
+  // 103; there is no near-black anywhere in either reference plate.
+  // `caphex` at 430:240 (delivered hexes — authored is these to the 1/0.72 power):
+  //   steel      #286F99 luma 56 sat 0.96 R=5  ->  #3086B8 luma 75 sat 0.96 R=6
+  //   steelDark  #225C7E luma 66 sat 0.87 R=16 ->  #296F9E luma 84 sat 0.90 R=16
+  // Rendered saturation holds or rises in both (deep blues have no room to desaturate
+  // — red is already near zero), authored HSV S rises 0.736/0.729 -> 0.740, and the
+  // walls stay 90+ luma below the roof above them, which is what makes the freezer read
+  // as a solid rather than as a lit slab on legs.
+  steel: '#2A75A2',
+  steelDark: '#225F83',
 
   // Same story as `steel`, worse: #1F9FD1 rendered rgb(3,111,155) — HSV sat 0.98,
   // red channel at 3. A walk-in freezer is a large static structure and under the
   // contract it does not get to be one of the most saturated objects on screen.
   // Still the arena's cyan landmark, now inside the band and off the channel floor.
-  freezerBody: '#2E88B4',
+  // Round 13: up the value axis with the rest of the freezer, saturation held exactly
+  // (authored HSV S 0.744 -> 0.740). `caphex` 430:240: delivered #3396C6 luma 101 sat
+  // 0.95 -> #42C1FF luma 131 sat 0.92. It is the door and the frost band, i.e. the
+  // freezer's identity chroma, and it has to stay clear of the walls that now sit at 75.
+  freezerBody: '#42C1FF',
   freezerDoor: '#37738F',
   freezerTrim: '#2B2B2B',
   // Cold light spilling off the freezer onto the floor in front of its door.
   // RESERVED CHROMA — this is emitted light, not a surface. Left alone.
   freezerGlow: '#8FE3FF',
 
-  crateWood: '#8D6020',
+  // Round 13: `crate_lid` and `pot_crate_lid` are both `addCoverCap` faces, so this is a
+  // prop TOP and belongs in the highlight band with the others. Saturation held EXACTLY
+  // (HSV S 0.773, unchanged); value only, 0.553 -> 0.759, absolute chroma 0.427 -> 0.587.
+  // ⚠️ This one is EXTRAPOLATED, not measured: `caphex`'s ID-buffer mask for this
+  // material was contaminated at all four stations tried (its "current" row read back as
+  // the utility mat's blue), so unlike every other constant in this round it has no
+  // before/after row of its own. It was verified only in the composited after-frame.
+  crateWood: '#C2842C',
   // BLOCKING's skirt band — `props/counters.ts` overrides this to `coverSkirt`, the
   // middle rung of the three-step ramp. Same violet family as `cabinetDark`.
   crateSlat: '#4A4058',
@@ -590,7 +618,17 @@ export const KPAL = {
   // frame contributing literally zero chroma in either direction. "Cold grey steel" is
   // the right read and it does not require being achromatic; this is the same steel
   // with a blue in it, which is the cheapest cool chroma in the palette.
-  potMetal: '#6E8A9E',
+  //
+  // ── Round 13: this is not only the pot — it is the SERVICE COUNTER'S CAP ─────
+  // `props/counters.ts:758` passes `M.potMetal` straight into `addCoverCap` for
+  // `service_top`, so this constant is one of the three big prop TOP faces, and the
+  // grep that says "the hazard pot's drum" is incomplete. It was rendering luma 148
+  // against reference prop tops at 190-216.
+  // `caphex` at 430:240 (delivered): #7E9EB5 luma 148 sat 0.49 -> #9BC9EB luma ~193
+  // sat ~0.43, measured either side at #98BED9 (182 / 0.44) and #A8DBFF (201 / 0.42).
+  // Authored HSV S RISES 0.304 -> 0.340 and absolute chroma 0.188 -> 0.303; the
+  // rendered saturation dip is the cool key running out of blue, not white being added.
+  potMetal: '#96C3E3',
   potMetalDark: '#3E5A73',
   flame: '#FFB238',
   flameCore: '#FFE9A8',
@@ -774,7 +812,11 @@ export const KPAL = {
   // and survives intact — it is still the only navy on the map, still distinct from
   // the freezer's cyan and the cart's violet — it just no longer competes with the
   // characters for chroma.
-  barrelBody: '#2F5F8C',
+  // Round 13: value only, saturation held EXACTLY (HSV S 0.664), V 0.549 -> 0.708.
+  // ⚠️ Also EXTRAPOLATED rather than measured — no station in the `caphex` set had a
+  // barrel on screen with a clean mask. It is a small curved cover prop, so it is here
+  // for family coherence with `steel`/`freezerBody` rather than for highlight area.
+  barrelBody: '#3D7BB5',
   barrelBodyDark: '#1E4160',
 
   // ── Round-6 fix: spice-cart body ─────────────────────────────────────────────

@@ -275,8 +275,46 @@ export function tinted(M: Materials, base: THREE.Material, hex: string): THREE.M
  * luma (163 -> 140, so it stops being the brightest plane in the map and stops
  * appearing in the salience grid's top cells) and UP in chroma (HSL 0.34 -> 0.47), so
  * the same 1.6% of frame delivers more of the warm budget from less of the eye.
- * Priced first: #96805C arrives rgb(178,136,64), hue 38, HSV 0.64, luma 140. */
-const prepCap = (M: Materials) => tinted(M, M.butcherBlock, '#8E7B5A');
+ * Priced first: #96805C arrives rgb(178,136,64), hue 38, HSV 0.64, luma 140.
+ *
+ * ── Round 13: THE VALUE CUT ABOVE IS PARTLY REVERSED, AND THE NUMBER SAYS SO ──
+ * Kept verbatim above rather than deleted, because the round-11 reasoning about
+ * *hue* is still right and only the *value* half is wrong.
+ *
+ * The measurement that reversed it (probe `p6-frame-vs-reference`, identical crop
+ * 0.05,0.16,0.95,0.86 and identical code on our frames and on the six
+ * `gameplay_topdown/` plates): share of playfield above luma 0.80 is ours
+ * 0.67-1.68% against the reference's 2.39-19.06% — NON-OVERLAPPING — and p95 ours
+ * 0.653-0.696 against 0.732-0.954, also non-overlapping. The reference's whole
+ * highlight band lives on PROP TOP FACES (its prop-only boxes reach p95 0.738-0.848,
+ * its ground-only boxes 0.402-0.529, which is where ours already sits). We had no
+ * bright material family at all: 43 of 48 KPAL entries below 0.60 albedo luma.
+ *
+ * "Stop being the brightest plane in the map" was therefore optimising the wrong
+ * direction — a shipped brawler's brightest plane IS a prop top. `bs_01`'s brightest
+ * block top samples #C5DAFF (luma 0.848) and its crate top #F4B66D (luma 0.745).
+ *
+ * The hue half of round 11 is untouched: this is still the arena's ONE large warm
+ * identity surface, still hue 38-47. What moves is value and chroma, together —
+ * priced live with `tools/tmp/caphex.mjs` before a line was written, 2 stations,
+ * frozen snapshot:
+ *
+ *   delivered   rendered @340:500      rendered @1150:330
+ *   #A7916A     luma 143  sat 0.56     luma 163  sat 0.58   <- was
+ *   #F2CC79     luma 191  sat 0.59     luma 212  sat 0.60   <- is
+ *
+ * SATURATION RISES with the value (+0.03/+0.02 rendered, authored HSV S
+ * 0.366 -> 0.500), which is the non-negotiable: `docs/LESSONS.md` §8 — lightening by
+ * adding white is the desaturation that has been falsified four times. Absolute
+ * chroma (S x V) goes 0.204 -> 0.466, and `arena-scan` had warm chroma FAILING LOW
+ * at 0.0473 against a band minimum of 0.072, so this moves a red rail toward its band
+ * rather than away.
+ *
+ * ⚠️ `shared.ts`'s `liftArenaValue` (V' = V^0.72) sits between this constant and the
+ * screen, so the AUTHORED hex is the delivered one raised to the 1/0.72 power. Author
+ * #EDC277, get #F2CC79 delivered, get the row above rendered. Do not read the numbers
+ * in this comment as properties of #EDC277 itself. */
+const prepCap = (M: Materials) => tinted(M, M.butcherBlock, '#EDC277');
 
 /** Stove island top — the single biggest lever in the arena, and now COOL.
  *
@@ -301,8 +339,32 @@ const prepCap = (M: Materials) => tinted(M, M.butcherBlock, '#8E7B5A');
  * ── Why not simply take it further down ────────────────────────────────────────────
  * A lower-chroma variant (#7A8CA8, sat 0.42 at the same luma) was simulated: it bought
  * 0.4 of playerRank and 0.007 of player-minus-surround saturation, for measurably less
- * cool chroma. That is the trade the "muddy" verdicts came from, so it was rejected. */
-const stoveCap = (M: Materials) => tinted(M, M.cabinet, '#6F8CAE');
+ * cool chroma. That is the trade the "muddy" verdicts came from, so it was rejected.
+ *
+ * ── Round 13: the HUE stays, the VALUE goes up. See `prepCap` for the measurement ──
+ * Same reversal, same reason, on the arena's largest single surface. This is the one
+ * the probe named directly: *"the largest prop's lit top face tops out at #73B4EF,
+ * L=0.668"* against reference block tops at L 0.745-0.848.
+ *
+ * Priced with `tools/tmp/caphex.mjs` on a frozen snapshot, 3 stations, before editing:
+ *
+ *   delivered   @700:640          @340:500          @1150:330
+ *   #7C9CC2     luma 167 sat .50  luma 164 sat .53  luma 145 sat .59   <- was
+ *   #94C6FF     ~luma 195         luma 195 sat .43  luma 181 sat .51   <- is
+ *   #A3CEFF     luma 205 sat .36  luma 205 sat .37  luma 190 sat .44   (rejected)
+ *   #CCE4FF     luma 227 sat .19  —                 —                  (rejected)
+ *
+ * #A3CEFF and beyond were rejected on the rule this file already runs on: they buy
+ * value by spending saturation, which is the falsified move. #94C6FF is authored HSV
+ * S 0.362 -> 0.420 — S RISES — and absolute chroma (S x V) 0.247 -> 0.420. Rendered
+ * saturation does come down 0.03-0.08 because the key is cool and blue is the channel
+ * that runs out first (rendered B lands 250-253 of 255, measured, not clipped); it
+ * still lands far above the reference's own brightest block top, which samples HSV
+ * sat 0.227. Nothing in the frame gets less chroma than it had.
+ *
+ * ⚠️ AUTHORED, not delivered: `liftArenaValue` (V^0.72) is between this and the screen.
+ * #94C5FF authored -> #94C5FF delivered here only because V is already 1.0. */
+const stoveCap = (M: Materials) => tinted(M, M.cabinet, '#94C5FF');
 
 /**
  * ── THE COUNTER BODY, and the one thing two independent critics both measured ──
@@ -399,7 +461,15 @@ const stoveCap = (M: Materials) => tinted(M, M.cabinet, '#6F8CAE');
  * hue now agree instead of one doing all the work. This is a deliberately clean,
  * revertible pair of constants because Uri may prefer the old look.
  */
-const coverBody = (M: Materials) => tinted(M, M.cabinetDark, '#8975B9');
+//
+// ── Round 13: the BODY moves one rung too, so the ramp does not become a cliff ──
+// The caps above went up 30-50 rendered luma. Left alone, the cap-to-body step would
+// have gone from 60 to ~85 points and the "three unambiguous steps" would have read as
+// a bright lid floating over a dark hole — the round-9b/round-11 defect arriving from
+// the other side. Measured (`caphex`, 2 stations): #9680CA -> #A185E6 takes rendered
+// luma 110 -> 119 and 108 -> 117 with rendered saturation UNCHANGED (0.58, 0.59), and
+// authored HSV S rises 0.368 -> 0.420. The ladder keeps every step it had.
+const coverBody = (M: Materials) => tinted(M, M.cabinetDark, '#9B80DC');
 const coverSkirt = (M: Materials) => tinted(M, M.crateSlat, '#6D5695');
 
 /**

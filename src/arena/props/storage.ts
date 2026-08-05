@@ -123,7 +123,29 @@ export function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.G
   // reference plates run at full strength (0.343) and this arena is at 72% of that even
   // after this pass, so quieting a cool surface is the one move the saturation contract
   // explicitly forbids. VALUE, not saturation, was wrong here — twice.
-  const roofMat = tinted(M, M.freezerLid, '#4A9DB8');
+  //
+  // ── Round 13: the same argument, one rung further up ─────────────────────────
+  // Everything above holds; the roof was still not bright ENOUGH. Measured on a frozen
+  // snapshot at station 430:240, where this roof is **13.23% of the frame** — the
+  // single largest prop surface the arena owns at any station — it renders luma 150,
+  // against reference prop tops at 0.745-0.848 (190-216). `p6-frame-vs-reference`:
+  // share of playfield above luma 0.80 is ours 0.67-1.68% vs 2.39-19.06% across six
+  // `gameplay_topdown/` plates, non-overlapping. The arena had no bright family at all.
+  //
+  // `caphex` on that station, before editing (delivered hexes; authored is the 1/0.72
+  // power of these, see `liftArenaValue`):
+  //
+  //   #51ACCA  luma 150  sat 0.89   <- was
+  //   #52D7FF  luma 177  sat 0.84   <- is        (authored HSV S 0.598 -> 0.680)
+  //   #66DBFF  luma 184  sat 0.76   rejected — buys 7 luma for 0.08 of saturation
+  //   #7AE0FF  luma 192  sat 0.67   rejected — same trade, worse
+  //
+  // The paragraph above says quieting a cool surface is the one move the saturation
+  // contract forbids, and that is exactly why the two brighter candidates lost: the
+  // chosen one raises AUTHORED saturation and absolute chroma (S x V 0.431 -> 0.680)
+  // while the rejected ones spend chroma to buy value. Value, not saturation — a third
+  // time. Clearance over the pads (78 / 117) goes from 65 / 26 to 99 / 60.
+  const roofMat = tinted(M, M.freezerLid, '#52D4FF');
   addCoverCap(g, wM, dM, bodyTop, capT, roofMat, 'freezer_lid');
 
   const parapetH = 0.24, parapetT = Math.min(wM, dM) * 0.05;
@@ -313,7 +335,19 @@ export function buildCrateTall(M: Materials, wM: number, dM: number): THREE.Grou
   // the salience grid's top cells — so it pays part of what the rim trim, the plank
   // pads and the brass stack give back. The 64-luma step over the pad below it, which
   // is what this constant exists for, is unchanged.
-  const lidMat = tinted(M, M.crateWood, '#B49560');
+  // ── Round 13: brighter again, and the collision this constant guards is now GONE ──
+  // The whole paragraph above is a hue-collision argument against `floor.ts`'s warm
+  // orange plank pad. That pad no longer exists: `KPAL.woodPad` is #577182, a cool
+  // blue-grey at hue 204 (see its own note in `shared.ts` — "it stops being timber").
+  // The pair is now 166 degrees of hue apart, so the saturation-axis escape this
+  // constant was cut for has nothing left to escape from, and the value cut it paid
+  // for is pure cost against the highlight-band deficit `prepCap` documents.
+  // `caphex` at 1150:330, where this lid is 1.46% of frame:
+  //   #C6A46A  luma 163 sat 0.59   <- was
+  //   #FFCC73  luma 185 sat 0.54   <- is   (authored HSV S 0.467 -> 0.550, chroma
+  //                                          S x V 0.329 -> 0.550)
+  // Still the crate's bright cap, now by 70+ luma over the pad instead of 64.
+  const lidMat = tinted(M, M.crateWood, '#FFCB73');
   addCoverSides(g, bw, bd, y0, h1 - capT, M.cabinetDark, M.crateSlat, 0.05, 'crate_bottom');
   addCoverCap(g, wM, dM, y0 + h1, capT, lidMat, 'crate_bottom_lid');
 
