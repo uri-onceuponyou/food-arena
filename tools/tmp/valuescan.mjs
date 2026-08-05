@@ -119,7 +119,7 @@ import { chromium } from 'playwright';
 import sharp from 'sharp';
 import ts from 'typescript';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
-import { readdirSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join, relative, resolve, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { VL, VL_SRC } from './valuelib.mjs';
@@ -921,6 +921,20 @@ async function modeDl() {
   const jobs = only ? STATIONS.filter((s) => only.split(',').includes(s.id)) : STATIONS;
   await mkdir(OUT, { recursive: true });
   const meta = await buildMeta('dl', BASE, { stations: jobs.map((s) => s.id), stationsTotal: STATIONS.length });
+  // ── EVERY ROW IS DURABLE THE MOMENT IT IS MEASURED ───────────────────────
+  // `--mode dl` used to write NOTHING until all 198 rows were in. A run killed at row
+  // 171 therefore left 171 real measurements — three hours of SwiftShader — existing
+  // only as text in a terminal log, unrecoverable as data. That is the same shape as
+  // the stale cache this mode was just fixed for: **the tool gave no observable account
+  // of its own state**, so from outside, "measuring row 172" and "hung" looked
+  // identical, and the work was thrown away on the strength of that ambiguity.
+  //
+  // The sidecar is JSONL and its FIRST line is the stamp, so a partial file is
+  // self-describing and can be audited by exactly the same `auditMeta` as a complete
+  // one. It is never read automatically — recovering from it is a decision a human
+  // makes, out loud — but it can no longer be lost.
+  const ROWS_PATH = join(OUT, 'dl.rows.jsonl');
+  writeFileSync(ROWS_PATH, `${JSON.stringify({ __meta: meta })}\n`);
   const browser = await chromium.launch({ args: LAUNCH_ARGS });
   const rows = [];
   // ── PARALLELISM, and the reason the default is 1 ──────────────────────────
@@ -963,13 +977,21 @@ async function modeDl() {
             ...validity(res),
           });
           const r = rows[rows.length - 1];
+          appendFileSync(ROWS_PATH, `${JSON.stringify(r)}\n`);
           console.log(`${id.padEnd(12)} ${st.id.padEnd(13)} dL ${String(r.dL).padStart(7)}  |dL| ${Math.abs(r.dL).toFixed(3)}  ` +
             `dLedge ${String(r.dLedge).padStart(7)}  fig ${r.figureLuma} grd ${r.groundLuma}  gridDL ${String(r.gridDL).padStart(6)}` +
             `  occl ${String(r.occludedPct).padStart(5)}%  dLvis ${String(r.dLvisible).padStart(7)}${r.valid ? '' : `  INVALID (${r.invalidWhy})`}`);
         } catch (e) {
           rows.push({ id, station: st.id, error: String(e) });
           console.error(`✗ ${id}/${st.id}: ${e}`);
-        } finally { await page.close(); }
+        } finally {
+          // A `page.close()` that throws in a `finally` REPLACES whatever brought us
+          // here and takes the process with it. When the browser was killed from
+          // outside at row 171, this turned "the run was stopped" into an uncaught
+          // `Protocol error (Target.disposeBrowserContext)` — the teardown destroying
+          // the report of the failure it was tearing down from.
+          try { await page.close(); } catch { /* the browser may already be gone */ }
+        }
       }
     }
   };
