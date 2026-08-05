@@ -17,12 +17,14 @@
 import {
   CHARACTERS,
   SLOW_DURATION_MS,
+  SLOW_GRACE_MS,
   STUN_DURATION_MS,
+  STUN_GRACE_MS,
   TRAIL,
   type StatusEffect,
   type Weapon,
 } from './rules.ts';
-import type { DamageSource, FighterRole, GameEvent, MatchState, Vec2 } from './state.ts';
+import type { DamageSource, Fighter, FighterRole, GameEvent, MatchState, Vec2 } from './state.ts';
 import { otherRole } from './state.ts';
 
 const RAD2DEG = 180 / Math.PI;
@@ -53,11 +55,38 @@ export function isOnOwnTrail(state: MatchState, role: FighterRole): boolean {
 }
 
 /**
+ * The earliest `elapsed` at which `effect` may next be applied to `fighter`.
+ *
+ * A status is refused while it is ACTIVE and for a grace period after it expires — see
+ * `rules.ts` AUTHORISED DEVIATION #5 for the rule and why it exists. Because
+ * `slowedUntil` / `stunnedUntil` are absolute timestamps that survive their own expiry,
+ * "active OR in grace" is a single comparison against `until + grace` and needs no extra
+ * state; `applyDamage` below is the only writer of either field.
+ *
+ * Exported so the HUD/VFX layers can render the shrug-off window (a player who cannot
+ * see the rule cannot learn it) without re-deriving the arithmetic, and so
+ * `sim.test.mjs` asserts the same predicate the sim uses rather than a copy of it.
+ * Returns `-Infinity` for a fighter that has never had the status.
+ */
+export function statusReadyAt(fighter: Fighter, effect: 'slow' | 'stun'): number {
+  return effect === 'stun'
+    ? fighter.status.stunnedUntil + STUN_GRACE_MS
+    : fighter.status.slowedUntil + SLOW_GRACE_MS;
+}
+
+/**
  * Apply `amount` damage to `targetRole`, optionally inflicting a status effect,
  * clamping HP, recording the hit for regen/VFX purposes, and ending the match if
  * this was the killing blow. This is the ONLY place fighter HP is reduced anywhere
  * in the sim — combat hits, trail damage, the central hazard, and fog all funnel
  * through here.
+ *
+ * ⚠️ The status half of this function is RATE-LIMITED and the damage half is not. A hit
+ * whose status is refused still lands, still deals full damage, and still emits the same
+ * `hit-landed` event carrying the weapon's authored `effect` — the event describes what
+ * the weapon DOES, and whether the target happened to be immune is read off the target's
+ * own timers (which is where `vfx.ts` already reads it from, so a refused stun correctly
+ * draws no stun ring with no change to that layer).
  */
 export function applyDamage(
   state: MatchState,
@@ -73,10 +102,18 @@ export function applyDamage(
   target.hp = Math.max(0, target.hp - amount);
   target.lastDamagedAt = state.elapsed;
 
+  // Refuse a status that is already running or still inside its grace window. This is
+  // what bounds the longest unbroken movement lock to exactly STUN_DURATION_MS — the
+  // measured worst case before it was 11.02 s against a 6.0 s mean engagement, held up
+  // by ONE weapon whose cooldown outran its own stun.
   if (effect === 'slow') {
-    target.status.slowedUntil = state.elapsed + SLOW_DURATION_MS;
+    if (state.elapsed >= statusReadyAt(target, 'slow')) {
+      target.status.slowedUntil = state.elapsed + SLOW_DURATION_MS;
+    }
   } else if (effect === 'stun') {
-    target.status.stunnedUntil = state.elapsed + STUN_DURATION_MS;
+    if (state.elapsed >= statusReadyAt(target, 'stun')) {
+      target.status.stunnedUntil = state.elapsed + STUN_DURATION_MS;
+    }
   }
 
   events.push({ type: 'hit-landed', targetRole, amount, effect, source, x: target.x, y: target.y });

@@ -204,14 +204,124 @@ export const AI_FLEE_HP_FRACTION = 0.28;
 /** Movement multiplier applied to a slowed AI. */
 export const AI_SLOW_MULTIPLIER = 0.35;
 
+/**
+ * ── AUTHORISED DEVIATION #6 (2026-08-05): THE AI CAN SEE HAZARDS ────────────
+ *
+ * `ai.ts` had NO term for the closing ring and NO term for the boiling pot. Its flee
+ * vector pointed directly away from the player and its chase vector directly at them,
+ * so it walked into the fog while retreating and stood in the fire while shooting.
+ * The scripted player has explicit "leave the pot" and "stay inside the ring" clauses,
+ * so this was not a difficulty setting — it was a one-sided handicap:
+ *
+ *                            (shipped layout, `smart2`, 110 matchups)
+ *   pot damage                  5.2% player / 94.8% enemy
+ *   fog damage                  0.0% player / 100.0% enemy
+ *   killed by the zone          player 0.0%  ·  enemy 11.8% fog + 4.5% pot
+ *
+ * The pot only became load-bearing when the 2026-08-05 arena pass revived it (0.0% ->
+ * 8.7% of all damage under `smart`, 24.6% under `chase`), and it is now the LARGER half
+ * of the blind spot. Both are the same missing concept, so both are one steering term.
+ *
+ * ⚠️ Avoidance has to be a STEERING term, not a walk-out reaction. `arena/hazards.ts`
+ * registers the pot as a solid CoverBox of `bodyRadius * 2`, so `tryMove` stops a
+ * fighter's centre at 73 wu while the burn ring reaches 95 wu: a fighter that walks in
+ * is PINNED INSIDE THE FIRE and cannot push through to the far side. The only exit is
+ * back the way it came, which is exactly what a radial push produces — but it has to
+ * start before entry, which is what the margins below are for.
+ *
+ * Margins are sized against reaction distance, not taste. The AI moves at
+ * AI_CHASE_SPEED 70 wu/s (0.07 wu/ms) and AI_FLEE_SPEED 85; the ring's edge sweeps at
+ * 22.1 wu/s on the 45 s clock. 140 wu is ~2.0 s of warning at flee speed and matches the
+ * ring margin the scripted player's own `survive` policy uses, so the two sides now read
+ * the zone the same way. 60 wu on the pot is a little over one body length (42) outside
+ * the burn ring — enough to turn, not so much that the arena centre becomes a no-go area
+ * once the ring closes past it.
+ *
+ * ── WHAT IT DELIVERS, and what it costs ─────────────────────────────────────
+ *
+ * 8,800 matches per side (110 matchups x 16 seeds x 5 policies, shipped arena), measured
+ * TOGETHER with DEVIATION #5 because the two interact:
+ *
+ *                                    `smart`            `smart2`           `chase`
+ *   pot damage to the enemy      7.8 -> 0.0 HP      18.0 -> 0.1 HP     15.8 -> 0.0 HP
+ *   fog damage to the enemy      2.1 -> 0.0 HP       2.8 -> 0.1 HP       0.0 -> 0.0 HP
+ *   enemy killed by the zone        6.5% -> 0.1%       9.1% -> 0.4%       0.0% -> 0.0%
+ *   player win rate               52.8% -> 44.1%    62.1% -> 51.3%     25.5% -> 18.4%
+ *
+ * ⚠️ The SIGN of the win-rate change is not uniform, and the exception is instructive:
+ * isolated, the hazard fix costs the player 4.9 pp under `smart2` and GIVES them 10.8 pp
+ * under `chase`. Both are correct. Under `chase` the scripted player charges through the
+ * pot and eats 49 HP a match from it against the enemy's 16 — so an AI that steers around
+ * the fire also stops LEADING the player into it, and the 12 HP that saves a 100 HP
+ * player is worth more than the 16 HP it stops costing a 150 HP enemy. A player who
+ * already avoids hazards only ever sees the AI get better.
+ */
+export const AI_RING_MARGIN = 140;
+export const AI_HAZARD_MARGIN = 60;
+/**
+ * Steering weights, relative to the fighter's own intent (which always has weight 1).
+ * At the boundary the danger term equals its weight, and it grows to 2x that one full
+ * margin past the boundary — so an AI already burning or already outside the ring is
+ * steered by the hazard 4-5x more strongly than by the player.
+ */
+export const AI_RING_WEIGHT = 2.0;
+export const AI_HAZARD_WEIGHT = 2.5;
+/**
+ * ENCROACHMENT at which SURVIVING OUTRANKS SHOOTING. `stepAI` fires OR moves in a given
+ * tick, never both, so an AI with a weapon off cooldown simply stops moving — which is
+ * how it came to stand inside the burn ring for whole seconds trading shots while the pot
+ * did 32 HP/s to it. Steering cannot fix that on its own; it never gets to steer.
+ *
+ * The unit is `dangerSteer`'s normalised encroachment, NOT a weight: 0 at the outer edge
+ * of the margin, **1 exactly at the boundary**, 2 a full margin past it. So 1.0 means
+ * "the moment it is actually being damaged, and not a step before" — the AI keeps
+ * shooting all the way up to the fire and through the whole warning band, and only then
+ * prefers its feet. An earlier draft compared against the WEIGHTED value instead, which
+ * silently put the no-shoot line 36 wu outside the burn ring and 70 wu inside the ring
+ * edge, and cost the AI enough output to swing `chase` by +10 pp in the PLAYER's favour.
+ */
+export const AI_ESCAPE_PRIORITY = 1.0;
+
+/**
+ * ── AUTHORISED DEVIATION #7 (2026-08-05): THE AI CAN USE `self` WEAPONS ─────
+ *
+ * `pickHighestDamageWeapon` skipped `type === 'self'` and `pickSniperWeapon` required
+ * `'ranged'`, so there was NO code path by which an enemy Hamburger ever healed:
+ * measured 0 fires across 11 matchups / 17,677 ticks. The human player can use the same
+ * slot (verified, 25 HP), so this was a live ASYMMETRY on the only `self` weapon in the
+ * roster, not dead content.
+ *
+ * The AI now heals when BOTH hold: it is at or below this fraction of max HP, and it is
+ * missing at least the full `healAmount` (so a heal is never partly wasted). 0.5 rather
+ * than "whenever it is off cooldown" because the heal is the AI's only defensive
+ * resource and burning it at 145/150 spends a 6 s cooldown to gain 5 HP; and rather than
+ * AI_FLEE_HP_FRACTION (0.28) because at 42 of 150 HP a single Egg Tackle (16) or Mega
+ * Splash (18) can outpace a 25 HP heal. Healing consumes the tick's ATTACK, exactly like
+ * any other weapon — it is not free.
+ *
+ * Measured with `tools/tmp/selfheal_probe.mjs` (10 real matches, enemy Hamburger against a
+ * chasing player): fires 0 -> 5, HP restored 0 -> 12.5 per match = 8.3% of the enemy pool,
+ * mean HP at the moment it chose to heal 75.2 of 150 against a 75 threshold.
+ *
+ * ⚠️ `tools/tmp/selfweapon_probe.mjs` — the probe that FOUND this — still prints 0 after
+ * the fix, and is right to: it drives an IDLE player, so the enemy kills a motionless
+ * target without ever being damaged and a heal that correctly never triggers looks
+ * identical to one that cannot. That is `docs/LESSONS.md` §13 exactly, which is why the
+ * replacement probe puts a real hand on the controls.
+ */
+export const AI_SELF_HEAL_HP_FRACTION = 0.5;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Status effects
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * ⚠️ MEASURED, NOT CHANGED — the 2026-08-05 constant audit found a real defect here and
- * deliberately left the numbers alone, because every available fix is a balance change.
- * Read this before touching either value.
+ * ⚠️ STILL NOT CHANGED, AND DELIBERATELY SO. The 2026-08-05 constant audit found a real
+ * defect here, recorded it in full below, and left both numbers alone because every fix
+ * available *to a duration* is a balance change. That defect is now FIXED — by the
+ * re-application rule in AUTHORISED DEVIATION #5 immediately below, which is a different
+ * lever. Everything in this comment is the evidence for why the duration was the wrong
+ * one; read it before touching either value.
  *
  * **A weapon whose COOLDOWN is shorter than the status it applies holds that status up
  * by itself, indefinitely.** 4 of 5 stun weapons and 8 of 10 slow weapons do
@@ -247,14 +357,112 @@ export const AI_SLOW_MULTIPLIER = 0.35;
  *
  * The genre fix is a re-application rule — diminishing returns or a brief immunity
  * window after a status expires — which lives in `combat.ts:applyDamage`, not here, and
- * removes the lock without removing the effect. Parked in `docs/DECISIONS-FOR-URI.md`.
- * `sim.test.mjs` section 17(d) RATCHETS the locker counts so this cannot get worse
- * silently. The largest `STUN_DURATION_MS` that makes a solo lock impossible is
- * 1100 ms (the shortest stun-applying cooldown in the roster); for slow it is 800 ms.
+ * removes the lock without removing the effect. ✅ **That is what DEVIATION #5 below now
+ * does.** The largest `STUN_DURATION_MS` that would have made a solo lock impossible is
+ * 1100 ms (the shortest stun-applying cooldown in the roster) and for slow 800 ms — both
+ * recorded because they are the numbers a duration-based fix would have had to reach, and
+ * both are far below what the sweep above shows the player can afford.
  */
 export const SLOW_DURATION_MS = 2500;
 export const SLOW_MOVE_MULTIPLIER = 0.45;
 export const STUN_DURATION_MS = 2000; // stunned = movement locked to 0
+
+/**
+ * ── AUTHORISED DEVIATION #5 (2026-08-05): STATUS RE-APPLICATION IS NOW BOUNDED ──
+ *
+ * This is the fix for the defect documented immediately above. It changes the
+ * RE-APPLICATION RULE and leaves both DURATIONS untouched, because the sweep in that
+ * comment proved the duration is the wrong lever: -10.6 pp of player win rate to buy a
+ * stun-lock reduction that a re-application rule buys for a fraction of that.
+ *
+ * ── THE RULE, in the words a player would use ───────────────────────────────
+ *
+ *   **"Stuns and slows never stack. While one is on you, more of the same does
+ *     nothing extra — and once it wears off you shrug that effect off for a moment
+ *     before it can touch you again."**
+ *
+ * Damage is completely unaffected. Every hit still hits, still deals full damage, still
+ * knocks you about; only the STATUS is refused. Two halves, and both are load-bearing:
+ *
+ *  1. NO REFRESH WHILE ACTIVE. This is what makes the lock BOUNDED rather than merely
+ *     shorter: the longest unbroken movement lock any weapon or combination of weapons
+ *     can produce is now exactly `STUN_DURATION_MS`, by construction, at every tick
+ *     rate, in every matchup. It was 11.02 s measured (Pizza's Cheese Blind), against a
+ *     6.0 s mean engagement. Without this half, an immunity window alone caps nothing —
+ *     the lock just extends through it.
+ *  2. A GRACE PERIOD AFTER IT ENDS. This is what makes the gap between locks USABLE.
+ *     Half 1 alone leaves Cheese Blind (1300 ms cooldown) re-landing 600 ms after each
+ *     2000 ms stun expires — a 77% duty cycle in 0.6 s slices, which reads as one long
+ *     lock with a stutter. The grace turns that into a window a player can act inside.
+ *
+ * ── The grace is stored in NO NEW STATE, deliberately ───────────────────────
+ *
+ * `status.stunnedUntil` / `slowedUntil` are absolute timestamps that persist after they
+ * expire, so `elapsed < stunnedUntil + STUN_GRACE_MS` is exactly "stunned, or within the
+ * grace after a stun". `combat.ts:applyDamage` is the only writer of either field, and
+ * `state.ts` did not have to change. `combat.ts:statusReadyAt` exports the predicate so
+ * the HUD/VFX can render the window without re-deriving it.
+ *
+ * ── How 500 was chosen ──────────────────────────────────────────────────────
+ *
+ * Swept on a staged copy of this file (`tools/tmp/status_grace_sweep.mjs`), shipped
+ * arena, 110 matchups x 8 seeds = 880 matches per row, policy `smart2` (the corrected
+ * scripted player — `smart` tests line of sight before range and therefore never closes):
+ *
+ *   stun/slow grace   stun %engaged   longest stun   slow %engaged   longest slow   p.win
+ *      (before)           27.0%          10.62 s         43.6%          12.27 s      61.1%
+ *        0 /   0          22.8%           4.00 s         35.8%           5.00 s      55.1%
+ *      300 / 375          21.1%           2.00 s         33.3%           2.50 s      54.1%
+ *   >> 500 / 500          19.8%           2.00 s         33.0%           2.50 s      53.9%
+ *      500 / 625          20.0%           2.00 s         31.6%           2.50 s      53.9%
+ *     1000 /1250          18.3%           2.00 s         29.6%           2.50 s      50.0%
+ *     2000 /2500          15.3%           2.00 s         25.0%           2.50 s      48.1%
+ *
+ * Three things decided 500, in this order:
+ *
+ *  1. ANY POSITIVE GRACE BUYS THE BOUND; ZERO DOES NOT. At `0/0` the no-refresh half
+ *     alone still leaves a 4.00 s stun, because a second application landing on the exact
+ *     tick the first expires chains seamlessly. One tick of grace ends that, and every
+ *     row from 300 ms up sits at exactly one application. **The bound is the fix; the
+ *     size of the grace is only how big the gap between locks is.**
+ *  2. THE GAP MUST BE LONG ENOUGH TO ACT IN. `EVADE_WINDOW` (see FLIGHT_MS) is 210 ms —
+ *     the time to move your own hit radius out of a line of fire. 500 ms is 2.38 evade
+ *     windows, which is precisely the dodgeability the game's workhorse projectile band
+ *     (`FLIGHT_MS.normal`) is authored to, so the shrug-off window is exactly one full
+ *     dodge of the most common shot in the game. That is where the number comes from; it
+ *     is not a round-looking constant.
+ *  3. IT MUST COST AS LITTLE BALANCE AS POSSIBLE. Every row above 500 buys a smaller
+ *     share of locked time for a steeper win-rate price (1000/1250 costs 3.9 pp more for
+ *     1.5 pp less locked time). This is the same judgement as `TRAIL.maxHitsPerTick`:
+ *     keep the mechanic, cap the degenerate case, move the rate as little as possible.
+ *
+ * The grace is FLAT — the same half second for both effects — rather than a ratio of each
+ * duration. `500/625` was measured alongside and is indistinguishable (53.9% either way),
+ * and one number is one sentence.
+ *
+ * ⚠️ WHAT THIS COSTS, DECLARED. 8,800 matches per side, 110 matchups x 16 seeds x 5
+ * policies, shipped arena, this change TOGETHER with DEVIATIONS #6/#7 (they interact —
+ * an AI that stops walking into the fog lives longer, which changes how much of the match
+ * is spent locked): player win rate `smart` 52.8% -> 44.1%, `smart2` 62.1% -> 51.3%,
+ * `chase` 25.5% -> 18.4%. Isolated, the grace rule alone is -1.6 pp (`smart2`) and
+ * -6.8 pp (`chase`); the rest is the AI fix. **This is a difficulty change and it is
+ * flagged in `docs/DECISIONS-FOR-URI.md`** — the lever if it is too hard is
+ * `ENEMY_MAX_HP` (measured: 140 -> 56.3%, 130 -> 62.3% under `smart2`), NOT re-opening
+ * the lock.
+ *
+ * The reason it costs anything at all is the per-role split, which is the number the old
+ * aggregate could not show: the ENEMY was locked roughly TWICE as much as the player
+ * (33.9% of engaged time against 18.6%), so the lock was a player advantage and removing
+ * it is a player cost. Concretely it was one character — **player-Pizza won 98.8% of its
+ * 10 matchups on Cheese Blind alone, and now wins 63.1%.**
+ *
+ * `sim.test.mjs` section 17(d) now asserts the BOUND — spam either status every tick for
+ * 20 s and it never exceeds one application — instead of merely ratcheting the count of
+ * weapons that could break it. That ratchet is kept and TIGHTENED from `<=` to `==`,
+ * because it no longer needs headroom.
+ */
+export const STUN_GRACE_MS = 500;
+export const SLOW_GRACE_MS = 500;
 
 /**
  * Out-of-combat regeneration.
@@ -667,14 +875,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Smash', name: 'Patty Smash', type: 'melee', range: REACH.meleeStrong, damage: 12, cooldown: 650, cone: 80, color: '#FFC93C', effect: null, emoji: '🍖' },
       { key: 'Tomato', name: 'Tomato Toss', type: 'ranged', range: REACH.rangedClose, damage: 8, cooldown: 800, speed: SPEED.closeFast, color: '#E63946', effect: 'slow', splatter: true, emoji: '🍅' },
       { key: 'Lettuce', name: 'Lettuce Fling', type: 'ranged', range: REACH.rangedMax, damage: 6, cooldown: 1100, speed: SPEED.maxSlow, color: '#7CB518', effect: 'stun', emoji: '🥬' },
-      // ⚠️ THE ONLY `self` WEAPON IN THE ROSTER, AND THE AI CANNOT USE IT. `ai.ts`
-      // reaches weapons through `pickHighestDamageWeapon` (skips `type === 'self'`) and
-      // `pickSniperWeapon` (requires `type === 'ranged'`), so there is no code path by
-      // which an enemy Hamburger ever heals. Measured: 0 fires across 11 matchups /
-      // 17,677 ticks, and 0.00 uses per match on both sides of every census run. The
-      // human player CAN use it — `combat.ts:attemptAttack` handles `self` correctly and
-      // heals 25 HP — so this is an ASYMMETRY, not a dead weapon: slot 4 works for you
-      // and never for the opponent. The fix is in `ai.ts`, not here. Parked for Uri.
+      // ✅ THE ONLY `self` WEAPON IN THE ROSTER, and until 2026-08-05 the AI could not
+      // use it: `ai.ts` reached weapons only through `pickHighestDamageWeapon` (which
+      // skips `type === 'self'`) and `pickSniperWeapon` (which requires `'ranged'`), so
+      // there was no code path by which an enemy Hamburger ever healed — 0 fires across
+      // 11 matchups / 17,677 ticks — while the human player used the same slot for 25 HP.
+      // A live ASYMMETRY, not dead content. Fixed in `ai.ts` (`pickSelfHealWeapon`); see
+      // AUTHORISED DEVIATION #7 above for the threshold and what it measured.
       { key: 'Onion', name: 'Onion Ring', type: 'self', damage: 0, cooldown: 6000, healAmount: 25, color: '#F4E9DA', effect: null, emoji: '🧅' },
     ],
     abilities: [

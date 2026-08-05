@@ -22,11 +22,13 @@ import { createMatch, stepMatch } from './sim.ts';
 import { stepAI } from './ai.ts';
 // Section 17 needs the real damage path to prove that taking a hit restarts the
 // out-of-combat delay — modelling `lastDamagedAt` by hand would test the model.
-import { applyDamage } from './combat.ts';
+import { applyDamage, statusReadyAt } from './combat.ts';
 import {
   CHARACTERS, CHARACTER_IDS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, POT, TRAIL,
   REGEN_DELAY_MS, REGEN_TICK_MS, REGEN_AMOUNT, STUN_DURATION_MS, SLOW_DURATION_MS,
+  STUN_GRACE_MS, SLOW_GRACE_MS,
+  AI_FLEE_HP_FRACTION, AI_HAZARD_MARGIN, AI_SELF_HEAL_HP_FRACTION,
 } from './rules.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
@@ -793,9 +795,21 @@ console.log('\n8. Countdown -> playing transition (sanity)');
 // The fixtures below are the two shapes that separate a router from a hill-climber. They
 // are deliberately synthetic: they must keep testing the ALGORITHM after the arena peer
 // moves the furniture, which a fixture copied from `kitchen.ts` would not.
+//
+// ⚠️ EVERY FIXTURE HERE HOLDS THE CLOSING RING OPEN (`NAV_SAFE_RADIUS`), and that is not
+// a workaround — it is what keeps these tests about NAVIGATION. `ai.ts` gained a ring term
+// on 2026-08-05 (rules.ts AUTHORISED DEVIATION #6), and each of these fixtures parks its
+// motionless target ~540 wu from the arena centre and then runs for 40 s of a 45 s clock,
+// by which time the real ring has closed to its 140 wu floor. A correct AI therefore
+// REFUSES to walk out to the target — measured: closest approach 284 / 206 / 207 wu, all
+// three ending near the centre. That is the hazard rule working, and scoring it as a
+// pathfinding failure would have deleted a fix. Section 18 tests the ring term directly.
 // ─────────────────────────────────────────────────────────────────────────────
 {
   console.log('\n14. The AI routes around obstacles a greedy rule cannot escape');
+
+  /** Ring radius that never bites inside a 40 s run, so routing is measured alone. */
+  const NAV_SAFE_RADIUS = 20_000;
 
   /** Run the AI at a motionless, immortal player and report how close it ever got. */
   function chase(arena, px, py, ms = 40_000, enemyChar = 'donut') {
@@ -825,7 +839,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   // route must first travel AWAY from the target. This is the shipped arena's shape.
   {
     const arena = makeArena({
-      width: 1400, height: 1000,
+      width: 1400, height: 1000, maxSafeRadius: NAV_SAFE_RADIUS,
       cover: [
         { x: 340, y: 420, w: 160, h: 55 },   // upper counter
         { x: 340, y: 580, w: 160, h: 55 },   // lower counter
@@ -854,7 +868,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     { x: 540, y: 680, w: 360, h: 40 },   // bottom arm
   ];
   {
-    const arena = makeArena({ width: 1400, height: 1000, cover: U_POCKET });
+    const arena = makeArena({ width: 1400, height: 1000, maxSafeRadius: NAV_SAFE_RADIUS, cover: U_POCKET });
     arena.enemySpawn = { x: 1240, y: 500 };
     const r = chase(arena, 500, 500);
     check('U-pocket with its mouth facing away: the AI still gets in',
@@ -872,7 +886,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   // routing: it is the compound case, and the plain "give up and go greedy" answer fails it.
   {
     const arena = makeArena({
-      width: 1400, height: 1000,
+      width: 1400, height: 1000, maxSafeRadius: NAV_SAFE_RADIUS,
       cover: [
         ...U_POCKET,
         { x: 500, y: 430, w: 180, h: 40 },
@@ -1285,20 +1299,25 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       `${POT.bodyRadius + PLAYER_SIZE / 2} < ${POT.dangerRadius} <= ${MIN_SAFE_RADIUS - PLAYER_SIZE / 2}`);
   }
 
-  // ── (d) status-lock RATCHET ───────────────────────────────────────────────
+  // ── (d) the STATUS LOCK is now BOUNDED, not merely ratcheted ──────────────
   //
-  // A weapon whose COOLDOWN is shorter than the status it applies holds that status up
-  // by itself, forever. Measured on the real sim: 4 of 5 stun weapons and 8 of 10 slow
-  // weapons do, worst observed unbroken movement lock 10.37 s (Pizza's Cheese Blind,
-  // 1300 ms cooldown against a 2000 ms stun = 1.54x uptime), and 47 of 110 chase
-  // matchups produce a lock of 4 s or more against a mean ENGAGEMENT of 6.0 s.
+  // A weapon whose COOLDOWN is shorter than the status it applies used to hold that
+  // status up by itself, forever. 4 of 5 stun weapons and 8 of 10 slow weapons still
+  // have that cooldown relationship and always will — Pizza's Cheese Blind re-fires
+  // every 1300 ms against a 2000 ms stun, Hamburger's Tomato Toss every 800 ms against a
+  // 2500 ms slow — and the measured consequence was an unbroken movement lock of 11.02 s
+  // against a 6.0 s mean engagement, 65.7% of stun applications landing on an
+  // already-stunned target, and 47 of 110 matchups producing >= 4 s.
   //
-  // Cutting `STUN_DURATION_MS` is NOT the fix — swept, it costs the player 10.6 pp of
-  // win rate at 1000 ms because the 100 HP player needs the lock against a 150 HP enemy
-  // more than the enemy needs it. That is a balance decision and it is parked in
-  // `docs/DECISIONS-FOR-URI.md`. What this asserts is only that it must not get WORSE:
-  // a ratchet on the count, not an endorsement of it.
+  // What changed on 2026-08-05 is the RE-APPLICATION RULE (`rules.ts` DEVIATION #5), not
+  // the durations and not the cooldowns. This section previously RATCHETED the locker
+  // count, which was the right guard while the defect was open and is the wrong one now:
+  // a ratchet is satisfied by the defect staying exactly the size it always was. What
+  // follows asserts the property that makes those cooldowns harmless.
   {
+    // The ratchet is KEPT and TIGHTENED — `<=` to `==`. It no longer needs headroom,
+    // because the counts can no longer produce a lock; it now simply records the shape of
+    // the roster so a new weapon inside the window is still visible.
     const lockers = { stun: 0, slow: 0 };
     const totals = { stun: 0, slow: 0 };
     for (const id of CHARACTER_IDS) {
@@ -1309,10 +1328,257 @@ console.log('\n8. Countdown -> playing transition (sanity)');
         if (w.cooldown < duration) lockers[w.effect]++;
       }
     }
-    check('no MORE weapons can hold a stun up by themselves than already do (ratchet, currently 4 of 5)',
-      lockers.stun <= 4, `${lockers.stun} of ${totals.stun} stun weapons re-fire inside STUN_DURATION_MS (${STUN_DURATION_MS}ms)`);
-    check('no MORE weapons can hold a slow up by themselves than already do (ratchet, currently 8 of 10)',
-      lockers.slow <= 8, `${lockers.slow} of ${totals.slow} slow weapons re-fire inside SLOW_DURATION_MS (${SLOW_DURATION_MS}ms)`);
+    check('the roster still has exactly the 4-of-5 stun and 8-of-10 slow cooldown overlaps (ratchet tightened <= to ==)',
+      lockers.stun === 4 && lockers.slow === 8,
+      `${lockers.stun}/${totals.stun} stun, ${lockers.slow}/${totals.slow} slow re-fire inside their own effect`);
+
+    // (i) THE BOUND. Spam the effect every single tick for ten times its own duration and
+    // measure the longest UNBROKEN run. It must be one application, because a status is
+    // refused while it is live. This is the assertion the old ratchet could not make.
+    for (const effect of ['stun', 'slow']) {
+      const duration = effect === 'stun' ? STUN_DURATION_MS : SLOW_DURATION_MS;
+      const state = playingMatch(makeArena());
+      const src = { kind: 'weapon', weaponKey: 'T', weaponName: 'test' };
+      const DT = 16.667;
+      let run = 0, longest = 0, applications = 0, refused = 0;
+      for (let t = 0; t < 20_000; t += DT) {
+        state.elapsed = t;
+        state.player.hp = PLAYER_MAX_HP; // isolate the status from the kill
+        const key = effect === 'stun' ? 'stunnedUntil' : 'slowedUntil';
+        const before = state.player.status[key];
+        applyDamage(state, 'player', 0, effect, src, []);
+        if (state.player.status[key] > before) applications++; else refused++;
+        if (t < state.player.status[key]) { run += DT; if (run > longest) longest = run; } else run = 0;
+      }
+      check(`spamming ${effect} every tick for 20 s never exceeds one ${duration}ms application`,
+        longest <= duration + DT + 1e-6,
+        `longest unbroken ${effect} ${longest.toFixed(0)}ms vs ${duration}ms (11,020ms was measured on the real sim)`);
+      check(`spamming ${effect} every tick REFUSES the re-application rather than extending it`,
+        refused > applications * 50,
+        `${applications} landed, ${refused} refused over 20 s`);
+    }
+
+    // (ii) THE WINDOW. After it expires there is a grace before the same effect can land
+    // again, and it is the grace the sim itself uses — `combat.ts` exports `statusReadyAt`
+    // precisely so this is not a second copy of the arithmetic.
+    {
+      const state = playingMatch(makeArena());
+      const src = { kind: 'weapon', weaponKey: 'T', weaponName: 'test' };
+      state.elapsed = 1000;
+      applyDamage(state, 'player', 0, 'stun', src, []);
+      check('a stun sets a ready-at of duration + grace',
+        approx(statusReadyAt(state.player, 'stun'), 1000 + STUN_DURATION_MS + STUN_GRACE_MS),
+        `${statusReadyAt(state.player, 'stun')} vs ${1000 + STUN_DURATION_MS + STUN_GRACE_MS}`);
+
+      // One tick before the grace ends: refused — AND the fighter is already free to move,
+      // so this really is a shrug-off window and not a longer stun wearing a new name.
+      state.elapsed = 1000 + STUN_DURATION_MS + STUN_GRACE_MS - 1;
+      const held = state.player.status.stunnedUntil;
+      applyDamage(state, 'player', 0, 'stun', src, []);
+      check('inside the grace window a fresh stun is refused',
+        state.player.status.stunnedUntil === held, `${state.player.status.stunnedUntil} vs ${held}`);
+      check('and the fighter is NOT stunned during that window',
+        state.elapsed >= state.player.status.stunnedUntil,
+        `elapsed ${state.elapsed} < stunnedUntil ${state.player.status.stunnedUntil}`);
+
+      // Exactly when the grace ends it lands again, at full duration. Capped, not deleted.
+      state.elapsed = 1000 + STUN_DURATION_MS + STUN_GRACE_MS;
+      applyDamage(state, 'player', 0, 'stun', src, []);
+      check('once the grace ends the stun lands again at full duration',
+        approx(state.player.status.stunnedUntil, state.elapsed + STUN_DURATION_MS));
+    }
+
+    // Slow gets the same window, and the two are independent of each other — a slow must
+    // never consume a stun's grace or vice versa.
+    {
+      const state = playingMatch(makeArena());
+      const src = { kind: 'weapon', weaponKey: 'T', weaponName: 'test' };
+      state.elapsed = 0;
+      applyDamage(state, 'player', 0, 'slow', src, []);
+      check('a slow sets a ready-at of duration + grace',
+        approx(statusReadyAt(state.player, 'slow'), SLOW_DURATION_MS + SLOW_GRACE_MS));
+      applyDamage(state, 'player', 0, 'stun', src, []);
+      check('a stun still lands on an already-slowed fighter (the two graces are independent)',
+        approx(state.player.status.stunnedUntil, STUN_DURATION_MS));
+    }
+
+    // (iii) DAMAGE IS NOT RATE-LIMITED. Only the status is refused: a hit whose status is
+    // blocked still costs full HP and still emits `hit-landed` carrying the weapon's
+    // authored effect. `vfx.ts` reads the TARGET's timers for the stun ring, so a refused
+    // stun correctly draws nothing without that layer knowing this rule exists.
+    {
+      const state = playingMatch(makeArena());
+      const src = { kind: 'weapon', weaponKey: 'T', weaponName: 'test' };
+      state.elapsed = 0;
+      const events = [];
+      applyDamage(state, 'player', 10, 'stun', src, events);
+      applyDamage(state, 'player', 10, 'stun', src, events); // status refused, damage not
+      check('a hit whose status is refused still deals its full damage',
+        state.player.hp === PLAYER_MAX_HP - 20, `hp ${state.player.hp}`);
+      check("and still emits hit-landed carrying the weapon's authored effect",
+        events.length === 2 && events.every((e) => e.type === 'hit-landed' && e.effect === 'stun'),
+        JSON.stringify(events.map((e) => `${e.type}:${e.effect}`)));
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 18. THE AI CAN SEE HAZARDS, AND CAN HEAL
+//
+// Two measured blind spots, both fixed on 2026-08-05 (`rules.ts` DEVIATIONS #6 and #7):
+//
+//   * `ai.ts` had no ring term and no hazard term. Measured on the shipped layout with a
+//     scripted player that engages: 94.8% of all pot damage and 100% of all fog damage
+//     landed on the ENEMY, which died to the zone in 16.3% of matches against the
+//     player's 0.0%. The scripted player has explicit "leave the pot" and "stay inside
+//     the ring" clauses; the AI had neither, so this was a one-sided handicap and it grew
+//     when the arena pass revived the pot (0.0% -> 8.7% of all damage).
+//   * `pickHighestDamageWeapon` skipped `type === 'self'` and `pickSniperWeapon` required
+//     `'ranged'`, so an enemy Hamburger could never use the roster's only `self` weapon,
+//     which the human player uses on the same character. 0 fires / 17,677 ticks.
+//
+// Behaviour tests against the real `stepAI`, not shape tests: each one puts the AI
+// somewhere specific and asserts where it ends up.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n18. The AI avoids damaging ground and heals itself');
+
+  const POT_HAZARD = {
+    x: 700, y: 500, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs,
+  };
+  /** Big enough that the closing ring never bites inside these runs. */
+  const OPEN_RING = 20_000;
+
+  // ── (a) THE POT. Park the AI just outside the burn ring with the player directly
+  // opposite, so the straight line to the player runs through the fire. Two things must
+  // both be true, and only asserting the first would hide a worse bug than the one being
+  // fixed: it must not walk in, AND it must still get there. A purely radial repulsion
+  // cancels exactly against a head-on approach and leaves the AI oscillating on the spot
+  // forever — see HAZARD_TANGENT in `ai.ts`.
+  {
+    const arena = makeArena({ width: 1400, height: 1000, maxSafeRadius: OPEN_RING, hazards: [POT_HAZARD] });
+    const state = playingMatch(arena, 'hamburger', 'donut');
+    state.player.x = 700 - 400; state.player.y = 500;
+    state.enemy.x = 700 + POT.dangerRadius + 30; state.enemy.y = 500;
+    let insideBurn = 0;
+    let closestToPot = Infinity;
+    let closestToPlayer = Infinity;
+    for (let i = 0; i < 1500; i++) {
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      // Weapons parked on cooldown so the AI always chooses to MOVE — otherwise this
+      // measures weapon range rather than steering.
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => state.elapsed);
+      state.elapsed += 16.667;
+      stepAI(state, 16.667, []);
+      closestToPot = Math.min(closestToPot, Math.hypot(state.enemy.x - 700, state.enemy.y - 500));
+      closestToPlayer = Math.min(closestToPlayer, Math.hypot(state.enemy.x - state.player.x, state.enemy.y - state.player.y));
+      if (Math.hypot(state.enemy.x - 700, state.enemy.y - 500) < POT.dangerRadius) insideBurn++;
+    }
+    check('the AI never enters the boiling pot to reach a player on the far side of it',
+      insideBurn === 0, `${insideBurn} ticks inside the ${POT.dangerRadius}wu burn ring (closest ${closestToPot.toFixed(0)}wu)`);
+    check('and it goes AROUND rather than stalling head-on against the repulsion',
+      closestToPlayer < 60, `closest approach to the player ${closestToPlayer.toFixed(0)}wu`);
+  }
+
+  // ── (b) THE CLOSING RING. A fleeing AI used to run directly away from the player and
+  // straight out of the safe disc — the flee vector had no ring term at all, which is
+  // why the zone was ~11x more lethal to it than to the human. Put the player between
+  // the AI and the arena centre, so "away from the player" IS "into the fog".
+  {
+    const arena = makeArena({ width: 1400, height: 1000, maxSafeRadius: 500 });
+    const state = playingMatch(arena, 'hamburger', 'donut');
+    state.player.x = 700 + 150; state.player.y = 500;
+    state.enemy.x = 700 + 300; state.enemy.y = 500;
+    state.enemy.hp = state.enemy.maxHp * (AI_FLEE_HP_FRACTION - 0.05); // below the flee threshold
+    let outside = 0;
+    let furthest = 0;
+    for (let i = 0; i < 900; i++) {
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      state.enemy.hp = Math.max(1, state.enemy.hp);
+      state.elapsed += 16.667;
+      stepAI(state, 16.667, []);
+      const r = Math.hypot(state.enemy.x - 700, state.enemy.y - 500);
+      furthest = Math.max(furthest, r);
+      if (r > state.safeRadius) outside++;
+    }
+    check('a fleeing AI does not run itself out of the closing ring',
+      outside === 0,
+      `${outside} ticks outside; furthest ${furthest.toFixed(0)}wu of a ${state.safeRadius.toFixed(0)}wu ring`);
+  }
+
+  // ── (c) SURVIVING OUTRANKS SHOOTING, and ONLY at the boundary. `stepAI` fires OR
+  // moves, never both, so an AI with a weapon ready simply stops moving — which is how it
+  // stood inside the burn ring trading shots while the pot did 32 HP/s to it. The
+  // override has to fire when it is actually burning and NOT while it is merely near the
+  // fire: an earlier draft compared against the WEIGHTED danger instead of the normalised
+  // encroachment, which silently pushed the no-shoot line 36 wu outside the burn ring.
+  {
+    const shootsAt = (offset) => {
+      const arena = makeArena({ width: 1400, height: 1000, maxSafeRadius: OPEN_RING, hazards: [POT_HAZARD] });
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.enemy.x = 700 + offset; state.enemy.y = 500;
+      state.player.x = state.enemy.x + 40; state.player.y = 500; // point blank, always in range
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => -1e9);
+      const events = [];
+      stepAI(state, 16.667, events);
+      return events.some((e) => e.type === 'weapon-fired');
+    };
+    check('an AI standing INSIDE the fire moves instead of shooting',
+      !shootsAt(POT.dangerRadius - 10), 'it fired while burning');
+    check('an AI merely NEAR the fire still shoots (the warning band costs it no output)',
+      shootsAt(POT.dangerRadius + AI_HAZARD_MARGIN * 0.5),
+      `it refused to fire ${(AI_HAZARD_MARGIN * 0.5).toFixed(0)}wu clear of the burn ring`);
+  }
+
+  // ── (d) THE HEAL.
+  {
+    const heal = CHARACTERS.hamburger.weapons.find((w) => w.type === 'self');
+    const firesAt = (hp) => {
+      const arena = makeArena({ width: 1400, height: 1000, maxSafeRadius: OPEN_RING });
+      const state = playingMatch(arena, 'donut', 'hamburger');
+      state.enemy.hp = hp;
+      state.enemy.x = 700; state.enemy.y = 500;
+      state.player.x = 900; state.player.y = 500;
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => -1e9);
+      const events = [];
+      stepAI(state, 16.667, events);
+      return events.filter((e) => e.type === 'weapon-fired' && e.weaponKey === heal.key).length;
+    };
+    check('a hurt AI Hamburger uses its Onion Ring — it never could before',
+      firesAt(ENEMY_MAX_HP * AI_SELF_HEAL_HP_FRACTION - 1) === 1, 'no self-weapon fire at half HP');
+    check('a healthy AI Hamburger saves it rather than spending a 6 s cooldown for nothing',
+      firesAt(ENEMY_MAX_HP - 1) === 0, 'it healed at 149/150');
+    check('and it never overheals — it waits until the whole heal fits',
+      firesAt(ENEMY_MAX_HP - (heal.healAmount - 1)) === 0,
+      `it healed ${heal.healAmount} HP into a ${heal.healAmount - 1} HP hole`);
+  }
+
+  // ── (e) INERT WHEN NOTHING IS WRONG. Away from every hazard and well inside the ring
+  // the AI must behave exactly as it always has: this is a blind spot removed, not a new
+  // personality, and a steering term that leaks into open ground is a balance change
+  // nobody asked for.
+  {
+    const arena = makeArena({ width: 1400, height: 1000, maxSafeRadius: OPEN_RING });
+    const state = playingMatch(arena, 'hamburger', 'donut');
+    state.player.x = 400; state.player.y = 500;
+    state.enemy.x = 1000; state.enemy.y = 500;
+    let drift = 0;
+    let closest = Infinity;
+    for (let i = 0; i < 900; i++) {
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => state.elapsed);
+      state.elapsed += 16.667;
+      stepAI(state, 16.667, []);
+      drift = Math.max(drift, Math.abs(state.enemy.y - 500));
+      closest = Math.min(closest, Math.hypot(state.enemy.x - 400, state.enemy.y - 500));
+    }
+    // 5 wu of lateral drift is the flow field's own grid resolution and is present on the
+    // tree as it was BEFORE this change too (verified: both end at 860.03, 497.08 after
+    // 2 s, bit-identical). The assertion is that the hazard term adds nothing to it.
+    check('with no hazard in reach the AI still walks straight at the player and arrives',
+      closest < 30 && drift < 5,
+      `closest ${closest.toFixed(1)}wu, worst lateral drift ${drift.toFixed(2)}wu`);
   }
 }
 
