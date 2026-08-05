@@ -217,6 +217,31 @@ const MIXED_CAMERA = {
 };
 
 /**
+ * Limitations that belong to a whole CATEGORY and would otherwise be rediscovered one
+ * round at a time. Printed with every packet and recorded in the manifest.
+ */
+const CATEGORY_NOTES = {
+  menus_home: 'Real lobby plates, supplied 2026-08-05 — DECISIONS §6 closed. Draw: '
+    + 'bs_home (Brawl Stars) + zb_home (Zooba), one plate from each product. Both are '
+    + '2556x1179 phone-landscape screenshots of PLAYED accounts, so our side must be '
+    + 'shot at the same aspect and with a populated profile or the round measures our '
+    + 'save state. ⚠️ zb_home carries personal account strings — never reproduce them.',
+  menus_select: 'Real hero-select plates, supplied 2026-08-05. Draw: bs_roster_grid + '
+    + 'bs_character_detail (Brawl Stars) + zb_character_detail (Zooba). Our select screen '
+    + 'carries BOTH a grid and a detail panel, so all three are legitimate comparators.',
+  menu_select: 'ZOOBA ONLY. All twelve Brawl Stars raw files are the same six App Store '
+    + 'composites and contain no menu screen at all, so this compares against one of the '
+    + 'two reference products, not both.',
+  menu_lobby: 'ZOOBA ONLY — see menu_select. Also: our menu captures are shot against a '
+    + 'FIRST-RUN profile (0 trophies, 0 wins, 0 XP) while the plates show a played '
+    + 'account, and a critic reads empty counters as an unshipped game.',
+  topdown_cast: 'Derived crops (tools/tmp/baseline_crops.mjs), same fraction of frame '
+    + 'height on both sides.',
+  topdown_hud: 'Derived crops (tools/tmp/baseline_crops.mjs), same fraction of frame '
+    + 'height on both sides.',
+};
+
+/**
  * The single number nobody had for this instrument: sd 0.50, from 16 fresh critics on
  * one fixed image.
  *
@@ -244,14 +269,34 @@ if (refs.length === 0) {
   process.exit(3);
 }
 
-const n = Math.min(Number(args.n ?? 3), refs.length);
-
-// Sample without replacement so the critic sees a spread of references, not the
-// same plate three times.
-const pool = [...refs];
-const picked = [];
-for (let i = 0; i < n; i++) {
-  picked.push(pool.splice(randomInt(0, pool.length), 1)[0]);
+/**
+ * `--plates bs_01.png,bs_03.png` names the draw instead of rolling it.
+ *
+ * The audit's finding was that THE PLATE DRAW IS THE REAL DEFECT — three character
+ * rounds drew 4 of 6 Zooba over-the-shoulder plates to score a top-down game, and
+ * nobody could have known before the round ran, because the draw was random and only
+ * printed afterwards. Naming the plates makes a round reproducible and lets a
+ * multi-critic study assign one distinct plate per critic, so the reference spread is a
+ * measurement of the LIBRARY rather than an accident of sampling.
+ */
+let picked;
+if (typeof args.plates === 'string') {
+  picked = args.plates.split(',').map((s) => s.trim()).filter(Boolean);
+  const missing = picked.filter((p) => !refs.includes(p));
+  if (missing.length) {
+    console.error(`--plates names ${missing.join(', ')}, which ${missing.length > 1 ? 'are' : 'is'} not in ${curatedDir}.`);
+    console.error(`   available: ${refs.join(', ')}`);
+    process.exit(3);
+  }
+} else {
+  const n = Math.min(Number(args.n ?? 3), refs.length);
+  // Sample without replacement so the critic sees a spread of references, not the
+  // same plate three times.
+  const pool = [...refs];
+  picked = [];
+  for (let i = 0; i < n; i++) {
+    picked.push(pool.splice(randomInt(0, pool.length), 1)[0]);
+  }
 }
 
 // Vouch for OUR side before a single sheet is built. The reference plates are
@@ -281,7 +326,29 @@ for (let i = 0; i < picked.length; i++) {
   sheets.push({ sheet, key, reference: basename(ref) });
 }
 
-const rubric = typeof args.rubric === 'string' ? args.rubric : 'UNSPECIFIED';
+/**
+ * The rubric.
+ *
+ * `--rubric canonical` reads `tools/review.rubric.txt`, which is COMMITTED — that is the
+ * whole point. The audit found the rubric is worth 2.0 points on identical sheets and
+ * that no canonical prompt existed anywhere in the repo, so every round was written
+ * fresh by whichever agent ran it and no two scores were ever on the same scale. A file
+ * in git is the only version of "the same rubric" that survives a session boundary.
+ *
+ * A literal string still works, for a deliberate one-off. It is recorded verbatim either
+ * way, and `RUBRIC.txt` in the packet is what the critic must be pasted.
+ */
+const CANONICAL_RUBRIC_PATH = resolve(process.argv[1], '../review.rubric.txt');
+let rubric = typeof args.rubric === 'string' ? args.rubric : 'UNSPECIFIED';
+let rubricSource = rubric === 'UNSPECIFIED' ? null : 'literal';
+if (rubric === 'canonical') {
+  if (!existsSync(CANONICAL_RUBRIC_PATH)) {
+    console.error(`--rubric canonical, but there is no ${CANONICAL_RUBRIC_PATH}.`);
+    process.exit(7);
+  }
+  rubric = await readFile(CANONICAL_RUBRIC_PATH, 'utf8');
+  rubricSource = 'tools/review.rubric.txt';
+}
 // Default 1: a round is one critic unless the orchestrator says otherwise.
 const critics = Number(args.critics ?? 1);
 const floor = resolutionFloor(critics);
@@ -293,8 +360,10 @@ const manifest = {
   // different rubrics are not on the same scale — measured at 2.0 points on identical
   // images, which is larger than any change this project has ever moved a score by.
   rubric,
+  rubricSource,
   plates: sheets.map((s) => s.reference),
   mixedCamera: MIXED_CAMERA[args.category] ?? null,
+  categoryNote: CATEGORY_NOTES[args.category] ?? null,
   critics,
   resolutionFloor: +floor.toFixed(2),
   sheets: sheets.map((s) => s.sheet),
@@ -318,7 +387,9 @@ console.log('Show the critic ONLY these files:');
 sheets.forEach((s) => console.log(`  ${s.sheet}`));
 console.log(`\nKeys (orchestrator only): ${join(outDir, 'sheet_*.key.json')}`);
 
-console.log(`\nRubric: ${rubric === 'UNSPECIFIED' ? 'UNSPECIFIED' : rubric.slice(0, 72)}`);
+console.log(`\nRubric: ${rubricSource ?? 'UNSPECIFIED'}`
+  + `${rubricSource === 'literal' ? ` — "${rubric.slice(0, 72)}"` : ''}`);
+if (CATEGORY_NOTES[args.category]) console.log(`Category note: ${CATEGORY_NOTES[args.category]}`);
 if (rubric === 'UNSPECIFIED') {
   console.error('!! NO RUBRIC RECORDED. Pass --rubric "<the exact question the critic is asked>".');
   console.error('   Measured on identical sheets: "overall visual quality" scores 5.0 and');
