@@ -1343,9 +1343,40 @@ function makeContactShadowTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d')!;
   // Tint: deep INDIGO, not warm-black and not grey. See the `SHADOW_TINT` note above —
   // these stops share that constant's reasoning and must move with it.
+  //
+  // ── THE STOPS MOVED OUTWARD, AND THE REASON IS THAT THE MIDDLE IS NEVER SEEN ───
+  //
+  // A blind critic: *"the single largest object in the frame — the pot — meets the
+  // floor with no contact shadow at all, so it reads as a sticker rather than a
+  // solid."* It has one. `tools/tmp/ao_ab.mjs` ablates exactly these decals and they
+  // deliver 3.5-6.7% of frame at mean |dL| **0.057-0.072** — measurably present, and
+  // just under `arena-scan`'s own 0.06 "the hero has no value separation" threshold,
+  // i.e. right at the edge of perceptible. `docs/LESSONS.md` §1 in its usual costume:
+  // it IS rendering and it is not readable.
+  //
+  // The reason is geometric and the old stop placement is the whole of it. The decal
+  // is a square plane `scale`x the prop's footprint, so the prop covers the middle
+  // and only the annulus from u = 1/scale to u = 1 (u = radius / half-width) is ever
+  // seen. With the old stops, alpha across that annulus was:
+  //
+  //     scale   visible annulus   alpha at its inner edge   at its middle
+  //     1.00    u 0.95 .. 1.00           0.03                   0.015
+  //     1.25    u 0.80 .. 1.00           0.12                   0.06
+  //     1.35    u 0.74 .. 1.00           0.16                   0.08
+  //
+  // — so 0.55 of the gradient's radius and most of its density was spent under the
+  // prop, where it cannot be seen, and the pot's own decal (`hazards.ts`, scale 1)
+  // was delivering a **3%** wash. That is the critic's "no contact shadow at all",
+  // and it is measured rather than judged.
+  //
+  // The stops now hold density out to u = 0.74 and fall to nothing over the last
+  // quarter. Nothing else moves: the same tint, the same size, the same falloff SHAPE
+  // at the rim, so `SHADOW_TINT`'s round-11 chroma argument above is untouched and the
+  // decal cannot start reading as a hard disc. What changes is that the part that
+  // reaches the screen is the part that carries the density.
   const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, SHADOW_TINT(0.55));
-  g.addColorStop(0.55, SHADOW_TINT(0.28));
+  g.addColorStop(0, SHADOW_TINT(0.58));
+  g.addColorStop(0.74, SHADOW_TINT(0.36));
   g.addColorStop(1, SHADOW_TINT(0));
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);

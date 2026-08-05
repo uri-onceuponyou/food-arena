@@ -111,6 +111,24 @@ const DECAL_Y = 0.045; // grime, spills, mats, pads, trim — just proud of the 
 const FINE_Y = 0.062; // marks drawn ON a decal (wood seams, speckle flecks)
 
 /**
+ * Height for a mark that has to be visible on the TILE and on a SERVICE MAT at once —
+ * the only layer in this file that must clear the mats rather than sit beside them.
+ *
+ * ⚠️ `FINE_Y` is NOT high enough and the arithmetic is the trap `docs/LESSONS.md` §1
+ * lists four separate times. `roundedBox` is centred, so `floor_utility_pad` —
+ * `roundedBox(w, 0.03, h)` positioned at `DECAL_Y + 0.003` — has its TOP FACE at
+ * 0.045 + 0.003 + 0.015 = **0.063**, one millimetre ABOVE `FINE_Y`. Anything drawn at
+ * `FINE_Y` is therefore invisible wherever it laps onto a utility pad, which is the
+ * exact half of a boundary mark that has to show.
+ *
+ * 0.066 is a window, like `BAKED_SHADOW_Y` above it: clear of the highest opaque floor
+ * layer in this file (0.063) and below the lowest prop kick (~0.08) and below the
+ * baked grounding decals (0.07), so a prop still occludes and grounds normally.
+ * If any pad in this file grows taller or moves up, this must move with it.
+ */
+const MAT_WEAR_Y = 0.066;
+
+/**
  * ── THE LOW BAND, AS ONE NUMBER ─────────────────────────────────────────────
  *
  * This floor's score history localises where its one good round went:
@@ -290,10 +308,63 @@ function keyServiceMat<T extends THREE.Material & { color: THREE.Color }>(src: T
  * lightens. So the border stops being a darker box (which was reading as a recess lip)
  * and becomes a visibly lighter kerb line — which also finally makes it a rim at all,
  * since the old one was 5cm wide, roughly a seventh of a pixel at shipped distance.
+ *
+ * ── 2.2 -> 1.21: the direction was right and the MAGNITUDE made it UI ───────────
+ *
+ * A blind critic reading `pot_diagonal` cold: *"the pink/teal zone boundary is a hard
+ * straight edge with a bright cyan rim and reads as a **picture-in-picture window
+ * pasted over the frame**."* That is one measurable image property wearing three
+ * words — a RIDGE, a line of pixels brighter than the surface on BOTH sides of it,
+ * which is the signature of a stroke around a shape, i.e. of UI. `x2.2` put a 17-px
+ * band of rgb(70,172,217) at HSV sat 0.68 on top of a boundary whose two ground
+ * materials are within 0.006-0.045 luma of each other.
+ *
+ * `tools/tmp/edgeridge.mjs` measures that ridge with one number and — the point of
+ * building it — runs the SAME code on the six curated top-down Brawl Stars plates,
+ * because the question is whether the reference does this too. It does not:
+ *
+ *                                             step    RIDGE overshoot   dark undershoot
+ *   bs_04 grass band, hard + straight         0.058       +0.0007            0.0000
+ *   bs_01 bush -> paver                       0.003       +0.0013           +0.1262
+ *   bs_06 ground seam, vertical               0.003       +0.0401           +0.0466
+ *   bs_06 ground seam, horizontal             0.066       +0.0428           -0.0378
+ *   -------------------------------------------------------------------------------
+ *   OURS hub pad, W edge      x2.2             0.045      +0.1281           +0.0425
+ *   OURS NW freezer pad, S    x2.2             0.006      +0.1715           +0.0380
+ *   OURS hub pad, N edge      x2.2             0.007      +0.1738           +0.0441
+ *   OURS control: a tile grout seam            0.026      -0.0179           +0.2378
+ *
+ * `bs_04` settles the part that looks like the defect and is not: the reference has
+ * **hard, straight, ground-material boundaries** — that one is a single pixel wide —
+ * and marks them with a VALUE STEP and no line at all. We had it exactly inverted:
+ * no value step, and a bright saturated line. The tile-grout control in our own frame
+ * behaves correctly (ridge NEGATIVE, deep trough), so the instrument is discriminating
+ * rather than finding ridges everywhere.
+ *
+ * 1.21 = `x2.2 x 0.55`, swept live on a frozen snapshot with `tools/tmp/padsweep.mjs`
+ * (which overrides the two materials on the shipped composited frame; `x1.00` is the
+ * control and reproduces the untouched capture to 4 dp) and looked at at every step:
+ *
+ *     kerb    hub-pad W edge          NW-pad S edge      what it looks like
+ *     x2.20   overshoot +0.1281       +0.1715            a cyan UI stroke
+ *     x1.54   overshoot +0.0096       +0.0532            a visible lighter band
+ *     x1.21   overshoot +0.0046       -0.0000            a quiet lip, no line
+ *     x0.99   overshoot +0.0076       -0.0000            a dark crack -> reads recessed
+ *
+ * At 1.21 the kerb renders at the FILL's own level (0.403-0.431 against the fill's
+ * 0.404-0.444) rather than at 0.60, so the boundary becomes one clean step — tile
+ * 0.495 -> pad 0.403, rising to 0.444 across the pad's own rounded lip. That lip is
+ * real geometry catching real light, which is what `bs_03`'s terracotta blocks have
+ * and a uniform multiplier never was. The rim's JOB (say "laid mat", not "pit") is
+ * kept: the authored value is still LIGHTER than the fill, and the arriving darker
+ * edge is the bevel, not a painted recess line.
+ *
+ * ⚠️ Do not restore this by eye against an isolated render. The ridge is invisible in
+ * `piece=floor` framing and unmissable at shipped framing — `docs/LESSONS.md` §6.
  */
 function serviceMatEdge<T extends THREE.Material & { color: THREE.Color }>(src: T): T {
   const m = keyServiceMat(src);
-  m.color.multiplyScalar(2.2);
+  m.color.multiplyScalar(1.21);
   return m;
 }
 
@@ -767,6 +838,277 @@ function buildDebrisPile(mats: THREE.Material[], cx: number, cy: number, seed: n
     item.scale.y = 0.7;
     item.rotation.y = rand() * Math.PI * 2;
     g.add(item);
+  }
+  return g;
+}
+
+/**
+ * ── THE OTHER HALF OF THE "PASTED-ON WINDOW" READ: NOTHING CROSSES THE LINE ─────
+ *
+ * `serviceMatEdge` above answers the *rim*. This answers the *containment*. A service
+ * mat is a closed rounded rectangle of one colour laid over a tile field of another,
+ * and — before this — **not one mark in the arena straddled its boundary**. Every
+ * stain, speck, path strip and splatter in this file is drawn at `DECAL_Y`, which is
+ * 18 mm BELOW a utility pad's top face, so anything that reached a mat's edge was
+ * clipped by it. The hub pad was even sized *deliberately* to keep two floor stains
+ * outside its edge (see `utilityPads`) — correct at the time, for the reason given
+ * there, and it is also exactly what makes a region read as a layer rather than as
+ * ground.
+ *
+ * The reference plates never leave a ground boundary uncrossed. `bs_01` scatters
+ * leaf litter from the bush field several tiles out onto the paver; `bs_04` runs
+ * grass tufts and wood chips across its band edges; `bs_03` puts loose rubble on both
+ * sides of every rock line. The mark type differs per plate and the property does
+ * not: **the two fields interpenetrate.**
+ *
+ * So: grime and pale scuff blobs whose centres sit ON the mat's outer kerb line, half
+ * lapping each way. Three things about them are load-bearing rather than decorative:
+ *
+ *  - **INTERRUPTED.** Only ~55% of the candidate stations are used, and their spacing
+ *    is jittered. A continuous fringe would just be a second stroke, and a softer
+ *    stroke is still a stroke.
+ *  - **ELONGATED ALONG THE EDGE**, ~2.2:1, because a scuff is made by traffic running
+ *    along a lip, not by something dropped on it — and a row of round blobs on a line
+ *    is the "collectible pickup" grammar `buildDebrisMats` was rewritten to avoid.
+ *  - **LOW CONTRAST, TWO WAYS.** Dark grime at 0.18 alpha AND pale scuff at 0.13, not
+ *    one monotone family. A single hard-edged dark blob roughly one tile across is
+ *    the shape language of a drop shadow — a critic once read this file's grime as
+ *    enemy characters, which was a gameplay failure, not an aesthetic one (see
+ *    `buildStainCluster`). Half of these being *lighter* than both grounds makes the
+ *    family unmistakably dirt, and it puts a little warm chroma back over the arena's
+ *    only cool ground while it does it.
+ *
+ * Every blob for every mat lands in ONE `ShapeGeometry` per material — `ShapeGeometry`
+ * takes an array of shapes — so the whole arena's mat fringing costs **2 draw calls**,
+ * not one per mark. Shapes are authored in ABSOLUTE layout coordinates for that
+ * reason; the two meshes sit at the origin.
+ *
+ * ⚠️ Drawn at `MAT_WEAR_Y`, not `FINE_Y`. Read that constant's note before moving it.
+ */
+/**
+ * Outline of a rounded rectangle as a closed polyline, as the Minkowski sum of a
+ * rectangle of half-extents (a, b) with a disc of radius r. Written this way on
+ * purpose: the OFFSET outline of the same shape is the identical call with a larger
+ * r, which makes the inner and outer loops of `buildMatCrease` exactly parallel and
+ * index-aligned with no correspondence problem to solve.
+ */
+function roundRectOutline(a: number, b: number, r: number, arcSeg: number): Array<[number, number]> {
+  const pts: Array<[number, number]> = [];
+  const corners: Array<[number, number, number]> = [
+    [a, b, 0], [-a, b, Math.PI / 2], [-a, -b, Math.PI], [a, -b, -Math.PI / 2],
+  ];
+  for (const [cx, cy, a0] of corners) {
+    for (let i = 0; i <= arcSeg; i++) {
+      const t = a0 + (i / arcSeg) * (Math.PI / 2);
+      pts.push([cx + Math.cos(t) * r, cy + Math.sin(t) * r]);
+    }
+  }
+  return pts;
+}
+
+/** Width of the contact crease outside a mat's kerb, world units. ~25 px at shipped
+ * framing, which is `bs_01`'s own 17 px of dark band scaled from its 1176-px frame to
+ * our 1600 (17 x 1600/1176 = 23). */
+const CREASE_W = 9;
+/**
+ * Alpha at the mat's own edge, falling to 0 at `CREASE_W` outward. Swept live rather
+ * than derived, because the blend happens in the renderer's LINEAR working space and
+ * then goes through the grade, so the display-space arithmetic gives the wrong answer
+ * — see the measured table in `buildMatCrease`.
+ */
+const CREASE_ALPHA = 0.25;
+
+/**
+ * ── THE THING THE SECOND BLIND CRITIC NAMED, AND IT IS THE OPPOSITE OF THE FIRST ──
+ *
+ * Round 1 took the bright kerb out (`serviceMatEdge`). A fresh blind critic, scoring
+ * the reference side 7.4/8.0/8.6/8.2 (valid), then named this as the single defect
+ * that most caps the frame — and it is not the same complaint:
+ *
+ *   *"the entire perimeter of the blue play surface is a zero-thickness colour swap.
+ *   The pink->blue transition happens in 1-2 pixels... There is no contact crease.
+ *   The pink immediately above the seam is the same value as the pink 100 px above
+ *   it. A raised surface would darken the floor at its base; a recessed one would
+ *   darken its own inner lip. Neither happens, so nothing tells the eye which side
+ *   is higher."*
+ *
+ * It also asked for a visible SIDE FACE, citing the lilac counter in the same frame
+ * showing ~35 px of front wall. **That one is arithmetically unavailable and must not
+ * be built.** These are 3 cm mats. At `WORLD_SCALE` 0.05 and the shipped ~2.77 px per
+ * world unit, 3 cm is 0.6 wu is **1.7 px of riser before foreshortening** — about half
+ * a pixel at a 58 deg pitch. The counter shows 35 px because it is 0.9 m tall, i.e.
+ * 30x taller. Giving a floor mat a visible wall would make it a step, which is the
+ * exact "raised blocking terrain?" ambiguity two critics have already scored this
+ * material down for (`docs/DECISIONS-FOR-URI.md` §5) and which round 6 spent a whole
+ * pass flattening. Take the symptom, re-derive the cause — `docs/LESSONS.md` §3.
+ *
+ * The half of the symptom that IS real and IS available is the contact crease, and the
+ * reference plates carry it as a measured quantity. `tools/tmp/edgeridge.mjs` on the
+ * curated top-down plates, `undershoot` = how far the darkest pixel across a ground
+ * boundary falls below the darker of the two fields:
+ *
+ *   bs_01 bush -> paver     +0.1262      <- a soft dark band under the raised mass
+ *   bs_06 ground seam       +0.0466
+ *   bs_04 grass band         0.0000      <- coplanar; no crease, and none needed
+ *   ---------------------------------
+ *   OURS, before            +0.0380 .. +0.0441
+ *
+ * So: a dark band on the TILE side of the kerb, alpha ramping to nothing outward.
+ * OUTSIDE, not inside, and that is the whole grammar. A dark band INSIDE a region's
+ * edge is what a pit or a recess has; a dark band OUTSIDE it is occlusion cast by
+ * something standing proud of the floor. Same pixels, opposite meaning, and it is the
+ * one cue that answers "which side is higher" without any geometry at all.
+ *
+ * Soft rather than hard for a second measured reason: the same critic called the
+ * diagonal run of this seam "visibly stair-stepped at presentation size — an aliased
+ * hard edge across the highest-contrast boundary in the frame". A gradient band over
+ * the boundary is also the cheapest possible antialias for it.
+ */
+function buildMatCrease(
+  rects: Array<[number, number, number, number]>,
+  tint: number,
+): THREE.Mesh | null {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  const c = new THREE.Color(tint);
+  const ARC = 4;
+
+  for (const [cx, cy, w, h] of rects) {
+    // The kerb's own outline: `roundedBox(w + EDGE_BAND*2, ..., 0.1, 3)` clamps its
+    // radius to 0.1 m, so the crease traces the same corner it actually has.
+    const r = 0.1;
+    const a = Math.max(0.01, wu(w + EDGE_BAND * 2) / 2 - r);
+    const b = Math.max(0.01, wu(h + EDGE_BAND * 2) / 2 - r);
+    const inner = roundRectOutline(a, b, r, ARC);
+    const outer = roundRectOutline(a, b, r + wu(CREASE_W), ARC);
+    const n = inner.length;
+    const base = positions.length / 3;
+    for (let i = 0; i < n; i++) {
+      // Layout y runs into the screen; these are world (x, z) directly, so no sign
+      // flip here — unlike `buildMatEdgeWear`, which authors into a rotated plane.
+      positions.push(wu(cx) + inner[i][0], 0, wu(cy) + inner[i][1]);
+      colors.push(c.r, c.g, c.b, CREASE_ALPHA);
+    }
+    for (let i = 0; i < n; i++) {
+      positions.push(wu(cx) + outer[i][0], 0, wu(cy) + outer[i][1]);
+      colors.push(c.r, c.g, c.b, 0);
+    }
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      indices.push(base + i, base + n + i, base + j);
+      indices.push(base + j, base + n + i, base + n + j);
+    }
+  }
+  if (!positions.length) return null;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  // itemSize 4 => three.js `USE_COLOR_ALPHA`, so the per-vertex alpha reaches the
+  // shader. The same technique `arena/fogRing.ts` uses for its annuli. (This is NOT
+  // the `vertexColors` trap in `docs/LESSONS.md` §12 — that one is specific to the
+  // tile `InstancedMesh`, which has no `color` attribute at all.)
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+  geo.setIndex(indices);
+
+  const mat = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false, // MUST stay false — a depth-writing transparent silently occludes.
+    toneMapped: false,
+    side: THREE.DoubleSide,
+  });
+  const m = new THREE.Mesh(geo, mat);
+  m.name = 'floor_mat_crease__no_outline';
+  m.position.y = MAT_WEAR_Y;
+  m.renderOrder = 1;
+  m.castShadow = false;
+  m.receiveShadow = false;
+  noOutline(m);
+  return m;
+}
+
+function buildMatEdgeWear(
+  grimeMat: THREE.Material,
+  dustMat: THREE.Material,
+  rects: Array<[number, number, number, number]>,
+  seed: number,
+): THREE.Group {
+  const g = new THREE.Group();
+  noOutline(g);
+  let s = seed;
+  const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+
+  const shapes: [THREE.Shape[], THREE.Shape[]] = [[], []];
+
+  /** Irregular lobed blob, same harmonic outline as `buildStainShape` (a spiky polygon
+   * reads as a debug overlay — that finding is in that function's note), authored at
+   * an absolute layout position and anisotropically scaled along the edge. */
+  const blob = (into: THREE.Shape[], cxWu: number, cyWu: number, rWu: number, ax: number, ay: number) => {
+    const harmonics = [
+      { k: 2, a: 0.16 + rand() * 0.14, p: rand() * Math.PI * 2 },
+      { k: 3, a: 0.10 + rand() * 0.10, p: rand() * Math.PI * 2 },
+      { k: 5, a: 0.05 + rand() * 0.07, p: rand() * Math.PI * 2 },
+    ];
+    const VERTS = 40;
+    const shape = new THREE.Shape();
+    for (let i = 0; i < VERTS; i++) {
+      const ang = (i / VERTS) * Math.PI * 2;
+      let f = 1;
+      for (const h of harmonics) f += Math.sin(ang * h.k + h.p) * h.a;
+      const r = wu(rWu) * f;
+      // Layout y runs into the screen (world +z); a mesh rotated -90 deg about X maps
+      // shape +y to world -z, so the layout offset is negated on the shape's y.
+      const x = wu(cxWu) + Math.cos(ang) * r * ax;
+      const y = -(wu(cyWu) + Math.sin(ang) * r * ay);
+      if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
+    }
+    shape.closePath();
+    into.push(shape);
+  };
+
+  for (const [cx, cy, w, h] of rects) {
+    // The visible tile/mat boundary is the KERB's outer edge, not the fill's.
+    const bw = w + EDGE_BAND * 2;
+    const bh = h + EDGE_BAND * 2;
+    const perim = 2 * (bw + bh);
+    const stations = Math.max(14, Math.round(perim / 28));
+    for (let i = 0; i < stations; i++) {
+      if (rand() > 0.55) continue;
+      // Jittered arc-length walk, then mapped onto the rectangle's perimeter.
+      let t = ((i + 0.5 + (rand() - 0.5) * 0.8) / stations) * perim;
+      t = ((t % perim) + perim) % perim;
+      let px: number;
+      let py: number;
+      let alongX: boolean;
+      if (t < bw) { px = cx - bw / 2 + t; py = cy - bh / 2; alongX = true; }
+      else if (t < bw + bh) { px = cx + bw / 2; py = cy - bh / 2 + (t - bw); alongX = false; }
+      else if (t < 2 * bw + bh) { px = cx + bw / 2 - (t - bw - bh); py = cy + bh / 2; alongX = true; }
+      else { px = cx - bw / 2; py = cy + bh / 2 - (t - 2 * bw - bh); alongX = false; }
+      // Sit ON the line, with a small bias either way so the fringe is not a bead
+      // chain threaded on a wire.
+      const bias = (rand() - 0.5) * 9;
+      if (alongX) py += bias; else px += bias;
+      // 4-9 wu, i.e. 11-25 px at shipped framing and 22-50 px along the edge after the
+      // stretch. A first pass at 6-14 wu put 85 px lobes on the line and they read as
+      // SPILLS, not scuffs — `docs/LESSONS.md` §6, a mark the size of a tile reads as
+      // a feature rather than as grain.
+      const r = 4 + rand() * 5;
+      const ax = alongX ? 2.0 : 0.62;
+      const ay = alongX ? 0.62 : 2.0;
+      blob(shapes[rand() < 0.58 ? 0 : 1], px, py, r, ax, ay);
+    }
+  }
+
+  for (const [k, mat] of [[0, grimeMat], [1, dustMat]] as const) {
+    if (!shapes[k].length) continue;
+    const m = mesh(new THREE.ShapeGeometry(shapes[k], 4), mat, 'floor_mat_edge_wear');
+    m.rotation.x = -Math.PI / 2;
+    m.position.y = MAT_WEAR_Y;
+    m.castShadow = false;
+    m.receiveShadow = false;
+    noOutline(m);
+    g.add(m);
   }
   return g;
 }
@@ -1766,6 +2108,29 @@ export function buildFloor(M: Materials): THREE.Group {
       g.add(drain);
     }
   }
+
+  // ── Nothing crossed a mat's edge until now — see `buildMatEdgeWear` ──────────
+  //
+  // Both mat families at once (the four 110x110 hub service zones and the three big
+  // utility pads), because they are ONE ground language and the failure is a property
+  // of the language, not of a footprint. `depthWrite: false` on both clones: these are
+  // transparent and sit above the pads, and a transparent material that writes depth
+  // silently occludes whatever is drawn after it (`docs/LESSONS.md` §1, corollary).
+  const edgeGrime = M.floorGrime.clone() as THREE.MeshBasicMaterial;
+  edgeGrime.opacity = 0.20;
+  edgeGrime.depthWrite = false;
+  // 0.09, not `M.dust`'s own 0.5 and not the 0.13 first tried: at 0.13 a mark straddling
+  // the line came out as a pale CREAM lobe over the pink half, which is the tidemark
+  // grammar `buildStainCluster` uses for an evaporated spill. These have to read as
+  // scuff, so they stay under the threshold where the eye assigns them a source.
+  const edgeDust = M.dust.clone() as THREE.MeshBasicMaterial;
+  edgeDust.opacity = 0.09;
+  edgeDust.depthWrite = false;
+  g.add(buildMatEdgeWear(edgeGrime, edgeDust, [...hubMatZones, ...utilityPads], 90210));
+  // The contact crease — see `buildMatCrease`. Drawn AFTER the fringe so the two read
+  // as one treatment; both sit at `MAT_WEAR_Y`, outside the mat, on the tile.
+  const crease = buildMatCrease([...hubMatZones, ...utilityPads], 0x2A1B24);
+  if (crease) g.add(crease);
 
   // Border trim — thin frame marking the nominal playfield edge.
   const trimT = 0.05;

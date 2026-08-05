@@ -1,0 +1,33 @@
+{
+  "band": 9,
+  "groups": [
+    {
+      "title": "OURS BEFORE — git HEAD, isolated via headserve (1600x900)",
+      "edges": [
+        { "img": "shots/arena/h0/freezer_nw.png", "line": [880, 640, 1085, 640], "label": "hub pad, W edge" },
+        { "img": "shots/arena/h0/freezer_nw.png", "line": [420, 310, 420, 480], "label": "NW freezer pad, S edge" },
+        { "img": "shots/arena/h0/pot_diagonal.png", "line": [700, 300, 700, 430], "label": "hub pad, N edge" },
+        { "img": "shots/arena/h0/freezer_nw.png", "line": [700, 570, 700, 615], "label": "control: tile grout" }
+      ]
+    },
+    {
+      "title": "OURS AFTER — HEAD + src/arena/floor.ts, same server, same stations",
+      "edges": [
+        { "img": "shots/arena/h1/freezer_nw.png", "line": [880, 640, 1085, 640], "label": "hub pad, W edge" },
+        { "img": "shots/arena/h1/freezer_nw.png", "line": [420, 310, 420, 480], "label": "NW freezer pad, S edge" },
+        { "img": "shots/arena/h1/pot_diagonal.png", "line": [700, 300, 700, 430], "label": "hub pad, N edge" },
+        { "img": "shots/arena/h1/freezer_nw.png", "line": [700, 570, 700, 615], "label": "control: tile grout" }
+      ]
+    },
+    {
+      "title": "REFERENCE — ground-material boundaries, curated top-down Brawl Stars plates (1176 wide)",
+      "edges": [
+        { "img": "reference/images/curated/gameplay_topdown/bs_04.png", "line": [420, 545, 420, 628], "label": "bs_04 grass band, hard straight" },
+        { "img": "reference/images/curated/gameplay_topdown/bs_04.png", "line": [610, 130, 610, 215], "label": "bs_04 LIGHT path band" },
+        { "img": "reference/images/curated/gameplay_topdown/bs_01.png", "line": [815, 150, 815, 240], "label": "bs_01 bush -> paver" },
+        { "img": "reference/images/curated/gameplay_topdown/bs_06.png", "line": [710, 150, 830, 150], "label": "bs_06 ground seam, vertical" },
+        { "img": "reference/images/curated/gameplay_topdown/bs_06.png", "line": [700, 55, 700, 125], "label": "bs_06 ground seam, horizontal" }
+      ]
+    }
+  ]
+}

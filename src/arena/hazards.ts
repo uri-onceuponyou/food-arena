@@ -69,7 +69,15 @@ export function buildPot(M: Materials): PotAssembly {
   // Contact AO directly under the pot's own base — a tighter, darker ring than the
   // broad hazard scorch, so the heaviest object in the arena visibly presses into
   // the floor rather than floating on top of it.
-  g.add(buildContactShadow(M.contactShadow, bodyR * 2.1, bodyR * 2.1, 1));
+  // ⚠️ `scale` was 1, and 1 is the one value that makes this decal invisible. The plane
+  // is `bodyR * 2.1` across, so at scale 1 its half-width is 1.05 * bodyR against a pot
+  // of radius `bodyR` — the decal peeks out by **5%** of its own radius, and the only
+  // part of a radial gradient that reaches the screen is its outermost twentieth, where
+  // alpha is ~0.03. A blind critic reading the frame cold said the pot "meets the floor
+  // with no contact shadow at all"; it had one and it was delivering a 3% wash. See the
+  // stop-placement note on `makeContactShadowTexture`, which is the other half of this.
+  // 1.45 puts the visible annulus at u 0.66..1.00, in the band the stops now carry.
+  g.add(buildContactShadow(M.contactShadow, bodyR * 2.1, bodyR * 2.1, 1.45));
   // The pot used to also get a hand-placed BAKED directional shadow here, because it is
   // the tallest object in the arena and had no CoverBox (so it never ran through
   // `addCover`). That whole system is retired: ablation measured the baked cast decals at
