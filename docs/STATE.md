@@ -129,6 +129,33 @@ turned out to be a bug rather than a taste gap:
 | p2 | prop surfaces carry **one flat value per face** — no gradient across a face, no crevice darkening | the form-highlight is **missing** |
 | p6 | share of playfield above luma 0.80: **ours 0.67–1.68% vs reference 2.39–19.06%**, non-overlapping | **nothing bright is ever drawn** |
 
+### ✅ LANDED — `c90c9ea` · `ecd07fa` · `e4734e2`
+
+| metric | before | after | in floors | reference |
+|---|---|---|---|---|
+| **hi70** (playfield share > luma 0.70) | 2.40% | **13.58%** | **4.7×** | min 6.65 · median 9.40 |
+| **p95** (playfield) | 0.6616 | **0.7725** | **3.6×** | min 0.732 · median 0.791 |
+| live rims, whole scene | 71/112 | **93/112** | — | — |
+| rim **corpses** | **22** | **0** | — | — |
+| cast `centreContrast` (paired, exact) | 0.0426 | **0.0516** | +21%, held/grew 13/18 | — |
+| `arena-scan` meanSat | 0.4657 | **0.4877** | — | target 0.493 |
+
+**Saturation went UP**, confirmed by an instrument sharing no code with the probe. 10 of 13 baseline
+rails moved closer. `floorprobe` 5/5 with `pantry_ne` **byte-identical** to its pre-session value —
+the drift control proving no floor value moved.
+
+⚠️ **`clippedHighPct` is NOT a concern**: measured on the identical definition, whole frame, both
+sides — **reference 1.36–16.36%** (median ~6.2%) against **ours 0.379% → 0.434%**. We are **3.1×
+below the lowest plate**. The rise is correct and nowhere near the band.
+
+⚠️ **The `lollipop`/`sushi` scare RESOLVED — not a regression.** A partial run showed lollipop 12 of
+18 stations under 0.10 and sushi 6, against "1 each" in a 16:43 `gate.json`. But `1f51987` — the
+pre-session record — already says **lollipop 11 of 18, sushi 6 of 18**. Sushi is **unchanged**;
+lollipop moved by **one** station, exactly the one the arena agent predicted from its own +0.0088
+ground lift before measuring (`pot_diagonal` 0.1015, the only station in the 0.100–0.109 band).
+**The 16:43 baseline was the outlier** — and p5 had already recorded those figures as *"neither
+confirmed nor refuted"*.
+
 ### 🚨 Root cause — `Material.clone()` silently drops `onBeforeCompile`
 
 `three/src/materials/Material.js` `copy()` names 40+ properties and **not** `onBeforeCompile`.
