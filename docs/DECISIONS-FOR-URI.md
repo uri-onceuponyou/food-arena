@@ -19,7 +19,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **15** | Should a fleeing enemy shoot at you? | — | ✅ **DONE — it aims at you now** | landed |
 | **16** | Soup lost its red band, egg went cream, cast p95 is +0.027 over reference | shipped | **look at it — these are looks, not measurements** | per-character, self-contained |
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
-| **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | no concealment | **your call — this is a feature, not an art pass** | new mechanic |
+| **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | inert, built | ✅ **ANSWERED — Uri: *"add bushes, but make it relevant to kitchen. For example plates you can hide under."*** Sim mechanic shipped inert; **→ now §29** | done |
 | **19** | Back out of a live match abandons it silently · mid-match reload restarts it | abandon · restart | **two small feel calls** | one line each |
 | **22** | **Character levels 1–15** | — | ✅ **DONE — shipped, and the flat curve is VERIFIED (1.9pp drift)** | landed |
 | **23** | ⚠️ PvP makes `PLAYER_MAX_HP` ≠ `ENEMY_MAX_HP` **unfair by definition** | 100 vs 90 | **your §12 dial has a shelf life** | a roadmap item |
