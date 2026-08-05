@@ -582,8 +582,28 @@ const RAILS = [
   { key: 'arenaWarmChroma', label: '(arena only) warm chroma', target: REF.warmChroma, band: [REF.warmChroma * 0.5, REF.warmChroma * 1.5],
     tol: 0.010, kind: 'HUD-free, advisory', role: true, advisory: true,
     note: '~25% of whole-frame warm chroma is HUD furniture, not arena' },
+  // freeAbove, for the SAME reason its whole-frame twin `coolChroma` above is — this is
+  // the identical quantity measured HUD-free, and shipping one half of a pair with the
+  // one-sided flag and the other without makes them return OPPOSITE verdicts on the
+  // identical directional move. Caught on the arena value lift (commit ce49cd3): in one
+  // run `coolChroma` 0.389 -> 0.4234 read `ok` while `arenaCoolChroma` 0.3959 -> 0.4373
+  // read REGRESSION.
+  //
+  // This is the THIRD instance of this exact shape in this file, and the first two are
+  // documented a few lines up: `coolChroma` itself shipped without `freeAbove` and cost a
+  // measured `contrast` 0.62 -> 0.72 that was dropped for spending 0.016 of a 0.020
+  // budget; `envWarmShare` shipped with a ceiling as its drift target. Commit 8a91f7c is
+  // literally titled "a SECOND arena-scan rail punished the move its own note recommends".
+  // Both fixes were applied to one rail of a pair and not to its twin.
+  //
+  // ⚠️ Declared conflict of interest: this removes one of the two baseline regressions
+  // that ce49cd3's own change produced. It is committed separately from that change, and
+  // ce49cd3's message quotes the RAW numbers, so the arena result can be judged with this
+  // reverted. The other regression there (`playerRankMedian` 19.5 -> 31) is real and is
+  // NOT touched.
   { key: 'arenaCoolChroma', label: '(arena only) cool chroma', target: REF.coolChroma, band: [REF.coolChroma * 0.5, REF.coolChroma * 1.5],
-    tol: 0.020, kind: 'HUD-free, advisory', role: true, advisory: true, note: '' },
+    tol: 0.020, kind: 'HUD-free, advisory, freeAbove', role: true, advisory: true, freeAbove: true,
+    note: 'the HUD-free twin of coolChroma; one-sided for the same reason — LESSONS §8' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
