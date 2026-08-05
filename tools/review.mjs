@@ -43,6 +43,52 @@
  * Whichever way it goes, `manifest.json` records `verified`, the frame statistics and
  * the full sidecar, so a verdict can always be traced back to the provenance of the
  * image it was formed from.
+ *
+ * ── WHAT AN AUDIT OF THIS INSTRUMENT FOUND ──────────────────────────────────
+ * The capture gate above guards the IMAGE. Nothing guarded the COMPARISON, and a
+ * 29-critic audit (`tools/tmp/{packet_audit,critic_cells,subject_ruler}.mjs`) found
+ * the comparison is where this instrument actually loses its numbers. Every figure
+ * below is measured, not asserted:
+ *
+ *   THE CRITIC IS NOT THE NOISE SOURCE. Sixteen fresh critics on one fixed image,
+ *   five different prompt phrasings, both A/B slots: our side 5.125 +/- 0.50, the
+ *   reference side 8.17 +/- 0.39. With the prompt held byte-identical the spread is
+ *   ZERO (6 of 6). Position bias is zero — the same pair with our panel forced into A
+ *   and then into B returns identical means, and a panel scored against ITSELF ties
+ *   (6/6 and 5/5). => at the usual n=2 the minimum resolvable difference is ~0.9
+ *   points. Nothing smaller than that is a result.
+ *
+ *   THE RUBRIC IS WORTH 2.0 POINTS, and it was never recorded. The SAME sheets score
+ *   5.0 under "overall visual quality" and 3.0 under "character design and rendering
+ *   only" — deterministically, 2 of 2 each, with the reference side unmoved at 8.5.
+ *   The whole recorded character series (3.6 -> 3.25 -> 3.0 -> 2.0) spans less than
+ *   one rubric change, and no round wrote its rubric down. That is why `--rubric` now
+ *   goes in the packet: a score is comparable ONLY to another score with the same one.
+ *
+ *   THE PACKET IS NOT BLIND, and it does not matter as much as feared. Critics name
+ *   the reference titles on sight, and this repo's CLAUDE.md is in every subagent's
+ *   context, so they also know the project is a food brawler and know the 7-9
+ *   calibration band — several quoted it back unprompted. Tested for damage and found
+ *   little: told "one of these is shipped and one is a WIP", two critics shown TWO
+ *   REFERENCE PLATES refused to invent a loser and returned 8.5/8 and 9/8. Recognition
+ *   does not confer immunity either — a deliberately degraded reference plate scored
+ *   4 against its own clean original's 8. The instrument discriminates.
+ *
+ *   THE PLATE DRAW IS THE REAL DEFECT. `gameplay` holds 6 Brawl Stars top-down frames
+ *   and 5 Zooba over-the-shoulder frames, whose camera is not ours. Three character
+ *   rounds drew 4 of 6 Zooba — a recurrence of the exact defect already recorded
+ *   against the arena packet — and one draw was `zb_01`, a wide aerial parachute shot
+ *   the library's own INDEX calls a reference for ENVIRONMENT ART, used to score
+ *   CHARACTERS. `gameplay_topdown` (Brawl Stars only) existed and was not used.
+ *
+ *   FALSIFIED, and worth stating because it was the leading suspicion: resolution and
+ *   framing are NOT stacked against us. The Brawl Stars plates are 1176x~730 marketing
+ *   crops that arrive UPSCALED 1.33-1.43x, delivering 0.42-0.48x our edge acuity, and
+ *   they still score 8. And subject scale is matched, not 25-35% short — measured off
+ *   a ruled frame, our character is 10.4-14.2% of frame height against Shelly 12.5%
+ *   and Barley ~11-13.6% in the same plate, and two blind critics measured ~12%
+ *   independently and said the failure is MASS, not scale. `CHARACTER_HEIGHT` should
+ *   not move on framing grounds.
  */
 
 import { readdir, mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -144,6 +190,38 @@ async function vouch(png, { allowUnverified, allowRefused }) {
   };
 }
 
+// ── Comparison gate ──────────────────────────────────────────────────────────
+/**
+ * Categories whose plates do NOT share one camera. Drawing from these mixes cameras
+ * inside a single round, and the round then measures the camera instead of the work.
+ * Measured consequence, from the audit in this file's header: three character rounds
+ * drew 4 of 6 Zooba plates — over-the-shoulder third person against our top-down —
+ * repeating a defect already recorded against the arena packet.
+ */
+const MIXED_CAMERA = {
+  gameplay: {
+    why: '6 Brawl Stars top-down frames + 5 Zooba OVER-THE-SHOULDER frames, and zb_01 is '
+      + 'a wide aerial the library INDEX offers as an ENVIRONMENT reference',
+    instead: 'gameplay_topdown',
+  },
+  character: {
+    why: 'tight head-and-shoulders busts (zb_03/zb_04 are face-only) mixed with full-body '
+      + 'pedestal shots — a bust reads more finished than a full body of the SAME asset '
+      + 'purely because it fills more pixels',
+    instead: 'fullbody_fair',
+  },
+};
+
+/**
+ * The single number nobody had for this instrument. Sixteen fresh critics on a fixed
+ * image gave sd 0.50; a round mean over `n` panels therefore carries se = 0.50/sqrt(n),
+ * and a DIFFERENCE between two rounds carries sqrt(2) more.
+ */
+function resolutionFloor(n) {
+  const SD = 0.50;
+  return 1.96 * Math.SQRT2 * (SD / Math.sqrt(n));
+}
+
 const curatedDir = resolve(`reference/images/curated/${args.category}`);
 if (!existsSync(curatedDir)) {
   console.error(`No curated references at ${curatedDir}.`);
@@ -194,9 +272,19 @@ for (let i = 0; i < picked.length; i++) {
   sheets.push({ sheet, key, reference: basename(ref) });
 }
 
+const rubric = typeof args.rubric === 'string' ? args.rubric : 'UNSPECIFIED';
+const floor = resolutionFloor(sheets.length);
+
 const manifest = {
   ours: args.ours,
   category: args.category,
+  // The rubric is part of the measurement, not part of the request. Two rounds with
+  // different rubrics are not on the same scale — measured at 2.0 points on identical
+  // images, which is larger than any change this project has ever moved a score by.
+  rubric,
+  plates: sheets.map((s) => s.reference),
+  mixedCamera: MIXED_CAMERA[args.category] ?? null,
+  resolutionFloor: +floor.toFixed(2),
   sheets: sheets.map((s) => s.sheet),
   keys: sheets.map((s) => s.key),
   // So a verdict can always be traced back to the provenance of the image it was
@@ -205,10 +293,43 @@ const manifest = {
 };
 await writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
+// The rubric goes in the packet as text, so the next round can be run with the SAME
+// one instead of whatever its orchestrator happens to type.
+await writeFile(join(outDir, 'RUBRIC.txt'),
+  `${rubric}\n\n(Paste this verbatim into the critic brief. A score is comparable only to\n`
+  + `another score taken under the same rubric — the measured difference between\n`
+  + `"overall visual quality" and "character design and rendering only" on identical\n`
+  + `sheets is 2.0 points.)\n`);
+
 console.log('\n── critic packet ready ──');
 console.log('Show the critic ONLY these files:');
 sheets.forEach((s) => console.log(`  ${s.sheet}`));
 console.log(`\nKeys (orchestrator only): ${join(outDir, 'sheet_*.key.json')}`);
+
+console.log(`\nRubric: ${rubric === 'UNSPECIFIED' ? 'UNSPECIFIED' : rubric.slice(0, 72)}`);
+if (rubric === 'UNSPECIFIED') {
+  console.error('!! NO RUBRIC RECORDED. Pass --rubric "<the exact question the critic is asked>".');
+  console.error('   Measured on identical sheets: "overall visual quality" scores 5.0 and');
+  console.error('   "character design and rendering only" scores 3.0, both deterministic, with');
+  console.error('   the reference side unmoved. A score whose rubric is not written down cannot');
+  console.error('   be compared to any other score, including the one it is meant to improve on.');
+}
+
+console.log(`Resolution floor: differences below ~${floor.toFixed(1)} points are NOT results at n=${sheets.length}`);
+console.log('   (critic sd 0.50 over 16 fresh critics on one fixed image; position bias 0.00)');
+
+if (MIXED_CAMERA[args.category]) {
+  const m = MIXED_CAMERA[args.category];
+  console.error(`\n!! MIXED-CAMERA CATEGORY "${args.category}" — ${m.why}.`);
+  console.error(`   Drew: ${sheets.map((s) => s.reference).join(', ')}`);
+  console.error(`   Prefer --category ${m.instead}. Three character rounds drew 4 of 6 Zooba`);
+  console.error('   plates before anyone looked, repeating the arena packet\'s recorded defect.');
+}
+
+console.log('\nNot actually blind: critics name the reference titles on sight, and this repo\'s');
+console.log('CLAUDE.md is in every subagent\'s context (they quote the 7-9 band back unprompted).');
+console.log('Tested for damage and found little — shown two REFERENCE plates and told one was a');
+console.log('WIP, critics returned 8.5/8 and 9/8 rather than inventing a loser.');
 // Say it at the END too. The refusal text scrolls off; this is the line the
 // orchestrator reads before it spends ~300k tokens, and a verdict formed from an
 // unvouched image has to be labelled as such when it is written down.
