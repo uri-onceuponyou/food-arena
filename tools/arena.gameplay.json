@@ -130,8 +130,8 @@
       "kind": "flour_sacks"
     },
     {
-      "x": 265,
-      "y": 330,
+      "x": 100,
+      "y": 600,
       "w": 160,
       "h": 55,
       "kind": "prep_counter"
@@ -144,8 +144,8 @@
       "kind": "prep_counter"
     },
     {
-      "x": 1135,
-      "y": 670,
+      "x": 1300,
+      "y": 400,
       "w": 160,
       "h": 55,
       "kind": "prep_counter"

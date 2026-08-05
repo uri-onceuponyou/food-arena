@@ -56,6 +56,12 @@
  */
 
 import { chromium } from 'playwright';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const ROOT = resolve(new URL('../..', import.meta.url).pathname);
+const { PLAYER_SIZE } = await import(`${ROOT}/src/game/rules.ts`);
 
 const BASE = process.env.PREVIEW_BASE ?? 'http://localhost:5173';
 const QUIET = process.argv.includes('--quiet');
@@ -67,6 +73,13 @@ const LAUNCH = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-sw
  *  under SwiftShader; 8 is far below either and far above float noise. */
 const MOVED_WU = 8;
 
+/** Game frames a held key is kept down for. At the loop's 50 ms dt clamp one frame is
+ *  PLAYER_SPEED x 50 = 6 wu, so 12 frames is 72 wu — comfortably over `MOVED_WU` and
+ *  comfortably under the shortest legal spawn runway (84 wu north, see
+ *  `tools/tmp/spawn_runway.mjs`), which is what keeps this a test of INPUT and not an
+ *  accidental second test of the arena layout. */
+const HOLD_FRAMES = 12;
+
 const results = [];
 let failures = 0;
 function record(group, check, ok, detail = '') {
@@ -76,6 +89,36 @@ function record(group, check, ok, detail = '') {
 
 const dbg = (p) => p.evaluate(() => window.__matchDebug ?? null);
 const fighters = (p) => p.evaluate(() => window.__vfxDebugFighters ?? null);
+
+/**
+ * Sample `__matchDebug` until `want()` holds, or until the deadline — then return the LAST
+ * sample either way.
+ *
+ * ── Why this replaced a fixed `waitForTimeout(400)` ─────────────────────────
+ * Every `*-reaches-sim` assertion used to read the debug block exactly 400 ms after
+ * `keyboard.down`. `MatchInput.move` is written by the game loop, and under SwiftShader
+ * that loop runs at ~9-10 fps on a *good* run — so 400 ms is between 3 and 4 frames, and
+ * a peer's render work in the same tree pushes it lower. Three consecutive runs of this
+ * suite on identical code scored 85/85, 78/85 and 84/85, with the failures moving between
+ * `KeyW`, `ArrowLeft`, `ArrowRight`, `ArrowDown`, `Digit1` and `mousedown` — every one of
+ * them reporting `move = (0,0)` or `attack = false` while the input was demonstrably held.
+ * That is a harness race, and `docs/LESSONS.md` §10 is explicit that a slow harness
+ * fabricates false negatives (it already cost this project four of five countdown blips).
+ *
+ * The assertion is UNCHANGED in strength: the deadline is bounded and the last sample is
+ * returned regardless, so an input that genuinely never arrives still fails, with the same
+ * message. What is removed is only the assumption that four frames is enough.
+ */
+async function pollDbg(page, want, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = await dbg(page);
+  while (Date.now() < deadline) {
+    if (last && want(last)) return last;
+    await page.waitForTimeout(60);
+    last = await dbg(page);
+  }
+  return last;
+}
 
 async function newPage(browser) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 620 }, deviceScaleFactor: 1 });
@@ -94,12 +137,25 @@ async function waitLiveMatch(page, timeout = 120000) {
  * while it was down, and how far the fighter actually travelled.
  */
 async function holdKey(page, code, ms = 1200) {
+  // Establish an IDLE baseline first. Without it the poll below returns instantly with the
+  // PREVIOUS key's value — the loop may not have processed the last `keyup` yet — and the
+  // suite reports `ArrowRight -> move = (-1,0)`, which is what the first version of this
+  // fix actually produced. With `move` proven to be (0,0) before the press, any non-zero
+  // sample afterwards can only have come from this key.
+  await pollDbg(page, (d) => d.moveX === 0 && d.moveY === 0, 2000);
   const before = (await fighters(page)).player;
+  const idle = await dbg(page);
   await page.keyboard.down(code);
-  // Sampled while held rather than after release, since `moveX` is zero again by then.
-  await page.waitForTimeout(Math.min(400, ms));
-  const during = await dbg(page);
-  await page.waitForTimeout(Math.max(0, ms - 400));
+  // Sampled while held rather than after release, since `moveX` is zero again by then —
+  // and POLLED rather than slept, see `pollDbg`.
+  const during = await pollDbg(page, (d) => d.moveX !== 0 || d.moveY !== 0, 2000);
+  // Held for a number of GAME FRAMES, not for a number of milliseconds. `docs/LESSONS.md`
+  // §10: a slow harness fabricates false negatives, and this one did — measured at load
+  // average 58 on this box, a 1.2 s hold advanced the loop ONE tick and the fighter moved
+  // 6.0 wu, so `KeyD/ArrowUp/ArrowDown-moves-fighter` all failed at exactly the value the
+  // real 60c5b92 defect produced. Displacement is `HOLD_FRAMES x step` and nothing else,
+  // so the number this returns no longer depends on how busy the machine is.
+  await pollDbg(page, (d) => d.frames >= idle.frames + HOLD_FRAMES, Math.max(ms * 8, 12000));
   await page.keyboard.up(code);
   await page.waitForTimeout(150);
   const after = (await fighters(page)).player;
@@ -127,11 +183,11 @@ async function auditMovement(page, group) {
   }
 
   // Diagonal — both axes must survive the same tick, and neither may cancel the other.
+  await pollDbg(page, (d) => d.moveX === 0 && d.moveY === 0, 2000);
   const b = (await fighters(page)).player;
   await page.keyboard.down('KeyW');
   await page.keyboard.down('KeyD');
-  await page.waitForTimeout(400);
-  const diag = await dbg(page);
+  const diag = await pollDbg(page, (d) => d.moveX !== 0 && d.moveY !== 0, 1200);
   await page.waitForTimeout(500);
   await page.keyboard.up('KeyD');
   await page.keyboard.up('KeyW');
@@ -143,16 +199,29 @@ async function auditMovement(page, group) {
     `d = (${(a.x - b.x).toFixed(1)}, ${(a.y - b.y).toFixed(1)})`);
 
   // Opposite keys held together must cancel to a standstill, not pick a winner.
+  // ⚠️ This is the one case where polling for the assertion's OWN condition would make it
+  // vacuous: `moveX === 0` is also true before either key has arrived. So the two presses
+  // are staged — KeyA is proven to have reached the sim, then KeyD is given two whole
+  // frames of the loop — and only then is the cancellation asserted. If KeyD never arrives,
+  // `moveX` is still -1 and this fails exactly as it should.
+  await pollDbg(page, (d) => d.moveX === 0 && d.moveY === 0, 2000);
   await page.keyboard.down('KeyA');
+  const solo = await pollDbg(page, (d) => d.moveX === -1, 1200);
   await page.keyboard.down('KeyD');
-  await page.waitForTimeout(400);
-  const both = await dbg(page);
+  const f0 = solo.frames;
+  // Two whole frames of the loop, waited for by FRAME COUNT rather than by clock — under
+  // load a 1500 ms sleep bought one tick, which is not enough to say the second keydown
+  // was seen at all.
+  const both = await pollDbg(page, (d) => d.frames >= f0 + 2, 12000);
   await page.keyboard.up('KeyA');
   await page.keyboard.up('KeyD');
-  record(group, 'opposite-keys-cancel', both.moveX === 0,
-    `MatchInput.move.x = ${both.moveX}`);
+  record(group, 'opposite-keys-cancel', solo.moveX === -1 && both.moveX === 0 && both.frames >= f0 + 2,
+    `KeyA alone -> move.x = ${solo.moveX}; +KeyD after ${both.frames - f0} frames -> move.x = ${both.moveX}`);
 
   // Release. A key that never clears is a fighter that walks into a wall all match.
+  // Let the loop actually see the keyup before the drift window opens — otherwise a slow
+  // frame applies one more held step INSIDE the measurement and reads as drift.
+  await pollDbg(page, (d) => d.moveX === 0 && d.moveY === 0, 1200);
   const relBefore = (await fighters(page)).player;
   await page.waitForTimeout(700);
   const relAfter = (await fighters(page)).player;
@@ -174,9 +243,9 @@ async function auditMovement(page, group) {
   // focused. So the real focus change cannot be produced, and this drives the exact
   // event a real one would deliver — same type, same target, same handler — which is
   // as far as any harness in this repo can go.
+  await pollDbg(page, (d) => d.moveX === 0 && d.moveY === 0, 2000);
   await page.keyboard.down('KeyD');
-  await page.waitForTimeout(300);
-  const heldBefore = await dbg(page);
+  const heldBefore = await pollDbg(page, (d) => d.moveX === 1, 1200);
   const canBlur = await page.evaluate(async () => {
     const other = window.open('about:blank');
     await new Promise((r) => setTimeout(r, 250));
@@ -184,8 +253,7 @@ async function auditMovement(page, group) {
     return document.hasFocus();
   }).then((f) => f === false).catch(() => false);
   await page.evaluate(() => window.dispatchEvent(new FocusEvent('blur')));
-  await page.waitForTimeout(250);
-  const heldAfter = await dbg(page);
+  const heldAfter = await pollDbg(page, (d) => d.moveX === 0, 1200);
   await page.keyboard.up('KeyD');
   record(group, 'blur-clears-held-keys', heldBefore.moveX === 1 && heldAfter.moveX === 0,
     `moveX ${heldBefore.moveX} -> ${heldAfter.moveX} on window "blur"` +
@@ -194,11 +262,9 @@ async function auditMovement(page, group) {
   // Digit keys select weapon slots. The HUD bar is the touch equivalent; this is the
   // desktop half, and it also proves `keydown` carries `e.key` as well as `e.code`.
   await page.keyboard.press('Digit2');
-  await page.waitForTimeout(200);
-  const w2 = (await dbg(page)).selectedWeapon;
+  const w2 = (await pollDbg(page, (d) => d.selectedWeapon === 1, 1200)).selectedWeapon;
   await page.keyboard.press('Digit1');
-  await page.waitForTimeout(200);
-  const w1 = (await dbg(page)).selectedWeapon;
+  const w1 = (await pollDbg(page, (d) => d.selectedWeapon === 0, 1200)).selectedWeapon;
   record(group, 'digit-keys-select-weapon', w2 === 1 && w1 === 0,
     `slot after "2" = ${w2}, after "1" = ${w1}`);
 }
@@ -218,8 +284,11 @@ async function auditAimAndFire(page, group) {
 
   const facingAt = async (ox, oy) => {
     await page.mouse.move(at.x + ox, at.y + oy);
-    await page.waitForTimeout(260);
-    const d = await dbg(page);
+    // The aim pipeline settles on the frame after the move; poll for the facing to point
+    // the way the cursor was put rather than assuming one 260 ms sleep covers a frame.
+    const wantX = Math.sign(ox), wantY = Math.sign(oy);
+    const d = await pollDbg(page, (s) =>
+      (wantX === 0 || Math.sign(s.facingX) === wantX) && (wantY === 0 || Math.sign(s.facingY) === wantY), 1200);
     return { x: d.facingX, y: d.facingY };
   };
   const right = await facingAt(200, 0);
@@ -236,13 +305,12 @@ async function auditAimAndFire(page, group) {
   await page.mouse.move(at.x + 200, at.y);
   const casts0 = await page.evaluate(() => window.__vfxQaCounts?.cast ?? 0);
   await page.mouse.down();
-  await page.waitForTimeout(300);
-  const held = await dbg(page);
+  const held = await pollDbg(page, (d) => d.attack === true, 1200);
   await page.waitForTimeout(700);
   await page.mouse.up();
+  const released = await pollDbg(page, (d) => d.attack === false, 1200);
   await page.waitForTimeout(250);
   const casts1 = await page.evaluate(() => window.__vfxQaCounts?.cast ?? 0);
-  const released = await dbg(page);
   record(group, 'mousedown-reaches-sim', held.attack === true, `MatchInput.attack = ${held.attack}`);
   record(group, 'mousedown-fires-weapon', casts1 > casts0, `cast events ${casts0} -> ${casts1}`);
   record(group, 'mouseup-stops-firing', released.attack === false, `MatchInput.attack = ${released.attack}`);
@@ -261,13 +329,18 @@ async function auditShippedPath(browser) {
   const step = async (name, sel, want) => {
     if (await page.evaluate((s) => window.__screen === s, want)) return;
     try {
-      await page.waitForSelector(sel, { state: 'visible', timeout: 45000 });
-      await page.click(sel, { force: true, timeout: 15000 });
+      await page.waitForSelector(sel, { state: 'visible', timeout: 90000 });
+      await page.click(sel, { force: true, timeout: 30000 });
     } catch { /* raced the auto-advance; the wait below is the real assertion */ }
-    await page.waitForFunction((s) => window.__screen === s, want, { timeout: 60000 });
+    // 180 s, not 60. Measured: at load average 75-92 on this box (six agents, each with a
+    // Vite server and a SwiftShader Chromium) the shipped route timed out at 60 s while the
+    // `/?player=&enemy=` route booted fine — i.e. the suite reported "cannot reach a live
+    // match" for a game that reaches one. `docs/LESSONS.md` §10, again: a slow harness
+    // fabricates false negatives, and a boot timeout is the loudest false negative there is.
+    await page.waitForFunction((s) => window.__screen === s, want, { timeout: 180000 });
   };
   try {
-    await page.waitForFunction('typeof window.__screen === "string"', null, { timeout: 60000 });
+    await page.waitForFunction('typeof window.__screen === "string"', null, { timeout: 180000 });
     await step('opening: Start', '.open-start', 'home');
     await step('home: Start Game', '[data-el="start"]', 'characters');
     await step('characters: Fight!', '[data-el="fight"]', 'match');
@@ -346,8 +419,7 @@ async function auditPointerLockBoundary(browser) {
 
   // Capture, through the real chip, with a real click.
   await page.click('[data-el="capture"]', { force: true });
-  await page.waitForTimeout(400);
-  const locked = await dbg(page);
+  const locked = await pollDbg(page, (d) => d.pointerLocked === true, 3000);
   record(G, 'sim-capture-engages', locked.pointerLocked === true, `pointerLocked=${locked.pointerLocked}`);
 
   // Movement must survive capture — the captured cursor model changes AIM, not motion.
@@ -396,28 +468,44 @@ async function auditPointerLockBoundary(browser) {
 /**
  * The QA footgun that produced the 2026-08 "WASD is dead" report — and the fix for it.
  *
- * `?px=850&py=500` puts the 42 wu fighter 25 wu from the centre of the `spice_cart`
- * CoverBox at (875,500,50,50), which is an overlap since 25 < (42+50)/2 = 46. `?px=`/`?py=`
- * deliberately does not validate against cover, so a QA URL really can bury a fighter.
+ * A `?px=`/`?py=` inside a `CoverBox` buries the 42 wu fighter: overlap is centre distance
+ * < (PLAYER_SIZE + w)/2 on both axes, and `?px=`/`?py=` deliberately does not validate
+ * against cover, so a QA URL really can bury one.
  *
  * WHAT USED TO HAPPEN: `movement.ts:tryMove` tested only the DESTINATION for overlap and
  * did no depenetration, so every step from inside was refused on both axes, forever,
- * silently — while the input layer was perfect the whole time. Measured band along y=500:
- * pinned for 829 < px < 921 (spice_cart) and 895 < px < 985 (`supply_barrel` at
- * (940,500,48,46)); free either side. Those bands are retained here because they are the
- * evidence for why this guard exists, and because the boundary landing exactly where burial
- * depth exceeds one step (PLAYER_SPEED 0.12 wu/ms x the loop's 50 ms dt clamp = 6 wu) is
- * what identified the mechanism.
+ * silently — while the input layer was perfect the whole time. The historical numbers, on
+ * the pre-60c5b92 layout: `?px=850&py=500` sat 25 wu from the `spice_cart` at
+ * (875,500,50,50), and the pinned band along y=500 ran 829 < px < 921 for that cart and
+ * 895 < px < 985 for the `supply_barrel` at (940,500,48,46). The boundary landing exactly
+ * where burial depth exceeds one step (PLAYER_SPEED 0.12 wu/ms x the loop's 50 ms dt clamp
+ * = 6 wu) is what identified the mechanism.
  *
  * WHAT HAPPENS NOW: `tryMove` pushes a fighter that is already inside a box back out along
  * its axis of least penetration before resolving the step, so all three cases below MOVE.
  *
+ * ── WHY THE COORDINATES ARE NO LONGER WRITTEN DOWN ──────────────────────────
+ * `60c5b92` moved every prop, and those two literals became open floor. The suite went on
+ * asserting them, so three checks failed against a layout that was CORRECT — the classic
+ * stale instrument, and re-typing the new numbers would only reset the clock on it.
+ *
+ * Every point below is now DERIVED FROM THE ARENA: pick a CoverBox **by kind**, offset off
+ * its centre by a stated fraction of the collision half-sum (so the point is provably
+ * inside, by construction, at any size the box ever takes), and assert the live game names
+ * THAT BOX back. Three separate things then have to agree before a number is reported:
+ *
+ *   1. `src/arena/kitchen.ts` vs `tools/arena.gameplay.json` — checked box-for-box by
+ *      `arena_probe.mjs --verify` before the browser is even launched.
+ *   2. the dump vs the LIVE arena — `qaSpawnInsideCover` must echo back exactly the box
+ *      this file aimed at, kind and coordinates and size. A moved prop cannot pass.
+ *   3. the derivation vs itself — the chosen point must overlap EXACTLY ONE box, because
+ *      `checkQaSpawn()` reports the first match in `arena.cover` order and an ambiguous
+ *      point would make assertion 2 a coin flip.
+ *
  * TWO ASSERTIONS, AND ONLY ONE OF THEM INVERTED:
  *   * `-cover-flag` still asserts `checkQaSpawn()` WARNS about the two buried cases.
  *     Depenetration rescues the fighter; it does not turn a bad QA coordinate into a good
- *     one, and a probe author still needs to be told. `spawnsInsideCover` drives this and
- *     nothing else now — the old `pinned` name is gone precisely because it meant two
- *     things and only one of them was still true.
+ *     one, and a probe author still needs to be told.
  *   * `-movement` is inverted: every case must now travel, and the buried ones must also
  *     end up outside the box they started in.
  *
@@ -429,33 +517,123 @@ async function auditPointerLockBoundary(browser) {
  * a fighter moving in the open gains no lateral drift, and one pressed exactly on a
  * collision boundary is not pushed off it.
  */
+
+/** Every box a fighter CENTRED at (x,y) would overlap. Exactly `movement.ts`'s test. */
+const coverHits = (arena, x, y) =>
+  arena.cover.filter((o) => Math.abs(x - o.x) < (PLAYER_SIZE + o.w) / 2 && Math.abs(y - o.y) < (PLAYER_SIZE + o.h) / 2);
+
+/** `checkQaSpawn()`'s exact string, rebuilt here so the assertion is on identity. */
+const boxLabel = (b) => `${b.kind ?? 'cover'} @(${b.x},${b.y}) ${b.w}x${b.h}`;
+
+/**
+ * The instance of `kind` nearest the arena's north-west, so the pick is deterministic and
+ * does not depend on `addCover` call order.
+ *
+ * `isolated` additionally requires that the box's INFLATED footprint (its own extent plus
+ * a fighter, i.e. the region where a centre is refused) touches no other box's. That is
+ * not fussiness, it is the precondition for the assertions below to be meaningful, and it
+ * was found by this suite: `?px=88&py=250` buried the fighter in the NW `supply_barrel`,
+ * whose inflated box OVERLAPS the NW freezer's by 17 wu. `escapeCover` takes the axis of
+ * least penetration, so it pushed the fighter 23 wu east — straight into the freezer —
+ * which pushed it 17 wu back west, into the barrel, and the two ping-ponged until
+ * `ESCAPE_PASSES` (4) ran out, leaving it stuck at x=94.0, the freezer's own west face.
+ * Min-translation depenetration has no exit from the intersection of two inflated boxes,
+ * and 18 such pairs exist in this layout (16 of them older than this file's last change).
+ * None is reachable in play — every one lies inside cover, where no legal step can put a
+ * fighter — so it is a `?px=`/`?py=` hazard and a warning for anyone adding sim-side
+ * knockback, a dash or a pull, not a live defect. Recorded rather than worked around
+ * silently, because "the fighter did not escape" would otherwise read as a depenetration
+ * regression the next time this suite runs.
+ */
+function boxOfKind(arena, kind, { isolated = false } = {}) {
+  const inflatedTouch = (a, b) =>
+    (a.w + b.w) / 2 + PLAYER_SIZE - Math.abs(a.x - b.x) > 0 &&
+    (a.h + b.h) / 2 + PLAYER_SIZE - Math.abs(a.y - b.y) > 0;
+  const all = arena.cover.filter((o) => o.kind === kind).sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  const usable = isolated ? all.filter((o) => !arena.cover.some((p) => p !== o && inflatedTouch(o, p))) : all;
+  return usable[0] ?? null;
+}
+
+/**
+ * A point provably inside `box`: offset along +x by `frac` of the collision half-sum. Any
+ * `frac` in (0,1) overlaps by construction — 0.55 is chosen to reproduce the SHAPE of the
+ * original report (a shallow, off-centre burial, 25 wu into a 50 wu cart) rather than a
+ * symmetric one, because min-translation depenetration behaves differently off-centre.
+ */
+const buriedPoint = (box) => ({ x: Math.round(box.x + 0.55 * ((PLAYER_SIZE + box.w) / 2)), y: box.y });
+
 async function auditQaSpawnGuard(browser) {
   const G = 'qa-spawn';
+
+  // (1) The dump this file derives from must still describe the source. Cheap (~1 s, no
+  //     browser) and it fails BEFORE any coordinate is used, which is the whole point.
+  let verify = '';
+  let verifyOk = false;
+  try {
+    verify = execFileSync('node', [`${ROOT}/tools/tmp/arena_probe.mjs`, '--verify'], { encoding: 'utf8' });
+    verifyOk = /MATCH — the extractor is a faithful second reader/.test(verify);
+  } catch (err) { verify = String(err.stdout ?? err); }
+  record(G, 'layout-dump-matches-source', verifyOk,
+    verifyOk
+      ? 'tools/arena.gameplay.json reproduces src/arena/kitchen.ts box-for-box'
+      : `arena_probe --verify says NO — every point below would be derived from a stale world:\n${verify.trim().split('\n').slice(-6).join('\n')}`);
+
+  const arena = JSON.parse(readFileSync(`${ROOT}/tools/arena.gameplay.json`, 'utf8'));
+  const fryer = boxOfKind(arena, 'fryer_counter');
   const CASES = [
-    { px: 850, py: 500, spawnsInsideCover: true, box: { x: 875, y: 500, w: 50, h: 50 }, why: 'inside spice_cart (875,500,50,50)' },
-    { px: 960, py: 500, spawnsInsideCover: true, box: { x: 940, y: 500, w: 48, h: 46 }, why: 'inside supply_barrel (940,500,48,46)' },
-    // Genuinely open floor. The first draft of this case used (700,760) and the guard
-    // immediately caught it: `stacked_pots` is at (700,742) 55x55, so 760 is 18 wu from
-    // its centre against a 48.5 wu half-sum. That is the same mistake the 2026-08 report
-    // made, caught in one run — which is the entire point of the flag.
-    { px: 700, py: 950, spawnsInsideCover: false, box: null, why: 'open floor south of the fryer counter' },
+    { kind: 'spice_cart', why: 'the north-westmost spice cart with a clear depenetration exit' },
+    { kind: 'supply_barrel', why: 'the north-westmost supply barrel with a clear depenetration exit' },
+    // Genuinely open floor, anchored to a named prop rather than to a literal: one box
+    // depth clear of the fryer counter's south face. The first draft of this case used a
+    // hardcoded (700,760) and the guard immediately caught it — `stacked_pots` was 18 wu
+    // away against a 48.5 wu half-sum. That is the same mistake the 2026-08 report made,
+    // caught in one run, which is the entire point of the flag.
+    {
+      open: true,
+      at: { x: fryer.x, y: Math.round(fryer.y + fryer.h / 2 + PLAYER_SIZE / 2 + PLAYER_SIZE) },
+      why: "open floor one full body clear of the fryer counter's own collision face",
+    },
   ];
+
   for (const c of CASES) {
+    let at;
+    let box = null;
+    if (c.open) {
+      at = c.at;
+    } else {
+      box = boxOfKind(arena, c.kind, { isolated: true });
+      if (!box) {
+        record(G, `${c.kind}-exists-in-layout`, false,
+          `no CoverBox of kind "${c.kind}" with a clear depenetration exit — this suite's premise moved, not the game`);
+        continue;
+      }
+      at = buriedPoint(box);
+    }
+    // (3) The derivation must be unambiguous, or the identity assertion below is a coin flip.
+    const hits = coverHits(arena, at.x, at.y);
+    record(G, `${c.open ? 'open-floor' : c.kind}-derivation-is-unambiguous`,
+      c.open ? hits.length === 0 : hits.length === 1 && hits[0] === box,
+      c.open
+        ? `(${at.x},${at.y}) overlaps ${hits.length} box(es) — want 0 (${c.why})`
+        : `(${at.x},${at.y}) overlaps ${hits.length} box(es): ${hits.map(boxLabel).join(' + ') || 'none'} — want exactly ${boxLabel(box)}`);
+
     const page = await newPage(browser);
-    await page.goto(`${BASE}/?player=hamburger&enemy=donut&px=${c.px}&py=${c.py}&fogRadius=545&pointerLock=0`,
+    await page.goto(`${BASE}/?player=hamburger&enemy=donut&px=${at.x}&py=${at.y}&fogRadius=545&pointerLock=0`,
       { waitUntil: 'domcontentloaded', timeout: 90000 });
     try { await waitLiveMatch(page); } catch (err) {
-      record(G, `px=${c.px}-reaches-match`, false, String(err).split('\n')[0]);
+      record(G, `px=${at.x}-reaches-match`, false, String(err).split('\n')[0]);
       await page.close(); continue;
     }
     const d = await dbg(page);
-    // UNCHANGED, deliberately: the spawn point is still a bad one and must still be flagged.
-    record(G, `px=${c.px},py=${c.py}-cover-flag`,
-      (d.qaSpawnInsideCover !== null) === c.spawnsInsideCover,
-      `qaSpawnInsideCover=${d.qaSpawnInsideCover} (${c.why})`);
+    // (2) UNCHANGED IN INTENT, STRONGER IN FORM: the spawn point is still a bad one and
+    //     must still be flagged — and the flag must NAME the box this file aimed at, which
+    //     is what makes the dump and the live arena prove each other.
+    record(G, `px=${at.x},py=${at.y}-cover-flag`,
+      box === null ? d.qaSpawnInsideCover === null : d.qaSpawnInsideCover === boxLabel(box),
+      `qaSpawnInsideCover=${d.qaSpawnInsideCover} · want ${box === null ? 'null' : boxLabel(box)} (${c.why})`);
 
     const r = await holdKey(page, 'KeyA');
-    record(G, `px=${c.px},py=${c.py}-input-reaches-sim`, r.axesX === -1,
+    record(G, `px=${at.x},py=${at.y}-input-reaches-sim`, r.axesX === -1,
       `MatchInput.move.x = ${r.axesX} — the input layer was never the problem here`);
     // INVERTED: nothing is frozen any more. The two cases assert different things on
     // purpose, and the difference is the interesting part.
@@ -465,26 +643,27 @@ async function auditQaSpawnGuard(browser) {
     //
     // A buried fighter asserts only that it is no longer stuck, because the escape is
     // MINIMUM-TRANSLATION and minimum translation does not care which way you wanted to go.
-    // `?px=960` is 20 wu east of `supply_barrel`'s centre, so the shortest way out is 25 wu
-    // EAST (against 65 wu west), and the fighter is deposited on the barrel's east face —
-    // where KeyA then presses straight back into it and legitimately moves nothing. Net
-    // displacement is +25 wu, the fighter is free, and demanding a westward dx here would be
-    // demanding that depenetration read the player's mind and take the longer exit through
-    // more geometry. Direction is asserted on the open case; freedom is asserted here.
+    // `buriedPoint` puts the fighter EAST of the box centre, so the shortest way out is
+    // always east, and the fighter is deposited on the box's east face — where KeyA then
+    // presses straight back into it and legitimately moves nothing further. Net
+    // displacement is the escape itself, the fighter is free, and demanding a westward dx
+    // here would be demanding that depenetration read the player's mind and take the longer
+    // exit through more geometry. Direction is asserted on the open case; freedom here.
     const netWu = Math.hypot(r.dx, r.dy);
-    record(G, `px=${c.px},py=${c.py}-movement`,
-      c.spawnsInsideCover ? netWu >= MOVED_WU : r.dx < -MOVED_WU,
-      c.spawnsInsideCover
+    record(G, `px=${at.x},py=${at.y}-movement`,
+      box ? netWu >= MOVED_WU : r.dx < -MOVED_WU,
+      box
         ? `moved ${netWu.toFixed(1)} wu net (want >=${MOVED_WU}) — no longer frozen; escape is min-translation, not player-intent`
         : `dx = ${r.dx.toFixed(1)} wu, want <=-${MOVED_WU}`);
-    // And a buried fighter must actually be OUT, not merely jiggling inside the box.
-    // `rules.ts:PLAYER_SIZE` = 42; the collision test is centre-distance < half-sum.
-    if (c.box) {
+    // And a buried fighter must actually be OUT, not merely jiggling inside the box. The
+    // collision test is centre-distance < half-sum, with the real `rules.ts:PLAYER_SIZE`
+    // rather than a copy of its value.
+    if (box) {
       const p = (await fighters(page)).player;
-      const inside = Math.abs(p.x - c.box.x) < (42 + c.box.w) / 2 &&
-        Math.abs(p.y - c.box.y) < (42 + c.box.h) / 2;
-      record(G, `px=${c.px},py=${c.py}-escaped-the-box`, !inside,
-        `ended at (${p.x.toFixed(1)},${p.y.toFixed(1)}) vs ${c.why}`);
+      const inside = Math.abs(p.x - box.x) < (PLAYER_SIZE + box.w) / 2 &&
+        Math.abs(p.y - box.y) < (PLAYER_SIZE + box.h) / 2;
+      record(G, `px=${at.x},py=${at.y}-escaped-the-box`, !inside,
+        `ended at (${p.x.toFixed(1)},${p.y.toFixed(1)}) vs ${boxLabel(box)} (${c.why})`);
     }
     await page.close();
   }

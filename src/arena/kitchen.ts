@@ -28,15 +28,36 @@
  *      between two large ones is exactly how this happens, and it is invisible in a
  *      screenshot. → `arena_probe.mjs --truth` must print ONE PIECE.
  *
- *   3. **A SPAWN'S STRAIGHT-AHEAD RUN MUST NOT END IN FURNITURE OR IN A HAZARD.** A
- *      player holding one direction out of the shipped spawn travelled **38 wu** before
- *      a barrel stopped it dead (`tryMove` tests the destination and does not slide).
- *      With the lane cleared the run became 700 wu — and then ran into the boiling pot,
- *      whose CoverBox stops a fighter at r=73 while its damage ring is r=95, i.e. it
- *      **pins you inside the fire**. Hence the spawns are now offset 110 wu off the
- *      centre line (still exactly point-symmetric), so the natural run out of spawn
- *      passes clear of both the pot's box and its 95 wu burn ring.
- *      → `arena_probe.mjs --route` prints the runway in every direction.
+ *   3. **A SPAWN'S STRAIGHT-AHEAD RUN MUST NOT END IN FURNITURE OR IN A HAZARD** —
+ *      **AND THE RULE IS ABOUT A CORRIDOR, NOT A RAY.** A player holding one direction
+ *      out of the shipped spawn travelled **38 wu** before a barrel stopped it dead
+ *      (`tryMove` tests the destination and does not slide). With the lane cleared the
+ *      run became 700 wu — and then ran into the boiling pot, whose CoverBox stops a
+ *      fighter at r=73 while its damage ring is r=95, i.e. it **pins you inside the
+ *      fire**. Hence the spawns are offset 110 wu off the centre line (still exactly
+ *      point-symmetric), so the natural run out of spawn passes clear of both the pot's
+ *      box and its 95 wu burn ring.
+ *
+ *      ⚠️ **AND THEN THE SAME BUG CAME BACK, 6 wu WIDE, BECAUSE THE MEASUREMENT WAS A
+ *      SINGLE RAY.** `arena_probe.mjs --route` walks one line out of the spawn point and
+ *      reported 700 / 84 / 318 wu on this layout — all healthy. `tools/tmp/input_accept.mjs`
+ *      then measured a player holding W travelling **6.0 wu**, which is 0.14 of a body
+ *      length and exactly ONE step (`PLAYER_SPEED` 0.12 wu/ms x the loop's 50 ms dt
+ *      clamp). Both numbers were right. A ray is measure-zero and a fighter is not: the
+ *      west `prep_counter` at (265,330,160x55) inflates to a collision box of
+ *      **x 164..366, y 281.5..378.5** against a 42 wu body, and the player spawn (160,390)
+ *      sat **4.0 wu west of one face and 11.5 wu south of the other**. Four wu of lateral
+ *      drift — a tenth of a body — took the north runway from 84 wu to 11.5, and the run
+ *      TOWARD THE ENEMY from 1219 wu to **4.0**. The counter had been placed by exactly
+ *      that arithmetic: "x=265 so the inflated west edge (265-80-21=164) clears the
+ *      spawn's x=160", i.e. deliberately, by 4 wu.
+ *      → `tools/tmp/spawn_runway.mjs` is the acceptance test. It measures the WORST case
+ *        over a +-21 wu lateral band (the fighter's own half-width) in all four cardinals
+ *        from BOTH spawns, and requires 60 wu — 0.5 s of held input, 1.43 body lengths.
+ *        Cardinals only, because `tryMove` resolves x and y independently, so a diagonal
+ *        that is refused on one axis still travels on the other; only a cardinal can stop
+ *        a fighter dead. It also fails if a run STOPS inside a damage hazard, which is the
+ *        pot pin above stated as a test instead of as a paragraph.
  *
  * ── The map itself ───────────────────────────────────────────────────────────────
  *   - A central STOVE HUB: the boiling pot alone in a wide clearing, with 4 diagonal
@@ -51,10 +72,11 @@
  *   - Two PANTRY clusters (crates + flour sacks) anchor the NE/SW corners: several
  *     smaller boxes clustered tight, reading as one nook but with more silhouette
  *     variety than the freezers.
- *   - Two PREP STATIONS sit mid-west/mid-east, butted against the freezer they share a
- *     corner with. They are the north wall of the spawn bay rather than a gate across
- *     it: the pair used to straddle the lane 80 wu either side of the centre line,
- *     which is what made the spawn an alcove and sealed the pockets above.
+ *   - Two PREP STATIONS. Each is a mid-lane counter plus a WALL PENINSULA out on the far
+ *     west / far east strip, and neither one is inside a spawn's corridor. They used to
+ *     straddle the lane 80 wu either side of the centre line (which made the spawn an
+ *     alcove and sealed the pockets above), and then to tuck under the freezer (which is
+ *     what put a collision face 4 wu from the player spawn — see rule 3).
  *   - A SERVICE LINE runs along the north and south walls: a sink (north) / fryer
  *     (south) counter flanked by the spice cart and the stacked pots that used to sit
  *     beside the pot. Each service counter still sits beside a slowing puddle (grease
@@ -233,7 +255,7 @@ export const createKitchenArena: ArenaFactory = () => {
     build: (w, d) => buildFlourSack(M, w, d),
   });
 
-  // ── Prep stations (mid-west / mid-east) ──────────────────────────────────────
+  // ── Prep stations ────────────────────────────────────────────────────────────
   //
   // Was a PAIR STRADDLING THE LANE at x=340, y=420/580 — a 105 wu gap between them on
   // the centre line. Together with the two lane barrels below, that pair is what sealed
@@ -243,14 +265,50 @@ export const createKitchenArena: ArenaFactory = () => {
   // navigation work had to build a flow field to escape — the player spawned in a bay
   // whose only exit was that gap, with a barrel parked in front of it.
   //
-  // Both counters of each station now sit on the SAME side of the centre line as the
-  // freezer they share a corner with, forming the north (west station) / south (east
-  // station) wall of an open spawn bay instead of a gate across the lane. x=265 rather
-  // than 340 is chosen so the counter's inflated west edge (265 − 80 − 21 = 164) clears
-  // the player spawn's x=160: without that, walking north out of spawn hits furniture
-  // in 10 wu instead of 84.
+  // ── The knife-block counters MOVED OFF THE SPAWN CORRIDOR. This is rule 3. ───────
+  //
+  // They were at (265, CENTER.y-170) and its mirror, chosen so "the counter's inflated
+  // west edge (265 - 80 - 21 = 164) clears the player spawn's x=160". It clears it by
+  // **4.0 wu — 0.095 of a body length**, and that is not a clearance, it is a coincidence.
+  // Against a 42 wu fighter the box inflates to x 164..366, y 281.5..378.5 while the spawn
+  // is (160,390), so the spawn sat 4.0 wu west of one collision face and 11.5 wu south of
+  // the other. Measured with `tools/tmp/spawn_runway.mjs`, which walks the +-21 wu band a
+  // body actually occupies instead of the single ray `arena_probe --route` walks:
+  //
+  //     direction          centre ray     worst over the body's own width
+  //     north                 84.0 wu     **11.5 wu**  at +4.5 wu of drift
+  //     toward the enemy    1219.0 wu     ** 4.0 wu**  at -21 wu of drift
+  //     south                319.0 wu       231.5 wu
+  //
+  // `tools/tmp/input_accept.mjs` caught the north case in the LIVE GAME at **6.0 wu**: an
+  // 11.5 wu runway delivered in 6 wu steps (PLAYER_SPEED 0.12 wu/ms x the loop's 50 ms dt
+  // clamp) is one step and then nothing. The 4.0 wu case is worse and nothing reported it
+  // at all — it is the run TOWARD THE ENEMY, i.e. the first thing every match does.
+  //
+  // THE COUNTER COULD NOT BE FIXED IN PLACE, and the proof is two inequalities. To clear
+  // the spawn's N/S corridor its collision box must start east of 181, and to avoid
+  // clipping the NW stove island its mesh must end west of 345 — so `w + 21 <= 164`, i.e.
+  // **no counter wider than 143 fits there at all**. To clear the E/W corridor its
+  // collision box must end north of 369 while its mesh starts south of the freezer at 285
+  // — so `h + 21 <= 84`, i.e. **h <= 63 with zero margin**. (That second one is structural:
+  // anything tucked under the freezer extends the freezer's own collision shadow south by
+  // half its mesh plus half its collision box plus 21, so it ALWAYS shortens the north
+  // runway below the freezer's 84.) Shrinking to fit was measured: at 120x42 the guard
+  // passes, but only out to a +-38 wu band against +-85 wu for moving it — one bad
+  // prop-nudge from the same bug.
+  //
+  // So it moves to the far west/east strip as a WALL PENINSULA, which also serves rule 1:
+  // r=467 -> r=608 from centre, the same band the barrels were moved to for the same
+  // reason ("beyond r=650 the shipped layout was 7% solid"). Measured over the whole
+  // layout: the occlusion series 27.7% -> 25.2% becomes **29.7% -> 25.2%** (peak 31.3% ->
+  // 30.9%, i.e. it falls further and peaks lower), floor still ONE PIECE, ceiling still
+  // 352/352 = 100.0%, 0 mesh clips, 6 pinches — unchanged. The spawn bay keeps a wall at
+  // both ends: the freezer 84 wu north, this counter 161.5 wu south, open to the east.
+  //
+  // ⚠️ The two `rollingPin` counters did NOT move. Their nearest collision face is 231.5 wu
+  // from the spawn and they were never part of this defect.
   addCover(propsGroup, cover, M, {
-    x: 265, y: CENTER.y - 170, w: 160, h: 55, kind: 'prep_counter',
+    x: 100, y: CENTER.y + 100, w: 160, h: 55, kind: 'prep_counter',
     build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
   });
   addCover(propsGroup, cover, M, {
@@ -258,7 +316,7 @@ export const createKitchenArena: ArenaFactory = () => {
     build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 265, y: ARENA_H - (CENTER.y - 170), w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    x: ARENA_W - 100, y: ARENA_H - (CENTER.y + 100), w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
     build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
   });
   addCover(propsGroup, cover, M, {
