@@ -22,16 +22,27 @@
  * `fa-screen-in` fade, which measures 3.7x lower contrast than the same content
  * settled. Neither is visible in a filename.
  *
- * So this refuses to build a packet from a capture it cannot vouch for:
- *   * `<ours>.capture.json` — the sidecar `tools/shoot.mjs` and the metric batteries
- *     now write. If it says the page was NOT painted, the packet is refused outright.
- *   * a frame-statistics floor on the pixels themselves, which catches the flat
- *     classes (blank, curtain, boot overlay) whether or not a sidecar exists.
- *   * a missing sidecar is a loud WARNING, not a failure — most shot pipelines
- *     predate it — and it is recorded in `manifest.json`, so a verdict can always be
- *     traced back to the provenance of the image it was made from.
+ * So this refuses to build a packet from a capture it cannot vouch for. There are
+ * two DIFFERENT reasons an image can fail, and they get two different flags, because
+ * one blanket override would let the dangerous one through on the cheap one's
+ * authority:
  *
- * `--allow-unverified` downgrades the refusal to a warning. Use it knowingly.
+ *   PROVEN BAD  — `<ours>.capture.json` (the sidecar `tools/shoot.mjs` and the metric
+ *                 batteries write) says the page was NOT painted, or the pixels are
+ *                 under the frame-statistics floor. Something is known to be wrong
+ *                 with this image. Override: `--allow-refused`.
+ *   UNVERIFIED  — no sidecar at all, so nothing is known either way. Override:
+ *                 `--allow-unverified`.
+ *
+ * Both are refusals, not warnings. A missing sidecar used to be a warning "because
+ * most shot pipelines predate it", and that is exactly the quiet failure this file
+ * exists to stop: the washed frame that started all of this was a plausible-looking
+ * PNG with no record attached, and nothing in a filename could have revealed it.
+ * Re-shooting is cheap; a critic round is ~300k tokens.
+ *
+ * Whichever way it goes, `manifest.json` records `verified`, the frame statistics and
+ * the full sidecar, so a verdict can always be traced back to the provenance of the
+ * image it was formed from.
  */
 
 import { readdir, mkdir, writeFile, readFile } from 'node:fs/promises';
@@ -65,7 +76,7 @@ if (!args.ours || !args.category || !args.out) {
  * Vouch for one PNG before it can go in front of a critic. Returns the provenance
  * record that ends up in `manifest.json`.
  */
-async function vouch(png, { allowUnverified }) {
+async function vouch(png, { allowUnverified, allowRefused }) {
   const path = resolve(png);
   if (!existsSync(path)) {
     console.error(`No such capture: ${png}`);
@@ -78,6 +89,7 @@ async function vouch(png, { allowUnverified }) {
     sidecar = JSON.parse(await readFile(sidecarPath, 'utf8'));
   }
 
+  // PROVEN BAD: something is positively known to be wrong with this image.
   const problems = [];
   if (stats.stdev < FRAME_FLOOR) {
     problems.push(`frame is FLAT (max-channel stdev ${stats.stdev} < ${FRAME_FLOOR}, mean ${stats.mean}, `
@@ -92,22 +104,44 @@ async function vouch(png, { allowUnverified }) {
   console.log(`         stdev ${stats.stdev}  mean ${stats.mean}  range ${stats.min}..${stats.max}`);
   if (sidecar) {
     console.log(`         provenance: ${sidecar.tool} "${sidecar.label}" at ${sidecar.takenAt}, painted=${sidecar.painted}`);
-  } else {
-    console.log('         provenance: NONE — no <png>.capture.json beside it. This image carries no');
-    console.log('                     record of whether the screen was on screen when it was taken.');
-    console.log('                     Re-shoot with tools/shoot.mjs to get one.');
   }
 
   if (problems.length) {
-    console.error('\n!! CAPTURE REFUSED — this image must not be shown to a critic:');
+    console.error('\n!! CAPTURE REFUSED — this image is PROVEN BAD and must not be shown to a critic:');
     for (const p of problems) console.error(`   - ${p}`);
-    if (!allowUnverified) {
-      console.error('\n   Re-shoot it. `--allow-unverified` overrides, knowingly.');
+    if (!allowRefused) {
+      console.error('\n   Re-shoot it. `--allow-refused` overrides this specific class, knowingly.');
       process.exit(5);
     }
-    console.error('\n   --allow-unverified given: building the packet anyway.\n');
+    console.error('\n   --allow-refused given: building the packet from a known-bad image.\n');
+  } else if (!sidecar) {
+    // UNVERIFIED: nothing is known either way, which is the state the whole
+    // `__screenReady` defect lived in for a session. Refused by default.
+    console.error('\n!! CAPTURE UNVERIFIED — no provenance, so this packet cannot be vouched for:');
+    console.error(`   there is no ${basename(sidecarPath)} beside this PNG, so nothing records whether`);
+    console.error('   the screen was actually ON SCREEN when the shutter fired. A frame captured');
+    console.error('   inside .fa-screen\'s 0.26s entry animation is the screen composited over the');
+    console.error('   orange page background: measured on the settings screen, card contrast drops');
+    console.error('   from stdev 72.9 to 55.8 and the card\'s blue mean from 217.5 to 190.3, while');
+    console.error('   the frame as a whole still looks entirely plausible.');
+    console.error('\n   Fix it by re-shooting through a tool that writes the sidecar:');
+    console.error('     tools/shoot.mjs, tools/tmp/{screen,home,chars}_metrics.mjs');
+    console.error('     or any tool calling captureSettled() from tools/tmp/settle.mjs');
+    console.error('\n   `--allow-unverified` proceeds anyway; the packet manifest records verified:false.');
+    if (!allowUnverified) process.exit(6);
+    console.error('\n   --allow-unverified given: building the packet from an unvouched image.\n');
   }
-  return { path: png, stats, provenance: sidecar, problems };
+
+  return {
+    path: png,
+    stats,
+    provenance: sidecar,
+    problems,
+    // The single field a later reader needs: was this verdict formed from an image
+    // anyone can vouch for?
+    verified: !!sidecar && problems.length === 0,
+    overrides: [allowRefused ? 'allow-refused' : null, allowUnverified ? 'allow-unverified' : null].filter(Boolean),
+  };
 }
 
 const curatedDir = resolve(`reference/images/curated/${args.category}`);
@@ -136,7 +170,10 @@ for (let i = 0; i < n; i++) {
 // Vouch for OUR side before a single sheet is built. The reference plates are
 // third-party screenshots and are not ours to re-shoot, so they are measured and
 // reported but never refused.
-const ourProvenance = await vouch(args.ours, { allowUnverified: !!args['allow-unverified'] });
+const ourProvenance = await vouch(args.ours, {
+  allowUnverified: !!args['allow-unverified'],
+  allowRefused: !!args['allow-refused'],
+});
 
 const outDir = resolve(args.out);
 await mkdir(outDir, { recursive: true });
@@ -172,3 +209,10 @@ console.log('\n── critic packet ready ──');
 console.log('Show the critic ONLY these files:');
 sheets.forEach((s) => console.log(`  ${s.sheet}`));
 console.log(`\nKeys (orchestrator only): ${join(outDir, 'sheet_*.key.json')}`);
+// Say it at the END too. The refusal text scrolls off; this is the line the
+// orchestrator reads before it spends ~300k tokens, and a verdict formed from an
+// unvouched image has to be labelled as such when it is written down.
+console.log(ourProvenance.verified
+  ? `Provenance: VERIFIED — ${ourProvenance.provenance.tool} "${ourProvenance.provenance.label}", painted=true.`
+  : `Provenance: NOT VERIFIED (${ourProvenance.overrides.join(', ') || 'unknown'}). `
+    + 'Any score from this packet must be recorded as provisional.');

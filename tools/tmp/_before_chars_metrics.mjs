@@ -41,7 +41,6 @@ import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
-import { settleScreen, waitForRoster, captureSettled } from './settle.mjs';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle',
@@ -699,28 +698,15 @@ async function auditViewport(page, base, vp, outDir, label) {
 
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction('window.__screen === "characters" && window.__screenReady === true', null, { timeout: 90000 });
-  // THE FLAG IS NOT THE CONDITION. `shell.ts:navigate` sets `__screenReady` in the same
-  // tick it drops the curtain and `.fa-screen` then runs `fa-screen-in 0.26s` from
-  // opacity 0. Everything below — figure/card area, head and face rects, every WCAG
-  // ratio — is measured off the captured PNG, so a mid-fade frame is the roster
-  // composited over the orange `.fa-bg`.
-  await settleScreen(page, { label: `characters@${vp.name}` });
-  // THE THUMBNAILS, BY OUTCOME. 28.9 s under SwiftShader with all eleven present; a
+  // THE FLAG, never a clock. 28.9 s under SwiftShader with all eleven present; a
   // fixed 2.5 s AND a fixed 15 s both captured emoji placeholders (see header).
-  // `waitForRoster` requires `window.__thumbsReady` AND every card to carry its own
-  // `has-render`. They are different claims: the flag says a generation pass ended,
-  // `has-render` says eleven cards hold their portrait — and the second is what every
-  // number below is computed from. `thumbs.ts:378` can also publish the flag
-  // VACUOUSLY, because `demandedIds()` returns `[]` on a portrait-less screen and
-  // `[].every()` is `true`. Full reasoning, and what is read-from-source versus
-  // observed, in `settle.mjs:waitForRoster`. Asking the cards asks about the OUTCOME
-  // (LESSONS §13).
-  const roster = await waitForRoster(page, { timeout: 300000 });
-  // Only the 0.25 s opacity swap, now that generation is provably finished.
+  await page.waitForFunction('window.__thumbsReady === true', null, { timeout: 300000 });
+  // Only the 0.25 s opacity swap and the entrance transition, now that generation is
+  // provably finished.
   await page.waitForTimeout(1500);
 
   const shot = `${outDir}/${label}-characters-${vp.name}.png`;
-  await captureSettled(page, { path: shot, label: `characters@${vp.name}`, tool: 'chars_metrics' });
+  await page.screenshot({ path: shot, timeout: 120_000 });
   const dom = await page.evaluate(collect);
   const grid = await page.evaluate(measureRoster);
   page.off('pageerror', onErr);
@@ -731,7 +717,6 @@ async function auditViewport(page, base, vp, outDir, label) {
     screen: 'characters', vp: vp.name, viewport: `${vp.w}x${vp.h}`, pageErrors: errors.slice(0, 5),
   });
   rep.grid = grid;
-  rep.roster = roster;
   rep.sheet = await contactSheet(shot, grid.cards, `${outDir}/${label}-cards-${vp.name}.png`, dom.vw, dom.vh);
   return rep;
 }
@@ -766,8 +751,7 @@ async function run() {
     if (r.error) { console.log(`\n!! ${r.vp}: ${r.error}`); hard++; continue; }
     const g = r.grid;
     console.log(`\n══ character select @ ${r.vp} (${r.viewport}) [${label}] ══`);
-    console.log(`  thumbsReady ${g.thumbsReady}   cards ${g.cards.length}   with render ${g.cards.filter((c) => c.hasRender).length}   thumbMeta ${g.metaCount}`
-      + `${r.roster ? `   (all ${r.roster.painted} painted after ${(r.roster.ms / 1000).toFixed(1)}s)` : ''}`);
+    console.log(`  thumbsReady ${g.thumbsReady}   cards ${g.cards.length}   with render ${g.cards.filter((c) => c.hasRender).length}   thumbMeta ${g.metaCount}`);
     const withR = g.cards.filter((c) => c.hasRender && c.fillFrac !== undefined);
     if (withR.length) {
       const mean = withR.reduce((a, c) => a + c.fillFrac, 0) / withR.length;

@@ -38,15 +38,32 @@
  * Usage: node tools/tmp/menu_accept.mjs [--flow-only]
  *
  * ── WHY EVERY WAIT HERE GOES THROUGH `settle.mjs` ───────────────────────────
- * This file measures GEOMETRY, and `getBoundingClientRect()` includes transforms.
+ * This file measures GEOMETRY, and `getBoundingClientRect()` INCLUDES transforms.
  * `.fa-screen` runs `fa-screen-in 0.26s`, whose first keyframe is
- * `translateY(10px) scale(0.992)` — so a tap target read during the entry animation
- * measures 43.65px against this file's own 43.5px floor, and every control's rect
- * sits 10px low against a +/-1px safe-area tolerance. Neither `window.__screenReady`
- * nor `window.__previewReady` means the animation is over: the first is set in the
- * same tick the curtain drops, the second two rAFs into the same animation. Playwright
- * `click({force:true})` also SKIPS its own stability check, so a forced click issued
- * mid-animation aims at a coordinate the button has already left.
+ * `translateY(10px) scale(0.992)`. Neither `window.__screenReady` nor
+ * `window.__previewReady` means that animation is over: measured, the first fires at
+ * animation time 0 ms of 260 on 4/4 screens with the screen at opacity 0.000, and the
+ * second at 0-26 ms — so the 250 ms sleep that used to follow it expired somewhere
+ * between 10 ms BEFORE and 16 ms after the animation ended. That is a coin flip, not
+ * a margin.
+ *
+ * MEASURED CONSEQUENCE (`tools/tmp/settle_geom_ab.mjs`, 3 viewports x 3 screens, the
+ * simulated-notch pass, reading the same two assertions this file makes):
+ *   tap-target height   43.648 px vs 44.000 settled — 0.352 px of error against the
+ *                       0.5 px margin this file's own 43.5 floor leaves. 70% eaten.
+ *   screen top          up to +11.84 px against a +/-1 px safe-area tolerance.
+ *   verdict flipped     1 of 9 cells. `settings @ 844x390` reports `Done` 18.34 px
+ *                       above the bottom edge — inside the 21 px home-bar band, a
+ *                       FAILED `inside-safe-area` — and 0 violations once settled.
+ *                       A FALSE FAILURE, the direction that sends someone hunting a
+ *                       layout bug that does not exist (`docs/LESSONS.md` §10).
+ *   flag caught mid-fade on 5 of 9 first mounts, and on 2 of 2 curtained navigations.
+ *
+ * Playwright `click({force:true})` also SKIPS its own stability check, so a forced
+ * click issued mid-animation aims at a coordinate the button has already left; and an
+ * UNforced click waits for stability instead, which is why the pre-fix run of this
+ * file died at "pick a different fighter" with a 30 s `page.click` timeout.
+ *
  * `settleScreen()` waits for the page's own rendered state instead of a flag or a
  * clock. See `tools/tmp/settle.mjs` and `tools/tmp/settle_validate.mjs`.
  */
@@ -54,6 +71,19 @@
 import { chromium } from 'playwright';
 import { readdir, readFile } from 'node:fs/promises';
 import { settleScreen } from './settle.mjs';
+
+/**
+ * How long a screen is allowed to take to paint.
+ *
+ * NOT a margin on an animation — `fa-screen-in` is 260 ms and `settleScreen` watches
+ * it directly. This is the budget for the whole first paint, which on this project
+ * means `index.html`'s `#boot` overlay coming down after the 3D stage builds. Measured
+ * under SwiftShader with other agents' batteries on the same cores: 23 ms for
+ * settings, 7.7 s for character select, 11.9 s for the trophy road. 60 s is ~5x the
+ * worst observed, and it is a CEILING rather than a wait — a fast machine still
+ * proceeds in 23 ms, which is the entire point of a state condition over a sleep.
+ */
+const SETTLE_MS = 60_000;
 
 /**
  * Wait for a route AND for it to be on screen.
@@ -66,7 +96,30 @@ async function atScreen(page, screen, timeout = 20000) {
     `window.__screen === ${JSON.stringify(screen)} && window.__screenReady === true`,
     null, { timeout },
   );
-  return settleScreen(page, { label: screen, timeout: Math.max(timeout, 30000) });
+  return settleScreen(page, { label: screen, timeout: Math.max(timeout, SETTLE_MS) });
+}
+
+/**
+ * Settle, and turn a failure into a RECORDED FAILURE rather than a crashed battery.
+ *
+ * The viewport x screen loop runs 30 settles with no `try` around it, so an
+ * unhandled `CaptureRefused` used to abort `run()` before it printed anything at
+ * all — 348 assertions replaced by a stack trace. That is a bad failure mode for a
+ * guard: the cheapest way to make a red battery green is to delete the thing that
+ * made it red, and a guard that destroys the report invites exactly that.
+ *
+ * It records only when it FAILS, so a healthy run's assertion count is unchanged and
+ * a sick one gains a line that names the screen and the reason.
+ */
+async function settled(page, vpName, screen, label) {
+  try {
+    await settleScreen(page, { label, timeout: SETTLE_MS });
+    return true;
+  } catch (err) {
+    record(vpName, screen, 'screen-painted', false,
+      String(err.message ?? err).split('\n')[0].slice(0, 150));
+    return false;
+  }
 }
 
 /**
@@ -320,7 +373,7 @@ async function auditEconomy(browser) {
   try {
     await page.goto(`${BASE}/?screen=trophies`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "trophies"', null, { timeout: 45000 });
-    await settleScreen(page, { label: 'economy/trophies' });
+    await settleScreen(page, { label: 'economy/trophies', timeout: SETTLE_MS });
     await page.waitForTimeout(300);
 
     step = 'seeded state renders';
@@ -455,7 +508,7 @@ async function auditEconomy(browser) {
     step = 'progress survives a reload';
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction('window.__screen === "trophies"', null, { timeout: 30000 });
-    await settleScreen(page, { label: 'economy/trophies-reload' });
+    await settleScreen(page, { label: 'economy/trophies-reload', timeout: SETTLE_MS });
     await page.waitForTimeout(250);
     const persisted = await page.evaluate(() => ({
       claimable: document.querySelectorAll('.tr-node.is-claimable').length,
@@ -501,7 +554,7 @@ async function auditOpening(browser) {
     step = 'a bare / shows the title card';
     await page.goto(`${BASE}/?hold=120000`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
-    await settleScreen(page, { label: 'opening' });
+    await settleScreen(page, { label: 'opening', timeout: SETTLE_MS });
     record('opening', 'opening', 'bare-slash-shows-the-title-card', true, '');
 
     step = 'audio is locked before the gesture';
@@ -522,13 +575,13 @@ async function auditOpening(browser) {
     await page.goto(`${BASE}/?hold=600`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
     await page.waitForFunction('window.__screen === "home"', null, { timeout: 15000 });
-    await settleScreen(page, { label: 'opening->home' });
+    await settleScreen(page, { label: 'opening->home', timeout: SETTLE_MS });
     record('opening', 'opening', 'auto-continues-with-no-input', true, 'no click, no key');
 
     step = 'an explicit screen request still wins';
     await page.goto(`${BASE}/?screen=home`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "home"', null, { timeout: 20000 });
-    await settleScreen(page, { label: 'screen-param-home' });
+    await settleScreen(page, { label: 'screen-param-home', timeout: SETTLE_MS });
     record('opening', 'opening', 'screen-param-skips-it', true, '?screen=home');
 
     record('opening', '-', 'opening-flow', true, 'boot / tap / auto / bypass');
@@ -575,7 +628,7 @@ async function auditSettings(browser) {
   try {
     await page.goto(`${BASE}/?screen=settings`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForFunction('window.__screen === "settings"', null, { timeout: 45000 });
-    await settleScreen(page, { label: 'settings' });
+    await settleScreen(page, { label: 'settings', timeout: SETTLE_MS });
 
     step = 'the volume slider moves the bus';
     const v0 = (await stats()).volume;
@@ -625,7 +678,7 @@ async function auditSettings(browser) {
       `html.fa-reduce-motion = ${applied}`);
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForFunction('window.__screen === "settings"', null, { timeout: 30000 });
-    await settleScreen(page, { label: 'settings-return' });
+    await settleScreen(page, { label: 'settings-return', timeout: SETTLE_MS });
     const survived = await page.evaluate(() =>
       document.documentElement.classList.contains('fa-reduce-motion'));
     record('settings', 'settings', 'reduce-motion-persists', survived === applied,
@@ -695,10 +748,12 @@ async function run() {
         const hold = screen === 'opening' ? '&hold=120000' : '';
         await page.goto(`${BASE}/?screen=${screen}${hold}`, { waitUntil: 'networkidle', timeout: 45000 });
         await page.waitForFunction('window.__previewReady === true', null, { timeout: 45000 });
-        // NOT a 250ms sleep. `__previewReady` fires two rAFs after mount, i.e. two
-        // frames into a 260ms entry animation, so the sleep was 70ms of margin on a
-        // race. This waits for the rendered state instead.
-        await settleScreen(page, { label: vp.name + '/' + screen });
+        // NOT a 250ms sleep. Measured: `__previewReady` fires 0-26 ms into a 260 ms
+        // entry animation, so the sleep expired somewhere between 10 ms BEFORE and
+        // 16 ms after the animation ended — a coin flip, not a margin. Every rect
+        // asserted below includes the animation's `scale(0.992) translateY(10px)`.
+        // This waits for the rendered state instead. See tools/tmp/settle_geom_ab.mjs.
+        await settled(page, vp.name, screen, `${vp.name}/${screen}`);
 
         // Pass 1: real (zero) insets.
         await page.evaluate(() => {
@@ -740,7 +795,7 @@ async function run() {
       await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
       // Before a FORCED click: force SKIPS Playwright's own stability check, so a
       // click issued during fa-screen-in aims where the button no longer is.
-      await settleScreen(page, { label: 'flow/opening' });
+      await settleScreen(page, { label: 'flow/opening', timeout: SETTLE_MS });
       await page.click('[data-el="start"]', { force: true });
       await atScreen(page, "home", 45000);
 

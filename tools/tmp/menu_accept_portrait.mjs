@@ -43,6 +43,31 @@ import { chromium } from 'playwright';
 import { readdir, readFile } from 'node:fs/promises';
 import { settleScreen } from './settle.mjs';
 
+/**
+ * How long a screen is allowed to take to paint. See the twin note in
+ * `menu_accept.mjs`: this is the budget for the first paint (chiefly `#boot` coming
+ * down after the 3D stage builds), NOT a margin on the 260 ms entry animation, which
+ * `settleScreen` watches directly. Measured 23 ms .. 11.9 s across screens under a
+ * contended SwiftShader; 60 s is a ceiling, not a wait.
+ */
+const SETTLE_MS = 60_000;
+
+/**
+ * Settle, and turn a failure into a RECORDED FAILURE rather than a crashed battery.
+ * A guard that replaces 219 assertions with a stack trace is a guard someone deletes.
+ * Records only on failure, so a healthy run's count is unchanged.
+ */
+async function settled(page, vpName, screen, label) {
+  try {
+    await settleScreen(page, { label, timeout: SETTLE_MS });
+    return true;
+  } catch (err) {
+    record(vpName, screen, 'screen-painted', false,
+      String(err.message ?? err).split('\n')[0].slice(0, 150));
+    return false;
+  }
+}
+
 const BASE = process.env.PREVIEW_BASE ?? 'http://localhost:5173';
 const LAUNCH_ARGS = [
   '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
@@ -476,14 +501,20 @@ async function auditMenus(browser) {
       await page.goto(`${BASE}/?screen=${screen}${hold}`, { waitUntil: 'networkidle', timeout: 45000 });
       // eslint-disable-next-line no-await-in-loop
       await page.waitForFunction('window.__previewReady === true', null, { timeout: 45000 });
-      // NOT a 250ms sleep. `__previewReady` is set two rAFs after mount, i.e. two frames
-      // into `.fa-screen`'s 260ms `fa-screen-in`, whose first keyframe is
-      // `translateY(10px) scale(0.992)`. `getBoundingClientRect()` INCLUDES transforms,
-      // so every rect this file asserts — 44px tap targets, safe-area edges, the HUD
-      // collision boxes — would be read 0.8% small and 10px low. This waits for the
-      // page's own rendered state instead of a clock. See tools/tmp/settle.mjs.
+      // NOT a 250ms sleep. `__previewReady` is set two rAFs after mount — measured at
+      // 0-26 ms into `.fa-screen`'s 260 ms `fa-screen-in`, whose first keyframe is
+      // `translateY(10px) scale(0.992)` — so the sleep expired between 10 ms BEFORE
+      // and 16 ms after the animation ended. `getBoundingClientRect()` INCLUDES
+      // transforms, so every rect this file asserts (44px tap targets, safe-area
+      // edges, HUD collision boxes) was read at whichever side of that coin landed.
+      // Measured in `settle_geom_ab.mjs`: 43.648 px against a 43.5 floor, screen top
+      // up to 11.84 px against a +/-1 px tolerance, and one cell in nine reporting a
+      // safe-area violation that does not exist. This file scored 219/219 both before
+      // and after on THIS machine — the exposure was the margin, not a flipped
+      // verdict here, and a margin is not something to keep betting on.
+      // This waits for the page's own rendered state instead of a clock.
       // eslint-disable-next-line no-await-in-loop
-      await settleScreen(page, { label: vp.name + '/' + screen });
+      await settled(page, vp.name, screen, `${vp.name}/${screen}`);
 
       // eslint-disable-next-line no-await-in-loop
       await page.evaluate(() => {

@@ -11,19 +11,42 @@
  *     window.__screenReady = true;         // <- the flag, RIGHT HERE
  *
  * and the freshly-mounted `.fa-screen` then runs `fa-screen-in 0.26s`, which is
- * `from { opacity: 0; transform: translateY(10px) scale(0.992) }`. Measured by
- * `tools/tmp/e2e_boot_probe.mjs`: at the instant the flag flips, `.fa-screen`
- * opacity is **0** and the curtain is still opaque. The same screen captured at
- * `__screenReady` and 2.5 s later scores stdev 26.16 / mean 71.7 against
- * stdev 96.08 / mean 133.4 — a 3.7x contrast difference on identical content,
- * because the early frame is the screen faded over the orange `.fa-bg` backdrop.
+ * `from { opacity: 0; transform: translateY(10px) scale(0.992) }`.
  *
- * It survived because it is INTERMITTENT: it only appeared on the third round trip
- * of `journey.mjs`, when cached thumbnails made the capture 0.3 s faster than the
- * animation. Every earlier trip was accidentally slow enough.
+ * ── What was measured, and by which instrument ──────────────────────────────────
+ * ORIGINALLY, by `tools/tmp/journey.mjs` (commit 09af4d0): the same screen captured
+ * at `__screenReady` and 2.5 s later scored stdev 26.16 / mean 71.7 against
+ * stdev 96.08 / mean 133.4 — a 3.7x contrast difference on identical content. That
+ * number has NOT been reproduced since and should be quoted as journey's, not as the
+ * general size of the effect: it was the worst case, on the third round trip, when
+ * cached thumbnails made the capture 0.3 s faster than the animation.
+ *
+ * REPRODUCED HERE, by `tools/tmp/settle_validate.mjs` on a frozen snapshot, on a real
+ * curtained navigation (`home -> settings`, a click, captured at `__screenReady`):
+ *
+ *   whole frame            stdev 67.16 -> 81.77   mean 149.2 -> 154.5
+ *   the AUDIO card only    stdev 55.82 -> 72.88   (-23%), blue mean 190.3 -> 217.5
+ *   the DONE button        stdev 62.25 -> 77.99
+ *   pure background        stdev  4.92 ->  4.37   -- UNCHANGED, which is the control
+ *
+ * The background not moving is what proves the mechanism: the loss is the screen's
+ * own content compositing over the orange `.fa-bg`, not a global exposure shift. And
+ * the early frame looks entirely plausible to a human, because the thing bleeding
+ * through is the same hue family as the card. That is why it survived a session.
+ *
+ * ── Why it is INTERMITTENT, precisely ───────────────────────────────────────────
+ * On a CURTAINED navigation the flag is wrong every time: 2 of 2 measured, screen
+ * opacity 0.000, curtain still at 0.722. On a FIRST MOUNT it is a race, and this
+ * machine loses it about half the time: mid-fade on 5 of 9 cells
+ * (`settle_geom_ab.mjs`) and 2 of 6 screens (`settle_validate.mjs` arrangement A).
+ *
+ * A second race sits behind the first: `page.screenshot()` is not instantaneous under
+ * SwiftShader, so a shutter opened mid-fade can still return a settled frame. The
+ * paint state and the pixels can therefore DISAGREE — which is exactly why
+ * `captureSettled` brackets the shutter and refuses on the worse of the two.
  *
  * `window.__previewReady` is no better: `shell.ts:mount` sets it two rAFs after the
- * append, i.e. two frames INTO the same 0.26 s animation.
+ * append, i.e. two frames INTO the same 0.26 s animation. Measured at 0-26 ms of 260.
  *
  * ── Why waiting on computed opacity, and not on a longer sleep ──────────────────
  * A fixed sleep re-introduces exactly the timing dependence that hid this for a
@@ -222,15 +245,38 @@ export async function settleScreen(page, opts = {}) {
 /**
  * Wait for the roster's ELEVEN portraits, by outcome rather than by flag.
  *
- * `window.__thumbsReady` is the documented condition and it is far better than a
- * timeout, but it is not airtight: `thumbs.ts:requestThumbnails` returns early at
- * `if (generating) return;` BEFORE it writes `__thumbsReady = false`, so a roster
- * mounted while home's single-portrait generation is still in flight can observe a
- * STALE `true`. `characterSelect.ts` adds `has-render` to a card the moment its
- * portrait lands, so counting those asks about the outcome instead of the symptom
- * (`docs/LESSONS.md` §13).
+ * `window.__thumbsReady` is the documented condition and it is enormously better than
+ * a timeout — a fixed 2.5 s AND a fixed 15 s both captured emoji placeholders, and it
+ * flips at ~28.9 s under SwiftShader. It is still not the thing the metric batteries
+ * actually need, for two reasons, and only the second one is a bug:
  *
- * Both are required: the flag, and then every card actually carrying its render.
+ *  1. THEY ARE DIFFERENT CLAIMS. The flag says a generation pass finished. What
+ *     `chars_metrics` measures is whether ELEVEN CARDS carry their portrait in the
+ *     DOM. `characterSelect.ts:190` adds `has-render` at the moment a card's image
+ *     lands, so counting those asks about the outcome rather than about a signal
+ *     believed to imply it — `docs/LESSONS.md` §13, "prefer a metric that asks about
+ *     the OUTCOME".
+ *  2. THE FLAG CAN BE SET TRUE VACUOUSLY. `thumbs.ts:378` ends a pass with
+ *     `window.__thumbsReady = demandedIds().every((id) => cache.has(id))`, and
+ *     `demandedIds()` returns `[]` whenever `window.__screen` is set to anything but
+ *     `characters` and the DOM holds no `[data-portrait]` host — its `if (!want.size
+ *     && !window.__screen) return all` fallback only fires when there is NO route at
+ *     all. `[].every(...)` is `true`. So a pass that finishes while a portrait-less
+ *     screen is mounted publishes `__thumbsReady = true` having demanded nothing and
+ *     rendered nothing.
+ *
+ * ⚠️ Read from `src/ui/screens/thumbs.ts` (356-382) and `shell.ts:mount`, NOT observed
+ * leaking onto the roster: the roster's own `requestThumbnails` writes the flag back
+ * to `false` unless all eleven are already cached, and `unmount(); mount(route)` is
+ * one synchronous block that no promise callback can interleave with. So the vacuous
+ * `true` is real in the code and I could not construct a probe that reads it on the
+ * characters screen. An earlier version of this comment claimed the early return at
+ * `if (generating) return;` was the cause; that is WRONG — whoever set `generating`
+ * had already written the flag `false` — and it is corrected here rather than left,
+ * because this repo's comments are quoted as evidence.
+ *
+ * Both are required: the flag, and then every card actually carrying its render. The
+ * conjunction costs nothing and is immune to either failing.
  *
  * `[data-char]` is load-bearing, not tidiness: `characterSelect.ts` appends a TWELFTH
  * `.chars-card chars-card--locked` "More soon" tile which has no character and can
