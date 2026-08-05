@@ -8,7 +8,7 @@ npm run dev        # http://localhost:5173 — SHARED. Fine for a quick look, ne
                    # and NEVER for actually playing (see below).
 npx tsc --noEmit
 node src/game/sim.test.mjs            # 219
-node src/game/economy/economy.test.mjs # 173
+node src/game/economy/economy.test.mjs # 220
 ```
 
 ---

@@ -568,6 +568,37 @@ number of additional rounds could ever have found — five rounds tuning a low-f
 whose wavelengths (420–530wu) exceed the frame (578wu), and every character round judged
 against inverted contrast.
 
+### 🚨 And the sharpest version: a check that CANNOT fail, inside the guard built to catch that
+
+`tools/tmp/sentinel.mjs` is the **meta-guard** — the instrument that validates the other
+instruments, and the encoding of *"a guard that has not been shown to FAIL is not a guard."*
+Its `selfPair` kind was implemented as `holds({ a, b: a })`.
+
+**That compares `metric(a)` against `metric(a)`, which is zero for ANY pure function regardless
+of what it returns.** It proved *determinism*, nothing more. So the row reading
+
+> *"figureGround reports ZERO on a figure identical to its ground"*
+
+**asserted no such thing for its entire life.** A `figureGround` returning a confident **0.42** on
+an identical field passed it. Proven on a real mutant: a `+0.42` constant in the boundary path is
+**accepted** by the old form and **refused** by the new one — same input, same process.
+
+Fixed by giving `selfPair` an optional `identity`: when the answer on a self-identical input is
+known *by construction*, the returned **value** is checked too, not merely its stability. The
+existing figureGround row was measured at exactly 0 — so it was **true**; it had simply never
+been **asserted**.
+
+→ **A guard has two ways to be worthless, and this project had only been watching for one.**
+It can fail to fail on the bug (the known-bad-input rule). Or it can be **tautological** — phrased
+so that no implementation could ever fail it. The second is harder to see, because it passes
+loudly and forever. **Ask of every assertion: what implementation would FAIL this?** If you cannot
+name one, it is a comment with a `✓` next to it.
+
+Corollary from the same pass: when a mutation harness rebuilds an instrument to break it, the
+**unmutated rebuild must be asserted to reproduce the original exactly**, and a missing mutation
+anchor must **throw** rather than skip. A skipped mutation turns every refusal into a pass — the
+same shape as the `driver_guard` whose coverage *shrank* from 49 to 41 when a bug was fixed.
+
 
 ---
 

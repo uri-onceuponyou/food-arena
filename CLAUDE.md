@@ -62,7 +62,7 @@ Not style preferences. Every one exists because breaking it cost hours.
    **Nineteen** instruments were caught returning confident wrong answers in one session — including
    the blind critic itself, a driver copied into ten tools, a cache serving stale JSON, and a guard
    whose coverage *shrank* when a bug was fixed. **A guard that has not been shown to FAIL on the bug
-   it guards against is not a guard.** `tools/tmp/sentinel.mjs` (17/17) encodes this: MOVES, HOLDS,
+   it guards against is not a guard.** `tools/tmp/sentinel.mjs` (32/32) encodes this: MOVES, HOLDS,
    ORDERS, SELF-PAIR.
 
 7. **The blind critic has a MEASURED RESOLUTION FLOOR of ±1.4 points.** σ = 0.50, and a round's two
@@ -116,7 +116,7 @@ node src/game/economy/economy.test.mjs    # 220
 node tools/aspect.mjs                     # PASS, 0.00wu — competitive fairness, not a nicety
 node tools/verify-head.mjs                # the committed tree builds
 node tools/tmp/driver_guard.mjs           # 86 — no 14th copy, + both `bestWeapon` faults
-node tools/tmp/sentinel.mjs               # 17 selftest + 10 live
+node tools/tmp/sentinel.mjs               # 32 selftest + 16 live
 PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept.mjs          # 361
 PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept_portrait.mjs # 219
 ```
