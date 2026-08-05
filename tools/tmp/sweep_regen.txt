@@ -1,0 +1,42 @@
+staged /tmp/rsweep/REGEN_DELAY_MS_10_000 with REGEN_DELAY_MS=10_000
+staged /tmp/rsweep/REGEN_DELAY_MS_6_000 with REGEN_DELAY_MS=6_000
+staged /tmp/rsweep/REGEN_DELAY_MS_5_000 with REGEN_DELAY_MS=5_000
+staged /tmp/rsweep/REGEN_DELAY_MS_4_000 with REGEN_DELAY_MS=4_000
+staged /tmp/rsweep/REGEN_DELAY_MS_3_500 with REGEN_DELAY_MS=3_500
+staged /tmp/rsweep/REGEN_DELAY_MS_3_000 with REGEN_DELAY_MS=3_000
+staged /tmp/rsweep/REGEN_DELAY_MS_2_500 with REGEN_DELAY_MS=2_500
+staged /tmp/rsweep/REGEN_DELAY_MS_2_000 with REGEN_DELAY_MS=2_000
+
+══ SWEEP REGEN_DELAY_MS · policy=smart · 880 matches/row ══
+       value    play  engaged  regen/f  regenAny  regenHP  regenEng  stunMs  stun-lock  stunLongP90  slowMs  splatUse   fog%  pKillFog  eKillFog   p.win  Δwin max  Δwin mean  timeout
+      10_000  17.92s    6.00s    0.062      1.9%     0.12     82.9%    1858      65.1%       5533ms    2802     66.7%   4.3%      1.5%     14.5%   54.1%      0.0pp      0.00pp        0
+       6_000  17.93s    6.01s    0.729      9.1%     1.45     87.4%    1859      65.0%       5533ms    2802     66.7%   4.4%      1.6%     14.4%   54.0%     12.5pp      0.11pp        0
+       5_000  17.94s    6.01s    1.173     13.0%     2.33     84.4%    1862      65.0%       5533ms    2803     66.7%   4.5%      1.7%     14.3%   53.9%     12.5pp      0.23pp        0
+       4_000  17.99s    6.04s    1.959     21.9%     3.90     82.5%    1871      64.9%       5533ms    2812     66.7%   4.3%      1.5%     14.3%   54.1%      0.0pp      0.00pp        0
+       3_500  18.01s    6.07s    2.442     26.0%     4.86     82.2%    1873      64.9%       5533ms    2821     66.6%   4.4%      1.4%     14.3%   54.3%     12.5pp      0.23pp        0
+       3_000  18.01s    6.09s    2.968     29.9%     5.90     81.9%    1879      64.8%       5533ms    2824     66.7%   4.5%      1.5%     14.2%   54.2%     12.5pp      0.80pp        0
+       2_500  18.06s    6.13s    3.686     34.2%     7.33     79.7%    1883      64.6%       5533ms    2844     66.5%   4.5%      1.7%     14.8%   54.5%     25.0pp      1.14pp        0
+       2_000  18.10s    6.17s    4.500     39.2%     8.94     77.2%    1884      64.6%       5533ms    2851     66.5%   4.7%      1.8%     15.0%   54.9%     25.0pp      1.48pp        0
+
+══ SWEEP REGEN_DELAY_MS · policy=chase · 880 matches/row ══
+       value    play  engaged  regen/f  regenAny  regenHP  regenEng  stunMs  stun-lock  stunLongP90  slowMs  splatUse   fog%  pKillFog  eKillFog   p.win  Δwin max  Δwin mean  timeout
+      10_000  16.52s    5.86s    0.006      0.1%     0.01    100.0%    1977      66.9%       5600ms    2660     97.0%   0.1%      0.0%      0.7%   49.5%      0.0pp      0.00pp        0
+       6_000  16.52s    5.86s    0.720      6.6%     1.43     96.7%    1977      66.9%       5600ms    2660     97.0%   0.1%      0.0%      0.7%   49.5%      0.0pp      0.00pp        0
+       5_000  16.52s    5.86s    1.069     12.7%     2.12     95.7%    1977      66.9%       5600ms    2660     97.0%   0.1%      0.0%      0.7%   49.5%      0.0pp      0.00pp        0
+       4_000  16.52s    5.86s    1.566     19.0%     3.10     95.2%    1977      66.9%       5600ms    2660     97.0%   0.1%      0.0%      0.6%   49.5%      0.0pp      0.00pp        0
+       3_500  16.53s    5.86s    1.918     21.5%     3.79     93.0%    1977      66.9%       5600ms    2662     97.0%   0.1%      0.0%      0.5%   49.5%      0.0pp      0.00pp        0
+       3_000  16.53s    5.87s    2.297     24.5%     4.55     91.6%    1977      66.9%       5600ms    2663     97.0%   0.1%      0.0%      0.3%   49.5%      0.0pp      0.00pp        0
+       2_500  16.55s    5.88s    2.786     30.0%     5.50     90.2%    1980      66.9%       5600ms    2668     97.0%   0.1%      0.0%      0.5%   49.7%     12.5pp      0.11pp        0
+       2_000  16.57s    5.90s    3.326     33.0%     6.58     87.2%    1987      67.0%       5600ms    2674     97.0%   0.1%      0.0%      0.6%   49.8%     12.5pp      0.23pp        0
+
+══ SWEEP REGEN_DELAY_MS · policy=kite · 880 matches/row ══
+       value    play  engaged  regen/f  regenAny  regenHP  regenEng  stunMs  stun-lock  stunLongP90  slowMs  splatUse   fog%  pKillFog  eKillFog   p.win  Δwin max  Δwin mean  timeout
+      10_000  25.18s    0.56s    1.350     10.1%     2.68      5.7%     137      26.6%          0ms      79     68.2%  91.5%     75.5%     16.8%   16.8%      0.0pp      0.00pp        0
+       6_000  25.23s    0.58s    2.781     13.9%     5.53      9.2%     140      26.5%          0ms      80     68.2%  91.6%     75.6%     16.8%   16.8%      0.0pp      0.00pp        0
+       5_000  25.24s    0.58s    3.026     14.3%     5.99     10.8%     140      26.5%          0ms      80     68.2%  91.6%     75.7%     16.8%   16.8%      0.0pp      0.00pp        0
+       4_000  25.25s    0.58s    3.237     15.9%     6.41     11.1%     141      26.3%          0ms      81     68.2%  91.5%     75.6%     16.8%   16.8%      0.0pp      0.00pp        0
+       3_500  25.25s    0.58s    3.361     16.4%     6.66     10.5%     141      26.3%          0ms      81     68.2%  91.5%     75.6%     16.8%   16.8%      0.0pp      0.00pp        0
+       3_000  25.26s    0.58s    3.500     17.8%     6.93      9.3%     142      26.3%          0ms      82     68.2%  91.5%     75.7%     16.8%   16.8%      0.0pp      0.00pp        0
+       2_500  25.34s    0.59s    3.910     23.1%     7.75      7.9%     144      25.6%          0ms      82     69.6%  91.6%     75.2%     16.8%   16.8%      0.0pp      0.00pp        0
+       2_000  25.37s    0.59s    4.215     24.7%     8.35      6.6%     144      25.4%          0ms      82     69.6%  91.6%     75.7%     16.8%   16.8%      0.0pp      0.00pp        0
+

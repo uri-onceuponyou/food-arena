@@ -1,0 +1,443 @@
+{
+  "mode": "counts",
+  "viewport": {
+    "W": 1300,
+    "H": 740,
+    "DPR": 1
+  },
+  "scenes": {
+    "match": {
+      "frames": 60,
+      "driven": false,
+      "otherStagesRendering": [],
+      "perFrame": {
+        "drawCalls": 507,
+        "triangles": 280807,
+        "postFillMPx": 0.96,
+        "drawBufferMPx": 0.962,
+        "postOverdrawFactor": 1,
+        "programBinds": 40,
+        "textureBinds": 49,
+        "framebufferBinds": 9,
+        "threeInfoCallsLastPassOnly": 507
+      },
+      "passes": [
+        {
+          "pass": "0:RenderPass",
+          "draws": 506,
+          "tris": 280806,
+          "fillMPx": null
+        },
+        {
+          "pass": "1:EffectPass(ToyGrade+Vignette)",
+          "draws": 1,
+          "tris": 1,
+          "fillMPx": 0.96
+        }
+      ],
+      "census": {
+        "renderer": {
+          "pixelRatio": 1,
+          "drawBufferPx": [
+            1300,
+            740
+          ],
+          "shadowsEnabled": true,
+          "shadowAutoUpdate": false,
+          "shadowType": 2,
+          "postFx": true,
+          "envIntensity": 0.32,
+          "hasEnvironment": true
+        },
+        "objects": 1279,
+        "meshes": 1023,
+        "visibleMeshes": 993,
+        "instanced": 6,
+        "instancesTotal": 2271,
+        "outlineHulls": 104,
+        "castShadow": 418,
+        "receiveShadow": 652,
+        "transparent": 259,
+        "depthWriteTransparent": 33,
+        "trianglesStatic": 332116,
+        "uniqueGeometries": 846,
+        "uniqueMaterials": 246,
+        "uniqueTextures": 28,
+        "lights": 4,
+        "shadowCasterLights": 1,
+        "texList": [
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 64,
+            "h": 64,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 128,
+            "h": 128,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 128,
+            "h": 32,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 256,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 64,
+            "h": 256,
+            "kind": "canvas",
+            "mip": true
+          },
+          {
+            "name": "CanvasTexture",
+            "w": 8,
+            "h": 64,
+            "kind": "canvas",
+            "mip": true
+          }
+        ]
+      },
+      "stages": {
+        "created": 1,
+        "live": 1,
+        "onScreen": 1
+      },
+      "contexts": {
+        "created": 1,
+        "live": 1,
+        "lost": 0,
+        "detail": [
+          {
+            "type": "webgl2",
+            "lost": false
+          }
+        ]
+      },
+      "canvas2d": {
+        "count": 39,
+        "megapixels": 2.38
+      },
+      "programs": {
+        "created": 25,
+        "linked": 25,
+        "shadersCompiled": 50,
+        "linkMsUnsafe": 0
+      },
+      "textureBytes": {
+        "content": 5090228,
+        "contentCount": 19,
+        "renderTarget": 18181760,
+        "renderTargetCount": 3,
+        "renderbuffer": 57364032,
+        "renderbufferCount": 5,
+        "total": 80636020,
+        "freed": 6291456,
+        "biggestContent": [
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          },
+          {
+            "w": 256,
+            "h": 256,
+            "kb": 341,
+            "src": "canvas2d",
+            "mip": true
+          }
+        ],
+        "biggestTargets": [
+          {
+            "w": 1300,
+            "h": 740,
+            "kb": 7516
+          },
+          {
+            "w": 768,
+            "h": 1024,
+            "kb": 6144
+          },
+          {
+            "w": 1024,
+            "h": 1024,
+            "kb": 4096
+          }
+        ],
+        "bySource": [
+          {
+            "src": "canvas2d",
+            "mb": 4.85
+          },
+          {
+            "src": "typedarray",
+            "mb": 0
+          }
+        ]
+      }
+    }
+  },
+  "meta": {
+    "at": "2026-08-04T23:28:25.254Z",
+    "base": "http://localhost:55370",
+    "viewport": {
+      "W": 1300,
+      "H": 740,
+      "DPR": 1
+    },
+    "frames": 60,
+    "rasteriser": "swiftshader-cpu"
+  }
+}

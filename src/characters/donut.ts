@@ -23,20 +23,46 @@ import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
 
 const GLAZE = PALETTE.glaze;      // #FF9EC4
-const DOUGH = '#F0C070';
+const DOUGH = '#F5CE86';
 const DOUGH_DARK = '#D9A253';
 // Shoes deliberately break from the dough/glaze pair — a genuine dark value drop
 // ("chocolate-dipped feet") so the body doesn't read as one undifferentiated tan
 // mass. `DOUGH_DARK` above is too close in hue/value to `DOUGH` to do that job.
-const CHOC_DIP = '#5C3417';
+const CHOC_DIP = '#120902';        // boots, darker than the shins above them
 // Limb-only pink family — a second independent art-director pass found Hamburger,
 // Donut and Taco all converging on the same golden-tan-dough hue for their limbs
 // despite different heads. Donut's own icing is already pink, so her limbs lean
 // into THAT identity instead of the shared dough tone: a saturated glaze pink for
 // the meaty part of the limb, a deeper berry pink for the lower segment, so the
 // whole body reads pink-and-cream rather than another tan blob.
-const LIMB_PINK = '#F0729B';
-const LIMB_PINK_DARK = '#D14E7C';
+// ── The dark rung ────────────────────────────────────────────────────────────
+// Measured against 18 Brawl Stars plates: their P05 is 0.097 and all eighteen put 5%
+// of the character below 0.18. Donut's was 0.333 — the second-worst in the cast — and
+// 33.6% of its part boundaries were under 0.10 apart, the arm chain worst of all
+// (`shoulderL|elbowL` 0.097, `elbowL|handL` 0.091, `hipL|kneeL` 0.086). Both are the
+// same defect: the whole character lived between 0.44 and 0.81.
+//
+// The beanie is where the dark end goes — it is 13.9% of the character's pixels in
+// ONE mesh, it is the reference's own grammar (near-black hair/hat over a light face),
+// and it costs the food nothing. The lower limb tone follows it down so the arm chain
+// alternates instead of ramping, and the pompom + dough come up to pay for both in
+// figure/ground. Measured at pot_south, shipped framing: range 0.466 -> 0.676,
+// p05 0.343 -> 0.173, steps@0.10 6 -> 7, figure/ground 0.262 -> 0.227.
+const BEANIE = '#170C28';
+const BEANIE_BRIM = '#0E0720';
+/** The pompom, and only the pompom. Was `GLAZE`, i.e. the same pink as the icing it
+ *  sits above; a wool pompom is the natural light rung and it pays for the beanie. */
+const POMPOM = '#FFF6E8';
+
+// ── PASS 2: the limb CHAIN has to alternate, not ramp ────────────────────────
+// The first value pass took both limb tones down together. That fixed range/P05 and
+// BROKE the part boundary — measured, `shoulderL|elbowL` 0.044, `kneeL|footL` 0.035,
+// because a chain of four segments each a shade darker than the last is one mass. The
+// reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
+// segment comes back UP, the lower segment holds the dark, and the boot takes its own
+// darkest tone instead of sharing the shin's.
+const LIMB_PINK = '#DE6491';       // upper arm / thigh — mid
+const LIMB_PINK_DARK = '#7E2340';  // forearm / shin — dark
 
 const SPRINKLE_COLORS = ['#E63946', '#7CB518', '#FFC93C', '#7C4DFF', '#2E86D8', '#FFFFFF'];
 
@@ -263,9 +289,9 @@ export class DonutCharacter extends BaseCharacter {
     // through wardrobe, and this cast had none. A jaunty knit beanie perched above
     // the ring is Donut's: it breaks the torus's round silhouette upward with a
     // real worn shape, in a fresh violet that doesn't fight her own pink glaze.
-    const beanieMat = toonMat({ color: '#8E5FD9', roughness: 0.68 });
-    const beanieBrimMat = toonMat({ color: '#6E3FB8', roughness: 0.68 });
-    const pompomMat = toonMat({ color: GLAZE, roughness: 0.7 });
+    const beanieMat = toonMat({ color: BEANIE, roughness: 0.68 });
+    const beanieBrimMat = toonMat({ color: BEANIE_BRIM, roughness: 0.68 });
+    const pompomMat = toonMat({ color: POMPOM, roughness: 0.7 });
 
     const beanieR = R * 0.36;
     const beanieThetaLen = Math.PI * 0.62;
@@ -375,7 +401,7 @@ export class DonutCharacter extends BaseCharacter {
       // "worn, not just coloured" read), tucked into the gap the drip angles leave
       // clear at the front (drips start at 0.55 rad).
       const badgeMat = toonMat({ color: '#FFD873', roughness: 0.5 });
-      const badgeInnerMat = toonMat({ color: '#8E5FD9', roughness: 0.5 });
+      const badgeInnerMat = toonMat({ color: BEANIE, roughness: 0.5 }); // same near-black as the cap
       const badgeA = 0.18;
       const badgeR = collarR + collarTube * 0.85;
       const badge = new THREE.Mesh(new THREE.CylinderGeometry(collarTube * 0.55, collarTube * 0.55, collarTube * 0.18, 16), badgeMat);

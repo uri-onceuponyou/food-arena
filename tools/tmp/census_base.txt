@@ -1,0 +1,311 @@
+
+╔══ RULES CENSUS ══ 11000 matches · 25 seeds × 110 matchups × 4 policies · 246.4s
+║ clock 45s · arena 1400x1000 maxSafeRadius 993 · spawn gap 1080wu
+║ sim working tree
+╚══════════════════════════════════════════════════════════════════════════
+
+══════ POLICY IDLE ── 2750 matches ══════
+  PLAY length      mean 21.22s  median 21.10s  p90 21.43s  max 21.70s   (clock 45s)
+  ENGAGED          mean 3.43s = 16.2% of play   (dead time 83.8%)
+  endings          knockout 2750  TIMEOUT 0  unresolved 0   ·  player win 0.0%
+  ring floor       reached in 0/2750 (0.0%)   min R seen 514wu  (floor 140)
+
+  ── REGEN_DELAY_MS = 10000 ────────────────────────────────────
+     regen ticks/match     0.000   (per FIGHTER; 0/5500 fighters ever regened)
+     HP regained/match     0.00 per fighter
+     eligible ticks/match  0.00 = 0.00s of eligibility per fighter
+     longest out-of-combat gap once damaged: mean 0.60s  p50 0.28s  p90 0.65s  max 4.93s
+     fighters whose longest gap exceeds a candidate delay:
+           1s  1.5s    2s  2.5s    3s    4s    5s    6s    8s   10s
+         4.5%  4.5%  4.5%  4.5%  4.5%  4.5%  0.0%  0.0%  0.0%  0.0%
+
+  ── STUN_DURATION_MS = 2000 · SLOW_DURATION_MS = 2500 ─────────
+     stun  applications/match 0.55 per fighter  ·  0.48s locked = 2.2% of play, 13.9% of ENGAGED time
+           re-applied while already stunned: 0.32/match (58.3% of applications = stun-LOCK)
+     slow  applications/match 1.41 per fighter  ·  0.76s slowed = 3.6% of play, 22.0% of ENGAGED time
+           re-applied while already slowed: 1.09/match (77.4%)
+
+  ── SPLAT_DURATION_MS = 4000 · TRAIL.durationMs = 4500 ─────────
+     splats created/match  0.64   max alive 4   mean alive 0.04
+     splats that ever slowed anyone: 100.0%   (500 matches had any)
+     splat victim-ticks/match 34.8 = 0.58s of fighter-time standing in one
+     trail marks/match     125.0  max alive 27  (cap = durationMs/dropIntervalMs = 28)
+     trail marks that ever bit: 5.6%   hits/match 7.0  damage/match 21.0 HP
+     terrain slow (puddle+splat) 0.64s per fighter = 3.0% of play
+
+  ── FOG (15/300ms = 50 HP/s) · POT (8/250ms = 32 HP/s) ──
+     damage share  fog 49.6%  ·  hazard 0.0%  ·  trail 1.3%  ·  weapon 49.0%
+     matches with ANY fog damage 100.0%   first fog hit mean 26.48s
+     matches with ANY pot damage 0.0%
+
+  ── PROJECTILE FLIGHT (FLIGHT_MS bands 350/500/875/1750) ──────────────
+     lifetime  mean 204ms  p50 100ms  p90 483ms  max 2417ms   (n=30750)
+     fate      hit 85.4% · cover 3.3% · fell short 11.4%
+
+  ── WEAPON COOLDOWNS — uses per match against 21.22s play / 3.43s engaged ──
+     character   weapon        cd  fires/m  hits/m  cap@play  cap@eng   verdict
+     hamburger   Smash        650     1.50    1.50      32.7      5.3   
+     hamburger   Tomato       800     1.50    1.50      26.5      4.3   
+     hamburger   Lettuce     1100     1.50    1.50      19.3      3.1   
+     hamburger   Onion       6000     0.00    0.00       3.5      0.6   RARE (<0.5 uses/match)
+     donut       Candy        900     2.00    5.00      23.6      3.8   
+     taco        Filling      900     1.50    1.50      23.6      3.8   
+     taco        Onion        750     2.00    2.00      28.3      4.6   
+     taco        Double      2500     0.50    1.00       8.5      1.4   sub-once
+     burrito     Disc         850     2.00    2.00      25.0      4.0   
+     burrito     Roll        1400     1.00    1.00      15.2      2.5   
+     burrito     Swarm       3000     1.00    2.50       7.1      1.1   
+     egg         Tackle      2200     1.00    0.50       9.6      1.6   
+     egg         Hatch       2600     1.00    2.50       8.2      1.3   
+     egg         Shards      1000     1.50    3.50      21.2      3.4   
+     lollipop    Smash        750     2.00    1.50      28.3      4.6   
+     lollipop    Giant       8000     0.50    0.50       2.7      0.4   sub-once
+     pizza       Dough        850     2.00    2.00      25.0      4.0   
+     pizza       Tomato       900     2.00    2.00      23.6      3.8   
+     pizza       Cheese      1300     1.50    1.50      16.3      2.6   
+     sushi       Rice         700     2.00    6.00      30.3      4.9   
+     sushi       Seaweed     1000     1.50    1.50      21.2      3.4   
+     sushi       Fish        1200     1.00    1.00      17.7      2.9   
+     sushi       Catch       3200     0.50    1.50       6.6      1.1   sub-once
+     soup        Splash       750     2.00    5.00      28.3      4.6   
+     soup        Noodle      1000     2.00    2.00      21.2      3.4   
+     soup        Dump        3000     0.50    0.50       7.1      1.1   sub-once
+     waterbottle Spray        850     1.50    3.50      25.0      4.0   
+     waterbottle Glass       1100     1.50    1.50      19.3      3.1   
+     waterbottle Cap          900     2.00    2.00      23.6      3.8   
+     waterbottle Mega        3500     0.50    0.50       6.1      1.0   sub-once
+     hotdog      Mustard      900     2.00    2.00      23.6      3.8   
+     hotdog      Ketchup      950     1.50    1.50      22.3      3.6   
+     hotdog      Slash        650     1.50    1.50      32.7      5.3   
+
+══════ POLICY SMART ── 2750 matches ══════
+  PLAY length      mean 17.89s  median 17.60s  p90 22.22s  max 28.12s   (clock 45s)
+  ENGAGED          mean 5.97s = 32.4% of play   (dead time 67.6%)
+  endings          knockout 2750  TIMEOUT 0  unresolved 0   ·  player win 53.3%
+  ring floor       reached in 0/2750 (0.0%)   min R seen 372wu  (floor 140)
+
+  ── REGEN_DELAY_MS = 10000 ────────────────────────────────────
+     regen ticks/match     0.053   (per FIGHTER; 99/5500 fighters ever regened)
+     HP regained/match     0.11 per fighter
+     eligible ticks/match  0.74 = 0.01s of eligibility per fighter
+     longest out-of-combat gap once damaged: mean 2.37s  p50 0.93s  p90 5.85s  max 12.37s
+     fighters whose longest gap exceeds a candidate delay:
+           1s  1.5s    2s  2.5s    3s    4s    5s    6s    8s   10s
+        46.9% 40.9% 39.3% 35.4% 30.8% 22.1% 13.2%  9.4%  3.9%  2.3%
+
+  ── STUN_DURATION_MS = 2000 · SLOW_DURATION_MS = 2500 ─────────
+     stun  applications/match 1.48 per fighter  ·  1.88s locked = 10.5% of play, 31.4% of ENGAGED time
+           re-applied while already stunned: 0.97/match (65.7% of applications = stun-LOCK)
+     slow  applications/match 3.78 per fighter  ·  2.83s slowed = 15.8% of play, 47.4% of ENGAGED time
+           re-applied while already slowed: 3.13/match (82.8%)
+
+  ── SPLAT_DURATION_MS = 4000 · TRAIL.durationMs = 4500 ─────────
+     splats created/match  2.36   max alive 7   mean alive 0.34
+     splats that ever slowed anyone: 63.2%   (941 matches had any)
+     splat victim-ticks/match 156.6 = 2.61s of fighter-time standing in one
+     trail marks/match     92.6  max alive 27  (cap = durationMs/dropIntervalMs = 28)
+     trail marks that ever bit: 9.3%   hits/match 8.2  damage/match 24.6 HP
+     terrain slow (puddle+splat) 2.61s per fighter = 14.6% of play
+
+  ── FOG (15/300ms = 50 HP/s) · POT (8/250ms = 32 HP/s) ──
+     damage share  fog 3.7%  ·  hazard 0.1%  ·  trail 2.3%  ·  weapon 93.9%
+     matches with ANY fog damage 19.0%   first fog hit mean 24.35s
+     matches with ANY pot damage 1.0%
+
+  ── PROJECTILE FLIGHT (FLIGHT_MS bands 350/500/875/1750) ──────────────
+     lifetime  mean 223ms  p50 167ms  p90 483ms  max 2717ms   (n=86581)
+     fate      hit 74.6% · cover 2.3% · fell short 23.2%
+
+  ── WEAPON COOLDOWNS — uses per match against 17.89s play / 5.97s engaged ──
+     character   weapon        cd  fires/m  hits/m  cap@play  cap@eng   verdict
+     hamburger   Smash        650     5.26    4.98      27.5      9.2   
+     hamburger   Tomato       800     4.96    4.63      22.4      7.5   
+     hamburger   Lettuce     1100     3.79    3.37      16.3      5.4   
+     hamburger   Onion       6000     0.00    0.00       3.0      1.0   RARE (<0.5 uses/match)
+     donut       Candy        900     5.28   11.59      19.9      6.6   
+     taco        Filling      900     4.57    3.51      19.9      6.6   
+     taco        Onion        750     4.64    3.49      23.9      8.0   
+     taco        Double      2500     2.15    3.38       7.2      2.4   
+     burrito     Disc         850     6.68    5.46      21.1      7.0   
+     burrito     Roll        1400     2.22    2.02      12.8      4.3   
+     burrito     Swarm       3000     2.50    8.04       6.0      2.0   
+     egg         Tackle      2200     1.95    1.90       8.1      2.7   
+     egg         Hatch       2600     2.08    5.14       6.9      2.3   
+     egg         Shards      1000     3.95    7.63      17.9      6.0   
+     lollipop    Smash        750     3.97    3.47      23.9      8.0   
+     lollipop    Giant       8000     1.09    1.09       2.2      0.7   
+     pizza       Dough        850     8.45    7.95      21.1      7.0   
+     pizza       Tomato       900     8.10    7.67      19.9      6.6   
+     pizza       Cheese      1300     5.48    5.17      13.8      4.6   
+     sushi       Rice         700     5.08    9.64      25.6      8.5   
+     sushi       Seaweed     1000     4.39    3.96      17.9      6.0   
+     sushi       Fish        1200     2.69    2.69      14.9      5.0   
+     sushi       Catch       3200     2.17    5.50       5.6      1.9   
+     soup        Splash       750     4.53   10.31      23.9      8.0   
+     soup        Noodle      1000     4.07    3.45      17.9      6.0   
+     soup        Dump        3000     1.55    1.53       6.0      2.0   
+     waterbottle Spray        850     5.07    8.26      21.1      7.0   
+     waterbottle Glass       1100     4.85    4.60      16.3      5.4   
+     waterbottle Cap          900     5.22    4.96      19.9      6.6   
+     waterbottle Mega        3500     1.63    1.62       5.1      1.7   
+     hotdog      Mustard      900     4.11    3.44      19.9      6.6   
+     hotdog      Ketchup      950     3.84    3.15      18.8      6.3   
+     hotdog      Slash        650     4.19    3.99      27.5      9.2   
+
+══════ POLICY CHASE ── 2750 matches ══════
+  PLAY length      mean 16.60s  median 16.28s  p90 20.47s  max 23.78s   (clock 45s)
+  ENGAGED          mean 5.92s = 34.7% of play   (dead time 65.3%)
+  endings          knockout 2750  TIMEOUT 0  unresolved 0   ·  player win 49.9%
+  ring floor       reached in 0/2750 (0.0%)   min R seen 468wu  (floor 140)
+
+  ── REGEN_DELAY_MS = 10000 ────────────────────────────────────
+     regen ticks/match     0.005   (per FIGHTER; 14/5500 fighters ever regened)
+     HP regained/match     0.01 per fighter
+     eligible ticks/match  0.11 = 0.00s of eligibility per fighter
+     longest out-of-combat gap once damaged: mean 2.18s  p50 0.83s  p90 5.80s  max 11.77s
+     fighters whose longest gap exceeds a candidate delay:
+           1s  1.5s    2s  2.5s    3s    4s    5s    6s    8s   10s
+        42.5% 38.1% 35.2% 31.1% 26.2% 19.4% 13.4%  8.1%  4.5%  0.8%
+
+  ── STUN_DURATION_MS = 2000 · SLOW_DURATION_MS = 2500 ─────────
+     stun  applications/match 1.57 per fighter  ·  1.99s locked = 12.0% of play, 33.5% of ENGAGED time
+           re-applied while already stunned: 1.04/match (66.2% of applications = stun-LOCK)
+     slow  applications/match 3.66 per fighter  ·  2.70s slowed = 16.3% of play, 45.6% of ENGAGED time
+           re-applied while already slowed: 3.00/match (81.9%)
+
+  ── SPLAT_DURATION_MS = 4000 · TRAIL.durationMs = 4500 ─────────
+     splats created/match  2.47   max alive 8   mean alive 0.37
+     splats that ever slowed anyone: 96.3%   (950 matches had any)
+     splat victim-ticks/match 447.1 = 7.45s of fighter-time standing in one
+     trail marks/match     79.1  max alive 27  (cap = durationMs/dropIntervalMs = 28)
+     trail marks that ever bit: 13.8%   hits/match 10.7  damage/match 32.0 HP
+     terrain slow (puddle+splat) 2.86s per fighter = 17.2% of play
+
+  ── FOG (15/300ms = 50 HP/s) · POT (8/250ms = 32 HP/s) ──
+     damage share  fog 0.1%  ·  hazard 0.1%  ·  trail 3.0%  ·  weapon 96.8%
+     matches with ANY fog damage 1.2%   first fog hit mean 25.18s
+     matches with ANY pot damage 0.6%
+
+  ── PROJECTILE FLIGHT (FLIGHT_MS bands 350/500/875/1750) ──────────────
+     lifetime  mean 164ms  p50 83ms  p90 483ms  max 2583ms   (n=150652)
+     fate      hit 45.4% · cover 33.4% · fell short 21.2%
+
+  ── WEAPON COOLDOWNS — uses per match against 16.60s play / 5.92s engaged ──
+     character   weapon        cd  fires/m  hits/m  cap@play  cap@eng   verdict
+     hamburger   Smash        650    14.90    5.02      25.5      9.1   
+     hamburger   Tomato       800     5.14    4.67      20.7      7.4   
+     hamburger   Lettuce     1100     4.18    3.49      15.1      5.4   
+     hamburger   Onion       6000     0.00    0.00       2.8      1.0   RARE (<0.5 uses/match)
+     donut       Candy        900    10.63   10.93      18.4      6.6   
+     taco        Filling      900    10.69    3.52      18.4      6.6   
+     taco        Onion        750     4.66    3.86      22.1      7.9   
+     taco        Double      2500     2.00    3.04       6.6      2.4   
+     burrito     Disc         850    13.73    6.26      19.5      7.0   
+     burrito     Roll        1400     3.56    3.27      11.9      4.2   
+     burrito     Swarm       3000     2.66    7.96       5.5      2.0   
+     egg         Tackle      2200     4.58    1.55       7.5      2.7   
+     egg         Hatch       2600     2.05    4.42       6.4      2.3   
+     egg         Shards      1000     3.89    7.98      16.6      5.9   
+     lollipop    Smash        750    13.58    3.07      22.1      7.9   
+     lollipop    Giant       8000     1.27    1.27       2.1      0.7   
+     pizza       Dough        850    15.77    8.58      19.5      7.0   
+     pizza       Tomato       900     8.48    7.86      18.4      6.6   
+     pizza       Cheese      1300     5.78    5.36      12.8      4.6   
+     sushi       Rice         700    12.76   15.36      23.7      8.5   
+     sushi       Seaweed     1000     3.66    3.02      16.6      5.9   
+     sushi       Fish        1200     2.81    2.77      13.8      4.9   
+     sushi       Catch       3200     1.72    3.62       5.2      1.9   
+     soup        Splash       750    12.82   11.59      22.1      7.9   
+     soup        Noodle      1000     4.31    3.39      16.6      5.9   
+     soup        Dump        3000     1.66    1.62       5.5      2.0   
+     waterbottle Spray        850    12.04   11.19      19.5      7.0   
+     waterbottle Glass       1100     4.56    3.91      15.1      5.4   
+     waterbottle Cap          900     5.21    4.49      18.4      6.6   
+     waterbottle Mega        3500     1.74    1.68       4.7      1.7   
+     hotdog      Mustard      900    10.53    3.58      18.4      6.6   
+     hotdog      Ketchup      950     3.96    3.21      17.5      6.2   
+     hotdog      Slash        650     4.50    4.32      25.5      9.1   
+
+══════ POLICY KITE ── 2750 matches ══════
+  PLAY length      mean 25.61s  median 29.43s  p90 31.00s  max 38.35s   (clock 45s)
+  ENGAGED          mean 0.63s = 2.1% of play   (dead time 97.9%)
+  endings          knockout 2750  TIMEOUT 0  unresolved 0   ·  player win 14.8%
+  ring floor       reached in 0/2750 (0.0%)   min R seen 146wu  (floor 140)
+
+  ── REGEN_DELAY_MS = 10000 ────────────────────────────────────
+     regen ticks/match     1.052   (per FIGHTER; 470/5500 fighters ever regened)
+     HP regained/match     2.09 per fighter
+     eligible ticks/match  12.85 = 0.21s of eligibility per fighter
+     longest out-of-combat gap once damaged: mean 1.99s  p50 0.28s  p90 8.42s  max 15.78s
+     fighters whose longest gap exceeds a candidate delay:
+           1s  1.5s    2s  2.5s    3s    4s    5s    6s    8s   10s
+        28.7% 27.1% 24.4% 22.2% 18.8% 14.8% 13.2% 12.9% 10.2%  8.7%
+
+  ── STUN_DURATION_MS = 2000 · SLOW_DURATION_MS = 2500 ─────────
+     stun  applications/match 0.11 per fighter  ·  0.16s locked = 0.6% of play, 25.1% of ENGAGED time
+           re-applied while already stunned: 0.03/match (31.4% of applications = stun-LOCK)
+     slow  applications/match 0.16 per fighter  ·  0.09s slowed = 0.4% of play, 14.5% of ENGAGED time
+           re-applied while already slowed: 0.13/match (80.2%)
+
+  ── SPLAT_DURATION_MS = 4000 · TRAIL.durationMs = 4500 ─────────
+     splats created/match  0.11   max alive 6   mean alive 0.01
+     splats that ever slowed anyone: 71.4%   (65 matches had any)
+     splat victim-ticks/match 14.1 = 0.24s of fighter-time standing in one
+     trail marks/match     161.2  max alive 27  (cap = durationMs/dropIntervalMs = 28)
+     trail marks that ever bit: 0.9%   hits/match 1.3  damage/match 3.8 HP
+     terrain slow (puddle+splat) 0.97s per fighter = 3.8% of play
+
+  ── FOG (15/300ms = 50 HP/s) · POT (8/250ms = 32 HP/s) ──
+     damage share  fog 90.4%  ·  hazard 2.3%  ·  trail 0.5%  ·  weapon 6.8%
+     matches with ANY fog damage 94.5%   first fog hit mean 26.07s
+     matches with ANY pot damage 9.1%
+
+  ── PROJECTILE FLIGHT (FLIGHT_MS bands 350/500/875/1750) ──────────────
+     lifetime  mean 202ms  p50 100ms  p90 483ms  max 2450ms   (n=4143)
+     fate      hit 70.8% · cover 12.7% · fell short 16.5%
+
+  ── WEAPON COOLDOWNS — uses per match against 25.61s play / 0.63s engaged ──
+     character   weapon        cd  fires/m  hits/m  cap@play  cap@eng   verdict
+     hamburger   Smash        650     0.28    0.15      39.4      1.0   RARE (<0.5 uses/match)
+     hamburger   Tomato       800     0.29    0.25      32.0      0.8   RARE (<0.5 uses/match)
+     hamburger   Lettuce     1100     0.27    0.17      23.3      0.6   RARE (<0.5 uses/match)
+     hamburger   Onion       6000     2.28    0.00       4.3      0.1   
+     donut       Candy        900     0.30    0.54      28.5      0.7   RARE (<0.5 uses/match)
+     taco        Filling      900     0.23    0.17      28.5      0.7   RARE (<0.5 uses/match)
+     taco        Onion        750     0.24    0.18      34.1      0.8   RARE (<0.5 uses/match)
+     taco        Double      2500     0.11    0.13      10.2      0.3   RARE (<0.5 uses/match)
+     burrito     Disc         850     0.28    0.20      30.1      0.7   RARE (<0.5 uses/match)
+     burrito     Roll        1400     0.11    0.08      18.3      0.4   RARE (<0.5 uses/match)
+     burrito     Swarm       3000     0.12    0.27       8.5      0.2   RARE (<0.5 uses/match)
+     egg         Tackle      2200     0.08    0.08      11.6      0.3   RARE (<0.5 uses/match)
+     egg         Hatch       2600     0.08    0.14       9.8      0.2   RARE (<0.5 uses/match)
+     egg         Shards      1000     0.15    0.26      25.6      0.6   RARE (<0.5 uses/match)
+     lollipop    Smash        750     0.65    0.58      34.1      0.8   sub-once
+     lollipop    Giant       8000     0.63    0.63       3.2      0.1   sub-once
+     pizza       Dough        850     0.36    0.29      30.1      0.7   RARE (<0.5 uses/match)
+     pizza       Tomato       900     0.33    0.27      28.5      0.7   RARE (<0.5 uses/match)
+     pizza       Cheese      1300     0.23    0.18      19.7      0.5   RARE (<0.5 uses/match)
+     sushi       Rice         700     0.22    0.53      36.6      0.9   RARE (<0.5 uses/match)
+     sushi       Seaweed     1000     0.20    0.12      25.6      0.6   RARE (<0.5 uses/match)
+     sushi       Fish        1200     0.10    0.10      21.3      0.5   RARE (<0.5 uses/match)
+     sushi       Catch       3200     0.12    0.18       8.0      0.2   RARE (<0.5 uses/match)
+     soup        Splash       750     0.30    0.74      34.1      0.8   RARE (<0.5 uses/match)
+     soup        Noodle      1000     0.27    0.23      25.6      0.6   RARE (<0.5 uses/match)
+     soup        Dump        3000     0.10    0.10       8.5      0.2   RARE (<0.5 uses/match)
+     waterbottle Spray        850     0.20    0.44      30.1      0.7   RARE (<0.5 uses/match)
+     waterbottle Glass       1100     0.20    0.17      23.3      0.6   RARE (<0.5 uses/match)
+     waterbottle Cap          900     0.23    0.19      28.5      0.7   RARE (<0.5 uses/match)
+     waterbottle Mega        3500     0.06    0.05       7.3      0.2   RARE (<0.5 uses/match)
+     hotdog      Mustard      900     0.26    0.19      28.5      0.7   RARE (<0.5 uses/match)
+     hotdog      Ketchup      950     0.22    0.17      27.0      0.7   RARE (<0.5 uses/match)
+     hotdog      Slash        650     0.23    0.23      39.4      1.0   RARE (<0.5 uses/match)
+
+
+╔══ HEADLINES ══════════════════════════════════════════════════════════════
+║ idle   play  21.22s · engaged   3.43s ( 16.2%) · regen 0.000/fighter · timeouts    0/2750 · ringFloor    0/2750 · fog  49.6%
+║ smart  play  17.89s · engaged   5.97s ( 32.4%) · regen 0.053/fighter · timeouts    0/2750 · ringFloor    0/2750 · fog   3.7%
+║ chase  play  16.60s · engaged   5.92s ( 34.7%) · regen 0.005/fighter · timeouts    0/2750 · ringFloor    0/2750 · fog   0.1%
+║ kite   play  25.61s · engaged   0.63s (  2.1%) · regen 1.052/fighter · timeouts    0/2750 · ringFloor    0/2750 · fog  90.4%
+╚═══════════════════════════════════════════════════════════════════════════
+
+wrote tools/tmp/census_base.json

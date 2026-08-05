@@ -1,0 +1,22 @@
+staged /tmp/rsweep/SLOW_DURATION_MS_2500 with SLOW_DURATION_MS=2500
+staged /tmp/rsweep/SLOW_DURATION_MS_2000 with SLOW_DURATION_MS=2000
+staged /tmp/rsweep/SLOW_DURATION_MS_1500 with SLOW_DURATION_MS=1500
+staged /tmp/rsweep/SLOW_DURATION_MS_1200 with SLOW_DURATION_MS=1200
+staged /tmp/rsweep/SLOW_DURATION_MS_900 with SLOW_DURATION_MS=900
+
+══ SWEEP SLOW_DURATION_MS · policy=smart · 880 matches/row ══
+       value    play  engaged  regen/f  regenAny  regenHP  regenEng  stunMs  stun-lock  stunLongP90  slowMs  splatUse   fog%  pKillFog  eKillFog   p.win  Δwin max  Δwin mean  timeout
+        2500  17.92s    6.00s    0.062      1.9%     0.12     82.9%    1858      65.1%       5533ms    2802     66.7%   4.3%      1.5%     14.5%   54.1%      0.0pp      0.00pp        0
+        2000  17.90s    6.02s    0.060      1.9%     0.12     81.1%    1855      65.1%       5533ms    2714     65.9%   4.3%      1.6%     14.7%   54.4%     25.0pp      0.57pp        0
+        1500  17.91s    6.02s    0.051      1.7%     0.10     78.5%    1855      65.1%       5500ms    2619     66.0%   4.2%      1.5%     14.1%   54.7%     25.0pp      0.57pp        0
+        1200  17.91s    6.02s    0.043      1.5%     0.09     86.5%    1857      64.8%       5500ms    2547     66.1%   4.3%      1.5%     15.0%   54.2%     25.0pp      1.02pp        0
+         900  17.95s    6.03s    0.068      1.9%     0.14     73.0%    1868      64.7%       5500ms    2309     65.7%   4.4%      1.5%     15.3%   53.2%     37.5pp      2.73pp        0
+
+══ SWEEP SLOW_DURATION_MS · policy=chase · 880 matches/row ══
+       value    play  engaged  regen/f  regenAny  regenHP  regenEng  stunMs  stun-lock  stunLongP90  slowMs  splatUse   fog%  pKillFog  eKillFog   p.win  Δwin max  Δwin mean  timeout
+        2500  16.52s    5.86s    0.006      0.1%     0.01    100.0%    1977      66.9%       5600ms    2660     97.0%   0.1%      0.0%      0.7%   49.5%      0.0pp      0.00pp        0
+        2000  16.50s    5.84s    0.001      0.1%     0.00    100.0%    1974      67.0%       5600ms    2579     97.6%   0.1%      0.0%      0.7%   49.7%     12.5pp      0.11pp        0
+        1500  16.48s    5.82s    0.001      0.1%     0.00    100.0%    1971      67.1%       5600ms    2478     97.4%   0.1%      0.0%      0.8%   49.7%     12.5pp      0.11pp        0
+        1200  16.46s    5.83s    0.001      0.1%     0.00    100.0%    1975      67.5%       5600ms    2418     97.7%   0.0%      0.0%      0.5%   49.5%     25.0pp      0.91pp        0
+         900  16.48s    5.83s    0.001      0.1%     0.00    100.0%    1980      67.4%       5617ms    2270     97.8%   0.1%      0.0%      0.7%   48.6%     25.0pp      1.82pp        0
+

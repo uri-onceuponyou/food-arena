@@ -1,0 +1,127 @@
+{
+  "hamburger": [
+    { "label": "R2 char + dark bottom bun", "rules": [
+      { "from": "#B26E2A", "to": "#43220B" },
+      { "from": "#8E5320", "to": "#241305" },
+      { "from": "#4E2C1B", "to": "#1E0F06" },
+      { "from": "#E8A33D", "to": "#F7CE86", "path": "handL_mesh|handR_mesh|mitt" },
+      { "from": "#D98E3D", "to": "#7A4718" },
+      { "from": "#6B3E26", "to": "#33190C" }
+    ] },
+    { "label": "R2 + dark apron hem",       "rules": [
+      { "from": "#B26E2A", "to": "#43220B" },
+      { "from": "#8E5320", "to": "#241305" },
+      { "from": "#4E2C1B", "to": "#1E0F06" },
+      { "from": "#E8A33D", "to": "#F7CE86", "path": "handL_mesh|handR_mesh|mitt" },
+      { "from": "#D98E3D", "to": "#66390F" },
+      { "from": "#6B3E26", "to": "#2A1408" },
+      { "from": "#B9C4D2", "to": "#8894A4" }
+    ] }
+  ],
+  "donut": [
+    { "label": "R2 deeper beanie",          "rules": [
+      { "from": "#8E5FD9", "to": "#1A0E2C" },
+      { "from": "#6E3FB8", "to": "#100820" },
+      { "from": "#D14E7C", "to": "#4E1229" },
+      { "from": "#FF9EC4", "to": "#FFF6E8", "path": "pompom" },
+      { "from": "#F0C070", "to": "#F5CE86" },
+      { "from": "#5C3417", "to": "#2A1607" }
+    ] }
+  ],
+  "burrito": [
+    { "label": "R2 deep filling",           "rules": [
+      { "from": "#6B3E26", "to": "#241205" },
+      { "from": "#4E2C1B", "to": "#140A03" },
+      { "from": "#7A5230", "to": "#180E05" },
+      { "from": "#587429", "to": "#182508" },
+      { "from": "#E0562B", "to": "#8A2A10", "path": "burrito_band" }
+    ] },
+    { "label": "R2 + dark joint balls",     "rules": [
+      { "from": "#6B3E26", "to": "#241205" },
+      { "from": "#4E2C1B", "to": "#140A03" },
+      { "from": "#7A5230", "to": "#180E05" },
+      { "from": "#587429", "to": "#182508" },
+      { "from": "#E0562B", "to": "#8A2A10", "path": "burrito_band" },
+      { "from": "#E63946", "to": "#7A1620", "path": "burrito_tomato" }
+    ] }
+  ],
+  "egg": [
+    { "label": "R2 limbs only, deeper",     "rules": [
+      { "from": "#E4C2E8", "to": "#33224A" },
+      { "from": "#CB9ED4", "to": "#1B1328" },
+      { "from": "#7C5530", "to": "#110A1C" },
+      { "from": "#FFC23C", "to": "#8A5A0E", "path": "handL|handR" }
+    ] },
+    { "label": "R2 shell #C0AB84",          "rules": [
+      { "from": "#E4C2E8", "to": "#33224A" },
+      { "from": "#CB9ED4", "to": "#1B1328" },
+      { "from": "#7C5530", "to": "#110A1C" },
+      { "from": "#FFF8EA", "to": "#C0AB84", "path": "egg_shell$|egg_shell_mesh|torso" },
+      { "from": "#E4D6AE", "to": "#8A7A55" }
+    ] },
+    { "label": "R2 shell #A89468 + gold",   "rules": [
+      { "from": "#E4C2E8", "to": "#33224A" },
+      { "from": "#CB9ED4", "to": "#1B1328" },
+      { "from": "#7C5530", "to": "#110A1C" },
+      { "from": "#FFF8EA", "to": "#A89468", "path": "egg_shell$|egg_shell_mesh|torso" },
+      { "from": "#E4D6AE", "to": "#75663F" }
+    ] }
+  ],
+  "lollipop": [
+    { "label": "R2 wrapper + dark choker",  "rules": [
+      { "from": "#FFFDF9", "to": "#1E0C24", "path": "wrapper_cape$|wrapper_cape_mesh" },
+      { "from": "#E63946", "to": "#1E0C24", "path": "wrapper_collar$|wrapper_petal" },
+      { "from": "#E63946", "to": "#2A1230", "path": "lollipop_choker" },
+      { "from": "#2A2140", "to": "#120C1E" },
+      { "from": "#57B296", "to": "#1E4A3B" }
+    ] },
+    { "label": "R2 + deeper swirl back",    "rules": [
+      { "from": "#FFFDF9", "to": "#1E0C24", "path": "wrapper_cape$|wrapper_cape_mesh" },
+      { "from": "#E63946", "to": "#1E0C24", "path": "wrapper_collar$|wrapper_petal" },
+      { "from": "#E63946", "to": "#2A1230", "path": "lollipop_choker" },
+      { "from": "#E63946", "to": "#8E1F2A", "path": "lollipop_swirl_back" },
+      { "from": "#2A2140", "to": "#120C1E" },
+      { "from": "#57B296", "to": "#1E4A3B" }
+    ] }
+  ],
+  "pizza": [
+    { "label": "R2 char limbs + joints",    "rules": [
+      { "from": "#EFB868", "to": "#3A2010", "path": "shoulderL|shoulderR|hipL|hipR|upperArm|thigh" },
+      { "from": "#CE8A2E", "to": "#E8CC96", "path": "pizza_torso_crust" },
+      { "from": "#CE8A2E", "to": "#3A2010", "path": "elbowL|elbowR|kneeL|kneeR|footL|footR" },
+      { "from": "#4A2A12", "to": "#1A0C04" },
+      { "from": "#7A4A24", "to": "#2A1808" },
+      { "from": "#54301A", "to": "#180C04" },
+      { "from": "#EFB868", "to": "#F7CE86" }
+    ] }
+  ],
+  "sushi": [
+    { "label": "R2 deep nori",              "rules": [
+      { "from": "#F5854A", "to": "#141E18", "path": "shoulderL|shoulderR|elbowL|elbowR|hipL|hipR|kneeL|kneeR|upperArm|forearm|thigh|shin" },
+      { "from": "#CE5C2E", "to": "#7A2A10" },
+      { "from": "#2F4034", "to": "#16211A" },
+      { "from": "#1E2B22", "to": "#0D150F" },
+      { "from": "#B23A2E", "to": "#5A1810" }
+    ] },
+    { "label": "R2 + slightly deeper salmon", "rules": [
+      { "from": "#F5854A", "to": "#141E18", "path": "shoulderL|shoulderR|elbowL|elbowR|hipL|hipR|kneeL|kneeR|upperArm|forearm|thigh|shin" },
+      { "from": "#CE5C2E", "to": "#7A2A10" },
+      { "from": "#2F4034", "to": "#16211A" },
+      { "from": "#1E2B22", "to": "#0D150F" },
+      { "from": "#B23A2E", "to": "#5A1810" },
+      { "from": "#F5854A", "to": "#E4712F" }
+    ] }
+  ],
+  "hotdog": [
+    { "label": "R2 deeper limbs + holster", "rules": [
+      { "from": "#FBD08A", "to": "#FFF2D4" },
+      { "from": "#E8A33D", "to": "#FBEEDA" },
+      { "from": "#C68A54", "to": "#2A1809" },
+      { "from": "#6B4226", "to": "#1E1006" },
+      { "from": "#4A2E1A", "to": "#140A04" },
+      { "from": "#2A4C63", "to": "#132532" },
+      { "from": "#B23A2E", "to": "#6A1C14", "path": "handL|handR" },
+      { "from": "#E5A473", "to": "#F0BE96" }
+    ] }
+  ]
+}

@@ -94,6 +94,38 @@
 /** The floor an exponential ramp decays to (it may not reach 0). -80 dBFS. */
 const SILENCE = 0.0001;
 
+/**
+ * The highest frequency any partial in this file may be asked for.
+ *
+ * ── Why this constant exists, with the numbers ──────────────────────────────────
+ *
+ * A real match printed five of these to the Chrome console:
+ *
+ *   Oscillator.frequency.setValueAtTime value 24276 outside nominal range
+ *   [-24000, 24000]; value will be clamped.
+ *
+ * The source was `weapons/lollipop.ts`: `candy()`'s modal bank has a partial at
+ * `ratio: 5.4`, and Smash's impact strikes it at `4400 * centsJitter(rng, 45)` Hz.
+ * 4400 x 5.4 = **23,760 Hz** before any jitter, and +45 cents takes it to **24,385**.
+ * Measured by `audio-probe --mode nyquist` across 24 seeds: 24,345 Hz worst case,
+ * over 20 kHz on **24 of 24** seeds. Giant's bank does the same at 3,700 Hz -> 20,362,
+ * over on 11 of 24. Third place in the entire game is 13,315 Hz, so this is one
+ * mechanism in one file, not a general drift.
+ *
+ * The clamp itself is INAUDIBLE — 24 kHz is above hearing for every adult, and the
+ * rendered samples are unchanged in every band anyone can hear. That is exactly why it
+ * survived 389 assertions. What is broken is the INTENT: a clamped partial has stopped
+ * tracking its own `ratio`, so the bank is no longer the object it was authored as. On
+ * a 44.1 kHz device (Nyquist 22,050) the whole of that partial's jitter range is
+ * clamped, not just its top; on 48 kHz only the top ~26% is. Same code, two different
+ * sounds, decided by the audio device.
+ *
+ * 20 kHz rather than a Nyquist: it is under BOTH shipped Nyquists, so the sound no
+ * longer depends on the device, and it is the top of human hearing, so nothing dropped
+ * here was ever heard.
+ */
+const MAX_PARTIAL_HZ = 20000;
+
 /** Deterministic per-event variation source. */
 export type Rng = () => number;
 
@@ -696,9 +728,15 @@ export function modes(s: SynthCtx, o: ModesOpts): number {
   let longest = 0;
   for (const m of o.modes) {
     const dur = o.duration * m.decay;
-    longest = Math.max(longest, dur);
     const f: number | readonly [number, number] =
       typeof o.freq === 'number' ? o.freq * m.ratio : [o.freq[0] * m.ratio, o.freq[1] * m.ratio];
+    // A partial above the audible band is not a partial. See MAX_PARTIAL_HZ: it is
+    // silently clamped by the browser (so it has stopped tracking `ratio` at all),
+    // nobody can hear it, and it still costs an oscillator and a gain out of a budget
+    // sized for a phone. `longest` is advanced only for partials that are actually
+    // built, so the voice's declared duration stays honest too.
+    if ((typeof f === 'number' ? f : Math.max(f[0], f[1])) > MAX_PARTIAL_HZ) continue;
+    longest = Math.max(longest, dur);
     tone(s, {
       type: 'sine',
       freq: f,

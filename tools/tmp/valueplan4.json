@@ -1,0 +1,33 @@
+{
+  "burrito": [
+    { "label": "R4 + dark wrapper joints",  "rules": [
+      { "from": "#6B3E26", "to": "#241205" },
+      { "from": "#4E2C1B", "to": "#140A03" },
+      { "from": "#7A5230", "to": "#180E05" },
+      { "from": "#587429", "to": "#16220A" },
+      { "from": "#7DA33F", "to": "#3E5A1C" },
+      { "from": "#E0562B", "to": "#6A1C0C" },
+      { "from": "#E63946", "to": "#7A1620", "path": "burrito_tomato" }
+    ] }
+  ],
+  "lollipop": [
+    { "label": "R4 + shadowed swirl back",  "rules": [
+      { "from": "#FFFDF9", "to": "#120818", "path": "wrapper_cape$|wrapper_cape_mesh" },
+      { "from": "#E63946", "to": "#120818", "path": "wrapper_collar$|wrapper_petal" },
+      { "from": "#E63946", "to": "#180C1E", "path": "lollipop_choker" },
+      { "from": "#E63946", "to": "#9C2028", "path": "lollipop_swirl_back" },
+      { "from": "#2A2140", "to": "#0C0814" },
+      { "from": "#57B296", "to": "#17382C" },
+      { "from": "#8FE0C9", "to": "#4C9E86" }
+    ] },
+    { "label": "R4b + dark teal limbs",     "rules": [
+      { "from": "#FFFDF9", "to": "#120818", "path": "wrapper_cape$|wrapper_cape_mesh" },
+      { "from": "#E63946", "to": "#120818", "path": "wrapper_collar$|wrapper_petal" },
+      { "from": "#E63946", "to": "#180C1E", "path": "lollipop_choker" },
+      { "from": "#E63946", "to": "#9C2028", "path": "lollipop_swirl_back" },
+      { "from": "#2A2140", "to": "#0C0814" },
+      { "from": "#57B296", "to": "#123026" },
+      { "from": "#8FE0C9", "to": "#2E6656" }
+    ] }
+  ]
+}

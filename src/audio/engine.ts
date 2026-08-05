@@ -9,14 +9,20 @@
  *
  * ── Design decisions and why ────────────────────────────────────────────────────
  *
- * **The context is created lazily, on the first user gesture.** Browsers block audio
- * until a gesture, and a context created before one starts `suspended` with a frozen
- * `currentTime` — so anything scheduled into it piles up at t≈0 and all fires at once
- * the instant it resumes, which is worse than silence. `play()` therefore refuses
- * outright while the context is not `running`. Nothing throws on either path; the
- * game just makes no sound until the player touches something, which they must do to
- * reach a match at all (the menu shell in `ui/screens/` guarantees a real gesture
- * before any match starts).
+ * **The context is created lazily, on the first user gesture**, and `unlock()` now
+ * ENFORCES that rather than merely documenting it. Browsers block audio until a
+ * gesture, and a context created before one starts `suspended` with a frozen
+ * `currentTime`. `play()` refuses outright while the context is not `running`, so
+ * nothing can pile up at t≈0 — the pile-up this comment used to warn about is
+ * structurally impossible and the warning was wrong about the mechanism. The cost is
+ * real but narrower, and it was measured rather than argued (`unlock()` carries the
+ * numbers): `resume()` is asynchronous, so a context created outside a gesture is
+ * still `suspended` for the whole of the FIRST gesture's call stack, and every sound
+ * that gesture's own handlers schedule is dropped. A context created INSIDE the
+ * gesture is born `running` and the same sound is heard. Nothing throws on either
+ * path; the game just makes no sound until the player touches something, which they
+ * must do to reach a match at all (the menu shell in `ui/screens/` guarantees a real
+ * gesture before any match starts).
  *
  * **Volume and mute are read from `localStorage` in the constructor**, before a
  * single node exists, so a muted player is muted on frame one rather than getting one
@@ -259,6 +265,26 @@ export function gainForVolume(volume01: number): number {
   return Math.pow(v, 1.8) * MASTER_TRIM;
 }
 
+/**
+ * Is the page inside a user gesture right now? See `unlock()` for the measurement
+ * this exists to satisfy.
+ *
+ * TRANSIENT activation, not sticky: `isActive` is what decides whether a freshly
+ * constructed `AudioContext` is born `running` or `suspended`, and it is exactly the
+ * question being asked. `hasBeenActive` would be wrong — the page having been touched
+ * at some point in the past does not make a context created from a `setTimeout`
+ * callback start running.
+ *
+ * Returns TRUE when the API is unavailable (Safari < 16.4, any non-browser host), so
+ * the fallback is precisely the behaviour that shipped before this guard existed.
+ */
+function hasUserActivation(): boolean {
+  const ua = typeof navigator !== 'undefined'
+    ? (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation
+    : undefined;
+  return ua === undefined || ua.isActive === true;
+}
+
 export interface AudioEngineOptions {
   /**
    * Inject a context instead of creating one. Tests pass an `OfflineAudioContext`;
@@ -412,9 +438,35 @@ export class AudioEngine {
    * safe to call outside a gesture (it just won't succeed). Called automatically by
    * the gesture listeners installed in the constructor — a settings screen only needs
    * it if it wants to preview a sound from a control that isn't a real gesture.
+   *
+   * ── "It just won't succeed" was FALSE, and the failure was silent ─────────────
+   *
+   * Called outside a gesture this used to CREATE the context anyway. It cannot be
+   * resumed there, so it is born `suspended` with a frozen clock — the exact state
+   * this file's header says must never happen. Measured on the shipped boot route
+   * (`tools/tmp/audio_boot_probe.mjs`, and it was `opening.ts`'s 4.5 s auto-continue
+   * `setTimeout` that did it, not `shell.mount()`'s `music.fadeIn()`, which cannot:
+   * `ensureGraph()` bails while `engine.context` is null):
+   *
+   *   * at `/`, no gesture, t=7.5 s: engine `suspended`, one context, born
+   *     `state="suspended"`, `currentTime` 0 -> 0 across 1.5 s of wall clock.
+   *   * the cost is ONE SPECIFIC THING and it is not the pile-up the header warns
+   *     about (nothing can pile up — `play()` refuses while not `running`). It is
+   *     that `resume()` is ASYNCHRONOUS, so `state` is still `suspended` for the
+   *     whole of the first gesture's call stack and every sound scheduled from that
+   *     gesture's own handlers is dropped. A/B on the same page, same click:
+   *     early context -> `play()` returns **false**, `droppedNotRunning` 0 -> 1;
+   *     no context -> `new AudioContext()` inside the gesture is born
+   *     `state="running"` and `play()` returns **true**.
+   *
+   * So the guard: outside transient user activation, RESUME an existing context but
+   * never CREATE one. That makes the caller's stated assumption true rather than
+   * asking eleven call sites to know this rule. `navigator.userActivation` is absent
+   * on Safari < 16.4, where the fallback is exactly today's behaviour — never worse.
    */
   unlock(): void {
     if (this.state === 'failed' || this.offline) return;
+    if (!this.ctx && !hasUserActivation()) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
     if (typeof (ctx as AudioContext).resume === 'function' && ctx.state !== 'running') {

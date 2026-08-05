@@ -46,12 +46,20 @@
  *             really happens (measured by `tools/tmp/audio_census.mjs` over 363 real
  *             matches) summed and checked for clipping, with a deliberately impossible
  *             pile-up as the control that must fail.
+ *   nyquist   Assert on the frequency the code ASKS FOR, at scheduling time — no
+ *             oscillator anywhere in the game may be driven above the audible band.
+ *             The only evidence of this class of bug is a Chrome console warning
+ *             (`value 24276 outside nominal range [-24000, 24000]`), which an
+ *             `OfflineAudioContext` never prints and which the rendered samples never
+ *             show, because the offending partial is above hearing. Swept at 24 seeds
+ *             per sound because the offender was a per-event jitter that only crosses
+ *             the line on part of its own distribution.
  *   live      Run the ACTUAL GAME in a browser, tap the master bus post-volume with
  *             an AnalyserNode, and measure the waveform while a real match plays.
  *             This is the only mode that proves the wiring, the autoplay unlock and
  *             the event stream all work together.
  *
- * Usage:  node tools/audio-probe.mjs [--mode all|offline|identity|depth|negative|variation|budget|dispatch|coverage|live]
+ * Usage:  node tools/audio-probe.mjs [--mode all|offline|identity|depth|negative|variation|budget|dispatch|coverage|nyquist|live]
  *         (dev server must be running on :5173)
  */
 
@@ -69,6 +77,11 @@ const LAUNCH_ARGS = [
   '--enable-webgl',
   '--ignore-gpu-blocklist',
   '--disable-gpu-sandbox',
+  // Stated rather than inherited. `--mode live` asserts things about the autoplay
+  // gate — whether a context is born running, whether the first gesture's own sound is
+  // heard — and every one of those answers changes if the harness quietly runs a
+  // different policy from the shipped browser. This is Chrome's desktop default.
+  '--autoplay-policy=document-user-activation-required',
 ];
 
 let failures = 0;
@@ -776,6 +789,62 @@ async function installHarness(page) {
         extentDry: window.__dsp.extent(dry.x, sr).duration,
         lateWet, lateDry,
       };
+    };
+
+    /**
+     * Every frequency this sound schedules onto an OSCILLATOR, at scheduling time.
+     *
+     * ── Why this cannot be measured off the rendered buffer ────────────────────
+     *
+     * Chrome clamps `OscillatorNode.frequency` to the context's nominal range and
+     * says so on the CONSOLE — `value 24276 outside nominal range [-24000, 24000];
+     * value will be clamped`. `OfflineAudioContext` emits no such warning, and the
+     * rendered samples are innocent either way: the offending partial is above
+     * hearing, so it changes no measurable peak, RMS or (audible-band) centroid.
+     * Five of these fired in one real match and every one of 389 assertions passed.
+     *
+     * So the assertion has to be made on the INTENT, not on the output — the number
+     * the code asked for, caught at the moment it asks. Same shape as the
+     * `GameEvent`-union check that fetched a file through Vite, got type-stripped
+     * output, parsed zero kinds and passed: measure the thing itself.
+     *
+     * Wraps `createOscillator` per context (not the prototype — parallel renders
+     * would cross-talk) and intercepts all four ways a frequency can be set:
+     * `setValueAtTime`, both ramps, and a plain `.value =` assignment.
+     */
+    window.__oscScan = async (makeSound, opt = {}) => {
+      const sr = opt.sampleRate ?? 44100;
+      const ctx = new OfflineAudioContext(1, Math.ceil(sr * (opt.seconds ?? 1.2)), sr);
+      const scheduled = [];
+      const valueDesc = Object.getOwnPropertyDescriptor(AudioParam.prototype, 'value');
+      const origCreate = ctx.createOscillator.bind(ctx);
+      ctx.createOscillator = () => {
+        const osc = origCreate();
+        const p = osc.frequency;
+        for (const m of ['setValueAtTime', 'linearRampToValueAtTime', 'exponentialRampToValueAtTime']) {
+          const orig = p[m].bind(p);
+          p[m] = (v, t) => { scheduled.push({ via: m, hz: v, type: osc.type }); return orig(v, t); };
+        }
+        if (valueDesc && valueDesc.set) {
+          Object.defineProperty(p, 'value', {
+            configurable: true,
+            get: () => valueDesc.get.call(p),
+            set: (v) => { scheduled.push({ via: 'value=', hz: v, type: osc.type }); valueDesc.set.call(p, v); },
+          });
+        }
+        return osc;
+      };
+      const engine = new audio.AudioEngine({ context: ctx, persist: false, reverb: opt.reverb !== false });
+      engine.play(makeSound, { seed: opt.seed ?? 1234567 });
+      // Deliberately NOT rendered: every frequency is scheduled synchronously inside
+      // `play()`, and skipping `startRendering()` makes a 400-sound sweep seconds
+      // rather than minutes.
+      let max = -Infinity, maxVia = '', maxType = '';
+      for (const s of scheduled) {
+        if (s.hz > max) { max = s.hz; maxVia = s.via; maxType = s.type; }
+      }
+      return { count: scheduled.length, max, maxVia, maxType,
+               over: scheduled.filter((s) => s.hz > (opt.ceiling ?? 20000)).map((s) => s.hz) };
     };
 
     /** Raw channel data, for the bit-exactness comparisons. */
@@ -2144,7 +2213,253 @@ async function modeCoverage(page) {
  * the master bus. Everything above proves the sounds exist; only this proves the
  * game plays them.
  */
+/**
+ * The highest frequency any oscillator in the game may be asked for.
+ *
+ * Two facts fix it. **22050 Hz** is the stricter of the two Nyquist limits the shipped
+ * game actually meets — a 44.1 kHz device clamps there, a 48 kHz one at 24000 — and
+ * **~20 kHz** is the top of human hearing, well above it for any adult. Anything
+ * scheduled above 20 kHz is therefore inaudible on every device AND clamped on some,
+ * which makes it strictly a bug: it costs an oscillator and a gain node, contributes
+ * nothing anyone can hear, and — the part that matters — a clamped partial has stopped
+ * tracking whatever ratio put it there, so the voice is misauthored below Nyquist too.
+ */
+const OSC_CEILING_HZ = 20000;
+
+/** Every bespoke weapon hook that exists, cast and impact, across the whole roster. */
+async function hookCatalogue(page) {
+  return page.evaluate(() => {
+    const out = [];
+    for (const [id, def] of Object.entries(window.__A.rules.CHARACTERS)) {
+      for (const w of def.weapons) {
+        const sfx = window.__A.weapons.getWeaponSfx(id, w.key);
+        if (!sfx) continue;
+        for (const hook of ['cast', 'impact']) {
+          if (sfx[hook]) out.push({ id, key: w.key, hook, damage: w.damage || 10 });
+        }
+      }
+    }
+    return out;
+  });
+}
+
+/**
+ * NYQUIST — no oscillator may be driven above the audible band.
+ *
+ * This mode exists because a real match printed five of these to the console:
+ *
+ *   Oscillator.frequency.setValueAtTime value 24276 outside nominal range
+ *   [-24000, 24000]; value will be clamped.
+ *
+ * and every other mode passed. They cannot see it: `OfflineAudioContext` prints no
+ * warning, and a clamp at 24 kHz changes no sample anyone can hear. So this asserts on
+ * the number the code ASKS FOR, captured inside `play()` before a single sample exists.
+ *
+ * Swept at 24 SEEDS per sound, and that is load-bearing rather than thorough: the one
+ * offender is a per-event pitch jitter riding on an already-high partial, so it only
+ * crosses the line on part of its own distribution. A single-seed check finds it about
+ * a quarter of the time, which is the worst possible kind of gate.
+ */
+async function modeNyquist(page) {
+  console.log('\n── nyquist: no oscillator may be scheduled above the audible band ──');
+  const hooks = await hookCatalogue(page);
+  const list = [
+    ...CATALOGUE.map((c) => ({ id: c.id, expr: c.expr })),
+    ...hooks.map((h) => ({ id: `${h.id}.${h.key}.${h.hook}`, expr: weaponExpr(h.id, h.key, h.hook, h.damage) })),
+  ];
+  const SEEDS = 24;
+
+  // One round trip for the whole sweep: ~90 sounds x 24 seeds is minutes across the
+  // Playwright bridge and seconds in the page.
+  const rows = await page.evaluate(
+    async ([entries, seeds, ceiling]) => {
+      const S = window.__A.sounds;
+      const W = window.__A;
+      const out = [];
+      for (const e of entries) {
+        // eslint-disable-next-line no-eval
+        const fn = eval(e.expr);
+        let max = -Infinity, via = '', type = '', over = 0, total = 0, oscs = 0;
+        for (let i = 0; i < seeds; i++) {
+          const r = await window.__oscScan(fn, { seed: 1000 + i * 7919, ceiling });
+          total += 1;
+          oscs = Math.max(oscs, r.count);
+          over += r.over.length;
+          if (r.max > max) { max = r.max; via = r.maxVia; type = r.maxType; }
+        }
+        out.push({ id: e.id, max, via, type, over, total, oscs });
+      }
+      return out;
+    },
+    [list, SEEDS, OSC_CEILING_HZ],
+  );
+
+  rows.sort((a, b) => b.max - a.max);
+  console.log(`  the ten highest oscillator frequencies in the game (worst of ${SEEDS} seeds each)`);
+  console.log('  id                              max Hz   set via                     osc/voice');
+  for (const r of rows.slice(0, 10)) {
+    console.log(`  ${r.id.padEnd(30)} ${String(Math.round(r.max)).padStart(6)}   ${r.via.padEnd(26)} ${r.oscs}` +
+      (r.over ? `   ⚠ ${r.over}/${r.total} seeds over ${OSC_CEILING_HZ}` : ''));
+  }
+
+  const offenders = rows.filter((r) => r.max > OSC_CEILING_HZ);
+  for (const r of offenders) {
+    console.log(`  OVER: ${r.id} reaches ${r.max.toFixed(1)} Hz via ${r.via} on a "${r.type}" oscillator ` +
+      `(${r.over}/${r.total} seeds)`);
+  }
+  check(`no sound schedules an oscillator above ${OSC_CEILING_HZ} Hz`, offenders.length === 0,
+    offenders.length ? offenders.map((r) => `${r.id}=${Math.round(r.max)}Hz`).join(', ')
+                     : `highest in the game: ${rows[0].id} at ${Math.round(rows[0].max)} Hz`);
+  // The line Chrome actually enforces. Stated separately so a regression report says
+  // whether it is merely inaudible or genuinely clamped, and on which devices.
+  const clamped44 = rows.filter((r) => r.max > 22050);
+  const clamped48 = rows.filter((r) => r.max > 24000);
+  check('nothing would be clamped on a 44.1 kHz device (Nyquist 22050)', clamped44.length === 0,
+    clamped44.map((r) => `${r.id}=${Math.round(r.max)}`).join(', ') || 'none');
+  check('nothing would be clamped on a 48 kHz device (Nyquist 24000)', clamped48.length === 0,
+    clamped48.map((r) => `${r.id}=${Math.round(r.max)}`).join(', ') || 'none');
+  // The instrument's own control. A wrapper that quietly saw nothing would report a
+  // clean sweep, which is `docs/LESSONS.md` §13's "healthy dashboard" failure exactly.
+  // Sounds with NO oscillator at all are legitimate (pure filtered noise), so the
+  // assertion is on how many DO have one, and they are named rather than assumed.
+  const withOsc = rows.filter((r) => r.oscs > 0);
+  const noOsc = rows.filter((r) => r.oscs === 0).map((r) => r.id);
+  if (noOsc.length) console.log(`  pure-noise sounds, no oscillator at all: ${noOsc.join(', ')}`);
+  check('the scanner is actually seeing oscillators (not silently wrapping nothing)',
+    withOsc.length > 40 && rows.length > 60,
+    `${withOsc.length}/${rows.length} sounds carry at least one oscillator; ` +
+    `total scheduled frequencies seen = ${rows.reduce((a, r) => a + r.oscs, 0)}`);
+
+  // ── The guard's own A/B ─────────────────────────────────────────────────────
+  // Every check above would also pass if `modes()` were building all its partials and
+  // this scanner were blind. So: the SAME bank at two fundamentals, one of which puts
+  // its top partial out of band. The in-band one must build three oscillators and the
+  // out-of-band one two — proving the drop happens AND that the scanner can count.
+  const ab = await page.evaluate(async ([ceiling]) => {
+    const W = window.__A;
+    const bank = [{ ratio: 1, gain: 1, decay: 1 }, { ratio: 2.76, gain: 0.8, decay: 0.7 },
+                  { ratio: 5.4, gain: 0.5, decay: 0.44 }];
+    const mk = (f0) => (s) => W.audio.modes(s, { freq: f0, duration: 0.3, peak: 0.5, modes: bank });
+    return {
+      inBand: await window.__oscScan(mk(1000), { ceiling }),   // top partial 5,400 Hz
+      outOfBand: await window.__oscScan(mk(5000), { ceiling }), // top partial 27,000 Hz
+    };
+  }, [OSC_CEILING_HZ]);
+  console.log(`  control: a 3-partial bank at f0=1000 schedules ${ab.inBand.count} oscillator frequencies ` +
+    `(max ${Math.round(ab.inBand.max)} Hz); the SAME bank at f0=5000 schedules ${ab.outOfBand.count} ` +
+    `(max ${Math.round(ab.outOfBand.max)} Hz)`);
+  check('an in-band 3-partial modal bank builds all three', ab.inBand.count === 3, `${ab.inBand.count} oscillators`);
+  check('the same bank drops the partial that would be out of band', ab.outOfBand.count === 2,
+    `${ab.outOfBand.count} oscillators, max ${Math.round(ab.outOfBand.max)} Hz`);
+}
+
+/**
+ * THE SHIPPED BOOT ROUTE — `/`, untouched, right through the title card.
+ *
+ * This exists because the assertion it replaces was measuring a path no player takes.
+ * `--mode live` boots `?player=…&enemy=…`, a MATCH route, and asserted "engine is
+ * LOCKED before any user gesture". That is true there for an uninteresting reason
+ * (`shell.mount()` calls `music.fadeOut()` on a match route and nothing calls
+ * `unlock()`), and it stayed green while the real boot route `/` reached the home
+ * screen with a context already created and `suspended` — `opening.ts`'s 4.5 s
+ * auto-continue `setTimeout` calling `audio.unlock()` outside any gesture. A gate that
+ * tests a path nobody uses cannot fail for the reason it was written.
+ *
+ * ── ⚠️ THE HARNESS GRANTS THE THING BEING MEASURED ─────────────────────────────
+ *
+ * `page.evaluate()` sends CDP `Runtime.evaluate` with `userGesture: true`, so ASKING
+ * the page what state it is in makes `navigator.userActivation.isActive` true for the
+ * next ~5 s — and a context created inside that window is born `running` instead of
+ * `suspended`. Measured: two consecutive runs of an earlier version of this check gave
+ * OPPOSITE answers purely on whether the poll landed before or after the auto-continue.
+ * So everything here is sampled by an init script inside the page and read out by
+ * exactly one `evaluate`, after the measuring is over. `docs/LESSONS.md` §13.
+ *
+ * The auto-continue is required to have actually fired (`screen === 'home'`) before the
+ * lock assertion counts — otherwise it would pass vacuously on a slow load, which is
+ * the same defect in a new costume.
+ */
+async function modeLiveBoot(browser) {
+  console.log('\n── live/boot: the SHIPPED boot route, GET / with no gesture ──');
+  const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
+  await page.addInitScript(`(() => {
+    window.__bootLog = [];
+    window.__bootCtx = [];
+    window.__bootWitness = [];
+    const Real = window.AudioContext;
+    if (Real) {
+      function Patched(...a) {
+        const c = new Real(...a);
+        window.__bootCtx.push({ at: Math.round(performance.now()), born: c.state });
+        window.__theCtx = c;
+        return c;
+      }
+      Patched.prototype = Real.prototype;
+      Object.setPrototypeOf(Patched, Real);
+      window.AudioContext = Patched;
+    }
+    setInterval(() => {
+      window.__bootLog.push({
+        at: Math.round(performance.now()),
+        state: window.__audio ? window.__audio.stats().state : 'no-engine',
+        ctxs: window.__bootCtx.length,
+        screen: window.__screen || null,
+      });
+    }, 250);
+    // Bubble phase on window: the engine's own capture-phase unlock listener has
+    // already run, so this sees exactly what a button's click handler would.
+    window.addEventListener('click', () => {
+      window.__bootWitness.push({
+        state: window.__audio ? window.__audio.stats().state : 'no-engine',
+        played: window.__audio ? window.__audio.engine.play(() => 0.05, { key: 'probe' }) : false,
+      });
+    }, false);
+  })();`);
+  await page.route('**/@vite/client*', (r) => r.fulfill({
+    status: 200, contentType: 'text/javascript',
+    body: `const noop=()=>{};export const createHotContext=()=>({accept:noop,acceptExports:noop,dispose:noop,prune:noop,invalidate:noop,on:noop,off:noop,send:noop,decline:noop,data:{}});export const injectQuery=(u)=>u;export const updateStyle=noop;export const removeStyle=noop;export const ErrorOverlay=class{};export default {};`,
+  }));
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  // Long enough for the title card's 4500 ms auto-continue to fire and for home to
+  // mount, on a machine where three peer agents are also rendering.
+  await page.waitForTimeout(12000);
+  await page.mouse.click(500, 320);   // the page's FIRST real gesture
+  await page.waitForTimeout(900);
+
+  const r = await page.evaluate(() => ({
+    log: window.__bootLog, ctx: window.__bootCtx, witness: window.__bootWitness,
+    final: window.__audio ? window.__audio.stats() : null,
+  }));
+  await page.close();
+
+  const pre = r.log.filter((e) => e.at < (r.ctx[0]?.at ?? Infinity));
+  const reachedHome = r.log.some((e) => e.screen === 'home');
+  const states = [...new Set(pre.map((e) => e.state))];
+  console.log(`  ${r.log.length} samples over ${r.log[r.log.length - 1]?.at ?? 0} ms; ` +
+    `screens seen: ${[...new Set(r.log.map((e) => e.screen))].join(' -> ')}`);
+  console.log(`  engine state before any context existed: ${states.join(', ')}`);
+  for (const c of r.ctx) console.log(`  AudioContext created at ${c.at} ms, born state="${c.born}"`);
+  for (const w of r.witness) console.log(`  inside the first click: engine=${w.state}, play() ${w.played ? 'SCHEDULED' : 'REFUSED'}`);
+
+  check('the title card auto-continued, so the lock claim is not vacuous', reachedHome, `screen reached home`);
+  // `born === "running"` is the property, and it is stronger than a timestamp: a
+  // browser only starts a fresh AudioContext running when it is constructed under
+  // transient user activation. One born "suspended" is proof it was created outside a
+  // gesture, whenever that was.
+  check('/ creates NO AudioContext outside a gesture (any it creates is born running)',
+    r.ctx.length <= 1 && (r.ctx.length === 0 || r.ctx[0].born === 'running'),
+    r.ctx.length ? `${r.ctx.length} context(s), born "${r.ctx[0].born}"` : 'no context');
+  check('engine stays idle across the whole pre-gesture window on /',
+    states.length === 1 && states[0] === 'idle', `states seen: ${states.join(', ')}`);
+  check('a sound fired from the FIRST click is scheduled, not dropped',
+    r.witness.length > 0 && r.witness[0].played === true,
+    r.witness.length ? `played=${r.witness[0].played} state=${r.witness[0].state}` : 'no click observed');
+  check('nothing was ever dropped for a locked engine on the boot route',
+    (r.final?.droppedNotRunning ?? -1) === 0, `droppedNotRunning=${r.final?.droppedNotRunning}`);
+}
+
 async function modeLive(browser) {
+  await modeLiveBoot(browser);
   console.log('\n── live: real match, master bus tapped with a ScriptProcessorNode ──');
   // simSpeed=3: under SwiftShader the page runs at ~9 fps and `match.ts` clamps dt to
   // 50 ms, so real time advances the sim at less than half speed. At 1x the countdown
@@ -2155,7 +2470,11 @@ async function modeLive(browser) {
 
   const before = await page.evaluate(() => (window.__audio ? window.__audio.stats() : null));
   check('audio QA handle published by the game', before !== null, JSON.stringify(before));
-  check('engine is LOCKED before any user gesture', before && before.state !== 'running', `state=${before && before.state}`);
+  // Deliberately narrow now: this is the MATCH route, which reaches `shell.mount()`'s
+  // `music.fadeOut()` branch and never calls `unlock()`. The claim about the route a
+  // player actually boots is made in `modeLiveBoot` above, against `/`.
+  check('engine is LOCKED before any user gesture on a deep-linked MATCH route',
+    before && before.state !== 'running', `state=${before && before.state}`);
 
   /**
    * FRAME-RATE BASELINE, taken here because right now the audio context does not
@@ -2409,7 +2728,7 @@ async function modeLive(browser) {
 
 const browser = await chromium.launch({ args: LAUNCH_ARGS });
 try {
-  const wantsOffline = ['all', 'offline', 'identity', 'depth', 'negative', 'variation', 'budget', 'dispatch', 'coverage'].includes(MODE);
+  const wantsOffline = ['all', 'offline', 'identity', 'depth', 'negative', 'variation', 'budget', 'dispatch', 'coverage', 'nyquist'].includes(MODE);
   if (wantsOffline) {
     // The home screen: no match, no sim, nothing competing for CPU while rendering.
     const page = await newPage(browser, `${BASE}/?screen=home`);
@@ -2422,6 +2741,7 @@ try {
     if (MODE === 'all' || MODE === 'budget') await modeBudget(page);
     if (MODE === 'all' || MODE === 'dispatch') await modeDispatch(page);
     if (MODE === 'all' || MODE === 'coverage') await modeCoverage(page);
+    if (MODE === 'all' || MODE === 'nyquist') await modeNyquist(page);
     await page.close();
   }
   if (MODE === 'all' || MODE === 'live') await modeLive(browser);

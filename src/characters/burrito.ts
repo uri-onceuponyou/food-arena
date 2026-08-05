@@ -31,7 +31,7 @@ import { bodyType } from './bodies';
 // ── Palette ──────────────────────────────────────────────────────────────────
 const TORTILLA = '#F5EAD6';        // pale flour wrap — the dominant, matte mass
 const TORTILLA_SHADE = '#E4CFA0';  // toasted/shadow tone — rim, torso wrap-continuation
-const WRAP_BAND = '#E0562B';       // paper wrapper band + hands — vivid contrast colour
+const WRAP_BAND = '#6A1C0C';       // paper wrapper band + hands — see THE DARK RUNG below
 // Foil. Warm-NEUTRAL silver rather than either extreme, and the value is the
 // load-bearing part: a first pass warmed this to #EFEBE0 to keep the character in
 // the cast's warm half, and at that value it landed within 4% of the tortilla it
@@ -40,11 +40,27 @@ const WRAP_BAND = '#E0562B';       // paper wrapper band + hands — vivid contr
 // contrast pass compresses the top end, so a gap that looks generous in the hex
 // arrives much smaller on screen — measured by rendering, not by reading the values.
 const FOIL = '#C4C0B5';
-const BOOT = '#7A5230';            // dark toasted-tortilla boots, grounds the pale body
+const BOOT = '#180E05';            // near-black toasted-tortilla boots, grounds the pale body
 const RICE = PALETTE.cream;        // '#FFF3DE' — filling mound base
-const MEAT = PALETTE.patty;
-const MEAT_DARK = PALETTE.pattyDark;
-const TOMATO = PALETTE.tomato;
+// ── THE DARK RUNG ────────────────────────────────────────────────────────────
+// Measured against 18 Brawl Stars plates: their P05 is 0.097 and every one of the
+// eighteen puts 5% of the character below 0.18. Burrito's was 0.285, and 53.3% of its
+// part boundaries measured under 0.10 apart — the arm chain almost entirely
+// (`elbowL|handL` 0.011 across 22 px, `elbowL|hipL` 0.028 across 35 px, `torso|handR`
+// 0.043 across 38 px). One character, four masses, all within a third of a stop.
+//
+// The tortilla and the rice are the light rung and do not move — they are 44% of the
+// character and they are already at the reference's light end. The FILLING is where
+// the dark rung goes: meat, boots, wrapper band and the lower limb tone. That is 9.7%
+// + 4.7% + 5.8% of the pixels, which is what a P05 costs in AREA. Measured at
+// pot_south, shipped framing: range 0.678 -> 0.799, p05 0.291 -> 0.169, fg 0.304 -> 0.251.
+//
+// Local, not `PALETTE.patty` / `pattyDark` / `tomato`: those three are shared with
+// Hamburger and Taco, `rules.ts` is not this file's to edit, and the right value for a
+// filling depends on the wrap it is sitting in.
+const MEAT = '#241205';
+const MEAT_DARK = '#140A03';
+const TOMATO = '#7A1620';
 const CHEESE = PALETTE.cheese;
 const LETTUCE = PALETTE.lettuce;
 const SOUR_CREAM = '#FFFDF7';
@@ -53,8 +69,8 @@ const SOUR_CREAM = '#FFFDF7';
 // boots — the wrap itself stays this pale tortilla tone (that's the food read for
 // the head/torso), but the arms and legs shift to a fresh guac-green so the body
 // no longer reads as another undifferentiated cream mass.
-const LIMB_AVOCADO = '#7DA33F';
-const LIMB_AVOCADO_DARK = '#587429';
+const LIMB_AVOCADO = '#3E5A1C';
+const LIMB_AVOCADO_DARK = '#16220A';
 
 type Spot = readonly [angleDeg: number, radiusFrac: number];
 

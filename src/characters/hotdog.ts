@@ -38,10 +38,10 @@ const CYBER = RARITY_COLORS.Cyber; // '#00E5B0'
 // silhouette-breaking item — it projects past the body outline at the hip the
 // way a cape or backpack does on the reference roster — plus a knotted bandana
 // at the neck as a smaller "patterned fabric panel" detail.
-const HOLSTER_LEATHER = '#6B4226';
-const HOLSTER_TRIM = '#4A2E1A';
+const HOLSTER_LEATHER = '#1E1006';   // near-black leather — part of the dark rung, see LIMB_BUN_DARK
+const HOLSTER_TRIM = '#140A04';
 const HOLSTER_BUCKLE = '#C9A227';
-const BANDANA_TRIM = '#2A4C63'; // the one cool accent on an otherwise all-warm body
+const BANDANA_TRIM = '#132532'; // the one cool accent on an otherwise all-warm body
 const GRILL_MARK = '#7A4A1E';   // toasted griddle stripes on the bun
 /**
  * Limb-only tones. Every limb, hand, boot AND the torso used to be exactly
@@ -66,13 +66,45 @@ const GRILL_MARK = '#7A4A1E';   // toasted griddle stripes on the bun
 // silhouette. Both limb tones go up roughly a value step; the sausage stays
 // exactly where it is because the red IS the identity and it is a minority of
 // the area.
-const LIMB_BUN = '#E5A473';
-const LIMB_BUN_DARK = '#C68A54';
+// ── …and the second half of the same problem: no dark rung ───────────────────
+// The paragraph above lifted the limbs to buy figure/ground and it worked, but it
+// left this character sitting entirely inside a 0.40-0.49 luma band: `head|torso`
+// measured 0.026 across 128 px and `face|head` 0.035 across 70 px. Everything was
+// one value. HotDog is the only character in the cast that needed BOTH ends moved
+// at once, so both move here and the net mean luma goes UP, not down:
+//
+//   bun (20.2% of the character)  -> a genuinely near-white baked crust
+//   torso bun-shade (7.6%)        -> the same, so the apron reads as cloth not crust
+//   forearms/shins/boots (6.2%)   -> near-black griddle char, the dark rung
+//   holster + bandana             -> near-black
+//   the SAUSAGE does not move     -- the red is the identity and it was already the
+//                                    cast's best P05 (0.183)
+//
+// Measured at pot_south, shipped framing: range 0.622 -> 0.732, p05 0.183 -> 0.174,
+// steps@0.10 6 -> 8, and figure/ground 0.111 -> **0.129** — the one character where
+// the value work BOUGHT separation instead of spending it.
+
+// ── PASS 2: the limb CHAIN has to alternate, not ramp ────────────────────────
+// The first value pass took both limb tones down together. That fixed range/P05 and
+// BROKE the part boundary — measured, `shoulderL|elbowL` 0.044, `kneeL|footL` 0.035,
+// because a chain of four segments each a shade darker than the last is one mass. The
+// reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
+// segment comes back UP, the lower segment holds the dark, and the boot takes its own
+// darkest tone instead of sharing the shin's.
+const LIMB_BUN = '#D89A68';        // upper arm / thigh — mid
+const LIMB_BUN_DARK = '#5A3418';   // forearm / shin — dark (PASS 3: up a step, the boot below was 0.069 away)
+const BOOT_CHAR = '#0A0501';       // boots — darker again
 /** A lighter bun than `PALETTE.bun` for THIS character's own mass — see above.
  *  Kept local rather than pushed into the shared palette: Hamburger's bun is not
  *  the one failing the contrast floor, and its stack is tuned around the shared
  *  value. */
-const BUN_LIGHT = '#FBD08A';
+const BUN_LIGHT = '#FFF2D4';
+/** The torso's bun-shade. Was `PALETTE.bun`; local now, and a value step ABOVE the
+ *  head's own mass so `head|torso` stops measuring 0.026 across 128 px. */
+const BUN_SHADE = '#FBEEDA';
+/** Mitts. Was `PALETTE.sausage`, i.e. exactly the head's sausage, so the hands had
+ *  nowhere to separate to. A deeper cured red keeps the meat read and gains a step. */
+const MITT_SAUSAGE = '#C4432F';
 
 /** Tapered limb: a flat cap at the joint origin (plugs flush, no gap) taper to a
  * rounded tip — the bun's own matte roughness, no capsule uniformity. */
@@ -232,8 +264,8 @@ export class HotDogCharacter extends BaseCharacter {
     this.rig = new ChibiRig({
       palette: {
         limb: LIMB_BUN,
-        hand: PALETTE.sausage,
-        foot: LIMB_BUN_DARK,
+        hand: MITT_SAUSAGE,
+        foot: BOOT_CHAR,
         torso: BUN_LIGHT,
         limbRoughness: 0.8,
       },
@@ -318,7 +350,7 @@ export class HotDogCharacter extends BaseCharacter {
       g.name = 'hotdog_torso';
 
       const bunMat = toonMat({ color: BUN_LIGHT, roughness: 0.85 });
-      const bunShadeMat = toonMat({ color: PALETTE.bun, roughness: 0.85 });
+      const bunShadeMat = toonMat({ color: BUN_SHADE, roughness: 0.85 });
       const meatMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 });
       const seamMat = glossyMat({ color: PALETTE.mustard, roughness: 0.15 });
 
@@ -831,8 +863,11 @@ export class HotDogCharacter extends BaseCharacter {
   private dressLimbs(): void {
     const bunMat = toonMat({ color: LIMB_BUN, roughness: 0.85 });
     const bunDarkMat = toonMat({ color: LIMB_BUN_DARK, roughness: 0.8 });
+    const bootMat = toonMat({ color: BOOT_CHAR, roughness: 0.8 });
     const ketchupMat = glossyMat({ color: PALETTE.ketchup, roughness: 0.15 });
-    const sausageMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 });
+    // MITT_SAUSAGE, not `PALETTE.sausage`: the mitts sat at exactly the head's own
+    // sausage value, so `handL` had nowhere to separate to against the forearm above it.
+    const sausageMat = glossyMat({ color: MITT_SAUSAGE, roughness: 0.3 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
@@ -859,7 +894,7 @@ export class HotDogCharacter extends BaseCharacter {
           return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.76, bunDarkMat);
         case 'footL':
         case 'footR':
-          return buildBunBoot(size.len, bunDarkMat, ketchupMat, size.groundY);
+          return buildBunBoot(size.len, bootMat, ketchupMat, size.groundY);
         default:
           return null;
       }

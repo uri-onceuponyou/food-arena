@@ -49,6 +49,7 @@ import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
+import { settleScreen, captureSettled } from './settle.mjs';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle',
@@ -640,14 +641,27 @@ async function auditScreen(page, base, screen, vp, outDir, label, opts = {}) {
     `window.__screen === ${JSON.stringify(screen)} && window.__screenReady === true`,
     null, { timeout: 60000 },
   );
+  // ── THE FLAG IS NOT THE CONDITION ───────────────────────────────────────────
+  // `__screenReady` is set by `shell.ts:navigate` in the SAME TICK it drops the
+  // curtain, and `.fa-screen` then runs `fa-screen-in 0.26s` from opacity 0. Measured
+  // on this build: at the instant the flag flips, the screen's effective opacity is
+  // 0.000 and index.html's `#boot` overlay is still at 1.000. This file's whole
+  // purpose is WCAG contrast "against the pixels actually behind it" — and a frame
+  // captured mid-fade is the screen composited over the orange `.fa-bg`, which
+  // compresses every ratio it reports. The 3.2s sleep below was enough on this
+  // machine and was never the condition; it is kept as a floor for the timed CONTENT
+  // settling (hint fades, progress-bar tweens) and `settleScreen` is the condition.
+  await settleScreen(page, { label: `${screen}@${vp.name}` });
   if (opts.touch) await page.evaluate(() => document.documentElement.classList.add('fa-touch-capable'));
-  // Past the entrance animation and any hint fade, so what is measured is the steady
-  // state — which is the state a critic is shown.
+  // Past any hint fade, so what is measured is the steady state — which is the state a
+  // critic is shown.
   await page.waitForTimeout(3200);
 
   const out = [];
   const shot = `${outDir}/${label}-${screen}-${vp.name}.png`;
-  await page.screenshot({ path: shot, timeout: 120_000 });
+  // Brackets the shutter with a paint check on BOTH sides and refuses a flat frame.
+  // Writes `<shot>.capture.json` so anything downstream can see how it was taken.
+  await captureSettled(page, { path: shot, label: `${screen}@${vp.name}`, tool: 'screen_metrics' });
   const dom = await page.evaluate(collect);
   if (!dom) {
     page.off('pageerror', onErr); page.off('console', onMsg);
@@ -664,9 +678,14 @@ async function auditScreen(page, base, screen, vp, outDir, label, opts = {}) {
       const btn = await page.$(`.fa-root ${sheet.open}`);
       if (!btn) continue;
       await btn.click();
+      // `fa-sheet-in 0.2s` / `fa-set-pop 0.24s` run on a DESCENDANT of the screen root,
+      // which `settleScreen` deliberately does not watch (watching every descendant
+      // would never settle against `fa-card-sheen` and friends). The sleep covers the
+      // sheet; the settle covers the screen underneath it.
       await page.waitForTimeout(900);
+      await settleScreen(page, { label: `${screen}:${sheet.name}` });
       const sShot = `${outDir}/${label}-${screen}-${sheet.name}.png`;
-      await page.screenshot({ path: sShot, timeout: 120_000 });
+      await captureSettled(page, { path: sShot, label: `${screen}:${sheet.name}`, tool: 'screen_metrics' });
       const sDom = await page.evaluate(collect, '.fa-root .tr-sheet-card, .fa-root .set-confirm-card');
       if (sDom) {
         out.push(await score(sDom, sShot, {

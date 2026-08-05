@@ -29,9 +29,31 @@ import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render
 import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
 
-const SHELL = PALETTE.egg;          // #FFF8EA — matte-ish porcelain
-const SHELL_SHADOW = '#E4D6AE';     // faint brow-crease shadow, subtle on purpose
-const CRACK_DARK = '#7C5530';       // the crack itself — needs real value contrast against
+const SHELL = PALETTE.egg;          // #FFF8EA — matte-ish porcelain. THE LID keeps this.
+// ── Egg was the worst character in the cast on every value axis ──────────────
+// Measured (`tools/tmp/valuescan.mjs`): range 0.401 — below the reference MINIMUM —
+// steps@0.10 of 4 against a reference minimum of 5, P05 0.579 against a reference
+// median of 0.097, and 73.8% of its part boundary under 0.10 apart. Its figure/ground
+// was simultaneously the CAST'S BEST at +0.500. That combination has one meaning:
+// perfect separation from the floor, zero internal structure. A white blob.
+//
+// It also has almost no room to fix that. The head is 93.7% of the character, so the
+// only masses big enough to carry a P05 are the shell itself — and the shell being
+// near-white IS the egg. So the shell SPLITS instead: the lifted lid keeps SHELL and
+// stays the light rung (it is the piece the key light actually hits), the body drops
+// one step into a warm shadowed eggshell, and everything that is not shell — limbs,
+// boots, hands, brow shadow — goes near-black.
+//
+// Measured at pot_south, shipped framing: range 0.401 -> 0.643 (over the 0.636 floor),
+// steps@0.10 4 -> 6, p05 0.579 -> 0.317, figure/ground 0.486 -> 0.416 — still by far
+// the cast's largest, so this spent from the one budget Egg had a surplus of.
+//
+// ⚠️ P05 0.317 still FAILS the <= 0.18 gate and no albedo can fix it: with 90% of the
+// character being one white ovoid, 5% of its pixels cannot be made near-black without
+// deleting the character. Egg needs a dark GARMENT — geometry, not colour.
+const SHELL_BODY = '#D6C098';       // the lower shell and the torso shell — one step down
+const SHELL_SHADOW = '#A08B5C';     // brow-crease shadow — a real shadow now, not a tint
+const CRACK_DARK = '#0E0916';       // the crack itself — needs real value contrast against
                                      // the pale shell or it reads as a stray highlight, not a break
 const YOLK = '#FFC23C';             // glossy peek at the crack tip
 const NEON_ACCENT = RARITY_COLORS.Neon; // #FF2FD0 — Egg's rarity accent, used ONLY on the crack seam
@@ -41,8 +63,20 @@ const INK = PALETTE.ink;
 // boots — the shell itself stays near-white (that IS the egg read), but the limbs
 // shift to a soft lilac tint of her own Neon accent so the body carries real hue
 // distinct from the shell, instead of reading as one undifferentiated pale mass.
-const LIMB_LILAC = '#E4C2E8';
-const LIMB_LILAC_SHADOW = '#CB9ED4';
+// …and the limbs are where the dark rung goes. They were pale lilac — a fifth
+// near-white on a character that was already four near-whites — so `head|shoulderL`
+// measured 0.080 across 74 px, the largest seam on the model. Deep plum instead: the
+// hue is still a tint of Egg's own Neon accent, only the value moved.
+const LIMB_LILAC = '#241A38';
+// PASS 3 tried this at #4A3568 to open `kneeL|footL` (0.011). MEASURED WORSE on every
+// axis at once — it closed `hipL|kneeL` (0.051) and `shoulderL|elbowL` (0.069) instead,
+// weak boundary 60.4% -> 70.3%, range 0.701 -> 0.653, p05 0.279 -> 0.326. Reverted.
+// Egg's limbs are ~1% of the character each; there is not enough room between the
+// thigh, the shin and the boot to fit three 0.10 steps at 111 px. That is a geometry
+// answer, not an albedo one.
+const LIMB_LILAC_SHADOW = '#150E22';
+/** Yolk-gold hands, deepened. At #FFC23C they were a sixth light mass. */
+const YOLK_HAND = '#3A2408';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shell surface — single source of truth for both the mesh and every decal.
@@ -284,7 +318,7 @@ export class EggCharacter extends BaseCharacter {
         // Hands now take the same saturated yolk used for the crack-tip peek,
         // feet take the crack's own dark caramel, so extremities carry real
         // value AND hue contrast against the shell.
-        hand: YOLK,
+        hand: YOLK_HAND,
         foot: CRACK_DARK,
         torso: SHELL,
         limbRoughness: 0.5,
@@ -365,7 +399,7 @@ export class EggCharacter extends BaseCharacter {
     const head = this.rig.joints.head;
 
     // ── Shell: a true ovoid, split along a sawtooth hatching rim ─────────────
-    const shell = new THREE.Mesh(shellPiece(R, 'lower'), toonMat({ color: SHELL, roughness: 0.35 }));
+    const shell = new THREE.Mesh(shellPiece(R, 'lower'), toonMat({ color: SHELL_BODY, roughness: 0.35 }));
     shell.name = 'egg_shell';
     shell.castShadow = true;
     shell.receiveShadow = true;
@@ -540,7 +574,7 @@ export class EggCharacter extends BaseCharacter {
         }
         shellGeo.computeVertexNormals();
       }
-      const torsoShell = new THREE.Mesh(shellGeo, toonMat({ color: SHELL, roughness: 0.35 }));
+      const torsoShell = new THREE.Mesh(shellGeo, toonMat({ color: SHELL_BODY, roughness: 0.35 }));
       torsoShell.name = 'egg_torso_shell';
       torsoShell.castShadow = true;
       torsoShell.receiveShadow = true;
@@ -565,7 +599,7 @@ export class EggCharacter extends BaseCharacter {
     // instead of a generic block.
     const limbShellMat = toonMat({ color: LIMB_LILAC, roughness: 0.4 });
     const limbShellShadowMat = toonMat({ color: LIMB_LILAC_SHADOW, roughness: 0.42 });
-    const yolkHandMat = glossyMat({ color: YOLK, roughness: 0.2 });
+    const yolkHandMat = glossyMat({ color: YOLK_HAND, roughness: 0.2 }); // deepened — see YOLK_HAND
     const crackFootMat = toonMat({ color: CRACK_DARK, roughness: 0.5 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {

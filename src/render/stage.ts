@@ -881,9 +881,9 @@ export class Stage {
     // ~3.4-6.0 separation drops BELOW switching it off, because it lights the floor
     // faster than it lights the fighter). It was not touched.
     // ── ONE knob changed, and here is why it is only one ────────────────────
-    // `saturation`, `knee` and `highlightKnee` are untouched, and `contrast` is back at
-    // its shipped 0.62. All three were moved during this pass and all three were put
-    // back, because the colour gate priced them and they were not worth what they cost:
+    // `saturation`, `knee` and `highlightKnee` are untouched. All three were moved
+    // during the toe pass and all three were put back, because the colour gate priced
+    // them and they were not worth what they cost:
     //
     //   candidate (6 arena-scan stations, `tools/tmp/gradechroma.mjs`)
     //                                  ΔmeanSat  Δchroma  ΔcoolChroma   Δrange
@@ -897,22 +897,67 @@ export class Stage {
     // back chroma the toe was spending, and once the toe stopped spending chroma it had
     // no job.
     //
-    // ⚠️ CONTRAST 0.72 IS THE ONE THING LEFT ON THE TABLE, AND IT IS A GATE DECISION,
-    // NOT AN ART ONE. It is worth a further **+0.016 of range** on top of everything
-    // below (measured, three characters: hamburger +0.057 vs +0.040, taco +0.048 vs
-    // +0.034, hotdog +0.056 vs +0.038) — a third of the whole recovery. It costs
-    // +0.0160 of `coolChroma`, whose entire drift budget is 0.0200 and which the toe
-    // has already spent 0.0159 of. `coolChroma` sits at 0.3505 against a target of
-    // 0.343: it is a rail this arena has already MET, being asked to stay met while
-    // `meanSat` (0.408, target 0.493) is asked to rise — and since this arena is ~87%
-    // cool chroma, those are the same number pulling in opposite directions. This
-    // change takes the side that keeps the gate green. See the report for Uri.
+    // ── CONTRAST 0.62 -> 0.72, TAKEN — AND THE CLAIM CAME IN 30% SHORT ────────
+    //
+    // It was left on the table last pass as a GATE decision, not an art one: it spends
+    // +0.0160 of `coolChroma`, whose drift budget is 0.0200. `8a91f7c` then made that
+    // rail `freeAbove` — exceeding the reference on cool chroma is never drift, because
+    // LESSONS §8's whole finding is that the reference reserves HUE by keeping a
+    // saturated COOL ground. So the block was removed and the gain was re-measured
+    // rather than inherited. RE-MEASURING IT WAS THE POINT: it does not pay what the
+    // handover said it pays.
+    //
+    // `tools/tmp/postablate.mjs --toe`, ALL ELEVEN characters, HEAD and the candidate
+    // driven on the SAME frozen frame so the two rows differ by exactly one uniform,
+    // repeated at two independent stations:
+    //
+    //                       P05      range     P95    clip0  clip255
+    //   pot_south  0.62    0.280     0.618    0.898    0.11     0.06
+    //              0.72    0.275     0.629    0.904    0.16     0.07
+    //   spawn_west 0.62    0.278     0.621    0.899    0.04
+    //              0.72    0.273     0.632    0.904    0.05
+    //
+    //   Δrange +0.0113 / +0.0111.  CLAIMED +0.016. The two stations agree with each
+    //   other to 0.0002 and disagree with the handover by 30%, so the shortfall is
+    //   real and not noise. The +0.016 was a delta-of-deltas over three characters
+    //   against a pre-toe control; re-derived that way on the same three it is
+    //   hamburger +0.012, taco +0.012, hotdog +0.015 — i.e. the arithmetic was right
+    //   and the three-character sample was optimistic about the other eight.
+    //
+    // Range improves for ALL ELEVEN at BOTH stations (min +0.0014 egg, max +0.0176
+    // waterbottle) and sushi gains a value step, 6 -> 7.
+    //
+    // ⚠️ TWO HONEST COSTS, neither of them hidden by the mean.
+    //
+    //   1. P05 deepens on TEN of eleven and LIGHTENS on egg (+0.0028). Not noise —
+    //      arithmetic. The S-curve's fixed point is 0.5 and egg's P05 is 0.579, so
+    //      egg's dark end is on the half of the curve that gets pushed UP. Any
+    //      character whose fifth percentile sits above mid-grey will do this.
+    //   2. The character's own P95 rises 0.898 -> 0.904, on all eleven. The light end
+    //      was already at the reference (0.896), so this is a 0.008 overshoot where
+    //      there was a 0.002 one. It is accepted because the number the shoulder
+    //      actually guards barely moves: whole-frame clipped-high 0.06% -> 0.07%,
+    //      against the 2.50% that got `highlightKnee` 0.92 rejected. Clipped-LOW goes
+    //      0.11% -> 0.16%. Both tails are still two orders under the raw render's
+    //      2.33% high.
+    //
+    // The colour side DID reproduce, to a thousandth (`tools/tmp/gradechroma.mjs`, six
+    // stations, one page load each, priced against the SHIPPED grade rather than the
+    // pre-toe HEAD — printing only the pre-toe column once made a candidate look as
+    // though it spent the toe's chroma twice):
+    //
+    //   contrast .62 -> .72   ΔmeanSat +0.0162   Δchroma +0.0077   Δwarm +0.0011
+    //                         ΔcoolChroma +0.0160   ΔwarmShare -0.0019   Δluma -0.0051
+    //
+    // Four of those five move TOWARD the reference. `meanSat` (0.408 against a 0.493
+    // target) is the rail this arena is furthest from and it gains the most.
     //
     // Worth recording as a shape, not just a number: this arena is ~87% cool chroma, so
-    // ANY global saturation move pushes `meanSat` (0.408, target 0.493, needs to rise)
-    // and `coolChroma` (0.3505, target 0.343, already there) in the same direction and
-    // the two rails cannot both be satisfied. That is a real property of the instrument
-    // pair and it is in the report to Uri.
+    // ANY global value or saturation move pushes `meanSat` (needs to rise) and
+    // `coolChroma` (already at target) in the same direction. Before `freeAbove` the
+    // two rails could not both be satisfied by any setting. That is a property of the
+    // instrument pair, and it is why the rail was one-sided rather than the change
+    // being abandoned.
     //
     // The stronger toes were rendered and LOOKED AT at shipped framing
     // (`shots/gradechroma/v3/sheet.png`) and rejected on the art direction, not on a
@@ -920,7 +965,7 @@ export class Stage {
     // which is a stated pillar of the reference. `.28@.60` is the deepest toe that
     // still leaves the frame bright.
     const grade = new ToyGradeEffect({
-      saturation: 0.70, contrast: 0.62, knee: 0.55, highlightKnee: 0.82,
+      saturation: 0.70, contrast: 0.72, knee: 0.55, highlightKnee: 0.82,
       shadowToe: 0.28, toeKnee: 0.60, toeChromaKeep: 0.55,
     });
     this.grade = grade;

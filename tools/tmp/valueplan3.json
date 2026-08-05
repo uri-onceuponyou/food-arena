@@ -1,0 +1,94 @@
+{
+  "hamburger": [
+    { "label": "R3 + dark romaine + tomato", "rules": [
+      { "from": "#B26E2A", "to": "#3E1F09" },
+      { "from": "#8E5320", "to": "#211104" },
+      { "from": "#4E2C1B", "to": "#1A0D05" },
+      { "from": "#E8A33D", "to": "#F7CE86", "path": "handL_mesh|handR_mesh|mitt" },
+      { "from": "#D98E3D", "to": "#66390F" },
+      { "from": "#6B3E26", "to": "#2A1408" },
+      { "from": "#B9C4D2", "to": "#8894A4" },
+      { "from": "#7CB518", "to": "#4E7A12" }
+    ] }
+  ],
+  "donut": [
+    { "label": "R3 + deeper limb pink",     "rules": [
+      { "from": "#8E5FD9", "to": "#170C28" },
+      { "from": "#6E3FB8", "to": "#0E0720" },
+      { "from": "#D14E7C", "to": "#43101F" },
+      { "from": "#F0729B", "to": "#B83464" },
+      { "from": "#FF9EC4", "to": "#FFF6E8", "path": "pompom" },
+      { "from": "#F0C070", "to": "#F5CE86" },
+      { "from": "#5C3417", "to": "#241305" }
+    ] }
+  ],
+  "burrito": [
+    { "label": "R3 + deeper avocado limb",  "rules": [
+      { "from": "#6B3E26", "to": "#241205" },
+      { "from": "#4E2C1B", "to": "#140A03" },
+      { "from": "#7A5230", "to": "#180E05" },
+      { "from": "#587429", "to": "#16220A" },
+      { "from": "#7DA33F", "to": "#3E5A1C" },
+      { "from": "#E0562B", "to": "#8A2A10", "path": "burrito_band" },
+      { "from": "#E63946", "to": "#7A1620", "path": "burrito_tomato" }
+    ] }
+  ],
+  "egg": [
+    { "label": "R3 all limbs near-black",   "rules": [
+      { "from": "#E4C2E8", "to": "#241A38" },
+      { "from": "#CB9ED4", "to": "#150E22" },
+      { "from": "#7C5530", "to": "#0E0916" },
+      { "from": "#FFC23C", "to": "#3A2408", "path": "handL|handR" }
+    ] },
+    { "label": "R3 + shell step #F0E2C6",   "rules": [
+      { "from": "#E4C2E8", "to": "#241A38" },
+      { "from": "#CB9ED4", "to": "#150E22" },
+      { "from": "#7C5530", "to": "#0E0916" },
+      { "from": "#FFC23C", "to": "#3A2408", "path": "handL|handR" },
+      { "from": "#FFF8EA", "to": "#EDDDBE", "path": "egg_shell$|egg_shell_mesh|torso" },
+      { "from": "#E4D6AE", "to": "#A08B5C" }
+    ] },
+    { "label": "R3 + dark shell interior",  "rules": [
+      { "from": "#E4C2E8", "to": "#241A38" },
+      { "from": "#CB9ED4", "to": "#150E22" },
+      { "from": "#7C5530", "to": "#0E0916" },
+      { "from": "#FFC23C", "to": "#3A2408", "path": "handL|handR" },
+      { "from": "#FFF8EA", "to": "#EDDDBE", "path": "egg_shell$|egg_shell_mesh|torso" },
+      { "from": "#E4D6AE", "to": "#A08B5C" },
+      { "from": "#FFC23C", "to": "#5A3A08", "path": "yolk_fill" }
+    ] }
+  ],
+  "lollipop": [
+    { "label": "R3 blackest wrapper",       "rules": [
+      { "from": "#FFFDF9", "to": "#120818", "path": "wrapper_cape$|wrapper_cape_mesh" },
+      { "from": "#E63946", "to": "#120818", "path": "wrapper_collar$|wrapper_petal" },
+      { "from": "#E63946", "to": "#180C1E", "path": "lollipop_choker" },
+      { "from": "#2A2140", "to": "#0C0814" },
+      { "from": "#57B296", "to": "#17382C" },
+      { "from": "#8FE0C9", "to": "#4C9E86" }
+    ] }
+  ],
+  "pizza": [
+    { "label": "R3 + dark pepperoni mitts", "rules": [
+      { "from": "#EFB868", "to": "#331C0D", "path": "shoulderL|shoulderR|hipL|hipR|upperArm|thigh" },
+      { "from": "#CE8A2E", "to": "#E8CC96", "path": "pizza_torso_crust" },
+      { "from": "#CE8A2E", "to": "#331C0D", "path": "elbowL|elbowR|kneeL|kneeR|footL|footR" },
+      { "from": "#4A2A12", "to": "#160A03" },
+      { "from": "#7A4A24", "to": "#221304" },
+      { "from": "#54301A", "to": "#120802" },
+      { "from": "#B93A28", "to": "#6A1A10" },
+      { "from": "#C23B2E", "to": "#7A2014" },
+      { "from": "#EFB868", "to": "#F7CE86" }
+    ] }
+  ],
+  "sushi": [
+    { "label": "R3 blackest nori",          "rules": [
+      { "from": "#F5854A", "to": "#0C1410", "path": "shoulderL|shoulderR|elbowL|elbowR|hipL|hipR|kneeL|kneeR|upperArm|forearm|thigh|shin" },
+      { "from": "#CE5C2E", "to": "#6A2208" },
+      { "from": "#2F4034", "to": "#0E1712" },
+      { "from": "#1E2B22", "to": "#070C09" },
+      { "from": "#B23A2E", "to": "#4E1209" },
+      { "from": "#C99A52", "to": "#5A4020" }
+    ] }
+  ]
+}

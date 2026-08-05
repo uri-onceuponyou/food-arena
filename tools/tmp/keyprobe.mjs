@@ -1,0 +1,16 @@
+import { chromium } from 'playwright';
+const BASE=process.env.PREVIEW_BASE;
+const b=await chromium.launch({args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--enable-webgl','--ignore-gpu-blocklist','--disable-gpu-sandbox']});
+const p=await b.newPage({viewport:{width:900,height:600}});
+await p.goto(`${BASE}/?player=hamburger&enemy=donut&px=850&py=500&fogRadius=545&simSpeed=1&pointerLock=0&aimMode=free`,{waitUntil:'networkidle',timeout:90000});
+await p.waitForFunction('window.__gameReady === true',null,{timeout:90000});
+await p.waitForTimeout(1500);
+const pos=async()=>await p.evaluate('window.__vfxDebugFighters?.player ? [window.__vfxDebugFighters.player.x, window.__vfxDebugFighters.player.y] : null');
+console.log('start', await pos(), 'hasFocus', await p.evaluate('document.hasFocus()'));
+await p.keyboard.down('KeyA'); await p.waitForTimeout(1500); await p.keyboard.up('KeyA');
+console.log('after playwright KeyA 1.5s:', await pos());
+await p.evaluate(`(()=>{ window.__ki=setInterval(()=>window.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyA',bubbles:true})),16); })()`);
+await p.waitForTimeout(1500);
+await p.evaluate('clearInterval(window.__ki); window.dispatchEvent(new KeyboardEvent("keyup",{code:"KeyA",bubbles:true}))');
+console.log('after synthetic KeyA 1.5s:', await pos());
+await b.close();

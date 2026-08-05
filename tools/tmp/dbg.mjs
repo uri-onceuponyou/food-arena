@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+const LAUNCH_ARGS=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--enable-webgl','--ignore-gpu-blocklist','--disable-gpu-sandbox'];
+const b=await chromium.launch({args:LAUNCH_ARGS});
+const p=await b.newPage({viewport:{width:1200,height:900}});
+p.on('pageerror',e=>console.log('PAGEERROR:',e.message));
+p.on('console',m=>{if(m.type()==='error')console.log('CONSOLE:',m.text());});
+await p.goto('http://localhost:5173/?player=hamburger&enemy=donut',{waitUntil:'networkidle'});
+await p.waitForFunction('window.__previewReady === true',null,{timeout:45000});
+await p.waitForTimeout(260);
+console.log(await p.evaluate(()=>({fair:typeof window.__fairView, ready:window.__gameReady, keys:Object.keys(window).filter(k=>k.startsWith('__'))})));
+await b.close();

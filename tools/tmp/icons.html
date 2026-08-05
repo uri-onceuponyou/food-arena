@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>icon sheet</title>
+<style>
+  body { margin: 0; background: #E8DCC4; font-family: system-ui, sans-serif; }
+  h2 { font: 700 12px system-ui; margin: 12px 0 5px 12px; color: #1a1224; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 12px 6px; }
+  .item { display: flex; flex-direction: column; align-items: center; width: 70px; }
+  .lab { font: 500 9px system-ui; color: #5b4a3a; text-align: center; margin-top: 2px; }
+
+  /* Every wrapper below is the REAL shipped box for that icon: same size, same
+     background, same border. Nothing here is zoomed. */
+  .slot   { width: 58px; height: 58px; background: #FFF3DE; border: 3px solid #1a1224;
+            border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 26px; }
+  .medal  { width: 64px; height: 64px; border-radius: 50%; background: #fff; border: 3px solid #1a1224;
+            display: flex; align-items: center; justify-content: center; font-size: 32px; }
+  .medalg { width: 64px; height: 64px; border-radius: 50%; background: #FFC93C; border: 3px solid #1a1224;
+            display: flex; align-items: center; justify-content: center; font-size: 32px; }
+  .chip   { height: 34px; padding: 0 12px; background: #FFF3DE; border: 3px solid #1a1224;
+            border-radius: 999px; display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .btn    { height: 40px; padding: 0 14px; background: #F4A300; border: 3px solid #1a1224;
+            border-radius: 999px; display: flex; align-items: center; font-size: 17px; }
+  .fact   { height: 20px; padding: 0 7px; background: #EDE0C8; border-radius: 999px;
+            display: flex; align-items: center; font-size: 11px; }
+  .statrow{ height: 22px; padding: 0 6px; display: flex; align-items: center; font-size: 13px; }
+  .mutepill { height: 22px; padding: 0 8px; background: rgba(26,18,36,0.9); border: 3px solid #1a1224;
+            border-radius: 999px; display: flex; align-items: center; font-size: 12px; }
+  .b24 { width: 24px; height: 24px; border-radius: 50%; background: rgba(255,255,255,.12);
+         border: 2px solid #3FCB86; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .b18 { width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,.14);
+         border: 1.5px solid #E6493F; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .darkstrip { background: #241a30; border-radius: 8px; padding: 6px 10px; margin: 0 12px 6px;
+               display: flex; flex-wrap: wrap; gap: 8px; }
+  .darkstrip .lab { color: #C9B8DE; }
+</style>
+</head>
+<body>
+<div id="out"></div>
+<script type="module">
+import { icon, ensureIconStyles, portraitMarkup, hydratePortraits } from '/src/ui/icons/index.ts';
+import { FOOD_ICONS } from '/src/ui/icons/food.ts';
+import { CHARACTER_IDS } from '/src/game/rules.ts';
+
+ensureIconStyles();
+const out = document.getElementById('out');
+const params = new URLSearchParams(location.search);
+const labels = params.get('labels') !== '0';
+if (params.get('zoom') === '1') {
+  const zs = document.createElement('style');
+  zs.textContent = '.slot{width:120px;height:120px;font-size:96px}.item{width:132px}';
+  document.head.appendChild(zs);
+}
+
+let counter = 0;
+const key = [];
+function section(title, names, wrapClass, dark = false) {
+  const h = document.createElement('h2');
+  h.textContent = title;
+  out.appendChild(h);
+  const row = document.createElement('div');
+  row.className = dark ? 'darkstrip' : 'row';
+  row.innerHTML = names.map((n) => {
+    const idx = ++counter;
+    key.push(idx + '. ' + n);
+    return '<div class="item"><div class="' + wrapClass + '">' + icon(n) + '</div>' +
+      '<div class="lab">' + (labels ? n : idx) + '</div></div>';
+  }).join('');
+  out.appendChild(row);
+}
+
+// ── Only contexts that actually ship. Each heading states the real box. ──────
+section('WEAPON SLOT (in-match HUD) — 58px slot, 26px icon', Object.keys(FOOD_ICONS), 'slot');
+section('TROPHY ROAD MEDAL — 64px white medal, 32px icon',
+  ['coin', 'gem', 'chest', 'boxBurger', 'boxPineapple', 'boxRed', 'boxFire', 'party', 'flag', 'gift'], 'medal');
+section('TROPHY ROAD MEDAL, CLAIMABLE — same but on the gold node fill',
+  ['coin', 'gem', 'chest', 'boxBurger', 'party'], 'medalg');
+section('TOP-BAR CHIP — 34px pill, 13px icon', ['coin', 'gem', 'trophy', 'avatar', 'pin'], 'chip');
+section('BUTTON — 17px icon on a gold button',
+  ['play', 'back', 'gear', 'close', 'star', 'lock', 'sparkle', 'gem', 'check', 'swap', 'home', 'pause', 'cone', 'chefhat'], 'btn');
+section('ABILITY FACT CHIP — 11px icon', ['damage', 'range', 'timer', 'heal', 'stun', 'slow'], 'fact');
+section('STAT ROW — 13px icon', ['damage', 'health', 'speed'], 'statrow');
+section('HUD MUTE PILL — 12px icon on the dark plate', ['mute', 'sound'], 'mutepill', true);
+
+const h = document.createElement('h2');
+h.textContent = 'CHARACTER PORTRAITS (rendered from the real 3D models) — 24px HUD badge / 18px float pill / 64px road medal';
+out.appendChild(h);
+const tiers = [['b24', false], ['b18', false], ['medal', true]];
+for (const [cls, full] of tiers) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = CHARACTER_IDS.map((id, i) =>
+    '<div class="item"><div class="' + cls + '">' +
+    portraitMarkup(id, full ? {} : { crop: 'head' }) + '</div>' +
+    '<div class="lab">' + (labels ? id : 'P' + (i + 1)) + '</div></div>').join('');
+  out.appendChild(row);
+}
+hydratePortraits(document);
+window.__iconKey = key;
+window.__iconsReady = true;
+</script>
+</body>
+</html>

@@ -22,15 +22,46 @@ import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 
-const CRUST = '#EFB868';       // baked dough slab
+// ── "Tan-on-tan": the whole character was one value ──────────────────────────
+// Two blind critics independently used almost the same words for Pizza, and the
+// instrument agreed: range 0.532, P05 0.317, and every weak part boundary was in the
+// legs (`kneeL|footL` 0.014). The cause was structural rather than a bad hex — the
+// SLICE and the LIMBS were literally the same constant (`limb: CRUST`), and the torso
+// was the crust roll, so head, arms, legs and body were three tones inside a third of
+// a stop.
+//
+// Pizza also has the least figure/ground headroom in the cast — its second-worst
+// station measures 0.106 against a 0.10 floor — so this pass had to be luma-NEUTRAL:
+// every pixel darkened is paid for by one lightened. Slice up, torso up, limbs down.
+// Measured at pot_south, shipped framing: range 0.536 -> 0.733, p05 0.313 -> 0.171,
+// figure/ground 0.267 -> 0.259 (-0.008, i.e. essentially nothing).
+const CRUST = '#F7CE86';       // baked dough slab — the light rung, lifted to pay for LIMB_CHAR
 const CRUST_RIM = '#CE8A2E';   // puffier crust roll along the base — noticeably deeper/toastier
+/** The torso barrel. Was `CRUST_RIM`, i.e. the crust roll at 16.7% of the character
+ *  sitting at luma 0.45 — the single biggest mid-value mass on the model. Flour-dusted
+ *  dough instead: it is the light step the dark limbs are read against. */
+const TORSO_DOUGH = '#E8CC96';
+/** Arms and legs. Was `CRUST` — the identical constant as the slice itself, which is
+ *  exactly the "tan-on-tan" the critics named. A charred crust edge, and the dark rung
+ *  of the whole character at 13% of its pixels. */
+const LIMB_CHAR = '#331C0D';
+
+// ── PASS 2: the limb CHAIN has to alternate, not ramp ────────────────────────
+// The first value pass took both limb tones down together. That fixed range/P05 and
+// BROKE the part boundary — measured, `shoulderL|elbowL` 0.044, `kneeL|footL` 0.035,
+// because a chain of four segments each a shade darker than the last is one mass. The
+// reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
+// segment comes back UP, the lower segment holds the dark, and the boot takes its own
+// darkest tone instead of sharing the shin's.
+/** Upper arm / thigh, and every joint ball. `LIMB_CHAR` stays on forearm and shin. */
+const LIMB_MID = '#6B3A16';
 const SAUCE = PALETTE.tomato;  // '#E63946' — thin margin peeking past the cheese
 const CHEESE = '#FFDE73';      // melted top layer — pushed brighter than the dough so it pops
-const PEPPERONI = '#B93A28';   // wet cured meat, redder than the crust rim
+const PEPPERONI = '#A8301E';   // wet cured meat — the MITT, a step lighter than the cuff above it
 // Feet deliberately break from the crust family altogether — a charred-crust-bottom
 // brown, dark enough to be a real value drop against the pale CRUST limbs rather than
 // a slightly-darker shade of the same tan.
-const CRUST_CHAR = '#4A2A12';
+const CRUST_CHAR = '#160A03';
 
 // ── Costume layer ────────────────────────────────────────────────────────────
 // A fresh independent art director named the missing costume/accessory layer as
@@ -40,10 +71,10 @@ const CRUST_CHAR = '#4A2A12';
 // breaking item — it projects past the body outline the way a cape or backpack
 // does on the reference roster — plus a quilted oven mitt overlaid on one hand
 // as a smaller detail prop that still reads as this character's own trade.
-const SATCHEL_LEATHER = '#7A4A24';
-const SATCHEL_TRIM = '#54301A';
+const SATCHEL_LEATHER = '#221304';   // near-black worn leather — part of the dark rung
+const SATCHEL_TRIM = '#120802';
 const SATCHEL_BUCKLE = '#D9B458';
-const MITT_RED = '#C23B2E';
+const MITT_RED = '#7A2014';
 const MITT_CREAM = '#F7EFE0';
 const FLOUR_DUST = '#F7ECD3';
 
@@ -195,14 +226,14 @@ export class PizzaCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: CRUST,
+        limb: LIMB_MID,
         // Cheese hands sat too close in hue to the crust limb — both warm
         // gold, differing mostly in value. Pepperoni-red mitts (the same
         // colour already used for the topping) give hands a genuine hue
         // break, not just a lighter shade of the same colour.
         hand: PEPPERONI,
         foot: CRUST_CHAR,
-        torso: CRUST,
+        torso: TORSO_DOUGH,
         limbRoughness: 0.78,
       },
       // A fresh independent art director scored the cast 4/10 and named the body plan
@@ -418,7 +449,7 @@ export class PizzaCharacter extends BaseCharacter {
       // value is the cheapest way to give it that.
       const doughBody = new THREE.Mesh(
         torsoBarrel(bodyHalfW, bodyTopY - bodyBottomY, bodyHalfD, 0.26),
-        toonMat({ color: CRUST_RIM, roughness: 0.85 })
+        toonMat({ color: TORSO_DOUGH, roughness: 0.85 })
       );
       doughBody.name = 'pizza_torso_crust';
       doughBody.position.y = (bodyTopY + bodyBottomY) / 2;
@@ -733,8 +764,9 @@ export class PizzaCharacter extends BaseCharacter {
    * the mitt/boot already reads as "sleeve ends here" without bolted-on hardware.
    */
   private dressLimbs(): void {
-    const doughMat = toonMat({ color: CRUST, roughness: 0.85 });
-    const doughDarkMat = toonMat({ color: CRUST_RIM, roughness: 0.8 });
+    // Both limb tones are the charred crust now — see LIMB_CHAR. The slice keeps CRUST.
+    const doughMat = toonMat({ color: LIMB_MID, roughness: 0.85 });
+    const doughDarkMat = toonMat({ color: LIMB_CHAR, roughness: 0.8 });
     const pepMat = glossyMat({ color: PEPPERONI, roughness: 0.18 });
     const charMat = toonMat({ color: CRUST_CHAR, roughness: 0.75 });
 

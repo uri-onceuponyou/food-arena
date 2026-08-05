@@ -28,11 +28,17 @@
  *   boundary used to vanish in one frame while carrying 27% of the frame's luminance.
  * - **`countdown-tick` / `match-started`** — HUD moments with no world position. Same
  *   reasoning.
- * - **`projectile-destroyed` with reason `hit-cover` or `expired`** — currently
- *   nothing at all: the mesh is removed by `syncPool` and the projectile simply
- *   blinks out. `hit-target` is covered, because `hit-landed` fires alongside it and
- *   brings the impact burst. This one is a GAP, not a decision — a shot that stops
- *   dead on a counter should scuff it. Left for a round that can measure the result.
+ * - **`projectile-destroyed` with reason `expired`** — a projectile fading out at max
+ *   range. Not a collision, and it happens on every over-range shot in the game;
+ *   marking those would put sparks on the floor several times a second. `audio/` skips
+ *   it for the same reason, which is the point: the two consumers of this stream are
+ *   allowed to differ, but where they differ it should be on purpose.
+ *
+ * `projectile-destroyed` with reason `hit-cover` USED to be on this list, labelled
+ * *"a GAP, not a decision"*. It is now `spawnCoverScuff` — `audio/director.ts` was
+ * already playing `coverThud()` for it, so a shot stopping dead on a counter had a
+ * sound and no picture. `hit-target` needs nothing here: `hit-landed` fires alongside
+ * it and brings the impact burst.
  */
 
 import * as THREE from 'three';
@@ -62,7 +68,7 @@ declare global {
      * driver `waitForFunction` on the exact frame a specific effect fires instead of
      * guessing at screenshot timing for effects that live well under a second.
      * Never read by game logic. */
-    __vfxQaCounts?: Record<'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash', number>;
+    __vfxQaCounts?: Record<VfxQaKey, number>;
     /**
      * QA-only: fire one effect on demand at a world position, bypassing the sim
      * entirely. Never called by game logic — it exists because DRIVING a specific
@@ -98,21 +104,28 @@ declare global {
   }
 }
 
-type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash';
+type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash' | 'coverScuff';
 
 /**
- * Every kind `window.__vfxSpawnTest` can fire. Deliberately the SAME set as
- * `VfxQaKey`: the QA counter and the QA spawner covering different subsets is how a
- * coverage audit ends up with blind spots, and this file's own history says the
- * blind spot is where the bug lives (`docs/LESSONS.md` §1). The first version wired
- * only `impact`/`death`/`cast`, so `meleeArc`, `heal`, `giantSlam` and
- * `puddleSplash` — four of the seven counted effects — could not be fired on demand
- * at all and had never been measured.
+ * Every kind `window.__vfxSpawnTest` can fire. A superset of `VfxQaKey`: the QA
+ * counter and the QA spawner covering different subsets is how a coverage audit ends
+ * up with blind spots, and this file's own history says the blind spot is where the
+ * bug lives (`docs/LESSONS.md` §1). The first version wired only
+ * `impact`/`death`/`cast`, so `meleeArc`, `heal`, `giantSlam` and `puddleSplash` —
+ * four of the seven counted effects — could not be fired on demand at all and had
+ * never been measured.
+ *
+ * `'weaponFired'` is the one entry that is not a single effect. It runs
+ * `spawnWeaponCast`, i.e. exactly what `match.ts` fires for one `weapon-fired` event,
+ * so a probe measures the SUM the player sees rather than a composition it assembled
+ * itself. Giant Lollipop is on record as three separately-measured passes nobody had
+ * ever measured together (`spawnWeaponCast`); a QA hook that can only fire one at a
+ * time is how that stays true.
  */
-type VfxSpawnTestKind = VfxQaKey;
+type VfxSpawnTestKind = VfxQaKey | 'weaponFired';
 
 function bumpVfxQaCount(key: VfxQaKey): void {
-  window.__vfxQaCounts ??= { cast: 0, meleeArc: 0, impact: 0, death: 0, heal: 0, giantSlam: 0, puddleSplash: 0 };
+  window.__vfxQaCounts ??= { cast: 0, meleeArc: 0, impact: 0, death: 0, heal: 0, giantSlam: 0, puddleSplash: 0, coverScuff: 0 };
   window.__vfxQaCounts[key]++;
 }
 
@@ -1164,7 +1177,17 @@ export class VfxLayer {
         );
       }
       else if (kind === 'giantSlam') {
+        // The raw generic shockwave, with no arbitration — this is the attribution
+        // probe for "what does this pass alone cost". `'weaponFired'` below is the
+        // one that measures what actually ships.
         this.spawnGiantSlamShockwave(xWU, yWU, qaWeapon?.color ?? color, qaWeapon?.range ?? 400);
+      }
+      else if (kind === 'coverScuff') {
+        this.spawnCoverScuff(xWU, yWU, qaWeapon?.color ?? color, 1, 0);
+      }
+      else if (kind === 'weaponFired') {
+        const weapon = qaWeapon ?? ({ key: 'qa', name: 'qa', type: 'ranged', range: 100, damage: amount, cooldown: 1, color, effect: null } as unknown as Weapon);
+        this.spawnWeaponCast(xWU, yWU, { x: 1, y: 0 }, weapon, qaId);
       }
       else {
         // `who`/`weaponKey` let a probe drive a SPECIFIC character's bespoke hook. Without
@@ -1520,10 +1543,73 @@ export class VfxLayer {
 
   // ── Spawn API — called from match.ts's event handling ─────────────────────────
 
+  /**
+   * EVERYTHING one `weapon-fired` event draws, arbitrated in ONE place.
+   *
+   * ── Why this function exists ───────────────────────────────────────────────────
+   *
+   * `match.ts` used to fire up to three independent effects for a single shot —
+   * `spawnCastFlash`, `spawnMeleeArc` and `spawnGiantSlamShockwave` — each authored,
+   * tuned and MEASURED alone. `docs/LESSONS.md` §7 ("local optima fight each other;
+   * watch the sum") predicts what that produces, and Giant Lollipop is the recorded
+   * proof: measured together at shipped framing, the three repainted **272,651 px =
+   * 75.7% of the frame**, and `spawnGiantSlamShockwave`'s own comment said the melee
+   * arc *"already makes this screen-filling on its own"* — written before
+   * `vfx/weapons/lollipop.ts` existed and never revisited after it did.
+   *
+   * The individual pieces (readback 800x450, hamburger self-cast, peak slice):
+   *
+   *     bespoke lollipop.Giant.cast   267,217 px    74.2% of frame
+   *     generic 360-degree melee wedge 262,797 px    73.0% of frame
+   *     generic giant-slam shockwave  161,800 px    44.9% of frame
+   *     ALL THREE, as shipped         272,651 px    75.7% of frame
+   *
+   * Three overlapping full-frame washes is not three times the information; the
+   * judgement PNGs show it is *less*, because the wedge is a flat featureless red
+   * disc with its edge off screen and the shockwave's epicentre flash sits on top of
+   * the caster. Whoever adds the next `weapon-fired` beat must add it HERE, where the
+   * sum is visible, not next to it in `match.ts`.
+   *
+   * `match.ts` keeps only the non-VFX consequences of a giant slam (HUD flash, camera
+   * shake, hit-stop) because those are not this layer's to own.
+   */
+  spawnWeaponCast(xWU: number, yWU: number, facing: Vec2, weapon: Weapon, characterId: CharacterId): void {
+    const bespokeCast = !!getWeaponVfx(characterId, weapon.key)?.cast;
+
+    this.spawnCastFlash(xWU, yWU, facing, weapon, characterId);
+
+    if (weapon.type === 'melee') {
+      // ── The one case where the generic wedge is SKIPPED ────────────────────────
+      // The wedge's job is to telegraph the hitbox, and it does that by having an
+      // EDGE and a DIRECTION. A `giantSlam` has neither on screen: 360 degrees means
+      // no direction, and `REACH.ultimateSlam` (400 wu) is twice the radius the camera
+      // guarantees is visible, so the edge is off frame by construction (see
+      // `render/camera.ts`). What actually renders is a flat 20 m red disc at 0.88
+      // opacity covering the whole floor — 262,797 px of information-free wash that
+      // erases the arena the player is trying to read.
+      //
+      // A bespoke `cast()` on a `giantSlam` weapon is drawing that same reach itself
+      // (lollipop's AOE fill is the weapon's true `range`, with a hard two-tone
+      // boundary and a racing rim — a strictly better hitbox indicator than a
+      // borderless flat disc). So the wedge stands down for it, and ONLY for it: with
+      // no bespoke cast the wedge is still the only reach indicator a `giantSlam` has,
+      // and every ordinary melee weapon (80-150 degree cones, 58-84 wu) keeps it —
+      // those measured 5,447-11,648 px composited, with 1.8-6.0% cast repaint.
+      if (!(weapon.giantSlam && bespokeCast)) {
+        this.spawnMeleeArc(xWU, yWU, facing, weapon.range ?? 0, weapon.cone ?? 360, weapon.color);
+      }
+    }
+
+    if (weapon.giantSlam) {
+      this.spawnGiantSlamShockwave(xWU, yWU, weapon.color, weapon.range ?? 0, { bespokeOwnsGround: bespokeCast });
+    }
+  }
+
   /** Muzzle/cast flash at the attacker, tinted the weapon's colour. Fires for every
    * `weapon-fired` event (melee wind-up, ranged muzzle, or a self-cast heal). Looks
-   * up this weapon's bespoke `cast()` hook first (`vfx/weapons/`); falls back to the
-   * generic flash below when it has none. */
+   * up this weapon's bespoke `cast()` hook first (`vfx/weapons/`); the bespoke hook
+   * adds this weapon's identity ON TOP OF a subordinate muzzle anchor — see
+   * `castMuzzle` for the measurement that made the anchor unconditional. */
   spawnCastFlash(xWU: number, yWU: number, facing: Vec2, weapon: Weapon, characterId: CharacterId): void {
     bumpVfxQaCount('cast');
     const origin = groundPos(xWU, yWU);
@@ -1534,30 +1620,88 @@ export class VfxLayer {
     const color = weapon.color;
 
     const bespoke = getWeaponVfx(characterId, weapon.key)?.cast;
-    if (bespoke) {
-      const ctx: WeaponVfxCtx = {
-        THREE,
-        position: new THREE.Vector3(origin.x + fx * offM, CAST_HEIGHT, origin.z + fy * offM),
-        direction: new THREE.Vector3(fx, 0, fy),
-        color,
-        damage: weapon.damage,
-        weapon,
-        characterId,
-        spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
-      };
-      bespoke(ctx);
-      return;
-    }
+    this.castMuzzle(origin.x + fx * offM, origin.z + fy * offM, color, bespoke ? 'subordinate' : 'primary');
+    if (!bespoke) return;
 
-    // ── Generic path — unchanged from before this system existed. ────────────────
+    const ctx: WeaponVfxCtx = {
+      THREE,
+      position: new THREE.Vector3(origin.x + fx * offM, CAST_HEIGHT, origin.z + fy * offM),
+      direction: new THREE.Vector3(fx, 0, fy),
+      color,
+      damage: weapon.damage,
+      weapon,
+      characterId,
+      spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+    };
+    bespoke(ctx);
+  }
+
+  /**
+   * The muzzle beat, and why every weapon now gets one.
+   *
+   * `'primary'` is the generic cast flash, byte-for-byte what shipped before the
+   * bespoke system existed. `'subordinate'` is the same sprite at 62% linear size and
+   * a shorter life, spawned UNDER a bespoke `cast()`.
+   *
+   * ── The measurement that made this unconditional ───────────────────────────────
+   *
+   * A bespoke `cast()` used to REPLACE the flash entirely. `tools/tmp/vfx_wcov.mjs`
+   * measured all 33 weapons x both paths at shipped framing, and the cast column has
+   * one shape: **the generic flash delivers 735 px and FIFTEEN of the twenty-two
+   * bespoke casts deliver under 300** —
+   *
+   *     hamburger.Tomato    18      egg.Shards       89      taco.Onion    149
+   *     waterbottle.Glass   21      sushi.Rice       97      pizza.Cheese  171
+   *     pizza.Dough         66      hotdog.Ketchup  108      burrito.Swarm 180
+   *     soup.Noodle         73      taco.Filling    147      taco.Double   231
+   *     pizza.Tomato        89                              donut.Candy   235
+   *                                                         sushi.Catch   283
+   *
+   * and the ablation says why: occlusion 0.98-1.36x (nothing is hiding them) against
+   * size ratios of 6-15x. They are simply SMALL — every one of them was authored as a
+   * detail beat (a puff of flour, four glass slivers, six grains of rice) at
+   * 0.15-0.35 m against the generic flash's 1.3 m, because the brief for each was
+   * "not the generic pale circular flash". Correct instinct, wrong conclusion: the
+   * generic flash was never the generic weapon's *flavour*, it was the MUZZLE, and
+   * every weapon has one. Eighteen pixels is not a quiet cast, it is a cast the player
+   * cannot see fire.
+   *
+   * Fixing this in eleven weapon files by scaling their detail up is exactly the move
+   * `docs/LESSONS.md` §1 warns against (three of the five invisibility bugs the last
+   * round fixed were burial, and scaling them would have made bigger invisible
+   * effects) — and it would also mean eleven separate re-derivations of one number.
+   *
+   * ── Why 0.75 and not 1.0, and not 0.5 ─────────────────────────────────────────
+   *
+   * The anchor has to be SUBORDINATE (the bespoke detail is the point of the system)
+   * and still clear the floor on its own, because the weakest bespoke cast contributes
+   * 18 px and cannot be relied on for any of it. A radial sprite's delivered area goes
+   * as the square of its scale, so against the primary flash's measured 735 px:
+   *
+   *     0.50x -> ~184 px   under the 300 px floor on its own — no
+   *     0.62x -> ~282 px   inside measurement noise of the floor — no
+   *     0.75x -> ~413 px   clears it with margin, and is 56% of the primary's area
+   *
+   * 0.75 it is: at 0.98 m against a 2.10 m character it reads as a muzzle rather than
+   * as the whole event, and every bespoke cast in the directory throws its detail
+   * OUTWARD (droplets, shards, grains, crumbs) so the detail is not competing for the
+   * same pixels anyway.
+   */
+  private castMuzzle(xM: number, zM: number, color: string, role: 'primary' | 'subordinate'): void {
+    const k = role === 'primary' ? 1 : 0.75;
     const p = this.allocParticle();
     p.active = true;
     p.life = 0;
-    p.maxLife = 0.16;
+    p.maxLife = role === 'primary' ? 0.16 : 0.13;
     p.sprite.visible = true;
-    p.sprite.position.set(origin.x + fx * offM, CAST_HEIGHT, origin.z + fy * offM);
+    p.sprite.position.set(xM, CAST_HEIGHT, zM);
     p.vx = 0; p.vy = 0; p.vz = 0; p.gravity = 0;
-    p.startScale = 0.75; p.endScale = 1.3;
+    p.startScale = 0.75 * k; p.endScale = 1.3 * k;
+    // Full opacity in both roles. The anchor is made subordinate by SIZE, not by
+    // dimming: rule 1 of the colour contract above requires every transient to clear
+    // the cast's luma 0.302 by >= 0.15 upward, and a half-opacity additive sprite over
+    // this floor lands under that — a dim anchor is just the invisible-effect bug
+    // again with extra steps.
     p.startOpacity = 1; p.endOpacity = 0; p.fadeEase = 1.6;
     p.mat.color.set(color).lerp(WHITE, 0.4);
   }
@@ -1915,60 +2059,177 @@ export class VfxLayer {
   }
 
   /**
-   * Lollipop's Giant Lollipop — an 8s-cooldown ultimate that per the ability text
-   * "grows huge and hits the whole map". The normal melee-arc call already draws its
-   * true cone/range (360°/huge radius already makes this screen-filling on its own);
-   * this layers a racing shockwave ring + a big white flash + heavy scatter on top so
-   * the cast reads as a genuine event, not just a bigger version of a normal swing.
+   * A shot that stops dead on a counter — `projectile-destroyed` with reason
+   * `hit-cover`.
+   *
+   * ── The gap this closes ────────────────────────────────────────────────────────
+   *
+   * The event stream has two consumers, this layer and `audio/`, and they disagreed:
+   * `audio/director.ts` plays `coverThud()` for `hit-cover` and this layer drew
+   * **nothing at all** — `syncPool` removed the mesh and the projectile blinked out
+   * mid-air. The header block above lists the kinds this layer deliberately does not
+   * draw (`countdown-tick`, `match-started`, `match-ended` — all HUD moments with no
+   * world position) and explicitly separated this one out as *"a GAP, not a
+   * decision"*. A shot that vanishes with no visual is indistinguishable from a
+   * rendering fault, and it is the one piece of feedback that teaches a player that
+   * cover blocks shots.
+   *
+   * `expired` stays silent, on purpose and in step with audio's own reasoning: that
+   * is a projectile fading out at max range, not a collision, and it happens on every
+   * over-range shot in the game. Marking those would put a spark on the floor several
+   * times a second.
+   *
+   * ── Why it is built the way it is ──────────────────────────────────────────────
+   *
+   *  - **Quieter than a hit, by construction.** A miss must never read as a hit, so
+   *    this gets ~2.5 m of streak against the impact burst's flash + double ring +
+   *    star decal + shards, and no ground decal at all. Rule 3 of the colour contract
+   *    reserves persistent ground marks for HAZARDS; a scuff is not one, so it is
+   *    purely transient.
+   *  - **The sparks come back TOWARD the shooter.** They are mirrored about the wall
+   *    normal-ish `-direction`, which is what sells "it stopped here" rather than
+   *    "it carried on through". The direction is reconstructed in `match.ts` from the
+   *    projectile's spawn and destroy positions, because the event carries neither
+   *    velocity nor weapon.
+   *  - **Chest height, not ground.** `PROJECTILE_HEIGHT` is where the shot actually
+   *    was; a mark at the feet would point at the wrong place. Cover bodies are the
+   *    arena's violet 258-268 BLOCKING band and this draws warm sparks over them, so
+   *    the scuff separates from the thing it is hitting by both hue and value.
    */
-  spawnGiantSlamShockwave(xWU: number, yWU: number, color: string, rangeWU: number): void {
+  spawnCoverScuff(xWU: number, yWU: number, color: string, dirX: number, dirY: number): void {
+    bumpVfxQaCount('coverScuff');
+    const origin = groundPos(xWU, yWU);
+    const mag = Math.hypot(dirX, dirY);
+    // Back along the flight line — see the doc comment. Zero-length (a projectile
+    // destroyed on its own spawn tick) falls back to straight up-screen, which is
+    // still a legible scatter rather than a degenerate point.
+    const bx = mag > 1e-4 ? -dirX / mag : 0;
+    const bz = mag > 1e-4 ? -dirY / mag : -1;
+
+    // The contact pop. Small — 0.85 m against the generic impact flash's 0.5-1.15x
+    // sizeFactor (1.4-3.2 m for a real hit) — and short.
+    const flash = this.allocParticle();
+    flash.active = true; flash.life = 0; flash.maxLife = 0.12;
+    flash.sprite.visible = true;
+    flash.sprite.position.set(origin.x, PROJECTILE_HEIGHT, origin.z);
+    flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
+    flash.startScale = 0.42; flash.endScale = 0.85;
+    flash.startOpacity = 0.95; flash.endOpacity = 0; flash.fadeEase = 1.4;
+    flash.mat.color.set(color).lerp(WHITE, 0.45);
+
+    // Sparks fanning back off the surface, within +/-60 degrees of the reflected
+    // direction so they read as a deflection rather than an explosion.
+    for (let i = 0; i < 5; i++) {
+      const spread = (Math.random() - 0.5) * (Math.PI * 2 / 3);
+      const c = Math.cos(spread), s = Math.sin(spread);
+      const ax = bx * c - bz * s;
+      const az = bx * s + bz * c;
+      const p = this.allocParticle();
+      p.mat.map = this.streakTex;
+      p.mat.rotation = Math.atan2(az, ax);
+      p.aspect = 0.22;
+      p.active = true; p.life = 0; p.maxLife = 0.22 + Math.random() * 0.1;
+      p.sprite.visible = true;
+      // Start ON the surface, offset a little back along the flight line so the
+      // sparks are not born inside the cover box they just hit — the same
+      // "start outside the silhouette" repair the heal pulse and puddle splash needed.
+      p.sprite.position.set(origin.x + bx * 0.22, PROJECTILE_HEIGHT, origin.z + bz * 0.22);
+      p.vx = ax * (2.4 + Math.random() * 1.6);
+      p.vz = az * (2.4 + Math.random() * 1.6);
+      p.vy = 0.9 + Math.random() * 0.7;
+      p.gravity = -7.5;
+      p.startScale = 0.55 + Math.random() * 0.25;
+      p.endScale = 0.12;
+      p.startOpacity = 0.9; p.endOpacity = 0; p.fadeEase = 1.2;
+      p.mat.color.set(SPARK_COLOR);
+    }
+  }
+
+  /**
+   * Lollipop's Giant Lollipop — an 8s-cooldown ultimate that per the ability text
+   * "grows huge and hits the whole map".
+   *
+   * ── `bespokeOwnsGround`, and the comment that used to be here ──────────────────
+   *
+   * This function's original comment read: *"The normal melee-arc call already draws
+   * its true cone/range (360°/huge radius already makes this screen-filling on its
+   * own); this layers a racing shockwave ring + a big white flash + heavy scatter on
+   * top."* That was true when written and stopped being true when
+   * `vfx/weapons/lollipop.ts` landed a bespoke `cast()` that draws the SAME 20 m disc
+   * with a swirl, a hard boundary and a racing rim of its own. Nobody re-read the
+   * comment, so a third full-frame pass went on top of two others — see
+   * `spawnWeaponCast` for the measured sum.
+   *
+   * `bespokeOwnsGround` is that arbitration, and the split is by ANCHOR, not by taste:
+   *
+   *   - The GROUND beats (two 17-21 m expanding rings) and the EPICENTRE beats
+   *     (starburst pop at 5.2, flash sprite to 3.5 m, ten 4.5 m spark rays) are what
+   *     a bespoke `cast()` already covers, and the epicentre pair is what actually
+   *     erased the caster: the shockwave alone repainted **81.6%** of the fighter's
+   *     own pixels — more than either of the two visually LARGER passes — because a
+   *     3.5 m additive flash centred on a 2.1 m character is a whiteout of exactly
+   *     that character.
+   *   - The SHARDS stay in both modes. They are the only part of this effect anchored
+   *     to nothing but the epicentre's own debris, they cost ~1 m of screen each, and
+   *     the bespoke hook has no equivalent.
+   */
+  spawnGiantSlamShockwave(
+    xWU: number,
+    yWU: number,
+    color: string,
+    rangeWU: number,
+    opts?: { bespokeOwnsGround?: boolean },
+  ): void {
     bumpVfxQaCount('giantSlam');
     const origin = groundPos(xWU, yWU);
     const radiusM = wu(rangeWU);
+    const bespokeOwnsGround = opts?.bespokeOwnsGround ?? false;
 
-    // Bright inner shockwave rim, racing out to the ability's true (huge) radius...
-    const ring = this.allocRing();
-    ring.active = true; ring.life = 0; ring.maxLife = 0.65;
-    ring.startScale = 0.3; ring.targetScale = radiusM * 1.05;
-    ring.startOpacity = 1;
-    ring.mesh.visible = true;
-    ring.mesh.position.set(origin.x, GROUND_VFX_Y + 0.02, origin.z);
-    ring.mesh.scale.setScalar(ring.startScale);
-    ring.mat.color.set(color).lerp(WHITE, 0.3);
-    ring.mat.opacity = ring.startOpacity;
+    if (!bespokeOwnsGround) {
+      // Bright inner shockwave rim, racing out to the ability's true (huge) radius...
+      const ring = this.allocRing();
+      ring.active = true; ring.life = 0; ring.maxLife = 0.65;
+      ring.startScale = 0.3; ring.targetScale = radiusM * 1.05;
+      ring.startOpacity = 1;
+      ring.mesh.visible = true;
+      ring.mesh.position.set(origin.x, GROUND_VFX_Y + 0.02, origin.z);
+      ring.mesh.scale.setScalar(ring.startScale);
+      ring.mat.color.set(color).lerp(WHITE, 0.3);
+      ring.mat.opacity = ring.startOpacity;
 
-    // ...plus a second, softer ring trailing just behind it, so the shockwave reads
-    // as a THICK expanding band rather than a single thin line racing outward.
-    const ring2 = this.allocRing();
-    ring2.active = true; ring2.life = 0; ring2.maxLife = 0.8;
-    ring2.startScale = 0.15; ring2.targetScale = radiusM * 0.85;
-    ring2.startOpacity = 0.6;
-    ring2.mesh.visible = true;
-    ring2.mesh.position.set(origin.x, GROUND_VFX_Y + 0.01, origin.z);
-    ring2.mesh.scale.setScalar(ring2.startScale);
-    ring2.mat.color.set(color);
-    ring2.mat.opacity = ring2.startOpacity;
+      // ...plus a second, softer ring trailing just behind it, so the shockwave reads
+      // as a THICK expanding band rather than a single thin line racing outward.
+      const ring2 = this.allocRing();
+      ring2.active = true; ring2.life = 0; ring2.maxLife = 0.8;
+      ring2.startScale = 0.15; ring2.targetScale = radiusM * 0.85;
+      ring2.startOpacity = 0.6;
+      ring2.mesh.visible = true;
+      ring2.mesh.position.set(origin.x, GROUND_VFX_Y + 0.01, origin.z);
+      ring2.mesh.scale.setScalar(ring2.startScale);
+      ring2.mat.color.set(color);
+      ring2.mat.opacity = ring2.startOpacity;
 
-    // Starburst flash — the sparkle silhouette, not just a soft circle, is what
-    // makes an 8-second ultimate read as a genuinely special event. Pulled back
-    // slightly from round 1 (was scale 6.5 / flash-white 0.55) — big enough to
-    // dominate the frame, but not so bright it fuses with the shard debris below
-    // into one indistinct white mass, which a critic pass explicitly called out
-    // ("zero debris/sparks" — they WERE there, just visually swallowed).
-    this.spawnStarPop(origin, IMPACT_HEIGHT * 1.5, color, 5.2, 0.38);
+      // Starburst flash — the sparkle silhouette, not just a soft circle, is what
+      // makes an 8-second ultimate read as a genuinely special event. Pulled back
+      // slightly from round 1 (was scale 6.5 / flash-white 0.55) — big enough to
+      // dominate the frame, but not so bright it fuses with the shard debris below
+      // into one indistinct white mass, which a critic pass explicitly called out
+      // ("zero debris/sparks" — they WERE there, just visually swallowed).
+      this.spawnStarPop(origin, IMPACT_HEIGHT * 1.5, color, 5.2, 0.38);
 
-    const flash = this.allocParticle();
-    flash.active = true; flash.life = 0; flash.maxLife = 0.3;
-    flash.sprite.visible = true;
-    flash.sprite.position.set(origin.x, IMPACT_HEIGHT * 1.5, origin.z);
-    flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
-    flash.startScale = 1.8; flash.endScale = 3.5;
-    flash.startOpacity = 0.9; flash.endOpacity = 0; flash.fadeEase = 1.2;
-    flash.mat.color.set(color).lerp(WHITE, 0.4);
+      const flash = this.allocParticle();
+      flash.active = true; flash.life = 0; flash.maxLife = 0.3;
+      flash.sprite.visible = true;
+      flash.sprite.position.set(origin.x, IMPACT_HEIGHT * 1.5, origin.z);
+      flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
+      flash.startScale = 1.8; flash.endScale = 3.5;
+      flash.startOpacity = 0.9; flash.endOpacity = 0; flash.fadeEase = 1.2;
+      flash.mat.color.set(color).lerp(WHITE, 0.4);
 
-    // Long hit-spark rays punching outward from the epicentre, on top of the ring —
-    // SPARK_COLOR (not the weapon colour) so they read as their own bright layer.
-    this.spawnStreaks(origin, IMPACT_HEIGHT * 0.6, '#FFE79A', 10, 4.5, 0.55);
+      // Long hit-spark rays punching outward from the epicentre, on top of the ring —
+      // SPARK_COLOR (not the weapon colour) so they read as their own bright layer.
+      this.spawnStreaks(origin, IMPACT_HEIGHT * 0.6, '#FFE79A', 10, 4.5, 0.55);
+    }
 
     // Shards only — the dedicated flash+rings above already cover this cast's
     // "flash" and "shockwave rim" beats; a second overlapping flash/ring from the
