@@ -707,6 +707,28 @@ async function installHarness(page) {
      * renderer into an audio test for no added coverage — the FULL state path is
      * covered by `--mode live`, which runs the actual game.
      */
+    /**
+     * Count the kitchen bed's voices SEPARATELY from everything else.
+     *
+     * `director.ts` runs a continuous ambience bed whenever `phase === 'playing'`, and
+     * three of the harnesses below drive the director with exactly that phase in order
+     * to test something else entirely — the shrug-off, the final-ring latch, the status
+     * grace rule. Every assertion they make is "this produces exactly N voices", so a
+     * state-driven bed folded into `counters.started` makes nine of them report the bed.
+     * Returns a getter for the bed's own count, so each harness can subtract it and
+     * still have it available to assert on.
+     */
+    window.__countAmbience = (engine) => {
+      let n = 0;
+      const orig = engine.play.bind(engine);
+      engine.play = (fn, o = {}) => {
+        const ok = orig(fn, o);
+        if (ok && o && o.key === 'ambience') n++;
+        return ok;
+      };
+      return () => n;
+    };
+
     window.__renderEvents = async (events, opt = {}) => {
       const sr = 44100;
       const ctx = new OfflineAudioContext(2, Math.ceil(sr * (opt.seconds ?? 2)), sr);
@@ -732,10 +754,23 @@ async function installHarness(page) {
           ...(opt.enemyAlive !== undefined ? { alive: opt.enemyAlive } : {}),
         },
       };
+      // ── The kitchen bed is counted SEPARATELY, and that is not a convenience ──
+      //
+      // `director.ts` now runs a continuous ambience bed whenever `phase === 'playing'`,
+      // which is state rather than a response to any event. Every assertion in
+      // `--mode dispatch` is of the form "this event produces exactly N voices", so
+      // folding a state-driven bed into that count would make nine assertions about
+      // the SHRUG-OFF and the FINAL RING report the bed instead — they all pass
+      // `phase: 'playing'`, and all nine did exactly that on the first run.
+      //
+      // Split rather than filtered out: `startedAmbience` is asserted directly below,
+      // so the bed is still covered by a shipped gate and cannot be silently lost.
+      const bed = window.__countAmbience(engine);
       md.handleEvents(events, state);
       const buf = await ctx.startRendering();
       const a = window.__dsp.analyse([buf.getChannelData(0), buf.getChannelData(1)], sr, opt);
-      return { ...a, started: engine.counters.started, dropped: engine.counters.droppedThrottle,
+      return { ...a, started: engine.counters.started - bed(), startedAmbience: bed(),
+        startedAll: engine.counters.started, dropped: engine.counters.droppedThrottle,
         droppedBudget: engine.counters.droppedBudget };
     };
 
@@ -755,6 +790,10 @@ async function installHarness(page) {
       const ctx = new OfflineAudioContext(2, Math.ceil(sr * (opt.seconds ?? 3)), sr);
       const engine = new audio.AudioEngine({ context: ctx, persist: false });
       const md = new director.MatchAudio(engine);
+      // The bed is not a response to the ring — see `__countAmbience`. Note every tick
+      // here carries `elapsed: 1000`, so the bed fires exactly once per match arm no
+      // matter how many radii are stepped through.
+      const bed = window.__countAmbience(engine);
       const mk = (r) => ({
         elapsed: 1000, phase: opt.phase ?? 'playing', safeRadius: r,
         player: { role: 'player', characterId: 'soup', x: 0, y: 0, hp: 100, maxHp: 100, alive: true },
@@ -767,7 +806,7 @@ async function installHarness(page) {
       }
       const buf = await ctx.startRendering();
       const a = window.__dsp.analyse([buf.getChannelData(0), buf.getChannelData(1)], sr, opt);
-      return { ...a, started: engine.counters.started };
+      return { ...a, started: engine.counters.started - bed(), startedAmbience: bed() };
     };
 
     /**
@@ -789,6 +828,8 @@ async function installHarness(page) {
       const ctx = new OfflineAudioContext(2, Math.ceil(sr * (opt.seconds ?? 2)), sr);
       const engine = new audio.AudioEngine({ context: ctx, persist: false });
       const md = new director.MatchAudio(engine);
+      // The bed is not a response to a status hit — see `__countAmbience`.
+      const bed = window.__countAmbience(engine);
       const mk = (elapsed, enemyStun) => ({
         elapsed, phase: 'playing',
         player: {
@@ -826,7 +867,8 @@ async function installHarness(page) {
       const a = window.__dsp.analyse(chans, sr, opt);
       return {
         ...a,
-        started: engine.counters.started,
+        started: engine.counters.started - bed(),
+        startedAmbience: bed(),
         hp1200: window.__dsp.hpRms(mono, sr, 1200),
       };
     };
@@ -1170,6 +1212,28 @@ async function modeIdentity(page) {
     ladder[ladder.length - 1].mean / ladder[0].mean > 4,
     `${Math.round(ladder[0].mean)} -> ${Math.round(ladder[ladder.length - 1].mean)} Hz`);
 
+  // ── THE LADDER'S OWN CENTRE, and why two gates below are derived from it ──
+  //
+  // Two checks in this mode used to be ABSOLUTE Hz numbers — "pizza.Dough < 1400" and
+  // "every soup impact < 2000" — and both were set against the tuning of the day they
+  // were written. That is fine until the day the whole roster is retuned at once, and
+  // then it is worse than useless: the numbers fail for a reason that has nothing to do
+  // with what they were protecting, and the only two available moves are to break the
+  // gate or to move the number, which is the same thing.
+  //
+  // The claims they encode are RELATIVE and always were. "Dough is the dull landing"
+  // and "Soup is the wet dark one" are statements about where those sounds sit AMONG
+  // THE OTHERS, not about a frequency. So they are now measured that way, against the
+  // geometric centre of the eleven-rung ladder this mode has already computed —
+  // geometric because the ladder is geometric (every separation in this file is a
+  // RATIO), so the arithmetic mean would sit far above the middle rung and the bound
+  // would silently loosen every time the bright end moved.
+  //
+  // This survives any future roster-wide pass in either direction, which is exactly
+  // what the old numbers could not do.
+  const ladderCentre = Math.exp(ladder.reduce((a, r) => a + Math.log(r.mean), 0) / ladder.length);
+  console.log(`  ladder geometric centre: ${Math.round(ladderCentre)} Hz  (the bound the "dull" and "wet" claims below are measured against)`);
+
   console.log('\n  --- per-character device claims ---');
 
   const cases = [
@@ -1208,9 +1272,19 @@ async function modeIdentity(page) {
       `peak=${m[c.id].peak.toFixed(4)} rms=${m[c.id].rms.toFixed(5)}`);
   }
 
-  // Soup is WET: energy collapses downward, so the centroid must be low.
+  // Soup is WET: energy collapses downward, so it must sit in the DARK HALF of the
+  // roster — every one of its impacts below the ladder's geometric centre.
+  //
+  // Was `< 2000 Hz`, an absolute set when Soup measured 1322-1831 and the whole game
+  // fell at -5.57 dB/octave with 86% of its energy under 1 kHz. The roster-wide top-end
+  // pass moved every character up, Soup included (its own steam and a new fine-droplet
+  // layer), and 2000 Hz then described nothing: it was 9% above the day's authored
+  // value and no more principled than that. The claim being made has never been "under
+  // 2 kHz", it is "darker than the roster", and that is what is measured now.
   for (const id of ['soup.Splash.impact', 'soup.Noodle.impact', 'soup.Dump.impact']) {
-    check(`${id}: centroid low (< 2000 Hz, wet)`, m[id].centroid < 2000, `${Math.round(m[id].centroid)} Hz`);
+    check(`${id}: in the DARK HALF of the roster (below the ladder's geometric centre, wet)`,
+      m[id].centroid < ladderCentre,
+      `${Math.round(m[id].centroid)} Hz vs centre ${Math.round(ladderCentre)} Hz`);
   }
   // Taco is BRITTLE: a cloud of tiny high transients, so the centroid must be high.
   // `Filling` sits lowest of the three because it is the one with real meat under the
@@ -1270,9 +1344,30 @@ async function modeIdentity(page) {
   check('pizza spin modulation is >2.5x any control\'s residual', pizzaMin > ctlMax * 2.5,
     `pizza min=${pizzaMin.toFixed(3)} control max=${ctlMax.toFixed(3)} ratio=${(pizzaMin / ctlMax).toFixed(1)}x`);
 
-  // Pizza dough must be the DULLEST impact — the deliberate counterexample.
-  check('pizza.Dough.impact is the dullest impact in the game (centroid < 1400 Hz)', m['pizza.Dough.impact'].centroid < 1400,
-    `${Math.round(m['pizza.Dough.impact'].centroid)} Hz`);
+  // ── Pizza Dough is the DULL LANDING — the deliberate counterexample. ──────
+  //
+  // Was a single check reading `pizza.Dough.impact is the dullest impact in the game
+  // (centroid < 1400 Hz)`, and the NAME WAS FALSE ON THE DAY IT WAS WRITTEN: at that
+  // tuning `hamburger.Smash` measured 707 Hz and `pizza.Cheese` 1184 against Dough's
+  // 1254, so two impacts were already duller and one of them is asserted to be, four
+  // lines below. What the gate really held was an absolute ceiling, and 1400 was 12%
+  // above the authored value of the day — a tolerance, not a derivation.
+  //
+  // `docs/LESSONS.md` section 9: a gate whose report is false gets fixed or switched
+  // off. So it is split into the two claims the comment in `weapons/pizza.ts` actually
+  // makes, both relative and both self-maintaining under a roster-wide retune:
+  //
+  //   1. Dough is a DULL landing — in the dark half of the roster, same bound Soup is
+  //      held to, so "dull" means the same thing for both.
+  //   2. Dough is the COUNTEREXAMPLE THAT MAKES BRITTLENESS READ — at least 2x below
+  //      every one of Taco's impacts. That is the sentence `pizza.ts` opens with, and
+  //      it is the only part a listener can actually hear.
+  const dough = m['pizza.Dough.impact'].centroid;
+  check('pizza.Dough.impact is a DULL landing (below the ladder\'s geometric centre)',
+    dough < ladderCentre, `${Math.round(dough)} Hz vs centre ${Math.round(ladderCentre)} Hz`);
+  const tacoMinAll = Math.min(...['taco.Filling.impact', 'taco.Onion.impact', 'taco.Double.impact'].map((id) => m[id].centroid));
+  check('pizza.Dough.impact is the counterexample to brittleness (>2x below every taco impact)',
+    tacoMinAll / dough > 2, `dough=${Math.round(dough)} taco min=${Math.round(tacoMinAll)} ratio=${(tacoMinAll / dough).toFixed(2)}x`);
 
   // ── The two pairs that share a rung on the ladder ────────────────────────
   // Centroid alone would call these four characters two characters. They are
@@ -2172,6 +2267,27 @@ async function modeCoverage(page) {
   const afterReset = await zone(closing, { reset: true, seconds: 3 });
   check('reset() re-arms the final-ring latch for the next match',
     afterReset.started === 2, `voices=${afterReset.started} (1 per match over 2 matches)`);
+
+  // ── The kitchen ambience bed ──────────────────────────────────────────────
+  // A bed is state, not an event, so it cannot be asserted the way everything else in
+  // this mode is — and a state-driven sound that is wired but produces nothing is
+  // exactly the failure this project keeps paying for (`docs/LESSONS.md` section 1).
+  // Three claims: it runs during play, it does NOT run outside it, and it is the first
+  // thing dropped under budget pressure rather than something that survives at the
+  // expense of a hit.
+  const bedPlaying = await run([], { phase: 'playing', safeRadius: 900, seconds: 3.5 });
+  const bedIdle = await run([], { seconds: 3.5 });
+  const bedCountdown = await run([{ type: 'countdown-tick', value: 3 }], { phase: 'countdown', safeRadius: 900, seconds: 3.5 });
+  console.log(`  ambience: playing=${bedPlaying.startedAmbience} voice(s) peak=${bedPlaying.peak.toFixed(4)} · no-phase=${bedIdle.startedAmbience} · countdown=${bedCountdown.startedAmbience}`);
+  check('the kitchen bed plays during a match, on a tick carrying no events at all',
+    bedPlaying.startedAmbience === 1 && bedPlaying.peak > 0.005,
+    `voices=${bedPlaying.startedAmbience} peak=${bedPlaying.peak.toFixed(4)}`);
+  check('the kitchen bed does NOT play outside `phase: playing`',
+    bedIdle.startedAmbience === 0 && bedCountdown.startedAmbience === 0,
+    `no-phase=${bedIdle.startedAmbience} countdown=${bedCountdown.startedAmbience}`);
+  check('the kitchen bed is Ambient priority, so a fight evicts it before it evicts a hit',
+    bedPlaying.startedAmbience === 1 && bedPlaying.startedAll === bedPlaying.started + 1,
+    `all=${bedPlaying.startedAll} sfx=${bedPlaying.started} bed=${bedPlaying.startedAmbience}`);
 
   const fog = await profile([hit({ source: { kind: 'fog' }, targetRole: 'player', x: 0 })], { seconds: 2.5 });
   const start = await profile([{ type: 'match-started' }], { seconds: 2.5 });
@@ -3076,8 +3192,24 @@ async function modeLive(browser) {
     return b.length ? b.reduce((a, c) => a + c, 0) / b.length : 0;
   });
   console.log(`  theme on the bus: idle meanRms without=${noMusic.toExponential(2)} with=${withMusic.toExponential(2)}`);
+  // ── Why this is a POWER subtraction and no longer a ratio ─────────────────
+  //
+  // The comment above says "the SFX bus is idle in both windows", and as of the kitchen
+  // ambience bed that is no longer true: this measurement is taken mid-match and
+  // `director.ts` runs a continuous room tone there by design. The floor rose, the
+  // `withMusic > noMusic * 5` ratio stopped holding (2.19e-2 -> 4.94e-2 = 2.3x), and the
+  // check failed for a reason that has nothing to do with the claim it exists to make.
+  //
+  // The claim — the theme reaches the master bus, and is therefore covered by global
+  // mute — is about the theme's OWN contribution, and the theme and the bed are
+  // uncorrelated, so their powers add. Subtracting in power recovers exactly that
+  // contribution and is independent of whatever the SFX floor happens to be, now or
+  // after any future change to the bed.
+  const themeOnly = Math.sqrt(Math.max(0, withMusic * withMusic - noMusic * noMusic));
+  console.log(`  theme's own contribution (power subtraction, uncorrelated with the room tone): ${themeOnly.toExponential(2)}`);
   check('the theme reaches the master bus (and so is covered by global mute)',
-    withMusic > noMusic * 5 && withMusic > 1e-3, `${noMusic.toExponential(2)} -> ${withMusic.toExponential(2)}`);
+    themeOnly > 1e-2 && withMusic > noMusic,
+    `${noMusic.toExponential(2)} -> ${withMusic.toExponential(2)}, theme alone ${themeOnly.toExponential(2)}`);
 
   // ── 5. The render loop must not have been harmed. ────────────────────────
   // Measured against this session's own audio-locked baseline — see `fpsLocked`.

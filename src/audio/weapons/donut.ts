@@ -43,6 +43,7 @@
 
 import {
   centsJitter,
+  glint,
   grainCloud,
   longest,
   modes,
@@ -71,25 +72,65 @@ function ring(s: SynthCtx, f0: number, dur: number, peak: number): number {
     wet: 0.34,
     modes: [
       { ratio: 1, gain: 1, decay: 1 },
-      { ratio: 2.06, gain: 0.72, decay: 0.82 },
-      { ratio: 3.18, gain: 0.46, decay: 0.6 },
-      { ratio: 4.34, gain: 0.26, decay: 0.42 },
+      // Upper-mode gains raised 0.72/0.46/0.26 -> 0.82/0.60/0.40 in the roster-wide
+      // top-end pass. This is the musical form of Donut's brightening and the reason it
+      // is not simply more sprinkles: a hoop's timbre IS its mode balance, so a thinner,
+      // harder ring is a different object rather than the same object with dust on it.
+      // The decays are untouched, because DECAY LENGTH is what separates this character
+      // from Lollipop and Water Bottle and is asserted directly.
+      { ratio: 2.06, gain: 0.82, decay: 0.82 },
+      { ratio: 3.18, gain: 0.6, decay: 0.6 },
+      { ratio: 4.34, gain: 0.4, decay: 0.42 },
+      // A FIFTH mode. Donut and Taco were the closest pair left after the roster-wide
+      // pass (1.041x against a 1.08x floor) and the two are separated by KIND — Taco is
+      // a noise cloud, Donut is modal — so the separation had to be bought with more
+      // MODE rather than with more noise, or the axis that tells them apart would have
+      // been spent buying the distance that hides them.
+      { ratio: 5.52, gain: 0.3, decay: 0.3 },
     ],
   });
 }
 
 /** SPRINKLES — tiny hard bright ticks scattered over the ring's decay. Dry, so they
- * stay separate from the ring rather than dissolving into its tail. */
+ * stay separate from the ring rather than dissolving into its tail. Band top raised
+ * 9 kHz -> 12 kHz in the roster-wide top-end pass; a sprinkle is a grain of sugar and
+ * has nothing in it below the top two octaves. */
 function sprinkles(s: SynthCtx, spread: number, level: number): number {
   return grainCloud(s, {
-    count: 6,
+    count: 7,
     spread,
     grainMs: [2, 5],
-    freq: [4200, 9000],
+    freq: [4200, 12000],
     q: 10,
     peak: level,
     decay: 0.3,
     wet: 0.12,
+  });
+}
+
+/**
+ * THE GLAZE — sugar crystal, and the one part of this character that is not modal.
+ *
+ * Donut and Sushi are the closest pair on the whole roster ladder (1.096x, against a
+ * 1.08x floor) and the roster-wide top-end pass had to separate them further rather
+ * than bringing them together, so the two got DIFFERENT top-end devices on purpose:
+ * Sushi's is a noise scatter of dry grains, Donut's is PITCHED. `glint()` was added to
+ * `synth.ts` for exactly this — hard crystalline matter is identified by discrete
+ * pitch, not by level in a band, and a level difference would not have held the two
+ * apart under a re-tune.
+ *
+ * It rises (`bend` above 1) where every other glint in the game falls. A sugar shell
+ * cracking off a hot glaze tightens; broken glass and plastic settle.
+ */
+function glaze(s: SynthCtx, spread: number, level: number): number {
+  return glint(s, {
+    count: 4,
+    spread,
+    freq: [5000, 12500],
+    peak: level,
+    pingMs: [5, 13],
+    bend: 1.08,
+    wet: 0.2,
   });
 }
 
@@ -121,7 +162,8 @@ export const donutWeaponSfx: CharacterWeaponSfxMap = {
       const tr = transient(c, { peak: 0.5, freq: 5400, snap: 3200, snapMs: 8, wet: 0.12 });
       // The ring itself: the longest pitched decay of any non-ultimate weapon.
       const hoop = ring(c, 2450 * j, 0.4, 0.56);
-      const dust = sprinkles(c, 0.22, 0.3);
+      const dust = sprinkles(c, 0.22, 0.9);
+      const sugar = glaze(c, 0.16, 0.74);
       // TWO ECHOES, detuned upward. The VFX draws a chain of fading ring echoes; this
       // is that chain. Each is quieter, shorter and slightly sharper, which is what a
       // hoop that is still bouncing actually does.
@@ -141,7 +183,7 @@ export const donutWeaponSfx: CharacterWeaponSfxMap = {
         drive: 3.2,
         wet: 0.12,
       });
-      return longest(tr, hoop, dust, 0.09 + e1, 0.175 + e2, body);
+      return longest(tr, hoop, dust, sugar, 0.09 + e1, 0.175 + e2, body);
     },
   },
 };

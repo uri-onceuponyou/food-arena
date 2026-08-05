@@ -36,7 +36,7 @@
  * measured as an unrelated 47.9 Hz artefact for exactly that reason.
  */
 
-import { centsJitter, longest, noiseBurst, tone, transient } from '../synth';
+import { centsJitter, grainCloud, longest, noiseBurst, spray, tone, transient } from '../synth';
 import type { CharacterWeaponSfxMap, WeaponSfxCtx } from './types';
 
 /**
@@ -113,8 +113,11 @@ export const pizzaWeaponSfx: CharacterWeaponSfxMap = {
       // A DULL transient: the tick corner is at 1.6 kHz and the snap is low, so raw
       // dough still has an onset without acquiring an edge it should not have. The
       // depth pass added this everywhere; here it had to be added without moving the
-      // weapon off its own acceptance bound (`--mode identity` requires this to stay
-      // the dullest impact in the game, under 1400 Hz).
+      // weapon off its own acceptance bound. That bound is now RELATIVE — `--mode
+      // identity` requires Dough to sit below the ladder's geometric centre and at least
+      // 2x below every Taco impact — because the old absolute (`< 1400 Hz`) carried a
+      // name that was false on the day it was written: `hamburger.Smash` and
+      // `pizza.Cheese` were both duller than Dough at that very tuning.
       const tr = transient(c, { peak: 0.34, freq: 1600, snap: 660, snapMs: 18, wet: 0.1 });
       const body = tone(c, {
         type: 'sine',
@@ -127,7 +130,22 @@ export const pizzaWeaponSfx: CharacterWeaponSfxMap = {
         detuneCents: 18,
         wet: 0.14,
       });
-      return longest(flop, tr, body);
+      // A FLOUR PUFF. Dough is the dull end of the roster and stays there, so its
+      // share of the roster-wide top-end pass is the softest form brightness can take:
+      // a slow-attack band with no discrete matter in it at all, so it reads as a
+      // cloud of flour leaving the surface rather than as anything cracking. No
+      // grains, no pings, no open highpass — every one of those would put Dough where
+      // Cheese and Tomato live.
+      const puff = noiseBurst(c, {
+        filter: 'bandpass',
+        freq: [2500, 1700],
+        q: 0.8,
+        peak: 0.028,
+        attack: 0.012,
+        duration: 0.11,
+        wet: 0.4,
+      });
+      return longest(flop, tr, body, puff);
     },
   },
 
@@ -173,7 +191,28 @@ export const pizzaWeaponSfx: CharacterWeaponSfxMap = {
         detuneCents: 16,
         wet: 0.14,
       });
-      return longest(slap, pulp, tr, body);
+      // ── THE SPLASH. This is the sound Uri asked for, by name. ─────────────
+      //
+      // *"I would expect a splash sound when I throw a tomato and it hits."* He was
+      // right and it was measurable: at the brightest instant of this exact hit the
+      // 2-6 kHz band sat 25 dB under the 20-500 Hz band and 6-16 kHz sat 32 dB under,
+      // for the whole life of the sound. Everything above is authored below ~2 kHz
+      // apart from a 13 ms snap, so the burst a bursting tomato throws off — the fine
+      // matter that leaves the surface faster than the pulp does — simply did not
+      // exist. A slap with no spray is a slap on a dry board.
+      //
+      // Deliberately the widest and wettest top layer any of Pizza's three weapons
+      // gets: Tomato is the only wet one in the file, Dough gets a flour puff and
+      // Cheese gets a sticky peel, so the three stay three sounds rather than one
+      // sound at three levels.
+      const burst = spray(c, {
+        peak: 0.15,
+        freq: [8200, 3000],
+        duration: 0.085,
+        drops: 6,
+        wet: 0.34,
+      });
+      return longest(slap, pulp, tr, body, burst);
     },
   },
 
@@ -211,7 +250,23 @@ export const pizzaWeaponSfx: CharacterWeaponSfxMap = {
         wet: 0.18,
       });
       const tr = transient(c, { peak: 0.26, freq: 1800, snap: 760, snapMs: 16, wet: 0.1 });
-      return longest(flap, slack, tr);
+      // A STICKY PEEL. Molten cheese coming off a surface is a few strands letting go
+      // one after another, not a burst — so this is a sparse grain cloud whose band
+      // walks DOWNWARD as the strands thin out and snap. Same primitive Burrito's
+      // ribbon uses, at a third the density and half the window, which is the
+      // difference between "unrolling" and "peeling".
+      const strands = grainCloud(c, {
+        count: 4,
+        spread: 0.13,
+        grainMs: [6, 16],
+        freq: [3200, 5200],
+        q: 3.5,
+        peak: 0.16,
+        decay: 0.35,
+        freqShift: [1, 0.62],
+        wet: 0.34,
+      });
+      return longest(flap, slack, tr, strands);
     },
   },
 };

@@ -68,7 +68,28 @@ function meat(s: SynthCtx, size: number, dur: number, peak: number): number {
     drive: 2.2,
     wet: 0.2,
   });
-  return longest(body, thud);
+  // GREASE. The one top-end device a damped character is allowed, and the only one
+  // that does not contradict the identity: a griddle hiss is CONTINUOUS matter, where
+  // a grain cloud or a ping is BRITTLE matter. Hamburger is the counterweight at the
+  // bottom of the ladder and must stay there, so this is the lowest, quietest and
+  // shortest of the eleven top layers — a band, not an open highpass, and it dies with
+  // the thud rather than hanging after it.
+  //
+  // It exists because the roster pass measured the mix and not the sound: the whole
+  // game fell at -5.57 dB/octave with 86% of its energy under 1 kHz, so even the
+  // DARKEST character has to put something above 2 kHz or the band is empty at every
+  // instant of every match. Hamburger's share of that is small on purpose.
+  const fat = noiseBurst(s, {
+    filter: 'bandpass',
+    freq: [(2400 - size * 400) * j, (1450 - size * 300) * j],
+    q: 0.8,
+    peak: peak * 0.056,
+    attack: 0.003,
+    duration: dur * 0.55,
+    drive: 1.4,
+    wet: 0.3,
+  });
+  return longest(body, thud, fat);
 }
 
 export const hamburgerWeaponSfx: CharacterWeaponSfxMap = {
@@ -201,7 +222,20 @@ export const hamburgerWeaponSfx: CharacterWeaponSfxMap = {
         detuneCents: 22,
         wet: 0.18,
       });
-      return longest(rustle, slack);
+      // A DRY leaf edge. Lettuce is the one place this character is allowed any
+      // brightness (the cast comment above says so), so the roster pass spends it
+      // here: a thin papery band above the rustle, still bandpassed rather than open,
+      // still under a fifth of the rustle's level.
+      const dry = noiseBurst(c, {
+        filter: 'bandpass',
+        freq: [3400, 1900],
+        q: 0.9,
+        peak: 0.042,
+        attack: 0.004,
+        duration: 0.1,
+        wet: 0.34,
+      });
+      return longest(rustle, slack, dry);
     },
   },
 

@@ -51,7 +51,7 @@
  * Pick an axis before you pick a filter frequency, and check `index.ts` first to see
  * which axes are already taken.
  *
- * ── THE LAYER CONTRACT: every hit owes four layers ──────────────────────────────
+ * ── THE LAYER CONTRACT: every hit owes five layers ──────────────────────────────
  *
  * Uri played the game and said the SFX were *"very shallow and similar"*. "Similar"
  * was the authoring gap above. "Shallow" was synthesis, and `--mode depth` now holds
@@ -66,6 +66,18 @@
  *   4. LOW END — the sub-300 Hz band must peak at >= 25% of the loudest band on
  *      anything doing 8 damage or more. Short is fine; absent is not. A hit with no
  *      low layer is inaudible as a hit on a phone speaker.
+ *
+ *   5. A TOP END — something above about 3 kHz, and it must be a KIND of brightness
+ *      rather than a level. Added when a mix measurement (`tools/tmp/audio_mix.mjs`)
+ *      showed that a whole real match fell at -5.57 dB/octave from 80 Hz to 8 kHz with
+ *      **86.2% of its energy below 1 kHz** and only 8 of 49 sixth-octave bands within
+ *      6 dB of the peak — every one of them between 71 and 141 Hz. Layers 1-4 are all
+ *      authored below ~2 kHz apart from a 7 ms tick, so eleven characters that differed
+ *      perfectly on the centroid ladder still shared one narrow region of the spectrum,
+ *      which is what "one tone, maybe two, monotonic" is when you measure it.
+ *      `./index.ts` lists what each character's top end IS: a grease sizzle, a splash,
+ *      foil crinkle, shell dust, pitched sugar. Do not add another spray — the point is
+ *      that eleven kinds of brightness are distinguishable and eleven levels are not.
  *
  * Plus the room, which you get for free: pass `wet` on any layer and it goes to the
  * shared reverb send. 0.05-0.12 for a transient, 0.12-0.25 for a body, 0.25-0.5 for

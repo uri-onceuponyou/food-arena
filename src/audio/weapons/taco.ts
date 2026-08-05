@@ -67,7 +67,10 @@ function shellShatter(s: SynthCtx, size: number, dry: number): number {
     count: Math.round(7 + size * 6),
     spread: 0.14 + size * 0.1,
     grainMs: [3, 9 - dry * 3],
-    freq: [2700 + dry * 900, 8000 + dry * 2200],
+    // Top of the band raised 8000+2200*dry -> 9200+2600*dry in the roster-wide
+    // top-end pass. A shell fragment is the hardest, driest, lightest matter in the
+    // roster and it had no business stopping an octave below foil.
+    freq: [2700 + dry * 900, 9200 + dry * 2600],
     q: 7,
     peak: 0.34 + size * 0.16,
     decay: 0.28,
@@ -91,7 +94,26 @@ function shellShatter(s: SynthCtx, size: number, dry: number): number {
           wet: 0.14,
         })
       : 0;
-  return longest(crack, snap, fragments, body);
+  // SHELL DUST — the matter too small to be a fragment.
+  //
+  // Taco's device is a dense cloud of DISCRETE transients, and the one thing that
+  // cannot express is the fine powder a corn shell throws off, which is continuous. So
+  // this is the character's share of the roster-wide top-end pass and it is deliberately
+  // the opposite kind of layer from everything else in the file: an open 24 dB/oct
+  // corner, 12 ms long, no grains. It sits ABOVE the fragments rather than among them,
+  // which is also what keeps Taco separated from Burrito's foil — foil is a cloud up
+  // there, this is a wash up there.
+  const dust = noiseBurst(s, {
+    filter: 'highpass',
+    poles: 24,
+    freq: [8000 + dry * 2000, 5200 + dry * 1200],
+    q: 0.7,
+    peak: 0.165 + size * 0.065,
+    attack: 0.0006,
+    duration: 0.014 + size * 0.012,
+    wet: 0.22,
+  });
+  return longest(crack, snap, fragments, body, dust);
 }
 
 export const tacoWeaponSfx: CharacterWeaponSfxMap = {

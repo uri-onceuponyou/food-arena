@@ -90,7 +90,29 @@ function blade(s: SynthCtx, from: number, to: number, dur: number, level: number
       wet: 0.22,
     },
   );
-  return longest(edge, dur * 0.16 + ring);
+  // A THIRD pass, narrower still, at 3.4x — the top of the edge.
+  //
+  // Sushi's share of the roster-wide top-end pass is deliberately TONAL rather than
+  // noisy, and this is why: `--mode identity` separates Sushi from Taco by spectral
+  // STRUCTURE (measured partials 2.7 against 1.7), not by brightness, because the two
+  // sit on the same rung. Giving Sushi its top octave as another noise scatter would
+  // have raised the centroid and spent the one axis that keeps the pair apart. A high-Q
+  // resonance up here is what a keen edge actually sounds like anyway — steel is the
+  // one material in the roster with real modes above 8 kHz.
+  const keen = noiseBurst(
+    { ...s, when: s.when + dur * 0.06 },
+    {
+      filter: 'bandpass',
+      freq: [from * 3.4 * j, to * 2.6 * j],
+      q: 16,
+      peak: level * 0.8,
+      attack: 0.0015,
+      duration: dur * 0.45,
+      curve: 'lin',
+      wet: 0.24,
+    },
+  );
+  return longest(edge, dur * 0.16 + ring, dur * 0.06 + keen);
 }
 
 /** THE GRAIN — rice. Tiny, dry, plural, and it BOUNCES: no resonance, no body, and
@@ -100,7 +122,12 @@ function rice(s: SynthCtx, count: number, spread: number, level: number): number
     count,
     spread,
     grainMs: [2, 5],
-    freq: [3800, 8200],
+    // Band top raised 8.2 -> 10.4 kHz in the roster-wide top-end pass. A dry grain of
+    // rice bouncing off a hard surface is one of the smallest, hardest events a kitchen
+    // produces; the old ceiling was set by what the rest of the game could reach, not by
+    // the material. Q stays at 6 (Taco's shards are 7-8) so these still read as bouncing
+    // rather than ringing.
+    freq: [4200, 12000],
     q: 6,
     peak: level,
     decay: 0.35,

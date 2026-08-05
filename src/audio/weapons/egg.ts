@@ -72,7 +72,26 @@ function crack(s: SynthCtx, level: number, bright: number): number {
     drive: 2.2,
     wet: 0.1,
   });
-  return longest(tr, split);
+  // SHELL AIR — the fracture's own top octave.
+  //
+  // A shell breaking is one of the few genuinely broadband events in the roster: the
+  // crack runs faster than anything else here and radiates right to the top of hearing.
+  // The transient and the split above both stop around 7 kHz because they are band
+  // objects, so this is the only layer in the file that is an open corner rather than a
+  // band — and it is 8 ms long, which is what stops an open highpass reading as tape
+  // hiss (the trap `synth.ts` -> `spray()` documents). 24 dB/oct because one biquad
+  // cannot place a band up here at all.
+  const air = noiseBurst(s, {
+    filter: 'highpass',
+    poles: 24,
+    freq: [(7000 + bright * 1800) * j, (4600 + bright * 1200) * j],
+    q: 0.7,
+    peak: level * 1.5,
+    attack: 0.0004,
+    duration: 0.024,
+    wet: 0.12,
+  });
+  return longest(tr, split, air);
 }
 
 /**
@@ -116,13 +135,17 @@ function spill(s: SynthCtx, size: number): number {
     duration: 0.2 + size * 0.14,
     wet: 0.36,
   });
+  // Shell fragments falling out with the yolk. The band was widened upward
+  // (3.2-7.2 kHz -> 3.6-9.4 kHz) in the roster-wide top-end pass: these are the driest,
+  // hardest pieces in a sound that is otherwise viscous, and confining them below
+  // 7 kHz was the reason Egg measured 1.8 kHz while sounding, in isolation, brittle.
   const bits = grainCloud(s, {
-    count: Math.round(4 + size * 4),
+    count: Math.round(5 + size * 5),
     spread: 0.12 + size * 0.06,
     grainMs: [3, 8],
-    freq: [3200, 7200],
+    freq: [3800, 10600],
     q: 7,
-    peak: 0.26 + size * 0.14,
+    peak: 0.5 + size * 0.3,
     decay: 0.3,
     wet: 0.28,
   });
@@ -207,6 +230,21 @@ export const eggWeaponSfx: CharacterWeaponSfxMap = {
       // A PECK: one tiny hard tap and a chirp, three times per cast. Deliberately
       // the smallest impact in the game — it fires every 500 ms and must not tire.
       const tap = transient(c, { peak: 0.4, freq: 5400, snap: 3200, snapMs: 6, wet: 0.1 });
+      // A CHIP of shell off the beak. The peck was the one Egg impact with no fracture
+      // in it at all — `crack()` is not called here — so the roster-wide top-end pass
+      // had to give this weapon its own, and a chick chipping its way out is exactly
+      // where the character's shell noise belongs. 5 ms, so three pecks per cast never
+      // accumulate into a hiss.
+      const chip = noiseBurst(c, {
+        filter: 'highpass',
+        poles: 24,
+        freq: [8200, 5600],
+        q: 0.7,
+        peak: 0.2,
+        attack: 0.0004,
+        duration: 0.005,
+        wet: 0.12,
+      });
       const beak = tone(c, {
         type: 'triangle',
         freq: [2100, 1250],
@@ -238,7 +276,7 @@ export const eggWeaponSfx: CharacterWeaponSfxMap = {
         drive: 2.2,
         wet: 0.1,
       });
-      return longest(tap, beak, 0.035 + chirp, body);
+      return longest(tap, chip, beak, 0.035 + chirp, body);
     },
   },
 

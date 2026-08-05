@@ -80,14 +80,23 @@ function ribbon(s: SynthCtx, spread: number, from: number, to: number, level: nu
   });
 }
 
-/** THE FOIL: brief, bright, hard-edged crinkle. Cool and metallic over the warm
- * tortilla, the audio counterpart of the VFX file's near-white opaque wrapper. */
+/**
+ * THE FOIL: brief, bright, hard-edged crinkle. Cool and metallic over the warm
+ * tortilla, the audio counterpart of the VFX file's near-white opaque wrapper.
+ *
+ * Band widened to 11 kHz and grain count raised 5 -> 7 in the roster-wide top-end pass.
+ * Foil crinkle is one of the few sounds in the real world whose energy genuinely peaks
+ * in the top octave, so this character's share of the pass costs nothing in identity —
+ * it is the layer already doing the job, finally authored at the level the physics
+ * implies. The CALLERS carry most of that change: this layer was being mixed at
+ * 0.13-0.24 under bodies peaking at 0.46.
+ */
 function foil(s: SynthCtx, spread: number, level: number): number {
   return grainCloud(s, {
-    count: 5,
+    count: 7,
     spread,
     grainMs: [2, 5],
-    freq: [5600, 9600],
+    freq: [5600, 11000],
     q: 9,
     peak: level,
     decay: 0.25,
@@ -134,7 +143,7 @@ export const burritoWeaponSfx: CharacterWeaponSfxMap = {
         wet: 0.24,
       });
       const strip = ribbon(c, 0.2, 1.3, 0.68, 0.3);
-      const wrap = foil(c, 0.14, 0.24);
+      const wrap = foil(c, 0.14, 0.46);
       const body = tone(c, {
         type: 'sine',
         freq: [190, 72],
@@ -171,7 +180,7 @@ export const burritoWeaponSfx: CharacterWeaponSfxMap = {
       // that tightens goes up and everything that lets go goes down, and this is the
       // only character that does both.
       const strip = ribbon(c, 0.26, 0.7, 1.5, 0.32);
-      const wrap = foil(c, 0.2, 0.22);
+      const wrap = foil(c, 0.2, 0.44);
       // The stun cue: a body that CLOSES rather than decays — a rising, narrowing
       // band that stops dead, which reads as being pinned rather than struck.
       const cinch = noiseBurst(c, {
@@ -222,6 +231,11 @@ export const burritoWeaponSfx: CharacterWeaponSfxMap = {
     impact(c: WeaponSfxCtx): number {
       const tr = transient(c, { peak: 0.36, freq: 4200, snap: 2200, snapMs: 7, wet: 0.1 });
       const strip = ribbon(c, 0.13, 1.2, 0.8, 0.24);
+      // Swarm was the ONE Burrito impact with no foil in it, which is a plain
+      // authoring gap rather than a decision: the toppings come off the same wrapped
+      // roll as everything else this character throws. Sparse and quiet, because four
+      // pellets land under one retrigger bucket and a dense crinkle x4 is a hiss.
+      const wrap = foil(c, 0.1, 0.3);
       const body = tone(c, {
         type: 'sine',
         freq: [250, 118],
@@ -231,7 +245,7 @@ export const burritoWeaponSfx: CharacterWeaponSfxMap = {
         drive: 2.4,
         wet: 0.12,
       });
-      return longest(tr, strip, body);
+      return longest(tr, strip, wrap, body);
     },
   },
 };

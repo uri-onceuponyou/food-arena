@@ -115,6 +115,76 @@ const FOG_MIN_INTERVAL_MS = 900;
  */
 const HEAL_MIN_INTERVAL_MS = 520;
 
+/**
+ * Level the kitchen bed is played at, on top of the level authored in `kitchenBed()`.
+ *
+ * Split from `sounds.ts` on purpose: the SHAPE of the bed belongs there and how loudly
+ * the game runs it belongs here, next to `place()` and the distance rules it has to sit
+ * under. Two numbers to turn, not a re-tune of four layers and an accent bank.
+ *
+ * ── Why there are two of them ──────────────────────────────────────────────────
+ *
+ * The bed has to satisfy two requirements that pull directly against each other, and a
+ * single level cannot:
+ *
+ *   * FILL THE SILENCE. 69.9% of the mean match is one unbroken silence before the
+ *     first combat sound. A bed quiet enough to be safe during a fight is a bed nobody
+ *     hears during the two thirds of the match that has no fight in it.
+ *   * DO NOT MASK. `tools/tmp/audio_mix.mjs --ambience` highpasses the render at 2 kHz
+ *     and compares each weapon impact against the bed IN THE SAME WINDOW. At the first
+ *     level tried the bed's own 2-16 kHz energy sat ABOVE the 10th-percentile impact's
+ *     — a background layer covering the foreground, in exactly the octaves the
+ *     roster-wide top-end pass had just been built to fill.
+ *
+ * So the level follows the match. Combat within the last `AMBIENCE_CALM_MS` and the bed
+ * plays at `FIGHT`; a quiet stretch and the next chunk comes up to `CALM`. It is a
+ * chunk-granular duck rather than a sidechain, which is the whole reason the bed is
+ * re-triggered in 2.7 s pieces: the level is chosen at `engine.play` time from state
+ * this class already has, with no envelope to automate, no handle to keep, and no
+ * change to `engine.ts` at all. The 0.7 s crossfade between chunks IS the ramp.
+ */
+const AMBIENCE_GAIN_FIGHT = 0.45;
+/**
+ * +10.5 dB over `FIGHT`. Both numbers are bounded by the masking measurement above
+ * rather than chosen by ear: `FIGHT` is the largest value at which 90% of weapon
+ * impacts still clear the bed by 6 dB above 2 kHz, and `CALM` is as far above it as the
+ * chunk-granular duck can carry without the calm level bleeding into the first exchange.
+ */
+const AMBIENCE_GAIN_CALM = 1.5;
+/**
+ * How long after a cast or a hit the match still counts as a fight.
+ *
+ * 1.6 s, and it is deliberately longer than the 1.2 s that would merely cover the gap
+ * between an attack and its impact: a duck that releases the instant a fight pauses for
+ * breath is a bed that pumps, and a pumping bed is more noticeable than a loud one.
+ */
+const AMBIENCE_CALM_MS = 1600;
+/**
+ * Separation below which the match counts as a fight even with nothing on the wire yet.
+ *
+ * The duck is chunk-granular, so it can only ever react one chunk late — and the chunk
+ * that matters most is the one covering the FIRST exchange, which by construction has no
+ * combat behind it to react to. Two fighters this close are about to be in one, and
+ * `MatchState` already carries both positions. Set to `DISTANCE_HALF_WU`, the range at
+ * which a sound is already half level, so "close enough to duck for" and "close enough
+ * to hear clearly" are the same number rather than two.
+ */
+const AMBIENCE_ENGAGE_WU = DISTANCE_HALF_WU;
+
+/**
+ * Pan of successive ambience chunks, as a golden-ratio walk.
+ *
+ * A bed pinned dead centre is a bed the ear stops hearing as a room — and a random pan
+ * would need an rng this class deliberately does not have (every sound gets its own
+ * from the engine; the director itself is pure dispatch). `0.618...` is the least
+ * rational number there is, so consecutive chunks never repeat a position and never
+ * fall into a pattern, from one integer counter and no state.
+ */
+const AMBIENCE_PAN_STRIDE = 0.6180339887;
+/** How far off centre a chunk may sit. Small: the kitchen surrounds you, it is not an
+ * object at a position, and a bed swinging hard left is a bed you notice. */
+const AMBIENCE_PAN_SPREAD = 0.42;
+
 export interface MatchAudioOptions {
   /** Which fighter is the local listener. Always `player` in the shipped game;
    * parameterised because a spectator or replay view would move it. */
@@ -150,6 +220,13 @@ export class MatchAudio {
   /** False when the `MatchState` handed in does not carry `status` at all — see
    * `openStatusWindow`. Nothing is voiced as a refusal while this is false. */
   private statusTrackable = false;
+  /** Match time at which the next ambience chunk is due. See `watchAmbience`. */
+  private nextAmbienceAt = -Infinity;
+  /** How many chunks this match has played — drives the pan walk, nothing else. */
+  private ambienceChunk = 0;
+  /** Match time of the last cast or hit. Decides which ambience level the next chunk
+   * comes up at; see `AMBIENCE_GAIN_FIGHT`. */
+  private lastCombatAt = -Infinity;
 
   constructor(
     private readonly engine: AudioEngine,
@@ -177,6 +254,12 @@ export class MatchAudio {
       // wired-but-produces-nothing failure this project keeps paying for
       // (`docs/LESSONS.md` §1). The cost of the change is one float compare per frame.
       this.watchZone(state);
+      // Same argument as `watchZone`, for the same reason it sits here: the kitchen is
+      // not an event either. It is a CONTINUOUS state of the match, and 95.3% of ticks
+      // carry no events at all, so anything driven off the event stream would be a bed
+      // that starts whenever the first shot happens to be fired — which is precisely
+      // the 6.55 s of silence this exists to fill.
+      this.watchAmbience(state);
       this.openStatusWindow(state);
       for (const ev of events) this.handleEvent(ev, state);
     } catch (err) {
@@ -212,6 +295,12 @@ export class MatchAudio {
     this.statusBefore = { player: { stun: NaN, slow: NaN }, enemy: { stun: NaN, slow: NaN } };
     this.statusWriterUnclaimed = { player: { stun: false, slow: false }, enemy: { stun: false, slow: false } };
     this.statusTrackable = false;
+    // Both matter for match two. `nextAmbienceAt` is an absolute match time and the
+    // clock restarts at zero, so leaving it would suppress the bed for as long as the
+    // previous match lasted — i.e. the whole of match two on a short one.
+    this.nextAmbienceAt = -Infinity;
+    this.ambienceChunk = 0;
+    this.lastCombatAt = -Infinity;
   }
 
   // ── The shrug-off discriminant ────────────────────────────────────────────
@@ -332,6 +421,60 @@ export class MatchAudio {
     this.engine.play(S.ringFloor(), { priority: Priority.Critical });
   }
 
+  /**
+   * THE KITCHEN BED — re-triggered, not looped, and that is the design.
+   *
+   * ## The measurement this answers
+   *
+   * `tools/tmp/audio_mix.mjs --shape`, 121 matchups of the real sim: mean play length
+   * 9.60 s, mean gap from the start whistle to the first combat sound **6.55 s — 69.9%
+   * of the match, in one unbroken silence**, duty cycle 21.9%. `shell.ts` fades the
+   * music out for the whole match, so that silence is total. A brawler is not silent
+   * for two thirds of its running time, and the fix is a room.
+   *
+   * ## Why a chunk every 2 s and not one long voice
+   *
+   * A single voice spanning the match would have to be started on an event, cancelled
+   * on another, and would sit permanently in a 20-voice budget it can never be evicted
+   * from without a click. Re-triggering a 2.7 s chunk every 2.0 s instead means:
+   *
+   *   * it costs the SAME machinery every other sound uses — `engine.play`, the voice
+   *     budget, `Priority.Ambient`, the retrigger table — with no special case anywhere;
+   *   * under budget pressure (a big fight) the bed is the FIRST thing stolen, which is
+   *     exactly the priority a bed should have, and it returns on the next chunk;
+   *   * it renders identically offline, so the mix probe measures the shipped thing;
+   *   * and each chunk draws a fresh accent and a fresh band, so nothing repeats. A
+   *     literal loop is the one thing a procedural bed must not be, because the ear
+   *     finds a loop point in about fifteen seconds and never un-hears it.
+   *
+   * The 0.7 s overlap is the crossfade: `kitchenBed()`'s hold is set so its release
+   * begins exactly as the next chunk's attack does.
+   *
+   * ## Where it starts and stops
+   *
+   * `phase === 'playing'` only. The countdown has its own three beats and a whistle and
+   * does not want a room fading up underneath it, and once the match is over the result
+   * sting should land in silence. Both ends therefore need no event and no wiring
+   * outside this file — `match.ts` and `shell.ts` are untouched.
+   */
+  private watchAmbience(state: MatchState): void {
+    if (state.phase !== 'playing') return;
+    if (state.elapsed < this.nextAmbienceAt) return;
+    // Absolute, not incremental: on the first playing tick `nextAmbienceAt` is
+    // -Infinity, so the chunk fires immediately rather than 2 s into the fight.
+    this.nextAmbienceAt = state.elapsed + S.AMBIENCE_PERIOD_S * 1000;
+    const walk = (this.ambienceChunk * AMBIENCE_PAN_STRIDE) % 1;
+    this.ambienceChunk++;
+    const gap = Math.hypot(state.player.x - state.enemy.x, state.player.y - state.enemy.y);
+    const fighting = state.elapsed - this.lastCombatAt < AMBIENCE_CALM_MS || gap < AMBIENCE_ENGAGE_WU;
+    this.engine.play(S.kitchenBed(), {
+      gain: fighting ? AMBIENCE_GAIN_FIGHT : AMBIENCE_GAIN_CALM,
+      pan: (walk * 2 - 1) * AMBIENCE_PAN_SPREAD,
+      priority: Priority.Ambient,
+      key: 'ambience',
+    });
+  }
+
   // ── Dispatch ──────────────────────────────────────────────────────────────
 
   private handleEvent(ev: GameEvent, state: MatchState): void {
@@ -367,10 +510,15 @@ export class MatchAudio {
       }
 
       case 'weapon-fired':
+        // Marked on the CAST as well as the hit, deliberately: a projectile takes up to
+        // several hundred ms to arrive, and a bed that only ducks once something lands
+        // is a bed sitting at full level underneath the shot that caused it.
+        this.lastCombatAt = state.elapsed;
         this.playCast(ev.fighterRole, ev.weaponKey, state);
         break;
 
       case 'hit-landed':
+        this.lastCombatAt = state.elapsed;
         this.playHit(ev, state);
         break;
 

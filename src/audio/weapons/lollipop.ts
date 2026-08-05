@@ -89,13 +89,23 @@ function candy(s: SynthCtx, f0: number, dur: number, peak: number): number {
   return longest(a, b);
 }
 
-/** SUGAR — a shower of tiny hard bright grains. The stripes coming off. */
+/**
+ * SUGAR — a shower of tiny hard bright grains. The stripes coming off.
+ *
+ * Band top raised 10 -> 14 kHz in the roster-wide top-end pass. Lollipop owns the top
+ * of the ladder and has to KEEP owning it: eleven characters were all brightened at
+ * once, so the character at the brightest end has to move furthest or the ladder
+ * compresses from above — which is the one failure mode of a roster-wide pass that a
+ * per-character pass cannot have. 14 kHz is the practical ceiling; above it the
+ * difference is inaudible on the phone speakers this project targets and the energy is
+ * simply thrown away.
+ */
 function sugar(s: SynthCtx, count: number, spread: number, level: number): number {
   return grainCloud(s, {
     count,
     spread,
     grainMs: [2, 5],
-    freq: [5000, 10000],
+    freq: [5600, 14000],
     q: 11,
     peak: level,
     decay: 0.3,
@@ -128,8 +138,13 @@ export const lollipopWeaponSfx: CharacterWeaponSfxMap = {
       const j = centsJitter(c.rng, 45);
       // The hardest, brightest transient in the roster. Glass on impact is all edge.
       const tr = transient(c, { peak: 0.66, freq: 6400, snap: 4200, snapMs: 6, wet: 0.14 });
-      const glass = candy(c, 4400 * j, 0.34, 0.56);
-      const shards = sugar(c, 9, 0.2, 0.42);
+      // f0 raised 4400 -> 5100 Hz in the roster-wide top-end pass. Lollipop owns the top
+      // of the ladder and every character below it moved up, so this one had to move
+      // furthest or the ladder compresses from above. Raising the modal FUNDAMENTAL is
+      // the honest way to do that — it is harder, thinner candy, and the mode ratios,
+      // decays and ring modulation that make it candy at all are untouched.
+      const glass = candy(c, 5400 * j, 0.34, 0.56);
+      const shards = sugar(c, 9, 0.2, 0.8);
       // A body small enough not to move the character down the ladder, and saturated
       // enough that 11 damage still lands. This is the tightest constraint in the
       // file and the reason `castGiantSlam()` carrying the weight matters.
@@ -150,7 +165,22 @@ export const lollipopWeaponSfx: CharacterWeaponSfxMap = {
         drive: 3,
         wet: 0.12,
       });
-      return longest(tr, glass, shards, body);
+      // A short SHIVER of air, the small version of what `Giant` already has. Candy
+      // glass shattering throws a cloud of dust too fine to be a grain, and Smash was
+      // the only one of the two weapons without it. Short and quiet: this must not
+      // lengthen the sound, because `--mode identity` asserts Donut rings LONGER than
+      // Lollipop and that ordering is a claim about these two characters, not a
+      // threshold that can be nudged.
+      const shiver = noiseBurst(c, {
+        filter: 'bandpass',
+        freq: [7000, 12000],
+        q: 1.2,
+        peak: 0.26,
+        attack: 0.025,
+        duration: 0.16,
+        wet: 0.5,
+      });
+      return longest(tr, glass, shards, shiver, body);
     },
   },
 
@@ -164,8 +194,8 @@ export const lollipopWeaponSfx: CharacterWeaponSfxMap = {
       // still arriving after the hit has landed, which is the right shape for an
       // ability whose whole design problem is that its source is off screen.
       const tr = transient(c, { peak: 0.72, freq: 5800, snap: 3600, snapMs: 9, wet: 0.16 });
-      const glass = candy(c, 3700 * j, 0.5, 0.64);
-      const shards = sugar(c, 12, 0.36, 0.46);
+      const glass = candy(c, 4550 * j, 0.5, 0.64);
+      const shards = sugar(c, 12, 0.36, 0.84);
       const shimmer = noiseBurst(c, {
         filter: 'bandpass',
         freq: [6000, 9500],

@@ -547,6 +547,16 @@ export interface NoiseOpts extends EnvOpts {
    * needs.
    */
   drive?: number;
+  /**
+   * Read the shared noise bed as a LOOP, so this layer can outlast the bed itself.
+   *
+   * The bed is 2 seconds (`noiseBuffer`) and nothing in the game needed more until the
+   * kitchen ambience arrived, which runs 2.7 s per chunk. Opt-in rather than always-on
+   * because a loop point in white noise is a one-sample discontinuity: inaudible under
+   * a filter and a slow envelope, which is what the bed has, and not worth introducing
+   * to a 20 ms transient that never needed it.
+   */
+  loop?: boolean;
 }
 
 /**
@@ -556,10 +566,28 @@ export interface NoiseOpts extends EnvOpts {
 export function noiseBurst(s: SynthCtx, o: NoiseOpts): number {
   const { ctx, dest, when } = s;
   const src = ctx.createBufferSource();
-  src.buffer = noiseBuffer(ctx);
+  const bed = noiseBuffer(ctx);
+  src.buffer = bed;
   src.playbackRate.value = o.rate ?? 1;
+  if (o.loop) {
+    src.loop = true;
+    src.loopStart = 0;
+    src.loopEnd = bed.duration;
+  }
   // Random read offset into the shared bed — different grain per shot, zero cost.
-  const offset = rand(s.rng, 0, 1.5);
+  //
+  // CLAMPED to what is left of the bed, which is a bug fix rather than a refinement.
+  // The offset was drawn from [0, 1.5) against a 2.0 s buffer with no loop, so ANY
+  // layer longer than ~0.5 s ran off the end of the bed and went silent early, at
+  // random, depending on the draw. Measured against the shipped catalogue that hits
+  // Soup's 0.75 s steam tail on ~18% of draws (losing up to 0.27 s of it), Lollipop's
+  // 0.58 s shimmer, and `ringFloor`'s 0.66 s settle — i.e. exactly the long, quiet,
+  // atmospheric tails whose absence is hardest to notice and whose whole job is to be
+  // the last thing you hear. A sound that is sometimes shorter than it declares is
+  // also the one thing the catalogue's declared-duration assertion cannot catch,
+  // because it fires on the mean of six seeds.
+  const room = Math.max(0, bed.duration - (o.duration + 0.02));
+  const offset = o.loop ? rand(s.rng, 0, bed.duration) : rand(s.rng, 0, Math.min(1.5, room));
 
   const env = envelope(ctx, when, o);
   // The tremolo (if any) sits IN SERIES before the envelope, multiplying it — see
@@ -975,6 +1003,77 @@ export function droplets(
         freq: [f0, f0 * rise],
         peak: o.peak * rand(s.rng, 0.5, 1),
         attack: 0.002,
+        duration: dur,
+        wet: o.wet,
+      },
+    );
+  }
+  return last;
+}
+
+export interface GlintOpts {
+  /** How many pings. 2-4 is a sparkle; past ~8 it becomes a chime and stops reading
+   * as debris. */
+  count: number;
+  /** Window the pings are scattered across. */
+  spread: number;
+  /** The band pings are drawn from, log-uniformly. 4-14 kHz is the useful range —
+   * below ~3 kHz a short sine reads as a blip in the hit's own band, not as air. */
+  freq: readonly [number, number];
+  peak: number;
+  /** Each ping's length, ms. 6-22; under ~4 ms a sine has no pitch left to hear. */
+  pingMs?: readonly [number, number];
+  /** Ratio the pitch travels across the ping's life. `1` holds, `<1` falls (glass
+   * cooling, a shard settling), `>1` rises. Default 0.92 — a barely-there fall, which
+   * is what stops a bank of these sounding like a synthesiser. */
+  bend?: number;
+  wet?: number;
+}
+
+/**
+ * SPARSE HIGH PITCHED PINGS — sparkle, sugar, grains of rice, splinters of candy.
+ *
+ * The third top-end device in this file, and it exists because the other two are both
+ * NOISE. `spray()` is a mist (broadband, continuous); `grainCloud()` is filtered noise
+ * grains (broadband, discrete). Neither can be *pitched*, and pitch is exactly what the
+ * ear uses to tell hard crystalline matter — candy, sugar, glass, a dry grain of rice —
+ * from wet matter and from paper. Two characters ended up needing the same 6-10 kHz
+ * region for opposite physical reasons, and a level difference in one band does not
+ * separate them; a difference in spectral STRUCTURE does. That is the same argument
+ * `weapons/index.ts` makes for Taco vs Sushi one octave lower, applied to the octaves
+ * this pillar had not reached at all.
+ *
+ * Frequencies are drawn LOG-uniformly and multiplied by an irrational stride, so a
+ * cluster never lands on a harmonic series — a harmonic cluster up here reads as a bell,
+ * which is a manufactured object, and nothing in this game is one.
+ *
+ * Deliberately quiet by convention: a ping at 9 kHz costs almost nothing in loudness
+ * (the mix's 6-16 kHz band sits ~32 dB under its 20-500 Hz band) and is audible far out
+ * of proportion to its level, because it has no competition up there.
+ */
+export function glint(s: SynthCtx, o: GlintOpts): number {
+  const [pMin, pMax] = o.pingMs ?? [7, 18];
+  const bend = o.bend ?? 0.92;
+  const lo = Math.log2(o.freq[0]);
+  const hi = Math.log2(o.freq[1]);
+  let last = 0;
+  for (let i = 0; i < o.count; i++) {
+    // Front-loaded, like every scatter in this file: matter comes off an impact fast
+    // and then trails.
+    const t = Math.pow(s.rng(), 1.6) * o.spread;
+    // The irrational stride. 0.6180339887 is 1/phi, the least-well-approximated
+    // number by rationals there is, so successive pings are as far from any simple
+    // ratio as a single constant can put them.
+    const f = Math.pow(2, lo + ((s.rng() + i * 0.6180339887) % 1) * (hi - lo));
+    const dur = rand(s.rng, pMin, pMax) / 1000;
+    last = Math.max(last, t + dur);
+    tone(
+      { ...s, when: s.when + t },
+      {
+        type: 'sine',
+        freq: [f, f * bend],
+        peak: o.peak * rand(s.rng, 0.55, 1),
+        attack: 0.0006,
         duration: dur,
         wet: o.wet,
       },

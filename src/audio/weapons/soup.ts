@@ -10,12 +10,18 @@
  *
  * 1. **A low spectral centre.** Every splash here is lowpassed with the cutoff
  *    falling through the sound, so the energy collapses downward the way a mass of
- *    liquid does. Measured (mean of 6 renders, energy-weighted spectral centroid):
- *    Soup's three impacts land at **1345 / 1741 / 1919 Hz**, Taco's at
- *    **2478 / 2824 / 5114 Hz** — two ranges that do not overlap at all, and a 3.8x
- *    separation between the wettest and driest weapon in the two sets. If those ever
+ *    liquid does. Measured (mean of 6 renders, energy-weighted spectral centroid) after
+ *    the roster-wide top-end pass: Soup's three impacts land at **1813 / 2664 / 2765 Hz**,
+ *    Taco's at **3580 / 4124 / 4749 Hz** — two ranges that do not overlap at all, and a
+ *    2.62x separation between the wettest and driest weapon in the two sets. If those ever
  *    converge, the roster has stopped having voices, and
  *    `tools/audio-probe.mjs --mode identity` fails the moment they do.
+ *
+ *    "Low" is now measured RELATIVE to the roster (below the ladder's geometric centre,
+ *    2996 Hz) rather than against a fixed 2000 Hz. The old absolute was set when the
+ *    whole game fell at -5.57 dB/octave with 86% of its energy under 1 kHz, and it
+ *    described the tuning of that day rather than the claim — which has always been that
+ *    Soup is darker than the others, not that it is under 2 kHz.
  *
  * 2. **Upward-chirping droplets** (`droplets()` in `synth.ts`). A sine sweeping UP
  *    while it decays is the canonical drip; sweeping DOWN is a thump. Nothing else in
@@ -50,7 +56,17 @@ import {
 } from '../synth';
 import type { CharacterWeaponSfxMap, WeaponSfxCtx } from './types';
 
-/** The steam tail. Long, quiet, high — heat, not hiss. */
+/**
+ * The steam tail. Long, quiet, high — heat, not hiss.
+ *
+ * Level was raised roughly 1.8x in the roster-wide top-end pass and the band widened
+ * upward (2.6-4.4 kHz -> 2.8-5.6 kHz). The original numbers were set when this was the
+ * ONLY thing Soup put above 2 kHz and the concern was Soup measuring as the brightest
+ * character; that concern was real (see below) but it was answered by the BAND, not by
+ * the level, and the level had been left at a value that a mix measurement later showed
+ * was inaudible in context — 86% of the game's energy sat under 1 kHz and this layer
+ * peaked at 0.035.
+ */
 function steam(s: SynthCtx, level: number, duration: number): number {
   return noiseBurst(s, {
     // BANDPASS, not highpass. A highpass hiss runs all the way to Nyquist, and
@@ -58,7 +74,7 @@ function steam(s: SynthCtx, level: number, duration: number): number {
     // spectral centroid to 6-7 kHz — i.e. the wettest weapon in the game measured
     // as the brightest. Steam is a band, not everything above a corner.
     filter: 'bandpass',
-    freq: [2600, 4400],
+    freq: [2800, 5600],
     q: 0.85,
     peak: level,
     // A slow attack is what stops this reading as a transient. Steam rises.
@@ -68,6 +84,23 @@ function steam(s: SynthCtx, level: number, duration: number): number {
     // hang in the room after the splash has gone.
     wet: 0.55,
   });
+}
+
+/**
+ * FINE SPRAY — the small droplets, an octave and a half above the fat ones.
+ *
+ * Soup's brightness is deliberately made of MORE OF SOUP'S OWN DEVICE rather than of
+ * hiss. `droplets()` (an upward-chirping sine) is the one gesture nothing else in the
+ * roster uses, and the physical fact the coarse drips already model — a mass of liquid
+ * hitting a surface throws matter off at every size at once — says the fine ones should
+ * be there too, faster and higher. Authoring the top end as extra hiss instead would
+ * have made Soup sound like Water Bottle with the lid on.
+ *
+ * Shorter rise than the coarse drips (1.9x against 2.6x) because a small droplet's
+ * whole life is shorter, and quieter, because there is less water in it.
+ */
+function mist(s: SynthCtx, count: number, spread: number, peak: number): number {
+  return droplets(s, { count, spread, freq: [1500, 3100], rise: 1.9, peak, wet: 0.42 });
 }
 
 /**
@@ -153,8 +186,9 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
     impact(c: WeaponSfxCtx): number {
       const body = splashBody(c, 0.24, 0.2, 0.44);
       const drips = droplets(c, { count: 4, spread: 0.16, freq: [480, 900], peak: 0.14, wet: 0.3 });
-      const heat = steam(c, 0.035, 0.34);
-      return longest(body, drips, heat);
+      const fine = mist(c, 7, 0.11, 0.2);
+      const heat = steam(c, 0.11, 0.34);
+      return longest(body, drips, fine, heat);
     },
   },
 
@@ -199,8 +233,9 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
       });
       const body = splashBody(c, 0.35, 0.26, 0.44);
       const drips = droplets(c, { count: 3, spread: 0.2, freq: [440, 820], peak: 0.12, wet: 0.3 });
-      const heat = steam(c, 0.04, 0.42);
-      return longest(slap, body, drips, heat);
+      const fine = mist(c, 8, 0.14, 0.2);
+      const heat = steam(c, 0.12, 0.42);
+      return longest(slap, body, drips, fine, heat);
     },
   },
 
@@ -255,8 +290,15 @@ export const soupWeaponSfx: CharacterWeaponSfxMap = {
       // A few bits of solid — the noodles and vegetables in the broth. Kept sparse
       // and low so this never crosses into Taco's brittle territory.
       const bits = grainCloud(c, { count: 5, spread: 0.26, freq: [600, 1500], peak: 0.1, q: 4, wet: 0.3 });
-      const heat = steam(c, 0.075, 0.75);
-      return longest(body, drips, bits, heat);
+      // Dump keeps the SMALLEST share of the top-end pass of Soup's three weapons, and
+      // that is deliberate rather than an oversight: it is the wettest sound in the
+      // game and the far end of the roster's "wettest vs driest" separation, which is
+      // asserted at >2.5x against Taco's Onion. Brightening the heaviest splash as hard
+      // as the light ones would have spent that separation on a hit that is already
+      // unmistakable.
+      const fine = mist(c, 7, 0.22, 0.14);
+      const heat = steam(c, 0.15, 0.75);
+      return longest(body, drips, bits, fine, heat);
     },
   },
 };

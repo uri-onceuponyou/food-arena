@@ -35,7 +35,7 @@
  * long), `'Ketchup'` (5 dmg, mid, slow), `'Slash'` (11 dmg, melee).
  */
 
-import { centsJitter, longest, noiseBurst, tone, transient, type SynthCtx } from '../synth';
+import { centsJitter, grainCloud, longest, noiseBurst, tone, transient, type SynthCtx } from '../synth';
 import type { CharacterWeaponSfxMap, WeaponSfxCtx } from './types';
 
 /**
@@ -124,7 +124,26 @@ function condimentSplat(s: SynthCtx, size: number, bright: number): number {
     detuneCents: 15,
     wet: 0.14,
   });
-  return longest(tr, goo, body);
+  // THE SQUIRT — the fine jet that leaves a condiment bottle ahead of the slug.
+  //
+  // Hotdog's device is the SQUEEZE, and until this pass the squeeze existed only in the
+  // cast (a non-monotonic pitch contour) while the landing was pure low-mid goo. A
+  // squeezed jet atomises: the thin stuff arrives first, high and short, and the fat
+  // stuff follows. That gives the impact the same physical story the cast already tells
+  // and puts Hotdog's share of the roster's top three octaves somewhere it belongs.
+  //
+  // `bright` is the mustard/ketchup axis and it drives the BAND, not just the level:
+  // mustard is thin and sprays, ketchup is thick and barely does.
+  const jet = noiseBurst(s, {
+    filter: 'bandpass',
+    freq: [(4200 + bright * 2200) * j, (2100 + bright * 900) * j],
+    q: 0.75,
+    peak: 0.23 + bright * 0.06,
+    attack: 0.0015,
+    duration: 0.05 + bright * 0.03,
+    wet: 0.34,
+  });
+  return longest(tr, goo, body, jet);
 }
 
 export const hotdogWeaponSfx: CharacterWeaponSfxMap = {
@@ -216,7 +235,22 @@ export const hotdogWeaponSfx: CharacterWeaponSfxMap = {
         detuneCents: 17,
         wet: 0.14,
       });
-      return longest(a, GAP + b, wood, body);
+      // CRUMBS. A bun clapping shut throws off dry crumb, and dry crumb is discrete
+      // matter — so this is grains rather than the jet the two condiments get, which
+      // keeps the melee weapon audibly a different event from the two ranged ones
+      // inside one character's voice. Sparse and short: bread is still a soft absorber
+      // and this must not turn the clap brittle.
+      const crumbs = grainCloud(c, {
+        count: 5,
+        spread: 0.075,
+        grainMs: [3, 9],
+        freq: [3000, 6400],
+        q: 4,
+        peak: 0.38,
+        decay: 0.3,
+        wet: 0.3,
+      });
+      return longest(a, GAP + b, wood, body, crumbs);
     },
   },
 };

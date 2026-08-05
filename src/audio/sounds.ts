@@ -64,6 +64,7 @@
 import {
   centsJitter,
   droplets,
+  glint,
   grainCloud,
   longest,
   modes,
@@ -73,6 +74,7 @@ import {
   tone,
   transient,
   type SoundFn,
+  type SynthCtx,
 } from './synth';
 
 /** Map a weapon's damage onto 0..1. The roster spans 2 (Rice Spray) to 18 (Mega
@@ -416,16 +418,51 @@ export function hurt(health01: number): SoundFn {
     // passed or failed at random on a different seed, which is worse than failing. A fixed
     // tick guarantees the band on every draw; the grains ride on top and carry the
     // variation. Randomise the CHARACTER of a layer, never whether it exists.
-    const edge = transient(s, { peak: 0.16, freq: 3600, wet: 0.16 });
+    const edge = transient(s, { peak: 0.2, freq: 3600, wet: 0.16 });
     const scuff = grainCloud(s, {
-      count: 3,
+      count: 4,
       spread: 0.03,
       grainMs: [3, 8],
-      freq: [rand(s.rng, 2700, 3400), rand(s.rng, 5200, 7000)],
+      freq: [rand(s.rng, 2700, 3400), rand(s.rng, 6000, 9000)],
       q: 4,
-      peak: 0.11,
+      peak: 0.24,
       decay: 0.3,
       wet: 0.2,
+    });
+    // ── THE CONTACT SPRAY, and why it is here rather than on a weapon ─────────
+    //
+    // This is the single most consequential change in the whole roster top-end pass,
+    // and it was found by measurement rather than by ear. `tools/tmp/audio_mix.mjs
+    // --tilt` drops one director key at a time from a real match and re-fits the
+    // long-term spectrum. Of the sixteen keys a pizza-vs-taco match uses:
+    //
+    //   drop `hurt`                   tilt -5.67 -> -5.06 dB/oct   (+0.61)
+    //   drop ALL FIFTEEN OTHER KEYS   about +0.90 between them
+    //
+    // `hurt` alone was holding down more of the game's spectrum than every weapon
+    // impact, every cast, the hazard, the shrug-off and the whole match-flow fanfare
+    // COMBINED. That follows from what it is: eight voices a match, tied for the
+    // loudest recurring key, centre-panned at full level while the weapon that caused
+    // it is distance-attenuated, and — before this — the lowest spectral centroid of
+    // any key in the game at 1366 Hz. Brightening eleven characters and leaving this
+    // alone would have been a roster pass the player never hears, because this sound is
+    // mixed on top of every one of them.
+    //
+    // Physically it is also the right place: `hurt` is the sound of SOMETHING HITTING
+    // YOU, and the part of a hit that reaches the victim first is the fine matter that
+    // leaves the point of contact. The grunt below is still the identity — this rides
+    // on it, at a fifth of its level.
+    //
+    // The LEVEL of the whole sound is deliberately still unchanged. Whether `hurt`
+    // should sit under the weapon that caused it is a mix decision and belongs to Uri
+    // (`docs/DECISIONS-FOR-URI.md`), and answering it by quietly making this layer loud
+    // would be answering it without asking.
+    const contact = spray(s, {
+      peak: 0.13,
+      freq: [rand(s.rng, 7600, 9400), rand(s.rng, 2800, 3600)],
+      duration: rand(s.rng, 0.05, 0.08),
+      drops: 5,
+      wet: 0.26,
     });
     const sub = critical
       ? tone(s, {
@@ -438,7 +475,7 @@ export function hurt(health01: number): SoundFn {
           wet: 0.16,
         })
       : 0;
-    return longest(grunt, dull, edge, scuff, sub);
+    return longest(grunt, dull, edge, scuff, contact, sub);
   };
 }
 
@@ -643,6 +680,186 @@ export function fogTick(): SoundFn {
       wet: 0.55,
     });
     return longest(rumble, wind);
+  };
+}
+
+/** How long one ambience chunk runs. See `kitchenBed`. */
+export const AMBIENCE_CHUNK_S = 2.1;
+/**
+ * How often `director.ts` re-triggers it — chunk minus the crossfade.
+ *
+ * 1.5 s rather than the 2.0 s first tried, and the reason is the DUCK rather than the
+ * sound: the level of a chunk is chosen when it is scheduled, so the period IS the
+ * duck's response time. At 2.0 s a chunk that came up at the calm level a moment before
+ * the first shot stayed there for 2.7 s of the fight, and the masking measurement
+ * showed it: the 10th-percentile impact fell 1.9 dB BELOW the bed above 2 kHz. Six
+ * extra voices per match is the price of a duck that arrives.
+ */
+export const AMBIENCE_PERIOD_S = 1.5;
+/** Fade-in of one chunk. The release is derived from it so the two always meet. */
+const AMBIENCE_ATTACK_S = 0.55;
+
+/**
+ * THE KITCHEN — a procedural ambience bed, and the answer to the other half of "flat".
+ *
+ * ## Why this exists, measured rather than argued
+ *
+ * `tools/tmp/audio_mix.mjs --shape` ran the real `sim.ts` over all 121 matchups and
+ * measured the SILENCE:
+ *
+ *   | | |
+ *   |---|---|
+ *   | mean play length | **9.60 s** |
+ *   | mean gap from the start whistle to the FIRST combat sound | **6.55 s** |
+ *   | that gap as a fraction of the match | **69.9%** |
+ *   | duty cycle (any voice inside a 300 ms window) | **21.9%** |
+ *
+ * Seven tenths of every match, in one unbroken silence, with `shell.ts` fading the
+ * music out for the duration and no ambience of any kind. Uri's *"flat, one tone,
+ * maybe two"* is partly a spectrum problem and partly this: the one tone is heard
+ * against NOTHING, so there is no context to hear it against, no sense of a place, and
+ * nothing at all happening for the two thirds of the match spent closing distance.
+ *
+ * ## Why it is built the way it is
+ *
+ * Procedural, like everything else here except the theme — a loop of recorded kitchen
+ * would be an asset, a download, and a repeat the ear locates within about fifteen
+ * seconds. Four layers, and the balance between them is the whole design:
+ *
+ *  1. **The extractor** — a quiet low drone. Kept DELIBERATELY SMALL. 20% of the mix's
+ *     energy already sits in 63-125 Hz, an octave a phone speaker cannot reproduce at
+ *     all, and a bed is the last thing that should add to it.
+ *  2. **The fryer** — a wide band of noise, slowly breathing. This is the layer that
+ *     says "kitchen" and it is the reason a kitchen was the right choice of room for a
+ *     game that needs its top three octaves occupied: frying is genuinely broadband.
+ *  3. **Air** — a 24 dB/oct corner above 6 kHz, very quiet. The top octave, present
+ *     continuously rather than only during the 21.9% of the match that has combat in it.
+ *  4. **One accent per chunk** — a lid, a pan, a knife on a board, a burst of steam.
+ *     Discrete events are what stop a bed reading as tape hiss, and they are what make
+ *     a room feel occupied rather than merely audible. Chosen from the per-voice rng,
+ *     so no two chunks are the same and nothing here loops.
+ *
+ * ## Level, and the one rule it must obey
+ *
+ * It must sit UNDER combat and it must not eat the top end the roster pass exists to
+ * create. Peak is authored at roughly a fifth of an impact's, and the measured
+ * consequence is in the commit — the correct test is not "is it quiet" but "does the
+ * 2-16 kHz share of a HIT still rise above the bed", and that is a measurement, not a
+ * level.
+ */
+export function kitchenBed(): SoundFn {
+  return (s) => {
+    const D = AMBIENCE_CHUNK_S;
+    // A long attack and an exponential release with the hold set so the release IS the
+    // crossfade: chunk N+1 starts exactly as chunk N begins to fall.
+    // The hold is DERIVED, not authored: it is set so the release begins exactly as the
+    // next chunk's attack does, whatever the chunk length and period are. Authoring it
+    // as a number would mean a silent gap or a 3 dB bump the first time either constant
+    // moved, and both constants moved once already in tuning the duck.
+    const shape = {
+      attack: AMBIENCE_ATTACK_S,
+      hold: (AMBIENCE_PERIOD_S - AMBIENCE_ATTACK_S) / (D - AMBIENCE_ATTACK_S),
+      duration: D,
+    } as const;
+
+    // 1. THE EXTRACTOR. Two detuned partials, not one — a fan is a machine with blades
+    // and beats slowly against itself. Level is the smallest in the layer stack.
+    const fan = tone(s, {
+      type: 'sine',
+      freq: 118 * centsJitter(s.rng, 25),
+      peak: 0.026,
+      voices: 3,
+      detuneCents: 26,
+      drive: 1.6,
+      ...shape,
+      wet: 0.25,
+    });
+
+    // 2. THE FRYER. `loop` because this outlasts the shared 2 s noise bed; the band
+    // drifts slowly across the chunk so consecutive chunks never sit still.
+    const fry = noiseBurst(s, {
+      filter: 'bandpass',
+      freq: [rand(s.rng, 900, 1500), rand(s.rng, 1700, 2500)],
+      q: 0.45,
+      peak: 0.055,
+      loop: true,
+      // Slow, deep-ish breathing. Under ~0.4 Hz it reads as a fault; over ~1.5 Hz it
+      // reads as a helicopter.
+      tremolo: { rate: [0.55, 0.85], depth: 0.3 },
+      ...shape,
+      wet: 0.4,
+    });
+
+    // 3. AIR — the top octave, continuously. 24 dB/oct because one biquad cannot place
+    // a band up here (see `NoiseOpts.poles`), and quiet because this is the layer that
+    // would turn into tape hiss first.
+    const air = noiseBurst(s, {
+      filter: 'highpass',
+      poles: 24,
+      freq: [6400, 8200],
+      q: 0.7,
+      // 0.013, down from 0.03. See `director.ts` -> `watchAmbience` and the masking
+      // measurement in the commit: at the first level tried, the bed's own 2-16 kHz
+      // energy sat ABOVE the 10th-percentile weapon impact's in the same band, which is
+      // a background layer masking the foreground it exists to sit behind — and, worse,
+      // masking precisely the octaves the roster-wide pass had just been built to fill.
+      peak: 0.009,
+      loop: true,
+      ...shape,
+      wet: 0.5,
+    });
+
+    // 4. ONE ACCENT. Placed anywhere in the chunk's steady middle, so accents land at
+    // irregular intervals across chunks rather than on a 2 s grid.
+    const at = rand(s.rng, 0.3, D - 0.6);
+    const a: SynthCtx = { ...s, when: s.when + at };
+    const pick = Math.floor(s.rng() * 4);
+    let acc = 0;
+    if (pick === 0) {
+      // A pan lid settling — a short inharmonic ring, the far side of the room.
+      acc = modes(a, {
+        freq: rand(s.rng, 620, 980),
+        duration: 0.42,
+        peak: 0.085,
+        attack: 0.0015,
+        wet: 0.62,
+        modes: [
+          { ratio: 1, gain: 1, decay: 1 },
+          { ratio: 2.71, gain: 0.6, decay: 0.5 },
+          { ratio: 4.63, gain: 0.34, decay: 0.3 },
+        ],
+      });
+    } else if (pick === 1) {
+      // A knife on a board. Two taps, uneven — a cook does not use a metronome.
+      const t1 = transient(a, { peak: 0.1, freq: 3400, snap: 900, snapMs: 14, wet: 0.5 });
+      const gap = rand(s.rng, 0.11, 0.19);
+      const t2 = transient({ ...a, when: a.when + gap }, { peak: 0.075, freq: 3100, snap: 820, snapMs: 12, wet: 0.5 });
+      acc = longest(t1, gap + t2);
+    } else if (pick === 2) {
+      // A burst of steam off a pot.
+      acc = noiseBurst(a, {
+        filter: 'bandpass',
+        freq: [rand(s.rng, 2800, 3600), rand(s.rng, 5600, 7400)],
+        q: 0.8,
+        peak: 0.04,
+        attack: 0.09,
+        duration: 0.55,
+        wet: 0.7,
+      });
+    } else {
+      // Cutlery, somewhere out of sight. The one accent with real top octave in it.
+      acc = glint(a, {
+        count: 3,
+        spread: 0.16,
+        freq: [4200, 11000],
+        peak: 0.022,
+        pingMs: [8, 20],
+        bend: 0.94,
+        wet: 0.6,
+      });
+    }
+
+    return longest(fan, fry, air, at + acc);
   };
 }
 

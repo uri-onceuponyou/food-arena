@@ -368,14 +368,123 @@ window.__MIX = (() => {
     const mono = new Float32Array(n);
     const k = lin !== 1 ? 1 / lin : 1;
     for (let i = 0; i < n; i++) mono[i] = (L[i] + R[i]) * 0.5 * k;
-    return { engine, voices, mono, sr, ctx,
+    return { engine, voices, mono, sr, ctx, buffer: buf,
       counters: { ...engine.counters },
       chanPeak: [win(L, sr, 0, n / sr).peak * k, win(R, sr, 0, n / sr).peak * k] };
+  }
+
+  /**
+   * A 24 dB/oct highpass, applied offline to a whole signal, so "energy above 2 kHz in
+   * this 60 ms window" is a thing that can be measured.
+   *
+   * The octave-band and 1/6-octave instruments above are both FFT-per-frame and neither
+   * can answer a question about a window shorter than a frame, which is exactly the
+   * question a masking test asks: at the instant of a hit, is the hit above the bed in
+   * the band the bed occupies? Two cascaded biquads, coefficients from the RBJ cookbook,
+   * and \`hpCal\` below proves the thing actually filters before any number is believed.
+   */
+  function highpass(x, sr, fc) {
+    const w0 = 2 * Math.PI * fc / sr, cw = Math.cos(w0), sw = Math.sin(w0);
+    const alpha = sw / (2 * Math.SQRT1_2);
+    const b0 = (1 + cw) / 2, b1 = -(1 + cw), b2 = (1 + cw) / 2;
+    const a0 = 1 + alpha, a1 = -2 * cw, a2 = 1 - alpha;
+    let y = new Float32Array(x);
+    for (let stage = 0; stage < 2; stage++) {
+      const out = new Float32Array(y.length);
+      let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+      for (let i = 0; i < y.length; i++) {
+        const v = (b0 / a0) * y[i] + (b1 / a0) * x1 + (b2 / a0) * x2 - (a1 / a0) * y1 - (a2 / a0) * y2;
+        x2 = x1; x1 = y[i]; y2 = y1; y1 = v; out[i] = v;
+      }
+      y = out;
+    }
+    return y;
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
   return {
     mods,
+    /** The masking test's own instrument, against inputs whose answer is known. */
+    hpCal() {
+      const sr = 44100, n = sr;
+      const mk = (f) => { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = Math.sin(2 * Math.PI * f * i / sr); return a; };
+      const r = (f) => win(highpass(mk(f), sr, 2000), sr, 0.2, 0.8).rms / win(mk(f), sr, 0.2, 0.8).rms;
+      return { at250: r(250), at500: r(500), at2000: r(2000), at8000: r(8000) };
+    },
+    /**
+     * DOES THE BED EAT THE HIT? The one question a background layer has to answer.
+     *
+     * Three arms of the same match: everything, everything-but-the-bed, and the bed
+     * alone. Then, inside each weapon impact's own window, the energy above 2 kHz of
+     * the hit against the energy above 2 kHz of the bed at that same instant. A bed
+     * that is merely QUIET can still mask, because quiet is a broadband statement and
+     * masking is a per-band one — and this bed is deliberately the brightest thing in
+     * the game, so the assumption "it is 19 dB down, therefore it is under" is exactly
+     * the kind of assumption this project has been caught by.
+     */
+    async ambienceMask(timeline, key = 'ambience') {
+      const full = await render(timeline, {});
+      const noBed = await render(timeline, { dropKeys: [key] });
+      const bedOnly = await render(timeline, { soloKey: key });
+      const sr = full.sr;
+      const hpHit = highpass(noBed.mono, sr, 2000);
+      const hpBed = highpass(bedOnly.mono, sr, 2000);
+      const hpFull = highpass(full.mono, sr, 2000);
+      const hits = full.voices.filter((v) => v.scheduled && v.when !== null && v.key && v.key.startsWith('impact:'));
+      const per = hits.map((v) => {
+        const t0 = v.when, t1 = v.when + Math.min(Math.max(v.dur, 0.08), 0.3);
+        return { key: v.key, hit: win(hpHit, sr, t0, t1).rms, bed: win(hpBed, sr, t0, t1).rms };
+      });
+      const dur = full.mono.length / sr;
+      return {
+        per,
+        bedHiRms: win(hpBed, sr, 0, dur).rms,
+        fullHiRms: win(hpFull, sr, 0, dur).rms,
+        noBedHiRms: win(hpHit, sr, 0, dur).rms,
+        bedPeak: win(bedOnly.mono, sr, 0, dur).peak,
+        fullPeak: win(full.mono, sr, 0, dur).peak,
+        bedBands: bands(bedOnly.mono, sr),
+        blocksFull: blocks(full.mono, sr),
+        blocksNoBed: blocks(noBed.mono, sr),
+        fineFull: fineSpectrum(full.mono, sr),
+        fineNoBed: fineSpectrum(noBed.mono, sr),
+        bandsFull: bands(full.mono, sr),
+        bandsNoBed: bands(noBed.mono, sr),
+      };
+    },
+    /**
+     * THE THING URI CAN ACTUALLY JUDGE — the same real match, as a stereo WAV.
+     *
+     * Every number in this file is a proxy for a listening test that nobody has run.
+     * A spectral tilt is not something a person can hear and Uri has said twice that
+     * the audio is flat, so the only honest deliverable for an authoring pass is a
+     * before/after pair of renders of the SAME event stream, at the same seeds,
+     * through the same production chain. Everything else in this probe exists to
+     * decide what to change; this exists to prove it changed.
+     *
+     * Returned as base-64 16-bit interleaved PCM because only numbers and strings
+     * cross the Playwright bridge; the Node side writes the 44-byte RIFF header.
+     */
+    async wav(timeline, opt = {}) {
+      const r = await render(timeline, opt);
+      // Re-read the rendered buffer's two channels. The render helper returns the
+      // summed mono for analysis, so the stereo image — which is half of what a mix
+      // IS — has to be taken from the buffer itself.
+      const buf = r.buffer;
+      const l = buf.getChannelData(0), rr = buf.getChannelData(1);
+      const n = l.length;
+      const pcm = new Int16Array(n * 2);
+      const clamp = (x) => (x > 1 ? 1 : x < -1 ? -1 : x);
+      for (let i = 0; i < n; i++) {
+        pcm[2 * i] = Math.round(clamp(l[i]) * 32767);
+        pcm[2 * i + 1] = Math.round(clamp(rr[i]) * 32767);
+      }
+      const bytes = new Uint8Array(pcm.buffer);
+      let bin = '';
+      const CH = 0x8000;
+      for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+      return { sr: r.sr, frames: n, b64: btoa(bin), peak: Math.max(...r.chanPeak) };
+    },
     /** One arm, analysed. Returns numbers only. */
     async arm(timeline, opt = {}) {
       const r = await render(timeline, opt);
@@ -786,12 +895,36 @@ async function modeValidate() {
     check('white noise reads as a 0 dB/octave spectrum', Math.abs(fcSlope) < 0.5,
       `${fcSlope.toFixed(2)} dB/oct (pink would be -3.00)`);
 
-    const onsets = synth.per.map((p) => p.when);
+    // The synthetic timeline is `phase: 'playing'` throughout, so `director.ts`'s
+    // kitchen bed runs underneath it — which is correct and is exactly what a real
+    // match does. Split rather than suppressed: the three CAST onsets are the claim
+    // this check has always made, and the bed's own grid becomes a second claim, so
+    // the ambience is validated by the instrument that validates everything else.
+    const cast = synth.per.filter((p) => p.key !== 'ambience');
+    const bed = synth.per.filter((p) => p.key === 'ambience');
+    const onsets = cast.map((p) => p.when);
     check('per-voice onsets land where the timeline put them',
-      onsets.length === 3 && onsets.every((o, i) => Math.abs(o - (0.5 + i - 0 + (i * 0))) >= 0 && Math.abs(o - [0.5, 1.5, 2.5][i]) < 0.02),
+      onsets.length === 3 && onsets.every((o, i) => Math.abs(o - [0.5, 1.5, 2.5][i]) < 0.02),
       `onsets ${onsets.map((o) => o.toFixed(3)).join(', ')} s`);
-    check('all three synthetic voices are audible', synth.per.every((p) => p.peak > 1e-3),
-      synth.per.map((p) => fmtDb(p.peak)).join(' / ') + ' dBFS');
+    check('all three synthetic voices are audible', cast.every((p) => p.peak > 1e-3),
+      cast.map((p) => fmtDb(p.peak)).join(' / ') + ' dBFS');
+    // The bed is re-triggered on a fixed period from the first PLAYING tick, so over a
+    // 3 s timeline it must land on 0, 1.5 and 3.0 s and nowhere else.
+    const bedOn = bed.map((p) => p.when);
+    check('the kitchen bed is re-triggered on its authored period and no other',
+      bedOn.length >= 2 && bedOn.every((o, i) => i === 0 || Math.abs((o - bedOn[i - 1]) - 1.5) < 0.02),
+      `bed onsets ${bedOn.map((o) => o.toFixed(3)).join(', ')} s`);
+    // NON-OVERLAPPING bed voices only, and that qualifier is the whole assertion.
+    // A per-voice window is a window on the WHOLE MIX, so the bed chunk that happens to
+    // start 8 ms after a cast measures the cast's peak and reads -16.8 dBFS against the
+    // two clean chunks' -43. The first version of this check did exactly that and
+    // reported the bed as being as loud as the thing it sits behind, which is the
+    // opposite of true. Whether the bed masks anything is a per-BAND question answered
+    // properly by `--ambience`; this only has to catch a bed left at the wrong level.
+    const clean = bed.filter((b) => !b.overlap);
+    check('the bed sits well under the events it plays behind',
+      clean.length >= 1 && clean.every((b) => b.peak < Math.min(...cast.map((c) => c.peak)) * 0.25),
+      `bed ${clean.map((b) => fmtDb(b.peak)).join('/')} vs quietest cast ${fmtDb(Math.min(...cast.map((c) => c.peak)))} dBFS`);
   } finally {
     await browser.close();
   }
@@ -973,6 +1106,171 @@ async function modeMix() {
  * The headline numbers across several matchups, so nothing above is a pizza-vs-taco
  * artefact. One production render and one unclipped render per matchup.
  */
+/**
+ * WHICH KEYS OWN THE TILT — the measurement that has to come before any authoring.
+ *
+ * The roster-wide top-end pass raised every bespoke impact's spectral centroid by
+ * 15-90% and moved the match's long-term tilt by 0.15 dB/octave. That is not a
+ * contradiction and it is not a failure of the pass: a long-term average spectrum is
+ * energy-weighted over the WHOLE render, the mix's duty cycle is 21.9%, and the loudest
+ * things in a match are not the hits. Guessing which key is holding the spectrum down
+ * would be exactly the "probe before you loop" failure this project keeps paying for
+ * (`docs/LESSONS.md` section 2), so this drops one director key at a time and reports
+ * what the tilt does without it.
+ *
+ * Read it as: a key whose removal makes the mix BRIGHTER (tilt rises toward 0) is a key
+ * that is holding the mix dark, and the size of that rise is its share of the problem.
+ */
+async function modeTilt() {
+  const P = get('--player', 'pizza');
+  const E = get('--enemy', 'taco');
+  const { browser, page } = await openPage();
+  try {
+    const tl = record(P, E, 'smart');
+    const prod = await page.evaluate(async (t) => window.__MIX.arm(t, {}), tl);
+    const base = slopeDbPerOct(prod.fine, 80, 8000);
+    const allKeys = [...new Set(prod.per.map((v) => v.key))];
+    console.log(`\n══ TILT ATTRIBUTION · ${P} vs ${E} · ${prod.per.length} voices, ${allKeys.length} keys ══\n`);
+    console.log(`  whole mix tilt ${base.toFixed(2)} dB/oct   energy below 1 kHz ${(prod.bands.slice(0, 5).reduce((a, b) => a + b, 0) * 100).toFixed(1)}%`);
+    console.log(`\n  ${'drop this key'.padEnd(26)} n   tilt without it   change   500-1k band   its own centroid`);
+    const rows = [];
+    for (const k of allKeys) {
+      const a = await page.evaluate(async ([t, d]) => window.__MIX.arm(t, { dropKeys: [d] }), [tl, k]);
+      // `dropKeys: d`, NOT `[d]`. The first version wrapped the already-array in
+      // another array, so `dropKeys.includes(key)` was false for every key, every solo
+      // arm was the FULL mix, and the table printed the same 49 voices and the same
+      // 3033 Hz on all sixteen rows — a confident, uniform, completely wrong answer.
+      // The n column below is what caught it and it is asserted at the end of the mode.
+      const solo = await page.evaluate(async ([t, d]) => window.__MIX.arm(t, { dropKeys: d }),
+        [tl, allKeys.filter((x) => x !== k)]);
+      const tilt = slopeDbPerOct(a.fine, 80, 8000);
+      const ct = solo.per.map((v) => v.cent).filter((c) => c > 0);
+      rows.push({ k, n: solo.per.length, tilt, d: tilt - base, b: solo.bands[4], cent: pct(ct, 0.5) });
+    }
+    rows.sort((x, y) => y.d - x.d);
+    for (const r of rows) {
+      console.log(`  ${String(r.k ?? '(match flow)').padEnd(26)} ${String(r.n).padStart(2)}   ${r.tilt.toFixed(2).padStart(9)} dB/oct  ${(r.d >= 0 ? '+' : '') + r.d.toFixed(2)}   ${(r.b * 100).toFixed(1).padStart(9)}%   ${(ctOrDash(r.cent)).padStart(8)}`);
+    }
+    console.log(`\n  (a POSITIVE change means the mix got brighter without that key — it was holding the spectrum down)`);
+    // The instrument checking itself against a known input: the solo arms partition the
+    // mix, so their voice counts must sum to exactly the whole. This is the assertion
+    // that would have caught `dropKeys: [d]` in the first run instead of the third.
+    const summed = rows.reduce((a, r) => a + r.n, 0);
+    check('the solo arms partition the mix (voice counts sum to the whole)',
+      summed === prod.per.length, `${summed} vs ${prod.per.length}`);
+  } finally { await browser.close(); }
+}
+const ctOrDash = (c) => (Number.isFinite(c) && c > 0 ? `${Math.round(c)} Hz` : '—');
+
+/**
+ * THE AMBIENCE BED, priced against the mix it has to sit inside.
+ *
+ * Two things have to be true at once and they pull in opposite directions: the bed must
+ * fill a match that is silent 70% of its length, and it must not eat the top three
+ * octaves the roster pass exists to create. "Quiet enough" does not settle that —
+ * masking is per band, and this bed is deliberately the brightest object in the game.
+ */
+async function modeAmbience() {
+  const pairs = String(get('--matchups', 'pizza:taco,hamburger:sushi,soup:donut'))
+    .split(',').map((x) => x.split(':'));
+  const { browser, page } = await openPage();
+  try {
+    const cal = await page.evaluate(async () => window.__MIX.hpCal());
+    console.log(`\n══ THE KITCHEN BED · ${pairs.length} matchups ══\n`);
+    console.log(`  masking filter calibration (2 kHz highpass, 24 dB/oct): 250 Hz ${db(cal.at250).toFixed(1)} dB · 500 Hz ${db(cal.at500).toFixed(1)} dB · 2 kHz ${db(cal.at2000).toFixed(1)} dB · 8 kHz ${db(cal.at8000).toFixed(1)} dB`);
+    check('the masking filter rejects the low band', db(cal.at250) < -30, `${db(cal.at250).toFixed(1)} dB at 250 Hz`);
+    check('the masking filter passes the high band', Math.abs(db(cal.at8000)) < 1.5, `${db(cal.at8000).toFixed(1)} dB at 8 kHz`);
+    // -6 dB, not -3: this is TWO cascaded Butterworth sections, so each contributes its
+    // own -3 dB at the shared corner. The first version of this assertion asked for -3
+    // and failed a filter that was behaving exactly as specified — the same shape as the
+    // 1 kHz sine that was fed to the octave-band calibrator and read as a 31% error
+    // because 1 kHz is a band EDGE. Calibrate against what the design says, not against
+    // the number that comes to mind.
+    check('the masking filter is -6 dB at its corner (two cascaded sections)',
+      Math.abs(db(cal.at2000) + 6) < 1, `${db(cal.at2000).toFixed(2)} dB at 2 kHz`);
+
+    const acc = [];
+    for (const [P, E] of pairs) {
+      const tl = record(P, E, 'smart');
+      const r = await page.evaluate(async (t) => window.__MIX.ambienceMask(t), tl);
+      const dutyF = r.blocksFull.filter((b) => b > 10 ** (-50 / 20)).length / r.blocksFull.length;
+      const dutyN = r.blocksNoBed.filter((b) => b > 10 ** (-50 / 20)).length / r.blocksNoBed.length;
+      const tF = slopeDbPerOct(r.fineFull, 80, 8000), tN = slopeDbPerOct(r.fineNoBed, 80, 8000);
+      const margins = r.per.map((p) => db(p.hit / p.bed));
+      console.log(`\n  ── ${P} vs ${E} ──`);
+      console.log(`  duty cycle            ${(dutyN * 100).toFixed(1)}% without the bed  ->  ${(dutyF * 100).toFixed(1)}% with it`);
+      console.log(`  spectral tilt         ${tN.toFixed(2)} dB/oct without  ->  ${tF.toFixed(2)} dB/oct with`);
+      console.log(`  bed peak              ${fmtDb(r.bedPeak)} dBFS, against a match peak of ${fmtDb(r.fullPeak)} dBFS  (${(db(r.fullPeak) - db(r.bedPeak)).toFixed(1)} dB under)`);
+      console.log(`  above 2 kHz, whole match: bed ${fmtDb(r.bedHiRms)} dBFS rms · everything else ${fmtDb(r.noBedHiRms)} dBFS rms`);
+      console.log(`  AT EACH HIT, above 2 kHz: the hit is this far above the bed —`);
+      console.log(`     min ${Math.min(...margins).toFixed(1)} dB   p10 ${pct(margins, 0.1).toFixed(1)} dB   median ${pct(margins, 0.5).toFixed(1)} dB   max ${Math.max(...margins).toFixed(1)} dB   (n=${margins.length})`);
+      console.log(`  bed's own octave shares: ` + r.bedBands.map((b, i) => `${EDGES[i]}-${EDGES[i + 1]} ${(b * 100).toFixed(0)}%`).join(' · '));
+      acc.push({ P, E, dutyF, dutyN, tF, tN, margins, r });
+    }
+    const allMargins = acc.flatMap((a) => a.margins);
+    console.log(`\n  ACROSS ALL MATCHUPS   duty ${(mean(acc.map((a) => a.dutyN)) * 100).toFixed(1)}% -> ${(mean(acc.map((a) => a.dutyF)) * 100).toFixed(1)}%   tilt ${mean(acc.map((a) => a.tN)).toFixed(2)} -> ${mean(acc.map((a) => a.tF)).toFixed(2)} dB/oct   hit-over-bed above 2 kHz: median ${pct(allMargins, 0.5).toFixed(1)} dB, worst ${Math.min(...allMargins).toFixed(1)} dB`);
+
+    // 6 dB is one doubling of amplitude and is the conventional floor for "this is
+    // foreground and that is background". It is asserted on the p10 rather than the
+    // minimum because the quietest hit in a match is a 2-damage Rice Spray tick landing
+    // at maximum range through the distance attenuation, and a bed you can hear behind
+    // THAT is a bed doing its job.
+    // 12 dB is four times the amplitude and is the conventional line between foreground
+    // and background; 6 dB is one doubling and is the floor below which two things are
+    // simply both there. The p10 rather than the minimum, because the quietest hit in a
+    // match is a 2-damage tick landing at maximum range through the distance
+    // attenuation, and a room you can still hear behind THAT is a room doing its job.
+    check('every matchup: the median hit sits at least 12 dB above the bed above 2 kHz',
+      acc.every((a) => pct(a.margins, 0.5) > 12), `worst median ${Math.min(...acc.map((a) => pct(a.margins, 0.5))).toFixed(1)} dB`);
+    check('90% of hits clear the bed by at least 6 dB above 2 kHz',
+      acc.every((a) => pct(a.margins, 0.1) > 6), `worst p10 ${Math.min(...acc.map((a) => pct(a.margins, 0.1))).toFixed(1)} dB`);
+    check('the bed more than doubles the share of the match that is not silence',
+      acc.every((a) => a.dutyF > a.dutyN * 2), `${acc.map((a) => `${(a.dutyN * 100).toFixed(0)}->${(a.dutyF * 100).toFixed(0)}%`).join(', ')}`);
+    check('the bed is at least 15 dB under the match peak in every matchup',
+      acc.every((a) => db(a.r.fullPeak) - db(a.r.bedPeak) > 15),
+      `worst ${Math.min(...acc.map((a) => db(a.r.fullPeak) - db(a.r.bedPeak))).toFixed(1)} dB`);
+  } finally { await browser.close(); }
+}
+
+/** RIFF/WAVE header for 16-bit stereo PCM. */
+function wavHeader(frames, sr) {
+  const b = Buffer.alloc(44);
+  const dataBytes = frames * 4;
+  b.write('RIFF', 0); b.writeUInt32LE(36 + dataBytes, 4); b.write('WAVE', 8);
+  b.write('fmt ', 12); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(2, 22);
+  b.writeUInt32LE(sr, 24); b.writeUInt32LE(sr * 4, 28); b.writeUInt16LE(4, 32); b.writeUInt16LE(16, 34);
+  b.write('data', 36); b.writeUInt32LE(dataBytes, 40);
+  return b;
+}
+
+/**
+ * Render one real match to a stereo WAV on disk. `--wav <path>`.
+ *
+ * `--matchups a:b,c:d` renders several and suffixes each file, so a listening test can
+ * be a whole roster rather than one pair.
+ */
+async function modeWav() {
+  const out = get('--wav', 'shots/audio/match.wav');
+  const pairs = String(get('--matchups', `${get('--player', 'pizza')}:${get('--enemy', 'taco')}`))
+    .split(',').map((x) => x.split(':'));
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { browser, page } = await openPage();
+  try {
+    for (const [P, E] of pairs) {
+      const tl = record(P, E, 'smart');
+      const w = await page.evaluate(async (t) => window.__MIX.wav(t, {}), tl);
+      const pcm = Buffer.from(w.b64, 'base64');
+      const file = pairs.length > 1
+        ? out.replace(/\.wav$/, '') + `-${P}-vs-${E}.wav`
+        : out;
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, Buffer.concat([wavHeader(w.frames, w.sr), pcm]));
+      console.log(`  wrote ${file}   ${(w.frames / w.sr).toFixed(2)} s   peak ${fmtDb(w.peak)} dBFS   ${P} vs ${E}`);
+    }
+  } finally { await browser.close(); }
+}
+
 async function modeSweep() {
   const pairs = String(get('--matchups', 'pizza:taco,hamburger:sushi,soup:donut,lollipop:egg,burrito:hotdog,waterbottle:pizza'))
     .split(',').map((x) => x.split(':'));
@@ -1048,18 +1346,22 @@ async function modeVary() {
   } finally { await browser.close(); }
 }
 
+const BROWSER_MODES = ['--validate', '--mix', '--sweep', '--vary', '--tilt', '--wav', '--ambience'];
 if (has('--shape')) await modeShape();
-if (has('--validate') || has('--mix') || has('--sweep') || has('--vary')) {
+if (BROWSER_MODES.some(has)) {
   if (has('--snapshot')) { BASE = await startSnapshot(); console.log(`frozen snapshot: ${BASE}`); }
   try {
     if (has('--validate')) await modeValidate();
     if (has('--mix')) await modeMix();
     if (has('--sweep')) await modeSweep();
     if (has('--vary')) await modeVary();
+    if (has('--tilt')) await modeTilt();
+    if (has('--ambience')) await modeAmbience();
+    if (has('--wav')) await modeWav();
   } finally { stopSnapshot(); }
 }
-if (!has('--shape') && !has('--validate') && !has('--mix') && !has('--sweep') && !has('--vary')) {
-  console.log('pick one of --shape (node only) / --validate / --mix / --sweep / --vary');
+if (!has('--shape') && !BROWSER_MODES.some(has)) {
+  console.log('pick one of --shape (node only) / --validate / --mix / --sweep / --vary / --tilt / --ambience / --wav <path>');
 }
 console.log(`\n${checks - failures}/${checks} checks passed`);
 process.exit(failures ? 1 : 0);

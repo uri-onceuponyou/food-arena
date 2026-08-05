@@ -35,6 +35,7 @@
 
 import {
   centsJitter,
+  glint,
   grainCloud,
   longest,
   modes,
@@ -88,16 +89,35 @@ function coldWater(s: SynthCtx, level: number, dur: number): number {
     wet: 0.34,
   });
   const beads = grainCloud(s, {
-    count: 6,
+    count: 7,
     spread: dur * 0.7,
     grainMs: [3, 7],
-    freq: [2400, 5200],
+    // Band widened upward (2.4-5.2 kHz -> 2.6-8.6 kHz) in the roster-wide top-end
+    // pass. Beads of cold water off a hard surface are the smallest matter in the
+    // roster and there was no reason for them to stop an octave below Taco's shards
+    // other than that nothing in the game went any higher.
+    freq: [2600, 8600],
     q: 8,
     peak: level * 0.42,
     decay: 0.3,
     wet: 0.3,
   });
-  return longest(spray, beads);
+  // THE ATOMISER. Water Bottle's device is a hard hollow CAVITY, and a jet leaving one
+  // under pressure atomises — that is what a squeeze bottle physically does, and it is
+  // the one wet identity in the roster whose top end is genuinely open rather than
+  // banded (Soup's steam is a band; Pizza's tomato is a burst that stops). 24 dB/oct
+  // above the beads, and short, so it is mist rather than hiss.
+  const atomise = noiseBurst(s, {
+    filter: 'highpass',
+    poles: 24,
+    freq: [6200, 3800],
+    q: 0.7,
+    peak: level * 0.25,
+    attack: 0.002,
+    duration: dur * 0.5,
+    wet: 0.36,
+  });
+  return longest(spray, beads, atomise);
 }
 
 export const waterbottleWeaponSfx: CharacterWeaponSfxMap = {
@@ -149,7 +169,10 @@ export const waterbottleWeaponSfx: CharacterWeaponSfxMap = {
         duration: 0.13,
         wet: 0.26,
       });
-      const glint = grainCloud(c, {
+      // Renamed from `glint` when `synth.ts` gained a primitive of that name — this
+      // one is a NOISE cloud and the primitive is PITCHED, and having the two share an
+      // identifier in one file would make the distinction they exist for invisible.
+      const sparkle = grainCloud(c, {
         count: 3,
         spread: 0.07,
         grainMs: [3, 7],
@@ -158,7 +181,7 @@ export const waterbottleWeaponSfx: CharacterWeaponSfxMap = {
         peak: 0.14,
         wet: 0.3,
       });
-      return longest(throwOut, glint);
+      return longest(throwOut, sparkle);
     },
     impact(c: WeaponSfxCtx): number {
       // The crack, then the shell ringing, then the pieces. The ring is what makes
@@ -170,13 +193,26 @@ export const waterbottleWeaponSfx: CharacterWeaponSfxMap = {
         count: 9,
         spread: 0.15,
         grainMs: [3, 8],
-        freq: [3000, 7600],
+        freq: [3200, 9200],
         q: 8,
         peak: 0.3,
         decay: 0.25,
         wet: 0.32,
       });
-      return longest(tr, shell, shards);
+      // Two or three PITCHED splinters over the noise shards. Glass is the one material
+      // in the roster whose small pieces ring rather than just click, and `glint()`
+      // exists precisely so that "hard crystalline matter" is a spectral STRUCTURE
+      // (discrete pitches) and not another level in the same noise band.
+      const splinters = glint(c, {
+        count: 3,
+        spread: 0.1,
+        freq: [5200, 11000],
+        peak: 0.19,
+        pingMs: [6, 14],
+        bend: 0.9,
+        wet: 0.34,
+      });
+      return longest(tr, shell, shards, splinters);
     },
   },
 
@@ -211,7 +247,21 @@ export const waterbottleWeaponSfx: CharacterWeaponSfxMap = {
         drive: 2.4,
         wet: 0.12,
       });
-      return longest(tr, bonk, body);
+      // A plastic RATTLE on top of the bonk. Cap was the darkest of Water Bottle's
+      // four weapons (1666 Hz against Spray's 3013) because a struck vessel is nearly
+      // all fundamental, and it is also the one that fires most often — so it was the
+      // single biggest contributor to this character having no top end in a real match.
+      // Two pings, not a cloud: a cap is one small hard thing, not several.
+      const rattle = glint(c, {
+        count: 2,
+        spread: 0.05,
+        freq: [4600, 9000],
+        peak: 0.3,
+        pingMs: [5, 11],
+        bend: 0.86,
+        wet: 0.28,
+      });
+      return longest(tr, bonk, body, rattle);
     },
   },
 

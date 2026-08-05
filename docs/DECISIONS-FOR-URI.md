@@ -666,16 +666,31 @@ code is trapped inside the mislabelled `9854f2c`).
 
 ## 17. Two audio calls that are yours, now that the diagnosis is settled
 
-The roster-wide brightening and a kitchen ambience bed are **in flight** — your *"more depth, more
-realism as much as possible"* is the direction, so they did not wait. You will get **before/after
-WAVs of the same match** to judge in 30 seconds. These two were deliberately not taken:
+The roster-wide brightening and the kitchen ambience bed have **landed**. Your *"more depth, more
+realism as much as possible"* is the direction, so they did not wait.
+
+**→ Listen to these. Same match, same seeds, HEAD versus now, 16 seconds each:**
+
+```
+shots/audio/before-pizza-vs-taco.wav       shots/audio/after-pizza-vs-taco.wav
+shots/audio/before-soup-vs-donut.wav       shots/audio/after-soup-vs-donut.wav
+shots/audio/before-hamburger-vs-sushi.wav  shots/audio/after-hamburger-vs-sushi.wav
+```
+
+Start with **pizza vs taco** — that is the tomato you asked about. Its impact's top octave
+(6–16 kHz) went from **32 dB under** the low band at the brightest instant of the hit to **22 dB
+under**, and it now survives 150 ms instead of 90. The match is also no longer silent for two thirds
+of its length: **21.9% → 58.6%** of it now carries sound.
+
+These two were deliberately **not** taken, and both are still yours:
 
 **1. Should the music keep playing during a match?** Today `shell.ts` fades it **out** for the whole
-match, and there is no ambience underneath it. That is what makes the measured 6.55-second gap — 70%
-of an average match — *total* silence rather than merely quiet. Brawl Stars never does this. Three
-options, and they are not exclusive: keep the music playing at a lower level, add the ambience bed
-(already being built), or add footsteps. **The ambience bed is going in regardless; the music
-question is yours** because it changes the feel of every match you have ever played of this build.
+match. Brawl Stars never does this. The kitchen bed has now gone in underneath, so the 6.55-second
+gap — 70% of an average match — is no longer *total* silence; it is a room. **That does not answer
+the music question, it only stops it being urgent.** `shell.ts` has a live owner and is outside the
+audio pillar's file set, so the fade was left exactly as it was. Three options, not exclusive: keep
+the music playing under the match at a lower level, leave it faded and rely on the bed, or add
+footsteps as well. It changes the feel of every match you have played of this build, so it is yours.
 
 **2. Should `generic.hurt()` drop about 3 dB?** It is **40.9% of the energy of every moment you are
 hit**. It is centre-panned at full level while the weapon that hit you is distance-attenuated, it is
@@ -686,10 +701,29 @@ being hurt* is masking the sound of *what hit you*.
 Dropping it would let you hear the weapon. Keeping it makes damage feel heavier. It is a real
 trade and it is taste, not measurement — one number, trivially reversible either way.
 
+**Its LEVEL is still exactly what it was**, on purpose. But its **spectrum** changed, because a
+measurement made the case unanswerable: `tools/tmp/audio_mix.mjs --tilt` drops one sound at a time
+from a real match and re-fits the whole spectrum, and of the sixteen sounds a pizza-vs-taco match
+uses, **`hurt` alone was holding the game darker than the other fifteen combined** (+0.61 dB/octave
+without it, against ~+0.90 for all the rest together). It now carries a contact spray, and its own
+centroid went **1366 → 2205 Hz**. So "what hit me" is more readable than it was even at the same
+level — which may be enough on its own, and is worth listening for before you decide about the 3 dB.
+
 **A caveat on the target, stated by the agent that measured it:** pink noise at −3.0 dB/oct is a
 *neutral broadband reference*, not a musical goal, and **there is no audio reference in this repo to
 measure Brawl Stars against** — the reference plates are images. So "brighter, toward −4.0" is
 steering by physics, and your ear is the only instrument that can say whether it landed.
+
+**Where it landed, and the honest reason it is not −4.0.** Long-term tilt went **−5.57 → −5.07
+dB/oct** across six matchups. That is a third of the way, and the pass that produced it moved the
+individual hits far more than that number suggests: a single hit's 4–8 kHz band nearly doubled and
+its 8–16 kHz band went up ~80%. The reason the whole-match average moves less is that **42% of a
+match's total energy sits in one octave, 500–1000 Hz** — the countdown, the whistle, the result
+sting, the hurt grunt, and the room prolonging all of them — and **19% sits in 63–125 Hz**, an octave
+a phone speaker cannot reproduce at all. Getting to −4.0 means taking energy OUT of those two places,
+not putting more in at the top: retuning the countdown/whistle/result pitches, and trimming the
+sub-125 Hz fundamentals that are costing headroom without being heard. **Both are taste calls on
+sounds you already know, so neither was taken.** Say the word and either is an afternoon.
 
 
 ---

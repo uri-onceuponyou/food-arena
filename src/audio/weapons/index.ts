@@ -26,19 +26,36 @@
  * the ear resolves independently. `--mode identity` prints the full 11x11 pairwise
  * separation table and fails if any pair converges.
  *
- * | character     | ladder     | device nobody else uses                          |
- * |---------------|------------|--------------------------------------------------|
- * | `hamburger`   | darkest    | 24 dB/oct damping + the shortest decays           |
- * | `hotdog`      | low-mid    | a NON-MONOTONIC pitch contour (a squeeze), + a CLAP |
- * | `pizza`       | mid-low    | real amplitude modulation at the disc's spin rate |
- * | `soup`        | mid        | upward-chirping droplets + a steam tail           |
- * | `waterbottle` | mid-high   | a damped hollow CAVITY (modal, irrational, short) |
- * | `egg`         | high-mid   | a GAP — crack, silence, then spill                |
- * | `burrito`     | high-mid   | a grain cloud whose band WALKS (`freqShift`)      |
- * | `taco`        | high       | a dense cloud of discrete broadband transients    |
- * | `donut`       | high       | near-harmonic modal RINGING, plus echoes          |
- * | `sushi`       | brightest- | a NARROW high-Q resonance that stops dead         |
- * | `lollipop`    | brightest  | RING MODULATION — genuinely inharmonic partials   |
+ * Measured after the roster-wide top-end pass (mean of 6 seeds per weapon, mean over a
+ * character's weapons). Every rung moved UP, because the mix measurement said the whole
+ * game lived in 80-650 Hz; the ORDER moved in two places and both are consequences of
+ * that pass rather than of taste, noted below.
+ *
+ * | character     | ladder    | device nobody else uses                           | its top end |
+ * |---------------|-----------|---------------------------------------------------|-------------|
+ * | `hamburger`   |   936 Hz  | 24 dB/oct damping + the shortest decays            | grease sizzle (a band, never grains) |
+ * | `pizza`       |  1791 Hz  | real amplitude modulation at the disc's spin rate  | flour puff / SPLASH / sticky peel |
+ * | `hotdog`      |  2072 Hz  | a NON-MONOTONIC pitch contour (a squeeze), + a CLAP | condiment jet + bread crumb |
+ * | `soup`        |  2414 Hz  | upward-chirping droplets + a steam tail            | FINER droplets, an octave and a half up |
+ * | `egg`         |  2705 Hz  | a GAP — crack, silence, then spill                 | shell air, an open 24 dB/oct corner |
+ * | `waterbottle` |  3092 Hz  | a damped hollow CAVITY (modal, irrational, short)  | an atomiser + pitched plastic/glass |
+ * | `burrito`     |  3639 Hz  | a grain cloud whose band WALKS (`freqShift`)       | foil crinkle to 11 kHz |
+ * | `taco`        |  4151 Hz  | a dense cloud of discrete broadband transients     | shell DUST — a wash, not a cloud |
+ * | `donut`       |  4701 Hz  | near-harmonic modal RINGING, plus echoes           | sugar glaze — PITCHED (`glint()`) |
+ * | `sushi`       |  5526 Hz  | a NARROW high-Q resonance that stops dead          | a third blade resonance, TONAL |
+ * | `lollipop`    |  6335 Hz  | RING MODULATION — genuinely inharmonic partials    | candy shards to 14 kHz + a shiver |
+ *
+ * Closest pair **1.121x** against a 1.08x floor (was 1.096x) and the span **6.77x** (was
+ * 6.60x): a roster-wide pass is the only kind that can IMPROVE a relative ladder, because
+ * it is the only one that can move both sides of a tight pair.
+ *
+ * TWO ORDERS CHANGED, and neither is a preference:
+ *   * **Pizza moved above Hotdog.** Uri asked for a splash when a tomato hits, by name.
+ *     `pizza.Tomato`'s impact went 1267 -> 2683 Hz, which is most of Pizza's mean, and a
+ *     bursting tomato IS brighter than mustard hitting a wall.
+ *   * **Soup moved above... nothing, but Egg moved above Soup**, which is the same
+ *     statement: a cracking shell has more top end than hot broth, and it took the pass
+ *     for either of them to have any.
  *
  * The two pairs that share a rung are deliberately the two pairs separated hardest on
  * the second axis: Taco vs Sushi are both bright and are opposite in spectral
