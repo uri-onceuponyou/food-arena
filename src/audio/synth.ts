@@ -112,17 +112,42 @@ const SILENCE = 0.0001;
  * over on 11 of 24. Third place in the entire game is 13,315 Hz, so this is one
  * mechanism in one file, not a general drift.
  *
- * The clamp itself is INAUDIBLE — 24 kHz is above hearing for every adult, and the
- * rendered samples are unchanged in every band anyone can hear. That is exactly why it
- * survived 389 assertions. What is broken is the INTENT: a clamped partial has stopped
- * tracking its own `ratio`, so the bank is no longer the object it was authored as. On
- * a 44.1 kHz device (Nyquist 22,050) the whole of that partial's jitter range is
- * clamped, not just its top; on 48 kHz only the top ~26% is. Same code, two different
- * sounds, decided by the audio device.
+ * ⚠️ **The clamp is AUDIBLE, and it is audible in the LOW band.** The obvious reading —
+ * "24 kHz is above hearing, so a clamp there costs nothing but intent" — is what this
+ * comment said first, and it is wrong. Measured by `audio-probe --mode nyquist`, which
+ * renders this exact bank twice through the production chain, differing by nothing but
+ * this partial:
  *
- * 20 kHz rather than a Nyquist: it is under BOTH shipped Nyquists, so the sound no
- * longer depends on the device, and it is the top of human hearing, so nothing dropped
- * here was ever heard.
+ *   | device   | what happens to the partial | residual, 20 Hz-16 kHz |
+ *   |----------|-----------------------------|------------------------|
+ *   | 48 kHz   | renders as asked at 23,760  | **-72.6 dB** (inaudible, as assumed) |
+ *   | 44.1 kHz | CLAMPED to exactly 22,050   | **-24.3 dB** (plainly audible)       |
+ *
+ * Note which way round that is. The console warning quoted above says `[-24000, 24000]`,
+ * so the machine that produced it was running at 48 kHz — the rate where the clamp is
+ * harmless. The device that gets the audible version is the one that never warned,
+ * because 44.1 kHz is where the jitter's whole range crosses Nyquist rather than only
+ * its top. **The console warning is not the bug; it is the only visible symptom of a
+ * bug that is worse where it is silent.**
+ *
+ * Clamped to exactly Nyquist the oscillator does not become a tone nobody can hear — it
+ * degenerates, and **89.8% of its energy comes out below 2 kHz**. So a partial authored
+ * at 23.8 kHz was arriving as a low-frequency blip on every Lollipop Smash impact, 24 dB
+ * under the bank, on any device running at 44.1 kHz — and at 48 kHz the same code did
+ * nothing of the kind. Same event, two different sounds, decided by the audio device.
+ *
+ * It is a cliff, not a slope, and that is what makes 20 kHz the right ceiling rather
+ * than a superstitious one. A lone sine at 44.1 kHz, share of its energy below 2 kHz:
+ *
+ *   12,000 Hz 0.3%  ·  16,000 0.3%  ·  19,000 0.6%  ·  **20,000 1.4%**  ·  21,000 5.4%
+ *   ·  22,050 (Nyquist) **87.8%**
+ *
+ * 20 kHz is under BOTH shipped Nyquists, is the top of human hearing so nothing dropped
+ * was ever heard, and — measured, not assumed — sits before the degeneration begins.
+ *
+ * The INTENT half of the argument still stands and is the reason to keep the ceiling
+ * even on a device where the clamp is harmless: a clamped partial has stopped tracking
+ * its own `ratio`, so the bank is no longer the object it was authored as.
  */
 const MAX_PARTIAL_HZ = 20000;
 

@@ -369,6 +369,99 @@ export function hurt(health01: number): SoundFn {
   };
 }
 
+/**
+ * THE SHRUG-OFF — a stun that was REFUSED by `combat.ts`'s grace rule.
+ *
+ * ── Why this sound exists, and why it fires for stuns only ─────────────────────
+ *
+ * Statuses no longer stack: a stun that lands on a target already stunned, or inside
+ * the 500 ms grace after one ends, is discarded. The hit still lands, still deals FULL
+ * damage and still emits the same `hit-landed`, so nothing about the moment is audible
+ * — the player hears an ordinary connect and has no way to learn the rule that just
+ * decided their next three seconds. `vfx.ts` gives it a ring pop, but the whole value
+ * of a refusal cue is that it reaches a player who is **looking somewhere else**.
+ *
+ * Whether it deserves a sound is a RATE question before it is a taste question, and it
+ * was measured rather than argued — `tools/tmp/audio_shrug_census.mjs`, 110 matchups of
+ * the real sim, 27.9 minutes of play:
+ *
+ *   | refusals | total | per minute | per match | worst match |
+ *   |----------|-------|------------|-----------|-------------|
+ *   | slow     |  460  |    16.5    |    4.2    |     ~18     |
+ *   | stun     |   83  |     3.0    |    0.75   |      2      |
+ *
+ * **67.7% of every status hit in the game is refused**, so a cue on all of them is not a
+ * cue, it is a texture: 65.5% of consecutive refusals are less than 250 ms apart, which
+ * is one perceived sound and not two. Slows are where that mass is — a slow is refused
+ * 460 times to a stun's 83, and its refusal changes a movement multiplier the player is
+ * not tracking. A refused STUN is the one that changes what they do next, because they
+ * committed to a follow-up on a target they believed was rooted. At 0.75 per match and a
+ * worst case of 2, it cannot become noise. (Two runs 40 minutes apart, with a peer agent
+ * editing `ai.ts` in between, gave 95 and 83 stun refusals against 476 and 460 slow ones
+ * — so the ~20x ratio and the ~1-per-match rate are the durable facts here, not the
+ * third digit. Re-run the census after any AI or weapon change.)
+ *
+ * ── Why it sounds like this ────────────────────────────────────────────────────
+ *
+ * It plays SIMULTANEOUSLY with the impact it belongs to (and, on the player's own body,
+ * with `hurt()` as well), so being merely audible is not enough — it has to be audible
+ * THROUGH a hit and never mistakable FOR one. Three properties, each chosen against a
+ * layer of `impact()`:
+ *
+ *   * **It rises.** Every impact-shaped sound in this file sweeps DOWN (`impact`'s body
+ *     230->62 Hz, `hurt`'s grunt 320->130, `death`'s fall). Direction alone separates it
+ *     from the entire hit vocabulary, and an upward sweep is already the game's "this
+ *     did not land" gesture rather than "this connected".
+ *   * **It is inharmonic**, via true ring modulation — the same device Lollipop's candy
+ *     and Water Bottle's shell use for "struck something that did not give". No amount
+ *     of saturation produces those sidebands, so it cannot be confused with a driven
+ *     body.
+ *   * **It lives above the hit and arrives after it.** The energy sits at 0.5-2.5 kHz
+ *     while `impact()`'s body and sub are under 250 Hz, and a 22 ms attack (against the
+ *     impact transient's 1.2-1.8 ms) puts its peak past the transient instead of inside
+ *     it. Measured through the real director on the same event twice, differing only in
+ *     whether the sim accepted the stun: **+5.4 to +5.7 dB above 1.2 kHz** for **+2.2 to
+ *     +2.7% of peak** (0.3499 -> 0.3595). Quoted as a range because the director seeds
+ *     every voice randomly — that is the point of the per-event variation — so a single
+ *     render is one draw. Clearly present where the hit is thin, nearly invisible where
+ *     the hit is loud, which is the whole design; `--mode dispatch` asserts both ends.
+ *
+ * Level is deliberately below the hit it rides on: this is an annotation on a hit, not
+ * an event of its own, and the ordering `impact > shrug-off` is asserted.
+ */
+export function statusRefused(): SoundFn {
+  return (s) => {
+    const j = centsJitter(s.rng, 30);
+    // 1. CONTACT — a thin, bright tick, well above the impact transient's 2.7-3.9 kHz
+    // so it reads as a second surface rather than a doubling of the first.
+    const tick = transient(s, { peak: 0.2, freq: 5400, snap: 3800, snapMs: 6 });
+    // 2. THE REFUSAL — ring-modulated, so what is heard is the SUM and DIFFERENCE of a
+    // rising carrier and a falling modulator: two inharmonic partials pulling apart.
+    // That divergence is the "it bounced" gesture; a single rising tone reads as a
+    // pickup or a UI confirm.
+    const bounce = tone(s, {
+      type: 'triangle',
+      freq: [620 * j, 1560 * j],
+      ring: [132, 96],
+      peak: 0.34,
+      attack: 0.022,
+      duration: 0.26,
+      wet: 0.34,
+    });
+    // 3. WARD — quiet, high, mostly reverb send. The tail that survives the hit and is
+    // what is actually left to hear 150 ms in.
+    const ward = tone(s, {
+      type: 'sine',
+      freq: [1880 * j, 2520 * j],
+      peak: 0.1,
+      attack: 0.03,
+      duration: 0.34,
+      wet: 0.55,
+    });
+    return longest(tick, bounce, ward);
+  };
+}
+
 /** Death — a deflating fall plus a low boom. The only downward pitch sweep in the
  * game that lasts long enough to be heard AS a sweep, and the longest decay outside
  * the ultimate. */

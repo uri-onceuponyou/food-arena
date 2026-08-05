@@ -50,14 +50,22 @@
  *             oscillator anywhere in the game may be driven above the audible band.
  *             The only evidence of this class of bug is a Chrome console warning
  *             (`value 24276 outside nominal range [-24000, 24000]`), which an
- *             `OfflineAudioContext` never prints and which the rendered samples never
- *             show, because the offending partial is above hearing. Swept at 24 seeds
- *             per sound because the offender was a per-event jitter that only crosses
- *             the line on part of its own distribution.
+ *             `OfflineAudioContext` never prints. Swept at 24 seeds per sound because
+ *             the offender was a per-event jitter that only crosses the line on part of
+ *             its own distribution. Then the half that is NOT about intent: the same
+ *             bank rendered twice through the production chain at both shipped sample
+ *             rates, differing by exactly the partial the ceiling drops. A partial
+ *             clamped to EXACTLY Nyquist is not inaudible — it degenerates and puts
+ *             89.8% of its energy below 2 kHz.
  *   live      Run the ACTUAL GAME in a browser, tap the master bus post-volume with
  *             an AnalyserNode, and measure the waveform while a real match plays.
  *             This is the only mode that proves the wiring, the autoplay unlock and
- *             the event stream all work together.
+ *             the event stream all work together. Boots `/` — the route a player
+ *             actually loads — with a CONTROL arm that defeats `engine.ts`'s gesture
+ *             guard, so the lock assertion is proved capable of failing.
+ *             ⚠️ Its frame-rate and onset-count checks are load-dependent under
+ *             SwiftShader (`docs/LESSONS.md` §10) and are the first thing to discount
+ *             when this mode disagrees with itself between runs.
  *
  * Usage:  node tools/audio-probe.mjs [--mode all|offline|identity|depth|negative|variation|budget|dispatch|coverage|nyquist|live]
  *         (dev server must be running on :5173)
@@ -568,7 +576,58 @@ window.__dsp = (() => {
     };
   }
 
-  return { analyse, stats, extent, centroid, envelopeMod, layers, windowRms, bandPeaks, partials, pitchSlope, lowFrac, bandProfile };
+  /**
+   * RMS of the signal above fc, as an ABSOLUTE number.
+   *
+   * bandProfile() is normalised and so answers "where is this sound's energy",
+   * deliberately — it cannot answer "did this render gain energy up here", which is the
+   * question when two renders of the SAME event are compared and one carries an extra
+   * layer. Two cascaded one-pole highpasses (-12 dB/oct); the exact slope does not
+   * matter because both arms of every A/B go through the identical filter.
+   */
+  /**
+   * UNNORMALISED energy strictly between lo and hi Hz, by framed FFT.
+   *
+   * Written because a filter cannot do this job at the top of the band: a 2-pole
+   * lowpass at 16 kHz attenuates 22 kHz by only ~5 dB, so a "below 16 kHz" residual
+   * measured that way is mostly the 22 kHz thing it was supposed to exclude. That
+   * mistake read -19.8 dB where the truth was -68.3, i.e. it made an inaudible partial
+   * look like an audible one. Bin selection has no slope and cannot leak an octave.
+   *
+   * Absolute scale is arbitrary (no window or FFT normalisation), which is fine and
+   * deliberate: every use is a RATIO of two signals analysed by this same function.
+   */
+  function bandEnergy(x, sr, lo, hi) {
+    const N = 4096, hop = 2048;
+    let total = 0;
+    for (let p = 0; p + N <= x.length; p += hop) {
+      const re = new Float64Array(N), im = new Float64Array(N);
+      for (let i = 0; i < N; i++) re[i] = x[p + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1)));
+      fft(re, im);
+      for (let k = 1; k < N / 2; k++) {
+        const hz = k * sr / N;
+        if (hz < lo || hz > hi) continue;
+        total += re[k] * re[k] + im[k] * im[k];
+      }
+    }
+    return total;
+  }
+
+  function hpRms(x, sr, fc) {
+    const dt = 1 / sr;
+    const rc = 1 / (2 * Math.PI * fc);
+    const a = rc / (rc + dt);
+    let y1 = 0, p1 = 0, y2 = 0, p2 = 0, acc = 0;
+    for (let i = 0; i < x.length; i++) {
+      const v = x[i];
+      y1 = a * (y1 + v - p1); p1 = v;
+      y2 = a * (y2 + y1 - p2); p2 = y1;
+      acc += y2 * y2;
+    }
+    return Math.sqrt(acc / Math.max(1, x.length));
+  }
+
+  return { analyse, stats, extent, centroid, envelopeMod, layers, windowRms, bandPeaks, partials, pitchSlope, lowFrac, bandProfile, hpRms, bandEnergy };
 })();
 `;
 
@@ -711,6 +770,67 @@ async function installHarness(page) {
       return { ...a, started: engine.counters.started };
     };
 
+    /**
+     * THE SHRUG-OFF A/B — the same `hit-landed` twice, differing only in whether the
+     * sim accepted its stun.
+     *
+     * The state here carries `status`, which the other duck-typed states deliberately
+     * do not: the director's discriminant is that `applyDamage` moved
+     * `status.stunnedUntil`, so an A/B on it has to model two consecutive frames and
+     * change nothing else. Frame 1 carries no events and exists only to set the
+     * "before" snapshot — which is precisely how the shipped path works, `match.ts`
+     * calling `handleEvents` every frame whether or not the tick produced anything.
+     *
+     * Everything else is held identical: same weapon (none — the generic impact), same
+     * damage, same position, same seed, same virtual time.
+     */
+    window.__renderStatusHit = async (opt = {}) => {
+      const sr = 44100;
+      const ctx = new OfflineAudioContext(2, Math.ceil(sr * (opt.seconds ?? 2)), sr);
+      const engine = new audio.AudioEngine({ context: ctx, persist: false });
+      const md = new director.MatchAudio(engine);
+      const mk = (elapsed, enemyStun) => ({
+        elapsed, phase: 'playing',
+        player: {
+          role: 'player', characterId: 'soup', x: 0, y: 0, hp: 100, maxHp: 100, alive: true,
+          status: { stunnedUntil: -Infinity, slowedUntil: -Infinity },
+        },
+        enemy: {
+          role: 'enemy', characterId: 'taco', x: 0, y: 0, hp: 150, maxHp: 150, alive: true,
+          status: { stunnedUntil: enemyStun, slowedUntil: -Infinity },
+        },
+      });
+      const hit = (effect) => ({
+        type: 'hit-landed', targetRole: opt.target ?? 'enemy', amount: opt.amount ?? 12, effect,
+        // A key no character owns, so the generic `impact()` is used and the A/B is not
+        // measuring one weapon's bespoke voice.
+        source: { kind: 'weapon', weaponKey: '__generic__', weaponName: 'Generic' },
+        x: 0, y: 0,
+      });
+      // A refused stun is one whose timestamp does NOT move across the frame; a landed
+      // one moves it. -Infinity -> 3000 is a landing; 3000 -> 3000 is a refusal.
+      const before = opt.refused ? 3000 : -Infinity;
+      md.handleEvents([], mk(0, before));
+      if (opt.resetBetween) {
+        // A second match on the same director. `reset()` must put the snapshot back to
+        // "not known yet" — and the first stun of the new match must still land.
+        md.reset();
+        md.handleEvents([], mk(0, -Infinity));
+      }
+      engine.setVirtualTime(0);
+      md.handleEvents([hit(opt.effect ?? 'stun')], mk(1000, 3000));
+      const buf = await ctx.startRendering();
+      const chans = [buf.getChannelData(0), buf.getChannelData(1)];
+      const mono = new Float64Array(chans[0].length);
+      for (let i = 0; i < mono.length; i++) mono[i] = (chans[0][i] + chans[1][i]) / 2;
+      const a = window.__dsp.analyse(chans, sr, opt);
+      return {
+        ...a,
+        started: engine.counters.started,
+        hp1200: window.__dsp.hpRms(mono, sr, 1200),
+      };
+    };
+
     /** Two batches at two virtual times, to exercise the director's own throttles. */
     window.__renderEventSeq = async (batches) => {
       const sr = 44100;
@@ -849,7 +969,11 @@ async function installHarness(page) {
 
     /** Raw channel data, for the bit-exactness comparisons. */
     window.__renderRaw = async (makeSound, opt = {}) => {
-      const sr = 44100;
+      // Overridable because the Nyquist A/B has to render the SAME sound at both of the
+      // sample rates a shipped device actually uses: at 44.1 kHz the out-of-band partial
+      // is clamped by the browser, at 48 kHz it is not, and the whole question is
+      // whether that difference reaches the audible band.
+      const sr = opt.sampleRate ?? 44100;
       const ctx = new OfflineAudioContext(1, Math.ceil(sr * (opt.seconds ?? 1.5)), sr);
       const engine = new audio.AudioEngine({ context: ctx, persist: false });
       engine.setVolume(opt.volume ?? 1);
@@ -877,6 +1001,12 @@ const CATALOGUE = [
   { id: 'generic.impact.big', expr: `S.impact(16)`, minPeak: 0.15 },
   { id: 'generic.hurt', expr: `S.hurt(0.8)` },
   { id: 'generic.hurt.critical', expr: `S.hurt(0.15)` },
+  // The shrug-off. In the standard catalogue rather than only in the dispatch A/B, so
+  // it carries the same declared-duration and prompt-onset assertions as every other
+  // sound — its whole design depends on a slow attack (22 ms, so its peak lands past
+  // the impact transient it rides on) and "slow attack" is one edit away from "starts
+  // late", which the 40 ms onset check is there to catch.
+  { id: 'generic.statusRefused', expr: `S.statusRefused()` },
   { id: 'generic.death', expr: `S.death()`, minPeak: 0.15 },
   { id: 'generic.heal', expr: `S.heal()` },
   { id: 'generic.fogTick', expr: `S.fogTick()` },
@@ -1694,6 +1824,44 @@ async function modeDispatch(page) {
   const flood = await run(Array.from({ length: 9 }, (_, i) => ({ ...ev.hitEnemy, amount: 2, x: 100 + i })));
   check('repeats beyond the duck table are dropped entirely',
     flood.dropped >= 4 && flood.started === 5, `voices=${flood.started} throttled=${flood.dropped}`);
+
+  // ── The shrug-off ────────────────────────────────────────────────────────
+  //
+  // The hardest thing to assert here is a NEGATIVE that used to be free: a refused
+  // status is not in the event stream at all, so before this the director could not
+  // have been wrong about it. Now it can, in both directions, and both are asserted.
+  const st = (o) => page.evaluate((opt) => window.__renderStatusHit(opt), o);
+  const landed = await st({ refused: false });
+  const refused = await st({ refused: true });
+  const dB = 20 * Math.log10(refused.hp1200 / Math.max(1e-12, landed.hp1200));
+  console.log(`  shrug-off: landed voices=${landed.started} peak=${landed.peak.toFixed(4)}; ` +
+    `refused voices=${refused.started} peak=${refused.peak.toFixed(4)}; ` +
+    `>1.2 kHz ${landed.hp1200.toExponential(2)} -> ${refused.hp1200.toExponential(2)} (${dB >= 0 ? '+' : ''}${dB.toFixed(1)} dB)`);
+  check('a stun that LANDED voices the impact alone', landed.started === 1, `voices=${landed.started}`);
+  check('a stun that was REFUSED adds exactly one voice', refused.started === 2, `voices=${refused.started}`);
+  // The whole point of the cue: it has to survive being played on top of the hit it
+  // annotates. Above 1.2 kHz is where `impact()` is thinnest (its body and sub are
+  // under 250 Hz) and where the shrug-off lives.
+  check('the refusal is audible THROUGH the hit (> +4 dB above 1.2 kHz)', dB > 4,
+    `${dB >= 0 ? '+' : ''}${dB.toFixed(1)} dB`);
+  // ...and it must not become the hit. A refusal is an annotation, not an event.
+  check('the refusal does not outweigh the impact it rides on',
+    refused.peak < landed.peak * 1.35,
+    `peak ${landed.peak.toFixed(4)} -> ${refused.peak.toFixed(4)}`);
+
+  // The three ways this could fire when it must not.
+  const slowRefused = await st({ refused: true, effect: 'slow' });
+  check('a refused SLOW is silent — 460 of them per 27.9 min, see sounds.ts',
+    slowRefused.started === 1, `voices=${slowRefused.started}`);
+  const afterReset = await st({ refused: true, resetBetween: true });
+  check('reset() clears the snapshot, so match two\'s first stun is not a shrug-off',
+    afterReset.started === 1, `voices=${afterReset.started}`);
+  // The duck-typed states every other assertion in this mode uses carry no `status`.
+  // "Cannot tell" must mean silence, or every dispatch test above would have gained a
+  // voice the moment this landed.
+  const noStatus = await run([{ ...ev.hitEnemy, effect: 'stun' }]);
+  check('a state carrying no `status` voices no shrug-off (cannot tell != refused)',
+    noStatus.started === 1, `voices=${noStatus.started}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2351,6 +2519,132 @@ async function modeNyquist(page) {
   check('an in-band 3-partial modal bank builds all three', ab.inBand.count === 3, `${ab.inBand.count} oscillators`);
   check('the same bank drops the partial that would be out of band', ab.outOfBand.count === 2,
     `${ab.outOfBand.count} oscillators, max ${Math.round(ab.outOfBand.max)} Hz`);
+
+  // ── IS ANY OF THIS AUDIBLE? ────────────────────────────────────────────────
+  //
+  // Everything above measures INTENT — the frequency the code asks for. The separate
+  // and much more expensive question is whether the ear was ever involved, and it is
+  // not answerable by argument: "24 kHz is above hearing" is true of a SINE and says
+  // nothing about a chain containing a saturator and a soft clip, where an inaudible
+  // partial can intermodulate with an audible one and land the difference tone right
+  // in the middle of the band. |24385 - 12144| = 12.2 kHz; clamped, |22050 - 12144| =
+  // 9.9 kHz. If the chain were non-linear here, clamping would MOVE an audible tone.
+  //
+  // So: the offending bank rendered through the production chain, twice, differing by
+  // exactly the partial the guard now drops — reconstructed with the same opts `modes()`
+  // would have given it (peak `o.peak * gain`, duration `o.duration * decay`, same
+  // attack, same wet). Neither arm consumes the rng, so the two are otherwise sample-
+  // identical, and the difference is subtracted sample by sample and low-passed at
+  // 16 kHz. That residual is what a listener could possibly hear.
+  // Lollipop's `candy()` bank, verbatim, at Smash's impact fundamental.
+  const BANK = [
+    { ratio: 1, gain: 1, decay: 1 },
+    { ratio: 2.76, gain: 0.8, decay: 0.7 },
+    { ratio: 5.4, gain: 0.5, decay: 0.44 },
+  ];
+  const F0 = 4400, DUR = 0.34, PEAK = 0.56;
+  for (const sr of [44100, 48000]) {
+    const r = await page.evaluate(async ([sampleRate, f0, dur, peak, bank]) => {
+      const W = window.__A;
+      const opts = { freq: f0, duration: dur, peak, attack: 0.0008, wet: 0.36, modes: bank };
+      const shipped = (s) => W.audio.modes(s, opts);
+      const prefix = (s) => {
+        const d = W.audio.modes(s, opts);
+        // The partial `modes()` now skips, rebuilt exactly as it used to be built.
+        W.audio.tone(s, {
+          type: 'sine', freq: f0 * 5.4, peak: peak * 0.5,
+          attack: 0.0008, duration: dur * 0.44, wet: 0.36,
+        });
+        return d;
+      };
+      // The partial on its own, with nothing to hide behind. If the diff below shows
+      // audible-band energy, this says whether it came from the oscillator itself or
+      // from the chain's non-linearity intermodulating it with the rest of the bank.
+      const alone = (s) => W.audio.tone(s, {
+        type: 'sine', freq: f0 * 5.4, peak: peak * 0.5,
+        attack: 0.0008, duration: dur * 0.44, wet: 0.36,
+      });
+      const a = await window.__renderRaw(shipped, { sampleRate, seconds: 0.8 });
+      const b = await window.__renderRaw(prefix, { sampleRate, seconds: 0.8 });
+      const c = await window.__renderRaw(alone, { sampleRate, seconds: 0.8 });
+      const d = new Float64Array(a.length);
+      for (let i = 0; i < a.length; i++) d[i] = b[i] - a[i];
+      const E = (x, lo, hi) => window.__dsp.bandEnergy(x, sampleRate, lo, hi);
+      // 20 Hz - 16 kHz is the whole of the audible band; anything the partial does
+      // OUTSIDE it is by definition not heard, and 20-16k is where the bank lives.
+      const sig = E(a, 20, 16000);
+      const res = E(d, 20, 16000);
+      // The same residual measured across the WHOLE spectrum, as the control: it proves
+      // the extra partial really was rendered, so "nothing in the audible band" cannot
+      // be the sound of the probe failing to add anything at all.
+      const resAll = E(d, 20, sampleRate / 2 - 1);
+      const split = [[20, 2000], [2000, 8000], [8000, 16000], [16000, sampleRate / 2 - 1]]
+        .map(([lo, hi]) => E(c, lo, hi));
+      return { sig, res, resAll, split, aloneTotal: split.reduce((x, y) => x + y, 0) };
+    }, [sr, F0, DUR, PEAK, BANK]);
+    const dB = 10 * Math.log10(Math.max(r.res, 1e-30) / Math.max(r.sig, 1e-30));
+    const dBAll = 10 * Math.log10(Math.max(r.resAll, 1e-30) / Math.max(r.sig, 1e-30));
+    const clamped = F0 * 5.4 > sr / 2;
+    const shareLow = r.split[0] / Math.max(1e-30, r.aloneTotal);
+    const pcts = r.split.map((e) => `${((100 * e) / Math.max(1e-30, r.aloneTotal)).toFixed(1)}%`);
+    console.log(`  ${sr} Hz (Nyquist ${sr / 2}): the dropped partial asks for ${Math.round(F0 * 5.4)} Hz` +
+      `${clamped ? ` and the browser CLAMPS it to ${sr / 2}` : ' and it renders as asked'}` +
+      `  ->  residual ${dB.toFixed(1)} dB in 20 Hz-16 kHz, ${dBAll.toFixed(1)} dB full band`);
+    console.log(`    that partial rendered ALONE puts its energy: ` +
+      `20Hz-2k ${pcts[0]}  2k-8k ${pcts[1]}  8k-16k ${pcts[2]}  16k-Nyq ${pcts[3]}`);
+    // The control for both arms: the reconstruction really is in the render, so an
+    // "inaudible" verdict below cannot be the sound of the probe adding nothing.
+    check(`at ${sr} Hz the reconstructed partial is really in the render (> -60 dB full band)`,
+      dBAll > -60, `${dBAll.toFixed(1)} dB`);
+    if (!clamped) {
+      // 48 kHz: 23,760 Hz fits under Nyquist, renders as asked, and is exactly the
+      // harmless supersonic partial everyone assumed this bug was.
+      check(`at ${sr} Hz, under Nyquist, the partial is inaudible (< -60 dB in 20 Hz-16 kHz)`,
+        dB < -60, `${dB.toFixed(1)} dB`);
+    } else {
+      // ⚠️ 44.1 kHz: it is NOT. This is the finding, and it inverts the assumption the
+      // fix was originally justified by (mine included, until it was measured).
+      //
+      // Clamped to EXACTLY Nyquist, Chrome's oscillator does not produce a 22,050 Hz
+      // tone that nobody can hear — it degenerates, and what reaches the bus is a LOW
+      // FREQUENCY artefact: 89.8% of that partial's energy lands below 2 kHz, at
+      // -24.3 dB against the whole bank. That is squarely audible, on every Lollipop
+      // Smash impact, on any device running at 44.1 kHz. 48 kHz gets no such thing.
+      // Same code, same event, two different sounds, decided by the audio device.
+      //
+      // These two assertions therefore document a BROWSER behaviour, and if a future
+      // Chrome band-limits its way out of it they will fail. That is the correct
+      // failure: the ceiling in `synth.ts` would then be buying only intent, and
+      // whoever reads this next should be told so rather than left with a green check.
+      check(`at ${sr} Hz the CLAMPED partial is audible — the cost the ceiling removes (> -40 dB)`,
+        dB > -40, `${dB.toFixed(1)} dB in 20 Hz-16 kHz`);
+      check(`and that artefact is LOW, not supersonic (>= 50% of its energy under 2 kHz)`,
+        shareLow >= 0.5, `${(100 * shareLow).toFixed(1)}% below 2 kHz`);
+    }
+  }
+
+  // ── WHERE the oscillator starts to degenerate, and therefore whether 20 kHz is far
+  // enough away from it. A ceiling chosen for "top of hearing" would be the wrong
+  // number if the artefact began at 20,500 Hz.
+  const sweep = await page.evaluate(async ([freqs]) => {
+    const W = window.__A;
+    const out = [];
+    for (const hz of freqs) {
+      const x = await window.__renderRaw(
+        (s) => W.audio.tone(s, { type: 'sine', freq: hz, peak: 0.28, attack: 0.0008, duration: 0.15, wet: 0 }),
+        { sampleRate: 44100, seconds: 0.5 },
+      );
+      const low = window.__dsp.bandEnergy(x, 44100, 20, 2000);
+      const all = window.__dsp.bandEnergy(x, 44100, 20, 22049);
+      out.push({ hz, share: low / Math.max(1e-30, all) });
+    }
+    return out;
+  }, [[12000, 16000, 19000, 20000, 21000, 22050]]);
+  console.log(`  a lone sine at 44.1 kHz, share of its energy below 2 kHz:`);
+  console.log(`    ${sweep.map((s) => `${s.hz}Hz ${(100 * s.share).toFixed(1)}%`).join('   ')}`);
+  const atCeiling = sweep.find((s) => s.hz === OSC_CEILING_HZ);
+  check(`the ceiling itself is clean — a sine AT ${OSC_CEILING_HZ} Hz stays where it was put (< 5% below 2 kHz)`,
+    atCeiling.share < 0.05, `${(100 * atCeiling.share).toFixed(2)}%`);
 }
 
 /**
@@ -2379,9 +2673,31 @@ async function modeNyquist(page) {
  * lock assertion counts — otherwise it would pass vacuously on a slow load, which is
  * the same defect in a new costume.
  */
-async function modeLiveBoot(browser) {
-  console.log('\n── live/boot: the SHIPPED boot route, GET / with no gesture ──');
+/**
+ * When the probe's own first gesture lands, measured from `domcontentloaded`. The
+ * pre-gesture window is everything before it, and the title card's 4500 ms
+ * auto-continue has to fall inside that window or the check below is vacuous.
+ */
+const CLICK_AT_MS = 12000;
+
+/**
+ * Boot `/` once and report everything observed. `opts.fakeActivation` runs the CONTROL
+ * arm — see `modeLiveBootControl`.
+ */
+async function bootRun(browser, opts = {}) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
+  if (opts.fakeActivation) {
+    // Defeat `engine.ts`'s `hasUserActivation()` guard, and ONLY that guard: an own
+    // property on `navigator` shadows the prototype accessor for anything reading it
+    // from JS, while the browser's own autoplay decision — which is what actually
+    // decides whether a fresh context is born `running` or `suspended` — reads its
+    // internal state and is untouched. So this arm runs the SHIPPED call path
+    // (`opening.ts`'s auto-continue `setTimeout` -> `audio.unlock()`) exactly as it ran
+    // before the guard existed, and the browser answers honestly.
+    await page.addInitScript(`Object.defineProperty(navigator, 'userActivation', {
+      configurable: true, get: () => ({ isActive: true, hasBeenActive: true }),
+    });`);
+  }
   await page.addInitScript(`(() => {
     window.__bootLog = [];
     window.__bootCtx = [];
@@ -2422,7 +2738,7 @@ async function modeLiveBoot(browser) {
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   // Long enough for the title card's 4500 ms auto-continue to fire and for home to
   // mount, on a machine where three peer agents are also rendering.
-  await page.waitForTimeout(12000);
+  await page.waitForTimeout(CLICK_AT_MS);
   await page.mouse.click(500, 320);   // the page's FIRST real gesture
   await page.waitForTimeout(900);
 
@@ -2435,6 +2751,49 @@ async function modeLiveBoot(browser) {
   const pre = r.log.filter((e) => e.at < (r.ctx[0]?.at ?? Infinity));
   const reachedHome = r.log.some((e) => e.screen === 'home');
   const states = [...new Set(pre.map((e) => e.state))];
+  const preGesture = [...new Set(r.log.filter((e) => e.at < CLICK_AT_MS).map((e) => e.state))];
+  return { ...r, pre, reachedHome, states, preGesture };
+}
+
+/**
+ * THE CONTROL — the same page, the same route, the same call site, with the guard's
+ * ONE INPUT flipped. This is what decides "real defect or stale comment", and it is the
+ * arm that makes the assertion above mean something: without it, "no context before a
+ * gesture" would also be green if `opening.ts` had simply stopped calling `unlock()`,
+ * or if the auto-continue never fired, or if the probe were blind.
+ *
+ * `docs/LESSONS.md` §13's rule, applied to a gate rather than to an image: before
+ * trusting a green check, confirm it goes red when the thing it guards is removed.
+ */
+async function modeLiveBootControl(browser) {
+  console.log('\n── live/boot CONTROL: the same route with engine.ts\'s gesture guard defeated ──');
+  const r = await bootRun(browser, { fakeActivation: true });
+  console.log(`  screens seen: ${[...new Set(r.log.map((e) => e.screen))].join(' -> ')}`);
+  for (const c of r.ctx) console.log(`  AudioContext created at ${c.at} ms, born state="${c.born}"`);
+  console.log(`  engine states before the first click: ${r.preGesture.join(', ')}`);
+  for (const w of r.witness) console.log(`  inside the first click: engine=${w.state}, play() ${w.played ? 'SCHEDULED' : 'REFUSED'}`);
+  console.log(`  droppedNotRunning after the click: ${r.final?.droppedNotRunning}`);
+
+  check('CONTROL: without the guard, / creates a context with no gesture',
+    r.ctx.length >= 1, `${r.ctx.length} context(s)`);
+  check('CONTROL: that context is born SUSPENDED — the state engine.ts says must never happen',
+    r.ctx[0]?.born === 'suspended', `born "${r.ctx[0]?.born}"`);
+  check('CONTROL: and the engine is observably suspended before any gesture',
+    r.preGesture.includes('suspended'), `states seen: ${r.preGesture.join(', ')}`);
+  // The COST, and the reason this is a defect and not a cosmetic complaint. `resume()`
+  // is asynchronous: the context is still `suspended` for the whole of the first
+  // gesture's call stack, so every sound that gesture's own handlers ask for is refused.
+  check('CONTROL: the first click\'s own sound is DROPPED (resume() is async)',
+    r.witness.length > 0 && r.witness[0].played === false,
+    r.witness.length ? `played=${r.witness[0].played} state=${r.witness[0].state}` : 'no click observed');
+  check('CONTROL: and the engine counted that drop',
+    (r.final?.droppedNotRunning ?? 0) >= 1, `droppedNotRunning=${r.final?.droppedNotRunning}`);
+}
+
+async function modeLiveBoot(browser) {
+  console.log('\n── live/boot: the SHIPPED boot route, GET / with no gesture ──');
+  const r = await bootRun(browser);
+  const { reachedHome, states } = r;
   console.log(`  ${r.log.length} samples over ${r.log[r.log.length - 1]?.at ?? 0} ms; ` +
     `screens seen: ${[...new Set(r.log.map((e) => e.screen))].join(' -> ')}`);
   console.log(`  engine state before any context existed: ${states.join(', ')}`);
@@ -2449,8 +2808,17 @@ async function modeLiveBoot(browser) {
   check('/ creates NO AudioContext outside a gesture (any it creates is born running)',
     r.ctx.length <= 1 && (r.ctx.length === 0 || r.ctx[0].born === 'running'),
     r.ctx.length ? `${r.ctx.length} context(s), born "${r.ctx[0].born}"` : 'no context');
-  check('engine stays idle across the whole pre-gesture window on /',
-    states.length === 1 && states[0] === 'idle', `states seen: ${states.join(', ')}`);
+  // `no-engine` is a LEGAL pre-gesture state and the first version of this check
+  // rejected it, so the gate that was written to catch the early context failed for a
+  // reason that had nothing to do with it. The samples run from `domcontentloaded`, and
+  // `window.__audio` is published when `main.ts`'s module graph finishes evaluating —
+  // measured, that is the first one or two samples of ~47. The invariant is not "the
+  // engine object exists and is idle", it is that **no live context state is ever
+  // observed before a gesture**: `suspended` here is the defect, and `running` before a
+  // gesture would be a browser policy failure.
+  const live = r.preGesture.filter((st) => st === 'suspended' || st === 'running');
+  check('no live AudioContext state is ever observed before a gesture on /',
+    live.length === 0, `states seen: ${r.preGesture.join(', ')}`);
   check('a sound fired from the FIRST click is scheduled, not dropped',
     r.witness.length > 0 && r.witness[0].played === true,
     r.witness.length ? `played=${r.witness[0].played} state=${r.witness[0].state}` : 'no click observed');
@@ -2460,6 +2828,7 @@ async function modeLiveBoot(browser) {
 
 async function modeLive(browser) {
   await modeLiveBoot(browser);
+  await modeLiveBootControl(browser);
   console.log('\n── live: real match, master bus tapped with a ScriptProcessorNode ──');
   // simSpeed=3: under SwiftShader the page runs at ~9 fps and `match.ts` clamps dt to
   // 50 ms, so real time advances the sim at less than half speed. At 1x the countdown

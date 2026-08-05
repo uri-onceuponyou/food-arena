@@ -51,6 +51,8 @@
  *   * A match ending on the CLOCK rather than by knockout — `match-ended` fires for
  *     both and carries no reason, so the discriminant is that both fighters are still
  *     alive. See the `'match-ended'` case.
+ *   * A status that was REFUSED by the grace rule — `hit-landed` carries the effect the
+ *     WEAPON has, not whether the target accepted it. See `statusWrittenThisFrame`.
  *
  * ── A swing that hits and a swing that misses ───────────────────────────────────
  *
@@ -127,6 +129,27 @@ export class MatchAudio {
   private ringFloored = false;
   /** Guard against an arena whose ring starts at its own floor. See `watchZone`. */
   private sawRingAboveFloor = false;
+  /**
+   * Each fighter's `stunnedUntil` / `slowedUntil` as they stood at the END of the last
+   * batch — i.e. BEFORE this frame's sim steps ran. The discriminant for a refused
+   * status; see `statusWrittenThisFrame`.
+   *
+   * `NaN` means "not known yet", which is the correct starting value: a first batch
+   * carrying a status hit must be read as LANDED (a fresh fighter is always ready), and
+   * `NaN !== anything` gives exactly that with no extra branch.
+   */
+  private statusBefore: Record<FighterRole, { stun: number; slow: number }> = {
+    player: { stun: NaN, slow: NaN },
+    enemy: { stun: NaN, slow: NaN },
+  };
+  /** Consumed once per batch, per target, per effect. See `statusWrittenThisFrame`. */
+  private statusWriterUnclaimed: Record<FighterRole, { stun: boolean; slow: boolean }> = {
+    player: { stun: false, slow: false },
+    enemy: { stun: false, slow: false },
+  };
+  /** False when the `MatchState` handed in does not carry `status` at all — see
+   * `openStatusWindow`. Nothing is voiced as a refusal while this is false. */
+  private statusTrackable = false;
 
   constructor(
     private readonly engine: AudioEngine,
@@ -154,11 +177,17 @@ export class MatchAudio {
       // wired-but-produces-nothing failure this project keeps paying for
       // (`docs/LESSONS.md` §1). The cost of the change is one float compare per frame.
       this.watchZone(state);
+      this.openStatusWindow(state);
       for (const ev of events) this.handleEvent(ev, state);
     } catch (err) {
       // The engine already swallows per-sound failures; this catches anything in the
       // dispatch itself (a malformed event, a missing weapon).
       console.warn('[audio] event dispatch failed:', err);
+    } finally {
+      // In `finally` on purpose: a throw in the middle of a batch must not leave the
+      // snapshot describing a frame that is now two frames old, which would misread
+      // every status hit until the next clean batch.
+      this.closeStatusWindow(state);
     }
   }
 
@@ -171,6 +200,96 @@ export class MatchAudio {
     this.lastHealSoundAt = -Infinity;
     this.ringFloored = false;
     this.sawRingAboveFloor = false;
+    // Back to "not known yet".
+    //
+    // Stated precisely, because the tempting overclaim is wrong: leaving these dangling
+    // would NOT mis-voice match two today. The stale value differs from the new
+    // fighters' `-Infinity`, so the comparison says "moved", so the first stun reads as
+    // landed — which is also the truth, because a fresh fighter is always ready. It is
+    // correct by coincidence, and per-match state that survives a match is exactly the
+    // kind of thing a later change silently starts depending on. Asserted rather than
+    // assumed: `--mode dispatch` drives a second match through a `reset()` director.
+    this.statusBefore = { player: { stun: NaN, slow: NaN }, enemy: { stun: NaN, slow: NaN } };
+    this.statusWriterUnclaimed = { player: { stun: false, slow: false }, enemy: { stun: false, slow: false } };
+    this.statusTrackable = false;
+  }
+
+  // ── The shrug-off discriminant ────────────────────────────────────────────
+
+  /**
+   * One fighter's status expiry timestamps, or `null` if this `MatchState` does not
+   * carry them.
+   *
+   * `--mode dispatch` in `tools/audio-probe.mjs` duck-types a state to exactly the
+   * fields the director reads, deliberately, and `status` is not among them. A missing
+   * field must therefore mean "cannot tell", never "refused" — `vfx.ts` reaches the
+   * same conclusion for its own snapshot: **no signal beats a wrong one.**
+   */
+  private static statusTimestamps(f: MatchState['player']): { stun: number; slow: number } | null {
+    const st = (f as { status?: { stunnedUntil?: number; slowedUntil?: number } }).status;
+    if (!st || typeof st.stunnedUntil !== 'number' || typeof st.slowedUntil !== 'number') return null;
+    return { stun: st.stunnedUntil, slow: st.slowedUntil };
+  }
+
+  /**
+   * Decide, for this batch, whether each target's status timer MOVED — and therefore
+   * whether one of the status hits in this batch was accepted.
+   *
+   * ── Why the timestamp and not the predicate ────────────────────────────────
+   *
+   * `combat.ts` exports `statusReadyAt()` and `vfx.ts` renders the shrug-off band from
+   * it, so the obvious thing is to import it here too. It does not work at this call
+   * site: by the time the director sees the event, `applyDamage` has ALREADY written
+   * `stunnedUntil`, so a stun that landed and a stun that was refused while the target
+   * was still stunned both read as "not ready" and the predicate answers the same for
+   * the two cases it exists to separate.
+   *
+   * `applyDamage` is the only writer of either field and writes them ONLY on acceptance,
+   * so **the timestamp moving is the acceptance**, exactly and with no threshold. A
+   * landing always moves it strictly upward (`elapsed + DURATION` against a value that
+   * was refused because it was already >= `elapsed`), so the two can never coincide.
+   *
+   * Where one batch carries several status hits on the same target — a multi-pellet
+   * spread, every pellet stamped with the weapon's effect — at most ONE of them can have
+   * been the writer, so the first claims it and the rest are refusals, which is what the
+   * sim did. `tools/tmp/audio_shrug_census.mjs` uses this same discriminant to count
+   * refusals over 110 matchups and is where the 95-stun figure in `sounds.ts` comes from.
+   *
+   * The comparison is against the values as of the END of the previous batch, which is
+   * "before this frame's sim steps" — the same one-frame-old snapshot `vfx.ts` reads,
+   * so the ring pop and the sound can never disagree about a given hit.
+   */
+  private openStatusWindow(state: MatchState): void {
+    const p = MatchAudio.statusTimestamps(state.player);
+    const e = MatchAudio.statusTimestamps(state.enemy);
+    this.statusTrackable = p !== null && e !== null;
+    if (p === null || e === null) return;
+    const now = { player: p, enemy: e };
+    for (const role of ['player', 'enemy'] as const) {
+      const before = this.statusBefore[role];
+      this.statusWriterUnclaimed[role] = {
+        stun: now[role].stun !== before.stun,
+        slow: now[role].slow !== before.slow,
+      };
+    }
+  }
+
+  /** Carry this batch's timestamps forward to be the next batch's "before". */
+  private closeStatusWindow(state: MatchState): void {
+    for (const role of ['player', 'enemy'] as const) {
+      const ts = MatchAudio.statusTimestamps(state[role]);
+      if (ts) this.statusBefore[role] = ts;
+    }
+  }
+
+  /** True when this event's status was discarded by the grace rule. */
+  private wasStatusRefused(role: FighterRole, effect: 'stun' | 'slow'): boolean {
+    if (!this.statusTrackable) return false;
+    if (this.statusWriterUnclaimed[role][effect]) {
+      this.statusWriterUnclaimed[role][effect] = false;
+      return false;
+    }
+    return true;
   }
 
   // ── State the event stream does not carry ─────────────────────────────────
@@ -323,6 +442,12 @@ export class MatchAudio {
   ): void {
     const place = this.place(ev.x, ev.y, state);
 
+    // Resolved BEFORE the ambient early-outs below, because the writer claim has to be
+    // consumed in event order to stay attributable: today only `kind: 'weapon'` ever
+    // carries an effect (trail, hazard and fog all pass `null` to `applyDamage`), but a
+    // future stunning hazard must not be able to hand its claim to the next weapon hit.
+    const shrugged = ev.effect === 'stun' && this.wasStatusRefused(ev.targetRole, 'stun');
+
     // Ambient damage sources are categorically not weapon hits — `match.ts` already
     // treats fog this way visually (no burst, no shake, a violet "ZONE" number) and
     // the audio holds the same line.
@@ -369,6 +494,23 @@ export class MatchAudio {
         key: 'hurt',
         priority: Priority.Normal,
       });
+    }
+
+    // ── The shrug-off ─────────────────────────────────────────────────────
+    // STUN only, and that is a measured line rather than a cautious one: see
+    // `sounds.ts` -> `statusRefused()` for the 110-matchup census (460 refused slows
+    // against 83 refused stuns, 65.5% of all refusals less than 250 ms apart).
+    //
+    // The per-frame discriminant below is not an approximation of the per-step truth,
+    // it IS it: replayed over the same 110 matchups at 1, 3, 6 and 12 sim steps per
+    // rendered frame, the rule finds all 83 and invents none, at every batch size.
+    //
+    // Placed like the impact it annotates, so a refusal on the far side of the arena
+    // arrives from that side and one on the player's own body arrives centred — which
+    // is the whole difference between "my stun bounced" and "I shrugged that off",
+    // carried by the pan the hit already had, with no second sound to author.
+    if (shrugged) {
+      this.engine.play(S.statusRefused(), { ...place, key: 'shrug', priority: Priority.Normal });
     }
   }
 
