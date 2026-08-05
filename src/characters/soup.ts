@@ -125,7 +125,17 @@ function buildHandleArc(
   side: 1 | -1,
   bowOut: number,
   bowFwd: number,
-  mat: THREE.Material
+  mat: THREE.Material,
+  /**
+   * Close the BOTTOM end with a knob. False on the forearm, because the `handL`/
+   * `handR` slot already puts one at exactly that point and two coincident spheres
+   * are not two shapes — the outer one hides the inner one and the inner one hides
+   * the outer one's lower half. Measured: with both present the hand group delivered
+   * **0.379** of its own footprint no matter how the sizes were traded, because
+   * whichever sphere was smaller was simply inside the other. One knob, owned by the
+   * slot that the acceptance test scores.
+   */
+  capBottom = true
 ): THREE.Group {
   const g = new THREE.Group();
   const start = new THREE.Vector3(0, 0, 0);
@@ -142,10 +152,12 @@ function buildHandleArc(
   capTop.position.copy(start);
   capTop.castShadow = true;
   g.add(capTop);
-  const capBot = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.9, 12, 10), mat);
-  capBot.position.copy(end);
-  capBot.castShadow = true;
-  g.add(capBot);
+  if (capBottom) {
+    const capBot = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.9, 12, 10), mat);
+    capBot.position.copy(end);
+    capBot.castShadow = true;
+    g.add(capBot);
+  }
   return g;
 }
 
@@ -260,6 +272,27 @@ export class SoupCharacter extends BaseCharacter {
         // 0.246, and both hands 0.200 / 0.386. Measuring the mass at the pivot's
         // own height under-reads a flared food; the screen-space overlap does not.
         shoulderWidth: CHARACTER_HEIGHT * 0.305,
+        // ── 0.175H -> 0.245H, and it is the SAME BUG the legs had ──────────────
+        // Round 2 found `CapsuleGeometry(r, len - 2r)` degenerating to a sphere
+        // whenever a segment was shorter than it was thick, and fixed it in the
+        // legs. The arms were never checked. STOUT's forearm is `0.175 * 0.477 =
+        // 0.0835H` long against `2 * armRadius * 0.92 * 0.52 = 0.0814H` of tube
+        // diameter — a segment 1.03x longer than it is wide, which is not a limb,
+        // it is a ball. Every archetype except LANKY is in that state (see the
+        // arm-ratio note in `bodies.ts`); soup is the one where it was MEASURED,
+        // because its forearms are the cast's worst-delivering limb group.
+        //
+        // The occluder was named by ablation rather than reasoned from source
+        // (`tools/tmp/occluder.mjs`, which reproduces `limbcheck`'s own metric
+        // exactly and then hides one candidate at a time): the bowl contributes
+        // NOTHING — it is the character's own upper arm at 40.7% of the forearm's
+        // footprint and its own hand cap at 25.9%. Two previous attempts moved the
+        // forearm's BOW and both measured worse, because the bow was never the
+        // variable; the chain is simply too short to have a visible middle.
+        //
+        // Kept soup-local rather than pushed into the archetype: hamburger and taco
+        // share STOUT and neither has been re-measured for it. See the hand-off.
+        armFraction: 0.245,
       }),
       // Serene and still — the calmest, most nearly-neutral stance in the cast,
       // matching the unsettling-patient no-mouth-then-mouth face. Distinct from
@@ -480,8 +513,15 @@ export class SoupCharacter extends BaseCharacter {
    */
   private buildFace(R: number, bowlSurface: (theta: number, hFrac: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }): void {
     const face = this.rig.joints.face;
-    face.position.set(0, 0, 0); // features are authored directly on `head` in exact surface coords
-    const head = this.rig.joints.head;
+    // The features are authored in EXACT bowl-surface coords by `bowlSurface`, so they
+    // cannot inherit `face`'s generic sphere-tuned forward offset — it is zeroed, and
+    // then the features are parented to `face` ANYWAY. With the offset cleared `face` is
+    // a direct child of `head` with an identity transform, so this is a pure reparent and
+    // nothing moves (proved by `tools/tmp/facemove.mjs`, which hashes every mesh world
+    // matrix in the model). It is not cosmetic: `thumbs.ts`'s character-select framing
+    // rule reads this joint and falls back to the whole HEAD box when it is empty, and
+    // `tools/tmp/chars_metrics.mjs` cannot assert a face it cannot find.
+    face.position.set(0, 0, 0);
 
     // Structural fix, round 4: EYE_H now sits at h=0.62, squarely inside the
     // profile's h 0.55-0.76 plateau where the bowl holds its FULL rim-width radius
@@ -510,7 +550,7 @@ export class SoupCharacter extends BaseCharacter {
       const eye = new THREE.Group();
       eye.position.copy(pos).addScaledVector(outward, R * 0.03);
       eye.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
-      head.add(eye);
+      face.add(eye);
 
       const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.205, 16, 14), scleraMat);
       white.scale.set(1, 1, 0.55);
@@ -569,7 +609,7 @@ export class SoupCharacter extends BaseCharacter {
     const mouth = new THREE.Group();
     mouth.position.copy(mouthPt.pos).addScaledVector(mouthOutward, R * 0.028);
     mouth.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthOutward);
-    head.add(mouth);
+    face.add(mouth);
 
     const mouthMat = toonMat({ color: '#343A41', roughness: 0.4 }); // groups with the (now darker) iris/brow, not lip-pink
     const mouthLine = new THREE.Mesh(
@@ -863,11 +903,36 @@ export class SoupCharacter extends BaseCharacter {
           // sound and the result was not — whatever is covering these forearms is not
           // answered by the bow, and the next attempt should isolate the occluder with
           // an ID-buffer pass (`tools/tmp/islands.mjs`) before moving geometry again.
-          return buildHandleArc(size.len, size.radius * 0.52, side, -0.85, 0.12, handleMat);
+          return buildHandleArc(size.len, size.radius * 0.52, side, -0.85, 0.12, handleMat, false);
         }
         case 'handL':
-        case 'handR':
-          return buildHandleCap(size.radius, handleMat);
+        case 'handR': {
+          // Sized against the FOREARM it terminates, not against `handRadius`.
+          // `handRadius` is an independent rig constant, and at `0.062H` it made this
+          // sphere `0.114H` across — **1.40x the forearm tube's diameter and 1.37x
+          // the whole forearm's LENGTH**. Ablation put 25.9% of the right forearm's
+          // entire footprint behind it (`tools/tmp/occluder.mjs`), which is the same
+          // defect round 1 found on waterbottle: "the occluder was its own hand,
+          // which is wider than the forearm was long."
+          //
+          // It is also redundant geometry — `buildHandleArc` already closes the
+          // segment with a `radius * 0.9` knob — so matching the tube is what the
+          // file's own description asked for all along: "a bowl handle terminates as
+          // a rounded lip of the same moulded ceramic, not a separate hand shape
+          // grafted on." `handRadius` itself is left alone because the ladle prop is
+          // sized off it.
+          // 1.30 x the forearm tube (sphere radius 1.20x it) is the measured
+          // setting, not a guessed one. At the old `handRadius` sizing — 1.40x the
+          // tube and 2.09x the forearm's whole LENGTH — the forearms delivered
+          // 0.337 / 0.383. At 1.15x they delivered 0.515 / 0.560 but the hand itself
+          // dropped to 0.379, because a knob that barely clears the tube is not a
+          // shape. 1.30x, with the forearm's duplicate end knob removed, is the
+          // point where BOTH clear the 0.50 gate and soup passes idle for the first
+          // time. `handRadius` itself is untouched because the ladle prop is sized
+          // off it.
+          const forearmR = this.rig.metrics.armRadius * 0.92 * 0.52;
+          return buildHandleCap(forearmR * 1.30, handleMat);
+        }
         case 'thighL':
         case 'thighR':
           return taperedLimb(size.len, size.radius * 1.0, size.radius * 0.94, legMat);

@@ -443,7 +443,25 @@ export class HamburgerCharacter extends BaseCharacter {
     const PATTY_R = R * 0.60;
     const CHEESE_R = R * 0.74;
     const TOMATO_R = R * 0.63;
-    const LETTUCE_BASE_R = R * 0.56;
+    // ── 0.56R -> 0.70R, and it closes a floating leaf ─────────────────────────
+    // At 0.56R the base disc ended 0.10R INSIDE the nearest frill blob's inner
+    // surface (worst case `0.78 * 0.95 - 0.079 * 0.8 = 0.678R`), so at the
+    // character's silhouette edge — where nothing else of the burger is at that
+    // height, the tomato below being 0.63R and the crown above only starting at
+    // `crownBaseY` — a leaf had clear background on both sides of it. Measured
+    // (`tools/tmp/detach.mjs`, which ablates one mesh at a time out of the SHIPPED
+    // render rather than trusting an ID buffer): an **877 px connected component
+    // consisting of exactly one `lettuce_frill` and its outline hull**, i.e. a green
+    // pea floating in mid-air beside the burger. That is the failure mode the frill
+    // loop's own comment warns about, and it was live.
+    //
+    // 0.70R guarantees every blob overlaps the disc radially with margin, and it is
+    // still under the cheese (0.74R) and the crown (0.82R), so the step ladder and
+    // the outer silhouette — which the frill flare and the crown set, not this — do
+    // not move. What it does change is the read between the leaves: a solid green
+    // collar instead of background, which is what "leaf collar, not a ring of peas"
+    // asked for in the first place.
+    const LETTUCE_BASE_R = R * 0.70;
     // The frill must stay INSIDE the crown's own radius at mouth height
     // (~0.81R, see `crownSurface` at hFrac 0.25) or a leaf sits in front of the
     // face. 0.78R is the largest flare that clears it.
@@ -541,7 +559,13 @@ export class HamburgerCharacter extends BaseCharacter {
     // ── Lettuce — solid base disc + a ruffled ring of frill blobs sitting in
     // the upper portion of the band, so it reads as a leaf collar peeking out
     // from under the crown, not a flat green wafer. ─────────────────────────
-    const lettuceBaseH = LETTUCE_H * 0.48;
+    // 0.48 -> 0.86 of the band. The frills are centred at `0.52 * LETTUCE_H` with up
+    // to `±0.26 * LETTUCE_H` of jitter, so a high, small blob's underside sat at
+    // `0.61 * LETTUCE_H` — above a disc that stopped at `0.48`. The radial fix above
+    // does not help a leaf that misses the disc VERTICALLY, and both gaps had to
+    // close for the component to merge. 0.86 still leaves the crown (which starts at
+    // `1.0 * LETTUCE_H`) sitting visibly ON the lettuce band rather than in it.
+    const lettuceBaseH = LETTUCE_H * 0.86;
     const lettuceBase = new THREE.Mesh(roundedPuck(LETTUCE_BASE_R, lettuceBaseH, LETTUCE_BASE_R * 0.07), lettuceMatA);
     lettuceBase.name = 'lettuce_base';
     lettuceBase.position.y = lettuceY;
@@ -1010,15 +1034,27 @@ export class HamburgerCharacter extends BaseCharacter {
     // front wall) read forwards instead of backwards: a large single-normal
     // surface renders as one flat value, and whether that value is near-black or
     // near-white it reads as a slab either way.
+    //
+    // The curl is a FUNCTION, not a loop body, because anything mounted on the blade
+    // has to be curled by the same amount — see the slots below, which were not, and
+    // drifted clean off the tool.
+    /** Blade curl at local height `y`, radians. 0 at the neck, ~31 deg at the tip. */
+    const bladeCurl = (y: number) => {
+      const t = THREE.MathUtils.clamp(y / 0.66, 0, 1);
+      return t * t * 0.55;
+    };
+    /** A point in the blade's PRE-curl space, moved to where the curl actually put it. */
+    const onBlade = (y: number, z: number) => {
+      const b = bladeCurl(y), c = Math.cos(b), s = Math.sin(b);
+      return new THREE.Vector3(0, y * c - z * s, y * s + z * c);
+    };
     {
       const pos = bladeGeo.attributes.position as THREE.BufferAttribute;
       const v = new THREE.Vector3();
       for (let i = 0; i < pos.count; i++) {
         v.fromBufferAttribute(pos, i);
-        const t = THREE.MathUtils.clamp(v.y / 0.66, 0, 1);
-        const bend = t * t * 0.55;               // 0 at the neck, ~31 deg at the tip
-        const c = Math.cos(bend), s = Math.sin(bend);
-        pos.setXYZ(i, v.x, v.y * c - v.z * s, v.y * s + v.z * c);
+        const p = onBlade(v.y, v.z);
+        pos.setXYZ(i, v.x, p.y, p.z);
       }
       pos.needsUpdate = true;
     }
@@ -1033,18 +1069,43 @@ export class HamburgerCharacter extends BaseCharacter {
 
     // Slotted turner holes — three flush decal ovals climbing the blade's own
     // centreline, the detail that finishes selling "kitchen turner" up close.
+    //
+    // ── They were placed in the blade's PRE-CURL coordinates ──────────────────
+    // The curl above was added later (to fix the "flat unshaded slab" critique) and
+    // it moves the blade's own vertices without moving anything mounted on them. At
+    // the top slot that is a 0.22 displacement in z — seven times the slot's own
+    // radius — so the disc parted company with the tool entirely and rendered as a
+    // grey circle floating in the background beside the character. It carries
+    // `noOutline`, so it had no ink edge to give it away, and it is the whole of
+    // hamburger's last remaining detachment: a **197 px connected component**, named
+    // by ablating one mesh at a time out of the shipped render
+    // (`tools/tmp/detach.mjs`). `tools/tmp/islands.mjs` had reported this same mesh
+    // as ZERO-PIXEL, which is the ID-buffer trap in `docs/LESSONS.md` §12 pointing at
+    // a real defect from the wrong end.
+    //
+    // `onBlade` is the same function the vertex loop uses, so the discs cannot drift
+    // again if the curl is ever retuned, and `rotation.x` tilts each disc onto the
+    // local surface tangent (the curl IS a rotation about X, applied about the
+    // blade's own origin).
     const slotGeo = new THREE.CircleGeometry(0.032, 14);
     for (const sy of [0.22, 0.40, 0.56]) {
+      const front = onBlade(sy, 0.017);
       const slot = new THREE.Mesh(slotGeo, spatulaSlotMat);
       slot.name = 'spatula_slot__no_outline';
       slot.userData.noOutline = true;
-      slot.position.set(0, sy, 0.017);
+      slot.position.copy(front);
+      slot.rotation.x = bladeCurl(sy);
       blade.add(slot);
+      const back = onBlade(sy, -0.017);
       const slotBack = new THREE.Mesh(slotGeo, spatulaSlotMat);
       slotBack.name = 'spatula_slot__no_outline';
       slotBack.userData.noOutline = true;
-      slotBack.rotation.y = Math.PI;
-      slotBack.position.set(0, sy, -0.017);
+      // Euler order is XYZ, i.e. v' = Rx * Ry * v — the flip happens FIRST and the
+      // curl tilt is then applied about the blade's X, which is what is wanted.
+      // (`docs/LESSONS.md` §12 warns about composing x-then-y on a flat plane; the
+      // order here is deliberate and is the one that keeps the disc on the surface.)
+      slotBack.rotation.set(bladeCurl(sy), Math.PI, 0);
+      slotBack.position.copy(back);
       blade.add(slotBack);
     }
 

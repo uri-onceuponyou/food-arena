@@ -85,6 +85,42 @@
  * `tools/tmp/legmodel.mjs` prints the ratio that decides it; it sorted the cast
  * into the measured pass/fail piles with no overlap. See each archetype below.
  *
+ * ── ⚠️ THE ARM ROW HAS THE SAME DEFECT AND HAS NOT BEEN FIXED ────────────────
+ * Round 2 fixed the legs and never checked the arms. Round 3 measured them. The
+ * arm chain is built by the identical arithmetic — `armLen = height *
+ * armFraction`, split 0.523 / 0.477, drawn as `CapsuleGeometry(r, len - 2r)` with
+ * `r = armRadius` (upper) and `armRadius * 0.92` (fore) — so the same ratio
+ * decides whether a forearm is a limb or a ball:
+ *
+ * | archetype  | `armFraction` | forearm len / 2r | hand diameter / forearm len |
+ * |------------|---------------|------------------|------------------------------|
+ * | `stub`     | 0.19          | 0.79             | 1.38                         |
+ * | `stout`    | 0.175         | **0.53**         | **2.09**                     |
+ * | `standard` | 0.22          | 0.98             | 1.32                         |
+ * | `lanky`    | 0.30          | **1.94**         | 0.77                         |
+ *
+ * Read that against the legs' measured split — every character at <= 0.31 failed,
+ * every character at >= 0.70 passed — and **LANKY is the only archetype whose arm
+ * segments are longer than they are thick**, exactly as LANKY was the only one
+ * whose legs were. On three of the four, the HAND BALL is wider than the whole
+ * forearm is long, so the segment has no visible middle at any camera angle.
+ *
+ * This was confirmed on the character where it was worst. Soup's forearms were the
+ * cast's lowest-delivering limb group (0.337 / 0.383), two bow retunes had already
+ * measured worse, and the occluder — named by ablation in `tools/tmp/occluder.mjs`,
+ * which reproduces `limbcheck`'s own metric and then hides one candidate at a time —
+ * turned out to be **its own upper arm (40.7% of the forearm's footprint) and its
+ * own hand cap (25.9%)**, with the bowl contributing nothing. Lengthening soup's
+ * arm to `armFraction: 0.245` (forearm ratio 0.75, i.e. just over the legs' own
+ * pass threshold) and sizing the terminal cap against the forearm instead of
+ * `handRadius` took them to 0.515 / 0.560.
+ *
+ * **The archetype values below are deliberately NOT changed.** Soup's fix is
+ * character-local because moving `armFraction` here moves nine characters at once
+ * and every one of them needs re-measuring — that is the legs' pass over again and
+ * it wants its own. `heaviness` does not read `armFraction`, so the motion weights
+ * are not affected either way.
+ *
  * Total nominal height stays near 0.95H in every archetype, so the cast still
  * reads as one family. When a character's food mass is not the ±R sphere the rig
  * assumes — most of them aren't — it re-balances with its own `headFraction` or

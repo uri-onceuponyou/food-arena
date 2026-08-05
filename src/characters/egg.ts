@@ -621,7 +621,7 @@ export class EggCharacter extends BaseCharacter {
       }
     });
 
-    this.buildFace(head, R);
+    this.buildFace(R);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -629,14 +629,28 @@ export class EggCharacter extends BaseCharacter {
   }
 
   /**
-   * Face features are added directly to `head` rather than `rig.joints.face`:
-   * `eggSurface()` already returns exact head-local surface coordinates, and
-   * `face`'s built-in forward offset (tuned for a plain sphere) would double up
-   * incorrectly against this custom ovoid. Open eyes with catchlights, thin
-   * shell-toned brow creases (an egg has no hair, so "worry" reads as a raised
-   * ridge, not eyebrows), and a straight, deadpan mouth.
+   * Open eyes with catchlights, thin shell-toned brow creases (an egg has no hair,
+   * so "worry" reads as a raised ridge, not eyebrows), and a small worried mouth.
+   *
+   * ── Mounted on `rig.joints.face`, re-anchored at the head origin ─────────────
+   * Every feature here is authored in EXACT head-local surface coordinates by
+   * `eggSurface()`, so it cannot inherit `face`'s built-in forward offset (which is
+   * tuned for a plain sphere and would double up against this ovoid). The offset is
+   * therefore zeroed and the features are parented to `face` anyway, which is a pure
+   * reparent: `face` is a direct child of `head` with an identity transform once the
+   * offset is cleared, so not one vertex moves.
+   *
+   * It is not cosmetic. `thumbs.ts`'s character-select framing rule is FACE-AWARE —
+   * it crops to the lower of the waist and a margin below the bottom of the face,
+   * read from this joint — and it falls back to the whole head box when the joint is
+   * empty, which is a guess. `tools/tmp/chars_metrics.mjs` likewise cannot assert a
+   * face it cannot find, and four of eleven characters were outside that test.
+   * Verified with `tools/tmp/facemove.mjs`: the world matrix of every mesh in the
+   * model hashes identically before and after.
    */
-  private buildFace(head: THREE.Group, R: number): void {
+  private buildFace(R: number): void {
+    const face = this.rig.joints.face;
+    face.position.set(0, 0, 0);
     const EYE_THETA = 0.50;
     const EYE_PHI = 0.43 * Math.PI;
     // At the old sizing every feature here (eyes, brows, mouth) sat well under
@@ -649,7 +663,7 @@ export class EggCharacter extends BaseCharacter {
     const FS = 1.35;
 
     for (const sx of [-1, 1] as const) {
-      const eye = addShellDecal(head, sx * EYE_THETA, EYE_PHI, R * 0.012, R);
+      const eye = addShellDecal(face, sx * EYE_THETA, EYE_PHI, R * 0.012, R);
 
       const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.125 * FS, 16, 14), toonMat({ color: '#FFFFFF', roughness: 0.3 }));
       white.scale.set(1, 1.08, 0.55);
@@ -674,7 +688,7 @@ export class EggCharacter extends BaseCharacter {
       // so the right crease now sits higher and cocks harder than the left, one
       // genuinely raised eyebrow rather than two symmetric worry lines.
       const browPhi = sx > 0 ? EYE_PHI - 0.205 : EYE_PHI - 0.135;
-      const brow = addShellDecal(head, sx * EYE_THETA * 0.92, browPhi, R * 0.010, R);
+      const brow = addShellDecal(face, sx * EYE_THETA * 0.92, browPhi, R * 0.010, R);
       const creaseMesh = new THREE.Mesh(
         roundedBox(R * 0.20 * FS, R * 0.040 * FS, R * 0.028 * FS, R * 0.018, 2),
         toonMat({ color: SHELL_SHADOW, roughness: 0.45 })
@@ -692,7 +706,7 @@ export class EggCharacter extends BaseCharacter {
     // cast. A small open ring pairs naturally with the raised-crease worry above
     // it (about to hatch, bracing for a hit) while staying dainty/deadpan rather
     // than a wide cartoon gasp.
-    const mouth = addShellDecal(head, 0, 0.505 * Math.PI, R * 0.010, R);
+    const mouth = addShellDecal(face, 0, 0.505 * Math.PI, R * 0.010, R);
     const mouthMesh = new THREE.Mesh(
       new THREE.TorusGeometry(R * 0.052 * FS, R * 0.019 * FS, 10, 16),
       toonMat({ color: INK, roughness: 0.3 })

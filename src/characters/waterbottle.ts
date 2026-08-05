@@ -753,7 +753,18 @@ export class WaterBottleCharacter extends BaseCharacter {
     R: number,
     shellSurface: (theta: number, yF: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }
   ): void {
-    const head = this.rig.joints.head;
+    // ── Mounted on `rig.joints.face`, re-anchored at the head origin ───────────
+    // Every feature is authored in EXACT shell-surface coords by `shellSurface`, so it
+    // cannot inherit `face`'s generic sphere-tuned forward offset — that offset is
+    // zeroed and the features are parented to `face` anyway. With the offset cleared
+    // `face` is a direct child of `head` with an identity transform, so this is a pure
+    // reparent: nothing moves (proved by `tools/tmp/facemove.mjs`, which hashes every
+    // mesh world matrix in the model). It matters because `thumbs.ts`'s character-select
+    // framing rule is FACE-AWARE and falls back to the whole head box when this joint is
+    // empty — a guess — and `tools/tmp/chars_metrics.mjs` cannot assert a face it cannot
+    // find, which put four of the eleven characters outside that test.
+    const face = this.rig.joints.face;
+    face.position.set(0, 0, 0);
     const ink = PALETTE.ink;
 
     const EYE_THETA = 0.40;
@@ -768,7 +779,7 @@ export class WaterBottleCharacter extends BaseCharacter {
       const eyeG = new THREE.Group();
       eyeG.position.copy(pos).addScaledVector(outward, R * 0.02);
       eyeG.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
-      head.add(eyeG);
+      face.add(eyeG);
 
       const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.155, 16, 14), eyeMat);
       eye.scale.set(1, 1.05, 0.6);
@@ -799,7 +810,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     const mouthG = new THREE.Group();
     mouthG.position.copy(mouthPt.pos).addScaledVector(mouthOutward, R * 0.022);
     mouthG.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthOutward);
-    head.add(mouthG);
+    face.add(mouthG);
 
     const smileMat = toonMat({ color: LABEL_PALE, roughness: 0.4 });
     const smile = new THREE.Mesh(

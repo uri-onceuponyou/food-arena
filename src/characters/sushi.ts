@@ -567,10 +567,18 @@ export class SushiCharacter extends BaseCharacter {
   private buildFace(R: number, yAt: (h: number) => number, zAt: (x: number, h: number) => number): void {
     const face = this.rig.joints.face;
     // `face` carries the rig's generic forward offset tuned for a plain sphere; this
-    // model's surface is authored directly on `head` instead, in exact local coords,
-    // so re-anchor `face` at the head origin and add features to `head` itself.
+    // model's surface is authored in exact head-local coords instead, so the offset
+    // is zeroed — and the features are then parented to `face` ANYWAY. With the
+    // offset cleared `face` is a direct child of `head` with an identity transform,
+    // so this is a pure reparent and not one vertex moves (proved by
+    // `tools/tmp/facemove.mjs`, which hashes every mesh's world matrix).
+    //
+    // Parenting to `head` instead — which is what this file used to do — left the
+    // `face` joint EMPTY, and two things read that joint: `thumbs.ts`'s
+    // character-select framing rule (face-aware; it falls back to the whole head box,
+    // i.e. a guess) and `tools/tmp/chars_metrics.mjs`'s face assertion (which simply
+    // could not see four of the eleven characters).
     face.position.set(0, 0, 0);
-    const head = this.rig.joints.head;
     const ink = PALETTE.ink;
     const browMat = toonMat({ color: SALMON_DARK, roughness: 0.35 }); // ties the brow to the fish accent colour
 
@@ -601,7 +609,7 @@ export class SushiCharacter extends BaseCharacter {
           new THREE.Matrix4().makeBasis(right, up, fwd)
         );
       }
-      head.add(eye);
+      face.add(eye);
 
       // Sclera — wide white eye, the "slightly startled" read.
       const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.135, 18, 14), toonMat({ color: '#FFFFFF', roughness: 0.25 }));
@@ -646,13 +654,13 @@ export class SushiCharacter extends BaseCharacter {
     lips.name = 'sushi_lips';
     lips.position.set(0, mouthY, mouthZ);
     lips.castShadow = true;
-    head.add(lips);
+    face.add(lips);
     // A dark inner disc so the "o" reads as an open pucker, not a solid pink bead.
     const lipHole = new THREE.Mesh(new THREE.CircleGeometry(R * 0.019, 12), toonMat({ color: '#7A2E38', roughness: 0.5 }));
     lipHole.name = 'sushi_lip_hole__no_outline';
     lipHole.userData.noOutline = true;
     lipHole.position.set(0, mouthY, mouthZ + R * 0.004);
-    head.add(lipHole);
+    face.add(lipHole);
   }
 
   /**

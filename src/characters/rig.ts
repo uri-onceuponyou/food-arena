@@ -313,6 +313,30 @@ export class ChibiRig {
    * bob. Run `bodyRise` spanned only 0.067-0.088 of height across the whole cast —
    * and the heaviest character bobbed the LEAST. This is the one number that fixes
    * that, and it is derived so it cannot drift out of sync with `bodies.ts`.
+   *
+   * ── SCORED (round 3). It works, and only one of its three channels does ─────
+   * The round-2 leg rewrite moved this number (STUB 1.00 -> 0.83, STOUT 1.00 ->
+   * 0.97, STANDARD 0.47 -> 0.38) and left the resulting motion unmeasured. Measured
+   * now, `tools/motion_probe.mjs --anims run` over one full cycle per character:
+   *
+   *   `bodyRise` (peak-to-peak body travel / height)
+   *     STOUT   hamburger 0.0903  soup 0.0931  taco 0.0967
+   *     STUB    egg 0.1051  waterbottle 0.1066  donut 0.1255  lollipop 0.1417
+   *     STANDARD sushi 0.1170  pizza 0.1378        LANKY  hotdog 0.1475  burrito 0.1496
+   *
+   * The two ranges are **disjoint** — the lightest STOUT is 8.7% below the heaviest
+   * STUB — and the whole cast orders monotonically by weight. Before round 2 both
+   * archetypes sat on the clamp at exactly 1.0 and this figure was IDENTICAL for
+   * them by construction, so the separation is new and it is real.
+   *
+   * The other two channels do NOT separate the archetypes, and that is worth
+   * knowing before anyone tunes them: `squash` is 0.1764 for all three STOUT and
+   * 0.134-0.1786 for STUB (egg OVERLAPS at 0.1786), and stride cadence is 0.717 s
+   * for STOUT against 0.66-0.73 s for STUB (egg overlaps again at ~0.725 s). The
+   * cause is that per-character overrides move `heaviness` further than the
+   * archetype does — egg is pure STUB but nothing else is, and lollipop's narrowed
+   * stance takes it to roughly 0.58. **The archetype is no longer the dominant term
+   * in this number.**
    */
   readonly heaviness: number;
   private readonly p: Required<RigProportions>;
@@ -952,7 +976,18 @@ export class ChibiRig {
       // 0.58 was measured first and moved the cast's mean wasted-limb figure at run
       // by only 3.9 points without closing anything outright, so it went further.
       // Stride length is the cost: foot travel drops ~23% against the old symmetric
-      // swing. `tools/filmstrip.mjs` still reads as a run — see the report.
+      // swing.
+      //
+      // ── SCORED (round 3): it still reads as a run, on all eleven ──────────────
+      // Contact sheets at `shots/motion/r3_run_{stub,stout,other}.png`, one full
+      // auto-detected cycle each, read frame by frame: every character alternates
+      // visible legs, every stride has real ground clearance (`footLift` 0.109 to
+      // 0.232 of leg length, nothing at zero), and no adjacent pair of cells repeats
+      // a pose, which is what a hitch or a skate looks like on a strip. `bobAtSplit`
+      // — the phase-inversion bug that once measured a perfect 1.000 on all four
+      // archetypes — is 0.000 to 0.040 across the cast, i.e. still inverted the
+      // right way round. The shortened rearward swing does read as a shorter stride
+      // and it is the right trade: it is what buys the trailing leg back.
       const BACK_LIFT = 0.45;
       const hipSwing = (s: number) => (s > 0 ? s * BACK_LIFT : s) * hipAmp;
       const hipXL = hipSwing(sw);
