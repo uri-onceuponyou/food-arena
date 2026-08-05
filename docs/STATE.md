@@ -279,8 +279,17 @@ lollipop and sushi. The dl table is 171 of 198 rows."*
 - **Seven weapon files carry a stale copy of the generic size curve**, each documenting it as matching
   `game/vfx.ts` — a claim the re-derivation invalidated. **Soup's three impact hooks read `ctx.damage`
   nowhere (1.00×).** Needs per-weapon floors first, or small weapons drop under the ~300 px floor.
-- **`limbcheck.mjs` and `limbcheck_pitch.mjs` are 93.3% identical**, while the latter's header claims
-  byte-identity so *"any delta is PITCH"*. **Every 22°-vs-58° comparison rests on that claim.**
+- ~~**`limbcheck.mjs` and `limbcheck_pitch.mjs` are 93.3% identical**, while the latter's header claims
+  byte-identity so *"any delta is PITCH"*. **Every 22°-vs-58° comparison rests on that claim.**~~
+  ⚠️ **RESOLVED — the warning OVERSTATED the defect, and the old wording is struck above.** The two
+  files were diffed directly: 25 differing lines, and the only **executable** differences are
+  (a) `const PITCH = Number(get('--pitch', 22))`, (b) one extra `console.log` banner, and
+  (c) `&pitch=${PITCH}` appended to the preview URL. **`limbcheck` IS `limbcheck_pitch --pitch 22`**,
+  so "any delta is PITCH" holds. The 93.3% figure was a *line* count over a mostly-comment file —
+  a reminder that a similarity percentage over prose says nothing about behaviour.
+  **The real limitation stands untouched:** `limbcheck` measures the preview's **22°** while the
+  match camera is **58°**; at 58° idle passes go 8/11 → 0/11, idle *ranking* survives (ρ 0.927) and
+  **run ranking does not** (ρ 0.673).
 - `perf_tier.mjs` should be `perf.mjs --query`; the clone-census budget is a holding action.
 - Skins need a per-character material-variant system that does not exist.
 - Character select is **n=1** — packets `select2-c2..c6` are built and waiting for five more critics.
