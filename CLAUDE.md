@@ -56,7 +56,13 @@ Not style preferences. Every one exists because breaking it cost hours.
    answered with a drift control rather than a guessed tolerance.
 
 5. **Probe before you loop.** Every plateau ever probed here was a **bug**, not a taste gap — now
-   **eight for eight**. A probe has repeatedly beaten a ~300k critic loop.
+   **nine for nine**. The ninth: six probes on the "flat, unlit surfaces" plateau found that
+   `Material.clone()` silently drops `onBeforeCompile`, so 54 clone sites had lost the Fresnel rim
+   and it reached **1.402% of pixels**. A probe has repeatedly beaten a ~300k critic loop.
+   ⚠️ **But see `docs/LESSONS.md` §6b before you act on what a probe finds.** That one was real,
+   correctly measured, fixed — and the blind score **did not move**, because the metric it produced
+   governed the minority of the frame. **A probe tells you what is broken; it does not tell you that
+   fixing it is what the viewer is reacting to.**
 
 6. **⚠️ VALIDATE EVERY INSTRUMENT AGAINST A KNOWN-BAD INPUT BEFORE BELIEVING IT.**
    **Nineteen** instruments were caught returning confident wrong answers in one session — including
