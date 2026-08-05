@@ -18,6 +18,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **12** | ⚠️ **Game is now MUCH harder: 51.2% → 31.8%** | the harder version | **your call — this one is big** | `ENEMY_MAX_HP` ≈123 restores it |
 | **15** | Should a fleeing enemy shoot at you? | it fires backwards | **measured at a further −25.9pp — parked, not landed** | a two-word patch |
 | **16** | Soup lost its red band, egg went cream, cast p95 is +0.027 over reference | shipped | **look at it — these are looks, not measurements** | per-character, self-contained |
+| **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
 | **11** | Longer legs — every silhouette changed | longer | **keep** — legs now exist at all | 2 constants + 1 row/archetype |
@@ -311,73 +312,51 @@ does Hamburger at 767 Hz read as "heavy" or merely "muffled"?
 
 ---
 
-### ✅ ANSWERED — Uri played it, and the answer is none of the things that were measured
+### ✅ ANSWERED, then RE-ANSWERED — and the first answer was wrong
 
 > **"It still seems like it's flat. One tone, maybe two, monotonic. I would expect a splash sound
 > when I throw a tomato and it hits, for example. More depth. More realism as much as possible."**
 
-**That is a different problem from everything this pillar had been measuring.** Four candidates had
-been prepared from measurement — the room reading as a small box, the soft clip flattening the mix,
-Hamburger's 767 Hz reading muffled, and sparse event coverage. **None of them is what he heard.**
-The real complaint is two things, and both are *build* work rather than tuning:
+⚠️ **The first diagnosis written here was falsified by measurement and has been deleted.** It said
+the sounds had no material identity (that impacts fell through to one generic sound) and that the
+synthesis was "one or two oscillators". Both are false: **32 of 33 impacts are bespoke**, no voice
+lacks noise, and `pizza.Tomato.impact` alone is **3 oscillators + 3 noise sources + 4 filters + 4
+shapers**. It is recorded here rather than quietly removed, because it is the exact failure this
+project keeps paying for — a confident description standing in for a measurement.
 
-**(a) The sounds have no material identity.** A tomato should *splat wetly*; glass should *shatter*;
-dough should *thud*. Right now a tomato hit is not distinguishable as a tomato hit. Note the
-coverage map's wording: impacts are *"bespoke **or** generic"* — so a weapon without a bespoke
-impact falls through to one generic sound, and that is almost certainly what he is hearing.
+**The real answer, measured on the production path** (`9d3d1a6`). Every audio instrument here
+rendered ONE sound in ISOLATION, which is how 91 depth and 77 identity assertions all passed on a
+mix nobody would call good. Recording a **real** match's event stream and replaying it through the
+**real** engine offline gives a completely different picture:
 
-**(b) The synthesis is too simple to carry realism.** *"One tone, maybe two"* is a literal
-description: a voice built from one or two oscillators and an envelope cannot sound like a splash.
-A splash is **filtered noise with a fast transient and a wet tail**, not a pitch.
+| | measured | reference |
+|---|---|---|
+| spectral tilt, 80 Hz–8 kHz | **−5.57 dB/oct** | pink −3.00, white 0.00 |
+| energy below 1 kHz | **86.2%** | — |
+| 1/6-oct bands within 6 dB of peak | **8 of 49 — all between 71 and 141 Hz** | — |
+| 2–6 kHz at a hit's *brightest instant* | **−25 dB** | — |
+| 6–16 kHz at the same instant | **−32 dB** | — |
 
-⚠️ **The constraint that shapes any fix:** this pillar is **procedural, with zero assets except the
-theme**. So the answer is not sampled splashes — it is layered synthesis (transient / body / tail,
-noise beds, filtered bursts), which is entirely achievable and is what "one or two tones" is
-missing.
+**"One tone, maybe two" is literally true in the spectrum.** The whole game lives in 80–650 Hz. The
+high band is not decaying too fast — **it never arrives**, which is precisely where a splash's
+identity lives.
 
-**Also note what this reframes.** `--mode identity` (77 assertions) proves sounds are
-*distinguishable from each other*. Uri's report proves distinguishable is **not** the same as
-*right for the material* — the same shape as this project's recurring lesson that a measurement can
-be perfectly true and still not answer the question you care about.
+**And the mix is silent most of the time.** Across 121 real matchups: mean play length **9.60 s**,
+and the mean gap between the start whistle and the first combat sound is **6.55 s — 69.9% of the
+match, in one unbroken silence**, with the music faded out and no ambience at all.
 
-**Still open from the original entry, and now lower priority than the above:** whether the room
-reads as a kitchen, and whether the soft-clip flattening (authored 13 dB apart, delivered 5 dB
-apart) should be spent by dropping the flow stings 4–5 dB. **Recommendation: do (a) and (b) first** —
-if every impact is one generic tone, no amount of room or headroom will fix "flat".
+**Two suspects formally cleared, so nobody re-opens them:**
+- **The soft clip is not the problem.** It reduces **2.00%** of signal by more than 0.5 dB, and the
+  delivered spread across a match's vocabulary is **18.9 dB — identical to the authored spread**.
+  The old "13 dB authored → 5 dB delivered" figure came from rendering catalogue sounds with no
+  placement; in a real match distance gain *adds* range. **So dropping the flow stings 4–5 dB is not
+  needed for flatness** — it remains your call for the ultimate's drama, but flatness is not the
+  argument for it.
+- **The bespoke voices do reach your ears.** Ablating one impact moves the whole match −4.56 dB,
+  about 130 dB above the instrument's own noise floor.
 
-### Evidence gathered since — not a verdict, but the room question now has a number
-
-The reverb return is doing measurable work **and is filling the tremolo's troughs**: at `wet: 0.22`
-a 24 Hz warble was completely undetectable against an unmodulated control, and only became
-measurable at `wet: 0.06`. `weapons/pizza.ts` had already hit this and rations its send inversely
-with spin rate. So if the room reads as *"a small box"* rather than *"a kitchen"*, there is a
-concrete lead: the current impulse (~190 ms) is **short enough to smear fast detail while too short
-to read as a large space** — the worst of both. Not changed; it is a taste call about the whole
-game's acoustic space. The Hamburger / 767 Hz question is untouched — nothing measured bears on it.
-
-### ❓ A NEW audio question, with numbers, and there is no free fix
-
-**The soft clip is flattening the top of the mix.** Eleven of 22 sounds sit above the knee *on
-their own*, and every centre-panned match-flow sting does:
-
-| sound | authored | delivered | soft clip takes |
-|---|---|---|---|
-| `castGiantSlam` (the ultimate) | 3.006 | 0.7439 FS | **−8.0 dB** |
-| `death` | 1.532 | 0.7225 FS | −2.4 dB |
-| `ringFloor` | 1.470 | 0.7168 FS | −2.1 dB |
-| `matchEnd.win` | 1.290 | 0.6905 FS | −1.3 dB |
-| `matchStart` | 1.017 | 0.6080 FS | −0.3 dB |
-
-**Authored 13.0 dB apart; delivered 5.0 dB apart.** The ultimate's authored level is 8 dB
-fictional — cutting it by 7 dB would change what you hear by ~0.5 dB. Nothing clips (the chain
-*structurally cannot* reach 0 dBFS), order is preserved, and the ultimate is still the loudest
-sound and still 3.6 dB above an ordinary impact — all asserted.
-
-**The choice, and there is no third option:** keep today's loudness and accept a compressed top,
-**or** drop the flow stings 4–5 dB so the ultimate is genuinely the biggest sound in the game.
-Raising the master trim to compensate would break the no-clipping guarantee. **Recommendation:
-drop the stings** — an ultimate that does not feel like an ultimate is the more expensive loss.
-Not done, because how loud the game should be is taste.
+**In flight now:** the roster-wide brightening pass, authorized by your "more depth, more realism as
+much as possible", plus a kitchen ambience bed for the silence. See **§17** for what still needs you.
 
 ---
 
@@ -678,3 +657,33 @@ egg in character select. That is a 30-second call and it is the kind only you ca
 self-contained named constants at the top of the file with the measurement in the comment. The
 whole-set revert is `git checkout 430c3c0 -- src/characters/` (**not** `git revert`, because the
 code is trapped inside the mislabelled `9854f2c`).
+
+
+---
+
+## 17. Two audio calls that are yours, now that the diagnosis is settled
+
+The roster-wide brightening and a kitchen ambience bed are **in flight** — your *"more depth, more
+realism as much as possible"* is the direction, so they did not wait. You will get **before/after
+WAVs of the same match** to judge in 30 seconds. These two were deliberately not taken:
+
+**1. Should the music keep playing during a match?** Today `shell.ts` fades it **out** for the whole
+match, and there is no ambience underneath it. That is what makes the measured 6.55-second gap — 70%
+of an average match — *total* silence rather than merely quiet. Brawl Stars never does this. Three
+options, and they are not exclusive: keep the music playing at a lower level, add the ambience bed
+(already being built), or add footsteps. **The ambience bed is going in regardless; the music
+question is yours** because it changes the feel of every match you have ever played of this build.
+
+**2. Should `generic.hurt()` drop about 3 dB?** It is **40.9% of the energy of every moment you are
+hit**. It is centre-panned at full level while the weapon that hit you is distance-attenuated, it is
+tied for the loudest recurring sound in the game, and it has the **lowest centroid of all sixteen
+keys** — sitting deepest into the band every weapon body already occupies. So the sound of *you
+being hurt* is masking the sound of *what hit you*.
+
+Dropping it would let you hear the weapon. Keeping it makes damage feel heavier. It is a real
+trade and it is taste, not measurement — one number, trivially reversible either way.
+
+**A caveat on the target, stated by the agent that measured it:** pink noise at −3.0 dB/oct is a
+*neutral broadband reference*, not a musical goal, and **there is no audio reference in this repo to
+measure Brawl Stars against** — the reference plates are images. So "brighter, toward −4.0" is
+steering by physics, and your ear is the only instrument that can say whether it landed.
