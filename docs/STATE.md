@@ -6,7 +6,10 @@ which, so treat those rows as "landing", not "untouched".
 
 **Judgement calls do not live here any more.** They are in **`docs/DECISIONS-FOR-URI.md`**, with
 what was assumed, what reversing costs, and why measurement could not settle it. Read that first
-if you are Uri.
+if you are Uri — it opens with a one-screen answer sheet.
+
+**→ For the live picture — what is uncommitted, who owns it, and what to do next — read
+`docs/RESUME.md` first.** It is the checkpoint; this file is the standing state.
 
 ---
 
