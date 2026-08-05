@@ -57,9 +57,47 @@ Measured since, over **363 real matches** (121 matchups × 3 policies):
 - But **13.0 s of the mean match is still walking**, and an arena-layout pass is cutting exactly
   that right now. → argues it will be **too long again** once that lands.
 
-A balance audit is sweeping every remaining `rules.ts` constant for the same 180 s-era assumption,
-and will report which conclusions flip if mean match length moves. **This is the single question in
-this file where more of my measurement genuinely helps, so expect a firmer recommendation shortly.**
+### ✅ ANSWERED — recommendation: keep 45 s. If you want to move it, 40 s is nearly free. **Do not go below 40 s.**
+
+A ~126,000-match audit (110 matchups × up to 25 seeds × 5 policies) settled this, and it **corrected
+two things I told you above.**
+
+**Correction 1 — the "fog 1.6% → 8.2%" figure compared two different estimators.** 1.5% was an
+*aggregate* share; 8.1% was a *mean of per-match ratios*. On one estimator (aggregate, `smart`):
+
+| clock | fog share | enemy killed by fog | player killed by fog | player win |
+|---|---|---|---|---|
+| 180 s | 0.8% | — | — | 55.0% |
+| 60 s | 2.1% | 10.8% | 0.2% | 55.2% |
+| **45 s (shipped)** | **3.7%** | **14.2%** | **0.9%** | **54.4%** |
+| 40 s | 5.2% | 17.0% | 2.9% | 53.8% |
+| 35 s | 9.7% | 22.9% | 5.8% | 51.4% |
+| 30 s | 19.2% | 25.5% | 20.3% | 43.8% |
+
+The decision was **directionally right** — 5× more fog — but its magnitude was **overstated ~2×**.
+
+**Correction 2 — almost nothing was ever tuned against 180 s.** Mean play length is **18.81 s at a
+180 s clock and 17.92 s at 45 s**; no match ever reached the old clock. Only the fog schedule
+derives from it. Everything else lives against play length and **engaged time (~6.0 s)**, which the
+clock change did not touch.
+
+**So the clock is not too long — the closing schedule is too slow.** The whistle only decides when a
+match *ends*; `FOG_FIRST_CONTACT_S` and the linear close decide when the ring *bites*. Making it
+bite at 20–25 s is a **schedule** change in `arena/shared.ts`, and it lets 45 s keep its proper role
+as a backstop. Shortening the clock instead costs three things:
+
+1. **Below 40 s the clock starts deciding matches** — −3.0 pp of player win rate at 35 s, −10.6 pp at
+   30 s, because fog is a flat 50 HP/s against unequal HP pools.
+2. **It hands you a degenerate strategy**, because the AI has no ring awareness: at 40 s the
+   pure-evasion policies' win rate jumped from 1–18% to **46–52%** — the enemy walks into the fog
+   while you stand still. *A combat/AI agent is fixing that now.*
+3. **It does not buy the timeout tiebreak anyway.** The longest match any of six policies produced
+   across 13,750 runs is **40.30 s**. To make the whistle routinely reachable you would be at ~30 s,
+   where you are truncating fights rather than stalemates.
+
+**The timeout tiebreak and FINAL RING are not dead code — they are 4.7 s out of reach**, and they
+come into reach on their own if the arena-layout pass lands its dead-time cut alongside a schedule
+change. I would not shorten the clock to reach them.
 
 **Related sub-question — answered, tell me if you disagree.** `FOG_FIRST_CONTACT_S` stays an
 **absolute 6 s** rather than scaling with the clock. Reasoning: it encodes a human duration you
