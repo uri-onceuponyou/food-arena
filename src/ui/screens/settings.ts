@@ -17,7 +17,7 @@
  * | Player | The name on the lobby badge. The one free-text field in the product; `profile.ts` owns the cap and the sanitiser, this file owns the field. |
  * | Audio | Fully wired to `src/audio`. Four real controls plus the engine's own state. |
  * | Graphics | Fully wired to `src/render/quality.ts`. See the section below. |
- * | Controls | The real bindings, IMPORTED from the modules that listen for them (see `KEYMAP`). Read-only, because nothing in the engine can rebind them yet — and this is the ONLY place in the product that tells a player `M` mutes. |
+ * | Controls | The real bindings, IMPORTED from the modules that listen for them. The four MOVEMENT keys are rebindable and everything else is stated as fixed — see the block below. This is also the ONLY place in the product that tells a player `M` mutes. |
  * | Game | One toggle, applied by this file, persisted by this file. |
  * | Danger zone | Wipes the saved profile and reboots. Destructive, so it is behind a confirm. |
  *
@@ -56,6 +56,32 @@
  * Nothing is called at boot: `renderTier()` reads storage lazily, so this screen is a
  * reader and a writer of a preference that already applies without it.
  *
+ * ── Rebinding: what is changeable, and the two things that make it safe ─────
+ * `game/input.ts` already anticipated this in its own header — *"the day the engine
+ * grows a rebinding table the only thing that changes is where `MOVE_KEYS` comes
+ * from"* — and `moveAxes()` re-reads `MOVE_KEYS` on every frame, so writing that table
+ * IS the rebind. There is deliberately no second map in this file: a UI-layer copy of
+ * the bindings is exactly the two-copies defect `input.ts` deleted when it exported
+ * this one, and it would be a settings screen that lies about the controls.
+ *
+ * Two properties bound the blast radius, and both are load-bearing rather than tidy:
+ *
+ *  1. **Only the PRIMARY binding of each direction moves.** The arrow keys are the
+ *     alternates and are never touched, so there is no reachable state — no storage
+ *     blob, no hand edit, no half-finished rebind — in which a player cannot move.
+ *     That is why the arrows are shown as a row of their own and labelled as fixed
+ *     rather than quietly omitted.
+ *  2. **A key that already does something is refused, with the reason said out loud.**
+ *     `MUTE_KEY`, `PAUSE_KEY`, the weapon digits and the keys the browser needs for
+ *     focus are all imported from the modules that own them, so the refusal list
+ *     cannot drift from the game either. `Esc` cancels a capture instead of binding,
+ *     which is also why it can never be bound: it is `PAUSE_KEY`.
+ *
+ * Everything else on the Controls list is stated as fixed BECAUSE IT IS: `MUTE_KEY`
+ * and `PAUSE_KEY` are compared as string primitives inside their own modules, so no
+ * amount of writing from here could move them, and a control offering to change them
+ * would be the dead-UI defect this screen exists not to have.
+ *
  * ── The audio API's own warnings, honoured ──────────────────────────────────
  * `audio.getState()` is `'idle'` until the page has been touched. A volume slider
  * that silently does nothing because the browser has not unlocked Web Audio is,
@@ -77,7 +103,7 @@ import {
 // The bindings the game actually listens for. See the KEYMAP block below — this used
 // to be a copy maintained by hand in this file.
 import { MOVE_KEYS, MUTE_KEY, MAX_WEAPON_SLOT_KEY, type MoveDirection } from '../../game/input';
-import { CHARACTERS, CHARACTER_IDS } from '../../game/rules';
+import { CHARACTERS, CHARACTER_IDS, LEVEL_MIN } from '../../game/rules';
 import { PAUSE_KEY } from './matchScreen';
 import { NAME_MAX } from './profile';
 import { ensureIconStyles, icon } from '../icons';
@@ -105,16 +131,27 @@ const REDUCE_MOTION_CLASS = 'fa-reduce-motion';
 
 interface StoredSettings {
   reduceMotion: boolean;
+  /**
+   * The PRIMARY movement key the player chose, per direction. A direction that is
+   * absent is on its shipped default — so an empty object is the factory state and
+   * a corrupt one degrades to it rather than to a fighter that cannot walk.
+   */
+  moveKeys: MoveBindings;
 }
 
 function loadSettings(): StoredSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    return { reduceMotion: parsed.reduceMotion === true };
+    return {
+      reduceMotion: parsed.reduceMotion === true,
+      // Validated, not trusted: a hand-edited or migrated blob is user input, and this
+      // one is read straight into the table the game matches key events against.
+      moveKeys: sanitizeBindings(parsed.moveKeys),
+    };
   } catch {
     // Private-mode Safari throws on localStorage access. Settings must still open.
-    return { reduceMotion: false };
+    return { reduceMotion: false, moveKeys: {} };
   }
 }
 
@@ -136,6 +173,11 @@ function saveSettings(s: StoredSettings): void {
 export function applyStoredSettings(): void {
   const s = loadSettings();
   document.documentElement.classList.toggle(REDUCE_MOTION_CLASS, s.reduceMotion);
+  // Movement bindings are the same kind of preference and have the same obligation:
+  // `shell.ts` calls this before the first screen mounts, so a rebind survives a
+  // reload and is in force for a match reached by any route — including the direct
+  // `/?player=&enemy=` one that never opens a menu.
+  applyMoveBindings(s.moveKeys);
 }
 
 // ── The real keyboard map ────────────────────────────────────────────────────
@@ -149,8 +191,8 @@ export function applyStoredSettings(): void {
 //   * pause ................................... `./matchScreen.ts`
 //   * how many weapon slots a digit can reach . `game/rules.ts`
 //
-// so the screen cannot drift from the game, and the day the engine grows a rebinding
-// table the only thing that changes is where `MOVE_KEYS` comes from.
+// so the screen cannot drift from the game, and THAT DAY HAS ARRIVED: `MOVE_KEYS` is
+// now written from here as well as read, and it is still the only copy.
 //
 // (The two mappings were checked against each other before they were collapsed, and
 // they had NOT drifted: W/A/S/D + arrows, M, 1-4 and Esc all matched what the code
@@ -161,6 +203,51 @@ export function applyStoredSettings(): void {
 
 /** The order the four directions are read out in: reading order on the keycaps. */
 const MOVE_ORDER: readonly MoveDirection[] = ['up', 'left', 'down', 'right'];
+
+/** What each direction is called out loud, for the refusal messages and the labels. */
+const MOVE_LABEL: Readonly<Record<MoveDirection, string>> = {
+  up: 'Move up', left: 'Move left', down: 'Move down', right: 'Move right',
+};
+
+/**
+ * The SHIPPED bindings, captured at module load — before anything can have rebound them.
+ *
+ * A shallow copy is enough and is deliberate: `applyMoveBindings()` only ever ASSIGNS a
+ * new array to `MOVE_KEYS[d]` and never mutates one in place, so the arrays this object
+ * holds are the originals and stay the originals for the life of the page. That is what
+ * makes "reset to defaults" a fact rather than a second table of literals.
+ */
+const DEFAULT_MOVE_KEYS: Readonly<Record<MoveDirection, readonly string[]>> = { ...MOVE_KEYS };
+
+/** A player's chosen PRIMARY key per direction. Missing = the shipped default. */
+type MoveBindings = Partial<Record<MoveDirection, string>>;
+
+/**
+ * Keys that already do something, and what — so a refusal can say WHY.
+ *
+ * Every entry is imported from the module that listens for it, for exactly the reason
+ * the map above is: a hand-typed reserved list is a second copy that drifts, and the
+ * failure mode here is a player binding a movement key that also mutes the game.
+ *
+ * The digits are the subtle ones. `input.ts:onKeyDown` reads `Number(e.key)` — the
+ * CHARACTER, not the code — so both the number row and the numpad select a weapon, and
+ * both have to be reserved even though only one of them is a `Digit*` code.
+ */
+const RESERVED_KEYS: ReadonlyArray<{ code: string; does: string }> = [
+  { code: MUTE_KEY, does: 'mutes the game' },
+  { code: PAUSE_KEY, does: 'pauses a match' },
+  { code: 'Tab', does: 'moves between controls' },
+  { code: 'Enter', does: 'presses the control you are on' },
+  { code: 'NumpadEnter', does: 'presses the control you are on' },
+  ...Array.from({ length: MAX_WEAPON_SLOT_KEY }, (_, i) => [
+    { code: `Digit${i + 1}`, does: 'picks a weapon' },
+    { code: `Numpad${i + 1}`, does: 'picks a weapon' },
+  ]).flat(),
+];
+
+function reservedReason(code: string): string | null {
+  return RESERVED_KEYS.find((r) => r.code === code)?.does ?? null;
+}
 
 /**
  * `KeyboardEvent.code` (a physical key position) -> the glyph printed on that key.
@@ -184,40 +271,78 @@ function keyCap(code: string): string {
 }
 
 /**
- * One row per BINDING RANK: everything each direction lists first ("Move"), then
- * everything it lists second ("Move (alt)"), and so on. Generic rather than two
- * hard-coded rows, so adding a third alternate to `MOVE_KEYS` draws a third row
- * instead of silently going unmentioned.
+ * WRITE the bindings the game matches against.
+ *
+ * This is the whole rebinding mechanism, and it is three lines because `input.ts` was
+ * already built for it: `moveAxes()` reads `MOVE_KEYS[dir]` on every frame, so a new
+ * array assigned here is in force on the very next tick of a live match — no reload, no
+ * event, no second listener. The `as` is the one honest cost: the table is typed
+ * `Readonly` for its ~dozen readers, which is right, and this is its one writer.
+ *
+ * `MOVE_KEYS[d]` is ASSIGNED, never mutated in place — see `DEFAULT_MOVE_KEYS`, whose
+ * correctness depends on it. A chosen key that duplicates one of the direction's own
+ * alternates is de-duplicated rather than refused: `keyDown()` is a `some()` over the
+ * list, so a repeat would work and read as "↑ ↑" on the card, which is a display bug
+ * dressed as a rule.
  */
-function moveRows(): Array<{ action: string; keys: string[] }> {
-  const depth = Math.max(...MOVE_ORDER.map((d) => MOVE_KEYS[d].length));
-  const rows: Array<{ action: string; keys: string[] }> = [];
-  for (let i = 0; i < depth; i++) {
-    const keys = MOVE_ORDER
-      .map((d) => MOVE_KEYS[d][i])
-      .filter((code): code is string => typeof code === 'string')
-      .map(keyCap);
-    if (keys.length > 0) rows.push({ action: i === 0 ? 'Move' : 'Move (alt)', keys });
+function applyMoveBindings(custom: MoveBindings): void {
+  const table = MOVE_KEYS as Record<MoveDirection, readonly string[]>;
+  for (const dir of MOVE_ORDER) {
+    const def = DEFAULT_MOVE_KEYS[dir];
+    const primary = custom[dir];
+    table[dir] = primary ? [primary, ...def.slice(1).filter((k) => k !== primary)] : def;
   }
-  return rows;
 }
 
-/** The digits that can ever select something: `input.ts` accepts 1..9, and
- *  `setWeaponCount()` bounds it at the equipped fighter's real weapon count, so the
- *  honest answer is the fattest kit on the roster. */
-function weaponSlotCaps(): string[] {
-  const most = Math.max(...CHARACTER_IDS.map((id) => CHARACTERS[id].weapons.length));
-  return Array.from({ length: Math.min(most, MAX_WEAPON_SLOT_KEY) }, (_, i) => String(i + 1));
+/**
+ * Validate a stored binding map. Anything unexplainable is DROPPED, never repaired.
+ *
+ * The order matters: each accepted key is added to `taken`, so a blob claiming the same
+ * code for two directions keeps the first and drops the second rather than producing a
+ * table in which one key moves you two ways at once.
+ */
+function sanitizeBindings(raw: unknown): MoveBindings {
+  const out: MoveBindings = {};
+  if (raw === null || typeof raw !== 'object') return out;
+  const src = raw as Record<string, unknown>;
+  const taken = new Set<string>();
+  for (const dir of MOVE_ORDER) {
+    const code = src[dir];
+    // `KeyboardEvent.code` is a short identifier; 32 is far past the longest real one
+    // and is here so a hostile blob cannot put a kilobyte into a keycap.
+    if (typeof code !== 'string' || code.length === 0 || code.length > 32) continue;
+    if (reservedReason(code)) continue;
+    if (taken.has(code)) continue;
+    if (MOVE_ORDER.some((other) => other !== dir && DEFAULT_MOVE_KEYS[other].includes(code))) continue;
+    taken.add(code);
+    out[dir] = code;
+  }
+  return out;
 }
 
-const KEYMAP: ReadonlyArray<{ action: string; keys: string[] }> = [
-  ...moveRows(),
-  { action: 'Aim', keys: ['Mouse'] },
-  { action: 'Fire', keys: ['Click'] },
-  { action: 'Switch weapon', keys: weaponSlotCaps() },
-  { action: 'Mute / unmute', keys: [keyCap(MUTE_KEY)] },
-  { action: 'Pause', keys: [keyCap(PAUSE_KEY)] },
-];
+/**
+ * Why `code` may not be bound to `dir`, in words, or null if it may.
+ *
+ * Refusing rather than swapping is the deliberate choice: a swap changes a binding the
+ * player did not ask about, and they find out by walking the wrong way in a match.
+ */
+function bindingConflict(dir: MoveDirection, code: string, current: MoveBindings): string | null {
+  const does = reservedReason(code);
+  if (does) return `${keyCap(code)} already ${does}.`;
+  for (const other of MOVE_ORDER) {
+    if (other === dir) continue;
+    const primary = current[other] ?? DEFAULT_MOVE_KEYS[other][0];
+    if (primary === code || DEFAULT_MOVE_KEYS[other].includes(code)) {
+      return `${keyCap(code)} is already ${MOVE_LABEL[other].toLowerCase()}.`;
+    }
+  }
+  return null;
+}
+
+/** True while any direction is off its shipped key — what the Reset control exists for. */
+function bindingsAreCustom(): boolean {
+  return MOVE_ORDER.some((d) => MOVE_KEYS[d][0] !== DEFAULT_MOVE_KEYS[d][0]);
+}
 
 /**
  * A music note.
@@ -248,6 +373,61 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
 
   const root = el('div', 'fa-screen fa-settings');
   let stored = loadSettings();
+
+  /** The direction currently waiting for a key, or null. */
+  let listening: MoveDirection | null = null;
+
+  /**
+   * Everything on the Controls list that is NOT rebindable, derived every render.
+   *
+   * ── The weapon row is a defect fix, not a tidy-up ──────────────────────────
+   * It used to print the FATTEST kit on the roster — `1 2 3 4` for everybody — with a
+   * comment calling that "the honest answer". It is not: `setWeaponCount()` bounds the
+   * digits at the EQUIPPED fighter's real weapon count, so a Donut player (one weapon)
+   * was shown three keys that do nothing, and this project has now found three separate
+   * cases of a screen showing a number the model does not compute. The count comes off
+   * `ctx.profile.selected` instead, and a one-weapon fighter gets no row at all plus a
+   * sentence saying why — because an empty row is the same lie with less type in it.
+   */
+  const staticRows = (): Array<{ action: string; keys: string[] }> => {
+    const rows: Array<{ action: string; keys: string[] }> = [];
+    // Everything each direction lists AFTER its primary — the fixed arrow fallback.
+    // Read off the live table so a rebind that lands on a direction's own alternate
+    // (de-duplicated in `applyMoveBindings`) cannot leave a phantom cap here.
+    const alts = MOVE_ORDER.flatMap((d) => MOVE_KEYS[d].slice(1)).map(keyCap);
+    if (alts.length > 0) rows.push({ action: 'Move (fixed)', keys: alts });
+    rows.push({ action: 'Aim', keys: ['Mouse'] });
+    rows.push({ action: 'Fire', keys: ['Click'] });
+    const kit = Math.min(CHARACTERS[ctx.profile.selected].weapons.length, MAX_WEAPON_SLOT_KEY);
+    if (kit > 1) {
+      rows.push({ action: 'Switch weapon', keys: Array.from({ length: kit }, (_, i) => String(i + 1)) });
+    }
+    rows.push({ action: 'Mute / unmute', keys: [keyCap(MUTE_KEY)] });
+    rows.push({ action: 'Pause', keys: [keyCap(PAUSE_KEY)] });
+    return rows;
+  };
+
+  /**
+   * The sentence under the Controls list. Every clause in it is checked against the
+   * module that implements it, because the version this replaced had TWO that were not:
+   *
+   *   * *"These are fixed for now — rebinding isn't built yet."* Now false above it.
+   *   * *"On a phone, twin sticks appear automatically IN LANDSCAPE."* This one mattered.
+   *     `game/touch.ts` installs on any device reporting touch points and has no
+   *     orientation test anywhere in it; the sticks are floating and claim a finger by
+   *     which half of the width it lands in (`ZONE_SPLIT = 0.5`). A portrait player was
+   *     being told by the only controls documentation in the product that their controls
+   *     did not exist — and the touch pass that had just proved the portrait thumb band
+   *     works could not fix this line, because this file has a different owner.
+   */
+  const controlsNote = (): string => {
+    const kit = CHARACTERS[ctx.profile.selected].weapons.length;
+    const solo = kit > 1 ? '' : ` ${CHARACTERS[ctx.profile.selected].name} carries one weapon, `
+      + 'so there is no weapon-switch key while it is equipped.';
+    return `Aim, fire, mute and pause are fixed.${solo} On a phone, twin sticks appear `
+      + 'under your thumbs — the left half of the screen moves, the right half aims and '
+      + 'fires — in landscape and in portrait alike.';
+  };
 
   /** One labelled row. `control` is trusted markup built below, never user input. */
   const row = (iconMarkup: string, label: string, sub: string, control: string): string => `
@@ -356,15 +536,33 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
 
       <section class="fa-panel set-section">
         <p class="fa-panel-title">Controls</p>
-        <div class="set-keys">
-          ${KEYMAP.map((b) => `
-            <div class="set-key-row">
-              <span class="set-key-action">${b.action}</span>
-              <span class="set-key-caps">${b.keys.map((k) => `<kbd class="set-cap">${k}</kbd>`).join('')}</span>
-            </div>`).join('')}
+
+        <!-- The four rebindable keys, laid out in the SHAPE OF THE KEYS THEMSELVES.
+             NOTE the single quotes below: this comment is inside a JS template
+             literal, so one backtick anywhere in it terminates the string and 500s
+             the dev server for every agent in the repo. docs/LESSONS.md section 9,
+             which has now bitten eight times.
+             A 3x2 cluster rather than four labelled rows because that is what a
+             'KeyboardEvent.code' IS — a physical key position, not a glyph (see
+             'keyCap') — and because four 44px rows plus their labels is ~190px of
+             panel against ~96px for this, on a screen whose landscape phone layout
+             is already fighting for ~278px. -->
+        <div class="set-bind">
+          <span class="set-bind-title">Move</span>
+          <div class="set-bindpad">
+            <span class="set-bindpad-gap"></span>
+            <button class="set-cap set-cap--bind" type="button" data-el="bind-up" data-bind="up">W</button>
+            <span class="set-bindpad-gap"></span>
+            <button class="set-cap set-cap--bind" type="button" data-el="bind-left" data-bind="left">A</button>
+            <button class="set-cap set-cap--bind" type="button" data-el="bind-down" data-bind="down">S</button>
+            <button class="set-cap set-cap--bind" type="button" data-el="bind-right" data-bind="right">D</button>
+          </div>
+          <button class="fa-btn fa-btn--quiet set-bindreset" type="button" data-el="bindreset" hidden>Reset keys</button>
         </div>
-        <p class="set-note">These are fixed for now — rebinding isn't built yet.
-          On a phone, twin sticks appear automatically in landscape.</p>
+        <p class="set-note" data-el="bindnote"></p>
+
+        <div class="set-keys" data-el="keys"></div>
+        <p class="set-note" data-el="ctrlnote"></p>
       </section>
 
       <section class="fa-panel set-section">
@@ -374,8 +572,14 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
 
       <section class="fa-panel set-section set-danger">
         <p class="fa-panel-title">Danger zone</p>
-        <p class="set-note">Wipes your trophies, coins, gems, unlocked fighters and every
-          claimed reward, and restarts the game. There is no undo.</p>
+        <!-- Every noun here is something the button below actually deletes, and the
+             second sentence is the other half of that: it clears keys beginning
+             'food-arena.profile', which is the name and the whole economy blob —
+             character levels included — and nothing else. -->
+        <p class="set-note">Wipes your name, trophies, coins, gems, unlocked fighters,
+          every character level you have paid for and every claimed reward, then restarts
+          the game. Volumes, graphics and your movement keys are settings rather than
+          progress, so those stay. There is no undo.</p>
         <button class="fa-btn set-reset" type="button" data-el="reset">Reset progress</button>
       </section>
     </div>
@@ -461,6 +665,48 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
       : profile.blurb;
   }
 
+  /**
+   * Paint the Controls block from `MOVE_KEYS` — the table the GAME matches against —
+   * and never from the stored blob.
+   *
+   * Same one-direction rule as the audio and graphics rows, and here it is the thing
+   * that makes the screen trustworthy at all: whatever is drawn on these caps is, by
+   * construction, what `moveAxes()` will read on the next frame. A render off `stored`
+   * would draw a key the sim had refused (a clash, a corrupt blob) and look identical.
+   */
+  function renderControls(): void {
+    for (const dir of MOVE_ORDER) {
+      const btn = q<HTMLButtonElement>(`bind-${dir}`);
+      const cap = keyCap(MOVE_KEYS[dir][0]);
+      const armed = listening === dir;
+      btn.textContent = armed ? '…' : cap;
+      btn.classList.toggle('is-listening', armed);
+      btn.setAttribute('aria-label', armed
+        ? `${MOVE_LABEL[dir]}: press the key you want, or Escape to keep ${cap}`
+        : `${MOVE_LABEL[dir]}, currently ${cap}. Press to change it.`);
+    }
+    // Shown only when there is something to reset. Every control on this screen has to
+    // DO something when it is tapped (both blind menu critics punished dead UI), and a
+    // Reset that restores the values already in force does not.
+    q('bindreset').hidden = !bindingsAreCustom();
+
+    q('keys').innerHTML = staticRows().map((b) => `
+      <div class="set-key-row">
+        <span class="set-key-action">${b.action}</span>
+        <span class="set-key-caps">${b.keys.map((k) => `<kbd class="set-cap">${k}</kbd>`).join('')}</span>
+      </div>`).join('');
+    q('ctrlnote').textContent = controlsNote();
+  }
+
+  /** The line under the cluster. Carries the standing instruction, or the last refusal. */
+  function setBindNote(text?: string): void {
+    q('bindnote').textContent = text ?? (listening !== null
+      ? 'Press any key. Escape keeps the one you have.'
+      : `Tap a key to change it. ${
+        MOVE_ORDER.map((d) => keyCap(DEFAULT_MOVE_KEYS[d].slice(1)[0] ?? '')).filter(Boolean).join(' ')
+      } always work as well, so movement can never be lost.`);
+  }
+
   /** The `n/16` readout beside the field. Written from whatever is IN the field, not
    *  from the profile, so it counts what the player can see themselves typing. */
   function renderNameCount(value: string): void {
@@ -510,6 +756,80 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
 
   // ── Wiring ────────────────────────────────────────────────────────────────
 
+  /**
+   * Write one binding, or say why not.
+   *
+   * The order is deliberate — refuse, then persist, then apply, then repaint — so the
+   * caps can never show a key the game is not matching against. `saveSettings` failing
+   * (private-mode Safari) does not stop `applyMoveBindings`: the session honours the
+   * choice and only the persistence is lost, which is the same trade the rest of this
+   * file's preferences already make.
+   */
+  function commitBinding(dir: MoveDirection, code: string): void {
+    const clash = bindingConflict(dir, code, stored.moveKeys);
+    if (clash) { setBindNote(`${clash} Pick another, or press Escape.`); return; }
+    const next: MoveBindings = { ...stored.moveKeys };
+    next[dir] = code;
+    stored = { ...stored, moveKeys: next };
+    saveSettings(stored);
+    applyMoveBindings(stored.moveKeys);
+    stopListening();
+    setBindNote(`${MOVE_LABEL[dir]} is now ${keyCap(code)}.`);
+    renderControls();
+  }
+
+  function resetBindings(): void {
+    stored = { ...stored, moveKeys: {} };
+    saveSettings(stored);
+    applyMoveBindings(stored.moveKeys);
+    stopListening();
+    setBindNote(`Movement is back to ${MOVE_ORDER.map((d) => keyCap(DEFAULT_MOVE_KEYS[d][0])).join(' ')}.`);
+    renderControls();
+  }
+
+  /**
+   * Capture the next key press.
+   *
+   * On `window`, in the CAPTURE phase, and only while armed. That combination is what
+   * stops the key ALSO reaching whatever it normally would — the name field, the
+   * browser's own focus handling, or the button that is now focused because it was just
+   * clicked (Space and Enter would otherwise re-activate it). It is added on arming and
+   * removed on disarming rather than left installed with an early return, so a settings
+   * screen sitting idle listens for nothing at all.
+   */
+  const onCaptureKey = (ev: KeyboardEvent): void => {
+    if (listening === null) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    // Cancel first, and note that this is also why Escape can never BE a binding: it is
+    // `PAUSE_KEY`, so the reserved list would refuse it a line later anyway.
+    if (ev.key === 'Escape') {
+      const dir = listening;
+      stopListening();
+      setBindNote(`Left ${MOVE_LABEL[dir].toLowerCase()} on ${keyCap(MOVE_KEYS[dir][0])}.`);
+      renderControls();
+      return;
+    }
+    // A modifier on its own is a player still reaching for the key they mean.
+    if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(ev.key)) return;
+    if (!ev.code) return;
+    commitBinding(listening, ev.code);
+  };
+
+  function startListening(dir: MoveDirection): void {
+    if (listening === dir) { stopListening(); renderControls(); setBindNote(); return; }
+    if (listening === null) window.addEventListener('keydown', onCaptureKey, true);
+    listening = dir;
+    renderControls();
+    setBindNote();
+  }
+
+  function stopListening(): void {
+    if (listening === null) return;
+    listening = null;
+    window.removeEventListener('keydown', onCaptureKey, true);
+  }
+
   const onToggle = (ev: Event): void => {
     // `setQualityChoice` IS the entire write path: it persists to
     // `food-arena.quality.v1` and applies to every live Stage by subscription. There
@@ -520,6 +840,13 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
       renderQuality();
       return;
     }
+    const bind = (ev.target as HTMLElement).closest<HTMLElement>('[data-bind]');
+    if (bind) { startListening(bind.dataset.bind as MoveDirection); return; }
+    if ((ev.target as HTMLElement).closest('[data-el="bindreset"]')) { resetBindings(); return; }
+    // A tap anywhere else means the player moved on. Disarming here rather than on a
+    // document-level blur keeps the whole capture lifetime inside this screen's own
+    // listeners, which is what makes `dispose()` sufficient.
+    if (listening !== null) { stopListening(); renderControls(); setBindNote(); }
     const btn = (ev.target as HTMLElement).closest<HTMLElement>('[data-toggle]');
     if (!btn) return;
     switch (btn.dataset.toggle) {
@@ -604,9 +931,19 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
   q<HTMLButtonElement>('reset').addEventListener('click', () => {
     // Say what will actually be lost, with this player's real numbers in it. A
     // generic "are you sure?" is a speed bump; a specific one is a decision.
+    //
+    // CHARACTER LEVELS were added to this sentence when they shipped. They live in the
+    // same blob and this button has always wiped them, so leaving them out was the
+    // omission half of "a screen saying something the model does not compute" — and
+    // levelling is now the single most expensive thing a player owns (`tuning.ts`:
+    // maxing one Normal costs more coins than the entire trophy road pays out).
+    const levelled = CHARACTER_IDS.filter((id) => ctx.profile.characterLevel(id) > LEVEL_MIN).length;
     q('confirmsub').textContent =
       `${ctx.profile.trophies.toLocaleString()} trophies, ${ctx.profile.coins.toLocaleString()} coins `
-      + `and ${ctx.profile.wins} wins will be deleted.`;
+      + `and ${ctx.profile.wins} wins will be deleted`
+      + (levelled > 0
+        ? `, along with ${levelled} upgraded fighter${levelled === 1 ? '' : 's'}.`
+        : '.');
     confirm.hidden = false;
   });
   q<HTMLButtonElement>('cancel').addEventListener('click', () => { confirm.hidden = true; });
@@ -668,6 +1005,8 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
   const offQuality = onQualityChange(renderQuality);
   render();
   renderQuality();
+  renderControls();
+  setBindNote();
 
   return {
     root,
@@ -676,6 +1015,11 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
       offAudio();
       offMusic();
       offQuality();
+      // The one listener on `window` rather than on `root`, so it is the one that would
+      // outlive the screen. Leaving a capture-phase keydown handler installed after
+      // navigation would swallow the first key press on every screen afterwards —
+      // including `Esc` on the pause sheet.
+      stopListening();
       body.removeEventListener('scroll', updateFade);
       root.removeEventListener('click', onToggle);
       root.removeEventListener('input', onRange);
@@ -1013,6 +1357,67 @@ const CSS = `
   border-radius: 7px;
   box-shadow: 0 2px 0 rgba(0,0,0,0.35);
 }
+
+/* ── Rebindable movement ──────────────────────────────────────────────────── */
+/* AFTER '.set-cap' on purpose. The two selectors have identical specificity (two
+   classes each), so source order is the whole tie-break — with this block above, the
+   generic rule's 'height: 24px' and 'min-width: 26px' win and every rebind button
+   ships 26x24, i.e. under the 44px tap floor 'menu_accept' enforces, with nothing in
+   any computed style to say a rule had been overruled. */
+
+/* The cluster is laid out as the KEYS ARE, because that is what a 'KeyboardEvent.code'
+   is — a physical position, not a glyph (see 'keyCap'). It also costs ~96px where four
+   labelled 44px rows cost ~190px, on a screen whose landscape phone layout already has
+   only ~278px to spend in total. */
+.fa-settings .set-bind {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 4px 2px 2px;
+}
+.fa-settings .set-bind-title {
+  font-family: 'Rubik', sans-serif; font-weight: 800;
+  font-size: clamp(0.69rem, 1.5vh, 0.86rem);
+}
+.fa-settings .set-bindpad {
+  display: grid;
+  grid-template-columns: repeat(3, var(--tap));
+  gap: 4px;
+  justify-content: start;
+}
+.fa-settings .set-bindpad-gap { display: block; }
+/* Full 44px on BOTH axes. 'menu_accept' measures every visible enabled button inside
+   '.fa-root', and these are buttons rather than the 24px static keycaps beside them —
+   which is also the right answer independently: a rebind control a thumb cannot hit is
+   worse than no rebind control at all. */
+.fa-settings .set-cap--bind {
+  width: var(--tap);
+  height: var(--tap);
+  min-width: var(--tap);
+  padding: 0;
+  cursor: pointer;
+  font-size: clamp(0.78rem, 1.7vh, 0.92rem);
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+}
+.fa-settings .set-cap--bind:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,0.35); }
+.fa-settings .set-cap--bind:focus-visible { outline: 3px solid var(--mustard); outline-offset: 2px; }
+/* ARMED, and it is a HUE change rather than a dimming — the same rule the disabled
+   quality cells record above. While armed the cap reads '...', so the plate is the only
+   thing carrying "this one is waiting for you"; ink stays solid on mustard, the pair
+   this project has measured at 11.9:1 wherever it uses it. */
+.fa-settings .set-cap--bind.is-listening {
+  background: linear-gradient(180deg, var(--mustard-hi), var(--mustard));
+  box-shadow: 0 3px 0 var(--gold-shadow);
+  animation: fa-set-arm 0.9s ease-in-out infinite alternate;
+}
+@keyframes fa-set-arm { from { transform: none; } to { transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) {
+  .fa-settings .set-cap--bind.is-listening { animation: none; }
+}
+:root.fa-reduce-motion .fa-settings .set-cap--bind.is-listening { animation: none; }
+.fa-settings .set-bindreset { margin-inline-start: auto; }
+.fa-settings .set-bindreset[hidden] { display: none; }
 
 .fa-settings .set-note {
   margin: 2px 0 0;

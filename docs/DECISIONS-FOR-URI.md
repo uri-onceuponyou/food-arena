@@ -1312,3 +1312,53 @@ where an upgrade is affordable — a legible "you have something to spend" signa
 **None of this is queued yet** — it is a comparison, not a decision. But it is the first time this
 project has had a picture of what the destination looks like for these screens, and it will make the
 next menu pass measurable instead of speculative.
+
+---
+
+## 27. The title card's blue backdrop — measured, and the only remaining lever is not in that file
+
+The opening screen is the first frame of the product and had never been judged as one. It is
+otherwise sound; one thing on it is not, and it is worth thirty seconds of your eye.
+
+`charStage.ts`'s 3D set — deep-blue cyclorama, floor, horizon — is a large, well-measured win on
+home and character select, where it is framed as a display case. On the **title card** it is
+supposed to be invisible, and it is not: a cool pool with a horizon line runs across the frame
+behind the fighter's chest. It is worst in portrait
+(`shots/screen_m/loose/final-opening-phone-portrait.png`).
+
+**Both levers inside `opening.ts` are now measured and both are closed** (`tools/tmp/openglare.mjs`,
+a two-frame differential with a drift control of ±0.14 pp / ±0.45%):
+
+| | cool share of the stage box | fighter + podium pixels |
+|---|---|---|
+| **shipped mask** | 6.15% | 168,306 |
+| tighter core | 1.88% | 116,270 — **−31%** |
+| tighter still | 0.73% | 73,572 — **−56%** |
+
+**Every mask that removes the blue removes the character with it**, by 60× the drift floor. The
+shipped values are exactly where that lever runs out.
+
+The other lever — a warm veil over the patch instead of a cut — loses no geometry at all and takes
+the cool share 7.62% → 2.16%, and it was **rejected on the pixels**: it desaturates the hero into a
+sticker behind frosted glass, spending precisely the figure/ground the 3D set was built to win
+(−0.23 → +0.19). See `shots/open/phone-portrait-glow-warm-veil-30.png` — that one is worth looking
+at, because the numbers alone say it is a good trade and the image says it is not.
+
+**❓ What would actually fix it: a per-mount backdrop colour on the shared stage** — a warm
+cyclorama for the title card only, cool everywhere else. That is `charStage.ts`, a different owner,
+and it is a look change on a screen three others share. Say the word and it is an hour.
+
+**If the answer is "leave it"**, that is a legitimate answer and the trade is now written down in
+`opening.ts` in numbers rather than in prose, so nobody re-derives it.
+
+### Two smaller things from the same pass, neither blocking
+
+- **Rebinding ships for the four MOVEMENT keys only**, and the arrow keys are deliberately fixed as
+  a fallback so no stored blob, hand edit or half-finished rebind can leave a player unable to move.
+  Mute, pause, aim and fire are stated as fixed **because they are** — they are compared as string
+  primitives inside their own modules. If you want those rebindable too, it is a small change in
+  `game/input.ts` and `matchScreen.ts` rather than in the settings screen.
+- **`settings.ts` now WRITES `MOVE_KEYS`**, the table `game/input.ts` exports and `moveAxes()` reads
+  every frame. That is what makes a rebind live on the next tick with no reload, and `input.ts`'s own
+  header anticipated it — but the honest shape is for `input.ts` to own a `setMoveKeys()` and for the
+  UI to call it. Worth tidying when that file is next free; nothing depends on it happening.

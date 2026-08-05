@@ -38,6 +38,7 @@
  */
 
 import { audio } from '../../audio';
+import { CHARACTER_IDS } from '../../game/rules';
 import { icon, ensureIconStyles } from '../icons';
 import type { Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
@@ -46,6 +47,31 @@ import { getCharacterStage } from './charStage';
 
 /** Milliseconds before the title card continues on its own. See the header. */
 const DEFAULT_HOLD_MS = 4500;
+
+/**
+ * The tagline's roster count, COUNTED rather than typed.
+ *
+ * It read "Eleven fighters." as a literal — true today, and the first line of the
+ * product is the worst possible place to keep a number the model does not compute.
+ * `shop.ts` already states the rule in its own notice ("the roster size is counted,
+ * not typed, so an eleventh-and-a-half character cannot make this sentence wrong")
+ * and this screen was the one place still breaking it. The same class of defect has
+ * been found three times here — a stat card showing `health`/`speed` the sim did not
+ * have, a shop promising "better" for a rarity that stopped granting power, and every
+ * "hours to unlock" figure wrong by 4.7x from a leftover literal.
+ *
+ * Spelled out to 20 because "Eleven fighters" is the line's voice and "11 fighters"
+ * is not; past that the digits read fine and the words do not.
+ */
+const NUMBER_WORDS = [
+  'No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+  'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen',
+  'Eighteen', 'Nineteen', 'Twenty',
+] as const;
+
+function spellCount(n: number): string {
+  return NUMBER_WORDS[n] ?? String(n);
+}
 
 /**
  * `?hold=<ms>` — QA only, the same spirit as `?simSpeed=` in `match.ts`.
@@ -72,7 +98,7 @@ export function createOpeningScreen(ctx: ScreenContext): Screen {
   root.innerHTML = `
     <header class="open-head">
       <h1 class="open-title">Food Fight Arena</h1>
-      <p class="open-tagline">Eleven fighters. One kitchen. No table manners.</p>
+      <p class="open-tagline">${spellCount(CHARACTER_IDS.length)} fighters. One kitchen. No table manners.</p>
     </header>
 
     <div class="open-stage">
@@ -232,7 +258,43 @@ const CSS = `
  * far enough to hide the horizon starts dissolving the arms. Instead the ellipse keeps
  * enough radius to hold the fighter and the transition is made much steeper — opaque
  * where the fighter is, gone within a short band after it — and the warm rim that beds
- * the patch into the card is roughly doubled and pulled inward to meet it. */
+ * the patch into the card is roughly doubled and pulled inward to meet it.
+ *
+ * ── That trade is now MEASURED, and both alternatives are closed ────────────
+ * NOTE the single quotes below. This comment sits inside a CSS template literal, and one
+ * backtick in it terminates the string — docs/LESSONS.md section 9, which has now bitten
+ * eight times and bit here while this very paragraph was being written.
+ *
+ * The paragraph above was an argument. tools/tmp/openglare.mjs turns it into numbers:
+ * shoot the stage box, hide the canvas, shoot it again, and every pixel that MOVED is a
+ * pixel the stage delivered — so the warm CARD showing through a transparent part of the
+ * mask can never be mistaken for the fighter. (The first version of that probe made
+ * exactly that mistake and its own control caught it: the tighter the mask, the more
+ * "fighter" it reported. docs/LESSONS.md section 13.)
+ *
+ * Cool pixels use home_metrics.mjs's own backdrop rule, so the number means the same
+ * thing it means on the two other screens that mount this stage. Drift control (two
+ * frames, same conditions, the idle sway alone): coolShare ±0.14 pp, warm ±0.45%.
+ *
+ *     desktop 1600x900         coolShare   fighter+podium px
+ *     shipped                      6.15%             168,306
+ *     tighter core (56%/38%)       1.88%             116,270   -31%   <- cuts the fighter
+ *     tighter still (50%/30%)      0.73%              73,572   -56%
+ *     steeper falloff              3.28%              89,806   -47%
+ *
+ * **Every mask that removes the blue removes the character with it**, by 60x the drift
+ * floor. The shipped values are where this lever runs out, and they are correct.
+ *
+ * The other lever — warming the rim instead of cutting — was priced in the same run and
+ * REJECTED on the pixels rather than on the numbers, which is the point of looking:
+ * a 0.30 warm veil takes coolShare 7.62% -> 2.16% and loses no geometry at all, and
+ * shots/open/phone-portrait-glow-warm-veil-30.png shows it desaturating the hero into
+ * a sticker behind frosted glass — spending exactly the figure/ground charStage was
+ * built to win (-0.23 to +0.19).
+ *
+ * So the residual cool is not this file's to remove. What WOULD remove it is a per-mount
+ * backdrop colour on the shared stage — a warm cyclorama for the title card only — which
+ * lives in charStage.ts. Parked in docs/DECISIONS-FOR-URI.md. */
 /* 54vh, not 70vh — and this is the second half of the same fix.
  *
  * charStage frames the fighter off whichever axis binds, so every pixel of panel width

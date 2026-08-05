@@ -87,6 +87,7 @@ import {
   CONTAINERS,
   CONTAINER_KINDS,
   DUPLICATE_COINS,
+  RARITY_MEANING,
   containerOdds,
   formatPercent,
   totalWeight,
@@ -308,10 +309,17 @@ export function createShopScreen(ctx: ScreenContext): Screen {
     const price = def.price!;
     const value = boxValue(kind, owned);
 
+    // "or BETTER" until 2026-08-05, and it had become a claim the model does not
+    // compute. `rules.ts` DEVIATION #12 removed power from rarity at equal level
+    // (measured tier spread 20.7 pp -> 4.0 pp, inside the ~9 pp noise floor), and
+    // `061e794` purged the same word from every container blurb and from the trophy
+    // road's own tier pips — but not from here, because this file had a different
+    // owner. What this line has ALWAYS measured is `value.floorRarity`, the rarest-
+    // ladder floor of the box's character pool, i.e. exactly "or rarer".
     const guarantee = value.canGrantFighter && value.characterPercent >= 99.999 && value.floorRarity
       ? `<span class="shop-guarantee"><i class="shop-odds-dot" style="background:${
         RARITY_COLORS[value.floorRarity]
-      }"></i>Always a fighter, ${value.floorRarity} or better</span>`
+      }"></i>Always a fighter, ${value.floorRarity} or rarer</span>`
       : '';
 
     const buy = (currency: Currency): string => {
@@ -490,6 +498,17 @@ export function createShopScreen(ctx: ScreenContext): Screen {
       ${inventory()}
       <section class="shop-section">
         <h2 class="shop-section-title">Boxes and chests</h2>
+        <!-- WHAT RARITY BUYS, on the screen where a player would spend.
+             NOTE the single quotes: this comment sits inside a JS template literal,
+             where one backtick terminates the string and 500s the dev server for
+             every agent in the repo (docs/LESSONS.md section 9).
+             'tuning.ts' owns this sentence (RARITY_MEANING) and the trophy road's
+             drop-rate sheet already prints it. This screen puts the FULL drop table
+             inline — deliberately, so the disclosure is measured rather than hidden
+             behind a tap — and then said nothing about what a rarer fighter is worth,
+             on the one surface that quotes a price next to it. Rendered from the
+             model's own string so the two surfaces cannot drift. -->
+        <p class="shop-rarity">${RARITY_MEANING}</p>
         <div class="shop-grid">${CONTAINER_KINDS.map((kind) => (
     CONTAINERS[kind].price ? boxCard(kind, owned) : chestCard(kind)
   )).join('')}</div>
@@ -606,6 +625,20 @@ const CSS = `
   margin-top: 5px;
   border-radius: 999px;
   background: var(--gold);
+}
+
+/* The rarity disclosure. Solid ink on the panel's own cream, no alpha and no plate:
+   the same decision '.shop-oddshead' records two rules down, for the same reason —
+   a tinted section note measured 4.85:1 on the trophy road and its scroller fade took
+   it to 3.93. This one is a legal disclosure on a priced surface, so there is no
+   headroom to spend at all. */
+.fa-shop .shop-rarity {
+  margin: 0 0 1px;
+  font-family: 'Heebo', sans-serif;
+  font-weight: 700;
+  font-size: clamp(0.7rem, 1.32vh, 0.78rem);
+  line-height: 1.35;
+  color: #40291A;
 }
 
 /* Auto-fit rather than a breakpoint ladder: four cards at desktop, two on a landscape
@@ -885,16 +918,28 @@ const CSS = `
      this decision at exactly this breakpoint for exactly this reason;
    * the blurb and the pool lists, which are prose restatements of the odds rows that
      stay. Nothing that is only said once is cut. */
+/* ⚠️ The rarity disclosure is two more lines in this band, and it MEASURABLY pushed the
+   first price off the bottom of the frame — the exact defect this block was written to
+   fix, re-created by the sentence added above it (screen_metrics: runs in view 46 -> 39,
+   scrolled out 6 -> 13, and the price row visibly clipped in
+   shots/screen_m/loose/after-shop-phone-land.png). It is a disclosure on a priced
+   surface, so it is not the thing that gives way. Two cheaper cuts pay for it, one per
+   card, and both follow the rule already stated above — nothing that is only said once:
+   * 'WHAT IS INSIDE', a heading over rows that each already read "<what> <percent>",
+     inside a card that already carries the box's own name;
+   * the tighter leading, which costs nothing at all. */
 @media (max-height: 460px) {
   .fa-shop .shop-heading { display: none; }
   .fa-shop .shop-notice-more { display: none; }
   .fa-shop .shop-inv { display: none; }
   .fa-shop .shop-blurb { display: none; }
   .fa-shop .shop-pool { display: none; }
+  .fa-shop .shop-oddshead { display: none; }
   .fa-shop .shop-section-title::after { display: none; }
   .fa-shop .shop-notice { padding: 7px 10px; line-height: 1.3; }
+  .fa-shop .shop-rarity { line-height: 1.24; }
   .fa-shop .shop-scroll { gap: 7px; padding: 8px; }
-  .fa-shop .shop-card { padding: 9px 10px 10px; }
+  .fa-shop .shop-card { padding: 9px 10px 10px; gap: 4px; }
 }
 
 /* ── Portrait phone ───────────────────────────────────────────────────────── */
