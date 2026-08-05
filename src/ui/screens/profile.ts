@@ -23,6 +23,10 @@ import {
   adoptLegacyBalance,
   applyMatchResult,
   buyContainer,
+  canLevelUp,
+  characterLevel,
+  levelUp,
+  nextLevelPrice,
   claimAll,
   claimMilestone,
   claimableMilestones,
@@ -38,6 +42,7 @@ import {
   type ContainerResult,
   type EconomyState,
   type LastMatch,
+  type LevelPrice,
   type Reward,
 } from '../../game/economy';
 
@@ -282,6 +287,42 @@ export class PlayerProfile {
     const ok = buyContainer(this.data.economy, kind, currency);
     if (ok) this.commit();
     return ok;
+  }
+
+  // ── Character levels (rules.ts DEVIATION #11) ─────────────────────────────
+  //
+  // ⚠️ NOT the same thing as `level` above. That one is the ACCOUNT level, derived from
+  // XP, and it is what the home screen's bar draws. These are per-CHARACTER levels 1-15,
+  // bought with coins, and they are what the simulation reads. The two are deliberately
+  // spelled differently at every call site for that reason; `characterLevel(id)` takes an
+  // argument and `level` does not, so they cannot be confused by autocomplete either.
+
+  /** This character's level, 1-15. `LEVEL_MIN` for anything never upgraded. */
+  characterLevel(id: CharacterId): number {
+    return characterLevel(this.data.economy, id);
+  }
+
+  /** What this character's next level costs, or null when it is already maxed. */
+  nextLevelPrice(id: CharacterId): LevelPrice | null {
+    return nextLevelPrice(this.data.economy, id);
+  }
+
+  /** Whether the next level is available AND affordable right now. */
+  canLevelUp(id: CharacterId): boolean {
+    return canLevelUp(this.data.economy, id);
+  }
+
+  /**
+   * Buy one level. Null — and no write at all — when it did not happen.
+   *
+   * The commit is what makes the purchase durable, and it happens in the same turn of the
+   * event loop as the spend: `levelUp` in the model is all-or-nothing, so there is no
+   * point at which a reload could observe a charged player without their level.
+   */
+  levelUp(id: CharacterId): { level: number; spent: LevelPrice } | null {
+    const got = levelUp(this.data.economy, id);
+    if (got) this.commit();
+    return got;
   }
 
   /** Subscribe to any change. Returns an unsubscribe function. */

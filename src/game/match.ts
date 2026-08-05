@@ -16,11 +16,12 @@ import { createKitchenArena } from '../arena/kitchen';
 import { createCharacter } from '../characters/registry';
 import type { CharacterModel } from '../characters/types';
 import { createFogRing, type FogRing } from '../arena/fogRing';
-import { createMatch, stepMatch } from './sim';
+import { createMatch, stepMatch, type MatchLevels } from './sim';
+import { enemyLevelFor } from './economy';
 import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchState } from './state';
 import { otherRole } from './state';
 import { boxesOverlap } from './movement';
-import { CHARACTER_IDS, CHARACTERS, MATCH_DURATION_MS, MIN_SAFE_RADIUS, type CharacterId, type Weapon } from './rules';
+import { CHARACTER_IDS, CHARACTERS, LEVEL_MIN, MATCH_DURATION_MS, MIN_SAFE_RADIUS, clampLevel, type CharacterId, type Weapon } from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 import { InputController } from './input';
 import { createPointerLock, type PointerLockController } from './pointerLock';
@@ -207,6 +208,18 @@ export interface GameSessionOptions {
    * The session stays the only owner of match state; this is the one-way edge out.
    */
   onPhase?: (phase: MatchState['phase'], winner: FighterRole | null) => void;
+  /**
+   * The player's CHARACTER level for `playerCharacterId`, 1-15 (`rules.ts` DEVIATION #11).
+   *
+   * The opponent's level is NOT a second option: it is derived here through
+   * `economy/levels.ts:enemyLevelFor()`, which is the single place Uri's answer lives —
+   * *"AI players… need to be adjusted to the player's level."* A caller that could set
+   * the two independently would be a caller that could silently un-answer that question.
+   *
+   * Defaults to `LEVEL_MIN`, whose multipliers are exactly 1.0, so a caller that does not
+   * pass it produces a bit-identical match to the one this build produced before levels.
+   */
+  playerLevel?: number;
 }
 
 const DEFAULT_PLAYER: CharacterId = 'hamburger';
@@ -244,6 +257,8 @@ export class GameSession {
   private readonly fogRing: FogRing;
   private readonly playerId: CharacterId;
   private readonly enemyId: CharacterId;
+  /** Both fighters' levels. Symmetric by construction — see `GameSessionOptions`. */
+  private readonly levels: MatchLevels;
 
   private playerModel: CharacterModel;
   private enemyModel: CharacterModel;
@@ -376,6 +391,10 @@ export class GameSession {
   constructor(private readonly opts: GameSessionOptions) {
     this.playerId = opts.playerCharacterId ?? characterFromQuery('player') ?? DEFAULT_PLAYER;
     this.enemyId = opts.enemyCharacterId ?? characterFromQuery('enemy') ?? DEFAULT_ENEMY;
+    // `?level=` alongside `?player=`/`?enemy=`, same QA-override spirit — it is what lets
+    // a screenshot pass reach a levelled fighter with no upgrade UI in the way.
+    const lvl = clampLevel(opts.playerLevel ?? numberFromQuery('level') ?? LEVEL_MIN);
+    this.levels = { player: lvl, enemy: enemyLevelFor(lvl) };
     const requestedSpeed = Number(new URLSearchParams(location.search).get('simSpeed'));
     this.simSpeed = Number.isFinite(requestedSpeed) && requestedSpeed > 0 ? Math.min(50, requestedSpeed) : 1;
 
@@ -427,7 +446,7 @@ export class GameSession {
     });
 
     // Placeholders assigned for real by spawnMatch() below (kept non-null for TS).
-    this.state = createMatch(this.arena, this.playerId, this.enemyId);
+    this.state = createMatch(this.arena, this.playerId, this.enemyId, this.levels);
     this.playerModel = createCharacter(this.playerId);
     this.enemyModel = createCharacter(this.enemyId);
     this.spawnMatch();
@@ -498,7 +517,7 @@ export class GameSession {
   }
 
   private spawnMatch(): void {
-    this.state = createMatch(this.arena, this.playerId, this.enemyId);
+    this.state = createMatch(this.arena, this.playerId, this.enemyId, this.levels);
     this.applyQaSetup();
 
     this.stage.scene.remove(this.playerModel.root, this.enemyModel.root);

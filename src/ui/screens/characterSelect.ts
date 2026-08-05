@@ -16,13 +16,19 @@
  *     `reference/images/zooba/tablet_5.jpg`: hero large at left, card grid at right).
  *  2. **The hero is the real 3D model**, on a pedestal, through the real Stage
  *     (`charStage.ts`) — the prototype's flat SVGs were placeholders for exactly this.
+ *  3. **Levels are here** (`rules.ts` DEVIATION #11), because this is where a player
+ *     already comes to compare fighters and it is the only screen that shows one at a
+ *     time. The upgrade button and the price are the third real control on the screen.
  *
- * Every number on this screen (roster order, names, rarity, stats, abilities) is read
- * from `game/rules.ts`. Nothing about the cast is duplicated here.
+ * Every number on this screen (roster order, names, rarity, stats, abilities, pools,
+ * damage multipliers, prices) is read from `game/rules.ts` or `game/economy/`. Nothing
+ * about the cast or the economy is duplicated here — see the block above `renderLevel`
+ * for why that matters more for the level readout than for anything else on the panel.
  */
 
 import {
-  CHARACTERS, CHARACTER_IDS, RARITY_COLORS, RARITY_CARD_COLORS, REACH,
+  CHARACTERS, CHARACTER_IDS, LEVEL_MAX, PLAYER_MAX_HP, RARITY_COLORS, RARITY_CARD_COLORS,
+  REACH, levelDamageMultiplier, maxHpFor,
   type CharacterId, type Weapon,
 } from '../../game/rules';
 import type { Screen, ScreenContext } from './types';
@@ -102,6 +108,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       <h1 class="fa-title chars-heading">Choose Your Fighter</h1>
       <div class="fa-topbar-spacer"></div>
       <div class="fa-chip"><span class="fa-chip-em">${icon('medal')}</span>Wins <span class="fa-chip-val" data-el="wins">0</span></div>
+      <div class="fa-chip"><span class="fa-chip-em">${icon('coin')}</span><span class="fa-chip-val" data-el="coins">0</span></div>
     </header>
 
     <div class="chars-body">
@@ -122,6 +129,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       <div class="fa-panel chars-detail">
         <p class="fa-panel-title">Stats</p>
         <div class="chars-stats" data-el="stats"></div>
+        <div class="chars-level" data-el="level"></div>
         <p class="fa-panel-title">Abilities</p>
         <div class="fa-scroll chars-abilities" data-el="abilities"></div>
       </div>
@@ -147,6 +155,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
   const heroName = q<HTMLSpanElement>('heroname');
   const heroRarity = q<HTMLSpanElement>('herorarity');
   const selectBtn = q<HTMLButtonElement>('select');
+  const levelEl = q<HTMLDivElement>('level');
   const confetti = q<HTMLDivElement>('confetti');
 
   // ── Roster grid ────────────────────────────────────────────────────────────
@@ -173,6 +182,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       <span class="fa-rarity chars-card-rarity"
             style="background:${RARITY_COLORS[def.rarity]}">${def.rarity}</span>
       <span class="chars-card-playing">${icon('star')}</span>
+      <span class="chars-card-lv" data-el="lv"></span>
     `;
     card.addEventListener('click', () => view(id, true));
     rosterEl.appendChild(card);
@@ -225,6 +235,64 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     statFills.set(row.key, fill);
     statVals.set(row.key, wrap.querySelector<HTMLSpanElement>('.fa-stat-val')!);
     statsEl.appendChild(wrap);
+  }
+
+  /**
+   * ── THE LEVEL BLOCK, AND WHY IT IS NOT A FOURTH STAT BAR ──────────────────
+   *
+   * The three bars above are the AUTHORED card — `def.stats`, integers on a 0-10 scale,
+   * asserted by `sim.test.mjs` §22 to be exactly what the sim uses at level 1. They
+   * describe the CHARACTER. `rules.ts` DEVIATION #11 is explicit that a level must not
+   * write into them: doing so would either turn those gates red or re-create the defect
+   * `DECISIONS §13` exists to have fixed — a card that says something the model does not
+   * compute. It also could not work: one card point is worth 7-12 pp of measured strength,
+   * so a 0-10 integer scale cannot express fifteen levels even in principle.
+   *
+   * So the level is a SEPARATE, CONTINUOUS readout, and it states the two numbers the
+   * simulation literally computes:
+   *
+   *   * HP is `maxHpFor(id, PLAYER_MAX_HP, level)` — the exact call `sim.ts:createMatch`
+   *     makes for the player fighter, imported from `rules.ts` rather than re-derived.
+   *   * Damage is `levelDamageMultiplier(level)` — the exact factor `combat.ts:applyDamage`
+   *     multiplies every hit by.
+   *
+   * Neither can drift from the sim, because neither is a copy of it. That is the whole
+   * design rule of this screen applied to a new axis.
+   */
+  function renderLevel(): void {
+    const id = viewed;
+    const level = ctx.profile.characterLevel(id);
+    const price = ctx.profile.nextLevelPrice(id);
+    const affordable = ctx.profile.canLevelUp(id);
+    const maxed = price === null;
+
+    const hp = maxHpFor(id, PLAYER_MAX_HP, level);
+    const dmg = levelDamageMultiplier(level);
+    const nextHp = maxed ? hp : maxHpFor(id, PLAYER_MAX_HP, level + 1);
+    const nextDmg = maxed ? dmg : levelDamageMultiplier(level + 1);
+
+    // The "+N" previews are the DIFFERENCE between two calls to the same function the
+    // sim makes — never a percentage recomputed here. A preview that is arithmetic on a
+    // displayed number rather than a second evaluation of the model is exactly how a
+    // readout starts lying.
+    const gain = maxed ? '' : `
+      <span class="chars-lv-gain">${icon('health')} +${nextHp - hp}
+        <span class="chars-lv-sep">·</span> ${icon('damage')} +${Math.round((nextDmg / dmg - 1) * 100)}%</span>`;
+
+    levelEl.innerHTML = `
+      <div class="chars-lv-head">
+        <span class="chars-lv-badge${maxed ? ' is-max' : ''}">Lv ${level}${maxed ? '' : ` / ${LEVEL_MAX}`}</span>
+        <span class="chars-lv-now">${icon('health')} ${hp} HP<span class="chars-lv-sep">·</span>${icon('damage')} ×${dmg.toFixed(2)}</span>
+      </div>
+      ${gain}
+      <button class="chars-lv-btn" type="button" data-el="upgrade"${maxed || !affordable ? ' disabled' : ''}>${
+        maxed
+          ? `${icon('star')} Max level`
+          : `${icon('sparkle')} Upgrade <span class="chars-lv-price">${icon('coin')} ${price.coins.toLocaleString()}</span>`
+      }</button>
+      ${maxed || affordable ? '' : `<span class="chars-lv-short">${
+        (price.coins - ctx.profile.coins).toLocaleString()} more coins needed</span>`}
+    `;
   }
 
   function renderEquippedState(): void {
@@ -295,6 +363,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
 
     stage.show(id);
     renderEquippedState();
+    renderLevel();
   }
 
   q<HTMLButtonElement>('back').addEventListener('click', () => ctx.navigate({ name: 'home' }));
@@ -313,7 +382,50 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     ctx.navigate({ name: 'match', player: viewed, enemy: pickOpponent(viewed) });
   });
 
-  q('wins').textContent = String(ctx.profile.wins);
+  /** Every card carries its own level, so the roster reads as a collection of
+   *  investments rather than eleven identical tiles. Hidden at level 1 — a badge on
+   *  every card at once is a badge that says nothing. */
+  function renderCardLevels(): void {
+    for (const [id, card] of cards) {
+      const level = ctx.profile.characterLevel(id);
+      const badge = card.querySelector<HTMLElement>('[data-el="lv"]');
+      if (!badge) continue;
+      badge.textContent = level > 1 ? `Lv ${level}` : '';
+      card.classList.toggle('has-lv', level > 1);
+      card.classList.toggle('is-maxed', level >= LEVEL_MAX);
+    }
+  }
+
+  function renderHeader(): void {
+    q('wins').textContent = String(ctx.profile.wins);
+    q('coins').textContent = ctx.profile.coins.toLocaleString();
+  }
+
+  /**
+   * ⚠️ THE UPGRADE IS OPTIMISTIC AND THE MODEL IS THE ONLY AUTHORITY.
+   *
+   * `profile.levelUp()` returns null for "maxed" and for "cannot afford" alike, and the
+   * screen does nothing on null. There is deliberately NO check here that duplicates the
+   * model's — a second copy of an affordability rule in a click handler is the same class
+   * of defect as a second copy of a drop-rate table, and the button's disabled state is
+   * already derived from `canLevelUp`.
+   */
+  levelEl.addEventListener('click', (ev) => {
+    if (!(ev.target as HTMLElement).closest('[data-el="upgrade"]')) return;
+    const got = ctx.profile.levelUp(viewed);
+    if (!got) return;
+    burstConfetti(confetti, 34, 18);
+    stage.poke();
+  });
+
+  const unsubscribe = ctx.profile.onChange(() => {
+    renderHeader();
+    renderCardLevels();
+    renderLevel();
+  });
+
+  renderHeader();
+  renderCardLevels();
   view(viewed);
   stage.attachTo(heroHost);
 
@@ -322,6 +434,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     update(dt) { stage.update(dt); },
     resize() { stage.resize(); },
     dispose() {
+      unsubscribe();
       stage.detach();
       root.remove();
     },
@@ -687,6 +800,127 @@ const CSS = `
   max-height: 100%;
 }
 .fa-chars .chars-stats { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── The level block ──────────────────────────────────────────────────────────
+   Deliberately a DIFFERENT shape from the three stat bars above it, because it is a
+   different kind of statement. The bars describe the character and never move; this
+   describes the player's investment in it and is the one control on the panel. Making
+   it a fourth bar would have put "what this fighter is" and "what I have spent on it"
+   in the same visual channel — the same mistake the trophy road made when it painted
+   rarity onto the node fill that already carried claim state.
+
+   Every colour here is ink-on-cream or ink-on-gold: this panel is the one place on the
+   screen a PRICE is stated, and a price that fails AA is a price the player disputes. */
+.fa-chars .chars-level {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 2px solid rgba(26,18,36,0.22);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.5);
+}
+.fa-chars .chars-lv-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fa-chars .chars-lv-badge {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: clamp(0.69rem, 1.5vh, 0.82rem);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.fa-chars .chars-lv-badge.is-max {
+  background: linear-gradient(180deg, #A6E24A 0%, var(--lettuce) 100%);
+}
+.fa-chars .chars-lv-now,
+.fa-chars .chars-lv-gain {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: clamp(0.69rem, 1.4vh, 0.8rem);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+/* The NEXT-level preview is green because it is a gain, and it is the one run on this
+   panel that is not simply a fact. 2E7D32 on the panel's near-white plate is 5.4:1. */
+.fa-chars .chars-lv-gain { color: #2E7D32; }
+.fa-chars .chars-lv-sep { opacity: 0.45; padding: 0 2px; }
+.fa-chars .chars-lv-btn {
+  appearance: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--tap);
+  padding: 0 10px;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: clamp(0.69rem, 1.5vh, 0.84rem);
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
+}
+.fa-chars .chars-lv-btn:hover:not(:disabled) { filter: brightness(1.06); }
+.fa-chars .chars-lv-btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.35); }
+/* A disabled upgrade keeps FULL ink contrast and loses only its lift and its fill.
+   The usual 0.5 layer opacity would drop the price below AA, and a price is the last
+   run on this screen that may become unreadable — see the identical note on the trophy
+   road's claimed nodes, which is where this project learned it. */
+.fa-chars .chars-lv-btn:disabled {
+  cursor: default;
+  background: #E6DAC4;
+  box-shadow: none;
+  border-color: rgba(26,18,36,0.55);
+}
+.fa-chars .chars-lv-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.fa-chars .chars-lv-short {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 700;
+  font-size: clamp(0.66rem, 1.25vh, 0.74rem);
+  color: rgba(26,18,36,0.82);
+}
+
+/* The card badge. Hidden at level 1 — a badge on all eleven cards says nothing. */
+.fa-chars .chars-card-lv {
+  position: absolute;
+  top: 3px;
+  inset-inline-start: 3px;
+  display: none;
+  padding: 0 5px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--mustard);
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: clamp(0.6rem, 1.15vh, 0.7rem);
+  line-height: 1.5;
+  color: var(--ink);
+  z-index: 3;
+}
+.fa-chars .chars-card.has-lv .chars-card-lv { display: block; }
+.fa-chars .chars-card.is-maxed .chars-card-lv { background: var(--lettuce); }
 /* Taller bars, and the value is countable rather than estimated. */
 .fa-chars .fa-stat-track { height: clamp(16px, 2.6vh, 24px); }
 .fa-chars .fa-stat-pips {

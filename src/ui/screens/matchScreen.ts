@@ -113,6 +113,10 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     hudRoot: ctx.hudRoot,
     playerCharacterId: route.player,
     enemyCharacterId: route.enemy,
+    // The player's CHARACTER level (not the account level on the home bar). The opponent
+    // mirrors it inside `GameSession` — see `enemyLevelFor`, which is where Uri's
+    // "AI players adjust to the player's level" answer is expressed exactly once.
+    playerLevel: ctx.profile.characterLevel(route.player),
     onPhase(phase: MatchPhase, winner) {
       if (phase === 'ended') {
         if (!banked) {

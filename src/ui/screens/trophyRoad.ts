@@ -40,6 +40,7 @@ import {
   bonusPercent,
   milestoneFace,
   milestones,
+  RARITY_MEANING,
   roadEnd,
   roadProgress,
   storeAvailable,
@@ -118,7 +119,11 @@ function tierPips(kind: ContainerKind, opts: { label?: boolean } = {}): string {
   if (!t) return '';
   const colour = t.floor ? RARITY_COLORS[t.floor] : 'var(--ink)';
   const pips = Array.from({ length: t.of }, (_, i) => `<i class="tr-pip${i < t.rank ? ' is-on' : ''}"></i>`).join('');
-  const aria = `Tier ${t.rank} of ${t.of}${t.floor ? `, ${t.floor} or better` : ''}`;
+  // "or better" until 2026-08-05, and it is now a false claim rather than a loose one:
+  // rarity stopped conferring power at equal level (`rules.ts` DEVIATION #12). "or rarer"
+  // is what the pips have always actually measured — the floor of the box's character
+  // pool — and it is now also what rarity actually means.
+  const aria = `Tier ${t.rank} of ${t.of}${t.floor ? `, ${t.floor} or rarer` : ''}`;
   return `<span class="tr-tier" style="--pip:${colour}" role="img" aria-label="${aria}">${pips}${
     opts.label && t.floor ? `<span class="tr-tier-txt">${t.floor}+</span>` : ''
   }</span>`;
@@ -578,6 +583,7 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
       <div class="fa-scroll tr-sheet-scroll">
         <p class="tr-sheet-note">Every percentage below is read directly from the reward
         tables the game rolls against.</p>
+        <p class="tr-sheet-note tr-sheet-note--rarity">${RARITY_MEANING}</p>
         ${sections}
       </div>
     `);
@@ -1114,6 +1120,15 @@ const CSS = `
   gap: 3px;
   line-height: 1;
 }
+/* The rarity-meaning line on the drop-rate sheet. Slightly stronger than the note above
+   it because it is the sentence that stops the sheet implying rarity is power — a claim
+   the game made until 2026-08-05 and no longer does. */
+.fa-tr .tr-sheet-note--rarity {
+  margin-top: 6px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
 .fa-tr .tr-pip {
   width: clamp(4px, 0.8vh, 6px);
   height: clamp(4px, 0.8vh, 6px);
