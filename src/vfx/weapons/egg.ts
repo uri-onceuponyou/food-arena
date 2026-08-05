@@ -854,32 +854,64 @@ function chickTrail(ctx: WeaponVfxCtx): void {
 /**
  * THE PECK — Hatch!'s hit. Deliberately the smallest impact in the file: 5 damage,
  * three times, from a bird. It still uses the fracture grammar (a four-spoke star) so
- * it is unmistakably the same fighter, but at 60% scale and with down instead of
+ * it is unmistakably the same fighter, but at reduced scale and with down instead of
  * yolk, because what pecked you was not the egg, it was what came out of it.
+ *
+ * ── 57 px, and it was BOTH failure modes at once ───────────────────────────────
+ *
+ * Measured at shipped framing (`tools/tmp/vfx_wcov.mjs`, 800x450 readback, peak
+ * slice) against the generic impact's 3,098 px and this probe's 300 px floor:
+ *
+ *                     shipped  +nodepth  +scale4   occl    size
+ *     Hatch.impact         57       130      606   2.28x   10.6x
+ *
+ * 2.28x occlusion means 56% of what it drew never reached the screen, and 10.6x says
+ * the surviving part is sub-perceptual as well. `docs/LESSONS.md` §1 is explicit that
+ * scaling a BURIED effect just makes a bigger invisible one, so the burial is fixed
+ * first and the size second.
+ *
+ * THE BURIAL: `R0` — the ring debris launches from — was `CH * 0.22 * s`, and `s` is
+ * damage-scaled. At Hatch!'s 5 damage that is 0.36 m, INSIDE a silhouette whose
+ * visible half-width is ~0.55 m on this camera. Egg Tackle, in this same file, runs
+ * the same pattern at 16 damage where `s` is 1.41 and lands `R0` at 0.77 m — and
+ * measures 1.14x. Same code, different damage, opposite outcome: tying the spawn
+ * RING to damage means the weakest hits are the ones that spawn inside the target.
+ * `PECK_RIM` is therefore a FIXED rim. Debris still scales with damage; where it is
+ * born does not, because the thing hiding it is the same size either way.
+ *
+ * THE SIZE: three pecks 500 ms apart (`peckInterval`) are three separate moments, not
+ * one composited hit — unlike `Shards` (3 pellets) or Burrito's `Swarm` (4), whose
+ * per-pellet numbers are simultaneous and add up on screen. So a peck has to clear
+ * the floor ON ITS OWN.
  */
+const PECK_RIM = CH * 0.27; // 0.567 m — just clear of the visible silhouette
+
 function peckImpact(ctx: WeaponVfxCtx): void {
-  const s = impactScale(ctx.damage) * 0.75;
+  const s = impactScale(ctx.damage) * 1.25;
   const { x, y, z } = ctx.position;
   const d = ctx.direction;
 
-  spawnFractureStar(ctx, 4, s * 0.72, 0.11);
+  // Same 0.13 s life as Egg Tackle's star (the file's default). It was 0.11 here for
+  // no measured reason, and this is the beat that carries the fracture grammar — the
+  // one thing that says the peck came from the same fighter as the tackle.
+  spawnFractureStar(ctx, 4, s * 1.15);
 
-  const R0 = CH * 0.22 * s;
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * TWO_PI + Math.random() * 0.8;
+  const R0 = PECK_RIM;
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * TWO_PI + Math.random() * 0.6;
     const out = (1.9 + Math.random() * 1.2) * s;
     spawnFleck(
       ctx, x + Math.cos(a) * R0, y, z + Math.sin(a) * R0,
       Math.cos(a) * out + d.x * 0.5, 1.5 + Math.random() * 1.0, Math.sin(a) * out + d.z * 0.5,
-      0.8 * s, 0.34,
+      1.2 * s, 0.34,
     );
   }
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 10; i++) {
     const a = Math.random() * TWO_PI;
     spawnDown(
       ctx, x + Math.cos(a) * R0, y + CH * 0.05, z + Math.sin(a) * R0,
       Math.cos(a) * (0.9 + Math.random() * 0.8), Math.sin(a) * (0.9 + Math.random() * 0.8),
-      s, 0.62,
+      s * 1.25, 0.62,
     );
   }
 }

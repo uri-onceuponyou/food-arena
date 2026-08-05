@@ -165,20 +165,48 @@ export const ErrorOverlay=class{}; export default {};`,
         },
         step(ms) { window.__clk.advance(ms); window.__vfxLayer.updateEffects(ms / 1000); },
         reset() { window.__vfxLayer.clear(); },
-        /** One ablation variant, fully restored afterwards. */
+        /**
+         * One ablation variant, fully restored afterwards.
+         *
+         * ⚠️ MATERIALS ARE SAVED BY IDENTITY, OBJECTS BY OBJECT. This is the same
+         * double-capture bug that produced a magenta character in the cast matte, and
+         * it was ALSO here, unnoticed, in the exact code whose own header warns about
+         * a leaked `depthTest:false` inflating this probe family's first version by
+         * 30-45%. `vfx/weapons/*` hand out materials from round-robin
+         * `materialPool()`s, so one effect can put the SAME material on several
+         * meshes. A per-mesh save then reads `depthTest` back off a material the
+         * first swap already set to `false`, and the restore loop writes `false`
+         * back permanently — a leak that survives `clear()`, because the pools are
+         * module-level and outlive every effect. Every later row would be inflated,
+         * and nothing in the output would look wrong.
+         *
+         * `scale`/`renderOrder` stay per-OBJECT: those are Object3D fields, not
+         * material fields, and two meshes sharing a material still have their own.
+         */
         measure(nodepth, scaleMul) {
-          const saved = [];
+          const savedObj = [];
+          const savedMat = [];
+          const seenMat = new Set();
           if (nodepth || scaleMul !== 1) {
             layer.traverse((o) => {
               if ((!o.isSprite && !o.isMesh) || !o.visible) return;
-              saved.push({ o, dt: o.material?.depthTest, sx: o.scale.x, sy: o.scale.y, sz: o.scale.z, ro: o.renderOrder });
-              if (nodepth && o.material) { o.material.depthTest = false; o.renderOrder = 999; }
+              savedObj.push({ o, sx: o.scale.x, sy: o.scale.y, sz: o.scale.z, ro: o.renderOrder });
+              if (nodepth) {
+                const mats = Array.isArray(o.material) ? o.material : [o.material];
+                for (const m of mats) {
+                  if (!m || seenMat.has(m)) continue;
+                  seenMat.add(m);
+                  savedMat.push({ m, dt: m.depthTest });
+                  m.depthTest = false;
+                }
+                o.renderOrder = 999;
+              }
               if (scaleMul !== 1) o.scale.set(o.scale.x * scaleMul, o.scale.y * scaleMul, o.scale.z * scaleMul);
             });
           }
           const n = changedIdx(grab()).length;
-          for (const s of saved) {
-            if (s.o.material) s.o.material.depthTest = s.dt;
+          for (const s of savedMat) s.m.depthTest = s.dt;
+          for (const s of savedObj) {
             s.o.scale.set(s.sx, s.sy, s.sz);
             s.o.renderOrder = s.ro;
           }
@@ -210,62 +238,164 @@ export const ErrorOverlay=class{}; export default {};`,
       // the character's whole footprint). Both mattes are reported; the intersection
       // is the one the 1/3 rule is judged on.
       const root = stage.scene.getObjectByName(`character:${pid}`);
+      const enemyRoot = stage.scene.getObjectByName('character:donut');
+
+      /**
+       * Repaint every material under `root` flat magenta, render, restore.
+       *
+       * `dedupe=false` reproduces the ORIGINAL, BROKEN version on demand — it is the
+       * known-bad input the restore check below is validated against. `rig.ts:540`
+       * builds ONE `limbMat` and assigns it to every limb mesh, so a per-mesh
+       * save/restore stores that material several times; captures 2..n read the value
+       * capture 1's swap already wrote (magenta), and the restore loop then walks the
+       * list forwards and writes magenta back OVER the colour it just restored. The
+       * character is left permanently magenta, every judgement PNG afterwards is of a
+       * magenta character, and the measurement itself still looks entirely reasonable.
+       * That is exactly LESSONS §13: an instrument that lies plausibly.
+       */
+      const paintMagenta = (dedupe) => {
+        const seen = new Set();
+        const swapped = [];
+        root.traverse((o) => {
+          if (!o.isMesh && !o.isSprite) return;
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          for (const m of mats) {
+            if (!m) continue;
+            if (dedupe) { if (seen.has(m)) continue; seen.add(m); }
+            swapped.push({
+              m, color: m.color?.getHex(), emissive: m.emissive?.getHex(),
+              map: m.map, transparent: m.transparent, opacity: m.opacity,
+            });
+            m.color?.setHex(0xff00ff);
+            m.emissive?.setHex(0x000000);
+            m.map = null;
+            m.transparent = false;
+            m.opacity = 1;
+            m.needsUpdate = true;
+          }
+        });
+        const img = grab();
+        for (const s of swapped) {
+          if (s.color !== undefined) s.m.color.setHex(s.color);
+          if (s.emissive !== undefined) s.m.emissive.setHex(s.emissive);
+          s.m.map = s.map;
+          s.m.transparent = s.transparent;
+          s.m.opacity = s.opacity;
+          s.m.needsUpdate = true;
+        }
+        return { img, captures: swapped.length, unique: dedupe ? swapped.length : new Set(swapped.map((s) => s.m)).size };
+      };
+
+      const magentaPx = (img, hideSet) => {
+        const sil = new Set();
+        let magentaN = 0;
+        for (let i = 0, p = 0; i < img.length; i += 4, p++) {
+          // Post chain shifts the exact value, so test the SHAPE of the colour
+          // (red+blue high, green low) rather than an exact hex.
+          if (img[i] > 110 && img[i + 2] > 110 && img[i + 1] < img[i] * 0.7) {
+            magentaN++;
+            if (!hideSet || hideSet.has(p)) sil.add(p);
+          }
+        }
+        return { sil, magentaN };
+      };
+
+      // ── CAST MATTE, and why it is NOT the obvious "hide it and diff" ──────────
+      //
+      // (see the note that used to live here — the matte is the INTERSECTION of
+      //  (a) "the pixel changes when the character is hidden"  — it OWNS it, and
+      //  (b) "the pixel turns magenta when the character is repainted magenta" — it
+      //      DRAWS it.
+      //  Shadow pixels pass (a) and fail (b) — a shadow is depth-only, so it is
+      //  byte-identical in both renders — and bloom pixels pass (b) and fail (a).)
       base = grab();
+      const cleanBefore = base;
       root.visible = false;
       const hideSet = new Set(changedIdx(grab()));
       root.visible = true;
 
-      // Dedupe by MATERIAL IDENTITY, not by mesh. A rig shares one material across
-      // many meshes (every `toonMat` of the same colour is one instance), so a
-      // per-mesh save/restore captures the same material several times — and the
-      // second capture reads the value the FIRST swap already wrote. Restoring then
-      // walks the list and writes magenta back over the original. That shipped for one
-      // run: the judgement PNG came out with a magenta-bodied hamburger while the
-      // measurement itself looked fine, which is exactly the LESSONS §13 failure
-      // (an instrument that lies plausibly is worse than none).
-      const seen = new Set();
-      const swapped = [];
-      root.traverse((o) => {
-        if (!o.isMesh && !o.isSprite) return;
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of mats) {
-          if (!m || seen.has(m)) continue;
-          seen.add(m);
-          swapped.push({
-            m, color: m.color?.getHex(), emissive: m.emissive?.getHex(),
-            map: m.map, transparent: m.transparent, opacity: m.opacity,
-          });
-          m.color?.setHex(0xff00ff);
-          m.emissive?.setHex(0x000000);
-          m.map = null;
-          m.transparent = false;
-          m.opacity = 1;
-          m.needsUpdate = true;
-        }
-      });
-      const magentaImg = grab();
-      for (const s of swapped) {
-        if (s.color !== undefined) s.m.color.setHex(s.color);
-        if (s.emissive !== undefined) s.m.emissive.setHex(s.emissive);
-        s.m.map = s.map;
-        s.m.transparent = s.transparent;
-        s.m.opacity = s.opacity;
-        s.m.needsUpdate = true;
+      // ── KNOWN-INPUT PROOF #1: does the swap restore? ──────────────────────────
+      // A ground-truth snapshot of every material's real state, taken once, dedup'd,
+      // BEFORE anything is touched. It is both the repair kit and the referee.
+      const truth = [];
+      {
+        const seen = new Set();
+        root.traverse((o) => {
+          if (!o.isMesh && !o.isSprite) return;
+          for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+            if (!m || seen.has(m)) continue;
+            seen.add(m);
+            truth.push({
+              m, color: m.color?.getHex(), emissive: m.emissive?.getHex(),
+              map: m.map, transparent: m.transparent, opacity: m.opacity,
+            });
+          }
+        });
       }
-      const sil = new Set();
-      let magentaN = 0;
-      for (let i = 0, p = 0; i < magentaImg.length; i += 4, p++) {
-        // Post chain shifts the exact value, so test the SHAPE of the colour
-        // (red+blue high, green low) rather than an exact hex.
-        if (magentaImg[i] > 110 && magentaImg[i + 2] > 110 && magentaImg[i + 1] < magentaImg[i] * 0.7) {
-          magentaN++;
-          if (hideSet.has(p)) sil.add(p);
+      const hardRestore = () => {
+        for (const s of truth) {
+          if (s.color !== undefined) s.m.color.setHex(s.color);
+          if (s.emissive !== undefined) s.m.emissive.setHex(s.emissive);
+          s.m.map = s.map; s.m.transparent = s.transparent; s.m.opacity = s.opacity;
+          s.m.needsUpdate = true;
         }
+      };
+
+      // Run the KNOWN-BAD variant, measure the damage its own restore leaves behind,
+      // then repair from `truth` and run the fixed one. `restoreDiff` is pixels
+      // differing from the pre-swap frame AFTER the variant restored itself:
+      // BROKEN must be >> 0, FIXED must be 0. Same code path, same frame, same
+      // threshold — the only difference is the dedupe.
+      const buggy = paintMagenta(false);
+      base = cleanBefore;
+      const buggyRestoreDiff = changedIdx(grab()).length;
+      hardRestore();
+      const afterRepairDiff = changedIdx(grab()).length;
+      const fixed = paintMagenta(true);
+      const fixedRestoreDiff = changedIdx(grab()).length;
+      const { sil, magentaN } = magentaPx(fixed.img, hideSet);
+
+      // ── KNOWN-INPUT PROOF #2: controls on the matte itself ────────────────────
+      // POSITIVE: an "effect" that repaints exactly the character's own pixels must
+      //   score ~100% of the matte. Hiding the character is that effect, by
+      //   construction — every pixel it changes is a pixel the character owned.
+      // NEGATIVE: an effect somewhere else entirely must score ~0%. Hiding the ENEMY
+      //   changes a completely disjoint region of the same frame.
+      const overlapWith = (idx) => { let n = 0; for (const p of idx) if (sil.has(p)) n++; return n; };
+      base = cleanBefore;
+      root.visible = false;
+      const posCtl = overlapWith(changedIdx(grab()));
+      root.visible = true;
+      let negCtl = -1;
+      if (enemyRoot) {
+        enemyRoot.visible = false;
+        negCtl = overlapWith(changedIdx(grab()));
+        enemyRoot.visible = true;
       }
+
       window.__castSet = sil;
       window.__castN = sil.size;
       window.__castHideN = hideSet.size;
       window.__castMagentaN = magentaN;
+      window.__matteProof = {
+        buggyCaptures: buggy.captures, buggyUnique: buggy.unique,
+        fixedCaptures: fixed.captures,
+        buggyRestoreDiff, afterRepairDiff, fixedRestoreDiff,
+        posCtlPct: sil.size ? +(posCtl / sil.size * 100).toFixed(1) : 0,
+        negCtlPct: sil.size && negCtl >= 0 ? +(negCtl / sil.size * 100).toFixed(1) : -1,
+      };
+      /** The matte, drawn. Green = a pixel the 1/3 rule is judged against. */
+      window.__matteShot = () => {
+        const cv2 = document.createElement('canvas');
+        cv2.width = rw; cv2.height = rh;
+        const g = cv2.getContext('2d');
+        const img = new ImageData(new Uint8ClampedArray(grab()), rw, rh);
+        for (const p of sil) {
+          img.data[p * 4] = 0; img.data[p * 4 + 1] = 255; img.data[p * 4 + 2] = 0;
+        }
+        g.putImageData(img, 0, 0);
+        return cv2.toDataURL('image/png');
+      };
       base = grab();
     }, [RW, RH, DELTA, PLAYER]);
 
@@ -282,12 +412,30 @@ export const ErrorOverlay=class{}; export default {};`,
     const castN = await page.evaluate(() => window.__castN);
     const castHideN = await page.evaluate(() => window.__castHideN);
     const castMagentaN = await page.evaluate(() => window.__castMagentaN);
+    const proof = await page.evaluate(() => window.__matteProof);
     log(`\n[selftest] frozen baseline vs itself: ${nullDiff} px (want ~0)`);
     log(`[selftest] forced garish impact:       ${forced} px (want >> 0)`);
-    log(`[cast matte] drawn silhouette ${castN} px = ${(castN / (RW * RH) * 100).toFixed(2)}% of frame`);
+    log(`\n[matte proof] material captures: broken path ${proof.buggyCaptures} for ${proof.buggyUnique} distinct materials`);
+    log(`              (dedup'd path takes ${proof.fixedCaptures}; the ${proof.buggyCaptures - proof.buggyUnique} extra are re-reads of an already-magenta material)`);
+    log(`[matte proof] restore diff, BROKEN per-mesh capture: ${proof.buggyRestoreDiff} px  (want >> 0 — the bug)`);
+    log(`[matte proof] restore diff, after hard repair:       ${proof.afterRepairDiff} px  (want 0 — repair kit is sound)`);
+    log(`[matte proof] restore diff, FIXED dedup'd capture:   ${proof.fixedRestoreDiff} px  (want 0)`);
+    log(`[matte proof] positive control (hide the cast -> % of its own matte): ${proof.posCtlPct}%  (want ~100)`);
+    log(`[matte proof] negative control (hide the ENEMY  -> % of cast matte):  ${proof.negCtlPct}%  (want ~0)`);
+    log(`\n[cast matte] drawn silhouette ${castN} px = ${(castN / (RW * RH) * 100).toFixed(2)}% of frame`);
     log(`             hide-diff (silhouette+shadow) ${castHideN} · magenta-only (silhouette+bloom) ${castMagentaN}`);
     if (castN < 500) { log('[selftest] FAIL — silhouette matte implausibly small'); process.exitCode = 1; }
     if (nullDiff > 40 || forced < 400) { log('[selftest] FAIL'); process.exitCode = 1; }
+    if (proof.buggyRestoreDiff <= 100) { log('[matte proof] FAIL — the known-BAD variant did not misbehave, so this proof proves nothing'); process.exitCode = 1; }
+    if (proof.fixedRestoreDiff > 0) { log('[matte proof] FAIL — the shipped matte does not restore'); process.exitCode = 1; }
+    if (proof.posCtlPct < 95) { log('[matte proof] FAIL — positive control'); process.exitCode = 1; }
+    if (proof.negCtlPct > 2) { log('[matte proof] FAIL — negative control'); process.exitCode = 1; }
+
+    {
+      const dataUrl = await page.evaluate(() => window.__matteShot());
+      await writeFile(`${OUT}/_matte.png`, Buffer.from(dataUrl.split(',')[1], 'base64'));
+      log(`[matte proof] wrote ${OUT}/_matte.png — green = the pixels the 1/3 rule is judged on`);
+    }
 
     const weapons = await page.evaluate(async () => {
       const rules = await import('/src/game/rules.ts');
@@ -339,9 +487,13 @@ export const ErrorOverlay=class{}; export default {};`,
         const shipped = c.n;
         const nodepth = window.__wc.measure(true, 1);
         const scale4 = window.__wc.measure(false, 4);
-        // leave the SHIPPED look standing for the screenshot
-        window.__wc.measure(false, 1);
-        return { shipped, nodepth, scale4, over: c.over, bbox: c.bbox };
+        // ── ABLATION RESTORE CHECK, every case ────────────────────────────────
+        // Re-measure the untouched shipped frame. It must come back to EXACTLY
+        // `shipped`; anything else means an ablation leaked state onto a pooled
+        // material and every row after this one is inflated. This is the check the
+        // 30-45% `depthTest:false` leak needed and did not have.
+        const reshipped = window.__wc.measure(false, 1);
+        return { shipped, nodepth, scale4, reshipped, over: c.over, bbox: c.bbox };
       }, [fires, peakMs]);
 
       if (opts.shot) {
@@ -356,9 +508,11 @@ export const ErrorOverlay=class{}; export default {};`,
         label, peakPx: r.shipped, peakAtMs: peakMs, lifetimeMs: life,
         nodepthPx: r.nodepth, scale4Px: r.scale4,
         occlusionRatio: +occl.toFixed(2), sizeRatio: +size.toFixed(1),
-        castCoveredPct: +castPct.toFixed(1), bbox: r.bbox, series,
+        castCoveredPct: +castPct.toFixed(1), bbox: r.bbox, series, reshipped: r.reshipped,
       };
-      log(`${label.padEnd(30)} ${String(r.shipped).padStart(7)} ${String(r.nodepth).padStart(8)} ${String(r.scale4).padStart(8)}   ${occl.toFixed(2).padStart(6)}x ${size.toFixed(1).padStart(6)}x   ${castPct.toFixed(1).padStart(5)}%  @${String(peakMs).padStart(4)}ms`);
+      const leak = r.reshipped !== r.shipped ? `  ⚠ ABLATION LEAK ${r.shipped}->${r.reshipped}` : '';
+      if (leak) process.exitCode = 1;
+      log(`${label.padEnd(30)} ${String(r.shipped).padStart(7)} ${String(r.nodepth).padStart(8)} ${String(r.scale4).padStart(8)}   ${occl.toFixed(2).padStart(6)}x ${size.toFixed(1).padStart(6)}x   ${castPct.toFixed(1).padStart(5)}%  @${String(peakMs).padStart(4)}ms${leak}`);
       return row;
     };
 
@@ -369,7 +523,19 @@ export const ErrorOverlay=class{}; export default {};`,
 
     const f = await page.evaluate(() => window.__vfxDebugFighters.player);
 
-    if (OFFSCREEN) {
+    if (args.fire) {
+      // Ad-hoc: measure named generic kinds on the same instrument as the weapon
+      // table, so a new effect's number is comparable to everything else here.
+      // `--fireAt <wu>` moves the spawn off the player. Load-bearing for anything that
+      // does NOT happen at a fighter: firing `coverScuff` at the player's own feet
+      // measured 84 px at 5.88x occlusion, which is a statement about the PLAYER, not
+      // about the effect — a scuff happens on a counter the shot ran into, metres away.
+      const dx = Number(args.fireAt ?? 0);
+      for (const kind of String(args.fire).split(',')) {
+        results.push(await runCase(`KIND.${kind}${dx ? `@${dx}` : ''}`,
+          [[kind, f.x + dx, f.y, 12, '#FFC93C']], { shot: true }));
+      }
+    } else if (OFFSCREEN) {
       // ── THE OFF-SCREEN TELL, and why it is measured HERE ──────────────────────
       //
       // `render/camera.ts` excludes `giantSlam` from the fair-play radius. Covering
@@ -416,8 +582,20 @@ export const ErrorOverlay=class{}; export default {};`,
         const dmg = Math.max(1, w.damage || 8);
         const tagC = w.hooks.includes('cast') ? '' : '[gen]';
         const tagI = w.hooks.includes('impact') ? '' : '[gen]';
-        results.push(await runCase(`${w.id}.${w.key}.cast${tagC}`, [['cast', f.x, f.y, dmg, w.color, w.id, w.key]], { shot: !!args.shots }));
-        results.push(await runCase(`${w.id}.${w.key}.impact${tagI}`, [['impact', f.x, f.y, dmg, w.color, w.id, w.key]], { shot: !!args.shots }));
+        // `--volley N` fires the hook N times in the same frozen frame.
+        //
+        // Two reasons, and the second is the load-bearing one. (1) A multi-pellet
+        // weapon really does land N of these at once, so N is what the player sees.
+        // (2) VARIANCE. These effects randomise every angle, speed and size, and the
+        // small ones are single-digit particle counts — repeated measurements of an
+        // UNCHANGED effect at ~300 px spread +/-10-20% run to run (egg.Shards.impact
+        // read 349 / 288 / 302 across three runs of identical code). At N=1 a 20%
+        // "improvement" is indistinguishable from a reroll, and this project has a
+        // documented history of acting on exactly that kind of number.
+        const V = Math.max(1, Number(args.volley ?? 1));
+        const rep = (fa) => Array.from({ length: V }, () => fa);
+        results.push(await runCase(`${w.id}.${w.key}.cast${tagC}`, rep(['cast', f.x, f.y, dmg, w.color, w.id, w.key]), { shot: !!args.shots }));
+        results.push(await runCase(`${w.id}.${w.key}.impact${tagI}`, rep(['impact', f.x, f.y, dmg, w.color, w.id, w.key]), { shot: !!args.shots }));
       }
     } else {
       // Exactly what `match.ts`'s `weapon-fired` handler fires, per weapon — routed

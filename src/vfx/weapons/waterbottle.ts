@@ -49,6 +49,33 @@ const SHARD_RADIUS = 0.09;
  * So: shards start on the RIM (`IMPACT_RIM`) and are sized in `GLASS_UNIT`s.
  */
 const GLASS_UNIT = CHARACTER_HEIGHT * 0.075; // 0.158 m
+/**
+ * The impact's own unit, larger than the cast's.
+ *
+ * Both beats used to share `GLASS_UNIT`, and re-measuring after the rim fix showed
+ * why they should not (`tools/tmp/vfx_wcov.mjs`, 800x450 readback, peak slice, against
+ * a 300 px floor and the generic impact's 3,098 px):
+ *
+ *                     shipped  +nodepth  +scale4   occl    size
+ *     Glass.cast          459       636    8,978   1.39x   19.6x   ✓ over floor
+ *     Glass.impact        264       264    2,935   1.00x   11.1x   ✗ under floor
+ *
+ * The rim move did its job — occlusion is 1.00x, i.e. NOTHING is hidden any more, so
+ * `docs/LESSONS.md` §1's precondition for scaling ("prove it is not buried first") is
+ * met and size is the only remaining cause. And unlike every other under-floor row in
+ * the roster, Glass Shards is a ONE-pellet weapon (`rules.ts`: no `pellets` field, 7
+ * damage, `effect: 'stun'`) — Burrito's Swarm at 113 px fires four at once and Soup's
+ * Splash at 312 px fires three, so their per-pellet numbers composite on screen and
+ * this one does not. 264 px is what the player actually gets, for the roster's only
+ * stun application.
+ *
+ * 0.10 rather than 0.075 is 1.33x linear ~ 1.78x area on a scatter that measured
+ * essentially area-proportional (4x linear -> 11.1x delivered).
+ *
+ * The CAST keeps `GLASS_UNIT`: it clears the floor already, and `game/vfx.ts`'s
+ * subordinate muzzle anchor is deliberately the load-bearing part of a cast beat.
+ */
+const IMPACT_UNIT = CHARACTER_HEIGHT * 0.10; // 0.210 m
 /** Radius the shatter is born on. `CHARACTER_RADIUS` is the sim's collision radius
  * (1.05 m); 0.5 of it puts the shards at the edge of the visible silhouette rather
  * than at its centre, without throwing them so wide they stop reading as this hit. */
@@ -161,8 +188,8 @@ export const waterbottleWeaponVfx: CharacterWeaponVfxMap = {
     impact(ctx) {
       const origin = ctx.position;
       /** Scale that turns one `shardGeo` (built at `SHARD_RADIUS`) into one
-       * `GLASS_UNIT`. Everything below is in units, not in shard-radii. */
-      const U = GLASS_UNIT / SHARD_RADIUS;
+       * `IMPACT_UNIT`. Everything below is in units, not in shard-radii. */
+      const U = IMPACT_UNIT / SHARD_RADIUS;
 
       // The crack flash: 0.30 -> 0.72 units (~0.11 -> 0.26 m of radius on a 2.10 m
       // character). Was 2 -> 7 GLINT radii = 0.043 -> 0.151 m.

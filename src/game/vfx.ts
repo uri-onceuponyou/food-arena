@@ -2114,8 +2114,20 @@ export class VfxLayer {
     flash.sprite.position.set(origin.x, PROJECTILE_HEIGHT, origin.z);
     flash.vx = 0; flash.vy = 0; flash.vz = 0; flash.gravity = 0;
     flash.startScale = 0.42; flash.endScale = 0.85;
-    flash.startOpacity = 0.95; flash.endOpacity = 0; flash.fadeEase = 1.4;
-    flash.mat.color.set(color).lerp(WHITE, 0.45);
+    flash.startOpacity = 1; flash.endOpacity = 0; flash.fadeEase = 1.4;
+    // ── RULE 1, and it FAILED its first measurement ────────────────────────────
+    // The colour block at the head of this file requires every transient to clear the
+    // cast's measured luma 0.302 by >= 0.15 upward. Built at `lerp(WHITE, 0.45)` and
+    // 0.9 spark opacity, `tools/tmp/vfx_hue.mjs` measured this effect's delivered
+    // pixels at luma 0.451 — |dL| 0.148, i.e. FAILING by 0.002. Marginal, but a rule
+    // that is only enforced when it is convenient is not a rule, and the failure mode
+    // it guards against is precisely this file's history: an effect that renders and
+    // cannot be seen against the thing it is drawn over.
+    //
+    // The fix is opacity and white, NOT size: this beat must stay quieter than a hit
+    // (a miss must never read as a hit), and it is already at 522 px against the
+    // generic impact's 3,113.
+    flash.mat.color.set(color).lerp(WHITE, 0.6);
 
     // Sparks fanning back off the surface, within +/-60 degrees of the reflected
     // direction so they read as a deflection rather than an explosion.
@@ -2138,9 +2150,11 @@ export class VfxLayer {
       p.vz = az * (2.4 + Math.random() * 1.6);
       p.vy = 0.9 + Math.random() * 0.7;
       p.gravity = -7.5;
-      p.startScale = 0.55 + Math.random() * 0.25;
+      p.startScale = 0.62 + Math.random() * 0.28;
       p.endScale = 0.12;
-      p.startOpacity = 0.9; p.endOpacity = 0; p.fadeEase = 1.2;
+      // Full opacity — see the rule-1 note on the flash above. The sparks are five of
+      // the six elements here, so they, not the flash, set the effect's mean luma.
+      p.startOpacity = 1; p.endOpacity = 0; p.fadeEase = 1.2;
       p.mat.color.set(SPARK_COLOR);
     }
   }

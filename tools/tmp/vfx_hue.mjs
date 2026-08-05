@@ -16,6 +16,22 @@
  *
  *   CAST    pixels the player's own model owns (found by a visibility matte, not a
  *           guessed screen box)
+ *
+ * ⚠️ DO NOT QUOTE THIS TOOL'S "covers% of cast" COLUMN. Its matte is a HIDE-DIFF —
+ * every pixel that changes when the character is hidden — and hiding a fighter also
+ * deletes the SHADOW it throws on the floor, so the matte is silhouette + shadow
+ * (measured 5,255 px against the true drawn silhouette's 1,540). Any floor-level wash
+ * tints the shadow and scores here as "repainted the fighter" while the fighter is
+ * untouched. Measured divergence on the same frame, same instant: the arbitrated giant
+ * slam reads **73.2% here and 9.7%** on `tools/tmp/vfx_wcov.mjs`'s intersection matte
+ * (hide-diff AND repaints-magenta), and the judgement PNG shows a completely readable
+ * hamburger — so 9.7% is the true one. `vfx_wcov.mjs` is the tool for rule 2.
+ *
+ * The HUE / SAT / LUMA / warm% columns are unaffected: they are computed over the
+ * EFFECT's own changed pixels and never touch the matte. Rule 1 (clear cast luma
+ * 0.302 by >= 0.15) and rule 4 (nothing in blocking violet 258-268) are still this
+ * tool's to answer, and `|dL cast|` uses only the CAST population's mean luma, which
+ * a shadow shifts by far less than it shifts a coverage count.
  *   ENV     every other pixel in the frozen frame
  *   EFFECT  the pixels an effect changes, at its own measured peak
  *
@@ -198,6 +214,12 @@ export const ErrorOverlay=class{}; export default {};`,
       ['meleeArc', ['meleeArc', 12, '#FFC93C', 'hamburger', 'Smash'], 16],
       ['giantSlam', ['giantSlam', 10, '#E63946', 'lollipop', 'Giant'], 220],
       ['puddleSplash', ['puddleSplash', 4, '#E8F8FF'], 16],
+      // Added 2026-08-05 with the effects themselves. `coverScuff` is new; `slam FIRED`
+      // is what `spawnWeaponCast` now composes for one `weapon-fired` event, which is
+      // the thing a player sees — the `giantSlam` row above is one PASS of it and can
+      // pass the contract while the sum fails it.
+      ['coverScuff', ['coverScuff', 12, '#BFEFFF'], 100],
+      ['slam FIRED', ['weaponFired', 10, '#E63946', 'lollipop', 'Giant'], 220],
     ];
 
     console.log('\neffect                 hue    sat   luma  warm%  |ΔL cast|  covers% of cast   verdict');
