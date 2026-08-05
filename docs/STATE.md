@@ -242,8 +242,52 @@ plates you can hide under."* Solid props cannot deliver it (the collision was ca
   (`terrainSlowFactor` is a working template) is the safe shape.
 - `stepAI` reads the player's true position at **three independent sites**, one a direct read — the
   exact shape of all five AI bugs found so far.
-- **Step 0 is the inert mechanism**, proven **bit-identical** (110 matchups × 32 seeds, tick-for-tick)
-  with concealment absent, exactly as `LEVEL_MIN` was.
+
+### ✅ STEP 0 IS DONE AND INERT — `1c140c0`
+
+**Bit-identity PASS: 0 differing ticks in 3,283,873.** 110 matchups × 32 seeds = 3520 matches,
+driver rev 4, stepped in **lockstep** against a git-extracted HEAD with one driver feeding both
+sims, every field compared after every tick. No arena ships a region, so the game plays exactly as
+before. `sim.test.mjs` 219 → **253**; new `tools/tmp/conceal_lab.mjs` (selftest 22).
+
+One rule: **while you are concealed, nothing that tracks you updates.** All **three** `stepAI`
+sites are routed through it — separation, facing, and the direct `steer(..., player.x, player.y)`
+nav target; `state.player` now appears nowhere else in `stepAI`. Plus a **fourth outside `ai.ts`**:
+homing projectiles re-aim every tick, and the observer there is the *projectile*, so it stays
+symmetric between the sides — the property all five recorded `ai.ts` defects lacked.
+
+### 🚨 THE FINDING THAT CONSTRAINS THE ART: `stepAI` has NO SEARCH
+
+It walks to the last-seen point, stops, and sees **84 wu** from there. Measured both ways: at half
+that radius it re-acquires; at **double, it never does** — final separation 363 wu, never sighted.
+
+> **A large bush is a permanent AI-denial zone.** Concealment needs **many SMALL patches — no
+> interior point more than ~84 wu from a plausible entry edge**, i.e. up to roughly **168 wu** across.
+
+**This independently reproduces the probe's GRAIN finding from the opposite direction** — the
+reference measurement said *dozens of small tufts, not a few big masses*; the AI says the same
+number. Two derivations, one answer. **Big hero bushes are off the table** unless someone builds AI
+search. → `docs/DECISIONS-FOR-URI.md` §29.
+
+### Still to route (all out-of-set for the sim agent)
+`src/arena/types.ts` (+`concealment?: ConcealBox[]`) · `src/ui/hud.ts:757` (radar blip) ·
+`src/game/match.ts:1191` (enemy HP bar) · `tools/arena-dump.js:24` ·
+`tools/tmp/arena_probe.mjs` extractor **and** `--verify` normaliser.
+
+⚠️ **`arena_probe --occl` and `--verify` are BLIND to concealment** — the series comes from
+`arena.cover` only and the normaliser compares `{w,h,c,msr,ps,es,cover,hz}`. Until they are fixed
+the sim-side guard is the only thing that can see a region.
+
+⚠️ **The endgame annulus is handled**: `concealmentKeepoutRadius = max(MIN_SAFE_RADIUS,
+maxSafe × 0.25)` = **248.25 wu** on the shipped kitchen, measured on the region's **nearest** point
+(a band whose centre is legal can still reach the hub), with §26(i) showing it FAIL on a hub box.
+
+⚠️ **One number not to trust:** a first placement run says the player would be concealed **1.51%**
+of ticks against the enemy's 23.90%. **That measures the HARNESS, not the feature** — the scripted
+player has perfect information and no concept of concealment, by design. What the run *did*
+establish: only **86 buildable 80×80 cells exist**, and traffic is **spatially segregated** — the
+player is at **0.000%** in every one of the enemy's four busiest cells, so **one region set cannot
+be high-traffic for both fighters.**
 
 ## 🟠 4. Cast value ladder — **the "regressions" are a RENDER commit, and the metric is wrong**
 

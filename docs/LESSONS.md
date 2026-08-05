@@ -686,6 +686,45 @@ At ≥250 the real move is **1.29×**.)*
 
 ---
 
+## 15c. A bit-identity claim has to name what it holds — "the state is identical" is not a test
+
+The concealment mechanism had to be proven **inert**: with no arena declaring a region, the game
+must play *exactly* as before, or no later balance delta can be attributed to the feature rather
+than to the plumbing. Same obligation `LEVEL_MIN` discharged.
+
+Its first full run reported **3520 of 3520 matches divergent at tick 1** — and was **right to**.
+The mechanism publishes three new fields (`state.aiSighting`, `state.player.concealed`,
+`state.enemy.concealed`). A naive "compare the whole state object" test fails on **any** new field,
+including one that changes no behaviour at all. Loosen it to "compare the fields both sides have"
+and it stops noticing a field that **disappears**, which is a real regression.
+
+The claim that actually works has three parts, and each is load-bearing:
+1. every **baseline** field holds the same value at every tick,
+2. **no baseline field disappears** — a removal is a hard failure, not a skipped comparison,
+3. the added fields are **declared and printed**, so the diff is auditable rather than suppressed.
+
+Final: **0 differing ticks in 3,283,873**, 110 matchups × 32 seeds, both sims stepped in
+**lockstep** off one driver so the inputs cannot drift.
+
+→ **"Bit-identical" is a claim about a named set, not about an object.** State the set, fail on
+shrinkage, and print the additions — otherwise the test is either too strict to pass or too loose
+to catch the thing it exists for.
+
+### And two assertions that FAILED and were worth more than the ones that passed
+
+Both were written expecting a pass, and both turned out to be discoveries about the game:
+
+- *"Every melee weapon reaches no further than a target can be seen"* → **reveal 84, longest melee
+  400.** Lollipop's Giant Lollipop is melee at `REACH.ultimateSlam`, which `rules.ts` already
+  declares off the ladder. Now one **named** exception rather than a silent one.
+- *"The AI always re-acquires"* → **it does not. `stepAI` has no search behaviour at all.** It walks
+  to the last-seen point and stops. That single failed assertion is what turned bush size from an
+  art decision into an engineering constraint (§29) — a large patch is a permanent AI-denial zone.
+
+**Write the assertion you expect to pass.** The ones that fail are where the game actually is.
+
+---
+
 ## 16. Two signals that look like "hung" and are not
 
 A probe was killed as deadlocked on 55 minutes elapsed, **0.0% CPU**, and **no file writes in 43

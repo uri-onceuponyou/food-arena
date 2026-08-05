@@ -26,6 +26,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **24** | Rarity vs level | — | ✅ **DONE — tier spread 20.7pp → 4.0pp, below the noise floor** | landed |
 | **26** | ⚠️ **Rarity now buys NOTHING and costs 4.5× to level** | genre-faithful default | **needs you — rarity has no job left** | one multiplier, or a kit pass |
 | **28** | 🆕 Hamburger's heal 25 → **18 HP**, after the measuring instrument was fixed | 18 | **measured to ±3 HP; the exact integer is a feel call.** ⚠️ And the constraint has moved off Hamburger onto **Legendary at the bottom** — the next balance pass is a Sushi pass | one constant |
+| **29** | 🆕 **Concealment is BUILT and inert.** Three calls before it ships | off | ⚠️ **(a) bush size is now an AI constraint — ~168wu max, big hero bushes are OFF** · **(b) hide the radar blip + HP bar, or it reads as broken** · (c) does attacking reveal you? | all cheap until patches ship |
 | **25** | ⚠️ **The 7+ bar is now calibrated** — the critic never scores shipped Brawl Stars above 9 | 7+ | **your bar is sound; the measurements under it were not** | — |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
@@ -1414,3 +1415,68 @@ recorded so nobody rediscovers it as a surprise.
 
 **Cost to change:** one constant in `src/game/rules.ts`. Re-run
 `node tools/tmp/roster_lab.mjs --seeds 32` and read tier spread, which binds before win rate does.
+
+---
+
+## 29. Concealment is BUILT and inert — three calls before it can ship
+
+You approved this in §18: *"add bushes — but make it relevant to kitchen. For example plates you
+can hide under."* The **sim mechanic exists now** (`1c140c0`) and is **switched off**: no arena ships
+a concealment region, so the game plays exactly as before. That is proven, not asserted — 110
+matchups × 32 seeds stepped in lockstep against a git-extracted HEAD, every field compared after
+every tick: **0 differing ticks in 3,283,873**.
+
+The rule is one sentence: **while you are concealed, nothing that tracks you updates.** The AI's
+belief freezes at your last sighting, and *visibility* — not believed distance — gates the shot.
+
+### ⚠️ 1. BUSH SIZE IS NOW AN AI CONSTRAINT, NOT A TASTE ONE. Read this before any art is made.
+
+`stepAI` **has no search behaviour**. It walks to where it last saw you, stops, and can see 84 wu
+from there. Measured both ways: at half that radius it re-acquires; at double, it **never does** —
+final separation 363 wu, never sighted.
+
+**So a large bush is a permanent AI-denial zone.** A player who stands still inside one breaks the
+enemy for the rest of the match.
+
+> **The constraint: many SMALL patches. No interior point more than ~84 wu from an edge the AI
+> might walk in through — i.e. patches up to roughly 168 wu across.**
+
+**Big hero bushes are off the table** unless someone builds AI search, which is a real piece of work
+and not currently planned. This arrived independently from two directions: the architecture probe
+measured that the reference's cover is *dozens of small tufts*, not a few big masses, and the sim
+agent hit the same number from the AI side. **Two derivations, one answer — that is as close to
+certain as this project gets.**
+
+### 2. Half-hidden, or fully hidden? — **this one actually blocks shipping**
+
+While concealed, the enemy's **radar blip, HP bar and 3D model are all still drawn.** Each is a
+one-line change in a file the sim agent did not own (`ui/hud.ts:757`, `game/match.ts:1191`), and
+`Fighter.concealed` is already published for exactly them.
+
+**Shipping without them means concealment reads as broken** — you hide, the AI loses you, and your
+own screen still shows it tracking you perfectly. My recommendation is to hide the blip and the HP
+bar and **keep the model visible** (you should always see where you are), but the reverse is a
+legitimate design choice and it is yours.
+
+### 3. Should attacking reveal you?
+
+Genre norm — in Brawl Stars, firing from a bush exposes you. **Deferred deliberately**: it is a
+second rule with its own balance cost, and it cannot be measured until regions actually exist.
+Your call whether it ships with v1 or after.
+
+### One number NOT to trust, and why I am telling you rather than quoting it
+
+A first placement measurement says the player would spend **1.51%** of its time concealed against
+the enemy's 23.90%. **Do not read that as "concealment is worthless."** The scripted player used to
+measure it has *perfect information and no concept of concealment at all* — by design, because
+giving it perception would invalidate every balance number in the project. So that figure bounds
+**what the harness can see**, not what the feature is worth to a human.
+
+What the same run *did* establish, and this is real: only **86 buildable 80×80 cells exist** in the
+whole arena once cover and the endgame keep-out are removed, and player traffic and enemy traffic are
+**spatially segregated** — the player is at **0.000%** in every one of the enemy's four busiest
+cells. **A single set of bushes cannot be high-traffic for both fighters.** That is a level-design
+tension worth knowing before the patches are placed, not after.
+
+**Cost to change any of this:** the mechanic is inert until an arena declares regions, so all three
+answers are still cheap. Once patches ship, (1) becomes a re-layout.
