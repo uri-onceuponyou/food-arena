@@ -1,3 +1,19 @@
+// ⚠️ SCRUB NOTE — 2026-08-06, and it is a STANDING RULE, not a one-off.
+//
+// This file previously carried prose DESCRIBING the third-party reference plates
+// naming the plate's costume and held-prop details verbatim. No pixels
+// and no secrets ever left the machine — but CLAUDE.md's permanent constraint says
+// reference/images/ must never be committed OR PUBLISHED, and a description derived
+// from viewing a plate is still derived from it. This repo is public.
+//
+// The rule, stated so the next agent does not have to infer it:
+//   DESCRIBE THE COMPOSITIONAL ROLE, NEVER THE THIRD-PARTY ARTWORK.
+//   "the costume element in the torso role" — yes.  Naming what it depicts — no.
+//
+// The crop COORDINATES stay: they are numbers, they are needed for reproducibility,
+// and they disclose nothing. Role-based notes are also better engineering, because
+// what this table needs to record is why a crop is COMPARABLE, not what it contains.
+
 /**
  * Where each named part lives on the reference plate, as fractions of the MATTED
  * SUBJECT's bounding box (`[x0, y0, x1, y1]`, origin at the subject box's
@@ -33,10 +49,10 @@ export default {
   },
   'figure-whole': { whole: true, kind: 'standalone', note: 'the control panel the per-part panels are supposed to beat' },
 
-  head: { box: [0.20, 0.00, 0.97, 0.40], kind: 'standalone', note: 'hair mass + crown + face down to the chin' },
+  head: { box: [0.20, 0.00, 0.97, 0.40], kind: 'standalone', note: 'the whole head mass down to the chin, on both sides' },
   crown: {
     box: [0.20, 0.00, 0.97, 0.20], kind: 'standalone',
-    note: 'the top-of-head mass above the eyes. Hamburger\'s is a seeded bun dome; this is a hair mass plus a gold crown — STRUCTURALLY DIFFERENT ELEMENTS in the same compositional role. Declared, not hidden.',
+    note: 'the top-of-head mass above the eyes. The two sides fill this compositional role with STRUCTURALLY DIFFERENT ELEMENTS — declared, not hidden. See the scrub note at the head of this file.',
   },
 
   'face-overall': { box: [0.41, 0.13, 0.85, 0.38], kind: 'inset' },
@@ -46,25 +62,24 @@ export default {
   torso: { box: [0.25, 0.37, 0.83, 0.68], kind: 'standalone' },
   decoration: {
     box: [0.25, 0.36, 0.83, 0.58], kind: 'inset',
-    note: 'the candy-studded collar and gold bow — the costume element worn on the torso, the role hamburger\'s apron plays',
+    note: 'the costume element worn on the torso — the compositional role hamburger\'s apron plays',
   },
 
   arms: { box: [0.02, 0.34, 0.98, 0.67], kind: 'standalone', note: 'both sleeves; the torso between them is in frame on OUR side too' },
-  hands: { box: [0.66, 0.46, 1.00, 0.70], kind: 'standalone', note: 'the free hand. The other grips the cannon, exactly as our handR grips the spatula, so both sides use the unencumbered hand' },
+  hands: { box: [0.66, 0.46, 1.00, 0.70], kind: 'standalone', note: 'the free hand. On both sides the other hand grips a held prop, so both use the unencumbered one' },
   legs: { box: [0.24, 0.62, 0.80, 0.92], kind: 'standalone' },
   feet: { box: [0.26, 0.86, 0.82, 1.00], kind: 'standalone' },
-  prop: { box: [0.00, 0.24, 0.42, 0.44], kind: 'standalone', note: 'the shoulder cannon, against our spatula: both are the character\'s one held silhouette landmark' },
+  prop: { box: [0.00, 0.24, 0.42, 0.44], kind: 'standalone', note: 'the held prop against our spatula: on both sides it is the character\'s one held silhouette landmark' },
 
   // NOSE — dropped, and it is dropped on BOTH sides. Hamburger has no nose mesh
   // (`src/characters/hamburger.ts` builds eye, brow, blush and mouth on
   // `joints.face`, and nothing else), and the Brawl Stars chibi face has no
-  // modelled nose either — the reference's own INDEX.md calls out "minimal nose"
-  // as a house style. A part that does not exist is a mis-specification, not a
+  // modelled nose either — the reference face has none either. A part that does not exist is a mis-specification, not a
   // finding.
-  nose: { valid: false, why: 'no nose exists on either side: hamburger builds eye/brow/blush/mouth only, and the reference chibi face has no modelled nose (the curated INDEX calls the house style "minimal nose")' },
+  nose: { valid: false, why: 'no nose exists on either side: hamburger builds eye/brow/blush/mouth only, and the reference face has none either' },
 
   // EARS — dropped for the same reason, on both sides. The brief asked for
   // "ears-or-crown"; hamburger has no ears and neither does this reference
-  // (hair covers the head entirely), so the part resolves to `crown` above.
+  // (the head mass is unbroken), so the part resolves to `crown` above.
   ears: { valid: false, why: 'neither side models ears; the brief\'s "ears-or-crown" resolves to `crown`' },
 };

@@ -74,8 +74,8 @@ console.log(`plate ${PLATE} ${W}x${H}`);
 //
 // `hsv` (default): the reference backdrop is one narrow, saturated cyan band —
 //   measured off this plate's own border, hue 184..199, sat 0.86..0.93, value
-//   0.92..1.00 — and nothing on the character is in it (green hair sits at ~90,
-//   the boots and cannon at ~280). So classify by colour, then keep only the
+//   0.92..1.00 — and nothing on the character is in it (its two largest masses
+//   sit near hue ~90 and ~280). So classify by colour, then keep only the
 //   BORDER-CONNECTED component of that class, which is what stops a cyan detail
 //   somewhere inside the character from being punched out.
 const MODE = get('--matte', 'hsv');

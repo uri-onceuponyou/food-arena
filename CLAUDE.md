@@ -163,6 +163,17 @@ Reference plates live in `reference/images/curated/` — `gameplay_topdown/` for
   copied into `src/`, or published.** They are the original 2D prototypes and third-party
   screenshots. Prototypes were once stripped from all git history because one contained a live
   Supabase key. **Never `git add -f` anything under `reference/`.**
+- 🚨 **AND THAT INCLUDES DESCRIBING THEM. This repo is PUBLIC.** Breached 2026-08-06 by the per-part
+  pass, which committed crop tables whose notes named a third-party character's costume and held
+  prop verbatim. No pixels and no secrets left the machine — but the rule says *published*, and
+  prose derived from viewing a plate is derived from it. The rule was scrubbed and restated in
+  `tools/tmp/pp_ref_parts.mjs`:
+  > **Describe the compositional ROLE, never the third-party artwork.**
+  > *"the costume element in the torso role"* — yes. Naming what it depicts — no.
+  Crop **coordinates** are fine: they are numbers, they disclose nothing, and they are needed for
+  reproducibility. **This was an honest misreading of a rule that only said "the images", so the
+  rule now says both.** Remedy was proportionate — a scrub commit, not a history rewrite, because
+  nothing sensitive shipped; a leaked secret or an actual plate would warrant the rewrite.
 - ⚠️ `reference/images/curated/menus/zb_home.png` contains **Uri's own account details**. It stays
   local; those strings must never appear in a report, a packet, or a committed file.
 - The prototypes are **reference, not specification**, for menus and remain the design source for
