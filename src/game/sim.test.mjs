@@ -30,6 +30,16 @@ import { pressValue, stepAI } from './ai.ts';
 // lands from beyond every other weapon's reach WITHOUT AIM — driving it through a whole
 // match would confound that with whether the driver ever chose it.
 import { applyDamage, attemptAttack, statusReadyAt } from './combat.ts';
+// Section 26 tests CONCEALMENT. The predicates are imported rather than re-derived for
+// the same reason `pressValue` and `statusReadyAt` are: the section's entire claim is that
+// ONE rule is read by four call sites, and a copy of the AABB test here would pass forever
+// against a sim that had stopped calling it. `tryMove`/`moveToward`/`navStats` come in so
+// walk-through can be PROVEN by walking, and the nav grid's passable-cell count compared
+// directly, rather than asserted from the fact that nobody wired concealment into them.
+import {
+  concealmentInsideRadius, concealmentKeepoutViolations, isConcealed, isVisibleFrom,
+  moveToward, navStats, tryMove,
+} from './movement.ts';
 import {
   CHARACTERS, CHARACTER_IDS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, POT, TRAIL,
@@ -54,7 +64,17 @@ import {
   // written as `0.45` because the section's whole claim is that ONE stated rule reaches
   // only ONE of the two fighters — a literal here would still pass if the constant moved.
   PUDDLE_SLOW_FACTOR, SPLAT_RADIUS,
+  // Section 26: concealment. `CONCEAL_REVEAL_RADIUS` and `concealmentKeepoutRadius` are
+  // imported rather than written as 84 and 248.25 because the section's claim is about the
+  // DERIVATIONS — reveal is a rung of the `REACH` ladder, keepout is the ring formula
+  // evaluated at `CONCEAL_ENDGAME_PROGRESS` — and a literal here would still pass after the
+  // ladder or the ring moved out from under it.
+  CONCEAL_REVEAL_RADIUS, CONCEAL_ENDGAME_PROGRESS, concealmentKeepoutRadius,
 } from './rules.ts';
+// Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
+// no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
+// walked is the thing the sim actually moves.
+import { createFighter } from './state.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
 // `rules.ts` and moved once already (the 2026-08-03 retune, see `REACH`). Tests that
@@ -91,8 +111,8 @@ function approx(a, b, eps = 1e-6) {
 // module to author anyway).
 // ─────────────────────────────────────────────────────────────────────────────
 
-function makeArena({ cover = [], hazards = [], width = 2000, height = 2000, maxSafeRadius = 545 } = {}) {
-  return {
+function makeArena({ cover = [], hazards = [], width = 2000, height = 2000, maxSafeRadius = 545, concealment } = {}) {
+  const arena = {
     id: 'test-fixture',
     displayName: 'Test Fixture Arena',
     width,
@@ -107,6 +127,12 @@ function makeArena({ cover = [], hazards = [], width = 2000, height = 2000, maxS
       return {};
     },
   };
+  // ABSENT unless asked for, not `concealment: []`. Every one of the 200-odd assertions
+  // above this line runs against an arena with NO SUCH FIELD, which is the case §26(a)
+  // and `tools/tmp/conceal_lab.mjs --bitid` both claim is inert — so the claim is exercised
+  // by the whole suite rather than only by the section that states it.
+  if (concealment) arena.concealment = concealment;
+  return arena;
 }
 
 const noInput = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
@@ -3082,6 +3108,405 @@ console.log('\n23. Character levels');
     check('…and with EVERY weapon off cooldown it finds only two — that gap is why "two" was believed',
       misFullKit.length === 2 && misFullKit.includes('taco') && misFullKit.includes('burrito'),
       `full-kit model: [${misFullKit.join(', ')}]`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 26. CONCEALMENT — walk-through cover, and the SIXTH instance of `ai.ts`'s defect
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri approved this in `docs/DECISIONS-FOR-URI.md` §18: *"add bushes — but make it
+// relevant to kitchen. For example plates you can hide under."* The full rule, its
+// derivation, and everything it deliberately does not do are in `rules.ts` under
+// "CONCEALMENT". This section is the behavioural half, and it exists because a probe found
+// the defect ALREADY ARMED before a line was written: `stepAI` read the player's true
+// position at three independent sites and one of them — the chase nav target — was a
+// DIRECT read rather than something derived from the other two.
+//
+// An implementation that reached two of three produces an AI that FACES where it last saw
+// you while WALKING to where you actually are. It looks correct on screen. It is the same
+// asymmetry as the stun-silence defect (§20(d): stunned player fires 100% of its shots,
+// stunned AI 0%) and it would be the SIXTH instance of this file's oldest shape.
+//
+// Every check below that could pass vacuously carries its ABLATION: the identical
+// experiment with the `concealment` list removed, which must come out the other way. A
+// concealment test on a sim that ignores concealment passes trivially, and that is the
+// exact failure mode `docs/LESSONS.md` §13 is about.
+{
+  console.log('\n26. Concealment: walk-through, the three AI sites, and the fourth outside ai.ts');
+
+  const REVEAL = CONCEAL_REVEAL_RADIUS;
+  /** Nothing steers off the ring or a hazard in this section; only concealment is in play. */
+  const openArena = (concealment) => makeArena({ maxSafeRadius: 50_000, concealment });
+  /** A bare fighter for the movement-layer checks — no match, no AI, no `stepMatch`. */
+  const createFighterLike = () =>
+    createFighter('player', 'hamburger', { x: 0, y: 0 }, 100, PLAYER_SIZE, { x: 1, y: 0 });
+
+  // ── (a) INERT WHEN ABSENT ─────────────────────────────────────────────────
+  //
+  // The mechanism's whole licence to exist is that an arena without it is unchanged. The
+  // tick-for-tick proof over 110 matchups x 32 seeds is `tools/tmp/conceal_lab.mjs --bitid`
+  // (0 differing ticks against the previous commit, in 8.6M ticks); this is the part a
+  // unit test can hold, and it is what makes that tool's `0 concealment` header meaningful.
+  {
+    const state = playingMatch(makeArena(), 'pizza', 'soup');
+    check('an arena with no `concealment` field conceals nobody',
+      !isConcealed(state.player.x, state.player.y, state.arena)
+      && !isConcealed(state.enemy.x, state.enemy.y, state.arena));
+    let everConcealed = false;
+    let beliefEverStale = false;
+    for (let i = 0; i < 400; i++) {
+      stepMatch(state, 16.667, { move: { x: 1, y: 0.3 }, aim: { x: 1, y: 0 }, selectedWeapon: 0, attack: true });
+      if (state.player.concealed || state.enemy.concealed) everConcealed = true;
+      if (state.aiSighting.x !== state.player.x || state.aiSighting.y !== state.player.y) beliefEverStale = true;
+    }
+    check('…so `Fighter.concealed` is false on both sides for a whole 400-tick match', !everConcealed);
+    check('…and the AI\'s belief equals the player\'s TRUE position on every one of those ticks',
+      !beliefEverStale, `belief (${state.aiSighting.x}, ${state.aiSighting.y}) vs player (${state.player.x}, ${state.player.y})`);
+  }
+
+  // ── (b) WALK-THROUGH IS PROVEN BY WALKING ─────────────────────────────────
+  //
+  // The inverse of a failure mode this repo has already paid for: `?px=850&py=500` spawns a
+  // 42 wu fighter INSIDE `spice_cart`, and every step out of it is refused, forever, with
+  // no event and nothing in the HUD — "total, silent, and indistinguishable from the
+  // controls stopping working" (`movement.ts:escapeCover`). A concealment region that
+  // accidentally reached `arena.cover` would do exactly that, in a prop the player has been
+  // told they can hide in.
+  {
+    const boxes = [
+      { x: 400, y: 400, w: 80, h: 80, kind: 'small' },
+      { x: 900, y: 400, w: 300, h: 60, kind: 'band' },
+      { x: 1400, y: 900, w: 240, h: 240, kind: 'patch' },
+    ];
+    const arena = openArena(boxes);
+    let refused = 0;
+    let stepsTaken = 0;
+    let everInside = false;
+    for (const b of boxes) {
+      const f = { ...createFighterLike(), x: b.x - b.w / 2 - PLAYER_SIZE, y: b.y };
+      // Walk east across the centre, in steps of a third of a body, past the far edge.
+      const steps = Math.ceil((b.w + 2 * PLAYER_SIZE) / (PLAYER_SIZE / 3));
+      for (let i = 0; i < steps; i++) {
+        if (!tryMove(f, PLAYER_SIZE / 3, 0, arena)) refused++;
+        stepsTaken++;
+        if (isConcealed(f.x, f.y, arena)) everInside = true;
+      }
+    }
+    check('a fighter crosses the centre of EVERY concealment box without one refused step',
+      refused === 0 && stepsTaken > 40, `${refused} of ${stepsTaken} steps refused`);
+    check('…and it really was inside them (a walk that missed every box would pass vacuously)',
+      everInside);
+
+    // The nav grid is built from `arena.cover` and must not have noticed. Compared by
+    // COUNT rather than by reading the source, because "nobody wired it in" is an
+    // assertion about a person and this is an assertion about the program.
+    const empty = openArena();
+    const probe = createFighterLike();
+    moveToward(probe, 1, 0, 1, empty, 1800, 900);
+    const passableWithout = navStats.passable;
+    const probe2 = createFighterLike();
+    moveToward(probe2, 1, 0, 1, arena, 1800, 900);
+    check('the navigation grid has exactly as many passable cells with concealment as without',
+      navStats.passable === passableWithout, `${navStats.passable} vs ${passableWithout}`);
+  }
+
+  // ── (c) MEMBERSHIP IS THE FIGHTER'S CENTRE ────────────────────────────────
+  {
+    const arena = openArena([{ x: 700, y: 500, w: 100, h: 100 }]);
+    check('the centre of a region conceals', isConcealed(700, 500, arena));
+    check('…1 wu inside its edge conceals, 1 wu outside does not — it is a centre test, not an AABB overlap',
+      isConcealed(749, 500, arena) && !isConcealed(751, 500, arena));
+    check('…so a fighter brushing the corner by half a body is NOT hidden (the render/sim mismatch that would cause)',
+      !isConcealed(700 + 50 + PLAYER_SIZE / 2 - 1, 500, arena));
+  }
+
+  // ── (d) THE REVEAL RADIUS IS DERIVED FROM THE REACH LADDER ────────────────
+  //
+  // Asserted as the two INEQUALITIES the derivation rests on rather than as the literal, so
+  // a rung change surfaces as a real behavioural failure instead of a stale constant. See
+  // `rules.ts:CONCEAL_REVEAL_RADIUS`.
+  {
+    // ⚠️ THE ORIGINAL WORDING OF THIS ASSERTION WAS "every MELEE weapon in the roster
+    // reaches no further than a target can be seen", AND IT FAILED ON ITS FIRST RUN —
+    // `reveal 84, longest melee 400`. Kept above the corrected version because the failure
+    // is the finding: Lollipop's Giant Lollipop is a `melee` weapon at `REACH.ultimateSlam`
+    // (400 wu), which `rules.ts` states is DELIBERATELY NOT ON THE LADDER — it is anchored
+    // to the ARENA ("hits the whole map") and is excluded from `render/camera.ts`'s
+    // fair-play radius for exactly that reason. So the derivation holds for the ladder and
+    // has ONE declared exception, rather than being a claim about every weapon.
+    const LADDER_MELEE = CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons
+      .filter((w) => w.type === 'melee' && (w.range ?? 0) <= REACH.rangedMax));
+    check('every melee weapon ON THE REACH LADDER reaches no further than a target can be seen',
+      LADDER_MELEE.every((w) => (w.range ?? 0) <= REVEAL),
+      `reveal ${REVEAL}, longest ladder melee ${Math.max(...LADDER_MELEE.map((w) => w.range ?? 0))}`);
+    // The exception, named and pinned — so it cannot grow a second member unnoticed.
+    const OFF_LADDER = CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons
+      .filter((w) => (w.range ?? 0) > REACH.rangedMax).map((w) => `${id}:${w.key}`));
+    check('…and exactly ONE weapon is off the ladder and can therefore strike an unseen target',
+      OFF_LADDER.length === 1 && OFF_LADDER[0] === 'lollipop:Giant',
+      `off-ladder: [${OFF_LADDER.join(', ')}] at ${REACH.ultimateSlam} wu vs reveal ${REVEAL}`);
+    check('…and the shortest RANGED weapon out-reaches it, so concealment always denies a full rung',
+      REVEAL < Math.min(...CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons
+        .filter((w) => w.type === 'ranged').map((w) => w.range ?? Infinity))),
+      `reveal ${REVEAL} vs REACH.rangedClose ${REACH.rangedClose}`);
+    const arena = openArena([{ x: 700, y: 500, w: 100, h: 100 }]);
+    check('visibility is a distance test only for a CONCEALED target',
+      isVisibleFrom(0, 0, 100, 100, arena) && !isVisibleFrom(700 + REVEAL + 1, 500, 700, 500, arena)
+      && isVisibleFrom(700 + REVEAL - 1, 500, 700, 500, arena));
+  }
+
+  // ── (e) ⚠️ THE THREE SITES IN `stepAI`, IN ONE EXPERIMENT, WITH ITS ABLATION ──
+  //
+  // The player is seen at A, then teleported into a bush at B on the OPPOSITE side of the
+  // enemy. A correct AI keeps walking to A and keeps facing A. An AI that routed `adx/ady`
+  // and missed the nav target walks to B while facing A — which is why the check is on
+  // POSITION and on FACING separately, and why the ablation must reverse BOTH.
+  {
+    const run = (concealed) => {
+      const A = { x: 1000, y: 400 };
+      const B = { x: 1000, y: 1600 };
+      const arena = openArena(concealed ? [{ x: B.x, y: B.y, w: 300, h: 300 }] : undefined);
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.player.x = A.x; state.player.y = A.y;
+      state.enemy.x = 1000; state.enemy.y = 1000;
+      // One tick with the player in the open: the enemy SEES it at A.
+      stepMatch(state, 16.667, noInput);
+      const sightedAtA = state.aiSighting.x === A.x && state.aiSighting.y === A.y;
+      // Now the player is at B — 600 wu the other way, inside the bush when `concealed`.
+      state.player.x = B.x; state.player.y = B.y;
+      const y0 = state.enemy.y;
+      for (let i = 0; i < 60; i++) stepMatch(state, 16.667, noInput);
+      return {
+        sightedAtA,
+        movedNorth: state.enemy.y < y0 - 1,
+        movedSouth: state.enemy.y > y0 + 1,
+        facingNorth: state.enemy.facing.y < 0,
+        belief: { ...state.aiSighting },
+        A, B,
+      };
+    };
+    const hidden = run(true);
+    const seen = run(false);
+
+    check('control: the enemy sighted the player at A before it moved',
+      hidden.sightedAtA && seen.sightedAtA);
+    check('SITE 3 (the chase nav target): a concealed player is chased to where it was LAST SEEN',
+      hidden.movedNorth && !hidden.movedSouth,
+      `belief (${hidden.belief.x}, ${hidden.belief.y}) — expected A (${hidden.A.x}, ${hidden.A.y})`);
+    check('SITE 2 (facing/aim): …and the enemy faces that stale point, not the player',
+      hidden.facingNorth);
+    check('ABLATION: with the SAME experiment and no concealment, it turns round and chases the truth',
+      seen.movedSouth && !seen.movedNorth && !seen.facingNorth,
+      `belief (${seen.belief.x}, ${seen.belief.y}) — expected B (${seen.B.x}, ${seen.B.y})`);
+    check('…and the belief itself is frozen at A while concealed, and tracks B while not',
+      hidden.belief.x === hidden.A.x && hidden.belief.y === hidden.A.y
+      && seen.belief.x === seen.B.x && seen.belief.y === seen.B.y);
+  }
+
+  // ── (f) SITE 1, AND THE DEADLOCK IT WOULD OTHERWISE BUILD ─────────────────
+  //
+  // `visible`, not believed separation, gates the shot. Without that, an AI that walks to
+  // the last-seen point arrives with a believed separation of ~0, every weapon passes the
+  // range test, and the CHASE branch fires instead of moving — permanently, at an empty
+  // patch of floor. It would register as "engaged" on `match-sim.mjs`'s stall detector,
+  // which wants a 15 wu span and this stands perfectly still. §13's lesson exactly.
+  {
+    // Derived from the ladder, never hardcoded: a separation strictly between the reveal
+    // radius and the character's own longest normal reach, so the weapon is in range and
+    // the target is not in sight.
+    const reachOf = (id) => Math.max(...CHARACTERS[id].weapons
+      .filter((w) => (w.range ?? 0) <= REACH.rangedMax).map((w) => w.range ?? 0));
+    // No `self` weapon, because the HEAL is deliberately NOT gated on sight (it targets the
+    // caster) and would put `weapon-fired` events into the count that are not shots.
+    const shooter = CHARACTER_IDS.find((id) => reachOf(id) > REVEAL + 10
+      && !CHARACTERS[id].weapons.some((w) => w.type === 'self'));
+    const sep = (REVEAL + reachOf(shooter)) / 2;
+    const P = { x: 700, y: 500 };
+
+    // ⚠️ PINNED ON BOTH SIDES, and the first version of this check was NOT — it pinned only
+    // the player, the enemy walked in, crossed the reveal radius on its own, and fired 6
+    // shots. The code was right and the experiment was wrong. Holding the separation is
+    // what makes this a test of the RANGE GATE rather than of the chase.
+    const shots = (concealed) => {
+      const arena = openArena(concealed ? [{ x: P.x, y: P.y, w: 120, h: 120 }] : undefined);
+      const state = playingMatch(arena, 'donut', shooter);
+      let fired = 0;
+      for (let i = 0; i < 120; i++) {
+        state.player.x = P.x; state.player.y = P.y;
+        state.enemy.x = P.x + sep; state.enemy.y = P.y;
+        state.player.hp = state.player.maxHp;
+        const evs = stepMatch(state, 16.667, noInput);
+        fired += evs.filter((e) => e.type === 'weapon-fired' && e.fighterRole === 'enemy').length;
+      }
+      return fired;
+    };
+    check(`SITE 1 (range gating): a ${shooter} at ${sep.toFixed(0)} wu — in weapon range, out of sight — does not fire`,
+      shots(true) === 0, `${shots(true)} shots`);
+    check('ABLATION: the same character at the same separation with no concealment fires freely',
+      shots(false) > 0, `${shots(false)} shots`);
+
+    // ── THE DEADLOCK GUARD, AND THE SIZE LIMIT IT DERIVES FOR THE ARENA ──────
+    //
+    // The outcome question rather than the symptom one (`docs/LESSONS.md` §13). A believed
+    // separation of ~0 at the stale point would let every weapon pass the range test and
+    // the chase branch would fire forever at empty floor; `visible` prevents that, so the
+    // AI walks instead. The question that decides whether the mechanic is playable is what
+    // happens when it ARRIVES.
+    //
+    // ⚠️ THIS FILE'S FIRST DRAFT ASSERTED "IT ALWAYS RE-ACQUIRES" AND FAILED — final
+    // separation 363 wu, never sighted. THE ASSERTION WAS WRONG AND THE BEHAVIOUR IS REAL:
+    // **the AI has no search. It walks to the last-seen point and stops.** So whether
+    // concealment is a delay or a permanent denial is a property of REGION SIZE, and it has
+    // an exact answer rather than a judgement:
+    //
+    //   the AI arrives at the point where it last saw you and can see `CONCEAL_REVEAL_RADIUS`
+    //   from there, so a player who can get FURTHER THAN THAT from their entry point while
+    //   staying concealed is invisible for the rest of the match.
+    //
+    // => CONSTRAINT FOR THE ARENA OWNER, and it agrees with the probe's grain finding
+    // independently: concealment wants MANY SMALL patches (no interior point more than
+    // ~84 wu from where a fighter would have entered), not a few large blobs. A single
+    // 300 wu bush is not more cover, it is a permanent AI-denial zone.
+    const hideAndSlide = (offset) => {
+      // Seen in the open first, so the belief is correct — which is the reachable case. A
+      // player concealed since spawn has never been seen at all and the AI walks to
+      // `playerSpawn`; that is a strictly worse case and is not what a real match produces.
+      const state = playingMatch(openArena(), 'donut', shooter);
+      state.player.x = P.x; state.player.y = P.y;
+      // 300 wu, not 600: at `AI_CHASE_SPEED` x a character speed multiplier a 600 wu walk
+      // takes ~550 ticks and the first draft of this ran 500, so the AI was still WALKING
+      // when the loop ended and "never re-acquired" was an artefact of the budget rather
+      // than a property of the AI. The horizon is now ~2x the walk.
+      state.enemy.x = P.x + 300; state.enemy.y = P.y;
+      stepMatch(state, 16.667, noInput);
+      const seenAt = { x: state.aiSighting.x, y: state.aiSighting.y };
+      // The region appears around the player (modelling "the player walked into it"), and
+      // the player slides `offset` deeper inside it.
+      state.arena = openArena([{ x: P.x, y: P.y, w: 800, h: 800 }]);
+      const hideX = P.x - offset;
+      let moved = 0;
+      let reacquired = false;
+      for (let i = 0; i < 500; i++) {
+        const before = { x: state.enemy.x, y: state.enemy.y };
+        stepMatch(state, 16.667, noInput);
+        state.player.x = hideX; state.player.y = P.y;
+        state.player.hp = state.player.maxHp;
+        if (state.enemy.x !== before.x || state.enemy.y !== before.y) moved++;
+        if (state.aiSighting.at === state.elapsed) reacquired = true;
+      }
+      return {
+        moved, reacquired, seenAt,
+        arrived: Math.hypot(state.enemy.x - seenAt.x, state.enemy.y - seenAt.y),
+      };
+    };
+    const near = hideAndSlide(REVEAL * 0.5);
+    const far = hideAndSlide(REVEAL * 2);
+
+    check('…a blind AI MOVES rather than standing still shooting a ghost',
+      near.moved > 100 && far.moved > 100, `${near.moved} / ${far.moved} of 500 ticks`);
+    check('…and it walks all the way to the point where it last saw the player',
+      near.arrived < REVEAL && far.arrived < REVEAL,
+      `arrived within ${near.arrived.toFixed(1)} / ${far.arrived.toFixed(1)} wu of the sighting`);
+    check(`…a player hiding WITHIN ${REVEAL} wu of where it was last seen is found again`,
+      near.reacquired);
+    check(`⚠️ …and one hiding FURTHER than ${REVEAL} wu is never found — the AI has no search. `
+      + 'This is the region-SIZE limit, not a bug: keep concealment patches small.',
+      !far.reacquired);
+  }
+
+  // ── (g) SITE 4 — THE READER OUTSIDE `ai.ts` ───────────────────────────────
+  //
+  // Homing projectiles re-aim at `target.x/target.y` every tick in `sim.ts:stepProjectiles`.
+  // Miss this and concealment works for the melee half of the roster and visibly fails for
+  // the homing half — a volley curving into a bush after a target its owner cannot see.
+  {
+    const homingId = CHARACTER_IDS.find((id) => CHARACTERS[id].weapons.some((w) => w.homing));
+    const homingIndex = CHARACTERS[homingId].weapons.findIndex((w) => w.homing);
+
+    const run = (concealed) => {
+      // One big region containing the target's whole path, so the answer cannot depend on
+      // exactly where the target ends up.
+      const arena = openArena(concealed ? [{ x: 1200, y: 700, w: 800, h: 800 }] : undefined);
+      const state = playingMatch(arena, homingId, 'donut');
+      state.player.x = 300; state.player.y = 500; state.player.facing = { x: 1, y: 0 };
+      state.enemy.x = 1200; state.enemy.y = 500;
+      // Rooted, so the AI cannot walk out from under the experiment. It still aims and
+      // fires — §20(d)'s rule — which is deliberate: the control has to be a real match.
+      state.enemy.status.stunnedUntil = Infinity;
+      const evs = [];
+      attemptAttack(state, 'player', homingIndex, evs);
+      const mine = state.projectiles.filter((p) => p.ownerRole === 'player').map((p) => p.id);
+      const vy0 = state.projectiles.filter((p) => mine.includes(p.id)).map((p) => p.vy);
+      // The target steps 400 wu off the projectiles' axis, deep inside the region.
+      state.enemy.y = 900;
+      let vyLast = vy0;
+      for (let i = 0; i < 8; i++) {
+        stepMatch(state, 16.667, noInput);
+        state.enemy.x = 1200; state.enemy.y = 900;
+        const live = state.projectiles.filter((p) => mine.includes(p.id));
+        if (live.length === mine.length) vyLast = live.map((p) => p.vy);
+      }
+      return { vy0, vyLast, count: mine.length };
+    };
+    const hidden = run(true);
+    const seen = run(false);
+
+    check('control: the homing weapon actually spawned projectiles',
+      hidden.count > 0 && seen.count === hidden.count, `${hidden.count} projectiles`);
+    check('SITE 4 (homing): a volley does NOT curve toward a target its owner cannot see',
+      hidden.vyLast.every((v, i) => v === hidden.vy0[i]),
+      `vy ${JSON.stringify(hidden.vy0)} -> ${JSON.stringify(hidden.vyLast)}`);
+    check('ABLATION: the same volley DOES curve when the target is in the open',
+      seen.vyLast.some((v, i) => v !== seen.vy0[i]),
+      `vy ${JSON.stringify(seen.vy0)} -> ${JSON.stringify(seen.vyLast)}`);
+  }
+
+  // ── (h) CONCEALMENT IS NOT INTANGIBILITY, AND NOT A ROLL ──────────────────
+  //
+  // Nothing in `combat.ts` reads concealment. A shot aimed at a hidden fighter that
+  // connects, connects — which is what makes this deterministic instead of an accuracy
+  // roll. `grep -rn 'Math.random' src/game/{sim,state,combat,ai,movement}.ts` must stay
+  // empty; the sim's determinism underwrites every balance number in the project.
+  {
+    const arena = openArena([{ x: 0, y: 0, w: 4000, h: 4000 }]); // the whole map is a bush
+    const state = playingMatch(arena, 'hamburger', 'donut');
+    const smashIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
+    state.player.x = 0; state.player.y = 0; state.player.facing = { x: 1, y: 0 };
+    state.enemy.x = SMASH_IN_RANGE; state.enemy.y = 0;
+    const evs = stepMatch(state, 0, { move: { x: 0, y: 0 }, selectedWeapon: smashIndex, attack: true });
+    check('a concealed fighter still takes the hit — concealment hides, it does not protect',
+      evs.some((e) => e.type === 'hit-landed' && e.targetRole === 'enemy')
+      && state.enemy.hp === state.enemy.maxHp - 12);
+    check('…and both fighters are observed as concealed, so the check is not vacuous',
+      state.player.concealed && state.enemy.concealed);
+  }
+
+  // ── (i) THE ENDGAME KEEPOUT, AND THE GUARD SHOWN TO FAIL ──────────────────
+  //
+  // ⚠️ `tools/tmp/arena_probe.mjs --occl` derives its occlusion series from `arena.cover`
+  // ONLY, and `--verify`'s normaliser compares `{w,h,c,msr,ps,es,cover,hz}`. Both would
+  // report a bush placed in the hub as MATCH — the arena's own guard is blind to this
+  // feature. `kitchen.ts`'s rule 1 exists because measured occlusion once ROSE 30.6% ->
+  // 67.7% as the ring closed, and the whole layout was rebuilt to fix it.
+  {
+    const R = 993; // the shipped kitchen's derived maxSafeRadius
+    const keepout = concealmentKeepoutRadius(R);
+    check('the keepout is derived from the ring, not picked, and lands where the endgame is fought',
+      approx(keepout, Math.max(MIN_SAFE_RADIUS, R * (1 - CONCEAL_ENDGAME_PROGRESS))) && keepout > MIN_SAFE_RADIUS,
+      `maxSafeRadius ${R} -> ${keepout.toFixed(2)} wu (floor ${MIN_SAFE_RADIUS})`);
+    const centre = makeArena({ maxSafeRadius: R, concealment: [{ x: 1000, y: 1000, w: 100, h: 100 }] });
+    check('the guard FAILS on a hub-placed region — a guard not shown to fail is not a guard',
+      concealmentKeepoutViolations(centre).length === 1);
+    const lane = makeArena({ maxSafeRadius: R, concealment: [{ x: 300, y: 300, w: 100, h: 100 }] });
+    check('…and PASSES a region out on the lanes',
+      concealmentKeepoutViolations(lane).length === 0);
+    // NEAREST POINT, not centre: a long band whose centre is legal can still reach the hub.
+    const band = makeArena({ maxSafeRadius: R, concealment: [{ x: 1000 - keepout - 100, y: 1000, w: 400, h: 60 }] });
+    check('…and catches a BAND whose centre is legal but whose near edge is not',
+      concealmentInsideRadius(band, keepout).length === 1);
+    check('the SHIPPED arena has no concealment yet, so no arena can be failing this today',
+      concealmentKeepoutViolations(makeArena()).length === 0);
   }
 }
 

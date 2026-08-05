@@ -47,7 +47,7 @@ import type { ArenaDefinition } from '../arena/types.ts';
 import type { Fighter, FighterRole, GameEvent, MatchInput, MatchState, Splat, TrailMark } from './state.ts';
 import { createFighter, otherRole } from './state.ts';
 import { applyDamage, attemptAttack, isOnOwnTrail } from './combat.ts';
-import { boxesOverlap, tryMove } from './movement.ts';
+import { boxesOverlap, isConcealed, isVisibleFrom, tryMove } from './movement.ts';
 import { stepAI } from './ai.ts';
 
 /**
@@ -121,6 +121,11 @@ export function createMatch(
     trailMarks: [],
     winner: null,
     arena,
+    // The AI starts the match knowing where the player spawned. Seeding this with the
+    // player's true spawn rather than with a "never seen" sentinel is what makes the
+    // no-concealment case bit-identical from the very first tick: `stepAI`'s first read of
+    // the belief happens before anything has had a chance to refresh it.
+    aiSighting: { x: arena.playerSpawn.x, y: arena.playerSpawn.y, at: 0 },
     nextId: 1,
   };
 }
@@ -341,6 +346,10 @@ function applyWorldTick(state: MatchState, role: FighterRole, dt: number, attemp
   // read `movePlayer` already uses to scale the player's own speed; storing its result
   // doesn't change what it returns or who calls it for movement.
   fighter.terrainSlowFactor = terrainSlowFactor(state, fighter);
+  // Same idiom, same contract: an OBSERVATION for the HUD and the renderer, published
+  // from the one predicate the gameplay readers call. See `Fighter.concealed` for why
+  // nothing in the sim reads this field back.
+  fighter.concealed = isConcealed(fighter.x, fighter.y, state.arena);
 
   const def = CHARACTERS[fighter.characterId];
   const opponentRole = otherRole(role);
@@ -482,7 +491,22 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
       continue;
     }
 
-    if (w.homing && target.hp > 0) {
+    // ── THE FOURTH READER OF A TARGET'S TRUE POSITION ─────────────────────────
+    //
+    // `ai.ts` has three (separation, facing, nav target) and they are named there. This is
+    // the one OUTSIDE that file, and it is the one an implementation of concealment would
+    // most naturally miss: a homing volley re-aims every tick, so without this condition
+    // Burrito's Topping Swarm and Sushi's Big Catch would curve into a bush after a target
+    // their owner cannot see — concealment visibly working for the melee half of the roster
+    // and visibly not for the homing half.
+    //
+    // The observer is the PROJECTILE, not its owner. A projectile is not a mind and has no
+    // memory: it simply flies its last heading while the target is hidden from where the
+    // projectile now is, and re-acquires if it gets inside `CONCEAL_REVEAL_RADIUS`. That is
+    // deterministic, it is symmetric between the two sides (which is the property the five
+    // recorded `ai.ts` defects all lacked), and it is the deterministic form of "shooting
+    // at a concealed target is less accurate" — with no roll anywhere near it.
+    if (w.homing && target.hp > 0 && isVisibleFrom(p.x, p.y, target.x, target.y, state.arena)) {
       const hx = target.x - p.x;
       const hy = target.y - p.y;
       const hmag = Math.hypot(hx, hy) || 1;

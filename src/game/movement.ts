@@ -26,6 +26,7 @@
 
 import type { ArenaDefinition, CoverBox } from '../arena/types.ts';
 import type { Fighter } from './state.ts';
+import { CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius } from './rules.ts';
 
 /** True if two centre+full-extent AABBs overlap. */
 export function boxesOverlap(
@@ -53,6 +54,147 @@ function collidesWithCover(cx: number, cy: number, size: number, cover: CoverBox
     if (Math.abs(cx - o.x) < (size + o.w) / 2 && Math.abs(cy - o.y) < (size + o.h) / 2) return true;
   }
   return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONCEALMENT — the two predicates every reader in the sim calls
+//
+// The rule, its derivation and everything it deliberately does NOT do live in
+// `rules.ts` under "CONCEALMENT". This file owns the GEOMETRY, for the same structural
+// reason `boxesOverlap` and `tryMove` live here rather than in `sim.ts`: `sim.ts` imports
+// `ai.ts`, so `ai.ts` cannot import `sim.ts`, and both already import this module. A
+// predicate placed in `sim.ts` would have forced `ai.ts` to grow its own copy — which is
+// the "stated once, implemented twice" shape that produced five AI defects.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Axis-aligned WALK-THROUGH region. Same `{x, y, w, h, kind}` shape as `CoverBox` — centre
+ * plus full extents — deliberately, so `boxesOverlap` is reused verbatim rather than a
+ * second overlap test being written next to the first one.
+ *
+ * It is a DIFFERENT TYPE from `CoverBox` even though the fields are identical, because the
+ * one thing that must never happen is a concealment box reaching `arena.cover` or a cover
+ * box reaching `arena.concealment`. Structural typing would let either pass silently; two
+ * nominally-distinct interfaces at least make the mistake visible at the declaration site.
+ */
+export interface ConcealBox {
+  /** Centre, in world units. */
+  x: number;
+  y: number;
+  /** Full extents, in world units. */
+  w: number;
+  h: number;
+  /** Purely descriptive — which prop class drew it, for VFX and for debugging. */
+  kind?: string;
+}
+
+/**
+ * ⚠️ `ArenaDefinition` DOES NOT DECLARE `concealment` YET, AND THAT IS ON PURPOSE.
+ *
+ * `src/arena/types.ts` belongs to the arena file set, which was mid-measurement when this
+ * landed, and this project's hardest constraint is one owner per file set. So the sim
+ * reads the field STRUCTURALLY through this one accessor instead. Every other module goes
+ * through `isConcealed`/`isVisibleFrom` and never touches the cast.
+ *
+ * WHEN THE ARENA OWNER ADDS `concealment?: ConcealBox[]` TO `ArenaDefinition`, delete
+ * `ConcealArena` and the intersection below; nothing else changes, and `tsc` will point at
+ * the two lines. Until then an arena that supplies the field works, an arena that does not
+ * gets an empty list, and — this is the acceptance test, not an assumption — an empty list
+ * is bit-identical to no field at all.
+ */
+type ConcealArena = { readonly concealment?: readonly ConcealBox[] };
+
+/** Shared empty list, so the common case allocates nothing on the hot path. */
+const NO_CONCEALMENT: readonly ConcealBox[] = [];
+
+/** This arena's concealment regions, or an empty list for an arena that has none. */
+export function concealmentOf(arena: ArenaDefinition): readonly ConcealBox[] {
+  return (arena as ArenaDefinition & ConcealArena).concealment ?? NO_CONCEALMENT;
+}
+
+/**
+ * Is the point (x, y) inside a concealment region?
+ *
+ * ── CENTRE-IN-BOX, NOT AABB OVERLAP, AND NOT FULL CONTAINMENT ───────────────
+ *
+ * The fighter's CENTRE decides, which is the same membership rule
+ * `sim.ts:terrainSlowFactor` already applies to hazards and splats (`hypot(fighter - hz) <
+ * hz.radius` is a centre test too). The two alternatives were both rejected on measurement
+ * rather than taste:
+ *
+ *   * AABB OVERLAP (`boxesOverlap(x, y, size, size, ...)`) hides a fighter that is merely
+ *     brushing a box's corner by 1 wu, which is the "I was clearly standing in the open"
+ *     complaint, and it makes the hidden area 42 wu larger than the drawn geometry in
+ *     every direction — the render/sim mismatch `docs/LESSONS.md` §1 keeps finding.
+ *   * FULL CONTAINMENT requires every box to exceed `PLAYER_SIZE` (42 wu) in both axes to
+ *     be usable at all. The probe's headline finding is that the reference delivers its
+ *     density as *"dozens of small tufts in lane-aligned bands"* while ours is 2-3 huge
+ *     blocks (top-2 kinds own 74.3% of all cover pixels), so a rule that forbids small
+ *     patches forbids the exact shape being chased.
+ *
+ * Expressed through `boxesOverlap` with a zero-extent probe box rather than as a fresh
+ * inequality, so there is one AABB test in this file and not two.
+ */
+export function isConcealed(x: number, y: number, arena: ArenaDefinition): boolean {
+  const regions = concealmentOf(arena);
+  for (let i = 0; i < regions.length; i++) {
+    const b = regions[i];
+    if (boxesOverlap(x, y, 0, 0, b.x, b.y, b.w, b.h)) return true;
+  }
+  return false;
+}
+
+/**
+ * Can an observer at (ox, oy) see a target at (tx, ty)?
+ *
+ * The whole of concealment's gameplay meaning is this function. `ai.ts` calls it to decide
+ * whether to update its belief about the player and whether it may fire at all;
+ * `sim.ts:stepProjectiles` calls it to decide whether a homing projectile may re-aim. Both
+ * are the same question and neither re-derives it.
+ *
+ * Note the observer's own concealment is irrelevant — hiding does not blind you. And note
+ * this is deliberately NOT a line-of-sight test: `arena.cover` blocks projectiles but has
+ * never blocked the AI's targeting, and adding raycast LOS here would be a much larger
+ * behavioural change wearing concealment's clothes.
+ */
+export function isVisibleFrom(ox: number, oy: number, tx: number, ty: number, arena: ArenaDefinition): boolean {
+  if (!isConcealed(tx, ty, arena)) return true;
+  return Math.hypot(tx - ox, ty - oy) <= CONCEAL_REVEAL_RADIUS;
+}
+
+/**
+ * Every concealment region whose NEAREST POINT falls within `radius` of the arena centre —
+ * i.e. every violation of `rules.ts`'s endgame keepout. Empty means the arena is legal.
+ *
+ * Nearest point, not centre: a 600 wu band whose centre is 400 wu out still reaches the
+ * hub, and a guard that only measured centres would pass it. Returned as the offending
+ * boxes rather than a boolean so a caller can name them.
+ *
+ * ⚠️ THIS IS THE ONLY GUARD IN THE REPO THAT CAN SEE A CONCEALMENT REGION AT ALL.
+ * `tools/tmp/arena_probe.mjs --occl` derives its series from `arena.cover` and `--verify`
+ * normalises `{w,h,c,msr,ps,es,cover,hz}`; both would report a hub-placed bush as MATCH.
+ * `sim.test.mjs` §26 runs this against a deliberately illegal arena and requires it to
+ * FAIL, because a guard that has not been shown to fail is not a guard.
+ */
+export function concealmentInsideRadius(arena: ArenaDefinition, radius: number): ConcealBox[] {
+  const out: ConcealBox[] = [];
+  const cx = arena.center.x;
+  const cy = arena.center.y;
+  for (const b of concealmentOf(arena)) {
+    // Distance from the centre to the box, 0 when the centre is inside it.
+    const dx = Math.max(0, Math.abs(cx - b.x) - b.w / 2);
+    const dy = Math.max(0, Math.abs(cy - b.y) - b.h / 2);
+    if (Math.hypot(dx, dy) < radius) out.push(b);
+  }
+  return out;
+}
+
+/**
+ * Convenience over `concealmentInsideRadius` for the common case: the keepout this arena's
+ * own `maxSafeRadius` implies. One call, so no caller has to remember to combine the two.
+ */
+export function concealmentKeepoutViolations(arena: ArenaDefinition): ConcealBox[] {
+  return concealmentInsideRadius(arena, concealmentKeepoutRadius(arena.maxSafeRadius));
 }
 
 /** Bounded so a fighter wedged between boxes cannot spin here forever. */

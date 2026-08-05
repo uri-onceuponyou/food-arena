@@ -911,6 +911,151 @@ export const REACH = {
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CONCEALMENT — walk-through cover, stated ONCE because it has four readers
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── WHAT IT IS ──────────────────────────────────────────────────────────────
+//
+// Uri, `docs/DECISIONS-FOR-URI.md` §18: *"add bushes — but make it relevant to kitchen.
+// For example plates you can hide under."* The arena's cover density is roughly half the
+// reference's, and it CANNOT be closed with more solid props: the layout's collision was
+// just tuned so the closing ring stops herding fighters into furniture (occlusion falls
+// 29.7% -> 25.2% as the zone shrinks). Walk-through concealment adds screen area without
+// adding one world unit of collision — which is exactly why the reference genre uses it.
+//
+// A concealment region is an axis-aligned box (`movement.ts:ConcealBox`) on
+// `arena.concealment`. It is a SEPARATE list from `arena.cover`: nothing in `tryMove`,
+// `escapeCover`, `collidesWithCover`, the nav grid or `stepProjectiles`' wall test ever
+// sees it, so "walk-through" is a property of the data model rather than a rule anyone
+// has to remember. `sim.test.mjs` §26 proves it by walking a fighter across the centre of
+// every box, and by asserting the nav grid's passable-cell count is unchanged.
+//
+// ── THE ONE RULE, AND WHY IT IS ONE RULE ────────────────────────────────────
+//
+//     WHILE YOU ARE CONCEALED, NOTHING THAT TRACKS YOU UPDATES.
+//
+// `ai.ts` has historically shipped FIVE defects of one shape — *a rule stated once in
+// this file and implemented twice*. `tools/tmp/p4_coverdensity.mjs`'s probe report found
+// the sixth already armed: `stepAI` reads the player's true position at three independent
+// sites, and one of them (the chase nav target, `ai.ts:605`) was a DIRECT read rather than
+// something derived from the other two. An implementation that reached two of the three
+// would produce an AI that FACES where it last saw you while WALKING to where you actually
+// are — which reads on screen as working, and is `docs/LESSONS.md` §1's plausible-and-wrong
+// shape. There is a fourth reader outside `ai.ts` entirely: homing projectiles re-aim at
+// `target.x/target.y` every tick (`sim.ts:stepProjectiles`), so a homing volley would curve
+// into the bush after a target the shooter cannot see.
+//
+// So the rule is expressed as TWO exported predicates in `movement.ts` —
+// `isConcealed(x, y, arena)` and `isVisibleFrom(ox, oy, tx, ty, arena)` — and all four
+// readers call them. Nothing else in the sim tests concealment geometry.
+//
+// ── NO ROLL. NOT NEGOTIABLE ─────────────────────────────────────────────────
+//
+// `grep -rn 'Math.random' src/game/{sim,state,combat,ai,movement}.ts` returns NOTHING, and
+// that is what underwrites every balance number in this project — `sim.test.mjs`'s seeded
+// assertions, `roster_lab`'s 110x32 paired deltas, the settled-matchup guard. The obvious
+// genre implementation of concealment ("shots at a hidden target have a miss chance") is
+// therefore FORBIDDEN here. Region membership is the deterministic equivalent, and
+// `sim.ts:terrainSlowFactor` is the working template for it.
+//
+// ── WHAT IS DELIBERATELY *NOT* HERE ─────────────────────────────────────────
+//
+//   * ATTACKING DOES NOT REVEAL YOU YET. The genre norm is that firing from a bush breaks
+//     concealment for a moment. It needs a `revealedUntil` timestamp written in
+//     `combat.ts:attemptAttack` and a second term in `isVisibleFrom` — a second rule, with
+//     its own balance cost, and it cannot be measured until regions exist. Deferred, named.
+//   * THE RADAR AND THE ENEMY HP BAR STILL SHOW A CONCEALED FIGHTER. `ui/hud.ts:757` and
+//     `game/match.ts:1191` are one line each and belong to other owners; the sim publishes
+//     `Fighter.concealed` for exactly them.
+//   * THE PLAYER IS NEVER HIDDEN FROM THEMSELVES. `render/camera.ts` follows the player and
+//     a concealed player is still drawn to their own client. Nothing to do.
+
+/**
+ * Separation at or inside which concealment does NOT hide you.
+ *
+ * DERIVED FROM THE REACH LADDER, not picked, and the derivation is the design rule:
+ * **melee is a contact weapon, so anything inside every melee weapon's reach is inside
+ * touching distance and cannot be hidden.** `REACH.meleeHeavy` is the longest melee rung
+ * in the roster, so:
+ *
+ *   * no melee weapon can ever swing at a target its owner cannot see (asserted, §26) —
+ *     which closes the "shooting at a ghost" hole before it opens; and
+ *   * it sits strictly BELOW `REACH.rangedClose` (98), the first ranged rung, so
+ *     concealment always denies at least one full rung of ranged fire. That is what makes
+ *     it a mechanic rather than a rounding error.
+ *
+ * If the ladder moves, this moves with it. §26 asserts both inequalities rather than the
+ * literal, so a rung change surfaces as a real failure instead of a stale constant.
+ *
+ * ⚠️ UNMEASURED IN PLAY. No arena ships a `concealment` list yet, so this number has never
+ * been through a match. It is a stated rule with a derivation, not a tuned value; re-derive
+ * it the first time regions exist (`tools/tmp/conceal_lab.mjs --occupancy`).
+ *
+ * ── ⚠️ IT ALSO SETS A HARD SIZE LIMIT ON THE REGIONS THEMSELVES ─────────────
+ *
+ * => **CONSTRAINT ON THE ARENA OWNER.** `stepAI` has no SEARCH behaviour: it walks to the
+ * point where it last saw the player and stops there. From that point it can see
+ * `CONCEAL_REVEAL_RADIUS`. So a player who can get FURTHER THAN THAT from where they
+ * entered a region, while staying inside it, is invisible for the rest of the match — and
+ * `sim.test.mjs` §26(f) measures exactly that, in both directions: at 0.5x the radius the
+ * AI finds them again, at 2x it never does.
+ *
+ * The first draft of that assertion said *"it always re-acquires"* and FAILED. The
+ * behaviour is real and it is not a bug to be fixed here — an AI that searches is a
+ * separate feature with its own balance cost. What it means is that **concealment wants
+ * MANY SMALL patches, not a few large blobs**: no interior point more than ~84 wu from a
+ * plausible entry edge. That is the same conclusion the cover-density probe reached from
+ * the opposite direction — the reference delivers its density as *"dozens of small tufts
+ * in lane-aligned bands"* while ours is 2-3 huge blocks, with the top-2 cover kinds owning
+ * 74.3% of all cover pixels. A single 300 wu bush is not more cover; it is a permanent
+ * AI-denial zone that also fails the grain metric.
+ */
+export const CONCEAL_REVEAL_RADIUS = REACH.meleeHeavy;
+
+/**
+ * Match progress at which the arena stops being a hide-and-seek space and becomes a duel.
+ *
+ * `src/arena/kitchen.ts` states the layout's rule 1: cover density must FALL toward the
+ * centre, *"because a closing ring that herds fighters into furniture is the inverse of
+ * what a closing ring is for"* — measured occlusion once ROSE 30.6% -> 67.7% as the ring
+ * shrank, and the whole layout was rebuilt to fix it. Concealment is subject to the same
+ * rule and to a stronger version of it: geometry you cannot see through is worse in a
+ * 140 wu final annulus than geometry you cannot walk through.
+ *
+ * ⚠️ AND THE GUARD THAT PROTECTS THAT RULE TODAY CANNOT SEE CONCEALMENT.
+ * `tools/tmp/arena_probe.mjs --occl` computes its occlusion series from `arena.cover`
+ * ONLY, and `--verify`'s normaliser compares `{w,h,c,msr,ps,es,cover,hz}` — a
+ * `concealment` array is invisible to both, so a region placed in the hub would leave
+ * every existing arena gate byte-identical while making the endgame a blind fight.
+ * `concealmentKeepoutRadius` + `movement.ts:concealmentInsideRadius` are the sim-side
+ * guard that CAN see it, and §26 shows them FAILING on a hub-placed box.
+ */
+export const CONCEAL_ENDGAME_PROGRESS = 0.75;
+
+/**
+ * The radius around `arena.center` that must contain NO concealment, for an arena whose
+ * fog starts at `maxSafeRadius`.
+ *
+ * Derived from the same formula `sim.ts` closes the ring with —
+ * `safeRadius = max(MIN_SAFE_RADIUS, maxSafeRadius * (1 - progress))` — evaluated at
+ * `CONCEAL_ENDGAME_PROGRESS`. So the rule reads in words as *the last quarter of the match
+ * is a visible duel*, and the number follows the arena rather than being re-picked when
+ * the arena is redressed. On the shipped kitchen (`maxSafeRadius` 993) it is **248.25 wu**.
+ *
+ * The floor matters: an arena whose ring closes fast would otherwise compute a keepout
+ * SMALLER than the annulus the ring actually stops at, and the final duel is fought inside
+ * `MIN_SAFE_RADIUS` whatever the progress arithmetic says.
+ *
+ * The probe that raised this recommended *"r > ~300, on the lanes, never in the hub"* by
+ * eye. 248.25 is the derived floor, deliberately looser than that advice — an arena agent
+ * following the advice satisfies this constant with 52 wu to spare, and an arena agent who
+ * ignores it still cannot put a bush in the hub.
+ */
+export function concealmentKeepoutRadius(maxSafeRadius: number): number {
+  return Math.max(MIN_SAFE_RADIUS, maxSafeRadius * (1 - CONCEAL_ENDGAME_PROGRESS));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PROJECTILE FLIGHT — speed is derived, not authored
 // ─────────────────────────────────────────────────────────────────────────────
 //

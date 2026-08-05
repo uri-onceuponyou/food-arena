@@ -105,6 +105,26 @@ export interface Fighter {
    * is a side-channel copy of that same result, not a new input to it.
    */
   terrainSlowFactor: number;
+  /**
+   * Read-only OBSERVATION of whether this fighter is standing inside a walk-through
+   * concealment region this tick — the exact same predicate `movement.ts:isConcealed()`
+   * answers, published in the same idiom as `terrainSlowFactor` immediately above and for
+   * the same consumers.
+   *
+   * ⚠️ **GAMEPLAY MUST NOT READ THIS FIELD, AND DOES NOT.** `ai.ts` and
+   * `sim.ts:stepProjectiles` both call `isVisibleFrom()` directly. The distinction is not
+   * pedantry: this field is written once per fighter per tick from `applyWorldTick`, which
+   * runs only while `phase === 'playing'` and returns early for a dead fighter, so it is
+   * STALE in exactly the states a decision-maker would most like to trust it. Reading a
+   * published observation as an input is how `rules.ts`'s "stated once, implemented twice"
+   * defects get built; the predicate is the single statement of the rule.
+   *
+   * It exists for the two one-line changes the sim cannot make itself, both in file sets
+   * owned elsewhere: `ui/hud.ts:757` (drop the enemy blip off the radar) and
+   * `game/match.ts:1191` (drop the enemy's floating HP bar). Both already receive the whole
+   * `MatchState`, so neither needs any new plumbing — see `rules.ts` under "CONCEALMENT".
+   */
+  concealed: boolean;
 }
 
 export function createFighter(
@@ -139,7 +159,32 @@ export function createFighter(
     detourSign: 0,
     lastDamagedAt: -Infinity,
     terrainSlowFactor: 1,
+    concealed: false,
   };
+}
+
+/**
+ * WHERE AN OBSERVER LAST ACTUALLY SAW ITS TARGET.
+ *
+ * On `MatchState` rather than on `Fighter`, and the reason is a rule rather than a
+ * preference: this is the OBSERVER'S MEMORY, not a property of the observed. Hanging it on
+ * the player would make "where the player was last seen" look like something the player
+ * owns, and the next observer that needs one (the radar; a second AI when this becomes 1v1
+ * human-vs-human with bots, which is Uri's stated direction) would either share it wrongly
+ * or grow a second copy.
+ */
+export interface Sighting {
+  /** The target's position at the last tick on which the observer could see it. */
+  x: number;
+  y: number;
+  /**
+   * `MatchState.elapsed` at that sighting. Equal to `elapsed` exactly while the target is
+   * visible, so `at === state.elapsed` is a precise "the belief is current" test and
+   * `elapsed - at` is how long the observer has been acting on stale information — which is
+   * the quantity `tools/tmp/conceal_lab.mjs` measures to decide whether concealment is a
+   * mechanic or decoration.
+   */
+  at: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,6 +252,22 @@ export interface MatchState {
   trailMarks: TrailMark[];
   winner: FighterRole | null;
   arena: ArenaDefinition;
+  /**
+   * THE AI's BELIEF about where the player is — the only perception state in the sim.
+   *
+   * `ai.ts:stepAI` derives every one of its decisions from this and never from
+   * `state.player.x/y`: the separation that gates weapon range, the facing it aims and
+   * fires along, and the nav target it walks to. It is refreshed to the player's true
+   * position on every tick the enemy can SEE the player (`movement.ts:isVisibleFrom`), so
+   * with no concealment regions in the arena it is the true position on every tick and the
+   * AI is bit-identical to the one that read the player directly.
+   *
+   * There is deliberately no mirror for the player: a human already knows where they are,
+   * and the scripted player in `tools/tmp/scripted_player.mjs` is a measuring instrument
+   * with perfect information by design (see its header) — giving it perception would change
+   * every recorded balance number for a reason that has nothing to do with the game.
+   */
+  aiSighting: Sighting;
   /** Monotonic id generator, so a VFX layer can correlate spawn/destroy events. */
   nextId: number;
 }

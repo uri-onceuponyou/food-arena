@@ -54,6 +54,24 @@
  *     BOTH directions, so landing the fix fails the test and forces the record to be
  *     re-read.
  *
+ * ── THE SIXTH, FOUND BEFORE IT WAS WRITTEN, AND CLOSED BY CONSTRUCTION ──────
+ *
+ *   * CONCEALMENT REACHING SOME OF THE PLAYER-POSITION READS AND NOT OTHERS. A probe found
+ *     this file read the player's TRUE position at three independent sites — `adx/ady`,
+ *     `enemy.facing`, and the chase nav target — and that the third was a DIRECT read
+ *     (`steer(..., player.x, player.y)`), not derived from the first. An implementation
+ *     that replaced `adx/ady` and missed it would give an AI that FACES where it last saw
+ *     you while WALKING to where you actually are: concealment dead content for the player,
+ *     still working against the AI, and looking correct on screen.
+ *
+ *     This is the ONLY one of the six that was closed before it shipped, and only because
+ *     it was PROBED rather than reviewed. All three sites now derive from `tx, ty` in the
+ *     perception block of `stepAI`, `state.player` appears nowhere else in the function,
+ *     and `sim.test.mjs` §26(e) pins all three behaviourally in ONE experiment with its
+ *     ablation. There is a fourth reader OUTSIDE this file — homing projectiles re-aim
+ *     every tick — handled at `sim.ts:stepProjectiles` through the same predicate and
+ *     pinned by §26(g).
+ *
  * ── AND THE SHAPE HAS LEFT THIS FILE ────────────────────────────────────────
  *
  * Defect 1 above — a heal only one side could reach — **recurred, mirrored, in the
@@ -92,7 +110,7 @@ import {
 } from './rules.ts';
 import type { GameEvent, MatchState } from './state.ts';
 import { attemptAttack } from './combat.ts';
-import { moveToward } from './movement.ts';
+import { isVisibleFrom, moveToward } from './movement.ts';
 
 /**
  * How far ahead a steered move aims. `moveToward` runs the flow field toward a TARGET
@@ -404,14 +422,62 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
   const player = state.player;
   if (enemy.hp <= 0 || player.hp <= 0) return false;
 
-  const adx = player.x - enemy.x;
-  const ady = player.y - enemy.y;
+  const now = state.elapsed;
+
+  /**
+   * ── PERCEPTION: THE ONE PLACE THIS FILE LOOKS AT THE PLAYER ────────────────
+   *
+   * Everything below is derived from `tx, ty` — WHERE THE ENEMY BELIEVES THE PLAYER IS —
+   * and `state.player.x/y` appears nowhere else in `stepAI` after these five lines. That
+   * is the entire point of the block, and it is a guard rather than a tidy-up.
+   *
+   * `tools/tmp/p4_coverdensity.mjs`'s probe report found that this function read the
+   * player's TRUE position at three independent sites, and that they were not all derived
+   * from one another:
+   *
+   *   1. `adx/ady` here             — separation, weapon-range gating, press value, intent
+   *   2. `enemy.facing` below       — aim; `combat.ts` resolves the melee cone AND the
+   *                                   projectile heading off it, `match.ts` rotates the
+   *                                   model by it (derived from 1, so it followed for free)
+   *   3. the CHASE NAV TARGET       — `steer(..., player.x, player.y)` passed the player's
+   *                                   coordinates LITERALLY to `moveToward`. A DIRECT read,
+   *                                   not derived from 1.
+   *
+   * Route 1 and 2 and miss 3 and you get an AI that FACES where it last saw you while
+   * WALKING to where you actually are — an AI that never loses you, so concealment is dead
+   * content for the player while still working against the AI. That asymmetry is precisely
+   * the shape of the stun-silence defect above (stunned player fires 100% of its shots,
+   * stunned AI 0%), and it would have been the SIXTH instance in this file. All three now
+   * read `tx, ty`; site 3 is `steer(adx / adist, ady / adist, tx, ty)` in the chase branch.
+   *
+   * (There is a FOURTH reader outside this file — homing projectiles re-aim at
+   * `target.x/target.y` every tick. It is handled at `sim.ts:stepProjectiles`, through the
+   * same `isVisibleFrom` predicate, and is commented there.)
+   *
+   * ⚠️ INERT BY CONSTRUCTION WHEN NO ARENA SUPPLIES CONCEALMENT. `isVisibleFrom` returns
+   * `true` unconditionally for an empty region list, so `sighting` is refreshed to the
+   * player's exact position on every tick and `tx, ty === player.x, player.y` identically.
+   * That is not an argument, it is the acceptance test: `tools/tmp/conceal_lab.mjs --bitid`
+   * runs 110 matchups x 32 seeds against a `--sim-ref` extraction of the previous commit
+   * and requires ZERO differing ticks.
+   */
+  const visible = isVisibleFrom(enemy.x, enemy.y, player.x, player.y, state.arena);
+  const sighting = state.aiSighting;
+  if (visible) {
+    sighting.x = player.x;
+    sighting.y = player.y;
+    sighting.at = now;
+  }
+  const tx = sighting.x;
+  const ty = sighting.y;
+
+  const adx = tx - enemy.x;
+  const ady = ty - enemy.y;
   const separation = Math.hypot(adx, ady);
   // `|| 1` keeps the historical range-check behaviour at zero separation (0 and 1 are
   // both inside every weapon's range), but it must NOT be used to derive a direction —
   // see `hasBearing`.
   const adist = separation || 1;
-  const now = state.elapsed;
 
   /**
    * COINCIDENT FIGHTERS HAVE NO BEARING, so there is nothing to face.
@@ -594,15 +660,31 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
     // while the aim defect was open a heavy swing spent a 3.5 s cooldown on nothing
     // (measured: Water Bottle took 3 Mega Splashes in 8 s and dealt 0 with them). That is
     // what makes `rankPressValue` the right key in this branch as well as the chase one.
-    const shotIndex = healIndex ?? pickWeapon(state, adist, ALLOW_OFFENSIVE, rankPressValue);
+    //
+    // ⚠️ `visible`, NOT `adist`, IS WHAT GATES THE SHOT — and without it the belief is a
+    // DEADLOCK rather than a mechanic. An AI that walks to the last-seen point arrives with
+    // a believed separation of ~0, so every weapon in its kit passes the range test, so
+    // `pickWeapon` returns an index, so the CHASE branch fires instead of moving —
+    // permanently, at an empty patch of floor, burning cooldowns. It would register as
+    // "the AI stalled" on no instrument in the repo (`match-sim`'s stall detector wants a
+    // 15 wu span and this stands perfectly still, which reads as *engaged*).
+    //
+    // The rule it encodes is also the one a player would state: you do not shoot into a
+    // bush you cannot see into. The HEAL is deliberately exempt — it targets the caster,
+    // needs no sight of anyone, and gating it here would be the "a rule stated once and
+    // implemented twice" defect this file is named for, one branch deeper.
+    const shotIndex = healIndex ?? (visible ? pickWeapon(state, adist, ALLOW_OFFENSIVE, rankPressValue) : null);
     if (shotIndex !== null) attemptAttack(state, 'enemy', shotIndex, events);
   } else {
-    const chosenIndex = escaping ? null : (healIndex ?? pickWeapon(state, adist, ALLOW_OFFENSIVE, rankPressValue));
+    const chosenIndex = escaping ? null : (healIndex ?? (visible ? pickWeapon(state, adist, ALLOW_OFFENSIVE, rankPressValue) : null));
     if (chosenIndex !== null) {
       attemptAttack(state, 'enemy', chosenIndex, events);
     } else if (!rooted) {
       const step = speedFor(enemy.characterId, AI_CHASE_SPEED) * dt * aiSlowMult;
-      steer(adx / adist, ady / adist, player.x, player.y);
+      // ⚠️ `tx, ty`, NOT `player.x, player.y`. This is site 3 of the three named in the
+      // perception block above, and it was the DIRECT read — the one an implementation
+      // that only replaced `adx/ady` would have left pointing at the truth.
+      steer(adx / adist, ady / adist, tx, ty);
       moveToward(enemy, STEER.dirX, STEER.dirY, step, state.arena, STEER.navX, STEER.navY);
       attemptedMove = true;
     }
