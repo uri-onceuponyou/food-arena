@@ -19,6 +19,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **15** | Should a fleeing enemy shoot at you? | it fires backwards | **measured at a further −25.9pp — parked, not landed** | a two-word patch |
 | **16** | Soup lost its red band, egg went cream, cast p95 is +0.027 over reference | shipped | **look at it — these are looks, not measurements** | per-character, self-contained |
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
+| **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | no concealment | **your call — this is a feature, not an art pass** | new mechanic |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
 | **11** | Longer legs — every silhouette changed | longer | **keep** — legs now exist at all | 2 constants + 1 row/archetype |
@@ -687,3 +688,56 @@ trade and it is taste, not measurement — one number, trivially reversible eith
 *neutral broadband reference*, not a musical goal, and **there is no audio reference in this repo to
 measure Brawl Stars against** — the reference plates are images. So "brighter, toward −4.0" is
 steering by physics, and your ear is the only instrument that can say whether it landed.
+
+
+---
+
+## 18. The arena needs roughly twice the cover it has, and the only way there is a gameplay mechanic
+
+The arena just took a full blind loop. It found and fixed a real defect — the whole arena had drifted
+**a full stop below every reference plate** and nothing was railing brightness (frame luma mean
+**0.322 → 0.402**, into the plates' band). **The blind score did not move: 4.0 → 3.875**, both rounds
+valid, reference side scoring 8.0 and 8–9. The bar is 7+.
+
+Two critics then reversed each other on the floor's value — which is the project's stop signal — so
+the agent probed instead of looping. Three blockers came out, and **only one of them is art**:
+
+| blocker | where it lives | status |
+|---|---|---|
+| props read as not standing on the floor | `render/lighting.ts` | **owned, in flight** |
+| cover density ~17–20% vs reference 35–45% | **gameplay** | **needs you** |
+| `playerRank` rail is self-contradictory | `tools/arena-scan.mjs` | instrument fix, queued |
+
+### The density one is yours
+
+Measured two independent ways that agree: a critic put our cover at *"~12% of screen area against
+35–45% in all four reference frames"*, and an ID-buffer measurement independently put our standing
+geometry at **17–20%**. Either way it is **roughly half**.
+
+**It cannot be closed from `src/arena/`.** More solid props means more collision, and the layout's
+collision was *just* tuned — the closing ring used to herd fighters into furniture (occlusion rose
+30.6% → 67.7% as the zone closed; it now correctly falls 27.7% → 25.2%). Undoing that to add cover
+trades a fixed gameplay bug for a visual one.
+
+**The way the reference does it is bushes** — and in Brawl Stars, bushes are the single biggest
+contributor to that 35–45%, precisely *because they are walk-through*. They add screen area without
+adding collision. But walk-through concealment is a **gameplay mechanic**, not decoration: it means
+hiding, ambushes, and an enemy you cannot see. That changes how the game plays, so it is your call
+and not one an agent should make.
+
+Roughly what it would involve: a new prop class in `src/arena/props/`, a concealment test in the
+sim, an AI that understands it (the AI already has a flow field and hazard awareness, so this is
+tractable), and a visibility rule for the camera. Non-trivial but well within reach.
+
+**If the answer is no**, say so and the arena's ceiling on density is what it is — the remaining
+arena-side wins are smaller and mostly cosmetic. The cheapest one already identified: the pink/teal
+zone boundary is a hard straight edge with a bright cyan rim that a critic said *"reads as a
+picture-in-picture window pasted over the frame."* Confirmed at crop, not yet fixed.
+
+### One thing you should NOT be asked to decide
+
+`playerRank` regressed 19.5 → 31 under the brightness fix, and the derivation shows the entire loss
+is the term that rewards the environment for being **far from the player's luma** — measured with a
+single character. The reference plates' own ground value is 0.40–0.46. **As constituted, that rail
+forbids the arena from ever matching the plates it is scored against.** It is being re-derived as an
+instrument fix. It is not a game problem and no one should tune the game to satisfy it.
