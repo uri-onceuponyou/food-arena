@@ -62,8 +62,12 @@ Not style preferences. Every one exists because breaking it cost hours.
    **Nineteen** instruments were caught returning confident wrong answers in one session — including
    the blind critic itself, a driver copied into ten tools, a cache serving stale JSON, and a guard
    whose coverage *shrank* when a bug was fixed. **A guard that has not been shown to FAIL on the bug
-   it guards against is not a guard.** `tools/tmp/sentinel.mjs` (32/32) encodes this: MOVES, HOLDS,
-   ORDERS, SELF-PAIR.
+   it guards against is not a guard.** `tools/tmp/sentinel.mjs` encodes this: MOVES, HOLDS, ORDERS,
+   SELF-PAIR. ⚠️ **This line quoted sentinel's own count and carried a stale `17/17`** <!-- gatecount: historical -->
+   long after it was 32 — one of six counts that went stale in a single session, every one found by
+   an agent tripping over it rather than by a check. Counts now live in exactly one place,
+   `docs/TOOLS.md`'s gate table, and `node tools/tmp/gatecount.mjs` refuses a second copy in this
+   file *even one that agrees*.
 
 7. **The blind critic has a MEASURED RESOLUTION FLOOR of ±1.4 points.** σ = 0.50, and a round's two
    panels are **n=1, not n=2** (one critic scores both and agrees with itself). **Do not act on a
@@ -111,17 +115,28 @@ Not style preferences. Every one exists because breaking it cost hours.
 
 ```bash
 npx tsc --noEmit                          # clean
-node src/game/sim.test.mjs                # 253
-node src/game/economy/economy.test.mjs    # 227
+node src/game/sim.test.mjs
+node src/game/economy/economy.test.mjs
 node tools/aspect.mjs                     # PASS, 0.00wu — competitive fairness, not a nicety
 node tools/verify-head.mjs                # the committed tree builds
-node tools/tmp/driver_guard.mjs           # 86 — no 14th copy, + both `bestWeapon` faults
-node tools/tmp/sentinel.mjs               # 32 selftest + 16 live
-PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept.mjs          # 361
-PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept_portrait.mjs # 219
+node tools/tmp/driver_guard.mjs           # no 14th copy, + both `bestWeapon` faults
+node tools/tmp/sentinel.mjs               # the meta-guard: MOVES / HOLDS / ORDERS / SELF-PAIR
+PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept.mjs
+PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept_portrait.mjs
+
+node tools/tmp/gatecount.mjs              # ← EXPECTED COUNTS LIVE HERE, doc vs tree, exit 1 on drift
 ```
 
-`docs/TOOLS.md` carries the full battery (~25 gates) with expected counts.
+🔴 **This block deliberately carries NO expected counts, and adding one back is a gate failure.**
+Six documented counts went stale in a single session and every one was found by an agent tripping
+over it, never by a check; twice the same file disagreed with itself, so either copy could be
+"confirmed" by reading the other. The counts lived in three places — this block, `docs/TOOLS.md`'s
+quick-start, and `docs/TOOLS.md`'s gate table. **They now live in the gate table only**, and
+`node tools/tmp/gatecount.mjs` parses it, runs every offline gate, diffs, and **refuses a second
+copy in either file even when it agrees** — today's agreeing copy is next month's stale one. It
+runs no browser gate (peers are measuring on the GPU), so it is not a substitute for the browser
+half; those rows print as visible SKIPs. `docs/TOOLS.md` carries the full battery — and its own
+size, because that sentence is a documented count too and `gatecount` checks it against the table.
 
 **Commit messages carry the reasoning and the measurements**, not just the change. This log is a
 primary source and has repeatedly been the only record of why a number is what it is. When an

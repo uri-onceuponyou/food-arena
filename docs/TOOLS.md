@@ -1,15 +1,20 @@
 # Tools runbook
 
-Sixteen tools. Almost every one was built to answer a question that had already cost real
-time. **Prefer reaching for one of these over inventing a new probe.**
+Almost every tool here was built to answer a question that had already cost real time.
+**Prefer reaching for one of these over inventing a new probe.**
 
 ```bash
 npm run dev        # http://localhost:5173 — SHARED. Fine for a quick look, never for a number,
                    # and NEVER for actually playing (see below).
 npx tsc --noEmit
-node src/game/sim.test.mjs            # 253
-node src/game/economy/economy.test.mjs # 227
+node src/game/sim.test.mjs
+node src/game/economy/economy.test.mjs
+node tools/tmp/gatecount.mjs           # every documented gate count, doc vs tree, in one table
 ```
+
+🔴 **Expected counts are deliberately NOT repeated here.** They live in exactly one place — the
+[GATE BATTERY](#the-gate-battery--run-all-of-these-before-you-believe-a-change) table below — and
+`gatecount` refuses a second copy anywhere in this file or `CLAUDE.md`, **even one that agrees**.
 
 ---
 
@@ -140,13 +145,13 @@ every push.**
 | `tools/arena-scan.mjs` | **The whole-arena scoreboard.** 18 player-centred stations through the live game. Reports `playerRank` in a 16×9 salience grid, player-vs-surround luma/saturation, a hue histogram, channel clipping — **and the cumulative colour budget nobody was watching**: absolute mean saturation / warm chroma / cool chroma measured the same way the reference figures were, split ENVIRONMENT vs CAST by an exact matte, with a hue-collision number. `--list`, `--only`, `--sim-speed 0.02` for byte-comparable runs. See the colour-budget block below. |
 | `tools/aspect.mjs` | Viewport fairness. Must PASS at **0.00wu spread** across 4:3 → 32:9 → portrait. |
 | `tools/perf.mjs` | `--mode counts\|ablate\|alloc\|boot\|leak`. `--json` baselines, `--baseline` regression gate. **Hardware-independent numbers only** — it refuses to print timings as performance without `--unsafe-timing`. |
-| `tools/audio-probe.mjs` | `--mode all\|depth\|identity\|live`. **427 assertions from real rendered samples** via `OfflineAudioContext` on the production path. ⚠️ **`OfflineAudioContext` has no media element, so NO offline assertion can ever see the theme track** — that is how a 404 on the deployed build survived every one of them (`docs/LESSONS.md` §3b). |
+| `tools/audio-probe.mjs` | `--mode all\|depth\|identity\|live`. **Assertions from real rendered samples** via `OfflineAudioContext` on the production path. ⚠️ **`OfflineAudioContext` has no media element, so NO offline assertion can ever see the theme track** — that is how a 404 on the deployed build survived every one of them (`docs/LESSONS.md` §3b). |
 | `tools/match-sim.mjs` | Real `sim.ts` in Node. `--all-matchups`, `--policy idle\|smart`, `--pathmap`, `--fog`, `--ranges`, `--occlusion`. A 180s match costs ~4ms. |
 | `tools/match-play.mjs` | Drives the real game boot → menus → combat → result, sampling the HUD's own DOM. |
 | `tools/tmp/journey.mjs` | **The only end-to-end gate.** `match-play` × N round trips in ONE page session, so it can see what LEAKS between a match and the menus — GL contexts, errors, profile state. Every gate above it is a unit gate, and HEAD was unbootable for 24 commits with all of them green. `--trips`, `--viewport portrait`, `--mode timeout\|idle`. |
 | `tools/filmstrip.mjs` | Animation as a contact sheet. Auto-detects cycle length; labels one-shots "NOT A LOOP". |
 | `tools/motion_probe.mjs` | Joint traces in the character's local frame — camera, framing and post chain out of the equation. |
-| `tools/tmp/menu_accept.mjs` | **361 assertions**, 5 viewports × 5 screens × notch/no-notch. Also **parses all 88 modules in ~95ms** to catch the backtick trap. `PREVIEW_BASE=<url>` to point it at a snapshot. |
+| `tools/tmp/menu_accept.mjs` | **The biggest single gate** — 5 viewports × 5 screens × notch/no-notch. Also **parses all 88 modules in ~95ms** to catch the backtick trap. `PREVIEW_BASE=<url>` to point it at a snapshot. |
 
 #### `arena-scan` colour budget — the guard rail on cumulative desaturation
 
@@ -155,7 +160,7 @@ node tools/arena-scan.mjs --url $URL --baseline tools/scan/colour-baseline.json 
 node tools/arena-scan.mjs --url $URL --gate         # also exit 1 on an absolute rail FAIL
 node tools/arena-scan.mjs --url $URL --json tools/scan/colour-baseline.json      # RE-baseline (deliberate only)
 node tools/arena-scan.mjs --ref-plates reference/images/curated/gameplay         # re-derive the reference figures
-node tools/arena-scan.mjs --selftest               # 105 assertions on synthetic frames, no browser (was 78)
+node tools/arena-scan.mjs --selftest               # synthetic frames, no browser — count in the gate table
 node tools/arena-scan.mjs --no-role                # skip the cast matte / HUD-free capture
 ```
 
@@ -240,7 +245,11 @@ than needed and still not a condition.
 → **Wait on `tools/tmp/settle.mjs`, never on the flag.** One shared paint condition, correct at
 any machine speed rather than merely longer — it returns in 23 ms on settings and 11.9 s on the
 trophy road from the *same* predicate. `tools/tmp/capture_audit.mjs` audits which side a capture
-site is on; **15 files are enforced and 27 still wait on a flag** (was 7 and 34).
+site is on. Its old summary here read *"15 files are enforced and 27 still wait on a flag (was 7
+and 34)"* — kept because packets quote it, but **it describes an output format the tool no longer
+prints.** Since the per-role split it reports an OWNED SET against per-role obligations, plus the
+css-immune claims and anything exposed elsewhere; the live numbers are in the gate table below and
+nowhere else.
 
 `capture_audit` enforces a **per-ROLE** obligation, not a blanket one, because a capture tool, a
 wait-only geometry battery and a packet consumer have three different ones and a rule loose enough
@@ -312,10 +321,43 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now
-**twenty-five**, and every one exists because something shipped past its absence. Counts below
-are current as of the capture-integrity follow-through; `screen_metrics` and `home_metrics` are
-"ALL CLEAN / 0 below AA" batteries rather than assertion counts and sit with `chars_metrics`:
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **50**, and
+every one exists because something shipped past its absence.
+
+### 🔴 This table is the SINGLE SOURCE for every expected count
+
+Six documented counts went stale in one session — `valuescan` 57 vs 78, `arena-scan` 78 vs 105,
+`driver_guard` 49 vs 60, `economy` 220 vs 227, `audio-probe` 389 vs 427 and 77 vs 78 — and **every
+one was found by an agent tripping over it, never by a check.** Twice the same file disagreed with
+itself: this file carried `economy 173` in its quick-start and `220` in this table, and
+`driver_guard` had two rows here with different numbers. **Either copy could be "confirmed" by
+reading the other.**
+
+The root cause was never the individual numbers. It was that they lived in **three** places
+(`CLAUDE.md`'s gate block, this file's quick-start, this table). They now live **here only**, and
+
+```bash
+node tools/tmp/gatecount.mjs              # parse the table, run every offline gate, diff. exit 1 on any fault
+node tools/tmp/gatecount.mjs --docs-only  # the docs half alone, ~50ms, runs nothing
+node tools/tmp/gatecount.mjs --list       # what it runs, what it skips, and why
+```
+
+- **A second copy is a fault even when it agrees.** Both same-file disagreements on record began
+  life agreeing. `gatecount` scans this file and `CLAUDE.md` for any count-bearing mention of a
+  gate outside its canonical row here and refuses it — before it runs anything.
+- **The `expect` column is machine-read.** Every integer in a cell is part of the contract, **in
+  order**: `gatecount` runs the gate and compares the vector elementwise. A row that gains a number
+  the registry does not measure fails on ARITY instead of going quietly unchecked.
+- **Every row must be registered**, either OFFLINE (run and diffed here) or SKIP with a reason
+  (browser / non-numeric). A row in neither fails, so a new gate cannot arrive unchecked. Skipped
+  rows are still **printed** — an invisible gap is the bug this whole section exists for.
+- **A gate whose output format changes fails LOUDLY** as UNPARSEABLE. That is the `driver_guard`
+  coverage-shrank shape (`docs/LESSONS.md` §13): a check that quietly stops checking.
+- ⚠️ `gatecount` runs **no browser gate** — peers measure on the GPU in this tree and load
+  contention corrupts *their* numbers. It is not a substitute for the browser half of the battery.
+
+`screen_metrics` and `home_metrics` are "ALL CLEAN / 0 below AA" batteries rather than assertion
+counts and sit with `chars_metrics`:
 
 | gate | expect | covers |
 |---|---|---|
@@ -335,21 +377,26 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/match-sim.mjs --selftest` | **15** | the scripted policies, against a hand-derivable answer |
 | `node tools/tmp/valuescan.mjs --selftest` | **105** | value-ladder metric on synthetic frames. ⚠️ Was **57** until `c3e3fbc`/`fc3d048` and **78** until the `dLcontact` pass; a run reporting 57 or 78 is an OLD TREE, not a pass. §L and §M are the two known-bad-input proofs — §L shows `dL` returning a confident **wrong** answer in both directions, §M shows a `__meta` stamp lifted off another file being **refused** |
 | `node tools/tmp/p5_dlprobe.mjs` | **12** | the derivation behind §L. `--live <dir>` recomputes `dLcontact` for all 11 characters from an existing `--mode chars` output **with no browser**, and refuses any character whose recovered owner map does not reproduce the recorded contact counts exactly |
-| `tools/tmp/quality_api.mjs` · `dpr_probe.mjs` | **20** · **24** | render tiers and the DPR cap |
+| `node tools/tmp/quality_api.mjs` | **20** | render tiers. ⚠️ Was one row with `dpr_probe` and two numbers; split so each has its own row |
+| `node tools/tmp/dpr_probe.mjs` | **24** | the DPR cap |
 | `node tools/perf.mjs --mode leak` | contexts flat at **1** | the leak that white-screened after ~8 round trips |
 | `node tools/tmp/settle_validate.mjs` | **22** | the shared PAINT condition — correct at any machine speed, not merely longer |
 | `node tools/tmp/review_gate_validate.mjs` | **8** | `review.mjs` refusing un-vouched PNGs |
-| `node tools/tmp/capture_audit.mjs` | **13** + **15** | classifies every capture site as paint-waiting or flag-waiting; **`--selftest` for the 13** |
+| `node tools/tmp/capture_audit.mjs --selftest` | **25** | the CLASSIFIER itself, on fixtures — including that a validator which does not import the guard it validates is refused. ⚠️ **This row said 13 and shared a row with the bare run**, so two different quantities sat under one gate |
 | `node tools/tmp/rarity_aa.mjs` | 0 below AA of **43** | `.fa-rarity` per rarity × home + character select × 3 viewports, **both** contrast models |
 | `node tools/shoot.mjs --selftest` | **6** | the capture path itself |
 | `node tools/tmp/snapsweep.mjs --selftest` | **5** | age parser for the leaked-snapshot sweeper |
 | `node tools/tmp/sentinel.mjs` | **32** + 16 live | ⚠️ **the meta-guard.** MOVES / HOLDS / ORDERS / SELF-PAIR — each kind run against an instrument broken that way and REFUSED there. `VL.adjacency` covered as of the 32/16 counts, on **MUTANTS OF `VL_SRC` ITSELF** (5: dLcontact aliased to dL, dL "fixed" to the band, the bands swapped, a constant offset, luma-gated contacts) — plus its own control that an unmutated rebuild reproduces the real `VL` exactly. ⚠️ **`selfPair` without `identity` proves DETERMINISM ONLY** — `metric(a)` vs `metric(a)` is zero for any pure function, so name the identity answer whenever it is known |
-| `node tools/tmp/driver_guard.mjs` | **86** | no 14th copy of the scripted driver; SHARED entries checked from the registry; RANK/HEAL/RANKKEY added with driver rev 4 |
-| `node tools/tmp/capture_audit.mjs` | **43/43 owned** | 0 exposed, 14 `css-immune` (claimed by annotation, mechanically refused if the file screenshots) |
+| `node tools/tmp/driver_guard.mjs` | **86** | no 14th copy of the scripted driver; SHARED entries checked from the registry; RANK/HEAL/RANKKEY landed with driver rev 4 (it was 60 at rev 3, and 49 before that). Fails if a **14th** copy appears, or a fixed copy loses its guard. Every check also runs against the historical driver and must FAIL there. ⚠️ **This gate used to occupy TWO rows in this table carrying 49 and 86** — either could be "confirmed" by reading the other, which is the defect `gatecount` now refuses outright |
+| `node tools/tmp/capture_audit.mjs` | **43/43 owned** · **15** css-immune | classifies every capture site as paint-waiting or flag-waiting, per ROLE; 0 exposed elsewhere. `css-immune` is claimed by annotation and mechanically refused if the file screenshots. ⚠️ This row said **14** css-immune |
+| `node tools/tmp/gatecount.mjs --selftest` | **42** | ⚠️ **the guard on THIS TABLE.** Every documented count vs the tree, plus the collapse itself: a second copy anywhere in `CLAUDE.md` or this file, two rows for one gate, a row in neither registry, a doc number nothing measures, a gate whose output format drifted. Its selftest refuses each on a deliberately-broken fixture — including the real 220-vs-227 and 78-vs-105 defects — and pairs every refusal with a positive control, because a checker that always screams would otherwise "pass" every refusal test in the file |
 | `node tools/tmp/kit_lab.mjs --selftest` | **10** | matchup-profile divergence + behavioural fingerprint, calibrated on a literal clone |
 | `node tools/tmp/level_lab.mjs --selftest` | **7** | the level ladder and its win-rate curve |
-| `node tools/tmp/limbmatch.mjs --selftest` | **27** + 9 control | hull deficiency / appendages / share — **computable on a reference plate** |
-| `node tools/tmp/sepscan.mjs --selftest` | **38** + 8 control | internal separation (neck pinch, chin notch, head:body area) |
+| `node tools/tmp/conceal_lab.mjs --selftest` | **22** | walk-through concealment: bit-identity, the band whose centre is legal and near edge is not, and the "no arena is failing this today" control. **Was undocumented until `gatecount` went looking** |
+| `node tools/tmp/burger_lab.mjs --selftest` | **16** | where the two drivers' matches diverge for one character — the instrument behind the 50.6 pp Hamburger role split. **Was undocumented** |
+| `node tools/tmp/roster_lab.mjs --selftest` | **9** | per-character strength, settled-matchup count and rarity roll-up on the FIXED driver. **Was undocumented.** ~26 s, the slowest offline gate |
+| `node tools/tmp/limbmatch.mjs --selftest` | **27** | hull deficiency / appendages / share — **computable on a reference plate**. `--mode control` adds 9 more, but they render in a browser and are not part of this contract |
+| `node tools/tmp/sepscan.mjs --selftest` | **38** | internal separation (neck pinch, chin notch, head:body area). `--mode control` adds 8 more, browser-side and outside this contract |
 | `node tools/tmp/trail_probe.mjs` | controls 3 | same-frame ablation of ground marks vs floor **and** cast |
 | `node tools/tmp/aoband.mjs --selftest` | **25** | contact darkening binned by metres from the footprint |
 | `node tools/tmp/haloprobe.mjs --selftest` | **27** | bloom-attributable halo as a paired `shipped − bloomOff`. ⚠️ Detects a rim via `userData.rimUniforms`, so it **counts a JSON-mangled corpse as live** after a plain `.clone()` — see `clonetoon_test` |
@@ -359,7 +406,6 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/tmp/touchfeel.mjs` | **79** | stick bearings, dead zone, multi-touch, `touchcancel` |
 | `tools/tmp/nav_history_probe.mjs` | **44** | URL names the screen · reload lands there · back/forward · query params survive · a throwing screen cannot freeze the router |
 | `tools/tmp/glloss_probe.mjs` | **29** | forces a REAL context loss via `WEBGL_lose_context`; asserts the restored frame is the SAME frame against a drift control |
-| `node tools/tmp/driver_guard.mjs` | **86** | ⚠️ **This row said 49 and duplicated the row above it** — two counts for one gate, so either could be "confirmed" by reading the other. Measured **86** (driver rev 4 — the RANK, HEAL and RANKKEY sections landed with the `bestWeapon` fix; it was 60 at rev 3). Fails if a **14th** copy of the scripted driver appears, or a fixed copy loses its guard. Every check also runs against the historical driver and must FAIL there |
 | `tools/tmp/floorprobe.mjs` | **5/5** | the floor's own gameplay test — breaks on any global value change |
 | `tools/tmp/chars_metrics.mjs` | ALL CLEAN | roster card fill, face-in-card, WCAG |
 | `tools/tmp/screen_metrics.mjs` | ALL CLEAN | settings/opening/trophies + `--screens home`, 3 viewports, WCAG from pixels |
