@@ -546,3 +546,69 @@ unknown one.** Two of this project's most expensive detours were instrument faul
 number of additional rounds could ever have found — five rounds tuning a low-frequency gradient
 whose wavelengths (420–530wu) exceed the frame (578wu), and every character round judged
 against inverted contrast.
+
+
+---
+
+## 14. A metric can measure the RIGHT thing and still be saturated
+
+`feel_probe.diff()` counted pixels changed against a pre-event baseline, to score how much an impact
+burst grows with damage. It reported **1.66×** across a 9.0× damage input, and a whole pass was
+dispatched to fix "the weakest feel channel".
+
+**The channel was fine. The counter was full.** A hit moves the burst, the white flash *and* the
+knockback inside the same box. Proof from the tool's own output on an unchanged tree:
+
+| | reads |
+|---|---|
+| a **fog** hit — flash only, no VFX at all | **3904 px** |
+| a **weapon** hit at the same damage — flash **plus the entire burst** | **3879 px** |
+
+The whole burst moved the counter by **−25 px**, under its own 197 px noise floor. Ablating the VFX
+layer against itself in one instant gives the real answer: **6.31×**, between camera kick (6.73×) and
+hit-stop (4.83×). It never needed fixing.
+
+→ **When several effects share a region, a whole-region counter measures the loudest one forever.**
+Ablate the thing you are actually asking about, in the same frame, and prove the ablation moves with
+a control that has none of it.
+
+---
+
+## 15. The measurement instrument had been shaping the game for two passes
+
+`tools/tmp/scripted_player.mjs:bestWeapon` opens `if (w.type === 'self') return;` — **the scripted
+player cannot press heal.** It is the exact mirror of a bug fixed months earlier in `ai.ts`, where
+`pickHighestDamageWeapon` skipped `'self'` so the *AI* could never heal. Same weapon, same character,
+same one-line exclusion, other side of the match.
+
+It cost **50.6 pp on exactly one character** — Hamburger owns the roster's only `self` weapon and its
+smallest pool, so one press is a third of its HP. Self-heal reads 0.0 HP/match in the player's hands
+and 27.0 in the AI's, while engagement distance, damage taken, status application and opening all
+agree within a few percent.
+
+**A human can press it. Only the measurement could not.** And the roster was balanced *twice* against
+that instrument — so "Hamburger is the strongest character in the game" and "8 of 17 settled matchups
+involve Hamburger" are both artefacts of a driver that under-plays one character.
+
+→ **Before tuning a system, ask what the thing measuring it cannot do.** A one-line exclusion in a
+harness is indistinguishable from a design fact until someone runs the control.
+
+---
+
+## 16. Two signals that look like "hung" and are not
+
+A probe was killed as deadlocked on 55 minutes elapsed, **0.0% CPU**, and **no file writes in 43
+minutes**. It was on **row 171 of 198**, working normally. Both signals were wrong for this workload:
+
+- **0.0% parent CPU is expected under SwiftShader.** The rasterisation happens in Chromium's
+  *renderer children*; the parent node process legitimately idles while waiting on them.
+- **"No writes" meant nothing** because the tool buffered its whole result and wrote at completion.
+  From outside, "measuring row 172" and "hung forever" were identical.
+
+The fix was not better judgement — it was **making the tool account for itself**: rows now append to
+`<out>/dl.rows.jsonl` as they are measured, with the meta stamp as line 1, so a partial file is
+self-describing.
+
+→ **The same defect underlies the stale-cache bug in the same tool: a tool that gives no observable
+account of its own state cannot be distinguished from a broken one.** Judge a long-running probe by
+its own per-row output, never by CPU or mtime.

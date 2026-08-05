@@ -1,220 +1,179 @@
 # State — what is done, what is pending
 
-As of commit **e0a4b9d**, ~37 commits into a long unattended session. HEAD verified bootable
-after every commit. **Agents were still in flight when this was written** — the 🟠 section names
-which, so treat those rows as "landing", not "untouched".
+**As of commit `b967242`, 125 commits into an unattended session.** Every commit verified with
+`tools/verify-head.mjs` before push. Working tree clean.
 
-**Judgement calls do not live here any more.** They are in **`docs/DECISIONS-FOR-URI.md`**, with
-what was assumed, what reversing costs, and why measurement could not settle it. Read that first
-if you are Uri — it opens with a one-screen answer sheet.
-
-**→ For the live picture — what is uncommitted, who owns it, and what to do next — read
-`docs/RESUME.md` first.** It is the checkpoint; this file is the standing state.
+Judgement calls live in **`docs/DECISIONS-FOR-URI.md`** — read that first if you are Uri; it opens
+with a one-screen answer sheet. **New session? Read `CLAUDE.md`, then this file, then
+`docs/LESSONS.md`.**
 
 ---
 
-# PART 0 — the one thing to know
+# PART 0 — where the game actually stands
 
-**Objective quality moved a great deal this session. Blind critic scores did not.**
+**For the first time, the score can be trusted.** The blind-critic instrument was audited and rebuilt:
+a canonical rubric (`tools/review.rubric.txt`), top-down plates for gameplay, action frames rather
+than idle ones, menus scored against menus, and a **measured resolution floor of ±1.4 points**.
+43 rounds, 43 valid.
 
-> ⚠️⚠️ **THE CRITIC HAS A MEASURED RESOLUTION FLOOR OF ~1.4 POINTS, AND EVERY DIFFERENCE THIS
-> PROJECT ACTED ON WAS SMALLER THAN THAT.** σ = 0.50 over 16 fresh critics; a round's two panels are
-> **n = 1**, not n = 2, because one critic scores both and agrees with itself 4 of 4 times. The
-> character history 3.6 → 3.25 → 3.0 → 2.0 has a largest single step of **1.0** — *not one transition
-> ever cleared the floor.* Treat every number below as ±1.4, and **never compare scores taken under
-> different rubrics**: the rubric alone is worth **2.0 points** (ours reads 5.0 under "overall visual
-> quality" and 3.0 under "character design only", with the reference unmoved).
->
-> ⚠️ **Every score in the table below is also STALE.** Since it was
-> measured: the whole cast gained a dark rung (`a5ce2a5`), the render grade moved `contrast`
-> 0.62 → 0.72, the VFX matte and the Giant Lollipop whiteout were fixed, arena colour and layout
-> landed, and the AI stopped being silenced by its own stun. **A fresh round is owed before any of
-> these numbers is quoted again.** They are kept here only as the last honest measurement.
+| element | ours | sd | reference | gap in **floors** |
+|---|---|---|---|---|
+| **cast in match** | **4.33** | 0.52 | 8.00 | **6.5** |
+| arena (action frame) | 5.17 | 0.41 | 8.33 | 5.6 |
+| home | 5.17 | 0.41 | 8.50 | 5.9 |
+| in-match HUD | 5.67 | 0.52 | 8.33 | 4.6 |
+| character select | 7.00 | *n=1* | 8.00 | not a result |
 
-| element | blind score | reference | round valid? |
-|---|---|---|---|
-| arena | **5.33** | 8.33 | yes |
-| home | **6.0** | 8.5 | yes, but see below |
-| character select | **6.0** | 8.5 | yes, same caveat |
-| characters | **3.6** | 9.0 | yes |
+**The bar is 7+.** Calibration: over 34 observations the critic **never scores shipped Brawl Stars
+above 9**, typically 8–8.5 — so 7+ sits ~1–1.5 below shipped Brawl Stars. The bar is well placed.
 
-Nothing is near Uri's bar of **7+**. Meanwhile reachability went 79.1% → 100%, buried limb groups
-50 → 26, hue collision −35%, mean saturation above the reference plate minimum for the first time,
-and 65 WCAG failures went to zero. **The work is real and has not yet converted into perceived
-quality.** The measured reason is in `PART 2 🔴 1`.
+⚠️ **Do not splice these onto the old series** (arena 5.33/4.0/3.875/6.0, characters 3.6/3.25/3.0/2.0).
+Different rubric, plates, frame content and n. And note what the audit proved about that old series:
+**its largest single step was 1.0 — inside the floor. "The characters got worse" was never an
+observation.**
 
-Two instrument caveats that bound those numbers: the review library has **no lobby/hero-select
-plates**, so every menu round scored against in-match combat frames (both critics flagged it
-unprompted); and the arena packet drew 4 of 6 Zooba plates, whose camera is not ours.
+## The one finding that dominates
+
+**"Surfaces are flat and unlit — no material variation, no contact shadow, no depth."**
+**6/6** critics on HUD, **6/6** home, **5/6** select, **4/6** arena. Two said it unprompted:
+
+> *"the playfield looks like coloured paper **while the HUD looks shipped**"*
+
+Our best element was being marked down for the surfaces behind it. **This is the #1 item**, and it
+has measured leads already in hand — see PART 2.
 
 ---
 
 # PART 1 — DONE
 
-## The 🔴 gameplay bugs — all six fixed
+## Gameplay
 
-| bug | what it actually was |
-|---|---|
-| **The clock ended nothing** | 110 of 110 forced-immortal matchups still `playing`, `winner: null`, after 360 s. Worse, the fog killed the 100 HP player **before** the 150 HP enemy every time (2.00 s vs 3.00 s), so running the clock out was an *arithmetically guaranteed player loss*. Now `resolveTimeout()` on HP **fraction** → zone control → the human, with `MIN_SAFE_RADIUS` flooring the ring so the tiebreak is reachable at all. |
-| **Trail marks stacked into a one-frame kill** | **87 HP in a single 16.7 ms tick across 29 hit events**, undodgeable by construction. Capped at one instance per victim per tick *while still consuming the others*, so the cap did not become a drip. Per-match trail damage moved −3.4%: the burst died, the mechanic did not. |
-| **Melee at distance 0 ignored facing** | `NaN > cone/2` is false, so a coned swing landed regardless of aim — an outcome decided by IEEE-754 comparison semantics. Now a defined rule: coincident fighters have no bearing, so a **directional** swing misses and an **omnidirectional** one lands. All 11 AIs still kill a motionless player, so no whiff-deadlock. |
-| **A fighter inside the pot was invisible** | **0.0% of its silhouette**, head included. The probe killed the alternative fix with three numbers: the rim sits at 2.53 m and characters are 2.10 m, so the fighter was *under a lid*, not behind an opaque colour. Solid `CoverBox`; the burn ring at r=95 still bites because collision stops centres at r=73. |
-| **The radar showed no zone** | Not merely oversized — **off-card at t=0, t=6 s and t=11.3 s**, with **zero pixels changing over the first six seconds** of a 19.6 s mean match. The map is now drawn *inside* the fog field, so danger closes in from outside. |
-| **`MATCH_DURATION_MS` ~7× too long** | 180 s → 45 s, chosen by sweeping nine values. **But see `PART 2` — the premise was later found to be wrong**, and the correction is in `DECISIONS §1`. |
+- **All six 🔴 bugs** fixed (the clock ended nothing · trail marks stacked an 87 HP one-frame kill ·
+  melee at distance 0 ignored facing · a fighter inside the pot was 0.0% visible · the radar showed
+  no zone · match duration ~7× too long).
+- **Five AI driver bugs**, every one the same shape — *a rule stated once in `rules.ts` and
+  implemented differently elsewhere*: a stun silenced the AI (11/11 characters — the stunned player
+  fired 100% of its shots, the stunned AI 0%); both drivers ranked weapons by authored `damage`
+  (which is per-*pellet*); a melee-only AI had nothing to fire when fleeing; the flee branch aimed
+  **away** from the player and fired along it (8 of 11 dealt literally zero); and the terrain slow is
+  applied to the player only — **the AI crosses every puddle at full speed** (0.450000 vs 1.000000;
+  *parked* — fixing it regresses settled 17→19).
+- **Levels 1–15**, +5%/level of HP and damage (1.70× each = 2.89× effective). **Level 1 is
+  bit-identical to the pre-levels build**, proven tick-for-tick. The AI mirrors the player's level:
+  win rate drifts **1.9 pp across L1→L15**; with the enemy pinned at L1 it would be **99.4%** by L15.
+- **The roster has a second axis.** Per-character health and speed are simulated (they were card
+  fiction). **Settled matchups 70 → 22 → 17 of 110.** Rarity is **not** power — tier spread
+  **3.98 pp** against a ~9 pp floor — and costs nothing extra to level (§26). Speed measured as a
+  **nearly inert lever**; every point of the result is health.
+- **Pacing.** Countdown 5.68 → 3.68 s with **zero** win-rate change, proven: 3,520 matches
+  bit-identical. `MATCH_DURATION_MS` and the fog schedule were both **falsified** as pacing levers.
+- **Touch is sound and closeable** — 36/36 distinct bearings, worst error 0.27°, reversal spread 0.
+  Two real defects fixed: a second finger in the same zone killed the stick, and **83.3% of the
+  bottom 38% of a portrait frame was dead to touch, with the control hints drawn on it**.
+- **Session continuity.** The URL now names the screen and reloads land there. A restored WebGL
+  context was rendering **15.65 luma darker, permanently** (a dead PMREM env map plus a shadow map
+  that never redraws). One bad screen constructor used to kill the router permanently.
 
-## Built this session
+## Presentation
 
-- **Real pathfinding.** A flow field replaced greedy avoidance. Map reachability **79.1% → 100%** (proven to be the ceiling by an independent lattice flood), the alcove deadlock **0/11 → 11/11 characters arriving**, and — the sharpest number — an idle player being reached at all went **0 of 110 matchups → 110 of 110**. Also fixed: `ai.ts` derived facing as a **zero vector** at zero separation, so every ranged shot at a coincident player flew **due east**.
-- **Mobile quality tiers + DPR cap.** Three tiers, **−93% post-chain fill** and **−55% GPU memory** at `low`, DPR cap exact at deviceScaleFactor 1/2/3/4 (24/24). The top tier is **byte-identical** to the pre-tier pipeline, which retroactively validates every colour number measured through it. Settings now ships a real graphics row.
-- **The shop.** Every price, percentage and pool read from the economy model; no second source of truth. Ships **visible and disabled** with the refusal stated in the model's own arithmetic (best possible outcome on a 900-coin box returns 520). `ROSTER_GATED` is never read — availability is *derived*, so the flag flip needs no edit, and that is proven by rewriting the flag inside a disposable snapshot.
-- **Menus.** 65 text runs below WCAG AA → **0**, minimum ratio 1.64 → 4.91+. The trophy bar stopped contradicting its own label. Roster framing **19% figure → 57%**, faces 41px → 83px.
-- **Audio.** A match ending on the clock and the FINAL RING both had **no sound at all**. Both fixed — the second required deleting an empty-batch early-out, because **95.3% of real ticks carry no events**.
-- **Arena colour and layout.** The environment vacated the cast's hue band (`envShareInCastBand` 0.1906 → 0.1244, `playerRank` median 33.5 → 23). The closing ring stopped herding fighters into furniture — occlusion **rose** 30.6% → 67.7% as the zone closed and now **falls** 27.7% → 25.2%.
-- **Characters.** Arms: eight of eleven stances rotated limbs *across* the body. Legs: `CapsuleGeometry` **degenerates to a sphere whenever `len < 2r`**, so STOUT's "leg" was two overlapping balls inside a boot a third of the character's height.
+- **Cast:** dark rung (p05 0.273 → 0.157; 11/11 pass `range`/`p05`/`steps10`), silhouette (hull
+  deficiency 0.1379 → **0.2621**, the reference median; appendages 0.5 → 3.0; **11/11** clear the
+  floor, from 1/11), near-white clipping **0.1007 → 0.0275** against a reference median of 0.0249.
+- **Arena:** brightness (nothing railed it; frame luma 0.322 → 0.402), edge grammar (the reference
+  marks a ground seam with a **dark band, never a bright line** — we had it inverted), contact
+  grounding (share past the 0.06 threshold 16.9% → 35.6%), stains (they had **no dark core at all** —
+  a bright ring around nothing).
+- **Lighting:** the key light's **azimuth sign** was throwing every shadow behind its own object.
+  Contact ΔL 0.0353 → **0.1242**. Figure/ground *paid* rather than cost: cast minimum −0.0014 →
+  **+0.0593**, gate failures 3 → 0.
+- **HUD:** 20 WCAG failures → 0, min ratio 1.89 → 6.48. Eight defects, all bugs — including a
+  `.hud-zone.is-danger` state authored and selected by nothing, and damage numbers erasing the clock.
+- **VFX:** the trail was **0.7° of hue from the floor and 1.0° from the cast** — the critic's phrase
+  was literal. Now 22.4°, with cast figure/ground +5.1%.
+- **Audio:** the top three octaves did not exist (tilt −5.57 dB/oct, 86.2% of energy below 1 kHz).
+  Now −5.07, duty cycle **21.9% → 58.6%**, plus a kitchen ambience bed. `generic.hurt()` alone was
+  holding the game darker than the other fifteen sounds combined.
+- **Menus:** key rebinding (35 assertions read off **sim state**), the levels UI, and three more
+  "shows a number the model does not compute" defects.
 
-## Instruments built — and this is the session's real output
+## The instruments — the session's real output
 
-**Ten** instruments were found returning **confident wrong answers**. Each is now fixed and
-validated against a known input first.
+**Nineteen instruments were caught returning confident wrong answers.** Each is fixed and validated
+against a known-bad input. The most consequential:
 
 | instrument | what it was doing |
 |---|---|
-| `arena-scan` colour budget | **new.** Reproduces the recorded reference figures to 4 decimals, so its numbers compare directly to the git log. Also found `<id>.canvas.png` — labelled "canvas only, no HUD" — **has never been HUD-free**. |
-| `valuescan` | **new.** Value ladder + hero/ground separation, calibrated against 27 reference-plate measurements. |
-| `verify-head` | **missed the bug it exists to catch**, through three gaps at once. Now walks `tools/`, reads HTML, and resolves root-absolute paths. |
-| `menu_accept_portrait` | **new.** Five landscape viewports had hidden **four** portrait bugs, all invisible because `.fa-root` clips so `scrollWidth` reads clean. |
-| `input_accept` | **new**, 81/81. Real CDP key events asserted against sim state. |
-| `limbcheck` | measures **22°**; the match camera is **58°**. See 🔴 2. |
-| `match-sim`'s `smart` policy | tests line-of-sight **before** range, so the scripted player strafes into a wall for the whole match. Being fixed. |
+| **the blind critic** | **±1.4-point floor; a round's two panels are n=1, not n=2.** The rubric alone is worth 2.0 points and there was no canonical one. |
+| `scripted_player.mjs` | **`bestWeapon` skips `'self'` — the measurement cannot press heal.** Worth **50.6 pp** on Hamburger. ⚠️ **The roster was balanced twice against this.** |
+| `feel_probe.diff()` | saturated: a fog hit (flash only) read 3904 px; a weapon hit (flash **plus the whole burst**) read 3879. The burst's real range is **6.31×**, not 1.66×. |
+| `valuescan --mode gate` | served **stale JSON off disk** — reported 0/11 passing where HEAD is 11/11, and named the **wrong characters**. |
+| one stale driver | copied into **ten** tools; a fourteenth born mid-audit. `roster_table`'s aggregate moved 0.8 pp while **58 of 110 matchups moved, max 34.4 pp**. |
+| `arena-scan` | ignored `PREVIEW_BASE`, silently measuring whatever was on port 5187. Three rails also disagreed with their own HUD-free twins. |
+| `hud_fit` harness | missing `box-sizing`, so it reported "0 px overflow" against a real 15.1 px — **and `hud.ts` cited that number in a source comment as proof.** |
+| `driver_guard` | its coverage **shrank** when a bug was fixed (49 → 41), because its census keyed off the bug's own fingerprint. |
+| `limbcheck` | measured **22°** and a pose the player never sees; the match camera is **58°**. Reported 9/11 passing on a cast where 10/11 failed. |
 
 ---
 
-# PART 2 — PENDING
+# PART 2 — PENDING, ranked
 
-## 🔴 The two findings that matter most
+## 🔴 1. Flat, unlit surfaces — the #1 defect, with measured leads
 
-**1. The cast had no dark rung. ✅ CLOSED for 9 of 11 — `a5ce2a5` carries the full record.**
+Named by 6/6 critics on three elements. **Three leads already priced, none spent:**
 
-p05 went **0.273 → 0.157** against a reference median of 0.097; **10 of 11 characters now put 5% of
-themselves below luma 0.18**, where previously *none* did against 18 of 18 reference plates. Range
-0.623 → 0.766. Albedo and material only — **geometry proven unmoved**, 324 limb footprints compared,
-largest difference 41 px on a part of 89,365 px.
+- **Raise `src/arena/`'s baked contact decal ~2.5×.** It sits at |dL| **0.0491** against a **0.1238**
+  reference measured off real barrels. **Beats a whole SSAO pass, for zero draw calls.**
+- **SSAO works** (contact −0.0273, +1 value step, acne solved by `bias 0.20` + intensity 1.5) but
+  costs **+314 draw calls / +79% triangles** — a second geometry pass. `TierProfile` has no `ao` field.
+- **`glossyMat` has no rim at all** — 18 materials, the only surfaces in the game with zero edge
+  response. One line, but it lands on the four characters whose clipping was hardest won; gate it on
+  a per-character `clipShare` run.
 
-**Figure/ground was redistributed, not spent** — the whole risk of the pass. Cast **minimum** over
-the 14 valid arena stations went **0.0689 → 0.0834 (up 21%)**, and stations under the 0.10 floor
-went 3 → 1.
+⚠️ Two facts to carry: **53% of the cast is authored at roughness ≥0.6**, where specular headroom has
+already collapsed 10×; and **`material.envMapIntensity` is silently discarded** — three.js overwrites
+it with `scene.environmentIntensity` for any material using `scene.environment`.
 
-**Two remain, and both need geometry rather than colour** — now owned by the character-geometry
-pass: **egg** (head is 93.7% of the character; the shell being near-white *is* the egg — it needs a
-dark **garment**) and **hotdog** (`weakBoundary` 22.6% vs ≤15%, from 68.1%; needs the bun geometry
-split, because its value is pinned at both ends at once).
+## 🔴 2. The scripted player cannot heal — fix it, then rebalance
 
-**Two costs, stated rather than buried:** cast-mean p95 moved 0.896 → **0.923**, i.e. +0.027 above
-the reference median — the old "p95 already equals the reference" rule was a *cast mean* hiding a
-0.780–0.979 spread, and only the five characters **below** the reference were lifted. And soup lost
-its red trim band while egg's lower shell went to warm cream. Both are looks, parked in
-`DECISIONS §16`.
+One line in `tools/tmp/scripted_player.mjs`. Worth settled **17 → 14**. ⚠️ **But it makes Hamburger
+the strongest character by 14 pp and blows the rarity guard from 3.98 to 16.56 pp.** The sequence,
+from the agent that found it: **land it, re-measure, *then* decide what Hamburger should be** —
+reading tier spread every iteration, because on this character it binds before win rate does.
+`bestWeapon` **also** still ranks by authored `damage` (wrong for Taco and Burrito at 5 of 8 bands).
 
-⚠️ The numbers above were measured at `contrast 0.62` and `main` ships 0.72, so they **understate**
-what ships by roughly +0.016 range each. A re-baseline is owed.
+## 🟠 3. Kitchen concealment — approved by Uri, unstarted
 
-<details><summary>The original finding, for the record</summary>
+**§18, and five critics deep** — each independently ranking cover density their #1 arena fix. We are
+at 17–20% of frame against a reference 35–45%. Uri: *"add bushes — but make it relevant to kitchen.
+For example plates you can hide under."* Solid props cannot deliver it (the collision was carefully
+tuned); **walk-through concealment adds screen area without adding collision.** It is a sim mechanic
+plus AI awareness plus props. **The largest single item waiting.**
 
-Measured against 18 Brawl Stars plates:
+## 🟠 4. Live character findings the fixed gate exposed
 
-| | ours | reference |
-|---|---|---|
-| p95 (light end) | **0.896** | **0.896** |
-| p05 (dark end) | **0.304** | **0.097** |
-
-Our light end is *identical* to the reference. **Every one of eighteen reference plates puts 5% of
-the character below luma 0.18; not one of ours does.** 73% of the gap is art, 27% is the post chain.
-`valuescan --mode gate` is the acceptance test; **0 of 11 currently pass.** Ranked: egg (range 0.401,
-below the reference *minimum*), donut, pizza, taco, hotdog. **Leave soup and hamburger alone** —
-best part structure in the cast.
-
-⚠️ **Do not fix this by desaturating.** Falsified **four** times now: the cast is **1.8× more
-saturated than the environment** and the frame sits below the reference. Value is the lever.
-
-</details>
-
-**2. ✅ RESOLVED — `limbcheck` was measuring the wrong camera, and replacing it found the real problem.**
-
-`tools/tmp/limbmatch.mjs` (`--selftest` 27/27, `--mode control` 8/8 **in the live game**) now measures at
-the match camera (58°) and the **shipped spawn facing**, and adds three numbers that — uniquely among
-this project's character metrics — **can also be computed on a reference plate**, because they are
-properties of the mask.
-
-**The new #1 red item is SILHOUETTE, and it is the strongest signal this project has produced:**
-
-| | cast | reference (6 hand-verified BS plates) |
-|---|---|---|
-| hull deficiency | **0.1379** mean | min **0.2007**, median 0.2617 |
-| appendages | **0.5** — *zero on eight of eleven* | median **2.5** |
-| wasted footprint | 64.0% | — |
-
-**10 of 11 are below the weakest reference plate**, while `limbcheck` @22° says 9 of 11 *pass* on the
-same tree. And a blind critic, in the same round, independently named the same quantity: *"roughly a
-quarter to a third of the outline area should come from non-body parts… every character in the fox
-game has 3–5 shape events on its outline. The egg has zero."* **A reference-calibrated instrument and
-a blind critic converged from opposite directions** — that had not happened before here.
-
-Two hypotheses are already priced: **pose is worth nothing** (no rotation puts a limb outside the
-mass — soup got *worse*), and **span works but only from the hips** (stance ×2.2: soup 0.106 → 0.202;
-widening shoulders instead **detaches the mitts**). Owned and in flight.
-
-Also corrected: **faces do NOT vanish at match framing.** At 58° and yaw 0, hamburger's eyes and mouth
-are legible at 181 px. They vanish at the *facing*, not the framing — that item was filed against the
-wrong cause.
-
-<details><summary>The original finding, for the record</summary>
-
-**`limbcheck` has been measuring the wrong camera.** At the match's 58°: idle passes **8/11 → 0/11**,
-mean wasted footprint **17.7% → 53.8%**. Idle *ranking* survives (ρ 0.927) so priorities were sound;
-**run ranking does not** (ρ 0.673). And at the shipped spawn facing every character sits at **exact
-profile to camera**, burying 5.3 of ~15 joints against 0.8 in the pose `limbcheck` uses.
-
-</details>
-
-## 🟠 In flight as this was written
-
-- **Status lock** — a weapon whose cooldown is shorter than the status it applies holds that status
-  up **forever**: 4 of 5 stun and 8 of 10 slow weapons do. **31.4% of engaged time movement-locked**,
-  longest unbroken lock **11.02 s** against a 6.0 s mean engagement. The Sticky Trail burst in slow
-  motion. ⚠️ Cutting `STUN_DURATION_MS` is measured **wrong** — it costs the player 10.6 pp.
-- **AI has no hazard or zone awareness.** Fog kills **14.1% of enemies vs 1.3% of players**, and
-  since the layout revived the pot, **100% of pot damage lands on the AI too.**
-- **Post chain** eating 27% of the value gap · **`grease_in`**, one puddle where 9 of 11 characters
-  fail figure/ground · **VFX audit** against the new hue contract · **measurement integrity** ·
-  **loose ends** (key rebinding, player name).
+`weakBoundaryPct` fails **5 of 11** — and **pizza 22.0 → 41.0** and **waterbottle 22.9 → 53.9** got
+*worse* while the gate was frozen. `dlBelow10` fails **lollipop (11 of 18)** and **sushi (6 of 18)**;
+the stale gate had named hotdog. The dl table is **171 of 198 rows** — re-run to close it.
 
 ## 🟡 Known, not started
 
-- **Skins** — needs a per-character material-variant system that does not exist.
-- **Faceting** is visibly real at crop (taco's hip gems, pizza's crust) and no critic named it as a
-  top fix.
-- **Eyes** are flat dark decals with no sclera/iris separation. **Faces vanish entirely at match
-  framing** — this is a character-select item only.
-- **`COUNTDOWN_FROM` + flash = 5.7 s of pre-match against a 17.9 s fight** (32%). Flagged, untouched.
-
-## ⚪ Small and certain
-
-- `preview.ts` `face=1` is unusable for non-spherical heads.
-- Four characters mount face features onto `head` instead of `rig.joints.face` (being fixed).
-- `rules.ts` + `economy/`: `emoji` fields are still model tokens; a real `iconId` would delete a
-  50-line translation table.
-- `hamburger` keeps 197 px of detachment — a floating lettuce frill the right mitt touches.
+- **Seven weapon files carry a stale copy of the generic size curve**, each documenting it as matching
+  `game/vfx.ts` — a claim the re-derivation invalidated. **Soup's three impact hooks read `ctx.damage`
+  nowhere (1.00×).** Needs per-weapon floors first, or small weapons drop under the ~300 px floor.
+- **`limbcheck.mjs` and `limbcheck_pitch.mjs` are 93.3% identical**, while the latter's header claims
+  byte-identity so *"any delta is PITCH"*. **Every 22°-vs-58° comparison rests on that claim.**
+- `perf_tier.mjs` should be `perf.mjs --query`; the clone-census budget is a holding action.
+- Skins need a per-character material-variant system that does not exist.
+- Character select is **n=1** — packets `select2-c2..c6` are built and waiting for five more critics.
 
 ---
 
 # PART 3 — NEEDS URI
 
-**→ `docs/DECISIONS-FOR-URI.md`.** Eleven parked items, each with the assumption in force, the cost
-to reverse, and the measurement behind it. The two that block other work:
-
-1. **Lobby/hero-select reference plates.** Three consecutive menu rounds scored against in-match
-   combat frames. Only Uri can supply them, and until he does every menu score is unreliable.
-2. **Two icons need a *subject* change**, not a redraw — measured across four and five attempts.
+**→ `docs/DECISIONS-FOR-URI.md`.** Twelve were answered this session (§6, §12, §13, §15, §18, §22,
+§24, §24b, §26 …). Still open: **§17** (music during matches, `hurt` level), **§19** (back out of a
+live match), **§4** (`ROSTER_GATED`), **§14** (portrait), **§10** (two icons need a *subject* change),
+and **§16/§20** (looks to eyeball).
 
 And the standing one: **the two most valuable bug reports this project has ever had came from Uri
-simply playing it.** Both were invisible to `tsc`, to every assertion, and to every screenshot.
+simply playing it.** A build is deployed for exactly that — see `CLAUDE.md`.

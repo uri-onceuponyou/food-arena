@@ -282,6 +282,27 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ---
 
+## ⚠️ THE CRITIC — calibrated, and it has a floor
+
+`tools/review.mjs` + **`tools/review.rubric.txt`** (`--rubric canonical`). Measured properties:
+
+- **Resolution floor ±1.4 points.** σ = 0.50 over 16 fresh critics on one fixed image. A round's two
+  panels are **n=1, not n=2** — one critic scores both and agreed with itself 4 of 4 times. Two
+  *independent* critics bring it to ~1.0. **Do not act on a smaller difference.**
+- **The rubric is worth 2.0 points.** The same sheet reads 5.0 under "overall visual quality" and 3.0
+  under "character design only", with the reference unmoved. **Never compare across rubrics.**
+- **Position bias 0.00** — our frame against itself tied 6/6.
+- **Validated both ways:** a real Brawl Stars plate submitted *as ours* scores 8.67; a degraded frame
+  scores 1.83 *below* its own clean original.
+- **Ceiling 8–9, never 10** over 34 observations — so a 7+ bar sits ~1–1.5 below shipped Brawl Stars.
+- ⚠️ Plates: `gameplay_topdown/` for gameplay (mixed-camera draws invalidated four rounds),
+  `menus/` for screens. **Capture ACTION frames and a POPULATED profile** — idle frames and empty
+  saves each cost ~1 point.
+- ⚠️ Blindness is imperfect: critics name the reference titles on sight and `CLAUDE.md` is in every
+  subagent's prompt. The instrument still discriminates; the caveat stands.
+
+---
+
 ## THE GATE BATTERY — run all of these before you believe a change
 
 The five gates in `CLAUDE.md` were the whole story when there were five. There are now
@@ -314,6 +335,18 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/tmp/rarity_aa.mjs` | 0 below AA of **43** | `.fa-rarity` per rarity × home + character select × 3 viewports, **both** contrast models |
 | `node tools/shoot.mjs --selftest` | **6** | the capture path itself |
 | `node tools/tmp/snapsweep.mjs --selftest` | **5** | age parser for the leaked-snapshot sweeper |
+| `node tools/tmp/sentinel.mjs` | **17** + 10 live | ⚠️ **the meta-guard.** MOVES / HOLDS / ORDERS / SELF-PAIR — each kind run against an instrument broken that way and REFUSED there |
+| `node tools/tmp/driver_guard.mjs` | **60** | no 14th copy of the scripted driver; SHARED entries checked from the registry |
+| `node tools/tmp/capture_audit.mjs` | **43/43 owned** | 0 exposed, 14 `css-immune` (claimed by annotation, mechanically refused if the file screenshots) |
+| `node tools/tmp/kit_lab.mjs --selftest` | **10** | matchup-profile divergence + behavioural fingerprint, calibrated on a literal clone |
+| `node tools/tmp/level_lab.mjs --selftest` | **7** | the level ladder and its win-rate curve |
+| `node tools/tmp/limbmatch.mjs --selftest` | **27** + 9 control | hull deficiency / appendages / share — **computable on a reference plate** |
+| `node tools/tmp/sepscan.mjs --selftest` | **38** + 8 control | internal separation (neck pinch, chin notch, head:body area) |
+| `node tools/tmp/trail_probe.mjs` | controls 3 | same-frame ablation of ground marks vs floor **and** cast |
+| `node tools/tmp/aoband.mjs --selftest` | **25** | contact darkening binned by metres from the footprint |
+| `node tools/tmp/haloprobe.mjs --selftest` | **27** | bloom-attributable halo as a paired `shipped − bloomOff` |
+| `node tools/tmp/rebind_accept.mjs` | **35** | key rebinding asserted against **sim state**, not the DOM |
+| `node tools/tmp/touchfeel.mjs` | **79** | stick bearings, dead zone, multi-touch, `touchcancel` |
 | `tools/tmp/nav_history_probe.mjs` | **44** | URL names the screen · reload lands there · back/forward · query params survive · a throwing screen cannot freeze the router |
 | `tools/tmp/glloss_probe.mjs` | **29** | forces a REAL context loss via `WEBGL_lose_context`; asserts the restored frame is the SAME frame against a drift control |
 | `node tools/tmp/driver_guard.mjs` | **49** | ⚠️ fails if a **14th** copy of the scripted driver appears, or a fixed copy loses its guard. Every check also runs against the historical driver and must FAIL there |
