@@ -57,7 +57,9 @@ Measured since, over **363 real matches** (121 matchups × 3 policies):
 - But **13.0 s of the mean match is still walking**, and an arena-layout pass is cutting exactly
   that right now. → argues it will be **too long again** once that lands.
 
-### ✅ ANSWERED — recommendation: keep 45 s. If you want to move it, 40 s is nearly free. **Do not go below 40 s.**
+### ✅ ANSWERED — and then RELAXED. See the update at the end of this section: **35 s is now safe too.**
+
+### Original answer: keep 45 s. If you want to move it, 40 s is nearly free. **Do not go below 40 s.**
 
 A ~126,000-match audit (110 matchups × up to 25 seeds × 5 policies) settled this, and it **corrected
 two things I told you above.**
@@ -111,6 +113,38 @@ Shortening the clock instead costs three things:
 **The timeout tiebreak and FINAL RING are not dead code — they are 4.7 s out of reach**, and they
 come into reach on their own if the arena-layout pass lands its dead-time cut alongside a schedule
 change. I would not shorten the clock to reach them.
+
+### 🔄 UPDATE — the constraint that forced "no lower than 40 s" has been removed
+
+Reason 2 above was that shortening the clock **hands you a degenerate strategy**, because the AI had
+no ring awareness and walked into the fog. **That is fixed** (`07a4e3a`), and re-measured across four
+clocks, 880 matches per cell:
+
+| clock | evasion win rate, before → after | **enemy killed by fog, before → after** | timeouts |
+|---|---|---|---|
+| 45 s | 3.4% → **0.2%** | 9.0% → **0.5%** | 1 → 11 |
+| 40 s | 2.2% → **0.2%** | 9.8% → **0.1%** | 7 → 10 |
+| 35 s | 9.2% → **0.6%** | 10.6% → **0.2%** | 30 → 17 |
+| 30 s | **16.4%** → **0.9%** | 12.0% → **0.0%** | 149 → 24 |
+
+Two corrections to what I told you:
+
+- **The "46–52% at 40 s" figure does not reproduce.** It was measured on the *pre-layout* arena;
+  even before the AI fix it is now 2.2%. The arena pass had already blunted it.
+- **But it did still re-emerge as the clock shortened** — 3.4% → 9.2% → **16.4%** at 30 s, with
+  timeouts hitting 149 of 880. **After the fix it is flat at ≤0.9% at every clock**, and the
+  mechanism is gone: the enemy stops dying to the zone at all.
+
+**And the scripted win rate is now nearly clock-invariant** (52.5 / 52.2 / 51.2 / 54.0 across
+45/40/35/30 s). **The clock is a pacing dial again, not a balance one.** 40 s is safe; **35 s no
+longer hands you anything.**
+
+⚠️ One honest caveat: the evasion policies now die to the fog *themselves* 40–68% of the time,
+because that policy has no obstacle avoidance on a 27-box map. **The number I stand behind is the
+mechanism** — enemy fog deaths 9.0% → 0.5% — not the win rate.
+
+**Also: your §2 tiebreak now actually fires.** The timeout was reached **0 of 363** times when §2 was
+written; it is now **11 of 880** at the 45 s clock.
 
 **Related sub-question — answered, tell me if you disagree.** `FOG_FIRST_CONTACT_S` stays an
 **absolute 6 s** rather than scaling with the clock. Reasoning: it encodes a human duration you
@@ -350,3 +384,45 @@ at the ~10.5% of frame height a character occupies in game.
 **❓ This changes the proportions of every character in the cast** — it is the most visible
 single change of the session. **Reverting is one constant per archetype.** Look at the roster
 silhouette before/after and say if you hate it.
+
+---
+
+## 12. The game just got harder — 62.1% → 51.3%. Keep it, or dial it back?
+
+**Why it needs you.** This is the one change this session that is a **deliberate difficulty shift**,
+and it is declared rather than smuggled. Bounding the status lock and giving the AI hazard awareness
+cost the player **~9–11 pp** of win rate, because both were player *advantages* in aggregate:
+
+- The **enemy was locked ~2× as much as the player** (33.9% of engaged time vs 18.6%). An
+  11-second undodgeable movement lock was, on balance, working *for* you.
+- The **zone killed the enemy 11× more often than you** — 94.8% of all pot damage and 100% of all
+  fog damage landed on the AI, because it had no ring or hazard term at all.
+
+| policy | before | after |
+|---|---|---|
+| scripted skilled player | 62.1% | **51.3%** |
+| naive "charge straight in" | 25.5% | **18.4%** |
+
+**Assumed: keep it.** 51.3% against a 150 HP enemy is a healthier baseline than 62.1%, and the
+points came from deleting two things that were never design — an 11-second undodgeable lock, and an
+AI that walked into fire.
+
+**❓ If you disagree, the dial is one constant and it is already measured:** `ENEMY_MAX_HP` 150 →
+**140 gives 56.3%**, → **130 gives 62.3%** (i.e. 130 restores the old difficulty almost exactly).
+**Please do not buy it back by re-opening the lock** — that mechanic was undodgeable by construction.
+
+### Two consequences, not decisions
+
+- **Pizza is now weak, and it was carrying itself on the bug.** Player-Pizza won **98.8%** of its ten
+  matchups on Cheese Blind alone; it now wins 63.1%, and in AI hands 10.6%. It was a coin that
+  decided the match by who held it. Worth its own balance pass.
+- **You cannot see the new rule.** A stun that is *refused* currently draws nothing, and "nothing"
+  looks identical to "my weapon did nothing" — i.e. like a bug. `combat.ts` exports `statusReadyAt()`
+  and the VFX owner has been asked to render it. Flagging it because **if it ships unrendered, the
+  fix will read as a defect.**
+
+### And the thing only you can settle
+
+Whether **2.0 s of zero movement still feels awful**, and whether a refused stun feels like a rule or
+a bug. `docs/LESSONS.md` §10 — the two most valuable bug reports this project ever had came from you
+playing it. This is squarely that kind of question.
