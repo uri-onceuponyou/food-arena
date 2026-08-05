@@ -82,6 +82,23 @@ const OWNED = {
   'tools/tmp/screen_metrics.mjs': 'capture',
   'tools/tmp/home_metrics.mjs': 'capture',
   'tools/tmp/chars_metrics.mjs': 'capture',
+
+  // ── The follow-through set, added after the seven above were green ──────────
+  // The first pass could only REPORT these ("34 exposed files elsewhere"), because they
+  // belonged to other owners at the time. They have been fixed one at a time, each with
+  // the reason written at the call site, so they are enforced now — a file that is
+  // merely correct today is not a guard, and this list is the only thing that makes an
+  // unpicking show up as a failure rather than as a line in a report nobody reads.
+  //
+  // The roles are NOT interchangeable and were chosen per file, not applied in bulk:
+  'tools/tmp/journey.mjs': 'capture',        // the e2e harness; 6 capture sites, 7 flag waits
+  'tools/tmp/e2e_boot_probe.mjs': 'capture', // a validator: its EARLY shot is annotated, its late one guarded
+  'tools/tmp/shop_accept.mjs': 'capture',    // 168 assertions incl. tap-target and safe-area rects
+  'tools/tmp/name_accept.mjs': 'geometry',   // captures nothing, but clicks and types on a moving screen
+  'tools/match-play.mjs': 'capture',         // drives menus -> match and shoots both
+  'tools/filmstrip.mjs': 'capture',          // preview.html has no shell; the FLAT-FRAME floor is the live guard
+  'tools/aspect.mjs': 'capture',             // the 0.00wu number never needed it; the optional PNG did
+  'tools/tmp/rarity_aa.mjs': 'capture',      // per-rarity WCAG, built for the badge follow-through
 };
 
 /** Does this file meet the obligation its role carries? Returns null or the reason. */

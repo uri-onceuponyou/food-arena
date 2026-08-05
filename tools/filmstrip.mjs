@@ -50,6 +50,7 @@ import { chromium } from 'playwright';
 import sharp from 'sharp';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve, join } from 'node:path';
+import { captureSettled } from './tmp/settle.mjs';
 
 const BASE_DEFAULT = 'http://localhost:5173';
 
@@ -178,7 +179,23 @@ async function captureRow(page, base, { id, anim, frames, span, yaw, cw, ch, sil
       ([tt, remount, an]) => window.__preview.frameAt(tt, { anim: an, remount }),
       [t, i === 0, anim]
     );
-    const buf = await page.screenshot({ timeout: 90_000 });
+    // ── THE FADE GUARD IS A NO-OP HERE, AND THE FLAT-FRAME FLOOR IS NOT ─────────
+    // This file shoots `preview.html`, which mounts NO menu shell: no `#boot` overlay
+    // (that lives in `index.html` only), no `.fa-curtain`, no `.fa-stack`, no
+    // `.fa-screen` and therefore no `fa-screen-in`. The `__screenReady` defect cannot
+    // reach a page that has none of the machinery it is about, and `__previewReady`
+    // here is the PREVIEW harness's own flag against a hand-cranked clock
+    // (`window.__preview.frameAt`), not `shell.ts`'s. So `wait: false`: there is no
+    // screen to settle, and pretending otherwise would be theatre.
+    //
+    // What CAN go wrong is the failure this repo keeps finding — a character that
+    // built nothing, or a frame taken before the model swap landed, which renders as a
+    // FLAT frame that a contact sheet makes look deliberate. That is exactly the class
+    // `assertFrame` exists for, so the floor is left ENFORCED and it is the only part
+    // of the guard doing work.
+    const { buf } = await captureSettled(page, {
+      label: `${id}/${anim} t=${t.toFixed(3)}`, tool: 'filmstrip', wait: false,
+    });
     shots.push({ t, buf: await sharp(buf).resize(cw, ch, { fit: 'contain', background: BG }).png().toBuffer() });
   }
   shots.loops = loops;

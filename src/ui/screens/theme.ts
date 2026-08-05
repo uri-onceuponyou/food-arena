@@ -636,7 +636,23 @@ const CSS = `
    outline, so half of it comes off the INSIDE of a stem that is only ~1.8px wide at
    800 weight; 2.2px visibly closed the counters of NORMAL and LEGENDARY, and 1.2px
    left too thin a rim to enclose the glyph. The font-size floor moved 0.70rem ->
-   0.72rem to keep that ratio honest at the smallest place this badge is used. */
+   0.72rem to keep that ratio honest at the smallest place this badge is used.
+
+   ── 'paint-order: stroke fill' IS LOAD-BEARING, and it was verified as pixels ──
+   Without it the stroke paints OVER the fill and does eat half an ~1.8px stem, which
+   at 11.2px would leave ~0.2px of '--cream' — a core no rasteriser can resolve, and a
+   badge that reads as solid ink on the rarity colour (Epic 3.69:1, the worst of six).
+   With it the fill is painted back over the rim, so the stroke only adds outside the
+   outline. Measured on every rarity on BOTH screens the badge renders on
+   ('tools/tmp/rarity_aa.mjs', 6 rarities x home + character select x 3 viewports):
+   16.52-16.54, cream core 12-17% of the badge, unbroken core runs of 7-9 CSS px, all
+   counters open at 6x. Do not drop 'paint-order' as a redundant line.
+
+   NOTE for the next reader: 'home.ts' locally pins 'font-size: 0.7rem', under the
+   0.72rem floor above. Measured, the ratio survives it (8px core run at 11.2px against
+   9px at 13.12px), so it is recorded rather than "fixed". 'tools/tmp/home_metrics.mjs'
+   scored this badge 2.53 for one commit because it was the only one of the three
+   contrast batteries without a text-stroke branch; it has one now. */
 .fa-rarity {
   display: inline-flex;
   align-items: center;

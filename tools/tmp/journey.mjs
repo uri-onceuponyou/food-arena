@@ -53,7 +53,7 @@
 
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import sharp from 'sharp';
+import { settleScreen, captureSettled, describe } from './settle.mjs';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
@@ -245,36 +245,71 @@ export const ErrorOverlay=class{}; export default {};`,
  * Wait for the screen to be VISIBLE, which is not what `window.__screenReady` means.
  *
  * `shell.ts:navigate` sets `__screenReady = true` in the same tick it drops the
- * curtain, and `.fa-screen` then runs a 0.26 s `fa-screen-in` entry animation. Measured
- * by `tools/tmp/e2e_boot_probe.mjs`: **at the instant the flag flips, `.fa-screen`
- * opacity is 0.** The same screen shot at `__screenReady` and 2.5 s later scores
- * stdev 26.16 / mean 71.7 against stdev 96.08 / mean 133.4 — a 3.7x contrast difference
- * on identical content, because the early frame is the screen faded over the orange
- * page background. Every probe in this repo that waits on `__screenReady` and then
- * screenshots is exposed to this.
+ * curtain, and `.fa-screen` then runs a 0.26 s `fa-screen-in` entry animation. **At the
+ * instant the flag flips, `.fa-screen` opacity is 0** — first measured by THIS file
+ * (commit `09af4d0`), then reproduced on a frozen snapshot by `settle_validate.mjs`,
+ * which found the flag wrong on 2 of 2 CURTAINED navigations and on 5 of 9 first mounts.
+ *
+ * ── This used to be a local predicate, and it was not enough ────────────────────
+ * The version here checked `.fa-stack > *` opacity and the curtain, then slept. It
+ * missed four things `tools/tmp/settle.mjs` checks, and every one of them can produce a
+ * frame this harness would then score as a screen:
+ *
+ *   * `#boot` — index.html's boot overlay is z-index 200, is never removed and only
+ *     fades. A capture inside that window is the purple boot gradient over everything,
+ *     at full screen opacity. This file's own comment admitted it did not check it.
+ *   * running finite animations on the screen root / `.fa-stack` / `.fa-root`, which is
+ *     what actually pins `fa-screen-in`, `fa-open-slam` and `fa-sheet-in` to completion.
+ *   * transform identity. `getBoundingClientRect()` INCLUDES transforms and
+ *     `fa-screen-in` starts at `translateY(10px) scale(0.992)` — a 0.352px error on a
+ *     44px tap target, which flipped a real verdict in `menu_accept`.
+ *   * two consecutive frames, so a value sampled on a keyframe boundary cannot pass.
+ *
+ * `settle.mjs` is now the single copy of that predicate. The `ms` floor stays, because
+ * it covers TIMED CONTENT (hint fades, HUD tweens) that no paint condition can predict
+ * — but it is a floor under a condition now, not the condition itself.
  */
 async function settle(page, ms = 1200) {
-  await page.waitForFunction(() => {
-    const el = document.querySelector('.fa-stack > *');
-    if (!el) return false;
-    const cs = getComputedStyle(el);
-    const curtain = document.querySelector('.fa-curtain');
-    return Number(cs.opacity) >= 0.99 && (!curtain || Number(getComputedStyle(curtain).opacity) <= 0.01);
-  }, null, { timeout: 30_000 }).catch(() => note('screen never reached full opacity within 30 s'));
+  const state = await settleScreen(page, { label: String(leg), soft: true, timeout: 30_000 });
+  if (!state?.ok) note(`screen never reached full paint within 30 s — ${describe(state)}`);
   await page.waitForTimeout(ms);
 }
 
+/**
+ * Every capture in this harness, through the guard.
+ *
+ * `captureSettled` brackets the shutter with a paint check on BOTH sides (the shutter
+ * is not instantaneous under SwiftShader, so the paint state and the pixels can
+ * disagree), applies the flat-frame floor, and writes a `<png>.capture.json` sidecar so
+ * `tools/review.mjs` can refuse a packet built from a washed frame.
+ *
+ * `enforce: false` is deliberate and is NOT a weakening: this file's contract is to
+ * COMPLETE the journey and report everything it found, and a thrown `CaptureRefused`
+ * two screens in would destroy the only end-to-end evidence in the repo. So the guard
+ * still runs, still records, and an unsettled capture becomes a printed FINDING —
+ * which is exactly what this harness is for.
+ *
+ * The condition is applied HERE rather than trusted from the caller: three of the six
+ * capture sites (`countdown`, `result_*`, `home_after_reload`) are reached without a
+ * preceding `settle()`, and `home_after_reload` in particular follows a full page
+ * reload. `soft: true` so a screen that never settles is reported instead of throwing;
+ * 15 s rather than 30 s because `settle()` has usually already paid the wait and this
+ * is the backstop.
+ */
 let shotN = 0;
 async function shoot(page, label) {
   const name = `${String(shotN++).padStart(2, '0')}_${VIEWPORT_NAME}_${label}.png`;
-  const buf = await page.screenshot({ timeout: 120_000 });
-  writeFileSync(`${OUT}/${name}`, buf);
-  const st = await sharp(buf).stats();
+  const pre = await settleScreen(page, { label, soft: true, timeout: 15_000 });
+  if (!pre?.ok) note(`capture ${name}: screen not settled before the shutter — ${describe(pre)}`);
+  const cap = await captureSettled(page, {
+    path: `${OUT}/${name}`, label, tool: 'journey', wait: false, enforce: false,
+  });
+  if (!cap.painted) note(`capture ${name} was taken UNSETTLED — ${describe(cap.before.ok ? cap.after : cap.before)}`);
   // "White screen" and "black screen" are both FLAT. A real screen of this game has
-  // structure, so the honest test is variance, not a colour.
-  const stdev = Math.max(...st.channels.map((c) => c.stdev));
-  const mean = st.channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3;
-  return { name, stdev: +stdev.toFixed(2), mean: +mean.toFixed(1), blank: stdev < 4 };
+  // structure, so the honest test is variance, not a colour. 4 is this file's own
+  // historical threshold and is kept; `settle.mjs`'s FRAME_FLOOR of 8.0 is stricter and
+  // is recorded in the sidecar, so both are on the record without moving the verdict.
+  return { name, stdev: cap.stats.stdev, mean: cap.stats.mean, blank: cap.stats.stdev < 4, painted: cap.painted };
 }
 
 const glCount = (page) => page.evaluate(() => ({
@@ -724,8 +759,26 @@ async function main() {
       record('profile-banked-once-per-match', !!profile1 && (profile1.wins + profile1.losses) === TRIPS,
         `${(profile1?.wins ?? 0) + (profile1?.losses ?? 0)} results banked for ${TRIPS} matches played`);
       const before = JSON.stringify(profile1);
+      // ── A RELOAD DOES NOT LAND ON HOME, AND THIS BLOCK ASSUMED IT DID ─────────
+      // `main.ts` DERIVES the boot route, and a reload of a bare `/` re-derives it from
+      // scratch: opening -> home. `window.__screen && __screenReady === true` is
+      // therefore satisfied by the OPENING screen, which carries none of home's DOM — so
+      // the four `querySelector` calls below returned null and
+      // `home-shows-the-persisted-record` failed a claim about PERSISTENCE with a fact
+      // about ROUTING. Pre-existing; found by the capture sidecar this pass added, which
+      // recorded `"screen": "opening"` inside a PNG labelled `home_after_reload`, i.e.
+      // provenance caught a probe bug the pixels looked fine for. (It is the same
+      // mechanism `docs/TOOLS.md` records for Uri's "the game crashed and started over":
+      // a reload re-derives the route from the original bare `/`.)
+      //
+      // Fixed by driving opening -> home the way `coldBoot` already does, and waiting on
+      // the screen NAME rather than on "some screen is ready".
       await page.reload({ waitUntil: 'domcontentloaded', timeout: 180_000 });
-      await page.waitForFunction('window.__screen && window.__screenReady === true', null, { timeout: 180_000 }).catch(() => {});
+      await page.waitForFunction('window.__screen === "opening" || window.__screen === "home"', null, { timeout: 180_000 }).catch(() => {});
+      await page.click('.open-start, [data-el="start"]', { timeout: 8_000 }).catch(() => { /* auto-continued */ });
+      await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 180_000 })
+        .catch(() => note('never reached home after the reload — the record check below is measuring some other screen'));
+      await settle(page);
       const profile2 = await readProfile(page);
       record('profile-survives-reload', JSON.stringify(profile2) === before,
         `wins ${profile2?.wins} losses ${profile2?.losses} trophies ${profile2?.economy?.trophies} coins ${profile2?.economy?.coins} ` +

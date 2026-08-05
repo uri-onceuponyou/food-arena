@@ -57,6 +57,7 @@
 
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { settleScreen, captureSettled, describe } from './tmp/settle.mjs';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
@@ -183,9 +184,25 @@ export const ErrorOverlay=class{}; export default {};`,
 
   const frames = [];
   let shotN = 0;
+  /**
+   * Every frame through the guard.
+   *
+   * This tool drives menus into a match, and the three menu frames below are captured
+   * straight off `__screenReady` — the flag that flips in the same tick the curtain
+   * drops, 0.26 s before `fa-screen-in` ends. `settleScreen` is the condition; the
+   * existing `waitForTimeout`s stay as floors for timed content. `enforce: false`
+   * because this tool's job is to REPORT what a real match looked like and a refused
+   * capture mid-match would throw away the run; an unsettled frame is printed instead,
+   * and the `.capture.json` sidecar records it either way so `tools/review.mjs` can
+   * refuse to build a critic packet out of one.
+   */
   const shoot = async (label) => {
     const name = `f${String(shotN++).padStart(2, '0')}_${label}.png`;
-    await page.screenshot({ path: `${OUT}/${name}`, timeout: 60_000 });
+    const pre = await settleScreen(page, { label, soft: true, timeout: 15_000 });
+    if (!pre?.ok) console.log(`  ! ${name} captured UNSETTLED — ${describe(pre)}`);
+    await captureSettled(page, {
+      path: `${OUT}/${name}`, label, tool: 'match-play', wait: false, enforce: false,
+    });
     frames.push(name);
     return name;
   };

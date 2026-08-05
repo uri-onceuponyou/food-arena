@@ -40,6 +40,7 @@
  */
 
 import { chromium } from 'playwright';
+import { settleScreen } from './settle.mjs';
 
 const BASE = process.env.PREVIEW_BASE ?? 'http://localhost:5173';
 const LAUNCH_ARGS = [
@@ -67,13 +68,31 @@ const badgeText = (page) => page.evaluate(() => {
   return chip ? chip.textContent : null;
 });
 
+/**
+ * ── NO CAPTURE HERE, AND IT IS STILL EXPOSED ────────────────────────────────────
+ * This battery shoots nothing — its whole output is stored values and badge text — so
+ * the "washed frame" half of the `__screenReady` defect cannot reach it. The other half
+ * can. `capture_audit.mjs` calls this class FLAG-ONLY and refuses to treat it as safe,
+ * because a screen mid-`fa-screen-in` is at `translateY(10px) scale(0.992)` and STILL
+ * MOVING, and every line below is a `click` or a `pressSequentially` on it. Playwright's
+ * actionability check waits for an element to be stable before an unforced click, and
+ * `cab4662` recorded the consequence directly: `menu_accept`'s round-trip flow died at
+ * "pick a different fighter" on a 30 s `page.click` timeout because the card was moving.
+ * A 30 s timeout in a name battery reads as a broken sanitiser, which is the expensive
+ * kind of false failure.
+ *
+ * So both entry points settle, and so does the reload path. Three flag waits, three
+ * settles — which is the ratio `capture_audit`'s `geometry` role requires.
+ */
 async function openSettings(page) {
   await page.goto(`${BASE}/?screen=settings&pointerLock=0`, { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForFunction('window.__screen === "settings" && window.__screenReady === true', null, { timeout: 60000 });
+  await settleScreen(page, { label: 'settings' });
 }
 async function openHome(page) {
   await page.goto(`${BASE}/?screen=home&pointerLock=0`, { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 60000 });
+  await settleScreen(page, { label: 'home' });
 }
 
 /** Set the field the way a script or a paste would — bypassing `maxlength` — and let
@@ -131,6 +150,7 @@ const errs = [];
 
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 60000 });
+  await settleScreen(page, { label: 'home after reload' });
   record('basics', 'it-survives-a-reload', (await badgeText(page)) === 'Uri',
     `badge "${await badgeText(page)}"`);
 

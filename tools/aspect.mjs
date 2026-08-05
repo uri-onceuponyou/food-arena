@@ -22,6 +22,7 @@
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { settleScreen, captureSettled, describe } from './tmp/settle.mjs';
 
 const BASE = process.env.PREVIEW_BASE ?? 'http://localhost:5173';
 
@@ -71,12 +72,37 @@ try {
     try {
       await page.goto(url, { waitUntil: 'networkidle', timeout: 45000 });
       await page.waitForFunction('window.__previewReady === true', null, { timeout: 45000 });
-      await page.waitForTimeout(260); // let post settle / the boot overlay fade out
+      // ── THE VERDICT HERE IS NOT A PIXEL AND NOT A DOM RECT ────────────────────
+      // `guaranteedRadiusUnits` comes out of `camera.ts`'s own fair-view solve, from the
+      // canvas's client size and the rig's frustum. `fa-screen-in`'s opacity and its
+      // `translateY(10px) scale(0.992)` cannot move it — unlike a `getBoundingClientRect`
+      // battery, where that transform is a 0.352px error on a 44px minimum. So this
+      // tool's NUMBER never needed the guard, and the 0.00wu gate has never been at risk
+      // from the `__screenReady` defect.
+      //
+      // The 260 ms sleep was a different thing wearing the same clothes: its own comment
+      // says it is there to let `#boot` fade, and `#boot` is a z-index 200 overlay over
+      // the whole page. That only ever mattered for the optional `--out-dir` PNG, which
+      // it could turn into the purple boot gradient. `settleScreen` makes it a condition
+      // rather than a bet on this machine's speed; `soft` because a direct `?player=`
+      // boot mounts no menu screen, so there may be nothing to settle beyond the overlay
+      // and a throw would be wrong.
+      const state = await settleScreen(page, { label: v.name, soft: true, timeout: 20_000 });
+      if (!state?.ok) console.log(`  note ${v.name}: ${describe(state)}`);
+      await page.waitForTimeout(260); // floor for the post chain's own warm-up
       const view = await page.evaluate(() => {
         const canvas = document.querySelector('#game canvas');
         return { ...window.__fairView(), canvasW: canvas.clientWidth, canvasH: canvas.clientHeight };
       });
-      if (outDir) await page.screenshot({ path: `${outDir}/${v.name}.png`, timeout: 90_000 });
+      // Debug artefact only — never read back, never scored. Guarded for the sidecar and
+      // the flat-frame floor, not enforced, because a masked 32:9 letterbox is a
+      // legitimately low-variance frame and this gate must not fail on a screenshot.
+      if (outDir) {
+        await captureSettled(page, {
+          path: `${outDir}/${v.name}.png`, label: v.name, tool: 'aspect',
+          wait: false, enforce: false,
+        });
+      }
       rows.push({ ...v, ...view });
     } finally {
       await page.close();

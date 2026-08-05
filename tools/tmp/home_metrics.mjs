@@ -84,6 +84,34 @@ function hsvSat(r, g, b) {
   return mx === 0 ? 0 : (mx - mn) / mx;
 }
 
+/** 5-bit bins over a rect, heaviest share first. */
+function binsOf(px, W, x0, y0, w, h) {
+  const bins = new Map();
+  let n = 0;
+  for (let y = y0; y < y0 + h; y++) {
+    for (let x = x0; x < x0 + w; x++) {
+      const i = (y * W + x) * 3;
+      const r = px[i], g = px[i + 1], b = px[i + 2];
+      const key = (r >> 3) * 1024 + (g >> 3) * 32 + (b >> 3);
+      let e = bins.get(key);
+      if (!e) bins.set(key, (e = { n: 0, r: 0, g: 0, b: 0 }));
+      e.n++; e.r += r; e.g += g; e.b += b; n++;
+    }
+  }
+  if (n === 0) return [];
+  return [...bins.values()]
+    .map((e) => ({ r: e.r / e.n, g: e.g / e.n, b: e.b / e.n, share: e.n / n }))
+    .sort((a, b) => b.share - a.share);
+}
+
+/** `rgb()` / `rgba()` -> channels. Needed to identify a stroked glyph's own ink. */
+function parseColor(s) {
+  const m = /rgba?\(([^)]+)\)/.exec(s || '');
+  if (!m) return { r: 0, g: 0, b: 0, a: 1 };
+  const p = m[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+  return { r: p[0] ?? 0, g: p[1] ?? 0, b: p[2] ?? 0, a: p[3] === undefined ? 1 : p[3] };
+}
+
 /**
  * Foreground/background split for one text rect, taken from PIXELS.
  *
@@ -92,8 +120,49 @@ function hsvSat(r, g, b) {
  * are only knowable after compositing. Quantise to 5 bits/channel, take the modal bin as
  * background, then take the bin whose relative luminance is furthest from it (with at
  * least `minShare` of the rect) as foreground.
+ *
+ * ── A STROKED GLYPH DOES NOT SIT ON THE BACKDROP ─────────────────────────────
+ * It sits on its own stroke. `.fa-title`, `.chars-card-name` and `.fa-rarity` all carry
+ * `-webkit-text-stroke` with `paint-order: stroke fill`, i.e. an ink rim OUTSIDE the
+ * glyph outline with the fill painted back over it. `screen_metrics.mjs` and
+ * `chars_metrics.mjs` have carried this branch since `4ca1862`; this file — the OLDEST
+ * of the three batteries — never got it, and that is the whole of the "regression"
+ * `cab4662` recorded:
+ *
+ *   home, `.fa-rarity` "Normal", 11.2px/800, on the SAME tree and the same frozen
+ *   snapshot:   this file 2.53 (1 below AA)      screen_metrics 16.53 (0 below AA)
+ *
+ * 2.53 is `contrast(#FFF3DE, #9B9B9B)` to three figures — `--cream` against the raw
+ * `RARITY_COLORS.Normal` fill, with the 1.6px ink stroke between them ignored. It is
+ * what a stroke-blind model MUST return once `home.ts` stopped darkening the fill
+ * (`4ca1862` deleted that darkening precisely because the stroke made it redundant).
+ * The pixels were then measured directly, per rarity, on both screens
+ * (`tools/tmp/rarity_aa.mjs`): the cream core survives at 12-17% of the badge with
+ * unbroken runs of 7-9 CSS px, and all six rarities read 16.52-16.54.
+ *
+ * A gate that reports a false FAIL gets switched off (`docs/LESSONS.md` §9), so the
+ * branch is copied here VERBATIM from `screen_metrics.mjs` rather than approximated.
  */
-function splitFgBg(px, W, x0, y0, w, h, minShare = 0.015) {
+function splitFgBg(px, W, x0, y0, w, h, minShare = 0.015, color = null, stroke = null) {
+  if (stroke && stroke.width >= 1.5) {
+    const paper = { r: stroke.r, g: stroke.g, b: stroke.b };
+    const paperL = relLum(paper.r, paper.g, paper.b);
+    // The ink is the glyph's own `color`, measured from pixels where it forms a bin.
+    let ink = color ?? paper;
+    if (color) {
+      const bins = binsOf(px, W, x0, y0, w, h);
+      let best = 70;
+      for (const b of bins) {
+        if (b.share < 0.015) continue;
+        const d = Math.hypot(b.r - color.r, b.g - color.g, b.b - color.b);
+        if (d < best) { best = d; ink = b; }
+      }
+    }
+    return {
+      bg: paper, fg: ink, viaStroke: true, share: 1,
+      ratio: contrast(relLum(ink.r, ink.g, ink.b), paperL),
+    };
+  }
   const bins = new Map();
   let n = 0;
   for (let y = y0; y < y0 + h; y++) {
@@ -221,6 +290,9 @@ async function run() {
         weight: Number(s.fontWeight),
         size: +parseFloat(s.fontSize).toFixed(1),
         color: s.color,
+        // A stroked glyph's paper is its own stroke, not the backdrop — see splitFgBg.
+        strokeWidth: parseFloat(s.webkitTextStrokeWidth) || 0,
+        strokeColor: s.webkitTextStrokeColor,
       });
     }
     const sr = stage ? stage.getBoundingClientRect() : null;
@@ -390,7 +462,9 @@ async function run() {
 
   // ── 2. Text contrast, against real pixels ───────────────────────────────────
   const texts = dom.runs.map((r) => {
-    const s = splitFgBg(data, IW, ...clampRect(r.x, r.y, r.w, r.h));
+    const sc = parseColor(r.strokeColor);
+    const stroke = r.strokeWidth > 0 ? { ...sc, width: r.strokeWidth } : null;
+    const s = splitFgBg(data, IW, ...clampRect(r.x, r.y, r.w, r.h), 0.015, parseColor(r.color), stroke);
     const large = r.size >= 24 || (r.size >= 18.66 && r.weight >= 700);
     const floor = large ? 3.0 : 4.5;
     return {
@@ -399,7 +473,7 @@ async function run() {
       large,
       floor,
       pass: s ? s.ratio >= floor : false,
-      bg: s ? `rgb(${Math.round(s.bg.r)},${Math.round(s.bg.g)},${Math.round(s.bg.b)})` : null,
+      bg: s ? `rgb(${Math.round(s.bg.r)},${Math.round(s.bg.g)},${Math.round(s.bg.b)})${s.viaStroke ? ' [text-stroke]' : ''}` : null,
       fg: s ? `rgb(${Math.round(s.fg.r)},${Math.round(s.fg.g)},${Math.round(s.fg.b)})` : null,
     };
   });

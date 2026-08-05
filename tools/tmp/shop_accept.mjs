@@ -37,6 +37,7 @@
 
 import { chromium } from 'playwright';
 import { readFile, writeFile } from 'node:fs/promises';
+import { settleScreen, captureSettled } from './settle.mjs';
 import {
   CONTAINERS,
   CONTAINER_KINDS,
@@ -258,10 +259,21 @@ function readLayout({ MIN_TAP, safe }) {
   };
 }
 
+/**
+ * `__screenReady` is not the condition, and this battery is one of the ones it can
+ * actually flip a verdict on: `tap-targets>=44` and `inside-safe-area` below are read
+ * from `getBoundingClientRect()`, which INCLUDES transforms, and `fa-screen-in` starts
+ * at `translateY(10px) scale(0.992)`. Measured in `cab4662`: 43.648px against a 44.000px
+ * minimum (0.352px of error on a 0.5px margin) and up to +11.84px of screen top against
+ * a +/-1px safe-area tolerance, which flipped 1 of 9 cells in `menu_accept` to a FALSE
+ * FAILURE. The 500 ms sleep was never the condition; `settleScreen` is, and the sleep
+ * stays as a floor for the shop's own timed content.
+ */
 async function open(page, base, profile) {
   await page.goto(`${base}/?screen=shop`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction('window.__screen === "shop" && window.__screenReady === true',
     null, { timeout: 60000 });
+  await settleScreen(page, { label: 'shop' });
   await page.waitForTimeout(500);
 }
 
@@ -480,7 +492,14 @@ async function run() {
       record('layout', `${tag}:no-webgl-canvas-on-a-dom-screen`, lay.contexts === 0, `${lay.contexts} canvases`);
     }
 
-    await page.screenshot({ path: `${shots}/shop-${vp.name}.png` }).catch(() => {});
+    // A diagnostic PNG, not a verdict — so `enforce: false`: this battery's 168
+    // assertions must not turn on whether a screenshot succeeded. The guard still runs
+    // and still writes the `.capture.json` sidecar, so anything downstream can see how
+    // the frame was taken instead of guessing.
+    await captureSettled(page, {
+      path: `${shots}/shop-${vp.name}.png`, label: `shop@${vp.name}`, tool: 'shop_accept',
+      wait: false, enforce: false,
+    }).catch(() => {});
     record('layout', `${vp.name}:no-console-errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
     await page.close();
   }
@@ -561,7 +580,10 @@ async function run() {
           afterBuy.held !== beforeBuy.held, afterBuy.held.slice(0, 90));
       }
       record('flip', 'no-console-errors', errs.length === 0, errs.slice(0, 3).join(' | '));
-      await page.screenshot({ path: `${shots}/shop-ungated-desktop.png` }).catch(() => {});
+      await captureSettled(page, {
+        path: `${shots}/shop-ungated-desktop.png`, label: 'shop-ungated', tool: 'shop_accept',
+        wait: false, enforce: false,
+      }).catch(() => {});
       await page.close();
 
       // Put the snapshot back the way it was, so anything chained after this measures

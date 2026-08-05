@@ -112,7 +112,7 @@ every push.**
 |---|---|
 | `tools/shoot.mjs` | `--url <u> --out x.png --w 1600 --h 900`. Headless WebGL capture; **always foreground**. |
 | `tools/compare.mjs` | `--tile "a.png,b.png" --labels "a,b" --cols 2 --out sheet.png` |
-| `tools/review.mjs` | `--ours <png> --category character\|gameplay --out shots/review/x --n 2` — builds a **blind** A/B packet. The answer key is a separate `.json` a critic must never open. |
+| `tools/review.mjs` | `--ours <png> --category character\|gameplay --out shots/review/x --n 2` — builds a **blind** A/B packet. The answer key is a separate `.json` a critic must never open. ⚠️ **Refuses any PNG with no `.capture.json` sidecar** — see the provenance block below. |
 
 **Preview harness** — `preview.html?`
 - `piece=character&id=<id>&anim=<state>&yaw=&t=&shot=1&fill=`
@@ -136,6 +136,7 @@ every push.**
 | `tools/audio-probe.mjs` | `--mode all\|depth\|identity\|live`. **319 assertions from real rendered samples** via `OfflineAudioContext` on the production path. |
 | `tools/match-sim.mjs` | Real `sim.ts` in Node. `--all-matchups`, `--policy idle\|smart`, `--pathmap`, `--fog`, `--ranges`, `--occlusion`. A 180s match costs ~4ms. |
 | `tools/match-play.mjs` | Drives the real game boot → menus → combat → result, sampling the HUD's own DOM. |
+| `tools/tmp/journey.mjs` | **The only end-to-end gate.** `match-play` × N round trips in ONE page session, so it can see what LEAKS between a match and the menus — GL contexts, errors, profile state. Every gate above it is a unit gate, and HEAD was unbootable for 24 commits with all of them green. `--trips`, `--viewport portrait`, `--mode timeout\|idle`. |
 | `tools/filmstrip.mjs` | Animation as a contact sheet. Auto-detects cycle length; labels one-shots "NOT A LOOP". |
 | `tools/motion_probe.mjs` | Joint traces in the character's local frame — camera, framing and post chain out of the equation. |
 | `tools/tmp/menu_accept.mjs` | **361 assertions**, 5 viewports × 5 screens × notch/no-notch. Also **parses all 88 modules in ~95ms** to catch the backtick trap. `PREVIEW_BASE=<url>` to point it at a snapshot. |
@@ -167,6 +168,9 @@ took warm chroma to 0.067 against a reference 0.145 because each only measured i
   the role split uses `<id>.nohud.png` instead.
 - **Open `<id>.matte.png` before believing any role number.** Cast coverage outside ~0.2–3% means
   the matte is wrong, not the arena.
+- ⚠️ **`arena-scan` writes no `.capture.json`, so `review.mjs` REFUSES its PNGs.** This is the
+  most likely way the new provenance gate bites you. Pass `--allow-unverified` and record the
+  round as **provisional**; do not reach for `--allow-refused`, which means something else.
 - `--sim-speed 0.02` freezes the sim, **not the shaders** — fog stations drift ±0.004 on
   `playerSalience` run to run. `playerRank` never moves.
 
@@ -213,18 +217,77 @@ contrast tool whose whole purpose is *"against the pixels actually behind it"* r
 for pixels that are not there yet. It survived so long because it is **intermittent**: it appears
 only when caching makes the capture faster than the animation.
 
+Re-measured on a frozen snapshot by `e2e_boot_probe.mjs` against a **proven-painted** control
+rather than a 2.5 s sleep — character select, one page, one navigation:
+
+```
+at __screenReady   stdev 42.38  mean  87.7   painted=false
+                   curtain 1.000 · screen opacity 0.000 · fa-screen-in running
+                   · transform matrix(0.992, 0, 0, 0.992, 0, 10)
+once PROVEN painted stdev 97.55 mean 131.0   settled in 275 ms
+```
+
+**2.3x on identical content**, and the control took 275 ms — so the old 2.5 s sleep was 9x longer
+than needed and still not a condition.
+
 → **Wait on `tools/tmp/settle.mjs`, never on the flag.** One shared paint condition, correct at
 any machine speed rather than merely longer — it returns in 23 ms on settings and 11.9 s on the
 trophy road from the *same* predicate. `tools/tmp/capture_audit.mjs` audits which side a capture
-site is on; **34 files still wait on a flag.**
+site is on; **15 files are enforced and 27 still wait on a flag** (was 7 and 34).
+
+`capture_audit` enforces a **per-ROLE** obligation, not a blanket one, because a capture tool, a
+wait-only geometry battery and a packet consumer have three different ones and a rule loose enough
+for all three guards nothing:
+
+| role | obligation |
+|---|---|
+| `capture` | zero raw `.screenshot()`, ≥1 `captureSettled()` |
+| `geometry` | imports `settle.mjs`, ≥1 settle call, **settles ≥ flag waits**, zero raw shots |
+| `consumer` | imports the frame floor **and** reads the `<png>.capture.json` sidecar |
+
+`// capture-audit: allow <reason>` on the shot's own line or the line above is the escape hatch,
+for a probe whose SUBJECT is the unsettled frame (`e2e_boot_probe.mjs`, `settle_validate.mjs`).
+
+⚠️ **Not every flag wait is a defect, and the fix is not uniform.** Decide per file:
+`tools/aspect.mjs`'s verdict is `__fairView()`, a camera number a CSS transform cannot move — only
+its optional `--out-dir` PNG ever needed a guard. `tools/filmstrip.mjs` shoots `preview.html`,
+which mounts **no shell at all** — no `#boot`, no curtain, no `.fa-screen` — so the fade guard is a
+no-op there and the **flat-frame floor** is the only part doing work. Conversely
+`tools/tmp/name_accept.mjs` captures nothing and was still exposed: it clicks and types on a screen
+that is at `translateY(10px) scale(0.992)` and still moving, which is how `menu_accept`'s
+round-trip flow died on a 30 s `page.click` timeout.
+
+### 🚨 `review.mjs` now REFUSES a PNG with no provenance — operational, affects every critic round
+
+Any PNG without a `<png>.capture.json` sidecar is **refused by default**, `arena-scan` output
+included. Two flags exist and they are **not interchangeable**:
+
+```bash
+node tools/review.mjs --ours x.png --category character --allow-unverified   # no provenance at all
+node tools/review.mjs --ours x.png --category character --allow-refused      # provenance says BAD
+```
+
+`--allow-unverified` records `verified:false` in the manifest and the last line printed says the
+score must be **recorded as provisional**. It does **not** launder a frame whose sidecar says the
+capture was refused — `review_gate_validate.mjs` proves that with a mid-fade fixture that is
+deliberately pixel-HEALTHY (stdev 54.25), so only provenance can catch it.
+
+**The sidecar earns its keep on more than fades.** Its first run on `journey.mjs` wrote
+`"screen": "opening"` into `06_desktop_home_after_reload.png.capture.json` — a healthy,
+fully-painted frame under a label that says *home*. That named a pre-existing probe bug in one
+line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands on opening, so
+`window.__screen && __screenReady` was satisfied by a screen carrying none of home's DOM, and
+`home-shows-the-persisted-record` was failing a claim about PERSISTENCE with a fact about ROUTING.
+**Wait on the screen's NAME, never on "some screen is ready".**
 
 ---
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
 The five gates in `CLAUDE.md` were the whole story when there were five. There are now
-**eighteen**, and every one exists because something shipped past its absence. Expected counts as
-of commit `97c92d6`:
+**twenty-five**, and every one exists because something shipped past its absence. Counts below
+are current as of the capture-integrity follow-through; `screen_metrics` and `home_metrics` are
+"ALL CLEAN / 0 below AA" batteries rather than assertion counts and sit with `chars_metrics`:
 
 | gate | expect | covers |
 |---|---|---|
@@ -247,10 +310,13 @@ of commit `97c92d6`:
 | `node tools/perf.mjs --mode leak` | contexts flat at **1** | the leak that white-screened after ~8 round trips |
 | `node tools/tmp/settle_validate.mjs` | **22** | the shared PAINT condition — correct at any machine speed, not merely longer |
 | `node tools/tmp/review_gate_validate.mjs` | **8** | `review.mjs` refusing un-vouched PNGs |
-| `node tools/tmp/capture_audit.mjs` | **13** + **7** | classifies every capture site as paint-waiting or flag-waiting |
+| `node tools/tmp/capture_audit.mjs` | **13** + **15** | classifies every capture site as paint-waiting or flag-waiting; **`--selftest` for the 13** |
+| `node tools/tmp/rarity_aa.mjs` | 0 below AA of **43** | `.fa-rarity` per rarity × home + character select × 3 viewports, **both** contrast models |
 | `node tools/shoot.mjs --selftest` | **6** | the capture path itself |
 | `tools/tmp/floorprobe.mjs` | **5/5** | the floor's own gameplay test — breaks on any global value change |
 | `tools/tmp/chars_metrics.mjs` | ALL CLEAN | roster card fill, face-in-card, WCAG |
+| `tools/tmp/screen_metrics.mjs` | ALL CLEAN | settings/opening/trophies + `--screens home`, 3 viewports, WCAG from pixels |
+| `tools/tmp/home_metrics.mjs` | **0** below AA | home staging, contrast and type. `--screens` n/a — home only |
 | `tools/tmp/limbcheck.mjs` | see below | per-joint delivered pixels ⚠️ **at 22°, not the match's 58°** |
 
 **Colour and value are baseline-relative, not absolute:**
@@ -292,6 +358,16 @@ is provable) · `status_{census,grace_sweep,ab_report}.mjs` · `rules_census.mjs
 - **Resolution floors, measured:** win rate is unresolvable below **~9 pp** (a ±25wu spawn nudge
   swings it 50.0→59.1%); pacing below **~0.8 s** of contact or **~4 pp** of dead time (±15wu of
   cover jitter moves them that much). Do not claim a result inside those bands.
+- **THREE contrast batteries share one WCAG split, and one of them was a commit behind.**
+  `screen_metrics`, `chars_metrics` and `home_metrics` all measure ink "against the pixels actually
+  behind it" — but a **stroked** glyph does not sit on the backdrop, it sits on its own stroke
+  (`.fa-title`, `.chars-card-name`, `.fa-rarity`, all with `paint-order: stroke fill`). The first
+  two gained that branch in `4ca1862`; `home_metrics` did not, and for one commit it scored the
+  Normal rarity badge **2.53 while `screen_metrics` scored the same badge on the same snapshot at
+  16.53**. 2.53 is exactly `contrast(#FFF3DE, #9B9B9B)` — the stroke ignored. Fixed, but the shape
+  is the lesson: **when two batteries disagree about one element, suspect the MODEL before the
+  pixels, and go and look at the pixels either way.** `tools/tmp/rarity_aa.mjs` prints both models
+  side by side for exactly this reason.
 
 ---
 

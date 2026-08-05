@@ -803,7 +803,41 @@ const CSS = `
    every rarity measures 16.53-16.54:1 no matter what hue 'rules.ts' hands it. The
    darkening is therefore contributing exactly nothing to legibility and is only
    muting the badge — on a screen whose whole job is telling six rarities apart. The
-   drop shadow stays; it is the shared raised-slab idiom, not a contrast device. */
+   drop shadow stays; it is the shared raised-slab idiom, not a contrast device.
+
+   ── RE-MEASURED AFTER 'cab4662' REPORTED 2.53 HERE. THE BADGE IS FINE. ────────
+   That commit read "home now measures min ratio 2.53 with 1 run below AA on the
+   Normal '.fa-rarity' badge, against a recorded 5.80 and 0" and called it a live
+   regression rather than a capture artefact. It reproduces, and it is neither: it is
+   the one battery of three whose contrast model does not know what a text stroke is.
+   On ONE frozen snapshot, same tree, same badge:
+
+     tools/tmp/screen_metrics.mjs   16.53   0 below AA   (has the stroke branch)
+     tools/tmp/chars_metrics.mjs    16.53   ALL CLEAN    (has the stroke branch)
+     tools/tmp/home_metrics.mjs      2.53   1 below AA   (did NOT — now fixed)
+
+   2.53 is 'contrast(#FFF3DE, #9B9B9B)' to three figures: '--cream' against the raw
+   'RARITY_COLORS.Normal' fill with the ink stroke between them ignored. It is exactly
+   what a stroke-blind model must return once the darkening above came out. Note that
+   screen_metrics' home MINIMUM is 5.80 today and 0 runs are below AA — the same pair of
+   numbers the report called the "recorded" baseline — and that minimum is
+   '.home-track-pill.is-go' "Open", not this badge. Which instrument the historical 5.80
+   actually came from was NOT established here; what was established is that the two
+   instruments disagree by 6.5x on this element on one frozen tree.
+
+   Judged as PIXELS, per rarity, on both screens the badge renders on
+   ('tools/tmp/rarity_aa.mjs', six rarities x home + character select x 3 viewports):
+   16.52-16.54 on all of them, cream core intact at 12-17% of the badge with unbroken
+   runs of 7-9 CSS px. 'paint-order: stroke fill' is why — the fill is painted back
+   OVER the stroke, so the 1.6px rim is added outside the outline and takes nothing
+   off an ~1.8px stem. Nothing here needs darkening again; darkening it to satisfy a
+   stroke-blind instrument would mute six rarities to fix a measurement.
+
+   The 'font-size: 0.7rem' below IS under theme.ts's 0.72rem floor, which that file
+   raised deliberately "to keep that ratio honest at the smallest place this badge is
+   used". Measured, the ratio holds anyway: 11.2px here gives a 8px core run against
+   9px at character select's 13.12px. Left alone rather than "fixed" blind, because
+   the only reason to move it would be a number that says it is wrong. */
 .fa-home .fa-rarity {
   height: 21px;
   font-size: 0.7rem;
