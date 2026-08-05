@@ -160,6 +160,77 @@ and a constant change are never measured together)
 
 ---
 
+## THE GATE BATTERY — run all of these before you believe a change
+
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now
+**eighteen**, and every one exists because something shipped past its absence. Expected counts as
+of commit `97c92d6`:
+
+| gate | expect | covers |
+|---|---|---|
+| `npx tsc --noEmit` | clean | ⚠️ the **working tree**, incl. peers' half-saved files |
+| `node tools/verify-head.mjs` | OK | **the COMMITTED tree** — the only one that matters before a push |
+| `node src/game/sim.test.mjs` | **134** | sim, combat, AI, navigation, status rules |
+| `node src/game/economy/economy.test.mjs` | **173** | economy, seeded and deterministic |
+| `node tools/aspect.mjs` | PASS, **0.00wu** | viewport fairness — point at a **snapshot** |
+| `tools/tmp/menu_accept.mjs` | **361** | 5 landscape viewports × screens, + the CSS-backtick parse |
+| `tools/tmp/menu_accept_portrait.mjs` | **219** | portrait + the nested-`@media` lint. **Opt-in, not folded in** |
+| `tools/tmp/input_accept.mjs` | **81** | real CDP keys/mouse asserted against **sim state**, both routes |
+| `tools/tmp/shop_accept.mjs` | **168** | every displayed price/odd re-derived in Node |
+| `tools/tmp/name_accept.mjs` | **29** | name sanitiser, both entry paths |
+| `tools/tmp/chip_probe.mjs` | **72** | pause chip vs thumb zone, 6 viewports × 2 states |
+| `node tools/audio-probe.mjs --mode all` | **389** | ⚠️ `--mode live` is flaky under load; judge by depth 91 / identity 77 |
+| `node tools/arena-scan.mjs --selftest` | **104** | colour-budget metric + the station-placement guard |
+| `node tools/match-sim.mjs --selftest` | **15** | the scripted policies, against a hand-derivable answer |
+| `node tools/tmp/valuescan.mjs --selftest` | **57** | value-ladder metric on synthetic frames |
+| `tools/tmp/quality_api.mjs` · `dpr_probe.mjs` | **20** · **24** | render tiers and the DPR cap |
+| `node tools/perf.mjs --mode leak` | contexts flat at **1** | the leak that white-screened after ~8 round trips |
+| `tools/tmp/floorprobe.mjs` | **5/5** | the floor's own gameplay test — breaks on any global value change |
+| `tools/tmp/chars_metrics.mjs` | ALL CLEAN | roster card fill, face-in-card, WCAG |
+| `tools/tmp/limbcheck.mjs` | see below | per-joint delivered pixels ⚠️ **at 22°, not the match's 58°** |
+
+**Colour and value are baseline-relative, not absolute:**
+```bash
+node tools/arena-scan.mjs --url $URL --baseline tools/scan/colour-baseline.json   # exit 1 on regression
+node tools/tmp/valuescan.mjs --mode gate --out shots/vl                           # exit 1 on regression
+```
+
+### Instruments added later in the session
+
+`headserve.mjs` (**serves `git archive HEAD` and runs a command as its CHILD** — the right way to
+measure while peers are mid-edit; `--overlay <path>` for just your files) · `snap_hold.mjs` (holds
+**one** snapshot across an edit, so before and after land on the same frozen tree) ·
+`valuescan.mjs` + `valuelib.mjs` (value ladder + hero/ground separation, calibrated against 27
+reference plates) · `limbcheck_pitch.mjs` (`limbcheck` with one changed line, so any delta **is**
+pitch) · `postablate.mjs` (walks the post chain one knob at a time on a frozen frame, `--pair` for
+A/B) · `gradechroma.mjs` (prices a grade change against `arena-scan`'s own budget) ·
+`vfx_{coverage,ablate,layers,hue}.mjs` (**`ablate` separates *occluded* from *too small* in one
+run** — the distinction that stops you enlarging an invisible effect) · `faceframe.mjs` (solves
+card framing with **no renderer at all**; 33/33 agreement with the live tool) · `occluder.mjs` /
+`detach.mjs` (ablate one mesh out of the **shipped** render — isolation cannot do this, because
+`visible` is inherited) · `facemove.mjs` (hashes every mesh's world matrix, so a "pure reparent"
+is provable) · `status_{census,grace_sweep,ab_report}.mjs` · `rules_census.mjs` +
+`rules_sweep.mjs` (sweeps a constant on a **staged copy** of `rules.ts`) · `arena_probe.mjs`
+(parses the layout straight out of `kitchen.ts` in ~20ms, `--verify` against the browser dump) ·
+`policy_{trace,sensitivity}.mjs` · `screen_metrics.mjs` · `chars_metrics.mjs`
+
+### ⚠️ Known instrument limits — read before trusting a number
+
+- **`limbcheck` measures the preview's 22°; the match camera is 58°.** At 58°, idle passes go
+  **8/11 → 0/11**. Idle *ranking* survives (ρ 0.927); **run ranking does not** (ρ 0.673). And the
+  shipped spawn faces every character at **profile to camera**, burying 5.3 of ~15 joints against
+  0.8 in the pose `limbcheck` uses — its pose is the **best** case.
+- **`menu_accept` is only partly snapshot-isolated** — its CSS lint parses the **live** tree, so a
+  peer mid-save fails your run on a file you never opened.
+- **`<id>.canvas.png` has never been HUD-free** — Playwright element screenshots capture the
+  composited page. 13.4% of frame, ~25% of its warm chroma.
+- **`--sim-speed 0.02` freezes the sim, not the shaders** — fog stations drift ±0.004 run to run.
+- **Resolution floors, measured:** win rate is unresolvable below **~9 pp** (a ±25wu spawn nudge
+  swings it 50.0→59.1%); pacing below **~0.8 s** of contact or **~4 pp** of dead time (±15wu of
+  cover jitter moves them that much). Do not claim a result inside those bands.
+
+---
+
 ## QA hooks in the app
 
 | hook | gives |
