@@ -342,7 +342,11 @@ const COVER = [
   [1120, 150, 90, 90], [280, 850, 90, 90],                                             // herb crates
   [1230, 140, 80, 80], [170, 860, 80, 80],                                             // tall crates
   [1175, 235, 110, 70], [225, 765, 110, 70],                                           // flour sacks
-  [265, 330, 160, 55], [265, 670, 160, 55], [1135, 670, 160, 55], [1135, 330, 160, 55], // prep counters
+  // Two of the four moved in e9bb185: (265,330) -> (100,600) and (1135,670) -> (1300,400).
+  // (265,330) sat 4.0 wu from the player spawn's collision face, so a player holding W
+  // travelled 6.0 wu — one movement step. The selftest below asserts this table box-for-box
+  // against tools/arena.gameplay.json, which is what caught the drift; keep it that way.
+  [100, 600, 160, 55], [265, 670, 160, 55], [1300, 400, 160, 55], [1135, 330, 160, 55], // prep counters
   [60, 250, 60, 50], [60, 750, 48, 46], [1340, 750, 60, 50], [1340, 250, 48, 46],      // supply barrels
   [700, 830, 150, 70], [700, 170, 150, 70],                                            // fryer / sink
   [700, 500, 104, 104],                                                                // the boiling pot — SOLID since a31bdb4
