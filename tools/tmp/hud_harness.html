@@ -4,6 +4,23 @@
     <meta charset="utf-8" />
     <title>HUD harness</title>
     <style>
+      /* ── THIS LINE IS THE INSTRUMENT, NOT DECORATION ────────────────────────
+         `index.html:15` applies `* { box-sizing: border-box }` to the whole game and
+         this harness did not. `.hud-zone` is `width: 196px; padding: 5px 9px 6px;
+         border: 3px`, so under content-box the harness laid it out at
+         196 + 18 + 6 = 220px — 12% wider than the game renders it.
+
+         That is not a cosmetic difference. `tools/tmp/hud_fit.mjs` exists to prove the
+         zone pill CONTAINS its own text and reported `pillW=220` and `overflow=0px` at
+         every viewport and every state; `hud.ts` quotes that result in a source comment
+         ("Verified 0px overflow at 5 viewports x 3 states"). Measured on the shipped
+         196px plate through the real game, the same text sits up to 15.1px OUTSIDE it.
+         The 24px of phantom slack was exactly enough to make an overflowing row fit.
+
+         docs/LESSONS.md section 13: a harness can invert the very thing you are
+         measuring. Confirm the harness reproduces the shipped layout before trusting
+         any number taken through it. */
+      * { box-sizing: border-box; }
       html, body { margin: 0; height: 100%; background: #6b4a2f; }
       /* A mid warm ground under the HUD so contrast judgements are made against
          something arena-like rather than white. */

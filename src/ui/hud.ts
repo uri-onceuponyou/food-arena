@@ -177,7 +177,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       <div class="hud-fogtick" data-el="fogtick"></div>
 
       <div class="hud-topbar-scrim"></div>
-      <div class="hud-topbar">
+      <div class="hud-topbar" data-el="topbar">
         <div class="hud-fighter hud-fighter--player">
           <div class="hud-fighter-pill">
             <div class="hud-fighter-emoji" data-el="player-emoji"></div>
@@ -218,14 +218,24 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
       <div class="hud-countdown" data-el="countdown"></div>
 
-      <div class="hud-gameover" data-el="gameover">
-        <div class="hud-gameover-card">
-          <div class="hud-gameover-title" data-el="gameover-title"></div>
-          <div class="hud-gameover-subtitle" data-el="gameover-subtitle"></div>
-          <div class="hud-gameover-stats" data-el="gameover-stats"></div>
-          <button class="hud-gameover-btn" data-el="gameover-btn" type="button">Play Again</button>
-        </div>
+      <!-- ── "Run this way" ─────────────────────────────────────────────────
+           Declared HERE, above the floating pills rather than below them, and that
+           order is the fix for a measured collision: the near chevron sits 40px from
+           the player's projected GROUND point, and the player's own floating HP pill
+           sits ~30-60px above that same point, so every time safety happens to lie
+           upward — a quarter of all cases, the same quarter the label's own placement
+           rule was written for — a 48px opaque triangle landed on top of the one
+           readout telling you how much life you have left while the zone is burning
+           it away. Photographed at 4x in shots/hud/after1/crop-chev.png.
+
+           Drawing it UNDER the pill costs the arrow a few px of a shape that is 140px
+           long and duplicated (two chevrons plus a label), and costs the HP bar
+           nothing. It stays above the weapon tray, which is declared earlier. -->
+      <div class="hud-safearrow" data-el="safearrow">
+        <div class="hud-safearrow-chevron"></div>
+        <div class="hud-safearrow-chevron hud-safearrow-chevron--2"></div>
       </div>
+      <div class="hud-safearrow-label" data-el="safearrow-label">RUN TO THE ZONE</div>
 
       <!-- Deliberately NO name TEXT here — the top-corner nameplates are the one
            canonical place to read "who is who"; repeating the full name would just
@@ -275,12 +285,6 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         <div class="hud-radar-cap" data-el="radar-cap">SAFE ZONE</div>
       </div>
 
-      <div class="hud-safearrow" data-el="safearrow">
-        <div class="hud-safearrow-chevron"></div>
-        <div class="hud-safearrow-chevron hud-safearrow-chevron--2"></div>
-      </div>
-      <div class="hud-safearrow-label" data-el="safearrow-label">RUN TO THE ZONE</div>
-
       <!-- ── Mute state ──────────────────────────────────────────────────────
            M toggles mute (see game/input.ts). It was landing SILENTLY, which
            makes it a coin flip: press it during a quiet second and there is no way
@@ -301,6 +305,27 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
       <div class="hud-dmg-layer" data-el="dmg-layer"></div>
       <div class="hud-screenflash" data-el="screenflash"></div>
+
+      <!-- ── The result card is LAST, and it was not ────────────────────────
+           It used to be declared seventh of seventeen, which put the radar, both
+           floating pills, the mute badge, the aim reticle, the damage layer and the
+           ultimate flash on top of a full-viewport modal. Photographed at 1600x900
+           (shots/hud/r2/desk-ended.png): a "-15 ZONE" damage number left over from the
+           killing blow is drawn between "Match time 0:24" and the Play Again button,
+           on the one screen a player reads word for word.
+
+           A result card is the last thing in a match by definition, so it is the last
+           thing in the stack. This does NOT change the z-index the screen layer relies
+           on — .hud-root stays at 20 and ui/screens/matchScreen.ts stays at 40, so its
+           Menu button is still clickable over this scrim. -->
+      <div class="hud-gameover" data-el="gameover">
+        <div class="hud-gameover-card">
+          <div class="hud-gameover-title" data-el="gameover-title"></div>
+          <div class="hud-gameover-subtitle" data-el="gameover-subtitle"></div>
+          <div class="hud-gameover-stats" data-el="gameover-stats"></div>
+          <button class="hud-gameover-btn" data-el="gameover-btn" type="button">Play Again</button>
+        </div>
+      </div>
     </div>
   `;
 
@@ -329,6 +354,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const gameoverStatsEl = q<HTMLDivElement>('gameover-stats');
   const gameoverBtn = q<HTMLButtonElement>('gameover-btn');
 
+  const topbarEl = q<HTMLDivElement>('topbar');
   const floatPlayer = q<HTMLDivElement>('float-player');
   const floatEnemy = q<HTMLDivElement>('float-enemy');
   const floatPlayerEmoji = q<HTMLDivElement>('float-player-emoji');
@@ -525,12 +551,85 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     };
   }
 
+  /**
+   * The lowest screen Y a floating name+HP pill is allowed to reach.
+   *
+   * ── The defect ──────────────────────────────────────────────────────────────
+   * `updateFloatingBars` places each pill at its fighter's PROJECTED position with no
+   * bound, and `match.ts` projects a fighter that is off the top of the frame to a
+   * negative-or-small Y. The pill then lands in the top bar. Measured mid-fight by
+   * `tools/tmp/hud_accept.mjs`: the enemy pill overlapped `.hud-clock` on 3 of 5
+   * viewports, by up to **2,010 px²** at tablet-4:3 — a solid plate drawn straight
+   * over the match timer — plus 398 px² over the enemy's own corner health bar. It is
+   * visible in `shots/hud/r0/phone-danger.png`, where a "-15 ZONE" damage number and
+   * the enemy pill together erase "0:13" completely.
+   *
+   * ── Why a floor and not a hide ──────────────────────────────────────────────
+   * A fighter above the top of the frame is precisely when their HP matters most, and
+   * the corner nameplate is a long way from where you are looking. Clamping keeps the
+   * pill horizontally over the fighter (so it still reads as "they are up there") and
+   * only refuses the one band the top bar owns.
+   *
+   * ── Why it is cached ────────────────────────────────────────────────────────
+   * This runs once per fighter per FRAME. `getBoundingClientRect()` forces layout, so
+   * it is read only when the viewport dimensions change — `innerWidth`/`innerHeight`
+   * are plain reads and do not. There is no resize hook on `Hud` to hang it off, and
+   * inventing one would put the same read on a path that has no other reason to exist.
+   */
+  const FLOAT_HALF_W = 56;
+  let floatFloor = 0;
+  let floatFloorW = -1;
+  let floatFloorH = -1;
+  function floatFloorY(): number {
+    if (window.innerWidth !== floatFloorW || window.innerHeight !== floatFloorH) {
+      floatFloorW = window.innerWidth;
+      floatFloorH = window.innerHeight;
+      // + the pill's own height, because the transform anchors its BOTTOM edge
+      // (`translate(-50%, -100%)`), plus clearance so it does not kiss the bar.
+      // 36 = 28 + 8. The pill is 28px tall by construction — an 18px emoji well (the
+      // taller of the well and the 12px bar), 6px of vertical padding, 4px of border —
+      // and the first attempt at 30 left it 1px² over `.hud-clock` at desktop, which
+      // the acceptance battery duly reported. Written as the sum so the next person to
+      // change `.hud-float-pill`'s padding knows which term to move.
+      const bottom = topbarEl.getBoundingClientRect().bottom;
+      floatFloor = bottom + 36;
+      // ── ...and the same boundary, published to CSS for the damage layer ──────
+      // Clamping a damage number's SPAWN point is not enough on its own: the rise
+      // animation carries it 68px up and 76% of its own height further, so a number
+      // that starts legally still ends on the clock. Clipping the layer is what makes
+      // "nothing is ever drawn over the match timer" a property of the HUD instead of
+      // a property of where the fighters happen to be — and it costs only the tail of
+      // an animation that is already at opacity 0 by then. See .hud-dmg-layer.
+      dmgLayer.style.setProperty('--fa-dmg-top', `${Math.max(0, Math.round(bottom + 2))}px`);
+    }
+    return floatFloor;
+  }
+
+  /** Half the width of "RUN TO THE ZONE". Measured once, and again on a resize —
+   *  see the clamp in renderZone. 0 = not measured yet. */
+  let arrowLabelHalfW = 0;
+
   function renderZone(state: MatchState, frame: HudFrameInfo): void {
     const live = state.phase === 'playing';
     const info = zoneInfo(state);
     const danger = live && info.outside && state.player.alive;
     const maxR = state.arena.maxSafeRadius;
 
+    // ── THIS LINE WAS MISSING, AND THREE CSS RULES WAITED ON IT ────────────────
+    // `.hud-zone.is-danger` authors the alarm state for this pill — the violet plate,
+    // the 0.6 s pulse, a WHITE 11px label and a pink value. Nothing ever added the
+    // class. `radarEl` got `is-danger` and `fogEdgeEl` got `is-on` twenty lines below,
+    // and the pill they sit beside was left in its calm styling while reading
+    // "▲ OUTSIDE THE ZONE −50 HP/s". Measured at all five viewports by
+    // `tools/tmp/hud_accept.mjs` before this landed: `zoneDanger: false`, 5 of 5.
+    //
+    // docs/LESSONS.md section 1 — "it isn't there" means it IS there and INVISIBLE,
+    // seventeen times. This is the variant where the STATE, not the element, never
+    // reaches the screen: every pixel of the styling exists and no input ever selects
+    // it. Nothing in the type system, the sim tests or a screenshot of the calm state
+    // can see that, which is why the acceptance battery now asserts, per viewport,
+    // that a state the game is definitely IN has actually been applied to the DOM.
+    zoneEl.classList.toggle('is-danger', danger);
     zoneEl.classList.toggle('is-imminent', !danger && info.msUntilEdge !== null && info.msUntilEdge < imminentMs(maxR));
     zoneBarEl.style.width = `${(info.radius01 * 100).toFixed(1)}%`;
 
@@ -671,8 +770,36 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // The label rides PAST the chevron tip along the same direction, never at a
       // fixed screen offset: pinned below the player it collided with the arrow every
       // time safety happened to lie downward, which is a quarter of all cases.
-      const lx = arrow.at.x + Math.cos(arrow.angleRad) * 178;
-      const ly = arrow.at.y + Math.sin(arrow.angleRad) * 178;
+      //
+      // ...but 178px along an arbitrary direction from a player the camera holds at
+      // frame centre puts it OFF SCREEN on a narrow viewport. Photographed at
+      // 430x932: "RUN TO THE ZONE" rendered as "UN TO THE ZONE", clipped by the left
+      // edge, in the one state where the HUD is shouting an instruction
+      // (shots/hud/after1/after1-portrait-danger.png). Half the frame width there is
+      // 215px against a 178px reach and an ~84px half-label, so it is not an edge
+      // case — it is most directions.
+      //
+      // Clamped rather than shortened: the offset is what keeps the label off the
+      // chevrons, so it stays at 178 wherever there is room and slides along the edge
+      // where there is not.
+      //
+      // The half-width is measured off the element rather than assumed, and cached:
+      // the text is a constant and no media query touches this rule, so its width does
+      // not vary with the viewport. The `innerWidth` term is belt-and-braces for a font
+      // that swaps in late, and it can legitimately miss a resize that happens while
+      // the arrow is hidden — which is why the cache is a width and not a layout.
+      if (arrowLabelHalfW === 0 || window.innerWidth !== floatFloorW) {
+        arrowLabelHalfW = safeArrowLabelEl.offsetWidth / 2;
+      }
+      const pad = 8;
+      const lx = Math.min(
+        Math.max(arrow.at.x + Math.cos(arrow.angleRad) * 178, arrowLabelHalfW + pad),
+        window.innerWidth - arrowLabelHalfW - pad,
+      );
+      const ly = Math.min(
+        Math.max(arrow.at.y + Math.sin(arrow.angleRad) * 178, floatFloorY() + 4),
+        window.innerHeight - 22,
+      );
       safeArrowLabelEl.style.transform =
         `translate(${lx.toFixed(1)}px, ${ly.toFixed(1)}px) translate(-50%, -50%)`;
     } else {
@@ -823,9 +950,18 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     },
 
     updateFloatingBars(player, enemy, player01, enemy01) {
+      const floor = floatFloorY();
+      const place = (el: HTMLElement, p: ScreenPoint): void => {
+        // Clamped, not hidden. A fighter above the top of the frame is exactly when
+        // you most want to know their HP, so the pill stays — it just stops at the
+        // first row of the play area instead of climbing into the clock.
+        const y = Math.max(p.y, floor);
+        const x = Math.min(Math.max(p.x, FLOAT_HALF_W), window.innerWidth - FLOAT_HALF_W);
+        el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
+      };
       if (player) {
         floatPlayer.style.display = 'flex';
-        floatPlayer.style.transform = `translate(${player.x.toFixed(1)}px, ${player.y.toFixed(1)}px) translate(-50%, -100%)`;
+        place(floatPlayer, player);
         const frac = Math.max(0, Math.min(1, player01));
         floatPlayerFill.style.width = `${(frac * 100).toFixed(1)}%`;
         floatPlayerFill.classList.toggle('is-low', frac > 0 && frac <= LOW_HP_FRACTION);
@@ -834,7 +970,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       }
       if (enemy) {
         floatEnemy.style.display = 'flex';
-        floatEnemy.style.transform = `translate(${enemy.x.toFixed(1)}px, ${enemy.y.toFixed(1)}px) translate(-50%, -100%)`;
+        place(floatEnemy, enemy);
         const frac = Math.max(0, Math.min(1, enemy01));
         floatEnemyFill.style.width = `${(frac * 100).toFixed(1)}%`;
         floatEnemyFill.classList.toggle('is-low', frac > 0 && frac <= LOW_HP_FRACTION);
@@ -849,8 +985,17 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       const heal = !!opts?.heal;
       const big = amount >= 15;
       const medium = !big && amount >= 6;
-      el.style.setProperty('--x', `${point.x.toFixed(1)}px`);
-      el.style.setProperty('--y', `${point.y.toFixed(1)}px`);
+      // Same clamp as the floating pills, for the same reason and one more. A fighter
+      // above the top of the frame projects to a small or negative Y, and a 36px
+      // "-15 ZONE" at weight 900 spawned there lands squarely on the match clock —
+      // photographed at 844x390 in shots/hud/r0/phone-danger.png, where "0:13" is
+      // completely gone. The layer's clip (see floatFloorY) stops the tail of the rise
+      // from reaching the top bar; this keeps the BRIGHT part of the number on screen
+      // rather than letting the clip eat all of it.
+      const y = Math.max(point.y, floatFloorY());
+      const x = Math.min(Math.max(point.x, 24), window.innerWidth - 24);
+      el.style.setProperty('--x', `${x.toFixed(1)}px`);
+      el.style.setProperty('--y', `${y.toFixed(1)}px`);
       el.textContent = heal
         ? `+${Math.round(amount)}`
         : `-${Math.round(amount)}`;
@@ -1011,6 +1156,35 @@ const CSS = `
 }
 .hud-fighter--player .hud-healthbar-fill { background-color: #3FCB86; }
 .hud-fighter--enemy .hud-healthbar-fill { background-color: #E6493F; }
+/* ── The most-read number in the game, and it failed AA by the widest margin ──
+   Cream #FFF3DE centred on the fill. Measured against THE PIXELS ACTUALLY BEHIND IT
+   mid-fight, at five viewports (tools/tmp/hud_accept.mjs):
+
+     over the player's green fill #3FCB86 ... 1.89   (AA needs 4.5)
+     over the enemy's red fill    #E6493F ... 3.55
+
+   1.89 was the worst text ratio anywhere in the HUD and it is on your own HP. It is
+   also the ONLY text class in the HUD that failed — 20 of the 117 measured runs, all
+   of them this one.
+
+   ── Why the fix is a stroke and not a colour ────────────────────────────────
+   This run is the one piece of HUD text whose backdrop CHANGES UNDER IT: the fill
+   recedes as HP drops, so at 40% HP the same glyphs sit half on #3FCB86 (luma 0.455)
+   and half on the #241a30 track (luma 0.013). No single ink wins both — cream is
+   correct on the track and hopeless on the fill; a dark ink would be the exact
+   reverse, and the bar would go unreadable at precisely the moment it matters.
+
+   A stroke removes the backdrop from the question: with paint-order: stroke fill
+   the glyph's paper is its own ink rim, so the ratio is cream vs #1a1224 = 12.02 on
+   BOTH halves and at every HP value. That is the same mechanism .hud-dmg, the
+   safe-zone chevron and the aim reticle already use, and the same one the menu pass
+   used to take 65 AA failures to zero — "a pale mark on this arena needs an ACTUAL
+   dark fill layer behind it".
+
+   2px, not the 3px .hud-dmg uses: verified on a rendered crop at 12px/800 rather
+   than assumed, because a stroke that closes the counters is a legibility LOSS that
+   a stroke-aware contrast model would happily score 12. The old soft 2px blur is gone
+   — a blurred halo behind an opaque rim contributes nothing. */
 .hud-healthbar-text {
   position: absolute;
   inset: 0;
@@ -1021,7 +1195,9 @@ const CSS = `
   font-weight: 800;
   font-size: 12px;
   color: #FFF3DE;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  -webkit-text-stroke: 2px #1a1224;
+  paint-order: stroke fill;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
   letter-spacing: 0.02em;
 }
 
@@ -1066,7 +1242,8 @@ const CSS = `
   width: 196px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: stretch;
+  gap: 3px;
   /* OPAQUE, not 78% alpha. This pill can land on top of the boiling pot's danger
      ring at some framings, and a translucent plate let the ring read straight through
      a zone readout. Chrome that the world shows through is chrome the player can
@@ -1074,29 +1251,59 @@ const CSS = `
   background: #1a1224;
   border: 3px solid #0e0916;
   border-radius: 12px;
-  padding: 5px 9px 6px;
+  padding: 4px 8px 6px;
   box-shadow: 0 3px 0 rgba(0,0,0,0.45);
 }
-/* gap 4, not 8. With justify-content: space-between the gap only binds at the row's
-   MINIMUM width, which is precisely the case that was broken: measured on a rendered
-   frame, "REACHES YOU 0:16" overflowed the plate by 7px and "-50 HP/s" by 6px, on all
-   five supported viewports, so the tail of the value sat on raw world pixels. That
-   defeats the reason the plate is opaque at all (see .hud-zone). The pill cannot
-   simply grow — at tablet-4:3 and phone-19.5:9 there are only 10px between it and the
-   nameplates either side — so the 7px comes out of the gap and the value's tracking
-   instead, which changes nothing about the pill's footprint, its type sizes or its
-   wording. Verified 0px overflow at 5 viewports x 3 states by tools/tmp/hud_fit.mjs. */
+/* ── STACKED, and the previous side-by-side row never fitted ──────────────────
+   The row used to be justify-content: space-between with the label and the value on
+   one line, and it OVERFLOWED THE PLATE IN EVERY STATE ON EVERY VIEWPORT. Measured
+   through the real game mid-fight (tools/tmp/hud_accept.mjs), text outside the plate:
+
+     "REACHES YOU 0:06"   15.1px portrait · 12.0px phone · 11.2px desktop/laptop/tablet
+     "-50 HP/s"            8.2px portrait ·  3.6px everywhere else
+
+   An earlier pass had already tried to fix this by shaving the gap 8 -> 4 and the
+   value's tracking 0.02em -> 0, and recorded the result in a comment as "Verified 0px
+   overflow at 5 viewports x 3 states by tools/tmp/hud_fit.mjs". THE VERIFICATION WAS
+   THE BUG: tools/tmp/hud_harness.html, which that tool measures through, was missing
+   the * { box-sizing: border-box } that index.html:15 applies to the whole game, so
+   it laid this plate out at 196 + 18 padding + 6 border = 220px. 24px of phantom slack
+   — more than the 15.1px overflow it was hunting. Corrected, that same tool reports
+   24px on the pre-fix tree (its harness drives the wider "REACHES YOU 0:16") and 0px
+   on this one. Two independent instruments now agree in both directions.
+
+   ── Why stacking, rather than a wider plate or shorter words ────────────────
+   Both were available and both are worse:
+     * WIDER. The plate can afford ~16px at desktop, but at portrait-430 the top bar is
+       already oversubscribed (two nameplates and this pill in 402px), and a plate sized
+       for the widest value would be sized for a string that is on screen for one second
+       in three.
+     * SHORTER WORDS. "REACHES YOU 0:08" is the wording a blind critic round arrived at
+       after "closes on you 0:08" was read as genuinely ambiguous English. Re-shortening
+       it would spend that finding to buy pixels.
+   Stacking gives each line the plate's FULL content width, so the overflow cannot come
+   back when a digit gets wider or a viewport gets narrower — it is structural, not a
+   tuned clearance.
+
+   ── And it buys the thing the pill actually needed ──────────────────────────
+   Both runs were 11px. At shipped framing (shots/hud/r0/desk-mid.png) that is 41px of
+   screen carrying a readout you cannot read without a 5x crop — 1.2% of frame height
+   spent on decoration. The freed width promotes the VALUE to 15px, which is the
+   Brawl Stars pattern this HUD is aimed at: a quiet small-caps label over a big number.
+   Net height cost 13px on a 900px frame. */
 .hud-zone-row {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
 }
 .hud-zone-label {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  line-height: 1.3;
   text-transform: uppercase;
   color: #E9A6FF;
   white-space: nowrap;
@@ -1104,11 +1311,16 @@ const CSS = `
 .hud-zone-value {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: 11px;
-  /* 0, not 0.02em. See .hud-zone-row: 0.02em on 11px is 0.22px per character and
-     bought nothing, while over a 16-character value it was 3.5px of the 7px that put
-     this text outside its own plate. */
+  font-size: 15px;
+  /* 0, not 0.02em. 0.02em on this run is 0.3px per character and buys nothing legible,
+     while over a 16-character value it is 4.8px of plate. */
   letter-spacing: 0;
+  line-height: 1.15;
+  /* Stays in the fog's pale violet, not the HUD's cream. Violet is reserved
+     project-wide for the closing fog (this strip, the radar, the edge vignette, the
+     chevron, the fog damage numbers and the 3D curtain), and promoting this run to
+     15px makes it the loudest thing in the pill — which is exactly when it must not
+     start reading as generic chrome. 14.06 against the plate, unchanged by the size. */
   color: #EFE2FF;
   white-space: nowrap;
 }
@@ -1128,12 +1340,30 @@ const CSS = `
   background: linear-gradient(90deg, #7B3FA8, #E9A6FF);
   transition: width 0.2s linear;
 }
+/* ── Reachable for the first time as of this change — see renderZone ─────────
+   These three rules were authored and never selected: nothing added is-danger to
+   .hud-zone. Now that they fire, two things in them were wrong on arrival and are
+   corrected here rather than shipped the moment they became visible.
+
+   1. OPACITY. The calm plate above was made fully opaque because at 78% alpha the
+      boiling pot's hazard ring read straight THROUGH a zone readout — a whole-arena
+      scan caught a pill saying "safe" superimposed on a ring meaning "lethal". This
+      rule kept 0.9, so the alarm state was quietly the one state that still let world
+      paint through a HUD readout, and it is the worst possible one to leave open: it
+      is drawn while the whole screen is already violet with fog, so anything showing
+      through is the same hue as the plate. #58147C is that colour with the alpha
+      resolved — identical over black, and now identical over everything else too.
+   2. THE LABEL SIZE JUMP. 11px -> 12px was a reflow of a row that was already
+      overflowing. At 11px against the stacked plate's 172px of content,
+      "▲ OUTSIDE THE ZONE" measures ~119px, so the bump now has room and stays.
+
+   White on #58147C is 11.60; #FFD4FF is 9.63. */
 .hud-zone.is-danger {
-  background: rgba(88,20,124,0.9);
+  background: #58147C;
   border-color: #E9A6FF;
   animation: hud-zone-alarm 0.6s ease-in-out infinite;
 }
-.hud-zone.is-danger .hud-zone-label { color: #FFFFFF; font-size: 12px; }
+.hud-zone.is-danger .hud-zone-label { color: #FFFFFF; font-size: 11px; }
 .hud-zone.is-danger .hud-zone-value { color: #FFD4FF; }
 /* A beat of warning BEFORE the first tick of damage, so the fog is never the thing
    that "just started hurting me for no reason". */
@@ -1276,19 +1506,43 @@ html.fa-touch-capable .hud-radar {
   z-index: 2;
 }
 .hud-radar-dot--enemy { background: #E6493F; box-shadow: 0 0 0 1.5px rgba(255,255,255,0.6); z-index: 1; }
+/* ── The only HUD text with no plate under it, and it showed ─────────────────
+   9px on a soft drop-shadow, drawn straight onto whatever the world is doing beneath
+   the radar card. Measured mid-fight against the pixels actually behind it
+   (tools/tmp/hud_accept.mjs), the SAME nine pixels of type scored:
+
+     desktop  3.26   ·  tablet 3.46  ·  laptop 3.88     <- all below the 4.5 AA floor
+     phone-land 10.09 ·  portrait 10.27                  <- same CSS, luckier backdrop
+
+   That spread IS the defect. A shadow is not a background: it makes a glyph findable
+   on a dark ground and does nothing on a light one, so this readout's legibility was
+   a property of where the camera happened to be pointing. Every other run in this HUD
+   already sits on an opaque plate for exactly this reason, and the caption is the one
+   that names the cream disc as SAFE and flips to GET INSIDE — i.e. the one that must
+   not be conditional on the floor.
+
+   A pill, not a stroke: at 9px with 0.12em tracking a 1.5px rim would close the
+   counters, and the plate costs 4px of height in a corner that has it. E9A6FF on
+   #1a1224 is 9.40 and cannot move. */
 .hud-radar-cap {
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
   font-size: 9px;
   letter-spacing: 0.12em;
   color: #E9A6FF;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+  background: #1a1224;
+  border: 2px solid #0e0916;
+  border-radius: 999px;
+  padding: 1px 9px 2px;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.35);
 }
 .hud-radar.is-danger .hud-radar-map {
   border-color: #E9A6FF;
   animation: hud-zone-alarm 0.6s ease-in-out infinite;
 }
-.hud-radar.is-danger .hud-radar-cap { color: #FFFFFF; }
+/* Same alarm plate the zone pill wears, so "you are outside" is one visual statement
+   made in two places rather than two unrelated colour changes. */
+.hud-radar.is-danger .hud-radar-cap { color: #FFFFFF; background: #58147C; border-color: #E9A6FF; }
 
 /* ── Fog damage feedback ──────────────────────────────────────────────────── */
 /* Sustained edge burn while outside the zone. A BORDER treatment on purpose: a hit
@@ -1961,11 +2215,19 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 /* ── Floating damage/heal numbers ─────────────────────────────────────────── */
 /* NEVER interactive: this layer sits over the whole canvas and a stray
    pointer-events:auto here would silently swallow every click on the game below it. */
+/* clip-path, not a smaller box. The numbers are positioned in the layer's own
+   coordinate space, so insetting the layer would shift every one of them by the same
+   amount; a clip changes what reaches the screen and nothing else. --fa-dmg-top is
+   written from JS whenever the viewport changes (floatFloorY), because the top bar's
+   height is a function of the media queries and of how tall the zone pill has grown —
+   hardcoding it here would go stale the next time either moves. 0px fallback, so a
+   HUD that somehow never runs that path behaves exactly as before. */
 .hud-dmg-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
   overflow: hidden;
+  clip-path: inset(var(--fa-dmg-top, 0px) 0 0 0);
 }
 .hud-dmg {
   position: absolute;
@@ -2043,8 +2305,21 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
   .hud-countdown { font-size: 90px; }
   .hud-gameover-card { padding: 26px 32px; }
   .hud-gameover-title { font-size: 34px; }
-  .hud-zone { width: 156px; padding: 4px 7px 5px; }
-  .hud-zone-label, .hud-zone-value { font-size: 9px; }
+  /* STILL 156px. Stacking changed the binding constraint from "label + gap + value" to
+     "the widest SINGLE run", and that turns out to fit in the width this plate already
+     had: at 156 - 14 padding - 6 border = 136px of content, the longest value
+     "REACHES YOU 0:06" measures 124px at 12.5px/800 and the longest label
+     "▲ OUTSIDE THE ZONE" 115px at 10px/800.
+
+     A first pass widened it to 168 for headroom and that was the wrong trade, visible
+     in the frame rather than in a number: this rule's tightest viewport is portrait-430,
+     where the top bar splits 402px between two nameplates and this pill, so every pixel
+     the pill takes comes straight off both health bars (104px each at 168, 110px at
+     156). Zero overflow is asserted at 430x932, not assumed — see hud_accept's C. */
+  .hud-zone { width: 156px; padding: 3px 7px 5px; }
+  .hud-zone-label { font-size: 9px; letter-spacing: 0.08em; }
+  .hud-zone-value { font-size: 12.5px; }
+  .hud-zone.is-danger .hud-zone-label { font-size: 10px; }
   .hud-radar-map { width: 105px; height: 75px; }
   .hud-radar-dot { width: 8px; height: 8px; }
 }
@@ -2084,5 +2359,30 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
    in both DOM states and with a portrait notch injected. */
 @media (max-width: 460px) {
   .hud-radar { bottom: calc(var(--fa-safe-b, 0px) + 84px); }
+}
+
+/* ── ...and on a NARROW touch screen the radar has to drop below the clock ───
+   Pure geometry again, and it is a consequence of stacking the zone pill. On touch the
+   radar is pinned to the top-right at safe-t + 96, a number chosen against a clock
+   column that ended around y=90. Stacking the pill and promoting its value made that
+   column 13px taller, so it now ends at y=102 — and the clock is 156px wide and
+   centred, which is what brings it into the radar's x range at all:
+
+     clock right edge = W/2 + 78                    [156px pill, flex: 0 0 auto]
+     radar left edge  = W - safe-r - 12 - 105       [105px card <=720]
+     they meet at      W/2 + 78 = W - 117, i.e. W = 390
+
+   Measured against that prediction by tools/tmp/menu_accept_portrait.mjs: 15x6px of
+   .hud-clock over .hud-radar at 360x800 touch, and clean at 390 and 430. So the rule
+   is keyed at 400 — the crossover plus ten pixels — and nothing wider moves.
+
+   118 = the clock's 102 plus a 16px gutter, the same gutter the rest of this HUD uses.
+   Deliberately NOT solved by narrowing the pill: 156px is already the minimum that
+   holds "REACHES YOU 0:06" at a readable size, and the phone is the screen that can
+   least afford to be handed the unreadable version. Also deliberately NOT solved by
+   dropping the pill's progress track, which would leave 4px of clearance and make the
+   widget a different shape on phones than on desktop. */
+@media (max-width: 400px) {
+  html.fa-touch-capable .hud-radar { top: calc(var(--fa-safe-t, 0px) + 118px); }
 }
 `;
