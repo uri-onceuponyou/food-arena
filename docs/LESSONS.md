@@ -6,7 +6,7 @@ Everything below was paid for. Reading this is cheaper than re-learning any of i
 
 ## 1. "It isn't there" almost always means it IS there and is INVISIBLE
 
-**True cause seventeen separate times.** Assume rendering-but-invisible *first*, and prove it
+**True cause eighteen separate times.** Assume rendering-but-invisible *first*, and prove it
 with an unmissable probe rather than reasoning about it.
 
 The first sixteen, grouped by mechanism — the variety is the point:
@@ -68,6 +68,38 @@ Replace the thing with something **unmissable** — a garish 4×4 red/cyan check
 a 10-second lifetime — and render. This *disproved* a five-round theory in ten minutes: the
 texture was wired perfectly and the real bug was spatial frequency. **The pattern above is a
 prompt to test, not a conclusion to reach.**
+
+
+**The eighteenth is the worst kind: it rendered PLAUSIBLY, and wrongly.**
+
+Every previous instance was *absent* — nothing on screen, so somebody eventually noticed. A WebGL
+context loss and restore produced a frame that looked **completely normal** and was 15.65 luma-mean
+darker than the frame before it. Measured on a frozen sim with a drift control over the same
+wall-clock span:
+
+| | HEAD | after |
+|---|---|---|
+| drift control (no loss at all) | 0.007 | 0.000 |
+| frame mean, pre-loss → post-restore | 76.291 → **60.641** | 96.466 → 96.458 |
+| delta | **−15.650** | −0.008 |
+
+Two causes, both invisible: the **PMREM environment map** is a render-target texture with no CPU
+image, so three's property reset leaves it empty; and the **shadow map** never redraws, because
+`autoUpdate` is false and three preserves `needsUpdate: false` across the restore.
+
+**A match hides it and a menu exposes it** — fighters move, so the shadow map redraws *by accident*;
+a static character-select portrait just silently loses its contact shadow. That asymmetry is why it
+would have survived any amount of gameplay testing.
+
+→ **The lesson widens: "is it there?" is not enough. Ask "is it the SAME?"** — and answer it with a
+drift control measured over the same span, not a guessed tolerance. A restored, resumed or
+reconstructed thing that *looks* right is the hardest possible failure to find, because nothing about
+it invites a second look.
+
+**And the brief's premise was falsified in passing.** The task said "no `preventDefault`, so the
+context is never restorable" — but three's own handler already calls it (`three.module.js:15852`),
+measured `defaultPrevented === true` on HEAD before any handler of ours existed. The real bug was not
+the missing thing everyone assumed; it was the *plausible* thing nobody checked.
 
 ---
 

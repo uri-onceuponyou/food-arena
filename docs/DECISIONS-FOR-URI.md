@@ -20,6 +20,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **16** | Soup lost its red band, egg went cream, cast p95 is +0.027 over reference | shipped | **look at it — these are looks, not measurements** | per-character, self-contained |
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
 | **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | no concealment | **your call — this is a feature, not an art pass** | new mechanic |
+| **19** | Back out of a live match abandons it silently · mid-match reload restarts it | abandon · restart | **two small feel calls** | one line each |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
 | **11** | Longer legs — every silhouette changed | longer | **keep** — legs now exist at all | 2 constants + 1 row/archetype |
@@ -741,3 +742,33 @@ is the term that rewards the environment for being **far from the player's luma*
 single character. The reference plates' own ground value is 0.40–0.46. **As constituted, that rail
 forbids the arena from ever matching the plates it is scored against.** It is being re-derived as an
 instrument fix. It is not a game problem and no one should tune the game to satisfy it.
+
+
+---
+
+## 19. Two small calls about leaving a match, now that reloads actually work
+
+`shell.ts` never touched `history`, so the URL never named the screen and **any reload landed you on
+home — including mid-match.** That is the mechanism behind your *"crashing mid-flight and starting
+over from homescreen"*: HMR was the trigger, this was why it looked like a crash. Fixed (`171c2d2`):
+the URL now names the screen, reloads land there, back/forward work, and all existing query
+parameters survive.
+
+**The resume rule chosen, and why.** A match is re-entered as a **fresh match of the same matchup**,
+never restored mid-fight. A match has no serialised form anywhere in this project, and inventing one
+hands you a fight you did not set up, at a disadvantage you cannot see. Nothing is lost, and that is
+measured rather than assumed — the profile only banks on `phase === 'ended'`.
+
+**Two consequences are yours:**
+
+1. **Back out of a live match now abandons it with no confirmation.** The alternative is that back
+   opens the pause sheet, which lives in `matchScreen.ts` — a different owner, so it was not done
+   unilaterally. Which do you want?
+2. **A mid-match reload restarts the match.** On the shared dev server that means an HMR reload
+   restarts a match every ~9 s instead of dumping you to home. Arguably better, arguably more
+   confusing. Either way, `node tools/tmp/playtest.mjs` remains the way to actually play — it serves
+   a frozen production build with no HMR at all.
+
+**One number is chosen rather than measured:** a lost GPU context now shows a notice immediately and
+a Reload button after **3 s**. There is no data on how long a real restore takes on your hardware, so
+if you ever see that button appear during normal play, that grace period is too short.
