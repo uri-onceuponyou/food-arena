@@ -171,9 +171,16 @@ for (const vp of VPS) {
     await page2.waitForFunction('window.__previewReady === true', null, { timeout: 60_000 });
     await page2.waitForTimeout(220);
     const atShoot = await page2.evaluate(READ, { minTap: MIN_TAP, safe: SAFE });
+    // capture-audit: allow — THE UNSETTLED FRAME IS THE SUBJECT. This file exists to
+    // measure what `shoot.mjs`'s old +220ms wait actually captured, so routing it through
+    // the guard would delete the very measurement. It is registered as role `validator`
+    // in capture_audit.mjs, which checks that it imports the guard it is validating and
+    // that every deliberate early shot is annotated here, where a reviewer sees it.
     const shotBuf = await page2.screenshot({ timeout: 120_000 });
     await page2.waitForTimeout(30);
     const atOld = await page2.evaluate(READ, { minTap: MIN_TAP, safe: SAFE });
+    // capture-audit: allow — the 30ms-later twin of the shot above; the DIFFERENCE
+    // between the two is the result this file reports.
     const lateBuf = await page2.screenshot({ timeout: 120_000 });
     const shootStats = await frameStats(shotBuf);
     const shootLateStats = await frameStats(lateBuf);

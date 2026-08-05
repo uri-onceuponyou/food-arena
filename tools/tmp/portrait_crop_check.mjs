@@ -16,6 +16,7 @@
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import sharp from 'sharp';
+import { captureSettled } from './settle.mjs';
 
 const LAUNCH_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   '--enable-webgl', '--ignore-gpu-blocklist', '--disable-gpu-sandbox'];
@@ -42,7 +43,10 @@ await page.waitForFunction('window.__thumbsReady === true', null, { timeout: 300
 await page.waitForTimeout(1500);
 
 const shot = `${OUT}/portraitcrop-trophies.png`;
-await page.screenshot({ path: shot, timeout: 120_000 });
+// Both halves of this file need the settle: the PNG (a fade compresses contrast) and
+// the getBoundingClientRect() below it (a rect INCLUDES the 0.992 entry transform).
+// captureSettled settles first, so the rects read after it are settled rects.
+await captureSettled(page, { path: shot, label: 'trophies portraits', timeout: 120_000, tool: 'portrait_crop_check' });
 const rects = await page.evaluate(() => [...document.querySelectorAll('.fa-ic-portrait--head.has-render')]
   .map((n) => { const r = n.getBoundingClientRect(); return { id: n.dataset.portrait, x: r.x, y: r.y, w: r.width, h: r.height }; })
   .filter((r) => r.w >= 8 && r.h >= 8 && r.x >= 0 && r.y >= 0 && r.x + r.w <= innerWidth && r.y + r.h <= innerHeight));

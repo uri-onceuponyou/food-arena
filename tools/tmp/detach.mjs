@@ -16,6 +16,10 @@
  *
  *   node tools/tmp/detach.mjs --ids hamburger --anim idle --t 1.5
  */
+/**
+ * capture-audit: css-immune — same as bgsweep — `gl.readPixels()` on `preview.html`. The number is a pixel count off
+ * the drawing buffer, which a CSS fade cannot touch.
+ */
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 

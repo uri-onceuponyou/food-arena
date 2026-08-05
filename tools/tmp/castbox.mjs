@@ -23,6 +23,11 @@
  *
  *   node tools/tmp/headserve.mjs --overlay src/characters -- node tools/tmp/castbox.mjs
  */
+/**
+ * capture-audit: css-immune — reads WORLD-UNIT bounding boxes out of `window.__stage`'s scene graph on
+ * `preview.html?piece=roster`. World units are not screen units; no CSS transform exists
+ * in that path at all.
+ */
 import { chromium } from 'playwright';
 
 const a = process.argv;

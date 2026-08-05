@@ -5,6 +5,7 @@
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import sharp from 'sharp';
+import { captureSettled } from './settle.mjs';
 
 const ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   '--enable-webgl', '--ignore-gpu-blocklist', '--disable-gpu-sandbox'];
@@ -28,7 +29,12 @@ async function shoot(url, out) {
   await p.goto(url, { waitUntil: 'networkidle', timeout: 90000 });
   await p.waitForFunction('window.__previewReady === true', null, { timeout: 90000 });
   await p.waitForTimeout(800);
-  await p.screenshot({ path: out, timeout: 120000 });
+  // These PNGs go STRAIGHT INTO A BLIND CRITIC PACKET, which is the most expensive
+  // consumer of a frame in this project (~300k tokens a round). `preview.html` mounts no
+  // shell, so `settleScreen` is satisfied immediately and the live guard here is the
+  // FLAT-FRAME floor plus the `.capture.json` sidecar that `tools/review.mjs` refuses a
+  // packet without — `filmstrip.mjs` carries the same reasoning.
+  await captureSettled(p, { path: out, label: out, timeout: 120000, tool: 'critic_r6_wide' });
   await p.close();
 }
 

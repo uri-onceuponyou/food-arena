@@ -23,6 +23,11 @@
  *              starts at `translateY(10px) scale(0.992)`. This is exactly the shape
  *              `menu_accept.mjs` had — no screenshot, and every tap-target and
  *              safe-area rect still read 0.8% small and 10px low.
+ *   CSS-IMMUNE waits on the flag, but its verdict is something no CSS transform or
+ *              opacity can reach — `gl.readPixels()` off the drawing buffer, a camera
+ *              projection out of `window.__charStage()`, an offscreen-rendered data
+ *              URI. `aspect.mjs`'s 0.00wu number is the canonical case. This class is
+ *              CLAIMED by an annotation and then CHECKED: see below.
  *   UNGUARDED  screenshots with no flag wait and no paint condition
  *   n/a        neither captures nor waits, so the defect cannot reach it
  *
@@ -42,6 +47,24 @@
  * `typescript` is already a dependency and `ts.createSourceFile` parses `.mjs`
  * directly, so this is a real AST walk with no new package.
  *
+ * ── The `css-immune` annotation, and why it is not an opt-out ────────────────
+ * Half of the flag-waiting files in `tools/` never touch a rect or a PNG: they wait
+ * for the app to boot and then read `gl.readPixels()` off the WebGL drawing buffer,
+ * which sits BELOW the CSS compositor, or an NDC projection out of the 3D camera,
+ * which is computed from layout size and not from any transform. A blanket "settle
+ * everything" would add a wait to a number the fade cannot move, and — worse — would
+ * make the audit's exposed list a place where thirteen files sit forever, which is how
+ * `docs/LESSONS.md` §9's "a lint that cries wolf gets ignored" happens.
+ *
+ * So a file may CLAIM the class:
+ *
+ *     // capture-audit: css-immune — <what the verdict is, and why CSS cannot reach it>
+ *
+ * and the claim is then MECHANICALLY REFUSED if the file takes a raw screenshot or
+ * calls `getBoundingClientRect()` anywhere, because both of those are precisely what a
+ * transform and an opacity do reach. The annotation records a judgement; the check is
+ * what makes it a guard rather than a promise.
+ *
  * ── Known-input validation ───────────────────────────────────────────────────
  * `--selftest` runs the classifier over seven synthetic files whose answers are
  * known — including the exact defect shape, the fixed shape, and a comments-only
@@ -58,8 +81,12 @@
 import ts from 'typescript';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const ROOT = resolve(process.argv[1], '../../..');
+// From `import.meta.url`, not `process.argv[1]`: `classify` is exported and other
+// tools import it, and under `node --input-type=module -e` argv[1] is undefined, which
+// threw before the audit could run a single check.
+const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
 /**
  * The capture-integrity file set, each with the obligation it actually has.
@@ -99,6 +126,51 @@ const OWNED = {
   'tools/filmstrip.mjs': 'capture',          // preview.html has no shell; the FLAT-FRAME floor is the live guard
   'tools/aspect.mjs': 'capture',             // the 0.00wu number never needed it; the optional PNG did
   'tools/tmp/rarity_aa.mjs': 'capture',      // per-rarity WCAG, built for the badge follow-through
+
+  // ── The sweep that finished the list, one decision per file ────────────────
+  // The 27 files reported as "exposed elsewhere" were not one problem with one fix.
+  // Sorted by what the fade can actually REACH, they were four different problems:
+  //
+  //   a PNG      -> `capture`     a fade compresses contrast; the packet renders below
+  //                               feed a ~300k-token critic round
+  //   a rect     -> `geometry`    getBoundingClientRect() includes the 0.992 entry scale
+  //   readPixels -> `css-immune`  the drawing buffer is read BELOW the compositor
+  //   the fade
+  //   ITSELF     -> `validator`   settling it would delete the measurement
+  //
+  // Applying one class to all of them would have meant a class loose enough to pass a
+  // validator, which is a class that catches nothing.
+  'tools/tmp/critic_r6_chars3.mjs': 'capture',       // renders that go into a blind critic packet
+  'tools/tmp/critic_r6_wide.mjs': 'capture',
+  'tools/tmp/floorprobe.mjs': 'capture',             // one CLIPPED shot, guarded by hand + annotated
+  'tools/tmp/facemove.mjs': 'capture',               // scene-graph numbers, but a human LOOKS at the PNG
+  'tools/tmp/ab_probe.mjs': 'capture',               // before/after in a live match on index.html
+  'tools/tmp/portrait_crop_check.mjs': 'capture',    // a PNG *and* rects, both on the trophies screen
+  'tools/tmp/rarity_px.mjs': 'capture',              // element crops; superseded by rarity_aa, still runnable
+  'tools/tmp/reload_watch.mjs': 'capture',           // a 30-min watch: records rather than refuses
+  'tools/tmp/portrait_probe.mjs': 'geometry',        // tap targets and overflow, i.e. pure rects
+  'tools/tmp/faceframe.mjs': 'geometry',
+  'tools/tmp/menu_roster_frame.mjs': 'geometry',     // clicks a card; ALSO had a hardcoded port
+  'tools/perf.mjs': 'geometry',                      // soft, time-boxed: a perf harness must not die on paint
+  'tools/tmp/perf_tier.mjs': 'geometry',
+  'tools/tmp/settle_geom_ab.mjs': 'validator',       // its subject IS the unsettled frame
+
+  // Verdicts CSS cannot reach. Annotated at the top of each file with WHAT the verdict
+  // is, and the annotation is refused if the file ever grows a rect or a screenshot.
+  'tools/tmp/bgsweep.mjs': 'css-immune',
+  'tools/tmp/castbox.mjs': 'css-immune',
+  'tools/tmp/detach.mjs': 'css-immune',
+  'tools/tmp/islands.mjs': 'css-immune',
+  'tools/tmp/limbcheck.mjs': 'css-immune',
+  'tools/tmp/limbcheck_pitch.mjs': 'css-immune',
+  'tools/tmp/masssit.mjs': 'css-immune',
+  'tools/tmp/occluder.mjs': 'css-immune',
+  'tools/tmp/setprobe.mjs': 'css-immune',
+  'tools/tmp/stage_fg.mjs': 'css-immune',
+  'tools/tmp/thumbdump.mjs': 'css-immune',
+  'tools/motion_probe.mjs': 'css-immune',
+  'tools/tmp/openframe.mjs': 'css-immune',
+  'tools/tmp/openwidth.mjs': 'css-immune',
 };
 
 /** Does this file meet the obligation its role carries? Returns null or the reason. */
@@ -122,14 +194,40 @@ function violation(role, r) {
     if (!r.readsSidecar) return 'never reads <png>.capture.json — provenance is not checked';
     return null;
   }
+  if (role === 'css-immune') {
+    if (!r.cssImmune) return 'missing the `// capture-audit: css-immune — <reason>` annotation';
+    if (r.rawShots.length) {
+      return `claims css-immune but screenshots at line(s) ${r.rawShots.join(',')} — a PNG is exactly what a fade compresses`;
+    }
+    if (r.rectReads) {
+      return `claims css-immune but calls getBoundingClientRect() ${r.rectReads}x — a rect INCLUDES transforms`;
+    }
+    return null;
+  }
+  if (role === 'validator') {
+    // Its SUBJECT is the unsettled frame, so it must shoot early on purpose — but it
+    // has to own the guard it is validating, and every raw shot has to be annotated
+    // where a reviewer sees it. Otherwise "validator" becomes the word you write on a
+    // file to make the audit stop asking.
+    if (!r.importsSettle) return 'a validator must import the very guard it validates';
+    if (r.rawShots.length) {
+      return `unannotated raw .screenshot() at line(s) ${r.rawShots.join(',')} —`
+        + ' a validator marks its deliberate early shot with `// capture-audit: allow <reason>`';
+    }
+    return null;
+  }
   return null;
 }
 const IMPLEMENTATION = ['tools/tmp/settle.mjs'];
 
 /**
- * Files that capture deliberately-unsettled frames as their SUBJECT. Excluding them
- * is not an exemption from the rule — they import `settle.mjs` and call the guard
- * with `enforce:false` on purpose, which is the documented escape hatch.
+ * Files that capture deliberately-unsettled frames as their SUBJECT.
+ *
+ * `settle_validate.mjs` predates the `validator` ROLE and is skipped outright.
+ * Everything else that does this now goes in `OWNED` with `role: 'validator'`, which
+ * is checked rather than merely excluded — an exclusion list is a place where a file
+ * stops being audited, and that is the same shape as the cache this session spent a
+ * task fixing.
  */
 const VALIDATORS = ['tools/tmp/settle_validate.mjs'];
 
@@ -148,9 +246,20 @@ const isBeforeCopy = (rel) => /(^|\/)_before_/.test(rel);
 export function classify(source, name = 'x.mjs') {
   const sf = ts.createSourceFile(name, source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
   const lines = source.split('\n');
+  // The annotation covers its own line and the first line of CODE after it, skipping
+  // any further comment lines in between. The original version covered only `i` and
+  // `i + 1`, so a three-line reason — which is what an honest reason usually is —
+  // silently failed to annotate its own call. That is a lint being pedantic about the
+  // shape of a comment instead of about the defect, which is how a lint gets switched
+  // off (`docs/LESSONS.md` §9).
   const allowed = new Set();
+  const isComment = (l) => /^\s*(\/\/|\/\*|\*)/.test(l) || /^\s*$/.test(l);
   lines.forEach((l, i) => {
-    if (/capture-audit:\s*allow/.test(l)) { allowed.add(i); allowed.add(i + 1); }
+    if (!/capture-audit:\s*allow/.test(l)) return;
+    allowed.add(i);
+    let j = i + 1;
+    while (j < lines.length && isComment(lines[j])) j++;
+    allowed.add(j);
   });
 
   const found = {
@@ -158,11 +267,14 @@ export function classify(source, name = 'x.mjs') {
     guardCalls: 0,       // `captureSettled(...)`
     settleCalls: 0,      // `settleScreen(...)` / a local wrapper
     flagWaits: 0,        // waitForFunction on __screenReady / __previewReady
+    rectReads: 0,        // `getBoundingClientRect()` — a rect INCLUDES transforms
     importsSettle: false,
     readsSidecar: false, // mentions the `<png>.capture.json` provenance record
+    cssImmune: false,    // claims its verdict is out of CSS's reach
     parseError: null,
   };
   if (/capture\.json/.test(source)) found.readsSidecar = true;
+  if (/capture-audit:\s*css-immune/.test(source)) found.cssImmune = true;
   for (const d of sf.parseDiagnostics ?? []) {
     found.parseError = ts.flattenDiagnosticMessageText(d.messageText, ' ');
     break;
@@ -183,6 +295,9 @@ export function classify(source, name = 'x.mjs') {
         const line = lineOf(node);
         if (!allowed.has(line)) found.rawShots.push(line + 1);
       }
+      // `x.getBoundingClientRect()` — parsed, not grepped, so the seven files that only
+      // MENTION it in a comment are not counted (`docs/LESSONS.md` §9).
+      if (ts.isPropertyAccessExpression(c) && c.name.text === 'getBoundingClientRect') found.rectReads++;
       // `captureSettled(...)` / `settleScreen(...)`, bare or namespaced.
       const callee = ts.isIdentifier(c) ? c.text
         : (ts.isPropertyAccessExpression(c) ? c.name.text : null);
@@ -206,6 +321,11 @@ export function classify(source, name = 'x.mjs') {
   else if (found.rawShots.length > 0 && found.flagWaits > 0) cls = 'EXPOSED';
   else if (found.rawShots.length > 0) cls = 'UNGUARDED';
   else if (found.guardCalls > 0 || (found.settleCalls > 0 && found.importsSettle)) cls = 'GUARDED';
+  // Claimed AND checked: no PNG and no rect, so neither opacity nor transform can move
+  // the verdict. A claim that fails either test falls through to FLAG-ONLY below.
+  // `flagWaits > 0` is load-bearing — without it this very file self-matched on the
+  // annotation quoted in its own header and reported itself as an audited probe.
+  else if (found.cssImmune && found.flagWaits > 0 && found.rawShots.length === 0 && found.rectReads === 0) cls = 'CSS-IMMUNE';
   // No capture at all, but it waits on the flag and then reads the page. Rects
   // include transforms, so this is exposed too — it is the shape menu_accept had.
   else if (found.flagWaits > 0) cls = 'FLAG-ONLY';
@@ -284,6 +404,56 @@ const FIXTURES = [
       await captureSettled(page, { path: 'late.png' });
     `,
   },
+  {
+    name: 'a MULTI-LINE allow reason still annotates its own call',
+    want: 'GUARDED',
+    src: `
+      import { captureSettled } from './settle.mjs';
+      // capture-audit: allow — this shot needs a clip rect, which the guard does not take.
+      // Settled above and floor-checked below, so both guards are applied by hand
+      // rather than skipped.
+      const buf = await page.screenshot({ clip: { x: 0, y: 0, width: 9, height: 9 } });
+      await captureSettled(page, { path: 'late.png' });
+    `,
+  },
+  {
+    name: 'css-immune: readPixels off the drawing buffer',
+    want: 'CSS-IMMUNE',
+    src: `
+      // capture-audit: css-immune — gl.readPixels() is below the CSS compositor
+      await page.waitForFunction('window.__previewReady === true');
+      const px = await page.evaluate(() => { const g = window.__stage.renderer.getContext();
+        const p = new Uint8Array(16); g.readPixels(0, 0, 2, 2, g.RGBA, g.UNSIGNED_BYTE, p); return [...p]; });
+    `,
+  },
+  {
+    name: 'css-immune CLAIMED but it reads a rect — claim refused, stays exposed',
+    want: 'FLAG-ONLY',
+    src: `
+      // capture-audit: css-immune — I promise it is fine
+      await page.waitForFunction('window.__screenReady === true');
+      const r = await page.evaluate(() => document.body.getBoundingClientRect());
+    `,
+  },
+  {
+    name: 'css-immune CLAIMED but it screenshots — claim refused, stays exposed',
+    want: 'EXPOSED',
+    src: `
+      // capture-audit: css-immune — I promise it is fine
+      await page.waitForFunction('window.__screenReady === true');
+      await page.screenshot({ path: 'a.png' });
+    `,
+  },
+  {
+    name: 'a rect named only in a COMMENT is not a rect read (grep would say it is)',
+    want: 'CSS-IMMUNE',
+    src: `
+      // capture-audit: css-immune — reads gl.readPixels only
+      // NOTE: deliberately does NOT use getBoundingClientRect(), see settle.mjs.
+      await page.waitForFunction('window.__previewReady === true');
+      const px = await page.evaluate(() => window.__stage.renderer.getContext());
+    `,
+  },
 ];
 
 /** The role requirements, also on known input — a rule nobody has seen FAIL is not a rule. */
@@ -323,9 +493,47 @@ const ROLE_FIXTURES = [
     src: "import { frameStats, FRAME_FLOOR } from './tmp/settle.mjs';\n"
       + "const s = await frameStats(png);\nconst side = `${png}.capture.json`;",
   },
+  {
+    name: 'css-immune role: an unannotated file cannot hold the class',
+    role: 'css-immune', wantViolation: true,
+    src: "await page.waitForFunction('window.__previewReady === true');\nconst p = await page.evaluate(() => 1);",
+  },
+  {
+    name: 'css-immune role: a rect read REFUSES the claim',
+    role: 'css-immune', wantViolation: true,
+    src: '// capture-audit: css-immune — trust me\nconst r = el.getBoundingClientRect();',
+  },
+  {
+    name: 'css-immune role: a screenshot REFUSES the claim',
+    role: 'css-immune', wantViolation: true,
+    src: "// capture-audit: css-immune — trust me\nawait page.screenshot({ path: 'a.png' });",
+  },
+  {
+    name: 'css-immune role: annotation + no rect + no shot is clean',
+    role: 'css-immune', wantViolation: false,
+    src: '// capture-audit: css-immune — gl.readPixels only\nconst px = gl.readPixels(0, 0, 1, 1, 0, 0, buf);',
+  },
+  {
+    name: 'validator role: an unannotated raw shot is a violation',
+    role: 'validator', wantViolation: true,
+    src: "import { settleScreen } from './settle.mjs';\nawait page.screenshot();",
+  },
+  {
+    name: 'validator role: not importing the guard it validates is a violation',
+    role: 'validator', wantViolation: true,
+    src: '// capture-audit: allow — early on purpose\nawait page.screenshot();',
+  },
+  {
+    name: 'validator role: imports the guard, early shot annotated',
+    role: 'validator', wantViolation: false,
+    src: "import { settleScreen } from './settle.mjs';\n"
+      + '// capture-audit: allow — the unsettled frame IS the subject\nawait page.screenshot();',
+  },
 ];
 
-if (process.argv.includes('--selftest')) {
+const IS_MAIN = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (IS_MAIN && process.argv.includes('--selftest')) {
   let pass = 0; let fail = 0;
   const t = (name, ok, detail) => {
     if (ok) pass++; else fail++;
@@ -346,6 +554,10 @@ if (process.argv.includes('--selftest')) {
 }
 
 // ── The audit ────────────────────────────────────────────────────────────────
+//
+// Everything below runs only as a MAIN program. `classify` is exported and imported by
+// `tools/tmp/sentinel.mjs`; before this guard, importing it ran the whole audit and
+// then crashed on `process.argv[1]` being undefined under `node -e`.
 
 async function listTools(dir) {
   const out = [];
@@ -357,6 +569,7 @@ async function listTools(dir) {
   return out;
 }
 
+if (!IS_MAIN) { /* imported for `classify` only */ } else {
 const files = (await listTools(join(ROOT, 'tools'))).sort();
 const rows = [];
 for (const abs of files) {
@@ -394,6 +607,14 @@ for (const r of ownedRows.sort((a, b) => a.rel.localeCompare(b.rel))) {
 }
 for (const m of missing) console.log(`  FAIL  ${m}  (MISSING — renamed or deleted)`);
 
+const immune = rows.filter((r) => r.cls === 'CSS-IMMUNE');
+if (immune.length) {
+  console.log('\n── assessed CSS-IMMUNE: the fade cannot reach the verdict (claimed AND checked) ──');
+  for (const r of immune.sort((a, b) => a.rel.localeCompare(b.rel))) {
+    console.log(`   ${r.owned ? '*' : ' '} ${r.rel.padEnd(34)} ${r.flagWaits} flag wait(s), 0 shots, 0 rects`);
+  }
+}
+
 const exposed = rows.filter((r) => !r.owned && (r.cls === 'EXPOSED' || r.cls === 'PARTIAL' || r.cls === 'FLAG-ONLY'));
 if (exposed.length) {
   console.log('\n── still exposed, OUTSIDE this file set (reported, not enforced) ───────────');
@@ -406,5 +627,6 @@ if (exposed.length) {
 
 const failed = bad.length + missing.length;
 console.log(`\n${ownedRows.length - bad.length}/${Object.keys(OWNED).length} owned files meet their obligation`
-  + `   ·   ${exposed.length} file(s) exposed elsewhere`);
+  + `   ·   ${immune.length} assessed css-immune   ·   ${exposed.length} file(s) exposed elsewhere`);
 process.exit(failed ? 1 : 0);
+}

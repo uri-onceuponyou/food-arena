@@ -16,6 +16,9 @@
  * flat panel's inverted hull is its own species of bug (it renders as a black copy of
  * the panel, because a plane's back face is the same plane).
  */
+/**
+ * capture-audit: css-immune — `gl.readPixels()` on `preview.html`. Component counts off the drawing buffer.
+ */
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 

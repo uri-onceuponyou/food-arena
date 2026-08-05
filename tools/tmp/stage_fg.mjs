@@ -35,6 +35,10 @@
  *                                  shows the equipped one, so home is measured once)
  *   --sweep "wall:floor,..."       hex pairs, swept in-page against the SAME mask
  */
+/**
+ * capture-audit: css-immune — `gl.readPixels()` off `window.__stage`, on `index.html`. Same reasoning as setprobe.mjs:
+ * the fade is real on this route and stops at the compositor.
+ */
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 

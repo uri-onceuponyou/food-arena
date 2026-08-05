@@ -36,6 +36,10 @@
  *                  driving every joint gives ~0; layered motion gives > 0.
  */
 
+/**
+ * capture-audit: css-immune — reads `window.__rigMetrics` and `window.__preview.trace()` — joint positions in WORLD
+ * units, sampled from the rig on `preview.html`. No pixel and no rect is involved.
+ */
 import { chromium } from 'playwright';
 import { writeFile } from 'node:fs/promises';
 

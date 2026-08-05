@@ -12,6 +12,11 @@
  * (all on / no ground decal / no foot decal / neither) and samples a fixed grid, so the
  * contribution of each decal is a number rather than an impression.
  */
+/**
+ * capture-audit: css-immune — `gl.readPixels()` off `window.__stage`, on `index.html`. The screen fade DOES run here —
+ * and it cannot reach the drawing buffer, which is composited after this read. (The live
+ * hazard on this path is a DISPOSED stage, which is a different defect; see ab_probe.mjs.)
+ */
 import { chromium } from 'playwright';
 
 const LAUNCH_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',

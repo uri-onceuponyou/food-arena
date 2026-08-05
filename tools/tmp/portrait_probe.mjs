@@ -9,6 +9,7 @@
  * ancestors are just being dragged along by it.
  */
 import { chromium } from 'playwright';
+import { settleScreen } from './settle.mjs';
 
 const LAUNCH_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   '--enable-webgl', '--ignore-gpu-blocklist', '--disable-gpu-sandbox'];
@@ -62,7 +63,12 @@ for (const screen of SCREENS) {
   try {
     await page.goto(`${BASE}/?screen=${screen}`, { waitUntil: 'networkidle', timeout: 120000 });
     await page.waitForFunction(`window.__screen === "${screen}" && window.__screenReady === true`, null, { timeout: 120000 });
+    // Every number below is a getBoundingClientRect() — tap targets against 44px,
+    // overflow past the viewport edge. A rect INCLUDES transforms, and `fa-screen-in`
+    // starts at scale(0.992) translateY(10px), so at the flag every one of them reads
+    // 0.8% small and 10px low. That is the exact bias menu_accept.mjs carried.
     await page.waitForTimeout(1500);
+    await settleScreen(page, { label: `portrait_probe:${screen}` });
     const r = await page.evaluate(REPORT);
     console.log(`\n── ${screen} @ ${W}x${H} ── scroll ${r.scroll}  overflowX=${r.overflowX} overflowY=${r.overflowY}`);
     for (const b of r.bad) {

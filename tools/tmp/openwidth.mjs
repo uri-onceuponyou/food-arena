@@ -11,6 +11,10 @@
  * width instead of height, at which point it stops helping and starts shrinking the
  * hero. This finds that knee instead of guessing at it.
  */
+/**
+ * capture-audit: css-immune — same as openframe.mjs — `window.__charStage()` NDC projections through the 3D camera,
+ * unreachable by a CSS transform.
+ */
 import { chromium } from 'playwright';
 const A=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--enable-webgl','--ignore-gpu-blocklist','--disable-gpu-sandbox'];
 const base=process.env.PREVIEW_BASE;

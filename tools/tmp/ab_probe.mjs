@@ -46,6 +46,7 @@
  */
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
+import { captureSettled } from './settle.mjs';
 
 const LAUNCH_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   '--enable-webgl', '--ignore-gpu-blocklist', '--disable-gpu-sandbox'];
@@ -87,7 +88,10 @@ await page.evaluate(() => { const r = window.requestAnimationFrame; window.__raf
 await page.waitForTimeout(300);
 
 if (save) await mkdir(save, { recursive: true });
-if (save) await page.screenshot({ path: `${save}/${name}_before.png` });
+// index.html, so the shell IS in the path and `__gameReady` says nothing about the
+// screen's opacity. A washed "before" against a settled "after" would read as the
+// change having done something.
+if (save) await captureSettled(page, { path: `${save}/${name}_before.png`, label: `${name}_before`, tool: 'ab_probe' });
 
 const res = await page.evaluate(({ mut, list }) => {
   const stage = window.__stage;
@@ -178,5 +182,5 @@ if (res.listOnly) {
   console.log(`draws ${res.before.draws} -> ${res.after.draws}   triangles ${res.before.tris} -> ${res.after.tris}   (info.autoReset=false, so these are WHOLE FRAMES)`);
   console.log(`effects: ${res.effects.join(', ')}   SKIP=${res.SKIP}`);
 }
-if (save && !res.listOnly) { await page.screenshot({ path: `${save}/${name}_after.png` }); console.log(`saved ${save}/${name}_{before,after}.png`); }
+if (save && !res.listOnly) { await captureSettled(page, { path: `${save}/${name}_after.png`, label: `${name}_after`, tool: 'ab_probe' }); console.log(`saved ${save}/${name}_{before,after}.png`); }
 await browser.close();

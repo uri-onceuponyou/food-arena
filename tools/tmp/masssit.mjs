@@ -21,6 +21,10 @@
  *
  * Read-only: it hides meshes to isolate groups and puts them all back.
  */
+/**
+ * capture-audit: css-immune — reads scene-graph geometry (joint world positions) out of `window.__stage`. World units,
+ * not screen units.
+ */
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 

@@ -26,6 +26,10 @@
  *   every limb group with footprint >= 700 px delivers >= 0.50 of it, and
  *   detached limb pixels are 0.
  */
+/**
+ * capture-audit: css-immune — `gl.readPixels()` on `preview.html`, exactly as `limbcheck.mjs`, with the camera pitch
+ * as a parameter. Nothing in the verdict passes through CSS.
+ */
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 

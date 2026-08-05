@@ -22,11 +22,17 @@
  * old comment said went brown) fail differently.
  *
  *   node tools/tmp/with_snapshot.mjs -- node tools/tmp/rarity_px.mjs --url {URL}
+ *
+ * ⚠️ SUPERSEDED by `tools/tmp/rarity_aa.mjs`, which measures per-rarity WCAG contrast
+ * rather than fill statistics. Kept because its ONE-PAGE A/B construction is still the
+ * cheapest way to price a single CSS declaration, and because a superseded tool that is
+ * still runnable and still wrong is worse than one that is superseded and correct.
  */
 
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import sharp from 'sharp';
+import { settleScreen, captureSettled } from './settle.mjs';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
@@ -121,7 +127,11 @@ for (const c of CASES) {
   }, seed(c.id));
   await page.goto(`${base}/?screen=home&pointerLock=0`, { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 60000 });
+  // The 2600ms sleep stays as a floor for home's own hero entrance, but the CONDITION is
+  // the paint state: this file reads a rect AND shoots an element, and a fade compresses
+  // exactly the fill statistics it exists to compare.
   await page.waitForTimeout(2600);
+  await settleScreen(page, { label: `home rarity ${c.id}` });
 
   const badge = page.locator('.fa-home [data-el="herorarity"]');
   const meta = await badge.evaluate((n) => {
@@ -138,12 +148,16 @@ for (const c of CASES) {
     };
   });
 
-  const afterBuf = await badge.screenshot({ path: `${outDir}/${c.id}-after.png` });
+  // floor 4.0, not FRAME_FLOOR's 8.0: that constant was calibrated on WHOLE menu frames
+  // and this is a ~60x24 element crop. Quoting a whole-frame number at an element crop is
+  // the same shape as reporting a prop's luma as a character's — right number, wrong
+  // subject. 4.0 still refuses a badge that rendered as a flat rectangle with no glyph.
+  const { buf: afterBuf } = await captureSettled(page, { element: badge, path: `${outDir}/${c.id}-after.png`, label: `${c.id}-after`, floor: 4.0, tool: 'rarity_px' });
   const after = await fillStats(afterBuf);
 
   await page.addStyleTag({ content: OLD_RULE });
   await page.waitForTimeout(160);
-  const beforeBuf = await badge.screenshot({ path: `${outDir}/${c.id}-before.png` });
+  const { buf: beforeBuf } = await captureSettled(page, { element: badge, path: `${outDir}/${c.id}-before.png`, label: `${c.id}-before`, floor: 4.0, tool: 'rarity_px' });
   const before = await fillStats(beforeBuf);
 
   rows.push({ ...c, meta, before, after });

@@ -15,6 +15,11 @@
  * Match reference (tools/tmp/shipframe.mjs, donut at shipped framing):
  *   bodyLuma 0.5411  frameLuma 0.3250  body-frame = +0.216   edge-ring = +0.2063
  */
+/**
+ * capture-audit: css-immune — the verdict is `gl.readPixels()` off `window.__stage`'s drawing buffer on
+ * `preview.html`, which mounts no shell and runs no `fa-screen-in`. Those bytes are read
+ * below the CSS compositor, so neither an opacity fade nor a transform can reach them.
+ */
 import { chromium } from 'playwright';
 
 const LAUNCH_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',

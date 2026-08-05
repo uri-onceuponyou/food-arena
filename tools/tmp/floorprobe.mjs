@@ -31,6 +31,7 @@
 import { chromium } from 'playwright';
 import sharp from 'sharp';
 import { mkdir, writeFile, readFile, access } from 'node:fs/promises';
+import { settleScreen, captureSettled, frameStats, assertFrame } from './settle.mjs';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
@@ -144,7 +145,13 @@ async function getMask(page) {
   catch {
     await page.goto(`${URL_BASE}/preview.html?piece=character&id=hamburger&anim=idle&yaw=20&t=1.5&shot=1&silhouette=1`, { waitUntil: 'networkidle', timeout: 60000 });
     await page.waitForFunction('window.__previewReady === true', null, { timeout: 60000 });
-    await writeFile(MASK_PATH, await page.screenshot({ clip: { x: 0, y: 0, width: 900, height: 1100 } }));
+    await settleScreen(page, { soft: true, label: 'floorprobe mask' });
+    // capture-audit: allow — this shot needs a CLIP rect, which captureSettled does not
+    // take. Settled above and floor-checked below, so the two guards it would have applied
+    // are both applied by hand rather than skipped.
+    const maskBuf = await page.screenshot({ clip: { x: 0, y: 0, width: 900, height: 1100 } });
+    assertFrame(await frameStats(maskBuf), { label: 'floorprobe mask' });
+    await writeFile(MASK_PATH, maskBuf);
   }
   const img = sharp(MASK_PATH);
   const { data, info } = await img.greyscale().raw().toBuffer({ resolveWithObject: true });
@@ -297,8 +304,13 @@ for (const s of STATIONS) {
   const url = `${URL_BASE}/preview.html?piece=floor&tx=${s.x}&ty=${s.y}&t=0&shot=1`;
   await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForFunction('window.__previewReady === true', null, { timeout: 60000 });
-  const png = await page.screenshot();
-  await writeFile(`${OUT}/${s.id}.png`, png);
+  // A floor station rendered on `preview.html` (no shell), so the working guard is the
+  // flat-frame floor: a blank or boot-overlay frame here would produce a perfectly
+  // plausible luminance histogram and nothing would say so.
+  // `path` here rather than a bare writeFile, so the PNG lands with its `.capture.json`
+  // sidecar: a station render with no provenance is exactly what `tools/review.mjs`
+  // refuses to build a packet from.
+  const { buf: png } = await captureSettled(page, { path: `${OUT}/${s.id}.png`, label: `floor:${s.id}`, tool: 'floorprobe' });
   const { data } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   results[s.id] = measure(data, W, H, mask);
   console.log(s.id.padEnd(12), JSON.stringify(results[s.id]));

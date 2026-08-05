@@ -32,6 +32,7 @@
 import { chromium } from 'playwright';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { captureSettled } from './settle.mjs';
 
 const a = process.argv;
 const get = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
@@ -244,7 +245,10 @@ for (const id of IDS) {
       ? `face y[${r.faceBox.min[1]}..${r.faceBox.max[1]}] ${r.facePx.w.toFixed(0)}x${r.facePx.h.toFixed(0)}px`
       : 'face EMPTY (framing falls back to head)';
     console.log(`${id.padEnd(12)} ${String(r.meshCount).padStart(3)} meshes  hash ${r.geomHash.slice(0, 12)}  ${fb}`);
-    if (SHOTS) await page.screenshot({ path: `${OUT}/${TAG}-${id}.png` });
+    // The numbers come from the scene graph, but this PNG is what a human LOOKS at to
+    // decide whether the numbers describe the face (non-negotiable #3), so it gets the
+    // flat-frame floor and the provenance sidecar.
+    if (SHOTS) await captureSettled(page, { path: `${OUT}/${TAG}-${id}.png`, label: `${TAG}-${id}`, tool: 'facemove' });
   } catch (e) { console.error(`✗ ${id}: ${e}`); out[id] = { error: String(e) }; }
   finally { await page.close(); }
 }

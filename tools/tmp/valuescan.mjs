@@ -41,6 +41,45 @@
  *     `docs/LESSONS.md` §13 — an instrument that reports a plausible wrong number is
  *     worse than none. Nothing here should be believed until this passes.
  *
+ *  5. `--mode gate`: the acceptance test. It RECOMPUTES by default and REFUSES to read
+ *     a cache it cannot prove is fresh. See the block above `modeGate`.
+ *
+ * ── PROVENANCE, and why `--mode gate` used to lie ────────────────────────────
+ * `--mode gate` read `chars.json` and `dl.json` off disk and reported whatever it
+ * found, with no record of which tree produced them. On 08-05 it reported the cast at
+ * its PRE-value-pass numbers — egg range 0.401, p05 0.579 — from files written at
+ * 03:42 and 04:36, hours before `a5ce2a5` gave the cast its dark rung at 11:11. The
+ * gate.json it wrote is timestamped 16:43. **A cache that silently serves a stale
+ * answer is strictly worse than no cache: it is indistinguishable from a fresh one.**
+ *
+ * Every produced JSON now carries a `meta` stamp, and the gate refuses anything it
+ * cannot tie to a tree:
+ *   • `srcId`     sha256 over the SERVED source, fetched from `PREVIEW_BASE` itself,
+ *                 so it names the tree that produced the pixels under any harness
+ *                 (`headserve`, `snapshot`, `with_snapshot`, a bare dev server).
+ *                 Sourcemap comments and Vite's `?v=`/`?t=` query hashes are stripped
+ *                 first — measured, they are the only volatile parts of the response.
+ *   • `toolHash`  this file plus `valuelib.mjs`. A metric change invalidates the cache.
+ *   • `stationsHash` the station TABLE, not just its names. Four of the eighteen were
+ *                 once inside a `CoverBox`; a run taken before that fix must not be
+ *                 quoted after it.
+ *   • `ids`, `argv`, `runId`, `startedAt`/`finishedAt`.
+ *
+ * ── THE SAME SHAPE, TWICE MORE, in this same file ────────────────────────────
+ *   • `--mode dl --only <stations>` writes a `dl.json` holding as few as ONE station.
+ *     The gate then printed `dlBelow10` as "(of 18)" while counting over 4.
+ *     `shots/vl/r12_head/dl.json` on this disk has exactly 4. The gate now checks the
+ *     station COVERAGE and refuses a partial file instead of relabelling it.
+ *   • the two-render disagreement (`docs/LESSONS.md` §5): the mask comes from an
+ *     environment-hidden render and the luma from the shipped frame, so wherever a prop
+ *     occludes the fighter the tool reports THE PROP'S luma as the character's. Now
+ *     MEASURED per capture as `occludedPct` — a third pair of direct renders asks
+ *     whether hiding the character changes the full scene at each masked pixel — and a
+ *     sample whose figure is mostly occluded is marked `valid:false` and excluded from
+ *     the gate rather than reported as a number. The primary numbers are UNCHANGED, on
+ *     purpose: peers are mid-A/B against this instrument right now and silently moving
+ *     a metric under them is the fault this file exists to stop.
+ *
  * ── The two-clear-colour matte ───────────────────────────────────────────────
  * Borrowed from `tools/arena-scan.mjs`'s `CAST_MATTE`, not re-invented: hide the
  * environment, render the cast alone on a black clear and on a white clear, and take
@@ -68,15 +107,21 @@
  *   node tools/tmp/headserve.mjs -- node tools/tmp/valuescan.mjs --mode chars
  *   node tools/tmp/headserve.mjs -- node tools/tmp/valuescan.mjs --mode dl
  *   node tools/tmp/valuescan.mjs --mode ref                       # reads reference/, no server
+ *   node tools/tmp/headserve.mjs -- node tools/tmp/valuescan.mjs --mode gate        # recomputes
+ *   node tools/tmp/headserve.mjs -- node tools/tmp/valuescan.mjs --mode gate --reuse # verifies
+ *   node tools/tmp/valuescan.mjs --mode gate --reuse --as-of <srcId>   # offline, tree NAMED
+ *   node tools/tmp/headserve.mjs -- node tools/tmp/valuescan.mjs --mode srcid       # print the id
  *
  * ⚠️ `reference/images/` is gitignored and must NEVER be committed, copied into `src/`
  * or published. `--mode ref` only ever READS a path.
  */
 import { chromium } from 'playwright';
 import sharp from 'sharp';
+import ts from 'typescript';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
-import { readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { join, relative, resolve, dirname } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 import { VL, VL_SRC } from './valuelib.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,6 +190,159 @@ const STATIONS = [
   { id: 'fog_inside', x: 1240, y: 500, fog: 420 },
   { id: 'fog_late', x: 700, y: 340, fog: 200 },
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROVENANCE — the identity of the tree a number came from
+//
+// Everything here is deliberately harness-independent. `headserve.mjs` serves a
+// `git archive` from a temp dir it does not export, `with_snapshot.mjs` exports
+// `SNAPSHOT_DIR`, a bare `npm run dev` serves the working tree. Sniffing the
+// environment would therefore be right for one of the three and silently wrong for
+// the others — so the id is read from THE SERVER, which is the only party that knows
+// what it is serving.
+// ─────────────────────────────────────────────────────────────────────────────
+const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '../..');
+const sha = (s) => createHash('sha256').update(s).digest('hex');
+
+/**
+ * Vite's dev response for a `.ts` module is deterministic given the source EXCEPT for
+ * two things, both measured rather than assumed:
+ *   • an inline `//# sourceMappingURL=data:...` base64 sourcemap
+ *   • `?v=<hash>` on optimised-dep imports and `?t=<ms>` on HMR-invalidated ones
+ * Strip both and the body carries only root-relative paths — verified across two
+ * different snapshot roots and two fetches of the same file.
+ */
+const normServed = (t) => t.replace(/\/\/# sourceMappingURL=\S*/g, '').replace(/\?[vt]=[0-9a-f]+/g, '');
+
+/** Every source path under `src/`, relative and sorted. Paths only — never contents. */
+function enumerateSrc(dir = join(ROOT, 'src'), acc = []) {
+  for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) enumerateSrc(p, acc);
+    else if (/\.(ts|tsx|css|json|glsl)$/.test(e.name)) acc.push(relative(ROOT, p));
+  }
+  return acc;
+}
+
+/**
+ * Fetch every enumerated source path FROM THE SERVER and hash it. A 404 is recorded as
+ * a `<missing>` marker rather than skipped, so a file present in one tree and absent in
+ * the other changes the id instead of being invisible.
+ *
+ * ⚠️ Known limit, stated because an unstated one is how §5 happens: the PATH LIST comes
+ * from the local working tree. A file that exists ONLY in the served tree is not
+ * covered. That is the harmless direction for every harness in this repo (`headserve`
+ * serves HEAD, a subset; `snapshot` serves the working tree itself) and it is reported
+ * as `srcFiles` so the coverage is never implicit.
+ */
+async function fetchSrcId(base, opts = {}) {
+  const files = enumerateSrc();
+  const h = createHash('sha256');
+  let missing = 0;
+  const limit = 16;
+  const bodies = new Array(files.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: limit }, async () => {
+    for (let i = next++; i < files.length; i = next++) {
+      try {
+        const r = await fetch(`${base}/${files[i]}`);
+        bodies[i] = r.ok ? normServed(await r.text()) : '<missing>';
+        if (!r.ok) missing++;
+      } catch (e) { bodies[i] = `<error:${String(e).slice(0, 40)}>`; missing++; }
+    }
+  }));
+  for (let i = 0; i < files.length; i++) h.update(files[i]).update('\0').update(bodies[i]).update('\0');
+  const id = h.digest('hex').slice(0, 16);
+  if (opts.verbose) console.log(`  srcId ${id}  (${files.length} paths, ${missing} missing)`);
+  return { srcId: id, srcFiles: files.length, srcMissing: missing };
+}
+
+/**
+ * The identity of THE MEASUREMENT, and deliberately not of this file.
+ *
+ * A first version hashed the whole of `valuescan.mjs` + `valuelib.mjs`. That is wrong in
+ * the expensive direction: editing a doc comment, a log line or a GATE THRESHOLD would
+ * have invalidated every cached measurement in the repo and demanded an hour-long re-run
+ * for a change that cannot move a single number. `docs/LESSONS.md` §9 — a guard that
+ * cries wolf gets switched off, and this one would have cost an hour every time.
+ *
+ * So it covers exactly the two things that decide what `chars.json` and `dl.json`
+ * CONTAIN, with comments stripped by the TypeScript printer so formatting and prose
+ * cannot move it:
+ *   • `valuelib.mjs` — the metric implementations (ladder, figureGround, gridDL, ...)
+ *   • `CAPTURE`      — the in-page measurement, including the matte, the player pick and
+ *                      the occlusion test
+ * `STATIONS` is hashed separately, and `GATES` is hashed NOT AT ALL — a threshold is a
+ * judgement applied to a measurement, not part of it, so re-deciding a threshold must
+ * re-evaluate a cache rather than destroy it.
+ */
+const codeHash = (src, name) => {
+  const sf = ts.createSourceFile(name, src, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
+  // The printer removes comments but KEEPS the original line structure, so a comment that
+  // adds a line still moved the key (measured — the first version of the check below
+  // failed on exactly that). Collapsing whitespace runs afterwards makes it insensitive
+  // to layout as well. ⚠️ Whitespace INSIDE a template literal is normalised too, so a
+  // change to only the spacing of a template string would not register; nothing in
+  // `valuelib.mjs` or `CAPTURE` derives a number from one.
+  return ts.createPrinter({ removeComments: true }).printFile(sf).replace(/\s+/g, ' ').trim();
+};
+const toolHash = () => sha(
+  codeHash(readFileSync(new URL('./valuelib.mjs', import.meta.url), 'utf8'), 'valuelib.mjs')
+  + codeHash(`const CAPTURE = ${String(CAPTURE)};`, 'capture.js'),
+).slice(0, 16);
+
+/**
+ * The station TABLE, not its names. `60c5b92` moved four stations that had ended up
+ * inside a `CoverBox` while keeping their names, so a name-keyed check would have
+ * accepted the stale run — which is exactly what happened.
+ */
+const stationsHash = () => sha(JSON.stringify(STATIONS)).slice(0, 16);
+
+async function buildMeta(mode, base, extra = {}) {
+  const t0 = new Date().toISOString();
+  const src = base ? await fetchSrcId(base, { verbose: true }) : { srcId: null, srcFiles: 0, srcMissing: 0 };
+  return {
+    tool: 'valuescan', mode, runId: randomUUID().slice(0, 8),
+    toolHash: toolHash(), stationsHash: stationsHash(),
+    ...src, base: base ?? null,
+    ids: IDS, argv: process.argv.slice(2), startedAt: t0, finishedAt: null,
+    node: process.version, ...extra,
+  };
+}
+
+/**
+ * Is a stored `meta` usable as an input to the gate? Pure, so `--selftest` can prove it
+ * refuses every known-bad shape without a browser. Returns the list of reasons to
+ * REFUSE; empty means acceptable.
+ *
+ * `want` carries the running tool's identity and, optionally, the tree the caller has
+ * NAMED (`--as-of`) or PROVEN (a live `PREVIEW_BASE`). There is no third way to be
+ * fresh — that is the whole point.
+ */
+export function auditMeta(meta, want, label) {
+  const bad = [];
+  const L = label ? `${label}: ` : '';
+  if (!meta || typeof meta !== 'object') {
+    bad.push(`${L}no meta stamp at all — written by a valuescan older than the provenance fix,`
+      + ' so the tree that produced it is UNKNOWABLE. Re-run --mode chars/--mode dl.');
+    return bad;
+  }
+  if (!meta.srcId) bad.push(`${L}meta.srcId is null — the run never reached a server`);
+  if (meta.toolHash !== want.toolHash) {
+    bad.push(`${L}toolHash ${meta.toolHash} != ${want.toolHash} — the metric itself changed since this was measured`);
+  }
+  if (meta.stationsHash !== want.stationsHash) {
+    bad.push(`${L}stationsHash ${meta.stationsHash} != ${want.stationsHash} — the station TABLE moved (four were once inside CoverBoxes)`);
+  }
+  if (want.srcId && meta.srcId && meta.srcId !== want.srcId) {
+    bad.push(`${L}srcId ${meta.srcId} != ${want.srcId} — measured against a DIFFERENT TREE`
+      + ` (taken ${meta.finishedAt ?? meta.startedAt ?? 'at an unrecorded time'})`);
+  }
+  for (const id of want.ids ?? []) {
+    if (!(meta.ids ?? []).includes(id)) { bad.push(`${L}does not cover --ids ${id}`); break; }
+  }
+  return bad;
+}
 
 /** Joint groups, from `src/characters/rig.ts`. Same list `tools/tmp/limbcheck.mjs` uses. */
 const JOINTS = ['face', 'head', 'neck', 'torso', 'hips', 'shoulderL', 'shoulderR',
@@ -326,6 +524,41 @@ const CAPTURE = (opts) => {
     result.player = player.name;
     result.otherCastPx = perCast.filter((p) => p !== player).reduce((s, p) => s + p.px, 0);
 
+    // ── 2b. WHERE THE MASK AND THE VALUE DISAGREE ──────────────────────────
+    // `docs/LESSONS.md` §5. The mask above came from an ENVIRONMENT-HIDDEN render; the
+    // luma below is read from the SHIPPED frame. Those are two different renders, and a
+    // two-render metric is only valid where the two agree. Where a prop stands in front
+    // of the fighter the mask still claims the pixel and the shipped frame shows the
+    // PROP — so the tool reports the prop's luma as the character's, confidently, to
+    // four decimals. It did: four of eighteen stations returned dL identical to four
+    // decimals across a change that moved every other station, because the fighter was
+    // behind a counter and only its floating HP bar was on screen.
+    //
+    // The test is the same frontmost-surface test the per-part table already uses, run
+    // once for the WHOLE character against the FULL scene: a masked pixel is genuinely
+    // the character's iff hiding the character changes the colour there.
+    {
+      const sceneWith = directRect(0, 0, Wp, Hp);
+      const pMeshes = [];
+      player.obj.traverse((o) => { if (o.isMesh && o.visible) pMeshes.push(o); });
+      pMeshes.forEach((mm) => { mm.visible = false; });
+      const sceneWithout = directRect(0, 0, Wp, Hp);
+      pMeshes.forEach((mm) => { mm.visible = true; });
+      const vis = new Uint8Array(Wp * Hp);
+      let nvis = 0;
+      for (let j = 0; j < player.mask.length; j++) {
+        if (!player.mask[j]) continue;
+        const i4 = j * 4;
+        const d = Math.abs(sceneWith[i4] - sceneWithout[i4])
+          + Math.abs(sceneWith[i4 + 1] - sceneWithout[i4 + 1])
+          + Math.abs(sceneWith[i4 + 2] - sceneWithout[i4 + 2]);
+        if (d > 12) { vis[j] = 1; nvis++; }
+      }
+      player.vis = vis;
+      result.visiblePx = nvis;
+      result.occludedPct = player.px ? +(((player.px - nvis) / player.px) * 100).toFixed(1) : 100;
+    }
+
     // 3. crop rect: bbox padded enough to hold the figure/ground ring.
     const [bx, by, bw, bh] = player.bbox;
     const pad = Math.max(12, Math.round(opts.ringFrac * bh) + 6);
@@ -360,6 +593,26 @@ const CAPTURE = (opts) => {
     result.ladder = window.VL.ladder(lumas, {});
     result.ladderNoPost = window.VL.ladder(lumasNoPost, {});
     result.fg = window.VL.figureGround(luma, cw, chh, maskCrop, { ringFrac: opts.ringFrac, edgeR: opts.edgeR });
+
+    // The SAME metric restricted to the pixels where the two renders agree. Reported
+    // ALONGSIDE, never instead of: peers are running before/after A/Bs through this
+    // instrument right now, and quietly changing what `fg.dL` means under them is the
+    // exact fault this file exists to stop. `dLvisible` is the honest number;
+    // `fg.dL - dLvisible` is the size of the lie at this station.
+    {
+      const visCrop = new Uint8Array(cw * chh);
+      let n = 0;
+      for (let y = 0; y < chh; y++) for (let x = 0; x < cw; x++) {
+        const v = player.vis[(cy + y) * Wp + (cx + x)];
+        visCrop[y * cw + x] = v; n += v;
+      }
+      result.fgVisible = n >= 16
+        ? window.VL.figureGround(luma, cw, chh, visCrop, { ringFrac: opts.ringFrac, edgeR: opts.edgeR })
+        : null;
+      const visLumas = [];
+      for (let j = 0; j < cw * chh; j++) if (visCrop[j]) visLumas.push(luma[j]);
+      result.ladderVisible = visLumas.length >= 64 ? window.VL.ladder(visLumas, {}) : null;
+    }
     result.charHeightPx = bh;
     result.charHeightPctOfFrame = +((bh / Hp) * 100).toFixed(2);
 
@@ -509,6 +762,33 @@ const CAPTURE = (opts) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const b64ToBytes = (s) => Uint8Array.from(Buffer.from(s, 'base64'));
 
+/**
+ * Is this sample a measurement of the CHARACTER, or of whatever is standing in front
+ * of it? `docs/LESSONS.md` §5, made operational.
+ *
+ * Both thresholds are derived, not chosen:
+ *  • `MIN_VISIBLE_PX` 200 — below this the fighter is effectively not on screen. The
+ *    four CoverBox stations produced tens of pixels of floating HP bar and returned a
+ *    perfectly plausible dL for it.
+ *  • `MAX_OCCLUDED` 20% — `fg.dL` is a MEAN over the figure, so an occluded fraction x
+ *    blends the occluder in with weight x. A prop typically sits 0.25-0.35 luma from a
+ *    fighter, so x = 0.20 is the point at which the error reaches ~0.05-0.07, which is
+ *    the size of the `dlBelow10` gate's own decision margin (threshold 0.10).
+ *
+ * `valid:false` means "no number", NOT "a bad number". The whole failure this replaces
+ * is that a bad number is indistinguishable from a good one.
+ */
+export const MIN_VISIBLE_PX = 200;
+export const MAX_OCCLUDED = 20;
+export function validity(res) {
+  const vis = res.visiblePx ?? null;
+  const occ = res.occludedPct ?? null;
+  if (vis == null || occ == null) return { valid: null, invalidWhy: 'not measured (pre-occlusion run)' };
+  if (vis < MIN_VISIBLE_PX) return { valid: false, invalidWhy: `only ${vis}px of the fighter reach the frame` };
+  if (occ > MAX_OCCLUDED) return { valid: false, invalidWhy: `${occ}% of the matte is occluded by the environment` };
+  return { valid: true, invalidWhy: null };
+}
+
 async function newPage(browser, W, H, dsf) {
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: dsf });
   await page.addInitScript({ content: VL_SRC });
@@ -572,6 +852,7 @@ async function modeChars() {
   if (!st) { console.error(`no station ${LADDER_STATION}`); process.exit(2); }
   const dir = join(OUT, 'chars');
   await mkdir(dir, { recursive: true });
+  const meta = await buildMeta('chars', BASE, { station: LADDER_STATION, ss: SS, yaws: YAWS });
   const browser = await chromium.launch({ args: LAUNCH_ARGS });
   const out = {};
   try {
@@ -623,8 +904,12 @@ async function modeChars() {
       }
     }
   } finally { await browser.close(); }
-  await writeFile(join(OUT, 'chars.json'), JSON.stringify(out, null, 2));
+  meta.finishedAt = new Date().toISOString();
+  // `__meta` and not `meta`, so a character called `meta` could never collide with it,
+  // and so an older reader that iterates ids sees an obviously non-character key.
+  await writeFile(join(OUT, 'chars.json'), JSON.stringify({ ...out, __meta: meta }, null, 2));
   console.log(`\nwrote ${OUT}/chars.json and ${dir}/*.{matte,value,parts}.png`);
+  console.log(`srcId ${meta.srcId}  toolHash ${meta.toolHash}  stations ${meta.stationsHash}  run ${meta.runId}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -635,11 +920,28 @@ async function modeDl() {
   const only = get('--only', null);
   const jobs = only ? STATIONS.filter((s) => only.split(',').includes(s.id)) : STATIONS;
   await mkdir(OUT, { recursive: true });
+  const meta = await buildMeta('dl', BASE, { stations: jobs.map((s) => s.id), stationsTotal: STATIONS.length });
   const browser = await chromium.launch({ args: LAUNCH_ARGS });
   const rows = [];
-  try {
-    for (const id of IDS) {
-      for (const st of jobs) {
+  // ── PARALLELISM, and the reason the default is 1 ──────────────────────────
+  // 11 characters x 18 stations = 198 full page boots, and a boot under SwiftShader is
+  // ~60s on this machine — 3.3 hours serial. `--jobs N` runs N pages at once.
+  //
+  // ⚠️ This is a change to THE MEASUREMENT BOX, which `docs/LESSONS.md` §5 records as
+  // part of the instrument: at load 38.4 across 789 processes, capture probes were
+  // racing their own animations and it was misread as peers saving files. So the
+  // default stays 1, the chosen value is stamped into `meta.jobs`, and the agreement
+  // between a serial run and a parallel one is a fact to be MEASURED rather than
+  // assumed — see the commit message for the paired comparison this was validated on.
+  const JOBS = Math.max(1, Number(get('--jobs', 1)));
+  meta.jobs = JOBS;
+  const queue = [];
+  for (const id of IDS) for (const st of jobs) queue.push({ id, st });
+  let next = 0;
+  const worker = async () => {
+    for (let k = next++; k < queue.length; k = next++) {
+      const { id, st } = queue[k];
+      {
         const page = await newPage(browser, 1600, 900, 1);
         try {
           const url = `${BASE}/?player=${id}&enemy=donut&px=${st.x}&py=${st.y}&fogRadius=${st.fog}&simSpeed=${SIM_SPEED}&pointerLock=0`;
@@ -656,19 +958,39 @@ async function modeDl() {
             dL: res.fg.dL, dLmedian: res.fg.dLmedian, dLedge: res.fg.dLedge,
             gridDL: res.gridDL.deltaLuma, gridPlayerLuma: res.gridDL.playerLuma, gridRingLuma: res.gridDL.ringLuma,
             ladderRange: res.ladder.range, ladderSteps10: res.ladder.steps.j10, ladderP50: res.ladder.p50,
+            visiblePx: res.visiblePx, occludedPct: res.occludedPct,
+            dLvisible: res.fgVisible ? res.fgVisible.dL : null,
+            ...validity(res),
           });
           const r = rows[rows.length - 1];
           console.log(`${id.padEnd(12)} ${st.id.padEnd(13)} dL ${String(r.dL).padStart(7)}  |dL| ${Math.abs(r.dL).toFixed(3)}  ` +
-            `dLedge ${String(r.dLedge).padStart(7)}  fig ${r.figureLuma} grd ${r.groundLuma}  gridDL ${String(r.gridDL).padStart(6)}`);
+            `dLedge ${String(r.dLedge).padStart(7)}  fig ${r.figureLuma} grd ${r.groundLuma}  gridDL ${String(r.gridDL).padStart(6)}` +
+            `  occl ${String(r.occludedPct).padStart(5)}%  dLvis ${String(r.dLvisible).padStart(7)}${r.valid ? '' : `  INVALID (${r.invalidWhy})`}`);
         } catch (e) {
           rows.push({ id, station: st.id, error: String(e) });
           console.error(`✗ ${id}/${st.id}: ${e}`);
         } finally { await page.close(); }
       }
     }
+  };
+  try {
+    await Promise.all(Array.from({ length: JOBS }, worker));
   } finally { await browser.close(); }
-  await writeFile(join(OUT, 'dl.json'), JSON.stringify({ rows }, null, 2));
-  console.log(`\nwrote ${OUT}/dl.json  (${rows.filter((r) => !r.error).length} ok, ${rows.filter((r) => r.error).length} failed)`);
+  // Deterministic order regardless of which worker finished first, so two runs at
+  // different `--jobs` produce byte-comparable files.
+  rows.sort((a, b) => (IDS.indexOf(a.id) - IDS.indexOf(b.id))
+    || (jobs.findIndex((s) => s.id === a.station) - jobs.findIndex((s) => s.id === b.station)));
+  meta.finishedAt = new Date().toISOString();
+  await writeFile(join(OUT, 'dl.json'), JSON.stringify({ rows, __meta: meta }, null, 2));
+  const inval = rows.filter((r) => r.valid === false);
+  console.log(`\nwrote ${OUT}/dl.json  (${rows.filter((r) => !r.error).length} ok, ${rows.filter((r) => r.error).length} failed,`
+    + ` ${inval.length} INVALID — mask and value disagree)`);
+  if (inval.length) {
+    const byStation = {};
+    for (const r of inval) (byStation[r.station] ??= []).push(r.id);
+    for (const [s, ids] of Object.entries(byStation)) console.log(`  INVALID ${s.padEnd(14)} ${ids.length}/${IDS.length} characters`);
+  }
+  console.log(`srcId ${meta.srcId}  toolHash ${meta.toolHash}  stations ${meta.stationsHash}  run ${meta.runId}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -984,7 +1306,72 @@ function selftest() {
     check('an enclosed hole is filled, not lost', n2, 10800);
   }
 
-  console.log('\nG. luma is the recorded formula, not a re-derivation');
+  console.log('\nG. PROVENANCE — every known-bad cache shape is REFUSED');
+  // The bug this replaced, as a fixture. `shots/vl/chars.json` on 08-05 had no stamp of
+  // any kind, and the gate reported it thirteen hours and one value pass later.
+  {
+    const good = {
+      tool: 'valuescan', mode: 'chars', srcId: 'aaaaaaaaaaaaaaaa', toolHash: 'tttttttttttttttt',
+      stationsHash: 'ssssssssssssssss', ids: ['egg', 'taco'], finishedAt: '2026-08-05T17:00:00Z',
+    };
+    const want = { toolHash: 'tttttttttttttttt', stationsHash: 'ssssssssssssssss', ids: ['egg', 'taco'], srcId: 'aaaaaaaaaaaaaaaa' };
+    const n = (m, w) => auditMeta(m, w ?? want, 'f').length;
+    check('a matching stamp is ACCEPTED', n(good), 0);
+    check('THE BUG: no stamp at all is REFUSED', n(undefined) > 0, true);
+    check('THE BUG: a stamp from another TREE is REFUSED', n({ ...good, srcId: 'bbbbbbbbbbbbbbbb' }) > 0, true);
+    check('a stamp from another TOOL VERSION is REFUSED', n({ ...good, toolHash: 'zzzzzzzzzzzzzzzz' }) > 0, true);
+    check('a stamp from the STALE STATION TABLE is REFUSED', n({ ...good, stationsHash: 'zzzzzzzzzzzzzzzz' }) > 0, true);
+    check('a stamp missing a requested id is REFUSED', n({ ...good, ids: ['egg'] }) > 0, true);
+    check('srcId null (never reached a server) is REFUSED', n({ ...good, srcId: null }) > 0, true);
+    // and the ONLY thing that may pass unverified is an explicitly named tree
+    check('no --as-of and no live base leaves srcId unchecked, so gate adds its own refusal',
+      n(good, { ...want, srcId: null }), 0);
+  }
+
+  console.log('\nH. TWO-RENDER VALIDITY — a sample is refused where mask and value disagree');
+  // `docs/LESSONS.md` §5. The four CoverBox stations: the fighter is behind a counter,
+  // the matte still claims ~26k px, and tens of pixels of floating HP bar reach the
+  // frame. That must be NO NUMBER, not a plausible one.
+  check('fully visible sample is valid', validity({ visiblePx: 26000, occludedPct: 0.0 }).valid, true);
+  check('a fighter behind a counter (120px visible) is INVALID',
+    validity({ visiblePx: 120, occludedPct: 99.5 }).valid, false);
+  check('half-occluded is INVALID', validity({ visiblePx: 13000, occludedPct: 50.0 }).valid, false);
+  check('exactly at the 20% threshold is still valid', validity({ visiblePx: 20000, occludedPct: 20 }).valid, true);
+  check('just past it is not', validity({ visiblePx: 20000, occludedPct: 20.1 }).valid, false);
+  check('a pre-occlusion run reports UNKNOWN, never true', validity({}).valid, null);
+
+  console.log('\nI. the served-response normaliser, on the two volatile parts (measured, not assumed)');
+  {
+    const body = 'import * as T from "/node_modules/.vite/deps/three.js?v=3853b7d2";\nconst a=1;\n';
+    const withMap = `${body}//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozfQ==`;
+    const withMap2 = `${body}//# sourceMappingURL=data:application/json;base64,DIFFERENTBASE64==`;
+    check('two different sourcemaps normalise to the same body', normServed(withMap), normServed(withMap2));
+    check('the dep-optimiser ?v= hash is stripped',
+      normServed('import x from "/a.js?v=deadbeef";'), 'import x from "/a.js";');
+    check('an HMR ?t= timestamp is stripped',
+      normServed('import x from "/src/a.ts?t=1754400000000";'), 'import x from "/src/a.ts";');
+    check('real code is NOT stripped', normServed(body).includes('const a=1;'), true);
+  }
+
+  console.log('\nJ. the CACHE KEY is scoped to the measurement, not to the file');
+  // Measured on the real file (see the commit message): a comment inside CAPTURE and a
+  // GATE THRESHOLD both leave toolHash at 8e48908c947924b9, while changing the occlusion
+  // tolerance from `d > 12` to `d > 24` moves it to a3c2a7d327c2c92c. Here is the same
+  // property on inputs small enough to read, because the version of this key that hashed
+  // the whole file would have demanded an hour-long re-run for a typo fix — and a guard
+  // that costs an hour to satisfy is a guard that gets deleted (`docs/LESSONS.md` §9).
+  {
+    const base = 'const f = (x) => { /* why */ return x * 2; };';
+    const commentOnly = 'const f = (x) => {\n  // a completely different comment\n  /* and another */\n  return x * 2;\n};';
+    const reformatted = 'const f = (x)=>{return x*2;};';
+    const realChange = 'const f = (x) => { /* why */ return x * 3; };';
+    const H = (s) => sha(codeHash(s, 't.js')).slice(0, 16);
+    check('a COMMENT-ONLY edit does not move the key', H(commentOnly), H(base));
+    check('REFORMATTING does not move the key', H(reformatted), H(base));
+    check('a one-character CONSTANT change DOES move the key', H(realChange) !== H(base), true);
+  }
+
+  console.log('\nK. luma is the recorded formula, not a re-derivation');
   check('luma(255,255,255)', +VL.luma(255, 255, 255).toFixed(6), 1);
   check('luma(0,0,0)', VL.luma(0, 0, 0), 0);
   check('luma(255,0,0) = 0.2126', +VL.luma(255, 0, 0).toFixed(4), 0.2126, 1e-4);
@@ -1027,28 +1414,130 @@ const GATES = [
   // eleven agents to repaint eleven characters for one puddle. One allowed failure keeps
   // the gate sensitive to a character that is genuinely weak everywhere (hotdog: 3 of 18)
   // while attributing a shared hostile station to the station.
-  { key: 'dlBelow10', label: 'stations with dL < 0.10 (of 18)', max: 1, target: 0,
-    why: "this project's own recorded lighting standard: figure/ground >= 0.10, |dL| < 0.05 = none. NOT a reference figure — said out loud. One station is allowed because `grease_in` fails for 9 of 11 and is an ARENA fix." },
+  { key: 'dlBelow10', label: 'stations with dL < 0.10 (of the VALID 18)', max: 1, target: 0,
+    why: "this project's own recorded lighting standard: figure/ground >= 0.10, |dL| < 0.05 = none. NOT a reference figure — said out loud. One station is allowed because `grease_in` fails for 9 of 11 and is an ARENA fix. Stations where the mask and the value disagree (the fighter is occluded) contribute NO number and are counted in the nInv column — they used to contribute the OCCLUDER'S luma, which is what made this key fail for all eleven characters on both sides of the value pass." },
   { key: 'weakBoundaryPct', label: 'part boundary below 0.10 dL', max: 15, target: 5,
     why: 'CHOSEN, not measured — no reference equivalent exists because the plates cannot be part-segmented. Calibrated off the cast: soup already reads 5.1%.' },
 ];
 
+/**
+ * RECOMPUTE OR REFUSE.
+ *
+ * The old body was three lines: `readFile(chars.json)`, `readFile(dl.json)`, print. It
+ * had no way to tell a file written five minutes ago from one written thirteen hours
+ * and one value pass ago, and on 08-05 it printed the pre-value-pass cast to four
+ * decimals as though `a5ce2a5` had never happened.
+ *
+ * Three ways to be right, and nothing else:
+ *   1. DEFAULT — recompute. `--mode chars` then `--mode dl` into `--out`, then gate.
+ *      Needs `PREVIEW_BASE`. The cache stops existing.
+ *   2. `--reuse` with a live `PREVIEW_BASE` — read the cache, then fetch the served
+ *      tree's `srcId` and PROVE the cache was taken against it.
+ *   3. `--reuse --as-of <srcId>` — offline. The caller must TYPE the id of the tree
+ *      they are quoting, which is what makes a stale quote impossible by accident
+ *      rather than merely discouraged.
+ *
+ * `--recompute-dl-only` / `--recompute-chars-only` exist because the two halves cost
+ * very different amounts (11 pages vs 11 x 18) and a character-only change does not
+ * move the arena stations.
+ */
 async function modeGate() {
-  const chars = JSON.parse(await readFile(join(OUT, 'chars.json'), 'utf8'));
-  const dl = JSON.parse(await readFile(join(OUT, 'dl.json'), 'utf8')).rows;
-  console.log('\nACCEPTANCE TEST — value separation\n');
+  const reuse = has('--reuse');
+  const asOf = get('--as-of', null);
+  const outDir = OUT;
+
+  if (!reuse) {
+    if (!BASE) {
+      console.error('\n✗ REFUSED — `--mode gate` recomputes by default and PREVIEW_BASE is unset.\n');
+      console.error('  Either run it under a server:');
+      console.error('    node tools/tmp/headserve.mjs -- node tools/tmp/valuescan.mjs --mode gate');
+      console.error('  or reuse a stamped cache and say which tree it describes:');
+      console.error('    node tools/tmp/valuescan.mjs --mode gate --reuse --as-of <srcId>\n');
+      console.error('  It will NOT read whatever happens to be on disk. That is the defect this');
+      console.error('  replaced: on 08-05 it reported the cast at its pre-value-pass numbers');
+      console.error('  (egg range 0.401, p05 0.579) from files 13 hours older than the change.');
+      return 2;
+    }
+    const doChars = !has('--recompute-dl-only');
+    const doDl = !has('--recompute-chars-only');
+    console.log(`\nRECOMPUTING into ${outDir} (chars:${doChars} dl:${doDl}) — the gate does not read a cache it cannot prove.\n`);
+    if (doChars) await modeChars();
+    if (doDl) await modeDl();
+  }
+
+  let chars; let dlFile;
+  try {
+    chars = JSON.parse(await readFile(join(outDir, 'chars.json'), 'utf8'));
+    dlFile = JSON.parse(await readFile(join(outDir, 'dl.json'), 'utf8'));
+  } catch (e) {
+    console.error(`\n✗ REFUSED — cannot read the gate's inputs from ${outDir}: ${e.message}\n`);
+    return 2;
+  }
+  const dl = dlFile.rows;
+
+  // ── PROVENANCE AUDIT ───────────────────────────────────────────────────────
+  const want = { toolHash: toolHash(), stationsHash: stationsHash(), ids: IDS, srcId: null };
+  let proof = null;
+  if (asOf) { want.srcId = asOf; proof = `NAMED by --as-of ${asOf}`; }
+  else if (BASE) {
+    const live = await fetchSrcId(BASE);
+    want.srcId = live.srcId;
+    proof = `PROVEN against the live tree at ${BASE} (srcId ${live.srcId}, ${live.srcFiles} paths)`;
+  }
+  const refusals = [
+    ...auditMeta(chars.__meta, want, 'chars.json'),
+    ...auditMeta(dlFile.__meta, want, 'dl.json'),
+  ];
+  if (chars.__meta && dlFile.__meta && chars.__meta.srcId && chars.__meta.srcId !== dlFile.__meta.srcId) {
+    refusals.push('chars.json and dl.json were measured against DIFFERENT TREES'
+      + ` (${chars.__meta.srcId} vs ${dlFile.__meta.srcId}) — a ladder from one and a dL from another`);
+  }
+  if (!want.srcId) {
+    refusals.push('no way to check freshness: no PREVIEW_BASE to verify against and no --as-of <srcId> naming the tree');
+  }
+  // The station COVERAGE, not just the table. `--mode dl --only <a,b>` writes a
+  // perfectly well-formed dl.json holding four of eighteen stations, and the gate then
+  // printed `dlBelow10` as "(of 18)" while counting over four.
+  const covered = new Set(dl.filter((r) => !r.error).map((r) => r.station));
+  const missingStations = STATIONS.filter((s) => !covered.has(s.id)).map((s) => s.id);
+  if (missingStations.length) {
+    refusals.push(`dl.json covers ${covered.size} of ${STATIONS.length} stations — missing ${missingStations.join(', ')}.`
+      + ' `dlBelow10` is a COUNT out of 18 and cannot be computed from a subset.');
+  }
+
+  if (refusals.length) {
+    console.error('\n✗ REFUSED — the gate will not report a number it cannot tie to a tree.\n');
+    for (const r of refusals) console.error(`  · ${r}`);
+    console.error('\n  chars.json meta:', chars.__meta ? JSON.stringify({ srcId: chars.__meta.srcId, toolHash: chars.__meta.toolHash, finishedAt: chars.__meta.finishedAt }) : 'ABSENT');
+    console.error('  dl.json    meta:', dlFile.__meta ? JSON.stringify({ srcId: dlFile.__meta.srcId, toolHash: dlFile.__meta.toolHash, finishedAt: dlFile.__meta.finishedAt }) : 'ABSENT');
+    console.error('\n  Fix: re-run `--mode gate` with PREVIEW_BASE set (it recomputes), or pass');
+    console.error('       `--reuse --as-of <srcId>` if you deliberately mean to quote that tree.\n');
+    return 2;
+  }
+
+  console.log('\nACCEPTANCE TEST — value separation');
+  console.log(`  tree      ${chars.__meta.srcId}   freshness ${proof}`);
+  console.log(`  measured  chars ${chars.__meta.finishedAt}   dl ${dlFile.__meta.finishedAt}`);
+  console.log(`  tool      ${chars.__meta.toolHash}   stations ${chars.__meta.stationsHash}\n`);
   for (const g of GATES) {
     console.log(`  ${g.label.padEnd(34)} ${g.min != null ? '>= ' + g.min : '<= ' + g.max}  (target ${g.target})`);
     console.log(`  ${' '.repeat(34)} ${g.why}`);
   }
-  console.log('\nchar          range   p05  steps  minDL  n<.10  weakB%  worstStn        verdict');
+  console.log('\nchar          range   p05  steps  minDL  n<.10   nInv  weakB%  worstStn        verdict');
   let failing = 0;
   const out = [];
   for (const id of IDS) {
     const c = chars[id];
     if (!c || !c.shipped || c.shipped.error) { console.log(`${id.padEnd(13)} NO DATA`); failing++; continue; }
     const L = c.shipped.ladder;
-    const my = dl.filter((r) => r.id === id && !r.error);
+    const all = dl.filter((r) => r.id === id && !r.error);
+    // §5 made operational: a station where the mask and the value disagree contributes
+    // NO NUMBER. The four CoverBox stations used to contribute a prop's luma here, and
+    // they are exactly what drove `dlBelow10` to fail for all eleven characters on BOTH
+    // sides of the value pass — which read as "the cast did not improve" when it was
+    // never a character property at all.
+    const my = all.filter((r) => r.valid !== false);
+    const nInvalid = all.length - my.length;
     const minDL = my.length ? Math.min(...my.map((r) => r.dL)) : null;
     const A = (c.ss && c.ss.adjacent) || [];
     const tot = A.reduce((s, p) => s + p.contacts, 0);
@@ -1062,20 +1551,40 @@ async function modeGate() {
       return g.min != null ? x < g.min : x > g.max;
     }).map((g) => g.key);
     if (fails.length) failing++;
-    out.push({ id, ...v, worstStation, fails });
+    out.push({ id, ...v, stationsScored: my.length, stationsInvalid: nInvalid, worstStation, fails });
     console.log(`${id.padEnd(13)}${v.range.toFixed(3).padStart(6)}${v.p05.toFixed(3).padStart(6)}${String(v.steps10).padStart(7)}` +
-      `${(minDL == null ? '  —' : minDL.toFixed(3)).padStart(7)}${String(dlBelow10).padStart(7)}` +
+      `${(minDL == null ? '  —' : minDL.toFixed(3)).padStart(7)}${String(dlBelow10).padStart(7)}${String(nInvalid).padStart(7)}` +
       `${v.weakBoundaryPct.toFixed(1).padStart(8)}  ${String(worstStation).padEnd(13)} ` +
       (fails.length ? `FAIL: ${fails.join(', ')}` : 'PASS'));
   }
-  await writeFile(join(OUT, 'gate.json'), JSON.stringify({ gates: GATES, rows: out }, null, 2));
-  console.log(`\n${IDS.length - failing}/${IDS.length} pass · wrote ${OUT}/gate.json`);
+  const meta = {
+    srcId: chars.__meta.srcId, toolHash: chars.__meta.toolHash, stationsHash: chars.__meta.stationsHash,
+    freshness: proof, recomputed: !reuse,
+    charsRun: { runId: chars.__meta.runId, finishedAt: chars.__meta.finishedAt },
+    dlRun: { runId: dlFile.__meta.runId, finishedAt: dlFile.__meta.finishedAt },
+    gatedAt: new Date().toISOString(),
+  };
+  await writeFile(join(OUT, 'gate.json'), JSON.stringify({ __meta: meta, gates: GATES, rows: out }, null, 2));
+  console.log(`\n${IDS.length - failing}/${IDS.length} pass · tree ${meta.srcId} · wrote ${OUT}/gate.json`);
   return failing ? 1 : 0;
+}
+
+/** Print the served tree's id, so `--as-of` can be quoted rather than guessed. */
+async function modeSrcId() {
+  // The two LOCAL ids print with or without a server, so `toolHash` can be diffed across
+  // an edit without booting anything — which is how its insensitivity to comments and to
+  // GATE thresholds, and its sensitivity to a metric change, are checked.
+  console.log(JSON.stringify({ toolHash: toolHash(), stationsHash: stationsHash() }));
+  if (!BASE) { console.error('PREVIEW_BASE unset — srcId needs a server (headserve.mjs / with_snapshot.mjs)'); return 2; }
+  const s = await fetchSrcId(BASE);
+  console.log(JSON.stringify({ ...s, base: BASE, toolHash: toolHash(), stationsHash: stationsHash() }));
+  return 0;
 }
 
 if (has('--selftest')) process.exit(selftest());
 else if (MODE === 'chars') await modeChars();
 else if (MODE === 'dl') await modeDl();
 else if (MODE === 'ref') await modeRef();
+else if (MODE === 'srcid') process.exit(await modeSrcId());
 else if (MODE === 'gate') process.exit(await modeGate());
 else { console.error(`unknown --mode ${MODE}`); process.exit(2); }

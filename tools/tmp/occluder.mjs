@@ -41,6 +41,9 @@
  *   node tools/tmp/occluder.mjs --ids soup --joints elbowL,elbowR
  *   node tools/tmp/occluder.mjs --ids hamburger --joints handR --pitch 58 --meshes 12
  */
+/**
+ * capture-audit: css-immune — `gl.readPixels()` on `preview.html`. Occlusion is measured in drawing-buffer pixels.
+ */
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 

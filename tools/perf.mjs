@@ -69,6 +69,7 @@
 import { chromium } from 'playwright';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { settleScreen } from './tmp/settle.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // args
@@ -496,6 +497,13 @@ async function gotoScene(page, name) {
   if (!s) throw new Error(`unknown scene "${name}". known: ${Object.keys(SCENES).join(', ')}`);
   await page.goto(BASE + s.url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
   await page.waitForFunction(s.ready, null, { timeout: 120_000 });
+  // The scene's `ready` flag fires in the same tick shell.ts drops the curtain, 0.26s
+  // before `fa-screen-in` finishes — so the first sampling window would otherwise include
+  // an entry animation that is not part of what this measures. SOFT and time-boxed on
+  // purpose: a perf harness must never die on a paint predicate, and `preview.html`
+  // scenes mount no shell at all, where this returns immediately.
+  const paint = await settleScreen(page, { soft: true, timeout: 8_000, label: `perf:${name}` });
+  if (paint && !paint.ok) console.warn(`  (scene ${name} never reached full paint: ${paint.why.join('; ')})`);
   if (s.settle) {
     await page.waitForFunction(s.settle, null, { timeout: 180_000 }).catch(() => {
       console.warn(`  (settle predicate never fired for ${name} — continuing)`);

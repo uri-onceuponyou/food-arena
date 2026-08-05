@@ -55,6 +55,7 @@
 
 import { chromium } from 'playwright';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { settleScreen, captureSettled } from './settle.mjs';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
@@ -229,12 +230,17 @@ async function main() {
       };
       trips.push(row);
       say(`trip ${i}/${TRIPS}: glCreated=${row.glCreated} glLive=${row.glLive} canvases=${canvases} nodes=${domNodes} listeners=${listeners} heap=${row.heapMB}MB errors=${errs}`);
-      await page.screenshot({ path: `${OUT}/trip-${String(i).padStart(2, '0')}.png` }).catch(() => {});
+      // `wait:false, enforce:false`: this probe must survive 30 minutes of navigation and
+      // must never die on a capture, so the shot is RECORDED rather than refused — the
+      // `.capture.json` sidecar carries `painted:` so a washed trip PNG is labelled as one
+      // instead of being read as a screen that looked like that.
+      await captureSettled(page, { path: `${OUT}/trip-${String(i).padStart(2, '0')}.png`, label: `trip-${i}`, wait: false, enforce: false, tool: 'reload_watch' }).catch(() => {});
     }
   }
 
   const beforeScreen = await page.evaluate(() => window.__screen).catch(() => null);
-  await page.screenshot({ path: `${OUT}/before.png` }).catch(() => {});
+  await settleScreen(page, { soft: true, label: 'before.png' });
+  await captureSettled(page, { path: `${OUT}/before.png`, label: 'before', wait: false, enforce: false, tool: 'reload_watch' }).catch(() => {});
 
   if (TOUCH) {
     await page.waitForTimeout(TOUCH_AFTER_MS);
@@ -258,14 +264,16 @@ async function main() {
       const firstScreen = await page.evaluate(() => window.__screen).catch(() => null);
       await page.waitForFunction('window.__screen === "home" && window.__screenReady === true', null, { timeout: 60_000 })
         .catch(() => say('did not reach home within 60s of the reload'));
-      // `__screenReady` fires while the screen is still at opacity 0 (`docs/RESUME.md`),
-      // so settle past the 0.26s fade before judging the pixels.
-      await page.waitForTimeout(2500);
+      // `__screenReady` fires while the screen is still at opacity 0, so settle past the
+      // 0.26s fade before judging the pixels. This was a 2500ms sleep — `docs/LESSONS.md`
+      // §10 records a fixed timeout MANUFACTURING a fake "blank roster card" bug that a
+      // critic then scored twice, so it is now the paint STATE, with the sleep gone.
+      await settleScreen(page, { soft: true, label: `after reload ${loads}` });
       const screen = await page.evaluate(() => window.__screen).catch(() => null);
       const url = page.url();
       reloads.push({ at: Math.round((Date.now() - t0) / 1000), loads, firstScreen, screen, url });
       say(`*** RELOAD #${loads} — first screen="${firstScreen}" -> settled on "${screen}" url=${url} ***`);
-      await page.screenshot({ path: `${OUT}/after-reload-${loads}.png` }).catch(() => {});
+      await captureSettled(page, { path: `${OUT}/after-reload-${loads}.png`, label: `after-reload-${loads}`, wait: false, enforce: false, tool: 'reload_watch' }).catch(() => {});
       lastLoads = loads;
       if (TOUCH) break;   // controlled test: one reload is the whole experiment
     }

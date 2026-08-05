@@ -9,6 +9,12 @@
  * rather than a file edit, so the comparison is on ONE page load with one animation
  * phase and the idle sway cannot be mistaken for the effect.
  */
+/**
+ * capture-audit: css-immune — the verdict is `window.__charStage()`, an NDC projection through the 3D camera. It is
+ * derived from the canvas LAYOUT size, which a `scale()` transform does not change, so
+ * `fa-screen-in` cannot move it. (The 2500ms sleep below is for the idle animation, not
+ * for the fade.)
+ */
 import { chromium } from 'playwright';
 const A=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--enable-webgl','--ignore-gpu-blocklist','--disable-gpu-sandbox'];
 const base=process.env.PREVIEW_BASE;

@@ -46,6 +46,7 @@ import { chromium } from 'playwright';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { settleScreen } from './settle.mjs';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle',
@@ -192,6 +193,11 @@ async function collectCardGeometry(base, outPath) {
       try {
         await page.goto(`${base}/?screen=characters&hold=600000&pointerLock=0`, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForFunction('window.__screen === "characters" && window.__screenReady === true', null, { timeout: 120000 });
+        // The card/image rects below are compared against each other as FRACTIONS, so the
+        // 0.992 entry scale largely cancels — but the safe-area and absolute-px checks in
+        // the same battery do not cancel, and a metric that is right for one column of a
+        // table and wrong for another is worse than one that is wrong for all of it.
+        await settleScreen(page, { label: 'faceframe:characters' });
         const n = await page.evaluate(readCards, DUMMY);
         // Two rAFs: the class change has to reach layout before the boxes are read.
         await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));

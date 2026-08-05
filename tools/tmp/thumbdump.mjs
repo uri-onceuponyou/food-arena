@@ -24,6 +24,12 @@
  *
  *   node tools/tmp/thumbdump.mjs --url <snap> --out shots/roster/src --label before
  */
+/**
+ * capture-audit: css-immune — the subject is each card's `img.src` data URI — a PNG produced by an OFFSCREEN renderer
+ * and then base64'd into the DOM. Its bytes are fixed before any card is painted, so the
+ * screen's opacity is not in the path. `__thumbsReady` plus a per-card src check is the
+ * real condition, and both are already waited on.
+ */
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 import sharp from 'sharp';
