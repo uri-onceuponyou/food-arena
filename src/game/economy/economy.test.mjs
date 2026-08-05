@@ -34,6 +34,7 @@ import {
   CONTAINERS, CONTAINER_KINDS, DUPLICATE_COINS, MATCH_PAYOUT, ROSTER_GATED,
   STARTER_CHARACTER, STARTING_BALANCE, STORE_AVAILABLE, STORE_PRODUCTS, TROPHY_ROAD,
   CHARACTERS_BY_RARITY, ENEMY_LEVEL_MODE, MATCH_PACING, SECONDS_PER_MATCH,
+  LEVEL_UP, RARITY_MEANING,
 } from './tuning.ts';
 import { costToMax, enemyLevelFor, levelUpCost, totalLevelCost } from './levels.ts';
 import { createRng, weightedIndex } from './rng.ts';
@@ -801,6 +802,60 @@ console.log('\n13. Character levels');
   check('no tier is cheaper or dearer to max than any other — rarity buys acquisition, not price',
     Math.max(...byTier.map((r) => r.coins)) === Math.min(...byTier.map((r) => r.coins)),
     `spread ${Math.max(...byTier.map((r) => r.coins)) - Math.min(...byTier.map((r) => r.coins))} coins`);
+
+  // ── (b2) THE DISCLOSURE SENTENCE MUST AGREE WITH THE TABLE ABOVE IT ───────
+  //
+  // `RARITY_MEANING` is rendered on the drop-rate sheet by BOTH `shop.ts` and
+  // `trophyRoad.ts` — the one surface this product treats as a legal disclosure. It told
+  // players rarity sets "how much it costs to level up" for a full commit AFTER §26 made
+  // that false, in the same file whose comment three lines above it already said it was
+  // false. Nothing caught it because nothing DERIVED the sentence from the constant. The
+  // inverted assertions above guarded the number and left the prose describing it
+  // unguarded, which is the whole lesson: flattening a constant is never just a constant.
+  //
+  // ⚠️ THIS IS A PROSE GUARD, AND PROSE GUARDS ARE BRITTLE. It is written as a pure
+  // function of (sentence, multiplier map) for exactly one reason: so it can be run
+  // against KNOWN-BAD inputs below. A guard that has not been shown to FAIL on the bug it
+  // guards against is not a guard. Reword the sentence freely — but keep one of the two
+  // phrasings it recognises, or teach it yours; a silent non-match is caught by the
+  // "says exactly one of the two" clause rather than passing vacuously.
+  const CLAIMS_COST = /\band how much it costs to level/i;  // rarity DOES set levelling cost
+  const DENIES_COST = /\bnot what it costs to level/i;      // rarity does NOT
+  function disclosureAgrees(sentence, multipliers) {
+    const varies = new Set(Object.values(multipliers)).size > 1;
+    const claims = CLAIMS_COST.test(sentence);
+    const denies = DENIES_COST.test(sentence);
+    if (claims === denies) return false;  // must say exactly one of them, never both/neither
+    return varies ? claims : denies;
+  }
+  check('the drop-rate sheet sentence agrees with LEVEL_UP.rarityCostMultiplier',
+    disclosureAgrees(RARITY_MEANING, LEVEL_UP.rarityCostMultiplier), RARITY_MEANING);
+
+  const FLAT_MULT = { Normal: 1, Rare: 1, Epic: 1, Legendary: 1, Neon: 1, Cyber: 1 };
+  const OLD_LADDER = { Normal: 1, Rare: 1.35, Epic: 1.8, Legendary: 2.45, Neon: 3.3, Cyber: 4.5 };
+  const SHIPPED_WRONG = 'Rarity sets how hard a fighter is to find and how much it costs to '
+    + 'level up — not how strong it is. Two fighters at the same level are a fair fight '
+    + 'whatever their rarity.';
+  check('...and REJECTS the exact sentence that shipped wrong (flat costs, cost claimed)',
+    disclosureAgrees(SHIPPED_WRONG, FLAT_MULT) === false);
+  check('...and REJECTS today\'s sentence if the cost ladder ever comes back',
+    disclosureAgrees(RARITY_MEANING, OLD_LADDER) === false);
+  check('...and ACCEPTS the old sentence under the old ladder it was written for',
+    disclosureAgrees(SHIPPED_WRONG, OLD_LADDER) === true);
+  check('...and rejects a sentence that makes neither claim (no vacuous pass)',
+    disclosureAgrees('Rarity decides which fighters you find.', FLAT_MULT) === false);
+
+  // ── (b3) THE COIN FIGURES `tuning.ts` QUOTES IN PROSE, ASSERTED ──────────
+  //
+  // Same defect class, one level up: that file's trophy-road block quoted "a Cyber costs
+  // 201,460" — a price nothing charges since §26 — next to a Normal figure that was still
+  // right, so the paragraph read as verified. These two pin the numbers it now quotes, so
+  // a move in `baseCoins` or `growth` reddens a gate instead of silently rotting a comment.
+  check('the 44,770 quoted for maxing ONE character is what the model charges',
+    costToMax(CHEAPEST).coins === 44770, `${costToMax(CHEAPEST).coins}`);
+  check('the 492,470 quoted for maxing the WHOLE roster is what the model charges',
+    CHARACTER_IDS.reduce((a, id) => a + costToMax(id).coins, 0) === 492470,
+    `${CHARACTER_IDS.reduce((a, id) => a + costToMax(id).coins, 0)}`);
 
   // ── (c) A total the player can verify by adding up their own receipts ─────
   //

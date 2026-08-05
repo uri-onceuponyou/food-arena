@@ -246,6 +246,38 @@ export const LEVEL_UP = {
    * OBTAIN — trophy-road position and drop rate — and nothing else. Levelling costs the
    * same for everyone, which is what "anyone can get there; it costs time, not luck" means.
    *
+   * ── WHAT IT ACTUALLY COST, DERIVED RATHER THAN ASSERTED ───────────────────
+   *
+   * Coins to take ONE character from level 1 to `LEVEL_MAX`, and the matches of career
+   * income that buys at the 60% win rate section 9 simulates (`SECONDS_PER_MATCH` for the
+   * clock). Every figure re-derived in Node off this table, not remembered:
+   *
+   *     tier         mult          BEFORE            AFTER      matches   h
+   *     Normal    1.0 -> 1.0       44,770           44,770         590    4.2
+   *     Rare      1.35 -> 1.0      60,440           44,770         590    4.2   (-25.9%)
+   *     Epic      1.8 -> 1.0       80,590           44,770         590    4.2   (-44.4%)
+   *     Legendary 2.45 -> 1.0     109,690           44,770         590    4.2   (-59.2%)
+   *     Neon      3.3 -> 1.0      147,750           44,770         590    4.2   (-69.7%)
+   *     Cyber     4.5 -> 1.0      201,460           44,770         590    4.2   (-77.8%)
+   *
+   * The COIN columns are exact arithmetic over this table. The matches column is a MEAN
+   * over 12 seeds (sd 31) — see the note in `TROPHY_ROAD` about not sharpening it.
+   *
+   * Tier spread 156,690 coins (4.50x) -> **0 coins (1.00x)**. Whole roster 1,208,810 ->
+   * **492,470** (-59.3%), i.e. ~191.6 h -> **~76.2 h** of play to max all eleven.
+   *
+   * ⚠️ **THE NORMAL PLAYER PAID NOTHING FOR THIS AND GAINS NOTHING FROM IT** — Normal was
+   * the 1.0x tier, so its curve is byte-identical before and after. The entire effect is a
+   * refund to players who own rarer characters, which is precisely the penalty §26 named.
+   * Worth stating because "we cut levelling costs 59%" sounds like an economy-wide
+   * loosening and is not one: the cheapest path through the game did not move at all.
+   *
+   * ⚠️ AND NOTHING ELSE IN THIS FILE READS THIS MAP. Verified by mutation rather than by
+   * grep: setting the ladder back to 1.0->4.5 and re-fingerprinting every box price, box
+   * odd, trophy-road reward, store product, duplicate value, match payout and starting
+   * balance leaves all of them IDENTICAL, while `costToMax(Cyber)` does move to 201,460 —
+   * so the probe is live, not inert. `levels.ts:levelUpCost` is the only consumer.
+   *
    * ⚠️ Kept as a per-rarity map rather than collapsed to a constant, so restoring a ladder
    * is a value edit rather than a signature change — and so this comment stays attached to
    * the decision it explains.
@@ -365,17 +397,38 @@ export interface ContainerEntry {
  * Since `rules.ts` DEVIATION #12, rarity does NOT make a fighter stronger at equal level
  * — that is Uri's *"match how common games do it"* answer, and the measured tier spread
  * is 4.0 pp, inside the ~9 pp the project treats as unresolvable. What rarity governs is
- * how hard a fighter is to OBTAIN (its position on the road, its odds in a box) and how
- * hard it is to OBTAIN. It no longer affects levelling cost at all (§26 flattened
- * `LEVEL_UP.rarityCostMultiplier` to 1.0 across every tier).
+ * how hard a fighter is to OBTAIN: its position on the trophy road, and its odds in a box.
+ * It no longer affects levelling cost at all (§26 flattened `LEVEL_UP.rarityCostMultiplier`
+ * to 1.0 across every tier).
  *
  * This string is rendered on the drop-rate sheet, which is the one surface in the product
  * that is a legal disclosure — so the sentence that says what the player is actually
  * buying belongs there rather than in a comment nobody ships.
+ *
+ * ── ⚠️ THIS SENTENCE WAS FALSE FOR ONE COMMIT, ON A DISCLOSURE SURFACE ──────
+ *
+ * It read, until now:
+ *
+ *     'Rarity sets how hard a fighter is to find AND HOW MUCH IT COSTS TO LEVEL UP
+ *      — not how strong it is. ...'
+ *
+ * True when written, and untrue the moment §26 flattened the multiplier — which is the
+ * same commit that wrote *"It no longer affects levelling cost at all"* into the comment
+ * three lines above it. **The constant and the prose documenting it contradicted each
+ * other, adjacent, in one file.** That is the `DECISIONS §13` defect class exactly — a
+ * number shown to the player that the model does not compute — and it is worse here than
+ * elsewhere, because `shop.ts` and `trophyRoad.ts` both render this on the drop-rate sheet,
+ * the one screen this product treats as a legal disclosure.
+ *
+ * The lesson is about BLAST RADIUS, not about wording: flattening a constant is never just
+ * a constant. Every sentence that described what the constant did is now a claim to
+ * re-verify, and a `Record` keyed by rarity is exactly the shape whose prose outlives it.
+ * `economy.test.mjs` §13 now DERIVES this sentence's claims from `LEVEL_UP` rather than
+ * reading them, so the string cannot outlive the value a second time.
  */
 export const RARITY_MEANING =
-  'Rarity sets how hard a fighter is to find and how much it costs to level up — not how '
-  + 'strong it is. Two fighters at the same level are a fair fight whatever their rarity.';
+  'Rarity sets how hard a fighter is to find — not how strong it is, and not what it costs '
+  + 'to level up. Two fighters at the same level are a fair fight whatever their rarity.';
 
 export interface ContainerDef {
   name: string;
@@ -548,8 +601,41 @@ export interface Milestone {
  * ~2.8 hours to the full roster is the number to argue with, and it is now SHORT rather
  * than long — deliberately shorter than any shipped brawler's (Brawl Stars is hundreds of
  * hours) because this game has 11 characters, not 90. **The long tail is no longer the
- * road at all: it is levelling** (`LEVEL_UP`), where maxing a single Normal costs 44,770
- * coins — more than the entire road pays out — and a Cyber costs 201,460.
+ * road at all: it is levelling** (`LEVEL_UP`).
+ *
+ * ⚠️ THE SECOND HALF OF THAT SENTENCE WAS STALE. It read *"...where maxing a single Normal
+ * costs 44,770 coins — more than the entire road pays out — and A CYBER COSTS 201,460."*
+ * The Cyber figure died with `LEVEL_UP.rarityCostMultiplier` (§26): every tier now costs
+ * **44,770**, and 201,460 is a price nothing in this model charges.
+ *
+ * ⚠️ AND THE COINS ARE EXACT WHILE THE MATCHES ARE NOT — quote them differently.
+ * `costToMax` is arithmetic over this file: 44,770 and 492,470 have NO seed dependence and
+ * are asserted in `economy.test.mjs` §13. Turning either into *matches* runs a seeded
+ * career, and that is a DISTRIBUTION. Over 12 seeds at the 60% win rate section 9 uses:
+ *
+ *   * MAX ONE CHARACTER (any rarity) — 44,770 coins · **590 matches mean, sd 31**
+ *     (550-638) · ~4.2 h.
+ *   * MAX THE WHOLE ROSTER (11 chars) — 492,470 coins · **10,751 matches mean, sd 27**
+ *     (10,705-10,798) · ~76.2 h.
+ *   * for scale, COMPLETING THE ROAD on the same runs — 577 matches mean, **sd 51**
+ *     (457-638).
+ *
+ * ⚠️ Maxing one character and finishing the whole road are the SAME SIZE of commitment —
+ * 590 vs 577 matches — but do not sharpen that past "the same size". The first draft of
+ * this comment said they were equal *"to the match"* on the strength of both reading 636
+ * at seed 20260804. They are equal at 8 of 12 seeds and 93 matches apart at another; the
+ * road's own sd is 51. That is `CLAUDE.md` non-negotiable 10 in miniature — a single-seed
+ * coincidence written up as a finding — caught here only because the greedy sim two
+ * sections down runs a DIFFERENT seed and printed a different number.
+ *
+ * "More than the entire road pays out" SURVIVES the flattening and is worth stating
+ * precisely, because it is the load-bearing claim: the road hands over **9,700** coins
+ * directly, or **24,328** counting every chest, box and duplicate at expected value. One
+ * maxed character is **4.6x** the former and **1.8x** the latter.
+ *
+ * (Before §26: a Cyber was 201,460 coins / 4,134 matches mean / ~29.3 h, and the roster
+ * 1,208,810 / 27,048 / ~191.6 h. Flattening cut the roster's bill **59.3%** and cost the
+ * Normal player nothing — Normal was the 1.0x tier already.)
  *
  * ── Which characters, in which order ────────────────────────────────────────
  * Rarity-ascending, which also preserves the prototype's own ordering for the six it

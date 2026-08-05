@@ -43,6 +43,8 @@ import {
   CONTAINER_KINDS,
   DUPLICATE_COINS,
   CHARACTERS_BY_RARITY,
+  RARITY_MEANING,
+  LEVEL_UP,
 } from '../../src/game/economy/index.ts';
 import { CHARACTERS, CHARACTER_IDS } from '../../src/game/rules.ts';
 
@@ -184,6 +186,7 @@ function readShop() {
   return {
     cards,
     notice: txt(root.querySelector('.shop-notice')),
+    rarityLine: txt(root.querySelector('.shop-rarity')),
     footnote: txt(root.querySelector('[data-el="footnote"]')),
     held: [...root.querySelectorAll('.shop-held')].map((h) => txt(h)),
     coins: txt(root.querySelector('[data-el="coins"]')),
@@ -317,6 +320,30 @@ async function run() {
       record('content', 'every-container-has-a-card',
         dom.cards.length === CONTAINER_KINDS.length,
         `${dom.cards.length} of ${CONTAINER_KINDS.length}`);
+
+      // ── THE DISCLOSURE SENTENCE, AT THE PIXEL ────────────────────────────
+      //
+      // ⚠️ THIS BATTERY PASSED 168/168 WITH A FALSE SENTENCE ON THE SCREEN. `RARITY_MEANING`
+      // told players rarity sets "how much it costs to level up" for a full commit after
+      // §26 flattened `LEVEL_UP.rarityCostMultiplier` to 1.0 — i.e. after that stopped
+      // being true. Group 1's whole premise is "every number on the screen is re-derived
+      // here", and this paragraph was the one piece of the disclosure that was PROSE, so
+      // nothing re-derived it. A claim is as checkable as a percentage when the thing it
+      // claims is a constant in the model.
+      record('odds', 'the-rarity-sentence-is-the-models',
+        dom.rarityLine === RARITY_MEANING,
+        `shown ${JSON.stringify(dom.rarityLine)}`);
+      {
+        // And the claim it makes must match what the model actually charges. Flat
+        // multiplier -> the sentence must DENY a levelling-cost effect; a ladder -> it must
+        // state one. Same derivation as `economy.test.mjs` §13(b2), applied to the DOM.
+        const varies = new Set(Object.values(LEVEL_UP.rarityCostMultiplier)).size > 1;
+        const claims = /\band how much it costs to level/i.test(dom.rarityLine);
+        const denies = /\bnot what it costs to level/i.test(dom.rarityLine);
+        record('odds', 'the-rarity-sentence-agrees-with-the-cost-table',
+          claims !== denies && (varies ? claims : denies),
+          `multiplier ${varies ? 'VARIES' : 'is FLAT'}; sentence ${claims ? 'claims' : denies ? 'denies' : 'says neither'}`);
+      }
 
       for (const kind of CONTAINER_KINDS) {
         const def = CONTAINERS[kind];
