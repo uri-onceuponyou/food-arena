@@ -31,7 +31,33 @@ import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as shardBlade, localBounds, massAnchor } from './appendages';
 
-const SHELL = PALETTE.egg;          // #FFF8EA — matte-ish porcelain. THE LID keeps this.
+/**
+ * ── NEAR-WHITE CLIPPING, and this is a measured pixel defect rather than taste ──
+ * `sepscan --mode chars` reports the share of a character above luma 0.94 at the
+ * shipped camera and shipped facing, and the same code over the six hand-verified
+ * Brawl Stars full-body plates gives the band: **0.0072-0.0929, median 0.0249**,
+ * p95 0.805-0.9685. An independent critic audit measured the same thing on gameplay
+ * plates and got even less headroom — Shelly 0.2%, Barley 0.0%, with empty-floor
+ * controls at 0.0%, so it is the character and not the frame.
+ *
+ * This character measured **36.83%** clipped and p95 **0.9789**.
+ *
+ * It is the cost `docs/STATE.md` records as cast-mean p95 drifting 0.896 -> 0.923
+ * during the value pass, seen at the pixel: the dark rung was won (p05 is now better
+ * than both plates) and the light end went with it, onto exactly the top-facing
+ * surfaces a 58deg camera sees most of. The fix is albedo, and it is NOT a
+ * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
+ * direction `docs/LESSONS.md` records as falsified four times in the other one.
+ */
+const SHELL = '#D8CAAB';            // was `PALETTE.egg` #FFF8EA (luma 0.973 -> 0.795).
+// TWO steps, because one was not enough and the reason is this character's shape:
+// egg is 93.7% head, i.e. the largest unbroken SPHERE in the cast, so it presents
+// more top-facing area to a 58deg camera than anything else and clips first. At
+// luma 0.830 it still measured 14.72% against a reference max of 9.29%.
+// ⚠️ NOT a `PALETTE` edit: `rules.ts` is a shared file with its own owner, and
+// `src/vfx/weapons/egg.ts` carries its own copy of the same hex for the projectile,
+// which is a DIFFERENT subject (a small bright shard against the floor) and is left
+// alone deliberately. The clipping is on this character's lid and shards.
 // ── Egg was the worst character in the cast on every value axis ──────────────
 // Measured (`tools/tmp/valuescan.mjs`): range 0.401 — below the reference MINIMUM —
 // steps@0.10 of 4 against a reference minimum of 5, P05 0.579 against a reference
@@ -53,7 +79,13 @@ const SHELL = PALETTE.egg;          // #FFF8EA — matte-ish porcelain. THE LID 
 // ⚠️ P05 0.317 still FAILS the <= 0.18 gate and no albedo can fix it: with 90% of the
 // character being one white ovoid, 5% of its pixels cannot be made near-black without
 // deleting the character. Egg needs a dark GARMENT — geometry, not colour.
-const SHELL_BODY = '#D6C098';       // the lower shell and the torso shell — one step down
+// ⚠️ 0.760 -> 0.667, and it is the albedo drop above paying its own debt. Taking
+// SHELL from 0.973 to 0.755 in one move put BOTH shell tones inside the same
+// 0.10-wide luma bin, and `valuescan` caught it immediately: egg's step count went
+// 7 -> 5 against a gate of 6. The near-white fix had quietly deleted a rung of the
+// ladder the previous pass was run to build. SHELL comes back up to 0.795 and this
+// one goes down, so the pair is 0.128 apart instead of 0.005.
+const SHELL_BODY = '#C0A87E';       // the lower shell and the torso shell — one step down
 const SHELL_SHADOW = '#A08B5C';     // brow-crease shadow — a real shadow now, not a tint
 const CRACK_DARK = '#0E0916';       // the crack itself — needs real value contrast against
                                      // the pale shell or it reads as a stray highlight, not a break
@@ -439,6 +471,13 @@ export class EggCharacter extends BaseCharacter {
         // Settled by measurement, not arithmetic: removing the knit cap took ~0.15m
         // off, raising the lid put some back, and `shoot.mjs --char egg` prints the
         // real bounding height. 0.71 lands at ~2.2m, inside the cast's 2.2-2.35.
+        // Unchanged. STUB was given a torso this round and it measured INVISIBLE at
+        // the shipped camera (`bodies.ts`, `torsoFraction`) — this character's
+        // `headFraction` moved with it and moved back. Recorded because the next
+        // pass will want the arithmetic: a 0.16H torso costs `2 * 0.16 / (1 + 0.95)
+        // = 0.1641` of `headFraction` to keep the top of the head still, i.e.
+        // 0.71 -> 0.5459. Measured `neckPinch` at the shipped facing: **0.0111**
+        // against a six-plate Brawl Stars floor of 0.2449.
         headFraction: 0.71,
         // 0.44H, not 0.40H: at 0.40 the pivot cleared the shell but the upper arm's
         // INNER half was still buried, so only the hands showed. The shell is 0.753m

@@ -434,6 +434,13 @@ export class WaterBottleCharacter extends BaseCharacter {
         // (longer neck plus a spout above the cap), and at 0.90 it measured 2.45m
         // against a cast that sits at 2.2-2.35 — `shoot.mjs --char waterbottle`
         // prints the real bounding height, which is the only way to settle this.
+        // Unchanged. STUB was given a torso this round and it measured INVISIBLE at
+        // the shipped camera (`bodies.ts`, `torsoFraction`) — this character's
+        // `headFraction` moved with it and moved back. Recorded because the next
+        // pass will want the arithmetic: a 0.16H torso costs `2 * 0.16 / (1 + 0.95)
+        // = 0.1641` of `headFraction` to keep the top of the head still, i.e.
+        // 0.85 -> 0.6859. Measured `neckPinch` at the shipped facing: **0.3077**
+        // against a six-plate Brawl Stars floor of 0.2449.
         headFraction: 0.85,
         // Pulled in from 0.31H with the shell: the reprofiled body is 0.525R at
         // shoulder height instead of 0.58R, and `bodies.ts` is explicit that this

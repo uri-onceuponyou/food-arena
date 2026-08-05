@@ -26,7 +26,25 @@ import { bodyType } from './bodies';
 import { aim, knob, localBounds, loop, massAnchor, rod } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
-const CERAMIC = '#F7F1E6';      // glazed bowl exterior — warm off-white, not clinical
+/**
+ * ── NEAR-WHITE CLIPPING, and this is a measured pixel defect rather than taste ──
+ * `sepscan --mode chars` reports the share of a character above luma 0.94 at the
+ * shipped camera and shipped facing, and the same code over the six hand-verified
+ * Brawl Stars full-body plates gives the band: **0.0072-0.0929, median 0.0249**,
+ * p95 0.805-0.9685. An independent critic audit measured the same thing on gameplay
+ * plates and got even less headroom — Shelly 0.2%, Barley 0.0%, with empty-floor
+ * controls at 0.0%, so it is the character and not the frame.
+ *
+ * This character measured **16.23%** clipped and p95 **0.9753**.
+ *
+ * It is the cost `docs/STATE.md` records as cast-mean p95 drifting 0.896 -> 0.923
+ * during the value pass, seen at the pixel: the dark rung was won (p05 is now better
+ * than both plates) and the light end went with it, onto exactly the top-facing
+ * surfaces a 58deg camera sees most of. The fix is albedo, and it is NOT a
+ * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
+ * direction `docs/LESSONS.md` records as falsified four times in the other one.
+ */
+const CERAMIC = '#DCD3C2';      // glazed bowl exterior (luma 0.947 -> 0.830). See above.
 const CERAMIC_SHADE = '#E2D8C4'; // interior shadow / underside
 // ── The dark rung ────────────────────────────────────────────────────────────
 // `tools/tmp/valuescan.mjs --mode ref`: every one of eighteen Brawl Stars plates puts
@@ -63,7 +81,7 @@ const WOOD = '#8A5A34';          // ladle handle
 // sash as a smaller fabric-panel detail.
 /** Boots. Deepened with `RIM_TRIM` so the dark rung reaches the ground, not just the sash. */
 const BOOT_STONE = '#160F0B';
-const BIB = '#FBF7EE';       // pale napkin cloth, warmer than pure white
+const BIB = '#E2DCCF';       // pale napkin cloth (luma 0.969 -> 0.863)
 const SLING = '#6B4226';     // leather sling strap
 const SLING_DARK = '#4A2E1A';
 

@@ -149,6 +149,19 @@ export interface RigPalette {
   foot: THREE.ColorRepresentation;
   /** Small torso mass between head and legs. */
   torso?: THREE.ColorRepresentation;
+  /**
+   * The neck column, when `RigProportions.neckFraction > 0`. Defaults to `limb`.
+   * Keep it close to the limb tone — the column is a structural device, and a third
+   * colour there reads as a scarf.
+   */
+  neck?: THREE.ColorRepresentation;
+  /**
+   * The collar ring at the base of the neck. Defaults to `foot`, which is already
+   * the cast's darkest authored tone on most characters — and DARK is the point:
+   * this ring is the "hard dark occlusion notch under the chin" two blind critics
+   * asked for, and it is what `seplib`'s `chinNotch` measures.
+   */
+  collar?: THREE.ColorRepresentation;
   limbRoughness?: number;
 }
 
@@ -230,6 +243,44 @@ export interface RigProportions {
    * so a stubby archetype with the default 0.14 drives its feet through the floor.
    */
   footClearance?: number;
+
+  // ── THE NECK ────────────────────────────────────────────────────────────────
+
+  /**
+   * Vertical gap between the top of the torso and the BOTTOM of the head mass, as
+   * a fraction of total height. Default 0 — the historical behaviour, where the
+   * head mass sits straight on (in fact slightly INSIDE) the torso.
+   *
+   * ── Why this knob exists, and the measurement behind it ────────────────────
+   * Two character passes hit their metric and lost score. Then two blind critics,
+   * independently, on two different characters, named the same missing thing:
+   *
+   *   egg      "no head/body separation ... a 4-6 px pinch at the neck"
+   *   burrito  "head as a distinct sphere proud of a real shoulder line, with a
+   *             hard dark occlusion notch under the chin"
+   *
+   * `tools/tmp/seplib.mjs` turns that into a number that can be computed on a
+   * Brawl Stars plate — `neckPinch`, the deepest horizontal narrowing between two
+   * lobes as a fraction of the narrower one. Measured over the six hand-verified
+   * plates at our own 136px on-screen height: **min 0.2449, median 0.3871**, and
+   * every one of them puts that break between **0.375 and 0.522** of figure
+   * height. Our cast measured **0.1441 mean at the shipped facing, 8 of 11 below
+   * the weakest plate**, with the break — where there was one at all — at 0.14-0.62.
+   *
+   * ⚠️ THE GAP IS PAID FOR OUT OF THE HEAD, NOT ADDED TO THE CHARACTER.
+   * `CHARACTER_HEIGHT` is parked (`docs/DECISIONS-FOR-URI.md`) and apparent size
+   * must not move, so the head radius is reduced by exactly `gap / (1 +
+   * headMount)` and the top of the head lands where it always did. That is
+   * arithmetic, not a tuning choice — see the constructor. It also happens to be
+   * precisely what the egg critic asked for: shrink the head AND lift it.
+   */
+  neckFraction?: number;
+  /**
+   * Neck column radius as a fraction of `min(torsoWidth * 0.5, headRadius)`.
+   * Default 0.42. It has to be narrower than BOTH lobes or there is no pinch —
+   * that is the definition of the metric, not a preference.
+   */
+  neckRatio?: number;
 }
 
 /**
@@ -272,6 +323,10 @@ export interface RigMetrics {
   shinLength: number;
   /** Ankle joint height above the ground. */
   ankleY: number;
+  /** Vertical clear gap between torso top and the bottom of the head mass. 0 = none. */
+  neckGap: number;
+  /** Radius of the neck column. Meaningful only when `neckGap > 0`. */
+  neckRadius: number;
   /** Ground to the top of a nominal spherical head mass. Sanity-check against `height`. */
   nominalHeight: number;
   /**
@@ -411,6 +466,8 @@ export class ChibiRig {
       shoulderFraction: pr.shoulderFraction ?? torsoFraction * 0.78,
       headMount: pr.headMount ?? 0.86,
       footClearance: pr.footClearance ?? 0.14,
+      neckFraction: pr.neckFraction ?? 0,
+      neckRatio: pr.neckRatio ?? 0.42,
     };
 
     // Thick limbs and a wide stance read heavy; long legs read light and athletic.
@@ -438,7 +495,24 @@ export class ChibiRig {
       (bulk - 0.110) / 0.160 + stubbiness * 1.1, 0, 1
     );
 
-    const headH = height * this.p.headFraction;
+    // ── The neck gap, and the head shrink that PAYS for it ─────────────────────
+    // Keeping the top of the head exactly where it was is a hard requirement, not a
+    // nicety: `CHARACTER_HEIGHT` is parked pending a properly segmented reference
+    // band (`docs/DECISIONS-FOR-URI.md`), and a neck that made the cast taller would
+    // move apparent size while claiming to be about structure.
+    //
+    //   before   top = torsoTopY + R0 * (1 + headMount)
+    //   after    top = torsoTopY + gap + R  * (1 + headMount)
+    //   equal    =>  R = R0 - gap / (1 + headMount)
+    //
+    // So a character asking for a neck gets a smaller head for free, which is the
+    // half of the critic's note ("shrink it to ~0.7-0.75 of the body's width and
+    // lift it") that a pure lift would have missed.
+    const neckGap = height * this.p.neckFraction;
+    const headH = Math.max(
+      height * 0.05,
+      height * this.p.headFraction - (2 * neckGap) / (1 + this.p.headMount)
+    );
     // Layout from the ground up: feet/legs, then the torso (which may be absent
     // entirely), then the head.
     const legH = height * this.p.legFraction;
@@ -464,7 +538,13 @@ export class ChibiRig {
     this.hasTorso = torsoH > 1e-4;
 
     this.headRadius = headH * 0.5;
-    this.headCentreY = torsoTopY + this.headRadius * this.p.headMount;
+    this.headCentreY = torsoTopY + neckGap + this.headRadius * this.p.headMount;
+    // Narrower than BOTH lobes or there is no pinch. On STUB there is no torso, so
+    // the column is sized against the head alone.
+    const neckHalf = this.hasTorso
+      ? Math.min(this.p.torsoWidth * 0.5, this.headRadius)
+      : this.headRadius;
+    const neckRadius = neckGap > 0 ? neckHalf * this.p.neckRatio : 0;
 
     const g = (name: string) => {
       const o = new THREE.Group();
@@ -565,6 +645,8 @@ export class ChibiRig {
       thighLength: thighLen,
       shinLength: shinLen,
       ankleY,
+      neckGap,
+      neckRadius,
       nominalHeight: this.headCentreY + this.headRadius,
       heaviness: this.heaviness,
     };
@@ -639,6 +721,59 @@ export class ChibiRig {
       torsoMesh.name = 'torso_mesh';
       this.joints.torso.add(torsoMesh);
       this.torsoMesh = torsoMesh;
+    }
+
+    // ── THE NECK COLUMN AND ITS COLLAR ─────────────────────────────────────────
+    // Built only when a gap was asked for, so every character that does not opt in
+    // is byte-identical to before.
+    //
+    // ⚠️ `CylinderGeometry`, deliberately NOT `CapsuleGeometry`. A neck is a SHORT
+    // segment and `docs/LESSONS.md` §12 records what that costs: `CapsuleGeometry`
+    // degenerates to a SPHERE whenever `len < 2r`, which is how a leg became two
+    // overlapping balls inside a boot on nine of eleven characters. A neck at
+    // `neckFraction` 0.05 and `neckRatio` 0.42 has len/2r ~ 0.6 — squarely inside
+    // the failure band — so this is the one place in the file most exposed to it.
+    //
+    // The COLLAR is the other half of the critic's note ("a hard dark occlusion
+    // notch under the chin") and it is geometry rather than a decal on purpose: a
+    // ring proud of the column catches the key light on top and shades underneath,
+    // so the notch survives whatever the lighting pass does next. It is also what
+    // hides the seam where a character's food mass meets the column.
+    if (this.metrics.neckGap > 0) {
+      const gap = this.metrics.neckGap;
+      const nr = this.metrics.neckRadius;
+      const neckMat = toonMat({ color: pal.neck ?? pal.limb, roughness: rough });
+      // ⚠️ DARKENED, and this is a measured correction rather than a preference.
+      // The first version used `pal.foot` neat. `pal.foot` is a MID tone on several
+      // characters, so the collar added a band of mid-luma pixels to the character
+      // and pushed the 5th percentile UP — taco went p05 0.1789 -> 0.1989, straight
+      // through the <= 0.180 gate the whole value pass exists to hold, on a ring
+      // that is supposed to be the DARKEST thing on the model. A collar that is not
+      // dark is not an occlusion notch; it is a belt.
+      const collarBase = new THREE.Color(pal.collar ?? pal.foot ?? pal.limb);
+      if (!pal.collar) collarBase.multiplyScalar(0.55);
+      const collarMat = toonMat({ color: collarBase, roughness: rough * 1.1 });
+      // The column overshoots at BOTH ends — down into the torso and up into the
+      // food mass — because a butt joint against a curved mass leaves a crescent of
+      // background showing through at exactly the row the metric reads.
+      const over = Math.max(gap * 0.55, nr * 0.5);
+      const col = new THREE.Mesh(
+        new THREE.CylinderGeometry(nr * 0.92, nr, gap + over * 2, 14, 1),
+        neckMat
+      );
+      col.position.y = gap * 0.5;
+      col.name = 'neck_column';
+      solid(col);
+      this.joints.neck.add(col);
+
+      const collar = new THREE.Mesh(
+        new THREE.CylinderGeometry(nr * 1.30, nr * 1.44, gap * 0.34, 16, 1),
+        collarMat
+      );
+      collar.position.y = gap * 0.16;
+      collar.name = 'neck_collar';
+      solid(collar);
+      this.joints.neck.add(collar);
     }
 
     // Segment helper: a capsule whose top sits at the joint origin and hangs down.

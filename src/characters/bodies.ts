@@ -153,6 +153,16 @@ export interface BodyArchetype {
   readonly armFraction: number;
   readonly shoulderFraction: number;
   readonly headMount: number;
+  /**
+   * Clear vertical gap between torso top and the bottom of the food mass, as a
+   * fraction of height. See `RigProportions.neckFraction` for the measurement that
+   * put it here; the short version is that the reference puts its head/body break
+   * at 0.375-0.522 of figure height with a pinch of 0.2449-0.7458, and this cast
+   * measured 0.1441 mean with 8 of 11 below the weakest plate.
+   *
+   * The head SHRINKS to pay for it, so total height does not move.
+   */
+  readonly neckFraction: number;
   readonly footClearance: number;
   readonly shoulderWidthF: number;
   readonly stanceWidthF: number;
@@ -251,6 +261,32 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     note: 'No torso — head on the hips, short thick limbs, wide stance.',
     headFraction: 0.68,
     legFraction: 0.24,
+    // ── 0 -> 0.16 WAS TRIED AND REVERTED, and the reason is worth keeping ─────
+    // "No torso" is also the reason all four STUB characters measure essentially
+    // ZERO internal separation: with the food mass mounted straight onto the hips
+    // there is no second lobe to be narrower than, so a pinch is not merely absent,
+    // it is undefined. Egg measured `neckPinch` **0.0111** at the shipped facing
+    // against a six-plate Brawl Stars floor of 0.2449 — the lowest in the cast, on
+    // the character a blind critic named for exactly this.
+    //
+    // So STUB was given a 0.16H torso, with `headFraction` 0.68 -> 0.5159 paying
+    // for it exactly (2 * 0.16 / (1 + 0.95) = 0.1641, so the top of the head does
+    // not move), which also activates the complete, reviewed `dressTorso` bodies
+    // that Egg, Donut and Lollipop have each carried unrendered since the archetype
+    // landed — every one of them commented "what she looks like the moment she has
+    // a torso again".
+    //
+    // ⚠️ IT DELIVERED NOTHING, AND THE REASON IS `docs/LESSONS.md` §1. Rendered at
+    // the shipped 58deg camera and shipped facing, the new body is INVISIBLE: the
+    // food mass is 0.52-0.69H wide and overhangs a 0.38H torso completely, and a
+    // camera looking DOWN sees the mass, not what is under it. Egg moved 0.0111 ->
+    // 0.0172 — inside the noise — and Donut went DOWN, 0.2545 -> 0.2083.
+    //
+    // The lesson generalises past this knob: **on this archetype, at this camera,
+    // anything added BELOW the food mass cannot be seen.** A STUB character's
+    // separation has to be carved INTO its own mass — which is exactly what the egg
+    // critic asked for ("carve a head out of the ball") and is per-character
+    // geometry, not an archetype knob. Left for that pass; reverting is one line.
     torsoFraction: 0,
     // ── 0.13 -> 0.19, with `handRadiusF` down from 0.078 ────────────────────────
     // Water Bottle's forearms measured 0.005 and 0.005 delivered while sitting
@@ -267,6 +303,11 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     armFraction: 0.19,
     shoulderFraction: 0.26,
     headMount: 0.95,
+    // 0 rather than the other archetypes' 0.045-0.065. A neck gap on STUB puts a
+    // thin column between the HIPS and the food mass, where the mass already
+    // overhangs it — the same invisibility the reverted torso hit, plus the risk of
+    // reading as a floating head. STUB opts out until its masses are carved.
+    neckFraction: 0,
     // `0.96 * legRadiusF / legFraction` — the ankle height that seats a boot on the
     // floor at full height. The old 0.52 was chosen to stop feet sized off
     // `legRadius` punching through the floor; the boot now seats itself off
@@ -321,6 +362,7 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     armFraction: 0.175,
     shoulderFraction: 0.24 * 0.80,
     headMount: 0.88,
+    neckFraction: 0.055,
     // `0.96 * legRadiusF / legFraction`. See STUB.
     footClearance: 0.23,
     shoulderWidthF: 0.25,
@@ -359,6 +401,7 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     armFraction: 0.22,
     shoulderFraction: 0.28 * 0.78,
     headMount: 0.86,
+    neckFraction: 0.055,
     // `0.96 * legRadiusF / legFraction`. See STUB.
     footClearance: 0.18,
     shoulderWidthF: 0.20,
@@ -402,6 +445,10 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     armFraction: 0.30,
     shoulderFraction: 0.30 * 0.84,
     headMount: 0.86,
+    // LANKY takes the biggest gap because the probe says it converts best: a live
+    // sweep on burrito moved neckPinch 0.0769 -> 0.2963 on head lift alone, the
+    // only archetype where lift ALONE cleared the reference floor.
+    neckFraction: 0.065,
     footClearance: 0.125,
     shoulderWidthF: 0.145,
     stanceWidthF: 0.062,
@@ -445,6 +492,7 @@ export function bodyType(name: BodyArchetypeName, tweaks: RigProportions = {}): 
     armFraction: a.armFraction,
     shoulderFraction: a.shoulderFraction,
     headMount: a.headMount,
+    neckFraction: a.neckFraction,
     footClearance: a.footClearance,
     shoulderWidth,
     stanceWidth: height * a.stanceWidthF,

@@ -213,6 +213,22 @@ export class TacoCharacter extends BaseCharacter {
         hand: ONION,  // saturated purple — ties to Onion Bomb, breaks from the cast's
                        // repeated cream/white mitt, per the same review pass above
         foot: BOOT_CHAR,
+        // ── The neck column and its collar are this character's DARKEST band ──────
+        // `rig.ts` defaults the column to `limb` and the collar to 0.55 x `foot`.
+        // On Taco that is a mid tone on top of a mid tone, and Taco is the one
+        // character whose dark end has no margin: `valuescan` p05 was 0.1789 against
+        // a <= 0.180 gate before this round, and the `CHARACTER_HEIGHT` correction
+        // (2.35 -> 2.10, `src/units.ts`) took it to 0.1943 — a smaller figure spends
+        // fewer pixels on the small dark features, so the percentile tail moves in.
+        // Isolated: removing the neck entirely gives 0.1943, so the neck is NOT the
+        // cause (0.0038 of it), the height is.
+        //
+        // The reference's own answer is to put the darkest band UNDER THE CHIN, so
+        // that is where the recovery goes rather than into the boot — pass 3 already
+        // measured that a near-black boot under a near-black shin is not two shapes
+        // (`kneeL|footL` 0.028 across 41 px) and deliberately went the other way.
+        neck: LIMB_SHELL_DARK,
+        collar: MEAT_DARK,
         torso: SHELL,
         limbRoughness: 0.8,
       },

@@ -109,7 +109,7 @@ const LIMB_PARTS = ['shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'handL', 'hand
 // IN-PAGE CAPTURE. One synchronous evaluate: no rAF of the game's own loop can
 // re-sync `rotation.y` from MatchState between setting it and reading pixels back.
 // ─────────────────────────────────────────────────────────────────────────────
-const CAPTURE = (opts) => {
+export const CAPTURE = (opts) => {
   const stage = window.__stage;
   if (!stage || stage.disposed) return { error: 'no live Stage on this page' };
   const r = stage.renderer, scene = stage.scene, cam = stage.rig && stage.rig.camera;
@@ -245,6 +245,24 @@ const CAPTURE = (opts) => {
     stage.render(0); stage.render(0);
     const fullRGBA = readRect(0, 0, Wp, Hp);
 
+    // ── OCCLUSION VALIDITY — `docs/LESSONS.md` §5 ───────────────────────────
+    // The matte mask comes from an environment-HIDDEN render; `cropRGB` comes from
+    // the SHIPPED frame. Wherever a prop occludes the fighter the two renders
+    // disagree, and §5's rule is that a two-render metric is valid only where its
+    // two renders agree — the failure it names cost `valuescan --mode dl` a
+    // confident report of a PROP's luma as the character's. So measure the
+    // disagreement rather than assume it away: hide the whole player in the shipped
+    // composition and see which of its matte pixels actually changed.
+    const hidPlayerRGBA = (() => {
+      const vis = [];
+      player.obj.traverse((o) => { if (o.isMesh && o.visible) { vis.push(o); o.visible = false; } });
+      stage.render(0); stage.render(0);
+      const buf = readRect(0, 0, Wp, Hp);
+      for (const o of vis) o.visible = true;
+      stage.render(0); stage.render(0);
+      return buf;
+    })();
+
     // crop
     let bx = 1e9, by = 1e9, bx1 = -1, by1 = -1;
     for (let j = 0; j < player.mask.length; j++) {
@@ -259,6 +277,23 @@ const CAPTURE = (opts) => {
     result.crop = [cx, cy, cw, chh];
     result.charHeightPx = by1 - by + 1;
     result.charHeightPctOfFrame = +(((by1 - by + 1) / Hp) * 100).toFixed(2);
+
+    {
+      const deliv = new Uint8Array(cw * chh);
+      let matteN = 0, delivN = 0;
+      for (let y = 0; y < chh; y++) for (let x = 0; x < cw; x++) {
+        const g = (cy + y) * Wp + (cx + x);
+        if (!player.mask[g]) continue;
+        matteN++;
+        const i4 = g * 4;
+        const d = Math.abs(fullRGBA[i4] - hidPlayerRGBA[i4]) +
+                  Math.abs(fullRGBA[i4 + 1] - hidPlayerRGBA[i4 + 1]) +
+                  Math.abs(fullRGBA[i4 + 2] - hidPlayerRGBA[i4 + 2]);
+        if (d > 12) { deliv[y * cw + x] = 1; delivN++; }
+      }
+      result.shippedDeliveredPct = +((delivN / Math.max(1, matteN)) * 100).toFixed(2);
+      result.charDeliveredb64 = b64(deliv);
+    }
 
     hideEnvironment(new Set([topOf(player.obj)]));
     const otherCast = [];
@@ -651,7 +686,7 @@ async function newPage(browser, W, H, dsf) {
   return page;
 }
 
-async function bootMatch(browser, id, st, ss) {
+export async function bootMatch(browser, id, st, ss) {
   const page = await newPage(browser, 1600, 900, ss ?? SS);
   const url = `${BASE}/?player=${id}&enemy=donut&px=${st.x}&py=${st.y}&fogRadius=${st.fog}&simSpeed=${SIM_SPEED}&pointerLock=0`;
   await page.goto(url, { waitUntil: 'networkidle', timeout: 180000 });
@@ -1100,10 +1135,20 @@ async function modeProto() {
   console.log(`\nwrote ${OUT}/proto.json`);
 }
 
-if (has('--selftest')) process.exit(selftest());
-else if (MODE === 'proto') await modeProto();
-else if (MODE === 'stance') await modeStance();
-else if (MODE === 'chars') await modeChars();
-else if (MODE === 'ref') await modeRef();
-else if (MODE === 'control') await modeControl();
-else { console.error(`unknown --mode ${MODE}`); process.exit(2); }
+// ── Shared with `sepscan.mjs` ────────────────────────────────────────────────
+// `docs/LESSONS.md` §5: ONE stale copy of `match-sim`'s driver contaminated ten
+// instruments and the audit's own count was wrong by 2x. So the internal-separation
+// probe IMPORTS this capture rather than copying it, and this dispatch is guarded so
+// importing it does not run a mode.
+export { LAUNCH_ARGS, STATIONS, JOINTS, MASS_PARTS, b64ToBytes };
+
+const IS_MAIN = process.argv[1] && process.argv[1].endsWith('limbmatch.mjs');
+if (IS_MAIN) {
+  if (has('--selftest')) process.exit(selftest());
+  else if (MODE === 'proto') await modeProto();
+  else if (MODE === 'stance') await modeStance();
+  else if (MODE === 'chars') await modeChars();
+  else if (MODE === 'ref') await modeRef();
+  else if (MODE === 'control') await modeControl();
+  else { console.error(`unknown --mode ${MODE}`); process.exit(2); }
+}

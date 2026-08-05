@@ -99,10 +99,28 @@ const BOOT_CHAR = '#0A0501';       // boots — darker again
  *  Kept local rather than pushed into the shared palette: Hamburger's bun is not
  *  the one failing the contrast floor, and its stack is tuned around the shared
  *  value. */
-const BUN_LIGHT = '#FFF2D4';
+/**
+ * ── NEAR-WHITE CLIPPING, and this is a measured pixel defect rather than taste ──
+ * `sepscan --mode chars` reports the share of a character above luma 0.94 at the
+ * shipped camera and shipped facing, and the same code over the six hand-verified
+ * Brawl Stars full-body plates gives the band: **0.0072-0.0929, median 0.0249**,
+ * p95 0.805-0.9685. An independent critic audit measured the same thing on gameplay
+ * plates and got even less headroom — Shelly 0.2%, Barley 0.0%, with empty-floor
+ * controls at 0.0%, so it is the character and not the frame.
+ *
+ * This character measured **8.87%** clipped and p95 **0.9574**.
+ *
+ * It is the cost `docs/STATE.md` records as cast-mean p95 drifting 0.896 -> 0.923
+ * during the value pass, seen at the pixel: the dark rung was won (p05 is now better
+ * than both plates) and the light end went with it, onto exactly the top-facing
+ * surfaces a 58deg camera sees most of. The fix is albedo, and it is NOT a
+ * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
+ * direction `docs/LESSONS.md` records as falsified four times in the other one.
+ */
+const BUN_LIGHT = '#EBDCB8';    // luma 0.951 -> 0.865
 /** The torso's bun-shade. Was `PALETTE.bun`; local now, and a value step ABOVE the
  *  head's own mass so `head|torso` stops measuring 0.026 across 128 px. */
-const BUN_SHADE = '#FBEEDA';
+const BUN_SHADE = '#E4D6BE';    // luma 0.939 -> 0.844
 /** Mitts. Was `PALETTE.sausage`, i.e. exactly the head's sausage, so the hands had
  *  nowhere to separate to. A deeper cured red keeps the meat read and gains a step. */
 const MITT_SAUSAGE = '#C4432F';

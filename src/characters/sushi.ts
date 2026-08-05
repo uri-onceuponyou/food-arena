@@ -30,8 +30,26 @@ import { bodyType } from './bodies';
 import { aim, blade as finBlade, localBounds, massAnchor, rod } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
-const RICE = '#FFFDF6';        // warm-white sticky rice, not clinical pure white
-const RICE_SHADE = '#F2ECDD';  // grain shading, a touch deeper
+/**
+ * ── NEAR-WHITE CLIPPING, and this is a measured pixel defect rather than taste ──
+ * `sepscan --mode chars` reports the share of a character above luma 0.94 at the
+ * shipped camera and shipped facing, and the same code over the six hand-verified
+ * Brawl Stars full-body plates gives the band: **0.0072-0.0929, median 0.0249**,
+ * p95 0.805-0.9685. An independent critic audit measured the same thing on gameplay
+ * plates and got even less headroom — Shelly 0.2%, Barley 0.0%, with empty-floor
+ * controls at 0.0%, so it is the character and not the frame.
+ *
+ * This character measured **13.63%** clipped and p95 **0.9820**.
+ *
+ * It is the cost `docs/STATE.md` records as cast-mean p95 drifting 0.896 -> 0.923
+ * during the value pass, seen at the pixel: the dark rung was won (p05 is now better
+ * than both plates) and the light end went with it, onto exactly the top-facing
+ * surfaces a 58deg camera sees most of. The fix is albedo, and it is NOT a
+ * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
+ * direction `docs/LESSONS.md` records as falsified four times in the other one.
+ */
+const RICE = '#DCD3BD';        // sticky rice (luma 0.992 -> 0.829)
+const RICE_SHADE = '#CFC6AE';  // grain shading, a touch deeper (luma 0.926 -> 0.777)
 // Lifted off `PALETTE.nori`'s near-black #2B2B2B to a dark seaweed GREEN. Two
 // measured reasons: (1) at near-black the torso sat about six value stops below
 // the cream head and a blind critic read the character as "a floating head with a

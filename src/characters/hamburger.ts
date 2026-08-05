@@ -333,6 +333,15 @@ export class HamburgerCharacter extends BaseCharacter {
       proportions: bodyType('stout', {
         height: H,
         headFraction: 0.68,
+        // ── OPTS OUT of STOUT's neck gap, and the measurement is the whole reason ──
+        // The neck is a real win where the mass already has two lobes (burrito
+        // `neckPinch` 0.0769 -> 0.3636, sushi 0.2500 -> 0.2927). Hamburger is the
+        // case where it is not: a burger's filling ring is as wide as its buns, so
+        // there is no row narrower than both, and the gap measured **0.1159 ->
+        // 0.0968 — WORSE** while shrinking the bun stack enough to float a mitt off
+        // it (15 detached limb px at yaw 0, against a hard requirement of zero).
+        // Attributed by running the height change alone, which left detachment at 0.
+        neckFraction: 0,
         // 0.25H -> 0.30H. Measured, not styled: the burger stack is 0.534m
         // half-wide at shoulder height and the shoulder pivot sat at 0.512m, so
         // the upper arm STARTED inside the food and everything below it was

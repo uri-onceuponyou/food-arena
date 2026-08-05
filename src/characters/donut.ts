@@ -172,6 +172,13 @@ export class DonutCharacter extends BaseCharacter {
       // does not grow: STUB's own rewrite makes the same trade at the same rate.
       proportions: bodyType('stub', {
         height: H,
+        // Unchanged. STUB was given a torso this round and it measured INVISIBLE at
+        // the shipped camera (`bodies.ts`, `torsoFraction`) — this character's
+        // `headFraction` moved with it and moved back. Recorded because the next
+        // pass will want the arithmetic: a 0.16H torso costs `2 * 0.16 / (1 + 0.95)
+        // = 0.1641` of `headFraction` to keep the top of the head still, i.e.
+        // 0.685 -> 0.5209. Measured `neckPinch` at the shipped facing: **0.2545**
+        // against a six-plate Brawl Stars floor of 0.2449.
         headFraction: 0.685,
         // 0.295H -> 0.345H. Measured: the ring is 0.619m half-wide at shoulder
         // height and the pivot sat at 0.620m — exactly ON the surface, so the whole

@@ -30,9 +30,27 @@ import { CHARACTER_HEIGHT } from '../units';
 import { curl, localBounds, massAnchor } from './appendages';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
-const CANDY_WHITE = '#FFFDF9';
+/**
+ * ── NEAR-WHITE CLIPPING, and this is a measured pixel defect rather than taste ──
+ * `sepscan --mode chars` reports the share of a character above luma 0.94 at the
+ * shipped camera and shipped facing, and the same code over the six hand-verified
+ * Brawl Stars full-body plates gives the band: **0.0072-0.0929, median 0.0249**,
+ * p95 0.805-0.9685. An independent critic audit measured the same thing on gameplay
+ * plates and got even less headroom — Shelly 0.2%, Barley 0.0%, with empty-floor
+ * controls at 0.0%, so it is the character and not the frame.
+ *
+ * This character measured **16.10%** clipped and p95 **0.9781**.
+ *
+ * It is the cost `docs/STATE.md` records as cast-mean p95 drifting 0.896 -> 0.923
+ * during the value pass, seen at the pixel: the dark rung was won (p05 is now better
+ * than both plates) and the light end went with it, onto exactly the top-facing
+ * surfaces a 58deg camera sees most of. The fix is albedo, and it is NOT a
+ * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
+ * direction `docs/LESSONS.md` records as falsified four times in the other one.
+ */
+const CANDY_WHITE = '#DED6C6';  // luma 0.993 -> 0.842
 const CANDY_RED = '#E63946';
-const STICK = '#FBF7EE';       // matte paper stick
+const STICK = '#E2DBCC';       // matte paper stick (luma 0.969 -> 0.860)
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0' — restrained trim accent only
 // ── The WRAPPER is the dark rung ─────────────────────────────────────────────
 // Measured (`tools/tmp/valuescan.mjs`): Lollipop's range already passed, but its P05
@@ -195,6 +213,13 @@ export class LollipopCharacter extends BaseCharacter {
       // hanging in mid-air unattached to anything.
       proportions: bodyType('stub', {
         height: H,
+        // Unchanged. STUB was given a torso this round and it measured INVISIBLE at
+        // the shipped camera (`bodies.ts`, `torsoFraction`) — this character's
+        // `headFraction` moved with it and moved back. Recorded because the next
+        // pass will want the arithmetic: a 0.16H torso costs `2 * 0.16 / (1 + 0.95)
+        // = 0.1641` of `headFraction` to keep the top of the head still, i.e.
+        // 0.72 -> 0.5559. Measured `neckPinch` at the shipped facing: **0.0769**
+        // against a six-plate Brawl Stars floor of 0.2449.
         headFraction: 0.72,
         // ── 0.085H -> 0.20H, and the reason is NOT the stick ────────────────────
         // The old value was reasoned from the stick's own radius, and the
@@ -271,6 +296,26 @@ export class LollipopCharacter extends BaseCharacter {
         // exactly that reason and the second one had to move it again after the leg
         // radius halved. Splay leaves the hip pivot, and therefore that overlap,
         // exactly where it is. Measured: 0.1358 -> 0.1759 at 0.5 rad, islands 1.
+        // ── 0.46 -> 0.58, and it is paying for a CORRECTION elsewhere ──────────
+        // `CHARACTER_HEIGHT` went back 2.35 -> 2.10 this round (`src/units.ts`: the
+        // 14-21% band that raised it was re-measured off a ruled frame and does not
+        // exist). That is not a uniform-scale no-op for a silhouette read at a 58deg
+        // perspective camera — a shorter character's crown sits nearer the view axis
+        // and spreads less — and this character was the one it cost: hull deficiency
+        // 0.2378 -> 0.1962 at the shipped facing, through the 0.2007 floor, with
+        // `coreShare` (0.8158 -> 0.8123) and the appendage count (2 -> 2) both
+        // unmoved, i.e. the appendages are all still there and simply reach less far.
+        // Isolated by running the height change ALONE, which is the only reason it is
+        // attributed correctly: the neck and the albedo work moved nothing here.
+        //
+        // ⚠️ RAISING THE SPLAY TO PAY IT BACK WAS TRIED AND FAILED, measured: 0.58
+        // bought **0.0005** of hull deficiency (0.1962 -> 0.1967) and DETACHED THE
+        // LEG — 1,437 px in its own component at yaw 0, against a hard requirement of
+        // zero. This character is the one the previous pass already recorded as
+        // unable to widen its stance, and the splay is at the same wall. Left at 0.46
+        // and the 0.0050 shortfall against the weakest reference plate is REPORTED
+        // rather than forced; it is a genuine conflict between the height correction
+        // and a floor that was set while the height was wrong.
         splay: 0.46,
       },
     });

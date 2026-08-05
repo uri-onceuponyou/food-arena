@@ -31,7 +31,25 @@ import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as peelBlade, localBounds, massAnchor } from './appendages';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
-const TORTILLA = '#F5EAD6';        // pale flour wrap — the dominant, matte mass
+/**
+ * ── NEAR-WHITE CLIPPING, and this is a measured pixel defect rather than taste ──
+ * `sepscan --mode chars` reports the share of a character above luma 0.94 at the
+ * shipped camera and shipped facing, and the same code over the six hand-verified
+ * Brawl Stars full-body plates gives the band: **0.0072-0.0929, median 0.0249**,
+ * p95 0.805-0.9685. An independent critic audit measured the same thing on gameplay
+ * plates and got even less headroom — Shelly 0.2%, Barley 0.0%, with empty-floor
+ * controls at 0.0%, so it is the character and not the frame.
+ *
+ * This character measured **11.44%** clipped and p95 **0.9647**.
+ *
+ * It is the cost `docs/STATE.md` records as cast-mean p95 drifting 0.896 -> 0.923
+ * during the value pass, seen at the pixel: the dark rung was won (p05 is now better
+ * than both plates) and the light end went with it, onto exactly the top-facing
+ * surfaces a 58deg camera sees most of. The fix is albedo, and it is NOT a
+ * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
+ * direction `docs/LESSONS.md` records as falsified four times in the other one.
+ */
+const TORTILLA = '#DFD2B9';        // pale flour wrap (luma 0.921 -> 0.827)
 const TORTILLA_SHADE = '#E4CFA0';  // toasted/shadow tone — rim, torso wrap-continuation
 const WRAP_BAND = '#6A1C0C';       // paper wrapper band + hands — see THE DARK RUNG below
 // Foil. Warm-NEUTRAL silver rather than either extreme, and the value is the
@@ -43,7 +61,7 @@ const WRAP_BAND = '#6A1C0C';       // paper wrapper band + hands — see THE DAR
 // arrives much smaller on screen — measured by rendering, not by reading the values.
 const FOIL = '#C4C0B5';
 const BOOT = '#180E05';            // near-black toasted-tortilla boots, grounds the pale body
-const RICE = PALETTE.cream;        // '#FFF3DE' — filling mound base
+const RICE = '#E6D8BC';            // was `PALETTE.cream` #FFF3DE (luma 0.957 -> 0.850)
 // ── THE DARK RUNG ────────────────────────────────────────────────────────────
 // Measured against 18 Brawl Stars plates: their P05 is 0.097 and every one of the
 // eighteen puts 5% of the character below 0.18. Burrito's was 0.285, and 53.3% of its
@@ -65,7 +83,7 @@ const MEAT_DARK = '#140A03';
 const TOMATO = '#7A1620';
 const CHEESE = PALETTE.cheese;
 const LETTUCE = PALETTE.lettuce;
-const SOUR_CREAM = '#FFFDF7';
+const SOUR_CREAM = '#EAE4D6';      // luma 0.992 -> 0.893
 // Limb-only avocado-green family. A second independent art-director pass named
 // Burrito, Egg and Lollipop as all converging on pale cream/white LIMBS with dark
 // boots — the wrap itself stays this pale tortilla tone (that's the food read for
