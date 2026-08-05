@@ -7,7 +7,7 @@ time. **Prefer reaching for one of these over inventing a new probe.**
 npm run dev        # http://localhost:5173 — SHARED. Fine for a quick look, never for a number,
                    # and NEVER for actually playing (see below).
 npx tsc --noEmit
-node src/game/sim.test.mjs            # 51
+node src/game/sim.test.mjs            # 155
 node src/game/economy/economy.test.mjs # 173
 ```
 
@@ -138,7 +138,7 @@ every push.**
 | `tools/match-play.mjs` | Drives the real game boot → menus → combat → result, sampling the HUD's own DOM. |
 | `tools/filmstrip.mjs` | Animation as a contact sheet. Auto-detects cycle length; labels one-shots "NOT A LOOP". |
 | `tools/motion_probe.mjs` | Joint traces in the character's local frame — camera, framing and post chain out of the equation. |
-| `tools/tmp/menu_accept.mjs` | **315 assertions**, 5 viewports × 5 screens × notch/no-notch. Also **parses all 88 modules in ~95ms** to catch the backtick trap. `PREVIEW_BASE=<url>` to point it at a snapshot. |
+| `tools/tmp/menu_accept.mjs` | **361 assertions**, 5 viewports × 5 screens × notch/no-notch. Also **parses all 88 modules in ~95ms** to catch the backtick trap. `PREVIEW_BASE=<url>` to point it at a snapshot. |
 
 #### `arena-scan` colour budget — the guard rail on cumulative desaturation
 
@@ -202,6 +202,24 @@ and a constant change are never measured together)
 
 ---
 
+## ⚠️ `__screenReady` IS NOT A PAINT — the single most contaminating capture bug found here
+
+`window.__screenReady === true` is set in the **same tick** the curtain drops, and `.fa-screen`
+then runs a 0.26 s fade. **Measured opacity is 0.000 when the flag flips.** The flag is wrong on
+**every** curtained navigation (2/2) and about half of first mounts (5/9).
+
+A faded frame **compresses** contrast, so a reading taken on the flag is not merely noisy — a
+contrast tool whose whole purpose is *"against the pixels actually behind it"* returns a number
+for pixels that are not there yet. It survived so long because it is **intermittent**: it appears
+only when caching makes the capture faster than the animation.
+
+→ **Wait on `tools/tmp/settle.mjs`, never on the flag.** One shared paint condition, correct at
+any machine speed rather than merely longer — it returns in 23 ms on settings and 11.9 s on the
+trophy road from the *same* predicate. `tools/tmp/capture_audit.mjs` audits which side a capture
+site is on; **34 files still wait on a flag.**
+
+---
+
 ## THE GATE BATTERY — run all of these before you believe a change
 
 The five gates in `CLAUDE.md` were the whole story when there were five. There are now
@@ -212,7 +230,7 @@ of commit `97c92d6`:
 |---|---|---|
 | `npx tsc --noEmit` | clean | ⚠️ the **working tree**, incl. peers' half-saved files |
 | `node tools/verify-head.mjs` | OK | **the COMMITTED tree** — the only one that matters before a push |
-| `node src/game/sim.test.mjs` | **134** | sim, combat, AI, navigation, status rules |
+| `node src/game/sim.test.mjs` | **155** | sim, combat, AI, navigation, status rules |
 | `node src/game/economy/economy.test.mjs` | **173** | economy, seeded and deterministic |
 | `node tools/aspect.mjs` | PASS, **0.00wu** | viewport fairness — point at a **snapshot** |
 | `tools/tmp/menu_accept.mjs` | **361** | 5 landscape viewports × screens, + the CSS-backtick parse |
@@ -222,11 +240,15 @@ of commit `97c92d6`:
 | `tools/tmp/name_accept.mjs` | **29** | name sanitiser, both entry paths |
 | `tools/tmp/chip_probe.mjs` | **72** | pause chip vs thumb zone, 6 viewports × 2 states |
 | `node tools/audio-probe.mjs --mode all` | **389** | ⚠️ `--mode live` is flaky under load; judge by depth 91 / identity 77 |
-| `node tools/arena-scan.mjs --selftest` | **104** | colour-budget metric + the station-placement guard |
+| `node tools/arena-scan.mjs --selftest` | **105** | colour-budget metric + the station-placement guard |
 | `node tools/match-sim.mjs --selftest` | **15** | the scripted policies, against a hand-derivable answer |
 | `node tools/tmp/valuescan.mjs --selftest` | **57** | value-ladder metric on synthetic frames |
 | `tools/tmp/quality_api.mjs` · `dpr_probe.mjs` | **20** · **24** | render tiers and the DPR cap |
 | `node tools/perf.mjs --mode leak` | contexts flat at **1** | the leak that white-screened after ~8 round trips |
+| `node tools/tmp/settle_validate.mjs` | **22** | the shared PAINT condition — correct at any machine speed, not merely longer |
+| `node tools/tmp/review_gate_validate.mjs` | **8** | `review.mjs` refusing un-vouched PNGs |
+| `node tools/tmp/capture_audit.mjs` | **13** + **7** | classifies every capture site as paint-waiting or flag-waiting |
+| `node tools/shoot.mjs --selftest` | **6** | the capture path itself |
 | `tools/tmp/floorprobe.mjs` | **5/5** | the floor's own gameplay test — breaks on any global value change |
 | `tools/tmp/chars_metrics.mjs` | ALL CLEAN | roster card fill, face-in-card, WCAG |
 | `tools/tmp/limbcheck.mjs` | see below | per-joint delivered pixels ⚠️ **at 22°, not the match's 58°** |

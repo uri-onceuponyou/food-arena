@@ -164,6 +164,27 @@ in its output.** A number that is 90% isolated invites you to trust the 10% that
 isolate the whole thing, or print which side each result came from — the arena-scan colour gate
 now stamps the SHA its baseline represents for the same reason.
 
+### A mask from one render and a value from another is a lie wherever they disagree
+
+`valuescan --mode dl` took its character **mask** from an environment-hidden render and read
+**luma** from the shipped frame. Wherever a prop occludes the character, the two renders disagree,
+and the tool confidently reported **the prop's luma as the character's**.
+
+It was caught only by a tell: four of eighteen stations returned values **identical to four decimal
+places** across a change that moved every other station by 0.03–0.04. Something that does not move
+when everything else does is not stable — **it is not measuring what you think.** Rendering those
+four and looking at them showed the player was not on screen at all, only its floating HP bar above
+a pantry counter.
+
+The general form: **a two-render metric is only valid where the two renders agree.** If one hides
+geometry to build a mask, the mask is of an *unoccluded* scene and the value is of an *occluded*
+one. Either sample both from the same frame, or detect the disagreement and report those samples as
+**invalid rather than as a number** — because a number is indistinguishable from a good one.
+
+That makes **ten** instruments found returning confident wrong answers in a single session. The
+tenth was found by an agent inside the very tool it was using to judge its own work, which is the
+argument for §2 in one sentence.
+
 ---
 
 ## 6. Scale, zoom and framing decide what is worth building

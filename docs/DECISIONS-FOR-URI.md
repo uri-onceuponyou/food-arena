@@ -17,6 +17,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **6** | **⚠️ Lobby reference plates** | none exist | **only you can fix this — it blocks all menu scoring** | drop 3–4 screenshots in |
 | **12** | ⚠️ **Game is now MUCH harder: 51.2% → 31.8%** | the harder version | **your call — this one is big** | `ENEMY_MAX_HP` ≈123 restores it |
 | **15** | Should a fleeing enemy shoot at you? | it fires backwards | **measured at a further −25.9pp — parked, not landed** | a two-word patch |
+| **16** | Soup lost its red band, egg went cream, cast p95 is +0.027 over reference | shipped | **look at it — these are looks, not measurements** | per-character, self-contained |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
 | **11** | Longer legs — every silhouette changed | longer | **keep** — legs now exist at all | 2 constants + 1 row/archetype |
@@ -640,3 +641,40 @@ before deciding.
 
 It was carrying itself on the stun bug twice over. **Worth its own pass — but after you settle the
 above**, because the flee decision moves it again.
+
+
+---
+
+## 16. Two character colours changed on judgement, and the highlight rule turned out to be a mean
+
+The value pass (`a5ce2a5`) closed the session's #1 red item — the cast finally has a dark rung, and
+**10 of 11 characters now reach the reference's dark end where none did before.** It is the most
+visible change of the session: every character, in the match, the roster, character select and the
+trophy road, because all of them go through `createCharacter`.
+
+Three things in it are **judgement, not measurement**, so they are yours:
+
+**1. Soup's red trim band is now near-black maroon.** Its near-black had to land on a mass already
+worth 6–12% of the character's pixels — that is what buys the p05 with one constant — and the rim
+band was the only such mass. It works, and it costs soup its one spot of identity colour.
+
+**2. Egg's lower shell went from near-white to warm cream.** Egg is the one character that
+**cannot** pass on colour at all: its head is 93.7% of it, and the shell being near-white *is* the
+egg. It ended at p05 0.279 against a ≤0.180 gate — still failing — having given up some of its
+whiteness for nothing. **The real fix is a dark garment**, which is geometry and is now in flight.
+It may be right to put egg's shell back to near-white and let the garment do the work.
+
+**3. The "do not lift highlights" rule was bent, deliberately.** It was recorded as *"p95 already
+equals the reference at 0.896, do not touch it"* — but that was a **cast mean hiding a 0.780–0.979
+spread**. Five characters sitting *below* the reference were lifted (taco 0.780→0.871, hotdog
+0.805→0.904, pizza 0.849→0.904, donut 0.812→0.853, hamburger 0.884→0.892); the six at or above are
+byte-unchanged. Cast mean is now **0.923, +0.027 over the reference median**. 81% of the range gain
+came from the dark end, 19% from the light end.
+
+**How to judge it:** run `node tools/tmp/playtest.mjs` → http://localhost:4321 and look at soup and
+egg in character select. That is a 30-second call and it is the kind only you can make.
+
+**Reverting is cheap and precise.** Per-character revert is safe — each file's changes are
+self-contained named constants at the top of the file with the measurement in the comment. The
+whole-set revert is `git checkout 430c3c0 -- src/characters/` (**not** `git revert`, because the
+code is trapped inside the mislabelled `9854f2c`).

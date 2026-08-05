@@ -17,6 +17,12 @@ if you are Uri — it opens with a one-screen answer sheet.
 
 **Objective quality moved a great deal this session. Blind critic scores did not.**
 
+> ⚠️ **Every score in the table below is now STALE and is expected to be wrong.** Since it was
+> measured: the whole cast gained a dark rung (`a5ce2a5`), the render grade moved `contrast`
+> 0.62 → 0.72, the VFX matte and the Giant Lollipop whiteout were fixed, arena colour and layout
+> landed, and the AI stopped being silenced by its own stun. **A fresh round is owed before any of
+> these numbers is quoted again.** They are kept here only as the last honest measurement.
+
 | element | blind score | reference | round valid? |
 |---|---|---|---|
 | arena | **5.33** | 8.33 | yes |
@@ -60,7 +66,7 @@ unprompted); and the arena packet drew 4 of 6 Zooba plates, whose camera is not 
 
 ## Instruments built — and this is the session's real output
 
-Seven instruments were found returning **confident wrong answers**. Each is now fixed and
+**Ten** instruments were found returning **confident wrong answers**. Each is now fixed and
 validated against a known input first.
 
 | instrument | what it was doing |
@@ -79,7 +85,34 @@ validated against a known input first.
 
 ## 🔴 The two findings that matter most
 
-**1. The cast has no dark rung.** Measured against 18 Brawl Stars plates:
+**1. The cast had no dark rung. ✅ CLOSED for 9 of 11 — `a5ce2a5` carries the full record.**
+
+p05 went **0.273 → 0.157** against a reference median of 0.097; **10 of 11 characters now put 5% of
+themselves below luma 0.18**, where previously *none* did against 18 of 18 reference plates. Range
+0.623 → 0.766. Albedo and material only — **geometry proven unmoved**, 324 limb footprints compared,
+largest difference 41 px on a part of 89,365 px.
+
+**Figure/ground was redistributed, not spent** — the whole risk of the pass. Cast **minimum** over
+the 14 valid arena stations went **0.0689 → 0.0834 (up 21%)**, and stations under the 0.10 floor
+went 3 → 1.
+
+**Two remain, and both need geometry rather than colour** — now owned by the character-geometry
+pass: **egg** (head is 93.7% of the character; the shell being near-white *is* the egg — it needs a
+dark **garment**) and **hotdog** (`weakBoundary` 22.6% vs ≤15%, from 68.1%; needs the bun geometry
+split, because its value is pinned at both ends at once).
+
+**Two costs, stated rather than buried:** cast-mean p95 moved 0.896 → **0.923**, i.e. +0.027 above
+the reference median — the old "p95 already equals the reference" rule was a *cast mean* hiding a
+0.780–0.979 spread, and only the five characters **below** the reference were lifted. And soup lost
+its red trim band while egg's lower shell went to warm cream. Both are looks, parked in
+`DECISIONS §16`.
+
+⚠️ The numbers above were measured at `contrast 0.62` and `main` ships 0.72, so they **understate**
+what ships by roughly +0.016 range each. A re-baseline is owed.
+
+<details><summary>The original finding, for the record</summary>
+
+Measured against 18 Brawl Stars plates:
 
 | | ours | reference |
 |---|---|---|
@@ -95,7 +128,9 @@ best part structure in the cast.
 ⚠️ **Do not fix this by desaturating.** Falsified **four** times now: the cast is **1.8× more
 saturated than the environment** and the frame sits below the reference. Value is the lever.
 
-**2. `limbcheck` has been measuring the wrong camera.** At the match's 58°: idle passes **8/11 → 0/11**,
+</details>
+
+**2. `limbcheck` has been measuring the wrong camera.** *(Now the #1 red item, and owned.)* At the match's 58°: idle passes **8/11 → 0/11**,
 mean wasted footprint **17.7% → 53.8%**. Idle *ranking* survives (ρ 0.927) so priorities were sound;
 **run ranking does not** (ρ 0.673). And at the shipped spawn facing every character sits at **exact
 profile to camera**, burying 5.3 of ~15 joints against 0.8 in the pose `limbcheck` uses.
