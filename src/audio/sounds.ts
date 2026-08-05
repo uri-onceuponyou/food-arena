@@ -42,6 +42,14 @@
  *      says WHERE this happened. Before it existed, every sound in the catalogue had
  *      a measured -66 dBFS extent SHORTER than its own declared duration — no energy
  *      after the envelope at all, anywhere in the game.
+ *   5. SPRAY — `spray()` in `synth.ts`, and it is FIVE layers now because a mix
+ *      measurement said so. Layers 1-4 are all authored below about 2 kHz apart from a
+ *      7 ms tick, and rendering a real match's event stream through the production
+ *      chain (`tools/tmp/audio_mix.mjs`) showed the consequence: the long-term average
+ *      spectrum falls at **-5.6 dB/octave** from 80 Hz to 8 kHz against pink noise's
+ *      -3.0, **86% of every matchup's energy is below 1 kHz**, and at the brightest
+ *      instant of a hit the 2-6 kHz band is already 25 dB under the low band. A splash
+ *      lives in exactly the octaves that were empty. See `spray()` for the full table.
  *
  * ── DECAY IS AN AXIS, NOT A CONSTANT ────────────────────────────────────────────
  *
@@ -61,6 +69,7 @@ import {
   modes,
   noiseBurst,
   rand,
+  spray,
   tone,
   transient,
   type SoundFn,
@@ -311,7 +320,22 @@ export function impact(damage: number): SoundFn {
       duration: 0.16 + size * 0.22,
       wet: 0.6,
     });
-    return longest(tr, body, sub, crunch, air);
+    // 5. SPRAY — the top three octaves, which this sound did not reach at all.
+    //
+    // Measured in a real match (`tools/tmp/audio_mix.mjs`): at the BRIGHTEST INSTANT of
+    // an impact the 2-6 kHz band sat 25 dB under the 20-500 Hz band and 6-16 kHz sat
+    // 32 dB under, and stayed there for the sound's whole life. Layers 1-4 above are all
+    // authored below ~2 kHz apart from a 7 ms tick, so the ear — which integrates over
+    // 100-200 ms — only ever heard the body. Light hits get a brighter, tighter spray and
+    // heavy ones a lower, longer one, so this stays an axis rather than a coat of varnish.
+    const mist = spray(s, {
+      peak: 0.1 + (1 - size) * 0.06,
+      freq: [8600 - size * 2200, 3400 - size * 900],
+      duration: 0.06 + size * 0.05,
+      drops: 5,
+      wet: 0.28,
+    });
+    return longest(tr, body, sub, crunch, air, mist);
   };
 }
 
@@ -330,42 +354,91 @@ export function impact(damage: number): SoundFn {
 export function hurt(health01: number): SoundFn {
   const critical = health01 < 0.3;
   return (s) => {
+    // ── Why this varies on more than pitch ──────────────────────────────────
+    //
+    // This is the most-repeated sound in the game and it was the least varied. Measured
+    // in a real match through the production chain (`tools/tmp/audio_mix.mjs`, pizza vs
+    // taco): 8 of 49 voices, tied for the loudest RECURRING key at -13.00 dBFS, the
+    // LOWEST spectral centroid of all sixteen keys in the match at 1070 Hz, and **37.8%
+    // of the energy of every moment the player is hit**. It is also unplaced — centre,
+    // no distance attenuation — so it arrives at full level while the weapon impact
+    // beside it has been attenuated by distance.
+    //
+    // The old version varied by `centsJitter(rng, 45)` on the grunt ALONE: +/-2.6% of
+    // pitch on one of three layers, with the noise band, both durations and the sub all
+    // fixed. Eight identical arrivals per match is a strong candidate for "monotonic" on
+    // its own, and it costs nothing to fix — every axis below is a free draw from the
+    // per-event rng the engine already hands every voice.
+    //
+    // The LEVEL is deliberately unchanged. Whether the hurt layer should sit under the
+    // weapon that caused it is a mix decision and belongs to Uri
+    // (`docs/DECISIONS-FOR-URI.md` section 7), not to this file.
     const j = centsJitter(s.rng, 45);
+    const len = rand(s.rng, 0.9, 1.15);
+    const gruntF = rand(s.rng, 285, 360);
     const grunt = tone(s, {
       type: 'sawtooth',
-      freq: [320 * j, 130 * j],
-      lowpass: [1300, 260],
+      freq: [gruntF * j, gruntF * j * 0.4],
+      lowpass: [rand(s.rng, 1180, 1620), 260],
       peak: 0.3,
       attack: 0.004,
-      duration: critical ? 0.34 : 0.22,
-      drive: 2.4,
+      duration: (critical ? 0.34 : 0.22) * len,
+      drive: rand(s.rng, 2.1, 2.8),
       voices: 2,
       detuneCents: 20,
       wet: 0.18,
     });
+    const dullTop = rand(s.rng, 830, 1150);
     const dull = noiseBurst(s, {
       filter: 'lowpass',
       poles: 24,
-      freq: [900, 190],
+      freq: [dullTop, 190],
       q: 0.9,
       peak: 0.2,
       attack: 0.002,
-      duration: 0.16,
+      duration: 0.16 * len,
       drive: 1.6,
       wet: 0.24,
+    });
+    // A SCUFF — a few milliseconds of contact well ABOVE the whole hit vocabulary, so
+    // "that one was me" is carried by a band no weapon body occupies rather than by more
+    // energy in the band every weapon already fills. Quiet on purpose: it is a marker,
+    // not a layer. Across the six matchups measured, 86% of the mix's energy sits under
+    // 1 kHz and the 2-6 kHz region is 25 dB down, so a cue placed up there costs almost
+    // no loudness and has almost no competition.
+    //
+    // The first component is FIXED and the second varies, and that split is deliberate.
+    // `--mode depth` splits every hit into 20-300 / 300-2500 / 2500-16000 Hz and requires
+    // all three to peak within 8.4 dB of the loudest. The critical variant's sub peaks at
+    // 0.55, so the high band has to clear ~0.066 of absolute peak. A first version put
+    // that entire band in a 3-grain cloud whose grains each draw `rand(0.55, 1)`, and the
+    // gate's one fixed seed drew low: 0.11 against a 0.12 floor, FAILED — and would have
+    // passed or failed at random on a different seed, which is worse than failing. A fixed
+    // tick guarantees the band on every draw; the grains ride on top and carry the
+    // variation. Randomise the CHARACTER of a layer, never whether it exists.
+    const edge = transient(s, { peak: 0.16, freq: 3600, wet: 0.16 });
+    const scuff = grainCloud(s, {
+      count: 3,
+      spread: 0.03,
+      grainMs: [3, 8],
+      freq: [rand(s.rng, 2700, 3400), rand(s.rng, 5200, 7000)],
+      q: 4,
+      peak: 0.11,
+      decay: 0.3,
+      wet: 0.2,
     });
     const sub = critical
       ? tone(s, {
           type: 'sine',
-          freq: [96, 32],
+          freq: [rand(s.rng, 88, 104), 32],
           peak: 0.55,
           attack: 0.006,
-          duration: 0.3,
+          duration: 0.3 * len,
           drive: 2.6,
           wet: 0.16,
         })
       : 0;
-    return longest(grunt, dull, sub);
+    return longest(grunt, dull, edge, scuff, sub);
   };
 }
 

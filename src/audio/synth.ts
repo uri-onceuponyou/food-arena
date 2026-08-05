@@ -983,6 +983,107 @@ export function droplets(
   return last;
 }
 
+export interface SprayOpts {
+  /** Level of the whole layer. */
+  peak: number;
+  /** The band the spray occupies, `[start, end]` Hz, swept DOWN across its life as the
+   * fine mist falls out of the air and the coarser matter is what is left. Default
+   * `[9000, 3200]` — deliberately ABOVE everything else in this file. */
+  freq?: readonly [number, number];
+  /** How long the spray hangs. 60-140 ms; under ~40 ms it is a tick, not a spray. */
+  duration?: number;
+  /** Discrete droplets riding on the hiss. Zero for a pure sizzle (steam, fizz). */
+  drops?: number;
+  wet?: number;
+}
+
+/**
+ * THE SPRAY LAYER — the top three octaves, which this game did not have.
+ *
+ * ## Why this exists, measured rather than argued
+ *
+ * Uri, after playing: *"It still seems like it's flat. One tone, maybe two, monotonic. I
+ * would expect a splash sound when I throw a tomato and it hits."* Two hypotheses were
+ * already refuted by measurement — it is not generic fallthrough (32/33 impacts are
+ * bespoke) and it is not a missing noise source (zero bespoke voices lack one).
+ *
+ * `tools/tmp/audio_mix.mjs` rendered a REAL match's event stream through the real
+ * director and the production chain and measured the mix, which no instrument here had
+ * ever done. Band energy in successive 10 ms windows from the onset of Uri's own example,
+ * `pizza.Tomato`'s impact, relative to its own loudest band-window:
+ *
+ *   | band | at onset | after 50 ms |
+ *   |---|---|---|
+ *   | 20-500 Hz    | **0 dB**   | -13 dB |
+ *   | 500-2000 Hz  | -11 dB     | -27 dB |
+ *   | 2000-6000 Hz | **-25 dB** | -41 dB |
+ *   | 6000-16000 Hz| **-32 dB** | -50 dB |
+ *
+ * The high band is not decaying too fast — it decays at the same rate as the low band.
+ * It is 25-32 dB DOWN AT THE BRIGHTEST INSTANT OF THE HIT and never arrives at all.
+ * Across the whole match the long-term average spectrum falls at **-5.6 dB/octave** from
+ * 80 Hz to 8 kHz, against **-3.0 dB/octave** for pink noise (white noise reads 0.00 on the
+ * same instrument, which is how that number is known to be real); **86.4% of every
+ * matchup's energy sits below 1 kHz**. Eight of 49 sixth-octave bands are within 6 dB of
+ * the peak and every one of them is between 71 and 141 Hz. That is what "one tone, maybe
+ * two" is in a spectrum, and a splash's identity — the spray — lives exactly in the band
+ * that is missing.
+ *
+ * ## Why it is built like this
+ *
+ * Three components, because a plain high shelf on noise is TAPE HISS, which is a texture
+ * the ear files under "broken", not "wet":
+ *
+ *  1. **Sizzle** — the bed, a wide bandpass sweeping down. This is the mist.
+ *  2. **Air** — a 24 dB/oct highpass above the sizzle, short. A single biquad is not
+ *     enough to place a band up here (`NoiseOpts.poles` documents the same trap costing
+ *     Soup's splash 2 kHz of centroid), and without this the sizzle reads as a mid.
+ *  3. **Droplets** — a grain cloud. Discrete transients are what make a high band read
+ *     as MATTER rather than as hiss, and their irregularity is per-event variation for
+ *     free.
+ *
+ * Deliberately WET by default (0.3, against 0.06-0.2 elsewhere): spray is the part of a
+ * splash that goes everywhere, and the room is what says so.
+ */
+export function spray(s: SynthCtx, o: SprayOpts): number {
+  const [hi, lo] = o.freq ?? [9000, 3200];
+  const dur = o.duration ?? 0.11;
+  const wet = o.wet ?? 0.3;
+  const sizzle = noiseBurst(s, {
+    filter: 'bandpass',
+    freq: [hi * centsJitter(s.rng, 90), lo * centsJitter(s.rng, 90)],
+    q: 0.7,
+    peak: o.peak,
+    attack: 0.0012,
+    duration: dur,
+    wet,
+  });
+  const air = noiseBurst(s, {
+    filter: 'highpass',
+    poles: 24,
+    freq: [hi * 0.8, hi * 0.45],
+    q: 0.7,
+    peak: o.peak * 0.55,
+    attack: 0.0006,
+    duration: dur * 0.55,
+    wet,
+  });
+  const drops = o.drops ?? 6;
+  const g = drops > 0
+    ? grainCloud(s, {
+        count: drops,
+        spread: dur * 0.85,
+        grainMs: [3, 9],
+        freq: [lo, hi],
+        q: 5,
+        peak: o.peak * 0.85,
+        decay: 0.25,
+        wet,
+      })
+    : 0;
+  return longest(sizzle, air, g);
+}
+
 /** Longest of a set of scheduled durations — what a composite sound returns. */
 export function longest(...durations: number[]): number {
   let m = 0;
