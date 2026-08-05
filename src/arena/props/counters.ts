@@ -3,8 +3,7 @@
  * four corner blockers, one with a hanging pan rack), the prep counters (the paired
  * mid-west/mid-east chokepoint cover, one variant with a knife block, the other with
  * a mixing bowl + rolling pin), and the service counters (the fryer south / sink
- * north pair). These are the biggest, tallest cover pieces in the arena — the ones
- * `shared.ts`'s `LARGE_COVER_KINDS` singles out for a stronger grounding shadow — and
+ * north pair). These are the biggest, tallest cover pieces in the arena, and
  * every one of them is built from the same plinth + cabinet + backsplash + steel-top
  * silhouette language (see `addBacksplash`/`addTopRim` in `../shared`).
  *

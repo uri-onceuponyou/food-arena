@@ -125,20 +125,33 @@ export const MAX_SAFE_RADIUS = Math.round(
 // light-driven contact darkening rather than a symmetric grey halo.
 //
 // It is the key light's azimuth, duplicated. `render/lighting.ts` is out of bounds
-// for this module, so the number is copied rather than read at runtime: the key sits
-// at (16.35, 9.82, 4.69) relative to its target, and a shadow falls AWAY from the
-// light. IF THAT AZIMUTH MOVES, MOVE THIS. Two other files carry the same duplicate
-// and are owned elsewhere — `arena/apron.ts` (`SHADOW_X`/`SHADOW_Y`, its kerb contact
-// band) and `arena/floor.ts` (the `along` term in its baked litness ramp) — and both
-// are still on the OLD azimuth (38.1 deg from +X; this one is 16.0), so both are 22
-// deg out. Neither draws a hard shadow edge — apron.ts shades a soft one-sided kerb
-// band, floor.ts a whole-arena low-frequency ramp — so neither is visibly wrong at 22
-// deg, but they should be brought across.
+// for this module, so the number is copied rather than read at runtime.
 //
-// CORRECTION (verified against the tree): `apron.ts` is ALREADY on the new azimuth — it
-// reads `Math.hypot(16.35, 4.69)`, matching this file and `lighting.ts:166`. Only
-// `floor.ts` is still stale, and it is parked. This note claimed otherwise for a while,
-// and a brief written from it sent an agent to "fix" something already correct.
+// ── ROUND 12: THE Z COMPONENT'S SIGN WAS WRONG, WHICH IS THE SAME BUG THE ─────
+//    LIGHTING PASS JUST FOUND IN THE KEY ITSELF
+//
+// `086ff5f` moved the key from azimuth +16 deg to **-31 deg** because +Z is the
+// CAMERA's own side and a light there throws every shadow behind its own caster. All
+// three baked duplicates in `src/arena` were left on the pre-swing offset
+// (16.35, 9.82, 4.69), i.e. shadow direction (-0.961, -0.276).
+//
+// That is 47 deg out — but the angle is not the interesting part. The Z component
+// **changed sign**: the real key now throws shadows toward +Z, TOWARD the viewer, and
+// every baked offset in this arena was still pushing them toward -Z, away from the
+// viewer and behind the prop. Exactly the defect `086ff5f` fixed in the renderer,
+// still live in the three files that mirror it, and invisible for the same reason:
+// nothing here draws a hard edge, so a soft field pointing the wrong way just reads as
+// "lit by nothing in particular" (`docs/LESSONS.md` §1).
+//
+// The live rig, read off `window.__stage.lighting.key` by `tools/tmp/aoband.mjs` at
+// three stations: offset (29.98, 28.32, -18.01), azimuth -30.99 deg, elevation 39.00
+// deg. hypot(29.98, 18.01) = 34.97, so the ground direction the light comes FROM is
+// (0.8572, -0.5150) and a shadow falls the other way.
+//
+// IF THAT AZIMUTH MOVES, MOVE ALL THREE: this constant, `arena/apron.ts`'s
+// `SHADOW_X`/`SHADOW_Y` (its kerb contact band) and `arena/floor.ts`'s `along` term
+// (its baked litness ramp). `tools/tmp/bakedaz.mjs` asserts all three against
+// `lighting.ts`'s own `KEY_OFFSET` and fails if any of them drifts again.
 //
 // ── The cast decals are GONE, and why ─────────────────────────────────────────
 // Rounds 6-8 gave every cover prop, the pot and several small props a second baked
@@ -163,8 +176,11 @@ export const MAX_SAFE_RADIUS = Math.round(
 // surface in the arena — measured +21% terminator ramp on the barrel's skirt — which
 // is worth incomparably more than 0.13/255. Removing these without moving the key
 // would have been a small strict loss, which is why the two landed as one change.
-const SHADOW_DIR_LEN = Math.hypot(16.35, 4.69);
-const SHADOW_DIR = { x: -16.35 / SHADOW_DIR_LEN, z: -4.69 / SHADOW_DIR_LEN };
+// `render/lighting.ts`'s KEY_OFFSET, XZ only. Written as the raw components rather
+// than as a pre-normalised pair so the source of the number stays legible.
+const KEY_X = 29.98, KEY_Z = -18.01;
+const SHADOW_DIR_LEN = Math.hypot(KEY_X, KEY_Z);
+const SHADOW_DIR = { x: -KEY_X / SHADOW_DIR_LEN, z: -KEY_Z / SHADOW_DIR_LEN };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kitchen palette — extends the shared character PALETTE with arena-only tones so
@@ -1045,34 +1061,45 @@ export function buildMaterials() {
     // Fake ambient occlusion — a soft dark radial decal dropped under ROUND props
     // (the pot) so they read as sitting ON the floor with real contact darkening,
     // rather than pasted on top of it.
+    // ⚠️ `vertexColors` is on for every decal material below, and every mesh that uses
+    // one is built by `buildContactShadow`/`buildContactRing`, which ALWAYS write a
+    // 4-component `color` attribute. Both halves of that are load-bearing: a material
+    // with `vertexColors` on a geometry with no `color` attribute gets a shader
+    // declaring an attribute that does not exist, which is `docs/LESSONS.md` §12's
+    // "renders the whole floor solid black" trap. Do not hand these materials to a
+    // mesh built any other way.
     contactShadow: new THREE.MeshBasicMaterial({
       map: makeContactShadowTexture(),
       transparent: true,
       depthWrite: false,
+      vertexColors: true,
       opacity: 0.9,
     }),
-    // Every CoverBox's automatic footprint shadow (see `addCover`) uses THIS instead
-    // of `contactShadow`: a blurred ROUNDED-RECT, not a radial gradient. The critic's
-    // #1 finding was that cover has "no AO where it meets the floor" — the old radial
-    // gradient was drawn as a circle inscribed in the plane's UV space, so for any
-    // elongated rectangular footprint (a stove island is 170x90wu) the gradient hit
-    // zero alpha well inside the plane's edges and its CORNERS got no darkening at
-    // all. A rounded-rect shadow hugs the actual silhouette — corners included — at
-    // any aspect ratio, which is what makes every box prop read as pressing into the
-    // floor instead of floating on it.
+    // ── ROUND 12: NO TEXTURE AT ALL — the falloff is now GEOMETRY ──────────────
+    //
+    // Every CoverBox's automatic footprint shadow (see `addCover`) used to be a blurred
+    // rounded-rect CanvasTexture stretched over a plane sized 1.22x (small props) or
+    // 1.34x (large) the footprint. A texture's feather is a fixed FRACTION of its own
+    // canvas, so the world width of the falloff scaled with the prop: on a 2.5 m barrel
+    // it was ~0.2 m and on an 8.5 m stove island ~1.4 m. That is the wrong dependency —
+    // a contact shadow's width is set by the light's elevation and the object's height,
+    // not by how long the object is — and it is why `tools/tmp/aoband.mjs` measures the
+    // baked layer still putting dL 0.0132 at 0.60-1.20 m from a footprint, which is a
+    // haze rather than contact. It is also unfixable with a shared texture: satisfying
+    // "full alpha at the footprint edge" and "zero at a fixed distance outside it"
+    // simultaneously forces the plane to be one specific multiple of the footprint.
+    //
+    // `buildContactRing` builds the rounded rect analytically instead — one inner
+    // contour on the footprint at full alpha, one outer contour `CONTACT_OVERHANG_M`
+    // outside it at zero — so the band is an absolute width on every prop, the corners
+    // are hugged by construction, and the DIRECTIONAL term (see `shadowRampAlpha`)
+    // rides on the same vertex-alpha channel. No canvas, no map, one draw call each,
+    // exactly as before.
     groundedShadow: new THREE.MeshBasicMaterial({
-      map: makeGroundedShadowTexture(),
+      color: SHADOW_TINT_HEX,
       transparent: true,
       depthWrite: false,
-      opacity: 1,
-    }),
-
-    // Round-7: stronger, wider-spread grounding pair reserved for `LARGE_COVER_KINDS`
-    // (see `addCover` and the texture notes above `makeGroundedShadowTextureStrong`).
-    groundedShadowStrong: new THREE.MeshBasicMaterial({
-      map: makeGroundedShadowTextureStrong(),
-      transparent: true,
-      depthWrite: false,
+      vertexColors: true,
       opacity: 1,
     }),
   };
@@ -1335,6 +1362,9 @@ export function liftArenaValue(root: THREE.Object3D, gamma = ARENA_VALUE_GAMMA):
  * IS the sky's own colour, and this rig's sky is blue.
  */
 const SHADOW_TINT = (alpha: number) => `rgba(16,10,36,${alpha})`;
+/** The same tint as a material colour, for the decals that get their alpha from
+ * vertex colours rather than from a canvas gradient. rgb(16,10,36). */
+const SHADOW_TINT_HEX = 0x100a24;
 
 function makeContactShadowTexture(): THREE.CanvasTexture {
   const size = 128;
@@ -1385,107 +1415,62 @@ function makeContactShadowTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
 /**
- * Blurred rounded-rect ground shadow, used for every `addCover` footprint (see the
- * `groundedShadow` material). Unlike a radial gradient, this hugs a RECTANGULAR
- * silhouette at any aspect ratio — corners included — because the shape itself is a
- * rounded rect, not a circle stretched to fit. The blur is faked by filling the rect
- * far off-canvas and letting `shadowBlur` paint only its soft edge onto the visible
- * area, so there's no hard sharp-rect artifact in the middle.
+ * ── THE DIRECTIONAL TERM, AND THE MEASUREMENT THAT ASKED FOR IT ──────────────
  *
- * `pad`/`blur` are deliberately SMALL fractions of the canvas (4% / 5%). A first pass
- * used 10%/11%, which reads fine on its own but is wrong for how this is actually
- * used: `addCover` sizes the plane only slightly larger than the prop's own footprint
- * (a "snug" contact shadow, scale ~1.3), which means the prop's edge lands almost
- * exactly where a wide feather is still ramping up from zero — so the one place a
- * player actually looks (right where the prop meets the floor) was the FAINTEST part
- * of the whole texture. A narrow feather keeps the interior at near-full alpha all
- * the way out to just shy of the plane edge, so a snug oversize actually shows a
- * crisp, visible dark edge instead of a barely-there haze.
+ * Alpha multiplier for a decal vertex at local `(px, pz)` metres, from 1.0 on the side
+ * the key throws its shadow to `SHADOW_RAMP_LIT` on the lit side. `dir` is already in
+ * the prop's own pre-yaw frame (see `localShadowDir`).
+ *
+ * Two blind critics called the grounding "a symmetric grey halo pasted under the prop"
+ * and both prescribed "a tight contact-occlusion ellipse". The symptom was right and
+ * it is now a number. `tools/tmp/aoband.mjs` splits the contact band (0-0.25 m from a
+ * footprint) into the key's shadow side and its lit side, each against open floor ON
+ * ITS OWN SIDE so a brightness gradient cannot fake an asymmetry:
+ *
+ *                        shadow side   lit side   ratio
+ *   ours, HEAD              0.1719      0.0835     2.06
+ *   Brawl Stars bs_04       0.1238      0.0161     7.7
+ *   (two isolated barrels, `tools/tmp/refcontact.mjs`, agreeing to 0.012)
+ *
+ * So the arena is not short of contact darkening in TOTAL — 0.1613 against the
+ * reference's 0.1238 — it is putting 5.2x too much of it on the side the light comes
+ * from. A symmetric ring cannot produce the reference's shape at any strength, which
+ * is why this is a change of KIND and not a tuning pass, and why making the layer
+ * darker (the obvious reading of "the ellipse is too weak") would have moved the one
+ * number that is already wrong further in the wrong direction.
+ *
+ * Quadratic rather than linear: a linear ramp is at half strength on the two sides
+ * PERPENDICULAR to the light, where the reference is already nearly clean.
  */
-function makeGroundedShadowTexture(): THREE.CanvasTexture {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const pad = size * 0.04;
-  const rectW = size - pad * 2;
-  const rectH = size - pad * 2;
-  const radius = size * 0.14;
-  const blur = size * 0.05;
-  const off = size * 3; // pushes the actual filled rect well outside the visible canvas
-
-  ctx.save();
-  ctx.shadowColor = SHADOW_TINT(0.88);
-  ctx.shadowBlur = blur;
-  ctx.shadowOffsetX = -off;
-  ctx.fillStyle = SHADOW_TINT(0.88);
-  roundRectPath(ctx, off + pad, pad, rectW, rectH, radius);
-  ctx.fill();
-  ctx.restore();
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
+const SHADOW_RAMP_LIT = 0.10;
+function shadowRampAlpha(px: number, pz: number, halfW: number, halfD: number, dir: { x: number; z: number }): number {
+  const reach = Math.abs(dir.x) * halfW + Math.abs(dir.z) * halfD;
+  if (reach <= 0) return 1;
+  const t = (px * dir.x + pz * dir.z) / reach; // -1 (lit) .. +1 (shadow)
+  const u = THREE.MathUtils.clamp((t + 1) / 2, 0, 1);
+  return SHADOW_RAMP_LIT + (1 - SHADOW_RAMP_LIT) * u * u;
 }
 
 /**
- * Round-7 "Strong" variant of `makeGroundedShadowTexture`, reserved for the large
- * structural cover pieces (stove islands, freezers, prep/service counters — see
- * `LARGE_COVER_KINDS` near `addCover`). The critic's finding was specific: small
- * props (barrels, crates, the lane pots) already show a consistent grounding
- * shadow, but the big platforms "mostly rely on a darker side-face... shadow
- * opacity/contrast is much lower than either shipped reference." The base
- * texture's feather is deliberately NARROW (4%/5% of the canvas) so a snug
- * 1.3x-oversized plane still shows a crisp edge close to a SMALL prop — but that
- * also means almost all of a LARGE prop's much bigger absolute overhang sits
- * under the fully-opaque interior, which is itself hidden beneath the box's own
- * geometry, leaving only a thin sliver of feather actually visible on the open
- * floor around it. This widens the feather zone and raises peak alpha so a wider,
- * darker band is actually visible beyond a big platform's silhouette instead of
- * fading to nothing within a few centimetres.
+ * Writes the 4-component `color` attribute every decal geometry in this file must
+ * carry (see the `vertexColors` warning on `buildMaterials`). RGB is left at 1 so the
+ * material's own colour and map still decide the tint; only alpha is authored.
+ *
+ * `dir` omitted means a flat 1.0 — the pre-round-12 behaviour, kept for the small
+ * props that pass their own scale to `buildContactShadow`.
  */
-function makeGroundedShadowTextureStrong(): THREE.CanvasTexture {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  // Round-8: feather tightened (pad 0.10 -> 0.075, blur 0.13 -> 0.09). Every number
-  // in this texture was tuned while ~63% of the decal's area was z-occluded by the
-  // opaque floor pads the props stand on (see `BAKED_SHADOW_Y`), so a wide, soft,
-  // far-reaching feather was compensating for a shadow that mostly never arrived.
-  // With the decal actually on screen the same feather reads as a broad grey haze
-  // spreading well past the prop on every side — grounding wants a defined dark band
-  // hugging the silhouette, not a fog bank around it.
-  const pad = size * 0.075;
-  const rectW = size - pad * 2;
-  const rectH = size - pad * 2;
-  const radius = size * 0.16;
-  const blur = size * 0.09;
-  const off = size * 3;
-
-  ctx.save();
-  ctx.shadowColor = SHADOW_TINT(0.95);
-  ctx.shadowBlur = blur;
-  ctx.shadowOffsetX = -off;
-  ctx.fillStyle = SHADOW_TINT(0.95);
-  roundRectPath(ctx, off + pad, pad, rectW, rectH, radius);
-  ctx.fill();
-  ctx.restore();
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
+function writeDecalAlpha(geo: THREE.BufferGeometry, halfW: number, halfD: number, dir?: { x: number; z: number }): void {
+  const pos = geo.attributes.position;
+  const col = new Float32Array(pos.count * 4);
+  for (let i = 0; i < pos.count; i++) {
+    // `PlaneGeometry` is authored in XY and every decal here is rotated -90 deg about
+    // X, which maps local +Y to world -Z. So the world-space offset of a vertex is
+    // (x, -y) and the ramp must be evaluated there, not on the raw attribute.
+    const a = dir ? shadowRampAlpha(pos.getX(i), -pos.getY(i), halfW, halfD, dir) : 1;
+    col[i * 4] = 1; col[i * 4 + 1] = 1; col[i * 4 + 2] = 1; col[i * 4 + 3] = a;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
 }
 
 /**
@@ -1531,9 +1516,19 @@ function makeGroundedShadowTextureStrong(): THREE.CanvasTexture {
 const BAKED_SHADOW_Y = 0.07;
 
 /** Elliptical AO blob sized to a prop's own footprint (in metres), slightly oversized
- * so it peeks out past the silhouette the way a real contact shadow would. */
-export function buildContactShadow(mat: THREE.Material, wM: number, dM: number, scale = 1.25): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(wM * scale, dM * scale), mat);
+ * so it peeks out past the silhouette the way a real contact shadow would.
+ *
+ * `dir` (the prop's local shadow direction, from `localShadowDir`) makes the blob
+ * one-sided — see `shadowRampAlpha`. Omitting it keeps the flat, symmetric decal the
+ * small props were tuned with. Either way the geometry gets its 4-component `color`
+ * attribute, which the material REQUIRES. */
+export function buildContactShadow(mat: THREE.Material, wM: number, dM: number, scale = 1.25, dir?: { x: number; z: number }): THREE.Mesh {
+  const w = wM * scale, d = dM * scale;
+  // 8x8 rather than 1x1: the ramp is per-vertex, so a two-triangle quad would carry
+  // exactly one gradient across the whole decal and lose the quadratic entirely.
+  const geo = new THREE.PlaneGeometry(w, d, 8, 8);
+  writeDecalAlpha(geo, w / 2, d / 2, dir);
+  const m = new THREE.Mesh(geo, mat);
   m.rotation.x = -Math.PI / 2;
   m.position.y = BAKED_SHADOW_Y;
   m.renderOrder = 1;
@@ -1544,10 +1539,99 @@ export function buildContactShadow(mat: THREE.Material, wM: number, dM: number, 
   return m;
 }
 
+/**
+ * The contact band as GEOMETRY: a rounded rect on the prop's own footprint at full
+ * alpha, and a second contour `CONTACT_OVERHANG_M` outside it at zero, with the
+ * directional ramp riding on the same vertex-alpha channel.
+ *
+ * See the `groundedShadow` material note for why this replaced a canvas texture. The
+ * short version: a texture's feather is a fraction of its canvas, so its world width
+ * scaled with the prop, and no single texture can be full-alpha at the footprint edge
+ * AND zero a fixed distance outside it on both a 2.5 m barrel and an 8.5 m island.
+ *
+ * `CONTACT_OVERHANG_M` is not a taste number. At the key's 39 deg elevation a point at
+ * height h is thrown h*cot(39) = 1.235h, and the reference's own prop shadows reach
+ * 0.35-0.55 of the prop's height (hand-measured off three crates and a barrel in
+ * `gameplay_topdown/bs_04.png` by the lighting pass). Arena cover stands 0.9-1.3 m, so
+ * the reference band is 0.32-0.7 m — and the long half of that throw is the shadow
+ * MAP's job now, not a decal's. 0.35 m is the near end: the core, not the tail.
+ */
+const CONTACT_OVERHANG_M = 0.35;
+const CONTACT_PEAK_ALPHA = 0.9;
+
+export function buildContactRing(mat: THREE.Material, wM: number, dM: number, dir: { x: number; z: number }, overhangM = CONTACT_OVERHANG_M): THREE.Mesh {
+  const hw = wM / 2, hd = dM / 2;
+  // Corner radius follows the prop's short side, capped so a long thin footprint does
+  // not turn into a stadium. `roundedBox`'s prop bevels sit in the same neighbourhood.
+  const r = Math.min(Math.min(hw, hd) * 0.35, 0.5);
+  const cx = hw - r, cz = hd - r;
+  const K = 6; // arc samples per corner
+  const corners: Array<[number, number, number]> = [
+    [cx, cz, 0], [-cx, cz, Math.PI / 2], [-cx, -cz, Math.PI], [cx, -cz, (3 * Math.PI) / 2],
+  ];
+  const inner: Array<[number, number]> = [];
+  const outer: Array<[number, number]> = [];
+  for (const [ox, oz, a0] of corners) {
+    for (let k = 0; k <= K; k++) {
+      const a = a0 + (Math.PI / 2) * (k / K);
+      const ca = Math.cos(a), sa = Math.sin(a);
+      inner.push([ox + r * ca, oz + r * sa]);
+      outer.push([ox + (r + overhangM) * ca, oz + (r + overhangM) * sa]);
+    }
+  }
+  const N = inner.length;
+  const pos = new Float32Array((1 + N * 2) * 3);
+  const col = new Float32Array((1 + N * 2) * 4);
+  const put = (i: number, x: number, z: number, alpha: number) => {
+    // Authored directly in the ground plane and rotated -90 deg about X like every
+    // other decal here, so a local +Z lands at plane -Y.
+    pos[i * 3] = x; pos[i * 3 + 1] = -z; pos[i * 3 + 2] = 0;
+    col[i * 4] = 1; col[i * 4 + 1] = 1; col[i * 4 + 2] = 1; col[i * 4 + 3] = alpha;
+  };
+  put(0, 0, 0, CONTACT_PEAK_ALPHA * shadowRampAlpha(0, 0, hw, hd, dir));
+  for (let i = 0; i < N; i++) {
+    put(1 + i, inner[i][0], inner[i][1], CONTACT_PEAK_ALPHA * shadowRampAlpha(inner[i][0], inner[i][1], hw, hd, dir));
+    put(1 + N + i, outer[i][0], outer[i][1], 0);
+  }
+  // ⚠️ WINDING. The contours above are generated counter-clockwise in (x, z), and
+  // `put` writes them as (x, -z) in the plane's XY — a mirror, which REVERSES the
+  // winding. Emitting them in the natural order therefore produces triangles facing
+  // -Z, i.e. straight DOWN once the mesh is rotated -90 deg about X, and
+  // `MeshBasicMaterial` is `FrontSide`, so the entire ring is backface-culled and
+  // renders at zero pixels while the mesh count, the bounding box and every ablation
+  // still say it is there. That is exactly how this shipped for one measurement round:
+  // `aoband` reported the baked layer at dL 0.0034 against HEAD's 0.0438 with all 41
+  // decals present and correct (`docs/LESSONS.md` §1, and §12's lathe-normal trap in a
+  // new costume). Indices are reversed here to undo the mirror. If this geometry is
+  // ever re-authored, check delivered PIXELS, not mesh count.
+  const idx: number[] = [];
+  for (let i = 0; i < N; i++) {
+    const j = (i + 1) % N;
+    // interior fan
+    idx.push(0, 1 + j, 1 + i);
+    // the band
+    idx.push(1 + i, 1 + N + j, 1 + N + i);
+    idx.push(1 + i, 1 + j, 1 + N + j);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, mat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = BAKED_SHADOW_Y;
+  m.renderOrder = 1;
+  m.name = 'contact_shadow__no_outline';
+  m.castShadow = false;
+  m.receiveShadow = false;
+  noOutline(m);
+  return m;
+}
 
 /** Counter-rotates the fixed world `SHADOW_DIR` into a group's local (pre-yaw) space,
- * so `addCover` can offset a prop's contact ring along the light direction whichever
- * way the prop itself is yawed. */
+ * so `addCover`'s contact ring runs the same way as the real light whichever way the
+ * prop itself is yawed. */
 function localShadowDir(yawDeg: number): { x: number; z: number } {
   const yawRad = THREE.MathUtils.degToRad(yawDeg);
   const c = Math.cos(-yawRad), s = Math.sin(-yawRad);
@@ -1555,21 +1639,33 @@ function localShadowDir(yawDeg: number): { x: number; z: number } {
 }
 
 /**
- * Round-7 grounding fix. The critic's finding was specific: small props (barrels,
- * crates, the lane pots) already show a consistent grounding ring, but "the
- * larger structural pieces (the counters/platforms, which matter most for the
- * 'is this a wall' read) mostly rely on a darker side-face rather than a separate
- * ground-contact shadow falling onto the floor beyond their footprint." These are
- * exactly the CoverBox `kind`s tall/wide enough that a steep top-down camera mostly
- * shows their flat top, with only a thin riser visible at the near edge — the same
- * kinds the file header already calls out as needing a vertical `addBacksplash`
- * wall for the same reason. They get the wider, higher-contrast AO ring (see
- * `makeGroundedShadowTextureStrong`) so the grounding shadow actually pokes out past
- * the body and its kick, instead of the
- * thin sliver the base (small-prop-tuned) texture would leave visible on something
- * this big.
+ * Re-authors the directional ramp on every contact decal already inside `root`.
+ *
+ * Round props (barrels, the stacked-pot crate, the pot itself, the puddles) add their
+ * own RADIAL decal on top of whatever `addCover` gives them, because a rounded rect's
+ * corners are the wrong shape under a cylinder. Those are built inside `build(wM, dM)`,
+ * which does not know the prop's yaw and therefore cannot know which way the light
+ * comes from — so they were the one family left symmetric, and a symmetric decal on
+ * the lit side is exactly the defect this round is closing.
+ *
+ * Doing it here, by walking for the decal's own reserved name, means a prop builder
+ * never has to thread a light direction through its signature and a decal added in
+ * future is covered by construction.
+ *
+ * ⚠️ ORDER MATTERS: call this BEFORE adding a `buildContactRing`, never after. The
+ * ring authors a zero-alpha outer contour that the bounding box cannot distinguish
+ * from any other vertex, so re-running the ramp over it would fill its feather in.
  */
-const LARGE_COVER_KINDS = new Set(['stove_island', 'freezer', 'prep_counter', 'fryer_counter', 'sink_counter']);
+export function applyContactRamp(root: THREE.Object3D, yawDeg = 0): void {
+  const dir = localShadowDir(yawDeg);
+  root.traverse((o) => {
+    if (!(o as THREE.Mesh).isMesh || o.name !== 'contact_shadow__no_outline') return;
+    const geo = (o as THREE.Mesh).geometry;
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    const bb = geo.boundingBox!;
+    writeDecalAlpha(geo, Math.max(Math.abs(bb.min.x), bb.max.x), Math.max(Math.abs(bb.min.y), bb.max.y), dir);
+  });
+}
 
 /**
  * Raised counter-back wall + a thin bright cap trim along its top edge.
@@ -1651,34 +1747,33 @@ export function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Material
   const wM = wu(spec.w);
   const dM = wu(spec.h);
   const group = spec.build(wM, dM);
-  // Rounded-rect grounded shadow — see the `groundedShadow` material comment. 1.3x
-  // is snug against the redesigned texture's much narrower feather (see
-  // `makeGroundedShadowTexture`), so the prop's own edge sits in the near-full-alpha
-  // interior instead of the faint outer ramp. `LARGE_COVER_KINDS` (see the round-7
-  // note above `LARGE_COVER_KINDS`) get a bigger oversize AND the wider/darker
-  // `groundedShadowStrong` texture, so the shadow visibly clears the prop's own body
-  // instead of staying hidden under it — the exact "counters/platforms... rely on a
-  // darker side-face rather than a separate ground-contact shadow" gap.
+  // ── ROUND 12: one ring, absolute band width, directional alpha ─────────────
   //
-  // Round-8: both oversizes come DOWN (1.6 -> 1.34 large, 1.3 -> 1.22 small) and the
-  // ring is now OFFSET along the shadow direction instead of sitting concentric.
-  // Same reason as the texture-feather change (see `makeGroundedShadowTextureStrong`):
-  // every one of these numbers was chosen while most of the decal's area was buried
-  // under an opaque floor pad, so they were sized to make a mostly-invisible thing
-  // register. Fully visible, a 1.6x ring around an 11.5m freezer threw 3.5m of grey
-  // in every direction — including the side the key light comes from, where a real
-  // contact shadow is at its thinnest. Offsetting it a fraction of its own overhang
-  // along `SHADOW_DIR` keeps the band tight on the lit side and lets it run a little
-  // further on the shaded side, which is what makes it read as light-driven contact
-  // darkening rather than a symmetric grey halo pasted under the prop.
-  const isLarge = LARGE_COVER_KINDS.has(spec.kind);
-  const aoMat = isLarge ? M.groundedShadowStrong : M.groundedShadow;
-  const aoScale = isLarge ? 1.34 : 1.22;
-  const ao = buildContactShadow(aoMat, wM, dM, aoScale);
-  const aoDir = localShadowDir(spec.yawDeg ?? 0);
-  ao.position.x += aoDir.x * wM * (aoScale - 1) * 0.42;
-  ao.position.z += aoDir.z * dM * (aoScale - 1) * 0.42;
-  group.add(ao);
+  // What this replaced, and why none of it survived: a texture-mapped plane at 1.22x
+  // (small props) or 1.34x (`LARGE_COVER_KINDS`) the footprint, nudged 0.42 of its own
+  // overhang along `SHADOW_DIR`. Three faults, all of them measured:
+  //
+  //  1. The band's WIDTH scaled with the prop. Rounds 7 and 8 both tried to fix "a
+  //     broad grey haze spreading well past the prop" by moving the multiplier, which
+  //     cannot work: a texture feather is a fraction of its own canvas. `aoband` put
+  //     the baked layer at dL 0.0132 a full 0.60-1.20 m from a footprint.
+  //  2. The ring was very nearly SYMMETRIC. The 0.42-of-overhang nudge is 9% of the
+  //     footprint on a small prop, so both sides of the base got nearly the same
+  //     darkening. Measured: our contact band runs 2.06:1 shadow-to-lit where the
+  //     reference runs 7.7:1 (`shadowRampAlpha`).
+  //  3. `SHADOW_DIR` itself had the WRONG SIGN on Z, so what little offset there was
+  //     pushed the band AWAY from the camera — the same defect `086ff5f` fixed in the
+  //     key light, mirrored into three arena files and left there.
+  //
+  // The offset is gone rather than retuned: with a directional alpha ramp the band is
+  // already thin on the lit side and thick on the shadow side, and an offset on top of
+  // that would pull the full-alpha edge off the footprint it is supposed to hug.
+  //
+  // `LARGE_COVER_KINDS` is gone with it. It existed only because a proportional
+  // feather was too thin, in world units, on a big prop; an absolute band makes a
+  // stove island and a barrel the same problem.
+  applyContactRamp(group, spec.yawDeg ?? 0);
+  group.add(buildContactRing(M.groundedShadow, wM, dM, localShadowDir(spec.yawDeg ?? 0)));
   // No baked cast shadow any more. The one that used to be added here measured
   // 0.13/255 across the frame while its frozen direction pinned the key light's
   // azimuth in place — see the `SHADOW_DIR` note at the top of this file. The real

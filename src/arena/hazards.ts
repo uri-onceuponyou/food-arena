@@ -28,7 +28,7 @@ import * as THREE from 'three';
 import { flatMat } from '../render/toon';
 import { wu, groundPos } from '../units';
 import { POT } from '../game/rules';
-import { puck, mesh, noOutline, buildContactShadow, FLOOR_Y, KPAL, type Materials } from './shared';
+import { puck, mesh, noOutline, buildContactShadow, applyContactRamp, FLOOR_Y, KPAL, type Materials } from './shared';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Central pot assembly.
@@ -77,7 +77,38 @@ export function buildPot(M: Materials): PotAssembly {
   // with no contact shadow at all"; it had one and it was delivering a 3% wash. See the
   // stop-placement note on `makeContactShadowTexture`, which is the other half of this.
   // 1.45 puts the visible annulus at u 0.66..1.00, in the band the stops now carry.
-  g.add(buildContactShadow(M.contactShadow, bodyR * 2.1, bodyR * 2.1, 1.45));
+  //
+  // ── ROUND 12: IT WAS UNDER THE HAZARD'S OWN GLOW, AND THAT IS ARITHMETIC ────
+  //
+  // The previous pass fixed both ends of this decal (scale 1 -> 1.45, gradient stops
+  // outward) and `ao_ab` did not move. Rendered and looked at, the reason was that the
+  // pot's contact annulus is owned by the hazard's own bright halo. The numbers, from
+  // `buildHazardGround` below: the glow plane is `R/0.84*1.02` = 5.767 m in radius and
+  // ADDITIVELY blended, so at the pot's own edge (bodyR = 2.6 m, u = 0.451) it lays
+  // down alpha ~0.141 of rgb(255,92,26) — a luma LIFT of +0.070, right where a decal
+  // is trying to deliver -0.05. It cannot win, and no amount of darkening it would
+  // have changed that.
+  //
+  // Two independent fixes, because either alone leaves the trap open:
+  //   * this decal now draws AFTER the glow (renderOrder 3 against the glow's 2).
+  //   * the glow's inner wash is faded out under the pot — see `makeHazardGlowTexture`.
+  //
+  // ⚠️ It is the RENDER ORDER that moves, not the height. Raising the plane to sit
+  // physically above the glow (`FLOOR_Y.fine` + 4 mm) also works and was tried first —
+  // and it costs 8.6 px of parallax. At this 58 deg camera a point 18 cm off the floor
+  // projects 0.18/tan(58) = 0.156 m toward the viewer, which at 55.4 px/m displaces the
+  // whole contact shadow away from the base it is supposed to be pinned to. That is
+  // peter-panning, manufactured to fix an occlusion problem that is not an occlusion
+  // problem: the glow and the scorch are both `depthWrite: false`, so nothing about
+  // this decal's HEIGHT was ever what hid it. Only the order was.
+  //
+  // The general form is worth keeping: an alpha-blended dark decal drawn BEFORE an
+  // additive plane covering the same pixels is invisible whatever its own alpha says
+  // (`docs/LESSONS.md` §1), and the fix for a draw-order bug is draw order.
+  const potContact = buildContactShadow(M.contactShadow, bodyR * 2.1, bodyR * 2.1, 1.45);
+  potContact.renderOrder = 3;
+  g.add(potContact);
+  applyContactRamp(g);
   // The pot used to also get a hand-placed BAKED directional shadow here, because it is
   // the tallest object in the arena and had no CoverBox (so it never ran through
   // `addCover`). That whole system is retired: ablation measured the baked cast decals at
@@ -249,11 +280,47 @@ function makeHazardGlowTexture(): THREE.CanvasTexture {
   // saturation contract is explicit that 0-60 deg belongs to *the cast, the hazards and
   // the VFX* — so a hazard is the one place the environment may spend warm freely, and
   // the one place spending it improves readability rather than costing it.
+  // ── Round 12: the inner wash now STARTS outside the pot's own base ──────────
+  // The wash above was added to make the damage footprint legible as a footprint, and
+  // that argument holds for the ground a fighter can stand on. It does not hold for
+  // the disc under the pot itself. `POT.bodyRadius` is 52 wu against a `dangerRadius`
+  // of 95, and this plane's radius is `dangerRadius/0.84*1.02`, so the pot's own edge
+  // sits at u = 0.451 of it — where the old stops were already laying +0.070 of
+  // additive luma onto the exact annulus the pot's contact shadow needs. Collision
+  // stops a fighter's CENTRE at 73 wu (u = 0.633), so nothing inside u ~ 0.5 is ever
+  // stood on, is mostly occluded by the pot, and telegraphs nothing: the whole of that
+  // wash was cost. It now ramps from zero at u = 0.42 (just outside the pot at 0.451
+  // once the pot's own base flare is allowed for) instead of starting at 0.09 in the
+  // middle.
+  //
+  // ── AND THE WASH ITSELF IS A WHITEOUT, WHICH IS MEASURED, NOT JUDGED ────────
+  // Sampled off the shipped frame at `570:430`, on the SAME teal service mat inside
+  // and outside the caution ring:
+  //
+  //                        luma     HSV saturation
+  //     mat, outside      0.446         0.695
+  //     mat, inside       0.698         0.391      <- +0.25 luma, saturation HALVED
+  //
+  // This is billed as a "scorched floor patch" and it is the BRIGHTEST large surface
+  // in the frame — brighter than the pink tile at 0.425 — and the most desaturated. The
+  // scorch texture underneath is a dark warm brown at up to 0.70 alpha and none of it
+  // survives, for the third time in this one file: an ADDITIVE plane over an
+  // alpha-blended dark one wins outright, so the dark layer is present, correct and
+  // invisible (`docs/LESSONS.md` §1). At 0.20-0.38 alpha of rgb(255,80,22) the wash
+  // alone lifts luma +0.10 to +0.19 before the post chain's bloom touches it.
+  //
+  // Halved inside u = 0.80 (0.20 -> 0.09, 0.38 -> 0.17) so the lift lands at +0.045 to
+  // +0.085: a warm tint over a surface whose own material still reads, instead of a
+  // veil that erases it. Every stop from `ringNorm - 0.02` outward — the peak, the
+  // boundary itself and the outer falloff — is untouched to the digit, because that is
+  // the part that does the telegraphing, and the black/amber caution ring traced
+  // exactly on the damage radius is untouched as well. The region stays legible as a
+  // region; it stops being a hole in the frame.
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
-  g.addColorStop(0, 'rgba(255,110,35,0.09)');
-  g.addColorStop(Math.max(0, ringNorm - 0.42), 'rgba(255,95,28,0.13)');
-  g.addColorStop(Math.max(0, ringNorm - 0.22), 'rgba(255,80,22,0.20)');
-  g.addColorStop(ringNorm - 0.07, 'rgba(255,80,25,0.38)');
+  g.addColorStop(0, 'rgba(255,110,35,0.0)');
+  g.addColorStop(0.42, 'rgba(255,105,32,0.0)');
+  g.addColorStop(Math.max(0, ringNorm - 0.22), 'rgba(255,80,22,0.09)');
+  g.addColorStop(ringNorm - 0.07, 'rgba(255,80,25,0.17)');
   g.addColorStop(ringNorm - 0.02, 'rgba(255,110,20,0.7)');
   g.addColorStop(ringNorm, 'rgba(255,60,10,1.0)');
   g.addColorStop(ringNorm + 0.025, 'rgba(230,35,15,0.6)');
@@ -305,6 +372,11 @@ function makeHazardStripeTexture(): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;
+  // A repeating pattern on a ring seen at 58 deg is minified hard on the far arc and
+  // barely at all on the near one, which is the exact case isotropic mip filtering
+  // cannot serve: the level that stops the far side crawling over-blurs the near side.
+  // three clamps this to the device maximum, so 8 is a request, not an assumption.
+  tex.anisotropy = 8;
   tex.needsUpdate = true;
   return tex;
 }
@@ -362,7 +434,26 @@ export function buildHazardGround(M: Materials): HazardGround {
   // against the pale floor the way the additive glow's near-white peak did.
   const stripeHalfWidth = Math.max(0.09, R * 0.05);
   const stripeTex = makeHazardStripeTexture();
-  const stripeRepeat = Math.max(8, Math.round((2 * Math.PI * R) / 1.0));
+  // ── Round 12: one repeat per 2 m, not per 1 m ───────────────────────────────
+  // A blind critic reading this frame cold: *"the hazard ring has visibly stair-stepped
+  // diagonal stripes — hard aliasing on a fully opaque coplanar decal. It reads as UI
+  // pasted onto the world."* Correct, and the mechanism is spatial frequency rather
+  // than the compositing it was attributed to. Measured off the shipped frame at
+  // native pixels (`/tmp/ring_zoom.png`, 4x nearest-neighbour): the ring's on-screen
+  // circumference is ~1630 px and this repeat put 96 stripe pairs around it, i.e.
+  // **~17 px per pair and ~2 px of dark stripe**. Two pixels is not a marking, it is
+  // hatching — and hatching at the display's own frequency limit is what a UI overlay
+  // looks like, which is precisely what the critic reported. The 32-px-tall texture
+  // also squashes the authored diagonal to near-vertical on a band that is only ~26 px
+  // deep on screen, so the "diagonal caution tape" reads as a picket fence.
+  //
+  // Halving the repeat doubles every stripe to ~4 px of dark against ~8 px of amber,
+  // out of the aliasing band and into a mark the eye resolves as a shape. Nothing else
+  // moves: same colours, same width, same radius, same `R`, so the hazard's reserved
+  // hard edge still lands exactly on the damage boundary and the telegraph is
+  // untouched. `docs/LESSONS.md` §6: a texture feature smaller than a few pixels at
+  // shipped framing is an aliasing generator, not detail.
+  const stripeRepeat = Math.max(8, Math.round((2 * Math.PI * R) / 2.0));
   stripeTex.repeat.set(stripeRepeat, 1);
   const stripeMat = new THREE.MeshBasicMaterial({ map: stripeTex });
   stripeMat.name = 'hazard:stripe';
@@ -704,6 +795,9 @@ export function buildPuddleVisual(
   shadow.position.x = gp.x;
   shadow.position.z = gp.z;
   g.add(shadow);
+  // This group is never yawed (see the positioning note above), so the world shadow
+  // direction is also the local one.
+  applyContactRamp(shadow);
 
   const disc = mesh(new THREE.CircleGeometry(R, 32), bodyMat, 'puddle');
   disc.rotation.x = -Math.PI / 2;

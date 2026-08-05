@@ -565,8 +565,16 @@ function buildStainCluster(mat: THREE.Material, cx: number, cy: number, seed: nu
   // `buildStainShape` — the pale footprint was the whole cluster and it compounded
   // wherever two marks overlapped. 0.84 puts the band's inner edge at 0.97x baseR,
   // i.e. hugging the dark outer silhouette it is supposed to ring.
+  // Round 12: 0.72 -> 0.82. The band ran 0.835..1.16 of baseR, i.e. 0.325*baseR wide,
+  // which is wide enough that two neighbouring clusters' rims and their satellites'
+  // rims routinely land on the same tile and compound — the +0.152 stack measured on
+  // the `stainRim` note in `buildFloor`. 0.82 halves the band to 0.16*baseR, so it
+  // reads as an EDGE rather than as a broad warm lobe around a cool one, which is the
+  // specific thing two critics independently called bloom. Area, not opacity: the two
+  // levers do different work and only one of them can be pushed without weakening the
+  // rim where it is actually doing its job.
   if (rimMat) {
-    const rim = buildStainShape(rimMat, cx, cy, seed + 5, baseR * 1.16, 9, 0.72);
+    const rim = buildStainShape(rimMat, cx, cy, seed + 5, baseR * 1.16, 9, 0.82);
     rim.position.y -= 0.004;
     g.add(rim);
   }
@@ -1194,7 +1202,42 @@ export function buildFloor(M: Materials): THREE.Group {
   // it is still barely darker than the tile, still chromatic, still in a hue the clean
   // floor never reaches. It now reads as a cool wet/scuffed patch rather than a warm
   // greasy one, which is also what the `floorWet` mark beside it already was.
-  M.floorGrime.color.set('#536978');
+  //
+  // ── ROUND 12: THE MARK'S VALUE STEP HAD BEEN ERASED BY THE BRIGHTNESS LIFT ───
+  //
+  // Two blind critics named these clusters independently — *"reads as bloom or a light
+  // leak"* and *"radial gradients with no lighting response... pasted decal"* — and the
+  // recorded hypothesis was that the pale tidemark rim had started reading as light.
+  // Sampled off the shipped frame at `570:430`, the real structure is worse and it is
+  // arithmetic:
+  //
+  //     clean tile        luma 0.4253
+  //     stain CORE        luma 0.4263      <- +0.001. Not darker. AT ALL.
+  //     tidemark RIM      luma 0.4628 single, 0.5770 where two marks overlap
+  //
+  // A patch that is exactly its surround's value in the middle and 0.10-0.15 BRIGHTER
+  // in a ring around it is not a stain in any lighting; it is the luminance profile of
+  // a bloom halo, which is precisely what both critics reported. The mechanism is not
+  // the rim on its own — it is that the mark has no value step left to be the rim's
+  // opposite, so the rim is the only structure in it.
+  //
+  // And the cause is a drift, not a decision. This colour was chosen against a tile
+  // measured at luma 0.341 and was "barely darker than the tile"; `ce49cd3` then lifted
+  // the whole arena a full stop (frame mean 0.322 -> 0.402) and this albedo did not
+  // follow, so a −0.05 step became a +0.00 one. The note above is still right about
+  // WHAT it wants; the number stopped delivering it.
+  //
+  // Re-derived rather than eyeballed, and the constraint is the GAMEPLAY rule stated
+  // above — a ground mark must never reach the value of a real shadow, because on a
+  // top-down floor dark means "something is above me". The target is the previously
+  // intended RATIO, deepest stack / clean tile = 0.29/0.341 = 0.85, applied to today's
+  // tile: 0.361. With alphas 0.22 (outer) and 0.286 (the two cores), the delivered
+  // stack is 0.1692 + 0.6023*albedo, so albedo luma 0.318 — and #43545F is #536978
+  // scaled 0.793, i.e. its hue (205 deg) and HSV saturation held to the digit and only
+  // its VALUE moved, which is this project's standing lever (`docs/LESSONS.md` §8: do
+  // not reach for saturation). Delivered: core −0.024 single, −0.064 stacked, against a
+  // measured contact-shadow floor of ~0.27. The margin to "reads as a shadow" is 0.09.
+  M.floorGrime.color.set('#43545F');
   M.floorGrime.needsUpdate = true;
 
   // Pale dried-residue rim shared by every stain cluster — see the tidemark note in
@@ -1204,8 +1247,37 @@ export function buildFloor(M: Materials): THREE.Group {
   // why these stains stopped being mistaken for enemy drop shadows. That argument is
   // about the SIGN of the step, not its size, so the rim can be cut hard and still do
   // it. See the pale-decal note in `buildFloor` for the measurement that forced this.
+  // Round 12: 0.11 -> 0.05. Measured on the shipped frame at `570:430`, against a clean
+  // tile at luma 0.4253: one rim layer lifted +0.041, and the worst overlap of a
+  // cluster rim, a satellite's rim and `buildLaneWear` lifted **+0.152**. The reference
+  // library's own maximum for a ground boundary is +0.043 of overshoot
+  // (`tools/tmp/edgeridge.mjs`'s reference table, five hand-picked crossings across
+  // `bs_01`/`bs_04`/`bs_06`), so a SINGLE rim already sat at that ceiling and a stack
+  // was 3.5x past it — which is what a blind critic was reading when it called these
+  // "a light leak".
+  //
+  // Fitted rather than guessed. Two measured points at the worst overlap (0.11 ->
+  // +0.1033, 0.07 -> +0.0736) give lift = 0.0216 + 0.743*opacity, so 0.05 lands that
+  // point at +0.059 and a single layer at +0.019. The 0.0216 intercept is NOT this
+  // material — it is whatever else is pale on that tile — and it is half the reference
+  // ceiling on its own, so driving this rim to zero could not reach +0.043 anyway.
+  //
+  // Two things are deliberately NOT done, and both are the same discipline:
+  //
+  //  * The HUE is untouched. A warm pale tidemark is the right grammar for a dried
+  //    spill, and it is warm chroma the colour budget wants kept (`arena-scan`'s warm
+  //    rail runs at 44% of the reference). The defect was the AMOUNT and the missing
+  //    dark core it is supposed to be the opposite of.
+  //  * The rim is NOT taken below the clean tile, however tempting. A mark that goes
+  //    tile -> slightly-dark ring -> darker core IS a penumbra, and this rim exists
+  //    because a critic read these clusters as enemy drop shadows — a gameplay failure,
+  //    not an aesthetic one. Its job is the SIGN of the step; only the size is wrong.
+  //
+  // That distinction is the whole lesson from the previous round of this argument: the
+  // rim was ADDED to fix the drop-shadow read and became the next defect. Cutting a
+  // magnitude cannot introduce a third thing. Swapping the hue, or the sign, could.
   const stainRim = M.flour.clone();
-  stainRim.opacity = 0.11;
+  stainRim.opacity = 0.05;
 
   // Subfloor — extends past the playfield edge so nothing reads as a table-edge cliff.
   //
@@ -1714,18 +1786,29 @@ export function buildFloor(M: Materials): THREE.Group {
       // The `blotch` mottling is folded in last at a fraction of the weight — it is
       // material variation, not lighting, and it must not compete with the light.
       //
-      // KEY AZIMUTH — this was the LAST stale copy of the old number in the repo.
-      // Retiring the baked cast-shadow ovals freed the key from `SHADOW_DIR` and it
-      // swung 38.08 deg -> 16.0 deg off +X (`lighting.ts`: the key sits at
-      // (16.35, 9.82, 4.69) relative to its target). The coefficients here are that
-      // azimuth normalised — hypot(16.35, 4.69) = 17.01, so (0.9612, 0.2757) — and
-      // they were still the pre-swing (9, 16, 7) pair, 22 deg out. Nothing here draws
-      // a hard edge so it was never visibly wrong, but a whole-arena ramp pointing 22
-      // deg away from the only real light in the scene is the kind of quiet
-      // inconsistency that makes a frame read as "lit by nothing in particular".
-      // `shared.ts:93` and `arena/apron.ts` are the other two copies; both already
-      // carry 16.0, so IF THE KEY MOVES AGAIN, all three move together.
-      const along = ((wx - CENTER.x) * 0.961 + (wy - CENTER.y) * 0.276) / 700;
+      // KEY AZIMUTH — and it has moved twice, the second time changing SIGN.
+      //
+      // This ramp is the whole arena's "one sun direction". It has to point at the
+      // only real light in the scene, or a floor lit from one direction sits under
+      // props shaded from another and the frame reads as lit by nothing in particular.
+      //
+      // History, because the number looks arbitrary: retiring the baked cast-shadow
+      // ovals freed the key and it swung 38.08 -> 16.0 deg off +X, and these
+      // coefficients were brought to (0.961, 0.276) then. `086ff5f` then swung it to
+      // **-31 deg** — +Z is the camera's own side, and a key there throws every shadow
+      // behind its own caster — and all three baked copies were left behind. That is
+      // 47 deg of disagreement, but the sign is the part that matters: the real key
+      // now comes from -Z and this ramp still brightened toward +Z, so the arena's
+      // baked "sun" was on the opposite side of the camera axis from the real one.
+      //
+      // The live rig, read off `window.__stage.lighting.key` by `tools/tmp/aoband.mjs`
+      // at three stations: offset (29.98, 28.32, -18.01), so the ground direction the
+      // light comes FROM is (29.98, -18.01) / 34.97 = (0.857, -0.515).
+      //
+      // `shared.ts`'s `SHADOW_DIR` and `apron.ts`'s `SHADOW_X`/`SHADOW_Y` are the other
+      // two copies. IF THE KEY MOVES AGAIN, ALL THREE MOVE TOGETHER —
+      // `tools/tmp/bakedaz.mjs` fails if one of them drifts.
+      const along = ((wx - CENTER.x) * 0.857 + (wy - CENTER.y) * -0.515) / 700;
       const litness = THREE.MathUtils.clamp(
         0.5 + shadeField(wx, wy) * 0.46 + along * 0.16 + b * 0.1 - wear * 0.3 - edge * edge * 0.38,
         0,

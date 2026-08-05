@@ -504,21 +504,33 @@ function valueNoise(x: number, y: number, cell: number, seed: number): number {
 /**
  * Direction the key light throws a shadow, on the ground plane, in world (x, y).
  *
- * `render/lighting.ts` puts the key at (16.35, 9.82, 4.69) relative to its target, i.e.
- * up and to the +x/+z side, so shadows fall toward -x/-z. That file is out of bounds
- * here, so — exactly as `shared.ts` does for its own baked decals — the azimuth is
- * duplicated as a constant. If the key's azimuth ever moves, both copies move with it.
+ * `render/lighting.ts` is out of bounds here, so — exactly as `shared.ts` does for its
+ * own baked decals — the key's azimuth is duplicated as a constant. If it ever moves,
+ * all three copies move with it (`shared.ts`, this file, `floor.ts`'s `along` term),
+ * and `tools/tmp/bakedaz.mjs` fails if one of them drifts.
  *
- * It moved once already and this copy was stale: the key swung from azimuth 38.1 deg
- * to 16.0 deg when the baked cast decals were retired, leaving the numbers below 22 deg
- * out of agreement with every other shadow in the scene. Nothing in this module draws a
- * hard shadow edge, so it was not visible — which is exactly why a stale duplicate like
- * this survives for months. Three things here read it: the kerb's baked contact band in
- * `apronShade`, and the offset and orientation of every instanced grounding quad.
+ * ── IT HAS NOW MOVED TWICE, AND THE SECOND TIME IT CHANGED SIGN ────────────────
+ * First 38.1 deg -> 16.0 deg, when the baked cast decals were retired. Then
+ * `086ff5f` swung it to **-31 deg**, because +Z is the camera's own side and a key
+ * there throws every shadow behind its own caster. This copy was left on the 16.0 deg
+ * offset (16.35, 9.82, 4.69), so its shadow direction (-0.961, -0.276) is 47 deg from
+ * the truth AND has the wrong sign on the second component: the real key throws
+ * toward +Z, TOWARD the viewer, and this file was pushing its kerb band and every
+ * instanced grounding quad toward -Z, away from it.
+ *
+ * The live rig, read off `window.__stage.lighting.key` at three stations: offset
+ * (29.98, 28.32, -18.01), azimuth -30.99 deg, elevation 39.00 deg.
+ *
+ * Nothing in this module draws a hard shadow edge, which is exactly why a stale
+ * duplicate like this survives — and, per `docs/LESSONS.md` §1, why "it isn't visibly
+ * wrong" is not evidence that it is right. Three things here read it: the kerb's baked
+ * contact band in `apronShade`, and the offset and orientation of every instanced
+ * grounding quad.
  */
-const SHADOW_DIR_LEN = Math.hypot(16.35, 4.69);
-const SHADOW_X = -16.35 / SHADOW_DIR_LEN;
-const SHADOW_Y = -4.69 / SHADOW_DIR_LEN;
+const KEY_X = 29.98, KEY_Z = -18.01;
+const SHADOW_DIR_LEN = Math.hypot(KEY_X, KEY_Z);
+const SHADOW_X = -KEY_X / SHADOW_DIR_LEN;
+const SHADOW_Y = -KEY_Z / SHADOW_DIR_LEN;
 
 const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t);
 
