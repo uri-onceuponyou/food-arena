@@ -23,6 +23,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **19** | Back out of a live match abandons it silently · mid-match reload restarts it | abandon · restart | **two small feel calls** | one line each |
 | **22** | **Character levels 1–15** | being built | ✅ **ANSWERED — AI scales to the player's level** | in flight |
 | **23** | ⚠️ PvP makes `PLAYER_MAX_HP` ≠ `ENEMY_MAX_HP` **unfair by definition** | 100 vs 90 | **your §12 dial has a shelf life** | a roadmap item |
+| **24** | Investment beats rarity → so **rarity must scale levelling COST** | being built | ✅ **answered; the cost curve is the consequence** | in flight |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
@@ -1043,3 +1044,59 @@ you** — it is a roadmap item, not a pending change.
 
 **Nothing needs deciding today.** This is recorded so that when PvP arrives, the 90 is understood as
 a dial that was always meant to come out, rather than a balance number someone is afraid to touch.
+
+
+---
+
+## 24. "Level 15 Normal beats level 1 Cyber" — and the consequence you should see coming
+
+**Uri:** *"I think that level 15 normal should be able to beat level 1 cyber. Understand the logic of
+how this works in common games and do the same."*
+
+### How the reference games actually do it
+
+Brawl Stars (power 1–11) and Clash Royale (card levels 1–14) share one structure:
+
+1. **Level applies a percentage scale to HP and damage** on the character's own base — roughly
+   +5% to +10% per level, a **1.5×–2.5× total swing** across the ladder.
+2. **Rarity does not confer power at equal level.** It governs **how hard the character is to get and
+   to upgrade**, not how strong it is when two characters sit at the same level.
+3. **Matchmaking pairs similar investment**, so maxed-versus-fresh is an edge case, not the norm.
+
+A level-14 Common beats a level-1 Legendary in Clash Royale for a simple reason: **the level range is
+wide and the rarity range at equal level is zero.**
+
+### ⚠️ This game has already chosen the opposite of point 2 — and that is fine, but it has a price
+
+**§13/§21 made rarity monotonic in strength** (Normal 40.4 → Cyber 61.1, a ~20 pp spread), an hour
+before you asked for this. So Food Fight Arena stacks **two** power axes where the reference games
+have one.
+
+If both rarity and level grant raw power and **nothing else differs, a rare character is strictly
+better forever** — same level, more power, always. Your two answers would quietly contradict each
+other everywhere except the exact L15-vs-L1 case you named.
+
+### The resolution being built: **rarity buys power, and pays for it in cost**
+
+Rarer characters are **more expensive to level**. That satisfies both of your answers at once:
+
+- **§13 stays true** — like for like, at equal level, rarer *is* stronger.
+- **§22/§24 stays true** — investment overcomes rarity, because the level range is wider than the
+  rarity spread.
+- **The trade becomes legible to the player** — *a rare character is a better long-run investment; a
+  common one is cheaper to max.*
+
+That is Clash Royale's rarity-scaled upgrade cost, transplanted onto a game where rarity **also**
+grants base power. **This is a design call made from your two answers rather than one you gave
+explicitly** — flagged here so you can overrule it. The alternative is to flatten rarity's power back
+to zero at equal level (the pure genre pattern), which would undo §13.
+
+### What you will get back
+
+- The **measured crossover**: at what level a Normal overtakes a level-1 Cyber, and confirmation that
+  it **never** overtakes a *level-matched* Cyber — that second one is what keeps rarity meaningful.
+- Both measured **under both policies**, since the rarity ramp is monotone under the skilled policy
+  but not the naive one.
+- A **top-end sanity check**: ~+5%/level over 14 steps is ~1.7× on HP *and* damage simultaneously,
+  i.e. roughly **2.9× effective combat power** against an unlevelled opponent. That is a big number
+  and it needs to not break anything.
