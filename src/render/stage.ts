@@ -907,50 +907,105 @@ export class Stage {
     // rather than inherited. RE-MEASURING IT WAS THE POINT: it does not pay what the
     // handover said it pays.
     //
-    // `tools/tmp/postablate.mjs --toe`, ALL ELEVEN characters, HEAD and the candidate
-    // driven on the SAME frozen frame so the two rows differ by exactly one uniform,
-    // repeated at two independent stations:
+    // ⚠️ MEASURED TWICE, BECAUSE THE CAST MOVED UNDER IT. `tools/tmp/contrastab.mjs`
+    // drives BOTH settings on ONE frozen frame per character, so the two rows differ
+    // by exactly one uniform. All eleven, two independent stations, both times.
     //
-    //                       P05      range     P95    clip0  clip255
-    //   pot_south  0.62    0.280     0.618    0.898    0.11     0.06
-    //              0.72    0.275     0.629    0.904    0.16     0.07
-    //   spawn_west 0.62    0.278     0.621    0.899    0.04
-    //              0.72    0.273     0.632    0.904    0.05
+    // It is NOT `postablate.mjs --toe`, and that matters: that tool's row helper is
+    // `T = (toe, tk, sat = 0.70, c = 0.72)`, so its row LABELLED `toe .28@.60 s.70`
+    // silently runs contrast 0.72 while the `HEAD ... c.62 toe0` row it is read
+    // against passes 0.62 explicitly. Every `--toe` row bar the first therefore
+    // differs from HEAD by TWO uniforms. Harmless for the sweep it was written for;
+    // fatal for a question worth exactly one uniform.
     //
-    //   Δrange +0.0113 / +0.0111.  CLAIMED +0.016. The two stations agree with each
-    //   other to 0.0002 and disagree with the handover by 30%, so the shortfall is
-    //   real and not noise. The +0.016 was a delta-of-deltas over three characters
-    //   against a pre-toe control; re-derived that way on the same three it is
-    //   hamburger +0.012, taco +0.012, hotdog +0.015 — i.e. the arithmetic was right
-    //   and the three-character sample was optimistic about the other eight.
+    //   (a) PRE-ALBEDO (cast as of 430c3c0), mean over 11:
+    //         pot_south   range 0.6187 -> 0.6299   Δ +0.0112
+    //         spawn_west  range 0.6205 -> 0.6319   Δ +0.0113
+    //       Against a CLAIMED +0.016 that is 30% short — and the two stations agree
+    //       with each other to 0.0001, so the shortfall was real, not noise. The
+    //       +0.016 was a three-character sample being optimistic about the other eight.
     //
-    // Range improves for ALL ELEVEN at BOTH stations (min +0.0014 egg, max +0.0176
-    // waterbottle) and sushi gains a value step, 6 -> 7.
+    //   (b) POST-ALBEDO (the shipped cast, 9854f2c swept the albedo pass in), same
+    //       probe, same stations:
+    //         pot_south   range 0.7592 -> 0.7734   Δ +0.0143
+    //         spawn_west  range 0.7590 -> 0.7728   Δ +0.0138
     //
-    // ⚠️ TWO HONEST COSTS, neither of them hidden by the mean.
+    // SO THE CLAIM IS NOW NEARLY RIGHT, AND FOR A REASON THAT IS ARITHMETIC RATHER
+    // THAN LUCK. The S-curve's fixed point is 0.5. The albedo pass moved the cast's
+    // fifth percentile from 0.280 to 0.167 — much further BELOW mid-grey — and the
+    // deeper a dark sits below the fixed point the more the curve moves it. Same
+    // uniform, darker cast, bigger payout. Anyone re-measuring this after another
+    // albedo move should expect the number to move again, in that direction.
     //
-    //   1. P05 deepens on TEN of eleven and LIGHTENS on egg (+0.0028). Not noise —
-    //      arithmetic. The S-curve's fixed point is 0.5 and egg's P05 is 0.579, so
-    //      egg's dark end is on the half of the curve that gets pushed UP. Any
-    //      character whose fifth percentile sits above mid-grey will do this.
-    //   2. The character's own P95 rises 0.898 -> 0.904, on all eleven. The light end
-    //      was already at the reference (0.896), so this is a 0.008 overshoot where
-    //      there was a 0.002 one. It is accepted because the number the shoulder
-    //      actually guards barely moves: whole-frame clipped-high 0.06% -> 0.07%,
-    //      against the 2.50% that got `highlightKnee` 0.92 rejected. Clipped-LOW goes
-    //      0.11% -> 0.16%. Both tails are still two orders under the raw render's
-    //      2.33% high.
+    // Range improves for ALL ELEVEN at BOTH stations, both times (post-albedo: min
+    // +0.0109 egg, max +0.0182 waterbottle). Post-albedo, donut gains a value step
+    // 7 -> 8 and sushi 6 -> 7.
+    //
+    // ⚠️ THE HONEST COSTS.
+    //
+    //   1. P05 now deepens on ELEVEN of eleven. Pre-albedo it LIGHTENED on egg
+    //      (+0.0028), because egg's P05 was 0.579 — above the S-curve's fixed point,
+    //      so its dark end was on the half that gets pushed UP. The albedo pass took
+    //      egg's P05 to 0.281 and the exception vanished. The RULE survives it: any
+    //      character whose fifth percentile sits above mid-grey will lighten, so this
+    //      is a property to re-check after any albedo move, not a solved problem.
+    //   2. The character's own P95 rises +0.0056, on all eleven. ⚠️ THE PREMISE THAT
+    //      MADE THIS CHEAP NO LONGER HOLDS: the light end WAS at the reference (0.896)
+    //      when this was decided, and post-albedo the cast's P95 is 0.9266 BEFORE this
+    //      change touches it. So this now adds 0.0056 to an existing +0.031 overshoot
+    //      rather than to a +0.002 one. That overshoot is the albedo pass's, not this
+    //      change's, but this change is no longer landing in the world the decision
+    //      was made in, and the light end is worth re-opening on its own.
+    //   3. Whole-frame clipping, both tails, post-albedo at pot_south:
+    //      clipped-LOW 0.110% -> 0.155%, clipped-HIGH 0.053% -> 0.066%. Against the
+    //      2.50% that got `highlightKnee` 0.92 rejected, and the raw render's 2.33%
+    //      high. Both tails stay ~1.5 orders under the untouched render.
+    //
+    // AND THE THREE THINGS NO NUMBER ANSWERS, looked at rather than inferred
+    // (`shots/contrastab/head_png/_sheet.*.png`, 4x nearest-neighbour so adjacent
+    // 8-bit codes are visible, plus whole frames at shipped framing):
+    //
+    //   banding    NOT PRESENT. Checked on the surfaces that would show it first —
+    //              the pot hazard's wide radial glow, egg's near-white sphere,
+    //              waterbottle's large low-curvature body. No contour rings either
+    //              side. The proxy agrees and is worth keeping: the widest flat 8-bit
+    //              code in the dark half FALLS, 2.45% -> 2.23% of the matte, because
+    //              the S-curve spreads dark codes APART rather than collapsing them.
+    //   crush      Real but small, and it has ONE worst case: waterbottle 0.119% ->
+    //              0.739% of its own pixels under luma 0.05. On lollipop — the lowest
+    //              P05 in the cast — the dark cloak and its own drop shadow visibly
+    //              begin to merge. Still readable; it is the character to watch if
+    //              contrast is ever pushed past 0.72.
+    //   sooty      NO — the opposite. HSV saturation of each character's darkest
+    //              quartile RISES on 11 of 11 (mean 0.574 -> 0.589). The darks get
+    //              more chromatic, not greyer, which is what `toeChromaKeep` 0.55 is
+    //              for. The whole frame reads slightly more vivid, not muddier.
     //
     // The colour side DID reproduce, to a thousandth (`tools/tmp/gradechroma.mjs`, six
     // stations, one page load each, priced against the SHIPPED grade rather than the
     // pre-toe HEAD — printing only the pre-toe column once made a candidate look as
     // though it spent the toe's chroma twice):
     //
-    //   contrast .62 -> .72   ΔmeanSat +0.0162   Δchroma +0.0077   Δwarm +0.0011
-    //                         ΔcoolChroma +0.0160   ΔwarmShare -0.0019   Δluma -0.0051
+    //   contrast .62 -> .72   ΔmeanSat +0.0168   Δchroma +0.0075   Δwarm +0.0014
+    //                         ΔcoolChroma +0.0162   ΔwarmShare -0.0019   Δluma -0.0050
     //
-    // Four of those five move TOWARD the reference. `meanSat` (0.408 against a 0.493
-    // target) is the rail this arena is furthest from and it gains the most.
+    // Four of those five move TOWARD the reference, and `meanSat` — the rail this
+    // arena is furthest from — gains the most.
+    //
+    // ⚠️ BUT THE GATE STILL FIRES, IN A SECOND PLACE `8a91f7c` DID NOT REACH.
+    // `arena-scan.mjs` has TWO cool-chroma rails against the same 0.343 target with
+    // the same 0.020 tol: whole-frame `coolChroma`, which `8a91f7c` made `freeAbove`,
+    // and `arenaCoolChroma`, which was NOT given the flag. So the identical move is
+    // rated `ok` by one and `REGRESSION` by the other. Not this file's to fix — but
+    // any future grade pass will hit it, and the fix is one flag.
+    //
+    // And a joint effect worth naming rather than burying: `warmShare` left its band
+    // [0.120, 0.450] at 0.1195. Of the -0.0122 that took it there, this change is
+    // -0.0019 and the cast-wide albedo pass is the rest — i.e. this change is a
+    // seventh of the drift and the part that crosses the floor. Both are recorded in
+    // `tools/scan/colour-baseline.json`'s `bakedInRegressions`, because the
+    // re-baseline makes them invisible to the next run and a green gate must not be
+    // mistaken for a healthy rail (`docs/LESSONS.md` §13).
     //
     // Worth recording as a shape, not just a number: this arena is ~87% cool chroma, so
     // ANY global value or saturation move pushes `meanSat` (needs to rise) and
