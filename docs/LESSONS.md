@@ -185,6 +185,30 @@ That makes **ten** instruments found returning confident wrong answers in a sing
 tenth was found by an agent inside the very tool it was using to judge its own work, which is the
 argument for §2 in one sentence.
 
+
+### The measurement BOX is part of the instrument, and a long fan-out silently poisons it
+
+Ten hours into a six-agent session this machine had **28 `fa-snap-*` Vite servers alive against 4
+live `with_snapshot` parents**, the oldest running **10h43m**. `snapshot.mjs` is documented as dying
+with its parent and `with_snapshot.mjs` owns both sides of a run — neither held. Every leaked server
+was parented to an `npm exec vite` shim, i.e. the owner had gone and the shim kept the child alive.
+
+**Load average 38.4 across 789 processes.** That is not untidiness, it is a tax on every measurement
+in flight, and it is almost certainly the hidden cause of a whole class of "flaky under peer load"
+reports this session: `audio-probe --mode live` failing a *different* check each run, `menu_accept`
+dying with `Execution context was destroyed`, capture probes racing their own animations. Those were
+all attributed to peers *saving files*. Some of them were peers *saturating the CPU*.
+
+→ **`tools/tmp/snapsweep.mjs`**, and note the rule it encodes, because `pkill -f fa-snap` would
+destroy a peer's in-flight run for exactly the reason `git stash` is banned:
+
+> A `with_snapshot` process cannot outlive the measurement it owns, so **any snapshot server older
+> than the oldest live `with_snapshot` parent cannot be backing a live run.**
+
+That is a *derived* bound, not a guess, and it self-adjusts — a long measurement pushes the threshold
+out to protect itself. Sweeping 21 leaked servers on that rule took load 38.4 → 33.4 and left all
+four live snapshots untouched. Dry run is the default, because the failure mode is destroying work.
+
 ---
 
 ## 6. Scale, zoom and framing decide what is worth building

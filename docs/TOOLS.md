@@ -313,6 +313,7 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/tmp/capture_audit.mjs` | **13** + **15** | classifies every capture site as paint-waiting or flag-waiting; **`--selftest` for the 13** |
 | `node tools/tmp/rarity_aa.mjs` | 0 below AA of **43** | `.fa-rarity` per rarity × home + character select × 3 viewports, **both** contrast models |
 | `node tools/shoot.mjs --selftest` | **6** | the capture path itself |
+| `node tools/tmp/snapsweep.mjs --selftest` | **5** | age parser for the leaked-snapshot sweeper |
 | `tools/tmp/floorprobe.mjs` | **5/5** | the floor's own gameplay test — breaks on any global value change |
 | `tools/tmp/chars_metrics.mjs` | ALL CLEAN | roster card fill, face-in-card, WCAG |
 | `tools/tmp/screen_metrics.mjs` | ALL CLEAN | settings/opening/trophies + `--screens home`, 3 viewports, WCAG from pixels |
