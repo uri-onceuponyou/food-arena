@@ -235,13 +235,45 @@ the drift control proving no floor value moved.
 sides — **reference 1.36–16.36%** (median ~6.2%) against **ours 0.379% → 0.434%**. We are **3.1×
 below the lowest plate**. The rise is correct and nowhere near the band.
 
-⚠️ **The `lollipop`/`sushi` scare RESOLVED — not a regression.** A partial run showed lollipop 12 of
-18 stations under 0.10 and sushi 6, against "1 each" in a 16:43 `gate.json`. But `1f51987` — the
-pre-session record — already says **lollipop 11 of 18, sushi 6 of 18**. Sushi is **unchanged**;
-lollipop moved by **one** station, exactly the one the arena agent predicted from its own +0.0088
-ground lift before measuring (`pot_diagonal` 0.1015, the only station in the 0.100–0.109 band).
-**The 16:43 baseline was the outlier** — and p5 had already recorded those figures as *"neither
-confirmed nor refuted"*.
+### ⚠️ `valuescan --mode gate` — VERIFIED (`freshness PROVEN`), and it is **4 PASS / 7 FAIL**
+
+**A CAST PASS TRADED `p05` FOR FIGURE/GROUND, across the whole roster.** This is the cleanest
+instance of `docs/LESSONS.md` §7 (local optima fighting each other) yet measured here:
+
+| gate | before (16:43) | now | |
+|---|---|---|---|
+| `p05` (dark anchor) | **11 of 11 FAIL** | **0 of 11** | ✅ fixed roster-wide |
+| `range` | 6 of 11 FAIL | **0 of 11** | ✅ fixed |
+| `dlBelow10` (figure/ground) | 1 of 11 FAIL | **6 of 11 FAIL** | 🔴 paid for it |
+
+**17 failures fixed, 5 created.** Arguably a good trade — but nobody chose it, and the gate is red.
+
+**The mechanism, on `lollipop` (clearest case):** `fig` is pinned at **0.497 at 17 of 18 stations**
+against a ground at 0.40–0.48, so `dL` sits at 0.02–0.10 **by construction**. Its `range`/`p05` went
+0.681/0.2915 (both FAIL) → 0.862/0.071 (both PASS) in the same window. **Pulling a character's
+median into the floor's own value band is what fixes `p05` and what destroys `dL`.**
+
+⚠️ **6 of the 7 failures have `worstStn` = `fog_late` or `fog_boundary`** — stations where figure
+*and* ground both collapse toward the veil colour. **That is an ARENA fix, not a cast fix**, and the
+gate already grants `grease_in` an exemption for exactly this class. Do not send a character agent
+at a fog station.
+
+⚠️ And the `weakBoundaryPct` failures carry the tool's **own** warning: *"the 15 cap was calibrated
+on `dL` and does NOT transfer to `weakBc%`"*, plus the cliff-not-band note (a 0.0142 luma move once
+swung it 33 pp).
+
+**Attribution:** the arena rim raises ground luma by **+0.0088** and `fig > grd` for these
+characters, so it can only push stations already sitting in the **0.100–0.109** band across the
+line — exactly **one** qualifies across lollipop's 18 (`pot_diagonal`, 0.1015). **The other failures
+are not the arena pass.**
+
+⚠️ **A correction to an earlier entry in this file.** The `lollipop`/`sushi` scare was closed here as
+*"not a regression"* on the grounds that `1f51987` already recorded **lollipop 11 of 18 stations,
+sushi 6 of 18**. That is still true **for those two characters**. But it was written as if it closed
+the whole question, and it did not: across the roster `dlBelow10` went from **2 characters failing
+pre-session to 6**. **Resolving the named instance is not the same as resolving the class** — the
+same error shape this file records in §1 (fixing an anchor is not verifying the result reaches the
+screen).
 
 ### 🚨 Root cause — `Material.clone()` silently drops `onBeforeCompile`
 
