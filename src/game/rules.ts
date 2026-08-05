@@ -208,9 +208,9 @@ export const FOG_DAMAGE = 15;
  * of any match that goes the distance contain NO ground that costs 0 HP/s — and at
  * that point the outcome is pure arithmetic, not play: both fighters burn the same
  * FOG_DAMAGE per FOG_TICK_MS, so the one with the smaller HP pool dies first. That is
- * always the player (PLAYER_MAX_HP 100 vs ENEMY_MAX_HP 150): measured on the real sim,
- * with both fighters pinned and unable to attack, the player dies at 2.00 s and the
- * enemy at 3.00 s. **Running the clock out was an arithmetically guaranteed loss**, and
+ * always the player when this floor was written (PLAYER_MAX_HP 100 vs ENEMY_MAX_HP 150):
+ * measured on the real sim, with both fighters pinned and unable to attack, the player
+ * died at 2.00 s and the enemy at 3.00 s. **Running the clock out was an arithmetically guaranteed loss**, and
  * it pre-empted the timeout rule below — the tiebreak could never fire because the fog
  * always resolved the match first.
  *
@@ -221,6 +221,12 @@ export const FOG_DAMAGE = 15;
  * cannot silently re-create the bug.
  *
  * This is the genre convention too: a battle-royale final circle is small, not empty.
+ *
+ * ⚠️ AUTHORISED DEVIATION #9 took `ENEMY_MAX_HP` to 90, so THE TWO POOLS HAVE INVERTED
+ * and the fog now kills the ENEMY first (1.80 s against the player's 2.00 s). This floor
+ * is unchanged and is if anything more clearly right for it: the argument was never
+ * "protect the player", it was "the endgame must be decided by play and not by whichever
+ * pool happens to be smaller", and that is symmetric in the pools by construction.
  */
 export const MIN_SAFE_RADIUS = 140;
 
@@ -263,7 +269,99 @@ export const PUDDLE_SLOW_FACTOR = 0.45;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const PLAYER_MAX_HP = 100;
-export const ENEMY_MAX_HP = 150;
+
+/**
+ * ── AUTHORISED DEVIATION #9 (2026-08-05): ENEMY_MAX_HP 150 -> 90 ────────────
+ *
+ * **Uri's dial, and Uri turned it.** `docs/DECISIONS-FOR-URI.md` §15 asked one question
+ * — "should a fleeing enemy be able to shoot at you?" — and the answer came back as both
+ * halves of the priced package: land the flee-aim fix in `ai.ts`, and take this constant
+ * to 90 so the fix does not simply end the game. They are ONE decision and they land in
+ * ONE commit, because either alone is a different game from the one he agreed to.
+ *
+ * ── Why the two are inseparable ─────────────────────────────────────────────
+ *
+ * The flee branch pointed `facing` directly AWAY from the player and fired along it, and
+ * `combat.ts` resolves both the melee cone and the projectile heading off
+ * `attacker.facing`. So 8 of 11 characters delivered ZERO from the branch called "flee
+ * and snipe". Fixing it is a two-word deletion — and the mechanism is a THRESHOLD, not a
+ * slope: AI damage per match crosses the player's 100 HP pool for every character at
+ * once, so the whole roster tips together.
+ *
+ * ── RE-MEASURED, because everything under it had moved ──────────────────────
+ *
+ * The prices Uri was quoted (31.8% -> 5.9% -> 52.8%) were taken with the driver family
+ * whose stuck detector runs during the countdown, before `COUNTDOWN_FROM` went 5 -> 3 in
+ * `099119a` — and the size of that artefact is a function of `countdownMs mod ~1200`, so
+ * it changed when the countdown did. Re-measured on the FIXED driver
+ * (`tools/tmp/roster_lab.mjs`, 110 matchups x 32 seeds x 2 policies = 7,040 matches a
+ * row, shipped arena, paired on identical seeds; its `--selftest` reproduces
+ * `pacing_ladder.mjs`'s published 27.2% / 18.8% to the digit, which is what makes it the
+ * same match as that tool's):
+ *
+ *   rung                                    smart2   chase   settled   strength sd
+ *   shipped before this commit               27.4%   18.4%   70/110      20.5 pp
+ *   + flee-aim fix alone                      5.0%    3.1%   91/110       6.2 pp
+ * >>+ flee-aim fix, ENEMY_MAX_HP 90          52.2%   45.0%   43/110      24.7 pp
+ *
+ * Every quoted figure reproduces in SHAPE and lands inside this project's ~9 pp aggregate
+ * resolution floor of the number Uri approved (52.2% against 52.8%). The absolute
+ * baseline is 27.4% rather than 31.8% because the driver was fixed, not because the game
+ * changed — that gap IS the instrument artefact, now measured.
+ *
+ * TWO THINGS THE MIDDLE ROW EARNS ITS PLACE FOR. At 5.0% the roster instrument saturates
+ * (strength sd 20.5 -> 6.2 pp; the AI wins ~95% of everything and every character looks
+ * identical), which would have blinded the balance pass that follows this one. And the
+ * shipped row does the OPPOSITE: sd 24.7 pp is the widest this roster has ever measured,
+ * so the instrument discriminates BETTER after the change than before it.
+ *
+ * ⚠️ AND A BONUS THAT IS NOT WHOLLY FREE: settled matchups — the 110 cells where one side
+ * wins >=95% or <=5% across every seed, `DECISIONS §13(c)`'s headline — go **70 -> 43**.
+ * Declared honestly: that metric is NOT independent of the aggregate. Any change that
+ * moves the aggregate toward 50% de-settles cells mechanically, and this moved it 22.6 pp.
+ * The honest quantity is the settled count AT a fixed aggregate, and that is what the
+ * per-character work above this line has to be judged on.
+ *
+ * ── WHAT ELSE THIS CONSTANT WAS HOLDING UP ──────────────────────────────────
+ *
+ * ⚠️ **THE POOLS HAVE INVERTED.** The enemy pool was 1.5x the player's and is now 0.9x,
+ * so three arguments written against "the enemy has more HP" now run the other way. None
+ * of them needed a code change — every one was already written as a rule rather than as
+ * an arithmetic accident — but they were checked, one at a time:
+ *
+ *   * `MIN_SAFE_RADIUS` existed because a ring that closes to nothing kills the SMALLER
+ *     pool first, which was always the player's (2.00 s vs 3.00 s in the fog). It is now
+ *     the enemy's (1.80 s vs 2.00 s). The floor is still exactly right and still needed:
+ *     its job is that safe ground EXISTS, so the tiebreak below decides the match instead
+ *     of the arithmetic — whichever way the arithmetic happens to point.
+ *   * `resolveTimeout` ranks on HP **fraction**, not absolute HP, precisely so the pools
+ *     may differ. That is pool-size independent and unchanged.
+ *   * `sim.test.mjs` §10(c) constructed "absolute HP favours the enemy, the fraction
+ *     favours the player" from two hardcoded numbers, which is only buildable while
+ *     `ENEMY_MAX_HP > PLAYER_MAX_HP`. It now DERIVES the disagreement from the two
+ *     constants and asserts it in whichever direction they imply, so it tests the rule
+ *     rather than the era. §19(e)'s time-to-kill bound is calibrated against a 150 HP
+ *     pool, so its fixture now pins one: a difficulty dial must not silently re-calibrate
+ *     an output test.
+ *
+ * ── The dial, re-calibrated, so the next person does not have to re-sweep ───
+ *
+ * Against the tree this commit leaves behind, `smart2` aggregate player win:
+ *
+ *   ENEMY_MAX_HP    150     130     115     100    >>90<<     80
+ *   player win     5.0%   13.7%   23.0%   34.3%    52.2%   68.0%
+ *
+ * ⚠️ Read that curve before turning the dial: it is NOT a slope. 100 -> 90 is worth
+ * 17.9 pp and 90 -> 80 another 15.8 pp, against 8.7 pp for 150 -> 130. The pools are
+ * crossing (PLAYER_MAX_HP is 100), and near the crossing every point of HP decides more
+ * matches than it does anywhere else on the curve — which is exactly why the flee-aim
+ * fix could not be landed without also choosing this number.
+ *
+ * `PLAYER_MAX_HP` is deliberately NOT the lever: it is the number every HUD bar, every
+ * damage figure and every reference to "a 100 HP player" in this repo is written
+ * against.
+ */
+export const ENEMY_MAX_HP = 90;
 export const PLAYER_SIZE = 42;
 export const ENEMY_SIZE = 42;
 

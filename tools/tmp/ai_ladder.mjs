@@ -8,20 +8,29 @@
  * stated as itself. So the ladder is built out of the SHIPPED file — each rung a small,
  * asserted, textual edit — and every rung is measured against the same seeds:
  *
- *   V0   pristine HEAD behaviour, re-expressed through the new selector   (the CONTROL)
+ *   V0   pristine 4105116^ behaviour, re-expressed through the new selector  (the CONTROL)
  *   V1b  V0 + the chase branch's weapon choice un-gated on stun, and nothing else
  *   V1   V0 + a stun locks movement only                                  (task 1)
  *   V2   V1 + weapons ranked by delivered damage per press                (task 2)
- *   V3   V2 + the flee branch may select a melee weapon      == THE SHIPPED FILE (task 3)
- *   V4   V3 + the flee branch aims at the player             == THE PARKED PATCH
+ *   V3   V2 + the flee branch may select a melee weapon                   (task 3)
+ *   V4   V3 + the flee branch aims at the player            == THE SHIPPED FILE (task 4)
  *   V5   V4 + the flee branch fires OR moves, like the chase branch
  *
- * V0 must come out BIT-IDENTICAL to pristine HEAD across all 440 matchup rates — it did
- * — or the ladder is measuring the rewrite instead of the fixes and every rung is void.
+ * V0 must come out BIT-IDENTICAL to pristine `4105116^` across all 440 matchup rates — it
+ * did — or the ladder is measuring the rewrite instead of the fixes and every rung is void.
  *
- * V4 is the patch for the one defect that is measured and NOT landed: a two-word deletion
- * worth -25.9 pp of aggregate player win rate. Generating it here means the decision Uri
- * is being asked to make comes with the exact diff, not a description of one.
+ * ── ⚠️ THE SHIPPED FILE MOVED A RUNG (2026-08-05) ───────────────────────────
+ *
+ * V4 was the PARKED patch — measured, priced at -25.9 pp of aggregate player win rate,
+ * and written up for Uri rather than smuggled in. Uri took it (`DECISIONS §15`), together
+ * with `ENEMY_MAX_HP` 150 -> 90, so `src/game/ai.ts` IS V4 now.
+ *
+ * This file therefore reconstructs DOWNWARD from the shipped file instead of upward from
+ * it: V3 is the shipped file with the aim-away line put BACK, and everything below V3 is
+ * built from that as before. Every rung is still reachable and every historical number is
+ * still reproducible — which is the point, because those numbers are the only record of
+ * what each fix was worth. Re-pointing rather than deleting is deliberate: a ladder whose
+ * bottom rungs cannot be rebuilt turns a priced decision back into an anecdote.
  *
  *   node tools/tmp/ai_ladder.mjs <outdir>
  */
@@ -33,7 +42,7 @@ const outdir = process.argv[2];
 if (!outdir) { console.error('usage: ai_ladder.mjs <outdir>'); process.exit(1); }
 mkdirSync(outdir, { recursive: true });
 
-/** The shipped file — V3. Every rung is an edit of it. */
+/** The shipped file — V4 since 2026-08-05. Every rung is an edit of it. */
 const SHIPPED = readFileSync(`${ROOT}/src/game/ai.ts`, 'utf8');
 
 /** Textual edit that refuses to guess. A rung that silently patched nothing would give a
@@ -48,14 +57,26 @@ function edit(src, label, from, to) {
 }
 
 const FLEE_AIM = '    if (hasBearing) enemy.facing = { x: -adx / adist, y: -ady / adist };\n';
-/** The shipped line plus the comment that exists only to explain why it is still there. */
+/** The old line plus the comment that existed only to explain why it was still there. */
 const FLEE_AIM_BLOCK = `    // ⚠️ THE ONE LINE. Aim, not travel — and it is what sends the shot below in the wrong
     // direction. Left in place deliberately; the facing block above carries the
     // measurement, the price and why this is Uri's call and not this file's.
 ${FLEE_AIM}`;
+/** What stands on that spot now: the comment that says the line is gone and why. */
+const FLEE_AIM_ABSENT = `    // ⚠️ NOTHING WRITES \`facing\` HERE ANY MORE. A line that pointed it directly away from
+    // the player used to sit on exactly this spot, and \`attemptAttack\` below fired along
+    // it. Aim is set once, at the player, in the facing block above — read it before
+    // re-introducing anything that turns a retreating fighter's aim with its feet.
+`;
 
-// ── V4: THE PARKED PATCH. Delete the flee branch's aim-away line. ───────────
-const v4 = edit(SHIPPED, 'flee aims at the player', FLEE_AIM_BLOCK, '');
+// ── V4 IS THE SHIPPED FILE. ────────────────────────────────────────────────
+const v4 = SHIPPED;
+
+// ── V3: put the aim-away line BACK. Every rung below is built from this. ────
+// The direction of this edit is the whole re-pointing: the ladder used to add the fix to
+// the shipped file, and now it removes it. The rungs, and every number ever measured on
+// them, are unchanged.
+const v3 = edit(SHIPPED, 'flee aims away again', FLEE_AIM_ABSENT, FLEE_AIM_BLOCK);
 
 // ── V5: V4, with the flee branch firing OR moving like the chase branch ─────
 // V4 leaves the flee half strictly better than the chase half: chase fires XOR moves,
@@ -64,7 +85,7 @@ const v4 = edit(SHIPPED, 'flee aims at the player', FLEE_AIM_BLOCK, '');
 // 5.9%) — with three weapons cycling, a weapon is ready on nearly every tick either way.
 const v5 = edit(
   edit(v4, 'flee fires or moves',
-    '  if (fleeing) {\n    if (!rooted) {',
+    `  if (fleeing) {\n${FLEE_AIM_ABSENT}    if (!rooted) {`,
     `  if (fleeing) {
     const fleeShot = healIndex ?? pickWeapon(state, adist, ALLOW_OFFENSIVE, rankPressValue);
     if (fleeShot !== null) {
@@ -81,7 +102,7 @@ const ALLOW_RANGED_ONLY: WeaponAllow = { melee: false, ranged: true, self: false
 const rankFirstRanged: WeaponRank = (_state, _w, index) => -index;
 
 const rankPressValue: WeaponRank`;
-let v2 = edit(SHIPPED, 'ranged-only defs', 'const rankPressValue: WeaponRank', RANGED_DEFS);
+let v2 = edit(v3, 'ranged-only defs', 'const rankPressValue: WeaponRank', RANGED_DEFS);
 v2 = edit(v2, 'flee picks ranged only',
   'healIndex ?? pickWeapon(state, adist, ALLOW_OFFENSIVE, rankPressValue);\n    if (shotIndex !== null)',
   'healIndex ?? pickWeapon(state, adist, ALLOW_RANGED_ONLY, rankFirstRanged);\n    if (shotIndex !== null)');
@@ -120,7 +141,7 @@ writeFileSync(`${outdir}/v0-control.ts`, v0);
 writeFileSync(`${outdir}/v1b-chase-only.ts`, v1b);
 writeFileSync(`${outdir}/v1-stun-symmetry.ts`, v1);
 writeFileSync(`${outdir}/v2-press-value.ts`, v2);
-writeFileSync(`${outdir}/v3-shipped.ts`, SHIPPED);
-writeFileSync(`${outdir}/v4-flee-aims-at-player.ts`, v4);
+writeFileSync(`${outdir}/v3-flee-aims-away.ts`, v3);
+writeFileSync(`${outdir}/v4-shipped.ts`, v4);
 writeFileSync(`${outdir}/v5-flee-xor.ts`, v5);
-console.error(`wrote v0, v1b, v1, v2, v3 (shipped), v4 (the parked patch), v5 to ${outdir}`);
+console.error(`wrote v0, v1b, v1, v2, v3, v4 (SHIPPED since 2026-08-05), v5 to ${outdir}`);

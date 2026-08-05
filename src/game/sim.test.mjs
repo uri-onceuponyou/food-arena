@@ -565,21 +565,48 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     check('...and ends on the clock, not later', state.timeRemaining === 0);
   }
 
-  // (c) THE FAIRNESS REGRESSION. Absolute HP favours the enemy; the HP FRACTION
-  //     favours the player. Any tiebreak that compares raw HP fails this.
+  // (c) THE FAIRNESS REGRESSION. Absolute HP says one fighter, the HP FRACTION says the
+  //     other. Any tiebreak that compares raw HP fails this.
+  //
+  //     ⚠️ RE-DERIVED, NOT WEAKENED (2026-08-05). This was two hardcoded numbers — player
+  //     60/100 = 0.60 against enemy 75/150 = 0.50 — and that construction is only
+  //     buildable while `ENEMY_MAX_HP > PLAYER_MAX_HP`. AUTHORISED DEVIATION #9 took the
+  //     enemy pool to 90 and INVERTED the two, at which point 75/90 = 0.83 and the old
+  //     literals asserted the opposite of the rule. The rule itself never mentioned which
+  //     role owns the bigger pool, so the fixture now derives the disagreement from the
+  //     constants and asserts it in whichever direction they imply. It tests the rule
+  //     instead of the era, and it fails loudly if the constants ever make the
+  //     disagreement unbuildable (they do when the pools are within ~2 HP of each other,
+  //     because then no pair of HP values can separate absolute from fraction).
   {
-    const { state } = atTheWhistle({ player: { hp: 60 }, enemy: { hp: 75 } });
+    const bigRole = ENEMY_MAX_HP >= PLAYER_MAX_HP ? 'enemy' : 'player';
+    const smallRole = bigRole === 'enemy' ? 'player' : 'enemy';
+    const bigMax = Math.max(PLAYER_MAX_HP, ENEMY_MAX_HP);
+    const smallMax = Math.min(PLAYER_MAX_HP, ENEMY_MAX_HP);
+    // The bigger pool gets more ABSOLUTE HP by exactly 1, which forces the smaller pool
+    // to hold the higher FRACTION whenever the pools differ by more than 1/0.6 HP.
+    const bigHp = 0.6 * bigMax;
+    const smallHp = bigHp - 1;
+    const disagree = bigHp > smallHp && smallHp / smallMax > bigHp / bigMax;
+    const { state } = atTheWhistle({ [bigRole]: { hp: bigHp }, [smallRole]: { hp: smallHp } });
     stepMatch(state, 200, noInput);
     check(
-      `higher HP FRACTION wins, not higher HP (player ${60}/${PLAYER_MAX_HP}=0.60 beats enemy ${75}/${ENEMY_MAX_HP}=0.50)`,
-      state.winner === 'player',
-      `winner=${state.winner}`,
+      `higher HP FRACTION wins, not higher HP (${smallRole} ${smallHp}/${smallMax}=${(smallHp / smallMax).toFixed(2)} ` +
+      `beats ${bigRole} ${bigHp}/${bigMax}=${(bigHp / bigMax).toFixed(2)})`,
+      disagree && state.winner === smallRole,
+      disagree ? `winner=${state.winner}` : `POOLS TOO CLOSE (${PLAYER_MAX_HP} vs ${ENEMY_MAX_HP}): absolute and fraction cannot be made to disagree — this check no longer tests anything, go and read it`,
     );
   }
   {
-    const { state } = atTheWhistle({ player: { hp: 50 }, enemy: { hp: 90 } });
+    // The mirror, same derivation: the bigger pool now also holds the higher fraction, so
+    // both criteria agree and the winner must be the bigger pool's owner either way.
+    const bigRole = ENEMY_MAX_HP >= PLAYER_MAX_HP ? 'enemy' : 'player';
+    const smallRole = bigRole === 'enemy' ? 'player' : 'enemy';
+    const bigMax = Math.max(PLAYER_MAX_HP, ENEMY_MAX_HP);
+    const smallMax = Math.min(PLAYER_MAX_HP, ENEMY_MAX_HP);
+    const { state } = atTheWhistle({ [bigRole]: { hp: 0.6 * bigMax }, [smallRole]: { hp: 0.5 * smallMax } });
     stepMatch(state, 200, noInput);
-    check('lower HP fraction loses (player 0.50 vs enemy 0.60)', state.winner === 'enemy', `winner=${state.winner}`);
+    check('lower HP fraction loses (0.50 against 0.60)', state.winner === bigRole, `winner=${state.winner}`);
   }
 
   // (d) Level on HP -> zone control decides, and it can go either way. Two runs with
@@ -1586,7 +1613,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     check('a hurt AI Hamburger uses its Onion Ring — it never could before',
       firesAt(ENEMY_MAX_HP * AI_SELF_HEAL_HP_FRACTION - 1) === 1, 'no self-weapon fire at half HP');
     check('a healthy AI Hamburger saves it rather than spending a 6 s cooldown for nothing',
-      firesAt(ENEMY_MAX_HP - 1) === 0, 'it healed at 149/150');
+      firesAt(ENEMY_MAX_HP - 1) === 0, `it healed at ${ENEMY_MAX_HP - 1}/${ENEMY_MAX_HP}`);
     check('and it never overheals — it waits until the whole heal fits',
       firesAt(ENEMY_MAX_HP - (heal.healAmount - 1)) === 0,
       `it healed ${heal.healAmount} HP into a ${heal.healAmount - 1} HP hole`);
@@ -1753,9 +1780,19 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   // same file against a staged copy of `rules.ts` with the old values). The 7.5 s bound
   // is between the two — it is not a design target, it is a value only one side of the
   // change can reach, which is the whole point of asserting it.
+  //
+  // ⚠️ THE TARGET POOL IS PINNED AT 150, DELIBERATELY (2026-08-05). Both figures above
+  // are times to remove a 150 HP pool, so the bound is only meaningful against one.
+  // `ENEMY_MAX_HP` is a DIFFICULTY DIAL and went to 90 in AUTHORISED DEVIATION #9; left
+  // reading the constant, this assertion would have silently re-calibrated itself to a
+  // 40% smaller pool and gone on passing while testing something 1.7x easier. A dial must
+  // not be able to move an OUTPUT test's bar. This is Lollipop's DPS under examination,
+  // not the enemy's health.
+  const TTK_REFERENCE_POOL = 150;
   {
     const arena = makeArena({ width: 2000, height: 2000, maxSafeRadius: 100000 });
     const state = playingMatch(arena, 'lollipop', 'donut');
+    state.enemy.hp = state.enemy.maxHp = TTK_REFERENCE_POOL;
     const ws = CHARACTERS.lollipop.weapons;
     let killedAt = null;
     for (let t = 0; t < 30000 && state.phase !== 'ended'; t += 16.667) {
@@ -1776,7 +1813,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
         if (ev.type === 'death' && ev.fighterRole === 'enemy' && killedAt === null) killedAt = state.elapsed;
       }
     }
-    check('Lollipop removes a full 150 HP pool at melee range inside 7.5 s',
+    check(`Lollipop removes a full ${TTK_REFERENCE_POOL} HP pool at melee range inside 7.5 s`,
       killedAt !== null && killedAt < 7500,
       `killed at ${killedAt === null ? 'never' : `${(killedAt / 1000).toFixed(2)}s`} (was 8.27s at Smash 11 / Giant 10)`);
   }
@@ -2041,40 +2078,51 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       `roster has [${[...types].join(', ')}], driver reached [${[...seen].join(', ')}]`);
   }
 
-  // ── (d) …AND "FLEE AND SNIPE" STILL DOES NOT SNIPE ────────────────────────
+  // ── (d) …AND "FLEE AND SNIPE" NOW SNIPES ──────────────────────────────────
   //
-  // ⚠️ AN OPEN DEFECT, PINNED RATHER THAN FIXED — the same device §19(g) used while the
-  // stun asymmetry was out of its owner's scope. Selecting a weapon (c) and DELIVERING
-  // with it are two things, and only the first is fixed.
+  // ⚠️ THIS CHECK WAS INVERTED, NOT DELETED (2026-08-05). It was written as a guard on an
+  // OPEN DEFECT — the same device §19(g) used while the stun asymmetry was out of its
+  // owner's scope — because the fix was measured, priced and parked for Uri rather than
+  // smuggled in, and a pinned diagnosis cannot be closed by accident in either direction.
+  // Uri took it (`DECISIONS §15`), so the guard now points the other way. The wording of
+  // what it used to assert is kept below, because the next person to read this needs to
+  // know that a green run here once meant the exact opposite.
   //
-  // The flee branch points `facing` directly AWAY from the player and then calls
-  // `attemptAttack`, which resolves BOTH the melee cone and the projectile heading off
-  // `attacker.facing`. So every straight shot a retreating enemy takes flies away from
-  // it. Measured (`tools/tmp/flee_probe.mjs`, 8 s below the threshold at 60 wu): 8 of 11
-  // characters deliver ZERO damage from the branch, and every point of damage in the
-  // table comes from the three HOMING weapons, which curve back on their own. Lollipop —
-  // the character (c) was written for — now selects and swings 11 times and connects
-  // once, with the 360-degree slam that needs no bearing.
+  //   WAS: "a fleeing AI lands ONLY its homing weapons — the branch aims away from the
+  //         target". The flee branch pointed `facing` directly AWAY from the player and
+  //         then called `attemptAttack`, which resolves BOTH the melee cone and the
+  //         projectile heading off `attacker.facing`. Measured
+  //         (`tools/tmp/flee_probe.mjs`, 8 s below the threshold at 60 wu): 8 of 11
+  //         characters delivered ZERO from the branch, and every point of damage in the
+  //         table came from the three HOMING weapons, which curve back on their own.
   //
-  // WHY IT IS NOT FIXED HERE. Deleting the aim line is a two-word patch and it is priced,
-  // paired on the same 32 seeds: aggregate player win 31.8% -> 5.9% under `smart2`
-  // (-25.9 pp, on top of the -19.3 pp the three landed fixes cost). The mechanism is a
-  // threshold, not a slope — AI damage per match goes 59.7-111.0 to 98.1-113.5 against a
-  // 100 HP player, so every character in the roster crosses the pool at once. At 5.9% the
-  // roster table stops discriminating at all (strength sd 20.6 -> 6.8 pp), so it would
-  // also blind the instrument the next balance pass depends on. `DECISIONS §12` is where
-  // a difficulty change of that size is decided, and `ENEMY_MAX_HP` is Uri's dial.
+  //   NOW:  the line is gone, aim is written once (at the player) in `stepAI`'s facing
+  //         block, and a retreating enemy BACKPEDALS FACING YOU. It is priced in
+  //         `rules.ts` AUTHORISED DEVIATION #9, where `ENEMY_MAX_HP` 150 -> 90 lands in
+  //         the same commit because the two are one decision.
   //
-  // The assertion is the DIAGNOSIS, stated so precisely that it must fail the moment
-  // anyone changes the aim — at which point they are made to come and read this.
+  // Three assertions, and between them they pin the MECHANISM, the OUTCOME and the thing
+  // that must NOT have changed:
+  //
+  //   1. while fleeing, `facing` points AT the player. This is the literal inverse of the
+  //      deleted line, so re-introducing it fails here first and most legibly.
+  //   2. no character delivers ZERO from the branch any more — the 8 of 11 is now 0 of 11
+  //      — and straight-line (non-homing, directional) weapons land, which was impossible
+  //      before by construction.
+  //   3. it is still genuinely FLEEING. Aim and travel are separate quantities; a fix to
+  //      the aim that also turned the retreat into a charge would pass (1) and (2) and be
+  //      a completely different change.
   {
     const homing = [];
     const straight = [];
+    const zeroDelivery = [];
+    const facedAway = [];
     let retreated = 0;
     for (const id of CHARACTER_IDS) {
       const state = aiFixture(id, { d: 60, flee: true });
       const x0 = state.enemy.x;
       const byWeapon = {};
+      let worstFacingDot = 1;
       // Only the PLAYER is pinned: the enemy must be free to retreat, because what is
       // under test is what it does while genuinely fleeing.
       for (let t = 0; t < 4000; t += TICK) {
@@ -2086,18 +2134,34 @@ console.log('\n8. Countdown -> playing transition (sanity)');
             byWeapon[ev.source.weaponKey] = (byWeapon[ev.source.weaponKey] ?? 0) + ev.amount;
           }
         }
+        // Facing vs the bearing to the player, every tick of the retreat.
+        const bx = state.player.x - state.enemy.x;
+        const by = state.player.y - state.enemy.y;
+        const bm = Math.hypot(bx, by);
+        if (bm > 1e-6) {
+          const dot = (state.enemy.facing.x * bx + state.enemy.facing.y * by) / bm;
+          if (dot < worstFacingDot) worstFacingDot = dot;
+        }
       }
+      // 0.999 rather than > 0: the AI does not merely face "roughly forwards", it faces
+      // exactly along the bearing, because that is the one line that writes `facing`.
+      if (worstFacingDot < 0.999) facedAway.push(`${id} dot ${worstFacingDot.toFixed(3)}`);
+      let dealtAny = false;
       for (const [key, dmg] of Object.entries(byWeapon)) {
         const w = CHARACTERS[id].weapons.find((k) => k.key === key);
+        if (dmg > 0) dealtAny = true;
         // A 360-degree cone needs no bearing, so it is not evidence either way.
         if (w.cone >= 360) continue;
         (w.homing ? homing : straight).push(`${id}/${key} ${dmg}`);
       }
+      if (!dealtAny) zeroDelivery.push(id);
       if (state.enemy.x < x0) retreated++;
     }
-    check('a fleeing AI lands ONLY its homing weapons — the branch aims away from the target',
-      straight.length === 0 && homing.length > 0,
-      `straight-line hits that should be impossible: [${straight.join(', ')}] · homing: [${homing.join(', ')}]`);
+    check('a fleeing AI AIMS AT the player every tick — the branch no longer turns its aim with its feet',
+      facedAway.length === 0, `faced away: [${facedAway.join(', ')}]`);
+    check('…so its straight-line weapons LAND, and 0 of 11 characters deliver nothing (was 8 of 11)',
+      straight.length > 0 && zeroDelivery.length === 0,
+      `delivered nothing: [${zeroDelivery.join(', ')}] · straight-line hits: [${straight.join(', ')}] · homing: [${homing.join(', ')}]`);
     check('and it is genuinely fleeing while it does it — all 11 retreat',
       retreated === CHARACTER_IDS.length, `${retreated}/${CHARACTER_IDS.length} moved away from the player`);
   }

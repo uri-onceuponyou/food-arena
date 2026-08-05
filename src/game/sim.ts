@@ -144,16 +144,21 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInput): Gam
  * still `phase: 'playing'`, `winner: null` after 360 s of a 180 s match. The clock
  * ended nothing. In an ordinary match it *looked* decided only because the ring had
  * closed to nothing and the fog had killed someone — which is the fairness half of
- * the same bug, since the fog kills the 100 HP player a full second before the 150 HP
- * enemy (measured: 2.00 s vs 3.00 s). `MIN_SAFE_RADIUS` removes that, and this
- * decides what is left.
+ * the same bug, since the fog kills the SMALLER HP pool first whoever owns it — measured
+ * when this was written, the 100 HP player at 2.00 s against the 150 HP enemy at 3.00 s.
+ * (`ENEMY_MAX_HP` is 90 as of AUTHORISED DEVIATION #9, so that ordering has inverted; the
+ * floor's job is symmetric in the pools and did not change with it.) `MIN_SAFE_RADIUS`
+ * removes that, and this decides what is left.
  *
  * ── The tiebreak, and why each rung ─────────────────────────────────────────
  *
- *  1. HIGHER HP **FRACTION**. Not absolute HP: `PLAYER_MAX_HP` is 100 and
- *     `ENEMY_MAX_HP` is 150, so "most HP left" hands the enemy a 50 HP head start on
- *     a criterion it did nothing to earn. The fraction is what "who is winning" means
- *     when the two pools are different sizes.
+ *  1. HIGHER HP **FRACTION**. Not absolute HP: the two pools are different sizes, so
+ *     "most HP left" hands whoever owns the bigger one a head start on a criterion it
+ *     did nothing to earn. The fraction is what "who is winning" means when the pools
+ *     differ, and it is the same rule whichever way round they are — which is why this
+ *     rung needed no change when `ENEMY_MAX_HP` went 150 -> 90 and the head start
+ *     changed hands (it was a 50 HP gift to the enemy; it is now a 10 HP gift to the
+ *     player). A tiebreak that compared raw HP would have silently flipped sides.
  *  2. ZONE CONTROL — nearer the ring's centre wins. A real, earned signal (holding the
  *     middle is contested ground), deterministic, and it is what separates two
  *     fighters who are level on HP.

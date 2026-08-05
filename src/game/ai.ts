@@ -22,13 +22,16 @@
  *     roots — 11 of 11 characters, the stunned player firing 100% of its shots and the
  *     stunned AI 0%;
  *   * a flee branch that could select nothing at all for the one melee-only character;
- *   * and a flee branch that AIMS BACKWARDS, so 8 of 11 characters deliver zero damage
- *     from it. Still open — measured, priced at -25.9 pp of player win rate, and parked
- *     for Uri rather than smuggled in. See `stepAI`'s facing block.
+ *   * and a flee branch that AIMED BACKWARDS, so 8 of 11 characters delivered zero
+ *     damage from it. ✅ **CLOSED 2026-08-05, on Uri's answer to `DECISIONS §15`**, with
+ *     `ENEMY_MAX_HP` 150 -> 90 landing beside it because the two are one decision — see
+ *     the facing block in `stepAI` and AUTHORISED DEVIATION #9 in `rules.ts`.
  *
- * The shape is always the same: a rule stated once in `rules.ts` and implemented twice.
- * Where this file must diverge from the player it now says so out loud, and
- * `sim.test.mjs` §20 asserts the symmetry behaviourally rather than by inspection.
+ * All four are now closed. The shape was always the same: a rule stated once in
+ * `rules.ts` and implemented twice. Where this file must diverge from the player it says
+ * so out loud, and `sim.test.mjs` §20 asserts the symmetry behaviourally rather than by
+ * inspection — §20(d) in particular is now a guard on the FIXED behaviour, having been
+ * written originally as a guard on the defect.
  */
 
 import {
@@ -221,12 +224,12 @@ type WeaponRank = (state: MatchState, w: Weapon, index: number, adist: number) =
  * eight separations and compares: **183 of 183 cells exact**, worst error 0.0.
  *
  * Two things it deliberately does not price:
- *   * the melee cone. In the CHASE branch the AI faces the target it is about to attack,
- *     so the cone check is a no-op. ⚠️ In the FLEE branch it does not — see the facing
- *     block in `stepAI` — and there this key OVERSTATES every directional weapon,
- *     because the swing cannot connect at all. That is a property of the open aim
- *     defect, not of the key: the moment the aim is fixed the key becomes exact again,
- *     and pricing the cone here would bake the defect into the ranking.
+ *   * the melee cone. The AI faces the target it is about to attack in BOTH branches now
+ *     (it did not in the flee branch until 2026-08-05, and while that was open this key
+ *     overstated every directional weapon in it — pricing the cone here would have baked
+ *     that defect into the ranking, so it was left exact and the aim was fixed instead).
+ *     With the aim correct in both branches the cone check is a no-op wherever this key
+ *     is consulted, so the key is exact.
  *   * Donut's `trailBoosted` Candy Barrage. Donut has exactly one offensive weapon, so
  *     the boost cannot re-order a kit of one.
  */
@@ -425,28 +428,38 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
    * is independent of the player's movement — mouse and WASD — so the enemy's is too,
    * and it survives a stun for the same reason `applyAim` does.
    *
-   * ⚠️ THE FLEE BRANCH BELOW THEN OVERWRITES THIS WITH "DIRECTLY AWAY", AND FIRES ALONG
-   * IT. `combat.ts` resolves both the melee cone and the projectile heading off
-   * `attacker.facing`, so every straight shot a retreating enemy takes flies AWAY from
-   * the target. Measured (`tools/tmp/flee_probe.mjs`, 8 s held below the flee threshold,
-   * three separations): 8 of 11 characters deliver ZERO damage from the branch whose own
-   * name is "flee and snipe", and the only damage in the whole table comes from the three
-   * HOMING weapons, which curve back on their own.
+   * ── THIS IS NOW THE ONLY PLACE FACING IS WRITTEN, AND THAT IS THE FIX ──────
    *
-   * NOT FIXED HERE, and that is a decision rather than an oversight. Deleting the line is
-   * a two-word patch and it is priced: paired on the same seeds, aggregate player win
-   * 31.8% -> 5.9% under `smart2` (-25.9 pp, on top of -19.3 pp for the three fixes that
-   * did land), because it takes every character in the roster over the 100 HP the player
-   * has — AI damage per match goes 59.7-111.0 to 98.1-113.5, and a win rate measured
-   * against a fixed pool is a step function of that, not a slope. At 5.9% the roster
-   * table itself stops working (strength sd collapses 20.6 -> 6.8 pp because the AI wins
-   * ~97% of everything), so landing it would also blind the instrument the next balance
-   * pass needs. It is written up for Uri with the patch and the `ENEMY_MAX_HP` dial
-   * re-calibrated against it — `docs/DECISIONS-FOR-URI.md` §12 is where difficulty of
-   * this size is decided, and it is not decided here.
+   * The flee branch below used to overwrite this with "directly away" and then fire along
+   * it. `combat.ts` resolves BOTH the melee cone and the projectile heading off
+   * `attacker.facing`, so every straight shot a retreating enemy took flew away from the
+   * target: measured (`tools/tmp/flee_probe.mjs`, 8 s held below the flee threshold, three
+   * separations) **8 of 11 characters delivered ZERO** from the branch whose own name is
+   * "flee and snipe", and every point of damage in the table came from the three HOMING
+   * weapons, which curve back on their own.
    *
-   * `sim.test.mjs` §20(d) pins the diagnosis behaviourally, so this cannot be resolved by
-   * accident in either direction.
+   * The line is gone. A fleeing enemy now BACKPEDALS FACING YOU — aim and travel are
+   * separate quantities here, exactly as they are for the player (mouse + WASD), and
+   * `moveToward` takes its own direction and never reads `facing`. ⚠️ It is visible:
+   * `match.ts` rotates the model to `facing`, so a retreating enemy no longer turns its
+   * back. That is the genre norm and it is what the player already does; it was flagged
+   * to Uri before he took the change.
+   *
+   * WHAT IT COST, paired on the same 32 seeds through the FIXED driver
+   * (`tools/tmp/roster_lab.mjs`, 110 matchups x 32 seeds, shipped arena):
+   *
+   *   rung                                   smart2   chase   settled   strength sd
+   *   shipped before this                     27.4%   18.4%   70/110      20.5 pp
+   *   + this fix alone                         5.0%    3.1%   91/110       6.2 pp
+   *   + `ENEMY_MAX_HP` 150 -> 90  (SHIPPED)   52.2%   45.0%   43/110      24.7 pp
+   *
+   * The middle row is why this could not land alone: the mechanism is a THRESHOLD, not a
+   * slope — every character in the roster crosses the player's pool at once — and at 5.0%
+   * the roster instrument saturates (sd 6.2 pp) and the next balance pass goes blind. The
+   * HP dial is `DECISIONS §12`'s and Uri answered both together, so both land together.
+   *
+   * `sim.test.mjs` §20(d) was written as a guard on the DEFECT and is now a guard on the
+   * FIX — same device, opposite direction, so neither can be undone by accident.
    */
   if (hasBearing) {
     enemy.facing = { x: adx / adist, y: ady / adist };
@@ -515,17 +528,19 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
   const healIndex = escaping ? null : pickWeapon(state, adist, ALLOW_HEAL, rankHeal);
 
   if (fleeing) {
-    // ⚠️ THE ONE LINE. Aim, not travel — and it is what sends the shot below in the wrong
-    // direction. Left in place deliberately; the facing block above carries the
-    // measurement, the price and why this is Uri's call and not this file's.
-    if (hasBearing) enemy.facing = { x: -adx / adist, y: -ady / adist };
+    // ⚠️ NOTHING WRITES `facing` HERE ANY MORE. A line that pointed it directly away from
+    // the player used to sit on exactly this spot, and `attemptAttack` below fired along
+    // it. Aim is set once, at the player, in the facing block above — read it before
+    // re-introducing anything that turns a retreating fighter's aim with its feet.
     if (!rooted) {
       const step = AI_FLEE_SPEED * dt * aiSlowMult;
       // Flee target is directly away from the player, so slide around cover toward
       // that point rather than pinning against it — now bent back inside the ring, which
       // is the whole reason a retreating AI used to run itself into the fog. At zero
-      // separation "directly away" is not a direction, and `hasBearing` is false, so the
-      // branch below is only reachable with a real bearing.
+      // separation `adx`/`ady` are both 0, so "directly away" is not a direction: the
+      // heading degenerates to zero and the nav target lands on the fighter's own feet.
+      // That is unchanged by the aim fix and is the movement half of the same degeneracy
+      // `hasBearing` answers for the aim — see the facing block.
       steer(-adx / adist, -ady / adist,
         enemy.x - (adx / adist) * STEER_LEAD, enemy.y - (ady / adist) * STEER_LEAD);
       moveToward(enemy, STEER.dirX, STEER.dirY, step, state.arena, STEER.navX, STEER.navY);
@@ -536,10 +551,10 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
     // shoot. `ALLOW_OFFENSIVE` rather than "ranged only" is what lets the one melee-only
     // character in the roster attack from a branch it can plainly enter.
     //
-    // ⚠️ While the aim defect above is open, a directional melee chosen here CANNOT
-    // connect, so a heavy swing spends a 3.5 s cooldown on nothing (measured: Water
-    // Bottle takes 3 Mega Splashes in 8 s and deals 0 with them). Ranking around that
-    // would bake the defect into the driver; it resolves the moment the aim does.
+    // A directional melee chosen here now CONNECTS, because the aim points at the target:
+    // while the aim defect was open a heavy swing spent a 3.5 s cooldown on nothing
+    // (measured: Water Bottle took 3 Mega Splashes in 8 s and dealt 0 with them). That is
+    // what makes `rankPressValue` the right key in this branch as well as the chase one.
     const shotIndex = healIndex ?? pickWeapon(state, adist, ALLOW_OFFENSIVE, rankPressValue);
     if (shotIndex !== null) attemptAttack(state, 'enemy', shotIndex, events);
   } else {
