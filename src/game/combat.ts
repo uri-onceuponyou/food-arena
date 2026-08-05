@@ -21,6 +21,7 @@ import {
   STUN_DURATION_MS,
   STUN_GRACE_MS,
   TRAIL,
+  levelHealthMultiplier,
   type StatusEffect,
   type Weapon,
 } from './rules.ts';
@@ -236,7 +237,35 @@ export function attemptAttack(
   events.push({ type: 'weapon-fired', fighterRole: attackerRole, weaponKey: w.key });
 
   if (w.type === 'self') {
-    const healAmount = w.healAmount ?? 0;
+    // ── THE HEAL SCALES WITH LEVEL, AND ON THE *HEALTH* LADDER ────────────────
+    //
+    // Until 2026-08-05 this applied `w.healAmount` RAW. Every damage path
+    // multiplies by `attacker.damageMul` (see `applyDamage`) and the pool itself
+    // scales via `maxHpFor` — so the self-heal was THE ONLY FIGHTER RESOURCE IN
+    // THE GAME THAT DID NOT SCALE WITH LEVEL. Same shape as the five AI bugs: a
+    // rule stated once and implemented differently elsewhere.
+    //
+    // The arithmetic, measured: at L15 the pool is 1.70x and the heal was 1.00x,
+    // so 18 HP at L15 bought what ~10.6 buys at L1, and Hamburger collapsed at
+    // levels 12-15. `hamburger>pizza` MIRRORED at L15 read 25.0% against 87.5%
+    // at L1 — a mirrored pairing is supposed to be FLAT, and `level_lab
+    // --selftest` was 6/7 on exactly that assertion. The threshold sat sharply
+    // between healAmount 22 (passed) and 20 (failed), which is why the 25 -> 18
+    // rebalance is what exposed it.
+    //
+    // ⚠️ WHY `levelHealthMultiplier` AND NOT `attacker.damageMul`. Today they are
+    // numerically identical — LEVEL_HEALTH_PER_LEVEL and LEVEL_DAMAGE_PER_LEVEL
+    // are both 0.05 — so `damageMul` would pass every test now. But they are
+    // SEPARATELY DECLARED constants, i.e. separable by design, and a heal refills
+    // the POOL. The invariant that makes a mirrored level curve flat is
+    // heal-as-a-FRACTION-OF-POOL held constant, and only the health ladder does
+    // that. Using `damageMul` would silently make the heal track damage the first
+    // time someone moves one constant and not the other.
+    //
+    // Exactly 1.0 at LEVEL_MIN, so every level-1 match — including the entire
+    // `healAmount` 25 -> 18 ladder, which was measured at level 1 — is
+    // bit-identical to before this change.
+    const healAmount = (w.healAmount ?? 0) * levelHealthMultiplier(attacker.level);
     const healed = Math.min(healAmount, attacker.maxHp - attacker.hp);
     attacker.hp = Math.min(attacker.maxHp, attacker.hp + healAmount);
     if (healed > 0) events.push({ type: 'heal', fighterRole: attackerRole, amount: healed });
