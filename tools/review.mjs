@@ -46,7 +46,8 @@
  *
  * ── WHAT AN AUDIT OF THIS INSTRUMENT FOUND ──────────────────────────────────
  * The capture gate above guards the IMAGE. Nothing guarded the COMPARISON, and a
- * 29-critic audit (`tools/tmp/{packet_audit,critic_cells,subject_ruler}.mjs`) found
+ * 28-agent audit — 26 returning scores, 34 reference-panel observations across 4
+ * plates and 2 games (`tools/tmp/{packet_audit,critic_cells,subject_ruler}.mjs`) — found
  * the comparison is where this instrument actually loses its numbers. Every figure
  * below is measured, not asserted:
  *
@@ -55,8 +56,11 @@
  *   reference side 8.17 +/- 0.39. With the prompt held byte-identical the spread is
  *   ZERO (6 of 6). Position bias is zero — the same pair with our panel forced into A
  *   and then into B returns identical means, and a panel scored against ITSELF ties
- *   (6/6 and 5/5). => at the usual n=2 the minimum resolvable difference is ~0.9
- *   points. Nothing smaller than that is a result.
+ *   (6/6 and 5/5). => the minimum resolvable difference is ~1.4 points for a round run
+ *   as this project runs them (ONE critic, two panels, and that critic gave both panels
+ *   the same score in 4 of 4 cases — so n=2 panels is n=1 observation), falling to ~1.0
+ *   with two independent critics. Nothing smaller than that is a result. The recorded
+ *   3.6 -> 3.25 -> 3.0 -> 2.0 never once cleared it.
  *
  *   THE RUBRIC IS WORTH 2.0 POINTS, and it was never recorded. The SAME sheets score
  *   5.0 under "overall visual quality" and 3.0 under "character design and rendering
@@ -213,13 +217,18 @@ const MIXED_CAMERA = {
 };
 
 /**
- * The single number nobody had for this instrument. Sixteen fresh critics on a fixed
- * image gave sd 0.50; a round mean over `n` panels therefore carries se = 0.50/sqrt(n),
- * and a DIFFERENCE between two rounds carries sqrt(2) more.
+ * The single number nobody had for this instrument: sd 0.50, from 16 fresh critics on
+ * one fixed image.
+ *
+ * ⚠️ The unit of replication is the CRITIC, not the panel. A round here is one critic
+ * scoring two panels and reporting their mean, and that critic gave the SAME score to
+ * both panels in 4 of 4 measured cases (5/5, 5/5, 3/3, 3/3) — within-critic spread
+ * 0.00. So "n=2" is n=1, and dividing by sqrt(panels) would claim a precision the
+ * round does not have. This deliberately counts critics.
  */
-function resolutionFloor(n) {
+function resolutionFloor(critics) {
   const SD = 0.50;
-  return 1.96 * Math.SQRT2 * (SD / Math.sqrt(n));
+  return 1.96 * Math.SQRT2 * (SD / Math.sqrt(Math.max(1, critics)));
 }
 
 const curatedDir = resolve(`reference/images/curated/${args.category}`);
@@ -273,7 +282,9 @@ for (let i = 0; i < picked.length; i++) {
 }
 
 const rubric = typeof args.rubric === 'string' ? args.rubric : 'UNSPECIFIED';
-const floor = resolutionFloor(sheets.length);
+// Default 1: a round is one critic unless the orchestrator says otherwise.
+const critics = Number(args.critics ?? 1);
+const floor = resolutionFloor(critics);
 
 const manifest = {
   ours: args.ours,
@@ -284,6 +295,7 @@ const manifest = {
   rubric,
   plates: sheets.map((s) => s.reference),
   mixedCamera: MIXED_CAMERA[args.category] ?? null,
+  critics,
   resolutionFloor: +floor.toFixed(2),
   sheets: sheets.map((s) => s.sheet),
   keys: sheets.map((s) => s.key),
@@ -315,8 +327,10 @@ if (rubric === 'UNSPECIFIED') {
   console.error('   be compared to any other score, including the one it is meant to improve on.');
 }
 
-console.log(`Resolution floor: differences below ~${floor.toFixed(1)} points are NOT results at n=${sheets.length}`);
-console.log('   (critic sd 0.50 over 16 fresh critics on one fixed image; position bias 0.00)');
+console.log(`Resolution floor: differences below ~${floor.toFixed(1)} points are NOT results at ${critics} critic(s)`);
+console.log('   (critic sd 0.50 over 16 fresh critics on one fixed image; position bias 0.00;');
+console.log('    within-critic spread across the two panels of a round was 0.00 in 4 of 4 —');
+console.log('    so the two panels of a round are ONE observation, not two. --critics N to raise it.)');
 
 if (MIXED_CAMERA[args.category]) {
   const m = MIXED_CAMERA[args.category];
