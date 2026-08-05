@@ -112,7 +112,16 @@ import type { ArenaDefinition, ArenaFactory, CoverBox, HazardZone } from './type
 import { outlineGroup } from '../render/toon';
 import { groundPos } from '../units';
 import { POT, PUDDLE_SLOW_FACTOR } from '../game/rules';
-import { buildMaterials, noOutline, ARENA_W, ARENA_H, CENTER, MAX_SAFE_RADIUS, addCover } from './shared';
+import {
+  buildMaterials,
+  noOutline,
+  ARENA_W,
+  ARENA_H,
+  CENTER,
+  MAX_SAFE_RADIUS,
+  addCover,
+  liftArenaValue,
+} from './shared';
 import { buildFloor } from './floor';
 import { buildApron } from './apron';
 import { buildPot, buildHazardGround, buildPuddleVisual } from './hazards';
@@ -537,6 +546,17 @@ export const createKitchenArena: ArenaFactory = () => {
   // pacing win came from the ROUTE (1341 -> 1171 wu) instead — see the barrels above.
   const playerSpawn = { x: 160, y: 390 };
   const enemySpawn = { x: ARENA_W - 160, y: ARENA_H - 390 };
+
+  // ── The value lift ───────────────────────────────────────────────────────────
+  // LAST, after everything is in `root`, because it walks the finished graph. See the
+  // long note above `ARENA_VALUE_GAMMA` in `./shared.ts` for the measurement that
+  // motivated it (the arena's whole value ladder sat below all six top-down reference
+  // plates while every colour rail read PASS), for why the transform is a uniform
+  // per-channel scale (hue exactly preserved, saturation provably cannot fall) and for
+  // the sweep that chose the exponent. It is applied here rather than at each authored
+  // hex so that every relative decision recorded in `KPAL` — "below the caps in value",
+  // "at the tile's own value", "the darkest thing in the arena" — survives untouched.
+  liftArenaValue(root);
 
   const updateAmbient = createAmbientUpdate(pot, hazardGround, dust);
 

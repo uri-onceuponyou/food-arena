@@ -1157,6 +1157,141 @@ export function noOutline<T extends THREE.Object3D>(o: T): T {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// THE ARENA VALUE LIFT
+//
+// ── The defect, measured ─────────────────────────────────────────────────────
+// `tools/arena-scan.mjs` rails mean saturation, warm chroma, cool chroma, hue
+// overlap and clipping against the curated reference plates. It has never railed
+// BRIGHTNESS. Its own `--ref-plates` pass prints the plates' luma column and then
+// drops it. So the one axis nothing was watching is the one the arena drifted on,
+// and `docs/LESSONS.md` §7 is explicit about what happens next: every pass measures
+// itself, every pass is right, nobody watches the sum.
+//
+// Measured 2026-08-05 with `tools/tmp/arena_ladder.mjs` (whole-frame luma
+// percentiles, methodology identical to `colourBudget()`, and validated first
+// against `arena-scan --ref-plates`'s own numbers to 4 dp):
+//
+//                       arena, 18 stations     6 top-down Brawl Stars plates
+//     p05 (darks)              0.114                    0.253
+//     p25                      0.231                    0.356
+//     p50                      0.311                    0.426
+//     p75                      0.381                    0.522
+//     p95 (lights)             0.580                    0.789
+//     mean                     0.322                    0.453   (11-plate mean 0.509)
+//
+// EVERY rung is low and the ladder is only 0.07 narrower — so this is a SHIFT, not a
+// compression. Not one of the eighteen stations reaches the mean of the darkest plate
+// in the library, and eight of them sit below that plate entirely. An independent
+// blind critic scored the arena 4/10 against those plates at 7.5-8.0 in the same
+// hour, and its own number-one written note was "the tile albedo is a dark, greyed
+// magenta sitting at roughly the same value as the props — it needs to become the
+// lightest large surface in frame".
+//
+// How the arena got there is visible in this file's own history: `burlap` scaled to
+// 75% value, `steel` "kept DARK", `freezerBody` "pulled down", both puddle bodies
+// "pulled down", `woodPad` re-keyed to luma 100. Six independently-correct passes,
+// each fixing a real hierarchy problem, each measuring only itself.
+//
+// ── Why a uniform channel SCALE, and not a per-hex rewrite ───────────────────
+// Every value in `KPAL` carries a documented reason, and almost all of those reasons
+// are RELATIVE ("below the caps in both chroma and value", "at the tile's own value",
+// "the darkest thing in the arena"). Rewriting hexes one at a time would relitigate
+// every one of those decisions and silently break some. Scaling all three channels of
+// every arena albedo by one factor preserves all of them by construction, and makes
+// two properties provable rather than hoped for:
+//
+//   - HUE is exactly unchanged — the channel ratios are unchanged.
+//   - SATURATION cannot fall. `colourBudget()` measures HSL saturation,
+//     `s = d/(mx+mn)` below l=0.5 and `d/(510-mx-mn)` above it. Scaling by k takes
+//     both d and (mx+mn) to k times themselves, so s is EXACTLY invariant below
+//     l=0.5, and strictly increases once a colour crosses above it. Measured over the
+//     sweep: meanSat 0.4236 -> 0.4708, mean chroma 0.2890 -> 0.3542. That matters
+//     because "fix it by desaturating" has now been falsified four times on this
+//     project; this lift is incapable of doing it.
+//
+// The exponent is a gamma on the colour's own value, so dark things move least in
+// absolute terms and the ladder's shape survives:
+//
+//     V  = max(r, g, b) in sRGB          V' = V^GAMMA          rgb *= V'/V
+//
+// ── Why 0.72 ────────────────────────────────────────────────────────────────
+// Swept live on a frozen snapshot before a line of this was written
+// (`tools/tmp/valuelift_price.mjs`, 4 stations, gamma 1 as the control):
+//
+//     gamma   mean    p05    p50    p95   meanSat  chroma   clipHi
+//     1.00    0.346  0.126  0.336  0.579   0.4236  0.2890    0.40%   <- control
+//     0.85    0.391  0.141  0.392  0.620   0.4389  0.3234    0.42%
+//     0.72    0.435  0.158  0.453  0.657   0.4708  0.3542    0.43%
+//     0.60    0.481  0.180  0.513  0.693   0.5178  0.3814    0.45%
+//     0.50    0.520  0.198  0.563  0.722   0.5782  0.4008    0.53%
+//     target  0.453  0.253  0.426  0.789   0.4925  0.3250
+//
+// 0.72 lands the mean and the median on the plates and keeps mean chroma inside the
+// band; 0.60 overshoots the mean and pushes chroma to 0.381 against a 0.325 target;
+// 0.85 leaves the arena below four of the six plates. Rendered and looked at at each
+// step (`CLAUDE.md` non-negotiable 3): at 0.60 the floor reads as bubblegum plastic,
+// at 0.72 as the fired-clay rose the palette was keyed to in the first place.
+//
+// ── What this deliberately does NOT touch ────────────────────────────────────
+//  - The fog ring and curtain. They are built outside this root (`fog_boundary`), and
+//    a lethal veil is supposed to be the darkest thing on screen. The sweep above was
+//    measured with them excluded, so the numbers transfer exactly.
+//  - Every contact-shadow and grounding decal, for free rather than by exception:
+//    they are authored `#FFFFFF`, so V = 1 and the scale factor is 1^(GAMMA-1) = 1.
+//    They keep their absolute darkening strength while the surface under them gets
+//    brighter, so prop grounding gains contrast instead of losing it — which is the
+//    same critic's number-one complaint ("props cast no shadow at all"), and that
+//    complaint was measurably FALSE: `tools/tmp/arena_shadow_ab.mjs` ablated the
+//    arena's shadow casting and found prop shadows covering 5.4-11.3% of the frame
+//    at mean |dL| 0.10-0.12, five to nine times the character's own 1.05-1.20%. The
+//    shadows were always there. They had nothing bright to be dark against.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Exponent applied to every arena albedo's value. 1 = no lift. See the block above
+ * for the sweep this came from and for why the transform is a uniform channel scale.
+ */
+export const ARENA_VALUE_GAMMA = 0.72;
+
+/**
+ * Lift every material under `root` up the value axis, once each.
+ *
+ * Called from `kitchen.ts` on the assembled arena root, which is deliberately the
+ * same set the sweep measured: one walk, one `seen` set, so a material shared by
+ * several builders is lifted exactly once and a second call is a no-op.
+ */
+export function liftArenaValue(root: THREE.Object3D, gamma = ARENA_VALUE_GAMMA): number {
+  if (gamma === 1) return 0;
+  const seen = new Set<string>();
+  const rgb = { r: 0, g: 0, b: 0 };
+  let lifted = 0;
+  root.traverse((o) => {
+    const anyMesh = o as THREE.Mesh;
+    if (!anyMesh.isMesh && !(o as THREE.Points).isPoints && !(o as THREE.Sprite).isSprite) return;
+    const mats = Array.isArray(anyMesh.material) ? anyMesh.material : [anyMesh.material];
+    for (const m of mats) {
+      const mat = m as THREE.Material & { color?: THREE.Color };
+      if (!mat || !mat.color || seen.has(mat.uuid)) continue;
+      seen.add(mat.uuid);
+      mat.color.getRGB(rgb, THREE.SRGBColorSpace);
+      const v = Math.max(rgb.r, rgb.g, rgb.b);
+      // Pure black has no value to lift and no ratios to preserve; leaving it alone
+      // also keeps ink outlines and the `#2B2B2B` trims from crawling toward grey.
+      if (v <= 0.02) continue;
+      const k = Math.pow(v, gamma) / v;
+      mat.color.setRGB(
+        Math.min(1, rgb.r * k),
+        Math.min(1, rgb.g * k),
+        Math.min(1, rgb.b * k),
+        THREE.SRGBColorSpace
+      );
+      lifted++;
+    }
+  });
+  return lifted;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Fake contact AO — a soft dark radial-gradient decal, canvas-generated once and
 // shared by every prop's footprint. This is the single cheapest lever for killing
 // the "pasted onto the floor" look: real-time contact shadows are expensive, but a
