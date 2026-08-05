@@ -1,0 +1,4 @@
+[
+ { "id": "OLD_rig", "keyElev": 30, "keyAz": 16, "keyInt": 5.3, "fillInt": 0.50, "rimInt": 1.7, "frontInt": 0 },
+ { "id": "NEW_rig" }
+]

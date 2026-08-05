@@ -1,0 +1,6 @@
+[
+ { "id": "A_cur_e39" },
+ { "id": "B_e46_F28", "keyElev": 46, "keyInt": 3.2, "frontInt": 2.8 },
+ { "id": "C_e46_F32", "keyElev": 46, "keyInt": 3.0, "frontInt": 3.2, "fillInt": 0.50 },
+ { "id": "D_e44_F26", "keyElev": 44, "keyInt": 3.3, "frontInt": 2.6 }
+]

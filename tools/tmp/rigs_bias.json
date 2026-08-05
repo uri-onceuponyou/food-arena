@@ -1,0 +1,7 @@
+[
+ { "id": "ship_nb035" },
+ { "id": "nb018",        "normalBias": 0.018 },
+ { "id": "nb008",        "normalBias": 0.008 },
+ { "id": "nb008_b00025", "normalBias": 0.008, "bias": -0.00025 },
+ { "id": "nb000_b0000",  "normalBias": 0.0,   "bias": 0 }
+]

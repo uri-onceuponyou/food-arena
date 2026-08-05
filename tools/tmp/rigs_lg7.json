@@ -1,0 +1,8 @@
+[
+ { "id": "OLD_rig",  "keyElev": 30, "keyAz": 16, "keyInt": 5.3, "fillInt": 0.50, "rimInt": 1.7, "frontInt": 0 },
+ { "id": "cur_e39",  "keyElev": 39 },
+ { "id": "e48",      "keyElev": 48 },
+ { "id": "e57",      "keyElev": 57 },
+ { "id": "e39_a-45", "keyElev": 39, "keyAz": -45 },
+ { "id": "e48_a-45", "keyElev": 48, "keyAz": -45 }
+]

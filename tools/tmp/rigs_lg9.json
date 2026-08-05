@@ -1,0 +1,7 @@
+[
+ { "id": "cur_fill055" },
+ { "id": "fill040",     "fillInt": 0.40 },
+ { "id": "fill028",     "fillInt": 0.28 },
+ { "id": "fill040_k39", "fillInt": 0.40, "keyInt": 3.9 },
+ { "id": "fill028_k42_F18", "fillInt": 0.28, "keyInt": 4.2, "frontInt": 1.8 }
+]
