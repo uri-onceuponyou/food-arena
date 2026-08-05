@@ -1586,3 +1586,50 @@ gesture). What should happen?**
 
 Today's behaviour is (a) purely because the pause sheet lives in a file a different agent owned at
 the time — **not** because anyone decided it. It is one line either way.
+
+---
+
+## 31. ✅ §19 ANSWERED — and a NEW brief: the home screen looks amateurish
+
+### ✅ §19 — Back opens the PAUSE SHEET
+
+> *"Pause menu is fine."*
+
+Settled. Back during a live match opens the pause sheet; it no longer abandons the match silently.
+The old behaviour was never a decision — it was where the code landed because `matchScreen.ts`
+belonged to a different owner at the time.
+
+### 🔴 NEW — the home screen and menus
+
+> *"I've had a look at the Home Screen and menus and we need to do a better job there.
+> Looks amateurish."*
+
+**The blind critic independently agrees**: home scores **5.17 against a reference 8.50** — a
+5.9-floor gap and the second-worst element in the game. Uri named the symptom; a fresh
+proven-painted capture was compared against `bs_home.png` to find the mechanism.
+
+**⚠️ The problem is concentrated on HOME, not "the menus" generally.** Character select scores
+**7.00** and is visibly the stronger screen — per-character coloured backdrops, rarity chips, real
+colour variety. **That is an internal reference that already works**, and a large part of the fix is
+"make home as good as the screen next door" rather than inventing a new language.
+
+Six differences, from pixels:
+
+| | ours | Brawl Stars |
+|---|---|---|
+| **backdrop** | flat orange radial gradient + dot pattern | a rendered **3D environment** — pipes, machinery, silhouettes, glow behind the hero |
+| **the hero** | boxed in a flat dark-blue **card** with a corner title | **no card** — full-bleed, standing *in* the world |
+| **panels** | every one an identical cream rounded rect | differentiated **by function** — yellow action tiles, dark utility tiles |
+| **depth** | flat; panels sit *on* the background | hard drop shadows and bevels; elements are physical objects |
+| **labels** | text — PROGRESS · WINS/LOSSES/BEST · YOUR FIGHTER · CHANGE | **pictorial icons** carry the meaning |
+| **hierarchy** | three roughly equal columns | one dominant hero, one dominant PLAY, utilities clustered small |
+
+**The backdrop is the biggest single item.** Our home is literally *"coloured paper"* — the exact
+phrase six critics used about the match playfield, now appearing in the menu. And the hero **card**
+actively separates the character from the page rather than placing them in a world.
+
+⚠️ **One thing that may need Uri, and is flagged rather than assumed:** a 3D environment behind the
+hero is a **new scene**, not a CSS change. It is the largest lever and the largest cost, and it is
+the one item that cannot be reached from `src/ui/screens/home.ts` alone. If it turns out to be
+expensive, the fallback — panel differentiation, depth, icons, killing the hero card — is most of
+the gap and is all reachable from the one file.
