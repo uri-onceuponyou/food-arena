@@ -151,6 +151,19 @@ measurement, because any render includes the whole tree. One cause, many costume
 → **`tools/snapshot.mjs`. Edit on the shared tree, measure on a snapshot.** `--swap <file>`
 freezes everything except one file, which is the only way an A/B means anything.
 
+### An instrument can be only PARTLY isolated, which is worse than not at all
+
+`menu_accept` measures a frozen snapshot — **except its static no-backtick-in-CSS lint, which
+parses the LIVE tree.** So a peer mid-save in any of 106 modules fails your run, on a file you
+have never opened, and it presents *exactly* like your own break. It cost time twice in one
+session, once naming `src/render/stage.ts:111` while the agent reading the failure owned
+`src/ui/`.
+
+The general form: **when part of a tool reads the working tree and part reads a snapshot, say so
+in its output.** A number that is 90% isolated invites you to trust the 10% that isn't. Either
+isolate the whole thing, or print which side each result came from — the arena-scan colour gate
+now stamps the SHA its baseline represents for the same reason.
+
 ---
 
 ## 6. Scale, zoom and framing decide what is worth building
