@@ -58,10 +58,89 @@ import { Stage } from '../../render/stage';
 import { createCharacter } from '../../characters/registry';
 import { CHARACTER_IDS, CHARACTERS, RARITY_CARD_COLORS, type CharacterId } from '../../game/rules';
 
-/** Square, and big enough that a 210px card at 2x DPR is still sharp. */
-const SIZE = 448;
-/** Fraction of the frame the character fills on its long axis. */
-const FILL = 0.80;
+/**
+ * ── The render is PORTRAIT now, and the framing is UPPER BODY ────────────────
+ *
+ * What was here before: a 448² square holding a whole standing figure at 80% of the
+ * frame's long axis, dropped into the card with `object-fit: contain`. Measured, that
+ * put the mean figure at **19.1% of the card at desktop and 14.3% in portrait** — the
+ * rest was letterbox and sky. A blind critic named it as this screen's single fix
+ * ("the figure floats small and centred with dead colour above and below it"), and an
+ * independent measurement pass agreed after opening the sheets.
+ *
+ * Two things were wrong, and only one of them was the framing:
+ *
+ *  1. **A square source cannot fill a card that is never square.** Cards measure
+ *     0.81 (desktop), 0.87 (portrait phone) and 1.17 (landscape phone) wide-over-tall.
+ *     `contain` fits the LOOSER axis, so a square lost 40 px of a 218 px card at
+ *     desktop and 41 px of a 106 px one in portrait before the character was even
+ *     drawn. The source is now 416x496 (0.839) — within 4% of both portrait framings,
+ *     so `cover` crops almost nothing there and crops the landscape phone vertically,
+ *     which is exactly where a tighter head-and-shoulders crop is worth most.
+ *  2. **Full body wastes the pixels on legs.** The crop now starts at the waist and
+ *     runs to the top of the head.
+ *
+ * ⚠️ THE CROP CANNOT BE A FIXED FRACTION OF HEIGHT, and this is the whole reason the
+ * rule below is face-aware rather than a constant. Donut's eyes and mouth sit at
+ * y 0.61-1.46 on a ring whose top is at 2.23 — its face is in the LOWER HALF of its
+ * own body — and Lollipop wears its eyes low on the stick with its mouth up on the
+ * candy, spanning 0.66-1.65. A waist crop decapitates both. So the cut is the LOWER
+ * of "waist" and "a margin below the bottom of the face", which leaves those two
+ * characters wider and lets the other nine come in at ~1.9x. Getting a per-character
+ * answer out of one rule is why the rig's own `face` joint is read here.
+ */
+const SIZE_W = 416;
+const SIZE_H = 496;
+const ASPECT = SIZE_W / SIZE_H;
+
+/** Where the crop starts, as a fraction of the model's own height, before the face
+ *  constraint below is applied. 0.42 is roughly the waist across all four archetypes. */
+const WAIST_FRAC = 0.42;
+/** The crop never comes closer than this to the bottom of the face. Same units. */
+const FACE_PAD = 0.07;
+/** Empty frame above the top of the head, as a fraction of the visible height. Sized
+ *  so the tightest card crop (landscape phone, which loses 28% of the height) still
+ *  cannot reach the head. */
+const TOP_PAD = 0.08;
+/**
+ * The bottom of the face must sit no lower than this fraction of the frame.
+ *
+ * A card puts its name and its rarity chip across the bottom ~26% of itself, and the
+ * first version of this framing anchored purely on the top of the head — which put
+ * LOLLIPOP'S EYES AT 91% OF THE FRAME, i.e. behind the nameplate. Measured as
+ * FACE-OUT: none, because the eyes were inside the card; they were simply underneath
+ * the type. The card that the critic singled out as having no readable face came back
+ * with a mouth and no eyes, which is not a fix.
+ */
+const FACE_FLOOR = 0.66;
+/** ...and this is what it is allowed to cost. Rather than zoom back out — which would
+ *  have taken Lollipop from 1.9x to 1.2x and undone the whole point — the frame slides
+ *  DOWN over the mass by up to this fraction. Only the two characters whose faces sit
+ *  low on their own bodies ever pay it, and both are round, so the top they lose reads
+ *  as a crop rather than as damage. Capped well under TOP_PAD's guarantee that the
+ *  corners of the frame stay clear, which `chars_metrics.mjs` keys the background from. */
+const HEAD_CROP = 0.08;
+/** How much of the frame height the framed band occupies. */
+const FILL_V = 0.92;
+/**
+ * The subject may be this much wider than the frame. A little bleed is what a portrait
+ * crop IS — but only a little, and the first attempt at this file proves why.
+ *
+ * At 1.5 the vertical band always won and every character was fitted on height alone.
+ * On the wide half of the cast that cut a quarter off each side: Soup became a bowl rim
+ * with two eyes in the bottom corner, Taco a shell with no taco in it, Hamburger a bun.
+ * The faces were enormous and the CHARACTERS were gone — the wrong trade on the one
+ * screen whose whole job is telling eleven of them apart.
+ *
+ * At 1.15 the width binds for the wide ones instead, and that produces the right answer
+ * without needing a second rule: a wide character is fitted across, so its frame comes
+ * out taller than the band asked for, and — because the head stays pinned TOP_PAD below
+ * the frame top — every extra millimetre goes downward into body. Soup and Egg end up
+ * near full-figure and full-bleed, while Hot Dog, Burrito, Lollipop and Pizza, which are
+ * narrow and were the ones with unreadable faces, still get the full ~1.9x. One rule,
+ * sorted by what each character actually needed.
+ */
+const WIDTH_ALLOW = 1.15;
 
 const cache = new Map<CharacterId, string>();
 /** Every listener waiting on the batch in flight. Cleared when it finishes. */
@@ -77,7 +156,40 @@ declare global {
      *  On the roster screen that is still all eleven; on home and the trophy road it
      *  is the handful those screens actually display — see `demandedIds`. */
     __thumbsReady?: boolean;
+    /** QA-only: where the subject, its HEAD and its FACE landed inside each generated
+     *  PNG, in source-image pixels, plus the world-space landmarks the framing was
+     *  solved from. A probe can key the flat background out of the PNG to find the
+     *  subject, but nothing in the pixels says which part of it is a face — and
+     *  "is the face legible at thumbnail size" is the acceptance test this screen is
+     *  judged on. The FACE joint is the landmark that matters, not the head: Lollipop
+     *  wears its eyes low on the stick and its mouth up on the candy, so its head mass
+     *  and its face are in two different places. Recorded at generation time, where
+     *  the camera and the rig's own joints are both in hand. */
+    __thumbMeta?: Record<string, ThumbMeta>;
   }
+}
+
+/** Pixel rect inside a generated portrait PNG. */
+export interface ThumbRect { x: number; y: number; w: number; h: number }
+export interface ThumbMeta {
+  /** Width and height of the render, in pixels. */
+  size: { w: number; h: number };
+  /** The whole model's projected bounds. */
+  subject: ThumbRect;
+  /** The rig's head joint subtree, or `null` if there is no joint named `head`. */
+  head: ThumbRect | null;
+  /** The rig's face joint subtree, or `null` if the model mounts its face elsewhere. */
+  face: ThumbRect | null;
+  /** World-space landmarks, so a framing rule can be designed against real numbers. */
+  world: {
+    minY: number; maxY: number; halfWidth: number;
+    hipsY: number | null; shoulderY: number | null;
+    headY: [number, number] | null; faceY: [number, number] | null;
+    /** Where the crop started, and the half-width that was fitted above it. */
+    yCut: number; upperHalfWidth: number;
+  };
+  /** What the camera was actually set to. */
+  frame: { subjectHeight: number; subjectFill: number; targetHeight: number };
 }
 
 export function getCachedThumb(id: CharacterId): string | undefined {
@@ -160,7 +272,7 @@ async function generate(): Promise<void> {
   const host = document.createElement('div');
   // Off-screen but LAID OUT: `display:none` would give the Stage a 0x0 container and
   // it would size its buffer to the window instead.
-  host.style.cssText = `position:fixed;left:-9999px;top:0;width:${SIZE}px;height:${SIZE}px;pointer-events:none;`;
+  host.style.cssText = `position:fixed;left:-9999px;top:0;width:${SIZE_W}px;height:${SIZE_H}px;pointer-events:none;`;
   document.body.appendChild(host);
 
   let stage: Stage | null = null;
@@ -177,7 +289,10 @@ async function generate(): Promise<void> {
         yawDeg: 24,
         frameMode: 'subject',
         subjectHeight: 2.1,
-        subjectFill: FILL,
+        // 1, always. `subjectHeight` below is the VISIBLE height in metres, solved per
+        // character; splitting the same quantity across two knobs is how a framing
+        // ends up tuned in one place and overridden in another.
+        subjectFill: 1,
         targetHeight: 1.05,
         followLerp: 1,
       },
@@ -189,7 +304,7 @@ async function generate(): Promise<void> {
       offscreen: true,
       maxPixelRatio: 1,
     });
-    stage.canvas.style.cssText = `display:block;width:${SIZE}px;height:${SIZE}px;`;
+    stage.canvas.style.cssText = `display:block;width:${SIZE_W}px;height:${SIZE_H}px;`;
     stage.resize();
 
     // Re-read demand every round: the player can navigate mid-batch, and a roster
@@ -212,6 +327,75 @@ async function generate(): Promise<void> {
   }
 }
 
+/**
+ * A world-space box, as the pixel rect it occupies in a `w`x`h` render.
+ *
+ * ⚠️ THE OBVIOUS VERSION OF THIS IS WRONG, and it was wrong here first: projecting all
+ * eight corners of the box straight through the camera reported Hamburger's head as
+ * 96% of its whole body. A perspective camera magnifies the four NEAR corners, so an
+ * unflattened projection measures the box's DEPTH as if it were height — a cube one
+ * head wide projects roughly its own diagonal. That is not what a viewer sees.
+ *
+ * So every corner is first pushed to the box centre's depth in camera space, and only
+ * then projected: the result is the extent of the mass AT ITS OWN DISTANCE, which is
+ * the thing a card is either big enough to show or is not. Instrument validated
+ * against the keyed pixel bbox — see `chars_metrics.mjs`, which prints both.
+ */
+function projectBox(box: THREE.Box3, camera: THREE.Camera, w: number, h: number): ThumbRect {
+  const v = new THREE.Vector3();
+  const centreZ = box.getCenter(v.clone()).applyMatrix4(camera.matrixWorldInverse).z;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < 8; i++) {
+    v.set(
+      i & 1 ? box.max.x : box.min.x,
+      i & 2 ? box.max.y : box.min.y,
+      i & 4 ? box.max.z : box.min.z,
+    ).applyMatrix4(camera.matrixWorldInverse);
+    v.z = centreZ;
+    v.applyMatrix4(camera.projectionMatrix);
+    const px = (v.x * 0.5 + 0.5) * w;
+    const py = (1 - (v.y * 0.5 + 0.5)) * h;
+    x0 = Math.min(x0, px); x1 = Math.max(x1, px);
+    y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+  }
+  return { x: +x0.toFixed(1), y: +y0.toFixed(1), w: +(x1 - x0).toFixed(1), h: +(y1 - y0).toFixed(1) };
+}
+
+/** Box3 of a named rig joint's subtree, or `null` when it holds no geometry. */
+function jointBox(root: THREE.Object3D, name: string): THREE.Box3 | null {
+  const j = root.getObjectByName(name);
+  if (!j) return null;
+  const b = new THREE.Box3().setFromObject(j);
+  return b.isEmpty() ? null : b;
+}
+
+/**
+ * Half-width of everything above `yCut`, measured ALONG THE CAMERA'S RIGHT AXIS.
+ *
+ * Not `Box3.max.x`, and not the whole-model box: both answer a different question.
+ * The camera yaws 24 degrees, so a character's screen width is part of its world X and
+ * part of its world Z, and a full-body box is set by the feet on half this cast. Real
+ * vertices, filtered by height, projected onto the axis the frame is actually measured
+ * in. ~30k vertices per character, once per session.
+ */
+function halfWidthAbove(root: THREE.Object3D, yCut: number, right: THREE.Vector3): number {
+  const v = new THREE.Vector3();
+  let maxAbs = 0;
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || !m.visible) return;
+    const pos = m.geometry?.getAttribute('position');
+    if (!pos) return;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos as THREE.BufferAttribute, i).applyMatrix4(m.matrixWorld);
+      if (v.y < yCut) continue;
+      const a = Math.abs(v.dot(right));
+      if (a > maxAbs) maxAbs = a;
+    }
+  });
+  return maxAbs;
+}
+
 async function renderOne(stage: Stage, id: CharacterId): Promise<void> {
   const model = createCharacter(id);
   stage.scene.add(model.root);
@@ -221,13 +405,51 @@ async function renderOne(stage: Stage, id: CharacterId): Promise<void> {
   model.update({ dt: 0.4, elapsed: 0.4, moveSpeed01: 0, health01: 1 });
 
   const box = new THREE.Box3().setFromObject(model.root);
-  const h = Math.max(0.5, box.max.y - box.min.y);
-  const w = 2 * Math.max(0.25, Math.abs(box.min.x), Math.abs(box.max.x));
-  // Square frame, so whichever axis is larger is the one that sets the fit.
-  stage.rig.subjectHeight = Math.max(h, w);
-  stage.rig.subjectFill = FILL;
-  stage.rig.targetHeight = (box.min.y + box.max.y) / 2;
-  stage.rig.snapTo(0, 0);
+  const headBox = jointBox(model.root, 'head');
+  const faceBox = jointBox(model.root, 'face');
+  const H = Math.max(0.5, box.max.y - box.min.y);
+  const yTop = box.max.y;
+
+  // Where to cut. The waist, unless the face reaches lower — see the file header for
+  // why Donut and Lollipop make that not a hypothetical. Four characters mount their
+  // features straight onto the head group rather than onto `face`, so the head's own
+  // bottom is the fallback, and the raw fraction is the floor under both.
+  const faceBottom = (faceBox ?? headBox)?.min.y ?? (box.min.y + 0.45 * H);
+  const yCut = Math.max(box.min.y, Math.min(box.min.y + WAIST_FRAC * H, faceBottom - FACE_PAD * H));
+  const framedH = Math.max(0.4, yTop - yCut);
+
+  // Two passes, because the width has to be measured along an axis the camera decides
+  // and the camera's DISTANCE then depends on that width. Only the distance changes
+  // between the passes — pitch and yaw are fixed — so the right axis read after pass 1
+  // is the one pass 2 renders with.
+  const frame = (visibleH: number): void => {
+    // Where the top of the frame sits, in world metres. Preferred: TOP_PAD of clear
+    // air above the head. Lowered — cropping the mass — only as far as it takes to
+    // lift the bottom of the face off the nameplate, and never past HEAD_CROP.
+    let frameTop = yTop + TOP_PAD * visibleH;
+    if (faceBox) {
+      frameTop = Math.max(
+        Math.min(frameTop, faceBox.min.y + FACE_FLOOR * visibleH),
+        yTop - HEAD_CROP * visibleH,
+      );
+    }
+    stage.rig.subjectFill = 1;
+    stage.rig.subjectHeight = visibleH;
+    stage.rig.targetHeight = frameTop - visibleH / 2;
+    stage.rig.snapTo(0, 0);
+  };
+  frame(framedH / FILL_V);
+  const right = new THREE.Vector3().setFromMatrixColumn(stage.rig.camera.matrixWorld, 0).normalize();
+  const upperHalfW = halfWidthAbove(model.root, yCut, right);
+  // Whichever of the three binds. The third term is the one the clamp inside `frame`
+  // cannot solve on its own: sliding down is capped at HEAD_CROP, so a face that still
+  // will not clear the nameplate at that cap has to be met by zooming out instead. It
+  // binds on Donut and Lollipop only, at ~12%, and on nobody else.
+  frame(Math.max(
+    framedH / FILL_V,
+    (2 * upperHalfW) / (ASPECT * WIDTH_ALLOW),
+    faceBox ? (yTop - faceBox.min.y) / (FACE_FLOOR + HEAD_CROP) : 0,
+  ));
 
   stage.scene.background = new THREE.Color(RARITY_CARD_COLORS[CHARACTERS[id].rarity]);
   stage.lighting.focus(0, 0, 4);
@@ -237,6 +459,33 @@ async function renderOne(stage: Stage, id: CharacterId): Promise<void> {
   stage.render(0);
   stage.render(0);
   const url = stage.canvas.toDataURL('image/png');
+
+  // QA metadata, after the render so the camera matrices are the ones that drew it.
+  const cam = stage.rig.camera;
+  const hips = model.root.getObjectByName('hips');
+  const shoulder = model.root.getObjectByName('shoulderL');
+  const wv = new THREE.Vector3();
+  (window.__thumbMeta ??= {})[id] = {
+    size: { w: SIZE_W, h: SIZE_H },
+    subject: projectBox(box, cam, SIZE_W, SIZE_H),
+    head: headBox ? projectBox(headBox, cam, SIZE_W, SIZE_H) : null,
+    face: faceBox ? projectBox(faceBox, cam, SIZE_W, SIZE_H) : null,
+    world: {
+      minY: +box.min.y.toFixed(4), maxY: +box.max.y.toFixed(4),
+      halfWidth: +Math.max(Math.abs(box.min.x), Math.abs(box.max.x)).toFixed(4),
+      hipsY: hips ? +hips.getWorldPosition(wv).y.toFixed(4) : null,
+      shoulderY: shoulder ? +shoulder.getWorldPosition(wv).y.toFixed(4) : null,
+      headY: headBox ? [+headBox.min.y.toFixed(4), +headBox.max.y.toFixed(4)] : null,
+      faceY: faceBox ? [+faceBox.min.y.toFixed(4), +faceBox.max.y.toFixed(4)] : null,
+      yCut: +yCut.toFixed(4),
+      upperHalfWidth: +upperHalfW.toFixed(4),
+    },
+    frame: {
+      subjectHeight: +stage.rig.subjectHeight.toFixed(4),
+      subjectFill: +stage.rig.subjectFill.toFixed(4),
+      targetHeight: +stage.rig.targetHeight.toFixed(4),
+    },
+  };
 
   stage.scene.remove(model.root);
   model.dispose();

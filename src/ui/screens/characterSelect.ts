@@ -46,24 +46,6 @@ const STAT_MAX = 10;
 const ANIMATED_RARITIES = new Set(['Neon', 'Cyber']);
 
 /**
- * Ink or cream on a rarity chip, chosen by relative luminance rather than by hand.
- *
- * `RARITY_COLORS` is the design's, not ours — and three of the six (Legendary gold,
- * Cyber mint, Normal grey) are light enough that white-on-them measured around
- * 1.8:1, which is illegible at badge size on a handset. Deriving the text colour
- * means a future rarity added to `rules.ts` is legible automatically.
- */
-function chipInk(hex: string): { fg: string; shadow: string } {
-  const c = hex.replace('#', '');
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
-  const lin = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-  return L > 0.42
-    ? { fg: '#1a1224', shadow: 'none' }
-    : { fg: '#FFFFFF', shadow: '0 1px 1px rgba(0,0,0,0.5)' };
-}
-
-/**
  * Reach, as a word.
  *
  * The raw `range` is in world units, which means nothing to a player, but the
@@ -178,7 +160,10 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     card.style.setProperty('--rarity', RARITY_COLORS[def.rarity]);
     card.style.setProperty('--rarity-glow', rgba(RARITY_COLORS[def.rarity], 0.75));
     if (ANIMATED_RARITIES.has(def.rarity)) card.classList.add('is-animated');
-    const ink = chipInk(RARITY_COLORS[def.rarity]);
+    // Only the FILL is set here. The ink used to be picked per card by luminance in
+    // this file; `.fa-rarity` now encloses every glyph in an ink stroke instead, which
+    // is colour-independent, needs no JS, and fixes the same badge on `home.ts` —
+    // see the block above `.fa-rarity` in `theme.ts` for what was measured.
     card.innerHTML = `
       <img class="chars-card-render" alt="" data-el="render" />
       <span class="chars-card-sheen"></span>
@@ -186,7 +171,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       <span class="chars-card-art">${icon('avatar')}</span>
       <span class="chars-card-name">${def.name}</span>
       <span class="fa-rarity chars-card-rarity"
-            style="background:${RARITY_COLORS[def.rarity]};color:${ink.fg};text-shadow:${ink.shadow}">${def.rarity}</span>
+            style="background:${RARITY_COLORS[def.rarity]}">${def.rarity}</span>
       <span class="chars-card-playing">${icon('star')}</span>
     `;
     card.addEventListener('click', () => view(id, true));
@@ -470,9 +455,17 @@ const CSS = `
    top and left two thirds of a cream panel empty at desktop size, which is the
    thing that reads as unfinished. The column floor keeps the count at 4 across on a
    phone and grows it on a desktop, so the grid is never one lonely card wide. */
+/* The 70px floor was measured, and it was wrong in portrait: at 430x932 the roster is
+   404px wide, which fits FIVE 64.8px columns — cards so narrow that four of the eleven
+   names ellipsised ("Ham...", "Burri...", "Lolli...", "Wato...") and the card's aspect
+   went to 0.61, i.e. a third of every card was letterbox no matter how the art was
+   framed. 76px drops that to four columns of ~92px, which restores every name, takes
+   the card aspect to 0.87 (within 4% of the render's own 0.84, so the crop is
+   near-zero), and grows the tap target. Nothing changes above 760px wide, where 10vw
+   already exceeds the floor — desktop and landscape phone are untouched. */
 .fa-chars .chars-roster {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(clamp(70px, 10vw, 180px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(clamp(76px, 10vw, 180px), 1fr));
   grid-auto-rows: minmax(clamp(68px, 12vh, 128px), 1fr);
   gap: clamp(6px, 1vw, 14px);
   padding: clamp(8px, 1.4vh, 14px);
@@ -518,18 +511,32 @@ const CSS = `
    230px-tall card is the same "unfinished" read the empty panel was. */
 /* The rendered portrait, once it lands. It covers the emoji placeholder rather
    than replacing it in the DOM, so there is no reflow at swap time. */
+/* COVER now, and the reason the old note here reached the opposite conclusion is that
+   it was reasoning about a SQUARE source of a WHOLE STANDING FIGURE. Against that
+   source 'cover' really did amputate arms, so 'contain' was correct — and it cost the
+   letterbox: mean figure area measured 19.1% of the card at desktop and 14.3% in
+   portrait, with the balance dead colour above and below. That is precisely the defect
+   a blind critic named as this screen's single fix.
+
+   'thumbs.ts' now renders 416x496 (0.839) framed on the upper body instead of 448²
+   framed on the whole figure, so the source and the card agree about shape to within
+   4% at desktop and in portrait, and 'cover' crops single-digit percentages there. The
+   landscape phone's card is 1.17 wide-over-tall and does crop ~28% of the height — off
+   the BOTTOM, by design, which on a 74px card is the difference between a whole body
+   at 30px and a head at 30px.
+
+   10% and not 50%: 'cover' distributes its overflow according to object-position, and
+   at a 10% bias the landscape crop takes 3% off the top and 25% off the bottom. The
+   render already leaves 8% of clear frame above the head (TOP_PAD), so the head keeps
+   ~5% of clearance in the tightest crop the layout can produce. Asserted per character
+   per viewport by 'chars_metrics.mjs''s FACE-OUT / HEAD-OUT columns, not eyeballed. */
 .fa-chars .chars-card-render {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  /* contain, not cover. A square render inside a portrait tile gets its SIDES
-     cropped by cover, which is what clipped Taco, Sushi and Hot Dog. contain
-     letterboxes instead — invisibly, since the bands are the same rarity colour —
-     and the 38% vertical bias lifts the character clear of the name plate so labels
-     stop landing on the model's legs. */
-  object-fit: contain;
-  object-position: center 38%;
+  object-fit: cover;
+  object-position: 50% 10%;
   opacity: 0;
   transition: opacity 0.25s ease-out;
   pointer-events: none;
@@ -539,13 +546,20 @@ const CSS = `
 /* Top gloss + bottom scrim, over the render: the scrim is what keeps the name and
    the rarity chip legible against whatever the character's own colours happen to be
    down there, which a flat card never had to worry about. */
+/* Both stops moved when the art started filling the card, and the top one is the one
+   that mattered: a 0.40 white radial centred at 6% used to fall on empty sky, and with
+   an upper-body crop it falls on the FACE. It is now weaker and pulled above the frame,
+   so it still reads as a glossy tile and no longer washes out the one part of the
+   render this screen exists to show. The bottom scrim goes the other way — the name and
+   the rarity chip now sit over a character's chest rather than over flat colour, so it
+   is deepened to keep them on a dark ground. */
 .fa-chars .chars-card-gloss {
   position: absolute;
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(90% 55% at 50% 6%, rgba(255,255,255,0.4), transparent 70%),
-    linear-gradient(0deg, rgba(20,13,30,0.62) 0%, rgba(20,13,30,0.14) 26%, transparent 44%);
+    radial-gradient(120% 34% at 50% -8%, rgba(255,255,255,0.30), transparent 72%),
+    linear-gradient(0deg, rgba(20,13,30,0.74) 0%, rgba(20,13,30,0.30) 26%, transparent 48%);
 }
 
 .fa-chars .chars-card-art {
@@ -583,10 +597,18 @@ const CSS = `
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The floor here was 0.5rem, which put this chip at 8px on a landscape phone and
+   10.4px everywhere else — under the 11px legibility floor at every single viewport,
+   on the one badge whose whole job is a six-way distinction. It is now never below
+   11.5px, which is also what keeps the 1.6px ink stroke '.fa-rarity' paints in
+   proportion. Where the card is too small to carry it at that size the chip is dropped
+   entirely rather than shrunk (see the landscape block at the bottom of this file) —
+   the card's background IS the rarity colour, so nothing is lost that the card was not
+   already saying. */
 .fa-chars .chars-card-rarity {
-  height: clamp(16px, 2.4vh, 21px);
+  height: clamp(18px, 2.4vh, 22px);
   padding: 0 8px;
-  font-size: clamp(0.5rem, 1.25vh, 0.65rem);
+  font-size: clamp(0.72rem, 1.35vh, 0.78rem);
   align-self: center;
 }
 
@@ -601,7 +623,11 @@ const CSS = `
   color: rgba(26,18,36,0.5);
 }
 .fa-chars .chars-card--locked .chars-card-art { opacity: 0.45; }
-.fa-chars .chars-card--locked .chars-card-name { color: rgba(26,18,36,0.55); }
+/* 0.55 measured 3.62:1 on this tile's own pale ground — under AA, and the only text on
+   the roster that was. Quietness on a 'not yet' slot is worth having, but not at the
+   cost of the floor: 0.70 measures 5.7 and is still plainly subordinate to the eleven
+   cream-on-ink names beside it. */
+.fa-chars .chars-card--locked .chars-card-name { color: rgba(26,18,36,0.70); }
 /* Equipped marker. A corner star rather than the prototype's "⭐ Playing" pill,
    because at roster-card scale in landscape a pill is wider than the card. */
 .fa-chars .chars-card-playing {
@@ -748,6 +774,13 @@ const CSS = `
    caught a portrait-only defect. */
 @media (max-height: 460px) {
   .fa-chars .chars-heading { display: none; }
+  /* 390px of height has to hold a top bar, three rows of cards and an action row, so a
+     roster card here is ~86x74. The rarity chip and the name together were taking 26px
+     of that 74 — a third of the card — to say in 8px type something the card's own
+     background already says in colour. Dropping the chip is worth 35% more height for
+     the figure, and 8px uppercase was not communicating a six-way distinction anyway.
+     The name stays: nothing else on the card encodes identity. */
+  .fa-chars .chars-card-rarity { display: none; }
 }
 
 @media (max-width: 700px) {
@@ -757,6 +790,12 @@ const CSS = `
   }
   .fa-chars .chars-detail { max-height: 34vh; }
   .fa-chars .chars-heading { display: none; }
+  /* Step 3 of the type ramp is sized off vh, and in portrait there is a lot of vh and
+     very little card: 1.85vh of 932 is 16.3px inside an 84px tile, which ellipsised
+     "Hamburger" to "Hambu...". Sizing it off the card instead of off the viewport is
+     not something CSS can express, so the ramp step is simply shorter here — 12.1px,
+     still over the 11px floor and still a step above the rarity chip below it. */
+  .fa-chars .chars-card-name { font-size: clamp(0.66rem, 1.3vh, 0.82rem); }
   /* TOP-LEFT here, bottom-centre everywhere else, and the reason is the panel's shape
      rather than a preference. In portrait the hero row is ~380px tall against a full
      column's ~740, and the rig frames the subject to a fraction of the panel HEIGHT —

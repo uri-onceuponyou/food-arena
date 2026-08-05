@@ -196,9 +196,19 @@ const ICON_CSS = `
   vertical-align: baseline;
 }
 .fa-ic-portrait.has-render img { display: block; }
-/* Head crop for badge-sized portraits — see PortraitOpts.crop in portraits.ts. The
-   origin is above centre because thumbs.ts frames a full standing body, so the head
-   sits in the upper third of the source image. */
-.fa-ic-portrait--head img { transform: scale(1.8); transform-origin: 50% 31%; }
+/* Head crop for badge-sized portraits — see PortraitOpts.crop in portraits.ts.
+   ⚠️ THIS RULE IS A FUNCTION OF HOW 'thumbs.ts' FRAMES, and it was retuned when that
+   changed. It used to read scale(1.8) / origin 50% 31%, sized against a source that
+   held a WHOLE STANDING BODY. thumbs.ts now frames the upper body, and 1.8x on top of
+   that showed a slice of Hot Dog's bun with no face in it and one of Egg's eyes —
+   measured by cropping the trophy road's own character nodes at 8x
+   ('tools/tmp/portrait_crop_check.mjs').
+   Retuned by measurement, not by eye: 'thumbs.ts' publishes every character's face
+   rect in source pixels on 'window.__thumbMeta', and across the seven characters that
+   carry a 'face' joint those rects span source y 0.166-0.760 and x 0.157-0.842. A
+   square badge's own 'object-fit: cover' already trims the 416x496 source to
+   y 0.081-0.919, and scale(1.2) at origin 14% then shows y 0.100-0.799, x 0.083-0.917
+   — the whole envelope, with margin on all four sides. scale(1.3) clips Pizza. */
+.fa-ic-portrait--head img { transform: scale(1.2); transform-origin: 50% 14%; }
 .fa-ic-portrait.has-render .fa-ic { display: none; }
 `;

@@ -249,8 +249,14 @@ const CSS = `
   color: var(--ink);
 }
 .fa-chip-em { font-size: 1.1em; line-height: 1; }
-.fa-chip-val { color: var(--ketchup); }
-.fa-chip--gem .fa-chip-val { color: var(--water); }
+/* The INK tokens, not the fill tokens. This is the case the pair above was created for
+   and the one place that had not been converted: '--ketchup' on the chip's cream plate
+   measures 4.27:1 and '--water' 2.99:1, both under the 4.5 floor, on a counter a player
+   reads at a glance. '--ketchup-ink' takes it to 6.43 and '--water-ink' to 6.51 at the
+   same hue. Found by measuring character select; the chip is the shell's, so this fixes
+   every screen that shows one. */
+.fa-chip-val { color: var(--ketchup-ink); }
+.fa-chip--gem .fa-chip-val { color: var(--water-ink); }
 
 /* Interactive version of the chip — used for Back and the settings gear. Height is
    raised to the full tap target; the visual pill stays 34px via padding so the
@@ -600,22 +606,55 @@ const CSS = `
 
 /* ── Rarity badge ─────────────────────────────────────────────────────────── */
 /* Colour comes from RARITY_COLORS in rules.ts via inline style — never hardcoded
-   here, so a balance/roster change can't silently desync the menu from the game. */
+   here, so a balance/roster change can't silently desync the menu from the game.
+
+   ── WHITE ON THE FILL FAILED FIVE OF SIX RARITIES ──────────────────────────
+   Measured against the pixels actually behind each glyph: Cyber 1.64, Legendary 2.08,
+   Normal 2.78, Neon 3.20, Rare 3.81, Epic 4.92, against a 4.5 AA floor. That is the
+   same failure family as 'docs/LESSONS.md' §1 case 10 — the dark-on-dark HUD cooldown
+   wipe that three critics across three rounds reported as "no visible cooldown".
+
+   Three fixes were rendered at real badge size and compared as PIXELS
+   ('tools/tmp/rarity_probe.mjs', 'rarity_probe2.mjs'), because only the arithmetic
+   could be settled on paper:
+
+     - darkening the fill behind the type. This is what 'home.ts' does at alpha 0.40,
+       and it is NOT enough: it leaves Cyber at 4.06. Reaching 4.5 on every rarity
+       needs ~0.52, which costs the badge half its value and turns Legendary gold
+       brown — on a screen whose whole job is telling six rarities apart.
+     - picking ink or white per fill by luminance. Crisp, keeps the fill fully
+       saturated, and clears AA for all six of OUR colours (worst 4.77) — but the
+       crossover for an ARBITRARY fill is 4.07, so a rarity added to 'rules.ts' near
+       L=0.185 would fail silently. It also needs JS, which means it could only ever
+       fix the screens whose owner remembered to call it.
+     - AN INK TEXT-STROKE, below. Colour-independent, CSS-only (so it fixes home's
+       badge too, in a file this owner does not touch), and the same treatment
+       '.fa-title' and '.chars-card-name' already use — measured 16.55:1 on every
+       rarity, because the glyph's paper is its own stroke rather than the fill.
+
+   1.6px is the width the sweep settled on. '-webkit-text-stroke' centres on the glyph
+   outline, so half of it comes off the INSIDE of a stem that is only ~1.8px wide at
+   800 weight; 2.2px visibly closed the counters of NORMAL and LEGENDARY, and 1.2px
+   left too thin a rim to enclose the glyph. The font-size floor moved 0.70rem ->
+   0.72rem to keep that ratio honest at the smallest place this badge is used. */
 .fa-rarity {
   display: inline-flex;
   align-items: center;
   align-self: flex-start;
-  height: 21px;
+  height: 22px;
   padding: 0 9px;
   border: 2px solid var(--ink);
   border-radius: 999px;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
-  font-size: 0.7rem;
-  letter-spacing: 0.09em;
+  font-size: clamp(0.72rem, 1.55vh, 0.82rem);
+  /* 0.09em -> 0.11em: the stroke adds ~1.6px of ink to every glyph's outside edge, so
+     the tracking has to grow with it or adjacent letters touch. */
+  letter-spacing: 0.11em;
   text-transform: uppercase;
-  color: #FFFFFF;
-  text-shadow: 0 1px 1px rgba(0,0,0,0.45);
+  color: var(--cream);
+  -webkit-text-stroke: 1.6px var(--ink);
+  paint-order: stroke fill;
   white-space: nowrap;
 }
 
