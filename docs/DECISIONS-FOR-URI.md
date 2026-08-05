@@ -15,8 +15,8 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | # | question | in force now | my recommendation | cost to reverse |
 |---|---|---|---|---|
 | **6** | **⚠️ Lobby reference plates** | none exist | **only you can fix this — it blocks all menu scoring** | drop 3–4 screenshots in |
-| **12** | Game got harder: 51.2% → 31.8% | — | ✅ **ANSWERED — land the 4th bug + `ENEMY_MAX_HP` 90 → ~52.8%** | in flight |
-| **15** | Should a fleeing enemy shoot at you? | — | ✅ **ANSWERED — yes, land it** (with §12's HP 90) | in flight |
+| **12** | Game got harder | — | ✅ **DONE — flee fix + `ENEMY_MAX_HP` 90. Shipped at 52.2%** | landed |
+| **15** | Should a fleeing enemy shoot at you? | — | ✅ **DONE — it aims at you now** | landed |
 | **16** | Soup lost its red band, egg went cream, cast p95 is +0.027 over reference | shipped | **look at it — these are looks, not measurements** | per-character, self-contained |
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
 | **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | no concealment | **your call — this is a feature, not an art pass** | new mechanic |
@@ -30,7 +30,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **4** | `ROSTER_GATED` | off | **yours** — shop is built and honest either way | one flag |
 | **2** | Timeout tiebreak | HP fraction → zone → you | **keep** (it now actually fires) | a few lines |
 | **3** | Trail damage cap | 1 per tick | **keep** | one constant |
-| **13** | Rarity runs backwards; the stat card is fiction | — | ✅ **ANSWERED — rarity MEANS power; build real health + speed** | in flight |
+| **13** | Rarity runs backwards; the stat card is fiction | — | ✅ **DONE — rarity is monotonic; settled matchups 70 → 22** | landed |
 | **14** | Portrait phones: 65% black bars | letterboxed to 4:3 | **prompt to rotate** — or rethink the fairness model | one prompt, or a model rework |
 | **8** | Pointer lock | shipped as built | ✅ **ANSWERED — Uri: "works good"** | — |
 | **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
@@ -894,3 +894,54 @@ wrong to you on the sheet, say so — it is one constant per character.
   That lives in the camera's fair-play radius and is routed there — ⚠️ but it is guarded by
   `aspect.mjs`, a **competitive-fairness** gate, so it may prove impossible without breaking the
   guarantee that every viewport sees the same distance in every direction.
+
+
+---
+
+## 21. ✅ §12, §13 and §15 are all LANDED — and the roster problem halved twice
+
+Your two answers are shipped. Numbers, all re-measured on the **fixed** driver (110 matchups × 32
+seeds × 2 policies = 7,040 matches per row, paired):
+
+| | settled matchups | rarity monotonic | player win |
+|---|---|---|---|
+| before | **70 / 110** | no | 27.4% |
+| §12 + §15 (flee fix + HP 90) | 43 / 110 | no | **52.2%** |
+| §13 (real health + speed) | **22 / 110** | **YES** | 51.8% |
+
+**52.2% against the 52.8% you approved** — inside the ~9 pp resolution floor. (The baseline reads
+27.4% rather than the 31.8% I quoted you because the *driver* was fixed in between; that 4.4 pp gap
+was instrument artefact.)
+
+**The rarity ramp now runs the right way:** Normal 40.4 · Rare 41.7 · Epic 46.3 · Legendary 50.0 ·
+Neon 58.7 · Cyber 61.1 — from 66.6 / 63.3 / 19.7 / 68.0 / 24.7 / 42.7. The trophy road no longer
+sells a downgrade.
+
+### The finding inside it: **speed is a nearly inert lever**
+
+Tested one character at a time on a neutral roster with a 20% speed cut: **nine of eleven move under
+6 pp**, and the response is not even monotone — two get *better* at a 20% cut, four at a 10% one.
+Only Donut responds strongly, and that is the Sticky Trail rather than speed. **Every point of the
+result above is health.** The speed axis is kept and honestly scaled, but it is not what fixed
+anything, and that is stated rather than implied.
+
+### Three caveats, none of them hidden
+
+1. **The ramp was fitted on the skilled policy.** Under the naive one the roster is much flatter
+   (settled 71 → 57) but **not monotone**, and its aggregate falls 45.0 → 36.6% — 8.4 pp, just
+   inside the floor.
+2. **Pizza cannot be helped further.** It is already at `health: 10`, the top of the scale.
+3. **The HP pools inverted** — the enemy now has 90 against your 100. Three assertions written
+   against "the enemy has more HP" were re-derived to test the *rule* rather than the era.
+
+### What the character card now says
+
+**`src/ui/` needed no change** — it already read `def.stats[key]` as integers on a 0–10 scale. The
+data changed; the view did not. The difference is that the bars now mean something: Hamburger reads
+**10/3/5** (glass cannon), Pizza **4/10/5** (wall). Stat totals take **7 distinct values with no tie
+above 3**, against **5 distinct values with a five-way tie** before. That was the structural reason
+the card could not discriminate, and it is gone.
+
+**One visual consequence of §15 to watch for when you next play:** a fleeing enemy now backpedals
+**facing you** rather than turning its back, because the model rotates to `facing`. Genre-normal, and
+it is what you already do — but you will notice it.

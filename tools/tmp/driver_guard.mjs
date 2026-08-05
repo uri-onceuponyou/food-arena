@@ -102,9 +102,13 @@ const REGISTRY = {
    * probe is deleted is a gate that cries wolf.
    */
   'tools/tmp/roster_lab.mjs': {
-    state: 'INDEPENDENT_FIXED', optional: true, guard: "if (state.phase !== 'playing') {",
-    guard2: "const canAct = state.phase === 'playing';",
-    note: 'peer file, born fixed — lifted from pacing_ladder.mjs',
+    // Born INDEPENDENT_FIXED (lifted from pacing_ladder.mjs, correctly, with both
+    // countdown guards), then converted to SHARED by its owner. The row was left stale
+    // and was UNREACHABLE either way — which is precisely the dead-branch bug fixed
+    // below, in miniature: a SHARED file has no `detourUntil`, so the fingerprint sweep
+    // never reached this entry to notice it was misclassified.
+    state: 'SHARED', optional: true,
+    note: 'peer file, born fixed from pacing_ladder.mjs; now imports the shared driver',
   },
   // ── declared debt, outside this pass's file set ───────────────────────────
   // Converted in 47feb9a. `grep -l detourUntil tools/` now returns 7: the source, this
