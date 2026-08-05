@@ -156,6 +156,153 @@ export const DUPLICATE_COINS: Record<Rarity, number> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CHARACTER LEVELS — the coin sink
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ── WHY COINS, AND ONLY COINS ───────────────────────────────────────────────
+ *
+ * Uri left the currency open: *"To increase levels you need to spend coins/anything else."*
+ * The answer is **coins**, and the argument is a measurement rather than a preference:
+ *
+ * **Before this, coins had no sink worth using.** The only thing they bought was a box,
+ * and while `ROSTER_GATED` is false every box pays out a DUPLICATE — so a 900-coin
+ * Hamburger Box returns 138 coins in expectation (0.89x120 + 0.10x260 + 0.01x520) and a
+ * 12,000-coin Fire Box returns 932. Coins were a currency whose only sink was an
+ * incinerator, and a player's balance rose forever with nothing to do about it. That is
+ * the hole levelling fills, and it is why this needs no new faucet: the coin faucets
+ * (match payout, chests, road nodes) already run and already have nowhere to drain.
+ *
+ * ── WHY NOT A SECOND, PER-CHARACTER RESOURCE ────────────────────────────────
+ *
+ * Brawl Stars splits this into gold (global) plus power points (per-brawler), which makes
+ * levelling ADDITIVE to unlocking rather than competing with it. It is a good design and it
+ * is deliberately not this one, for one reason: **a second resource needs a second faucet**,
+ * and every faucet here is already tuned and asserted. Adding one means re-deriving the
+ * chest table, the road payouts and the box odds together — a bigger change than the
+ * feature, and one that would land untested.
+ *
+ * **The competition is therefore REAL and is the intended tension**: coins spent on levels
+ * are coins not spent on boxes. That is a decision the player gets to make, which is more
+ * than the coin balance offered before.
+ *
+ * ⚠️ AND IT IS REVERSIBLE BY CONSTRUCTION. `levelUpCost()` returns a full `{ coins, gems }`
+ * price, not a number, and takes the CHARACTER ID even though nothing below reads it for
+ * anything except rarity. Adding a per-character resource, or moving levels onto gems, is
+ * a change to this table and to `Reward` — not a change to any call site.
+ */
+export const LEVEL_UP = {
+  /**
+   * Coin price of the very first upgrade (level 1 -> 2) for a Normal character.
+   *
+   * Set against `STARTING_BALANCE.coins` deliberately: 300 out of a 500-coin opening
+   * balance buys EXACTLY ONE level before a single match is played, and the second rung
+   * (400) does not fit. The level system therefore announces itself immediately — a
+   * player finds the button by having enough for it — without the welcome balance
+   * quietly paying for a quarter of the ladder. Asserted in `economy.test.mjs` §13,
+   * because it is a relationship between two constants and not a property of either.
+   */
+  baseCoins: 300,
+
+  /**
+   * Each upgrade costs this much more than the one before it, before rarity.
+   *
+   * 1.32 over the 14 steps of a 1-15 ladder puts the last upgrade at 37x the first, which
+   * is the shape every shipped level ladder has: the first few are impulse purchases and
+   * the last one is a decision. Totals are in `LEVEL_UP`'s own tests and in
+   * `tools/tmp/level_lab.mjs --economy`, measured against real career income rather than
+   * asserted from this comment.
+   */
+  growth: 1.32,
+
+  /**
+   * ── RARITY PAYS FOR ITS POWER HERE, AND THIS IS THE LOAD-BEARING NUMBER ───
+   *
+   * This game grants power for rarity (`DECISIONS §13`) AND power for level (§22). Two
+   * power axes with nothing else differing would make a rarer character strictly better
+   * forever. Clash Royale's answer — which is the one adopted — is that **rarity is paid
+   * for in upgrade cost**: a Legendary costs multiples of a Common to bring to the same
+   * level.
+   *
+   * So the trade a player actually faces is legible: **a Cyber is the better character and
+   * a Normal is the cheaper one to max.** Uri's *"level 15 Normal should beat level 1
+   * Cyber"* holds because the level span (2.89x effective power) dwarfs the rarity span
+   * (20.7 pp), and §13 also holds because at EQUAL level the rarer character still wins.
+   *
+   * The ladder is ~1.35x per tier, which lands Cyber at 4.5x Normal — close to Clash
+   * Royale's own Common-to-Legendary gold ratio over a full ladder.
+   */
+  rarityCostMultiplier: {
+    Normal: 1.0,
+    Rare: 1.35,
+    Epic: 1.8,
+    Legendary: 2.45,
+    Neon: 3.3,
+    Cyber: 4.5,
+  } as Record<Rarity, number>,
+
+  /** Prices are rounded to this, so they read as prices rather than as arithmetic. */
+  roundTo: 10,
+} as const;
+
+/**
+ * ── HOW LONG A MATCH ACTUALLY TAKES ─────────────────────────────────────────
+ *
+ * Every "hours to unlock" figure this project has ever quoted was computed from a
+ * hardcoded **2 minutes per match** buried in `economy.test.mjs`, dating from when
+ * `MATCH_DURATION_MS` was 180 s. It has been wrong ever since the clock moved, which is
+ * why `DECISIONS §13`'s *"roughly 13 hours of play"* and this file's own *"~15 hours to
+ * the full roster"* are both stale by a factor of four. The number lives here now, next to
+ * everything else that decides pacing, so it can never again be a literal inside a test.
+ *
+ * ⚠️ TWO OF THESE THREE ARE MEASUREMENTS AND ONE IS AN ASSUMPTION. Stated separately on
+ * purpose — Uri should know which numbers he can argue with.
+ */
+export const MATCH_PACING = {
+  /**
+   * MEASURED. Mean wall-clock from PLAY pressed to the winner being decided, including
+   * the countdown, over 110 matchups x 8 seeds on the shipped arena
+   * (`tools/tmp/roster_lab.mjs`, policy `smart2`). Countdown is 3.7 s of it.
+   */
+  sessionSeconds: 15.5,
+
+  /**
+   * ASSUMED, and the only number here that is not measured. Results screen, the walk back
+   * to the lobby, and pressing Fight again. Nothing in this repo instruments a human
+   * navigating a menu, so this is a placeholder that is labelled rather than hidden —
+   * `DECISIONS §22` asks Uri for it.
+   */
+  menuSecondsPerMatch: 10,
+} as const;
+
+/** Total wall-clock a player spends per match, on the numbers above. */
+export const SECONDS_PER_MATCH =
+  MATCH_PACING.sessionSeconds + MATCH_PACING.menuSecondsPerMatch;
+
+/**
+ * ── WHO ELSE LEVELS UP: Uri answered it, and the answer shaped the code ─────
+ *
+ * *"The game eventually should be humans vs. humans. We will incorporate AI players to
+ * enrich. They need to be adjusted to the player's level."*
+ *
+ * So `'mirror'`: the opponent is a stand-in for a human at the player's own investment, and
+ * it carries the player's level. Two consequences, both deliberate:
+ *
+ *   * **The win-rate curve across 1->15 should be FLAT.** Uri set difficulty to 52.2% two
+ *     hours ago; a level system that made the game easier as you invest would have quietly
+ *     un-set it. This is a verification, not a design space — `tools/tmp/level_lab.mjs
+ *     --winrate` measures it and a drift is a defect.
+ *   * **Difficulty belongs in decision quality, not in stats.** A weaker opponent should
+ *     think worse, not be made of paper. Nothing here gives the AI its own stat table.
+ *
+ * `'fixed'` is kept because it is the honest alternative and because measuring it is what
+ * PROVES the mirror is doing something: at `'fixed'` the player's win rate climbs with
+ * level, which is exactly the failure this constant exists to prevent.
+ */
+export type EnemyLevelMode = 'mirror' | 'fixed';
+export const ENEMY_LEVEL_MODE: EnemyLevelMode = 'mirror';
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Containers — chests and boxes
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -193,6 +340,23 @@ export interface ContainerEntry {
   /** Grants a uniformly-random character of this rarity (duplicate → coins). */
   characterRarity?: Rarity;
 }
+
+/**
+ * ── WHAT RARITY BUYS, STATED ONCE AND SHOWN TO THE PLAYER ───────────────────
+ *
+ * Since `rules.ts` DEVIATION #12, rarity does NOT make a fighter stronger at equal level
+ * — that is Uri's *"match how common games do it"* answer, and the measured tier spread
+ * is 4.0 pp, inside the ~9 pp the project treats as unresolvable. What rarity governs is
+ * how hard a fighter is to OBTAIN (its position on the road, its odds in a box) and how
+ * expensive it is to LEVEL (`LEVEL_UP.rarityCostMultiplier`, 1.0x to 4.5x).
+ *
+ * This string is rendered on the drop-rate sheet, which is the one surface in the product
+ * that is a legal disclosure — so the sentence that says what the player is actually
+ * buying belongs there rather than in a comment nobody ships.
+ */
+export const RARITY_MEANING =
+  'Rarity sets how hard a fighter is to find and how much it costs to level up — not how '
+  + 'strong it is. Two fighters at the same level are a fair fight whatever their rarity.';
 
 export interface ContainerDef {
   name: string;
@@ -254,7 +418,13 @@ export const CONTAINERS: Record<ContainerKind, ContainerDef> = {
   hamburgerBox: {
     name: 'Hamburger Box',
     emoji: '🍔',
-    blurb: 'Mostly Normal fighters, with a chance of better.',
+    // ⚠️ "with a chance of BETTER" is what this said until 2026-08-05, and it stopped
+    // being true the moment Uri answered *"match how common games do it"*: rarity no
+    // longer confers power at equal level (`rules.ts` DEVIATION #12 — measured tier
+    // spread 20.7 pp -> 4.0 pp). A box that promises a stronger fighter and delivers a
+    // rarer one is the `DECISIONS §13` defect wearing a different hat, so every blurb
+    // below now says RARER, and the drop-rate sheet states what rarity buys instead.
+    blurb: 'Mostly Normal fighters, with a chance of something rarer.',
     price: { coins: 900, gems: 60 },
     entries: [
       { weight: 89, characterRarity: 'Normal' },
@@ -328,8 +498,7 @@ export interface Milestone {
  *
  * Assumptions used to derive it — CHANGE THESE AND THE NUMBERS BELOW MOVE:
  *   * 60% win rate against the current AI.
- *   * ~2 minutes per match including menu time (`MATCH_DURATION_MS` is 3:00, but
- *     most matches end on a knockout well before the clock).
+ *   * `SECONDS_PER_MATCH` — see `MATCH_PACING`, which is where the wall clock now lives.
  *
  * Expected trophies per match at that win rate:
  *   * below 100 trophies (grace band):  0.6 x 15                = +9.0
@@ -337,18 +506,31 @@ export interface Milestone {
  *   * around 1,000:                     0.6 x 15 - 0.4 x 8      = +5.8
  *   * 1,350 and above (loss capped):    0.6 x 15 - 0.4 x 10     = +5.0
  *
- * Which the seeded simulation in `economy.test.mjs` turns into (measured, not
- * estimated — the printed line in section 9 is the live figure):
- *   * FIRST CHARACTER (Donut, 75 trophies) — ~6 matches, ~12 minutes. One sitting.
- *   * HALF THE ROSTER (Water Bottle, 850)  — ~110 matches, ~3.7 hours.
- *   * FULL ROSTER (Hot Dog, 2,400)         — ~440 matches, ~15 hours.
- *   * ROAD COMPLETE (3,200)                — ~600 matches, ~20 hours.
+ * ── ⚠️ EVERY WALL-CLOCK FIGURE THIS BLOCK USED TO QUOTE WAS WRONG BY ~4.7x ──
  *
- * ~15 hours to the full roster is the number to argue with. It is deliberately
- * shorter than any shipped brawler's (Brawl Stars is hundreds of hours) because this
- * game has 11 characters, not 90, and a roster you cannot see is a roster you cannot
- * appreciate. `economy.test.mjs` asserts these bounds directly, so retuning any
- * number above will report exactly what it did to them.
+ * The old text read "~2 minutes per match including menu time (`MATCH_DURATION_MS` is
+ * 3:00...)" and derived: first character ~12 minutes, half the roster ~3.7 hours, full
+ * roster ~440 matches / **~15 hours**, road complete ~600 matches / ~20 hours. The clock
+ * has been **45 s** since the pacing sweep, and the measured session is **15.5 s**. So
+ * "~15 hours" was never a measurement of this build, and `DECISIONS §13`'s *"roughly 13
+ * hours of play"* inherited the same literal. Three of the four THRESHOLDS quoted were
+ * wrong too — the first character is at 60 trophies, not 75, and half the roster is Water
+ * Bottle at 725, not 850.
+ *
+ * Re-measured on the same seeded simulation (`economy.test.mjs` section 9 prints the live
+ * figures, and the assertions there are in MATCHES precisely so a wall clock in another
+ * file can never again go stale without a gate noticing):
+ *
+ *   * FIRST CHARACTER (Donut, 60 trophies) —   4 matches, ~1.7 min. One sitting.
+ *   * HALF THE ROSTER (Water Bottle, 725)  —  94 matches, ~0.7 h.
+ *   * FULL ROSTER (Hot Dog, 2,400)         — 394 matches, ~2.8 h.
+ *   * ROAD COMPLETE (3,200)                — 636 matches, ~4.5 h.
+ *
+ * ~2.8 hours to the full roster is the number to argue with, and it is now SHORT rather
+ * than long — deliberately shorter than any shipped brawler's (Brawl Stars is hundreds of
+ * hours) because this game has 11 characters, not 90. **The long tail is no longer the
+ * road at all: it is levelling** (`LEVEL_UP`), where maxing a single Normal costs 44,770
+ * coins — more than the entire road pays out — and a Cyber costs 201,460.
  *
  * ── Which characters, in which order ────────────────────────────────────────
  * Rarity-ascending, which also preserves the prototype's own ordering for the six it

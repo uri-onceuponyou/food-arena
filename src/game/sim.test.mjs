@@ -42,6 +42,10 @@ import {
   // would pass forever against a `sim.ts` that had stopped calling it.
   maxHpFor, speedFor, healthMultiplier, speedMultiplier, kitDps, damageStatFor, powerIndex,
   HEALTH_BASELINE_STAT, SPEED_TOP_STAT, STAT_MAX_DISPLAY, RARITY_ORDER,
+  // Section 23: same rule — the level multipliers are imported, never re-derived, so a
+  // `sim.ts` that stopped applying them cannot leave this section green.
+  LEVEL_MIN, LEVEL_MAX, LEVEL_HEALTH_PER_LEVEL, LEVEL_DAMAGE_PER_LEVEL,
+  clampLevel, levelHealthMultiplier, levelDamageMultiplier,
 } from './rules.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
@@ -2495,18 +2499,58 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
       CHARACTERS[id].stats.damage + CHARACTERS[id].stats.health + CHARACTERS[id].stats.speed);
     const distinct = new Set(totals).size;
     const largestTie = Math.max(...[...new Set(totals)].map((t) => totals.filter((x) => x === t).length));
-    check(`the card's stat total distinguishes the roster: >= 7 distinct values, no tie bigger than 3`,
-      distinct >= 7 && largestTie <= 3,
+    // ── ⚠️ THE BOUND MOVED 7 -> 6, AND THE OLD WORDING IS KEPT DELIBERATELY ──
+    //
+    // WAS: "the card's stat total distinguishes the roster: >= 7 distinct values, no tie
+    //       bigger than 3"  (against the pre-#10 card's 5 distinct values with a
+    //       FIVE-WAY tie at 19, which could not rank the roster even in principle).
+    //
+    // The rule this encoded has been half-reversed by Uri: *"Match how common games do
+    // it. There is a reason for it."* Rarity must NOT confer power at equal level, so the
+    // roster was re-flattened (DEVIATION #12) and four health values moved. That took the
+    // distinct-total count 7 -> 6, and the honest reading is that **the card SHOULD be
+    // losing total-spread** — characters are meant to differ in SHAPE at comparable
+    // totals (Hamburger 10/3/5 glass cannon, Pizza 4/10/5 wall), not in size.
+    //
+    // What must NOT come back is the degenerate case this check was built for. 6 distinct
+    // values with a largest tie of 3 is still nothing like 5 with a tie of 5, so the
+    // bound is lowered to exactly where the defect starts rather than deleted. Weakening
+    // it further is how the old defect returns.
+    check(`the card's stat total still discriminates: >= 6 distinct values, no tie bigger than 3`,
+      distinct >= 6 && largestTie <= 3,
       `${distinct} distinct totals across ${CHARACTER_IDS.length} characters, largest tie ${largestTie} `
-      + `(the old card: 5 distinct, largest tie 5)`);
+      + `(the pre-#10 card: 5 distinct, largest tie 5)`);
   }
 
-  // ── (h) THE DESIGN RULE THAT PRODUCES THE RARITY RAMP ────────────────────
+  // ── (h) THE DESIGN RULE THAT PRODUCES A **FLAT** ROSTER ──────────────────
   //
-  // The trophy road is built as a PROGRESSION — roughly 13 hours of play to reach the
-  // rarer tiers — and it used to sell a DOWNGRADE: measured, Normal 68.6 against Epic
-  // 12.5. Uri's answer to `DECISIONS §13(a)` was "rarity means power", and the roster
-  // now delivers it: MONOTONIC across all six tiers under `smart2`, 40.4 -> 61.1.
+  // ⚠️ THIS SECTION'S GOAL REVERSED, AND BOTH VERSIONS ARE URI'S. The old text read:
+  //
+  //   "The trophy road is built as a PROGRESSION and it used to sell a DOWNGRADE:
+  //    measured, Normal 68.6 against Epic 12.5. Uri's answer to `DECISIONS §13(a)` was
+  //    'rarity means power', and the roster now delivers it: MONOTONIC across all six
+  //    tiers under `smart2`, 40.4 -> 61.1."
+  //
+  // Then, on seeing the level system stack a SECOND power axis on top of that one:
+  // *"Match how common games do it. There is a reason for it."* The reason is his own
+  // §22 answer — this becomes humans vs. humans, and **rarity-as-power is pay-to-win
+  // that skill cannot close.** Brawl Stars brawlers and Clash Royale cards are balanced
+  // at equal level; rarity there governs ACQUISITION and UPGRADE COST. So it does here:
+  // `economy/tuning.ts:LEVEL_UP.rarityCostMultiplier` charges a Cyber 4.5x a Normal to
+  // reach the same level, and `rules.ts` DEVIATION #12 flattened the power ramp.
+  //
+  // MEASURED, 110 matchups x 32 seeds, `smart2` (`tools/tmp/roster_lab.mjs`):
+  //   tier means   BEFORE  40.4 · 41.7 · 46.3 · 50.0 · 58.7 · 61.1   spread 20.7 pp
+  //                AFTER   48.4 · 52.0 · 48.9 · 48.8 · 52.4 · 48.9   spread  4.0 pp
+  //   settled matchups 22/110 -> **17/110**, roster sd 12.4 pp -> 4.6 pp.
+  // The 4.0 pp spread is BELOW the ~9 pp this project treats as the aggregate resolution
+  // floor — the tiers are flat to the limit of what the instrument can distinguish.
+  //
+  // ⚠️ AND THE MODEL DOES NOT AGREE WITH THAT MEASUREMENT, WHICH IS DECLARED RATHER THAN
+  // ASSERTED. `powerIndex` still correlates rho = 0.63 with rarity rank, and the card's
+  // stat total rho = 0.75, on the roster that MEASURES flat to 4.0 pp. Exactly the trap
+  // the paragraph below already describes: a model that disagrees with 7,040 matches is
+  // not a gate. Neither correlation is asserted here, in either direction.
   //
   // ⚠️ THAT SENTENCE CANNOT BE ASSERTED HERE, AND AN EARLIER DRAFT OF THIS CHECK TRIED.
   // Measured strength is a 7,040-match quantity; `tools/tmp/roster_lab.mjs` owns it and
@@ -2532,8 +2576,12 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
     const sx = Math.sqrt(dps.reduce((s, x) => s + (x - mx) ** 2, 0));
     const sy = Math.sqrt(hp.reduce((s, y) => s + (y - my) ** 2, 0));
     const rho = cov / (sx * sy);
-    check('health COMPENSATES the kit: the strongest kits are the frailest (rho <= -0.4)',
-      rho <= -0.4, `rho = ${rho.toFixed(3)} between kit HP/s and health multiplier`);
+    // Bound tightened -0.4 -> -0.6 with DEVIATION #12. Compensation is not merely
+    // present now, it is the MECHANISM that makes the tiers flat: the kits are not
+    // aligned to rarity at all (rho = 0.03 between kit HP/s and rarity rank), so a flat
+    // roster is exactly a roster where durability cancels output. Measured -0.788.
+    check('health COMPENSATES the kit: the strongest kits are the frailest (rho <= -0.6)',
+      rho <= -0.6, `rho = ${rho.toFixed(3)} between kit HP/s and health multiplier`);
 
     // …and the compensation is big enough to be worth something. A roster where every
     // multiplier sat between 0.98 and 1.02 would satisfy every check above and change
@@ -2541,6 +2589,163 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
     const lo = Math.min(...hp), hi = Math.max(...hp);
     check('…and the durability axis has real range — the toughest pool is >= 1.6x the frailest',
       hi / lo >= 1.6, `${(lo * 100).toFixed(0)}% .. ${(hi * 100).toFixed(0)}% of the role pool = ${(hi / lo).toFixed(2)}x`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 23. CHARACTER LEVELS 1-15 (rules.ts DEVIATION #11)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri asked for levels that raise damage and HP, and separately answered the two
+// questions that make a level system more than a multiplier:
+//
+//   * *"AI players… need to be adjusted to the player's level"* -> the term is
+//     ROLE-AGNOSTIC. Everything below drives BOTH fighters through the same function.
+//   * *"level 15 normal should be able to beat level 1 cyber"* -> the level span must
+//     exceed the rarity span. The crossover itself is a 7,040-match measurement and
+//     lives in `tools/tmp/level_lab.mjs`; what is assertable here is the arithmetic that
+//     makes it possible.
+
+console.log('\n23. Character levels');
+{
+  // ── (a) The identity that every "bit-identical" claim in this pass rests on ──
+  check('level 1 is exactly 1.0 on both axes',
+    levelHealthMultiplier(LEVEL_MIN) === 1 && levelDamageMultiplier(LEVEL_MIN) === 1);
+  check('a 3-argument createMatch gives level-1 fighters',
+    (() => {
+      const s = createMatch(makeArena(), 'hamburger', 'donut');
+      return s.player.level === LEVEL_MIN && s.enemy.level === LEVEL_MIN
+        && s.player.damageMul === 1 && s.enemy.damageMul === 1;
+    })());
+  check('an unlevelled fighter has exactly the pool it had before levels existed',
+    createMatch(makeArena(), 'pizza', 'taco').player.maxHp
+      === Math.round(PLAYER_MAX_HP * healthMultiplier('pizza')));
+
+  // ── (b) The ladder ────────────────────────────────────────────────────────
+  check('both multipliers rise strictly with level, all the way to the cap',
+    Array.from({ length: LEVEL_MAX - 1 }, (_, i) => i + LEVEL_MIN).every((n) =>
+      levelHealthMultiplier(n + 1) > levelHealthMultiplier(n)
+      && levelDamageMultiplier(n + 1) > levelDamageMultiplier(n)));
+  check('the cap is the documented 1 + 14 steps on both axes',
+    Math.abs(levelHealthMultiplier(LEVEL_MAX) - (1 + (LEVEL_MAX - LEVEL_MIN) * LEVEL_HEALTH_PER_LEVEL)) < 1e-12
+    && Math.abs(levelDamageMultiplier(LEVEL_MAX) - (1 + (LEVEL_MAX - LEVEL_MIN) * LEVEL_DAMAGE_PER_LEVEL)) < 1e-12);
+  check('levels clamp rather than extrapolate in either direction',
+    clampLevel(-5) === LEVEL_MIN && clampLevel(1e6) === LEVEL_MAX
+      && clampLevel(NaN) === LEVEL_MIN && clampLevel(7.9) === 7);
+
+  // ── (c) THE LEVEL SPAN MUST EXCEED THE RARITY SPAN ───────────────────────
+  //
+  // This is Uri's sentence expressed as arithmetic. HP and damage are multiplicative in
+  // combat power, so a full ladder is `mult^2` of effective power against an unlevelled
+  // opponent. The rarity side is now flat BY DESIGN (§22(h)), so the comparison is
+  // against the widest per-character durability gap the roster still contains — if the
+  // level ladder did not clear even that, "investment beats rarity" could not hold for
+  // any pair of characters, let alone a Normal against a Cyber.
+  {
+    const levelPower = levelHealthMultiplier(LEVEL_MAX) * levelDamageMultiplier(LEVEL_MAX);
+    const hp = CHARACTER_IDS.map((id) => healthMultiplier(id));
+    const rosterSpread = Math.max(...hp) / Math.min(...hp);
+    check('a full level ladder is worth more than the whole roster durability spread',
+      levelPower > rosterSpread,
+      `level 1->${LEVEL_MAX} = ${levelPower.toFixed(2)}x effective power vs a ${rosterSpread.toFixed(2)}x roster spread`);
+  }
+
+  // ── (d) ROLE-AGNOSTIC. One function, both sides. ─────────────────────────
+  //
+  // ⚠️ THE POINT OF THIS CHECK IS THE ABSENCE OF A BOT PATH. Uri's PvP answer means a
+  // bot standing in for a level-8 human must have a level-8 human's stats. A level term
+  // that applied only to the player would be invisible in every aggregate — and `ai.ts`
+  // has had "a rule stated once and implemented twice" removed from it four times.
+  {
+    const s = createMatch(makeArena(), 'hamburger', 'hamburger', { player: LEVEL_MAX, enemy: LEVEL_MAX });
+    const one = createMatch(makeArena(), 'hamburger', 'hamburger');
+    // ⚠️ COMPARED AGAINST `maxHpFor` ITSELF, NOT AGAINST A RATIO. The first draft of this
+    // asserted `enemyRatio === playerRatio` and failed at 1.6984 vs 1.7000 — which is
+    // `maxHpFor`'s own `Math.round` on a 63 HP pool, not an asymmetry. A ratio between two
+    // rounded integers is not the quantity under test; the quantity under test is that
+    // both sides go through the same function with the same level.
+    check('the level term reaches BOTH pools through the identical function',
+      s.player.maxHp === maxHpFor('hamburger', PLAYER_MAX_HP, LEVEL_MAX)
+      && s.enemy.maxHp === maxHpFor('hamburger', ENEMY_MAX_HP, LEVEL_MAX)
+      && one.enemy.maxHp === maxHpFor('hamburger', ENEMY_MAX_HP, LEVEL_MIN),
+      `player ${s.player.maxHp}, enemy ${s.enemy.maxHp}`);
+    check('…so the two ratios agree to within the rounding maxHpFor already applies',
+      Math.abs((s.enemy.maxHp / one.enemy.maxHp) - (s.player.maxHp / one.player.maxHp)) < 0.01,
+      `player x${(s.player.maxHp / one.player.maxHp).toFixed(4)}, enemy x${(s.enemy.maxHp / one.enemy.maxHp).toFixed(4)}`);
+    check('…and gives both fighters the identical damage multiplier',
+      s.player.damageMul === s.enemy.damageMul && s.player.damageMul === levelDamageMultiplier(LEVEL_MAX));
+    const asym = createMatch(makeArena(), 'hamburger', 'hamburger', { player: LEVEL_MAX, enemy: LEVEL_MIN });
+    check('an asymmetric pairing is expressible — nothing forces the two together in the sim',
+      asym.player.maxHp > asym.enemy.maxHp * 1.5);
+  }
+
+  // ── (e) maxHpFor STAYS LINEAR IN ITS ROLE BASE AT EVERY LEVEL ───────────
+  //
+  // §22(b) asserts this at level 1 because `ENEMY_MAX_HP` is Uri's live difficulty dial.
+  // A level term that broke linearity would take the dial away at every level except 1,
+  // which no existing gate would have caught.
+  check('maxHpFor is linear in roleBaseHp at every level, not just level 1',
+    CHARACTER_IDS.every((id) => [LEVEL_MIN, 5, 9, LEVEL_MAX].every((lvl) =>
+      Math.abs(maxHpFor(id, 200, lvl) - 2 * maxHpFor(id, 100, lvl)) <= 1)),
+    'tolerance 1 HP for the rounding maxHpFor already applies');
+
+  // ── (f) THE DAMAGE MULTIPLIER REACHES REAL HITS — AND NOT THE ARENA ─────
+  //
+  // `combat.ts:applyDamage` is the single choke point for all five damage sources. The
+  // failure this catches is the one that motivated putting it there: a multiplier wired
+  // into four of them and not the fifth, or — worse — wired into the FOG, so levelling
+  // up would make the closing ring hurt you more.
+  {
+    const arena = makeArena();
+    const hi = createMatch(arena, 'hamburger', 'pizza', { player: LEVEL_MAX, enemy: LEVEL_MAX });
+    const lo = createMatch(arena, 'hamburger', 'pizza');
+    const evHi = [], evLo = [];
+    applyDamage(hi, 'enemy', 10, null, { kind: 'weapon', weaponKey: 'k', weaponName: 'n' }, evHi);
+    applyDamage(lo, 'enemy', 10, null, { kind: 'weapon', weaponKey: 'k', weaponName: 'n' }, evLo);
+    check('a weapon hit is scaled by the ATTACKER\'s level',
+      Math.abs(evHi[0].amount - 10 * levelDamageMultiplier(LEVEL_MAX)) < 1e-9
+      && evLo[0].amount === 10,
+      `${evHi[0].amount} vs ${evLo[0].amount}`);
+    check('…and the health bar lost exactly what the event reported',
+      Math.abs((hi.enemy.maxHp - hi.enemy.hp) - evHi[0].amount) < 1e-9,
+      'the floating damage number and the bar cannot disagree');
+
+    const evFog = [], evHaz = [];
+    const fogState = createMatch(arena, 'hamburger', 'pizza', { player: LEVEL_MAX, enemy: LEVEL_MAX });
+    applyDamage(fogState, 'player', 10, null, { kind: 'fog' }, evFog);
+    applyDamage(fogState, 'player', 10, null, { kind: 'hazard' }, evHaz);
+    check('the fog and the pot are NOT scaled by anybody\'s level',
+      evFog[0].amount === 10 && evHaz[0].amount === 10,
+      `fog ${evFog[0].amount}, hazard ${evHaz[0].amount}`);
+
+    const evTrail = [];
+    const trailState = createMatch(arena, 'donut', 'pizza', { player: LEVEL_MAX, enemy: LEVEL_MIN });
+    applyDamage(trailState, 'enemy', 10, null, { kind: 'trail', ownerRole: 'player' }, evTrail);
+    check('a trail mark is scaled by its OWNER, who may not be the target\'s opponent-of-record',
+      Math.abs(evTrail[0].amount - 10 * levelDamageMultiplier(LEVEL_MAX)) < 1e-9,
+      `${evTrail[0].amount}`);
+  }
+
+  // ── (g) A WHOLE MATCH AT LEVEL 1 IS BIT-IDENTICAL TO THE OLD CALL PATH ──
+  //
+  // The cheapest possible guarantee that shipping levels re-priced nothing: drive two
+  // full matches, one through each signature, and require every tick to agree.
+  {
+    const drive = (state) => {
+      let ticks = 0;
+      const trace = [];
+      while (state.phase !== 'ended' && ticks < 4000) {
+        const evs = stepMatch(state, 16.667, { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: true });
+        for (const ev of evs) if (ev.type === 'hit-landed') trace.push(`${ticks}:${ev.targetRole}:${ev.amount}`);
+        ticks++;
+      }
+      return { ticks, trace: trace.join('|'), hp: `${state.player.hp}/${state.enemy.hp}` };
+    };
+    const a = drive(createMatch(makeArena(), 'taco', 'soup'));
+    const b = drive(createMatch(makeArena(), 'taco', 'soup', { player: LEVEL_MIN, enemy: LEVEL_MIN }));
+    check('a level-1 match is tick-for-tick and hit-for-hit identical to a pre-levels one',
+      a.ticks === b.ticks && a.trace === b.trace && a.hp === b.hp,
+      `${a.ticks}/${b.ticks} ticks, hp ${a.hp} vs ${b.hp}`);
   }
 }
 

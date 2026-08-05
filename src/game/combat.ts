@@ -99,7 +99,31 @@ export function applyDamage(
   const target = state[targetRole];
   if (!target.alive) return;
 
-  target.hp = Math.max(0, target.hp - amount);
+  // ── THE LEVEL TERM IS APPLIED HERE, AND ONLY HERE ──────────────────────────
+  //
+  // Damage scaling has to live at the same single choke point HP reduction already does,
+  // for the same reason: there are FIVE call sites (melee, two projectile impact paths,
+  // trail marks, and the environment) and a multiplier applied at four of them is a
+  // silent balance bug in the fifth.
+  //
+  // ⚠️ IT KEYS OFF THE SOURCE, NOT OFF THE ROLE. A fighter's own level must not scale
+  // the fog or the central hazard — those are the ARENA hitting you, and making them
+  // scale with your level would mean levelling up made the map more dangerous. So:
+  //
+  //   'weapon'  the attacker is the target's opponent, always — a weapon can only ever
+  //             be aimed at the other fighter (`attemptAttack` passes `otherRole`, and a
+  //             projectile's `targetRole` is fixed to the opponent at spawn).
+  //   'trail'   the source carries `ownerRole` explicitly, because a Sticky Trail mark
+  //             outlives the tick that dropped it.
+  //   'fog' / 'hazard'  no attacker, no scaling.
+  //
+  // `damageMul` is exactly 1.0 at LEVEL_MIN, so every pre-levels match is bit-identical.
+  const attacker = source.kind === 'weapon' ? state[otherRole(targetRole)]
+    : source.kind === 'trail' ? state[source.ownerRole]
+    : null;
+  const dealt = attacker ? amount * attacker.damageMul : amount;
+
+  target.hp = Math.max(0, target.hp - dealt);
   target.lastDamagedAt = state.elapsed;
 
   // Refuse a status that is already running or still inside its grace window. This is
@@ -116,7 +140,12 @@ export function applyDamage(
     }
   }
 
-  events.push({ type: 'hit-landed', targetRole, amount, effect, source, x: target.x, y: target.y });
+  // `amount` on the event is what the target actually LOST, not what the weapon table
+  // says — otherwise the floating damage number and the health bar would disagree by the
+  // level multiplier, which is precisely the class of defect (`DECISIONS §13`) where a
+  // screen shows a number the model does not compute. `hud.ts` already rounds it for
+  // display and `setBar` already ceils HP, so a continuous term needs nothing downstream.
+  events.push({ type: 'hit-landed', targetRole, amount: dealt, effect, source, x: target.x, y: target.y });
 
   if (target.hp === 0) {
     target.alive = false;

@@ -12,10 +12,14 @@
  * Three things here are not ordinary unit tests and are the reason the module was
  * built this way at all:
  *
- *  1. PACING (section 9). The trophy curve is a design claim — "first character in a
- *     sitting, full roster in ~15 hours". It is asserted against a seeded simulated
- *     player, so changing any number in `tuning.ts` reports exactly what it did to
- *     time-to-first-unlock and time-to-full-roster instead of quietly moving them.
+ *  1. PACING (sections 9 and 13). The trophy curve and the level ladder are both design
+ *     claims — "first character in a sitting", "first upgrade in a sitting", "the road
+ *     still finishes even if you spend every coin on levels". They are asserted against a
+ *     seeded simulated player, so changing any number in `tuning.ts` reports exactly what
+ *     it did instead of quietly moving it. ⚠️ The BOUNDS are in MATCHES; the wall-clock
+ *     is printed from `tuning.ts:MATCH_PACING` and is never asserted, because a session
+ *     length that lives in another file must not be able to turn a pacing gate red — and
+ *     because a hardcoded 2-minute match survived a 4x clock change here undetected.
  *  2. PUBLISHED ODDS (section 5). Once gems are buyable with real money, box drop
  *     rates are a legal disclosure. The empirical distribution of the seeded roller
  *     is checked against `containerOdds()` — the exact string the player is shown —
@@ -25,12 +29,13 @@
  *     `rules.ts` and this fails until the road has a home for them.
  */
 
-import { CHARACTERS, CHARACTER_IDS } from '../rules.ts';
+import { CHARACTERS, CHARACTER_IDS, LEVEL_MAX, LEVEL_MIN, RARITY_ORDER } from '../rules.ts';
 import {
   CONTAINERS, CONTAINER_KINDS, DUPLICATE_COINS, MATCH_PAYOUT, ROSTER_GATED,
   STARTER_CHARACTER, STARTING_BALANCE, STORE_AVAILABLE, STORE_PRODUCTS, TROPHY_ROAD,
-  CHARACTERS_BY_RARITY,
+  CHARACTERS_BY_RARITY, ENEMY_LEVEL_MODE, MATCH_PACING, SECONDS_PER_MATCH,
 } from './tuning.ts';
+import { costToMax, enemyLevelFor, levelUpCost, totalLevelCost } from './levels.ts';
 import { createRng, weightedIndex } from './rng.ts';
 import { containerOdds, containerOddsLine, formatPercent, rollContainer, totalWeight } from './containers.ts';
 import {
@@ -42,7 +47,8 @@ import { bonusPercent, formatPrice, grantProduct, storeAvailable, storeProducts 
 import {
   applyMatchResult, buyContainer, claimAll, claimMilestone, createEconomy, deserialize,
   grantReward, openContainer, ownedSet, serialize, spend, totalContainers, winsToNextChest,
-  adoptLegacyBalance,
+  adoptLegacyBalance, canLevelUp, characterLevel, coinsSpentOnLevels, levelUp,
+  nextLevelPrice, rosterLevelProgress01,
 } from './state.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -581,19 +587,36 @@ console.log('\n9. Pacing (60% win rate, seeded)');
   const halfAt = run.unlockedAt.get(order[Math.floor(order.length / 2)]);
   const lastAt = run.unlockedAt.get(order[order.length - 1]);
 
-  const MIN = 2; // assumed minutes per match, including menus
-  console.log(`     first=${firstAt} matches (~${(firstAt * MIN)} min)`
+  // ── ⚠️ THE WALL-CLOCK HERE WAS WRONG BY 4.7x FOR THE WHOLE OF THIS PROJECT ──
+  //
+  // This line used to read `const MIN = 2; // assumed minutes per match, including menus`
+  // — a literal, in a test, dating from when `MATCH_DURATION_MS` was 180 s. It has been
+  // wrong since the clock went to 45 s, and it is the source of every "hours to unlock"
+  // figure the project has quoted: `tuning.ts`'s own "~15 hours to the full roster" and
+  // `DECISIONS §13`'s "roughly 13 hours of play to unlock characters measurably worse
+  // than the free one". **The measured session is 15.5 s, not 120 s.**
+  //
+  // It is exactly the `DECISIONS §13` defect in this module's own house: a number
+  // presented as a finding that the model never computed. The fix is not a better guess —
+  // it is moving the number to `tuning.ts:MATCH_PACING` where the two halves can be
+  // labelled separately, one MEASURED (the session, off `roster_lab`) and one ASSUMED
+  // (menu time, which nothing here instruments and which is parked for Uri).
+  const MIN = SECONDS_PER_MATCH / 60;
+  console.log(`     first=${firstAt} matches (~${(firstAt * MIN).toFixed(1)} min)`
     + `  half=${halfAt} (~${(halfAt * MIN / 60).toFixed(1)} h)`
     + `  full=${lastAt} (~${(lastAt * MIN / 60).toFixed(1)} h)`
-    + `  road complete=${run.matches} (~${(run.matches * MIN / 60).toFixed(1)} h)`);
+    + `  road complete=${run.matches} (~${(run.matches * MIN / 60).toFixed(1)} h)`
+    + `   [${SECONDS_PER_MATCH.toFixed(1)}s/match: ${MATCH_PACING.sessionSeconds}s measured + ${MATCH_PACING.menuSecondsPerMatch}s assumed menus]`);
 
   check('FIRST character is reachable in one sitting (<= 20 matches)',
     firstAt !== undefined && firstAt <= 20, `${firstAt} matches`);
   check('first character is not instant (>= 3 matches)', firstAt >= 3, `${firstAt} matches`);
-  check('HALF the roster inside ~8 hours (<= 240 matches)',
-    halfAt !== undefined && halfAt <= 240, `${halfAt} matches`);
-  check('FULL roster inside ~20 hours (<= 600 matches)',
-    lastAt !== undefined && lastAt <= 600, `${lastAt} matches`);
+  // ⚠️ THE BOUNDS ARE IN MATCHES, NOT HOURS, AND THAT IS DELIBERATE. Matches is what
+  // this model computes; hours is matches times a session length that lives in another
+  // file and moves whenever the clock does. Asserting the hours here is what let the
+  // 2-minute literal survive a 4x change in match length without a single gate going red.
+  check('HALF the roster inside 240 matches', halfAt !== undefined && halfAt <= 240, `${halfAt} matches`);
+  check('FULL roster inside 600 matches', lastAt !== undefined && lastAt <= 600, `${lastAt} matches`);
   check('full roster is not trivial (>= 150 matches)', lastAt >= 150, `${lastAt} matches`);
   check('the whole road is completable without spending a penny', run.complete,
     `stopped at ${run.matches} matches`);
@@ -720,6 +743,239 @@ console.log('\n11. Real-money store');
     grantReward(t, grantProduct('not-a-product'));
     return t.coins === STARTING_BALANCE.coins && t.gems === STARTING_BALANCE.gems;
   })());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 13. CHARACTER LEVELS 1-15 — the model, the sink, and the reload
+// ─────────────────────────────────────────────────────────────────────────────
+
+console.log('\n13. Character levels');
+{
+  const CHEAPEST = CHARACTER_IDS.find((id) => CHARACTERS[id].rarity === 'Normal');
+  const DEAREST = CHARACTER_IDS.find((id) => CHARACTERS[id].rarity === 'Cyber');
+
+  // ── (a) The ladder's shape ────────────────────────────────────────────────
+  check('a fresh player is level 1 on every character',
+    CHARACTER_IDS.every((id) => characterLevel(seeded(), id) === LEVEL_MIN));
+
+  check('a maxed character has no next price — null, not zero',
+    levelUpCost(CHEAPEST, LEVEL_MAX) === null && levelUpCost(CHEAPEST, LEVEL_MAX + 5) === null);
+
+  const ladder = [];
+  for (let n = LEVEL_MIN; n < LEVEL_MAX; n++) ladder.push(levelUpCost(CHEAPEST, n).coins);
+  check(`the ladder has exactly ${LEVEL_MAX - LEVEL_MIN} rungs`, ladder.length === LEVEL_MAX - LEVEL_MIN);
+  check('every rung costs more than the one before it — no free or flat level',
+    ladder.every((c, i) => i === 0 || c > ladder[i - 1]), ladder.join(','));
+  check('every price is a positive whole number of coins',
+    ladder.every((c) => Number.isInteger(c) && c > 0));
+
+  // ── (b) RARITY PAYS FOR ITSELF IN COST, NOT IN POWER ──────────────────────
+  //
+  // Uri: "Match how common games do it. There is a reason for it." In Brawl Stars and
+  // Clash Royale rarity governs ACQUISITION and UPGRADE COST, never strength at equal
+  // level — because rarity-as-power is pay-to-win and cannot be closed by skill, which
+  // is fatal in the humans-vs-humans game §22 says this is becoming. `rules.ts` holds
+  // the other half (tiers comparable at equal level); this is the half that lives here.
+  const byTier = RARITY_ORDER.map((tier) => {
+    const id = CHARACTER_IDS.find((c) => CHARACTERS[c].rarity === tier);
+    return id ? { tier, id, coins: costToMax(id).coins } : null;
+  }).filter(Boolean);
+  check('cost to max RISES with rarity, tier by tier',
+    byTier.every((row, i) => i === 0 || row.coins > byTier[i - 1].coins),
+    byTier.map((r) => `${r.tier} ${r.coins.toLocaleString()}`).join(' < '));
+  check('the rarest character costs at least 3x the commonest to max',
+    byTier[byTier.length - 1].coins >= byTier[0].coins * 3,
+    `${byTier[byTier.length - 1].coins} vs ${byTier[0].coins}`);
+
+  // ── (c) A total the player can verify by adding up their own receipts ─────
+  //
+  // Summed, never closed-form: the closed form of a ROUNDED geometric series is not the
+  // sum of the rounded terms, and the player pays the terms. A headline total the
+  // purchases do not add up to is `DECISIONS §13`'s defect in miniature.
+  const stepwise = ladder.reduce((a, b) => a + b, 0);
+  check('costToMax equals the sum of every individual upgrade',
+    costToMax(CHEAPEST).coins === stepwise, `${costToMax(CHEAPEST).coins} vs ${stepwise}`);
+  check('a zero-length span costs nothing',
+    totalLevelCost(CHEAPEST, 5, 5).coins === 0 && totalLevelCost(CHEAPEST, 9, 3).coins === 0);
+  check('a partial span is the matching slice of the ladder',
+    totalLevelCost(CHEAPEST, LEVEL_MIN, LEVEL_MIN + 3).coins === ladder[0] + ladder[1] + ladder[2]);
+
+  // ── (d) Buying one ────────────────────────────────────────────────────────
+  {
+    const s = seeded();
+    const price = nextLevelPrice(s, CHEAPEST);
+    s.coins = price.coins;
+    check('an affordable upgrade is available', canLevelUp(s, CHEAPEST));
+    const got = levelUp(s, CHEAPEST);
+    check('levelling returns the new level and what it cost',
+      got !== null && got.level === LEVEL_MIN + 1 && got.spent.coins === price.coins, JSON.stringify(got));
+    check('the coins are actually taken', s.coins === 0);
+    check('the level is recorded', characterLevel(s, CHEAPEST) === LEVEL_MIN + 1);
+    check('the next level costs more than the one just bought',
+      nextLevelPrice(s, CHEAPEST).coins > price.coins);
+    check('only that character moved',
+      CHARACTER_IDS.every((id) => id === CHEAPEST || characterLevel(s, id) === LEVEL_MIN));
+  }
+
+  // ── (e) Every refusal changes NOTHING. This is the atomicity property. ────
+  //
+  // ⚠️ Load-bearing beyond the obvious: the router writes `?screen=<name>` and a
+  // mid-match reload restarts the match, so an upgrade can be interrupted by a page load
+  // at any moment. The only durable record is the blob `serialize()` writes AFTER
+  // `levelUp` returns — so as long as the spend and the grant cannot separate, no reload
+  // can charge a player for a level they did not get, or hand them one they did not buy.
+  {
+    const s = seeded();
+    s.coins = nextLevelPrice(s, CHEAPEST).coins - 1;
+    check('an unaffordable upgrade is refused', canLevelUp(s, CHEAPEST) === false);
+    check('...and returns null', levelUp(s, CHEAPEST) === null);
+    check('...and takes no coins', s.coins === nextLevelPrice(s, CHEAPEST).coins - 1);
+    check('...and grants no level', characterLevel(s, CHEAPEST) === LEVEL_MIN);
+  }
+  {
+    const s = seeded();
+    s.coins = 1e9;
+    for (let n = LEVEL_MIN; n < LEVEL_MAX; n++) levelUp(s, CHEAPEST);
+    check('a character can be walked all the way to the cap',
+      characterLevel(s, CHEAPEST) === LEVEL_MAX);
+    const before = s.coins;
+    check('a maxed character refuses a further upgrade', levelUp(s, CHEAPEST) === null);
+    check('...and is not charged for it', s.coins === before);
+    check('canLevelUp is false at the cap even with infinite coins', canLevelUp(s, CHEAPEST) === false);
+    check('the walk cost exactly costToMax', 1e9 - before === costToMax(CHEAPEST).coins,
+      `${1e9 - before} vs ${costToMax(CHEAPEST).coins}`);
+    check('coinsSpentOnLevels reconstructs the bill from the levels alone',
+      coinsSpentOnLevels(s) === costToMax(CHEAPEST).coins, `${coinsSpentOnLevels(s)}`);
+  }
+
+  // ── (f) THE RELOAD. Levels are the one thing here a player PAYS for. ──────
+  {
+    const s = seeded(555);
+    s.coins = 1e9;
+    levelUp(s, CHEAPEST); levelUp(s, CHEAPEST); levelUp(s, DEAREST);
+    const round = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+    check('levels survive a serialize/deserialize round trip',
+      characterLevel(round, CHEAPEST) === LEVEL_MIN + 2 && characterLevel(round, DEAREST) === LEVEL_MIN + 1,
+      JSON.stringify(round.levels));
+    check('untouched characters come back at level 1',
+      CHARACTER_IDS.every((id) => (id === CHEAPEST || id === DEAREST) || characterLevel(round, id) === LEVEL_MIN));
+    check('level 1 is never stored — the sparse form has one spelling',
+      !Object.keys(serialize(seeded()).levels).length);
+  }
+  check('an unknown character in the levels blob is dropped',
+    Object.keys(deserialize({ levels: { spaghetti: 9 } }).levels).length === 0);
+  check('a non-numeric level is dropped',
+    characterLevel(deserialize({ levels: { [CHEAPEST]: 'nine' } }), CHEAPEST) === LEVEL_MIN);
+  check('an over-cap level is CLAMPED, not discarded — a paid-for character never resets',
+    characterLevel(deserialize({ levels: { [CHEAPEST]: 999 } }), CHEAPEST) === LEVEL_MAX);
+  check('a below-floor level reads as the floor',
+    characterLevel(deserialize({ levels: { [CHEAPEST]: -4 } }), CHEAPEST) === LEVEL_MIN);
+  check('a missing levels field is a fresh, empty ladder',
+    Object.keys(deserialize({ trophies: 10 }).levels).length === 0);
+
+  // ── (g) Roster progress ──────────────────────────────────────────────────
+  check('a fresh roster is 0% levelled', rosterLevelProgress01(seeded()) === 0);
+  check('an all-maxed roster is 100% levelled', (() => {
+    const s = seeded();
+    for (const id of CHARACTER_IDS) s.levels[id] = LEVEL_MAX;
+    return rosterLevelProgress01(s) === 1;
+  })());
+
+  // ── (h) THE OPPONENT. Uri: AI players adjust to the player's level. ──────
+  check('the opponent mirrors the player at every level',
+    Array.from({ length: LEVEL_MAX }, (_, i) => i + 1).every((n) => enemyLevelFor(n) === n),
+    ENEMY_LEVEL_MODE);
+  check('an out-of-range player level still yields a legal opponent level',
+    enemyLevelFor(99) === LEVEL_MAX && enemyLevelFor(-1) === LEVEL_MIN && enemyLevelFor(NaN) === LEVEL_MIN);
+
+  // ── (i) SOURCES AND SINKS — does the loop close? ─────────────────────────
+  //
+  // Levelling is by far the largest coin sink this economy has ever had, and the failure
+  // it could produce is silent: a player who can never afford a second level, or one
+  // whose balance still runs away because the sink is trivial. Both are measured here
+  // against the SAME seeded career the pacing section runs, so retuning any price
+  // reports what it did rather than hiding it.
+  //
+  // ⚠️ THE OPENING BALANCE IS PART OF THE LADDER, and it is a relationship between two
+  // constants rather than a property of either — so it is asserted rather than commented.
+  // 500 starting coins against a 300-coin first rung buys EXACTLY ONE level before a
+  // single match: enough for the player to find the button, not enough for the welcome
+  // gift to pay for the opening of the ladder.
+  check('the starting balance buys exactly one level and no more', (() => {
+    const s = seeded();
+    let bought = 0;
+    while (canLevelUp(s, STARTER_CHARACTER)) { levelUp(s, STARTER_CHARACTER); bought++; }
+    return bought === 1;
+  })(), `${STARTING_BALANCE.coins} coins vs a ${levelUpCost(STARTER_CHARACTER, LEVEL_MIN).coins} first rung`);
+
+  {
+    // ONE career, played to the end of the road, levelling the starter greedily along the
+    // way. Greedy is the WORST case for the road, not the average one: it spends every
+    // coin the instant it can, so if the road still completes here it completes for any
+    // less aggressive spender.
+    const s = createEconomy(20260805);
+    const rng = createRng(20260805);
+    let matches = 0;
+    let firstUpgradeAt = null;
+    let maxedStarterAt = null;
+    let roadDoneAt = null;
+    const LIMIT = 6000;
+    while (matches < LIMIT && (roadDoneAt === null || maxedStarterAt === null)) {
+      matches++;
+      applyMatchResult(s, rng.next() < 0.60);
+      claimAll(s);
+      while (canLevelUp(s, STARTER_CHARACTER)) {
+        levelUp(s, STARTER_CHARACTER);
+        if (firstUpgradeAt === null) firstUpgradeAt = matches;
+        if (characterLevel(s, STARTER_CHARACTER) === LEVEL_MAX && maxedStarterAt === null) maxedStarterAt = matches;
+      }
+      if (roadDoneAt === null && s.claimed.length === TROPHY_ROAD.length) roadDoneAt = matches;
+    }
+    const hrs = (m) => (m === null ? 'n/a' : `${((m * SECONDS_PER_MATCH) / 3600).toFixed(1)} h`);
+    console.log(`     LEVELS, greedy on the starter: first upgrade match ${firstUpgradeAt}`
+      + `  ·  road complete match ${roadDoneAt} (~${hrs(roadDoneAt)})`
+      + `  ·  Lv${LEVEL_MAX} at match ${maxedStarterAt} (~${hrs(maxedStarterAt)})`);
+    console.log(`     cost to max: ${RARITY_ORDER.map((t) => {
+      const id = CHARACTER_IDS.find((c) => CHARACTERS[c].rarity === t);
+      return id ? `${t} ${costToMax(id).coins.toLocaleString()}` : null;
+    }).filter(Boolean).join(' · ')}`);
+
+    check('the FIRST upgrade lands in the first sitting (<= 12 matches)',
+      firstUpgradeAt !== null && firstUpgradeAt <= 12, `${firstUpgradeAt} matches`);
+    check('maxing ONE character is reachable without spending a penny',
+      maxedStarterAt !== null, `not reached in ${LIMIT} matches`);
+    check('levelling does NOT starve the road — the road still completes on a greedy career',
+      roadDoneAt !== null, `${s.claimed.length}/${TROPHY_ROAD.length} claimed in ${LIMIT} matches`);
+    check('maxing one character is a bigger project than finishing the road',
+      maxedStarterAt > roadDoneAt, `max at ${maxedStarterAt}, road at ${roadDoneAt}`);
+    check('...but not an absurd one (inside 4x the road)',
+      maxedStarterAt < roadDoneAt * 4, `max at ${maxedStarterAt}, road at ${roadDoneAt}`);
+  }
+
+  // The sink must be REAL: a player who never levels should end up sitting on a balance
+  // the leveller does not have. If the two are close, levelling is not a sink and coins
+  // still have nowhere to go — which was the state of this economy before §22.
+  {
+    const idle = createEconomy(20260805);
+    const rngA = createRng(20260805);
+    for (let i = 0; i < 400; i++) { applyMatchResult(idle, rngA.next() < 0.60); claimAll(idle); }
+    const spender = createEconomy(20260805);
+    const rngB = createRng(20260805);
+    for (let i = 0; i < 400; i++) {
+      applyMatchResult(spender, rngB.next() < 0.60);
+      claimAll(spender);
+      while (canLevelUp(spender, STARTER_CHARACTER)) levelUp(spender, STARTER_CHARACTER);
+    }
+    console.log(`     400 matches: never levelling -> ${idle.coins.toLocaleString()} coins`
+      + `  ·  levelling the starter -> ${spender.coins.toLocaleString()} coins, Lv${characterLevel(spender, STARTER_CHARACTER)}`);
+    check('levelling absorbs at least 70% of a balance that would otherwise just pile up',
+      spender.coins < idle.coins * 0.3, `${spender.coins} vs ${idle.coins}`);
+    check('...and the two careers earned identically, so the gap IS the sink',
+      idle.trophies === spender.trophies);
+    check('every coin the spender is missing is accounted for by levels bought',
+      idle.coins - spender.coins === coinsSpentOnLevels(spender),
+      `${idle.coins - spender.coins} vs ${coinsSpentOnLevels(spender)}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1248,7 +1248,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   donut: {
     id: 'donut', name: 'Donut', emoji: '🍩', rarity: 'Normal',
-    stats: { damage: 4, health: 6, speed: 6 }, hasTrail: true,
+    stats: { damage: 4, health: 7, speed: 6 }, hasTrail: true,
     face: 'Crooked smile, sprinkles across a pink glaze torus.',
     weapons: [
       { key: 'Candy', name: 'Candy Barrage', type: 'ranged', range: REACH.rangedLong, damage: 4, cooldown: 900, speed: SPEED.long, color: '#FF6FA5', effect: null, pellets: 3, spreadDeg: 14, trailBoosted: true, emoji: '🍬' },
@@ -1261,7 +1261,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   taco: {
     id: 'taco', name: 'Taco', emoji: '🌮', rarity: 'Rare',
-    stats: { damage: 9, health: 3, speed: 5 }, hasTrail: false,
+    stats: { damage: 9, health: 4, speed: 5 }, hasTrail: false,
     face: 'Trapezoid shell with a jagged crimped top edge; face floats completely outside the shell, to the side.',
     weapons: [
       { key: 'Filling', name: 'Filling Toss', type: 'ranged', range: REACH.rangedLong, damage: 12, cooldown: 900, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '🥩' },
@@ -1308,7 +1308,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   egg: {
     id: 'egg', name: 'Egg', emoji: '🥚', rarity: 'Neon',
-    stats: { damage: 7, health: 9, speed: 4 }, hasTrail: false,
+    stats: { damage: 7, health: 8, speed: 4 }, hasTrail: false,
     face: 'Open eyes with highlights, straight neutral mouth.',
     weapons: [
       { key: 'Tackle', name: 'Egg Tackle', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, emoji: '🥚' },
@@ -1410,7 +1410,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   hotdog: {
     id: 'hotdog', name: 'Hot Dog', emoji: '🌭', rarity: 'Cyber',
-    stats: { damage: 9, health: 7, speed: 8 }, hasTrail: false,
+    stats: { damage: 9, health: 6, speed: 8 }, hasTrail: false,
     face: 'Sleepy half-closed eyes, small smile. Sausage in a bun with a mustard zigzag.',
     weapons: [
       { key: 'Mustard', name: 'Mustard Blast', type: 'ranged', range: REACH.rangedLong, damage: 7, cooldown: 900, speed: SPEED.long, color: '#FFC93C', effect: null, emoji: '💛' },
@@ -1596,16 +1596,140 @@ export function speedMultiplier(id: CharacterId): number {
   return 1 - (SPEED_TOP_STAT - CHARACTERS[id].stats.speed) * SPEED_PER_STAT;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CHARACTER LEVELS 1-15 — the second power axis
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── AUTHORISED DEVIATION #11 (2026-08-05): PER-CHARACTER LEVELS ─────────────
+//
+// Uri, verbatim: *"I want the ability to improve characters in levels. 1-15, each level
+// improves damage and HP."* The COST side of that lives in `economy/tuning.ts` (it is
+// progression, not balance); what lives here is the only thing the simulation needs to
+// know — how much bigger a level makes a fighter.
+//
+// ── FOUR CONSTRAINTS, and every one of them is somebody else's measurement ──
+//
+// 1. **A LEVEL IS NOT A CARD POINT.** `sim.test.mjs` §22(a)/(f) assert that the card's
+//    `health` bar IS the pool and its `damage` bar IS `damageStatFor(id)`. A level system
+//    that wrote into `CharacterDef.stats` would either turn those gates red or re-create
+//    the exact defect DEVIATION #10 exists to have fixed — a card that lies. So the level
+//    is a SEPARATE, CONTINUOUS term multiplied in at the sim, and the card keeps
+//    describing the base character. It also has to be continuous for a second reason:
+//    one card point is worth 7-12 pp of measured strength, so a 0-10 integer scale cannot
+//    express fifteen steps even in principle.
+//
+// 2. **IT IS ROLE-AGNOSTIC, BY CONSTRUCTION.** Uri: *"The game eventually should be humans
+//    vs. humans. We will incorporate AI players to enrich. They need to be adjusted to the
+//    player's level."* So there is ONE function of `(characterId, level)` and both sides
+//    call it. There is deliberately no enemy-level table and no bot-only path: a bot
+//    standing in for a level-8 human has a level-8 human's stats, and difficulty is a
+//    property of how well it THINKS, not of how much paper it is made of.
+//
+//    ⚠️ `PLAYER_MAX_HP` (100) vs `ENEMY_MAX_HP` (90) is a pre-existing ROLE asymmetry and
+//    Uri's live difficulty dial. It is left exactly alone — but nothing here depends on
+//    the two bases differing, so deleting that asymmetry for PvP is a deletion rather than
+//    a refactor.
+//
+// 3. **SPEED IS NOT ON THE LADDER, AND THAT IS DELIBERATE.** `render/camera.ts` derives
+//    the fair-play radius — the guarantee that you can always see the fighter shooting you
+//    — from `PLAYER_SPEED * TRAIL.speedBoost` on the explicit claim that "nothing in
+//    rules.ts moves faster". §22(d) is the only guard on it and `aspect.mjs` would still
+//    read PASS while a level quietly falsified it. Uri asked for damage and HP; speed was
+//    also measured to be a nearly inert lever (nine of eleven characters move under 6 pp
+//    on a 20% cut, non-monotonically). Two reasons, same answer.
+//
+// 4. **`maxHpFor` STAYS LINEAR IN ITS BASE.** §22(b) asserts that, so the role dial keeps
+//    scaling the whole roster. The level term multiplies alongside the character term
+//    rather than replacing either, which preserves the property rather than working
+//    around it.
+//
+// ── SIZING: THIS GAME STACKS TWO POWER AXES WHERE THE GENRE STACKS ONE ──────
+//
+// Uri: *"I think that level 15 normal should be able to beat level 1 cyber. Understand the
+// logic of how this works in common games and do the same."*
+//
+// In Brawl Stars (power 1-11) and Clash Royale (card levels 1-14) the level ladder applies
+// roughly +5% to +10% of HP and damage per level — a 1.5x-2.5x total swing — and a maxed
+// Common beats a fresh Legendary for one simple structural reason: **at equal level, rarity
+// grants no power at all.** Rarity there governs ACQUISITION and UPGRADE COST. The level
+// range wins because the rarity range is zero.
+//
+// ⚠️ THIS GAME HAS ALREADY CHOSEN OTHERWISE, DELIBERATELY, ONE COMMIT AGO. `DECISIONS
+// §13`/§21 made rarity monotonic in MEASURED STRENGTH — Normal 40.4 -> Cyber 61.1, a
+// **20.7 pp** spread at equal footing. So levels are a second power axis on top of a first
+// one, and the two answers only coexist under one condition:
+//
+//   **the level span must comfortably exceed the rarity span, and rarity must pay for its
+//   power somewhere other than in power — namely in what a level COSTS.**
+//
+// That second half lives in `economy/tuning.ts:LEVEL_UP.rarityCostMultiplier`, which is
+// Clash Royale's rarity-scaled upgrade cost transplanted onto a game where rarity also
+// grants base power. The trade it makes legible: a rare character is the better long-run
+// investment, a common one is far cheaper to max. Both of Uri's answers stay true —
+// rarer IS stronger like for like (§13), and investment DOES overcome rarity (§22).
+
+/** A brand-new character. Levels are 1-based so "Lv 1" is the floor, never "Lv 0". */
+export const LEVEL_MIN = 1;
+
+/** Uri's number, verbatim: levels 1-15. */
+export const LEVEL_MAX = 15;
+
 /**
- * The HP pool a `role` fighter of this character starts with.
+ * Fraction of the fighter's own pool added per level above `LEVEL_MIN`.
+ *
+ * 0.05 is the genre's step (Brawl Stars is ~+5%/level of base) and over the 14 steps of a
+ * 1-15 ladder it compounds to **1.70x HP**. Sized against the 20.7 pp rarity spread rather
+ * than adopted: `tools/tmp/level_lab.mjs` measures the actual crossover through the real
+ * `stepMatch`, and the acceptance test is Uri's sentence — a level-15 Normal must beat a
+ * level-1 Cyber, while a level-matched Cyber must still beat a level-matched Normal.
+ */
+export const LEVEL_HEALTH_PER_LEVEL = 0.05;
+
+/**
+ * Fraction of a hit's damage added per level above `LEVEL_MIN`.
+ *
+ * Deliberately the SAME size as the health step, which is also what the reference games do.
+ * Equal steps mean a level-N fighter versus a level-N fighter has an unchanged
+ * time-to-kill RATIO — exactly the property Uri's "AI players adjust to the player's level"
+ * answer needs, and the reason the win-rate curve across 1->15 can be flat at all rather
+ * than drifting as the pools outgrow the guns.
+ *
+ * ⚠️ HP and damage are multiplicative in combat power, so 1.70x each is **2.89x effective
+ * power against an unlevelled opponent.** That is the number that has to clear 20.7 pp of
+ * rarity, and it is why nothing smaller was viable.
+ */
+export const LEVEL_DAMAGE_PER_LEVEL = 0.05;
+
+/** Any level, from anywhere, forced into 1..15 as an integer. */
+export function clampLevel(level: number): number {
+  if (!Number.isFinite(level)) return LEVEL_MIN;
+  return Math.max(LEVEL_MIN, Math.min(LEVEL_MAX, Math.floor(level)));
+}
+
+/** This level's HP multiplier. Exactly 1.0 at `LEVEL_MIN`, by construction. */
+export function levelHealthMultiplier(level: number): number {
+  return 1 + (clampLevel(level) - LEVEL_MIN) * LEVEL_HEALTH_PER_LEVEL;
+}
+
+/** This level's damage multiplier. Exactly 1.0 at `LEVEL_MIN`, by construction. */
+export function levelDamageMultiplier(level: number): number {
+  return 1 + (clampLevel(level) - LEVEL_MIN) * LEVEL_DAMAGE_PER_LEVEL;
+}
+
+/**
+ * The HP pool a `role` fighter of this character starts with, at `level`.
  *
  * `roleBaseHp` is passed in rather than looked up so this function has no idea which role
  * it is serving: `sim.ts` supplies `PLAYER_MAX_HP` or `ENEMY_MAX_HP` and the difficulty
  * dial keeps working unchanged, on top of the per-character multiplier rather than
  * instead of it. Rounded, because HP is displayed and a fighter on 68.4 HP reads as a bug.
+ *
+ * `level` defaults to `LEVEL_MIN`, whose multiplier is exactly 1.0 — so every caller that
+ * predates levels keeps its exact previous answer, and §22(b)'s linearity in `roleBaseHp`
+ * holds at every level rather than only at level 1.
  */
-export function maxHpFor(id: CharacterId, roleBaseHp: number): number {
-  return Math.round(roleBaseHp * healthMultiplier(id));
+export function maxHpFor(id: CharacterId, roleBaseHp: number, level: number = LEVEL_MIN): number {
+  return Math.round(roleBaseHp * healthMultiplier(id) * levelHealthMultiplier(level));
 }
 
 /**

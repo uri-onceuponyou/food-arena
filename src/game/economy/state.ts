@@ -22,7 +22,7 @@
  * which is the oldest exploit in the genre and is free to prevent here.
  */
 
-import { CHARACTER_IDS, type CharacterId } from '../rules.ts';
+import { CHARACTER_IDS, CHARACTERS, LEVEL_MAX, LEVEL_MIN, clampLevel, type CharacterId } from '../rules.ts';
 import {
   CONTAINERS,
   CONTAINER_KINDS,
@@ -36,6 +36,7 @@ import {
 import { createRng, randomSeed } from './rng.ts';
 import { rollContainer, type ContainerResult } from './containers.ts';
 import { claimable, resolveReward, trophyDelta } from './trophyRoad.ts';
+import { levelUpCost, type LevelPrice } from './levels.ts';
 import { emptyReward, mergeReward, type Reward } from './reward.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,6 +68,15 @@ export interface EconomyState {
   /** Wins banked toward the next free chest. */
   winsTowardChest: number;
   lastMatch: LastMatch | null;
+  /**
+   * Character levels the player has PAID FOR, 2..`LEVEL_MAX`.
+   *
+   * Sparse on purpose — a character at level 1 is absent rather than stored as 1. Two
+   * reasons, and the second is the one that matters: the blob stays small, and
+   * `characterLevel()` returns `LEVEL_MIN` for anything it has never heard of, so a
+   * character added to `rules.ts` tomorrow reads as level 1 today with no migration.
+   */
+  levels: Partial<Record<CharacterId, number>>;
   /** Per-player RNG stream. */
   seed: number;
   rolls: number;
@@ -91,6 +101,7 @@ export function createEconomy(seed = randomSeed()): EconomyState {
     unlocked: [STARTER_CHARACTER],
     winsTowardChest: 0,
     lastMatch: null,
+    levels: {},
     seed,
     rolls: 0,
   };
@@ -261,6 +272,97 @@ export function buyContainer(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Character levels
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * This character's level for this player. `LEVEL_MIN` for anything never upgraded.
+ *
+ * Clamped on the way OUT as well as on the way in. That is not belt-and-braces: it is the
+ * property that lets the UI and the sim be handed the same number and be unable to
+ * disagree about it, even if a future migration writes something odd into the blob.
+ */
+export function characterLevel(state: EconomyState, id: CharacterId): number {
+  return clampLevel(state.levels[id] ?? LEVEL_MIN);
+}
+
+/** What the next level costs, or `null` when this character is already maxed. */
+export function nextLevelPrice(state: EconomyState, id: CharacterId): LevelPrice | null {
+  return levelUpCost(id, characterLevel(state, id));
+}
+
+/**
+ * Whether the player could level this character right now. Maxed, broke and NOT OWNED are
+ * all the same answer.
+ *
+ * ⚠️ Ownership goes through `isUnlocked`, never through `ROSTER_GATED` directly. That is
+ * the standing rule for this module: availability is DERIVED, so flipping the flag turns
+ * the level ladder into an owned-characters-only feature with no edit here and no edit in
+ * `characterSelect.ts`. While the flag is false `isUnlocked` is true for everything, so
+ * this clause costs nothing today and is correct the moment it does not.
+ */
+export function canLevelUp(state: EconomyState, id: CharacterId): boolean {
+  if (!isUnlocked(state, id)) return false;
+  const price = nextLevelPrice(state, id);
+  return price !== null && state.coins >= price.coins && state.gems >= price.gems;
+}
+
+/**
+ * Buy one level for one character.
+ *
+ * Returns the new level and what it cost, or `null` if it did not happen — maxed out, or
+ * not affordable. Both are the same answer to a click handler ("no"), which is what lets
+ * `characterSelect.ts` call this optimistically, exactly as the road screen already calls
+ * `claimMilestone`.
+ *
+ * ⚠️ THE SPEND AND THE GRANT ARE ONE OPERATION AND CANNOT SEPARATE. `spend()` is
+ * all-or-nothing and is checked BEFORE the level is written, so there is no ordering in
+ * which a player is charged for a level they did not receive. This matters more than usual
+ * here: the router writes `?screen=<name>` and a mid-match reload restarts the match, so
+ * an upgrade bought between matches has to be atomic against a page load that can arrive
+ * at any moment. It is, because the only durable record is the blob `serialize()` writes
+ * after this returns — either both halves are in it or neither is.
+ */
+export function levelUp(
+  state: EconomyState,
+  id: CharacterId,
+): { level: number; spent: LevelPrice } | null {
+  if (!isUnlocked(state, id)) return null;
+  const price = nextLevelPrice(state, id);
+  if (!price) return null;
+  if (!spend(state, price.coins, price.gems)) return null;
+  const level = clampLevel(characterLevel(state, id) + 1);
+  state.levels[id] = level;
+  return { level, spent: price };
+}
+
+/**
+ * Total coins the player has ever sunk into levels, reconstructed from the levels they
+ * hold rather than tracked as a counter.
+ *
+ * Derived on purpose. A counter can drift from the thing it counts (that is the whole
+ * shape of `DECISIONS §13`); this cannot, because it is computed from the same table the
+ * purchase reads. Used by the economy audit to close the sources-and-sinks loop.
+ */
+export function coinsSpentOnLevels(state: EconomyState): number {
+  let total = 0;
+  for (const id of CHARACTER_IDS) {
+    const level = characterLevel(state, id);
+    for (let n = LEVEL_MIN; n < level; n++) total += levelUpCost(id, n)?.coins ?? 0;
+  }
+  return total;
+}
+
+/** How far the whole roster is levelled, 0..1 — one number for a progression readout. */
+export function rosterLevelProgress01(state: EconomyState): number {
+  const span = (LEVEL_MAX - LEVEL_MIN) * CHARACTER_IDS.length;
+  if (span <= 0) return 1;
+  let gained = 0;
+  for (const id of CHARACTER_IDS) gained += characterLevel(state, id) - LEVEL_MIN;
+  return gained / span;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Persistence
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -290,6 +392,7 @@ export function deserialize(raw: unknown): EconomyState {
     unlocked: [STARTER_CHARACTER],
     winsTowardChest: num(o.winsTowardChest, 0),
     lastMatch: null,
+    levels: {},
     seed: num(o.seed, base.seed) || base.seed,
     rolls: num(o.rolls, 0),
   };
@@ -322,6 +425,22 @@ export function deserialize(raw: unknown): EconomyState {
     }
   }
 
+  // Levels are the one persisted field a player PAYS for, so the validation is stricter
+  // than "is it a number": an out-of-range value is clamped into 1..LEVEL_MAX rather than
+  // discarded (a blob written by a build with a longer ladder must not silently reset a
+  // paid-for character to 1), and a level of exactly LEVEL_MIN is dropped so the sparse
+  // representation has exactly one spelling. An unknown character id is dropped entirely —
+  // same rule `unlocked` already uses.
+  if (o.levels && typeof o.levels === 'object') {
+    const held = o.levels as Record<string, unknown>;
+    for (const id of CHARACTER_IDS) {
+      const raw = held[id];
+      if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
+      const level = clampLevel(raw);
+      if (level > LEVEL_MIN) state.levels[id] = level;
+    }
+  }
+
   if (o.lastMatch && typeof o.lastMatch === 'object') {
     const lm = o.lastMatch as Record<string, unknown>;
     state.lastMatch = {
@@ -349,6 +468,7 @@ export function serialize(state: EconomyState): Record<string, unknown> {
     unlocked: [...state.unlocked],
     winsTowardChest: state.winsTowardChest,
     lastMatch: state.lastMatch ? { ...state.lastMatch } : null,
+    levels: { ...state.levels },
     seed: state.seed,
     rolls: state.rolls,
   };

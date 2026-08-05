@@ -24,6 +24,8 @@ import {
   HIT_RADIUS_VS_ENEMY,
   HIT_RADIUS_VS_PLAYER,
   HOMING_TURN_RATE,
+  clampLevel,
+  LEVEL_MIN,
   MATCH_DURATION_MS,
   MIN_SAFE_RADIUS,
   maxHpFor,
@@ -70,7 +72,33 @@ const PROJECTILE_COVER_SIZE = 12;
  * frozen one — only the max is arena-scoped now.
  */
 
-export function createMatch(arena: ArenaDefinition, playerCharacterId: CharacterId, enemyCharacterId: CharacterId): MatchState {
+/**
+ * The two fighters' CHARACTER levels (`rules.ts` `LEVEL_MIN`..`LEVEL_MAX`).
+ *
+ * ── Both sides, one shape, deliberately ─────────────────────────────────────
+ * Uri: *"The game eventually should be humans vs. humans. We will incorporate AI players
+ * to enrich. They need to be adjusted to the player's level."* So this is a symmetric
+ * pair, not a player level plus a difficulty knob: the caller decides what the opponent
+ * is standing in for, and `economy/levels.ts:enemyLevelFor()` is the shipped answer
+ * (mirror the player). Nothing in the sim treats the two fields differently.
+ *
+ * Optional, and defaulting to `LEVEL_MIN` on both sides, because `levelHealthMultiplier`
+ * and `levelDamageMultiplier` are both exactly 1.0 there — so every caller written before
+ * levels existed produces a bit-identical match.
+ */
+export interface MatchLevels {
+  player?: number;
+  enemy?: number;
+}
+
+export function createMatch(
+  arena: ArenaDefinition,
+  playerCharacterId: CharacterId,
+  enemyCharacterId: CharacterId,
+  levels: MatchLevels = {},
+): MatchState {
+  const playerLevel = clampLevel(levels.player ?? LEVEL_MIN);
+  const enemyLevel = clampLevel(levels.enemy ?? LEVEL_MIN);
   return {
     phase: 'countdown',
     elapsed: 0,
@@ -83,8 +111,11 @@ export function createMatch(arena: ArenaDefinition, playerCharacterId: Character
     // `maxHpFor` multiplies the ROLE base by the character's own `stats.health`, so
     // `ENEMY_MAX_HP` keeps scaling the whole roster exactly as it did — a per-character
     // pool that replaced the role constant would have taken Uri's difficulty dial away.
-    player: createFighter('player', playerCharacterId, arena.playerSpawn, maxHpFor(playerCharacterId, PLAYER_MAX_HP), PLAYER_SIZE, { x: 1, y: 0 }),
-    enemy: createFighter('enemy', enemyCharacterId, arena.enemySpawn, maxHpFor(enemyCharacterId, ENEMY_MAX_HP), ENEMY_SIZE, { x: -1, y: 0 }),
+    // The level term rides ALONGSIDE the character term inside `maxHpFor`, never instead
+    // of it, so `maxHpFor` stays linear in its `roleBaseHp` at every level — which is what
+    // `sim.test.mjs` §22(b) asserts and what keeps `ENEMY_MAX_HP` a working dial.
+    player: createFighter('player', playerCharacterId, arena.playerSpawn, maxHpFor(playerCharacterId, PLAYER_MAX_HP, playerLevel), PLAYER_SIZE, { x: 1, y: 0 }, playerLevel),
+    enemy: createFighter('enemy', enemyCharacterId, arena.enemySpawn, maxHpFor(enemyCharacterId, ENEMY_MAX_HP, enemyLevel), ENEMY_SIZE, { x: -1, y: 0 }, enemyLevel),
     projectiles: [],
     splats: [],
     trailMarks: [],

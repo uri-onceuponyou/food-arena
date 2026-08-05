@@ -20,7 +20,7 @@
  */
 
 import type { CharacterId, StatusEffect, Weapon } from './rules.ts';
-import { CHARACTERS } from './rules.ts';
+import { CHARACTERS, LEVEL_MIN, clampLevel, levelDamageMultiplier } from './rules.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
 
 export type FighterRole = 'player' | 'enemy';
@@ -40,6 +40,27 @@ export interface StatusTimers {
 export interface Fighter {
   role: FighterRole;
   characterId: CharacterId;
+  /**
+   * This fighter's CHARACTER level, 1-15 (`rules.ts` `LEVEL_MIN`..`LEVEL_MAX`).
+   *
+   * Role-agnostic on purpose: Uri's answer to the enemy-scaling question is *"the game
+   * eventually should be humans vs. humans… AI players need to be adjusted to the
+   * player's level"*, so a bot standing in for a level-8 human carries a level-8 human's
+   * level here and there is no bot-only path anywhere.
+   *
+   * It is stored rather than re-derived because `maxHp` is already baked from it at
+   * spawn: keeping the input next to the output is what lets an instrument assert the
+   * two agree instead of trusting that they do.
+   */
+  level: number;
+  /**
+   * Every point of damage this fighter DEALS is multiplied by this before it lands —
+   * `combat.ts:applyDamage` is the only reader, which is the same single-choke-point
+   * doctrine that file already applies to HP.
+   *
+   * Exactly 1.0 at `LEVEL_MIN`, so a level-1 match is bit-identical to a pre-levels one.
+   */
+  damageMul: number;
   x: number;
   y: number;
   hp: number;
@@ -93,11 +114,15 @@ export function createFighter(
   maxHp: number,
   size: number,
   initialFacing: Vec2,
+  level: number = LEVEL_MIN,
 ): Fighter {
   const weaponCount = CHARACTERS[characterId].weapons.length;
+  const lvl = clampLevel(level);
   return {
     role,
     characterId,
+    level: lvl,
+    damageMul: levelDamageMultiplier(lvl),
     x: spawn.x,
     y: spawn.y,
     hp: maxHp,
