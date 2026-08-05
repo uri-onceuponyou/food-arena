@@ -342,6 +342,29 @@ is worse than both: contamination adds noise and wrong framing adds bias, but **
 harness flips the sign of the answer.** Before trusting any A/B, confirm the harness reproduces
 the *polarity* of the shipped view, not merely its subject.
 
+### A metric can be perfectly TRUE and still tell you nothing
+
+**"AI stalled: 0.0%" was true for months while the AI was permanently deadlocked.**
+
+Measured: with the player motionless on its own spawn, the enemy walked 2,968wu, parked against a
+counter face and **oscillated 38wu for the remaining 25 seconds of every match, in all 11
+characters.** It never registered, because `match-sim.mjs` calls a stall a span under **15wu** —
+and 38 > 15. The metric was not wrong. It was answering a narrower question than the one everyone
+believed it was answering.
+
+The number that *did* expose it was **reachability** — 79.1%, and an idle player reached in
+**0 of 110 matchups**. Two lessons, and the second is the general one:
+
+- **Prefer a metric that asks about the OUTCOME** ("does the AI ever arrive?") over one that asks
+  about a symptom ("is it standing still?"). Symptom metrics have thresholds, and a bug that
+  clears the threshold is invisible.
+- **A healthy dashboard is not evidence of health.** It is evidence that nothing you chose to
+  measure is failing. Before trusting a green metric, ask what it would look like if the thing
+  you actually care about were broken — and if the answer is "the same", it is not a guard.
+
+Same shape as §7's local-optima problem: the elements each scored 5–7 while the whole scored 4.2.
+Every measurement was correct and the conclusion drawn from them was wrong.
+
 **The general form: validate the instrument against a known input before believing it on an
 unknown one.** Two of this project's most expensive detours were instrument faults that no
 number of additional rounds could ever have found — five rounds tuning a low-frequency gradient
