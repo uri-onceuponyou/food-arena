@@ -283,6 +283,18 @@ if (args.selftest) {
   // game and starts firing at every legitimate balance change. `docs/LESSONS.md` §5 —
   // freeze what you are comparing against. Extraction rather than checkout, because a
   // checkout would clobber every peer (and `git stash` is forbidden here).
+  //
+  // ⚠️ AND THE DRIVER IS PART OF THAT SAME BOX — the rule above was stated for the sim
+  // and not extended to the thing PLAYING it, so this check pinned half of what it was
+  // comparing. 2026-08-05, `bestWeapon` gained two fixes (`b137484`, driver rev 3 -> 4:
+  // a heal branch, and `pressValue` replacing the authored-`damage` ranking key). The sim
+  // stayed pinned at 099119a, the driver did not, and the check compared a rev-3
+  // PUBLISHED aggregate against a rev-4 driver: chase read 21.7% against the recorded
+  // 18.8%. It was right to fail and the check was wrong AGAIN, for the same reason one
+  // level out. The reproduction flags exist precisely so every pre-fix figure still
+  // reproduces byte-identically — so the fix is to pin the driver too, not to re-baseline
+  // a published number. **If a future driver rev adds another fault-reproduction flag,
+  // it belongs in this list.**
   if (arena && !args['skip-crosscheck']) {
     const REF = '099119a';
     let dir = null;
@@ -304,7 +316,10 @@ if (args.selftest) {
       // Re-run THIS FILE against the extracted sim, so the cross-check exercises exactly
       // the code path a real measurement takes rather than a second copy of it.
       const out = execFileSync(process.execPath,
-        [new URL(import.meta.url).pathname, '--seeds', '8', '--policies', 'smart2,chase', '--sim', join(dir, 'game')],
+        [new URL(import.meta.url).pathname, '--seeds', '8', '--policies', 'smart2,chase', '--sim', join(dir, 'game'),
+         // Pin the DRIVER to the rev that published 27.2 / 18.8, exactly as `--sim` pins
+         // the sim. Without these the child inherits the working tree's driver.
+         '--no-player-heal', '--damage-ranking-key'],
         { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       const grab = (name) => {
         const m = out.match(new RegExp(`POLICY ${name}[^\n]*aggregate player win (\\d+\\.\\d)%`));

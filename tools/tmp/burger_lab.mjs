@@ -410,11 +410,33 @@ if (args.selftest) {
     const r2 = runMatch('donut', 'hamburger', 'chase', 0);
     ok('an AI-side self-heal is attributed to the WEAPON too',
       r2.side.enemy.healedBySelf > 0, `self=${r2.side.enemy.healedBySelf}`);
-    // THE ONE THAT MATTERS: the shipped measurement policy never presses it.
+    // ── THE ONE THAT MATTERS — AND ITS PREMISE HAS NOW REVERSED ───────────────
+    //
+    // Old wording, kept because it was true for two whole balance passes and is the
+    // reason this file exists: "THE ONE THAT MATTERS: the shipped measurement policy
+    // never presses it." Old assertion:
+    //
+    //     PLAYER_HEALS ? presses > 0 : presses === 0
+    //
+    // That encoded the INSTRUMENT GAP — `bestWeapon` opened `if (w.type === 'self')
+    // return;`, so the scripted player could not press heal and `--player-heals` was a
+    // local wrapper built to measure the counterfactual. `b137484` fixed the driver
+    // itself (rev 3 -> 4), so the shipped policy PRESSES IT NOW and the `=== 0` branch
+    // became false. It was right to fail: the assertion was pinning a bug.
+    //
+    // The wrapper is now REDUNDANT rather than wrong — it still forces a press, but the
+    // driver no longer needs it. So the expectation is driven by whichever mechanism can
+    // heal: burger_lab's own wrapper, OR a driver that is not reproducing the old fault.
+    // Under `--no-player-heal` the old behaviour reproduces exactly, which is what makes
+    // this a re-basing rather than a re-baselining.
     const r3 = runMatch('hamburger', 'donut', 'smart2', 0);
-    ok(`smart2 presses the self weapon ${(r3.side.player.presses.Onion ?? 0) > 0 ? 'YES' : 'NEVER  <-- instrument gap'}`,
-      PLAYER_HEALS ? (r3.side.player.presses.Onion ?? 0) > 0 : (r3.side.player.presses.Onion ?? 0) === 0,
-      `Onion presses = ${r3.side.player.presses.Onion ?? 0}  (--player-heals ${PLAYER_HEALS ? 'ON' : 'off'})`);
+    const canHeal = PLAYER_HEALS || !DRIVER_FLAGS.noPlayerHeal;
+    const presses = r3.side.player.presses.Onion ?? 0;
+    ok(`smart2 presses the self weapon ${presses > 0 ? 'YES' : 'NEVER'}`
+       + (canHeal ? '' : '  <-- reproducing the historical instrument gap, on purpose'),
+      canHeal ? presses > 0 : presses === 0,
+      `Onion presses = ${presses}  (--player-heals ${PLAYER_HEALS ? 'ON' : 'off'}`
+      + `, driver heal ${DRIVER_FLAGS.noPlayerHeal ? 'DISABLED (historical)' : 'enabled'})`);
     // The wrapper must change NOTHING for a character with no `self` weapon: that is what
     // makes a `--player-heals` roster run comparable to one without it everywhere else.
     const a = runMatch('donut', 'sushi', 'smart2', 3);

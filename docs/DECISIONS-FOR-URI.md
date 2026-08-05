@@ -25,6 +25,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **23** | ⚠️ PvP makes `PLAYER_MAX_HP` ≠ `ENEMY_MAX_HP` **unfair by definition** | 100 vs 90 | **your §12 dial has a shelf life** | a roadmap item |
 | **24** | Rarity vs level | — | ✅ **DONE — tier spread 20.7pp → 4.0pp, below the noise floor** | landed |
 | **26** | ⚠️ **Rarity now buys NOTHING and costs 4.5× to level** | genre-faithful default | **needs you — rarity has no job left** | one multiplier, or a kit pass |
+| **28** | 🆕 Hamburger's heal 25 → **18 HP**, after the measuring instrument was fixed | 18 | **measured to ±3 HP; the exact integer is a feel call.** ⚠️ And the constraint has moved off Hamburger onto **Legendary at the bottom** — the next balance pass is a Sushi pass | one constant |
 | **25** | ⚠️ **The 7+ bar is now calibrated** — the critic never scores shipped Brawl Stars above 9 | 7+ | **your bar is sound; the measurements under it were not** | — |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
@@ -1362,3 +1363,54 @@ and it is a look change on a screen three others share. Say the word and it is a
   every frame. That is what makes a rebind live on the next tick with no reload, and `input.ts`'s own
   header anticipated it — but the honest shape is for `input.ts` to own a `setMoveKeys()` and for the
   UI to call it. Worth tidying when that file is next free; nothing depends on it happening.
+
+---
+
+## 28. Hamburger's heal is now 18 HP — the exact integer inside 15–21 is yours
+
+**Assumed: `healAmount: 25 → 18`.** Landed in `80ae0e0`. Nothing is blocked on you; this is a
+"do you like the feel of it" call, and it is the only number in this pass that measurement could
+not settle on its own.
+
+**Why it moved at all.** The instrument that balanced this roster **twice** could not press heal —
+`bestWeapon` opened `if (w.type === 'self') return;`. With that fixed (plus a second, larger fault
+in the same function), Hamburger became the strongest character in the game and the rarity guard
+you settled in §24b/§26 blew from 3.98 pp to 15.94 pp. Dropping the heal to 18 brings it back to
+**8.05 pp**, under the ~9 pp floor, so your "rarity is not power" ruling holds.
+
+**What is measured, and what is not:**
+
+| | |
+|---|---|
+| the **ladder** — 25 → 70.9% strength · 22 → 63.1 · 20 → 60.6 · **18 → 53.4** · 15 → 40.3 | **measured**, monotone, spanning 30.6 pp at **3.06 pp of strength per 1 HP** |
+| 18 is the **argmin of the tier spread** and the only rung clearing the floor | **measured** |
+| 18 vs 20 specifically | **NOT resolved** — 2.8 pp strength / 3.2 pp spread, both inside the ~9 pp floor |
+
+So: **the direction and the magnitude are measured to ±3 HP. The exact integer is not.** If 18 makes
+the heal feel like a non-event when you play it, 20 is free — it costs 3.2 pp of spread and stays
+under the floor. Below 15 the spread gets *worse* again, because Normal then falls past Legendary on
+the other side.
+
+**⚠️ One thing you should know, because it changes what the next balance pass is about.**
+The constraint has **moved off Hamburger**. At 18 the tiers read:
+
+```
+Normal 53.0 · Rare 52.3 · Epic 53.0 · Legendary 45.0 · Neon 49.5 · Cyber 48.7
+```
+
+The 8.05 pp spread is now set by **Legendary at the BOTTOM** — Sushi 43.8%, Water Bottle 46.3% —
+not by anything at the top. **Sushi is the weakest character in every driver variant measured.**
+Every document here frames tier spread as a Hamburger problem; that framing expired the moment the
+driver was fixed. **The next balance pass is a Sushi/Legendary pass, and it has to push Legendary
+UP** — there is no version of pushing Hamburger further down that helps.
+
+**And a second-order note, for whoever runs that pass.** At 18, Hamburger's role split has flipped
+sign and grown: **asPlayer 62.5% / asAI 44.4% = −18.1 pp** (it was −9.4 pp at heal 25, inside the
+floor; the original bug was +50.6 pp the other way). Each half is an aggregate over 10 matchups ×
+32 seeds, so −18.1 pp is **outside** the ~9 pp floor and −9.4 was not. Hamburger is now measurably
+better in your hands than in the AI's — at about a third the magnitude of the split just closed.
+Strength (the role-symmetric mean) sits at the roster mean, so this was not re-opened; it is
+recorded so nobody rediscovers it as a surprise.
+
+**Cost to change:** one constant in `src/game/rules.ts`. Re-run
+`node tools/tmp/roster_lab.mjs --seeds 32` and read tier spread, which binds before win rate does.
