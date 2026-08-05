@@ -7,7 +7,7 @@ time. **Prefer reaching for one of these over inventing a new probe.**
 npm run dev        # http://localhost:5173 — SHARED. Fine for a quick look, never for a number,
                    # and NEVER for actually playing (see below).
 npx tsc --noEmit
-node src/game/sim.test.mjs            # 219
+node src/game/sim.test.mjs            # 253
 node src/game/economy/economy.test.mjs # 220
 ```
 
@@ -314,8 +314,8 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 |---|---|---|
 | `npx tsc --noEmit` | clean | ⚠️ the **working tree**, incl. peers' half-saved files |
 | `node tools/verify-head.mjs` | OK | **the COMMITTED tree** — the only one that matters before a push |
-| `node src/game/sim.test.mjs` | **219** | sim, combat, AI, navigation, status rules |
-| `node src/game/economy/economy.test.mjs` | **173** | economy, seeded and deterministic |
+| `node src/game/sim.test.mjs` | **253** | sim, combat, AI, navigation, status, concealment rules |
+| `node src/game/economy/economy.test.mjs` | **220** | economy, seeded and deterministic |
 | `node tools/aspect.mjs` | PASS, **0.00wu** | viewport fairness — point at a **snapshot** |
 | `tools/tmp/menu_accept.mjs` | **361** | 5 landscape viewports × screens, + the CSS-backtick parse |
 | `tools/tmp/menu_accept_portrait.mjs` | **219** | portrait + the nested-`@media` lint. **Opt-in, not folded in** |

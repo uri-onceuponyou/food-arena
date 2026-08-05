@@ -111,7 +111,7 @@ Not style preferences. Every one exists because breaking it cost hours.
 
 ```bash
 npx tsc --noEmit                          # clean
-node src/game/sim.test.mjs                # 219
+node src/game/sim.test.mjs                # 253
 node src/game/economy/economy.test.mjs    # 220
 node tools/aspect.mjs                     # PASS, 0.00wu — competitive fairness, not a nicety
 node tools/verify-head.mjs                # the committed tree builds
