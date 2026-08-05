@@ -21,9 +21,10 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
 | **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | no concealment | **your call — this is a feature, not an art pass** | new mechanic |
 | **19** | Back out of a live match abandons it silently · mid-match reload restarts it | abandon · restart | **two small feel calls** | one line each |
-| **22** | **Character levels 1–15** | being built | ✅ **ANSWERED — AI scales to the player's level** | in flight |
+| **22** | **Character levels 1–15** | — | ✅ **DONE — shipped, and the flat curve is VERIFIED (1.9pp drift)** | landed |
 | **23** | ⚠️ PvP makes `PLAYER_MAX_HP` ≠ `ENEMY_MAX_HP` **unfair by definition** | 100 vs 90 | **your §12 dial has a shelf life** | a roadmap item |
-| **24** | Rarity vs level | being rebuilt | ✅ **ANSWERED — pure genre pattern: rarity ≠ power at equal level.** Reverses part of §13 | in flight |
+| **24** | Rarity vs level | — | ✅ **DONE — tier spread 20.7pp → 4.0pp, below the noise floor** | landed |
+| **26** | ⚠️ **Rarity now buys NOTHING and costs 4.5× to level** | genre-faithful default | **needs you — rarity has no job left** | one multiplier, or a kit pass |
 | **25** | ⚠️ **The 7+ bar is now calibrated** — the critic never scores shipped Brawl Stars above 9 | 7+ | **your bar is sound; the measurements under it were not** | — |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
@@ -1194,3 +1195,53 @@ as a size correction.**
 against Shelly 0.2% and Barley 0.0%, on exactly the top-facing surfaces a top-down camera sees most
 of. Empty-floor controls read 0.0%, so it is the character. That is the cost of the value pass,
 visible at the pixel — and it is fixable without any critic at all.
+
+
+---
+
+## 26. ⚠️ Rarity now buys nothing, and costs 4.5× to level
+
+This is the direct consequence of *"match how common games do it"*, and it is the one thing from the
+level build that needs you.
+
+**What shipped, and it is genre-faithful:** rarity no longer grants power (tier spread **20.7 pp →
+4.0 pp**, below the ~9 pp noise floor), and instead scales **upgrade cost** 1.0× → 4.5× — Normal
+costs **44,770** coins to max, Cyber **201,460**.
+
+**The problem:** in Clash Royale that cost scaling is a *consequence* of copy scarcity — rare cards
+are hard to *find*, and the cost reflects it. Here there is no scarcity mechanic behind it. So once
+you own a rare character, rarity is a **pure penalty**: same power, 4.5× the price.
+
+**Three ways out:**
+
+| | what rarity would mean | cost |
+|---|---|---|
+| **keep it** | prestige and kit variety only | nothing — already shipped |
+| **flatten the cost** (multiplier → 1.0) | nothing at all, honestly | one constant |
+| **make rarer kits more DISTINCTIVE** ⭐ | rarity buys *character*, not power | a kit pass |
+
+**I would take the third**, and I have started it — it is the only option that gives rarity a job
+worth having, and it does not foreclose either of the others. A rare character that plays *unlike*
+anything else is a genuine reward and is exactly what Brawl Stars sells: its rarest brawlers are not
+stronger, they are **weirder**. It also serves the roster directly — **17 of 110 matchups are still
+decided before they start**, and kit variety is what breaks those.
+
+⚠️ **Note what it must NOT become:** "more distinctive" cannot quietly mean "stronger", or rarity
+becomes power again through the back door and PvP is pay-to-win after all. The measured guard is the
+tier spread staying inside the noise floor.
+
+---
+
+## Also from the level build — three smaller things
+
+**A number I quoted you was wrong by 4.7×.** Every "hours to unlock" figure came from a `const MIN =
+2` literal left over from when a match was 180 s. The full roster was quoted at **~15 hours**; it is
+**394 matches ≈ 2.8 hours**. Pacing assertions are now in *matches*, never hours, with the one
+invented input (10 s of menu time per match) labelled as assumed.
+
+**The shop was promising power that rarity no longer sells** — "with a chance of **better**", including
+in an aria label read to exactly the users who cannot check the visual. Now says "rarer", with a
+statement of what rarity actually buys.
+
+**Coin-bought boxes are strictly dominated** while `ROSTER_GATED` is false — 900 coins returns 138 EV.
+They only become a real coin sink when that flag flips, which is still **§4, and still yours.**
