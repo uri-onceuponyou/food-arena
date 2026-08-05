@@ -22,7 +22,10 @@ import { createMatch, stepMatch } from './sim.ts';
 import { stepAI } from './ai.ts';
 // Section 17 needs the real damage path to prove that taking a hit restarts the
 // out-of-combat delay — modelling `lastDamagedAt` by hand would test the model.
-import { applyDamage, statusReadyAt } from './combat.ts';
+// Section 19 fires Lollipop's slam directly, because the thing under test is that it
+// lands from beyond every other weapon's reach WITHOUT AIM — driving it through a whole
+// match would confound that with whether the driver ever chose it.
+import { applyDamage, attemptAttack, statusReadyAt } from './combat.ts';
 import {
   CHARACTERS, CHARACTER_IDS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, POT, TRAIL,
@@ -1579,6 +1582,218 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     check('with no hazard in reach the AI still walks straight at the player and arrives',
       closest < 30 && drift < 5,
       `closest ${closest.toFixed(1)}wu, worst lateral drift ${drift.toFixed(2)}wu`);
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 19. THE ROSTER — a character that cannot fight is a defect, not spice
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Nothing had ever measured the roster PER CHARACTER. Every instrument on this project
+// reported the aggregate player win rate or a flat matchup map, and both of those are
+// blind to the only question a roster has: is any character out of the game? Measured
+// for the first time on 2026-08-05 (`tools/tmp/roster_table.mjs`, 3,520 matches per
+// policy), the answer was yes, once, and by a mile — Lollipop, LAST of eleven in six
+// independent measurements (two policies x three sims), in BOTH roles.
+//
+// What follows pins the two things that were actually wrong with it, and the ceiling
+// that stops the repair from becoming this project's fourth undodgeable burst.
+{
+  const lolli = CHARACTERS.lollipop;
+  const smash = lolli.weapons.find((w) => w.key === 'Smash');
+  const giant = lolli.weapons.find((w) => w.key === 'Giant');
+
+  /** Damage ONE press delivers. Pellets and combo parts are separate hit events, so the
+   *  per-EVENT damage and the per-PRESS damage are different questions and the two
+   *  assertions below need different ones. */
+  const perPress = (w) => (w.comboParts
+    ? w.comboParts.reduce((a, p) => a + p.damage, 0)
+    : (w.damage ?? 0) * (w.pellets ?? 1) * (w.peckHits ?? 1));
+  /** The largest damage a SINGLE hit event from this weapon can carry. */
+  const perEvent = (w) => (w.comboParts ? Math.max(...w.comboParts.map((p) => p.damage)) : (w.damage ?? 0));
+
+  // ── (a) A SPECIAL MUST BE THE BIGGEST PRESS ITS OWNER HAS ─────────────────
+  //
+  // Two weapons in the roster are flagged as specials rather than attacks — Lollipop's
+  // `giantSlam` and Taco's `comboParts`. Taco's Double Toss obeyed this (23 against 12
+  // and 7). Lollipop's Giant Lollipop did NOT: 10 damage against its own 11 damage
+  // basic swing.
+  //
+  // That is not a small mistuning, because BOTH drivers pick a weapon the same way —
+  // `ai.ts:pickHighestDamageWeapon` and the scripted player's `bestWeapon` each take the
+  // highest `damage` that is off cooldown and in range. A special that is one point
+  // weaker than the swing next to it is therefore NEVER CHOSEN inside melee range by
+  // anybody: an 8 s cooldown ability whose whole design is "grows huge and hits the
+  // whole map" was reduced to a long-range poke, and measured, cutting its cooldown
+  // 8000 -> 5000 made Lollipop WORSE (strength 9.7% -> 8.1%), because more presses of a
+  // below-par weapon is a worse rotation, not a better one.
+  for (const id of CHARACTER_IDS) {
+    const ws = CHARACTERS[id].weapons.filter((w) => w.type !== 'self');
+    const specials = ws.filter((w) => w.giantSlam || w.comboParts);
+    if (!specials.length) continue;
+    const best = Math.max(...ws.map(perPress));
+    for (const sp of specials) {
+      check(`${id}'s special (${sp.name}) is the biggest press it has`,
+        perPress(sp) >= best,
+        `${sp.key} delivers ${perPress(sp)} against a kit maximum of ${best}`);
+    }
+  }
+
+  // ── (b) THE UNDODGEABLE CEILING ───────────────────────────────────────────
+  //
+  // A `giantSlam` has `cone: 360` and resolves ON THE TICK IT IS CAST, from up to
+  // `REACH.ultimateSlam` (400 wu) — 2.0x the radius `render/camera.ts` guarantees is on
+  // screen. It cannot be dodged, aimed away from, or broken line of sight with; it can
+  // only be explained afterwards, which `docs/DECISIONS-FOR-URI.md` §9 has already
+  // parked for a human to judge.
+  //
+  // So its damage is capped by the largest hit the roster can produce that a player CAN
+  // do something about. This project has now had to bound three separate undodgeable
+  // bursts — the Sticky Trail's 87 HP in one tick, the 11.02 s status lock, and the
+  // melee-at-zero-separation rule — and the cheapest place to stop the fourth is here.
+  const dodgeableMax = Math.max(...CHARACTER_IDS.flatMap((id) =>
+    CHARACTERS[id].weapons.filter((w) => w.type !== 'self' && !w.giantSlam).map(perEvent)));
+  for (const id of CHARACTER_IDS) {
+    for (const w of CHARACTERS[id].weapons) {
+      if (!w.giantSlam) continue;
+      check(`${id}'s undodgeable slam stays under the biggest DODGEABLE hit in the roster`,
+        perEvent(w) <= dodgeableMax,
+        `${w.name} ${perEvent(w)} vs dodgeable maximum ${dodgeableMax}`);
+    }
+  }
+
+  // ── (c) THE MELEE-ONLY CHARACTER, AND WHY IT IS ALONE ─────────────────────
+  //
+  // Lollipop is the only fighter in the roster with no `ranged` weapon at all. That is a
+  // legitimate archetype and it is NOT what this ratchet is guarding. What it guards is
+  // the consequence: `ai.ts:pickSniperWeapon` — the ONLY weapon picker the flee branch
+  // can reach — requires `w.type === 'ranged'`, so an AI of a melee-only character
+  // cannot attack at all while it is fleeing (below AI_FLEE_HP_FRACTION of its pool).
+  // Exactly the same shape as the `self`-weapon hole fixed in DEVIATION #7, and it is
+  // still open. One character in that hole is a design choice; two is a pattern nobody
+  // decided on.
+  const meleeOnly = CHARACTER_IDS.filter((id) =>
+    !CHARACTERS[id].weapons.some((w) => w.type === 'ranged'));
+  check('exactly one character has no ranged weapon, and it is Lollipop',
+    meleeOnly.length === 1 && meleeOnly[0] === 'lollipop',
+    `melee-only: [${meleeOnly.join(', ')}] — ai.ts:pickSniperWeapon can return nothing for any of these while fleeing`);
+
+  // ── (d) …SO ITS SWING HAS TO BE THE BEST SWING ────────────────────────────
+  //
+  // Sustained output from a BASIC swing (melee, cooldown <= 1 s — the roster's
+  // press-repeatedly band, as opposed to the 2.2-3.5 s heavy specials). Lollipop's was
+  // the WORST of the three: 11/750 = 14.7 HP/s against Hamburger's 12/650 = 18.5 and Hot
+  // Dog's 11/650 = 16.9 — and Hamburger and Hot Dog each carry two ranged weapons on top
+  // of theirs while Lollipop carries nothing. It was strictly Hot Dog's swing with a
+  // longer cooldown and no rest of the kit, on the character whose own roster card
+  // claims the joint-highest damage in the game.
+  const swings = CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons
+    .filter((w) => w.type === 'melee' && w.cooldown <= 1000)
+    .map((w) => ({ id, key: w.key, dps: (w.damage ?? 0) / w.cooldown })));
+  const lolliSwing = swings.find((s) => s.id === 'lollipop');
+  const bestSwing = swings.reduce((a, b) => (b.dps > a.dps ? b : a));
+  check('the melee-only character has the roster\'s best sustained basic swing',
+    lolliSwing && lolliSwing.dps >= bestSwing.dps,
+    `lollipop ${(lolliSwing.dps * 1000).toFixed(1)} HP/s vs best ${bestSwing.id}/${bestSwing.key} ${(bestSwing.dps * 1000).toFixed(1)} HP/s`);
+
+  // A special that outlasts its own status cannot self-lock (section 17(d)'s property,
+  // restated for the one weapon whose damage just went up).
+  check('the slam cannot hold its own stun up (cooldown > duration + grace)',
+    giant.cooldown > STUN_DURATION_MS + STUN_GRACE_MS,
+    `cd ${giant.cooldown} vs ${STUN_DURATION_MS + STUN_GRACE_MS}`);
+
+  // ── (e) THE CHANGE REACHES THE SIM — through the real combat path ─────────
+  //
+  // (a)-(d) are arithmetic on `rules.ts` and would all still pass if `attemptAttack`
+  // ignored the roster entirely. This drives the real one: Lollipop at melee range
+  // against a full 150 HP pool, immortal so the measurement is a time-to-kill and not a
+  // duel, choosing weapons with the same greedy rule both drivers use.
+  //
+  // Measured: 6.03 s after the change, 8.27 s before it (verified by re-running this
+  // same file against a staged copy of `rules.ts` with the old values). The 7.5 s bound
+  // is between the two — it is not a design target, it is a value only one side of the
+  // change can reach, which is the whole point of asserting it.
+  {
+    const arena = makeArena({ width: 2000, height: 2000, maxSafeRadius: 100000 });
+    const state = playingMatch(arena, 'lollipop', 'donut');
+    const ws = CHARACTERS.lollipop.weapons;
+    let killedAt = null;
+    for (let t = 0; t < 30000 && state.phase !== 'ended'; t += 16.667) {
+      state.player.x = 980; state.player.y = 1000;
+      state.enemy.x = 1020; state.enemy.y = 1000;
+      state.player.hp = 1e9; state.player.maxHp = 1e9; // measure a TTK, not a duel
+      let slot = 0, bestDmg = -Infinity;
+      ws.forEach((w, i) => {
+        if (w.type === 'self') return;
+        if (state.elapsed - state.player.lastUsed[i] < w.cooldown) return;
+        if (40 > (w.range ?? Infinity)) return;
+        if ((w.damage ?? 0) > bestDmg) { bestDmg = w.damage ?? 0; slot = i; }
+      });
+      const evs = stepMatch(state, 16.667, {
+        move: { x: 0, y: 0 }, aim: { x: 1, y: 0 }, selectedWeapon: slot, attack: true,
+      });
+      for (const ev of evs) {
+        if (ev.type === 'death' && ev.fighterRole === 'enemy' && killedAt === null) killedAt = state.elapsed;
+      }
+    }
+    check('Lollipop removes a full 150 HP pool at melee range inside 7.5 s',
+      killedAt !== null && killedAt < 7500,
+      `killed at ${killedAt === null ? 'never' : `${(killedAt / 1000).toFixed(2)}s`} (was 8.27s at Smash 11 / Giant 10)`);
+  }
+
+  // ── (f) THE SLAM IS STILL THE SLAM ────────────────────────────────────────
+  //
+  // Raising its damage must not have quietly turned it into an ordinary swing: it still
+  // has to land from beyond every other weapon's reach, with no aim, and still stun.
+  {
+    const arena = makeArena({ width: 2000, height: 2000, maxSafeRadius: 100000 });
+    const state = playingMatch(arena, 'lollipop', 'donut');
+    const giantIdx = CHARACTERS.lollipop.weapons.findIndex((w) => w.key === 'Giant');
+    const otherReach = Math.max(...CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons
+      .filter((w) => !w.giantSlam).map((w) => w.range ?? 0)));
+    state.player.x = 1000; state.player.y = 1000;
+    state.enemy.x = 1000 + otherReach + 100; state.enemy.y = 1000;
+    state.player.facing = { x: -1, y: 0 }; // pointing AWAY: a 360-degree cone needs no bearing
+    const hp0 = state.enemy.hp;
+    const evs = [];
+    attemptAttack(state, 'player', giantIdx, evs);
+    check('the slam lands beyond every other weapon\'s reach, unaimed, and stuns',
+      state.enemy.hp === hp0 - giant.damage && state.enemy.status.stunnedUntil > state.elapsed,
+      `dealt ${hp0 - state.enemy.hp} at ${otherReach + 100}wu (next-longest reach ${otherReach}wu), stunned=${state.enemy.status.stunnedUntil > state.elapsed}`);
+  }
+
+  // ── (g) A STUN IS A MOVEMENT LOCK, NOT A SILENCE ──────────────────────────
+  //
+  // `rules.ts` states the rule in one line: "stunned = movement locked to 0". `sim.ts`
+  // implements exactly that — `movePlayer` reads `stunnedUntil` and `attemptAttack` is
+  // called unconditionally, so a stunned player is rooted and keeps shooting.
+  //
+  // ⚠️ `ai.ts:stepAI` does NOT: it gates `chosenIndex` on `aiFrozen`, so a stunned AI is
+  // rooted AND silenced. Measured (`tools/tmp/stun_symmetry.mjs`): over one full 2000 ms
+  // stun, with both fighters pinned in range, a stunned player fires 100% of its shots
+  // and a stunned AI fires 0% — 11 of 11 characters, in that direction, every time.
+  // Priced on a staged sim (`tools/tmp/roster_table.mjs --sim`): removing the asymmetry
+  // costs the player 9.5 pp of aggregate win rate under `smart2` and moves individual
+  // matchups by up to 84.4 pp. It is NOT fixed here — `ai.ts` is not this owner's file
+  // and a 9.5 pp swing is a declared difficulty change, which `DECISIONS §12` reserves.
+  // This check asserts the side that matches the documented rule, so that whichever way
+  // the divergence is resolved it has to be resolved deliberately.
+  {
+    const arena = makeArena({ width: 2000, height: 2000, maxSafeRadius: 100000 });
+    const state = playingMatch(arena, 'hamburger', 'donut');
+    const smashIdx = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
+    state.player.x = 1000; state.player.y = 1000;
+    state.enemy.x = 1000 + SMASH_IN_RANGE; state.enemy.y = 1000;
+    state.player.status.stunnedUntil = state.elapsed + STUN_DURATION_MS;
+    const x0 = state.player.x;
+    const evs = stepMatch(state, 16.667, {
+      move: { x: 1, y: 0 }, aim: { x: 1, y: 0 }, selectedWeapon: smashIdx, attack: true,
+    });
+    const fired = evs.some((e) => e.type === 'weapon-fired' && e.fighterRole === 'player');
+    check('a stunned PLAYER is rooted but not silenced — the rule is a movement lock',
+      fired && state.player.x === x0,
+      `fired=${fired}, moved ${(state.player.x - x0).toFixed(3)}wu`);
   }
 }
 

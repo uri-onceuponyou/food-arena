@@ -863,7 +863,171 @@ export const RARITY_CARD_COLORS: Record<Rarity, string> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The roster — 11 characters, frozen
+// The roster — 11 characters
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── AUTHORISED DEVIATION #8 (2026-08-05): LOLLIPOP ──────────────────────────
+//
+// THE ROSTER HAD NEVER BEEN MEASURED PER CHARACTER. Every instrument on this
+// project reports the AGGREGATE player win rate or a flat 110-entry matchup map,
+// and neither can answer the only question a roster has: is any character out of
+// the game? `tools/tmp/roster_table.mjs` was built to ask it — 110 matchups x 32
+// seeds per policy (3,520 matches a row), reporting each character's win rate in
+// the PLAYER's hands and in the AI's, because the two are the same matches read
+// from opposite ends and a character that is simply good moves both.
+//
+// One character was out of the game, and only one:
+//
+//   strength = (win rate in player hands + win rate in AI hands) / 2, shipped tree
+//
+//     hamburger 86.6  waterbottle 75.5  burrito 69.1  taco  66.3  sushi 62.2
+//     donut     54.1  pizza       38.6  egg     37.8  hotdog 34.8  soup  16.3
+//     LOLLIPOP   8.9   <- last, by 7.4 pp, under `smart2`
+//
+// and it is not a policy artefact. Lollipop is LAST OF ELEVEN in six independent
+// measurements — `smart2` and `chase`, against the shipped sim, against the
+// PRE-status-lock sim (`eaede1d`), and against a staged sim with the AI stun
+// asymmetry removed. Under `chase` it lost 10 of its 10 matchups at <= 3%. The
+// cleanest evidence that it is the KIT and not the driver is the AI column: all
+// eleven characters share one driver (`ai.ts`), and in AI hands Lollipop wins
+// 10.6% against a next-worst of 20.9%.
+//
+// ── The two things that were actually wrong ─────────────────────────────────
+//
+// 1. ITS SPECIAL WAS WEAKER THAN ITS OWN BASIC ATTACK. Giant Lollipop dealt 10
+//    against Lollipop Smash's 11 — the only special in the roster with that
+//    property (Taco's Double Toss delivers 23 against 12 and 7). BOTH drivers
+//    pick a weapon the same way: `ai.ts:pickHighestDamageWeapon` and the scripted
+//    player's `bestWeapon` each take the highest `damage` that is ready and in
+//    range. So an 8 s cooldown ability whose whole design is "grows huge and hits
+//    the whole map" was NEVER CHOSEN inside melee range, by anybody. Measured, and
+//    this is the part that proves the mechanism rather than asserting it: cutting
+//    its cooldown 8000 -> 5000 made Lollipop WORSE (8.9% -> 8.1%), because more
+//    presses of a below-par weapon is a worse rotation, not a better one.
+//
+// 2. THE ONLY CHARACTER WITH NO RANGED WEAPON HAD THE ROSTER'S WORST SWING.
+//    Sustained output from a basic swing (melee, cooldown <= 1 s):
+//
+//      hamburger Patty Smash   12 / 650 ms = 18.5 HP/s   + 2 ranged + a 25 HP heal
+//      hotdog    Bun Slash     11 / 650 ms = 16.9 HP/s   + 2 ranged
+//      lollipop  Lollipop Smash 11 / 750 ms = 14.7 HP/s   + nothing
+//
+//    Lollipop was strictly Hot Dog's swing with a longer cooldown and none of the
+//    rest of the kit — on the character whose own roster card claims the
+//    joint-highest damage in the game (8) and whose rarity is the rarest tier.
+//    Consequence, measured: 5.9 weapon presses per match against Pizza's 28.8 and
+//    Burrito's 20.9, and 63.4 HP of damage dealt per match against a roster median
+//    of 141.9.
+//
+// ── How 16 and 17 were chosen ───────────────────────────────────────────────
+//
+// Swept on staged copies of this file (`tools/tmp/stage_weapon.mjs` +
+// `tools/tmp/roster_sweep.mjs`), shipped arena, 110 matchups x 32 seeds, both
+// `smart2` and `chase`. Single levers first, then packages:
+//
+//   candidate                    lollipop strength   roster RANGE   agg. win
+//                                smart2 / chase      smart2/chase   smart2
+//   shipped                        8.9  /  9.5       77.7 / 57.0     53.4%
+//   Smash range 70 -> 84           11.6 / —          73.8 / —        52.6%   (+1.9: reach is not the constraint)
+//   Giant cooldown 8000 -> 5000     8.1 / —          76.9 / —        53.5%   (WORSE — see mechanism 1)
+//   Smash effect -> 'slow'          5.3 / —          80.0 / —        53.7%   (WORSE)
+//   Smash 15 · Giant 16            25.9 / 26.9       73.9 / 38.8     51.2%
+// >>Smash 16 · Giant 17            27.0 / 28.3       74.1 / 37.3     51.2%
+//   Smash 15/700ms · Giant 16      28.9 / 29.1       73.9 / 36.6     50.7%
+//   Smash 18 · Giant 19            35.5 / 35.8       76.1 / 29.7     50.8%   (REFUSED — see ceiling below)
+//
+// Three constraints decided it, in this order:
+//
+//  1. THE SWING HAS TO BE THE BEST SWING, BECAUSE IT IS ALL SHE HAS. 16 is the
+//     roster's heavy-melee damage number (Egg's Tackle and Soup's Dump are both
+//     16) delivered on a basic-swing cooldown: 21.3 HP/s, +15% on Hamburger's
+//     18.5 and the roster's best. That margin is the compensation for carrying no
+//     ranged option at all, and it is a margin rather than a blowout — Smash 18
+//     would be 24.0 HP/s, +30%.
+//  2. THE SPECIAL MUST BE THE BIGGEST PRESS IN ITS OWN KIT. That forces
+//     Giant > Smash, so Giant >= 17.
+//  3. AN UNDODGEABLE HIT MAY NOT EXCEED THE BIGGEST DODGEABLE ONE. A `giantSlam`
+//     has `cone: 360` and resolves ON THE TICK IT IS CAST, from up to
+//     `REACH.ultimateSlam` (400 wu) = 2.0x the radius `render/camera.ts`
+//     guarantees is on screen. It cannot be dodged, aimed away from, or broken
+//     line of sight with (`docs/DECISIONS-FOR-URI.md` §9 has already parked its
+//     missing wind-up for a human to judge, and this change RAISES the stake on
+//     that question). So it is capped by the largest single hit the roster can
+//     produce that a player CAN do something about — Water Bottle's Mega Splash,
+//     18. That caps Smash at 17 and kills the 18/19 row outright. 2 and 3
+//     together pin Giant to exactly 17 once Smash is 16; it is not a taste pick.
+//
+// This project has had to bound three undodgeable bursts already (the Sticky
+// Trail's 87 HP in one tick, the 11.02 s status lock, melee at zero separation).
+// `sim.test.mjs` section 19 asserts constraints 1, 2 and 3 so the fourth cannot
+// arrive by a damage tweak.
+//
+// ── WHAT IT DELIVERS, AND WHAT IT COSTS ─────────────────────────────────────
+//
+//                                          smart2            chase
+//   Lollipop strength                   8.9 -> 27.0%      9.5 -> 28.3%
+//   Lollipop in AI hands               10.6 -> 40.9%     18.8 -> 54.4%
+//   Lollipop in player hands            7.2 -> 13.1%      0.3 ->  2.2%
+//   opponents beating AI-Lollipop >=95%   5/10 -> 2/10      2/10 -> 0/10
+//   roster RANGE (max-min strength)    77.7 -> 74.1pp    57.0 -> 37.3pp
+//   roster sd                          23.6 -> 22.2pp    14.7 -> 10.6pp
+//   aggregate player win rate          53.4 -> 51.2%     16.8 -> 13.8%
+//
+// THE CHANGE IS SURGICAL, and this is the number that shows it rather than the
+// per-character deltas: PAIRED against the same seeds, same arena, same matchups,
+// **14 of 110 matchups moved under `smart2` and 11 of 110 under `chase`, and every
+// single one of them has Lollipop on one side.** No matchup between two other
+// characters changed at all. The strength shifts the table shows for Donut (-3.4),
+// Egg (-4.5), Soup (-3.8) and Hot Dog (-2.8) are ENTIRELY their own Lollipop
+// matchups being averaged back in — Lollipop is 1 of the 10 opponents in each of
+// their two role columns, so a +18 pp move in the target arithmetically moves every
+// other character by ~2 pp and there is no way to buff anybody without it.
+//
+// ⚠️ THE AGGREGATE MOVED 2.2 pp AND THAT IS DECLARED, NOT SMUGGLED. It is well
+// inside the ~9 pp band this project treats as unresolvable for an aggregate, and
+// it is the arithmetic of a symmetric character change: buffing a character makes
+// the player stronger in 10 of 110 matchups and the AI stronger in 10 others, and
+// the AI's 150 HP pool converts extra damage slightly better than the player's 100,
+// so the residual is negative. `ENEMY_MAX_HP` is the difficulty dial and is
+// UNTOUCHED — it is parked for Uri in `DECISIONS §12`.
+//
+// ⚠️ AND THE PLAYER-SIDE HALF OF LOLLIPOP IS NOT FIXED, because it cannot be from
+// this file. Player-Lollipop went 7.2% -> 13.1% for a 45% damage increase, and
+// still loses 8 of its 10 matchups at <=5%. Its problem in the player's hands is
+// not output, it is CROSSING 1,080 wu WITH 100 HP TO REACH 70 wu: it absorbs
+// 102.4 HP of weapon damage per match against a 100 HP pool (only Soup, at 102.6,
+// takes more, and Soup is the other bottom-of-roster character). The lever would be
+// per-character health or movement speed — and `CharacterDef.stats` is
+// display-only ("Not used in combat math"), so no such lever exists. Every
+// character in this game has identical HP and identical speed; the only exception
+// in the whole roster is Donut's `TRAIL.speedBoost`. See the report.
+//
+// ── WHAT WAS DELIBERATELY LEFT ALONE ────────────────────────────────────────
+//
+// Nine of eleven characters were measured and not touched. The two that look like
+// outliers and are not this file's problem:
+//
+//   * PIZZA, the character `07a4e3a` named as the exposed question. It splits
+//     66.9% in the player's hands against 10.3% in the AI's — the widest role gap
+//     in the roster — and the cause is NOT its kit. `sim.ts` implements this
+//     file's stun rule as written ("stunned = movement locked to 0"): a stunned
+//     player is rooted and keeps shooting. `ai.ts:stepAI` gates its weapon choice
+//     on `aiFrozen`, so a stunned AI is rooted AND SILENCED. Measured over one
+//     full 2000 ms stun with both fighters pinned in range
+//     (`tools/tmp/stun_symmetry.mjs`): the stunned player fires 100% of its shots
+//     and the stunned AI fires 0%, for 11 of 11 characters. Pizza applies the most
+//     status in the roster (3.61 stuns + 3.23 slows a match), so it is the
+//     character that asymmetry flatters most. Priced on a staged sim: removing it
+//     costs the player 9.5 pp of aggregate win rate and moves single matchups by
+//     up to 84.4 pp — and it makes Pizza WORSE (38.6 -> 27.5), which is exactly why
+//     retuning Pizza here would have been tuning around a driver bug.
+//   * HAMBURGER, the top outlier at 86.6% and first in every measurement. There is
+//     no mistuned number to point at: it has the roster's highest kit DPS (34.5
+//     HP/s), the joint-longest reach, both status effects, and the only heal. It is
+//     the best kit, and it is the Normal-tier starter. That is a design question
+//     (should the free starter be the strongest?), not a defect, and it goes to Uri
+//     with the rarity roll-up in the report.
+//
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const CHARACTERS: Record<CharacterId, CharacterDef> = {
@@ -973,8 +1137,10 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     stats: { damage: 8, health: 5, speed: 6 }, hasTrail: false,
     face: 'Eyes on the stick, mouth on the candy. Concentric red/white swirl disc.',
     weapons: [
-      { key: 'Smash', name: 'Lollipop Smash', type: 'melee', range: REACH.meleeStrong, damage: 11, cooldown: 750, cone: 80, color: '#E63946', effect: null, emoji: '🔨' },
-      { key: 'Giant', name: 'Giant Lollipop', type: 'melee', range: REACH.ultimateSlam, damage: 10, cooldown: 8000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
+      // ── AUTHORISED DEVIATION #8 (2026-08-05): LOLLIPOP — see the block above
+      //    `CHARACTERS` for the full measurement. damage 11 -> 16 and 10 -> 17.
+      { key: 'Smash', name: 'Lollipop Smash', type: 'melee', range: REACH.meleeStrong, damage: 16, cooldown: 750, cone: 80, color: '#E63946', effect: null, emoji: '🔨' },
+      { key: 'Giant', name: 'Giant Lollipop', type: 'melee', range: REACH.ultimateSlam, damage: 17, cooldown: 8000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
     ],
     abilities: [
       { emoji: '🔨', name: 'Lollipop Smash', desc: 'Swings herself like a hammer for heavy damage' },
