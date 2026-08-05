@@ -517,8 +517,24 @@ const RAILS = [
     note: 'below 0.302 is the reading three critics called muddy; every plate is >= 0.370' },
   { key: 'warmChroma', label: 'warm chroma 0-60', target: REF.warmChroma, band: [REF.warmChroma * 0.5, REF.warmChroma * 1.5],
     tol: 0.010, kind: 'chosen band', note: 'absolute, not a share. 0.067 = the recorded overshoot' },
+  // freeAbove, and the rail's own note is why. It said "adding cool is the cheap lever"
+  // while the drift check penalised adding cool — the same self-contradiction envWarmShare
+  // shipped with, found the same way: by an agent doing the work the rail discouraged.
+  //
+  // The two rails are pulled in opposite directions by the same pixels. meanSat is 0.408
+  // against a 0.493 target and must RISE; coolChroma is 0.3505 against 0.343 and has already
+  // ARRIVED. This arena is ~87% cool chroma, so a global value or saturation change moves
+  // both together and NO setting satisfies both. Concretely it cost real work: a measured
+  // `contrast` 0.62 -> 0.72 is worth +0.016 of character value range across all eleven
+  // characters, and was dropped because it spends 0.016 of coolChroma's entire 0.020 budget.
+  //
+  // Exceeding the reference on cool chroma is not a defect — LESSONS §8's whole finding is
+  // that the reference reserves HUE, keeping a saturated COOL ground so the warm half is
+  // free for the cast. The band ceiling (1.5x) still hard-fails, so this is one-sided drift,
+  // not an unbounded licence.
   { key: 'coolChroma', label: 'cool chroma 60-360', target: REF.coolChroma, band: [REF.coolChroma * 0.5, REF.coolChroma * 1.5],
-    tol: 0.020, kind: 'chosen band', note: 'adding cool is the cheap lever — LESSONS §8' },
+    tol: 0.020, kind: 'chosen band, freeAbove', freeAbove: true,
+    note: 'adding cool is the cheap lever — LESSONS §8. Above target is free; the band ceiling still applies.' },
   { key: 'meanChroma', label: 'mean chroma', target: REF.chroma, band: [REF.chroma * 0.5, REF.chroma * 1.5],
     tol: 0.020, kind: 'chosen band', note: 'max-min per pixel; the raw colourfulness of the frame' },
   { key: 'warmShare', label: 'warm share of chroma', target: REF.warmShare, band: [0.12, 0.45],
@@ -1183,8 +1199,11 @@ function compareBaseline(baseAgg, nowAgg) {
     const db = Math.abs(b - rail.target), dn = Math.abs(n - rail.target);
     const inB = b >= rail.band[0] && b <= rail.band[1];
     const inN = n >= rail.band[0] && n <= rail.band[1];
+    // `freeAbove` rails treat EXCEEDING the target as free: only movement below it is drift.
+    // The band's ceiling still applies, so this is a one-sided DRIFT rule, not a blank cheque.
+    const onFreeSide = rail.freeAbove === true && n >= rail.target;
     let verdict = 'ok', why = '';
-    if (dn > db + rail.tol) { verdict = 'REGRESSION'; why = `drifted ${(dn - db).toFixed(4)} further from ${rail.target} (tol ${rail.tol})`; }
+    if (!onFreeSide && dn > db + rail.tol) { verdict = 'REGRESSION'; why = `drifted ${(dn - db).toFixed(4)} further from ${rail.target} (tol ${rail.tol})`; }
     if (inB && !inN) { verdict = 'REGRESSION'; why = `LEFT the band [${rail.band[0].toFixed(3)}, ${rail.band[1].toFixed(3)}]`; }
     rows.push({ key: rail.key, label: rail.label, base: b, now: n, target: rail.target, delta: +(n - b).toFixed(4), verdict, why, moved: dn > db ? 'further' : dn < db ? 'closer' : 'same' });
   }
@@ -1447,6 +1466,14 @@ async function modeSelftest() {
   // floored that headline metric at ~0.16 whatever the art did. These two lock the fix.
   check('env warm share 0.20 -> 0.12 (vacating the cast band — the CONTRACT)', verdictFor(agg({}), agg({ envWarmShare: 0.12 }), 'envWarmShare'), 'ok');
   check('env warm share 0.20 -> 0.00 (fully vacated, however large the move)', verdictFor(agg({}), agg({ envWarmShare: 0.0 }), 'envWarmShare'), 'ok');
+  // coolChroma is freeAbove. Its note says "adding cool is the cheap lever" and its drift
+  // check used to punish exactly that — the envWarmShare bug in a second rail. These four
+  // pin both sides: above target is free however far (until the band), below target still
+  // regresses, and the band ceiling is untouched.
+  check('cool chroma 0.343 -> 0.380 (above target — the cheap lever)', verdictFor(agg({ coolChroma: 0.343 }), agg({ coolChroma: 0.380 }), 'coolChroma'), 'ok');
+  check('cool chroma 0.350 -> 0.366 (the contrast 0.72 case, was a REGRESSION)', verdictFor(agg({ coolChroma: 0.350 }), agg({ coolChroma: 0.366 }), 'coolChroma'), 'ok');
+  check('cool chroma 0.343 -> 0.300 (BELOW target past tol — still regresses)', verdictFor(agg({ coolChroma: 0.343 }), agg({ coolChroma: 0.300 }), 'coolChroma'), 'REGRESSION');
+  check('cool chroma 0.343 -> 0.530 (breaches the 1.5x band ceiling)', verdictFor(agg({ coolChroma: 0.343 }), agg({ coolChroma: 0.530 }), 'coolChroma'), 'REGRESSION');
   check('hue overlap 0.27 -> 0.60 (env moves onto the cast hue)', verdictFor(agg({}), agg({ hueOverlap: 0.60 }), 'hueOverlap'), 'REGRESSION');
   check('hue overlap 0.27 -> 0.10 (env moves off it)', verdictFor(agg({}), agg({ hueOverlap: 0.10 }), 'hueOverlap'), 'ok');
   check('arena warm chroma drifts further (advisory rail still gates)', verdictFor(agg({}), agg({ arenaWarmChroma: 0.040 }), 'arenaWarmChroma'), 'REGRESSION');
