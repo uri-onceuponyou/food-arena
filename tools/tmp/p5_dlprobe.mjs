@@ -157,7 +157,7 @@ if (process.argv.includes('--live')) {
   console.log('   Every character below reproduced its recorded contact counts EXACTLY or was refused.\n');
   console.log('char          pairs  weakB%  weakBc%  flips   the pair that dominates weakB%');
 
-  let totalPairs = 0, totalFlips = 0, refused = 0, maxP50 = 0, maxP50At = null, p50Total = 0;
+  let totalPairs = 0, totalFlips = 0, refused = 0, maxP50 = 0, maxP50At = null, p50Total = 0, uniN = 0, uniWorst = 0, uniAt = null;
   for (const id of Object.keys(J)) {
     if (id === '__meta') continue;
     const c = J[id] && J[id].ss;
@@ -230,6 +230,28 @@ if (process.argv.includes('--live')) {
       if (d > p50Worst) { p50Worst = d; p50At = nm; }
     });
 
+    // ── THE ACCEPTANCE TEST, defined before round 1 ──────────────────────────
+    // Where BOTH parts are near-uniform, dL and dLcontact are the same quantity by
+    // construction and must agree. A disagreement there is an implementation fault, not a
+    // finding — which is the only thing that separates "the metric changed the answer"
+    // from "the metric is broken". `valuescan --mode gate` prints the same check.
+    //
+    // ⚠️ 0.05, NOT the 0.15 this was specified with. A part whose p10-p90 spans 0.15 can
+    // legitimately have its contact band 0.15 from its median, so "spread < 0.15 must
+    // agree within 0.02" demands 0.02 from a shape that permits 0.15. As specified it
+    // selected 2 pairs and "failed" at 0.1190 on hamburger kneeL|footL (spreads 0.141 /
+    // 0.136) — the TEST was wrong, not the metric. At 0.05 nothing on this cast qualifies,
+    // because the narrowest pair anywhere is 0.119, and that is the point: no part of any
+    // character is uniform, so the whole-part median is the wrong statistic for EVERY pair.
+    for (const p of c.adjacent) {
+      const sp = (q) => { const r = c.parts.find((z) => z.part === q); return r && r.p90 != null ? r.p90 - r.p10 : null; };
+      const sa = sp(p.a), sb = sp(p.b);
+      if (sa == null || sb == null || sa >= 0.05 || sb >= 0.05) continue;
+      uniN++;
+      const d = Math.abs(p.dL - recBy.get(`${p.a}|${p.b}`).dLcontact);
+      if (d > uniWorst) { uniWorst = d; uniAt = `${id} ${p.a}|${p.b} (spreads ${sa.toFixed(3)}/${sb.toFixed(3)})`; }
+    }
+
     const tot = c.adjacent.reduce((s, p) => s + p.contacts, 0);
     const weakB = tot ? (100 * c.adjacent.filter((p) => p.dL < 0.10).reduce((s, p) => s + p.contacts, 0)) / tot : 0;
     const weakBc = tot ? (100 * c.adjacent.filter((p) => recBy.get(`${p.a}|${p.b}`).dLcontact < 0.10)
@@ -253,6 +275,13 @@ if (process.argv.includes('--live')) {
   console.log(`two medians must agree — the worst |recovered p50 - recorded p50| is ${maxP50.toFixed(4)} at ${maxP50At}.`);
   console.log('The 8-bit quantisation floor of value.png is 0.0039. A luma read off the wrong channel or');
   console.log('an unscaled PNG would put this in the tenths.');
+  console.log(`\nCONSTRUCTION CHECK: ${uniN} pairs where BOTH parts are near-uniform (p90-p10 < 0.05) — the`);
+  console.log('case where dL and dLcontact are the SAME quantity by construction and must agree.');
+  if (uniN) console.log(`Worst |dL - dLcontact| = ${uniWorst.toFixed(4)} at ${uniAt}.`);
+  console.log(uniN === 0
+    ? 'n=0 is EXPECTED here and is itself the finding: the narrowest pair on the whole cast spreads\n0.119, so no part is uniform and the whole-part median is the wrong statistic for EVERY pair.\nThe agreement is proved synthetically instead — valuescan --selftest section L3.'
+    : (uniWorst <= 0.02 ? 'Within 0.02: the new quantity is not simply a different number.'
+      : '⚠️ OVER 0.02 — an IMPLEMENTATION FAULT in dLcontact, not a finding about the cast.'));
 }
 
 process.exit(fail ? 1 : 0);

@@ -400,6 +400,15 @@ is provable) · `status_{census,grace_sweep,ab_report}.mjs` · `rules_census.mjs
     **Steer on the per-pair `dLcontact`** (floor **0.0039**, the 8-bit quantisation of `value.png`),
     not on either aggregate. ⚠️ And the **15% cap was calibrated on the `dL` distribution** — it does
     **not** transfer to `weakBoundaryPctContact`, which is printed alongside for comparison only.
+  - **And it is the wrong statistic for EVERY pair, not merely some.** Measured on HEAD: the
+    narrowest adjacency pair on the entire cast has a p10–p90 spread of **0.119** (sushi
+    `hipL|kneeL`); **not one part of any character is near-uniform**, which is exactly the condition
+    under which a whole-part median stands in for a boundary. The gate's CONSTRUCTION CHECK
+    therefore reports **n=0 / UNTESTED** on live data by design, and the agreement between the two
+    is proved synthetically instead, in `--selftest` §L3 where uniformity is true by construction.
+    ⚠️ That check was nearly shipped at **spread < 0.15 → agree within 0.02**, which is internally
+    inconsistent — a 0.15 spread *permits* a 0.15 contact difference — and it "failed" at 0.1190 on
+    hamburger `kneeL|footL` (spreads 0.141/0.136). **The test was wrong, not the metric.**
 - **`limbcheck` measures the preview's 22°; the match camera is 58°.** At 58°, idle passes go
   **8/11 → 0/11**. Idle *ranking* survives (ρ 0.927); **run ranking does not** (ρ 0.673). And the
   shipped spawn faces every character at **profile to camera**, burying 5.3 of ~15 joints against

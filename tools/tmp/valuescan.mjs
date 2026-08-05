@@ -1744,10 +1744,17 @@ async function modeGate() {
   // The station COVERAGE, not just the table. `--mode dl --only <a,b>` writes a
   // perfectly well-formed dl.json holding four of eighteen stations, and the gate then
   // printed `dlBelow10` as "(of 18)" while counting over four.
-  const covered = new Set(dl.filter((r) => !r.error).map((r) => r.station));
-  const missingStations = STATIONS.filter((s) => !covered.has(s.id)).map((s) => s.id);
+  const present = new Set(dl.filter((r) => !r.error).map((r) => r.station));
+  // Counted against the TABLE, not against itself. It used to be `present.size`, which is
+  // the number of distinct station names in the file whether or not they are stations —
+  // so a file naming ten stations that do not exist printed "covers 18 of 18 stations —
+  // missing pantry_ne, ...", a sentence that contradicts itself in the same breath.
+  const missingStations = STATIONS.filter((s) => !present.has(s.id)).map((s) => s.id);
+  const unknownStations = [...present].filter((s) => !STATIONS.some((t) => t.id === s));
   if (missingStations.length) {
-    refusals.push(`dl.json covers ${covered.size} of ${STATIONS.length} stations — missing ${missingStations.join(', ')}.`
+    refusals.push(`dl.json covers ${STATIONS.length - missingStations.length} of ${STATIONS.length} stations`
+      + ` — missing ${missingStations.join(', ')}.`
+      + (unknownStations.length ? ` It also names ${unknownStations.length} station(s) that are NOT in the table (${unknownStations.join(', ')}), so it was measured against a different station list.` : '')
       + ' `dlBelow10` is a COUNT out of 18 and cannot be computed from a subset.');
   }
 
@@ -1808,14 +1815,30 @@ async function modeGate() {
     const weakPctC = haveC.length && tot
       ? (100 * haveC.filter((p) => p.dLcontact < 0.10).reduce((s, p) => s + p.contacts, 0)) / tot : null;
     const flips = haveC.filter((p) => (p.dL < 0.10) !== (p.dLcontact < 0.10)).length;
-    // THE CONSTRUCTION CHECK, on live data: where both parts ARE roughly uniform the two
-    // quantities are the same thing and must agree. A disagreement there is an
-    // implementation fault, not a finding — which is the only way to tell the two apart.
+    // ── THE CONSTRUCTION CHECK, and the threshold it was nearly shipped with ──
+    // Where both parts ARE near-uniform the two quantities are the same thing and must
+    // agree; a disagreement there is an implementation fault, not a finding, and that is
+    // the only thing separating "the metric changed the answer" from "the metric broke".
+    //
+    // ⚠️ The threshold was specified as spread < 0.15 / agree within 0.02, AND THAT PAIR
+    // IS INTERNALLY INCONSISTENT. p10-p90 = 0.15 means the middle 80% of the part spans
+    // 0.15 of luma, so its contact band can legitimately sit 0.15 away from its median —
+    // the test would demand 0.02 of agreement from a shape that permits 0.15. Run as
+    // specified on HEAD it selected 2 pairs and "failed" at 0.1190 on hamburger
+    // kneeL|footL, whose parts spread 0.141 and 0.136. That was the TEST being wrong.
+    //
+    // 0.05 is a part that is actually near-uniform. MEASURED on HEAD: the narrowest pair
+    // on the entire cast is 0.119 (sushi hipL|kneeL), so NOTHING qualifies and this check
+    // correctly reports n=0 / UNTESTED rather than a number. That is itself the finding —
+    // every part of every character spans at least 0.119 across its middle 80%, so the
+    // whole-part median is the wrong statistic for EVERY pair, not merely for some. The
+    // agreement itself is proved synthetically instead, in `--selftest` section L3, where
+    // uniformity is true by construction and the two agree exactly.
     const byName = Object.fromEntries(((c.ss && c.ss.parts) || []).map((p) => [p.part, p]));
     for (const p of haveC) {
       const sp = (q) => (byName[q] && byName[q].p90 != null && byName[q].p10 != null ? byName[q].p90 - byName[q].p10 : null);
       const sa = sp(p.a), sb = sp(p.b);
-      if (sa == null || sb == null || sa >= 0.15 || sb >= 0.15) continue;
+      if (sa == null || sb == null || sa >= 0.05 || sb >= 0.05) continue;
       uniformN++;
       const d = Math.abs(p.dL - p.dLcontact);
       if (d > uniformWorst) { uniformWorst = d; uniformWorstAt = `${id} ${p.a}|${p.b}`; }
@@ -1845,12 +1868,15 @@ async function modeGate() {
   // agreement check is a guard nobody can see working.
   if (uniformN) {
     const ok = uniformWorst <= 0.02;
-    console.log(`\n  CONSTRUCTION CHECK  ${uniformN} pairs where BOTH parts are near-uniform (p90-p10 < 0.15),`);
+    console.log(`\n  CONSTRUCTION CHECK  ${uniformN} pairs where BOTH parts are near-uniform (p90-p10 < 0.05),`);
     console.log(`  ${' '.repeat(18)}i.e. where dL and dLcontact are the same quantity by construction:`);
     console.log(`  ${' '.repeat(18)}max |dL - dLcontact| = ${uniformWorst.toFixed(4)} at ${uniformWorstAt}  ${ok ? '≤ 0.02 OK' : '> 0.02 ✗ THE NEW METRIC IS WRONG, NOT THE CAST'}`);
   } else {
-    console.log('\n  CONSTRUCTION CHECK  no near-uniform pair on this run — the agreement between dL and');
-    console.log(`  ${' '.repeat(18)}dLcontact is UNTESTED on this data. Do not read that as agreement.`);
+    console.log('\n  CONSTRUCTION CHECK  no near-uniform pair on this run (p90-p10 < 0.05) — so the agreement');
+    console.log(`  ${' '.repeat(18)}between dL and dLcontact is UNTESTED HERE. Do not read that as agreement;`);
+    console.log(`  ${' '.repeat(18)}it is proved synthetically in --selftest section L3 instead. It is also`);
+    console.log(`  ${' '.repeat(18)}the finding: measured on HEAD the narrowest pair on the whole cast spreads`);
+    console.log(`  ${' '.repeat(18)}0.119, so the whole-part median is the wrong statistic for EVERY pair.`);
   }
   const meta = {
     srcId: chars.__meta.srcId, toolHash: chars.__meta.toolHash, stationsHash: chars.__meta.stationsHash,
