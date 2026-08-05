@@ -148,7 +148,7 @@ node tools/arena-scan.mjs --url $URL --baseline tools/scan/colour-baseline.json 
 node tools/arena-scan.mjs --url $URL --gate         # also exit 1 on an absolute rail FAIL
 node tools/arena-scan.mjs --url $URL --json tools/scan/colour-baseline.json      # RE-baseline (deliberate only)
 node tools/arena-scan.mjs --ref-plates reference/images/curated/gameplay         # re-derive the reference figures
-node tools/arena-scan.mjs --selftest               # 78 assertions on synthetic frames, no browser
+node tools/arena-scan.mjs --selftest               # 105 assertions on synthetic frames, no browser (was 78)
 node tools/arena-scan.mjs --no-role                # skip the cast matte / HUD-free capture
 ```
 
@@ -326,7 +326,7 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/audio-probe.mjs --mode all` | **389** | ⚠️ `--mode live` is flaky under load; judge by depth 91 / identity 77 |
 | `node tools/arena-scan.mjs --selftest` | **105** | colour-budget metric + the station-placement guard |
 | `node tools/match-sim.mjs --selftest` | **15** | the scripted policies, against a hand-derivable answer |
-| `node tools/tmp/valuescan.mjs --selftest` | **57** | value-ladder metric on synthetic frames |
+| `node tools/tmp/valuescan.mjs --selftest` | **78** | value-ladder metric on synthetic frames. ⚠️ Was **57** until `c3e3fbc`/`fc3d048`; a run reporting 57 is an OLD TREE, not a pass |
 | `tools/tmp/quality_api.mjs` · `dpr_probe.mjs` | **20** · **24** | render tiers and the DPR cap |
 | `node tools/perf.mjs --mode leak` | contexts flat at **1** | the leak that white-screened after ~8 round trips |
 | `node tools/tmp/settle_validate.mjs` | **22** | the shared PAINT condition — correct at any machine speed, not merely longer |
@@ -349,7 +349,7 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/tmp/touchfeel.mjs` | **79** | stick bearings, dead zone, multi-touch, `touchcancel` |
 | `tools/tmp/nav_history_probe.mjs` | **44** | URL names the screen · reload lands there · back/forward · query params survive · a throwing screen cannot freeze the router |
 | `tools/tmp/glloss_probe.mjs` | **29** | forces a REAL context loss via `WEBGL_lose_context`; asserts the restored frame is the SAME frame against a drift control |
-| `node tools/tmp/driver_guard.mjs` | **49** | ⚠️ fails if a **14th** copy of the scripted driver appears, or a fixed copy loses its guard. Every check also runs against the historical driver and must FAIL there |
+| `node tools/tmp/driver_guard.mjs` | **60** | ⚠️ **This row said 49 and duplicated the row above it** — two counts for one gate, so either could be "confirmed" by reading the other. Measured 60 (driver rev 3). Fails if a **14th** copy of the scripted driver appears, or a fixed copy loses its guard. Every check also runs against the historical driver and must FAIL there |
 | `tools/tmp/floorprobe.mjs` | **5/5** | the floor's own gameplay test — breaks on any global value change |
 | `tools/tmp/chars_metrics.mjs` | ALL CLEAN | roster card fill, face-in-card, WCAG |
 | `tools/tmp/screen_metrics.mjs` | ALL CLEAN | settings/opening/trophies + `--screens home`, 3 viewports, WCAG from pixels |

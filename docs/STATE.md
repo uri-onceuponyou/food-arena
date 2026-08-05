@@ -117,43 +117,162 @@ against a known-bad input. The most consequential:
 
 # PART 2 — PENDING, ranked
 
-## 🔴 1. Flat, unlit surfaces — the #1 defect, with measured leads
+## 🔴 1. Flat, unlit surfaces — the #1 defect. **THE MECHANISM IS NOW KNOWN: the game draws no highlights.**
 
-Named by 6/6 critics on three elements. **Three leads already priced, none spent:**
+Named by 6/6 critics on three elements. **Three independent probes converged on one mechanism** —
+the convergence signal `docs/LESSONS.md` §3 says to trust, and the *ninth* consecutive plateau that
+turned out to be a bug rather than a taste gap:
 
-- **Raise `src/arena/`'s baked contact decal ~2.5×.** It sits at |dL| **0.0491** against a **0.1238**
-  reference measured off real barrels. **Beats a whole SSAO pass, for zero draw calls.**
-- **SSAO works** (contact −0.0273, +1 value step, acne solved by `bias 0.20` + intensity 1.5) but
-  costs **+314 draw calls / +79% triangles** — a second geometry pass. `TierProfile` has no `ao` field.
-- **`glossyMat` has no rim at all** — 18 materials, the only surfaces in the game with zero edge
-  response. One line, but it lands on the four characters whose clipping was hardest won; gate it on
-  a per-character `clipShare` run.
+| probe | measured | says |
+|---|---|---|
+| p1 | Fresnel rim reaches **1.402% of pixels**; 33 of 112 lit materials carry it | the edge-highlight term is **missing** |
+| p2 | prop surfaces carry **one flat value per face** — no gradient across a face, no crevice darkening | the form-highlight is **missing** |
+| p6 | share of playfield above luma 0.80: **ours 0.67–1.68% vs reference 2.39–19.06%**, non-overlapping | **nothing bright is ever drawn** |
 
-⚠️ Two facts to carry: **53% of the cast is authored at roughness ≥0.6**, where specular headroom has
-already collapsed 10×; and **`material.envMapIntensity` is silently discarded** — three.js overwrites
-it with `scene.environmentIntensity` for any material using `scene.environment`.
+### 🚨 Root cause — `Material.clone()` silently drops `onBeforeCompile`
 
-## 🔴 2. The scripted player cannot heal — fix it, then rebalance
+`three/src/materials/Material.js` `copy()` names 40+ properties and **not** `onBeforeCompile`.
+`applyRimLight` is called from exactly **one** site (`toon.ts:192`, inside `toonMat`) and nothing
+re-applies it after a clone. There are **54 material-clone sites in `src/`**, so the arena's whole
+cloned palette renders with **no rim** — the term `toon.ts` itself calls *"the single largest
+material lever in the frame."*
 
-One line in `tools/tmp/scripted_player.mjs`. Worth settled **17 → 14**. ⚠️ **But it makes Hamburger
-the strongest character by 14 pp and blows the rarity guard from 3.98 to 16.56 pp.** The sequence,
-from the agent that found it: **land it, re-measure, *then* decide what Hamburger should be** —
-reading tier spread every iteration, because on this character it binds before win rate does.
-`bestWeapon` **also** still ranks by authored `damage` (wrong for Taco and Burrito at 5 of 8 bands).
+**Smoking gun:** `kpal:woodPad` appears **twice in one frame under the same name** — the original
+with the rim (0.805% of frame), its clone without (2.501%). Two independent instruments agree on
+33 of 112 (`matvar --mode census`, and a `renderer.properties` handle count).
+
+→ Fix with a **`cloneToon()` helper in `src/render/toon.ts`** so the 54 sites cannot silently drop it
+again. Zero draw calls, zero new programs (an identical `onBeforeCompile` source shares one cached
+GL program). ⚠️ **Not the ground plane** — `src/arena/apron.ts:830` passes `rim: false` on purpose.
+
+### ⚠️ Lead 1 (the contact decal) is FALSIFIED — it was the "cheapest lead" and it was a category error
+
+**The old wording, kept so nobody re-derives it:** *"Raise `src/arena/`'s baked contact decal ~2.5×.
+It sits at |dL| 0.0491 against a 0.1238 reference measured off real barrels. Beats a whole SSAO pass,
+for zero draw calls."*
+
+**0.0491 and 0.1238 are different quantities.** 0.0491 is the mean *ablation delta of the baked decal
+layer alone* over 0–0.15 m; 0.1238 is the reference's *total shipped contact contrast* (open-floor
+luma − contact-band luma) over 0–0.25 m, all layers. Measured **like-for-like on HEAD, ours already
+matches or exceeds Brawl Stars**:
+
+| | ours | bs_04 |
+|---|---|---|
+| shadow side, ≤3 m | **0.1415 / 0.2181** | 0.1238 |
+| lit side | −0.0044 / 0.0000 | 0.0161 |
+
+And **there is no 2.5× in the knob** in any of its three readings: opacity headroom **1.11×**
+(`CONTACT_PEAK_ALPHA` is already 0.9), darkness headroom **1.14×**. All three possible changes move
+the arena *further* from the reference. The layer actually doing the grounding work is the **shadow
+map**, not the decal. **Do not spend a round on this.**
+
+### Lead 2 (SSAO) — worse than recorded, and a cheaper approximation exists
+
+`useAO` has **zero call sites in `src/`**, so it cannot be re-measured on HEAD, but its draw cost is
+bounded exactly and is worse than recorded: **+395 draws (+94%), +99% triangles**. An
+`EffectAttribute`-based approximation in the existing post chain is the cheaper route if ever wanted.
+
+### Lead 3 (`glossyMat` has no rim) — real, and now gated
+
+The per-character `clipShare` run it was gated on is **done: 4 of 5 pass, SOUP FAILS** (pushes past
+the reference band maximum), and on egg it does almost nothing.
+
+⚠️ Facts to carry, both **confirmed on HEAD**: **52.6% of the cast (20 of 38) is authored at
+roughness ≥0.6**, where specular headroom has already collapsed 10×; and
+**`material.envMapIntensity` is silently discarded** (`three.module.js:17341-17343`, outside the
+`refreshMaterial` guard, so it runs every draw). Assigning `material.envMap = scene.environment` to
+escape the overwrite is a **provable no-op at the scene's own 0.32** (dMean 0.0000/255) — and at ×2
+it behaves as **flat ambient, not sheen**: floor p05 0.248 → 0.361 while range 0.307 → 0.263, i.e. it
+washes the darks. **It is not a sheen control.** All 112 materials sit at the default 1, so the knob
+carries zero authored variation today.
+
+### The composition census nobody had
+
+**18.39% of a gameplay frame is `MeshBasicMaterial`** — a shader with no normal in it at all: zero
+specular, zero rim, zero diffuse falloff, zero shadow receive. **140 of 255 materials are Basic**,
+the largest single unlit surface being `hazard:glow` at 11.68%. Separately, **63.44% of the frame is
+a flat ground plane**, with **zero normalMaps project-wide** (and 4 roughnessMaps, all arena metal).
+⚠️ But the reference argues for restraint: `bs_04`'s ground is *also* a smooth flat plane — what stops
+it reading as paper is **prop density and a dark offset contact under every object**, not surface
+detail. Treat a floor normal map as second-order, and only at the gentle end.
+
+## 🔴 2. The scripted player cannot heal — **and "one line" is a DIFFERENT, WORSE fix**
+
+**The old wording, kept because it is wrong and would be re-derived:** *"One line in
+`tools/tmp/scripted_player.mjs`. Worth settled 17 → 14."*
+
+The recorded end-state reproduces **exactly** (settled 17→14, tier spread 3.98→16.56 pp), from two
+independent implementations — but **the literal one-line deletion does not produce it.** Deleting
+`if (w.type === 'self') return;` alone gives **settled 13, tier spread 9.14 pp, Hamburger 53.9%**,
+and **wastes 66.5% of every heal** (it presses at full HP). The heal must be gated on
+`ai.ts:rankHeal`'s own three conditions — the rule already stated once in the codebase.
+
+⚠️ **The SECOND bug in the same function is the bigger one, and it names the wrong characters.**
+`bestWeapon` ranks by authored `damage`, which is per-*pellet*. Fixing only the ranking key
+(→ `ai.ts:pressValue`), heal still excluded, moves **40 of 110 matchups — paired, exact, max |Δ|
+46.9 pp** (`taco>donut` 9.4% → 56.3%). It mis-ranks **five** characters, not the two `rules.ts` and
+`sim.test.mjs` name.
+
+**Land both faults in one act**, keep both old behaviours reachable by flag (as `--nav-countdown-bug`
+already is) so every pre-fix figure reproduces byte-identically, and extend `driver_guard.mjs` so
+each new check also runs against the historical driver and **FAILS there**.
+
+**Then Hamburger:** the heal is the whole character, priced at **~3.1 pp of strength per 1 HP**.
+Measured ladder under the fully-fixed driver, 32 seeds: `healAmount` 25 (shipped) → strength 70.9%,
+spread 15.94 pp · **18 → spread 8.05 pp, settled 14**. ⚠️ **And the binding constraint then moves off
+Hamburger**: at 18 the tiers read Normal 53.0 · Rare 52.3 · Epic 53.0 · **Legendary 45.0** · Neon
+49.5 · Cyber 48.7 — the spread is now set by **Legendary at the BOTTOM**, not Hamburger at the top.
 
 ## 🟠 3. Kitchen concealment — approved by Uri, unstarted
 
-**§18, and five critics deep** — each independently ranking cover density their #1 arena fix. We are
-at 17–20% of frame against a reference 35–45%. Uri: *"add bushes — but make it relevant to kitchen.
-For example plates you can hide under."* Solid props cannot deliver it (the collision was carefully
-tuned); **walk-through concealment adds screen area without adding collision.** It is a sim mechanic
-plus AI awareness plus props. **The largest single item waiting.**
+**§18, and five critics deep.** Uri: *"add bushes — but make it relevant to kitchen. For example
+plates you can hide under."* Solid props cannot deliver it (the collision was carefully tuned);
+**walk-through concealment adds screen area without adding collision.** Sim mechanic + AI awareness
++ props. **The largest single item waiting.**
 
-## 🟠 4. Live character findings the fixed gate exposed
+⚠️ **Corrections from the architecture probe, before anyone chases the recorded number:**
+- **Our 21.36% reproduces** (n=12 canonical stations, ablation-validated instrument). **The
+  "35–45%" reference has NO instrument anywhere in this repo** — it is one critic's prose about four
+  plates, and *three of the plates do not show it*. Do not tune to it.
+- **The gap is GRAIN, not area.** Our 21.4% is delivered by **~2 objects per frame**; the reference
+  delivers its share as dozens of small tufts in lane-aligned bands. And **every solid prop in the
+  arena is one height — 2.415 m**, taller than a character.
+- 🚨 **The sim contains ZERO randomness.** Concealment expressed as an accuracy *roll* destroys the
+  determinism underwriting every balance number in the project. Region membership
+  (`terrainSlowFactor` is a working template) is the safe shape.
+- `stepAI` reads the player's true position at **three independent sites**, one a direct read — the
+  exact shape of all five AI bugs found so far.
+- **Step 0 is the inert mechanism**, proven **bit-identical** (110 matchups × 32 seeds, tick-for-tick)
+  with concealment absent, exactly as `LEVEL_MIN` was.
 
-`weakBoundaryPct` fails **5 of 11** — and **pizza 22.0 → 41.0** and **waterbottle 22.9 → 53.9** got
-*worse* while the gate was frozen. `dlBelow10` fails **lollipop (11 of 18)** and **sushi (6 of 18)**;
-the stale gate had named hotdog. The dl table is **171 of 198 rows** — re-run to close it.
+## 🟠 4. Cast value ladder — **the "regressions" are a RENDER commit, and the metric is wrong**
+
+**The old wording, kept because both halves are misleading:** *"`weakBoundaryPct` fails 5 of 11 — and
+pizza 22.0 → 41.0 and waterbottle 22.9 → 53.9 got worse while the gate was frozen. `dlBelow10` fails
+lollipop and sushi. The dl table is 171 of 198 rows."*
+
+- 🚨 **They are not character regressions.** A 9-tree paired bisect (same tool, `headserve --ref`)
+  puts **both** collapses inside `ce49cd3..47feb9a`, whose only character-rendering commit is
+  **`086ff5f` — the key-light move that added a near-head-on 2.2 front fill.** One `src/render/`
+  commit, not two `src/characters/` ones.
+- 🚨 **`weakBoundaryPct` measures the wrong quantity.** It gates on `dL = |p50(A) − p50(B)|` — the two
+  parts' *whole-part medians* — while contacts are counted on a merged owner map. Proven wrong in
+  **both** directions by construction; it disagrees with a contact-local step on **11 of 35 live
+  pairs**, including the pair producing **32.7 of pizza's 41.0 points**. **Fix the metric before
+  dispatching any character agent** (add `dLcontact` alongside `dL`; do not change `dL` — peers A/B
+  against it). It is also a **cliff, not a band**.
+- **burrito and sushi regressed too, and by more than pizza** — burrito head|torso 0.3605 → **0.0114**,
+  sushi 0.2647 → **0.0403**. STATE.md named neither.
+- **The fix is already built and it is INVISIBLE — LESSONS §1 for the nineteenth time.** `e6fed57`
+  added a neck column plus a dark collar to 8 of 11 characters; at the shipped camera and facing it
+  delivers **0 pixels** on burrito (565 px footprint), sushi (939 px) and soup (2199 px).
+- **The 171 dl rows never existed on disk** — no `dl.rows.jsonl` anywhere, and all 17 `dl*.json` are
+  **unstamped**. The untracked `tools/tmp/rigs_lg*.json` are not them.
+- `valuescan --selftest` is **78**, not the 57 `docs/TOOLS.md` still names.
+- ✅ Drift control clean: `0529aa8` and `b967242` moved the cast's value ladder by **0.000**.
+- ✅ Harness polarity **confirmed correct** — `--mode chars`/`--mode dl` drive the real game URL, not
+  the inverted `preview.html`. And the recorded `limbcheck_pitch` warning **overstates it**: the only
+  executable differences are the pitch constant, a banner and `&pitch=` on the URL.
 
 ## 🟡 Known, not started
 

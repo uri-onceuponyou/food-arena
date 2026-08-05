@@ -50,26 +50,39 @@ THE NON-NEGOTIABLES ARE IN CLAUDE.md. The ones that cost the most when broken:
 
 START HERE, in this order:
 
-  1. src/render/{toon,lighting}.ts + src/arena — "surfaces are flat and unlit, no material
-     variation, no contact shadow, no depth". 6/6 critics on three elements, 4/6 on the
-     arena. THE #1 DEFECT. Three leads already priced in STATE.md PART 2; the cheapest is
-     raising the arena's baked contact decal ~2.5x (it is at |dL| 0.0491 against a 0.1238
-     reference) which beats a whole SSAO pass for zero draw calls.
+  1. THE GAME DRAWS NO HIGHLIGHTS. Three independent probes converged on one mechanism:
+     the Fresnel rim reaches 1.402% of pixels, prop faces carry one flat value each, and
+     share of playfield above luma 0.80 is ours 0.67-1.68% vs reference 2.39-19.06% —
+     NON-OVERLAPPING. Root cause: `Material.clone()` does not copy `onBeforeCompile`, and
+     `applyRimLight` is called from exactly ONE site inside `toonMat`, so all 54 clone
+     sites in src/ silently drop the rim. Fix with a `cloneToon()` helper in
+     src/render/toon.ts. NOT the ground plane (apron.ts:830 declines it on purpose).
+     ⚠️ The old "raise the contact decal 2.5x" lead is FALSIFIED — it compared an ablation
+     delta of one layer to the reference's total shipped contact contrast. Like-for-like,
+     ours already MATCHES Brawl Stars. Do not spend a round on it.
 
-  2. tools/tmp/scripted_player.mjs — bestWeapon skips 'self', so the MEASUREMENT cannot
-     press heal. Worth 50.6pp on Hamburger, and the roster was balanced TWICE against it.
-     Sequence: land the one-line fix, re-measure, THEN decide what Hamburger should be —
-     reading rarity tier spread every iteration, because it binds before win rate does.
-     It also still ranks by authored `damage` (wrong for Taco and Burrito).
+  2. tools/tmp/scripted_player.mjs — the "one line" fix is a DIFFERENT, WORSE fix. Deleting
+     `if (w.type === 'self') return;` alone gives settled 13 / tier spread 9.14pp and wastes
+     66.5% of every heal; it must be gated on ai.ts:rankHeal's own three conditions. And the
+     SECOND bug is bigger: ranking by authored `damage` moves 40 of 110 matchups, max 46.9pp,
+     and mis-ranks FIVE characters not two. Land both, keep both old behaviours behind flags.
+     Then Hamburger: healAmount 25 -> 18 gives spread 8.05pp, settled 14 — but the binding
+     constraint then moves to LEGENDARY AT THE BOTTOM, not Hamburger at the top.
 
   3. Kitchen concealment — APPROVED BY URI, UNSTARTED. "add bushes but make it relevant to
-     kitchen, for example plates you can hide under." Five critics deep; cover density is
-     17-20% of frame against a reference 35-45%, and solid props cannot deliver it because
-     collision was tuned. Sim mechanic + AI awareness + props. The largest item waiting.
+     kitchen, for example plates you can hide under." Our 21.36% reproduces, but the
+     "35-45% reference" HAS NO INSTRUMENT — it is one critic's prose and three of the four
+     plates do not show it. The gap is GRAIN not area: ~2 objects deliver our whole share,
+     every solid prop is one height (2.415m). ⚠️ The sim contains ZERO randomness — an
+     accuracy ROLL would destroy the determinism under every balance number. Step 0 is the
+     inert mechanism, proven bit-identical exactly as LEVEL_MIN was.
 
-  4. The live character findings the fixed valuescan gate exposed: weakBoundaryPct fails 5
-     of 11, pizza and waterbottle got WORSE while the gate was frozen, and dlBelow10 fails
-     lollipop and sushi (the stale gate had named hotdog).
+  4. Cast value ladder — the "regressions" are ONE src/render/ COMMIT, not two character
+     commits: a 9-tree paired bisect puts pizza and waterbottle both inside ce49cd3..47feb9a,
+     whose only character-rendering commit is 086ff5f (the key-light front fill). And
+     weakBoundaryPct MEASURES THE WRONG QUANTITY (whole-part medians, not the boundary) —
+     fix the metric before dispatching any character agent. burrito and sushi regressed
+     MORE than pizza and were never named. The 171 dl rows never existed on disk.
 
 STILL NEEDS URI (docs/DECISIONS-FOR-URI.md): §17 music during matches and hurt level, §19
 back out of a live match, §4 ROSTER_GATED, §14 portrait, §10 two icons need a SUBJECT
