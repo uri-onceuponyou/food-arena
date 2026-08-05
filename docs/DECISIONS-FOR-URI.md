@@ -24,6 +24,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **4** | `ROSTER_GATED` | off | **yours** — shop is built and honest either way | one flag |
 | **2** | Timeout tiebreak | HP fraction → zone → you | **keep** (it now actually fires) | a few lines |
 | **3** | Trail damage cap | 1 per tick | **keep** | one constant |
+| **13** | Rarity runs backwards; the stat card is fiction | as built | **decide if rarity means power** — half the grid is settled at select | a real build, not a tune |
 | **8** | Pointer lock | shipped as built | **cannot be tested here at all** — needs your browser | — |
 | **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
 
@@ -453,3 +454,59 @@ AI that walked into fire.
 Whether **2.0 s of zero movement still feels awful**, and whether a refused stun feels like a rule or
 a bug. `docs/LESSONS.md` §10 — the two most valuable bug reports this project ever had came from you
 playing it. This is squarely that kind of question.
+
+---
+
+## 13. Power runs BACKWARDS against rarity, and the character card is fiction
+
+**Why it needs you.** The roster was measured per character for the first time — 110 matchups ×
+32 seeds, each character scored in the player's hands *and* in the AI's. Three findings, and all
+three are design questions rather than defects.
+
+### (a) The free starter is the strongest character in the game
+
+Mean strength by rarity tier:
+
+| tier | Normal | Rare | Legendary | Neon | Cyber | **Epic** |
+|---|---|---|---|---|---|---|
+| strength | **68.6** | 67.3 | 68.4 | 34.8 | 29.5 | **12.5** |
+
+**Hamburger — Normal tier, the character you start with — is first in every measurement**, with no
+mistuned number to point at: highest kit DPS, joint-longest reach, both statuses, and the only heal
+in the roster. Meanwhile the two rarest tiers are the two weakest. **The trophy road currently
+sells a downgrade** — ~13 hours of play to unlock characters measurably worse than the free one.
+
+**❓ Is rarity meant to mean power, or just cosmetic variety?** Both are legitimate; a lot of games
+do the latter deliberately. But the trophy road is built as a *progression*, so if rarity is not
+power, the reward curve is promising something it does not deliver.
+
+### (b) `CharacterDef.stats` is display-only — and two of its four axes do not exist
+
+The card on character select shows stats. Correlation between the card's stat total and measured
+strength is **ρ = 0.327** — barely better than chance.
+
+Worse: **`health` and `speed` do not exist in the simulation at all.** Every character has identical
+HP and identical movement speed. Donut's trail is the roster's only genuine movement difference.
+
+**❓ Is the card a promise?** If it is, the roster needs per-character HP and speed, **which is a
+real build, not a tuning pass** — `PLAYER_MAX_HP`/`ENEMY_MAX_HP` are per-*role* constants today, so
+this touches the sim, the HUD and the economy's balance assumptions. If it is not, the card should
+show something true.
+
+### (c) The roster's dominant problem is not any one character
+
+**53 of 110 matchups are decided before they start** — one side wins ≥95% or ≤5% across 32 seeds.
+Fixing Lollipop moved that to 52.
+
+**This is the finding I would act on if you only pick one.** A brawler where half the grid is
+settled at character select is a different problem from a brawler with one weak character, and no
+amount of per-character tuning reaches it. It plausibly needs the thing (b) describes — real
+per-character health and speed — to give the matchup matrix more than one axis to vary on.
+
+**Assumed.** Nothing here is changed. Lollipop was pulled out of last place because its special was
+weaker than its own basic attack, which was categorically a defect; everything above is design.
+
+**One honest caveat on all of it:** these are scripted-player numbers. A human moves at 120 wu/s
+against an AI that chases at 70, so a human can dictate engagement far better than any policy here
+does. The **AI-hands** column is the driver-neutral one, because all eleven characters share one
+driver there.
