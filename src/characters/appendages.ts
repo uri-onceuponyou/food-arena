@@ -72,6 +72,38 @@
  * there is nothing left above to project over them. Both work; the second is
  * better when the food only has one plausible place for the feature.
  *
+ * ── ⚠️ WHAT THIS KIT DOES NOT BUY, MEASURED AFTER THE FACT ───────────────────
+ * Two blind critic rounds were run once the cast cleared the reference floor, both
+ * VALID (reference panels scored 8/9 and 7/9, inside the 7-9 band `docs/LESSONS.md`
+ * §3 requires). Our panels scored **3, 3** on egg and **2, 2** on burrito, against a
+ * previous 3.25 — so a cast-mean hull deficiency of 0.1379 -> 0.2621, from below the
+ * weakest Brawl Stars plate to their MEDIAN, moved the perceived number not at all.
+ * And burrito, which has the best measured outline in the cast (0.334 / 0.4103),
+ * scored the LOWEST of the two.
+ *
+ * **Hull deficiency and appendage count are necessary and they are not sufficient.**
+ * Both critics, independently, on two different characters, named the same missing
+ * thing, and it is not an appendage:
+ *
+ *   egg      "no head/body separation ... carve a head out of the ball, shrink it to
+ *             ~0.7-0.75 of the body's width and lift it so a visible notch appears on
+ *             BOTH sides of the outline, with a 4-6 px pinch at the neck"
+ *   burrito  "invert the mass distribution ... head as a distinct sphere sitting proud
+ *             of a real shoulder line with a hard dark occlusion notch under the chin"
+ *
+ * One finding in two costumes: **the cast has no NECK.** Everything in this file is
+ * an event on the OUTSIDE of a single undifferentiated mass; the reference's own
+ * device is an INTERNAL break that splits the outline into head and body. It would
+ * register on the same metric — a pinch is a concavity, and it can separate the head
+ * under the morphological opening — so this is a mechanism this pass did not try
+ * rather than a metric that is wrong. It is the ranked next item, and it lives in
+ * `rig.ts` (`headMount`, the neck joint) and in each character's own mass.
+ *
+ * Both rounds also named figure/ground — "pale cream on pastel floor tiles of
+ * near-identical value, no dark contour, no rim light, no contact shadow beneath it"
+ * — which is the THIRD consecutive round to say so and belongs to
+ * `src/render/lighting.ts`, not here.
+ *
  * ── Traps these builders are written to avoid ────────────────────────────────
  *  * `CapsuleGeometry` degenerates into a SPHERE whenever `len < 2r`
  *    (`docs/LESSONS.md` §12 — it is how a leg once became two balls in a boot).
