@@ -24,6 +24,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **22** | **Character levels 1–15** | being built | ✅ **ANSWERED — AI scales to the player's level** | in flight |
 | **23** | ⚠️ PvP makes `PLAYER_MAX_HP` ≠ `ENEMY_MAX_HP` **unfair by definition** | 100 vs 90 | **your §12 dial has a shelf life** | a roadmap item |
 | **24** | Rarity vs level | being rebuilt | ✅ **ANSWERED — pure genre pattern: rarity ≠ power at equal level.** Reverses part of §13 | in flight |
+| **25** | ⚠️ **The 7+ bar is now calibrated** — the critic never scores shipped Brawl Stars above 9 | 7+ | **your bar is sound; the measurements under it were not** | — |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
@@ -1150,3 +1151,46 @@ silent trade.
 
 *(§13 remains correct about the defect it found: the trophy road was selling a downgrade and the stat
 card was fiction. Both are fixed. Only the "rarity = power" remedy is reversed.)*
+
+
+---
+
+## 25. Your 7+ bar is sound — but everything measured against it needs re-reading
+
+The blind-critic instrument has been audited for the first time. Three things you should know.
+
+**1. It cannot resolve differences smaller than ~1.4 points.** σ = 0.50 across 16 fresh critics on
+one fixed image. And a round's two panels are **n = 1**, not n = 2 — one critic scores both and
+agrees with itself 4 times out of 4.
+
+⚠️ **So "the characters got worse" was never an observation.** The history reads 3.6 → 3.25 → 3.0 →
+2.0, and the largest single step is **1.0** — inside the floor every time. I reported those moves to
+you as real. They were not. **The correct reading is that characters have sat at roughly 3, ±1.4,
+throughout** — which is still far below your bar, but it is a plateau, not a decline.
+
+**2. Your bar is well placed, and now calibrated.** Over 34 observations the critic **never scores
+shipped Brawl Stars above 9**, and typically 8–8.5. So **7+ sits about 1–1.5 points below shipped
+Brawl Stars** — demanding, reachable, and not asking for a perfect score. That was a good instinct.
+
+**3. The instrument had two uncontrolled levers, both now fixed.** The *rubric* is worth **2.0
+points** — the same sheet reads 5.0 under "overall visual quality" and 3.0 under "character design
+only", with the reference side unmoved — and there was **no canonical prompt in the repo**; every
+round was written fresh. And all three character rounds drew **4 of 6 Zooba plates** (over-the-
+shoulder camera) to score a top-down game, repeating a defect already recorded for the arena.
+
+### What the critics actually mean, now that it is measurable
+
+**"The failure is mass, not scale."** Burrito measures head **46 px** wide, body **15 px**, figure
+126 px tall — a needle. Hull deficiency and appendage count are **area-blind**, which is why 11 of 11
+characters clearing the silhouette floor changed nothing.
+
+⚠️ **And a constant was moved on a wrong number.** Our character is **10.4% of frame height** (14.2%
+with legs) against **Shelly at 12.5%** in the same plate — two blind critics independently measured
+~12%. The 14–21% figure that justified `CHARACTER_HEIGHT` 2.1 → 2.35 **was wrong**; the critic's
+10–12% was right. That is being re-derived. **The sheet I sent you still stands as a look — just not
+as a size correction.**
+
+**One concrete defect, fully verified:** **24.3% of our egg is clipped near white** (p95 0.981)
+against Shelly 0.2% and Barley 0.0%, on exactly the top-facing surfaces a top-down camera sees most
+of. Empty-floor controls read 0.0%, so it is the character. That is the cost of the value pass,
+visible at the pixel — and it is fixable without any critic at all.

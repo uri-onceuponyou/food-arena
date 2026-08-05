@@ -17,7 +17,15 @@ if you are Uri — it opens with a one-screen answer sheet.
 
 **Objective quality moved a great deal this session. Blind critic scores did not.**
 
-> ⚠️ **Every score in the table below is now STALE and is expected to be wrong.** Since it was
+> ⚠️⚠️ **THE CRITIC HAS A MEASURED RESOLUTION FLOOR OF ~1.4 POINTS, AND EVERY DIFFERENCE THIS
+> PROJECT ACTED ON WAS SMALLER THAN THAT.** σ = 0.50 over 16 fresh critics; a round's two panels are
+> **n = 1**, not n = 2, because one critic scores both and agrees with itself 4 of 4 times. The
+> character history 3.6 → 3.25 → 3.0 → 2.0 has a largest single step of **1.0** — *not one transition
+> ever cleared the floor.* Treat every number below as ±1.4, and **never compare scores taken under
+> different rubrics**: the rubric alone is worth **2.0 points** (ours reads 5.0 under "overall visual
+> quality" and 3.0 under "character design only", with the reference unmoved).
+>
+> ⚠️ **Every score in the table below is also STALE.** Since it was
 > measured: the whole cast gained a dark rung (`a5ce2a5`), the render grade moved `contrast`
 > 0.62 → 0.72, the VFX matte and the Giant Lollipop whiteout were fixed, arena colour and layout
 > landed, and the AI stopped being silenced by its own stun. **A fresh round is owed before any of

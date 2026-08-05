@@ -156,6 +156,53 @@ Without one, loops oscillate instead of converging. Good ones from this project:
   saturated, swept *and* detuned, which is what stops "add more saturation" being mistaken
   for "add a transient"
 
+
+### It now has a MEASURED resolution floor, and this project spent a session below it
+
+σ = **0.50**, from 16 fresh critics on one fixed image across 5 prompt phrasings and both A/B slots
+(ours 5.125; reference 8.167 ± 0.39). With the prompt held byte-identical the spread is **zero** —
+6 of 6 returned the same numbers.
+
+**Minimum resolvable difference: ~1.4 points.**
+
+And the unit of replication is the **critic**, not the panel: one critic scores both panels of a
+round and gave both the same number in **4 of 4** cases. So a round with 2 panels is **n = 1**, not
+n = 2. Two *independent* critics bring the floor to ~1.0.
+
+**Applied to the character history — 3.6 → 3.25 → 3.0 → 2.0 — the largest single step is 1.0. Not
+one transition ever cleared the floor.** Two passes were reported as "the score fell" and a third
+was nearly cancelled on that basis. **It was never an observation.**
+
+Falsified while measuring it: **position bias is 0.00** (our frame against *itself* tied 6/6 and 5/5;
+forcing our panel into slot A then slot B gave identical means), and **resolution is not the story**
+— the reference plates arrive **upscaled 1.33–1.43×**, delivering **0.42–0.48× our edge acuity**, and
+still score 8.
+
+→ **State a resolution floor for every instrument, and refuse to act inside it.** This project had
+floors for win rate (~9 pp) and pacing (~0.8 s) and none for the instrument that decided what every
+agent worked on.
+
+### The RUBRIC is worth 2.0 points, and there was never a canonical one
+
+Identical sheets, same critic model: *"overall visual quality"* → ours **5.0**; *"character design and
+rendering only"* → ours **3.0**. Deterministic, 2 of 2 each, and **the reference side does not move**.
+
+There was **no canonical critic prompt anywhere in this repo** — every round was written fresh by
+whichever agent ran it. So scores were never comparable across rounds, and a 2.0-point lever sat
+uncontrolled while agents acted on 0.25-point differences.
+
+→ `tools/review.mjs` now records `--rubric` and writes `RUBRIC.txt` into the packet. **Never compare
+scores across different rubrics.**
+
+### The wrong-plates defect RECURRED, in a second element, unnoticed
+
+`docs/STATE.md` recorded that an arena packet drew **4 of 6 Zooba** plates, whose camera is a low
+third-person chase rather than our top-down. **All three character rounds then did exactly the
+same** — including one wide aerial parachute shot the library's own index offers as an *environment*
+reference, used to score characters. `gameplay_topdown` existed and was not used.
+
+→ A defect recorded but not **enforced** recurs. `review.mjs` now warns by name on mixed-camera
+categories and prints the actual draw.
 ---
 
 ## 4. Verify the artefact you are shipping
