@@ -311,7 +311,16 @@ export class HamburgerCharacter extends BaseCharacter {
       // hard at -0.95) and by the asymmetry between the two shoulders, rather
       // than by burying one whole limb. Both shoulders now open outward.
       stance: {
-        shoulderL: -0.16, shoulderR: -0.26,
+        // ── `shoulderR` -0.26 -> +0.20: round 1 missed this one ──────────────────
+        // `docs/LESSONS.md` §12 — `shoulderR` sits at x = +shoulderWidth, so a
+        // NEGATIVE z-rotation swings that arm ACROSS the body. Round 1 opened
+        // `shoulderL` outward and left `shoulderR` swinging 0.26 rad inward, right
+        // over the right thigh. It shows up not on the arm (which measured 0.899
+        // delivered — it is in FRONT, so it is perfectly visible) but underneath it:
+        // `hipR` delivered **0.000** of a 4,697 px footprint while the food mass
+        // covered only 0.343 of it. The occluder was the character's own 0.195 m
+        // bun-mitt, which is wider than the thigh it hangs over.
+        shoulderL: -0.38, shoulderR: 0.20,
         elbowL: -0.95, elbowR: -0.22,
         twist: -0.12, headTilt: -0.07, headTurn: 0.20,
         hipSway: 0.06, lean: 0.06,
@@ -784,7 +793,11 @@ export class HamburgerCharacter extends BaseCharacter {
       // "apron tied at the side" landmark, and a silhouette break independent
       // of the bib itself (visible from the back/side yaw angles too).
       const tieTheta = -apronArc * 0.62;
-      const tieBase = new THREE.Vector3(Math.sin(tieTheta) * apronR * 1.03, apronY - apronH * 0.2, Math.cos(tieTheta) * apronR * 1.03);
+      // Pulled IN and UP. Measured (`tools/tmp/masssit.mjs`): `apron_tie_loop` was the
+      // single widest thing on this character at the hip line — 0.612 m half-width
+      // against a 0.435 m stance — and it is knotted on the LEFT hip, which is exactly
+      // where `hipL` was delivering 0.429 of its footprint.
+      const tieBase = new THREE.Vector3(Math.sin(tieTheta) * apronR * 0.90, apronY + apronH * 0.06, Math.cos(tieTheta) * apronR * 0.90);
       const tieKnot = new THREE.Mesh(new THREE.SphereGeometry(apronR * 0.13, 10, 8), apronTrimMat);
       tieKnot.name = 'apron_tie_knot';
       tieKnot.position.copy(tieBase);

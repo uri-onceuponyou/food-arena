@@ -166,7 +166,14 @@ export class LollipopCharacter extends BaseCharacter {
         // -0.02m, dead on the body centre-line, inside the stick — and the left
         // arm delivered 0.001 of its upper arm and 0.000 of its forearm.
         // `shots/probe/sil/lollipop.png` has nothing at all on the left side.
-        shoulderWidth: 2.00 * 0.185,
+        // ── 0.185H -> 0.15H, because 0.185H is OUTSIDE the connectivity window ──
+        // The arm has to straddle the stick: its OUTER edge proud of it to be seen,
+        // its INNER edge inside it to stay attached. With `stickR` = 0.32R = 0.230 m
+        // and `armRadius` = 0.124 m that window is 0.106 m .. 0.354 m of shoulder
+        // half-width, and 0.185H = 0.370 m sat just outside the far end — measured,
+        // the entire right arm was its own connected component (4,038 px at idle,
+        // 4,400 at run) while the left one, pulled in by `hipSway`, was not.
+        shoulderWidth: 2.00 * 0.17,
         // ── STUB's widened 0.225H stance is wrong for a character this narrow ────
         // Every other STUB mass is 0.5-1.0m wide at hip height and needed the legs
         // pushed out from under it. This one is a 0.41m stick, so 0.45m of stance
@@ -183,6 +190,13 @@ export class LollipopCharacter extends BaseCharacter {
         // bug fixed further down this file. Removing that black slab revealed a
         // latent detachment worth 12,635 px; 0.145H closes it properly, with both
         // thighs overlapping the stick. Measured 0 px detached at idle, 1 px at run.
+        // ── 0.145H -> 0.11H, because the round-2 leg rewrite HALVED the bridge ───
+        // `legRadiusF` went 0.075 -> 0.058 cast-wide (see `bodies.ts`), so the thigh
+        // that used to overlap the 0.41 m stick by 0.065 m now overlaps it by 0.031 m
+        // — about 8 px — and the right arm-and-leg went back to being their own
+        // connected component, 8,406 px at idle. The stance is what pays for that
+        // overlap on this character, so the stance is what has to move with it.
+        // 0.11H restores a 0.10 m (~25 px) bridge on both sides.
         stanceWidth: 2.00 * 0.145,
         // Same override as Donut's, for the opposite mass: STUB's raised 0.26 is
         // right for a bottom-heavy food, but this character's food is a DISC on a
@@ -205,7 +219,12 @@ export class LollipopCharacter extends BaseCharacter {
       stance: {
         shoulderL: -0.14, shoulderR: 0.12,
         elbowL: -0.30, elbowR: -0.55,
-        twist: 0.30, headTilt: -0.28, headTurn: -0.35,
+        // `headTilt` -0.28 -> -0.13. The stick hangs off `head`, so the tilt swings its
+        // BOTTOM by 0.68 m x sin(tilt) = 0.188 m — more than half the stance — and that
+        // offset, not any radius, is what buried the left thigh (0.041 delivered) while
+        // detaching the right one. `twist` 0.30 and `hipSway` 0.20 carry the cocky read
+        // and are untouched.
+        twist: 0.30, headTilt: -0.13, headTurn: -0.35,
         hipSway: 0.20, lean: -0.06,
       },
     });
@@ -237,7 +256,10 @@ export class LollipopCharacter extends BaseCharacter {
     // because the only thing on the huge disc was a small mouth arc. A real
     // candy-stick mascot's stick is chunky; this is still slender against a disc
     // more than three times its width, but the face now has room to exist.
-    const stickR = R * 0.285;
+    // 0.285R -> 0.32R. The stick is the ONLY thing both arms and both legs can
+    // attach to on this character, so its radius is a connectivity budget, not a
+    // styling choice. The extra 0.035R buys ~9 px of overlap on each of four limbs.
+    const stickR = R * 0.28;
     const stickTopY = discCenterY - discOuterR * 0.5; // embeds into the disc's underside
     const stickBottomY = -neckGap * 1.12; // reaches past the neck join, into the torso —
                                            // no visible gap between stick and body
@@ -336,18 +358,58 @@ export class LollipopCharacter extends BaseCharacter {
     // failure than the burial it was meant to fix. Tried and reverted; the real fix
     // is longer legs on the STUB archetype, which is called out in the handover
     // rather than attempted here.
-    const petalGeo = new THREE.ConeGeometry(stickR * 1.3, R * 0.18, 3, 1, true);
+    // 1.3 -> 0.80, and lifted from `+0.14R` to `+0.30R` so the cuff sits just ABOVE
+    // the hip line rather than straddling it. The warning above was written when the
+    // cuff was the only thing connecting the right leg to the body; with `stanceWidth`
+    // at 0.11H the thighs now overlap the stick itself by 0.10 m each, so the cuff is
+    // no longer load-bearing and can stop covering 100% of both thighs (`hipL`
+    // delivered 0.006 of a 1,426 px footprint with the cuff reaching 0.44 m).
+    const petalGeo = new THREE.ConeGeometry(stickR * 0.55, R * 0.18, 3, 1, true);
     const petalMatA = toonMat({ color: CANDY_RED, roughness: 0.68 });
     const petalMatB = toonMat({ color: CANDY_WHITE, roughness: 0.68 });
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
       const petal = new THREE.Mesh(petalGeo, i % 2 === 0 ? petalMatA : petalMatB);
       petal.name = 'lollipop_wrapper_petal';
-      petal.position.set(Math.cos(a) * stickR * 0.85, stickBottomY + R * 0.14, Math.sin(a) * stickR * 0.85);
+      petal.position.set(Math.cos(a) * stickR * 0.75, stickBottomY + R * 0.50, Math.sin(a) * stickR * 0.75);
       petal.rotation.set(0.4, a, 0);
       petal.castShadow = true;
       petal.receiveShadow = true;
       head.add(petal);
+    }
+
+    // ── Wrapper collar, on the HIPS — the one thing both legs can hold on to ────
+    // The stick is parented to `head` (it has to be: the eyes are built onto it), so
+    // it inherits `headTilt`. At -0.28 rad and 0.68 m of lever that swings the stick's
+    // BOTTOM 0.188 m sideways, which is more than half the stance — measured, the left
+    // thigh ended up buried inside the stick (0.041 delivered) while the right thigh
+    // and foot became their own connected component (4,325 px) in the same frame.
+    // Widening the stick fixes one and worsens the other; there is no radius that
+    // fixes both, because the failure is the OFFSET, not the width.
+    //
+    // A short wrapper collar on `joints.hips` does not inherit the tilt, so it sits
+    // symmetrically over both hip pivots by construction. It is also the honest read:
+    // this is the twisted candy wrapper where the stick enters the body.
+    {
+      const collarR = this.rig.metrics.stanceWidth * 0.86;
+      const collarH = this.rig.metrics.thighLength * 0.55;
+      const collar = new THREE.Mesh(
+        new THREE.CylinderGeometry(collarR, collarR * 0.82, collarH, 18, 1, false),
+        toonMat({ color: CANDY_RED, roughness: 0.68 })
+      );
+      collar.name = 'lollipop_wrapper_collar';
+      collar.position.y = collarH * 0.16;
+      collar.castShadow = true;
+      collar.receiveShadow = true;
+      this.rig.joints.hips.add(collar);
+      const collarTrim = new THREE.Mesh(
+        new THREE.TorusGeometry(collarR * 0.99, R * 0.022, 6, 22),
+        toonMat({ color: CANDY_WHITE, roughness: 0.6 })
+      );
+      collarTrim.name = 'lollipop_wrapper_collar_trim';
+      collarTrim.rotation.x = Math.PI / 2;
+      collarTrim.position.y = collarH * 0.16 + collarH * 0.34;
+      this.rig.joints.hips.add(collarTrim);
     }
 
     // ── Face: eyes on the stick, mouth on the candy ───────────────────────────

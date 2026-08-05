@@ -64,15 +64,26 @@
  *
  * | knob            | stub | stout | standard | lanky |
  * |-----------------|------|-------|----------|-------|
- * | `headFraction`  | 0.76 | 0.50  | 0.46     | 0.40  |
+ * | `headFraction`  | 0.68 | 0.50  | 0.46     | 0.40  |
  * | `torsoFraction` | 0    | 0.24  | 0.28     | 0.30  |
- * | `legFraction`   | 0.15 | 0.25  | 0.26     | 0.33  |
+ * | `legFraction`   | 0.24 | 0.31  | 0.30     | 0.34  |
  * | `armFraction`   | 0.19 | 0.175 | 0.22     | 0.30  |
  * | torso width     | —    | 0.39  | 0.24     | 0.17  |
  * | `shoulderWidth` | 0.32 | 0.25  | 0.20     | 0.145 |
  * | `stanceWidth`   | 0.225| 0.215 | 0.115    | 0.062 |
  * | `armRadius`     | .062 | 0.085 | 0.058    | 0.040 |
- * | `legRadius`     | .075 | 0.098 | 0.062    | 0.043 |
+ * | `legRadius`     | .058 | 0.074 | 0.056    | 0.043 |
+ * | `footClearance` | 0.25 | 0.23  | 0.18     | 0.125 |
+ *
+ * ── The leg row is the round-2 rewrite, and it is a BUG FIX ──────────────────
+ * `legFraction` and `legRadius` used to be 0.15/0.075 (STUB) and 0.25/0.098
+ * (STOUT). At those values `ChibiRig`'s own arithmetic — thigh and shin split the
+ * bone length, `CapsuleGeometry(r, max(0.001, len - 2r))` — produced segments
+ * SHORTER than they were thick, which `THREE` degenerates into a sphere. The two
+ * spheres then sat inside each other and inside the boot, and the shin reached the
+ * screen at **exactly 0.000 of its own footprint** on nine of eleven characters.
+ * `tools/tmp/legmodel.mjs` prints the ratio that decides it; it sorted the cast
+ * into the measured pass/fail piles with no overlap. See each archetype below.
  *
  * Total nominal height stays near 0.95H in every archetype, so the cast still
  * reads as one family. When a character's food mass is not the ±R sphere the rig
@@ -177,11 +188,33 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
    * legs" read. Note this cannot be fixed by lowering the mass alone: the camera
    * looks DOWN (22 deg in preview, 58 deg in game), so anything above the hips
    * projects over the legs regardless of where its bottom edge sits.
+   *
+   * ── `legFraction` 0.15 -> 0.24, `legRadiusF` 0.075 -> 0.058, ────────────────
+   * ── `footClearance` 0.52 -> 0.25, `headFraction` 0.76 -> 0.68 ──────────────
+   * The wide stance was necessary and not sufficient, and the remainder was never
+   * a camera problem. At 0.15H the whole leg is 0.315 m, `footClearance` 0.52 ate
+   * more than half of it, and what was left — a 0.091 m thigh and a 0.060 m shin —
+   * was THINNER THAN IT WAS WIDE against a 0.158 m leg radius. `CapsuleGeometry`
+   * turns any segment with `len < 2r` into a sphere, so STUB's leg was literally
+   * two overlapping balls 0.32 m across spanning 0.15 m of height, inside a boot
+   * 0.36 m wide whose top sat ABOVE the knee. Delivered shin pixels: **zero**.
+   *
+   * 0.24H with a 0.058 radius makes the shin 1.4x as long as it is wide and puts
+   * the boot's top at 31% of it. `footClearance` follows the rule the whole cast
+   * now shares — `0.96 * legRadiusF / legFraction`, which is what keeps a boot
+   * seated on the floor without being squashed, and which reproduces LANKY's
+   * long-standing hand-picked 0.12 to two decimal places.
+   *
+   * `headFraction` pays for the legs so the archetype's total height does not
+   * move: 0.24 + 0.68 * 0.975 = 0.893 against the old 0.15 + 0.76 * 0.975 = 0.891.
+   * The head is still nearly TWICE any other archetype's, which is what STUB is
+   * for. (All four STUB characters override `headFraction` anyway — see their own
+   * files for the same arithmetic applied to their own masses.)
    */
   stub: {
-    note: 'No torso — head on the hips, very short thick limbs, wide stance.',
-    headFraction: 0.76,
-    legFraction: 0.15,
+    note: 'No torso — head on the hips, short thick limbs, wide stance.',
+    headFraction: 0.68,
+    legFraction: 0.24,
     torsoFraction: 0,
     // ── 0.13 -> 0.19, with `handRadiusF` down from 0.078 ────────────────────────
     // Water Bottle's forearms measured 0.005 and 0.005 delivered while sitting
@@ -198,15 +231,16 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     armFraction: 0.19,
     shoulderFraction: 0.26,
     headMount: 0.95,
-    // Very short, very thick legs: at the stock 0.14 the feet — which are sized
-    // off `legRadius`, not off leg length — go straight through the floor. Nearly
-    // half the leg is ankle here, which is exactly the "no legs, just feet" read.
-    footClearance: 0.52,
+    // `0.96 * legRadiusF / legFraction` — the ankle height that seats a boot on the
+    // floor at full height. The old 0.52 was chosen to stop feet sized off
+    // `legRadius` punching through the floor; the boot now seats itself off
+    // `LimbSize.groundY`, so the clearance can go back to doing its real job.
+    footClearance: 0.25,
     shoulderWidthF: 0.32,
     stanceWidthF: 0.225,
     armRadiusF: 0.062,
     handRadiusF: 0.068,
-    legRadiusF: 0.075,
+    legRadiusF: 0.058,
     // Unused (no torso) but kept sane so a character that flips to another
     // archetype for a round doesn't inherit nonsense.
     torsoWidthF: 0.32 * 1.18,
@@ -227,19 +261,32 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
    * mass is STUB's read, and Hamburger stopped being distinguishable from Egg
    * except by head shape — which is the exact failure this whole exercise exists
    * to fix. STOUT separates from STUB by having a BODY, not by being short.
+   *
+   * ── `legFraction` 0.25 -> 0.31, `legRadiusF` 0.098 -> 0.074, ────────────────
+   * ── `footClearance` 0.44 -> 0.23 ───────────────────────────────────────────
+   * Same mechanism as STUB, one size up. At 0.25H/0.098 the thigh was 0.174 m long
+   * and 0.402 m thick and the shin 0.113 m long and 0.362 m thick — both spheres,
+   * both inside each other, both inside a boot 0.69 m long (a THIRD of the whole
+   * character's height). Measured delivery of `kneeL` at run: 0.000 on all three
+   * STOUT characters. `soup.ts`'s boot builder already carries a comment about
+   * having had to squash the boot to stop it swallowing the shin — that was this
+   * bug, treated one character at a time.
+   *
+   * Note STOUT's legs are now the same length as STANDARD's rather than 0.01H
+   * shorter, which is what the paragraph above already asked for. The archetype's
+   * separation is carried by torso width (0.39H against 0.24H), stance (0.215
+   * against 0.115) and limb thickness — never by leg length.
    */
   stout: {
-    note: 'Short wide torso, thick short limbs, low centre of mass.',
+    note: 'Short wide torso, thick limbs, low centre of mass.',
     headFraction: 0.50,
-    legFraction: 0.25,
+    legFraction: 0.31,
     torsoFraction: 0.24,
     armFraction: 0.175,
     shoulderFraction: 0.24 * 0.80,
     headMount: 0.88,
-    // Thick legs mean big feet (the foot mesh is sized off `legRadius`), so the
-    // ankle has to sit high or the feet go through the floor. 0.44 keeps the
-    // lowest point within ~0.2m of y=0 across all three STOUT characters.
-    footClearance: 0.44,
+    // `0.96 * legRadiusF / legFraction`. See STUB.
+    footClearance: 0.23,
     shoulderWidthF: 0.25,
     // 0.155 -> 0.215. Same measurement as STUB's: a STOUT torso is 0.39H wide and
     // the hips sat at 0.155H, so all three STOUT characters' thighs and shins were
@@ -250,7 +297,7 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
     stanceWidthF: 0.215,
     armRadiusF: 0.085,
     handRadiusF: 0.095,
-    legRadiusF: 0.098,
+    legRadiusF: 0.074,
     torsoWidthF: 0.25 * 1.55,
     torsoWidthRatio: 1.55,
     torsoDepthRatio: 0.88,
@@ -261,21 +308,28 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
    * pre-archetype defaults. Kept unchanged on purpose: with four archetypes in
    * play something has to be the middle, and a middle that also happens to be the
    * historical default makes every other archetype a legible delta from it.
+   *
+   * `legFraction` 0.26 -> 0.30 and `legRadiusF` 0.062 -> 0.056 for the same reason
+   * as the other two, though STANDARD was the least broken of the three: its shin
+   * ratio was already 0.98 and both its characters passed at idle. The change is
+   * what keeps the archetype ladder monotone once STUB and STOUT move, and it buys
+   * the run pose the same headroom.
    */
   standard: {
     note: 'Medium torso and limbs — the neutral chibi baseline.',
     headFraction: 0.46,
-    legFraction: 0.26,
+    legFraction: 0.30,
     torsoFraction: 0.28,
     armFraction: 0.22,
     shoulderFraction: 0.28 * 0.78,
     headMount: 0.86,
-    footClearance: 0.14,
+    // `0.96 * legRadiusF / legFraction`. See STUB.
+    footClearance: 0.18,
     shoulderWidthF: 0.20,
     stanceWidthF: 0.115,
     armRadiusF: 0.058,
     handRadiusF: 0.075,
-    legRadiusF: 0.062,
+    legRadiusF: 0.056,
     torsoWidthF: 0.20 * 1.18,
     torsoWidthRatio: 1.18,
     torsoDepthRatio: 0.88,
@@ -294,16 +348,25 @@ export const BODY_ARCHETYPES: Record<BodyArchetypeName, BodyArchetype> = {
    * `shoulderWidthF` 0.145 against STANDARD's 0.20, `armRadiusF` 0.040 against
    * 0.058, `stanceWidthF` 0.062 against 0.115. Narrow stance so the whole figure
    * reads as a vertical line rather than a triangle.
+   *
+   * **LANKY is the archetype that was already right, and that is the evidence the
+   * other three were wrong.** It is the only one whose leg segments were longer
+   * than they were thick (shin ratio 1.48 against STOUT's 0.31 and STUB's 0.21),
+   * and the only one whose legs read as legs in
+   * `preview.html?piece=roster&silhouette=1`. Its hand-picked `footClearance` 0.12
+   * is also exactly what the cast-wide rule `0.96 * legRadiusF / legFraction`
+   * returns for it — which is why that rule is trustworthy. Only `legFraction`
+   * moves here, and only enough to keep LANKY the longest-legged body in the cast.
    */
   lanky: {
     note: 'Tall narrow torso, long thin limbs, narrow stance.',
     headFraction: 0.40,
-    legFraction: 0.33,
+    legFraction: 0.34,
     torsoFraction: 0.30,
     armFraction: 0.30,
     shoulderFraction: 0.30 * 0.84,
     headMount: 0.86,
-    footClearance: 0.12,
+    footClearance: 0.125,
     shoulderWidthF: 0.145,
     stanceWidthF: 0.062,
     armRadiusF: 0.040,

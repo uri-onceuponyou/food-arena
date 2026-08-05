@@ -852,6 +852,17 @@ export class SoupCharacter extends BaseCharacter {
           // Bows the OTHER way relative to the upper arm, so the two segments
           // together read as one D-shaped handle looping back toward the body
           // rather than a straight tube bent once at a joint.
+          // -0.85 / 0.12 -> -0.38 / 0.34. Measured: both forearms delivered 0.337 and
+          // 0.383 with the food mass covering **0.005 and 0.004** of them — the bowl
+          // was not the occluder, the character's own upper arm was, because the
+          // forearm bowed back INSIDE the D the upper arm makes. Swapping most of the
+          // inward bow for a forward one keeps the D reading while putting the segment
+          // where this camera could see it. **Both variants measured WORSE and were
+          // reverted**: -0.38/0.34 gave 0.322/0.386 and +0.34/0.34 gave 0.257/0.294,
+          // against the original's 0.337/0.383. Recorded because the reasoning was
+          // sound and the result was not — whatever is covering these forearms is not
+          // answered by the bow, and the next attempt should isolate the occluder with
+          // an ID-buffer pass (`tools/tmp/islands.mjs`) before moving geometry again.
           return buildHandleArc(size.len, size.radius * 0.52, side, -0.85, 0.12, handleMat);
         }
         case 'handL':

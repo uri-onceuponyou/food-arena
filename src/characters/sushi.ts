@@ -222,7 +222,8 @@ export class SushiCharacter extends BaseCharacter {
         // shortest in the cast by a visible margin. Raising the hip and shoulder
         // lines puts the same flat head back at ~2.1m top-of-head without inflating
         // it into a dinner plate. Verified with `shoot.mjs --char sushi`.
-        legFraction: 0.29,
+        // (`legFraction` used to be overridden to 0.29 for the same reason;
+        // STANDARD is now 0.30 and the override is gone.)
         torsoFraction: 0.31,
         // `headMount` is the fix for the trap `rig.ts` documents: the rig places
         // the head centre `headRadius * headMount` above the torso top ASSUMING a
@@ -243,7 +244,11 @@ export class SushiCharacter extends BaseCharacter {
         stanceWidth: CHARACTER_HEIGHT * 0.15,    // low, wide stance
         armRadius: CHARACTER_HEIGHT * 0.068,     // thick
         handRadius: CHARACTER_HEIGHT * 0.088,    // big round rice-fist
-        legRadius: CHARACTER_HEIGHT * 0.078,     // thick, stout
+        // 0.078H -> 0.064H. Still the thickest leg on a STANDARD body (the
+        // archetype is 0.056H) so the "thick, stout" read survives, but 0.078
+        // made the shin 0.207 m long against a 0.147 m radius — a sphere, per
+        // `bodies.ts`'s leg note — and `kneeL` measured 0.000 delivered at run.
+        legRadius: CHARACTER_HEIGHT * 0.064,     // thick, stout
       }),
       // Poised and refined — arms held close in rather than out, a slight
       // aloof over-the-shoulder glance. Distinct from every other stance in
@@ -253,6 +258,10 @@ export class SushiCharacter extends BaseCharacter {
         // 0.189 / 0.176 at run — under the floor in both states, tucked in behind
         // the nigiri. The shoulders are already correct (near-zero, so the arms
         // hang where the rig puts them); it was only the elbow tuck.
+        // REVERTED to +-0.04 after measuring. Both signs are inward per §12, and on this
+        // character that is load-bearing: opening them to -+0.12 detached 12,499 px of
+        // limb at run. The nigiri bed is 1.5x wider than the shoulders, so the arms
+        // hang past the body and only the inward tuck keeps them on it.
         shoulderL: 0.04, shoulderR: -0.04,
         elbowL: -0.40, elbowR: -0.40,
         twist: -0.07, headTilt: 0.11, headTurn: -0.22,

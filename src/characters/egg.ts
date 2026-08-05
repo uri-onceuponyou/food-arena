@@ -352,7 +352,7 @@ export class EggCharacter extends BaseCharacter {
       // what opened the arms in the first place) but -0.22 / +0.18 on a pivot that
       // was already outside the shell is what detached them.
       stance: {
-        shoulderL: -0.07, shoulderR: 0.06,
+        shoulderL: -0.14, shoulderR: 0.18,
         elbowL: -0.80, elbowR: -0.76,
         twist: 0.05, headTilt: 0.16, headTurn: 0.32,
         hipSway: 0.01, lean: 0.10,
@@ -462,12 +462,28 @@ export class EggCharacter extends BaseCharacter {
     // near the bottom of the head, where the bulge gives it real radius to wrap.
     const scarfMat = toonMat({ color: LIMB_LILAC, roughness: 0.6 });
     const scarfDarkMat = toonMat({ color: LIMB_LILAC_SHADOW, roughness: 0.6 });
+    // ── The scarf, not the shell, was burying this character's legs ─────────────
+    // Measured with `tools/tmp/masssit.mjs`: the wrap sat 0.627 m half-wide at the
+    // HIP LINE against a 0.549 m stance, and its tassels hung all the way to
+    // y = 0.022 m — the floor. The shell itself is only 0.509 m half-wide there, i.e.
+    // INSIDE the stance and not the problem at all. It showed up as `hipR`
+    // overlapping the mass by **1.000 at every stride phase** while delivering 0.000
+    // px. The costume was burying the legs, not the egg.
+    //
+    // **Do not fix it by raising `scarfPhi`.** Tried and measured: `BOTTOM_BULGE`
+    // peaks at ny = -0.5, i.e. phi = 0.667π, so lifting the wrap moves it to the
+    // WIDEST band on the ovoid — 0.66π took the wasted-limb figure from 27.9% to
+    // 55.9% and put `hipL`, `hipR` and `elbowR` all on 0.000. 0.80π is near the
+    // narrowest the wrap can sit and still read as a scarf; the fix is to stop the
+    // wrap and its tails being oversized THERE.
     const scarfPhi = 0.80 * Math.PI;
     const scarfPt = eggSurface(Math.PI / 2, scarfPhi, R);
     const scarfRadius = Math.hypot(scarfPt.pos.x, scarfPt.pos.z);
     const scarfY = scarfPt.pos.y;
 
-    const scarfWrap = new THREE.Mesh(new THREE.TorusGeometry(scarfRadius * 1.08, R * 0.13, 10, 24), scarfMat);
+    // 1.08 / 0.13R -> 0.96 / 0.10R: outer edge 0.63 m -> 0.51 m, inside the 0.549 m
+    // stance instead of 0.078 m outside it.
+    const scarfWrap = new THREE.Mesh(new THREE.TorusGeometry(scarfRadius * 0.96, R * 0.10, 10, 24), scarfMat);
     scarfWrap.name = 'egg_scarf_wrap';
     scarfWrap.rotation.x = Math.PI / 2;
     scarfWrap.position.y = scarfY;
@@ -476,9 +492,9 @@ export class EggCharacter extends BaseCharacter {
     head.add(scarfWrap);
 
     for (const sx of [-1, 1] as const) {
-      const tail = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.085, R * 0.48, 4, 8), sx > 0 ? scarfMat : scarfDarkMat);
+      const tail = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.085, R * 0.30, 4, 8), sx > 0 ? scarfMat : scarfDarkMat);
       tail.name = 'egg_scarf_tail';
-      tail.position.set(sx * R * 0.16, scarfY - R * 0.40, scarfRadius * 0.92);
+      tail.position.set(sx * R * 0.16, scarfY - R * 0.26, scarfRadius * 0.92);
       tail.rotation.x = 0.22;
       tail.rotation.z = sx * 0.08;
       tail.castShadow = true;
@@ -487,7 +503,7 @@ export class EggCharacter extends BaseCharacter {
 
       const tassel = new THREE.Mesh(new THREE.SphereGeometry(R * 0.07, 8, 6), scarfDarkMat);
       tassel.name = 'egg_scarf_tassel';
-      tassel.position.set(sx * R * 0.16, scarfY - R * 0.66, scarfRadius * 0.98);
+      tassel.position.set(sx * R * 0.16, scarfY - R * 0.44, scarfRadius * 0.98);
       tassel.castShadow = true;
       head.add(tassel);
     }

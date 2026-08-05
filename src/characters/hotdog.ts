@@ -256,12 +256,16 @@ export class HotDogCharacter extends BaseCharacter {
       // --char hotdog` prints the real bounding height.
       proportions: bodyType('lanky', {
         height: 2.16,
-        shoulderWidth: CHARACTER_HEIGHT * 0.21,  // a touch wider than stock LANKY, to support the sausage's span
+        // 0.21H -> 0.175H, with `torsoWidth` widened below to meet it. Same defect as
+        // burrito: inner edge 0.348 m against a 0.259 m torso half-width, so the right
+        // arm detached at run (9,073 px, one stride phase). Both numbers move because
+        // moving either one alone leaves an overlap of a few millimetres.
+        shoulderWidth: CHARACTER_HEIGHT * 0.196,
         // LANKY's stock torso is 1.15x the shoulder width. On this character the
         // torso is a dressed SPLIT BUN, and at that ratio it came out taller than
         // it was wide and read as a plain capsule instead of two bun halves. A bun
         // needs to be wider than it is deep to read as one at all.
-        torsoWidth: CHARACTER_HEIGHT * 0.17 * 1.45,
+        torsoWidth: CHARACTER_HEIGHT * 0.17 * 1.75,
       }),
       // Slouched and sleepy — weight dropped onto one hip, one shoulder
       // drooping low, head lolling to the side. Distinct from every other

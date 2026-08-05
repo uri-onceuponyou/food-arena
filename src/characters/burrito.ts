@@ -147,7 +147,16 @@ export class BurritoCharacter extends BaseCharacter {
       // still 0.015m clear of the body. 0.277m puts that inner edge inside the
       // wrap and leaves the outer edge proud of it — the straddle, not either edge
       // of the window.
-      proportions: bodyType('lanky', { height: 2.05, shoulderWidth: 2.05 * 0.135 }),
+      proportions: bodyType('lanky', {
+        height: 2.05,
+        // 0.135H -> 0.115H. LANKY's torso is 0.167H wide, i.e. 0.171 m half-width,
+        // and at 0.135H the arm's INNER edge sat at 0.189 m — outside the only mass
+        // it can attach to. At the rearward extreme of the run the whole left arm
+        // became its own connected component, 10,060 px. 0.115H puts the inner edge
+        // at 0.148 m, inside the torso, while the outer edge is still 0.153 m proud
+        // of it.
+        shoulderWidth: 2.05 * 0.105,
+      }),
       // Arms held CLEAR of the body, with a deliberate asymmetry.
       //
       // The signs are the fix, not the magnitudes. `restPose()` sets

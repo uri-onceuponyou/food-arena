@@ -30,9 +30,10 @@
  * (+0.27), so this character was hardened against a frame the game never renders.
  * `preview.ts` now uses a warm mid-dark ground matching the match's own polarity.
  * The defences below are kept — they are correct for a translucent character on any
- * ground — but note that this character still measures the WORST figure/ground in
- * the cast against the real polarity (+0.054 body-minus-frame), which is a genuine
- * open item rather than a solved one. Held off by: a full ink outline on the shell/cap/label
+ * ground. This character used to measure the WORST figure/ground in the cast against
+ * the real polarity (+0.034 body-minus-frame, against a >= 0.10 floor); the blue
+ * family was lifted in round 2 and it now measures **+0.109 idle / +0.116 run**, above
+ * the floor. See the palette block for the arithmetic and for why it is albedo-only. Held off by: a full ink outline on the shell/cap/label
  * (opaque regardless of transmission), a bright near-white label wrap breaking up
  * the transparent mass, a saturated water fill colour distinct from the pale shell,
  * and a dark matte cap anchoring the silhouette.
@@ -73,11 +74,35 @@ import { CHARACTER_HEIGHT } from '../units';
 // near-zero separation, and this character would vanish against a pale arena floor.
 // The shell is still clearly the LIGHTEST thing on the character (that is what sells
 // plastic against liquid) but it now carries real chroma of its own.
-const PLASTIC = '#96DCF4';
-const WATER = '#1478C4';            // richer, saturated liquid fill
-const WATER_DEEP = '#0E5185';       // shaded underside tone, and the fill-line ring
-const CAP = '#123A63';              // dark matte navy — the one place the eye can rest
-const CAP_DARK = '#0B2A49';
+// ── The whole blue family lifted, for FIGURE/GROUND ──────────────────────────
+// Water Bottle finished round 1 with the worst figure/ground in the cast: body luma
+// minus frame luma **+0.034** against this project's own >= 0.10 floor
+// (`docs/LESSONS.md` §3), on a frame whose polarity is now verified to match the
+// shipped match (`preview.ts`'s backdrop note). The cause is arithmetic and not
+// lighting: `WATER` is the limb colour AND the fill, at luma 0.409, and the cap
+// family — hands, boots, cap — sat at 0.206 and 0.147. Two thirds of the character
+// was darker than the kitchen floor it stands on.
+//
+// This is deliberately an ALBEDO-ONLY fix, exactly as HotDog's was (0.0740 ->
+// 0.1328 in round 1). A measured rim-light sweep already proved lighting cannot buy
+// this: retuning the existing rim is worth at most +0.012 before it inverts, because
+// past ~3.4 it lights the GROUND faster than it lights the fighter. Do not reach for
+// the rim here.
+//
+// Hue and saturation are held: `WATER` goes 0.816 -> 0.792 HSL saturation while its
+// luma goes 0.409 -> 0.522, so this spends nothing from the colour budget
+// `arena-scan` guards (`docs/LESSONS.md` §7).
+const PLASTIC = '#BDEDFA';
+const WATER = '#4FB0E8';            // richer, saturated liquid fill
+const WATER_DEEP = '#3A87BE';       // shaded underside tone, and the fill-line ring
+const CAP = '#3E6EA3';              // matte navy — still the darkest area, no longer near-black
+// Held DOWN deliberately while the rest of the family came up. Lifting every blue
+// by the same amount would have bought figure/ground by compressing this character's
+// own internal value ladder, which is the cast's next known defect — measured, the
+// ladder is shell 0.893 -> water/limb 0.625 -> deep 0.481 -> cap 0.407 -> boot 0.268,
+// a span of 0.625 against 0.664 before this change, with every step preserved and in
+// the same order.
+const CAP_DARK = '#26496F';
 // The label was near-white, which spent the single largest opaque area on this
 // character for no chroma at all. It is now a hot sports-label orange: it is the
 // clearest "this is a drinks bottle" cue available, it is the complement of the

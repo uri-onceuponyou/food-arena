@@ -125,21 +125,29 @@ export class DonutCharacter extends BaseCharacter {
       // ring's outer radius (1.04R) at shoulder height, where the torus is
       // ~0.86R wide. See the STUB notes in `bodies.ts`.
       //
-      // `legFraction` is nudged up from STUB's 0.15. A blind critic reading the
-      // silhouette said the feet were "two indistinct pink stubs hidden under
-      // the ring's overhang, so the silhouette is essentially a circle" — a ring
-      // 2.0R wide overhangs 0.15H legs completely, which is the one place this
-      // archetype's proportions fight a very large food mass. 0.20 is still by
-      // far the shortest leg in the cast and STUB's read is untouched; the feet
-      // just clear the ring now, so the circle has something under it.
+      // `legFraction` used to be overridden to 0.20, up from STUB's old 0.15,
+      // because a blind critic reading the silhouette said the feet were "two
+      // indistinct pink stubs hidden under the ring's overhang, so the silhouette
+      // is essentially a circle". STUB itself is now 0.24 and the override is
+      // gone — the archetype finally does what this character had to hand-fit.
+      //
+      // `headFraction` 0.72 -> 0.685 pays for the extra 0.04H of leg so the ring
+      // does not grow: STUB's own rewrite makes the same trade at the same rate.
       proportions: bodyType('stub', {
         height: 2.10,
-        headFraction: 0.72,
-        legFraction: 0.20,
+        headFraction: 0.685,
         // 0.295H -> 0.345H. Measured: the ring is 0.619m half-wide at shoulder
         // height and the pivot sat at 0.620m — exactly ON the surface, so the whole
         // upper arm was inside the dough (delivery 0.46 left, 0.09 right).
-        shoulderWidth: 2.10 * 0.345,
+        // 0.345H -> 0.305H. The ring shrank with `headFraction` 0.72 -> 0.685, so its
+        // half-width at shoulder height went 0.619 -> 0.589 m while the arm's inner
+        // edge stayed at 0.594 — 5 mm OUTSIDE the only mass it can attach to. At run
+        // the whole left arm became its own connected component, 11,133 px.
+        // 0.345 detached the arm (11,133 px at run), 0.305 buried it (shoulderR 0.375
+        // delivered). 0.325H is the middle of a window only 0.084 m wide, which is what
+        // a torus gives you: inner edge 0.552 m inside the ring's 0.589 m, outer edge
+        // 0.224 m proud of it.
+        shoulderWidth: 2.10 * 0.325,
         // ── A RING is widest at its own CENTRE, so STUB's new 0.26 is wrong here ──
         // `bodies.ts` raised STUB's `shoulderFraction` from 0.12 to 0.26 because
         // every other STUB mass (bottle, egg, lollipop stick) is widest LOW, so
@@ -149,10 +157,15 @@ export class DonutCharacter extends BaseCharacter {
         // 0.79m. The archetype's fix would have cost this character 0.17m of extra
         // burial, which is why it is overridden rather than inherited.
         shoulderFraction: 0.12,
-        // The ring is 0.81m wide and STUB's stance (even widened to 0.225H) leaves
-        // the thighs at 0.278-0.317 delivered. 0.26H is as far as this can go before
-        // the legs leave the dough entirely and detach.
-        stanceWidth: 2.10 * 0.26,
+        // 0.26H -> 0.225H, back to STUB's own value. The 0.26 was bought to drag the
+        // thighs out from under the ring when the legs were 0.20H long; at 0.24H they
+        // clear it vertically instead and the width is no longer paying for anything.
+        // It is now actively harmful: measured, the ring's own half-width at the hip
+        // line is 0.504 m (`tools/tmp/masssit.mjs`) against hips at 0.535 — the legs
+        // hung 0.031 m OUTSIDE the only mass they could attach to, and at run the
+        // whole left arm-and-leg became its own connected component, 19,248 px
+        // detached. That is the second edge of the same window round 1 documented.
+        stanceWidth: 2.10 * 0.20,
       }),
       // Bouncy and playful — hip popped out, head cocked, weight rocked back onto
       // her heels like she's mid-bounce. An art director's second pass named the

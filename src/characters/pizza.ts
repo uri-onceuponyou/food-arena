@@ -255,6 +255,12 @@ export class PizzaCharacter extends BaseCharacter {
         // and mitt measured 0.867 / 0.382 / 0.692 with 0.165-0.380 of each covered
         // by the dough. +0.10 opens it. The left stays as authored — it is the arm
         // that was already clear, and over-opening it is what detached it at run.
+        // REVERTED to +0.22 after measuring. §12 says +0.22 swings this arm ACROSS the
+        // body, and it does — but the wedge is a CONE, so at shoulder height the body
+        // it has to reach is much narrower than at the hip. Opening to -0.18 put the
+        // whole left arm in its own connected component (12,876 px at idle, 13,012 at
+        // run). The inward swing is what keeps the arm on the wedge. This is the far
+        // edge of the same window the rest of the cast is fitted to.
         shoulderL: 0.22, shoulderR: 0.10,
         // -0.64 -> -0.46 on the right: at -0.64 the right forearm tucked behind the
         // wedge and delivered exactly 0.500 of its footprint, sitting on the

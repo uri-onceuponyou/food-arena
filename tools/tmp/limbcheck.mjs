@@ -41,6 +41,7 @@ const ANIMS = get('--anims', 'idle,run').split(',');
 /** Run is sampled at two stride phases; the WORST of the two is what is reported. */
 const TS = get('--t', '1.5').split(',').map(Number);
 const W = Number(get('--w', 640)), H = Number(get('--h', 800));
+const VERBOSE = a.includes('--verbose');
 const FOOT_MIN = Number(get('--footMin', 700));
 const RATIO_MIN = Number(get('--ratioMin', 0.5));
 
@@ -324,6 +325,18 @@ try {
         for (const t of ts) {
           const r = await page.evaluate(MEASURE, { t, anim });
           r.t = t;
+          // `--verbose` prints EVERY sampled phase, not just the worst. Added because
+          // "the trailing leg is invisible at run" has two very different causes with
+          // the same summary line: a body-plan defect that holds all cycle, or one
+          // extreme of the stride where the leg genuinely is behind the character.
+          // Only the per-phase spread can tell them apart. Reporting only — the
+          // pass/fail metric below is untouched.
+          if (VERBOSE) {
+            const legs = r.parts.filter((p) => ['hipL', 'hipR', 'kneeL', 'kneeR', 'footL', 'footR'].includes(p.part))
+              .sort((p, q) => p.part.localeCompare(q.part))
+              .map((p) => `${p.part}=${String(p.ratio).padEnd(5)}(ovl ${p.ovl})`).join(' ');
+            console.log(`      t=${t.toFixed(3)} ${legs}`);
+          }
           if (!worst) worst = r;
           else {
             // keep the sample with the most failing limbs, then the most detached px

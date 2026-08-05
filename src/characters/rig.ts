@@ -79,6 +79,27 @@ export interface LimbSize {
   groundY: number;
 }
 
+/**
+ * Foot scale, as a multiple of `legRadius`. Handed to every foot builder as
+ * `LimbSize.len` and used by the rig's own default boot, so ONE number sizes every
+ * foot in the cast.
+ *
+ * ── 2.3 -> 1.75 ─────────────────────────────────────────────────────────────
+ * At 2.3 the boot is `2.3 * 1.34 = 3.08` leg-radii DEEP and `2.3 * 0.96 = 2.21`
+ * wide, against a shin `1.8` radii wide — so the boot was wider than the leg
+ * wearing it in every direction, and its top sat `0.22 * 2.3 = 0.51` radii above
+ * the ankle. On the two stubby archetypes that was ~100% of the shin's entire
+ * length: measured, `kneeL` delivered **exactly 0.000** of its own footprint at
+ * run on nine of eleven characters, and on donut its screen overlap with the food
+ * mass was 0.001 — nothing about the food was hiding it, the boot was. On STOUT
+ * the foot was also 0.69 m long on a 2.05 m character (34% of its height), which
+ * is most of the cast-wide "no legs, just feet" read all by itself.
+ *
+ * 1.75 puts the boot NARROWER than the shin it sits under (1.68 vs 1.8 radii) and
+ * its top at 0.385 radii, and leaves the foot a still-oversized ~20% of height.
+ */
+export const FOOT_WIDTH_RATIO = 1.75;
+
 /** Attachment points `dressLimbs` can replace. */
 export type LimbPart =
   | 'upperArmL' | 'upperArmR' | 'forearmL' | 'forearmR' | 'handL' | 'handR'
@@ -341,7 +362,12 @@ export class ChibiRig {
     // (several pass `height` to `bodyType`) keeps the same motion weight, and a
     // character that switches archetype gets the new one for free.
     //
-    // Resolves to roughly stub 0.83 / stout 1.00 / standard 0.47 / lanky 0.00.
+    // Resolves to roughly stub 0.83 / stout 0.97 / standard 0.38 / lanky 0.00.
+    // (Those are the ARCHETYPE values recomputed after the round-2 leg rewrite. The
+    // figures previously quoted here — 0.83 / 1.00 / 0.47 — had gone stale when
+    // `stanceWidthF` was widened: STUB and STOUT were both sitting on the clamp at
+    // exactly 1.0 and therefore moving IDENTICALLY, which is the very thing this
+    // number exists to prevent. Thinner legs pull both back off the rail.)
     // STOUT ending up heaviest is a check on the formula rather than a coincidence:
     // `rules.ts` independently gives the STOUT cast the lowest speed stats in the
     // game (soup 4, hamburger 5, taco 5) and the LANKY cast the highest (hotdog 7,
@@ -411,11 +437,22 @@ export class ChibiRig {
     const handR = mk(elbowR, 'handR', new THREE.Vector3(0, -forearmLen, 0));
 
     // The ankle sits `footClearance` of the way up the leg, because the foot mesh
-    // hangs BELOW it and is sized off `legRadius`. Thigh/shin then split the rest
-    // in the rig's original 0.52 : 0.34 ratio.
+    // hangs BELOW it and is sized off `legRadius`.
+    //
+    // ── THIGH_SHARE 0.605 -> 0.55 ──────────────────────────────────────────────
+    // The old value was the rig's pre-archetype 0.52 : 0.34 ratio carried forward.
+    // It is the wrong split for THIS rig because the shin is the segment that
+    // fails: `buildLimbs` gives it 0.9x the thigh's radius but only 0.395 of the
+    // bone length, so `shinLen / (2 * shinRadius)` — the number that decides
+    // whether `CapsuleGeometry` produces a capsule or a sphere — was the smallest
+    // ratio on every archetype. Measured across the cast (tools/tmp/legmodel.mjs):
+    // every character whose shin ratio was <= 0.31 failed the limb-visibility test
+    // and every one at >= 0.70 passed, with no overlap. Moving the split evens the
+    // two segments' odds and costs the thigh nothing it needs.
+    const THIGH_SHARE = 0.55;
     const ankleY = legH * this.p.footClearance;
     const boneLen = legH - ankleY;
-    const thighLen = boneLen * 0.605;
+    const thighLen = boneLen * THIGH_SHARE;
     const shinLen = boneLen - thighLen;
     const hipL = mk(hips, 'hipL', new THREE.Vector3(-this.p.stanceWidth, 0, 0));
     const hipR = mk(hips, 'hipR', new THREE.Vector3(this.p.stanceWidth, 0, 0));
@@ -568,7 +605,7 @@ export class ChibiRig {
     // -ankleY is the whole fix, and it is expressed in terms of `metrics` so it
     // stays right when an archetype retunes `footClearance` or `legRadius`.
     for (const [joint, name] of [[this.joints.footL, 'footL'], [this.joints.footR, 'footR']] as const) {
-      const fw = this.p.legRadius * 2.3;
+      const fw = this.p.legRadius * FOOT_WIDTH_RATIO;
       const m = solid(new THREE.Mesh(roundedBox(fw, fw * 0.72, fw * 1.5, fw * 0.3, 4), footMat));
       m.position.set(0, Math.max(-this.metrics.ankleY + fw * 0.36, -fw * 0.18), fw * 0.28);
       m.name = `${name}_mesh`;
@@ -626,8 +663,8 @@ export class ChibiRig {
       ['thighR', j.hipR, { len: m.thighLength, radius: m.legRadius, groundY }],
       ['shinL', j.kneeL, { len: m.shinLength, radius: m.legRadius * 0.9, groundY }],
       ['shinR', j.kneeR, { len: m.shinLength, radius: m.legRadius * 0.9, groundY }],
-      ['footL', j.footL, { len: m.legRadius * 2.3, radius: m.legRadius * 1.15, groundY }],
-      ['footR', j.footR, { len: m.legRadius * 2.3, radius: m.legRadius * 1.15, groundY }],
+      ['footL', j.footL, { len: m.legRadius * FOOT_WIDTH_RATIO, radius: m.legRadius * FOOT_WIDTH_RATIO * 0.5, groundY }],
+      ['footR', j.footR, { len: m.legRadius * FOOT_WIDTH_RATIO, radius: m.legRadius * FOOT_WIDTH_RATIO * 0.5, groundY }],
     ];
   }
 
@@ -896,8 +933,32 @@ export class ChibiRig {
       const pass = Math.abs(Math.cos(phase));
 
       const hipAmp = 0.85 * (1 + 0.30 * W);
-      j.hipL.rotation.x = sw * hipAmp;
-      j.hipR.rotation.x = swOpp * hipAmp;
+      // ── The stride is deliberately ASYMMETRIC, and it is a visibility fix ──────
+      // A leg swung BACKWARD does not just move back, it rises: rotating about the
+      // hip by theta lifts the knee by `thigh * (1 - cos theta)` AND pushes it to
+      // -z, and this camera looks DOWN, so both terms add. Screen-up gain works out
+      // as `thigh * (0.927 (1-cos t) + 0.375 sin t)` at the preview's 22 deg — at
+      // the old symmetric 63 deg that is 0.84 of a thigh length, which walks the
+      // trailing leg straight up into the food mass. Measured per stride phase
+      // (`tools/tmp/limbcheck.mjs --verbose`): the trailing leg's screen overlap
+      // with the mass went 0.00 -> 0.99 and its delivered pixels 0.92 -> 0.00,
+      // across every archetype including LANKY, which is otherwise clean.
+      //
+      // The FORWARD half has the opposite sign — a leg reaching toward camera
+      // projects DOWN, away from the mass — and it measured 0.7-0.9 delivered
+      // throughout. So the reach is worth keeping and only the rearward half is
+      // costing anything. 0.45 puts the trailing hip at ~28 deg while the leading
+      // one still reaches 63, which is also what stylised run cycles actually draw.
+      // 0.58 was measured first and moved the cast's mean wasted-limb figure at run
+      // by only 3.9 points without closing anything outright, so it went further.
+      // Stride length is the cost: foot travel drops ~23% against the old symmetric
+      // swing. `tools/filmstrip.mjs` still reads as a run — see the report.
+      const BACK_LIFT = 0.45;
+      const hipSwing = (s: number) => (s > 0 ? s * BACK_LIFT : s) * hipAmp;
+      const hipXL = hipSwing(sw);
+      const hipXR = hipSwing(swOpp);
+      j.hipL.rotation.x = hipXL;
+      j.hipR.rotation.x = hipXR;
       // Swing-leg tuck, plus a compression bend on whichever leg is landing. There
       // was no impact absorption at all before: the knees only ever tucked.
       const compL = Math.pow(Math.max(0, sw), 2) * 0.30 * (0.5 + W);
@@ -917,8 +978,11 @@ export class ChibiRig {
       // the feet were 25 px airborne while the body compressed against nothing.
       // Cancelling the real angle makes both contacts behave the same by
       // construction, and the residual 40% still gives toe-off and heel strike.
-      j.footL.rotation.x = -(sw * hipAmp + kneeXL) * 0.60;
-      j.footR.rotation.x = -(swOpp * hipAmp + kneeXR) * 0.60;
+      // Note this reads `hipXL`/`hipXR`, the ACTUAL hip angles, not `sw * hipAmp` —
+      // the asymmetric stride above means those are no longer the same number, and
+      // cancelling the wrong one would pitch the sole by the difference.
+      j.footL.rotation.x = -(hipXL + kneeXL) * 0.60;
+      j.footR.rotation.x = -(hipXR + kneeXR) * 0.60;
 
       // Arms lag the legs. Overlap is what stops a run reading as one rigid object
       // rotating about its own centre, and heavier bodies drag further behind.
@@ -926,8 +990,18 @@ export class ChibiRig {
       const armL = shape(Math.sin(phase + Math.PI - lag)) * move;
       const armR = shape(Math.sin(phase - lag)) * move;
       const armAmp = 0.75 - 0.20 * W; // thick arms swing less
-      j.shoulderL.rotation.x += armL * armAmp;
-      j.shoulderR.rotation.x += armR * armAmp;
+      // Same asymmetry as the hips, for the same reason and with a second one on
+      // top. Rearward is +x here too, so a back-swinging arm rises AND goes behind —
+      // and on the two LANKY characters the arm pivot already sits outside the torso
+      // (burrito: inner edge 0.189 m against a 0.171 m torso half-width), so at the
+      // rearward extreme the whole arm became its own connected component — 10,060 px
+      // on burrito, 9,073 px on hotdog. Note both were invisible in the summary until
+      // their limb failures cleared, because the probe reports the phase with the most
+      // FAILING groups and only breaks ties on detachment.
+      const ARM_BACK = 0.55;
+      const armSwing = (s: number) => (s > 0 ? s * ARM_BACK : s) * armAmp;
+      j.shoulderL.rotation.x += armSwing(armL);
+      j.shoulderR.rotation.x += armSwing(armR);
       j.elbowL.rotation.x -= Math.abs(Math.sin(phase + Math.PI - lag * 2)) * 0.35;
       j.elbowR.rotation.x -= Math.abs(Math.sin(phase - lag * 2)) * 0.35;
 

@@ -216,7 +216,9 @@ export class TacoCharacter extends BaseCharacter {
       // makes the shape read as a container with a front and a back rather than
       // as a cut-out.
       stance: {
-        shoulderL: -0.05, shoulderR: 0.16,
+        // -0.05 barely opened at all and the left thigh measured 0.329 delivered with
+        // only 0.206 of it covered by the shell — the occluder is the mitt, not the food.
+        shoulderL: -0.18, shoulderR: 0.28,
         elbowL: -0.50, elbowR: -0.45,
         twist: 0.05, headTilt: -0.07, headTurn: -0.24,
         hipSway: -0.04, lean: 0.16,
