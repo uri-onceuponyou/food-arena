@@ -82,7 +82,40 @@ const DT = Number(args.dt ?? 16.667);
 const TAG = `${args.tag ?? 'run'}${args.baseline ? ' (HEAD baseline)' : ''}`;
 const POLICY = String(args.policy ?? 'smart');
 
-const ARENA_DATA = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
+/**
+ * ── STALENESS GUARD (added 2026-08-05) ──────────────────────────────────────
+ *
+ * `nav-arena.json` was frozen deliberately: the shared cache was contested while this
+ * probe was written, and a private copy is what made ITS OWN before/after comparable.
+ * That was right at the time and is a trap afterwards — a private freeze has no expiry,
+ * so it silently keeps answering questions about a map that no longer exists.
+ *
+ * It now does: commit 60c5b92 moved every stove island, every counter, every barrel and
+ * both spawns, and this file's frozen copy predates it. So every `--matchups`,
+ * `--reach` and `--alcove` number taken here after that commit describes a layout the
+ * game does not have.
+ *
+ * The fix is not to delete the freeze — it is to make the freeze SAY SO. `--layout
+ * shared` measures the committed cache instead.
+ */
+const SHARED_PATH = `${ROOT}/tools/arena.gameplay.json`;
+const USE_SHARED = String(args.layout ?? '') === 'shared';
+const ARENA_DATA = JSON.parse(readFileSync(USE_SHARED ? SHARED_PATH : ARENA_PATH, 'utf8'));
+{
+  const key = (a) => JSON.stringify([
+    a.playerSpawn, a.enemySpawn, a.maxSafeRadius,
+    [...a.cover].map((c) => `${c.kind}@${c.x},${c.y},${c.w}x${c.h}`).sort(),
+  ]);
+  const shared = JSON.parse(readFileSync(SHARED_PATH, 'utf8'));
+  if (key(ARENA_DATA) !== key(shared)) {
+    console.log(`
+*** STALE ARENA — this probe is reading ${USE_SHARED ? SHARED_PATH : ARENA_PATH}, which does NOT
+*** match tools/arena.gameplay.json. Spawns here are (${ARENA_DATA.playerSpawn.x},${ARENA_DATA.playerSpawn.y})/(${ARENA_DATA.enemySpawn.x},${ARENA_DATA.enemySpawn.y});
+*** the committed layout has (${shared.playerSpawn.x},${shared.playerSpawn.y})/(${shared.enemySpawn.x},${shared.enemySpawn.y}). Everything below describes a map
+*** the game does not have. Re-run with \`--layout shared\`, or refresh the freeze.
+`);
+  }
+}
 const arena = { ...ARENA_DATA, build: () => null, update: () => {} };
 
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
@@ -354,11 +387,20 @@ function lineOfSight(x0, y0, x1, y1) {
   }
   return true;
 }
-function makeNav() {
+function makeNav({ countdownStuckBug = false } = {}) {
   const hist = [];
   let detourUntil = -1, detourSign = 1;
   return function walk(state, tx, ty) {
     const p = state.player;
+    // See `tools/match-sim.mjs`'s makeNav: the stuck detector used to run through the
+    // COUNTDOWN, when `movePlayer` is never called and the player is motionless by
+    // construction. It fired four times before the whistle and every match started with
+    // up to 900 ms of a latched sideways detour. Measured cost on a known-input arena
+    // where the correct closure is 5283 ms: the player arrived at 5867 ms.
+    if (!countdownStuckBug && state.phase !== 'playing') {
+      hist.length = 0; detourUntil = -1;
+      return axesToward(p.x, p.y, tx, ty);
+    }
     hist.push({ t: state.elapsed, x: p.x, y: p.y });
     while (hist.length && state.elapsed - hist[0].t > 1500) hist.shift();
     if (state.elapsed > detourUntil && hist.length > 4 && state.elapsed - hist[0].t > 1200) {
@@ -373,8 +415,27 @@ function makeNav() {
     return axesToward(p.x, p.y, ax, ay);
   };
 }
-function smartPolicy() {
-  const nav = makeNav();
+/**
+ * ═══ POLICY REVISION 2 — matches `tools/match-sim.mjs`, and for the same reason ═══
+ *
+ * This file's `smart` was a reduced copy of match-sim's, so it inherited BOTH of that
+ * file's defects verbatim: line-of-sight tested BEFORE range (so the scripted player
+ * answered "I have no shot" with "walk sideways" at any distance), and a stuck detector
+ * that ran during the countdown (so every match began with up to 900 ms of latched
+ * sideways walking). See match-sim's POLICY REVISION block for the measurements.
+ *
+ * **Every `--matchups` figure this probe printed before 2026-08-05 is SUPERSEDED**,
+ * including the "13.0 s on record" its own header quotes. `smart-losfirst` reproduces
+ * the old behaviour exactly, for comparison only.
+ *
+ * `--reach`, `--truth`, `--alcove` and `--cost` are UNAFFECTED: none of them uses the
+ * scripted player. `--reach`/`--alcove` pin the player as a statue and measure the AI,
+ * `--truth` is pure geometry, `--cost` counts nav work. Those numbers stand.
+ */
+const POLICY_REV = 2;
+
+function makeSmart({ losBeforeRange, countdownStuckBug }) {
+  const nav = makeNav({ countdownStuckBug });
   return (state) => {
     const p = state.player, e = state.enemy;
     const d = dist(p.x, p.y, e.x, e.y);
@@ -383,6 +444,10 @@ function smartPolicy() {
     const los = lineOfSight(p.x, p.y, e.x, e.y);
     const cx = arena.center.x, cy = arena.center.y;
     const dc = dist(p.x, p.y, cx, cy), R = state.safeRadius;
+    const flank = () => {
+      const ang = Math.atan2(e.y - p.y, e.x - p.x) + Math.PI / 2;
+      return { x: p.x + Math.cos(ang) * 150, y: p.y + Math.sin(ang) * 150 };
+    };
     let target;
     if (dc > R - 30) {
       target = { x: cx, y: cy };
@@ -393,10 +458,10 @@ function smartPolicy() {
     } else if (POT && dist(p.x, p.y, POT.x, POT.y) < POT.radius + 15 && R > POT.radius + 40) {
       const ang = Math.atan2(p.y - POT.y, p.x - POT.x);
       target = { x: POT.x + Math.cos(ang) * (POT.radius + 60), y: POT.y + Math.sin(ang) * (POT.radius + 60) };
-    } else if (!los) {
-      const ang = Math.atan2(e.y - p.y, e.x - p.x) + Math.PI / 2;
-      target = { x: p.x + Math.cos(ang) * 150, y: p.y + Math.sin(ang) * 150 };
+    } else if (losBeforeRange && !los) {
+      target = flank();                                   // ← REV 1's defect, kept verbatim
     } else if (d > band) { target = { x: e.x, y: e.y }; }
+    else if (!los) { target = flank(); }                  // ← REV 2: in range AND blocked
     else if (d < band * 0.5) {
       const ang = Math.atan2(p.y - e.y, p.x - e.x);
       target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
@@ -412,6 +477,9 @@ function smartPolicy() {
     };
   };
 }
+function smartPolicy() { return makeSmart({ losBeforeRange: false, countdownStuckBug: false }); }
+/** REV 1, both defects. Reproduction only — do not steer by it. */
+function smartLosFirstPolicy() { return makeSmart({ losBeforeRange: true, countdownStuckBug: true }); }
 
 /** The player does nothing at all. The control: what can the AI do to a statue? */
 function idlePolicy() {
@@ -426,7 +494,14 @@ function chasePolicy() {
     return { move: nav(state, e.x, e.y), aim: { x: e.x - p.x, y: e.y - p.y }, selectedWeapon: w ?? 0, attack: true };
   };
 }
-const POLICIES = { smart: smartPolicy, chase: chasePolicy, idle: idlePolicy };
+const POLICIES = { smart: smartPolicy, 'smart-losfirst': smartLosFirstPolicy, chase: chasePolicy, idle: idlePolicy };
+const POLICY_REV_OF = { smart: 2, 'smart-losfirst': 1, chase: 2, idle: 2 };
+if (POLICY === 'smart-losfirst') {
+  console.log(`
+*** POLICY REV 1 — KNOWN BROKEN (LOS tested before range, stuck detector runs through the
+*** countdown). Present only to reproduce figures recorded before 2026-08-05.
+`);
+}
 
 function runMatch(playerId, enemyId) {
   const state = createMatch(arena, playerId, enemyId);
@@ -469,6 +544,7 @@ function runMatch(playerId, enemyId) {
 
   return {
     player: playerId, enemy: enemyId,
+    policy: POLICY, policyRev: POLICY_REV_OF[POLICY] ?? POLICY_REV,
     outcome: state.phase === 'ended' ? (state.winner === 'player' ? 'player' : 'enemy') : 'NO-END',
     playMs: MATCH_DURATION_MS - state.timeRemaining,
     contactElapsedMs: contactElapsed, contactPlayMs,
@@ -494,7 +570,7 @@ if (args.matchups) {
   const noContact = all.filter((r) => r.contactElapsedMs === null).length;
   const withContact = all.filter((r) => r.contactElapsedMs !== null);
   const mean = (arr, f) => arr.reduce((a, r) => a + f(r), 0) / arr.length;
-  console.log(`\n== MATCHUPS [${TAG}] — ${n} matchups, policy=${POLICY}, clock ${MATCH_DURATION_MS / 1000}s`);
+  console.log(`\n== MATCHUPS [${TAG}] — ${n} matchups, policy=${POLICY} rev${POLICY_REV_OF[POLICY] ?? POLICY_REV}, clock ${MATCH_DURATION_MS / 1000}s`);
   console.log(`   player win rate         ${pct(wins / n)}   (${wins}/${n}, never ended: ${noEnd})`);
   console.log(`   match length            mean ${secs(avg((r) => r.playMs))}  min ${secs(Math.min(...all.map((r) => r.playMs)))}  max ${secs(Math.max(...all.map((r) => r.playMs)))}`);
   console.log(`   TIME TO FIRST CONTACT   mean ${secs(mean(withContact, (r) => r.contactElapsedMs))} ELAPSED (incl. 5.7s countdown)`);

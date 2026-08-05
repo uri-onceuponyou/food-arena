@@ -300,44 +300,128 @@ import { execFileSync } from 'node:child_process';
 // ─────────────────────────────────────────────────────────────────────────────
 const ARENA_W = 1400, ARENA_H = 1000;
 const CENTRE = { x: 700, y: 500 };
-const MAX_SAFE_RADIUS = 850;      // fogRadius=850 => ring parked off the map corners
+/**
+ * `shared.ts` computes this as `ARENA_HALF_DIAGONAL / (1 - FOG_FIRST_CONTACT_S*1000 /
+ * MATCH_DURATION_MS)` = 860.23 / (1 - 6/45) = 993, and `match.ts:applyQaSetup` clamps
+ * `?fogRadius=` to it. Passing the real maximum is what parks the ring genuinely OFF the
+ * map: the furthest corner is 860 wu from centre, so anything below that fogs the
+ * corners. This file used to pass 850, which put the fog wall INSIDE the `edge_west`
+ * frame and mixed death-zone colour into a "normal play" colour sample. Same class as
+ * everything else in this file: a number that was right when it was written (the clock
+ * was 180 s and the maximum was 890) and silently stopped being right.
+ */
+const MAX_SAFE_RADIUS = 993;
 const GREASE = { x: 560, y: 900 };
 const WATER = { x: 840, y: 100 };
+const PLAYER_SIZE = 42;           // rules.ts; the fighter's collision box
 
 /**
  * Every `CoverBox` in `kitchen.ts`, as {x, y, w, h} centre + full extent.
+ * MIRRORS `tools/arena.gameplay.json` — `--selftest` asserts it box-for-box, because a
+ * hand-copied layout is a second source of truth and this project has been burned by
+ * every one it has ever had. **Refreshed for 60c5b92**, which moved every island, every
+ * counter, every barrel, both spawns and made the pot solid.
  *
- * Here for ONE reason: `?px=/?py=` write straight into `MatchState` with no collision
- * resolution, so a station placed on a prop puts the player INSIDE it. At the shipped
- * 58 deg pitch a freezer or a barrel then swallows the character completely — the
- * first draft of this file lost four of eighteen stations that way and the frames
- * looked like a rendering bug. `validate()` below turns that into a startup error.
+ * Here for TWO reasons, and the second was learned the hard way:
+ *  1. `?px=/?py=` write straight into `MatchState`, so a station placed on a prop puts
+ *     the player INSIDE it and at the shipped 58 deg pitch a freezer swallows the
+ *     character. Four of eighteen stations were in this state after 60c5b92.
+ *  2. Legal ground is not the same as REACHABLE ground. Before 60c5b92, `west_lane`,
+ *     `west_choke` and `fog_boundary` sat inside sealed pockets — floor no fighter could
+ *     ever walk to — so the colour baseline held frames shot from ground the game cannot
+ *     produce. Nothing in the old validator could see that, because each station was
+ *     legal on its own.
+ *
+ * `validate()` below tests BOTH and refuses to scan on either.
  */
 const COVER = [
-  [525, 350, 170, 90], [875, 350, 170, 90], [525, 650, 170, 90], [875, 650, 170, 90], // stove islands
-  [700, 258, 55, 55], [700, 742, 55, 55],                                             // lane pots
-  [525, 500, 50, 50], [875, 500, 50, 50],                                             // spice carts
-  [230, 190, 230, 190], [1170, 810, 230, 190],                                        // freezers
-  [1120, 150, 90, 90], [280, 850, 90, 90],                                            // herb crates
-  [1230, 140, 80, 80], [170, 860, 80, 80],                                            // tall crates
-  [1175, 235, 110, 70], [225, 765, 110, 70],                                          // flour sacks
-  [340, 420, 160, 55], [340, 580, 160, 55], [1060, 580, 160, 55], [1060, 420, 160, 55], // prep counters
-  [250, 500, 60, 50], [460, 500, 48, 46], [1150, 500, 60, 50], [940, 500, 48, 46],    // supply barrels
-  [700, 830, 150, 70], [700, 170, 150, 70],                                           // fryer / sink
+  [430, 300, 170, 90], [970, 300, 170, 90], [430, 700, 170, 90], [970, 700, 170, 90],  // stove islands
+  [1010, 120, 55, 55], [390, 880, 55, 55],                                             // stacked pots
+  [450, 120, 50, 50], [950, 880, 50, 50],                                              // spice carts
+  [230, 190, 230, 190], [1170, 810, 230, 190],                                         // freezers
+  [1120, 150, 90, 90], [280, 850, 90, 90],                                             // herb crates
+  [1230, 140, 80, 80], [170, 860, 80, 80],                                             // tall crates
+  [1175, 235, 110, 70], [225, 765, 110, 70],                                           // flour sacks
+  [265, 330, 160, 55], [265, 670, 160, 55], [1135, 670, 160, 55], [1135, 330, 160, 55], // prep counters
+  [60, 250, 60, 50], [60, 750, 48, 46], [1340, 750, 60, 50], [1340, 250, 48, 46],      // supply barrels
+  [700, 830, 150, 70], [700, 170, 150, 70],                                            // fryer / sink
+  [700, 500, 104, 104],                                                                // the boiling pot — SOLID since a31bdb4
 ];
-/** Clearance a station must keep from every cover box, in world units. */
-const CLEARANCE = 18;
+/** Where the AI starts; the flood below runs from here, so "reachable" means
+ *  "reachable by a fighter in a real match", not "connected to something". */
+const ENEMY_SPAWN = { x: 1240, y: 610 };
+/** Clearance a station must keep from every cover box, in world units. `movement.ts`
+ *  refuses a step whose destination overlaps, i.e. within `(PLAYER_SIZE + w)/2`, so the
+ *  minimum honest clearance is PLAYER_SIZE/2 = 21. This was 18 — LOOSER than the real
+ *  collision test, so the guard could pass a station the sim would bury. */
+const CLEARANCE = 24;
+
+/** Does a fighter CENTRED here overlap any cover box? Exactly `movement.ts`'s test. */
+function coverAt(x, y, pad = 0) {
+  for (const [cx, cy, w, h] of COVER) {
+    if (Math.abs(x - cx) < PLAYER_SIZE / 2 + w / 2 + pad && Math.abs(y - cy) < PLAYER_SIZE / 2 + h / 2 + pad) {
+      return { x: cx, y: cy, w, h };
+    }
+  }
+  return null;
+}
+
+/**
+ * Flood the legal standing space outward from the enemy spawn on a 4 wu lattice, using
+ * the same "diagonals only where both orthogonals are open" rule the nav grid uses.
+ * Anything the flood does not touch is a sealed pocket: legal to stand on, impossible
+ * to arrive at. Built once, lazily, and it costs ~5 ms.
+ */
+let REACHABLE = null;
+const LATTICE = 4;
+function buildReachable() {
+  const cols = Math.floor(ARENA_W / LATTICE), rows = Math.floor(ARENA_H / LATTICE);
+  const half = PLAYER_SIZE / 2;
+  const legal = new Uint8Array(cols * rows);
+  for (let gy = 0; gy < rows; gy++) for (let gx = 0; gx < cols; gx++) {
+    const x = (gx + 0.5) * LATTICE, y = (gy + 0.5) * LATTICE;
+    legal[gy * cols + gx] = (x >= half && x <= ARENA_W - half && y >= half && y <= ARENA_H - half && !coverAt(x, y)) ? 1 : 0;
+  }
+  const seen = new Uint8Array(cols * rows);
+  const q = new Int32Array(cols * rows);
+  let h = 0, t = 0;
+  const s0 = Math.min(rows - 1, Math.floor(ENEMY_SPAWN.y / LATTICE)) * cols + Math.min(cols - 1, Math.floor(ENEMY_SPAWN.x / LATTICE));
+  q[t++] = s0; seen[s0] = 1;
+  while (h < t) {
+    const c = q[h++], cx = c % cols, cy = (c - cx) / cols;
+    for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+      if (!ox && !oy) continue;
+      const nx = cx + ox, ny = cy + oy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ni = ny * cols + nx;
+      if (!legal[ni] || seen[ni]) continue;
+      if (ox && oy && (!legal[cy * cols + nx] || !legal[ny * cols + cx])) continue;
+      seen[ni] = 1; q[t++] = ni;
+    }
+  }
+  return { cols, rows, seen, legal, nReached: t };
+}
+function isReachable(x, y) {
+  REACHABLE ??= buildReachable();
+  const gx = Math.min(REACHABLE.cols - 1, Math.max(0, Math.floor(x / LATTICE)));
+  const gy = Math.min(REACHABLE.rows - 1, Math.max(0, Math.floor(y / LATTICE)));
+  return !!REACHABLE.seen[gy * REACHABLE.cols + gx];
+}
 
 function validate(stations) {
   const bad = [];
   for (const s of stations) {
-    for (const [cx, cy, w, h] of COVER) {
-      if (Math.abs(s.x - cx) < w / 2 + CLEARANCE && Math.abs(s.y - cy) < h / 2 + CLEARANCE) {
-        bad.push(`${s.id} (${s.x},${s.y}) sits inside cover box centred (${cx},${cy}) ${w}x${h}`);
-      }
-    }
     if (s.x < 20 || s.x > ARENA_W - 20 || s.y < 20 || s.y > ARENA_H - 20) {
       bad.push(`${s.id} (${s.x},${s.y}) is outside the playfield`);
+      continue;
+    }
+    const box = coverAt(s.x, s.y, CLEARANCE - PLAYER_SIZE / 2);
+    if (box) {
+      bad.push(`${s.id} (${s.x},${s.y}) sits inside cover box centred (${box.x},${box.y}) ${box.w}x${box.h}`);
+      continue;
+    }
+    if (!isReachable(s.x, s.y)) {
+      bad.push(`${s.id} (${s.x},${s.y}) is on SEALED ground — legal to stand on, but no fighter can ever walk there, so no frame shot from it exists in a real match`);
     }
   }
   return bad;
@@ -356,18 +440,31 @@ function validate(stations) {
  */
 const STATIONS = [
   // ── normal play, the west half (player spawn side) ──────────────────────────
-  { id: 'spawn_west',    x: 160,  y: 500, fog: MAX_SAFE_RADIUS, note: 'player spawn, looking down the west lane' },
-  { id: 'west_lane',     x: 340,  y: 500, fog: MAX_SAFE_RADIUS, note: 'primary combat lane: barrels, prep counters, spill decals' },
-  { id: 'west_choke',    x: 400,  y: 500, fog: MAX_SAFE_RADIUS, note: 'the mid-lane chokepoint between the two supply barrels' },
+  // MOVED with the spawn itself. 60c5b92 took the spawns 110wu off the centre line and
+  // this station stayed at y=500, so a station whose entire purpose is "what the player
+  // sees at the whistle" was 110wu from where the player actually stands. Cheap to miss,
+  // and exactly the class of drift this file is supposed to be immune to.
+  { id: 'spawn_west',    x: 160,  y: 390, fog: MAX_SAFE_RADIUS, note: 'THE player spawn (kitchen.ts playerSpawn), looking east down the west lane' },
+  // Both of these were INSIDE A SEALED POCKET until 60c5b92 opened the centre line —
+  // legal ground that nothing could walk to. Verified reachable by `validate()` now.
+  { id: 'west_lane',     x: 340,  y: 500, fog: MAX_SAFE_RADIUS, note: 'primary combat lane: the two west prep counters and the spill decals between them' },
+  { id: 'west_choke',    x: 400,  y: 500, fog: MAX_SAFE_RADIUS, note: 'mid-lane, looking east into the hub (the barrels that used to pinch here moved to the far strips in 60c5b92)' },
   // ── the hub. Never centred on the pot. ─────────────────────────────────────
   { id: 'pot_south',     x: 700,  y: 640, fog: MAX_SAFE_RADIUS, note: 'pot 140wu north of the player — hazard in frame, not filling it' },
-  { id: 'pot_diagonal',  x: 570,  y: 430, fog: MAX_SAFE_RADIUS, note: 'hub diagonal: pot + stove island + spice cart + lane pots together' },
-  { id: 'hub_north',     x: 700,  y: 320, fog: MAX_SAFE_RADIUS, note: 'north lane mouth, stacked pots, sink counter beyond' },
+  { id: 'pot_diagonal',  x: 570,  y: 430, fog: MAX_SAFE_RADIUS, note: 'hub diagonal: the pot, the NW stove island and the west prep counter in one frame' },
+  { id: 'hub_north',     x: 700,  y: 320, fog: MAX_SAFE_RADIUS, note: 'north lane mouth: sink counter, both north stove islands, pot rim at the bottom of frame' },
   // ── corners: the four landmark clusters ────────────────────────────────────
-  { id: 'freezer_nw',    x: 430,  y: 240, fog: MAX_SAFE_RADIUS, note: 'NW walk-in freezer + exhaust pipe, seen from the lane' },
-  { id: 'pantry_ne',     x: 1150, y: 330, fog: MAX_SAFE_RADIUS, note: 'NE pantry cluster: crates, herb crate, flour sacks, on its plank pad' },
-  { id: 'pantry_sw',     x: 270,  y: 665, fog: MAX_SAFE_RADIUS, note: 'SW pantry cluster + a real prep counter in the same frame' },
-  { id: 'freezer_se',    x: 1000, y: 700, fog: MAX_SAFE_RADIUS, note: 'SE walk-in freezer (mirror)' },
+  // ── MOVED for 60c5b92. All four of the old positions landed inside a prop that had
+  //    been somewhere else when they were chosen: (430,240) in the NW stove island,
+  //    (1150,330) and (270,665) in prep counters, (1000,700) in the SE stove island.
+  //    Nothing rendered wrong; the camera simply centred on a buried character, and the
+  //    frames were measured anyway. That alone manufactured a false colour regression
+  //    (cast/env hue overlap read 0.1785 -> 0.2363, while on the 14 legal stations it had
+  //    IMPROVED, 0.1742 -> 0.1674). A future colour pass would have chased it.
+  { id: 'freezer_nw',    x: 430,  y: 420, fog: MAX_SAFE_RADIUS, note: 'NW corner: walk-in freezer beyond the north-west stove island' },
+  { id: 'pantry_ne',     x: 1150, y: 420, fog: MAX_SAFE_RADIUS, note: 'NE pantry cluster: flour sacks and the east prep counter, crates beyond' },
+  { id: 'pantry_sw',     x: 400,  y: 800, fog: MAX_SAFE_RADIUS, note: 'SW pantry cluster: herb crate, tall crate, flour sacks, prep counter and stacked pots together' },
+  { id: 'freezer_se',    x: 1000, y: 580, fog: MAX_SAFE_RADIUS, note: 'SE quadrant: stove island, east prep counter, walk-in freezer beyond' },
   // ── service counters + decoration density ──────────────────────────────────
   { id: 'fryer_south',   x: 560,  y: 790, fog: MAX_SAFE_RADIUS, note: 'fryer counter, chalkboard, stacked pots, south apron edge' },
   // ── map edge: does the apron hold the frame? ───────────────────────────────
@@ -988,6 +1085,24 @@ function aggregate(results) {
     // than print a confident wrong REGRESSION — an agent running `--only pot_south`
     // against the full 18-station baseline got exactly that.
     stationIds: ok.map((r) => r.id),
+    /**
+     * The same guard, one level stronger — and the level that actually mattered.
+     *
+     * `stationIds` catches `--only` being compared against a full sweep. It does NOT
+     * catch the failure that produced a false regression on 2026-08-05: the station IDs
+     * were identical while four of them had MOVED, because the arena layout had moved
+     * under them and the old coordinates now sat inside props. Same names, different
+     * ground, silently compared, and the resulting 0.1785 -> 0.2363 hue-overlap "drift"
+     * was an artefact of four buried characters.
+     *
+     * So the identity of a sweep is (id, x, y, fogRadius) for every station, not the
+     * names. Any change to any of them makes the baseline incomparable and the gate says
+     * so instead of printing a verdict.
+     */
+    stationKeys: ok.map((r) => {
+      const s = STATIONS.find((z) => z.id === r.id);
+      return s ? `${s.id}@${s.x},${s.y}/fog${s.fog}` : `${r.id}@?`;
+    }),
     values, binChromaAll: binsAll.map((v) => +v.toFixed(5)),
     castBinShare: castBins.map((v) => +v.toFixed(4)),
     envBinShare: envBins.map((v) => +v.toFixed(4)),
@@ -995,6 +1110,32 @@ function aggregate(results) {
       ? +(mean(withRole.map((r) => r.metrics.topOther.filter((t) => t.inCastBand).length)) / 3).toFixed(3)
       : null,
   };
+}
+
+/**
+ * Is this run comparable to that baseline AT ALL? Returns an explanatory message, or
+ * null when the two sweeps sampled the same 18 points of the same arena.
+ *
+ * A named function rather than four lines inline, because a guard nobody can call is a
+ * guard nobody can test, and this one exists precisely because an untested assumption
+ * ("same station names means same sample") produced a confident false regression.
+ * `--selftest` exercises it on the real shapes.
+ */
+function baselineIdentityError(base, now) {
+  const bk = base.stationKeys, nk = now.stationKeys;
+  if (!bk || !nk) return null;                     // one side predates the field
+  if (bk.join(',') === nk.join(',')) return null;
+  const byId = (list, id) => list.find((k) => k.startsWith(`${id}@`)) ?? '(absent)';
+  const ids = [...new Set([...bk, ...nk].map((k) => k.split('@')[0]))];
+  const moved = ids.filter((id) => byId(bk, id) !== byId(nk, id));
+  return [
+    'names the same stations but they are NOT IN THE SAME PLACE:',
+    ...moved.map((id) => `  ${id}: baseline ${byId(bk, id)}  ->  now ${byId(nk, id)}`),
+    'A station that moved is a different sample of the arena, so the difference would',
+    'read as a colour regression that is really a different viewpoint. That has happened',
+    'once already (2026-08-05: four stations left inside props by a layout change).',
+    'Re-baseline deliberately with --json, and say in the commit which SHA it is.',
+  ].join('\n');
 }
 
 /** PASS / FAIL each rail against its band, plus the hard "muddy" floor. */
@@ -1324,6 +1465,88 @@ async function modeSelftest() {
   check('--gate: arena rails are advisory, never FAIL', st(rr({ arenaWarmChroma: 0.001 }), 'arenaWarmChroma'), 'WARN');
   check('--gate: rails with no role data SKIP, they do not pass', st(railStatus({ values: { meanSat: 0.5 } }), 'hueOverlap'), 'SKIP');
 
+  // ── F. the station guard ───────────────────────────────────────────────────
+  // Added after the layout moved under the station list and four of eighteen frames were
+  // measured from inside a prop — producing a false 0.1785 -> 0.2363 hue-overlap
+  // "regression" that a colour agent would have chased. The guard is only worth having
+  // if it is itself proven on inputs whose answer is known, so: three synthetic stations
+  // whose verdicts are derivable from the COVER table by hand, then the real list.
+  console.log('\nF. station placement guard — legal AND reachable ground');
+  {
+    // The hand-copied COVER table is a SECOND SOURCE OF TRUTH for the layout, which is
+    // the exact shape of bug that put four stations inside props. Assert it against the
+    // browser dump box-for-box so it can never drift again silently.
+    let dump = null;
+    try { dump = JSON.parse(await readFile(resolve('tools/arena.gameplay.json'), 'utf8')); } catch { /* absent */ }
+    if (dump) {
+      const mine = COVER.map(([x, y, w, h]) => `${x},${y},${w}x${h}`).sort().join('|');
+      const theirs = dump.cover.map((c) => `${c.x},${c.y},${c.w}x${c.h}`).sort().join('|');
+      check('COVER matches tools/arena.gameplay.json box-for-box', mine === theirs, true);
+      check('COVER has the same number of boxes as the dump', COVER.length, dump.cover.length);
+      check('ENEMY_SPAWN matches the dump', `${ENEMY_SPAWN.x},${ENEMY_SPAWN.y}`, `${dump.enemySpawn.x},${dump.enemySpawn.y}`);
+      check('MAX_SAFE_RADIUS matches the dump', MAX_SAFE_RADIUS, dump.maxSafeRadius);
+    } else {
+      console.log('  ⚠ tools/arena.gameplay.json absent — cross-check skipped');
+    }
+
+    // Derived by hand from COVER: the NW stove island is [430,300,170,90], so a fighter
+    // centred at (430,300) overlaps it by its whole extent.
+    check('a station on the NW stove island centre is rejected',
+      validate([{ id: 't', x: 430, y: 300 }]).length, 1);
+    // 300 + 45 (half height) + 21 (half fighter) + 24 (clearance) = 390. 420 clears it.
+    check('the verified replacement 60wu clear of that island is accepted',
+      validate([{ id: 't', x: 430, y: 420 }]).length, 0);
+    check('a station outside the playfield is rejected',
+      validate([{ id: 't', x: 5, y: 500 }]).length, 1);
+    // The flood is what catches sealed ground. Prove it finds SOMETHING and that the
+    // arena is currently one piece: every legal lattice node must be reachable.
+    const R = buildReachable();
+    const nLegal = R.legal.reduce((a, b) => a + b, 0);
+    check('the walkable floor is ONE piece (no sealed pockets)', R.nReached, nLegal);
+    check('the flood actually visited most of the map', R.nReached > nLegal * 0.99, true);
+    // And a point inside a prop is by construction not reachable, so the two tests are
+    // not the same test wearing two hats.
+    check('a point inside the freezer is not reachable', isReachable(230, 190), false);
+
+    // The baseline-identity guard, exercised through the REAL function, on the real
+    // failure: the four stations 60c5b92 left inside props, with their IDs unchanged.
+    {
+      const keyed = (list) => ({ stationIds: list.map((k) => k.split('@')[0]), stationKeys: list });
+      const now = keyed(STATIONS.map((s) => `${s.id}@${s.x},${s.y}/fog${s.fog}`));
+      check('a baseline of THIS station set is comparable', baselineIdentityError(now, now), null);
+
+      const stale = keyed(STATIONS.map((s) => {
+        const old = { freezer_nw: [430, 240], pantry_ne: [1150, 330], pantry_sw: [270, 665], freezer_se: [1000, 700], spawn_west: [160, 500] }[s.id];
+        return old ? `${s.id}@${old[0]},${old[1]}/fog850` : `${s.id}@${s.x},${s.y}/fog850`;
+      }));
+      const err = baselineIdentityError(stale, now);
+      check('the PRE-60c5b92 baseline is refused, not compared', typeof err === 'string' && err.includes('NOT IN THE SAME PLACE'), true);
+      check('...and it names freezer_nw as one of the moved stations', !!err && err.includes('freezer_nw@430,240'), true);
+      check('...and the ID lists alone would have matched, so stationIds could not catch it',
+        stale.stationIds.join(',') === now.stationIds.join(','), true);
+      check('a baseline that predates stationKeys is not falsely refused',
+        baselineIdentityError({ stationIds: now.stationIds }, now), null);
+      // One station moved a single world unit is still a different sample.
+      const nudged = keyed(now.stationKeys.map((k, i) => (i === 3 ? k.replace(/@(\d+),(\d+)/, (m, a, b) => `@${a},${Number(b) + 1}`) : k)));
+      check('a ONE-WU move is enough to make a sweep incomparable',
+        typeof baselineIdentityError(nudged, now) === 'string', true);
+    }
+
+    const bad = validate(STATIONS);
+    check('every shipped station is on legal, reachable ground', bad.length, 0);
+    if (bad.length) bad.forEach((m) => console.log(`      ${m}`));
+    check('the four moved stations are where 60c5b92 needs them',
+      STATIONS.filter((s) => ['freezer_nw', 'pantry_ne', 'pantry_sw', 'freezer_se'].includes(s.id))
+        .map((s) => `${s.id}@${s.x},${s.y}`).sort().join(' '),
+      'freezer_nw@430,420 freezer_se@1000,580 pantry_ne@1150,420 pantry_sw@400,800');
+    // The three that were sealed before 60c5b92. Named explicitly so re-sealing the
+    // centre line can never quietly restore the old defect.
+    for (const id of ['west_lane', 'west_choke', 'fog_boundary']) {
+      const s = STATIONS.find((z) => z.id === id);
+      check(`${id} (sealed before 60c5b92) is reachable`, isReachable(s.x, s.y), true);
+    }
+  }
+
   console.log('\nE. the reference figures reproduce (skipped if reference/ is absent)');
   try {
     const rc = await modeRefPlates('reference/images/curated/gameplay');
@@ -1343,10 +1566,15 @@ async function run() {
   const jobs = STATIONS.filter((s) => !wanted || wanted.has(s.id));
   if (jobs.length === 0) { console.error('No stations matched --only'); process.exit(2); }
 
-  const invalid = validate(jobs);
+  // Validate the WHOLE list, not `jobs`. `--only` is how a colour agent re-checks two
+  // stations after a change, and a subset filter must never be able to hide a station
+  // that the next full sweep will silently measure from inside a freezer.
+  const invalid = validate(STATIONS);
   if (invalid.length) {
-    console.error('Station placement is invalid — the player would spawn inside a prop:');
+    console.error('STATION PLACEMENT IS INVALID — refusing to scan. Every frame below would be');
+    console.error('shot from ground the game cannot put a player on, and would be measured anyway:');
     invalid.forEach((m) => console.error(`  ${m}`));
+    console.error('\nPick replacements with:  node tools/tmp/station_audit.mjs --at <x>,<y>');
     process.exit(2);
   }
 
@@ -1389,6 +1617,23 @@ export const ErrorOverlay=class{}; export default {};`;
         await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
         await page.waitForFunction('window.__gameReady === true', null, { timeout: 60000 });
         await page.waitForTimeout(SETTLE_MS);
+
+        // ── the LIVE half of the placement guard ───────────────────────────
+        // `validate()` above runs against this file's hand-copied COVER table, which is a
+        // second source of truth and therefore exactly the thing that failed last time
+        // (the layout moved, the table did not, four stations ended up inside props and
+        // were measured anyway). `match.ts:checkQaSpawn` is the FIRST source: it tests
+        // the same point against the arena the game actually built. If they ever
+        // disagree, the game wins and this run stops — a frame shot from inside a
+        // freezer must be a loud error, never a silently-measured sample.
+        const insideCover = await page.evaluate(() => window.__matchDebug?.qaSpawnInsideCover ?? null);
+        if (insideCover) {
+          console.error(`\n✗ ${s.id} (${s.x},${s.y}): the RUNNING GAME reports the player inside cover — ${insideCover}`);
+          console.error('  This file\'s COVER table says otherwise, so the table is stale. Refresh it from');
+          console.error('  tools/arena.gameplay.json (--selftest asserts the two agree) and re-site the station.');
+          await page.close();
+          process.exit(2);
+        }
 
         const view = await page.evaluate(() => (window.__fairView ? window.__fairView() : null));
         await page.screenshot({ path: full, timeout: 90000 });
@@ -1605,6 +1850,12 @@ export const ErrorOverlay=class{}; export default {};`;
       process.exit(2);
     }
     if (!bi) console.log('\n  (baseline predates stationIds — assuming the same sweep; verify by hand)');
+    // Same IDs, different GROUND. See the `stationKeys` doc — this is the check that
+    // would have stopped a colour agent chasing a regression that did not exist.
+    const idErr = baselineIdentityError(base.aggregate, agg);
+    if (idErr) { console.error(`\n${BASELINE} ${idErr}`); process.exit(2); }
+    if (base.aggregate.stationKeys && !agg.stationKeys) console.log('\n  (this run predates stationKeys — position check skipped)');
+    if (!base.aggregate.stationKeys) console.log('\n  (baseline predates stationKeys — a MOVED station would not be caught; re-baseline)');
     console.log(`\n── colour budget vs baseline: ${BASELINE} ──`);
     console.log('  rail                          base      now     target   moved      verdict');
     for (const row of compareBaseline(base.aggregate, agg)) {

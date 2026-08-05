@@ -37,16 +37,56 @@
  *   node tools/match-sim.mjs --all-matchups                  # 11x11 sweep
  *   node tools/match-sim.mjs --trace shots/match/trace.json  # full sample trace
  *   node tools/match-sim.mjs --policy idle                   # what the AI does to a statue
+ *   node tools/match-sim.mjs --selftest                      # known-input validation, no browser
+ *   node tools/match-sim.mjs --sim-ref HEAD --all-matchups    # measure a FROZEN sim
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const ARENA_CACHE = `${ROOT}/tools/arena.gameplay.json`;
 
-const { createMatch, stepMatch } = await import(`${ROOT}/src/game/sim.ts`);
-const RULES = await import(`${ROOT}/src/game/rules.ts`);
+/**
+ * ── `--sim-ref <ref>`: measure a FROZEN sim ────────────────────────────────
+ *
+ * Every number this tool prints is a function of `src/game/**`, and this project runs
+ * up to six agents at once — `rules.ts` and `combat.ts` are routinely half-edited by a
+ * peer while a pacing sweep is running. `docs/LESSONS.md` §5 records the render-side
+ * version of this ("measurement contamination is a separate problem from write
+ * conflicts"); it applies just as hard to a pure-Node instrument, and there is no
+ * `snapshot.mjs` for an `import`.
+ *
+ * So: `--sim-ref HEAD` copies the six sim modules out of git into the OS temp dir and
+ * imports THOSE. `git stash` is forbidden here and a checkout would clobber five peers,
+ * so extraction is the only safe freeze. Writing outside the repo is deliberate — a
+ * scratch tree of `.ts` files under `tools/` is inside `tsconfig.json`'s include and
+ * turns `npx tsc --noEmit` red for everyone at once (see `nav_baseline_setup.mjs`).
+ *
+ * Default (no flag) is the working tree, i.e. the historical behaviour.
+ */
+function extractSimAt(ref) {
+  const sha = execFileSync('git', ['rev-parse', '--short', ref], { cwd: ROOT, encoding: 'utf8' }).trim();
+  const dir = join(tmpdir(), `fa-simref-${sha}`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(join(dir, 'game'), { recursive: true });
+  mkdirSync(join(dir, 'arena'), { recursive: true });
+  for (const f of ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts']) {
+    writeFileSync(join(dir, 'game', f), execFileSync('git', ['show', `${ref}:src/game/${f}`], { cwd: ROOT, encoding: 'utf8' }));
+  }
+  writeFileSync(join(dir, 'arena', 'types.ts'), execFileSync('git', ['show', `${ref}:src/arena/types.ts`], { cwd: ROOT, encoding: 'utf8' }));
+  return { dir: join(dir, 'game'), sha };
+}
+
+const SIM_REF = process.argv.includes('--sim-ref')
+  ? String(process.argv[process.argv.indexOf('--sim-ref') + 1] ?? 'HEAD')
+  : null;
+const SIM = SIM_REF ? extractSimAt(SIM_REF) : { dir: `${ROOT}/src/game`, sha: 'working tree' };
+
+const { createMatch, stepMatch } = await import(`${SIM.dir}/sim.ts`);
+const RULES = await import(`${SIM.dir}/rules.ts`);
 const {
   CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, PLAYER_SPEED,
   HIT_RADIUS_VS_ENEMY, HIT_RADIUS_VS_PLAYER, FOG_DAMAGE, FOG_TICK_MS,
@@ -109,17 +149,28 @@ if (args['refresh-arena']) {
   await refreshArena(String(url).replace(/\/$/, ''));
 }
 
-if (!existsSync(ARENA_CACHE)) {
+/** `--layout <path>` reads any dumped arena JSON instead of the shared cache. Needed to
+ *  ask "how much of this number is the LAYOUT?" — see `tools/tmp/policy_sensitivity.mjs`,
+ *  which is what re-tested the conclusions drawn from the broken policy. */
+const LAYOUT_PATH = typeof args.layout === 'string' ? resolve(String(args.layout)) : ARENA_CACHE;
+
+if (!existsSync(LAYOUT_PATH) && !args.selftest) {
   console.error(`No arena cache. Run once with:  node tools/match-sim.mjs --refresh-arena --url $URL`);
   process.exit(1);
 }
-const ARENA_DATA = JSON.parse(readFileSync(ARENA_CACHE, 'utf8'));
+const ARENA_DATA = existsSync(LAYOUT_PATH) ? JSON.parse(readFileSync(LAYOUT_PATH, 'utf8')) : null;
 
 /** The sim only ever calls `arena.build()`/`arena.update()` from the RENDERER, never
- *  from `stepMatch`, so a data-only arena is a complete input for the simulation. */
-const arena = { ...ARENA_DATA, build: () => null, update: () => {} };
+ *  from `stepMatch`, so a data-only arena is a complete input for the simulation.
+ *
+ *  `let`, not `const`, for exactly one reason: `--selftest` swaps in a synthetic arena
+ *  whose correct answer is derivable with a calculator. The policies close over this
+ *  binding, so swapping it is what lets the SHIPPED policy code be the thing under test
+ *  rather than a copy of it — `docs/LESSONS.md` §13's "validate the instrument against a
+ *  known input" is worth nothing if the validated copy is not the one that runs. */
+let arena = ARENA_DATA ? { ...ARENA_DATA, build: () => null, update: () => {} } : null;
 
-const POT = arena.hazards.find((h) => h.kind === 'damage');
+let POT = arena ? arena.hazards.find((h) => h.kind === 'damage') : null;
 const POT_DPS = POT ? (POT.damage / POT.tickMs) * 1000 : 0;
 const FOG_DPS = (FOG_DAMAGE / FOG_TICK_MS) * 1000;
 
@@ -191,7 +242,7 @@ function bestWeapon(state, d) {
  * the player spawn to the enemy spawn), and every pacing number would be measuring
  * that, not the game.
  */
-function makeNav() {
+function makeNav({ countdownStuckBug = false } = {}) {
   /** Positions over the last ~1.5 s. NET displacement, not per-tick movement, is the
    *  right stuck test: a fighter pinned on a corner still jitters, and a per-tick
    *  test reads that as walking. (This is the same mistake `movement.ts:moveToward`
@@ -202,6 +253,31 @@ function makeNav() {
 
   return function walk(state, targetX, targetY) {
     const p = state.player;
+
+    /**
+     * ── FIXED 2026-08-05: the stuck detector used to run during the COUNTDOWN ──
+     *
+     * `sim.ts:movePlayer` is only called while `phase === 'playing'`, so for the first
+     * ~5.7 s of every match the player is motionless BY CONSTRUCTION. The detector saw
+     * "1.5 s of walking has covered 0 wu", concluded it was jammed, and fired — four
+     * times before the whistle, in a measured trace — leaving the match to start with
+     * up to 900 ms of the 150 wu perpendicular detour still latched.
+     *
+     * Cost: on the selftest arena, where the correct closure is exactly 5283 ms, the
+     * player instead arrived at 5867 ms having drifted 58 wu sideways. Every
+     * time-to-contact figure this tool has ever printed carried that 0-900 ms of
+     * sideways walking, with the sign set by a coin-flip on countdown length — which is
+     * part of why the same route length could score 8.8 s and 15.1 s.
+     *
+     * A stuck detector must only run while movement is possible. This is the same class
+     * of fault as the `smart` ordering bug below: the code was right about WHAT to
+     * detect and wrong about WHEN, and the number stayed plausible throughout.
+     */
+    if (!countdownStuckBug && state.phase !== 'playing') {
+      hist.length = 0; detourUntil = -1;
+      return axesToward(p.x, p.y, targetX, targetY);
+    }
+
     hist.push({ t: state.elapsed, x: p.x, y: p.y });
     while (hist.length && state.elapsed - hist[0].t > 1500) hist.shift();
 
@@ -236,90 +312,203 @@ function lineOfSight(x0, y0, x1, y1) {
   return true;
 }
 
+/**
+ * ═══ POLICY REVISION 2 — READ THIS BEFORE COMPARING ANY NUMBER ═══════════════
+ *
+ * **Every `policy=smart` figure recorded before 2026-08-05 is SUPERSEDED and must not
+ * be compared with anything this file prints now.** The old behaviour is preserved
+ * verbatim under `smart-losfirst` so any historical number can be reproduced, but it
+ * is a broken instrument and it prints a warning when selected.
+ *
+ * ── The defect ──────────────────────────────────────────────────────────────
+ * `smart` tested LINE OF SIGHT BEFORE RANGE. Its own comment says what the clause was
+ * for — *"In range but shooting a counter. A player flanks; they do not stand there
+ * emptying cooldowns into furniture."* — and the words "in range" were never enforced,
+ * because the test ran ahead of the range test. Across 1080 wu of a map carrying 27
+ * CoverBoxes something is nearly always in the line, so the branch fired at ANY
+ * distance and the scripted player answered "I cannot shoot yet" with "then walk
+ * sideways", forever.
+ *
+ * Measured on the committed layout (`tools/tmp/policy_trace.mjs --all`, 110 matchups,
+ * 12,608 decision ticks):
+ *
+ *              branch          LOS-first (shipped)   range-first (this file)
+ *              STRAFE-noLOS         45.1%                 0.02%
+ *              CLOSE                30.2%                70.3%
+ *
+ * Nearly half of every decision the "player" made was a refusal to approach, so
+ * `timeToContact` was not measuring a closure — it was measuring how long the refusal
+ * happened to last. Against the straight-line floor `(spawnGap - engageRange) /
+ * (PLAYER_SPEED + AI_CHASE_SPEED)`, rev 1 lands at **1.39x** and rev 2 at **1.08x**;
+ * the corrected player closes at ~93% of the geometric best, which is what a
+ * closure-time metric is supposed to look like.
+ *
+ * ── Two things on record that this does NOT support ─────────────────────────
+ * 60c5b92's commit message says the figure is "AI route / AI_CHASE_SPEED, the enemy
+ * walking alone at 70 wu/s; the combined 190 wu/s is 2.7x optimistic", and that the
+ * player is in STRAFE-noLOS "for the ENTIRE match". Neither reproduces here.
+ * Re-measured on the layouts as committed:
+ *
+ *              STRAFE-noLOS share    contact vs both-moving floor
+ *   pre-60c5b92 layout    63.1%              (11.1 s vs 10.0 s corrected)
+ *   committed layout      45.1%              1.39x  ->  1.08x corrected
+ *
+ * At 1.39x of the BOTH-moving floor, rev 1 is closing at ~137 wu/s, not 70 — the broken
+ * player still drifts toward the enemy because the strafe direction rotates as the
+ * bearing changes. So the defect is real and worth fixing, and the error it caused in
+ * time-to-contact is **23-29%, not 170%**. Recorded verbatim because "take the symptom,
+ * re-derive the cause" (`docs/LESSONS.md` §3) applies to magnitudes too, and a peer
+ * planning around a 2.7x correction would over-correct by a factor of six.
+ *
+ * ── The fix, and why it is not "make the AI better" ─────────────────────────
+ * ONE clause moved: the range test now runs in front of the LOS test, so the player
+ * closes while it has no shot and only flanks once it is IN RANGE and blocked — which
+ * is what the comment always claimed. Nothing else about the policy changed. The
+ * header's framing stands: this is the SHAPE of a match, not a skill benchmark. But a
+ * scripted player that strafes forever is not a conservative model of a human, it is a
+ * broken one, and `docs/LESSONS.md` §13 is explicit that an instrument reporting a
+ * plausible wrong number is worse than no instrument.
+ *
+ * ── Why `smart` was fixed in place rather than renamed ──────────────────────
+ * `--policy` DEFAULTS to `smart`. Leaving the broken policy on the default means every
+ * future run, by anyone who does not know this file, silently produces the wrong
+ * number — which is exactly how the last five bad instruments survived. So the default
+ * name carries the corrected behaviour, `POLICY_REV` is stamped into every report and
+ * every JSON record so a stale figure can be identified mechanically, and the old
+ * behaviour stays reachable by name for reproduction.
+ *
+ * ── A SECOND defect, found by the validation and not by reading the code ────
+ * See `makeNav` above: the stuck detector also ran during the COUNTDOWN, when the player
+ * cannot move at all, so every match began with up to 900 ms of latched sideways
+ * walking. It is fixed in rev 2 as well, and `smart-navfix` isolates it — rev 1 misses
+ * the derived closure by 567 ms on a CLEAR line, where the LOS clause cannot fire.
+ *
+ * Validated by `--selftest`: a synthetic arena on which the correct closure is 5283 ms
+ * by arithmetic. Rev 2 reports 5350 ms (one sampler period late, which is the floor);
+ * rev 1 reports 5850 ms with a clear line and 12050 ms with a blocked one.
+ */
+const POLICY_REV = 2;
+
+function makeChase({ countdownStuckBug }) {
+  const nav = makeNav({ countdownStuckBug });
+  return (state) => {
+    const p = state.player, e = state.enemy;
+    const d = dist(p.x, p.y, e.x, e.y);
+    const w = bestWeapon(state, d);
+    return {
+      move: nav(state, e.x, e.y),
+      aim: { x: e.x - p.x, y: e.y - p.y },
+      selectedWeapon: w ?? 0,
+      attack: true,
+    };
+  };
+}
+
+/** The decision tree shared by `smart` (rev 2) and `smart-losfirst` (rev 1). */
+function makeSmart({ losBeforeRange, countdownStuckBug }) {
+  const nav = makeNav({ countdownStuckBug });
+  return (state) => {
+    const p = state.player, e = state.enemy;
+    const d = dist(p.x, p.y, e.x, e.y);
+    const idx = bestWeapon(state, d);
+    const band = preferredRange(p.characterId) * 0.85;
+    const los = lineOfSight(p.x, p.y, e.x, e.y);
+
+    const cx = arena.center.x, cy = arena.center.y;
+    const dc = dist(p.x, p.y, cx, cy);
+    const R = state.safeRadius;
+
+    /** In range but shooting a counter: flank, don't empty cooldowns into furniture. */
+    const flank = () => {
+      const ang = Math.atan2(e.y - p.y, e.x - p.x) + Math.PI / 2;
+      return { x: p.x + Math.cos(ang) * 150, y: p.y + Math.sin(ang) * 150 };
+    };
+
+    let target;
+    // 1. Ring first: get inside, with margin, before anything else.
+    if (dc > R - 30) {
+      target = { x: cx, y: cy };
+      // 2. …but if the safe disc has shrunk INSIDE the pot's danger ring there is
+      //    nowhere safe left; sit on the least-bad radius (just inside the ring).
+      if (POT && R < POT.radius + 20) {
+        const ang = Math.atan2(p.y - cy, p.x - cx);
+        const r = Math.max(0, R - 10);
+        target = { x: cx + Math.cos(ang) * r, y: cy + Math.sin(ang) * r };
+      }
+    } else if (POT && dist(p.x, p.y, POT.x, POT.y) < POT.radius + 15 && R > POT.radius + 40) {
+      // 3. Standing in the boiling pot with somewhere better to be: leave.
+      const ang = Math.atan2(p.y - POT.y, p.x - POT.x);
+      target = { x: POT.x + Math.cos(ang) * (POT.radius + 60), y: POT.y + Math.sin(ang) * (POT.radius + 60) };
+    } else if (losBeforeRange && !los) {
+      target = flank();                                   // ← REV 1's defect, kept verbatim
+    } else if (d > band) {
+      target = { x: e.x, y: e.y };                        // close
+    } else if (!los) {
+      target = flank();                                   // ← REV 2: in range AND blocked
+    } else if (d < band * 0.5) {
+      const ang = Math.atan2(p.y - e.y, p.x - e.x);       // back off
+      target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
+    } else {
+      const ang = Math.atan2(p.y - e.y, p.x - e.x) + Math.PI / 2;  // strafe
+      target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
+    }
+
+    return {
+      move: nav(state, target.x, target.y),
+      aim: { x: e.x - p.x, y: e.y - p.y },
+      selectedWeapon: idx ?? 0,
+      // Don't spend cooldowns on shots that cannot reach OR cannot arrive — a
+      // player watching a weapon slot grey out for nothing learns that in one match.
+      attack: idx !== null && (los || CHARACTERS[p.characterId].weapons[idx].type === 'melee'),
+    };
+  };
+}
+
 const POLICIES = {
   /** Nothing at all. The control: what does the AI do to a target that never acts? */
   idle: () => () => ({ move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false }),
 
   /** Run at the enemy and hold fire. The naive human's first 30 seconds. */
-  chase: () => {
-    const nav = makeNav();
-    return (state) => {
-      const p = state.player, e = state.enemy;
-      const d = dist(p.x, p.y, e.x, e.y);
-      const w = bestWeapon(state, d);
-      return {
-        move: nav(state, e.x, e.y),
-        aim: { x: e.x - p.x, y: e.y - p.y },
-        selectedWeapon: w ?? 0,
-        attack: true,
-      };
-    };
-  },
+  chase: () => makeChase({ countdownStuckBug: false }),
+
+  /**
+   * ABLATION. `chase` has no line-of-sight clause, so the policy reorder does not touch
+   * it — but it shares `makeNav`, so the countdown-detour fix DOES. Every recorded
+   * `chase` figure (60c5b92's "pot share 25%, naive win rate 39.1%", which is what chose
+   * the 110 wu spawn offset) was taken with that detour live. This reproduces them.
+   */
+  'chase-navbug': () => makeChase({ countdownStuckBug: true }),
 
   /**
    * Play it properly: hold the range band of the best available weapon, respect the
    * closing ring, and don't stand in the pot unless the ring leaves nowhere else.
+   * REV 2 — see the block comment above.
    */
-  smart: () => {
-    const nav = makeNav();
-    return (state) => {
-      const p = state.player, e = state.enemy;
-      const d = dist(p.x, p.y, e.x, e.y);
-      const idx = bestWeapon(state, d);
-      const band = preferredRange(p.characterId) * 0.85;
-      const los = lineOfSight(p.x, p.y, e.x, e.y);
+  smart: () => makeSmart({ losBeforeRange: false, countdownStuckBug: false }),
 
-      const cx = arena.center.x, cy = arena.center.y;
-      const dc = dist(p.x, p.y, cx, cy);
-      const R = state.safeRadius;
+  /**
+   * REV 1, verbatim — BOTH defects, so this reproduces the instrument exactly as it was
+   * when every recorded figure was taken. Here ONLY so a pre-2026-08-05 number can be
+   * reproduced and shown to be what it is. Do not steer by it.
+   */
+  'smart-losfirst': () => makeSmart({ losBeforeRange: true, countdownStuckBug: true }),
 
-      let target;
-      // 1. Ring first: get inside, with margin, before anything else.
-      if (dc > R - 30) {
-        target = { x: cx, y: cy };
-        // 2. …but if the safe disc has shrunk INSIDE the pot's danger ring there is
-        //    nowhere safe left; sit on the least-bad radius (just inside the ring).
-        if (POT && R < POT.radius + 20) {
-          const ang = Math.atan2(p.y - cy, p.x - cx);
-          const r = Math.max(0, R - 10);
-          target = { x: cx + Math.cos(ang) * r, y: cy + Math.sin(ang) * r };
-        }
-      } else if (POT && dist(p.x, p.y, POT.x, POT.y) < POT.radius + 15 && R > POT.radius + 40) {
-        // 3. Standing in the boiling pot with somewhere better to be: leave.
-        const ang = Math.atan2(p.y - POT.y, p.x - POT.x);
-        target = { x: POT.x + Math.cos(ang) * (POT.radius + 60), y: POT.y + Math.sin(ang) * (POT.radius + 60) };
-      } else if (!los) {
-        // In range but shooting a counter. A player flanks; they do not stand there
-        // emptying cooldowns into furniture.
-        const ang = Math.atan2(e.y - p.y, e.x - p.x) + Math.PI / 2;
-        target = { x: p.x + Math.cos(ang) * 150, y: p.y + Math.sin(ang) * 150 };
-      } else if (d > band) {
-        target = { x: e.x, y: e.y };                       // close
-      } else if (d < band * 0.5) {
-        const ang = Math.atan2(p.y - e.y, p.x - e.x);      // back off
-        target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
-      } else {
-        const ang = Math.atan2(p.y - e.y, p.x - e.x) + Math.PI / 2;  // strafe
-        target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
-      }
-
-      return {
-        move: nav(state, target.x, target.y),
-        aim: { x: e.x - p.x, y: e.y - p.y },
-        selectedWeapon: idx ?? 0,
-        // Don't spend cooldowns on shots that cannot reach OR cannot arrive — a
-        // player watching a weapon slot grey out for nothing learns that in one match.
-        attack: idx !== null && (los || CHARACTERS[p.characterId].weapons[idx].type === 'melee'),
-      };
-    };
-  },
+  /**
+   * ABLATION, not a policy anyone should steer by: rev 1's decision ordering with only
+   * the countdown-detour fixed. Exists so the before/after table can attribute each
+   * headline movement to one of the two defects instead of to "the fix" as a lump.
+   */
+  'smart-navfix': () => makeSmart({ losBeforeRange: true, countdownStuckBug: false }),
 };
+
+/** Which revision each policy name IS, so a stale record is identifiable mechanically. */
+const POLICY_REV_OF = { smart: 2, 'smart-losfirst': 1, 'smart-navfix': 1.5, chase: 2, 'chase-navbug': 1, idle: 2 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // one match
 // ─────────────────────────────────────────────────────────────────────────────
 
-function runMatch({ player, enemy, policy = POLICY, dt = DT, reactMs = REACT_MS, sampleMs = SAMPLE_MS, keepTrace = false }) {
+function runMatch({ player, enemy, policy = POLICY, dt = DT, reactMs = REACT_MS, sampleMs = SAMPLE_MS, keepTrace = false, beforeTick = null }) {
   const state = createMatch(arena, player, enemy);
   const makePolicy = POLICIES[policy];
   if (!makePolicy) throw new Error(`unknown policy "${policy}" (have: ${Object.keys(POLICIES).join(', ')})`);
@@ -342,6 +531,10 @@ function runMatch({ player, enemy, policy = POLICY, dt = DT, reactMs = REACT_MS,
   const HARD_CAP_MS = MATCH_DURATION_MS + 120_000; // detect "the clock ran out and nothing happened"
 
   while (state.phase !== 'ended' && state.elapsed < HARD_CAP_MS) {
+    // `--selftest` uses this to pin and immortalise the opponent, so a closure time can
+    // be derived on paper. Null in every ordinary run; deliberately the ONLY seam, so
+    // the policy and sampling code under test are byte-identical to the shipped path.
+    if (beforeTick) beforeTick(state);
     if (sinceDecision >= reactMs) { input = decide(state, sinceDecision === Infinity ? dt : sinceDecision); sinceDecision = 0; }
     const px0 = state.player.x, py0 = state.player.y, ex0 = state.enemy.x, ey0 = state.enemy.y;
 
@@ -360,6 +553,10 @@ function runMatch({ player, enemy, policy = POLICY, dt = DT, reactMs = REACT_MS,
       const d = dist(p.x, p.y, e.x, e.y);
       samples.push({
         t: Math.round(state.elapsed),
+        // The MATCH CLOCK, i.e. time since the whistle. `t` (elapsed) carries the
+        // countdown as well, so the two differ by ~5.7 s and a figure quoted without
+        // saying which is being used is unusable. Both are reported for that reason.
+        play: Math.round(MATCH_DURATION_MS - state.timeRemaining),
         rem: Math.round(state.timeRemaining),
         phase: state.phase,
         R: +state.safeRadius.toFixed(1),
@@ -418,6 +615,7 @@ function runMatch({ player, enemy, policy = POLICY, dt = DT, reactMs = REACT_MS,
   // one is how long you walk, the other is how long the game is a game.
   const firstContact = playing.find((s) => s.eng);
   const timeToContactMs = firstContact ? firstContact.t : null;
+  const timeToContactPlayMs = firstContact ? firstContact.play : null;
   const ttkMs = firstHit !== null ? state.elapsed - firstHit : null;
 
   const ended = state.phase === 'ended';
@@ -452,6 +650,10 @@ function runMatch({ player, enemy, policy = POLICY, dt = DT, reactMs = REACT_MS,
 
   return {
     player, enemy, policy,
+    /** Stamped into every record so a stale figure is identifiable mechanically, not
+     *  by remembering which week it was taken in. See the POLICY REVISION block. */
+    policyRev: POLICY_REV_OF[policy] ?? POLICY_REV,
+    simRef: SIM.sha,
     outcome: ended ? (state.winner === 'player' ? 'player' : 'enemy') : 'NO-END',
     endedByMs: Math.round(matchMs),
     playMs: Math.round(playMs),
@@ -459,6 +661,7 @@ function runMatch({ player, enemy, policy = POLICY, dt = DT, reactMs = REACT_MS,
     ticks,
     firstHitMs: firstHit === null ? null : Math.round(firstHit),
     timeToContactMs: timeToContactMs === null ? null : Math.round(timeToContactMs),
+    timeToContactPlayMs: timeToContactPlayMs === null ? null : Math.round(timeToContactPlayMs),
     ttkMs: ttkMs === null ? null : Math.round(ttkMs),
     fires: fires.length,
     hits: hits.length,
@@ -498,7 +701,7 @@ function secs(ms) { return ms === null ? '—' : `${(ms / 1000).toFixed(1)}s`; }
 function printOne(r) {
   console.log(`\n── ${r.player} (player, ${RULES.PLAYER_MAX_HP}hp) vs ${r.enemy} (enemy, ${RULES.ENEMY_MAX_HP}hp) · policy=${r.policy}`);
   console.log(`   outcome            ${r.outcome === 'player' ? 'PLAYER WINS' : r.outcome === 'enemy' ? 'ENEMY WINS' : '*** NEVER ENDED ***'}  at ${secs(r.endedByMs)} elapsed (${secs(r.playMs)} of match clock used, ${secs(r.clockLeftMs)} left)`);
-  console.log(`   first contact      ${secs(r.timeToContactMs)}  ·  first damage ${secs(r.firstHitMs)}  ·  then decided in ${secs(r.ttkMs)}`);
+  console.log(`   first contact      ${secs(r.timeToContactPlayMs)} MATCH CLOCK (${secs(r.timeToContactMs)} elapsed, incl. countdown)  ·  first damage ${secs(r.firstHitMs)}  ·  then decided in ${secs(r.ttkMs)}`);
   console.log(`   engaged / dead     ${pct(r.engagedFrac)} within reach (${r.engageRange}wu)  ·  ${pct(r.deadFrac)} out of reach of each other`);
   console.log(`   enemy off-screen   ${pct(r.enemyOffFairFrac)} of the match outside the 199.2wu guaranteed-visible square`);
   console.log(`   AI stalled         ${pct(r.aiStallFrac)} of the match  (longest unbroken stall ${secs(r.longestAiStallMs)})`);
@@ -512,6 +715,161 @@ function printOne(r) {
   console.log(`   damage by source   ${JSON.stringify(r.dmgBySource)}`);
   console.log(`   damage TO PLAYER   ${JSON.stringify(r.dmgToPlayerBySource)}`);
   console.log(`   final HP           player ${r.finalPlayerHp}  enemy ${r.finalEnemyHp}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// --selftest : validate the instrument against an input whose answer is known
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `docs/LESSONS.md` §13, and this file is the sixth instrument in one session found
+// returning a confident wrong number. A pacing figure taken on the shipped arena cannot
+// be checked — nobody knows what the right answer is — so the check has to happen on an
+// arena small enough to do with a calculator.
+//
+// THE KNOWN INPUT
+//   arena     1400x1000, no hazards, fog parked at r=5000 so the ring never fires
+//   player    hamburger at (200,500). `hasTrail: false`, so no trail speed boost can
+//             perturb the arithmetic. PLAYER_SPEED = 0.12 wu/ms.
+//   enemy     lollipop, PINNED at (1000,500), immortal, and held on cooldown — a piece
+//             of scenery. So time-to-contact is the player's closure ALONE and depends
+//             on neither the AI's pathing nor its damage. (Holding the cooldowns is not
+//             fussiness: Lollipop's ultimate is `range: 400, cone: 360, effect: 'stun'`,
+//             and it froze the player for a full STUN_DURATION_MS mid-approach the first
+//             time this test was run — a 2.6 s error in a 5.3 s answer. An unpinned
+//             variable in a known-input test is how a known input stops being known.)
+//   contact   engageRange = max(140 + 26, 70 + 25.2) = 166 wu
+//
+//   => the player must cover 800 - 166 = 634 wu, and
+//      634 / 0.12 = 5283 ms of MATCH CLOCK. Nothing else can be the right answer.
+//
+// Two arenas, identical except for one 40x40 box at (900,500):
+//   A  no cover               — line of sight is clear the whole way
+//   B  one box beside the enemy — the projectile line (12 wu box, inflated to
+//      x in 874..926) is blocked from every player position west of it, at EVERY
+//      distance, so the `!los` clause is live for the entire approach.
+//
+// A discriminates nothing (both revisions must agree) and exists to prove the harness
+// itself is sound. B is the discriminator: rev 2 must still reproduce 5283 ms, and rev 1
+// must fail to arrive at all.
+if (args.selftest) {
+  const CLEAR = {
+    id: 'selftest', displayName: 'selftest', width: 1400, height: 1000,
+    center: { x: 700, y: 500 }, maxSafeRadius: 5000,
+    playerSpawn: { x: 200, y: 500 }, enemySpawn: { x: 1000, y: 500 },
+    cover: [], hazards: [], build: () => null, update: () => {},
+  };
+  const BLOCKED = { ...CLEAR, cover: [{ x: 900, y: 500, w: 40, h: 40, kind: 'selftest_block' }] };
+
+  const PIN = { x: 1000, y: 500 };
+  const pin = (state) => {
+    state.enemy.x = PIN.x; state.enemy.y = PIN.y;
+    state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+    state.player.hp = 1e9; state.player.maxHp = 1e9;
+    // Every weapon permanently on cooldown: `attemptAttack` refuses when
+    // `elapsed - lastUsed < cooldown`. Scenery cannot swing back.
+    state.enemy.lastUsed.fill(state.elapsed);
+  };
+
+  const D0 = 800;
+  const ENGAGE = Math.max(maxNormalRange('hamburger') + HIT_RADIUS_VS_ENEMY, maxNormalRange('lollipop') + HIT_RADIUS_VS_PLAYER);
+  const IDEAL_MS = (D0 - ENGAGE) / PLAYER_SPEED;
+  // One sampler period plus one tick: the sampler can only report contact at its own
+  // grid, and movement is quantised to 0.12*dt = 2.0 wu per tick.
+  const TOL = SAMPLE_MS + DT;
+
+  let pass = 0, fail = 0;
+  const check = (name, ok, detail) => {
+    if (ok) { pass++; console.log(`   PASS  ${name}${detail ? `  ${detail}` : ''}`); }
+    else { fail++; console.log(`   FAIL  ${name}${detail ? `  ${detail}` : ''}`); }
+  };
+
+  const trial = (layout, policy) => {
+    arena = layout;
+    POT = null;
+    return runMatch({ player: 'hamburger', enemy: 'lollipop', policy, beforeTick: pin, keepTrace: true });
+  };
+  /** How much of the 800 wu gap the player closed in its first `ms` of match clock.
+   *  This is the OUTCOME question (`docs/LESSONS.md` §13: prefer the outcome metric to
+   *  the symptom) — "does it approach?" rather than "is it standing still?". A policy
+   *  that walks 360 wu perpendicular is not standing still and closes nothing. */
+  const closedBy = (r, ms) => {
+    const s0 = r.samples.find((s) => s.phase === 'playing');
+    const s1 = [...r.samples].reverse().find((s) => s.phase === 'playing' && s.play <= ms);
+    return s0 && s1 ? s0.d - s1.d : NaN;
+  };
+
+  console.log(`\n══ match-sim SELFTEST — known-input validation of the scripted player ══`);
+  console.log(`   sim=${SIM.sha}   engageRange ${ENGAGE}wu   derived closure ${IDEAL_MS.toFixed(0)}ms of match clock   tolerance +${TOL.toFixed(0)}ms\n`);
+
+  // 0. The premise: LOS is clear in A and blocked in B, from the spawn.
+  arena = CLEAR;
+  check('arena A: line of sight from the player spawn is CLEAR', lineOfSight(200, 500, 1000, 500) === true);
+  arena = BLOCKED;
+  check('arena B: line of sight from the player spawn is BLOCKED', lineOfSight(200, 500, 1000, 500) === false);
+  check('arena B: still blocked from 20wu short of contact', lineOfSight(1000 - ENGAGE - 20, 500, 1000, 500) === false);
+  check('arena B: the box is never in the WALKING path (fighter is clear at the contact point)',
+    Math.abs((1000 - ENGAGE) - 900) >= (42 + 40) / 2,
+    `player stops at x=${1000 - ENGAGE}, box clearance needs 41wu, has ${Math.abs((1000 - ENGAGE) - 900)}wu`);
+
+  // 1. Clear line. The LOS clause CANNOT fire here, so this isolates the OTHER defect:
+  //    rev 1's stuck-detector runs through the countdown, when the player is motionless
+  //    by construction, and starts the match with a latched sideways detour.
+  {
+    const r2 = trial(CLEAR, 'smart');
+    const t2 = r2.timeToContactPlayMs;
+    check('A/clear · smart (rev 2) reaches contact at the derived time',
+      t2 !== null && t2 >= Math.floor(IDEAL_MS) && t2 <= IDEAL_MS + TOL,
+      `measured ${t2}ms vs derived ${IDEAL_MS.toFixed(0)}ms`);
+    check('A/clear · smart stamps policyRev 2', r2.policyRev === 2, `got ${r2.policyRev}`);
+
+    const r1 = trial(CLEAR, 'smart-losfirst');
+    const t1 = r1.timeToContactPlayMs;
+    check('A/clear · rev 1 is late EVEN WITH A CLEAR LINE — the countdown detour',
+      t1 !== null && t1 > IDEAL_MS + TOL,
+      `measured ${t1}ms vs derived ${IDEAL_MS.toFixed(0)}ms = +${(t1 - IDEAL_MS).toFixed(0)}ms of sideways walking`);
+    check('A/clear · smart-losfirst stamps policyRev 1', r1.policyRev === 1, `got ${r1.policyRev}`);
+
+    const rA = trial(CLEAR, 'smart-navfix');
+    check('A/clear · the ablation isolates it: nav fix alone restores the derived time',
+      rA.timeToContactPlayMs >= Math.floor(IDEAL_MS) && rA.timeToContactPlayMs <= IDEAL_MS + TOL,
+      `measured ${rA.timeToContactPlayMs}ms`);
+  }
+
+  // 2. Blocked line — THE discriminator.
+  {
+    const r2 = trial(BLOCKED, 'smart');
+    const t2 = r2.timeToContactPlayMs;
+    check('B/blocked · smart (rev 2) still reaches contact at the derived time',
+      t2 !== null && t2 >= Math.floor(IDEAL_MS) && t2 <= IDEAL_MS + TOL,
+      `measured ${t2}ms vs derived ${IDEAL_MS.toFixed(0)}ms`);
+
+    const r1 = trial(BLOCKED, 'smart-losfirst');
+    const t1 = r1.timeToContactPlayMs;
+    check('B/blocked · smart-losfirst (rev 1) does NOT reproduce the derived time',
+      t1 === null || t1 > IDEAL_MS * 1.5,
+      `measured ${t1 === null ? 'never made contact' : `${t1}ms = ${(t1 / IDEAL_MS).toFixed(2)}x the truth`}`);
+
+    // The mechanism, not the symptom. In 3 s the player CAN close 360 wu (0.12 wu/ms).
+    const CAN_CLOSE = 3000 * PLAYER_SPEED;
+    const c2 = closedBy(r2, 3000), c1 = closedBy(r1, 3000);
+    check('B/blocked · rev 2 closes the gap at very nearly PLAYER_SPEED',
+      c2 > CAN_CLOSE * 0.9, `closed ${c2.toFixed(0)}wu of a possible ${CAN_CLOSE.toFixed(0)}wu in 3s`);
+    check('B/blocked · rev 1 closes ~nothing while 634wu out of range — it walks sideways',
+      c1 < CAN_CLOSE * 0.05, `closed ${c1.toFixed(0)}wu of a possible ${CAN_CLOSE.toFixed(0)}wu in 3s`);
+    check('B/blocked · rev 1 is not merely stuck — it travels while closing nothing',
+      r1.playerTravelWU > 500, `travelled ${r1.playerTravelWU}wu`);
+  }
+
+  // 3. The countdown is not silently counted as walking time.
+  {
+    const r = trial(CLEAR, 'smart');
+    check('elapsed and match-clock contact differ by the countdown, and both are reported',
+      r.timeToContactMs > r.timeToContactPlayMs + 4000,
+      `elapsed ${r.timeToContactMs}ms, match clock ${r.timeToContactPlayMs}ms`);
+  }
+
+  console.log(`\n   ${pass}/${pass + fail} assertions passed\n`);
+  process.exit(fail ? 1 : 0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -717,7 +1075,15 @@ const enemies = args['all-matchups'] ? CHARACTER_IDS : [String(args.enemy ?? 'do
 
 console.log(`arena "${arena.displayName}" ${arena.width}x${arena.height}  centre (${arena.center.x},${arena.center.y})  maxSafeRadius ${arena.maxSafeRadius}`);
 if (POT) console.log(`damage hazard at (${POT.x},${POT.y}) r=${POT.radius}  ${POT_DPS.toFixed(0)} HP/s   ·   fog ${FOG_DPS.toFixed(0)} HP/s`);
-console.log(`match length ${MATCH_DURATION_MS / 1000}s   dt=${DT.toFixed(2)}ms   react=${REACT_MS}ms   policy=${POLICY}`);
+console.log(`match length ${MATCH_DURATION_MS / 1000}s   dt=${DT.toFixed(2)}ms   react=${REACT_MS}ms   policy=${POLICY} rev${POLICY_REV_OF[POLICY] ?? POLICY_REV}   sim=${SIM.sha}`);
+if (POLICY === 'smart-losfirst') {
+  console.log(`
+*** POLICY REV 1 — KNOWN BROKEN. It tests line-of-sight before range, so the scripted
+*** player refuses to approach for ~45% of its decisions and "time to first contact" is
+*** the AI walking alone at AI_CHASE_SPEED, not a closure. Present only to reproduce
+*** figures recorded before 2026-08-05. Do NOT steer by anything printed below.
+`);
+}
 
 const all = [];
 for (const p of players) {
@@ -736,11 +1102,11 @@ if (args['all-matchups']) {
   const avg = (f) => all.reduce((a, r) => a + f(r), 0) / n;
   const playerWins = all.filter((r) => r.outcome === 'player').length;
   const noEnd = all.filter((r) => r.outcome === 'NO-END').length;
-  console.log(`\n══ ${n} matchups, policy=${POLICY} ══`);
+  console.log(`\n══ ${n} matchups, policy=${POLICY} rev${POLICY_REV_OF[POLICY] ?? POLICY_REV}, sim=${SIM.sha} ══`);
   console.log(`  player win rate     ${pct(playerWins / n)}   (never ended: ${noEnd})`);
   console.log(`  match length        mean ${secs(avg((r) => r.playMs))}   min ${secs(Math.min(...all.map((r) => r.playMs)))}   max ${secs(Math.max(...all.map((r) => r.playMs)))}`);
-  console.log(`  used of the 180s    ${pct(avg((r) => r.playMs) / MATCH_DURATION_MS)}`);
-  console.log(`  first CONTACT       mean ${secs(avg((r) => r.timeToContactMs ?? 0))}  (walking, nothing else happens)`);
+  console.log(`  used of the ${MATCH_DURATION_MS / 1000}s clock  ${pct(avg((r) => r.playMs) / MATCH_DURATION_MS)}`);
+  console.log(`  first CONTACT       mean ${secs(avg((r) => r.timeToContactPlayMs ?? 0))} MATCH CLOCK  ·  ${secs(avg((r) => r.timeToContactMs ?? 0))} elapsed (incl. countdown)  (walking, nothing else happens)`);
   console.log(`  first damage        mean ${secs(avg((r) => r.firstHitMs ?? 0))}`);
   console.log(`  TIME TO KILL        mean ${secs(avg((r) => r.ttkMs ?? 0))}   min ${secs(Math.min(...all.map((r) => r.ttkMs ?? Infinity)))}   max ${secs(Math.max(...all.map((r) => r.ttkMs ?? 0)))}   <- first damage to decision`);
   console.log(`  DEAD TIME           ${pct(avg((r) => r.deadFrac))} of the match neither fighter can reach the other`);
