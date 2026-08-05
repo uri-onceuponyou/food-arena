@@ -75,6 +75,14 @@ const LIMB_LILAC = '#241A38';
 // thigh, the shin and the boot to fit three 0.10 steps at 111 px. That is a geometry
 // answer, not an albedo one.
 const LIMB_LILAC_SHADOW = '#150E22';
+/**
+ * The cowl. Same plum family as the limbs so the costume reads as ONE garment,
+ * one step darker than `LIMB_LILAC` so the limbs still separate from it where they
+ * touch — the value pass's own rule that a chain has to ALTERNATE, not ramp.
+ * `GARMENT_LIT` is the rolled rim, which is the piece the key light actually hits.
+ */
+const GARMENT = '#1A1228';
+const GARMENT_LIT = '#332748';
 /** Yolk-gold hands, deepened. At #FFC23C they were a sixth light mass. */
 const YOLK_HAND = '#3A2408';
 
@@ -187,6 +195,53 @@ function shellPiece(R: number, side: 'lower' | 'upper', widthSeg = 64): THREE.Bu
   }
   geo.computeVertexNormals();
   return geo;
+}
+
+/**
+ * A curved patch of the shell surface, pushed OUTWARD by `offset(u, v)`.
+ *
+ * Built from `eggSurface` rather than a THREE primitive so it hugs the ovoid
+ * exactly at any taper/bulge setting — the same single-source-of-truth rule the
+ * crack, the eyes and the mouth already follow. `u` runs `thetaA -> thetaB` and
+ * `v` runs `phiA -> phiB` (0 = toward the crown).
+ *
+ * Deliberately DOUBLE-SIDED. `docs/LESSONS.md` §12: a lathe/patch whose profile
+ * runs the wrong way inverts its normals and renders near-black, and it has bitten
+ * six characters at once on this project. A cloth shell has no inside worth
+ * defending, so the whole failure class is designed out instead of being got right.
+ */
+function shellPatch(
+  thetaA: number, thetaB: number, phiA: number, phiB: number, R: number,
+  offset: (u: number, v: number) => number,
+  segT = 40, segP = 16
+): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (let j = 0; j <= segP; j++) {
+    const v = j / segP;
+    const phi = phiA + (phiB - phiA) * v;
+    for (let i = 0; i <= segT; i++) {
+      const u = i / segT;
+      const theta = thetaA + (thetaB - thetaA) * u;
+      const s = eggSurface(theta, phi, R);
+      const o = offset(u, v);
+      pos.push(s.pos.x + s.normal.x * o, s.pos.y + s.normal.y * o, s.pos.z + s.normal.z * o);
+    }
+  }
+  for (let j = 0; j < segP; j++) {
+    for (let i = 0; i < segT; i++) {
+      const a = j * (segT + 1) + i;
+      const b = a + 1;
+      const c = a + segT + 1;
+      const d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
 }
 
 /** Path (theta, phi-as-fraction-of-PI) for the crack landmark: a short, bold
@@ -542,6 +597,8 @@ export class EggCharacter extends BaseCharacter {
       head.add(tassel);
     }
 
+    this.buildCowl(R);
+
     // ── Body: dress the torso ─────────────────────────────────────────────────
     // Two independent builder rounds both named the same gap: a themed head on a
     // generic body. Egg's body is a second, smaller shell built from the exact
@@ -660,6 +717,144 @@ export class EggCharacter extends BaseCharacter {
     outlineGroup(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
+  }
+
+  /**
+   * ── THE DARK GARMENT: a hood pushed back off the crown, and its cape ─────────
+   *
+   * Two separate measurements asked for this and neither could be answered with
+   * albedo.
+   *
+   * 1. VALUE. `valuescan --mode gate` wants P05 <= 0.180; Egg sits at 0.279, the
+   *    only character in the cast that the albedo pass could not close. The
+   *    reason is arithmetic, recorded at `SHELL_BODY` above: the head is 93.7% of
+   *    the character and the shell being near-white IS the egg, so the only masses
+   *    left to carry a dark rung are the limbs — ~1% of the silhouette each, with
+   *    no room for three 0.10 steps at 111 px. A dark rung needs AREA, and the
+   *    only area available is area that does not exist yet.
+   *
+   * 2. SILHOUETTE. Measured in the LIVE MATCH at the match camera and the shipped
+   *    spawn facing (`tools/tmp/limbmatch.mjs`), Egg is the worst-reading shape in
+   *    the cast: hull deficiency **0.0986** against a floor of **0.2007** taken
+   *    from the weakest of six hand-verified Brawl Stars plates, and only **4.4%**
+   *    of its on-screen pixels are anything other than the food mass. Rendered and
+   *    looked at, it is a pale boulder with two dark stubs under it.
+   *
+   * ── Why a hood, and why PUSHED BACK ────────────────────────────────────────
+   * The match camera pitches **58 degrees**, so the surface it sees most of is the
+   * TOP of the mass — which on this character is the lifted lid, the crack and the
+   * face, i.e. the entire identity. Anything laid over the crown buys value by
+   * deleting the character. The back hemisphere above the equator is the one large
+   * area this camera sees a lot of and the design needs none of, so that is where
+   * the garment goes: `theta 0.55PI .. 1.45PI`, which leaves the front 0.55PI clear
+   * on both sides of the face.
+   *
+   * The hood STANDS OFF the shell — 0.028R at the crown opening out to 0.11R at
+   * the rim — and carries a DROOPING POINT off the back of the crown. The point is
+   * the silhouette half of the job and it is not decoration: measured, a hood that
+   * merely hugs the ovoid moved hull deficiency 0.0986 -> 0.0992, i.e. nothing at
+   * all. The outline of a sphere with a dark patch painted on it is still the
+   * outline of a sphere. Only geometry that leaves the surface changes the shape.
+   *
+   * ── Egg already HAD a dark garment, and it delivered nothing ────────────────
+   * The scarf above is `LIMB_LILAC` (#241A38, near-black) and has been since the
+   * value pass. It sits at `phi 0.80PI` — near the bottom pole, where the ovoid's
+   * radius has collapsed — and under a camera looking DOWN at 58 degrees it is
+   * almost entirely behind the shell's own bulge. `docs/LESSONS.md` §1 for the
+   * seventeenth time: the fix is not "add a dark garment", it is "put the dark
+   * garment where pixels reach the screen". The scarf is kept (it is the front
+   * half of the costume and reads at character-select framing) and the cowl is the
+   * half that reaches the match.
+   */
+  private buildCowl(R: number): void {
+    const head = this.rig.joints.head;
+    const cloth = toonMat({ color: GARMENT, roughness: 0.62, doubleSide: true });
+    const clothLit = toonMat({ color: GARMENT_LIT, roughness: 0.58, doubleSide: true });
+
+    // Back hemisphere only — the front stays bare, so the lid, the crack and the
+    // face are untouched.
+    //
+    // ── SIZED BY MEASUREMENT, and the first size was a disaster ────────────────
+    // Pass 1 ran the hood from `phi 0.15PI` to `0.60PI` standing 0.085R -> 0.34R
+    // proud, with a scalloped cape under it down to `0.80PI`. Rendered and looked
+    // at (non-negotiable #3), that is not a hood — it is a black dome that
+    // swallowed the entire character, legs included. Measured at the match camera
+    // and the shipped facing it made every single number WORSE: hull deficiency
+    // 0.0986 -> 0.0532, wasted limb footprint 53.8% -> 89.9%, and the share of the
+    // silhouette that is anything other than the food mass 4.4% -> 0.7%. A garment
+    // big enough to guarantee a dark rung is big enough to BE the character.
+    //
+    // The working size is roughly a third of that, and the cape is gone: it was
+    // the piece reaching down over the legs, which is the scarf's own recorded
+    // mistake (`scarfPhi`, above) repeated one layer up.
+    const T0 = 0.62 * Math.PI;
+    const T1 = 1.38 * Math.PI;
+    const PHI_TOP = 0.16 * Math.PI;
+    const PHI_RIM = 0.50 * Math.PI;   // the equator — the garment never reaches the legs
+
+    // ── The hood ──────────────────────────────────────────────────────────────
+    const hood = new THREE.Mesh(
+      shellPatch(T0, T1, PHI_TOP, PHI_RIM, R, (_u, v) => {
+        const s = v * v * (3 - 2 * v);          // smoothstep: hugs the crown, lifts at the rim
+        return R * (0.028 + 0.082 * s);
+      }),
+      cloth
+    );
+    hood.name = 'egg_hood';
+    hood.castShadow = true;
+    hood.receiveShadow = true;
+    // Thin double-sided cloth: an inverted-hull outline on a shell with no interior
+    // renders as a black slab rather than an edge.
+    hood.userData.noOutline = true;
+    head.add(hood);
+
+    // ── The rolled rim ────────────────────────────────────────────────────────
+    // A real tube, not a patch, so the opening has a solid edge to catch the key
+    // light — and so ONE piece of this costume carries an ink outline. It stands
+    // slightly PROUDER than the hood it closes, which is the whole silhouette
+    // contribution: a lip on the outline instead of a smooth arc.
+    {
+      const pts: THREE.Vector3[] = [];
+      const N = 26;
+      for (let i = 0; i <= N; i++) {
+        const t = T0 + (T1 - T0) * (i / N);
+        const s = eggSurface(t, PHI_RIM, R);
+        pts.push(s.pos.clone().addScaledVector(s.normal, R * 0.125));
+      }
+      const rim = new THREE.Mesh(
+        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, R * 0.055, 8, false),
+        clothLit
+      );
+      rim.name = 'egg_hood_rim';
+      rim.castShadow = true;
+      rim.receiveShadow = true;
+      head.add(rim);
+    }
+
+    // ── The drooping hood point: BUILT, MEASURED, REMOVED ─────────────────────
+    // A tapered drooping tube off the back of the crown with a pale bobble on the
+    // tip, added to buy the silhouette half of this garment's job. It moved hull
+    // deficiency at the shipped facing by **0.0003** (0.0992 -> 0.0989) — nothing —
+    // and rendered, from behind, as a lump in the middle of the hood. Both facts
+    // are recorded here rather than the code being quietly deleted, because the
+    // reason it failed is the finding: at the match camera Egg's ovoid is 1.16R
+    // wide at its bulge and any addition that starts on the shell and reaches
+    // 0.7R along the surface normal is still INSIDE that hull. Egg's outline
+    // cannot be fixed by bolting a landmark onto the egg; it needs the egg to stop
+    // being the whole character. See `tools/tmp/limbmatch.mjs` and the report.
+
+    // ── The clasp ─────────────────────────────────────────────────────────────
+    // One small saturated landmark at each end of the rim, so the garment reads as
+    // WORN rather than as a shadow. Neon, because that is Egg's rarity accent and
+    // the crack seam is the only other place it appears.
+    for (const sx of [-1, 1] as const) {
+      const p = eggSurface(sx * 0.62 * Math.PI, PHI_RIM - 0.02, R);
+      const clasp = new THREE.Mesh(new THREE.SphereGeometry(R * 0.05, 12, 10), glossyMat({ color: NEON_ACCENT, roughness: 0.25 }));
+      clasp.position.copy(p.pos).addScaledVector(p.normal, R * 0.125);
+      clasp.name = 'egg_cowl_clasp';
+      clasp.castShadow = true;
+      head.add(clasp);
+    }
   }
 
   /**

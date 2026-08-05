@@ -102,19 +102,40 @@ export const createHotContext=()=>({accept:noop,acceptExports:noop,dispose:noop,
 export const injectQuery=(u)=>u; export const updateStyle=noop; export const removeStyle=noop;
 export const ErrorOverlay=class{}; export default {};`;
 
-/** Stations: copied verbatim from `tools/arena-scan.mjs` so the two tools' rows line up. */
+/**
+ * Stations: copied from `tools/arena-scan.mjs` so the two tools' rows line up.
+ *
+ * ── FIVE OF THESE WERE STALE, AND ONE GATE KEY WAS MEASURING A COUNTER ───────
+ * `60c5b92` moved the spawns and re-placed four corner stations that had ended up
+ * INSIDE a `CoverBox` (44-106 wu inside, on BOTH axes). `arena-scan` corrected them
+ * and now guards the correction in its own selftest; this file had copied the
+ * station NAMES before the fix and kept the old coordinates.
+ *
+ * The consequence was not cosmetic. `--mode dl` takes its mask from an
+ * environment-hidden render and its luma from the SHIPPED frame, so where a prop
+ * occludes the fighter it reports THE PROP'S luma as the character's. At those four
+ * stations the fighter is not on screen at all — only its floating HP bar above a
+ * counter. They are exactly what drives the `dlBelow10` gate key, which is why that
+ * key failed for all eleven characters on BOTH sides of the value pass and made the
+ * headline verdict read 0/11 -> 0/11 while the four character-owned keys went
+ * 0/11 -> 9/11. It was never a character property.
+ *
+ * A fighter centred in a CoverBox is also exactly where `tryMove` refuses every step
+ * (`docs/LESSONS.md` §10), so no real match ever produces those frames.
+ * `tools/tmp/stationvalidate.mjs` reproduces the whole thing in ~20 ms.
+ */
 const MAX_SAFE_RADIUS = 850, GREASE = { x: 560, y: 900 }, WATER = { x: 840, y: 100 };
 const STATIONS = [
-  { id: 'spawn_west', x: 160, y: 500, fog: MAX_SAFE_RADIUS },
+  { id: 'spawn_west', x: 160, y: 390, fog: MAX_SAFE_RADIUS },   // was 160,500 — the spawn moved in 60c5b92
   { id: 'west_lane', x: 340, y: 500, fog: MAX_SAFE_RADIUS },
   { id: 'west_choke', x: 400, y: 500, fog: MAX_SAFE_RADIUS },
   { id: 'pot_south', x: 700, y: 640, fog: MAX_SAFE_RADIUS },
   { id: 'pot_diagonal', x: 570, y: 430, fog: MAX_SAFE_RADIUS },
   { id: 'hub_north', x: 700, y: 320, fog: MAX_SAFE_RADIUS },
-  { id: 'freezer_nw', x: 430, y: 240, fog: MAX_SAFE_RADIUS },
-  { id: 'pantry_ne', x: 1150, y: 330, fog: MAX_SAFE_RADIUS },
-  { id: 'pantry_sw', x: 270, y: 665, fog: MAX_SAFE_RADIUS },
-  { id: 'freezer_se', x: 1000, y: 700, fog: MAX_SAFE_RADIUS },
+  { id: 'freezer_nw', x: 430, y: 420, fog: MAX_SAFE_RADIUS },   // was 430,240 — inside the NW stove island
+  { id: 'pantry_ne', x: 1150, y: 420, fog: MAX_SAFE_RADIUS },   // was 1150,330 — inside a prep counter
+  { id: 'pantry_sw', x: 400, y: 800, fog: MAX_SAFE_RADIUS },    // was 270,665 — inside a prep counter
+  { id: 'freezer_se', x: 1000, y: 580, fog: MAX_SAFE_RADIUS },  // was 1000,700 — inside the SE stove island
   { id: 'fryer_south', x: 560, y: 790, fog: MAX_SAFE_RADIUS },
   { id: 'edge_west', x: 70, y: 500, fog: MAX_SAFE_RADIUS },
   { id: 'grease_near', x: GREASE.x - 130, y: GREASE.y - 95, fog: MAX_SAFE_RADIUS },
