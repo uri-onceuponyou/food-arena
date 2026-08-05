@@ -1235,11 +1235,14 @@ export function buildFloor(M: Materials): THREE.Group {
     [CENTER.x, CENTER.y, 165],
     [CENTER.x, CENTER.y - 242, 130], [CENTER.x, CENTER.y + 242, 130], // N/S hub lane mouths
     [CENTER.x - 175, CENTER.y, 130], [CENTER.x + 175, CENTER.y, 130], // W/E hub lane mouths
-    [340, 500, 120], [ARENA_W - 340, 500, 120], // prep-station corridor gaps
-    [355, 500, 100], [ARENA_W - 355, 500, 100], // barrel lane
+    // ⚠️ Traffic follows GEOMETRY. Everything below tracks a `kitchen.ts` footprint, so
+    // it moves when that does — 2026-08-05: the prep stations left the centre line, the
+    // barrels left the lane entirely, and the stove islands went ±175/±150 -> ±270/±200.
+    [265, 500, 120], [ARENA_W - 265, 500, 120], // spawn bay mouth, between the prep pair
+    [430, 445, 110], [ARENA_W - 430, ARENA_H - 445, 110], // the main spawn-to-hub lane
     [CENTER.x, 830, 110], [CENTER.x, 170, 110], // service counters
     // The four stove islands themselves — the busiest cooking surfaces on the map.
-    [525, 350, 110], [875, 350, 110], [525, 650, 110], [875, 650, 110],
+    [430, 300, 110], [970, 300, 110], [430, 700, 110], [970, 700, 110],
   ];
   /** 0 at rest, 1 at the dead centre of a wear zone. Squared falloff so a zone has a
    * soft, spatially-motivated core rather than a hard-edged disc. */
@@ -1498,11 +1501,23 @@ export function buildFloor(M: Materials): THREE.Group {
   // exactly on the ring where the spawned cast stands. Four discrete patches sized
   // to their prop, elongated along the open lane so they clear the stove islands
   // on the cross-axis, read as floor styling instead.
+  // ⚠️ EVERY ONE OF THESE IS A PAD UNDER A PROP. A mat with nothing standing on it is
+  // not neutral decoration — it is the single worst read this arena has (a blind critic
+  // called this exact material *"raised platforms, floor mats, water, or pits — I could
+  // not tell"*, `docs/DECISIONS-FOR-URI.md` §5), and an isolated dark rectangle alone on
+  // open tile is the version of it that reads most like a hole.
+  //
+  // These four were at `CENTER ± 242` / `CENTER ± 175`, under the lane pots and spice
+  // carts of the old hub. The 2026-08-05 pacing re-plan emptied that ring deliberately —
+  // the endgame has to be a duel around ONE pillar — so the props moved out to the north
+  // and south service lines and these mats moved with them. **If you move a prop in
+  // `kitchen.ts`, move its mat.** `tools/tmp/arena_probe.mjs --map` shows the layout;
+  // an overview render shows the orphans, and nothing else will.
   const hubMatZones: Array<[number, number, number, number]> = [
-    [CENTER.x, CENTER.y - 242, 150, 80], // north, under the lane pot
-    [CENTER.x, CENTER.y + 242, 150, 80], // south, under the lane pot
-    [CENTER.x - 175, CENTER.y, 80, 150], // west, under the spice cart
-    [CENTER.x + 175, CENTER.y, 80, 150], // east, under the spice cart
+    [450, 120, 110, 110], // NW service line, under the spice cart
+    [ARENA_W - 450, ARENA_H - 120, 110, 110], // SE mirror
+    [1010, 120, 115, 115], // NE service line, under the stacked pots
+    [ARENA_W - 1010, ARENA_H - 120, 115, 115], // SW mirror
   ];
   // Round-6 fix: these used to be a THICKER patch (0.04) sitting ABOVE a wider, offset
   // "trim" box floating 0.06 BELOW it — two slabs stepped apart read exactly like a
@@ -1611,7 +1626,12 @@ export function buildFloor(M: Materials): THREE.Group {
   // wood pads — verified against every relevant footprint in `kitchen.ts`), so the
   // "someone's been cooking here" story shows up at the single place a player is
   // most likely to be looking at the floor: right beside the stove.
-  const stoveGrease: Array<[number, number]> = [[395, 260], [990, 260], [410, 740], [1005, 740]];
+  // Moved with the islands on 2026-08-05 (±175/±150 -> ±270/±200). At the old
+  // coordinates all four splats now sit UNDER an island body — 30 wu of grease
+  // delivering zero pixels, `docs/LESSONS.md` §1 with the props moving instead of the
+  // decal. Each sits ~10 wu clear of its island's outboard face, checked against the
+  // spice cart, the flour sacks, the herb crate and the SE freezer.
+  const stoveGrease: Array<[number, number]> = [[430, 215], [970, 215], [430, 785], [970, 785]];
   stoveGrease.forEach(([sx, sy], i) => g.add(buildGreaseSplat(M, stainRim, sx, sy, 7401 + i * 53, 30)));
 
   // Worn-floor marks near the service counters — a confident grease pool behind the
@@ -1697,9 +1717,33 @@ export function buildFloor(M: Materials): THREE.Group {
   const matFill = keyServiceMat(M.utilityMat);
   const matEdge = serviceMatEdge(M.utilityMat);
   const matTrim = keyServiceMat(M.utilityMatDark);
+  // The THIRD entry is the stove hub's own service zone, and it is here for a measured
+  // reason rather than a decorative one. The 2026-08-05 pacing re-plan emptied the ring
+  // around the pot of every prop (see `kitchen.ts`) — which is right for the game and
+  // cost the frame **0.018 of mean saturation**, because what those props were standing
+  // on was four saturated cool mats and what replaced them is plain tile. The colour
+  // pass had just taken mean saturation 0.324 -> 0.427, above the lowest reference plate
+  // for the first time; handing 0.018 of that straight back an hour later is exactly the
+  // "two independently-correct passes, nobody watching the sum" failure of
+  // `docs/LESSONS.md` §7.
+  //
+  // A pad is the right instrument for it: it is FLOOR, so it costs nothing in occlusion,
+  // pathing or reachability — the three things the re-plan bought — while putting the
+  // chroma back over the emptiest composition on the map. It gets the same painted kerb
+  // as the others, which is what stops this material reading as a pit
+  // (`docs/DECISIONS-FOR-URI.md` §5), and it is centred on the arena's landmark rather
+  // than floating alone, which is the other half of that read.
+  //
+  // SIZE IS MEASURED, not chosen. A first pass used 560x400 and overshot in the other
+  // direction: this material is COOL, so it took the frame's warm SHARE straight out of
+  // its band (0.128 -> 0.114 against a floor of 0.120) and it buried two warm floor
+  // stains at (460,460)/(940,540) under its own decal — `docs/LESSONS.md` §1, a decal
+  // hidden by a decal 3 mm above it. 400x280 keeps both stains outside its edge and
+  // lands mean saturation back at baseline with the warm share still inside the band.
   const utilityPads: Array<[number, number, number, number]> = [
     [230, 190, 420, 340],
     [ARENA_W - 230, ARENA_H - 190, 420, 340],
+    [CENTER.x, CENTER.y, 400, 280],
   ];
   for (const [px, py, pw, ph] of utilityPads) {
     // Same painted kerb as the hub set — these had no border at all, which is most of

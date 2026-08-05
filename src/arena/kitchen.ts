@@ -6,27 +6,63 @@
  * 1400 x 1000 world units (vs the prototype's 900 x 600) laid out with true 180°
  * point symmetry around the centre so both spawns face an identical, fair map.
  *
- *   - A central STOVE HUB: the boiling pot (the frozen hazard numbers, unmoved in
- *     spirit) ringed by 4 diagonal stove islands that block the corners but leave
- *     four cardinal lanes open, each with a small chokepoint prop sitting in the
- *     lane mouth. This is the classic "danger in the middle, cover on the corners"
- *     BS arena hub — you can dash straight up a lane, but the diagonals are blocked
- *     and the hub itself is lethal to linger in. The pot itself is SOLID (see the
- *     `boiling_pot` CoverBox below): the burning ground is the ring around it, not
- *     the vessel, so the middle of the map is a pillar you fight around rather than
- *     a hole fighters vanish into.
+ * ── The three rules the 2026-08-05 re-plan added, and why ────────────────────────
+ * Read these before moving any prop. Each one was a measured defect, and every one of
+ * them is re-checkable in seconds with `tools/tmp/arena_probe.mjs`.
+ *
+ *   1. **COVER DENSITY MUST FALL TOWARD THE CENTRE.** The closing ring has to force
+ *      fighters INTO each other; if the middle is the most cluttered part of the map
+ *      it forces them into furniture instead. Measured on the shipped layout,
+ *      occlusion rose 30.6% -> 67.7% as the ring shrank from 993 to MIN_SAFE_RADIUS,
+ *      because the four stove islands' inner corners sat **138 wu from centre — inside
+ *      MIN_SAFE_RADIUS (140)** — and the spice carts sat at 175. The endgame annulus
+ *      literally touched them. The islands are now at ±270/±200 (inner corner 241 wu),
+ *      the carts and lane pots are out on the service wall, and the whole 150..250 wu
+ *      band is 0.3% solid: the endgame is a ring around ONE pillar, as intended.
+ *      → `arena_probe.mjs --occl` must end BELOW where it starts.
+ *
+ *   2. **NO PROP MAY SEAL A POCKET.** Two prep counters plus two lane barrels sealed
+ *      `x 301..415` and `x 985..1099`, both `y 469..531` — 114x63 wu each, **1.9% of
+ *      all legal standing space that nothing could ever enter**, one of them containing
+ *      a hanging sign nobody could ever walk up to. A small prop dropped in the gap
+ *      between two large ones is exactly how this happens, and it is invisible in a
+ *      screenshot. → `arena_probe.mjs --truth` must print ONE PIECE.
+ *
+ *   3. **A SPAWN'S STRAIGHT-AHEAD RUN MUST NOT END IN FURNITURE OR IN A HAZARD.** A
+ *      player holding one direction out of the shipped spawn travelled **38 wu** before
+ *      a barrel stopped it dead (`tryMove` tests the destination and does not slide).
+ *      With the lane cleared the run became 700 wu — and then ran into the boiling pot,
+ *      whose CoverBox stops a fighter at r=73 while its damage ring is r=95, i.e. it
+ *      **pins you inside the fire**. Hence the spawns are now offset 110 wu off the
+ *      centre line (still exactly point-symmetric), so the natural run out of spawn
+ *      passes clear of both the pot's box and its 95 wu burn ring.
+ *      → `arena_probe.mjs --route` prints the runway in every direction.
+ *
+ * ── The map itself ───────────────────────────────────────────────────────────────
+ *   - A central STOVE HUB: the boiling pot alone in a wide clearing, with 4 diagonal
+ *     stove islands pushed out to the edge of that clearing. This is the classic
+ *     "danger in the middle, cover on the corners" BS arena hub — the cardinal lanes
+ *     are open and the diagonals are blocked, and the hub itself is lethal to linger
+ *     in. The pot is SOLID (see the `boiling_pot` CoverBox below): the burning ground
+ *     is the ring around it, not the vessel, so the middle of the map is a pillar you
+ *     fight around rather than a hole fighters vanish into.
  *   - Two big WALK-IN FREEZERS anchor the NW/SE corners: single huge landmark props
  *     that fully block sightlines and give a hard flank route around the hub.
  *   - Two PANTRY clusters (crates + flour sacks) anchor the NE/SW corners: several
  *     smaller boxes clustered tight, reading as one nook but with more silhouette
  *     variety than the freezers.
- *   - Two PREP STATIONS sit mid-west/mid-east: paired counters with a narrow gap
- *     between them, a deliberate chokepoint on the flanking route around the hub.
- *   - Two SERVICE counters (a fryer south, a sink north) each sit beside a slowing
- *     puddle (grease / spilled water) — the required slow hazard, doubled for
- *     symmetry.
- * Player spawns west, enemy spawns east, both in open floor well clear of cover so
- * neither side opens the match already boxed in.
+ *   - Two PREP STATIONS sit mid-west/mid-east, butted against the freezer they share a
+ *     corner with. They are the north wall of the spawn bay rather than a gate across
+ *     it: the pair used to straddle the lane 80 wu either side of the centre line,
+ *     which is what made the spawn an alcove and sealed the pockets above.
+ *   - A SERVICE LINE runs along the north and south walls: a sink (north) / fryer
+ *     (south) counter flanked by the spice cart and the stacked pots that used to sit
+ *     beside the pot. Each service counter still sits beside a slowing puddle (grease
+ *     / spilled water) — the required slow hazard, doubled for symmetry.
+ *   - Four SUPPLY BARRELS sit in the far west and east strips, where the map had no
+ *     cover at all beyond r=650. They used to stand in the middle of the spawn lane.
+ * Player spawns west-north, enemy east-south, both in open floor well clear of cover
+ * so neither side opens the match already boxed in.
  *
  * ── Every CoverBox has exactly one matching visual, built by the same call ───────
  * `addCover()` is the single place a collision box gets created, and it always
@@ -96,38 +132,65 @@ export const createKitchenArena: ArenaFactory = () => {
   if (!location.search.includes('apron=0')) root.add(buildApron());
 
   // ── Central stove hub ────────────────────────────────────────────────────────
+  //
+  // ⚠️ `HUB_ISLAND_DX/DY` are the single most load-bearing pair of numbers in this
+  // file. They were ±175/±150, which put each island's INNER CORNER at
+  // hypot(175−85, 150−45) = **138 wu from centre — inside `MIN_SAFE_RADIUS` (140)**.
+  // The last standable annulus of every long match was therefore wedged between the
+  // pot and four counters, and measured occlusion CLIMBED 30.6% → 67.7% as the ring
+  // closed: the closing zone was herding fighters into furniture instead of into each
+  // other, the exact inverse of what a closing zone is for.
+  //
+  // At ±270/±200 the inner corner sits at hypot(185, 155) = **241 wu**, which is
+  // outside `MIN_SAFE_RADIUS` + a fighter's own reach, so nothing but the pot is
+  // shootable from the endgame annulus. Series now 27.7% → 25.2%, peak 31.3%.
+  //
+  // The outward limit is the freezer, not taste: at DX > 270 the island's west face
+  // (CENTER.x − DX − 85) crosses the NW freezer's east face at x=345 and the two
+  // meshes intersect. `arena_probe.mjs --audit` reports that as a MESH CLIP.
   const HUB_ISLAND_W = 170, HUB_ISLAND_H = 90;
+  const HUB_ISLAND_DX = 270, HUB_ISLAND_DY = 200;
   addCover(propsGroup, cover, M, {
-    x: CENTER.x - 175, y: CENTER.y - 150, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island',
+    x: CENTER.x - HUB_ISLAND_DX, y: CENTER.y - HUB_ISLAND_DY, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island',
     build: (w, d) => buildStoveIsland(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x + 175, y: CENTER.y - 150, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island',
+    x: CENTER.x + HUB_ISLAND_DX, y: CENTER.y - HUB_ISLAND_DY, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island',
     build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x - 175, y: CENTER.y + 150, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island', yawDeg: 180,
+    x: CENTER.x - HUB_ISLAND_DX, y: CENTER.y + HUB_ISLAND_DY, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island', yawDeg: 180,
     build: (w, d) => buildStoveIsland(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x + 175, y: CENTER.y + 150, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island', yawDeg: 180,
+    x: CENTER.x + HUB_ISLAND_DX, y: CENTER.y + HUB_ISLAND_DY, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island', yawDeg: 180,
     build: (w, d) => buildStoveIsland(M, w, d),
   });
 
+  // ── Service line, north and south walls ──────────────────────────────────────
+  // The stacked pots (was CENTER.y ± 242) and the spice carts (was CENTER.x ± 175)
+  // used to be the "chokepoint prop in the lane mouth" of the old hub. Both sat inside
+  // the endgame annulus's reach — the carts at 175 wu from centre were the single
+  // biggest contributor to the 67.7% endgame occlusion, since a fighter anywhere in
+  // the annulus is within one weapon reach of them.
+  //
+  // They keep their job — clutter with silhouette variety, and a counterpoint to the
+  // long service counters — out on the wall line instead, where cover SHOULD be dense.
+  // Kept clear of the exhaust pipes at (375,80)/(1025,920) and of both puddles.
   addCover(propsGroup, cover, M, {
-    x: CENTER.x, y: CENTER.y - 242, w: 55, h: 55, kind: 'stacked_pots',
+    x: 1010, y: 120, w: 55, h: 55, kind: 'stacked_pots',
     build: (w, d) => buildLanePots(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x, y: CENTER.y + 242, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
+    x: ARENA_W - 1010, y: ARENA_H - 120, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
     build: (w, d) => buildLanePots(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x - 175, y: CENTER.y, w: 50, h: 50, kind: 'spice_cart',
+    x: 450, y: 120, w: 50, h: 50, kind: 'spice_cart',
     build: (w, d) => buildSpiceCart(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x + 175, y: CENTER.y, w: 50, h: 50, kind: 'spice_cart', yawDeg: 180,
+    x: ARENA_W - 450, y: ARENA_H - 120, w: 50, h: 50, kind: 'spice_cart', yawDeg: 180,
     build: (w, d) => buildSpiceCart(M, w, d),
   });
 
@@ -171,45 +234,68 @@ export const createKitchenArena: ArenaFactory = () => {
   });
 
   // ── Prep stations (mid-west / mid-east) ──────────────────────────────────────
+  //
+  // Was a PAIR STRADDLING THE LANE at x=340, y=420/580 — a 105 wu gap between them on
+  // the centre line. Together with the two lane barrels below, that pair is what sealed
+  // `x 301..415, y 469..531` (and its twin): a 114x63 wu pocket of legal standing space
+  // that **nothing in the game could ever enter**, 1.9% of the map, found by a 2 wu
+  // lattice flood and invisible to every other test. It is also the "alcove" the
+  // navigation work had to build a flow field to escape — the player spawned in a bay
+  // whose only exit was that gap, with a barrel parked in front of it.
+  //
+  // Both counters of each station now sit on the SAME side of the centre line as the
+  // freezer they share a corner with, forming the north (west station) / south (east
+  // station) wall of an open spawn bay instead of a gate across the lane. x=265 rather
+  // than 340 is chosen so the counter's inflated west edge (265 − 80 − 21 = 164) clears
+  // the player spawn's x=160: without that, walking north out of spawn hits furniture
+  // in 10 wu instead of 84.
   addCover(propsGroup, cover, M, {
-    x: 340, y: 420, w: 160, h: 55, kind: 'prep_counter',
+    x: 265, y: CENTER.y - 170, w: 160, h: 55, kind: 'prep_counter',
     build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
   });
   addCover(propsGroup, cover, M, {
-    x: 340, y: 580, w: 160, h: 55, kind: 'prep_counter',
+    x: 265, y: CENTER.y + 170, w: 160, h: 55, kind: 'prep_counter',
     build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 340, y: ARENA_H - 420, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
-    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
-  });
-  addCover(propsGroup, cover, M, {
-    x: ARENA_W - 340, y: ARENA_H - 580, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    x: ARENA_W - 265, y: ARENA_H - (CENTER.y - 170), w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
     build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 265, y: ARENA_H - (CENTER.y + 170), w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
   });
 
-  // ── Mid-lane supply barrels ───────────────────────────────────────────────────
-  // The straight run from each spawn to the hub was open floor along its centre
-  // line: the prep-station pairs above sit at y=420/580 (offset ±80 from the
-  // y=500 centreline), leaving a clear ~105-unit-wide channel a player could stand
-  // in at spawn and see straight down to the opposing spawn. These four barrels
-  // sit squarely IN that channel — two per lane, staggered front/back rather than
-  // one solid wall, so the sightline is broken twice and there's still room to
-  // dodge around each individually instead of the lane just being sealed.
+  // ── Supply barrels — far west / far east strips ──────────────────────────────
+  // These used to stand squarely IN the spawn lane at x=250/460, to break the
+  // spawn-to-spawn sightline. Three measurements retired that idea:
+  //   * that sightline is 1080 wu long and the camera guarantees only 199.2 wu, so no
+  //     player has ever seen down it;
+  //   * `tryMove` tests the destination and does NOT slide, so a player holding one
+  //     direction out of spawn walked **38 wu** and stopped dead against the first
+  //     barrel — 0.9 of a body length, the very first thing anyone does in a match;
+  //   * with the prep counters they sealed the two dead pockets described above.
+  // Removing them took the shortest legal spawn-to-spawn route 1341 wu -> 1171 wu
+  // (detour factor 1.24x -> 1.06x) and the runway 38 wu -> 700 wu.
+  //
+  // They land in the far west/east strips because that is where the map had NO cover
+  // at all: beyond r=650 the shipped layout was 7% solid and beyond r=750 it was 0.0%,
+  // while r=150..250 was its densest band. Density now falls toward the centre, which
+  // is rule 1 at the top of this file.
   addCover(propsGroup, cover, M, {
-    x: 250, y: 500, w: 60, h: 50, kind: 'supply_barrel',
+    x: 60, y: 250, w: 60, h: 50, kind: 'supply_barrel',
     build: (w, d) => buildSupplyBarrel(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: 460, y: 500, w: 48, h: 46, kind: 'supply_barrel',
+    x: 60, y: 750, w: 48, h: 46, kind: 'supply_barrel',
     build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 250, y: ARENA_H - 500, w: 60, h: 50, kind: 'supply_barrel',
+    x: ARENA_W - 60, y: ARENA_H - 250, w: 60, h: 50, kind: 'supply_barrel',
     build: (w, d) => buildSupplyBarrel(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 460, y: ARENA_H - 500, w: 48, h: 46, kind: 'supply_barrel',
+    x: ARENA_W - 60, y: ARENA_H - 750, w: 48, h: 46, kind: 'supply_barrel',
     build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
   });
 
@@ -341,16 +427,22 @@ export const createKitchenArena: ArenaFactory = () => {
   pipeSE.position.set(pipeSEPos.x, 0, pipeSEPos.z);
   root.add(pipeSE);
 
-  // Hanging order-tag signs in the mid-lane, in the open gap BETWEEN the two supply
-  // barrels — signage motif, and the single tallest thing in the lane view, the
-  // composition the round-6 critic called emptiest. Kept clear of every CoverBox
-  // (barrels sit at x=250/460 ±30/24, prep counters at y=420/580 ±27.5).
+  // Hanging order-tag signs — signage motif, tucked against the freezer's inboard
+  // face at the mouth of the north (west sign) / south (east sign) flank route.
+  //
+  // They used to stand at (365,500)/(1035,500), which the 2 wu lattice flood showed was
+  // **inside one of the two sealed pockets** — a decoration nothing in the game could
+  // ever walk up to. That is also why nobody noticed these are collision-free: with the
+  // pockets healed, a sign left in the open lane would be a solid-looking post players
+  // walk straight through. (350,180) sits 5 wu clear of the freezer mesh but inside the
+  // band a 42 wu fighter's centre can never occupy, so it cannot be walked through at
+  // all. Same convention as the exhaust pipes and the chalkboard: decoration only.
   const signW = buildHangingSign(M);
-  const signWPos = groundPos(365, 500);
+  const signWPos = groundPos(350, 180);
   signW.position.set(signWPos.x, 0, signWPos.z);
   root.add(signW);
   const signE = buildHangingSign(M, 180);
-  const signEPos = groundPos(ARENA_W - 365, ARENA_H - 500);
+  const signEPos = groundPos(ARENA_W - 350, ARENA_H - 180);
   signE.position.set(signEPos.x, 0, signEPos.z);
   signE.rotation.y = THREE.MathUtils.degToRad(180);
   root.add(signE);
@@ -360,8 +452,33 @@ export const createKitchenArena: ArenaFactory = () => {
   root.add(dust.mesh);
 
   // ── Spawns ────────────────────────────────────────────────────────────────────
-  const playerSpawn = { x: 160, y: CENTER.y };
-  const enemySpawn = { x: ARENA_W - 160, y: CENTER.y };
+  //
+  // ── Why y is 390 and not CENTER.y ────────────────────────────────────────────
+  // 180° point symmetry forces the segment between two spawns through the arena
+  // centre, and the arena centre is a 32 HP/s hazard. On the centre line that is not
+  // merely a coincidence, it is a trap: `POT.bodyRadius*2` blocks a fighter's centre
+  // at r=73 while `POT.dangerRadius` burns from r=95, so a player holding one
+  // direction out of spawn ran 466 wu, jammed flush against the pot **inside its burn
+  // ring**, and cooked. Measured with the scripted `chase` player over all 110
+  // matchups: the pot went from 0% of all damage dealt to **71%**, and the naive
+  // player's win rate collapsed 47.3% -> 12.7%, without one balance constant moving.
+  // The old lane barrels had hidden this by stopping everyone 38 wu from spawn.
+  //
+  // Offsetting each spawn 110 wu off the centre line — still exactly point-symmetric,
+  // so both sides remain identical — puts the straight-ahead run clear of both the pot
+  // box (needs |dy| > 73) and its burn ring (needs |dy| > 95). Pot share falls to 25%
+  // and the naive win rate recovers to 39.1%. The offset costs 22 wu of spawn
+  // separation (1080 -> 1102 straight line) and nothing else.
+  //
+  // ── Why the SEPARATION did not change ────────────────────────────────────────
+  // Swept through all 110 matchups at gaps 1080/1000/920/840/760 on this layout.
+  // Dead time did not improve (56.6 / 55.6 / 58.9 / 58.1 / 57.6%) because shortening
+  // the walk shortens the match by about as much, while the scripted player's win rate
+  // climbed 56.4% -> 90.0% as the spawns approached the hub. Pulling the spawns in buys
+  // 1.7 s of contact time and costs a 34 pp balance swing, so it was not taken. The
+  // pacing win came from the ROUTE (1341 -> 1171 wu) instead — see the barrels above.
+  const playerSpawn = { x: 160, y: 390 };
+  const enemySpawn = { x: ARENA_W - 160, y: ARENA_H - 390 };
 
   const updateAmbient = createAmbientUpdate(pot, hazardGround, dust);
 
