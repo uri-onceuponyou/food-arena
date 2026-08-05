@@ -496,6 +496,27 @@ and treated as fact has cost this project real time — twice.
   came close to "fixing" meshes that were never broken. Forcing the pass to linear showed all
   of them fine. Any probe that encodes data as colour must disable the transfer, or it is
   measuring the transfer. See §13: an instrument that lies plausibly is worse than none.
+- 🚨 **`Material.clone()` does NOT copy `onBeforeCompile`.** `Material.copy()`
+  (`three/src/materials/Material.js:940-976`) names 40+ properties and not that one, so **every
+  cloned material silently loses its shader patch.** This is what reduced our Fresnel rim — the
+  term `toon.ts` calls *"the single largest material lever in the frame"* — to **1.402% of
+  delivered pixels** across 54 clone sites, and it is the root cause of the #1 defect.
+  The smoking gun is the shape to look for: **the same material name appearing twice in one
+  frame with different behaviour** (`kpal:woodPad`, 0.805% of frame with the rim, its clone
+  2.501% without). *Zero* new GL programs is the reason it is safe to fix everywhere:
+  `customProgramCacheKey()` returns `onBeforeCompile.toString()`, so an identical patch source
+  shares one compiled program and only the uniform container is per-material.
+- 🚨 **And the repair has its own trap: `Material.copy()` runs `userData` through
+  `JSON.parse(JSON.stringify(...))`.** Two consequences, both live here:
+  1. A plain `.clone()` of an **already-rendered** material carries a **dead, JSON-mangled**
+     `userData.rimUniforms`. Four instruments (`haloprobe`, `matvar`, `rimcheck`,
+     `p1_matresp`) detect a rim by testing that key and **count the corpse as live**.
+  2. Anything you stash in `userData` to survive a clone must be **JSON-safe**. A
+     `THREE.Color` round-trips to `{r,g,b}`, which `new THREE.Color()` cannot read back —
+     so the rim parameters are recorded as a plain hex + number, deliberately.
+  The general form: **a property written from INSIDE `onBeforeCompile` does not exist until
+  first render**, so a build-time clone has nothing to copy. Record what a clone needs
+  *synchronously*, at the point of application.
 
 ---
 
@@ -592,6 +613,45 @@ involve Hamburger" are both artefacts of a driver that under-plays one character
 
 → **Before tuning a system, ask what the thing measuring it cannot do.** A one-line exclusion in a
 harness is indistinguishable from a design fact until someone runs the control.
+
+---
+
+## 15b. A probe that CHECKS for a capability, correctly finds it absent, and proceeds anyway
+
+The subtlest instrument fault found so far, because every individual step of it is correct.
+
+A probe priced the post chain's `highlightKnee` and reported the lever was worth **+0.72 pp** of
+playfield highlight share. Re-measured paired inside one synchronous evaluate — drift control
+**exactly 0.0000** — it is worth **+0.081 pp**. **Nine times smaller**, and the difference decided
+whether a knob got turned.
+
+The cause: the probe needed to freeze the sim, so it tested `typeof d.pause === 'function'` on
+`window.__matchDebug`. That returned `false` — **correctly**, because `__matchDebug.paused` is a
+*field on a read-only mirror*, not a `pause()` method. The probe then **carried on measuring
+anyway**, so its "before" and "after" frames were two different moments of a running match and it
+was reading animation, not the knob.
+
+→ **A capability check whose failure branch is "continue regardless" is not a check, it is a
+comment.** If a probe needs an invariant to hold, it must **refuse to produce a number** when the
+invariant is absent — the same rule `valuescan` learned about stale caches, one level further in.
+And note the shape of the near-miss: the probe *knew* the answer and did not *use* it.
+
+### Corollary — a critic of a metric can commit the metric's own sin
+
+The same probe's headline argument was that `stage.ts` had rejected a knob using a **cross-quantity
+comparison**. It was right that this happened. But its own replacement compared *"any channel at
+exactly 255, whole canvas"* against *"luma > 0.94, playfield crop"* — pure red (255,0,0) is **100%
+of the first and 0% of the second**. It replaced one cross-quantity comparison with another.
+
+Its **conclusion** still survived, on a control neither side had taken: the reference plates' own
+channel clipping, identical crop, identical code, **native resolution** — reference **1.70–18.93%**
+against ours **0.044–0.51%**. We do not produce a single all-channel-white playfield pixel; every
+plate does. **So take the finding and re-derive the argument** — §3's rule about critics applies to
+instruments and to agents, not only to the blind critic.
+
+*(And the "40× regression" that rejection rested on is an artefact: `softKnee` is asymptotic to 1.0
+and can never emit 255, so the metric is nearly a detector for "is a shoulder present at all."
+At ≥250 the real move is **1.29×**.)*
 
 ---
 

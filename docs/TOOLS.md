@@ -345,7 +345,9 @@ are current as of the capture-integrity follow-through; `screen_metrics` and `ho
 | `node tools/tmp/sepscan.mjs --selftest` | **38** + 8 control | internal separation (neck pinch, chin notch, head:body area) |
 | `node tools/tmp/trail_probe.mjs` | controls 3 | same-frame ablation of ground marks vs floor **and** cast |
 | `node tools/tmp/aoband.mjs --selftest` | **25** | contact darkening binned by metres from the footprint |
-| `node tools/tmp/haloprobe.mjs --selftest` | **27** | bloom-attributable halo as a paired `shipped − bloomOff` |
+| `node tools/tmp/haloprobe.mjs --selftest` | **27** | bloom-attributable halo as a paired `shipped − bloomOff`. ⚠️ Detects a rim via `userData.rimUniforms`, so it **counts a JSON-mangled corpse as live** after a plain `.clone()` — see `clonetoon_test` |
+| `node tools/tmp/clonetoon_test.mjs` | **33** | ⚠️ **`Material.clone()` does not copy `onBeforeCompile`** — the root cause of the #1 defect. Asserts the DEFECT first, and was mutation-tested: drop the re-apply → 12 fail; keep the dead uniform handle → 1 fail (exactly its row); ignore `rim: false` → 5 fail |
+| `node tools/tmp/kneeprice.mjs --selftest` | **21** | prices `highlightKnee` as a **paired** sweep inside one synchronous evaluate (drift control exactly 0.0000). `--plates [--whole]` offline. Its known-bad fixtures are the two quantities `stage.ts` conflated, **in both directions** |
 | `node tools/tmp/rebind_accept.mjs` | **35** | key rebinding asserted against **sim state**, not the DOM |
 | `node tools/tmp/touchfeel.mjs` | **79** | stick bearings, dead zone, multi-touch, `touchcancel` |
 | `tools/tmp/nav_history_probe.mjs` | **44** | URL names the screen · reload lands there · back/forward · query params survive · a throwing screen cannot freeze the router |
