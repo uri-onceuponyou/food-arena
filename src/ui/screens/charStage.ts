@@ -331,9 +331,71 @@ function shadowDecal(size: number, core: [number, number, number], order: number
   return mesh;
 }
 
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE LOBBY SET — a room, because the lobby was a backdrop
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Uri, after looking at the build: *"I've had a look at the Home Screen and menus and we
+ * need to do a better job there. Looks amateurish."* and then, when asked: *"Perhaps we
+ * should also create a background image or even better a background 3d world."*
+ *
+ * Measured, the lobby was **46.8% featureless** by `tools/tmp/hm_lang.mjs` — 12x12 tiles
+ * whose luma stdev is under 2.5 — against our own character select's 30.4 and a Brawl
+ * Stars plate's 31.5. The single biggest contributor was a flat CSS gradient, and
+ * `home.ts` has replaced that with a room; this is the half of it that has to be
+ * geometry, because `Stage` clears to an OPAQUE colour and anything a screen paints
+ * behind the canvas is `docs/LESSONS.md` §1 in its purest form.
+ *
+ * ── Why it is a MODE and not just added to the set ──────────────────────────
+ * This stage is a **singleton shared by three screens**. Character select scores 7.00 —
+ * the best menu in the build — and the title card was re-framed against this exact cove
+ * only a few rounds ago (`opening.ts`'s 54vh sweep). Dressing the shared set would have
+ * changed both of them without either being measured. `setScene('lobby')` is called by
+ * `home.ts` on mount and reset on dispose, so the room is opt-in and the two screens
+ * that were judged against the plain cove keep it.
+ *
+ * ── Why these albedos, and why NOT a blur ───────────────────────────────────
+ * The reference plate throws its background out of focus. We have no cheap DOF here, and
+ * the honest substitute is the one this file already uses on the cove: author the value
+ * so the background sits BELOW the hero. `docs/LESSONS.md` §13 records that the menus
+ * used to show every fighter as a dark shape on a bright field (polarity -0.234) while
+ * the game shows the opposite, and that the set fixed it to +0.188. A bright prop wall
+ * behind the head would spend that straight back. So every colour below is a food or
+ * kitchen hue at a DEEP value — chroma kept, value spent — which is also the direction
+ * `docs/LESSONS.md` §8 measured as cheaper than removing warm chroma. Nothing here is
+ * desaturated; that has been falsified four times on this project.
+ *
+ * ── The cost, because home is the first screen on a phone ───────────────────
+ * 17 meshes, 6 materials, no instancing, no shadow casting except the counter. Measured
+ * with `tools/perf.mjs --mode counts --scene home`; the number is in the commit message.
+ * The obvious cheaper-looking idea — reuse `createKitchenArena()` — is a trap: it is a
+ * 1400x1000 wu LAYOUT at ~1700 draw calls, more than a live match, and its scale is
+ * world units where this scene is metres.
+ */
+
+/** Deep, saturated kitchen palette. Value spent, chroma kept — see the note above. */
+const LOBBY = {
+  counterBody: '#123A50',
+  counterTop: '#A8641F',
+  counterLip: '#D08A2E',
+  shelf: '#7A431A',
+  steel: '#24485C',
+  jars: ['#B02733', '#4E8A12', '#C99414', '#1668A8', '#6B3AA8', '#B85A18', '#2E8C6A', '#C4553C'],
+} as const;
+
 export interface CharacterStage {
   /** Move the canvas into `host` (and size to it). Safe to call repeatedly. */
   attachTo(host: HTMLElement): void;
+  /**
+   * Which set is dressed behind the hero.
+   *
+   * `'portrait'` is the plain cove every character was authored and critiqued against,
+   * and it is the DEFAULT — character select and the title card never call this.
+   * `'lobby'` adds the kitchen. Idempotent; the geometry is built once and then only
+   * shown or hidden, so bouncing home -> characters -> home costs nothing.
+   */
+  setScene(mode: 'portrait' | 'lobby'): void;
   /** Remove the canvas from the DOM without destroying the GL context. */
   detach(): void;
   /** Swap the displayed character. No-op if already showing `id`. */
@@ -362,6 +424,8 @@ class MenuCharacterStage implements CharacterStage {
   private observer: ResizeObserver | null = null;
   private footShadow: THREE.Mesh | null = null;
   private disposed = false;
+  /** The kitchen, built on first `setScene('lobby')` and then only toggled. */
+  private dressing: THREE.Group | null = null;
 
   constructor() {
     // A holder the Stage can measure. The Stage appends its canvas here and reads
@@ -611,6 +675,222 @@ class MenuCharacterStage implements CharacterStage {
     this.stage.rig.apply();
   }
 
+  /**
+   * Build the kitchen, once.
+   *
+   * ⚠️ EVERYTHING HAS TO FIT INSIDE THE COVE. `CYC_RADIUS` is 5.0 m and the cylinder is
+   * seen from the inside, so any prop at hypot(x, z) > 5 is OUTSIDE the wall and simply
+   * does not exist as far as the camera is concerned — it would be culled by the
+   * backdrop it is standing behind. The counter run is half-width 3.2 at z = -3.35,
+   * which is hypot 4.63, and every jar on it is inside that.
+   *
+   * ⚠️ AND NOTHING HERE CASTS EXCEPT THE COUNTER. The shadow frustum is 12 m across at
+   * 1024 texels and it is spent on the hero's own cast shadow, which is the one that
+   * does grounding work. Eight jars each throwing a soft blob onto the wall behind them
+   * would take texels off that and add nothing a viewer can name.
+   */
+  /**
+   * A grout grid for the lobby floor, as an alpha texture.
+   *
+   * The floor is the single largest smooth surface the camera sees — after the room was
+   * built around it, `tools/tmp/hm_lang.mjs` still put 36% of the frame in featureless
+   * 12x12 tiles and most of what was left was this. A kitchen floor is tiled, so the
+   * cheapest honest detail available is the true one.
+   *
+   * DARK LINES ONLY, on transparent. Painting a lighter grid would raise the floor's
+   * value behind the hero and spend the +0.188 figure/ground polarity `docs/LESSONS.md`
+   * §13 records; taking value out in thin lines does not. Alpha rather than multiply
+   * because a `CustomBlending` multiply is already in use twice in this file for the
+   * contact shadows and a third one drawing over them would compound.
+   */
+  private static floorGridTexture(px = 256): THREE.Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = px;
+    canvas.height = px;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, px, px);
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = px * 0.055;
+      // Drawn ON the edge, so the wrapped copies meet and the joint is one line wide
+      // rather than two half-lines with a gap between them at every repeat boundary.
+      ctx.strokeRect(0, 0, px, px);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(22, 22);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  private buildDressing(): THREE.Group {
+    const g = new THREE.Group();
+    g.name = 'lobby_dressing';
+
+    const add = (mesh: THREE.Mesh, cast = false): THREE.Mesh => {
+      mesh.castShadow = cast;
+      mesh.receiveShadow = true;
+      mesh.userData.noOutline = true;
+      g.add(mesh);
+      return mesh;
+    };
+
+    /**
+     * ⚠️ THE FIRST LAYOUT PUT EVERY PROP WHERE THE FIGHTER IS.
+     *
+     * The camera targets half the assembly's height (~1.37 m) with the subject filling
+     * 62% of the frame, so the band from about 0.6 m to 2.6 m and roughly +/-1.2 m of
+     * the axis is FIGHTER, at every framing, for every character. Round 1 put the
+     * counter at 1.05 m, the stock pot dead centre at 1.41 m and the shelf at 2.78 m —
+     * i.e. one object hidden behind the hero's waist, one behind its head, and one
+     * cropped off the top by the canvas mask. Rendered, the room read as three
+     * unidentifiable coloured rectangles poking out from behind a hamburger.
+     *
+     * The fix is compositional, not stylistic: the set has to live in the two vertical
+     * gutters either side of the fighter and in the band BELOW its feet, which is the
+     * same reasoning `home.ts` used to move the nameplate to the stage's top centre.
+     * The counter drops so its lit lip crosses under the podium, and the shelf drops to
+     * 2.15 m where the mask still passes it.
+     */
+    const Z = -3.35;
+    const COUNTER_W = 7.2;
+    const COUNTER_H = 0.78;
+
+    // ── The tiled floor ──────────────────────────────────────────────────────
+    // A square plane and NOT the floor ring's own UVs: `RingGeometry` parameterises u
+    // by angle, so a repeating texture on it fans out from the centre like a dartboard
+    // instead of tiling. The plane runs to 13 m, well past the 5 m cyclorama, and every
+    // corner outside that radius is occluded by the cove's own back-facing wall — there
+    // is nothing to clip and no seam to hide.
+    const grid = new THREE.Mesh(
+      new THREE.PlaneGeometry(13, 13),
+      new THREE.MeshBasicMaterial({
+        map: MenuCharacterStage.floorGridTexture(),
+        transparent: true,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    grid.rotation.x = -Math.PI / 2;
+    grid.position.y = 0.006;
+    grid.renderOrder = 0;
+    grid.userData.noOutline = true;
+    grid.name = 'lobby_floor_grid';
+    g.add(grid);
+
+    // ── The tiled back wall ──────────────────────────────────────────────────
+    // Same texture, on a cylinder 4 cm inside the cove. The cove's albedo and its two
+    // authored ramps are untouched — this only adds the joints — because those ramps
+    // are load-bearing for three separate acceptance numbers (see CYC_VALUE) and
+    // retinting the wall to get a texture on it would have moved all of them.
+    const wallTex = MenuCharacterStage.floorGridTexture();
+    wallTex.repeat.set(26, 9);
+    const wallGrid = new THREE.Mesh(
+      new THREE.CylinderGeometry(CYC_RADIUS - 0.04, CYC_RADIUS - 0.04, CYC_HEIGHT, 72, 1, true),
+      new THREE.MeshBasicMaterial({
+        map: wallTex,
+        side: THREE.BackSide,
+        transparent: true,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    wallGrid.position.y = CYC_HEIGHT / 2 + CYC_BASE_Y;
+    wallGrid.renderOrder = 0;
+    wallGrid.userData.noOutline = true;
+    wallGrid.name = 'lobby_wall_grid';
+    g.add(wallGrid);
+
+    // ── The counter run ──────────────────────────────────────────────────────
+    // A cool steel body under a warm top, which is the same two-material read the podium
+    // uses and the reason the room does not become one brown mass. The top is a separate
+    // slab overhanging the body by 6 cm on each side so the join throws its own line —
+    // the podium's inset trick, applied to furniture.
+    add(new THREE.Mesh(
+      new THREE.BoxGeometry(COUNTER_W, COUNTER_H, 0.72),
+      toonMat({ color: LOBBY.counterBody, ramp: RAMP_SOFT(), roughness: 0.8 }),
+    ), true).position.set(0, COUNTER_H / 2, Z);
+
+    add(new THREE.Mesh(
+      new THREE.BoxGeometry(COUNTER_W + 0.12, 0.11, 0.84),
+      toonMat({ color: LOBBY.counterTop, ramp: RAMP_SOFT(), roughness: 0.5 }),
+    )).position.set(0, COUNTER_H + 0.055, Z);
+
+    // A bright lip on the front face of the slab. The single highest-value horizontal in
+    // the room and the thing that reads as "a surface at this height" from any yaw.
+    add(new THREE.Mesh(
+      new THREE.BoxGeometry(COUNTER_W + 0.12, 0.045, 0.06),
+      toonMat({ color: LOBBY.counterLip, ramp: RAMP_SOFT(), roughness: 0.4 }),
+    )).position.set(0, COUNTER_H + 0.012, Z + 0.44);
+
+    // ── The shelf ────────────────────────────────────────────────────────────
+    add(new THREE.Mesh(
+      new THREE.BoxGeometry(COUNTER_W - 0.4, 0.13, 0.52),
+      toonMat({ color: LOBBY.shelf, ramp: RAMP_SOFT(), roughness: 0.75 }),
+    )).position.set(0, 2.15, Z - 0.05);
+    // Two brackets, so the shelf is held up rather than floating. Cheap, and the
+    // difference between a prop and a set is whether things are attached to each other.
+    for (const x of [-2.6, 2.6]) {
+      add(new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 0.36, 0.1),
+        toonMat({ color: LOBBY.steel, ramp: RAMP_SOFT(), roughness: 0.7 }),
+      )).position.set(x, 2.31, Z - 0.2);
+    }
+
+    // ── The jars ─────────────────────────────────────────────────────────────
+    // THE HUE BUDGET LIVES HERE. `hm_lang`'s effective-hue count is a Simpson diversity
+    // over the chromatic pixels, so one orange page plus one cream panel scores ~5.6 no
+    // matter how many accents are sprinkled on it — the only thing that moves it is real
+    // AREA in other hues. Eight jars split across the roster's own palette is that area,
+    // it is on-brand for a food game, and it costs eight draw calls.
+    //
+    // Split across two heights so the row does not read as a bar chart: the shelf line
+    // and the counter line each get four, staggered.
+    const jarGeo = new THREE.CylinderGeometry(0.19, 0.21, 0.44, 20);
+    const lidGeo = new THREE.CylinderGeometry(0.21, 0.21, 0.07, 20);
+    const lidMat = toonMat({ color: LOBBY.steel, ramp: RAMP_SOFT(), roughness: 0.45 });
+    // ALL OUTSIDE +/-1.35 m. That is the fighter's gutter — see the layout note above.
+    const jarXs = [-2.95, -2.25, -1.55, 1.55, 2.25, 2.95, -2.6, 2.6];
+    const jarYs = [2.35, 2.35, 2.35, 2.35, 2.35, 2.35, 0.9, 0.9];
+    for (let i = 0; i < jarXs.length; i++) {
+      const s = 0.86 + ((i * 37) % 5) * 0.09;
+      const y = jarYs[i] + 0.22 * s;
+      add(new THREE.Mesh(jarGeo, toonMat({ color: LOBBY.jars[i], ramp: RAMP_SOFT(), roughness: 0.55 })))
+        .position.set(jarXs[i], y, Z - 0.02);
+      g.children[g.children.length - 1].scale.setScalar(s);
+      add(new THREE.Mesh(lidGeo, lidMat)).position.set(jarXs[i], y + 0.25 * s, Z - 0.02);
+      g.children[g.children.length - 1].scale.setScalar(s);
+    }
+
+    // ── Two stock pots, flanking ─────────────────────────────────────────────
+    // Round 1 put ONE dead centre, at exactly the height of the hero's chest, where it
+    // was never once visible. A pair in the gutters breaks the counter's horizontal on
+    // both sides and reads at every yaw of the +/-22 degree sway. Steel, so they
+    // separate from the jars by MATERIAL rather than by hue.
+    for (const x of [-1.95, 1.95]) {
+      add(new THREE.Mesh(
+        new THREE.CylinderGeometry(0.4, 0.36, 0.46, 24),
+        toonMat({ color: LOBBY.steel, ramp: RAMP_SOFT(), roughness: 0.35 }),
+      )).position.set(x, COUNTER_H + 0.34, Z - 0.02);
+      add(new THREE.Mesh(
+        new THREE.CylinderGeometry(0.44, 0.44, 0.06, 24),
+        toonMat({ color: LOBBY.counterLip, ramp: RAMP_SOFT(), roughness: 0.3 }),
+      )).position.set(x, COUNTER_H + 0.6, Z - 0.02);
+    }
+
+    return g;
+  }
+
+  setScene(mode: 'portrait' | 'lobby'): void {
+    if (this.disposed) return;
+    if (mode === 'lobby' && !this.dressing) {
+      this.dressing = this.buildDressing();
+      this.stage.scene.add(this.dressing);
+    }
+    if (this.dressing) this.dressing.visible = mode === 'lobby';
+  }
+
   attachTo(host: HTMLElement): void {
     if (this.disposed) return;
     if (this.holder.parentElement !== host) host.appendChild(this.holder);
@@ -749,6 +1029,23 @@ class MenuCharacterStage implements CharacterStage {
     this.disposed = true;
     this.observer?.disconnect();
     this.observer = null;
+    if (this.dressing) {
+      // `Stage.dispose()` tears down the renderer, not the scene graph, so the room's
+      // geometries and materials have to be released here or a home -> match -> home
+      // cycle leaks one kitchen per visit. The jar geometry is shared across eight
+      // meshes, so this walks a Set rather than calling dispose per mesh.
+      const geos = new Set<THREE.BufferGeometry>();
+      const mats = new Set<THREE.Material>();
+      this.dressing.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.geometry) geos.add(m.geometry);
+        if (m.material) for (const mat of Array.isArray(m.material) ? m.material : [m.material]) mats.add(mat);
+      });
+      geos.forEach((x) => x.dispose());
+      mats.forEach((x) => x.dispose());
+      this.stage.scene.remove(this.dressing);
+      this.dressing = null;
+    }
     if (this.model) {
       this.stage.scene.remove(this.model.root);
       this.model.dispose();
