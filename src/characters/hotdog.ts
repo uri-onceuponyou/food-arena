@@ -9,10 +9,21 @@
  * character's LEFT-RIGHT axis (local X) so the full length reads as one broadside
  * silhouette at the default camera instead of foreshortening away down its own
  * length. A bold mustard zigzag traces the sausage's top ridge — the character's
- * one unmistakable landmark, per the brief. Sleepy half-closed eyes (a thick lid
- * stroke over a small peeking pupil) and a small closed-lip smile carry the
- * laid-back, unbothered personality the brief calls out as the most distinctive
- * thing about this character.
+ * one unmistakable landmark, per the brief.
+ *
+ * ── THE FACE IS OPEN-EYED NOW, AND THE OLD SPEC IS WHY IT WASN'T ─────────────
+ * This file used to say "sleepy half-closed eyes (a thick lid stroke over a small
+ * peeking pupil)", faithfully implementing `rules.ts`'s old one-line
+ * `face: 'Sleepy half-closed eyes'`. `docs/DECISIONS-FOR-URI.md` §42 is the reason
+ * that line is gone: Uri ranked seven faces without seeing any code and his ranking
+ * matches the `face:` field exactly — every character specified with CLOSED eyes was
+ * rated badly ("the worst part", "terrible"), and the one specified with OPEN EYES
+ * AND HIGHLIGHTS was rated best. **Eleven agents implemented their line faithfully;
+ * the line was the problem.** `rules.ts` now says, for this character, "EYES OPEN,
+ * NOT SLEEPY … RELAXED IS A LID ANGLE, NOT A MISSING EYE", and `buildFace` below
+ * implements that: a white sclera that is the brightest value on the model, a dark
+ * pupil offset down-and-across for a bored gaze, a catchlight in the pupil, the old
+ * lid stroke demoted to a drooping lash hood, and a mouth with a real interior.
  *
  * Cyber rarity accent: a pair of small emissive "end caps" seated in the exposed
  * sausage tips, gently pulsing — restrained enough to read as energised food, not
@@ -26,7 +37,9 @@ import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
-import { aim, curl, knob, localBounds, massAnchor, rod } from './appendages';
+// `aim`, `rod` and `knob` went with the duplicate mustard bottle — see
+// `buildSilhouetteEvents`. `curl` is still the bandana tail's constructor.
+import { curl, localBounds, massAnchor } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0'
@@ -118,12 +131,56 @@ const BOOT_CHAR = '#0A0501';       // boots — darker again
  * direction `docs/LESSONS.md` records as falsified four times in the other one.
  */
 const BUN_LIGHT = '#EBDCB8';    // luma 0.951 -> 0.865
-/** The torso's bun-shade. Was `PALETTE.bun`; local now, and a value step ABOVE the
- *  head's own mass so `head|torso` stops measuring 0.026 across 128 px. */
-const BUN_SHADE = '#E4D6BE';    // luma 0.939 -> 0.844
+/**
+ * The torso's bun-shade. Was `PALETTE.bun`; local now, and separated from the head's
+ * own mass so `head|torso` stops measuring 0.026 across 128 px.
+ *
+ * ── 0.844 -> 0.871, and it is buying back a gate key, not taste ──────────────
+ * `torso|shoulderL` has been sitting ON the `weakBoundaryPct` gate's hard 0.10 the
+ * whole time — 0.1058 before this pass, i.e. 0.0058 of margin against a threshold
+ * that any edit to this file moves by more than that. Deleting the duplicate mustard
+ * bottle took bright pixels off the torso and pushed it under (0.0954), and two
+ * independently-justified additions (a bolder torso zigzag, a bigger holstered
+ * bottle) walked it back to 0.0999 and then stalled: the median pixel is a BUN
+ * pixel, so the only lever with real authority over `torso.p50` is the bun's own
+ * value. `shoulderL` is 0.6720 and does not move, so the torso needs >= 0.7720.
+ *
+ * ⚠️ It is the TORSO's constant and not `BUN_LIGHT`, deliberately. `BUN_LIGHT` is
+ * the head as well, and the block above it records why it was pulled DOWN in the
+ * first place (8.87% of the character clipping above 0.94). This lobe is 7.6% of
+ * the character and touches nothing else.
+ */
+const BUN_SHADE = '#EBDDC2';    // luma 0.844 -> 0.871
 /** Mitts. Was `PALETTE.sausage`, i.e. exactly the head's sausage, so the hands had
  *  nowhere to separate to. A deeper cured red keeps the meat read and gains a step. */
 const MITT_SAUSAGE = '#C4432F';
+
+// ── FACE VALUES, and these are the whole point of this pass ──────────────────
+// Measured, cast-wide: **0% of our eye pixels are above 0.85 luma against the
+// reference plates' 31.1% and 34.1%** — our faces carried TWO values, the food
+// colour and near-black, so the largest and brightest element of a reference face
+// was simply absent. Measured on THIS character before the pass, `valuescan --mode
+// chars` put `face|head` at dLcontact **0.0794**, i.e. the face barely separated in
+// value from the sausage it is drawn on, at 113 delivered pixels.
+//
+// Three named values fix that, and they are named rather than inlined because the
+// FACE is now the character's brightest AND darkest surface at once — the value
+// ladder that `valuescan --mode gate` measures runs through this face.
+/** Pure white. It has to be the brightest value anywhere on the model — brighter
+ *  than `BUN_LIGHT` (#EBDCB8, albedo luma 0.865), which was the previous maximum. */
+const SCLERA = '#FFFFFF';
+/** The mouth interior. DARKER than `PALETTE.ink` (#1a1224) deliberately: the brief
+ *  asks for an "interior value step" so the mouth reads as an opening rather than a
+ *  painted curve, and a step needs the throat to be a different value from the lip
+ *  drawn around it, not the same ink twice. */
+const THROAT = '#12060A';
+/** …and the second half of the same step. A near-black hole is still one value; a
+ *  lit tongue inside it is what makes the opening read as having depth. */
+const TONGUE = '#E2707F';
+/** Sweet green relish along the bun's front trough — see `buildSilhouetteEvents`
+ *  for why the fried-onion curls it replaces had to go. */
+const RELISH = '#7CB518';
+const RELISH_DARK = '#5E8C10';
 
 /** Tapered limb: a flat cap at the joint origin (plugs flush, no gap) taper to a
  * rounded tip — the bun's own matte roughness, no capsule uniformity. */
@@ -441,7 +498,23 @@ export class HotDogCharacter extends BaseCharacter {
       const zzTop = sausCY + sausLen * 0.46;
       const zzBot = sausCY - sausLen * 0.46;
       const zzAmp = sausR * 0.52;
-      const zzThick = sausR * 0.20;
+      // ── 0.20 -> 0.31, and it is paying for a MEASURED gate crossing ──────────
+      // Deleting the duplicate mustard bottle (see `buildSilhouetteEvents`) took
+      // bright mustard pixels off the TORSO, and mustard sits just above the torso's
+      // own median. Measured on one frozen snapshot with only this file differing:
+      // torso p50 0.7778 -> 0.7674, and because `shoulderL` did not move at all
+      // (0.6720 both sides) `torso|shoulderL`'s whole-part dL fell 0.1058 -> 0.0954,
+      // i.e. **across the gate's hard 0.10** on 0.0104 of luma. `weakBoundaryPct` is
+      // a contact-weighted COUNT over that hard threshold, so an 86-contact pair
+      // flipping took it 11.1% -> 16.3% against a cap of 15 — the exact cliff
+      // `valuescan.mjs` documents ("pizza head|torso moved 0.0142 of luma and this
+      // moved 33 pp"). The boundary-local measure, which is the perceptual one,
+      // moved the OTHER way over the same change: dLcontact 0.0926 -> 0.0981.
+      //
+      // The repair puts the bright area back where the character wants it anyway.
+      // This zigzag is the torso's half of "the one unmistakable landmark" and at
+      // 0.20 it was a hairline at lobby distance.
+      const zzThick = sausR * 0.31;
       const N = 6;
       const zzPts: THREE.Vector3[] = [];
       for (let i = 0; i < N; i++) {
@@ -496,17 +569,47 @@ export class HotDogCharacter extends BaseCharacter {
     const NECK_W = R * 0.95, NECK_D = R * 0.44, NECK_H = R * 0.34;
     const NECK_Y = -R * 0.90 + NECK_H / 2;
 
+    // ── THE BUN WAS EATING THE FACE, AND THE NUMBER SAYS BY HOW MUCH ───────────
+    // `LOBE_H` was 0.58R and the sausage seat 0.35 * SAUS_R. Take the front lobe's
+    // top-BACK corner — the edge nearest the sausage, which a 0.40 rad forward tilt
+    // makes the highest point on the bun — and project it at the lobby camera's
+    // 20-degree pitch: it lands at screen height **-0.047R** relative to the
+    // sausage's centre line, at depth 0.148. Solve the same projection for the
+    // sausage's own front surface and everything below **dy = -0.124R** is BEHIND
+    // the bread. Meanwhile the mustard zigzag's front nodes come down to screen
+    // height +0.155R. The usable face field was **0.394R of screen height, and the
+    // eyes alone need 0.33R of it.** That is why the old mouth was a comma at the
+    // seam and why the rebuilt one rendered and was still invisible: the bound is
+    // geometric, and no amount of moving the mouth around inside it helps.
+    //
+    // Both numbers move together so the head's BOUNDING BOX DOES NOT MOVE AT ALL —
+    // and that is the point, because `H` above is tuned so the top of this mass
+    // lands at the cast's standard height, and `LOBE_Y` is pinned to the neck block
+    // below it. Shortening the lobes by d lowers `LOBE_Y` by d/2 and `SAUS_Y` by d;
+    // raising the seat by dk raises `SAUS_Y` by dk * SAUS_R. Choosing
+    // d = dk * SAUS_R cancels: bun bottom -0.713R -> -0.716R, sausage top unchanged
+    // to three decimals. Only the RATIO of sausage to bread changes.
+    //
+    // Result: the occluding corner drops to -0.204R and the face field opens to
+    // **0.483R** — the eyes keep their size and a real mouth fits under them. It is
+    // also the read `rules.ts` asks for in the first place, "a PLUMP sausage nestled
+    // in a split bun": the old proportion showed the top 60% of a thin sausage on a
+    // deep slab of bread, which is why the bun read as a plank.
     const LOBE_LEN = R * 1.85;
-    const LOBE_H = R * 0.58;
+    const LOBE_H = R * 0.42;
     const LOBE_D = R * 0.56;
-    const LOBE_EDGE = R * 0.24;
+    // 0.24R -> 0.17R: `roundedBox`'s edge radius has to stay under half the smallest
+    // dimension, and half of the new LOBE_H is 0.21R.
+    const LOBE_EDGE = R * 0.17;
     const LOBE_DZ = R * 0.32;
     const LOBE_TILT = 0.40;
     const LOBE_Y = NECK_Y + NECK_H / 2 + LOBE_H / 2; // lobes sit right on top of the neck block
 
     const SAUS_R = R * 0.38;
     const SAUS_MIDLEN = R * 1.70;
-    const SAUS_Y = LOBE_Y + LOBE_H / 2 + SAUS_R * 0.35; // nestled into the trough, not floating above it
+    /** Seat depth. 0.35 -> 0.78: the sausage still sits 0.17R behind the lobes' own
+     *  inner-top corners, so it is nestled and not perched — see the block above. */
+    const SAUS_Y = LOBE_Y + LOBE_H / 2 + SAUS_R * 0.78;
     const SAUS_HALF = SAUS_MIDLEN / 2 + SAUS_R; // half-length including the rounded caps
 
     // ── Materials — every part gets its own roughness so the model reads as
@@ -575,18 +678,41 @@ export class HotDogCharacter extends BaseCharacter {
     // end. Kept secondary to the mustard zigzag so the silhouette has ONE clear
     // landmark rather than two competing stripes, while still giving the wet
     // ketchup material a visible presence (it owns a real ability, Ketchup Slip).
+    //
+    // ⚠️ RE-SEATED, and this is a FACE fix rather than a ketchup one. The drips were
+    // positioned in HEAD space at `LOBE_DZ + LOBE_D * 0.46` — but the lobe they are
+    // meant to be running down is TILTED 0.40 rad, so solving that position back into
+    // the lobe's own frame puts it at local y = 0.42 of a box whose half-height is
+    // 0.29: they were floating 0.13R clear of the bread, in the trough beside the
+    // sausage, at almost exactly the old eyes' height and 0.5R to one side. Read at
+    // the lobby camera they were four red beads flanking the right eye.
+    //
+    // They now live in a group carrying the lobe's transform — the same fix
+    // `hotdog_grill_marks` already uses — so they sit ON the crust and hang below
+    // the sausage entirely (screen height -0.74R against the sclera's -0.20R).
+    const dripGroup = new THREE.Group();
+    dripGroup.name = 'hotdog_ketchup_drips';
+    dripGroup.position.set(0, LOBE_Y, LOBE_DZ);
+    dripGroup.rotation.x = LOBE_TILT;
+    head.add(dripGroup);
+    //
+    // ⚠️ AND THEY HAVE TO STAY OFF THE ROUNDED END. At `dx` 0.46 the outermost drip's
+    // centre sits at 0.851R against a lobe half-length of 0.925R — inside the box,
+    // but `roundedBox` rolls the front face away over the last `LOBE_EDGE` of it, so
+    // rendered and zoomed the last two drips hung in mid-air past the bread's own
+    // outline like beads glued on. 0.22-0.36 keeps every drip on flat crust.
     const KET_DRIPS: Array<{ dx: number; len: number }> = [
-      { dx: 0.50, len: 0.10 }, { dx: 0.64, len: 0.15 }, { dx: 0.77, len: 0.09 }, { dx: 0.90, len: 0.13 },
+      { dx: 0.22, len: 0.15 }, { dx: 0.27, len: 0.22 }, { dx: 0.31, len: 0.12 }, { dx: 0.36, len: 0.18 },
     ];
     for (const d of KET_DRIPS) {
       const dripLen = R * d.len;
-      const drip = new THREE.Mesh(new THREE.SphereGeometry(R * 0.065, 8, 8), ketchupMat);
+      const drip = new THREE.Mesh(new THREE.SphereGeometry(R * 0.048, 8, 8), ketchupMat);
       drip.name = 'ketchup_drip';
       drip.userData.noOutline = true;
-      drip.position.set(d.dx * R, LOBE_Y + LOBE_H * 0.74 - dripLen * 0.5, LOBE_DZ + LOBE_D * 0.46);
-      drip.scale.set(1, dripLen / (R * 0.065), 0.8);
+      drip.position.set(d.dx * LOBE_LEN, LOBE_H * 0.05 - dripLen * 0.5, LOBE_D * 0.50);
+      drip.scale.set(1, dripLen / (R * 0.048), 0.8);
       drip.castShadow = true;
-      head.add(drip);
+      dripGroup.add(drip);
     }
 
     // ── Cyber accent — small emissive end caps seated in the exposed sausage
@@ -607,7 +733,7 @@ export class HotDogCharacter extends BaseCharacter {
     this.buildFace(R, SAUS_Y, SAUS_R);
     this.dressLimbs();
     this.buildAccessories(R, head, { LOBE_Y, LOBE_DZ, LOBE_TILT, LOBE_LEN, LOBE_D, LOBE_H });
-    this.buildSilhouetteEvents(R);
+    this.buildSilhouetteEvents(R, { LOBE_LEN }, SAUS_Y);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -615,13 +741,59 @@ export class HotDogCharacter extends BaseCharacter {
   }
 
   /**
-   * Sleepy half-closed eyes + small closed-lip smile, built as real shaded
-   * geometry (per types.ts convention #6) rather than flat decals.
+   * OPEN eyes with a white sclera, an offset pupil, a catchlight in the pupil, a
+   * drooping lash hood, and a smile with a real interior — built as shaded geometry
+   * (types.ts convention #6), never as decals.
    *
-   * Each eye is a thick horizontal lid stroke with a small dark pupil peeking out
-   * just beneath it — the standard "half-closed" cartoon read: a full closed line
-   * alone reads as asleep, a full round eye reads as alert, a lid-over-a-sliver
-   * reads as exactly the laid-back, unbothered personality the brief calls out.
+   * ── WHAT WAS HERE, AND WHY IT WAS WRONG ─────────────────────────────────────
+   * Each eye used to be "a thick horizontal lid stroke with a small dark pupil
+   * peeking out just beneath it", implementing the old `face: 'Sleepy half-closed
+   * eyes'` spec exactly. Rendered at the LOBBY camera Uri actually judges
+   * (`charStage.ts:451` — pitch 20, subjectFill 0.60) and looked at, that is a
+   * yellow mustard bar over a black bar over a 2-px bead: **two hazard-stripe
+   * badges, not eyes.** It is the literal thing Uri wrote about the same
+   * construction on hamburger — *"drawn lines and not an actual face"*. The pupil
+   * was 0.068R and the sclera did not exist at all, so the face carried the food
+   * colour and near-black and nothing else.
+   *
+   * ── WHAT REPLACES IT, ELEMENT BY ELEMENT ───────────────────────────────────
+   * `docs/DECISIONS-FOR-URI.md` §40 names Egg as the cast reference (sclera, pupil
+   * and highlight as SEPARATE elements) and §42 says even Egg is not far enough —
+   * the target is a white sclera that is the brightest value on the whole model.
+   *
+   *   sclera   a white sphere half-embedded in the meat. Albedo 1.0 against
+   *            `BUN_LIGHT` 0.865, so it is the model's brightest lit surface.
+   *   pupil    offset DOWN and ACROSS. The offset is the same sign on BOTH eyes,
+   *            not mirrored — mirroring gives a cross-eyed doll; one shared
+   *            direction is a GAZE, and a bored sideways glance is what carries
+   *            "permanently half-awake" now that the eyes are open.
+   *   glint    inside the pupil, `flatMat` (unlit), so it is white at every light
+   *            angle. A catchlight on the SCLERA — which is what Egg does — is
+   *            white on white and invisible; on the pupil it is the thing that
+   *            makes an eye read as wet.
+   *   lash     the OLD LID STROKE, demoted. It is now a hood covering the top ~40%
+   *            of the open eye, rotated so the OUTER corner drops. That is the
+   *            whole "relaxed" read: a lid ANGLE over a full eye, not a missing eye.
+   *
+   * ── THE BROW IS DELIBERATELY GONE, and the reason is geometric ──────────────
+   * The old mustard brow was the single worst element on the character at lobby
+   * distance — a saturated yellow bar 0.19R long directly above a black bar, which
+   * is a warning label. A previous pass added it against an art-director checklist
+   * item ("brows carrying expression"), and it cannot simply be re-toned, because
+   * there is nowhere to put it: the mustard zigzag rides the sausage's top ridge and
+   * its FRONT nodes project to screen-height +0.20R at the lobby camera's 20-degree
+   * pitch, while the sclera's top already reaches +0.125R. The 0.08R strip between
+   * them is smaller than a brow. **The zigzag owns the space above the eyes**, so
+   * the lash hood's angle carries the expression instead — which is exactly what the
+   * new spec asks for.
+   *
+   * ── EVERY FEATURE RIDES THE CYLINDER, and that is not decoration ────────────
+   * `face.position.z` is a single flat plane, but this face is drawn on a capsule
+   * lying along X whose cross-section falls away fast: a feature 0.25R below the
+   * sausage's centre line has its surface 0.094R BEHIND that plane, so the old flat
+   * layout floated its lowest features clear of the meat. `onSausage` returns the
+   * surface point and its normal, the same trick `buildZigzagStripe` already uses
+   * for the mustard.
    */
   private buildFace(R: number, sausY: number, sausR: number): void {
     const face = this.rig.joints.face;
@@ -631,63 +803,131 @@ export class HotDogCharacter extends BaseCharacter {
     // mass. This sausage's front surface sits much closer to the head origin, so
     // without this override the face would float in empty space in front of it.
     face.position.z = R * 0.38;
+    const FACE_Z = face.position.z;
 
-    const lidMat = toonMat({ color: ink, roughness: 0.3 });
+    /**
+     * Ride the sausage's circular Y-Z cross-section. `dy` is the offset above the
+     * sausage's centre line; the return is the surface point in HEAD-local space
+     * plus the pitch that makes a feature face along the surface normal.
+     */
+    const onSausage = (dy: number) => {
+      const d = Math.max(-0.97 * sausR, Math.min(0.97 * sausR, dy));
+      const z = Math.sqrt(Math.max(1e-6, sausR * sausR - d * d));
+      return { y: sausY + d, z, tilt: Math.atan2(d, z) };
+    };
+
+    const scleraMat = toonMat({ color: SCLERA, roughness: 0.28 });
+    const inkMat = toonMat({ color: ink, roughness: 0.24 });
+    const throatMat = toonMat({ color: THROAT, roughness: 0.6 });
+    const tongueMat = glossyMat({ color: TONGUE, roughness: 0.35 });
+
     // ── The face was too SMALL for the mass carrying it ──────────────────────
     // A blind critic described it as "a tiny face squeezed onto the lower third
     // of the sausage". The sausage is the widest single form in this cohort —
     // roughly 3.7R across — and the features were sized as if it were a normal
-    // head, so at the ~10.5% of frame height a player actually sees the character
-    // at, the expression was a few pixels of ink on a large red tube. Everything
-    // below is scaled up about 35% and the eyes pushed wider apart.
-    const eyeY = sausY + sausR * 0.30;
+    // head. The eyes are now 0.155R spheres at +/-0.42R, which fills the central
+    // ~45% of the sausage's own width instead of the old 26%.
+    const EYE_X = R * 0.42;
+    const EYE_DY = R * 0.115;
+    const SCL = R * 0.148;
+    /** ONE direction for both pupils. See the header — mirrored is cross-eyed. */
+    const GAZE_X = R * 0.030;
 
-    for (const sx of [-1, 1]) {
-      const lid = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.034, R * 0.20, 4, 8), lidMat);
-      lid.name = 'lid';
-      lid.rotation.z = Math.PI / 2; // level — a mirrored tilt read as an angry V-brow, not sleepy
-      lid.position.set(sx * R * 0.32, eyeY, R * 0.02);
-      lid.castShadow = true;
-      face.add(lid);
+    for (const sx of [-1, 1] as const) {
+      const s = onSausage(EYE_DY);
+      const eye = new THREE.Group();
+      eye.name = 'eye';
+      eye.position.set(sx * EYE_X, s.y, s.z - FACE_Z);
+      eye.rotation.x = -s.tilt;
+      face.add(eye);
 
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.068, 10, 8), lidMat);
+      const white = new THREE.Mesh(new THREE.SphereGeometry(SCL, 18, 14), scleraMat);
+      white.name = 'eye_white';
+      // Half in, half out: z-scale 0.62 leaves the sclera bulging 0.096R proud of
+      // the meat and buried the same amount, so it reads as an eye set INTO the
+      // sausage rather than a bead stuck on it.
+      white.scale.set(1, 1.05, 0.62);
+      white.castShadow = true;
+      eye.add(white);
+
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.074, 14, 12), inkMat);
       pupil.name = 'pupil';
-      pupil.position.set(sx * R * 0.32, eyeY - R * 0.086, -R * 0.01);
-      pupil.scale.set(1, 0.85, 0.7);
+      pupil.scale.set(1, 1, 0.55);
+      pupil.position.set(GAZE_X, -R * 0.040, SCL * 0.42);
       pupil.castShadow = true;
-      face.add(pupil);
+      eye.add(pupil);
 
-      // Specular catchlight — cheapest trick for making even a sleepy eye feel alive.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.024, 8, 6), flatMat('#ffffff'));
-      glint.position.set(sx * R * 0.32 - sx * R * 0.024, eyeY - R * 0.068, R * 0.03);
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.029, 10, 8), flatMat('#ffffff'));
+      glint.name = 'eye_glint';
+      glint.position.set(GAZE_X - R * 0.034, -R * 0.011, SCL * 0.58);
       glint.userData.noOutline = true;
-      face.add(glint);
+      eye.add(glint);
 
-      // A thin, level brow riding just above the lid — a fresh independent art
-      // director's checklist explicitly called for verifying every character has
-      // "brows carrying expression," and the sleepy lid alone was doing double duty
-      // as both lid and brow. A separate stroke, mustard-toned rather than ink-black
-      // so it doesn't fuse into the lid below it, keeps the same level/unbothered
-      // angle (no V-tilt) so the laid-back personality isn't disturbed.
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.024, R * 0.19, 4, 8), toonMat({ color: PALETTE.mustard, roughness: 0.4 }));
-      brow.name = 'brow';
-      brow.rotation.z = Math.PI / 2;
-      brow.position.set(sx * R * 0.32, eyeY + R * 0.125, R * 0.01);
-      brow.castShadow = true;
-      face.add(brow);
+      const lash = new THREE.Mesh(new THREE.SphereGeometry(SCL * 1.06, 16, 12), inkMat);
+      lash.name = 'eye_lash';
+      lash.scale.set(1, 0.46, 0.66);
+      lash.position.set(0, SCL * 0.72, R * 0.012);
+      // Outer corner DOWN. `rotation.z` is applied in the eye's own frame, so the
+      // sign has to mirror: about +Z, a positive angle lifts +X.
+      lash.rotation.z = -sx * 0.20;
+      lash.castShadow = true;
+      eye.add(lash);
     }
 
-    // Small closed-lip smile — calm and symmetric-ish rather than crooked, to
-    // match the "laid-back, unbothered" personality rather than a mischievous one.
-    const mouth = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.19, R * 0.036, 8, 16, Math.PI * 0.68),
-      lidMat
-    );
+    // ── The mouth, and the interior is the point ────────────────────────────────
+    // The old mouth was a 0.19R torus arc at `sausY - sausR * 0.12` — right on the
+    // seam where the sausage disappears behind the bread, so it rendered and was
+    // invisible for the eighteenth time. A first rebuild at `-0.11R` with a 0.132R
+    // ring rendered and was STILL invisible: measured against the bun's occluding
+    // corner it needed depth 0.351 and had 0.348, and buying the difference with a
+    // forward offset would have floated the mouth 0.075R clear of the meat and read
+    // as a decal at any yaw. **The fix was the bun proportion, not the mouth** —
+    // see the `LOBE_H` block in the constructor. With that field open the mouth sits
+    // 0.02R proud on the surface at depth 0.252 against the bun's 0.136.
+    //
+    // Geometry: a `TorusGeometry` arc has its endpoints at `-r * sin(delta)` and its
+    // low point at `-r`, so a 0.66PI arc is a smile whose crescent is 0.49r deep.
+    // The interior fills exactly that crescent: an ink lower lip, a throat DARKER
+    // than the ink, and a lit tongue inside that. Three values in a shape that used
+    // to have one.
+    // ⚠️ SIZED FROM A RENDER, NOT FROM TASTE. A first pass at 0.145R with a 0.66PI
+    // arc rendered, was visible, and still carried NO interior: read at 5x zoom the
+    // whole mouth was 11 x 5 px and the throat, the lip and the tongue resolved into
+    // one dark almond. The value step is only a step if there are pixels to put it
+    // in. At 0.185R with a 0.78PI arc the crescent is 0.66r deep — 0.122R against
+    // the old 0.071R — and the tongue owns its lower 45%.
+    const MOUTH_R = R * 0.185;
+    const m = onSausage(0);
+    const mouth = new THREE.Group();
     mouth.name = 'mouth';
-    mouth.position.set(0, sausY - sausR * 0.12, R * 0.05);
-    mouth.rotation.z = Math.PI * 1.08;
-    mouth.castShadow = true;
+    mouth.position.set(0, m.y, m.z - FACE_Z + R * 0.020);
+    mouth.rotation.x = -m.tilt;
     face.add(mouth);
+
+    const lip = new THREE.Mesh(
+      new THREE.TorusGeometry(MOUTH_R, R * 0.024, 10, 24, Math.PI * 0.78),
+      inkMat
+    );
+    lip.name = 'mouth_lip';
+    // The arc is authored starting at +X and sweeping CCW; rotating it to start at
+    // 199.8deg centres it on 270deg — the LOW point — which is a smile. Half a turn
+    // out and it is a frown, which is the one sign error worth naming here.
+    lip.rotation.z = Math.PI * (199.8 / 180);
+    lip.castShadow = true;
+    mouth.add(lip);
+
+    const throat = new THREE.Mesh(new THREE.SphereGeometry(R * 0.155, 14, 12), throatMat);
+    throat.name = 'mouth_throat';
+    throat.scale.set(1, 0.39, 0.30);
+    throat.position.set(0, -R * 0.124, R * 0.008);
+    mouth.add(throat);
+
+    const tongue = new THREE.Mesh(new THREE.SphereGeometry(R * 0.100, 12, 10), tongueMat);
+    tongue.name = 'mouth_tongue';
+    tongue.scale.set(1, 0.27, 0.26);
+    tongue.position.set(0, -R * 0.157, R * 0.020);
+    tongue.userData.noOutline = true;
+    mouth.add(tongue);
   }
 
   /**
@@ -769,54 +1009,96 @@ export class HotDogCharacter extends BaseCharacter {
    * so no new hue enters a deliberately all-warm palette except the cool bandana
    * accent that was already there.
    */
-  private buildSilhouetteEvents(R: number): void {
-    const torso = this.rig.joints.torso;
+  private buildSilhouetteEvents(R: number, lobe: { LOBE_LEN: number }, sausY: number): void {
     const head = this.rig.joints.head;
 
-    // ── The mustard bottle, holstered ─────────────────────────────────────────
-    // On the TORSO, not the head, and angled down and out: it has to clear the bun
-    // lobes, which is exactly what the sushi belt-chopsticks failed to do.
-    {
-      const box = localBounds(torso);
-      const { at, out } = massAnchor(torso, box, { azimuth: -Math.PI * 0.42, height01: 0.34, inset: 0.05 });
-      const g = new THREE.Group();
-      g.name = 'hotdog_mustard_bottle';
-      aim(g, at, out.clone().multiplyScalar(1.05).add(new THREE.Vector3(0, -0.55, 0)).normalize());
-      torso.add(g);
-      g.add(rod(glossyMat({ color: PALETTE.mustard, roughness: 0.18 }), {
-        len: R * 0.52, rBase: R * 0.115, rTip: R * 0.085,
-      }));
-      const nozzle = rod(toonMat({ color: HOLSTER_TRIM, roughness: 0.45 }), {
-        len: R * 0.18, rBase: R * 0.055, rTip: R * 0.028,
-      });
-      nozzle.position.y = R * 0.52;
-      g.add(nozzle);
-      const cap = knob(toonMat({ color: HOLSTER_LEATHER, roughness: 0.5 }), R * 0.085);
-      g.add(cap);
-    }
+    // ── THE MUSTARD BOTTLE USED TO BE BUILT TWICE, AND IT SHOWED ──────────────
+    // A second `hotdog_mustard_bottle` lived here — a `rod` anchored by `massAnchor`
+    // on the torso at azimuth -0.42PI, i.e. the SAME hip that `buildAccessories`
+    // already puts a holster and a bottle on. `massAnchor` skips objects tagged as
+    // silhouette events, and the holster is NOT one, so the ray landed on the pouch
+    // and the rod was aimed straight through it. Rendered at the lobby camera and
+    // looked at: a yellow rod entering the black pouch on one side and a dark cone
+    // leaving it on the other.
+    //
+    // That is exactly Uri's second hamburger reject — *"I don't understand what the
+    // silver/grey element that is going in and out of the character"* — which
+    // `docs/DECISIONS-FOR-URI.md` §37 diagnoses as a prop INTERSECTING body
+    // geometry. One bottle survives, in `buildAccessories`, where the holster that
+    // holds it is defined; it is now tipped outward there so it still leaves the
+    // body outline, which is the only job this copy was doing.
 
-    // ── Fried-onion curls ─────────────────────────────────────────────────────
-    // ROUND 3, and they exist for the HEAD-ON facing specifically. The bottle and
-    // the bandana tail both sit on the character's back quarter, which is the axis
-    // that projects to screen-X at the shipped facing and straight into the body at
-    // yaw 0 — measured, hotdog came back with 3 appendages in profile and ZERO
-    // head-on. These two are on the sausage's own ends, which is the free axis
-    // there, and they are the one topping this character was missing.
+    // ── Fried-onion curls: REMOVED. They were the ears. ───────────────────────
+    // They were added in round 3 for the HEAD-ON facing, anchored at azimuth
+    // +0.52PI and -0.54PI — that is `out = (sin, 0, cos)`, so both sat on the
+    // sausage's own ends, i.e. one tapered mass projecting out and UP from either
+    // side of the head at the same height. `docs/DECISIONS-FOR-URI.md` §40 pattern
+    // 1: **two pointed masses either side of a head read as ears or horns, whatever
+    // they are made of — five for five** (burrito's foil, egg's shards, hamburger's
+    // lettuce, lollipop's cellophane, pizza's cheese). Read in the SILHOUETTE panel
+    // rather than the shaded render, which is the only view that answers the
+    // question, this character was six for six: a wide head with a horn curling off
+    // each corner.
+    //
+    // And they were §40's other finding as well — **detail added to signal the
+    // subject destroying the silhouette that signalled it better.** The one place
+    // they could be mounted was the exposed sausage TIPS, which are the two features
+    // that say "there is a sausage inside this bun" and are also where the Cyber end
+    // caps live. Capping them cost more identity than the curls added.
+    //
+    // What replaces them obeys the same section's prescription — re-placed ABOVE,
+    // ROUNDED, and ASYMMETRIC — and is a stronger hot-dog signal than fried onion:
+    // sweet relish along the bun's front trough. It is also the model's only
+    // saturated COOL hue, which `docs/LESSONS.md` records as the cheaper half of the
+    // chroma problem ("adding cool chroma lowers the warm band's share more cheaply
+    // than removing warm chroma does").
+    //
+    // ⚠️ The CENTRE IS DELIBERATELY EMPTY, and the bound is measured rather than
+    // eyeballed. A nub in the trough projects to screen height -0.40R at the lobby
+    // camera's 20-degree pitch, which is close to the band the mouth ends in
+    // (-0.31R). Only the X axis separates them cleanly, so nothing is mounted inside
+    // |x| = 0.68 * LOBE_LEN/2 = 0.63R, which clears the sclera's outer edge at
+    // 0.568R.
     {
-      const box = localBounds(head);
-      for (const [azimuth, k] of [[Math.PI * 0.52, 1.0], [-Math.PI * 0.54, 0.82]] as const) {
-        const { at, out } = massAnchor(head, box, { azimuth, height01: 0.62, inset: 0.16 });
-        const pts = [
-          at.clone(),
-          at.clone().addScaledVector(out, R * 0.30 * k).add(new THREE.Vector3(0, R * 0.10 * k, 0)),
-          at.clone().addScaledVector(out, R * 0.54 * k).add(new THREE.Vector3(0, -R * 0.06 * k, 0)),
-          at.clone().addScaledVector(out, R * 0.52 * k).add(new THREE.Vector3(0, -R * 0.34 * k, 0)),
-        ];
-        const onion = curl(toonMat({ color: BUN_LIGHT, roughness: 0.66 }), pts, {
-          rBase: R * 0.095, rTip: R * 0.045,
-        });
-        onion.name = 'hotdog_onion_curl';
-        head.add(onion);
+      const relishMat = toonMat({ color: RELISH, roughness: 0.5 });
+      const relishDarkMat = toonMat({ color: RELISH_DARK, roughness: 0.55 });
+      // The V between the sausage's flank and the front bun lobe's top face. The
+      // lobe is tilted 0.40 rad, so with `LOBE_H` 0.42R its top face at the seam
+      // sits at y = sausY - 0.313R, z = 0.402R; a nub centred just above and outside
+      // that rests in the groove and touches both without entering either. Checked
+      // both ways: 0.011R clear of the lobe's top plane in the lobe's own frame, and
+      // 0.083R clear of the sausage's axis against its 0.38R radius.
+      const troughY = sausY - R * 0.285;
+      const troughZ = R * 0.365;
+      const halfLen = lobe.LOBE_LEN * 0.5;
+      const NUBS: Array<{ x: number; r: number; dy: number; dz: number; dark: boolean }> = [
+        { x: -0.97, r: 0.058, dy: 0.018, dz: 0.010, dark: false },
+        { x: -0.83, r: 0.074, dy: -0.006, dz: 0.038, dark: true },
+        { x: -0.68, r: 0.056, dy: 0.012, dz: -0.006, dark: false },
+        { x: 0.68, r: 0.066, dy: -0.010, dz: 0.030, dark: true },
+        { x: 0.82, r: 0.054, dy: 0.014, dz: -0.004, dark: false },
+        // Asymmetric by construction: ONE long nub droops over the bun's front lip,
+        // on one side only. A matched pair is what the ear read is made of.
+        { x: 0.97, r: 0.082, dy: -0.048, dz: 0.062, dark: false },
+      ];
+      for (const n of NUBS) {
+        const nub = new THREE.Mesh(
+          new THREE.SphereGeometry(R * n.r, 10, 8),
+          n.dark ? relishDarkMat : relishMat
+        );
+        nub.name = 'hotdog_relish';
+        nub.scale.set(1.25, 0.82, 1.0);
+        nub.rotation.z = n.x * 0.35;
+        nub.position.set(n.x * halfLen, troughY + R * n.dy, troughZ + R * n.dz);
+        nub.castShadow = true;
+        nub.receiveShadow = true;
+        // Tagged, exactly as `appendages.ts:solid()` tags everything it builds:
+        // `localBounds` and `massAnchor` both skip tagged meshes, so the bandana
+        // tail below still measures the FOOD's box and still casts its anchor ray
+        // at the bun rather than stopping on a relish nub. Untagged, the fourth
+        // drip landing on the first is the documented failure mode.
+        nub.userData.silhouetteEvent = true;
+        head.add(nub);
       }
     }
 
@@ -889,14 +1171,36 @@ export class HotDogCharacter extends BaseCharacter {
     this.rig.joints.torso.add(holster);
 
     // Mustard-bottle prop nestled in the holster, nozzle peeking above the pouch.
+    //
+    // ── THIS IS NOW THE ONLY MUSTARD BOTTLE ON THE MODEL ─────────────────────
+    // `buildSilhouetteEvents` built a second one, `massAnchor`-ed onto the torso at
+    // the SAME hip. `massAnchor` only skips meshes tagged as silhouette events and
+    // the holster is not one, so its ray stopped on the pouch and aimed the rod
+    // through it — a yellow rod entering the black pouch on one side and a dark cone
+    // leaving it on the other, which is Uri's hamburger reject #2 verbatim
+    // ("going in and out of the character"). That copy is gone.
+    //
+    // Its one real job was breaking the body outline, so this one takes it over:
+    // tipped 0.34 rad OUTWARD (the holster sits at -X, and about +Z a positive angle
+    // carries the bottle's +Y top toward -X) and seated higher, so the neck and
+    // nozzle clear the pouch rim and project past the torso's own edge instead of
+    // hiding inside it.
     const bottle = new THREE.Group();
     bottle.name = 'hotdog_mustard_bottle';
-    bottle.position.copy(holsterPt).add(new THREE.Vector3(0, pouchH * 0.32, pouchD * 0.15));
-    const bottleBody = new THREE.Mesh(new THREE.CylinderGeometry(pouchW * 0.32, pouchW * 0.36, pouchH * 0.55, 10), bottleMat);
+    bottle.position.copy(holsterPt).add(new THREE.Vector3(0, pouchH * 0.46, pouchD * 0.15));
+    bottle.rotation.z = 0.34;
+    // Sized up from 0.32/0.36 x 0.62. Two reasons, one of them measured: this is the
+    // "Mustard Blast" character and at the old size the prop was a yellow stub at
+    // lobby distance; and the deleted duplicate took bright mustard off the torso,
+    // which is what pushed `torso|shoulderL` under the gate's 0.10 (see the torso
+    // zigzag note). `pouchW * 0.46` is still inside the pouch's own half-width
+    // (`pouchW / 2`), so the bottle grows without breaking back out through the
+    // leather — which was the whole defect.
+    const bottleBody = new THREE.Mesh(new THREE.CylinderGeometry(pouchW * 0.42, pouchW * 0.46, pouchH * 0.80, 10), bottleMat);
     bottleBody.castShadow = true;
     bottle.add(bottleBody);
-    const nozzle = new THREE.Mesh(new THREE.ConeGeometry(pouchW * 0.16, pouchH * 0.16, 8), bottleMat);
-    nozzle.position.y = pouchH * 0.35;
+    const nozzle = new THREE.Mesh(new THREE.ConeGeometry(pouchW * 0.22, pouchH * 0.26, 8), bottleMat);
+    nozzle.position.y = pouchH * 0.53;
     nozzle.castShadow = true;
     bottle.add(nozzle);
     this.rig.joints.torso.add(bottle);
