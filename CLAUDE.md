@@ -50,15 +50,34 @@ Not style preferences. Every one exists because breaking it cost hours.
 3. **Judge rendered pixels. Read the PNG with the Read tool and actually look at it.** Judging a
    description instead of an image is this project's most common failure.
 
-   🚨 **AND JUDGE AT THE CAMERA THE VIEWER IS USING — THERE ARE TWO, AND EVERY CAST INSTRUMENT
-   MEASURES THE WRONG ONE.** `src/ui/screens/charStage.ts:451` is **`pitchDeg: 20`** — the lobby,
-   where Uri looks at a character and where every one of his reject sheets came from.
-   `src/render/camera.ts:265` defaults the **match** to **58**. `limbmatch`, `sepscan`, `valuescan`
-   and the per-part pass all measure **58**.
-   ⚠️ **And `limbcheck` was caveated for measuring "the preview's 22°, not the match's 58°" — 22° is
-   within two degrees of the LOBBY camera.** The instrument dismissed as measuring the wrong view
-   was measuring the one the owner actually judges. **Before quoting a cast number, say which camera
-   it is from.** A fix validated at 58° has not been validated for the screen Uri is looking at.
+   🚨 **THERE ARE TWO SHIPPED CAMERAS, AND THEY EXPOSE DIFFERENT DEFECTS. USE BOTH.**
+   `src/ui/screens/charStage.ts:451` is **`pitchDeg: 20`** — the lobby, close and shallow, where Uri
+   looks at a character and where every one of his reject sheets came from.
+   `src/render/camera.ts:265` defaults the **match** to **58** — steep and far.
+   `limbmatch`, `sepscan`, `valuescan` and the per-part pass all measure **58**.
+
+   ⚠️ **This is NOT "the instruments measure the wrong camera" — that framing is wrong and it was
+   mine.** Uri's correction, and it is the right model:
+
+   > *"Angle only provides the ability to see what you can't notice easily on another camera. The
+   > intersecting limbs is hard to identify from 58 degrees, but from a shallower look you can
+   > identify it. Fixing something in the physics shouldn't damage the 58-degree view — it should
+   > improve it and make it more realistic."*
+
+   **A limb passing through a torso is a 3D fact. It is wrong at every angle.** The shallow view does
+   not make it wrong; it makes it **visible**. So:
+   - **The lobby camera is the better DETECTOR** for interpenetration, limb attachment and face
+     construction — defects that foreshortening hides at 58°.
+   - **Fix the GEOMETRY, not the appearance at one pitch.** A change that only looks right at 58° is
+     a cheat and will fail the lobby, where the owner is looking.
+   - **Verify at BOTH.** A real geometric fix improves both views; if it improves one and costs the
+     other, it is not the fix.
+   - **Diagnose UP CLOSE.** Render at lobby framing to find the defect, then confirm at match
+     framing that it survived.
+
+   ⚠️ And note `limbcheck`'s long-standing caveat — *"it measures the preview's 22°, not the match's
+   58°"* — reads differently now: **22° is within two degrees of the lobby camera**, so it was never
+   measuring nothing. It was answering the *other* question, and nobody noticed there were two.
 
 4. **When something "isn't there", assume it is rendering and INVISIBLE.** True cause **eighteen**
    times. The eighteenth rendered *plausibly and wrongly* — a restored WebGL context 15.65 luma
