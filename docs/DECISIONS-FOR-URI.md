@@ -1867,3 +1867,42 @@ That is, word for word, what nine of fourteen critics said — *"characters sit 
 already match the reference), and the **character** version is un-instrumented. It is now the
 strongest remaining candidate for the cast score, and it is being treated as a build-the-instrument-
 first job, not a tweak.
+
+---
+
+## 35. ❓ Concealment: two edges of "fully hidden" that the build had to decide
+
+You said *"fully hidden"* (§30). Landed and **verified on rendered pixels** — a concealed enemy's
+**radar blip, floating HP pill and 3D model** (with its cast shadow) are all gone. Two edges the
+implementation had to rule on, both easy to change:
+
+### 1. The CORNER NAMEPLATE still shows the enemy's HP — deliberately
+
+Your *"fully hidden"* named the **floating pill above the character**. The **corner nameplate** — the
+permanent scoreboard element — still reports their HP while they are hidden.
+
+**The argument for leaving it:** it reports **HP, not position**, so it leaks nothing about where
+they are; it is a fixed layout element, so hiding it leaves a hole; and it tells you nothing you did
+not already know from having hit them.
+
+**If you disagree, it is one line** plus a decision about what fills the gap. Say the word.
+
+### 2. 🔴 A concealed enemy's PROJECTILES are still drawn — and this one is a real hole
+
+Projectiles and ability VFX are **world entities**, not parented to the enemy's model, so they do not
+hide with it. **Measured**, not assumed — a probe was thrown away and rebuilt because a pecking-chick
+projectile stayed on screen after the character vanished.
+
+So today: **a concealed enemy can shoot at you, stay invisible, and its projectile leaks its
+position anyway.**
+
+⚠️ **Under your §29c answer this is arguably correct** — *"attacking from under it will break it and
+reveal you"*. If attacking reveals you, a visible projectile is honest. **But §29c is not
+implemented yet**, so right now we have the leak without the reveal, which is the worst of both.
+These two ship together or the feature is incoherent.
+
+### One thing that needed no decision, but you should know it exists
+
+**`window.__vfxDebugFighters` publishes both fighters' exact x/y/hp to the browser window every
+frame.** Harmless single-player QA hook today. **In any multiplayer future it is a wallhack** — and
+concealment is precisely the feature it would defeat. Worth a note now rather than a surprise later.
