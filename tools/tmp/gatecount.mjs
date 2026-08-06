@@ -270,7 +270,7 @@ const OFFLINE = [
   { key: 'tools/tmp/conceal_lab.mjs --selftest', probes: [pr(['tools/tmp/conceal_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/burger_lab.mjs --selftest',  probes: [pr(['tools/tmp/burger_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/driver_guard.mjs',           probes: [pr(['tools/tmp/driver_guard.mjs'], /^driver_guard: (\d+) passed, \d+ failed/m)] },
-  { key: 'tools/tmp/cs_charcontact.mjs --selftest', probes: [pr(['tools/tmp/cs_charcontact.mjs', '--selftest'], /(\d+)\s*(?:\/\s*\d+\s*)?pass/mi)] },
+  { key: 'tools/tmp/cs_charcontact.mjs --selftest', probes: [pr(['tools/tmp/cs_charcontact.mjs', '--selftest'], /cs_charcontact --selftest\s+(\d+)\/\d+/m)] },
   { key: 'tools/tmp/ds_inventory.mjs --selftest', probes: [pr(['tools/tmp/ds_inventory.mjs', '--selftest'], /(\d+) passed, \d+ failed/m)] },
   { key: 'tools/tmp/ds_neutral.mjs --selftest',   probes: [pr(['tools/tmp/ds_neutral.mjs', '--selftest'], /(\d+) passed, \d+ failed/m)] },
   { key: 'tools/tmp/clonetoon_test.mjs',         probes: [pr(['tools/tmp/clonetoon_test.mjs'], /^PASS\s+clonetoon_test: (\d+) passed, \d+ failed/m)] },
