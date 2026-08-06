@@ -50,6 +50,16 @@ Not style preferences. Every one exists because breaking it cost hours.
 3. **Judge rendered pixels. Read the PNG with the Read tool and actually look at it.** Judging a
    description instead of an image is this project's most common failure.
 
+   🚨 **AND JUDGE AT THE CAMERA THE VIEWER IS USING — THERE ARE TWO, AND EVERY CAST INSTRUMENT
+   MEASURES THE WRONG ONE.** `src/ui/screens/charStage.ts:451` is **`pitchDeg: 20`** — the lobby,
+   where Uri looks at a character and where every one of his reject sheets came from.
+   `src/render/camera.ts:265` defaults the **match** to **58**. `limbmatch`, `sepscan`, `valuescan`
+   and the per-part pass all measure **58**.
+   ⚠️ **And `limbcheck` was caveated for measuring "the preview's 22°, not the match's 58°" — 22° is
+   within two degrees of the LOBBY camera.** The instrument dismissed as measuring the wrong view
+   was measuring the one the owner actually judges. **Before quoting a cast number, say which camera
+   it is from.** A fix validated at 58° has not been validated for the screen Uri is looking at.
+
 4. **When something "isn't there", assume it is rendering and INVISIBLE.** True cause **eighteen**
    times. The eighteenth rendered *plausibly and wrongly* — a restored WebGL context 15.65 luma
    darker, forever. So the question is no longer only "is it there?" but **"is it the SAME?"**,
@@ -128,6 +138,15 @@ Not style preferences. Every one exists because breaking it cost hours.
     swept six agents' work into one mislabelled commit. ⚠️ **Never `git commit --amend`** — a peer
     pushed between an agent's `git log -1` and its amend, and an appendix landed on someone else's
     pushed commit.
+
+    🚨 **BUT PATHSPEC PROTECTS YOU FROM OTHER *FILES*, NOT FROM OTHER *AGENTS IN YOUR FILE*.**
+    `git commit -- <path>` commits the **working tree** for that path — including a peer's
+    uncommitted edits to the *same file*. Happened 2026-08-06: a rig commit carried ~250 lines of a
+    peer's in-flight `armClearance` work under a message describing something else. Nothing was
+    lost, HEAD built, and the agent declared it — but the commit is mislabelled forever.
+    **The only real protection is rule 9: ONE OWNER PER FILE.** Pathspec is a guard against your own
+    index, not against a second owner. **If you find changes in your file you did not write, stop
+    and report — do not commit them under your message.**
 
 ---
 
