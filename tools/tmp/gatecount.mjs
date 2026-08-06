@@ -321,6 +321,8 @@ const SKIP = [
   ['tools/tmp/screen_metrics.mjs',         'browser',     'ALL CLEAN battery, WCAG from pixels'],
   ['tools/tmp/home_metrics.mjs',           'browser',     'WCAG from pixels'],
   ['tools/tmp/limbcheck.mjs',              'browser',     'per-joint delivered pixels; and its expect cell is prose'],
+  ['tools/tmp/cw_conceal_view.mjs',        'browser',     'concealment on rendered pixels: blip, HP pill, 3D model'],
+  ['tools/tmp/cw_verify_knownbad.mjs',     'browser',     'ablates arena_probe --verify against a derived pre-fix ref'],
 ];
 
 /* ══════════════════════════════════════════════════════════════════════════

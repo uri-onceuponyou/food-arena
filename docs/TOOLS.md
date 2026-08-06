@@ -321,7 +321,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **50**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **52**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -393,6 +393,8 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/kit_lab.mjs --selftest` | **10** | matchup-profile divergence + behavioural fingerprint, calibrated on a literal clone |
 | `node tools/tmp/level_lab.mjs --selftest` | **7** | the level ladder and its win-rate curve |
 | `node tools/tmp/conceal_lab.mjs --selftest` | **22** | walk-through concealment: bit-identity, the band whose centre is legal and near edge is not, and the "no arena is failing this today" control. **Was undocumented until `gatecount` went looking** |
+| `node tools/tmp/cw_conceal_view.mjs` | **19** | ⚠️ browser. A concealed enemy is gone on **all three** surfaces — radar blip, floating HP pill, 3D model (27.4% of its body box against a measured 4.79% drift floor, S/N 5.7×). Its known-bad input is separation 60wu ≤ `CONCEAL_REVEAL_RADIUS`: a wire that hid unconditionally passes the far case and FAILS here |
+| `node tools/tmp/cw_verify_knownbad.mjs` | **13** | ⚠️ browser. Proves `arena_probe --verify` was BLIND to a dropped concealment list, as an ablation against a **derived** pre-fix ref so it survives a rebase. Carries a tripwire for the way the blindness got in: **zero boxes is indistinguishable from "no plates"** |
 | `node tools/tmp/burger_lab.mjs --selftest` | **16** | where the two drivers' matches diverge for one character — the instrument behind the 50.6 pp Hamburger role split. **Was undocumented** |
 | `node tools/tmp/roster_lab.mjs --selftest` | **9** | per-character strength, settled-matchup count and rarity roll-up on the FIXED driver. **Was undocumented.** ~26 s, the slowest offline gate |
 | `node tools/tmp/limbmatch.mjs --selftest` | **27** | hull deficiency / appendages / share — **computable on a reference plate**. `--mode control` adds 9 more, but they render in a browser and are not part of this contract |
