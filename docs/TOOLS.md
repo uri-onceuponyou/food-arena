@@ -73,6 +73,15 @@ node tools/tmp/with_snapshot.mjs -- node tools/arena-scan.mjs --url '$URL' --out
 invocation. Backgrounding it and measuring in the next call fails with
 `ERR_CONNECTION_REFUSED`, which reads exactly like a broken build.
 
+🚨 **IT COPIES THE *WORKING* TREE, NOT A COMMIT — so "frozen" is not "clean".** It protects you from
+changes *during* your measurement. It does **not** give you a tree without your peers' half-saved
+work in it. With five agents editing, two arms of one A/B taken 40 minutes apart landed on **two
+different trees** and the second pair was garbage.
+→ **For any A/B you will quote a number from, snapshot a DETACHED WORKTREE of a known commit.**
+That is also the only way to attribute an error to a specific tree — it is how a peer's
+`MultiplyBlending` error was isolated: **0 occurrences on HEAD+own-change in a clean worktree,
+207–210 against a snapshot of the live tree.**
+
 🚨 **The one-liner this file used to recommend DOES NOT WORK, and cost three separate agents
 10–20 minutes each before any of them diagnosed it:**
 

@@ -422,6 +422,42 @@ carve-out that large is measuring the minority of the picture.**
 This is the sibling of §7 (local optima fighting each other) and its sharper form: not two passes
 cancelling, but one pass succeeding completely against a target that did not matter.
 
+### 🚨 And §6b READ BACKWARDS: the change that fixes a visible defect can be invisible to every metric
+
+§6b is "the metric passed and the defect remained". **The inverse happened the same week and is just
+as dangerous: the defect was fixed and every metric stayed flat.**
+
+The Sticky Trail was briefed as an **area and opacity** problem, on five critics saying it *"covers a
+third of the play space"* and *"swallows both fighters"*. Measured — same-frame ablation, never a
+region counter, because §14 is this effect's own scar:
+
+| | share of frame |
+|---|---|
+| ours, ablated | **2.49% ± 0.36 pp** |
+| the frame the critics actually scored | 5.34% |
+| `bs_05`'s poison cloud, **same code, same definitions** | **15.86%** |
+
+**"A third of the play space" is wrong by ~6×, and we are 3× SMALLER than the reference's own large
+ground effect.** Occlusion of the character's *core* pixels: 8.2–18.7% against a ~33% allowance.
+**Both briefed hypotheses were false.**
+
+**Only the PNG could see the real defect:** a chain of ~20 individually **bright-outlined** lozenges
+— a segmented worm rather than a spill. The fix was **rim POLARITY** (dark rim, bright moved inside
+as speckles), so a pile of marks draws **one contour around the union** instead of twenty.
+
+**And every number stayed inside its floor.** L stdev 0.1046 → 0.1022, area 2.49% → 3.01% (floor
+±0.4 pp). The change that fixes what a human sees is **invisible to every instrument this repo has.**
+
+→ **A flat metric is not evidence a change did nothing.** Ask what the metric can *express*: a
+whole-region area number cannot see *segmentation*, and no statistic here counts contours. When the
+defect was found by eye, **the close-out is also by eye** — render it, read the PNG, and say so.
+Together with §6b: **the metric and the defect are two different things, and either can move without
+the other.**
+
+⚠️ Note also what the previous fix did: `b967242` diagnosed this exact failure in its own rejected
+iteration — *"stacked into concentric contour rings, a red flower rather than a spill"* — and then
+shipped a **thinner version of the same mechanism**. Naming a failure mode is not avoiding it.
+
 ### Corollary — a BASELINE is itself a measurement, and a cross-session one may drift
 
 The same round re-scored the **byte-identical** baseline sheets with fresh critics six hours later

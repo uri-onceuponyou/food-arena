@@ -1906,3 +1906,46 @@ These two ship together or the feature is incoherent.
 **`window.__vfxDebugFighters` publishes both fighters' exact x/y/hp to the browser window every
 frame.** Harmless single-player QA hook today. **In any multiplayer future it is a wallhack** — and
 concealment is precisely the feature it would defeat. Worth a note now rather than a surprise later.
+
+---
+
+## 36. ❓ The trail can only get ~27° of hue from the floor, and that is an ARENA decision
+
+Not blocking; recorded because it caps a whole class of future VFX work and cannot be fixed where
+anyone would look for it.
+
+**The Sticky Trail was investigated as an area/opacity problem and both hypotheses were false.**
+Measured with same-frame ablation against the reference's own large ground effect:
+
+| | share of frame |
+|---|---|
+| ours | **2.49%** (5.34% on the frame the critics scored) |
+| `bs_05`'s poison cloud, same code | **15.86%** |
+
+*"Covers a third of the play space"* is wrong by ~6×, and **we are 3× smaller than the reference's
+own big ground effect.** The real defect was that ~20 marks each drew their **own bright outline** —
+a segmented worm rather than one spill. Fixed by inverting the rim (dark outside, bright speckles
+inside), so a pile of marks draws **one contour around the union**.
+
+### The part that needs you
+
+**`bs_05` gets 162° of hue separation between its ground effect and its floor. We can get ~27°, and
+`vfx.ts` cannot change that — the arena has taken every direction:**
+
+| direction | already spoken for |
+|---|---|
+| magenta 300–320° | the fog / closing zone |
+| orange 14–42° | the splat, and the enemy's own trail |
+| cool green / cyan | the hazard ellipses — and it reads as *"safe"*, which is the opposite of a damage trail |
+
+`bs_05` buys its separation by putting a **magenta cloud on a green floor**. Our floor is **warm
+rose**, so the half of the wheel that would separate is the half the arena already uses.
+
+**So: every future ground effect is competing for the same ~27°.** Widening it means changing the
+**floor's hue** or re-allocating what the zone and hazards use — an arena-wide decision, not a VFX
+one, and exactly the kind of thing that is cheap now and expensive after five more effects are
+tuned against the current palette.
+
+Related and same cause: the trail's internal structure is ~25% short of the reference cloud's
+(L stdev 0.102 vs 0.137), and **a saturated red at this mean cannot carry a wider range** — so that
+gap is also downstream of the hue choice rather than fixable in the effect.
