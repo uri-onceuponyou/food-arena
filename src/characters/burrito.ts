@@ -18,6 +18,56 @@
  * the SAME tube (see `dressTorso`): head and torso are now one uncut ~2.5:1 vertical
  * cylinder, which is the one proportion nothing else in the cast has, with a torn foil
  * sleeve flared back over its lower half as the costume/silhouette break.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ── THE GOAT PASS, 2026-08-06 — and FOUR of the five mechanisms were invisible
+ *    to every number in this repo until somebody shot the LOBBY camera. ────────
+ *
+ * Uri, blind to the code: *"looks a bit like a GOAT. Face is not good."* `DECISIONS`
+ * §39 worked out three of the causes by reading this file — torn foil peaks as EARS,
+ * LANKY as animal proportions, pale cream as FUR, a small low face as a MUZZLE — and
+ * explicitly warned that the per-part instrument **cannot** see a gestalt error
+ * because isolation removes the information needed to detect one.
+ *
+ * Then `305d813` established that this project ships TWO cameras and that the lobby's
+ * **20 degrees** (`charStage.ts:451`) is where Uri actually looks, while `limbmatch`,
+ * `sepscan`, `valuescan` and the per-part pass all measure the match's **58**. Shot at
+ * 20 degrees (`tools/tmp/ch_burrito_shots.mjs`), this character showed three further
+ * defects that no metric on this project had ever reported, and two of them are worse
+ * than the ears:
+ *
+ *  1. 🚨 **THE HEAD AND TORSO WERE NOT ONE TUBE. They were a blob on a stick.**
+ *     `dressTorso` capped its own radius at `shoulderWidth - armRadius * 1.28`, and a
+ *     later arm-clearance pass cut `shoulderWidth` from 0.135H to 0.105H. That cap
+ *     therefore *shrank with the fix*: it floored out on `R * 0.34` = 0.139 m against a
+ *     head tube of 0.238 m, so the torso was **59% of the head's width**. The doc
+ *     comment below has claimed "one uncut ~2.5:1 vertical cylinder" the whole time
+ *     and the render is a 1.1:1 barrel on a straw — which is the "pill with a waist"
+ *     this file says it FIXED, silently reintroduced from the other end.
+ *  2. 🚨 **THE ARMS WERE VISIBLY DETACHED**, with background between shoulder and body
+ *     at 20 degrees. Same root cause: the arm's inner edge sat 0.006 m inside a 0.139 m
+ *     tube, i.e. tangent. At 58 degrees foreshortening hides it completely — exactly
+ *     what `305d813` predicts, and the reason a fix must be verified at BOTH pitches.
+ *  3. 🚨 **THE FILLINGS READ AS A SECOND FACE.** At 58 degrees the mound is the top of
+ *     the character, and two dark `MEAT` SPHERES (0.55R across, on a pale rice dome)
+ *     sat side by side on it. Two dark round masses on a light ground **are eyes**, and
+ *     with the foil peels flanking them the whole crown read as an animal's head. This
+ *     is finding 4's rule ("a pointed mass either side of a head reads as an ear")
+ *     generalised: **a SYMMETRIC PAIR of anything, at the top of a mass, recruits the
+ *     mass into a face.** It is the fillings — the character's own identity landmark —
+ *     doing it.
+ *
+ * And the foil is finding 5 (*"detail added to signal the subject can destroy the
+ * silhouette that signalled it better"*) in its purest form on this cast. The head foil
+ * sleeve, its six torn cone tabs and the three peeled corners were all added to say
+ * "burrito". Rendered, they say: two silver EARS at ±X on the crown, and a zigzag row
+ * of white triangles across the character's middle that reads as TEETH. All three
+ * groups are removed here. What is left — a long tortilla tube, a fold seam, an open
+ * top spilling filling, and a foil sleeve with a paper band at the waist — is both the
+ * more recognisable burrito image and the one that keeps the outline.
+ *
+ * ⚠️ NOTHING IN `rules.ts` OR IN THIS FILE IS FROZEN (Uri, 2026-08-06). Where a written
+ * description was producing a bad character the description is changed and said so.
  */
 
 import * as THREE from 'three';
@@ -49,8 +99,36 @@ import { aim, blade as peelBlade, localBounds, massAnchor } from './appendages';
  * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
  * direction `docs/LESSONS.md` records as falsified four times in the other one.
  */
-const TORTILLA = '#DFD2B9';        // pale flour wrap (luma 0.921 -> 0.827)
-const TORTILLA_SHADE = '#E4CFA0';  // toasted/shadow tone — rim, torso wrap-continuation
+// ── PALE CREAM READS AS FUR, AND THAT IS ONE QUARTER OF THE GOAT ─────────────
+// WAS: TORTILLA '#DFD2B9' — HSL(39.5, 37.5%, 80%) — and `DECISIONS` §39 names it in
+// as many words: *"`TORTILLA #DFD2B9`, pale cream | authored as flour wrap | reads as
+// FUR."* A cream so pale it has almost no hue left is the surface of an animal, not of
+// a griddled flatbread, and it is 44% of this character's pixels.
+//
+// #E5C795 is HSL(37.5, 61%, 74%): **+24 pp saturation, -6 pp lightness, hue held.**
+// Three things follow and all three are wanted:
+//   • it stops reading as fur, because fur is not chromatic and a toasted tortilla is;
+//   • ⚠️ it is a SATURATION INCREASE, which is the only direction `docs/LESSONS.md`
+//     allows — "do not fix anything by desaturating" is falsified four times over, and
+//     the frame is measured UNDER-chromatic (meanSat 0.324 vs the reference's 0.493);
+//   • it pays down this file's own recorded near-white defect below. Scaling a warm
+//     off-white DOWN raises its chroma, which is the same move `soup.ts` is briefed to
+//     make on its bowl for the same reason.
+// TORTILLA_SHADE was '#E4CFA0', which is *lighter than TORTILLA in two channels* — a
+// "shade" that never shaded anything. #C99C5B is a real toast tone, luma 0.63 against
+// the wrap's 0.79, so the rim, the seam and the brow creases now carry a value step.
+const TORTILLA = '#E5C795';        // griddled flour wrap
+const TORTILLA_SHADE = '#C99C5B';  // genuine toast/shadow tone — brow creases, lower lip
+// ── AND A SECOND, MUCH QUIETER STEP, BECAUSE ONE STEP WAS DOING TWO JOBS ─────
+// The first version of this pass used TORTILLA_SHADE for the rim, the fold seam AND the
+// scorch spots, and the render says that is one step too big for all three: the rim read
+// as an ORANGE HEADBAND, the seam as a row of orange dashes running down through the
+// left eye, and the two visible scorch spots as BLOTCHES on the cheeks — three separate
+// "somebody drew on this character" reads off one colour. #D9B075 is luma 0.708 against
+// the wrap's 0.791: an 0.08 step, which is a griddle mark. TORTILLA_SHADE's 0.63 is an
+// 0.16 step, which is a stripe. The strong step is kept only where a FEATURE needs to be
+// read as a feature — the brow creases and the lower lip.
+const TORTILLA_TOAST = '#D9B075';  // scorch spots, the cut rim, the fold seam
 const WRAP_BAND = '#6A1C0C';       // paper wrapper band + hands — see THE DARK RUNG below
 // Foil. Warm-NEUTRAL silver rather than either extreme, and the value is the
 // load-bearing part: a first pass warmed this to #EFEBE0 to keep the character in
@@ -61,7 +139,14 @@ const WRAP_BAND = '#6A1C0C';       // paper wrapper band + hands — see THE DAR
 // arrives much smaller on screen — measured by rendering, not by reading the values.
 const FOIL = '#C4C0B5';
 const BOOT = '#180E05';            // near-black toasted-tortilla boots, grounds the pale body
-const RICE = '#E6D8BC';            // was `PALETTE.cream` #FFF3DE (luma 0.957 -> 0.850)
+// WAS '#E6D8BC' (itself down from `PALETTE.cream` #FFF3DE, luma 0.957 -> 0.850). With the
+// wrap darkened to a real tortilla the rice became the LIGHTEST large mass on the
+// character by a clear margin, and the render says exactly what that costs: a smooth
+// pale dome on a warm cone reads as SOFT-SERVE ICE CREAM, sprinkles and all. #E3CFA4 is
+// luma 0.816 against the wrap's 0.791 — still lighter, as cooked rice is against a
+// griddled tortilla, but no longer a different material. The rest of that read is
+// COVERAGE, handled by the piece table below.
+const RICE = '#E3CFA4';
 // ── THE DARK RUNG ────────────────────────────────────────────────────────────
 // Measured against 18 Brawl Stars plates: their P05 is 0.097 and every one of the
 // eighteen puts 5% of the character below 0.18. Burrito's was 0.285, and 53.3% of its
@@ -83,7 +168,23 @@ const MEAT_DARK = '#140A03';
 const TOMATO = '#7A1620';
 const CHEESE = PALETTE.cheese;
 const LETTUCE = PALETTE.lettuce;
-const SOUR_CREAM = '#EAE4D6';      // luma 0.992 -> 0.893
+// WAS '#EAE4D6' (luma 0.992 -> 0.893). Taken down one step for a reason that is new to
+// this file: the SCLERA has to be the brightest value ANYWHERE on the character
+// (`rules.ts`'s face standard), and a glossy near-white blob with a specular on it is
+// the one thing that can out-bright a lit white sphere. Two small pixels are not worth
+// costing the face its whole job.
+const SOUR_CREAM = '#E2D9C4';
+// ── The face's own values, and the one thing this character's ground makes hard ──
+// `rules.ts` burrito: *"the wrap is TORTILLA, a pale cream — so an off-white sclera
+// will dissolve into it. The sclera must be genuinely WHITE and carry a strong dark
+// lash/lid line to hold its edge against a low-contrast ground; this is the one
+// character where the eye needs a drawn boundary to survive its own background."*
+// Both halves are built: `SCLERA` is pure white on a LIT material (so it takes the key
+// and becomes the top of the character's value ladder) and every eye carries an ink
+// lid arc over its top and outer corner.
+const SCLERA = '#FFFFFF';
+const MOUTH_THROAT = '#1E0803';    // the interior value step — darker than the lip ink
+const MOUTH_TONGUE = '#C4514F';    // the third value inside the mouth, so it is an opening
 // Limb-only avocado-green family. A second independent art-director pass named
 // Burrito, Egg and Lollipop as all converging on pale cream/white LIMBS with dark
 // boots — the wrap itself stays this pale tortilla tone (that's the food read for
@@ -132,6 +233,54 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   const geo = new THREE.LatheGeometry(pts, radialSegments);
   geo.computeVertexNormals();
   return geo;
+}
+
+/**
+ * A group sitting flush on the wrap's TRUE surface, with local **+Z along the outward
+ * normal** and local +Y along the tube's own up direction — this character's answer to
+ * `egg.ts`'s `addShellDecal`, which `rules.ts` names as the pattern for the whole cast.
+ *
+ * ── Why every feature has to share one frame ─────────────────────────────────
+ * `rules.ts`'s face standard: *"NOTHING FLOATS. Every feature sits ON a surface,
+ * sharing one tangent frame with its neighbours."* Burrito's body is a bulged cylinder,
+ * so a feature placed at a guessed constant depth only matches the surface at one
+ * height and one azimuth: the rig's own `face` offset (a flat `headRadius * 0.82`) sits
+ * ~0.09R proud of this tube wherever it is not dead centre, and the previous face
+ * dodged that with a per-feature `surfaceZ * 0.9`-style fudge that is a different fudge
+ * for every feature. One frame, solved against `wrapRadiusAt`, removes the whole class.
+ *
+ * ── ⚠️ AND NOT `setFromUnitVectors`, WHICH IS A NAMED TRAP ────────────────────
+ * `docs/LESSONS.md` §12: it picks the SHORTEST arc between two vectors and therefore
+ * leaves a **different residual roll on each side** — the recorded cause of Sushi
+ * reading as having a LAZY EYE, and `rules.ts` calls it out again in sushi's own spec.
+ * The basis here is explicit: +Y is world-up projected into the tangent plane, +X is
+ * +Y x +Z. Both eyes get the same roll by construction rather than by luck.
+ *
+ * The normal is the true normal of a surface of revolution — radial 1, axial -dr/dy —
+ * sampled numerically off the very same `radiusAt` the geometry was built from, so a
+ * change to the bulge cannot leave the decals behind.
+ */
+function tubeFrame(
+  parent: THREE.Object3D,
+  radiusAt: (y: number) => number,
+  span: number,
+  azimuth: number,
+  y: number,
+  embed: number,
+): THREE.Group {
+  const r = radiusAt(y);
+  const sa = Math.sin(azimuth);
+  const ca = Math.cos(azimuth);
+  const h = span * 1e-3;
+  const dr = (radiusAt(y + h) - radiusAt(y - h)) / (2 * h);
+  const n = new THREE.Vector3(sa, -dr, ca).normalize();
+  const g = new THREE.Group();
+  g.position.set(sa * r, y, ca * r).addScaledVector(n, embed);
+  const up = new THREE.Vector3(0, 1, 0).addScaledVector(n, -n.y).normalize();
+  const right = new THREE.Vector3().crossVectors(up, n).normalize();
+  g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
+  parent.add(g);
+  return g;
 }
 
 /**
@@ -194,13 +343,39 @@ export class BurritoCharacter extends BaseCharacter {
       // of the window.
       proportions: bodyType('lanky', {
         height: H,
-        // 0.135H -> 0.115H. LANKY's torso is 0.167H wide, i.e. 0.171 m half-width,
-        // and at 0.135H the arm's INNER edge sat at 0.189 m — outside the only mass
-        // it can attach to. At the rearward extreme of the run the whole left arm
-        // became its own connected component, 10,060 px. 0.115H puts the inner edge
-        // at 0.148 m, inside the torso, while the outer edge is still 0.153 m proud
-        // of it.
-        shoulderWidth: H * 0.105,
+        // ── WAS 0.105H, AND THE NOTE BELOW IT WAS SOLVING THE RIGHT PROBLEM AGAINST
+        //    THE WRONG BODY. Kept verbatim because the reasoning is still correct: ──
+        //
+        //   "0.135H -> 0.115H. LANKY's torso is 0.167H wide, i.e. 0.171 m half-width,
+        //    and at 0.135H the arm's INNER edge sat at 0.189 m — outside the only mass
+        //    it can attach to. At the rearward extreme of the run the whole left arm
+        //    became its own connected component, 10,060 px. 0.115H puts the inner edge
+        //    at 0.148 m, inside the torso, while the outer edge is still 0.153 m proud
+        //    of it."  (then 0.115H -> 0.105H by the same argument)
+        //
+        // ⚠️ **"LANKY's torso" is not the mass this character has.** `dressTorso()`
+        // below REPLACES the rig's barrel with this file's own tube — so the pass above
+        // narrowed the shoulders to reach a torso that is not there, and the tube it
+        // should have been measured against then narrowed WITH it, because that tube's
+        // cap was written as `shoulderWidth - armRadius * 1.28`. Two knobs chasing each
+        // other down: 0.135H -> 0.105H shoulders, 0.238 m -> 0.139 m tube, and at
+        // 20 degrees the arms are detached anyway (measured, `shots/ch/burrito/before`).
+        //
+        // Solved as one relationship instead, in metres, on LANKY's actual numbers
+        // (R = 0.20H by construction: headFraction 0.40, halved):
+        //
+        //   tube half-width  = headTubeBottomR = 0.58R          = 0.116 H
+        //   armRadius        = 0.040 H
+        //   shoulderWidth    = tube + armRadius * 0.55          = 0.138 H
+        //
+        // which is the STRADDLE this file has always said it wanted and never had:
+        // the arm's inner edge lands 0.55 of an arm-radius INSIDE the tube (attached),
+        // its axis sits outside the surface (not buried), and its outer edge stands
+        // 0.127 m proud (visible in outline). `dressTorso` derives the tube's cap from
+        // this same expression, so the two can no longer drift apart.
+        // ⚠️ It also stays clear of `bodies.ts`'s explicit warning — the tube's
+        // half-width (0.116H) does NOT reach the shoulder pivot (0.138H).
+        shoulderWidth: H * 0.138,
         // 0.062H -> 0.087H. LANKY's stance is narrow on purpose — "the whole figure
         // reads as a vertical line" — and a vertical line is exactly the outline
         // this pass exists to break. Still the second-narrowest in the cast, so the
@@ -291,12 +466,12 @@ export class BurritoCharacter extends BaseCharacter {
       const base = THREE.MathUtils.lerp(botR, topR, t);
       return base * (1 + bulgeAmt * Math.sin(t * Math.PI));
     };
-    // True surface Z at a given (x, y) on the tube, assuming a circular cross-section
-    // at every height (true here since the bulge scales x/z uniformly together).
-    const surfaceZ = (x: number, y: number): number => {
-      const r = wrapRadiusAt(y);
-      return Math.sqrt(Math.max(0, r * r - x * x));
-    };
+    // (A `surfaceZ(x, y)` helper lived here and is gone with the face that used it. It
+    // gave a POSITION on the surface and nothing else, so every feature also carried a
+    // hand-picked `* 0.9`-ish factor to fake the depth and had no orientation at all —
+    // which is why the old eyes sat flat-on while the tube curved away underneath them.
+    // `tubeFrame()` returns a full tangent frame from the same `wrapRadiusAt`, so
+    // position, depth and orientation come out of one solve.)
 
     // ── Open top: rim + a mound of fillings spilling out ──────────────────────
     // Faces +Y (up), not +Z — under this game's steeply pitched-down camera an
@@ -312,7 +487,14 @@ export class BurritoCharacter extends BaseCharacter {
     const openEnd = new THREE.Group();
     openEnd.name = 'burrito_open_end';
     openEnd.position.y = bodyTopY;
-    openEnd.rotation.z = -0.30;
+    // WAS -0.30. The slant is kept — it is what stops the top reading as a level cap —
+    // but it was costing the FACE. Solved rather than eyeballed: at the eye's own
+    // azimuth the tilted rim's underside sat at +0.269R, and the face this pass builds
+    // is deliberately large and HIGH (`rules.ts`: *"a small face low on a long narrow
+    // head reads as a MUZZLE, and that is half of why Uri said 'looks a bit like a
+    // goat'"*), with its sclera reaching +0.26R. -0.22 lifts the rim's underside there
+    // to +0.299R and buys the clearance out of the one part of the shape nobody reads.
+    openEnd.rotation.z = -0.22;
     openEnd.rotation.x = 0.10;
     head.add(openEnd);
     // The rim is now the tube's WIDEST point (1.02x the wall, plus its own tube
@@ -320,8 +502,12 @@ export class BurritoCharacter extends BaseCharacter {
     // the open end has to be the landmark, and a rim narrower than the wall it
     // caps cannot be seen at all in outline — it just continues the cylinder.
     const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(topR * 1.02, R * 0.075, 10, 28),
-      toonMat({ color: TORTILLA_SHADE, roughness: 0.8 })
+      // Tube down from R * 0.075, and off TORTILLA_SHADE: at the old size and value this
+      // rim rendered as a thick ORANGE HEADBAND round a pale dome, which is most of why
+      // the crown read as a cupcake. It is the tortilla's own CUT EDGE — the one thing it
+      // must not look like is a separate object put on top.
+      new THREE.TorusGeometry(topR * 1.02, R * 0.058, 10, 28),
+      toonMat({ color: TORTILLA_TOAST, roughness: 0.8 })
     );
     rim.name = 'burrito_rim';
     rim.rotation.x = -Math.PI / 2; // torus hole (default +Z) now points +Y
@@ -394,47 +580,98 @@ export class BurritoCharacter extends BaseCharacter {
     // framing, so this whole mound is ~14px across — pieces below ~0.16R simply do
     // not survive to the screen, and the "packed filling" read has to come from a
     // few big saturated lumps rather than many small ones.
-    const meatGeo = new THREE.SphereGeometry(R * 0.25, 10, 8);
-    const tomatoGeo = new THREE.BoxGeometry(R * 0.23, R * 0.23, R * 0.23);
-    const cheeseGeo = new THREE.ConeGeometry(R * 0.115, R * 0.34, 6);
+    // ── SHAPES, and this is taco's finding applied to a different character ───
+    // WAS: meat a `SphereGeometry(R * 0.25)` scaled to 0.55R across, tomato a cube,
+    // cheese a 6-sided cone, lettuce a capsule. `DECISIONS` §39 records the same defect
+    // on taco — *"'looks like fruit' is a SHAPE problem, not a colour one: the fillings
+    // are authored correctly and built as SPHERES and RINGS, and spheres read as
+    // berries. Real fillings are shredded, diced, crumbled. Change the shapes, keep the
+    // palette."* Burrito's spheres were doing something worse than berries (see finding
+    // 3 in the header): near-black, round, 0.55R across, and one on each side of a pale
+    // dome — a pair of EYES, which turned the whole crown into an animal's head at the
+    // match camera. Diced now, and smaller: a cube with visible facets cannot be a
+    // pupil. Cheese likewise goes from a cone (a spike) to a flat shred.
+    const meatGeo = new THREE.BoxGeometry(R * 0.26, R * 0.19, R * 0.24);
+    const tomatoGeo = new THREE.BoxGeometry(R * 0.20, R * 0.20, R * 0.20);
+    const cheeseGeo = new THREE.BoxGeometry(R * 0.34, R * 0.055, R * 0.11);
     const lettuceGeo = new THREE.CapsuleGeometry(R * 0.075, R * 0.26, 4, 6);
     const creamGeo = new THREE.SphereGeometry(R * 0.115, 10, 8);
 
-    // Fewer, bigger pieces. At the size a player sees a character the whole mound is
-    // ~14px across; sixteen pieces at that scale average into one mottled dome, which
-    // is the "reads as ice cream" note. Eight big ones keep a readable lump-and-gap
-    // rhythm. This is the same spatial-frequency lesson the floor learned: detail the
-    // size of the thing carrying it reads as a flat tint.
-    const KIND_COUNT = 8;
-    const kinds = ['meat', 'tomato', 'cheese', 'lettuce'] as const;
-    const spotsByKind: Record<(typeof kinds)[number], Spot[]> = { meat: [], tomato: [], cheese: [], lettuce: [] };
-    for (let i = 0; i < KIND_COUNT; i++) {
-      const deg = (i / KIND_COUNT) * 360 + ((i * 13) % 10); // near-even ring, deterministic jitter
-      // Widened from 0.32..0.78 to reach the mound's own edge: the pieces that do
-      // the silhouette work are the ones that hang OVER the rim, and the old range
-      // stopped short of it so every topping stayed inside the tube's outline.
-      const rFrac = 0.30 + (((i * 37) % 100) / 100) * 0.66; // 0.30..0.96
-      spotsByKind[kinds[i % kinds.length]].push([deg, rFrac]);
-    }
-    const creamSpots: Spot[] = [[40, 0.18], [230, 0.20]];
+    // ── AUTHORED, NOT GENERATED, AND THAT IS THE FIX ─────────────────────────
+    // WAS: `deg = (i / 8) * 360 + jitter`, kinds assigned round-robin `i % 4`. A
+    // round-robin over four kinds at an even eight-step **puts the same kind at +X and
+    // -X by construction** — meat landed at 0 deg and 182 deg, i.e. screen-left and
+    // screen-right, at matched height. That is a mirrored pair, and finding 4's rule
+    // ("a pointed mass either side of a head reads as an ear") has a general form this
+    // file had to learn the expensive way: **a SYMMETRIC PAIR of anything, near the top
+    // of a mass, recruits that mass into a face.** The generator could not avoid it,
+    // because evenness was the whole thing it was written to guarantee.
+    //
+    // Three rules, all checkable by reading the table rather than by rendering it:
+    //   1. the three dark MEAT pieces sit at 62 / 176 / 290 deg. The mirror of an
+    //      azimuth about the screen's vertical is `180 - deg`, so the forbidden
+    //      partners are 118 / 4 / 250 — no meat is within 58 deg of any of them.
+    //   2. no kind repeats within 58 deg of a mirrored azimuth (checked for all four).
+    //   3. every radius differs, so nothing sits at a matching height on the dome
+    //      either — the second half of what makes two blobs read as a pair.
+    //
+    // Twelve, not nine. The render of the nine-piece version still read as ICE CREAM,
+    // and the missing half of that was never colour: a smooth pale dome showing between
+    // widely spaced lumps is a scoop with sprinkles on it whatever the lumps are. Three
+    // more (44 / 122 / 268) close the gaps to ~20 deg, which at r ~ 0.7 is about one
+    // piece-width — packed, with the lump-and-gap rhythm the earlier round wanted, and
+    // still inside every rule above (the three meats are untouched at 62 / 176 / 290).
+    const PIECES = [
+      ['tomato', 24, 0.38], ['cheese', 44, 0.72], ['meat', 62, 0.62],
+      ['cheese', 104, 0.94], ['tomato', 122, 0.66], ['lettuce', 142, 0.30],
+      ['meat', 176, 0.86], ['tomato', 214, 0.50], ['cheese', 250, 0.34],
+      ['lettuce', 268, 0.78], ['meat', 290, 0.44], ['lettuce', 330, 0.90],
+    ] as const satisfies readonly (readonly [kind: string, deg: number, rFrac: number])[];
+    const creamSpots: Spot[] = [[46, 0.18], [252, 0.22]];
 
-    spotsByKind.meat.forEach((s, i) => {
-      const m = placeOnDome(s, meatGeo, i % 3 === 0 ? meatDarkMat : meatMat, 'burrito_meat');
-      m.scale.set(1.1, 0.8, 1.1);
-    });
-    spotsByKind.tomato.forEach((s) => {
-      const m = placeOnDome(s, tomatoGeo, tomatoMat, 'burrito_tomato');
-      m.rotation.z = 0.4;
-    });
-    spotsByKind.cheese.forEach((s) => placeOnDome(s, cheeseGeo, cheeseMat, 'burrito_cheese'));
-    spotsByKind.lettuce.forEach((s) => {
-      const m = placeOnDome(s, lettuceGeo, lettuceMat, 'burrito_lettuce');
-      m.rotation.x += Math.PI / 2; // lay along the surface rather than poking straight up
+    PIECES.forEach(([kind, deg, rFrac], i) => {
+      const spot: Spot = [deg, rFrac];
+      switch (kind) {
+        case 'meat': {
+          const m = placeOnDome(spot, meatGeo, i % 2 === 0 ? meatDarkMat : meatMat, 'burrito_meat');
+          // A per-piece tumble, so three cubes off the same geometry never present the
+          // same face to the camera and cannot average into one shape.
+          m.rotation.x += 0.42 * (i % 3) - 0.3;
+          m.rotation.z += 0.55 - 0.31 * (i % 4);
+          break;
+        }
+        case 'tomato': {
+          const m = placeOnDome(spot, tomatoGeo, tomatoMat, 'burrito_tomato');
+          m.rotation.z += 0.4;
+          m.rotation.x += 0.25 * (i % 3);
+          break;
+        }
+        case 'cheese': {
+          const m = placeOnDome(spot, cheeseGeo, cheeseMat, 'burrito_cheese');
+          m.rotation.y += 0.7 - 0.25 * (i % 3); // shreds lie across the mound, not radially
+          m.rotation.z += 0.18;
+          break;
+        }
+        default: {
+          const m = placeOnDome(spot, lettuceGeo, lettuceMat, 'burrito_lettuce');
+          m.rotation.x += Math.PI / 2; // lay along the surface rather than poking straight up
+          break;
+        }
+      }
     });
     creamSpots.forEach((s) => {
       const m = placeOnDome(s, creamGeo, creamMat, 'burrito_cream');
       m.scale.set(1, 0.5, 1);
     });
+    // ⚠️ A LATENT BUG, FOUND WHILE ADDING THE TUMBLES ABOVE, AND IT IS TWO ROUNDS OLD.
+    // `placeOnDome` records `toppingBaseRotZ` at CREATION time — before the caller
+    // adjusts anything — and `onUpdate()` then assigns `rotation.z = base + wobble`
+    // every frame. So the old `tomato.rotation.z = 0.4` was reset to 0 by the first
+    // animated frame and no tomato has ever been tilted in motion; it only ever looked
+    // right in a `t=0` screenshot, which is exactly what every review capture is.
+    // Re-reading the rest roll here is the whole fix, and it has to happen AFTER the
+    // per-piece rotations rather than inside the placement helper.
+    this.toppingBaseRotZ = this.toppings.map((t) => t.rotation.z);
 
     // ── The fold seam ────────────────────────────────────────────────────────
     // A rolled tortilla has one overlapping edge running its whole length. Without
@@ -443,9 +680,22 @@ export class BurritoCharacter extends BaseCharacter {
     // it does not sit behind the face, and solved against `wrapRadiusAt` so it hugs
     // the bulge instead of floating off it at one height and sinking at another.
     {
-      const seamMat = toonMat({ color: TORTILLA_SHADE, roughness: 0.82 });
-      const seamTheta = -0.85; // to her right of the face, still on the visible front
-      const steps = 7;
+      const seamMat = toonMat({ color: TORTILLA_TOAST, roughness: 0.82 });
+      // WAS -0.85 rad (-48.7 deg), commented "to her right of the face, still on the
+      // visible front". Solved against the face this pass builds, it is not: the eye sits
+      // at -29.5 deg and spans to -44 deg, and the seam DRIFTS +0.30 rad as it climbs, so
+      // its top end lands at -32 deg — inside the eye. The render shows a column of orange
+      // dashes running down through the left eye like a zip. -1.45 rad (-83 deg) puts the
+      // overlap on the tube's side where a rolled edge actually sits, and it still catches
+      // the key from three of the four review yaws.
+      // (-1.45 first, then -1.25: at -83 deg the seam sat ON the silhouette edge and its
+      // seven separate lumps read as a row of stitches down the outline. -71.6 deg puts
+      // it back on the lit surface, still 10 deg clear of the eye's outer corner at
+      // -44 deg once the +0.30 rad climb-drift is counted.)
+      const seamTheta = -1.25;
+      // 7 -> 10. The lumps are 0.212R long over a 1.34R span, i.e. spaced 0.223R — they
+      // did not touch, which is why a "fold" read as beads. At 10 they overlap.
+      const steps = 10;
       for (let i = 0; i < steps; i++) {
         const t = i / (steps - 1);
         const y = THREE.MathUtils.lerp(bodyBottomY + R * 0.10, bodyTopY - R * 0.06, t);
@@ -454,7 +704,7 @@ export class BurritoCharacter extends BaseCharacter {
         // does not run dead vertical.
         const a = seamTheta + t * 0.30;
         const lump = new THREE.Mesh(
-          new THREE.CapsuleGeometry(R * 0.036, R * 0.14, 4, 8),
+          new THREE.CapsuleGeometry(R * 0.030, R * 0.16, 4, 8),
           seamMat
         );
         lump.name = 'burrito_fold_seam';
@@ -465,78 +715,78 @@ export class BurritoCharacter extends BaseCharacter {
       }
     }
 
-    // ── Foil wrap, cut on the diagonal ────────────────────────────────────────
-    // The single most recognisable burrito image is a tortilla tube half out of its
-    // foil, and the foil's torn edge running DIAGONALLY across the roll. In outline
-    // the diagonal costs nothing on its own (it is a colour break), but the torn
-    // tabs peeling off it do break the silhouette, and in the lit render the
-    // diagonal is what stops a cream cylinder reading as a cream cylinder.
+    // ── THE HEAD FOIL AND ITS SIX TORN TABS ARE GONE. THIS IS FINDING 5. ──────
     //
-    // Built by shearing an open cylinder's TOP ring only: every vertex above the
-    // mid-plane gets `y += FOIL_SLANT * x`, so the wrap keeps a level bottom and a
-    // slanted mouth. Radii are sampled off `wrapRadiusAt`, the same equation the
-    // face and every decal use, plus a real 3% wall clearance so it can never
-    // z-fight with the tortilla underneath.
-    const FOIL_SLANT = 0.38;
-    const foilBotY = bodyBottomY + R * 0.02;
-    // ── This was NOT below the mouth, and it ate half the face ─────────────────
-    // Measured: the `face` joint group delivers **0.465** of its own footprint —
-    // 53.5% of every eye, brow and mouth pixel is drawn and then covered. The
-    // arithmetic in the previous note stopped one term short. The foil sits at
-    // 1.035x the tortilla radius while the face features are placed at 0.90-0.94x
-    // (they hug the tube), so the foil is IN FRONT of the face everywhere the two
-    // overlap on screen — and the mouth's torus (R*0.17 major + R*0.055 tube about
-    // -0.22R) actually reaches down to -0.445R, not the -0.39R assumed here, while
-    // the sheared edge climbs to foilTopY + 0.38 * maxRadius ~= foilTopY + 0.13R.
+    // What was here, kept verbatim because the intent was right and only the RESULT
+    // was wrong:
     //
-    // -0.70R puts the highest point of the wrap at ~-0.57R, clear of the mouth's
-    // true bottom with margin. The torn tabs are handled separately below, because
-    // they stand proud of the edge and were the other half of the overlap.
-    const foilTopY = -R * 0.70;
-    const foilH = foilTopY - foilBotY;
-    const foilGeo = new THREE.CylinderGeometry(
-      wrapRadiusAt(foilTopY) * 1.035,
-      wrapRadiusAt(foilBotY) * 1.035,
-      foilH, 30, 1, true
-    );
+    //   "Foil wrap, cut on the diagonal. The single most recognisable burrito image is
+    //    a tortilla tube half out of its foil, and the foil's torn edge running
+    //    DIAGONALLY across the roll. In outline the diagonal costs nothing on its own
+    //    (it is a colour break), but the torn tabs peeling off it do break the
+    //    silhouette, and in the lit render the diagonal is what stops a cream cylinder
+    //    reading as a cream cylinder."
+    //   "Torn tabs riding the diagonal edge — the silhouette break... the tabs that
+    //    actually break the SILHOUETTE are the ones near +-X."
+    //
+    // ⚠️ **Read that last sentence against finding 4.** The tabs were deliberately made
+    // TALLEST at +X and -X — `h = R * (0.10 + 0.13 * |cos a| + ...)` — because that is
+    // where a mass leaves the outline. That is the same reasoning, on the same
+    // character, that produced the ears: *"a pointed mass either side of a head reads
+    // as an ear or a horn, five for five, and it overrides what the shape is made of."*
+    // Six three-sided cones on a sheared edge, tallest at the sides, rendered as a
+    // ZIGZAG ROW OF WHITE TRIANGLES across the character's middle — teeth, or a bib —
+    // with the two tallest standing off the head at ±X. Read the lobby captures in
+    // `shots/ch/burrito/before/`: on `lobby_side.png` it is the single most legible
+    // feature on the whole character, and it is not a burrito feature.
+    //
+    // And the sleeve underneath them earned even less. Its own note above records that
+    // it once ate **53.5% of every face pixel**; it was lowered to -0.70R to stop that,
+    // which left a cool grey band low on a warm character, doing nothing the torso's
+    // foil sleeve was not already doing better and lower down.
+    //
+    // The trade this file was making is exactly `egg.ts:206`'s: **detail added to
+    // signal the subject destroyed the silhouette that signalled it better.** The
+    // "tortilla half out of its foil" image survives intact — the foil sleeve and its
+    // takeaway paper band are still on the TORSO (`dressTorso`), which is where a
+    // wrapper actually sits and where nothing occludes it.
+    //
+    // What replaces the diagonal's job — "stop a cream cylinder reading as a cream
+    // cylinder" — is the thing a real tortilla has and this one never did: SCORCH.
+    // Griddle spots are pure albedo, so they cost nothing in outline, they are warm
+    // rather than cool, and they say "flatbread" in a way a grey band cannot.
     {
-      const pos = foilGeo.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < pos.count; i++) {
-        if (pos.getY(i) > 0) pos.setY(i, pos.getY(i) + FOIL_SLANT * pos.getX(i));
+      const toastMat = toonMat({ color: TORTILLA_TOAST, roughness: 0.85 });
+      // Deliberately irregular in all three of angle, height and size, and NEVER a
+      // mirrored pair (see the toppings table above for why that matters here). The
+      // front-centre band y in [-0.30R, +0.30R], |sin a| small, is left clear so
+      // nothing lands on the face.
+      // Angles checked against the face's own footprint rather than eyeballed: an eye
+      // sits at azimuth ±asin(0.335R / r) ≈ ±29.5 deg and subtends ±14.5 deg, a brow
+      // ±(28 ± 10) deg, the mouth 0 ± 18 deg. No spot's own angular half-width reaches
+      // any of them. This is the same "solve it against the real equation" rule the
+      // rest of the file applies to depth, applied to azimuth.
+      // Seven, not nine, and the three that were front-facing have moved. Rendered, a
+      // scorch at [18, -0.62] and one at [304, -0.36] landed on the two CHEEKS — beside
+      // the pink blush that is already there — so the face carried two different blushes
+      // in two different colours. The remaining front-ish pair is pushed low (y -0.90R,
+      // below the mouth) and out to the tube's edge.
+      const spots: readonly (readonly [deg: number, y: number, rx: number, ry: number])[] = [
+        [8, -0.90, 0.15, 0.10], [78, 0.10, 0.11, 0.08], [96, -0.18, 0.18, 0.11],
+        [168, 0.34, 0.16, 0.09], [239, 0.05, 0.20, 0.11], [272, -0.72, 0.14, 0.09],
+        [318, -0.86, 0.12, 0.08],
+      ];
+      for (const [deg, yF, rx, ry] of spots) {
+        const y = R * yF;
+        const a = THREE.MathUtils.degToRad(deg);
+        const g = tubeFrame(head, wrapRadiusAt, bodyH, a, y, R * 0.004);
+        const spot = new THREE.Mesh(new THREE.CircleGeometry(R * rx, 12), toastMat);
+        spot.name = 'burrito_toast_spot';
+        spot.scale.set(1, ry / rx, 1);
+        spot.userData.noOutline = true; // albedo only — a scorch mark has no outline
+        g.add(spot);
       }
-      foilGeo.computeVertexNormals();
     }
-    const headFoilMat = toonMat({ color: FOIL, roughness: 0.22, metalness: 0.55, doubleSide: true });
-    const headFoil = new THREE.Mesh(foilGeo, headFoilMat);
-    headFoil.name = 'burrito_head_foil';
-    headFoil.position.y = (foilTopY + foilBotY) / 2;
-    headFoil.castShadow = true;
-    headFoil.receiveShadow = true;
-    head.add(headFoil);
-
-    // Torn tabs riding the diagonal edge — the silhouette break. Each sits at the
-    // sheared edge height for its own azimuth, so they trace the diagonal instead
-    // of ringing the tube at one level.
-    const tabMat = toonMat({ color: FOIL, roughness: 0.22, metalness: 0.55 });
-    [10, 58, 122, 190, 250, 312].forEach((deg, i) => {
-      const a = THREE.MathUtils.degToRad(deg);
-      const rr = wrapRadiusAt(foilTopY) * 1.035;
-      const x = Math.cos(a) * rr;
-      const z = Math.sin(a) * rr;
-      // Tab height now scales with how SIDE-ON the tab is, which serves both
-      // masters at once: the tabs that actually break the SILHOUETTE are the ones
-      // near +-X (they stick out past the body's outline), and the ones near +Z are
-      // the ones that were climbing over the mouth while contributing nothing to
-      // the outline. So the side tabs get taller than before and the front tabs get
-      // shorter. `i` is kept only to keep the pattern from being perfectly regular.
-      const h = R * (0.10 + 0.13 * Math.abs(Math.cos(a)) + 0.012 * (i % 3));
-      const tab = new THREE.Mesh(new THREE.ConeGeometry(rr * 0.24, h, 3), tabMat);
-      tab.name = 'burrito_foil_tab';
-      tab.position.set(x, foilTopY + FOIL_SLANT * x + h * 0.30, z);
-      tab.rotation.set(Math.sin(a) * 0.6, -a, -Math.cos(a) * 0.6);
-      tab.castShadow = true;
-      head.add(tab);
-    });
 
     // ── Face: on the wrap's own front surface, mid-body ───────────────────────
     // `face` is reset to identity and every feature carries its own computed
@@ -545,7 +795,7 @@ export class BurritoCharacter extends BaseCharacter {
     // wherever they're not dead-centre (verified: at the default x-offset the rig's
     // flat headRadius*0.82 constant sits ~0.09R proud of the tube's true surface).
     this.rig.joints.face.position.set(0, 0, 0);
-    this.buildFace(R, surfaceZ);
+    this.buildFace(R, wrapRadiusAt, bodyH);
 
     // ── Torso: dressed as a wrap continuation, foil peeling back at the base ──
     this.dressTorso(R);
@@ -638,7 +888,7 @@ export class BurritoCharacter extends BaseCharacter {
       }
     });
 
-    this.buildSilhouetteEvents(R);
+    this.buildSpill(R);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -646,94 +896,349 @@ export class BurritoCharacter extends BaseCharacter {
   }
 
   /**
-   * SILHOUETTE EVENTS — three peeled corners of foil.
+   * SILHOUETTE EVENTS — the spill, not the ears.
    *
-   * Burrito already had the third-best outline in the cast at the shipped facing
-   * (0.1717, one appendage), and the same shape head-on was 0.1354 with the wrap
-   * reading as a plain cylinder. Foil peeled back off the top is the one thing a
-   * wrapped burrito does that a cylinder does not, and the file already carries
-   * `FOIL` for it.
+   * ── WHAT WAS HERE, AND WHY IT WAS THE GOAT ───────────────────────────────────
+   * Three peeled corners of foil, kept verbatim because the *reasoning* is sound and
+   * still applies to what replaces them:
    *
-   * Three, at three lengths, curled out and up so each leaves the tube on the
-   * horizontal — the direction worth 0.85-1.0 of a screen-metre at this camera
-   * against a vertical element's 0.53 (`appendages.ts`).
+   *   "Burrito already had the third-best outline in the cast at the shipped facing
+   *    (0.1717, one appendage), and the same shape head-on was 0.1354 with the wrap
+   *    reading as a plain cylinder... Three, at three lengths, curled out and UP so
+   *    each leaves the tube on the horizontal — the direction worth 0.85-1.0 of a
+   *    screen-metre at this camera against a vertical element's 0.53."
+   *
+   *     { azimuth:  PI * 0.54, len: 0.78, lift: 0.55 }   <- +X, lifted
+   *     { azimuth: -PI * 0.48, len: 0.62, lift: 0.34 }   <- -X, lifted
+   *     { azimuth:  PI * 0.96, len: 0.70, lift: 0.68 }   <- back
+   *
+   * The first two are the ears. `massAnchor`'s azimuth is 0 at +Z, so +0.54PI and
+   * -0.48PI are **+X and -X within 11 degrees of each other's mirror**, at `height01`
+   * 0.74 (the crown), both LIFTED, both `blade()` — which narrows to a point by
+   * construction. Two pointed masses, either side of a head, aimed up. `DECISIONS` §39
+   * called it from the source; the lobby capture makes it undeniable.
+   *
+   * ── AND THE REPLACEMENT IS NOT "THE SAME THING, ROUNDED" ─────────────────────
+   * Rounding them would still leave a PAIR, and the pair is half of the read. The four
+   * properties that make a flanking mass an ear are: two of them, mirrored, near the
+   * top, pointing up. This breaks all four at once —
+   *
+   *   • ONE lettuce leaf and ONE cheese pull, not a pair;
+   *   • at -0.34PI and +0.78PI, which are not mirrors (-61 deg vs +140 deg);
+   *   • at different lengths (0.66R vs 0.40R) and different colours;
+   *   • both DROOPING (lift is negative), hanging down the tube rather than off it.
+   *
+   * It is also made of FOOD rather than packaging, which is the converse of finding 5:
+   * the detail that breaks the outline is now the same detail that says "burrito". A
+   * filling spilling over a cut edge is the one thing this shape does that a tube does
+   * not, and it costs nothing in the read to get the outline from it.
+   *
+   * ⚠️ Horizontal reach is deliberately traded away here. `appendages.ts` measures a
+   * horizontal element at 0.85-1.0 of a screen-metre against a vertical's 0.53, so a
+   * drooping event buys roughly half the hull deficiency an out-thrust one does. That
+   * is the price of not being a goat, it is paid knowingly, and the number is reported.
    */
-  private buildSilhouetteEvents(R: number): void {
+  private buildSpill(R: number): void {
     const head = this.rig.joints.head;
     const box = localBounds(head);
-    const foilMat = glossyMat({ color: FOIL, roughness: 0.30, metalness: 0.25 });
+    const lettuceMat = toonMat({ color: LETTUCE, roughness: 0.55 });
+    const cheeseMat = glossyMat({ color: CHEESE, roughness: 0.28 });
 
+    // ⚠️ The lettuce WAS at -0.34PI (-61 deg) and it covered the left eye's outer corner
+    // — the eye spans to -44 deg and the leaf is 0.60R wide, so the two overlap on
+    // screen from every front-ish yaw. Read the render: a green mass sitting exactly
+    // where an ear goes, on top of an eye. -0.56PI (-101 deg) puts it on the tube's own
+    // silhouette edge, which is where a spill breaking the OUTLINE wants to be anyway,
+    // and clear of every face feature. This is the same class of error as the fold seam
+    // and the scorch spots in this pass: three separate elements authored against the
+    // tube and never checked against the face that shares it.
+    // ── `height01` IS A BOX FRACTION, AND THIS FILE JUST MOVED THE BOX ──────────
+    // `massAnchor` takes a fraction of the head's own bounding box, so deleting the head
+    // foil (which reached to -1.02R) silently RE-MAPPED every fraction on this character.
+    // Anchors are therefore stated in head-local Y — the same coordinate the tube, the
+    // face and every decal already use — and converted here. A constant that means a
+    // different height depending on what else exists is not a constant.
+    const at01 = (y: number) => THREE.MathUtils.clamp(
+      (y - box.min.y) / Math.max(1e-6, box.max.y - box.min.y), 0, 1,
+    );
     const spec = [
-      { azimuth: Math.PI * 0.54, len: 0.78, lift: 0.55 },
-      { azimuth: -Math.PI * 0.48, len: 0.62, lift: 0.34 },
-      { azimuth: Math.PI * 0.96, len: 0.70, lift: 0.68 },
-    ];
+      { azimuth: -Math.PI * 0.56, y: 0.80, len: 0.58, half: 0.30, waist: 1.75, mat: lettuceMat, name: 'burrito_lettuce_drape' },
+      { azimuth: Math.PI * 0.78, y: 0.30, len: 0.40, half: 0.22, waist: 1.95, mat: cheeseMat, name: 'burrito_cheese_pull' },
+    ] as const;
     for (const sp of spec) {
-      const { at, out } = massAnchor(head, box, { azimuth: sp.azimuth, height01: 0.74, inset: 0.20 });
+      // eslint-disable-next-line prefer-const
+      let { at, out, hit } = massAnchor(head, box, { azimuth: sp.azimuth, height01: at01(R * sp.y), inset: 0.22 });
+      // ⚠️ A GUARD WITH A KNOWN-BAD INPUT ALREADY ON THE RECORD, WHICH IS THE ONLY KIND
+      // WORTH HAVING. The mound is a sphere CAP (theta 0..0.48PI), not a sphere, and it
+      // is tilted twice — so a horizontal ray above its rim misses the geometry
+      // entirely, `massAnchor` falls back to the bounding BOX exactly as it warns it
+      // will, and the root lands ~0.2R clear of anything. That is not hypothetical: the
+      // first version of this spill anchored at a flat `height01: 0.66` and the run
+      // printed `[appendages] no mass at azimuth -1.76 height01 0.66 on head — anchor
+      // fell back to the bounding box`, with a **detached green slab** beside the head in
+      // `shots/ch/burrito/after/lobby_q45.png` to match. `massAnchor` was doing its job:
+      // it returned `hit: false` and said so, and nothing was reading it.
+      //
+      // The re-anchor is on the TUBE, which is a surface of revolution and cannot be
+      // missed at any azimuth — so this fallback always terminates on real geometry.
+      if (!hit) {
+        ({ at, out } = massAnchor(head, box, { azimuth: sp.azimuth, height01: at01(R * 0.20), inset: 0.22 }));
+      }
       const g = new THREE.Group();
-      g.name = 'burrito_foil_peel';
-      aim(g, at, out.clone().add(new THREE.Vector3(0, sp.lift, 0)).normalize(), Math.PI * 0.5);
-      g.add(peelBlade(foilMat, {
-        len: R * sp.len, halfWidth: R * 0.30, thick: R * 0.028, curl: 0.30, waist: 1.1,
+      g.name = sp.name;
+      // -0.9 on Y: mostly DOWN with an outward lean. `blade()`'s tip is at local +Y, so
+      // this is the whole difference between "spilling over" and "sticking up".
+      aim(g, at, out.clone().add(new THREE.Vector3(0, -0.9, 0)).normalize(), Math.PI * 0.5);
+      g.add(peelBlade(sp.mat, {
+        len: R * sp.len, halfWidth: R * sp.half, thick: R * 0.035, curl: 0.42, waist: sp.waist,
       }));
       head.add(g);
     }
   }
 
-  /** Eager, open-mouthed grin — a Rare brawler ready to roll into a fight. */
-  private buildFace(R: number, surfaceZ: (x: number, y: number) => number): void {
+  /**
+   * The face, rebuilt to `rules.ts`'s four-element standard.
+   *
+   * ── THE SPEC THIS IMPLEMENTS, AND WHY THERE WAS NONE ─────────────────────────
+   * Burrito is the strongest single datum behind `DECISIONS` §42: it is **the one
+   * character whose `face:` field never mentioned a face**, and it is the one whose
+   * face Uri rejected without being able to say why (*"face is not good"*). Eleven
+   * agents implemented their line faithfully; this line had nothing in it to implement.
+   * The new spec is quoted where each element below satisfies it.
+   *
+   * What was here: two INK spheres (one squashed to 0.34 as a wink), a 0.04R white
+   * glint, two ink capsule brows, and a torus arc for a mouth. That is the bottom of
+   * the construction ladder Uri reproduced blind — *"a flattened arc (a stroke) < a
+   * sphere with a specular < a sphere plus an explicit glint mesh < open eyes with
+   * catchlights (egg)"* — with **two values total** and no white anywhere.
+   *
+   * ── THE FOUR ELEMENTS, ALL SEPARATE MESHES ──────────────────────────────────
+   *  1. **SCLERA.** Pure white, LIT (`toonMat`, roughness 0.22), 0.17R — the largest,
+   *     brightest mass on the face and intended to be the brightest value anywhere on
+   *     the character. Measured cast-wide: *"0% of our eye pixels are above 0.85 luma
+   *     against the reference plates' 31.1% and 34.1%."*
+   *  2. **PUPIL**, real geometry, **OFFSET**. Both pupils are pushed the same way
+   *     (+X and slightly up), so the character has a GAZE rather than two centred
+   *     beads — `rules.ts` records that even egg, the cast reference, sets `x = 0` and
+   *     therefore *"stares dead ahead"*.
+   *  3. **CATCHLIGHT**, an explicit unlit mesh, offset OPPOSITE the pupil.
+   *  4. **UPPER LID / LASH.** *"The wrap is a pale cream, so an off-white sclera will
+   *     dissolve into it... this is the one character where the eye needs a DRAWN
+   *     BOUNDARY to survive its own background."* The lid is a thick ink arc over the
+   *     top and outer corner of each sclera — the one place the white would otherwise
+   *     meet tortilla with nothing between them.
+   *
+   * The MOUTH gets the interior value step the standard demands: a near-black throat
+   * (`MOUTH_THROAT`, darker than the lip ink), a tongue inside it, and a lit lower lip
+   * — three values, so it reads as an opening rather than a painted curve.
+   *
+   * ── PLACEMENT IS THE OTHER HALF OF THE FIX ──────────────────────────────────
+   * *"Set the face HIGH and WIDE on the tube. A small face low on a long narrow head
+   * reads as a MUZZLE, and that is half of why Uri said 'looks a bit like a goat'."*
+   * Eyes go from ±0.30R to ±0.335R and from 0.25R across to 0.34R, so the pair spans
+   * **1.01R of a 1.36R-wide tube** where it spanned 0.85R before; the mouth comes UP
+   * from -0.22R to -0.14R, closing the eye-to-mouth gap from 0.32R to 0.22R. A muzzle
+   * is precisely a small feature set with a long blank gap under it.
+   *
+   * The wink is kept — it is this character's acting and a second art-director pass
+   * named mirrored faces as the cast's biggest reason facial acting was not landing —
+   * but it is now a LID ANGLE over a full open eye rather than a squashed eyeball, the
+   * same correction `rules.ts` makes for hotdog (*"RELAXED IS A LID ANGLE, NOT A
+   * MISSING EYE"*). The sclera is full size on both sides.
+   */
+  private buildFace(R: number, wrapRadiusAt: (y: number) => number, span: number): void {
     const face = this.rig.joints.face;
     const ink = PALETTE.ink;
-    const eyeMat = toonMat({ color: ink, roughness: 0.25 });
-    const eyeY = R * 0.10;
+    const inkMat = toonMat({ color: ink, roughness: 0.28 });
+    const scleraMat = toonMat({ color: SCLERA, roughness: 0.22 });
+    const glintMat = flatMat('#ffffff');
+    // eyeY sits under a HARD CEILING and it is worth writing down: the open end's tilted
+    // rim passes overhead, and its underside at the eye's own azimuth is at +0.299R (see
+    // the `openEnd.rotation.z` note). The sclera's y half-extent is 0.17R, so anything
+    // above +0.09R puts the eye through the rim.
+    const eyeY = R * 0.09;
+    const EYE_X = R * 0.335;
 
-    for (const sx of [-1, 1]) {
-      // Right eye (sx>0) winks — noticeably squashed and its brow cocked hard above
-      // it — while the left stays wide open with a low, relaxed brow. A second
-      // independent art-director pass named matched, mirrored brows/eyes across the
-      // cast as the biggest reason facial acting wasn't landing; "ready to roll into
-      // a fight" now reads as one deliberate wink-and-grin rather than a symmetric
-      // eager stare.
-      const wink = sx > 0 ? 0.34 : 1.15;
-      const ex = sx * R * 0.30;
-      const ez = surfaceZ(ex, eyeY) * 0.94;
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.125, 16, 14), eyeMat);
-      eye.position.set(ex, eyeY, ez);
-      eye.scale.set(1, wink, 0.55);
-      eye.castShadow = true;
-      face.add(eye);
+    for (const sx of [-1, 1] as const) {
+      // Azimuth solved from the wanted screen-space X against the tube's TRUE radius at
+      // this height, so widening the face never pushes an eye off the surface.
+      const az = Math.asin(THREE.MathUtils.clamp((sx * EYE_X) / wrapRadiusAt(eyeY), -0.94, 0.94));
+      const eye = tubeFrame(face, wrapRadiusAt, span, az, eyeY, R * 0.010);
+      eye.name = `burrito_eye${sx > 0 ? 'R' : 'L'}`;
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.04, 8, 8), flatMat('#ffffff'));
-      glint.position.set(ex - R * 0.03, eyeY + R * 0.045 * wink, ez + R * 0.05);
+      // 1. SCLERA — full size on BOTH sides; the wink lives in the lid, not here.
+      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.17, 18, 14), scleraMat);
+      // y-scale 1.06 -> 1.00. The extra 6% bought nothing and cost the MOUTH: it pushed
+      // the sclera's bottom to -0.10R and the mouth had to start below that, which is the
+      // muzzle gap this pass exists to close. Round eyes, and the mouth sits right under
+      // them.
+      white.scale.set(1, 1.00, 0.42);
+      white.castShadow = true;
+      eye.add(white);
+
+      // 2. PUPIL — offset the SAME way on both sides, which is what makes it a gaze.
+      // 0.040R -> 0.032R (19% of the sclera's own radius). The gaze has to be readable
+      // and not googly, and the eye decal is ALSO rotated 29.5 deg outward on the tube,
+      // which exaggerates a tangential offset on screen — measured off the render, not
+      // assumed. It stays a real offset: `rules.ts` records that even egg, the cast
+      // reference, sets `x = 0` and therefore "stares dead ahead".
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.082, 14, 12), inkMat);
+      pupil.position.set(R * 0.032, R * 0.012, R * 0.062);
+      pupil.scale.set(1, 1.05, 0.5);
+      pupil.castShadow = true;
+      eye.add(pupil);
+
+      // 3. CATCHLIGHT — unlit and `noOutline`.
+      // ⚠️ WAS AT x = -0.045R, "offset OPPOSITE the pupil", and on the right eye it was
+      // INVISIBLE. This is `docs/LESSONS.md` §1 in miniature — it rendered, and it
+      // rendered onto WHITE. A pure-white unlit dot has nothing to contrast with on a
+      // pure-white lit sclera; the only reason the left eye's glint read at all is that
+      // that side of the sclera happened to be in shade. The catchlight has to overlap
+      // the PUPIL, which is the only dark thing on the eye — x = -0.010R puts it inside
+      // the pupil's own x span (-0.042R .. +0.122R) and z = 0.105R stands it just proud
+      // of the pupil's front (0.103R), so it reads as a highlight in the dark rather
+      // than a white dot on white.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.033, 8, 8), glintMat);
+      glint.position.set(-R * 0.010, R * 0.060, R * 0.105);
       glint.userData.noOutline = true;
-      face.add(glint);
+      eye.add(glint);
 
-      // Brows — placed against the SAME `surfaceZ` equation as the eye it sits above
-      // so it can't sink into or float off the tube regardless of where sx pushes it.
-      // Genuinely asymmetric now: cocked hard over the winking eye, low and level
-      // over the open one.
-      const bx = ex;
-      const by = eyeY + (sx > 0 ? R * 0.205 : R * 0.135);
-      const bz = surfaceZ(bx, by) * 0.95;
-      const brow = new THREE.Mesh(
-        new THREE.CapsuleGeometry(R * 0.022, R * 0.15, 4, 8),
-        toonMat({ color: PALETTE.ink, roughness: 0.4 })
+      // 4. UPPER LID / LASH — the drawn boundary the pale ground makes necessary. A
+      // torus arc hugging the sclera's rim, swept from the outer corner over the top.
+      // The winking side (sx > 0) drops its lid further and sweeps further round; the
+      // open side keeps a thin lash. This is where the old "wink" went.
+      const winking = sx > 0;
+      const lid = new THREE.Mesh(
+        new THREE.TorusGeometry(R * 0.172, R * 0.030, 8, 22, Math.PI * (winking ? 1.15 : 0.80)),
+        inkMat,
       );
-      brow.position.set(bx, by, bz);
-      brow.rotation.z = Math.PI / 2 - sx * (sx > 0 ? 0.40 : 0.10);
-      brow.castShadow = true;
-      face.add(brow);
+      lid.scale.set(1, 1.06, 1);
+      lid.rotation.z = winking ? Math.PI * 0.02 : Math.PI * 0.14;
+      lid.position.set(0, winking ? -R * 0.030 : 0, R * 0.020);
+      lid.castShadow = true;
+      eye.add(lid);
+
+      // BROW — a toasted crease in the wrap, not a hair. Same reasoning `egg.ts` uses
+      // for its shell ridge: this character has no hair, so a brow has to be made of
+      // the thing the head IS made of, and INK here would put a third heavy black mark
+      // on a face that already carries a lid and a pupil.
+      const browY = eyeY + (winking ? R * 0.255 : R * 0.190);
+      const browAz = Math.asin(THREE.MathUtils.clamp((sx * R * 0.315) / wrapRadiusAt(browY), -0.94, 0.94));
+      const brow = tubeFrame(face, wrapRadiusAt, span, browAz, browY, R * 0.008);
+      const browMesh = new THREE.Mesh(
+        new THREE.CapsuleGeometry(R * 0.034, R * 0.18, 4, 8),
+        toonMat({ color: TORTILLA_SHADE, roughness: 0.6 }),
+      );
+      browMesh.rotation.z = Math.PI / 2 - sx * (winking ? 0.42 : 0.12);
+      browMesh.castShadow = true;
+      brow.add(browMesh);
     }
 
-    const mouthY = -R * 0.22;
-    const mouth = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.17, R * 0.055, 8, 20, Math.PI * 0.85),
-      toonMat({ color: ink, roughness: 0.3 })
+    // ── MOUTH — an opening with an interior, not a painted curve ───────────────
+    // Three values inside one shape, which is the whole of what the standard asks for:
+    // THROAT (#1E0803, darker than the lip ink and the darkest thing on the head),
+    // TONGUE, and a lit lower lip in the wrap's own toast tone. The lip ring is what
+    // stops the dark opening reading as a hole punched in the tortilla.
+    //
+    // ⚠️ Checked against taco's fusion, which `rules.ts` calls out by name: a mouth
+    // must not sit next to the character's darkest band or the two merge and read as a
+    // hat brim. Burrito's darkest bands are BOOT (feet) and the WRAP_BAND at the waist,
+    // both far below; the head foil that used to sit 0.56R under this mouth is gone, so
+    // the opening now has clear griddled tortilla all round it.
+    //
+    // 🚨 AND THE FIRST VERSION OF THIS MOUTH READ AS A NOSE. Every element was present
+    // and correct — throat behind lip behind tongue, three values, a real depth step —
+    // and the assembled thing was a black ring with a red bean in it, sitting high and
+    // centred between two eyes. Rendered, that is a snout, or a camera lens. Four
+    // numbers were wrong and none of them were the ones the standard talks about:
+    //
+    //   major 0.205R, y-scale 0.60  ->  0.27R, 0.40   a mouth is WIDE. 0.41R x 0.25R is
+    //                                                 round enough to be a nostril;
+    //                                                 0.54R x 0.22R can only be a mouth.
+    //   lip tube 0.036R             ->  0.020R        the ring was thicker than the
+    //                                                 opening it framed, and the ink
+    //                                                 outline doubled it again.
+    //   tongue 0.125R at -0.046R    ->  0.095R at     it FILLED the opening, so the
+    //                                   -0.062R       throat — the whole point — was a
+    //                                                 thin dark annulus nobody could see.
+    //   mouthY -0.14R               ->  -0.25R        directly under the eyes rather than
+    //                                                 between them.
+    //
+    // The general form is worth keeping: **the four-element standard is necessary and it
+    // is not sufficient.** It specifies what a mouth must CONTAIN; a mouth also has to
+    // be the right SHAPE, in the right place, or the contents are correctly built inside
+    // the wrong object.
+    const mouthY = -R * 0.25;
+    const mouth = tubeFrame(face, wrapRadiusAt, span, 0, mouthY, R * 0.004);
+    mouth.name = 'burrito_mouth';
+
+    const throat = new THREE.Mesh(
+      new THREE.SphereGeometry(R * 0.27, 18, 14),
+      toonMat({ color: MOUTH_THROAT, roughness: 0.62 }),
     );
-    mouth.position.set(0, mouthY, surfaceZ(0, mouthY) * 0.9);
-    mouth.rotation.z = Math.PI * 1.08;
-    mouth.castShadow = true;
-    face.add(mouth);
+    throat.scale.set(1, 0.40, 0.26);
+    // ── The depth step is ARITHMETIC, not a look ─────────────────────────────
+    // The frame's origin is on the tube's surface. Throat half-depth is 0.27R * 0.26 =
+    // 0.070R, so at z = -0.052R its front face lands 0.018R proud of the surface while
+    // the lip ring's front lands at 0.032R: **the throat sits 0.014R BEHIND the lip**,
+    // which is the "interior value step" the standard asks for expressed as real
+    // geometry rather than as a darker paint.
+    throat.position.z = -R * 0.052;
+    throat.castShadow = true;
+    throat.userData.noOutline = true; // it is already the darkest thing on the head
+    mouth.add(throat);
+
+    const tongue = new THREE.Mesh(
+      new THREE.SphereGeometry(R * 0.095, 12, 10),
+      toonMat({ color: MOUTH_TONGUE, roughness: 0.45 }),
+    );
+    tongue.scale.set(1, 0.46, 0.30);
+    // Low in the opening and small: it should read as a tongue GLIMPSED inside a mouth.
+    // At 0.125R centred it was 62% of the opening's height and the mouth read as a
+    // solid red centre — the "bean in a grommet".
+    tongue.position.set(R * 0.010, -R * 0.062, -R * 0.014);
+    tongue.userData.noOutline = true;
+    mouth.add(tongue);
+
+    const lip = new THREE.Mesh(
+      new THREE.TorusGeometry(R * 0.27, R * 0.020, 8, 26),
+      inkMat,
+    );
+    lip.scale.set(1, 0.40, 1);
+    lip.position.z = R * 0.012;
+    lip.castShadow = true;
+    lip.userData.noOutline = true; // ink already; the hull outline was doubling its weight
+    mouth.add(lip);
+
+    // UPPER LIP — a straight heavy bar across the top of the opening, and it is what
+    // turns an oval into an open GRIN. A ring of even weight reads as a hole; every
+    // cartoon open mouth is heavy along the top edge and light along the bottom, because
+    // that is where the upper lip and the shadow it casts are. Cheaper and far more
+    // legible at ~22 px than trying to author a crescent.
+    const upperLip = new THREE.Mesh(
+      new THREE.CapsuleGeometry(R * 0.028, R * 0.40, 4, 8),
+      inkMat,
+    );
+    upperLip.rotation.z = Math.PI / 2;
+    upperLip.position.set(0, R * 0.104, R * 0.018);
+    upperLip.castShadow = true;
+    mouth.add(upperLip);
+
+    // LOWER LIP — a LIT strip under the opening, in the wrap's strong shade tone rather
+    // than the quiet one, because this is a feature and not a griddle mark. `rules.ts`
+    // names its absence on hamburger — *"not a flat dark shape, which is what the
+    // per-part pass named: no lip thickness or interior value step"* — and it is the
+    // fourth value in the mouth: throat 0.03, ink lip 0.05, tongue 0.31, lower lip 0.63.
+    // Placed BELOW the lip ring's own outer edge (0.27R * 0.40 + 0.020R = 0.128R), which
+    // is where a first version put it and had it swallowed whole.
+    const lower = new THREE.Mesh(
+      new THREE.CapsuleGeometry(R * 0.026, R * 0.26, 4, 8),
+      toonMat({ color: TORTILLA_SHADE, roughness: 0.7 }),
+    );
+    lower.rotation.z = Math.PI / 2;
+    lower.position.set(0, -R * 0.152, R * 0.020);
+    lower.userData.noOutline = true;
+    mouth.add(lower);
 
     // Hoisted and given `depthWrite: false` — a transparent material that still
     // writes depth is a silent occluder (`docs/LESSONS.md` §1), and every
@@ -741,16 +1246,15 @@ export class BurritoCharacter extends BaseCharacter {
     const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.5 });
     blushMat.depthWrite = false;
     for (const sx of [-1, 1]) {
-      const cx = sx * R * 0.44;
-      const cy = -R * 0.08;
-      const cheek = new THREE.Mesh(
-        new THREE.SphereGeometry(R * 0.06, 10, 8),
-        blushMat
-      );
-      cheek.position.set(cx, cy, surfaceZ(cx, cy) * 0.92);
-      cheek.scale.set(1, 0.7, 0.3);
+      // Pushed out and down from ±0.44R / -0.08R: the eyes are wider and lower-reaching
+      // now, and a blush overlapping a sclera's outer corner reads as a smudge on it.
+      const cy = -R * 0.20;
+      const cheekAz = Math.asin(THREE.MathUtils.clamp((sx * R * 0.50) / wrapRadiusAt(cy), -0.96, 0.96));
+      const cheek = new THREE.Mesh(new THREE.SphereGeometry(R * 0.07, 10, 8), blushMat);
+      const g = tubeFrame(face, wrapRadiusAt, span, cheekAz, cy, R * 0.006);
+      cheek.scale.set(1, 0.62, 0.28);
       cheek.userData.noOutline = true;
-      face.add(cheek);
+      g.add(cheek);
     }
   }
 
@@ -804,7 +1308,25 @@ export class BurritoCharacter extends BaseCharacter {
     // Where the head's tube ends, in TORSO-LOCAL space (the torso joint's origin
     // is the hip pivot, so subtract hipY from the world height).
     const headBottomLocal = m.headCentreY + this.headTubeBottomY - m.hipY;
-    const maxR = Math.max(m.shoulderWidth - m.armRadius * 1.28, R * 0.34);
+    // ── THE CAP THAT SHRANK WITH ITS OWN FIX ─────────────────────────────────
+    // WAS: `Math.max(m.shoulderWidth - m.armRadius * 1.28, R * 0.34)` — "keep the tube
+    // clear INSIDE the arms". That is the wrong sign for the thing this cap decides.
+    // A limb reads as attached when the body OVERLAPS it; `-armRadius * 1.28` puts the
+    // tube's surface a quarter of an arm-diameter SHORT of the arm's inner edge, so the
+    // two only touch by accident. And because it is written as a subtraction from
+    // `shoulderWidth`, every pass that narrowed the shoulders to fix a detached arm
+    // narrowed the only mass that arm could attach to by MORE than it moved the arm.
+    // Measured on HEAD: shoulders 0.2152 m, cap 0.1103 m, floored to R*0.34 = 0.1394 m,
+    // against a head tube of 0.2378 m — a torso 59% of the head's width, and arms whose
+    // inner edge cleared that torso by 0.006 m. Both defects, one line.
+    //
+    // `+ armRadius * 0.55` is the straddle stated once, here, and mirrored in the
+    // `shoulderWidth` note above: the arm's inner edge ends up 0.55 of an arm-radius
+    // inside the tube. With `shoulderWidth = H * 0.138` this evaluates to exactly
+    // `headTubeBottomR`, so the `min` below is a tie and head and torso are ONE
+    // CONTINUOUS TUBE for the first time — which is what the file header has claimed
+    // since the head+torso loop and what the lobby render says was never true.
+    const maxR = Math.max(m.shoulderWidth - m.armRadius * 0.55, R * 0.34);
     const tubeTopR = Math.min(this.headTubeBottomR, maxR);
     const tubeBotR = tubeTopR * 0.82;   // the folded, tucked end
     const yBot = -R * 0.16;             // dips below the hip pivot so no seam shows
