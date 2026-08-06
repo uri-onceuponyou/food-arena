@@ -2202,3 +2202,53 @@ ear or a horn, whatever it is made of.**
 *"Fix it so it looks good"* is broader latitude than the other four sheets, which named specific
 defects. **Recorded as such** — this one is a redesign brief, not a bug report, and it should be
 judged by Uri's eye rather than by a metric clearing a floor.
+
+---
+
+## 42. 🚨 THE CAST'S FACE PROBLEM IS SPECIFIED IN `rules.ts`, AND URI'S RANKING PROVES IT
+
+Uri reviewed seven characters without seeing any code. **His ranking correlates exactly with the
+one-line `face:` field in `rules.ts` that the agents were implementing.**
+
+| `rules.ts` `face:` | character | Uri's verdict |
+|---|---|---|
+| **"Closed happy eyes, small smile"** | hamburger | *"the **worst part** in the character… drawn lines and not an actual face"* |
+| **"Closed eyes, smiling"** | pizza | *"face is **terrible**"* |
+| **(no face spec at all)** — *"White wrap, stands upright, toppings visible"* | burrito | *"**face is not good**"* |
+| *"Crooked smile"* — no eye spec | donut | *"**better** than the burger, the eyes have more depth"* |
+| ✅ **"Open eyes with highlights, straight neutral mouth"** | **egg** | the most complete face in the cast |
+
+**Every character he rated poorly is specified with CLOSED eyes, or with no eye spec at all. The one
+specified with OPEN EYES AND HIGHLIGHTS is the one whose face he ranked best.** Eleven agents each
+implemented their line faithfully; the line was the problem.
+
+### This is the INVERSE of this project's most expensive defect shape
+
+Five AI bugs came from *"a rule stated once in `rules.ts` and implemented differently elsewhere."*
+This is the same file, and the opposite failure: **the rule was implemented exactly, and the rule
+was wrong.** An agent doing excellent work against a bad spec produces a bad character and no gate
+can tell — because every gate here measures *conformance*, not whether the target was worth hitting.
+
+### It also PREDICTS the rejects Uri has not sent yet
+
+| `face:` says | prediction |
+|---|---|
+| **soup — "Gray steam-coloured eyes, no mouth"** | 🔴 the same *"no mouth"* complaint he already made about taco |
+| **waterbottle — "Eyes floating above the cap"** | floating, detached facial features |
+| **hotdog — "Sleepy half-closed eyes"** | the closed-eye family again |
+| **taco — "face floats completely outside the shell, to the side"** | he already flagged the mouth reading as a hat |
+
+**Fix the specs first, then the characters.** Changing only a character file leaves the spec in
+place, and the next agent to read it re-implements the rejected face faithfully — which is exactly
+what happened to Lollipop (§41).
+
+### What the new spec should say — grounded, not invented
+
+Egg is the working example **and** the per-part measurement agrees with it. Target, for every
+character: **open eyes with a white sclera that is the brightest value anywhere on the face**, a dark
+pupil offset for gaze, an explicit catchlight, and a mouth with an **interior value step** so it
+reads as an opening rather than a painted curve.
+
+⚠️ Current measurement: **0% of our eye pixels are above 0.85 luma, against the reference's 31.1% and
+34.1%.** Our faces carry **two values total**. Even Egg — the best of them — has a catchlight rather
+than a sclera, so **the whole cast moves, not just the seven Uri has reviewed.**
