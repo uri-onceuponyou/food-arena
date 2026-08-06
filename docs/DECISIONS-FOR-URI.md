@@ -1825,7 +1825,7 @@ now on the list.
 
 ---
 
-## 34. ❓ Should the arena floor stop being a tiled kitchen floor?
+## 34. ✅ ANSWERED — **"keep it tiles, add debris."** Uri, 2026-08-06
 
 **A taste call no metric here can make**, and it decides which of two builds is worth doing.
 
@@ -1847,7 +1847,8 @@ barely see.
 | **keep the tiled floor, break the grid** | irregular or hex pavers, joints in more than two directions, near-invisible contrast | a rewrite of the largest surface in the game |
 | **keep the grid, scatter debris on it** | dozens of small ground chips arena-wide — which is what the reference actually does | additive, does not touch the tile field |
 
-**My recommendation is the second**, and not only because it is cheaper: the same probe found that
+✅ **URI CHOSE THE SECOND — keep the tiled floor, scatter debris on it.** The tile field is NOT
+being rewritten. My recommendation, now his decision, and not only because it is cheaper: the same probe found that
 the whole-frame gap is **object-scale contrast**, not texture — the reference frame carries 24.6–34.9%
 against our 15.3–20.7%. **The frame is short of THINGS, not short of surface.** Scattering ground
 debris serves that directly and dilutes the lattice as a side effect.
