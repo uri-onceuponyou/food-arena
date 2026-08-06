@@ -226,6 +226,26 @@ function faceArc(curveRadius: number, tube: number, arcRad: number): THREE.Buffe
 }
 
 /**
+ * A crescent bounded by two quadratic arcs that both hang DOWN from the same two
+ * corners at (±`halfW`, 0) — the upper one through (0, -`upper`), the lower through
+ * (0, -`lower`). The corners are therefore the HIGHEST points, which is the whole
+ * difference between a smile and a frown, and the reason this is one helper rather
+ * than two hand-placed curves that can drift apart.
+ *
+ * Used three ways on the mouth: `grinCrescent(w, topSag, botSag)` is the open
+ * aperture; a thin one hugging either arc is a LIP. A Bézier from (-w,0) to (w,0)
+ * with control (0, -2s) passes exactly through (0, -s), so `upper`/`lower` are the
+ * real mid-height sags rather than control-point coordinates.
+ */
+function grinCrescent(halfW: number, upper: number, lower: number): THREE.Shape {
+  const s = new THREE.Shape();
+  s.moveTo(-halfW, 0);
+  s.quadraticCurveTo(0, -2 * upper, halfW, 0);
+  s.quadraticCurveTo(0, -2 * lower, -halfW, 0);
+  return s;
+}
+
+/**
  * A vertical cloth strip curved around a cylinder of `radius`, spanning `arcRad`
  * of angle centred on the character's front (+Z), `height` tall. Used for the
  * apron bib — a cloth panel that hugs the dressed torso's own curvature rather
@@ -353,13 +373,73 @@ export class HamburgerCharacter extends BaseCharacter {
         // This is only safe because `bodies.ts` no longer ties `torsoWidth` to
         // `shoulderWidth` — before that, widening the shoulders by 0.10m widened
         // the bottom bun by 0.16m and the arm ended up exactly as buried.
-        shoulderWidth: H * 0.30,
+        //
+        // ── 0.30H -> 0.33H, and the reason is the OTHER instrument ────────────────
+        // `341ce8f` measured interpenetration across a whole animation cycle for the
+        // first time (`rg_interpen`, exact to its 1/32 quantisation) and named this
+        // character's two worst pairs explicitly: `handR~thighR` **0.727 idle / 0.909
+        // run** — 73-91% of the mitt's centreline INSIDE its own thigh — with the fix
+        // routed here because "17 degrees of splay cannot close a quarter-metre. These
+        // need `shoulderWidth` up or `stanceWidth` down." Both, here: the deficit is
+        // -0.262 m and each move alone is inside it.
+        // Burial re-checked, because that is what 0.30H was bought with: the stack is
+        // 0.534 m half-wide at shoulder height, so 0.6765 m puts the pivot 0.143 m
+        // outside it while the arm's own 0.174 m radius still reaches 0.031 m INTO the
+        // mass — the arm reads attached and clears below, which is the same condition
+        // 0.615 m was chosen to satisfy.
+        shoulderWidth: H * 0.33,
+        // ── `armFraction` 0.175 (STOUT) -> 0.225, character-local, exactly as SOUP ──
+        // The remaining pair the elbow could not touch: `handL~upperArmL` **0.515**
+        // held at 0.515 after `elbowL` went -0.95 -> -0.58, which falsifies the elbow
+        // as its cause. The real one is arithmetic and angle-independent: STOUT gives
+        // `forearmLength` 0.1711 m against a `handRadius` of 0.1947 m, so the mitt's
+        // TOP sits 0.024 m ABOVE its own elbow at every pose. `bodies.ts:105` already
+        // names this exact shape — *"on three of the four, the HAND BALL is wider than
+        // the whole forearm is long, so the segment has no visible middle at any camera
+        // angle"* — and records soup fixing it character-locally at `armFraction:
+        // 0.245` rather than in the archetype, because moving it there moves nine
+        // characters at once. Same fix, same reason. 0.225 puts the forearm at 0.220 m,
+        // 1.13x the mitt radius, so the segment has a middle again.
+        armFraction: 0.225,
         // 0.215H -> 0.30H. STOUT's own note says a planted character stands wide and
         // that this is the one place where the silhouette fix and the burial fix are
         // the same change; the shipped facing says it was not wide enough. Moved in
         // this file rather than in `bodies.ts` so soup and taco each carry their own
         // measurement.
-        stanceWidth: H * 0.30,
+        // ⚠️ 0.30H -> 0.24H. The sentence above is still true about the SILHOUETTE and
+        // was wrong to be spent on the arm: a wider stance walks the thigh INTO the
+        // hand, and the hand is the thing that was buried.
+        // ⚠️ AND THE REASON I FIRST WROTE HERE WAS FALSE, so it is corrected rather than
+        // deleted: *"narrowing also deepens the crotch concavity, which is the one place
+        // hull deficiency is bought cheaply."* Measured, same tree, only this constant
+        // swapped (`ch_hamburger_sil.mjs`, offline raster, drift control 0 by
+        // construction): hull deficiency at 0.30H vs 0.24H is **0.2953 -> 0.2700**
+        // (lobby yaw 0) and **0.2244 -> 0.2049** (match). Narrowing the stance COSTS
+        // hull deficiency at both shipped cameras. It is still the right move — it buys
+        // 0.42 of `insideFrac` on the pair Uri actually reported — but it is paid for,
+        // not free, and the leaf placement below is where it was paid back.
+        //
+        // ── THE THREE KNOBS ABOVE ARE ONE DECISION, and they fight ────────────────
+        // Lengthening the arm fixes the mitt-in-biceps and drives the hand FURTHER
+        // DOWN into the thigh — `docs/LESSONS.md` §7 exactly. Measured together
+        // (`rg_interpen --ids hamburger`, whose `insideFrac` is EXACT to its 1/32 =
+        // 0.031 quantisation, so every move below is real):
+        //
+        //   shoulderW  stanceW  armF   worst idle   worst run
+        //     0.30H     0.30H   0.175    0.727        0.909   <- HEAD, all three defects
+        //     0.33H     0.27H   0.175    0.515        0.545
+        //     0.33H     0.27H   0.225    0.758        0.545   <- the arm undoing the legs
+        //     0.33H     0.24H   0.200    0.424        0.333
+        //     0.33H     0.24H   0.225    0.303        0.333   <- SHIPPED
+        //     0.33H     0.24H   0.240    0.333        0.364
+        //
+        // Offending pairs 5 -> 3 (idle) and 6 -> 2 (run); `forearmR~thighR` 0.697 and
+        // `handL~thighL` 0.364 leave the table entirely. ⚠️ `shoulderWidth` is CAPPED
+        // by attachment, not by the metric: the sweep's best leg numbers are at 0.39H,
+        // which puts the arm's inner surface 0.09 m CLEAR of the food and detaches the
+        // limb — the defect Uri actually reported. 0.33H is the widest value that still
+        // overlaps.
+        stanceWidth: H * 0.24,
       }),
       // Grill-master swagger: weight planted and leaning in over the flat-top,
       // one arm cocked back with the spatula ready, the other tucked in tight —
@@ -387,8 +467,17 @@ export class HamburgerCharacter extends BaseCharacter {
         // `hipR` delivered **0.000** of a 4,697 px footprint while the food mass
         // covered only 0.343 of it. The occluder was the character's own 0.195 m
         // bun-mitt, which is wider than the thigh it hangs over.
+        // ── `elbowL` -0.95 -> -0.58, and it is the pair the SOLVER refuses to fix ──
+        // `341ce8f`: "The mitt folds back into its own biceps. `handL~upperArmL`
+        // **0.515** on hamburger... Cause is the authored elbow tuck — hamburger's
+        // `elbowL: -0.95` is 54 degrees, and at that fold a mitt of `handRadius` 0.195
+        // against a `forearmLength` shorter than it reaches the upper arm. Splay cannot
+        // fix it and the solver correctly REFUSES to splay further because of it (that
+        // pair is in its objective). **The lever is the elbow, in the character file.**"
+        // The tuck is the grill-master swagger and is kept — 33 degrees still reads as
+        // an arm cocked in, it just no longer puts the mitt inside the biceps.
         shoulderL: -0.38, shoulderR: 0.20,
-        elbowL: -0.95, elbowR: -0.22,
+        elbowL: -0.58, elbowR: -0.22,
         twist: -0.12, headTilt: -0.07, headTurn: 0.20,
         hipSway: 0.06, lean: 0.06,
         // Grill-master weight, planted. Measured at the shipped facing: hull
@@ -417,6 +506,31 @@ export class HamburgerCharacter extends BaseCharacter {
     const lettuceMatB = toonMat({ color: LETTUCE_FRILL, ramp: RAMP_CHARACTER(), roughness: 0.6 });
     const seedMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER(), roughness: 0.75 }); // dry toasted sesame
     const faceMat = toonMat({ color: PALETTE.ink, ramp: RAMP_CHARACTER(), roughness: 0.42 });
+    // ── THE FACE'S OWN VALUE LADDER ───────────────────────────────────────────
+    // The measurement behind Uri's *"drawn lines and not an actual face"*
+    // (DECISIONS §37/§42): **0% of our eye pixels are above 0.85 luma, against the
+    // reference's 31.1% and 34.1%.** The face carried exactly TWO values — orange bun
+    // and near-black ink — so the largest, brightest, highest-contrast element of a
+    // reference face was simply absent. These five materials are that missing ladder,
+    // and `egg.ts:1032` is the construction they are copied from (sclera / pupil /
+    // explicit glint as three separate meshes, which is why Uri ranked egg's eyes best
+    // in the cast without seeing any code).
+    //
+    // `scleraMat` is a lit `toonMat` so the eye turns with the light like a ball, and
+    // the GLINT is `flatMat` — unlit, so it is 1.0 luma by construction at every angle.
+    // A shaded white alone cannot GUARANTEE the >0.85 band on the shadow side, and the
+    // whole point of this pass is that the band exists.
+    const scleraMat = toonMat({ color: '#FFFFFF', ramp: RAMP_CHARACTER(), roughness: 0.28 });
+    const pupilMat = toonMat({ color: PALETTE.ink, ramp: RAMP_CHARACTER(), roughness: 0.22 });
+    const glintMat = flatMat('#FFFFFF');
+    // The mouth's INTERIOR. `#2E0A0B` is deliberately warmer than `PALETTE.ink`, not
+    // darker for its own sake: a throat is a lit cavity, and an ink-black hole reads as
+    // a punched-out shape rather than an opening. The tongue and the lit lower lip are
+    // the two steps that turn "a flat dark shape with no lip thickness or interior
+    // value step" (the per-part pass's exact words) into a mouth.
+    const throatMat = toonMat({ color: '#2E0A0B', ramp: RAMP_CHARACTER(), roughness: 0.5 });
+    const tongueMat = toonMat({ color: '#C2453B', ramp: RAMP_CHARACTER(), roughness: 0.38 });
+    const lipMat = toonMat({ color: '#FFDCA6', ramp: RAMP_CHARACTER(), roughness: 0.55 });
     const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.45 });
     // `depthWrite: false`: a transparent material that still writes depth is a
     // SILENT OCCLUDER — `docs/LESSONS.md` §1 names it explicitly, and every
@@ -425,7 +539,19 @@ export class HamburgerCharacter extends BaseCharacter {
     // Spatula — the held prop. Deliberately NOT a food material: brushed metal +
     // dark plastic reads as "tool", sells Patty Smash as an ability, and gives the
     // silhouette a landmark nothing else in a roster of round food blobs would have.
-    const spatulaHandleMat = toonMat({ color: '#3B2A22', roughness: 0.55 });
+    // ── ⚠️ THE HANDLE WAS THE SAME VALUE AS THE ARM HOLDING IT ────────────────
+    // `#3B2A22` is luma 0.175. `LIMB_TOAST_DARK`, the forearm the handle is drawn
+    // against for most of its length, is `#3E1F09` — luma 0.146. **A 0.03 separation**,
+    // which is a quarter of the 0.10 floor `valuescan` uses for a part boundary. So the
+    // handle was invisible and the blade appeared to float: exactly Uri's *"I don't
+    // understand what the silver/grey element"* read, since a blade with no visible
+    // handle is not a spatula, it is a shard. `docs/LESSONS.md` §1, "contrast, blending,
+    // colour" — the fifteenth entry on that list is this same prop's blade.
+    // `#4A5560` is luma 0.32 and, more importantly, COOL: it separates from the
+    // near-black forearm by value AND from every warm tone on this character by hue,
+    // and it puts the handle in the same steel family as the blade so the two read as
+    // one tool in two values rather than as two objects.
+    const spatulaHandleMat = toonMat({ color: '#4A5560', roughness: 0.55 });
     // Metalness was 0.55 and the blade rendered as a near-BLACK wedge in every
     // shot — a metal with no strong environment reflection has almost no diffuse
     // term left to light, so the one prop that is supposed to be the roster's
@@ -535,7 +661,15 @@ export class HamburgerCharacter extends BaseCharacter {
     // not move. What it does change is the read between the leaves: a solid green
     // collar instead of background, which is what "leaf collar, not a ring of peas"
     // asked for in the first place.
-    const LETTUCE_BASE_R = R * 0.70;
+    // ── 0.70R -> 0.74R, and it is the SAME defect a third time ────────────────
+    // Shrinking the lettuce POINTS (see `buildSilhouetteEvents`) stopped them bridging
+    // the frill ring, and one blob immediately became a **197 px detached island** at
+    // the lobby camera — measured, and NAMED, by `ch_hamburger_sil.mjs`. 0.70R
+    // guaranteed radial overlap against the frill's own geometry; it did not guarantee
+    // it against the CAMERA, which is the third time this character has shipped a
+    // floating green component. 0.74R equals the cheese above it, so the step ladder
+    // (0.60 patty / 0.74 cheese / 0.63 tomato / 0.82 crown) is unchanged.
+    const LETTUCE_BASE_R = R * 0.74;
     // The frill must stay INSIDE the crown's own radius at mouth height
     // (~0.81R, see `crownSurface` at hFrac 0.25) or a leaf sits in front of the
     // face. 0.78R is the largest flare that clears it.
@@ -708,10 +842,21 @@ export class HamburgerCharacter extends BaseCharacter {
     // Positions are (theta radians, height fraction 0-1), resolved to an EXACT
     // surface point + normal via `crownSurface` so every seed sits flush on the
     // dome regardless of how sharply the profile curves at that height.
+    // ── ⚠️ FOUR OF THESE WERE ON THE FOREHEAD, AND THEY WERE THE BRIGHTEST THING
+    //    ON THE FACE. Read the per-part crop (`shots/perpart/face-overall/ours.png`):
+    //    near-white seeds sit directly above and BETWEEN the eyes at theta 0.0/±0.5/0.2,
+    //    and because the old eyes were ink strokes, the seeds — not the eyes — carried
+    //    every high value in the face. That is the same measurement DECISIONS §37
+    //    reports from the other end (0% of eye pixels above 0.85 luma) with the
+    //    brightness landing on the wrong feature.
+    //    The comment above claimed they were "kept clear of the face zone (front, lower
+    //    third)". They were clear of the lower third and squarely on the brow line.
+    //    Front seeds now start at hFrac 0.82, above the brows; the count stays 16 so
+    //    the crown's scatter density is unchanged.
     const seedSpots: Array<[number, number]> = [
-      [0.0, 0.82], [0.5, 0.76], [-0.5, 0.76], [1.0, 0.68], [-1.0, 0.68],
-      [1.5, 0.56], [-1.5, 0.56], [2.1, 0.46], [-2.1, 0.46], [2.7, 0.55],
-      [-2.7, 0.55], [3.1, 0.72], [Math.PI, 0.62], [2.4, 0.84], [-2.4, 0.84], [0.2, 0.6],
+      [0.0, 0.97], [0.34, 0.94], [-0.40, 0.95], [1.30, 0.76], [-1.30, 0.76],
+      [1.6, 0.56], [-1.6, 0.56], [2.1, 0.46], [-2.1, 0.46], [2.7, 0.55],
+      [-2.7, 0.55], [3.1, 0.72], [Math.PI, 0.62], [2.4, 0.84], [-2.4, 0.84], [0.90, 0.88],
     ];
     const seedGeo = new THREE.SphereGeometry(1, 8, 6);
     for (const [theta, hf] of seedSpots) {
@@ -728,7 +873,25 @@ export class HamburgerCharacter extends BaseCharacter {
       head.add(seed);
     }
 
-    // ── Face — closed happy eyes + small smile ──────────────────────────────
+    // ── Face — OPEN eyes with a white sclera, and a mouth with an interior ──────
+    //
+    // ⚠️ THE OLD HEADING SAID "closed happy eyes + small smile" AND IT WAS THE BUG.
+    // It is kept one line above because the geometry below was authored against it and
+    // because DECISIONS §42 is the reason it changed: Uri ranked seven characters
+    // without seeing any code, and his ranking matches `rules.ts`'s one-line `face:`
+    // field EXACTLY — *"Closed happy eyes"* -> hamburger, **"the worst part in the
+    // character… drawn lines and not an actual face"**; *"Open eyes with highlights"*
+    // -> egg, the best face in the cast. Eleven agents implemented their line
+    // faithfully. **The line was the problem**, and `rules.ts`'s hamburger `face:` spec
+    // has since been rewritten to ask for exactly what is built below.
+    //
+    // The construction ladder Uri reproduced blind, in his own order:
+    //   hamburger  a flattened arc / torus            — a STROKE      <- was here
+    //   donut      `SphereGeometry` + a specular      — a bead
+    //   taco       a sphere + an explicit glint mesh
+    //   egg        sclera + pupil + catchlight, three separate meshes <- copied here
+    //
+    // What is kept from the old face, because it was right: the SHARED TANGENT FRAME.
     // Mounted on `rig.joints.face`, repositioned to share the crown's exact
     // local frame (same y offset, zero relative rotation — the rig applies all
     // yaw/tilt personality to `head` itself, which both the crown mesh above
@@ -747,23 +910,61 @@ export class HamburgerCharacter extends BaseCharacter {
     face.position.set(0, crownBaseY, 0);
     face.rotation.set(0, 0, 0);
 
+    // The eye is a BALL, so it can afford to sink into the dome — the sphere's own
+    // curvature keeps its rim welded to the crown instead of leaving the gap a flat
+    // decal would. `embed` is therefore SMALLER than the mouth's, not larger.
+    const EYE_R = 0.108 * faceScale;
     for (const sx of [-1, 1]) {
-      const faceSideG = addCrownDecal(face, CROWN, sx * 0.33, 0.5, 0.014 * faceScale);
+      const faceSideG = addCrownDecal(face, CROWN, sx * 0.36, 0.62, 0.010 * faceScale);
 
-      // Eye — closed happy "^" arc. Tube/curve radius held IDENTICAL between
-      // sides so the two eyes carry equal visual weight; only the arc length
-      // varies (right squints a touch tighter), reading as a deliberate
-      // half-wink rather than one eye being malformed.
-      const eyeArc = sx > 0 ? Math.PI * 0.66 : Math.PI * 0.74;
       const eyeG = new THREE.Group();
-      eyeG.position.set(0, -0.125 * faceScale, 0);
+      eyeG.position.set(0, -0.050 * faceScale, 0);
       faceSideG.add(eyeG);
-      const eye = new THREE.Mesh(faceArc(0.12 * faceScale, 0.028 * faceScale, eyeArc), faceMat);
-      eye.name = 'eye';
-      eye.rotation.z = Math.PI / 2; // bulge upward: closed happy "^" eye
-      eye.castShadow = true;
-      eye.receiveShadow = true;
-      eyeG.add(eye);
+
+      // 1. THE SCLERA — and it is the point of this whole pass. On this orange bun a
+      //    white ball is the brightest mass anywhere on the character, which is what
+      //    the reference faces do and what ours did not do at all. Slightly taller
+      //    than wide and flattened in z so it reads as an eye set in a head rather
+      //    than a marble glued to one.
+      const sclera = new THREE.Mesh(new THREE.SphereGeometry(EYE_R, 18, 16), scleraMat);
+      sclera.name = 'eye';
+      sclera.scale.set(1, 1.12, 0.44);
+      sclera.castShadow = true;
+      sclera.receiveShadow = true;
+      eyeG.add(sclera);
+
+      // 2. THE PUPIL — offset UP and FORWARD, per the spec. Up reads as "eager,
+      //    looking at you"; a centred pupil reads as a doll and a low one as sad.
+      //    Nudged toward the character's own centre line as well, so both eyes agree
+      //    on where they are looking instead of staring outward in parallel.
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.52, 14, 12), pupilMat);
+      pupil.position.set(-sx * EYE_R * 0.10, EYE_R * 0.20, EYE_R * 0.50);
+      pupil.scale.set(1, 1.14, 0.52);
+      pupil.castShadow = true;
+      eyeG.add(pupil);
+
+      // 3. THE CATCHLIGHT — an explicit mesh, `flatMat`, so it is 1.0 luma at every
+      //    lighting angle. `noOutline`: an ink hull around a 2 mm highlight turns it
+      //    grey, which is the failure this exact element exists to avoid.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.24, 10, 8), glintMat);
+      glint.position.set(-sx * EYE_R * 0.30, EYE_R * 0.46, EYE_R * 0.74);
+      glint.userData.noOutline = true;
+      glint.name = 'eye_glint__no_outline';
+      eyeG.add(glint);
+
+      // 4. THE OLD CLOSED-HAPPY ARC, DEMOTED TO A LASH LINE. `rules.ts`'s rewritten
+      //    spec asks for exactly this — *"the old closed-happy arc kept ONLY as the
+      //    upper lash line above them"* — and it is worth saying why rather than
+      //    deleting it: the arc was never badly built, it was standing in for the
+      //    whole eye. Over a sclera it is what a reference eye actually has. The
+      //    left/right arc-length asymmetry is kept as the character's own half-wink.
+      const lashArc = sx > 0 ? Math.PI * 0.74 : Math.PI * 0.84;
+      const lash = new THREE.Mesh(faceArc(EYE_R * 1.02, 0.030 * faceScale, lashArc), faceMat);
+      lash.name = 'eye_lash';
+      lash.rotation.z = Math.PI / 2;   // arc centred on the top of the eye
+      lash.position.z = EYE_R * 0.30;
+      lash.castShadow = true;
+      eyeG.add(lash);
 
       // Eyebrow — offset along the SAME local Y the eye is offset along, so the
       // gap between them is fixed and cannot collapse regardless of dome
@@ -773,33 +974,92 @@ export class HamburgerCharacter extends BaseCharacter {
       // acting as the single biggest appeal gap across the cast, and this face
       // was singled out as the one to keep rather than replace, so the brow gets
       // more read (bolder arc, stronger raise) without changing its shape language.
+      // Raised from 0.13 to 0.20 because the eye below it is now a 0.24 m ball
+      // rather than a 0.03 m stroke, and a brow resting ON the lash reads as a
+      // second lash line rather than as a brow.
       const browG = new THREE.Group();
-      browG.position.set(0, 0.13 * faceScale, 0.012 * faceScale);
+      browG.position.set(0, 0.112 * faceScale, 0.012 * faceScale);
       faceSideG.add(browG);
-      const brow = new THREE.Mesh(faceArc(0.09 * faceScale, 0.026 * faceScale, Math.PI * 0.36), faceMat);
+      // ── ⚠️ THE BROW WAS NEVER ARCHED. IT WAS A COMMA. ─────────────────────────
+      // `faceArc()` centres its arc on local +X (see its own doc comment) and the
+      // caller is expected to rotate it: the eye's lash uses `rotation.z = PI/2`, which
+      // is what turns a piece of a circle into something that bulges UPWARD. The brow
+      // used `rotation.z = 0.32` — a 18-degree tilt off +X — so its arc bulged
+      // SIDEWAYS and rendered as a short vertical crescent beside the eye. Read
+      // `shots/perpart/face-overall/ours.png`: two black apostrophes on the forehead.
+      // It has been that shape since the face was built, through a pass that
+      // deliberately "thickened and cocked" it, because thickening a comma makes a
+      // bolder comma. The tilt is KEPT as the one-eyebrow-raised personality it was
+      // authored for; it is now a tilt applied to an arch instead of instead of one.
+      // Also 1.9x wider (0.09 -> 0.13 curve radius, arc 0.36PI -> 0.52PI): the eye
+      // below it went from a 0.03 m stroke to a 0.23 m ball, and a brow narrower than
+      // a third of its eye reads as a speck.
+      const brow = new THREE.Mesh(faceArc(0.13 * faceScale, 0.030 * faceScale, Math.PI * 0.52), faceMat);
       brow.name = 'brow';
-      brow.rotation.z = sx > 0 ? 0.32 : 0.05;
+      brow.rotation.z = Math.PI / 2 + (sx > 0 ? 0.32 : 0.05);
       brow.castShadow = true;
       brow.receiveShadow = true;
       browG.add(brow);
 
-      const blushG = addCrownDecal(face, CROWN, sx * 0.6, 0.3, 0.004 * faceScale);
+      // Blush, pushed out to 0.68 rad and down: the eye is nearly three times its old
+      // width, and at 0.60 the disc was landing under the sclera's own outer edge.
+      const blushG = addCrownDecal(face, CROWN, sx * 0.68, 0.28, 0.004 * faceScale);
       const blush = new THREE.Mesh(new THREE.CircleGeometry(0.068 * faceScale, 16), blushMat);
       blush.name = 'blush__no_outline';
       blush.userData.noOutline = true;
       blushG.add(blush);
     }
 
-    // Mouth — kept off-centre with the whole arc tilted, so the small closed
-    // smile reads as a one-sided smirk (playful short-order cook) instead of a
-    // perfectly symmetric "u".
-    const mouthG = addCrownDecal(face, CROWN, -0.05, 0.25, 0.014 * faceScale);
-    const mouth = new THREE.Mesh(faceArc(0.13 * faceScale, 0.028 * faceScale, Math.PI * 0.54), faceMat);
-    mouth.name = 'mouth';
-    mouth.rotation.z = -Math.PI / 2 + 0.16; // bulge down-and-tilted: smirk, not a flat "u"
-    mouth.castShadow = true;
-    mouth.receiveShadow = true;
-    mouthG.add(mouth);
+    // ── Mouth — an OPENING with an interior, not a painted curve ────────────────
+    // The per-part pass named the old one precisely: *"a flat dark shape with no lip
+    // thickness or interior value step."* It was a single ink torus, so the whole
+    // mouth carried ONE value and the bun carried the other — the same two-value
+    // problem as the eyes, in the same face.
+    //
+    // Four meshes, four values, ordered outward in z so each one occludes the last:
+    //   throat  #2E0A0B  the aperture           (darkest, and warm — a cavity, not a hole)
+    //   tongue  #C2453B  low and central        (mid, warm)
+    //   lipLow  #F0B778  hugging the lower arc  (LIGHTER than the bun — the lit lip)
+    //   lipUp   ink      hugging the upper arc  (the smile line itself)
+    //
+    // ⚠️ `embed` is 0.026 and not the eyes' 0.010, and the reason is geometric: these
+    // are FLAT plates on a dome of radius ~0.57 m, so a plate 0.135 half-wide sags
+    // 0.0136 m below its own tangent plane at the corners. Embed less than that and
+    // the corners of the mouth clip THROUGH the crown — the mouth would lose its ends
+    // and read as a short dash. This is `docs/LESSONS.md` §1 in its "buried inside the
+    // target" costume, and it is why the number is derived rather than eyeballed.
+    const MW = 0.135 * faceScale;      // half-width
+    const MA = 0.030 * faceScale;      // upper-arc sag: shallow, so the corners lift
+    const MB = 0.108 * faceScale;      // lower-arc sag: deep, so it is an OPEN grin
+    const mouthG = addCrownDecal(face, CROWN, -0.05, 0.25, 0.026 * faceScale);
+    // Tilted, keeping the old face's one-sided smirk (playful short-order cook).
+    mouthG.rotation.z += 0.14;
+
+    const throat = new THREE.Mesh(new THREE.ShapeGeometry(grinCrescent(MW, MA, MB), 20), throatMat);
+    throat.name = 'mouth';
+    throat.castShadow = true;
+    mouthG.add(throat);
+
+    const tongue = new THREE.Mesh(new THREE.CircleGeometry(MW * 0.30, 18), tongueMat);
+    tongue.name = 'mouth_tongue';
+    tongue.position.set(0, -MB * 0.56, 0.006 * faceScale);
+    tongue.scale.set(1.4, 0.62, 1);
+    mouthG.add(tongue);
+
+    // The lower lip: a lens between the aperture's own bottom arc and a deeper one,
+    // so it is thickest at the centre and tapers to nothing at the corners — which is
+    // what a lip does, and what a constant-width band would not.
+    const lipLow = new THREE.Mesh(new THREE.ShapeGeometry(grinCrescent(MW, MB, MB + 0.038 * faceScale), 20), lipMat);
+    lipLow.name = 'mouth_lip_lower';
+    lipLow.position.z = 0.010 * faceScale;
+    lipLow.castShadow = true;
+    mouthG.add(lipLow);
+
+    const lipUp = new THREE.Mesh(new THREE.ShapeGeometry(grinCrescent(MW, Math.max(MA - 0.024 * faceScale, 0.002), MA), 20), faceMat);
+    lipUp.name = 'mouth_lip_upper';
+    lipUp.position.z = 0.010 * faceScale;
+    lipUp.castShadow = true;
+    mouthG.add(lipUp);
 
     // ── Body: dress the torso with the bottom bun ─────────────────────────────
     // The strongest characters in this cast extend their food mass down through
@@ -1054,8 +1314,34 @@ export class HamburgerCharacter extends BaseCharacter {
     // as "a giant cleaver", because a broad flat head cantilevered sideways off
     // a short handle is a cleaver's silhouette, not a turner's. Standing it up
     // puts the handle visibly in the fist with the blade above it.
-    spatula.position.set(0.06, -0.02, 0.10);
-    spatula.rotation.set(-0.42, 0.26, -0.05);
+    //
+    // ── 🚨 ROUND 6: THE OWNER STILL CANNOT TELL WHAT IT IS, AND HE SAID WHY ──────
+    // Uri, DECISIONS §37: *"I don't understand what the silver/grey element that is
+    // going IN AND OUT of the character."* Both halves are measurable and both were
+    // true. Measured at HEAD, world boxes, `ch_hamburger_prop.mjs`:
+    //
+    //   spatula_blade   x  0.361 … 1.096      the cheese layer reaches x 0.560
+    //                   -> 0.199 m OF THE BLADE WAS INSIDE THE FOOD MASS
+    //   spatula (all)   1.20 m tall           = 47% of a 2.55 m character
+    //   blade centre    y 1.349               the tomato/lettuce band, i.e. mid-burger
+    //
+    // "In and out" is not a figure of speech; it is a **0.199 m intersection**, and it
+    // is the same class as `docs/LESSONS.md` §1 case 8, where Sushi's correctly-sized
+    // blade spawned mid-torso and rendered as two disconnected shards. Round 5 fixed
+    // the blade's SHAPE and never checked where the shape ended up.
+    //
+    // Three changes, measured rather than eyeballed:
+    //   SCALE  0.66. Prop height 1.20 -> 0.79 m. A turner is a hand tool.
+    //   OUT    px 0.06 -> 0.12 and rz -0.05 -> -0.66 (38 deg outboard). Blade x now
+    //          0.79 … 1.36 against a food edge of 0.538 — **+0.25 m of clear air**,
+    //          the whole blade outside the burger at every height it occupies.
+    //   FWD    pz 0.10 -> 0.20, so the blade is read against the BACKGROUND at the
+    //          lobby camera rather than against the burger behind it.
+    // `rx`/`ry` open the broad face further toward camera; at -0.42/0.26 it presented
+    // closer to edge-on, which is the other half of "unidentifiable".
+    spatula.position.set(0.12, 0.00, 0.20);
+    spatula.rotation.set(-0.28, 0.34, -0.66);
+    spatula.scale.setScalar(0.66);
     this.rig.joints.handR.add(spatula);
 
     const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.46, 4, 8), spatulaHandleMat);
@@ -1225,20 +1511,74 @@ export class HamburgerCharacter extends BaseCharacter {
     // measured zero: hamburger's only appendage was the pick. The third leaf at
     // ~PI is on the free axis. They also flop UP-and-out now rather than down,
     // because down is into the bun's own projected shadow.
+    //
+    // ── 🚨 ROUND 3: TWO POINTED MASSES EITHER SIDE OF A HEAD ARE EARS. FIVE FOR FIVE.
+    // Round 2's "up-and-out" is exactly the wrong instruction, and it took an owner
+    // review of five characters to see why. Burrito's torn foil (*"looks a bit like a
+    // goat"*), Egg's shell shards (*"the ears don't make sense"*), Pizza's cheese
+    // strands (*"the ears are messy"*), Lollipop's cellophane cape petals (they read as
+    // HORNS) — and this character's lettuce, which is the same construction and is
+    // visible in Uri's own shot. **The signal overrides what the shape is made of.**
+    // `rules.ts`'s rewritten hamburger spec now says it in one line: *"the lettuce must
+    // read as a frill running CONTINUOUSLY around the whole stack; two leaf points
+    // either side of the head is the ear signal."*
+    //
+    // Three changes, and each one attacks a different half of the signal:
+    //   COUNT      3 -> 5, at irregular azimuths, so there is no MIRRORED PAIR left to
+    //              read as a pair of anything. A ring of five is a frill; two is a face.
+    //   DIRECTION  `lift` is now NEGATIVE on every leaf. A mass hanging DOWN off a
+    //              collar is lettuce spilling out of a burger; the same mass angled UP
+    //              beside a head is an ear, and that is the whole of the difference.
+    //   SIZE       longest 1.22 -> 0.92 of `rStack`, fatter waist (1.35 -> 1.80) and a
+    //              stronger curl. `blade()` tapers to a POINT by construction, so the
+    //              only lever on "pointed" is how much mass sits behind the point.
+    //
+    // ⚠️ Round 2's own measurement is not forgotten: the leaves it placed on the
+    // character's own left/right measured ZERO hull contribution at the match facing,
+    // which is why one was moved to the back. The azimuths below keep three on that
+    // free axis, and they are the LONG ones — deliberately, because a leaf pointing
+    // -Z is behind the stack at the lobby camera (foreshortened, cannot read as an ear
+    // or a cape) and broadside at the match camera (full hull contribution). The two
+    // FRONT-quarter leaves are the short ones for the same reason read backwards.
+    //
+    // ⚠️ AND THE FIRST ATTEMPT AT THIS FIX WAS ITSELF FINDING 5. Five leaves at 0.92-1.22
+    // `rStack` and `halfWidth` 0.30, all drooping, composed a GREEN CAPE: rendered, the
+    // lower half of the character was one undifferentiated green mantle and the burger
+    // stack it was meant to decorate had vanished behind it. `egg.ts:206` records the
+    // same trade — *"the detail added to signal the subject destroyed the silhouette
+    // that signalled it better"* — and I committed it inside the fix for it. Only the
+    // PNG could see that; every number was fine. Lengths and `halfWidth` below are the
+    // recovery. Hull deficiency, `ch_hamburger_sil.mjs`, HEAD -> cape -> shipped:
+    //   lobby yaw 0   0.3026 -> 0.2687 -> 0.3110
+    //   lobby yaw 22  0.2769 -> 0.2366 -> 0.2636
+    //   match yaw 90  0.3025 -> 0.2594 -> 0.2841
+    // islands 1 at all three views throughout, EXCEPT one intermediate where a single
+    // `lettuce_frill` blob became a 197 px DETACHED ISLAND at the lobby the moment the
+    // leaves stopped bridging it — `LETTUCE_BASE_R` 0.70R -> 0.74R closed it, which is
+    // the same 877 px floating-pea defect this file already fixed once.
     const leafMat = toonMat({ color: LETTUCE_FRILL, roughness: 0.72 });
-    const leaves: Array<[number, number, number]> = [
-      [Math.PI * 0.42, 1.22, 0.06],
-      [-Math.PI * 0.66, 1.02, -0.10],
-      [Math.PI * 0.98, 1.16, 0.10],
+    const leaves: Array<[azimuth: number, len: number, lift: number]> = [
+      [Math.PI * 1.00, 1.18, -0.30],
+      [-Math.PI * 0.74, 1.02, -0.42],
+      [Math.PI * 0.76, 0.96, -0.38],
+      [-Math.PI * 0.33, 0.40, -0.60],
+      [Math.PI * 0.22, 0.36, -0.66],
     ];
     for (const [azimuth, len, lift] of leaves) {
       const { at, out } = massAnchor(head, box, { azimuth, height01: 0.46, inset: 0.20 });
       const g = new THREE.Group();
       g.name = 'hamburger_lettuce_point';
       aim(g, at, out.clone().add(new THREE.Vector3(0, lift, 0)).normalize(), Math.PI * 0.5);
-      g.add(leafBlade(leafMat, {
-        len: rStack * len, halfWidth: rStack * 0.28, thick: rStack * 0.035, curl: -0.20, waist: 1.35,
-      }));
+      // NAMED. `appendages.blade()` returns an unnamed mesh, and an unnamed mesh is
+      // invisible to every diagnostic here: `rg_solid`'s occluder report lumped all
+      // five of these plus the pick's rod and olive into one `(unnamed)` row that was
+      // the single largest silhouette-edge owner on the character (327 px at the lobby
+      // camera) and could not be attributed to any of them.
+      const leaf = leafBlade(leafMat, {
+        len: rStack * len, halfWidth: rStack * 0.21, thick: rStack * 0.032, curl: -0.45, waist: 1.80,
+      });
+      leaf.name = 'lettuce_leaf';
+      g.add(leaf);
       head.add(g);
     }
 
@@ -1248,10 +1588,13 @@ export class HamburgerCharacter extends BaseCharacter {
     const { at } = massAnchor(head, box, { azimuth: -Math.PI * 0.35, height01: 0.93, inset: 0.62 });
     aim(pick, at, new THREE.Vector3(0.20, 1, 0.10).normalize());
     head.add(pick);
-    pick.add(rod(toonMat({ color: MITT_BUN, roughness: 0.55 }), {
+    const pickRod = rod(toonMat({ color: MITT_BUN, roughness: 0.55 }), {
       len: rStack * 0.52, rBase: rStack * 0.045, rTip: rStack * 0.038,
-    }));
+    });
+    pickRod.name = 'pick_rod';
+    pick.add(pickRod);
     const olive = knob(toonMat({ color: PALETTE.tomato, roughness: 0.34 }), rStack * 0.11);
+    olive.name = 'pick_olive';
     olive.position.y = rStack * 0.52;
     pick.add(olive);
   }
