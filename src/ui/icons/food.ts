@@ -283,7 +283,47 @@ export const FOOD_ICONS: Record<string, string> = {
    *  low-variance arm the original was already **3/3** and the best redraw was 2/3. The
    *  "paper airplane / arrows" answers came only from the free-form arm, where naming
    *  loose pieces at 20px is hard for any drawing. Reverted; the failure was in the
-   *  measurement's leniency, not in the glyph. */
+   *  measurement's leniency, not in the glyph.
+   *
+   *  ── ⚠️ AND THAT 3/3 DID NOT HOLD. THREE MORE DRAFTS, ALL REVERTED. ────────
+   *  Re-measured on the same forced-choice arm with three fresh judges: **0/3** —
+   *  "an impact burst / explosion star" x2, "a sword slash" x1. On the both-families
+   *  plate it collides with the UI `range` chip, which ships on the SAME character-select
+   *  row as this glyph ("a double-headed arrow" / "two circling swap arrows" / "a back
+   *  arrow", 3/3 wrong across two rounds). And in the other direction, `wrap` was named
+   *  "glass shards" 3/3. **The number the previous revert was justified by is not
+   *  reproducible**, which is worth more than the glyph: a per-icon score taken once and
+   *  treated as durable is exactly the trap `docs/LESSONS.md` warns about.
+   *
+   *  Three further drafts were built and judged against this one on a single plate,
+   *  three fresh judges, real 20px, the full 65-candidate list:
+   *
+   *      draft                                        what judges called it
+   *      the shipped three triangles (control)        swap arrows x2, sparkle x1   0/3
+   *      a big broken tumbler, V-notch rim            **a chef's hat x3**          0/3
+   *      three co-directional clustered fragments     arrows x2, sparkle x1        0/3
+   *      a small tumbler + a flying chip              chest, honey, party popper   0/3
+   *
+   *  **All four score 0/3, so nothing here beats the shipped art and every draft is
+   *  reverted** — and the broken tumbler is strictly worse in KIND, because "a chef's
+   *  hat" is a UI icon in the same registry, i.e. it traded an intra-family miss for a
+   *  cross-family collision. `docs/DECISIONS-FOR-URI.md` §10's history holds: 8 of 14
+   *  redraws measured worse, and this is now 3 more.
+   *
+   *  ⚠️ **The remaining move is not a drawing.** Every failure is the same failure and
+   *  this file already wrote it down two paragraphs up — *"any single four-or-more-sided
+   *  pale shape gets read as one recognisable object, and the reader will find one"* —
+   *  and the conclusion drawn from it ("three-sided pieces cannot be anything but
+   *  pieces") is falsified: a scatter of pale triangles is ALSO one recognisable object.
+   *  It is an explosion, and two of them pointing apart is an arrow. Loose fragments have
+   *  no silhouette of their own, which is what killed `mustardblast` and `cap`; both were
+   *  fixed by drawing the OBJECT the weapon is about rather than the effect it produces
+   *  (§32). Doing that here means changing what Glass Shards IS, and every object in that
+   *  neighbourhood is taken: radial belongs to `burst`/`star`/`sparkle`/`swirl`/`gear`, a
+   *  blue faceted crystal is the game's own premium CURRENCY (`gem` — the §32 defect in
+   *  reverse), a cube is the four loot boxes, a disc is `cap`, a drop is `droplets`, and
+   *  a vessel is a chef's hat 3/3 as measured above. **That is a design call, not a
+   *  drawing one, and it is parked for Uri.** */
   shards: `
 <path d="M2.2 3.4 12.6 8.8 6.6 18.2z" fill="${P.ice}"/>
 <path d="M15.2 2.6 22 11.4 13.4 13.6z" fill="${P.iceHi}"/>

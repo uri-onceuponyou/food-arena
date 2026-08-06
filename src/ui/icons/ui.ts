@@ -30,12 +30,60 @@ import { P, starPath } from './svg';
 
 /** The four purchasable containers share one silhouette and differ by colourway plus
  *  a lid emblem, so they read as a family and as a ladder — which is what they are.
- *  Emoji made them four unrelated objects (a burger, a pineapple, a gift, a flame). */
+ *  Emoji made them four unrelated objects (a burger, a pineapple, a gift, a flame).
+ *
+ *  ── THE RIBBON CAME OFF, AND THAT IS THE WHOLE CHANGE ──────────────────────
+ *  The third colour used to be a FULL-HEIGHT VERTICAL BAND — `M10.2 5.6h3.6v14.9h-3.6z`
+ *  — running from the top of the lid to the bottom of the body. Kept here because the
+ *  rule it encoded has been reversed rather than deleted.
+ *
+ *  Measured on the first both-families-on-one-plate round: `boxBurger`, `boxRed` and
+ *  `boxFire` were each named **"a wrapped gift" 3 of 3**. Box-to-box confusion is by
+ *  design and is exempted in `icon_score.mjs`; box-to-GIFT is not, because a gift is a
+ *  different object the set also draws (`gift`, below) and because the four boxes are
+ *  priced differently from each other in `tuning.ts`.
+ *
+ *  The cause is construction, not colour — a gold box and a dark purple box cannot both
+ *  read as a red present because of hue. A lidded body with a contrasting band CROSSING
+ *  THE LID from top to bottom is the universal wrapped-present construction, and at
+ *  20 px it is the only thing on the tile with enough mass to carry a read. So the band
+ *  becomes a CLASP straddling the lid seam, which is what `chest` already does two lines
+ *  below and which no present has. Same three colours, same silhouette, same family; the
+ *  wrapping is what goes.
+ *
+ *  It is deliberately WIDER than the ribbon it replaces (4.4 vs 3.6): the band was
+ *  carrying the third colour's entire presence and a thin latch would have spent the
+ *  colourway that separates the four boxes from each other.
+ *
+ *  ── MEASURED, paired on identical tile positions, 3 judges each side ────────
+ *
+ *      icon            ribbon (before)                 clasp (after)
+ *      boxRed          0/3   "a wrapped gift" x3       **3/3**
+ *      boxPineapple    1/3   "a wrapped gift" x2       **3/3**
+ *      boxFire         0/3   gift x2, chest x1         0/3, "a purple loot box" x3
+ *      boxBurger       1/3   "red loot box w/ bow" x2  1/3, "a wrapped gift" x2
+ *      ------------------------------------------------------------------------
+ *      a box named "a wrapped gift"   **7 of 12  ->  2 of 12**
+ *      a box named correctly          **2 of 12  ->  7 of 12**
+ *
+ *  `boxFire`'s remaining miss is box-to-box, which is the exempt case — it stopped being
+ *  a present and became the wrong rung of its own ladder. **`boxBurger` REGRESSED into
+ *  the collision the other three left**, and the likely reason is stated rather than
+ *  fixed: its clasp is `P.ketchup` on a `P.gold` body, so a small red mass centred on the
+ *  lid of a gold box is a bow. That is one colour swap away from a test, and it is not
+ *  taken here because the instrument cannot currently resolve it — see below.
+ *
+ *  ⚠️ **THE AGGREGATE IS NOT CLAIMED, AND THE REASON IS IN THIS RUN.** Judge totals were
+ *  48/46/61 before and 63/49/46 after — a mean move of +1.0 inside a judge-to-judge
+ *  spread of ~15 of 65, far wider than the ~4.0 `docs/DECISIONS-FOR-URI.md` §32 recorded.
+ *  The built-in control for that is `chest`, whose art did NOT change and which moved
+ *  1/3 -> 3/3 across the same two rounds. **Read the box-to-gift count, which is a paired
+ *  directional count on identical tiles; do not read the totals.** */
 function box(front: string, lid: string, band: string, emblem = ''): string {
   return `
 <path d="M3.4 9.4h17.2v9.4a1.7 1.7 0 0 1-1.7 1.7H5.1a1.7 1.7 0 0 1-1.7-1.7z" fill="${front}"/>
 <path d="M3.4 9.4 6.6 5.6h10.8l3.2 3.8z" fill="${lid}"/>
-<path d="M10.2 5.6h3.6v14.9h-3.6z" fill="${band}" stroke-width="1.3"/>
+<path d="M9.8 7.0h4.4v5.6H9.8z" fill="${band}" stroke-width="1.3"/>
 ${emblem}`;
 }
 
