@@ -82,6 +82,20 @@ Not style preferences. Every one exists because breaking it cost hours.
    Score the reference side every round; outside 7–9 discards it. Two critics reversing → stop.
 
 8. **Never `git stash`.** Its blast radius is the entire repo, including other agents' uncommitted work.
+   🚨 **AND THAT INCLUDES `--autostash`.** `git pull --rebase --autostash` **creates a stash**, and it
+   is the natural way to pull a branch with a dirty tree — so the ban is easy to break while trying
+   to be careful. Done 2026-08-06; it happened to be a no-op that re-applied immediately, and the
+   agent declared it. **That was luck, not care.** If you must pull with peers mid-edit: don't.
+   Commit your own files with pathspec form first, or work from `git archive HEAD` (`headserve.mjs`).
+
+8b. 🚨 **KILL BY PID, NEVER BY PATTERN.** `pkill -f "<toolname>"` matched **two peers' snapshot
+   servers** and killed them mid-measurement (2026-08-06; they restarted, so it cost time rather
+   than work). This file already banned `pkill -f fa-snap` for exactly this reason and the ban was
+   read as being about *that string* rather than about *pattern-killing*. **Every agent runs the same
+   tool names**, so any `-f` pattern that matches your process matches theirs. Record the PID when
+   you spawn something and kill that. `tools/tmp/snapsweep.mjs` exists because it kills on a
+   **derived bound** — nothing younger than the oldest live `with_snapshot` parent — rather than on
+   a name.
 
 9. **One owner per file set.** Parallel agents in the same file clobber each other. The hardest
    constraint in this project — it held across ~200 agents with zero clobbering.

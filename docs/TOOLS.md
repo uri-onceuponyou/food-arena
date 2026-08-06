@@ -369,7 +369,7 @@ counts and sit with `chars_metrics`:
 | `tools/tmp/menu_accept.mjs` | **361** | 5 landscape viewports × screens, + the CSS-backtick parse |
 | `tools/tmp/menu_accept_portrait.mjs` | **219** | portrait + the nested-`@media` lint. **Opt-in, not folded in** |
 | `tools/tmp/input_accept.mjs` | **81** | real CDP keys/mouse asserted against **sim state**, both routes |
-| `tools/tmp/shop_accept.mjs` | **168** | every displayed price/odd re-derived in Node |
+| `tools/tmp/shop_accept.mjs` | **170** | every displayed price/odd re-derived in Node. ⚠️ Was 168 before `33a0048` added the rarity-sentence derivation. **`gatecount` cannot check this row — it is browser-bound and skipped**, which is why it went stale unnoticed |
 | `tools/tmp/name_accept.mjs` | **29** | name sanitiser, both entry paths |
 | `tools/tmp/chip_probe.mjs` | **72** | pause chip vs thumb zone, 6 viewports × 2 states |
 | `node tools/audio-probe.mjs --mode all` | **427** | ⚠️ `--mode live`'s countdown-onset checks are **pre-existing load flake, PROVEN not assumed** — untouched HEAD on a clean isolated server gave **29/29, 27/29, 26/29 on three consecutive runs**. Do not attribute them to your change without that control. Judge by **depth 91 / identity 78**. |
