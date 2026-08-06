@@ -102,9 +102,23 @@ const CSS = `
   /* Vertical rhythm. vh-driven because landscape phones run out of HEIGHT first. */
   --gap: clamp(6px, 1.3vh, 12px);
   --gutter: clamp(10px, 1.6vw, 20px);
-  /* TWO radii, project-wide. Anything you press is a pill; anything you read off is
-     a 16px surface. Four competing radii on one screen was a named critic finding. */
-  --radius-surface: 16px;
+  /* ── THIS ASSERTION WAS FALSE WHEN IT WAS WRITTEN, AND IS KEPT WITH THE REASON ──
+     The old wording, verbatim:
+
+       "TWO radii, project-wide. Anything you press is a pill; anything you read off is
+        a 16px surface. Four competing radii on one screen was a named critic finding."
+
+     It was an intention, not a fact, and nothing ever measured it. Counted by
+     'tools/tmp/ds_inventory.mjs' (which parses every stylesheet in src/ui/ with the
+     real TypeScript parser rather than grepping it): 18 distinct border-radius
+     declarations, 15 distinct absolute atoms, across 110 uses. This token is referenced
+     exactly THREE times in the entire codebase, while 10px, 12px, 13px and 14px are
+     typed literally 17 times between them for the same job.
+
+     It is now the third rung of a five-rung scale, named '--ds-r-3' with the rest of
+     the tokens at the foot of this file, and kept here as an alias so the three
+     existing references keep working and keep resolving to the same 16px. */
+  --radius-surface: var(--ds-r-3);
 
   position: fixed;
   inset: 0;
@@ -239,11 +253,11 @@ const CSS = `
   height: 40px;
   padding: 0 15px;
   background: var(--panel);
-  border: 3px solid var(--ink);
-  border-radius: 999px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
+  box-shadow: var(--ds-e2);
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   font-size: clamp(0.7rem, 1.7vh, 0.95rem);
   white-space: nowrap;
   color: var(--ink);
@@ -272,17 +286,17 @@ const CSS = `
   padding: 0 12px;
   cursor: pointer;
   background: var(--panel);
-  border: 3px solid var(--ink);
-  border-radius: 999px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
+  box-shadow: var(--ds-e2);
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   font-size: clamp(0.7rem, 1.6vh, 0.9rem);
   color: var(--ink);
   transition: transform 0.08s, box-shadow 0.08s, background 0.12s;
 }
 .fa-iconbtn:hover { background: #FFFFFF; }
-.fa-iconbtn:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.35); }
+.fa-iconbtn:active { transform: translateY(3px); box-shadow: var(--ds-e0); }
 
 /* Segmented tab bar.
    The height is the tap target PLUS the container's own 3px border on each side —
@@ -308,8 +322,8 @@ const CSS = `
   min-height: calc(var(--tap) + 6px);
   padding: 3px;
   background: var(--ink);
-  border: 3px solid var(--ink);
-  border-radius: 999px;
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
   overflow: hidden;
   box-shadow: 0 3px 0 rgba(0,0,0,0.35), inset 0 2px 6px rgba(0,0,0,0.5);
 }
@@ -321,12 +335,12 @@ const CSS = `
   color: rgba(255,243,222,0.78);
   --fa-ic-ink: var(--cream);
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   font-size: clamp(0.74rem, 1.9vh, 1.02rem);
   letter-spacing: 0.02em;
   min-height: var(--tap);
   padding: 0 clamp(10px, 1.6vw, 22px);
-  border-radius: 999px;
+  border-radius: var(--ds-r-pill);
   transition: background 0.12s, color 0.12s;
 }
 .fa-tab:hover:not(.is-active) { background: rgba(255,243,222,0.16); color: var(--cream); }
@@ -342,9 +356,9 @@ const CSS = `
 /* ── Panels ───────────────────────────────────────────────────────────────── */
 .fa-panel {
   background: var(--panel);
-  border: 3px solid var(--ink);
+  border: var(--ds-stroke-2) solid var(--ink);
   border-radius: var(--radius-surface);
-  box-shadow: 0 5px 0 rgba(0,0,0,0.35);
+  box-shadow: var(--ds-e3);
   padding: clamp(8px, 1.5vh, 14px);
   min-height: 0;
   display: flex;
@@ -361,7 +375,7 @@ const CSS = `
 .fa-panel-title {
   margin: 0;
   font-family: 'Rubik', sans-serif;
-  font-weight: 900;
+  font-weight: var(--ds-w-black);
   font-size: clamp(0.72rem, 1.7vh, 0.95rem);
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -374,7 +388,7 @@ const CSS = `
 .fa-title {
   margin: 0;
   font-family: 'Rubik', sans-serif;
-  font-weight: 900;
+  font-weight: var(--ds-w-black);
   font-size: clamp(1rem, 3.1vh, 1.75rem);
   line-height: 1.05;
   letter-spacing: 0.01em;
@@ -398,14 +412,14 @@ const CSS = `
   min-height: var(--tap);
   padding: 0 clamp(14px, 2vw, 30px);
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   font-size: clamp(0.8rem, 1.9vh, 1.1rem);
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--ink);
   background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
-  border: 3px solid var(--ink);
-  border-radius: 999px;
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
   box-shadow: 0 4px 0 var(--gold-shadow);
   transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
   white-space: nowrap;
@@ -457,7 +471,7 @@ const CSS = `
   background: linear-gradient(180deg, #FFFFFF 0%, #EFE2CC 100%);
   box-shadow: 0 4px 0 rgba(0,0,0,0.35);
 }
-.fa-btn--quiet:active { box-shadow: 0 0 0 rgba(0,0,0,0.35); }
+.fa-btn--quiet:active { box-shadow: var(--ds-e0); }
 
 /* Left-aligned nav row (Foods / Shop / Items ...). */
 .fa-menuitem {
@@ -471,12 +485,12 @@ const CSS = `
   padding: 0 12px;
   text-align: start;
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   font-size: clamp(0.74rem, 1.7vh, 0.95rem);
   color: var(--ink);
   background: #FFFFFF;
-  border: 3px solid var(--ink);
-  border-radius: 999px;
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
   box-shadow: 0 3px 0 rgba(0,0,0,0.3);
   transition: transform 0.1s, background 0.12s, box-shadow 0.1s;
 }
@@ -488,7 +502,7 @@ const CSS = `
 .fa-menuitem-soon {
   margin-inline-start: auto;
   font-size: 0.62em;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(26,18,36,0.45);
@@ -511,7 +525,7 @@ const CSS = `
 .fa-scroll::-webkit-scrollbar-track { background: transparent; }
 .fa-scroll::-webkit-scrollbar-thumb {
   background: rgba(26,18,36,0.35);
-  border-radius: 999px;
+  border-radius: var(--ds-r-pill);
 }
 
 /* ── Level / progress bar ─────────────────────────────────────────────────── */
@@ -524,7 +538,7 @@ const CSS = `
 }
 .fa-level-label {
   font-family: 'Rubik', sans-serif;
-  font-weight: 900;
+  font-weight: var(--ds-w-black);
   font-size: clamp(0.69rem, 1.6vh, 0.9rem);
   color: var(--cream);
   text-shadow: 0 2px 0 var(--ink);
@@ -538,14 +552,14 @@ const CSS = `
   min-width: 40px;
   height: clamp(20px, 3vh, 26px);
   background: var(--panel);
-  border: 3px solid var(--ink);
-  border-radius: 999px;
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
   overflow: hidden;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  box-shadow: var(--ds-e2);
 }
 .fa-level-fill {
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--ds-r-pill);
   background: repeating-linear-gradient(45deg, var(--lettuce) 0 10px, #9BE03A 10px 20px);
   transition: width 0.4s ease-out;
 }
@@ -556,7 +570,7 @@ const CSS = `
   align-items: center;
   justify-content: center;
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   font-size: clamp(0.69rem, 1.4vh, 0.76rem);
   letter-spacing: 0.03em;
   color: var(--ink);
@@ -573,7 +587,7 @@ const CSS = `
   flex: 0 0 auto;
   width: clamp(58px, 8vw, 92px);
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   font-size: clamp(0.69rem, 1.45vh, 0.8rem);
   white-space: nowrap;
 }
@@ -584,12 +598,12 @@ const CSS = `
   height: 14px;
   background: #FFFFFF;
   border: 2.5px solid var(--ink);
-  border-radius: 999px;
+  border-radius: var(--ds-r-pill);
   overflow: hidden;
 }
 .fa-stat-fill {
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--ds-r-pill);
   transition: width 0.32s cubic-bezier(0.2, 0.9, 0.3, 1);
   background-image: linear-gradient(180deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0) 45%);
   background-blend-mode: overlay;
@@ -599,7 +613,7 @@ const CSS = `
   width: 20px;
   text-align: end;
   font-family: 'Rubik', sans-serif;
-  font-weight: 900;
+  font-weight: var(--ds-w-black);
   font-size: clamp(0.69rem, 1.4vh, 0.78rem);
   color: rgba(26,18,36,0.7);
 }
@@ -660,9 +674,9 @@ const CSS = `
   height: 22px;
   padding: 0 9px;
   border: 2px solid var(--ink);
-  border-radius: 999px;
+  border-radius: var(--ds-r-pill);
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   font-size: clamp(0.72rem, 1.55vh, 0.82rem);
   /* 0.09em -> 0.11em: the stroke adds ~1.6px of ink to every glyph's outside edge, so
      the tracking has to grow with it or adjacent letters touch. */
@@ -709,4 +723,796 @@ const CSS = `
 :root.fa-reduce-motion .fa-btn--primary,
 :root.fa-reduce-motion .fa-rays,
 :root.fa-reduce-motion .fa-confetti { animation: none !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   THE COMPONENT LAYER  —  'ds-*'
+   ═══════════════════════════════════════════════════════════════════════════════
+
+   Uri, on the shipped build: "The character and scenery is a lot better. But the
+   text, menu boxes, icons, bars, etc still look amateurish."
+
+   ── THE MEASURED CAUSE, and it is not taste ─────────────────────────────────
+   'tools/tmp/ds_inventory.mjs' parses every stylesheet in 'src/ui/' (with the real
+   TypeScript parser, because every one lives in a template literal) and counts the
+   authored values. Across the five menu screens plus this file:
+
+     border-radius     14 distinct declarations / 11 absolute atoms   (a system: ~4)
+     box-shadow        53 distinct declarations / 66 distinct LAYERS  (a system: ~5)
+     font-size        102 distinct declarations                       (a system: ~7)
+     border            15 distinct, of which FOUR are the same ink line at
+                       2px / 2.5px / 3px / 4px
+     gap               20 distinct, a continuum from 1px to 22px with no structure
+
+   303 class names across the five screens, of which SEVEN are shared. Every screen
+   re-implements its own panel, its own button, its own bar. Nothing reads as one
+   product when every box has its own physics.
+
+   ── THE SINGLE MOST DAMNING NUMBER, and it is NOT the shadow count ──────────
+   Decomposing every 'font-size: clamp(min, slope, max)' (ds_inventory --clamps):
+
+     91 of 102 font-size declarations — 89% of all type on the menus — land in ONE
+     cluster. min 0.58-0.84rem, max 0.70-1.15rem, slope 1.15-2.0vh.
+
+   The menus do not have a type scale that drifted. THEY HAVE ONE SIZE, jittered 26
+   different ways. A section label, a stat value, a nav item and a currency counter
+   all render between 11px and 18px, and the only thing separating them is 0.02rem
+   of noise no reader can see. That is what "amateurish" looks like from the inside:
+   a shipped lobby's numerals are 3-4x its labels; ours are within 1.15x, at random.
+
+   ── WHERE THE SCALES BELOW COME FROM ────────────────────────────────────────
+   From the histogram, not from taste. Every step is either the MODE of an observed
+   cluster or a rung on a ratio anchored at two observed modes:
+
+     radius   999px (n=51) . 50% (n=19) . 12px (mode of the 10-14 band, n=24)
+              16px (mode of the 16-26 band once var(--radius-surface) is counted)
+              3px (mode of the 2-3 band)
+     lip      alpha 0.35 is the mode by a landslide (13 of the top 20 declarations);
+              offset 3px is the mode (n=13), then 2px (n=4), 5px (n=3), 4px, 10px
+     stroke   3px (n=26) . 2px (n=12) . 4px (n=3);  2.5px (n=16) is drift, and it is
+              settings.ts's alone in 8 of its 16 uses
+     space    3 . 6 . 8 . 12 . 20  — the four modes of the gap continuum, plus one
+              step for the 16-22 clamp tails
+     type     ratio 1.2, anchored so that step 2 is the PER-PART MODE of the
+              91-declaration cluster (min 0.69rem n=39, slope 1.4vh n=18, max
+              0.82rem n=15 — the modes of the three parts, not a triple that any one
+              author happened to type) and step 6 lands on the observed TITLE cluster
+              (max 1.7-1.85rem, slope 2.8-3.2vh). 1.2 was not chosen: 1.70 / 0.82 =
+              2.07, and 2.07^(1/4) = 1.199. The data picked it.
+
+   ── AND WHAT THE COUNTS DO NOT MEASURE (docs/LESSONS.md 6b) ─────────────────
+   Collapsing 53 shadows to 6 measures TIDINESS. It does not measure quality, and a
+   stylesheet where every box is the same immaculate panel scores perfectly on that
+   metric while being exactly the defect. The reference plates
+   ('reference/images/curated/menus/') do NOT run one rounded rect everywhere: they
+   run distinct treatments for distinct JOBS — a dark slab for utility and data, a
+   saturated slab for actions, a pill for read-only counters, a circular badge that
+   breaks its parent's silhouette for counts, a SEGMENTED meter for discrete
+   progression against a continuous bar for fractional. That differentiation is the
+   win, and no counter in this repo can see it. Hence the '--paper' / '--slate' /
+   '--action' split below, which is a design claim and not a tidiness one.
+
+   ⚠️ And note what is NOT the mechanism: "add drop shadows" was refused on a
+   measurement. The dark% budget reads 14.50 on our 5.17-scoring screen against
+   13.63 on our 7.00-scoring one — a 0.87 gap against a +/-4.26 floor. It does not
+   separate our good menu from our bad one. Brawl Stars' 43.74 is a DARK-THEMED
+   game. Chasing it means darkening our art to satisfy an instrument.
+
+   ── THIS LAYER SHIPS UNUSED, ON PURPOSE ─────────────────────────────────────
+   Five screens are owned by five other agents. A foundation that silently restyles
+   all five while their owners are asleep is how this project loses a night. So
+   every class here is prefixed 'ds-', which no existing element carries, and every
+   token is prefixed '--ds-', which nothing existing reads. Adoption is each
+   owner's call, in their own file, in a later pass.
+
+   Proven, not asserted: 'tools/tmp/ds_neutral.mjs' censuses 70 computed properties
+   on every element of all five screens at three viewports, before and after, on ONE
+   frozen snapshot with this file symlinked live ('snap_hold --swap'), and diffs the
+   captures against a drift control taken on the unedited tree.
+
+   ── 🚨 AND THE CHROME IS SHARED, WHICH REFUTES THE OBVIOUS PLAN ─────────────
+   The plan this pass started from was "character select scores 7.00 and home 5.17, so
+   make home like the screen next door." A per-element critique (commit 6ebb6d1)
+   refutes it. Every 2D chrome element measured lives in THIS FILE, and the two places
+   character select overrides it — '.fa-stat-track' height and '.fa-stat-pips' — moved
+   the critic by ZERO. So the answer to "does our own better screen already solve this
+   element" is NO, for all shared chrome. There is no screen to copy: the fixes have to
+   land in the layer, which makes it considerably more load-bearing than briefed.
+
+   Three of its findings are built above, each against a measurement, and two of them
+   REFUSE the obvious mechanism:
+     * the stat row is 0.60x the reference's height with a line glyph where the
+       reference has a tinted mass, and the label beside the value instead of above it.
+       Pips and a taller TRACK are refuted — character select already has both and
+       scored identically. See '.ds-row' and '.ds-tile--stat'.
+     * the primary button is NOT flat: our vertical shading is +0.038/+0.064 against a
+       reference +0.050. The difference is the LABEL treatment. See '.ds-btn--primary'.
+     * the secondary control is 0.91x the primary's area against a reference 0.25x —
+       a relationship no crop of either button could see. See '.ds-btn--secondary'.
+   Its type and shadow findings are the ones this layer was already built for: 8 of 10
+   measured font sizes inside 9.6-12.8px (a 1.33x range with eight steps in it, i.e. no
+   perceptible hierarchy below 16px), and 14 box-shadows that are one idiom at six
+   depths.
+
+   ── ADOPTION MAP, for whoever comes next ────────────────────────────────────
+   Derived from the class census, so it is a list of real sites and not a wish:
+     ds-surface  <- home-track, chars-card, chars-detail, tr-node, tr-sku,
+                    shop-card, set-section, set-row, fa-panel
+     ds-btn      <- chars-lv-btn, tr-claimall, tr-open-cta, tr-sku-buy, shop-buy,
+                    set-done, set-reset, tr-sheet-close, set-bindreset, tr-odds,
+                    home-change   (11 bespoke buttons beside the shared fa-btn)
+     ds-bar      <- home-bar, tr-track, tr-spine, fa-level-track, fa-stat-track
+     ds-meter    <- home-pips, fa-stat-pips, tr-pip  (three segmented meters, unshared)
+     ds-tile     <- home-kit-tile, home-track-icon, tr-node-medal, shop-card-em,
+                    set-row-icon, tr-open-em, chars-ability-em
+     ds-badge    <- tr-open-count, shop-held-n, chars-card-lv
+     ds-row      <- home-rec, chars-fact, tr-odds-row, shop-odds-row
+     ds-chip     <- home-track-pill, chars-hero-badge, tr-tier, tr-status,
+                    shop-guarantee, tr-reveal-chip
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+.fa-root {
+  /* ── RADIUS ─────────────────────────────────────────────────────────────── */
+  --ds-r-1: 3px;        /* inner clip, scrollbar thumb, nib */
+  --ds-r-2: 12px;       /* tile, card, row — the working radius */
+  --ds-r-3: 16px;       /* panel — the largest flat surface */
+  --ds-r-pill: 999px;   /* anything you press, and every counter */
+  --ds-r-round: 50%;    /* a token, a medal, a count bubble */
+
+  /* ── ELEVATION ──────────────────────────────────────────────────────────────
+     The whole drift is one idiom with two hand-typed parameters. 53 distinct
+     box-shadow declarations decompose into: 'inset? 0 Npx 0 COLOUR', N in
+     {0,1,2,3,4,5,6,7,8,10}, COLOUR in {rgba(0,0,0,a) for ten values of a} plus
+     four named lip colours. Nobody was designing a new shadow; they were
+     re-typing the whole declaration to change ONE of its two numbers.
+
+     So the colour comes out as a variable. A component that wants a gold lip sets
+     '--ds-lip: var(--gold-shadow)' and keeps the ladder. That single indirection
+     is what collapses 53 declarations into six, and it is also why adoption is
+     cheap: the press state is 'box-shadow: var(--ds-e0)', which is the SAME
+     colour at zero offset, so it animates instead of popping. */
+  --ds-lip: rgba(0,0,0,0.35);
+  --ds-e0: 0 0 0 var(--ds-lip);                                     /* pressed */
+  --ds-e1: 0 2px 0 var(--ds-lip);                                   /* chip, tag */
+  --ds-e2: 0 3px 0 var(--ds-lip);                                   /* raised (mode) */
+  --ds-e3: 0 5px 0 var(--ds-lip);                                   /* panel */
+  --ds-e4: 0 7px 0 var(--ds-lip), 0 10px 22px rgba(0,0,0,0.4);      /* hero CTA */
+  --ds-e5: 0 10px 0 rgba(0,0,0,0.4), 0 20px 40px rgba(0,0,0,0.5);   /* modal sheet */
+  /* The inner top highlight that makes a slab read as moulded rather than filled.
+     Two, because the same white at 0.9 on a dark surface is a stripe, not a
+     highlight — the six existing uses had already split into 0.7-0.9 on light and
+     0.14-0.15 on dark, so this records a distinction that was already being made. */
+  --ds-bevel: inset 0 2px 0 rgba(255,255,255,0.9);
+  --ds-bevel-dark: inset 0 2px 0 rgba(255,255,255,0.15);
+
+  /* ── STROKE — the ink line ────────────────────────────────────────────────── */
+  --ds-stroke-1: 2px;
+  --ds-stroke-2: 3px;   /* the mode, n=26 */
+  --ds-stroke-3: 4px;
+
+  /* ── SPACE ────────────────────────────────────────────────────────────────── */
+  --ds-s1: 3px;
+  --ds-s2: 6px;
+  --ds-s3: 8px;
+  --ds-s4: 12px;
+  --ds-s5: 20px;
+
+  /* ── TYPE ───────────────────────────────────────────────────────────────────
+     Seven steps at ratio 1.2. Each is clamp(min, slope, max) with
+
+       max(n)   = 0.82rem * 1.2^(n-2)          rounded to 2dp
+       min(n)   = max(n-1)                     so a short screen drops every element
+                                               exactly one rung, which is a property
+                                               rather than a pile of guesses
+       slope(n) = max(n) in px / 9.37 per vh   so the crossover sits near a 937px-tall
+                                               viewport for every step
+
+     ⚠️ The bottom of the ladder is CLAMPED AT 0.69rem (11.04px) and does not follow
+     the ratio. That is not a rounding choice: 'screen_metrics.mjs' flags every text
+     run under 11px, the tight case is a 390px-TALL landscape phone where the min
+     binds, and 0.82/1.2 = 0.68rem = 10.88px would fail it. So steps 1 and 2 share a
+     floor and converge on a short screen. Recorded rather than hidden.
+
+     Rendered, at a 16px root:              phone 390h   desktop 900h   cap (>937h)
+       --ds-t1  caption, tag, superscript     11.0px       11.0px         11.5px
+       --ds-t2  label, stat name  [THE MODE]  11.0px       12.6px         13.1px
+       --ds-t3  body, control, nav item       13.1px       14.9px         15.7px
+       --ds-t4  lead, chip value              15.7px       18.0px         18.9px
+       --ds-t5  numeral, price                18.9px       21.6px         22.7px
+       --ds-t6  screen title                  22.7px       26.1px         27.2px
+       --ds-t7  display                       27.2px       31.5px         32.6px
+
+     The step between consecutive DESKTOP renders is 1.15 / 1.18 / 1.21 / 1.20 /
+     1.21 / 1.21 — the ratio holds everywhere except across the 11px floor, which is
+     the one place it cannot.
+
+     Steps 3 and up are BIGGER than almost anything currently on the menus, and
+     that is the point: the defect is that nothing is big. Nothing above t7 is
+     tokenised — the opening title (4.6rem), the trophy count (5.6rem) and the
+     character-select name (4rem) are deliberate per-screen display type and stay
+     their owners' business. */
+  --ds-t1: clamp(0.69rem, 1.2vh, 0.72rem);
+  --ds-t2: clamp(0.69rem, 1.4vh, 0.82rem);
+  --ds-t3: clamp(0.82rem, 1.65vh, 0.98rem);
+  --ds-t4: clamp(0.98rem, 2vh, 1.18rem);
+  --ds-t5: clamp(1.18rem, 2.4vh, 1.42rem);
+  --ds-t6: clamp(1.42rem, 2.9vh, 1.7rem);
+  --ds-t7: clamp(1.7rem, 3.5vh, 2.04rem);
+
+  /* Three weights, from five. 600 (n=4) and 500 (n=1) are single-site drift. */
+  --ds-w-body: 700;
+  --ds-w-bold: 800;   /* n=59 */
+  --ds-w-black: 900;  /* n=32 */
+
+  /* Three tracking steps, from twelve. The clusters are real: 0.01-0.02 (tight,
+     for large type where the stroke already separates), 0.03-0.05 (normal),
+     0.08-0.12 (uppercase, where tracking is doing structural work). */
+  --ds-track-tight: 0.02em;
+  --ds-track: 0.04em;
+  --ds-track-caps: 0.09em;
+
+  /* ── SURFACE COLOURS, BY JOB ────────────────────────────────────────────────
+     This is the design claim, not the tidiness one. Our menus are cream boxes on a
+     warm backdrop, all the way down; the reference plates run three surfaces that
+     mean three different things, and the meaning is carried by the SURFACE rather
+     than by a label. Reusing the existing measured tokens, so no new colour enters
+     the product and every contrast pair below is one the batteries already know. */
+  --ds-paper: var(--panel);                                            /* read */
+  --ds-paper-hi: #FFFFFF;
+  --ds-slate: var(--ink);                                              /* utility */
+  --ds-slate-2: var(--ink-2);
+  --ds-action-a: var(--mustard-hi);                                    /* get */
+  --ds-action-b: var(--mustard);
+  --ds-ink-on-paper: var(--ink);
+  --ds-ink-on-slate: var(--cream);
+}
+
+/* ═══ TYPE UTILITIES ══════════════════════════════════════════════════════════
+   Size only. Family and weight stay separate concerns, because a screen that wants
+   the label size at black weight should not have to fight a compound class. */
+.ds-t1 { font-size: var(--ds-t1); }
+.ds-t2 { font-size: var(--ds-t2); }
+.ds-t3 { font-size: var(--ds-t3); }
+.ds-t4 { font-size: var(--ds-t4); }
+.ds-t5 { font-size: var(--ds-t5); }
+.ds-t6 { font-size: var(--ds-t6); }
+.ds-t7 { font-size: var(--ds-t7); }
+
+/* A <button> does NOT inherit font-family — 'screen_metrics.mjs' found real controls
+   shipping in Arial because of it. Anything structural names Rubik explicitly. */
+.ds-face { font-family: 'Rubik', sans-serif; }
+.ds-w-body { font-weight: var(--ds-w-body); }
+.ds-w-bold { font-weight: var(--ds-w-bold); }
+.ds-w-black { font-weight: var(--ds-w-black); }
+.ds-caps {
+  text-transform: uppercase;
+  letter-spacing: var(--ds-track-caps);
+}
+
+/* Counters that do not jitter. A trophy total ticking 3170 -> 3180 reflows every
+   glyph in a proportional face, which reads as cheap in exactly the way Uri named.
+   Costs one declaration and is invisible until the number changes. */
+.ds-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* The headline treatment, factored out of '.fa-title' so a screen can put a stroked
+   headline anywhere without re-deriving it. 'paint-order: stroke fill' is
+   LOAD-BEARING and measured: without it the stroke paints over the fill and eats
+   half of an ~1.8px stem, and the glyph reads as solid ink. See the '.fa-rarity'
+   comment above for the six-rarity pixel measurement that settled it. */
+.ds-stroked {
+  color: var(--cream);
+  -webkit-text-stroke: var(--ds-stroke-2) var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 4px 0 var(--ink);
+}
+
+/* ═══ SURFACE ═════════════════════════════════════════════════════════════════
+   One box, three jobs. The modifier is not decoration — it is the only thing
+   telling a player whether a box is something to READ, something to USE, or
+   something that GIVES them something, and picking it is the adopting screen's
+   most consequential decision. */
+.ds-surface {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-s3);
+  min-height: 0;
+  padding: var(--ds-s4);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-3);
+  background: var(--ds-paper);
+  box-shadow: var(--ds-e3);
+  color: var(--ds-ink-on-paper);
+}
+/* READ — the cream plate. Data you look at and do not touch. */
+.ds-surface--paper { background: var(--ds-paper); color: var(--ds-ink-on-paper); }
+/* USE — the dark slab. The single biggest structural difference from the reference
+   plates, which put navigation, settings and secondary data on dark and reserve
+   bright surfaces for actions. We have this treatment in exactly one place today
+   (the tab track, which was itself a fix for "the lowest-contrast element on the
+   lobby") and it worked there for the same reason it will work here: a dark plate
+   separates from a warm backdrop, and a bright state inside it separates from the
+   plate. Cream on ink measures ~12:1. */
+.ds-surface--slate {
+  background: linear-gradient(180deg, var(--ds-slate-2) 0%, var(--ds-slate) 100%);
+  color: var(--ds-ink-on-slate);
+  box-shadow: var(--ds-e3), var(--ds-bevel-dark);
+}
+/* GET — the saturated slab. Reserved for surfaces that hand the player something. */
+.ds-surface--action {
+  background: linear-gradient(180deg, var(--ds-action-a) 0%, var(--ds-action-b) 100%);
+  color: var(--ds-ink-on-paper);
+  --ds-lip: var(--gold-shadow);
+  box-shadow: var(--ds-e3), var(--ds-bevel);
+}
+.ds-surface--tile { border-radius: var(--ds-r-2); padding: var(--ds-s3); }
+.ds-surface--flush { padding: 0; overflow: hidden; }
+.ds-surface--flat { box-shadow: none; }
+.ds-surface--raised { box-shadow: var(--ds-e4); }
+
+/* ═══ BUTTON ══════════════════════════════════════════════════════════════════
+   Press physics come free from the lip token: the raised state is an offset lip and
+   the pressed state is the SAME colour at zero offset, so the element travels down
+   into its own shadow. Eleven bespoke buttons across the five screens each
+   re-derive this; every one of them is this component plus a colour. */
+.ds-btn {
+  appearance: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-s3);
+  min-height: var(--tap);
+  padding: 0 var(--ds-s5);
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t3);
+  letter-spacing: var(--ds-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ds-ink-on-paper);
+  background: linear-gradient(180deg, var(--ds-action-a) 0%, var(--ds-action-b) 100%);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
+  --ds-lip: var(--gold-shadow);
+  box-shadow: var(--ds-e2);
+  transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
+}
+.ds-btn:hover { filter: brightness(1.06); }
+.ds-btn:active { transform: translateY(3px); box-shadow: var(--ds-e0); }
+.ds-btn[disabled] { opacity: 0.5; cursor: default; filter: none; }
+.ds-btn[disabled]:active { transform: none; box-shadow: var(--ds-e2); }
+
+/* The one loud control on a screen. Bigger, not just brighter: a critic measured our
+   CTA at ~17% of frame width against a ~22-25% reference norm and noted it carried
+   less weight than the disabled nav around it. Size IS the hierarchy here. */
+/* ⚠️ AND THE OBVIOUS FIX IS REFUTED, WITH A NUMBER. The natural diagnosis of our CTA
+   against the reference is "ours is flat, add a gradient". It is NOT flat: our vertical
+   shading measures +0.038 / +0.064 against the reference's +0.050, i.e. we already have
+   MORE. Adding gradient would spend the pass moving a number that is already past the
+   target — LESSONS 6b, an acceptance test that is not the binding constraint.
+
+   The measured remaining difference is the LABEL: ours is dark ink on yellow, the
+   reference is white with a heavy black outline. So the primary carries the stroked
+   treatment, which is the same idiom '.fa-title' and '.fa-rarity' already use and the
+   same one measured at 16.55:1 on every rarity — a stroked glyph sits on its own
+   stroke, so this also makes the label colour-independent of the button fill. */
+.ds-btn--primary {
+  font-size: var(--ds-t6);
+  min-height: clamp(var(--tap), 9.5vh, 78px);
+  padding: 0 clamp(24px, 3.6vw, 58px);
+  border-width: var(--ds-stroke-3);
+  box-shadow: var(--ds-e4), var(--ds-bevel);
+  color: var(--cream);
+  -webkit-text-stroke: var(--ds-stroke-2) var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 var(--ink);
+}
+.ds-btn--primary:active { transform: translateY(6px); box-shadow: var(--ds-e0), var(--ds-bevel); }
+/* ── SIZE IS THE HIERARCHY, AND OURS IS INVERTED BY 3.6x ─────────────────────────
+   Measured on home: the secondary control (CHANGE) is 0.91x the PRIMARY's area. The
+   reference's secondary is 0.25x. We are 3.6x too large relative to our own primary,
+   which is why the lobby reads as three equal columns rather than one dominant action.
+
+   Note the SHAPE of that finding, because it generalises: no crop of either button
+   could have found it. An isolated element cannot see what it sits beside — the same
+   blind spot that once let a character read as a goat. A component library is where
+   the relationship gets fixed, because it is the only place both ends are declared.
+
+   So the ratio is a stated target, not a vibe: this modifier stays at the 44px tap
+   floor while '--primary' runs to 78px (0.56x linear), and a caller should hold its
+   WIDTH near half the primary's to land the 0.25x area. '.fa-btn--quiet' is the class
+   actually carrying the defect today and it is NOT changed here — it is live on five
+   screens and this layer ships pixel-neutral; the fix belongs to that screen's owner.
+
+   Secondary also reads as secondary by SIZE as well as colour — a same-size pair in
+   two hues is how a menu ends up with no hierarchy at all.
+
+   ── INK, NOT CREAM, AND THAT IS A MEASUREMENT ─────────────────────────────────
+   This shipped for one iteration as cream on the blue and 'tools/tmp/ds_sheet.mjs'
+   caught it in the rendered specimen: cream on '--water' measures 2.92:1 and on the
+   gradient's lighter top stop 2.14:1, against a 4.5 floor. Ink on the same two stops
+   measures 5.13 and 7.60. Same failure family as the six rarities that failed white-
+   on-fill, and the same lesson: a brand colour that carries white in the HUD does not
+   automatically carry it as a button face. */
+.ds-btn--secondary {
+  font-size: var(--ds-t2);
+  padding: 0 var(--ds-s4);
+  background: linear-gradient(180deg, #4FB3E8 0%, var(--water) 100%);
+  color: var(--ink);
+  --ds-lip: #0e4a6d;
+}
+.ds-btn--quiet {
+  background: linear-gradient(180deg, #FFFFFF 0%, #EFE2CC 100%);
+  --ds-lip: rgba(0,0,0,0.35);
+}
+/* The gradient runs '--ketchup' -> a darker red rather than '--tomato' -> '--ketchup',
+   and the reason is the WORST stop rather than taste. Cream on '--tomato' (#E63946) is
+   3.80:1 — under the 4.5 floor, and a reset-your-progress button is the last control in
+   the product that should be hard to read. Cream on '--ketchup' (#D62839) is 4.52 and
+   on the dark stop 8.13, so running the ramp one notch darker clears AA at both ends
+   without changing the hue. Ink was tried instead and measures 4.29 on '--tomato',
+   i.e. it fails too: the fix had to be the FILL, not the type. */
+.ds-btn--danger {
+  background: linear-gradient(180deg, var(--ketchup) 0%, #8f1a24 100%);
+  color: var(--cream);
+  --ds-lip: #5c1017;
+}
+.ds-btn--green {
+  background: linear-gradient(180deg, #A6E24A 0%, var(--lettuce) 100%);
+  --ds-lip: #43690b;
+}
+/* SQUARE, not a pill. Our icon control is '.fa-iconbtn', a pill, everywhere; the
+   plates use a rounded SQUARE for a glyph-only control and a pill only for text.
+   The shape is doing the work of telling you which it is before you read it. */
+.ds-btn--icon {
+  width: var(--tap);
+  min-width: var(--tap);
+  padding: 0;
+  border-radius: var(--ds-r-2);
+  background: linear-gradient(180deg, var(--ds-slate-2) 0%, var(--ds-slate) 100%);
+  color: var(--ds-ink-on-slate);
+  --fa-ic-ink: var(--cream);
+  --ds-lip: rgba(0,0,0,0.45);
+  box-shadow: var(--ds-e2), var(--ds-bevel-dark);
+}
+.ds-btn--block { width: 100%; }
+
+/* ═══ CHIP — a read-only counter ══════════════════════════════════════════════
+   Never interactive. A chip that can be tapped is a '.ds-btn', and keeping the two
+   apart is the difference between a player knowing what is pressable and guessing. */
+.ds-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-s2);
+  height: 40px;
+  padding: 0 var(--ds-s4);
+  background: var(--ds-paper);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
+  box-shadow: var(--ds-e2);
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t2);
+  white-space: nowrap;
+  color: var(--ds-ink-on-paper);
+}
+.ds-chip--slate {
+  background: linear-gradient(180deg, var(--ds-slate-2) 0%, var(--ds-slate) 100%);
+  color: var(--ds-ink-on-slate);
+  box-shadow: var(--ds-e2), var(--ds-bevel-dark);
+}
+.ds-chip--sm { height: 22px; padding: 0 var(--ds-s3); font-size: var(--ds-t1); border-width: var(--ds-stroke-1); }
+/* The chip's VALUE, one step up from its label. On the reference plates the numeral
+   is the loudest thing in the counter and the icon is second; ours were the same
+   size, which is why a trophy total read as chrome. */
+.ds-chip-val { font-size: var(--ds-t4); font-weight: var(--ds-w-black); font-variant-numeric: tabular-nums; }
+
+/* ═══ BADGE — status attached to something else ═══════════════════════════════
+   Absent from this project entirely, and the plates are covered in them: a count
+   bubble on a nav tile, a FREE flag on a shop entry, a NEW ribbon on a season card.
+   A badge is defined by breaking its parent's silhouette — that overhang is what
+   makes it read as applied rather than contained, and it is why the parent needs
+   'position: relative' and nothing else. */
+.ds-badge {
+  position: absolute;
+  top: -8px;
+  inset-inline-end: -8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 var(--ds-s2);
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-pill);
+  background: var(--ketchup);
+  color: #FFFFFF;
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-black);
+  font-size: var(--ds-t1);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  box-shadow: var(--ds-e1);
+  pointer-events: none;
+}
+.ds-badge--count { min-width: 22px; padding: 0; border-radius: var(--ds-r-round); }
+/* White is kept on the RED badge and dropped on the other two, because that is what
+   the arithmetic says rather than what looks consistent in a rule listing: white on
+   '--ketchup' is 4.96:1 and clears, white on '--lettuce' is 2.48 and white on
+   '--water' is 3.49, both under the floor at an 11px glyph. Ink on those two measures
+   7.21 and 5.13. A badge is the smallest type in the product and is the last place a
+   marginal ratio is affordable. */
+.ds-badge--good { background: var(--lettuce); color: var(--ink); }
+.ds-badge--info { background: var(--water); color: var(--ink); }
+/* The flag form: a small tag on the top-left, tilted off the parent's corner. Text
+   is uppercase and tracked because at 11px it is a mark, not a word. */
+.ds-badge--tag {
+  top: -7px;
+  inset-inline-end: auto;
+  inset-inline-start: -6px;
+  border-radius: var(--ds-r-1);
+  padding: 0 var(--ds-s2);
+  height: 18px;
+  text-transform: uppercase;
+  letter-spacing: var(--ds-track-caps);
+  transform: rotate(-4deg);
+}
+
+/* ═══ TILE — a glyph in a box ═════════════════════════════════════════════════
+   Seven independent implementations across the five screens. Square, so it does not
+   compete with the pills, and it carries its own fill so a caller can colour-code
+   by category the way the plates colour-code a stat by its icon chip. */
+/* ⚠️ 'color' is SET, not inherited, and that is a bug fix. A tile inside
+   '.ds-row--slate' inherits cream, and its fill is a bright category colour by
+   construction — so the specimen sheet rendered a cream glyph on mustard at 1.4:1 and
+   a cream glyph on green at 3.8:1. The tile's paper is its OWN fill, never its
+   parent's, so it has to name its own ink. A caller passing a DARK '--ds-tile-fill'
+   must override 'color' as well; that is the one case this cannot cover, because the
+   fill arrives from JS. */
+.ds-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--ink);
+  --fa-ic-ink: var(--ink);
+  width: 34px;
+  height: 34px;
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  background: var(--ds-tile-fill, var(--ds-paper-hi));
+  box-shadow: var(--ds-e1);
+  font-size: var(--ds-t4);
+  line-height: 1;
+}
+.ds-tile--lg { width: 46px; height: 46px; font-size: var(--ds-t5); }
+.ds-tile--sm { width: 26px; height: 26px; font-size: var(--ds-t2); border-radius: var(--ds-r-1); }
+.ds-tile--round { border-radius: var(--ds-r-round); }
+/* THE STAT TILE. Sized off the measurement rather than off the grid: our stat icon is
+   33x33 against a reference tile of roughly 72x70, and at 1em with a 1.7px stroke and
+   'fill: none' it is a line DRAWING where the reference has a coloured MASS. 56px is
+   the largest tile that still leaves a 56px row taller than it is deep at the tight
+   landscape-phone height. The glyph is scaled to 0.62 of the tile, not to 1em, so the
+   tint is what the eye lands on. The default fill is deliberately NOT white here --
+   a stat tile with no tint is the defect. */
+.ds-tile--stat {
+  width: 56px;
+  height: 56px;
+  border-width: var(--ds-stroke-2);
+  border-radius: var(--ds-r-2);
+  background: var(--ds-tile-fill, var(--mustard));
+  font-size: 35px;
+  box-shadow: var(--ds-e1), var(--ds-bevel);
+}
+.ds-tile--stat > svg, .ds-tile--stat > .fa-ic { width: 62%; height: 62%; stroke-width: 2.4; }
+
+/* ═══ ROW — icon, label, value ════════════════════════════════════════════════
+   Four independent implementations today, all of them a bar or a flex line. The
+   plates' stat block is NOT a bar: it is a dark slab carrying a coloured icon chip,
+   a small coloured label and a large numeral, and the absence of a fill is what
+   lets the numeral be the loud thing. A row is for a value with no denominator; a
+   bar is for a value with one. Choosing correctly between them is most of what
+   makes a stat block look designed.
+
+   ── 🚨 THE GEOMETRY BELOW IS MEASURED, AND IT REPLACES A FIRST DRAFT ──────────
+   'stat-bars' is the WORST element in the per-element critique, and the finding that
+   matters is that character select's supposedly-better version scored the SAME —
+   two critics, two panels, one number. So pips and a taller track are refuted as the
+   fix; the reference is not doing a better BAR, it is not drawing a bar at all.
+
+   The three measured gaps, and every number below is one of them:
+     * the row is 0.60x the reference's HEIGHT. First draft: min-height 34px. Now 56.
+     * the icon is a 33x33 line glyph -- 1.7px stroke, 'fill: none', sized at 1em --
+       against a filled, TINTED tile roughly 72x70. Hence '.ds-tile--stat' at 56px
+       with a tint that is required rather than optional: an outline glyph at 1em is a
+       drawing, and the reference's is a MASS.
+     * the label sits BESIDE the value. In the reference it sits ABOVE it, small and
+       colour-coded, with the numeral at display weight underneath. That single
+       change is what lets the number be the loud thing, and it costs no width -- the
+       reason our stat rows are short is that they are laid out as one line.
+
+   ⚠️ Read the per-element scores as GAPS and as three bands, never as a ranking, and
+   never beside the whole-screen numbers: isolating a UI crop displaces the critic
+   scale (the reference side scored 7.12 +/- 1.22 against 8.17 for whole images, and
+   4 of 17 rounds fell outside 7-9 and were discarded). Critics said why, unprompted --
+   an isolated crop "reads as a debug overlay". The instrument works; the SCALE moved. */
+.ds-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-s4);
+  min-height: 56px;
+  padding: var(--ds-s2) var(--ds-s3);
+  border-radius: var(--ds-r-2);
+  background: rgba(26,18,36,0.06);
+}
+.ds-row--slate {
+  background: linear-gradient(180deg, var(--ds-slate-2) 0%, var(--ds-slate) 100%);
+  color: var(--ds-ink-on-slate);
+  box-shadow: var(--ds-bevel-dark);
+}
+/* Label over value. The stack is the component; a caller that puts the label and the
+   value as siblings of the tile gets the old one-line row back and the defect with it. */
+.ds-row-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+}
+.ds-row-label {
+  min-width: 0;
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t1);
+  line-height: 1.15;
+  text-transform: uppercase;
+  letter-spacing: var(--ds-track-caps);
+  /* Colour-coded to its tile, the way the reference colour-codes a stat by its icon
+     chip. Defaults to the inherited ink so a caller that sets nothing is still legible. */
+  color: var(--ds-row-accent, inherit);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Display weight, one full step above the label rather than beside it. */
+.ds-row-val {
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-black);
+  font-size: var(--ds-t5);
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+/* The one-line form is kept for rows that are genuinely a list item rather than a
+   stat -- an odds row, an inventory line -- where a two-line stack would be wrong. */
+.ds-row--inline { min-height: 34px; }
+.ds-row--inline .ds-row-body { flex-direction: row; align-items: center; gap: var(--ds-s3); }
+.ds-row--inline .ds-row-label { font-size: var(--ds-t2); flex: 1 1 auto; }
+.ds-row--inline .ds-row-val { font-size: var(--ds-t4); flex: 0 0 auto; }
+
+/* ═══ BAR — a value WITH a denominator ════════════════════════════════════════
+   Five independent implementations today, at four different heights, three border
+   widths and two fill idioms. The caller supplies the fill colour and the width;
+   everything else is here. */
+.ds-bar {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 40px;
+  height: 22px;
+  background: var(--ds-paper);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
+  overflow: hidden;
+  box-shadow: var(--ds-e2);
+}
+.ds-bar--sm { height: 14px; border-width: var(--ds-stroke-1); box-shadow: none; }
+.ds-bar--lg { height: 30px; }
+.ds-bar-fill {
+  height: 100%;
+  border-radius: var(--ds-r-pill);
+  background: var(--ds-bar-ink, var(--lettuce));
+  /* The top-light that makes a fill read as a lozenge rather than a flat block.
+     Same idiom as '.fa-stat-fill', hoisted so every bar gets it. */
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0) 45%);
+  transition: width 0.4s ease-out;
+}
+/* The numeric readout INSIDE the track. A bar with no number is a decoration, and a
+   critic called ours "invisible for what is core progression" when it had none. */
+.ds-bar-cap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t1);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--ds-track);
+  color: var(--ds-ink-on-paper);
+  pointer-events: none;
+}
+
+/* ═══ METER — a value with a SMALL, COUNTABLE denominator ═════════════════════
+   Segmented, and that is the point. The reference plates use a continuous bar for a
+   fraction nobody counts (trophies to the next reward) and a PIPPED meter for one a
+   player counts on sight (power level, 11 pips). We already draw three pip meters,
+   in three files, none shared. This is the same '.ds-bar' with the segmentation as
+   an overlay rather than as N child elements, so a screen that already renders a
+   percentage-width fill adopts it by adding one class.
+
+   '--ds-pips' is the segment count; the gap is drawn in ink over the fill so it
+   reads as a physical notch instead of a lighter stripe. */
+.ds-meter { --ds-pips: 10; }
+.ds-meter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent calc(100% / var(--ds-pips) - 2px),
+    var(--ink) calc(100% / var(--ds-pips) - 2px),
+    var(--ink) calc(100% / var(--ds-pips))
+  );
+}
+
+/* ═══ BANNER — a classification, not a chip ═══════════════════════════════════
+   A rarity or a class is not a counter and should not look like one. The plates run
+   it as a slanted strip that bleeds off the left edge of the frame, which reads as
+   applied to the character rather than as another pill in a row of pills. Kept
+   subtle (8 degrees) because a landscape phone is 390px tall and a steeper angle
+   costs real vertical space.
+
+   ── ITS FILL COMES FROM THE CALLER, SO ITS LEGIBILITY CANNOT ────────────────
+   '--ds-banner-fill' is whatever a rarity or a class colour happens to be, exactly
+   like '.fa-rarity'. Measured on the specimen sheet, cream on '--water' reads 2.92:1.
+   That is the same problem '.fa-rarity' already solved and the solution is copied
+   verbatim rather than re-derived: an INK TEXT-STROKE with 'paint-order: stroke fill',
+   which is colour-INDEPENDENT because the glyph's paper becomes its own stroke.
+   Measured there at 16.5:1 on all six rarities on two screens at three viewports.
+   'paint-order' is load-bearing: without it the stroke paints over the fill, eats half
+   an ~1.8px stem, and the badge reads as solid ink. */
+.ds-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-s2);
+  padding: var(--ds-s1) var(--ds-s5) var(--ds-s1) var(--ds-s4);
+  transform: skewX(-8deg);
+  background: var(--ds-banner-fill, var(--ketchup));
+  border-block: var(--ds-stroke-1) solid var(--ink);
+  color: var(--cream);
+  -webkit-text-stroke: 1.6px var(--ink);
+  paint-order: stroke fill;
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-black);
+  font-size: var(--ds-t2);
+  text-transform: uppercase;
+  letter-spacing: var(--ds-track-caps);
+  box-shadow: var(--ds-e1);
+}
+.ds-banner > * { transform: skewX(8deg); }
+
+/* ═══ DIVIDER ════════════════════════════════════════════════════════════════ */
+.ds-rule {
+  height: var(--ds-stroke-1);
+  border: 0;
+  margin: var(--ds-s2) 0;
+  background: rgba(26,18,36,0.18);
+  border-radius: var(--ds-r-pill);
+}
+
+/* Motion opt-out, both forms, kept as separate blocks for the reason recorded on the
+   existing pair below: a comma-joined selector list is disabled entirely if either
+   selector turns out to be unsupported. */
+@media (prefers-reduced-motion: reduce) {
+  .ds-btn, .ds-bar-fill { transition: none !important; }
+}
+:root.fa-reduce-motion .ds-btn,
+:root.fa-reduce-motion .ds-bar-fill { transition: none !important; }
 `;
