@@ -162,6 +162,13 @@ export interface RigPalette {
    * asked for, and it is what `seplib`'s `chinNotch` measures.
    */
   collar?: THREE.ColorRepresentation;
+  /**
+   * The pelvis mass where the thighs meet the body. Defaults to `limb`, deliberately:
+   * the pelvis is the top of the legs, and giving it the thigh tone means it can never
+   * introduce a new hue or a new value rung next to the food mass. Override it only to
+   * make it read as a garment (shorts) rather than as body.
+   */
+  pelvis?: THREE.ColorRepresentation;
   limbRoughness?: number;
 }
 
@@ -281,6 +288,74 @@ export interface RigProportions {
    * that is the definition of the metric, not a preference.
    */
   neckRatio?: number;
+  /**
+   * The PELVIS mass, as a multiple of the default size. **1 = on, 0 = off.**
+   *
+   * ── Why this exists, and it is the owner's own report ───────────────────────
+   * Uri, on the lobby render, in three separate sheets: *"the legs are disconnected
+   * from the body"* (hamburger), *"same issue with legs detached from torso"* (donut),
+   * *"legs — same issue, I'll stop relating to the leg issue, it's on all characters
+   * so far"* (taco). Three of three, spanning STOUT, STUB and STANDARD.
+   *
+   * **The mechanism is that the hip was never a MASS.** `hipY` is SOLVED from the
+   * splayed leg chain — it is a coordinate, and `hipL`/`hipR` are empty `Group`s at
+   * `(±stanceWidth, 0, 0)` inside it. The only geometry at the hip line is the top
+   * hemisphere of each thigh capsule, at `±stanceWidth`, and the rig's tapered-sphere
+   * torso comes to a POINT at that same height (its lowest vertex is a pole). So on
+   * every archetype the two thighs emerge from two separate points with background
+   * between them and nothing joining them to the body above. That is the same class
+   * as `docs/LESSONS.md` §1 — the attachment was never authored, so no amount of limb
+   * tuning could make it read.
+   *
+   * Sized off `stanceWidth` and `legRadius` so it always spans BOTH thigh tops
+   * whatever the archetype does, and DEPTH is generous on purpose: the shipped spawn
+   * facing is yaw 90, i.e. exact profile, where the two legs are one behind the other
+   * and the pelvis is seen edge-on — depth is the dimension that reaches the screen.
+   *
+   * ── 🚨 MEASURED, AND IT DOES NOT FIX WHAT IT WAS BUILT TO FIX ────────────────
+   * Two predictions were written here before anything was measured. **Both are wrong**,
+   * and they are kept above rather than deleted because the reasoning that produced
+   * them is the reasoning someone will use again.
+   *
+   * 1. *"On STUB this is expected to deliver few or zero pixels."* **The opposite.**
+   *    STUB is the archetype where it delivers BEST — egg 0.922, lollipop 0.578,
+   *    donut 0.280 — because STUB has no torso and its legs are long relative to the
+   *    mass, so the hip region is genuinely exposed. The dead ones are STOUT and
+   *    STANDARD, whose food mass is a wide overhanging disc: pizza **0.000**, soup
+   *    0.010, hamburger 0.051, hotdog 0.046. `e6fed57`'s "anything BELOW a STUB's food
+   *    mass cannot be seen" does not generalise to the hip line.
+   * 2. *"depth is the dimension that reaches the screen."* True of the MATCH camera,
+   *    and the match camera is not where the complaint comes from. `charStage.ts:451`
+   *    puts the LOBBY at `pitchDeg: 20` with the rig yawing +/-22 degrees — near
+   *    frontal. Uri's rejects say *"in menu"*.
+   *
+   * **And the part is not visible either way.** `tools/tmp/rg_gap.mjs` prices it as a
+   * SILHOUETTE FILL — a paired A/B on one built character, mesh rendered then hidden
+   * then re-rendered, drift control 0.0000 by construction:
+   *
+   *   view                     pelvis fill              legs reading as separate islands
+   *   match pitch 58 yaw 90     393 / 471032 = 0.08%      4/11 -> 4/11
+   *   lobby pitch 20 yaw  0    2400 / 724988 = 0.33%      6/11 -> 6/11
+   *   lobby pitch 20 yaw 22    2710 / 710129 = 0.38%      6/11 -> 6/11
+   *
+   * It changes **ZERO** of the 22 leg-attachment measurements, and on a default rig its
+   * fill is exactly **0 px of a 40,807 px silhouette** — it is entirely inside the
+   * outline it was built to extend.
+   *
+   * ⚠️ Note the trap in the obvious metric. `delivered / own footprint` (the
+   * `charprobe`/`limbcheck` measure) says 0.204 across the cast and reads like "80%
+   * dead geometry, delete it". That verdict is wrong in BOTH directions: a pelvis pixel
+   * landing on the torso delivers nothing *and costs nothing*, and a part can be 95%
+   * "dead" by that measure while being the entire fix. The pixels that matter are the
+   * ones landing on BACKGROUND. Use `rg_gap.mjs`, not `rg_solid.mjs`, for this question.
+   *
+   * KEPT rather than removed: it costs one mesh, it is correct geometry, it is the
+   * right thing to be there when a character's mass moves, and 0.38% is not nothing.
+   * But **it is not the fix for "the legs are detached"** and the next pass should not
+   * assume it was. The gap is not at the hip line — six characters still have a leg
+   * reading as a separate silhouette island with this mass present.
+   */
+  pelvisScale?: number;
 }
 
 /**
@@ -338,6 +413,12 @@ export interface RigMetrics {
    * and `animate()` for everything it drives.
    */
   heaviness: number;
+  /**
+   * Extra outward shoulder rotation solved by the rig so the arm clears the thigh,
+   * radians. 0 means the character already cleared. Published so a character author
+   * can see that the rig has adjusted their authored stance, and by how much.
+   */
+  armClearance?: number;
 }
 
 /**
@@ -429,6 +510,13 @@ export class ChibiRig {
    * in this number.**
    */
   readonly heaviness: number;
+  /**
+   * Extra OUTWARD shoulder rotation, radians, solved per character so the hand and
+   * forearm clear the thigh. See `solveArmClearance()` for the measurement — the arm
+   * ran THROUGH the thigh on ten of eleven characters before this existed. 0 for a
+   * character that already clears, which is byte-identical to the old behaviour.
+   */
+  armClearance = 0;
   private readonly p: Required<RigProportions>;
 
   constructor(opts: ChibiRigOptions) {
@@ -468,6 +556,7 @@ export class ChibiRig {
       footClearance: pr.footClearance ?? 0.14,
       neckFraction: pr.neckFraction ?? 0,
       neckRatio: pr.neckRatio ?? 0.42,
+      pelvisScale: pr.pelvisScale ?? 1,
     };
 
     // Thick limbs and a wide stance read heavy; long legs read light and athletic.
@@ -651,9 +740,157 @@ export class ChibiRig {
       heaviness: this.heaviness,
     };
 
+    this.armClearance = this.solveArmClearance();
+    this.metrics.armClearance = this.armClearance;
+
     if (!opts.jointsOnly) {
       this.buildLimbs(opts.palette, upperArmLen, forearmLen, thighLen, shinLen, torsoH);
     }
+  }
+
+  /**
+   * 🚨 THE ARM RUNS THROUGH THE THIGH ON TEN OF ELEVEN CHARACTERS. This solves it.
+   *
+   * Returns extra OUTWARD shoulder rotation, in radians, applied by `restPose()` on
+   * top of whatever the character authored. Never negative, so it can only ever open
+   * an arm outward and can never undo an authored pose.
+   *
+   * ── The finding ────────────────────────────────────────────────────────────
+   * Uri, on the lobby render: *"all characters' movements (in menu) seems like
+   * sometimes the limbs are intersecting and getting into one another."*
+   *
+   * Measured with `tools/tmp/rg_interpen.mjs`, which reports the fraction of a limb's
+   * CENTRELINE lying inside another body, swept over 240 phases of the idle cycle.
+   * Worst self-pair per character, BEFORE this:
+   *
+   *   taco      forearmR~thighR 1.000    soup        forearmR~thighR 1.000
+   *   donut     handR~shinR     0.970    lollipop    handR~thighR    0.879
+   *   hamburger forearmR~thighR 0.848    sushi       handR~thighR    0.818
+   *   burrito   handR~thighR    0.788    pizza       handL~thighL    0.485
+   *   hotdog    handR~thighR    0.394    waterbottle handR~thighR    0.091
+   *   egg       (none)  <- the ONE character with no self-overlap anywhere
+   *
+   * **Egg is the exception, and Uri independently ranked egg the best in the cast.**
+   *
+   * ── The mechanism is arithmetic, and it is a MISSING RULE, not a bad value ──
+   * Lateral clearance between the hand centre and the thigh axis (dX) against the
+   * clearance at which they merely touch (`handRadius + legRadius`):
+   *
+   *   egg       +0.083   pizza     +0.024   hotdog    -0.005   donut     -0.099
+   *   burrito   -0.125   soup      -0.129   lollipop  -0.134   sushi     -0.242
+   *   hamburger -0.262   taco      -0.285   waterbottle -0.301
+   *
+   * Nine of eleven are NEGATIVE at rest, before animation moves anything. The driver
+   * is `shoulderWidth - stanceWidth`: the three that clear (egg +0.242, hotdog +0.229,
+   * pizza +0.210) are the three widest, and everyone else is <= 0.095.
+   *
+   * **This rig had no rule relating `shoulderWidth` to `stanceWidth`.** They were
+   * tuned by different passes for different reasons — `shoulderWidth` to get the arm
+   * out of the FOOD (`hamburger.ts`: *"0.25H -> 0.30H ... the upper arm STARTED inside
+   * the food"*), `stanceWidth` to widen the silhouette — and the PAIR was never checked
+   * against each other. That is why the defect is cast-wide rather than per-character,
+   * and it is why the fix belongs HERE rather than in eleven character files.
+   *
+   * ── Why SOLVED per character rather than a constant ────────────────────────
+   * A uniform splay was measured first and is the wrong shape of fix. Sweeping one
+   * value across the cast (`rg_interpen --armOut`):
+   *
+   *   armOut   hamburger  taco   soup   sushi   pizza  hotdog   NEW defect appearing
+   *   0.00       0.848   1.000  1.000   0.818   0.485  0.394    -
+   *   0.10       0.727   1.000  1.000   0.788   0.333  0.182    -
+   *   0.20       0.606   0.939  0.879   0.727   0.182  (none)   -
+   *   0.30       0.515*  0.636  0.273   0.485   0.061  (none)   * handL~upperArmL
+   *   0.45       0.515*  0.515* 0.182*  0.182   0.030  (none)   * on FOUR characters
+   *
+   * Characters need very different amounts — exactly as the deficit table predicts —
+   * and past ~0.30 a uniform value stops helping and starts folding the mitt back into
+   * its own upper arm. So each character gets the minimum that clears ITS numbers, and
+   * a character already clear (egg, pizza, hotdog) gets exactly 0 and is byte-identical.
+   *
+   * ── It MINIMISES the objective; it does not hit a threshold. And that is a fix ──
+   * The first version stopped at the first angle where the hand cleared the thigh by a
+   * margin. **It made pizza worse**, swapping `handL~thighL` 0.485 for a brand-new
+   * `forearmR~torso` 0.424 — the arm cleared the leg by arriving inside the body. A
+   * threshold solver optimises the constraint it was handed and is blind to every
+   * other one, which is `docs/LESSONS.md`'s "fix one thing, break another" in a loop.
+   *
+   * So the objective is the WORST normalised penetration over every pair the arm can
+   * hit — thigh, torso, and its own upper arm — and the solver scans the whole
+   * admissible range and takes the argmin, preferring the SMALLEST angle on a tie so a
+   * character that gains nothing is left exactly where it was. It cannot make any of
+   * those three pairs worse than doing nothing, because doing nothing is a candidate.
+   *
+   * Full surface clearance is deliberately NOT the target: it needs ~50 degrees of
+   * splay on the short-armed characters, which is a scarecrow, and it would undo the
+   * food-burial work by swinging the upper arm back across the mass. A mitt RESTING
+   * against a thigh is normal and reads as weight; a mitt INSIDE a thigh is the defect.
+   * `MAX` caps the correction at 0.30 rad (17 degrees) — the sweep above shows a
+   * uniform value stops helping past there and starts folding the mitt into the biceps.
+   */
+  private solveArmClearance(): number {
+    const j = this.joints;
+    const P = this.p;
+    const w = (o: THREE.Object3D) => new THREE.Vector3().setFromMatrixPosition(o.matrixWorld);
+    /** Distance from p to segment ab. */
+    const distToSeg = (p: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3) => {
+      const ab = new THREE.Vector3().subVectors(b, a);
+      const ap = new THREE.Vector3().subVectors(p, a);
+      const d2 = ab.lengthSq();
+      const t = d2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ap.dot(ab) / d2));
+      return ap.sub(ab.multiplyScalar(t)).length();
+    };
+    /** Overlap of two spheres/capsules as a fraction of their combined radii. 0 = clear. */
+    const pen = (d: number, r: number) => Math.max(0, (r - d) / r);
+    // The torso as a capsule up its own local Y. The radius is the MINOR half-axis
+    // (`min(width, depth)`), i.e. INSCRIBED — an over-large torso proxy would push the
+    // arms out to solve a collision that is not there, and this solver's whole job is
+    // to not create a pose that fixes a number nobody can see.
+    const torsoR = Math.min(P.torsoWidth, P.torsoDepth) * 0.5;
+    const worstAt = (extra: number) => {
+      this.armClearance = extra;
+      this.restPose();
+      j.root.updateWorldMatrix(true, true);
+      const tA = w(j.torso);
+      const tB = tA.clone().setY(tA.y + this.metrics.torsoHeight);
+      let worst = 0;
+      for (const [hand, elbow, shoulder, hip, knee] of [
+        [j.handL, j.elbowL, j.shoulderL, j.hipL, j.kneeL],
+        [j.handR, j.elbowR, j.shoulderR, j.hipR, j.kneeR],
+      ] as const) {
+        const h = w(hand), e = w(elbow), s = w(shoulder), a = w(hip), b = w(knee);
+        // The forearm's two endpoints bound it against a convex body, so testing the
+        // hand and the elbow is enough and costs two distance evaluations instead of a
+        // sampled sweep.
+        worst = Math.max(worst,
+          pen(distToSeg(h, a, b), P.legRadius + P.handRadius),
+          pen(distToSeg(e, a, b), P.legRadius + P.armRadius));
+        if (this.hasTorso) {
+          worst = Math.max(worst,
+            pen(distToSeg(h, tA, tB), torsoR + P.handRadius),
+            pen(distToSeg(e, tA, tB), torsoR + P.armRadius));
+        }
+        // The mitt folding back into its own biceps — the SECOND defect a uniform
+        // splay creates, so it has to be in the objective or the solver walks into it.
+        worst = Math.max(worst, pen(distToSeg(h, s, e), P.armRadius + P.handRadius));
+      }
+      return worst;
+    };
+    // A scan rather than a closed form. The chain from shoulder to hand carries the
+    // elbow's own z offsets, the torso's -0.05 lean and the character's authored
+    // `twist`, so a closed form would have to duplicate `restPose()` and would silently
+    // go wrong the next time `restPose()` changes. This asks the real pose.
+    const MAX = 0.30, STEPS = 30;
+    let best = 0, bestScore = worstAt(0);
+    for (let i = 1; i <= STEPS; i++) {
+      const v = (i / STEPS) * MAX;
+      const sc = worstAt(v);
+      // A strict improvement only, so a tie always keeps the smaller angle and a
+      // character that gains nothing measurable is left byte-identical.
+      if (sc < bestScore - 1e-4) { bestScore = sc; best = v; }
+    }
+    this.armClearance = 0;
+    this.restPose();
+    return best;
   }
 
   /**
@@ -844,6 +1081,73 @@ export class ChibiRig {
       joint.add(m);
     }
 
+    // ── THE PELVIS — the mass the legs were never attached to ─────────────────
+    // See `RigProportions.pelvisScale` for the owner's report and the mechanism. In
+    // short: `hipL`/`hipR` are empty groups at `(±stanceWidth, 0, 0)` and the default
+    // torso is a tapered sphere whose LOWEST point is a pole, so two thigh capsules
+    // emerged from two separate coordinates with background between them.
+    //
+    // Parented to `hips` rather than to `torso`, deliberately, for three reasons:
+    //   1. `hipSway` rotates `hips`, so the pelvis sways with the legs rather than
+    //      shearing against them.
+    //   2. STUB has `torsoFraction: 0` and therefore no torso mesh at all, and this is
+    //      exactly the archetype Uri named on donut. A pelvis on `torso` would not
+    //      exist there.
+    //   3. `dressLimbs()` only strips `rigDefaultLimb` meshes from LIMB slots and
+    //      `dressTorso()` only replaces children of `torso`, so a character that
+    //      rebuilds either one keeps this and does not have to know about it.
+    //
+    // ⚠️ THE COMMENT THAT WAS HERE SAID "NOT tagged `rigDefaultLimb`" AND THE CODE
+    // BELOW TAGS IT. `solid()` sets `userData.rigDefaultLimb = true` on everything it
+    // wraps, and the pelvis is wrapped in `solid()`. The claim was false the moment it
+    // was written.
+    //
+    // It is HARMLESS, and that is exactly why it was worth catching: `dressLimbs()`
+    // iterates `limbSlots()`, and `hips` is not one of the twelve slots, so nothing
+    // ever looks at this flag on this mesh. The comment was describing a safety
+    // property the code did not have, on a mesh where the property did not matter —
+    // which is the shape of a bug that only surfaces when someone later adds `hips` to
+    // `limbSlots()` and trusts the comment. Left tagged (removing the tag would mean
+    // hand-rolling `solid()`'s shadow flags) and the comment now says what is true.
+    if (this.p.pelvisScale > 0) {
+      const s = this.p.pelvisScale;
+      const lr = this.p.legRadius;
+      // ── SIZED DOWN FROM A FULL-SPAN SLAB, AND THE NUMBERS ARE WHY ─────────────
+      // The first version spanned BOTH thigh tops — `(stanceWidth + legRadius * 0.95)
+      // * 2`, centred on the hip line. It delivered pixels on all 11 (429 -> 6,496
+      // across the cast) and it broke two things that were hard-won:
+      //
+      //   * IT BURIED THE THIGHS. `hipL` delivered fell on 9 of 11 — soup 244 -> 25,
+      //     lollipop 269 -> 82, hamburger 209 -> 77, waterbottle 674 -> 250. A mass
+      //     that hides the leg is not a fix for "the legs look detached"; it is
+      //     `docs/LESSONS.md` §1 committed on purpose.
+      //   * IT FILLED THE CROTCH, which IS the silhouette's concavity. Hull deficiency
+      //     fell on all 11 and took **waterbottle to 0.1979 and lollipop to 0.1834**,
+      //     under the weakest reference plate's 0.2007 — undoing the pass that got
+      //     11 of 11 over that floor from 1 of 11.
+      //
+      // So: NARROW in x (it must not close the gap between the knees), SHORT, and
+      // lifted so it sits ABOVE the hip line rather than straddling it. The gap Uri
+      // is looking at is the VERTICAL one between the leg tops and the body, not the
+      // horizontal one between the legs — filling the second cost the silhouette and
+      // did not address the first.
+      const pw = (this.p.stanceWidth * 0.58 + lr * 0.55) * 2 * s;
+      const ph = lr * 1.5 * s;
+      // Depth is the dimension that reaches the screen at the SHIPPED FACING (yaw 90 =
+      // exact profile, `sim.ts` gives the player facing {x:1,y:0}), where the two legs
+      // are one behind the other and the pelvis is seen edge-on. `limbcheck`'s 22°
+      // face-on preview is the harness that would hide this.
+      const pd = Math.min(this.p.torsoDepth * 0.80, lr * 2.3) * s;
+      const pelvisMat = toonMat({ color: pal.pelvis ?? pal.limb, roughness: rough });
+      const pelvis = solid(new THREE.Mesh(roundedBox(pw, ph, pd, Math.min(lr * 0.7, ph * 0.45), 4), pelvisMat));
+      // ABOVE the hip line, not straddling it: the thigh tops are at y=0 and the body
+      // is above them, so the mass has to reach UP to meet the torso. Straddling put
+      // it over the thigh capsules' own top hemispheres and hid them.
+      pelvis.position.y = ph * 0.50;
+      pelvis.name = 'pelvis_mesh';
+      this.joints.hips.add(pelvis);
+    }
+
     this.joints.hipL.add(segment(thighLen, this.p.legRadius, limbMat, 'thighL'));
     this.joints.hipR.add(segment(thighLen, this.p.legRadius, limbMat, 'thighR'));
     this.joints.kneeL.add(segment(shinLen, this.p.legRadius * 0.9, limbMat, 'shinL'));
@@ -1008,8 +1312,16 @@ export class ChibiRig {
     j.body.rotation.set(0, 0, 0);
     j.body.scale.set(1, 1, 1);
     const s = this.stance;
-    j.shoulderL.rotation.set(0.12, 0, s.shoulderL);
-    j.shoulderR.rotation.set(0.06, 0, s.shoulderR);
+    // ── `armClearance` opens BOTH arms outward, and the SIGNS are the whole point ──
+    // `docs/LESSONS.md` §12: `shoulderL` sits at x = -shoulderWidth, so a POSITIVE z
+    // swings that arm ACROSS the body; `shoulderR` is the mirror. Subtracting on the
+    // left and adding on the right is therefore "outward" on both. Getting this
+    // backwards is the single most repeated mistake in this file's history — it is
+    // what put hamburger's left arm inside its own burger, and what left `shoulderR`
+    // swinging over the right thigh for a whole round after `shoulderL` was fixed.
+    // See `solveArmClearance()`: this is 0 for a character that already clears.
+    j.shoulderL.rotation.set(0.12, 0, s.shoulderL - this.armClearance);
+    j.shoulderR.rotation.set(0.06, 0, s.shoulderR + this.armClearance);
     j.elbowL.rotation.set(s.elbowL, 0, -0.16);
     j.elbowR.rotation.set(s.elbowR, 0, 0.12);
     // ── Legs ────────────────────────────────────────────────────────────────────
