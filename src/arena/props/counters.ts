@@ -701,6 +701,17 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   // have adopted the big pale-blue counter slab"). A prop that a ground-finder mistakes
   // for the floor is, measurably, a plane with nothing on it.
   //
+  // ── AND THAT SAME INSTRUMENT SCORES THE FIX, WITHOUT BEING ASKED TO ────────
+  // Re-run after this change, 9-10 action frames per arm captured the same way:
+  //
+  //   original cap   adopted as GROUND in 3/10, 4/10, 3/10 frames (three separate runs)
+  //   rebuilt cap    adopted as GROUND in **1 of 9**
+  //
+  // `fp_ground_windows.mjs` has no notion of "blank" and no knowledge of this prop — it
+  // takes the frame's modal surfaces and filters them by spatial spread. The cap stopped
+  // passing that filter. That is the ~8 critics' claim, arrived at by an instrument with
+  // no opinion about it, and it is the only objective number this defect has ever had.
+  //
   // ── AND `e4734e2` MADE IT WORSE, WHICH IS CHECKED RATHER THAN ASSUMED ───────
   // That pass took `stoveCap` #7C9CC2 -> #94C5FF, i.e. delivered luma **167 -> 195**, on
   // exactly this surface. It was right to (the frame drew no highlights at all; `hi70`
