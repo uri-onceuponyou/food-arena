@@ -14,10 +14,11 @@
  *     both axes — no cropped characters.
  *  5. FLOW. boot -> home -> character select -> match (window.__gameReady) ->
  *     back to home, with zero console errors along the way.
- *  6a. HERO FILL. The home screen's largest measured defect was that its hero panel
- *     was ~1.8x wider than tall, and `charStage` frames the subject off whichever
- *     axis binds — always height on a panel that shape — so the surplus width was
- *     guaranteed to be empty backdrop. See `MIN_HERO_WIDTH_FRAC`.
+ *  6a. HERO FILL. The hero has to be a real presence in the frame, asserted on the
+ *     fraction of frame HEIGHT it occupies. It used to be asserted on WIDTH, which is
+ *     a function of the panel's aspect and not of the hero at all — and which refused
+ *     the reference plate's own composition. See `MIN_HERO_HEIGHT_FRAC` for the
+ *     measurements that reversed it; the old wording is kept there.
  *  6b. NOTHING IS DEAD. Every control on the settings screen is asserted to move the
  *     thing it names, read back off the audio engine rather than off the UI that drew
  *     it, and the title card is asserted to unlock audio and to never trap a probe.
@@ -219,24 +220,79 @@ function record(vp, screen, check, ok, detail = '') {
 const MIN_CONTROLS = { opening: 1, default: 3 };
 
 /**
- * ── HOW MUCH OF THE HERO PANEL THE HERO ACTUALLY OCCUPIES ───────────────────
+ * ── HOW MUCH OF THE FRAME THE HERO ACTUALLY OCCUPIES ────────────────────────
  *
  * The objective acceptance test for the home screen's largest defect, added because
  * `PROGRESS.md` is explicit that an element with no measurable test oscillates at its
  * own noise floor — which is exactly what happened here: two blind critics reversed
  * each other and the loop stopped rather than converged.
  *
- * The defect was that the hero panel spanned the full width of the middle row, and
- * `charStage.applyFraming()` sizes the subject off whichever axis BINDS — always
- * height on a panel wider than it is tall. So every extra pixel of panel width was
- * guaranteed to be empty backdrop, and the character measured ~26% of its own panel's
- * width. This asserts the fix rather than the taste: the character's projected box has
- * to cover a real fraction of the panel it is standing in, on every viewport.
+ * ── THE ORIGINAL ASSERTION, AND WHY IT IS KEPT HERE ─────────────────────────
+ * It read, and this wording is preserved verbatim because the rule it encodes has been
+ * REVERSED rather than deleted:
  *
- * Measured on the rebuilt screen at 0.55-0.75. The floor is set well below that, at a
- * value the OLD layout could not reach, so it fails on a regression and not on noise.
+ *   > "The defect was that the hero panel spanned the full width of the middle row, and
+ *   > `charStage.applyFraming()` sizes the subject off whichever axis BINDS — always
+ *   > height on a panel wider than it is tall. So every extra pixel of panel width was
+ *   > guaranteed to be empty backdrop, and the character measured ~26% of its own
+ *   > panel's width."
+ *   >
+ *   > `const MIN_HERO_WIDTH_FRAC = 0.42;`  — asserted on `|right.x - left.x|`.
+ *
+ * That was CORRECT for a hero standing in a PANEL, and it becomes a CATEGORY ERROR the
+ * moment the panel is the screen — which is the composition the reference plates
+ * themselves use. `applyFraming()` caps the fit at `V_FILL = 0.62` of frame HEIGHT, so
+ * for any panel wider than ~1:1 the height binds and the identity is exact:
+ *
+ *     wFrac = hFrac * (subjectW / subjectH) / panelAspect
+ *
+ * The width fraction is therefore divided by the aspect change while the PICTURE of the
+ * hero does not change at all. Measured, on one viewport, widening only the panel's CSS
+ * (`tools/tmp/up_herofill.mjs --aspect-sweep`):
+ *
+ *     panel width   panel aspect   hFrac   wFrac
+ *     40vw          0.711          0.533   0.725
+ *     56vw (ships)  0.996          0.540   0.506
+ *     70vw          1.244          0.546   0.393   <- already refused by the 0.42 floor
+ *     85vw          1.511          0.550   0.316
+ *     100vw         1.778          0.553   0.263
+ *
+ * The hero is the same size on screen in all five. The old number falls 2.76x. So the
+ * assertion was a statement about the PANEL'S SHAPE wearing the costume of a statement
+ * about the hero's size, and at full bleed it refused a composition that is not a defect.
+ *
+ * ── AND IT REFUSED ITS OWN REFERENCE ────────────────────────────────────────
+ * Measured on `reference/images/curated/menus/bs_home.png` (2556x1179, 21.7:9) by
+ * masking the hero off the backdrop: the fighter spans **0.486 of screen HEIGHT** and
+ * **0.217 of screen WIDTH** — 0.265 once normalised to 16:9. Against a 0.42 floor the
+ * reference plate fails its own guard by nearly 2x, on both readings. A guard that
+ * refuses the thing it exists to imitate is measuring the wrong quantity.
+ *
+ * ── WHAT IS GUARDED NOW, STATED PLAINLY ─────────────────────────────────────
+ * The property has CHANGED, deliberately. It is no longer "the panel is not wider than
+ * the hero needs" (a panel much wider than the hero is now the intended composition); it
+ * is **"the hero is not small in the frame"** — which is the half of the original defect
+ * that is still a defect, and the half a full-bleed lobby cannot make go away.
+ *
+ * ── THE FLOOR, AND WHERE IT COMES FROM ──────────────────────────────────────
+ * From the REFERENCE, not from what we happen to score: `bs_home`'s hero occupies 0.486
+ * of frame height. 0.47 is that number, and a hero less present than the genre's own is
+ * under-framed by definition. What we score is reported rather than used:
+ *
+ *     shipped, 5 viewports x {home, opening}   hFrac 0.531 - 0.591
+ *     whole cast x home's panel aspects        worst 0.543 (hotdog; the only fighter
+ *                                              whose width binds at all)
+ *     a full-bleed lobby at 16:9               0.553
+ *
+ * so the floor clears the cast's worst case by 0.073 and the reference by 0.016.
+ *
+ * ⚠️ PROVEN TO FAIL, because a guard that has not been shown to fail is not a guard
+ * (CLAUDE.md non-negotiable #6). Known-bad input: `charStage.ts`'s `V_FILL` cut from
+ * 0.62 to 0.34 — one constant, the single thing that decides the hero's presence, and
+ * the exact regression class this exists for. All 20 cells report hFrac 0.30-0.31 and
+ * FAIL. Restored, all 20 pass. See the commit that changed this line for the two runs.
  */
-const MIN_HERO_WIDTH_FRAC = 0.42;
+const MIN_HERO_HEIGHT_FRAC = 0.47;
 
 /** Every check that can run against a mounted menu screen. */
 async function auditScreen(page, vp, screen, { safe }) {
@@ -305,14 +361,18 @@ async function auditScreen(page, vp, screen, { safe }) {
     record(vp.name, screen, 'hero-in-frame', inFrame && h.cameraOk === true,
       `fill=${h.fill} feet=${JSON.stringify(h.feet)} crown=${JSON.stringify(h.crown)} L=${JSON.stringify(h.left)} R=${JSON.stringify(h.right)}`);
 
-    // See MIN_HERO_WIDTH_FRAC. Home and the title card are the two screens whose whole
+    // See MIN_HERO_HEIGHT_FRAC. Home and the title card are the two screens whose whole
     // point is the hero; character select frames its own column and is not this
     // screen's business.
+    //
+    // The width fraction is still PRINTED — it is the thing that used to be asserted,
+    // and keeping it visible is what lets anyone re-derive the reversal from a log
+    // instead of taking this comment's word for it. It is no longer a verdict.
     if (screen.startsWith('home') || screen.startsWith('opening')) {
       const wFrac = Math.abs(h.right.x - h.left.x);
       const hFrac = Math.abs(h.feet.y - h.crown.y);
-      record(vp.name, screen, 'hero-fills-its-panel', wFrac >= MIN_HERO_WIDTH_FRAC,
-        `width=${wFrac.toFixed(3)} (min ${MIN_HERO_WIDTH_FRAC}) height=${hFrac.toFixed(3)}`);
+      record(vp.name, screen, 'hero-fills-its-panel', hFrac >= MIN_HERO_HEIGHT_FRAC,
+        `height=${hFrac.toFixed(3)} (min ${MIN_HERO_HEIGHT_FRAC}) width=${wFrac.toFixed(3)} panelAspect=${h.aspect}`);
     }
   }
 

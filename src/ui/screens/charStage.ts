@@ -220,8 +220,15 @@ const PLINTH_TOP_Y = 0.215;
 const V_FILL = 0.62;
 /** Widest part of the podium, in metres — it has to be framed too.
  *  UNCHANGED at 2.48 deliberately: `applyFraming` fits `max(subjectW, PLINTH_BASE_W)`,
- *  so widening the podium would shrink every character, and character width over panel
- *  width is an acceptance number (`menu_accept`, floor 0.42). */
+ *  so widening the podium would shrink every character.
+ *
+ *  ⚠️ The reason given here used to be *"and character width over panel width is an
+ *  acceptance number (`menu_accept`, floor 0.42)"*. It is not, any more: that assertion
+ *  measured a function of the PANEL'S ASPECT rather than of the hero, and it refused the
+ *  reference plate's own composition. It now asserts the HEIGHT fraction, floor 0.47,
+ *  derived from `bs_home`'s measured 0.486. The constant still matters — widening the
+ *  podium past a character's own width makes `fillFromWidth` bind and shrinks the hero on
+ *  BOTH axes, which the new assertion catches — but for a different reason than written. */
 const PLINTH_BASE_W = 2.48;
 /** Fraction of the frame's WIDTH the subject may fill when width is binding. */
 const H_FILL = 0.86;
