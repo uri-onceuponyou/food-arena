@@ -678,6 +678,82 @@ export function createShell(opts: ShellOptions): Shell {
       report(`screen "${currentRoute.name}" resize() threw`, err);
     }
   };
+
+  /**
+   * ── EVERY BUTTON IN THE GAME NOW MAKES A SOUND ──────────────────────────────
+   *
+   * Uri: *"i can't hear on menus as well now."* Half of that was a 404 on the deployed
+   * theme (`audio/music.ts`, fixed). The other half was this: `uiClick()` has existed in
+   * `audio/sounds.ts` since the audio pillar was built and the ONLY caller was the
+   * settings screen's volume slider. Every other control in the game — Play, Foods,
+   * Trophies, Shop, Back, Fight, every roster card, every milestone claim, every chest —
+   * was silent when tapped. A menu that makes no sound on tap reads as unfinished, and
+   * on a phone it is the only confirmation that the tap landed at all.
+   *
+   * ── WHY IT IS ONE DELEGATED LISTENER HERE, NOT A CALL PER BUTTON ────────────
+   * There are ~60 click handlers across seven screens, four of which are themselves
+   * delegated `[data-go]` / `[data-open]` / `[data-toggle]` dispatchers. Adding a call
+   * to each one would mean a new control is silent until somebody remembers — the exact
+   * failure this is fixing. The shell owns the only DOM node every screen mounts inside,
+   * so one listener here covers every screen that exists and every screen that will.
+   *
+   * ── CAPTURE PHASE, and that is load-bearing ─────────────────────────────────
+   * A bubbling listener never hears a click whose own handler navigates: `go()` unmounts
+   * the screen, and a target removed from the document takes its ancestors' bubble path
+   * with it. Capture runs before the target's own handler, so the sound is scheduled
+   * while the button is still in the tree. This is also why it does NOT need to know
+   * which screen it is on.
+   *
+   * ── ONE SOUND PER COMMITTED ACTION ──────────────────────────────────────────
+   * `click`, not `pointerdown`/`pointermove`/`pointerup`: a pointer event fires on drags,
+   * on stick grabs and on scroll starts on the trophy road, and wiring three of them
+   * turns a menu into a machine gun. A click is the browser's own definition of "the
+   * player committed to this control", it fires exactly once, and it fires for the
+   * keyboard too (Enter/Space on a focused button), which a pointer event does not.
+   *
+   * ── WHAT IS DELIBERATELY EXCLUDED ───────────────────────────────────────────
+   *   * MUTED. Guarded here rather than left to the master gain: a muted engine still
+   *     builds and schedules the voice, and the point of `isMuted()` is that a muted
+   *     player never costs anything. Same guard `settings.ts` already uses.
+   *   * `input[type=range]`. The sliders own their own feedback on `input` (the audible
+   *     ruler you set the level against) and are not in the selector — a second click on
+   *     top of that would double-fire on every drag.
+   *   * `data-clicksound="off"`. Exactly one control carries it: the MUTE toggle, whose
+   *     own handler already says a click confirming that you just silenced the game
+   *     would be a joke at the player's expense. Suppression is on the markup rather than
+   *     on a class name from another screen, so this file stays decoupled from theirs.
+   *   * DISABLED controls. `<button disabled>` does not emit `click` at all, but
+   *     `aria-disabled` and `.fa-tab[disabled]`-style controls can, and a locked control
+   *     that answers is a lie about what it will do.
+   *
+   * `data-clicksound="on"` is the opt-IN for the two committed actions that are not
+   * buttons — the sheet scrim (tap outside to close) and the home hero (tap to poke).
+   *
+   * ⚠️ The FIRST tap of a session is silent by design and is not a bug: the engine
+   * creates its `AudioContext` from its own `window`-capture gesture listener, which runs
+   * before this one, and `resume()` has not resolved by the time `play()` is reached — so
+   * that voice is counted as `droppedNotRunning`. The title card's own "tap to start"
+   * spends it, which is why home is audible from its first button.
+   */
+  const CLICK_SOUND_SELECTOR = 'button, [role="button"], a[href], [data-clicksound="on"]';
+
+  const onClickSound = (ev: MouseEvent): void => {
+    try {
+      if (audio.isMuted()) return;
+      const node = (ev.target as HTMLElement | null)?.closest?.(CLICK_SOUND_SELECTOR);
+      if (!node) return;
+      if (node.closest('[data-clicksound="off"]')) return;
+      if (node.hasAttribute('disabled') || node.getAttribute('aria-disabled') === 'true') return;
+      audio.previewClick();
+    } catch (err) {
+      // A UI sound is the least important thing on the page and must never be able to
+      // stop a button from working. The engine already swallows its own failures; this
+      // covers the DOM walk above.
+      report('ui click sound threw', err);
+    }
+  };
+
+  root.addEventListener('click', onClickSound, true);
   window.addEventListener('resize', onResize);
   window.addEventListener('popstate', onPopState);
   window.addEventListener('fa:webglcontextlost', onGlLost);
@@ -710,6 +786,7 @@ export function createShell(opts: ShellOptions): Shell {
     dispose() {
       disposed = true;
       if (pendingTimer !== null) clearTimeout(pendingTimer);
+      root.removeEventListener('click', onClickSound, true);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('popstate', onPopState);
       window.removeEventListener('fa:webglcontextlost', onGlLost);

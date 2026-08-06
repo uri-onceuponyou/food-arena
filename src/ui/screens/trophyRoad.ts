@@ -184,7 +184,11 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
     </footer>
 
     <div class="tr-sheet" data-el="sheet">
-      <div class="tr-sheet-scrim" data-el="scrim"></div>
+      <!-- 'data-clicksound=on' opts a NON-button into the shell's global UI click sound
+           (shell.ts). Tapping outside a sheet to dismiss it is a committed action and is
+           the one way out of the odds and store sheets on a phone, so it has to answer
+           the same way the close button does. -->
+      <div class="tr-sheet-scrim" data-el="scrim" data-clicksound="on"></div>
       <div class="tr-sheet-card" data-el="sheetcard"></div>
     </div>
 

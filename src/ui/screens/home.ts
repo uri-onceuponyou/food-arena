@@ -311,7 +311,7 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
 
     <!-- OUTSIDE '.home-middle' ON PURPOSE. It spans the whole screen height, so it
          cannot be a child of one row of the screen grid. -->
-    <section class="home-stage" data-el="stage">
+    <section class="home-stage" data-el="stage" data-clicksound="on">
       <div class="home-stage-3d" data-el="stage3d"></div>
       <div class="home-stage-glow" aria-hidden="true"></div>
       <div class="home-nameplate">

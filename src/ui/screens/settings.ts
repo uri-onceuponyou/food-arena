@@ -448,9 +448,19 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
    * browser without being hidden — and a hidden input is exactly how a control ends
    * up unreachable by touch.
    */
-  const toggle = (name: string, label: string): string =>
+  /**
+   * `silentOnTap` suppresses the shell's global UI click sound for this control
+   * (`shell.ts`, `data-clicksound="off"`). Exactly one control wants it: MUTE. The
+   * shell's listener runs in the CAPTURE phase, so it reads `audio.isMuted()` before
+   * this screen's handler has flipped it — which is right in the un-muting direction
+   * (silent going in, this screen's own `previewClick()` coming out) and wrong in the
+   * other, where it would play a click on the way to silence. See the handler below:
+   * a click confirming that you just silenced the game is a joke at the player's
+   * expense, and that has to hold for the shell's sound as well as for this one's.
+   */
+  const toggle = (name: string, label: string, silentOnTap = false): string =>
     `<button class="set-toggle" type="button" role="switch" aria-checked="false"
-       aria-label="${label}" data-toggle="${name}"><span class="set-knob"></span></button>`;
+       aria-label="${label}" data-toggle="${name}"${silentOnTap ? ' data-clicksound="off"' : ''}><span class="set-knob"></span></button>`;
 
   const slider = (name: string, label: string): string =>
     `<span class="set-slider">
@@ -517,7 +527,7 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
         <p class="fa-panel-title">Audio</p>
         <p class="set-locked" data-el="audiostate" hidden></p>
         ${row(icon('sound'), 'Sound effects', 'Hits, pickups, menu taps', slider('sfx', 'Sound effects volume'))}
-        ${row(icon('mute'), 'Mute everything', 'Same as pressing M in a match', toggle('mute', 'Mute everything'))}
+        ${row(icon('mute'), 'Mute everything', 'Same as pressing M in a match', toggle('mute', 'Mute everything', true))}
         ${row(noteIcon(), 'Music', 'The menu and lobby theme', toggle('music', 'Music'))}
         ${row(noteIcon(), 'Music volume', 'Sits under the effects', slider('music', 'Music volume'))}
       </section>
