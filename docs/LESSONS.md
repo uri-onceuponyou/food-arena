@@ -552,6 +552,25 @@ parser *cannot* catch it, because it is valid TypeScript. Only a screenshot foun
 `verify-head` import checker made the same mistake in its first version, matching imports
 inside doc comments.)
 
+### 🚨 And "only a screenshot found it" STOPPED BEING TRUE ENOUGH — 2026-08-06
+
+That limit was recorded as acceptable because a screenshot always eventually catches it.
+**It does not, for CSS that ships UNUSED.** The shared `.ds-*` component layer is written
+before any screen adopts it, so a discarded rule renders nothing different, and **no capture
+of any screen can see the loss.** The trap ate `.ds-banner` once and `.ds-row` once, in the
+same pass, and neither was visible anywhere.
+
+Caught instead by a new static check — `orphanedProse()` — that looks for prose sitting
+*after* a comment's close marker inside a CSS template literal, where the browser will parse
+it as a selector and **silently discard the rule attached to it.** All 20 files under
+`src/ui` are currently clean.
+
+→ **The general form: "a screenshot will catch it" is only true for code that is on screen.**
+Any layer that is written ahead of its callers — a component library, a theme, a utility
+module, a feature behind a flag — has **no visual backstop at all**, so its faults have to be
+caught statically or not at all. **Check whether your safety net is looking at the thing you
+are changing.**
+
 ---
 
 ## 10. Some things only a human can judge — say which
