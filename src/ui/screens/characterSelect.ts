@@ -1043,6 +1043,69 @@ const CSS = `
      the figure, and 8px uppercase was not communicating a six-way distinction anyway.
      The name stays: nothing else on the card encodes identity. */
   .fa-chars .chars-card-rarity { display: none; }
+
+  /* ── THE ABILITIES LIST WAS 28 CSS PX TALL ────────────────────────────────────
+     Measured at 852x393 with 'tools/tmp/ud_defects.mjs' (471x84 DEVICE px at DPR 3,
+     which is the number the per-element audit reported):
+
+       .chars-abilities   clientHeight 28   scrollHeight 384   overflowY 356
+
+     — a 28px window onto four rows totalling 384px, so the ONE thing on screen was the
+     first ability's name and the first line of its description, sliced 7.05px below its
+     own descenders. Four rows of four were cut. There was no scrollbar thumb in view
+     and no partial second row, so nothing on the screen said a list existed; it read as
+     a rendering fault, and that is exactly how the audit described it.
+
+     The itemised bill for the 281px panel that contains it explains the whole thing:
+
+       Stats title  14      chars-stats   60
+       chars-level 119      Abilities ttl 14      chars-abilities 28      gaps 24
+
+     '.chars-level' alone — the Lv badge, the HP/damage readout, the +N preview and the
+     44px Upgrade button — is 42% of the panel, and it cannot shrink much: the button is
+     a tap target and the price on it is the one number on this screen a player disputes.
+     So the room comes from ornament and from padding, in the order of least meaning
+     lost, and the acceptance test is stated before the fix rather than after it:
+
+       THE FIRST ABILITY IS WHOLE AT EVERY VIEWPORT.
+
+     Not "no row is ever cut" — a four-row list in a two-row window WILL cut the third,
+     and that is what scrolling means. A metric that cannot be satisfied is not a metric.
+     What must never happen again is the FIRST row being sliced, because a partially
+     visible second row is itself the affordance that says there is more. */
+  /* The three bars below it are each labelled "Damage" / "Health" / "Speed" in 11px
+     ink. A section header that repeats what its own contents already say is the
+     cheapest 20px on the panel. The ABILITIES title stays — the pills below it are not
+     self-describing. */
+  .fa-chars .chars-detail > .fa-panel-title:first-of-type { display: none; }
+  /* 3px, not 4: at 844x390 — the ONE phone in 'menu_accept''s viewport list — the
+     region came out 65px against a 67.34px row and cut the first card's border by
+     2.34px, while 852x393 passed with 68. Three pixels of viewport height is the whole
+     difference between the two, which is why this is tuned against the shortest
+     supported screen and not the audit's. */
+  /* ⚠️ AND THE NOTCH TAKES ANOTHER 21px THAT NO MEDIA QUERY CAN SEE.
+     A landscape iPhone's home indicator is a 21px bottom inset, and '@media
+     (max-height: 460px)' reads the VIEWPORT height (390) — which is identical with and
+     without it. So the safe-area case cannot be given its own rule; the only way to
+     serve it is to make the un-notched case carry the slack. Measured with menu_accept's
+     own insets, the region was 49px against a 67.34px row. These are the last pixels
+     available without deleting a number a player buys with: the level block's readouts
+     and its 44px Upgrade button are untouched. */
+  .fa-chars .chars-detail { gap: 2px; padding: 4px; }
+  .fa-chars .chars-stats { gap: 1px; }
+  .fa-chars .chars-level { padding: 2px 6px; gap: 2px; }
+  .fa-chars .chars-abilities { gap: 4px; }
+  .fa-chars .chars-ability-desc { line-height: 1.25; }
+  /* 2px and not 3: at 852x393 the region came out 68px against a 69.34px row, so the
+     first row's own 2.5px ink BORDER was still shaved by 1.34px while every text metric
+     read clear. The acceptance test is the row's BOX for that reason. */
+  .fa-chars .chars-ability { padding: 1px 6px; gap: 6px; }
+  /* The fact pills wrapped to two lines inside a 129px body and were worth ~21px of the
+     first row on their own. Tighter pills, not smaller type: 10.24px is already the
+     floor here and 'screen_metrics' judges these on contrast, which shrinking would
+     not change but which a reader would still lose. */
+  .fa-chars .chars-ability-facts { margin-top: 1px; gap: 3px; }
+  .fa-chars .chars-fact { padding: 0 5px; }
 }
 
 @media (max-width: 700px) {

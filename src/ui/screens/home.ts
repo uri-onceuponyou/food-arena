@@ -234,38 +234,39 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
           <span class="fa-level-label" data-el="lvnext">Lv 2</span>
         </div>
 
+        <!-- THE SUB IS A SIBLING OF '.home-track-top', NOT A CHILD OF IT, and that one
+             move is most of the truncation fix. It used to sit inside
+             '.home-track-text', a flex item squeezed between a 24px icon and a nowrap
+             pill: at 852x480 that column measured 39.89 CSS px, so "Waiting to be
+             opened" rendered as "Waitin...". Out here it gets the card's full 125px and
+             needs no ellipsis at all. It costs ZERO height -- it was already on its own
+             line, just an artificially narrow one. -->
         <button class="home-track home-track--road" type="button" data-go="trophies" data-el="road">
           <span class="home-track-top">
             <span class="home-track-icon" data-el="roadicon">${icon('chest')}</span>
-            <span class="home-track-text">
-              <span class="home-track-title" data-el="roadtitle">Next reward</span>
-              <span class="home-track-sub" data-el="roadsub"></span>
-            </span>
+            <span class="home-track-title" data-el="roadtitle">Next reward</span>
             <span class="home-track-pill" data-el="roadpill">${icon('trophy')}</span>
           </span>
+          <span class="home-track-sub" data-el="roadsub"></span>
           <span class="home-bar"><span class="home-bar-fill" data-el="roadfill"></span></span>
         </button>
 
         <button class="home-track" type="button" data-go="trophies" data-el="chest">
           <span class="home-track-top">
             <span class="home-track-icon">${icon('gift')}</span>
-            <span class="home-track-text">
-              <span class="home-track-title">Free chest</span>
-              <span class="home-track-sub" data-el="chestsub"></span>
-            </span>
+            <span class="home-track-title">Free chest</span>
             <span class="home-pips" data-el="pips"></span>
           </span>
+          <span class="home-track-sub" data-el="chestsub"></span>
         </button>
 
         <button class="home-track home-track--held" type="button" data-go="trophies" data-el="held" hidden>
           <span class="home-track-top">
             <span class="home-track-icon">${icon('chest')}</span>
-            <span class="home-track-text">
-              <span class="home-track-title" data-el="heldtitle"></span>
-              <span class="home-track-sub">Waiting to be opened</span>
-            </span>
+            <span class="home-track-title" data-el="heldtitle"></span>
             <span class="home-track-pill is-go">Open</span>
           </span>
+          <span class="home-track-sub">Waiting to be opened</span>
         </button>
 
         <!-- THE DARK FAMILY. Three cream-on-cream chips inside a cream card were the
@@ -498,14 +499,56 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
         <span class="home-kit-name">${a.name}</span>
       </button>`).join('');
     const cap = q<HTMLParagraphElement>('kitcap');
-    cap.textContent = def.abilities[kitIndex]?.desc ?? '';
+    const picked = def.abilities[kitIndex];
+    // The NAME is rendered too, and CSS decides whether it is shown. On a landscape
+    // phone the tiles are icon-only (there is not room for four names across a 186px
+    // flank), so the caption is the only place the ability is named; everywhere else
+    // '.home-kit-capname' is 'display: none' and the tile carries it.
+    cap.innerHTML = picked
+      ? `<span class="home-kit-capname">${picked.name}</span><span>${picked.desc}</span>`
+      : '';
     // Point the caption at the tile it belongs to. Round 2's critic: "'Slows enemies
     // down' is centred under the whole 2x2 grid so it binds to no button in
     // particular." A caption for a tap state has to say WHICH tap it is describing, and
-    // a caret under the selected column is the cheapest unambiguous way to say it. The
-    // odd last tile spans both columns, so its caret goes to the middle.
-    const spansBoth = kitIndex === def.abilities.length - 1 && def.abilities.length % 2 === 1;
-    cap.style.setProperty('--home-cap-x', spansBoth ? '50%' : kitIndex % 2 === 0 ? '25%' : '75%');
+    // a caret under the selected column is the cheapest unambiguous way to say it.
+    //
+    positionKitCaret();
+  }
+
+  /**
+   * Point the caption's caret at the selected tile.
+   *
+   * ⚠️ MEASURED off the tile, not inferred from the index. This used to be
+   * `spansBoth ? '50%' : kitIndex % 2 === 0 ? '25%' : '75%'`, which hard-codes a
+   * TWO-COLUMN grid — correct for the only layout that existed when it was written,
+   * and silently wrong the moment the landscape-phone breakpoint made the grid N
+   * columns wide: every caret would have pointed at one of two positions on a row of
+   * four tiles. Reading the tile's own box is right for any column count, and for the
+   * odd last tile that spans the full width, with no special case at all.
+   *
+   * ⚠️ AND IT IS SEPARATE FROM `renderKit` BECAUSE IT NEEDS LAYOUT, which the first
+   * render does not have. `render()` runs at line 603, BEFORE this factory returns its
+   * root and before `shell.ts:mount` appends it — so every rect is 0x0 on the first
+   * pass and the caret defaulted to 50%. That was visible in the shipped capture at
+   * 1600x900: the diamond sat in the gutter between tile 1 and tile 2 instead of under
+   * the selected tile, on every screen the player had not yet tapped. Called again
+   * from a post-mount frame and from `resize()`, and it writes NOTHING when the box is
+   * still zero, so a call that is too early cannot overwrite a good value with a guess.
+   */
+  function positionKitCaret(): void {
+    const kitEl = q<HTMLDivElement>('kit');
+    const tile = kitEl.children[kitIndex] as HTMLElement | undefined;
+    if (!tile) return;
+    const kr = kitEl.getBoundingClientRect();
+    const tr = tile.getBoundingClientRect();
+    if (kr.width <= 0 || tr.width <= 0) return;
+    // 'inset-inline-start' resolves the percentage from the RIGHT under RTL, while
+    // getBoundingClientRect is always physical, so the offset is mirrored there.
+    const centre = tr.left + tr.width / 2;
+    const frac = getComputedStyle(kitEl).direction === 'rtl'
+      ? (kr.right - centre) / kr.width
+      : (centre - kr.left) / kr.width;
+    q<HTMLParagraphElement>('kitcap').style.setProperty('--home-cap-x', `${(frac * 100).toFixed(1)}%`);
   }
 
   function render(): void {
@@ -572,13 +615,17 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   const unsubscribe = ctx.profile.onChange(render);
   render();
   stage.attachTo(stageHost);
+  // The first frame after `shell.ts:mount` has appended this root — the earliest moment
+  // the kit has a box. See `positionKitCaret`.
+  const caretFrame = requestAnimationFrame(() => positionKitCaret());
 
   return {
     root,
     update(dt) { stage.update(dt); },
-    resize() { stage.resize(); },
+    resize() { stage.resize(); positionKitCaret(); },
     dispose() {
       unsubscribe();
+      cancelAnimationFrame(caretFrame);
       root.removeEventListener('click', onClick);
       // Hand the shared stage back in the state every OTHER consumer expects. The room
       // is home's; character select's hero column and the title card were both judged
@@ -830,12 +877,56 @@ const CSS = `
    was one small card sitting on top of ~600px of empty cream, and a large flat
    emptiness inside a bordered surface is a louder "unfinished" signal than no surface
    at all. These cards hold everything the lobby honestly knows and then stop. */
+/* 'container-type: inline-size' — A CONTAINER QUERY, AND IT IS THE RIGHT INSTRUMENT
+   RATHER THAN A CLEVER ONE. The flank's width is
+       (100vw - 2*gutter - min(97vh, 60vw) - 2*gap) / 2
+   because the middle track reserves the stage slot off vh. So it is a function of BOTH
+   axes, and the flank widths actually measured are
+
+     852x480 -> 173.34    1024x768 -> 178.45    844x390 -> 213.34
+     852x393 -> 215.77    1280x800 -> 225.61    1600x900 -> 331.81
+
+   — the narrowest flank in the set is on a PHONE and the second narrowest is on a
+   TABLET twice its area. No media query can name that pair without naming four
+   viewports and getting the fifth wrong, which is the same mistake the nameplate's vh
+   clamp made one panel up. The card asks about the box it is in, and gets the true
+   answer at every size including ones nobody tested.
+
+   ⚠️ It also removes a hazard rather than adding one: 'contain: inline-size' makes this
+   column's width independent of its contents, which is the exact defect
+   'docs/LESSONS.md' records for the portrait top bar (an auto track inflated to its
+   items' min-content and drew the whole screen 70px too wide). */
 .fa-home .home-col {
-  gap: 6px;
+  container-type: inline-size;
+  /* THE ONE PLACE ON THIS SCREEN WHERE 'vh' IS THE RIGHT UNIT, and it is worth saying
+     why given the nameplate two panels down was broken by exactly the opposite. There
+     the quantity being positioned against (a 56px top bar) does not scale with the
+     viewport, so a vh clamp was a category error. HERE the quantity being spent IS
+     vertical room, and there is proportionally less of it on a 480px screen than on a
+     900px one. 0.85vh resolves to 4.08px at 852x480 — the only viewport whose left
+     flank has no headroom — and to the original 6px everywhere above 706px tall.
+     Worth 9.6px across the column's five gaps, against a measured 9.31px overspend. */
+  gap: clamp(4px, 0.85vh, 6px);
+  padding: clamp(6px, 1.35vh, 14px);
   overflow: hidden;
   align-self: center;
   max-height: 100%;
 }
+/* ⚠️ 'flex: 0 0 auto' ON EVERY CHILD, AND IT IS A GUARD RATHER THAN A LAYOUT TWEAK.
+   An over-subscribed column here does NOT overflow — every child is a '<button>' or a
+   block whose flex 'min-height: auto' Chromium does not resolve to its content-based
+   minimum, so the column silently COMPRESSES its cards and their contents draw outside
+   their own borders while the panel looks untouched. Proven on a mutant
+   ('ud_defects.mjs --selftest', row 5): 40px of extra content shrank the road card
+   70.58px -> 52.28px with its content still 67px, i.e. 21px of type rendering over the
+   card's bottom edge — and BOTH column-level overflow metrics reported 0.00.
+   'scrollHeight - clientHeight' was 0, the per-child bottom was 0.06.
+
+   With shrinking off, the same overspend becomes an overflow the panel clips, which
+   'childCut' does see. That is the whole point: a failure this layout can have must be
+   a failure the instrument can NAME. It is not load-bearing for the fit — every
+   viewport measured has headroom — it is load-bearing for the NEXT change. */
+.fa-home .home-col > * { flex: 0 0 auto; }
 
 /* ── UI WEIGHT ────────────────────────────────────────────────────────────── */
 /* The round-1 critic's second finding: "everything around the hero is web UI rather
@@ -908,27 +999,79 @@ const CSS = `
 }
 .fa-home .home-track[hidden] { display: none; }
 
-.fa-home .home-track-top { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
-.fa-home .home-track-icon { font-size: 1.5rem; line-height: 1; flex: 0 0 auto; }
-.fa-home .home-track-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+/* ── NOTHING ON THIS SCREEN ELLIPSISES ANY MORE ───────────────────────────────
+   'white-space: nowrap; overflow: hidden; text-overflow: ellipsis' on the title and
+   the sub produced NINE truncated runs at 852x480 and TEN at 1024x768, measured with
+   'tools/tmp/ud_defects.mjs' against a populated save:
+
+     "9 rewards ready"      -> "9 rew..."       (-10 chars)
+     "Waiting to be opened" -> "Waitin..."      (-14 chars)
+     "3 chests held"        -> "3 che..."       (-8 chars)
+
+   Two blind critics named it unprompted -- "truncated mid-word ... reads as an
+   unfinished layout bug" -- and it produced the joint-worst score in the per-element
+   audit, 4 against 8. The solution was already written down in 'settings.ts:1311',
+   where a nowrap segmented control rendered "Battery s..." at 390px portrait and was
+   fixed by WRAPPING: an option a player cannot read is an option that is not offered.
+   Same rule, same fix, three more elements.
+
+   THREE THINGS MAKE THE WRAP SAFE, and all three are load-bearing:
+
+   1. 'min-width' on the title, NOT 'min-width: 0'. A flex item allowed to shrink to
+      zero wraps INSIDE A WORD -- at 852x480 the title column was 39.89px against a
+      45px "rewards", so break-word would have rendered "reward" / "s", which is worse
+      than the ellipsis it replaced. The floor is set above the longest word any title
+      can hold, so the wrap always lands on a space.
+   2. 'flex-wrap: wrap' on the row, so the PILL drops to its own line when the title
+      cannot have its floor otherwise. This is what buys the title its width back; the
+      pill is 'white-space: nowrap' and cannot shrink, so without this the title pays
+      for it. 'margin-inline-start: auto' keeps the pill right-aligned on either line.
+   3. 'overflow-wrap: break-word' as a FLOOR, never as the mechanism -- exactly as in
+      'settings.ts'. If a future string does hold a word longer than the column, it
+      breaks rather than overflowing the card, and the metrics tool reports it.
+
+   ⚠️ Wrapping spends VERTICAL space, and '.home-col' is 'overflow: hidden' -- it CLIPS
+   rather than scrolls. A wrap that does not fit converts a horizontal truncation into
+   a vertical one, which is strictly WORSE: an ellipsis at least tells the player that
+   something was cut. The container query below pays for the wrap at the one flank
+   width where the budget is tight, and 'ud_defects.mjs' reports 'clipped' per column
+   so an overspend cannot ship silently. */
+.fa-home .home-track-top {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 4px 8px; width: 100%; min-width: 0;
+}
+.fa-home .home-track-icon { font-size: clamp(1.15rem, 2.6vh, 1.5rem); line-height: 1; flex: 0 0 auto; }
 .fa-home .home-track-title {
   font-family: 'Rubik', sans-serif; font-weight: 800;
   font-size: clamp(0.7rem, 1.55vh, 0.86rem);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.18;
+  flex: 1 1 auto;
+  /* The longest word any title can carry is a milestone face title -- a character name
+     from 'rules.ts' ("Hamburger", "Bottle") or "complete" / "rewards" / "chests" --
+     which measures ~68px at the largest size this clamp reaches. 72px therefore
+     guarantees the wrap lands on a space at every viewport. */
+  min-width: 72px;
+  overflow-wrap: break-word;
 }
 .fa-home .home-track-sub {
   font-family: 'Heebo', sans-serif;
   font-size: clamp(0.7rem, 1.4vh, 0.8rem); font-weight: 700; color: #4A3524;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.22;
+  overflow-wrap: break-word;
 }
+/* 'renderRoad' leaves this empty in one state and the flex column would otherwise
+   still pay the gap for a box with nothing in it. */
+.fa-home .home-track-sub:empty { display: none; }
 .fa-home .home-track-pill {
   display: flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  margin-inline-start: auto;
   --fa-ic-ink: #FFF3DE;
   font-family: 'Rubik', sans-serif; font-weight: 800;
   font-size: clamp(0.6rem, 1.35vh, 0.74rem);
   background: var(--ink); color: var(--cream);
   border-radius: 999px; padding: 3px 9px; white-space: nowrap;
 }
+.fa-home .home-pips { margin-inline-start: auto; }
 .fa-home .home-track-pill.is-go { background: var(--lettuce); color: #16300a; }
 
 /* The one state on this screen allowed to pull the eye away from START GAME, and
@@ -968,6 +1111,88 @@ const CSS = `
   background: rgba(26,18,36,0.14);
 }
 .fa-home .home-pip.is-on { background: var(--lettuce); }
+
+/* ── PAYING FOR THE WRAP, AT THE ONE WIDTH WHERE IT COSTS ANYTHING ────────────
+   Wrapping instead of ellipsising spends vertical space, and the left flank's budget
+   is not the same at every viewport. Measured slack (band height minus column height),
+   'tools/tmp/ud_defects.mjs':
+
+     852x480 ....  24.95px   <- the only tight one
+     852x393 ....  35.78px
+     844x390 ....  32.78px
+     1024x768 ... 254.20px
+     1280x800 ... 275.03px
+     1600x900 ... 350.47px
+
+   So the trims below fire on a 173px flank and NOT on a 178px one, which no media
+   query can express (the 173px case is a 852x480 phone and the 178px case is a
+   1024x768 tablet). Nothing here removes information — it is padding, gap and one
+   ornamental icon size. The icon is the largest single saving because it, not the
+   text, sets the row's height: 24px of glyph beside 13px of type. */
+/* ⚠️ THE HEIGHT CONDITION IS NOT REDUNDANT WITH THE WIDTH ONE, and leaving it off
+   applied all of this to a 1024x768 tablet.
+   A container query resolves against the CONTENT box, and the content boxes are
+   852x480 -> 155.4px and 1024x768 -> 152.7px: the TABLET's flank is the narrower of the
+   two, so no max-width threshold can separate them. But every declaration in this block
+   buys VERTICAL room, and the tablet has 232px of slack — it needs none of it, and
+   quietly restyling a viewport that was never broken is how a fix becomes a regression
+   somewhere nobody looked. The width says the cards are cramped; the height says the
+   column is out of room; the trims are only correct when both are true. */
+@media (max-height: 520px) {
+@container (max-width: 176px) {
+  /* THE PILL MOVES ONTO THE SUB'S LINE, and this is where the height actually is.
+     With the row as a wrapping flex line, a 132px card cannot hold
+     icon + a title with a usable minimum + a nowrap pill, so the PILL wraps to a line
+     of its own: 22px per card, on all three cards, for one 45px chip. Reflowing the
+     card as a three-area grid puts it beside the sub instead, where there is already a
+     line. 'display: contents' on '.home-track-top' is what lets a grid area address
+     children of a wrapper without moving them in the DOM — the wide layout keeps its
+     single row and its markup is untouched.
+
+     Measured at 852x480 with the LONGEST strings the code can emit
+     ('ud_defects.mjs --stress'): the road card was 108.17px and the column overspent
+     its band by 21.61px, clipping the record row. */
+  .fa-home .home-track {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'ic ti ti'
+      'sb sb pl'
+      'br br br';
+    align-items: center;
+    padding: 4px 7px;
+    column-gap: 6px;
+    row-gap: 3px;
+  }
+  .fa-home .home-track-top { display: contents; }
+  .fa-home .home-track-icon { grid-area: ic; font-size: 1.05rem; }
+  /* min-width goes back to 0 here ON PURPOSE: the title now owns a whole grid row and
+     is never competing with the pill, so the floor that stopped mid-word breaks in the
+     flex layout would only force the grid column wider than the card. */
+  .fa-home .home-track-title { grid-area: ti; min-width: 0; }
+  .fa-home .home-track-sub { grid-area: sb; }
+  .fa-home .home-track-pill,
+  .fa-home .home-pips { grid-area: pl; justify-self: end; margin-inline-start: 0; }
+  .fa-home .home-bar { grid-area: br; height: 7px; }
+  .fa-home .home-kit-tile { padding: 4px 3px; }
+  .fa-home .home-kit-cap { margin-top: 6px; padding: 3px 6px; }
+  /* ORNAMENT ONLY, and it is already dropped one breakpoint down for the same reason:
+     "the gold rule under a panel title is 9px of a band that has none to spare". The
+     first pass of this fix left it in and the column came out 8.59px over — measured as
+     '.home-track > .home-bar draws 8.59px outside its own card', which is precisely the
+     silent squash the guard above now makes impossible. */
+  .fa-home .fa-panel-title::after { display: none; }
+  /* THE THIRD CHANNEL IS THE ONE TO SPEND. This row says each number three ways: a
+     glyph, a colour and a word. The file's own note is that "the numeral carries the
+     meaning in colour now (won / lost / peak) instead of a caption doing all the work",
+     and every one of the three colours is documented at 8.4-12.4:1 on the slate plate.
+     Dropping the 11.5px glyph keeps the word AND the colour and is worth 22.3px of a
+     band that was 21.61px short. */
+  .fa-home .home-record { margin-top: 1px; padding-top: 4px; }
+  .fa-home .home-rec { padding: 3px 2px 2px; }
+  .fa-home .home-rec-ic { display: none; }
+}
+}
 
 /* ── Centre stage ─────────────────────────────────────────────────────────── */
 /* PORTRAIT, AND THAT IS THE SINGLE BIGGEST CHANGE ON THE SCREEN.
@@ -1090,9 +1315,42 @@ const CSS = `
    the top bar that is deliberately empty ('.fa-topbar-spacer'), and it is still sky at
    every framing for the same reason as before. Bottom-centre remains wrong -- that is
    where the plinth is. */
+/* ⚠️ AND THE OFFSET WAS IN THE WRONG UNIT, WHICH IS WHY IT WAS WRONG EVERYWHERE.
+   'top: clamp(46px, 7.5vh, 76px)' with a 'clamp(40px, 12vh, 56px)' override on short
+   viewports was a guard nobody had ever measured, and it FAILED AT ALL SIX viewports
+   tested, not only on the phone it was tuned for. Measured, 'tools/tmp/ud_defects.mjs':
+
+     viewport     top bar bottom   nameplate top   OVERLAP
+     852x393           62.00           47.16       14.84px
+     852x480           62.23           46.00       16.23px
+     844x390           62.00           46.80       15.20px
+     1024x768          65.97           57.59        8.38px
+     1280x800          66.39           60.00        6.39px
+     1600x900          67.69           67.50        0.19px
+
+   The mechanism is in the middle column: THE TOP BAR IS 56px TALL AT EVERY ONE OF THEM.
+   It is built out of '--tap' (a fixed 44px) plus fixed padding and borders, so it does
+   not scale with the viewport at all — only the 'var(--gap)' above it does, and that is
+   itself clamped to 6-12px. The nameplate offset was written in 'vh', so the two
+   quantities scale differently and any value that clears the bar does so by coincidence
+   at exactly one height. A vh clamp cannot express "below a fixed-height bar".
+
+   So the offset is now a MAX of the aesthetic value and a hard floor derived from the
+   same variable the bar is derived from: '--tap + 12px' is the bar's measured height
+   (56px, constant across a 2.3x range of viewport height), and 6px is the clearance.
+   If the design system's tap target ever grows, the nameplate moves with it instead of
+   silently sliding back under the tabs.
+
+   NOT solved by moving the plate off-centre: the empty half of the top bar
+   ('.fa-topbar-spacer') is LEFT of the tabs, and the nameplate is centred on the hero,
+   which is centred on the screen. Decentring the name to dodge the tabs would decentre
+   it from the thing it names. */
 .fa-home .home-nameplate {
   position: absolute;
-  top: clamp(46px, 7.5vh, 76px);
+  top: max(
+    calc(var(--fa-safe-t) + var(--gap) + var(--tap) + 12px + 6px),
+    clamp(46px, 7.5vh, 76px)
+  );
   inset-inline-start: 0;
   inset-inline-end: 0;
   display: flex;
@@ -1251,12 +1509,19 @@ const CSS = `
   box-shadow: 0 3px 0 var(--gold-shadow), inset 0 2px 0 rgba(255,255,255,0.75);
 }
 .fa-home .home-kit-em { font-size: clamp(1.25rem, 2.9vh, 1.7rem); line-height: 1; flex: 0 0 auto; }
+/* WRAPS, for the same reason the track title does. At 852x480 a 58.17px tile rendered
+   "Tomato Toss" as "Tomato T..." and "Lettuce Fling" as "Lettuce ..." — three of the
+   nine truncated runs on the screen, and unlike the track rows these strings come from
+   'rules.ts' and cannot be shortened here. The longest single word in the cast's
+   ability names measures ~40px against a 57-58px tile at every viewport where the tile
+   exists, so the wrap always lands on a space and 'break-word' is only a floor. */
 .fa-home .home-kit-name {
   font-family: 'Rubik', sans-serif; font-weight: 800;
   font-size: clamp(0.66rem, 1.45vh, 0.82rem);
+  line-height: 1.12;
   text-align: center;
   max-width: 100%;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  overflow-wrap: break-word;
 }
 /* The tap state. A FIXED minimum height, because selecting a tile must not reflow the
    panel — the Change button sits under this and '.home-col' clips rather than scrolls,
@@ -1280,6 +1545,22 @@ const CSS = `
   border-radius: 10px;
   box-shadow: 0 3px 0 rgba(0,0,0,0.28), inset 0 2px 0 rgba(255,255,255,0.9);
 }
+/* The selected ability's NAME, hidden by default because the tile beside it already
+   carries it. It is turned on at exactly one breakpoint — the landscape phone, where
+   the tiles go icon-only to fit (see the max-height block at the foot of this file) —
+   so the caption is the only place the name exists there. Rendered as its own element
+   rather than concatenated into the string, because the two states differ in LAYOUT,
+   not in content, and a screen must not have to re-run 'renderKit' to change size. */
+.fa-home .home-kit-capname { display: none; font-weight: 900; }
+/* NON-BREAKING SPACES, both sides. A plain space in 'content' collapses against the
+   adjacent inline box and the first capture rendered "Tomato Toss -Slows enemies down"
+   — the leading space survived and the trailing one did not. The dash is also what
+   stops the separator from being the wrap point on a two-line caption.
+   ⚠️ DOUBLE backslashes: this whole stylesheet is a JS template literal, so a single
+   backslash is consumed by JS and never reaches CSS. Written singly it compiled as an
+   octal escape and tsc refused the file (TS1487). Same family of trap as the backtick
+   rule at the top of this file. */
+.fa-home .home-kit-capname::after { content: '\\00a0\\2013\\00a0'; font-weight: 700; }
 /* The tail. '--home-cap-x' is written by 'renderKit()' from the selected index, so the
    caption points at its own tile rather than at the grid in general. A rotated square
    whose lower half lands ON the plate's ink border, which is what makes it read as a
@@ -1481,16 +1762,116 @@ const CSS = `
    two lists that need vertical room the band does not have. */
 @media (max-height: 460px) {
   .fa-home .home-stage-hint { display: none; }
-  /* The nameplate's top offset is a clamp against viewport height, and at 390px tall the
-     top bar is proportionally much larger, so the name would land on the tabs. */
-  .fa-home .home-nameplate { top: clamp(40px, 12vh, 56px); }
+  /* WAS: '.fa-home .home-nameplate { top: clamp(40px, 12vh, 56px); }' with the reason
+     "the nameplate's top offset is a clamp against viewport height, and at 390px tall
+     the top bar is proportionally much larger, so the name would land on the tabs."
+     The diagnosis was right and the prescription was 15px short — 12vh of 393 is
+     47.16px against a tab bar whose bottom edge is at y=62, so the override moved the
+     plate DOWN by 1.16px and the name still ran under the tabs. Kept here per the
+     project's rule about reversed assertions: the fix is one level up, on the base
+     rule, and it is a max() against a floor derived from '--tap' rather than another
+     vh guess. Nothing viewport-specific is needed any more. */
   .fa-home .home-track-sub { display: none; }
   .fa-home .home-mode-sub { display: none; }
   .fa-home .home-record { display: none; }
-  .fa-home .home-kit { display: none; }
-  /* The caption is the kit's tap state, so it goes with the kit. Left behind it would
-     be a description of an ability whose tile is not on screen. */
-  .fa-home .home-kit-cap { display: none; }
+  /* ⚠️ WAS: '.fa-home .home-kit { display: none; }' and '.home-kit-cap { display: none }',
+     with the reason "the caption is the kit's tap state, so it goes with the kit".
+     The reason for hiding the CAPTION was sound; hiding the KIT was not, and it stopped
+     being defensible the moment Uri ruled the game LANDSCAPE-ONLY (DECISIONS §14).
+     This breakpoint is not an edge case — it IS the phone experience — and what it
+     shipped was a lobby with NO ability affordance whatsoever: measured 0 tiles at
+     852x393 and 844x390, against 4 at every viewport above 460px tall. The right flank
+     is titled "Your fighter" and told the player three stat bars and nothing about what
+     the fighter DOES.
+
+     It was hidden because the 2x2 grid plus its caption is ~139px and did not fit. The
+     measurement says the flank has 118px of unused height at 852x393 (panel 151px in a
+     269px band), so the fix is to make the kit fit rather than to delete it:
+
+       - ONE ROW of N tiles instead of a 2x2 grid          -> 44px, not 93px
+       - ICON-ONLY tiles, the name moving to the caption   -> nothing truncates in a
+                                                              43px tile, and the caption
+                                                              gains the name it needs
+       - a slightly taller caption to hold name + desc     -> ~50px
+
+     Total ~96px against 118px available, and 'ud_defects.mjs' asserts the column does
+     not clip. The caption stays because the tiles are back, which is what the old
+     comment actually said. */
+  /* ICON-ONLY AT EVERY LANDSCAPE-PHONE WIDTH, one row or two. The name moves to the
+     caption, which is where the tap state already lives — measured, that is 33px off a
+     two-up grid (a 73px tile wraps "Lettuce Fling" onto a second line and stands 61px
+     tall; icon-only it is 44px, the tap floor exactly), and the notched flank needed
+     every one of them. */
+  .fa-home .home-kit-tile { padding: 4px 3px; gap: 0; }
+  .fa-home .home-kit-name { display: none; }
+  .fa-home .home-kit-capname { display: inline; }
+  .fa-home .home-kit-cap { margin-top: 7px; padding: 3px 6px; min-height: 2.6em; }
+  /* ⚠️ AND THE ONE-ROW FORM IS GATED ON THE FLANK BEING WIDE ENOUGH FOR FOUR THUMBS.
+     The first version of this fix put four icon tiles in a row unconditionally and
+     'menu_accept' refused it: at 844x390 WITH A LANDSCAPE iPHONE'S NOTCH (44px of inset
+     on each long edge, which is the device this breakpoint exists for) the flank falls
+     from 193px of content to 151, and four tiles measured 34x44 against a 44x44 tap
+     floor. An ability affordance a thumb cannot hit is not an affordance, so the count
+     the probe reports would have said "4" about a row nobody can use.
+
+     The threshold is arithmetic rather than taste: four 44px targets with three 5px
+     gaps need 191px. Below it the kit falls back to the two-up grid this file already
+     uses everywhere else — still icon-only, still 44px tall, 73px wide.
+     A container query rather than a width media query for the reason given above the
+     '.home-col' rule: this is a question about the FLANK, and the same 844x390 device
+     answers it differently with and without insets. */
+  /* ⚠️ 191px IS THE CONTAINER'S CONTENT BOX, NOT ITS BORDER BOX, and the difference is
+     18px of padding and border that cost a whole debugging round. A container query on
+     'container-type: inline-size' resolves against the CONTENT box, so a 215.78px flank
+     queries as 200.2px — a threshold written at 200 against the outer width matched
+     NOTHING, at any viewport, and the kit stayed two-up everywhere while the rule sat
+     there parsing cleanly. (Confirmed by walking 'document.styleSheets': the
+     CSSContainerRule was present and simply never matched.) 191 = 4 tiles x 44px +
+     3 gaps x 5px, i.e. the arithmetic requirement itself, which is why it is that
+     number and not a rounded one.
+     ⚠️ SINGLE QUOTES in this comment, like every other one in this file: a backtick
+     anywhere in this template literal terminates the string. Writing the property name
+     in backticks here produced 'home.ts(1820,7): error TS1005' — CLAUDE.md's
+     non-negotiable, and it has now bitten in this file twice. */
+  @container (width >= 191px) {
+    .fa-home .home-kit {
+      grid-template-columns: none;
+      grid-auto-flow: column;
+      /* minmax(44px, ...) and not minmax(0, ...): the tap floor has to be expressed in
+         the grid, not merely satisfied by arithmetic, or the next ability added to a
+         character silently shrinks four targets below it. */
+      grid-auto-columns: minmax(44px, 1fr);
+    }
+    /* The odd-count span is a two-column idiom. In one row there is no ragged cell to
+       close, and letting it span would make a three-ability fighter's last tile twice
+       the width of the other two. */
+    .fa-home .home-kit-tile:last-child:nth-child(odd) { grid-column: auto; }
+  }
+  /* ⚠️ AND BELOW 191px THE STATS GO, NOT THE KIT — WHICH IS A REVERSAL, ON THIS FILE'S
+     OWN STATED PRINCIPLE.
+     A landscape iPhone carries 44px of safe-area inset on BOTH long edges, so 844x390
+     becomes 756px of usable width and the flank falls to 154px of content. Four 44px
+     targets need 191, so the kit has to be two-up there — and two-up plus its caption
+     plus three stat bars plus the Change button measures 313px against a 245px band.
+     Something has to go, and the comment at the top of this media query already says
+     which: "drop the flank whose information is available one tap away: the fighter's
+     stats are the whole right-hand panel of the character-select screen". That reason
+     was written to justify dropping a whole flank and was then applied to the KIT,
+     which is available nowhere else on this screen. Applied to the thing it actually
+     describes, it drops the three stat bars: 227px, and it fits.
+     Measured with 'ud_defects.mjs' at 844x390 and 852x393 with menu_accept's own
+     insets (t0 r44 b21 l44). See DECISIONS-FOR-URI — this is the one judgement call in
+     the four fixes, and reversing it is one rule. */
+  @container (width < 191px) {
+    .fa-home .home-stats { display: none; }
+    /* And the panel HEADERS, worth 19px each including their gap. Measured, the right
+       flank was still 7.5px over after the stats went and the left flank had 0.41px of
+       slack — 19px is the difference between "fits" and "the Change button is clipped".
+       What is left in each panel says what it is without being told: three cards reading
+       "9 rewards ready" / "Free chest" / "3 chests held", and four ability tiles over a
+       caption that names the one you tapped. */
+    .fa-home .home-col .fa-panel-title { display: none; }
+  }
   /* The gold rule under a panel title is 9px of a band that has none to spare. */
   .fa-home .fa-panel-title::after { display: none; }
 }
