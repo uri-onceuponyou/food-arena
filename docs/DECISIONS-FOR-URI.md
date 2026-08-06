@@ -2041,3 +2041,54 @@ white **sclera** as the brightest mass on the face. **A highlight is not a scler
 hamburger as *"a flat dark shape with no lip thickness or interior value step."* A mouth needs an
 **interior** — a darker throat value behind the lip line — so it reads as an opening rather than a
 painted curve. Same principle as the eyes: **a value step INSIDE the silhouette.**
+
+---
+
+## 39. ✅ TACO + BURRITO rejects — and Burrito exposes a blind spot in our best new instrument
+
+### Taco
+> *"legs — same issue, **I'll stop relating to the leg issue, it's on all characters so far**.
+> Eyes — better, still needs work. **No mouth, seems like a hat or something.** Not sure about the
+> items on the head, **looks like fruit, not taco add-ons**."*
+
+- **The legs escalated to a RIG defect** — see §40 below. Uri seeing it on three of three is what
+  turned it from a character note into the widest-reach fix in the cast.
+- **Taco's eyes are the best in the cast**, and Uri's ranking is exactly the construction ladder:
+  hamburger a flattened **arc** (a stroke) → donut a **sphere** with a specular → taco a sphere
+  **plus an explicit white glint mesh**. His eye tracked the geometry without seeing the code.
+- **"No mouth, seems like a hat"** — likely a **fusion**, not a missing mouth. Taco's mouth is the
+  shell's own opening, and directly beneath it `taco.ts:216` says *"the neck column and its collar
+  are this character's DARKEST band."* A dark opening immediately above the darkest band merges into
+  one mass that reads as a **brim**. Same class as Hamburger's apron fusing with its tomato into one
+  red cylinder, and Burrito's foil landing within 4% of its tortilla.
+- **"Looks like fruit"** is a **SHAPE** problem, not a colour one — the fillings are authored
+  correctly (`TOMATO #E63946`, `LETTUCE`, `ONION`) but built as **spheres and rings**, and spheres
+  read as berries while purple rings read as grapes. Real fillings are **shredded, diced, crumbled**.
+  Change the shapes, keep the palette.
+
+### Burrito — *"Looks a bit like a goat. Face is not good."*
+
+**He is right, and it is not a face problem.** Every element is individually correct:
+
+| element | authored as | reads as |
+|---|---|---|
+| two upright pointed shapes on top | **torn foil peaks** on the wrap (`burrito.ts:19`) | **ears** |
+| LANKY archetype — *"tall narrow torso, long thin limbs"* | a burrito is a long vertical tube | animal proportions |
+| `TORTILLA #DFD2B9`, pale cream | flour wrap | fur |
+| small face low on a long narrow head | a face on a tube | a **muzzle** |
+
+**Each part is a correct burrito feature. Together they compose a goat.** Improving the face will
+not fix it — the *silhouette* is what says "animal", and the silhouette is read first.
+
+### 🚨 And this is a BLIND SPOT in the per-part instrument, worth more than the character
+
+The per-part method — Uri's own suggestion, and the thing that independently found Hamburger's face
+and eyes — **scores each part in ISOLATION to reduce noise.** That is exactly what makes it unable
+to see this: **isolation removes the information needed to detect a gestalt error.** A per-part run
+on Burrito would score the foil peaks, the head and the face separately and could rate each of them
+fine, while the assembled character reads as the wrong animal.
+
+**So the two methods are complementary and neither replaces the other:** per-part finds *"this
+component is badly built"*; only a whole-character look finds *"these correct components compose
+something else."* Any future per-part run must be paired with a whole-figure panel — and the
+existing `figure-whole` control exists for precisely this, so **read it, do not just compute it.**
