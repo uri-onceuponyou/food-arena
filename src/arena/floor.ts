@@ -86,7 +86,7 @@
  */
 
 import * as THREE from 'three';
-import { roundedBox, cloneToon } from '../render/toon';
+import { roundedBox, cloneToon, toonMat } from '../render/toon';
 import { wu, groundPos } from '../units';
 import { mesh, noOutline, FLOOR_Y, ARENA_W, ARENA_H, CENTER, type Materials } from './shared';
 
@@ -847,6 +847,412 @@ function buildDebrisPile(mats: THREE.Material[], cx: number, cy: number, seed: n
     item.rotation.y = rand() * Math.PI * 2;
     g.add(item);
   }
+  return g;
+}
+
+/**
+ * ── GROUND DEBRIS — THE REFERENCE'S GROUND DETAIL IS *OBJECTS*, NOT SURFACE ──
+ *
+ * ⚠️ Read `ac08dbf` before touching this. That probe measured our ground surface
+ * against the six `gameplay_topdown` plates with the same code on both sides and found
+ * NOTHING to add: `mf` (3-12 px features) 1.07x and `lf` (12-48 px) 1.01x — both on the
+ * reference MEDIAN. **A normalMap, an aoMap, more grain or more mottle would move a
+ * quantity that is already where Brawl Stars is.** Two things were out of band, and
+ * only two:
+ *
+ *   `featShare`   ref 24.58-34.94%   ours 15.06-21.37%    NON-OVERLAPPING
+ *   `groundFeat`  ref 0.1363-0.2761  ours 0.1101-0.1517   at/below the floor
+ *
+ * Both count pixels whose local contrast exceeds 0.035 — that is OBJECT scale, not
+ * texture scale. **The frame is short of THINGS, not short of surface.**
+ *
+ * Looked at rather than inferred (`reference/images/curated/gameplay_topdown/bs_01.png`,
+ * the plate this floor is keyed to): its rose paver field carries **dozens of small teal
+ * chips**, ~12 px at height-900 against an 80-106 px stone — i.e. **11-15% of a stone's
+ * width** — clustered near their source and thinning into the open, each one a little
+ * solid object with its own lit face and shaded face.
+ *
+ * ── WHY THIS IS NOT THE DELETED "POLKA DOTS" ────────────────────────────────
+ * A previous round scattered flat tinted DISCS of radius 3-7wu onto a third of all tiles
+ * and they were correctly deleted (see the note in `buildFloor`): a 7wu-radius disc is
+ * **35% of a 40wu tile**, which is not grain, it is a blemish stamped on the tile, and it
+ * sat squarely in the MID band this file reserves for nobody. The difference here is not
+ * degree, it is kind:
+ *
+ *              deleted discs           these chips
+ *   size       6-14wu (15-35% tile)    3.4-6.2wu (8.5-15% tile) — the measured ref ratio
+ *   shading    flat, one tinted fill   solid geometry, lit face + shaded face + shadow
+ *   count      ~1/3 of 875 tiles       density-modulated scatter over 1400x1000wu
+ *   band       MID (tile-sized)        OBJECT (sub-tile, above the texture's 1-2.5px)
+ *
+ * ── THE VALUE CONTRACT THIS FILE RUNS ON IS NOT SUSPENDED ───────────────────
+ * `tools/tmp/floorprobe.mjs` requires the character's own outline to be the strongest
+ * edge within 200px, and its binding station (`pantry_ne`) has charEdge 0.132 against a
+ * floor edge p99.9 of 0.092. So chips separate by **HUE and by their own shading**, never
+ * by albedo: every colour below is authored inside luma 90-121 against the tile field's
+ * own 105 (0.2126R + 0.7152G + 0.0722B on the authored sRGB triple), i.e. within one
+ * value step of the surface they lie on. That is the same rule the tile field, the
+ * service mats and the pale marks already work to, applied to a new layer.
+ *
+ * ── HUE IS CHOSEN OFF `arena-scan`'s FAILING RAIL, NOT OFF THE PLATE ────────
+ * `bs_01`'s litter is teal, and copying that would have been the wrong transcription:
+ * the whole-frame colour budget reads **warm chroma 0.053 against a band minimum of
+ * 0.072 (FAIL) while cool chroma is 0.427 against a 0.343 target (PASS)**, and the
+ * environment's hue occupancy is 0.34 in the 180deg bin. Our arena is not short of cool.
+ * So the family is mostly WARM kitchen matter — crumb, herb scrap, tile shard — with one
+ * cool chip kept for variety at 8%. `CLAUDE.md`'s "adding COOL chroma is the cheap lever"
+ * was true when it was written and is measured false for this frame today.
+ *
+ * ── DENSITY IS A FIELD, NOT A PROP LIST ─────────────────────────────────────
+ * Deliberately NOT keyed to prop positions. This file already carries two warnings about
+ * decoration pinned to a prop and orphaned when the prop moved ("if you move a prop in
+ * `kitchen.ts`, move its mat"), and the 2026-08-05 re-plan moved every hub prop. A
+ * continuous low-frequency density field cannot be orphaned: it clusters and thins the
+ * way real litter does, and it survives any layout change.
+ */
+/** wu. Jittered-grid cell; at most one chip per cell, so nothing ever piles up.
+ * 28 -> 22 -> 19 across rounds 3 and 8: the paired A/B below wanted more chip AREA, and
+ * count is half of that lever (size is the other half, and cheaper — see `CHIP_R_MIN`).
+ * 73 x 52 candidate cells, ~1750 chips placed, still **2 draw calls**. */
+const CHIP_CELL = 19;
+/**
+ * Placement probability per cell in the emptiest / densest part of the field.
+ *
+ * Round 2, off the render rather than off a number: at 0.16-0.62 the scatter was
+ * visually UNIFORM — a fine even sprinkle over the whole floor, which is the read a
+ * texture gives, not the read litter gives. `bs_01`'s chips gather in loose drifts with
+ * bare paver between them. The spread is widened and the field slowed down (below) so
+ * there are stretches with almost nothing and drifts with several chips per tile.
+ */
+const CHIP_P_MIN = 0.10;
+const CHIP_P_MAX = 0.85;
+/**
+ * wu. Chip radius, before the per-instance ground-axis scale (0.80-1.40) below. Delivered
+ * width is therefore 3.5-10.9wu, mean ~6.6wu = **16.5% of a 40wu tile**.
+ *
+ * ⚠️ DECLARED OVERSHOOT. The ratio measured off `bs_01` is 11-15% of a stone's width and
+ * round 7 sat inside it (mean 13.8%). The paired A/B then showed that at that size the
+ * layer moves `groundFeat` by **+0.0048 against a measured floor of 0.0028** — real, and
+ * a fifth of what closing the reference band needs. `groundFeat` counts pixels whose luma
+ * departs from a 5px-radius triple box blur (sigma ~6.5px) by more than 0.035, and a 12px
+ * feature is close enough to that kernel that the blur partly FOLLOWS it — so chips at the
+ * transcribed size sit right on the threshold and a large share of them fall under it.
+ * Area goes with the square of width, so +20% of width buys +44% of registering pixels,
+ * which is a cheaper lever than count. 16.5% is one notch outside the transcribed ratio
+ * and is recorded here as a deliberate trade rather than left to be re-derived.
+ */
+const CHIP_R_MIN = 2.2;
+const CHIP_R_MAX = 3.9;
+/**
+ * Y of the chip layer's underside. The tile top face is +0.015 and the raised ground
+ * layers in this file run 0.045 (pads) -> 0.063 (pad top face) -> 0.066 (`MAT_WEAR_Y`)
+ * -> 0.068-0.07 (baked contact) -> ~0.08 (prop kicks). A chip is a SOLID, so it is placed
+ * on the tile at 0.020 rather than lifted to clear the pads — lifting it would float it
+ * 5cm over the ~80% of the arena that is bare tile, and a floating chip is the exact
+ * "decal above the surface" parallax defect `DECAL_Y` exists to fix.
+ *
+ * The consequence, stated rather than discovered later: chips landing on a service mat or
+ * a plank pad are partially buried by it (pad top 0.063 against a chip standing
+ * 0.077-0.233 tall, so they show as low nubs rather than vanishing). That reads as the
+ * service mats being the swept part of the floor, which is true of a real kitchen, and it
+ * is why the flatten factor below bottoms out at 0.45 rather than going flatter.
+ */
+const CHIP_Y = 0.020;
+
+/** One scattered chip, resolved before any Three.js object exists so the scatter is a
+ * pure function of the seed and the transcription below cannot perturb it. */
+type ChipRow = {
+  wx: number; wy: number; r: number; flat: number;
+  rot: number; tiltX: number; tiltZ: number; sx: number; sz: number; ci: number;
+};
+
+/**
+ * Scattered ground debris, arena-wide, as two `InstancedMesh`es.
+ *
+ * ⚠️ INSTANCED, and that is a hard requirement rather than an optimisation. Hundreds of
+ * individually-meshed chips would be hundreds of draw calls on top of an 804-call frame;
+ * as two instanced meshes they are **2 draws**. The per-chip variation that stops them
+ * reading as one stamp therefore has to come from the instance MATRIX (rotation on three
+ * axes, non-uniform scale) and from `instanceColor` — not from a `map`, which is a
+ * property of the MATERIAL and would stamp one recognisable mark onto every chip.
+ *
+ * ⚠️ `material.vertexColors` is deliberately NOT set — see the long note at the tile
+ * field. `InstancedMesh.instanceColor !== null` already enables `USE_INSTANCING_COLOR`;
+ * setting `vertexColors` additionally enables the per-VERTEX `USE_COLOR` path against a
+ * `color` attribute this geometry does not have, which renders every instance BLACK.
+ */
+function buildGroundChips(): THREE.Group {
+  const g = new THREE.Group();
+  noOutline(g);
+
+  // ── ROUND 2: THE FIRST PALETTE RENDERED AS CONFETTI, AND THE FILE ALREADY SAID SO ──
+  //
+  // r1 authored five hues at HSV saturation 0.43-0.69, holding only luma inside the value
+  // contract. Read on the rendered PNG (`shots/floorprobe/arena3_r1/west_choke.png`) that
+  // is hot pink, bright orange, bright green and cyan sprinkled over a rose floor: **the
+  // universal read for COLLECTIBLE PICKUP**, which is the exact failure `buildDebrisMats`
+  // above was rewritten to fix, at a hundred times the count. Its note carries the
+  // mechanism and r1 ignored it: `render/stage.ts` runs a global
+  // `HueSaturationEffect({ saturation: 0.32 })`, so anything authored as "already a bit
+  // muted" arrives on screen vivid.
+  //
+  // ⚠️ This is NOT the falsified "fix it by desaturating" move (`docs/LESSONS.md` §8),
+  // and the distinction matters because that one has been falsified four times. That
+  // finding is about the FRAME's total chroma — measured under-reference at meanSat 0.483
+  // against 0.493 — and nothing here touches any existing surface. This is one NEW element
+  // being authored into set-dressing chroma instead of hero chroma, at the same HSV
+  // saturation band (0.18-0.30) the three loose-produce colours above were already
+  // measured onto for the same reason. The frame gains chroma either way; the question was
+  // only whether the gain arrives as litter or as sweets.
+  //
+  // Two of the four are the FLOOR'S OWN HUE, which is what makes them read as chipped tile
+  // rather than as dropped objects, and it is what `bs_01` does — its litter is one
+  // family (teal leaves off the teal bushes), never a rainbow. Authored luma beside each,
+  // against the tile field's own #8A5F6F = 105; every one is inside 88-118, i.e. within
+  // one value step of the surface it lies on. Weights are out of 100.
+  //
+  // ── ROUND 3: THE VALUE WINDOW IS WIDER FOR A CHIP THAN FOR A MARK, AND WHY ─────
+  // r2 held every colour inside 88-118 (±0.06 luma of the tile) and the render shows the
+  // cost: the chips read as tiny dark flecks, barely present, and the paired station
+  // measurement agreed — `groundFeat` moved +0.25pp against r1's +1.00pp.
+  //
+  // The ±0.06 bound in this file's header is not a general law, and its own sentence says
+  // what it is for: *"a character standing on a mark that bright loses his own outline —
+  // and marks are large enough to stand inside"*. A chip is **3.4-6.2wu across against a
+  // 42wu character**; nobody can stand on one, and the failure mode the bound exists to
+  // prevent cannot occur. What DOES still bind is `floorprobe`'s R, and that is checked
+  // rather than assumed: its binding station (`pantry_ne`) has charEdge 0.132 against a
+  // floor edge p99.9 of 0.0922, so there is real headroom and the probe is what spends it.
+  //
+  // So the window widens to roughly ±0.12 in authored luma (75-134 against the tile's
+  // 105), and the mix is skewed LIGHT: this file's other standing rule is that on a
+  // top-down floor DARK means "something is above me", so a field of dark specks reads as
+  // grime or as insects, while a lighter chip reads as an object lying there.
+  //
+  // ── ROUND 4: AT 12px A CHIP READS BY *HUE*. VALUE CANNOT CARRY IT. ─────────────
+  // Three rounds of rendered PNGs say this and they are consistent:
+  //
+  //   r1  5 hues, HSV sat 0.43-0.69, luma held inside ±0.06   -> plainly visible,
+  //       and plainly CONFETTI. `groundFeat` +1.00pp (paired).
+  //   r2  4 hues, sat 0.21-0.28, luma inside ±0.06            -> nearly invisible;
+  //       what the eye finds is the chip's own SHADOW. +0.25pp.
+  //   r3  5 hues, sat 0.24-0.29, luma widened to ±0.12        -> still nearly
+  //       invisible. Widening VALUE bought almost nothing.
+  //
+  // r1 and r3 differ in chroma, not in size or count, and only r1 registered. That is
+  // the reference's own answer read back: `bs_01`'s litter is teal on a rose paver —
+  // a large HUE step at a small value step — and it is **one family**, leaves off the
+  // teal bushes, never a rainbow. r1's defect was five unrelated bright hues, which is
+  // the grammar of a pickup; it was never the chroma itself.
+  //
+  // So: ONE family at real chroma, plus the floor's own rose so a fifth of the litter
+  // reads as chipped tile. The family is WARM (hue 38-80), which is chosen off
+  // `arena-scan`'s failing rail rather than off the plate — whole-frame warm chroma is
+  // 0.053 against a band minimum of 0.072 (FAIL) while cool is 0.427 against a 0.343
+  // target (PASS), and ENV hue occupancy is 0.34 in the 180deg bin. Copying `bs_01`'s
+  // teal would have spent the one budget this frame has none of. It is also the right
+  // read: crumbs, grated cheese, herb and onion skin on a kitchen floor.
+  //
+  // Held 30-60deg off the cast's own 30deg hue bin, and checked: `arena-scan`'s
+  // `ENV chroma in cast band` and `cast/env hue overlap` are both re-run after this.
+  // Authored luma beside each against the tile field's 105; `floorprobe` is the guard on
+  // the value half and is run every round.
+  //
+  // 🚨 ROUND 5: PRICED IN **LINEAR** LUMA, BECAUSE sRGB LUMA IS THE WRONG RULER.
+  // Rounds 1-4 all computed "authored luma" as 0.2126R + 0.7152G + 0.0722B on the sRGB
+  // triple, held it inside ±0.12 of the tile's 105, and every single render came back
+  // with the chips far brighter than intended (r5 measured `floorprobe` paleDL 0.168 ->
+  // **0.293**, i.e. the litter became the brightest thing on the floor by a factor of two).
+  //
+  // Diffuse lighting multiplies LINEAR albedo, so the ratio that reaches the screen is the
+  // linear one, and sRGB understates it badly wherever the two colours differ in GREEN —
+  // which is exactly our case, because the tile is rose (G=95) and kitchen litter is
+  // yellow-olive (G=138). #9C8A4A over #8A5F6F is **1.31x in sRGB luma and 1.75x in
+  // linear**. Four rounds of palettes were derived off the 1.31.
+  //
+  // Every entry below is now solved for a target LINEAR-luma ratio against the tile field
+  // at a fixed hue and HSV saturation (`0.2126*lin(R) + 0.7152*lin(G) + 0.0722*lin(B)`,
+  // tile = 0.1474). Ratios, not absolutes, so this survives a re-key of the tile.
+  //
+  // ── ROUND 6: ONE FAMILY, AND THE CHROMA COMES DOWN. ─────────────────────────
+  // r5's linear pricing fixed the VALUE (paleDL 0.293 -> 0.211) and the render still read
+  // as confetti, for the other reason: three hue families at HSV sat 0.30-0.46 — gold,
+  // lime and a bright rose shard — arrive through `stage.ts`'s global
+  // `HueSaturationEffect({ saturation: 0.32 })` as sweets. `buildDebrisMats` above hit
+  // exactly this and landed its three produce colours at sat 0.18-0.30; this is the same
+  // finding on a layer a hundred times more numerous, so it lands lower still.
+  //
+  // The rose shard is dropped outright rather than dimmed. It was the single loudest thing
+  // in the frame — a bright pink dot — and it was also the one entry doing two jobs:
+  // "chipped tile" is told better by a warm-neutral flour/bone chip that reads as spilled
+  // dry goods, which is what a kitchen floor actually carries. So: ONE family, hue 36-78,
+  // varied by VALUE (0.73x .. 1.31x of the tile in linear luma) rather than by hue. That
+  // is `bs_01`'s own structure — its litter is all one thing, leaves off the teal bushes.
+  //
+  // ── ROUND 8: THE VALUE SPREAD WIDENS, THE CHROMA DOES NOT. ──────────────────
+  // Round 7's spread was 0.73x .. 1.31x of the tile in linear luma and the paired A/B put
+  // `groundFeat` +0.0048 on a measured 0.0028 floor — real, and a fifth of the gap to the
+  // reference band. That metric's threshold is a LUMA departure of 0.035, so what buys
+  // registering pixels is VALUE spread, not chroma; and this file's own guard on value
+  // spread is `floorprobe`'s R, which sat at 0.734 of its 1.0 limit with a quarter of its
+  // range unspent. So the spread goes to **0.55x .. 1.55x** and the HSV saturations stay
+  // exactly where round 6 put them — chroma is what made rounds 1 and 5 read as confetti,
+  // and it is not what the metric counts.
+  const CHIP_COLOURS: Array<[string, number]> = [
+    ['#827A5B', 26], // lin 0.194  1.32x  crumb / grated cheese — hue 48, HSV sat 0.30
+    ['#697252', 20], // lin 0.157  1.06x  herb scrap — hue 78, sat 0.28
+    ['#7D7262', 18], // lin 0.173  1.17x  onion skin — hue 36, sat 0.22
+    ['#57503B', 16], // lin 0.081  0.55x  the family in shade — the dark member
+    ['#888377', 20], // lin 0.228  1.55x  flour / dry goods — hue 40, sat 0.13, the pale one
+  ];
+  const wheel: THREE.Color[] = [];
+  for (const [hex, weight] of CHIP_COLOURS) {
+    for (let i = 0; i < weight; i++) wheel.push(new THREE.Color(hex));
+  }
+
+  // ONE material for both meshes: two draw calls, one compiled program, one rim patch.
+  // White albedo so `instanceColor` carries the whole colour rather than tinting a base
+  // (instanceColor MULTIPLIES `material.color`).
+  //
+  // 🚨 `flatShading: true` HERE IS A BROKEN SHADER, AND IT FAILS SILENTLY.
+  //
+  // Rounds 2-4 of this layer set it, because flat facets are exactly what a 12px chip
+  // needs (see the geometry note below). Three rendered PNGs later, a **magenta known-bad
+  // probe** — every chip colour forced to #FF00FF — produced a **byte-identical** PNG, and
+  // the browser console had been saying why the whole time:
+  //
+  //     THREE.WebGLProgram: Shader Error 0 - VALIDATE_STATUS false
+  //     Material Name: ground_chip
+  //     ERROR: 0:1863: 'vNormal' : undeclared identifier
+  //
+  // `applyRimLight` (`render/toon.ts`, applied by `toonMat` unless `rim: false`) injects a
+  // Fresnel term that reads `vNormal`. Under `FLAT_SHADED` three does not declare that
+  // varying at all — the fragment shader derives the normal with `dFdx`/`dFdy` instead —
+  // so the program fails to link and **every chip draws nothing**. `toon.ts` already
+  // records the sibling case ("a rim on a MeshBasicMaterial ... reads `vNormal`, and a
+  // basic shader has neither"); this is the second trigger for the same hazard.
+  //
+  // What made it survive three rounds is worth writing down: the SHADOW-depth program
+  // carries no rim patch, compiles fine, and kept drawing each chip's little contact
+  // shadow. So the floor rendered a field of small dark specks that looked exactly like
+  // low-contrast litter — `docs/LESSONS.md` §1's "rendering PLAUSIBLY and wrongly", with
+  // the object's own shadow standing in for the object.
+  //
+  // The rim stays (`toon.ts` calls it "the single largest material lever in the frame")
+  // and the facets are bought from the GEOMETRY instead — see `faceted()` below.
+  const chipMat = toonMat({ color: 0xffffff, roughness: 0.68 });
+  chipMat.name = 'ground_chip';
+
+  // Two silhouettes, because one repeated outline at ~12px is a stamp however it is
+  // rotated. The pebble is crumb/produce; the shard is a chipped piece of the tile
+  // itself. 20 and 4 triangles.
+  //
+  // ⚠️ Round 2: the shard was a hexagonal prism (`CylinderGeometry(1, 0.72, 0.5, 6)`) and
+  // that is the WRONG geometry for the job this layer exists to do. Its top face is a
+  // single horizontal plane, so every shard rendered as ONE flat fill — a flat tinted
+  // hexagon, i.e. a smaller version of the polka dot this file already deleted. A
+  // tetrahedron has no horizontal face at any rotation, so it always presents at least
+  // two facets at different angles to the key and carries its own lit/shaded step. That
+  // step IS the "each with its own shading" property measured off `bs_01`, and it is what
+  // `groundFeat` (a LUMA contrast count) actually registers.
+  //
+  // `faceted()` is `flatShading` bought from the geometry instead of the material, for the
+  // reason in the material note above. `PolyhedronGeometry` builds a NON-INDEXED buffer
+  // and then sets each vertex normal to its normalised POSITION — i.e. spherical, smooth —
+  // so an icosahedron shades as a ball. Recomputing normals on a non-indexed geometry
+  // gives one normal per FACE, which is flat shading, with `vNormal` still declared and
+  // the rim still compiling.
+  const faceted = (geo: THREE.BufferGeometry) => { geo.computeVertexNormals(); return geo; };
+  const pebbleGeo = faceted(new THREE.IcosahedronGeometry(1, 0));
+  const shardGeo = faceted(new THREE.TetrahedronGeometry(1.25, 0));
+
+  let seed = 91_711;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+
+  /**
+   * Low-frequency density field, 0..1, continuous in world space — the same idea as the
+   * tile field's `blotch`, at a different set of incommensurate wavelengths (~470 / ~200
+   * / ~95wu) so the two cannot beat against each other into a visible moire.
+   */
+  const density = (wx: number, wy: number) => {
+    const a = Math.sin(wx * 0.01337 - 1.1) * Math.cos(wy * 0.00921 + 2.4);
+    const b = Math.sin((wx * 0.8 - wy) * 0.0314 + 0.7);
+    const c = Math.cos((wx + wy * 1.3) * 0.0661 - 2.2);
+    // Gained past 1 and clamped, for exactly the reason `blotch` records: a PRODUCT of two
+    // sines spends almost all its time far below its own peak, so the raw sum hovers near
+    // the middle and the scatter comes out uniform. Clipping is what makes the field
+    // actually reach both ends, which is what turns an even sprinkle into drifts.
+    return THREE.MathUtils.clamp((a * 0.55 + b * 0.32 + c * 0.2) * 1.35 * 0.5 + 0.5, 0, 1);
+  };
+
+  const cols = Math.floor(ARENA_W / CHIP_CELL);
+  const rows = Math.floor(ARENA_H / CHIP_CELL);
+  const pebbles: ChipRow[] = [];
+  const shards: ChipRow[] = [];
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      const wx = (cx + 0.15 + rand() * 0.7) * CHIP_CELL;
+      const wy = (cy + 0.15 + rand() * 0.7) * CHIP_CELL;
+      const keep = rand();
+      const r = CHIP_R_MIN + rand() * (CHIP_R_MAX - CHIP_R_MIN);
+      const flat = 0.45 + rand() * 0.3;
+      const rot = rand() * Math.PI * 2;
+      // ±0.55 rad (32 deg), not ±0.25. A chip lying dead flat presents its top face square
+      // to the key and renders as one fill; the tilt is what puts two facets at different
+      // angles, which is the whole difference between "an object" and "a tinted spot".
+      const tiltX = (rand() - 0.5) * 1.1;
+      const tiltZ = (rand() - 0.5) * 1.1;
+      // 0.80-1.40 independently on the two ground axes, so one geometry yields long chips,
+      // stubby chips and everything between — `map` cannot vary per instance, the MATRIX
+      // can. Narrower than round 7's 0.6-1.7: that spread put a real share of the layer
+      // under 4wu, where a chip contributes nothing to the metric and nothing to the eye.
+      const sx = 0.80 + rand() * 0.6;
+      const sz = 0.80 + rand() * 0.6;
+      const ci = Math.floor(rand() * wheel.length);
+      const toShard = rand() < 0.45;
+      // Inset from the playfield edge so no chip straddles the painted kerb (EDGE_BAND)
+      // or is clipped by the apron's own boundary geometry.
+      if (wx < 14 || wx > ARENA_W - 14 || wy < 14 || wy > ARENA_H - 14) continue;
+      // Clear of the boiling pot: its CoverBox is r=73 and its burn ring r=95, so a chip
+      // inside 80 would be either buried in the prop or sitting in the hazard's own
+      // scorch decal, where it would read as a hazard token rather than as litter.
+      if (Math.hypot(wx - CENTER.x, wy - CENTER.y) < 80) continue;
+      if (keep > CHIP_P_MIN + (CHIP_P_MAX - CHIP_P_MIN) * density(wx, wy)) continue;
+      (toShard ? shards : pebbles).push({ wx, wy, r, flat, rot, tiltX, tiltZ, sx, sz, ci });
+    }
+  }
+
+  const build = (geo: THREE.BufferGeometry, list: ChipRow[], name: string) => {
+    if (!list.length) return;
+    const im = new THREE.InstancedMesh(geo, chipMat, list.length);
+    im.name = name;
+    im.castShadow = true;
+    im.receiveShadow = true;
+    noOutline(im);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const pos = new THREE.Vector3();
+    const scl = new THREE.Vector3();
+    list.forEach((c, i) => {
+      const rw = wu(c.r);
+      const p = groundPos(c.wx, c.wy);
+      pos.set(p.x, CHIP_Y + rw * c.flat, p.z);
+      // Non-uniform scale, so one geometry produces many outlines: elongated chips,
+      // stubby chips, and every rotation of both.
+      scl.set(rw * c.sx, rw * c.flat, rw * c.sz);
+      e.set(c.tiltX, c.rot, c.tiltZ);
+      q.setFromEuler(e);
+      m.compose(pos, q, scl);
+      im.setMatrixAt(i, m);
+      im.setColorAt(i, wheel[c.ci]);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    im.instanceColor!.needsUpdate = true;
+    g.add(im);
+  };
+  build(pebbleGeo, pebbles, 'ground_chip_pebble');
+  build(shardGeo, shards, 'ground_chip_shard');
   return g;
 }
 
@@ -2010,6 +2416,12 @@ export function buildFloor(M: Materials): THREE.Group {
   // regardless of angle.
   g.add(buildHubDebris(debrisMats));
 
+  // ── Arena-wide ground debris — see `buildGroundChips` for the measurement ─────
+  // This is the answer to `featShare` / `groundFeat`, the only two ground numbers
+  // `ac08dbf` found outside the reference band, and it is deliberately the LAST thing
+  // added to the ground so it lies over every mark above rather than under them.
+  g.add(buildGroundChips());
+
   // Splatter apron ringing the hazard — see `buildHazardSplatterApron`. This is the
   // single highest-leverage addition in this file for the isolated `piece=floor`
   // diagnostic shot specifically: its default framing centres on CENTER, where the
@@ -2327,7 +2739,13 @@ export function buildFloor(M: Materials): THREE.Group {
   // their small contact shadow is what stops them looking pasted on.
   g.traverse((o) => {
     const m = o as THREE.Mesh;
-    if (!m.isMesh || m.name.endsWith('_veg')) return;
+    // `ground_chip_*` is exempt for the same reason as `_veg`: they are real solids
+    // resting ON the tile, and the small offset shadow under each is the only thing
+    // that stops ~700 of them reading as printed spots. It is also what makes them
+    // register on `groundFeat`, which counts LUMA contrast — an unshadowed chip held
+    // inside ±0.06 luma of the tile by this file's value contract would contribute
+    // almost nothing to the metric it exists to move.
+    if (!m.isMesh || m.name.endsWith('_veg') || m.name.startsWith('ground_chip')) return;
     m.castShadow = false;
   });
 

@@ -681,31 +681,104 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   // punched through it, and the warm hue puts it 174 degrees off the hazard pot's cold
   // grey drum. The burner rings stay on the shared dark metal — they are 6cm tori, far
   // too small to read as a panel.
-  const hobW = wM * 0.32, hobD = dM * 0.36;
+  // ── ROUND 14: THE BLANK SLAB. ~8 CRITICS, ARENA *AND* CAST ROUNDS. ──────────
+  //
+  //   *"the giant untextured pale-blue box in the foreground looks like an unfinished
+  //    placeholder block"* · *"the huge blank ice-block slab in the lower-left crops the
+  //    frame with nothing on it"* · *"untextured, unlit and unshadowed"*
+  //
+  // It is this prop: the stove island is 8.5 x 4.5 m, the arena's largest cover, and its
+  // cap is the arena's largest single flat plane. The hob covered `0.32 x 0.36` of it —
+  // **4.4 m² of 38.25 m², i.e. 11.5%** — so 88% of the biggest thing in the frame was one
+  // unbroken pale-blue fill with a 2-burner griddle floating in the middle of it.
+  //
+  // ── INDEPENDENT CORROBORATION FROM AN INSTRUMENT NOT LOOKING FOR IT ─────────
+  // `tools/tmp/fp_ground_windows.mjs` clusters a frame's modal surfaces to find the
+  // GROUND, and on our action frames it adopts **rgb(140,204,254) — this cap — as a ground
+  // cluster in 2 of 8 frames**, because it is large, flat and spatially spread enough to
+  // pass a test built to separate ground from props. `ac08dbf` recorded the same shape as
+  // an instrument fault it had to defend against ("on our own frames the same fault would
+  // have adopted the big pale-blue counter slab"). A prop that a ground-finder mistakes
+  // for the floor is, measurably, a plane with nothing on it.
+  //
+  // ── AND `e4734e2` MADE IT WORSE, WHICH IS CHECKED RATHER THAN ASSUMED ───────
+  // That pass took `stoveCap` #7C9CC2 -> #94C5FF, i.e. delivered luma **167 -> 195**, on
+  // exactly this surface. It was right to (the frame drew no highlights at all; `hi70`
+  // went 2.40% -> 13.58%), and raising a big blank slab 28 luma also makes the blankness
+  // 28 luma louder. **The value is not reverted** — that would undo a measured win and
+  // land back in the "flat, unlit, coloured paper" frame six critics scored 6/10. What is
+  // wrong is the BLANKNESS, so this fills the plane instead of dimming it.
+  //
+  //   hob deck   0.32 x 0.36 -> 0.56 x 0.60 of the top face: 11.5% -> 33.6% of it
+  //   burners    2 -> 4, in a 2x2 grid, at commercial-range spacing
+  //   stock pot  a real solid standing ON the deck, which is the only thing here that
+  //              answers *"unshadowed"* literally: it is the first object in this prop's
+  //              history to cast a shadow onto its own cap
+  //
+  // Cost, MEASURED on a paired null control rather than estimated: +6 meshes per island x
+  // 4 islands = **+24 meshes**, and `tools/perf.mjs --mode counts` reads 804 -> 834 draw
+  // calls across this change and the ground-debris layer together (+3.7%), of which the
+  // debris layer is +4 measured in isolation on an otherwise identical tree. Triangles
+  // 383,450 -> 435,276.
+  const hobW = wM * 0.56, hobD = dM * 0.60;
   const hobT = 0.12;
-  const hobLip = mesh(roundedBox(hobW + 0.1, hobT * 0.6, hobD + 0.1, 0.03), tinted(M, M.potMetal, '#D2D7DC'), 'stove_hob_lip');
+  const hobLip = mesh(roundedBox(hobW + 0.14, hobT * 0.6, hobD + 0.14, 0.03), tinted(M, M.potMetal, '#D2D7DC'), 'stove_hob_lip');
   hobLip.position.y = COUNTER_TOP_Y + hobT * 0.3;
   g.add(hobLip);
   const hob = mesh(roundedBox(hobW, hobT, hobD, 0.03), tinted(M, M.potMetalDark, '#7A6A52'), 'stove_hob');
   hob.position.y = COUNTER_TOP_Y + hobT / 2;
   g.add(hob);
 
-  // Two burner rings + a lit-coil disc each.
-  for (const bx of [-wM * 0.14, wM * 0.14]) {
-    const ring = mesh(new THREE.TorusGeometry(0.17, 0.03, 8, 20), M.potMetalDark, 'burner_ring');
+  // Four burner rings + a lit-coil disc each, on a 2x2 grid. The ring/coil sizes go up
+  // with the deck (0.17/0.12 -> 0.26/0.19) so they still read as burners rather than as
+  // studs on a large plate — the r10 note below is about the DECK reading as a hole, and
+  // the answer to a bigger deck is bigger burners, not more empty steel.
+  const burners: Array<[number, number]> = [];
+  for (const bx of [-wM * 0.155, wM * 0.155]) for (const bz of [-dM * 0.155, dM * 0.155]) burners.push([bx, bz]);
+  for (const [bx, bz] of burners) {
+    // ⚠️ Both leave the hazard pot's palette through `tinted()`. Judged on the rendered
+    // frame at 4 burners rather than 2: `M.potMetalDark` and `M.potMetal` arrive as a
+    // COLD BLUE ring and a pale blue disc (they are keyed for the boiling pot's steel
+    // drum, hue 209), and four of them on a warm cast-iron deck read as blue buttons
+    // rather than as burners. Warm iron and warm steel instead — which also keeps this
+    // prop's whole top plane in one hue family, so the deck reads as one object.
+    const ring = mesh(new THREE.TorusGeometry(0.26, 0.045, 8, 20), tinted(M, M.potMetalDark, '#4A423A'), 'burner_ring');
     ring.rotation.x = Math.PI / 2;
-    ring.position.set(bx, COUNTER_TOP_Y + hobT + 0.02, 0);
+    ring.position.set(bx, COUNTER_TOP_Y + hobT + 0.02, bz);
     g.add(ring);
-    const coil = mesh(puck(0.12, 0.02, 16), M.potMetal, 'burner_coil');
-    coil.position.set(bx, COUNTER_TOP_Y + hobT + 0.02, 0);
+    const coil = mesh(puck(0.19, 0.02, 16), tinted(M, M.potMetal, '#BFB6A4'), 'burner_coil');
+    coil.position.set(bx, COUNTER_TOP_Y + hobT + 0.02, bz);
     g.add(coil);
+  }
+
+  // A stock pot standing on the back-left burner. This is the one addition here that is
+  // an OBJECT rather than surface articulation, and it is the one that answers the
+  // critics' third word: a 0.62 m pot is the first thing this prop has ever had that
+  // throws a shadow across its own top face. It is also what makes a stove read as a
+  // stove in one glance from a 58deg camera, where a flat griddle reads as a panel.
+  //
+  // ⚠️ NOT the boiling-pot hazard's materials. `potMetal`/`potMetalDark` are the hazard's
+  // own palette and this file already has one round (see the hob note below) spent
+  // undoing cover and damage sharing a material. Both surfaces leave through `tinted()`,
+  // and this one is deliberately a WARM brass rather than the hazard's cold grey drum.
+  {
+    const potR = 0.34, potH = 0.62;
+    const bx = -wM * 0.155, bz = -dM * 0.155;
+    const body = mesh(puck(potR, potH, 18), tinted(M, M.potMetal, '#C9A96A'), 'stove_stockpot');
+    body.position.set(bx, COUNTER_TOP_Y + hobT + potH / 2, bz);
+    g.add(body);
+    const lid = mesh(puck(potR * 1.06, 0.07, 18), tinted(M, M.potMetal, '#E4CE9A'), 'stove_stockpot_lid');
+    lid.position.set(bx, COUNTER_TOP_Y + hobT + potH + 0.035, bz);
+    g.add(lid);
   }
 
   // Herb garnish sitting on the steel top's inner-front corner (the side that faces
   // the pot — `+dM*0.26` lands there regardless of the 0/180 deg yaw the caller
   // applies, since that flips which world edge is "inner"), clear of both burners.
   const herb = buildHerbSprig(M, 1.6);
-  herb.position.set(wM * 0.3, COUNTER_TOP_Y, dM * 0.26);
+  // wM*0.30 -> wM*0.35: the hob deck below widened from 0.32 to 0.56 of the top face,
+  // so its lip now reaches wM*0.288 and the old position would have stood the pot inside it.
+  herb.position.set(wM * 0.35, COUNTER_TOP_Y, dM * 0.26);
   g.add(herb);
 
   if (opts?.panRack) {
