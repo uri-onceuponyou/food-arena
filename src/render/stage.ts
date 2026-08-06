@@ -15,6 +15,7 @@ import {
 import { CameraRig, SUPPORTED_ASPECT, type CameraRigOptions } from './camera';
 import { createLighting, MATCH_SHADOW_RADIUS_M, type LightingRig } from './lighting';
 import { noteGpu, onQualityChange, tierProfile, type TierProfile } from './quality';
+import { CHARACTER_RADIUS } from '../units';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE GRADE — a saturation curve that cannot clip a channel
@@ -598,6 +599,93 @@ function ensureRegistry(): void {
   });
 }
 
+/**
+ * Height of the per-fighter contact decal above the floor plane, in metres.
+ *
+ * NOT a taste number. `docs/LESSONS.md` §1 lists eighteen separate occasions where
+ * something rendered and was invisible, and three of them were ground decals buried
+ * under the layer above them. The stack, measured: floor pads 0.045-0.048, tile seams
+ * 0.062, the arena's baked prop shadows 0.068-0.07, prop kicks 0.08. 0.09 clears all
+ * of it with 1 cm of margin, and at the match camera's 26.6 m that is far below the
+ * depth buffer's resolution there, so it cannot z-fight.
+ */
+const CONTACT_Y = 0.09;
+
+/**
+ * Half-width of the decal in CHARACTER_RADIUS units — i.e. the normalised radius `t`
+ * at which the darkening reaches zero, in exactly the units
+ * `tools/tmp/cs_charcontact.mjs` measures in. Its NEAR band is t 1.10-2.20, and the
+ * reference plates' props carry their darkening out to about t 2.3, so the falloff
+ * has to still be alive at 2.2 and gone by 2.6.
+ */
+const CONTACT_SPREAD = 2.6;
+
+/**
+ * Peak multiply, as (1 - r, 1 - g, 1 - b) subtracted at the centre.
+ *
+ * COOL-LEANING ON PURPOSE, and it is derived rather than chosen: the light this
+ * shadow occludes is the warm key (0xfff4de), so what is left in shade is the
+ * hemisphere's SKY end (0xd8ecff) and the cool front fill. Removing more red than
+ * blue is what an occluder physically does under this rig. `lighting.ts`'s hemisphere
+ * exists for the same reason — "a hemisphere light only models form if its ends
+ * differ in VALUE" — and a neutral grey here would have thrown that away at the one
+ * place the eye looks for it.
+ *
+ * MEASURED, not predicted. `cs_charcontact.mjs --ours` isolates this decal from the
+ * cast shadow by rendering a third frame with the contact group hidden, and reports
+ * its own contribution as a fraction of the floor it lands on:
+ *
+ *   station        opposite flank        shade flank
+ *   570:430            0.137                0.087
+ *   1150:420           0.074                0.054
+ *   340:500            0.144                0.052
+ *
+ * against the reference's opposite-flank 0.061 / 0.087 / 0.198 on bs_06's props. The
+ * OPPOSITE flank is the one this exists for: it read exactly 0.000 at all three
+ * stations before, because a cast shadow only darkens one side.
+ */
+const CONTACT_TINT: readonly [number, number, number] = [0.30, 0.27, 0.21];
+
+/**
+ * The decal's texture: white everywhere except a soft radial core.
+ *
+ * White is the identity of a MULTIPLY blend, so the quad's square corners have to be
+ * exactly 255 — a texture that is merely "nearly white" at the edge draws a visible
+ * square on the floor, which is the failure mode a whole round of arena work went
+ * into removing from the baked prop decals.
+ *
+ * `NearestFilter` is deliberately NOT used: this is a smooth gradient blown up to
+ * ~1.6 m on screen, and nearest sampling would band it.
+ */
+function contactTexture(size = 64): THREE.DataTexture {
+  const data = new Uint8Array(size * size * 4);
+  const c = (size - 1) / 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const r = Math.min(1, Math.hypot((x - c) / c, (y - c) / c));
+      // (1-r)^1.4: a soft shoulder at the centre and a long tail, so the darkening is
+      // still ~46% of peak at t=1.10 (the inner edge of the measured band) and ~7% at
+      // t=2.20 (its outer edge). A linear ramp put too much of the mass under the
+      // character, where its own body hides it.
+      const f = Math.pow(Math.max(0, 1 - r), 1.4);
+      const i = (y * size + x) * 4;
+      data[i] = Math.round(255 * (1 - CONTACT_TINT[0] * f));
+      data[i + 1] = Math.round(255 * (1 - CONTACT_TINT[1] * f));
+      data[i + 2] = Math.round(255 * (1 - CONTACT_TINT[2] * f));
+      data[i + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export class Stage {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene: THREE.Scene;
@@ -639,6 +727,18 @@ export class Stage {
   private shadowCasterMinTexels: number;
   /** The colour grade, exposed so a probe can sweep it without a rebuild. */
   grade: ToyGradeEffect | null = null;
+  /** The per-fighter contact decals. Null until a match frame asks for one. */
+  private contactGroup: THREE.Group | null = null;
+  private readonly contactTargets: THREE.Object3D[] = [];
+  // PER-STAGE, not static, and that is the whole reason it is written out: `dispose()`
+  // walks the scene graph and disposes every geometry, material and texture it finds.
+  // A shared static would be disposed by the FIRST Stage to tear down and every other
+  // live Stage would keep drawing with a dead GPU resource — the same class of bug as
+  // the PMREM env map that `onContextRestored` exists for. A 64x64 texture per Stage
+  // is nothing; a cross-Stage dangling handle is a white screen.
+  private contactGeometry: THREE.PlaneGeometry | null = null;
+  private contactMaterial: THREE.MeshBasicMaterial | null = null;
+  private readonly contactScratch = new THREE.Vector3();
 
   constructor(opts: StageOptions = {}) {
     this.useAO = opts.ao === true;
@@ -1627,9 +1727,190 @@ export class Stage {
     // lost, but `composer.render()` does not — it would walk the whole post chain
     // binding dead render targets once per frame, for as long as the loss lasts.
     if (this.contextLost) return;
+    // BEFORE the shadow fingerprint, deliberately: the decals move with the fighters
+    // and `scheduleShadowUpdate` calls `scene.updateMatrixWorld()`, so placing them
+    // after it would leave their matrices a frame behind. They never enter the
+    // fingerprint itself — it only hashes meshes with `castShadow`, and these do not.
+    this.updateContactShadows();
     if (this.shadowsOn) this.scheduleShadowUpdate();
     if (this.composer) this.composer.render(dtSeconds);
     else this.renderer.render(this.scene, this.rig.camera);
+  }
+
+  /**
+   * ── THE CENTRED CONTACT SHADOW UNDER EACH FIGHTER ──────────────────────────
+   *
+   * Nine of fourteen arena critics said, unprompted, that "the characters sit on it
+   * like decals rather than in a built environment ... no contact shading". That was
+   * a symptom, and `docs/LESSONS.md` §3 says take the symptom and re-derive the
+   * cause. `tools/tmp/cs_charcontact.mjs` (selftest 31/31) did, by rendering every
+   * frame TWICE — shipped, and with the cast's own `castShadow` off and nothing else
+   * moved — and measuring the darkening on two flanks mirrored about the screen
+   * vertical: the one the key throws into, and its mirror.
+   *
+   *   hamburger, 3 stations, frozen snapshot     shade flank      OPPOSITE flank
+   *     ablation delta, luma                  0.190/0.160/0.153   0.0000/0.0000/0.0001
+   *     as a fraction of the floor            0.431/0.352/0.388   0.000/0.000/0.000
+   *
+   *   bs_06's vent props — the only reference   0.192/0.269/0.324   0.198/0.061/0.087
+   *   subjects with no UI decal over them
+   *
+   * So the diagnosis is NOT "too little shadow". Our shade side is at or above the
+   * reference. It is that our contact is **100% DIRECTIONAL**: three sides of every
+   * fighter's feet are untouched floor, where the reference darkens all round by
+   * 6-20% of the floor's own value. Rendered and looked at at 2x
+   * (`shots/contact/before/570_430__shipped.png`): one offset slab to the left, and
+   * a character standing on nothing.
+   *
+   * ── WHY A DECAL AND NOT SSAO ───────────────────────────────────────────────
+   * `buildPost` above measured the repaired SSAO pass at 0.0273 of contact for +314
+   * draw calls and +79% of triangles, because a normal buffer means rendering the
+   * whole scene a second time, and rejected it on that price. This is the same
+   * contact for **two draw calls in a match** — one per fighter, sharing one geometry,
+   * one material and one 64x64 texture.
+   *
+   * ── THE THREE THINGS THAT WOULD HAVE BURIED IT ─────────────────────────────
+   *  1. `y = 0.09`. The ground layer stack is crowded and has hidden things eighteen
+   *     times (`docs/LESSONS.md` §1): floor pads 0.045-0.048, seams 0.062, baked prop
+   *     shadows 0.068-0.07, prop kicks 0.08. This sits above all of them, and the fix
+   *     is closed out by measuring DELIVERED pixels rather than authored ones — the
+   *     §1 case-17 rule, which is what a decal at 0.011 under tiles at 0.015 cost.
+   *  2. `depthWrite: false`. Every transparent material in the cast carries
+   *     `depthWrite: true` and silently occludes; this one must not.
+   *  3. MULTIPLY, not additive and not a black quad. Additive blending over this
+   *     floor makes a wash, and a grey multiply keeps hue and saturation exactly
+   *     while lowering value — the one darkening operation that is not a
+   *     desaturation, which has been falsified here four times.
+   *
+   * ── MATCH FRAMING ONLY, and that is measured rather than cautious ──────────
+   * `src/ui/screens/charStage.ts` already draws TWO contact decals under the
+   * character-select podium and says in its own comment that "a third one drawing
+   * over them would compound". `frameMode: 'fair'` is true in a match and false in
+   * every preview and menu plate, so this is off wherever an authored contact shadow
+   * already exists. The cost is that a character reviewed in `preview.html` no longer
+   * sees exactly what a match draws — stated because `lighting.ts` deliberately
+   * shares its rig for the opposite reason.
+   */
+  private updateContactShadows(): void {
+    if (this.rig.frameMode !== 'fair') return;
+    const targets = this.collectContactTargets();
+    if (!targets.length && !this.contactGroup) return;
+    if (!this.contactGroup) {
+      this.contactGroup = new THREE.Group();
+      this.contactGroup.name = 'contact:shadows';
+      // Never a shadow caster and never a shadow receiver: it IS the shadow.
+      this.contactGroup.matrixAutoUpdate = true;
+      this.scene.add(this.contactGroup);
+    }
+    for (let i = this.contactGroup.children.length; i < targets.length; i++) {
+      this.contactGroup.add(this.buildContactDecal());
+    }
+    const v = this.contactScratch;
+    for (let i = 0; i < this.contactGroup.children.length; i++) {
+      const decal = this.contactGroup.children[i];
+      const target = targets[i];
+      if (!target) { decal.visible = false; continue; }
+      target.getWorldPosition(v);
+      decal.visible = true;
+      decal.position.set(v.x, CONTACT_Y, v.z);
+    }
+  }
+
+  /**
+   * The fighters, without walking the arena.
+   *
+   * A full `scene.traverse` is ~740 arena meshes a frame for two answers. This stops
+   * descending at anything already named `character:*` (the answer) and at the two
+   * subtrees that can never contain one, so it visits tens of nodes rather than
+   * hundreds. Re-run every frame on purpose: a character is added at spawn and
+   * removed on death, and a cached list would leave a shadow on empty floor for
+   * however long the cache lived.
+   */
+  private collectContactTargets(): THREE.Object3D[] {
+    const out = this.contactTargets;
+    out.length = 0;
+    const walk = (o: THREE.Object3D): void => {
+      if (!o.visible) return;
+      if (o.name.startsWith('character:')) { out.push(o); return; }
+      if (o.name === 'arena:kitchen' || o.name === 'lighting' || o.name === 'contact:shadows') return;
+      for (const c of o.children) walk(c);
+    };
+    for (const c of this.scene.children) walk(c);
+    return out;
+  }
+
+  private buildContactDecal(): THREE.Mesh {
+    if (!this.contactGeometry) {
+      // A plane lying on the ground, sized in the character's OWN footprint radii so
+      // it stays correct if `PLAYER_SIZE` moves — `CHARACTER_RADIUS` derives from it.
+      this.contactGeometry = new THREE.PlaneGeometry(1, 1);
+      this.contactGeometry.rotateX(-Math.PI / 2);
+    }
+    if (!this.contactMaterial) {
+      this.contactMaterial = new THREE.MeshBasicMaterial({
+        map: contactTexture(),
+        transparent: true,
+        // ── A MULTIPLY, SPELLED OUT AS CustomBlending, AND THAT IS NOT STYLE ────
+        // out = 0*src + dst*src = dst*src, so a WHITE texel is an exact identity and
+        // only the painted core darkens anything. The texture's border is white for
+        // that reason — the square corners of the quad must be invisible.
+        //
+        // ⚠️ `blending: THREE.MultiplyBlending` DOES NOT WORK, AND IT FAILS BY DRAWING
+        // AN OPAQUE WHITE QUAD 5.5 m ACROSS ON THE FLOOR — present, and doing the
+        // exact opposite of its job. Probed rather than reasoned about
+        // (`tools/tmp/cs_decalprobe.mjs`, the §1 unmissable-probe technique): the
+        // material reported `blending: 4`, `transparent: true`, and a texture that had
+        // uploaded correctly (corner 255,255,255 / centre 181,188,203) — everything as
+        // authored — while the delivered pixels came back 248,248,248 at the corner and
+        // 231,236,244 at the centre, i.e. the TEXTURE drawn opaquely. A multiply cannot
+        // produce a pixel brighter than the floor it lands on, so the GL blend function
+        // was not the one the material asked for.
+        //
+        // THE CAUSE, and `src/ui/screens/charStage.ts:294` had already written it down
+        // — three r180's `WebGLState.setBlending` refuses the mode outright:
+        //
+        //     case MultiplyBlending:
+        //       console.error('THREE.WebGLState: MultiplyBlending requires
+        //                      material.premultipliedAlpha = true');
+        //
+        // It does not throw and it does not fall back; it logs and leaves whatever
+        // blend function the previous draw call set. My first guess from the pixels
+        // alone was a stale `currentBlending` cache colliding with `postprocessing`'s
+        // own GL state — plausible, and WRONG. That guess is recorded because the
+        // right answer was one console line away and one grep away.
+        //
+        // `CustomBlending` spells the same maths out and takes the branch that always
+        // emits the factors. `premultipliedAlpha: true` would also work and is not
+        // taken: it would change how every OTHER property of this material composites,
+        // to buy a preset that is already expressible.
+        blending: THREE.CustomBlending,
+        blendEquation: THREE.AddEquation,
+        blendSrc: THREE.ZeroFactor,
+        blendDst: THREE.SrcColorFactor,
+        blendEquationAlpha: THREE.AddEquation,
+        blendSrcAlpha: THREE.ZeroFactor,
+        blendDstAlpha: THREE.OneFactor,
+        // §1's silent occluder. A transparent material that writes depth hides
+        // whatever sorts after it.
+        depthWrite: false,
+        depthTest: true,
+        toneMapped: false,
+        fog: false,
+      });
+    }
+    const m = new THREE.Mesh(this.contactGeometry, this.contactMaterial);
+    m.name = 'contact:decal';
+    m.castShadow = false;
+    m.receiveShadow = false;
+    m.frustumCulled = true;
+    const s = CHARACTER_RADIUS * CONTACT_SPREAD * 2;
+    m.scale.set(s, 1, s);
+    // Transparents are sorted back-to-front by depth, and this sits ABOVE the arena's
+    // own ground decals (0.045-0.08) so it already sorts after them. `renderOrder`
+    // stated anyway, because relying on a y offset for draw order is how the ground
+    // stack buried things eighteen times.
+    m.renderOrder = 2;
+    return m;
   }
 
   /** Force the shadow map to re-render on the next frame. For a caller that changes
