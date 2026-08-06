@@ -1822,3 +1822,47 @@ different fix.
 settings sliders — **every other button in the game is silent when tapped.** If *"can't hear on
 menus"* partly meant taps rather than music, that gap is real, it is unrelated to the 404, and it is
 now on the list.
+
+---
+
+## 34. ❓ Should the arena floor stop being a tiled kitchen floor?
+
+**A taste call no metric here can make**, and it decides which of two builds is worth doing.
+
+The floor was probed rather than looped (`ac08dbf`), and **the critics' stated mechanism is false**:
+*"no surface detail"* does not survive measurement. Our ground's 3–12 px and 12–48 px detail lands
+on the **reference median** (1.07× and 1.01×). More grain, a normal map or an AO map would move a
+quantity that is already where Brawl Stars is.
+
+**What IS out of band is that our ground is a regular LATTICE.** Our tiles repeat at ~100 × 83 px
+with strong autocorrelation; **five of the six reference plates have no periodic ground repeat at
+all.** Look at `shots/floor2/ours_vs_bs01_ground.png` — ours is a two-direction grout grid with
+nothing on it; theirs is ground with **dozens of small chips scattered over it** and joints you can
+barely see.
+
+**The two ways out are different products:**
+
+| | what it means | cost |
+|---|---|---|
+| **keep the tiled floor, break the grid** | irregular or hex pavers, joints in more than two directions, near-invisible contrast | a rewrite of the largest surface in the game |
+| **keep the grid, scatter debris on it** | dozens of small ground chips arena-wide — which is what the reference actually does | additive, does not touch the tile field |
+
+**My recommendation is the second**, and not only because it is cheaper: the same probe found that
+the whole-frame gap is **object-scale contrast**, not texture — the reference frame carries 24.6–34.9%
+against our 15.3–20.7%. **The frame is short of THINGS, not short of surface.** Scattering ground
+debris serves that directly and dilutes the lattice as a side effect.
+
+⚠️ **But a tiled kitchen floor is a legible, correct choice for a kitchen**, and "stop being tiled"
+is a look decision, not an engineering one. If you want the irregular-paver version, say so and it
+gets built; nobody should rewrite the floor on a metric that has **no established link to the score**.
+
+### 🔴 And a separate finding from the same probe, which needs no decision from you
+
+**Characters have no contact shadow.** Brawl Stars puts a soft elliptical shadow **directly under**
+each brawler; we have only the offset directional cast shadow, with nothing tight under the feet.
+That is, word for word, what nine of fourteen critics said — *"characters sit on it like decals."*
+
+⚠️ And **nobody has ever measured it**: our contact instruments cover the **prop** version (where we
+already match the reference), and the **character** version is un-instrumented. It is now the
+strongest remaining candidate for the cast score, and it is being treated as a build-the-instrument-
+first job, not a tweak.

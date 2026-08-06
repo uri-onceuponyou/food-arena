@@ -148,6 +148,47 @@ regression — and do not report it as a win.
 
 `docs/LESSONS.md` §3: when two critics name the same mechanism unprompted, take it seriously.
 
+### ✅ THE FLOOR WAS PROBED, AND THE CRITICS' MECHANISM IS FALSIFIED — `ac08dbf`
+
+**Nothing was changed, deliberately.** 8 fresh action frames on a frozen snapshot against the 6
+`gameplay_topdown` plates, ground-only masks computed identically both sides and audited by eye.
+
+| metric | reference band | ours | verdict |
+|---|---|---|---|
+| `mf` 3–12 px | 0.00930–0.02414 | 0.01535–0.01918 | **1.07× — the reference MEDIAN** |
+| `lf` 12–48 px | 0.01095–0.03989 | 0.01749–0.01957 | **1.01× — the reference MEDIAN** |
+| `hf` 1–3 px | 0.00336–0.01005 | 0.01283–0.01572 | 1.92×, against a 2.08× acuity handicap ⇒ **parity** |
+| **`oriAll`** (global lattice) | 0.229–0.351 | **0.421–0.547** | **1.55× — NON-OVERLAPPING** |
+
+🚨 **"No surface detail" is FALSE.** `mf`/`lf` describe 3–48 px features, survive the plates' upscale,
+and land on the reference **median**. **A normalMap, aoMap, grain or mottle would move a quantity
+that is already where the reference is** — §6b applied *before* the round was spent, which is the
+whole point of writing §6b down. These govern **37–46% of the whole frame** (stated, as §6b requires).
+
+**The one real out-of-band thing is that our ground is a LATTICE.** Our tile field repeats at
+**100–107 × 80–86 px, autocorrelation 0.55–0.82**, while **five of six plates have NO periodic ground
+repeat at all** above the instrument's own noise floor. `bs_01`'s paver ground — the plate `floor.ts`
+is keyed to — is **irregular polygons whose joints run in many directions at near-invisible
+contrast**, and scores the *lowest* `oriAll` of the six. Side by side:
+`shots/floor2/ours_vs_bs01_ground.png`.
+
+🚨 **AND THE WHOLE-FRAME GAP IS NOT THE GROUND AT ALL.** `featShare` reference **24.6–34.9%** against
+ours **15.3–20.7%**, non-overlapping — and `featShare` counts **object-scale contrast, not texture**.
+**The frame is short of THINGS, not short of surface.** That redirects the arena effort at props and
+cover density (items 2 and 3 below), not at the floor.
+
+⚠️ **Not changed, and here is why:** `oriAll` is real and out of band but **has no established link
+to critic score**, and rewriting the largest surface in the game steered by an unlinked metric is
+exactly the §6b failure. Specced for whoever takes it: break the two-direction lattice (irregular or
+hex pavers, joints at more than two orientations) targeting `oriAll` ≤ 0.351; and scatter small
+ground chips arena-wide — `bs_01`'s ground detail is **objects**, ~12 px against an 80–106 px stone
+(11–15% of a stone width), each with its own shading. That is materially different from the deleted
+"polka dots" (35% of a tile, flat tinted discs). Before-control recorded: `floorprobe` **5/5**,
+R mean 0.388, worst `pantry_ne` R=0.672.
+
+⚠️ **`oriAll` has NO measured resolution floor** — frame-to-frame spread ~0.08 (ours) and ~0.12
+(plates) against a 0.13 gap. **Established in direction, not in magnitude.**
+
 ### 🔴 1. THE FLOOR PLANE — **9 of 14 arena critics**, and we deliberately never touched it
 
 > *"a flat, untextured pink-and-blue checkerboard with hard unmodulated tile lines and no surface
