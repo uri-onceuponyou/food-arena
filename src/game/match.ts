@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { Stage } from '../render/stage';
 import { createKitchenArena } from '../arena/kitchen';
+import type { ArenaDefinition } from '../arena/types';
 import { createCharacter } from '../characters/registry';
 import type { CharacterModel } from '../characters/types';
 import { createFogRing, type FogRing } from '../arena/fogRing';
@@ -31,7 +32,13 @@ import { VfxLayer } from './vfx';
 // touches the renderer, and every call into it is failure-tolerant by contract, so
 // an audio problem degrades to silence rather than to a stalled frame.
 import { createMatchAudio, type MatchAudio } from '../audio';
-import { createHud, type Hud, type ScreenPoint } from '../ui/hud';
+// `enemyVisibleToPlayer` is concealment's ONE presentation-side predicate, shared by all
+// three surfaces that could leak the opponent's position (radar blip, floating HP pill,
+// 3D model). It is declared in `hud.ts` rather than here purely for import direction:
+// `match.ts` imports `hud.ts` and not the other way round, so this is the only placement
+// that lets both files call one copy instead of growing two. Its header carries the
+// asymmetry rule — observer is always `state.player`, target is always `state.enemy`.
+import { createHud, enemyVisibleToPlayer, type Hud, type ScreenPoint } from '../ui/hud';
 
 declare global {
   interface Window {
@@ -70,6 +77,27 @@ declare global {
      * Published by the constructor, cleared by `dispose()`. Never called by game logic.
      */
     __feelEvent?: (ev: GameEvent) => void;
+    /**
+     * QA-only: THE LIVE `ArenaDefinition` this match is stepping, by reference.
+     *
+     * It exists for exactly one question that is otherwise unanswerable:
+     * **is a concealed enemy actually invisible on screen?** No arena declares an
+     * `arena.concealment` list yet (the mechanic shipped inert and Uri's plates are not
+     * placed), so without a handle there is no way to render the state at all — the
+     * three hiding surfaces would ship measured only by reading the code, which is this
+     * project's most-repeated failure. A probe assigns
+     * `window.__matchArena.concealment = [...]` and the very next frame is drawn through
+     * it, because `MatchState.arena` is this same object.
+     *
+     * Deliberately the ARENA and not the whole session: it is the one input the renderer
+     * and the sim genuinely share, so a probe can change the world without being able to
+     * reach into `MatchState` and fake an outcome. Strictly less power than
+     * `__feelEvent` immediately above, which synthesises gameplay events outright.
+     *
+     * Published by the constructor, cleared by `dispose()`. Never read by game logic —
+     * every gameplay reader goes through `this.arena`/`state.arena` directly.
+     */
+    __matchArena?: ArenaDefinition;
   }
 }
 
@@ -454,6 +482,9 @@ export class GameSession {
     window.__matchDebug = this.debug;
     window.__feelDebug = this.feel;
     window.__feelEvent = (ev: GameEvent) => this.handleEvents([ev]);
+    // See the declaration: the only way to render concealment before an arena declares
+    // regions. `tools/tmp/cw_conceal_view.mjs` is the consumer.
+    window.__matchArena = this.arena;
     window.addEventListener('resize', this.handleResize);
     this.raf = requestAnimationFrame(this.loop);
   }
@@ -504,6 +535,10 @@ export class GameSession {
     cancelAnimationFrame(this.raf);
     if (window.__matchDebug === this.debug) delete window.__matchDebug;
     if (window.__feelDebug === this.feel) delete window.__feelDebug;
+    // Identity-guarded like `__matchDebug`, not unconditional: a second session may
+    // already have claimed the slot, and clearing it would leave the live match's arena
+    // unreachable to a probe that has one.
+    if (window.__matchArena === this.arena) delete window.__matchArena;
     delete window.__feelEvent;
     window.removeEventListener('resize', this.handleResize);
     this.pointerLock.dispose();
@@ -1129,6 +1164,26 @@ export class GameSession {
     this.enemyModel.root.position.z += this.knockback.enemy.z;
     this.decayKnockback(rawDtSeconds);
 
+    // ⚠️ SURFACE 3 OF 3 — the model itself. Uri, §30: *"plates and other kitchen objects
+    // you can hide under — FULLY HIDDEN."* Blip and HP pill without this leaves the
+    // character standing in plain sight with its UI stripped, which is strictly worse
+    // than either extreme.
+    //
+    // `root.visible = false` on the group, not per-mesh and not a material swap: Three
+    // prunes the whole subtree from BOTH the beauty pass and the shadow-map pass, so the
+    // contact shadow goes with it. A hidden model that still casts a shadow is
+    // `docs/LESSONS.md` §1's "rendering and invisible" inverted — an unmissable dark blob
+    // reporting the exact position of something the player is told they cannot see.
+    //
+    // The transforms above still run every frame while hidden, deliberately: the model is
+    // in the right place the instant it reappears, with no one-frame pop at the old
+    // position, and nothing here has to be re-synced on the reveal path.
+    //
+    // ⚠️ `this.enemyModel` ONLY. `playerModel.root.visible` is never assigned anywhere in
+    // this file — a player who hides must always see themselves, and vanishing your own
+    // character reads as a crash rather than as a mechanic.
+    this.enemyModel.root.visible = enemyVisibleToPlayer(this.state);
+
     if (this.state.player.alive) this.playerModel.play(playerMoved ? 'run' : 'idle');
     if (this.state.enemy.alive) this.enemyModel.play(enemyMoved ? 'run' : 'idle');
 
@@ -1186,9 +1241,13 @@ export class GameSession {
       // cursor with nothing on screen to orient by.
       aim: this.aimCursor(),
     });
+    // ⚠️ SURFACE 2 OF 3 — the enemy's floating HP pill. `updateFloatingBars` hides a bar
+    // whose screen point is `null`, and `projectToScreen` already returns `null` for a
+    // dead fighter, so concealment rides the SAME null channel rather than inventing a
+    // second way to hide the same element. The player's own pill takes `alive` unchanged.
     this.hud.updateFloatingBars(
       this.projectToScreen(this.playerModel, this.state.player.alive),
-      this.projectToScreen(this.enemyModel, this.state.enemy.alive),
+      this.projectToScreen(this.enemyModel, this.state.enemy.alive && enemyVisibleToPlayer(this.state)),
       this.state.player.hp / this.state.player.maxHp,
       this.state.enemy.hp / this.state.enemy.maxHp,
     );

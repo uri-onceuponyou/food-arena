@@ -29,8 +29,17 @@
  *
  * That is a SECOND source of truth, which is exactly the thing this project keeps getting
  * burned by, so it is self-validating: `--verify` asserts the extraction reproduces the
- * committed browser dump box-for-box. Run it before trusting any `--from-src` number, and
- * re-run the real browser refresh at the end (`match-sim.mjs --refresh-arena`).
+ * committed browser dump box-for-box — SOLID cover and WALK-THROUGH concealment both. Run
+ * it before trusting any `--from-src` number, and re-run the real browser refresh at the
+ * end (`match-sim.mjs --refresh-arena`).
+ *
+ * ⚠️ `--verify` was blind to `arena.concealment` until it was taught the list, and it is
+ * worth knowing why the hole was invisible: concealment lives on its own array precisely
+ * so that nothing which reads `cover` can see it (that separation is what makes it
+ * walk-through), and the normaliser only read `cover`. `tools/tmp/cw_verify_knownbad.mjs`
+ * is the known-bad battery that pins it — it feeds a dropped concealment list to the
+ * COMMITTED pre-fix copy of this file and requires MATCH, then to this one and requires
+ * MISMATCH.
  *
  * `--layout <path>` reads any dumped arena JSON instead (default: tools/arena.gameplay.json).
  */
@@ -86,8 +95,24 @@ const pct = (v) => `${(v * 100).toFixed(1)}%`;
 // Layout: from the browser dump, or extracted from source
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * `--kitchen <path>` parses an ALTERNATE arena source instead of `src/arena/kitchen.ts`.
+ *
+ * It exists so the parser can be pointed at a KNOWN-BAD input, which is the only way the
+ * concealment tripwire below can be shown to fire: no arena in the tree declares a
+ * concealment list yet, so every recognised shape and every unrecognised one is
+ * unexercised by the real file. `tools/tmp/cw_verify_knownbad.mjs` drives it with
+ * synthetic sources — one per supported registration shape, one in a shape the parser
+ * cannot read (must throw), one that only mentions concealment in a comment (must not).
+ *
+ * `shared.ts` is NOT swappable: it supplies ARENA_W/ARENA_H/FOG_FIRST_CONTACT_S, which
+ * are the constants the coordinate expressions are evaluated against, and a fixture that
+ * could move those would be testing arithmetic rather than the parser.
+ */
+const KITCHEN_PATH = String(args.kitchen ?? `${ROOT}/src/arena/kitchen.ts`);
+
 function extractFromSource() {
-  const kitchen = readFileSync(`${ROOT}/src/arena/kitchen.ts`, 'utf8');
+  const kitchen = readFileSync(KITCHEN_PATH, 'utf8');
   const shared = readFileSync(`${ROOT}/src/arena/shared.ts`, 'utf8');
   const ARENA_W = Number(/export const ARENA_W = (\d+)/.exec(shared)[1]);
   const ARENA_H = Number(/export const ARENA_H = (\d+)/.exec(shared)[1]);
@@ -127,6 +152,82 @@ function extractFromSource() {
     });
   }
 
+  // ── Concealment: walk-through plates / pot lids / crates / stacked trays ────
+  //
+  // ⚠️ THIS BLOCK IS A GUARD, NOT A CONVENIENCE, and it was written because the guard
+  // it belongs to COULD NOT FAIL ON THE BUG IT GUARDS AGAINST. `--verify` normalised
+  // `{w,h,c,msr,ps,es,cover,hz}` and this extractor read `addCover` only, so an arena
+  // that declared concealment and a dump that had lost it compared EQUAL and printed
+  // "MATCH — the extractor is a faithful second reader". A guard that has not been shown
+  // to fail on its own bug is not a guard (`docs/LESSONS.md` §13).
+  //
+  // Three registration shapes are recognised, because no arena has declared a region yet
+  // and the shape the arena owner picks is not knowable from here:
+  //
+  //   1. `addPlate(propsGroup, concealment, M, { x, y, w, h, kind, build: ... })`
+  //      — the exact parallel of `addCover`, and the likeliest, since a concealment prop
+  //        needs geometry the same way a cover prop does. The helper NAME is left open
+  //        (`add[A-Za-z]*`); what identifies the call is the `concealment` array in the
+  //        second slot.
+  //   2. `concealment.push({ x, y, w, h, kind })` — flat literal, no `build`.
+  //   3. `const concealment: ConcealBox[] = [ { ... }, { ... } ]` — a plain array.
+  //
+  // ⚠️ AND A TRIPWIRE FOR THE FOURTH SHAPE. If none of the three matches, extraction
+  // silently returns zero — which is indistinguishable from "this arena has no plates"
+  // and would put the blindness straight back. So: if `kitchen.ts` REGISTERS a
+  // concealment list anywhere (comments stripped first, so prose about the mechanic
+  // cannot trip it) and this parser found nothing, `--from-src` is refused outright
+  // rather than answered wrongly. Loud and wrong-shaped beats quiet and empty.
+  const noComments = kitchen.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
+  const concealment = [];
+  const boxFrom = (body) => {
+    const get = (key) => {
+      const mm = new RegExp(`\\b${key}:\\s*([^,\\n}]+)`).exec(body);
+      return mm ? mm[1].trim() : null;
+    };
+    const [x, y, w, h] = ['x', 'y', 'w', 'h'].map(get);
+    if (x === null || y === null || w === null || h === null) return null;
+    const kindRaw = get('kind');
+    return {
+      x: ev(x), y: ev(y), w: ev(w), h: ev(h),
+      kind: kindRaw ? kindRaw.replace(/^['"]|['"]$/g, '') : undefined,
+    };
+  };
+  // Shape 1 — helper call registering into the `concealment` array (up to `build:`,
+  // exactly as the cover extractor does, so an arrow-function body cannot confuse it).
+  for (const m2 of noComments.matchAll(/add[A-Za-z]*\(\s*[A-Za-z_$][\w$]*\s*,\s*concealment\s*,\s*M\s*,\s*\{([\s\S]*?)build:/g)) {
+    const b = boxFrom(m2[1]);
+    if (b) concealment.push(b);
+  }
+  // Shape 2 — direct push of a flat literal (one `push` may carry several).
+  for (const m2 of noComments.matchAll(/concealment\.push\(([\s\S]*?)\);/g)) {
+    for (const lit of m2[1].matchAll(/\{([^{}]*)\}/g)) {
+      const b = boxFrom(lit[1]);
+      if (b) concealment.push(b);
+    }
+  }
+  // Shape 3 — a plain array literal.
+  for (const m2 of noComments.matchAll(/\bconcealment\s*(?::\s*[A-Za-z<>[\]| ]+)?\s*=\s*\[([\s\S]*?)\];/g)) {
+    for (const lit of m2[1].matchAll(/\{([^{}]*)\}/g)) {
+      const b = boxFrom(lit[1]);
+      if (b) concealment.push(b);
+    }
+  }
+  // Evidence that the file POPULATES a concealment list, as opposed to merely declaring
+  // an empty one (`const concealment: ConcealBox[] = [];` is legitimate scaffolding and
+  // must not trip the wire — zero boxes is the honest answer for it).
+  const populatesConcealment =
+    /add[A-Za-z]*\(\s*[A-Za-z_$][\w$]*\s*,\s*concealment\s*,/.test(noComments)
+    || /concealment\.push\(/.test(noComments)
+    || /\bconcealment\s*(?::\s*[A-Za-z<>[\]| ]+)?\s*=\s*\[\s*\{/.test(noComments);
+  if (populatesConcealment && concealment.length === 0) {
+    throw new Error(
+      'arena_probe: src/arena/kitchen.ts POPULATES a `concealment` list but this extractor '
+      + 'parsed ZERO boxes out of it — an unrecognised registration shape. Teach '
+      + 'extractFromSource() the new shape; do NOT trust --from-src or --verify until you have.'
+    );
+  }
+
   const spawnRe = /const (playerSpawn|enemySpawn) = \{ x: ([^,]+), y: ([^}]+) \}/g;
   const spawns = {};
   while ((m = spawnRe.exec(kitchen)) !== null) spawns[m[1]] = { x: ev(m[2]), y: ev(m[3]) };
@@ -142,6 +243,10 @@ function extractFromSource() {
     width: ARENA_W, height: ARENA_H, center: CENTER, maxSafeRadius: MAX_SAFE_RADIUS,
     playerSpawn: spawns.playerSpawn, enemySpawn: spawns.enemySpawn,
     cover, hazards,
+    // Omitted rather than `[]` when the arena has none, mirroring `tools/arena-dump.js`
+    // exactly. The two readers are only comparable if they answer "no regions" the same
+    // way, and `movement.ts:concealmentOf` treats absent and empty identically anyway.
+    ...(concealment.length ? { concealment } : {}),
   };
 }
 
@@ -150,22 +255,48 @@ const DATA = args['from-src'] || args.verify ? extractFromSource() : JSON.parse(
 
 if (args.verify) {
   const dump = JSON.parse(readFileSync(LAYOUT_PATH, 'utf8'));
+  const boxKey = (c) => `${c.kind}@${c.x},${c.y},${c.w}x${c.h}`;
+  /**
+   * ⚠️ `conceal` WAS MISSING FROM THIS OBJECT, and its absence is the reason this whole
+   * guard existed without being able to fail on the thing it guards against.
+   *
+   * The normaliser used to be `{w,h,c,msr,ps,es,cover,hz}`. Concealment lives on its own
+   * `arena.concealment` list precisely BECAUSE nothing that reads `cover` may see it —
+   * that separation is what makes it walk-through — so "not in `cover`" also meant "not
+   * in this comparison". An arena that declared plates and a dump that had lost them
+   * normalised to the identical string and printed *"MATCH — the extractor is a faithful
+   * second reader"*. Demonstrated, not reasoned about: `tools/tmp/cw_verify_knownbad.mjs`
+   * runs the COMMITTED pre-fix copy of this file against a dump carrying a concealment
+   * list and shows it returning MATCH, then this copy returning MISMATCH on the same
+   * input.
+   *
+   * Absent and `[]` normalise the same, deliberately: `movement.ts:concealmentOf` returns
+   * an empty list for an arena with no field, and `conceal_lab --bitid` proved the two
+   * bit-identical over 3,283,873 ticks. The distinction this guard exists to catch is
+   * N-vs-0, not [] -vs-undefined.
+   */
   const norm = (a) => JSON.stringify({
     w: a.width, h: a.height, c: a.center, msr: a.maxSafeRadius,
     ps: a.playerSpawn, es: a.enemySpawn,
-    cover: [...a.cover].map((c) => `${c.kind}@${c.x},${c.y},${c.w}x${c.h}`).sort(),
+    cover: [...a.cover].map(boxKey).sort(),
     hz: [...a.hazards].map((h) => `${h.kind}@${h.x},${h.y},r${h.radius}`).sort(),
+    conceal: [...(a.concealment ?? [])].map(boxKey).sort(),
   });
   const ok = norm(DATA) === norm(dump);
+  const nConceal = (a) => (a.concealment ?? []).length;
   console.log(`\n== EXTRACTOR VERIFY vs ${LAYOUT_PATH.replace(ROOT + '/', '')}`);
-  console.log(`   source extraction: ${DATA.cover.length} cover, ${DATA.hazards.length} hazards`);
-  console.log(`   browser dump     : ${dump.cover.length} cover, ${dump.hazards.length} hazards`);
+  console.log(`   source extraction: ${DATA.cover.length} cover, ${DATA.hazards.length} hazards, ${nConceal(DATA)} concealment`);
+  console.log(`   browser dump     : ${dump.cover.length} cover, ${dump.hazards.length} hazards, ${nConceal(dump)} concealment`);
   console.log(`   ${ok ? 'MATCH — the extractor is a faithful second reader' : 'MISMATCH — do NOT trust --from-src'}\n`);
   if (!ok) {
-    const A = new Set(DATA.cover.map((c) => `${c.kind}@${c.x},${c.y},${c.w}x${c.h}`));
-    const B = new Set(dump.cover.map((c) => `${c.kind}@${c.x},${c.y},${c.w}x${c.h}`));
-    for (const s of A) if (!B.has(s)) console.log(`     src only  ${s}`);
-    for (const s of B) if (!A.has(s)) console.log(`     dump only ${s}`);
+    const diff = (label, a, b) => {
+      const A = new Set(a.map(boxKey));
+      const B = new Set(b.map(boxKey));
+      for (const s of A) if (!B.has(s)) console.log(`     ${label} src only  ${s}`);
+      for (const s of B) if (!A.has(s)) console.log(`     ${label} dump only ${s}`);
+    };
+    diff('cover   ', DATA.cover, dump.cover);
+    diff('conceal ', DATA.concealment ?? [], dump.concealment ?? []);
     process.exitCode = 1;
   }
 }
@@ -428,6 +559,20 @@ if (args.occl) {
   }
   const first = rows[0].occl, last = rows[rows.length - 1].occl;
   console.log(`\n== OCCLUSION vs RING [${TAG}] — rung ${rung}wu, ${arena.cover.length} boxes, ${(arena.cover.reduce((a, c) => a + c.w * c.h, 0) / (arena.width * arena.height) * 100).toFixed(1)}% of floor solid`);
+  // ⚠️ THIS SERIES IS SOLID COVER ONLY, AND THAT IS DELIBERATE — but it must be STATED,
+  // because the same unstated assumption is what made `--verify` unable to fail.
+  //
+  // The series answers "does the closing ring herd fighters into furniture?", i.e. how
+  // much SHOOTING is blocked as R falls (27.7% -> 25.2% is the recorded pass). A
+  // concealment box blocks nothing — not movement, not projectiles, not the nav grid —
+  // so folding it in would inflate a number whose whole meaning is blocked line of fire,
+  // and would break comparability with every figure recorded before regions existed.
+  // The count is printed instead, so a region set can never again be silently absent
+  // from this view.
+  const nConcealBoxes = (arena.concealment ?? []).length;
+  console.log(`   concealment: ${nConcealBoxes} walk-through box${nConcealBoxes === 1 ? '' : 'es'}`
+    + `${nConcealBoxes ? ` (${((arena.concealment.reduce((a, c) => a + c.w * c.h, 0) / (arena.width * arena.height)) * 100).toFixed(1)}% of floor)` : ''}`
+    + ' — NOT in the series below: it blocks no line of fire.');
   console.log(`   ${'R'.padStart(6)}  ${'t'.padStart(7)}  ${'standable'.padStart(10)}   occlusion`);
   for (const r of rows) {
     const bar = '#'.repeat(Math.round((r.occl ?? 0) * 60));

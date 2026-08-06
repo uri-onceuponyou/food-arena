@@ -21,6 +21,7 @@ import {
   type Weapon,
 } from '../game/rules';
 import type { FighterRole, MatchState } from '../game/state';
+import { isVisibleFrom } from '../game/movement';
 // The guaranteed-visible radius. It lives with the camera because the camera is what
 // guarantees it, but it is a GAMEPLAY number — "how far can this player possibly see"
 // — and the zone warning is calibrated against it so the pill and the 3D fog curtain
@@ -95,6 +96,55 @@ export interface Hud {
    */
   flashFogTick(): void;
   dispose(): void;
+}
+
+/**
+ * CAN THIS CLIENT'S HUMAN SEE THE OPPONENT AT ALL?
+ *
+ * The single presentation-side statement of concealment, and every surface that could
+ * leak the enemy's position calls THIS rather than re-deriving it — the radar blip here
+ * in `renderZone`, and both the floating HP pill and the 3D model in `game/match.ts`.
+ * Three surfaces, one predicate: five recorded `ai.ts` defects were all one rule stated
+ * once and implemented twice, and three surfaces is three chances to make the same
+ * mistake.
+ *
+ * ── ⚠️ THE ASYMMETRY, WHICH IS THE ONLY WAY TO GET THIS WRONG ────────────────
+ *
+ * The sim is SYMMETRIC — `Fighter.concealed` is published for both fighters and either
+ * can be standing under a plate. The RENDERER IS NOT: it is one human's client, the
+ * camera follows `state.player`, and a player who hides must still see themselves or
+ * the frame reads as a crash. So the observer is always `state.player` and the target is
+ * always `state.enemy`, in that order, stated once here so no call site can transpose
+ * them. Nothing in this file or in `match.ts` ever hides `state.player`.
+ *
+ * ── ⚠️ WHY NOT `state.enemy.concealed` ──────────────────────────────────────
+ *
+ * `Fighter.concealed` is a position-only observation: *is this fighter inside a region.*
+ * Visibility is a two-body question, because `CONCEAL_REVEAL_RADIUS` (84 wu, = the
+ * longest melee rung) says concealment does NOT hide you from someone already within
+ * touching distance. Hiding the model on `concealed` alone would delete an enemy who is
+ * close enough to hit you — the sim would let them swing at a target that had vanished
+ * from the screen, which is a bug that presents as a rendering fault. `isVisibleFrom` is
+ * the same predicate `ai.ts` and `sim.ts:stepProjectiles` gate on, so the human's screen
+ * and the AI's perception are answering the question with one function.
+ *
+ * It is also the field's own documented rule: `Fighter.concealed` is written once per
+ * fighter per tick from `applyWorldTick`, which only runs while `phase === 'playing'` and
+ * returns early for a dead fighter — i.e. it is STALE in exactly the states the renderer
+ * draws through. `isVisibleFrom` reads live positions and has no such window.
+ *
+ * ── PRESENTATION ONLY ───────────────────────────────────────────────────────
+ *
+ * Pure: two positions and the arena in, a boolean out, nothing written. Nothing derived
+ * from it is ever fed back into `stepMatch`, so the seeded determinism that underwrites
+ * every balance number in the project is untouched (`sim.test.mjs` stays at 253 and
+ * `conceal_lab --bitid` stays exact).
+ *
+ * Degenerates to `true` on every arena that ships no `concealment` list, which today is
+ * all of them — so this is currently a no-op by construction, not by luck.
+ */
+export function enemyVisibleToPlayer(state: MatchState): boolean {
+  return isVisibleFrom(state.player.x, state.player.y, state.enemy.x, state.enemy.y, state.arena);
 }
 
 const STYLE_ID = 'hud-styles';
@@ -754,7 +804,17 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     radarPlayerEl.style.display = state.player.alive ? 'block' : 'none';
     radarEnemyEl.style.left = wx(state.enemy.x);
     radarEnemyEl.style.top = wy(state.enemy.y);
-    radarEnemyEl.style.display = state.enemy.alive ? 'block' : 'none';
+    // ⚠️ SURFACE 1 OF 3. The blip is the purest position leak on the screen — it reports
+    // the enemy's exact coordinates on a map with no occlusion at all, so shipping
+    // concealment without this line makes the mechanic read as BROKEN: you hide, the AI
+    // demonstrably loses you, and your own radar keeps tracking it perfectly. Uri,
+    // `docs/DECISIONS-FOR-URI.md` §30: *"plates and other kitchen objects you can hide
+    // under — fully hidden"* — blip, HP bar AND model, not the half-measure.
+    //
+    // `alive` still gates it independently: a dead enemy is hidden whether or not it
+    // died inside a region, which is the pre-existing rule and is not concealment's to
+    // change.
+    radarEnemyEl.style.display = state.enemy.alive && enemyVisibleToPlayer(state) ? 'block' : 'none';
     radarEl.classList.toggle('is-danger', danger);
     radarCapEl.textContent = danger ? 'GET INSIDE' : 'SAFE ZONE';
 
