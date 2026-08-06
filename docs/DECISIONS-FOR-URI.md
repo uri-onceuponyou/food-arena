@@ -2146,3 +2146,59 @@ information needed to see *"these correct parts compose a goat"* or *"the lid br
 **Per-part finds badly-built components; only a whole-figure look finds a mis-composed character.**
 Uri has now caught two of these that the instrument structurally could not. Every future per-part
 run must be **paired with a whole-figure panel that is actually looked at.**
+
+---
+
+## 41. ✅ LOLLIPOP — and both complaints trace to ONE LINE OF SPEC, faithfully implemented
+
+> *"Limbs and torso intersecting, **making the face invisible** sometimes. The candy should have
+> **more colors than red only**, make it colorful. **Unfreeze the structure — the mouth doesn't have
+> to be above the eyes.** Fix it so it looks good."*
+
+### 🚨 The implementation was CORRECT. The specification was wrong.
+
+`src/game/rules.ts:1734`:
+
+```
+face: 'Eyes on the stick, mouth on the candy. Concentric red/white swirl disc.',
+```
+
+**That single line is the source of both complaints.** `lollipop.ts` follows it exactly and says so
+(`:344` — *"`rules.ts` puts the eyes on the stick and the mouth on the candy"*), and the file even
+records fighting the consequence: at 0.19R the eyes came out **~3 px** at the size a player actually
+sees, *"because the only thing on the huge disc was a small mouth arc."*
+
+**So nobody made a mistake — an agent honoured a written spec, and the spec produced a face with the
+mouth above the eyes.** Uri has now released it.
+
+⚠️ **The fix must change BOTH `rules.ts` and `lollipop.ts`.** Changing only the character file leaves
+the spec in place, and the next agent to read it will faithfully re-implement the layout Uri just
+rejected. That is this project's most-repeated defect shape — *a rule stated once and implemented
+elsewhere* — appearing for the first time in its **inverse** form: **the rule was obeyed, and the
+rule was wrong.**
+
+The same line carries *"Concentric red/white swirl disc"*, which is the palette complaint. **Both
+halves of that sentence are now open.** Note the character already contains a second colour family —
+`LIMB_TEAL #8FE0C9` on the limbs — so a colourful disc has somewhere to start that is already in the
+palette rather than invented.
+
+### The face being occluded is the RIG defect with a worse consequence here
+
+*"Limbs and torso intersecting, making the face invisible"* is the cast-wide interpenetration issue
+(§40 / task 21), but on Lollipop it **hides the face**, not just a limb. Note also that Lollipop is
+the **worst figure/ground character in the cast** — 12 of 18 stations below the 0.10 standard, with
+its `fig` pinned at 0.497 at 17 of 18 stations against a ground at 0.40–0.48, so `dL` sits at
+0.02–0.10 **by construction**. A colourful disc would help that measurement too.
+
+### ⚠️ Pattern 1 again — FOUR for four
+
+The two black shapes flanking the disc are the **cellophane cape petals** (`WRAPPER_INK` — *"cape,
+collar, petals — near-black cellophane"*). They read as **horns**. Burrito's foil, Egg's shards,
+Hamburger's lettuce, and now Lollipop's cape: **any pointed mass either side of a head reads as an
+ear or a horn, whatever it is made of.**
+
+### And one thing worth saying plainly
+
+*"Fix it so it looks good"* is broader latitude than the other four sheets, which named specific
+defects. **Recorded as such** — this one is a redesign brief, not a bug report, and it should be
+judged by Uri's eye rather than by a metric clearing a floor.
