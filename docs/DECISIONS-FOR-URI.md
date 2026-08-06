@@ -2252,3 +2252,52 @@ reads as an opening rather than a painted curve.
 ⚠️ Current measurement: **0% of our eye pixels are above 0.85 luma, against the reference's 31.1% and
 34.1%.** Our faces carry **two values total**. Even Egg — the best of them — has a catchlight rather
 than a sclera, so **the whole cast moves, not just the seven Uri has reviewed.**
+
+---
+
+## 43. ❓ Our UI chrome is CREAM; the reference's is NEAR-BLACK. That is a decision, not a defect.
+
+Measured across 17 isolated UI elements, ours against the reference plates by identical code:
+
+| | ours | reference |
+|---|---|---|
+| **darkFrac** (share of the element that is near-black) | **0.13 – 0.19** | **0.70 – 0.73** |
+| satMean, ours − reference | negative on **12 of 17**, median ≈ **−0.33** | |
+
+**The reference draws its chrome on near-black plates. We draw ours on cream.** Nearly all of our
+chroma deficit lives there — it is not a hundred small colour mistakes, it is one structural choice.
+
+⚠️ **I am not recommending a direction, and that is deliberate.** Reversing it is a whole
+design-system change, and **our own best-scoring screen (character select, 7.00) is also cream on
+warm.** So the evidence does not point one way. **This is yours.**
+
+### 🔴 Four hard defects found in the same audit, being fixed now — no judgement needed
+
+1. **The hero nameplate is occluded by the nav tab bar.** The guard exists and is **15 px short** —
+   it resolves to 47.2 px against a bar whose bottom edge is at y=62.
+2. **Eight strings truncate with a visible ellipsis** — *"2 rewards ready"* renders as
+   *"2 rewards re…"* on the shipped landscape phone; at 852×480 it is **every** chest-row title and
+   sub, plus all three ability names. Two critics named it unprompted and it produced the
+   **joint-worst score in the audit, 4 against 8.**
+3. The character-select abilities list is **clipped mid-descender** by its own panel.
+4. 🔴 **On a landscape phone, home has NO ability buttons at all** — `.home-kit` is `display: none`
+   below 460 px of viewport height. It is deliberate and documented, but since you have ruled the
+   game **landscape-only** (§14), that is not an edge case — **it is the phone experience.** You may
+   want a view on whether the kit should be shrunk to fit rather than hidden.
+
+### ⚠️ And a correction to something I told you
+
+I said character select was our internal reference for the chrome, and that home should be made more
+like it. **That is wrong.** The chrome is **shared** — every element measured lives in `theme.ts`,
+and the two places character select overrides it moved the critic **zero**. Its 7.00 against home's
+5.17 is **not** coming from its components. The fixes belong in the shared layer.
+
+### ⚠️ One instrument caveat, so no one over-reads the per-element numbers
+
+**Isolating a UI element displaces the critic's scale.** The reference side scored **7.12 ± 1.22**
+against a recorded **8.17** for whole images, and **4 of 17 rounds fell outside the valid 7–9 band**
+and were discarded — critics saying an isolated crop *"reads as a debug overlay… a UI wireframe, not
+a game screenshot."* Both controls passed, so the instrument discriminates; it is the **scale** that
+moves. **Per-element numbers are usable as gaps and are NOT comparable to the 5.17 / 7.00 screen
+scores.** (Notably, all three rounds where we *beat* the reference were among the four discarded —
+the validity rule caught every anomaly it exists to catch.)
