@@ -7,13 +7,31 @@
  * and a palette.
  *
  * Identity is fixed by `rules.ts`: Soup, Epic rarity, Soup Splash / Noodle Toss /
- * Soup Dump. The written description ("wide bowl with rising steam, grey steam-
- * coloured eyes, no mouth") is treated as a personality guide rather than a literal
- * spec, per the brief — but the no-mouth, grey-eyed blank stare is EXPLICITLY kept:
- * it is the one genuinely unsettling-calm read in the whole cast and nothing else
- * has it. The bowl silhouette + rising steam is the landmark; a ladle held in
- * `handR` nods at all three abilities (Splash / Toss / Dump) without inventing new
- * silhouette elements the brief didn't ask for.
+ * Soup Dump.
+ *
+ * ── ⚠️ THE OLD HEADER SAID THE OPPOSITE OF THIS ONE, AND IT WAS THE DEFECT ────
+ * WAS: *"the no-mouth, grey-eyed blank stare is EXPLICITLY kept: it is the one
+ * genuinely unsettling-calm read in the whole cast."* **That note is VOID.** Uri
+ * rejected exactly that construction on taco by name (*"no mouth, seems like a
+ * hat"*), `docs/DECISIONS-FOR-URI.md` §42 predicted the same reject would land here,
+ * and `rules.ts`'s `face:` spec has since been rewritten to demand a mouth. The
+ * old wording is kept above rather than deleted because an agent reading only the
+ * code would otherwise re-derive it: **CALM IS AN EXPRESSION, NOT AN ABSENCE.** A
+ * blank face reads as unfinished, not as eerie.
+ *
+ * "Grey steam-coloured eyes" is gone for the same reason and it was worse: it
+ * specified the irises to be the SAME VALUE FAMILY as the steam behind them, which
+ * is why this face carried no value range at all. The face now runs pure-white
+ * sclera (the brightest value anywhere on the character, by construction — see
+ * `CERAMIC`) through a near-black pupil to a mouth with a real interior step.
+ *
+ * ── What this file owns, and what it now DOESN'T ─────────────────────────────
+ * The bowl silhouette + rising steam is the landmark. A ladle in `handR` nods at
+ * all three abilities. The body below the bowl is a stoneware POT STAND rather than
+ * a bare rig torso, because the rig's tapered-sphere torso is 0.34 m half-wide at
+ * the shoulder line while soup's shoulder pivots sit at 0.54 m — the arms and legs
+ * were hanging in ~0.19 m of open background, which is Uri's *"limbs disattached"*
+ * on this character, measured rather than guessed. See `buildPotStand`.
  */
 
 import * as THREE from 'three';
@@ -23,7 +41,9 @@ import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
-import { aim, knob, localBounds, loop, massAnchor, rod } from './appendages';
+// `loop` is deliberately no longer imported: it built the two torus arcs that read
+// as ears. See `buildSilhouetteEvents`.
+import { aim, knob, localBounds, massAnchor, rod } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
 /**
@@ -44,8 +64,19 @@ import { CHARACTER_HEIGHT } from '../units';
  * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
  * direction `docs/LESSONS.md` records as falsified four times in the other one.
  */
-const CERAMIC = '#DCD3C2';      // glazed bowl exterior (luma 0.947 -> 0.830). See above.
-const CERAMIC_SHADE = '#E2D8C4'; // interior shadow / underside
+// WAS `#DCD3C2` (luma 0.830). `rules.ts`'s rewritten `face:` spec names the trade
+// explicitly and it is the reason this moved: the sclera can only be "the brightest
+// value on the character" if the bowl stops competing with it, and the bowl is where
+// the 16.23% above luma 0.94 lives — a large area, against eyes that are a few dozen
+// pixels. So the sclera is paid for by taking the BOWL DOWN, not by adding white.
+// -13% (0.830 -> 0.722) with the chroma left in; per `docs/LESSONS.md` scaling a warm
+// off-white down RAISES its chroma, which is the direction this frame needs.
+const CERAMIC = '#C6B79A';      // glazed bowl exterior, luma 0.722
+// WAS `#E2D8C4`, luma 0.863 — i.e. the "interior shadow" constant was LIGHTER than
+// the surface it was supposed to shade, and `dressLimbs` used it for the LEGS, which
+// made the legs the brightest large mass on the model. Both were contributing to the
+// 16.23% clip. Now genuinely a shade (0.612), used for the bowl's interior wall.
+const CERAMIC_SHADE = '#A99B80'; // interior shadow / underside, luma 0.612
 // ── The dark rung ────────────────────────────────────────────────────────────
 // `tools/tmp/valuescan.mjs --mode ref`: every one of eighteen Brawl Stars plates puts
 // 5% of the character below luma 0.18. Not one of ours did. Soup's own part structure
@@ -63,7 +94,41 @@ const RIM_TRIM = '#3A1009';      // takeout-bowl band, near-black rust — Soup'
 // grey-steam/grey-iris palette rather than inventing an unrelated hue, while being a
 // real value/hue break from cream. Cream now lives on the hands (cloth mitts, echoing
 // the bowl) instead, so the read becomes "grey sleeves, cream mitts, dark boots".
-const GLAZE_GREY = '#9B9691';
+//
+// 🚨 AND THE PARAGRAPH ABOVE DESCRIBED SOMETHING THE CODE NEVER DID. `GLAZE_GREY`
+// was referenced only in the `ChibiRig` palette, which this character's own
+// `dressLimbs()` overrides in every slot — the comment says the read is "grey
+// sleeves, cream mitts, dark boots" and what shipped was cream sleeves, cream
+// mitts, cream legs. It was never rendered once. `rules.ts` now names the same
+// three-tone read in the spec, so the ladder below is authored against it and each
+// tone is used by an actual mesh. Values are sRGB luma, and they are chosen as a
+// LADDER because `valuescan`'s whole finding is that adjacent parts fusing at the
+// seam is what makes limbs read as detached even when the geometry is fine —
+// soup's own `torso|shoulderL` measured **0.0423**, a 0.72 median gap that fuses.
+//
+//   boots       0.06 │ trim 0.10 │ mouth 0.09 │ pupil 0.11   the dark rung
+//   legs        0.41 │ stoneware posts
+//   pot stand   0.52 │ the body mass
+//   bowl inside 0.61
+//   sleeves     0.65 │ grey stoneware
+//   bowl        0.72 │ cream glaze
+//   mitts       0.76 │ cream cloth
+//   SCLERA      1.00 │ the brightest value anywhere on the character, by construction
+// `#8B857E` (0.524) -> `#78726B` (0.452), and this one was MEASURED, not chosen.
+// `valuescan --mode chars` reports `head|torso` — the bowl meeting the body at the
+// neck, this character's single most prominent junction — going **dLcontact 0.2336
+// -> 0.0803** when the pale rig torso was replaced by the pot stand: a boundary that
+// used to be the model's strongest became one of its three weakest, because the
+// stand's top-facing dome and the bowl's under-curve landed in the same value band.
+const GLAZE_GREY = '#78726B';    // pot stand / body mass, luma 0.452
+const SLEEVE_GREY = '#ABA49B';   // upper arms — grey stoneware sleeves, luma 0.647
+// `shoulderL|elbowL` measured `dLcontact` **0.0612** with one sleeve tone for the
+// whole arm — the two halves of a limb drawn in one colour fuse at the elbow, which
+// is the same fusion that made the arm read as detached from the torso, one joint
+// further out. A rolled-back cuff is the cheapest real break available.
+const CUFF_GREY = '#948D84';     // forearms — the darker rolled cuff, luma 0.556
+const LEG_STONE = '#6E675F';     // legs — darker stoneware posts, luma 0.408
+const MITT_CREAM = '#CFC1A6';    // hands — cream cloth mitts, luma 0.761
 const BROTH = PALETTE.broth;     // #E8792A
 const BROTH_DARK = '#B85A16';    // broth depth shading
 const STEAM = PALETTE.steam;     // #C9C9C9
@@ -81,7 +146,12 @@ const WOOD = '#8A5A34';          // ladle handle
 // sash as a smaller fabric-panel detail.
 /** Boots. Deepened with `RIM_TRIM` so the dark rung reaches the ground, not just the sash. */
 const BOOT_STONE = '#160F0B';
-const BIB = '#E2DCCF';       // pale napkin cloth (luma 0.969 -> 0.863)
+// WAS `#E2DCCF` (0.863) on a chevron-shaped extruded bib. Rendered at the lobby
+// camera that panel read as a white ARROW pointing up the chest, not as cloth, and
+// it was the second-brightest large area on the model. It is now a curved apron
+// PANEL that follows the pot stand's own lathe profile (see `buildApron`), at a
+// value that sits between the stand and the bowl instead of above both.
+const BIB = '#BCB29B';       // apron cloth, luma 0.700
 const SLING = '#6B4226';     // leather sling strap
 const SLING_DARK = '#4A2E1A';
 
@@ -101,15 +171,29 @@ function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Materia
   // pose rotates the shoulder/hip to, reads as a flat flag/wing sticking out of
   // the joint rather than blending into it. The dome keeps almost the whole
   // length budget for the actual tapered shaft.
-  const capBot = Math.min(rBot, len * 0.45);
+  // ── 🚨 THE BOTTOM CAP WAS EATING `rBot`, AND THAT IS THE VISIBLE KNEE STEP ───
+  // WAS: `capBot = min(rBot, len * 0.45)` used as BOTH the cap's height and its
+  // radius, with the wall then starting at `capBot`. Whenever `len * 0.45 < rBot` —
+  // which is every STOUT leg, the thigh being 0.276 m long against a 0.155 m radius —
+  // the wall's bottom radius silently became `len * 0.45` instead of `rBot`. So the
+  // thigh ended 0.031 m NARROWER than the shin that starts directly under it, and the
+  // knee rendered as two stacked cups with a hard step between them. Read
+  // `shots/ch/soup/before/crop_legs.png` and it is the most obvious thing in frame.
+  //
+  // The cap now has TWO numbers: `rBot` horizontally (so the wall keeps the radius it
+  // was asked for) and `capH` vertically (so a short segment gets a squashed dome
+  // instead of a truncated one). Same class as `docs/LESSONS.md` §12's capsule
+  // degeneracy — a geometry helper quietly changing shape when a segment is shorter
+  // than it is thick.
+  const capH = Math.min(rBot, len * 0.45);
   const capTopH = Math.min(rTop * 0.42, len * 0.16);
-  const wallBotY = -(len - capBot);
+  const wallBotY = -(len - capH);
   const wallTopY = -capTopH;
   const CAP = 5;
   const pts: THREE.Vector2[] = [];
   for (let i = CAP; i >= 0; i--) {
     const a = (i / CAP) * Math.PI * 0.5;
-    pts.push(new THREE.Vector2(capBot * Math.cos(a), wallBotY - capBot * Math.sin(a)));
+    pts.push(new THREE.Vector2(rBot * Math.cos(a), wallBotY - capH * Math.sin(a)));
   }
   pts.push(new THREE.Vector2(rTop, wallTopY));
   const TCAP = 4;
@@ -150,7 +234,11 @@ function buildHandleCap(R: number, mat: THREE.Material): THREE.Mesh {
  */
 function buildHandleArc(
   len: number,
-  radius: number,
+  /** Radius at the segment's TOP (the joint origin). */
+  rTop: number,
+  /** Radius at the segment's BOTTOM. Matching one segment's `rBot` to the next
+   *  segment's `rTop` is what removes the step at the elbow — see below. */
+  rBot: number,
   side: 1 | -1,
   bowOut: number,
   bowFwd: number,
@@ -171,18 +259,45 @@ function buildHandleArc(
   const mid = new THREE.Vector3(side * len * bowOut, -len * 0.5, len * bowFwd);
   const end = new THREE.Vector3(0, -len, 0);
   const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
-  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 14, radius, 10, false), mat);
+  // ── WAS ONE RADIUS FOR THE WHOLE SEGMENT, AND THAT IS THE VISIBLE ELBOW STEP ──
+  // `TubeGeometry` takes a single radius, so the upper arm was drawn at
+  // `armRadius * 0.60` and the forearm at `armRadius * 0.52` — an 8-point jump in
+  // diameter at the elbow, with a `radius * 1.02` cap sphere on the forearm's top
+  // that was SMALLER than the tube above it. Rendered, the arm read as a chain of
+  // separate blobs with a crease across it, which is the other half of Uri's
+  // *"limbs disattached or intersecting"* on this character.
+  //
+  // The taper is applied by scaling each of `TubeGeometry`'s rings toward its own
+  // centre on the curve — the technique `appendages.ts:curl` uses, reimplemented
+  // here rather than imported because `curl` tags its mesh `silhouetteEvent`, which
+  // would hide the arms from `localBounds()` and from the appendage instruments.
+  const SEG = 16, RADIAL = 10;
+  const geo = new THREE.TubeGeometry(curve, SEG, rTop, RADIAL, false);
+  const p = geo.attributes.position;
+  const centre = new THREE.Vector3();
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    const t = Math.floor(i / (RADIAL + 1)) / SEG;
+    curve.getPointAt(Math.min(1, t), centre);
+    v.set(p.getX(i), p.getY(i), p.getZ(i));
+    v.sub(centre).multiplyScalar((rBot / rTop - 1) * t + 1).add(centre);
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  p.needsUpdate = true;
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+  const tube = new THREE.Mesh(geo, mat);
   tube.name = 'soup_handle_tube';
   tube.castShadow = true;
   tube.receiveShadow = true;
   g.add(tube);
 
-  const capTop = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.02, 12, 10), mat);
+  const capTop = new THREE.Mesh(new THREE.SphereGeometry(rTop * 1.02, 12, 10), mat);
   capTop.position.copy(start);
   capTop.castShadow = true;
   g.add(capTop);
   if (capBottom) {
-    const capBot = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.9, 12, 10), mat);
+    const capBot = new THREE.Mesh(new THREE.SphereGeometry(rBot * 0.98, 12, 10), mat);
     capBot.position.copy(end);
     capBot.castShadow = true;
     g.add(capBot);
@@ -264,6 +379,17 @@ export class SoupCharacter extends BaseCharacter {
   private steamWisps: THREE.Object3D[] = [];
   private steamMats: THREE.MeshStandardMaterial[] = [];
   private brothSurface!: THREE.Mesh;
+  /**
+   * How wide the pot stand is at a given torso-local height, in metres.
+   *
+   * Published by `buildPotStand()` and read by `buildAccessories()`. It exists so
+   * that nothing on the body is ever placed against a REMEMBERED number — the same
+   * discipline `bowlSurface` enforces on the head and `localBounds` enforces in
+   * `appendages.ts`. The strap this replaces was authored as fractions of
+   * `shoulderWidth`, and when the body's width changed it ran straight through the
+   * inside of the torso.
+   */
+  private standRadiusAt: (y: number) => number = () => 0;
 
   constructor(def: CharacterDef) {
     super(def);
@@ -273,12 +399,22 @@ export class SoupCharacter extends BaseCharacter {
         // A third independent art-director pass named the structural problem
         // directly: every character shares the identical tube-and-ball-joint limb
         // TOPOLOGY, colour changes notwithstanding. Soup's fix is structural, not a
-        // recolour — see `dressLimbs()` below, which replaces every slot. This
-        // palette is therefore only a fallback that is never actually rendered.
+        // recolour — see `dressLimbs()` below, which replaces every slot.
+        //
+        // ⚠️ "only a fallback that is never actually rendered" WAS TRUE OF THE LIMB
+        // SLOTS AND FALSE OF EVERYTHING ELSE, and believing it is how `GLAZE_GREY`
+        // ended up describing a colour nothing wore. `dressLimbs()` overrides the
+        // eight limb parts; the TORSO, the NECK COLUMN and the COLLAR are built by
+        // `rig.ts` straight off this palette and reach the screen unchanged. STOUT
+        // carries `neckFraction: 0.055`, so this character has had a neck column
+        // and a collar the whole time, drawn in `limb` (cream) and in
+        // `foot * 0.55`. They are named here now.
         limb: CERAMIC,
-        hand: CERAMIC,
+        hand: MITT_CREAM,
         foot: BOOT_STONE,
         torso: GLAZE_GREY,
+        neck: LEG_STONE,        // a stoneware throat, darker than both lobes it joins
+        collar: RIM_TRIM,       // the same near-black band the bowl's rim wears
         limbRoughness: 0.5,
       },
       // Structural fix, round 4: the face was sitting on a narrow neck BELOW the
@@ -300,7 +436,26 @@ export class SoupCharacter extends BaseCharacter {
         // both upper arms delivered only 0.556 / 0.508, both forearms 0.276 /
         // 0.246, and both hands 0.200 / 0.386. Measuring the mass at the pivot's
         // own height under-reads a flared food; the screen-space overlap does not.
-        shoulderWidth: CHARACTER_HEIGHT * 0.305,
+        //
+        // ── 0.305H -> 0.255H, AND THIS IS URI'S "LIMBS DISATTACHED" ────────────
+        // The paragraph above optimised ONE quantity — how much of the arm the bowl
+        // covers at 58 degrees — and never checked what it cost at the other end.
+        // The rig's torso is a tapered sphere of half-width `torsoWidth * 0.5 =
+        // 0.407` m, and at the shoulder line (`shoulderFraction 0.192` of height,
+        // i.e. 80% of the way up a 0.504 m torso, where the taper has already begun
+        // closing) it is **0.340 m**. At 0.305H the shoulder pivot sat at 0.641 m
+        // and the upper arm's inner wall at 0.533 m: **0.19 m of open background
+        // between the arm and the body it is supposed to hang off.** At the LOBBY
+        // camera (`charStage.ts`, pitch 20) that gap IS the read; at 58 degrees
+        // foreshortening hides it, which is exactly why it survived every
+        // instrument the previous passes ran. `docs/LESSONS.md` §1 in its newest
+        // form — it rendered, and it rendered plausibly at the camera being measured.
+        //
+        // Two changes together, because neither is sufficient alone: the pivot comes
+        // in to 0.255H (0.536 m, arm inner wall 0.407 m) AND `buildPotStand()` gives
+        // the body a real mass 0.452 m half-wide at that height. The arm now
+        // OVERLAPS the body by 0.045 m instead of missing it by 0.19 m.
+        shoulderWidth: CHARACTER_HEIGHT * 0.255,
         // ── 0.175H -> 0.245H, and it is the SAME BUG the legs had ──────────────
         // Round 2 found `CapsuleGeometry(r, len - 2r)` degenerating to a sphere
         // whenever a segment was shorter than it was thick, and fixed it in the
@@ -334,7 +489,23 @@ export class SoupCharacter extends BaseCharacter {
         // 0.025H back is worth ~0.06 m of overhang and ~0.01 of hull deficiency
         // against a 0.115 margin over the reference floor — cheap, and it is the
         // difference between the size rise costing hit-feel and not.
-        stanceWidth: CHARACTER_HEIGHT * 0.275,
+        //
+        // ── 0.275H -> 0.225H, same defect as the shoulders, one joint down ──────
+        // The rig's torso mesh bottoms out AT the hip line and does so as a POLE
+        // (`rig.ts`: the tapered sphere's lowest vertex has radius 0), and the
+        // pelvis mass spans 0.42 m half-width. At 0.275H the hip pivots sat at
+        // 0.578 m, so both thigh tops — flat discs, because of the `taperedLimb`
+        // cap bug fixed above — floated 0.16 m outside anything solid, with the
+        // 0.55 m-radius apron sash overhanging them and hiding what little body
+        // there was. `shots/ch/soup/before/crop_legs.png`: the legs are two free-
+        // standing columns with daylight between them and the torso.
+        //
+        // 0.225H puts the pivots at 0.473 m, comfortably inside the pot stand's
+        // 0.462 m half-width at the hip line, so the thigh's inner half is buried
+        // in the body. `splay: 0.34` is UNCHANGED, so the FEET still land as wide
+        // as they did — the planted read and the hull deficiency the splay bought
+        // are carried by the ankle, not by the hip.
+        stanceWidth: CHARACTER_HEIGHT * 0.225,
       }),
       // Serene and still — the calmest, most nearly-neutral stance in the cast,
       // matching the unsettling-patient no-mouth-then-mouth face. Distinct from
@@ -366,7 +537,40 @@ export class SoupCharacter extends BaseCharacter {
     const ceramicMat = glossyMat({ color: CERAMIC, roughness: 0.25 });      // glazed bowl
     const ceramicShadeMat = glossyMat({ color: CERAMIC_SHADE, roughness: 0.28 });
     const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });
-    const brothMat = glossyMat({ color: BROTH, roughness: 0.12 });          // very wet broth
+    // ── 🚨 THE "HOLE IN THE BOWL" WAS THIS MATERIAL, AND I MISDIAGNOSED IT TWICE ──
+    // At the three-quarter lobby facing the bowl's interior renders as a broad
+    // white-to-cyan band, and it looks exactly like backdrop showing through a
+    // single-sided lathe. It is not. `glossyMat` is `MeshPhysicalMaterial` with
+    // `clearcoat: 0.6, clearcoatRoughness: 0.2` hard-coded (`toon.ts:440`), and the
+    // broth is a large FLAT disc: at a 20-35 degree camera the clearcoat lobe lines
+    // up with the key and sweeps the whole far half of the disc to white. The
+    // "cyan" is that white against the bloom of the backdrop behind the rim.
+    //
+    // Two wrong fixes were shipped and measured before this one, and both are worth
+    // recording because each was a plausible reading of the same picture:
+    //   1. an interior wall, which was the right instinct for a DIFFERENT bug and
+    //      was itself built with `pos.x` as a radius — see the needle note below;
+    //   2. `roughness 0.12 -> 0.28`, which does nothing useful, because roughness on
+    //      the BASE lobe does not touch the clearcoat lobe at all.
+    // `docs/LESSONS.md` §13: an instrument — here, the eye — reporting a plausible
+    // wrong cause is worse than none. The tell was that neither fix moved the image.
+    //
+    // `toonMat` has no clearcoat, and thick soup is not lacquered. `rim: false`
+    // because `toonMat`'s Fresnel is opt-OUT and this character has no clip budget.
+    //
+    // ⚠️ AND CLEARCOAT WAS ONLY HALF OF IT — 0.42 STILL BLEW OUT. `stage.ts` settles
+    // where a highlight in this game comes from: *"the highlight a viewer actually
+    // sees is the DIRECT lights' GGX lobe (key 3.5 + front 2.2), not the
+    // environment's reflection"* — and the broth is a large FLAT disc facing
+    // straight up, i.e. the single geometry in the cast most able to point a broad
+    // GGX lobe at the camera. At 0.42 the lobe is wide AND bright and it whited out
+    // the middle of the bowl; the surviving orange only showed at the rim, which is
+    // what made it look like a hole rather than a highlight. 0.86 is the fix and it
+    // is also the truth about the material: broth scatters, it does not reflect.
+    // ⚠️ `envMapIntensity` is NOT an alternative lever — `stage.ts:396` quotes
+    // three.js overwriting per-material `envMapIntensity` with the scene's whenever
+    // `material.envMap === null`, which is every material in this project.
+    const brothMat = toonMat({ color: BROTH, roughness: 0.86, rim: false }); // broth scatters, it does not reflect
 
     // ── Bowl ─────────────────────────────────────────────────────────────────
     // A true lathed bowl profile — flared rim, tapering to a small footed base —
@@ -455,6 +659,66 @@ export class SoupCharacter extends BaseCharacter {
     trim.receiveShadow = true;
     head.add(trim);
 
+    // ── 🚨 THE BOWL HAD A HOLE IN IT, AND YOU COULD SEE THE SKY THROUGH IT ──────
+    // The lathe and the rim-trim cylinder are both single-sided, so from any angle
+    // that looks INTO the bowl — which at the lobby camera is every angle, the rim
+    // being the highest thing on the character — the inner wall between the rim lip
+    // (h 1.0) and the broth line (h 0.95) is back-face culled and the BACKGROUND
+    // renders through it. `shots/ch/soup/before/lobby_yaw35.png`: the bright cyan
+    // band inside the rim is not a specular, it is the sky. It went unnoticed at
+    // yaw 0 only because the backdrop happens to be dark brown at that height, so
+    // the hole looked like an intentional shadow ring.
+    //
+    // `docs/LESSONS.md` §1's newer form: the question is not only "is it there" but
+    // "is it the SAME" — this rendered plausibly and wrongly for five rounds.
+    // Closed with a real interior wall, run from the RIM DOWN so `LatheGeometry`'s
+    // automatic normals face inward (the same bottom-to-top rule the exterior obeys,
+    // deliberately inverted), plus `doubleSide` so no camera can find an edge case.
+    // ⚠️ THE RADIUS IS `|(x, z)|`, NOT `x`. The first version of this loop read
+    // `s.pos.x`, and `bowlSurface(0, h)` returns `(sin 0 * r, y, cos 0 * r)` — so
+    // `x` is **exactly zero** at the azimuth it was sampled at and the whole wall
+    // was built as a 0.0001 m needle down the bowl's axis. It rendered, it cost a
+    // draw call, and the hole it was written to close was still there in the next
+    // capture. `docs/LESSONS.md` §1 for the twenty-first time, and the tell was that
+    // the "fix" changed the image by nothing at all. Every other radius in this file
+    // already takes the 2-vector length; this one did not.
+    const innerPts: THREE.Vector2[] = [];
+    for (let i = 10; i >= 0; i--) {
+      const h = 0.78 + (i / 10) * 0.22;
+      const s = bowlSurface(0, h);
+      const r = new THREE.Vector2(s.pos.x, s.pos.z).length() * 0.965;
+      innerPts.push(new THREE.Vector2(Math.max(1e-4, r), s.pos.y));
+    }
+    const innerWall = new THREE.Mesh(
+      new THREE.LatheGeometry(innerPts, 40),
+      // ⚠️ `rim: false`, AND THE FIRST VERSION OF THIS WALL WITHOUT IT WAS WORSE
+      // THAN THE HOLE IT CLOSED. `toonMat`'s Fresnel rim is opt-OUT (`toon.ts:192`,
+      // unlike `glossyMat`'s opt-IN), and a Fresnel term on a CONCAVE surface is at
+      // full strength across the whole visible area, because every one of its
+      // normals is near-perpendicular to the view. Rendered, the plugged bowl
+      // glowed brighter than the sky it replaced. This character has no rim budget
+      // to spend anyway — it measures 16.23% above luma 0.94 against a reference
+      // band that tops out at 9.29%.
+      // The colour is a shadowed interior, not the exterior's shade: the inside of
+      // a bowl above its own liquid line is one of the darkest places on a vessel,
+      // and it is worth real dark AREA at the top of the character where the match
+      // camera sees most.
+      // `#7C7160` (0.447) -> `#463D31` (0.243). At 0.447 this is a MID tone, and once
+      // the needle bug above was fixed and the wall actually rendered, soup's p05 went
+      // 0.18 -> 0.22 — a "shadow" that is lighter than the shadow it replaced is a
+      // belt, not a shadow. `rig.ts` records the identical mistake on the neck collar,
+      // in the same words. The inside of a vessel above its own liquid line is one of
+      // the darkest places on it, and at the 58 degree match camera it is also one of
+      // the few dark surfaces that FACES THE CAMERA.
+      toonMat({ color: '#463D31', roughness: 0.66, doubleSide: true, rim: false })
+    );
+    innerWall.name = 'soup_bowl_inner__no_outline';
+    // A thin double-sided shell with no volume renders its inverted-hull outline as
+    // a solid dark slab — `egg.ts:hood` records the same trade.
+    innerWall.userData.noOutline = true;
+    innerWall.receiveShadow = true;
+    head.add(innerWall);
+
     // Underside shading disc — closes the bowl's hollow interior at the base so the
     // open lathe never shows a see-through hole from a low camera angle.
     const underside = new THREE.Mesh(new THREE.CircleGeometry(BOWL_PROFILE[1][0] * bowlBaseR, 24), ceramicShadeMat);
@@ -467,7 +731,11 @@ export class SoupCharacter extends BaseCharacter {
     // ── Broth surface ────────────────────────────────────────────────────────
     // A shallow glossy disc filling the bowl's opening, set just below the rim so
     // it reads as liquid inside rather than a lid on top.
-    const brothH = 0.95;
+    // 0.95 -> 0.915. Two things at once: the bowl stops being filled flush to the
+    // brim (a pot you can see the inside of reads as a pot; a disc of orange level
+    // with the rim reads as a lid), and the dark inner wall above the liquid gets
+    // enough visible area at 58 degrees to carry part of the dark rung.
+    const brothH = 0.915;
     const brothPt = bowlSurface(0, brothH);
     const brothRadius = new THREE.Vector2(brothPt.pos.x, brothPt.pos.z).length() * 0.90;
     this.brothSurface = new THREE.Mesh(new THREE.CircleGeometry(brothRadius, 32), brothMat);
@@ -479,7 +747,8 @@ export class SoupCharacter extends BaseCharacter {
 
     // A darker broth-depth ring near the rim, and a couple of floating garnish bits,
     // so the broth reads as liquid with real depth rather than a flat orange disc.
-    const brothDeepMat = glossyMat({ color: BROTH_DARK, roughness: 0.16 });
+    // Same clearcoat trap as the broth disc above, on a ring at the same height.
+    const brothDeepMat = toonMat({ color: BROTH_DARK, roughness: 0.82, rim: false });
     const brothRing = new THREE.Mesh(new THREE.RingGeometry(brothRadius * 0.7, brothRadius * 0.98, 32), brothDeepMat);
     brothRing.name = 'soup_broth_ring__no_outline';
     brothRing.userData.noOutline = true;
@@ -498,9 +767,11 @@ export class SoupCharacter extends BaseCharacter {
     this.buildSteam(R, brothPt.pos.y, brothRadius);
     this.buildFace(R, bowlSurface);
     this.buildLadle();
-    this.dressTorsoAsSoup();
+    // ⚠️ ORDER MATTERS AND IT IS NOT COSMETIC: `buildPotStand()` publishes
+    // `standRadiusAt`, and `buildAccessories()` places every garment against it.
+    this.buildPotStand();
     this.dressLimbs();
-    this.buildAccessories(R, bowlSurface);
+    this.buildAccessories();
     this.buildSilhouetteEvents();
 
     outlineGroup(this.root);
@@ -542,22 +813,44 @@ export class SoupCharacter extends BaseCharacter {
   }
 
   /**
-   * Grey steam-coloured eyes and NO mouth — the one genuinely unsettling-calm read
-   * in the cast, kept and sharpened rather than removed.
+   * THE FACE, rebuilt to `rules.ts`'s rewritten `face:` spec.
    *
-   * With no mouth, the eyes carry the ENTIRE face, so they get top billing on the
-   * bowl: EYE_H now sits in the real near-vertical WALL segment the narrowed
-   * `BOWL_PROFILE` holds through h 0.16–0.58 (see the bowl comment above), where
-   * the true surface normal points mostly outward rather than down — a genuinely
-   * visible, camera-facing surface, not the underside of a flare. Eyes are sized
-   * up from the previous pass now that the bowl itself is ~30% narrower, so they
-   * read as prominent rather than lost against the ceramic. Each eye keeps its
-   * heavy ceramic-toned LID — a shallow shell that caps the sclera's upper third
-   * and casts a real shadow line — plus a soft brow stroke above: together they
-   * turn "two dots" into a deliberate, sleepy, PATIENT stare, the single highest-
-   * leverage shape this character has. Both eyes are built from one mirrored loop
-   * at identical size/height, so any residual asymmetry in the render is the
-   * camera angle, not the geometry.
+   * WAS: *"Grey steam-coloured eyes and NO mouth — the one genuinely unsettling-calm
+   * read in the cast."* Both halves of that are now rejected upstream (see this
+   * file's header and `docs/DECISIONS-FOR-URI.md` §42), and the old text is kept
+   * here because it explains every choice the new build undoes.
+   *
+   * Four things the spec asks for, each with the specific defect it replaces —
+   * all four visible in `shots/ch/soup/before/crop_face.png`:
+   *
+   * 1. **A white sclera that is the brightest value anywhere on the character.**
+   *    Was `#EDEDEA` (0.930) against a `#DCD3C2` bowl (0.830) — a tenth of a stop,
+   *    on a surface the key light hits harder than it hits the eye. Now `#FFFFFF`
+   *    against a 0.722 bowl. The per-part measurement behind this is blunt: **0% of
+   *    our eye pixels are above 0.85 luma against the reference's 31.1% / 34.1%.**
+   * 2. **A dark pupil OFFSET for gaze.** Was dead-centre in both eyes, which is
+   *    the doll stare in the before crop. Now nudged toward the nose and down, so
+   *    the two eyes converge on the viewer.
+   * 3. **An explicit catchlight.** There was one, and it lost: the pupil ran
+   *    `roughness 0.30`, so a broad specular smear across the whole pupil was
+   *    brighter and larger than the 0.029R glint meant to be the catchlight. The
+   *    pupil is now matte and the glint is the only bright thing in the eye.
+   * 4. **A mouth with an INTERIOR VALUE STEP.** Was a `TorusGeometry` arc 0.17R
+   *    wide next to 0.41R eyes — the "painted curve" §42 names, and about a third
+   *    of the size it needed to read at all. Now a recessed cavity at 0.089 luma
+   *    with a warm interior at 0.412 behind the lip: an OPENING, not a stroke.
+   *
+   * ⚠️ And the eye orientation was a live instance of `docs/LESSONS.md` §12.
+   * `setFromUnitVectors` picks the shortest arc, so it leaves a DIFFERENT residual
+   * roll on each side — the bug that gave Sushi a lazy eye. Both eyes here were
+   * built with it, and every offset inside them (glint, pupil) therefore landed in
+   * a slightly different place per side. The basis is now built explicitly from
+   * world up, exactly as `appendages.ts:aim` does it, so a mirrored pair is
+   * genuinely mirrored and `-sx` means "toward the nose" on both sides.
+   *
+   * Placement is unchanged: EYE_H sits in the profile's h 0.55–0.76 plateau where
+   * the bowl holds full rim-width radius, so the face is on the bowl's main body
+   * rather than on a narrower neck below it.
    */
   private buildFace(R: number, bowlSurface: (theta: number, hFrac: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }): void {
     const face = this.rig.joints.face;
@@ -579,95 +872,210 @@ export class SoupCharacter extends BaseCharacter {
     // Orientation still uses the flattened HORIZONTAL-outward direction rather
     // than the raw 3D normal, as a belt-and-braces fix against any residual
     // downward tilt in the wall segment.
-    const EYE_THETA = 0.46;
-    const EYE_H = 0.62;
-    // Darkened hard from #6B6E72. `rules.ts` calls for "grey steam-coloured eyes",
-    // and a mid-grey iris on a near-white sclera on a cream bowl is three values
-    // inside half a stop — a blind critic reported that at small size the face
-    // vanishes entirely and the character reads as an empty dish. This is still a
-    // cool grey rather than the cast's ink, so it keeps the steam association, but
-    // it now has the value separation an eye needs to survive at ~10px.
-    const irisMat = toonMat({ color: '#2B3138', roughness: 0.3 });
-    const scleraMat = toonMat({ color: '#EDEDEA', roughness: 0.3 });
-    const lidMat = toonMat({ color: '#B7BABD', roughness: 0.35 }); // between sclera and iris — a real shaded lid
-    const browMat = toonMat({ color: '#3A4149', roughness: 0.4 }); // groups with the iris as "the eye area"
+    const EYE_THETA = 0.42;
+    const EYE_H = 0.63;
+
+    /**
+     * Orient a feature so its +Z points out of the bowl's wall and its +Y is world
+     * up, with an EXPLICIT basis. See the §12 note in this method's docblock — the
+     * `setFromUnitVectors` this replaces left a different roll on each side.
+     *
+     * With `y = world up` and `z = outward` both horizontal-plane derived, local +X
+     * comes out as `up x outward`, which for an eye at `theta = sx * EYE_THETA`
+     * points AWAY from the face's centre on both sides. So "toward the nose" is
+     * `-sx` on local X, which is what the pupil offset below relies on.
+     */
+    const faceBasis = (obj: THREE.Object3D, at: THREE.Vector3, out: THREE.Vector3): void => {
+      const z = out.clone().normalize();
+      const up = new THREE.Vector3(0, 1, 0);
+      const x = new THREE.Vector3().crossVectors(up, z).normalize();
+      const y = new THREE.Vector3().crossVectors(z, x).normalize();
+      obj.position.copy(at);
+      obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+    };
+
+    // WAS `#EDEDEA` — a "near-white" that was only 0.10 of luma above the bowl it
+    // sat on. Pure white, and it is now the brightest albedo on the model by 0.24.
+    const scleraMat = toonMat({ color: '#FFFFFF', roughness: 0.46 });
+    // WAS `#2B3138` at `roughness 0.30`. The colour was fine; the ROUGHNESS was the
+    // defect — a glossy pupil grows a broad specular that outshines the catchlight
+    // meant to be the only highlight in the eye. Matte, and darker.
+    const pupilMat = toonMat({ color: '#171C22', roughness: 0.62 });
+    // WAS `#B7BABD`, a cool grey LIGHTER than the ceramic — rendered, it read as a
+    // glass dome over a googly eye rather than as a lid. A lid is made of the same
+    // stuff as the face, one step down in value.
+    const lidMat = toonMat({ color: '#B0A288', roughness: 0.5 });
+    const browMat = toonMat({ color: '#4A4038', roughness: 0.5 });
 
     for (const sx of [-1, 1] as const) {
       const { pos } = bowlSurface(sx * EYE_THETA, EYE_H);
       const outward = new THREE.Vector3(pos.x, 0, pos.z).normalize();
       const eye = new THREE.Group();
-      eye.position.copy(pos).addScaledVector(outward, R * 0.03);
-      eye.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
+      eye.name = 'soup_eye';
+      // 0.03R -> 0.010R of stand-off, and the sclera is flattened from `z 0.55` to
+      // `z 0.42`. Together those are the difference between an eyeball GLUED ON and
+      // an eye SET IN: the before crop's eyes bulge off the ceramic as two separate
+      // spheres, which is most of why the face read as a toy's stick-on parts.
+      faceBasis(eye, pos.clone().addScaledVector(outward, R * 0.010), outward);
       face.add(eye);
 
-      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.205, 16, 14), scleraMat);
-      white.scale.set(1, 1, 0.55);
+      const white = new THREE.Mesh(new THREE.SphereGeometry(R * 0.200, 18, 14), scleraMat);
+      white.name = 'soup_eye_white';
+      white.scale.set(1, 1.06, 0.42);
       white.castShadow = true;
       eye.add(white);
 
-      const iris = new THREE.Mesh(new THREE.SphereGeometry(R * 0.125, 14, 12), irisMat);
-      iris.position.set(0, 0, R * 0.075);
-      iris.scale.set(1, 1, 0.55);
-      iris.castShadow = true;
-      eye.add(iris);
+      // OFFSET FOR GAZE, which is item 2 of the spec. Toward the nose (`-sx` on
+      // local X, see `faceBasis`) and slightly down, so the two eyes converge just
+      // in front of the viewer and the stare becomes deliberate instead of blank.
+      // Small on purpose — soup is the serene one, and a large converge reads as
+      // cross-eyed comedy.
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.112, 16, 14), pupilMat);
+      pupil.name = 'soup_eye_pupil';
+      // ── 0.026R -> 0.060R, AND THE FIRST VALUE WAS CANCELLED BY PARALLAX ───────
+      // Rendered at 0.026R the eyes came out WALL-EYED, both pupils sitting outboard
+      // of their sclera (`shots/ch/soup/after/crop_face.png`, first pass). The basis
+      // was right and the arithmetic was right; what was missing is that the pupil
+      // stands `0.062R` PROUD of the sclera's centre on an eye whose axis is turned
+      // `EYE_THETA = 0.42` rad away from the viewer, so it projects outboard by
+      // `0.062R * sin(0.42) = 0.025R` before any authored offset applies. 0.026R of
+      // inward offset therefore bought exactly nothing — it paid the parallax back
+      // and stopped. The offset has to beat it, not match it.
+      pupil.position.set(-sx * R * 0.060, -R * 0.020, R * 0.062);
+      pupil.scale.set(1, 1, 0.42);
+      pupil.castShadow = true;
+      eye.add(pupil);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.029, 8, 8), flatMat('#ffffff'));
-      glint.position.set(-R * 0.030, R * 0.036, R * 0.11);
+      // THE CATCHLIGHT. `flatMat` is unlit, so it is the one thing in the frame that
+      // cannot be dimmed by the lighting rig. Constant sign, not `sx`-mirrored: a
+      // catchlight is a reflection of ONE key light, so both eyes carry it on the
+      // same WORLD side. (With the explicit basis above, local +X is world-ish +X
+      // on both eyes, which is what makes that possible — under the old
+      // `setFromUnitVectors` roll it was not.)
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.040, 10, 10), flatMat('#ffffff'));
+      glint.name = 'soup_eye_glint';
+      // Follows the pupil's own inward shift, or it drifts off the dark disc it is
+      // supposed to sit on and lands on white, where a white glint is invisible.
+      glint.position.set(-sx * R * 0.060 - R * 0.038, R * 0.048, R * 0.098);
+      glint.scale.set(1, 0.85, 0.5);
       glint.userData.noOutline = true;
       eye.add(glint);
+      // A second, much smaller bounce low on the opposite side. Two highlights of
+      // very different size is what stops an eye reading as plastic — it is the one
+      // piece of Egg's eye the per-part measurement said we were still short of.
+      const glint2 = new THREE.Mesh(new THREE.SphereGeometry(R * 0.017, 8, 8), flatMat('#ffffff'));
+      glint2.name = 'soup_eye_glint2';
+      glint2.position.set(-sx * R * 0.060 + R * 0.048, -R * 0.052, R * 0.090);
+      glint2.scale.set(1, 0.9, 0.5);
+      glint2.userData.noOutline = true;
+      eye.add(glint2);
 
-      // Heavy lid — a shallow dome capping the sclera's upper third, sitting proud
-      // (bigger radius + forward Z) so it casts a real shadow line rather than
-      // z-fighting with the white beneath. This is what turns a bare "dot on a
-      // curve" into a deliberate, sleepy, PATIENT stare — the single highest-
-      // leverage shape available here, since there is no mouth to share the work.
+      // Heavy lid — a shallow dome capping the sclera's upper quarter, sitting proud
+      // so it casts a real shadow line rather than z-fighting with the white beneath.
+      // Thinner than before (0.30PI -> 0.22PI of the sphere) because the sclera is
+      // now the character's brightest value and covering a third of it was paying
+      // that back. Still the shape that makes the stare PATIENT rather than blank.
       const lid = new THREE.Mesh(
-        new THREE.SphereGeometry(R * 0.185, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.30),
+        new THREE.SphereGeometry(R * 0.196, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.22),
         lidMat
       );
       lid.name = 'soup_eye_lid';
-      lid.position.set(0, R * 0.022, R * 0.022);
-      lid.scale.set(1, 1, 0.62);
+      lid.position.set(0, R * 0.014, R * 0.004);
+      lid.scale.set(1, 1, 0.46);
       lid.castShadow = true;
       eye.add(lid);
 
-      // A soft brow stroke above the lid — flat, calm, not angled into a V (which
-      // would read as annoyed rather than unsettling-calm).
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.019, R * 0.16, 4, 8), browMat);
+      // ── THE BROW WAS RENDERING AND INVISIBLE. `docs/LESSONS.md` §1, nineteenth ──
+      // It was parented INSIDE the eye group at `z = 0.036R` while the sclera in
+      // front of it reached `0.113R` — so it sat behind the eyeball and inside the
+      // bowl wall. Read the before crop: there is no brow on either eye, and the
+      // file has described one for three rounds.
+      //
+      // It is now placed on the BOWL'S OWN SURFACE, above the eye, by the same
+      // `bowlSurface` call everything else here uses — so it is on the wall by
+      // construction rather than at a remembered offset from something else.
+      const browPt = bowlSurface(sx * EYE_THETA * 0.98, EYE_H + 0.105);
+      const browOut = new THREE.Vector3(browPt.pos.x, 0, browPt.pos.z).normalize();
+      const browG = new THREE.Group();
+      faceBasis(browG, browPt.pos.clone().addScaledVector(browOut, R * 0.012), browOut);
+      face.add(browG);
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.022, R * 0.185, 4, 8), browMat);
       brow.name = 'soup_brow';
-      brow.rotation.z = Math.PI / 2 + sx * 0.05;
-      brow.position.set(0, R * 0.165, R * 0.036);
+      // Flat, not angled into a V — a V reads as annoyed, and soup is the serene
+      // one. The tiny `sx` tilt lifts the OUTER end, which is calm/knowing; the
+      // inner-end lift is the angry direction (verified on egg's own crease note).
+      brow.rotation.z = Math.PI / 2 + sx * 0.10;
       brow.castShadow = true;
-      eye.add(brow);
+      browG.add(brow);
     }
 
-    // A small, serene mouth. A fresh independent art director was blunt: "no mouth or
-    // brows — just dot-eyes on a stalk. That's the single biggest appeal gap," and the
-    // brief explicitly authorises dropping the original no-mouth spec since it measurably
-    // costs quality. Kept true to the personality doc's intent, though: a thin, nearly
-    // flat closed curve with just a hint of an upturn at the ends — calm and knowing
-    // rather than a grin — so the unsettling-patient read from the eyes/lids survives.
-    // Sits centred (theta=0) below the eyes, still inside the wide plateau (the
-    // profile holds full width from h=0.55) rather than down in the narrower
-    // ramp-up zone below it, so mouth and eyes read as one continuous face on one
-    // continuous wide wall.
-    const MOUTH_H = 0.48;
+    // ── THE MOUTH: AN OPENING, NOT A STROKE ─────────────────────────────────────
+    // WAS a `TorusGeometry` arc, 0.17R wide, 0.017R thick, in flat `#343A41`. Two
+    // separate failures, both visible in the before crop: it is ~40% of the width
+    // it needs next to 0.41R eyes, and it is a painted curve with no interior — the
+    // exact construction `docs/DECISIONS-FOR-URI.md` §42 names as the cast-wide
+    // defect ("a mouth with an interior value step so it reads as an opening rather
+    // than a painted curve").
+    //
+    // Three parts, and the middle one is the whole point:
+    //   cavity  #1E1512  luma 0.089   the opening, sunk INTO the wall
+    //   throat  #B0574C  luma 0.412   the interior, a 0.32 step behind the lip
+    //   lip     the bowl's own shade  a soft rim so the opening has an edge
+    // `calm is an expression, not an absence` — it is a small, slightly open,
+    // patient mouth, not a grin and not a gasp.
+    // ── 0.46 -> 0.365, AND WIDER THAN IT IS TALL ────────────────────────────────
+    // At 0.46 the opening sits directly under the eyes at nose height and comes out
+    // ROUND, and rendered it reads as a NOSTRIL, not a mouth
+    // (`shots/ch/soup/after/crop_face.png`, first pass — one small round hole in the
+    // middle of the face). Two changes, both about read rather than taste: drop it
+    // to 0.365 so there is a cheek between it and the eyes, and make it 2.0x wider
+    // than tall. A round hole is a nostril at any size; a wide flattened one is a
+    // mouth at any size.
+    const MOUTH_H = 0.365;
     const mouthPt = bowlSurface(0, MOUTH_H);
     const mouthOutward = new THREE.Vector3(mouthPt.pos.x, 0, mouthPt.pos.z).normalize();
     const mouth = new THREE.Group();
-    mouth.position.copy(mouthPt.pos).addScaledVector(mouthOutward, R * 0.028);
-    mouth.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthOutward);
+    mouth.name = 'soup_mouth';
+    faceBasis(mouth, mouthPt.pos.clone().addScaledVector(mouthOutward, R * 0.004), mouthOutward);
     face.add(mouth);
 
-    const mouthMat = toonMat({ color: '#343A41', roughness: 0.4 }); // groups with the (now darker) iris/brow, not lip-pink
-    const mouthLine = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.085, R * 0.017, 8, 16, Math.PI * 0.55),
-      mouthMat
-    );
-    mouthLine.name = 'soup_mouth';
-    mouthLine.rotation.z = Math.PI * 1.225; // a shallow, almost-flat arc — serene, not a grin
-    mouthLine.castShadow = true;
-    mouth.add(mouthLine);
+    const lipMat = toonMat({ color: '#9C8E77', roughness: 0.55 });
+    const cavityMat = toonMat({ color: '#1E1512', roughness: 0.72 });
+    const throatMat = toonMat({ color: '#B0574C', roughness: 0.6 });
+
+    // The lip: a squashed ring standing just proud of the wall, so the opening reads
+    // as a hole in a surface instead of a decal floating on one.
+    const lip = new THREE.Mesh(new THREE.TorusGeometry(R * 0.150, R * 0.026, 8, 24), lipMat);
+    lip.name = 'soup_mouth_lip';
+    lip.scale.set(1, 0.50, 0.60);
+    lip.position.z = R * 0.010;
+    lip.castShadow = true;
+    mouth.add(lip);
+
+    const cavity = new THREE.Mesh(new THREE.SphereGeometry(R * 0.152, 16, 12), cavityMat);
+    cavity.name = 'soup_mouth_cavity';
+    cavity.scale.set(1, 0.48, 0.32);
+    cavity.position.z = -R * 0.006;
+    mouth.add(cavity);
+
+    // ── THE THROAT WAS RENDERING AND INVISIBLE. `docs/LESSONS.md` §1, twentieth ──
+    // First pass put it at `z = -0.004R` inside a cavity ellipsoid whose front face
+    // at that height reaches `+0.034R`, so the whole interior step was sealed inside
+    // the shape it was supposed to step against. The mouth came back as one flat
+    // near-black hole — i.e. the exact "painted curve with no interior" the spec is
+    // written to eliminate, with an extra mesh paying for nothing.
+    //
+    // It has to POKE THROUGH: the front of this ellipsoid reaches `0.014R + 0.085R *
+    // 0.40 = 0.048R`, comfortably past the cavity's `0.034R` at the same height. So
+    // the lower third of the opening is warm interior and the rest is near-black,
+    // which is the value step — cavity 0.089, throat 0.412, a 0.32 break INSIDE the
+    // mouth's own outline.
+    const throat = new THREE.Mesh(new THREE.SphereGeometry(R * 0.100, 14, 12), throatMat);
+    throat.name = 'soup_mouth_throat';
+    throat.scale.set(1, 0.40, 0.40);
+    throat.position.set(0, -R * 0.036, R * 0.014);
+    throat.userData.noOutline = true;
+    mouth.add(throat);
   }
 
   /**
@@ -697,7 +1105,11 @@ export class SoupCharacter extends BaseCharacter {
     handle.castShadow = true;
     ladle.add(handle);
 
-    const bowlMat = glossyMat({ color: '#C7CDD4', roughness: 0.3, metalness: 0.4 });
+    // `#C7CDD4` (luma 0.797) -> `#9AA3AC` (0.629). Steel that pale is a third
+    // near-white area on the cast's worst near-white offender, and a ladle bowl is a
+    // shadowed concave surface — it has no business being brighter than the ceramic
+    // it hangs beside. Read as metal by its `metalness`, not by its albedo.
+    const bowlMat = glossyMat({ color: '#9AA3AC', roughness: 0.34, metalness: 0.4 });
     const scoop = new THREE.Mesh(new THREE.SphereGeometry(handRadius * 0.5, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), bowlMat);
     scoop.name = 'soup_ladle_scoop';
     scoop.position.set(0, -handRadius * 1.55, 0);
@@ -720,157 +1132,252 @@ export class SoupCharacter extends BaseCharacter {
   }
 
   /**
-   * Dresses the torso as a simple vendor apron: a contrasting rust-trimmed bib over
-   * the pale ceramic limb colour, matching the "contrasting costume colours" note
-   * from the reference bar. There is no `dressTorso` helper on the shared rig, so
-   * the apron is sized against the torso's own known geometry — `rig.ts` builds the
-   * torso as a tapered sphere of half-width `(shoulderWidth*1.18)*0.5` at its
-   * equator, scaled by a taper factor that peaks at ~1.123 around the vertical
-   * midpoint — with a safety margin so the apron sits proud rather than sinking
-   * into that taper at any point.
+   * ── THE POT STAND — the mass Uri's *"limbs disattached"* was missing ─────────
+   *
+   * WAS `dressTorsoAsSoup()`: a rust cylinder sash of radius `torsoHalfWidthMid *
+   * 1.16` with two flat caps, described as "a simple vendor apron". Rendered at the
+   * lobby camera it is a **tyre**, and worse than decorative — it is 0.55 m in
+   * radius with a flat underside, overhanging the 0.35 m the torso has left at the
+   * hip line, so it visually amputates the lower body. Read
+   * `shots/ch/soup/before/crop_legs.png`: below the sash there is *background*, and
+   * two free-standing leg columns beside it.
+   *
+   * The real defect underneath was arithmetic and it is the same one at both joints:
+   *
+   *   shoulder line   torso half-width 0.340 m   arm inner wall 0.533 m   gap 0.19 m
+   *   hip line        torso half-width 0.000 m   thigh inner wall 0.423 m (the rig's
+   *                   tapered sphere ENDS at the hip line, and it ends as a POLE)
+   *
+   * `rig.ts:pelvisScale` already records that the pelvis mass is not the fix — it is
+   * 0.33% of the lobby silhouette and moved **zero** of 22 leg-attachment
+   * measurements. It cannot be: it spans the hip TOPS, and the hole is between the
+   * hips and the body ABOVE them.
+   *
+   * So this replaces the sash with a body: a lathed stoneware pot stand running from
+   * below the hip line to the neck, whose radius is solved AT each joint's own
+   * height to swallow the inner wall of the limb that starts there. It is not a
+   * costume choice — it is the geometry that makes the arms and legs attached at
+   * every camera angle, which is the standard `CLAUDE.md` sets for this defect class
+   * ("fix the GEOMETRY, not the appearance at one pitch"). It also happens to be the
+   * most on-brief shape available: a heavy vessel sitting on a heavy stand.
+   *
+   * The near-black band that carried part of the dark rung moves onto the stand's
+   * lower flare, so no dark AREA is lost — `RIM_TRIM`'s note above is explicit that
+   * a dark rung has to carry area, not just value.
    */
-  private dressTorsoAsSoup(): void {
+  private buildPotStand(): void {
     // Read off the rig, never hand-mirrored: body proportions come from an
     // archetype (`bodies.ts`) now, so a hardcoded copy of a rig constant goes
     // silently wrong the moment the archetype changes.
-    const tw = this.rig.metrics.torsoWidth;
-    const torsoH = this.rig.metrics.torsoHeight;
-    const taperMid = 0.86 + 0.30 * Math.sin(0.5 * Math.PI * 0.85); // rig.ts's taper at t=0.5
-    const torsoHalfWidthMid = tw * 0.5 * taperMid;
-    const beltRadius = torsoHalfWidthMid * 1.16;
-    const beltY = torsoH * 0.48;
+    const m = this.rig.metrics;
+    const torsoH = m.torsoHeight;
 
-    const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });
-    const sash = new THREE.Mesh(new THREE.CylinderGeometry(beltRadius, beltRadius * 1.05, torsoH * 0.24, 24, 1, true), trimMat);
-    sash.name = 'soup_torso_sash';
-    sash.position.y = beltY;
-    sash.castShadow = true;
-    sash.receiveShadow = true;
-    this.rig.joints.torso.add(sash);
-    for (const dy of [-torsoH * 0.12, torsoH * 0.12]) {
-      const rFrac = dy < 0 ? 1.05 : 1.0;
-      const cap = new THREE.Mesh(new THREE.CircleGeometry(beltRadius * rFrac, 24), trimMat);
-      cap.name = 'soup_torso_sash_cap__no_outline';
-      cap.userData.noOutline = true;
-      cap.rotation.x = -Math.PI / 2;
-      cap.position.y = beltY + dy;
-      this.rig.joints.torso.add(cap);
-    }
+    // Each radius is SOLVED from the joint it has to swallow, never picked.
+    //  * `rShoulder`: the upper arm's tube is `armRadius * 0.72` at its top (see
+    //    `dressLimbs`), so reaching `shoulderWidth - armRadius * 0.45` puts the
+    //    stand's wall 0.27 of a tube-radius inside the arm. Overlap, not tangency.
+    //  * `rHip`: the thigh's top radius is `legRadius`, so `stanceWidth * 0.98`
+    //    buries the thigh's inner half completely.
+    const rShoulder = m.shoulderWidth - m.armRadius * 0.45;
+    const rHip = m.stanceWidth * 0.98;
+    const rBelly = Math.max(rShoulder, rHip) * 1.06;
+    const rNeck = Math.max(m.neckRadius * 1.30, m.torsoWidth * 0.16);
+    // How far the stand's skirt drops BELOW the hip line. Capped at a third of the
+    // thigh, or the leg disappears into the body and the character loses its legs
+    // the way `egg.ts` lost its ovoid — the trade `docs/DECISIONS-FOR-URI.md` §40
+    // names as "the detail added to signal the subject destroyed the silhouette".
+    const yBase = -m.thighLength * 0.34;
+
+    const prof: Array<[r: number, y: number]> = [
+      [0.00, yBase - m.legRadius * 0.20],
+      [rHip * 0.42, yBase - m.legRadius * 0.14],
+      [rHip * 0.78, yBase],
+      [rHip * 0.95, yBase * 0.45],
+      [rHip, 0],
+      [rBelly * 0.985, torsoH * 0.22],
+      [rBelly, torsoH * 0.46],
+      [rShoulder * 1.03, torsoH * 0.68],
+      [rShoulder, m.shoulderY],
+      [rShoulder * 0.80, torsoH * 0.88],
+      [rNeck * 1.25, torsoH * 0.97],
+      [rNeck, torsoH * 1.02],
+      [0.00, torsoH * 1.05],
+    ];
+    /** Linear interpolation over the stand's own profile — the one place anything
+     *  is allowed to ask "how wide is the body at height y", so an accessory can
+     *  never be placed against a remembered number. Same principle as
+     *  `bowlSurface` above and `localBounds` in `appendages.ts`. */
+    this.standRadiusAt = (y: number): number => {
+      if (y <= prof[0][1]) return prof[0][0];
+      for (let i = 0; i < prof.length - 1; i++) {
+        const [r0, y0] = prof[i], [r1, y1] = prof[i + 1];
+        if (y >= y0 && y <= y1) return y1 > y0 ? r0 + (r1 - r0) * ((y - y0) / (y1 - y0)) : r1;
+      }
+      return prof[prof.length - 1][0];
+    };
+
+    // Lathe points run bottom -> top: `docs/LESSONS.md` §12 — reversed, the normals
+    // invert and the whole mass renders near-black. It bit six characters at once.
+    const stand = new THREE.Mesh(
+      new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 32),
+      toonMat({ color: GLAZE_GREY, roughness: 0.55 })
+    );
+    stand.name = 'soup_pot_stand';
+    // The rig's own torso is an ellipse in plan (`torsoDepth = torsoWidth * 0.88`),
+    // and a circular body would be 14% deeper than the cast's convention at the
+    // match camera's profile facing, where depth is the dimension that reaches the
+    // screen. Matched rather than left circular.
+    stand.scale.z = m.torsoDepth / m.torsoWidth;
+    stand.castShadow = true;
+    stand.receiveShadow = true;
+    this.rig.joints.torso.add(stand);
+
+    // ── The iron band ─────────────────────────────────────────────────────────
+    // The dark rung, relocated from the sash. It sits on the hip flare, which is
+    // where the stand is WIDEST in plan and therefore where a band buys the most
+    // pixels per unit of height — and it reads as the hoop on a stoneware crock.
+    //
+    // ⚠️ SIZED BY MEASUREMENT AFTER THE FIRST VERSION LOST THE DARK RUNG. At
+    // `legRadius * 0.70` tall this replaced a sash that was `torsoHeight * 0.24`
+    // tall at a 12% larger radius PLUS a flat bottom cap disc that the lobby
+    // camera sees almost face-on. Measured on `valuescan --mode chars`, soup's
+    // **p05 went 0.10 -> 0.18** and its range 0.847 -> 0.677 — the near-white end
+    // was fixed and the dark end went with it, which is the same trade recorded in
+    // the opposite direction at the top of this file. `RIM_TRIM`'s own note says
+    // it plainly: **a dark rung has to carry AREA.** So the band is now 2.6x
+    // taller and it is the crock's cast-iron FOOT rather than a hoop.
+    const bandA = -m.legRadius * 0.34, bandB = m.legRadius * 1.48;
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(this.standRadiusAt(bandB) * 1.022, this.standRadiusAt(bandA) * 1.022, bandB - bandA, 32, 1, true),
+      toonMat({ color: RIM_TRIM, roughness: 0.42 })
+    );
+    band.name = 'soup_stand_band';
+    band.position.y = (bandA + bandB) * 0.5;
+    band.scale.z = stand.scale.z;
+    band.castShadow = true;
+    band.receiveShadow = true;
+    this.rig.joints.torso.add(band);
   }
 
   /**
-   * Costume layer: a spare ladle worn on a diagonal back-sling (handle poking up
-   * past the shoulder — the silhouette-breaking element), a tied napkin bib
-   * layered above the existing apron sash, and a bright ceramic glaze-highlight
-   * streak climbing the bowl's own belly — the "glossy specular rim" for
-   * ceramic the material-fidelity note calls for by name.
+   * Costume layer over the pot stand: a cook's apron panel that follows the stand's
+   * own lathe profile, and the diagonal shoulder strap that carries the spare ladle.
+   *
+   * ── TWO THINGS BUILT HERE WERE REMOVED, BOTH FOR MEASURED REASONS ───────────
+   *
+   * 1. THE CHEVRON BIB. An extruded `Shape` with a point at the top, sitting on a
+   *    flat plane at `z = shoulderWidth * 0.60`. Rendered at the lobby camera it is
+   *    a white ARROW on the chest — a flat plate standing off a curved body, at
+   *    `#E2DCCF` (luma 0.863), which made it the second-brightest large area on a
+   *    character already measured as the cast's worst near-white offender. Cloth on
+   *    a vessel has to follow the vessel; this is now a partial LATHE of the stand's
+   *    own profile, so it wraps.
+   *
+   * 2. THE GLAZE HIGHLIGHT — a `#FFFCF5` tube at `roughness 0.06` climbing the
+   *    bowl. It was authored as "the photographed ceramic specular pop", and a
+   *    painted-on specular does not behave like one: it does not move with the
+   *    light, it renders at a FIXED near-white regardless of facing, and at the
+   *    lobby camera it reads as a scratch or a seam down the bowl, not as gloss.
+   *    It also broke the one rule `rules.ts` sets for this character's face — the
+   *    sclera has to be the brightest value on the model, and a `#FFFCF5` stripe on
+   *    a large surface outranks any eye. Deleted rather than dimmed: the bowl's
+   *    `glossyMat` at `roughness 0.25` already produces a real specular that tracks
+   *    the key light, which is what the material note was actually asking for.
    */
-  private buildAccessories(R: number, bowlSurface: (theta: number, hFrac: number) => { pos: THREE.Vector3; normal: THREE.Vector3 }): void {
-    const head = this.rig.joints.head;
-    const shoulderWidth = this.rig.metrics.shoulderWidth;
-    const torsoH = this.rig.metrics.torsoHeight;
+  private buildAccessories(): void {
+    const m = this.rig.metrics;
+    const shoulderWidth = m.shoulderWidth;
+    const torsoH = m.torsoHeight;
 
-    // ── Napkin bib ────────────────────────────────────────────────────────────
-    // A tied cloth bib hanging from the neck over the chest, layered above the
-    // sash built in `dressTorsoAsSoup` so the body reads as dressed in two
-    // garment pieces rather than one flat colour — reinforcing the exact
-    // "garment, not paint-on-a-blob" read the critic already praised.
-    const bibMat = toonMat({ color: BIB, roughness: 0.62 });
-    const bibTrimMat = toonMat({ color: RIM_TRIM, roughness: 0.42 });
-    const bTopY = torsoH * 0.94, bBotY = torsoH * 0.42;
-    const bHalfW = shoulderWidth * 0.30;
-    const midY = (bTopY + bBotY) / 2;
-    const bibShapeAt = (scale: number): THREE.Shape => {
-      const sc = (y: number) => midY + (y - midY) * scale;
-      const s = new THREE.Shape();
-      s.moveTo(0, sc(bTopY));
-      s.lineTo(bHalfW * scale * 0.35, sc(bTopY - (bTopY - bBotY) * 0.12));
-      s.lineTo(bHalfW * scale, sc(bBotY + (bTopY - bBotY) * 0.22));
-      s.quadraticCurveTo(0, sc(bBotY - (bTopY - bBotY) * 0.12), -bHalfW * scale, sc(bBotY + (bTopY - bBotY) * 0.22));
-      s.lineTo(-bHalfW * scale * 0.35, sc(bTopY - (bTopY - bBotY) * 0.12));
-      s.lineTo(0, sc(bTopY));
-      return s;
-    };
-    const bibDepth = shoulderWidth * 0.05;
-    const bibOuter = new THREE.Mesh(
-      new THREE.ExtrudeGeometry(bibShapeAt(1.0), { depth: bibDepth, bevelEnabled: true, bevelThickness: bibDepth * 0.3, bevelSize: bibDepth * 0.3, bevelSegments: 2, curveSegments: 16 }),
-      bibTrimMat
+    // ── The apron ─────────────────────────────────────────────────────────────
+    // A partial lathe over the front arc of the pot stand at 1.035 of its own
+    // radius, so it is a garment ON the body rather than a plate NEXT TO it.
+    // `LatheGeometry`'s phi starts at +Z (`vertex.x = r*sin(phi)`, `z = r*cos(phi)`),
+    // which is `types.ts` convention 2's facing direction, so a symmetric span about
+    // 0 is a front panel with no further maths.
+    // The apron starts ABOVE the stand's iron band rather than over it — the band is
+    // this character's dark rung and the apron is the second-lightest large area on
+    // it, so overlapping them spends the rung to no purpose.
+    const apronTop = torsoH * 0.76, apronBot = m.legRadius * 1.40;
+    const apronPts: THREE.Vector2[] = [];
+    for (let i = 0; i <= 10; i++) {
+      const y = apronBot + (apronTop - apronBot) * (i / 10);
+      apronPts.push(new THREE.Vector2(this.standRadiusAt(y) * 1.035, y));
+    }
+    const apron = new THREE.Mesh(
+      new THREE.LatheGeometry(apronPts, 20, -Math.PI * 0.36, Math.PI * 0.72),
+      toonMat({ color: BIB, roughness: 0.68, doubleSide: true })
     );
-    bibOuter.name = 'soup_bib_trim';
-    bibOuter.position.z = shoulderWidth * 0.60;
-    bibOuter.castShadow = true;
-    bibOuter.receiveShadow = true;
-    this.rig.joints.torso.add(bibOuter);
+    apron.name = 'soup_apron__no_outline';
+    // A thin open shell has no interior, so an inverted-hull outline on it renders
+    // as a dark slab rather than an edge — `egg.ts:hood` records the same trade.
+    apron.userData.noOutline = true;
+    apron.scale.z = m.torsoDepth / m.torsoWidth;
+    apron.castShadow = true;
+    apron.receiveShadow = true;
+    this.rig.joints.torso.add(apron);
 
-    const innerDepth = bibDepth * 0.6;
-    const bibInner = new THREE.Mesh(
-      new THREE.ExtrudeGeometry(bibShapeAt(0.80), { depth: innerDepth, bevelEnabled: true, bevelThickness: innerDepth * 0.3, bevelSize: innerDepth * 0.3, bevelSegments: 2, curveSegments: 16 }),
-      bibMat
+    // The waist tie: one dark horizontal line across the apron, which is what makes
+    // it read as tied on rather than painted. Sits at the apron's own top edge.
+    const tieY = apronTop * 0.96;
+    const tie = new THREE.Mesh(
+      new THREE.TorusGeometry(this.standRadiusAt(tieY) * 1.045, m.legRadius * 0.085, 8, 26, Math.PI * 0.84),
+      toonMat({ color: SLING_DARK, roughness: 0.6 })
     );
-    bibInner.name = 'soup_bib';
-    bibInner.position.z = shoulderWidth * 0.60 + bibDepth;
-    bibInner.castShadow = true;
-    bibInner.receiveShadow = true;
-    this.rig.joints.torso.add(bibInner);
-
-    const tie = new THREE.Mesh(new THREE.CapsuleGeometry(shoulderWidth * 0.018, shoulderWidth * 0.42, 4, 8), bibTrimMat);
-    tie.name = 'soup_bib_tie';
-    tie.rotation.z = Math.PI / 2;
-    tie.position.set(0, bTopY + shoulderWidth * 0.02, shoulderWidth * 0.44);
+    tie.name = 'soup_apron_tie';
+    tie.rotation.set(Math.PI * 0.5, 0, Math.PI * 0.5 - Math.PI * 0.42);
+    tie.position.y = tieY;
+    tie.scale.y = m.torsoDepth / m.torsoWidth;
     tie.castShadow = true;
     this.rig.joints.torso.add(tie);
 
     // ── Back-sling ladle ──────────────────────────────────────────────────────
-    // Placement rule: the rig's thighs hang straight DOWN from y=0 in this same
-    // torso-local frame, so the sling's low end stays at y ≥ torsoH*0.28 —
-    // comfortably above the hip line, clear of the cast's thickest legs.
+    // Placement is now solved against `standRadiusAt` rather than against
+    // `shoulderWidth` fractions. Under the old numbers the strap's low end sat at
+    // radius 0.364 while the body it was supposed to lie on was 0.495 wide there —
+    // i.e. the strap ran INSIDE the torso and only its high end was ever visible,
+    // and the mini ladle it carries surfaced beside the hip looking like a floating
+    // trinket. `docs/LESSONS.md` §1 in the cheapest possible form: a hand-computed
+    // offset against a mass that moved.
     const slingMat = toonMat({ color: SLING, roughness: 0.76 });
-    const shoulderPt = new THREE.Vector3(shoulderWidth * 0.48, torsoH * 0.97, -shoulderWidth * 0.18);
-    const hipPt = new THREE.Vector3(-shoulderWidth * 0.40, torsoH * 0.30, -shoulderWidth * 0.55);
-    const sling = strapArc(shoulderPt, hipPt, new THREE.Vector3(shoulderWidth * 0.05, 0, -shoulderWidth * 0.30), shoulderWidth * 0.06, slingMat);
+    const onStand = (angle: number, y: number, out: number): THREE.Vector3 => {
+      const r = this.standRadiusAt(y) * out;
+      return new THREE.Vector3(Math.sin(angle) * r, y, Math.cos(angle) * r * (m.torsoDepth / m.torsoWidth));
+    };
+    // Both anchors pushed onto the BACK hemisphere (0.86PI / 1.24PI, where 0 is the
+    // facing direction). At 0.72PI the ladle's handle rose past the shoulder and
+    // crossed the bowl's cheek in the lobby render — a stray stick over the face,
+    // which is the one place on this character nothing is allowed to be.
+    const shoulderPt = onStand(Math.PI * 0.86, torsoH * 0.90, 1.05);
+    const hipPt = onStand(Math.PI * 1.24, torsoH * 0.26, 1.05);
+    const sling = strapArc(shoulderPt, hipPt, new THREE.Vector3(0, 0, -shoulderWidth * 0.10), m.legRadius * 0.30, slingMat);
     sling.name = 'soup_ladle_sling';
     this.rig.joints.torso.add(sling);
 
     const dir = shoulderPt.clone().sub(hipPt).normalize();
     const miniLadle = new THREE.Group();
     miniLadle.name = 'soup_sling_ladle';
-    miniLadle.position.copy(hipPt).addScaledVector(dir, shoulderWidth * 0.05);
+    // Seated at the SHOULDER end, not the hip end. The handle then rises past the
+    // shoulder line — a genuine silhouette event on the body — instead of the scoop
+    // poking out beside a knee, which is where the old hip-end seat put it.
+    miniLadle.position.copy(shoulderPt).addScaledVector(dir, -shoulderWidth * 0.06);
     miniLadle.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     this.rig.joints.torso.add(miniLadle);
 
     const handleMat = toonMat({ color: WOOD, roughness: 0.6 });
-    const handle = new THREE.Mesh(new THREE.CapsuleGeometry(shoulderWidth * 0.024, shoulderWidth * 0.55, 4, 8), handleMat);
+    const handle = new THREE.Mesh(new THREE.CapsuleGeometry(shoulderWidth * 0.026, shoulderWidth * 0.52, 4, 8), handleMat);
     handle.name = 'soup_sling_ladle_handle';
-    handle.position.y = shoulderWidth * 0.30;
+    handle.position.y = shoulderWidth * 0.28;
     handle.castShadow = true;
     miniLadle.add(handle);
 
-    const scoopMat = glossyMat({ color: '#C7CDD4', roughness: 0.3, metalness: 0.4 });
+    const scoopMat = glossyMat({ color: '#9AA3AC', roughness: 0.34, metalness: 0.4 });
     const scoop = new THREE.Mesh(new THREE.SphereGeometry(shoulderWidth * 0.13, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), scoopMat);
     scoop.name = 'soup_sling_ladle_scoop';
     scoop.rotation.x = Math.PI;
     scoop.position.y = -shoulderWidth * 0.04;
     scoop.castShadow = true;
     miniLadle.add(scoop);
-
-    // ── Glaze highlight ───────────────────────────────────────────────────────
-    // A bright, near-mirror streak climbing the bowl's own belly, off to one
-    // side clear of the face/rim-trim — the photographed ceramic specular pop
-    // the material-fidelity note calls for by name.
-    const stripeTheta = -1.15;
-    const stripePts: THREE.Vector3[] = [];
-    for (let i = 0; i <= 4; i++) {
-      const h = 0.30 + (i / 4) * 0.45;
-      const { pos, normal } = bowlSurface(stripeTheta, h);
-      const outward = new THREE.Vector3(normal.x, normal.y * 0.3, normal.z).normalize();
-      stripePts.push(pos.clone().addScaledVector(outward, R * 0.015));
-    }
-    const stripeCurve = new THREE.CatmullRomCurve3(stripePts);
-    const highlightMat = glossyMat({ color: '#FFFCF5', roughness: 0.06 });
-    const highlight = new THREE.Mesh(new THREE.TubeGeometry(stripeCurve, 16, R * 0.02, 8, false), highlightMat);
-    highlight.name = 'soup_glaze_highlight';
-    highlight.userData.noOutline = true;
-    head.add(highlight);
   }
 
   /**
@@ -890,11 +1397,39 @@ export class SoupCharacter extends BaseCharacter {
    * straight down over. That is the whole lesson of `appendages.ts`: the event has
    * to leave the mass HORIZONTALLY, from the mass's own widest point.
    *
-   * So: two ears on the bowl (a crock has handles; this one now looks like a crock
-   * rather than a mixing bowl), and the ladle that was buried on the back is stood
-   * up IN the broth with its handle out over the rim. All three are placed against
-   * `localBounds(head)` — the bowl as it was actually built by the lathe — rather
-   * than against a remembered radius.
+   * So: two handles on the bowl (a crock has handles; this one now looks like a
+   * crock rather than a mixing bowl), and the ladle that was buried on the back is
+   * stood up IN the broth with its handle out over the rim. All three are placed
+   * against `localBounds(head)` — the bowl as it was actually built by the lathe —
+   * rather than against a remembered radius.
+   *
+   * ── 🚨 AND THE THING ABOVE CALLED "EARS" WAS BUILT AS EARS AND READ AS EARS ──
+   * `docs/DECISIONS-FOR-URI.md` §40/§41: **a pointed or looped mass either side of
+   * a head reads as an ear or a horn, and it overrides what the shape is made of.**
+   * Five for five across the cast — burrito's torn foil (*"looks a bit like a
+   * goat"*), egg's shell shards (*"the ears don't make sense"*), hamburger's
+   * lettuce, lollipop's cellophane petals (*horns*), pizza's cheese strands.
+   *
+   * Soup's were the literal case: two `loop()` torus arcs of radius `0.46 * rBowl`,
+   * mounted at `height01: 0.90` — the TOP of the mass — at azimuth exactly ±PI/2,
+   * and then tilted UP by `+0.45` on Y specifically to get them clear of the rim.
+   * A large curved mass either side of a head, at the top, angled up and out, is a
+   * rabbit. `shots/ch/soup/before/lobby_yaw35.png` is unambiguous about it.
+   *
+   * The fix is RE-SHAPE, which is the option §40 lists alongside re-placing. Ears
+   * are TALL AND NARROW; a casserole lug is WIDE AND FLAT. So these are now flat
+   * horizontal tabs — 1.9x wider than they are thick, sitting level at the bowl's
+   * shoulder rather than climbing off its rim — which is also what a real soup crock
+   * has. The azimuth is deliberately KEPT at ±PI/2: that is where a vessel's handles
+   * belong, and the ear read was never about the azimuth, it was about a tall looped
+   * silhouette. A flat tab cannot make that read at any position.
+   *
+   * ⚠️ What this costs, stated rather than discovered later: the handles were
+   * already contributing **0.0000 to hull deficiency at four decimal places** — the
+   * measurement recorded below — so there is nothing to lose there. But `appendages.ts`
+   * is explicit that ±PI/2 is the OCCLUDED pair at the shipped spawn facing, so
+   * these still register zero appendages at the match camera. The standing ladle and
+   * the spoon carry that number alone, as they already did.
    */
   private buildSilhouetteEvents(): void {
     const head = this.rig.joints.head;
@@ -902,30 +1437,57 @@ export class SoupCharacter extends BaseCharacter {
     const size = box.getSize(new THREE.Vector3());
     const rBowl = Math.max(size.x, size.z) * 0.5;
 
-    // ── Crock ears ────────────────────────────────────────────────────────────
-    // Glazed in the bowl's own ceramic with the rim band's rust on the inner face,
-    // so they read as part of the vessel rather than as bolted-on props.
-    // ROUND 2: `height01` 0.66 -> 0.94 and half again the size. At 0.66 the ears
-    // sat on the bowl's waist, and at the shipped facing the bowl's own rim
-    // projects DOWN over everything below it — measured, soup came back with one
-    // appendage and both ears contributed none of it. At the rim there is nothing
-    // above them left to be occluded by. See the azimuth note in `appendages.ts`.
-    const earMat = toonMat({ color: CERAMIC, roughness: 0.34 });
+    // ── Crock LUGS — flat casserole tabs, not looped ears ─────────────────────
+    // Glazed in the bowl's own ceramic so they read as part of the vessel rather
+    // than as bolted-on props.
+    //
+    // WAS: `loop(earMat, { radius: rBowl * 0.46, tube: rBowl * 0.12, arc: 1.15PI })`
+    // at `height01: 0.90`, aimed `out + (0, 0.45, 0)`. Two recorded rounds of tuning
+    // are kept here because the reasoning behind them is sound and the OBJECTIVE was
+    // wrong — they were optimised for hull deficiency and nobody looked at the shape:
+    //
+    //   ROUND 2: `height01` 0.66 -> 0.94 and half again the size. At 0.66 the ears
+    //   sat on the bowl's waist, and at the shipped facing the bowl's own rim
+    //   projects DOWN over everything below it — measured, soup came back with one
+    //   appendage and both ears contributed none of it.
+    //
+    //   ROUND 5, and the instrument caught this one rather than the eye: changing
+    //   the ear radius by a quarter (0.34 -> 0.42 of the bowl) moved soup's hull
+    //   deficiency by **0.0000 at both facings, to four decimals**. Something that
+    //   does not move when everything around it does is not contributing at all
+    //   (`docs/LESSONS.md` §5) ... Tilting them up off the rim is what makes them
+    //   shape rather than decoration.
+    //
+    // Both notes are about a quantity that was already dead (0.0000), and the tilt
+    // ROUND 5 prescribed is precisely what turned them into ears. See this method's
+    // docblock. A lug is authored on the two axes an ear is not: WIDE tangentially
+    // (0.46 rBowl), FLAT vertically (0.155 rBowl — a 3.0 : 1 ratio), and LEVEL.
+    //
+    // `aim()` sets +Y along the outward direction and derives +X as `worldUp x out`,
+    // so with a level `out` the local axes are exactly (tangential-horizontal,
+    // outward, vertical) — the box below is authored in that frame directly.
+    const lugMat = toonMat({ color: CERAMIC, roughness: 0.34 });
     for (const side of [-1, 1] as const) {
-      // ROUND 5, and the instrument caught this one rather than the eye: changing
-      // the ear radius by a quarter (0.34 -> 0.42 of the bowl) moved soup's hull
-      // deficiency by **0.0000 at both facings, to four decimals**. Something that
-      // does not move when everything around it does is not contributing at all
-      // (`docs/LESSONS.md` §5) — the ears were hugging the bowl's outer wall, and
-      // at 58 deg the bowl's own rim projects down over its wall, so they were
-      // inside the silhouette however big they got. Tilting them up off the rim is
-      // what makes them shape rather than decoration.
-      const { at, out } = massAnchor(head, box, { azimuth: side * Math.PI * 0.5, height01: 0.90, inset: 0.10 });
-      const ear = loop(earMat, { radius: rBowl * 0.46, tube: rBowl * 0.12, arc: Math.PI * 1.15 });
+      const { at, out } = massAnchor(head, box, { azimuth: side * Math.PI * 0.5, height01: 0.80, inset: 0.16 });
       const g = new THREE.Group();
-      g.name = 'soup_crock_ear';
-      aim(g, at, out.clone().add(new THREE.Vector3(0, 0.45, 0)).normalize());
-      g.add(ear);
+      g.name = 'soup_crock_lug';
+      // Level, and the horizontal component kept — no vertical term at all. That
+      // single change is what stops it being an ear.
+      aim(g, at, new THREE.Vector3(out.x, 0, out.z).normalize());
+      // 0.46 x 0.30 x 0.155 -> 0.52 x 0.34 x 0.165, still a 3.2 : 1 width-to-
+      // thickness ratio. The first pass read correctly (no ear) and read SMALL —
+      // at the lobby camera the tabs were two nubs rather than handles, which
+      // loses the "crock, not mixing bowl" cue the shape is here for.
+      const reach = rBowl * 0.34;
+      const lug = new THREE.Mesh(
+        roundedBox(rBowl * 0.52, reach, rBowl * 0.165, rBowl * 0.078, 3),
+        lugMat
+      );
+      lug.name = 'soup_crock_lug_tab';
+      lug.position.y = reach * 0.42;
+      lug.castShadow = true;
+      lug.receiveShadow = true;
+      g.add(lug);
       head.add(g);
     }
 
@@ -1033,8 +1595,22 @@ export class SoupCharacter extends BaseCharacter {
    * on legs.
    */
   private dressLimbs(): void {
-    const handleMat = glossyMat({ color: CERAMIC, roughness: 0.22 }); // same material as the bowl itself
-    const legMat = toonMat({ color: CERAMIC_SHADE, roughness: 0.48 }); // matte stoneware pedestal
+    // ── THE THREE-TONE READ THIS FILE HAS DESCRIBED FOR ROUNDS, NOW BUILT ───────
+    // WAS: `handleMat = CERAMIC` for both arms AND hands, `legMat = CERAMIC_SHADE`
+    // (which was LIGHTER than CERAMIC). So the whole limb set was one cream, on a
+    // cream bowl, on a cream torso — which is exactly the fusion `valuescan`
+    // measured as `torso|shoulderL` **dLcontact 0.0423**, a boundary step of four
+    // hundredths where the gate wants 0.10. A limb the same value as the thing it
+    // grows out of reads as detached however well it is attached, which is the
+    // finding that whole instrument exists for.
+    //
+    // `GLAZE_GREY`'s own note (above) records the intent — "grey sleeves, cream
+    // mitts, dark boots" — and `rules.ts` now states it as spec. Each tone below is
+    // one rung of the ladder at the top of this file.
+    const sleeveMat = glossyMat({ color: SLEEVE_GREY, roughness: 0.34 }); // upper arm — grey stoneware sleeve
+    const cuffMat = glossyMat({ color: CUFF_GREY, roughness: 0.38 });     // forearm — the darker rolled cuff
+    const mittMat = toonMat({ color: MITT_CREAM, roughness: 0.62 });      // cream cloth mitt
+    const legMat = toonMat({ color: LEG_STONE, roughness: 0.55 });        // dark stoneware post
     const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });
     const bootMat = toonMat({ color: BOOT_STONE, roughness: 0.7 });
 
@@ -1043,10 +1619,17 @@ export class SoupCharacter extends BaseCharacter {
         case 'upperArmL':
         case 'upperArmR': {
           const side = part === 'upperArmL' ? 1 : -1;
-          // Thinner than the rig's own arm radius and bowed hard outward — the
-          // point is to NOT read as a muscle/limb thickness at all, but as a
-          // moulded ceramic loop of roughly constant, modest thickness.
-          return buildHandleArc(size.len, size.radius * 0.60, side, 1.0, 0.10, handleMat);
+          // WAS: `radius * 0.60` constant, `bowOut 1.0`. A quadratic bezier whose
+          // control point is a FULL segment-length out to the side is not a bowed
+          // limb — it is a hook, and with the forearm hooking back the other way at
+          // -0.85 the pair rendered as a tentacle. `lobby_yaw35.png` before.
+          //
+          // 1.0 -> 0.42, and the segment now tapers 0.72 -> 0.60 of `armRadius` so
+          // it hands off to the forearm at exactly the forearm's own top radius.
+          // "A moulded loop of roughly constant thickness" was the old intent and it
+          // is what produced the visible step at the elbow: two constant-radius
+          // tubes at different constants cannot meet.
+          return buildHandleArc(size.len, size.radius * 0.72, size.radius * 0.60, side, 0.42, 0.10, sleeveMat);
         }
         case 'forearmL':
         case 'forearmR': {
@@ -1065,7 +1648,18 @@ export class SoupCharacter extends BaseCharacter {
           // sound and the result was not — whatever is covering these forearms is not
           // answered by the bow, and the next attempt should isolate the occluder with
           // an ID-buffer pass (`tools/tmp/islands.mjs`) before moving geometry again.
-          return buildHandleArc(size.len, size.radius * 0.52, side, -0.85, 0.12, handleMat, false);
+          //
+          // ── AND THAT WHOLE PARAGRAPH IS ABOUT THE WRONG QUANTITY ──────────────
+          // Every number in it is `delivered` at the MATCH camera. Uri's complaint
+          // is *"limbs disattached or intersecting with the body that causes weird
+          // shapes"*, at the LOBBY camera, and it is about SHAPE, not coverage. The
+          // bow is now -0.28 rather than -0.85: enough to keep the D-shaped handle
+          // read the design asked for, not enough to hook the forearm back inside
+          // the upper arm's own arc. Radii run 0.60 -> 0.46 of `armRadius`, starting
+          // exactly where the upper arm ended, so there is no step at the elbow.
+          // ⚠️ If `delivered` regresses at 58 degrees, the answer recorded above
+          // still stands: isolate the occluder before moving the bow again.
+          return buildHandleArc(size.len, size.radius * 0.60, size.radius * 0.46, side, -0.28, 0.22, cuffMat, false);
         }
         case 'handL':
         case 'handR': {
@@ -1092,18 +1686,28 @@ export class SoupCharacter extends BaseCharacter {
           // point where BOTH clear the 0.50 gate and soup passes idle for the first
           // time. `handRadius` itself is untouched because the ladle prop is sized
           // off it.
+          //
+          // The SIZE is kept exactly (`armRadius * 0.92 * 0.52 * 1.30`, measured, and
+          // the forearm's own tip radius is now 0.46 of `armRadius` which lands
+          // within 3% of the old 0.92*0.52) — only the MATERIAL changes, from the
+          // arm's cream to a cream CLOTH mitt against a grey sleeve. That is the one
+          // value break the old "one continuous loop of the bowl's own material"
+          // read could never have, and `rules.ts` names it: cream mitts.
           const forearmR = this.rig.metrics.armRadius * 0.92 * 0.52;
-          return buildHandleCap(forearmR * 1.30, handleMat);
+          return buildHandleCap(forearmR * 1.30, mittMat);
         }
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.0, size.radius * 0.94, legMat);
+          return taperedLimb(size.len, size.radius * 1.0, size.radius * 0.93, legMat);
         case 'shinL':
         case 'shinR':
-          // Same material, near-identical radius to the thigh — no taper break at
-          // the knee, so the leg reads as one short stub post, not two tube
-          // segments joined at a visible ball joint.
-          return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.88, legMat);
+          // Same material, and the shin's TOP radius is now exactly the thigh's
+          // BOTTOM radius (0.93). It was already written that way and it did not
+          // hold, because `taperedLimb` silently replaced the thigh's `rBot` with
+          // `len * 0.45` on any segment shorter than it is thick — see the fix in
+          // that function. So "no taper break at the knee" was true of the numbers
+          // passed in and false of the geometry that came out.
+          return taperedLimb(size.len, size.radius * 0.93, size.radius * 0.86, legMat);
         case 'footL':
         case 'footR':
           return buildWorkBoot(size.len, bootMat, trimMat, size.groundY);
