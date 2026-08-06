@@ -1949,3 +1949,46 @@ tuned against the current palette.
 Related and same cause: the trail's internal structure is ~25% short of the reference cloud's
 (L stdev 0.102 vs 0.137), and **a saturated red at this mean cannot carry a wider range** — so that
 gap is also downstream of the hue choice rather than fixable in the effect.
+
+---
+
+## 37. ✅ URI'S HAMBURGER REJECTS — all three corroborate a measurement already in hand
+
+> 1. *"It seems like the **legs are disconnected from the body**."*
+> 2. *"I don't understand what the **silver/grey element that is going in and out of the character**."*
+> 3. *"I think the **face is the worst part**. It looks **drawn lines and not actual face**."*
+
+**A human owner and a blind per-part critic reached the same conclusions from opposite directions.**
+That convergence is the strongest signal this project recognises, and it is worth recording that the
+instrument built last night *earned its keep on its first real test*.
+
+### 1. The legs — a known invisibility bug, recorded in the file's own comments
+
+`src/characters/hamburger.ts:387` already says: **`hipR` delivered 0.000 of a 4,697 px footprint.**
+The hips render **nothing**, so the legs have no visible attachment. `docs/LESSONS.md` §1 for the
+twentieth time — *"it isn't there" means it IS there and is INVISIBLE.* Uri saw the consequence of a
+number that was already written down and not acted on.
+
+### 2. The silver element is the SPATULA, and "in and out" is the diagnosis
+
+It is his held weapon (`rig.joints.handR`). **That he cannot tell what it is, is the finding.**
+*"Going in and out of the character"* means the blade is **intersecting the body geometry** — the
+same class as `LESSONS §1` case 8, where Sushi's correctly-sized blade spawned mid-torso and
+rendered as **two disconnected shards**. The per-part pass independently scored `prop` **3 vs 8.5**.
+
+### 3. The face — and the instrument had already named both the defect and the fix
+
+Per-part scores: `face-overall` **3.5 vs 9**, `eyes` **3 vs 8.5**. The measurement behind Uri's
+"drawn lines":
+
+> **Our eyes have 0% of pixels above 0.85 luma. The reference's two eye regions are 31.1% and 34.1%.
+> There is no white in our eyes at all** — the face carries two values total, orange bun and
+> near-black, so the largest, brightest, highest-contrast element of a reference face is *absent*.
+
+The fix, already specified: **open eyes** — a white sclera oval that becomes the brightest value on
+the face, a dark tapered pupil offset for gaze, and the existing black arc demoted from *being* the
+eye to being its upper lash line.
+
+**Routed to the live cast agent; hamburger only.** Uri is sending rejects for the rest of the cast
+soon, and **no other character gets a look pass until they arrive** — starting one now risks doing
+work he is about to reject by name.
