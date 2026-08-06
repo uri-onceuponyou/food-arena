@@ -1992,3 +1992,52 @@ eye to being its upper lash line.
 **Routed to the live cast agent; hamburger only.** Uri is sending rejects for the rest of the cast
 soon, and **no other character gets a look pass until they arrive** — starting one now risks doing
 work he is about to reject by name.
+
+---
+
+## 38. ✅ URI'S DONUT REJECTS — one symptom, TWO mechanisms, and an internal reference
+
+> *"Same issue with **legs detached from torso**. Same issue with **face**. It's **better than the
+> burger** — the eyes have more depth, but can be taken deeper, and the mouth is deeper than burger
+> but **still missing details**."*
+
+### 🚨 "Legs detached" is the same complaint on both characters and a DIFFERENT bug on each
+
+| | archetype | why it reads detached |
+|---|---|---|
+| **hamburger** | `STOUT` — *has* a torso | **`hipR` delivers 0.000 of a 4,697 px footprint.** The hip renders **nothing**. An invisibility bug. |
+| **donut** | `STUB` — **no torso at all** | There is genuinely **nothing between the limbs**; the chain sprouts from the ring's edge. A design consequence, not a bug. |
+
+**One fix would have been wrong for one of them.** `donut.ts:371` already records the STUB torso as a
+no-op, and `docs/LESSONS.md` §1 case 6 records the same empty group biting before — Water Bottle's
+strap anchored to `joints.torso`, which on a STUB body sits at the hips, drawing as a hook beside
+the waist.
+
+⚠️ Swapping donut off STUB is recorded as *"a supported one-line fix"* — **but it changes the
+silhouette Uri has just called better than the burger's**, and the file prices it at 0.17 m. So the
+first move is a visible **attachment mass** where limb meets ring, not an archetype swap.
+
+### 🎯 Donut's eyes are Hamburger's fix, and it is already in our own code
+
+Uri: *"the eyes have more depth."* **They do, and the reason is mechanical:**
+
+| | construction |
+|---|---|
+| **donut** | `SphereGeometry(R * 0.125)` at `roughness 0.25` — **real 3D geometry**, proud of the icing, catching a specular highlight |
+| **hamburger** | *"a small flattened arc… the torus"* — **strokes** |
+
+That is precisely *"drawn lines"* vs *"an actual face"*, and it means **the fix is to copy our own
+better character rather than invent one** — cheaper, lower risk, and it makes two characters speak
+one language. (Same pattern as `characterSelect` being home's reference in §31.)
+
+### But donut is not finished either, and the measurement says how much further
+
+Uri: *"can be taken deeper."* The per-part number: **our eyes have 0% of pixels above 0.85 luma
+against the reference's 31.1% and 34.1%.** Donut has a specular **dot**; the reference has a large
+white **sclera** as the brightest mass on the face. **A highlight is not a sclera.** The move is from
+*"a dark bead with a glint"* to *"a white eye with a dark pupil"*.
+
+**The mouth** — *"deeper than burger but still missing details"*: the per-part pass named it on
+hamburger as *"a flat dark shape with no lip thickness or interior value step."* A mouth needs an
+**interior** — a darker throat value behind the lip line — so it reads as an opening rather than a
+painted curve. Same principle as the eyes: **a value step INSIDE the silhouette.**
