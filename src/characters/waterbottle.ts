@@ -58,11 +58,13 @@
 import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
-import { PALETTE } from '../game/rules';
+// `PALETTE` is no longer imported: the face's dark is now this character's own
+// `CAP_DARK` rung rather than the shared ink, so nothing here reads the global.
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
-import { aim, blade as lidBlade, curl, knob, localBounds, loop, massAnchor, rod } from './appendages';
+// `rod` and `knob` went with the deleted flip nozzle — see `buildSilhouetteEvents`.
+import { aim, blade as lidBlade, curl, localBounds, loop, massAnchor } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -122,16 +124,32 @@ const LABEL_PALE = '#FFF6EC';       // the label's own wave stripe, and the smil
 const LABEL_TRIM = '#B8371A';       // trim rings on the label
 
 // ── Costume layer ────────────────────────────────────────────────────────────
-// A fresh independent art director named the missing costume/accessory layer as
-// the TOP gap in the whole cast: without one, characters read as "naked mascot
-// body with a themed head glued on" no matter how good the body sculpt is. A
-// crossbody sports strap with a pouch and a carabiner clip is this character's
-// silhouette-breaking item — it projects past the narrow bottle body the way a
-// cape or backpack does on the reference roster — plus a thin retainer cord
-// around the shoulder taper as a smaller "sports-cap strap" detail.
-const STRAP_FABRIC = '#2E7D5B';    // sporty webbing — a fresh hue not used elsewhere on this character
-const STRAP_TRIM = '#0C2418';      // near-black webbing trim, part of the same dark rung
-const CARABINER_METAL = '#B6BEC4'; // brushed aluminium — genuinely new metalness on this character
+//
+// ── 🚨 THE COSTUME LAYER WAS DELETED, AND THE RENDER IS WHY ──────────────────
+// This block used to carry three extra hues — `STRAP_FABRIC #2E7D5B` (forest
+// green webbing), `STRAP_TRIM #0C2418` and `CARABINER_METAL #B6BEC4` (bright
+// chrome) — dressing a neck collar, a small carry loop, a loop keeper and a
+// carabiner, plus a **chrome ring of radius 0.50R** in `buildSilhouetteEvents`.
+//
+// Rendered at the LOBBY camera (`charStage.ts`, pitch 20 — the camera Uri is
+// actually judging) and looked at, `shots/ch/waterbottle/before_lobby_yaw0.png`:
+// the chrome ring is as wide as the bottle, arcs across the upper shell at eye
+// height and **occludes the face at several yaws** (see `before_face.png`, where
+// it fills half the frame). At the match camera, `before_match58.png`, the ring
+// plus the orange straw make the whole figure read as a **kettle** — a chrome
+// handle over a spouted vessel. The green collar and green loop read as a rubber
+// band and a scrap.
+//
+// That is §40's finding on this character: **the detail added to signal the
+// subject destroyed the silhouette that signalled it better.** The bottle's own
+// lathe — grip waist, shoulder taper, long neck, cap — reads instantly and was
+// being buried under camping hardware.
+//
+// What is kept: a retainer collar and cord, both moved onto the character's own
+// dark rung (`CAP_DARK`) so they read as moulded plastic rings rather than as
+// two more materials, and one carry loop **moved onto the cap**, shrunk and
+// darkened. What is gone: the chrome, the green, the carabiner and the loop
+// keeper. Three constants deleted with them.
 
 // ── Bottle silhouette, in fractions of headRadius (R) ───────────────────────
 // A genuine surface-of-revolution profile (LatheGeometry), not a stretched sphere —
@@ -299,20 +317,54 @@ function ribbedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material
   return m;
 }
 
-/**
- * A worn strap: a curved tube from `from` to `to`, bowed out through a control
- * point offset by `bow` — the same bezier-tube technique `soup.ts`'s
- * `buildHandleArc` uses for its bowl-handle arms, reused here for costume
- * webbing that has to read as fabric draped over a body rather than a rigid rod.
- */
-function strapArc(from: THREE.Vector3, to: THREE.Vector3, bow: THREE.Vector3, radius: number, mat: THREE.Material): THREE.Mesh {
-  const mid = from.clone().add(to).multiplyScalar(0.5).add(bow);
-  const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
-  const m = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, radius, 8, false), mat);
-  m.castShadow = true;
-  m.receiveShadow = true;
-  return m;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// 🚨 `cuffedLimb` — A DARK JOINT COLLAR ON EVERY RIBBED SEGMENT. BUILT, MEASURED,
+//    REVERTED. DO NOT RE-TRY IT AT THIS SCALE.
+// ─────────────────────────────────────────────────────────────────────────────
+// The reasoning was sound and the result was not. `dressLimbs`'s block comment
+// records the problem — every limb segment on this character is ONE material, so
+// the whole body below the bottle is a single value and the part-vs-part
+// boundaries collapse — and it records two levers that failed because they moved a
+// whole PART: a Fresnel rim (-0.049 / -0.082 / -0.090) and a `WATER_DEEP` repaint.
+//
+// A `CAP_DARK` torus of tube `0.30 * rTop` at the top of each segment was supposed
+// to be boundary-LOCAL: a near-black step exactly where the metric samples,
+// leaving each part's median alone. **It is not local on a STUB body.** These
+// limbs are short and thick by archetype, so a 0.30-radius ring is a large share
+// of the segment's own pixels, and the collar became a repaint by another route.
+//
+// Measured, `git a80dd70` + this file, `valuescan --mode chars`, ss2/yaw90,
+// `dLcontact` (the per-pair contact-gated delta, from `chars.json` — NOT the
+// terminal's "tightest contacts" line, which prints whole-part `dL`):
+//
+//   pair                without collars   with collars    delta
+//   hipL|kneeL                   0.0981         0.0245   -0.0736   ← 19 floors
+//   kneeL|footL                  0.1585         0.1260   -0.0325
+//   handL|hipL                   0.0590         0.0303   -0.0287
+//   elbowL|handL                 0.1121         0.0849   -0.0272
+//   head|shoulderL               0.0889         0.0909   +0.0020   ← the target pair
+//   shoulderL|elbowL             0.0175         0.0212   +0.0037
+//
+// Four pairs worse, two flat, and **the pair it was built for moved +0.0020 — half
+// a 1/255 floor.** It also took the character's own median 0.53 -> 0.49 and
+// figure/ground `dL` 0.0766 -> 0.0442.
+//
+// And the render agrees, which is the part worth keeping: read
+// `shots/ch/waterbottle/after_lobby_yaw0.png` from the collared build — the ribbed
+// limbs plus eight black rings read as **stacks of black and blue discs**, which is
+// the identical defect this file already recorded for the HAND ("a stack of three
+// flat discs — a separate pile of bottle caps"). At 160 px of character the limbs
+// are ~8 px wide; a "thin" collar is 1-2 px and cannot be a value STEP, only a
+// tint. `docs/LESSONS.md` §6 — scale decides what is worth building.
+//
+// `head|shoulderL`'s real movement this round came from the head losing the chrome
+// ring, not from the collar: whole-part `dL` 0.0334 -> 0.2423 with the collars, and
+// the collars contributed 0.0020 of the contact number.
+
+// `strapArc` (a bezier webbing tube) lived here and had NO CALLER — the crossbody
+// strap it was written for was deleted rounds ago and the helper outlived it. Gone
+// now that the rest of the webbing has gone too, so nothing in this file implies a
+// fabric layer that no longer exists.
 
 /** A grip-ridge ring — the same "thin darker ring around a cylindrical wall" motif
  * the head's cap already uses, echoed here as the limb's cuff/joint accent. */
@@ -557,9 +609,15 @@ export class WaterBottleCharacter extends BaseCharacter {
     // shape on the roster, so the parts that are NOT the cylinder have to carry
     // the read — and a stepped spout with its lid flipped back is a shape only a
     // sports bottle has. It is also the character's only upward silhouette break.
+    // `capMat`, not `capRidgeMat`. As near-black `CAP_DARK` the spout was a hard
+    // black nub on top of the cap with an orange tube leaving it, and the pair read
+    // as a **pump dispenser** — the top of the character stopped saying "sports
+    // cap". In the mid navy it belongs to the cap it sits on, and the black is
+    // spent on the ridges and the finger loop instead, where it is a line rather
+    // than a mass.
     const spout = new THREE.Mesh(
       new THREE.LatheGeometry(SPOUT_PROFILE.map(([r, y]) => pt(r, y)), 20),
-      capRidgeMat
+      capMat
     );
     spout.name = 'waterbottle_spout';
     spout.castShadow = true;
@@ -791,46 +849,132 @@ export class WaterBottleCharacter extends BaseCharacter {
     // find, which put four of the eleven characters outside that test.
     const face = this.rig.joints.face;
     face.position.set(0, 0, 0);
-    const ink = PALETTE.ink;
 
     const EYE_THETA = 0.40;
-    const eyeMat = toonMat({ color: ink, roughness: 0.25 });
-    const browMat = toonMat({ color: CAP, roughness: 0.4 }); // ties the brows to the cap material
-    // The face sits on the transparent upper body with saturated blue water behind
-    // it, so ink eyes and a pale smile both hold their contrast; the previous
-    // placement had them over pale near-white label, where the smile vanished.
+
+    // ── THE EYE IS NOW THREE ELEMENTS, NOT ONE ────────────────────────────────
+    // What was here: ONE ink sphere plus a glint — the third rung of the ladder
+    // Uri reproduced without seeing any code (a flattened arc < a sphere with a
+    // specular < a sphere plus a glint mesh < an open eye). Rendered at the lobby
+    // camera it is two large black beads: `before_lobby_yaw0.png`.
+    //
+    // `rules.ts`'s rewritten `face:` spec and `docs/DECISIONS-FOR-URI.md` §42 both
+    // name the target and the measurement behind it: **0% of our eye pixels are
+    // above 0.85 luma against the reference's 31.1% and 34.1%** — our faces carry
+    // two values total. So: a white SCLERA as a bright mass (not a highlight), a
+    // dark pupil offset for gaze, and an explicit catchlight on top of the pupil.
+    //
+    // ⚠️ The sclera carries a small emissive lift on purpose. This is the one
+    // genuinely transmissive character in the cast; the face is mounted on the
+    // OUTER wall (offset along the surface normal, opaque material) exactly as the
+    // spec demands, but the eyes sit on the upper shell where the key can rake
+    // across rather than land, and a lit-only white measured as the brightest
+    // value is not the same claim as a white that IS the brightest value. 0.08 is
+    // deliberately below anything that would read as a glow.
+    const scleraMat = toonMat({
+      color: '#FFFFFF', roughness: 0.24, emissive: '#FFFFFF', emissiveIntensity: 0.08,
+    });
+    // The pupil is `CAP_DARK`, not `PALETTE.ink`: it is the character's OWN dark
+    // rung (the constant that already dresses the belt, boots and cap ridges), so
+    // the face costs the value ladder nothing — no sixth band, and the darkest
+    // thing on the character stays one colour.
+    // ⚠️ `rim: false` on the pupil, and `toon.ts`'s own option doc is explicit about
+    // why — "on by default; set false for flat decals AND EYES". The Fresnel term
+    // brightens grazing normals, which on a small dark sphere is its entire visible
+    // edge, so a rimmed pupil is a dark disc with a bright ring around it: the exact
+    // opposite of the value step this rebuild exists to create. (Not to be confused
+    // with `dressLimbs`'s rim warning — that one is about whole limb segments and is
+    // still in force; this is the same term working against the same goal in a second
+    // place.)
+    const pupilMat = toonMat({ color: CAP_DARK, roughness: 0.22, rim: false });
+    const browMat = toonMat({ color: CAP_DARK, roughness: 0.45, rim: false });
+
     for (const sx of [-1, 1] as const) {
       const { pos, normal } = shellSurface(sx * EYE_THETA, EYE_Y);
       const outward = new THREE.Vector3(normal.x, 0, normal.z).normalize();
       const eyeG = new THREE.Group();
-      eyeG.position.copy(pos).addScaledVector(outward, R * 0.02);
+      // 0.02R -> 0.032R off the wall. The sclera is a wider, flatter mass than the
+      // bead it replaces, so its rim has further to travel before it clears the
+      // shell's own curvature; at the old offset the outer edge grazed the wall.
+      eyeG.position.copy(pos).addScaledVector(outward, R * 0.032);
       eyeG.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
       face.add(eyeG);
 
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.155, 16, 14), eyeMat);
-      eye.scale.set(1, 1.05, 0.6);
-      eye.castShadow = true;
-      eyeG.add(eye);
+      const sclera = new THREE.Mesh(new THREE.SphereGeometry(R * 0.168, 18, 14), scleraMat);
+      sclera.name = 'waterbottle_sclera';
+      sclera.scale.set(1, 1.04, 0.52);
+      sclera.castShadow = true;
+      eyeG.add(sclera);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.04, 10, 8), flatMat('#ffffff'));
-      glint.position.set(-R * 0.038, R * 0.045, R * 0.075);
+      // GAZE. Both pupils are offset by the same LOCAL +x/-y, and the two eye
+      // frames differ only by a rotation about y, so the offset resolves to the
+      // same world direction on both sides — a pair looking one way, not two eyes
+      // each drifting outward. (Mirroring the offset is what produces cross-eyes;
+      // it is the easiest mistake in this construction and the one that reads
+      // worst at 95 px.)
+      const pupilG = new THREE.Group();
+      pupilG.position.set(R * 0.026, -R * 0.012, R * 0.052);
+      eyeG.add(pupilG);
+
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(R * 0.086, 14, 12), pupilMat);
+      pupil.name = 'waterbottle_pupil';
+      pupil.scale.set(1, 1.02, 0.52);
+      pupil.castShadow = true;
+      pupilG.add(pupil);
+
+      // Catchlight — a child of the PUPIL, so it can never drift onto the sclera
+      // where it would be invisible. `flatMat` is unlit, i.e. luma 1.0 whatever
+      // the lighting does, which is the whole point of a catchlight.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.036, 10, 8), flatMat('#ffffff'));
+      glint.name = 'waterbottle_catchlight';
+      glint.position.set(-R * 0.030, R * 0.036, R * 0.038);
       glint.userData.noOutline = true;
-      eyeG.add(glint);
+      pupilG.add(glint);
 
-      // Brow: a slight friendly lift outward (not a V — this bottle is cheerful,
-      // not fierce), on one shared height so the pair reads as deliberately level.
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.022, R * 0.15, 4, 8), browMat);
+      // A second, much smaller bounce light low on the opposite side. Reference
+      // eyes carry two: the key's catchlight and a fill. It costs one sphere and
+      // it is the difference between "a dot on a bead" and "a wet eye".
+      const bounce = new THREE.Mesh(new THREE.SphereGeometry(R * 0.016, 8, 6), flatMat('#ffffff'));
+      bounce.position.set(R * 0.034, -R * 0.034, R * 0.034);
+      bounce.userData.noOutline = true;
+      pupilG.add(bounce);
+
+      // Brow: an ARC, not a bar. The old capsule read as a floating dash at lobby
+      // scale (visible in `before_lobby_yaw0.png`), because a straight rod has no
+      // shape to recognise once it is 6 px long. A torus segment reads as a brow
+      // at any size, and it is CAP_DARK so it holds against the pale shell.
+      //
+      // Deliberately ASYMMETRIC — the right brow sits higher and cocks harder.
+      // A mirrored pair is the "matched, no personality" pattern flagged across
+      // the cast; egg.ts's worry crease makes the same trade for the same reason.
+      const brow = new THREE.Mesh(
+        new THREE.TorusGeometry(R * 0.125, R * 0.028, 6, 16, Math.PI * 0.62),
+        browMat
+      );
       brow.name = 'waterbottle_brow';
-      brow.rotation.z = Math.PI / 2 - sx * 0.18;
-      brow.position.set(0, R * 0.205, R * 0.05);
+      brow.rotation.z = Math.PI * 0.5 - Math.PI * 0.31 + sx * 0.16;
+      brow.position.set(0, sx > 0 ? R * 0.245 : R * 0.215, R * 0.04);
+      brow.scale.set(1, 0.78, 0.7);
       brow.castShadow = true;
       eyeG.add(brow);
     }
 
-    // Big, warm smile — per the brief's own spec for this character, and a
-    // repeated art-director miss when it lived up on the cap fused against the
-    // stalk. Sits centred below the eyes, on the same shell wall, in the label's
-    // bright near-white so it reads clearly against the richer WATER-blue shell.
+    // ── THE MOUTH NOW HAS AN INTERIOR ─────────────────────────────────────────
+    // What was here: a `TorusGeometry` arc in `LABEL_PALE` — a painted curve on a
+    // wall, which is precisely the defect §38 named on hamburger ("a flat dark
+    // shape with no lip thickness or interior value step") and §42 generalised to
+    // the whole cast. `rules.ts` now asks for "the big smile ... with a dark
+    // throat behind the lip", and this is that, in three values:
+    //
+    //   lip   LABEL_PALE  the smile line itself, tracing the lower rim
+    //   teeth #FFFFFF     a row across the top of the opening
+    //   throat CAP_DARK   the interior, so the mouth reads as an OPENING
+    //
+    // The throat is a lower hemisphere with an explicit flat roof disc capping its
+    // open top. A hemisphere alone leaves that top edge open and the pale shell
+    // shows straight through it from a camera that pitches DOWN — which both of
+    // the cameras this game ships do (lobby 20 deg, match 58 deg). The cap costs
+    // one circle and closes the hole.
     const mouthPt = shellSurface(0, MOUTH_Y);
     const mouthOutward = new THREE.Vector3(mouthPt.normal.x, 0, mouthPt.normal.z).normalize();
     const mouthG = new THREE.Group();
@@ -838,15 +982,57 @@ export class WaterBottleCharacter extends BaseCharacter {
     mouthG.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthOutward);
     face.add(mouthG);
 
-    const smileMat = toonMat({ color: LABEL_PALE, roughness: 0.4 });
-    const smile = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.165, R * 0.032, 8, 20, Math.PI * 0.8),
-      smileMat
+    const MOUTH_R = R * 0.215;
+    // `rim: false` for the same reason as the pupil: a Fresnel edge on the throat is
+    // a bright line drawn exactly where the mouth's outline needs to be darkest.
+    const throatMat = toonMat({ color: CAP_DARK, roughness: 0.6, rim: false });
+
+    const throatG = new THREE.Group();
+    throatG.name = 'waterbottle_mouth';
+    throatG.scale.set(1, 0.86, 0.34);
+    mouthG.add(throatG);
+
+    const throat = new THREE.Mesh(
+      new THREE.SphereGeometry(MOUTH_R, 24, 12, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5),
+      throatMat
     );
-    smile.name = 'waterbottle_smile';
-    smile.rotation.z = Math.PI * 1.09;
-    smile.castShadow = true;
-    mouthG.add(smile);
+    throat.name = 'waterbottle_throat';
+    throat.castShadow = true;
+    throatG.add(throat);
+
+    const roof = new THREE.Mesh(new THREE.CircleGeometry(MOUTH_R, 24), throatMat);
+    roof.name = 'waterbottle_mouth_roof';
+    roof.rotation.x = -Math.PI / 2;
+    roof.userData.noOutline = true;
+    throatG.add(roof);
+
+    // Teeth — a single row along the top of the opening, narrower than the mouth
+    // so the dark corners survive. One row, not two: at the height a player sees
+    // this face, an upper AND a lower row close the opening back up and the value
+    // step the whole rebuild exists for disappears.
+    const teeth = new THREE.Mesh(
+      roundedBox(MOUTH_R * 1.42, R * 0.058, R * 0.075, R * 0.020, 2),
+      toonMat({ color: '#FFFFFF', roughness: 0.35 })
+    );
+    teeth.name = 'waterbottle_teeth';
+    teeth.position.set(0, -R * 0.026, R * 0.048);
+    teeth.castShadow = true;
+    mouthG.add(teeth);
+
+    // The lip: the smile line, rimming the lower half and turning UP past
+    // horizontal at both corners. This is the element `rules.ts` explicitly asks
+    // to protect — "keep the big smile, it is the most extrovert face in the cast"
+    // — so it keeps its colour and gains an interior rather than being replaced.
+    const lip = new THREE.Mesh(
+      new THREE.TorusGeometry(MOUTH_R * 1.03, R * 0.030, 8, 24, Math.PI * 1.14),
+      toonMat({ color: LABEL_PALE, roughness: 0.4 })
+    );
+    lip.name = 'waterbottle_smile';
+    lip.rotation.z = Math.PI * 0.93;
+    lip.scale.set(1, 0.86, 1);
+    lip.position.z = R * 0.012;
+    lip.castShadow = true;
+    mouthG.add(lip);
   }
 
   /**
@@ -901,8 +1087,10 @@ export class WaterBottleCharacter extends BaseCharacter {
   }
 
   /**
-   * Costume layer: a webbing carry-loop clipped to the bottle's neck, plus beaded
-   * condensation on the clear upper shell.
+   * Surface layer: a cap-retainer collar, a shoulder cord, and beaded condensation
+   * on the clear upper shell. **There is no costume/webbing layer left** — the
+   * green strap family and the metal clip family were both deleted this round; see
+   * the block inside `buildAccessories` for the render that decided it.
    *
    * ── Why the crossbody strap had to go ───────────────────────────────────────
    * The previous accessory was a shoulder-to-hip strap with a hip pouch, anchored
@@ -919,7 +1107,9 @@ export class WaterBottleCharacter extends BaseCharacter {
    * the silhouette at the top where nothing occludes it.
    */
   /**
-   * SILHOUETTE EVENTS — a carry loop and a flip nozzle.
+   * SILHOUETTE EVENTS — a cap carry loop, a flipped-open lid, and a straw.
+   * (The flip NOZZLE that used to be the third is deleted — it was a second spout
+   * beside the cap's own, and the pair read as a soap dispenser. See below.)
    *
    * Water Bottle measured the **worst hull deficiency in the cast at the shipped
    * facing, 0.0991, with ZERO appendages**. A bottle is a surface of revolution, so
@@ -940,17 +1130,59 @@ export class WaterBottleCharacter extends BaseCharacter {
     const head = this.rig.joints.head;
     const box = localBounds(head);
 
-    // ── Carry loop ────────────────────────────────────────────────────────────
+    // ── Carry loop — MOVED TO THE CAP, SHRUNK, DARKENED ───────────────────────
+    //
+    // ⚠️ WAS: `azimuth -0.52PI, height01 0.68, radius 0.50R, tube 0.105R`, in
+    // bright chrome. Read the render (`shots/ch/waterbottle/before_lobby_yaw0.png`
+    // and `before_face.png`): at 0.68 of the head box the loop leaves the shell at
+    // EYE HEIGHT, and a ring of radius 0.50R on a bottle whose widest half-radius
+    // is 0.478R is **wider than the character**. It arcs straight across the upper
+    // shell and buries the face — the same "limbs and torso intersecting, making
+    // the face invisible" complaint Uri made about Lollipop (§41), except here the
+    // occluder is the character's own accessory. At the match camera it turns the
+    // whole figure into a kettle.
+    //
+    // The mechanism the previous pass was reaching for still holds and is recorded
+    // below at the straw: geometry that leaves the mass where the shell has
+    // ALREADY ENDED is what escapes the hull. The cap is that place, and it is
+    // also where a real sports bottle's finger loop lives. So the loop moves up
+    // onto the cap (height01 0.93), loses 44% of its radius, and takes `CAP_DARK`
+    // — which deletes a whole material family from the character and feeds the
+    // dark rung instead of adding a third bright value competing with the sclera.
     {
-      // Down to the shoulder of the bottle and bigger. At 0.80 of the height the
-      // shell is already narrowing into the cap, so the loop sat in the cap's own
-      // projected shadow and measured nothing; at 0.68 it leaves the widest part.
-      const { at, out } = massAnchor(head, box, { azimuth: -Math.PI * 0.52, height01: 0.68, inset: 0.08 });
+      // `height01 0.88` is on the CAP WALL, not the cap crown: the head box spans
+      // roughly -0.98R..1.12R (the spout is the top of it), so 0.88 resolves to
+      // ~0.87R where `CAP_PROFILE` is still 0.295R wide. Anchoring on the crown
+      // instead puts the anchor at r≈0 and the loop stands straight up out of the
+      // middle of the lid, which is not a thing a bottle has.
+      const { at, out } = massAnchor(head, box, { azimuth: -Math.PI * 0.52, height01: 0.88, inset: 0.14 });
       const g = new THREE.Group();
       g.name = 'waterbottle_carry_loop';
-      aim(g, at, out.clone().add(new THREE.Vector3(0, 0.22, 0)).normalize());
-      g.add(loop(glossyMat({ color: CARABINER_METAL, roughness: 0.32, metalness: 0.35 }), {
-        radius: R * 0.50, tube: R * 0.105, arc: Math.PI * 1.35,
+      aim(g, at, out.clone().add(new THREE.Vector3(0, 0.55, 0)).normalize());
+      // ⚠️ SIZED BY TWO MEASUREMENTS PULLING OPPOSITE WAYS. Read them before
+      // touching either number.
+      //
+      // At `radius 0.34R, tube 0.070R` (tube/radius 0.21) the loop has **no visible
+      // hole at lobby scale** — it renders as a solid near-black bar standing off
+      // the cap, i.e. a pointed dark mass beside the head, which is §40's PATTERN 1
+      // (five for five: burrito's foil, egg's shards, hamburger's lettuce,
+      // lollipop's cape, pizza's cheese). At the match camera it reads as a kettle
+      // handle. Measured there: `isl 1`, hull deficiency **0.2172**.
+      //
+      // At `radius 0.26R, tube 0.034R` (ratio 0.13) the hole opens and it reads as a
+      // finger loop — and it **BREAKS OFF**. `limbmatch --yaws 90` reports
+      // `isl 2(102)` and hull deficiency **0.1961/0.1977**, under the six-plate floor
+      // of 0.2007. Connected-component analysis of the tool's own silhouette mask
+      // puts a 102 px orphan hook exactly where this arc is: shrunk to 0.26R its
+      // roots sit inside the cap's own projection at a 58 degree camera, so only the
+      // free part of the arc reaches the screen and it reaches it detached. That is
+      // `docs/LESSONS.md` §1 in its second form — not "invisible", but "visible and
+      // no longer attached to anything".
+      //
+      // 0.32R / 0.050R is the compromise: ratio 0.16, so the hole is open, with the
+      // roots back out where the previous size proved they stay connected.
+      g.add(loop(toonMat({ color: CAP_DARK, roughness: 0.45 }), {
+        radius: R * 0.32, tube: R * 0.050, arc: Math.PI * 1.35,
       }));
       head.add(g);
     }
@@ -967,26 +1199,50 @@ export class WaterBottleCharacter extends BaseCharacter {
       const g = new THREE.Group();
       g.name = 'waterbottle_flip_lid';
       aim(g, at, out.clone().add(new THREE.Vector3(0, 0.20, 0)).normalize(), Math.PI * 0.5);
+      // ⚠️ THIS BLADE'S PROPORTIONS ARE LOAD-BEARING FOR THE SILHOUETTE FLOOR.
+      // RESHAPING IT WAS TRIED, MEASURED, AND REVERTED — the numbers, so nobody
+      // spends another render on it:
+      //
+      //   blade                                  isl   hullDef @ yaw90
+      //   0.46 len x 0.30 hw, curl 0.18 (this)     1          0.2172
+      //   0.38 x 0.38, curl 0.34                   2(102)     0.1977
+      //   0.38 x 0.38, curl 0.14                   2(102)     0.1961
+      //   0.38 x 0.38, curl 0.14, loop back up     1          0.1916
+      //
+      // against a six-plate Brawl Stars floor of **0.2007**. The reshape was for a
+      // good reason — `blade` always comes to a POINT (`appendages.ts:275`) and a
+      // point standing off a head is §40's ear/horn signal, which at the match camera
+      // reads as a shark fin. But this blade is at azimuth 0.92PI, i.e. BEHIND the
+      // head and alone, and PATTERN 1 is specifically about a **pair flanking** a
+      // head; a single asymmetric flap at the back is a flipped-open lid, which is
+      // what it is. Shortening it by 0.08R costs 0.026 of hull deficiency, which is
+      // three times the whole margin over the floor. The length stays.
+      //
+      // (`curl: 0.34` had a second, separate failure worth recording: `curl`
+      // displaces z by `curl * t^2 * len`, so at 0.34 the tip tucked BEHIND the cap
+      // and re-emerged past its far edge as a 102 px ORPHAN ISLAND. That is
+      // `docs/LESSONS.md` §1 in its second form — not invisible, but visible and no
+      // longer attached to anything.)
       g.add(lidBlade(toonMat({ color: CAP, roughness: 0.42, doubleSide: true }), {
         len: R * 0.46, halfWidth: R * 0.30, thick: R * 0.045, curl: 0.18, waist: 0.95,
       }));
       head.add(g);
     }
 
-    // ── Flip nozzle ───────────────────────────────────────────────────────────
-    {
-      const nozzle = new THREE.Group();
-      nozzle.name = 'waterbottle_nozzle';
-      const { at } = massAnchor(head, box, { azimuth: Math.PI * 0.9, height01: 0.985, inset: 0.55 });
-      aim(nozzle, at, new THREE.Vector3(0.10, 0.62, -0.78).normalize());
-      head.add(nozzle);
-      nozzle.add(rod(toonMat({ color: CAP_DARK, roughness: 0.45 }), {
-        len: R * 0.38, rBase: R * 0.115, rTip: R * 0.080,
-      }));
-      const tip = knob(toonMat({ color: CAP, roughness: 0.4 }), R * 0.095);
-      tip.position.y = R * 0.38;
-      nozzle.add(tip);
-    }
+    // ── ⚠️ THE FLIP NOZZLE IS DELETED. IT WAS THE SECOND SPOUT ────────────────
+    // A `rod` + `knob` in `CAP_DARK`/`CAP` stood off the top of the cap at
+    // azimuth 0.9PI — directly alongside `SPOUT_PROFILE`'s own stepped spout and
+    // its hinged lid, thirty lines up in this same file. The cap therefore carried
+    // TWO spouts, and in `before_lobby_yaw0.png` the near-black nub with the
+    // orange tube arcing out of it reads as a **pump dispenser**: the top of the
+    // character stopped saying "sports cap" and started saying "soap bottle".
+    //
+    // Deleting it is the finding-5 trade taken deliberately (§40): the detail
+    // added to signal the subject was destroying the silhouette that signalled it
+    // better. The hull mass it was carrying is replaced below by giving the straw
+    // back its horizontal reach — which is the shape of protrusion that is worth
+    // the most at this camera anyway (0.85-1.0 of a screen-metre against a
+    // vertical element's 0.53), and it costs no height.
 
     // ── The straw ─────────────────────────────────────────────────────────────
     // A bent sports straw out of the cap, kicked hard sideways. It is here because
@@ -996,17 +1252,27 @@ export class WaterBottleCharacter extends BaseCharacter {
     // leaving the TOP — where the shell has already ended and nothing is left to
     // project over it — is the mechanism that works, and this character had the
     // most obvious possible excuse for one.
+    //
+    // ── RE-PROPORTIONED, and the number that asked for it is HEIGHT ───────────
+    // `shoot.mjs` prints the model's real bounding height and this character
+    // measured **2.752 m** against a cast that sits at 2.2-2.35 — the figure that
+    // `headFraction` was already trimmed once to protect. The straw was the tallest
+    // thing on the model, rising 0.30R above a cap that already ends at 0.962R,
+    // and at `rBase 0.075R` it was as thick as the bottle's own neck is wide. It
+    // now rises 0.19R and is 33% thinner, while its HORIZONTAL run grows 0.60R ->
+    // 0.66R: the hull is bought sideways, where it is worth ~1.8x as much, and the
+    // height is given back.
     {
       const box = localBounds(head);
       const { at } = massAnchor(head, box, { azimuth: Math.PI * 0.05, height01: 0.99, inset: 0.55 });
       const pts = [
         at.clone(),
-        at.clone().add(new THREE.Vector3(R * 0.04, R * 0.20, -R * 0.04)),
-        at.clone().add(new THREE.Vector3(R * 0.28, R * 0.30, -R * 0.14)),
-        at.clone().add(new THREE.Vector3(R * 0.60, R * 0.30, -R * 0.22)),
+        at.clone().add(new THREE.Vector3(R * 0.04, R * 0.13, -R * 0.04)),
+        at.clone().add(new THREE.Vector3(R * 0.30, R * 0.19, -R * 0.14)),
+        at.clone().add(new THREE.Vector3(R * 0.66, R * 0.19, -R * 0.24)),
       ];
       const straw = curl(glossyMat({ color: LABEL, roughness: 0.3 }), pts, {
-        rBase: R * 0.075, rTip: R * 0.062,
+        rBase: R * 0.050, rTip: R * 0.042,
       });
       straw.name = 'waterbottle_straw';
       head.add(straw);
@@ -1019,17 +1285,29 @@ export class WaterBottleCharacter extends BaseCharacter {
   ): void {
     const head = this.rig.joints.head;
 
-    const strapMat = toonMat({ color: STRAP_FABRIC, roughness: 0.72 });
-    const trimMat = toonMat({ color: STRAP_TRIM, roughness: 0.68 });
-    const metalMat = toonMat({ color: CARABINER_METAL, roughness: 0.28, metalness: 0.75 });
+    // ── THREE ACCESSORIES DELETED, AND THE FOURTH CHANGED COLOUR ──────────────
+    // Gone: `waterbottle_carry_loop` (a second object with the SAME NAME as the one
+    // in `buildSilhouetteEvents` — two carry loops, both on -x), the
+    // `waterbottle_loop_keeper`, and the `waterbottle_carabiner`. Read
+    // `before_lobby_yaw0.png`: a green ring, a green scrap and a small chrome hook
+    // stacked on one side of the neck, all under ~10 px each at the size a player
+    // sees, and collectively the reason the neck reads as a jumble rather than as
+    // a neck. Three meshes and two whole colour families for a detail that cannot
+    // resolve is exactly the trade §40 says to refuse.
+    //
+    // The collar STAYS — it is a real sports-cap retainer and it does honest work
+    // separating the cap from the shoulder — but it moves from `STRAP_FABRIC`
+    // (a forest green that read as a rubber band on a blue bottle, and the only
+    // green anywhere on this character) onto `CAP_DARK`. That is the character's
+    // own dark rung, so the collar now FEEDS the value ladder instead of opening a
+    // sixth band, and the top of the bottle reads as one moulded assembly.
+    const trimMat = toonMat({ color: CAP_DARK, roughness: 0.55 });
 
-    // Collar the loop hangs from — a webbing band around the neck, sized off the
-    // shell's own surface so it grips rather than floats.
     const collarYF = 0.60;
     const collarR = Math.hypot(shellSurface(0, collarYF).pos.x, shellSurface(0, collarYF).pos.z);
     const collar = new THREE.Mesh(
       new THREE.TorusGeometry(collarR * 1.06, R * 0.032, 8, 22),
-      strapMat
+      trimMat
     );
     collar.name = 'waterbottle_neck_collar';
     collar.rotation.x = Math.PI / 2;
@@ -1037,44 +1315,6 @@ export class WaterBottleCharacter extends BaseCharacter {
     collar.castShadow = true;
     collar.receiveShadow = true;
     head.add(collar);
-
-    // The loop itself: a webbing ring standing out to one side, clearly outside the
-    // bottle's own outline. Asymmetric on purpose — the cast's biggest repeated
-    // note is that every character is a dead-front symmetric statue.
-    const loop = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.15, R * 0.030, 8, 20),
-      strapMat
-    );
-    loop.name = 'waterbottle_carry_loop';
-    loop.position.set(-collarR * 1.05 - R * 0.10, collarYF * R + R * 0.05, 0);
-    loop.rotation.y = Math.PI / 2;
-    loop.rotation.z = 0.45;
-    loop.castShadow = true;
-    loop.receiveShadow = true;
-    head.add(loop);
-
-    const loopTrim = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.062, R * 0.026, 8, 16),
-      trimMat
-    );
-    loopTrim.name = 'waterbottle_loop_keeper';
-    loopTrim.position.set(-collarR * 1.02, collarYF * R + R * 0.01, 0);
-    loopTrim.rotation.y = Math.PI / 2;
-    loopTrim.castShadow = true;
-    head.add(loopTrim);
-
-    // Carabiner clipped through the loop — the one genuinely high-metalness
-    // material this character carries anywhere.
-    const carabiner = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.085, R * 0.020, 8, 16, Math.PI * 1.7),
-      metalMat
-    );
-    carabiner.name = 'waterbottle_carabiner';
-    carabiner.position.set(-collarR * 1.05 - R * 0.24, collarYF * R + R * 0.02, 0);
-    carabiner.rotation.y = Math.PI / 2;
-    carabiner.rotation.z = 0.9;
-    carabiner.castShadow = true;
-    head.add(carabiner);
 
     // Retainer cord — a thin strap ring around the bottle's own shoulder taper,
     // echoing a sports-cap retainer strap. Built via `shellSurface` so it sits
@@ -1202,6 +1442,10 @@ export class WaterBottleCharacter extends BaseCharacter {
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
+        // ⚠️ A THIRD lever was tried here and reverted — a `CAP_DARK` joint collar
+        // on every ribbed segment. Four `dLcontact` pairs got worse (hipL|kneeL by
+        // 0.0736, nineteen 1/255 floors) and the pair it was aimed at moved
+        // +0.0020. The numbers and the render are in the block above `ribbedLimb`.
         case 'upperArmL':
         case 'upperArmR':
           return ribbedLimb(size.len, size.radius * 1.02, size.radius * 0.72, plasticMat, 3);
