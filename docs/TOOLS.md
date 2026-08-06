@@ -330,7 +330,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **54**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **55**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -413,6 +413,7 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/haloprobe.mjs --selftest` | **27** | bloom-attributable halo as a paired `shipped − bloomOff`. ⚠️ Detects a rim via `userData.rimUniforms`, so it **counts a JSON-mangled corpse as live** after a plain `.clone()` — see `clonetoon_test` |
 | `node tools/tmp/clonetoon_test.mjs` | **33** | ⚠️ **`Material.clone()` does not copy `onBeforeCompile`** — the root cause of the #1 defect. Asserts the DEFECT first, and was mutation-tested: drop the re-apply → 12 fail; keep the dead uniform handle → 1 fail (exactly its row); ignore `rim: false` → 5 fail |
 | `node tools/tmp/ds_inventory.mjs --selftest` | **29** | the design-system inventory: every radius/shadow/size/colour literal in `src/ui`, with counts. ⚠️ **Steer waves by TOKEN COVERAGE (4.4% → 21.2%), not by literal counts** — a distinct-value count only falls when the LAST user of a value converts, so it reads zero through an entire adoption wave |
+| `node tools/tmp/cs_charcontact.mjs --selftest` | **31** | character contact shadow, measured on **two flanks mirrored about screen-vertical** — a directional cast darkens one, a centred contact darkens both. ⚠️ **Reference brawlers are NOT measurable**: every one stands inside a team-indicator decal ~3× its footprint drawn ON the contact band. `bs_06`'s vent props are the usable reference |
 | `node tools/tmp/ds_neutral.mjs --selftest` | **10** | proves a `theme.ts` change is PIXEL-NEUTRAL: 70 computed properties × every element × 5 screens × 3 viewports, judged against a drift control rather than a guessed tolerance |
 | `node tools/tmp/kneeprice.mjs --selftest` | **21** | prices `highlightKnee` as a **paired** sweep inside one synchronous evaluate (drift control exactly 0.0000). `--plates [--whole]` offline. Its known-bad fixtures are the two quantities `stage.ts` conflated, **in both directions** |
 | `node tools/tmp/rebind_accept.mjs` | **35** | key rebinding asserted against **sim state**, not the DOM |
