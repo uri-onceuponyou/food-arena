@@ -7,10 +7,34 @@
  * and a palette.
  *
  * Identity is fixed by `rules.ts`: Pizza, Neon rarity, Dough Balls / Tomato Splat /
- * Cheese Blind. The written description ("triangular slice, pepperoni, crust base,
- * closed smiling eyes") is a personality guide, not a literal spec — but the triangle
- * is explicitly the silhouette landmark here, so unlike other characters it is
- * protected rather than freely reinterpreted.
+ * Cheese Blind. The triangle is explicitly the silhouette landmark here, so unlike
+ * other characters it is protected rather than freely reinterpreted.
+ *
+ * ── ⚠️ THE OLD SENTENCE ABOVE IS KEPT BECAUSE IT WAS THE DEFECT ──────────────
+ * It used to read: *"The written description ('triangular slice, pepperoni, crust
+ * base, **closed smiling eyes**') is a personality guide, not a literal spec."*
+ * It was treated as a literal spec, faithfully, and Uri's verdict on the result was
+ * *"face is **TERRIBLE**"* — the second-harshest in the cast. `DECISIONS §42` shows
+ * his blind ranking of seven characters tracking the `face:` string exactly: every
+ * character he rated poorly is specified with CLOSED eyes or with no eye spec, and
+ * the one specified **"open eyes with highlights"** (egg) is the one he rated best.
+ * **The rule was obeyed and the rule was wrong.** `rules.ts`'s `face:` for pizza has
+ * been rewritten; this file now builds that.
+ *
+ * ── Uri's three complaints, and where each is answered ───────────────────────
+ *   *"face is TERRIBLE"*                -> `buildFace`, rebuilt from `egg.ts`'s open
+ *                                          eye and taken past it (sclera as the
+ *                                          brightest value, offset pupil, catchlight,
+ *                                          a mouth with an interior).
+ *   *"the torso should look more like    -> `dressTorso`, kneaded lobes + a fold +
+ *    DOUGH"*                               flour, with the VALUE deliberately unmoved.
+ *   *"the nose and ears are MESSY"*      -> `buildSilhouetteEvents`. They were cheese
+ *                                          strands: one out of the face centre (the
+ *                                          "nose") and a near-mirrored pair at the
+ *                                          sides of the head (the "ears").
+ *
+ * Everything each of those blocks changed is argued at the block, against the render
+ * in `shots/ch/pizza/{before,after}/` rather than against a description of it.
  */
 
 import * as THREE from 'three';
@@ -20,7 +44,7 @@ import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
-import { curl, localBounds, massAnchor } from './appendages';
+import { curl, knob, localBounds, massAnchor } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
 // ── "Tan-on-tan": the whole character was one value ──────────────────────────
@@ -78,6 +102,41 @@ const SATCHEL_BUCKLE = '#D9B458';
 const MITT_RED = '#7A2014';
 const MITT_CREAM = '#F7EFE0';
 const FLOUR_DUST = '#F7ECD3';
+
+// ── The FACE palette, and the one number the whole pass is steered on ─────────
+// `DECISIONS-FOR-URI.md` §42: Uri ranked seven faces without seeing any code and his
+// ranking matches the one-line `face:` field in `rules.ts` exactly. Pizza's said
+// **"Closed eyes, smiling"** and his verdict was *"face is TERRIBLE"* — the
+// second-harshest in the cast, and the second character specified shut.
+//
+// The measurement behind it: **0% of our eye pixels are above 0.85 luma, against the
+// reference's 31.1% and 34.1%.** Measured on this character specifically, at the LOBBY
+// camera Uri judges (`ch_pizza_shots.mjs`, pitch 20, head band of the mask's own
+// height): `>0.94` share was **0.0002 / 0.0003** — i.e. nothing on this head is near
+// white. The `>0.85` share was already 0.109/0.245 and that number is NOT the eyes: it
+// is the CHEESE, which sits at luma ~0.87 because `cheeseMat` carries an emissive.
+//
+// ⚠️ That is the trap this palette is built around. A white sclera on this character
+// has to beat a background that is ALREADY at 0.87, so an unlit-white sphere under our
+// key light does not clear it — the sclera carries its own emissive lift, and `>0.94`
+// (not `>0.85`) is the acceptance number for the eyes.
+const EYE_WHITE = '#FFFFFF';
+/** Warm near-black for the mouth's interior. Deliberately warmer than `PALETTE.ink`:
+ *  an ink-blue opening on a warm yellow face reads as a printed sticker, and this is
+ *  meant to read as a hole. Not a new value extreme — `CRUST_CHAR` is darker. */
+const MOUTH_DARK = '#2A0E12';
+/** The tongue. Distinct from both `SAUCE` and `PEPPERONI` on purpose — a mouth
+ *  interior the same red as a topping merges with the pepperoni at thumbnail size. */
+const TONGUE = '#C4414C';
+/** Teeth. Warm white, deliberately a step BELOW the sclera so the eye whites stay the
+ *  brightest value anywhere on the character, which is what the spec asks for. */
+const TOOTH = '#FFF6E4';
+/** The melt shadow under the grin, which doubles as the lower lip. */
+const CHEESE_SHADE = '#E0AF3C';
+/** Kneaded-dough crease on the torso. A shade under `TORSO_DOUGH`, not a new hue —
+ *  the torso's job in the value ladder (the light step the dark limbs read against)
+ *  is measured and must not move. */
+const DOUGH_FOLD = '#D3B27A';
 
 /** Soft tapered barrel — the same visual language as the rig's own default torso
  * (fuller belly, narrower neck) but built locally so each character can own its
@@ -301,7 +360,13 @@ export class PizzaCharacter extends BaseCharacter {
         // wedge and delivered exactly 0.500 of its footprint, sitting on the
         // acceptance floor with no margin, and dropping to 0.206 at run.
         elbowL: -0.28, elbowR: -0.46,
-        twist: 0.16, headTilt: -0.09, headTurn: 0.20,
+        // `headTurn` 0.20 -> 0.14. The head is a flat SLAB, so its turn costs more
+        // than a sphere's: at 0.20 the lobby-front frame shows a wide band of the
+        // wedge's bare side face on the left while the whole face is pushed into the
+        // right third of the triangle, and a face that is not centred in the frame the
+        // owner judges is a face he sees less of. 0.14 keeps the three-quarter
+        // attitude and the visible slab edge that gives the wedge its thickness.
+        twist: 0.16, headTilt: -0.09, headTurn: 0.14,
         hipSway: -0.045, lean: 0.04,
         // The presenting swagger needs a base under it. Pizza responds to splay
         // more than to stance — measured at the shipped facing, splay 0.5 alone is
@@ -350,6 +415,20 @@ export class PizzaCharacter extends BaseCharacter {
     // the dough — sat low enough to disappear behind the torso instead). Built the
     // same way as the sauce/cheese insets: an exact offset of the dough's boundary,
     // extruded thicker and pushed proud in Z for a raised, toastier-coloured roll.
+    //
+    // ── 🚨 READ FROM THE RENDER: a smooth band under a triangle is a HAT BRIM ────
+    // `shots/ch/pizza/before/lobby_front.png`. The rim was a clean extruded band that
+    // jutted forward past the dough and carried a row of EVENLY SPACED light and dark
+    // specks along it. Rendered, that is not a crust — it is a studded helmet brim,
+    // and with the near-black neck collar directly beneath it the pair reads as one
+    // dark band under a cone. `DECISIONS §39` names exactly this failure on taco: *"a
+    // dark opening immediately above the darkest band merges into one mass that reads
+    // as a brim"*, and it cost that character its mouth.
+    //
+    // Two changes, both about MANUFACTURED vs BAKED: the band juts forward less
+    // (`rimDepth` +0.10R -> +0.06R), and seven overlapping puffs ride along its own
+    // base curve so its top edge is knobbly rather than ruled. The even speck row is
+    // gone entirely — see `buildAccessories`.
     const rimBand = R * 0.13;
     const rimShape = new THREE.Shape();
     rimShape.moveTo(-halfW, baseY + R * 0.10);
@@ -357,22 +436,58 @@ export class PizzaCharacter extends BaseCharacter {
     rimShape.lineTo(halfW, baseY + R * 0.10 + rimBand);
     rimShape.quadraticCurveTo(0, baseY - R * 0.30 + rimBand, -halfW, baseY + R * 0.10 + rimBand);
     rimShape.lineTo(-halfW, baseY + R * 0.10);
-    const rimDepth = depth + R * 0.1;
+    const rimDepth = depth + R * 0.06;
+    const rimMat = toonMat({ color: CRUST_RIM, roughness: 0.83 });
     const rim = new THREE.Mesh(
       new THREE.ExtrudeGeometry(rimShape, { depth: rimDepth, bevelEnabled: true, bevelThickness: R * 0.03, bevelSize: R * 0.03, bevelSegments: 2, curveSegments: 16 }),
-      toonMat({ color: CRUST_RIM, roughness: 0.83 })
+      rimMat
     );
     rim.name = 'pizza_crust_rim';
-    rim.position.z = -rimDepth / 2 + R * 0.08; // proud of the dough's own front face
+    rim.position.z = -rimDepth / 2 + R * 0.06; // proud of the dough's own front face
     rim.castShadow = true;
     rim.receiveShadow = true;
     head.add(rim);
 
+    // The knobbly half of the brim fix. Sampled off the SAME quadratic the dough's own
+    // base uses, so a puff can never float off the rim or sink behind the dough — the
+    // failure this file already recorded twice for free-floating primitives.
+    const rimCurve = (t: number): THREE.Vector2 => {
+      const p0 = new THREE.Vector2(-halfW, baseY + R * 0.10);
+      const p1 = new THREE.Vector2(0, baseY - R * 0.30);
+      const p2 = new THREE.Vector2(halfW, baseY + R * 0.10);
+      const a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+      return new THREE.Vector2(a * p0.x + b * p1.x + c * p2.x, a * p0.y + b * p1.y + c * p2.y);
+    };
+    // Ends pulled in to t 0.10/0.90 rather than 0/1: a puff at the base CORNER pushes
+    // the silhouette out past the wedge's own widest point, and two rounded masses
+    // level with the bottom of a head is the one place this cast cannot afford them
+    // (`DECISIONS §40`, five for five). At 0.10/0.90 they sit inside the triangle.
+    const puffTs = [0.10, 0.23, 0.37, 0.50, 0.63, 0.77, 0.90];
+    for (let i = 0; i < puffTs.length; i++) {
+      const p = rimCurve(puffTs[i]);
+      // Alternating sizes so the row reads as hand-shaped dough, not as a bead strip.
+      const pr = R * (i % 2 === 0 ? 0.105 : 0.088);
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(pr, 12, 10), rimMat);
+      puff.name = 'pizza_crust_puff';
+      puff.position.set(p.x, p.y + rimBand * 0.52, R * 0.06);
+      // Z-scale spans the rim's own depth so the puff bulges on BOTH faces; a puff
+      // that only bulged forward would read as a bolt head, which is the artefact
+      // this whole block exists to remove.
+      puff.scale.set(1, 0.86, (rimDepth * 0.5) / pr);
+      puff.castShadow = true;
+      puff.receiveShadow = true;
+      head.add(puff);
+    }
+
     // Sauce margin: a slightly larger, thin triangle sitting just behind the cheese
     // so a sliver of red shows at the border — the detail that reads as "sauce under
     // cheese" instead of "solid yellow triangle".
+    // Widened from 0.74 -> 0.80 of the wedge and lifted 0.14R -> 0.10R off the tip,
+    // because the CHEESE had to grow to host a real face (see below) and the red
+    // margin between them is the detail that says "sauce under cheese". Growing one
+    // without the other would have closed the margin to nothing.
     const sauceShape = new THREE.Shape();
-    const sTip = tipY - R * 0.14, sBase = baseY + R * 0.22, sHalfW = halfW * 0.74;
+    const sTip = tipY - R * 0.10, sBase = baseY + R * 0.20, sHalfW = halfW * 0.80;
     sauceShape.moveTo(0, sTip);
     sauceShape.lineTo(sHalfW, sBase + R * 0.06);
     sauceShape.quadraticCurveTo(0, sBase - R * 0.16, -sHalfW, sBase + R * 0.06);
@@ -388,11 +503,29 @@ export class PizzaCharacter extends BaseCharacter {
     head.add(sauce);
 
     // Cheese: inset further still, proud of the sauce, glossy and melted.
+    //
+    // ── This is the FACE's ground, and it was too small to hold one ──────────────
+    // At 0.60 of the wedge the cheese was 0.48R across at its widest and the old
+    // closed-arc eyes were 0.20R apart — which is why the render shows a large empty
+    // triangle with a tiny doodle in the middle of it. An open eye with a sclera, a
+    // pupil and a catchlight needs roughly 0.27R of width EACH, so the cheese goes to
+    // 0.66 of the wedge and up 0.24R -> 0.20R off the tip. The triangle itself is
+    // untouched: `rules.ts` protects it as this character's whole read at gameplay
+    // distance, and only the inset layers move.
+    //
+    // The lower boundary is now THREE scallops rather than one clean quadratic. That
+    // is the authorised half of the cheese-strand fix — `rules.ts` says *"drape them
+    // across the FRONT of the slice or run them continuously round the edge"* — and a
+    // continuous lobed edge cannot read as an ear, because ears are discrete and
+    // paired and this is neither.
     const cheeseShape = new THREE.Shape();
-    const cTip = tipY - R * 0.24, cBase = baseY + R * 0.34, cHalfW = halfW * 0.60;
+    const cTip = tipY - R * 0.20, cBase = baseY + R * 0.32, cHalfW = halfW * 0.66;
+    const cRim = cBase + R * 0.05;
     cheeseShape.moveTo(0, cTip);
-    cheeseShape.lineTo(cHalfW, cBase + R * 0.05);
-    cheeseShape.quadraticCurveTo(0, cBase - R * 0.12, -cHalfW, cBase + R * 0.05);
+    cheeseShape.lineTo(cHalfW, cRim);
+    cheeseShape.quadraticCurveTo(cHalfW * 0.68, cBase - R * 0.10, cHalfW * 0.33, cBase + R * 0.02);
+    cheeseShape.quadraticCurveTo(0, cBase - R * 0.20, -cHalfW * 0.33, cBase - R * 0.03);
+    cheeseShape.quadraticCurveTo(-cHalfW * 0.68, cBase - R * 0.14, -cHalfW, cRim);
     cheeseShape.lineTo(0, cTip);
     const cheeseMat = glossyMat({ color: CHEESE, roughness: 0.25, emissive: CHEESE, emissiveIntensity: 0.18 });
     const cheese = new THREE.Mesh(
@@ -412,16 +545,29 @@ export class PizzaCharacter extends BaseCharacter {
     // corners) — round 1 crowded the face with oversized pepperoni and blotted out
     // an eye entirely, which is exactly the "floating/colliding topping" failure the
     // brief warns about.
-    const pepGeo = new THREE.CylinderGeometry(R * 0.078, R * 0.088, R * 0.045, 16);
+    //
+    // ── 🚨 READ FROM THE RENDER: FOUR pepperoni WERE A SECOND FACE ──────────────
+    // `shots/ch/pizza/before/lobby_front.png`. The old layout put a mirrored PAIR at
+    // (±0.13R, +0.38R) directly above the eyes and another mirrored pair at
+    // (±0.38R, -0.39R) either side of the mouth. Rendered, the upper pair is two
+    // round dark spots evenly spaced above two closed arcs, and it reads as the
+    // character's real eyes with the arcs demoted to brows. A face has exactly one
+    // pair of anything; a topping must therefore never be MIRRORED at eye height.
+    //
+    // Three now, and deliberately asymmetric: two at cheek height flanking the grin
+    // (where a round warm spot reads as a pepperoni sitting beside a mouth, and does
+    // the blush's old job — see `buildFace`), one small one near the tip. Every
+    // position is checked against the cheese triangle's own half-width at that height
+    // so no disc hangs off the melt onto the sauce.
     const pepMat = glossyMat({ color: PEPPERONI, roughness: 0.18 });
-    const pepSpots: [number, number][] = [
-      [R * 0.13, R * 0.38],
-      [-R * 0.13, R * 0.38],
-      [R * 0.38, -R * 0.39],
-      [-R * 0.38, -R * 0.39],
+    // [x, y, radius] — radii differ so the row cannot read as a manufactured set.
+    const pepSpots: [number, number, number][] = [
+      [-R * 0.37, -R * 0.33, R * 0.078],
+      [R * 0.33, -R * 0.36, R * 0.070],
+      [-R * 0.06, R * 0.44, R * 0.055],
     ];
-    for (const [px, py] of pepSpots) {
-      const pep = new THREE.Mesh(pepGeo, pepMat);
+    for (const [px, py, pr] of pepSpots) {
+      const pep = new THREE.Mesh(new THREE.CylinderGeometry(pr, pr * 1.12, R * 0.045, 16), pepMat);
       pep.rotation.x = Math.PI / 2;
       pep.position.set(px, py, cheeseFrontZ + R * 0.02);
       pep.castShadow = true;
@@ -431,10 +577,85 @@ export class PizzaCharacter extends BaseCharacter {
       // A faint grease glisten on top of each — the specular pop that sells "wet".
       const glistenMat = flatMat('#ffffff', { transparent: true, opacity: 0.5 });
       glistenMat.depthWrite = false; // transparent + depthWrite is a silent occluder — §1
-      const glisten = new THREE.Mesh(new THREE.SphereGeometry(R * 0.016, 8, 6), glistenMat);
-      glisten.position.set(px - R * 0.02, py + R * 0.02, cheeseFrontZ + R * 0.04);
+      const glisten = new THREE.Mesh(new THREE.SphereGeometry(pr * 0.21, 8, 6), glistenMat);
+      glisten.position.set(px - pr * 0.26, py + pr * 0.26, cheeseFrontZ + R * 0.04);
       glisten.userData.noOutline = true;
       head.add(glisten);
+    }
+
+    // ── Melted cheese droplets, ON THE FRONT ────────────────────────────────────
+    // The other authorised half of the strand fix. Three fat rounded lobes hanging off
+    // the cheese's scalloped lower edge onto the sauce, at three different depths.
+    // They are ROUND and they are on the face plane, so neither of the two reads Uri
+    // rejected is available to them: a drip cannot be an ear (it is not at the side of
+    // the head) and it cannot be a nose (it is below the mouth and it does not leave
+    // the mass). This is where "melted" now lives.
+    const dripMat = glossyMat({ color: CHEESE, roughness: 0.24, emissive: CHEESE, emissiveIntensity: 0.14 });
+    const drips: [number, number, number][] = [
+      [-R * 0.30, -R * 0.635, R * 0.070],
+      [R * 0.06, -R * 0.700, R * 0.082],
+      [R * 0.36, -R * 0.600, R * 0.058],
+    ];
+    for (const [dx, dy, dr] of drips) {
+      const drip = new THREE.Mesh(new THREE.SphereGeometry(dr, 12, 10), dripMat);
+      drip.name = 'pizza_cheese_drip';
+      drip.position.set(dx, dy, cheeseFrontZ - R * 0.035);
+      drip.scale.set(1, 1.25, 0.62);
+      drip.castShadow = true;
+      drip.receiveShadow = true;
+      head.add(drip);
+    }
+
+    // ── 🚨 THE EVEN SPECK ROW WAS READING AS RIVETS ─────────────────────────────
+    // WAS (in `buildAccessories`): eight specks at `t = 0.12 .. 0.90` along the crust
+    // rim's own base curve, alternating flour-white and char-black, described as
+    // *"small surface detail so the crust reads as baked dough rather than one flat
+    // matte colour."* The intent is right and the execution inverted it. Read off
+    // `shots/ch/pizza/before/lobby_front.face.png`: eight equally-spaced light and dark
+    // dots in a single line along a smooth band is a **studded hatband**, and with the
+    // near-black neck collar directly beneath it, it is the largest single contributor
+    // to this head reading as a helmet rather than as a slice. Regular spacing is a
+    // manufacturing signal; nothing baked is regular.
+    //
+    // The crust's texture is carried by the seven overlapping puffs on the rim now.
+    // What is left is flour on the DOUGH's exposed margin — the strip of bare crust
+    // between the cheese and the wedge's edge, which is where flour survives baking.
+    //
+    // ⚠️ It lives HERE, in the constructor, and that is the whole point: every one of
+    // `tipY`, `halfW`, `cTip`, `cRim` and `cHalfW` is in scope, so each mark is solved
+    // against the shapes that were actually built rather than against three literals
+    // re-typed in another method. The old block re-derived `rimDepth` by hand and got
+    // a DIFFERENT answer from the constructor's (`depth + R*0.1` vs the rim's own),
+    // which is exactly how a decal ends up 2 mm inside a mesh.
+    const doughEdgeHW = (y: number) => ((tipY - y) / (tipY - (baseY + R * 0.10))) * halfW;
+    const cheeseEdgeHW = (y: number) => Math.max(0, ((cTip - y) / (cTip - cRim)) * cHalfW);
+    // The dough's flat front face is inset from its outline by `bevelSize` (R*0.035),
+    // so the usable band stops short of the true edge by that much again.
+    const BEVEL_INSET = R * 0.045;
+    const flourMat = toonMat({ color: FLOUR_DUST, roughness: 0.92 });
+    // [y, side, radius]. x is SOLVED as the centre of the usable band at that height,
+    // so no mark can float off the wedge or hide behind the cheese however the
+    // triangle is later retuned.
+    const marks: Array<[number, number, number]> = [
+      [R * 0.30, -1, R * 0.026],
+      [R * 0.62, 1, R * 0.019],
+      [-R * 0.16, 1, R * 0.030],
+      [-R * 0.44, -1, R * 0.024],
+      [-R * 0.52, 1, R * 0.020],
+      [R * 0.02, -1, R * 0.017],
+    ];
+    for (const [my, side, mr] of marks) {
+      const inner = cheeseEdgeHW(my) + mr * 1.4;
+      const outer = doughEdgeHW(my) - BEVEL_INSET - mr * 1.4;
+      if (outer <= inner) continue;   // no band at this height — skip rather than float
+      const speck = new THREE.Mesh(new THREE.SphereGeometry(mr, 7, 6), flourMat);
+      speck.name = 'pizza_flour_speck';
+      // Front face of the dough is `depth/2 + bevelThickness`; +0.02R clears the sauce
+      // slab, which is itself proud of the dough by 0.005R.
+      speck.position.set(side * (inner + outer) * 0.5, my, depth / 2 + R * 0.035 + R * 0.02);
+      speck.scale.set(1.3, 0.7, 0.42);
+      speck.userData.noOutline = true;
+      head.add(speck);
     }
 
     // ── Body: dress the torso ─────────────────────────────────────────────────
@@ -466,6 +687,116 @@ export class PizzaCharacter extends BaseCharacter {
       doughBody.castShadow = true;
       doughBody.receiveShadow = true;
       group.add(doughBody);
+
+      // ── "Make the torso look more like DOUGH" — Uri, verbatim ─────────────
+      // Read against `shots/ch/pizza/before/lobby_front.png`, the complaint is exact:
+      // the barrel is one smooth unbroken ovoid in one flat tone, and at lobby scale
+      // it is an EGG. Nothing on it says the material is dough rather than plastic.
+      //
+      // The fix is deliberately NOT a colour change. `TORSO_DOUGH` is load-bearing —
+      // this file's value pass pinned it as "the light step the dark limbs are read
+      // against" and measured range 0.536 -> 0.733 on it — so the torso stays exactly
+      // the value it is and gains dough's two actual signatures instead:
+      //
+      //   1. KNEADED LOBES. Dough is hand-shaped, so its surface is a set of soft
+      //      overlapping masses, never one revolved profile. Four lobes at different
+      //      radii ride proud of the barrel, in the barrel's OWN colour, so they read
+      //      purely as shading and cost the value ladder nothing.
+      //   2. A FOLD, and FLOUR. One shallow crease where the dough was pinched, in a
+      //      shade of the same hue, plus dusting patches. Flour is the one cue that
+      //      says "raw dough" rather than "baked bread", and this file already
+      //      declares `FLOUR_DUST` for the crust.
+      //
+      // ⚠️ Every patch stays clear of the top 18% of the barrel. `head|torso` is this
+      // character's tightest real adjacency (dLcontact 0.1723, 133 contacts) and it is
+      // measured AT THE BOUNDARY — a light flour patch parked under the chin would
+      // move that number while looking like it moved nothing.
+      // ⚠️ AND EVERY ONE OF THEM IS PLACED ON A SOLVED SURFACE POINT, NOT A GUESS.
+      // This file already carries the note, from the pass that lost a satchel buckle
+      // to it: *"`bodyHalfD` is the value handed to `torsoBarrel`, and that helper
+      // then applies a bulge of up to 1.16x, so the body's real front face sits well
+      // past it. A badge parked at `bodyHalfD * 0.58` was ENTIRELY INSIDE the mesh and
+      // rendered as a 2 mm gold nub."* `barrelSurface` below is `torsoBarrel`'s own
+      // arithmetic run forwards, so a lobe at `k = 0.80` is provably 20% of the local
+      // radius inside a surface that is measured rather than remembered — the same
+      // principle as `appendages.ts`'s raycast, one level cheaper.
+      const doughMat = toonMat({ color: TORSO_DOUGH, roughness: 0.85 });
+      const foldMat = toonMat({ color: DOUGH_FOLD, roughness: 0.88 });
+      const flourMat = toonMat({ color: FLOUR_DUST, roughness: 0.95 });
+      const bodyH = bodyTopY - bodyBottomY;
+      const barrelCentreY = (bodyTopY + bodyBottomY) / 2;
+      /** `u` in (-1, 1) up the barrel, `theta` around it (0 = front, +X to the right),
+       *  `k` a radial fraction of the local surface. Mirrors `torsoBarrel` exactly. */
+      const barrelSurface = (u: number, theta: number, k: number): THREE.Vector3 => {
+        const t = (u + 1) * 0.5;
+        const bulge = 1 + 0.26 * Math.sin(t * Math.PI * 0.9) - 0.26 * 0.55 * t;
+        const c = Math.sqrt(Math.max(0, 1 - u * u));
+        return new THREE.Vector3(
+          bodyHalfW * bulge * c * Math.sin(theta) * k,
+          barrelCentreY + u * bodyH * 0.5,
+          bodyHalfD * bulge * c * Math.cos(theta) * k,
+        );
+      };
+
+      // [u, theta, radius as a fraction of bodyHalfW, y-scale]
+      const lobes: Array<[number, number, number, number]> = [
+        [0.30, -0.86, 0.36, 0.92],
+        [0.16, 0.92, 0.31, 0.98],
+        [-0.30, -0.24, 0.40, 0.80],
+        [-0.46, 0.62, 0.30, 0.86],
+      ];
+      for (const [u, theta, lr, sy] of lobes) {
+        const lobe = new THREE.Mesh(new THREE.SphereGeometry(bodyHalfW * lr, 14, 12), doughMat);
+        lobe.name = 'pizza_dough_lobe';
+        lobe.position.copy(barrelSurface(u, theta, 0.80));
+        lobe.scale.set(1, sy, 1);
+        lobe.castShadow = true;
+        lobe.receiveShadow = true;
+        group.add(lobe);
+      }
+
+      // The pinch. A shallow arc across the belly's FRONT, opening downward — a fold,
+      // not a belt, and deliberately off-horizontal so it cannot be confused with the
+      // sash beneath it.
+      const fold = new THREE.Mesh(
+        new THREE.TorusGeometry(bodyHalfW * 0.52, bodyHalfW * 0.055, 8, 22, Math.PI * 0.72),
+        foldMat
+      );
+      fold.name = 'pizza_dough_fold';
+      fold.position.copy(barrelSurface(-0.06, -0.10, 0.98));
+      fold.rotation.set(0.26, 0, Math.PI * 1.14);
+      fold.castShadow = true;
+      group.add(fold);
+
+      // Flour. Irregular sizes and no mirrored pair — a mirrored pair of light spots
+      // on a torso is a shirt button placket, which is the same class of accidental
+      // read as the four pepperoni that were a second face. All of it is kept on the
+      // FRONT (|theta| < 0.8) because a z-flattened patch on the barrel's SIDE is
+      // edge-on and delivers nothing, and kept below u = +0.5 for the `head|torso`
+      // reason above.
+      // ⚠️ ROUND 1 SIZED THESE AT 0.07-0.13 OF THE BARREL AND THEY READ AS HOLES.
+      // Read off `shots/ch/pizza/after/lobby_front.png`: five hard-edged white ellipses
+      // on a pale ovoid are eggshell chips, or Swiss-cheese holes, not dusting. Flour
+      // reads by DENSITY, not by patch size — nine marks at roughly half the radius.
+      const dust: Array<[number, number, number]> = [
+        [0.42, -0.52, 0.062],
+        [0.08, 0.34, 0.050],
+        [0.46, 0.14, 0.040],
+        [-0.34, 0.66, 0.036],
+        [-0.18, -0.72, 0.046],
+        [0.30, -0.16, 0.034],
+        [-0.06, -0.44, 0.042],
+        [0.20, 0.62, 0.030],
+        [-0.44, -0.06, 0.038],
+      ];
+      for (const [u, theta, dr] of dust) {
+        const speck = new THREE.Mesh(new THREE.SphereGeometry(bodyHalfW * dr, 8, 6), flourMat);
+        speck.name = 'pizza_torso_flour';
+        speck.position.copy(barrelSurface(u, theta, 0.97));
+        speck.scale.set(1.35, 0.72, 0.40);
+        speck.userData.noOutline = true;
+        group.add(speck);
+      }
 
       // ── There is NO chest wedge here, and that is the point ──────────────
       //
@@ -539,8 +870,37 @@ export class PizzaCharacter extends BaseCharacter {
   }
 
   /**
-   * Closed, happy eyes (upward arcs) and a warm smile, sitting on the cheese in the
-   * lower-centre of the slice, clear of the crust and every pepperoni disc.
+   * OPEN eyes with a white sclera, an offset pupil and a catchlight, and a wide grin
+   * with a real interior — a dark opening, a tooth band and a tongue.
+   *
+   * ── The old face, and why it was not an implementation failure ───────────────
+   * WAS: two `TorusGeometry` arcs (a closed `^_^` pair) plus a third arc for a smile.
+   * `rules.ts` said **"Closed eyes, smiling"** and that is exactly what was built.
+   * Uri, without seeing any code: *"face is TERRIBLE"* — and `DECISIONS §42` shows his
+   * ranking of seven characters tracking that one `face:` string with no exceptions.
+   * **The rule was obeyed and the rule was wrong**, which is the inverse of this
+   * project's most expensive defect shape. The string has since been rewritten; this
+   * builds the new one.
+   *
+   * ── The construction ladder, which Uri reproduced blind ─────────────────────
+   * a flattened arc (a stroke) < a sphere with a specular < a sphere plus an explicit
+   * glint mesh < **egg's open eye**. `egg.ts:1017` is the cast reference and this is
+   * built from it rather than invented — sclera, pupil and catchlight as three
+   * separate meshes — then taken past it, because even egg has a catchlight where the
+   * reference has a SCLERA as the brightest mass on the face.
+   *
+   * ── ⚠️ THE ONE THING THAT IS PIZZA-SPECIFIC, AND IT IS THE HARD PART ─────────
+   * Every other character's face sits on a mid or dark ground. This one sits on
+   * `cheeseMat`, which carries `emissive: CHEESE, emissiveIntensity: 0.18` and
+   * measures **luma ~0.87** — so the cheese is ALREADY above the 0.85 threshold the
+   * cast-wide finding is stated in. A plain white sclera does not separate from it.
+   * Two devices, both required:
+   *   1. the sclera carries its own emissive lift, so it clears the cheese rather
+   *      than tying with it (steered on `>0.94`, which was 0.0002 before);
+   *   2. every eye sits inside a dark LASH/SOCKET ring, so the separation does not
+   *      depend on the value difference alone. That ring is where the old closed arc
+   *      goes — **demoted from BEING the eye to BOUNDING it**, which is what the new
+   *      spec asks for and is also why the expression survives the change.
    */
   private buildFace(R: number, cheeseFrontZ: number): void {
     const face = this.rig.joints.face;
@@ -549,45 +909,183 @@ export class PizzaCharacter extends BaseCharacter {
     const localZ = cheeseFrontZ - this.rig.headRadius * 0.82;
     const ink = PALETTE.ink;
 
-    for (const sx of [-1, 1]) {
-      // Closed eye: a thick upward-curved arc (happy ^_^ shape), built as real
-      // geometry with depth per the face convention, not a flat decal.
-      const eye = new THREE.Mesh(
-        new THREE.TorusGeometry(R * 0.10, R * 0.028, 8, 16, Math.PI * 0.92),
-        toonMat({ color: ink, roughness: 0.3 })
-      );
-      eye.position.set(sx * R * 0.26, -R * 0.05, localZ + R * 0.02);
-      eye.rotation.z = sx > 0 ? Math.PI * 0.92 : Math.PI * 0.08;
-      eye.castShadow = true;
+    // ── Eyes ────────────────────────────────────────────────────────────────
+    // x = 0.225R, y = -0.10R is not free: the cheese is a TRIANGLE and it narrows
+    // upward, so every eye position is bounded by the melt's own half-width at that
+    // height. At y = -0.10R the widened cheese reaches 0.366R and the SCLERA reaches
+    // 0.355R, so the white is fully on the melt; the dark socket ring around it
+    // overshoots by 0.010R onto the sauce margin, which is deliberate — a dark ring
+    // touching the red edge reads as an eye set into the slice, and shrinking the eye
+    // to avoid it would cost more than it buys. The eye is as large as this shape
+    // allows, and the shape is the one `rules.ts` protects.
+    const EYE_X = R * 0.225, EYE_Y = -R * 0.10, EYE_R = R * 0.130;
+    const scleraMat = toonMat({
+      color: EYE_WHITE, roughness: 0.34,
+      // See the header: the ground under this face is already at luma ~0.87.
+      emissive: EYE_WHITE, emissiveIntensity: 0.30,
+    });
+    const pupilMat = toonMat({ color: ink, roughness: 0.22 });
+    const lashMat = toonMat({ color: ink, roughness: 0.30 });
+    const glintMat = flatMat('#ffffff');
+
+    for (const sx of [-1, 1] as const) {
+      const eye = new THREE.Group();
+      eye.name = `pizza_eye_${sx > 0 ? 'R' : 'L'}`;
+      eye.position.set(sx * EYE_X, EYE_Y, localZ + R * 0.02);
       face.add(eye);
-    }
 
-    // Smile: a broad downward arc, wide and warm.
-    const smile = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.20, R * 0.032, 8, 20, Math.PI * 0.8),
-      toonMat({ color: ink, roughness: 0.3 })
-    );
-    smile.position.set(0, -R * 0.28, localZ);
-    smile.rotation.z = Math.PI * 1.1;
-    smile.castShadow = true;
-    face.add(smile);
+      // 1. SOCKET — a dark disc a shade larger than the sclera. Cheap, and it is what
+      //    makes a white eye read on a near-white ground.
+      const socket = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 1.16, 16, 14), lashMat);
+      socket.scale.set(1, 1.14, 0.26);
+      socket.castShadow = true;
+      eye.add(socket);
 
-    // Rosy cheeks — small, warm, cheap charm that reads well at chibi scale.
-    // Hoisted and given `depthWrite: false` — a transparent material that still
-    // writes depth is a silent occluder (`docs/LESSONS.md` §1), and every
-    // transparent material in the cast carried the default `true`.
-    const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.55 });
-    blushMat.depthWrite = false;
-    for (const sx of [-1, 1]) {
-      const cheekBlush = new THREE.Mesh(
-        new THREE.SphereGeometry(R * 0.06, 10, 8),
-        blushMat
+      // 2. SCLERA — the brightest value anywhere on the character.
+      const white = new THREE.Mesh(new THREE.SphereGeometry(EYE_R, 18, 16), scleraMat);
+      white.scale.set(1, 1.14, 0.44);
+      white.position.z = R * 0.012;
+      white.castShadow = true;
+      eye.add(white);
+
+      // 3. PUPIL — real geometry, OFFSET. Both pupils move the SAME way in world
+      //    space, never mirrored: a mirrored offset is two eyes looking outward, i.e.
+      //    wall-eyed, and `docs/LESSONS.md` §12 records the mirrored-roll version of
+      //    this exact mistake shipping on sushi as a lazy eye.
+      const PUP_X = R * 0.020, PUP_Y = R * 0.004;
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.56, 14, 12), pupilMat);
+      pupil.scale.set(1, 1.05, 0.42);
+      pupil.position.set(PUP_X, PUP_Y, R * 0.052);
+      pupil.castShadow = true;
+      eye.add(pupil);
+
+      // 4. CATCHLIGHT — `flatMat` is unlit, so this is the one element guaranteed to
+      //    hit 1.0 whatever the key light does.
+      //
+      //    ⚠️ ROUND 1 PUT IT ON THE SCLERA AND IT WAS INVISIBLE. `docs/LESSONS.md` §1
+      //    for the nineteenth time, in its subtlest form yet: the mesh rendered, it was
+      //    unoccluded, it was at full brightness — and it was WHITE ON WHITE, so there
+      //    was nothing to see. Read off `shots/ch/pizza/after/lobby_front.face.png`:
+      //    both glints are there and neither registers as a highlight.
+      //    **A catchlight is not a bright thing; it is a bright thing ON A DARK THING.**
+      //    Both are therefore anchored to the PUPIL's centre, not the eye's, and offset
+      //    by less than the pupil's own radius so they straddle its edge.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.28, 10, 8), glintMat);
+      glint.position.set(PUP_X - R * 0.030, PUP_Y + R * 0.030, R * 0.074);
+      glint.userData.noOutline = true;
+      eye.add(glint);
+
+      const bounce = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.14, 8, 6), glintMat);
+      bounce.position.set(PUP_X + R * 0.032, PUP_Y - R * 0.030, R * 0.070);
+      bounce.userData.noOutline = true;
+      eye.add(bounce);
+
+      // 5. UPPER LASH LINE — the old "closed happy eyes" arc, kept and demoted. It
+      //    caps the eye, it carries the expression, and it is asymmetric (the
+      //    character's right lid rides higher) so the face has one raised brow rather
+      //    than two matched worry lines, which an art-director pass named cast-wide.
+      const lash = new THREE.Mesh(
+        new THREE.TorusGeometry(EYE_R * 1.02, EYE_R * 0.20, 8, 18, Math.PI * 0.86),
+        lashMat
       );
-      cheekBlush.position.set(sx * R * 0.42, -R * 0.18, localZ - R * 0.01);
-      cheekBlush.scale.set(1, 0.7, 0.3);
-      cheekBlush.userData.noOutline = true;
-      face.add(cheekBlush);
+      lash.position.set(0, EYE_R * 0.30, R * 0.030);
+      lash.rotation.z = Math.PI * 0.07 + sx * 0.10;
+      lash.castShadow = true;
+      eye.add(lash);
     }
+
+    // ── Mouth ───────────────────────────────────────────────────────────────
+    // "A flat dark shape with no lip thickness or interior value step" is the per-part
+    // note that killed the old arc, and `DECISIONS §38` states the fix generally: a
+    // mouth needs a value step INSIDE the silhouette so it reads as an opening rather
+    // than a painted curve. Four values, outermost first: melt shadow (the lower lip)
+    // -> dark opening -> tooth band -> tongue.
+    const MW = R * 0.235, M_TOP = -R * 0.325, M_CTL = -R * 0.825;
+    const grin = (k: number, dy: number): THREE.Shape => {
+      const s = new THREE.Shape();
+      const w = MW * k, top = M_TOP + dy, ctl = M_CTL + dy;
+      s.moveTo(-w, top);
+      // Top edge SAGS at the centre, so the corners are the highest points on it —
+      // that is what makes a closed shape read as a grin instead of as a slot.
+      s.quadraticCurveTo(0, top - R * 0.055, w, top);
+      s.quadraticCurveTo(0, ctl, -w, top);
+      return s;
+    };
+
+    // The melt shadow, sitting a touch lower and wider and BEHIND the opening, so a
+    // warm rim shows along the bottom of the grin and reads as a lower lip.
+    const lip = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(grin(1.09, -R * 0.024), { depth: R * 0.03, bevelEnabled: false, curveSegments: 14 }),
+      toonMat({ color: CHEESE_SHADE, roughness: 0.35 })
+    );
+    lip.name = 'pizza_mouth_lip';
+    lip.position.set(0, 0, localZ - R * 0.012);
+    lip.castShadow = true;
+    face.add(lip);
+
+    // The opening. Bevelled on purpose — a flat extrusion has no lip thickness, and
+    // "no lip thickness" is half of the per-part complaint verbatim.
+    const mouth = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(grin(1, 0), {
+        depth: R * 0.05, bevelEnabled: true, bevelThickness: R * 0.020, bevelSize: R * 0.018,
+        bevelSegments: 2, curveSegments: 14,
+      }),
+      toonMat({ color: MOUTH_DARK, roughness: 0.42 })
+    );
+    mouth.name = 'pizza_mouth';
+    mouth.position.set(0, 0, localZ);
+    mouth.castShadow = true;
+    face.add(mouth);
+
+    // Tooth band.
+    //
+    // ⚠️ ROUND 1 BUILT THIS AS A `roundedBox` AND IT READ AS A STRIP OF TAPE. A
+    // straight bar under a SAGGING upper lip leaves a black wedge at each end and a
+    // hard horizontal top edge in the middle, and at lobby scale that is a white
+    // rectangle stuck inside a mouth, not teeth. Read off
+    // `shots/ch/pizza/after/lobby_front.face.png`. Teeth follow the lip they hang
+    // from, so the band is now an extrusion of the SAME quadratic as the mouth's top
+    // edge, offset down — one curve, authored once, so the two can never drift.
+    //
+    // The width is 0.76 of the mouth's, not 0.86: the opening's bottom boundary rises
+    // fast toward the corners (`y = M_TOP - t + t²`), and at 0.86 the band's own lower
+    // corners sat 0.012R from breaching it.
+    const TW = MW * 0.76, T_TOP = M_TOP - R * 0.020, T_SAG = R * 0.042, T_H = R * 0.058;
+    const toothShape = new THREE.Shape();
+    toothShape.moveTo(-TW, T_TOP);
+    toothShape.quadraticCurveTo(0, T_TOP - T_SAG, TW, T_TOP);
+    toothShape.lineTo(TW, T_TOP - T_H);
+    toothShape.quadraticCurveTo(0, T_TOP - T_SAG - T_H, -TW, T_TOP - T_H);
+    toothShape.lineTo(-TW, T_TOP);
+    const teeth = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(toothShape, { depth: R * 0.030, bevelEnabled: false, curveSegments: 12 }),
+      toonMat({ color: TOOTH, roughness: 0.30, emissive: TOOTH, emissiveIntensity: 0.12 })
+    );
+    teeth.name = 'pizza_mouth_teeth';
+    teeth.position.set(0, 0, localZ + R * 0.046);
+    teeth.castShadow = true;
+    face.add(teeth);
+
+    // Tongue. Sized against the opening's own lower BOUNDARY, not against the mouth's
+    // widest point — that is the trap, and the first sizing here fell into it. The
+    // bottom edge is `y(x) = M_TOP - t + t²` with `t = (1 - x/MW)/2`, so at
+    // |x| = 0.091R the floor is already up at -0.535R while the mouth's centre reaches
+    // -0.575R: a tongue wide enough to look like a tongue pokes out through the
+    // corners long before it reaches the middle of the opening.
+    const tongue = new THREE.Mesh(new THREE.SphereGeometry(R * 0.070, 12, 10),
+      toonMat({ color: TONGUE, roughness: 0.36 }));
+    tongue.name = 'pizza_mouth_tongue';
+    tongue.scale.set(1.30, 0.55, 0.5);
+    tongue.position.set(0, -R * 0.495, localZ + R * 0.048);
+    tongue.castShadow = true;
+    face.add(tongue);
+
+    // ── The blush is GONE, and that is a decision, not an omission ──────────────
+    // It was two `#FF9EC4` discs at 0.55 opacity and 0.06R across. In the lobby render
+    // they are two pink specks with no readable shape, sitting exactly where the face
+    // now needs the room, and the two cheek PEPPERONI do the same job — a warm round
+    // accent flanking the grin — in this character's own material rather than in a
+    // borrowed cartoon convention. Removed, not moved.
   }
 
   protected onUpdate(ctx: AnimContext): void {
@@ -612,50 +1110,94 @@ export class PizzaCharacter extends BaseCharacter {
    * disconnected from the body.
    */
   /**
-   * SILHOUETTE EVENTS — three cheese strings off the crust.
+   * SILHOUETTE EVENTS — cheese pull, and this is the block Uri rejected by name.
    *
-   * Pizza is the cast's biggest facing asymmetry after taco: **0.2187 head-on and
-   * 0.1435 in profile, with ZERO appendages at either**. A wedge is a flat slab, so
-   * at the shipped facing it turns edge-on and every bit of the shape that makes it
-   * legible from the front disappears at once.
+   * ── WHAT WAS HERE, AND WHAT IT ACTUALLY RENDERED AS ─────────────────────────
+   * Uri: *"the **nose and ears are MESSY**."* Read against
+   * `shots/ch/pizza/before/lobby_front.png` and `lobby_3q.png`, both of those are
+   * exactly this function, and the mapping is one-to-one:
    *
-   * Cheese pulling off a slice is the one silhouette event this food has that is
-   * not a property of the wedge's outline, so it survives the turn. Three strands,
-   * different lengths, at azimuths spread far enough apart that no two merge into a
-   * single component under the metric's morphological opening — the same failure
-   * that made hamburger's continuous lettuce frill count as core.
+   *   `[PI*0.08, 0.34]`  azimuth ~0 = **straight out of the FACE**, mid height —
+   *                      a yellow tube that crosses the right eye, hangs down the
+   *                      middle of the head and past the chin. **That is the "nose".**
+   *                      At three-quarter view it reads as an elephant's trunk.
+   *   `[PI*0.55, 0.42]` and `[-PI*0.50, 0.30]` — a near-mirrored PAIR at mid-head
+   *                      height, one either side, curving out and down.
+   *                      **Those are the "ears"**, and they read as a handlebar
+   *                      moustache in the three-quarter frame.
+   *   `[PI*0.96, 0.28]`  behind the slab. This one was never the problem.
+   *
+   * `DECISIONS §40/§41`: **a pointed mass either side of a head reads as an ear or a
+   * horn, and it overrides what the shape is made of — five for five** across
+   * burrito, egg, hamburger, lollipop and this character. The old comment reasoned
+   * entirely about `limbmatch`'s appendage metric and azimuth projection, and every
+   * word of that reasoning is correct; it simply never asked what the shape would be
+   * READ as. A metric that is necessary is not a metric that is sufficient, and
+   * `appendages.ts`'s own postscript says so in the same words.
+   *
+   * ── WHAT IS HERE NOW, AND WHAT IT COSTS ─────────────────────────────────────
+   * The rewritten `face:` spec authorises two placements: *"drape them across the
+   * FRONT of the slice or run them continuously round the edge."* Both are taken, and
+   * neither is here — the front drape is the cheese layer's own scalloped lower
+   * boundary plus three round drips, built in the constructor. What remains in this
+   * function is the REAR pair only:
+   *
+   *   · nothing in the front hemisphere at all, so there is no nose;
+   *   · nothing at +/-PI/2, so there is no mirrored pair at the sides of the head;
+   *   · both strands in the rear quadrant at DIFFERENT heights, lengths and azimuths,
+   *     so even seen from behind they are not a pair.
+   *
+   * ⚠️ **The cost is measured and it is real.** `appendages.ts` requires an event to
+   * clear the core by more than the opening radius, and the two strands that did that
+   * best at the shipped spawn facing (yaw 90, exact profile) were the two at +/-PI/2,
+   * because azimuths PERPENDICULAR to the view are the ones that project to screen-X.
+   * Rear strands project to screen-X at yaw 90 as well — that is why they are kept
+   * rather than deleted — but this pass trades appendage COUNT for the read, on the
+   * grounds that `appendages.ts` already recorded the count buying **zero** critic
+   * points (cast hull deficiency 0.1379 -> 0.2621, panels 3/3 and 2/2, unchanged),
+   * while the ear read cost this character a *"TERRIBLE"* from the owner.
    */
   private buildSilhouetteEvents(R: number): void {
     const head = this.rig.joints.head;
     const box = localBounds(head);
     const cheeseMat = toonMat({ color: CHEESE, roughness: 0.4 });
 
-    // ROUND 2: four strands, one per quadrant, and roughly twice the reach. The
-    // first three measured **zero** appendages at either facing — they were short
-    // enough to lie along the crust rim, which is the one place a strand cannot
-    // break an outline. `appendages.ts` sets the bar: an event has to clear the
-    // core by more than the metric's opening radius, ~0.10 m of world here, and
-    // 0.19 m of outward reach against a wedge that is itself 0.4 m thick was not
-    // it. The azimuths now include one at ~0 and one at ~PI, which is what a slab
-    // needs — edge-on at the shipped facing, the strands perpendicular to its face
-    // are the only ones on the free screen axis.
+    // [azimuth, height01, length scale]. 0 is +Z, the direction the character faces
+    // (`appendages.ts`), so both of these are behind the slab.
     const spec: Array<[number, number, number]> = [
-      [Math.PI * 0.08, 0.34, 1.00],
-      [Math.PI * 0.55, 0.42, 0.86],
-      [-Math.PI * 0.50, 0.30, 0.72],
-      [Math.PI * 0.96, 0.28, 0.92],
+      [Math.PI * 0.93, 0.58, 0.85],
+      [Math.PI * 0.74, 0.40, 0.62],
     ];
     for (const [azimuth, height01, k] of spec) {
       const { at, out } = massAnchor(head, box, { azimuth, height01, inset: 0.14 });
+      // ⚠️ ROUND 1 REACHED OUT 0.78R AND CAME BACK IN TO 0.74R, AND IT READ AS A
+      // HANDLE. See `shots/ch/pizza/after/lobby_side.png`: a near-constant-thickness
+      // tube that arcs out, over and down, with both ends against the mass, is a mug
+      // handle — which is the same failure class as the ear, one shape further on.
+      // Cheese does not arc; it SAGS. Reach halved, drop raised past the reach, and
+      // the taper steepened to 3:1 so the strand thins as it falls.
+      //
+      // ⚠️ AND THE REACH IS MONOTONIC, which is the actual mechanism. Round 2 shortened
+      // the strand and it STILL read as a handle in profile, because the reach went
+      // 0.34 -> 0.50 -> 0.44: the tip curved back toward the mass, and a tube whose two
+      // ends both approach the body IS a handle whatever its length. A hanging strand's
+      // outline can only move away. 0.34 -> 0.46 -> 0.54.
       const pts = [
         at.clone(),
-        at.clone().addScaledVector(out, R * 0.40 * k).add(new THREE.Vector3(0, -R * 0.18 * k, 0)),
-        at.clone().addScaledVector(out, R * 0.72 * k).add(new THREE.Vector3(0, -R * 0.46 * k, 0)),
-        at.clone().addScaledVector(out, R * 0.68 * k).add(new THREE.Vector3(0, -R * 0.80 * k, 0)),
+        at.clone().addScaledVector(out, R * 0.34 * k).add(new THREE.Vector3(0, -R * 0.24 * k, 0)),
+        at.clone().addScaledVector(out, R * 0.46 * k).add(new THREE.Vector3(0, -R * 0.62 * k, 0)),
+        at.clone().addScaledVector(out, R * 0.54 * k).add(new THREE.Vector3(0, -R * 1.00 * k, 0)),
       ];
-      const str = curl(cheeseMat, pts, { rBase: R * 0.085, rTip: R * 0.030 });
+      // Fatter at the root and BLUNTER at the tip than the old strands (0.085 -> 0.030
+      // became 0.105 -> 0.035, and a bead caps it). A tapered point is the shape that
+      // reads as a horn; a molten strand ends in a bead.
+      const str = curl(cheeseMat, pts, { rBase: R * 0.105, rTip: R * 0.035 });
       str.name = 'pizza_cheese_string';
       head.add(str);
+      const bead = knob(cheeseMat, R * 0.058 * (0.7 + 0.3 * k));
+      bead.name = 'pizza_cheese_bead';
+      bead.position.copy(pts[3]);
+      head.add(bead);
     }
   }
 
@@ -777,34 +1319,8 @@ export class PizzaCharacter extends BaseCharacter {
     mittGroup.add(thumb);
     this.rig.joints.handL.add(mittGroup);
 
-    // Flour-dust + toasted-char speckling along the crust rim's own base curve —
-    // small surface detail so the crust reads as baked dough rather than one
-    // flat matte colour. Sampled off the exact quadratic curve `pizza_dough`'s
-    // own base uses, so specks sit precisely on the rim, never floating or
-    // sunk into the dough.
-    const tipY = R * 0.98, baseY = -R * 0.86, halfWedge = R * 0.80, depth = R * 0.62;
-    const rimDepth = depth + R * 0.1;
-    const rimFrontZ = rimDepth / 2 + R * 0.13 + R * 0.008;
-    const p0 = new THREE.Vector2(-halfWedge, baseY + R * 0.10);
-    const p1 = new THREE.Vector2(0, baseY - R * 0.30);
-    const p2 = new THREE.Vector2(halfWedge, baseY + R * 0.10);
-    const quadPt = (t: number): THREE.Vector2 => {
-      const a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
-      return new THREE.Vector2(a * p0.x + b * p1.x + c * p2.x, a * p0.y + b * p1.y + c * p2.y);
-    };
-    const flourMat = toonMat({ color: FLOUR_DUST, roughness: 0.92 });
-    const charMat = toonMat({ color: CRUST_CHAR, roughness: 0.8 });
-    const speckTs = [0.12, 0.22, 0.34, 0.46, 0.58, 0.70, 0.82, 0.90];
-    for (let i = 0; i < speckTs.length; i++) {
-      const p = quadPt(speckTs[i]);
-      const isChar = i % 3 === 1;
-      const speck = new THREE.Mesh(new THREE.SphereGeometry(R * (isChar ? 0.026 : 0.020), 6, 6), isChar ? charMat : flourMat);
-      speck.name = isChar ? 'pizza_char_speck' : 'pizza_flour_speck';
-      speck.position.set(p.x, p.y + R * 0.035, rimFrontZ);
-      speck.scale.set(1, 0.6, 0.5);
-      speck.userData.noOutline = true;
-      head.add(speck);
-    }
+    // (The flour/char speck row that used to live here is gone — see the constructor,
+    // where flour is now placed against the wedge's own solved half-widths.)
   }
 
   /**
