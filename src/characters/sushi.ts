@@ -865,6 +865,27 @@ export class SushiCharacter extends BaseCharacter {
       thickAt: (h) => drapeTAtX(0, h, SCALE_R * 0.005),
     });
     if (strapGeo) {
+      // ── A SECOND MECHANISM I NAMED AND THE PIXELS REFUSED ────────────────────
+      // In the lobby head crop this strap reads as a SLAB — a dark rectangle with a
+      // broad soft specular, i.e. a screen or a visor. Three rounds of geometry (wider,
+      // flatter, flush) moved it from "a battery" to "a slab" and no further, so the
+      // next hypothesis was the MATERIAL: near-black at roughness 0.3 is glass, and real
+      // nori is matte. Tried `toonMat({ color: '#14211A', roughness: 0.66 })`:
+      //
+      //   glossy (kept)   figure/ground dL 0.1231   range 0.842   p50 0.47
+      //   matte           figure/ground dL 0.0912   range 0.821   p50 0.43
+      //
+      // and the two head crops are, side by side, INDISTINGUISHABLE. The gloss was not
+      // the cause either. It cost 0.032 of figure/ground — enough to take `pot_south`
+      // from over the 0.10 standard to under it, on a gate that allows exactly one
+      // failing station — for no visible gain, so it is reverted.
+      //
+      // What is left is the shape, and specifically the CAMERA: this band arches over a
+      // crown that is steep at the front, so at the lobby's 20 deg it presents a large
+      // near-planar face. At the match's 58 deg the same geometry reads correctly as a
+      // nori strap across the fish, which is why it is kept. ⚠️ That is a genuine split
+      // between the two shipped cameras rather than a defect with a known fix, and it is
+      // flagged for Uri rather than iterated on further.
       const strap = new THREE.Mesh(strapGeo, noriMat);
       strap.name = 'sushi_nori_strap';
       strap.castShadow = true;
