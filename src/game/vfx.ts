@@ -897,66 +897,124 @@ function buildGlazeMarkTexture(variant: number): THREE.CanvasTexture {
   };
 
   // Body: a DARK diagonal ramp. The map is a multiplier and the material colour is the
-  // RIM colour, so the body is a deep version of that same hue (0.30-0.44 of it) and
-  // the rim below is the only place the full colour appears.
+  // mark's colour, so the body is a deep version of that hue and the SPECKLES below are
+  // the only place near-full colour appears.
   outline();
   const body = ctx.createLinearGradient(size * 0.18, size * 0.12, size * 0.86, size * 0.92);
-  body.addColorStop(0, 'rgb(74,74,74)');
-  body.addColorStop(0.5, 'rgb(58,58,58)');
-  body.addColorStop(1, 'rgb(44,44,44)');
+  body.addColorStop(0, 'rgb(104,104,104)');
+  body.addColorStop(0.5, 'rgb(76,76,76)');
+  body.addColorStop(1, 'rgb(52,52,52)');
   ctx.fillStyle = body;
   ctx.fill();
 
   ctx.save();
   outline();
   ctx.clip();
-  // ── A HOT RIM, and this is the part that was got wrong first ──────────────────
+  // ── THE RIM POLARITY, AND WHY IT IS NOW DARK ──────────────────────────────────
   //
-  // Version 1 made the whole mark uniformly dark. Measured, that was a REGRESSION on
-  // the very thing this change exists to fix: the mark landed at composited luma 0.215
-  // against a Donut whose own mean is 0.347, so the mark stopped matching the FLOOR and
-  // started matching the CAST instead — |dL| to the cast 0.132, under the 0.15 this
-  // file's own hue contract asks of a transient, with only 6 degrees of hue between
-  // them. Trading one collision for another is not a fix.
+  // Kept above this, because it is the reasoning that was reversed and this file's rule
+  // is to keep the old wording with the reason: *"A dark body with a BRIGHT rim cannot
+  // make that trade, because it occupies two values at once: composited, the body sits
+  // ~0.19 BELOW the floor and the rim ~0.13 ABOVE it, straddling the cast."* And the
+  // hairline was chosen over a thick bright rim because *"marks drop every 160 ms and
+  // overlap almost completely, so every mark's rim drew over the previous mark's body
+  // and a trail stacked into concentric contour rings, a red flower rather than a
+  // spill."*
   //
-  // A dark body with a BRIGHT rim cannot make that trade, because it occupies two
-  // values at once: composited, the body sits ~0.19 BELOW the floor and the rim ~0.13
-  // ABOVE it, straddling the cast. Whatever value a character standing on the mark
-  // happens to be, part of the mark contrasts with it — which is also what the genre
-  // does with persistent ground hazards, and why they stay readable under a fighter.
+  // ⚠️ BOTH HALVES OF THAT ARE FALSIFIED, and by the judgement PNG the second half
+  // itself invokes. Thinning the bright rim from 0.055 to 0.028 did not stop the rings;
+  // it made them thinner. `shots/review/cr1/stage/match_donut_taco_03.png` — the frame
+  // the blind round actually scored — shows a chain of ~20 INDIVIDUALLY OUTLINED
+  // lozenges, because at `dropIntervalMs` 160 every mark's bright rim draws over the
+  // previous mark's body and it does so whatever the line width. The five-of-six critic
+  // complaint did not move across the hue fix; only the adjective did ("opaque flat-pink
+  // cloud" -> "large flat semi-transparent RED BLOB").
   //
-  // Shoulder first (wide, mid), rim second (narrow, full) — `stroke()` centres on the
-  // path and the clip discards the outer half, so each stroke lands as a band of half
-  // its width just INSIDE the silhouette.
+  // And the "straddling the cast" claim was never true as shipped. The rim is a
+  // hairline, so it is ~3% of the mark's pixels and contributes almost nothing to the
+  // mark's mean. Measured by same-frame ablation (`tools/tmp/trail_probe.mjs`, this
+  // tree): mark L 0.3473 against a cast at L 0.4225 — **|dL| 0.0752**, which is not
+  // merely under the 0.15 the contract asks, it is WORSE than the 0.132 that got the
+  // uniform-dark `#78112B` variant rejected as a regression. The reason is that the
+  // OTHER operand moved: that decision was taken against "a Donut whose own mean is
+  // 0.347" and the cast has since been lifted to 0.4225 by the render/cast passes. The
+  // premise expired, the conclusion did not (`docs/LESSONS.md` §5's "a baseline is
+  // itself a measurement", one level up — a REASON can go stale the same way).
   //
-  // ⚠️ The rim is a HAIRLINE, and that is the second thing this got wrong. A thick
-  // bright rim (0.055 of the texture, over a 0.13 shoulder) measured well — flatness
-  // 1.07x, hue distance to the floor 23.8 degrees — and looked like a target: marks
-  // drop every 160 ms and overlap almost completely, so every mark's rim drew over the
-  // previous mark's body and a trail stacked into concentric contour rings, a red
-  // flower rather than a spill. The judgement PNG is the only thing that catches that;
-  // no counter in this probe would have (non-negotiable #3).
-  ctx.lineWidth = size * 0.05;
-  ctx.strokeStyle = 'rgb(96,96,96)';
+  // ── The polarity flip, and why it is self-solving ──────────────────────────────
+  //
+  // A DARK rim is invisible where it lands on a neighbouring mark's dark body and
+  // strongly visible where it meets the FLOOR — so a pile of overlapping marks draws
+  // exactly ONE contour, around the union, which is what the reference plate's poison
+  // cloud does (`reference/.../bs_05.png`: one hot rim around the whole cloud, none
+  // between its lobes). A bright rim does the precise opposite: it is loudest where it
+  // crosses a neighbour and quietest against the floor. Stacking contrast falls from
+  // |238-58| = 180 to |26-68| = 42, a 4.3x reduction, with no change to the mark's
+  // footprint — the hitbox is `TRAIL.radius` and is not touched.
+  //
+  // Shoulder first (wide, mid), rim second (narrow, dark) — `stroke()` centres on the
+  // path and the clip discards the outer half, so each lands as a band of half its
+  // width just INSIDE the silhouette.
+  ctx.lineWidth = size * 0.055;
+  ctx.strokeStyle = 'rgb(44,44,44)';
   outline();
   ctx.stroke();
-  ctx.lineWidth = size * 0.028;
-  ctx.strokeStyle = 'rgb(238,238,238)';
+  ctx.lineWidth = size * 0.03;
+  ctx.strokeStyle = 'rgb(26,26,26)';
   outline();
   ctx.stroke();
-  // Two lighter pockets and one dark pit, placed off-centre and per-variant. Small hard
-  // shapes, not a noise field: at this camera a fine noise texture averages back out to
-  // a flat tint (`docs/LESSONS.md` §6, "features the size of the tile read as a tint,
-  // not detail").
-  const pit = (fx: number, fy: number, fr: number, v: number): void => {
+  // ── INTERIOR SPECKLES — where the upward half of the value range went ──────────
+  //
+  // The rim used to be the mark's only bright value and it could not be one, being a
+  // hairline. These carry it instead, and they are the shape the reference actually
+  // uses: `bs_05`'s cloud is a dark body carrying many small BRIGHT pockets, measured
+  // (same code, `tools/tmp/tr_area.mjs --ref`) at an internal L stdev of **0.1371**
+  // against our shipped **0.0929** — the "flat" half of the critic phrase, in numbers,
+  // and the half the hue fix never addressed.
+  //
+  // Every speckle is placed well INSIDE the silhouette (|centre| <= 0.30 of the texture
+  // from the middle, against a mean lobe radius of 0.40), for the same reason the rim
+  // is dark: anything on the boundary stacks into a contour when marks overlap, and
+  // anything in the interior stacks into texture. Deterministic per variant — no RNG,
+  // so a judgement screenshot is reproducible.
+  const dot = (fx: number, fy: number, fr: number, v: number): void => {
     ctx.beginPath();
     ctx.arc(c + fx * size, c + fy * size, fr * size, 0, Math.PI * 2);
     ctx.fillStyle = `rgb(${v},${v},${v})`;
     ctx.fill();
   };
-  pit(-0.16 + 0.05 * variant, 0.14, 0.11, 92);
-  pit(0.19, -0.11 + 0.06 * variant, 0.075, 30);
-  pit(-0.06, -0.19, 0.055, 128);
+  //
+  // ⚠️ THE VALUE RANGE IS THE POINT, NOT THE DOTS, and round 1 of this change proved it
+  // by getting it wrong. A first pass replaced the bright rim with speckles at 214-160
+  // over a body of 92-48 and MEASURED FLATTER than what it replaced: internal L stdev
+  // 0.0895 +/- 0.0005 against the shipped 0.1036 +/- 0.0021 (n=2 vs n=4 on one held
+  // snapshot, 22 marks per arm). It killed the ring stack — the PNG is unambiguous — and
+  // paid for it in the exact adjective the critics used. The bright rim was carrying more
+  // of the mark's value range than its 3% of the mark's area suggested, because a stroke
+  // sits on the ANTIALIASED BOUNDARY and composites against the light floor. So the
+  // speckles run to FULL strength (255 = the material colour undiluted) and the pits to
+  // near-black, and the body sits between them.
+  const spin = variant * 1.7;
+  for (let i = 0; i < 7; i++) {
+    const a = spin + i * 2.399963;                 // golden angle — even, non-lattice
+    const r = 0.075 + 0.215 * Math.sqrt((i + 0.55) / 7);
+    // Radius runs 0.080 -> 0.050 across the seven, so a mark carries a few large
+    // pockets and several small ones rather than a lattice of equal dots.
+    //
+    // ⚠️ A STEEPER TAPER WAS MEASURED AND REJECTED. Running 0.085 -> 0.034 looks better
+    // described and reads with more variety, and it costs internal L stdev 0.1043 ->
+    // 0.0968 (n=2, spread 0.0000) against a shipped 0.1046 +/- 0.0026 (n=6) — a 3-sigma
+    // move on the ONE structural quantity this change exists to hold, because the small
+    // dots simply carry less bright area. Variety that is paid for in the value range is
+    // the wrong trade: "flat" is the critic word, "samey" is not.
+    const rad = 0.080 - 0.0050 * i;
+    const v = 255 - 8 * i;
+    dot(Math.cos(a) * r, Math.sin(a) * r, rad, v);
+  }
+  // Dark pits, so the body is not uniform between the speckles and the dark half of the
+  // range is populated too — stdev is two-sided and the reference cloud has both.
+  dot(-0.06 + 0.05 * variant, 0.20, 0.075, 24);
+  dot(0.20 - 0.04 * variant, -0.17, 0.055, 20);
   ctx.restore();
 
   const tex = new THREE.CanvasTexture(canvas);
