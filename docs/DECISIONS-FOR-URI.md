@@ -2092,3 +2092,57 @@ fine, while the assembled character reads as the wrong animal.
 component is badly built"*; only a whole-character look finds *"these correct components compose
 something else."* Any future per-part run must be paired with a whole-figure panel — and the
 existing `figure-whole` control exists for precisely this, so **read it, do not just compute it.**
+
+---
+
+## 40. ✅ EGG — and three cross-character patterns that matter more than any single character
+
+> *"The **ears don't make sense**. The egg **lost the appearance of egg**. We need to improve the
+> face, and the shape to resemble an egg."*
+
+Egg's shell is authored as *"a **true ovoid** (not a sphere) — fuller at the bottom, tapering"*, and
+`egg.ts:206` records that a clean ovoid was **"the one thing Egg had going for it in the silhouette
+test."** So the egg read was not lost to a bad shape — **it was lost to the details added on top of
+it**: a lifted lid that breaks the crown, and shell **shards** that flank the head.
+
+**The detail added to signal the subject destroyed the silhouette that signalled it better.**
+That is the finding, and it generalises past this character.
+
+---
+
+### 🚨 PATTERN 1 — a pointed shape flanking a head reads as an EAR. Three for three.
+
+| character | authored as | Uri reads |
+|---|---|---|
+| **burrito** | torn foil peaks on the wrap | *"looks a bit like a goat"* |
+| **egg** | shell shards | *"the ears don't make sense"* |
+| **hamburger** | lettuce leaves | (visible in his shot, same construction) |
+
+**Two pointed masses either side of a head is the universal ear signal**, and it overrides whatever
+the shapes are actually made of. Any character with side-flanking points needs them re-placed
+(above, behind, asymmetric) or re-shaped (rounded, drooping) — **or the character will read as an
+animal no matter how good its face is.**
+
+### 🎯 PATTERN 2 — Uri's eye ranking is exactly the construction ladder, and it names our reference
+
+He ranked the faces without seeing any code: hamburger *worst* → donut *better* → taco *better
+still* → and Egg's are plainly the most complete.
+
+| | construction |
+|---|---|
+| hamburger | a flattened **arc/torus** — a stroke |
+| donut | `SphereGeometry` at `roughness 0.25` — a specular highlight |
+| taco | sphere **+ an explicit white glint mesh** |
+| **egg** | **open eyes with catchlights** — sclera, pupil and highlight as separate elements |
+
+**Egg is the cast reference for eyes.** Bring the other ten up to it rather than inventing anything —
+and then take *all* of them further, because the per-part measurement still says **0% of our eye
+pixels are above 0.85 luma against the reference's 31.1% / 34.1%**.
+
+### ⚠️ PATTERN 3 — the per-part instrument cannot see any of this
+
+It scores parts **in isolation**, which is what removes the noise — and also what removes the
+information needed to see *"these correct parts compose a goat"* or *"the lid broke the egg read"*.
+**Per-part finds badly-built components; only a whole-figure look finds a mis-composed character.**
+Uri has now caught two of these that the instrument structurally could not. Every future per-part
+run must be **paired with a whole-figure panel that is actually looked at.**
