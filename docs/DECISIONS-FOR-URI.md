@@ -2342,3 +2342,53 @@ chroma is the cheaper lever"*. Measured today: **warm chroma FAILS LOW (0.053 vs
 while cool sits at 0.427 against a 0.343 target — over.** A teal-chip palette copied literally from
 the reference was **rejected on that basis**: it would have spent the one budget this frame has none
 of. **Warm is the scarce budget now.** CLAUDE.md has been corrected.
+
+---
+
+## 45. ❌ THE 22° HYPOTHESIS IS FALSIFIED — the reference camera is ~51°, ours is 57.4°
+
+Uri: *"the reference characters are roughly 22 degrees… that could also explain why we couldn't
+improve scores."* **Measured, and it does not hold.**
+
+A circle lying on the ground images as an ellipse with `minor/major = sin(pitch)` — semantic-free,
+no rig, no knowledge of what a plate depicts. **Calibrated on our own renders first, including a
+held-out angle:**
+
+| target | true | recovered |
+|---|---|---|
+| ours, ground ring @ 20° | 20 | **19.50** |
+| ours, ground ring @ 40° *(held out)* | 40 | **39.24** |
+| ours, ground ring @ 58° | 58 | **57.44** |
+| reference `bs_06` / `bs_01` / `bs_04` | — | **49.4 · 49.9 · 51.3 · 53.2** |
+
+Resolution floor **±1.0°**. So the like-for-like gap is **~6.5°, not 36°.** Closing it moves
+crown-share from 0.924 to 0.888 — far too small to be the binding constraint on a 4.33-vs-8.00
+element — while the blast radius is `FAIR_PLAY` radius, `aspect.mjs`, HUD layout and every arena
+framing constant. **Recommendation: leave the match camera at 58°.**
+
+**Two follow-up hypotheses of its own, also falsified:** delivered face *area* survives the steep
+camera fine (median 0.842 where a flat vertical face would give 0.564 — our faces survive *better*
+than flat), and crown blankness is a **null** (ours 78.7–152.3 against plates 66.5–147.8, fully
+overlapping).
+
+### 🎯 But something real survived, and it is a RIG lever, not a camera one
+
+**Face-plane elevation: 8 of 11 characters have their face aimed BELOW the horizon.**
+
+```
+hotdog +23.9 · hamburger +22.6 · egg +7.8    ← aimed up
+sushi −11.9 · soup −12.4 · burrito −12.4 · donut −19.6
+waterbottle −21.4 · pizza −27.6 · taco −32.7 · lollipop −56.3   ← aimed down
+```
+
+**A face aimed below the horizon is wrong at BOTH shipped cameras** — the same class as a limb
+passing through a torso, which is your own framing applied to a second defect. Note the three
+aimed *up* include the two whose faces you rated best-constructed.
+
+⚠️ **Do not rank the cast on this number alone** — it assumes a spherical head and it fails for
+donut (a torus head's centre-to-face vector is not its surface normal; predicted 1.000, measured
+0.645). It is a pointer, not a scoreboard.
+
+⚠️ **And the live cast overhaul is already moving it, hard, in both directions** — lollipop
+**−56.3 → +65.8**, donut −19.6 → −30.0, egg +7.8 → +17.9. Whether or not those agents intend to,
+they are moving exactly this quantity.
