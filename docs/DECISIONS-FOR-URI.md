@@ -2301,3 +2301,44 @@ a game screenshot."* Both controls passed, so the instrument discriminates; it i
 moves. **Per-element numbers are usable as gaps and are NOT comparable to the 5.17 / 7.00 screen
 scores.** (Notably, all three rounds where we *beat* the reference were among the four discarded —
 the validity rule caught every anomaly it exists to catch.)
+
+---
+
+## 44. ✅ §34 SHIPPED — ground debris landed, and the pale-blue slab was the STOVE ISLAND CAP
+
+Your *"keep it tiles, add debris"* is done (`aa9b743`). **The tile field was not touched** — no
+pavers, no hex, no tile-size change, no global floor value moved.
+
+Measured against a **true null arm** (chips driven to zero on the same tree; it reproduces HEAD's
+draw counts *exactly*, which is what proves it is the null):
+
+| | null | after | in floors | reference band |
+|---|---|---|---|---|
+| **groundFeat** | 0.1239 | **0.1635** | **14.1×** | 0.136–0.276 — **every frame now inside it** |
+| **featShare** | 0.1765 | **0.2398** | **9.9×** | 0.246–0.349 — now overlaps; median still **one floor short**. Not closed. |
+| oriAll (the lattice) | 0.4723 | 0.4204 | 3.9× | diluted, as predicted |
+
+Cost: **+30 draw calls (+3.7%)** — and the chip layer itself is **+4 draws for 1,734 chips**.
+Side effects, all paired on 18 identical stations: cast figure/ground **+17%**, `playerRank`
+37 → 32.5 (recovering about a third of the earlier standing regression), and `arena-scan`'s
+**warm-chroma rail flips FAIL → PASS**.
+
+**The pale-blue "placeholder slab" was the stove island cap** — the arena's largest cover, 8.5×4.5 m,
+with its hob covering only **11.5%** of the top face. So **88% of the biggest object in frame was one
+unbroken fill.** Independent corroboration, from an instrument with no notion of "blank": a
+ground-finder mistook it for *floor* in 3/10, 4/10 and 3/10 frames before — and **1 of 9** after.
+And the earlier prop-value pass **did** make it worse (167 → 195 delivered luma), confirmed rather
+than assumed. The value was kept (it bought the highlight result); the blankness was filled instead.
+
+### ❓ One taste call for you: chip density
+
+We sit at `groundFeat` **0.163** against a reference band of 0.136–0.276 (median 0.187) — **inside
+the band and below its median**, so by the reference's own measure the floor is *not* over-littered.
+But **1,734 chips is a busy floor**, and that is an eye question, not a metric one. Two constants
+dial it: `CHIP_CELL` and `CHIP_P_MIN/MAX` in `src/arena/floor.ts`.
+
+⚠️ **And one piece of our own standing advice is now stale.** `docs/LESSONS.md` §8 says *"adding cool
+chroma is the cheaper lever"*. Measured today: **warm chroma FAILS LOW (0.053 vs a 0.072 minimum)
+while cool sits at 0.427 against a 0.343 target — over.** A teal-chip palette copied literally from
+the reference was **rejected on that basis**: it would have spent the one budget this frame has none
+of. **Warm is the scarce budget now.** CLAUDE.md has been corrected.

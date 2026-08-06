@@ -228,6 +228,15 @@ desaturates; removed deliberately). ⚠️ **Do not fix anything by desaturating
 Reference plates live in `reference/images/curated/` — `gameplay_topdown/` for the arena and cast,
 `menus/` for the screens (6 plates supplied by Uri).
 
+⚠️ **"ADDING COOL CHROMA IS THE CHEAP LEVER" IS NOW STALE — the frame moved under it.** That advice
+(`docs/LESSONS.md` §8) was true when the frame was under-chromatic overall and warm-heavy in share.
+Measured **2026-08-06** on the debris pass: **warm chroma now FAILS LOW (0.053 against a 0.072
+minimum) while cool sits at 0.427 against a 0.343 target — over.** A teal-chip palette copied
+literally from `bs_01` was **rejected on `arena-scan`** for exactly this: *"copying the plate would
+have spent the one budget this frame has none of."*
+→ **Warm is the scarce budget today.** Re-read `arena-scan --baseline` before assuming either
+direction; the rails move as the arena changes, and the standing advice ages with them.
+
 ---
 
 ## Security constraints — permanent

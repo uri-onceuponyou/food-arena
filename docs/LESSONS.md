@@ -63,6 +63,39 @@ Corollary found at the same time: **every transparent material in the entire cas
 `depthWrite: true`** — the exact silent-occluder trap named two paragraphs above, present
 project-wide and never swept for.
 
+**The twentieth is the nastiest yet: the invisible thing's SHADOW was visible, so it looked like it
+was working.**
+
+`toonMat({ flatShading: true })` produces a shader that **never links**. `applyRimLight` reads
+`vNormal`; under three's `FLAT_SHADED` path that varying is not declared, so `VALIDATE_STATUS` comes
+back **false** and **every chip drew nothing.**
+
+It survived **three tuning rounds** — and here is why, which is the part worth keeping:
+**the shadow-depth program carries no rim patch**, so it linked fine and kept drawing each chip's
+**contact shadow**. The floor rendered a field of dark specks that looked exactly like the
+low-contrast litter being aimed for. **Two whole palettes were tuned against geometry that was not
+on screen.**
+
+Caught by a **known-bad input** — every chip forced to `#FF00FF`, and the PNG came back
+**byte-identical** — not by looking, because looking is what had been passing it for three rounds.
+
+→ **A convincing render is not evidence the thing renders.** When a change is meant to add geometry,
+ablate it to an unmissable colour and require the frame to MOVE. And note the general trap: **a
+mesh's shadow, outline, or contact decal can be drawn by a DIFFERENT program from the mesh itself**,
+so any of them surviving proves nothing about the mesh. Guarded now by
+`tools/tmp/ar_chipcheck.mjs` (6/6, including a control that re-enables `flatShading` and requires
+the check to FIRE).
+
+⚠️ **Routed and unfixed:** `toonMat` still accepts `flatShading` and applies the rim by default, so
+that combination is a **silently broken shader for any future caller.** The fix belongs in
+`src/render/toon.ts` — either throw when `flatShading && rim !== false`, or give `applyRimLight` an
+`#ifdef FLAT_SHADED` fallback normal.
+
+**And a second, independent fault found in the same pass: the palette was priced in the wrong colour
+space.** "Authored luma" was computed on the **sRGB** triple, but lighting multiplies **linear**
+albedo. `#9C8A4A` over `#8A5F6F` is **1.31× in sRGB and 1.75× in linear** — so every contrast ratio
+chosen by eye from hex values was wrong by ~35%. Solve for a target **linear**-luma ratio.
+
 ### The probe technique
 Replace the thing with something **unmissable** — a garish 4×4 red/cyan checker, a 5× scale,
 a 10-second lifetime — and render. This *disproved* a five-round theory in ten minutes: the
