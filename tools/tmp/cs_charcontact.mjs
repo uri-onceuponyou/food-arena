@@ -540,6 +540,17 @@ if (has('ours')) {
     st.markShadowsDirty(); st.renderer.shadowMap.autoUpdate = true;
     return n;
   }`;
+  // `Stage.updateContactShadows` re-shows the group every frame, so hiding it once is
+  // overwritten before the next capture — the same trap `contactshadow.mjs` documents
+  // for `lighting.focus()`. The GROUP's own `visible` is what the walk never touches.
+  const SETDECAL = `(on) => {
+    const g = window.__stage.scene.getObjectByName('contact:shadows');
+    if (!g) return 0;
+    if (!g.__csPatched) { g.__csPatched = true; Object.defineProperty(g, 'visible', { get() { return this.__csWant !== false; }, set(v) { if (this.__csForce === undefined) this.__csWant = v; }, configurable: true }); }
+    g.__csForce = on ? undefined : false;
+    g.__csWant = on;
+    return g.children.length;
+  }`;
 
   /**
    * The floor level for OUR frames. Hand-marking a rect on a frame that is
@@ -585,14 +596,24 @@ if (has('ours')) {
     const shipped = await raw();
     await sharp(await canvas.screenshot()).toFile(`${OUT}/${sx}_${sy}__shipped.png`);
 
-    await p.evaluate(`window.__csCast = ${SETCAST};`);
+    await p.evaluate(`window.__csCast = ${SETCAST}; window.__csDecal = ${SETDECAL};`);
     const all = info.chars.flatMap((c) => c.meshes);
+
+    // (a) the DECAL alone, isolated: everything shipped except the contact group.
+    const nDecal = await p.evaluate(() => window.__csDecal(false));
+    await p.waitForTimeout(700);
+    const noDecal = await raw();
+    await sharp(await canvas.screenshot()).toFile(`${OUT}/${sx}_${sy}__nodecal.png`);
+
+    // (b) NO CONTACT AT ALL — the cast shadow off as well. This is the known-bad.
     await p.evaluate(([u]) => window.__csCast(u, false), [all]);
     await p.waitForTimeout(900);
     const ablated = await raw();
     await sharp(await canvas.screenshot()).toFile(`${OUT}/${sx}_${sy}__ablated.png`);
     await p.evaluate(([u]) => window.__csCast(u, true), [all]);
+    await p.evaluate(() => window.__csDecal(true));
     await p.waitForTimeout(400);
+    if (nDecal === 0) console.log('  (no contact:shadows group in this build — nodecal == shipped by construction)');
 
     for (const c of info.chars) {
       const e = { cx: c.cx, cy: c.cy, rx: c.rx, ry: c.ry };
@@ -605,6 +626,7 @@ if (has('ours')) {
       }
       const shipM = measure(shipped, W, H, e, c.shadowDeg);
       const ablM = measure(ablated, W, H, e, c.shadowDeg);
+      const ndM = measure(noDecal, W, H, e, c.shadowDeg);
       rows.push({ plate: `${sx}:${sy}`, name: c.name, kind: 'char', ...shipM,
         ablShadeCoreDL: ablM.shadeCoreDL, ablOppCoreDL: ablM.oppCoreDL,
         deltaShade: +(shipM.shadeCoreDL - ablM.shadeCoreDL).toFixed(4),
@@ -613,6 +635,10 @@ if (has('ours')) {
         // of the floor it falls on. This is the column that compares to the plates.
         deltaShadeFrac: +((shipM.shadeCoreDL - ablM.shadeCoreDL) / shipM.floorL).toFixed(3),
         deltaOppFrac: +((shipM.oppCoreDL - ablM.oppCoreDL) / shipM.floorL).toFixed(3),
+        // The DECAL's own contribution, isolated from the cast shadow. Zero by
+        // construction on a build with no contact group.
+        decalShadeFrac: +((shipM.shadeCoreDL - ndM.shadeCoreDL) / shipM.floorL).toFixed(3),
+        decalOppFrac: +((shipM.oppCoreDL - ndM.oppCoreDL) / shipM.floorL).toFixed(3),
         ellipse: e, shadowDeg: +c.shadowDeg.toFixed(1) });
       // the ABLATED frame, measured as its own row: this is the known-bad input.
       rows.push({ plate: `${sx}:${sy}`, name: `${c.name}~ablated`, kind: 'null', ...ablM, ellipse: e, shadowDeg: +c.shadowDeg.toFixed(1) });
@@ -624,8 +650,10 @@ if (has('ours')) {
   printRows(rows, `OURS — ${TAG}`);
   const chars = rows.filter((r) => r.kind === 'char');
   console.log('\n  ABLATION (the known-bad): shipped minus cast-shadow-off, same frame, same ellipse, same floor rect');
-  console.log('  station    who               shipped   ablated    delta   deltaFrac   oppDelta  oppFrac');
-  for (const r of chars) console.log(`  ${r.plate.padEnd(10)} ${r.name.padEnd(16)} ${r.shadeCoreDL.toFixed(4).padStart(8)} ${r.ablShadeCoreDL.toFixed(4).padStart(9)} ${r.deltaShade.toFixed(4).padStart(8)} ${String(r.deltaShadeFrac).padStart(11)} ${r.deltaOpp.toFixed(4).padStart(10)} ${String(r.deltaOppFrac).padStart(8)}`);
+  console.log('  station    who               shipped   ablated    delta   TOTALshadeFrac  TOTALoppFrac   decalShadeFrac  decalOppFrac');
+  for (const r of chars) console.log(`  ${r.plate.padEnd(10)} ${r.name.padEnd(16)} ${r.shadeCoreDL.toFixed(4).padStart(8)} ${r.ablShadeCoreDL.toFixed(4).padStart(9)} ${r.deltaShade.toFixed(4).padStart(8)} ${String(r.deltaShadeFrac).padStart(15)} ${String(r.deltaOppFrac).padStart(13)} ${String(r.decalShadeFrac).padStart(16)} ${String(r.decalOppFrac).padStart(13)}`);
+  console.log('\n  REFERENCE BAND (bs_06 vent props, the only reference subjects with no UI decal over them):');
+  console.log('    shade fraction 0.192 / 0.269 / 0.324      OPPOSITE fraction 0.198 / 0.061 / 0.087');
   const d = chars.map((r) => r.deltaShade);
   console.log(`\n  median delta ${d.slice().sort((a, c) => a - c)[Math.floor(d.length / 2)].toFixed(4)}   max ${Math.max(...d).toFixed(4)}`);
   await writeFile(`${OUT}/ours.json`, JSON.stringify(rows, null, 1));
