@@ -1,0 +1,29 @@
+{
+  "rubric": "tools/review.rubric.txt (canonical v1, byte-identical)",
+  "seed": 20260806,
+  "note": "One fresh critic per element, blind, scoring BOTH panels. Validity rule: reference side must land 7-9 or the round is discarded BEFORE anything is acted on (docs/LESSONS.md section 3).",
+  "controls": {
+    "selfpair": { "a": 7, "b": 7, "expect": "tie", "pass": true },
+    "degraded": { "cleanRef": 5, "degraded": 3, "expect": "degraded materially lower", "pass": true,
+      "note": "the CLEAN reference scored 5 here, outside 7-9 -- see the rubric-displacement finding" }
+  },
+  "rounds": [
+    { "part": "nav-tab-2up",       "oursScore": 7, "refScore": 6, "valid": false, "why": "reference 6, outside 7-9" },
+    { "part": "currency-chips",    "oursScore": 6, "refScore": 7 },
+    { "part": "panel-fighter",     "oursScore": 7, "refScore": 6, "valid": false, "why": "reference 6, outside 7-9" },
+    { "part": "xp-bar",            "oursScore": 7, "refScore": 8 },
+    { "part": "stat-bars",         "oursScore": 3, "refScore": 5, "valid": false, "why": "reference 5, outside 7-9" },
+    { "part": "stat-bars-cs",      "oursScore": 3, "refScore": 7 },
+    { "part": "primary-button",    "oursScore": 6, "refScore": 8 },
+    { "part": "primary-button-cs", "oursScore": 8, "refScore": 8 },
+    { "part": "chest-rows",        "oursScore": 6, "refScore": 8 },
+    { "part": "chest-row-single",  "oursScore": 4, "refScore": 8 },
+    { "part": "mode-chip",         "oursScore": 6, "refScore": 8 },
+    { "part": "rarity-badge",      "oursScore": 5, "refScore": 7 },
+    { "part": "rarity-badge-cs",   "oursScore": 6, "refScore": 7 },
+    { "part": "progress-track",    "oursScore": 5, "refScore": 4, "valid": false, "why": "reference 4, outside 7-9 -- the critic named a bright mark belonging to the SURROUNDING screen intruding into the reference crop, i.e. a CROP fault, which is exactly what the 7-9 validity rule exists to catch" },
+    { "part": "roster-card",       "oursScore": 4, "refScore": 8 },
+    { "part": "secondary-button",  "oursScore": 6, "refScore": 8 },
+    { "part": "weapon-buttons",    "oursScore": 5, "refScore": 8 }
+  ]
+}
