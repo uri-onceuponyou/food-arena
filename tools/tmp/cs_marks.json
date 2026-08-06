@@ -1,0 +1,275 @@
+{
+ "_": "Hand marks for cs_charcontact.mjs. EVERY entry has been drawn back onto its plate with `node tools/tmp/cs_mark.mjs` and looked at. floorRect is a clean open-floor sample used as the floor LEVEL for every mark on that plate; its own spread is printed, and the null sites are the proof it transfers across the plate.",
+ "floorRects": {
+  "bs_01": {
+   "cx": 360,
+   "cy": 455,
+   "w": 120,
+   "h": 50,
+   "note": "spread 0.1030. bs_01's floor is NOT uniform - mode 0.420 here, 0.472 bottom-right, 0.513 top-left. Rows on this plate carry that as bias."
+  },
+  "bs_03": {
+   "cx": 880,
+   "cy": 640,
+   "w": 120,
+   "h": 50,
+   "note": "spread 0.0036; four samples across the plate span 0.694-0.745"
+  },
+  "bs_04": {
+   "cx": 900,
+   "cy": 600,
+   "w": 120,
+   "h": 50,
+   "note": "spread 0.0000; mode is 0.4599-0.4605 at FOUR separate places on this plate - the grass is uniform"
+  },
+  "bs_05": {
+   "cx": 1000,
+   "cy": 600,
+   "w": 120,
+   "h": 50,
+   "note": "spread 0.0882; a darker strip at (600,620) reads 0.378, so this plate is not uniform either"
+  },
+  "bs_06": {
+   "cx": 700,
+   "cy": 600,
+   "w": 120,
+   "h": 50,
+   "note": "spread 0.0039; mode is 0.2815-0.2820 at FOUR separate places - uniform"
+  }
+ },
+ "marks": [
+  {
+   "plate": "bs_06",
+   "name": "ventD",
+   "kind": "prop",
+   "cx": 588,
+   "cy": 528,
+   "rx": 30,
+   "ry": 14,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_06",
+   "name": "ventC",
+   "kind": "prop",
+   "cx": 946,
+   "cy": 462,
+   "rx": 30,
+   "ry": 14,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_06",
+   "name": "ventB",
+   "kind": "prop",
+   "cx": 655,
+   "cy": 340,
+   "rx": 30,
+   "ry": 14,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_06",
+   "name": "ventA",
+   "kind": "prop",
+   "cx": 394,
+   "cy": 258,
+   "rx": 30,
+   "ry": 14,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_01",
+   "name": "grom",
+   "cx": 190,
+   "cy": 408,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_04",
+   "name": "bork6",
+   "cx": 200,
+   "cy": 358,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_04",
+   "name": "nrb",
+   "cx": 772,
+   "cy": 392,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_05",
+   "name": "shelly",
+   "cx": 957,
+   "cy": 328,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_06",
+   "name": "rosa",
+   "cx": 893,
+   "cy": 287,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_06",
+   "name": "griff",
+   "cx": 441,
+   "cy": 610,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_06",
+   "name": "brock",
+   "cx": 300,
+   "cy": 650,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_01",
+   "name": "null1",
+   "kind": "null",
+   "cx": 320,
+   "cy": 330,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_03",
+   "name": "null1",
+   "kind": "null",
+   "cx": 700,
+   "cy": 690,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_03",
+   "name": "null2",
+   "kind": "null",
+   "cx": 240,
+   "cy": 700,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_04",
+   "name": "null1",
+   "kind": "null",
+   "cx": 300,
+   "cy": 620,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_04",
+   "name": "null2",
+   "kind": "null",
+   "cx": 430,
+   "cy": 600,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_05",
+   "name": "null1",
+   "kind": "null",
+   "cx": 200,
+   "cy": 600,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_06",
+   "name": "null1",
+   "kind": "null",
+   "cx": 830,
+   "cy": 620,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_06",
+   "name": "null2",
+   "kind": "null",
+   "cx": 620,
+   "cy": 690,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_06",
+   "name": "null3",
+   "kind": "null",
+   "cx": 980,
+   "cy": 660,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150
+  },
+  {
+   "plate": "bs_01",
+   "name": "bull",
+   "cx": 628,
+   "cy": 690,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150,
+   "skip": "feet 38 px off the bottom of the plate; the measured band leaves the image"
+  },
+  {
+   "plate": "bs_02",
+   "name": "piper",
+   "cx": 240,
+   "cy": 570,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150,
+   "skip": "a round dress covers the whole NEAR band on both flanks - no ground in it"
+  },
+  {
+   "plate": "bs_02",
+   "name": "poco",
+   "cx": 959,
+   "cy": 215,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150,
+   "skip": "standing in a bush; the down-screen half is foliage, not floor"
+  },
+  {
+   "plate": "bs_03",
+   "name": "piper",
+   "cx": 617,
+   "cy": 300,
+   "rx": 26,
+   "ry": 12,
+   "shadowDeg": 150,
+   "skip": "bs_03's brawlers all stand in explosion dust; no clean ground at any foot line"
+  }
+ ]
+}
