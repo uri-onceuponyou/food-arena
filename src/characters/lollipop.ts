@@ -5,18 +5,39 @@
  * this pattern. The rig supplies torso, arms, hands, legs, feet and all motion; this
  * file authors only the food mass on `rig.joints.head`, the face and a palette.
  *
- * Identity is fixed by `rules.ts`: Lollipop, Cyber rarity, Lollipop Smash / Giant
- * Lollipop. The written description ("eyes on the stick, mouth on the candy,
- * concentric red/white swirl disc") is unusual among this cast's face guides — most
- * are treated as loose vibe references, but this one is kept close to literal because
- * it's a genuinely distinctive read once built: it plays on the rig's own neck→head
- * gap, which every other character hides by extending their food mass down to cover
- * it. Here that gap IS the stick, with the swirl disc mounted above it — so the split
- * face (eyes low on the stick, mouth up on the candy) falls out naturally instead of
- * needing anything hacky.
+ * ── ⚠️ THE PARAGRAPH THAT USED TO BE HERE IS KEPT BELOW, BECAUSE IT WAS THE BUG ──
  *
- * The swirl disc is the silhouette landmark and is built as a genuine Archimedean
- * spiral ribbon (not a bullseye of concentric rings) — see `spiralRibbonShape`.
+ * > "The written description ('eyes on the stick, mouth on the candy, concentric
+ * > red/white swirl disc') is unusual among this cast's face guides — most are treated
+ * > as loose vibe references, but this one is kept close to literal because it's a
+ * > genuinely distinctive read once built […] so the split face (eyes low on the stick,
+ * > mouth up on the candy) falls out naturally instead of needing anything hacky."
+ *
+ * That reasoning was internally consistent and it produced the character Uri rejected:
+ * *"limbs and torso intersecting, MAKING THE FACE INVISIBLE. The candy should have more
+ * colors than red only. UNFREEZE THE STRUCTURE — the mouth doesn't have to be above the
+ * eyes."* (`docs/DECISIONS-FOR-URI.md` §41.) Both complaints trace to the one `rules.ts`
+ * line this file was obeying, and the spec has now been rewritten there. The mouth was
+ * above the eyes because the SPEC put it there; the face was occluded by the arms because
+ * the spec put the eyes on the one part of the character the arms swing across.
+ *
+ * ── WHAT THE CHARACTER IS NOW ────────────────────────────────────────────────
+ *  • The whole face lives on the CANDY DISC, mouth below the eyes. The disc is the
+ *    largest flat frontal surface in the cast, so this also retires the ~3 px eye
+ *    problem the old layout fought (see the `stickR` note) BY CONSTRUCTION rather than
+ *    by widening a stick that is really a connectivity budget.
+ *  • The disc front is a shallow SPHERICAL CAP, and every face feature is mounted
+ *    through `discDecal()` — the same "nothing floats, one tangent frame" pattern as
+ *    `egg.ts`'s `addShellDecal`. Egg is the cast's face reference and is copied here,
+ *    then taken past it: sclera + iris + pupil + two catchlights + lash line per eye.
+ *  • The swirl is THREE interleaved Archimedean ribbons in three candy hues on a
+ *    candy-white ground, not one red one. Uri: *"more colors than red only."*
+ *  • The two cellophane tails that flanked the disc are GONE — a pointed mass either
+ *    side of a head reads as an ear or a horn, five for five across this cast, whatever
+ *    it is made of. One asymmetric wrapper twist above the disc replaces them.
+ *
+ * The swirl disc is the silhouette landmark and is built from genuine Archimedean
+ * spiral ribbons (not a bullseye of concentric rings) — see `spiralRibbonShape`.
  */
 
 import * as THREE from 'three';
@@ -27,7 +48,10 @@ import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render
 import { ChibiRig } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
-import { curl, localBounds, massAnchor } from './appendages';
+// `localBounds`/`massAnchor` are gone with the two side tails they placed — the whole
+// point of the replacement is that the wrapper twist is anchored on the DISC, not on
+// wherever the bounding box happens to be widest.
+import { curl } from './appendages';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 /**
@@ -49,6 +73,27 @@ import { curl, localBounds, massAnchor } from './appendages';
  * direction `docs/LESSONS.md` records as falsified four times in the other one.
  */
 const CANDY_WHITE = '#DED6C6';  // luma 0.993 -> 0.842
+// ── DISC_WHITE — CANDY_WHITE x 0.93, and it is a PROBE RESULT, not a taste choice ──
+// The candy disc's own ground. `sepscan --mode chars --ids lollipop` put `clipShare` at
+// **0.1233** after this pass's rebuild, against the six-plate Brawl Stars band of
+// 0.0072-0.0929 — outside it, on the exact number `e6fed57` spent a round winning
+// (0.1610 -> 0.0175). I guessed the cause twice (the domed glossy candy; the near-white
+// cellophane twist), dropped the gloss, the dome depth and the twist's albedo, and moved
+// it to **0.1192**. Four thousandths. That is `docs/LESSONS.md` §7 — symptom accurate,
+// mechanism wrong — and §2: probe before you loop.
+//
+// `tools/tmp/ch_lollipop_clipmap.mjs` (offline, over PNGs `valuescan` had already
+// written; 9/9 selftest including "background above threshold must NOT be counted") maps
+// every clipped pixel. **They are one band on the disc's LIT FLANK** — the crown and the
+// twist contribute zero — so it is the disc's DIFFUSE response on a 0.842 albedo, not any
+// specular and not the twist. The same probe's luma histogram says the fix is small:
+// scaling that albedo by 0.95 takes its measured share 0.0171 -> 0.0002, by 0.93 -> 0.0000.
+//
+// So the disc alone steps down 7%; CANDY_WHITE keeps its value everywhere else (hands,
+// wrapper petals, twist cone), and the disc getting darker is a second win for the face —
+// `rules.ts` wants the #FFFFFF sclera to be the brightest value on the character, and the
+// thing it is drawn against just moved further away.
+const DISC_WHITE = '#CEC7B8';   // luma 0.842 -> 0.782
 const CANDY_RED = '#E63946';
 const STICK = '#E2DBCC';       // matte paper stick (luma 0.969 -> 0.860)
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0' — restrained trim accent only
@@ -75,6 +120,41 @@ const CHOKER_INK = '#180C1E';
 // The swirl goes back to CANDY_RED and the SEPARATION is bought on the other side
 // instead, by taking the collar's trim down with the collar. 
 const SWIRL_RED = CANDY_RED;    // the disc's ribbon, both faces
+// ── THE DISC IS NOW THREE-COLOUR, AND THE HUES ARE PICKED ON A MEASUREMENT ──
+// Uri: *"the candy should have more colors than red only, make it colorful."* The
+// obvious move — grab any three hues — would have been free to get wrong, because
+// this character is the cast's WORST figure/ground case and the disc is its largest
+// single mass: `fig` sits pinned at **0.497** at 17 of 18 arena stations against a
+// ground at 0.40–0.48, so `dL` is 0.02–0.10 BY CONSTRUCTION (`docs/DECISIONS-FOR-URI.md`
+// §41). Any hue that lands INSIDE 0.40–0.48 is colour that costs separation.
+//
+// So both new arms are chosen ABOVE the ground band, not merely "different":
+//   CANDY_WHITE  #DED6C6  luma 0.842   the ground between the arms (unchanged)
+//   CANDY_SUN    #FFC53D  luma ~0.80   warm, high-key
+//   CANDY_TEAL   #3FD3B8  luma ~0.73   COOL chroma — `docs/LESSONS.md` records that
+//                                      adding cool chroma is cheaper than removing warm,
+//                                      and this is a tint of her own Cyber accent so it
+//                                      is authored rather than invented
+//   CANDY_RED    #E63946  luma ~0.48   kept as the identity anchor: a lollipop that is
+//                                      not red at all stops reading as this character
+// Two values on the disc becomes four, all but the anchor above the ground band.
+const CANDY_TEAL = '#3FD3B8';
+const CANDY_SUN = '#FFC53D';
+// The cellophane twist above the disc. Pale and cool rather than near-black — see
+// `buildSilhouetteEvents` for the render that reversed that, and note it is a HALF-STEP
+// above CANDY_WHITE so the twist separates from the candy's own top edge instead of
+// disappearing into it.
+// ── ⚠️ #EFF9F4 -> #DCEBE3, AND IT IS A MEASURED REVERSAL ─────────────────────
+// The first pale value was picked to sit a half-step ABOVE CANDY_WHITE so the twist would
+// separate from the candy's own top edge. Measured with `sepscan --mode chars --ids
+// lollipop`, that plus the domed glossy candy took `clipShare` at the shipped facing from
+// **0.0211 to 0.1233**, against a six-plate Brawl Stars band of 0.0072-0.0929 — i.e. OUT
+// of the band, on the exact number `e6fed57` spent a whole round winning (0.1610 ->
+// 0.0175). A near-white glossy tube with a Fresnel rim, at the TOP of the character where
+// the key light lands hardest, is about the worst shape to hand that budget to.
+// #DCEBE3 sits just BELOW CANDY_WHITE instead, and the separation is bought at the base
+// with the near-black cinch ring rather than at the top with luma.
+const CELLO = '#DCEBE3';
 const BOOT = '#0C0814';        // near-ink boots — grounds the pale/red palette
 // Limb-only frosted-teal family, a tint of Lollipop's own Cyber accent. A second
 // independent art-director pass named Lollipop, Egg and Burrito as all converging
@@ -86,21 +166,41 @@ const LIMB_TEAL = '#8FE0C9';
 // PASS 3. Measured: the boot DELIVERS 0.37 despite a #0C0814 albedo (its own sole and
 // trim are pale), so darkening it further buys nothing — the SHIN moves instead.
 const LIMB_TEAL_DARK = '#7ACBB0';
+// The mouth's own value ladder. `rules.ts`'s face standard asks for an INTERIOR VALUE
+// STEP — "a lip line with a genuinely darker throat plane behind it, so it reads as an
+// OPENING rather than a painted curve". A solid opaque disc cannot be recessed into
+// without cutting a hole in it, so the step is built the way `egg.ts` builds every
+// feature: as stacked plates at increasing z, darkest furthest back.
+const THROAT = '#2A0E20';      // mouth interior — dark plum, not black; black kills the read
+const TONGUE = '#FF6F91';
+const TEETH = '#FFFFFF';
+const EYE_WHITE = '#FFFFFF';   // must be the brightest value ANYWHERE on the character
+const IRIS = '#5A3FC0';
 
 /**
  * Archimedean spiral ribbon: a band of constant width whose centreline radius grows
  * linearly with angle. Built as a single extrudable Shape (outer edge walked forward,
  * inner edge walked back) rather than concentric rings, so it reads as an actual swirl
  * — the shape the description asks for — instead of a dartboard/bullseye approximation.
+ *
+ * `phase` rotates the whole arm. Three arms at 0 / 2π/3 / 4π/3 interleave into one
+ * multi-coloured swirl while every individual arm stays a true Archimedean spiral —
+ * which is the part of the old spec `rules.ts` kept ("keep it a genuine Archimedean
+ * spiral ribbon rather than a bullseye of concentric rings — that part is right and is
+ * the landmark") while releasing "red/white".
+ *
+ * ⚠️ The band width is not free. Adjacent arms are `pitch / arms` apart in radius, so a
+ * band wider than that MERGES them into a solid colour wheel and the swirl disappears.
+ * `ARM_BAND` below is derived from that, not guessed.
  */
-function spiralRibbonShape(turns: number, rStart: number, rEnd: number, bandWidth: number): THREE.Shape {
+function spiralRibbonShape(turns: number, rStart: number, rEnd: number, bandWidth: number, phase = 0): THREE.Shape {
   const stepsPerTurn = 48;
   const steps = Math.max(8, Math.round(turns * stepsPerTurn));
   const outer: THREE.Vector2[] = [];
   const inner: THREE.Vector2[] = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    const theta = t * turns * Math.PI * 2;
+    const theta = phase + t * turns * Math.PI * 2;
     const r = THREE.MathUtils.lerp(rStart, rEnd, t);
     const ro = r + bandWidth * 0.5;
     const ri = Math.max(0.001, r - bandWidth * 0.5);
@@ -116,22 +216,82 @@ function spiralRibbonShape(turns: number, rStart: number, rEnd: number, bandWidt
 }
 
 /**
- * A cloth/cellophane strip curved around a cylinder of `radius`, spanning
- * `arcRad` of angle centred on `angleOffset` (radians, 0 = character-front/+Z),
- * `height` tall. Used for the wrapper cape — a panel that hugs the body's own
- * curvature rather than floating as a flat card behind it.
+ * The mouth outline: a wide grin with a shallow upward bow on the upper lip and a deep
+ * curve on the lower. `pad` inflates it by a roughly constant amount in every direction —
+ * which is how the LIP BAND is built (outer = padded outline, hole = the outline itself).
+ *
+ * ⚠️ Scaling `w`/`h` instead of padding was tried first and is wrong: the shape's origin
+ * sits on the CORNER line, so scaling moves the top edge by 0.3·h·k and the bottom by
+ * 1.3·h·k. A 17% scale gave a lip band 0.05·h thick at the top and 0.22·h at the bottom —
+ * the upper lip line effectively vanished, which is the one edge that says "this is a
+ * mouth" rather than "this is a dark blob".
  */
-function curvedPanel(radius: number, arcRad: number, height: number, angleOffset = 0, segX = 18, segY = 8): THREE.BufferGeometry {
-  const geo = new THREE.PlaneGeometry(arcRad, height, segX, segY);
-  const pos = geo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) {
-    const theta = angleOffset + pos.getX(i);
-    const y = pos.getY(i);
-    pos.setXYZ(i, Math.sin(theta) * radius, y, Math.cos(theta) * radius);
-  }
-  geo.computeVertexNormals();
-  return geo;
+function mouthShape(w: number, h: number, pad = 0, hole?: THREE.Shape): THREE.Shape {
+  const W = w + pad;
+  const top = h * 0.30 + pad;
+  const bot = h * 1.30 + pad;
+  const s = new THREE.Shape();
+  s.moveTo(-W, 0);
+  s.quadraticCurveTo(0, top, W, 0);
+  s.bezierCurveTo(W * 0.86, -bot, -W * 0.86, -bot, -W, 0);
+  s.closePath();
+  if (hole) s.holes.push(hole);
+  return s;
 }
+
+/**
+ * The candy disc's front/back surface, as a SHALLOW SPHERICAL CAP.
+ *
+ * The disc used to be a flat cylinder, which is two problems at once: real hard candy
+ * is a lens, and a flat plate gives every face feature the same z — so the features
+ * were coplanar cards rather than things sitting on a surface. `rules.ts`'s face
+ * standard closes with "NOTHING FLOATS. Every feature sits ON a surface, sharing one
+ * tangent frame with its neighbours (`egg.ts`'s `addShellDecal` is the pattern)". This
+ * is that pattern for a disc.
+ *
+ * `sag` is the cap's height at the centre above the rim plane. The sphere it is cut
+ * from has radius `(R² + sag²) / (2·sag)`; at the eye positions the surface tilts only
+ * ~7°, which is the point — enough that the features are genuinely ON the candy and
+ * catch the key light unevenly, not so much that they turn away from the camera.
+ */
+class DiscCap {
+  readonly rs: number;
+  private readonly base: number;
+  constructor(readonly outerR: number, readonly sag: number, readonly halfDepth: number) {
+    this.rs = (outerR * outerR + sag * sag) / (2 * sag);
+    this.base = Math.sqrt(Math.max(0, this.rs * this.rs - outerR * outerR));
+  }
+  /** Height of the cap above the rim plane at radius `d` from the disc axis. */
+  rise(d: number): number {
+    const dd = Math.min(d, this.outerR);
+    return Math.sqrt(Math.max(0, this.rs * this.rs - dd * dd)) - this.base;
+  }
+  /** Front surface z for a point `d` out from the axis (disc-local). */
+  z(d: number): number {
+    return this.halfDepth + this.rise(d);
+  }
+  /** Outward unit normal of the front cap at disc-local (x, y). */
+  normal(x: number, y: number): THREE.Vector3 {
+    const d = Math.min(Math.hypot(x, y), this.outerR);
+    const s = d > 1e-6 ? d / Math.hypot(x, y) : 1;
+    return new THREE.Vector3(x * s, y * s, Math.sqrt(Math.max(0, this.rs * this.rs - d * d))).normalize();
+  }
+}
+
+/**
+ * ⚠️ `curvedPanel` LIVED HERE and is deleted with the cape it existed for — a
+ * `PlaneGeometry` bent around a cylinder. Its signature is recorded because the reason it
+ * failed is reusable and is NOT about this character: **a zero-volume sheet cannot be
+ * outlined** (`outlineGroup`'s inverted hull of a plane is a full-size opaque black copy
+ * of the plane), and it cannot be given a transparent material without becoming a silent
+ * occluder unless `depthWrite` is cleared by hand. Both were fixed here, in two separate
+ * rounds, and the element still rendered as a black plate. If a costume layer is wanted on
+ * any character, give it thickness.
+ *
+ *     function curvedPanel(radius, arcRad, height, angleOffset = 0, segX = 18, segY = 8)
+ *       // PlaneGeometry(arcRad, height, segX, segY), then per vertex:
+ *       //   theta = angleOffset + x;  setXYZ(sin(theta) * radius, y, cos(theta) * radius)
+ */
 
 /**
  * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
@@ -198,6 +358,23 @@ export class LollipopCharacter extends BaseCharacter {
         hand: CANDY_WHITE,
         foot: BOOT,
         torso: STICK,
+        // ── The rig's new pelvis, recoloured OFF its default ──────────────────────
+        // `fc4d9ad` added a pelvis mass on `hips` because `limbmatch` had no `hips` row
+        // for 10 of 11 characters and Uri reported detached legs on three sheets running.
+        // It defaults to `limb` deliberately (rig.ts: "the pelvis is the top of the legs")
+        // and on ten characters that is right. On THIS one it is not, and the render says
+        // so: lollipop is the one character that ALREADY had a hips mass — the near-black
+        // wrapper collar — so the default put a LIMB_TEAL wedge on top of a WRAPPER_INK
+        // collar, both poking out of a cream stick, and at the lobby camera the pair reads
+        // as two unrelated chips stuck to the body rather than as one hip.
+        //
+        // WRAPPER_INK merges it INTO the collar: one dark wrapper band where the stick
+        // enters the body, with a full value step to the cream stick above (0.86) and to
+        // the teal thighs below (0.83). It keeps every pixel the rig fix delivered — the
+        // mass is unchanged, only its albedo — and it does not re-open the seam the rig
+        // was closing, because the seam it was closing is hips-to-THIGH and the thigh is
+        // still the brightest thing next to it.
+        pelvis: WRAPPER_INK,
         limbRoughness: 0.75,
       },
       // Body: STUB archetype (see `bodies.ts`) — no torso, head mounted low,
@@ -337,28 +514,72 @@ export class LollipopCharacter extends BaseCharacter {
     // disc's bottom edge clears the stick with room to spare.
     const discCenterY = R * 0.66;
     const discOuterR = R * 0.74;
-    const discDepth = R * 0.26; // real thickness — a paper-thin disc would vanish to a
+    // 0.26R -> 0.28R, PLUS a domed front and back. Neither is decoration:
+    //
+    //  1. THE STICK WAS FATTER THAN THE DISC WAS DEEP. `stickR` is 0.28R and it is a
+    //     CONNECTIVITY BUDGET, not a style choice — it is the only mass four limbs can
+    //     attach to on this body. With a half-depth of 0.13R the stick protruded 0.15R
+    //     THROUGH THE DISC'S OWN FRONT FACE everywhere the two overlap, which is the
+    //     disc's lower third — exactly where the old spec put the mouth. A tapered plug
+    //     (below) and a deeper disc together retire that.
+    //  2. Real hard candy is a LENS, and a flat plate gives every face feature the same
+    //     z. `rules.ts`: "NOTHING FLOATS. Every feature sits ON a surface, sharing one
+    //     tangent frame with its neighbours." `DiscCap` is that surface.
+    const discDepth = R * 0.28; // real thickness — a paper-thin disc would vanish to a
                                 // blade edge-on (idle_135/210), same failure Taco solved
+    // 0.10R, and it went 0.10 -> 0.085 -> 0.10 across this pass: flattening it was half of
+    // the wrong clipShare theory above and bought a share of 0.0041 between them. The cap
+    // is back at the depth that reads as candy, ~7.7° of tilt at the eye positions — enough
+    // that the face is genuinely ON a surface and not so much that it turns away.
+    const DOME_SAG = R * 0.10;
+    const cap = new DiscCap(discOuterR, DOME_SAG, discDepth / 2);
     const discBottomY = discCenterY - discOuterR;
-    // Widened from 0.19R. This is the character's FACE PLATE as much as it is a
-    // stick: `rules.ts` puts the eyes on the stick and the mouth on the candy, and
-    // at 0.19R the eyes came out ~3px at the size a player sees a character — a
-    // blind critic read the whole model as "an inanimate prop, not a mascot,"
-    // because the only thing on the huge disc was a small mouth arc. A real
-    // candy-stick mascot's stick is chunky; this is still slender against a disc
-    // more than three times its width, but the face now has room to exist.
-    // 0.285R -> 0.32R. The stick is the ONLY thing both arms and both legs can
-    // attach to on this character, so its radius is a connectivity budget, not a
-    // styling choice. The extra 0.035R buys ~9 px of overlap on each of four limbs.
+    // ── ⚠️ THE OLD JUSTIFICATION IS KEPT, BECAUSE HALF OF IT IS NOW DEAD ──────
+    //
+    // > "Widened from 0.19R. This is the character's FACE PLATE as much as it is a stick:
+    // > `rules.ts` puts the eyes on the stick and the mouth on the candy, and at 0.19R the
+    // > eyes came out ~3px at the size a player sees a character — a blind critic read the
+    // > whole model as 'an inanimate prop, not a mascot', because the only thing on the
+    // > huge disc was a small mouth arc."
+    //
+    // The face is no longer on the stick, so that half no longer applies — and its own
+    // symptom is what the new layout retires: an eye sized to the DISC is ~4.8x the radius
+    // of one sized to the stick, for free. **The rest still holds, and it is the reason
+    // this value does not move now that its original motive is gone:**
+    //
+    // > "0.285R -> 0.32R. The stick is the ONLY thing both arms and both legs can attach
+    // > to on this character, so its radius is a connectivity budget, not a styling choice.
+    // > The extra 0.035R buys ~9 px of overlap on each of four limbs."
+    //
+    // Four separate rounds in this file are limbs detaching from this cylinder. It stays.
     const stickR = R * 0.28;
     const stickTopY = discCenterY - discOuterR * 0.5; // embeds into the disc's underside
     const stickBottomY = -neckGap * 1.12; // reaches past the neck join, into the torso —
                                            // no visible gap between stick and body
 
     // ── Candy disc ───────────────────────────────────────────────────────────
-    // A short cylinder rotated so its flat faces point ±Z (camera-facing), the same
-    // "coin facing the camera" orientation Donut's torus uses for its hole.
-    const discGeo = new THREE.CylinderGeometry(discOuterR, discOuterR, discDepth, 40, 1, false);
+    // A LATHE, not a cylinder: domed front, straight rim wall, domed back. The rim wall
+    // is kept — it is what the disc presents EDGE-ON at the shipped spawn facing (yaw 90,
+    // where `valuescan` measures this character's bounding box as 39 px wide against
+    // 126 tall), and a pure lens would taper it away to a blade.
+    //
+    // ⚠️ The profile MUST be wound with y INCREASING. `taperedSegment` below carries the
+    // scar: an earlier lathe in this same file was wound top-to-bottom and every limb
+    // using it rendered near-black, because `computeVertexNormals`'s outward-vs-inward
+    // call depends on point ORDER, not point position.
+    const discProfile: THREE.Vector2[] = [];
+    const CAP_SEG = 12;
+    for (let i = 0; i <= CAP_SEG; i++) {          // back pole -> back rim (y rising)
+      const d = discOuterR * (i / CAP_SEG);
+      discProfile.push(new THREE.Vector2(d, -cap.z(d)));
+    }
+    discProfile.push(new THREE.Vector2(discOuterR, cap.halfDepth)); // the rim wall
+    for (let i = CAP_SEG - 1; i >= 0; i--) {      // front rim -> front pole (y rising)
+      const d = discOuterR * (i / CAP_SEG);
+      discProfile.push(new THREE.Vector2(d, cap.z(d)));
+    }
+    const discGeo = new THREE.LatheGeometry(discProfile, 44);
+    discGeo.computeVertexNormals();
     discGeo.rotateX(Math.PI / 2);
     // ⚠️ `rim: true` on every `glossyMat` in this file. `toonMat` applies the Fresnel
     // rim by default; `glossyMat`'s is OPT-IN (`aeee0b9`) and **no call site anywhere
@@ -370,59 +591,108 @@ export class LollipopCharacter extends BaseCharacter {
     // -> 0.0175 against a reference band max of 0.0929). The per-character `clipShare`
     // run gated it and says ON here; **soup is the one that FAILS it** (0.0883 ->
     // 0.0976, past the band) and egg is a no-op (0.33/255 over 1.67% of its matte).
-    const candyMat = glossyMat({ color: CANDY_WHITE, roughness: 0.12, rim: true });
+    // ⚠️ TRIED AND REVERTED, and the number is the point: roughness 0.12 -> 0.22 with
+    // `rim: false`, on the theory that a DOME has a grazing ring around its whole
+    // circumference where a flat plate had none. Measured, together with DOME_SAG 0.10R ->
+    // 0.085R, it moved `clipShare` **0.1233 -> 0.1192** — 0.0041, for the glossiest surface
+    // in the cast going matte. Reverted; the cause was the disc's ALBEDO (see DISC_WHITE),
+    // which is where the fix went instead. This is the single hardest shading surface in
+    // the game on purpose — hard sugar candy.
+    const candyMat = glossyMat({ color: DISC_WHITE, roughness: 0.12, rim: true });
+    // Everything that belongs to the candy — base, three swirl arms front and back, edge
+    // ring, Cyber trim — hangs off ONE group centred on the disc, so every disc-local
+    // coordinate below is literally disc-local and the back-face swirl can be a plain
+    // 180° rotation about the disc's own axis. The face joint is re-anchored to the same
+    // origin in `buildFace`, which is what lets the face share the disc's tangent frame.
+    const discGroup = new THREE.Group();
+    discGroup.name = 'lollipop_disc';
+    discGroup.position.y = discCenterY;
+    head.add(discGroup);
+
     const disc = new THREE.Mesh(discGeo, candyMat);
     disc.name = 'lollipop_candy_base';
-    disc.position.y = discCenterY;
     disc.castShadow = true;
     disc.receiveShadow = true;
-    head.add(disc);
+    discGroup.add(disc);
 
-    // Spiral ribbon, proud of the base disc's front face. This is the single hardest
-    // shading surface in the cast on purpose — hard sugar candy, glossiest thing built.
-    const ribbonShape = spiralRibbonShape(2.35, discOuterR * 0.08, discOuterR * 0.97, discOuterR * 0.17);
-    const ribbonGeo = new THREE.ExtrudeGeometry(ribbonShape, {
-      depth: discDepth * 0.55, bevelEnabled: true, bevelThickness: R * 0.008, bevelSize: R * 0.008, bevelSegments: 2, curveSegments: 1,
+    // ── THE SWIRL: THREE interleaved Archimedean arms, three candy hues ────────
+    // Uri: *"the candy should have more colors than red only, make it colorful."* One
+    // red ribbon on white is TWO VALUES, which is the same defect `rules.ts` records for
+    // the faces ("our faces carry two values total"), just on the largest mass in the
+    // character.
+    //
+    // The band width is DERIVED, not chosen. Adjacent arms sit `pitch / ARMS` apart in
+    // radius; a band wider than that merges them into a solid colour wheel and the
+    // spiral — the landmark `rules.ts` explicitly keeps — disappears. At 62% of the
+    // separation, ~59% of the disc face is coloured ribbon and ~41% stays candy-white
+    // ground, which is close to the red/white ratio the old single arm produced.
+    const ARM_TURNS = 2.0;
+    const ARM_R0 = discOuterR * 0.10;
+    const ARM_R1 = discOuterR * 0.97;
+    const ARM_HUES = [SWIRL_RED, CANDY_TEAL, CANDY_SUN];
+    const ARM_SEP = ((ARM_R1 - ARM_R0) / ARM_TURNS) / ARM_HUES.length;
+    const ARM_BAND = ARM_SEP * 0.62;
+    const ribbonT = R * 0.05;
+    // The swirl is now CONFORMED to the domed face instead of being a flat card laid on
+    // a flat plate: every vertex's z is pushed to the cap surface at its own radius, so
+    // the ribbon curves with the candy and the face features that sit on top of it share
+    // that same surface. `ribbonFrontZ` — a single flat z that the old mouth and blush
+    // were placed against — no longer exists, because there is no single z.
+    const swirlBack = new THREE.Group();
+    swirlBack.name = 'lollipop_swirl_back';
+    swirlBack.rotation.y = Math.PI;  // a true 180° turn, NOT `scale.z = -1`: a negative
+                                     // scale inverts face winding and lights the mesh
+                                     // from the inside. It also mirrors the spiral, which
+                                     // is what the back of a real disc actually looks like.
+    ARM_HUES.forEach((hue, i) => {
+      const shape = spiralRibbonShape(ARM_TURNS, ARM_R0, ARM_R1, ARM_BAND, (i / ARM_HUES.length) * Math.PI * 2);
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: ribbonT, bevelEnabled: true, bevelThickness: R * 0.008, bevelSize: R * 0.008, bevelSegments: 2, curveSegments: 1,
+      });
+      const pos = geo.attributes.position as THREE.BufferAttribute;
+      for (let v = 0; v < pos.count; v++) {
+        const d = Math.hypot(pos.getX(v), pos.getY(v));
+        pos.setZ(v, cap.z(d) + pos.getZ(v) - ribbonT * 0.55);
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+      // The emissive stays on each arm's OWN hue at a low intensity — the old code kept
+      // a brighter red emissive under a darker red diffuse so the swirl held its candy
+      // glow while its value stepped down. Same trick, three times.
+      const mat = glossyMat({ color: hue, roughness: 0.12, emissive: hue, emissiveIntensity: 0.10, rim: true });
+      const arm = new THREE.Mesh(geo, mat);
+      arm.name = `lollipop_swirl_${i}`;
+      arm.castShadow = true;
+      arm.receiveShadow = true;
+      discGroup.add(arm);
+      // A flat disc is one-sided by default — round 1 only decorated the front face, so
+      // at yaw 135/210 the candy read as a featureless pale oval, the exact "vanishes to
+      // a blank blade off-axis" failure the brief warns about.
+      const back = new THREE.Mesh(geo, mat);
+      back.name = `lollipop_swirl_back_${i}`;
+      back.castShadow = true;
+      back.receiveShadow = true;
+      swirlBack.add(back);
     });
-    const ribbonDepth = discDepth * 0.55;
-    // Colour drops to SWIRL_RED; the emissive deliberately stays at the brighter
-    // CANDY_RED so the swirl keeps its candy glow while its diffuse value steps down.
-    const ribbonMat = glossyMat({ color: SWIRL_RED, roughness: 0.12, emissive: CANDY_RED, emissiveIntensity: 0.12, rim: true });
-    const ribbon = new THREE.Mesh(ribbonGeo, ribbonMat);
-    ribbon.name = 'lollipop_swirl';
-    ribbon.position.set(0, discCenterY, discDepth / 2 - ribbonDepth * 0.2);
-    ribbon.castShadow = true;
-    ribbon.receiveShadow = true;
-    head.add(ribbon);
-    // The z coordinate that safely clears the ribbon's own proud front face — mouth
-    // and blush below are placed relative to this rather than a flat guess, otherwise
-    // they land UNDER the ribbon wherever it happens to cross that point on the swirl
-    // and vanish entirely (exactly what happened in round 1).
-    const ribbonFrontZ = ribbon.position.z + ribbonDepth;
-
-    // A flat disc is one-sided by default — round 1 only decorated the front face, so
-    // at yaw 135/210 (closer to a back/edge view) the candy read as a featureless pale
-    // oval, the exact "vanishes to a blank blade off-axis" failure the brief warns
-    // about. Mirroring the ribbon onto the back face fixes it: every angle now shows
-    // swirl, not blank candy.
-    const ribbonBack = new THREE.Mesh(ribbonGeo, ribbonMat);
-    ribbonBack.name = 'lollipop_swirl_back';
-    ribbonBack.position.set(0, discCenterY, -(discDepth / 2 - ribbonDepth * 0.2));
-    ribbonBack.scale.z = -1;
-    ribbonBack.castShadow = true;
-    ribbonBack.receiveShadow = true;
-    head.add(ribbonBack);
+    discGroup.add(swirlBack);
 
     // Candy-white edge ring, cleaning up the swirl's outer terminus into a crisp rim.
+    // ⚠️ DELIBERATELY LEFT WHITE while the faces went three-colour, and that is a
+    // measurement, not an oversight. At the shipped spawn facing the disc is EDGE-ON —
+    // `valuescan` measures this character at 39 px wide by 126 tall — so the rim is most
+    // of what the arena metric ever sees of the disc, while the faces are what the LOBBY
+    // camera sees and what Uri judges. Every candy hue available is DARKER than
+    // CANDY_WHITE's 0.842, so striping the rim would have spent `figureLuma` (0.513
+    // against a ground of 0.40–0.48) to buy colour at the one camera where the colour
+    // does not show. Colour goes where the eye is; value stays where the metric is.
     const edgeRing = new THREE.Mesh(
       new THREE.TorusGeometry(discOuterR * 0.99, R * 0.035, 8, 32),
       candyMat
     );
     edgeRing.name = 'lollipop_edge';
-    edgeRing.position.y = discCenterY;
     edgeRing.castShadow = true;
     edgeRing.receiveShadow = true;
-    head.add(edgeRing);
+    discGroup.add(edgeRing);
 
     // Restrained Cyber trim — a hairline emissive ring just outside the candy edge.
     // Kept deliberately thin and low-intensity per the brief: a blown-out glow on a
@@ -433,19 +703,44 @@ export class LollipopCharacter extends BaseCharacter {
     );
     trim.name = 'lollipop_cyber_trim';
     trim.userData.noOutline = true;
-    trim.position.y = discCenterY;
-    head.add(trim);
+    discGroup.add(trim);
 
-    // ── Stick ────────────────────────────────────────────────────────────────
+    // ── Stick, in two pieces, and the split is geometric ──────────────────────
+    // The shaft stays at full `stickR` for its whole visible length, because that radius
+    // is the connectivity budget every limb straddles. Above the disc's bottom point it
+    // TAPERS to 0.45·stickR, which is under the disc's own half-depth — so the part of
+    // the stick that is inside the candy no longer punches out through the candy's face.
+    // That protrusion was a pale bulge across the disc's lower third and it is where the
+    // old spec put the mouth.
+    //
+    // ⚠️ The taper start is CLAMPED against the rig's own shoulder height rather than
+    // eyeballed. `metrics.shoulderY` is torso-local (origin = the hips), so in head-local
+    // terms the shoulder sits at `hipY + shoulderY - headCentreY`; thinning the stick at
+    // or below that point would pull the arms' attachment out from under them, and this
+    // is the character whose file already records four separate rounds of limbs
+    // detaching from this exact cylinder.
+    const m = this.rig.metrics;
+    const shoulderHeadY = m.hipY + m.shoulderY - m.headCentreY;
+    const taperY = Math.max(discBottomY - R * 0.06, shoulderHeadY + m.armRadius + R * 0.10);
     const stick = new THREE.Mesh(
-      new THREE.CylinderGeometry(stickR, stickR * 1.05, stickTopY - stickBottomY, 16, 1, false),
+      new THREE.CylinderGeometry(stickR, stickR * 1.05, taperY - stickBottomY, 16, 1, false),
       toonMat({ color: STICK, roughness: 0.75 })
     );
     stick.name = 'lollipop_stick';
-    stick.position.y = (stickTopY + stickBottomY) / 2;
+    stick.position.y = (taperY + stickBottomY) / 2;
     stick.castShadow = true;
     stick.receiveShadow = true;
     head.add(stick);
+
+    const plug = new THREE.Mesh(
+      new THREE.CylinderGeometry(stickR * 0.45, stickR, Math.max(R * 0.05, stickTopY - taperY), 16, 1, false),
+      toonMat({ color: STICK, roughness: 0.75 })
+    );
+    plug.name = 'lollipop_stick_plug';
+    plug.position.y = (stickTopY + taperY) / 2;
+    plug.castShadow = true;
+    plug.receiveShadow = true;
+    head.add(plug);
 
     // Twisted wrapper cuff where the stick meets the body — alternating red/white
     // "petals", echoing real candy-stick wrapper twists and doubling as the torso's
@@ -515,79 +810,57 @@ export class LollipopCharacter extends BaseCharacter {
       this.rig.joints.hips.add(collarTrim);
     }
 
-    // ── Face: eyes on the stick, mouth on the candy ───────────────────────────
-    this.rig.joints.face.position.set(0, 0, 0);
-    this.buildFace(R, stickR, discCenterY, discOuterR, discBottomY, ribbonFrontZ, stickBottomY);
+    // ── Face: ALL of it on the candy disc, mouth BELOW the eyes ───────────────
+    // The face joint is re-anchored to the disc's own centre, so every coordinate in
+    // `buildFace` is disc-local and shares `cap`'s tangent frame. That is also a real
+    // improvement to `thumbs.ts`, whose character-select framing rule crops to the
+    // bottom of this joint's bounding box and falls back to a guess when the joint is
+    // empty or misplaced — it used to describe two features on a stick.
+    this.rig.joints.face.position.set(0, discCenterY, 0);
+    this.buildFace(R, cap, discOuterR, ribbonT);
 
     // ── Torso: candy-wrapper costume, contrasting the pale limbs ──────────────
     this.dressTorso(R);
 
-    // ── Costume: translucent wrapper cape ─────────────────────────────────────
-    // A second independent art-director pass named the total absence of any
-    // silhouette-breaking costume/accessory layer as the cast's single biggest
-    // remaining gap — the existing sash/trim dress the torso but never leave its
-    // own footprint. A cellophane wrapper worn like a cloak (the brief's own
-    // suggested read) is Lollipop's: translucent, glossy candy-wrap plastic
-    // flowing from a twisted knot at the neck down her back, with a hairline
-    // Cyber trim along its hem echoing her own rarity accent.
-    // Parented to the HEAD, not the neck. On a STUB body the neck joint sits at
-    // the hips, so a cape hanging `capeH * 0.38` below it started at hip height
-    // and ran straight through the floor. Anchoring it under the candy disc —
-    // where a wrapper would actually be twisted shut — works on any archetype.
+    // ── Costume: the wrapper gather under the candy ───────────────────────────
+    // The anchor sits under the disc — where a real wrapper is twisted shut — rather than
+    // on the neck joint, which on a STUB body is at the HIPS: a cape hung off it started
+    // at hip height and ran through the floor.
     const capeAnchor = new THREE.Group();
     capeAnchor.name = 'lollipop_cape_anchor';
     capeAnchor.position.y = discBottomY;
     head.add(capeAnchor);
     const neck = capeAnchor;
-    const capeMat = glossyMat({ color: WRAPPER_INK, roughness: 0.16, transparent: true, opacity: 0.6, rim: true });
-    capeMat.side = THREE.DoubleSide; // seen edge-on/from behind at yaw 135/210, not just front
-    // A transparent material that still writes depth is a silent occluder
-    // (`docs/LESSONS.md` §1) — and this one is a DoubleSide panel wrapped around the
-    // stick, so it was punching a hole through the character's own body from behind.
-    capeMat.depthWrite = false;
-    const capeTrimMat = toonMat({ color: CYBER, roughness: 0.3, emissive: CYBER, emissiveIntensity: 0.5 });
     const twistMat = glossyMat({ color: CANDY_WHITE, roughness: 0.14, rim: true });
 
-    // Sized to the STICK, not to a torso. At the old R*0.55 x R*1.55 this was a
-    // torso-scale cloak on a body that is 0.19R wide, and it rendered as a flat
-    // grey sheet hanging behind the candy and through the floor — the STUB body
-    // has no torso for a cloak to drape over. Cut down to a wrapper flare that
-    // hugs the stick just under the disc, which is what a real lollipop wrapper
-    // does anyway.
-    const capeR = stickR * 1.7;
-    const capeArc = Math.PI * 0.85;
-    const capeH = R * 0.52;
-    const cape = new THREE.Mesh(curvedPanel(capeR, capeArc, capeH, Math.PI), capeMat);
-    cape.name = 'lollipop_wrapper_cape';
-    // ── The cape rendered as a near-BLACK SLAB on both sides of the stick ───────
-    // Two separate mechanisms, both of them `docs/LESSONS.md` §1:
+    // ── 🔴 THE CAPE IS DELETED — AND SO IS THE REASON I FIRST GAVE FOR IT ──────
+    // What it was: a `curvedPanel` of WRAPPER_INK at 0.6 opacity wrapped round the back of
+    // the stick, plus a CYBER-emissive hem. Its own comment block recorded TWO earlier
+    // rounds spent stopping it rendering as a black slab — `depthWrite` on a transparent
+    // material, then `outlineGroup`'s inverted hull, which on a PLANE is a full-size opaque
+    // black copy of the plane because ink cannot outline a surface with no interior. Both
+    // diagnoses were right, both fixes landed, and the element still contributed nothing a
+    // render could show. It is `rules.ts`'s converse rule — detail added to signal the
+    // subject destroying the silhouette that signalled it better — on a character whose
+    // entire read is a clean coloured disc on a stick.
     //
-    //  1. `depthWrite` (fixed on the material above).
-    //  2. THE INVERTED HULL. `outlineGroup` gives every mesh a BackSide copy of its
-    //     own geometry, pushed out along the normals. That is correct for a solid:
-    //     you see the ink only where the hull escapes the silhouette. This is not a
-    //     solid — it is a PLANE. A plane's back face is the same plane, so its hull
-    //     is a full-size opaque black copy of the cape sitting a hair behind it,
-    //     which is precisely the dark grey trapezoid visible either side of the
-    //     stick in `shots/probe/front/lollipop.png`. Ink cannot outline a surface
-    //     with no interior.
+    // ⚠️ AND THE CORRECTION, because I had the mechanism wrong first. I blamed the cape for
+    // the near-black plate and bright teal wedge sitting across the stick at hip height in
+    // `lobby_yaw0/35/170`. **Deleting the cape did not move them** — they are still there
+    // in the next render. They are the WRAPPER COLLAR (near-black, on `hips`) and the rig's
+    // new PELVIS (`fc4d9ad`, LIMB_TEAL by default), and the giveaway was in the first batch
+    // before I touched anything: they appear at yaw 0 AND at yaw 170, so whatever they are
+    // is radially symmetric, and the cape spans only 0.85π centred on the BACK. Fixed
+    // instead by giving the pelvis the collar's own ink in the palette above, which merges
+    // the two into one hip band. `docs/LESSONS.md` §7: a symptom named accurately, a
+    // mechanism named badly — the cape deletion stands on its own evidence, not on this.
     //
-    // The same reasoning applies to the trim, which is already `noOutline` for the
-    // z-fighting reason and gets the geometric one for free.
-    cape.userData.noOutline = true;
-    cape.castShadow = true;
-    cape.receiveShadow = true;
-    cape.position.y = -capeH * 0.38;
-    neck.add(cape);
+    // ⚠️ If a future pass wants a cape back, it must be a SOLID with thickness, not a
+    // plane — every failure this element ever had traces to being a zero-volume sheet.
 
-    const capeTrim = new THREE.Mesh(curvedPanel(capeR * 1.01, capeArc * 0.97, capeH * 0.045, Math.PI), capeTrimMat);
-    capeTrim.name = 'lollipop_wrapper_cape_trim__no_outline';
-    capeTrim.userData.noOutline = true;
-    capeTrim.position.y = cape.position.y - capeH * 0.48;
-    neck.add(capeTrim);
-
-    // Twisted wrapper knot — the cape's own "tied at the neck" landmark, echoing
-    // the twist-cone hands and wrapper-petal cuffs already on this character.
+    // Twisted wrapper knot — the gather where the cellophane is pinched shut under the
+    // candy, echoing the twist-cone hands and wrapper-petal cuffs already on this
+    // character.
     const twist = new THREE.Mesh(new THREE.ConeGeometry(R * 0.16, R * 0.3, 8), twistMat);
     twist.name = 'lollipop_wrapper_twist';
     twist.rotation.x = Math.PI;
@@ -688,7 +961,7 @@ export class LollipopCharacter extends BaseCharacter {
       }
     });
 
-    this.buildSilhouetteEvents(R);
+    this.buildSilhouetteEvents(R, discCenterY, discOuterR);
 
     outlineGroup(this.root);
     this.collectFlashTargets();
@@ -696,138 +969,342 @@ export class LollipopCharacter extends BaseCharacter {
   }
 
   /**
-   * SILHOUETTE EVENTS — the wrapper twist.
+   * SILHOUETTE EVENTS — ONE wrapper twist, ABOVE the disc.
    *
-   * Lollipop measured **hull deficiency 0.1377 with ZERO appendages** at the shipped
-   * facing: at yaw 90 the candy disc is edge-on, so the whole character is a tall
-   * flat slab. The one thing every wrapped lollipop in the world has, and this one
-   * did not, is the twisted cellophane above the disc — and it is the ideal shape
-   * for this camera, because the two tails leave the mass sideways at the widest
-   * point rather than climbing over it.
+   * ── ⚠️ THE OLD VERSION'S REASONING IS KEPT, BECAUSE IT WAS SOUND AND STILL WRONG ──
    *
-   * `WRAPPER_INK` is deliberate on both counts: it is the cape and collar's own
-   * near-black cellophane, so this reads as the same material the character is
-   * already wearing, and it keeps the two new events inside the dark rung rather
-   * than adding a third light mass to a character that is mostly white and red.
+   * > "Lollipop measured **hull deficiency 0.1377 with ZERO appendages** at the shipped
+   * > facing: at yaw 90 the candy disc is edge-on, so the whole character is a tall flat
+   * > slab. […] it is the ideal shape for this camera, because the two tails leave the
+   * > mass sideways at the widest point rather than climbing over it."
+   *
+   * Two tapered tails leaving the head sideways at ±90° is the *literal* statement of
+   * `rules.ts` pattern 1, and Uri named it without seeing the code: **a pointed mass
+   * either side of a head reads as an ear or a horn — five for five across this cast
+   * (burrito's foil "looks like a goat", egg's shards, hamburger's lettuce, THESE, and
+   * pizza's cheese strands), whatever the shape is made of.** The metric that motivated
+   * them is real; the shape it selected was the one shape this character could not wear.
+   *
+   * The replacement keeps the metric's requirement and drops the horn read, using all
+   * three of the escape routes `rules.ts` lists:
+   *   • **RE-PLACED** — above the mass, not beside it. This is also the honest object:
+   *     every wrapped lollipop in the world is twisted shut at the TOP, not at 3 and 9
+   *     o'clock.
+   *   • **RE-SHAPED** — it hooks over and droops, and its tip is a rounded knot rather
+   *     than a taper. Horns are straight and they point; this flops.
+   *   • **ASYMMETRIC** — one, off the disc's axis, leaning. Two mirrored masses is what
+   *     makes the brain read "ears" in the first place.
+   * It should also do the hull job at least as well: the hook's underside is a real
+   * concavity at every yaw, where the old pair only broke the outline sideways.
    */
-  private buildSilhouetteEvents(R: number): void {
+  private buildSilhouetteEvents(R: number, discCenterY: number, discOuterR: number): void {
     const head = this.rig.joints.head;
-    const box = localBounds(head);
-    const wrapMat = toonMat({ color: WRAPPER_INK, roughness: 0.42, doubleSide: true });
+    // ── 🔴 IT WAS `WRAPPER_INK`, AND THE FIRST RENDER OF THIS PASS KILLED THAT ──
+    // The inherited reasoning was: near-black ties the twist to the cape and collar and
+    // keeps the new mass inside the dark rung rather than adding another light one. Sound,
+    // and wrong once looked at. At the lobby camera a near-black tube rising off a
+    // character's crown does not read as cellophane at all — it reads as an ANTENNA or a
+    // TAIL, which is the same class of error as the horns it replaced: the SHAPE is judged
+    // by where it sits and how it is valued, not by what it is nominally made of. Pale,
+    // glossy, high-key is what says "clear plastic wrapper".
+    //
+    // The dark rung it was carrying is not lost: the cape it matched is deleted this pass
+    // and the boots (#0C0814), hip collar and choker still hold p05 at 0.083 against a
+    // 0.18 cap, i.e. with room to spare — measured, not assumed.
+    const filmMat = glossyMat({ color: CELLO, roughness: 0.30, rim: false });
+    // The cinch stays near-black so the twist still has a value step at its root rather
+    // than melting into the candy's own top edge.
+    const cinchMat = toonMat({ color: WRAPPER_INK, roughness: 0.42 });
 
-    for (const [azimuth, k, rise] of [[Math.PI * 0.5, 1.0, 0.62], [-Math.PI * 0.5, 0.82, 0.44]] as const) {
-      const { at, out } = massAnchor(head, box, { azimuth, height01: 0.86, inset: 0.26 });
-      const pts = [
-        at.clone(),
-        at.clone().addScaledVector(out, R * 0.22 * k).add(new THREE.Vector3(0, R * 0.18 * rise, 0)),
-        at.clone().addScaledVector(out, R * 0.46 * k).add(new THREE.Vector3(0, R * 0.34 * rise, 0)),
-        at.clone().addScaledVector(out, R * 0.58 * k).add(new THREE.Vector3(0, R * 0.60 * rise, 0)),
-      ];
-      const tail = curl(wrapMat, pts, { rBase: R * 0.115, rTip: R * 0.038 });
-      tail.name = 'lollipop_wrapper_twist';
-      head.add(tail);
-    }
+    // Anchored on the disc's own top edge rather than through `massAnchor`, because the
+    // whole point is that this is the wrapper's twist-point — not a generic outline event
+    // placed wherever the bounding box happens to be widest, which is what put the old
+    // pair at ±90° in the first place.
+    //
+    // ⚠️ ~55% of the first version's reach. A big hook is a big silhouette event and it was
+    // also the largest single element on the character that is not candy — which is
+    // `rules.ts`'s converse rule ("detail added to signal the subject can destroy the
+    // silhouette that signalled it better") pointed straight at the one thing this
+    // character has always had going for it: a clean disc on a stick.
+    const base = new THREE.Vector3(R * 0.05, discCenterY + discOuterR * 0.93, 0);
+    const pts = [
+      base.clone(),
+      base.clone().add(new THREE.Vector3(R * 0.06, R * 0.15, -R * 0.01)),
+      base.clone().add(new THREE.Vector3(R * 0.16, R * 0.27, -R * 0.03)),
+      base.clone().add(new THREE.Vector3(R * 0.27, R * 0.31, -R * 0.035)),  // the hook over
+      base.clone().add(new THREE.Vector3(R * 0.31, R * 0.21, -R * 0.030)),  // and the droop
+    ];
+    const tail = curl(filmMat, pts, { rBase: R * 0.105, rTip: R * 0.062, seg: 16 });
+    tail.name = 'lollipop_wrapper_twist';
+    head.add(tail);
+
+    // The rounded knot on the end. A taper to a point is a horn tip whatever it is
+    // attached to; a ball is a wrapper end.
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(R * 0.072, 12, 10), filmMat);
+    knot.position.copy(pts[pts.length - 1]);
+    knot.scale.set(1, 0.82, 0.9);
+    knot.castShadow = true;
+    head.add(knot);
+
+    // The gather where the cellophane is cinched against the candy — a small torus at
+    // the twist's base, so the twist grows OUT of the disc instead of being parked on it.
+    const cinch = new THREE.Mesh(new THREE.TorusGeometry(R * 0.100, R * 0.026, 6, 16), cinchMat);
+    cinch.position.copy(base).add(new THREE.Vector3(R * 0.015, R * 0.045, 0));
+    cinch.rotation.set(Math.PI / 2, 0, -0.30);
+    cinch.castShadow = true;
+    head.add(cinch);
   }
 
   /**
-   * Eyes sit low on the stick (round, alert, a curved surface solved the same way as
-   * the disc/wrap treatments elsewhere in this cast); a sweet closed-smile mouth and
-   * rosy blush sit up on the candy's front face. Confident, a little sassy — she
-   * swings herself like a hammer.
+   * THE FACE — all of it on the candy disc, mouth BELOW the eyes.
+   *
+   * ── ⚠️ THE OLD DOC COMMENT IS KEPT, BECAUSE IT DESCRIBES THE REJECTED CHARACTER ──
+   *
+   * > "Eyes sit low on the stick (round, alert, a curved surface solved the same way as
+   * > the disc/wrap treatments elsewhere in this cast); a sweet closed-smile mouth and
+   * > rosy blush sit up on the candy's front face."
+   *
+   * That is `rules.ts`'s old one-line spec implemented faithfully, and it is the whole of
+   * Uri's reject sheet (`docs/DECISIONS-FOR-URI.md` §41): the mouth was above the eyes
+   * because the SPEC put it there, and the arms hid the face because the spec put the
+   * eyes on the one part of this character the arms swing across. Both halves of that
+   * line are retired in `rules.ts` too — changing only this file would leave the next
+   * agent to faithfully re-implement the layout Uri just rejected.
+   *
+   * ── THE STANDARD THIS BUILDS TO, AND IT IS MEASURED ──────────────────────────
+   * `rules.ts`: **0% of our eye pixels are above 0.85 luma, against the reference plates'
+   * 31.1% and 34.1%. Our faces carry TWO VALUES TOTAL.** Separate meshes fix that, and
+   * `egg.ts` — the cast's face reference and the one character Uri rated well — is copied
+   * rather than reinvented, then taken past:
+   *
+   *   sclera  #FFFFFF, and it is the BRIGHTEST ALBEDO ON THE CHARACTER by construction —
+   *           above CANDY_WHITE (0.842), the stick (0.860) and the limbs (0.83). Egg's
+   *           eye is a white sphere too, but egg's SHELL is near-white, so its sclera
+   *           does not separate from its own head. Here the candy behind it is a step
+   *           down, so the same construction delivers more.
+   *   iris    a real coloured element between sclera and pupil. Egg has none; this is the
+   *           "add depth, details, make the face clear and crisp" half of Uri's brief.
+   *   pupil   INK, offset up-and-inward from the eye centre so she has a GAZE — both eyes
+   *           the SAME way, which is what makes it a gaze rather than two independently
+   *           wandering eyes. `rules.ts` is explicit that a centred pupil "reads dead
+   *           even when everything else is right".
+   *   catchlights  two, `noOutline`, the primary offset opposite the pupil.
+   *   lash line    the closed-eye arc DEMOTED FROM BEING THE EYE TO BOUNDING IT. This is
+   *                literally the geometry the old build used for the winking eye: it is
+   *                not deleted, it is moved to the top of an open one. Removing "closed"
+   *                is not removing character.
+   *
+   * ── AND THE WINK IS GONE, DELIBERATELY ───────────────────────────────────────
+   * The old right eye was a genuine closed wink, chosen so the two eyes were not mirrored.
+   * The asymmetry was the right instinct and the wrong element: Uri's blind ranking of
+   * seven characters tracks CLOSED EYES, and a wink is a closed eye on the half of the
+   * face nearest the camera at the lobby's three-quarter yaw. The asymmetry moves to the
+   * brows and the lash tilt, which carry it without shutting an eye.
+   *
+   * Personality per `rules.ts`: bright, hyperactive, sugar-manic. Both eyes wide, brows
+   * high and uneven, an open grin with teeth and tongue.
    */
-  private buildFace(
-    R: number,
-    stickR: number,
-    discCenterY: number,
-    discOuterR: number,
-    discBottomY: number,
-    ribbonFrontZ: number,
-    stickBottomY: number
-  ): void {
+  private buildFace(R: number, cap: DiscCap, discOuterR: number, ribbonT: number): void {
     const face = this.rig.joints.face;
     const ink = PALETTE.ink;
-    const eyeMat = toonMat({ color: ink, roughness: 0.25 });
 
-    // Centred in the stick's CLEARLY VISIBLE span — below the disc's actual bottom
-    // edge (with a little clearance), not the full stick length, most of whose top
-    // half is embedded inside the disc.
-    const visibleStickTop = discBottomY - R * 0.05;
-    const stickFaceY = stickBottomY + (visibleStickTop - stickBottomY) * 0.5;
-    // Round 2 defect: eyes sat close together (+-0.52*stickR, radius 0.42*stickR) right
-    // where the disc's shadow falls, and read as a single squinting smudge. Pushed
-    // apart and enlarged — the stick was widened specifically to give this room.
-    // Right eye (sx>0) winks shut — a real closed-eye read, not just a squint — under
-    // a hard-cocked brow; the left stays wide open under a low, level brow. A second
-    // independent art-director pass named matched, mirrored brows/eyes as the reason
-    // facial acting wasn't landing across the cast, and "confident, a little sassy"
-    // is exactly the personality a genuine wink sells that a symmetric stare can't.
-    for (const sx of [-1, 1]) {
-      const winking = sx > 0;
-      const ex = sx * stickR * 0.52;
-      const ez = Math.sqrt(Math.max(0, stickR * stickR - ex * ex)) * 0.96;
+    // Every feature must clear the swirl arms, which stand `ribbonT * 0.45` proud of the
+    // candy. The old code hard-coded one flat `ribbonFrontZ` for this and the round-1 note
+    // records what happens without it: features "land UNDER the ribbon wherever it happens
+    // to cross that point on the swirl and vanish entirely". There is no single z on a
+    // domed disc, so the clearance is applied along the surface instead of at one plane.
+    const LIFT = ribbonT * 0.45 + R * 0.006;
 
-      if (winking) {
-        // A thin closed-lid arc instead of an open eyeball — flattened almost to a
-        // line, with a slight upward curve so it reads as shut-and-smiling rather
-        // than a flat dash.
-        const lid = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.44, 14, 12), eyeMat);
-        lid.position.set(ex, stickFaceY - stickR * 0.06, ez);
-        lid.scale.set(1, 0.16, 0.55);
-        lid.castShadow = true;
-        face.add(lid);
-      } else {
-        const eye = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.44, 14, 12), eyeMat);
-        eye.position.set(ex, stickFaceY, ez);
-        eye.scale.set(1, 1.15, 0.55);
-        eye.castShadow = true;
-        face.add(eye);
+    /**
+     * Mount a feature group flush on the candy's front cap at disc-local (x, y), pushed
+     * out along the surface NORMAL by `embed`. Local +Z is the outward normal — the exact
+     * contract of `egg.ts`'s `addShellDecal`, which is why the whole face shares one
+     * tangent frame and cannot drift out of plane.
+     */
+    const decal = (x: number, y: number, embed: number): THREE.Group => {
+      const n = cap.normal(x, y);
+      const g = new THREE.Group();
+      g.position.set(x, y, cap.z(Math.hypot(x, y))).addScaledVector(n, embed);
+      g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+      face.add(g);
+      return g;
+    };
 
-        const glint = new THREE.Mesh(new THREE.SphereGeometry(stickR * 0.15, 8, 8), flatMat('#ffffff'));
-        glint.position.set(ex - stickR * 0.13, stickFaceY + stickR * 0.17, ez + stickR * 0.12);
-        glint.userData.noOutline = true;
-        face.add(glint);
+    /**
+     * Push a flat extruded plate onto the cap per-vertex, so a wide feature follows the
+     * candy instead of hovering over its middle and sinking at its ends. `oy` is where the
+     * shape's own origin sits in disc-local Y; the geometry comes out carrying ABSOLUTE
+     * disc-local z, so its mesh is placed at z = 0.
+     */
+    const conform = (geo: THREE.BufferGeometry, oy: number, lift: number): THREE.BufferGeometry => {
+      const p = geo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) {
+        p.setZ(i, cap.z(Math.hypot(p.getX(i), p.getY(i) + oy)) + lift + p.getZ(i));
       }
+      p.needsUpdate = true;
+      geo.computeVertexNormals();
+      return geo;
+    };
 
-      // Brows — real shaded geometry, not a flat decal, sitting a fixed offset
-      // above each eye so it can't drift out of alignment. Cocked hard over the
-      // winking eye, low and level over the open one.
-      const browLift = winking ? stickR * 0.78 : stickR * 0.55;
-      const browTilt = winking ? 0.55 : 0.12;
-      const brow = new THREE.Mesh(
-        new THREE.CapsuleGeometry(stickR * 0.09, stickR * 0.55, 4, 8),
+    // ── EYES ───────────────────────────────────────────────────────────────────
+    // Sized to the DISC, not to the stick. The old build's eyes were 0.44·stickR on a
+    // 0.28R stick — this file records them measuring "~3px at the size a player sees a
+    // character", and a blind critic reading the whole model as "an inanimate prop, not a
+    // mascot". These are 0.255·discOuterR ≈ 0.19R, i.e. **~4.8x the radius**, and they
+    // cost nothing structural because the disc is the largest flat frontal surface in the
+    // cast. That is what the new `rules.ts` spec means by solving the eye-size problem BY
+    // CONSTRUCTION rather than by widening a stick that is really a connectivity budget.
+    const eyeR = discOuterR * 0.255;
+    const eyeX = discOuterR * 0.335;
+    const eyeY = discOuterR * 0.20;
+    const gazeX = eyeR * 0.13;
+    const gazeY = eyeR * 0.11;
+
+    for (const sx of [-1, 1] as const) {
+      const eye = decal(sx * eyeX, eyeY, LIFT);
+
+      const white = new THREE.Mesh(
+        new THREE.SphereGeometry(eyeR, 18, 14),
+        toonMat({ color: EYE_WHITE, roughness: 0.28 })
+      );
+      white.scale.set(1, 1.06, 0.40);
+      white.name = `lollipop_sclera_${sx > 0 ? 'r' : 'l'}`;
+      white.castShadow = true;
+      eye.add(white);
+
+      const iris = new THREE.Mesh(
+        new THREE.SphereGeometry(eyeR * 0.52, 16, 12),
+        toonMat({ color: IRIS, roughness: 0.3 })
+      );
+      iris.position.set(gazeX, gazeY, eyeR * 0.26);
+      iris.scale.set(1, 1, 0.38);
+      iris.castShadow = true;
+      eye.add(iris);
+
+      const pupil = new THREE.Mesh(
+        new THREE.SphereGeometry(eyeR * 0.30, 14, 12),
+        toonMat({ color: ink, roughness: 0.22 })
+      );
+      pupil.position.set(gazeX, gazeY, eyeR * 0.33);
+      pupil.scale.set(1, 1, 0.38);
+      pupil.castShadow = true;
+      eye.add(pupil);
+
+      // Primary catchlight, offset OPPOSITE the pupil's own offset. `rules.ts` asks for it
+      // as an explicit mesh rather than a specular hit, because a specular is a property
+      // of the light rig and walks away when the light moves.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.17, 10, 10), flatMat('#ffffff'));
+      glint.position.set(gazeX - sx * eyeR * 0.26, gazeY + eyeR * 0.24, eyeR * 0.40);
+      glint.userData.noOutline = true;
+      eye.add(glint);
+
+      // Secondary, small, low and on the far side. Two catchlights is what reads as wet.
+      const glint2 = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.075, 8, 8), flatMat('#ffffff'));
+      glint2.position.set(gazeX + sx * eyeR * 0.20, gazeY - eyeR * 0.26, eyeR * 0.38);
+      glint2.userData.noOutline = true;
+      eye.add(glint2);
+
+      // ── LASH LINE — the old closed-eye arc, demoted to BOUNDING the eye ───────
+      // Capping the top ~155° of the sclera. Its tilt is the character's asymmetry now:
+      // the right lid rides higher and cocks harder, which is the same "confident, a
+      // little sassy" read the wink carried, without shutting an eye.
+      const lidArc = new THREE.Mesh(
+        new THREE.TorusGeometry(eyeR * 0.94, eyeR * 0.17, 8, 22, Math.PI * 0.86),
+        toonMat({ color: ink, roughness: 0.35 })
+      );
+      lidArc.rotation.z = Math.PI * 0.07 + sx * 0.16;
+      lidArc.position.z = eyeR * 0.12;
+      lidArc.scale.set(1, 1.06, 0.55);
+      lidArc.castShadow = true;
+      eye.add(lidArc);
+
+      // Brows — real shaded geometry on their own decal, so they share the eyes' tangent
+      // plane and cannot drift out of it. Cocked hard on the right, high and level on the
+      // left.
+      const brow = decal(sx * eyeX * 1.02, eyeY + eyeR * (sx > 0 ? 1.44 : 1.30), LIFT);
+      const browMesh = new THREE.Mesh(
+        new THREE.CapsuleGeometry(eyeR * 0.115, eyeR * 1.02, 4, 8),
         toonMat({ color: ink, roughness: 0.4 })
       );
-      brow.position.set(ex, stickFaceY + browLift, ez * 0.85);
-      brow.rotation.z = Math.PI / 2 - sx * browTilt;
-      brow.castShadow = true;
-      face.add(brow);
+      browMesh.rotation.z = Math.PI / 2 - sx * (sx > 0 ? 0.42 : 0.20);
+      browMesh.castShadow = true;
+      brow.add(browMesh);
     }
 
-    // Mouth: a closed, sweet smile on the candy's front face. Pulled further down from
-    // the disc centre than round 2 (0.42 -> 0.52) so it sits clear of the spiral's
-    // innermost curl instead of visually merging with it.
-    const mouthY = discCenterY - discOuterR * 0.52;
-    const mouth = new THREE.Mesh(
-      new THREE.TorusGeometry(R * 0.15, R * 0.04, 8, 20, Math.PI * 0.85),
-      toonMat({ color: ink, roughness: 0.3 })
-    );
-    mouth.name = 'lollipop_mouth';
-    mouth.position.set(0, mouthY, ribbonFrontZ + R * 0.02);
-    mouth.rotation.z = Math.PI * 1.08;
-    mouth.castShadow = true;
-    face.add(mouth);
+    // ── MOUTH — an OPENING, not a painted curve ────────────────────────────────
+    // `rules.ts`: "THE MOUTH NEEDS AN INTERIOR VALUE STEP — a lip line with a genuinely
+    // darker throat plane behind it." A solid opaque disc cannot be recessed into without
+    // cutting a hole in it, so the step is built as stacked plates at strictly increasing
+    // z, LIP frontmost and THROAT furthest back. Both ladders — depth and value — then run
+    // the same way, which is what makes it read as a hole:
+    //
+    //   plate    z (relative to the candy surface)   albedo luma
+    //   throat        -0.006R .. +0.014R                0.09
+    //   tongue        -0.016R .. +0.024R                0.55
+    //   teeth         +0.008R .. +0.028R                1.00
+    //   lip           +0.012R .. +0.034R                0.06   <- frontmost
+    //
+    // It also clears the character's darkest band by a wide margin, which `rules.ts` flags
+    // after taco's mouth fused with its near-black collar and Uri read the pair as a hat
+    // brim: the nearest WRAPPER_INK mass here is the hip collar, most of a head below.
+    const mw = discOuterR * 0.32;
+    const mh = discOuterR * 0.21;
+    const mouthY = -discOuterR * 0.30;
+    const zAt = (dy: number) => cap.z(Math.abs(mouthY + dy));
 
-    // Hoisted and given `depthWrite: false` — a transparent material that still
-    // writes depth is a silent occluder (`docs/LESSONS.md` §1), and every
-    // transparent material in the cast carried the default `true`.
+    const lipRing = new THREE.Mesh(
+      conform(new THREE.ExtrudeGeometry(mouthShape(mw, mh, R * 0.038, mouthShape(mw, mh)), {
+        depth: R * 0.022, bevelEnabled: false, curveSegments: 10,
+      }), mouthY, LIFT + R * 0.012),
+      toonMat({ color: ink, roughness: 0.32 })
+    );
+    lipRing.name = 'lollipop_mouth';
+    lipRing.position.y = mouthY;
+    lipRing.castShadow = true;
+    face.add(lipRing);
+
+    // Slightly larger than the lip's hole so its rim tucks UNDER the lip band instead of
+    // leaving a hairline of candy showing through the ring at an off-axis yaw.
+    const throat = new THREE.Mesh(
+      conform(new THREE.ExtrudeGeometry(mouthShape(mw, mh, R * 0.010), {
+        depth: R * 0.020, bevelEnabled: false, curveSegments: 10,
+      }), mouthY, LIFT - R * 0.006),
+      toonMat({ color: THROAT, roughness: 0.55 })
+    );
+    throat.name = 'lollipop_throat';
+    throat.position.y = mouthY;
+    throat.userData.noOutline = true;   // it lives INSIDE the lip; an ink hull round a
+                                        // near-black plate is pure cost
+    face.add(throat);
+
+    // Upper teeth. The only pure white below the eyes, and it is what makes the grin read
+    // as a grin at gameplay scale instead of a dark hole. Deliberately allowed to overrun
+    // the lip's INNER edge — the opaque lip band in front of it hides the overrun, and the
+    // alternative (fitting a straight bar inside a bowed curve) leaves a dark gap under
+    // the upper lip that reads as a gum line.
+    const teeth = new THREE.Mesh(
+      roundedBox(mw * 1.30, mh * 0.30, R * 0.020, R * 0.010, 2),
+      toonMat({ color: TEETH, roughness: 0.35 })
+    );
+    teeth.position.set(0, mouthY - mh * 0.055, zAt(-mh * 0.055) + LIFT + R * 0.018);
+    teeth.userData.noOutline = true;
+    face.add(teeth);
+
+    const tongue = new THREE.Mesh(new THREE.SphereGeometry(mw * 0.46, 14, 10), toonMat({ color: TONGUE, roughness: 0.45 }));
+    tongue.position.set(0, mouthY - mh * 0.68, zAt(-mh * 0.68) + LIFT + R * 0.004);
+    tongue.scale.set(1, 0.62, 0.18);
+    tongue.userData.noOutline = true;
+    face.add(tongue);
+
+    // Blush. `depthWrite: false` because a transparent material that still writes depth is
+    // a silent occluder (`docs/LESSONS.md` §1).
     const blushMat = flatMat('#FF9EC4', { transparent: true, opacity: 0.5 });
     blushMat.depthWrite = false;
     for (const sx of [-1, 1]) {
-      const blush = new THREE.Mesh(
-        new THREE.SphereGeometry(R * 0.07, 10, 8),
-        blushMat
-      );
-      blush.position.set(sx * discOuterR * 0.48, discCenterY - discOuterR * 0.12, ribbonFrontZ + R * 0.01);
+      const bx = sx * discOuterR * 0.60;
+      const by = -discOuterR * 0.10;
+      const blush = new THREE.Mesh(new THREE.SphereGeometry(R * 0.085, 10, 8), blushMat);
+      blush.position.set(bx, by, cap.z(Math.hypot(bx, by)) + LIFT);
       blush.scale.set(1, 0.7, 0.3);
       blush.userData.noOutline = true;
       face.add(blush);
