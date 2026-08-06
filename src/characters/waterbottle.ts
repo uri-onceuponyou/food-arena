@@ -1160,6 +1160,42 @@ export class WaterBottleCharacter extends BaseCharacter {
   private dressLimbs(): void {
     // Richer WATER blue, not the pale near-white shell tone — see the constructor's
     // own comment on the colour-convergence fix.
+    //
+    // ── 🚨 `rim: true` WAS TRIED HERE AND MEASURED WORSE. DO NOT RE-TRY IT. ────────
+    // Every limb segment on this character is this ONE material, so the whole body
+    // below the bottle is a single value and the boundary numbers say so:
+    //
+    //   pair                dLcontact   dL (whole-part)   contact band
+    //   head|shoulderL         0.0563           0.0228    76/71 px, 112 contacts
+    //   shoulderL|elbowL       0.0844           0.0828    19/20 px
+    //   hipL|kneeL             0.0981           0.0457    20/20 px
+    //
+    // against a floor of 0.0039 (1/255) and a target of 0.15. `head|shoulderL` has the
+    // LARGEST contact band in the whole cast, so it is the least noisy reading there
+    // is, and a whole-part `dL` of 0.0228 makes it a genuine albedo collapse rather
+    // than the shadow coincidence that produces most of the cast's weak boundaries
+    // (soup's `torso|shoulderL` reads `dL` 0.7237 and `dLcontact` 0.0425 — those two
+    // parts could not be further apart and the seam between them still does not exist).
+    //
+    // The Fresnel rim looked like the right lever because it does not move a part's
+    // median: it brightens only grazing normals, i.e. the front part's own edge, which
+    // IS the contact band. **Measured on a frozen tree, it made all three worse:**
+    //
+    //   head|shoulderL     0.0563 -> 0.0073   (-0.0490, 13 floors)
+    //   shoulderL|elbowL   0.0844 -> 0.0021   (-0.0823, 21 floors)
+    //   hipL|kneeL         0.0981 -> 0.0081   (-0.0900, 23 floors)
+    //
+    // The reason is the SIGN, which `dLcontact` does not carry and `cA`/`cB` do: on all
+    // three pairs the DARKER side was the one the rim brightened, so it walked toward
+    // the other side instead of away from it. Reverted; the revert measures back to
+    // within +0.0028 of the original, which is also this instrument's two-run noise
+    // floor. `tools/tmp/ca_pairs.mjs` exists to make that sign readable before the next
+    // pass spends a render on it.
+    //
+    // ⚠️ AND THE OBVIOUS ALTERNATIVE IS ALSO WRONG. Darkening the limbs to `WATER_DEEP`
+    // (a rung this file already owns) would separate them — and would take the
+    // character's own MEDIAN down toward a floor it sits only 0.0779 clear of, trading
+    // `dLcontact` for `dlBelow10`. This character already fails `dlBelow10` 6 of 18.
     const plasticMat = glossyMat({ color: WATER, roughness: 0.16 });
     const capMat = toonMat({ color: CAP, roughness: 0.4 });
     const capDarkMat = toonMat({ color: CAP_DARK, roughness: 0.4 });

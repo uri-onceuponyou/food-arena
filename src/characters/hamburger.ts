@@ -411,8 +411,8 @@ export class HamburgerCharacter extends BaseCharacter {
     const bunDarkMat = toonMat({ color: BUN_DARK, ramp: RAMP_CHARACTER(), roughness: 0.85 });
     const pattyMat = toonMat({ color: PATTY, ramp: RAMP_CHARACTER(), roughness: 0.55 }); // seared, faintly greasy meat
     const pattyDarkMat = toonMat({ color: PATTY_DARK, ramp: RAMP_CHARACTER(), roughness: 0.55 });
-    const cheeseMat = glossyMat({ color: PALETTE.cheese, roughness: 0.35 }); // soft melt sheen
-    const tomatoMat = glossyMat({ color: PALETTE.tomato, roughness: 0.18 }); // wettest surface on the model
+    const cheeseMat = glossyMat({ color: PALETTE.cheese, roughness: 0.35, rim: true }); // soft melt sheen
+    const tomatoMat = glossyMat({ color: PALETTE.tomato, roughness: 0.18, rim: true }); // wettest surface on the model
     const lettuceMatA = toonMat({ color: LETTUCE, ramp: RAMP_CHARACTER(), roughness: 0.6 }); // leafy, satin not shiny
     const lettuceMatB = toonMat({ color: LETTUCE_FRILL, ramp: RAMP_CHARACTER(), roughness: 0.6 });
     const seedMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER(), roughness: 0.75 }); // dry toasted sesame

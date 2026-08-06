@@ -360,7 +360,17 @@ export class LollipopCharacter extends BaseCharacter {
     // "coin facing the camera" orientation Donut's torus uses for its hole.
     const discGeo = new THREE.CylinderGeometry(discOuterR, discOuterR, discDepth, 40, 1, false);
     discGeo.rotateX(Math.PI / 2);
-    const candyMat = glossyMat({ color: CANDY_WHITE, roughness: 0.12 });
+    // ⚠️ `rim: true` on every `glossyMat` in this file. `toonMat` applies the Fresnel
+    // rim by default; `glossyMat`'s is OPT-IN (`aeee0b9`) and **no call site anywhere
+    // passed it**, so the eighteen `MeshPhysicalMaterial`s in the cast — the wet and
+    // candy surfaces that most want a wet edge — were the only materials in the game
+    // with no edge response at all. Lollipop is the most glossy-dominated character
+    // there is, so it is where this is worth the most and where it is riskiest: its
+    // near-white clipping was the hardest-won number of `e6fed57` (`clipShare` 0.1610
+    // -> 0.0175 against a reference band max of 0.0929). The per-character `clipShare`
+    // run gated it and says ON here; **soup is the one that FAILS it** (0.0883 ->
+    // 0.0976, past the band) and egg is a no-op (0.33/255 over 1.67% of its matte).
+    const candyMat = glossyMat({ color: CANDY_WHITE, roughness: 0.12, rim: true });
     const disc = new THREE.Mesh(discGeo, candyMat);
     disc.name = 'lollipop_candy_base';
     disc.position.y = discCenterY;
@@ -377,7 +387,7 @@ export class LollipopCharacter extends BaseCharacter {
     const ribbonDepth = discDepth * 0.55;
     // Colour drops to SWIRL_RED; the emissive deliberately stays at the brighter
     // CANDY_RED so the swirl keeps its candy glow while its diffuse value steps down.
-    const ribbonMat = glossyMat({ color: SWIRL_RED, roughness: 0.12, emissive: CANDY_RED, emissiveIntensity: 0.12 });
+    const ribbonMat = glossyMat({ color: SWIRL_RED, roughness: 0.12, emissive: CANDY_RED, emissiveIntensity: 0.12, rim: true });
     const ribbon = new THREE.Mesh(ribbonGeo, ribbonMat);
     ribbon.name = 'lollipop_swirl';
     ribbon.position.set(0, discCenterY, discDepth / 2 - ribbonDepth * 0.2);
@@ -529,14 +539,14 @@ export class LollipopCharacter extends BaseCharacter {
     capeAnchor.position.y = discBottomY;
     head.add(capeAnchor);
     const neck = capeAnchor;
-    const capeMat = glossyMat({ color: WRAPPER_INK, roughness: 0.16, transparent: true, opacity: 0.6 });
+    const capeMat = glossyMat({ color: WRAPPER_INK, roughness: 0.16, transparent: true, opacity: 0.6, rim: true });
     capeMat.side = THREE.DoubleSide; // seen edge-on/from behind at yaw 135/210, not just front
     // A transparent material that still writes depth is a silent occluder
     // (`docs/LESSONS.md` §1) — and this one is a DoubleSide panel wrapped around the
     // stick, so it was punching a hole through the character's own body from behind.
     capeMat.depthWrite = false;
     const capeTrimMat = toonMat({ color: CYBER, roughness: 0.3, emissive: CYBER, emissiveIntensity: 0.5 });
-    const twistMat = glossyMat({ color: CANDY_WHITE, roughness: 0.14 });
+    const twistMat = glossyMat({ color: CANDY_WHITE, roughness: 0.14, rim: true });
 
     // Sized to the STICK, not to a torso. At the old R*0.55 x R*1.55 this was a
     // torso-scale cloak on a body that is 0.19R wide, and it rendered as a flat
@@ -605,7 +615,7 @@ export class LollipopCharacter extends BaseCharacter {
     const stickLimbMat = toonMat({ color: LIMB_TEAL, roughness: 0.55 });
     const stickLimbDarkMat = toonMat({ color: LIMB_TEAL_DARK, roughness: 0.55 });
     const stripeMat = toonMat({ color: CANDY_RED, roughness: 0.55 });
-    const candyHandMat = glossyMat({ color: CANDY_RED, roughness: 0.14 });
+    const candyHandMat = glossyMat({ color: CANDY_RED, roughness: 0.14, rim: true });
     const candySwirlMat = candyMat;
     this.rig.dressLimbs((part, size) => {
       switch (part) {

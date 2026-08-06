@@ -336,9 +336,23 @@ export class SushiCharacter extends BaseCharacter {
     const head = this.rig.joints.head;
 
     // ── Materials ────────────────────────────────────────────────────────────
+    // ⚠️ `rim: true` ON EVERY `glossyMat` IN THIS FILE, and it is the ONLY change of
+    // its kind here. `toonMat` applies the Fresnel rim by default; `glossyMat` gained
+    // an OPT-IN `rim` in `aeee0b9` and **not one of its 69 call sites passed it**, so
+    // the eighteen `MeshPhysicalMaterial`s in the cast — precisely the wet surfaces
+    // that most want an edge — were the only materials in the game with no edge
+    // response at all, and the flag was pixel-neutral.
+    //
+    // It was gated, not merged blind, because the four characters whose near-white
+    // clipping was hardest won (lollipop 0.1610 -> 0.0175, sushi, soup, egg) are the
+    // same four that are mostly glossy. The per-character `clipShare` run says:
+    // lollipop / sushi / hamburger ON; **egg SKIP** (worth 0.33/255 over 1.67% of its
+    // matte — it does nothing); **soup DO NOT** (it ships a `valuescan` failure,
+    // clipping 0.0883 -> 0.0976 past the reference band max of 0.0929).
+    // `docs/LESSONS.md` §7: a local optimum that pays for itself somewhere else.
     const riceMat = toonMat({ color: RICE, roughness: 0.76 });        // matte sticky rice — pushed further from the glossy nori/salmon for real contrast
-    const noriMat = glossyMat({ color: NORI, roughness: 0.3 });       // glossy seaweed sheen
-    const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });   // wet fish
+    const noriMat = glossyMat({ color: NORI, roughness: 0.3, rim: true });       // glossy seaweed sheen
+    const salmonMat = glossyMat({ color: SALMON, roughness: 0.2, rim: true });   // wet fish
     const salmonDarkMat = toonMat({ color: SALMON_DARK, roughness: 0.3 });
 
     // ── Rice mound + salmon topping — one shared profile, two lathes ─────────
@@ -757,8 +771,8 @@ export class SushiCharacter extends BaseCharacter {
     const beltY = torsoH * 0.52;
 
     const riceMat = toonMat({ color: RICE, roughness: 0.72 });
-    const noriMat = glossyMat({ color: NORI, roughness: 0.3 });
-    const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });
+    const noriMat = glossyMat({ color: NORI, roughness: 0.3, rim: true });
+    const salmonMat = glossyMat({ color: SALMON, roughness: 0.2, rim: true });
     const goldMat = toonMat({ color: GOLD, roughness: 0.3, metalness: 0.35 });
 
     // ── Maki roll, lying on its side with the cut face forward ────────────────
@@ -935,6 +949,14 @@ export class SushiCharacter extends BaseCharacter {
     }
 
     // Glaze highlight streak along the nori band's own top edge.
+    // ⚠️ THE ONE `glossyMat` IN THIS FILE THAT DOES **NOT** TAKE THE RIM, and the
+    // reason is arithmetic rather than taste. `clipShare` counts the share of the
+    // character above luma 0.94 against a reference band whose maximum is 0.0929, and
+    // `#E8E8E8` is already luma ~0.909. The rim adds `0.28 * pow(fresnel, 2.6)` — and
+    // this geometry is a tube of radius `R * 0.012`, i.e. essentially ALL grazing
+    // normals, so it would convert almost its entire area to clipped pixels. Adding an
+    // edge highlight to a surface that IS an edge highlight buys nothing and spends the
+    // budget the near-white pass (`e6fed57`, cast mean 0.1007 -> 0.0275) paid for.
     const highlightMat = glossyMat({ color: '#E8E8E8', roughness: 0.08 });
     const highlight = new THREE.Mesh(
       new THREE.TorusGeometry(rAt(0.15) * 1.02, R * 0.012, 6, 28, Math.PI * 0.5),
@@ -1043,10 +1065,45 @@ export class SushiCharacter extends BaseCharacter {
     // mostly-dark character with an orange hat. Nori is now confined to the maki
     // torso, the head's base strip and the boots, where it works as an accent
     // instead of as the character's dominant value.
-    const noriLimbMat = glossyMat({ color: LIMB_NORI, roughness: 0.34 });
-    const upperLimbMat = glossyMat({ color: LIMB_SALMON_DEEP, roughness: 0.34 });
-    const noriAccentMat = glossyMat({ color: NORI, roughness: 0.3 });
-    const salmonMat = glossyMat({ color: SALMON, roughness: 0.2 });
+    // ── THE RIM EARNS THE MOST HERE, AND IT IS ALSO THE ONE PLACE IT COSTS ────────
+    // `shoulderL|elbowL` measured `dLcontact` **0.0080** against a floor of 0.0039 and
+    // a target of 0.15 — the upper arm and the forearm were within TWO 8-BIT STEPS of
+    // each other at the boundary where they meet, i.e. the elbow did not exist. A
+    // Fresnel term fires on the front segment's grazing edge and not on the flatter
+    // surface behind it, which is exactly the polarity a limb-on-limb seam needs.
+    // Measured, paired, on a frozen tree:
+    //
+    //   pair               before -> after     contacts
+    //   shoulderL|elbowL   0.0080 -> 0.2107      31 -> 23   past the 0.15 target
+    //   hipL|kneeL         0.0394 -> 0.2015      30 -> 24   past the 0.15 target
+    //   kneeL|footL        0.0695 -> 0.1294      42 -> 39
+    //   torso|shoulderL    0.1079 -> 0.0181      86 -> 98   🚨 THE COST
+    //   face|head          0.0476 -> 0.0307      57 -> 55
+    //
+    // 🚨 `torso|shoulderL` IS A REAL REGRESSION AND IT WAS CHOSEN, NOT OVERLOOKED.
+    // `cA`/`cB` say exactly what happened: the torso's band did not move (0.3798 ->
+    // 0.3825) and the shoulder's rose +0.093, from 0.2719 to **0.3645** — it walked
+    // onto the torso's own value rather than past it. It is not tunable out: at
+    // rimStrength 0.28 the shoulder gains 0.093, so clearing 0.15 on the far side
+    // would need ~0.75, and `toon.ts` is explicit that an overdone rim is its own
+    // species of amateur.
+    //
+    // Taken anyway, on the count and on the weight. Seams under 0.10 go **4 -> 2**
+    // (shoulderL|elbowL, hipL|kneeL, face|head, kneeL|footL  ->  torso|shoulderL,
+    // face|head) while the contact-WEIGHTED share of weak seams is flat: 39.5% ->
+    // 38.7%, inside the noise. Two seams that were invisible by construction become
+    // visible; one marginal seam is lost.
+    //
+    // THE ALTERNATIVE WAS MEASURED, NOT ASSUMED. Dropping `rim` from `upperLimbMat`
+    // alone (everything else unchanged) restores `torso|shoulderL` to 0.1186 and puts
+    // `shoulderL|elbowL` at **0.0038** and `hipL|kneeL` at **0.0063** — i.e. it buys
+    // the marginal seam back by making the two dead ones deader than they started.
+    // That is the one-word revert if this trade is ever reversed; the number is here so
+    // it does not have to be re-measured.
+    const noriLimbMat = glossyMat({ color: LIMB_NORI, roughness: 0.34, rim: true });
+    const upperLimbMat = glossyMat({ color: LIMB_SALMON_DEEP, roughness: 0.34, rim: true });
+    const noriAccentMat = glossyMat({ color: NORI, roughness: 0.3, rim: true });
+    const salmonMat = glossyMat({ color: SALMON, roughness: 0.2, rim: true });
     const goldMat = toonMat({ color: GOLD, roughness: 0.3, metalness: 0.35 });
     const riceMat = toonMat({ color: RICE, roughness: 0.6 });
 

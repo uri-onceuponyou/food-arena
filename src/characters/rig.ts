@@ -739,6 +739,53 @@ export class ChibiRig {
     // ring proud of the column catches the key light on top and shades underneath,
     // so the notch survives whatever the lighting pass does next. It is also what
     // hides the seam where a character's food mass meets the column.
+    //
+    // ── 🚨 AND 86% OF IT NEVER REACHES THE SCREEN. MEASURED, NOT SUSPECTED ────────
+    // `tools/tmp/ca_neckprobe.mjs` (new; keeps the isolated footprint MASK, which
+    // `limbmatch` throws away, and intersects it with the owner map so the occluder is
+    // NAMED rather than guessed). Match camera, shipped facing (yaw 90), pot_south,
+    // ss2 — the six characters that build a neck:
+    //
+    //   char        foot  delivered  ratio   occluded by
+    //   taco        2168        782  0.361   head 1463
+    //   hotdog      1503        301  0.200   head 1228
+    //   pizza        798         42  0.053   head  767
+    //   burrito      565          0  0.000   head  563, torso 2
+    //   sushi        939          0  0.000   head  938
+    //   soup        2199          0  0.000   head 2159
+    //   TOTAL       8172       1125  0.138
+    //
+    // The occluder is the character's OWN FOOD MASS in all six, and on three of them
+    // the column and the collar are **completely dead geometry**. This is
+    // `docs/LESSONS.md` §1 case 17 exactly — a fix that was never closed out by
+    // measuring delivered pixels — and it is the same theorem `e6fed57` proved for
+    // STUB ("anything added BELOW the food mass cannot be seen"), which turns out not
+    // to be a STUB property at all.
+    //
+    // ⚠️ THE WIDENING THAT WOULD FIX IT IS NOT A FIX, AND THE ARITHMETIC SAYS SO.
+    // The camera is pitched 58° below horizontal (`render/camera.ts:265`), so a ray
+    // from the collar toward the camera rises 1 m per 1/tan(58°) = 0.625 m travelled.
+    // A ring of radius `r` at height `y0` is hidden by any mass vertex above it with
+    // `R >= r + 0.625 * Δy`, i.e. it must clear `max(R - 0.625 * Δy)` over the mass's
+    // own vertices — being wider than the mass at its OWN height is not enough, because
+    // the overhang above it does the occluding. `ca_neckprobe` computes exactly that:
+    //
+    //   char       collar r   REQUIRED r   factor   as a share of the mass's radius
+    //   hotdog       0.2288       0.4838    x2.11   0.83
+    //   taco         0.2607       0.5920    x2.27   0.67
+    //   burrito      0.1117       0.2700    x2.42   0.59
+    //   pizza        0.1539       0.4829    x3.14   0.96
+    //   soup         0.2467       0.8045    x3.26   0.70
+    //   sushi        0.1636       0.5691    x3.48   0.70
+    //
+    // 2.1x to 3.5x, i.e. **59-96% of the food mass's own radius, on all six**. At that
+    // size the ring is no longer a notch under the chin — it IS the silhouette, at the
+    // character's most prominent junction. That is a design change for Uri
+    // (`docs/DECISIONS-FOR-URI.md` §16 has per-character art rejects inbound), not a
+    // defect fix, so it is NOT taken here. Recorded so the next pass starts from the
+    // number instead of re-deriving it, and so nobody widens the collar a little,
+    // measures nothing, and concludes the lever is dead: below ~2.1x it delivers
+    // exactly zero extra pixels, because occlusion is a threshold, not a gradient.
     if (this.metrics.neckGap > 0) {
       const gap = this.metrics.neckGap;
       const nr = this.metrics.neckRadius;
