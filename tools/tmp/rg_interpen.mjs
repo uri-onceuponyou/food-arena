@@ -82,6 +82,9 @@ const SPAN = num('--span', 30);     // seconds of animation swept
 const ANIMS = list('--anims', 'idle,run');
 const IDS = list('--ids', ALL_IDS.join(','));
 const VERBOSE = flag('--verbose');
+const ARM_OUT = num('--armOut', 0);
+const ARM_FWD = num('--armFwd', 0);
+const NO_CLEAR = flag('--noArmClear');
 
 // ── Geometry ───────────────────────────────────────────────────────────────────
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -437,6 +440,23 @@ async function sweep(mod) {
       const ch = createCharacter(id);
       const rig = ch.rig;
       if (!rig) { rows.push({ id, error: 'no rig' }); continue; }
+      // ── `--armOut <rad>`: swing BOTH arms outward by the same angle ─────────────
+      // A probe knob, not a fix. `docs/LESSONS.md` §12: `shoulderL` sits at
+      // x = -shoulderWidth so a POSITIVE z swings it ACROSS the body, and `shoulderR`
+      // is the mirror — hence the opposite signs. Applied to `rig.stance` AFTER
+      // construction, which works because `restPose()` reads `this.stance` every frame,
+      // so a candidate fix can be swept without editing `rig.ts` at all and without a
+      // rebuild between candidates.
+      if (ARM_OUT) { rig.stance.shoulderL -= ARM_OUT; rig.stance.shoulderR += ARM_OUT; }
+      if (ARM_FWD) { rig.stance.armForward = (rig.stance.armForward ?? 0) + ARM_FWD; }
+      // ── `--noArmClear`: the exact A/B for `ChibiRig.solveArmClearance()` ────────
+      // `armClearance` is solved per character, so no single `--armOut` can cancel it
+      // across the cast. Zeroing the field on the built rig reverts the pose to exactly
+      // what it was before the solver existed, in the SAME process, on the SAME object,
+      // with no rebuild in between — a drift control of 0.0000 by construction rather
+      // than by assertion. That is the only honest way to price the change while peers
+      // are mid-edit in the same tree.
+      if (NO_CLEAR) rig.armClearance = 0;
       for (const anim of ANIMS) {
         let worstSelf = null, worstMass = null;
         const offenders = new Map();

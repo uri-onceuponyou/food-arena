@@ -888,8 +888,21 @@ export class ChibiRig {
       // character that gains nothing measurable is left byte-identical.
       if (sc < bestScore - 1e-4) { bestScore = sc; best = v; }
     }
+    // ⚠️ RESTORE THE POSE THE CONSTRUCTOR USED TO LEAVE BEHIND, WHICH IS IDENTITY.
+    // Before this solver existed, nothing posed the rig during construction: `mk()`
+    // set joint POSITIONS and every rotation stayed 0 until the first `animate()`.
+    // `worstAt()` calls `restPose()`, which does NOT return to identity — it leaves
+    // the authored stance on the shoulders, elbows, hips and head.
+    //
+    // That matters because characters build their own geometry AFTER `new ChibiRig()`
+    // and several of them measure the rig in world space to place it — `appendages.ts`
+    // resolves an anchor by casting against the head mesh, and `head` carries
+    // `headTurn`/`headTilt` in the rest pose. Leaving a rest pose behind would have
+    // silently moved every such anchor on every character, which is a whole-cast art
+    // change disguised as a leg fix. Ending at identity keeps this solver invisible to
+    // everything except the number it was written to move.
+    for (const g of Object.values(this.joints)) g.rotation.set(0, 0, 0);
     this.armClearance = 0;
-    this.restPose();
     return best;
   }
 
