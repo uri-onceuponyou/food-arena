@@ -435,7 +435,15 @@ card framing with **no renderer at all**; 33/33 agreement with the live tool) ·
 is provable) · `status_{census,grace_sweep,ab_report}.mjs` · `rules_census.mjs` +
 `rules_sweep.mjs` (sweeps a constant on a **staged copy** of `rules.ts`) · `arena_probe.mjs`
 (parses the layout straight out of `kitchen.ts` in ~20ms, `--verify` against the browser dump) ·
-`policy_{trace,sensitivity}.mjs` · `screen_metrics.mjs` · `chars_metrics.mjs`
+`policy_{trace,sensitivity}.mjs` · `screen_metrics.mjs` · `chars_metrics.mjs` ·
+`up_click_audio.mjs` (does tapping a menu BUTTON make a sound? RMS off the master bus through
+`__audio.connectTap`, with a dead-space cell and a paired suppressed/sibling cell as its
+known-bad inputs — no offline assertion can see this, because the defect was the missing CALL,
+not the sound) · `up_herofill.mjs` (hero height vs width fraction per viewport, and an
+`--aspect-sweep` that widens only the panel's CSS — the demonstration that the width fraction
+was a statement about the panel, not the hero) · `up_refhero.mjs` (the same two fractions read
+off a REFERENCE lobby plate by colour mask, `--control` validates it against our own render
+where `__charStage` knows the true answer)
 
 ### ⚠️ Known instrument limits — read before trusting a number
 
