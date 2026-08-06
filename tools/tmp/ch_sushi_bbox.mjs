@@ -1,0 +1,22 @@
+import { createServer } from 'vite';
+const ROOT='/Users/uribishansky/claude-code/food-arena';
+const vite = await createServer({ root: ROOT, server:{middlewareMode:true}, appType:'custom', logLevel:'error', optimizeDeps:{noDiscovery:true,include:[]} });
+const THREE = await vite.ssrLoadModule('three');
+const { CHARACTERS } = await vite.ssrLoadModule('/src/game/rules.ts');
+const { SushiCharacter } = await vite.ssrLoadModule('/src/characters/sushi.ts');
+const { CHARACTER_HEIGHT } = await vite.ssrLoadModule('/src/units.ts');
+const ch = new SushiCharacter(CHARACTERS.sushi);
+const r = ch.root ?? ch.body;
+r.updateWorldMatrix(true,true);
+const b = new THREE.Box3().setFromObject(r);
+const s = b.getSize(new THREE.Vector3());
+console.log('CHARACTER_HEIGHT', CHARACTER_HEIGHT);
+console.log('bbox min', b.min.toArray().map(v=>v.toFixed(3)).join(', '));
+console.log('bbox max', b.max.toArray().map(v=>v.toFixed(3)).join(', '));
+console.log('size  W', s.x.toFixed(3), ' H', s.y.toFixed(3), ' D', s.z.toFixed(3));
+// head-only
+const head = ch.rig.joints.head;
+const hb = new THREE.Box3().setFromObject(head);
+const hs = hb.getSize(new THREE.Vector3());
+console.log('head  W', hs.x.toFixed(3), ' H', hs.y.toFixed(3), ' D', hs.z.toFixed(3), ' ratio W/H', (hs.x/hs.y).toFixed(2));
+await vite.close();
