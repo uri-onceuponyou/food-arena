@@ -1204,10 +1204,86 @@ export interface CharacterDef {
   weapons: Weapon[];
   abilities: AbilityBlurb[];
   /**
-   * Personality reference for the 3D model. Per the brief these descriptions were
-   * written for flat 2D icons — they are a vibe guide, NOT a literal spec. Silhouette
-   * readability and holding up against the Brawl Stars / Zooba bar wins when the two
-   * pull in different directions. Identity (which food, which rarity) is fixed.
+   * ⚠️ THE OLD WORDING OF THIS DOC COMMENT IS KEPT BELOW, BECAUSE IT WAS PART OF THE BUG.
+   *
+   * > "Personality reference for the 3D model. Per the brief these descriptions were
+   * > written for flat 2D icons — they are a vibe guide, NOT a literal spec. Silhouette
+   * > readability and holding up against the Brawl Stars / Zooba bar wins when the two
+   * > pull in different directions. Identity (which food, which rarity) is fixed."
+   *
+   * That framing said "not a literal spec" and eleven agents implemented their line
+   * literally anyway — `lollipop.ts:344` says so in as many words ("`rules.ts` puts the
+   * eyes on the stick and the mouth on the candy"). Calling a spec a vibe guide does not
+   * stop it being obeyed. **So the EYES/MOUTH half of every string below is now a HARD
+   * SPEC.** The food-identity and silhouette half remains a guide, and identity (which
+   * food, which rarity) is still fixed.
+   *
+   * ── WHY (DECISIONS §37–§42) ────────────────────────────────────────────────
+   * Uri ranked seven characters without seeing any code and his ranking matched this
+   * one field EXACTLY: every character he rated poorly was specified with **closed eyes
+   * or no eye spec at all**, and the one he rated best — egg — was the only one specified
+   * **"open eyes with highlights"**. The implementations were faithful. The spec was wrong.
+   * This is the inverse of this project's most expensive defect shape: not "a rule stated
+   * once and implemented differently elsewhere", but **a rule obeyed exactly that should
+   * not have been written**. No gate could catch it, because every gate here measures
+   * conformance rather than whether the target was worth hitting.
+   *
+   * ── THE FACE STANDARD — every character, no exceptions ─────────────────────
+   * Measured, not asserted: **0% of our eye pixels are above 0.85 luma against the
+   * reference plates' 31.1% and 34.1%.** Our faces carry TWO VALUES TOTAL. Four elements
+   * fix that, and all four must be separate meshes:
+   *
+   *   1. **A WHITE SCLERA that is the brightest value anywhere on the character.**
+   *      Not a highlight, not a specular — a white shape with area. This is the single
+   *      largest, brightest, highest-contrast element of any reference face and it is
+   *      currently absent from all eleven.
+   *   2. **A DARK PUPIL, real geometry, OFFSET from centre** so the character has a gaze.
+   *      A centred pupil reads dead even when everything else is right.
+   *   3. **AN EXPLICIT CATCHLIGHT MESH** — small, `noOutline`, offset opposite the pupil.
+   *   4. **AN UPPER LID / LASH LINE.** This is where the old "closed happy eyes" arc goes:
+   *      **demoted from BEING the eye to BOUNDING it.** Removing "closed" is not removing
+   *      character — the arc still carries the expression, it just stops being the whole eye.
+   *
+   *   The construction ladder Uri reproduced blind, worst to best, is exactly the geometry:
+   *   a flattened arc (a stroke, hamburger) < a sphere with a specular (donut) < a sphere
+   *   plus an explicit glint mesh (taco) < **open eyes with catchlights (egg)**. Egg is the
+   *   cast reference. Copy it rather than inventing, then take all eleven past it.
+   *
+   *   **THE MOUTH NEEDS AN INTERIOR VALUE STEP** — a lip line with a genuinely darker
+   *   throat plane behind it, so it reads as an OPENING rather than a painted curve. And a
+   *   mouth must not sit adjacent to the character's darkest band: taco's mouth above its
+   *   near-black neck collar fused into one mass and Uri read the pair as **a hat brim**.
+   *
+   *   **NOTHING FLOATS.** Every feature sits ON a surface, sharing one tangent frame with
+   *   its neighbours (`egg.ts`'s `addShellDecal` is the pattern, and hamburger's shared
+   *   crown frame is the reason its eyes and brows can never drift out of plane).
+   *   A detached face was specified twice (taco "floats outside the shell", waterbottle
+   *   "floating above the cap") and rejected both times.
+   *
+   * ── AND ONE SILHOUETTE RULE, BECAUSE IT OVERRIDES ANY FACE ─────────────────
+   * 🚨 **A POINTED MASS EITHER SIDE OF A HEAD READS AS AN EAR OR A HORN. Five for five:**
+   * burrito's torn foil ("looks like a goat"), egg's shell shards ("the ears don't make
+   * sense"), hamburger's lettuce, lollipop's cellophane cape petals, pizza's cheese
+   * strands. **It overrides what the shape is made of.** Re-place it (above, behind,
+   * asymmetric) or re-shape it (rounded, drooping, continuous) — or the character reads as
+   * an animal no matter how good its face is.
+   *
+   * ⚠️ And its converse: **detail added to signal the subject can destroy the silhouette
+   * that signalled it better.** `egg.ts:206` calls the clean ovoid "the one thing Egg had
+   * going for it in the silhouette test"; a lifted lid and shards broke it, and Uri says
+   * "the egg lost the appearance of egg". Check your character for the same trade.
+   *
+   * ── SCOPE ─────────────────────────────────────────────────────────────────
+   * Uri, 2026-08-06, verbatim: *"Do NOT see any description of any character as frozen.
+   * If something needs changing cause it makes the character look weird or get a bad
+   * score, change it."* Two lines were unfrozen by name — **lollipop** ("the mouth doesn't
+   * have to be above the eyes" AND "more colors than red only") and **soup** ("no mouth"
+   * is the same defect already rejected on taco). Everything else here is open on the same
+   * terms: if the string is producing a bad character, change the string and say why.
+   *
+   * This field is a BUILD BRIEF. It is read by no UI and rendered nowhere — grep confirms
+   * the only `.face` reads in `src/` are `rig.joints.face` and `thumbs.ts`'s joint bbox —
+   * so it costs nothing to be long and precise, and precision here is the whole point.
    */
   face: string;
 }
@@ -1617,7 +1693,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   hamburger: {
     id: 'hamburger', name: 'Hamburger', emoji: '🍔', rarity: 'Normal',
     stats: { damage: 10, health: 3, speed: 5 }, hasTrail: false,
-    face: 'Closed happy eyes, small smile. Stacked bun/patty/lettuce/tomato silhouette.',
+    // WAS: 'Closed happy eyes, small smile. Stacked bun/patty/lettuce/tomato silhouette.'
+    //   Uri, blind to the code: "the face is the WORST PART in the character… drawn lines and
+    //   not an actual face" (DECISIONS §37). Per-part scored `face-overall` 3.5 vs 9 and `eyes`
+    //   3 vs 8.5 from the opposite direction on the same day. The eyes were built as a flattened
+    //   arc — a stroke — which is precisely what "drawn lines" means, and CLOSED eyes are the
+    //   bottom rung of the ladder in the doc comment above. Kept here because the old wording is
+    //   what the existing geometry was authored against.
+    face: 'EYES: open and eager. White sclera ovals — on the orange bun they will be the brightest value on the character, which is the point — with dark pupils offset up-and-forward, a catchlight in each, and the old closed-happy arc kept ONLY as the upper lash line above them. The existing shared tangent frame on the curved crown is right and must be kept: it is why the eyes and brows can never drift out of plane. MOUTH: a broad open grin with a dark throat behind the lip and a visible lower lip — not a flat dark shape, which is what the per-part pass named ("no lip thickness or interior value step"). SILHOUETTE: the stacked bottom-bun/patty/cheese/tomato/lettuce/top-bun tower, every layer owning real height and its own substance — the richest food mass in the cast and worth protecting. But the lettuce must read as a frill running CONTINUOUSLY around the whole stack; two leaf points either side of the head is the ear signal (five for five). PERSONALITY: hearty, greedy, good-natured heavy.',
     weapons: [
       { key: 'Smash', name: 'Patty Smash', type: 'melee', range: REACH.meleeStrong, damage: 12, cooldown: 650, cone: 80, color: '#FFC93C', effect: null, emoji: '🍖' },
       { key: 'Tomato', name: 'Tomato Toss', type: 'ranged', range: REACH.rangedClose, damage: 8, cooldown: 800, speed: SPEED.closeFast, color: '#E63946', effect: 'slow', splatter: true, emoji: '🍅' },
@@ -1655,7 +1738,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   donut: {
     id: 'donut', name: 'Donut', emoji: '🍩', rarity: 'Normal',
     stats: { damage: 4, health: 7, speed: 6 }, hasTrail: true,
-    face: 'Crooked smile, sprinkles across a pink glaze torus.',
+    // WAS: 'Crooked smile, sprinkles across a pink glaze torus.'
+    //   Uri: "better than the burger — the eyes have more depth, but can be taken deeper, and the
+    //   mouth is deeper than burger but still missing details" (DECISIONS §38). This is the one
+    //   old line with nothing wrong in it, only something MISSING: it specified a mouth and no
+    //   eyes at all, and the sphere-with-a-specular the file chose is rung two of four. The
+    //   crooked smile is genuine personality and is carried forward verbatim.
+    face: 'EYES: OPEN, and KEEP THE SPHERE — ADD THE WHITE. Donut already has real 3D eye geometry catching a specular — that is exactly why Uri ranked it above hamburger — but a highlight is not a sclera, and a dark bead with a glint is not an open eye. Build white sclera spheres as the brightest value on the character, a dark pupil offset toward the smile\'s high side so the gaze and the grin agree, and an explicit catchlight mesh on top of the specular rather than instead of it. MOUTH: the crooked, lopsided smile stays — it is the personality and Uri named it as the better half of this face — but it needs an INTERIOR: a lip line with a darker throat plane behind it. "Deeper than burger but still missing details" is a request for a value step inside the silhouette, not a bigger curve. SILHOUETTE: sprinkles across a pink glaze torus, chocolate-dipped feet holding the value drop. ⚠️ Donut is a STUB body — there is genuinely no torso between the limbs, so the chain sprouts from the ring edge and reads detached. Do NOT swap the archetype (it would cost the silhouette Uri just called better than the burger\'s); build a visible attachment mass where each limb meets the ring instead. PERSONALITY: sweet, chaotic, slightly smug.',
     weapons: [
       { key: 'Candy', name: 'Candy Barrage', type: 'ranged', range: REACH.rangedLong, damage: 4, cooldown: 900, speed: SPEED.long, color: '#FF6FA5', effect: null, pellets: 3, spreadDeg: 14, trailBoosted: true, emoji: '🍬' },
     ],
@@ -1668,7 +1757,18 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   taco: {
     id: 'taco', name: 'Taco', emoji: '🌮', rarity: 'Rare',
     stats: { damage: 9, health: 4, speed: 5 }, hasTrail: false,
-    face: 'Trapezoid shell with a jagged crimped top edge; face floats completely outside the shell, to the side.',
+    // WAS: 'Trapezoid shell with a jagged crimped top edge; face floats completely outside the
+    //       shell, to the side.'
+    //   All three clauses were implemented literally once and all three were wrong on screen
+    //   (`taco.ts:10-27` records it): the trapezoid read as a paper bag, the jagged crimp read as
+    //   a crown because tall spikes are the loudest thing in any silhouette, and the FLOATING
+    //   FACE read as a second head — a pale ball with eyes beside a brown mass, so the eye picked
+    //   the ball as the character and the shell as scenery. The file fixed all three and the spec
+    //   still said the opposite, which is exactly the trap §42 describes: the next agent to read
+    //   it re-implements the rejected version faithfully. Uri's own reject — "no mouth, seems
+    //   like a hat or something… looks like fruit, not taco add-ons" (DECISIONS §39) — is folded
+    //   in below. The old wording is kept because it explains why the file departs from it.
+    face: 'EYES: the best construction in the cast after egg — a sphere PLUS an explicit white glint mesh, which is why Uri ranked taco third of three blind — and it needs one thing: a real white sclera behind the pupil, sized as the brightest mass on the face rather than a glint on a dark bead. Dark pupil offset for gaze, catchlight kept. MOUTH: a wide open cheeky smile with a BRIGHT interior, and it must sit CLEAR of the neck column and collar, which `taco.ts:216` names as this character\'s darkest band. A dark opening immediately above the darkest band merges into one mass and reads as a HAT BRIM — that is exactly what Uri saw, and it is a fusion, not a missing mouth. Lift the mouth, or lighten the interior, or both. FACE PLACEMENT: front and centre on the near shell wall, sharing one tangent frame. Never floating beside the shell. SILHOUETTE: a crescent — a U wall with two soft horns and a dipped mouth — with a small crimped ripple, not a trapezoid and not tall spikes. FILLINGS: shredded, diced and crumbled. The palette (TOMATO #E63946, LETTUCE, ONION) is correct and the SHAPES are the bug: spheres read as berries and purple rings read as grapes, which is Uri\'s "looks like fruit". PERSONALITY: crisp, quick, cheeky.',
     weapons: [
       { key: 'Filling', name: 'Filling Toss', type: 'ranged', range: REACH.rangedLong, damage: 12, cooldown: 900, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '🥩' },
       // Onion Bomb sits one rung below Filling/Double so Taco keeps two distinct
@@ -1692,7 +1792,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   burrito: {
     id: 'burrito', name: 'Burrito', emoji: '🌯', rarity: 'Rare',
     stats: { damage: 6, health: 7, speed: 7 }, hasTrail: false,
-    face: 'White wrap, stands upright, toppings visible at the open end.',
+    // WAS: 'White wrap, stands upright, toppings visible at the open end.'
+    //   ⚠️ NO FACE SPEC AT ALL — and Uri's verdict was "face is not good" (DECISIONS §39). This
+    //   is the strongest single datum behind §42: the one character whose `face:` field never
+    //   mentioned a face is the one whose face he rejected without being able to say why. The old
+    //   wording is kept because "open end with visible fillings" is still the silhouette landmark.
+    face: 'EYES: this character had NO EYE SPEC AND NO MOUTH SPEC, which is the defect. Open eyes, three elements: a white sclera, a dark pupil offset for gaze, a catchlight. ⚠️ The wrap is TORTILLA #DFD2B9, a pale cream — so an off-white sclera will dissolve into it. The sclera must be genuinely white AND carry a strong dark lash/lid line to hold its edge against a low-contrast ground; this is the one character where the eye needs a drawn boundary to survive its own background. MOUTH: real, with a dark interior behind the lip. PLACEMENT IS THE REAL FIX: set the face HIGH and WIDE on the tube. A small face low on a long narrow head reads as a MUZZLE, and that is half of why Uri said "looks a bit like a goat". 🚨 SILHOUETTE — THE GOAT. Every part of this character is individually a correct burrito and together they compose an animal: two upright torn-foil peaks on top read as EARS, LANKY proportions read as animal proportions, pale cream reads as fur, small low face reads as a muzzle. Improving the face alone will not fix it — the silhouette is read first. Fold the foil peaks BACK over the crown, round them, or make them asymmetric; do not leave two points either side of the head. The uncut ~2.5:1 vertical tube is the one proportion nothing else in the cast has and is worth keeping. PERSONALITY: wound-up, fast, over-stuffed.',
     weapons: [
       // Disc sits one rung below Swarm so Burrito keeps its 240-vs-260 ordering.
       { key: 'Disc', name: 'Burrito Disc', type: 'ranged', range: REACH.rangedLong, damage: 10, cooldown: 850, speed: SPEED.long, color: '#F4E9DA', effect: null, emoji: '🌯' },
@@ -1715,7 +1820,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   egg: {
     id: 'egg', name: 'Egg', emoji: '🥚', rarity: 'Neon',
     stats: { damage: 7, health: 8, speed: 4 }, hasTrail: false,
-    face: 'Open eyes with highlights, straight neutral mouth.',
+    // WAS: 'Open eyes with highlights, straight neutral mouth.'
+    //   ✅ THE ONLY LINE IN THIS FILE THAT WAS RIGHT, and the reason egg's face is the best in
+    //   the cast. It is EXTENDED below, not replaced. Uri's egg reject was about the SHAPE —
+    //   "the ears don't make sense, the egg lost the appearance of egg" (DECISIONS §40) — not
+    //   about the face. Kept verbatim so it is obvious what the other ten are being raised to.
+    face: 'EYES: open eyes with catchlights — sclera, pupil and highlight built as three separate meshes. ⭐ THIS IS THE CAST REFERENCE; the other ten are being brought up to it, so changes here propagate. What it still needs, and there are two things: (a) the sclera must become the BRIGHTEST VALUE ANYWHERE ON THE CHARACTER — measured, even egg has 0% of its eye pixels above 0.85 luma against the reference plates\' 31.1% and 34.1%, because what it has today is a catchlight where a sclera belongs; and (b) THE PUPIL IS CENTRED. `egg.ts` sets it to x = 0, so egg stares dead ahead and has no gaze — offset it horizontally like every other character in this brief. A centred pupil reads dead even when everything else is right, and it is the one element of the standard the cast reference itself does not meet. MOUTH: straight and deadpan — KEEP THE DEADPAN, it is the whole personality and nothing else in the cast has it — but give it an interior value step behind the lip so it reads as an opening. The worried brow creases are correct: an egg has no hair, so worry reads as a raised shell ridge rather than eyebrows, and the asymmetric inner-end lift is what makes it a raised eyebrow instead of two symmetric worry lines. 🚨 SILHOUETTE — THE THING TO ACTUALLY FIX. A clean uncut TRUE OVOID (fuller at the bottom, tapering) is recorded at `egg.ts:206` as "the one thing Egg had going for it in the silhouette test". The lifted lid broke the crown and the flanking shell shards read as EARS, and both were added to signal "egg" while destroying the shape that signalled it better. Restore the ovoid; move any cracking cue onto the surface as a decal rather than into the outline. PERSONALITY: deadpan, stoic, slightly anxious under it.',
     weapons: [
       { key: 'Tackle', name: 'Egg Tackle', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, emoji: '🥚' },
       { key: 'Hatch', name: 'Hatch!', type: 'ranged', range: REACH.rangedMax, damage: 5, cooldown: 2600, speed: SPEED.maxDrift, color: '#FFE9A8', effect: null, homing: true, peckHits: 3, peckInterval: 500, emoji: '🐣' },
@@ -1731,7 +1841,15 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   lollipop: {
     id: 'lollipop', name: 'Lollipop', emoji: '🍭', rarity: 'Cyber',
     stats: { damage: 7, health: 8, speed: 7 }, hasTrail: false,
-    face: 'Eyes on the stick, mouth on the candy. Concentric red/white swirl disc.',
+    // WAS: 'Eyes on the stick, mouth on the candy. Concentric red/white swirl disc.'
+    //   🚨 THE CLEAREST CASE IN THE FILE, AND BOTH HALVES WERE UNFROZEN BY URI BY NAME:
+    //   "Unfreeze the structure — the mouth doesn't have to be above the eyes" and "the candy
+    //   should have more colors than red only, make it colorful" (DECISIONS §41). The
+    //   implementation was CORRECT — `lollipop.ts:344` cites this exact line — and the
+    //   SPECIFICATION was wrong. It is also the reason the eyes came out ~3 px at the size a
+    //   player actually sees: the stick is thin, so eyes sized to it are invisible, while the huge
+    //   disc carried nothing but a small mouth arc. Kept because it explains the existing layout.
+    face: 'EYES AND MOUTH BOTH ON THE CANDY DISC, MOUTH BELOW THE EYES like every other character. The split face is retired by Uri directly. Big open eyes sized to the DISC, not to the stick — white sclera as the brightest value on the character, dark pupils offset for gaze, an explicit catchlight each. MOUTH: an open smile with a dark interior, below the eyes, on the same disc face. This also solves the ~3 px eye problem by construction: the disc is the largest flat frontal surface in the cast and a face built for it can be genuinely large. 🎨 THE DISC MUST BE MULTI-COLOUR — Uri: "more colors than red only, make it colorful". Keep it a genuine Archimedean spiral ribbon rather than a bullseye of concentric rings (that part is right and is the landmark), but run at least three candy hues through it. LIMB_TEAL #8FE0C9 is already in this character\'s own palette, so a colourful disc starts from something authored rather than invented. It also pays twice: lollipop is the WORST figure/ground character in the cast — 12 of 18 stations below the 0.10 standard, `fig` pinned at 0.497 against a ground at 0.40–0.48, so dL sits at 0.02–0.10 BY CONSTRUCTION — and more hue on the disc is the cheapest lever on that number. 🚨 The near-black cellophane cape petals either side of the disc read as HORNS (pattern 1, four for four at the time it was found). Re-place or round them. And keep the limbs and torso from crossing the disc: on this character interpenetration hides the FACE, not just a limb. PERSONALITY: bright, hyperactive, sugar-manic.',
     weapons: [
       // ── AUTHORISED DEVIATION #8 (2026-08-05): LOLLIPOP — see the block above
       //    `CHARACTERS` for the full measurement. damage 11 -> 16 and 10 -> 17.
@@ -1747,7 +1865,11 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   pizza: {
     id: 'pizza', name: 'Pizza', emoji: '🍕', rarity: 'Neon',
     stats: { damage: 4, health: 10, speed: 5 }, hasTrail: false,
-    face: 'Closed eyes, smiling. Triangular slice with pepperoni and a crust base.',
+    // WAS: 'Closed eyes, smiling. Triangular slice with pepperoni and a crust base.'
+    //   Uri: "face is TERRIBLE" (DECISIONS §42) — the second-harshest verdict in the cast, and
+    //   the second character specified with CLOSED eyes. The correlation with the closed-eye
+    //   family is the whole finding. Kept because the triangle clause still governs the model.
+    face: 'EYES: OPEN. The closed eyes are the entirety of Uri\'s "face is terrible" and they are removed — this was the second-worst-rated face in the cast and the second one specified shut. White sclera as the brightest value on the character (the slice is tan-on-tan, so the eye whites will be the only real value anchor on it), dark pupils offset for gaze, a catchlight each, and the old closed-smiling arc demoted to the upper lash line. MOUTH: a wide confident grin with a dark throat and a visible lower lip. SILHOUETTE: a triangular slice with pepperoni and a crust base — the triangle is the protected landmark here, unlike the rest of the cast\'s shapes, because it is the whole read at gameplay distance. ⚠️ But the melted cheese strands must not hang as two points either side of the head — Uri named that construction on four other characters and it reads as ears whatever it is made of. Drape them across the FRONT of the slice or run them continuously round the edge. ⚠️ And watch the tan-on-tan trap this file already records: slice, torso and limbs were literally the same constant, putting head, arms, legs and body inside a third of a stop. The face is where the missing value range gets paid back first. PERSONALITY: broad, loud, confident tank.',
     weapons: [
       { key: 'Dough', name: 'Dough Balls', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 850, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '⚪' },
       { key: 'Tomato', name: 'Tomato Splat', type: 'ranged', range: REACH.rangedMid, damage: 6, cooldown: 900, speed: SPEED.mid, color: '#E63946', effect: null, splatter: true, emoji: '🍅' },
@@ -1763,7 +1885,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   sushi: {
     id: 'sushi', name: 'Sushi', emoji: '🍣', rarity: 'Legendary',
     stats: { damage: 9, health: 5, speed: 8 }, hasTrail: false,
-    face: 'Wide eyes, puckered lips. Rice cylinder banded with nori, salmon centre.',
+    // WAS: 'Wide eyes, puckered lips. Rice cylinder banded with nori, salmon centre.'
+    //   Not one of the seven Uri reviewed, and the only old line that already said "wide" rather
+    //   than "closed" — so the instinct was right and the construction still carries no white.
+    //   §42 predicts the whole cast moves, not only the seven with rejects on file. Kept because
+    //   the nori-band-on-rice clause is the character's silhouette landmark.
+    face: 'EYES: wide and open — the old line already had the right instinct and is extended, not reversed. Build the three elements: a white sclera as the brightest value on the character, a dark pupil offset for gaze, an explicit catchlight. Rice is near-white, so the sclera needs a dark lid line and a dark pupil to separate from it — the SEPARATION here comes from the pupil and lash, not from the white. ⚠️ BOTH EYES MUST CARRY THE SAME ROLL. `setFromUnitVectors` picks the shortest arc and leaves a different residual roll per side, and that is the recorded cause of this character reading as having a LAZY EYE (LESSONS §12). Use an explicit shared tangent frame or matched quaternions, not per-eye `setFromUnitVectors`. MOUTH: keep the pucker — it is the personality — but a pucker still needs an INTERIOR: a dark opening ringed by a lighter lip, not a painted O. SILHOUETTE: classic salmon nigiri — a rounded rice mound, a near-black nori belt around its lower half, a glossy salmon slice draped over the top, the emoji read exactly. The rice-and-nori motif carried down onto the torso so the whole body reads as made of sushi. Legendary is the premium tier and this is the strongest high-contrast graphic in the cast (near-black on white); it earns the most craft. PERSONALITY: fast, precise, a little haughty.',
     weapons: [
       { key: 'Rice', name: 'Rice Spray', type: 'ranged', range: REACH.rangedClose, damage: 2, cooldown: 700, speed: SPEED.closeFast, color: '#FFFFFF', effect: null, pellets: 5, spreadDeg: 35, emoji: '🍚' },
       { key: 'Seaweed', name: 'Seaweed Bait', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 1000, speed: SPEED.mid, color: '#7CB518', effect: 'slow', emoji: '🌿' },
@@ -1781,7 +1908,15 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   soup: {
     id: 'soup', name: 'Soup', emoji: '🍲', rarity: 'Epic',
     stats: { damage: 6, health: 9, speed: 4 }, hasTrail: false,
-    face: 'Gray steam-coloured eyes, no mouth. Wide bowl with rising steam.',
+    // WAS: 'Gray steam-coloured eyes, no mouth. Wide bowl with rising steam.'
+    //   🚨 UNFROZEN BY URI. "No mouth" is the same defect he already rejected by name on taco
+    //   ("no mouth, seems like a hat"), and §42 predicted this reject before it arrived. The
+    //   `soup.ts` header currently says the no-mouth grey-eyed blank stare is "EXPLICITLY kept";
+    //   THAT NOTE IS NOW VOID and the file must be updated with it. "Grey steam-coloured eyes"
+    //   is also the direct cause of this face carrying no value range at all: it specifies the
+    //   eyes to be the SAME family as the steam behind them. Kept because it is why soup looks
+    //   the way it does today.
+    face: 'GIVE IT A MOUTH. Uri rejected "no mouth" on taco and the same complaint lands here — a small, calm, slightly open mouth with a dark interior behind the lip. Soup can stay the unsettling-calm one in the cast without being featureless: CALM IS AN EXPRESSION, NOT AN ABSENCE, and a blank face reads as unfinished rather than eerie. EYES: open, and NOT grey. A white sclera as the brightest value on the character, dark pupils offset for gaze, a catchlight each. Grey-on-grey was the old spec and it is why this face has no value range — it put the irises in the same family as the steam behind them. ⚠️ CLIPPING BUDGET, and it is real: `sepscan --mode chars` measures this character at 16.23% above luma 0.94 with p95 0.9753, against a reference band of 0.72–9.29% (median 2.49%). Soup is ALREADY the cast\'s worst near-white offender, so do NOT pay for the sclera by adding white. Pay for it by taking the CERAMIC bowl albedo (#DCD3C2, luma 0.947) DOWN — the bowl is where the 16.23% lives, it is a large area, and the eyes are a few dozen pixels. That trade improves both numbers at once: the sclera only reads as the brightest value if the bowl stops competing with it. And per LESSONS, scaling a warm off-white down is NOT a desaturation. SILHOUETTE: a wide bowl with rising steam, a ladle held in handR nodding at Splash/Toss/Dump, grey stoneware sleeves, cream mitts, dark boots, the near-black RIM_TRIM band carrying the dark rung. PERSONALITY: slow, heavy, eerily serene — serene WITH a face.',
     weapons: [
       { key: 'Splash', name: 'Soup Splash', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 750, speed: SPEED.closeFast, color: '#E8792A', effect: null, pellets: 3, spreadDeg: 25, emoji: '💦' },
       { key: 'Noodle', name: 'Noodle Toss', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 1000, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '🍜' },
@@ -1797,7 +1932,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   waterbottle: {
     id: 'waterbottle', name: 'Water Bottle', emoji: '💧', rarity: 'Legendary',
     stats: { damage: 8, health: 6, speed: 6 }, hasTrail: false,
-    face: 'Eyes floating above the cap, big smile. Translucent blue bottle with a darker cap.',
+    // WAS: 'Eyes floating above the cap, big smile. Translucent blue bottle with a darker cap.'
+    //   §42 flagged "eyes floating above the cap" as a predicted reject before Uri sent one: it
+    //   is the same detached-feature construction he rejected on taco ("the face floats completely
+    //   outside the shell" read as a second head). A spec that says FLOATING will get floating.
+    //   Kept because the translucency clauses still govern the model.
+    face: 'EYES ON THE BOTTLE, NEVER FLOATING ABOVE THE CAP. Detached features were the old spec and floating is a defect already rejected on taco — a face with nothing under it reads as a separate object. Set the eyes on the SHOULDER of the bottle where the shell curves, sharing one tangent frame, so they sit on a surface. Open eyes, three elements: a white sclera as the brightest value on the character, a dark pupil offset for gaze, an explicit catchlight. ⚠️ THE FACE MUST BE OPAQUE AND MOUNTED ON THE OUTER SURFACE. This is the one genuinely transmissive character in the cast; a feature placed inside or on the inner wall gets eaten by the transmission pass, and the sclera in particular will vanish into whatever is behind the bottle. MOUTH: keep the big smile — it is the most extrovert face in the cast and worth protecting — with a dark throat behind the lip. SILHOUETTE: translucent blue bottle, darker cap, water fill kept NON-transmissive (an opaque glossy liquid seen through a transmissive shell; nesting two transmissive materials makes the transmission snapshot incoherent and one of them flattens). PERSONALITY: cheerful, splashy, unbothered.',
     weapons: [
       // Water Bottle is the only four-weapon fighter with three ranged slots, so
       // Spray and Glass each drop a rung to keep all four reaches distinct.
@@ -1831,7 +1971,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   hotdog: {
     id: 'hotdog', name: 'Hot Dog', emoji: '🌭', rarity: 'Cyber',
     stats: { damage: 9, health: 6, speed: 8 }, hasTrail: false,
-    face: 'Sleepy half-closed eyes, small smile. Sausage in a bun with a mustard zigzag.',
+    // WAS: 'Sleepy half-closed eyes, small smile. Sausage in a bun with a mustard zigzag.'
+    //   §42 predicted this reject: "sleepy half-closed" is the closed-eye family again, and
+    //   `hotdog.ts` implemented it as "a thick lid stroke over a small peeking pupil" — which is
+    //   the exact drawn-line construction Uri called "the worst part" on hamburger. Kept because
+    //   the lid stroke and the mustard zigzag are both authored against this wording.
+    face: 'EYES OPEN, NOT SLEEPY. Half-closed is the closed-eye family that Uri ranked bottom without seeing any code, and the current build is "a thick lid stroke over a small peeking pupil" — a stroke, which is what "drawn lines and not an actual face" means. Keep the laid-back personality by DROOPING the upper lid a little over a FULL open eye: RELAXED IS A LID ANGLE, NOT A MISSING EYE. Under that lid, all three elements — a white sclera as the brightest value on the character, a dark pupil offset for gaze (offset DOWN and to the side reads as bored far better than a closed eye does), and a catchlight. The old lid stroke survives as the lash line above the sclera, which is where it belonged all along. MOUTH: a small easy smile with a dark interior behind the lip. SILHOUETTE: a plump sausage nestled in a split bun, long axis along local X so the full length reads broadside at the shipped camera instead of foreshortening down its own length; a bold mustard zigzag along the sausage ridge as the one unmistakable landmark; small emissive Cyber end caps in the exposed sausage tips, gently pulsing — energised food, not a glow stick. PERSONALITY: fast, unbothered, permanently half-awake — and now half-awake with EYES.',
     weapons: [
       { key: 'Mustard', name: 'Mustard Blast', type: 'ranged', range: REACH.rangedLong, damage: 7, cooldown: 900, speed: SPEED.long, color: '#FFC93C', effect: null, emoji: '💛' },
       { key: 'Ketchup', name: 'Ketchup Slip', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 950, speed: SPEED.mid, color: '#D62839', effect: 'slow', emoji: '🔴' },
