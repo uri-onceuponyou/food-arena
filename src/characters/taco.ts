@@ -25,6 +25,28 @@
  * The brief explicitly allows treating these notes as personality guides rather
  * than literal specs. What is kept is the intent behind them: a hard, crisp,
  * fried shape with an open crimped mouth and a cheeky expression.
+ *
+ * ── 2026-08-06: Uri's rejects, and all three were the SHAPES, not the colours ─
+ * *"No mouth, seems like a hat or something. Not sure about the items on the head,
+ * looks like fruit, not taco add-ons."* (`docs/DECISIONS-FOR-URI.md` §39.)
+ *
+ *   - **"No mouth"** was a FUSION, not an absence: the grin's lowest point sat at
+ *     head-local y -0.977R on a shell whose own bottom edge is -1.036R, directly
+ *     above the near-black neck collar. Two dark masses that close read as one
+ *     band, and a dark band under a wide gold crescent is a hat brim. The mouth is
+ *     lifted 0.21R and given a bright tooth band, so it is neither low nor
+ *     uniformly dark. See `buildFace`.
+ *   - **"Looks like fruit"** was every filling being built as the wrong solid: a
+ *     sphere is a berry, a capsule is a bean, a purple torus arc is a grape. The
+ *     palette was already correct and is untouched; the solids are now crumbles,
+ *     dice, ribbons and slivers.
+ *   - and the **eyes**, which Uri ranked as the cast's second best blind, still had
+ *     no white in them at all — a near-black bead with a glint. Three elements now,
+ *     egg's construction, with the sclera as the brightest albedo on the character.
+ *
+ * The two lettuce sprigs were also a pair of pointed masses either side of the head
+ * — the construction that has read as an animal five times in this cast. One moved
+ * behind; both now droop. See `buildSilhouetteEvents`.
  */
 
 import * as THREE from 'three';
@@ -50,6 +72,34 @@ import { aim, blade as leafBlade, localBounds, massAnchor } from './appendages';
 // lift on the shell and the pale serape stripe.
 const SHELL = '#F8BE62';       // toasted hard-shell gold — bright, saturated
 const SHELL_DARK = '#D07F1E';  // shadow / crease tone
+/**
+ * ── TRIED AND REVERTED: a darker TORSO fold, `#E09A3A`. A gate killed it. ──────
+ *
+ * The reasoning was that half of Uri's *"seems like a hat"* is the head shell and
+ * the torso fold being the SAME gold in the SAME crimped-fold language, so the eye
+ * resolves the upper mass as something the lower one is WEARING. The evidence was
+ * one number: `head|torso` **dLcontact 0.0304** at the near-frontal lobby facing.
+ *
+ * **One number was not enough, and the other number said the opposite.** Whole-part
+ * `dL` for the same pair was **0.248** — head and torso were already well separated
+ * across their areas; what dLcontact sees is a 52-px band under the chin that the
+ * neck and collar largely cover anyway. Darkening the torso moved its median TOWARD
+ * the head's and traded a boundary the player cannot see for an area contrast they
+ * can:
+ *
+ *     shipped facing (yaw 90)     head|torso dL   dLcontact   weakBoundaryPct (max 15)
+ *     SHELL      (#F8BE62)            0.248        0.015           **8.2  PASS**
+ *     #E09A3A                         0.094        0.079           **19.1 FAIL**
+ *
+ * `weakBoundaryPct` is `--mode gate`'s verdict key and its cap is 15. 8.2 -> 19.1 is
+ * a shipped-threshold regression bought with a metric the same tool tells you not to
+ * steer the verdict on. Reverted; the torso is `SHELL` again.
+ *
+ * ⚠️ The general shape, for whoever reads `dLcontact` next: it is boundary-LOCAL and
+ * it is the better number *for a boundary*, but a pair can be locally flat and
+ * globally separated, and only the second one is what "these two masses read as one"
+ * means. Check both before moving a large area's albedo.
+ */
 // The cheek pad's tone. Deliberately only a HAIR lighter than SHELL: at a
 // bigger gap the pad stopped reading as a swelling in the wall and started
 // reading as a separate pale ball sitting inside a container, which put the
@@ -97,6 +147,73 @@ const BOOT_CHAR = '#B06A2E';       // boots — a step LIGHTER than the shin abo
  */
 const SERAPE_PALE = '#F7EDD8';
 
+// ── The FACE's own value ladder ──────────────────────────────────────────────
+// Uri ranked seven characters blind and the ranking reproduced the construction
+// ladder exactly: a flattened arc (hamburger) < a sphere with a specular (donut) <
+// a sphere PLUS an explicit white glint (taco) < open eyes with catchlights (egg).
+// Taco placed third of three on the strength of one glint mesh — and even egg is
+// not enough: measured across the cast, **0% of our eye pixels are above 0.85 luma
+// against the reference plates' 31.1% and 34.1%**, because what this file called an
+// "eye" was a near-black bead with a highlight on it and no white anywhere.
+//
+// The sclera is now a real mass and it is the brightest albedo on the character:
+// 1.000, against the cheek pad's 0.856, the serape's pale stripe at 0.930 and the
+// teeth's 0.924. The teeth are deliberately BELOW the sclera — an open mouth needs
+// a bright interior on this character (see `THROAT`) but it must not outbid the eye.
+const SCLERA = '#FFFFFF';
+const TOOTH = '#F6EBD5';
+/**
+ * The mouth's interior. This is the value step that turns a painted curve into an
+ * OPENING, and its exact tone is decided by what sits below it.
+ *
+ * `MEAT_DARK` is this character's near-black and it is on the neck collar directly
+ * under the chin. A dark opening immediately above the darkest band merges with it
+ * into one mass and reads as **a hat brim** — which is what Uri reported as "no
+ * mouth, seems like a hat". So the throat is a warm dark red-brown (albedo luma
+ * 0.196) rather than the collar's near-black (0.065): a real step down from the
+ * cheek pad (0.856) with a real step UP from the collar, so the two darks cannot
+ * be read as one band even before the mouth is lifted clear of it.
+ */
+const THROAT = '#8A3020';
+/**
+ * The brow. Was `SHELL_DARK` (#D07F1E, albedo luma 0.55) drawn on the cheek pad
+ * (0.856) — a 0.31 step, which is a shade, not a stroke. Read off the rendered
+ * lobby PNG the brows were two faint orange smudges. Uri asked for the face to be
+ * "clear and crisp"; a brow is a LINE and a line needs to be dark against what it
+ * is drawn on. Still the shell's own family (a deep fried edge), not ink — ink
+ * brows on a warm pad read as pasted-on decals.
+ */
+const BROW = '#8A4A12';
+/**
+ * ── TRIED AND REVERTED: a MID-TONED collar, `#A85F22`. Two numbers killed it. ──
+ *
+ * The idea was that Uri's *"seems like a hat"* is partly the near-black ring under
+ * the chin, and it was defended by this file's own note that removing the whole
+ * neck moves p05 by **0.0038** — i.e. that the collar is not the dark rung.
+ *
+ * **That note does not transfer, and this is the `docs/LESSONS.md` §13 shape: a
+ * measurement that was TRUE when it was taken and answers a narrower question than
+ * the one it gets quoted for.** It was measured when p05 already sat at 0.1943 with
+ * a different `CHARACTER_HEIGHT`; the value pass since then moved the whole ladder.
+ * Measured now, on a frozen HEAD + this file, at the shipped facing:
+ *
+ *     collar                  p05      range    gate (p05 <= 0.180)
+ *     MEAT_DARK #1C0E07       0.132    0.725    PASS
+ *     #A85F22 (mid)           0.200    0.692    **FAIL**
+ *
+ * The collar is roughly HALF of this character's darkest 5% — 739 delivered px of
+ * ~16.4k, against 305 + 285 for both dark limb segments together.
+ *
+ * And the render refuted the art reason too, which is the more useful half. With a
+ * MID collar under the still-dark neck column the pair reads as **a black crown
+ * with an orange brim** — a sombrero, which is a sharper version of the very defect
+ * it was meant to remove. A uniformly dark neck+collar reads as a collar.
+ *
+ * → The lever for "seems like a hat" is the FACE and the MOUTH HEIGHT, exactly as
+ *   `rules.ts` prescribes ("Lift the mouth, or lighten the interior, or both"), not
+ *   the collar. Both were done; the collar stays `MEAT_DARK`.
+ */
+
 /**
  * Shell wall outline: a rounded fold at the bottom rising to a wide open mouth,
  * with a gently SCALLOPED top edge.
@@ -133,27 +250,51 @@ const SERAPE_PALE = '#F7EDD8';
  *
  * Baking the crimp into the outline rather than gluing teeth on afterward keeps
  * the whole wall one solid mesh, so no part of it can float off the surface.
+ *
+ * ── AND THE TWO HORNS ARE NOW ROUNDED ───────────────────────────────────────
+ * 🚨 A pointed mass either side of a head reads as an EAR or a HORN whatever it
+ * is made of — five for five across this cast (burrito's foil, egg's shards,
+ * hamburger's lettuce, lollipop's cellophane, pizza's cheese strands). Taco is
+ * the one character where the two upper corners ARE the food: a taco is a
+ * crescent, and `rules.ts` asks for "two soft horns". Deleting them is the trap
+ * on the other side of the same rule — detail added to signal the subject can
+ * destroy the silhouette that signalled it better (`egg.ts:206`), and here the
+ * crescent IS the signal.
+ *
+ * So they are re-SHAPED rather than re-placed: each corner was a hard vertex
+ * where a near-vertical side met a top edge falling away at ~42 degrees, an
+ * exterior turn of ~48 degrees. It is now a quadratic through that old vertex,
+ * which keeps the horn's position and its height and takes the point off it.
  */
 function tacoShellShape(halfW: number, yBot: number, yTop: number, dipFrac: number, crimp: number): THREE.Shape {
   const shape = new THREE.Shape();
   const h = yTop - yBot;
   const dip = h * dipFrac;
-  shape.moveTo(-halfW, yTop);
+  /** The dipping top edge, as a function of x — the crescent. */
+  const topAt = (x: number): number => { const u = x / halfW; return yTop - dip * (1 - u * u); };
+  const hrX = halfW * 0.14;  // how far in from the corner the rounding starts
+  const hrY = h * 0.045;     // and how far down the side
+  shape.moveTo(-halfW, yTop - hrY);
   // Outer edge: sweeps down and slightly OUT before turning into the bowl, so
   // the widest point of the wall is up near the horns rather than at the waist.
   shape.quadraticCurveTo(-halfW * 1.05, yBot + h * 0.36, -halfW * 0.60, yBot + h * 0.04);
   shape.quadraticCurveTo(0, yBot - h * 0.06, halfW * 0.60, yBot + h * 0.04);
-  shape.quadraticCurveTo(halfW * 1.05, yBot + h * 0.36, halfW, yTop);
+  shape.quadraticCurveTo(halfW * 1.05, yBot + h * 0.36, halfW, yTop - hrY);
+  // The right horn: the OLD sharp vertex is now this curve's control point, so the
+  // corner keeps its place and loses its point.
+  shape.quadraticCurveTo(halfW, yTop, halfW - hrX, topAt(halfW - hrX));
   // Top edge DIPS toward the centre — this is the crescent. Walked right → left
   // as a fine polyline with a small ripple riding on it, which gives the crimped
   // fried edge without the ripple ever becoming the shape the eye names.
   const N = 12;
+  const span = halfW - hrX;
   for (let i = 1; i <= N; i++) {
     const t = i / N;
-    const x = halfW - 2 * halfW * t;
-    const u = x / halfW;
-    shape.lineTo(x, yTop - dip * (1 - u * u) + crimp * Math.abs(Math.sin(t * Math.PI * 3)));
+    const x = span - 2 * span * t;
+    shape.lineTo(x, topAt(x) + crimp * Math.abs(Math.sin(t * Math.PI * 3)));
   }
+  // The left horn, mirrored, closing back onto `moveTo`.
+  shape.quadraticCurveTo(-halfW, yTop, -halfW, yTop - hrY);
   return shape;
 }
 
@@ -227,6 +368,11 @@ export class TacoCharacter extends BaseCharacter {
         // that is where the recovery goes rather than into the boot — pass 3 already
         // measured that a near-black boot under a near-black shin is not two shapes
         // (`kneeL|footL` 0.028 across 41 px) and deliberately went the other way.
+        //
+        // ⚠️ A mid-toned collar was tried here for Uri's "seems like a hat" and
+        // REVERTED on two measurements — see the reverted-experiment block above
+        // `SCLERA`. p05 0.132 -> 0.200 against a <= 0.180 gate, and the render came
+        // back reading as a sombrero rather than less like a hat.
         neck: LIMB_SHELL_DARK,
         collar: MEAT_DARK,
         torso: SHELL,
@@ -451,18 +597,52 @@ export class TacoCharacter extends BaseCharacter {
     // wall and contributes nothing. Meat starts right at the waterline so a
     // little brown reads under the brighter toppings without the fold looking
     // like it is overflowing with beef.
+    // ── 🚨 THE SHAPES WERE THE BUG, NOT THE PALETTE ──────────────────────────
+    // Uri, on the lobby render: *"items on the head look like FRUIT, not taco
+    // add-ons"* (`docs/DECISIONS-FOR-URI.md` §39). The colours were already right —
+    // `TOMATO #E63946`, `LETTUCE`, `ONION` are exactly what a taco is filled with —
+    // and every one of them was built as the wrong SOLID: **a sphere is a berry, a
+    // rounded capsule is a bean, and a purple torus arc is a grape.** Real fillings
+    // are crumbled, diced and shredded, so that is what each one is now built from,
+    // with the palette untouched:
+    //
+    //   meat     sphere            -> faceted icosahedral CRUMBLES, smaller, 12 of
+    //                                 them instead of 8, each with its own
+    //                                 non-uniform scale and roll so no two repeat
+    //   tomato   cube              -> kept (a dice IS a cube) but flattened, so it
+    //                                 reads as a cut slab rather than a jelly bead
+    //   lettuce  capsule           -> flat SHREDS — thin ribbons, not rods
+    //   onion    torus arc         -> thin diced SLIVERS
+    //
+    // Sizes come DOWN across the board. The old blobs at 0.185R were the largest
+    // objects in the fold; crumbled mince is small, and smallness is half of what
+    // makes a pile of anything read as chopped rather than as whole fruit.
+    const crumbGeo = new THREE.IcosahedronGeometry(R * 0.128, 0);
     const meatSpots: Array<[number, number, number, THREE.Material]> = [
-      [-0.62, 0.86, 0.24, meatMat], [-0.30, 0.90, 0.08, meatDarkMat], [0.02, 0.88, 0.28, meatMat],
-      [0.34, 0.90, 0.10, meatDarkMat], [0.64, 0.86, 0.24, meatMat], [-0.16, 0.84, 0.34, meatDarkMat],
-      [0.48, 0.84, 0.34, meatMat], [-0.48, 0.84, 0.02, meatDarkMat],
+      // ⚠️ The dark/mid SPLIT is a value-gate decision, not a taste one, and it was
+      // measured both ways. Cutting `meatDarkMat` from 6 of 12 to 4 (because the
+      // rendered fold looked like charcoal at the old 0.185R sphere size) moved the
+      // shipped-capture p05 from 0.15 to 0.17 against a **max of 0.180** — the
+      // fillings ARE part of this character's dark 5%, not just the limbs. 6 dark
+      // crumbs at 0.128R read very differently from 6 dark spheres at 0.185R, which
+      // is what actually caused the charcoal look: the fix was the SIZE and the
+      // FACETING, not the count.
+      [-0.66, 0.86, 0.22, meatMat], [-0.44, 0.88, 0.06, meatDarkMat], [-0.24, 0.85, 0.30, meatMat],
+      [-0.06, 0.90, 0.12, meatDarkMat], [0.12, 0.86, 0.30, meatMat], [0.30, 0.89, 0.08, meatDarkMat],
+      [0.48, 0.85, 0.26, meatMat], [0.66, 0.87, 0.12, meatMat], [-0.54, 0.83, 0.34, meatDarkMat],
+      [0.02, 0.83, 0.02, meatDarkMat], [0.38, 0.83, 0.36, meatDarkMat], [-0.14, 0.92, 0.20, meatMat],
     ];
-    for (const [fx, fy, fz, mat] of meatSpots) {
-      // Smaller than the first pass. At 0.23R the meat blobs were the largest
-      // objects in the fold and rendered as a row of chocolate truffles; the
-      // toppings should sit UNDER the brighter vegetables, not dominate them.
-      const blob = new THREE.Mesh(new THREE.SphereGeometry(R * 0.185, 12, 10), mat);
+    for (let i = 0; i < meatSpots.length; i++) {
+      const [fx, fy, fz, mat] = meatSpots[i];
+      const blob = new THREE.Mesh(crumbGeo, mat);
       blob.name = 'taco_meat';
-      blob.scale.set(1.15, 0.85, 0.95);
+      // Deterministic per-index variation — a shared geometry with a different
+      // non-uniform scale and a different roll on every instance is what stops a
+      // dozen identical solids reading as a texture (the critic note that killed
+      // the first filling pass: "a row of near-identical brown spheres").
+      const j = (i * 2.399963) % 1;
+      blob.scale.set(0.78 + j * 0.66, 0.62 + ((i * 7) % 5) * 0.11, 0.80 + j * 0.34);
+      blob.rotation.set(j * 2.6, i * 1.31, ((i * 5) % 7) * 0.44);
       blob.position.set(fx * halfWTop, fy * troughLen, fz * R);
       blob.castShadow = true;
       blob.receiveShadow = true;
@@ -482,8 +662,10 @@ export class TacoCharacter extends BaseCharacter {
       [0.46, 0.99, 0.08, 0.8], [0.70, 0.94, 0.20, 1.15], [-0.44, 0.94, 0.00, 0.75],
     ];
     for (const [fx, fy, fz, scale] of tomatoSpots) {
-      const s = R * 0.17 * scale;
-      const bit = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), tomatoMat);
+      const s = R * 0.155 * scale;
+      // Flattened, not a cube: a diced tomato is a CUT SLAB with a thickness, and a
+      // true cube at this size is the one solid that still reads as a bead.
+      const bit = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.58, s * 0.92), tomatoMat);
       bit.name = 'taco_tomato';
       bit.position.set(fx * halfWTop, fy * troughLen, fz * R);
       bit.rotation.set(0.3, 0.5, 0.2 + fx);
@@ -499,22 +681,42 @@ export class TacoCharacter extends BaseCharacter {
     // `burst` shreds stand nearly UPRIGHT and reach past the horns; the rest lie
     // across the fold. Two spiky green bursts breaking the outline is what makes
     // the crown of this silhouette specific instead of a flat lumpy line.
+    //
+    // ── AND THEY NOW CARRY THE HEIGHT THE SIDE SPRIGS USED TO ──────────────────
+    // MEASURED, and it is why there are three bursts instead of two and why they
+    // are longer: taking the up-aim off the two side sprigs (see
+    // `buildSilhouetteEvents` — they were reading as ears) cost this character
+    // **13 px of rendered height at the shipped facing, 152 -> 139**, because the
+    // taller sprig was the top of the silhouette. That is a real loss of presence
+    // and it must not be paid for by putting a pointed mass back at the side. The
+    // crown of the fold — near CENTRE, where nothing can be mistaken for an ear —
+    // is the correct place to spend it, and it is also what the food does: a
+    // taco's filling stands out of the TOP.
     const lettuceSpots: Array<[number, number, number, number, boolean]> = [
-      [-0.72, 1.02, 0.12, 0.3, false], [-0.40, 1.05, 0.24, -0.30, true], [-0.10, 1.04, 0.04, 0.25, false],
-      [0.22, 1.06, 0.22, -0.34, true], [0.52, 1.04, 0.06, 0.2, false], [0.74, 1.00, 0.16, -0.25, false],
+      [-0.72, 1.02, 0.12, 0.3, false], [-0.42, 1.13, 0.24, -0.30, true], [-0.10, 1.04, 0.04, 0.25, false],
+      [0.20, 1.15, 0.22, -0.34, true], [0.52, 1.04, 0.06, 0.2, false], [0.74, 1.00, 0.16, -0.25, false],
       [-0.56, 1.00, 0.28, 0.1, false], [0.36, 0.99, -0.04, -0.1, false],
+      [-0.06, 1.11, 0.30, 0.18, true],
     ];
     for (let i = 0; i < lettuceSpots.length; i++) {
       const [fx, fy, fz, tilt2, burst] = lettuceSpots[i];
+      // A flat RIBBON, not a capsule. Shredded lettuce is a thin cut strip; a
+      // rounded rod of the same length and colour is a green bean, which is the
+      // other half of Uri's "looks like fruit" — the palette was never the problem.
       const shred = new THREE.Mesh(
-        new THREE.CapsuleGeometry(R * (burst ? 0.055 : 0.045), R * (burst ? 0.27 : 0.26), 4, 6),
+        // Narrower than the first ribbon pass: at 0.090R wide by 0.52R long the
+        // bursts rendered as flat green BARS across the crown. A shred is thin.
+        roundedBox(R * (burst ? 0.072 : 0.058), R * (burst ? 0.48 : 0.30), R * 0.018, R * 0.009, 2),
         i % 2 === 0 ? lettuceMatA : lettuceMatB
       );
       shred.name = 'taco_lettuce';
       shred.position.set(fx * halfWTop, fy * troughLen, fz * R);
-      // Bursts stand up but are RAKED, not vertical — two dead-upright green
-      // capsules read as candles on a cake rather than as leaves.
-      shred.rotation.set(burst ? 0.55 : Math.PI / 2 + tilt2 * 0.6, 0, tilt2 + (burst ? tilt2 * 2.2 : 0));
+      // Bursts stand up but are RAKED, not vertical — three dead-upright green
+      // strips read as candles on a cake rather than as leaves. Raked HARDER than
+      // before (0.55 -> 0.40) now that they are the tallest thing on the character:
+      // a vertical spike at the crown is the "crown" silhouette this file spent two
+      // rounds getting rid of, and a rake keeps the same height at a shallower angle.
+      shred.rotation.set(burst ? 0.40 : Math.PI / 2 + tilt2 * 0.6, 0, tilt2 + (burst ? tilt2 * 2.2 : 0));
       shred.castShadow = true;
       shred.receiveShadow = true;
       troughPivot.add(shred);
@@ -524,12 +726,18 @@ export class TacoCharacter extends BaseCharacter {
 
     // A few onion slivers tucked among the meat — ties visually to the Onion Bomb
     // ability's projectile colour, and the only cool-leaning hue in the fold.
-    const onionSpots: Array<[number, number, number]> = [[-0.22, 0.94, 0.30], [0.36, 0.96, 0.30], [0.06, 0.90, 0.34]];
-    for (const [fx, fy, fz] of onionSpots) {
-      const sliver = new THREE.Mesh(new THREE.TorusGeometry(R * 0.14, R * 0.042, 6, 12, Math.PI * 1.3), onionMat);
+    // ⚠️ These were TORUS ARCS — purple rings — and a purple ring is a grape. Same
+    // colour, same place, but built as the thin flat slivers a diced red onion
+    // actually is. The hue is untouched; it still ties to the Onion Bomb.
+    const onionSpots: Array<[number, number, number, number]> = [
+      [-0.22, 0.94, 0.30, 0.4], [0.36, 0.96, 0.30, -0.8], [0.06, 0.90, 0.34, 1.1],
+      [-0.50, 0.92, 0.16, -0.3], [0.58, 0.92, 0.34, 0.9],
+    ];
+    for (const [fx, fy, fz, roll] of onionSpots) {
+      const sliver = new THREE.Mesh(roundedBox(R * 0.135, R * 0.052, R * 0.022, R * 0.011, 2), onionMat);
       sliver.name = 'taco_onion';
       sliver.position.set(fx * halfWTop, fy * troughLen, fz * R);
-      sliver.rotation.set(0.4, 0.7, fx);
+      sliver.rotation.set(0.4, 0.7 + roll, fx);
       sliver.castShadow = true;
       sliver.receiveShadow = true;
       troughPivot.add(sliver);
@@ -564,8 +772,16 @@ export class TacoCharacter extends BaseCharacter {
     // version said the face "looks like a decal rather than a head — no brow,
     // cheek or jaw form under it", which is what a 0.20 lens on a flat panel
     // gives you: features with correct depth sitting on nothing.
+    // `sy` 0.66 -> 0.72. Not taste: the face below now carries three-element eyes
+    // (sclera + pupil + catchlight) and a mouth with a real interior, and at 0.66
+    // those two stacks did not FIT — the mouth's lowest point sat 0.14R below the
+    // pad's own bottom edge and ran onto the bare shell wall immediately above the
+    // near-black collar, which is the fusion Uri read as a hat brim. The ceiling on
+    // this number is the wall: the near wall's rim dips to head-local y -0.006R at
+    // centre and the pad's top now reaches -0.046R, so 0.72 is the largest value
+    // that keeps the pad inside its own wall. Anything past ~0.74 pokes through it.
     const PAD_R = R * 0.58;
-    const PAD = { sx: 1.28, sy: 0.66, sz: 0.26 };
+    const PAD = { sx: 1.28, sy: 0.72, sz: 0.26 };
     const cheek = new THREE.Mesh(new THREE.SphereGeometry(PAD_R, 20, 16), podMat);
     cheek.name = 'taco_face_pad';
     cheek.scale.set(PAD.sx, PAD.sy, PAD.sz);
@@ -601,6 +817,8 @@ export class TacoCharacter extends BaseCharacter {
       const geoT = new THREE.ExtrudeGeometry(shapeT, { depth: thicknessT, bevelEnabled: false, curveSegments: 1 });
       geoT.translate(0, 0, -thicknessT / 2);
       geoT.computeVertexNormals();
+      // ⚠️ A deeper toasted tone was tried here and reverted — see the block above
+      // `SCLERA`. It took `weakBoundaryPct` from 8.2 to 19.1 against a cap of 15.
       const mesh = new THREE.Mesh(geoT, shellMat);
       mesh.name = 'taco_torso_fold_mesh';
       mesh.castShadow = true;
@@ -769,15 +987,41 @@ export class TacoCharacter extends BaseCharacter {
   }
 
   /**
-   * Oversized, slightly asymmetric eyes plus a crooked grin — a cheeky, spice-loving
-   * personality that matches a taco throwing filling and onion bombs. Built as real
-   * shaded geometry with depth, not flat decals, per the relaxed face convention.
+   * Open eyes with a real white sclera, a dark offset pupil and an explicit
+   * catchlight, under a cocked brow; and an open cheeky grin with an interior value
+   * step. Built as real shaded geometry with depth, not flat decals.
+   *
+   * ── WHAT THIS REPLACED, AND WHY IT WAS THE DEFECT ────────────────────────────
+   * The old eye was a near-black bead (`PALETTE.ink`, radius 0.27F) with a 0.10F
+   * white glint stuck on it, and the old mouth was a `TorusGeometry` arc of the
+   * same ink — a painted curve with no interior. Uri ranked seven characters blind
+   * and put taco third of three purely on that glint mesh, which is exactly the
+   * construction ladder `rules.ts` now records: arc < sphere+specular <
+   * sphere+glint < open eye with a catchlight. **Egg is the cast reference and even
+   * egg is not enough** — measured, 0% of our eye pixels clear luma 0.85 against
+   * the reference plates' 31.1% and 34.1%, because none of these faces had a WHITE
+   * in them at all. Three elements per eye, egg's construction, taco's sizing.
+   *
+   * ── AND THE MOUTH IS LIFTED, WHICH IS THE "HAT" FIX ─────────────────────────
+   * The old grin's centre sat at -0.40F with a 0.40F torus radius under it, so its
+   * lowest point reached head-local **y -0.977R** against a shell whose own bottom
+   * edge is at -1.036R: a wide dark arc riding the very bottom lip of the shell,
+   * with the near-black neck collar (`MEAT_DARK`, this character's darkest band)
+   * immediately below it. Two dark masses that close together merge into one band,
+   * and a wide dark band under a wide gold crescent is **a hat brim** — which is
+   * precisely what Uri reported. It was never a missing mouth; it was a fusion.
+   * The new mouth's lowest point is at **-0.765R**, a lift of 0.21R, and it has a
+   * bright tooth band inside it so the mass is no longer uniformly dark either.
    */
   private buildFace(F: number, pad: { sx: number; sy: number; sz: number; originZ: number }): void {
     const face = this.rig.joints.face;
     const ink = PALETTE.ink;
-    const eyeMat = toonMat({ color: ink, roughness: 0.25 });
-    const browMat = toonMat({ color: SHELL_DARK, roughness: 0.7 });
+    const browMat = toonMat({ color: BROW, roughness: 0.7 });
+    const scleraMat = toonMat({ color: SCLERA, roughness: 0.28 });
+    const pupilMat = toonMat({ color: ink, roughness: 0.22 });
+    const lidMat = toonMat({ color: ink, roughness: 0.35 });
+    const throatMat = toonMat({ color: THROAT, roughness: 0.45 });
+    const toothMat = toonMat({ color: TOOTH, roughness: 0.30 });
 
     /**
      * Z of the cheek pad's front surface directly in front of (x, y), in
@@ -806,20 +1050,56 @@ export class TacoCharacter extends BaseCharacter {
     // only) carries the "mischievous, about to throw something spicy" asymmetry
     // instead, and a raised brow is unambiguous in a way a slightly smaller pupil
     // is not.
-    const eyeSize = 0.27;
+    //
+    // ⚠️ The eye is a GROUP sitting on the pad surface, not four meshes each solving
+    // their own `padZ`. The old glint took `padZ(ex, ey, …)` — the surface height at
+    // the EYE's centre — while being drawn 0.09F to the side and 0.13F above it, so
+    // it was only ever accidentally in front of a curved surface. Everything inside
+    // the group is now in eye-local coordinates and cannot drift out of plane.
+    const EYE_R = F * 0.285;
+    const eyeY = F * 0.14;
     for (const sx of [-1, 1]) {
-      const ex = sx * F * 0.44;
-      const ey = F * 0.08;
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(F * eyeSize, 16, 14), eyeMat);
-      eye.position.set(ex, ey, padZ(ex, ey, -F * 0.06));
-      eye.scale.set(1, 1.2, 0.55);
-      eye.castShadow = true;
+      const ex = sx * F * 0.46;
+      const eye = new THREE.Group();
+      eye.name = 'taco_eye';
+      eye.position.set(ex, eyeY, padZ(ex, eyeY, F * 0.02));
       face.add(eye);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(F * 0.10, 10, 8), flatMat('#ffffff'));
-      glint.position.set(ex - sx * F * 0.09, ey + F * 0.13, padZ(ex, ey, F * 0.06));
+      // 1. THE SCLERA — and it is sized to be the brightest MASS on the face, not a
+      //    highlight on a dark one. Silhouette radius 0.285F x 0.331F per eye, which
+      //    is larger than the whole old eye bead was.
+      const white = new THREE.Mesh(new THREE.SphereGeometry(EYE_R, 18, 16), scleraMat);
+      white.scale.set(1, 1.16, 0.52);
+      white.castShadow = true;
+      eye.add(white);
+
+      // 2. A DARK PUPIL, OFFSET — outward and a touch low, so there is a gaze. A
+      //    centred pupil reads dead even when everything else is right.
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.48, 14, 12), pupilMat);
+      pupil.position.set(sx * EYE_R * 0.20, -EYE_R * 0.12, EYE_R * 0.34);
+      pupil.scale.set(1, 1.05, 0.50);
+      pupil.castShadow = true;
+      eye.add(pupil);
+
+      // 3. AN EXPLICIT CATCHLIGHT, offset OPPOSITE the pupil. `flatMat` and
+      //    `noOutline`: an inverted hull around a 0.06F sphere would eat it.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.21, 8, 8), flatMat('#ffffff'));
+      glint.position.set(-sx * EYE_R * 0.30, EYE_R * 0.40, EYE_R * 0.46);
       glint.userData.noOutline = true;
-      face.add(glint);
+      eye.add(glint);
+
+      // 4. AN UPPER LID, hugging the inside of the sclera's top edge. This is where
+      //    the old "the eye IS an arc" construction goes — demoted from being the
+      //    eye to BOUNDING it. Kept thin (tube 0.10 EYE_R) on purpose: the sclera
+      //    has to win the value contest inside its own outline.
+      const lid = new THREE.Mesh(
+        new THREE.TorusGeometry(EYE_R * 0.94, EYE_R * 0.10, 6, 16, Math.PI * 0.74),
+        lidMat
+      );
+      lid.rotation.z = Math.PI * 0.13;
+      lid.scale.set(1, 1.16, 0.55);
+      lid.position.z = EYE_R * 0.10;
+      eye.add(lid);
     }
 
     // One eyebrow cocked up over the left eye — a mischievous, "about to throw
@@ -830,10 +1110,14 @@ export class TacoCharacter extends BaseCharacter {
     // all: they read as EARS, and the whole face came back as a teddy bear
     // rather than a taco. A brow reads as a brow by being a thin stroke that
     // nearly touches the eye it belongs to.
-    const browX = -F * 0.44;
-    const browY = F * 0.40;
+    // Both brows move UP with the eyes (0.40F -> 0.56F, 0.31F -> 0.50F) and get
+    // LONGER (0.32F -> 0.40F). Position is not free here: the eye's top edge is now
+    // at 0.47F, so the old 0.40F would have buried the raised brow inside the
+    // sclera, and a brow shorter than the eye it sits over reads as a smudge.
+    const browX = -F * 0.46;
+    const browY = F * 0.56;
     const brow = new THREE.Mesh(
-      new THREE.CapsuleGeometry(F * 0.036, F * 0.32, 4, 8),
+      new THREE.CapsuleGeometry(F * 0.036, F * 0.40, 4, 8),
       browMat
     );
     brow.name = 'brow';
@@ -847,10 +1131,10 @@ export class TacoCharacter extends BaseCharacter {
     // the cast as reading "unfinished" rather than deliberate; this eye now has a real
     // brow too, it's just NOT the one doing the acting, so the mischievous raise above
     // stays unambiguous instead of reading as two brows that happen to differ.
-    const browX2 = F * 0.44;
-    const browY2 = F * 0.31;
+    const browX2 = F * 0.46;
+    const browY2 = F * 0.50;
     const brow2 = new THREE.Mesh(
-      new THREE.CapsuleGeometry(F * 0.032, F * 0.30, 4, 8),
+      new THREE.CapsuleGeometry(F * 0.032, F * 0.38, 4, 8),
       browMat
     );
     brow2.name = 'brow';
@@ -859,17 +1143,50 @@ export class TacoCharacter extends BaseCharacter {
     brow2.castShadow = true;
     face.add(brow2);
 
-    // Crooked, wide-open grin.
-    const smileX = F * 0.04;
-    const smileY = -F * 0.40;
-    const smile = new THREE.Mesh(
-      new THREE.TorusGeometry(F * 0.40, F * 0.085, 8, 20, Math.PI * 0.8),
-      toonMat({ color: ink, roughness: 0.3 })
+    // ── The mouth: an OPENING, with an interior value step ────────────────────
+    // Three values where the old grin had one, which is the whole point — a lip
+    // outline (the inverted hull), a dark throat behind it, and a bright tooth band
+    // in front of the throat. A single flat dark curve is a painted mouth; a value
+    // step behind the lip is a mouth that is open. Kept crooked (11 degrees) so the
+    // cheeky read survives the rebuild.
+    // ⚠️ MH read off the rendered lobby PNG, not chosen: at 0.32F the opening was
+    // nearly as tall as it was wide and rendered as a dark OVAL — a heavy blob under
+    // the eyes rather than a smile, and a big dark mass low on the face is the thing
+    // this whole change is trying to stop. A cartoon grin is WIDE AND SHALLOW.
+    const MW = F * 0.38;   // half width
+    const MH = F * 0.22;   // depth of the smile below its top line
+    const mouthX = F * 0.03;
+    const mouthY = -F * 0.30;
+    const mouth = new THREE.Group();
+    mouth.name = 'taco_mouth';
+    mouth.position.set(mouthX, mouthY, padZ(mouthX, mouthY, F * 0.03));
+    mouth.rotation.z = 0.11;
+    face.add(mouth);
+
+    const mShape = new THREE.Shape();
+    mShape.moveTo(-MW, 0);
+    mShape.quadraticCurveTo(0, -MH * 2, MW, 0);        // the smile, bottoming at -MH
+    mShape.quadraticCurveTo(0, MH * 0.30, -MW, 0);     // upper lip, arched gently up
+    const mGeo = new THREE.ExtrudeGeometry(mShape, { depth: F * 0.05, bevelEnabled: false, curveSegments: 10 });
+    mGeo.translate(0, 0, -F * 0.05);                   // front face flush with the group origin
+    const throat = new THREE.Mesh(mGeo, throatMat);
+    throat.name = 'taco_mouth_throat';
+    throat.castShadow = true;
+    mouth.add(throat);
+
+    // The tooth band sits IN FRONT of the throat, not level with it — that parallax
+    // is what makes the dark below it read as depth rather than as a second colour.
+    // Width and height are bounded by the upper-lip curve above (at x = +/-0.72 MW
+    // that curve is at 0.072 MH and the band's corners reach 0.05 MH), so no corner
+    // of it can escape the mouth outline and sit on bare cheek as a stray tooth.
+    const teeth = new THREE.Mesh(
+      roundedBox(MW * 1.44, MH * 0.44, F * 0.055, F * 0.018, 2),
+      toothMat
     );
-    smile.position.set(smileX, smileY, padZ(smileX, smileY - F * 0.20, F * 0.02));
-    smile.rotation.set(0, 0, Math.PI * 1.08);
-    smile.castShadow = true;
-    face.add(smile);
+    teeth.name = 'taco_mouth_teeth';
+    teeth.position.set(0, -MH * 0.16, F * 0.012);
+    teeth.castShadow = true;
+    mouth.add(teeth);
   }
 
   /**
@@ -885,6 +1202,31 @@ export class TacoCharacter extends BaseCharacter {
    * Deliberately only two, at different heights and different lengths. The metric
    * counts DISTINCT protrusions, and a fringe of eight would merge into one core
    * under the morphological opening exactly the way hamburger's lettuce frill did.
+   *
+   * ── 🚨 AND THEY WERE A PAIR OF EARS ─────────────────────────────────────────
+   * `azimuth +0.52 PI` and `-0.60 PI` are +/-94 and -108 degrees: one pointed blade
+   * sticking out either side of the head at 88% and 80% of its height, aimed OUTWARD
+   * AND UP (`out + (0, +0.30, 0)`). That is the exact construction that has now read
+   * as an animal five times in this cast — burrito's foil peaks ("looks a bit like a
+   * goat"), egg's shell shards ("the ears don't make sense"), hamburger's lettuce,
+   * lollipop's cellophane petals, pizza's cheese strands. **It overrides what the
+   * shape is made of**, so "but they are lettuce" is not a defence; the burrito's
+   * peaks were correctly-authored foil and composed a goat anyway.
+   *
+   * Fixed with all three of the prescribed remedies at once rather than one:
+   *   RE-PLACED    the second sprig from -0.60 PI (mirrored, side) to -0.90 PI
+   *                (behind), so the frontal lobby read has ONE protrusion, not a
+   *                symmetric pair. A single garnish cannot be a pair of ears.
+   *   RE-AIMED     both from `+0.30` up to a negative droop, so they flop out over
+   *                the rim the way a filling spills instead of standing up.
+   *   RE-SHAPED    `curl` 0.22 -> 0.42, which bends the blade along its length —
+   *                "rounded, drooping, continuous" rather than a straight point.
+   *
+   * ⚠️ This costs the yaw-0 hull number, and knowingly: the sprigs were added here
+   * because a folded shell presented square-on is a slab (0.1847 with zero
+   * appendages), and moving one behind the head hides it at exactly that facing.
+   * Uri's silhouette rule outranks a hull statistic — it is his own report against
+   * a metric — and the front sprig still breaks the outline at yaw 0.
    */
   private buildSilhouetteEvents(): void {
     const head = this.rig.joints.head;
@@ -895,16 +1237,26 @@ export class TacoCharacter extends BaseCharacter {
     const sprigMat = toonMat({ color: LETTUCE, roughness: 0.7 });
     const sprigDarkMat = toonMat({ color: LETTUCE_DARK, roughness: 0.7 });
     const spec = [
-      { azimuth: Math.PI * 0.52, height01: 0.88, len: 0.70, mat: sprigMat },
-      { azimuth: -Math.PI * 0.60, height01: 0.80, len: 0.58, mat: sprigDarkMat },
+      // ⚠️ `height01` IS NOT FREE, and the first version of this change proved it:
+      // at 0.90 the ray at azimuth 0.62 PI found NO MASS and `massAnchor` fell back
+      // to the bounding box, which put a green blade floating off the corner of the
+      // head — visible in the render, and the tool said so on the console
+      // ("[appendages] no mass at azimuth 1.95 height01 0.90 — anchor fell back to
+      // the bounding box"). The head's bbox got TALLER in the same edit (the crown
+      // bursts below), so the same fraction reached a height where only thin lettuce
+      // lives. Both fractions are now solidly on the shell walls. **A console warning
+      // from `massAnchor` is a build failure, not noise** — check for it after any
+      // change to either the fractions or the head's extent.
+      { azimuth: Math.PI * 0.62, height01: 0.60, len: 0.66, droop: -0.26, mat: sprigMat },
+      { azimuth: -Math.PI * 0.90, height01: 0.50, len: 0.46, droop: -0.12, mat: sprigDarkMat },
     ];
     for (const s of spec) {
       const { at, out } = massAnchor(head, box, { azimuth: s.azimuth, height01: s.height01, inset: 0.30 });
       const g = new THREE.Group();
       g.name = 'taco_filling_sprig';
-      aim(g, at, out.clone().multiplyScalar(1.00).add(new THREE.Vector3(0, 0.30, 0)).normalize(), Math.PI * 0.5);
+      aim(g, at, out.clone().add(new THREE.Vector3(0, s.droop, 0)).normalize(), Math.PI * 0.5);
       g.add(leafBlade(s.mat, {
-        len: scale * s.len, halfWidth: scale * 0.22, thick: scale * 0.03, curl: 0.22, waist: 1.3,
+        len: scale * s.len, halfWidth: scale * 0.24, thick: scale * 0.03, curl: 0.42, waist: 1.3,
       }));
       head.add(g);
     }
