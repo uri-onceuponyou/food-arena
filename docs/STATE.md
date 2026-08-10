@@ -1,7 +1,50 @@
 # State — what is done, what is pending
 
-**As of commit `b967242`, 125 commits into an unattended session.** Every commit verified with
-`tools/verify-head.mjs` before push. Working tree clean.
+**As of commit `0bcbdf0`.** Every commit verified with `tools/verify-head.mjs` before push.
+
+> ⚠️ **The header used to read *"as of `b967242`, 125 commits into an unattended session… working
+> tree clean."* Kept because the staleness is itself the lesson:** this line is the first thing a new
+> session reads, and it went a full session out of date while every gate stayed green. Nothing checks
+> it. If you land work, move it.
+
+---
+
+## 📌 SESSION OF 2026-08-10/11 — READ THIS BEFORE THE REST OF THIS FILE
+
+Most of what follows is still true about the SCORE. It is out of date about the CODE. The short
+version, with the section that supersedes each:
+
+**Landed**
+- 🔴 **The sim is no longer hard-1v1.** `cdcdd65` — `fighters: Fighter[]`, slot identity, an N×N
+  perception matrix, `damagedMask`, `hitRadius` on the fighter. `state.player`/`state.enemy` remain
+  real properties holding the same objects, so **every renderer/HUD/audio/tool consumer needed zero
+  changes.** Proved: **0 differing ticks in 26,388,976** over per-tick state AND 7,039,194 events in
+  order. Seat cap was pinned at 2; raising it is in flight.
+- **All eleven characters** got the arms-vs-legs pass (`25665f9`, `76369eb`, `75daec3`): they were
+  not merely similar, they were **the same call** — hamburger's forearm and shin shared one `case`
+  block, and three archetypes made **arms fatter than legs**.
+- Fighters cast a contact shadow in grease and water (`e47ba7c`); the puddle was depth-rejecting it.
+- Design-system adoption on home + character select (`f5a6229`), `theme.ts`'s shared gaps (`3481d71`).
+- Sushi's Big Catch 160 → 280 wu/s (`0558bc5`) — roster range 12.5 → 8.8 pp, **minimum RAISED**.
+
+**Falsified — do not act on these, they are recorded here because they read as settled**
+- 🚨 **`weakBoundaryPct` produced a FALSE FAIL and a FALSE PASS in one run** (egg 61.8% with a
+  contact-local count of 0.0; hamburger PASSES at 4.3% with a contact count of 9.0). It is not
+  "noisy but conservative". **Steer on `minDL` (floor 0.0039) and the contact-local variant.**
+  `dlBelow10` is **0 of 11** — that class is closed on merit.
+- 🚨 **Every icon round ever judged was judged at the wrong size**, one with inverted polarity — and
+  the protocol (whether the judge may zoom) is worth **29 points**, more than any icon. **Never quote
+  an icon verdict without its protocol.** `DECISIONS §46` was WITHDRAWN on this.
+- **"The AI can't play Legendary" was wrong** — a homing projectile was losing a race, because
+  `stepProjectiles` retires on cumulative path length and the human flees at 120 while the AI flees
+  at 70. Every homing weapon is worth ~2× in a human's hands.
+- **More cover does NOT create contact.** First contact is monotonic in prop count.
+- **A ×4 arena costs +12.77 s to first contact at N=2** and must ship WITH the roster change
+  (`DECISIONS §48`).
+
+**Open for Uri:** §29a (screenshot sent), §47, §49a/b, plus §2/§9/§17/§27/§33. §43 and §46 are
+closed — do not re-ask them.
+
 
 Judgement calls live in **`docs/DECISIONS-FOR-URI.md`** — read that first if you are Uri; it opens
 with a one-screen answer sheet. **New session? Read `CLAUDE.md`, then this file, then
