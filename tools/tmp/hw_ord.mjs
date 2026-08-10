@@ -49,6 +49,22 @@
  *
  *   node tools/tmp/headserve.mjs -- node tools/tmp/hw_ord.mjs --only hazard:wisp --out shots/hw/ord
  *   node tools/tmp/hw_ord.mjs --url <snap> --only kpal:dust --station 700:640 --vfx
+ *
+ * ── 🚨 WHY THIS TOOL DOES EVERYTHING IN ONE PAGE LOAD, RESTATED ─────────────
+ * Because the alternative is not safe here, and that was learned the expensive way on the
+ * pass that wrote this file. `headserve.mjs` defaults to `--ref HEAD`, and in a session
+ * with six agents committing, **HEAD MOVES WHILE YOUR ARMS RUN.** An `arena-scan` A/B on
+ * this pass took ~25 minutes per arm and FOUR peer commits landed across the three arms,
+ * so what was reported as a "HEAD-to-HEAD drift control" was two different trees. Nothing
+ * `headserve` does prevents that: it protects you from a peer's UNCOMMITTED edits, which
+ * is the trap `AGENT-BRIEF` §3 names, and not from a peer's COMMITTED ones.
+ *
+ *   → For any cross-tree comparison, PIN AN IMMUTABLE SHA in every arm:
+ *       node tools/tmp/headserve.mjs --ref <sha> -- <cmd>
+ *     and read the server's own banner back — it prints `serving git <ref>`.
+ *   → Better, where the question allows it: don't compare trees at all. Every arm in this
+ *     file is one flag on one material in ONE frozen frame of ONE page load, which is why
+ *     its self-pair is 0 px and why no amount of peer activity can enter it.
  */
 import { chromium } from 'playwright';
 import sharp from 'sharp';
