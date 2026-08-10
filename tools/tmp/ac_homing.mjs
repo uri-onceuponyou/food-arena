@@ -51,6 +51,17 @@
  *   node tools/tmp/ac_homing.mjs --char sushi --weapon Catch --sep 95
  *   node tools/tmp/ac_homing.mjs --all-homing
  *
+ * ── ⚠️ IT IS ALSO A MODULE, AND THAT IS DELIBERATE ──────────────────────────
+ *
+ * `fireOnce` and `speedRows` are EXPORTED and the CLI half is behind `import.meta.main`,
+ * so `tools/tmp/hm_audit.mjs` measures with THIS rig rather than a second copy of it.
+ * The alternative — a private re-implementation in the audit tool — is how this repo got
+ * fourteen copies of the scripted player and the guard that now polices them
+ * (`tools/tmp/driver_guard.mjs`). A rig that has 11 validated assertions against
+ * known-bad inputs is worth exactly as much as the number of tools that use it.
+ * `--sim` is read from `process.argv`, which the importer shares, so an audit run pointed
+ * at a detached worktree points this rig at the same one with no extra wiring.
+ *
  * ⚠️ NOT A WIN RATE AND NOT COMPARABLE TO ONE. Every figure here is delivered HP from a
  * single deterministic press with no RNG anywhere in it: re-running gives the same digits,
  * so there is no sampling floor to clear. The ~9 pp aggregate floor belongs to
@@ -102,7 +113,7 @@ const CLEAR = {
  * and nothing else" — the same flag a stun sets, so the target's own driver contributes
  * no displacement and the prescribed trajectory is the whole trajectory.
  */
-function fireOnce(charId, weaponKey, sep, speed, thetaDeg, { durationMs = 4000 } = {}) {
+export function fireOnce(charId, weaponKey, sep, speed, thetaDeg, { durationMs = 4000 } = {}) {
   const ws = CHARACTERS[charId].weapons;
   const idx = ws.findIndex((w) => w.key === weaponKey);
   if (idx < 0) throw new Error(`ac_homing: ${charId} has no weapon "${weaponKey}"`);
@@ -148,7 +159,7 @@ function fireOnce(charId, weaponKey, sep, speed, thetaDeg, { durationMs = 4000 }
 // ═════════════════════════════════════════════════════════════════════════════
 // --selftest
 // ═════════════════════════════════════════════════════════════════════════════
-if (args.selftest) {
+if (import.meta.main && args.selftest) {
   let pass = 0, fail = 0;
   const ok = (name, cond, detail = '') => {
     if (cond) { pass++; console.log(`   PASS  ${name}${detail ? `  ${detail}` : ''}`); }
@@ -257,7 +268,7 @@ if (args.selftest) {
 // ═════════════════════════════════════════════════════════════════════════════
 
 /** The speeds that actually occur in a match, named, so a row is readable as a role. */
-function speedRows(charId) {
+export function speedRows(charId) {
   const p = speedFor(charId, PLAYER_SPEED) * 1000;
   const c = speedFor(charId, AI_CHASE_SPEED) * 1000;
   const f = speedFor(charId, AI_FLEE_SPEED) * 1000;
@@ -269,9 +280,9 @@ function speedRows(charId) {
   ];
 }
 
-const THETAS = [0, 45, 90, 135, 180];
+export const THETAS = [0, 45, 90, 135, 180];
 
-function sweep(charId, weaponKey, sep) {
+export function sweep(charId, weaponKey, sep) {
   const ws = CHARACTERS[charId].weapons;
   const w = ws.find((x) => x.key === weaponKey);
   const expected = pressValue(w, sep);
@@ -299,7 +310,7 @@ function sweep(charId, weaponKey, sep) {
   return { charId, weaponKey, sep, expected, rows };
 }
 
-if (args['all-homing']) {
+if (import.meta.main && args['all-homing']) {
   const out = [];
   for (const id of CHARACTER_IDS) {
     for (const w of CHARACTERS[id].weapons) {
@@ -319,7 +330,7 @@ if (args['all-homing']) {
       + ` ${(c / (p || 1)).toFixed(2).padStart(8)}x`);
   }
   console.log('');
-} else {
+} else if (import.meta.main) {
   sweep(String(args.char ?? 'sushi'), String(args.weapon ?? 'Catch'), Number(args.sep ?? 95));
   console.log('');
 }

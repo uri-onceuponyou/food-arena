@@ -2821,3 +2821,136 @@ point symmetry is a **competitive-fairness** constraint in the same category as 
 default invented in `sim.ts` would be a second, quieter source of truth for it, it would produce
 balance numbers, and it would look like it worked. → **The arena pass owns this**; the sim will
 refuse loudly until it lands.
+
+---
+
+## 50. ❓ EGG'S `Hatch!` CANNOT HIT ANYBODY, AND THE ONLY FIX COSTS THE WADDLE
+
+**One taste call, one sim-design call, and one thing you do not have to decide.** Nothing is
+blocked — nothing shipped tonight, and the tree is byte-identical to before this pass
+(comment-only in `rules.ts`, proved mechanically and reproduced bit-identically across all 880
+matches).
+
+### The finding, in one line
+
+**Egg's Hatch! is not weak. It is inert.** The chick flies at 80 wu/s. Every fighter in the game
+moves at 105.6–120 wu/s when you drive them and 61.6–70 when the AI does. **The projectile is
+slower than its target**, so there is no separation at which it catches anyone who is walking away.
+
+Measured — the largest separation at which one press still delivers its full authored 15 against a
+target walking straight away (`tools/tmp/hm_audit.mjs`):
+
+| | |
+|---|---|
+| the separation the game lets you press it from | **140 wu** — the longest in the roster |
+| against a fleeing **AI** | 58 wu (41% of that) |
+| against a fleeing **human** | **27 wu** (19%) — and the hit radius is 26, so that is *"already touching you"* |
+| Egg's own **melee** (Egg Tackle) | **84 wu** |
+
+The game's longest-ranged weapon connects at **a third of its owner's punching distance**.
+
+**Why nothing ever flagged it:** it is broken *symmetrically*. `c786fd7` found every homing weapon
+is worth 1.89×–2.14× more in a human's hands than the AI's. Hatch! is the worst in the roster at
+**2.00×** — and Egg's role split is only **+1.6 pp**, because 40% and 20% of nothing are the same
+nothing. **A weapon that misses both roles equally looks balanced.**
+
+### ❓ 50a — TASTE CALL: does the chick keep waddling?
+
+`rules.ts` authors the slowness on purpose. `FLIGHT_MS.drift`'s comment is *"8.3 evade windows.
+Egg's Hatch! — a chick that waddles at you."* That is a character choice and it reads on screen.
+
+**Two of the three levers are refuted by measurement, not by opinion:**
+
+- **Homing strength** — cannot help. Hatch! is the roster's only *single-projectile* homing weapon,
+  so it wastes **zero** path on turning; a displacement-based rule leaves its reach at 27 wu,
+  unchanged to the digit. A better turn rate cannot buy a weapon that never turns.
+- **Reach** — cannot help. `REACH.rangedMax` is already the longest rung **and it sets the camera**.
+  Reach works out to `range − speed_of_target × flight_time`, so at 1750 ms you would need a range
+  over **210 wu** just to break even: a ~50% camera pull-back, and every character shrinks.
+
+**Speed is the only lever, and it is the waddle.** Priced at 8 seeds against a frozen worktree, with
+a no-op staging control reproduced bit-identically before any candidate was believed:
+
+| candidate | Egg strength | roster range | roster min | rarity tier spread |
+|---|---|---|---|---|
+| **shipped** (80 wu/s, 1750 ms) | 46.9% | 8.8 pp | 46.3% | 6.9 pp |
+| 280 wu/s (500 ms) | **70.6%** | 27.5 pp | 43.1% | 15.3 pp |
+| 160 wu/s (875 ms) | 63.7% | 20.6 pp | 43.1% | 11.9 pp |
+| 280 wu/s **+ damage 5→4** | 47.5% | 9.4 pp | 45.0% | 6.2 pp |
+| 160 wu/s **+ damage 5→4** | 46.3% | 9.4 pp | 45.0% | 6.9 pp |
+| 280 wu/s + damage 5→3 | 35.0% | 21.9 pp | 43.1% | 13.1 pp |
+
+Read two things off that table:
+
+1. **Uncompensated it is a +23.8 pp buff** — the strongest character in the roster by 16 pp. That is
+   the tell that Egg's numbers were authored around a weapon delivering nothing.
+2. **Compensated it lands, but there is no tuning room.** Damage moves Egg **~17.8 pp per point**
+   (5 → 70.6%, 4 → 47.5%, 3 → 35.0%). That is the same coarseness that got the vitals pass refused
+   in `6cc2438` (13.5–27.9 pp per point) inside an 8.8 pp band. "Damage 4 lands" is integer luck.
+
+Every roster figure in both landing rows moves **inside the ~9 pp resolution floor**, so the balance
+argues neither for nor against. **It is a straight trade of one feel for another and it is yours:**
+
+- **(a) Keep the waddle.** Hatch! stays a flavour press that lands on someone who is standing
+  still, charging, or already on top of you. The weapon reads as broken to anyone who tries to use
+  it at range — which is where the game lets you press it from.
+- **(b) 160 wu/s + damage 4.** 875 ms is still slow and readable (4.2 evade windows, the same rung
+  as Burrito's Topping Swarm). The chick still visibly lumbers; reach goes 27 → 61 wu.
+- **(c) 280 wu/s + damage 4.** It works properly at range; the waddle is gone. Best tier spread of
+  the three (6.2 pp).
+
+⚠️ If you take (b) or (c), **`FLIGHT_MS.drift` becomes an orphan rung** with no weapon on it.
+
+### ❓ 50b — SIM CALL: `range` is doing two jobs, and one of them is a lie
+
+This is the root of the whole family and it is **not** Egg-specific.
+
+`ai.ts:pickWeapon` refuses to press a weapon past `w.range`, so **`range` is the separation a
+fighter believes the weapon works at**. `sim.ts:stepProjectiles` retires a projectile at
+`traveled >= range`, so **the same number is the path budget it actually gets**. Those coincide only
+when the target is standing still — and every one of the 183 cells that validated the AI's ranking
+key is a stationary target.
+
+**23 of 23 ranged weapons cannot connect at their own press gate against a fleeing human.**
+
+The proposal on the table was to retire on **displacement** instead of path length. Staged and
+measured, and the answer is **"it helps, but not where you would expect"**:
+
+| Egg's Hatch!, fleeing human | path (shipped) | displacement | "relative" |
+|---|---|---|---|
+| straight away | 27 wu | **27 wu** | 27 wu |
+| perpendicular | 34 wu | 34 wu | 34 wu |
+
+| Burrito's Topping Swarm, fleeing human | path | displacement | "relative" |
+|---|---|---|---|
+| straight away | 51 wu | 55 wu | **128 wu** |
+| perpendicular | 26 wu | **69 wu** | 118 wu |
+
+Displacement refunds only the path a shot spends **turning**. On a straight chase there is no turn,
+so it refunds nothing — it does **not** remove the human/AI asymmetry at its root, and it does
+nothing at all for Egg. What it does buy is large and real: it roughly **triples** a pellet fan's
+reach against a target running sideways.
+
+The third column is the rule that *would* fix it at the root: denominate the budget in the
+**target's frame**, so a shot gets `range` world units of *ground gained* rather than ground
+covered. It nearly equalises the two roles. Its price is honest and should be stated: it needs a
+hard age cap (a shot that cannot gain ground would otherwise never die — a new constant), it makes
+every ranged weapon meaningfully stronger, and it lands in all 110 matchups at once.
+
+**Nothing here is urgent and nothing is blocked.** Recorded because the *next* homing weapon anyone
+authors will hit the same wall, and because the honest version of the proposal is now measured
+rather than assumed.
+
+### ℹ️ 50c — NOT a decision for you: Burrito's Topping Swarm was fixed and it made him *worse*
+
+Included so nobody re-runs it. Burrito's Swarm has the identical defect (reach 51 wu against a
+140 wu gate; 1.89× more valuable in your hands than the AI's). Applying **exactly** the one-token
+fix that worked on Sushi (`0558bc5`) makes Burrito **−11.9 pp weaker**, and the mechanism is now
+measured: homing turn rate is *angular*, so **the turning radius scales with speed**. Topping Swarm
+is the roster's widest fan (55°); at the faster speed its outer pellets cannot turn back inside
+60 wu, and it loses **half its delivery against a target that is standing still**.
+
+Sushi's 40° fan survives the same speed cleanly and Egg has no fan at all — which is why `0558bc5`
+was safe, and why that rung **is not transferable between homing weapons**. Burrito is left alone;
+the only lever that helps him without a close-range cost is 50b.
+

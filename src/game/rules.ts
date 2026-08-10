@@ -812,7 +812,32 @@ export const TRAIL = {
   maxHitsPerTick: 1,
 } as const;
 
-/** Homing projectile steering. Prototype: `turnAmount = min(1, 0.006 * dt)`. */
+/**
+ * Homing projectile steering. Prototype: `turnAmount = min(1, 0.006 * dt)`.
+ *
+ * ── ⚠️ IT IS AN ANGULAR RATE, SO THE TURNING RADIUS SCALES WITH SPEED ───────
+ *
+ * `sim.ts:stepProjectiles` lerps the DIRECTION vector by `min(1, rate * dt)` and then
+ * renormalises it to `w.speed`. Nothing in that expression mentions speed, so the turn
+ * costs the same milliseconds however fast the projectile is going — which means a faster
+ * homing shot sweeps a WIDER arc getting onto its target.
+ *
+ * => **RAISING A HOMING WEAPON'S `speed` BUYS LONG RANGE AND CAN SPEND CLOSE RANGE**, and
+ * the cost scales with `spreadDeg`, because a fan is exactly a set of pellets that begin
+ * off-axis and have to turn back. Measured on a STATIONARY target, where a hole cannot be
+ * a lost race (`tools/tmp/hm_audit.mjs --minrange`, selftest 12):
+ *
+ *   weapon                fan   at the shipped speed        at SPEED.max (280 wu/s)
+ *   sushi/Big Catch       40°   100% at every separation    100% at every separation
+ *   burrito/Topping Swarm 55°   100% at every separation    50% at 30-60 wu and 130-140
+ *   egg/Hatch!             0°   100% at every separation    100% (nothing to turn)
+ *
+ * That is why `0558bc5` was safe on Sushi and why **the same rung is NOT transferable to
+ * Burrito on the strength of it**: at `SPEED.max` Topping Swarm loses half its delivery
+ * inside 60 wu, and `roster_lab` reads the buff as a **-11.9 pp** hit to Burrito's strength
+ * (asAI 40.0% -> 20.0%). A weapon buff that makes the character weaker is the shape this
+ * constant produces, and no instrument here looked for it before 2026-08-11.
+ */
 export const HOMING_TURN_RATE = 0.006;
 
 /** Projectile hit radii. */
@@ -1120,14 +1145,53 @@ export function concealmentKeepoutRadius(maxSafeRadius: number): number {
 // from reach x flight rather than being set by hand.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── ⚠️ A RUNG OF THIS LADDER IS ALSO A REACH TAX, AND THAT HALF WAS NEVER WRITTEN ──
+//
+// Everything above is about DODGEABILITY and is right. It is half the consequence. Reduce
+// the geometry of a shot chasing a target that is running away and the range CANCELS:
+//
+//     reach = range x (1 - S/v) + hitRadius     and    v = range / flight
+//           = range - S x flight + hitRadius
+//
+// The penalty is `S x flight` AND NOTHING ELSE. It does not depend on how far the weapon
+// reaches — only on how long the shot is in the air. So a rung of this table is a reach
+// tax in world units, identical for every weapon on it, and the same number that makes a
+// shot fair to dodge is the number that decides how much ground a runner steals from it.
+//
+// Against the roster's fastest human (120 wu/s) the tax by rung is:
+//
+//     fast   350ms ->  42 wu      slow   875ms -> 105 wu
+//     normal 500ms ->  60 wu      drift 1750ms -> 210 wu   <-- more than REACH.rangedMax
+//
+// Measured, not just derived: `tools/tmp/hm_audit.mjs --ladder` prints the closed form for
+// all 23 ranged weapons and `--selftest` pins it against the real sim on the one weapon
+// with no fan to explain away (58 wu measured, 58.2 predicted). **23 of 23 ranged weapons
+// cannot connect at their own press gate against a fleeing human** — `ai.ts:pickWeapon`
+// gates on `adist > w.range`, so `range` is simultaneously the separation a fighter
+// BELIEVES the weapon works at and the path budget it actually gets, and the two coincide
+// only when the target is standing still. Every one of `press_value.mjs`'s 183 validated
+// cells is a stationary target.
+//
+// That is a fact about the whole ladder and it is recorded, not fixed: it is bounded and
+// symmetric everywhere except `drift`. See `SPEED.maxDrift` for the one weapon it breaks
+// outright, and `docs/DECISIONS-FOR-URI.md` §50 for the sim-level alternative and its price.
 export const FLIGHT_MS = {
-  /** 1.67 evade windows. Sprays and quick lobs. */
+  /** 1.67 evade windows. Sprays and quick lobs. Reach tax vs a fleeing human: 42 wu. */
   fast: 350,
-  /** 2.38 evade windows. The workhorse. */
+  /** 2.38 evade windows. The workhorse. Reach tax vs a fleeing human: 60 wu. */
   normal: 500,
-  /** 4.2 evade windows. Big, readable, telegraphed shots. */
+  /** 4.2 evade windows. Big, readable, telegraphed shots. Reach tax: 105 wu. */
   slow: 875,
-  /** 8.3 evade windows. Egg's Hatch! — a chick that waddles at you. */
+  /**
+   * 8.3 evade windows. Egg's Hatch! — a chick that waddles at you.
+   *
+   * ⚠️ **THE WADDLE IS THE INTENT AND IT IS ALSO THE DEFECT.** The tax at this rung is
+   * **210 wu against a fleeing human**, which is more than `REACH.rangedMax` (140) — so a
+   * weapon on this rung has NEGATIVE reach at every range on the ladder. It is not that
+   * `Hatch!` is slow; it is that at 80 wu/s the chick is slower than **every fighter in
+   * the game** (105.6-120 wu/s in the human role, 61.6-70 in the AI's), so there is no
+   * separation at which it catches anyone who is walking away. See `SPEED.maxDrift`.
+   */
   drift: 1750,
 } as const;
 
@@ -1178,6 +1242,69 @@ export const SPEED = {
    * the character `stepAI` could not play. See `tools/tmp/ac_homing.mjs`.
    */
   /** 160 wu/s */ maxSlow: projectileSpeed(REACH.rangedMax, FLIGHT_MS.slow),
+  /**
+   * 80 wu/s. Egg's Hatch!, and nothing else.
+   *
+   * ── 🚨 THIS RUNG IS SLOWER THAN EVERY FIGHTER IN THE GAME ───────────────────
+   *
+   * `maxSlow` above records a homing shot that cannot catch a fleeing HUMAN. This one
+   * cannot catch ANYBODY. Fighter speeds run 105.6-120 wu/s in the human role and
+   * 61.6-70 in the AI's chase; a projectile at 80 is below the whole human band, so
+   * against a human the closing rate is NEGATIVE and no `range` can pay for it.
+   *
+   * Measured (`tools/tmp/hm_audit.mjs`, selftest 12) — the largest separation at which one
+   * press still delivers its full authored 15, against a target walking straight away:
+   *
+   *     gate `pickWeapon` presses from    140 wu
+   *     vs a fleeing AI                    58 wu   (41% of the gate)
+   *     vs a fleeing HUMAN                 27 wu   (19% — and `HIT_RADIUS_VS_ENEMY` is 26,
+   *                                                 so that is "already touching you")
+   *
+   * Egg's own **Egg Tackle is a MELEE weapon with 84 wu of reach**. The game's longest
+   * authored ranged weapon connects at a third of its owner's punching distance.
+   *
+   * ── WHY THIS DID NOT SHOW UP IN ANY BALANCE NUMBER ──────────────────────────
+   *
+   * Because it is broken SYMMETRICALLY. `c786fd7` found homing weapons are worth
+   * 1.89x-2.14x more in a human's hands than the AI's, because `speedFor` applies
+   * `PLAYER_SPEED` 120 to one role and `AI_CHASE_SPEED` 70 to the other. Hatch! is at
+   * 2.00x — the worst ratio in the roster — and Egg's role split is only **+1.6 pp**,
+   * because 40% and 20% of nothing are the same nothing. **A weapon that misses both
+   * roles equally looks balanced**, and that is why no instrument flagged it for a year.
+   *
+   * ── AND IT IS NOT FIXED HERE, DELIBERATELY. THREE LEVERS, TWO REFUTED ───────
+   *
+   *  * HOMING STRENGTH — refuted, provably. Hatch! is the roster's ONLY single-projectile
+   *    homing weapon, so it spends ZERO path on turning: measured, a displacement-based
+   *    retirement rule leaves its straight-flee reach at 27 wu, unchanged to the digit.
+   *    A better turn rate cannot buy a weapon that never turns.
+   *  * REACH — refuted. `REACH.rangedMax` is already the longest rung AND IT SETS THE
+   *    CAMERA (`FAIR_PLAY.radiusUnits`); and since reach = range - S x flight, at 1750 ms
+   *    you would need range > 210 wu just to break even. That is a 50% camera pull-back.
+   *  * SPEED — the only lever that works, and it costs the authored character. Priced at
+   *    8 seeds against a detached worktree of `5f40b2b`, with a no-op staging control
+   *    reproduced bit-identically first:
+   *
+   *      candidate                     egg strength   roster range   roster min   tier spread
+   *      shipped (80 wu/s)                    46.9%         8.8 pp       46.3%        6.9 pp
+   *      speed 280                            70.6%        27.5 pp       43.1%       15.3 pp
+   *      speed 160                            63.7%        20.6 pp       43.1%       11.9 pp
+   *      speed 280 + damage 5->4              47.5%         9.4 pp       45.0%        6.2 pp
+   *      speed 160 + damage 5->4              46.3%         9.4 pp       45.0%        6.9 pp
+   *      speed 280 + damage 5->3              35.0%        21.9 pp       43.1%       13.1 pp
+   *
+   *    Uncompensated it is a **+23.8 pp** buff — the tell that the character's numbers
+   *    were authored around a weapon delivering 20-40%. Compensated it lands, but the
+   *    damage lever is **~17.8 pp per point** (5 -> 70.6%, 4 -> 47.5%, 3 -> 35.0%), the
+   *    same coarseness that got the vitals pass refused in `6cc2438` (13.5-27.9 pp/point)
+   *    and far too coarse for an 8.8 pp band — so "damage 4 lands" is integer luck, not a
+   *    tuned result. Every roster quantity in both landing rows moves INSIDE the ~9 pp
+   *    aggregate floor, so the balance neither argues for the change nor against it.
+   *
+   * => It is a TASTE call between two feels — a chick that waddles, versus a weapon that
+   * works — and it is parked in `docs/DECISIONS-FOR-URI.md` §50 rather than decided here.
+   * ⚠️ If it is ever taken, `drift` becomes an ORPHAN RUNG with no weapon on it.
+   */
   /**  80 wu/s */ maxDrift: projectileSpeed(REACH.rangedMax, FLIGHT_MS.drift),
 } as const;
 
@@ -2000,6 +2127,18 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // Disc sits one rung below Swarm so Burrito keeps its 240-vs-260 ordering.
       { key: 'Disc', name: 'Burrito Disc', type: 'ranged', range: REACH.rangedLong, damage: 10, cooldown: 850, speed: SPEED.long, color: '#F4E9DA', effect: null, emoji: '🌯' },
       { key: 'Roll', name: 'Roll Stun', type: 'melee', range: REACH.meleeQuick, damage: 4, cooldown: 1400, cone: 100, color: '#FFC93C', effect: 'stun', emoji: '🌀' },
+      // ⚠️ THE SECOND HOMING WEAPON IN THE RACE `SPEED.maxSlow` DOCUMENTS, AND THE ONE
+      //   THE SUSHI FIX DOES NOT TRANSFER TO. Effective reach against a fleeing human is
+      //   51 wu against a 140 wu press gate (36%); against a fleeing AI 92 wu (66%), so it
+      //   is worth 1.89x more in a human's hands with no decision differing.
+      //   `sushi.Catch`'s one-token fix (`maxSlow` -> `max`) was STAGED AND MEASURED here
+      //   and REFUSED: this is the roster's WIDEST FAN at 55°, and `HOMING_TURN_RATE` is
+      //   angular, so at 280 wu/s the outer pellets cannot turn back inside 60 wu. Half
+      //   the delivery is lost at 30-60 wu AGAINST A STATIONARY TARGET, and `roster_lab`
+      //   reads the buff as **-11.9 pp** to Burrito (asAI 40.0% -> 20.0%). A buff that
+      //   makes the character weaker. See `HOMING_TURN_RATE` and DECISIONS §50 — the only
+      //   lever that helps this weapon without a close-range cost is the retirement rule,
+      //   which lives in `sim.ts` and is priced there rather than guessed at here.
       {
         key: 'Swarm', name: 'Topping Swarm', type: 'ranged', range: REACH.rangedMax, damage: 5, cooldown: 3000, speed: SPEED.maxSlow, color: '#7CB518', effect: null,
         pellets: 4, spreadDeg: 55, homing: true,
