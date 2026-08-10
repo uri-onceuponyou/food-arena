@@ -267,6 +267,7 @@ const OFFLINE = [
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
+  { key: 'tools/tmp/hm_audit.mjs --selftest', probes: [pr(['tools/tmp/hm_audit.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/hw_ord.mjs --selftest',    probes: [pr(['tools/tmp/hw_ord.mjs', '--selftest'], /^hw_ord\s+(\d+)\/\d+\s*$/m)] },
   { key: 'tools/tmp/hw_burner.mjs --selftest', probes: [pr(['tools/tmp/hw_burner.mjs', '--selftest'], /^hw_burner\s+(\d+)\/\d+\s*$/m)] },
   { key: 'tools/tmp/dup_census.mjs --selftest', probes: [pr(['tools/tmp/dup_census.mjs', '--selftest'], /^\s*(\d+)\/\d+ selftest arms passed\s*$/m)] },

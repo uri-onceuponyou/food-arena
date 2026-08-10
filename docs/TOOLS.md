@@ -330,7 +330,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **80**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **81**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -406,6 +406,7 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/cw_verify_knownbad.mjs` | **13** | ⚠️ browser. Proves `arena_probe --verify` was BLIND to a dropped concealment list, as an ablation against a **derived** pre-fix ref so it survives a rebase. Carries a tripwire for the way the blindness got in: **zero boxes is indistinguishable from "no plates"** |
 | `node tools/tmp/burger_lab.mjs --selftest` | **16** | where the two drivers' matches diverge for one character — the instrument behind the 50.6 pp Hamburger role split. **Was undocumented** |
 | `node tools/tmp/roster_lab.mjs --selftest` | **9** | per-character strength, settled-matchup count and rarity roll-up on the FIXED driver. **Was undocumented.** ~26 s, the slowest offline gate |
+| `node tools/tmp/hm_audit.mjs --selftest` | **12** | **EFFECTIVE REACH** — the largest separation at which one press still delivers against a *moving* target. `range` is two things wearing one number: `pickWeapon` gates on it (what a fighter BELIEVES) while `stepProjectiles` retires on it (the path budget it GETS), and they coincide only against a stationary target — which all 183 validated `press_value` cells are. Closed form `range − S·flight + hitRadius` predicts 58.2 where the sim measures 58. 🚨 **The range CANCELS: the penalty is `S × flight`, so a rung of `FLIGHT_MS` is a REACH TAX** — `drift` costs 210 wu against a fleeing human, more than `REACH.rangedMax` itself |
 | `node tools/tmp/hw_ord.mjs --selftest` | **5** | which `renderOrder` a transparent ground-stack material should take. ⚠️ **Pixels could not make this call**: 3 vs 8 is **0 px** at `pot_south` and separates only at 599 px with `--vfx`. The answer came from `fogRing.ts` — curtain **7**, canopy **8** — so a wisp at 8 **leaks the central hazard through the fog of war.** Shipped 3, costing 1.9% of the fix |
 | `node tools/tmp/hw_burner.mjs --selftest` | **5** | the pot burner's 0-px ablation **with a positive control** — 0 px shipped vs **1,126/2,296 px with `pot_solid` hidden**. Establishes the cause as **containment, not foreshortening** (both cones are narrower than `pot_body` at every shared height). Without the control, "it delivers no pixels" is indistinguishable from a blind capture |
 | `node tools/tmp/dup_census.mjs --selftest` | **26** | normalised-function-BODY duplication across `src/`, which `sentinel`'s whole-file clone census structurally cannot see (it scans `tools/**.mjs`, 300-line minimum, 0.90 floor — the six files carrying a byte-identical `taperedSegment` peak at **0.0478** whole-file similarity). **Registration buys a SEAT, never a budget** — the `995417e` inversion refused by construction. ⚠️ Its floors sit in **measured gaps** and both shadows print every run: a first draft at `MIN_TOKENS = 60` hid an **eleven-copy** helper **by two tokens** |
