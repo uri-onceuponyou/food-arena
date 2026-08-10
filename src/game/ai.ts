@@ -289,6 +289,96 @@ type WeaponRank = (state: MatchState, w: Weapon, index: number, adist: number) =
  *     is consulted, so the key is exact.
  *   * Donut's `trailBoosted` Candy Barrage. Donut has exactly one offensive weapon, so
  *     the boost cannot re-order a kit of one.
+ *
+ * ── ⚠️ WHAT THIS KEY STILL DOES NOT PRICE: THE TARGET IS MOVING ─────────────
+ *
+ * `pressValue` is validated to the digit — `press_value.mjs` 183 of 183 cells exact,
+ * `sim.test.mjs` §20(b) against the real combat path. **Every one of those cells is
+ * measured against a STATIONARY target.** `press_value.mjs` sweeps eight SEPARATIONS;
+ * until 2026-08-10 nothing in the repo had ever fired a weapon at a target with a
+ * velocity, so the key is exact for the geometry it was validated on and silent about
+ * the one that decides half the roster's matchups.
+ *
+ * It matters for HOMING weapons and it is not small. `sim.ts:stepProjectiles` retires a
+ * projectile at `p.traveled >= w.range`, and `traveled` is CUMULATIVE PATH LENGTH, not
+ * displacement — so a curve spends budget without spending separation, and a homing
+ * volley is in a RACE it can lose. Big Catch has `range` 140 and `speed` 160 wu/s: it
+ * exists for 875 ms and 140 wu of path, whichever ends first. Against a target receding
+ * at `AI_CHASE_SPEED` (70 wu/s) the closing rate is 90 and it always arrives. Against
+ * one receding at `PLAYER_SPEED` (120) the closing rate is 40 and it expires in flight.
+ *
+ * `tools/tmp/ac_homing.mjs` measures exactly that — one press, one separation, a target
+ * on a prescribed constant velocity, delivered HP off `hit-landed`. At 95 wu, as a
+ * fraction of what THIS KEY promises (selftest 11, and the rig reproduces `pressValue`
+ * exactly at speed 0 for all five weapons it calibrates on):
+ *
+ *   weapon               speed  lifetime   vs a CHASE-speed target   vs a PLAYER-speed one
+ *   burrito/Topping Swarm  160     875ms                      85%                     45%
+ *   egg/Hatch!              80    1750ms                      40%                     20%
+ *   sushi/Big Catch        160     875ms                     100%                     47%
+ *
+ * ⚠️ **AND THE TWO ROLES NEVER SHOOT AT THE SAME TARGET.** `PLAYER_SPEED` is 0.12 wu/ms
+ * and `AI_CHASE_SPEED` is 0.07 — a fixed 1.71x that `speedFor` applies to both roles, so
+ * the human ALWAYS shoots at the slow one and this file ALWAYS shoots at the fast one.
+ * Every homing weapon in the roster is therefore worth **1.89x to 2.14x more in the
+ * player's hands than in the AI's, with no decision differing anywhere.**
+ *
+ * ── WHY THAT IS RECORDED HERE AND NOT FIXED HERE ────────────────────────────
+ *
+ * It is the whole of the Sushi role split, and it is NOT a defect in this file.
+ * `tools/tmp/ac_engage.mjs --mirror` puts one character on both sides of a match with
+ * `smart2` driving one and `stepAI` the other — same kit, same pool ratio, same speed
+ * ratio, same arena, so the ONLY difference is the driver. Sushi comes back at **99.2%**
+ * to the scripted player, the roster's largest driver gap by 30 pp, and the per-weapon
+ * breakdown localises **96.5% of the entire damage gap to one press**:
+ *
+ *   sushi mirror, 128 seeds   P press  P dmg  P d/press  |  A press  A dmg  A d/press
+ *   Big Catch                    2.02   53.6      26.48  |     2.02   25.6      12.65
+ *
+ * Both sides press it the SAME 2.02 times a match, from the same separation (93 vs 97 wu),
+ * for the same authored 27. `ac_homing` predicts 47% against a player-speed target; the
+ * mirror measures 12.65/27 = 47%. Two instruments that share no code agree to the digit.
+ *
+ * So there is no decision for this file to make better. Everything `stepAI` chooses on
+ * Sushi is already at least as good as the scripted player's — measured, not assumed:
+ * it presses from CLOSER (69 wu vs 90), which for a monotone-decreasing kit curve is
+ * strictly better (kit EXPRESSION 65% against the player's 50%), its blind-fire rate is
+ * 0.4% of ranged presses, and its press-value efficiency is within 2 pp. The gap is
+ * entirely in what the projectile does after release, and the variable that decides it —
+ * the target's speed — is the one thing an AI cannot change about its opponent.
+ *
+ * A velocity-aware rank was considered and refused: at 47% Big Catch is still worth 12.65
+ * against Seaweed's 5, so the CHOICE does not change and the fix is worth exactly zero on
+ * the character that has the problem. (It would re-order Burrito's Swarm 20 -> 9.0 below
+ * Disc 10, and Egg's Hatch! 15 -> 3.0 below Shards 4 — neither of which has the problem
+ * badly, and both of which are a new behaviour with its own balance cost.)
+ *
+ * The lever that DOES work is one token in `rules.ts`, priced and handed over rather than
+ * taken: `sushi.Catch.speed` 160 -> 280 (`rangedMax` at `FLIGHT_MS.normal`, already on the
+ * ladder — no new constant). `roster_lab.mjs --seeds 32`, staged, against a no-op staging
+ * control that reproduced the unstaged run **110/110 cells bit-identical**:
+ *
+ *   quantity                        shipped   speed 280   floor
+ *   settled matchups                 14/110      12/110   a count, exact
+ *   roster strength range             9.7pp       7.3pp   improved
+ *   roster MINIMUM                    43.8%       45.9%   RAISED
+ *   rarity tier spread               8.05pp       5.9pp   improved
+ *   aggregate player win              57.6%       57.8%   ~9pp — INSIDE the floor
+ *   sushi role split                 +30.7pp    +32.5pp   ~9pp — INSIDE the floor
+ *
+ * PAIRED per-matchup delta (a different, EXACT quantity): **15 of 110 cells moved, max
+ * |Δ| 18.8 pp, and every single one involves Sushi.** Nothing else in the roster is
+ * touched. Contrast `6cc2438`'s refused vitals candidate, which moved 17 cells at max
+ * 65.6 pp, widened the roster range 9.7 -> 16.6 pp and LOWERED the roster minimum to
+ * 43.3% — this raises the floor instead, which is what that pass could not buy at any
+ * rung. ⚠️ **It does NOT close the role split**, which stays inside the aggregate floor:
+ * it fixes the roster-balance half of the finding and leaves the fairness half open.
+ *
+ * ⚠️ The comparison is NOT void under the re-seeding trap. That trap is about the
+ * DRIVER's decision cadence being a function of countdown length; `w.speed` is read by
+ * `stepProjectiles` and by nothing in `scripted_player.mjs`, `COUNTDOWN_FROM` is
+ * untouched, and the seeded stream at the whistle is therefore identical. The matches
+ * diverge downstream because the physics differs, which is the effect being measured.
  */
 interface PressProfile {
   /** Damage that lands at any separation the weapon reaches at all. */
@@ -321,9 +411,13 @@ const PRESS_VALUE: ReadonlyMap<Weapon, PressProfile> = (() => {
         const per = w.damage * (w.peckHits ?? 1);
         const n = w.pellets ?? 1;
         if (w.type === 'melee' || n <= 1 || w.homing) {
-          // A melee swing, a single projectile, and a HOMING volley all land whole: the
-          // homing term steers every pellet back onto the target, measured and confirmed
-          // (Burrito's 4-pellet 55° fan delivers its full 20 at all eight separations).
+          // WAS: "A melee swing, a single projectile, and a HOMING volley all land whole:
+          //   the homing term steers every pellet back onto the target, measured and
+          //   confirmed (Burrito's 4-pellet 55° fan delivers its full 20 at all eight
+          //   separations)." TRUE AT ALL EIGHT SEPARATIONS AND FALSE AT SPEED — kept
+          //   because the melee/single-projectile half is still exactly right, and
+          //   because the homing half was correctly measured against the only geometry
+          //   anyone had ever varied. See "WHAT THIS KEY STILL DOES NOT PRICE" below.
           always = per * n;
         } else {
           const spread = w.spreadDeg ?? 0;
