@@ -14,17 +14,42 @@
  * ALREADY SHIPPED, which is exactly the order §48 forbids. So this tool derives the
  * candidate dumps arithmetically from the shipped one.
  *
- * ── The two arms, and why one is not enough ────────────────────────────────
+ * ── The arms, and why one is not enough ────────────────────────────────────
  *
  *   stretch   every coordinate x k, every prop SIZE unchanged. Four times the floor,
  *             the same 27 cover boxes. Cover DENSITY falls to 1/k^2 of today's.
  *   tile      the whole layout replicated into a k x k grid of quadrants. Cover density
  *             is held EXACTLY constant, so the only thing that changed is distance.
+ *   hub       Uri's own rules: density held, ONE pot dead centre at shipped scale, true
+ *             180-degree point symmetry. The only arm that is a shipping candidate.
  *
  * They bracket the real answer. `stretch` is what you get if the size ships and the
- * layout is not re-authored; `tile` is the optimistic bound where every wu of new floor
- * is furnished at today's density. A single arm would be reporting one layout decision
- * as if it were the size decision.
+ * layout is not re-authored; `tile` is the mechanical density-preserving bound; `hub` is
+ * the one that honours the design rules. A single arm would be reporting one layout
+ * decision as if it were the size decision.
+ *
+ * ── ⚠️ CORRECTION TO `0a63d96`'s COMMIT MESSAGE, WHICH IS A PRIMARY SOURCE ──
+ *
+ * That message states, of the aggregate player win rate:
+ *
+ *     "Aggregate win rate moves 2-6 pp, INSIDE its ~9 pp floor — do not act on it."
+ *
+ * **That is true for `stretch` and `tile` and FALSE for `hub`, which is the arm that
+ * matters.** Kept above verbatim rather than paraphrased, because the wrong sentence is
+ * the one a future reader will find by grepping the log. Measured, same runs:
+ *
+ *     policy   arm        1x -> 2x            delta      vs the ~9 pp floor
+ *     smart2   stretch    57.5% -> 55.3%     -2.2 pp     inside
+ *     smart2   tile       57.5% -> 51.9%     -5.6 pp     inside
+ *     smart2   hub        57.5% -> 44.1%    -13.4 pp     **OUTSIDE**
+ *     chase    stretch    40.9% -> 41.7%     +0.8 pp     inside
+ *     chase    tile       40.9% -> 42.2%     +1.2 pp     inside
+ *     chase    hub        40.9% ->  1.7%    -39.2 pp     **OUTSIDE**
+ *
+ * So the size does NOT leave the aggregate alone on the layout Uri specified: it costs
+ * the scripted player 13.4 pp, and the naive `chase` player is nearly wiped out (1.7%)
+ * because the fog decides matches it never reaches an opponent in. The conclusion the
+ * commit drew is unchanged — it is strengthened. The floor sentence was wrong.
  *
  * ⚠️ SIZES ARE NOT SCALED, IN EITHER ARM, AND THAT IS DELIBERATE. The characters do not
  * get bigger (`PLAYER_SIZE`), the weapons do not get longer (`REACH`), so a counter that
