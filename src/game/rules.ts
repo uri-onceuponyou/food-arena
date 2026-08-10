@@ -958,15 +958,53 @@ export const REACH = {
 // therefore FORBIDDEN here. Region membership is the deterministic equivalent, and
 // `sim.ts:terrainSlowFactor` is the working template for it.
 //
-// ── WHAT IS DELIBERATELY *NOT* HERE ─────────────────────────────────────────
+// ── THE SECOND RULE: ATTACKING SPENDS THE COVER (DECISIONS §29c) ────────────
 //
-//   * ATTACKING DOES NOT REVEAL YOU YET. The genre norm is that firing from a bush breaks
-//     concealment for a moment. It needs a `revealedUntil` timestamp written in
-//     `combat.ts:attemptAttack` and a second term in `isVisibleFrom` — a second rule, with
-//     its own balance cost, and it cannot be measured until regions exist. Deferred, named.
-//   * THE RADAR AND THE ENEMY HP BAR STILL SHOW A CONCEALED FIGHTER. `ui/hud.ts:757` and
-//     `game/match.ts:1191` are one line each and belong to other owners; the sim publishes
-//     `Fighter.concealed` for exactly them.
+// ⚠️ THE OLD WORDING OF THIS BLOCK IS KEPT BELOW, because it stated a deliberate omission
+// that Uri has now closed. It read:
+//
+//     "ATTACKING DOES NOT REVEAL YOU YET. The genre norm is that firing from a bush breaks
+//      concealment for a moment. It needs a `revealedUntil` timestamp written in
+//      `combat.ts:attemptAttack` and a second term in `isVisibleFrom` — a second rule, with
+//      its own balance cost, and it cannot be measured until regions exist. Deferred, named."
+//
+// Uri, `docs/DECISIONS-FOR-URI.md` §30 answering §29c, verbatim: *"attacking from under it
+// will break it and reveal you. You can also step out and attack."* That is STRONGER than
+// the genre norm — in the reference game firing from a bush merely reveals you and the bush
+// survives. Here the object is DESTROYED, so:
+//
+//   * concealment is a CONSUMABLE, PER-OBJECT RESOURCE — one ambush per plate, then it is
+//     gone for the rest of the match; and
+//   * there is a real tactical choice: ambush from under it and spend it, or step out,
+//     attack, and keep it for later.
+//
+// Stated once, in two halves, because they answer two different questions:
+//
+//   1. DESTRUCTION — `movement.ts:breakConcealment` removes every STANDING region that
+//      contains the attacker's centre. It is per-MATCH (`MatchState.brokenConcealment`),
+//      never a mutation of `ArenaDefinition`: one arena object is shared by every match a
+//      process runs — `match.ts` reuses `this.arena` across restarts and `roster_lab` steps
+//      thousands of matches through one — so a broken plate on the arena would stay broken
+//      for the rest of the session. It emits `concealment-broken` for the prop layer.
+//   2. REVEAL — `Fighter.revealedUntil`, `CONCEAL_ATTACK_REVEAL_MS` below. Destruction
+//      alone is NOT enough: the size constraint above puts many small patches close
+//      together, so an attacker whose plate shattered could step 90 wu into the next one and
+//      vanish inside a single tick. The reveal window is what makes "you are exposed" a
+//      STATE rather than a frame's coincidence.
+//
+// ⚠️ A `self` weapon (Hamburger's Onion Ring, the roster's only heal) does NEITHER. Uri's
+// word is *attacking*; a heal deals no damage, spawns no projectile, and leaks nothing. It
+// is the one press that is not an attack, and `sim.test.mjs` §26(l) asserts both directions
+// so the exemption cannot be widened or lost by accident.
+//
+// ── WHAT IS *STILL* DELIBERATELY NOT HERE ───────────────────────────────────
+//
+//   * ⚠️ `ui/hud.ts:enemyVisibleToPlayer` CALLS `isVisibleFrom` WITHOUT THE MATCH, so the
+//     human's screen still resolves concealment against the arena's DECLARED regions rather
+//     than the ones still standing. One line, in a file this owner does not have; routed,
+//     and harmless while no arena declares a region. Both new arguments are OPTIONAL for
+//     exactly that reason — the five-argument form keeps its old meaning instead of
+//     becoming a type error in three files at once.
 //   * THE PLAYER IS NEVER HIDDEN FROM THEMSELVES. `render/camera.ts` follows the player and
 //     a concealed player is still drawn to their own client. Nothing to do.
 
@@ -1107,6 +1145,38 @@ export const SPEED = {
   /** 160 wu/s */ maxSlow: projectileSpeed(REACH.rangedMax, FLIGHT_MS.slow),
   /**  80 wu/s */ maxDrift: projectileSpeed(REACH.rangedMax, FLIGHT_MS.drift),
 } as const;
+
+/**
+ * How long an attack keeps you visible, whatever cover you are standing in.
+ * **This constant belongs to the CONCEALMENT block above** and lives down here only
+ * because it is DERIVED from `FLIGHT_MS`, which is declared below it — a `const` cannot be
+ * read before its own initialiser runs.
+ *
+ * ── DERIVED FROM THE FLIGHT LADDER, NOT PICKED ──────────────────────────────
+ *
+ * The rule it has to satisfy is *"a fighter that has just fired is visible long enough to
+ * be shot back at"*. The thing that decides how long that is, is not reaction time (the AI
+ * has none — it re-decides every tick) and not the cooldown of the weapon that fired (which
+ * would make the exposure a property of the ATTACKER's kit, so a fast weapon would be a
+ * strictly safer ambush and Taco's 2.5 s combo the worst). It is **how long a shot takes to
+ * arrive** — because a reveal shorter than that is a reveal you cannot punish.
+ *
+ * `FLIGHT_MS.normal` is that number: the band `SPEED.close`/`mid`/`long` are all authored
+ * to, i.e. the flight time of the game's workhorse projectile across its own rung. So the
+ * rule reads in words as **you stay lit for exactly as long as the return shot needs to
+ * cross the ground between you**, and if the flight ladder moves this moves with it.
+ *
+ * It is the same derivation, from the same rung, that `STUN_GRACE_MS` (500) already uses —
+ * "exactly one full dodge of the most common shot in the game" — which is a second reason
+ * to reuse the rung rather than introduce a third timescale into the same fight.
+ *
+ * ⚠️ UNMEASURED IN PLAY, exactly like `CONCEAL_REVEAL_RADIUS`. No arena ships a
+ * `concealment` list, so no reveal has ever happened in a real match. It is a stated rule
+ * with a derivation, not a tuned value. `sim.test.mjs` §26 asserts the DERIVATION
+ * (`=== FLIGHT_MS.normal`, and > 0) rather than the literal, so re-tuning the ladder
+ * surfaces as a real change instead of a stale constant.
+ */
+export const CONCEAL_ATTACK_REVEAL_MS = FLIGHT_MS.normal;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Weapon / character types

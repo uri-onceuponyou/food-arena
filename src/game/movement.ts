@@ -113,6 +113,48 @@ export function concealmentOf(arena: ArenaDefinition): readonly ConcealBox[] {
 }
 
 /**
+ * ⚠️ THE PER-MATCH HALF OF CONCEALMENT, AND WHY IT IS A SEPARATE ARGUMENT.
+ *
+ * `ArenaDefinition` is shared, immutable data — one object serves every match a process
+ * runs (see `MatchState.brokenConcealment`). Two facts about concealment are NOT properties
+ * of the arena and cannot be stored on it: **which regions this match has destroyed**, and
+ * **when the target last attacked**. Both arrived with `DECISIONS §29c`.
+ *
+ * `MatchState` satisfies this structurally, so every gameplay reader passes `state` itself
+ * and assembles nothing — this runs on every tick of every match and the concealment path
+ * must stay allocation-free (`tools/perf.mjs --mode alloc`).
+ */
+export interface ConcealMatch {
+  /** `MatchState.elapsed` — the clock `ConcealTarget.revealedUntil` is expressed on. */
+  readonly elapsed: number;
+  /** `MatchState.brokenConcealment` — the regions destroyed this match. */
+  readonly brokenConcealment: readonly ConcealBox[];
+}
+
+/**
+ * The observed fighter, for the one fact about it that geometry cannot answer.
+ * `Fighter` satisfies this structurally.
+ *
+ * It is a separate parameter from `(tx, ty)` rather than replacing them, and that
+ * redundancy is deliberate: it keeps the five-argument `isVisibleFrom(ox, oy, tx, ty,
+ * arena)` — which `ui/hud.ts` and `tools/tmp/conceal_lab.mjs --selftest` both call, neither
+ * of them in this owner's file set — a valid call that still means exactly what it always
+ * meant, instead of a compile error in three files at once.
+ */
+export interface ConcealTarget {
+  /** `Fighter.revealedUntil`. */
+  readonly revealedUntil: number;
+}
+
+/** Has this region been destroyed this match? Reference identity — see `brokenConcealment`. */
+function isBroken(b: ConcealBox, match: ConcealMatch | undefined): boolean {
+  if (!match) return false;
+  const broken = match.brokenConcealment;
+  for (let i = 0; i < broken.length; i++) if (broken[i] === b) return true;
+  return false;
+}
+
+/**
  * Is the point (x, y) inside a concealment region?
  *
  * ── CENTRE-IN-BOX, NOT AABB OVERLAP, AND NOT FULL CONTAINMENT ───────────────
@@ -134,14 +176,49 @@ export function concealmentOf(arena: ArenaDefinition): readonly ConcealBox[] {
  *
  * Expressed through `boxesOverlap` with a zero-extent probe box rather than as a fresh
  * inequality, so there is one AABB test in this file and not two.
+ *
+ * ── `match` — THE REGIONS THAT ARE STILL STANDING ───────────────────────────
+ *
+ * Pass it and a region destroyed by `breakConcealment` (`DECISIONS §29c`) is skipped;
+ * omit it and the answer is about the arena's DECLARED regions, which is exactly what this
+ * function meant before §29c and what the geometry-only callers still want.
  */
-export function isConcealed(x: number, y: number, arena: ArenaDefinition): boolean {
+export function isConcealed(x: number, y: number, arena: ArenaDefinition, match?: ConcealMatch): boolean {
   const regions = concealmentOf(arena);
   for (let i = 0; i < regions.length; i++) {
     const b = regions[i];
-    if (boxesOverlap(x, y, 0, 0, b.x, b.y, b.w, b.h)) return true;
+    if (boxesOverlap(x, y, 0, 0, b.x, b.y, b.w, b.h) && !isBroken(b, match)) return true;
   }
   return false;
+}
+
+/**
+ * IS THIS FIGHTER HIDDEN AT ALL RIGHT NOW — the one-body half of visibility, stated once.
+ *
+ * Two ways to be hidden by nothing, and they are different questions:
+ *
+ *   * the region you are standing in HAS BEEN DESTROYED — a property of the object, spent
+ *     for the rest of the match (`isConcealed` above, via `match`); or
+ *   * YOU JUST ATTACKED — a property of you, and it expires
+ *     (`rules.ts:CONCEAL_ATTACK_REVEAL_MS`).
+ *
+ * Both are `DECISIONS §29c`, and both have to be in ONE function because the alternative is
+ * `isVisibleFrom` and `sim.ts`'s published `Fighter.concealed` each spelling out half of
+ * the rule — "a rule stated once and implemented twice", which is the shape of all five
+ * recorded `ai.ts` defects and of the sixth that concealment itself nearly shipped.
+ *
+ * Degenerates to `isConcealed` when `match`/`target` are omitted, so the pre-§29c meaning
+ * is still reachable and is what the geometry tests assert against.
+ */
+export function isHidden(
+  tx: number,
+  ty: number,
+  arena: ArenaDefinition,
+  match?: ConcealMatch,
+  target?: ConcealTarget,
+): boolean {
+  if (match && target && match.elapsed < target.revealedUntil) return false;
+  return isConcealed(tx, ty, arena, match);
 }
 
 /**
@@ -156,10 +233,74 @@ export function isConcealed(x: number, y: number, arena: ArenaDefinition): boole
  * this is deliberately NOT a line-of-sight test: `arena.cover` blocks projectiles but has
  * never blocked the AI's targeting, and adding raycast LOS here would be a much larger
  * behavioural change wearing concealment's clothes.
+ *
+ * ── ⚠️ THE TWO OPTIONAL ARGUMENTS ARE THE §29c RULE, AND OMITTING THEM IS A ──
+ * ── QUIETLY DIFFERENT QUESTION ──────────────────────────────────────────────
+ *
+ * With `match` and `target`, this answers *can the observer see this FIGHTER, in THIS
+ * match* — destroyed cover does not hide, and an attacker inside its reveal window does not
+ * hide. Without them it answers *is this POINT inside a region the arena declares*, which
+ * is what it meant before §29c.
+ *
+ * They are optional rather than required because two callers outside this owner's file set
+ * pass five arguments — `ui/hud.ts:enemyVisibleToPlayer` (routed: it should pass `state`
+ * and `state.enemy`) and `tools/tmp/conceal_lab.mjs --selftest` (correct as it stands: it
+ * tests geometry against a hand-built arena, with no match anywhere). Making them required
+ * would break a gate this change has to pass in order to be believed.
+ *
+ * Every reader inside `src/game/` passes all seven, and `sim.test.mjs` §26(m) asserts that
+ * by reading this directory's source — because "everybody remembered" is a claim about
+ * people and that is precisely the claim this file has been wrong about five times.
  */
-export function isVisibleFrom(ox: number, oy: number, tx: number, ty: number, arena: ArenaDefinition): boolean {
-  if (!isConcealed(tx, ty, arena)) return true;
+export function isVisibleFrom(
+  ox: number,
+  oy: number,
+  tx: number,
+  ty: number,
+  arena: ArenaDefinition,
+  match?: ConcealMatch,
+  target?: ConcealTarget,
+): boolean {
+  if (!isHidden(tx, ty, arena, match, target)) return true;
   return Math.hypot(tx - ox, ty - oy) <= CONCEAL_REVEAL_RADIUS;
+}
+
+/**
+ * DESTROY every standing concealment region containing (x, y), and report them.
+ *
+ * Uri, `DECISIONS §29c`: *"attacking from under it will break it and reveal you."* This is
+ * the "break it" half; `Fighter.revealedUntil` is the "reveal you" half. `combat.ts` is the
+ * only caller — attacking is the only thing that breaks cover.
+ *
+ * ── EVERY containing region, not just the first ─────────────────────────────
+ *
+ * Regions may overlap (nothing forbids two plates touching, and the size constraint pushes
+ * the layout toward many small ones). Breaking only the first would leave the attacker
+ * still hidden by the second — an ambush that costs a plate and reveals nothing, which is
+ * the incoherent middle state §29c exists to remove. Membership is the same centre test
+ * `isConcealed` uses, so "the region you are under" means one thing in this file.
+ *
+ * Returns the boxes destroyed by THIS call, so the caller can emit one event each without
+ * re-deriving which ones they were. Empty — and allocation-free — in the overwhelmingly
+ * common case where the attacker is standing in the open, and on every arena shipping
+ * today, where there is nothing to be standing in at all.
+ */
+export function breakConcealment(
+  x: number,
+  y: number,
+  arena: ArenaDefinition,
+  broken: ConcealBox[],
+): readonly ConcealBox[] {
+  const regions = concealmentOf(arena);
+  let destroyed: ConcealBox[] | null = null;
+  for (let i = 0; i < regions.length; i++) {
+    const b = regions[i];
+    if (!boxesOverlap(x, y, 0, 0, b.x, b.y, b.w, b.h)) continue;
+    if (broken.includes(b)) continue; // already spent, by this fighter or the other one
+    broken.push(b);
+    (destroyed ??= []).push(b);
+  }
+  return destroyed ?? NO_CONCEALMENT;
 }
 
 /**

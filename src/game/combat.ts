@@ -16,6 +16,7 @@
 
 import {
   CHARACTERS,
+  CONCEAL_ATTACK_REVEAL_MS,
   SLOW_DURATION_MS,
   SLOW_GRACE_MS,
   STUN_DURATION_MS,
@@ -27,6 +28,7 @@ import {
 } from './rules.ts';
 import type { DamageSource, Fighter, FighterRole, GameEvent, MatchState, Vec2 } from './state.ts';
 import { otherRole } from './state.ts';
+import { breakConcealment } from './movement.ts';
 
 const RAD2DEG = 180 / Math.PI;
 const DEG2RAD = Math.PI / 180;
@@ -235,6 +237,53 @@ export function attemptAttack(
   if (now - attacker.lastUsed[weaponIndex] < w.cooldown) return false;
   attacker.lastUsed[weaponIndex] = now;
   events.push({ type: 'weapon-fired', fighterRole: attackerRole, weaponKey: w.key });
+
+  // ── ATTACKING SPENDS YOUR COVER (DECISIONS §29c) ───────────────────────────
+  //
+  // Uri: *"attacking from under it will break it and reveal you. You can also step out and
+  // attack."* Both halves, at the one point in the sim where "a fighter attacked" is a
+  // fact — the same single-choke-point doctrine `applyDamage` applies to HP and to the
+  // level multiplier, and for the same reason: there are two attack paths below (melee and
+  // ranged, the second with three spawn shapes) and a rule applied in some of them is a
+  // silent bug in the rest.
+  //
+  // ── WHY *HERE*, ABOVE EVERY OUTCOME TEST ───────────────────────────────────
+  //
+  // This sits after the cooldown gate and before range, cone, target-alive and every other
+  // outcome test, so the reveal follows THE ACT OF ATTACKING and not its success. That is
+  // the same line this function already draws for the cooldown — "too far", "wrong
+  // direction" and "target already dead" all still consume the press — and it is the only
+  // version that is symmetric: an attacker cannot learn whether it connected before
+  // deciding whether it was seen, and neither can the fighter watching it.
+  //
+  // ── AND WHY A `self` PRESS DOES NEITHER ────────────────────────────────────
+  //
+  // Uri's word is *attacking*. The heal is the roster's only `self` weapon; it deals no
+  // damage, spawns no projectile, and leaks nothing about where its caster is — it is
+  // exactly the press `ai.ts` already exempts from the sight gate ("it targets the caster,
+  // needs no sight of anyone"), and making concealment treat it as an attack here while
+  // that file treats it as not-an-attack there would be this project's oldest defect shape
+  // in a new place. §26(l) asserts BOTH directions, so the exemption cannot silently widen
+  // to `ranged` nor silently vanish.
+  //
+  // ⚠️ INERT WHERE NO ARENA DECLARES A REGION: `breakConcealment` walks an empty list and
+  // `revealedUntil` is read only through `movement.ts:isHidden`, which returns false either
+  // way when nothing conceals. `tools/tmp/conceal_lab.mjs --bitid` is the proof, not this
+  // paragraph.
+  if (w.type !== 'self') {
+    attacker.revealedUntil = now + CONCEAL_ATTACK_REVEAL_MS;
+    for (const box of breakConcealment(attacker.x, attacker.y, state.arena, state.brokenConcealment)) {
+      events.push({
+        type: 'concealment-broken',
+        ownerRole: attackerRole,
+        x: box.x,
+        y: box.y,
+        w: box.w,
+        h: box.h,
+        kind: box.kind,
+      });
+    }
+  }
 
   if (w.type === 'self') {
     // ── THE HEAL SCALES WITH LEVEL, AND ON THE *HEALTH* LADDER ────────────────

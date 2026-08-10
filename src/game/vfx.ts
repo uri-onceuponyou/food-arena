@@ -1586,6 +1586,36 @@ export class VfxLayer {
     const frameDtSeconds = Math.max(0, (state.elapsed - this.lastSyncElapsedMs) / 1000);
     this.lastSyncElapsedMs = state.elapsed;
 
+    // ── ⚠️ CONCEALMENT: THIS POOL DRAWS EVERY PROJECTILE, INCLUDING A HIDDEN ──
+    // ── FIGHTER'S, AND SINCE DECISIONS §29c THAT IS CORRECT — MEASURED, NOT ───
+    // ── ASSUMED, SO NOBODY "FIXES" IT AGAIN ──────────────────────────────────
+    //
+    // Projectiles are WORLD entities, not children of a fighter's model, so they do not
+    // vanish when `match.ts` hides `enemyModel.root`. `DECISIONS §35` recorded that as a
+    // real hole and it was: *a concealed enemy could shoot at you, stay invisible, and its
+    // projectile leaked its position anyway* — the leak without the reveal, which is the
+    // worst of both.
+    //
+    // §29c closes it in the SIM rather than here. Uri: *"attacking from under it will break
+    // it and reveal you."* A projectile exists only because someone pressed attack, and
+    // `combat.ts:attemptAttack` destroys the cover they were under and lights them for
+    // `CONCEAL_ATTACK_REVEAL_MS` at that same instant — before the projectile is spawned,
+    // in the same function. So there is no reachable state in which a projectile is on
+    // screen and its owner is hidden by the plate it fired from.
+    //
+    // => **NO CHANGE IS NEEDED HERE, and hiding projectiles would now be the bug**: it
+    // would delete the return-fire cue from a fighter the game has deliberately just
+    // exposed. Same reasoning for `spawnWeaponCast`/`spawnMeleeArc`, which draw at the
+    // attacker's own position off `weapon-fired` — that event is emitted three lines before
+    // the reveal is written.
+    //
+    // ⚠️ ONE CASE IS *NOT* COVERED BY THAT ARGUMENT, and it is named rather than left to be
+    // found: `spawnImpactBurst` fires on `hit-landed`, and a projectile CAN fly into a
+    // region and hit a fighter its shooter cannot see (concealment is not intangibility —
+    // `sim.test.mjs` §26(h)). That burst is drawn at the victim's position. It predates
+    // §29c, it leaks only to the player who already landed the shot, and it is a
+    // presentation call for whoever places the plates; it is not fixed here because
+    // suppressing it would mean a hit that lands and shows nothing.
     syncPool<Projectile>(
       this.projectilePool,
       this.group,

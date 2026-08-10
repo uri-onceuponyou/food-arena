@@ -47,7 +47,7 @@ import type { ArenaDefinition } from '../arena/types.ts';
 import type { Fighter, FighterRole, GameEvent, MatchInput, MatchState, Splat, TrailMark } from './state.ts';
 import { createFighter, otherRole } from './state.ts';
 import { applyDamage, attemptAttack, isOnOwnTrail } from './combat.ts';
-import { boxesOverlap, isConcealed, isVisibleFrom, tryMove } from './movement.ts';
+import { boxesOverlap, isHidden, isVisibleFrom, tryMove } from './movement.ts';
 import { stepAI } from './ai.ts';
 
 /**
@@ -126,6 +126,9 @@ export function createMatch(
     // no-concealment case bit-identical from the very first tick: `stepAI`'s first read of
     // the belief happens before anything has had a chance to refresh it.
     aiSighting: { x: arena.playerSpawn.x, y: arena.playerSpawn.y, at: 0 },
+    // Every plate starts the match intact — a restart is a fresh set of cover, which is why
+    // this is per-match state and not a mutation of the shared arena. See the field doc.
+    brokenConcealment: [],
     nextId: 1,
   };
 }
@@ -349,7 +352,13 @@ function applyWorldTick(state: MatchState, role: FighterRole, dt: number, attemp
   // Same idiom, same contract: an OBSERVATION for the HUD and the renderer, published
   // from the one predicate the gameplay readers call. See `Fighter.concealed` for why
   // nothing in the sim reads this field back.
-  fighter.concealed = isConcealed(fighter.x, fighter.y, state.arena);
+  //
+  // ⚠️ `isHidden`, NOT `isConcealed`. Since DECISIONS §29c there are two ways to be inside
+  // a box and hidden by nothing — the box has been destroyed, or you have just attacked —
+  // and a published observation that ignored either would be a second, quieter statement
+  // of the rule for the renderer to disagree with. `state` and `fighter` supply the two
+  // per-match facts geometry cannot; see `movement.ts:ConcealMatch`.
+  fighter.concealed = isHidden(fighter.x, fighter.y, state.arena, state, fighter);
 
   const def = CHARACTERS[fighter.characterId];
   const opponentRole = otherRole(role);
@@ -506,7 +515,12 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
     // deterministic, it is symmetric between the two sides (which is the property the five
     // recorded `ai.ts` defects all lacked), and it is the deterministic form of "shooting
     // at a concealed target is less accurate" — with no roll anywhere near it.
-    if (w.homing && target.hp > 0 && isVisibleFrom(p.x, p.y, target.x, target.y, state.arena)) {
+    //
+    // `state, target` carry the two §29c facts: a plate the target shattered by attacking
+    // from under it stops hiding it from an incoming volley, and so does the reveal window
+    // its own shot bought. That is the honest reading of Uri's answer — the volley you fired
+    // BACK at a shooter who just gave itself away should track it, and it does.
+    if (w.homing && target.hp > 0 && isVisibleFrom(p.x, p.y, target.x, target.y, state.arena, state, target)) {
       const hx = target.x - p.x;
       const hy = target.y - p.y;
       const hmag = Math.hypot(hx, hy) || 1;

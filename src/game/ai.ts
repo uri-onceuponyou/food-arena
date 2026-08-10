@@ -461,7 +461,16 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
    * runs 110 matchups x 32 seeds against a `--sim-ref` extraction of the previous commit
    * and requires ZERO differing ticks.
    */
-  const visible = isVisibleFrom(enemy.x, enemy.y, player.x, player.y, state.arena);
+  // ⚠️ `state, player` ARE THE §29c ARGUMENTS, AND THIS ONE CALL IS WHY THE RULE REACHES
+  // ALL THREE SITES. Destroyed cover (`MatchState.brokenConcealment`) and the reveal window
+  // a fighter's own attack buys (`Fighter.revealedUntil`) are per-MATCH facts that
+  // `ArenaDefinition` cannot carry — it is one shared object across every match a process
+  // runs. Because the perception block below derives `tx, ty` from this single boolean, and
+  // `state.player` appears nowhere else in `stepAI`, adding them here routes the reveal to
+  // the separation, the facing AND the nav target in one edit. Route it to two of the three
+  // and you get the sixth instance of this file's oldest defect; `sim.test.mjs` §26(k)
+  // pins all three behaviourally in one experiment, with its ablation.
+  const visible = isVisibleFrom(enemy.x, enemy.y, player.x, player.y, state.arena, state, player);
   const sighting = state.aiSighting;
   if (visible) {
     sighting.x = player.x;

@@ -37,9 +37,16 @@ import { applyDamage, attemptAttack, statusReadyAt } from './combat.ts';
 // walk-through can be PROVEN by walking, and the nav grid's passable-cell count compared
 // directly, rather than asserted from the fact that nobody wired concealment into them.
 import {
-  concealmentInsideRadius, concealmentKeepoutViolations, isConcealed, isVisibleFrom,
-  moveToward, navStats, tryMove,
+  breakConcealment, concealmentInsideRadius, concealmentKeepoutViolations, concealmentOf,
+  isConcealed, isHidden, isVisibleFrom, moveToward, navStats, tryMove,
 } from './movement.ts';
+// Section 26(m) reads `src/game/*.ts` back off disk and asserts that every gameplay reader
+// of `isVisibleFrom` passes the two per-match arguments. "Everybody remembered" is a claim
+// about people; five of this file's six recorded defects are exactly that claim being
+// false, so it is checked against the source rather than believed.
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
   CHARACTERS, CHARACTER_IDS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, POT, TRAIL,
@@ -70,6 +77,10 @@ import {
   // evaluated at `CONCEAL_ENDGAME_PROGRESS` — and a literal here would still pass after the
   // ladder or the ring moved out from under it.
   CONCEAL_REVEAL_RADIUS, CONCEAL_ENDGAME_PROGRESS, concealmentKeepoutRadius,
+  // Section 26(j)-(l): DECISIONS §29c. `FLIGHT_MS` comes in beside the reveal duration for
+  // the same reason — the claim is that the window IS the workhorse projectile's flight
+  // time, so the assertion is the derivation and not the number 500.
+  CONCEAL_ATTACK_REVEAL_MS, FLIGHT_MS,
 } from './rules.ts';
 // Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
 // no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
@@ -3481,12 +3492,24 @@ console.log('\n23. Character levels');
     const smashIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
     state.player.x = 0; state.player.y = 0; state.player.facing = { x: 1, y: 0 };
     state.enemy.x = SMASH_IN_RANGE; state.enemy.y = 0;
+    // ⚠️ THE VACUITY CONTROL HAD TO MOVE BEFORE THE SWING, AND THE OLD ONE FAILING IS
+    // WHY THIS SECTION IS TRUSTWORTHY. It used to read, AFTER the tick:
+    //
+    //     check('…and both fighters are observed as concealed, so the check is not vacuous',
+    //       state.player.concealed && state.enemy.concealed);
+    //
+    // Under DECISIONS §29c that is now FALSE BY DESIGN — the swing destroys the one region
+    // in this fixture, so neither fighter is concealed once the tick has run. It failed on
+    // the first run of the §29c build and it was RIGHT to: a control asserted after the
+    // event it controls for is measuring the wrong instant. Kept above rather than deleted
+    // because the failure is the record of when the rule changed.
+    check('control: both fighters ARE concealed before the swing, so the hit below is not vacuous',
+      isHidden(state.player.x, state.player.y, arena, state, state.player)
+      && isHidden(state.enemy.x, state.enemy.y, arena, state, state.enemy));
     const evs = stepMatch(state, 0, { move: { x: 0, y: 0 }, selectedWeapon: smashIndex, attack: true });
     check('a concealed fighter still takes the hit — concealment hides, it does not protect',
       evs.some((e) => e.type === 'hit-landed' && e.targetRole === 'enemy')
       && state.enemy.hp === state.enemy.maxHp - 12);
-    check('…and both fighters are observed as concealed, so the check is not vacuous',
-      state.player.concealed && state.enemy.concealed);
   }
 
   // ── (i) THE ENDGAME KEEPOUT, AND THE GUARD SHOWN TO FAIL ──────────────────
@@ -3514,6 +3537,399 @@ console.log('\n23. Character levels');
       concealmentInsideRadius(band, keepout).length === 1);
     check('the SHIPPED arena has no concealment yet, so no arena can be failing this today',
       concealmentKeepoutViolations(makeArena()).length === 0);
+  }
+
+  // ── (j) ⚠️ DECISIONS §29c — ATTACKING BREAKS THE COVER AND REVEALS YOU ─────
+  //
+  // Uri, verbatim: *"attacking from under it will break it and reveal you. You can also
+  // step out and attack."* Two mechanically separate consequences, tested separately
+  // because they answer different questions and can fail independently:
+  //
+  //   DESTRUCTION is about the OBJECT. It is permanent for the match, it is per-region and
+  //   not per-fighter (a shattered plate hides nobody, including the opponent), and it must
+  //   NOT touch the shared `ArenaDefinition` — one arena object serves every match a
+  //   process runs, so a plate broken on the arena would stay broken for the session.
+  //
+  //   THE REVEAL is about the FIGHTER. It expires, and it is what stops "break a plate,
+  //   step 90 wu into the next one, vanish inside one tick" — the size constraint in (f)
+  //   guarantees those patches are close together.
+  {
+    const P = { x: 700, y: 500 };
+    const smashIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
+    const attackInput = { move: { x: 0, y: 0 }, selectedWeapon: smashIndex, attack: true };
+    // ⚠️ A NEUTRAL PROBE, and the first draft of this section did not have one.
+    //
+    // "Is this point still cover?" was originally asked with `state.enemy` as the target,
+    // and two checks failed for a reason that is worth keeping: THE AI FIRES TOO. `stepAI`
+    // runs inside the same `stepMatch`, the enemy took its own shot, and its own reveal
+    // window then answered a question that was supposed to be about the REGION. Asking
+    // about a fighter is never a neutral way to ask about a plate; this is.
+    const NEVER_ATTACKED = { revealedUntil: -Infinity };
+    /** One box under the player, one 400 wu away that no attack ever touches. */
+    const twoPlates = () => [
+      { x: P.x, y: P.y, w: 120, h: 120, kind: 'plate' },
+      { x: P.x + 400, y: P.y, w: 120, h: 120, kind: 'spare' },
+    ];
+
+    check('the reveal duration IS the workhorse projectile\'s flight time, not a picked number',
+      CONCEAL_ATTACK_REVEAL_MS === FLIGHT_MS.normal && CONCEAL_ATTACK_REVEAL_MS > 0,
+      `CONCEAL_ATTACK_REVEAL_MS ${CONCEAL_ATTACK_REVEAL_MS} vs FLIGHT_MS.normal ${FLIGHT_MS.normal}`);
+
+    // ── The whole rule, in one tick, from under a plate ──────────────────────
+    {
+      const boxes = twoPlates();
+      const arena = openArena(boxes);
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.player.x = P.x; state.player.y = P.y;
+      state.enemy.x = P.x; state.enemy.y = P.y + 40; // inside the same plate
+      check('control: the attacker is hidden, and so is the opponent sharing its plate',
+        isHidden(state.player.x, state.player.y, arena, state, state.player)
+        && isHidden(state.enemy.x, state.enemy.y, arena, state, state.enemy));
+
+      const evs = stepMatch(state, 16.667, attackInput);
+      const broke = evs.filter((e) => e.type === 'concealment-broken');
+      check('attacking from under a plate DESTROYS it — one `concealment-broken`, carrying its geometry',
+        broke.length === 1 && broke[0].x === boxes[0].x && broke[0].y === boxes[0].y
+        && broke[0].w === boxes[0].w && broke[0].h === boxes[0].h
+        && broke[0].kind === 'plate' && broke[0].ownerRole === 'player',
+        JSON.stringify(broke));
+      check('…and the destroyed box is the one recorded on the match, by reference',
+        state.brokenConcealment.length === 1 && state.brokenConcealment[0] === boxes[0]);
+      check('…so the attacker is no longer hidden by it',
+        !isHidden(state.player.x, state.player.y, arena, state, state.player)
+        && !state.player.concealed);
+      check('…and NEITHER IS THE OPPONENT standing in the same plate — the OBJECT broke, not the attacker\'s cover',
+        !isHidden(state.enemy.x, state.enemy.y, arena, state, NEVER_ATTACKED));
+      check('…while the plate 400 wu away still conceals — destruction is per-region, not global',
+        isHidden(P.x + 400, P.y, arena, state, NEVER_ATTACKED));
+      check('the attacker is REVEALED for exactly one flight time, on the match clock',
+        state.player.revealedUntil === state.elapsed + CONCEAL_ATTACK_REVEAL_MS,
+        `revealedUntil ${state.player.revealedUntil}, elapsed ${state.elapsed}`);
+
+      // A SECOND match on the SAME arena object must start with the plate intact. This is
+      // the assertion that would fail if destruction were a mutation of `arena.concealment`
+      // — and it is the failure mode that would have been invisible in a single match and
+      // catastrophic across `roster_lab`'s 3,520.
+      const next = playingMatch(arena, 'hamburger', 'donut');
+      check('⚠️ a FRESH match on the same arena object starts with every plate intact',
+        next.brokenConcealment.length === 0
+        && isHidden(P.x, P.y, arena, next, next.player)
+        && concealmentOf(arena).length === 2,
+        `broken ${next.brokenConcealment.length}, regions ${concealmentOf(arena).length}`);
+    }
+
+    // ── ABLATION: attacking from the OPEN keeps the plate ────────────────────
+    //
+    // Uri's second sentence — *"You can also step out and attack"* — is a mechanic only if
+    // this comes out the other way. Same arena, same weapon, same tick, attacker moved off
+    // the box.
+    {
+      const boxes = twoPlates();
+      const arena = openArena(boxes);
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.player.x = P.x + 200; state.player.y = P.y; // in the open, between the plates
+      state.enemy.x = P.x + 200; state.enemy.y = P.y + 60;
+      check('control: the attacker is NOT hidden before this attack',
+        !isHidden(state.player.x, state.player.y, arena, state, state.player));
+      const evs = stepMatch(state, 16.667, attackInput);
+      check('ABLATION: attacking from the OPEN destroys nothing — the plate survives to be used later',
+        !evs.some((e) => e.type === 'concealment-broken') && state.brokenConcealment.length === 0
+        && isHidden(P.x, P.y, arena, state, NEVER_ATTACKED));
+      check('…but it STILL reveals: you cannot fire and then dive into cover in the same second',
+        state.player.revealedUntil === state.elapsed + CONCEAL_ATTACK_REVEAL_MS);
+    }
+
+    // ── THE REVEAL IS A STATE, AND IT EXPIRES ───────────────────────────────
+    //
+    // The measurement that decides whether the window is a mechanic or a rounding error:
+    // walk the clock across it with the fighter standing still inside an untouched plate.
+    {
+      const arena = openArena(twoPlates());
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.player.x = P.x + 200; state.player.y = P.y;
+      stepMatch(state, 16.667, attackInput); // fired from the open — the plate survives
+      // Now step into the plate it never broke.
+      state.player.x = P.x; state.player.y = P.y;
+      const hiddenDuring = [];
+      const t0 = state.elapsed;
+      for (let i = 0; i < 80; i++) {
+        stepMatch(state, 16.667, noInput);
+        hiddenDuring.push({
+          dt: state.elapsed - t0,
+          hidden: isHidden(state.player.x, state.player.y, arena, state, state.player),
+        });
+      }
+      const lastExposed = hiddenDuring.filter((r) => !r.hidden).at(-1);
+      const firstHidden = hiddenDuring.find((r) => r.hidden);
+      check('a fighter that just fired stays exposed inside a plate it did not break…',
+        !hiddenDuring[0].hidden && lastExposed !== undefined);
+      check(`…and is hidden again once ${CONCEAL_ATTACK_REVEAL_MS} ms have passed, within one tick of it`,
+        firstHidden !== undefined
+        && Math.abs(firstHidden.dt - CONCEAL_ATTACK_REVEAL_MS) <= 16.667
+        && lastExposed.dt < CONCEAL_ATTACK_REVEAL_MS,
+        `last exposed at +${lastExposed?.dt.toFixed(1)} ms, first hidden at +${firstHidden?.dt.toFixed(1)} ms`);
+    }
+
+    // ── OVERLAPPING PLATES BOTH BREAK ───────────────────────────────────────
+    //
+    // Breaking only the first containing region leaves the attacker still hidden by the
+    // second: a plate spent for nothing, which is the incoherent middle state §29c removes.
+    // Nothing in the data model forbids two plates touching and the size constraint pushes
+    // the layout toward many small ones, so this is reachable, not theoretical.
+    {
+      const boxes = [
+        { x: P.x, y: P.y, w: 120, h: 120, kind: 'a' },
+        { x: P.x + 30, y: P.y, w: 120, h: 120, kind: 'b' },
+      ];
+      const arena = openArena(boxes);
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.player.x = P.x; state.player.y = P.y;
+      // ⚠️ THE ENEMY IS PARKED OUT OF EVERY WEAPON'S RANGE, and the first draft did not do
+      // that. With the enemy sharing the plates, a `break` after the first region STILL
+      // produced two `concealment-broken` events in the tick — one from each fighter — and
+      // the mutant passed. Ownership is now asserted as well, so the check cannot be
+      // satisfied by the other fighter doing half the work.
+      state.enemy.x = 100; state.enemy.y = 100;
+      const evs = stepMatch(state, 16.667, attackInput);
+      const broke = evs.filter((e) => e.type === 'concealment-broken');
+      check('EVERY overlapping plate containing the attacker breaks, not just the first',
+        broke.length === 2 && broke.every((e) => e.ownerRole === 'player')
+        && state.brokenConcealment.length === 2,
+        `${broke.length} events from [${[...new Set(broke.map((e) => e.ownerRole))].join(', ')}]`);
+      check('…so the attacker is genuinely exposed rather than still hidden by the second one',
+        !isHidden(state.player.x, state.player.y, arena, state, NEVER_ATTACKED));
+    }
+
+    // ── AND A PLATE IS SPENT ONCE, NOT ONCE PER SHOT ────────────────────────
+    {
+      const arena = openArena([{ x: P.x, y: P.y, w: 120, h: 120, kind: 'plate' }]);
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.player.x = P.x; state.player.y = P.y;
+      let broke = 0;
+      for (let i = 0; i < 200; i++) {
+        state.player.x = P.x; state.player.y = P.y;
+        broke += stepMatch(state, 16.667, attackInput)
+          .filter((e) => e.type === 'concealment-broken').length;
+      }
+      check('a plate emits `concealment-broken` exactly ONCE however many shots follow',
+        broke === 1 && state.brokenConcealment.length === 1, `${broke} events`);
+    }
+
+    // ── THE PREDICATE ITSELF, WITHOUT A MATCH AROUND IT ─────────────────────
+    //
+    // `breakConcealment` is the only writer of `brokenConcealment`; asserted directly so a
+    // failure upstream in `attemptAttack` cannot be confused with a failure in the geometry.
+    {
+      const boxes = twoPlates();
+      const arena = openArena(boxes);
+      const broken = [];
+      const first = breakConcealment(P.x, P.y, arena, broken);
+      const again = breakConcealment(P.x, P.y, arena, broken);
+      const miss = breakConcealment(P.x, P.y + 2000, arena, broken);
+      check('breakConcealment returns what it destroyed, is idempotent, and destroys nothing at a point in the open',
+        first.length === 1 && first[0] === boxes[0] && again.length === 0 && miss.length === 0
+        && broken.length === 1);
+      check('KNOWN-BAD: an arena with NO regions cannot have anything broken in it',
+        breakConcealment(P.x, P.y, openArena(), []).length === 0);
+    }
+  }
+
+  // ── (k) ⚠️ THE REVEAL REACHES ALL THREE `stepAI` SITES, IN ONE EXPERIMENT ──
+  //
+  // (e) proved the three sites route CONCEALMENT. This proves they route the §29c REVEAL,
+  // and it is a separate experiment because the reveal enters `stepAI` through the same
+  // single `isVisibleFrom` call — which is exactly the property that could be lost by
+  // someone "simplifying" that call, and would then fail here rather than nowhere.
+  //
+  // Shape mirrors (e) deliberately: seen at A, then teleported into a plate at B on the
+  // OPPOSITE side of the enemy. Attacking from B destroys the plate, so a correct AI turns
+  // round and chases B; an AI that missed one of the three would face one point and walk to
+  // another. The ABLATION is the identical run in which the player never presses attack.
+  {
+    const A = { x: 1000, y: 400 };
+    const B = { x: 1000, y: 1600 };
+    const smashIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
+    const run = (fireFromCover) => {
+      const arena = openArena([{ x: B.x, y: B.y, w: 300, h: 300, kind: 'plate' }]);
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.player.x = A.x; state.player.y = A.y;
+      state.enemy.x = 1000; state.enemy.y = 1000;
+      stepMatch(state, 16.667, noInput); // sighted at A
+      state.player.x = B.x; state.player.y = B.y;
+      const y0 = state.enemy.y;
+      // ONE attack, then silence — so what is measured is the STATE the attack left behind
+      // and not a rule that only holds while the trigger is held.
+      stepMatch(state, 16.667, fireFromCover
+        ? { move: { x: 0, y: 0 }, selectedWeapon: smashIndex, attack: true }
+        : noInput);
+      for (let i = 0; i < 60; i++) {
+        state.player.x = B.x; state.player.y = B.y;
+        stepMatch(state, 16.667, noInput);
+      }
+      return {
+        movedSouth: state.enemy.y > y0 + 1,
+        facingSouth: state.enemy.facing.y > 0,
+        belief: { ...state.aiSighting },
+        broken: state.brokenConcealment.length,
+      };
+    };
+    const fired = run(true);
+    const quiet = run(false);
+
+    check('SITE 3 (nav): a player who FIRED from under a plate is chased to where it really is',
+      fired.movedSouth && fired.broken === 1,
+      `belief (${fired.belief.x}, ${fired.belief.y}) — expected B (${B.x}, ${B.y})`);
+    check('SITE 2 (facing/aim): …and the enemy turns to face it, not the stale sighting',
+      fired.facingSouth);
+    check('SITE 1 (belief): …and the belief itself tracks B, so the sighting is live',
+      fired.belief.x === B.x && fired.belief.y === B.y && fired.belief.at > 0);
+    check('ABLATION: the identical run in which the player never fires keeps the AI walking to A',
+      !quiet.movedSouth && !quiet.facingSouth && quiet.broken === 0
+      && quiet.belief.x === A.x && quiet.belief.y === A.y,
+      `belief (${quiet.belief.x}, ${quiet.belief.y}) — expected A (${A.x}, ${A.y})`);
+
+    // And the pure-REVEAL half, with no destruction anywhere: fire from the open, THEN hide.
+    // This is the case destruction alone cannot cover, and it is why the window exists.
+    {
+      const arena = openArena([{ x: B.x, y: B.y, w: 300, h: 300, kind: 'plate' }]);
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.player.x = A.x; state.player.y = A.y;
+      state.enemy.x = 1000; state.enemy.y = 1000;
+      stepMatch(state, 16.667, { move: { x: 0, y: 0 }, selectedWeapon: smashIndex, attack: true });
+      state.player.x = B.x; state.player.y = B.y;
+      stepMatch(state, 16.667, noInput);
+      const seenWhileLit = state.aiSighting.x === B.x && state.aiSighting.y === B.y;
+      check('a fighter that fired in the OPEN is still seen after diving into an intact plate',
+        seenWhileLit && state.brokenConcealment.length === 0);
+      // Run the window out with the fighter parked in the plate.
+      for (let i = 0; i < 60; i++) { state.player.x = B.x; state.player.y = B.y; stepMatch(state, 16.667, noInput); }
+      state.player.x = B.x + 100; state.player.y = B.y; // still inside the 300 wu plate
+      for (let i = 0; i < 5; i++) stepMatch(state, 16.667, noInput);
+      check('…and is lost again once the window expires — the reveal is a window, not a latch',
+        state.aiSighting.x === B.x && state.aiSighting.y === B.y
+        && state.aiSighting.at < state.elapsed,
+        `belief (${state.aiSighting.x}, ${state.aiSighting.y}) at ${state.aiSighting.at.toFixed(0)} of ${state.elapsed.toFixed(0)}`);
+    }
+  }
+
+  // ── (l) THE `self` EXEMPTION, IN BOTH DIRECTIONS ──────────────────────────
+  //
+  // Uri's word is *attacking*. The heal is the roster's only `self` weapon, it deals no
+  // damage and spawns nothing, and `ai.ts` already exempts it from the sight gate for
+  // exactly that reason. Asserted in BOTH directions because a one-directional check
+  // ("the heal does not reveal") would still pass if the whole rule stopped working.
+  {
+    const P = { x: 700, y: 500 };
+    const healIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.type === 'self');
+    const smashIndex = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
+    check('control: the roster still has exactly one `self` weapon, and it is on the attacker used here',
+      healIndex >= 0 && CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons)
+        .filter((w) => w.type === 'self').length === 1);
+
+    const press = (weaponIndex) => {
+      const arena = openArena([{ x: P.x, y: P.y, w: 120, h: 120, kind: 'plate' }]);
+      const state = playingMatch(arena, 'hamburger', 'donut');
+      state.player.x = P.x; state.player.y = P.y;
+      state.player.hp = 10; // so the heal has somewhere to go and definitely fires
+      state.enemy.x = P.x + 600; state.enemy.y = P.y;
+      const evs = stepMatch(state, 16.667, { move: { x: 0, y: 0 }, selectedWeapon: weaponIndex, attack: true });
+      return {
+        fired: evs.some((e) => e.type === 'weapon-fired' && e.fighterRole === 'player'),
+        broke: evs.filter((e) => e.type === 'concealment-broken').length,
+        revealed: state.player.revealedUntil > state.elapsed,
+        hidden: isHidden(state.player.x, state.player.y, arena, state, state.player),
+      };
+    };
+    const heal = press(healIndex);
+    const smash = press(smashIndex);
+    check('a HEAL is not an attack: it fires, and it neither breaks the plate nor reveals the caster',
+      heal.fired && heal.broke === 0 && !heal.revealed && heal.hidden);
+    check('ABLATION: the SAME fighter in the SAME plate pressing a MELEE weapon breaks it and is revealed',
+      smash.fired && smash.broke === 1 && smash.revealed && !smash.hidden);
+  }
+
+  // ── (m) ⚠️ EVERY GAMEPLAY READER PASSES THE PER-MATCH ARGUMENTS ───────────
+  //
+  // `isVisibleFrom`'s two §29c arguments are OPTIONAL, because two callers outside this
+  // owner's file set pass five and making them required would break a gate. An optional
+  // argument that everybody is supposed to pass is a rule enforced by memory, and this
+  // file's six recorded defects are all one rule remembered in one place and forgotten in
+  // another. So it is checked against the SOURCE, not against anyone's recollection.
+  //
+  // A source scan is a weak instrument by nature, so it carries its own known-bad input:
+  // the same matcher is run over a hand-written five-argument call and must REJECT it. A
+  // scanner that silently matched nothing would otherwise report a clean sheet forever.
+  {
+    const gameDir = dirname(fileURLToPath(import.meta.url));
+    /**
+     * ⚠️ COMMENTS FIRST, AND THE FIRST DRAFT DID NOT DO THIS.
+     *
+     * It reported three offenders — `movement.ts: 5 args`, `rules.ts: 5 args`,
+     * `state.ts: 1 args` — and every one was PROSE: this feature is documented by quoting
+     * its own signature, so the files that explain the rule are the files that trip a naive
+     * scanner. A guard that fires on documentation trains its reader to ignore it, which is
+     * strictly worse than no guard.
+     */
+    const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
+    /** Argument lists of every `isVisibleFrom(...)` CALL in `src`, paren-matched so a
+     *  multi-line call and a nested `Math.hypot(...)` are both handled. */
+    const callArities = (raw) => {
+      const src = stripComments(raw);
+      const out = [];
+      const re = /(?<![\w.])isVisibleFrom\s*\(/g;
+      let m;
+      while ((m = re.exec(src)) !== null) {
+        // Skip the declaration itself — `export function isVisibleFrom(`.
+        if (/function\s+$/.test(src.slice(0, m.index))) continue;
+        let depth = 1;
+        let commas = 0;
+        let i = re.lastIndex;
+        for (; i < src.length && depth > 0; i++) {
+          const c = src[i];
+          if (c === '(' || c === '[' || c === '{') depth++;
+          else if (c === ')' || c === ']' || c === '}') depth--;
+          else if (c === ',' && depth === 1) commas++;
+        }
+        out.push(commas + 1);
+      }
+      return out;
+    };
+
+    check('KNOWN-BAD: the matcher REJECTS a five-argument call, so a clean sheet means something',
+      JSON.stringify(callArities('const v = isVisibleFrom(a.x, a.y, b.x, b.y, state.arena);')) === '[5]');
+    check('…and accepts the seven-argument form, and is not confused by a nested call',
+      JSON.stringify(callArities('isVisibleFrom(p.x, p.y, Math.max(t.x, 0), t.y, state.arena, state, t);')) === '[7]');
+    check('…and ignores a five-argument mention in PROSE while still seeing the real call beside it',
+      JSON.stringify(callArities(
+        '// isVisibleFrom(ox, oy, tx, ty, arena) is the old form.\n'
+        + '/* also isVisibleFrom(a, b, c, d, e) */\n'
+        + 'isVisibleFrom(e.x, e.y, p.x, p.y, state.arena, state, p);')) === '[7]');
+
+    const offenders = [];
+    let calls = 0;
+    for (const f of readdirSync(gameDir).filter((n) => n.endsWith('.ts'))) {
+      for (const n of callArities(readFileSync(join(gameDir, f), 'utf8'))) {
+        calls++;
+        if (n !== 7) offenders.push(`${f}: ${n} args`);
+      }
+    }
+    check('every `isVisibleFrom` CALL in src/game/ passes the match and the target',
+      calls >= 2 && offenders.length === 0, `${calls} calls; offenders [${offenders.join(', ')}]`);
+
+    // `revealedUntil` is written in exactly one place. The same claim `applyDamage` makes
+    // about HP, checked the same way, because "there are five call sites and a rule applied
+    // at four of them is a silent bug in the fifth" is this file's most expensive lesson.
+    // A write is `<something>.revealedUntil =` that is not `==`/`===`, with comments stripped
+    // for the same reason as above — the field is documented by name in three files.
+    const isWriter = (src) => /\.revealedUntil\s*=(?!=)/.test(stripComments(src));
+    check('KNOWN-BAD: the writer scan fires on an assignment and not on a comparison or a mention',
+      isWriter('f.revealedUntil = now + 1;')
+      && !isWriter('if (m.elapsed < t.revealedUntil) return false;')
+      && !isWriter('// sets f.revealedUntil = now'));
+    const writers = readdirSync(gameDir).filter((n) => n.endsWith('.ts'))
+      .filter((f) => isWriter(readFileSync(join(gameDir, f), 'utf8')));
+    check('`Fighter.revealedUntil` is written in exactly one file, and it is combat.ts',
+      writers.length === 1 && writers[0] === 'combat.ts', `writers: [${writers.join(', ')}]`);
   }
 }
 

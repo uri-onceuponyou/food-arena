@@ -22,6 +22,11 @@
 import type { CharacterId, StatusEffect, Weapon } from './rules.ts';
 import { CHARACTERS, LEVEL_MIN, clampLevel, levelDamageMultiplier } from './rules.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
+// TYPE ONLY, and the direction matters: `movement.ts` imports nothing from this file, so
+// there is no cycle to reason about at runtime or at build time. `ConcealBox` is declared
+// there because that file owns concealment GEOMETRY; `MatchState` merely holds a list of
+// which ones this match has destroyed.
+import type { ConcealBox } from './movement.ts';
 
 export type FighterRole = 'player' | 'enemy';
 
@@ -123,8 +128,41 @@ export interface Fighter {
    * owned elsewhere: `ui/hud.ts:757` (drop the enemy blip off the radar) and
    * `game/match.ts:1191` (drop the enemy's floating HP bar). Both already receive the whole
    * `MatchState`, so neither needs any new plumbing — see `rules.ts` under "CONCEALMENT".
+   *
+   * ⚠️ SINCE DECISIONS §29c THIS MEANS *HIDDEN*, NOT MERELY *INSIDE A BOX*. It is written
+   * from `movement.ts:isHidden`, so a region that has been DESTROYED by its occupant's own
+   * attack conceals nobody, and a fighter inside its own `revealedUntil` window is not
+   * concealed even while standing in one. The old wording said "standing inside a
+   * concealment region this tick", which is now the narrower `isConcealed()` and is not
+   * what any consumer wants: a plate that has shattered is not cover.
    */
   concealed: boolean;
+  /**
+   * Match-elapsed-ms timestamp until which this fighter is EXPOSED by its own last attack,
+   * whatever cover it is standing in. `-Infinity` for a fighter that has never attacked —
+   * the same idiom, and the same sentinel, as `lastDamagedAt` above and as
+   * `StatusTimers`' two absolute deadlines.
+   *
+   * Uri, `DECISIONS §29c`: *"attacking from under it will break it and reveal you."* The
+   * DESTRUCTION half of that is `MatchState.brokenConcealment`; this is the REVEAL half,
+   * and it is a separate quantity rather than a consequence of the first because the
+   * regions are deliberately small and close together (`rules.ts:CONCEAL_REVEAL_RADIUS`
+   * caps them at ~168 wu) — an attacker whose plate shattered is one step from the next
+   * one, and without a window it would vanish again in a single tick. Duration and its
+   * derivation: `rules.ts:CONCEAL_ATTACK_REVEAL_MS`.
+   *
+   * A deadline rather than a per-tick boolean, deliberately. A recomputed flag would be
+   * written in `applyWorldTick`, which runs at ONE point in the tick, and the four readers
+   * of concealment sit either side of it (`stepAI` fires mid-tick, `stepProjectiles` after
+   * everything). A flag would therefore be fresh for some readers and stale for others, in
+   * an order nobody could see from the call sites — the exact hazard `concealed`'s own doc
+   * above describes. An absolute timestamp compared against `state.elapsed` has no such
+   * window.
+   *
+   * ⚠️ Written by `combat.ts:attemptAttack` and by nothing else, for `melee`/`ranged` only.
+   * A `self` press (the heal) is not an attack; see `rules.ts` under "CONCEALMENT".
+   */
+  revealedUntil: number;
 }
 
 export function createFighter(
@@ -160,6 +198,7 @@ export function createFighter(
     lastDamagedAt: -Infinity,
     terrainSlowFactor: 1,
     concealed: false,
+    revealedUntil: -Infinity,
   };
 }
 
@@ -268,6 +307,28 @@ export interface MatchState {
    * every recorded balance number for a reason that has nothing to do with the game.
    */
   aiSighting: Sighting;
+  /**
+   * THE CONCEALMENT REGIONS THIS MATCH HAS DESTROYED — Uri's §29c, the half of it that is
+   * about the OBJECT rather than about the fighter.
+   *
+   * ⚠️ ON `MatchState` AND NOT ON THE ARENA, AND THIS IS NOT A STYLE CHOICE. One
+   * `ArenaDefinition` object is shared by every match a process runs: `match.ts` keeps
+   * `this.arena` across restarts and hands the same object to `createMatch` each time
+   * (`window.__matchArena` is that same reference, by design), and `roster_lab.mjs` /
+   * `conceal_lab.mjs` step thousands of matches through one. Splicing a destroyed plate out
+   * of `arena.concealment` would therefore leave it destroyed for the whole session — a
+   * fresh match starting with somebody else's broken cover, on a field nothing compares.
+   *
+   * Holds the BOXES BY REFERENCE rather than indices into `arena.concealment`, so it stays
+   * correct if that list is replaced mid-match — which is exactly what `match.ts`'s
+   * `window.__matchArena.concealment = [...]` QA hook does, and it is the only way anything
+   * renders concealment today.
+   *
+   * Empty for every match on every arena that ships today, which is what makes the whole
+   * feature inert: `movement.ts:isConcealed` skips a region only if it is in here, and
+   * nothing gets in here unless a fighter attacked from inside one.
+   */
+  brokenConcealment: ConcealBox[];
   /** Monotonic id generator, so a VFX layer can correlate spawn/destroy events. */
   nextId: number;
 }
@@ -345,4 +406,20 @@ export type GameEvent =
   | { type: 'heal'; fighterRole: FighterRole; amount: number }
   | { type: 'death'; fighterRole: FighterRole }
   | { type: 'splat-created'; x: number; y: number }
-  | { type: 'trail-mark-created'; ownerRole: FighterRole; x: number; y: number };
+  | { type: 'trail-mark-created'; ownerRole: FighterRole; x: number; y: number }
+  /**
+   * A concealment region was DESTROYED by the fighter hiding under it attacking from it
+   * (`DECISIONS §29c`). Carries the box's own geometry, not an index, for the same reason
+   * `MatchState.brokenConcealment` stores references: the arena's list can be replaced
+   * under a running match by the `__matchArena` QA hook, and an index into a list that has
+   * changed identifies the wrong plate.
+   *
+   * ⚠️ NOBODY LISTENS TO THIS YET, AND THAT IS THE POINT OF PUBLISHING IT. The prop that
+   * draws a plate lives in `src/arena/`, which the sim does not own and which does not
+   * declare a `concealment` list yet either — so this event can never fire today. It exists
+   * so that when the plates are placed, "make it shatter" is a subscription rather than a
+   * second traversal of the region list in the renderer. Same contract as every other
+   * member of this union: the sim states what happened, the presentation layers decide what
+   * that looks like and what it sounds like.
+   */
+  | { type: 'concealment-broken'; ownerRole: FighterRole; x: number; y: number; w: number; h: number; kind?: string };
