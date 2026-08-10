@@ -41,6 +41,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **14** | Portrait phones: 65% black bars | letterboxed to 4:3 | **prompt to rotate** — or rethink the fairness model | one prompt, or a model rework |
 | **8** | Pointer lock | shipped as built | ✅ **ANSWERED — Uri: "works good"** | — |
 | **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
+| **51** | 🆕 **The mobile app — which wrapper?** | nothing chosen | **the bundle already survives a third base (4/4, with both known-bad controls failing), so this is a wrapper pick + one `index.html` line.** ⚠️ `file://` is measured UNBOOTABLE — it needs a scheme | a wrapper is swappable; no `src/` change either way |
 
 **If you only do one thing:** play it for ten minutes. The two most valuable bug reports this
 project has ever had came from exactly that, and both were invisible to every gate here.
@@ -2953,4 +2954,111 @@ is the roster's widest fan (55°); at the faster speed its outer pellets cannot 
 Sushi's 40° fan survives the same speed cleanly and Egg has no fan at all — which is why `0558bc5`
 was safe, and why that rung **is not transferable between homing weapons**. Burrito is left alone;
 the only lever that helps him without a close-range cost is 50b.
+
+---
+
+## 51. ❓ THE APP IS SMALLER THAN IT LOOKS — the bundle already survives a third base. Pick a wrapper.
+
+**Nothing is blocked and nothing shipped in `src/`.** This is a wrapper choice, one small
+`index.html` change, and two tiny defaults. The game itself is ready.
+
+### The good news first, because it changes the size of the job
+
+You asked for this as a mobile app. The fear was the failure class that already cost us the silent
+menus: **Vite rewrites the asset URLs it resolves and never string literals in TypeScript**, so a
+hand-typed `/audio/…` shipped as a permanent 404 on the deployed build and **427 audio assertions
+survived it**, because every one pointed at a server rooted at `/`. A wrapper is a *third* base —
+so the question was how many more of those are hiding.
+
+**Answer: zero.** Every emitted chunk was audited at three bases for root-absolute literals,
+`new URL`, `fetch`, CSS `url()`, workers and service workers. The only asset URL built in
+TypeScript is the theme, and it already reads `import.meta.env.BASE_URL`. `DEPLOY_BASE=./` makes
+the whole bundle relative and it runs under any prefix, verified end to end:
+
+| built at | served at | expected | got |
+|---|---|---|---|
+| `/food-arena/` — the live deploy | `/food-arena/` | PASS | **PASS** |
+| `./` — the wrapper | `/app/v1/wrap/` | PASS | **PASS** |
+| `/` — control | `/app/v1/wrap/` | FAIL | **FAIL** |
+| `/food-arena/` + the historical `music.ts` literal — control | `/food-arena/` | FAIL | **FAIL** |
+
+`node tools/tmp/ab_basepath.mjs --selftest`. The two controls exist because a guard that has not
+been shown to fail on the bug it guards against is not a guard.
+
+### The one hard constraint, measured
+
+🚨 **The bundle cannot load over `file://`, and no base fixes it.** Vite emits
+`<script type="module">`; a module script is fetched with CORS; a `file://` document has an opaque
+origin, so Chromium refuses it. The page sits on *"Heating the kitchen…"* with zero canvases,
+forever, with the URL it asked for being **correct**. **The wrapper must supply a scheme or a
+loopback origin** — which every modern wrapper does by default and Cordova famously did not.
+
+**Assumed.** Nothing. No wrapper has been chosen and none is implied by anything in the tree.
+
+### ❓ 51a — which wrapper?
+
+Everything below satisfies the scheme constraint. They differ in what you own afterwards.
+
+| | what you get | what it costs |
+|---|---|---|
+| **1. Capacitor** | Serves over `capacitor://localhost` (iOS) / `https://localhost` (Android) out of the box, so §1 is solved by the default. First-party plugins for orientation lock, status bar, safe areas and the hardware back button. `npx cap sync` after each `vite build`. | An `ios/` and `android/` project in (or beside) the repo, a Node dependency in the build, Xcode + Android Studio to produce a store binary. Most-travelled path; most tutorials are correct. |
+| **2. Hand-rolled WebView** | `WKWebView` + `WKURLSchemeHandler` on iOS, `WebView` + `WebViewAssetLoader` on Android. Nothing between you and the platform; smallest possible surface; no JS dependency at all. | You write the scheme handler, the orientation lock, the inset opt-in, the back-button policy and all the store plumbing yourself — a few hundred lines per platform — and you own them forever. |
+| **3. PWA, no wrapper** | Zero native code. Add a manifest + a service worker and it installs to the home screen from the browser. | **No app store presence**, which is usually the actual point. Orientation lock is honoured unevenly on iOS. Offline needs a service worker we do not have. |
+| **4. Tauri v2 mobile / RN WebView** | Same shape as (1) with different ecosystems. | Smaller communities for the mobile-WebView case specifically; more unknowns per hour spent. |
+| ❌ **Cordova** | — | **Defaults to `file://`, which is the exact configuration measured above as unbootable.** Listed only so it is refused on a number rather than on taste. |
+
+**This pass deliberately did not pick one.** It is your call, and the honest input is that the
+game is wrapper-agnostic: `docs/APP.md` states every requirement as a capability rather than as an
+API in somebody's SDK, so choosing (2) later after starting with (1) costs nothing in `src/`.
+
+### ❓ 51b — two small defaults that come with whichever you pick
+
+1. **Back button at the home screen.** In-app back already works — the router is history-driven and
+   its `popstate` handler names the Android hardware button explicitly. But the first mount
+   *replaces* rather than pushes, so at home there is nothing to go back to. Either **let it exit**
+   (Android's default, and correct) or **intercept and require a second press**. Most games do the
+   second. Wrapper-side either way; no `src/` change.
+2. **Bundle the fonts.** `index.html` loads Rubik and Heebo from `fonts.googleapis.com` — the only
+   external request the game makes, and an app is offline by definition. With the CDN blocked:
+   **33 font faces → 0**, the UI falls to the platform sans, and the home screen's weapon caption
+   **clips** — `Tomato Toss –` re-wraps and loses its leading `T` off the left edge of its pill.
+   Self-hosting the two `woff2` files fixes it and also removes a render-blocking third-party
+   request from the **web** build's critical path. One `index.html` edit; not made in this pass
+   because that file belonged to nobody tonight.
+
+### ℹ️ 51c — NOT a decision: forcing landscape in the app does NOT retire portrait on the web
+
+Your §14 answer — *"the game should be landscape… when it will be in an app, we'll force
+landscape"* — is taken as settled and is not reopened. Recording the consequence so nobody
+"tidies up" on the strength of it:
+
+* **App target:** landscape-locked natively. Portrait is unreachable.
+* **Web target:** unchanged. A phone browser still renders portrait, so
+  `menu_accept_portrait.mjs` (**219** assertions) **stays a shipped gate**, and the portrait layouts
+  in `shop.ts`, `settings.ts`, `trophyRoad.ts` and `characterSelect.ts` stay load-bearing.
+
+Deleting them would be a regression *in web*, justified by a decision that was only ever about
+*app*.
+
+### ℹ️ 51d — NOT a decision: the audio unlock already works, and you should not "help" it
+
+Mobile autoplay policy needs a real gesture. **The first tap supplies it**, measured on a phone-shaped
+touch device with the policy forced on: the engine goes `idle → running` **131 ms after the first
+pointerdown**, the theme loads (`200`) and the master bus carries 0.021 RMS — against a no-tap
+control that stays `idle` with no audio context at all for 10.6 s. The title card's "tap to start"
+is what spends that first tap.
+
+**So: do not add a synthetic gesture, and do not deep-link the wrapper past the title card.** If it
+opened straight on home, the theme would still start but the player's first *button* press would be
+silent — `resume()` is asynchronous, so the voice scheduled inside that first gesture is dropped.
+
+⚠️ One caveat stated rather than hidden: that measurement is Chromium with
+`--autoplay-policy=user-gesture-required`. **Real iOS WebView behaviour is not verified here** and
+Safari's rules for media elements are stricter. It is the first thing to check on a real device.
+
+⚠️ And one instrument fault worth your knowing, because it is the kind of thing that produces
+confident nonsense: the first version of that probe read the state with `page.evaluate()` before
+the tap, **which itself grants a user gesture** — and duly reported the theme playing with **no tap
+at all**. Caught by its own control, and the probe is now built so the measurement never talks to
+the page until it is over.
 
