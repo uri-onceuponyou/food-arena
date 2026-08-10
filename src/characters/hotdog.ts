@@ -878,9 +878,40 @@ export class HotDogCharacter extends BaseCharacter {
       // the sign of the error flipped by a rounding. Pulled to |offset| R * 0.0374 with
       // radius R * 0.026: outer edge R * 0.0634, a real 14% margin, and still 35% of
       // the pupil's radius so the catchlight keeps its size.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.026, 10, 8), flatMat('#ffffff'));
+      //
+      // ── 🚨 AND THE 14% MARGIN DID NOT CLOSE IT. THE FIX ABOVE NEVER LANDED ──────
+      // Read at 12x off the shipped lobby camera (`shots/ey/zoom/hotdog-Leye.png`) the
+      // pupil is still a clear "C" with a white bite out of its upper-left, continuous
+      // with the sclera. `tools/tmp/ey_pacman.mjs` scores it **0.8356** against
+      // burrito's genuinely-whole 0.9679 at a comparable size.
+      //
+      // The paragraph above measures the right quantity in the wrong SPACE: it is done
+      // in the eye's tangent plane, in head radii, and both of the terms that decide
+      // this are in PIXELS. `egg.ts` carries the full derivation — the same recipe left
+      // the cast reference itself bitten — and the short form is:
+      //   BLOOM   `stage.ts` thresholds bloom at 0.80 luma and `flatMat` white is 1.000,
+      //           so the highlight glows 2-3 px INTO the rim. **That is an ABSOLUTE
+      //           size and hotdog has the SMALLEST pupils in the cast at 21 px**, so
+      //           3 px is nearly a third of a radius. This character is the most
+      //           exposed to the term and had the second-smallest margin.
+      //   BURIAL  the glint's centre sat at `SCL * 0.58` = 0.0858R against a pupil
+      //           front face of 0.1029R — buried 0.0171R, so only a 0.0102R sliver
+      //           emerged, and an emerging sliver is displaced OUTWARD because the
+      //           pupil's surface recedes fastest away from its own apex.
+      //
+      // So: a flattened LENS just PROUD of the surface, at an in-plane 0.59 rather than
+      // 0.86, and the radius takes the extra step this character's pupil size argues
+      // for — 0.026 -> 0.024R, still 32.4% of the pupil radius (egg ships 30.8%).
+      //   offset  RELATIVE TO THE PUPIL's centre, which sits at y = -0.040R — so the
+      //           ABSOLUTE y moves -0.015 -> -0.027, and reading the old pair as an
+      //           offset is the trap this line exists to close: (-0.028, +0.025) ->
+      //           (-0.015, +0.013), giving 0.268 + 0.324 = **0.592**, a 41% margin.
+      //   z       SCL * 0.58 -> SCL * 0.70 (0.1036R) against a front face of 0.1014R at
+      //           that offset, i.e. 0.002R proud — it emerges whole.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.024, 10, 8), flatMat('#ffffff'));
       glint.name = 'eye_glint';
-      glint.position.set(GAZE_X - R * 0.028, -R * 0.015, SCL * 0.58);
+      glint.position.set(GAZE_X - R * 0.015, -R * 0.027, SCL * 0.70);
+      glint.scale.set(1, 1, 0.45);
       glint.userData.noOutline = true;
       eye.add(glint);
 

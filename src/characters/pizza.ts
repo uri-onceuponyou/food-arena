@@ -1100,13 +1100,47 @@ export class PizzaCharacter extends BaseCharacter {
       //    Still 36% of the pupil's radius, so the catchlight is not made timid — it is
       //    made a catchlight. `bounce` below was already inside (outer edge R * 0.062)
       //    and is untouched, which is the control: it never read as a bite.
+      //
+      //    ── 🚨 ROUND 3: 18% OF MARGIN IS NOT ENOUGH, AND THE CONTROL WAS NOT ONE ──
+      //    Read at 12x off the shipped lobby camera (`shots/ey/zoom/pizza-Leye.png`)
+      //    there are 2-3 px of dark left between this catchlight and the pupil's rim,
+      //    and `bounce` breaks the rim at the lower right — so the "control" was
+      //    carrying the same defect more quietly. `tools/tmp/ey_pacman.mjs` scores the
+      //    pupil **0.9548**: the best in the cast before this pass and still not whole,
+      //    against burrito's genuinely-clean 0.9679 at a smaller size.
+      //
+      //    The arithmetic above is right and is done in the wrong SPACE — the eye's
+      //    tangent plane, in head radii — while both deciding terms are in PIXELS.
+      //    `egg.ts` carries the derivation (the same recipe left the cast reference
+      //    itself bitten). Short form: BLOOM — `stage.ts` thresholds at 0.80 luma and
+      //    `flatMat` white is 1.000, so a catchlight glows 2-3 px outward into the rim,
+      //    an ABSOLUTE size that a ratio cannot express; and BURIAL — a glint centred
+      //    behind the pupil's front face emerges as a cap displaced OUTWARD.
+      //
+      //    Both highlights become flattened LENSES sitting just PROUD of the surface,
+      //    at an in-plane 0.62 rather than 0.81. Radii are untouched:
+      //      glint  offset 0.024/0.024 -> 0.014/0.014, z 0.074 -> 0.084R (front face
+      //             0.0815R at that offset, so 0.003R proud).  0.266 + 0.357 = 0.623
+      //      bounce offset 0.032/0.030 -> 0.024/0.023, z 0.070 -> 0.082R.
+      //             0.446 + 0.161 = 0.607, where it was 0.839.
+      //    ⚠️ AND THE BOUNCE HAD TO SHRINK, WHICH THE FIRST TRY DID NOT DO. Pulling
+      //    both highlights toward the pupil's centre pulls them toward EACH OTHER, and
+      //    at 0.020/0.019 they were 0.003R apart before bloom — rendered, one lumpy
+      //    white shape rather than two lights. On a 22 px pupil there is no placement
+      //    at which an 8 px and a 6 px disc both read; the second one has to be
+      //    genuinely small. `EYE_R * 0.14 -> 0.09`, i.e. 16% of the pupil radius against
+      //    the key's 36%, which is the "two highlights of VERY DIFFERENT size" the
+      //    construction always specified and never had. Gap is now 0.0153R (~2 px).
+      const bounceR = EYE_R * 0.09;
       const glint = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.20, 10, 8), glintMat);
-      glint.position.set(PUP_X - R * 0.024, PUP_Y + R * 0.024, R * 0.074);
+      glint.position.set(PUP_X - R * 0.014, PUP_Y + R * 0.014, R * 0.084);
+      glint.scale.set(1, 1, 0.45);
       glint.userData.noOutline = true;
       eye.add(glint);
 
-      const bounce = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.14, 8, 6), glintMat);
-      bounce.position.set(PUP_X + R * 0.032, PUP_Y - R * 0.030, R * 0.070);
+      const bounce = new THREE.Mesh(new THREE.SphereGeometry(bounceR, 8, 6), glintMat);
+      bounce.position.set(PUP_X + R * 0.024, PUP_Y - R * 0.023, R * 0.082);
+      bounce.scale.set(1, 1, 0.45);
       bounce.userData.noOutline = true;
       eye.add(bounce);
 
