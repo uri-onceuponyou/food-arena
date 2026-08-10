@@ -254,6 +254,24 @@ const spec = JSON.parse(readFileSync(specPath, 'utf8'));
 const allVariants = JSON.parse(readFileSync(a.variants, 'utf8'));
 for (const s of subjects) if (!allVariants[s]) { console.error(`no variants declared for "${s}" in ${a.variants}`); process.exit(2); }
 
+/** ── `--arms slow=A,D,E;boxBurger=A,D` — which declared arms this ROUND draws. ──
+ *  The variants file is a growing RECORD: an arm that lost stays in it, with the number
+ *  that killed it, so the next pass does not rebuild it. A round should not have to draw
+ *  the whole record. Two reasons this is not cosmetic:
+ *   * a decided arm on the plate is a tile of judge attention spent on a settled question;
+ *   * once a winner has been pasted into `src/ui/icons/`, the shipped arm and the winning
+ *     arm are the SAME PIXELS, and the "variants must differ" control correctly refuses
+ *     the round. Selecting arms is the honest way to drop the duplicate; `--handover` is
+ *     for the case where proving they are identical IS the point. */
+for (const spec2 of (a.arms ?? '').split(';').map((s) => s.trim()).filter(Boolean)) {
+  const [n, ids] = spec2.split('=');
+  const want = (ids ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!allVariants[n]) { console.error(`--arms names "${n}", which has no variants declared`); process.exit(2); }
+  const missing = want.filter((id) => !allVariants[n].some((v) => v.id === id));
+  if (missing.length) { console.error(`--arms ${n}: no such arm(s) ${missing.join(',')}`); process.exit(2); }
+  allVariants[n] = allVariants[n].filter((v) => want.includes(v.id));
+}
+
 /** ── HAND-OVER: `--handover coin=B` ────────────────────────────────────────────
  *  Asserts that the icon AS SHIPPED and variant B render byte-identical pixels on this
  *  plate. A geometry variant is real artwork, so unlike a `fills` swap it has to be

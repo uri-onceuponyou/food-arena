@@ -311,9 +311,23 @@ export const UI_ICONS: Record<string, string> = {
    *      unlike [the other three] nothing sits ON TOP of the box."*
    *  `BURGER_EMBLEM` is stamped on the FRONT PANEL. `FLAME_EMBLEM`, `LEAF_EMBLEM` and
    *  `BOW_EMBLEM` all sit ABOVE THE LID, breaking the box's outline — and those three
-   *  boxes are the ones that pass. That is a silhouette difference, it is the one
-   *  structural asymmetry left in the family, and it is untested. Move the burger onto
-   *  the lid before touching anything else here. */
+   *  boxes are the ones that pass. That is a silhouette difference and it is the one
+   *  structural asymmetry left in the family.
+   *
+   *  🔴 IT WAS TESTED, AND IT IS ALSO NOT THE LEVER. Shipped geometry, shipped colours,
+   *  the burger moved above the lid so it breaks the outline like its three siblings.
+   *  Paired, twin floor 0 of 9: **3/3 -> 3/3 magnified, 0/3 -> 0/3 native, Δ +0 at both.**
+   *  It moved the native wrong answer from meat/cheese onto "a pot of honey" x2.
+   *  ⚠️ THE CAUTION IS ABOUT THE EVIDENCE, NOT THE BOX. Two zoomed judges independently
+   *  volunteered the "nothing sits on top" explanation, and it was a correct description
+   *  of what they saw and a WRONG prediction of what would change it. **A judge's stated
+   *  reason is an observation, not a lever.** Four variables have now each moved with no
+   *  effect (colourway ×3, front/lid ratio, clasp dominance, lid silhouette, emblem
+   *  placement). ⚠️ And `boxBurger` scored 1/3 magnified in one round and 3/3 in the
+   *  next on UNCHANGED art, so its magnified number carries no information either.
+   *  Nothing further should be spent here until there is a measurement that can resolve
+   *  it — the native arm is 0/3 across every arm ever drawn, which is a legibility floor
+   *  at 11.83 px rather than a drawing defect. */
   boxBurger: box(P.gold, P.mustard, P.ketchup, BURGER_EMBLEM),
   boxPineapple: box(P.grape, P.grapeHi, P.mustard, LEAF_EMBLEM),
   boxRed: box(P.ketchup, '#E9536A', P.mustard, BOW_EMBLEM),
@@ -461,13 +475,32 @@ export const UI_ICONS: Record<string, string> = {
      a number. A blind judge, magnifying, put it plainly: *"only 44 shows the shell's
      pointed apex; 8 and 24 alone are weakly identifiable."*
 
-     ⚠️ AND IT IS STILL 0/3 AT NATIVE SIZE — "a gold coin" x2, "an egg" x1 — so the
-     apex fixed the DRAWING and not the low-acuity read. The remaining defect is
-     measured and is HUE, not shape: at 13.8 px a warm gold rounded mass is the
-     currency, and `coin`, `trophy`, `medal`, `honey`, `gear`, `lock`, `home`, `cone`,
-     `burst` and this are all gold. Shipped anyway because +2 of 3 at one protocol and
-     0 at the other is a strict improvement over a floor of 0 — but the next move on
-     this glyph is a COLOUR, not another silhouette, and it is untried.
+     ⚠️ IT IS STILL WEAK AT NATIVE SIZE — 0/3 in the round that chose it, 1/3 in the
+     next one. Shipped because +2 of 3 magnified and no loss anywhere is a strict
+     improvement, but the low-acuity read is NOT solved.
+
+     🔴 AND THE OBVIOUS NEXT MOVE WAS TRIED AND IS WRONG. This comment said, on one
+     round's evidence, *"the remaining defect is measured and is HUE, not shape: at
+     13.8 px a warm gold rounded mass is the currency, and ten glyphs in this set are
+     gold."* That inference came from ONE round in which the native misreads were "a
+     gold coin" x2. It is kept because it is exactly the mistake this file keeps making
+     — reasoning from a misread instead of testing it. A second paired plate, twin floor
+     0 of 9, same silhouette, one variable:
+
+         arm                                    magnified   native
+         A  gold (shipped)                      3/3         1/3
+         D  `P.woodHi` brown, near-ink whorl    3/3         1/3   Δ +0
+         E  `P.candy` pink, near-ink whorl      3/3         **0/3   Δ −1**
+
+     Hue is not the lever, and the loudest separation available made it WORSE. What the
+     second round also showed is why: with the shell shipped, nothing on the plate was
+     named "a gold coin" except `coin` itself, and slow's wrong answers moved to "a
+     rolled burrito" / "a hot dog with mustard" / "a tomato" / "a fish" — a DIFFERENT
+     wrong answer every round. Unstable misreads are the signature of a LEGIBILITY
+     failure, where nobody can name it, not a DISTINGUISHABILITY one where it collides
+     with a neighbour (`LESSONS.md` §3), and those have opposite fixes. The next move is
+     LESS DETAIL AND MORE MASS at 13.8 px — not another hue and not another silhouette.
+
      ⚠️ A spiral RIBBON was rejected on arithmetic, not taste: at 13.8 px one viewBox
      unit is 0.575 px, so two turns need a gap wider than the stroke and no pair of
      numbers under 24 units gives one. */

@@ -175,15 +175,62 @@ const V = {
 <circle cx="12" cy="12" r="9.1" fill="${P.gold}"/>
 <path d="M12 12a2.9 2.9 0 1 0 2.9 2.9c0-3.4-3.2-5.3-6.3-4.1-3.4 1.3-4.6 5.3-2.6 8.2" stroke="#5A3200" stroke-width="2.8" fill="none" stroke-linecap="round"/>`,
     },
+    // ── The HUE arms. 🔴 BOTH LOST, and the hypothesis behind them is FALSIFIED.
+    //    [B] fixed the drawing (1/3 -> 3/3 magnified) and left the native read at 0/3,
+    //    "a gold coin" x2 + "an egg" x1, from which this file inferred that a warm gold
+    //    rounded mass is the currency at 13.8 px. Measured on a second plate, same
+    //    silhouette, one variable, twin floor 0 of 9:
+    //        A gold (shipped) 3/3 magnified, 1/3 native
+    //        D brown          3/3, 1/3   Δ +0
+    //        E pink           3/3, 0/3   Δ −1   ← the loudest separation made it WORSE
+    //    And with the shell shipped, slow's native misreads moved to burrito / hot dog /
+    //    tomato / fish — a different wrong answer every round, which is a LEGIBILITY
+    //    failure rather than a collision. Kept so the next pass does not rebuild them.
+    {
+      id: 'D',
+      note: 'SHELL BROWN. `P.woodHi`, the one warm saturated hue in the palette that no currency glyph uses, with a near-ink whorl. Warm chroma is also the budget CLAUDE.md records as SCARCE, so this spends the right one.',
+      svg: `
+<path d="M13 7.6 21.8 3.6 18.4 13.2z" fill="#B4622A"/>
+<circle cx="10.6" cy="14.2" r="7.8" fill="#B4622A"/>
+<path d="M14.2 18.4a5 5 0 1 1 1-5.6" stroke="#4A2400" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+<circle cx="10.6" cy="14.2" r="1.7" fill="#4A2400" stroke="none"/>`,
+    },
+    {
+      id: 'E',
+      note: 'MAXIMUM SEPARATION. `P.candy` pink — no coin, trophy, medal, gear, lock, home, cone or burst is pink, and the ink fact pill it ships on carries nothing pink either. Deliberately not a snail colour: the question this arm asks is whether HUE alone carries the native read once the silhouette is right.',
+      svg: `
+<path d="M13 7.6 21.8 3.6 18.4 13.2z" fill="#FF6FA5"/>
+<circle cx="10.6" cy="14.2" r="7.8" fill="#FF6FA5"/>
+<path d="M14.2 18.4a5 5 0 1 1 1-5.6" stroke="#8E2E56" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+<circle cx="10.6" cy="14.2" r="1.7" fill="#8E2E56" stroke="none"/>`,
+    },
   ],
 
   // ── the box family — 11.83 px on white, one row of one sheet. ───────────────
   // Colour has been measured and is NOT the lever (a77ff30: three colourways, Δ = 0 of
   // 3, twin floor clean). Both arms below hold the colours FIXED and change only where
   // the lid is.
+  // 🔴 [B] LOST — 1/3 -> 1/3 magnified, 0/3 -> 0/3 native, Δ +0 at both. Kept, because
+  // three variables (front/lid ratio, clasp dominance, lid silhouette) have now each
+  // moved with no effect and the next pass should not spend a fourth on the box's body.
+  // [D] was the arm the LOSING round produced — two zoomed judges independently said the
+  // box reads as a chest "because unlike the other three nothing sits ON TOP of it" —
+  // and 🔴 [D] LOST TOO: 3/3 -> 3/3 magnified, 0/3 -> 0/3 native, Δ +0 at both, twin
+  // floor 0 of 9. A judge's stated reason is an observation, not a lever.
   boxBurger: [
-    { id: 'A', note: 'SHIPPED — trapezoid lid inside the body silhouette. front/lid separation 1.36, the family lowest; at 11.83px there is no visible lid.' },
-    { id: 'B', note: 'OVERHANGING FLAT LID. The lid is 2.6 units wider than the body on each side, so it is in the SILHOUETTE; the trapezoid that made the box a faceted solid is gone; the clasp straddles the seam evenly instead of sitting lid-dominant.', svg: box2(P.gold, P.mustard, P.ketchup, BURGER_EMBLEM2) },
+    { id: 'A', note: 'SHIPPED — trapezoid lid inside the body silhouette, burger stamped on the FRONT PANEL.' },
+    { id: 'B', note: 'REJECTED (Δ +0 both protocols). OVERHANGING FLAT LID, 2.6 units wider than the body each side, trapezoid removed, clasp straddling the seam evenly.', svg: box2(P.gold, P.mustard, P.ketchup, BURGER_EMBLEM2) },
+    {
+      id: 'D',
+      note: 'THE EMBLEM MOVES ONTO THE LID. Shipped geometry, shipped colours, one change: the burger sits ABOVE the lid and breaks the outline, which is what FLAME_EMBLEM, LEAF_EMBLEM and BOW_EMBLEM already do — and those three boxes are the ones that pass. It is the last structural asymmetry in the family.',
+      svg: `
+<path d="M3.4 9.4h17.2v9.4a1.7 1.7 0 0 1-1.7 1.7H5.1a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.gold}"/>
+<path d="M3.4 9.4 6.6 5.6h10.8l3.2 3.8z" fill="${P.mustard}"/>
+<path d="M9.8 7h4.4v5.6H9.8z" fill="${P.ketchup}" stroke-width="1.3"/>
+<path d="M8.9 3.9a3.1 3.1 0 0 1 6.2 0z" fill="#B4622A" stroke-width="1.2"/>
+<path d="M8.7 3.9h6.6v1.1H8.7z" fill="${P.lettuce}" stroke-width="1.2"/>
+<path d="M8.9 5h6.2v1.4H8.9z" fill="#B4622A" stroke-width="1.2"/>`,
+    },
   ],
   boxRed: [
     { id: 'A', note: 'SHIPPED. 1/3 at native size, "a treasure chest" x2 — the other half of a mutual swap with `chest`.' },
