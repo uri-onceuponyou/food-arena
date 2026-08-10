@@ -142,10 +142,11 @@ import { chromium } from 'playwright';
 import sharp from 'sharp';
 import ts from 'typescript';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
-import { readdirSync, existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
 import { join, relative, resolve, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { VL, VL_SRC } from './valuelib.mjs';
+import { claimDir, warnIfClaimed, readClaim } from './ir_outclaim.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────────
 const a = process.argv;
@@ -154,6 +155,23 @@ const has = (k) => a.includes(k);
 
 const MODE = get('--mode', 'chars');
 const BASE = process.env.PREVIEW_BASE ?? process.env.HEADSERVE_URL ?? get('--url', null);
+/**
+ * ⚠️ THE DEFAULT IS SHARED, SO IT IS NOW CLAIMED. Three agents in one night measured into
+ * `shots/vl` at once: two had a peer's run land BETWEEN their `--mode chars` and their
+ * `--mode dl`, so `chars.json` and `dl.json` described two different trees; the third used
+ * a private `--out`, was fine, and still could not fully opt out because a stray process it
+ * could not kill finished into the shared directory anyway.
+ *
+ * Every WRITING mode now takes an exclusive claim on `OUT` (`tools/tmp/ir_outclaim.mjs`) and
+ * REFUSES if a live foreign process holds it, naming the flag that resolves it. The default
+ * path is deliberately UNCHANGED — see that file's header for why a per-pid default was
+ * written and then rejected: it would have broken the `chars && dl && gate --reuse` pipeline
+ * peers run today, turning a rare collision into a guaranteed failure for everyone.
+ *
+ * 🚨 THIS DOES NOT REPLACE THE `srcId` AUDIT and must never be allowed to. `srcId` is what
+ * turned all three of those nights into refusals instead of silently wrong numbers. The claim
+ * catches the collision before the first page boots; `srcId` catches it however it arrives.
+ */
 const OUT = get('--out', 'shots/vl');
 const IDS = get('--ids', 'hamburger,donut,taco,burrito,egg,lollipop,pizza,sushi,soup,waterbottle,hotdog').split(',');
 const LADDER_STATION = get('--station', 'pot_south');
@@ -915,6 +933,32 @@ async function writeOverlays(res, dir, tag) {
   }
 }
 
+/**
+ * Take the write claim on `OUT`, or die with the refusal. Called by every mode that
+ * WRITES — `chars`, `dl`, `ref`, and the gate's recompute path — and by nothing that only
+ * reads. Idempotent within a process, so `--mode gate` claiming and then `modeChars`
+ * claiming again is a `SELF` no-op rather than a self-refusal.
+ *
+ * `--force-claim` is the escape hatch for the one case the decision cannot resolve on its
+ * own: a claim whose pid has been recycled onto an unrelated live process where `ps` could
+ * not supply a start time to distinguish them. It is deliberately not the default.
+ */
+function takeOut(mode) {
+  if (has('--force-claim')) {
+    const c = readClaim(OUT);
+    if (c && c !== 'CORRUPT' && c.pid !== process.pid) {
+      console.warn(`⚠️ --force-claim: taking ${OUT} from pid ${c.pid} (${c.tool} --mode ${c.mode}, run ${c.runId}).`);
+      console.warn('   If that process is in fact alive, the two runs are now writing one directory and');
+      console.warn('   nothing downstream can tell which file came from which. That is on this flag.');
+    }
+    try { rmSync(join(OUT, '.ir-owner.json'), { force: true }); } catch { /* nothing to clear */ }
+  }
+  const r = claimDir(OUT, { tool: 'valuescan', mode });
+  if (!r.ok) { console.error(`\n${r.refusal}\n`); process.exit(2); }
+  console.log(`out ${OUT}  (claimed ${r.code}, pid ${process.pid}, run ${r.claim.runId})`);
+  return r;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MODE: chars — internal value ladder, per character and per part
 // ─────────────────────────────────────────────────────────────────────────────
@@ -922,6 +966,7 @@ async function modeChars() {
   if (!BASE) { console.error('PREVIEW_BASE unset — run under tools/tmp/headserve.mjs'); process.exit(2); }
   const st = STATIONS.find((s) => s.id === LADDER_STATION);
   if (!st) { console.error(`no station ${LADDER_STATION}`); process.exit(2); }
+  takeOut('chars');
   const dir = join(OUT, 'chars');
   await mkdir(dir, { recursive: true });
   const meta = await buildMeta('chars', BASE, { station: LADDER_STATION, ss: SS, yaws: YAWS });
@@ -992,6 +1037,7 @@ async function modeDl() {
   if (!BASE) { console.error('PREVIEW_BASE unset — run under tools/tmp/headserve.mjs'); process.exit(2); }
   const only = get('--only', null);
   const jobs = only ? STATIONS.filter((s) => only.split(',').includes(s.id)) : STATIONS;
+  takeOut('dl');
   await mkdir(OUT, { recursive: true });
   const meta = await buildMeta('dl', BASE, { stations: jobs.map((s) => s.id), stationsTotal: STATIONS.length });
   // ── EVERY ROW IS DURABLE THE MOMENT IT IS MEASURED ───────────────────────
@@ -1108,6 +1154,7 @@ async function modeDl() {
 // ─────────────────────────────────────────────────────────────────────────────
 async function modeRef() {
   const targetH = Number(get('--targetH', 136));   // our fighter's measured on-screen height
+  takeOut('ref');
   const dir = join(OUT, 'ref');
   await mkdir(dir, { recursive: true });
   const rows = [];
@@ -1704,9 +1751,19 @@ async function modeGate() {
     }
     const doChars = !has('--recompute-dl-only');
     const doDl = !has('--recompute-chars-only');
+    // Claim BEFORE the first page boots. `modeChars`/`modeDl` claim too, and get `SELF` —
+    // this one exists so a collision costs a second rather than eleven page boots.
+    takeOut('gate');
     console.log(`\nRECOMPUTING into ${outDir} (chars:${doChars} dl:${doDl}) — the gate does not read a cache it cannot prove.\n`);
     if (doChars) await modeChars();
     if (doDl) await modeDl();
+  } else {
+    // READS ARE WARNED, NOT REFUSED. A read of a claimed directory cannot corrupt it: a
+    // torn read fails `JSON.parse`, a complete read from a different tree is caught by the
+    // `srcId` audit below, and a complete read from the SAME tree is the same measurement.
+    // Refusing here was written and dropped — it would have failed the one agent who was
+    // already doing the right thing, which is how a guard gets switched off.
+    warnIfClaimed(outDir, "the gate's input directory");
   }
 
   let chars; let dlFile;
@@ -1885,8 +1942,21 @@ async function modeGate() {
     dlRun: { runId: dlFile.__meta.runId, finishedAt: dlFile.__meta.finishedAt },
     gatedAt: new Date().toISOString(),
   };
-  await writeFile(join(OUT, 'gate.json'), JSON.stringify({ __meta: meta, gates: GATES, rows: out }, null, 2));
-  console.log(`\n${IDS.length - failing}/${IDS.length} pass · tree ${meta.srcId} · wrote ${OUT}/gate.json`);
+  // The VERDICT is already computed and is printed either way; only the artefact is
+  // conditional. Writing `gate.json` into a directory a live peer owns would overwrite
+  // their verdict with ours, and a `--reuse` reader is by definition not the owner.
+  const owner = readClaim(OUT);
+  const foreign = owner && owner !== 'CORRUPT' && owner.pid !== process.pid;
+  if (foreign) {
+    console.log(`\n${IDS.length - failing}/${IDS.length} pass · tree ${meta.srcId}`);
+    console.log(`  ⚠️ gate.json NOT written — ${OUT} is claimed by pid ${owner.pid} (${owner.tool} --mode ${owner.mode},`);
+    console.log(`     run ${owner.runId}). The verdict above stands; only the file was withheld, because`);
+    console.log('     overwriting their gate.json is exactly the clobber this claim exists to stop.');
+    console.log(`     Re-run with --out <a directory of your own> if you want the artefact.`);
+  } else {
+    await writeFile(join(OUT, 'gate.json'), JSON.stringify({ __meta: meta, gates: GATES, rows: out }, null, 2));
+    console.log(`\n${IDS.length - failing}/${IDS.length} pass · tree ${meta.srcId} · wrote ${OUT}/gate.json`);
+  }
   return failing ? 1 : 0;
 }
 
