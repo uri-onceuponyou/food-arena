@@ -26,7 +26,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **24** | Rarity vs level | — | ✅ **DONE — tier spread 20.7pp → 4.0pp, below the noise floor** | landed |
 | **26** | ⚠️ **Rarity now buys NOTHING and costs 4.5× to level** | genre-faithful default | **needs you — rarity has no job left** | one multiplier, or a kit pass |
 | **28** | 🆕 Hamburger's heal 25 → **18 HP**, after the measuring instrument was fixed | 18 | **measured to ±3 HP; the exact integer is a feel call.** ⚠️ And the constraint has moved off Hamburger onto **Legendary at the bottom** — the next balance pass is a Sushi pass | one constant |
-| **29** | 🆕 **Concealment is BUILT and inert.** Three calls before it ships | off | ⚠️ **(a) bush size is now an AI constraint — ~168wu max, big hero bushes are OFF** · **(b) hide the radar blip + HP bar, or it reads as broken** · (c) does attacking reveal you? | all cheap until patches ship |
+| **29** | 🆕 **Concealment is BUILT and inert.** Three calls before it ships | off | ⚠️ **(a) bush size is now an AI constraint — ~168wu max, big hero bushes are OFF — STILL OPEN, awaiting your read of the size screenshot** · (b) ✅ **DONE — fully hidden, verified on pixels** · (c) ✅ **DONE — attacking BREAKS the plate and reveals you for 500 ms (`f0e7aed`), and §35's projectile leak closed with it** | (a) is a re-layout once patches ship; (b)(c) landed |
 | **25** | ⚠️ **The 7+ bar is now calibrated** — the critic never scores shipped Brawl Stars above 9 | 7+ | **your bar is sound; the measurements under it were not** | — |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
 | **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
@@ -1524,6 +1524,14 @@ Genre norm — in Brawl Stars, firing from a bush exposes you. **Deferred delibe
 second rule with its own balance cost, and it cannot be measured until regions actually exist.
 Your call whether it ships with v1 or after.
 
+> ✅ **ANSWERED in §30 and now BUILT (`f0e7aed`).** *"attacking from under it will break it and
+> reveal you. You can also step out and attack."* Both halves shipped: the plate is **destroyed**
+> (a consumable, one ambush each — and it stops concealing the *opponent* too, because the object
+> broke), and the attacker is **exposed for 500 ms** so it cannot break a plate and vanish into the
+> next one in the same tick. Pressing the **heal** does neither — it is not an attack. Still inert;
+> the balance cost you were told about is still unmeasured, and stays unmeasured until §29a's
+> plates are placed.
+
 ### One number NOT to trust, and why I am telling you rather than quoting it
 
 A first placement measurement says the player would spend **1.51%** of its time concealed against
@@ -1900,6 +1908,17 @@ position anyway.**
 reveal you"*. If attacking reveals you, a visible projectile is honest. **But §29c is not
 implemented yet**, so right now we have the leak without the reveal, which is the worst of both.
 These two ship together or the feature is incoherent.
+
+> ✅ **CLOSED — §29c is implemented and they DID ship together (`f0e7aed`).** Attacking destroys
+> every standing plate the attacker is under and lights them for **500 ms**
+> (`CONCEAL_ATTACK_REVEAL_MS = FLIGHT_MS.normal` — one flight time of the game's workhorse
+> projectile, i.e. *long enough for the return shot to arrive*). A projectile therefore only ever
+> exists while its owner is exposed, so **the visible projectile is now honest and `vfx.ts` needed
+> no change at all** — hiding projectiles would now be the bug. Still inert: no arena declares a
+> region, and bit-identity held **exactly — 0 differing ticks in 3,283,873**.
+> **One case is NOT covered and is named in `vfx.ts`:** a shot can fly into a plate and hit a
+> fighter its shooter cannot see (concealment is not intangibility), and the impact burst draws at
+> the victim. It leaks only to the player who already landed the shot. Yours if you want it changed.
 
 ### One thing that needed no decision, but you should know it exists
 
