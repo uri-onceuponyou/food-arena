@@ -45,7 +45,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
-import { ChibiRig } from './rig';
+import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 // `localBounds`/`massAnchor` are gone with the two side tails they placed — the whole
@@ -305,79 +305,40 @@ class DiscCap {
  */
 
 /**
- * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
- * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
- * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
- * reference copy. Lollipop's own call sites pass radii noticeably SMALLER than
- * `size.radius` — she is a slender candy-on-a-stick character, and the rig's
- * default limb thickness read as far too stocky for that read.
+ * ── 🚨 LOLLIPOP HAD THE *MILD* HALF OF THE CAP BUG, AND THE RATIO TEST MISSES IT ──
+ * The `taperedSegment` COPY that used to sit here is gone; the function is imported
+ * from `rig.ts`, which carries the mechanism once for all six files that had it —
+ * this was one of the five copies donut's fix never reached. **What stays is what is
+ * true of LOLLIPOP.** Her call sites pass radii noticeably SMALLER than
+ * `size.radius`: she is a slender candy-on-a-stick character and the rig's default
+ * limb thickness read as far too stocky for that.
+ *
+ * The old body emitted a straight side only when `len >= rTop + rBot`, and when it
+ * did not it clamped with `yTopSafe = Math.max(...)` — which does not shrink the
+ * caps, it stacks two full hemispheres into a sphere that pokes above its own joint
+ * origin. `tools/tmp/cb_rig.mjs` prints the arithmetic. **On lollipop that branch
+ * never fires** — every bone here has ratio 0.64-0.74 — so the dramatic failure is
+ * not what this character had. What it had is the MILD half of the same bug: with
+ * caps of height `rBot` and `rTop` and a bone only ~1.35x their sum, the "straight
+ * side" is **11-26% of the bone** and the other 74-89% is two hemispheres. Rendered
+ * (`shots/cb/before/lollipop.png`) that is a ball, four to a limb, and Uri's
+ * *"limbs disattached or intersecting with the body"* names the result exactly.
+ *
+ * So the ball read has TWO causes and the ratio test only catches one. Bounding the
+ * caps by the BONE — 0.42/0.30 of `len`, sum 0.72 < 1 so a straight side always
+ * exists — catches both, and it is the same code either way.
+ *
+ * ── AND THE CAP FRACTIONS ARE ARGUMENTS, WHICH IS THE OTHER HALF OF THE FIX ──
+ * Bounding the caps by the bone still leaves every segment tapering to a POINT at
+ * both ends — the profile starts at `(0, -len)`, on the axis — so the limb pinches
+ * to zero width at every joint, and `outlineGroup` gives each segment its own ink
+ * hull, which traces the pinch. That is a bead whatever the albedo is.
+ * INTERIOR caps (the upper arm's bottom, the forearm's top, and the leg
+ * equivalents) abut a segment of the same radius and are never visible, so a
+ * caller passes ~0.05 for that end and the two lathes share a silhouette tangent.
+ * EXTERIOR caps (shoulder, wrist, hip, ankle) keep 0.30/0.42 and stay round —
+ * flattening THOSE is what turned donut's limbs into a stack of drink cans.
  */
-function taperedSegment(
-  len: number, rTop: number, rBot: number, radialSegments = 12,
-  capTopFrac = 0.30, capBotFrac = 0.42,
-): THREE.BufferGeometry {
-  // Profile MUST be wound bottom-to-top (y increasing), matching every other
-  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
-  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
-  // outward-vs-inward call) depends on point order, not just point position. An
-  // earlier version of this function built the profile top-to-bottom and every
-  // limb using it rendered near-black: inverted normals facing away from the
-  // light. The y=0/y=-len hang-down placement is unchanged.
-  //
-  // ── 🚨 THE CAPS WERE SIZED BY THE RADIUS AND NOT BY THE BONE ────────────────
-  // Taken VERBATIM from `donut.ts:145`, which derived it; six independent copies of
-  // this helper exist and donut's fix never reached the other five. Read that file
-  // for the full derivation. The short version, and the part that differs on THIS
-  // character, is worth stating because it is a DIFFERENT symptom of one bug:
-  //
-  // The old code emitted a straight side only when `len >= rTop + rBot`, and when it
-  // did not it clamped with `yTopSafe = Math.max(...)` — which does not shrink the
-  // caps, it stacks two full hemispheres into a sphere that pokes above its own joint
-  // origin. `tools/tmp/cb_rig.mjs` prints the arithmetic. **On lollipop that branch
-  // never fires** — every bone here has ratio 0.64-0.74 — so the dramatic failure is
-  // not what this character had. What it had is the MILD half of the same bug: with
-  // caps of height `rBot` and `rTop` and a bone only ~1.35x their sum, the "straight
-  // side" is **11-26% of the bone** and the other 74-89% is two hemispheres. Rendered
-  // (`shots/cb/before/lollipop.png`) that is a ball, four to a limb, and Uri's
-  // *"limbs disattached or intersecting with the body"* names the result exactly.
-  //
-  // So the ball read has TWO causes and the ratio test only catches one. Bounding the
-  // caps by the BONE — 0.42/0.30 of `len`, sum 0.72 < 1 so a straight side always
-  // exists — catches both, and it is the same code either way.
-  //
-  // ── AND THE CAP FRACTIONS ARE ARGUMENTS, WHICH IS THE OTHER HALF OF THE FIX ──
-  // Bounding the caps by the bone still leaves every segment tapering to a POINT at
-  // both ends — `pts` starts at `(0, -len)`, on the axis — so the limb pinches to
-  // zero width at every joint, and `outlineGroup` gives each segment its own ink
-  // hull, which traces the pinch. That is a bead whatever the albedo is.
-  // INTERIOR caps (the upper arm's bottom, the forearm's top, and the leg
-  // equivalents) abut a segment of the same radius and are never visible, so a
-  // caller passes ~0.05 for that end and the two lathes share a silhouette tangent.
-  // EXTERIOR caps (shoulder, wrist, hip, ankle) keep 0.30/0.42 and stay round —
-  // flattening THOSE is what turned donut's limbs into a stack of drink cans.
-  const capSegs = 6;
-  const capBot = Math.min(rBot, len * capBotFrac);
-  const capTop = Math.min(rTop, len * capTopFrac);
-  const yBotCap = -len + capBot;
-  const yTopCap = -capTop;
-  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
-  }
-  const sideSteps = 4;
-  for (let i = 1; i <= sideSteps; i++) {
-    const t = i / sideSteps;
-    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-  }
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
-  }
-  const geo = new THREE.LatheGeometry(pts, radialSegments);
-  geo.computeVertexNormals();
-  return geo;
-}
 
 /**
  * This character's own height, as a multiple of the cast's.
@@ -1017,7 +978,7 @@ export class LollipopCharacter extends BaseCharacter {
           // RIG's `armRadius` (0.124) while this call site built the segment at 0.66
           // of it (0.082). The arm was 0.042 m thinner than the arithmetic that
           // placed it, on a body 0.20 m wide, and that is most of the gap.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.95, size.radius * 0.80, 12, 0.30, 0.05), stickLimbMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.95, size.radius * 0.80, 12, { capTopFrac: 0.30, capBotFrac: 0.05 }), stickLimbMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -1035,9 +996,9 @@ export class LollipopCharacter extends BaseCharacter {
           const g = new THREE.Group();
           // Top radius matches the upper arm's bottom in METRES, not in multiplier:
           // 0.80 * 0.1240 = 0.0992 against 0.870 * 0.1140 = 0.0992. The rig gives the
-          // forearm a smaller base radius (`armRadius * 0.92`), so equal multipliers
-          // would put a step in the outline at the elbow.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.870, size.radius * 0.70, 12, 0.05, 0.30), forearmMat);
+          // forearm a smaller base radius (`metrics.forearmRadius`), so equal
+          // multipliers would put a step in the outline at the elbow.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.870, size.radius * 0.70, 12, { capTopFrac: 0.05, capBotFrac: 0.30 }), forearmMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -1062,7 +1023,7 @@ export class LollipopCharacter extends BaseCharacter {
           return g;
         }
         case 'thighL': case 'thighR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.10, size.radius * 0.92, 12, 0.30, 0.05), legMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.10, size.radius * 0.92, 12, { capTopFrac: 0.30, capBotFrac: 0.05 }), legMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -1070,7 +1031,7 @@ export class LollipopCharacter extends BaseCharacter {
         }
         case 'shinL': case 'shinR': {
           // 0.92 * 0.1160 = 0.1067 against 1.022 * 0.1044 = 0.1067.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.022, size.radius * 0.84, 12, 0.05, 0.34), legDeepMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.022, size.radius * 0.84, 12, { capTopFrac: 0.05, capBotFrac: 0.34 }), legDeepMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;

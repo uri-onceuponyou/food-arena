@@ -57,7 +57,7 @@ import type { AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox, RAMP_CHARACTER, OUTLINE_THIN } from '../render/toon';
-import { ChibiRig } from './rig';
+import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as leafBlade, knob, localBounds, massAnchor, rod } from './appendages';
@@ -354,29 +354,29 @@ function curvedPanel(radius: number, arcRad: number, height: number, segX = 14, 
 }
 
 /**
- * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
- * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
- * `dressLimbs()` expects. Used so Hamburger's limbs read as tapered dough rather
- * than the rig's uniform-radius default capsule.
- *
- * ⚠️ THE OLD DOC LINE HERE READ *"Degenerates to a plain sphere when
- * rTop==rBot==len/2, which is exactly what the hand slot wants"*, AND IT IS KEPT
- * ABOVE THIS BECAUSE IT WAS THE BUG. That degeneration was described as a feature
- * for a slot this function is not used for, and it is what turned all four of this
- * character's limb segments into balls. It cannot happen any more — see below.
- */
-/**
  * ── 🚨 THE ARM WAS A CHAIN OF BALLS, AND IT IS ARITHMETIC, NOT TASTE ─────────
+ * The `taperedSegment` COPY that used to sit here is gone; the function is now
+ * imported from `rig.ts`, which carries the mechanism (bone-bounded caps, profile
+ * winding, the interior/exterior cap rule) once for all six files that had it.
+ * **What stays here is what is true of HAMBURGER and of no other character**, and it
+ * is the reason the four `rise` arguments below are the values they are.
+ *
+ * ⚠️ THE ORIGINAL DOC LINE READ *"Degenerates to a plain sphere when
+ * rTop==rBot==len/2, which is exactly what the hand slot wants"*, AND IT IS KEPT
+ * BECAUSE IT WAS THE BUG. That degeneration was described as a feature for a slot
+ * this function is not used for, and it is what turned all four of this character's
+ * limb segments into balls.
+ *
  * Found by eye at the shipped lobby camera (`shots/cx/before/hamburger.png`,
- * `charStage.ts:451`, pitch 20): each arm reads as **three separate orange balls**
- * — an orange lump, a dark lump, another orange lump — and each leg does the same.
+ * `charStage.ts:451`, pitch 20): each arm read as **three separate orange balls**
+ * — an orange lump, a dark lump, another orange lump — and each leg did the same.
  * A blind critic scored this character 4.0 against a reference 8-9 and **the number
  * contains none of this**, because no instrument in the repo counts limb segments.
  *
- * The cause is one inequality. This function only emits a cylindrical SIDE when
- * `yTopCap >= yBotCap`, i.e. when `len >= rTop + rBot`; below that it collapses to
- * two hemispheres sharing an equator — a ball. Hamburger's four segment types, on
- * the numbers the file actually passes:
+ * The cause is one inequality: a cylindrical SIDE only exists when
+ * `yTopCap >= yBotCap`, i.e. when `len >= rTop + rBot`; below that the profile
+ * collapses to two hemispheres sharing an equator — a ball. Hamburger's four segment
+ * types, on the numbers this file actually passes:
  *
  *   segment      len      rTop+rBot   side?
  *   upper arm   0.2412     0.3554     NO   -> ball
@@ -385,74 +385,22 @@ function curvedPanel(radius: number, arcRad: number, height: number, segX = 14, 
  *   shin        0.2201     0.2245     NO   -> ball
  *
  * **All four. Every limb on this character was a sphere.** And it is a rediscovery,
- * not a new bug: `rig.ts:982` and `bodies.ts:80` both record `CapsuleGeometry`
+ * not a new bug: `rig.ts` and `bodies.ts:80` both record `CapsuleGeometry`
  * degenerating to a sphere at `len < 2r` and the archetype pass that fixed it —
  * `bodies.ts:88` even says in capitals that **the ARM row has the same defect and
- * has not been fixed**. This function is hamburger's own private re-entry into the
- * same trap: it was written to replace those capsules and reproduced their failure
- * mode with `1.2x` radii, which are FATTER than the rig defaults it replaced.
+ * has not been fixed**. This file's private copy was hamburger's own re-entry into
+ * the same trap: written to replace those capsules, it reproduced their failure mode
+ * with `1.2x` radii, which are FATTER than the rig defaults it replaced.
+ * **A private copy is how a fix fails to travel — donut derived the cap bound and it
+ * never reached the other five.** That is why there is one function now.
  *
- * Two changes, and neither can affect a segment that was already well-formed:
- *
- *  1. The caps are bounded by the BONE rather than by the radius, so a straight
- *     tapered side always exists. This is donut's fix, copied — see below.
- *  2. `rise` — how far the top cap reaches ABOVE the joint. The default 0 is the old
- *     behaviour exactly. It exists for the OTHER half of Uri's reject (§37 #1,
- *     *"the legs are disconnected from the body"*): a segment whose apex is at the
- *     joint butts the mass above it and draws its own closed contour there, and two
- *     closed contours touching is what "detached" looks like. A segment that starts
- *     INSIDE the mass has no contour of its own until it emerges from under it.
+ * `rise` — how far the top cap reaches ABOVE the joint — is the OTHER half of Uri's
+ * reject (§37 #1, *"the legs are disconnected from the body"*): a segment whose apex
+ * is at the joint butts the mass above it and draws its own closed contour there, and
+ * two closed contours touching is what "detached" looks like. A segment that starts
+ * INSIDE the mass has no contour of its own until it emerges from under it.
+ * The default `rise: 0` is the pre-fix behaviour exactly.
  */
-function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12, rise = 0): THREE.BufferGeometry {
-  // Profile MUST be wound bottom-to-top (y increasing), matching the convention
-  // every other lathe helper in this file (`roundedPuck`, `bunDome`) already
-  // uses — LatheGeometry's face winding (and therefore `computeVertexNormals`'s
-  // outward-vs-inward call) depends on point order, not just point position. An
-  // earlier version of this function built the profile top-to-bottom for
-  // convenience (it "hangs down", so starting at the joint origin felt natural)
-  // and every limb using it rendered near-black: inverted normals facing away
-  // from the light. Built the shape the same way round now; the y=0/y=-len
-  // hang-down placement is unchanged.
-  // ── THE CAPS ARE BOUNDED BY THE BONE, NOT BY THE RADIUS ─────────────────────
-  // Lifted verbatim from `donut.ts:194`, which solved this exact defect on that
-  // character — Uri's *"limbs disattached or intersecting with the body"*, rendered
-  // as *"four separate balls per side… like a bead necklace"* — and never
-  // propagated to the five other copies of this function. It is the RIGHT fix and
-  // not the obvious one: shrinking the radii until they fit would also have worked
-  // and would have cost STOUT the limb thickness that IS its archetype. Clamping
-  // the cap HEIGHTS instead keeps every limb exactly as wide as it was and buys the
-  // straight side out of the segment's vertical budget, where there is slack.
-  //
-  // `0.42 / 0.30` sum to 0.72 < 1, so a side always exists. Donut's note records
-  // `0.18 / 0.14` being tried and reverted — it removes the waist at the joints and
-  // turns every segment into a flat-ended cylinder ("a stack of drink cans"), and
-  // it cost a value rung because a rounded limb's own shading gradient is one of the
-  // plateaus `valuescan` counts. 6 cap segments / 4 side steps for the same reason
-  // it gives: a 5/3 lathe puts a shading corner where `computeVertexNormals` has to
-  // guess, and it renders faceted.
-  const capSegs = 6;
-  const capBot = Math.min(rBot, len * 0.42);
-  const capTop = Math.min(rTop, (len + rise) * 0.30);
-  const yBotCap = -len + capBot;
-  const yTopCap = rise - capTop;
-  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
-  }
-  const sideSteps = 4;
-  for (let i = 1; i <= sideSteps; i++) {
-    const t = i / sideSteps;
-    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-  }
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
-  }
-  const geo = new THREE.LatheGeometry(pts, radialSegments);
-  geo.computeVertexNormals();
-  return geo;
-}
 
 /**
  * This character's own height, as a multiple of the cast's.
@@ -1448,7 +1396,7 @@ export class HamburgerCharacter extends BaseCharacter {
           // — the arm's widest point is 1.08 * 0.1785 = 0.193 m and its elbow is
           // 0.118 m, against a thigh at 0.208 m and a shin at 0.154 m, so the leg is
           // 30% thicker where both pairs are simply columns and the eye compares them.
-          const geo = taperedSegment(size.len, size.radius * 1.08, size.radius * 0.70, 20, size.len * 0.32);
+          const geo = taperedSegment(size.len, size.radius * 1.08, size.radius * 0.70, 20, { rise: size.len * 0.32 });
           const m = new THREE.Mesh(geo, limbMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -1487,7 +1435,7 @@ export class HamburgerCharacter extends BaseCharacter {
           // 1.2/0.84 -> 1.34/1.10. The thigh keeps its width all the way to the knee
           // instead of tapering like the arm above; see the upper-arm case for the
           // arm/leg separation this is one half of.
-          const geo = taperedSegment(size.len, size.radius * 1.34, size.radius * 1.10, 20, size.len * 0.34);
+          const geo = taperedSegment(size.len, size.radius * 1.34, size.radius * 1.10, 20, { rise: size.len * 0.34 });
           const m = new THREE.Mesh(geo, thighMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -1505,7 +1453,7 @@ export class HamburgerCharacter extends BaseCharacter {
           // at a point (donut's recorded "waist"), and 0.12 of the bone is enough for
           // the lower segment's shoulder to sit inside the upper one's skirt without
           // widening either.
-          const geo = taperedSegment(size.len, size.radius * 0.72, size.radius * 0.54, 20, size.len * 0.12);
+          const geo = taperedSegment(size.len, size.radius * 0.72, size.radius * 0.54, 20, { rise: size.len * 0.12 });
           const m = new THREE.Mesh(geo, limbDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -1513,7 +1461,7 @@ export class HamburgerCharacter extends BaseCharacter {
           return m;
         }
         case 'shinL': case 'shinR': {
-          const geo = taperedSegment(size.len, size.radius * 1.10, size.radius * 0.88, 20, size.len * 0.12);
+          const geo = taperedSegment(size.len, size.radius * 1.10, size.radius * 0.88, 20, { rise: size.len * 0.12 });
           const m = new THREE.Mesh(geo, limbDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;

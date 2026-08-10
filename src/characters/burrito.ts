@@ -75,7 +75,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
-import { ChibiRig } from './rig';
+import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as peelBlade, localBounds, massAnchor } from './appendages';
@@ -205,77 +205,37 @@ const LIMB_AVOCADO_LIGHT = '#5E8430';  // upper arm — fresh guac, luma 0.462
 type Spot = readonly [angleDeg: number, radiusFrac: number];
 
 /**
- * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
- * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
- * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
- * reference copy. Burrito's own call sites keep top/bottom radii close together
- * — a rolled tortilla is close to a true cylinder, not a tapered dough limb.
+ * ── BURRITO'S OWN `taperedSegment` NOTE — the copy is gone, the finding is not ──
+ * The `taperedSegment` COPY that used to sit here is gone; the function is imported
+ * from `rig.ts`, which carries the mechanism (bone-bounded caps, profile winding,
+ * interior/exterior caps) once for all six files that had it. Burrito's call sites
+ * keep top/bottom radii close together — a rolled tortilla is close to a true
+ * cylinder, not a tapered dough limb.
+ *
+ * ⚠️ THE CAP BUG NEVER FIRED ON THIS CHARACTER, and that is worth keeping. Measured
+ * on LANKY's own numbers at `H = 2.0496` — the archetype `bodies.ts` calls "the one
+ * that was already right", i.e. the only one whose segments are longer than thick:
+ *
+ *   segment      len       rTop+rBot   side?
+ *   upper arm   0.3216      0.1681     yes
+ *   forearm     0.2933      0.1448     yes
+ *   thigh       0.3354      0.1807     yes
+ *   shin        0.2744      0.1523     yes
+ *
+ * **Four for four, and the clamps are all inactive** (`len * 0.42` and `len * 0.30`
+ * both exceed the radii), so the cap fix was a no-op on burrito's delivered geometry
+ * and so is this migration.
+ *
+ * 🚨 SO THE BEAD-CHAIN READ ON THIS CHARACTER IS **NOT** THIS FUNCTION, AND SAYING
+ * IT WAS WOULD HAVE CLOSED THE WRONG BUG. `shots/ca/before/burrito.png` shows four
+ * chains of green pills separated by fat crimson rings; the rings are the
+ * `WRAP_BAND` cuff torus that `dressLimbs` hangs at the TOP of every forearm and
+ * shin — a joint-height band on a two-segment chain is a bead separator by
+ * construction. That is fixed where it lives, in the call sites below.
+ *
+ * `rise` extends the mesh ABOVE its own joint origin so a top segment can start
+ * inside the mass it hangs from.
  */
-function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12, rise = 0): THREE.BufferGeometry {
-  // Profile MUST be wound bottom-to-top (y increasing), matching every other
-  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
-  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
-  // outward-vs-inward call) depends on point order, not just point position. An
-  // earlier version of this function built the profile top-to-bottom and every
-  // limb using it rendered near-black: inverted normals facing away from the
-  // light. The y=0/y=-len hang-down placement is unchanged.
-  //
-  // ── THE CAPS ARE BOUNDED BY THE BONE, NOT BY THE RADIUS ─────────────────────
-  // Taken from `donut.ts:145` via `hamburger.ts:334`, the two copies that already
-  // carry it. The old body emitted a straight side only when `len >= rTop + rBot`
-  // and otherwise stacked two full hemispheres, producing a sphere wider than the
-  // bone whose top cap reached above its own joint origin.
-  //
-  // ⚠️ AND ON THIS CHARACTER THAT BRANCH NEVER FIRED. Measured on LANKY's own
-  // numbers at `H = 2.0496` — the archetype `bodies.ts` calls "the one that was
-  // already right", i.e. the only one whose segments are longer than they are thick:
-  //
-  //   segment      len       rTop+rBot   side?
-  //   upper arm   0.3216      0.1681     yes
-  //   forearm     0.2933      0.1448     yes
-  //   thigh       0.3354      0.1807     yes
-  //   shin        0.2744      0.1523     yes
-  //
-  // **Four for four, and the clamps are all inactive** (`len * 0.42` and `len * 0.30`
-  // both exceed the radii), so this is a no-op on burrito's delivered geometry today
-  // and the render before and after is expected to be identical here. It is taken
-  // anyway for two reasons that are not cosmetic: the sixth copy of a function with a
-  // known defect is a defect whoever next re-tunes these radii will walk into, and the
-  // resolution bump (6 cap segments / 4 side steps against 5/3) removes the shading
-  // corner donut measured `computeVertexNormals` guessing at.
-  //
-  // 🚨 SO THE BEAD-CHAIN READ ON THIS CHARACTER IS **NOT** THIS FUNCTION, AND SAYING
-  // IT WAS WOULD HAVE CLOSED THE WRONG BUG. `shots/ca/before/burrito.png` shows four
-  // chains of green pills separated by fat crimson rings; the rings are the
-  // `WRAP_BAND` cuff torus that `dressLimbs` hangs at the TOP of every forearm and
-  // shin — a joint-height band on a two-segment chain is a bead separator by
-  // construction. That is fixed where it lives, in the call sites below.
-  //
-  // `rise` (hamburger's parameter, same meaning) extends the mesh ABOVE its own joint
-  // origin so a top segment can start inside the mass it hangs from.
-  const capSegs = 6;
-  const capBot = Math.min(rBot, len * 0.42);
-  const capTop = Math.min(rTop, (len + rise) * 0.30);
-  const yBotCap = -len + capBot;
-  const yTopCap = rise - capTop;
-  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
-  }
-  const sideSteps = 4;
-  for (let i = 1; i <= sideSteps; i++) {
-    const t = i / sideSteps;
-    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-  }
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
-  }
-  const geo = new THREE.LatheGeometry(pts, radialSegments);
-  geo.computeVertexNormals();
-  return geo;
-}
 
 /**
  * A group sitting flush on the wrap's TRUE surface, with local **+Z along the outward
@@ -930,8 +890,8 @@ export class BurritoCharacter extends BaseCharacter {
     // `WRAP_BAND` cuffs sat at the TOP of every forearm and shin, i.e. at the elbow
     // and at the knee. A saturated ring at the joint of a two-segment chain does not
     // decorate the chain, it CUTS it — which is the bead-necklace read that
-    // `taperedSegment` above is usually blamed for and which, on this character, that
-    // function is measurably not causing. Each band moves to a TERMINAL: the arm's to
+    // `taperedSegment` is usually blamed for and which, on this character, that
+    // function is measurably not causing (see the note at the top of this file). Each band moves to a TERMINAL: the arm's to
     // the wrist (where it is a glove cuff and an arm-only feature — a leg has no
     // wrist) and the leg's is deleted, because the boot already terminates the leg.
     const limbLightMat = toonMat({ color: LIMB_AVOCADO_LIGHT, roughness: 0.75 });
@@ -958,7 +918,7 @@ export class BurritoCharacter extends BaseCharacter {
           // other half of the detached-arm repair whose first half is the shoulder
           // swell in `dressTorso`.
           const m = new THREE.Mesh(
-            taperedSegment(size.len, size.radius * 0.94, size.radius * 0.82, 12, size.len * 0.30),
+            taperedSegment(size.len, size.radius * 0.94, size.radius * 0.82, 12, { rise: size.len * 0.30 }),
             limbLightMat,
           );
           m.name = `${part}_mesh`;
@@ -969,7 +929,7 @@ export class BurritoCharacter extends BaseCharacter {
         case 'thighL': case 'thighR': {
           const g = new THREE.Group();
           const m = new THREE.Mesh(
-            taperedSegment(size.len, size.radius * 1.14, size.radius * 1.00, 12, size.len * 0.30),
+            taperedSegment(size.len, size.radius * 1.14, size.radius * 1.00, 12, { rise: size.len * 0.30 }),
             limbWrapMat,
           );
           m.name = `${part}_mesh`;
@@ -990,7 +950,7 @@ export class BurritoCharacter extends BaseCharacter {
           // a step. Two constant-radius tubes at different constants cannot meet —
           // `soup.ts` records the same finding on its own arm chain.
           const m = new THREE.Mesh(
-            taperedSegment(size.len, size.radius * 0.89, size.radius * 0.76, 12, size.len * 0.16),
+            taperedSegment(size.len, size.radius * 0.89, size.radius * 0.76, 12, { rise: size.len * 0.16 }),
             limbWrapMat,
           );
           m.name = `${part}_mesh`;
@@ -999,10 +959,11 @@ export class BurritoCharacter extends BaseCharacter {
           return m;
         }
         case 'shinL': case 'shinR': {
-          // Same continuity rule at the knee: `legRadius * 0.9 * 1.11` is the thigh's
-          // own bottom radius to within 0.1%.
+          // Same continuity rule at the knee: `metrics.shinRadius * 1.11` is the
+          // thigh's own bottom radius to within 0.1%. (`shinRadius` is the published
+          // `legRadius * 0.9`; read the metric rather than re-typing the product.)
           const m = new THREE.Mesh(
-            taperedSegment(size.len, size.radius * 1.11, size.radius * 0.95, 12, size.len * 0.16),
+            taperedSegment(size.len, size.radius * 1.11, size.radius * 0.95, 12, { rise: size.len * 0.16 }),
             limbWrapShadeMat,
           );
           m.name = `${part}_mesh`;
@@ -1020,7 +981,15 @@ export class BurritoCharacter extends BaseCharacter {
           // ⚠️ Sized off the FOREARM, not off `handRadius`. `dressLimbs` hands this
           // slot the rig's independent `handRadius` constant; on LANKY that is
           // 0.123 m, 2.1x the forearm's own tip.
-          const tipR = this.rig.metrics.armRadius * 0.92 * 0.76;
+          // ⚠️ This line used to RE-TYPE the derivation as `armRadius * 0.92 * 0.76`.
+          // Identical arithmetic, and that is exactly the trap: `0.92` is the rig's
+          // number, not this file's, and this same file already proved what a re-typed
+          // derived constant costs — its `R = 0.20H` (see the head note above) ignored
+          // that `rig.ts` subtracts the neck gap before halving, was 17.5% out, and
+          // FOUR ROUNDS of shoulder tuning inherited it. `metrics.forearmRadius` is the
+          // SAME value `limbSlots()` builds the forearm at, published so there is
+          // nothing left to re-type.
+          const tipR = this.rig.metrics.forearmRadius * 0.76;
           const mitt = new THREE.Mesh(new THREE.SphereGeometry(tipR * 1.70, 16, 12), mittMatLimb);
           mitt.position.y = -tipR * 1.30;
           mitt.scale.set(1, 0.96, 0.86);

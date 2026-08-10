@@ -54,7 +54,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
-import { ChibiRig } from './rig';
+import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as leafBlade, localBounds, massAnchor } from './appendages';
@@ -348,80 +348,44 @@ function tacoShellShape(halfW: number, yBot: number, yTop: number, dipFrac: numb
 }
 
 /**
- * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
- * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
- * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
- * reference copy. Taco's own call sites use a low `radialSegments` and a
- * flattened Z scale so the limb reads as a faceted, crunchy shell shard rather
- * than the smooth rubbery capsule every other character in the cast would get
- * from the same helper at default settings.
+ * ── 🚨 THREE OF TACO'S FOUR SEGMENTS WERE SPHERES, AND THE FOURTH WAS CLOSE ──
+ * The `taperedSegment` COPY that used to sit here is gone; the function is imported
+ * from `rig.ts`, which carries the mechanism once for all six files that had it.
+ * **What stays is what is true of TACO** and explains the four call sites below.
+ *
+ * The old body emitted a straight side only when `len >= rTop + rBot`; below that it
+ * SKIPPED the side and clamped with `yTopSafe = max(...)`, which does not shrink the
+ * caps — it stacks two full hemispheres. Taco's own numbers, measured off `bodies.ts`'s
+ * STOUT at `CHARACTER_HEIGHT` 2.1 and the radii the call sites used to pass:
+ *
+ *   segment      len       rTop+rBot   side?
+ *   upper arm   0.1922      0.3302     NO -> ball, top cap 0.138 m ABOVE its pivot
+ *   forearm     0.1753      0.2299     NO -> ball
+ *   thigh       0.2757      0.2875     NO -> ball
+ *   shin        0.2256      0.1958     yes (the only one)
+ *
+ * "0.138 m above its own joint origin" is the whole defect: the upper arm's mesh
+ * pokes 72% of its own bone length UP through the shoulder, and the thigh does the
+ * same through the hip, so a chain of segments interpenetrates instead of abutting
+ * and reads as a string of beads. `shots/ca/before/taco.png` at the lobby camera:
+ * four indistinguishable chains of orange-and-black balls.
+ *
+ * The fix — donut's, which took weeks to travel because it lived in a COPY — bounds
+ * each cap by the BONE rather than by the radius. ⚠️ The call sites' radii below were
+ * re-tuned when it landed, because bounding the caps changes the delivered silhouette
+ * and the old radii were chosen against the broken shape.
+ *
+ * `rise` extends the mesh ABOVE its own joint origin, so a segment can start INSIDE
+ * the mass it hangs from and have no contour of its own until it emerges. On STOUT
+ * that is not a nicety: even with the caps bounded, taco's bones are 1.3-1.5x as wide
+ * as they are long, so two segments that merely ABUT meet through a double taper and
+ * leave a waist at every joint — the same bead read from the other end. Overlapping
+ * them removes the waist.
+ *
+ * Taco's call sites also use a LOW `radialSegments` (8) and a flattened Z scale, so
+ * the limb reads as a faceted, crunchy shell shard rather than the smooth rubbery
+ * capsule the same helper gives every other character at default settings.
  */
-function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12, rise = 0): THREE.BufferGeometry {
-  // Profile MUST be wound bottom-to-top (y increasing), matching every other
-  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
-  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
-  // outward-vs-inward call) depends on point order, not just point position. An
-  // earlier version of this function built the profile top-to-bottom and every
-  // limb using it rendered near-black: inverted normals facing away from the
-  // light. The y=0/y=-len hang-down placement is unchanged.
-  //
-  // ── 🚨 THREE OF TACO'S FOUR SEGMENTS WERE SPHERES, AND THE FOURTH WAS CLOSE ──
-  // Taken verbatim from `donut.ts:145`, which solved this and never propagated to
-  // the other five copies of this helper. The old code emitted a straight side only
-  // when `len >= rTop + rBot`; below that it SKIPPED the side and clamped with
-  // `yTopSafe = max(...)`, which does not shrink the caps — it stacks two full
-  // hemispheres. Taco's own numbers, measured off `bodies.ts`'s STOUT at
-  // `CHARACTER_HEIGHT` 2.1 and the radii the call sites below used to pass:
-  //
-  //   segment      len       rTop+rBot   side?
-  //   upper arm   0.1922      0.3302     NO -> ball, top cap 0.138 m ABOVE its pivot
-  //   forearm     0.1753      0.2299     NO -> ball
-  //   thigh       0.2757      0.2875     NO -> ball
-  //   shin        0.2256      0.1958     yes (the only one)
-  //
-  // "0.138 m above its own joint origin" is the whole defect: the upper arm's mesh
-  // pokes 72% of its own bone length UP through the shoulder, and the thigh does the
-  // same through the hip, so a chain of segments interpenetrates instead of abutting
-  // and reads as a string of beads. `shots/ca/before/taco.png` at the lobby camera:
-  // four indistinguishable chains of orange-and-black balls.
-  //
-  // The fix bounds each cap by the BONE rather than by the radius — cap HEIGHTS
-  // clamp to 0.42/0.30 of `len` (sum 0.72 < 1, so a straight side always exists)
-  // while cap WIDTH stays `rBot`/`rTop`. The mesh then spans exactly y in [-len, 0]
-  // and can never overlap its parent segment. Resolution follows donut's measured
-  // choice (6 cap segments, 4 side steps) rather than the 4/3 that was here: a
-  // coarser lathe puts a shading corner where `computeVertexNormals` has to guess.
-  // ⚠️ The call sites' radii are re-tuned below, because bounding the caps changes
-  // the delivered silhouette and the old radii were chosen against the broken shape.
-  // `rise` (hamburger's parameter, same meaning) extends the mesh ABOVE its own joint
-  // origin, so a segment can start INSIDE the mass it hangs from and have no contour
-  // of its own until it emerges. On STOUT that is not a nicety: even with the caps
-  // bounded, taco's bones are 1.3-1.5x as wide as they are long, so two segments that
-  // merely ABUT meet through a double taper and leave a waist at every joint — which
-  // is the same bead read from the other end. Overlapping them removes the waist.
-  const capSegs = 6;
-  const capBot = Math.min(rBot, len * 0.42);
-  const capTop = Math.min(rTop, (len + rise) * 0.30);
-  const yBotCap = -len + capBot;
-  const yTopCap = rise - capTop;
-  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
-  }
-  const sideSteps = 4;
-  for (let i = 1; i <= sideSteps; i++) {
-    const t = i / sideSteps;
-    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-  }
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
-  }
-  const geo = new THREE.LatheGeometry(pts, radialSegments);
-  geo.computeVertexNormals();
-  return geo;
-}
 
 export class TacoCharacter extends BaseCharacter {
   private rig: ChibiRig;
@@ -1186,8 +1150,9 @@ export class TacoCharacter extends BaseCharacter {
     //          and wide, on the floor.
     //
     // ⚠️ The old radii (1.05/0.8 and 0.8/0.6 of the slot radius) were tuned against
-    // the BROKEN `taperedSegment` above, where the shape that came out was a sphere
-    // of `max(rTop, rBot)` regardless — so they are not a baseline worth preserving.
+    // the BROKEN `taperedSegment` (see the note at the top of this file), where the
+    // shape that came out was a sphere of `max(rTop, rBot)` regardless — so they are
+    // not a baseline worth preserving.
     const limbShellMat = toonMat({ color: LIMB_SHELL, roughness: 0.78 });
     const limbShellDarkMat = toonMat({ color: LIMB_SHELL_DARK, roughness: 0.78 });
     const bootMat = toonMat({ color: BOOT_CHAR, roughness: 0.8 });
@@ -1204,7 +1169,7 @@ export class TacoCharacter extends BaseCharacter {
     this.rig.dressLimbs((part, size) => {
       switch (part) {
         case 'upperArmL': case 'upperArmR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.72, size.radius * 0.58, 8, size.len * 0.30), limbShellMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.72, size.radius * 0.58, 8, { rise: size.len * 0.30 }), limbShellMat);
           m.scale.z = 0.72;
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -1212,7 +1177,7 @@ export class TacoCharacter extends BaseCharacter {
           return m;
         }
         case 'thighL': case 'thighR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.06, size.radius * 0.86, 8, size.len * 0.30), limbShellMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.06, size.radius * 0.86, 8, { rise: size.len * 0.30 }), limbShellMat);
           m.scale.z = 0.72;
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -1220,7 +1185,7 @@ export class TacoCharacter extends BaseCharacter {
           return m;
         }
         case 'forearmL': case 'forearmR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.58, size.radius * 0.46, 8, size.len * 0.22), limbShellDarkMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.58, size.radius * 0.46, 8, { rise: size.len * 0.22 }), limbShellDarkMat);
           m.scale.z = 0.72;
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -1228,7 +1193,7 @@ export class TacoCharacter extends BaseCharacter {
           return m;
         }
         case 'shinL': case 'shinR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.86, size.radius * 0.70, 8, size.len * 0.22), limbShellDarkMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.86, size.radius * 0.70, 8, { rise: size.len * 0.22 }), limbShellDarkMat);
           m.scale.z = 0.72;
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -1253,7 +1218,12 @@ export class TacoCharacter extends BaseCharacter {
           // an independent rig constant (0.095H = 0.1995 m here) that has nothing to
           // do with the arm it terminates — sizing off it is how the old icosahedron
           // ended up 0.367 m across, wider than the whole forearm is long.
-          const tipR = this.rig.metrics.armRadius * 0.92 * 0.46;
+          // ⚠️ This line used to RE-TYPE the derivation as `armRadius * 0.92 * 0.46`.
+          // Identical arithmetic, and that is exactly the trap: `0.92` is the rig's
+          // number, not this file's, and a copy of it here goes stale silently the day
+          // the rig changes it. `metrics.forearmRadius` is the SAME value `limbSlots()`
+          // builds the forearm at, published so there is nothing left to re-type.
+          const tipR = this.rig.metrics.forearmRadius * 0.46;
           const mitt = new THREE.Mesh(new THREE.SphereGeometry(tipR * 1.62, 16, 12), mittMat);
           mitt.position.y = -tipR * 1.25;
           mitt.scale.set(1, 0.94, 0.82);

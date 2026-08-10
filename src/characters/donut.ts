@@ -19,7 +19,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
-import { ChibiRig } from './rig';
+import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, curl, knob, localBounds, massAnchor } from './appendages';
@@ -148,142 +148,109 @@ const TONGUE = '#F2758F';
 const SPRINKLE_COLORS = ['#E63946', '#7CB518', '#FFC93C', '#7C4DFF', '#2E86D8', '#FFFFFF'];
 
 /**
- * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
- * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
- * `dressLimbs()` expects. Local to this file per the same pattern as `dressTorso`
- * above; see `hamburger.ts` for the reference copy of this helper. Donut's own
- * radii stay close together (soft dough barely tapers) rather than the aggressive
- * wedge every other character in this file gives it, which is the point: a cast
- * that shares a helper but tunes it per-character reads as one family, not one mould.
+ * ── 🚨 DONUT IS WHERE THE `taperedSegment` CAP FIX WAS DERIVED ───────────────
+ * The COPY that used to sit here is gone; the function is imported from `rig.ts`.
+ * **The record below is kept in full and deliberately**: this file is the primary
+ * source for the fix, it contains a reversed assertion CLAUDE.md requires be kept
+ * with its correction, and — the whole reason there is one function now — *"the fix
+ * never reached the other five"*, which is why the bead necklace survived weeks.
+ * **The knowledge was written down, correct, and in the repo while the FUNCTION was
+ * duplicated. A comment cannot propagate a fix; a symbol can.**
+ *
+ * Donut's own radii stay close together (soft dough barely tapers) rather than the
+ * aggressive wedge the rest of the cast gives it, which is the point: a cast that
+ * shares a helper but tunes it per-character reads as one family, not one mould.
+ *
+ * ── 🚨 THE CAPS WERE SPHERICAL AND UNBOUNDED, AND THAT IS WHY THE LIMBS READ ──
+ * ── AS A STRING OF BEADS ────────────────────────────────────────────────────
+ * Uri, on the lobby render: *"limbs disattached or intersecting with the body
+ * that causes weird shapes."* Rendered and looked at (non-negotiable #3), Donut's
+ * arms and legs were not limbs at all — four separate balls per side, alternating
+ * pink / dark berry, hanging beside the ring like a bead necklace.
+ *
+ * The mechanism is arithmetic, not taste. On STUB the bones are SHORT:
+ * `upperArmLength` 0.209 m, `thighLength` 0.208 m, `shinLength` 0.170 m — while
+ * the radii this file passed in were `radius * 1.16` and `radius * 1.0`, i.e.
+ * 0.151 + 0.130 = **0.281 m of cap on a 0.209 m bone**. The old code detected
+ * that (`if (yTopCap >= yBotCap)`), SKIPPED the straight side, and then clamped
+ * with `yTopSafe = max(...)` — which does not shrink the caps, it just stacks two
+ * full hemispheres on top of each other. The result is a sphere ~0.30 m across on
+ * a 0.209 m bone, whose top cap reaches **0.072 m ABOVE its own joint origin**, so
+ * each segment also pokes up through the segment above it. Four of those in a
+ * chain, in two alternating values, is a bead necklace by construction.
+ *
+ * ── ⚠️ THE CLAIM THAT USED TO CLOSE THIS PARAGRAPH WAS FALSE. IT READ: ───────
+ *
+ *   > "…which turned the bead necklace into limbs."
+ *
+ * It did not. It is kept per CLAUDE.md's rule on reversed assertions, because the
+ * mistake is more useful than the sentence: **the fix was correct, it was correctly
+ * measured, and the defect it was claimed to close was still there in the very next
+ * render.** Rendered at the lobby camera on the committed tree
+ * (`shots/cb/before/donut.png`, pitch 20 — the camera Uri judges), donut was four
+ * chains of alternating pink and berry lumps hanging off a ring.
+ *
+ * The bead had THREE causes and that fix addressed one of them:
+ *   1. caps sized by RADIUS instead of by BONE — fixed, genuinely;
+ *   2. every segment tapering to a POINT at both ends, so the limb pinches to zero
+ *      width at every joint and the ink hull traces the pinch — see the interior/
+ *      exterior cap note below, which is the fix for that;
+ *   3. the ALTERNATING VALUE between adjacent segments, which puts a different
+ *      colour inside each of those traced contours and confirms the read.
+ * Fixing (1) alone leaves (2) and (3) intact, and (2)+(3) are sufficient on their
+ * own. `docs/LESSONS.md` §6b, in the form that costs the most: a probe told us what
+ * was broken and we read it as telling us what the viewer was reacting to.
+ *
+ * The fix is to bound each cap by the BONE, not by the radius: the cap heights are
+ * clamped to 0.42/0.30 of `len` (sum 0.72 < 1, so a straight side always exists)
+ * while the cap's WIDTH stays `rBot`/`rTop`. Two consequences, both wanted:
+ *   · the mesh spans exactly y in [-len, 0] — it can never overlap its parent
+ *     segment, so consecutive segments abut instead of interpenetrating;
+ *   · there is always a real tapered side, so a chain of segments reads as one
+ *     continuous limb whose colour changes at the elbow/knee, which is the
+ *     reference's own grammar (mid sleeve, dark cuff, light glove) and the thing
+ *     the alternating limb tones in this file were introduced to deliver.
+ *
+ * ── 0.42/0.30 IS A MEASURED CHOICE AND 0.18/0.14 WAS TRIED AND REVERTED ─────
+ * Each cap tapers toward the joint and the next segment starts from a point at the
+ * same place, so consecutive segments meet through a double taper and the limb has
+ * a slight waist at every joint. Shortening the caps to 0.18/0.14 of the bone
+ * removes the waist — and rendered (`shots/ch/donut/after4/lobby_3q.png`) it turns
+ * every segment into a flat-ended CYLINDER: the limbs read as a stack of drink cans
+ * rather than as dough, which is a worse defect than the waist it fixed. It also
+ * cost a value rung — `steps@10` at the shipped station **7 -> 6**, against a gate
+ * minimum of 6 — because a rounded limb's own shading gradient is one of the
+ * plateaus the ladder counts, and flattening it collapsed the arm's.
+ * What DOES survive from that round is the resolution: 6 cap segments against 4
+ * side steps, and 16 radial, because a 5/3/12 lathe put a shading corner where
+ * `computeVertexNormals` has to guess and rendered as a faceted gem.
+ *
+ * ── 🚨 AND 0.42/0.30 EVERYWHERE IS WHY THE FIX ABOVE DID NOT FINISH THE JOB ──
+ * Every segment was a CLOSED CAPSULE: the profile starts at `(0, -len)`, a point on
+ * the axis, so each segment tapers to nothing at its bottom, and the next segment
+ * down starts from a point at exactly the same place and flares back out. So even
+ * with perfectly matched radii the limb has a full pinch to ZERO WIDTH at every
+ * joint — and `outlineGroup` draws an ink hull round each one, so the pinch is
+ * traced. That is a bead by construction, at any albedo, and no value scheme
+ * survives it.
+ *
+ * The previous round tried to remove it by shortening ALL FOUR caps to 0.18/0.14
+ * and got flat-ended cylinders — "a stack of drink cans" — because that also
+ * flattened the SHOULDER and the WRIST, which are the two caps you can actually
+ * see. The distinction it missed is that a limb's caps are not interchangeable:
+ *
+ *   INTERIOR caps (the upper arm's BOTTOM, the forearm's TOP, and their leg
+ *   equivalents) meet an abutting segment of the same radius and are NEVER VISIBLE.
+ *   Flattening those to ~0.05 of the bone makes the two lathes share a silhouette
+ *   tangent, so the limb runs as one continuous taper through the joint.
+ *
+ *   EXTERIOR caps (the shoulder, the wrist, the hip, the ankle) are the ones the
+ *   drink-can round flattened by mistake. They keep 0.30/0.42 and stay round.
+ *
+ * Hence the two fractions are ARGUMENTS, defaulting to the values above so every
+ * call site that does not pass them is byte-identical. A caller that knows which end
+ * of its bone faces a neighbour passes ~0.05 for that end and nothing else changes.
  */
-function taperedSegment(
-  len: number, rTop: number, rBot: number, radialSegments = 12,
-  capTopFrac = 0.30, capBotFrac = 0.42,
-): THREE.BufferGeometry {
-  // Profile MUST be wound bottom-to-top (y increasing), matching every other
-  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
-  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
-  // outward-vs-inward call) depends on point order, not just point position. An
-  // earlier version of this function built the profile top-to-bottom and every
-  // limb using it rendered near-black: inverted normals facing away from the
-  // light. The y=0/y=-len hang-down placement is unchanged.
-  //
-  // ── 🚨 THE CAPS WERE SPHERICAL AND UNBOUNDED, AND THAT IS WHY THE LIMBS READ ──
-  // ── AS A STRING OF BEADS ────────────────────────────────────────────────────
-  // Uri, on the lobby render: *"limbs disattached or intersecting with the body
-  // that causes weird shapes."* Rendered and looked at (non-negotiable #3), Donut's
-  // arms and legs are not limbs at all — they are four separate balls per side,
-  // alternating pink / dark berry, hanging beside the ring like a bead necklace.
-  //
-  // The mechanism is arithmetic, not taste. On STUB the bones are SHORT:
-  // `upperArmLength` 0.209 m, `thighLength` 0.208 m, `shinLength` 0.170 m — while
-  // the radii this file passed in were `radius * 1.16` and `radius * 1.0`, i.e.
-  // 0.151 + 0.130 = **0.281 m of cap on a 0.209 m bone**. The old code detected
-  // that (`if (yTopCap >= yBotCap)`), SKIPPED the straight side, and then clamped
-  // with `yTopSafe = max(...)` — which does not shrink the caps, it just stacks two
-  // full hemispheres on top of each other. The result is a sphere ~0.30 m across on
-  // a 0.209 m bone, whose top cap reaches **0.072 m ABOVE its own joint origin**, so
-  // each segment also pokes up through the segment above it. Four of those in a
-  // chain, in two alternating values, is a bead necklace by construction.
-  //
-  // ── ⚠️ THE CLAIM THAT USED TO CLOSE THIS PARAGRAPH WAS FALSE. IT READ: ───────
-  //
-  //   > "…which turned the bead necklace into limbs."
-  //
-  // It did not. It is kept here per CLAUDE.md's rule on reversed assertions, because
-  // the mistake is more useful than the sentence: **the fix below is correct, it was
-  // correctly measured, and the defect it was claimed to close was still there in the
-  // very next render.** Rendered at the lobby camera on the committed tree
-  // (`shots/cb/before/donut.png`, pitch 20 — the camera Uri judges), donut is four
-  // chains of alternating pink and berry lumps hanging off a ring.
-  //
-  // The bead had THREE causes and this fix addressed one of them:
-  //   1. caps sized by RADIUS instead of by BONE — fixed here, genuinely;
-  //   2. every segment tapering to a POINT at both ends, so the limb pinches to zero
-  //      width at every joint and the ink hull traces the pinch — see the interior/
-  //      exterior cap note further down, which is the fix for that;
-  //   3. the ALTERNATING VALUE between adjacent segments, which puts a different
-  //      colour inside each of those traced contours and confirms the read.
-  // Fixing (1) alone leaves (2) and (3) intact, and (2)+(3) are sufficient on their
-  // own. `docs/LESSONS.md` §6b, in the form that costs the most: a probe told us what
-  // was broken and we read it as telling us what the viewer was reacting to.
-  //
-  // The fix is to bound each cap by the BONE, not by the radius: the cap heights are
-  // clamped to 0.42/0.30 of `len` (sum 0.72 < 1, so a straight side always exists)
-  // while the cap's WIDTH stays `rBot`/`rTop`. Two consequences, both wanted:
-  //   · the mesh now spans exactly y in [-len, 0] — it can never overlap its parent
-  //     segment, so consecutive segments abut instead of interpenetrating;
-  //   · there is always a real tapered side, so a chain of segments reads as one
-  //     continuous limb whose colour changes at the elbow/knee, which is the
-  //     reference's own grammar (mid sleeve, dark cuff, light glove) and the thing
-  //     the alternating limb tones in this file were introduced to deliver.
-  // ── 0.42/0.30 IS A MEASURED CHOICE AND 0.18/0.14 WAS TRIED AND REVERTED ─────
-  // Each cap tapers toward the joint and the next segment starts from a point at the
-  // same place, so consecutive segments meet through a double taper and the limb has
-  // a slight waist at every joint. Shortening the caps to 0.18/0.14 of the bone
-  // removes the waist — and rendered (`shots/ch/donut/after4/lobby_3q.png`) it turns
-  // every segment into a flat-ended CYLINDER: the limbs read as a stack of drink cans
-  // rather than as dough, which is a worse defect than the waist it fixed. It also
-  // cost a value rung — `steps@10` at the shipped station **7 -> 6**, against a gate
-  // minimum of 6 — because a rounded limb's own shading gradient is one of the
-  // plateaus the ladder counts, and flattening it collapsed the arm's.
-  // What DOES survive from that round is the resolution: 6 cap segments against 4
-  // side steps, and 16 radial, because a 5/3/12 lathe put a shading corner where
-  // `computeVertexNormals` has to guess and rendered as a faceted gem.
-  //
-  // ── 🚨 AND 0.42/0.30 EVERYWHERE IS WHY THE FIX ABOVE DID NOT FINISH THE JOB ──
-  // The committed claim directly under this block used to read *"turned the bead
-  // necklace into limbs"*. **It was wrong, and it is corrected in place below.** The
-  // fix above is real and it is the reason a segment no longer pokes through the one
-  // over it — but rendered at the lobby camera afterwards, donut still read as four
-  // bead chains, and the reason is the OTHER end of the same profile.
-  //
-  // Every segment was a CLOSED CAPSULE: `pts` starts at `(0, -len)`, a point on the
-  // axis, so each segment tapers to nothing at its bottom, and the next segment down
-  // starts from a point at exactly the same place and flares back out. So even with
-  // perfectly matched radii the limb has a full pinch to ZERO WIDTH at every joint —
-  // and `outlineGroup` draws an ink hull round each one, so the pinch is traced. That
-  // is a bead by construction, at any albedo, and no value scheme survives it.
-  //
-  // The previous round tried to remove it by shortening ALL FOUR caps to 0.18/0.14
-  // and got flat-ended cylinders — "a stack of drink cans" — because that also
-  // flattened the SHOULDER and the WRIST, which are the two caps you can actually
-  // see. The distinction it missed is that a limb's caps are not interchangeable:
-  //
-  //   INTERIOR caps (the upper arm's BOTTOM, the forearm's TOP, and their leg
-  //   equivalents) meet an abutting segment of the same radius and are NEVER VISIBLE.
-  //   Flattening those to ~0.05 of the bone makes the two lathes share a silhouette
-  //   tangent, so the limb runs as one continuous taper through the joint.
-  //
-  //   EXTERIOR caps (the shoulder, the wrist, the hip, the ankle) are the ones the
-  //   drink-can round flattened by mistake. They keep 0.30/0.42 and stay round.
-  //
-  // Hence the two fractions are ARGUMENTS now, defaulting to the values above so
-  // every existing call site is byte-identical. A caller that knows which end of its
-  // bone faces a neighbour passes ~0.05 for that end and nothing else changes.
-  const capSegs = 6;
-  const capBot = Math.min(rBot, len * capBotFrac);
-  const capTop = Math.min(rTop, len * capTopFrac);
-  const yBotCap = -len + capBot;
-  const yTopCap = -capTop;
-  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
-  }
-  const sideSteps = 4;
-  for (let i = 1; i <= sideSteps; i++) {
-    const t = i / sideSteps;
-    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-  }
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
-  }
-  const geo = new THREE.LatheGeometry(pts, radialSegments);
-  geo.computeVertexNormals();
-  return geo;
-}
 
 /** Soft tapered barrel — the same visual language as the rig's own default torso
  * (fuller belly, narrower neck) but built locally so each character can own its
@@ -710,8 +677,9 @@ export class DonutCharacter extends BaseCharacter {
       switch (part) {
         // ── The radii are CONTINUITY constraints, not taste ────────────────────
         // The rig hands the lower segment a smaller base radius than the upper one
-        // (`forearm = armRadius * 0.92`, `shin = legRadius * 0.9`, `rig.ts`
-        // `limbSlots`), so matching multipliers do NOT produce a matching diameter.
+        // — published as `metrics.forearmRadius` and `metrics.shinRadius`, which
+        // `limbSlots()` and `buildLimbs()` both READ BACK, so published and built
+        // cannot diverge — so matching multipliers do NOT produce a matching diameter.
         // These are chosen so the upper segment's BOTTOM and the lower segment's TOP
         // are the same width in metres — arm 0.86*0.1302 = 0.112 against
         // 0.935*0.1198 = 0.112, leg 0.86*0.1218 = 0.1048 against 0.956*0.1096 =
@@ -744,7 +712,7 @@ export class DonutCharacter extends BaseCharacter {
           // and is never seen. See the interior/exterior cap note in
           // `taperedSegment` — this is the argument that stops the limb pinching to
           // zero width at the elbow, which is what an ink hull traces as a bead.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.90, size.radius * 0.79, 16, 0.30, 0.05), sleeveDoughMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.90, size.radius * 0.79, 16, { capTopFrac: 0.30, capBotFrac: 0.05 }), sleeveDoughMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -755,7 +723,7 @@ export class DonutCharacter extends BaseCharacter {
           // each other, which at this on-screen size is no difference at all; they
           // are now 24% apart, and the heavier pair being the LEGS is the one
           // proportion cue that survives any pose.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.12, size.radius * 0.945, 16, 0.30, 0.05), limbPinkMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.12, size.radius * 0.945, 16, { capTopFrac: 0.30, capBotFrac: 0.05 }), limbPinkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -764,9 +732,9 @@ export class DonutCharacter extends BaseCharacter {
         case 'forearmL': case 'forearmR': {
           // Top radius matches the upper arm's bottom in METRES, not in multiplier:
           // 0.79 * 0.1302 = 0.1029 against 0.859 * 0.1198 = 0.1029. The rig hands the
-          // lower segment a smaller base radius (`forearm = armRadius * 0.92`), so
-          // equal multipliers would put a step in the outline at the elbow.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.859, size.radius * 0.72, 16, 0.05, 0.30), sleeveDoughDarkMat);
+          // lower segment a smaller base radius (`metrics.forearmRadius`), so equal
+          // multipliers would put a step in the outline at the elbow.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.859, size.radius * 0.72, 16, { capTopFrac: 0.05, capBotFrac: 0.30 }), sleeveDoughDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -775,7 +743,7 @@ export class DonutCharacter extends BaseCharacter {
         case 'shinL': case 'shinR': {
           // Same continuity, on the leg: 0.945 * 0.1218 = 0.1151 against
           // 1.05 * 0.1096 = 0.1151.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.05, size.radius * 0.88, 16, 0.05, 0.34), limbPinkDarkMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.05, size.radius * 0.88, 16, { capTopFrac: 0.05, capBotFrac: 0.34 }), limbPinkDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;

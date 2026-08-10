@@ -30,7 +30,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
-import { ChibiRig } from './rig';
+import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 // `./appendages` is deliberately NOT imported any more. It supplied `aim`/`blade`/
@@ -595,81 +595,42 @@ function buildCrackLine(
 }
 
 /**
- * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
- * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
- * `dressLimbs()` expects. Local to this file; see `hamburger.ts` for the
- * reference copy. Egg's own call sites pass radii noticeably SMALLER than
- * `size.radius` — she is a small, delicate character, and the rig's default
- * limb thickness read as too stocky for that.
+ * ── 🚨 EGG HAD THE *QUIET* HALF OF THE CAP BUG, AND A RATIO UNDER 1 HID IT ───
+ * The `taperedSegment` COPY that used to sit here is gone; the function is imported
+ * from `rig.ts`, which carries the mechanism once for all six files that had it —
+ * this file was the THIRD independent copy, and donut's fix had reached only
+ * `hamburger.ts`. **What stays is what is true of EGG.** Her call sites pass radii
+ * noticeably SMALLER than `size.radius`: she is a small, delicate character and the
+ * rig's default limb thickness read as too stocky for that.
+ *
+ * The old body emitted a straight side only when `len >= rTop + rBot`, and when it
+ * did not, `yTopSafe = Math.max(...)` stacked two FULL hemispheres into a sphere
+ * that pokes above its own joint origin. `tools/tmp/cb_rig.mjs` prints that test
+ * and **egg never trips it** — her four bones come out at ratio 0.64-0.89, all
+ * under 1. What she had instead is the QUIET half: caps of height `rBot`/`rTop` on
+ * a bone barely longer than their sum leave a straight side of **11-36% of the
+ * bone**, and the rest is two hemispheres. Rendered at the lobby camera
+ * (`shots/cb/before/egg.png`) each limb was three dark balls on a string, which is
+ * the same defect hamburger's critic called *"a chain of three separate orange
+ * balls per side"* — arrived at from the other side of the same `if`.
+ *
+ * ⚠️ So a ratio under 1 is NOT a clean bill of health, and reading `fb9d9da`'s
+ * table as one would have skipped this file. Bounding the caps by the BONE —
+ * 0.42/0.30 of `len`, sum 0.72 < 1 so a straight side always exists — is the fix
+ * for both halves, and it is the same code either way.
+ *
+ * ── AND THE CAP FRACTIONS ARE ARGUMENTS, WHICH IS THE OTHER HALF OF THE FIX ──
+ * Bounding the caps by the bone still leaves every segment tapering to a POINT at
+ * both ends — the profile starts at `(0, -len)`, on the axis — so the limb pinches
+ * to zero width at every joint, and `outlineGroup` gives each segment its own ink
+ * hull, which traces the pinch. That is a bead whatever the albedo is, and on this
+ * character the albedo cannot help: all four limb tones sit between 0.04 and 0.15.
+ * INTERIOR caps (the upper arm's bottom, the forearm's top, and the leg
+ * equivalents) abut a segment of the same radius and are never visible, so a
+ * caller passes ~0.05 for that end and the two lathes share a silhouette tangent.
+ * EXTERIOR caps (shoulder, wrist, hip, ankle) keep 0.30/0.42 and stay round —
+ * flattening THOSE is what turned donut's limbs into a stack of drink cans.
  */
-function taperedSegment(
-  len: number, rTop: number, rBot: number, radialSegments = 12,
-  capTopFrac = 0.30, capBotFrac = 0.42,
-): THREE.BufferGeometry {
-  // Profile MUST be wound bottom-to-top (y increasing), matching every other
-  // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
-  // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
-  // outward-vs-inward call) depends on point order, not just point position. An
-  // earlier version of this function built the profile top-to-bottom and every
-  // limb using it rendered near-black: inverted normals facing away from the
-  // light. The y=0/y=-len hang-down placement is unchanged.
-  //
-  // ── 🚨 THE CAPS WERE SIZED BY THE RADIUS AND NOT BY THE BONE ────────────────
-  // Taken VERBATIM from `donut.ts:145`, which derived it. Six independent copies of
-  // this helper exist across the cast and donut's fix reached only `hamburger.ts`;
-  // this is the third. The one thing worth restating here is which HALF of the bug
-  // this character had, because the loud half is not it:
-  //
-  // The old code emitted a straight side only when `len >= rTop + rBot`, and when it
-  // did not, `yTopSafe = Math.max(...)` stacked two FULL hemispheres into a sphere
-  // that pokes above its own joint origin. `tools/tmp/cb_rig.mjs` prints that test
-  // and **egg never trips it** — her four bones come out at ratio 0.64-0.89, all
-  // under 1. What she had instead is the QUIET half: caps of height `rBot`/`rTop` on
-  // a bone barely longer than their sum leave a straight side of **11-36% of the
-  // bone**, and the rest is two hemispheres. Rendered at the lobby camera
-  // (`shots/cb/before/egg.png`) each limb is three dark balls on a string, which is
-  // the same defect hamburger's critic called *"a chain of three separate orange
-  // balls per side"* — arrived at from the other side of the same `if`.
-  //
-  // ⚠️ So a ratio under 1 is NOT a clean bill of health, and reading `fb9d9da`'s
-  // table as one would have skipped this file. Bounding the caps by the BONE —
-  // 0.42/0.30 of `len`, sum 0.72 < 1 so a straight side always exists — is the fix
-  // for both halves, and it is the same code either way.
-  //
-  // ── AND THE CAP FRACTIONS ARE ARGUMENTS, WHICH IS THE OTHER HALF OF THE FIX ──
-  // Bounding the caps by the bone still leaves every segment tapering to a POINT at
-  // both ends — `pts` starts at `(0, -len)`, on the axis — so the limb pinches to
-  // zero width at every joint, and `outlineGroup` gives each segment its own ink
-  // hull, which traces the pinch. That is a bead whatever the albedo is, and on this
-  // character the albedo cannot help: all four limb tones sit between 0.04 and 0.15.
-  // INTERIOR caps (the upper arm's bottom, the forearm's top, and the leg
-  // equivalents) abut a segment of the same radius and are never visible, so a
-  // caller passes ~0.05 for that end and the two lathes share a silhouette tangent.
-  // EXTERIOR caps (shoulder, wrist, hip, ankle) keep 0.30/0.42 and stay round —
-  // flattening THOSE is what turned donut's limbs into a stack of drink cans.
-  const capSegs = 6;
-  const capBot = Math.min(rBot, len * capBotFrac);
-  const capTop = Math.min(rTop, len * capTopFrac);
-  const yBotCap = -len + capBot;
-  const yTopCap = -capTop;
-  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
-  }
-  const sideSteps = 4;
-  for (let i = 1; i <= sideSteps; i++) {
-    const t = i / sideSteps;
-    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-  }
-  for (let i = 1; i <= capSegs; i++) {
-    const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
-  }
-  const geo = new THREE.LatheGeometry(pts, radialSegments);
-  geo.computeVertexNormals();
-  return geo;
-}
 
 /**
  * This character's own height, as a multiple of the cast's.
@@ -1148,7 +1109,7 @@ export class EggCharacter extends BaseCharacter {
         case 'upperArmL': case 'upperArmR': {
           // `capBotFrac` 0.05 — this end abuts the forearm at the same radius and is
           // never visible; see `taperedSegment`'s interior/exterior cap note.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.86, size.radius * 0.70, 12, 0.30, 0.05), limbShellMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.86, size.radius * 0.70, 12, { capTopFrac: 0.30, capBotFrac: 0.05 }), limbShellMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -1157,9 +1118,10 @@ export class EggCharacter extends BaseCharacter {
         case 'forearmL': case 'forearmR': {
           // Radii are continuous across the elbow in METRES: 0.70 * 0.1253 = 0.0877
           // against 0.761 * 0.1152 = 0.0877. The rig gives the forearm a smaller base
-          // radius (`armRadius * 0.92`), so equal multipliers would step the outline.
+          // radius, so equal multipliers would step the outline. That radius is
+          // published as `metrics.forearmRadius` — read it, never re-type `* 0.92`.
           const g = new THREE.Group();
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.761, size.radius * 0.60, 12, 0.05, 0.30), limbShellShadowMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.761, size.radius * 0.60, 12, { capTopFrac: 0.05, capBotFrac: 0.30 }), limbShellShadowMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -1183,7 +1145,7 @@ export class EggCharacter extends BaseCharacter {
           // so 1.06 * 0.1172 = 0.1242 against 0.86 * 0.1253 = 0.1078: the leg ends up
           // 15% fatter in metres from a 23% gap in multipliers. The multiplier is not
           // the cue; the metre is.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.06, size.radius * 0.90, 12, 0.30, 0.05), limbShellMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.06, size.radius * 0.90, 12, { capTopFrac: 0.30, capBotFrac: 0.05 }), limbShellMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -1192,7 +1154,7 @@ export class EggCharacter extends BaseCharacter {
         case 'shinL': case 'shinR': {
           // 0.90 * 0.1172 = 0.1055 against 1.0 * 0.1055 = 0.1055.
           const g = new THREE.Group();
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.0, size.radius * 0.80, 12, 0.05, 0.34), limbShellShadowMat);
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.0, size.radius * 0.80, 12, { capTopFrac: 0.05, capBotFrac: 0.34 }), limbShellShadowMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
@@ -1247,7 +1209,7 @@ export class EggCharacter extends BaseCharacter {
           const g = new THREE.Group();
           g.add(chip);
           const shaft = new THREE.Mesh(
-            taperedSegment(size.len * 0.46, size.radius * 1.06, size.radius * 1.28, 12, 0.14, 0.30),
+            taperedSegment(size.len * 0.46, size.radius * 1.06, size.radius * 1.28, 12, { capTopFrac: 0.14, capBotFrac: 0.30 }),
             crackFootMat
           );
           // Hangs from the ANKLE (y = 0 in this joint's frame) down over the boot, so
