@@ -192,6 +192,26 @@ const LIMB_LILAC = '#241A38';
 // PASS 3 tried this at #4A3568 to open `kneeL|footL` (0.011). MEASURED WORSE on every
 // axis at once — it closed `hipL|kneeL` (0.051) and `shoulderL|elbowL` (0.069) instead,
 // weak boundary 60.4% -> 70.3%, range 0.701 -> 0.653, p05 0.279 -> 0.326. Reverted.
+//
+// 🚨 THAT "WEAK BOUNDARY 60.4% -> 70.3%" WAS STEERING ON A NUMBER THAT MEANS NOTHING
+// HERE, AND THE TOOL NOW PRINTS THE PROOF NEXT TO IT. `valuescan --mode gate` on this
+// character, measured 2026-08-10 on a `headserve` HEAD tree (srcId f3a794a3f40f9fc0):
+//
+//   char        range   p05  steps  minDL  n<.10  weakB%  weakBc%  flip  verdict
+//   egg         0.863 0.071      6  0.182      0    61.8      0.0     1  FAIL: weakBoundaryPct
+//   hamburger   0.713 0.166      7  0.208      0     4.3      9.0     2  PASS
+//   pizza       0.813 0.090      7  0.186      0    32.1     17.0     2  FAIL: weakBoundaryPct
+//
+// `weakBc%` is the IDENTICAL count computed on `dLcontact` — the step measured AT the
+// boundary, which is where the contacts are counted. **Egg's is 0.0.** Not one boundary
+// pair on this character is weak where it actually touches; `minDL` 0.182 clears the
+// 0.15 target and is 47x the 0.0039 floor. **Egg's only gate failure is an artefact of
+// comparing two whole-part MEDIANS**, and every hour spent darkening a limb tone to move
+// 61.8% was spent on a statistic this character cannot fail for a real reason.
+//
+// The same run catches it wrong in the OTHER direction on the same day: hamburger PASSES
+// at weakB% 4.3 while its contact-local count is **9.0** — more genuinely weak pairs than
+// the gate can see. Steer on per-pair `dLcontact`. Read `weakB%` as history.
 // Egg's limbs are ~1% of the character each; there is not enough room between the
 // thigh, the shin and the boot to fit three 0.10 steps at 111 px. That is a geometry
 // answer, not an albedo one.
