@@ -478,9 +478,17 @@ function shellPatch(
  * own yaw ADDS to it on this side, and the round-3 render has the crack sliding off
  * the profile edge and the Neon tail disappearing behind her arm. The band is
  * therefore a WEDGE — wide at the top where there is nothing to avoid, tucked back
- * in below the eye where the surface is still facing the camera. */
+ * in below the eye where the surface is still facing the camera.
+ *
+ * ⚠️ EVERY THETA HERE IS +0.14 ON WHAT IT WAS, AND THE CRACK HAS NOT MOVED.
+ * `stance.headTurn` went 0.20 -> 0.06 to centre the face (see the stance block); the
+ * head's own yaw is ADDED to every decal's authored theta, so leaving these alone
+ * would have swung the crack, its Neon segment and its yolk bead 8 degrees toward
+ * the camera as a side effect of a face fix. The world azimuths are byte-identical
+ * to the values this comment block was written about: 1.12, 1.20, 1.06, 1.14, 0.98,
+ * 1.06 — including the 1.20 max the "went too far at 1.22" note above settled on. */
 const CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
-  [0.92, 0.21], [1.00, 0.28], [0.86, 0.36], [0.94, 0.44], [0.78, 0.52], [0.86, 0.59],
+  [1.06, 0.21], [1.14, 0.28], [1.00, 0.36], [1.08, 0.44], [0.92, 0.52], [1.00, 0.59],
 ];
 
 /** Continuation of the crack onto the torso shell, same side (character's right
@@ -488,7 +496,14 @@ const CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
  * `buildCrackLine` are both already generic in R, so this reuses them verbatim
  * against the torso's own smaller shell radius. Theta band matches the
  * repositioned `CRACK_PATH` above so the two segments read as one continuous
- * crack running from head to torso instead of jumping sideways at the neck. */
+ * crack running from head to torso instead of jumping sideways at the neck.
+ *
+ * ⚠️ IT NO LONGER MATCHES `CRACK_PATH` NUMERICALLY, AND THAT IS THE POINT. These
+ * are WORLD thetas because the torso is not a child of `head`; `CRACK_PATH`'s are
+ * HEAD-LOCAL and the head carries `stance.headTurn`. The two paths line up when
+ * `CRACK_PATH_local + headTurn ≈ TORSO_CRACK_PATH`, which is why both moved by the
+ * same +0.14 when `headTurn` moved by -0.14 — one in its numbers, one not at all.
+ * (Moot today: STUB gives Egg no torso, so `dressTorso` is a no-op.) */
 const TORSO_CRACK_PATH: Array<[theta: number, phiFrac: number]> = [
   [0.80, 0.05], [0.68, 0.10], [0.82, 0.16],
 ];
@@ -692,7 +707,43 @@ export class EggCharacter extends BaseCharacter {
         // the pupils are now offset the OTHER way (see `EYE_GAZE`), so the read goes
         // from "looking past you" to "turned away, still watching you" — which is a
         // stronger version of the same character note, not a weaker one.
-        twist: 0.05, headTilt: 0.16, headTurn: 0.20,
+        //
+        // ── ROUND 2 OF THE SAME FIX: `headTurn` 0.20 -> 0.06 ─────────────────────
+        // The paragraph above took 0.32 -> 0.20 and stopped halfway, and TWO
+        // INDEPENDENT BLIND CRITICS then converged, unprompted, on *"the two eyes are
+        // drastically different sizes"*. They are, and this is the whole mechanism —
+        // there is no second cause and nothing about the eyes themselves is
+        // asymmetric. `buildFace` places them at exactly `sx * EYE_THETA`.
+        //
+        // The arithmetic, and it predicts BOTH complaints from one number. Total head
+        // yaw is `headTurn + twist` = 0.25 rad. An eye authored at theta ±0.50
+        // therefore images at +0.75 / -0.25 rad off the camera axis, so:
+        //
+        //   face centre   (sin 0.75 + sin -0.25) / 2  =  +0.217 of the half-width
+        //                 -> the whole face sits in the RIGHT half of the ovoid,
+        //                    which is the second thing found by eye at pitch 20
+        //   eye width     cos 0.75 / cos 0.25 = 0.755
+        //                 -> the far eye is a quarter narrower than the near one
+        //
+        // Measured on `shots/cx/before/egg.png`: face centre +26% of the half-width,
+        // eye widths 90 px vs 105 px (ratio 0.857 — perspective magnifies the near
+        // side, which is why the measured ratio is milder than the flat-projection
+        // prediction). **Both complaints are one variable.** At 0.06 the same
+        // arithmetic gives +0.096 and 0.886.
+        //
+        // Kept non-zero deliberately: a dead-square head is a mannequin, and the
+        // "turned away, still watching you" read is carried by `EYE_GAZE` on the
+        // pupils, which is where it belongs — a gaze offset costs the face nothing,
+        // a head yaw costs it its symmetry.
+        //
+        // ⚠️ `CRACK_PATH` and the cowl's `T0`/`T1`/clasp thetas are all compensated
+        // by +0.14 rad so their WORLD azimuth is unchanged. Without that this edit
+        // would silently drag the crack, the hood edge and both clasps 8 degrees
+        // around the shell, and the before/after would be measuring four changes
+        // instead of one. `TORSO_CRACK_PATH` is deliberately NOT compensated: the
+        // torso is not a child of `head`, so it never saw the yaw in the first place
+        // and moving it would be the very drift this compensation exists to prevent.
+        twist: 0.05, headTilt: 0.16, headTurn: 0.06,
         hipSway: 0.01, lean: 0.10,
         // Splay ONLY, and the stance is deliberately left alone. Egg is the one
         // character whose `stanceWidth` cannot be widened at all: measured
@@ -808,7 +859,6 @@ export class EggCharacter extends BaseCharacter {
     // `eggSurface` (the same source of truth the crack and face already use)
     // near the bottom of the head, where the bulge gives it real radius to wrap.
     const scarfMat = toonMat({ color: LIMB_LILAC, roughness: 0.6 });
-    const scarfDarkMat = toonMat({ color: LIMB_LILAC_SHADOW, roughness: 0.6 });
     // ── The scarf, not the shell, was burying this character's legs ─────────────
     // Measured with `tools/tmp/masssit.mjs`: the wrap sat 0.627 m half-wide at the
     // HIP LINE against a 0.549 m stance, and its tassels hung all the way to
@@ -838,22 +888,33 @@ export class EggCharacter extends BaseCharacter {
     scarfWrap.receiveShadow = true;
     head.add(scarfWrap);
 
-    for (const sx of [-1, 1] as const) {
-      const tail = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.085, R * 0.30, 4, 8), sx > 0 ? scarfMat : scarfDarkMat);
-      tail.name = 'egg_scarf_tail';
-      tail.position.set(sx * R * 0.16, scarfY - R * 0.26, scarfRadius * 0.92);
-      tail.rotation.x = 0.22;
-      tail.rotation.z = sx * 0.08;
-      tail.castShadow = true;
-      tail.receiveShadow = true;
-      head.add(tail);
-
-      const tassel = new THREE.Mesh(new THREE.SphereGeometry(R * 0.07, 8, 6), scarfDarkMat);
-      tassel.name = 'egg_scarf_tassel';
-      tassel.position.set(sx * R * 0.16, scarfY - R * 0.44, scarfRadius * 0.98);
-      tassel.castShadow = true;
-      head.add(tassel);
-    }
+    // ── 🔴 THE TWO SCARF TAILS AND THEIR TASSELS ARE DELETED. EGG HAD SIX LIMBS. ──
+    // Found by eye at the SHIPPED LOBBY CAMERA (`shots/cx/before/egg.png`, pitch 20,
+    // `charStage.ts:451`) and it is not subtle: this character rendered with **two
+    // arms, two legs, and two extra dark stalks hanging between the legs, each
+    // ending in a ball**. In near-black plum (`LIMB_LILAC` / `LIMB_LILAC_SHADOW`,
+    // the SAME family as the limbs) against a pale yellow shell, six dark
+    // appendages under one round body read as a BEETLE.
+    //
+    // The construction is why. A `CapsuleGeometry(R*0.085, R*0.30)` is a thin
+    // straight rod, a `SphereGeometry(R*0.07)` on the end of it is a ball foot, they
+    // were mirrored on `sx`, and they hung from `scarfY - 0.26R` to `-0.44R` — i.e.
+    // INTO the leg band, at the leg pitch, in the leg colour, in a mirrored pair.
+    // Every cue that says "limb" was present; nothing said "cloth".
+    //
+    // ⚠️ Nobody caused this and no metric could catch it. It is identical before and
+    // after the cast rebuild, and it appears in NO score: a blind critic scored this
+    // character 3.5 without mentioning it, because `valuescan`, `limbmatch` and
+    // `sepscan` all count pixels and value steps and **none of them counts LIMBS**.
+    // `docs/LESSONS.md` §6b read backwards — the defect a human sees instantly can be
+    // invisible to every instrument in the repo.
+    //
+    // Deleted rather than re-shaped, on `docs/DECISIONS-FOR-URI.md` §40's third
+    // pattern — *"the detail added to signal the subject destroyed the silhouette
+    // that signalled it better"* — which is the same finding that removed the lid and
+    // the shell shards. The wrap stays: it is a single ring tucked under the shell's
+    // own bulge, it reads as a collar, and it cannot be mistaken for an appendage.
+    // The COWL below is the costume layer that survives at this camera.
 
     this.buildCowl(R);
 
@@ -1085,8 +1146,12 @@ export class EggCharacter extends BaseCharacter {
     // Narrowed and dropped off the crown after a blind critic called the result a
     // near-black hemisphere cutting the body in half — see the note on `GARMENT`
     // for why softening rather than reverting still holds the p05 gate.
-    const T0 = 0.72 * Math.PI;
-    const T1 = 1.28 * Math.PI;
+    // ⚠️ +0.14 rad on both ends, and the hood has NOT moved. `stance.headTurn` went
+    // 0.20 -> 0.06 to centre the face; these are head-LOCAL azimuths, so the world
+    // position of the hood's two visible profile edges is held by adding back exactly
+    // what the head gave up. Was `0.72PI`/`1.28PI`.
+    const T0 = 0.72 * Math.PI + 0.14;
+    const T1 = 1.28 * Math.PI + 0.14;
     const PHI_TOP = 0.30 * Math.PI;
     const PHI_RIM = 0.50 * Math.PI;   // the equator — the garment never reaches the legs
 
@@ -1146,7 +1211,10 @@ export class EggCharacter extends BaseCharacter {
     // WORN rather than as a shadow. Neon, because that is Egg's rarity accent and
     // the crack seam is the only other place it appears.
     for (const sx of [-1, 1] as const) {
-      const p = eggSurface(sx * 0.72 * Math.PI, PHI_RIM - 0.02, R);
+      // +0.14 for the same `headTurn` compensation as `T0`/`T1` above. Note the sign
+      // is NOT mirrored: the head's yaw is a rotation, so both clasps move the same
+      // way round the shell, which is why this is `+ 0.14` and not `sx * 0.14`.
+      const p = eggSurface(sx * 0.72 * Math.PI + 0.14, PHI_RIM - 0.02, R);
       const clasp = new THREE.Mesh(new THREE.SphereGeometry(R * 0.05, 12, 10), glossyMat({ color: NEON_ACCENT, roughness: 0.25 }));
       clasp.position.copy(p.pos).addScaledVector(p.normal, R * 0.085);
       clasp.name = 'egg_cowl_clasp';
@@ -1247,14 +1315,33 @@ export class EggCharacter extends BaseCharacter {
       //    is the cheapest "depth" available anywhere on this model.
       //    Both sit on the same side on BOTH eyes: a catchlight comes from a light
       //    in the world, not from a per-eye mirror.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.038, 10, 10), flatMat('#ffffff'));
-      glint.position.set(-R * (EYE_GAZE + 0.030), R * 0.052, R * 0.104);
+      //
+      //    🚨 THE KEY GLINT WAS EATING THE PUPIL, AND THE PUPIL READ AS A COMMA.
+      //    Found by eye at 2.6x on the lobby render (`shots/cx/zoom/egg-face-*.png`):
+      //    the dark of each eye is not a disc, it is a **Pac-Man** — a round pupil
+      //    with a rounded bite taken out of its upper-left. At `R*0.038` against a
+      //    pupil of `R*0.078` the glint was **49% of the pupil's radius**, centred
+      //    `R*0.030` off its centre, so it straddled the pupil's edge and replaced a
+      //    whole quadrant of it with white. A catchlight sits ON an eye; at half the
+      //    pupil's size it IS the eye. Down to `R*0.024` and pulled inside the pupil's
+      //    own radius, which is what makes it read as a wet highlight rather than as
+      //    a notch cut in the iris.
+      //    ⚠️ It is NOT a value or a colour change and no metric here can see it: the
+      //    same white pixels are drawn either way, in nearly the same place. Only the
+      //    SHAPE of the dark region moved, and nothing in `valuescan`, `sepscan` or
+      //    `limbmatch` describes a shape. `docs/LESSONS.md` §6b read backwards.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.024, 10, 10), flatMat('#ffffff'));
+      glint.position.set(-R * (EYE_GAZE + 0.024), R * 0.036, R * 0.104);
       glint.scale.set(1, 1, 0.45);
       glint.userData.noOutline = true;
       eye.add(glint);
 
-      const bounce = new THREE.Mesh(new THREE.SphereGeometry(R * 0.019, 8, 8), flatMat('#DCD4F0'));
-      bounce.position.set(-R * (EYE_GAZE - 0.042), -R * 0.040, R * 0.098);
+      // The cool bounce moves OFF the pupil for the same reason: at `R*0.019` sitting
+      // on the pupil's lower-right edge it was a lilac smudge on the iris. On the
+      // sclera just clear of the pupil it does the job it was added for — a second,
+      // dimmer light in the world — without carving the dark shape up.
+      const bounce = new THREE.Mesh(new THREE.SphereGeometry(R * 0.015, 8, 8), flatMat('#DCD4F0'));
+      bounce.position.set(-R * (EYE_GAZE - 0.060), -R * 0.048, R * 0.098);
       bounce.scale.set(1, 1, 0.45);
       bounce.userData.noOutline = true;
       eye.add(bounce);
@@ -1279,8 +1366,24 @@ export class EggCharacter extends BaseCharacter {
       //    ridge is legible only as a lit top plus a dark underside, so it is now
       //    two bars: `SHELL` catching the key above, `BROW_SHADOW` tucked under it.
       //    That is one more value step on the face, which is the whole brief.
-      const browPhi = EYE_PHI - (sx > 0 ? 0.32 : 0.255);
-      const brow = addShellDecal(face, sx * EYE_THETA * 0.92, browPhi, R * 0.006, R);
+      //    🚨 AND ROUND 5 FOUND THE BROWS WERE NOT OVER THE EYES AT ALL.
+      //    `shots/cx/zoom/egg-face-after.png`, read at 2.6x: the far brow floats
+      //    between the two eyes, nearer the crown than to the eye it belongs to. Both
+      //    old numbers pull it inboard and the ovoid multiplies the error:
+      //      · `* 0.92` on theta moves it in by 7% before the surface is consulted;
+      //      · 0.32 rad of phi is nearly FOUR sclera half-heights above the eye, and
+      //        `shellPoint` narrows hard up there — at the eye band the surface radius
+      //        factor is 0.943, at the old brow band it is 0.741.
+      //    Together the brow landed at **73% of its own eye's horizontal offset**. The
+      //    fix is both: bring the brow down to a brow's distance (0.21 / 0.17 rad,
+      //    still asymmetric — the raised-one-eyebrow read is the character and
+      //    `rules.ts` keeps it — and still clearing the 0.085 rad sclera half-height
+      //    by 1.4x), and open theta to 1.14 so the narrowing is paid for rather than
+      //    compounded. Derived, not eyeballed: `sin(theta_brow) = (0.943 / 0.83) *
+      //    sin(0.50)` solves to 0.577 rad = 1.15 * EYE_THETA on the far side and
+      //    1.11 on the near one, so one factor covers both to within 3%.
+      const browPhi = EYE_PHI - (sx > 0 ? 0.21 : 0.17);
+      const brow = addShellDecal(face, sx * EYE_THETA * 1.14, browPhi, R * 0.006, R);
       // (sign verified against a render: the naive -sx tilt read as angry —
       // inner end low, outer high — so this is flipped to lift the inner end.)
       //    ⚠️ AND `noOutline` IS LOAD-BEARING, not tidiness. Round 2 of this pass
@@ -1318,15 +1421,36 @@ export class EggCharacter extends BaseCharacter {
       //    the answer changes with the scale you judge at — and the reason the rule
       //    here is "read the PNG" AND "measure it", not either one alone. Two rounds
       //    of albedo were spent on a defect that a 20-line probe showed did not exist.
+      //    🚨 ROUND 5, AND IT IS A SHAPE CHANGE, NOT ANOTHER VALUE CHANGE.
+      //    Two independent blind critics said, unprompted, that the mouth and brow
+      //    marks *"look like flat pasted-on decals rather than sculpted features"*.
+      //    Rounds 3 and 4 both read that as a VALUE complaint and both were wrong
+      //    (see the correction above — the value step is 0.35 and always was).
+      //    Read the render instead (`shots/cx/before/egg.png` at the lobby camera):
+      //    these are `roundedBox`es, so each brow is a bar with **two straight
+      //    parallel long edges and two square ends**, and a shape with square ends
+      //    lying on a dome is a STICKER. Nothing in nature that is part of a face
+      //    has a square end. It reads as a strip of gold tape, which is exactly the
+      //    phrase both critics reached for and exactly the *"drawn lines and not an
+      //    actual face"* verdict Uri gave hamburger, arriving here by a different
+      //    route: hamburger's marks were too FLAT, these are too RECTANGULAR.
+      //
+      //    So: the same two bars, the same two colours, the same two sizes, the same
+      //    tilt — as ELLIPSOIDS. A lens tapers to nothing at both ends, which is what
+      //    a raised ridge in a shell actually does, and it costs no value rung, no
+      //    extra mesh and nothing the rounds above measured. The scale factors are
+      //    `2/PI`-corrected on the minor axis so the ellipse keeps the bar's visual
+      //    mass rather than the 0.785 of it a naive swap would give.
       const tilt = sx * (sx > 0 ? 0.52 : 0.30);
       for (const [w, h, y, z, col] of [
         [0.268, 0.018, 0.022, 0.010, SHELL],
         [0.290, 0.038, -0.002, 0.004, BROW_SHADOW],
       ] as const) {
         const bar = new THREE.Mesh(
-          roundedBox(R * w, R * h, R * 0.020, R * 0.010, 2),
+          new THREE.SphereGeometry(1, 20, 10),
           toonMat({ color: col, roughness: 0.45, rim: false })
         );
+        bar.scale.set(R * w * 0.5, R * h * 0.64, R * 0.010);
         bar.position.set(0, R * y, R * z);
         bar.rotation.z = tilt;
         bar.userData.noOutline = true;
@@ -1367,29 +1491,48 @@ export class EggCharacter extends BaseCharacter {
     // Dropped from phi 0.505PI to 0.525PI: the sclera is now 0.170 rad tall instead
     // of 0.135, and at the old spacing the face was crowded into the top third of a
     // head that is 93.7% of the character.
+    //
+    // 🚨 ROUND 2 — THREE STACKED BARS ARE A STRIP OF TAPE, WHATEVER THEY ARE MADE OF.
+    // The three pieces above are correct in VALUE and were wrong in SHAPE, and the
+    // render says so plainly at the lobby camera (`shots/cx/before/egg.png`): a black
+    // rectangle, a thin plum rectangle and a cream rectangle, **all three the same
+    // length, all three with square ends, stacked**. That is not an opening, it is
+    // three parallel stripes — and the file's own note above already caught the
+    // identical failure from the other side ("a `SHELL`-toned bar ABOVE the slot
+    // rendered as a cream moustache… two pale bars with a dark gap read as a stack of
+    // three objects"). The upper bar was removed and the lower one, which does the
+    // same thing from below, was kept. Both critics who called the face *"flat
+    // pasted-on decals"* were looking at this.
+    //
+    // The rebuild keeps all three VALUES and all three ROLES and changes only the
+    // outline each one presents:
+    //   • every piece is an ELLIPSOID, so the mouth's corners taper the way a real
+    //     opening's do instead of terminating in a 90-degree corner;
+    //   • the inner lip is pushed UP into the throat so only its lower crescent
+    //     shows — it is now the far wall seen THROUGH the opening rather than a
+    //     stripe drawn under it, which is the thing the value step was always for;
+    //   • the lit lower lip is 52% of the throat's width instead of 78%, so it can
+    //     no longer bracket the slot; it is a highlight on the middle of the lower
+    //     edge, which is where a key above the head actually lands.
     const mouth = addShellDecal(face, 0, 0.525 * Math.PI, R * 0.004, R);
 
-    const throat = new THREE.Mesh(
-      roundedBox(R * 0.250, R * 0.070, R * 0.022, R * 0.028, 3),
-      toonMat({ color: MOUTH_DARK, roughness: 0.62 })
-    );
-    throat.userData.noOutline = true;
+    /** An ellipsoid decal: tapered at both ends, flattened into the shell. */
+    const lens = (hw: number, hh: number, hd: number, color: string, rough: number) => {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), toonMat({ color, roughness: rough }));
+      m.scale.set(R * hw, R * hh, R * hd);
+      m.userData.noOutline = true;
+      return m;
+    };
+
+    const throat = lens(0.140, 0.042, 0.013, MOUTH_DARK, 0.62);
     mouth.add(throat);
 
-    const innerLip = new THREE.Mesh(
-      roundedBox(R * 0.198, R * 0.022, R * 0.018, R * 0.009, 2),
-      toonMat({ color: MOUTH_INNER, roughness: 0.55 })
-    );
-    innerLip.position.set(0, -R * 0.022, R * 0.008);
-    innerLip.userData.noOutline = true;
+    const innerLip = lens(0.104, 0.023, 0.014, MOUTH_INNER, 0.55);
+    innerLip.position.set(0, -R * 0.017, R * 0.002);
     mouth.add(innerLip);
 
-    const lowerLip = new THREE.Mesh(
-      roundedBox(R * 0.196, R * 0.022, R * 0.020, R * 0.009, 3),
-      toonMat({ color: SHELL, roughness: 0.42 })
-    );
-    lowerLip.position.set(0, -R * 0.047, R * 0.010);
-    lowerLip.userData.noOutline = true;
+    const lowerLip = lens(0.073, 0.011, 0.012, SHELL, 0.42);
+    lowerLip.position.set(0, -R * 0.043, R * 0.008);
     lowerLip.castShadow = true;
     mouth.add(lowerLip);
   }

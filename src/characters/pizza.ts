@@ -724,6 +724,47 @@ export class PizzaCharacter extends BaseCharacter {
       const foldMat = toonMat({ color: DOUGH_FOLD, roughness: 0.88 });
       const flourMat = toonMat({ color: FLOUR_DUST, roughness: 0.95 });
       const bodyH = bodyTopY - bodyBottomY;
+
+      // ── 🦵 AND THE SAME MASS CLOSES THE LEG GAP, WHICH URI HAS NAMED THREE TIMES ──
+      // *"The legs are disconnected from the body"* (hamburger), *"same issue"* (donut),
+      // *"it's on all characters so far"* (taco). He never sent a sheet for pizza and it
+      // is true here too — MEASURED, at the camera he judges, by `rg_gap.mjs`, whose
+      // BRIDGE metric is the validated half of that tool (its `--selftest` proves it
+      // returns the full width for an attached leg and **0** for a leg with 20 px of
+      // background above it; ⚠️ its FILL positive control fails on this tree, so the
+      // fill column is NOT relied on here):
+      //
+      //   camera              bridgeL   bridgeR
+      //   lobby  pitch 20 yaw  0     0        0     both legs are separate islands
+      //   lobby  pitch 20 yaw 22     3        0
+      //   match  pitch 58 yaw 90     —        0
+      //
+      // The arithmetic behind it, and it is not the rig's pelvis. `torsoBarrel` is a
+      // sphere pushed through a profile, so it comes to a POLE at its own bottom: at
+      // 0.05 m below the hip line the barrel is 0.147 m across the half while the
+      // thigh's inner edge — `stanceWidth` 0.2835 m, swung out by `splay` 0.44, minus a
+      // 0.118 m radius — is at 0.191 m. **A 0.045 m gap, by construction.** The rig's
+      // pelvis adds 236 px of fill at the lobby camera and still does not bridge it,
+      // exactly as `rig.ts`'s own note predicts for a STANDARD body under a wide
+      // overhanging food mass.
+      //
+      // A dough seat is the fix that this character in particular gets for free,
+      // because dough SPREADS where it sits — so the one mass answers both "the legs
+      // are detached" and "make the torso look more like dough", and it costs no new
+      // value rung (it is `TORSO_DOUGH`, the tone already there).
+      //
+      // ⚠️ Sized against the thigh, not by eye, and CAPPED by the head. Half-width
+      // 0.235 m reaches past the thigh's inner edge at every height it spans; the head
+      // is 0.674 m across, so at 0.470 m the seat is still narrower than the wedge AND
+      // narrower than the barrel's own widest point (0.49 m) — the file's "a head only
+      // reads as the hero form if the body under it is smaller" rule is not touched.
+      const seat = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), doughMat);
+      seat.name = 'pizza_dough_seat';
+      seat.scale.set(bodyHalfW * 0.955, size.h * 0.138, bodyHalfD * 0.745);
+      seat.position.y = size.h * 0.028;
+      seat.castShadow = true;
+      seat.receiveShadow = true;
+      group.add(seat);
       const barrelCentreY = (bodyTopY + bodyBottomY) / 2;
       /** `u` in (-1, 1) up the barrel, `theta` around it (0 = front, +X to the right),
        *  `k` a radial fraction of the local surface. Mirrors `torsoBarrel` exactly. */

@@ -120,12 +120,30 @@ const MITT_BUN = '#F7CE86';
 /** A rounded "hockey puck" — flat top/bottom with a filleted rim. Used for every
  * stacked layer (buns, patty, cheese, tomato, lettuce) so the whole stack reads as
  * one consistent chunky-food language. */
-function roundedPuck(radius: number, height: number, edge: number, radialSegments = 24): THREE.BufferGeometry {
+function roundedPuck(radius: number, height: number, edge: number, radialSegments = 24, bulge = 0): THREE.BufferGeometry {
   const e = Math.min(edge, height / 2 - 0.001, radius * 0.9);
   const corner = 5;
   const pts: THREE.Vector2[] = [];
-  pts.push(new THREE.Vector2(0, 0));
-  pts.push(new THREE.Vector2(Math.max(radius - e, 0.001), 0));
+  // ── `bulge`: how far the UNDERSIDE domes below y=0. Default 0 = the old flat disc.
+  // A real bun bottom is convex, and so is the reason this exists. At the lobby
+  // camera the flat version gave this character a body whose lowest contour is a
+  // straight horizontal line with background under it and a leg butted against each
+  // end — see the thigh case in `dressLimbs` for the full reading. The dome tapers to
+  // zero by `radius - e`, so it descends ONLY in the span between the two thigh tops
+  // and adds nothing outboard of them: it closes the notch it is aimed at without
+  // repeating `rig.ts:1137`'s full-span pelvis slab, which buried the thighs on 9 of
+  // 11 characters and cost hull deficiency the pass that had just bought it.
+  if (bulge > 0) {
+    const dome = 6;
+    pts.push(new THREE.Vector2(0, -bulge));
+    for (let i = 1; i <= dome; i++) {
+      const a = (Math.PI / 2) * (i / dome);
+      pts.push(new THREE.Vector2(Math.max(radius - e, 0.001) * Math.sin(a), -bulge * Math.cos(a)));
+    }
+  } else {
+    pts.push(new THREE.Vector2(0, 0));
+    pts.push(new THREE.Vector2(Math.max(radius - e, 0.001), 0));
+  }
   for (let i = 0; i <= corner; i++) {
     const a = (Math.PI / 2) * (i / corner);
     pts.push(new THREE.Vector2(radius - e + Math.sin(a) * e, e - Math.cos(a) * e));
@@ -267,10 +285,53 @@ function curvedPanel(radius: number, arcRad: number, height: number, segX = 14, 
  * A rounded limb segment, like a capsule but with INDEPENDENT top and bottom
  * radii, hanging DOWN from the joint origin (spans y=0..-len) — the orientation
  * `dressLimbs()` expects. Used so Hamburger's limbs read as tapered dough rather
- * than the rig's uniform-radius default capsule. Degenerates to a plain sphere
- * when rTop==rBot==len/2, which is exactly what the hand slot wants.
+ * than the rig's uniform-radius default capsule.
+ *
+ * ⚠️ THE OLD DOC LINE HERE READ *"Degenerates to a plain sphere when
+ * rTop==rBot==len/2, which is exactly what the hand slot wants"*, AND IT IS KEPT
+ * ABOVE THIS BECAUSE IT WAS THE BUG. That degeneration was described as a feature
+ * for a slot this function is not used for, and it is what turned all four of this
+ * character's limb segments into balls. It cannot happen any more — see below.
  */
-function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+/**
+ * ── 🚨 THE ARM WAS A CHAIN OF BALLS, AND IT IS ARITHMETIC, NOT TASTE ─────────
+ * Found by eye at the shipped lobby camera (`shots/cx/before/hamburger.png`,
+ * `charStage.ts:451`, pitch 20): each arm reads as **three separate orange balls**
+ * — an orange lump, a dark lump, another orange lump — and each leg does the same.
+ * A blind critic scored this character 4.0 against a reference 8-9 and **the number
+ * contains none of this**, because no instrument in the repo counts limb segments.
+ *
+ * The cause is one inequality. This function only emits a cylindrical SIDE when
+ * `yTopCap >= yBotCap`, i.e. when `len >= rTop + rBot`; below that it collapses to
+ * two hemispheres sharing an equator — a ball. Hamburger's four segment types, on
+ * the numbers the file actually passes:
+ *
+ *   segment      len      rTop+rBot   side?
+ *   upper arm   0.2412     0.3554     NO   -> ball
+ *   forearm     0.2200     0.2372     NO   -> ball
+ *   thigh       0.2691     0.3095     NO   -> ball
+ *   shin        0.2201     0.2245     NO   -> ball
+ *
+ * **All four. Every limb on this character was a sphere.** And it is a rediscovery,
+ * not a new bug: `rig.ts:982` and `bodies.ts:80` both record `CapsuleGeometry`
+ * degenerating to a sphere at `len < 2r` and the archetype pass that fixed it —
+ * `bodies.ts:88` even says in capitals that **the ARM row has the same defect and
+ * has not been fixed**. This function is hamburger's own private re-entry into the
+ * same trap: it was written to replace those capsules and reproduced their failure
+ * mode with `1.2x` radii, which are FATTER than the rig defaults it replaced.
+ *
+ * Two changes, and neither can affect a segment that was already well-formed:
+ *
+ *  1. The caps are bounded by the BONE rather than by the radius, so a straight
+ *     tapered side always exists. This is donut's fix, copied — see below.
+ *  2. `rise` — how far the top cap reaches ABOVE the joint. The default 0 is the old
+ *     behaviour exactly. It exists for the OTHER half of Uri's reject (§37 #1,
+ *     *"the legs are disconnected from the body"*): a segment whose apex is at the
+ *     joint butts the mass above it and draws its own closed contour there, and two
+ *     closed contours touching is what "detached" looks like. A segment that starts
+ *     INSIDE the mass has no contour of its own until it emerges from under it.
+ */
+function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12, rise = 0): THREE.BufferGeometry {
   // Profile MUST be wound bottom-to-top (y increasing), matching the convention
   // every other lathe helper in this file (`roundedPuck`, `bunDome`) already
   // uses — LatheGeometry's face winding (and therefore `computeVertexNormals`'s
@@ -280,25 +341,41 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   // and every limb using it rendered near-black: inverted normals facing away
   // from the light. Built the shape the same way round now; the y=0/y=-len
   // hang-down placement is unchanged.
-  const capSegs = 5;
+  // ── THE CAPS ARE BOUNDED BY THE BONE, NOT BY THE RADIUS ─────────────────────
+  // Lifted verbatim from `donut.ts:194`, which solved this exact defect on that
+  // character — Uri's *"limbs disattached or intersecting with the body"*, rendered
+  // as *"four separate balls per side… like a bead necklace"* — and never
+  // propagated to the five other copies of this function. It is the RIGHT fix and
+  // not the obvious one: shrinking the radii until they fit would also have worked
+  // and would have cost STOUT the limb thickness that IS its archetype. Clamping
+  // the cap HEIGHTS instead keeps every limb exactly as wide as it was and buys the
+  // straight side out of the segment's vertical budget, where there is slack.
+  //
+  // `0.42 / 0.30` sum to 0.72 < 1, so a side always exists. Donut's note records
+  // `0.18 / 0.14` being tried and reverted — it removes the waist at the joints and
+  // turns every segment into a flat-ended cylinder ("a stack of drink cans"), and
+  // it cost a value rung because a rounded limb's own shading gradient is one of the
+  // plateaus `valuescan` counts. 6 cap segments / 4 side steps for the same reason
+  // it gives: a 5/3 lathe puts a shading corner where `computeVertexNormals` has to
+  // guess, and it renders faceted.
+  const capSegs = 6;
+  const capBot = Math.min(rBot, len * 0.42);
+  const capTop = Math.min(rTop, (len + rise) * 0.30);
+  const yBotCap = -len + capBot;
+  const yTopCap = rise - capTop;
   const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
   }
-  const yBotCap = -len + rBot;
-  const yTopCap = -rTop;
-  if (yTopCap >= yBotCap) {
-    const sideSteps = 3;
-    for (let i = 1; i <= sideSteps; i++) {
-      const t = i / sideSteps;
-      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-    }
+  const sideSteps = 4;
+  for (let i = 1; i <= sideSteps; i++) {
+    const t = i / sideSteps;
+    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
   }
-  const yTopSafe = Math.max(yTopCap, yBotCap);
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
   }
   const geo = new THREE.LatheGeometry(pts, radialSegments);
   geo.computeVertexNormals();
@@ -1074,6 +1151,29 @@ export class HamburgerCharacter extends BaseCharacter {
       // back OUT at the bottom bun instead of running straight down.
       const bunR = size.w * 0.53;
       const bunH = size.h * 1.02;
+      // ── ❌ A DOMED UNDERSIDE WAS BUILT HERE, RENDERED, AND REVERTED ────────────
+      // `roundedPuck(..., bulge = bunH * 0.20)` — 0.10 m of convex bun bottom, aimed
+      // at the flat horizontal terminator this body ends in. Rendered at the lobby
+      // camera it changed **nothing**: `shots/cx/zoom/hamburger-crotch-ab.png` is two
+      // identical panels below the hem. The `bulge` parameter is kept (default 0, a
+      // no-op) because the ARITHMETIC is the finding and the next pass should not
+      // re-derive it:
+      //
+      //   A camera pitched `p` below horizontal maps a point to screen height
+      //   `y·cos p − z·sin p`. The bun's front-bottom rim is at z ≈ 0.556 m, so it
+      //   already buys `0.556·sin20 = 0.190` of downward screen travel FROM ITS
+      //   DEPTH. The dome descends on the AXIS, where **z = 0** — it gets none of
+      //   that. To reach the screen height the front rim already occupies, the dome
+      //   would have to drop `z_front · tan p` = **0.202 m**, which is 75% of the
+      //   thigh, i.e. exactly the "mass that hides the leg" failure `rig.ts:1133`
+      //   measured on 9 of 11 characters. At the MATCH camera (pitch 58) the same
+      //   number is 0.89 m — more than the character has.
+      //
+      // 🚨 **Anything added on the axis of a body is projected UP-screen relative to
+      // that body's own front surface, and the steeper the camera the worse it gets.**
+      // Same theorem as `rig.ts:1015`'s collar analysis, which found the same class of
+      // fix needed 2.1x-3.5x its size to deliver one pixel. The lever that works at a
+      // pitched camera is the FRONT of the mass, never its centre.
       const bottomBun = new THREE.Mesh(roundedPuck(bunR, bunH, bunR * 0.28), bunDarkMat);
       bottomBun.name = 'bottom_bun_mesh';
       bottomBun.position.y = size.h * 0.02;
@@ -1099,7 +1199,22 @@ export class HamburgerCharacter extends BaseCharacter {
       // bun, where a bib belongs, and hands the legs back their space.
       const apronR = bunR * 1.05;
       const apronArc = Math.PI * 0.50;
-      const apronH = bunH * 0.70;
+      // ── 0.70 -> 0.58, AND IT IS THE LEVER THE AXIAL DOME COULD NOT BE ──────────
+      // The bib is drawn on a cylinder at `apronR` — i.e. on the FRONT of the mass,
+      // z ≈ 0.58 — which by the projection above is the one place a change reaches
+      // the bottom of this character on screen. Its bottom edge, a hard `#B5342B`
+      // arc, was sitting only ~9 px above the bun's own rounded rim, so the body
+      // terminated in a bright straight-ish red line with background under it and a
+      // leg butted against each end. That line IS Uri's *"the legs are disconnected
+      // from the body"* at the lobby camera.
+      //
+      // Shortening the bib is the cheapest possible fix and it ADDS NO MASS: it
+      // uncovers ~30 px of the bun's own convex bottom, so the contour under the body
+      // becomes the bun's curve instead of the apron's edge. It also moves the
+      // garment further from the failure recorded two paragraphs down (an apron
+      // hanging into the thigh space, which measured the thighs delivering 0.006 and
+      // 0.075 of their footprint) rather than closer to it.
+      const apronH = bunH * 0.58;
       const bunBaseY = size.h * 0.02;
       const apronY = bunBaseY + bunH * 0.50;
       const apron = new THREE.Mesh(curvedPanel(apronR, apronArc, apronH), apronMat);
@@ -1194,16 +1309,57 @@ export class HamburgerCharacter extends BaseCharacter {
     const limbDarkMat = toonMat({ color: LIMB_TOAST_DARK, ramp: RAMP_CHARACTER(), roughness: 0.85 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {
-        case 'upperArmL': case 'upperArmR':
+        // ── The two TOP segments differ only in how far they reach UP ────────────
+        // 10 radial segments -> 20. A blind critic judging the home screen at 1:1
+        // named "faceted shoulder normals", and on this character specifically
+        // that is arithmetic: STOUT has the thickest limbs in the cast
+        // (`armRadius` 0.174m, so this segment is 0.21m across), and 10 segments
+        // put a 36-degree crease every 65px at menu size. The rest of the cast
+        // gets away with 10 because their limbs are half the width. Costs ~8
+        // meshes x ~120 extra triangles against a 295k-triangle match.
+        case 'upperArmL': case 'upperArmR': {
+          // `rise` 0.32 of the bone, up into the bun seam the arm emerges from. See
+          // the SEAM block above: this character's whole arm placement exists to make
+          // the arm come out from BETWEEN the bun layers, and a segment whose apex
+          // stops dead at the shoulder pivot draws its own closed silhouette right
+          // there and undoes it.
+          const geo = taperedSegment(size.len, size.radius * 1.2, size.radius * 0.84, 20, size.len * 0.32);
+          const m = new THREE.Mesh(geo, limbMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
         case 'thighL': case 'thighR': {
-          // 10 radial segments -> 20. A blind critic judging the home screen at 1:1
-          // named "faceted shoulder normals", and on this character specifically
-          // that is arithmetic: STOUT has the thickest limbs in the cast
-          // (`armRadius` 0.174m, so this segment is 0.21m across), and 10 segments
-          // put a 36-degree crease every 65px at menu size. The rest of the cast
-          // gets away with 10 because their limbs are half the width. Costs ~8
-          // meshes x ~120 extra triangles against a 295k-triangle match.
-          const geo = taperedSegment(size.len, size.radius * 1.2, size.radius * 0.84, 20);
+          // ── 🔴 URI'S §37 REJECT #1, AND THE PELVIS WAS NEVER THE ANSWER ─────────
+          // *"It seems like the legs are disconnected from the body."* `fc4d9ad` gave
+          // the rig a pelvis mass for this and the render at the lobby camera is
+          // unchanged, with the pelvis measured at **0.08% of the silhouette**. The
+          // reason is geometric and complete: `rig.ts:1147` sizes the pelvis
+          // `(stanceWidth * 0.58 + legRadius * 0.55) * 2` = 0.74 m wide and seats it
+          // ABOVE the hip line — and hamburger's dressed torso is the BOTTOM BUN,
+          // `bunR = size.w * 0.53` ~ 0.56 m radius, i.e. **1.11 m wide**, whose own
+          // base sits at `size.h * 0.02` above that same hip line. The pelvis is
+          // enclosed by the bun on every axis. It is not failing to help; it is
+          // `docs/LESSONS.md` §1 for the twenty-first time — it is there, and it is
+          // invisible, and it always would have been on this character.
+          //
+          // What the lobby render actually shows (`shots/cx/before/hamburger.png`,
+          // zoomed at `shots/cx/zoom/hamburger-hip.png`) is a **flat-bottomed drum
+          // with a bright red hem across it and two ball-chains hanging outside its
+          // left and right edges**. The body's lowest contour is a horizontal line,
+          // each leg is a separate closed outline butted against it, and background
+          // shows between them. "Detached" is a CONTOUR failure, not a fill failure,
+          // which is why a mass that delivered pixels moved the read by nothing.
+          //
+          // `rise` 0.34 of the bone puts the thigh's top cap 0.09 m INSIDE the bun.
+          // The thigh has no contour of its own until it emerges from under the
+          // overhang, so the leg reads as coming out of the body rather than as
+          // standing next to it. This is the same lever donut used from the other
+          // side (an attachment mass added to the body); here the body mass already
+          // exists and overhangs the hip by 0.06 m, so the cheaper half of the pair
+          // is to reach the leg up into it.
+          const geo = taperedSegment(size.len, size.radius * 1.2, size.radius * 0.84, 20, size.len * 0.34);
           const m = new THREE.Mesh(geo, limbMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -1212,7 +1368,12 @@ export class HamburgerCharacter extends BaseCharacter {
         }
         case 'forearmL': case 'forearmR':
         case 'shinL': case 'shinR': {
-          const geo = taperedSegment(size.len, size.radius * 0.84, size.radius * 0.64, 20);
+          // A small `rise` here too, for the same reason one segment up: the elbow and
+          // knee are the two joints where the previous fix left a double taper meeting
+          // at a point (donut's recorded "waist"), and 0.12 of the bone is enough for
+          // the lower segment's shoulder to sit inside the upper one's skirt without
+          // widening either.
+          const geo = taperedSegment(size.len, size.radius * 0.84, size.radius * 0.64, 20, size.len * 0.12);
           const m = new THREE.Mesh(geo, limbDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
