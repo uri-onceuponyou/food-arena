@@ -88,6 +88,15 @@ export interface ToonMatOptions {
   /** Render both faces — needed for thin shells like lettuce and nori. */
   doubleSide?: boolean;
   map?: THREE.Texture | null;
+  /**
+   * Hard facets instead of interpolated normals.
+   *
+   * ⚠️ **This used to be a shader that never linked, and the mesh drew NOTHING.** The
+   * rim below reads `vNormal`, which three does not declare under `FLAT_SHADED`. It is
+   * safe now — `applyRimLight` carries an `#ifdef FLAT_SHADED` fallback normal and
+   * `tools/tmp/tt_flatrim.mjs` renders both paths and refuses the pre-fix source — but
+   * see that function's note before changing either.
+   */
   flatShading?: boolean;
   /**
    * Surface roughness, 0 = mirror, 1 = fully matte. THIS IS THE MAIN TOOL for making
@@ -273,12 +282,58 @@ export function applyRimLight(
          uniform vec3 rimColor;
          uniform float rimStrength;`
       )
+      // ── `vNormal` DOES NOT EXIST UNDER `flatShading`, AND THE FAILURE IS SILENT ──
+      //
+      // This term read `normalize(vNormal)` directly for most of its life. three
+      // declares that varying inside `#ifndef FLAT_SHADED`
+      // (`three/src/renderers/shaders/ShaderChunk/normal_pars_fragment.glsl.js`), so on
+      // any material built with `flatShading: true` the fragment shader referenced an
+      // undeclared identifier, the program never linked, and **every mesh using that
+      // material drew nothing** — with no exception thrown and nothing missing from the
+      // scene graph, only a line in a console nobody reads:
+      //
+      //     THREE.WebGLProgram: Shader Error 0 - VALIDATE_STATUS false
+      //     ERROR: 0:1834: 'vNormal' : undeclared identifier
+      //
+      // `src/arena/floor.ts`'s chip layer shipped exactly that for THREE tuning rounds
+      // and two whole palettes, because **the shadow-depth program carries no rim patch**
+      // — it linked fine and kept drawing each invisible chip's contact shadow, so the
+      // floor rendered a convincing field of dark specks. `docs/LESSONS.md` §1, twentieth
+      // instance: a mesh's shadow can be drawn by a DIFFERENT program from the mesh.
+      //
+      // ── WHY A FALLBACK AND NOT A THROW ──────────────────────────────────────────
+      // Refusing `flatShading + rim` would have been honest only if the combination were
+      // unsupportable, and it is not: three shades flat surfaces by rebuilding the face
+      // normal from screen-space derivatives of `vViewPosition`
+      // (`normal_fragment_begin.glsl.js`), and the `#ifdef` below is that same
+      // expression. Flat facets are a legitimate tool here — the chip layer wanted them
+      // and had to buy them from geometry instead — so the renderer's real capability
+      // should be reachable through the factory.
+      //
+      // three's own `normal` is deliberately NOT borrowed: by `<dithering_fragment>` it
+      // has been through `<normal_fragment_maps>`, so reusing it would quietly give the
+      // flat path a normal-mapped rim while the smooth path keeps a geometric one.
+      //
+      // ── AND IT IS PIXEL-NEUTRAL ─────────────────────────────────────────────────
+      // The `#else` branch is `vNormal` unchanged and `#ifdef` resolves in the
+      // preprocessor, so the compiled program is the same one for every existing call
+      // site (none of the 315 passes `flatShading`). `tools/tmp/tt_flatrim.mjs` proves
+      // that by rendering the PRE-FIX source alongside this one on a smooth material and
+      // requiring the two frames to be byte-identical.
+      //
+      // GLSL comments are kept out of the injected string on purpose: it is concatenated
+      // into every rim shader, and the ESSL character set does not promise to accept the
+      // non-ASCII this file's prose uses.
       .replace(
         '#include <dithering_fragment>',
         `#include <dithering_fragment>
-         // vNormal / vViewPosition are in view space, so the rim follows the camera
-         // and holds on every silhouette edge regardless of character rotation.
-         float rimDot = 1.0 - clamp(dot(normalize(vNormal), normalize(vViewPosition)), 0.0, 1.0);
+         // rim: view-space, so it follows the camera and holds on every silhouette edge
+         #ifdef FLAT_SHADED
+           vec3 rimNormal = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
+         #else
+           vec3 rimNormal = vNormal;
+         #endif
+         float rimDot = 1.0 - clamp(dot(normalize(rimNormal), normalize(vViewPosition)), 0.0, 1.0);
          float rim = pow(rimDot, 2.6) * rimStrength;
          gl_FragColor.rgb += rimColor * rim;`
       );

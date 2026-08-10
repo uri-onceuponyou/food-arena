@@ -330,7 +330,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **55**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **56**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -372,7 +372,7 @@ counts and sit with `chars_metrics`:
 |---|---|---|
 | `npx tsc --noEmit` | clean | ⚠️ the **working tree**, incl. peers' half-saved files |
 | `node tools/verify-head.mjs` | OK | **the COMMITTED tree** — the only one that matters before a push |
-| `node src/game/sim.test.mjs` | **253** | sim, combat, AI, navigation, status, concealment rules |
+| `node src/game/sim.test.mjs` | **287** | sim, combat, AI, navigation, status, concealment rules. ⚠️ Was 253 before §29c — attacking breaks the cover and reveals you (§26(j)–(m)) |
 | `node src/game/economy/economy.test.mjs` | **227** | economy, seeded and deterministic. ⚠️ Was 220 before `33a0048` added the rarity-sentence derivation |
 | `node tools/aspect.mjs` | PASS, **0.00wu** | viewport fairness — point at a **snapshot** |
 | `tools/tmp/menu_accept.mjs` | **361** | 5 landscape viewports × screens, + the CSS-backtick parse |
@@ -412,6 +412,7 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/aoband.mjs --selftest` | **25** | contact darkening binned by metres from the footprint |
 | `node tools/tmp/haloprobe.mjs --selftest` | **27** | bloom-attributable halo as a paired `shipped − bloomOff`. ⚠️ Detects a rim via `userData.rimUniforms`, so it **counts a JSON-mangled corpse as live** after a plain `.clone()` — see `clonetoon_test` |
 | `node tools/tmp/clonetoon_test.mjs` | **33** | ⚠️ **`Material.clone()` does not copy `onBeforeCompile`** — the root cause of the #1 defect. Asserts the DEFECT first, and was mutation-tested: drop the re-apply → 12 fail; keep the dead uniform handle → 1 fail (exactly its row); ignore `rim: false` → 5 fail |
+| `node tools/tmp/tt_flatrim.mjs` | **24** | ⚠️ browser. **`toonMat({ flatShading: true })` was a shader that NEVER LINKED, so every mesh using it drew NOTHING** — `applyRimLight` reads `vNormal`, which three declares only inside `#ifndef FLAT_SHADED`. It survived three tuning rounds of the floor's chip layer because the **shadow-depth program carries no rim patch** and went on drawing every invisible chip's contact shadow. This guards the FACTORY, where the trap lives, rather than one caller (`ar_chipcheck` guards the chip layer): LINK from two independent instruments — GL `LINK_STATUS` and three's console — then DELIVERED PIXELS, facets actually happening, the rim answering its own uniform, and every shipped material configuration proven byte-identical to the pre-fix source. ⚠️ Its known-bad input is **that pre-fix source reproduced verbatim**, not `flatShading` itself, so the control cannot be fixed out from under it — which is exactly what happened to `ar_chipcheck`'s |
 | `node tools/tmp/ds_inventory.mjs --selftest` | **29** | the design-system inventory: every radius/shadow/size/colour literal in `src/ui`, with counts. ⚠️ **Steer waves by TOKEN COVERAGE (4.4% → 21.2%), not by literal counts** — a distinct-value count only falls when the LAST user of a value converts, so it reads zero through an entire adoption wave |
 | `node tools/tmp/cs_charcontact.mjs --selftest` | **31** | character contact shadow, measured on **two flanks mirrored about screen-vertical** — a directional cast darkens one, a centred contact darkens both. ⚠️ **Reference brawlers are NOT measurable**: every one stands inside a team-indicator decal ~3× its footprint drawn ON the contact band. `bs_06`'s vent props are the usable reference |
 | `node tools/tmp/ds_neutral.mjs --selftest` | **10** | proves a `theme.ts` change is PIXEL-NEUTRAL: 70 computed properties × every element × 5 screens × 3 viewports, judged against a drift control rather than a guessed tolerance |

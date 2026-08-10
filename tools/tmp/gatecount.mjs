@@ -326,6 +326,7 @@ const SKIP = [
   ['tools/tmp/limbcheck.mjs',              'browser',     'per-joint delivered pixels; and its expect cell is prose'],
   ['tools/tmp/cw_conceal_view.mjs',        'browser',     'concealment on rendered pixels: blip, HP pill, 3D model'],
   ['tools/tmp/cw_verify_knownbad.mjs',     'browser',     'ablates arena_probe --verify against a derived pre-fix ref'],
+  ['tools/tmp/tt_flatrim.mjs',             'browser',     'compiles real GL programs and reads delivered pixels back off the drawing buffer'],
 ];
 
 /* ══════════════════════════════════════════════════════════════════════════
