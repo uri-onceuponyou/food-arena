@@ -139,22 +139,56 @@ const PROJECTILE_HEIGHT = 0.5;
  *
  * The old heights (SPLAT 0.17, TRAIL 0.19, GROUND_VFX 0.24) were chosen against a
  * documented stack of "floor pads 0.045-0.048, seams 0.062, baked shadows
- * 0.068-0.07, prop kicks 0.08, arena decals 0.15-0.25". That stack has moved. Walked
- * live out of the running scene (`tools/tmp/vfx_layers.mjs`, which transforms all
- * eight bbox corners rather than trusting a constant), the arena's floor-level
- * OPAQUE, DEPTH-WRITING geometry now tops out at:
+ * 0.068-0.07, prop kicks 0.08, arena decals 0.15-0.25". That stack has moved — twice
+ * now — so re-derive it rather than reading the table below, with
+ * `tools/tmp/vfx_layers.mjs` (it transforms all eight bbox corners instead of trusting
+ * a constant; every ground decal here is a `CircleGeometry` rotated -90 deg about X, so
+ * scaling the local-Y extent reports flat discs as spanning their own RADIUS
+ * vertically and mis-orders the whole stack).
  *
- *     puddle disc          0.150   pipe_foot_step   0.175   cover_plinth   0.200
- *     foot meshes          0.159   debris_veg       0.182   floor_drain    0.230
- *     hub_debris_veg       0.172   cart_wheel       0.190   puddle_wet_rim 0.250
- *                                                           hazard_ring    0.252
+ * ⚠️ THE PREVIOUS VERSION OF THIS TABLE WAS WRONG BY THE TIME IT WAS READ, and it is
+ * kept here because HOW it went wrong is the point. It listed, under *opaque,
+ * depth-writing*:
  *
- * Counting only in-arena meshes (the apron's 784 pieces sit outside the playfield),
- * the number of opaque depth-writing surfaces standing ABOVE each old decal plane
- * was **62 at SPLAT_Y, 39 at TRAIL_Y, 17 at GROUND_VFX_Y** — every one of them a
- * place where a splat, a sticky-trail mark or a melee arc is silently clipped. At
- * 0.30 the only things left above are raised prop BODIES (pot crate, sack pallet,
- * chalkboard leg), which a ground decal is supposed to go behind.
+ *     puddle disc     0.150      puddle_wet_rim  0.250
+ *
+ * `e47ba7c` made both of those **transparent and non-depth-writing** — the puddle body
+ * was depth-rejecting the fighter's contact decal across the whole disc, and the fix
+ * moved the opaque wet rim into the transparent queue at opacity 1 (an exact blend
+ * passthrough) and gave every puddle layer an explicit `renderOrder` below the contact
+ * decal's 2. Nothing about the puddle is in this list any more. The rows did not become
+ * WRONG in a way that reads as wrong: they still name real geometry at real heights,
+ * which is exactly why a stale layer table is worth re-deriving rather than eyeballing.
+ *
+ * Re-walked live 2026-08-11, the arena's floor-level OPAQUE, DEPTH-WRITING geometry
+ * now tops out at:
+ *
+ *     pipe_foot            0.100   hub_debris_veg   0.172   cover_plinth      0.200
+ *     sack_pallet_bearer   0.140   pipe_foot_step   0.175   floor_drain       0.230
+ *     foot meshes          0.146   debris_veg       0.182   hazard_ring_crisp 0.252
+ *                                  cart_wheel       0.190   pot_crate_skirt   0.292
+ *
+ * and the ground TRANSPARENT stack, which is now ordered by `renderOrder` and not by
+ * height at all (none of it writes depth, so height decides nothing):
+ *
+ *     puddle halo 1.0   body 1.2   grease/water surface 1.4   wet rim 1.6
+ *     fighter contact decal 2   hazard glow 2   VFX 3..11   fog 6/7
+ *
+ * COUNTING RULE, which the old paragraph left implicit and which changes the number by
+ * 40: in-arena only (the apron's 784 pieces sit outside the playfield), and CHARACTER
+ * meshes counted separately — two fighters' limbs contribute ~40 rows and move every
+ * frame, so folding them in makes the count pose-dependent.
+ *
+ * The number of opaque depth-writing arena surfaces standing ABOVE each old decal plane
+ * was **62 at SPLAT_Y, 39 at TRAIL_Y, 17 at GROUND_VFX_Y** when those planes were
+ * retired (97c92d6) — every one of them a place where a splat, a sticky-trail mark or a
+ * melee arc was silently clipped. Re-measured today it is **58 / 35 / 13** excluding
+ * characters, **98 / 73 / 50** including them; the tree has moved a great deal since,
+ * so the two are not a paired comparison and only the conclusion carries over. At 0.30
+ * the only things left above are **10** raised prop BODIES — pot crate, pot crate lid,
+ * sack pallet, chalkboard leg, pipe band — which a ground decal is supposed to go
+ * behind. That was the claim made at 97c92d6 on trust; it is now measured, and the
+ * count is exactly those five prop kinds x2.
  *
  * Cost of the lift: a ground decal at height h on a 58-degree camera appears
  * `h / tan(58)` = 0.625h further from the camera than the point it marks, so moving
@@ -165,6 +199,9 @@ const PROJECTILE_HEIGHT = 0.5;
  * z-fighting insurance: every material in this layer sets `depthWrite: false`, so
  * VFX decals cannot occlude or z-fight each other at all, and their mutual layering
  * is decided by `renderOrder` (3/4 status rings, 5 wedges, 6 rings, 10/11 sprites).
+ * Still true and re-checked the same way: **138 renderables under `vfx_layer`, 0 of
+ * them transparent-and-depth-writing.** The arena is not in that state — see the
+ * `M.dust` note in `src/arena/shared.ts` and `tools/tmp/gl_occl_ab.mjs`.
  */
 const GROUND_CLEAR_Y = 0.30;
 /** Ground-decal layer heights. See `GROUND_CLEAR_Y` for how these were derived. */

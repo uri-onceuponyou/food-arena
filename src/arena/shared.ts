@@ -1039,6 +1039,17 @@ export function buildMaterials() {
     potMetal: glossyMat({ color: KPAL.potMetal, roughness: 0.3 }),
     potMetalDark: toonMat({ color: KPAL.potMetalDark, roughness: 0.4, map: potMetalTex }),
     broth: glossyMat({ color: PALETTE.broth, roughness: 0.22, emissive: '#3a1a05', emissiveIntensity: 0.12 }),
+    // ⚠️ BOTH OF THESE DELIVERED ZERO PIXELS AT EVERY STATION PROBED, ABLATED.
+    // `tools/tmp/gl_occl_ab.mjs` forces a material to #FF00FF at opacity 1 and requires
+    // the frame to MOVE before believing any measurement of it. At `pot_south` (700:640)
+    // and `pot_diagonal` (570:430) — the two `arena-scan` stations that exist to put the
+    // pot in frame — `kpal:flame` and `kpal:flameCore` moved the frame by **0 px**,
+    // twice each, while `pot_steam` moved it by 2,394-4,332 px in the same captures. The
+    // burner sits UNDER the pot body and at 58 degrees the body covers it, so this is
+    // `docs/LESSONS.md` §1 shape: geometry that renders, is animated every frame by
+    // `createAmbientUpdate` (flicker on `pot.flame.scale`), and reaches the screen never.
+    // ROUTED, not fixed: the geometry and its placement are `src/arena/hazards.ts`, and
+    // it is not established that the flame is MEANT to be visible from the match camera.
     flame: flatMat(KPAL.flame, { transparent: true, opacity: 0.92 }),
     flameCore: flatMat(KPAL.flameCore, { transparent: true, opacity: 0.95 }),
 
@@ -1050,6 +1061,63 @@ export function buildMaterials() {
     lettuce: toonMat({ color: PALETTE.lettuce, roughness: 0.6 }),
     onion: toonMat({ color: PALETTE.onion, roughness: 0.6 }),
     ink: flatMat(PALETTE.ink),
+
+    // ── THE SILENT-OCCLUDER CLASS, MEASURED RATHER THAN FIXED ON SIGHT ──────────
+    //
+    // `render/toon.ts`'s `flatMat` has no `depthWrite` option and three's default is
+    // `true`, so BOTH materials below are `transparent: true` while still writing depth
+    // — the authoring mistake in `docs/LESSONS.md` §1's corollary, and the one that cost
+    // the fighter's contact shadow inside both puddles (`e47ba7c`). `hc_occluders`
+    // prints `kpal:dust` for exactly this and deliberately does not gate on it.
+    //
+    // 🚨 DO NOT "FIX" `dust` BY CLEARING THE FLAG. It was probed, and clearing the flag
+    // alone makes the render WORSE, not better. `tools/tmp/gl_occl_ab.mjs` — one page
+    // load, `requestAnimationFrame` frozen, per-block self-pair 0 px and per-block drift
+    // floor 0 px, 9 loads across `grease_in` / `pot_south` / `pot_diagonal`, worst case
+    // with 12 VFX decals spawned on the floor:
+    //
+    //   what the depth write actually buries        6 .. 12 px of 1,440,000  (<= 0.0008%)
+    //   ...as summed channel delta                  82 .. 126
+    //   the whole field, ablated to magenta         6 .. 65 px               (one load: 0)
+    //
+    // ⚠️ Compare distances from `c`, the arm that is correct w.r.t. the ground stack —
+    // and compare SUMMED DELTA, not pixel counts, because counting alone conflates a
+    // 183-level change with a 3-level one and reads this as a tie:
+    //
+    //   shipped vs correct       30 / 13 / 31       <- 3.4x to 5.4x CLOSER
+    //   flag-only vs correct    111 / 70 / 105
+    //
+    // The field is 40 motes at y 0.26 .. 2.13 — NOT the y -0.025 .. 0.025 `hc_occluders`
+    // reports, which is one mote's geometry box at the origin (an `InstancedMesh` keeps
+    // its instances in an attribute the bounding box never sees; that tool says so). So
+    // the motes are ABOVE the whole ground stack, not buried under it, and along the
+    // camera ray a mote is genuinely IN FRONT of the ground decal it rejects.
+    //
+    // That is why the flag alone is not the fix. The motes carry `renderOrder 0`, so
+    // they are drawn FIRST in the transparent pass; stop them writing depth and they are
+    // simply PAINTED OVER by every ground decal drawn after them. Rendered and looked at
+    // (`shots/gl/dust6/load5/triptych_bot.png` — the same three arms, cropped on the load
+    // where a mote happened to land over a VFX decal; the field is unseeded, so that
+    // placement can be waited for but not requested): shipped shows the mote,
+    // `depthWrite:false` alone ERASES it, and `depthWrite:false` PLUS a renderOrder above
+    // the ground stack shows it again.
+    //
+    // ⚠️ ROUTED, NOT DONE: the complete fix is both halves, and `renderOrder` lives on
+    // the mesh in `src/arena/ambient.ts` (`buildDustField`), which is not this file set.
+    // It is worth <= 12 px, so it is not urgent — but half of it is a regression.
+    //
+    // `chalk` is in the same class and is CLEAN on the measurement: ablation-positive
+    // (121-158 px of chalkboard line delivered, so the instrument can see it) and its
+    // depth write buries 0 px at every station tried. Latent, left alone.
+    //
+    // ⚠️ AND THE ONE THAT IS NOT LATENT IS NOT IN THIS FILE. The same sweep found
+    // `hazard:wisp` (`src/arena/hazards.ts`, 7 materials) burying up to **1,146 px at
+    // meanD 71-89, maxD 183** at the pot's hazard ring — 100x the dust, "clearing the
+    // flag is closer to correct" on every wisp at every station, and plainly visible in
+    // `shots/gl/occl_pot2/load0/triptych_wisp5.png`: shipped draws the heat wisp as a
+    // dull blue-grey SLAB that deletes the ring's flame crown behind it. `hc_occluders`
+    // does not flag it because its predicate requires a FLAT box (h <= 0.50) and a wisp
+    // cone spans 1.0-2.0 m. Routed, not this file set.
     chalk: flatMat('#F4EFE2', { transparent: true, opacity: 0.85 }),
     dust: flatMat('#FFF6DC', { transparent: true, opacity: 0.5 }),
 
