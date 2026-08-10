@@ -330,7 +330,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **58**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **60**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -406,6 +406,8 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/cw_verify_knownbad.mjs` | **13** | ⚠️ browser. Proves `arena_probe --verify` was BLIND to a dropped concealment list, as an ablation against a **derived** pre-fix ref so it survives a rebase. Carries a tripwire for the way the blindness got in: **zero boxes is indistinguishable from "no plates"** |
 | `node tools/tmp/burger_lab.mjs --selftest` | **16** | where the two drivers' matches diverge for one character — the instrument behind the 50.6 pp Hamburger role split. **Was undocumented** |
 | `node tools/tmp/roster_lab.mjs --selftest` | **9** | per-character strength, settled-matchup count and rarity roll-up on the FIXED driver. **Was undocumented.** ~26 s, the slowest offline gate |
+| `node tools/tmp/ac_engage.mjs --selftest` | **20** | how `stepAI` engages vs how the scripted player does — press rate, press separation, kit-expression share, blind-fire share, impatience. Built to find the Sushi role split and instead **refuted four candidate mechanisms**, including the favourite: the AI presses from *closer* (69 vs 90 wu) and expresses **65%** of its kit against the player's 50%. Its positioning is better, not worse |
+| `node tools/tmp/ac_homing.mjs --selftest` | **11** | whether a homing projectile can close on a receding target given `range` as **cumulative path length**. **Predicted 47% before the mirror measured 47%** — two instruments sharing no code. This is the tool that found the systemic role asymmetry: `PLAYER_SPEED` 120 vs `AI_CHASE_SPEED` 70 means the human always shoots at the slow one |
 | `node tools/tmp/hc_occluders.mjs --selftest` | **4** | ⚠️ **the guard for the silent-occluder class** — a `transparent: true` material that still writes depth and rejects whatever is beneath it. Sweeps the arena for the authoring mistake and **is shown to FAIL on the bug it guards**: 3/4 on the tree that had it, naming both puddles, 4/4 after the fix, and its known-bad input re-injects the defect live. Found `M.dust` in `shared.ts` by the same sweep |
 | `node tools/tmp/bl_vitals_gate.mjs --selftest` | **5** | prices a proposed vitals change against §22's structural bounds before it is measured. Every bound is shown to FAIL on a known-bad roster, so a green result means the bound was tested — not that it was skipped. Refused nothing in the Sushi/Legendary pass, which is how that pass established §22 was not the thing blocking it |
 | `node tools/tmp/limbmatch.mjs --selftest` | **27** | hull deficiency / appendages / share — **computable on a reference plate**. `--mode control` adds 9 more, but they render in a browser and are not part of this contract |

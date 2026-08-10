@@ -267,6 +267,8 @@ const OFFLINE = [
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
+  { key: 'tools/tmp/ac_engage.mjs --selftest', probes: [pr(['tools/tmp/ac_engage.mjs', '--selftest'], S)] },
+  { key: 'tools/tmp/ac_homing.mjs --selftest', probes: [pr(['tools/tmp/ac_homing.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/bl_vitals_gate.mjs --selftest', probes: [pr(['tools/tmp/bl_vitals_gate.mjs', '--selftest'], SLASH_ASSERT)] },
   // Captures the NUMERATOR, not the denominator. `SLASH_ASSERT` above takes the denominator, which
   // is fine when a tool only prints on success but would let `hc_occluders 3/4` satisfy a doc value

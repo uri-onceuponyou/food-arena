@@ -1142,6 +1142,39 @@ export const SPEED = {
   /** 196 wu/s */ close: projectileSpeed(REACH.rangedClose, FLIGHT_MS.normal),
   /** 232 wu/s */ mid: projectileSpeed(REACH.rangedMid, FLIGHT_MS.normal),
   /** 256 wu/s */ long: projectileSpeed(REACH.rangedLong, FLIGHT_MS.normal),
+  /**
+   * 280 wu/s. Added 2026-08-10 for Sushi's Big Catch, and the reason is a rung that was
+   * MISSING rather than a number that was wrong: `rangedMax` existed only at `slow` and
+   * `drift`, so a weapon that had to reach the fair radius could not do it in a normal
+   * flight time. See `maxSlow` below for the failure that exposed the gap.
+   *
+   * ⚠️ This is numerically equal to `closeFast` (280) TODAY and they must not be conflated.
+   * `closeFast` is `rangedClose / fast`; this is `rangedMax / normal`. They coincide only
+   * because 98/350 happens to equal 140/500. Point a weapon at the rung that describes its
+   * REACH — that is the whole purpose of this table, which says so above: *"so a weapon's
+   * `range` and `speed` can never drift out of sync."*
+   */
+  /** 280 wu/s */ max: projectileSpeed(REACH.rangedMax, FLIGHT_MS.normal),
+  /**
+   * 160 wu/s.
+   *
+   * ── ⚠️ A HOMING PROJECTILE ON THIS RUNG CANNOT CATCH A FLEEING HUMAN ─────────
+   *
+   * `stepProjectiles` retires a projectile at `traveled >= range` — CUMULATIVE PATH
+   * LENGTH, not displacement. At this rung Big Catch gets 875 ms and 140 wu of path.
+   * Against a target receding at `AI_CHASE_SPEED` (70) the closing rate is 90 and it
+   * arrives; against one receding at `PLAYER_SPEED` (120) the closing rate is 40 and it
+   * EXPIRES IN FLIGHT.
+   *
+   * `speedFor` applies both role constants, so **the human always shoots at the slow one
+   * and `stepAI` always shoots at the fast one.** Measured: every homing weapon is worth
+   * **1.89-2.14x more in the player's hands, with no decision differing** — both sides
+   * press Big Catch 2.02x/match from the same separation for the same authored 27; the
+   * player collects 26.48 and the AI collects 12.65.
+   *
+   * This is a ROLE ASYMMETRY IN THE SIM, not an AI defect, and it is why Sushi looked like
+   * the character `stepAI` could not play. See `tools/tmp/ac_homing.mjs`.
+   */
   /** 160 wu/s */ maxSlow: projectileSpeed(REACH.rangedMax, FLIGHT_MS.slow),
   /**  80 wu/s */ maxDrift: projectileSpeed(REACH.rangedMax, FLIGHT_MS.drift),
 } as const;
@@ -2058,7 +2091,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Rice', name: 'Rice Spray', type: 'ranged', range: REACH.rangedClose, damage: 2, cooldown: 700, speed: SPEED.closeFast, color: '#FFFFFF', effect: null, pellets: 5, spreadDeg: 35, emoji: '🍚' },
       { key: 'Seaweed', name: 'Seaweed Bait', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 1000, speed: SPEED.mid, color: '#7CB518', effect: 'slow', emoji: '🌿' },
       { key: 'Fish', name: 'Fish Pile', type: 'melee', range: REACH.meleeStrong, damage: 6, cooldown: 1200, cone: 150, color: '#F4A261', effect: null, emoji: '🐟' },
-      { key: 'Catch', name: 'Big Catch', type: 'ranged', range: REACH.rangedMax, damage: 9, cooldown: 3200, speed: SPEED.maxSlow, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, emoji: '🐡' },
+      // ── AUTHORISED DEVIATION #12 (2026-08-10): SUSHI — `speed` SPEED.maxSlow -> SPEED.max
+      //    (160 -> 280 wu/s). Not a strength tune. At `maxSlow` this homing shot EXPIRED IN
+      //    FLIGHT against a fleeing human and ARRIVED against a fleeing AI, because
+      //    `stepProjectiles` retires on cumulative path length and PLAYER_SPEED (120) is
+      //    1.71x AI_CHASE_SPEED (70). Both roles press it 2.02x/match from the same
+      //    separation for the same authored 27; the player collected 26.48, the AI 12.65.
+      //    Same rung, same reach, normal flight time instead of slow. See `SPEED.maxSlow`.
+      { key: 'Catch', name: 'Big Catch', type: 'ranged', range: REACH.rangedMax, damage: 9, cooldown: 3200, speed: SPEED.max, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, emoji: '🐡' },
     ],
     abilities: [
       { emoji: '🍚', name: 'Rice Spray', desc: 'Throws a spray of rice grains - each one chips away a little health' },

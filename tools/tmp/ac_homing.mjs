@@ -212,13 +212,30 @@ if (args.selftest) {
   // expire independently, the partial cells are the OFF-AXIS ones, so that is where
   // non-degeneracy has to be asserted. Fixing it by widening the tolerance would have
   // hidden the sharpest number in the table.
+  //
+  // ⚠️ AND THE SECOND VERSION WAS WRONG TOO, IN THE OPPOSITE DIRECTION. It is kept here
+  // with its reason for the same purpose as the first. It read `.every(...)` — requiring
+  // BOTH cells to be strictly partial — and it went RED the moment Sushi's Big Catch was
+  // moved from `SPEED.maxSlow` to `SPEED.max` (160 -> 280 wu/s), because the 45°-at-flee-
+  // speed cell then resolved to a clean 27/27.
+  //
+  // Nothing about the rig changed. The assertion had quantified over live roster data, so
+  // FIXING THE BUG SHRANK THE GUARD'S COVERAGE — the exact failure mode `CLAUDE.md` #6 and
+  // `LESSONS.md` §13 name, and it is worth noting it fired on the very tool built to prove
+  // that class of thing. `.some` is what the assertion's own wording always claimed ("some
+  // cell IS strictly partial") and is what non-degeneracy actually requires: a rig that
+  // only ever returned {0, full} still fails it.
+  //
+  // Both cells are still printed, deliberately. A reader who sees `18/27  27/27` can tell
+  // that one cell went full *because the weapon was fixed*, which is information; a reader
+  // who only saw a green tick could not.
   {
     const partial = [
       fireOnce('sushi', 'Catch', 95, 120, 90),   // perpendicular at player speed
-      fireOnce('sushi', 'Catch', 95, 85, 45),    // 45° at flee speed
+      fireOnce('sushi', 'Catch', 95, 85, 45),    // 45° at flee speed — FULL since SPEED.max
     ];
     ok('some cell IS strictly partial — the rig resolves more than {0, full}',
-      partial.every((r) => r.dealt > 0 && r.dealt < r.expected),
+      partial.some((r) => r.dealt > 0 && r.dealt < r.expected),
       partial.map((r) => `${r.dealt}/${r.expected}`).join('  '));
   }
   // ── E. A NON-HOMING projectile is UNAFFECTED by the target's heading past the
