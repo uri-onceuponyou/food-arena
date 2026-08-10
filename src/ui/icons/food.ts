@@ -578,7 +578,24 @@ export const FOOD_ICONS: Record<string, string> = {
   /** The fill is a warm off-white, NOT `P.cream`: cream is exactly the weapon slot's
    *  own plate colour, and round 1 shipped a cream egg on a cream plate that a blind
    *  legibility test read as an empty slot. Anything light that lands in the weapon
-   *  bar needs its own value edge. */
+   *  bar needs its own value edge.
+   *
+   *  UNCHANGED, and the reason is a caveat about the INSTRUMENT rather than about the art.
+   *  One round had this **0/3 at native size, named "a gold coin" x3** — a cross-family
+   *  leak from a weapon glyph onto the primary currency, and the cause looked obvious: a
+   *  symmetric ellipse whose right half is a whole value darker is a struck coin seen
+   *  edge-lit. A true OVOID (1:1.44, narrow at the top) with the shading moved to a
+   *  bottom crescent was drawn and measured paired, twin floor 0 of 9:
+   *  **3/3 -> 3/3 magnified, 3/3 -> 3/3 native, Δ +0 at both.**
+   *
+   *  ⚠️ THE SHIPPED EGG SCORED 3/3 ON THAT PLATE, so the defect did not reproduce and the
+   *  Δ is measured against a ceiling. The likely reason is worth writing down because it
+   *  is a property of the harness: that plate also carried a REDRAWN COIN that is
+   *  unmistakably a coin. In a forced-choice round, "a gold coin" is only available as a
+   *  wrong answer while no tile has claimed it. **A paired plate cancels the judge, not
+   *  the plate's own composition** — putting several subjects on one plate can remove a
+   *  wrong answer from circulation. Re-measure `egg` on a plate whose coin is unchanged
+   *  before concluding anything about it. */
   egg: `
 <ellipse cx="12" cy="13.1" rx="6.7" ry="8.3" fill="#E4CFA6"/>
 <path d="M12 4.8a6.7 8.3 0 0 1 0 16.6z" fill="#C9AE7C" stroke="none"/>

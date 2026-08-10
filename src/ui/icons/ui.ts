@@ -16,9 +16,16 @@
  * as a cardboard shipping box."* Both verdicts are about SILHOUETTE, and both are
  * fair criticisms of the emoji that were there:
  *
- *  * A moon and a coin have the same outline: a flat circle. So the coin below is not
+ *  * 🔴 REVERSED, AND THE ORIGINAL IS KEPT BECAUSE IT IS THE INSTRUCTIVE HALF. It read:
+ *    *"A moon and a coin have the same outline: a flat circle. So the coin below is not
  *    a circle. It is an ELLIPSE with a darker disc peeking out beneath it — a struck
- *    coin lying at a tilt, which no crescent-lit sphere ever looks like.
+ *    coin lying at a tilt, which no crescent-lit sphere ever looks like."*
+ *    The reasoning is sound and the premise was never checked: **there is no moon in
+ *    this icon set, and there IS a bottle cap.** An ellipse with a same-shape darker
+ *    ellipse under it is `cap`'s construction, and at the currency's smallest delivered
+ *    size three blind judges named the shipped coin "a bottle cap" 3 of 3. The tilt is
+ *    gone; see `coin` below for the paired measurement. **A defect avoided by argument
+ *    is not a defect measured.**
  *  * A shipping box and a treasure chest have the same outline too, and the emoji is
  *    literally a cardboard carton. The chest below has a DOMED lid, a gold band and a
  *    lock plate, so it is unmistakable at any size and it separates cleanly from the
@@ -130,11 +137,45 @@ export const UI_ICONS: Record<string, string> = {
      was rewritten for. A COIN STACK was drawn and rendered first and was WORSE — three
      stacked ellipses at 20px are a stack of pancakes, i.e. nearer to `honey`'s banded jar
      than the single coin was. Rejected before any judge saw it. */
+  /* 🔴 THE TILT IS GONE, AND WITH IT THE ARGUMENT AT THE TOP OF THIS FILE.
+     WAS: `<ellipse cy="14.2" fill="#7F4E00"/>` under `<ellipse cy="11.2" fill="#D98200"/>`
+     with an ink-stroked cream star and a white 1.7-unit arc. Kept in words, because the
+     rule it encoded has been REVERSED rather than deleted. This file's header says:
+
+       *"A moon and a coin have the same outline: a flat circle. So the coin below is not
+       a circle. It is an ELLIPSE with a darker disc peeking out beneath it."*
+
+     That was reasoned from a MOON. It was never measured, and what it actually built is
+     `cap`'s construction exactly — an ellipse with a same-shape darker ellipse offset
+     downward — on the game's PRIMARY CURRENCY, at a delivered size nobody had measured.
+     The moon it was avoiding is not in the icon set. The bottle cap is.
+
+     ── MEASURED, PAIRED: one plate, one judge, both drawings, twin floor 0 of 9 ──
+     11.03 px on rgb(253,233,212), the smallest of coin's 21 delivered sites:
+
+         protocol            shipped ellipse    THIS       Δ (exact, same judge)
+         one look, native    0/3  "a bottle cap" x3   3/3   **+3 of 3**
+         judge may magnify   3/3                      3/3    +0 of 3
+
+     Two things that only a paired plate could separate, and the second is the surprise:
+
+      1. THE TILT IS THE DEFECT, NOT THE INK. A third arm kept the tilted ellipses and
+         removed only the interior strokes: 2/3, still "a bottle cap" x1. Removing ink
+         recovers most of it; removing the tilt recovers all of it.
+      2. THE ZOOMED ARM CANNOT SEE THIS AT ALL — both drawings are 3/3 there. A blind
+         judge allowed to magnify wrote of the shipped tile: *"the crimped-looking bottom
+         band is genuinely readable as a bottle cap."* It is an ACUITY defect, so a round
+         judged at magnification would have reported the currency as fine. `a77ff30`.
+
+     So: a full disc, a goldDark rim, and a cream star with NO interior stroke. The star
+     survives from the version above — it is the one part that measured well. Every
+     interior outline is gone on purpose: at 11 px, 1.7 units of ink is 0.78 px drawn
+     around each of three stacked shapes, and the gold never becomes a mass.
+     ⚠️ Do not re-tilt this. It has been drawn, delivered and judged both ways. */
   coin: `
-<ellipse cx="12" cy="14.2" rx="9" ry="7" fill="#7F4E00"/>
-<ellipse cx="12" cy="11.2" rx="9" ry="7" fill="#D98200"/>
-<path d="${starPath(5, 5.6, 2.4, 12, 11.4)}" fill="#FFEFC0" stroke-width="1.4"/>
-<path d="M8.2 8.6a7 5.4 0 0 1 3.4-2.3" stroke="${P.white}" stroke-width="1.7"/>`,
+<circle cx="12" cy="12" r="9.5" fill="${P.goldDark}"/>
+<circle cx="12" cy="12" r="7.6" fill="${P.gold}" stroke="none"/>
+<path d="${starPath(5, 5.8, 2.5, 12, 12)}" fill="${P.cream}" stroke="none"/>`,
 
   gem: `
 <path d="M6.6 3.9h10.8l3.6 5.3L12 20.4 3 9.2z" fill="${P.water}"/>
@@ -244,7 +285,35 @@ export const UI_ICONS: Record<string, string> = {
    *  What that costs to settle is a PAIRED plate — the before-art and after-art tiles on
    *  ONE plate seen by ONE judge in ONE round, so the panel's chest-happiness cancels the
    *  way identical seeds cancel in a matchup delta. That is the next move here, and it is
-   *  not a redraw. */
+   *  not a redraw.
+   *
+   *  ── THE PAIRED PLATE WAS BUILT. COLOUR IS NOT THE LEVER, AND NEITHER IS THE LID. ──
+   *  `a77ff30` ran the colourway question above: shipped 1/3, the goldDark candidate 1/3,
+   *  clasp-only 1/3, **Δ = 0 of 3, twin floor clean**. Every judge gave all three the same
+   *  answer. So the ratios in this comment are correct arithmetic about the wrong variable.
+   *
+   *  This pass then tested the GEOMETRY the ratios implied — an OVERHANGING FLAT LID,
+   *  2.6 units wider than the body on each side, replacing the trapezoid, with the clasp
+   *  straddling the seam evenly and the colours held fixed. It puts the lid in the
+   *  SILHOUETTE, which is the channel that survives downscaling. Measured paired at the
+   *  delivered 11.83 px, twin floor 0 of 9:
+   *
+   *      protocol            shipped   overhanging lid   Δ
+   *      judge may magnify   1/3       1/3               +0 of 3   ("a treasure chest" x2 both)
+   *      one look, native    0/3       0/3               +0 of 3
+   *
+   *  NOT SHIPPED. Three variables — front/lid ratio, clasp dominance, lid silhouette —
+   *  have now each moved with no effect, so the next pass should not spend a fourth on
+   *  the box's construction.
+   *
+   *  ⚠️ WHAT THE ZOOMED JUDGES ACTUALLY SAID IS THE LEAD, and it is about the EMBLEM:
+   *      *"Read as a treasure chest rather than a loot box with a burger on it, because
+   *      unlike [the other three] nothing sits ON TOP of the box."*
+   *  `BURGER_EMBLEM` is stamped on the FRONT PANEL. `FLAME_EMBLEM`, `LEAF_EMBLEM` and
+   *  `BOW_EMBLEM` all sit ABOVE THE LID, breaking the box's outline — and those three
+   *  boxes are the ones that pass. That is a silhouette difference, it is the one
+   *  structural asymmetry left in the family, and it is untested. Move the burger onto
+   *  the lid before touching anything else here. */
   boxBurger: box(P.gold, P.mustard, P.ketchup, BURGER_EMBLEM),
   boxPineapple: box(P.grape, P.grapeHi, P.mustard, LEAF_EMBLEM),
   boxRed: box(P.ketchup, '#E9536A', P.mustard, BOW_EMBLEM),
@@ -367,11 +436,62 @@ export const UI_ICONS: Record<string, string> = {
      blob, and a blind critic read that blob as the SPEED bolt sitting two chips away —
      the worst possible confusion for a slow debuff. A spiral is one stroke, survives
      any size, and cannot be mistaken for a bolt. */
+  /* 🔴 IT COULD BE MISTAKEN FOR A COIN, WHICH IS WORSE, AND THE CAUSE WAS ALREADY
+     WRITTEN DOWN ONE FILE OVER.
+     WAS: `<circle r="9.1" fill="${P.gold}"/>` with the spiral above drawn INSIDE it.
+     Kept in words. `food.ts`'s `swirl` comment says, of the identical construction:
+
+       *"a spiral drawn INSIDE a filled disc is a disc, because at this size the disc is
+       the mass and the spiral is a 1.7px scratch on it."*
+
+     `swirl` was redrawn for exactly that and this glyph — the same drawing — was never
+     revisited. At its one delivered site (13.8 px, the `chars-fact` INK pill, cream
+     outline, 77 occurrences) three blind judges allowed to magnify scored it **1/3, "a
+     gold coin" x2**.
+
+     ── PAIRED, three arms on one plate, twin floor 0 of 9 ─────────────────────
+         arm                                        zoom    native
+         A  shipped disc + interior spiral          1/3     0/3
+         C  SAME disc, spiral fattened to 2.8u and
+            darkened to near-ink — contrast only    1/3     0/3   Δ +0
+         B  this: the spiral BREAKS THE OUTLINE     **3/3**  0/3   **Δ +2 of 3**
+
+     C is the control that matters: making the interior line as loud as it can be moved
+     NOTHING. The silhouette is the whole lever, which is `food.ts`'s rule restated with
+     a number. A blind judge, magnifying, put it plainly: *"only 44 shows the shell's
+     pointed apex; 8 and 24 alone are weakly identifiable."*
+
+     ⚠️ AND IT IS STILL 0/3 AT NATIVE SIZE — "a gold coin" x2, "an egg" x1 — so the
+     apex fixed the DRAWING and not the low-acuity read. The remaining defect is
+     measured and is HUE, not shape: at 13.8 px a warm gold rounded mass is the
+     currency, and `coin`, `trophy`, `medal`, `honey`, `gear`, `lock`, `home`, `cone`,
+     `burst` and this are all gold. Shipped anyway because +2 of 3 at one protocol and
+     0 at the other is a strict improvement over a floor of 0 — but the next move on
+     this glyph is a COLOUR, not another silhouette, and it is untried.
+     ⚠️ A spiral RIBBON was rejected on arithmetic, not taste: at 13.8 px one viewBox
+     unit is 0.575 px, so two turns need a gap wider than the stroke and no pair of
+     numbers under 24 units gives one. */
   slow: `
-<circle cx="12" cy="12" r="9.1" fill="${P.gold}"/>
-<path d="M12 12a2.9 2.9 0 1 0 2.9 2.9c0-3.4-3.2-5.3-6.3-4.1-3.4 1.3-4.6 5.3-2.6 8.2" stroke-width="2.1"/>`,
+<path d="M13 7.6 21.8 3.6 18.4 13.2z" fill="${P.gold}"/>
+<circle cx="10.6" cy="14.2" r="7.8" fill="${P.gold}"/>
+<path d="M14.2 18.4a5 5 0 1 1 1-5.6" stroke="#5A3200" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+<circle cx="10.6" cy="14.2" r="1.7" fill="#5A3200" stroke="none"/>`,
 
   /* Win count. Exists purely so the trophy stops meaning two different quantities. */
+  /* UNCHANGED, and the redraw that was built is recorded rather than shipped.
+     At the delivered 11.19 px this is 3/3 when a judge may magnify and **0/3 at native
+     size in two separate rounds** — but it fails DIFFERENTLY every round: "a trophy cup"
+     x3 in one, "a chef's hat" x2 + "a party popper" x1 in the next. That is a LEGIBILITY
+     failure (nobody can name it) rather than a DISTINGUISHABILITY one, and `LESSONS.md`
+     §3 says those have opposite fixes.
+     ⚠️ So the trophy↔medal mutual swap this icon exists to prevent — 3+3 in one round —
+     did NOT reproduce: `trophy` scored 3/3 at native size on the next plate. Do not treat
+     it as standing.
+     The candidate: ONE wide ketchup ribbon with a V tail over a gold disc with a
+     mustardHi hub, replacing the two thin splayed strips. Paired, twin floor 0 of 9:
+     **3/3 -> 3/3 magnified, 0/3 -> 0/3 native, Δ +0 at both.** It moved the wrong answer
+     onto "a lollipop" x3 — a band above a round mass is a lolly — which is a candidate no
+     tile on the plate draws, i.e. it bought nothing and cost a new neighbour. Reverted. */
   medal: `
 <path d="M8.4 2.2 11 8.6H7L4.4 2.2z" fill="${P.ketchup}"/>
 <path d="M15.6 2.2 13 8.6h4l2.6-6.4z" fill="${P.water}"/>

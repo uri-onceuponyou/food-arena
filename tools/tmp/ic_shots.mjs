@@ -114,5 +114,37 @@ await shoot('odds-titles-desk', DESK, async (page) => {
   return { x: b.x, y: b.y, width: b.width, height: Math.min(b.height, 700) };
 });
 
+// 7. THE CURRENCY AT ITS SMALLEST DELIVERED SIZE — `coin` in `.tr-node-note`, 11.03 px,
+//    100 occurrences, and the site the paired round scored. `coin` also ships at 20 other
+//    sizes up to 42 px and in BOTH polarities (cream plates on the trophy road, ink pills
+//    on home), so this is the worst case rather than the only one.
+await shoot('trophy-road-coin-desk', DESK, async (page) => {
+  await at(page, 'trophies');
+  const els = await page.$$('.tr-node-note');
+  for (const el of els) {
+    const b = await el.boundingBox();
+    if (b && b.width > 8) return pad({ x: b.x, y: b.y - 40, width: Math.min(b.width, 420), height: b.height + 80 }, 8);
+  }
+  throw new Error('no .tr-node-note with a box');
+});
+
+// 8. THE DEBUFF FACT PILL — `slow` at 13.8 px on the ink pill with a CREAM outline, its
+//    only delivered site (77 occurrences), sitting in the same row as `range`, `heal`,
+//    `stun` and `timer`. Polarity is per-site and getting it backwards is what
+//    invalidated every earlier round, so this is shot rather than assumed.
+await shoot('fact-pill-slow-desk', DESK, async (page) => {
+  await at(page, 'characters');
+  for (const c of ['burrito', 'noodle', 'sushi', 'waterbottle', 'pizza', 'hamburger']) {
+    await page.click(`.chars-card[data-char="${c}"]`).catch(() => {});
+    await page.waitForTimeout(500);
+    const els = await page.$$('.chars-fact');
+    for (const el of els) {
+      const t = await el.textContent();
+      if (/slow/i.test(t)) return pad(await el.boundingBox(), 10);
+    }
+  }
+  throw new Error('no .chars-fact mentioning slow on any character');
+});
+
 await browser.close();
 console.log(`\nwrote ${OUT}`);
