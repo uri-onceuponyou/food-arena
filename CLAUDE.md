@@ -16,6 +16,7 @@ Remote: https://github.com/uri-onceuponyou/food-arena — push freely.
 | **`docs/STATE.md`** | What is DONE (with evidence) and what is PENDING (ranked). Start here. |
 | **`docs/DECISIONS-FOR-URI.md`** | Every judgement call parked for Uri, with what was assumed and what reversing costs. Opens with a one-screen answer sheet. |
 | **`docs/LESSONS.md`** | Every hard-won learning. Reading it is cheaper than re-learning any of it. |
+| **`docs/APP.md`** | What a mobile wrapper must supply, measured rather than assumed — the scheme requirement (`file://` is unbootable), the audio-unlock number, safe areas, fonts, payload. |
 | **`docs/TOOLS.md`** | The runbook and the gate battery. Most tools exist to answer a question that cost real time. |
 | `PROGRESS.md`, `LAUNCH_PLAN.md` | Historical. Superseded by `docs/LESSONS.md` where they overlap. |
 

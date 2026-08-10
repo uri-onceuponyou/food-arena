@@ -63,6 +63,17 @@ your run; it does not remove peers' half-saved work. **For any A/B you will quot
 DETACHED WORKTREE of a known commit.**
 ⚠️ A fresh snapshot's **first** client eats a dep-optimisation reload that presents as
 `execution context was destroyed`. Warm it with a cheap page load.
+🚨 **`page.evaluate()` GRANTS TRANSIENT USER ACTIVATION.** Playwright issues it over CDP with
+`userGesture: true`. Proved on `about:blank` with a page-side sampler: `isActive` false at 1003 ms,
+**true at 1205 ms, from a single `page.evaluate(() => 1)`.** So a probe's own bookkeeping read hands
+the app a gesture it never received — an audio no-tap control reported the theme playing at rms
+0.022 with nothing tapped. **This applies to every probe that evaluates before the gesture it
+measures**, not just audio. Fix structurally: observe page-side via `addInitScript`, allow exactly
+one `evaluate` per cell and make it LAST, and compute the verdict from the samples.
+
+⚠️ **`process.exit()` inside a `try` SKIPS THE `finally`** — a frozen tree leaked on every run of a
+probe that looked correct.
+
 ⚠️ **`window.__screenReady` IS NOT A PAINT** — measured opacity 0.000 when it flips. Wait on
 `tools/tmp/settle.mjs`, and on the screen's **NAME**.
 

@@ -339,6 +339,7 @@ const SKIP = [
   // near-miss on a key. Compare `tools/audio-probe.mjs --mode all` below.
   ['tools/tmp/ic_plate.mjs --selftest --url <snapshot>', 'browser', 'renders the delivered-size fixture against a snapshot; its known-bad input is the harness AS IT HISTORICALLY SHIPPED'],
   ['tools/perf.mjs --mode navselftest', 'browser', 'runs a control arm AND a real page.reload() arm in one invocation — the proof that the reload guard fires'],
+  ['tools/tmp/ab_basepath.mjs --selftest', 'browser', 'four vite builds plus a real page per cell; verdict is a PASS/FAIL matrix, not a count'],
   ['tools/tmp/perf_tier.mjs --mode navselftest', 'browser', 'the same reload-guard proof for the CLONE of perf.mjs'],
   // ⚠️ SKIP for a SECOND reason on top of "browser", and it is the interesting one: its checked
   // count is NOT STABLE UNDER GPU CONTENTION. Observed `0 of 24` with "no verdict: 0" on one run
