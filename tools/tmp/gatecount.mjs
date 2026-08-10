@@ -268,8 +268,6 @@ const OFFLINE = [
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/hm_audit.mjs --selftest', probes: [pr(['tools/tmp/hm_audit.mjs', '--selftest'], S)] },
-  { key: 'tools/tmp/hw_ord.mjs --selftest',    probes: [pr(['tools/tmp/hw_ord.mjs', '--selftest'], /^hw_ord\s+(\d+)\/\d+\s*$/m)] },
-  { key: 'tools/tmp/hw_burner.mjs --selftest', probes: [pr(['tools/tmp/hw_burner.mjs', '--selftest'], /^hw_burner\s+(\d+)\/\d+\s*$/m)] },
   { key: 'tools/tmp/dup_census.mjs --selftest', probes: [pr(['tools/tmp/dup_census.mjs', '--selftest'], /^\s*(\d+)\/\d+ selftest arms passed\s*$/m)] },
   { key: 'tools/tmp/rg_neckz.mjs --selftest', probes: [pr(['tools/tmp/rg_neckz.mjs', '--selftest'], /^\s*(\d+) pass, \d+ fail\s*$/m)] },
   { key: 'tools/tmp/rg_taper.mjs --selftest', probes: [pr(['tools/tmp/rg_taper.mjs', '--selftest'], /^\s*(\d+) pass, \d+ fail\s*$/m)] },
@@ -339,6 +337,14 @@ const SKIP = [
   // near-miss on a key. Compare `tools/audio-probe.mjs --mode all` below.
   ['tools/tmp/ic_plate.mjs --selftest --url <snapshot>', 'browser', 'renders the delivered-size fixture against a snapshot; its known-bad input is the harness AS IT HISTORICALLY SHIPPED'],
   ['tools/perf.mjs --mode navselftest', 'browser', 'runs a control arm AND a real page.reload() arm in one invocation — the proof that the reload guard fires'],
+  // ⚠️ These two IGNORE `--selftest` entirely — neither file contains the string — and run the real
+  // probe against PREVIEW_BASE. Registered OFFLINE by mistake, which made gatecount boot a GPU
+  // probe on every run; they then hung under six-agent contention where they had passed at 18-25s.
+  // Their 5/5 is about the INSTRUMENT (self-pair 0 px, drift bounded, ablation positive-or-BLIND),
+  // so the count is stable regardless of what the sweep finds — which is exactly why it looked
+  // like a well-behaved offline count.
+  ['tools/tmp/hw_ord.mjs --selftest',    'browser', 'renderOrder choice for a transparent ground-stack material; ignores --selftest, runs the real probe'],
+  ['tools/tmp/hw_burner.mjs --selftest', 'browser', 'the burner ablation with its positive control; ignores --selftest, runs the real probe'],
   ['tools/tmp/ab_basepath.mjs --selftest', 'browser', 'four vite builds plus a real page per cell; verdict is a PASS/FAIL matrix, not a count'],
   ['tools/tmp/perf_tier.mjs --mode navselftest', 'browser', 'the same reload-guard proof for the CLONE of perf.mjs'],
   // ⚠️ SKIP for a SECOND reason on top of "browser", and it is the interesting one: its checked
