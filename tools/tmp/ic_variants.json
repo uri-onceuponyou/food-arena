@@ -101,5 +101,53 @@
       "note": "The same overhanging lid, same colourway. Carried on the plate so the geometry is tested on TWO members of a family that shares one function, not on one.",
       "svg": "\n<path d=\"M4.8 10.4h14.4v8.3a1.6 1.6 0 0 1-1.6 1.6H6.4a1.6 1.6 0 0 1-1.6-1.6z\" fill=\"#D62839\"/>\n<path d=\"M2.2 5.2h19.6v5.2H2.2z\" fill=\"#E9536A\"/>\n<path d=\"M9.9 8.4h4.2v5.2H9.9z\" fill=\"#FFC93C\" stroke-width=\"1.3\"/>\n<path d=\"M12 5.6C9.2 1.6 4.8 2.8 6.2 5.6M12 5.6C14.8 1.6 19.2 2.8 17.8 5.6\" fill=\"#FFC93C\" stroke-width=\"1.4\"/>"
     }
+  ],
+  "swirl": [
+    {
+      "id": "A",
+      "note": "SHIPPED — three convex teardrop blades radiating from a cream hub. Reads as a three-leaf sprig; \"seaweed\" x3 native on seed 7, 2/3 on seed 13."
+    },
+    {
+      "id": "B",
+      "note": "FUNNEL — a tornado: four stacked lozenges of decreasing width. The radial composition is abandoned entirely, and the silhouette (wide top tapering to a point) is owned by nothing else in the set. Rotation is carried by the STACK, which survives downscaling, rather than by a curve, which does not.",
+      "svg": "\n<ellipse cx=\"12\" cy=\"5.6\" rx=\"9.3\" ry=\"3.1\" fill=\"#1E90D8\"/>\n<ellipse cx=\"11.3\" cy=\"11.4\" rx=\"6.5\" ry=\"2.6\" fill=\"#1E90D8\"/>\n<ellipse cx=\"10.9\" cy=\"16.2\" rx=\"4.1\" ry=\"2.2\" fill=\"#1E90D8\"/>\n<ellipse cx=\"11.4\" cy=\"20.2\" rx=\"2.2\" ry=\"1.7\" fill=\"#1E90D8\"/>"
+    },
+    {
+      "id": "C",
+      "note": "HOOKED BLADES, SAME RADIAL COMPOSITION. Each leaf becomes a comma whose outer edge is concave, so the outline spirals instead of radiating. Isolates the two halves of the diagnosis: if C alone recovers the read the defect was the BLADE SHAPE; if only B does, three masses around a hub is a sprig however you draw the mass.",
+      "svg": "\n<g fill=\"#1E90D8\">\n<path d=\"M12 12c0-5.2 2.4-8.9 6.6-9.9 1.9-.4 3.4 1.1 3 3-1 4.2-4.3 6-9.6 6.9z\"/>\n<path d=\"M12 12c0-5.2 2.4-8.9 6.6-9.9 1.9-.4 3.4 1.1 3 3-1 4.2-4.3 6-9.6 6.9z\" transform=\"rotate(120 12 12)\"/>\n<path d=\"M12 12c0-5.2 2.4-8.9 6.6-9.9 1.9-.4 3.4 1.1 3 3-1 4.2-4.3 6-9.6 6.9z\" transform=\"rotate(240 12 12)\"/>\n</g>"
+    }
+  ],
+  "heal": [
+    {
+      "id": "A",
+      "note": "SHIPPED — full-size heart, cream cross wholly INSIDE it, on a pill whose outline is also cream. 0/3 \"a cut gemstone\" x3 on seed 7, 3/3 on seed 13."
+    },
+    {
+      "id": "B",
+      "note": "THE CLEFT. Same dark cross as C — colour is held FIXED across B and C — and the one variable is the top of the heart. 🔴 THE SHIPPED HEART HAS NO CLEFT: its two arcs meet at (12, 7.2) while the lobe apexes sit at y≈6.45, so the notch is 0.75 units — **0.43 px at 13.8**. A heart without a cleft is a wide-topped body ending in a point, which is `gem`. This one is cut to (12, 10.4) against apexes at y≈5.2: a 5.2-unit notch, 3.0 px, the one feature that separates the two objects at all. ⚠️ TWO earlier B arms were built and REJECTED on render, both worth recording: a CREAM cross grown to project past the heart became the mass and read as a green `sparkle` (on this pill cream is the outline colour, so a cream element that dominates stops being a mark and becomes the glyph); the same cross in #1F3D08 was dark-on-ink outside the heart and simply was not there, leaving a green mass cut into four wedges. Anything that leaves this heart must read against BOTH the green and the ink, and neither cream nor near-ink does.",
+      "svg": "\n<path d=\"M12 20.6C9 17.5 3.2 14.2 3.2 10.2 3.2 6.4 6.6 4.4 9 5.4c1.6.7 2.6 2.4 3 5 .4-2.6 1.4-4.3 3-5 2.4-1 5.8 1 5.8 4.8 0 4-5.8 7.3-8.8 10.4z\" fill=\"#7CB518\"/>\n<path d=\"M12 12.4v5.2M9.4 15h5.2\" stroke=\"#1F3D08\" stroke-width=\"2.1\"/>"
+    },
+    {
+      "id": "C",
+      "note": "CROSS RECOLOURED, GEOMETRY UNTOUCHED — the control. The one variable is that the cross stops being the same colour as the pill's outline, so it is a mark ON a green mass instead of a pale seam THROUGH it. If C alone recovers the read, the defect was the cream-on-cream fragmentation and the heart's silhouette was never the problem; if only B does, a heart on this pill is a gemstone whatever you draw inside it.",
+      "svg": "\n<path d=\"M12 20.9 4.3 13.4a4.95 4.95 0 0 1 7.7-6.2 4.95 4.95 0 0 1 7.7 6.2z\" fill=\"#7CB518\"/>\n<path d=\"M12 9.6v5.6M9.2 12.4h5.6\" stroke=\"#1F3D08\" stroke-width=\"2.1\"/>"
+    }
+  ],
+  "timer": [
+    {
+      "id": "A",
+      "note": "SHIPPED — after this pass, the projecting ketchup hand. Before it, hands that inherited the outline colour, which is CREAM here, over a #C9B8DE dial: 1.68:1 at 1.09 px, i.e. drawn and invisible. 0/3 native, \"an onion\"/\"a bottle cap\"."
+    },
+    {
+      "id": "B",
+      "note": "VISIBLE HANDS + THE MINUTE HAND BREAKS THE RIM. Same hands as C, but the long hand runs out to r=11.3 and projects 3.6 units past the r=7.7 dial. The silhouette gains an asymmetric spur at 1 o'clock — an onion and a lollipop are both symmetric about their stem, so this is the one axis on which the wrong answers cannot follow.",
+      "svg": "\n<circle cx=\"12\" cy=\"13.6\" r=\"7.7\" fill=\"#C9B8DE\"/>\n<path d=\"M9.5 2.4h5\" stroke-width=\"2.1\"/>\n<path d=\"M12 2.4v3.5\" stroke-width=\"2.1\"/>\n<path d=\"M12 13.6V8.2\" stroke=\"#D62839\" stroke-width=\"2.4\"/>\n<path d=\"M12 13.6 21.4 7.4\" stroke=\"#D62839\" stroke-width=\"2.4\"/>"
+    },
+    {
+      "id": "C",
+      "note": "HANDS MADE VISIBLE, GEOMETRY UNTOUCHED. Ketchup rather than the inherited outline colour, and 2.4 units rather than 1.9 — one concept (\"the hands can be seen\"), two parameters, stated. Ketchup reads on BOTH sides of this glyph: 2.7:1 against the lavender dial and 3.6:1 against the ink plate, so unlike ink or cream it cannot vanish on either. If C alone recovers the read, this was an invisible-element bug and not a silhouette one.",
+      "svg": "\n<circle cx=\"12\" cy=\"13.6\" r=\"7.7\" fill=\"#C9B8DE\"/>\n<path d=\"M9.5 2.4h5\" stroke-width=\"2.1\"/>\n<path d=\"M12 2.4v3.5\" stroke-width=\"2.1\"/>\n<path d=\"M12 9.4v4.3h3.3\" stroke=\"#D62839\" stroke-width=\"2.4\"/>"
+    }
   ]
 }

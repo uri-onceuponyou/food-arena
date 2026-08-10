@@ -31,9 +31,26 @@ function starPath(points, rOuter, rInner, cx = 12, cy = 12) {
   return `M${parts.join('L')}Z`;
 }
 
+/** ⚠️ A SUBSET COPY OF `src/ui/icons/svg.ts`'s palette, AND THE SUBSET BIT COST A ROUND.
+ *  This started as eight names — the ones the box/coin/slow arms happened to need — so
+ *  `${P.water}` in a new arm interpolated to the string `undefined`, SVG rejected
+ *  `fill="undefined"` as invalid, and two `swirl` arms rendered as hollow outlines with
+ *  no fill at all. Nothing threw: a template literal has no idea a key is missing, the
+ *  plate rendered, `ic_pair`'s "variants must differ" control PASSED (an unfilled glyph
+ *  differs from a filled one by plenty), and the round would have been judged on artwork
+ *  nobody drew. Caught only by reading the PNG — CLAUDE.md #3.
+ *  Two fixes, both kept: every colour `svg.ts` exports is now here, and `assertColours()`
+ *  below refuses to write a variants file containing the literal `undefined`. */
 const P = {
-  cream: '#FFF3DE', gold: '#F4A300', goldDark: '#B87400', mustard: '#FFC93C',
-  mustardHi: '#FFDD6B', ketchup: '#D62839', lettuce: '#7CB518', white: '#FFFFFF',
+  ink: '#1a1224', cream: '#FFF3DE', white: '#FFFFFF',
+  gold: '#F4A300', goldDark: '#B87400', mustard: '#FFC93C', mustardHi: '#FFDD6B',
+  ketchup: '#D62839', tomato: '#E63946', tomatoHi: '#FF9E9E',
+  lettuce: '#7CB518', lettuceHi: '#A6E24A', leafDark: '#4E8B2B',
+  water: '#1E90D8', waterHi: '#5BC8F5', ice: '#8FE1FF', iceHi: '#BFF0FF',
+  grape: '#7A4BC4', grapeHi: '#9B6BE0', grapeDark: '#5B2E8C', violet: '#B497D6',
+  wood: '#8B4A22', woodHi: '#B4622A', meat: '#8B3A2E', meatHi: '#D98A72',
+  patty: '#A05A2C', pattyDark: '#5A2E17', steel: '#DCD6E8', bone: '#F4E9DA',
+  candy: '#FF6FA5', candyHi: '#FFB3D1', flame: '#FF7A2F',
 };
 
 // ── The box family, with an OVERHANGING FLAT LID ─────────────────────────────
@@ -236,7 +253,156 @@ const V = {
     { id: 'A', note: 'SHIPPED. 1/3 at native size, "a treasure chest" x2 — the other half of a mutual swap with `chest`.' },
     { id: 'B', note: 'The same overhanging lid, same colourway. Carried on the plate so the geometry is tested on TWO members of a family that shares one function, not on one.', svg: box2(P.ketchup, '#E9536A', P.mustard, BOW_EMBLEM) },
   ],
+
+  // ── swirl — 22.72 px on WHITE, ink outline. 0/3 native, "seaweed" x3. ───────
+  // The largest of this round's three sites: 1 viewBox unit is 0.947 px, so a 2-unit
+  // feature really is 2 px here and this is NOT an acuity failure.
+  //
+  // ⚠️ ITS OWN COMMENT SAYS IT WAS ALREADY FIXED FOR THE DISC BUG — and it was. The
+  // disc is gone; `food.ts` says the replacement is "two fat teardrop arms [that] make a
+  // two-bladed pinwheel", and the shipped art is THREE teardrops at 0/120/240°. Read off
+  // the 16x magnification of the delivered tile: each blade is a LEAF — pointed at the
+  // hub, rounded at the tip, convex on both edges — and three leaves radiating from a
+  // hub is a sprig. `seaweed` is a stem with three lobes of the same shape. The hue is
+  // as far apart as this palette goes (P.water #1E90D8 against #3E8B4A) and three judges
+  // still said seaweed, which is `slow`'s arms D/E again: hue does not carry a native
+  // read. So the defect is the BLADE SHAPE and/or the radial composition, and the two
+  // are separable.
+  // 🔴 VERDICT: UNDECIDED, AND THE ROUND IS WHY. On the seed-13 plate the SHIPPED arm
+  // scored 2/3 native — the "seaweed" x3 defect did not reproduce — so [B] (1/3, Δ −1)
+  // and [C] (2/3, Δ +0) are both measured against a ceiling. In that same round `lettuce`
+  // and `seaweed` swapped with each other 3/3 in BOTH directions, so the green-leaf
+  // answers were occupied and were never offered to this tile. Magnified: A 2/3, B 3/3,
+  // C 2/3. Kept in full — re-run on a plate where [A] reproduces 0/3; do not redraw.
+  swirl: [
+    { id: 'A', note: 'SHIPPED — three convex teardrop blades radiating from a cream hub. Reads as a three-leaf sprig; "seaweed" x3 native on seed 7, 2/3 on seed 13.' },
+    {
+      id: 'B',
+      note: 'FUNNEL — a tornado: four stacked lozenges of decreasing width. The radial composition is abandoned entirely, and the silhouette (wide top tapering to a point) is owned by nothing else in the set. Rotation is carried by the STACK, which survives downscaling, rather than by a curve, which does not.',
+      svg: `
+<ellipse cx="12" cy="5.6" rx="9.3" ry="3.1" fill="${P.water}"/>
+<ellipse cx="11.3" cy="11.4" rx="6.5" ry="2.6" fill="${P.water}"/>
+<ellipse cx="10.9" cy="16.2" rx="4.1" ry="2.2" fill="${P.water}"/>
+<ellipse cx="11.4" cy="20.2" rx="2.2" ry="1.7" fill="${P.water}"/>`,
+    },
+    {
+      id: 'C',
+      note: 'HOOKED BLADES, SAME RADIAL COMPOSITION. Each leaf becomes a comma whose outer edge is concave, so the outline spirals instead of radiating. Isolates the two halves of the diagnosis: if C alone recovers the read the defect was the BLADE SHAPE; if only B does, three masses around a hub is a sprig however you draw the mass.',
+      svg: `
+<g fill="${P.water}">
+<path d="M12 12c0-5.2 2.4-8.9 6.6-9.9 1.9-.4 3.4 1.1 3 3-1 4.2-4.3 6-9.6 6.9z"/>
+<path d="M12 12c0-5.2 2.4-8.9 6.6-9.9 1.9-.4 3.4 1.1 3 3-1 4.2-4.3 6-9.6 6.9z" transform="rotate(120 12 12)"/>
+<path d="M12 12c0-5.2 2.4-8.9 6.6-9.9 1.9-.4 3.4 1.1 3 3-1 4.2-4.3 6-9.6 6.9z" transform="rotate(240 12 12)"/>
+</g>`,
+    },
+  ],
+
+  // ── heal — 13.8 px on the ink fact pill, CREAM #FFF3DE outline. ─────────────
+  // 0/3 native, "a cut gemstone" x3, while `gem` itself is 3/3 — a one-way leak into a
+  // shipped icon, which costs twice. `health` is the SAME heart path in ketchup and
+  // scores 3/3, so the heart alone is not the defect. What differs is the cream cross:
+  // on the ink pill the outline is ALSO cream, so cross and outline are one colour and
+  // the green mass is cut into four pips with pale seams between them, which is `gem`'s
+  // construction (a body split into panels by interior lines) exactly.
+  //
+  // ⚠️ A FOURTH ARM WAS BUILT, RENDERED, LOOKED AT AND DROPPED BEFORE ANY JUDGE SAW IT,
+  // and it is recorded because the reason generalises: a CREAM cross grown until it
+  // projects past the heart, on the ink pill, renders as a cream four-armed mark filling
+  // the grid with four small green wedges behind it — i.e. as `sparkle`, which is a
+  // shipped icon that is 3/3. Putting it on the plate would have spent a tile AND stolen
+  // "a sparkle / twinkle" answers from the real sparkle. On this pill, cream is the
+  // outline colour, so ANY cream element that becomes the dominant mass stops being a
+  // mark on the glyph and becomes the glyph. That is why both surviving fix arms recolour
+  // the cross first and change its size second.
+  // 🔴 VERDICT: UNDECIDED, SAME REASON AS `swirl`. The SHIPPED arm scored 3/3 native on
+  // the seed-13 plate — an outright ceiling — so [B] (2/3) and [C] (3/3) could not gain.
+  // Magnified: all three 3/3. Across those two rounds 24 of 63 icons moved by ≥1 of 3 on
+  // identical art and 13 by ≥2, `heal` among them (0/3 → 3/3). Kept in full.
+  heal: [
+    { id: 'A', note: 'SHIPPED — full-size heart, cream cross wholly INSIDE it, on a pill whose outline is also cream. 0/3 "a cut gemstone" x3 on seed 7, 3/3 on seed 13.' },
+    {
+      id: 'B',
+      note: 'THE CLEFT. Same dark cross as C — colour is held FIXED across B and C — and the one variable is the top of the heart. 🔴 THE SHIPPED HEART HAS NO CLEFT: its two arcs meet at (12, 7.2) while the lobe apexes sit at y≈6.45, so the notch is 0.75 units — **0.43 px at 13.8**. A heart without a cleft is a wide-topped body ending in a point, which is `gem`. This one is cut to (12, 10.4) against apexes at y≈5.2: a 5.2-unit notch, 3.0 px, the one feature that separates the two objects at all. ⚠️ TWO earlier B arms were built and REJECTED on render, both worth recording: a CREAM cross grown to project past the heart became the mass and read as a green `sparkle` (on this pill cream is the outline colour, so a cream element that dominates stops being a mark and becomes the glyph); the same cross in #1F3D08 was dark-on-ink outside the heart and simply was not there, leaving a green mass cut into four wedges. Anything that leaves this heart must read against BOTH the green and the ink, and neither cream nor near-ink does.',
+      svg: `
+<path d="M12 20.6C9 17.5 3.2 14.2 3.2 10.2 3.2 6.4 6.6 4.4 9 5.4c1.6.7 2.6 2.4 3 5 .4-2.6 1.4-4.3 3-5 2.4-1 5.8 1 5.8 4.8 0 4-5.8 7.3-8.8 10.4z" fill="${P.lettuce}"/>
+<path d="M12 12.4v5.2M9.4 15h5.2" stroke="#1F3D08" stroke-width="2.1"/>`,
+    },
+    {
+      id: 'C',
+      note: 'CROSS RECOLOURED, GEOMETRY UNTOUCHED — the control. The one variable is that the cross stops being the same colour as the pill\'s outline, so it is a mark ON a green mass instead of a pale seam THROUGH it. If C alone recovers the read, the defect was the cream-on-cream fragmentation and the heart\'s silhouette was never the problem; if only B does, a heart on this pill is a gemstone whatever you draw inside it.',
+      svg: `
+<path d="M12 20.9 4.3 13.4a4.95 4.95 0 0 1 7.7-6.2 4.95 4.95 0 0 1 7.7 6.2z" fill="${P.lettuce}"/>
+<path d="M12 9.6v5.6M9.2 12.4h5.6" stroke="#1F3D08" stroke-width="2.1"/>`,
+    },
+  ],
+
+  // ── timer — 13.8 px on the ink fact pill, CREAM outline. ───────────────────
+  // 0/3 native, "an onion" x2 + "a lollipop" x1 — every wrong answer is a round pale
+  // mass with a small thing on top, which is what the tile IS.
+  //
+  // 🔴 AND THE HANDS ARE NOT DRAWN IN A COLOUR. `<path d="M12 9.4v4.3h3.3"/>` sets no
+  // `stroke`, so it inherits `stroke:var(--fa-ic-ink)` — the OUTLINE colour — which this
+  // site flips to #FFF3DE. Cream on the #C9B8DE dial is 1.6:1 at 1.09 px. `ui.ts`'s own
+  // comment reasoned about exactly this flip and guarded the DIAL fill against it
+  // ("the dial is deliberately NOT cream"), then left the hands inheriting. So the clock
+  // has no hands at its only delivered site and what remains is a bulb with a sprout.
+  // 🔴 VERDICT: [B] WON AND IS NOW SHIPPED. native 0/3 -> 2/3 (Δ +2 of 3), magnified
+  // 3/3 -> 3/3. [A] is therefore now the SAME ART as [B]; the pair is kept so
+  // `--handover timer=B` can prove the paste by pixels (0% differ, max channel 0).
+  // [C] is the arm that makes the finding: making the hands VISIBLE and changing nothing
+  // else moved NOTHING (0/3, Δ +0). The invisibility was real and was not what the judge
+  // was reacting to — `LESSONS.md` §6b.
+  // ⚠️ FLOOR: that round's twins split 3 of 9, all on `chest`, its one ILLEGIBLE twin, so
+  // ±1 of 3 is noise for a failing subject and only the +2 clears it.
+  timer: [
+    { id: 'A', note: 'SHIPPED — after this pass, the projecting ketchup hand. Before it, hands that inherited the outline colour, which is CREAM here, over a #C9B8DE dial: 1.68:1 at 1.09 px, i.e. drawn and invisible. 0/3 native, "an onion"/"a bottle cap".' },
+    {
+      id: 'B',
+      note: 'VISIBLE HANDS + THE MINUTE HAND BREAKS THE RIM. Same hands as C, but the long hand runs out to r=11.3 and projects 3.6 units past the r=7.7 dial. The silhouette gains an asymmetric spur at 1 o\'clock — an onion and a lollipop are both symmetric about their stem, so this is the one axis on which the wrong answers cannot follow.',
+      svg: `
+<circle cx="12" cy="13.6" r="7.7" fill="#C9B8DE"/>
+<path d="M9.5 2.4h5" stroke-width="2.1"/>
+<path d="M12 2.4v3.5" stroke-width="2.1"/>
+<path d="M12 13.6V8.2" stroke="${P.ketchup}" stroke-width="2.4"/>
+<path d="M12 13.6 21.4 7.4" stroke="${P.ketchup}" stroke-width="2.4"/>`,
+    },
+    {
+      id: 'C',
+      note: 'HANDS MADE VISIBLE, GEOMETRY UNTOUCHED. Ketchup rather than the inherited outline colour, and 2.4 units rather than 1.9 — one concept ("the hands can be seen"), two parameters, stated. Ketchup reads on BOTH sides of this glyph: 2.7:1 against the lavender dial and 3.6:1 against the ink plate, so unlike ink or cream it cannot vanish on either. If C alone recovers the read, this was an invisible-element bug and not a silhouette one.',
+      svg: `
+<circle cx="12" cy="13.6" r="7.7" fill="#C9B8DE"/>
+<path d="M9.5 2.4h5" stroke-width="2.1"/>
+<path d="M12 2.4v3.5" stroke-width="2.1"/>
+<path d="M12 9.4v4.3h3.3" stroke="${P.ketchup}" stroke-width="2.4"/>`,
+    },
+  ],
 };
+
+/** ── THE KNOWN-BAD-INPUT GUARD FOR THIS FILE ────────────────────────────────
+ *  A missing palette key interpolates to the seven characters `undefined` and produces
+ *  `fill="undefined"`, which SVG discards silently: the glyph renders unfilled and every
+ *  downstream control still passes, because an unfilled variant genuinely does differ
+ *  from a filled one. This is the only place that can see it, so it refuses here.
+ *  Shown to FAIL: deleting `water` from `P` above trips it on `swirl` [B] and [C].
+ *  It also refuses an empty `svg`, which is the other way an arm can be blank. */
+function assertColours(v) {
+  const bad = [];
+  for (const [name, arms] of Object.entries(v)) {
+    if (name === '_') continue;
+    for (const arm of arms) {
+      const s = arm.svg ?? '';
+      if (arm.svg !== undefined && !s.trim()) bad.push(`${name} [${arm.id}]: empty svg`);
+      if (s.includes('undefined')) bad.push(`${name} [${arm.id}]: contains the literal "undefined" — a palette key is missing from P`);
+      for (const f of s.match(/fill="[^"]*"|stroke="[^"]*"/g) ?? []) {
+        const val = f.split('"')[1];
+        if (!/^(#[0-9a-fA-F]{3,8}|none|currentColor|rgb|url\()/.test(val)) bad.push(`${name} [${arm.id}]: ${f} is not a colour`);
+      }
+    }
+  }
+  return bad;
+}
+const bad = assertColours(V);
+if (bad.length) { console.error('🔴 REFUSING TO WRITE:\n  ' + bad.join('\n  ')); process.exit(1); }
 
 writeFileSync('tools/tmp/ic_variants.json', JSON.stringify(V, null, 2) + '\n');
 console.log('wrote tools/tmp/ic_variants.json');

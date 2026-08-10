@@ -117,7 +117,27 @@ export const FOOD_ICONS: Record<string, string> = {
    *  The disc is gone. Two fat teardrop arms make a two-bladed pinwheel whose silhouette
    *  is a pinwheel, which nothing else here owns, and the spiral is now the OUTLINE rather
    *  than an interior line. Three arms rather than two: two make an S, and an S at 20px is
-   *  a bow tie. */
+   *  a bow tie.
+   *
+   *  ── UNCHANGED AGAIN, AND THIS TIME IT IS THE ROUND THAT FAILED, NOT THE ARMS ──────
+   *  A native panel had it **0/3, "seaweed" x3** at the delivered 22.72 px, and `seaweed`
+   *  is a stem with three lobes of exactly this shape — so the pinwheel above is a THREE-
+   *  LEAF SPRIG, each blade pointed at the hub and convex on both edges. The hue is as far
+   *  apart as this palette goes (`P.water` #1E90D8 against #3E8B4A) and three judges still
+   *  said seaweed, which is `slow`'s arms D/E again: hue does not carry a native read.
+   *  Two arms, paired, 72 tiles, 3 judges, `--twins chest,tomato,gift`:
+   *      A  shipped three convex blades                       2/3   ← 🔴
+   *      C  the same radial composition, blades hooked into
+   *         commas so the outline spirals                     2/3   Δ +0
+   *      B  a TORNADO: four stacked lozenges of decreasing
+   *         width, radial composition abandoned entirely      1/3   Δ −1
+   *  🔴 THE SHIPPED ARM SCORED 2/3, so the "seaweed" defect did not reproduce and both Δs
+   *  sit inside a round whose twin floor was 3 of 9. Note where the seaweed reading went
+   *  instead: in that round `lettuce` and `seaweed` swapped with each other 3/3 in BOTH
+   *  directions — the first full mutual swap this instrument has produced — so the green
+   *  leaf answers were occupied elsewhere and this tile was never offered them.
+   *  The tornado is drawn and rendered (`tools/tmp/ic_mkvariants.mjs`, arm B) and is worth
+   *  re-running on a plate where arm A reproduces 0/3; it is not worth redrawing. */
   swirl: `
 <g fill="${P.water}">
 <path d="M12 12C13.4 7 16.2 3.6 19.6 2.6a2.7 2.7 0 0 1 2 3.6C20.2 9.2 17.2 11 12 12z"/>

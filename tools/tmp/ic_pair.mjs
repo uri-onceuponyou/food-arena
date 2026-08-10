@@ -26,6 +26,30 @@
  * not borrowed from another instrument: `AGENT-BRIEF.md` §4.5 — state the resolution
  * floor BEFORE acting on a change in it. Here it is stated by the plate.
  *
+ * 🚨 BUT THE FLOOR IS A PROPERTY OF THE TWIN **ICON**, NOT OF THE ROUND, AND QUOTING IT
+ * AS A ROUND-WIDE NUMBER UNDERSTATES IT FOR EXACTLY THE SUBJECTS THIS TOOL IS AIMED AT.
+ * Measured on the seed-13 plate, same three twins as the two rounds before it:
+ *
+ *     tomato  (3/3 legible)   3 of 3 judges agreed        floor 0
+ *     gift    (3/3 legible)   3 of 3 judges agreed        floor 0
+ *     chest   (0/3 illegible) 0 of 3 judges agreed        floor 1 — EVERY pair split
+ *
+ * A judge that can read a tile gives the same answer to its twin; a judge that cannot is
+ * choosing, and two identical illegible tiles get two different guesses. So a round whose
+ * twins are all legible reports "floor 0 of 9" and that number does not apply to a
+ * subject sitting at 0/3. `13fb98c` and `e4fa1bd` both reported 0 of 9 with these same
+ * three twins — `chest` happened to be misread CONSISTENTLY in those rounds, which was
+ * luck, not a property of the control.
+ * → **Declare at least one twin that is failing and one that is passing**, and read the
+ *   failing one as the floor for a failing subject.
+ *
+ * ⚠️ AND THE BETWEEN-ROUND FLOOR IS THE FULL RANGE, RE-MEASURED. Across the seed-7 and
+ * seed-13 native rounds — 63 icons, identical art, 3 fresh judges each — **24 icons moved
+ * by ≥1 of 3 and 13 moved by ≥2 of 3**, five of them the whole way (patty, medal, boxRed,
+ * seaweed and lettuce all went 3/3 → 0/3; heal went 0/3 → 3/3). The aggregate barely
+ * moved, 70.7% → 66.2%. That is `CLAUDE.md` #10's aggregate-versus-paired split in this
+ * corner of the project, and it is why nothing here may be decided across rounds.
+ *
  *   node tools/tmp/with_snapshot.mjs -- node tools/tmp/ic_pair.mjs --url {URL} \
  *     --spec shots/ic/spec.json --variants tools/tmp/ic_variants.json \
  *     --subject boxBurger --twins boxRed,gift --seed 7 --out shots/ic/pair1
@@ -169,6 +193,25 @@ function printScore(key, runs) {
   if (twinRows.length) {
     console.log(`\n  FLOOR: ${dis} of ${twinRows.length} twin pairs disagreed on IDENTICAL art.`);
     console.log('  A paired delta smaller than this is not a result.');
+    // ── PER-TWIN, because the pooled number is the WRONG floor for a failing subject.
+    //    A judge that can read a tile answers its twin the same way; a judge that cannot
+    //    is guessing twice. Pooling a legible twin with an illegible one averages a floor
+    //    of 0 against a floor of 1 and reports neither. See the header.
+    const byIcon = new Map();
+    for (const t of twinRows) {
+      const n = t.k.split('/')[0];
+      const v = byIcon.get(n) ?? { n: 0, dis: 0, hit: 0 };
+      v.n++; if (!t.agree) v.dis++;
+      if (t.given.every((g) => g === n)) v.hit++;
+      byIcon.set(n, v);
+    }
+    for (const [n, v] of byIcon) {
+      console.log(`    ${n.padEnd(10)} ${v.dis} of ${v.n} judges split  —  this twin is ${v.hit === v.n ? 'LEGIBLE (floor for a passing subject)' : v.hit ? 'MARGINAL' : 'ILLEGIBLE (floor for a FAILING subject)'}`);
+    }
+    if (![...byIcon.values()].some((v) => v.hit === 0) || ![...byIcon.values()].some((v) => v.hit === v.n)) {
+      console.log('  ⚠️  the twins do not BRACKET: declare one twin that passes and one that fails,'
+        + '\n      or this round has no floor for whichever kind of subject it is missing.');
+    }
   }
   return { perVariant, twinRows, dis };
 }
@@ -393,17 +436,63 @@ const bb = await page.locator('#grid').boundingBox();
 // And it has a POSITIVE CONTROL that runs on every plate rather than in a selftest: the
 // SAME predicate is required to FAIL for every declared variant pair. A round in which
 // "identical" and "different" cannot be told apart cannot be scored, and says so.
-const SAME_ART = { pct: 2.0, chan: 64 };
+//
+// 🚨 AND THE `pct` HALF OF THAT BOUND WAS ITSELF WRONG — IT WAS COUNTING ANTIALIASING.
+// Kept in words, because the rule has been reversed rather than deleted. WAS:
+//
+//     const SAME_ART = { pct: 2.0, chan: 64 };
+//     sameArt = (d) => d.pct <= 2.0 && d.chan <= 64;
+//
+// On the seed-13 plate the `chest` twins — the same DOM node built twice, 11.03 px on a
+// saturated orange plate — came back **6.93% of plate px differ, max channel 32**, and
+// the round was refused for "twin tiles are NOT the same art". Max channel 32 says every
+// one of those differences is antialiasing; a real art difference on this plate is 176
+// to 238. The reason the earlier plate measured 0.58–1.16% and this one 6.93% is that
+// `pct` counts any pixel that moved BY ONE, so it is a function of how much of a tile is
+// EDGE — i.e. of the glyph's delivered px and its business — and not of its art at all.
+// `chest` at 11.03 px is almost entirely edge.
+//
+// 🔴 THE ORDERING INVERTED ON THAT AXIS, ON THIS PLATE: identical `chest` twins scored
+// 6.93% while the genuinely different `timer` [C] vs [A] scored 2.89%. An axis that
+// ranks identical art as MORE different than different art is not a weak axis, it is a
+// wrong one, and the AND made it decisive because either half can refuse a round.
+//
+// So the share is now taken over pixels that differ by MORE THAN ONE ANTIALIASING STEP,
+// and `pct` stays printed beside it as a diagnostic. Measured on the seed-13 plate's 72
+// tiles — the plate that exposed the fault, so the bound comes from the failure and not
+// from taste:
+//
+//     identical art (3 twin pairs)     hard 0.00 / 0.00 / 0.55 %,   max chan 0 / 1 / 32
+//     different art (9 A/B/C pairs)    hard 2.48 .. 21.40 %,        max chan 176 .. 238
+//
+//     bound: same art ⇔ hard ≤ 1.2%  AND  max chan ≤ 64
+//
+// 1.2 is the geometric middle of the measured gap (0.55 → 2.48): 2.2× above the worst
+// identical pair and 2.1× below the closest different one. ⚠️ I GUESSED 0.5 FIRST, ran
+// it, and it refused the same round again at 0.55 — which is the whole reason this file
+// says bounds are measured rather than chosen, and I had just chosen one.
+//
+// `aa` is 24/255: BELOW the 32 the twins actually produce, so a twin pair's own worst
+// pixels are still counted and its hard share still comes out under the bound because
+// there are so few of them. A step above 32 would pass by hiding the evidence.
+// ⚠️ `chan` is retained in the AND and is not redundant: identical art has been seen at
+// 46/255 on an earlier plate while a PURE HUE variant (`slow` A vs D, `e4fa1bd`) came in
+// at 65 — a 19-point gap — so the channel axis alone is too thin to carry a round, and
+// the area axis alone would call a subtle recolour identical. Each covers the other's
+// blind spot; that is why the predicate is an AND of two measured numbers.
+const SAME_ART = { hard: 1.2, aa: 24, chan: 64 };
 const sharp = (await import('sharp')).default;
 const buf = await sharp(readFileSync(shot)).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-/** Per-channel max difference and the share of plate pixels that differ at all. */
+/** Per-channel max difference, the share of plate pixels that differ AT ALL, and the
+ *  share that differ by more than `AA` — see the note on `SAME_ART` for why the third
+ *  number exists and the second one is now a diagnostic rather than a bound. */
 const tileDiff = (d1, d2) => {
   const m1 = measured.find((x) => x.i === d1.i), m2 = measured.find((x) => x.i === d2.i);
   const w = Math.round(Math.min(m1.plateRect.w, m2.plateRect.w));
   const h = Math.round(Math.min(m1.plateRect.h, m2.plateRect.h));
   const ax = Math.round(m1.plateRect.x - bb.x), ay = Math.round(m1.plateRect.y - bb.y);
   const bx = Math.round(m2.plateRect.x - bb.x), by = Math.round(m2.plateRect.y - bb.y);
-  let n = 0, mx = 0;
+  let n = 0, hard = 0, mx = 0;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const ia = ((ay + y) * buf.info.width + ax + x) * 3;
@@ -411,13 +500,14 @@ const tileDiff = (d1, d2) => {
       let m = 0;
       for (let c = 0; c < 3; c++) m = Math.max(m, Math.abs(buf.data[ia + c] - buf.data[ib + c]));
       if (m > 0) n++;
+      if (m > SAME_ART.aa) hard++;
       if (m > mx) mx = m;
     }
   }
-  return { pct: +(100 * n / (w * h)).toFixed(2), chan: mx };
+  return { pct: +(100 * n / (w * h)).toFixed(2), hard: +(100 * hard / (w * h)).toFixed(2), chan: mx };
 };
-const sameArt = (d) => d.pct <= SAME_ART.pct && d.chan <= SAME_ART.chan;
-const fmt = (d) => `${d.pct}% of plate px differ, max channel ${d.chan}`;
+const sameArt = (d) => d.hard <= SAME_ART.hard && d.chan <= SAME_ART.chan;
+const fmt = (d) => `${d.hard}% of plate px differ by >${SAME_ART.aa}/255 (${d.pct}% differ at all), max channel ${d.chan}`;
 const artRows = [];
 /** ⚠️ A HAND-OVER PAIR IS EXEMPT FROM THE "must differ" CONTROL, AND ONLY THAT PAIR.
  *  Once a winning variant has been pasted into `src/ui/icons/`, the shipped arm and the
@@ -450,7 +540,7 @@ for (const n of twins) {
   if (ts.length !== 2) continue;
   const d = tileDiff(ts[0], ts[1]);
   artRows.push(`SAME    ${n} twins #${ts[0].i}/#${ts[1].i}  ${fmt(d)}${sameArt(d) ? '' : '  ← 🔴 DIFFER'}`);
-  if (!sameArt(d)) faults.push(`${n}: twin tiles are NOT the same art (${fmt(d)}, bound ${SAME_ART.pct}% / ${SAME_ART.chan})`);
+  if (!sameArt(d)) faults.push(`${n}: twin tiles are NOT the same art (${fmt(d)}, bound ${SAME_ART.hard}% hard / ${SAME_ART.chan} chan)`);
 }
 
 // ── HAND-OVER. The shipped tile must BE the variant that won. ───────────────
@@ -484,7 +574,7 @@ await browser.close();
 console.log(`wrote ${shot}  ${Math.round(bb.width)}x${Math.round(bb.height)}px  ${declared.length} tiles`);
 for (const s of subjects) console.log(`variants of ${s}: ${variantTiles.get(s).map((d) => `#${d.i} [${d.variant}]`).join(', ')}`);
 console.log(`twin controls: ${twins.map((n) => `${n} #${declared.filter((d) => d.name === n).map((d) => d.i).join('/')}`).join(', ') || 'NONE — this round has no measured floor'}`);
-console.log(`\nART IDENTITY (bound: same art ⇔ ≤${SAME_ART.pct}% of plate px differ AND ≤${SAME_ART.chan}/255 max channel):`);
+console.log(`\nART IDENTITY (bound: same art ⇔ ≤${SAME_ART.hard}% of plate px differ by >${SAME_ART.aa}/255 AND ≤${SAME_ART.chan}/255 max channel):`);
 for (const r of artRows) console.log(`  ${r}`);
 for (const r of handoverRows) console.log(`hand-over  ${r}`);
 if (errs.length) console.log('CONSOLE ERRORS:\n' + errs.join('\n'));

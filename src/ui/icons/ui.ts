@@ -427,12 +427,75 @@ export const UI_ICONS: Record<string, string> = {
      and a cream-filled dial under a cream outline collapses into one solid blob with
      no hands. A mid-tone dial keeps its internal structure whichever way the outline
      goes. */
+  /* 🔴 …AND THE HANDS WERE NEVER GIVEN A COLOUR AT ALL, SO THEY FLIPPED WITH IT.
+     WAS: `<path d="M12 9.4v4.3h3.3" stroke-width="1.9"/>`. Kept in words, because the
+     comment above got the reasoning right and then guarded the wrong element. A path
+     with no `stroke` attribute inherits `stroke:var(--fa-ic-ink)` from `index.ts`'s
+     `OPEN` — the OUTLINE colour — which at this glyph's one delivered site is `#FFF3DE`.
+     Cream on the `#C9B8DE` dial is **1.68:1 at 1.09 px**. The clock had no hands, and
+     what was left is a pale round mass with a small thing on top: two blind native
+     panels named it "an onion" x2 + "a lollipop", then "a bottle cap" x2 + "a purple
+     loot box". `CLAUDE.md` #4 — it was rendering, and invisible.
+
+     ── AND FIXING THAT ALONE MOVED NOTHING. Paired, one plate, 72 tiles, 3 judges ──
+         arm                                              native
+         A  shipped, inherited (invisible) hands          0/3
+         C  SAME geometry, hands in P.ketchup at 2.4u —
+            2.70:1 on the dial, 3.65:1 on the plate       0/3   Δ +0
+         B  those hands, and the long one RUNS OUT TO
+            r=11.3, projecting 3.6 units past the r=7.7
+            dial                                          **2/3**  **Δ +2 of 3**
+     C is the control that makes the finding, and it is `LESSONS.md` §6b in one row: the
+     invisibility is real, measured and was worth fixing — and it is NOT what the viewer
+     was reacting to. An onion and a lollipop are both symmetric about their stem, so the
+     asymmetric spur at 1 o'clock is the one axis the wrong answers cannot follow.
+     ⚠️ FLOOR: this round's twins split 3 of 9, all on `chest`, the plate's one ILLEGIBLE
+     twin — so ±1 of 3 is noise for a failing subject here and only the +2 clears it.
+     ⚠️ AND THE CONFUSION MOVED RATHER THAN VANISHING, on one judge of three: B's single
+     miss is "a lightning bolt", i.e. `speed`, which ships on this same fact pill. It went
+     from 3 of 3 wrong to 1 of 3, and what is left points at a sibling.
+     ⚠️ Ketchup rather than ink or cream on purpose: it is the only value that survives
+     BOTH polarities — an ink hand would vanish where the hand leaves the dial and crosses
+     the ink pill, and a cream one vanishes on the dial, which is the bug being fixed. */
   timer: `
 <circle cx="12" cy="13.6" r="7.7" fill="#C9B8DE"/>
 <path d="M9.5 2.4h5" stroke-width="2.1"/>
 <path d="M12 2.4v3.5" stroke-width="2.1"/>
-<path d="M12 9.4v4.3h3.3" stroke-width="1.9"/>`,
+<path d="M12 13.6V8.2" stroke="${P.ketchup}" stroke-width="2.4"/>
+<path d="M12 13.6 21.4 7.4" stroke="${P.ketchup}" stroke-width="2.4"/>`,
 
+  /* UNCHANGED, and the reason is about the INSTRUMENT rather than the art — the same
+     caveat `egg` carries in `food.ts`, arrived at by a different route.
+
+     One native panel had this **0/3, "a cut gemstone" x3**, while `gem` itself was 3/3:
+     a one-way leak into a shipped icon. The cause looked measured rather than guessed.
+     On this pill the outline flips to `#FFF3DE`, and the cross is ALSO `P.cream`, so
+     cross and outline are one colour (16.5:1 against the plate, 2.26:1 against the green)
+     and the mass is cut into four pips with pale seams between them — which is `gem`'s
+     construction, a body split into panels by interior lines. And the shipped heart has
+     no CLEFT: its two arcs meet at (12, 7.2) while the lobe apexes sit at y≈6.45, a
+     0.75-unit notch = **0.43 px at 13.8**. A heart without a cleft is a wide-topped body
+     ending in a point, i.e. a gemstone.
+
+     Two arms were built and measured paired, 72 tiles, 3 judges:
+         A  shipped                                        3/3   ← 🔴
+         C  cross recoloured to #1F3D08 (4.90:1 on the
+            green), geometry untouched                     3/3   Δ +0
+         B  that cross, plus a 5.2-unit cleft against
+            apexes at y≈5.2                                2/3   Δ −1
+     🔴 THE SHIPPED ARM SCORED 3/3, so the defect did not reproduce and both Δs are
+     measured against a ceiling. Across those two rounds 24 of 63 icons moved by ≥1 of 3
+     on identical art and 13 by ≥2, `heal` among them (0/3 → 3/3) — a per-icon native
+     score from one 3-judge panel is not a measurement. Nothing here is falsified and
+     nothing is confirmed; re-measure on a round where arm A reproduces 0/3 before
+     drawing anything new.
+     ⚠️ Two further arms were drawn, rendered and REJECTED before any judge saw them, and
+     both failures are properties of this pill rather than of this glyph: a CREAM cross
+     grown until it projects past the heart becomes the mass and reads as `sparkle`
+     (cream is the outline colour here, so a dominant cream element stops being a mark on
+     the glyph and becomes the glyph); the same cross in #1F3D08 is dark-on-ink the moment
+     it leaves the heart and simply is not there. Anything that breaks this silhouette has
+     to read against BOTH the green and the ink — as `timer`'s ketchup hand does. */
   heal: `
 <path d="M12 20.9 4.3 13.4a4.95 4.95 0 0 1 7.7-6.2 4.95 4.95 0 0 1 7.7 6.2z" fill="${P.lettuce}"/>
 <path d="M12 9.6v5.6M9.2 12.4h5.6" stroke="${P.cream}" stroke-width="2.1"/>`,
@@ -503,7 +566,17 @@ export const UI_ICONS: Record<string, string> = {
 
      ⚠️ A spiral RIBBON was rejected on arithmetic, not taste: at 13.8 px one viewBox
      unit is 0.575 px, so two turns need a gap wider than the stroke and no pair of
-     numbers under 24 units gives one. */
+     numbers under 24 units gives one.
+
+     🔴 AND A THIRD NATIVE PANEL SAYS "LEGIBILITY FAILURE" IS NO LONGER THE RIGHT CALL.
+     Unchanged art, fresh plate, fresh judges: **0/3, "a spinning cyclone or vortex" x3**
+     — one answer, unanimous, and it names `swirl`, a shipped icon two files over. The
+     apex-plus-300°-groove that fixed the coin reading is a vortex: an arc that nearly
+     closes around a centre dot is the cyclone mark. So this is now a COLLISION and not a
+     legibility failure, and the two want opposite fixes. ⚠️ ONE ROUND, and in that same
+     round 24 of 63 icons moved by ≥1 of 3 on identical art, so do not act on it alone —
+     but note it costs twice, because `cap` in that round went 0/3 naming **this** glyph
+     ("a snail shell spiral" x3), making a three-link chain cap → slow → swirl. */
   slow: `
 <path d="M13 7.6 21.8 3.6 18.4 13.2z" fill="${P.gold}"/>
 <circle cx="10.6" cy="14.2" r="7.8" fill="${P.gold}"/>
