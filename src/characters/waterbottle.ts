@@ -273,19 +273,67 @@ const WATER_PIVOT_F = (WATER_BOTTOM_F + WATER_FILL_F) / 2;
 // header's whole point is that `transmission` is reserved for the head, where
 // depth-write behaviour has been carefully reasoned through.
 
-/** A ribbed, bellows-like limb segment: a flat cap at the joint origin (plugs
- * flush with no gap), then a shaft that alternates between a narrower "waist" and
- * a wider "rib" several times along its length before tapering to a rounded tip —
- * a squeeze-bottle accordion hose, not a smooth tapered tube. `taperedLimb`'s own
- * end-cap technique is reused so it still plugs cleanly into the rig's joints. */
-function ribbedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, ribCount = 4, segs = 14): THREE.Mesh {
+/** A ribbed, bellows-like limb segment: a cap at the joint origin, then a shaft
+ * that alternates between a narrower "waist" and a wider "rib" several times along
+ * its length before tapering to a rounded tip — a squeeze-bottle accordion hose,
+ * not a smooth tapered tube.
+ *
+ * `ribCount = 0` turns the ribbing OFF and leaves a smooth tapered column. That is
+ * not a degenerate case, it is half of the fix below: the ARMS are the hose and the
+ * LEGS are not.
+ *
+ * ── 🚨 THIS CHARACTER READ AS A SPIDER, AND BOTH HALVES OF IT ARE IN HERE ─────
+ * The lobby render (`shots/cc/before/waterbottle_p20.png`, zoomed at
+ * `shots/cc/zoom/wb-limbs-before.png`) shows **four identical blue ribbed chains
+ * hanging in mid-air**, none of them touching the bottle. Two independent defects
+ * produce that, and neither is visible in any number this repo emits:
+ *
+ * 1. **THE RIB AMPLITUDE WAS 1.16/0.88 AND IT RENDERED AS A STACK OF MUSHROOM
+ *    CAPS, NOT AS A HOSE.** A 32%-of-radius peak-to-trough corrugation with only
+ *    2*ribCount profile points, on a STUB bone ~0.20 m long and ~0.13 m wide, puts
+ *    a hard shading break every ~3 px at menu size. Combined with a top cap of
+ *    height `min(rTop*0.32, len*0.12)` — i.e. essentially FLAT — each segment reads
+ *    as a wide plate with a lip. Amplitude is now a parameter and defaults to
+ *    0.10 (1.10/0.90), and the shaft is sampled at 4x the rib count so the
+ *    corrugation is a wave rather than a staircase.
+ *
+ * 2. **`rise`.** The old profile spanned exactly y in [-len, 0], so the segment's
+ *    apex stopped dead ON the joint pivot and drew its own closed silhouette there.
+ *    `rise` lifts the top cap above the pivot so the segment's top is buried in
+ *    whatever is above it. Copied from `hamburger.ts`'s `taperedSegment`, which
+ *    took it from `donut.ts`. ⚠️ On THIS character rise is the JUNIOR lever and the
+ *    probe says so — see `dressLimbs`.
+ *
+ * `taperedLimb`'s end-cap technique is otherwise unchanged, so it still plugs
+ * cleanly into the rig's joints, and the mesh still spans a bounded range rather
+ * than stacking two hemispheres (the `donut.ts` bead-necklace degeneracy): the two
+ * cap heights are clamped to 0.32*len and 0.12*len, sum 0.44 < 1, so a real shaft
+ * always exists. This helper never had that bug and does not acquire it here. */
+function ribbedLimb(
+  len: number, rTop: number, rBot: number, mat: THREE.Material,
+  ribCount = 4, segs = 14, rise = 0, ribAmp = 0.10,
+): THREE.Mesh {
   // Points MUST run bottom → top for LatheGeometry's automatic normals to face
   // outward — this file's own SHELL_PROFILE comment already documents the same
   // rule; getting it backwards was a round 1 defect elsewhere in this file.
   const capBot = Math.min(rBot, len * 0.32);
-  const capTopH = Math.min(rTop * 0.32, len * 0.12);
+  // ── 🚨 `rTop * 0.32` MADE A WIDE TOP INTO A FLAT PLATE, AND ROUND 1 OF THIS FIX
+  //    RENDERED IT AS A FIN ────────────────────────────────────────────────────
+  // The first attempt at the deltoid below flared `rTop` to 1.62 radii and left
+  // this line alone, so the top cap was `min(1.62r * 0.32, len * 0.12)` = **`len *
+  // 0.12`**, i.e. 2.4 cm of dome on a 21 cm-wide ring. Rendered
+  // (`shots/cc/after1/waterbottle_p20.png`) both upper arms are flat elliptical
+  // WINGS sticking out sideways — the same "flat flag/wing sticking out of the
+  // joint" this cast's `taperedLimb` comments already record, arrived at from the
+  // other direction. A cap's height has to scale with the ring it is closing.
+  //
+  // `rise` is the budget: the mesh may reach `rise` above the pivot, so a cap up to
+  // `rise + len*0.12` tall costs nothing and the widest ring simply sits BELOW the
+  // pivot instead of above it. The result is a rounded shoulder/hip ball that the
+  // body closes over, not a plate whose rim draws its own silhouette.
+  const capTopH = Math.min(rTop, rise + len * 0.12);
   const wallBotY = -(len - capBot);
-  const wallTopY = -capTopH;
+  const wallTopY = rise - capTopH;
   const CAP = 5;
   const pts: THREE.Vector2[] = [];
   for (let i = CAP; i >= 0; i--) {
@@ -297,13 +345,15 @@ function ribbedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material
   // tapered overall (thick near the body, narrower toward the extremity) — the
   // ribbing rides ON TOP of that taper rather than replacing it.
   const shaftSpan = wallTopY - wallBotY;
-  const steps = ribCount * 2;
+  const SUB = 4;                       // profile samples per rib half-period
+  const steps = Math.max(1, ribCount * 2) * SUB;
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
     const y = wallBotY + t * shaftSpan;
     const base = THREE.MathUtils.lerp(rBot, rTop, t);
-    const isRib = i % 2 === 1; // odd steps bulge OUT, even steps pinch IN
-    pts.push(new THREE.Vector2(base * (isRib ? 1.16 : 0.88), y));
+    // A cosine wave, not a two-level square wave. Same peaks, no staircase.
+    const wave = ribCount > 0 ? 1 + ribAmp * Math.cos(t * ribCount * 2 * Math.PI - Math.PI) : 1;
+    pts.push(new THREE.Vector2(base * wave, y));
   }
   pts.push(new THREE.Vector2(rTop, wallTopY));
   const TCAP = 4;
@@ -498,12 +548,45 @@ export class WaterBottleCharacter extends BaseCharacter {
         // shoulder height instead of 0.58R, and `bodies.ts` is explicit that this
         // number is a per-character fit on STUB rather than a preset value — the
         // arms have to clear the FOOD, and the food just got narrower.
-        shoulderWidth: CHARACTER_HEIGHT * 0.25,
+        //
+        // ── 🚨 0.25H -> 0.216H, AND "THE ARMS HAVE TO CLEAR THE FOOD" IS THE BUG ──
+        // That instruction is what put the joints in mid-air. `tools/tmp/cc_probe.mjs`
+        // takes the body's TRUE half-width from its VERTICES, binned by height (the
+        // AABB cannot answer this — a lathe's AABB half-width is its width at its
+        // widest height, not at the height you asked about, and round 1 of the probe
+        // reported every limb "overlapping" while the render showed 90 px of
+        // background). At the shipped stance, on HEAD:
+        //
+        //   slot          jointX   body half-width at that height    gap    riseTo
+        //   upperArmL     0.5201   0.4196                          +0.1005    --
+        //   upperArmR     0.5171   0.3541                          +0.1630   2.42
+        //   thighL        0.6229   0.4047                          +0.2182    --
+        //   thighR        0.6229   0.4031                          +0.2198    --
+        //
+        // **Every joint is 10-22 cm outside the bottle**, and `riseTo --` says the
+        // bottle is never that wide at ANY height above — so `rise`, which is the
+        // lever that fixed hamburger's hips, cannot fix this one. It has to be
+        // lateral. (Known-bad: `--knownbad shift` pushes each joint out 0.25 m and
+        // every gap grows by 0.247. The probe measures what it claims.)
+        //
+        // 0.216H puts the shoulder at 0.449 against a 0.354-0.42 wall, and the upper
+        // arm's new 1.62-radius deltoid top then reaches inward to 0.238 — 12-18 cm
+        // INSIDE the shell, so the arm emerges from the bottle instead of floating
+        // beside it. ⚠️ The character does not get narrower: the old outer edge was
+        // 0.520 + 1.16*0.133 = 0.674 and the new one is 0.449 + 0.211 = 0.660. The
+        // silhouette is the same width; the hole in the middle of it is gone.
+        shoulderWidth: CHARACTER_HEIGHT * 0.216,
         // 0.225H -> 0.30H. STUB's own value was set to get four bottom-heavy masses
         // off their own legs; this is the same argument taken one step further for
         // the outline, and it stops short of x1.5 because that is where this
         // character measured a second island.
-        stanceWidth: CHARACTER_HEIGHT * 0.30,
+        // 0.30H -> 0.264H for the hip half of the same measurement (+0.22 m of air
+        // under both thighs). Same trade: the thigh's own top went 1.00 -> 1.42
+        // radii, so the outer edge moves 0.772 -> 0.722 while the inner face moves
+        // 0.481 -> 0.376 against a 0.405-0.42 wall. Deliberately short of the 0.225H
+        // this character used to have — that was measured as a WORSE outline, and
+        // the point here is to close the gap, not to re-open an old defect.
+        stanceWidth: CHARACTER_HEIGHT * 0.264,
       }),
       // Upright and eager — chest forward, one arm raised as if reaching/
       // waving. Distinct from every other character's stance in this file's
@@ -1446,21 +1529,72 @@ export class WaterBottleCharacter extends BaseCharacter {
         // on every ribbed segment. Four `dLcontact` pairs got worse (hipL|kneeL by
         // 0.0736, nineteen 1/255 floors) and the pair it was aimed at moved
         // +0.0020. The numbers and the render are in the block above `ribbedLimb`.
+        // ── 🚨 ARMS AND LEGS WERE THE SAME OBJECT, SO THIS READ AS A SPIDER ──────
+        // Before this round the four slots below called ONE helper with ONE material
+        // and radii that differed by at most 0.18 of a radius:
+        //     upperArm 1.02/0.72   forearm 0.70/0.52
+        //     thigh    1.00/0.84   shin    0.84/0.66
+        // — four identical blue ribbed chains, differing only in the terminal cap,
+        // which is the smallest element on screen and is DARK NAVY on both ends
+        // (`buildCapHand` and `buildBottleFoot` share `capDarkMat`). A human at the
+        // lobby camera could not say which pair was which, and the honest read of
+        // the render is a spider.
+        //
+        // Three separations, in decreasing order of how far they carry:
+        //
+        //   1. SHAPE. The ribbed hose is now the ARM only (`ribCount 3`). The legs
+        //      are `ribCount 0` — smooth tapered columns, the bottle's own body
+        //      profile in miniature, with the ankle ridge as their one break. A
+        //      corrugated flexible tube and a smooth rigid column are different
+        //      objects at 8 px wide; two corrugated tubes are not.
+        //   2. MASS. **The arms were FATTER THAN THE LEGS**, which no animal is:
+        //      STUB's `armRadiusF` is 0.062 and `legRadiusF` is 0.058, and the
+        //      multipliers above then made the upper arm wider still. Reversed — the
+        //      legs are now ~1.5x the arm's width and the arms are genuinely thin.
+        //   3. ATTACHMENT (see the block below `dressLimbs`'s signature for the
+        //      probe numbers). The upper arm gets a hard deltoid flare, 1.62 -> 0.60
+        //      over one bone, so its top is a shoulder rather than a plate.
+        // ⚠️ 1.62 -> 1.24 -> 1.06, and both intermediate values were rendered and
+        // rejected by eye. At 1.62 the shoulder ball is 0.21 m across on a 2.1 m
+        // character and, because the ring is perpendicular to an arm that hangs ~20
+        // degrees off vertical, it projects almost horizontally: both shoulders read
+        // as WATER WINGS (`shots/cc/after2/waterbottle_p20.png`). 1.24 was still a
+        // bulb on a stalk (`shots/cc/after3/`). 1.06 reaches inward to
+        // 0.449 - 0.138 = 0.311 against a 0.354-0.421 wall — still 4-11 cm inside the
+        // shell, so the arm is still buried — and it stops being a separate object.
+        // The arm/leg separation does not depend on it: the legs are 1.42/1.20 radii
+        // against the arm's 1.06/0.72, on a bigger radius, all the way down.
         case 'upperArmL':
         case 'upperArmR':
-          return ribbedLimb(size.len, size.radius * 1.02, size.radius * 0.72, plasticMat, 3);
+          return ribbedLimb(size.len, size.radius * 1.06, size.radius * 0.72, plasticMat, 3, 16, size.len * 0.24);
+        // 2 ribs, not 3. The forearm is the thinnest segment on the character (0.09 m
+        // across) and three bulges on it is the bead-chain read this whole round is
+        // about, at the one place where there is no room for a wave.
         case 'forearmL':
         case 'forearmR':
-          return ribbedLimb(size.len, size.radius * 0.70, size.radius * 0.52, plasticMat, 3);
+          return ribbedLimb(size.len, size.radius * 0.72, size.radius * 0.54, plasticMat, 2, 16, size.len * 0.12, 0.08);
         case 'handL':
         case 'handR':
-          return buildCapHand(size.radius, capMat, capDarkMat);
+          return buildCapHand(size.radius * 0.86, capMat, capDarkMat);
         case 'thighL':
         case 'thighR':
-          return ribbedLimb(size.len, size.radius * 1.0, size.radius * 0.84, plasticMat, 3);
+          // `ribCount 0` — smooth. And a bigger `rise` than the arm gets, because the
+          // probe says the bottle is WIDER above the hip (0.455 at the elbow band vs
+          // 0.405 at the hip) and NARROWER above the shoulder (the neck): rising is
+          // worth something on the leg and nothing on the arm.
+          return ribbedLimb(size.len, size.radius * 1.42, size.radius * 1.20, plasticMat, 0, 20, size.len * 0.40);
         case 'shinL':
-        case 'shinR':
-          return ribbedLimb(size.len, size.radius * 0.84, size.radius * 0.66, plasticMat, 3);
+        case 'shinR': {
+          const g = new THREE.Group();
+          g.add(ribbedLimb(size.len, size.radius * 1.20, size.radius * 0.94, plasticMat, 0, 20, size.len * 0.14));
+          // One ridge at the ankle. The legs gave up the ribbing to separate from the
+          // arms; this keeps ONE grip-ridge on them so they still belong to the same
+          // moulded-plastic object. ⚠️ Deliberately ONE, at the ankle, not a collar at
+          // the knee — a collar at every joint is the `cuffedLimb` experiment above,
+          // which cost `hipL|kneeL` 0.0736 of `dLcontact` (nineteen 1/255 floors).
+          g.add(ridgeRing(-size.len * 0.86, size.radius * 0.99, size.radius * 0.09, capMat));
+          return g;
+        }
         case 'footL':
         case 'footR':
           return buildBottleFoot(size.radius, capDarkMat, plasticMat);

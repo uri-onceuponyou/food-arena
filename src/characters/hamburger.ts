@@ -102,7 +102,79 @@ const LIMB_TOAST_DARK = '#3E1F09'; // forearm / shin — dark
  */
 const PATTY = '#2A1408';
 const PATTY_DARK = '#0C0603';     // and the boots are darker than the shins above them
+/**
+ * ── ❌ #43220B -> #7B4415 WAS BUILT, MEASURED AND REVERTED. THE NUMBER THAT
+ *    KILLED IT: `p05` **0.166 -> 0.238** AGAINST A HARD MAX OF **0.180** ──────
+ * `valuescan --mode gate`, recomputed on both trees under `headserve`
+ * (before f2ed2d9b3ce0d8e6, after 06621542555b1d37):
+ *
+ *   hamburger    range    p05  steps  minDL  weakB%  weakBc%  verdict
+ *   #43220B      0.713  0.166      7  0.208     4.3      9.0  PASS
+ *   #7B4415      0.639  0.238      6  0.209     4.7     11.6  FAIL: p05
+ *
+ * `p05` is the DARK ANCHOR and its band is calibrated off the reference plates
+ * (max 0.180, target 0.100). The bottom bun is this character's whole torso, so it
+ * IS the dark end of the ladder — lifting it 0.145 of luma lifted `p05` 0.072 and
+ * cost a value rung as well (`steps@10` 7 -> 6, `range` 0.713 -> 0.639).
+ * ⚠️ The slope is the finding: **+0.5 of p05 per unit of bun albedo**, so the p05
+ * headroom (0.180 - 0.166 = 0.014) buys **0.028 of bun luma** — nothing. Lifting
+ * this constant is not affordable at any useful size, and the next pass should not
+ * re-derive that.
+ *
+ * The diagnosis below is unchanged and correct; only the side it is paid from moved.
+ * See `LIMB_THIGH` — the same value step, taken from the LIMB instead, which pushes
+ * `p05` DOWN (the safe direction) and separates the thigh from the upper arm at the
+ * same time.
+ *
+ * ── the diagnosis this was written for ──────────────────────────────────────
+ *
+ * `bunDarkMat` paints the **bottom bun, which is this character's whole torso**
+ * (`dressTorso`). At #43220B it is **luma 0.154** — the darkest large surface on the
+ * model — while `LIMB_TOAST`, the thigh that attaches to it, is 0.459. Rendered at
+ * the lobby camera and zoomed 2x (`shots/cc/zoom/hb-hips-after4.png`) the body's
+ * lower half is a BLACK VOID with two lit orange legs standing in front of it. A
+ * body that is the darkest thing on the character cannot read as the thing its
+ * limbs attach to, whatever the contour does.
+ *
+ * ⚠️ This is the third distinct cause found for the same reject, and the first two
+ * were both real and both insufficient:
+ *   · `fc4d9ad`'s pelvis — measured 0.08% of the silhouette, enclosed by the bun on
+ *     every axis (`LESSONS` §1);
+ *   · the apron's hard hem — fixed, twice (0.70 -> 0.58 -> 0.46 of the bun's height),
+ *     and the contour under the body IS the bun's curve now. The zoom shows it.
+ * The geometry is right and the paint is wrong.
+ *
+ * The value it was deepened FOR still holds, because the number that made it
+ * necessary has moved. PASS 3's note above reads *"at #7A4318 the upper arm measured
+ * 0.32 against a bottom bun at 0.33 — `torso|shoulderL` 0.011 across 68 px"* — that
+ * was when the LIMB was #7A4318. The limb has since gone to #AD6C29 (0.459), so:
+ *
+ *   torso|shoulderL step   old #43220B: 0.459 - 0.154 = 0.305
+ *                          new #7B4415: 0.459 - 0.299 = 0.160
+ *
+ * — still above the 0.10 floor and at the 0.15 target, bought with 0.145 of luma
+ * that the torso had no use for. Hue is held exactly (the same 24-degree bake); only
+ * value moved, which is the rule the block below already states.
+ */
 const BUN_DARK = '#43220B';
+/**
+ * The THIGH's own tone, and it exists to pay for the paragraph above from the side
+ * that `p05` does not object to.
+ *
+ * `LIMB_TOAST` (#AD6C29, luma 0.459) dressed the upper arm AND the thigh — one
+ * material for both, which is half of why this character reads as four legs. Against
+ * a bottom bun at 0.154 it also puts a **0.305 luma cliff exactly at the hip**, and a
+ * bright limb butted against a black body is the "disconnected" read whatever the
+ * contour does.
+ *
+ * #8A5220 is luma **0.354**, so:
+ *   thigh | bottom bun   0.305 -> 0.200   the hip cliff, cut by a third
+ *   upper arm | thigh    0.000 -> 0.105   arms and legs now differ in VALUE too,
+ *                                         on top of 1.08/0.70 against 1.34/1.10
+ * and because it moves a large surface DOWN, it moves `p05` down — the direction the
+ * gate wants — where lifting the bun moved it up and failed.
+ */
+const LIMB_THIGH = '#8A5220';
 const LETTUCE = '#4E7A12';
 /** The frill's own lighter green. Was `PALETTE.lettuce` offset in HSL; pinned to the
  *  value that offset actually produced so deepening `LETTUCE` does not drag it down
@@ -1178,6 +1250,24 @@ export class HamburgerCharacter extends BaseCharacter {
       bottomBun.name = 'bottom_bun_mesh';
       bottomBun.position.y = size.h * 0.02;
       bottomBun.castShadow = true;
+      // ❌ `receiveShadow = false` WAS TRIED HERE AND THE FRAME DID NOT MOVE.
+      // After `BUN_DARK` 0.154 -> 0.299 the bun's SIDES read as warm brown and the
+      // legs read as growing out of them, but a near-black band survived across the
+      // FRONT of the waist (`shots/cc/zoom/hb-hips-after5.png`). The obvious
+      // explanation is that the patty/cheese/tomato/lettuce stack, which is the same
+      // radius as this bun and sits directly on it, casts a hard shadow across it.
+      // Ablated — shadow receipt off, re-rendered, `shots/cc/zoom/hb-hips-after6.png`
+      // — and the two crops are **indistinguishable**. `docs/AGENT-BRIEF.md` §4.2:
+      // require the frame to MOVE. It did not, so the hypothesis is wrong and the
+      // flag goes back.
+      // 🚨 **The band is the PATTY.** `PATTY` is `#2A1408`, luma **0.09**, and the
+      // stack order puts it directly under the cheese — so the dark strip at the
+      // waist is a correctly-lit surface whose ALBEDO is a void. It sits above the
+      // hip line, so it is not what detaches the legs (the bun was), but it is why
+      // this character still reads as two objects stacked at the waist. Left alone
+      // deliberately: `PATTY`/`PATTY_DARK` are this file's dark rung and the value
+      // pass used them to buy `p05`, so moving them is a `valuescan` round of its own
+      // and not a free ride on this one.
       bottomBun.receiveShadow = true;
       group.add(bottomBun);
 
@@ -1214,9 +1304,24 @@ export class HamburgerCharacter extends BaseCharacter {
       // garment further from the failure recorded two paragraphs down (an apron
       // hanging into the thigh space, which measured the thighs delivering 0.006 and
       // 0.075 of their footprint) rather than closer to it.
-      const apronH = bunH * 0.58;
+      // ── 0.58 -> 0.46, AND THE HIP IS STILL NOT CLOSED AT 0.58 ──────────────────
+      // The paragraph above is right about the mechanism and stopped short of the
+      // number. Re-rendered at the lobby camera and zoomed 2x
+      // (`shots/cc/zoom/hb-hips-before.png`), the body's lowest contour is STILL the
+      // apron: a cream drum with a bright `#B5342B` hem across it, terminating in two
+      // hard CORNERS where the panel's arc ends, with the bun's gold curve visible
+      // only outboard of those corners. A cream panel that is the widest, lowest and
+      // lightest thing on the body is what the eye takes for the bottom of the body,
+      // whatever is behind it.
+      // 0.46 of the bun's height, raised to sit on the bun's upper half, uncovers
+      // roughly twice as much of the bun's own convex rim. It still ADDS NO MASS —
+      // the same argument as the 0.70 -> 0.58 step, taken to where the bun actually
+      // wins the contour. ⚠️ And it moves the garment further from the failure the
+      // paragraph above records (an apron hanging into the thigh space, measured at
+      // 0.006/0.075 of thigh footprint delivered), never closer.
+      const apronH = bunH * 0.46;
       const bunBaseY = size.h * 0.02;
-      const apronY = bunBaseY + bunH * 0.50;
+      const apronY = bunBaseY + bunH * 0.58;
       const apron = new THREE.Mesh(curvedPanel(apronR, apronArc, apronH), apronMat);
       apron.name = 'apron_bib';
       apron.position.y = apronY;
@@ -1307,6 +1412,8 @@ export class HamburgerCharacter extends BaseCharacter {
     const mittSeedMat = toonMat({ color: PALETTE.cream, roughness: 0.75 });
     const limbMat = toonMat({ color: LIMB_TOAST, ramp: RAMP_CHARACTER(), roughness: 0.85 });
     const limbDarkMat = toonMat({ color: LIMB_TOAST_DARK, ramp: RAMP_CHARACTER(), roughness: 0.85 });
+    // See `LIMB_THIGH`: the thigh no longer shares the upper arm's material.
+    const thighMat = toonMat({ color: LIMB_THIGH, ramp: RAMP_CHARACTER(), roughness: 0.85 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {
         // ── The two TOP segments differ only in how far they reach UP ────────────
@@ -1323,7 +1430,25 @@ export class HamburgerCharacter extends BaseCharacter {
           // the arm come out from BETWEEN the bun layers, and a segment whose apex
           // stops dead at the shoulder pivot draws its own closed silhouette right
           // there and undoes it.
-          const geo = taperedSegment(size.len, size.radius * 1.2, size.radius * 0.84, 20, size.len * 0.32);
+          // ── 🚨 1.2/0.84 WAS THE THIGH'S NUMBER TOO, CHARACTER-FOR-CHARACTER ──────
+          // Until this round `upperArm` and `thigh` were the SAME call with the SAME
+          // material, and `forearm` and `shin` were literally the same `case` block.
+          // Four identical orange-over-brown chains; a viewer at the lobby camera
+          // cannot say which pair is which, and the honest read of
+          // `shots/cc/before/hamburger_p20.png` is a four-legged animal whose front
+          // pair happens to end in bun mitts. STOUT makes it worse by archetype:
+          // `armRadiusF` 0.085 against `legRadiusF` 0.074, so **the arms were fatter
+          // than the legs**, which no animal is.
+          // ⚠️ 1.28 WAS TRIED FIRST AND RENDERED AS A MUSHROOM CAP. A top/bottom ratio
+          // of 1.78 on a bone this short is not a taper, it is a dome on a stalk:
+          // `shots/cc/after3/hamburger_p20.png` shows both upper arms as wide orange
+          // caps with a dark rim and a thin brown stem under them. 1.08/0.70 (ratio
+          // 1.54, the same as the old 1.2/0.84's 1.43 within a hair) keeps the arm a
+          // limb. **The arm/leg separation is carried by the SHAFT, not the shoulder**
+          // — the arm's widest point is 1.08 * 0.1785 = 0.193 m and its elbow is
+          // 0.118 m, against a thigh at 0.208 m and a shin at 0.154 m, so the leg is
+          // 30% thicker where both pairs are simply columns and the eye compares them.
+          const geo = taperedSegment(size.len, size.radius * 1.08, size.radius * 0.70, 20, size.len * 0.32);
           const m = new THREE.Mesh(geo, limbMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
@@ -1359,21 +1484,36 @@ export class HamburgerCharacter extends BaseCharacter {
           // side (an attachment mass added to the body); here the body mass already
           // exists and overhangs the hip by 0.06 m, so the cheaper half of the pair
           // is to reach the leg up into it.
-          const geo = taperedSegment(size.len, size.radius * 1.2, size.radius * 0.84, 20, size.len * 0.34);
-          const m = new THREE.Mesh(geo, limbMat);
+          // 1.2/0.84 -> 1.34/1.10. The thigh keeps its width all the way to the knee
+          // instead of tapering like the arm above; see the upper-arm case for the
+          // arm/leg separation this is one half of.
+          const geo = taperedSegment(size.len, size.radius * 1.34, size.radius * 1.10, 20, size.len * 0.34);
+          const m = new THREE.Mesh(geo, thighMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           return m;
         }
-        case 'forearmL': case 'forearmR':
-        case 'shinL': case 'shinR': {
+        // ⚠️ These two were ONE `case` block sharing one set of radii — the strongest
+        // possible statement that a forearm and a shin are the same object, made in
+        // the code rather than only in the render. Split, and the numbers now differ:
+        // the forearm is the slimmest segment on the character and the shin is nearly
+        // as thick as the thigh above it.
+        case 'forearmL': case 'forearmR': {
           // A small `rise` here too, for the same reason one segment up: the elbow and
           // knee are the two joints where the previous fix left a double taper meeting
           // at a point (donut's recorded "waist"), and 0.12 of the bone is enough for
           // the lower segment's shoulder to sit inside the upper one's skirt without
           // widening either.
-          const geo = taperedSegment(size.len, size.radius * 0.84, size.radius * 0.64, 20, size.len * 0.12);
+          const geo = taperedSegment(size.len, size.radius * 0.72, size.radius * 0.54, 20, size.len * 0.12);
+          const m = new THREE.Mesh(geo, limbDarkMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'shinL': case 'shinR': {
+          const geo = taperedSegment(size.len, size.radius * 1.10, size.radius * 0.88, 20, size.len * 0.12);
           const m = new THREE.Mesh(geo, limbDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;

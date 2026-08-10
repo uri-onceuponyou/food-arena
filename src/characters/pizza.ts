@@ -163,7 +163,7 @@ function torsoBarrel(halfW: number, height: number, halfD: number, taper: number
  * radius top-to-bottom), this reads as a real tapered form: thick doughy shoulder,
  * narrower wrist, per the art director's call for varied taper per character.
  */
-function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
+function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12, rise = 0): THREE.Mesh {
   // Points MUST run bottom → top for LatheGeometry's automatic normals to face
   // outward — this file's other lathes (dough wedge etc.) rely on the same rule.
   // Getting it backwards was a round 1 defect: the real mesh got face-culled
@@ -175,9 +175,18 @@ function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Materia
   // the joint rather than blending into it. The dome keeps almost the whole
   // length budget for the actual tapered shaft.
   const capBot = Math.min(rBot, len * 0.45);
-  const capTopH = Math.min(rTop * 0.42, len * 0.16);
+  // ⚠️ `min(rTop * 0.42, len * 0.16)` resolves to `len * 0.16` on every slot this
+  // file uses — ~4 cm of dome closing a 13 cm ring, i.e. a plate. Combined with the
+  // old `wallTopY = -capTopH`, the segment's apex stopped dead ON the joint pivot and
+  // drew its own closed silhouette there, which at the lobby camera
+  // (`shots/cc/zoom/pz-limbs-before.png`) is two upper arms hanging in mid-air with
+  // their FAT end pointing up and away from the body.
+  // `rise` is the budget that fixes both: the mesh may reach `rise` above the pivot,
+  // so the cap can be that much taller AND the widest ring sits below the pivot,
+  // buried in whatever mass is above. From `hamburger.ts`'s `taperedSegment`.
+  const capTopH = Math.min(rTop, rise + len * 0.16);
   const wallBotY = -(len - capBot);
-  const wallTopY = -capTopH;
+  const wallTopY = rise - capTopH;
   const CAP = 5;
   const pts: THREE.Vector2[] = [];
   for (let i = CAP; i >= 0; i--) {
@@ -329,7 +338,15 @@ export class PizzaCharacter extends BaseCharacter {
         // pivot that was already 0.095m clear of the body at rest. The idle-only
         // baseline could not see this, which is exactly why the acceptance test
         // now samples both.
-        shoulderWidth: CHARACTER_HEIGHT * 0.235, // broad shoulders — wide top of the wedge
+        // 0.235H -> 0.200H, and it is the SAME defect one round further on. The probe
+        // (`tools/tmp/cc_probe.mjs`, body half-width taken from vertices) puts the left
+        // shoulder pivot **0.228 m** outside the dough barrel at IDLE — far more than
+        // the 0.095 m this note was written about — so the run-cycle island above is
+        // the idle gap plus a swing, not a separate problem. The wedge read is not
+        // paid for: the upper arm's own top went 1.10 -> 1.50 radii in the same round,
+        // so the silhouette's outer edge moves 0.627 -> 0.579 (8%) while the hole
+        // between arm and body closes completely.
+        shoulderWidth: CHARACTER_HEIGHT * 0.200, // broad shoulders — wide top of the wedge
         torsoWidth: CHARACTER_HEIGHT * 0.26 * 0.82, // narrow waist — do NOT track the wide shoulders
         // 0.09H -> 0.135H. Still the second-narrowest in the cast, so the wedge's
         // own taper still reads; the point of the change is that the feet now
@@ -765,6 +782,60 @@ export class PizzaCharacter extends BaseCharacter {
       seat.castShadow = true;
       seat.receiveShadow = true;
       group.add(seat);
+
+      // ── 💪 AND THE SAME MASS, MIRRORED, CLOSES THE *ARM* GAP ──────────────────
+      // The seat above is the hip half of a two-part defect and the arm half is
+      // larger. `tools/tmp/cc_probe.mjs` — the body's half-width taken from its
+      // VERTICES and binned by height, because a lathe's AABB reports its width at
+      // its WIDEST height and therefore says every limb overlaps while the render
+      // shows 100 px of background — measures, on HEAD, at idle:
+      //
+      //   slot         jointX   body half-width there    gap     riseTo
+      //   upperArmL    0.4649   0.2373                 +0.2276     --
+      //   upperArmR    0.5010   0.4244                 +0.0766     --
+      //
+      // `riseTo --` is the decisive column: the barrel is NEVER that wide at any
+      // height above the shoulder, because `torsoBarrel` is a sphere and the shoulder
+      // pivot sits near its top. So `rise` — the lever that works on the legs, where
+      // `riseTo` is only 0.14 m up — cannot reach the arms, and this file's own note
+      // about the left arm becoming a separate 9,032 px component during the stride
+      // is the same gap plus a swing.
+      //
+      // Two things close it and BOTH are needed: `shoulderWidth` 0.235H -> 0.200H
+      // (see `proportions`), and this — dough spreading UP over the shoulders exactly
+      // as it spreads DOWN over the thighs. It is the same argument, the same tone,
+      // and the same "dough goes where it is pressed" logic Uri asked for; a shoulder
+      // cuff ON THE ARM was tried instead and rendered as a lampshade (see
+      // `dressLimbs`), because a mass parented to the joint moves with the joint and
+      // can never be the thing the joint is attached TO.
+      //
+      // ⚠️ Sized off the rig's own numbers, not by eye: `shoulderWidth` and
+      // `shoulderY` come from `metrics`, so this stays correct if the proportions are
+      // retuned later — the failure mode this file already records for a badge parked
+      // at a remembered radius. Half-width `sw * 1.24` reaches 0.24 * sw = 0.10 m PAST
+      // the pivot, so the arm's top is inside dough rather than tangent to it, and the
+      // two lobes overlap on the axis so they read as one shoulder mass.
+      const sw = this.rig.metrics.shoulderWidth;
+      const sy = this.rig.metrics.shoulderY;
+      for (const sx of [-1, 1]) {
+        const pad = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), doughMat);
+        pad.name = 'pizza_dough_shoulder';
+        // ⚠️ 0.74/0.30 was rendered first and is a real trade recorded rather than
+        // hidden: at that size the shoulder mass is 1.04 m across against a head
+        // 0.674 m across, and this file's own rule is *"a head only reads as the hero
+        // form if the body under it is smaller"*. 0.66/0.25, dropped a further 0.04h,
+        // takes it to 0.97 m and keeps the arms buried. It is still wider than the
+        // wedge, and that is a **judgement call**: a shoulder mass narrower than the
+        // head cannot reach a pivot the head does not span, so on this character the
+        // rule and an attached arm are not simultaneously satisfiable without moving
+        // the pivot further than `shoulderWidth` 0.200H already moves it. Attachment
+        // wins — a detached arm is a defect Uri has named, a broad shoulder is not.
+        pad.scale.set(sw * 0.66, size.h * 0.25, bodyHalfD * 0.86);
+        pad.position.set(sx * sw * 0.50, sy - size.h * 0.14, 0);
+        pad.castShadow = true;
+        pad.receiveShadow = true;
+        group.add(pad);
+      }
       const barrelCentreY = (bodyTopY + bodyBottomY) / 2;
       /** `u` in (-1, 1) up the barrel, `theta` around it (0 = front, +X to the right),
        *  `k` a radial fraction of the local surface. Mirrors `torsoBarrel` exactly. */
@@ -1009,10 +1080,28 @@ export class PizzaCharacter extends BaseCharacter {
       //    was nothing to see. Read off `shots/ch/pizza/after/lobby_front.face.png`:
       //    both glints are there and neither registers as a highlight.
       //    **A catchlight is not a bright thing; it is a bright thing ON A DARK THING.**
-      //    Both are therefore anchored to the PUPIL's centre, not the eye's, and offset
-      //    by less than the pupil's own radius so they straddle its edge.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.28, 10, 8), glintMat);
-      glint.position.set(PUP_X - R * 0.030, PUP_Y + R * 0.030, R * 0.074);
+      //    Both are therefore anchored to the PUPIL's centre, not the eye's.
+      //
+      //    ── 🚨 "…AND OFFSET SO THEY STRADDLE ITS EDGE" WAS THE BUG ────────────────
+      //    That is the old wording, kept because it states the mistake exactly: a
+      //    catchlight is a bright thing ON a dark thing, and one hanging OFF the edge
+      //    of the dark thing merges with the white behind it. Read at 3x
+      //    (`shots/cc/zoom/pz-face-after5.png`): **both pupils are Pac-Men with a bite
+      //    out of the upper left**, and the bite is continuous with the sclera. This is
+      //    the same defect `fb9d9da` fixed on egg (glint at 49% of the pupil radius,
+      //    straddling); it is here because both faces were built from the same recipe.
+      //
+      //    The arithmetic, since "looks about right" is what produced it:
+      //      pupil radius   EYE_R * 0.56  = R * 0.0728
+      //      old glint      EYE_R * 0.28  = R * 0.0364 at |offset| R * 0.0424
+      //                     -> outer edge R * 0.0788, i.e. **R * 0.006 PAST the rim**
+      //      new glint      EYE_R * 0.20  = R * 0.0260 at |offset| R * 0.0339
+      //                     -> outer edge R * 0.0599, **R * 0.0129 inside** (18% margin)
+      //    Still 36% of the pupil's radius, so the catchlight is not made timid — it is
+      //    made a catchlight. `bounce` below was already inside (outer edge R * 0.062)
+      //    and is untouched, which is the control: it never read as a bite.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.20, 10, 8), glintMat);
+      glint.position.set(PUP_X - R * 0.024, PUP_Y + R * 0.024, R * 0.074);
       glint.userData.noOutline = true;
       eye.add(glint);
 
@@ -1392,12 +1481,45 @@ export class PizzaCharacter extends BaseCharacter {
         // so the upper arm came out wider than it was tall and read as a flipper
         // rather than as the top of a limb. Flare pulled back to 1.10 so the
         // taper still reads without the segment going square.
+        //
+        // ── 🚨 1.10 -> 1.50, AND THE FLIPPER IT WAS PULLED BACK FROM WAS THE FLAT
+        //    TOP CAP, NOT THE WIDTH ────────────────────────────────────────────────
+        // The old `capTopH` was `len * 0.16` regardless of `rTop`, so ANY wide top
+        // rendered as a plate — which is what "flipper" was describing. With the cap
+        // height now scaled by `rTop` and budgeted by `rise` (see `taperedLimb`), a
+        // 1.50 flare is a rounded shoulder ball instead, and it is what closes the
+        // gap this character has carried since the file was written: the probe
+        // (`tools/tmp/cc_probe.mjs`) puts `upperArmL` **0.228 m clear of the body**
+        // at idle with `riseTo --` — the dough barrel is never that wide at any
+        // height above, so rise alone cannot reach it and the flare has to.
+        // ⚠️ This file already RECORDS the run-cycle half of the same defect
+        // ("the left arm breaks off into its own 9,032 px connected component during
+        // the stride"), and 0.26H -> 0.235H was the partial fix. This is the rest.
+        //
+        // ── ARMS AND LEGS WERE THE SAME OBJECT ────────────────────────────────────
+        // Both pairs called this helper with `doughMat` over `doughDarkMat` at radii
+        // within 0.06 of a radius (arm 1.10/0.90 -> 0.90/0.62, leg 1.14/0.94 ->
+        // 0.94/0.76). Four identical dark-brown chains. Now: the arm tapers hard from
+        // a wide shoulder to a THIN forearm, the leg stays thick all the way down,
+        // and only the arm carries a crust cuff.
+        // ❌ A `CRUST_RIM` SHOULDER CUFF WAS BUILT, RENDERED AND REVERTED HERE.
+        // It was a second `taperedLimb` of length `0.30 * bone` at 1.58 radii, meant
+        // to be the arm's third value rung. At that length the helper's own cap
+        // clamps leave a mesh 0.38 m ACROSS and 0.14 m TALL — rendered
+        // (`shots/cc/after3/pizza_p20.png`) it is a bright orange LAMPSHADE hanging in
+        // mid-air at each shoulder, more prominent than the arm it was decorating and
+        // no more attached than before. The lesson is `taperedLimb`'s, not the cuff's:
+        // **a segment shorter than its own radius cannot be a segment**, which is the
+        // same arithmetic `donut.ts` records for `len < rTop + rBot`.
+        // The arm/leg separation is carried by the shaft instead (1.16/0.80 against
+        // the thigh's 1.34/1.14 on a bigger radius), and the ATTACHMENT is carried by
+        // the torso's own dough shoulder — see `dressTorso`.
         case 'upperArmL':
         case 'upperArmR':
-          return taperedLimb(size.len, size.radius * 1.10, size.radius * 0.90, doughMat);
+          return taperedLimb(size.len, size.radius * 1.16, size.radius * 0.80, doughMat, 16, size.len * 0.26);
         case 'forearmL':
         case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.90, size.radius * 0.62, doughDarkMat);
+          return taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, doughDarkMat, 14, size.len * 0.12);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
@@ -1415,10 +1537,14 @@ export class PizzaCharacter extends BaseCharacter {
         }
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.14, size.radius * 0.94, doughMat);
+          // `rise` 0.30 of the bone. The probe puts `thighR` already INSIDE the body
+          // (gap -0.118) and `thighL` 0.017 clear with `riseTo` only 0.14 m up — so
+          // unlike the arms, the legs are a rise problem and not a width problem, and
+          // this is the mass the dough seat above was built to spread over.
+          return taperedLimb(size.len, size.radius * 1.34, size.radius * 1.14, doughMat, 16, size.len * 0.30);
         case 'shinL':
         case 'shinR':
-          return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.76, doughDarkMat);
+          return taperedLimb(size.len, size.radius * 1.14, size.radius * 0.90, doughDarkMat, 16, size.len * 0.12);
         case 'footL':
         case 'footR':
           return buildCrustBoot(size.len, charMat, doughDarkMat);

@@ -182,9 +182,14 @@ const TONGUE = '#E2707F';
 const RELISH = '#7CB518';
 const RELISH_DARK = '#5E8C10';
 
-/** Tapered limb: a flat cap at the joint origin (plugs flush, no gap) taper to a
- * rounded tip — the bun's own matte roughness, no capsule uniformity. */
-function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
+/** Tapered limb: a rounded cap at (or above) the joint origin tapering to a
+ * rounded tip — the bun's own matte roughness, no capsule uniformity.
+ *
+ * `rise` lifts the top cap ABOVE the joint pivot so the segment's apex is buried in
+ * whatever mass is above it. Taken from `hamburger.ts`'s `taperedSegment`, which
+ * took it from `donut.ts`; see the block in `dressLimbs` for the probe numbers that
+ * say how much each slot needs. */
+function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12, rise = 0): THREE.Mesh {
   // Points MUST run bottom → top for LatheGeometry's automatic normals to face
   // outward. Getting it backwards was a round 1 defect: the real mesh got
   // face-culled invisible and its outline shell rendered as a solid dark wedge
@@ -195,9 +200,16 @@ function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Materia
   // the joint rather than blending into it. The dome keeps almost the whole
   // length budget for the actual tapered shaft.
   const capBot = Math.min(rBot, len * 0.45);
-  const capTopH = Math.min(rTop * 0.42, len * 0.16);
+  // ⚠️ `min(rTop * 0.42, len * 0.16)` IS `len * 0.16` ON EVERY SLOT THIS FILE USES,
+  // and on LANKY that is ~4 cm of dome closing a 15 cm-wide ring — i.e. flat. The
+  // lobby render (`shots/cc/before/hotdog_p20.png`, zoomed at
+  // `shots/cc/zoom/hd-limbs-before.png`) shows all four upper segments ending in a
+  // hard elliptical disc that reads as a cut sausage, not a shoulder. `rise` is the
+  // budget that fixes it: the mesh may reach `rise` above the pivot, so the cap can
+  // be that much taller and the widest ring simply sits below the pivot.
+  const capTopH = Math.min(rTop, rise + len * 0.16);
   const wallBotY = -(len - capBot);
-  const wallTopY = -capTopH;
+  const wallTopY = rise - capTopH;
   const CAP = 5;
   const pts: THREE.Vector2[] = [];
   for (let i = CAP; i >= 0; i--) {
@@ -857,9 +869,18 @@ export class HotDogCharacter extends BaseCharacter {
       pupil.castShadow = true;
       eye.add(pupil);
 
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.029, 10, 8), flatMat('#ffffff'));
+      // ⚠️ The catchlight was EXACTLY TANGENT to the pupil's rim and it is checked here
+      // rather than eyeballed, because the tangent case is the one that renders as a
+      // bite out of the pupil at some framings and not at others. Pupil radius
+      // R * 0.074; the glint sat at |offset| sqrt(0.034^2 + 0.029^2) = R * 0.0447 with
+      // radius R * 0.029, so its outer edge was **R * 0.0737 against a R * 0.074 rim** —
+      // 0.0003 of margin, i.e. none. That is the `pizza.ts`/`egg.ts` Pac-Man pupil with
+      // the sign of the error flipped by a rounding. Pulled to |offset| R * 0.0374 with
+      // radius R * 0.026: outer edge R * 0.0634, a real 14% margin, and still 35% of
+      // the pupil's radius so the catchlight keeps its size.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.026, 10, 8), flatMat('#ffffff'));
       glint.name = 'eye_glint';
-      glint.position.set(GAZE_X - R * 0.034, -R * 0.011, SCL * 0.58);
+      glint.position.set(GAZE_X - R * 0.028, -R * 0.015, SCL * 0.58);
       glint.userData.noOutline = true;
       eye.add(glint);
 
@@ -1301,19 +1322,66 @@ export class HotDogCharacter extends BaseCharacter {
     // MITT_SAUSAGE, not `PALETTE.sausage`: the mitts sat at exactly the head's own
     // sausage value, so `handL` had nowhere to separate to against the forearm above it.
     const sausageMat = glossyMat({ color: MITT_SAUSAGE, roughness: 0.3 });
+    // ── The shoulder sleeve, and why it is MUSTARD and not the torso's own bun ───
+    // The obvious choice for "make the arm start as part of the body" is `BUN_SHADE`,
+    // the torso's own tone. It is the wrong one: `torso|shoulderL` has been sitting on
+    // the `weakBoundaryPct` gate's hard 0.10 with 0.0058 of margin (see BUN_SHADE's own
+    // block), and painting the shoulder the torso's colour would take that boundary to
+    // roughly zero — buying a silhouette read by deleting a value read. Mustard is this
+    // character's own condiment language, is already on the torso as the zigzag, and is
+    // a step AWAY from both the bun and the limb tan rather than into either.
+    const sleeveMat = glossyMat({ color: PALETTE.mustard, roughness: 0.25 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
+        // ── 🚨 ARMS AND LEGS WERE THE SAME OBJECT ───────────────────────────────
+        // Before this round all four upper segments were `bunMat` and all four lower
+        // segments were `bunDarkMat`, built by ONE helper at radii within 0.10 of a
+        // radius of each other (arm 1.28/0.92 -> 0.90/0.64, leg 1.18/0.94 -> 0.94/
+        // 0.76). Four identical tan-over-brown chains, differing only in the terminal
+        // cap. On this character the arms also hang close to vertical, so the lobby
+        // render is a four-legged animal with two small red claws at the front.
+        //
+        // Two separations, and the `rise` that attaches them. Probe
+        // (`tools/tmp/cc_probe.mjs`, body half-width from vertices, HEAD):
+        //   upperArmL gap +0.041   upperArmR +0.073   thighL +0.102   thighR +0.044
+        // — small gaps, unlike waterbottle's 0.10-0.22, and the thighs' `riseTo` is
+        // only 0.02-0.04 m up. So here `rise` IS the lever and no lateral move is
+        // needed; the segment radii do the rest.
+        //
+        //   1. MASS. Arms 1.28 -> 0.98 at the shoulder and 0.90 -> 0.74 at the elbow;
+        //      legs 1.18 -> 1.46 and 0.94 -> 1.12. The leg is now half again the
+        //      arm's width all the way down, which is the read every quadruped
+        //      silhouette test is actually asking about.
+        //   2. A SLEEVE. The upper arm carries a cream `bunPaleMat` cuff at the
+        //      shoulder — the TORSO's own bun tone, so the arm starts as part of the
+        //      body and steps down into limb tan. The legs have no such step, so the
+        //      arm chain is three values and the leg chain is two.
         case 'upperArmL':
-        case 'upperArmR':
-          return taperedLimb(size.len, size.radius * 1.28, size.radius * 0.92, bunMat);
+        case 'upperArmR': {
+          const g = new THREE.Group();
+          g.add(taperedLimb(size.len, size.radius * 0.98, size.radius * 0.74, bunMat, 12, size.len * 0.30));
+          // ⚠️ A segment shorter than its own radius stops being a segment and becomes
+          // a bauble — the failure `pizza.ts` records for a `CRUST_RIM` cuff that
+          // rendered as a lampshade. This one survives because its two radii are
+          // nearly EQUAL (1.02 / 0.94), so the lathe closes into a ball with no rim to
+          // catch the eye, where pizza's 1.58-over-the-arm's-1.16 left a wide flat
+          // brim. Trimmed 1.16/1.02 -> 1.02/0.94 after rendering: at 1.16 it is 0.28 m
+          // across on a 2.1 m character and reads as a tennis ball on the shoulder.
+          // 1.02 * `armRadius` = 0.124 still covers the 0.041-0.073 m the probe
+          // measures between this joint and the bun.
+          const cuff = taperedLimb(size.len * 0.34, size.radius * 1.02, size.radius * 0.94, sleeveMat, 12, size.len * 0.34);
+          cuff.name = 'arm_sleeve';
+          g.add(cuff);
+          return g;
+        }
         // Lower segments step DOWN a value into `bunDark`. Every limb, hand, boot
         // and the torso were one identical `PALETTE.bun` tan, so the whole body
         // below the head was a single unbroken flat mass with no joint reading at
         // all — the reason it looked naked rather than simply plain.
         case 'forearmL':
         case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.90, size.radius * 0.64, bunDarkMat);
+          return taperedLimb(size.len, size.radius * 0.74, size.radius * 0.54, bunDarkMat, 12, size.len * 0.12);
         case 'handL':
         case 'handR': {
           const side = part === 'handL' ? 1 : -1;
@@ -1321,10 +1389,10 @@ export class HotDogCharacter extends BaseCharacter {
         }
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.18, size.radius * 0.94, bunMat);
+          return taperedLimb(size.len, size.radius * 1.46, size.radius * 1.12, bunMat, 14, size.len * 0.34);
         case 'shinL':
         case 'shinR':
-          return taperedLimb(size.len, size.radius * 0.94, size.radius * 0.76, bunDarkMat);
+          return taperedLimb(size.len, size.radius * 1.12, size.radius * 0.86, bunDarkMat, 14, size.len * 0.12);
         case 'footL':
         case 'footR':
           return buildBunBoot(size.len, bootMat, ketchupMat, size.groundY);
