@@ -192,6 +192,15 @@ const MOUTH_TONGUE = '#C4514F';    // the third value inside the mouth, so it is
 // no longer reads as another undifferentiated cream mass.
 const LIMB_AVOCADO = '#3E5A1C';
 const LIMB_AVOCADO_DARK = '#16220A';
+// ── The ARM's own rung, and it exists to make an arm not be a leg ────────────
+// Both limb pairs used to share `LIMB_AVOCADO` over `LIMB_AVOCADO_DARK`, so the
+// four chains were the same object four times (see `dressLimbs`). The fix is a
+// third rung and, more importantly, a DIRECTION: the arm now runs
+// 0.462 -> 0.312 -> 0.753 (foil mitt) and the leg runs 0.312 -> 0.117 -> 0.056
+// (boot), so one chain brightens toward its terminal and the other darkens.
+// Opposite directions survive shading in a way a single value gap does not — the
+// key can flatten a gap, it cannot reverse an order.
+const LIMB_AVOCADO_LIGHT = '#5E8430';  // upper arm — fresh guac, luma 0.462
 
 type Spot = readonly [angleDeg: number, radiusFrac: number];
 
@@ -202,7 +211,7 @@ type Spot = readonly [angleDeg: number, radiusFrac: number];
  * reference copy. Burrito's own call sites keep top/bottom radii close together
  * — a rolled tortilla is close to a true cylinder, not a tapered dough limb.
  */
-function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12, rise = 0): THREE.BufferGeometry {
   // Profile MUST be wound bottom-to-top (y increasing), matching every other
   // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
   // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
@@ -210,25 +219,58 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   // earlier version of this function built the profile top-to-bottom and every
   // limb using it rendered near-black: inverted normals facing away from the
   // light. The y=0/y=-len hang-down placement is unchanged.
-  const capSegs = 5;
+  //
+  // ── THE CAPS ARE BOUNDED BY THE BONE, NOT BY THE RADIUS ─────────────────────
+  // Taken from `donut.ts:145` via `hamburger.ts:334`, the two copies that already
+  // carry it. The old body emitted a straight side only when `len >= rTop + rBot`
+  // and otherwise stacked two full hemispheres, producing a sphere wider than the
+  // bone whose top cap reached above its own joint origin.
+  //
+  // ⚠️ AND ON THIS CHARACTER THAT BRANCH NEVER FIRED. Measured on LANKY's own
+  // numbers at `H = 2.0496` — the archetype `bodies.ts` calls "the one that was
+  // already right", i.e. the only one whose segments are longer than they are thick:
+  //
+  //   segment      len       rTop+rBot   side?
+  //   upper arm   0.3216      0.1681     yes
+  //   forearm     0.2933      0.1448     yes
+  //   thigh       0.3354      0.1807     yes
+  //   shin        0.2744      0.1523     yes
+  //
+  // **Four for four, and the clamps are all inactive** (`len * 0.42` and `len * 0.30`
+  // both exceed the radii), so this is a no-op on burrito's delivered geometry today
+  // and the render before and after is expected to be identical here. It is taken
+  // anyway for two reasons that are not cosmetic: the sixth copy of a function with a
+  // known defect is a defect whoever next re-tunes these radii will walk into, and the
+  // resolution bump (6 cap segments / 4 side steps against 5/3) removes the shading
+  // corner donut measured `computeVertexNormals` guessing at.
+  //
+  // 🚨 SO THE BEAD-CHAIN READ ON THIS CHARACTER IS **NOT** THIS FUNCTION, AND SAYING
+  // IT WAS WOULD HAVE CLOSED THE WRONG BUG. `shots/ca/before/burrito.png` shows four
+  // chains of green pills separated by fat crimson rings; the rings are the
+  // `WRAP_BAND` cuff torus that `dressLimbs` hangs at the TOP of every forearm and
+  // shin — a joint-height band on a two-segment chain is a bead separator by
+  // construction. That is fixed where it lives, in the call sites below.
+  //
+  // `rise` (hamburger's parameter, same meaning) extends the mesh ABOVE its own joint
+  // origin so a top segment can start inside the mass it hangs from.
+  const capSegs = 6;
+  const capBot = Math.min(rBot, len * 0.42);
+  const capTop = Math.min(rTop, (len + rise) * 0.30);
+  const yBotCap = -len + capBot;
+  const yTopCap = rise - capTop;
   const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
   }
-  const yBotCap = -len + rBot;
-  const yTopCap = -rTop;
-  if (yTopCap >= yBotCap) {
-    const sideSteps = 3;
-    for (let i = 1; i <= sideSteps; i++) {
-      const t = i / sideSteps;
-      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-    }
+  const sideSteps = 4;
+  for (let i = 1; i <= sideSteps; i++) {
+    const t = i / sideSteps;
+    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
   }
-  const yTopSafe = Math.max(yTopCap, yBotCap);
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
   }
   const geo = new THREE.LatheGeometry(pts, radialSegments);
   geo.computeVertexNormals();
@@ -375,7 +417,42 @@ export class BurritoCharacter extends BaseCharacter {
         // this same expression, so the two can no longer drift apart.
         // ⚠️ It also stays clear of `bodies.ts`'s explicit warning — the tube's
         // half-width (0.116H) does NOT reach the shoulder pivot (0.138H).
-        shoulderWidth: H * 0.138,
+        //
+        // ── 🚨 0.138H -> 0.1177H, BECAUSE `R = 0.20H` ABOVE IS WRONG ─────────────
+        // The relationship is right and it was solved against a head radius this rig
+        // does not build. `rig.ts:602` subtracts the neck gap from the head before
+        // halving it —
+        //
+        //     headH = height * headFraction - (2 * neckGap) / (1 + headMount)
+        //           = 2.0496 * 0.40 - (2 * 0.1332) / 1.86 = 0.6766
+        //     R     = headH * 0.5 = 0.3383,  NOT 0.20H = 0.4099
+        //
+        // — a 17.5% error, and every metre figure in the note above inherits it. The
+        // tube is `0.58R` = **0.196 m**, not the 0.238 m claimed, so
+        // `shoulderWidth - armRadius * 0.55` = 0.238 m was not "exactly
+        // `headTubeBottomR`" and the `min` in `dressTorso` was not a tie: it was
+        // 21% clear of the mass on the far side of it, i.e. the shoulder pivot sat
+        // 0.087 m outside a tube it was supposed to straddle.
+        //
+        // Measured on a frozen HEAD before this change (`tools/tmp/ca_geom.mjs`,
+        // which walks the joint tree and interpolates the body's half-width along
+        // every triangle edge crossing the arm's own height):
+        //
+        //     side  worldY   bodyHalf  armInner   overlap
+        //       L   1.1111    0.2019    0.2221    -0.0202     <- background between
+        //       L   0.9838    0.1993    0.2221    -0.0228        arm and body
+        //       R   1.1203    0.2021    0.2083    -0.0062
+        //       R   0.9933    0.1995    0.2083    -0.0088
+        //
+        // **Both arms detached, and asymmetrically** (the stance is asymmetric), which
+        // is exactly what `shots/ca/before/burrito.png` shows at the lobby camera and
+        // what 58 degrees of foreshortening hides. `0.1177H` = `0.58R + armRadius *
+        // 0.55` evaluated on the REAL R, so `dressTorso`'s cap now genuinely ties to
+        // `headTubeBottomR` and head and torso are one tube for the first time.
+        // ⚠️ The tube's half-width (0.0958H) still does not reach the pivot
+        // (0.1177H), so `bodies.ts`'s warning is still respected — by 0.55 of an arm
+        // radius, which is what the relationship above says it should be.
+        shoulderWidth: H * 0.1177,
         // 0.062H -> 0.087H. LANKY's stance is narrow on purpose — "the whole figure
         // reads as a vertical line" — and a vertical line is exactly the outline
         // this pass exists to break. Still the second-narrowest in the cast, so the
@@ -398,7 +475,20 @@ export class BurritoCharacter extends BaseCharacter {
       // of an already-wide pivot is what pushed the hands 0.27m clear of the body.
       stance: {
         shoulderL: -0.04, shoulderR: 0.03,
-        elbowL: -0.34, elbowR: -0.20,
+        // ── ELBOWS OPENED TO PAY BACK WHAT THE SHOULDER FIX COST THE OUTLINE ──
+        // Narrowing `shoulderWidth` to attach the arms (see the derivation above)
+        // moved both hands inboard, and `limbmatch --mode chars --yaws 90` says what
+        // that costs at the MATCH camera: hull deficiency 0.2074 -> 0.1856 and
+        // **appendages 2 -> 0** — the hands had been the only two masses breaking
+        // this character's hull at that facing, and tucking them in deleted both.
+        //
+        // `restPose()` puts the stance's elbow value on rotation.**X**, i.e. a
+        // FORE-AFT swing. That is the one axis this trade is free on: the arm's
+        // attachment is decided at the shoulder, 0.32 m above the elbow, so nothing
+        // here can re-open the gap; and at the lobby's yaw 0 a fore-aft swing is
+        // almost entirely depth, so nothing here disturbs the front read either.
+        // -0.34/-0.20 -> -0.52/-0.36.
+        elbowL: -0.52, elbowR: -0.36,
         twist: -0.04, headTilt: 0.03, headTurn: 0.08,
         hipSway: 0.02, lean: -0.05,
         // The largest single response in the cast: hull deficiency 0.178 -> 0.2189
@@ -693,18 +783,27 @@ export class BurritoCharacter extends BaseCharacter {
       // it back on the lit surface, still 10 deg clear of the eye's outer corner at
       // -44 deg once the +0.30 rad climb-drift is counted.)
       const seamTheta = -1.25;
-      // 7 -> 10. The lumps are 0.212R long over a 1.34R span, i.e. spaced 0.223R — they
-      // did not touch, which is why a "fold" read as beads. At 10 they overlap.
-      const steps = 10;
+      // 7 -> 10 -> 18, and the LENGTH comes down with the count. The 10-lump version
+      // reasoned from spacing alone (0.22R capsules at 0.149R centres "overlap") and
+      // the render still shows a column of separate dashes, because spacing was not
+      // the mechanism: each lump is a STRAIGHT capsule seated on a CURVED surface at
+      // `radius * 1.012`, so over 0.22R of length its two ends sink inside the tube
+      // and only its middle stands proud. A chord is shorter than its arc — the
+      // longer the lump, the less of it clears the wall.
+      // Short lumps (0.10R + caps) at a CONSTANT normal offset (`+ R * 0.016`, not a
+      // radius multiplier, which is a bigger stand-off at the fat end than the thin
+      // one) each clear the wall along their whole length, and 18 of them at 0.079R
+      // centres run into one another. Same total mass, same colour, one seam.
+      const steps = 18;
       for (let i = 0; i < steps; i++) {
         const t = i / (steps - 1);
         const y = THREE.MathUtils.lerp(bodyBottomY + R * 0.10, bodyTopY - R * 0.06, t);
-        const rr = wrapRadiusAt(y) * 1.012;
+        const rr = wrapRadiusAt(y) + R * 0.016;
         // Drifts slightly around the tube as it climbs — a wrapped edge spirals, it
         // does not run dead vertical.
         const a = seamTheta + t * 0.30;
         const lump = new THREE.Mesh(
-          new THREE.CapsuleGeometry(R * 0.030, R * 0.16, 4, 8),
+          new THREE.CapsuleGeometry(R * 0.026, R * 0.10, 4, 8),
           seamMat
         );
         lump.name = 'burrito_fold_seam';
@@ -807,61 +906,153 @@ export class BurritoCharacter extends BaseCharacter {
     // tapered dough, with a seam stripe echoing the roll; hands are twisted foil
     // nubs (the classic "twist the wrapper end" burrito silhouette) instead of a
     // generic mitt, and feet read as the wrap's own cut end.
+    // ── 🚨 AN ARM AND A LEG WERE THE SAME OBJECT, SO THIS WAS A FOUR-LEGGED THING ─
+    // Read `shots/ca/before/burrito.png` at the lobby camera. Four dark-green pill
+    // chains hang off a pale tube at four near-identical angles, each cut in half by
+    // a fat crimson ring, each ending in a small pale point. Nothing on screen says
+    // which pair is which; the figure reads as an insect, and the two silver cones
+    // read as claws. The old code says why in one line — `upperArm*` and `thigh*`
+    // shared a `case`, and so did `forearm*` and `shin*`. They were the same mesh,
+    // the same radii and the same material by construction.
+    //
+    // Three separations, none of which needs `rig.ts`:
+    //
+    //   THICKNESS   arms run 0.94/0.82 of their slot radius against the legs'
+    //               1.14/1.00 — the arm's top is 77% of the thigh's.
+    //   LADDER      the arm gets LIGHTER downward (fresh guac -> mid -> a bright
+    //               FOIL MITT) and the leg gets DARKER downward (mid -> dark ->
+    //               near-black boot). Opposite directions is worth more than any
+    //               single value gap, because it survives the shading.
+    //   TERMINAL    a real mitt with a thumb, ~0.20 m across, against a boot. That
+    //               is the pair a human names without being told.
+    //
+    // ── AND THE CRIMSON RINGS WERE THE BEADS ────────────────────────────────────
+    // `WRAP_BAND` cuffs sat at the TOP of every forearm and shin, i.e. at the elbow
+    // and at the knee. A saturated ring at the joint of a two-segment chain does not
+    // decorate the chain, it CUTS it — which is the bead-necklace read that
+    // `taperedSegment` above is usually blamed for and which, on this character, that
+    // function is measurably not causing. Each band moves to a TERMINAL: the arm's to
+    // the wrist (where it is a glove cuff and an arm-only feature — a leg has no
+    // wrist) and the leg's is deleted, because the boot already terminates the leg.
+    const limbLightMat = toonMat({ color: LIMB_AVOCADO_LIGHT, roughness: 0.75 });
     const limbWrapMat = toonMat({ color: LIMB_AVOCADO, roughness: 0.75 });
     const limbWrapShadeMat = toonMat({ color: LIMB_AVOCADO_DARK, roughness: 0.75 });
     const seamMat = toonMat({ color: LIMB_AVOCADO_DARK, roughness: 0.7 });
     const foilMatLimb = toonMat({ color: FOIL, roughness: 0.25, metalness: 0.5 });
+    // ── THE MITT IS MATTE FOIL, AND THE CHROME WAS THE BELL ────────────────────
+    // The first version of the hand used `foilMatLimb` — roughness 0.25, metalness
+    // 0.5 — and `shots/ca/zoom/a1-burrito-limbs.png` shows what a 0.20 m polished
+    // metal sphere with a saturated crimson ring round its top actually reads as:
+    // a hand BELL. The shape was right; a mirror-finish sphere is a bell, a bauble
+    // or a doorknob and never a hand, because skin and cloth do not have a specular
+    // hotspot. Same albedo (this is still the wrapper's foil), matte surface.
+    const mittMatLimb = toonMat({ color: FOIL, roughness: 0.62, metalness: 0.0 });
     const bandMatLimb = toonMat({ color: WRAP_BAND, roughness: 0.72 });
     const bootMatLimb = toonMat({ color: BOOT, roughness: 0.75 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {
-        case 'upperArmL': case 'upperArmR':
+        case 'upperArmL': case 'upperArmR': {
+          // `rise` = 0.30 of the bone. The upper arm's mesh now starts 0.097 m ABOVE
+          // its own shoulder pivot, inside the wrap, so it has no contour of its own
+          // until it emerges — the same fix `fb9d9da` used on hamburger, and the
+          // other half of the detached-arm repair whose first half is the shoulder
+          // swell in `dressTorso`.
+          const m = new THREE.Mesh(
+            taperedSegment(size.len, size.radius * 0.94, size.radius * 0.82, 12, size.len * 0.30),
+            limbLightMat,
+          );
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
         case 'thighL': case 'thighR': {
           const g = new THREE.Group();
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.05, size.radius * 1.0, 12), limbWrapMat);
+          const m = new THREE.Mesh(
+            taperedSegment(size.len, size.radius * 1.14, size.radius * 1.00, 12, size.len * 0.30),
+            limbWrapMat,
+          );
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           g.add(m);
-          const seam = new THREE.Mesh(new THREE.BoxGeometry(size.radius * 0.16, size.len * 0.94, size.radius * 0.05), seamMat);
-          seam.position.set(0, -size.len * 0.5, size.radius * 0.98);
+          // The rolled-tortilla seam stays on the LEG only. On the arm it was a third
+          // parallel line beside two other verticals and read as a slit.
+          const seam = new THREE.Mesh(new THREE.BoxGeometry(size.radius * 0.13, size.len * 0.78, size.radius * 0.05), seamMat);
+          seam.position.set(0, -size.len * 0.52, size.radius * 1.06);
           seam.userData.noOutline = true;
           g.add(seam);
           return g;
         }
-        case 'forearmL': case 'forearmR':
-        case 'shinL': case 'shinR': {
-          const g = new THREE.Group();
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.0, size.radius * 0.92, 12), limbWrapShadeMat);
+        case 'forearmL': case 'forearmR': {
+          // Top radius is the upper arm's bottom radius EXACTLY (0.94 * 0.82 of
+          // `armRadius` = 0.89 * 0.92 of it), so the elbow is a continuation and not
+          // a step. Two constant-radius tubes at different constants cannot meet —
+          // `soup.ts` records the same finding on its own arm chain.
+          const m = new THREE.Mesh(
+            taperedSegment(size.len, size.radius * 0.89, size.radius * 0.76, 12, size.len * 0.16),
+            limbWrapMat,
+          );
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
-          g.add(m);
-          // Wrapper-band cuff — same costume language as the torso's own sash.
-          const cuff = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 1.02, size.radius * 0.26, 8, 20), bandMatLimb);
-          cuff.rotation.x = Math.PI / 2;
-          cuff.position.y = -size.radius * 0.3;
-          cuff.castShadow = true;
-          g.add(cuff);
-          return g;
+          return m;
+        }
+        case 'shinL': case 'shinR': {
+          // Same continuity rule at the knee: `legRadius * 0.9 * 1.11` is the thigh's
+          // own bottom radius to within 0.1%.
+          const m = new THREE.Mesh(
+            taperedSegment(size.len, size.radius * 1.11, size.radius * 0.95, 12, size.len * 0.16),
+            limbWrapShadeMat,
+          );
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
         }
         case 'handL': case 'handR': {
+          // ── THE TWISTED-FOIL CONE WAS A CLAW ────────────────────────────────
+          // A cone tapering to a point, hung off the end of a limb, is a talon at any
+          // size — and mirrored on a four-limbed silhouette it is the single element
+          // that pushed this figure from "character" to "insect". The wrapper-twist
+          // idea survives as the mitt's own twisted tip; the MASS becomes a hand.
           const g = new THREE.Group();
-          const cuff = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.7, size.radius * 0.22, 8, 16), bandMatLimb);
+          // ⚠️ Sized off the FOREARM, not off `handRadius`. `dressLimbs` hands this
+          // slot the rig's independent `handRadius` constant; on LANKY that is
+          // 0.123 m, 2.1x the forearm's own tip.
+          const tipR = this.rig.metrics.armRadius * 0.92 * 0.76;
+          const mitt = new THREE.Mesh(new THREE.SphereGeometry(tipR * 1.70, 16, 12), mittMatLimb);
+          mitt.position.y = -tipR * 1.30;
+          mitt.scale.set(1, 0.96, 0.86);
+          mitt.name = `${part}_mesh`;
+          mitt.castShadow = true;
+          mitt.receiveShadow = true;
+          g.add(mitt);
+          // The twist: a short blunt nub off the mitt's underside, which is the
+          // wrapper end this file has always wanted and is far too small to be an
+          // appendage on its own.
+          const twist = new THREE.Mesh(new THREE.ConeGeometry(tipR * 0.52, tipR * 0.72, 8), mittMatLimb);
+          twist.position.y = -tipR * 2.55;
+          twist.rotation.z = Math.PI;
+          twist.castShadow = true;
+          g.add(twist);
+          // Thumb — the element that makes the mass NAMEABLE at 20 px.
+          const sx = part === 'handL' ? 1 : -1;
+          const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(tipR * 0.52, tipR * 0.86, 4, 8), mittMatLimb);
+          thumb.position.set(sx * tipR * 1.42, -tipR * 0.74, tipR * 0.42);
+          thumb.rotation.set(0.22, 0, sx * 1.02);
+          thumb.castShadow = true;
+          g.add(thumb);
+          // The paper band, moved here from the elbow. At the wrist it is a glove
+          // cuff; at the elbow it was a bead separator.
+          // Slimmer than the elbow band it replaces (tube 0.24 -> 0.15 of the tip) and
+          // pushed UP against the forearm: a cuff is an EDGE, and at 0.24 it was a
+          // ring the same order as the mitt, which is the collar half of the bell.
+          const cuff = new THREE.Mesh(new THREE.TorusGeometry(tipR * 1.02, tipR * 0.15, 8, 18), bandMatLimb);
+          cuff.position.y = tipR * 0.16;
           cuff.rotation.x = Math.PI / 2;
           cuff.castShadow = true;
           g.add(cuff);
-          // The classic twisted-foil wrapper end — a cone tapering to a point.
-          // Blunted from a 0.62 x 1.5 spike. A pointed cone hanging off a short arm
-          // reads as a stick, not a hand — and the arms are now held clear of the
-          // body (see the stance note) so the hands are actually visible in outline
-          // for the first time, which is what exposed it.
-          const twist = new THREE.Mesh(new THREE.ConeGeometry(size.radius * 0.82, size.radius * 1.02, 8), foilMatLimb);
-          twist.position.y = -size.radius * 0.72;
-          twist.name = `${part}_mesh`;
-          twist.castShadow = true;
-          twist.receiveShadow = true;
-          g.add(twist);
           return g;
         }
         case 'footL': case 'footR': {
@@ -1098,8 +1289,20 @@ export class BurritoCharacter extends BaseCharacter {
       // the pupil's own x span (-0.042R .. +0.122R) and z = 0.105R stands it just proud
       // of the pupil's front (0.103R), so it reads as a highlight in the dark rather
       // than a white dot on white.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.033, 8, 8), glintMat);
-      glint.position.set(-R * 0.010, R * 0.060, R * 0.105);
+      // ── 🚨 AND IT WAS STILL BITING A CHUNK OUT OF THE PUPIL ──────────────────
+      // `fb9d9da` found this on egg — a glint at 49% of the pupil's radius, placed
+      // across its edge, renders every pupil as a Pac-Man. Burrito had the same
+      // construction at 40% (0.033R against an 0.082R pupil) and the same placement
+      // error, and `shots/ca/zoom/burrito-face.png` shows the bite plainly on the
+      // open eye. It is arithmetic: the pupil is an ellipsoid with y half-extent
+      // 0.0861R, so a glint centred at (-0.010R, +0.060R) sits at normalised radius
+      // sqrt((0.042/0.082)^2 + (0.048/0.0861)^2) = 0.757, and 0.757 + 0.033/0.082 =
+      // **1.16 > 1** — 16% of the way outside its own pupil.
+      // 0.024R at (+0.008R, +0.052R) gives 0.550 + 0.293 = 0.843, comfortably inside,
+      // and it stays high-and-inboard so it still reads as a catchlight rather than
+      // as a centred dot.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.024, 8, 8), glintMat);
+      glint.position.set(R * 0.008, R * 0.052, R * 0.105);
       glint.userData.noOutline = true;
       eye.add(glint);
 
@@ -1107,14 +1310,24 @@ export class BurritoCharacter extends BaseCharacter {
       // torus arc hugging the sclera's rim, swept from the outer corner over the top.
       // The winking side (sx > 0) drops its lid further and sweeps further round; the
       // open side keeps a thin lash. This is where the old "wink" went.
+      // ── THE WINK WAS EATING THE EYE ────────────────────────────────────────
+      // A 1.15PI sweep dropped 0.030R over an 0.172R sclera covers 57% of the eye,
+      // and `shots/ca/zoom/a3-burrito-face.png` shows the result: a near-black almond
+      // with a sliver of white under it, beside a fully open round eye. Two blind
+      // critics said of egg, in the same construction, *"the two eyes are drastically
+      // different sizes"* — this is that complaint's other cause. A wink is a LID
+      // ANGLE over a visible eye (`rules.ts`, on hotdog: *"RELAXED IS A LID ANGLE,
+      // NOT A MISSING EYE"*); at 57% coverage it is a missing eye.
+      // 0.95PI at -0.016R leaves the pupil and its catchlight fully in view, so the
+      // acting survives and the pair reads as two eyes.
       const winking = sx > 0;
       const lid = new THREE.Mesh(
-        new THREE.TorusGeometry(R * 0.172, R * 0.030, 8, 22, Math.PI * (winking ? 1.15 : 0.80)),
+        new THREE.TorusGeometry(R * 0.172, R * 0.030, 8, 22, Math.PI * (winking ? 0.95 : 0.80)),
         inkMat,
       );
       lid.scale.set(1, 1.06, 1);
-      lid.rotation.z = winking ? Math.PI * 0.02 : Math.PI * 0.14;
-      lid.position.set(0, winking ? -R * 0.030 : 0, R * 0.020);
+      lid.rotation.z = winking ? Math.PI * 0.06 : Math.PI * 0.14;
+      lid.position.set(0, winking ? -R * 0.016 : 0, R * 0.020);
       lid.castShadow = true;
       eye.add(lid);
 
@@ -1122,7 +1335,10 @@ export class BurritoCharacter extends BaseCharacter {
       // for its shell ridge: this character has no hair, so a brow has to be made of
       // the thing the head IS made of, and INK here would put a third heavy black mark
       // on a face that already carries a lid and a pupil.
-      const browY = eyeY + (winking ? R * 0.255 : R * 0.190);
+      // 0.255R -> 0.215R on the winking side. With the lid no longer dropped 0.030R
+      // the raised brow no longer has that drop to clear, and at 0.255R it was
+      // floating 0.07R clear of its own eye — a stray stick rather than a brow.
+      const browY = eyeY + (winking ? R * 0.215 : R * 0.190);
       const browAz = Math.asin(THREE.MathUtils.clamp((sx * R * 0.315) / wrapRadiusAt(browY), -0.94, 0.94));
       const brow = tubeFrame(face, wrapRadiusAt, span, browAz, browY, R * 0.008);
       const browMesh = new THREE.Mesh(
@@ -1210,18 +1426,33 @@ export class BurritoCharacter extends BaseCharacter {
     lip.userData.noOutline = true; // ink already; the hull outline was doubling its weight
     mouth.add(lip);
 
-    // UPPER LIP — a straight heavy bar across the top of the opening, and it is what
-    // turns an oval into an open GRIN. A ring of even weight reads as a hole; every
-    // cartoon open mouth is heavy along the top edge and light along the bottom, because
-    // that is where the upper lip and the shadow it casts are. Cheaper and far more
-    // legible at ~22 px than trying to author a crescent.
+    // UPPER LIP — heavy along the top edge and light along the bottom, which is what
+    // turns an oval into an open GRIN: a ring of even weight reads as a hole.
+    //
+    // ── 🚨 IT WAS A STRAIGHT BAR AND THE MOUTH READ AS A MAIL SLOT ──────────────
+    // WAS a `CapsuleGeometry` 0.028R thick laid horizontally at y +0.104R. Two
+    // things made that a slot rather than a lip, and neither is the value:
+    //   · it is STRAIGHT and the opening under it is an ELLIPSE, so a rectangle sits
+    //     on a curve with daylight between them at both ends;
+    //   · at 0.028R it is **3.5x the lip ring's own tube** (0.020R, y-scaled to
+    //     0.008R), so it does not thicken the ring, it replaces it.
+    // Read `shots/ca/zoom/burrito-face.png`: a black rectangle above a black oval
+    // with a red bean in it. `egg.ts` fixed the same class of error in `fb9d9da` —
+    // *"the mouth was three bars of the same length with square ends, stacked"* — and
+    // the general rule it recorded applies here unchanged: **nothing on a face is a
+    // straight bar.**
+    // The upper lip is now the SAME torus as the lip ring, on the same major radius
+    // and the same y-scale, swept over the top arc only and one notch fatter. It
+    // thickens the ring along the ring's own curve, so the mouth stays one shape.
     const upperLip = new THREE.Mesh(
-      new THREE.CapsuleGeometry(R * 0.028, R * 0.40, 4, 8),
+      new THREE.TorusGeometry(R * 0.27, R * 0.030, 8, 20, Math.PI * 0.80),
       inkMat,
     );
-    upperLip.rotation.z = Math.PI / 2;
-    upperLip.position.set(0, R * 0.104, R * 0.018);
+    upperLip.scale.set(1, 0.40, 1);
+    upperLip.rotation.z = Math.PI * 0.10;
+    upperLip.position.z = R * 0.014;
     upperLip.castShadow = true;
+    upperLip.userData.noOutline = true;
     mouth.add(upperLip);
 
     // LOWER LIP — a LIT strip under the opening, in the wrap's strong shade tone rather
@@ -1231,12 +1462,19 @@ export class BurritoCharacter extends BaseCharacter {
     // fourth value in the mouth: throat 0.03, ink lip 0.05, tongue 0.31, lower lip 0.63.
     // Placed BELOW the lip ring's own outer edge (0.27R * 0.40 + 0.020R = 0.128R), which
     // is where a first version put it and had it swallowed whole.
+    // ⚠️ AND IT WAS FLOATING, which is the same defect as the upper lip one paragraph
+    // up. The lip ring's lowest point is -0.116R and this bar sat centred at -0.152R
+    // with a 0.026R radius, so its top edge was -0.126R — a 0.010R strip of bare
+    // tortilla between the two, and at that separation a horizontal light bar under a
+    // dark mouth is a MOUSTACHE, which is what the lobby crop shows. Raised to -0.128R
+    // (top edge -0.102R, overlapping the ring) and shortened so it cannot outrun the
+    // ellipse's own curve at the corners.
     const lower = new THREE.Mesh(
-      new THREE.CapsuleGeometry(R * 0.026, R * 0.26, 4, 8),
+      new THREE.CapsuleGeometry(R * 0.026, R * 0.20, 4, 8),
       toonMat({ color: TORTILLA_SHADE, roughness: 0.7 }),
     );
     lower.rotation.z = Math.PI / 2;
-    lower.position.set(0, -R * 0.152, R * 0.020);
+    lower.position.set(0, -R * 0.128, R * 0.020);
     lower.userData.noOutline = true;
     mouth.add(lower);
 

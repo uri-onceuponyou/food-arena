@@ -126,9 +126,30 @@ const SLEEVE_GREY = '#ABA49B';   // upper arms — grey stoneware sleeves, luma 
 // whole arm — the two halves of a limb drawn in one colour fuse at the elbow, which
 // is the same fusion that made the arm read as detached from the torso, one joint
 // further out. A rolled-back cuff is the cheapest real break available.
-const CUFF_GREY = '#948D84';     // forearms — the darker rolled cuff, luma 0.556
+// ── 🚨 0.556 -> 0.456, BECAUSE THE ELBOW BOUNDARY MEASURED 0.009 ────────────
+// WAS '#948D84'. `valuescan --mode chars`, paired on frozen trees, reports this
+// character's tightest contact as `shoulderL|elbowL` **0.026 before and 0.009 after**
+// the arm-thinning in `dressLimbs` — against a 0.15 target and a 0.0039 measured
+// floor, i.e. a boundary that is very nearly not there. An 0.09 albedo step between
+// two glossy tubes that meet at a tangent does not survive the shading; the sleeve's
+// own falloff eats it.
+// '#7C7369' is luma 0.456, a **0.191** step under `SLEEVE_GREY`. It is deliberately
+// still 0.048 ABOVE `LEG_STONE` (0.408) rather than darker than it: the arm/leg
+// separation this pass is for is carried by thickness, by the warm cream mitt and by
+// the ladder's DIRECTION, and a forearm darker than a thigh would invert that.
+const CUFF_GREY = '#7C7369';     // forearms — the darker rolled cuff, luma 0.456
 const LEG_STONE = '#6E675F';     // legs — darker stoneware posts, luma 0.408
-const MITT_CREAM = '#CFC1A6';    // hands — cream cloth mitts, luma 0.761
+// ── WARMED, and it is the frame's scarce budget rather than a preference ─────
+// WAS '#CFC1A6' (HSL 39, 25%, 73%). This character is the cast's most achromatic:
+// every large mass on it is a grey or a near-neutral cream and the only chroma in
+// frame is the broth. `CLAUDE.md` records warm chroma measured at 0.053 against a
+// 0.072 floor while cool sits OVER target, so a warm terminal mass is the cheap
+// direction here and desaturating anything is the falsified one. '#E0BC8A' is
+// HSL 36, 58%, 71% — **+33 pp saturation, -2 pp lightness, hue held within 3
+// degrees** — so the mitts stay "cream cloth" (`rules.ts`'s spec) and stop being
+// grey. It also widens the arm/leg split: the mitt is now the only warm thing on
+// the limbs, and the boots below stay near-black stoneware.
+const MITT_CREAM = '#E0BC8A';    // hands — warm cream cloth mitts, luma 0.756
 const BROTH = PALETTE.broth;     // #E8792A
 const BROTH_DARK = '#B85A16';    // broth depth shading
 const STEAM = PALETTE.steam;     // #C9C9C9
@@ -208,18 +229,50 @@ function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Materia
 }
 
 /**
- * A small rounded ceramic knob capping the end of a handle — deliberately NOT a
- * ball-fist. A bowl handle terminates as a rounded lip of the same moulded ceramic,
- * not a separate hand shape grafted on; this cap also gives the ladle prop (on
- * `handR`) somewhere to visually seat.
+ * The MITT that terminates an arm.
+ *
+ * ── 🚨 WHY THIS IS NO LONGER "A SMALL ROUNDED CERAMIC KNOB" ──────────────────
+ * It was, and its docblock defended the choice: *"a bowl handle terminates as a
+ * rounded lip of the same moulded ceramic, not a separate hand shape grafted on."*
+ * The reasoning is about what a BOWL is; the object on screen is a CHARACTER, and
+ * read at the lobby camera (`shots/ca/before/soup.png`) this one has four grey
+ * segmented columns hanging off it at four similar angles, two ending in a small
+ * pale ball and two ending in a dark boot. Nothing says which pair is which and the
+ * figure reads as a four-legged animal — the cross-character finding of this pass.
+ *
+ * A hand is the cheapest possible answer, because it is the ONE terminal that only
+ * an arm can have. Three properties do the work and all three were missing:
+ *   · SIZE — 1.55x the forearm's tip against the old 1.30x, so it is a mass rather
+ *     than a lip. (`soup.ts`'s own measurement caps this: at the original
+ *     `handRadius` sizing the hand was 1.40x the forearm TUBE and 2.09x the whole
+ *     forearm's length, and ablation put 25.9% of the forearm's footprint behind
+ *     it. 1.55x the TIP is 1.24x the tube — still under that.)
+ *   · A THUMB — the element that makes the mass nameable at 20 px. A rounded blob
+ *     is a ball; a rounded blob with a thumb is a hand, at any resolution.
+ *   · A CUFF — arm-exclusive by construction. A leg has no wrist.
  */
-function buildHandleCap(R: number, mat: THREE.Material): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(R * 0.92, 14, 12), mat);
+function buildHandleCap(R: number, mat: THREE.Material, cuffMat: THREE.Material, sx: number): THREE.Group {
+  const g = new THREE.Group();
+  g.name = 'soup_mitt';
+  const m = new THREE.Mesh(new THREE.SphereGeometry(R * 0.92, 16, 12), mat);
   m.name = 'soup_handle_cap';
-  m.scale.set(1.0, 0.86, 1.05);
+  m.scale.set(1.0, 0.90, 1.02);
+  m.position.y = -R * 0.28;
   m.castShadow = true;
   m.receiveShadow = true;
-  return m;
+  g.add(m);
+  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.34, R * 0.56, 4, 8), mat);
+  thumb.position.set(sx * R * 0.86, -R * 0.02, R * 0.44);
+  thumb.rotation.set(0.34, 0, sx * 0.92);
+  thumb.castShadow = true;
+  g.add(thumb);
+  const cuff = new THREE.Mesh(new THREE.TorusGeometry(R * 0.78, R * 0.20, 8, 16), cuffMat);
+  cuff.name = 'soup_wrist_cuff';
+  cuff.rotation.x = Math.PI / 2;
+  cuff.position.y = R * 0.44;
+  cuff.castShadow = true;
+  g.add(cuff);
+  return g;
 }
 
 /**
@@ -1466,9 +1519,50 @@ export class SoupCharacter extends BaseCharacter {
     // `aim()` sets +Y along the outward direction and derives +X as `worldUp x out`,
     // so with a level `out` the local axes are exactly (tangential-horizontal,
     // outward, vertical) — the box below is authored in that frame directly.
+    // ── 🚨 AND AT `height01: 0.80` THEY WERE STILL EARS. THE MISSING RULE IS ────
+    // ── HEIGHT, NOT SHAPE. ──────────────────────────────────────────────────────
+    // The re-shape above is right and it was not sufficient: `shots/ca/before/soup.png`
+    // at the lobby camera still shows two pale masses flanking the head ABOVE the
+    // eyes, which is where ears live. The rule the previous rounds were missing is
+    // simple and it is geometric rather than stylistic:
+    //
+    //   **An ear is above the eye line. A handle at or below the eye line is not an
+    //   ear at any shape, size or colour, because no animal has one there.**
+    //
+    // `height01` is a fraction of the HEAD'S BOUNDING BOX, and this head's box is not
+    // the bowl — the standing ladle and the steam reach well above it — so 0.80 of the
+    // box was some distance up the rim. The anchor is therefore stated in head-local
+    // Y (the coordinate `BOWL_PROFILE`, the eyes and every decal already use) and
+    // converted here, exactly as `burrito.ts` does for its spill: a constant that
+    // means a different height depending on what else exists is not a constant.
+    //
+    // The target is the eyes' own height: `bowlBottomY + EYE_H * bowlH`
+    // = `-R + 0.63 * 1.35R` = **-0.150R**. That is also inside the profile's
+    // `h 0.55..0.76` plateau where the bowl holds its FULL radius, i.e. the crock's
+    // widest point — which is where a real casserole's lugs are anyway. So the fix
+    // for the ear read and the fix for "these look like nubs, not handles" are the
+    // same move: at the belly they sit on the silhouette instead of on the rim.
+    const at01 = (y: number) => THREE.MathUtils.clamp(
+      (y - box.min.y) / Math.max(1e-6, box.max.y - box.min.y), 0, 1,
+    );
+    // ── ⚠️ AND "EYE HEIGHT" IS NOT `EYE_H` AT A PITCHED CAMERA ─────────────────
+    // The first version of this fix put the lugs at exactly the eyes' own world Y
+    // (-0.150R) and `shots/ca/after1/soup.png` still shows them ABOVE the eye line.
+    // The reason is the theorem `fb9d9da` proved on hamburger's bun and `rig.ts`
+    // proves for the collar: a camera pitched `p` maps a point to `y·cos p - z·sin p`,
+    // so **depth buys downward screen travel**. The eyes sit on the bowl's FRONT at
+    // z ~ +1.08R; the lugs sit at z = 0, on the axis. At the lobby's 20 degrees the
+    // eyes therefore fall `1.08R · tan 20` = **0.39R further down the screen** than
+    // anything at the same world height on the axis.
+    //
+    // Equal world height is not equal screen height. -0.46R puts the lug's screen
+    // centre just BELOW the eye centre, measured off the after-1 capture at
+    // 511 px/m, and `BOWL_PROFILE` still has r = 0.95 there — the belly, where a
+    // casserole's lugs actually are — rather than the rim.
+    const lugY = at01(-this.rig.headRadius * 0.46);
     const lugMat = toonMat({ color: CERAMIC, roughness: 0.34 });
     for (const side of [-1, 1] as const) {
-      const { at, out } = massAnchor(head, box, { azimuth: side * Math.PI * 0.5, height01: 0.80, inset: 0.16 });
+      const { at, out } = massAnchor(head, box, { azimuth: side * Math.PI * 0.5, height01: lugY, inset: 0.16 });
       const g = new THREE.Group();
       g.name = 'soup_crock_lug';
       // Level, and the horizontal component kept — no vertical term at all. That
@@ -1478,9 +1572,14 @@ export class SoupCharacter extends BaseCharacter {
       // thickness ratio. The first pass read correctly (no ear) and read SMALL —
       // at the lobby camera the tabs were two nubs rather than handles, which
       // loses the "crock, not mixing bowl" cue the shape is here for.
-      const reach = rBowl * 0.34;
+      // 0.52 x 0.34 -> 0.58 x 0.40 of the bowl. Dropping the lugs to the belly moved
+      // them onto the silhouette but also onto the widest part of the mass, where a
+      // small tab is easier to lose; the after-2 capture reads them as nubs again.
+      // The width-to-thickness ratio (3.5 : 1) is untouched, which is the property
+      // that makes them lugs and not ears.
+      const reach = rBowl * 0.40;
       const lug = new THREE.Mesh(
-        roundedBox(rBowl * 0.52, reach, rBowl * 0.165, rBowl * 0.078, 3),
+        roundedBox(rBowl * 0.58, reach, rBowl * 0.165, rBowl * 0.078, 3),
         lugMat
       );
       lug.name = 'soup_crock_lug_tab';
@@ -1629,7 +1728,12 @@ export class SoupCharacter extends BaseCharacter {
           // "A moulded loop of roughly constant thickness" was the old intent and it
           // is what produced the visible step at the elbow: two constant-radius
           // tubes at different constants cannot meet.
-          return buildHandleArc(size.len, size.radius * 0.72, size.radius * 0.60, side, 0.42, 0.10, sleeveMat);
+          // 0.72/0.60 -> 0.62/0.52 of `armRadius`. The ARM/LEG separator this pass is
+          // for needs a THICKNESS gap as well as a value one: at 0.72 the upper arm
+          // was 0.83 of the thigh's top radius, which is not a difference a viewer
+          // reads. At 0.62 it is 0.60, and soup keeps STOUT's planted read because
+          // the LEGS carry it — they got thicker in the same edit.
+          return buildHandleArc(size.len, size.radius * 0.62, size.radius * 0.52, side, 0.42, 0.10, sleeveMat);
         }
         case 'forearmL':
         case 'forearmR': {
@@ -1659,7 +1763,7 @@ export class SoupCharacter extends BaseCharacter {
           // exactly where the upper arm ended, so there is no step at the elbow.
           // ⚠️ If `delivered` regresses at 58 degrees, the answer recorded above
           // still stands: isolate the occluder before moving the bow again.
-          return buildHandleArc(size.len, size.radius * 0.60, size.radius * 0.46, side, -0.28, 0.22, cuffMat, false);
+          return buildHandleArc(size.len, size.radius * 0.52, size.radius * 0.42, side, -0.28, 0.22, cuffMat, false);
         }
         case 'handL':
         case 'handR': {
@@ -1693,12 +1797,18 @@ export class SoupCharacter extends BaseCharacter {
           // arm's cream to a cream CLOTH mitt against a grey sleeve. That is the one
           // value break the old "one continuous loop of the bowl's own material"
           // read could never have, and `rules.ts` names it: cream mitts.
+          // 1.30 -> 1.55 of the forearm's tip, plus a thumb and a wrist cuff. See
+          // `buildHandleCap`: this is the ARM/LEG separator, and the numbers that
+          // capped the old sizing are still respected (1.55x the tip is 1.24x the
+          // tube, under the 1.40x that measured as an occluder).
           const forearmR = this.rig.metrics.armRadius * 0.92 * 0.52;
-          return buildHandleCap(forearmR * 1.30, mittMat);
+          return buildHandleCap(forearmR * 1.55, mittMat, trimMat, part === 'handL' ? 1 : -1);
         }
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.0, size.radius * 0.93, legMat);
+          // 1.0/0.93 -> 1.04/0.94: thicker than the arm by construction (see the
+          // upper-arm note), and STOUT is the archetype whose whole read is planted.
+          return taperedLimb(size.len, size.radius * 1.04, size.radius * 0.94, legMat);
         case 'shinL':
         case 'shinR':
           // Same material, and the shin's TOP radius is now exactly the thigh's
@@ -1707,7 +1817,14 @@ export class SoupCharacter extends BaseCharacter {
           // `len * 0.45` on any segment shorter than it is thick — see the fix in
           // that function. So "no taper break at the knee" was true of the numbers
           // passed in and false of the geometry that came out.
-          return taperedLimb(size.len, size.radius * 0.93, size.radius * 0.86, legMat);
+          // 🚨 0.93 -> 1.044, AND THE COMMENT ABOVE WAS WRONG ABOUT ITS OWN NUMBER.
+          // "The shin's TOP radius is now exactly the thigh's BOTTOM radius (0.93)"
+          // was true of the FACTOR and false of the RADIUS: `dressLimbs` hands the
+          // thigh `legRadius` and the shin `legRadius * 0.9`, so `0.93` on each gave
+          // 0.1445 m against 0.1301 m — a **10% step at the knee**, which is exactly
+          // the two-stacked-cups defect `taperedLimb`'s own cap fix was written to
+          // remove, surviving in the call site. 0.94 / 0.9 = 1.0444 makes them equal.
+          return taperedLimb(size.len, size.radius * 1.0444, size.radius * 0.95, legMat);
         case 'footL':
         case 'footR':
           return buildWorkBoot(size.len, bootMat, trimMat, size.groundY);

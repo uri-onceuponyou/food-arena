@@ -113,6 +113,17 @@ const LETTUCE = '#8FCB1E';
 const LETTUCE_DARK = '#6FA112';
 const ONION = '#AD82D6';       // ties visually to the Onion Bomb projectile colour — kept saturated
                                 // enough not to read as another tomato bit at a glance
+// ── The MITT, and why it is a new tone rather than `POD` ─────────────────────
+// The hands were `ONION` icosahedra and read as gems (see `dressLimbs`). Their
+// replacement has one job the shell tones cannot do: end the ARM chain on a value
+// the LEG chain never reaches, so a human can say which pair is which. `POD`
+// (#FBD79A, luma 0.856) is the cheek pad's tone and is nearly the character's
+// brightest non-sclera albedo — putting it on two moving masses at hip height would
+// bid against the eyes, which `SCLERA` above is explicit must stay the top rung.
+// #F0C070 is one step down (luma ~0.79) and 20 pp MORE saturated, which is the
+// direction `CLAUDE.md` records as the scarce budget on this frame (warm chroma
+// measured 0.053 against a 0.072 floor) rather than the falsified one.
+const MITT_MASA = '#F0C070';   // soft masa mitts — the ARM chain's light terminal
 // Limb-only rust family. A second independent art-director pass found Hamburger's
 // bun-amber, Donut's dough-tan and Taco's own shell-gold all sitting in the same
 // golden-orange hue band despite different heads — the "one templated body" read
@@ -138,7 +149,17 @@ const LIMB_SHELL_DARK = '#4A1608'; // forearm / shin — dark
 // `kneeL|footL` 0.028 across 41 px. The boot goes the OTHER way instead: this
 // character's foot was `SHELL_DARK` originally, and a mid toasted boot under a dark
 // shin is the same alternation the arms use.
-const BOOT_CHAR = '#B06A2E';       // boots — a step LIGHTER than the shin above them
+// ── 0.457 -> 0.337 luma, and the alternation it protects still holds ────────
+// WAS '#B06A2E'. PASS 3's argument for a LIGHTER boot is intact and is why this is a
+// darkening and not a near-black: *"a near-black boot under a near-black shin is not
+// two shapes — measured `kneeL|footL` 0.028 across 41 px."* The shin is
+// `LIMB_SHELL_DARK`, albedo luma 0.126; at 0.337 the boot still stands **0.211**
+// above it, twice the 0.10 the boundary gate asks for, so the alternation survives.
+// What changed is the budget: this pass deleted the near-black neck collar (it was
+// half a hat) and thinned the dark forearms to separate arms from legs, and
+// `valuescan` measured the cost as p05 0.16 -> 0.20 against a 0.180 cap. The boots
+// are the largest remaining mass that can carry dark without touching either fix.
+const BOOT_CHAR = '#8A4C1E';       // boots — still a step LIGHTER than the shin above them
 /**
  * The serape's own light rung. The stripe used to be `#C1432B`, a red a few units off
  * `TOMATO` and only 0.09 of luma from the limbs it sits above — one more mid tone on a
@@ -270,30 +291,58 @@ function tacoShellShape(halfW: number, yBot: number, yTop: number, dipFrac: numb
   const shape = new THREE.Shape();
   const h = yTop - yBot;
   const dip = h * dipFrac;
-  /** The dipping top edge, as a function of x — the crescent. */
-  const topAt = (x: number): number => { const u = x / halfW; return yTop - dip * (1 - u * u); };
-  const hrX = halfW * 0.14;  // how far in from the corner the rounding starts
-  const hrY = h * 0.045;     // and how far down the side
+  // ── 🚨 THE TOP EDGE WAS A PARABOLA, AND A PARABOLA IS A PAIR OF EARS ────────
+  // The paragraphs above rounded the two corner VERTICES and declared the horn read
+  // solved. Read `shots/ca/before/taco.png` at the lobby camera and it is not: the
+  // bright gold near wall is a wide **V**, with a pointed lobe at each end rising
+  // 0.224 m (0.46R) above the face pad's own crown and a hard notch between them,
+  // and the face sits in the notch. That is a cat's head, drawn exactly.
+  //
+  // The vertices were never the mechanism. `yTop - dip*(1 - u*u)` is an UPWARD
+  // parabola: its minimum is at the centre and its maxima are at the ends, so the
+  // edge has non-zero slope arriving at BOTH ends and a sharp turn at the middle.
+  // The silhouette it produces is two peaks and a valley regardless of how the
+  // corner vertex itself is filleted — the peaks are made by the curve, not by the
+  // join. `docs/DECISIONS-FOR-URI.md` §40 pattern 1 says a mirrored pair of raised
+  // masses beside a head is an ear whatever it is made of; here the pair is the
+  // OUTLINE of the head, which is why rounding the tips did not touch it.
+  //
+  // A raised cosine has zero slope at BOTH ends and at the centre, so the same dip
+  // arrives as one continuous scallop with no peak and no notch. Combined with
+  // `dipFrac` 0.34 -> 0.18 at the call site the lobes drop from 0.46R to 0.19R of
+  // relief, which is a shell rim.
+  const topAt = (x: number): number => {
+    const u = THREE.MathUtils.clamp(x / halfW, -1, 1);
+    return yTop - dip * 0.5 * (1 + Math.cos(Math.PI * u));
+  };
+  // Rounding widened hard (0.14 -> 0.30 across, 0.045 -> 0.13 down). At the old
+  // values the fillet was 0.07 m on a 0.51 m half-width — a chamfer on a spike.
+  const hrX = halfW * 0.30;  // how far in from the corner the rounding starts
+  const hrY = h * 0.13;      // and how far down the side
   shape.moveTo(-halfW, yTop - hrY);
-  // Outer edge: sweeps down and slightly OUT before turning into the bowl, so
-  // the widest point of the wall is up near the horns rather than at the waist.
-  shape.quadraticCurveTo(-halfW * 1.05, yBot + h * 0.36, -halfW * 0.60, yBot + h * 0.04);
+  // Outer edge: was `±halfW * 1.05`, i.e. the wall bulged OUT below the corners so
+  // the corners themselves were pinched — which is precisely an ear's outline (wide
+  // base, narrowing tip). 0.97 makes the widest point the corner itself and the wall
+  // taper gently down into the fold, which is what a shell seen end-on does.
+  shape.quadraticCurveTo(-halfW * 0.97, yBot + h * 0.36, -halfW * 0.60, yBot + h * 0.04);
   shape.quadraticCurveTo(0, yBot - h * 0.06, halfW * 0.60, yBot + h * 0.04);
-  shape.quadraticCurveTo(halfW * 1.05, yBot + h * 0.36, halfW, yTop - hrY);
-  // The right horn: the OLD sharp vertex is now this curve's control point, so the
-  // corner keeps its place and loses its point.
+  shape.quadraticCurveTo(halfW * 0.97, yBot + h * 0.36, halfW, yTop - hrY);
+  // The right corner: a long fillet through the old vertex, which keeps the corner's
+  // place and takes the point off it.
   shape.quadraticCurveTo(halfW, yTop, halfW - hrX, topAt(halfW - hrX));
-  // Top edge DIPS toward the centre — this is the crescent. Walked right → left
-  // as a fine polyline with a small ripple riding on it, which gives the crimped
-  // fried edge without the ripple ever becoming the shape the eye names.
-  const N = 12;
+  // Top edge scallops toward the centre. Walked right → left as a fine polyline with
+  // a small ripple riding on it, which gives the crimped fried edge without the
+  // ripple ever becoming the shape the eye names. N 12 -> 24: at 12 the chords were
+  // 0.086 m and the "curve" rendered as a row of straight facets, which put hard
+  // vertices back into the outline the fillet had just removed.
+  const N = 24;
   const span = halfW - hrX;
   for (let i = 1; i <= N; i++) {
     const t = i / N;
     const x = span - 2 * span * t;
     shape.lineTo(x, topAt(x) + crimp * Math.abs(Math.sin(t * Math.PI * 3)));
   }
-  // The left horn, mirrored, closing back onto `moveTo`.
+  // The left corner, mirrored, closing back onto `moveTo`.
   shape.quadraticCurveTo(-halfW, yTop, -halfW, yTop - hrY);
   return shape;
 }
@@ -307,7 +356,7 @@ function tacoShellShape(halfW: number, yBot: number, yTop: number, dipFrac: numb
  * than the smooth rubbery capsule every other character in the cast would get
  * from the same helper at default settings.
  */
-function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12, rise = 0): THREE.BufferGeometry {
   // Profile MUST be wound bottom-to-top (y increasing), matching every other
   // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
   // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
@@ -315,25 +364,59 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   // earlier version of this function built the profile top-to-bottom and every
   // limb using it rendered near-black: inverted normals facing away from the
   // light. The y=0/y=-len hang-down placement is unchanged.
-  const capSegs = 4;
+  //
+  // ── 🚨 THREE OF TACO'S FOUR SEGMENTS WERE SPHERES, AND THE FOURTH WAS CLOSE ──
+  // Taken verbatim from `donut.ts:145`, which solved this and never propagated to
+  // the other five copies of this helper. The old code emitted a straight side only
+  // when `len >= rTop + rBot`; below that it SKIPPED the side and clamped with
+  // `yTopSafe = max(...)`, which does not shrink the caps — it stacks two full
+  // hemispheres. Taco's own numbers, measured off `bodies.ts`'s STOUT at
+  // `CHARACTER_HEIGHT` 2.1 and the radii the call sites below used to pass:
+  //
+  //   segment      len       rTop+rBot   side?
+  //   upper arm   0.1922      0.3302     NO -> ball, top cap 0.138 m ABOVE its pivot
+  //   forearm     0.1753      0.2299     NO -> ball
+  //   thigh       0.2757      0.2875     NO -> ball
+  //   shin        0.2256      0.1958     yes (the only one)
+  //
+  // "0.138 m above its own joint origin" is the whole defect: the upper arm's mesh
+  // pokes 72% of its own bone length UP through the shoulder, and the thigh does the
+  // same through the hip, so a chain of segments interpenetrates instead of abutting
+  // and reads as a string of beads. `shots/ca/before/taco.png` at the lobby camera:
+  // four indistinguishable chains of orange-and-black balls.
+  //
+  // The fix bounds each cap by the BONE rather than by the radius — cap HEIGHTS
+  // clamp to 0.42/0.30 of `len` (sum 0.72 < 1, so a straight side always exists)
+  // while cap WIDTH stays `rBot`/`rTop`. The mesh then spans exactly y in [-len, 0]
+  // and can never overlap its parent segment. Resolution follows donut's measured
+  // choice (6 cap segments, 4 side steps) rather than the 4/3 that was here: a
+  // coarser lathe puts a shading corner where `computeVertexNormals` has to guess.
+  // ⚠️ The call sites' radii are re-tuned below, because bounding the caps changes
+  // the delivered silhouette and the old radii were chosen against the broken shape.
+  // `rise` (hamburger's parameter, same meaning) extends the mesh ABOVE its own joint
+  // origin, so a segment can start INSIDE the mass it hangs from and have no contour
+  // of its own until it emerges. On STOUT that is not a nicety: even with the caps
+  // bounded, taco's bones are 1.3-1.5x as wide as they are long, so two segments that
+  // merely ABUT meet through a double taper and leave a waist at every joint — which
+  // is the same bead read from the other end. Overlapping them removes the waist.
+  const capSegs = 6;
+  const capBot = Math.min(rBot, len * 0.42);
+  const capTop = Math.min(rTop, (len + rise) * 0.30);
+  const yBotCap = -len + capBot;
+  const yTopCap = rise - capTop;
   const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
   }
-  const yBotCap = -len + rBot;
-  const yTopCap = -rTop;
-  if (yTopCap >= yBotCap) {
-    const sideSteps = 3;
-    for (let i = 1; i <= sideSteps; i++) {
-      const t = i / sideSteps;
-      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-    }
+  const sideSteps = 4;
+  for (let i = 1; i <= sideSteps; i++) {
+    const t = i / sideSteps;
+    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
   }
-  const yTopSafe = Math.max(yTopCap, yBotCap);
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
   }
   const geo = new THREE.LatheGeometry(pts, radialSegments);
   geo.computeVertexNormals();
@@ -373,7 +456,26 @@ export class TacoCharacter extends BaseCharacter {
         // REVERTED on two measurements — see the reverted-experiment block above
         // `SCLERA`. p05 0.132 -> 0.200 against a <= 0.180 gate, and the render came
         // back reading as a sombrero rather than less like a hat.
-        neck: LIMB_SHELL_DARK,
+        // ── 🚨 THE "HAT" WAS THE NECK COLUMN AND ITS COLLAR, AND BOTH ARE GONE ──
+        // Uri: *"no mouth, seems like a hat."* Two previous rounds read that as the
+        // MOUTH (lifted 0.21R, given a bright tooth band) and as the COLLAR (a mid
+        // tone, measured, reverted — the block above `SCLERA` keeps the numbers).
+        // Neither is wrong and neither was the object. The lobby capture
+        // `shots/ca/before/taco.png` shows, directly under the chin, a dark
+        // near-cylindrical mass 0.34 m across and 0.29 m tall with a near-black disc
+        // 0.49 m across flaring at its base, standing on a bright gold chest. That is
+        // a crown and a brim, and it is `rig.ts`'s `neck_column` + `neck_collar`.
+        //
+        // `neckFraction: 0` in the proportions below deletes both; the full
+        // derivation — including why recolouring, covering and enclosing the column
+        // all failed, and the compensation that keeps R and `headCentreY` identical —
+        // is in `buildFood()` above the chin notch that replaces the ring.
+        //
+        // ⚠️ These two entries are therefore DEAD on this character and are kept, not
+        // deleted, because `RigPalette` is shared: if a later pass restores a neck gap
+        // here it must not silently restore the near-black crown with it. `SHELL`
+        // (the chest's own gold) is what a re-enabled column should be.
+        neck: SHELL,
         collar: MEAT_DARK,
         torso: SHELL,
         limbRoughness: 0.8,
@@ -397,7 +499,19 @@ export class TacoCharacter extends BaseCharacter {
       // measured on this character: hull deficiency 0.2217 base -> 0.28 at stance
       // x1.5 with splay, islands 1 throughout, and it is the change that takes the
       // yaw-0 read off 0.1898.
-      proportions: bodyType('stout', { headFraction: 0.52, stanceWidth: CHARACTER_HEIGHT * 0.275 }),
+      // `headFraction` 0.52 -> 0.461490 and `headMount` 0.88 -> 1.118344 are NOT a
+      // re-proportioning: they are the exact compensation for `neckFraction: 0`, and
+      // the arithmetic that shows they leave R and `headCentreY` unchanged to six
+      // figures is with the chin-notch block in `buildFood()`. `neckFraction: 0`
+      // deletes `rig.ts`'s neck column and collar, which on this character — and only
+      // on this character, because its face sits 0.15 m BEHIND the rig's neck axis —
+      // render as a hat crown and brim under the chin.
+      proportions: bodyType('stout', {
+        headFraction: 0.461490,
+        headMount: 1.118344,
+        neckFraction: 0,
+        stanceWidth: CHARACTER_HEIGHT * 0.275,
+      }),
       // ── Both elbows were tucked INSIDE the shell ────────────────────────────
       // The old -0.75 / -0.85 elbows plus a +0.20 / -0.45 shoulder pair swung both
       // forearms across the body and behind the shell: measured delivery 0.286
@@ -491,7 +605,31 @@ export class TacoCharacter extends BaseCharacter {
     // was broad, which is most of why it kept reading as a container rather
     // than as food.
     const halfWTop = R * 1.06;
+    // ── THE HINGE AND THE SHELL'S BOTTOM ARE NOW TWO NUMBERS ────────────────────
+    // `yBot` used to be both: the hinge the walls rotate about AND the lowest point
+    // of the extruded outline. Making the shell reach further down (the lever this
+    // method's own docblock prescribes for "the shell does not reach the body") was
+    // therefore impossible without also moving the hinge, and `troughLen` — which
+    // every filling's position is a fraction of — is measured from it. So the two
+    // are split: `yBot` stays the hinge and the trough datum, and `shellBotY` is how
+    // far the WALL hangs below it.
     const yBot = -R * 0.95;
+    // ── 🚨 AND THIS IS THE SECOND HALF OF THE "HAT" ────────────────────────────
+    // Recolouring the neck column to `SHELL` (see the palette) removed the dark
+    // crown, and the lobby render then showed what was underneath: a gold CYLINDER
+    // with a hard rounded rim standing under the chin — a cup. `outlineGroup` draws
+    // an ink edge round every mesh, so a column that matches its background in ALBEDO
+    // still has a drawn silhouette; matching the colour hid the mass and not the line.
+    // ⚠️ `docs/LESSONS.md` §1 in its newest form, and worth stating plainly: **making
+    // a thing the same colour as its neighbour is not the same as covering it.**
+    //
+    // The real fix is coverage, and it is the lever this file already documents.
+    // `rig.ts` mounts the head `neckGap + 0.88R` above `torsoTopY`, so the shell's own
+    // lowest point sits at `headCentreY + shellBotY`; at -0.95R that is
+    // `torsoTopY + 0.1155 - 0.034` = **0.082 m of bare neck column**, exactly what is
+    // in frame. -1.10R puts it at `torsoTopY - 0.010`, i.e. the wall closes over the
+    // column and lands inside the torso fold. Nothing above the opening moves.
+    const shellBotY = -R * 1.10;
     // ── The two walls are DIFFERENT HEIGHTS, and that is the load-bearing part ─
     // Built identical, the near wall's rim always sits higher on screen than
     // anything in the fold behind it — so the fillings, the one thing that says
@@ -530,7 +668,7 @@ export class TacoCharacter extends BaseCharacter {
     // solid backdrop; give both the same dip and the toppings lose their
     // background and float against the sky.
     const wallGeo = (yTop: number, dipFrac: number): THREE.BufferGeometry => {
-      const g = new THREE.ExtrudeGeometry(tacoShellShape(halfWTop, yBot, yTop, dipFrac, R * 0.06), {
+      const g = new THREE.ExtrudeGeometry(tacoShellShape(halfWTop, shellBotY, yTop, dipFrac, R * 0.06), {
         depth: panelThickness, bevelEnabled: false, curveSegments: 8,
       });
       g.translate(0, 0, -panelThickness / 2);
@@ -545,7 +683,14 @@ export class TacoCharacter extends BaseCharacter {
     frontPivot.position.set(0, hingeY, 0);
     frontPivot.rotation.x = frontTilt;
     head.add(frontPivot);
-    const frontMesh = new THREE.Mesh(wallGeo(frontTopY, 0.34), shellMat);
+    // 0.34 -> 0.18 -> 0.12. See `tacoShellShape`: the dip is now a raised cosine, so
+    // it no longer manufactures two PEAKS, but the lobes are still whatever relief the
+    // dip leaves. Measured off the outline, the corner stands `0.794 * dip` above the
+    // centre — 0.204R at 0.18 (and `shots/ca/after1/taco.png` still reads as a bonnet
+    // with two soft corners), 0.150R at 0.12. The fillings clear it either way: they
+    // sit in the trough behind, whose back wall is 0.28R taller, and the after-1
+    // capture shows the whole mound standing clear of the rim with room to spare.
+    const frontMesh = new THREE.Mesh(wallGeo(frontTopY, 0.12), shellMat);
     frontMesh.name = 'taco_shell_front';
     frontMesh.position.set(0, -hingeY, 0); // re-centres the shape's own yBot back onto the hinge
     frontMesh.castShadow = true;
@@ -762,7 +907,19 @@ export class TacoCharacter extends BaseCharacter {
     // Sits low, in the BOWL of the U, where the wall is solid. The rim above it
     // now dips toward the centre, so a face placed any higher would run out of
     // wall in the middle of its own forehead.
-    const faceY = yBot + (frontTopY - yBot) * 0.34;
+    // ── STATED IN R, NOT AS A FRACTION OF THE WALL ─────────────────────────────
+    // WAS `yBot + (frontTopY - yBot) * 0.34`. A fraction of the wall height means the
+    // face moves whenever the wall's BOTTOM moves — and the wall's bottom is now a
+    // burial depth (`shellBotY`), a number chosen against the torso and having nothing
+    // to do with where a face belongs. `burrito.ts` records the same class of bug on
+    // its spill anchors: *"a constant that means a different height depending on what
+    // else exists is not a constant."*
+    //
+    // -0.26R keeps the pad's crown 0.133R under the near rim, which is the clearance
+    // the after-1 capture had; a face that stays put under a rim that rises is a face
+    // at the bottom of a hood, and that is the MUZZLE read arriving from the other
+    // direction.
+    const faceY = -R * 0.26;
     const faceZ = panelThickness / 2;
 
     // Cheek pad: a shallow lens of slightly lighter shell proud of the wall, so
@@ -797,6 +954,108 @@ export class TacoCharacter extends BaseCharacter {
     frontMesh.add(this.rig.joints.face);
     this.rig.joints.face.position.set(0, faceY, faceZ + R * 0.10);
     this.buildFace(PAD_R, { ...PAD, originZ: -R * 0.12 });
+
+    // ── 🚨 THE THIRD ROUND OF THE "HAT", AND THE ONE THAT CLOSES IT ────────────
+    // Round 1 recoloured `pal.neck` to `SHELL` so the rig's neck column would stop
+    // reading as a dark hat CROWN. Round 2 hung the shell wall 0.15R lower to cover
+    // it. Round 3 grew a masa JAW to enclose it, and the render
+    // (`shots/ca/after3/taco.png`) turned that into a pale saucer under the chin.
+    // Three rounds, three renders, and the column was in frame in all three, because
+    // every one of them attacked the wrong axis:
+    //
+    //   the column is a cylinder of radius `neckRatio * min(torsoWidth/2, R)` =
+    //     0.42 * 0.4069 = **0.171 m**, centred on the rig's own axis, so it reaches
+    //     z = +0.171;
+    //   this character's FACE is on a wall that leans BACK 0.26 rad about a hinge, so
+    //     the cheek pad's own front surface only reaches z = **+0.017**.
+    //
+    // **The neck stands 0.15 m in front of the face.** It is the closest thing on the
+    // model to the camera, and nothing mounted on the face can ever cover it — which
+    // is why a colour match failed (`outlineGroup` still draws its edge), a longer
+    // wall failed (the wall is behind it), and a jaw failed (a jaw deep enough to
+    // reach z 0.171 sticks out further than the face does).
+    //
+    // So the column goes. `neckFraction: 0` is a supported archetype value —
+    // `bodies.ts` gives it to STUB with the same reasoning inverted (*"a neck gap on
+    // STUB puts a bright column between two masses... STUB opts out until its masses
+    // are carved"*) — and taco's masses ARE carved: the shell now hangs to -1.10R and
+    // lands inside the torso fold, so there is no gap for a column to bridge.
+    //
+    // ⚠️ AND IT IS A NO-OP ON THE HEAD'S SIZE AND PLACEMENT, BY CONSTRUCTION.
+    // `neckFraction` is not an isolated knob — `rig.ts:602` subtracts the gap from the
+    // head before halving it and `rig.ts:630` mounts the head above it — so dropping
+    // it alone would have grown R by 12.7% (a 0.13 m wider shell, straight at
+    // `castbox`'s hit-radius margin) and dropped the head 0.115 m. Both are cancelled
+    // exactly:
+    //
+    //     headH = height * headFraction - (2 * neckGap) / (1 + headMount)
+    //     0.52 with gap 0.1155, mount 0.88  ->  headH 0.96913, R 0.484565
+    //     0.461490 with gap 0, mount X      ->  headH 0.96913, R 0.484565   ✓
+    //
+    //     headCentreY = torsoTopY + neckGap + R * headMount
+    //     before: + 0.1155 + 0.484565 * 0.88   = torsoTopY + 0.541917
+    //     after:  + 0      + 0.484565 * 1.118344 = torsoTopY + 0.541917     ✓
+    //
+    // R, the shell, the fillings, the face and the standing height are byte-identical;
+    // only the column and the ring are gone.
+    //
+    // The ring is not simply deleted, because it was load-bearing twice over: it is
+    // the "hard dark occlusion notch under the chin" two blind critics asked for, and
+    // it is roughly HALF of this character's darkest 5% (739 delivered px of ~16.4k,
+    // measured — against 305 + 285 for both dark limb segments together). Taco builds
+    // its own, at the same height and the same near-black, but as a SHADOW rather than
+    // a brim: 8.8x wider than it is tall, hugging the shell's underside, with no crown
+    // above it to make it a hat.
+    //
+    // ── ⚠️ SIZED BY MEASUREMENT, AFTER THE FIRST SIZE FAILED THE GATE ──────────
+    // The first notch was `scale (1.15, 0.13, 0.62)` and `valuescan --mode chars`,
+    // paired on frozen trees, says that is not enough dark: **p05 0.16 -> 0.20
+    // against a `<= 0.180` gate**, and `range` 0.710 -> 0.669 with it (the range is
+    // P95 - P05, so a lost dark anchor costs both). The collar it replaces presented
+    // roughly `pi * (0.246^2 - 0.171^2) * sin 58` = 0.083 m^2 of near-black annulus
+    // at the match camera; that notch presented `pi * 0.223 * 0.1066 * sin 58` =
+    // 0.063 m^2, i.e. about three quarters of it, and the thinned dark forearms in
+    // `dressLimbs` spent the rest.
+    // `(1.30, 0.20, 0.95)` gives 0.124 m^2 and measured **p05 0.19** — still over the
+    // 0.180 cap, so the collar was carrying more than the projected-area estimate
+    // credited it with. It is worth stating why, because it is the useful number: p05
+    // is the FIFTH PERCENTILE and the collar was ~739 px of a ~16.4k-px character,
+    // i.e. **4.5%** — the collar was very nearly the whole of the darkest 5% by
+    // itself, so removing it does not shave the tail, it deletes it and p05 jumps to
+    // whatever sat at ~9.5%. Replacing it needs comparable AREA, not a token.
+    // `(1.45, 0.34, 1.00)` measured p05 **0.1906** against 0.1902 at `(1.30, 0.20,
+    // 0.95)` — i.e. widening it in X bought **nothing**, and that is the useful
+    // finding: `valuescan`'s shipped framing is **yaw 90**, a SIDE view, so the axis
+    // that projects to screen-horizontal there is **Z, not X**. Half of that growth
+    // went into the depth axis of the camera measuring it. Read the value matte
+    // (`shots/ca/vl-after3/chars/taco.shipped.value.png`) and the notch is plainly the
+    // largest dark mass on the figure — it was never invisible, it was growing along
+    // the one axis the number could not see. `docs/LESSONS.md` §6: ask what the
+    // metric can EXPRESS before concluding a change did nothing.
+    // `(1.30, 0.40, 1.55)` cleared the gate — p05 **0.1774** — and the lobby render
+    // rejected it: a 0.50 x 0.16 x 0.60 m near-black ellipsoid hanging under the chin
+    // is a bow tie. Both cameras, as the rule requires, and the second one vetoed it.
+    //
+    // ── SO IT IS A HORIZONTAL PLATE, WHICH IS WHAT A SHADOW ACTUALLY IS ────────
+    // A dark mass under a chin has to be dark for the 58-degree gate and nearly
+    // invisible from the 20-degree lobby, and those are not in conflict once the
+    // notch is oriented instead of merely sized. A horizontal plate presents its FACE
+    // to a camera pitched 58 (x sin 58 = 0.85 of its area) and its EDGE to one pitched
+    // 20 — a 0.043 m dark line under the shell, which is the "hard dark occlusion
+    // notch under the chin" two blind critics asked for, drawn as a line rather than
+    // as an object.
+    //   58 deg:  pi * 0.301 * 0.242 * sin 58 = **0.194 m^2** of near-black
+    //   20 deg:  a 0.60 m x 0.043 m edge, tucked under the shell's own bottom
+    // X is held at 0.62R, just inside the shell outline's own 0.636R half-width at
+    // this height, so it never breaks the silhouette sideways; Z is pulled back to
+    // -0.12R so the plate sits under the wall rather than in front of it.
+    const notch = new THREE.Mesh(new THREE.SphereGeometry(R * 0.40, 22, 12), meatDarkMat);
+    notch.name = 'taco_chin_notch';
+    notch.scale.set(1.55, 0.11, 1.25);
+    notch.position.set(0, -R * 1.02, -R * 0.12);
+    notch.castShadow = true;
+    notch.userData.noOutline = true;   // already the darkest thing on the model
+    head.add(notch);
 
     // ── Torso: a second, smaller shell fold, not the rig's bare default ball ──
     // Taco never authored a torso, so it was rendering the shared rig's plain
@@ -909,47 +1168,115 @@ export class TacoCharacter extends BaseCharacter {
     // count) and flattened into shard-like cross-sections, with a couple of the
     // pod's own crimp teeth glued onto the hand — the same toasted-shell language
     // as the head, not a generic mitt.
+    // ── 🚨 AND ALL FOUR CHAINS WERE THE SAME OBJECT, SO TACO WAS A QUADRUPED ───
+    // Read `shots/ca/before/taco.png` at the lobby camera: an arm and a leg are the
+    // SAME mid-terracotta segment over the SAME near-black segment, at the same
+    // thickness, at the same angle. They differed only in the terminal cap — the
+    // smallest element on screen — and one of those caps was a purple icosahedron,
+    // so the read was four legs, two of them wearing gems.
+    //
+    // Nothing here needs `rig.ts`: an arm can be told apart from a leg by
+    // THICKNESS, by the DIRECTION its value ladder runs, and by carrying a
+    // hand-shaped terminal mass. All three are set below, and all three are
+    // authored in this file.
+    //
+    //   arms   thinner (0.72/0.58 of `armRadius` against the legs' 1.06/0.86),
+    //          ladder runs mid -> dark -> **PALE MASA MITT**: it ends LIGHT.
+    //   legs   thicker, planted, ladder runs mid -> dark -> mid boot: it ends DARK
+    //          and wide, on the floor.
+    //
+    // ⚠️ The old radii (1.05/0.8 and 0.8/0.6 of the slot radius) were tuned against
+    // the BROKEN `taperedSegment` above, where the shape that came out was a sphere
+    // of `max(rTop, rBot)` regardless — so they are not a baseline worth preserving.
     const limbShellMat = toonMat({ color: LIMB_SHELL, roughness: 0.78 });
     const limbShellDarkMat = toonMat({ color: LIMB_SHELL_DARK, roughness: 0.78 });
     const bootMat = toonMat({ color: BOOT_CHAR, roughness: 0.8 });
-    const mittMat = glossyMat({ color: ONION, roughness: 0.32 });
-    const toothGeoSmall = new THREE.ConeGeometry(R * 0.05, R * 0.12, 4);
+    // Soft masa, not hard shell — the mitt is the one part of this character that is
+    // NOT fried, which is why it can carry a different value and still be food. It is
+    // also warm chroma, and `CLAUDE.md` records warm as the scarce budget on this
+    // frame today (0.053 delivered against a 0.072 floor), so a large warm terminal
+    // mass is the cheap direction rather than the expensive one.
+    const mittMat = toonMat({ color: MITT_MASA, roughness: 0.66 });
+    // The Onion Bomb tie moves from the whole fist to a wrist band. It keeps the
+    // projectile's colour on the character, and a BAND AT THE WRIST is an
+    // arm-exclusive feature — a leg has no wrist — so it pays for itself twice.
+    const cuffMat = glossyMat({ color: ONION, roughness: 0.32 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {
-        case 'upperArmL': case 'upperArmR':
-        case 'thighL': case 'thighR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.05, size.radius * 0.8, 6), limbShellMat);
-          m.scale.z = 0.62;
+        case 'upperArmL': case 'upperArmR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.72, size.radius * 0.58, 8, size.len * 0.30), limbShellMat);
+          m.scale.z = 0.72;
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           return m;
         }
-        case 'forearmL': case 'forearmR':
+        case 'thighL': case 'thighR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.06, size.radius * 0.86, 8, size.len * 0.30), limbShellMat);
+          m.scale.z = 0.72;
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'forearmL': case 'forearmR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.58, size.radius * 0.46, 8, size.len * 0.22), limbShellDarkMat);
+          m.scale.z = 0.72;
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
         case 'shinL': case 'shinR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.8, size.radius * 0.6, 6), limbShellDarkMat);
-          m.scale.z = 0.62;
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.86, size.radius * 0.70, 8, size.len * 0.22), limbShellDarkMat);
+          m.scale.z = 0.72;
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           return m;
         }
         case 'handL': case 'handR': {
+          // ── THE PURPLE ICOSAHEDRA READ AS GEMS, NOT AS FISTS ─────────────────
+          // `IcosahedronGeometry(radius * 0.92, 0)` is a twenty-faced solid with hard
+          // edges, in a saturated violet, hung off a near-black forearm at hip
+          // height. At the lobby camera that is a jewel on a stick — two of them,
+          // mirrored, which is also why they read as a PAIR of props rather than as
+          // hands. The old comment defended the colour ("breaks from the cast's
+          // repeated cream/white mitt"); the colour was never the problem, the
+          // FACETED SOLID was, and a hand is the one place on a character where the
+          // reference is unanimous: big, soft, one silhouette, with a thumb.
           const g = new THREE.Group();
-          const fist = new THREE.Mesh(new THREE.IcosahedronGeometry(size.radius * 0.92, 0), mittMat);
-          fist.position.y = -size.radius * 0.9;
-          fist.scale.z = 0.75;
-          fist.name = `${part}_mesh`;
-          fist.castShadow = true;
-          fist.receiveShadow = true;
-          g.add(fist);
-          for (const sx of [-1, 1]) {
-            const tooth = new THREE.Mesh(toothGeoSmall, limbShellDarkMat);
-            tooth.position.set(sx * size.radius * 0.5, -size.radius * 1.5, size.radius * 0.2);
-            tooth.rotation.z = sx * 0.5;
-            tooth.castShadow = true;
-            g.add(tooth);
-          }
+          // Sized off the FOREARM it terminates, not off `handRadius`, for the same
+          // reason `soup.ts` records: `handRadius` is an independent rig constant and
+          // a hand wider than its own arm is long is an occluder, not a hand.
+          // ⚠️ NOT `size.radius`. `dressLimbs` hands the hand slot `m.handRadius`,
+          // an independent rig constant (0.095H = 0.1995 m here) that has nothing to
+          // do with the arm it terminates — sizing off it is how the old icosahedron
+          // ended up 0.367 m across, wider than the whole forearm is long.
+          const tipR = this.rig.metrics.armRadius * 0.92 * 0.46;
+          const mitt = new THREE.Mesh(new THREE.SphereGeometry(tipR * 1.62, 16, 12), mittMat);
+          mitt.position.y = -tipR * 1.25;
+          mitt.scale.set(1, 0.94, 0.82);
+          mitt.name = `${part}_mesh`;
+          mitt.castShadow = true;
+          mitt.receiveShadow = true;
+          g.add(mitt);
+          // Thumb — a stub off the inner-forward quadrant. It is the smallest element
+          // here and it is the one that makes the mass NAMEABLE: a rounded blob is a
+          // ball, a rounded blob with a thumb is a hand, at any resolution.
+          const sx = part === 'handL' ? 1 : -1;
+          const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(tipR * 0.46, tipR * 0.72, 4, 8), mittMat);
+          thumb.position.set(sx * tipR * 1.15, -tipR * 0.62, tipR * 0.52);
+          thumb.rotation.set(0.35, 0, sx * 0.85);
+          thumb.castShadow = true;
+          g.add(thumb);
+          // Wrist cuff — arm-exclusive, and it also hides the join between the dark
+          // forearm and the pale mitt so the value jump reads as a garment edge.
+          const cuff = new THREE.Mesh(new THREE.TorusGeometry(tipR * 1.06, tipR * 0.26, 8, 16), cuffMat);
+          cuff.rotation.x = Math.PI / 2;
+          cuff.scale.z = 0.82;
+          cuff.castShadow = true;
+          g.add(cuff);
           return g;
         }
         case 'footL': case 'footR': {
