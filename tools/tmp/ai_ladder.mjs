@@ -45,6 +45,30 @@ mkdirSync(outdir, { recursive: true });
 /** The shipped file — V4 since 2026-08-05. Every rung is an edit of it. */
 const SHIPPED = readFileSync(`${ROOT}/src/game/ai.ts`, 'utf8');
 
+// ── THE WHOLE DIAGNOSIS, BEFORE THE FIRST ABORT ─────────────────────────────
+// `edit()` exits on the FIRST bad anchor, so for days the entire diagnosis of this tool
+// was "ai_ladder is broken" — one anchor named, eleven unexamined, and no way to tell a
+// mechanical rename from a semantic change without reading `ai.ts` by hand.
+//
+// This WARNS and never aborts. Deliberate: the table in `ir_ladder_anchors.mjs` is a
+// second copy of these anchor strings (guarded by its own selftest, but a copy), and a
+// stale copy that could BLOCK a working ladder would be a false refusal on a tool whose
+// entire value is that it refuses only when it should. `edit()` stays the thing that
+// stops the run.
+try {
+  const { preflight } = await import('./ir_ladder_anchors.mjs');
+  const bad = preflight(SHIPPED);
+  if (bad.length) {
+    console.error(`\nai_ladder PRE-FLIGHT: ${bad.length} anchor(s) will not select exactly once in the shipped ai.ts.`);
+    for (const r of bad) console.error(`  ${r.rung.padEnd(4)} ${r.label.padEnd(44)} n=${r.n} ${r.probeHit ? 'STALE-BUT-PRESENT' : 'ABSENT'}`);
+    console.error('  Full table + why each one drifted:  node tools/tmp/ir_ladder_anchors.mjs');
+    console.error('  🚨 RE-ANCHOR ONLY WHERE THE NEW ANCHOR SELECTS THE SAME CODE. Every rung price is a');
+    console.error('     number a decision rests on, and a mis-anchored rung prices something else in silence.\n');
+  }
+} catch (e) {
+  console.error(`ai_ladder: pre-flight unavailable (${e.message}) — continuing; edit() is still the guard.`);
+}
+
 /** Textual edit that refuses to guess. A rung that silently patched nothing would give a
  *  confident, entirely fictional "this fix was free" row — `docs/LESSONS.md` §13. */
 function edit(src, label, from, to) {
@@ -108,14 +132,40 @@ v2 = edit(v2, 'flee picks ranged only',
   'healIndex ?? pickWeapon(state, adist, ALLOW_RANGED_ONLY, rankFirstRanged);\n    if (shotIndex !== null)');
 
 // ── V1: rank by the authored `damage` field again ───────────────────────────
-const v1 = edit(v2, 'rank by authored damage',
-  'export function pressValue(w: Weapon, adist: number): number {',
-  'export function pressValue(w: Weapon, adist: number): number {\n  // LADDER RUNG: the pre-fix key is applied in `rankPressValue`; this stays exact so the\n  // 183-cell estimator assertion still means something on this rung.')
-  .replace('const rankPressValue: WeaponRank = (_state, w, _index, adist) => pressValue(w, adist);',
-    '/** LADDER RUNG: the pre-fix key — the authored per-pellet `damage` field. */\nconst rankPressValue: WeaponRank = (_state, w) => w.damage;');
-if (v1.includes('(_state, w, _index, adist) => pressValue')) {
-  console.error('ai_ladder: v1 did not swap the ranking key'); process.exit(2);
-}
+//
+// 🚨 THE RANKING-KEY SWAP WAS THE ONE EDIT IN THIS FILE THAT COULD FAIL SILENTLY, AND ITS
+// GUARD HAD GONE STALE IN EXACTLY THE WAY IT WAS GUARDING AGAINST (2026-08-10).
+//
+// It used to be a bare `.replace(...)`, which returns the string UNCHANGED when nothing
+// matches, followed by:
+//
+//     if (v1.includes('(_state, w, _index, adist) => pressValue')) {
+//       console.error('ai_ladder: v1 did not swap the ranking key'); process.exit(2);
+//     }
+//
+// That wording is kept above rather than deleted, because it encoded a real rule and the
+// rule has not been reversed — only its implementation was wrong. The guard looked for the
+// OLD signature. The N-fighter refactor changed `WeaponRank` to
+// `(_state, _self, w, _index, adist)`, so BOTH the `.replace` and the guard stopped
+// matching at the same moment: the swap became a no-op AND the check for the no-op passed.
+//
+// MEASURED against `HEAD:src/game/ai.ts`:
+//     the .replace changed anything?  false
+//     the guard string is present?    false   -> guard does not fire
+//     => v1 is written with V2's ranking key, and "task 2 costs X pp" prices NOTHING.
+//
+// Today the ladder aborts earlier (V5's shot anchor), so nothing has been mis-priced. But
+// the moment someone repairs the loud failures, this quiet one is what they hit — and a
+// wrong price is indistinguishable from a right one in the output. `edit()` already
+// refuses on any count but exactly one; using it here is the whole fix, and it produces a
+// byte-identical rung on any tree where the anchor did match.
+const v1 = edit(
+  edit(v2, 'rank by authored damage',
+    'export function pressValue(w: Weapon, adist: number): number {',
+    'export function pressValue(w: Weapon, adist: number): number {\n  // LADDER RUNG: the pre-fix key is applied in `rankPressValue`; this stays exact so the\n  // 183-cell estimator assertion still means something on this rung.'),
+  'the ranking key swapped to the authored `damage` field',
+  'const rankPressValue: WeaponRank = (_state, w, _index, adist) => pressValue(w, adist);',
+  '/** LADDER RUNG: the pre-fix key — the authored per-pellet `damage` field. */\nconst rankPressValue: WeaponRank = (_state, w) => w.damage;');
 
 // ── V0: the stun back to silencing as well as rooting. THE CONTROL. ─────────
 let v0 = edit(v1, 'facing re-gated on stun',
