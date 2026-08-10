@@ -12,6 +12,16 @@
  * The answers file is [{ judge, plate, key, mode, lines: [...] }].
  */
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+
+/** True only when this file is the process entry point.
+ *
+ *  `ic_pair.mjs` needs the SUBJECT map and `subjectOf()` — a paired round is scored by
+ *  exactly the same rulebook as a plain one, and a SECOND COPY of a 65-entry map is the
+ *  defect `gatecount` exists to refuse one level up: today's agreeing copy is next
+ *  month's stale one. Importing it means the CLI body below must not run on import, or
+ *  `readFileSync(process.argv[2])` fires with someone else's arguments. */
+const IS_MAIN = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 
 /** Forced-choice candidate text -> icon name. Fixed before any judge ran.
  *
@@ -21,7 +31,7 @@ import { readFileSync } from 'node:fs';
  *  `--selftest` added below caught it on its first run, one line after this map grew to
  *  65 subjects; before that this instrument had never been shown a known-bad input at
  *  all. CLAUDE.md non-negotiable #6. */
-const SUBJECT = {
+export const SUBJECT = {
   'a hammer or mallet': 'hammer',
   'seaweed': 'seaweed',
   'a bottle cap': 'cap',
@@ -108,11 +118,11 @@ const SUBJECT = {
  *  intent as a bug. Declared BEFORE any judge ran, so it cannot be tuned afterwards.
  *  Nothing else is exempt — `health`/`heal` are NOT exempt, because a heart that means
  *  "damage taken" and a heart that means "healing" are opposite meanings. */
-const BY_DESIGN = new Set(['boxBurger', 'boxPineapple', 'boxRed', 'boxFire']);
+export const BY_DESIGN = new Set(['boxBurger', 'boxPineapple', 'boxRed', 'boxFire']);
 
 /** Case-insensitive subject lookup — see the warning on `SUBJECT`. */
-const SUBJECT_LC = new Map(Object.entries(SUBJECT).map(([t, n]) => [t.toLowerCase().trim(), n]));
-const subjectOf = (raw) => SUBJECT_LC.get(String(raw).toLowerCase().trim());
+export const SUBJECT_LC = new Map(Object.entries(SUBJECT).map(([t, n]) => [t.toLowerCase().trim(), n]));
+export const subjectOf = (raw) => SUBJECT_LC.get(String(raw).toLowerCase().trim());
 
 /**
  * Free-form normalisation, applied identically to every run so the before/after delta is
@@ -137,7 +147,7 @@ function freeVariants(raw) {
 
 /** Free-form arm: accepted answers per icon. Written from the ICON's intent, not from
  *  any judge's output, so it cannot be tuned after the fact. */
-const FREE = {
+export const FREE = {
   patty: ['patty', 'burger patty', 'hamburger patty', 'beef patty', 'grilled patty', 'meat patty'],
   meat: ['meat on the bone', 'drumstick', 'ham', 'meat', 'ham hock', 'meat on bone', 'chicken leg'],
   tomato: ['tomato'],
@@ -199,7 +209,7 @@ const FREE = {
  *
  *   node tools/tmp/icon_score.mjs --selftest
  */
-if (process.argv[2] === '--selftest') {
+if (IS_MAIN && process.argv[2] === '--selftest') {
   const names = Object.values(SUBJECT);
   const rev = new Map(Object.entries(SUBJECT).map(([text, n]) => [n, text]));
   const tiles = names.map((name, i) => ({ i: i + 1, name }));
@@ -262,6 +272,7 @@ if (process.argv[2] === '--selftest') {
   process.exit(fail ? 1 : 0);
 }
 
+if (IS_MAIN) {
 const runs = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const confusion = new Map(); // "truth->given" -> count
 const perIcon = new Map();   // icon -> { seen, hit, given: Map }
@@ -352,3 +363,4 @@ for (const k of confusion.keys()) {
   }
 }
 if (!anySwap) console.log('  none');
+}

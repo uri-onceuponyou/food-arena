@@ -89,19 +89,71 @@ const COLLECT = () => {
     // how a plate ends up drawing a glyph against a background it never ships on.
     // `elementFromPoint` answers it directly: if the topmost element at the icon's own
     // centre is not the icon or an ancestor of it, something is on top.
-    const hit = document.elementFromPoint(
-      Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)),
-      Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)),
+    // ── OCCLUSION, IN TWO PARTS — because one test cannot answer both questions ──
+    //
+    // ⚠️ WAS: `!(hit === el || el.contains(hit) || hit === p1 || hit === p2)`, with the
+    // reason *"`hit.contains(el)` is NOT an acceptable pass — when an icon is scrolled
+    // out of a clipping container, `elementFromPoint` returns the SCREEN ROOT, which
+    // contains the icon, so the test said 'not occluded' and the sample returned the
+    // page's warm brown."* That diagnosis was right and the remedy over-fired: capping
+    // the accepted ancestor at TWO levels made the predicate a proxy for DOM DEPTH.
+    //
+    // It excluded THE ENTIRE MATCH HUD. Every `.hud-weapon-emoji` row — desk, land and
+    // phone, both fighters — came back `occluded: true`, so the weapon glyphs were
+    // dropped from the delivered spec at the one site where a player meets them
+    // mid-fight. `shots/ic/context/hud-waterbottle-phone.png` shows four slots with
+    // nothing over them, and all seven rows agreed on rgb(239, 234, 247), which is
+    // `#EFEAF7` — the documented HUD plate, i.e. the "occluded" sample was RIGHT.
+    //
+    // The cause is that `elementFromPoint` is a HIT TEST, not a paint query.
+    // `pointer-events: none` on a wrapper makes it invisible to the hit test while it
+    // goes on painting perfectly, so the topmost hit walks up to the slot button —
+    // three levels above the `<svg>`. This project's standing lesson is that a thing
+    // that "isn't there" is usually there and invisible; here the instrument declared a
+    // painted element absent because it declines pointer events.
+    //
+    // So the two questions are separated and each is answered by the right instrument:
+    //
+    //   1. CLIPPED OUT — geometry. Intersect the client rects of every ancestor whose
+    //      overflow is not `visible`. If the icon's centre falls outside that
+    //      intersection it has been scrolled out of a scroller, and nothing on the
+    //      screen is showing it. This is the case the old comment describes, and it is
+    //      now caught WITHOUT the hit test.
+    //   2. COVERED — the hit test, but only for what it can actually tell you. A hit on
+    //      an unrelated element means something else paints over this point. A hit on an
+    //      ANCESTOR at any depth means the hit test passed through non-interactive
+    //      children and found the box the icon lives in — which is not an occluder.
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    let clip = { l: 0, t: 0, rr: innerWidth, b: innerHeight };
+    for (let n = el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
+      const o = getComputedStyle(n);
+      if (o.overflow === 'visible' && o.overflowX === 'visible' && o.overflowY === 'visible') continue;
+      const q = n.getBoundingClientRect();
+      clip = { l: Math.max(clip.l, q.left), t: Math.max(clip.t, q.top), rr: Math.min(clip.rr, q.right), b: Math.min(clip.b, q.bottom) };
+    }
+    const clipped = !(cx > clip.l && cx < clip.rr && cy > clip.t && cy < clip.b);
+    const hit = clipped ? null : document.elementFromPoint(
+      Math.min(innerWidth - 1, Math.max(0, cx)), Math.min(innerHeight - 1, Math.max(0, cy)),
     );
-    // ⚠️ `hit.contains(el)` is NOT an acceptable pass. It was, and it let every case
-    // through: when an icon is scrolled out of a clipping container, `elementFromPoint`
-    // returns the SCREEN ROOT, which contains the icon — so the test said "not
-    // occluded" and the sample returned the page's warm brown. That is how `shards`
-    // came back sitting on rgb(149,63,36) when the photograph of the same pill shows it
-    // on white. Only the icon itself, its own descendants, or its immediate host box
-    // count as a clean hit; anything further up means something else is on top.
-    const p1 = el.parentElement, p2 = p1?.parentElement;
-    const occluded = !hit || !(hit === el || el.contains(hit) || hit === p1 || hit === p2);
+    // ⚠️ AND ALLOWING ANY ANCESTOR WAS STILL NOT ENOUGH — the HUD came back covered by
+    // the WebGL CANVAS. `pointer-events: none` on the HUD overlay means the hit test
+    // falls THROUGH it to the element painted UNDERNEATH, and an element underneath is
+    // the opposite of an occluder. Measured: `hit=canvas.` on all 27 `.hud-weapon-emoji`
+    // rows across three viewports, every one sampling rgb(239, 234, 247) — the correct
+    // `#EFEAF7` HUD plate — while `shots/ic/context/hud-waterbottle-phone.png` shows four
+    // unobstructed slots.
+    //
+    // Document order is the discriminator, and it is the right one: within a stacking
+    // context, later siblings paint over earlier ones. The odds sheet, its scrim and its
+    // rows are all appended AFTER the trophy-road nodes they cover (measured: `hit` is
+    // `div.tr-sheet-scrim`, `li.tr-odds-row`, `h3.tr-odds-title`, `section.tr-odds-block`
+    // — every one FOLLOWING). The canvas PRECEDES the HUD. So a hit that follows is on
+    // top; a hit that precedes is beneath and is not an occluder.
+    const FOLLOWING = 4;    // Node.DOCUMENT_POSITION_FOLLOWING
+    const related = !hit || hit === el || el.contains(hit) || hit.contains(el);
+    const hitFollows = !!hit && !related && Boolean(el.compareDocumentPosition(hit) & FOLLOWING);
+    const covered = !clipped && !related && hitFollows;
+    const occluded = clipped || covered;
     let ink = null;
     try {
       const b = el.getBBox();               // viewBox units; 24-unit box, `meet` scale
@@ -111,7 +163,8 @@ const COLLECT = () => {
     rows.push({
       name,
       w: +r.width.toFixed(2), h: +r.height.toFixed(2),
-      ink, vis, occluded,
+      ink, vis, occluded, clipped, covered, hitFollows,
+      hitTag: hit && hit !== el ? `${hit.tagName.toLowerCase()}.${String(hit.className || '').split(' ')[0]}` : '',
       host: el.parentElement?.className || '',
       bg: bgOf(el),
       // ⚠️ SAMPLED FROM THE BOX'S OWN INTERIOR, WITH THE ICONS ABLATED — not from
@@ -306,5 +359,57 @@ for (const p of [...byName.values()].sort((x, y) => x.min - y.min)) {
   );
 }
 console.log(`\nAUTHORED BUT NEVER RENDERED (${neverRendered.length} of ${registry.size}): ${neverRendered.join(', ') || 'none'}`);
+
+// ── THE OCCLUSION PREDICATE, CHECKED AGAINST BOTH ANSWERS IT MUST GET RIGHT ──
+// This is the whole of `CLAUDE.md` #6 for this instrument. The predicate was rewritten
+// because its old form excluded the match HUD; a rewrite that simply stopped calling
+// anything occluded would "fix" that and silently reintroduce the bug it replaced — the
+// drop-rates sheet sampling the trophy road's warm brown through a scrim. So both
+// directions are asserted on the live sweep, and the run FAILS if either goes quiet.
+//
+//   MUST STILL FIRE   the trophy-road nodes are behind the odds sheet while it is open
+//   MUST NOT FIRE     the HUD weapon slots, which are painted and merely non-interactive
+//   AND THE SAMPLES MUST AGREE — an unoccluded row's own plate colour has to match what
+//                     its co-sited siblings measured, or "unoccluded" means nothing
+const occl = [];
+const behind = all.filter((r) => /trophies\/odds/.test(r.screen) && r.host === 'tr-node-em');
+occl.push([`odds sheet still hides the trophy-road nodes (${behind.length} rows)`,
+  behind.length > 0 && behind.every((r) => r.occluded), true]);
+const hud = all.filter((r) => r.host === 'hud-weapon-emoji');
+occl.push([`the match HUD weapon slots are NOT occluded (${hud.length} rows)`,
+  hud.length > 0 && hud.every((r) => !r.occluded), true]);
+occl.push(['at least one row IS occluded, so the test is not a no-op',
+  all.some((r) => r.occluded), true]);
+// ⚠️ WAS: *"co-sited samples agree — worst spread <= 24"*. That assertion was WRONG,
+// not merely strict: `desk/characters::chars-card-art` is eleven different character
+// portraits behind eleven placeholder icons, so its spread is 191 BY DESIGN. A site that
+// spans several plates is a real thing and it is `ic_spec.mjs`'s job to refuse to lend a
+// plate there (it does, above a spread of 16). Asserting agreement here made a correct
+// measurement fail its own gate, which is how a usable sweep gets thrown away.
+// Replaced by two claims this tool can actually own:
+// ⚠️ AND THE FIRST VERSION OF THIS ROW WAS ALSO A GUESS: *"stable — under 5% of rows
+// disagreed"*. Measured on a desk sweep, 111 of 586 rows (19%) disagree between two
+// ablated shots 400 ms apart, because character select genuinely repaints while it is
+// being measured — this file's own `grab()` comment says so and puts the drift at up to
+// 0.9998 of a box. So the 5% was a threshold invented to be passed, and it failed a
+// sweep that was correct. What actually matters is not the RATE but that an unstable row
+// LENDS NOTHING, which is a structural invariant and can be asserted exactly.
+const unstable = all.filter((r) => r.bgUnstable).length;
+occl.push([`an unstable row carries no plate sample (${unstable} of ${all.length} rows unstable, ${(unstable / Math.max(1, all.length) * 100).toFixed(1)}%)`,
+  all.every((r) => !(r.bgUnstable && r.bgPix)), true]);
+// The new predicate's own known-bad direction: nothing may be called covered by an
+// element that PRECEDES it in the document, because that element paints underneath.
+// This is the canvas fault, asserted rather than remembered.
+const beneath = all.filter((r) => r.covered && !r.hitFollows);
+occl.push([`nothing is "covered" by an element painted BENEATH it (${beneath.length} rows)`,
+  beneath.length === 0, true]);
+console.log('\nOCCLUSION PREDICATE — both directions, on this sweep:');
+let occlFail = 0;
+for (const [label, got, want] of occl) {
+  const ok = got === want;
+  if (!ok) occlFail++;
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'}  ${label}`);
+}
 if (errs.length) console.log('\nERRORS:\n' + errs.join('\n'));
 console.log(`\nwrote ${OUT}`);
+if (occlFail) { console.log(`\n🔴 OCCLUSION PREDICATE: ${occlFail} of ${occl.length} FAILED — this sweep is not usable.`); process.exit(1); }

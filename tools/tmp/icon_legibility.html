@@ -2,32 +2,36 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>icon legibility — identify at real size</title>
+<title>icon legibility — identify at the DELIVERED size</title>
 <style>
-  /* NOTHING here is zoomed. Every wrapper below is the REAL shipped box, at the REAL
-     shipped px size, taken from src/ui/hud.ts and src/ui/screens/characterSelect.ts.
-     The page background is the same warm cream the previous acceptance sheet used, so
-     before/after plates are comparable. */
+  /* ── THERE ARE NO SIZES IN THIS FILE ANY MORE, AND THAT IS THE POINT ────────
+     WAS: three classes, `.slot26` (26px), `.slot20` (20px) and `.ability` (21.6px),
+     with the comment *"NOTHING here is zoomed. Every wrapper below is the REAL shipped
+     box, at the REAL shipped px size, taken from src/ui/hud.ts and
+     src/ui/screens/characterSelect.ts."* Every word of that was believed and none of it
+     was measured. Walking the real screens (`ic_delivered.mjs`, 1728 rendered nodes)
+     says:
+
+         range   ships at 13.8px on an INK PILL with a CREAM outline
+                 -> drawn 56% too large with its POLARITY INVERTED
+         shards  ships at 22.7px (char select) / 24-26px (HUD, plate #EFEAF7)
+                 -> drawn 14% too small, on the wrong plate
+         HUD     24px on phones (hud.ts:2374), not 20
+         heal    13.8px on the same INK PILL as `range` -> also inverted
+         boxes   all four ship in ONE ROW of ONE SHEET at ONE size
+
+     A judged score at the wrong size and the wrong polarity is not a weak measurement;
+     it is a measurement of a screen this game does not have. So the numbers now come
+     from `tools/tmp/ic_spec.mjs`, which is a distillation of a measurement, and this
+     file REFUSES to draw anything without one. It does not fall back to a default —
+     the 20px cream fallback is exactly how five icons were judged at a size they never
+     ship at, and a silent fallback is indistinguishable from a measurement. */
   html, body { margin: 0; background: #E8DCC4; font-family: system-ui, sans-serif; }
-  #grid { display: grid; gap: 14px; padding: 14px; width: max-content; }
+  #grid { display: grid; width: max-content; }
   .item { display: flex; flex-direction: column; align-items: center; }
   .idx { font: 500 10px ui-monospace, monospace; color: #8a7c66; margin-top: 3px; }
-
-  /* HUD weapon slot, desktop (>720px): hud.ts:1446 + hud.ts:1497 */
-  .slot26 { width: 58px; height: 58px; background: #FFF3DE; border: 3px solid #1a1224;
-            border-radius: 16px; display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 3px 0 rgba(0,0,0,0.35); font-size: 26px; }
-  /* HUD weapon slot, phones (max-width:720px): hud.ts:1989-1990. THE SMALLEST SHIPPED SIZE. */
-  .slot20 { width: 46px; height: 46px; background: #FFF3DE; border: 3px solid #1a1224;
-            border-radius: 13px; display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 3px 0 rgba(0,0,0,0.35); font-size: 20px; }
-  /* The shipped drop-shadow on .hud-weapon-emoji. It ships, so it is measured. */
-  .slot26 .fa-ic, .slot20 .fa-ic { filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5)); }
-
-  /* Character select ability row, at the BOTTOM of its clamp: 1.35rem = 21.6px. */
-  .ability { width: 34px; height: 34px; background: #FFFFFF; border: 2.5px solid #1a1224;
-             border-radius: 11px; display: flex; align-items: center; justify-content: center;
-             font-size: 21.6px; }
+  #refuse { padding: 28px; font: 600 16px/1.5 system-ui, sans-serif; color: #7a1020;
+            background: #ffe3e3; border: 3px solid #7a1020; margin: 20px; max-width: 640px; }
 </style>
 </head>
 <body>
@@ -40,47 +44,199 @@ import { UI_ICONS } from '/src/ui/icons/ui.ts';
 ensureIconStyles();
 
 const q = new URLSearchParams(location.search);
-const box = q.get('box') ?? 'slot20';
 const set = q.get('set') ?? 'food';
 const seed = Number(q.get('seed') ?? 1);
 const cols = Number(q.get('cols') ?? 7);
+const cell = Number(q.get('cell') ?? 92);
 const showIdx = q.get('idx') !== '0';
 const only = q.get('only');
+/** Plate padding as a fraction of the glyph box. Constant across every round so a
+ *  before/after delta is not contaminated by the surround changing size with it. */
+const PAD = Number(q.get('pad') ?? 0.30);
 
-/** mulberry32 — a deterministic shuffle so a plate can be regenerated exactly. */
-function rng(a) {
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+function refuse(why) {
+  document.getElementById('grid').remove();
+  const d = document.createElement('div');
+  d.id = 'refuse';
+  d.textContent = 'REFUSED — ' + why + '. This plate draws icons at their MEASURED delivered '
+    + 'size and plate colour only. It has no default size, deliberately: the 20px cream '
+    + 'fallback it used to have is how five icons were judged at a size they never ship at. '
+    + 'Build one with `node tools/tmp/ic_spec.mjs shots/ic/delivered.json --out shots/ic/spec.json`.';
+  document.body.appendChild(d);
+  window.__refused = why;
+  window.__ready = true;
 }
 
-/* `all` renders BOTH families into one plate. It exists because
-   docs/DECISIONS-FOR-URI.md §10 recorded that the 37 UI_ICONS had never been measured at
-   all, and that one judge answered "coin" to a FOOD icon — i.e. cross-family collisions
-   were unmeasured. Measuring each family alone cannot find them: a judge shown only food
-   icons can never answer "coin". The two key sets do not overlap (index.ts merges them
-   into one flat REGISTRY), so a single concatenated name list is unambiguous. */
-let names = set === 'all'
-  ? [...Object.keys(UI_ICONS), ...Object.keys(FOOD_ICONS)]
-  : set === 'ui' ? Object.keys(UI_ICONS) : Object.keys(FOOD_ICONS);
-if (only) names = only.split(',');
-const r = rng(seed);
-for (let i = names.length - 1; i > 0; i--) {
-  const j = Math.floor(r() * (i + 1));
-  [names[i], names[j]] = [names[j], names[i]];
+/* ── The spec: injected, or fetched, never invented ────────────────────────── */
+let SPEC = window.__ICON_SPEC ?? null;
+if (!SPEC && q.get('spec')) {
+  try {
+    const res = await fetch(q.get('spec'));
+    if (res.ok) SPEC = await res.json();
+  } catch { /* handled below */ }
 }
+/* ⚠️ `tools/snapshot.mjs` deliberately excludes `shots/`, so `?spec=/shots/...` cannot
+   resolve on a frozen snapshot. Drivers inject `window.__ICON_SPEC` instead. Both paths
+   land here, and neither can be silently empty. */
+if (!SPEC || !SPEC.icons) refuse('no delivered spec was supplied');
 
-const grid = document.getElementById('grid');
-grid.style.gridTemplateColumns = `repeat(${cols}, max-content)`;
-grid.innerHTML = names.map((n, i) =>
-  `<div class="item"><div class="${box}">${icon(n)}</div>` +
-  (showIdx ? `<div class="idx">${i + 1}</div>` : '') + '</div>').join('');
+if (SPEC && SPEC.icons) {
+  /** mulberry32 — a deterministic shuffle so a plate can be regenerated exactly. */
+  function rng(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
 
-window.__key = names.map((n, i) => ({ i: i + 1, name: n }));
-window.__ready = true;
+  /* `all` renders BOTH families into one plate. It exists because
+     docs/DECISIONS-FOR-URI.md §10 recorded that the 37 UI_ICONS had never been measured
+     at all, and that one judge answered "coin" to a FOOD icon — i.e. cross-family
+     collisions were unmeasured. Measuring each family alone cannot find them: a judge
+     shown only food icons can never answer "coin". The two key sets do not overlap
+     (index.ts merges them into one flat REGISTRY), so a single concatenated name list is
+     unambiguous. */
+  let names = set === 'all'
+    ? [...Object.keys(UI_ICONS), ...Object.keys(FOOD_ICONS)]
+    : set === 'ui' ? Object.keys(UI_ICONS) : Object.keys(FOOD_ICONS);
+  if (only) names = only.split(',');
+
+  /* ── UNMEASURED ICONS ARE DROPPED, NOT DEFAULTED ─────────────────────────────
+     `flag` needs a COMPLETED trophy road, so it is unreachable on a normal profile and
+     nothing ever renders it. The previous harness drew it — and `heal`, `puffer`,
+     `party` and `lollipop` — at a 20px cream fallback and their verdicts were quoted
+     for a round before anyone noticed. A tile that cannot be given a shipped condition
+     is not a weaker test of that icon; it is a test of a different icon. */
+  const dropped = names.filter((n) => !SPEC.icons[n]);
+  names = names.filter((n) => SPEC.icons[n]);
+
+  /* ── The PLAN. One entry per tile. ───────────────────────────────────────────
+     A plain plate is one tile per icon. A PAIRED plate (`ic_pair.mjs`) is several tiles
+     that share one `name` — competing variants of the same subject, plus identical
+     TWINS whose disagreement is the round's own noise floor — all shuffled together so
+     one judge in one round decides between them. That is the capability `cc34026` said
+     was missing when a `boxBurger` fix was reverted because the CONTROL moved: `boxRed`,
+     art unchanged by one byte, went 3/3 -> 0/3 across two rounds. Across rounds a
+     3-judge panel's swing on fixed art is the full range; within one round both variants
+     face the same judge in the same mood on the same plate, the way identical seeds
+     cancel in a matchup delta. */
+  let plan = window.__ICON_PLAN ?? names.map((n) => ({ name: n }));
+  const r = rng(seed);
+  for (let i = plan.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [plan[i], plan[j]] = [plan[j], plan[i]];
+  }
+
+  /** Rewrite the Nth `fill="…"` of a shipped icon's markup.
+   *  A colourway variant is then expressed as PARAMETERS to the art that ships, not as
+   *  new art — so nothing here can drift from `src/ui/icons/`, and a winning variant
+   *  hands over as three hex values rather than a redraw. */
+  function applyFills(markup, fills) {
+    let k = -1;
+    return markup.replace(/fill="([^"]*)"/g, (m, cur) => {
+      k++;
+      return fills[k] ? `fill="${fills[k]}"` : m;
+    });
+  }
+
+  const grid = document.getElementById('grid');
+  grid.style.gridTemplateColumns = `repeat(${cols}, ${cell}px)`;
+  grid.style.padding = '10px';
+
+  const declared = [];
+  for (const [i, p] of plan.entries()) {
+    const s = SPEC.icons[p.name];
+    const px = s.px;
+    const pad = Math.max(4, Math.round(px * PAD));
+    const side = px + pad * 2;
+
+    const item = document.createElement('div');
+    item.className = 'item';
+    item.style.cssText = `width:${cell}px;height:${cell}px;display:flex;flex-direction:column;`
+      + 'align-items:center;justify-content:center;gap:2px;';
+
+    const plate = document.createElement('div');
+    plate.className = 'plate';
+    plate.style.cssText = `width:${side}px;height:${side}px;background:${s.bg};`
+      + `border-radius:${Math.round(side * 0.34)}px;display:flex;align-items:center;`
+      + `justify-content:center;--fa-ic-ink:${s.outline};`;
+    plate.innerHTML = icon(p.name);
+
+    const svg = plate.querySelector('svg.fa-ic');
+    /* VARIANT / FORGERY: swap the artwork, leave the key alone. `--forgery A=B` puts B's
+       pixels under A's name so a collision exists BY CONSTRUCTION — the known-bad input
+       for the judging pipeline itself. `fills` is the same mechanism used honestly. */
+    if (p.svg) svg.innerHTML = p.svg;
+    else if (p.forgeFrom) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = icon(p.forgeFrom);
+      svg.innerHTML = tmp.querySelector('svg').innerHTML;
+    }
+    if (p.fills) svg.innerHTML = applyFills(svg.innerHTML, p.fills);
+
+    svg.setAttribute('width', `${px}px`);
+    svg.setAttribute('height', `${px}px`);
+    svg.style.width = `${px}px`;
+    svg.style.height = `${px}px`;
+    if (s.filter) svg.style.filter = s.filter;
+
+    item.appendChild(plate);
+    if (showIdx) {
+      const idx = document.createElement('div');
+      idx.className = 'idx';
+      idx.textContent = String(i + 1);
+      item.appendChild(idx);
+    }
+    grid.appendChild(item);
+
+    declared.push({
+      i: i + 1, name: p.name, variant: p.variant ?? null, twinOf: p.twinOf ?? null,
+      forgeFrom: p.forgeFrom ?? null, fills: p.fills ?? null,
+      px, bg: s.bg, outline: s.outline, filter: s.filter ?? '',
+      where: s.where, host: s.host, viaOccluded: !!s.viaOccluded, ink: s.ink ?? null,
+    });
+  }
+
+  /* ── WHAT ACTUALLY RENDERED. ─────────────────────────────────────────────────
+     Read back from the DOM after the cascade has settled, so a stylesheet rule that
+     overrides an inline size, an inherited `1em`, or a `preserveAspectRatio` surprise
+     shows up as a DISAGREEMENT with what was declared rather than as a plate nobody
+     questions. `ic_plate.mjs --verify` compares these three ways: declared vs rendered
+     DOM, rendered DOM vs the DELIVERED measurement, and the plate's colour against the
+     screenshot's own pixels. */
+  const measured = [...grid.querySelectorAll('.item')].map((item, i) => {
+    const svg = item.querySelector('svg.fa-ic');
+    const plate = item.querySelector('.plate');
+    const rc = svg.getBoundingClientRect();
+    const pr = plate.getBoundingClientRect();
+    let ink = null;
+    try {
+      const b = svg.getBBox();
+      const sc = Math.min(rc.width, rc.height) / 24;
+      ink = { w: +(b.width * sc).toFixed(2), h: +(b.height * sc).toFixed(2) };
+    } catch { /* detached */ }
+    return {
+      i: i + 1,
+      w: +rc.width.toFixed(2), h: +rc.height.toFixed(2), ink,
+      plateBg: getComputedStyle(plate).backgroundColor,
+      inkVar: getComputedStyle(svg).getPropertyValue('--fa-ic-ink').trim(),
+      plateRect: { x: +pr.left.toFixed(2), y: +pr.top.toFixed(2), w: +pr.width.toFixed(2), h: +pr.height.toFixed(2) },
+      /* ⚠️ The GLYPH's own rect, not the plate's. A pixel scan bounded by the plate rect
+         reads the plate's ROUNDED CORNERS as ink — outside the border radius sits the
+         page, which differs from the plate by far more than any ink threshold, so every
+         tile came back with its ink box exactly equal to its plate box. */
+      svgRect: { x: +rc.left.toFixed(2), y: +rc.top.toFixed(2), w: +rc.width.toFixed(2), h: +rc.height.toFixed(2) },
+    };
+  });
+
+  window.__key = plan.map((p, i) => ({ i: i + 1, name: p.name }));
+  window.__declared = declared;
+  window.__measured = measured;
+  window.__dropped = dropped;
+  window.__ready = true;
+}
 </script>
 </body>
 </html>

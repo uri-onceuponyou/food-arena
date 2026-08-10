@@ -1,0 +1,35 @@
+{
+  "_": [
+    "Variants for the PAIRED plate (tools/tmp/ic_pair.mjs). Each entry is a list of",
+    "colourway arms for one icon, expressed as substitutions into the `fill=` attributes",
+    "that src/ui/icons/ui.ts already writes — NOT as new artwork. `fills` is positional:",
+    "index 0 is the first fill in the icon's markup, and a null leaves that fill alone.",
+    "",
+    "For a box, box(front, lid, band, emblem) yields fills in the order",
+    "  0 front panel   1 lid   2 clasp/band   3.. emblem",
+    "",
+    "Palette (src/ui/icons/svg.ts): cream #FFF3DE  gold #F4A300  goldDark #B87400",
+    "                              mustard #FFC93C  mustardHi #FFDD6B  ketchup #D62839",
+    "",
+    "This file is an INPUT TO AN INSTRUMENT, not a proposed edit to the icon set. A",
+    "winning arm hands over to whoever owns src/ui/icons as three hex values."
+  ],
+
+  "boxBurger": [
+    {
+      "id": "A",
+      "note": "SHIPPED — box(P.gold, P.mustard, P.ketchup). front/lid separation 1.36, the family's lowest; clasp/front 2.39 vs clasp/lid 3.24, the only LID-dominant clasp of the four. 0/3 at delivered size, named 'a wrapped gift' x2.",
+      "fills": null
+    },
+    {
+      "id": "B",
+      "note": "THE FULL CANDIDATE cc34026 built and reverted — box(P.goldDark, P.gold, P.cream). front/lid 1.82 so the lid exists at 14px; clasp becomes front-dominant. Reverted not because it lost but because the CONTROL moved 3/3 -> 0/3 in the same two rounds, so that round could not tell. This plate can.",
+      "fills": ["#B87400", "#F4A300", "#FFF3DE", null, null, null]
+    },
+    {
+      "id": "C",
+      "note": "CLASP ONLY — box(P.gold, P.mustard, P.cream). The body is untouched, so this separates the two halves of the diagnosis: if C alone recovers the read, the defect was the LID-DOMINANT CLASP (which is exactly gift's ribbon-against-body ratio of 3.24); if only B does, the defect was the invisible lid.",
+      "fills": [null, null, "#FFF3DE", null, null, null]
+    }
+  ]
+}
