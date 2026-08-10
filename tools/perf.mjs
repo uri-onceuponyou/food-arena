@@ -41,6 +41,17 @@
  *   node tools/perf.mjs --mode alloc   --scene match --frames 120    # GC pressure
  *   node tools/perf.mjs --mode boot    --scene match,home            # boot, by file
  *   node tools/perf.mjs --mode leak                                  # home->match->home
+ *   node tools/perf.mjs --mode navselftest                           # the reload guard's own gate
+ *
+ * ⚠️ `--mode navselftest` is the known-bad input for the "page reloaded mid-run" warning.
+ * That warning was a 100% FALSE POSITIVE until 2026-08-10: it counted `framenavigated`,
+ * which Playwright fires for SAME-DOCUMENT navigations, and `shell.ts` calls
+ * `history.pushState`/`replaceState` on the app's first route — so every run against a
+ * pristine `git archive HEAD` printed "discard this run" while three independent runs
+ * returned bit-identical counts. It now asks about the DOCUMENT (main-frame `load` /
+ * `domcontentloaded`, plus an identity token stamped into `window`), and `navselftest`
+ * runs a CONTROL arm and a real `page.reload()` arm in one invocation so a guard that
+ * fires on everything and a guard that fires on nothing both fail it.
  *
  * Scenes: match, match-fast, match-vfx, home, characters, trophies,
  *         preview-arena, preview-char, or `all`.
@@ -79,7 +90,12 @@ const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
 const flag = (k) => argv.includes(k);
 
 const MODE = arg('--mode', 'counts');
-const BASE = arg('--url', 'http://localhost:5188').replace(/\/$/, '');
+// Precedence: an explicit `--url` always wins, then a harness's env (`headserve.mjs` /
+// `with_snapshot.mjs` export `PREVIEW_BASE` and pass NO argv), then the local default.
+// Without the env leg, `headserve -- node tools/perf.mjs ...` silently measured whatever
+// was on :5188 — which is the shared-server trap in a different costume.
+const BASE = (arg('--url', null) ?? process.env.PREVIEW_BASE ?? process.env.HEADSERVE_URL
+  ?? 'http://localhost:5188').replace(/\/$/, '');
 const FRAMES = Number(arg('--frames', 60));
 const JSON_OUT = arg('--json', null);
 const BASELINE = arg('--baseline', null);
@@ -476,13 +492,51 @@ async function newPage(browser, { instrument = 'full' } = {}) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  // ── A GUARD THAT ALWAYS FIRES IS NOT A GUARD ──────────────────────────────
   // Another agent's save triggers a Vite reload; the HMR stub above should prevent it,
-  // but if one slips through every in-page measurement after it is garbage. Only the
-  // FIRST navigation is expected.
-  let navs = 0;
+  // but if one slips through, every in-page measurement after it is garbage. That is a
+  // real hazard and the warning below is worth having.
+  //
+  // ⚠️ IT WAS A 100% FALSE POSITIVE. This counted `framenavigated` and errored on the
+  // second one — but Playwright fires `framenavigated` for SAME-DOCUMENT navigations too,
+  // and `src/ui/screens/shell.ts`'s `writeHistory` calls `history.pushState`/
+  // `replaceState` on the app's very first route. So every run against a pristine
+  // `git archive HEAD` printed "page reloaded mid-run — discard this run" while three
+  // independent runs returned bit-identical counts. `--mode leak` was worst: it navigates
+  // the router six times ON PURPOSE, so the mode built to prove a clean round trip
+  // reported seven reloads.
+  //
+  // A warning that fires on every run trains every agent to ignore it, and the day the
+  // page really does reload the warning looks like the usual noise. `docs/LESSONS.md` §9
+  // — a guard that cries wolf gets switched off, and this one had already been.
+  //
+  // THE FIX IS TO ASK ABOUT THE DOCUMENT, NOT ABOUT THE HISTORY ENTRY. A same-document
+  // navigation does not dispatch `load` or `DOMContentLoaded`, does not re-run
+  // `addInitScript`, and does not discard `window`. A real load does all four. So:
+  //   · `docLoads`  — main-frame `load` events. The FIRST is the goto; a second is a reload.
+  //   · `docParsed` — main-frame `domcontentloaded`, the second chance for a document whose
+  //                   `load` never fires because a subresource hangs.
+  //   · `routerNavs`— the old `framenavigated` count, KEPT and reported as INFORMATION.
+  //                   It is what the app's router does and it is never an error.
+  //   · `__perfDocToken` — a token stamped into `window` after each intentional navigation
+  //                   and re-read when results are collected. A new document cannot have
+  //                   it. This is the positive half: it proves the document we MEASURED is
+  //                   the one we NAVIGATED, rather than only proving nothing was seen.
+  const nav = { docLoads: 0, docParsed: 0, routerNavs: 0, token: null };
+  page.__nav = nav;
+  const reloadFault = (what) => `!! page ${what} mid-run — discard this run`;
+  page.on('load', () => {
+    if (++nav.docLoads > 1) errors.push(reloadFault(`loaded a NEW DOCUMENT (load #${nav.docLoads})`));
+  });
+  page.on('domcontentloaded', () => {
+    // Only escalate if `load` has not already said so, or the same reload reports twice.
+    if (++nav.docParsed > 1 && nav.docParsed > nav.docLoads) {
+      errors.push(reloadFault(`parsed a NEW DOCUMENT (domcontentloaded #${nav.docParsed}, load #${nav.docLoads})`));
+    }
+  });
   page.on('framenavigated', (f) => {
     if (f !== page.mainFrame() || f.url() === 'about:blank') return;
-    if (++navs > 1) errors.push('!! page reloaded mid-run — discard this run');
+    nav.routerNavs++;   // information, NOT a fault — see above
   });
   await stubHmr(page);
   if (instrument !== 'none') {
@@ -492,11 +546,56 @@ async function newPage(browser, { instrument = 'full' } = {}) {
   return page;
 }
 
+/**
+ * Stamp the document we intend to measure. Called after every INTENTIONAL navigation; any
+ * document that appears afterwards will not have it.
+ */
+async function stampDoc(page) {
+  const t = `perf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  page.__nav.token = t;
+  await page.evaluate((v) => { window.__perfDocToken = v; }, t);
+  return t;
+}
+
+/**
+ * The faults to report for this page — the accumulated console/page errors PLUS the
+ * document-identity verdict. Async because the identity half asks the live page.
+ *
+ * ⚠️ `stampDoc` may never have run (a scene that threw before it, `--mode boot`'s inline
+ * goto before this existed). A missing STAMP is not a reload, so it is reported as
+ * `unstamped` and never as a fault — a guard that fires when it was not armed is the bug
+ * this whole block replaced.
+ */
+async function pageFaults(page) {
+  const out = [...page.__errors];
+  const want = page.__nav?.token ?? null;
+  if (want) {
+    const got = await page.evaluate(() => window.__perfDocToken ?? null).catch(() => '<evaluate failed>');
+    if (got !== want) {
+      out.push(`!! THE DOCUMENT CHANGED UNDER THE RUN — stamped ${want}, found ${got === null ? 'no stamp at all' : got}. Discard this run.`);
+    }
+  }
+  return out;
+}
+
+/** One line of nav accounting, printed whether or not anything is wrong. */
+function navLine(page) {
+  const n = page.__nav ?? { docLoads: 0, docParsed: 0, routerNavs: 0 };
+  const routerOnly = Math.max(0, n.routerNavs - n.docLoads);
+  return `nav: ${n.docLoads} document load(s), ${routerOnly} same-document router nav(s)`
+    + `${n.docLoads > 1 ? '  <- RELOADED' : ''}`;
+}
+
 async function gotoScene(page, name) {
   const s = SCENES[name];
   if (!s) throw new Error(`unknown scene "${name}". known: ${Object.keys(SCENES).join(', ')}`);
   await page.goto(BASE + s.url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
   await page.waitForFunction(s.ready, null, { timeout: 120_000 });
+  // Stamp AFTER `ready`: the shell's first `replaceState` has already happened by then, so
+  // a stamp that survives to read-out proves the same-document router traffic did not
+  // replace the document. Stamping before the goto would prove nothing — the goto itself
+  // discards the window.
+  await stampDoc(page);
   // The scene's `ready` flag fires in the same tick shell.ts drops the curtain, 0.26s
   // before `fa-screen-in` finishes — so the first sampling window would otherwise include
   // an entry animation that is not part of what this measures. SOFT and time-boxed on
@@ -821,7 +920,9 @@ async function modeCounts(browser) {
       if (VERBOSE_TIMING) scene.cpuMsUnsafe = +median(frames.map((f) => f.cpuMsUnsafe || 0)).toFixed(2);
       report.scenes[name] = scene;
       printCounts(name, scene);
-      if (page.__errors.length) console.log(`  page errors: ${page.__errors.slice(0, 3).join(' | ')}`);
+      const faults = await pageFaults(page);
+      console.log(`  ${navLine(page)}`);
+      if (faults.length) console.log(`  page errors: ${faults.slice(0, 3).join(' | ')}`);
     } catch (e) {
       console.error(`  ✗ ${name}: ${e.message}`);
       report.scenes[name] = { error: String(e) };
@@ -1148,7 +1249,9 @@ async function modeAblate(browser) {
           console.log(`    ${pad(e.name, 26)} Δimage mean ${pad(e.mean.toFixed(4), 8)} max ${pad(e.max, 5)} pixels>2 ${e.pct}%`);
         }
       }
-      if (page.__errors.length) console.log(`  page errors: ${page.__errors.slice(0, 3).join(' | ')}`);
+      const faults = await pageFaults(page);
+      console.log(`  ${navLine(page)}`);
+      if (faults.length) console.log(`  page errors: ${faults.slice(0, 3).join(' | ')}`);
     } catch (e) {
       console.error(`  ✗ ${name}: ${e.message}`);
       report.scenes[name] = { error: String(e) };
@@ -1297,6 +1400,9 @@ async function modeBoot(browser) {
       await page.goto(BASE + s.url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
       await page.waitForFunction(s.ready, null, { timeout: 120_000 });
       const tReady = Date.now() - t0;
+      // `--mode boot` navigates itself rather than through `gotoScene` (it must own the
+      // clock across the goto), so it arms the identity check itself.
+      await stampDoc(page);
       if (s.settle) await page.waitForFunction(s.settle, null, { timeout: 180_000 }).catch(() => {});
       const tSettle = Date.now() - t0;
 
@@ -1436,12 +1542,93 @@ async function modeLeak(browser) {
     console.log(`    live contexts leaked . ${verdict.contextsLeaked}`);
     console.log(`    DOM canvases leaked .. ${verdict.canvasesLeaked}`);
     console.log(`    contexts EVER created  ${verdict.contextsCreatedTotal}`);
-    if (page.__errors.length) console.log(`    page errors: ${page.__errors.slice(0, 4).join(' | ')}`);
+    const faults = await pageFaults(page);
+    console.log(`    ${navLine(page)}`);
+    if (faults.length) console.log(`    page errors: ${faults.slice(0, 4).join(' | ')}`);
     await cdp.detach();
-    return { mode: 'leak', steps, verdict, errors: page.__errors };
+    return { mode: 'leak', steps, verdict, errors: faults, nav: { ...page.__nav } };
   } finally {
     await page.close();
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODE: navselftest — THE KNOWN-BAD INPUT FOR THE RELOAD GUARD ITSELF
+//
+//   node tools/tmp/headserve.mjs -- node tools/perf.mjs --mode navselftest --url {URL}
+//
+// `docs/LESSONS.md` §13: a guard that has not been shown to FAIL on the bug it guards
+// against is not a guard. The guard this replaced had the opposite disease — it fired on
+// every single run — and the cheapest way to "fix" that is to make it fire on nothing at
+// all. That trade is strictly worse and it is invisible from a green run, so it is tested
+// here rather than argued about.
+//
+// TWO ARMS, ONE INVOCATION, so neither can be reported without the other:
+//   A. CONTROL      boot the match scene and let the app's router do what it does.
+//                   Requires: NO fault, exactly ONE document load, and — this is the part
+//                   that proves the arm is not vacuous — at least one SAME-DOCUMENT router
+//                   navigation actually happened. If `shell.ts` ever stops calling
+//                   `pushState`, this arm passes for the wrong reason and says so.
+//   B. KNOWN-BAD    the same boot, then a real `page.reload()`.
+//                   Requires: the fault fires, TWO document loads, and the identity stamp
+//                   is gone from the new document.
+//
+// Both arms must hold. A guard hard-wired to fire fails A; one hard-wired to stay silent
+// fails B; one that watches `framenavigated` — the implementation this replaced — fails A
+// on the router traffic alone.
+// ─────────────────────────────────────────────────────────────────────────────
+async function modeNavSelftest(browser) {
+  const results = [];
+  let pass = 0, fail = 0;
+  const check = (name, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (ok) { pass++; console.log(`  ✓ ${name.padEnd(66)} ${JSON.stringify(got)}`); }
+    else { fail++; console.log(`  ✗ ${name.padEnd(66)} got ${JSON.stringify(got)}  want ${JSON.stringify(want)}`); }
+    return ok;
+  };
+  const scene = SCENES.match ? 'match' : SCENE_NAMES[0];
+
+  for (const armReloads of [false, true]) {
+    const label = armReloads ? 'B. KNOWN-BAD — a real page.reload() mid-run' : 'A. CONTROL — the app router, untouched';
+    console.log(`\n${label}`);
+    const page = await newPage(browser, { instrument: 'light' });
+    try {
+      await gotoScene(page, scene);
+      const stamped = page.__nav.token;
+      if (armReloads) {
+        // THE INJECTION. Not simulated, not a fake event: the document is genuinely
+        // discarded and rebuilt, which is exactly what a Vite full-reload does to a run.
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 });
+        await page.waitForFunction(SCENES[scene].ready, null, { timeout: 120_000 }).catch(() => {});
+      }
+      const faults = await pageFaults(page);
+      const n = page.__nav;
+      const routerOnly = n.routerNavs - n.docLoads;
+      console.log(`     ${navLine(page)}   (raw framenavigated ${n.routerNavs}, load ${n.docLoads}, dcl ${n.docParsed})`);
+      const reloadFaults = faults.filter((f) => /reload|NEW DOCUMENT|DOCUMENT CHANGED/i.test(f));
+      results.push({ arm: armReloads ? 'reload' : 'control', nav: { ...n }, faults });
+
+      if (!armReloads) {
+        check('CONTROL: no reload fault', reloadFaults.length, 0);
+        check('CONTROL: exactly one document load', n.docLoads, 1);
+        check('CONTROL: the identity stamp survived the router', faults.some((f) => /DOCUMENT CHANGED/.test(f)), false);
+        // NOT VACUOUS: the old implementation failed precisely because this number is > 0.
+        // If it is 0 the arm proved nothing, so it is asserted rather than assumed.
+        check('CONTROL: same-document router navigations DID happen (else this arm is vacuous)', routerOnly > 0, true);
+      } else {
+        check('KNOWN-BAD: the reload fault FIRES', reloadFaults.length > 0, true);
+        check('KNOWN-BAD: two document loads were seen', n.docLoads, 2);
+        check('KNOWN-BAD: the identity stamp is GONE from the new document',
+          faults.some((f) => /DOCUMENT CHANGED/.test(f) && /no stamp at all/.test(f)), true);
+        check('KNOWN-BAD: a stamp was in fact armed before the reload', typeof stamped === 'string' && stamped.length > 0, true);
+      }
+      for (const f of faults) console.log(`       fault: ${f}`);
+    } catch (e) {
+      fail++; console.log(`  ✗ arm ${armReloads ? 'B' : 'A'} threw: ${e.message}`);
+    } finally { await page.close(); }
+  }
+  console.log(`\n${pass} passed, ${fail} failed`);
+  return { mode: 'navselftest', pass, fail, results, verdict: fail === 0 ? 'PASS' : 'FAIL' };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1487,6 +1674,7 @@ async function main() {
     else if (MODE === 'alloc') report = await modeAlloc(browser);
     else if (MODE === 'boot') report = await modeBoot(browser);
     else if (MODE === 'leak') report = await modeLeak(browser);
+    else if (MODE === 'navselftest') report = await modeNavSelftest(browser);
     else { console.error(`unknown --mode ${MODE}`); process.exit(2); }
   } finally {
     await browser.close();
@@ -1505,6 +1693,8 @@ async function main() {
     console.log(bad ? `\n${bad} regression(s).` : `\nno regressions.`);
     if (bad) process.exit(1);
   }
+  // A selftest that cannot fail the process is a printout. `--mode navselftest` is a gate.
+  if (MODE === 'navselftest' && report.fail) process.exit(1);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
