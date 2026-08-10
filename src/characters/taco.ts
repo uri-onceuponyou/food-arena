@@ -1370,20 +1370,96 @@ export class TacoCharacter extends BaseCharacter {
       white.castShadow = true;
       eye.add(white);
 
-      // 2. A DARK PUPIL, OFFSET — outward and a touch low, so there is a gaze. A
-      //    centred pupil reads dead even when everything else is right.
+      // 2. A DARK PUPIL, OFFSET — so there is a gaze. A centred pupil reads dead even
+      //    when everything else is right.
+      //
+      // ── 🚨 "OUTWARD" WAS THE BUG: `sx` MIRRORED THE OFFSET AND SHE WAS WALL-EYED ──
+      // That is the old wording, kept because it states the mistake in one word. Read
+      // at 4x off the shipped lobby camera (`shots/ey/zoom/taco-face-before.png`): the
+      // left pupil sits hard against the left of its sclera and the right pupil hard
+      // against the right, so the two eyes look away from each other. Uri, blind:
+      // *"Eyes - better, still needs work."*
+      //
+      // Every other face in this cast now forbids exactly this in its own comment —
+      // `pizza.ts` (*"a mirrored offset is two eyes looking outward, i.e. wall-eyed"*),
+      // `donut.ts`, `waterbottle.ts`, `hotdog.ts` (*"ONE direction for both pupils"*),
+      // `egg.ts` (*"mirroring them would cross her eyes"*) — and taco is the one file
+      // that kept the `sx`. One direction, and the direction is DERIVED, not picked:
+      //
+      //   `stance.headTurn + twist` = -0.24 + 0.05 = **-0.19 rad** about +Y.
+      //   A local vector v lands in the world at R_y(theta) v, so the world-forward
+      //   axis (0,0,1) is at local (-sin theta, 0, cos theta) = (+0.189, 0, 0.982).
+      //   The camera is therefore off toward local **+X**, and both pupils go +X.
+      //
+      // That is `egg.ts`'s derivation with the sign of `headTurn` flipped, and it
+      // checks out against egg: headTurn +0.32 there puts the camera at local -X and
+      // egg's pupils are at -X. The read is the character — head turned to show the
+      // shell's fold, eyes still on you.
       const pupil = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.48, 14, 12), pupilMat);
-      pupil.position.set(sx * EYE_R * 0.20, -EYE_R * 0.12, EYE_R * 0.34);
+      pupil.position.set(EYE_R * 0.20, -EYE_R * 0.12, EYE_R * 0.34);
       pupil.scale.set(1, 1.05, 0.50);
       pupil.castShadow = true;
       eye.add(pupil);
 
-      // 3. AN EXPLICIT CATCHLIGHT, offset OPPOSITE the pupil. `flatMat` and
-      //    `noOutline`: an inverted hull around a 0.06F sphere would eat it.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.21, 8, 8), flatMat('#ffffff'));
-      glint.position.set(-sx * EYE_R * 0.30, EYE_R * 0.40, EYE_R * 0.46);
+      // 3. AN EXPLICIT CATCHLIGHT. `flatMat` and `noOutline`: an inverted hull around
+      //    a 0.06F sphere would eat it.
+      //
+      // ── 🚨 "OFFSET OPPOSITE THE PUPIL" MEANT IT WAS DRAWN ON WHITE ──────────────
+      // Also the old wording, also kept. `pizza.ts` records the identical mistake and
+      // the sentence that retires it: **a catchlight is not a bright thing; it is a
+      // bright thing ON A DARK THING.** At `-sx * 0.30, +0.40` this sat on bare sclera
+      // 1.50 pupil-radii from the pupil's centre — pure white, unlit, on pure white,
+      // lit. In the before crop it is a faint cream disc that reads as a smudge, and
+      // the only highlight that reads at all in each eye is the pupil material's own
+      // SPECULAR, which is a property of the light rig and walks away when it moves.
+      // (It also nearly bit the pupil from the outside: nearest approach 1.06 radii,
+      // a 6% margin, which is `hotdog.ts`'s tangent case.)
+      //
+      // And `-sx` mirrors it, so the two eyes carried highlights on opposite sides —
+      // two keys facing each other. Constant sign, on the pupil, at the cast's ratio:
+      //   radius  0.48 * 0.35 = 0.168 EYE_R  (egg 30.8%, pizza 36%, hotdog 35%)
+      //
+      // ⚠️ ROUND 2 OF THE PLACEMENT, AND ROUND 1 IS KEPT BECAUSE IT IS THE LESSON.
+      // Round 1 put it at offset 0.115/0.135 as a full SPHERE at z 0.46 EYE_R — an
+      // in-plane 0.709, a 29% margin by the cast's own arithmetic — and it rendered
+      // TANGENT to the rim (`ey_pacman` solidity 0.9721 -> **0.7994**, i.e. this file's
+      // clean pupil was made into a Pac-Man by "fixing" it). The pupil's front face at
+      // that offset is 0.5716 EYE_R and the glint's centre was 0.46, so the ball was
+      // buried 0.11 deep and **a buried sphere emerges as a cap whose centroid is
+      // displaced OUTWARD**, because the pupil's surface recedes fastest away from its
+      // own apex. Measured off the render, the highlight landed at 0.64 of the pupil
+      // radius, not the 0.37 authored. `egg.ts` carries the full derivation and the
+      // second pixel-space term (BLOOM: `stage.ts` thresholds at 0.80, `flatMat` white
+      // is 1.000, and the glow eats 2-3 px of rim whatever the radii say).
+      //
+      // Round 2 is a flattened LENS sitting just PROUD of the pupil, at an in-plane
+      // 0.62 rather than 0.82:
+      //   offset  0.084 / +0.099 from the PUPIL's centre  ->  absolute (0.116, -0.021)
+      //   check   sqrt((.084/.48)^2 + (.099/.504)^2) = 0.263, + 0.350 = **0.613**
+      //   z       0.58 EYE_R with `scale.z 0.45`. The pupil's front at that offset is
+      //           0.5716, so the lens centre stands 0.008 proud and emerges whole.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.168, 10, 10), flatMat('#ffffff'));
+      glint.position.set(EYE_R * 0.116, -EYE_R * 0.021, EYE_R * 0.58);
+      glint.scale.set(1, 1, 0.45);
       glint.userData.noOutline = true;
       eye.add(glint);
+
+      // 3b. A SECOND, MUCH SMALLER BOUNCE, low and outboard ON THE SCLERA. Two
+      //     highlights of very different size is what stops an eye reading as plastic;
+      //     egg, donut, soup, waterbottle and pizza all carry two and taco carried one
+      //     that did not read. This one is deliberately OFF the pupil — `egg.ts` found
+      //     that a bounce on the pupil's edge is a smudge on the iris.
+      //     ⚠️ 0.34/0.34 cleared the pupil's rim by 3% (1.027 of a pupil radius) and
+      //     that is inside the bloom budget the key glint just failed on, approached
+      //     from the outside. 0.42/0.40 puts it at 1.23, and it is still only 0.633 of
+      //     the sclera's own half-width including its radius, so it cannot escape the
+      //     white either. z 0.44 sits it on the sclera's surface (0.4366) rather than
+      //     inside it, for the same emergence reason as the glint above.
+      const bounce = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.090, 8, 8), flatMat('#ffffff'));
+      bounce.position.set(-EYE_R * 0.42, -EYE_R * 0.40, EYE_R * 0.44);
+      bounce.scale.set(1, 1, 0.50);
+      bounce.userData.noOutline = true;
+      eye.add(bounce);
 
       // 4. AN UPPER LID, hugging the inside of the sclera's top edge. This is where
       //    the old "the eye IS an arc" construction goes — demoted from being the
@@ -1411,15 +1487,40 @@ export class TacoCharacter extends BaseCharacter {
     // LONGER (0.32F -> 0.40F). Position is not free here: the eye's top edge is now
     // at 0.47F, so the old 0.40F would have buried the raised brow inside the
     // sclera, and a brow shorter than the eye it sits over reads as a smudge.
+    //
+    // ── 🚨 ROUND 3: THEY ARE CAPSULES, AND A CAPSULE ON A DOME IS A STICK ────────
+    // `egg.ts`'s round 5 is the same finding arrived at by two independent blind
+    // critics — *"the mouth and brow marks look like flat pasted-on decals rather
+    // than sculpted features"* — and its conclusion transfers verbatim: **nothing in
+    // nature that is part of a face has parallel sides.** A `CapsuleGeometry` is a
+    // cylinder with two hemispherical caps: constant thickness for its whole length,
+    // then a sudden round end. Read at 4x (`shots/ey/zoom/taco-face-before.png`) both
+    // brows are exactly that — two brown RODS lying on a gold dome, each with its own
+    // closed ink contour round it, which is the cue that says "separate object" rather
+    // than "relief in this surface".
+    //
+    // Same colour, same length, same tilt, same asymmetry — as ELLIPSOIDS, which taper
+    // to nothing at both ends the way a brow ridge does. The minor axis is derived so
+    // the mark keeps its visual MASS rather than the 0.785 of it a naive swap gives:
+    // a capsule of radius r and shaft L covers 2rL + pi*r^2, and setting that equal to
+    // pi*a*b with a = (L + 2r)/2 fixes b.
+    //   raised  r .036 L .40 -> area .03287 F^2, a = .236F -> b = .0443F
+    //   calm    r .032 L .38 -> area .02754 F^2, a = .222F -> b = .0395F
+    //
+    // ⚠️ AND `noOutline` IS LOAD-BEARING, not tidiness — `egg.ts` proves it by having
+    // rendered the other way: the inverted-hull ink draws a closed contour around any
+    // proud mark, and that contour is what makes it read as a sticker. Dropping it is
+    // safe here because the mark is DARK on a light pad (BROW #8A4A12 against SHELL
+    // #F8BE62, a 0.36 luma step), so it holds its own edge — which is egg's round-3
+    // conclusion that the mark carrying a brow has to be the dark one.
     const browX = -F * 0.46;
     const browY = F * 0.56;
-    const brow = new THREE.Mesh(
-      new THREE.CapsuleGeometry(F * 0.036, F * 0.40, 4, 8),
-      browMat
-    );
+    const brow = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 10), browMat);
     brow.name = 'brow';
-    brow.position.set(browX, browY, padZ(browX, browY, F * 0.04));
-    brow.rotation.z = Math.PI / 2 + 0.35;
+    brow.scale.set(F * 0.236, F * 0.0443, F * 0.026);
+    brow.position.set(browX, browY, padZ(browX, browY, F * 0.03));
+    brow.rotation.z = 0.35;
+    brow.userData.noOutline = true;
     brow.castShadow = true;
     face.add(brow);
 
@@ -1428,15 +1529,26 @@ export class TacoCharacter extends BaseCharacter {
     // the cast as reading "unfinished" rather than deliberate; this eye now has a real
     // brow too, it's just NOT the one doing the acting, so the mischievous raise above
     // stays unambiguous instead of reading as two brows that happen to differ.
+    //
+    // ⚠️ AND IT WAS RESTING ON THE EYE. 0.50F -> 0.53F, because the arithmetic says the
+    // old value was inside the sclera and no amount of looking at a 26 px eye was going
+    // to catch 3 thousandths of a head:
+    //   sclera top   eyeY + EYE_R * 1.16 = 0.14F + 0.3306F = **0.4706F**
+    //   brow bottom  0.50F - capsule radius 0.032F        = **0.4680F**
+    // i.e. 0.0026F of overlap — the calm brow was seated ON the white, which is what
+    // this file's own note two paragraphs up warns about for the RAISED one (*"the old
+    // 0.40F would have buried the raised brow inside the sclera"*) and then does to the
+    // other. At 0.53F its bottom is 0.4905F, a real 0.020F of bare pad under it, and
+    // the raised brow keeps its own 0.053F so the asymmetry `rules.ts` protects is
+    // untouched — it is now an asymmetry of two brows rather than one brow and one lash.
     const browX2 = F * 0.46;
-    const browY2 = F * 0.50;
-    const brow2 = new THREE.Mesh(
-      new THREE.CapsuleGeometry(F * 0.032, F * 0.38, 4, 8),
-      browMat
-    );
+    const browY2 = F * 0.53;
+    const brow2 = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 10), browMat);
     brow2.name = 'brow';
-    brow2.position.set(browX2, browY2, padZ(browX2, browY2, F * 0.04));
-    brow2.rotation.z = Math.PI / 2 - 0.06;
+    brow2.scale.set(F * 0.222, F * 0.0395, F * 0.024);
+    brow2.position.set(browX2, browY2, padZ(browX2, browY2, F * 0.03));
+    brow2.rotation.z = -0.06;
+    brow2.userData.noOutline = true;
     brow2.castShadow = true;
     face.add(brow2);
 
@@ -1473,15 +1585,82 @@ export class TacoCharacter extends BaseCharacter {
 
     // The tooth band sits IN FRONT of the throat, not level with it — that parallax
     // is what makes the dark below it read as depth rather than as a second colour.
-    // Width and height are bounded by the upper-lip curve above (at x = +/-0.72 MW
-    // that curve is at 0.072 MH and the band's corners reach 0.05 MH), so no corner
-    // of it can escape the mouth outline and sit on bare cheek as a stray tooth.
-    const teeth = new THREE.Mesh(
-      roundedBox(MW * 1.44, MH * 0.44, F * 0.055, F * 0.018, 2),
-      toothMat
-    );
+    //
+    // ── 🚨 IT WAS A `roundedBox`, AND A BAR IN A MOUTH IS A STRIP OF TAPE ────────
+    // `pizza.ts` shipped and then reverted the identical construction, and its note is
+    // the whole finding: *"A straight bar under a sagging upper lip leaves a black
+    // wedge at each end and a hard horizontal top edge in the middle, and at lobby
+    // scale that is a white rectangle stuck inside a mouth, not teeth."* Read at 4x
+    // (`shots/ey/zoom/taco-face-before.png`) that is exactly what is there — a flat
+    // cream RECTANGLE with square ends floating in a maroon crescent. It is the fourth
+    // instance of one defect: egg's brow bars, egg's three stacked mouth bars, pizza's
+    // tooth bar, this. Uri's verbatim on the character with the most drawn face in the
+    // cast — *"it looks drawn lines and not an actual face"* — is the same complaint.
+    //
+    // The fix is pizza's, and it is structural rather than a tuned outline: **teeth
+    // hang from the lip they belong to, so the band is an extrusion of the SAME curve
+    // as the mouth's upper lip, offset down.** One curve, authored once, so the two can
+    // never drift apart.
+    //
+    // The upper lip above is `quadraticCurveTo(0, MH * 0.30, -MW, 0)` from (+MW, 0).
+    // Its x is linear in t, so in closed form it is the parabola
+    //     y(x) = 0.15 * MH * (1 - (x / MW)^2)
+    // — peak `LIP_C` at the centre, zero at the corners. A Bezier through (-TW, y0) and
+    // (+TW, y0) reproduces that arc exactly when its control sits at `c * (1 + k^2)`,
+    // since B(0.5) = (y0 + 2*yc + y0)/4 must equal the parabola's own peak.
+    //
+    // Widths are bounded, not chosen: the mouth's FLOOR is the mirrored parabola
+    // `-MH * (1 - (x/MW)^2)`, so at k = 0.70 it is at -0.510 MH while the band's lower
+    // edge reaches -0.404 MH — 0.107 MH of clear throat under the corners, which is the
+    // margin that stops a tooth escaping through the smile's end. The 0.10 MH gap above
+    // the band is the dark lip line, held at constant width by construction because
+    // both curves are the same curve.
+    // ⚠️ AND FOLLOWING THE LIP IS NOT ENOUGH ON ITS OWN — ROUND 2, MEASURED BY EYE.
+    // Round 1 did exactly what `pizza.ts` prescribes: same curve, offset down, constant
+    // band height. Rendered (`shots/ey/zoom/taco-face-after.png`) it is STILL a white
+    // rectangle, because this mouth's upper lip is nearly straight — its whole arch is
+    // `MH * 0.15` = 0.033F, about 3 px across a 100 px band — so "follow the lip" buys
+    // no curvature here, and the two `lineTo` verticals at the ends stay vertical. The
+    // pizza note is right about the CAUSE and its remedy is specific to a lip that
+    // sags hard.
+    //
+    // What actually makes enamel read as teeth rather than as tape is that **a tooth
+    // band has no ends** — it disappears into the corners of the mouth. So the band's
+    // HEIGHT tapers elliptically to zero at +/-TW instead of its width being cut off
+    // square: full `T_H` at the centre, nothing at the corners, top edge still riding
+    // the lip's own curve. Sampled rather than Bezier'd because the bottom edge is a
+    // parabola minus an ellipse and is not a conic; 26 segments is smooth at 4x.
+    const LIP_C = MH * 0.15;          // the upper lip's own peak, from the shape above
+    const TK = 0.74;                  // band half-width as a fraction of MW
+    const TW = MW * TK;
+    const T_GAP = MH * 0.10;          // dark lip line between the lip and the enamel
+    const T_H = MH * 0.46;            // band height AT THE CENTRE; zero at both ends
+    const SEG = 26;
+    /** The upper lip's closed form: y = 0.15 MH (1 - (x/MW)^2). See above. */
+    const lipY = (x: number): number => LIP_C * (1 - (x / MW) * (x / MW));
+    const tShape = new THREE.Shape();
+    for (let i = 0; i <= SEG; i++) {
+      const x = -TW + (2 * TW * i) / SEG;
+      const y = lipY(x) - T_GAP;
+      if (i === 0) tShape.moveTo(x, y); else tShape.lineTo(x, y);
+    }
+    for (let i = SEG; i >= 0; i--) {
+      const x = -TW + (2 * TW * i) / SEG;
+      const u = x / TW;
+      tShape.lineTo(x, lipY(x) - T_GAP - T_H * Math.sqrt(Math.max(0, 1 - u * u)));
+    }
+    tShape.closePath();
+    const tGeo = new THREE.ExtrudeGeometry(tShape, {
+      depth: F * 0.045, bevelEnabled: false, curveSegments: 12,
+    });
+    tGeo.translate(0, 0, -F * 0.045);   // front face flush with the group origin
+    const teeth = new THREE.Mesh(tGeo, toothMat);
     teeth.name = 'taco_mouth_teeth';
-    teeth.position.set(0, -MH * 0.16, F * 0.012);
+    // The throat's own front face is at the group origin (`mGeo.translate` above puts
+    // it there), so this stands the enamel 0.030F in front of it — the parallax step
+    // the paragraph above is about — while poking LESS far out of the shell than the
+    // `roundedBox` did (0.030F against 0.0395F).
+    teeth.position.set(0, 0, F * 0.030);
     teeth.castShadow = true;
     mouth.add(teeth);
   }

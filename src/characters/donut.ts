@@ -1159,13 +1159,79 @@ export class DonutCharacter extends BaseCharacter {
       // above 0.94 regardless of which way the head is turned.
       // 0.044R -> 0.036R: at 0.044 the catchlight bit a crescent out of the pupil and
       // the pupil read as a "C" rather than as a round dark centre.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.036, 10, 8), flatMat('#ffffff'));
-      glint.position.set(eyeX + GAZE_X - sx * R * 0.040, eyeY + R * 0.052, eyeZ + SCLERA_R * 0.86);
+      //
+      // ── 🚨 0.036 STILL BIT THE CRESCENT, AND IT IS MEASURED NOW, NOT JUDGED ────
+      // Uri on this character: *"the eyes have more depth, but can be taken deeper."*
+      // Read at 3x off the shipped lobby camera (`shots/ey/zoom/donut-face-before.png`)
+      // **both pupils are Pac-Men** — a white bite out of the upper-inner quadrant,
+      // continuous with the sclera behind it, so the dark reads as a "C" and not as a
+      // round centre. The round above closed 22% of the error and declared it shut.
+      //
+      // `tools/tmp/ey_pacman.mjs` puts a number on it for the first time: threshold
+      // dark, FILL HOLES, then solidity = filledArea / convexHullArea. A catchlight
+      // that sits ON the pupil is a hole and is filled, so it scores ~0.98; one that
+      // hangs off the rim is a notch in the outline and the hull spans it with a
+      // chord. Measured at the lobby camera, on `headserve` HEAD:
+      //
+      //     donut L 0.7348   donut R 0.7394        <- this construction
+      //     pizza L 0.9527   pizza R 0.9469        <- the same fix already shipped
+      //     soup  L 0.8614   soup  R 0.8429
+      //
+      // ⚠️ AND THE IN-PLANE ARITHMETIC UNDER-READS THE DEFECT, WHICH IS THE FINDING.
+      // egg/pizza/hotdog all sized this in the eye's own TANGENT PLANE:
+      //   normalised centre  sqrt((0.040/0.084)^2 + (0.052/0.0874)^2) = 0.762
+      //   plus glint radius  0.036/0.084 = 0.4286        ->  1.19, 19% outside.
+      // A 19% overhang predicts solidity 0.865 (hand-derived; it is selftest case 3
+      // of `ey_pacman`). The render delivers 0.735. The missing term is PARALLAX: the
+      // glint is authored `SCLERA_R * 0.40` = 0.066R in FRONT of the pupil, and the
+      // lobby camera pitches 20 degrees down, so a mesh standing that proud projects
+      // clear of the pupil before it is ever seen. `soup.ts` records the same term
+      // from the other side and nothing else in the cast applies it to the glint.
+      // **The rim test has to be done after projection, i.e. in pixels.**
+      //
+      // ⚠️ AND THE MARGIN HAS TO BE 38%, NOT THE 18% THE CAST RECIPE STATES. The first
+      // attempt here shipped 0.030R at offset 0.018/0.024 with z pulled BACK to
+      // SCLERA_R * 0.60 — an in-plane 0.705 — and re-measured at **0.7897 / 0.8014**,
+      // i.e. two thirds of the defect still on screen. Two terms live in PIXELS and so
+      // are invisible to any sum done in head radii (full derivation in `egg.ts`):
+      //   BLOOM   `stage.ts` thresholds at 0.80 luma and `flatMat` white is 1.000, so
+      //           the highlight glows 2-3 px INTO the pupil's rim. On this character's
+      //           41 px pupils that is ~0.14 of a radius, and it is an absolute size,
+      //           which is why the identical recipe measures 0.95 on pizza's 29 px
+      //           pupils and 0.83 on hotdog's 19 px ones.
+      //   BURIAL  pulling z BACK was the wrong direction and made it worse. A glint
+      //           whose centre sits behind the pupil's front surface emerges as a cap
+      //           displaced OUTWARD from the pupil's axis, because the surface recedes
+      //           fastest away from its own apex. `egg.ts` is the least-bitten of the
+      //           four precisely because its glint is a flattened LENS sitting on the
+      //           pupil's surface rather than a ball inside it.
+      //
+      // So both catchlights become lenses ON the surface, at an in-plane 0.62:
+      //   glint  0.036 -> 0.030R (35.7% of the pupil radius, the cast's own ratio, so
+      //          the catchlight is not made timid), offset 0.040/0.052 -> 0.014/0.018,
+      //          z 0.86 -> 0.77 SCLERA_R with `scale.z 0.45`. The pupil's front face at
+      //          that offset is 0.1228R from the eye centre and the lens centre is
+      //          0.1268R, so it sits 0.004R PROUD — emerging whole, not as a sliver.
+      //          0.265 + 0.357 = **0.622**.
+      //   glint2 0.019 -> 0.016R, offset 0.036/0.044 -> 0.023/0.029, z 0.78 -> 0.73,
+      //          same lens treatment. 0.430 + 0.190 = **0.620**. It was at 0.887 and
+      //          the file called it "a small secondary glint": it was a second bite.
+      //
+      // 🚨 AND THE SIGNS WERE MIRRORED. `- sx` and `+ sx` put each catchlight on the
+      // opposite side of the two eyes, which is two eyes lit by two different lights
+      // facing each other. This file's own `GAZE_X` comment forbids exactly that for
+      // the pupil — *"mirroring them per side makes a cross-eyed doll"* — and then
+      // mirrors both highlights three lines later. A catchlight is a reflection of ONE
+      // key, so it takes a CONSTANT sign, which is what `egg.ts` states and does.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.030, 10, 8), flatMat('#ffffff'));
+      glint.position.set(eyeX + GAZE_X - R * 0.014, eyeY + R * 0.018, eyeZ + SCLERA_R * 0.77);
+      glint.scale.set(1, 1, 0.45);
       glint.userData.noOutline = true;
       face.add(glint);
 
-      const glint2 = new THREE.Mesh(new THREE.SphereGeometry(R * 0.019, 8, 6), flatMat('#ffffff'));
-      glint2.position.set(eyeX + GAZE_X + sx * R * 0.036, eyeY - R * 0.044, eyeZ + SCLERA_R * 0.78);
+      const glint2 = new THREE.Mesh(new THREE.SphereGeometry(R * 0.016, 8, 6), flatMat('#ffffff'));
+      glint2.position.set(eyeX + GAZE_X + R * 0.023, eyeY - R * 0.029, eyeZ + SCLERA_R * 0.73);
+      glint2.scale.set(1, 1, 0.45);
       glint2.userData.noOutline = true;
       face.add(glint2);
 

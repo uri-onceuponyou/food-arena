@@ -1008,17 +1008,75 @@ export class WaterBottleCharacter extends BaseCharacter {
       // Catchlight — a child of the PUPIL, so it can never drift onto the sclera
       // where it would be invisible. `flatMat` is unlit, i.e. luma 1.0 whatever
       // the lighting does, which is the whole point of a catchlight.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.036, 10, 8), flatMat('#ffffff'));
+      //
+      // ── 🚨 PARENTING IT TO THE PUPIL IS NOT THE SAME AS KEEPING IT ON THE PUPIL ──
+      // The comment above was written about DRIFT and it is satisfied; the defect is
+      // SIZE and PARALLAX. Read at 3.5x off the shipped lobby camera
+      // (`shots/ey/zoom/waterbottle-face-before.png`) **both pupils are Pac-Men**, with
+      // a white bite out of the upper-left that runs continuous into the sclera. The
+      // in-plane arithmetic said this was legal by a hair and the render says it is not:
+      //
+      //   pupil semi-axes            0.086R x 0.0877R
+      //   old glint  R*0.036 at (-0.030, +0.036)
+      //     normalised centre        sqrt((.030/.086)^2 + (.036/.0877)^2) = 0.5387
+      //     plus its own radius      0.036/0.086 = 0.4186        -> 0.957
+      //   i.e. it cleared the rim by **4.3% of a radius**, on paper, in a plane.
+      //
+      // `egg.ts`, `pizza.ts` and `hotdog.ts` all do this sum in the eye's own TANGENT
+      // PLANE. That is incomplete here for a reason specific to this character: the eye
+      // sits at `EYE_THETA = 0.40` rad round a barrel and the head carries another
+      // 0.12 of `headTurn`, so its surface normal is ~0.52 rad off the view axis — and
+      // the glint stands proud of the pupil's own front face, so it PROJECTS OUTBOARD
+      // before it is seen. `soup.ts` derives exactly this term for the pupil against
+      // the sclera (*"0.062R * sin(0.42) = 0.025R ... 0.026R of inward offset bought
+      // exactly nothing"*) and no file in the cast applies it to the glint. 4.3% of a
+      // radius is less than the parallax, so the margin was already spent.
+      //
+      // Measured with `tools/tmp/ey_pacman.mjs` (dark-blob solidity after hole-fill; a
+      // catchlight that sits ON a pupil is a hole and scores ~0.98, one that hangs off
+      // the rim is a notch the convex hull spans). Lobby camera, `headserve` HEAD:
+      //   waterbottle L 0.7943  R 0.7164     against pizza L 0.9527  R 0.9469
+      //
+      // ⚠️ AND THE FIRST ATTEMPT AT THAT FIX WENT THE WRONG WAY, WHICH IS THE FINDING.
+      // It shipped 0.030R at offset 0.020/0.024 with z pulled BACK from 0.038 to
+      // 0.030R — an in-plane 0.708 — and re-measured **0.7615 / 0.7694**, one arm of
+      // which is WORSE than the 0.7943 it replaced. Pulling z back BURIES the glint:
+      // a sphere whose centre sits behind the pupil's front surface emerges as a cap,
+      // and that cap's centroid is pushed OUTWARD from the pupil's axis because the
+      // surface recedes fastest away from its own apex. So burial moves a highlight
+      // further out than it was authored, and it is the opposite of what parallax
+      // needs. (`egg.ts` carries the full derivation, plus the second pixel-space term
+      // — BLOOM. `stage.ts` thresholds at 0.80 luma, `flatMat` white is 1.000, and the
+      // glow spreads 2-3 px into the pupil's rim. On these 38-54 px pupils that is
+      // 0.10-0.14 of a radius, and it is an ABSOLUTE size, which is why one recipe
+      // measures 0.95 on pizza's 29 px pupils and 0.83 on hotdog's 19 px ones.)
+      //
+      // So: a flattened LENS sitting just PROUD of the pupil's surface, at an in-plane
+      // 0.62 rather than the cast recipe's 0.82.
+      //   radius 0.036 -> 0.030R, i.e. 34.9% of the pupil's radius, so the catchlight
+      //          keeps its size (egg ships 30.8%, pizza 36%, hotdog 35%);
+      //   offset 0.030/0.036 -> 0.015/0.018, giving 0.269 + 0.349 = **0.618**, a 38%
+      //          margin — ~5 px of dark rim, more than the bloom can bridge;
+      //   z      0.038 -> 0.046R with `scale.z 0.45`. The pupil's front face at that
+      //          offset is 0.0430R and the lens centre is 0.046R, so it stands 0.003R
+      //          PROUD and emerges whole. The stand-off is also now 0.0135R instead of
+      //          0.023R, which cuts the lateral parallax this eye's 0.52 rad of turn
+      //          produces to 0.0068R — 8% of a pupil radius, inside the new margin.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.030, 10, 8), flatMat('#ffffff'));
       glint.name = 'waterbottle_catchlight';
-      glint.position.set(-R * 0.030, R * 0.036, R * 0.038);
+      glint.position.set(-R * 0.015, R * 0.018, R * 0.046);
+      glint.scale.set(1, 1, 0.45);
       glint.userData.noOutline = true;
       pupilG.add(glint);
 
       // A second, much smaller bounce light low on the opposite side. Reference
       // eyes carry two: the key's catchlight and a fill. It costs one sphere and
       // it is the difference between "a dot on a bead" and "a wet eye".
-      const bounce = new THREE.Mesh(new THREE.SphereGeometry(R * 0.016, 8, 6), flatMat('#ffffff'));
-      bounce.position.set(R * 0.034, -R * 0.034, R * 0.034);
+      // Same lens treatment: 0.586 in plane, sitting 0.003R proud of the pupil at its
+      // own offset, so it is a hole in the dark rather than a notch in its rim.
+      const bounce = new THREE.Mesh(new THREE.SphereGeometry(R * 0.014, 8, 6), flatMat('#ffffff'));
+      bounce.position.set(R * 0.026, -R * 0.026, R * 0.043);
+      bounce.scale.set(1, 1, 0.45);
       bounce.userData.noOutline = true;
       pupilG.add(bounce);
 

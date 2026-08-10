@@ -1283,12 +1283,32 @@ export class LollipopCharacter extends BaseCharacter {
       white.castShadow = true;
       eye.add(white);
 
+      // ── 🚨 THE PUPIL RENDERED AND WAS INVISIBLE. `docs/LESSONS.md` §1 AGAIN ──────
+      // Read at 3.5x off the shipped lobby camera (`shots/ey/zoom/lollipop-face-before
+      // .png`): each eye is a plain violet disc with two white bites out of it and NO
+      // DARK CENTRE AT ALL. The pupil mesh is built, is in the graph, is the right
+      // colour, and is drawn — behind the iris. It is arithmetic, in Z:
+      //
+      //   iris   z 0.26 + radius 0.52 * zScale 0.38 = front face at **0.458** eyeR
+      //   pupil  z 0.33 + radius 0.30 * zScale 0.38 = front face at **0.444** eyeR
+      //
+      // The iris's front stands 0.014 eyeR PROUD OF THE PUPIL'S FRONT, so the smaller
+      // sphere is enclosed by the larger one on every ray that could reach it. The two
+      // z's were tuned independently and the one that matters is not either z but
+      // `z + r*zScale`, which nothing here computed. `rules.ts` asks this character for
+      // "dark pupils offset for gaze" and it has never had one.
+      //
+      // Fixed by separating the FRONT FACES, not the centres: the iris is flattened
+      // (0.38 -> 0.30, front 0.416) and the pupil is pushed out and made rounder in Z
+      // (0.33 -> 0.36, 0.38 -> 0.34, front 0.462). The pupil now stands 0.046 eyeR
+      // proud of the iris — a real dark cap on a coloured lens, which is what an eye is.
+      // Neither change moves a silhouette: both are lenses seen face-on.
       const iris = new THREE.Mesh(
         new THREE.SphereGeometry(eyeR * 0.52, 16, 12),
         toonMat({ color: IRIS, roughness: 0.3 })
       );
       iris.position.set(gazeX, gazeY, eyeR * 0.26);
-      iris.scale.set(1, 1, 0.38);
+      iris.scale.set(1, 1, 0.30);
       iris.castShadow = true;
       eye.add(iris);
 
@@ -1296,22 +1316,64 @@ export class LollipopCharacter extends BaseCharacter {
         new THREE.SphereGeometry(eyeR * 0.30, 14, 12),
         toonMat({ color: ink, roughness: 0.22 })
       );
-      pupil.position.set(gazeX, gazeY, eyeR * 0.33);
-      pupil.scale.set(1, 1, 0.38);
+      pupil.position.set(gazeX, gazeY, eyeR * 0.36);
+      pupil.scale.set(1, 1, 0.34);
       pupil.castShadow = true;
       eye.add(pupil);
 
-      // Primary catchlight, offset OPPOSITE the pupil's own offset. `rules.ts` asks for it
-      // as an explicit mesh rather than a specular hit, because a specular is a property
-      // of the light rig and walks away when the light moves.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.17, 10, 10), flatMat('#ffffff'));
-      glint.position.set(gazeX - sx * eyeR * 0.26, gazeY + eyeR * 0.24, eyeR * 0.40);
+      // Primary catchlight. `rules.ts` asks for it as an explicit mesh rather than a
+      // specular hit, because a specular is a property of the light rig and walks away
+      // when the light moves.
+      //
+      // ── 🚨 "OFFSET OPPOSITE THE PUPIL'S OWN OFFSET" WAS THE BUG, TWICE OVER ─────
+      // That is the old wording and it is kept because it names both mistakes exactly.
+      //
+      // 1. THE SIZE AND PLACE. `eyeR * 0.17` against a pupil of `eyeR * 0.30` is **57%
+      //    of the pupil's radius**, centred `0.354 eyeR` away — so it spanned 0.184 to
+      //    0.524 eyeR from the pupil's centre and straddled BOTH boundaries at once:
+      //    the pupil's rim at 0.30 and the iris's at 0.52 (tangent to within 1.5%,
+      //    which is `hotdog.ts`'s "exactly tangent" case, the one that renders as a
+      //    bite at some framings and not at others). It is the same defect `fb9d9da`
+      //    fixed on egg at 49% and `75daec3` fixed on pizza at 51%, and it is the
+      //    WORST instance in the cast. `glint2` at 0.328 eyeR straddled the pupil too.
+      // 2. THE SIGN. `- sx` / `+ sx` mirror both highlights, so the left eye is lit
+      //    from the right and the right eye from the left: two eyes reflecting two
+      //    different lights facing each other. A catchlight is a reflection of ONE key
+      //    (`egg.ts`: *"a catchlight comes from a light in the world, not from a
+      //    per-eye mirror"*), so both take a CONSTANT sign.
+      //
+      // The rebuild keeps two highlights of very different sizes — that contrast is
+      // what reads as wet — and puts both ON the pupil, which is the only dark thing
+      // an unlit white can be a highlight on.
+      //
+      // ⚠️ THE MARGIN IS 38%, NOT THE 18% THE CAST RECIPE STATES, and the reason lives
+      // in PIXELS so no sum in eye radii can see it (full derivation in `egg.ts`, which
+      // was still a Pac-Man after passing its own 18% test):
+      //   BLOOM   `stage.ts` thresholds bloom at 0.80 luma and `flatMat` white is
+      //           1.000, so a catchlight glows 2-3 px OUTWARD into the pupil's rim.
+      //           That is an ABSOLUTE size, which is why the identical recipe measures
+      //           0.95 on pizza's 29 px pupils and 0.83 on hotdog's 19 px ones.
+      //   BURIAL  a glint whose centre sits BEHIND the pupil's front surface emerges
+      //           as a cap displaced OUTWARD from the pupil's axis, because the surface
+      //           recedes fastest away from its own apex — so sinking a highlight moves
+      //           it further out than it was authored. Both of these are flattened
+      //           lenses (`scale.z 0.45`) sitting just PROUD of the surface instead.
+      //   key     0.105 eyeR (35% of the pupil radius, the cast's ratio) at 0.081 eyeR
+      //           up-and-left of the pupil's centre: 0.270 + 0.350 = **0.620**.
+      //           z 0.465 against a pupil front of 0.458 — 0.007 proud, emerging whole.
+      //   bounce  0.055 eyeR at 0.095 eyeR down-and-right: 0.317 + 0.183 = **0.500**.
+      //           It stays on the pupil rather than in the pupil/iris annulus: at this
+      //           character's scale that gap is ~2 px and bloom would close it.
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.105, 10, 10), flatMat('#ffffff'));
+      glint.position.set(gazeX - eyeR * 0.051, gazeY + eyeR * 0.063, eyeR * 0.465);
+      glint.scale.set(1, 1, 0.45);
       glint.userData.noOutline = true;
       eye.add(glint);
 
       // Secondary, small, low and on the far side. Two catchlights is what reads as wet.
-      const glint2 = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.075, 8, 8), flatMat('#ffffff'));
-      glint2.position.set(gazeX + sx * eyeR * 0.20, gazeY - eyeR * 0.26, eyeR * 0.38);
+      const glint2 = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.055, 8, 8), flatMat('#ffffff'));
+      glint2.position.set(gazeX + eyeR * 0.060, gazeY - eyeR * 0.074, eyeR * 0.462);
+      glint2.scale.set(1, 1, 0.45);
       glint2.userData.noOutline = true;
       eye.add(glint2);
 
@@ -1393,11 +1455,50 @@ export class LollipopCharacter extends BaseCharacter {
     // the lip's INNER edge — the opaque lip band in front of it hides the overrun, and the
     // alternative (fitting a straight bar inside a bowed curve) leaves a dark gap under
     // the upper lip that reads as a gum line.
+    //
+    // ── 🚨 IT WAS A `roundedBox`, AND A BAR IN A MOUTH IS A STRIP OF TAPE ────────
+    // Read at 3.5x off the shipped lobby camera (`shots/ey/zoom/lollipop-face-before
+    // .png`): a flat white RECTANGLE with square ends floating in a black crescent.
+    // `pizza.ts` shipped and reverted the identical construction — *"at lobby scale
+    // that is a white rectangle stuck inside a mouth, not teeth"* — and it is the same
+    // family as `egg.ts`'s brow bars and mouth bars: **nothing that is part of a face
+    // has a square end.** Uri's verbatim on the worst-rated face in the cast, *"it
+    // looks drawn lines and not an actual face"*, is this complaint.
+    //
+    // Two changes, and the second is the one that matters:
+    //   · the top edge rides the upper lip's OWN curve — `mouthShape`'s
+    //     `quadraticCurveTo(0, h*0.30, W, 0)` is the parabola y = 0.15 mh (1-(x/mw)^2),
+    //     so the two can never drift apart;
+    //   · **the band's HEIGHT tapers elliptically to zero at both ends** rather than
+    //     being cut off square. A tooth band has no ends; it disappears into the
+    //     corners of the mouth. `taco.ts` carries the note on why "follow the lip"
+    //     alone is not enough — on a nearly-straight lip it still renders as a bar.
+    // The deliberate overrun past the lip's inner edge (see above) is kept: at
+    // TK 0.68 the band is still wider than the opening and the opaque lip band in
+    // front of it hides the overrun, so no gum line opens up.
+    const TK = 0.68;                       // half-width as a fraction of `mw`
+    const TW = mw * TK;
+    const T_GAP = mh * 0.06;               // dark lip line above the enamel
+    const T_H = mh * 0.38;                 // height AT THE CENTRE; zero at both ends
+    const SEG = 24;
+    const lipY = (x: number): number => mh * 0.15 * (1 - (x / mw) * (x / mw));
+    const tShape = new THREE.Shape();
+    for (let i = 0; i <= SEG; i++) {
+      const x = -TW + (2 * TW * i) / SEG;
+      const y = lipY(x) - T_GAP;
+      if (i === 0) tShape.moveTo(x, y); else tShape.lineTo(x, y);
+    }
+    for (let i = SEG; i >= 0; i--) {
+      const x = -TW + (2 * TW * i) / SEG;
+      const u = x / TW;
+      tShape.lineTo(x, lipY(x) - T_GAP - T_H * Math.sqrt(Math.max(0, 1 - u * u)));
+    }
+    tShape.closePath();
     const teeth = new THREE.Mesh(
-      roundedBox(mw * 1.30, mh * 0.30, R * 0.020, R * 0.010, 2),
+      new THREE.ExtrudeGeometry(tShape, { depth: R * 0.020, bevelEnabled: false, curveSegments: 8 }),
       toonMat({ color: TEETH, roughness: 0.35 })
     );
-    teeth.position.set(0, mouthY - mh * 0.055, zAt(-mh * 0.055) + LIFT + R * 0.018);
+    teeth.position.set(0, mouthY, zAt(-mh * 0.055) + LIFT + R * 0.008);
     teeth.userData.noOutline = true;
     face.add(teeth);
 

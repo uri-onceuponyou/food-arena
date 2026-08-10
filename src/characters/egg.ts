@@ -1529,8 +1529,51 @@ export class EggCharacter extends BaseCharacter {
       //    same white pixels are drawn either way, in nearly the same place. Only the
       //    SHAPE of the dark region moved, and nothing in `valuescan`, `sepscan` or
       //    `limbmatch` describes a shape. `docs/LESSONS.md` §6b read backwards.
+      //
+      //    🚨 ROUND 2, AND THE FIX ABOVE DID NOT LAND. THE PUPIL IS STILL A PAC-MAN.
+      //    Read at 12x off the shipped lobby camera (`shots/ey/zoom/egg-Leye.png`):
+      //    the bite is still there, still upper-left, still continuous with the sclera.
+      //    The round above measured the right quantity and shipped a value that does
+      //    not close it, and it was declared closed — **on this file, the one the other
+      //    ten are being brought up to.** `tools/tmp/ey_pacman.mjs` (dark-blob solidity
+      //    after hole-filling: a catchlight that sits ON the pupil is a hole and scores
+      //    ~0.98, one that hangs off the rim is a notch the convex hull spans) puts
+      //    egg at **L 0.8469 / R 0.9414** against pizza's 0.9527 / 0.9469.
+      //
+      //    ── WHY THE TANGENT-PLANE SUM UNDER-READS IT, WHICH IS THE REUSABLE PART ──
+      //    The recipe copied into pizza and hotdog is "36% of the pupil radius with an
+      //    18% margin", i.e. normalised centre + normalised radius <= ~0.82, computed
+      //    in the eye's own tangent plane. Egg itself sits at
+      //      sqrt((0.024/0.078)^2 + (0.042/0.0827)^2) + 0.024/0.078 = 0.594 + 0.308
+      //      = **0.902**
+      //    which passes that test and fails the render. Two terms are missing and both
+      //    are in PIXELS, not in head radii:
+      //
+      //    1. **BLOOM.** `stage.ts` thresholds bloom at 0.80 luma and this is `flatMat`
+      //       white, i.e. 1.000 by construction — the one thing in the frame guaranteed
+      //       to be over the line. The glow spreads the white 2-3 px OUTWARD into the
+      //       darkest neighbour it has, which is the pupil's own rim. On a pupil whose
+      //       screen radius is ~13 px at lobby framing, 3 px is **0.23 of a radius** —
+      //       larger than the whole 0.10 margin this construction was left with. It is
+      //       also why the same recipe measures 0.95 on pizza (29 px pupils) and 0.83
+      //       on hotdog (19 px): the term is absolute and the pupils are not.
+      //    2. **BURIAL.** A glint whose centre sits BEHIND the pupil's front surface
+      //       emerges as a cap, and the cap's centroid is pushed OUTWARD from the
+      //       pupil's axis, because the pupil's surface recedes fastest away from its
+      //       own apex. So burying a highlight moves it further out than it was
+      //       authored. (Egg is already safe here — z 0.104R against a pupil front of
+      //       0.101R, and `scale.z 0.45` makes it a lens rather than a ball — which is
+      //       exactly why this file's bite is the *smallest* of the four found.)
+      //
+      //    So the target is not 0.82, it is **0.62**, and the lever is the OFFSET, not
+      //    the radius: 0.024R of glint on 0.078R of pupil is already the smallest ratio
+      //    in the cast (30.8%) and shrinking it further makes a timid catchlight rather
+      //    than a whole pupil. Offset 0.024/0.042 -> 0.013/0.022:
+      //      sqrt((0.013/0.078)^2 + (0.022/0.0827)^2) + 0.308 = 0.314 + 0.308 = 0.622
+      //    a 38% margin, which is ~5 px of dark rim at lobby framing — more than the
+      //    bloom can bridge. Nothing about the glint's SIZE, VALUE or Z changes.
       const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.024, 10, 10), flatMat('#ffffff'));
-      glint.position.set(-R * (EYE_GAZE + 0.024), R * 0.036, R * 0.104);
+      glint.position.set(-R * (EYE_GAZE + 0.013), R * 0.016, R * 0.104);
       glint.scale.set(1, 1, 0.45);
       glint.userData.noOutline = true;
       eye.add(glint);
@@ -1539,8 +1582,12 @@ export class EggCharacter extends BaseCharacter {
       // on the pupil's lower-right edge it was a lilac smudge on the iris. On the
       // sclera just clear of the pupil it does the job it was added for — a second,
       // dimmer light in the world — without carving the dark shape up.
+      // ⚠️ It cleared the rim by 11% of a pupil radius (1.114 normalised) — which is
+      // inside the same bloom budget the key glint just failed on, from the outside.
+      // 0.060 -> 0.075 and 0.048 -> 0.056 puts it at 1.328, and it stays well inside
+      // the sclera (0.622 of `EYE_WHITE_R`'s own half-width including its radius).
       const bounce = new THREE.Mesh(new THREE.SphereGeometry(R * 0.015, 8, 8), flatMat('#DCD4F0'));
-      bounce.position.set(-R * (EYE_GAZE - 0.060), -R * 0.048, R * 0.098);
+      bounce.position.set(-R * (EYE_GAZE - 0.075), -R * 0.056, R * 0.098);
       bounce.scale.set(1, 1, 0.45);
       bounce.userData.noOutline = true;
       eye.add(bounce);
