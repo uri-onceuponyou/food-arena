@@ -58,6 +58,15 @@
  * registered pair that DIVERGES past its recorded budget fails — which is the actual
  * failure mode, because the copies do not start wrong, they drift.
  *
+ * 🚨 AND THE CENSUS BROKE ITS OWN RULE, 2026-08-11. It re-DISCOVERED its pairs by
+ * similarity every run and looked the registry up afterwards, so `CLONE_MIN_SIMILARITY`
+ * was a DETECTION threshold: when `perf.mjs`'s reload guard was fixed and the copy was
+ * not, similarity fell 0.9926 -> 0.8621, the pair fell through the 0.90 floor, and the
+ * census printed `note … (or renamed)` and exited 0 with 171 diverged lines uncounted
+ * against a budget of 12. **Its coverage shrank because the defect grew** — the exact
+ * `driver_guard` 49 -> 41 shape, inside the meta-guard written to catch it. Registration
+ * is now the SUBJECT LIST and similarity only ever ADDS subjects; see `cloneCensus`.
+ *
  * ── Every check is proved on the input it guards against ─────────────────────
  * `--selftest` runs each assertion kind against a deliberately broken instrument —
  * a constant metric, a metric frozen at its first answer (task 1's bug, verbatim), a
@@ -77,9 +86,11 @@
  *   node tools/tmp/sentinel.mjs              # run the registry + the clone census
  *   node tools/tmp/sentinel.mjs --selftest   # prove the four assertions on known-bad input
  *   node tools/tmp/sentinel.mjs --clones     # census only
+ *   node tools/tmp/sentinel.mjs --rank       # + every pair ranked by distance to the floor
  */
 
 import { readdir, readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { join, relative, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -510,6 +521,13 @@ async function registry() {
  * A registered clone is not forgiven, it is BUDGETED. The failure mode that cost this
  * project a session was not the copy existing; it was the copy DRIFTING while the
  * original was fixed. So the budget is the thing that fires.
+ *
+ * 🚨 AND THE REGISTRY IS THE SUBJECT LIST, NOT A LOOKUP TABLE. See `cloneCensus` below:
+ * every key here is measured on EVERY run whatever its similarity, because the first
+ * version of this census re-DISCOVERED its pairs by similarity each run and looked the
+ * registry up afterwards — so a pair that diverged past the detection floor stopped being
+ * a subject at all. That is not hypothetical; it happened to the first entry here, hours
+ * after the entry was written, and the census printed a `note` and exited 0.
  */
 const CLONES = {
   'tools/perf.mjs :: tools/tmp/perf_tier.mjs': {
@@ -519,7 +537,14 @@ const CLONES = {
       + 'that put a stale scripted-player driver into ten tools with five still carrying the '
       + 'defect — the right fix is `perf.mjs --query <q>` and deleting the copy, which is '
       + 'the perf owner\'s call, not this guard\'s. The budget is what makes a divergent '
-      + 'fix show up as a FAILURE instead of as silence.',
+      + 'fix show up as a FAILURE instead of as silence.'
+      + '\n\n      ⚠️ AND THIS ENTRY IS THE ONE THAT PROVED THE CENSUS ITSELF WRONG. On '
+      + '2026-08-11 the false-positive reload guard was fixed in `tools/perf.mjs` (9e1061c) '
+      + 'and NOT in the copy — the exact event the sentence above says would show up as a '
+      + 'FAILURE. It did not. The fix added 190 lines, similarity fell 0.9926 -> 0.8621, the '
+      + 'pair dropped below CLONE_MIN_SIMILARITY, and a discovery-driven census stopped '
+      + 'looking at it: `note … (or renamed)`, exit 0, 171 diverged lines never counted '
+      + 'against this budget of 12. Both files are checked BY REGISTRATION now.',
   },
   'tools/tmp/limbcheck.mjs :: tools/tmp/limbcheck_pitch.mjs': {
     budget: 26,
@@ -555,6 +580,17 @@ export function similarity(a, b) {
   return union ? inter / union : 1;
 }
 
+/** The two numbers for one pair, from sources. Pure, so `--selftest` can feed it history. */
+export function comparePair(srcA, srcB) {
+  const sim = similarity(lineSet(srcA), lineSet(srcB));
+  const A = new Set(srcA.split('\n').map((l) => l.trim()));
+  const B = new Set(srcB.split('\n').map((l) => l.trim()));
+  let diverged = 0;
+  for (const l of A) if (l && !B.has(l)) diverged++;
+  for (const l of B) if (l && !A.has(l)) diverged++;
+  return { sim: +sim.toFixed(4), diverged };
+}
+
 async function listMjs(dir, out = []) {
   for (const e of await readdir(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
@@ -564,33 +600,195 @@ async function listMjs(dir, out = []) {
   return out;
 }
 
-export async function cloneCensus() {
-  const files = (await listMjs(join(ROOT, 'tools'))).sort();
+/** Every `.mjs` under `tools/`, as rel -> source. No filtering; the callers filter. */
+async function readTools() {
+  const out = new Map();
+  for (const abs of (await listMjs(join(ROOT, 'tools'))).sort()) {
+    out.set(relative(ROOT, abs), await readFile(abs, 'utf8'));
+  }
+  return out;
+}
+
+/**
+ * 🚨 THE BUG THIS FUNCTION IS SHAPED AROUND — a similarity floor used as a DETECTION
+ * threshold means the guard stops looking exactly when the thing it guards against
+ * has happened.
+ *
+ * The first implementation did this, in this order:
+ *
+ *     for every pair of files:  if (sim < 0.90) continue;          <- DISCOVERY
+ *     ...then look the surviving pair up in CLONES                 <- JUDGEMENT
+ *
+ * so a registered pair's membership of the census was recomputed from its own content
+ * every run. Registration bought it a budget; it did not buy it a SEAT. Measured, on the
+ * real files, hours apart:
+ *
+ *     BEFORE `perf.mjs`'s reload fix   sim 0.9926 ·   8 diverged / budget 12  -> PASS
+ *     AFTER  it (perf_tier not ported) sim 0.8621 · below the 0.90 floor
+ *                                      -> the pair is not discovered at all
+ *                                      -> `note  registered pair no longer a clone (or renamed)`
+ *                                      -> exit 0, and 171 diverged lines are never counted
+ *
+ * **The census went silent BECAUSE the divergence grew.** Its coverage shrank as the
+ * defect grew — the `driver_guard` 49 -> 41 shape from `docs/LESSONS.md` §13, inside the
+ * meta-guard written to catch that shape.
+ *
+ * SO THE ORDER IS INVERTED. `CLONES` is the SUBJECT LIST:
+ *
+ *   · every registered key is measured on EVERY run, whatever its similarity, whatever
+ *     its length. A registered pair that has fallen below the floor is the LOUDEST
+ *     signal available, not an absent one — it is a fix that reached one copy.
+ *   · a registered file that has vanished FAILS too. Renaming must not buy silence
+ *     either; deleting the registry entry is a decision, and it should look like one.
+ *   · similarity is still what DISCOVERS pairs nobody registered. That is the one job a
+ *     threshold can honestly do: it can only ever add subjects, never remove them.
+ *
+ * `sources` (rel -> src) and `registry` are injectable so `--selftest` can replay the
+ * exact bytes of the state above out of git, rather than a hand-written imitation of it.
+ */
+export async function cloneCensus({ sources = null, registry = CLONES } = {}) {
+  const src = sources ?? await readTools();
+  const rows = [];
+  const seen = new Set();
+
+  // ── 1. BY REGISTRATION. No threshold stands between a registered pair and its budget.
+  for (const [key, reg] of Object.entries(registry)) {
+    const [a, b] = key.split(' :: ');
+    seen.add(key); seen.add(`${b} :: ${a}`);
+    const sa = src.get(a); const sb = src.get(b);
+    if (sa === undefined || sb === undefined) {
+      const gone = [sa === undefined ? a : null, sb === undefined ? b : null].filter(Boolean);
+      rows.push({
+        key, kind: 'MISSING', ok: false, sim: null, diverged: null, budget: reg.budget, why: reg.why,
+        detail: `registered file(s) not found: ${gone.join(', ')}. A rename or a deletion must not `
+          + 'silence a registered pair — if the copy is genuinely gone, remove the CLONES entry '
+          + 'deliberately and say so in the commit.',
+      });
+      continue;
+    }
+    const { sim, diverged } = comparePair(sa, sb);
+    const base = { key, sim, diverged, budget: reg.budget, why: reg.why };
+    if (sim < CLONE_MIN_SIMILARITY) {
+      rows.push({
+        ...base, kind: 'DIVERGED PAST DETECTION', ok: false,
+        detail: `${(sim * 100).toFixed(2)}% identical — BELOW the ${(CLONE_MIN_SIMILARITY * 100).toFixed(0)}% `
+          + `detection floor — with ${diverged} lines diverged against a budget of ${reg.budget}. `
+          + 'This is a REGISTERED pair, so falling below the floor is the loudest possible signal '
+          + 'and not an absent one: two files that were 99% identical are not any more, which is '
+          + 'what a fix landing in one copy looks like. Port the fix, or retire the registration.',
+      });
+      continue;
+    }
+    if (diverged > reg.budget) {
+      rows.push({
+        ...base, kind: 'DRIFTED', ok: false,
+        detail: `${diverged} lines diverged, budget ${reg.budget}. A fix has landed in one copy and `
+          + 'not the other — which is exactly how ten tools ended up carrying one stale driver.',
+      });
+      continue;
+    }
+    rows.push({
+      ...base, kind: 'registered', ok: true,
+      detail: `${(sim * 100).toFixed(1)}% identical, ${diverged}/${reg.budget} lines diverged`
+        + `  (sim margin to the ${CLONE_MIN_SIMILARITY} floor: ${(sim - CLONE_MIN_SIMILARITY).toFixed(4)})`,
+    });
+  }
+
+  // ── 2. BY SIMILARITY. Discovery can only ADD subjects; it can never remove one.
   const kept = [];
-  for (const abs of files) {
-    const rel = relative(ROOT, abs);
+  for (const [rel, s] of src) {
     // `_before_*` are FROZEN pre-change copies kept deliberately for A/B. They are
     // supposed to be stale; that is their entire job.
     if (/(^|\/)_before_/.test(rel)) continue;
-    const src = await readFile(abs, 'utf8');
-    const lines = src.split('\n').length;
-    if (lines < CLONE_MIN_LINES) continue;
-    kept.push({ rel, lines, set: lineSet(src), src });
+    if (s.split('\n').length < CLONE_MIN_LINES) continue;
+    kept.push({ rel, set: lineSet(s), src: s });
   }
+  kept.sort((x, y) => (x.rel < y.rel ? -1 : 1));
+  for (let i = 0; i < kept.length; i++) {
+    for (let j = i + 1; j < kept.length; j++) {
+      const key = `${kept[i].rel} :: ${kept[j].rel}`;
+      if (seen.has(key)) continue;
+      const sim = similarity(kept[i].set, kept[j].set);
+      if (sim < CLONE_MIN_SIMILARITY) continue;
+      const cmp = comparePair(kept[i].src, kept[j].src);
+      rows.push({
+        key, kind: 'UNREGISTERED CLONE', ok: false, ...cmp, budget: null,
+        detail: `${(cmp.sim * 100).toFixed(1)}% identical, ${cmp.diverged} lines diverged. Either delete `
+          + 'the copy and parameterise the original, or register it in CLONES with a divergence '
+          + 'budget and the reason.',
+      });
+    }
+  }
+  return rows;
+}
+
+/**
+ * THE OLD ALGORITHM, kept verbatim as the negative control for `--selftest`.
+ *
+ * Not dead code and not nostalgia: the known-bad arm below has to show that this returned
+ * NOTHING on the state that actually occurred, or "the new census fails on it" is a claim
+ * about an input nobody has shown to be hard. Same rule as `perf.mjs --mode navselftest`'s
+ * control arm asserting the router traffic really happened.
+ */
+export function legacyDiscovery(sources) {
+  const kept = [];
+  for (const [rel, s] of sources) {
+    if (/(^|\/)_before_/.test(rel)) continue;
+    if (s.split('\n').length < CLONE_MIN_LINES) continue;
+    kept.push({ rel, set: lineSet(s), src: s });
+  }
+  kept.sort((x, y) => (x.rel < y.rel ? -1 : 1));
   const pairs = [];
   for (let i = 0; i < kept.length; i++) {
     for (let j = i + 1; j < kept.length; j++) {
       const sim = similarity(kept[i].set, kept[j].set);
-      if (sim < CLONE_MIN_SIMILARITY) continue;
-      const A = new Set(kept[i].src.split('\n').map((l) => l.trim()));
-      const B = new Set(kept[j].src.split('\n').map((l) => l.trim()));
-      let diverged = 0;
-      for (const l of A) if (l && !B.has(l)) diverged++;
-      for (const l of B) if (l && !A.has(l)) diverged++;
-      pairs.push({ key: `${kept[i].rel} :: ${kept[j].rel}`, sim: +sim.toFixed(4), diverged });
+      if (sim < CLONE_MIN_SIMILARITY) continue;   // <- THE LINE THAT BOUGHT THE SILENCE
+      pairs.push({ key: `${kept[i].rel} :: ${kept[j].rel}`, sim: +sim.toFixed(4) });
     }
   }
   return pairs;
+}
+
+/**
+ * The artefact nobody had: every registered pair ranked by how close it is to falling out
+ * of a similarity-driven census, plus the near-misses that are not registered yet.
+ *
+ * With the census above, a registered pair can no longer drop out — but the ranking still
+ * answers the question that matters for the OTHER half: which pairs are so nearly one file
+ * that a fix to either is likely to be needed in both.
+ */
+export async function rankPairs(sources = null) {
+  const src = sources ?? await readTools();
+  const kept = [];
+  for (const [rel, s] of src) {
+    if (/(^|\/)_before_/.test(rel)) continue;
+    if (s.split('\n').length < CLONE_MIN_LINES) continue;
+    kept.push({ rel, set: lineSet(s), src: s });
+  }
+  kept.sort((x, y) => (x.rel < y.rel ? -1 : 1));
+  const out = [];
+  for (let i = 0; i < kept.length; i++) {
+    for (let j = i + 1; j < kept.length; j++) {
+      const A = kept[i].set; const B = kept[j].set;
+      const sim = similarity(A, B);
+      if (sim < 0.50) continue;
+      // DISTANCE TO THE FLOOR, in the unit that actually moves it: novel lines added to
+      // ONE side. sim = |A∩B| / |A∪B|; N novel lines leave the intersection alone and grow
+      // the union by N, so the pair drops out once |A∩B| / (|A∪B| + N) < floor.
+      let inter = 0;
+      for (const x of A) if (B.has(x)) inter++;
+      const union = A.size + B.size - inter;
+      const toFloor = Math.max(0, Math.floor(inter / CLONE_MIN_SIMILARITY - union) + 1);
+      const key = `${kept[i].rel} :: ${kept[j].rel}`;
+      out.push({
+        key, sim: +sim.toFixed(4), registered: !!CLONES[key], toFloor,
+        ...comparePair(kept[i].src, kept[j].src),
+      });
+    }
+  }
+  // Registered pairs first, then by distance to the floor: the closest to dropping out first.
+  out.sort((a, b) => (b.registered - a.registered) || (a.sim - b.sim));
+  return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -643,7 +841,23 @@ const MUT_LUMA_GATED_CONTACTS = [[ADJ_BUMP_RIGHT, 'if (x < W - 1 && luma[j] !== 
 // SELFTEST — every assertion, against an instrument that is BROKEN in its own way
 // ─────────────────────────────────────────────────────────────────────────────
 
-function selftest() {
+/**
+ * The bytes of one file at one commit. THROWS if git cannot produce them.
+ *
+ * ⚠️ It must throw and not return null. A skipped fixture turns every refusal below into a
+ * pass — the same shape as a silently-skipped mutation anchor, and the same shape as the
+ * census bug this section exists to prove fixed.
+ */
+function gitShow(ref, path) {
+  const r = spawnSync('git', ['show', `${ref}:${path}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 << 20 });
+  if (r.status !== 0 || typeof r.stdout !== 'string' || r.stdout.length === 0) {
+    throw new Error(`sentinel --selftest needs the historical fixture ${ref}:${path} and git could not `
+      + `produce it (status ${r.status}): ${String(r.stderr).trim().slice(0, 200)}`);
+  }
+  return r.stdout;
+}
+
+async function selftest() {
   let pass = 0; let fail = 0;
   const t = (name, ok, detail) => {
     if (ok) pass++; else fail++;
@@ -824,6 +1038,96 @@ function selftest() {
   t('two unrelated 400-line files do NOT read as a clone',
     simLow < CLONE_MIN_SIMILARITY, `similarity ${simLow.toFixed(4)} < ${CLONE_MIN_SIMILARITY}`);
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // THE CENSUS, ON THE STATE THAT ACTUALLY OCCURRED — real bytes, out of git
+  //
+  // Not a hand-written imitation of the divergence: `git show` at two commits, so the
+  // fixture cannot be wrong in a way the real event was not. `9e1061c` is the commit that
+  // fixed the false-positive reload guard in `tools/perf.mjs` and did not touch the copy.
+  //
+  //   CONTROL   9e1061c^  perf.mjs UNFIXED, perf_tier UNFIXED   -> the pair must PASS
+  //   KNOWN-BAD 9e1061c   perf.mjs FIXED,   perf_tier UNFIXED   -> the pair must FAIL
+  //
+  // Both arms, on one registry, in one run — the `--mode navselftest` shape. A census
+  // hard-wired to fail passes neither; the census this replaces passes the control and
+  // goes SILENT on the known-bad, which is asserted below rather than described.
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log('\n── the CLONE census, on the REAL bytes of the state that occurred (9e1061c) ──\n');
+
+  const PERF = 'tools/perf.mjs';
+  const TIER = 'tools/tmp/perf_tier.mjs';
+  const KEY = `${PERF} :: ${TIER}`;
+  const REG = { [KEY]: { budget: 12, why: 'fixture: the real registration, with its real budget' } };
+
+  const before = new Map([[PERF, gitShow('9e1061c^', PERF)], [TIER, gitShow('9e1061c^', TIER)]]);
+  const after = new Map([[PERF, gitShow('9e1061c', PERF)], [TIER, gitShow('9e1061c', TIER)]]);
+
+  const cBefore = comparePair(before.get(PERF), before.get(TIER));
+  const cAfter = comparePair(after.get(PERF), after.get(TIER));
+
+  const rBefore = (await cloneCensus({ sources: before, registry: REG }))[0];
+  const rAfter = (await cloneCensus({ sources: after, registry: REG }))[0];
+
+  // ── A. CONTROL. If this failed, the known-bad arm would prove nothing: a census that
+  //    refuses everything refuses the bug too, and that is not the same as detecting it.
+  t('CONTROL 9e1061c^ (fix in NEITHER copy): the registered pair PASSES',
+    rBefore.ok && rBefore.kind === 'registered',
+    `sim ${cBefore.sim}, ${cBefore.diverged}/12 diverged -> ${rBefore.kind}`);
+  // NOT VACUOUS: the control must be above the floor, or it is passing for the same reason
+  // a below-floor pair used to "pass" — by not being looked at.
+  t('...and it is genuinely ABOVE the detection floor, so the arm is not vacuous',
+    cBefore.sim >= CLONE_MIN_SIMILARITY, `sim ${cBefore.sim} >= ${CLONE_MIN_SIMILARITY}`);
+
+  // ── B. KNOWN-BAD. Tonight's exact tree state, reconstructed.
+  t('KNOWN-BAD 9e1061c (fix in perf.mjs ONLY): the registered pair FAILS',
+    rAfter.ok === false, `${rAfter.kind}`);
+  t('...and it fails as DIVERGED PAST DETECTION, naming the floor it fell through',
+    rAfter.kind === 'DIVERGED PAST DETECTION',
+    `sim ${cAfter.sim} < ${CLONE_MIN_SIMILARITY}`);
+  t('...and the divergence is COUNTED against the budget rather than lost with the pair',
+    rAfter.diverged > 12 && rAfter.budget === 12,
+    `${rAfter.diverged} diverged vs budget ${rAfter.budget}`);
+
+  // ── C. THE PROOF THAT B IS A HARD INPUT. The old algorithm on the same bytes.
+  //    Without this, "the new census fails on it" is a claim about an input nobody has
+  //    shown to be difficult — the census could be failing it for any reason at all.
+  const legacyBefore = legacyDiscovery(before);
+  const legacyAfter = legacyDiscovery(after);
+  t('the OLD discovery-driven census DID see the pair before the fix',
+    legacyBefore.some((p) => p.key === KEY), `discovered at sim ${legacyBefore[0]?.sim}`);
+  t('🚨 ...and saw NOTHING after it — divergence BOUGHT SILENCE. This is the bug.',
+    legacyAfter.length === 0,
+    `0 pairs discovered; sim fell ${cBefore.sim} -> ${cAfter.sim}, under the ${CLONE_MIN_SIMILARITY} floor`);
+
+  // ── D. The other two ways a registered pair could leave the census.
+  const renamed = new Map([[PERF, after.get(PERF)], ['tools/tmp/perf_tier_v2.mjs', after.get(TIER)]]);
+  const rRenamed = (await cloneCensus({ sources: renamed, registry: REG }))[0];
+  t('a registered file RENAMED away fails MISSING rather than printing a note',
+    rRenamed.ok === false && rRenamed.kind === 'MISSING', rRenamed.kind);
+
+  const shrunk = new Map([[PERF, after.get(PERF)], [TIER, 'const a = 1;\n'.repeat(20)]]);
+  const rShrunk = (await cloneCensus({ sources: shrunk, registry: REG }))[0];
+  t('a registered copy shrunk under CLONE_MIN_LINES is still judged, not filtered out',
+    rShrunk.ok === false, `${rShrunk.kind} (${CLONE_MIN_LINES}-line discovery filter does not apply to registrations)`);
+
+  // ── E. The pre-existing checks must still work. A rewrite that trades one coverage for
+  //    another is the `driver_guard` 49 -> 41 trade, and it is invisible from a green run.
+  const drifted = new Map(before);
+  drifted.set(TIER, `${before.get(TIER)}\n${Array.from({ length: 40 }, (_, i) => `const extraLine${i} = ${i} + 1;`).join('\n')}\n`);
+  const rDrift = (await cloneCensus({ sources: drifted, registry: REG }))[0];
+  t('a pair still ABOVE the floor but past its budget still fails DRIFTED',
+    rDrift.ok === false && rDrift.kind === 'DRIFTED',
+    `${rDrift.kind}: ${rDrift.diverged}/${rDrift.budget} at sim ${rDrift.sim}`);
+
+  const rUnreg = await cloneCensus({ sources: before, registry: {} });
+  t('an UNREGISTERED clone still fails, so discovery was not lost in the rewrite',
+    rUnreg.length === 1 && rUnreg[0].ok === false && rUnreg[0].kind === 'UNREGISTERED CLONE',
+    `${rUnreg[0]?.kind} ${rUnreg[0]?.key}`);
+
+  t('a missing historical fixture THROWS rather than silently skipping an arm',
+    (() => { try { gitShow('9e1061c', 'tools/no_such_file.mjs'); return false; } catch { return true; } })(),
+    'refused');
+
   console.log(`\n${pass}/${pass + fail} sentinel checks passed`);
   return fail ? 1 : 0;
 }
@@ -831,7 +1135,7 @@ function selftest() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {
-  if (process.argv.includes('--selftest')) process.exit(selftest());
+  if (process.argv.includes('--selftest')) process.exit(await selftest());
 
   let failed = 0;
   if (!process.argv.includes('--clones')) {
@@ -848,35 +1152,36 @@ async function main() {
 
   if (!process.argv.includes('--sentinels')) {
     console.log('\n── CLONE CENSUS: an instrument duplicated is an instrument that drifts ──\n');
-    const pairs = await cloneCensus();
+    const rows = await cloneCensus();
     let cloneFail = 0;
-    for (const p of pairs) {
-      const reg = CLONES[p.key];
-      if (!reg) {
-        cloneFail++;
-        console.log(`FAIL  UNREGISTERED CLONE  ${p.key}`);
-        console.log(`      ${(p.sim * 100).toFixed(1)}% identical, ${p.diverged} lines diverged.`);
-        console.log('      Either delete the copy and parameterise the original, or register it in'
-          + ' CLONES with a divergence budget and the reason.');
-        continue;
-      }
-      if (p.diverged > reg.budget) {
-        cloneFail++;
-        console.log(`FAIL  DRIFTED  ${p.key}`);
-        console.log(`      ${p.diverged} lines diverged, budget ${reg.budget}. A fix has landed in one`
-          + ' copy and not the other — which is exactly how ten tools ended up carrying one stale driver.');
-        continue;
-      }
-      console.log(`PASS  registered  ${p.key}  (${(p.sim * 100).toFixed(1)}% identical, ${p.diverged}/${reg.budget} lines diverged)`);
+    for (const r of rows) {
+      if (!r.ok) cloneFail++;
+      console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.kind}  ${r.key}`);
+      console.log(`      ${r.detail}`);
+      // The registration's own reason is printed on failure and only on failure: it is the
+      // context an agent needs at the moment it is deciding whether to port a fix.
+      if (!r.ok && r.why) console.log(`      WHY IT WAS REGISTERED: ${r.why}`);
     }
-    for (const key of Object.keys(CLONES)) {
-      if (!pairs.some((p) => p.key === key)) {
-        console.log(`note  registered pair no longer a clone (or renamed): ${key}`);
-      }
-    }
-    if (!pairs.length) console.log('no file pairs over the clone threshold');
-    console.log(`\n${pairs.length - cloneFail}/${pairs.length} clone pairs accounted for`);
+    // ⚠️ There is deliberately NO "registered pair no longer a clone" note here any more.
+    // That note WAS the bug: it is what a divergence past the detection floor printed, and
+    // it exited 0. Every registered key is a row above, pass or fail.
+    if (!rows.length) console.log('no registered pairs and no file pairs over the clone threshold');
+    console.log(`\n${rows.length - cloneFail}/${rows.length} clone pairs accounted for`);
     failed += cloneFail;
+  }
+
+  if (process.argv.includes('--rank')) {
+    console.log('\n── PAIRS RANKED BY DISTANCE TO THE DETECTION FLOOR ──\n');
+    console.log(`      floor ${CLONE_MIN_SIMILARITY}; registered pairs first, then closest-to-dropping-out.`);
+    console.log('      `+N` = novel lines a fix could add to ONE side before the pair falls');
+    console.log('      through the floor. Under the OLD census that was the number of lines');
+    console.log('      that bought silence; it is now the number that changes nothing.\n');
+    console.log('      reg?  sim     margin    +N   diverged  pair');
+    for (const p of await rankPairs()) {
+      console.log(`      ${p.registered ? ' R  ' : ' -  '}  ${p.sim.toFixed(4)}  `
+        + `${(p.sim - CLONE_MIN_SIMILARITY >= 0 ? '+' : '')}${(p.sim - CLONE_MIN_SIMILARITY).toFixed(4)}  `
+        + `${String(p.toFloor).padStart(4)}  ${String(p.diverged).padStart(8)}  ${p.key}`);
+    }
   }
 
   process.exit(failed ? 1 : 0);
