@@ -588,12 +588,16 @@ console.log(`  tree: ${from}${from === 'head' ? ` (${spawnSync('git', ['-C', ROO
 // needs its OWN browser because it forces `--autoplay-policy=user-gesture-required`.
 if (has('unlock')) {
   const d = freeze(from);
+  // ⚠️ `process.exit()` does NOT unwind the stack, so it must land AFTER the `finally`,
+  // never inside the `try`. The first version had it inside and leaked the frozen tree —
+  // three `dist/`s and a 4 MB theme per run — every single time it was invoked.
+  let code = 1;
   try {
-    const code = await unlockProbe(build(d, './', 'dist-rel'));
-    process.exit(code);
+    code = await unlockProbe(build(d, './', 'dist-rel'));
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
+  process.exit(code);
 }
 
 const browser = await chromium.launch({
