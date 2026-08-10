@@ -2719,3 +2719,50 @@ require the N-fighter refactor first.
 => **Measure the 1v1 pacing cost BEFORE shipping the size**, and report it. If it is severe, the
 arena wants to land WITH the roster change rather than before it. That is a sequencing question with
 a measurable answer, not a taste call, so it is not being sent back to Uri.
+
+---
+
+## 49. ❓ TWO BALANCE CALLS THAT ONLY EXIST ONCE THERE ARE MORE THAN TWO FIGHTERS
+
+Both surfaced by the N-fighter container (`cdcdd65`). **Neither blocks anything tonight** — at N=2
+both are provably identical to today, and the seat cap is still pinned at 2. They must be answered
+**before the cap is raised**, because each one silently picks a winner otherwise.
+
+### 49a — the timeout tiebreak's rung 3 is now "the LOWER SLOT wins"
+
+The 45 s timeout resolves in rungs: HP fraction → zone control → **tiebreak**. Rung 3 used to read
+*"the tie goes to the human"*. In a slot array there is no "the human", so it now reads **"the tie
+goes to the lower slot"**.
+
+**Identical at N=2, by construction.** At N>2 it is a **standing positional advantage**: seat 0 wins
+every exact tie, forever, and seats are assigned in `createMatch` argument order.
+
+⚠️ **No corpus reaches it.** 3,520 forced-immortal timeouts landed **rung 1: 3,516 · rung 2: 4 ·
+rung 3: ZERO**. So this cannot be settled by measurement — the case essentially never occurs, which
+is also why it is cheap to change. `sim.test.mjs` §27(c) constructs all three rungs by hand and
+checks them against the two-way formula written longhand, so whatever you choose stays pinned.
+
+**Options:** lower slot wins (in force, invisible today) · a genuine draw · fewest deaths, then lower
+slot · most damage dealt. ⚠️ A draw is not free — `GameEvent.match-ended` requires a non-null winner,
+and the payout table has no draw row, so it is an economy change too (see §2, which asks the same
+question for 1v1).
+
+### 49b — a trail is worth N× more when there are N fighters
+
+Trail marks used to carry `damaged: boolean` — **one bite total**. That had to change, because "one
+bite, first victim in slot order" would have made trail damage depend on **seat order**, which is the
+one thing a deterministic sim must not smuggle in. It is now `damagedMask: number`, a per-victim
+bitmask: **order-free, and each victim can be bitten once.**
+
+**Identical at N=2.** At N=6 it means **Donut's trail is worth up to 5× its current value** in one
+pass, because five different fighters can each take the bite.
+
+That is a **balance** decision, not a correctness one, and the honest options are:
+- **keep per-victim** (in force) — a trail becomes an area-denial tool that scales with the crowd,
+  which is arguably what a trail *should* be in a 6-player brawl
+- **cap hits per mark** at 2 or 3 — keeps some scaling without a lane becoming lethal
+- **scale `TRAIL.damage` down** as fighter count rises
+
+⚠️ **Do not answer this from the 1v1 balance table.** `roster_lab`, `kit_lab` and `match-sim` all
+assume a 110-cell **1v1** matchup grid; a 4–6 fighter balance number is a **different quantity** and
+the instrument for it does not exist yet. Whoever prices this builds that first.
