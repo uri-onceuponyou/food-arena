@@ -27,6 +27,51 @@ export interface DustField {
   phase: number[];
 }
 
+/**
+ * ⚠️ NO `renderOrder` HERE, AND THAT IS A MEASUREMENT, NOT AN OVERSIGHT.
+ *
+ * `M.dust` is `transparent: true` with `depthWrite` left true (`src/arena/shared.ts`), the
+ * silent-occluder class. `2f05202` priced it and found the obvious fix BACKWARDS: with no
+ * depth write the mote at `renderOrder 0` is drawn first in the transparent pass and then
+ * simply PAINTED OVER by any decal drawn after it, so `depthWrite:false` alone ERASES the
+ * mote and shipped is 3.4x-5.4x closer to correct than that. It routed the other half
+ * here — "the dust needs `renderOrder`, not the flag" — because the flag lives in
+ * `shared.ts` and the mesh lives in this file.
+ *
+ * Measured before acting on it (`tools/tmp/hw_ord.mjs`, one page load, `rAF` frozen,
+ * `pot_south`, `--vfx` worst case, 3 loads; per-block self-pair 0 px and RETURN drift
+ * 0 px). Distance from the reference arm that clears the flag AND raises the order, as
+ * SUMMED channel delta — arm `d8` is the only one shippable from THIS file, i.e.
+ * `renderOrder` raised with the flag left as it is:
+ *
+ *     load           0        1        2      (0 and 2 ablate at 37 px and 15 px — the
+ *     shipped      110      652      152       field is unseeded, so on most loads no
+ *     flag only     39      463       78       mote overlaps anything and every arm is
+ *     flag + order   0       64        0       near-blind. Load 1 is the informative one)
+ *     ORDER ONLY     0      589        0
+ *
+ * `renderOrder` alone buys **652 -> 589, i.e. 9.7%**, of a quantity the same sweep already
+ * priced at <= 12 px of 1,440,000 (0.0008% of frame). It does not remove the rejection, it
+ * MOVES it. The two knobs are separable and are NOT additive, so each is quoted against the
+ * arm that differs from the reference in exactly one of them: `d8` (order raised, flag
+ * kept) is **589** from correct, and that residue is the depth write rejecting everything
+ * drawn AFTER `renderOrder` 8 — `slowTint` at 8, VFX sprites at 10, stars at 11 — which no
+ * `renderOrder` reachable from this file can help, because drawing after the sprites means
+ * painting over sprites that are in front of the mote. Only the flag fixes that layer.
+ *
+ * 🔴 AND THE PROBE'S REFERENCE ORDER OF 8 IS NOT A SHIPPING CANDIDATE. `src/arena/fogRing.ts`
+ * puts the fog CURTAIN at 7 and the fog CANOPY at 8. Dust is scattered over the WHOLE
+ * playfield, so most motes are outside the safe radius at any moment; at order 8 they would
+ * composite on top of the fog of war as a field of sparkles over the curtain that exists to
+ * hide the arena. Any order low enough to stay under the fog (<= 6) is also under the VFX
+ * rings, so it does not reach the layer that owns 90% of the cost either.
+ *
+ * → The complete fix is BOTH halves, the half that matters is `M.dust`'s flag in
+ * `src/arena/shared.ts`, and half of it landed here alone would buy 9.7% of 0.0008% while
+ * making the item read as closed. Left alone deliberately; documented at the declaration so
+ * the next sweep does not re-derive it. If `M.dust` ever loses `depthWrite`, THIS is where
+ * the matching `renderOrder` goes, and it must be <= 6.
+ */
 export function buildDustField(M: Materials, count: number): DustField {
   const geo = new THREE.SphereGeometry(0.025, 6, 6);
   const im = new THREE.InstancedMesh(geo, M.dust, count);
@@ -63,6 +108,22 @@ export function createAmbientUpdate(pot: PotAssembly, hazardGround: HazardGround
 
   return function updateAmbient(elapsed: number): void {
     // Steam: rise, fade, loop.
+    //
+    // ⚠️ THIS LOOP REQUIRES ONE MATERIAL PER WISP AND, UNTIL THIS PASS, DID NOT HAVE ONE.
+    // `buildPot` built a single `steamMat` and handed the same instance to all three
+    // plumes, so the three `mat.opacity` writes below — one per plume, off a per-plume
+    // phase offset `i * 0.5` — were three writes to the SAME uniform in the same frame.
+    // The last one won and the pot pulsed as one blob on wisp 2's phase; the offset that
+    // exists to stagger them was computed, assigned and discarded. Nothing here looked
+    // wrong, and that is the point: `wisp.position` and `wisp.scale` are per-OBJECT and
+    // were always correct, so only the ONE property that lives on the material collapsed.
+    // Fixed at the source (`buildPot` now calls `flatMat` per iteration, as the hazard
+    // ring's wisps below always did). If a future pass pools these again to save two
+    // materials, THIS loop silently stops working.
+    //
+    // ⚠️ The standing corollary: NEVER READ INITIAL STATE OFF A POOLED MATERIAL. A spawn
+    // helper doing `opacity: wisp.material.opacity` here inherits whatever the last plume
+    // faded to, which is a number between 0 and 0.55 that depends on the frame it ran on.
     const cycle = 1.6;
     pot.steam.forEach((wisp, i) => {
       const t = ((elapsed + i * 0.5) % cycle) / cycle;
@@ -88,6 +149,11 @@ export function createAmbientUpdate(pot: PotAssembly, hazardGround: HazardGround
     // Hazard boundary: a slow breathing pulse on the glow halo, plus heat wisps
     // rising and fading off the ring — the "shimmer" that keeps the danger zone
     // reading as active heat rather than a painted mark.
+    //
+    // These seven have always had one material each — which is why `buildPot`'s three
+    // sharing one was invisible: the two loops read identically and only one of them
+    // worked. `buildHazardGround` now says so at the `flatMat` call, so the per-iteration
+    // allocation is not "tidied up" into a pool by someone reading it as waste.
     hazardGround.glowMat.opacity = 0.75 + Math.sin(elapsed * 2.6) * 0.2;
     const wispCycle = 1.9;
     hazardGround.wisps.forEach((wisp, i) => {

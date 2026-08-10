@@ -150,22 +150,96 @@ export function buildPot(M: Materials): PotAssembly {
 
   // Flame licking out from under the rim — two overlapping unlit blobs, flicker
   // animated in update().
-  const flameCore = mesh(new THREE.ConeGeometry(bodyR * 0.28, bodyR * 0.4, 10), M.flameCore, 'pot_flame_core__no_outline');
+  //
+  // 🔴 IT CANNOT LICK OUT FROM ANYWHERE. THE BURNER IS SEALED INSIDE THE POT.
+  // Reported, not "fixed": what to do about it is a design call, and this is the
+  // measurement that call needs. Bounding boxes read off the LIVE scene, not from the
+  // constructor arguments above (`tools/tmp/hw_burner.mjs` prints them):
+  //
+  //     flame           r 1.092   y -0.692 .. 0.612
+  //     flameCore       r 0.728   y -0.490 .. 0.450
+  //     pot_stove_base  r 1.300   y  0.000 .. 0.060    OPAQUE, depth-writing
+  //     pot_body        r 2.600   y  0.060 .. 2.530    OPAQUE, depth-writing
+  //
+  // Both cones are narrower than the pot at every height they share, everything above
+  // y = 0.06 is INSIDE the body, and everything below y = 0 is under the floor. There is
+  // no camera angle that sees either one; this is containment, not 58-degree
+  // foreshortening, so the shallow lobby camera would not rescue it either.
+  //
+  // ⚠️ AND 0 PX IS ALSO WHAT A BROKEN PROBE RETURNS, so this has a POSITIVE CONTROL —
+  // the same ablation with `pot_solid` hidden. Self-pair 0 px and RETURN drift 0 px at
+  // both stations:
+  //
+  //     station        ablate to #FF00FF @ opacity 1     ...with the opaque shell hidden
+  //     pot_south                     0 px                          1,126 px
+  //     pot_diagonal                  0 px                          2,296 px
+  //
+  // So the burner IS drawn, the ablation DOES work on these two materials, and the pot
+  // eats every pixel. `docs/LESSONS.md` §1 exactly: built, named, animated every frame
+  // by `createAmbientUpdate` (`pot.flame.scale`, `pot.flameCore.scale`, a two-term
+  // flicker at 18 and 41 rad/s), and reaching the screen never. Rendered and looked at:
+  // `shots/hw/trip_burner.png` — shipped | shell hidden | shell hidden + ablated, where
+  // the burner is the small blob at the pot's centre that turns magenta.
+  //
+  // NOT changed here, because all three answers are design decisions and Uri is asleep:
+  // raise the cones so they clear y 0.06 and widen them past `bodyR`; move them out to
+  // the stove base's rim; or delete them and the flicker with them. The last is not
+  // obviously wrong — the pot already reads as hot from the hazard glow, the scorch
+  // patch, the steam and the boil. Routed to `docs/DECISIONS-FOR-URI.md` (owned by a
+  // peer this session, so it is in the report rather than in that file).
+  //
+  // WHAT *IS* FIXED HERE is the flag, which is a bug independent of the visibility
+  // question: `M.flame`/`M.flameCore` are `transparent: true` at opacity 0.92/0.95 with
+  // `depthWrite` left true, so they are the same silent-occluder class as the hazard
+  // wisps below and `tools/tmp/hc_occluders.mjs` names them. Today they bury nothing
+  // (they are behind an opaque cylinder, so their own fragments fail the depth test and
+  // write nothing) — but "harmless because it is invisible" stops being true the moment
+  // anyone acts on the paragraph above, and that is the worst time to discover it.
+  // `nonOccluding` clones rather than mutating `M.*`: both materials reach exactly one
+  // call site each today (grep: this file, these two lines), and a shared material
+  // mutated by a builder is a booby trap for the second call site.
+  const flameCore = mesh(new THREE.ConeGeometry(bodyR * 0.28, bodyR * 0.4, 10), nonOccluding(M.flameCore), 'pot_flame_core__no_outline');
   flameCore.position.y = -0.02;
   noOutline(flameCore);
   g.add(flameCore);
-  const flame = mesh(new THREE.ConeGeometry(bodyR * 0.42, bodyR * 0.6, 10), M.flame, 'pot_flame__no_outline');
+  const flame = mesh(new THREE.ConeGeometry(bodyR * 0.42, bodyR * 0.6, 10), nonOccluding(M.flame), 'pot_flame__no_outline');
   flame.position.y = -0.04;
   noOutline(flame);
   g.add(flame);
 
   // Steam — soft tapered blobs rising above the broth, reset by `update()`.
+  //
+  // ⚠️ ONE MATERIAL PER WISP. It was ONE material shared by all three meshes, while
+  // `createAmbientUpdate` writes `wisp.material.opacity` per wisp off a per-wisp phase
+  // offset (`(elapsed + i * 0.5) % cycle`). Three writes to the same uniform per frame:
+  // the LAST one wins and all three plumes fade in lockstep on wisp 2's phase, so the
+  // offset that exists to stagger them was computed, assigned, and thrown away — the
+  // pot pulsed as one blob instead of breathing. The classic pooled-material bug, and
+  // the reason it survives review is that the code READS as if it works: every wisp does
+  // get its own `t`, its own y, and its own scale, and only the opacity is shared.
+  // (`wisp.scale` and `wisp.position` are per-OBJECT and were always correct — this is
+  // specifically the one property that lives on the material.)
+  //
+  // ⚠️ AND THE STANDING TRAP THAT COMES WITH IT: never read initial state off a pooled
+  // material. A helper that did `opacity: steamMat.opacity` here would have inherited
+  // whatever the last plume had faded to, not the 0.55 authored two lines up.
+  //
+  // Cost: 2 extra `MeshBasicMaterial`s, no extra draw call, no extra program (identical
+  // type and defines). `flatMat` is called per iteration for exactly the same reason the
+  // hazard ring's wisps call it per iteration — see `buildHazardGround`.
   const steam: THREE.Mesh[] = [];
-  const steamMat = flatMat('#EDEDED', { transparent: true, opacity: 0.55 });
   const steamPositions: Array<[number, number]> = [
     [-bodyR * 0.4, 0], [0, bodyR * 0.05], [bodyR * 0.38, -bodyR * 0.05],
   ];
   for (const [sx, sz] of steamPositions) {
+    const steamMat = flatMat('#EDEDED', { transparent: true, opacity: 0.55 });
+    steamMat.name = 'pot:steam';
+    // Not an occluder today — the plumes float at y 2.28..3.74, clear of everything in
+    // the ground stack, which is why `hc_occluders` reports the class and gates only on
+    // what is ROOTED at or below y 0.60. Cleared anyway: it is the same authoring
+    // mistake, three plumes overlap each other, and a depth write between two 20%-alpha
+    // cones is never what was wanted.
+    steamMat.depthWrite = false;
     const wisp = mesh(new THREE.ConeGeometry(bodyR * 0.16, bodyR * 0.5, 8, 1, true), steamMat, 'pot_steam__no_outline');
     noOutline(wisp);
     wisp.position.set(sx, 0.06 + bodyH + 0.2, sz);
@@ -469,15 +543,82 @@ export function buildHazardGround(M: Materials): HazardGround {
 
   // Heat-shimmer wisps drifting up off the boundary — cheap stand-in for real
   // screen-space refraction, animated (rise + fade, looping) in the arena's update().
+  //
+  // ── THE WISPS WERE OPAQUE GREY SLABS THAT DELETED THE RING BEHIND THEM ──────
+  // `transparent: true` with `depthWrite` left true. `docs/LESSONS.md` §1's "also,
+  // adjacent" paragraph, and the second pass in this file caught by it: the wisp
+  // draws at renderOrder 0, i.e. FIRST in the transparent pass, stamps depth at its own
+  // surface, and every transparent surface drawn after it and behind it fails the depth
+  // test across the cone's whole screen footprint. The wisp is 30% opaque, so what
+  // survives is the *shading* of a solid cone with nothing behind it.
+  //
+  // RENDERED AND LOOKED AT (`shots/hw/trip_wisp5.png`, 3x, the cone that crosses the
+  // caution ring at `pot_south`): shipped draws a DULL BLUE-GREY TRIANGLE that has
+  // erased the yellow/black stripes and the pink halo underneath it. With the flag
+  // cleared it is warm amber shimmer and the stripes read straight through. There was
+  // never a design intent here to argue about — a "heat shimmer" that is opaque is a
+  // bug, at every camera angle.
+  //
+  // MEASURED — `tools/tmp/gl_occl_ab.mjs`, HEAD @ 2f05202, one page load with
+  // `requestAnimationFrame` frozen, station `pot_south` (700:640), 2 loads. Per-block
+  // self-pair **0 px** and per-block RETURN drift **0 px**, so nothing below is quoted
+  // against a guessed tolerance. What the depth write buries, summed across the seven:
+  //
+  //     1,834 delivered px, 96,474 summed channel delta, meanD 4.7..73.6, maxD 132
+  //
+  // and the verdict is "clearing the flag is closer to correct" on 7 of 7 wisps on both
+  // loads. Against the `M.dust` field the SAME sweep deliberately LEFT ALONE (6-12 px,
+  // 82-126 summed, and there the obvious fix was backwards) that is **153x by delivered
+  // pixels and 766x by summed delta** — quoted both ways on purpose, because the two
+  // ratios differ by 5x and this instrument has already been caught getting a verdict
+  // backwards by using the first one. Opposite verdicts out of one tool is why the
+  // sweep prices every hit instead of gating on the flag alone.
+  //
+  // ── THE ORDER IS A SEPARATE JUDGEMENT FROM THE FLAG, AND IT IS 8% OF IT ─────
+  // `tools/tmp/hw_ord.mjs`, same freeze, distance to a reference arm that both clears
+  // the flag AND draws above the whole ground stack, as SUMMED delta — NEVER pixel
+  // count. Wisp #5 alone is the demonstration: 814 px shipped-vs-flag and 837 px
+  // flag-vs-correct, so by AREA the flag barely helps, while the mean deltas are 73.6
+  // and 2.4. Count says where; total says how much:
+  //
+  //     shipped                              92,689     <- 100%
+  //     depthWrite:false alone                 7,268     <- 7.8% left over
+  //     depthWrite:false + renderOrder             0
+  //
+  // So the flag is 92% of the fix and the order is the remaining 8% — real, and small.
+  // It is NOT the dust's situation, where clearing the flag alone was a REGRESSION
+  // (3.4x-5.4x further from correct than shipped) because a 5 cm mote at renderOrder 0
+  // with no depth write is simply painted over by the decal drawn after it. A 1.7 m cone
+  // is overdrawn at its base, not erased: the flag-only arm is already 92% of the way
+  // there, which is why the order is a refinement here and was the whole fix there.
+  //
+  // ⚠️ 3 AND NOT THE PROBE'S DEFAULT 8, AND PIXELS CANNOT MAKE THIS CALL. At
+  // `pot_south` with no VFX, renderOrder 3 and renderOrder 8 are **pixel-identical —
+  // 0 px, 0 summed** (`hw_ord` prints that comparison on its own line precisely so a
+  // station that cannot tell two candidates apart says so). The choice is made on the
+  // layer census instead: `src/arena/fogRing.ts` puts the fog CURTAIN at renderOrder 7
+  // and the fog CANOPY at **8**. A wisp at 8 would be composited on top of the fog of
+  // war and leak the arena's central hazard through a curtain whose whole job is to
+  // hide it — trading a 3-level compositing artefact for a visibility bug. 3 is the
+  // smallest value that clears the ground stack (`PUDDLE_RENDER_ORDER` tops out at 1.6,
+  // the character contact decal and `hazard:glow` are both 2) while staying under every
+  // VFX layer (3/4 status rings, 5 wedges, 6 rings, 10/11 sprites) and under the fog.
+  const HAZARD_WISP_RENDER_ORDER = 3;
   const wisps: THREE.Mesh[] = [];
   const wispCount = 7;
   for (let i = 0; i < wispCount; i++) {
     const a = (i / wispCount) * Math.PI * 2 + 0.35;
+    // ⚠️ ONE MATERIAL PER WISP, AND THAT IS LOAD-BEARING, NOT WASTE. `createAmbientUpdate`
+    // writes `wisp.material.opacity` per wisp off a per-wisp phase, so seven meshes
+    // sharing one material would collapse to whatever the last one wrote — which is
+    // exactly what the pot's steam was doing until this pass (see `buildPot`).
     const wispMat = flatMat('#FFCE7A', { transparent: true, opacity: 0.30 });
     wispMat.name = 'hazard:wisp';
+    wispMat.depthWrite = false;
     const wisp = mesh(new THREE.ConeGeometry(R * 0.1, R * 0.36, 8, 1, true), wispMat, 'hazard_wisp__no_outline');
     noOutline(wisp);
     wisp.position.set(Math.cos(a) * R * 0.96, 0.04, Math.sin(a) * R * 0.96);
+    wisp.renderOrder = HAZARD_WISP_RENDER_ORDER;
     wisp.userData.baseY = wisp.position.y;
     wisp.userData.phase = i * 0.7;
     g.add(wisp);
