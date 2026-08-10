@@ -2604,6 +2604,42 @@ the stated purpose.
 5. **Apron + perf.** `apron.ts` covers everything outside the playfield; `floor.ts:885` scatters
    ~1/3 of 875 tiles density-modulated over 1400×1000. At constant density **×4 area is ×4 tiles.**
 
+### 🧱 HOW IT SCALES — Uri, on reading the first brief
+
+> *"You didn't explain how to scale. Obviously adding more obstacles, keeping the pot in the middle,
+> things like that"*
+
+The first brief said "grow `ARENA_W/H` and re-derive the constants" and said **nothing about what the
+map should BECOME**. Taken literally that produces the wrong arena, and it would look like it worked.
+
+**❌ NOT a 2x linear stretch of the existing layout.** `kitchen.ts` has **30 props** over 1400x1000.
+Stretched, that is 30 props over 2800x2000 — **a quarter of the current cover density**, twice as far
+between hiding places, on a map whose AI cannot search. Prop positions currently derive from
+`ARENA_W`/`ARENA_H` (`x: ARENA_W - 1010` and friends), so a naive constant bump does exactly this
+**by default**.
+
+**✅ THE RULES:**
+
+1. **Keep DENSITY, add obstacles.** ~4x area wants **~4x the props** — order of 100+, not 30 — using
+   the kinds already authored. This is a layout pass, not an art pass.
+2. **The pot / central stove hub stays in the middle AT ITS CURRENT SCALE** (`kitchen.ts:165`). It is
+   a designed centrepiece — *"danger in the middle, cover on the corners"*, cardinal lanes open,
+   diagonals blocked, the hub lethal to linger on. **A hub that doubles is a different game object; a
+   hub that stays put becomes the landmark a bigger map needs.**
+3. **Preserve true 180 degree point symmetry** (`kitchen.ts:6`) — *"so both spawns face an identical,
+   fair map."* Every added prop needs its partner. **This is competitive fairness, the same category
+   as `aspect.mjs`**, and it is the easiest thing to break while placing ~70 props by hand. Generate
+   the second half by transform and **assert the symmetry in a test.**
+4. **New space needs new structure, not more clutter.** At 2800x2000 there is room for real lanes and
+   rooms; extend the existing design language outward rather than sprinkling props uniformly.
+5. **The concealment ceiling does NOT scale** — `CONCEAL_REVEAL_RADIUS` is fixed, so patches stay
+   capped at ~168 wu however big the map gets, and a 4x map wants **~4x the patch COUNT**. Same
+   instinct as rule 1: **more objects, not bigger ones.** See §29a.
+
+⚠️ **And this changes the pacing measurement**: measure at the **populated** layout, never at a bare
+2800x2000 field. More cover shortens sightlines and creates contact, so an empty box would measure far
+worse and give the wrong sequencing answer.
+
 ### ⚠️ AND THE HONEST RISK, STATED BEFORE THE WORK STARTS
 
 **A ×4 arena with only TWO fighters will almost certainly play WORSE**, and that is expected rather
