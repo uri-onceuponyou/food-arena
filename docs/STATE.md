@@ -456,6 +456,39 @@ reference measurement said *dozens of small tufts, not a few big masses*; the AI
 number. Two derivations, one answer. **Big hero bushes are off the table** unless someone builds AI
 search. → `docs/DECISIONS-FOR-URI.md` §29.
 
+### ✅ §29c LANDED — attacking BREAKS the plate and reveals you (`f0e7aed`)
+
+Bit-identity held **exactly**: **0 differing ticks in 3,283,873** (110 matchups × 32 seeds), with
+the three-part claim §15c requires — baseline fields hold, none disappears, the three additions
+declared (`state.brokenConcealment`, `player.revealedUntil`, `enemy.revealedUntil`).
+
+**Two halves, deliberately separate because they fail independently:**
+- **Destruction is about the OBJECT.** `breakConcealment` removes **every** standing region
+  containing the attacker's centre, not the first — overlapping plates would otherwise spend one and
+  reveal nothing. It lives on `MatchState.brokenConcealment` and **never** mutates
+  `arena.concealment`: **one `ArenaDefinition` serves every match a process runs**, so a plate broken
+  on the arena would stay broken for the session.
+- **Reveal is about the FIGHTER.** `revealedUntil = now + CONCEAL_ATTACK_REVEAL_MS`, written at the
+  press, above every outcome test. Destruction alone is not enough and that is measurable: patches
+  cap at ~168 wu and the layout wants dozens, so an attacker whose plate shattered is one step from
+  the next one.
+- A **`self` press (the heal) does neither** — Uri's word was *attacking*.
+
+**The duration is DERIVED, not invented:** `CONCEAL_ATTACK_REVEAL_MS = FLIGHT_MS.normal` (500 ms) —
+how long a shot takes to arrive. Deliberately **not** the firing weapon's own cooldown, which would
+make a fast weapon a strictly safer ambush. The test asserts the derivation, never the literal.
+
+**`vfx.ts` needed no change, and the reasoning is now in the file:** a projectile exists only because
+someone pressed attack, and `attemptAttack` breaks their cover three lines before the spawn — so
+**hiding projectiles would now be the bug**. One case is named rather than left to be found:
+`spawnImpactBurst` on `hit-landed` can fire into a plate and hit a fighter its shooter cannot see
+(concealment is not intangibility). It leaks only to the player who already landed the shot.
+
+🚨 **The mutant that escaped is the lesson.** Of 14 mutants, *"breakConcealment breaks only the FIRST
+region"* passed **287/287** — because **the AI fires too**, and the enemy's own shot broke the second
+plate. **Asking about a fighter is never a neutral way to ask about a plate.** Fixed with a parked
+enemy, an `ownerRole` assertion and a `NEVER_ATTACKED` probe; two other checks had the same disease.
+
 ### Still to route (all out-of-set for the sim agent)
 `src/arena/types.ts` (+`concealment?: ConcealBox[]`) · `src/ui/hud.ts:757` (radar blip) ·
 `src/game/match.ts:1191` (enemy HP bar) · `tools/arena-dump.js:24` ·

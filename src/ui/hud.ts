@@ -144,7 +144,17 @@ export interface Hud {
  * all of them — so this is currently a no-op by construction, not by luck.
  */
 export function enemyVisibleToPlayer(state: MatchState): boolean {
-  return isVisibleFrom(state.player.x, state.player.y, state.enemy.x, state.enemy.y, state.arena);
+  // ⚠️ `state, state.enemy` ARE THE §29c ARGUMENTS, and omitting them made THE PLAYER'S OWN
+  // SCREEN the only observer still resolving concealment against DECLARED regions instead of
+  // STANDING ones. Two facts live on the match, not the arena, and `ArenaDefinition` cannot
+  // carry either — it is one shared object across every match a process runs:
+  //   `MatchState.brokenConcealment`  a plate the enemy shattered by attacking from under it
+  //   `Fighter.revealedUntil`         the window a fighter's own attack buys the other side
+  // Without them the radar would keep hiding an enemy who had just destroyed their cover and
+  // fired at you — the sim would treat them as seen while the HUD treated them as hidden, and
+  // that disagreement between two readers of one rule is this project's oldest defect shape.
+  // `ai.ts` takes the same two arguments at its own single call site for the same reason.
+  return isVisibleFrom(state.player.x, state.player.y, state.enemy.x, state.enemy.y, state.arena, state, state.enemy);
 }
 
 const STYLE_ID = 'hud-styles';
