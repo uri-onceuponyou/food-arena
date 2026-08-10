@@ -182,10 +182,21 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
       <div class="home-room-alcove"></div>
     </div>
 
+    <!-- ADOPTED: '.ds-chip ds-chip--slate' from theme.ts's component layer, plus
+         '.ds-chip-val' on the NUMERALS. The slate treatment is not new here - this file
+         already hand-rolled it in a '.fa-home .fa-chip' override with the same gradient,
+         the same cream and the same lip - so the adoption DELETES a bespoke rule rather
+         than adding a look. What is new is '.ds-chip-val': the count now runs a full
+         ladder step above its own icon and label, which is theme.ts's recorded finding
+         that "on the reference plates the numeral is the loudest thing in the counter and
+         the icon is second; ours were the same size, which is why a trophy total read as
+         chrome". '.fa-chip' STAYS on the element - 'screen_metrics' and 'home_metrics'
+         both key their headline set on it, and dropping it would shrink a guard's
+         coverage to make a class list tidier. -->
     <header class="fa-topbar">
-      <div class="fa-chip"><span class="fa-chip-em">${icon('avatar')}</span><span data-el="name"></span></div>
-      <div class="fa-chip"><span class="fa-chip-em">${icon('trophy')}</span><span class="fa-chip-val" data-el="trophies">0</span></div>
-      <div class="fa-chip home-chip-coin"><span class="fa-chip-em">${icon('coin')}</span><span data-el="coins">0</span></div>
+      <div class="fa-chip ds-chip ds-chip--slate"><span class="fa-chip-em">${icon('avatar')}</span><span data-el="name"></span></div>
+      <div class="fa-chip ds-chip ds-chip--slate"><span class="fa-chip-em">${icon('trophy')}</span><span class="fa-chip-val ds-chip-val ds-num" data-el="trophies">0</span></div>
+      <div class="fa-chip ds-chip ds-chip--slate home-chip-coin"><span class="fa-chip-em">${icon('coin')}</span><span class="fa-chip-val ds-chip-val ds-num" data-el="coins">0</span></div>
       <div class="fa-topbar-spacer"></div>
       <!-- ICONS, not four words. The reference plates carry navigation pictorially and
            caption it; ours carried four same-weight text runs in one dark pill, which is
@@ -248,7 +259,12 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
             <span class="home-track-pill" data-el="roadpill">${icon('trophy')}</span>
           </span>
           <span class="home-track-sub" data-el="roadsub"></span>
-          <span class="home-bar"><span class="home-bar-fill" data-el="roadfill"></span></span>
+          <!-- ADOPTED: '.ds-bar ds-bar--sm'. theme.ts's adoption map names '.home-bar' as
+               a '.ds-bar' site, and the component supplies the track, the radius, the ink
+               line and the top-light on the fill. The FILL COLOUR stays this file's — the
+               gold diagonal stripe is the road's identity and the component takes its ink
+               from the caller by design. -->
+          <span class="home-bar ds-bar ds-bar--sm"><span class="home-bar-fill ds-bar-fill" data-el="roadfill"></span></span>
         </button>
 
         <button class="home-track" type="button" data-go="trophies" data-el="chest">
@@ -304,7 +320,20 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
         <div class="home-stats" data-el="stats"></div>
         <div class="home-kit" data-el="kit"></div>
         <p class="home-kit-cap" data-el="kitcap"></p>
-        <button class="fa-btn fa-btn--quiet home-change" type="button" data-go="characters">
+        <!-- 🔴 THE 3.6x HIERARCHY INVERSION, FIXED HERE AND NOT IN THE SHARED CLASS.
+             Measured on this screen: the secondary control was 0.91x the PRIMARY's area
+             where the reference's is 0.25x, which is why the lobby read as three equal
+             columns instead of one dominant action. theme.ts records the finding and
+             deliberately did NOT change '.fa-btn--quiet' to fix it — that class is live
+             on five screens and the layer shipped pixel-neutral, so the fix belongs to
+             each screen's owner. This is home's.
+
+             It is a SIZE change, not a colour one. The class moves to '.ds-btn
+             ds-btn--quiet', whose base holds the 44px tap floor while '.fa-btn--primary'
+             runs to 78px, and the 'width: 100%' comes off so the control sizes to its
+             own label instead of to the panel. '.fa-btn' STAYS: 'home_metrics' keys its
+             headline set on it. -->
+        <button class="fa-btn ds-btn ds-btn--quiet home-change" type="button" data-go="characters">
           ${icon('swap')} Change
         </button>
       </aside>
@@ -445,26 +474,61 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     if (n > 0) q('heldtitle').textContent = n === 1 ? '1 chest held' : `${n} chests held`;
   }
 
-  /** The right flank. Display stats are `rules.ts`'s 0-10 scale — the same numbers
-   *  character select draws, so the two screens cannot disagree about a fighter. */
+  /**
+   * The right flank. Display stats are `rules.ts`'s 0-10 scale — the same numbers
+   * character select draws, so the two screens cannot disagree about a fighter.
+   *
+   * ═══════════════════════════════════════════════════════════════════════════
+   * THE BAR IS GONE, AND THAT IS THE FIX RATHER THAN A SIDE EFFECT
+   * ═══════════════════════════════════════════════════════════════════════════
+   * `stat-bars` is the WORST element in the per-element critique — 3 against a
+   * reference 7 — and the finding that decided this rewrite is that character select's
+   * supposedly-better version, with a taller track AND ten pips, scored THE SAME 3.
+   * Two critics, two panels, one number. So "make the bar better" is refuted by the
+   * only paired control available: the reference is not drawing a better bar, it is
+   * not drawing a bar at all.
+   *
+   * The three measured gaps, and what each one becomes here (see `.ds-row` and
+   * `.ds-tile--stat` in `theme.ts`, where the geometry is derived):
+   *
+   *   * the row was 52 device px against the reference's 86  -> `.ds-row`, min 56 CSS px
+   *   * the icon was a 33x33 px, 1.7-px-stroke, `fill: none` LINE GLYPH against a
+   *     ~72x70 filled TINTED tile                            -> `.ds-tile--stat`, 56 px,
+   *     tint required rather than optional, glyph at 62% of the tile at stroke 2.4
+   *   * the label sat BESIDE the value                       -> `.ds-row-body` stacks it
+   *     ABOVE, small and colour-coded, with the numeral under it at display weight
+   *
+   * ── THE COLOURS ARE PICKED BY ARITHMETIC, NOT BY BRAND ─────────────────────
+   * `--ketchup` / `--lettuce` / `--water` are FILL colours and two of the three fail as
+   * a tile behind an ink glyph: ketchup measures 3.65:1 against a 4.5 floor and water
+   * 5.22. Lifted one value step each, the same triple measures 8.07 / 11.19 / 9.74 as a
+   * tile, and 7.34 / 10.18 / 8.86 as the LABEL on the slate plate's dark stop (5.75 /
+   * 7.98 / 6.94 on its light stop, which is the binding case and still clear). Two of
+   * the three are colours this file already ships and already measured on this exact
+   * plate — `#FF8A96` and `#8FE04A` are the loss and win numerals in the record row.
+   * The VALUE stays cream (15.05 / 11.80), because the reference's numeral is the loud
+   * neutral thing and the colour belongs to the small label.
+   *
+   * ⚠️ `.fa-stat` STAYS on the wrapper. `chars_metrics`'s clipping guard lists it in
+   * CARES, and this screen and character select are its only two users — dropping it to
+   * tidy a class list would silently shrink that guard's coverage, which is the exact
+   * failure `CLAUDE.md` #6 records for `driver_guard`.
+   */
+  const STAT_ROWS: Array<[string, string, 'damage' | 'health' | 'speed', string]> = [
+    ['damage', 'Damage', 'damage', '#FF8A96'],
+    ['health', 'Health', 'health', '#8FE04A'],
+    ['speed', 'Speed', 'speed', '#6FC8F5'],
+  ];
+
   function renderFighter(): void {
     const def = CHARACTERS[ctx.profile.selected];
-    const rows: Array<[string, string, number, string]> = [
-      ['damage', 'Damage', def.stats.damage, 'var(--ketchup)'],
-      ['health', 'Health', def.stats.health, 'var(--lettuce)'],
-      ['speed', 'Speed', def.stats.speed, 'var(--water)'],
-    ];
-    // `<div>`, not `<span>`, for the fill. `theme.ts` styles `.fa-stat-fill` with a
-    // width and a height and nothing else — an inline span silently ignores both, and
-    // the bars render as empty tracks. Round 1 of this restructure shipped exactly
-    // that, and it is invisible to tsc and to every assertion in `menu_accept`.
-    q('stats').innerHTML = rows.map(([ic, label, value, color]) => `
-      <div class="fa-stat">
-        <span class="fa-stat-label">${icon(ic)} ${label}</span>
-        <div class="fa-stat-track">
-          <div class="fa-stat-fill" style="width:${value * 10}%;background-color:${color}"></div>
-        </div>
-        <span class="fa-stat-val">${value}</span>
+    q('stats').innerHTML = STAT_ROWS.map(([ic, label, key, color]) => `
+      <div class="fa-stat ds-row ds-row--slate home-stat" style="--ds-row-accent:${color}">
+        <span class="ds-tile ds-tile--stat" style="--ds-tile-fill:${color}">${icon(ic)}</span>
+        <span class="ds-row-body">
+          <span class="ds-row-label">${label}</span>
+          <span class="ds-row-val ds-num">${def.stats[key]}</span>
+        </span>
       </div>`).join('');
 
     renderKit();
@@ -941,21 +1005,40 @@ const CSS = `
    'theme.ts' already gives '.fa-btn--primary', the one control on this screen the
    critic called shipped-grade. Scoped to '.fa-home' because 'theme.ts' is shared and
    this is a home-screen finding, not a system-wide one. */
+/* ADOPTED: the elevation ladder. This four-layer stack was one hand-typed idiom at two
+   hand-typed parameters -- exactly what theme.ts's '--ds-e*' collapses -- and the two
+   outer layers are now 'var(--ds-e4)' (the hero-CTA elevation, which is what a panel
+   this large should carry) and the top highlight is 'var(--ds-bevel)'. The warm inner
+   pool is KEPT as a literal and is the one thing here that is not on the ladder: it was
+   added against a critic finding ("no warmth pooling in the base") and there is no token
+   for a hue-tinted inner glow. Recorded rather than deleted to make a counter go up. */
 .fa-home .home-col {
-  border-width: 4px;
-  box-shadow:
-    0 6px 0 rgba(0,0,0,0.38),
-    0 11px 20px rgba(0,0,0,0.22),
-    inset 0 3px 0 rgba(255,255,255,0.9),
-    inset 0 -10px 16px rgba(150,96,30,0.10);
+  border-width: var(--ds-stroke-3);
+  box-shadow: var(--ds-e4), var(--ds-bevel), inset 0 -10px 16px rgba(150,96,30,0.10);
 }
 /* Panel titles were 62%-opacity ink at ~12px — the lightest structural type on the
    screen, and measured at 4.8:1. Solid ink, larger, with a gold rule under it, so a
    heading reads as a heading and not as a caption. */
+/* ── TYPE: STEP 3, AND THE STEP IS THE POINT ─────────────────────────────────
+   'ds_inventory --clamps' decomposed every font-size on the menus and found 91 of 102
+   -- 89% of all menu type -- inside ONE cluster: min 0.58-0.84rem, max 0.70-1.15rem.
+   The menus did not have a scale that drifted, they had ONE SIZE JITTERED 26 WAYS, and
+   this file supplied a dozen of the jitters. Every 'font-size' below now names a rung
+   of theme.ts's histogram-derived ladder, and the rung is chosen by MEANING:
+
+     t1  caption / tag      the tap hint, the record's key, the level caption, the pill
+     t2  label              a card's sub-line, an ability name, the mode's sub
+     t3  body / control     a section title, a card's title
+     t4  lead               the mode name, and (from theme.ts) a chip's numeral
+     t5  numeral            the record's counts, and the stat row's value
+     t6  glyph / title      the ability icon
+   ⚠️ A ladder assigned at random scores as well on any counter as one assigned by
+   meaning (LESSONS §6b). The counter is 'da_geom --compare's T3; the assignment is
+   this table, and the close-out is the PNG. */
 .fa-home .fa-panel-title {
   color: var(--ink);
-  font-size: clamp(0.8rem, 1.95vh, 1.05rem);
-  letter-spacing: 0.1em;
+  font-size: var(--ds-t3);
+  letter-spacing: var(--ds-track-caps);
 }
 .fa-home .fa-panel-title::after {
   content: '';
@@ -963,7 +1046,7 @@ const CSS = `
   width: 32px;
   height: 4px;
   margin-top: 5px;
-  border-radius: 999px;
+  border-radius: var(--ds-r-pill);
   background: var(--gold);
 }
 
@@ -987,15 +1070,15 @@ const CSS = `
   font-family: 'Heebo', sans-serif;
   color: var(--ink);
   background: linear-gradient(180deg, #FFFFFF 0%, #F1DFC0 100%);
-  border: 3px solid var(--ink);
-  border-radius: 12px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.32), inset 0 2px 0 rgba(255,255,255,0.9);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  box-shadow: var(--ds-e2), var(--ds-bevel);
   transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
 }
 .fa-home .home-track:hover { filter: brightness(1.04); }
 .fa-home .home-track:active {
   transform: translateY(3px);
-  box-shadow: 0 0 0 rgba(0,0,0,0.32), inset 0 2px 0 rgba(255,255,255,0.9);
+  box-shadow: var(--ds-e0), var(--ds-bevel);
 }
 .fa-home .home-track[hidden] { display: none; }
 
@@ -1040,10 +1123,10 @@ const CSS = `
   display: flex; align-items: center; flex-wrap: wrap;
   gap: 4px 8px; width: 100%; min-width: 0;
 }
-.fa-home .home-track-icon { font-size: clamp(1.15rem, 2.6vh, 1.5rem); line-height: 1; flex: 0 0 auto; }
+.fa-home .home-track-icon { font-size: var(--ds-t5); line-height: 1; flex: 0 0 auto; }
 .fa-home .home-track-title {
-  font-family: 'Rubik', sans-serif; font-weight: 800;
-  font-size: clamp(0.7rem, 1.55vh, 0.86rem);
+  font-family: 'Rubik', sans-serif; font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t3);
   line-height: 1.18;
   flex: 1 1 auto;
   /* The longest word any title can carry is a milestone face title -- a character name
@@ -1055,7 +1138,7 @@ const CSS = `
 }
 .fa-home .home-track-sub {
   font-family: 'Heebo', sans-serif;
-  font-size: clamp(0.7rem, 1.4vh, 0.8rem); font-weight: 700; color: #4A3524;
+  font-size: var(--ds-t2); font-weight: var(--ds-w-body); color: #4A3524;
   line-height: 1.22;
   overflow-wrap: break-word;
 }
@@ -1066,10 +1149,10 @@ const CSS = `
   display: flex; align-items: center; gap: 4px; flex: 0 0 auto;
   margin-inline-start: auto;
   --fa-ic-ink: #FFF3DE;
-  font-family: 'Rubik', sans-serif; font-weight: 800;
-  font-size: clamp(0.6rem, 1.35vh, 0.74rem);
+  font-family: 'Rubik', sans-serif; font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t1);
   background: var(--ink); color: var(--cream);
-  border-radius: 999px; padding: 3px 9px; white-space: nowrap;
+  border-radius: var(--ds-r-pill); padding: 3px 9px; white-space: nowrap;
 }
 .fa-home .home-pips { margin-inline-start: auto; }
 .fa-home .home-track-pill.is-go { background: var(--lettuce); color: #16300a; }
@@ -1086,28 +1169,41 @@ const CSS = `
   50% { box-shadow: 0 3px 0 rgba(0,0,0,0.3), 0 0 16px rgba(166,226,74,0.85); }
 }
 
-/* Distance-to-next, measured across the gap the player is actually crossing. */
-.fa-home .home-bar {
-  display: block;
-  width: 100%;
-  height: 9px;
-  background: rgba(26,18,36,0.16);
-  border: 2px solid var(--ink);
-  border-radius: 999px;
-  overflow: hidden;
-}
+/* Distance-to-next, measured across the gap the player is actually crossing.
+   ── ADOPTED '.ds-bar ds-bar--sm', SO ALL THAT IS LEFT HERE IS WHAT THE COMPONENT
+      CANNOT KNOW ────────────────────────────────────────────────────────────────
+   The track, the ink line, the pill radius, the clip and the fill's top-light all come
+   from theme.ts now. Two declarations have to stay, and both are about the CONTEXT
+   rather than the component:
+
+     * 'flex: 0 0 auto'. '.ds-bar' is 'flex: 1 1 auto', which is right in the flex ROW
+       it was drawn for and wrong inside '.home-track', which is a flex COLUMN -- there
+       the same declaration makes the bar grow in HEIGHT until it fills the card. This
+       is the '.home-col > *' guard one level down, for the same reason.
+     * the diagonal gold stripe, which is this row's identity and which '.ds-bar-fill'
+       takes from the caller by design ('--ds-bar-ink' or an override). */
+.fa-home .home-bar { flex: 0 0 auto; }
+/* 🚨 'display: block' IS LOAD-BEARING AND THIS FILE ALREADY KNEW IT.
+   The note above 'renderFighter' has said since round 1: "'theme.ts' styles the fill
+   with a width and a height and nothing else — an INLINE SPAN silently ignores both,
+   and the bars render as empty tracks." Deleting this file's own '.home-bar-fill'
+   block during the '.ds-bar' adoption took the 'display: block' with it, and the very
+   first capture showed the road card's bar as an empty cream track with a 100%-width
+   fill inside it that was not drawing anything. Rendering and INVISIBLE, for the
+   twenty-first time (AGENT-BRIEF §4.2), caught by reading the PNG and not by any
+   assertion — 'menu_accept' and 'ud_defects' both passed it.
+   ⚠️ '.ds-bar-fill' in 'theme.ts' has the same gap and it is a trap for every future
+   adopter. That file is not this owner's; it is in the report. */
 .fa-home .home-bar-fill {
   display: block;
-  height: 100%;
   background: repeating-linear-gradient(45deg, var(--gold) 0 8px, var(--mustard) 8px 16px);
-  transition: width 0.4s ease-out;
 }
 
 /* Free-chest cadence. Countable, so it is counted. */
 .fa-home .home-pips { display: flex; gap: 3px; flex: 0 0 auto; }
 .fa-home .home-pip {
-  width: 10px; height: 10px; border-radius: 50%;
-  border: 2px solid var(--ink);
+  width: 10px; height: 10px; border-radius: var(--ds-r-round);
+  border: var(--ds-stroke-1) solid var(--ink);
   background: rgba(26,18,36,0.14);
 }
 .fa-home .home-pip.is-on { background: var(--lettuce); }
@@ -1165,7 +1261,7 @@ const CSS = `
     row-gap: 3px;
   }
   .fa-home .home-track-top { display: contents; }
-  .fa-home .home-track-icon { grid-area: ic; font-size: 1.05rem; }
+  .fa-home .home-track-icon { grid-area: ic; font-size: var(--ds-t4); }
   /* min-width goes back to 0 here ON PURPOSE: the title now owns a whole grid row and
      is never competing with the pill, so the floor that stopped mid-word breaks in the
      flex layout would only force the grid column wider than the card. */
@@ -1421,8 +1517,8 @@ const CSS = `
 .fa-home .fa-rarity {
   height: 21px;
   font-size: 0.7rem;
-  border-width: 2.5px;
-  box-shadow: 0 2px 0 rgba(0,0,0,0.35);
+  border-width: var(--ds-stroke-1);
+  box-shadow: var(--ds-e1);
 }
 
 /* BOTTOM-LEFT, not bottom-right. The stage now runs the full screen height, so its
@@ -1434,15 +1530,15 @@ const CSS = `
   inset-inline-start: clamp(4px, 1vh, 12px);
   pointer-events: none;
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
-  font-size: clamp(0.66rem, 1.45vh, 0.78rem);
-  letter-spacing: 0.1em;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t1);
+  letter-spacing: var(--ds-track-caps);
   text-transform: uppercase;
   color: var(--cream);
   background: linear-gradient(180deg, rgba(42,29,58,0.94) 0%, rgba(16,10,26,0.96) 100%);
-  border: 2.5px solid rgba(255,243,222,0.45);
-  border-radius: 999px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  border: var(--ds-stroke-1) solid rgba(255,243,222,0.45);
+  border-radius: var(--ds-r-pill);
+  box-shadow: var(--ds-e2);
   padding: 4px 11px;
   transition: opacity 0.6s ease;
 }
@@ -1458,13 +1554,32 @@ const CSS = `
 }
 
 /* ── Fighter card ─────────────────────────────────────────────────────────── */
-.fa-home .home-stats { display: flex; flex-direction: column; gap: 5px; }
-/* The shared '.fa-stat-label' is a fixed 58-92px column, which is right for character
-   select's narrow stats panel and wrong here, where the label carries an icon too. */
-.fa-home .home-fighter .fa-stat-label {
-  display: flex; align-items: center; gap: 5px;
-  width: auto; flex: 0 0 auto;
-}
+/* WAS, and kept with the reason per this project's rule about reversed assertions:
+
+     ".fa-home .home-stats { display: flex; flex-direction: column; gap: 5px; }"
+     "The shared '.fa-stat-label' is a fixed 58-92px column, which is right for
+      character select's narrow stats panel and wrong here, where the label carries an
+      icon too."
+     .fa-home .home-fighter .fa-stat-label { display:flex; align-items:center; gap:5px;
+                                             width:auto; flex:0 0 auto; }
+
+   Both are obsolete because the element they describe is gone: '.fa-stat-label' and
+   '.fa-stat-track' are no longer rendered on this screen. See 'renderFighter()' for the
+   measurement that removed the bar -- character select's taller, pipped version of the
+   same bar scored IDENTICALLY, so the bar was not the thing.
+
+   ⚠️ THE THEME'S '.fa-stat-*' CHILDREN ARE NOT REUSED, AND THAT IS DELIBERATE.
+   '.fa-stat-val' carries 'width: 20px' and 'color: rgba(26,18,36,0.7)' -- a 70%-ink
+   value that on this row's SLATE plate is dark ink on a dark ground, which is
+   'docs/LESSONS.md' §1 case 10 exactly. Reusing the class to look tidy would have
+   shipped that bug for the third time in this repo. */
+.fa-home .home-stats { display: flex; flex-direction: column; gap: var(--ds-s2); }
+/* ⚠️ THE ROW LIST IS THE TALL-VIEWPORT FORM AND IT DOES NOT FIT A LANDSCAPE PHONE.
+   Three 56px rows plus gaps is ~180px against the ~64px the old bars occupied, and
+   'ud_defects' measures the left flank's slack at 852x480 as 24.95px. So the same three
+   facts are laid out ACROSS at short viewports instead of DOWN -- see the max-height
+   block at the foot of this file. The tile, the colour-coded label and the display-
+   weight numeral survive at every viewport; only the axis changes. */
 
 /* ── The kit, as tiles ─────────────────────────────────────────────────────── */
 /* Was four full-width rows with a two-line label each: "it reads as a spreadsheet in
@@ -1493,22 +1608,23 @@ const CSS = `
   padding: 5px 4px;
   color: var(--ink);
   background: linear-gradient(180deg, #FFFFFF 0%, #F1DFC0 100%);
-  border: 3px solid var(--ink);
-  border-radius: 12px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.32), inset 0 2px 0 rgba(255,255,255,0.9);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  box-shadow: var(--ds-e2), var(--ds-bevel);
   transition: transform 0.08s, box-shadow 0.08s, background 0.12s;
 }
 .fa-home .home-kit-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .fa-home .home-kit-tile:hover { filter: brightness(1.04); }
 .fa-home .home-kit-tile:active {
   transform: translateY(3px);
-  box-shadow: 0 0 0 rgba(0,0,0,0.32), inset 0 2px 0 rgba(255,255,255,0.9);
+  box-shadow: var(--ds-e0), var(--ds-bevel);
 }
 .fa-home .home-kit-tile.is-on {
   background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
-  box-shadow: 0 3px 0 var(--gold-shadow), inset 0 2px 0 rgba(255,255,255,0.75);
+  --ds-lip: var(--gold-shadow);
+  box-shadow: var(--ds-e2), var(--ds-bevel);
 }
-.fa-home .home-kit-em { font-size: clamp(1.25rem, 2.9vh, 1.7rem); line-height: 1; flex: 0 0 auto; }
+.fa-home .home-kit-em { font-size: var(--ds-t6); line-height: 1; flex: 0 0 auto; }
 /* WRAPS, for the same reason the track title does. At 852x480 a 58.17px tile rendered
    "Tomato Toss" as "Tomato T..." and "Lettuce Fling" as "Lettuce ..." — three of the
    nine truncated runs on the screen, and unlike the track rows these strings come from
@@ -1516,8 +1632,8 @@ const CSS = `
    ability names measures ~40px against a 57-58px tile at every viewport where the tile
    exists, so the wrap always lands on a space and 'break-word' is only a floor. */
 .fa-home .home-kit-name {
-  font-family: 'Rubik', sans-serif; font-weight: 800;
-  font-size: clamp(0.66rem, 1.45vh, 0.82rem);
+  font-family: 'Rubik', sans-serif; font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t2);
   line-height: 1.12;
   text-align: center;
   max-width: 100%;
@@ -1535,15 +1651,15 @@ const CSS = `
   align-items: center;
   justify-content: center;
   font-family: 'Heebo', sans-serif;
-  font-weight: 700;
-  font-size: clamp(0.7rem, 1.45vh, 0.82rem);
+  font-weight: var(--ds-w-body);
+  font-size: var(--ds-t2);
   line-height: 1.15;
   text-align: center;
   color: #3B2A18;
   background: linear-gradient(180deg, #FFFFFF 0%, #F1DFC0 100%);
-  border: 2.5px solid var(--ink);
-  border-radius: 10px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.28), inset 0 2px 0 rgba(255,255,255,0.9);
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  box-shadow: var(--ds-e2), var(--ds-bevel);
 }
 /* The selected ability's NAME, hidden by default because the tile beside it already
    carries it. It is turned on at exactly one breakpoint — the landscape phone, where
@@ -1551,7 +1667,7 @@ const CSS = `
    so the caption is the only place the name exists there. Rendered as its own element
    rather than concatenated into the string, because the two states differ in LAYOUT,
    not in content, and a screen must not have to re-run 'renderKit' to change size. */
-.fa-home .home-kit-capname { display: none; font-weight: 900; }
+.fa-home .home-kit-capname { display: none; font-weight: var(--ds-w-black); }
 /* NON-BREAKING SPACES, both sides. A plain space in 'content' collapses against the
    adjacent inline box and the first capture rendered "Tomato Toss -Slows enemies down"
    — the leading space survived and the trailing one did not. The dash is also what
@@ -1560,7 +1676,7 @@ const CSS = `
    backslash is consumed by JS and never reaches CSS. Written singly it compiled as an
    octal escape and tsc refused the file (TS1487). Same family of trap as the backtick
    rule at the top of this file. */
-.fa-home .home-kit-capname::after { content: '\\00a0\\2013\\00a0'; font-weight: 700; }
+.fa-home .home-kit-capname::after { content: '\\00a0\\2013\\00a0'; font-weight: var(--ds-w-body); }
 /* The tail. '--home-cap-x' is written by 'renderKit()' from the selected index, so the
    caption points at its own tile rather than at the grid in general. A rotated square
    whose lower half lands ON the plate's ink border, which is what makes it read as a
@@ -1576,11 +1692,29 @@ const CSS = `
   margin-inline-start: -6.5px;
   transform: rotate(45deg);
   background: var(--mustard);
-  border-left: 2.5px solid var(--ink);
-  border-top: 2.5px solid var(--ink);
-  border-start-start-radius: 3px;
+  border-left: var(--ds-stroke-1) solid var(--ink);
+  border-top: var(--ds-stroke-1) solid var(--ink);
+  border-start-start-radius: var(--ds-r-1);
 }
-.fa-home .home-change { margin-top: 4px; width: 100%; }
+/* WAS: '.fa-home .home-change { margin-top: 4px; width: 100%; }', and the 'width: 100%'
+   is the whole 3.6x inversion in one declaration. A secondary control stretched to its
+   panel is 0.91x the primary's area; the reference's is 0.25x. It now sizes to its own
+   label and centres, and theme.ts's stated target -- "a caller should hold its WIDTH
+   near half the primary's" -- is what 'da_geom --compare's T4 column measures. */
+/* ⚠️ AND THE PADDING COMES IN A STEP, BECAUSE A SHRINK-WRAPPED BUTTON CAN BE WIDER
+   THAN ITS PANEL. 'menu_accept' caught it: at 1024x768 WITH a landscape tablet's 44px
+   safe insets the flank falls to ~150px of content, and '.ds-btn''s 20px side padding
+   plus a nowrap "CHANGE" plus its icon measures ~132px of MIN-CONTENT -- which a flex
+   item is not allowed to shrink below, so the centred button overhung both sides and
+   landed 3px inside the right safe inset ("inside-safe-area  fa-btn[Change] R41").
+   'width: 100%' had been hiding it: a stretched item is bounded by its container by
+   construction, and taking the stretch off is what exposed the min-content. One step
+   down on the space scale is 16px, which clears it with 34px to spare -- and it makes
+   the control smaller, which is the direction T4 wants anyway.
+   Deliberately NO 'max-width: 100%': with 'white-space: nowrap' that would cap the BOX
+   and let the label spill out of it, i.e. turn a loud gate failure into a silent visual
+   one. If a longer label ever arrives here, this assertion should fail again. */
+.fa-home .home-change { margin-top: var(--ds-s1); align-self: center; padding: 0 var(--ds-s4); }
 
 /* Career record. Three numbers, all live, and the only place in the product that
    shows them — the trophy road tracks the CURRENT count, this tracks the peak. */
@@ -1589,7 +1723,7 @@ const CSS = `
   gap: 5px;
   margin-top: 2px;
   padding-top: 6px;
-  border-top: 2.5px dotted rgba(26,18,36,0.2);
+  border-top: var(--ds-stroke-1) dotted rgba(26,18,36,0.2);
 }
 /* DARK SLATE, and this is the second tile family on the screen.
    They were 'rgba(26,18,36,0.06)' on cream -- a 6% tint inside a cream card, which is
@@ -1606,15 +1740,15 @@ const CSS = `
   gap: 1px;
   padding: 4px 2px 3px;
   background: linear-gradient(180deg, #3A2A4E 0%, #241A33 100%);
-  border: 2.5px solid var(--ink);
-  border-radius: 10px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.34), inset 0 2px 0 rgba(255,255,255,0.14);
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  box-shadow: var(--ds-e2), var(--ds-bevel-dark);
   --fa-ic-ink: #FFF3DE;
 }
-.fa-home .home-rec-ic { font-size: clamp(0.72rem, 1.5vh, 0.9rem); line-height: 1; opacity: 0.92; }
+.fa-home .home-rec-ic { font-size: var(--ds-t2); line-height: 1; opacity: 0.92; }
 .fa-home .home-rec-val {
-  font-family: 'Rubik', sans-serif; font-weight: 900;
-  font-size: clamp(0.8rem, 1.9vh, 1.05rem);
+  font-family: 'Rubik', sans-serif; font-weight: var(--ds-w-black);
+  font-size: var(--ds-t5);
   line-height: 1;
   color: var(--cream);
 }
@@ -1632,9 +1766,9 @@ const CSS = `
    same job is done by cream at 78%, measured 9.2:1. */
 .fa-home .home-rec-key {
   display: flex; align-items: center; gap: 3px;
-  font-size: clamp(0.7rem, 1.4vh, 0.78rem);
-  font-weight: 800;
-  letter-spacing: 0.05em;
+  font-size: var(--ds-t1);
+  font-weight: var(--ds-w-bold);
+  letter-spacing: var(--ds-track);
   text-transform: uppercase;
   color: rgba(255,243,222,0.78);
   white-space: nowrap;
@@ -1648,9 +1782,10 @@ const CSS = `
    reference plates' actual system: bright yellow means "this gives you something". */
 .fa-home .home-track--road {
   background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
-  box-shadow: 0 3px 0 var(--gold-shadow), inset 0 2px 0 rgba(255,255,255,0.7);
+  --ds-lip: var(--gold-shadow);
+  box-shadow: var(--ds-e2), var(--ds-bevel);
 }
-.fa-home .home-track--road:active { box-shadow: 0 0 0 var(--gold-shadow), inset 0 2px 0 rgba(255,255,255,0.7); }
+.fa-home .home-track--road:active { box-shadow: var(--ds-e0), var(--ds-bevel); }
 /* '#4A3524' on mustard measures 7.1:1; the sub-line keeps its own value rather than
    inheriting a colour picked for cream. */
 .fa-home .home-track--road .home-track-sub { color: #4A3524; }
@@ -1686,13 +1821,16 @@ const CSS = `
    slate plate the trophy count goes the other way and becomes a LIGHT value: '#FF8A96'
    on '#241A33' measures 8.4:1, where '#A81B2B' would have been 1.6:1 and unreadable.
    This is 'docs/LESSONS.md' §1 case 10 exactly -- dark ink on a dark plate -- and it is
-   the direct cost of changing a surface under type that was tuned for the old one. */
-.fa-home .fa-chip {
-  background: linear-gradient(180deg, #3A2A4E 0%, #241A33 100%);
-  color: var(--cream);
-  box-shadow: 0 4px 0 rgba(0,0,0,0.42), inset 0 2px 0 rgba(255,255,255,0.15);
-  --fa-ic-ink: #FFF3DE;
-}
+   the direct cost of changing a surface under type that was tuned for the old one.
+
+   ── AND THE HAND-ROLLED SLAB IS NOW '.ds-chip--slate' ───────────────────────────
+   The three declarations that used to live here -- the '#3A2A4E -> #241A33' gradient,
+   'color: var(--cream)' and a '0 4px 0 / inset 0 2px 0' pair -- were this file
+   re-deriving, by eye, exactly what theme.ts's slate chip declares from the ladder. They
+   are deleted rather than tokenised: the class is on the elements now. What is left is
+   the ONE thing the component cannot know, which is that an outlined SVG glyph inside it
+   has to flip its ink or draw ink-on-ink -- the bug this repo has shipped three times. */
+.fa-home .fa-chip { --fa-ic-ink: #FFF3DE; }
 .fa-home .fa-chip-val { color: #FF8A96; }
 .fa-home .home-chip-coin .fa-chip-val,
 .fa-home .home-chip-coin { color: #FFD15C; }
@@ -1704,7 +1842,7 @@ const CSS = `
 .fa-home .home-level .fa-level-label {
   color: var(--ink);
   text-shadow: none;
-  font-size: clamp(0.62rem, 1.4vh, 0.78rem);
+  font-size: var(--ds-t1);
 }
 
 /* The CTA's subject. A lobby's primary button has to say what it starts — this is the
@@ -1728,14 +1866,14 @@ const CSS = `
   min-width: 0;
   padding: 6px clamp(11px, 1.4vw, 18px);
   background: linear-gradient(180deg, rgba(44,30,60,0.94) 0%, rgba(20,13,30,0.96) 100%);
-  border: 3px solid var(--ink);
-  border-radius: 14px;
-  box-shadow: 0 4px 0 rgba(0,0,0,0.4), inset 0 2px 0 rgba(255,255,255,0.14);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  box-shadow: var(--ds-e3), var(--ds-bevel-dark);
 }
 .fa-home .home-mode-name {
-  font-family: 'Rubik', sans-serif; font-weight: 900;
-  font-size: clamp(0.74rem, 1.75vh, 0.96rem);
-  letter-spacing: 0.05em;
+  font-family: 'Rubik', sans-serif; font-weight: var(--ds-w-black);
+  font-size: var(--ds-t4);
+  letter-spacing: var(--ds-track);
   text-transform: uppercase;
   color: var(--mustard-hi);
   text-shadow: none;
@@ -1743,11 +1881,89 @@ const CSS = `
 }
 .fa-home .home-mode-sub {
   font-family: 'Rubik', sans-serif;
-  font-size: clamp(0.72rem, 1.6vh, 0.88rem);
-  font-weight: 800;
+  font-size: var(--ds-t2);
+  font-weight: var(--ds-w-bold);
   color: rgba(255,243,222,0.94);
   text-shadow: none;
   white-space: nowrap;
+}
+
+/* ── THE STAT ROWS TURN THROUGH 90 DEGREES ON A SHORT SCREEN ──────────────────
+   The tall-viewport form is theme.ts's '.ds-row': a 56px slate slab per stat, carrying a
+   56px tinted tile, a colour-coded label and the numeral under it at display weight.
+   Three of those plus gaps is ~180px, and 'ud_defects' measures the left flank's slack
+   at 852x480 as 24.95px -- so the vertical list is simply not affordable on a landscape
+   phone, and pretending otherwise would convert a legibility fix into a clipped panel,
+   which is strictly worse (an ellipsis at least tells the player something was cut).
+
+   What gives is the AXIS, and nothing else. Laid out across, the three rows share the
+   flank's width and stack their own contents: tile on top, label under it, numeral
+   under that. Every one of the three measured fixes survives -- a filled tinted TILE
+   instead of a line glyph, a colour-coded label, and the numeral a full ladder step
+   above it -- because none of them was ever about the row being horizontal. This is the
+   shape '.home-record' three panels down already uses for the same reason.
+
+   ⚠️ 460px is NOT the right threshold here even though it is what the rest of this file
+   uses. The binding case is 852x480, which is above it, and 480 is where the flank's
+   slack was measured. 520 is the same bound the container-query trims below already
+   run on.
+
+   🚨 AND THIS BLOCK'S POSITION IN THE FILE IS LOAD-BEARING. It was first written just
+   above the existing '@media (max-height: 520px)' container-query block, which is 350
+   lines ABOVE '.fa-home .home-stats'. A MEDIA QUERY ADDS NO SPECIFICITY, so the later
+   base rule won, 'flex-direction' stayed 'column', and the three rows -- now
+   'flex: 1 1 0' in a zero-height column -- collapsed to about 8px each with their 30px
+   tiles overflowing across the panel title. tsc was clean, the rule parsed, and the
+   cascade simply did not reach it. Caught by reading the 844x390 PNG; no assertion in
+   the battery would have. Keep this block BELOW the base rule. */
+@media (max-height: 520px) {
+  .fa-home .home-stats { flex-direction: row; gap: var(--ds-s1); }
+  .fa-home .home-stat {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0;
+    min-height: 0;
+    padding: var(--ds-s1) 0 var(--ds-s1);
+  }
+  /* 30px and not 56: three 56px tiles need 168px of a 155px flank before any padding.
+     It is still a filled, tinted, bordered MASS rather than the 1.7px-stroke outline the
+     audit measured -- which is the property that was wrong, not the diameter. */
+  .fa-home .home-stat .ds-tile--stat {
+    width: 30px;
+    height: 30px;
+    border-width: var(--ds-stroke-1);
+    font-size: var(--ds-t6);
+  }
+  .fa-home .home-stat .ds-row-body { flex: 0 0 auto; align-items: center; text-align: center; }
+  /* The label loses its caps tracking and nothing else. At 11px in a ~50px cell,
+     0.09em of tracking on "DAMAGE" is the difference between the word fitting and the
+     component's own ellipsis firing -- and an ellipsised label is the D2 defect this
+     screen spent a whole pass removing. */
+  .fa-home .home-stat .ds-row-label { letter-spacing: var(--ds-track-tight); }
+  .fa-home .home-stat .ds-row-val { font-size: var(--ds-t4); }
+
+  /* ── TWO PLACES WHERE THE LADDER OVERFLOWS A BOX, AND BOTH WERE FOUND IN A PNG ──
+     A type ramp is sized off vh and knows nothing about how wide the box under it is.
+     Both of these read clean in every assertion in the battery and both were plainly
+     broken at 852x480 in the capture:
+
+     1. THE RECORD NUMERAL. t5 floors at 1.18rem = 18.9px, and "3,170" at that size
+        needs ~62px against a ~50px tile — the comma and the last digit were drawn
+        outside the plate. t3 floors at 13.1px, still a clear step above the 11px key
+        under it, and inside the tile.
+     2. THE LEVEL ROW. Both "Lv 17" and "Lv 18" went from 9.92px to 11.04px, which is
+        the right direction (9.92 is under 'screen_metrics''s 11px legibility floor) and
+        took ~10px off the track between them — enough that theme.ts's own
+        '.fa-level-xp' caption WRAPPED inside a 14px track and was clipped through the
+        middle of both lines. There is no ladder rung below 11.04px by design, so the
+        room has to come from the row rather than from the type: the TRAILING label goes
+        and the leading one plus the fraction carry it, which is complete
+        ("Lv 17 / 180 of 250 XP") and is the same kind of trim this breakpoint already
+        makes to the panel rule and the record glyphs. */
+  .fa-home .home-rec-val { font-size: var(--ds-t3); }
+  .fa-home .home-level .fa-level-label:last-child { display: none; }
 }
 
 /* ── Landscape phones ─────────────────────────────────────────────────────── */

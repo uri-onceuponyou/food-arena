@@ -38,15 +38,23 @@ import { getCharacterStage, PORTRAIT_BG_CSS } from './charStage';
 import { getCachedThumb, requestThumbnails } from './thumbs';
 import { abilityIcon, ensureIconStyles, icon } from '../icons';
 
-/** Stat bar colours, matching the prototype's damage/health/speed semantics. */
+/**
+ * Stat colours, damage / health / speed.
+ *
+ * ⚠️ WAS `#D62839` / `#7CB518` / `#1E90D8` — the raw brand FILLS, which is correct for
+ * a bar you look at and wrong for a tile you read an ink glyph on: measured against
+ * `--ink`, those three are 3.65 / 7.34 / 5.22 : 1 and the first fails AA outright. One
+ * value step up, the same three hues measure 8.07 / 11.19 / 9.74 as a tile, and
+ * 7.34 / 10.18 / 8.86 as the label on the slate row's dark stop (5.75 / 7.98 / 6.94 on
+ * its light stop, the binding case). The hues are unchanged; only the value moved, and
+ * the triple is the same one `home.ts` now uses so the two screens cannot disagree
+ * about what "damage" looks like.
+ */
 const STAT_ROWS = [
-  { key: 'damage', icon: 'damage', label: 'Damage', color: '#D62839' },
-  { key: 'health', icon: 'health', label: 'Health', color: '#7CB518' },
-  { key: 'speed', icon: 'speed', label: 'Speed', color: '#1E90D8' },
+  { key: 'damage', icon: 'damage', label: 'Damage', color: '#FF8A96' },
+  { key: 'health', icon: 'health', label: 'Health', color: '#8FE04A' },
+  { key: 'speed', icon: 'speed', label: 'Speed', color: '#6FC8F5' },
 ] as const;
-
-/** Stats are authored on a 0-10 display scale in `rules.ts`. */
-const STAT_MAX = 10;
 
 /** Rarities whose cards animate, per the prototype's zigzag treatment. */
 const ANIMATED_RARITIES = new Set(['Neon', 'Cyber']);
@@ -107,8 +115,14 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       <button class="fa-iconbtn" type="button" data-el="back" aria-label="Back to home">${icon('back')} Back</button>
       <h1 class="fa-title chars-heading">Choose Your Fighter</h1>
       <div class="fa-topbar-spacer"></div>
-      <div class="fa-chip"><span class="fa-chip-em">${icon('medal')}</span>Wins <span class="fa-chip-val" data-el="wins">0</span></div>
-      <div class="fa-chip"><span class="fa-chip-em">${icon('coin')}</span><span class="fa-chip-val" data-el="coins">0</span></div>
+      <!-- ADOPTED: '.ds-chip' plus '.ds-chip-val' on the numerals. The chip's shape is
+           unchanged; what moves is the RELATIONSHIP inside it — theme.ts's recorded
+           finding is that on the reference plates the numeral is the loudest thing in a
+           counter and ours were the same size as their own labels, "which is why a
+           trophy total read as chrome". '.fa-chip' stays: 'chars_metrics' and
+           'screen_metrics' both key on it. -->
+      <div class="fa-chip ds-chip"><span class="fa-chip-em">${icon('medal')}</span>Wins <span class="fa-chip-val ds-chip-val ds-num" data-el="wins">0</span></div>
+      <div class="fa-chip ds-chip"><span class="fa-chip-em">${icon('coin')}</span><span class="fa-chip-val ds-chip-val ds-num" data-el="coins">0</span></div>
     </header>
 
     <div class="chars-body">
@@ -216,24 +230,48 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
   `;
   rosterEl.appendChild(locked);
 
-  // ── Stat bars (built once, widths animate on view change) ─────────────────
-  const statFills = new Map<string, HTMLDivElement>();
+  /**
+   * ═════════════════════════════════════════════════════════════════════════════
+   * STAT ROWS — AND THE PIPS THIS SCREEN WAS PROUD OF ARE THE THING BEING REMOVED
+   * ═════════════════════════════════════════════════════════════════════════════
+   *
+   * WAS: a `.fa-stat-label` beside a `.fa-stat-track` carrying a `.fa-stat-fill` and ten
+   * `.fa-stat-pips`, with the reason "ten discrete pips, because the scale in `rules.ts`
+   * IS out of ten — a smooth bar makes 7 and 8 indistinguishable at a glance". That
+   * reasoning is sound and it is NOT what was wrong, which is why it is recorded here
+   * rather than deleted.
+   *
+   * What killed it is a paired measurement. `stat-bars` is the worst element in the
+   * per-element critique at 3 against a reference 7 — and THIS screen's version, the one
+   * with the taller track AND the pips, scored the SAME 3 as `home.ts`'s plain bar. Two
+   * critics, two panels, one number. The two places character select overrides the
+   * shared chrome are `.fa-stat-track`'s height and `.fa-stat-pips`, and they moved the
+   * critic by ZERO. So "a better bar" is refuted by the only paired control this project
+   * has: the reference is not drawing a better bar, it is not drawing a bar at all.
+   *
+   * What it draws instead, and what `.ds-row` / `.ds-tile--stat` in `theme.ts` are:
+   * a slab carrying a filled, TINTED icon tile (ours was a 33x33 px, 1.7-px-stroke,
+   * `fill: none` line glyph against a ~72x70 filled tile), a small colour-coded label
+   * ABOVE the value rather than beside it, and the numeral at display weight.
+   *
+   * The value is no longer animated, because there is no width to animate. It is
+   * rewritten per view, which is what `view()` already did to the numeral.
+   *
+   * ⚠️ `.fa-stat` stays on the wrapper: `chars_metrics`'s clipping guard lists it in
+   * CARES and this screen is one of its two users.
+   */
   const statVals = new Map<string, HTMLSpanElement>();
   for (const row of STAT_ROWS) {
-    const wrap = el('div', 'fa-stat');
-    // Ten discrete pips, because the scale in `rules.ts` IS out of ten — a smooth
-    // bar makes "7" and "8" indistinguishable at a glance, and the numeral was
-    // previously flung to the far edge of the panel where the eye could not
-    // associate it with its own bar.
+    const wrap = el('div', 'fa-stat ds-row ds-row--slate chars-stat');
+    wrap.style.setProperty('--ds-row-accent', row.color);
     wrap.innerHTML = `
-      <span class="fa-stat-label">${icon(row.icon)} ${row.label}</span>
-      <div class="fa-stat-track"><div class="fa-stat-fill"></div><div class="fa-stat-pips"></div></div>
-      <span class="fa-stat-val"></span>
+      <span class="ds-tile ds-tile--stat" style="--ds-tile-fill:${row.color}">${icon(row.icon)}</span>
+      <span class="ds-row-body">
+        <span class="ds-row-label">${row.label}</span>
+        <span class="ds-row-val ds-num"></span>
+      </span>
     `;
-    const fill = wrap.querySelector<HTMLDivElement>('.fa-stat-fill')!;
-    fill.style.backgroundColor = row.color;
-    statFills.set(row.key, fill);
-    statVals.set(row.key, wrap.querySelector<HTMLSpanElement>('.fa-stat-val')!);
+    statVals.set(row.key, wrap.querySelector<HTMLSpanElement>('.ds-row-val')!);
     statsEl.appendChild(wrap);
   }
 
@@ -286,7 +324,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
           ><span class="chars-lv-item">${icon('damage')} x${dmg.toFixed(2)}</span></span>
       </div>
       ${gain}
-      <button class="chars-lv-btn" type="button" data-el="upgrade"${maxed || !affordable ? ' disabled' : ''}>${
+      <button class="ds-btn ds-btn--block chars-lv-btn" type="button" data-el="upgrade"${maxed || !affordable ? ' disabled' : ''}>${
         maxed
           ? `${icon('star')} Max level`
           : `${icon('sparkle')} Upgrade <span class="chars-lv-price">${icon('coin')} ${price.coins.toLocaleString()}</span>`
@@ -320,10 +358,12 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     heroRarity.textContent = def.rarity;
     heroRarity.style.background = RARITY_COLORS[def.rarity];
 
+    // WAS also `statFills.get(row.key)!.style.width = (value / STAT_MAX) * 100 + '%'`.
+    // `STAT_MAX` went with it: a row with no denominator does not need one, and a
+    // constant kept alive only to divide by is how a screen keeps a bar it no longer
+    // draws. `rules.ts` remains the authority on the 0-10 scale.
     for (const row of STAT_ROWS) {
-      const value = def.stats[row.key];
-      statFills.get(row.key)!.style.width = `${(value / STAT_MAX) * 100}%`;
-      statVals.get(row.key)!.textContent = String(value);
+      statVals.get(row.key)!.textContent = String(def.stats[row.key]);
     }
 
     abilitiesEl.innerHTML = '';
@@ -459,10 +499,10 @@ const CSS = `
 .fa-chars .chars-hero {
   position: relative;
   min-height: 0;
-  border: 3px solid var(--ink);
-  border-radius: 18px;
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-3);
   overflow: hidden;
-  box-shadow: 0 5px 0 rgba(0,0,0,0.35);
+  box-shadow: var(--ds-e3);
   /* Seen only for the frame before WebGL first presents. Imported from 'charStage.ts'
      so the card and the renderer cannot disagree about the clear colour. */
   background: ${PORTRAIT_BG_CSS};
@@ -503,19 +543,19 @@ const CSS = `
   min-height: var(--tap);
   padding: 0 14px;
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
-  font-size: clamp(0.66rem, 1.5vh, 0.82rem);
-  letter-spacing: 0.03em;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t2);
+  letter-spacing: var(--ds-track);
   text-transform: uppercase;
   color: var(--ink);
   background: linear-gradient(180deg, #FFFFFF 0%, #EFE2CC 100%);
-  border: 3px solid var(--ink);
-  border-radius: 999px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.4);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-pill);
+  box-shadow: var(--ds-e2);
   transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
 }
 .fa-chars .chars-equip:hover { filter: brightness(1.05); }
-.fa-chars .chars-equip:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.4); }
+.fa-chars .chars-equip:active { transform: translateY(3px); box-shadow: var(--ds-e0); }
 .fa-chars .chars-equip.is-equipped {
   background: linear-gradient(180deg, #A6E24A 0%, var(--lettuce) 100%);
   color: #123000;
@@ -546,13 +586,13 @@ const CSS = `
   padding: 0 9px;
   background: var(--lettuce);
   color: #FFFFFF;
-  border: 2px solid var(--ink);
-  border-radius: 999px;
-  box-shadow: 0 2px 0 rgba(0,0,0,0.35);
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-pill);
+  box-shadow: var(--ds-e1);
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
-  font-size: 0.62rem;
-  letter-spacing: 0.06em;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t1);
+  letter-spacing: var(--ds-track);
   text-transform: uppercase;
   pointer-events: none;
 }
@@ -604,18 +644,18 @@ const CSS = `
      render sit inside a portrait-shaped tile with no visible seam, because the
      card's own background and the render's baked background are the same colour. */
   background: var(--card-bg, #BEBEBE);
-  border: 3px solid var(--ink);
-  border-radius: 14px;
-  box-shadow: 0 4px 0 rgba(0,0,0,0.35);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  box-shadow: var(--ds-e3);
   transition: transform 0.1s, box-shadow 0.1s, border-color 0.12s;
 }
-.fa-chars .chars-card:hover { transform: translateY(-3px); box-shadow: 0 7px 0 rgba(0,0,0,0.35); }
-.fa-chars .chars-card:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.35); }
+.fa-chars .chars-card:hover { transform: translateY(-3px); box-shadow: var(--ds-e4); }
+.fa-chars .chars-card:active { transform: translateY(3px); box-shadow: var(--ds-e0); }
 /* The card you are LOOKING at: gold frame, the same colour the HUD reserves for
    "this is the selected slot" on the weapon bar. One meaning, one colour. */
 .fa-chars .chars-card.is-viewed {
   border-color: var(--gold);
-  box-shadow: 0 4px 0 rgba(0,0,0,0.35), 0 0 0 3px var(--gold), 0 0 16px var(--rarity-glow);
+  box-shadow: var(--ds-e3), 0 0 0 3px var(--gold), 0 0 16px var(--rarity-glow);
   transform: translateY(-3px);
 }
 .fa-chars .chars-card.is-viewed:active { transform: translateY(1px); }
@@ -712,11 +752,11 @@ const CSS = `
 .fa-chars .chars-card.has-render { justify-content: flex-end; }
 .fa-chars .chars-card-name {
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
+  font-weight: var(--ds-w-bold);
   /* Step 3 of the type ramp. Was 0.78rem max, which put card names, tab labels and
      currency values all within a couple of pixels of each other — a scale with no
      steps in it is not a hierarchy. */
-  font-size: clamp(0.66rem, 1.85vh, 1.02rem);
+  font-size: var(--ds-t3);
   color: var(--ink);
   text-align: center;
   line-height: 1.1;
@@ -775,7 +815,7 @@ const CSS = `
    more legibly at card size and does not fight the emoji for attention. */
 .fa-chars .chars-card-sheen { display: none; }
 .fa-chars .chars-card.is-animated {
-  box-shadow: 0 4px 0 rgba(0,0,0,0.35), 0 0 14px var(--rarity-glow);
+  box-shadow: var(--ds-e3), 0 0 14px var(--rarity-glow);
 }
 .fa-chars .chars-card.is-animated .chars-card-sheen {
   display: block;
@@ -817,8 +857,8 @@ const CSS = `
   flex-direction: column;
   gap: 4px;
   padding: 6px 8px;
-  border: 2px solid rgba(26,18,36,0.22);
-  border-radius: 12px;
+  border: var(--ds-stroke-1) solid rgba(26,18,36,0.22);
+  border-radius: var(--ds-r-2);
   background: rgba(255,255,255,0.5);
 }
 .fa-chars .chars-lv-head {
@@ -830,12 +870,12 @@ const CSS = `
 .fa-chars .chars-lv-badge {
   flex: 0 0 auto;
   padding: 1px 8px;
-  border: 2px solid var(--ink);
-  border-radius: 999px;
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-pill);
   background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
   font-family: 'Rubik', sans-serif;
-  font-weight: 900;
-  font-size: clamp(0.69rem, 1.5vh, 0.82rem);
+  font-weight: var(--ds-w-black);
+  font-size: var(--ds-t2);
   color: var(--ink);
   white-space: nowrap;
 }
@@ -848,8 +888,8 @@ const CSS = `
   align-items: center;
   gap: 3px;
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
-  font-size: clamp(0.69rem, 1.4vh, 0.8rem);
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t2);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   white-space: nowrap;
@@ -871,28 +911,18 @@ const CSS = `
 .fa-chars .chars-lv-now,
 .fa-chars .chars-lv-gain { display: inline-flex; flex-wrap: wrap; gap: 2px 10px; }
 .fa-chars .chars-lv-item { display: inline-flex; align-items: center; gap: 3px; }
+/* ADOPTED '.ds-btn'. This was nineteen declarations re-deriving, by hand, the gold
+   gradient, the ink line, the pill, the lip and the press travel that theme.ts's button
+   already declares -- one of the eleven bespoke buttons its adoption map counts. What
+   stays is the two things the component does not know: the weight (this control states a
+   PRICE, so it runs at black rather than bold) and the disabled treatment below, which is
+   a legibility decision rather than a state. */
 .fa-chars .chars-lv-btn {
-  appearance: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: var(--tap);
-  padding: 0 10px;
-  font-family: 'Rubik', sans-serif;
-  font-weight: 900;
-  font-size: clamp(0.69rem, 1.5vh, 0.84rem);
-  letter-spacing: 0.02em;
-  color: var(--ink);
-  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
-  border: 3px solid var(--ink);
-  border-radius: 999px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
-  transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
+  font-weight: var(--ds-w-black);
+  padding: 0 var(--ds-s4);
+  letter-spacing: var(--ds-track-tight);
+  text-transform: none;
 }
-.fa-chars .chars-lv-btn:hover:not(:disabled) { filter: brightness(1.06); }
-.fa-chars .chars-lv-btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.35); }
 /* A disabled upgrade keeps FULL ink contrast and loses only its lift and its fill.
    The usual 0.5 layer opacity would drop the price below AA, and a price is the last
    run on this screen that may become unreadable — see the identical note on the trophy
@@ -911,8 +941,8 @@ const CSS = `
 }
 .fa-chars .chars-lv-short {
   font-family: 'Rubik', sans-serif;
-  font-weight: 700;
-  font-size: clamp(0.66rem, 1.25vh, 0.74rem);
+  font-weight: var(--ds-w-body);
+  font-size: var(--ds-t1);
   color: rgba(26,18,36,0.82);
 }
 
@@ -923,36 +953,38 @@ const CSS = `
   inset-inline-start: 3px;
   display: none;
   padding: 0 5px;
-  border: 2px solid var(--ink);
-  border-radius: 999px;
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-pill);
   background: var(--mustard);
   font-family: 'Rubik', sans-serif;
-  font-weight: 900;
-  font-size: clamp(0.6rem, 1.15vh, 0.7rem);
+  font-weight: var(--ds-w-black);
+  font-size: var(--ds-t1);
   line-height: 1.5;
   color: var(--ink);
   z-index: 3;
 }
 .fa-chars .chars-card.has-lv .chars-card-lv { display: block; }
 .fa-chars .chars-card.is-maxed .chars-card-lv { background: var(--lettuce); }
-/* Taller bars, and the value is countable rather than estimated. */
-.fa-chars .fa-stat-track { height: clamp(16px, 2.6vh, 24px); }
-.fa-chars .fa-stat-pips {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    90deg,
-    transparent 0 calc(10% - 2px),
-    rgba(26,18,36,0.55) calc(10% - 2px) 10%
-  );
-}
-.fa-chars .fa-stat-val {
-  width: auto;
-  min-width: 18px;
-  font-size: clamp(0.72rem, 1.8vh, 0.95rem);
-  color: var(--ink);
-}
+/* ── THE TALLER TRACK AND THE PIPS ARE DELETED, AND THAT IS THE MEASUREMENT ────
+   WAS, verbatim, and kept per this project's rule about reversed assertions:
+
+     "Taller bars, and the value is countable rather than estimated."
+     .fa-chars .fa-stat-track { height: clamp(16px, 2.6vh, 24px); }
+     .fa-chars .fa-stat-pips  { ... repeating-linear-gradient at 10% ... }
+     .fa-chars .fa-stat-val   { width: auto; min-width: 18px; ... }
+
+   These two rules were THE ONLY places character select overrides the shared chrome,
+   and a per-element critique (6ebb6d1) measured what they bought: NOTHING. This screen's
+   taller, pipped stat bar scored 3 against a reference 7 -- the identical number
+   'home.ts''s plain bar scored. Two critics, two panels, one result. That is the finding
+   that refutes "make the bar better" and is why 'theme.ts' built a ROW instead of a
+   better BAR, and why both screens now draw one.
+
+   '.fa-stat-val' goes with them for a second, independent reason: it carries
+   'color: var(--ink)' here and 'rgba(26,18,36,0.7)' in theme.ts, and the row it would
+   now sit in is a DARK slate plate. Reusing it to keep a class list tidy would have
+   shipped dark ink on a dark ground -- 'docs/LESSONS.md' §1 case 10, for the third time
+   in this repo. See '.chars-stat' below for what replaced all of it. */
 .fa-chars .chars-abilities { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
 
 .fa-chars .chars-ability {
@@ -961,20 +993,20 @@ const CSS = `
   gap: 7px;
   padding: 5px 8px;
   background: #FFFFFF;
-  border: 2.5px solid var(--ink);
-  border-radius: 11px;
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-2);
 }
 .fa-chars .chars-ability--passive { background: #FFF0CF; }
-.fa-chars .chars-ability-em { font-size: clamp(1.35rem, 3.2vh, 1.85rem); line-height: 1.2; flex: 0 0 auto; }
+.fa-chars .chars-ability-em { font-size: var(--ds-t6); line-height: 1.2; flex: 0 0 auto; }
 .fa-chars .chars-ability-body { display: flex; flex-direction: column; min-width: 0; }
 .fa-chars .chars-ability-name {
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
-  font-size: clamp(0.72rem, 1.95vh, 1rem);
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t3);
   line-height: 1.22;
 }
 .fa-chars .chars-ability-desc {
-  font-size: clamp(0.64rem, 1.55vh, 0.82rem);
+  font-size: var(--ds-t2);
   line-height: 1.3;
   color: #4E2C1B;
 }
@@ -994,11 +1026,11 @@ const CSS = `
   /* Ink plate: flip the icon outline, or a stroke-only mark (the range arrows) draws
      ink on ink and disappears completely. */
   --fa-ic-ink: #FFF3DE;
-  border-radius: 999px;
+  border-radius: var(--ds-r-pill);
   font-family: 'Rubik', sans-serif;
-  font-weight: 800;
-  font-size: clamp(0.64rem, 1.6vh, 0.82rem);
-  letter-spacing: 0.02em;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t1);
+  letter-spacing: var(--ds-track-tight);
   white-space: nowrap;
 }
 /* The glyph runs a little larger than its own text. 11px was measured to be below the
@@ -1106,6 +1138,106 @@ const CSS = `
      not change but which a reader would still lose. */
   .fa-chars .chars-ability-facts { margin-top: 1px; gap: 3px; }
   .fa-chars .chars-fact { padding: 0 5px; }
+  /* ── THE STAT BAND PAYS FOR ITSELF HERE, MEASURED IN DEVICE PIXELS ────────────
+     The 30px compact cell measures 65.17px tall against the 48px the three bars used,
+     and this panel has no slack at all on a NOTCHED landscape phone: 'ud_defects'
+     reported the first ability row's BOX cut by 16.39px at 844x390+notch and 13.39px at
+     852x393+notch -- D3, one of the four hard defects this file exists to keep fixed.
+     The un-notched viewports passed; the notch takes 21px off the bottom and no media
+     query can see it, so the un-notched case has to carry the slack (the note above says
+     exactly this about the 460px bound).
+
+     So the cell is rebuilt to the height budget rather than to the design: a 24px tile,
+     the value one rung down at t3, and both text lines at line-height 1. That is 48.2px,
+     which hands back the 16.4 and then some. It is NOT the 56px tile the audit called
+     for -- but the property the audit measured as wrong was that our icon was a
+     1.7px-stroke 'fill: none' OUTLINE at 16px of actual ink, and a 24px filled, tinted,
+     ink-bordered tile is still a MASS. The full geometry runs at every viewport with the
+     room for it, which is every viewport above 460px tall. */
+}
+
+/* ── THE STAT ROWS TURN THROUGH 90 DEGREES ON A SHORT SCREEN ──────────────────
+   Identical to the rule 'home.ts' carries, for an identical reason and at a threshold
+   this panel's own budget sets. The tall form is three 56px slate rows, ~180px; the
+   itemised bill above records this panel at 281px total at 852x393, of which
+   '.chars-level' alone is 119. Three tall rows would eat the abilities list whole, which
+   is D3 -- the defect this file spent a pass measuring in device pixels.
+
+   Laid out across, the same three facts cost about what the bars did. Nothing is
+   dropped: the tinted tile, the colour-coded label and the display-weight numeral all
+   survive; only the axis changes.
+
+   ⚠️ 560 and not 460. 852x480 is above every other threshold in this file and is where
+   'ud_defects' measured the tightest flank, so a 460 bound would leave the one viewport
+   the audit used running the tall form. */
+@media (max-height: 560px) {
+  /* ⚠️ THE CARD NAME DROPS A RUNG, AND IT IS A REGRESSION FIX RATHER THAN A PREFERENCE.
+     Ladder step 3 is right on a desktop card and WRONG on a ~96px one: t3 floors at
+     0.82rem = 13.1px against the old clamp's 0.66rem = 10.6px, and the first two
+     captures after the type pass rendered "Water Bot..." at BOTH 844x390 and 852x480 on
+     cards that had shown "Water Bottle" the run before. Step 2 floors at 0.69rem =
+     11.04px, over 'screen_metrics''s 11px legibility floor and back inside the card.
+     ⚠️ The threshold is 560 and not 460 for exactly the reason the first fix missed:
+     852x480 is above 460, so a 460 bound repaired the phone the suite watches and left
+     the phone the AUDIT used still truncating. The portrait breakpoint at the foot of
+     this file states the same rule for the same element — a ladder step sized off vh
+     knows nothing about how wide the card is, and where the two disagree the CARD wins. */
+  .fa-chars .chars-card-name { font-size: var(--ds-t2); }
+  .fa-chars .chars-stats { flex-direction: row; gap: var(--ds-s1); }
+  .fa-chars .chars-stat {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0;
+    min-height: 0;
+    padding: var(--ds-s1) 0;
+  }
+  .fa-chars .chars-stat .ds-tile--stat {
+    width: 30px;
+    height: 30px;
+    border-width: var(--ds-stroke-1);
+    font-size: var(--ds-t6);
+  }
+  .fa-chars .chars-stat .ds-row-body { flex: 0 0 auto; align-items: center; text-align: center; }
+  /* The caps tracking goes, and only the tracking: at 11px in a ~55px cell, 0.09em on
+     "DAMAGE" is the difference between the word fitting and the component's own ellipsis
+     firing, and a truncated label is the D2 defect this screen already fixed once. */
+  .fa-chars .chars-stat .ds-row-label { letter-spacing: var(--ds-track-tight); }
+  .fa-chars .chars-stat .ds-row-val { font-size: var(--ds-t4); }
+}
+
+/* ── AND THE NOTCHED LANDSCAPE PHONE PAYS FOR THE BAND OUT OF THE BAND ─────────
+   🚨 THIS BLOCK IS BELOW THE 560px ONE ON PURPOSE, AND THE FIRST ATTEMPT WAS ABOVE IT.
+   A MEDIA QUERY ADDS NO SPECIFICITY, so a '@media (max-height: 460px)' rule written
+   earlier in the file loses to an identical selector inside '@media (max-height: 560px)'
+   written later -- both match at 390px tall and the later one wins. Measured: the tile
+   stayed 30px and the band came back 62.73px instead of the ~48 intended, i.e. the fix
+   moved 2.44px of the 16.39 it was written to move. Second time this exact trap fired in
+   this pass; the first was in 'home.ts'.
+
+   The budget it is paying: 'ud_defects' measured the first ability row's BOX cut by
+   16.39px at 844x390+notch and 13.39px at 852x393+notch after the stat band went in --
+   D3, one of the four hard defects this file exists to keep fixed. The notch takes 21px
+   off the bottom and NO media query can see it (the block above says so), so the
+   un-notched case has to carry the slack.
+
+   A 24px tile is not the 56px the audit called for, and that is a stated compromise
+   rather than a miss: the property the audit measured as WRONG was that our icon was a
+   1.7px-stroke 'fill: none' OUTLINE with 16px of actual ink, and a 24px filled, tinted,
+   ink-bordered tile is still a MASS. The full 56px geometry runs at every viewport that
+   has the room, which is every viewport above 560px tall. */
+@media (max-height: 460px) {
+  /* And 4px of headroom on top, because 0.61px is not a margin. With the band at 48.17
+     the first ability row cleared its container by 0.61px at 844x390+notch -- a pass
+     that the next font-metric change anywhere in the product would turn into a failure.
+     The panel's own gap is the cheapest 4px in the bill and it deletes nothing: 1px
+     instead of 2px across four gaps. Margin 0.61 -> ~4.6px. */
+  .fa-chars .chars-detail { gap: 1px; }
+  .fa-chars .chars-stat { padding: 0; }
+  .fa-chars .chars-stat .ds-tile--stat { width: 24px; height: 24px; font-size: var(--ds-t4); }
+  .fa-chars .chars-stat .ds-row-label { line-height: 1; }
+  .fa-chars .chars-stat .ds-row-val { font-size: var(--ds-t3); line-height: 1; }
 }
 
 @media (max-width: 700px) {
@@ -1115,12 +1247,42 @@ const CSS = `
   }
   .fa-chars .chars-detail { max-height: 34vh; }
   .fa-chars .chars-heading { display: none; }
+  /* ── THE STAT BAND GOES ACROSS HERE TOO, AND 'chars_metrics' IS WHAT SAID SO ──
+     Portrait caps this panel at 34vh = 317px, and the tall '.ds-row' form is three 56px
+     slabs plus gaps = ~180px of it. With the level block at ~100 and two section titles
+     at 15 each there is nothing left, so the panel OVERFLOWED and the "Abilities" title
+     was drawn on the shell's red backdrop: 'chars_metrics' measured it at 2.95:1 against
+     a 4.5 floor -- 'rgba(26,18,36,0.8) on rgb(202,52,45)@27%', which is the page
+     background, not a panel. A contrast battery reported it, and what it was actually
+     detecting was a LAYOUT overflow. (LESSONS §6b: an acceptance test proves you moved
+     the thing you named, not that it was the thing.)
+     Across, the band is ~65px and the panel fits. There is far more WIDTH here than on a
+     landscape phone, so the tile keeps its 30px rather than dropping to the notched
+     phone's 24. */
+  .fa-chars .chars-stats { flex-direction: row; gap: var(--ds-s1); }
+  .fa-chars .chars-stat {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0;
+    min-height: 0;
+    padding: var(--ds-s1) 0;
+  }
+  .fa-chars .chars-stat .ds-tile--stat {
+    width: 30px;
+    height: 30px;
+    border-width: var(--ds-stroke-1);
+    font-size: var(--ds-t6);
+  }
+  .fa-chars .chars-stat .ds-row-body { flex: 0 0 auto; align-items: center; text-align: center; }
+  .fa-chars .chars-stat .ds-row-val { font-size: var(--ds-t4); }
   /* Step 3 of the type ramp is sized off vh, and in portrait there is a lot of vh and
      very little card: 1.85vh of 932 is 16.3px inside an 84px tile, which ellipsised
      "Hamburger" to "Hambu...". Sizing it off the card instead of off the viewport is
      not something CSS can express, so the ramp step is simply shorter here — 12.1px,
      still over the 11px floor and still a step above the rarity chip below it. */
-  .fa-chars .chars-card-name { font-size: clamp(0.66rem, 1.3vh, 0.82rem); }
+  .fa-chars .chars-card-name { font-size: var(--ds-t2); }
   /* TOP-LEFT here, bottom-centre everywhere else, and the reason is the panel's shape
      rather than a preference. In portrait the hero row is ~380px tall against a full
      column's ~740, and the rig frames the subject to a fraction of the panel HEIGHT —
