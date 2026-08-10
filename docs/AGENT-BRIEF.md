@@ -19,6 +19,21 @@ two agents at once and a commit swept a peer's in-flight work under the wrong me
 **working tree** for that path, including a peer's uncommitted edits to the *same file*. **If you
 find changes in your file you did not write, stop and report — do not commit them.**
 
+🚨 **AND "NOTHING ELSE IS RUNNING" EXPIRES. TREAT IT AS TRUE ONLY WHEN YOU WERE DISPATCHED.**
+An orchestrator writes that sentence honestly and it stops being true the moment your work outlives
+your dispatch window — a successor is briefed on your own handover ladder and lands *in your file
+set*, correctly. Happened 2026-08-11: the N-fighter step-1 agent woke on a stale wait-loop hours
+after finishing, found +1,091 lines across five of its files, and **stopped without committing,
+reverting or stashing anything.** That was the right move and it cost nothing.
+
+So: **re-read `git status` before you touch anything after any pause.** If your files carry changes
+you did not write, you are no longer the owner — **report and stop.** Do not diff-and-merge, do not
+"just commit my part": `git commit -- <path>` commits the *working tree* for that path, so your
+message would ship a peer's half-finished work under it.
+⚠️ And do **not** run gates on that tree either. Any `tsc` / `sim.test` / bit-identity number you
+quote would be measured on a peer's half-saved files — a red result there is noise, not a regression,
+and reporting it as one wastes an orchestrator's next decision.
+
 **The release valve:** a **provably additive, non-behavioural** fix — a comment, a user-facing
 string, a doc line — may cross a boundary if you (a) verify the file is **clean in `git status`**
 immediately before and after, (b) change **nothing executable**, and (c) **declare it**. ⚠️ A row in
