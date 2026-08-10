@@ -488,6 +488,24 @@ where `__charStage` knows the true answer)
     ⚠️ That check was nearly shipped at **spread < 0.15 → agree within 0.02**, which is internally
     inconsistent — a 0.15 spread *permits* a 0.15 contact difference — and it "failed" at 0.1190 on
     hamburger `kneeL|footL` (spreads 0.141/0.136). **The test was wrong, not the metric.**
+  - 🚨 **AND IT IS NOW WRONG IN BOTH DIRECTIONS AT ONCE, IN ONE RUN, ON THE SAME DAY.** Everything
+    above could still be read as *"noisy, but conservative"* — it fails characters that are fine. It
+    is not conservative. Measured `3ad20e2`, `--ids egg,hamburger,pizza`, both columns printed side
+    by side:
+
+    | char | weakB% | weakBc% (contact-local) | verdict |
+    |---|---|---|---|
+    | egg | **61.8** | **0.0** | FAIL — and not one boundary pair is weak where it touches |
+    | pizza | 32.1 | 17.0 | FAIL — about half the alarm is real |
+    | hamburger | **4.3** | **9.0** | **PASS — while its contact count is more than double egg's** |
+
+    **A false FAIL and a false PASS in the same table.** A metric that only over-reported would be a
+    tax; one that also under-reports cannot be used as a gate verdict in either direction, and
+    "well, it passed" is not evidence of anything. `minDL` is the quantity with a floor (**0.0039**,
+    the 8-bit quantisation of `value.png`) and a target (0.15) — steer on it and on `dLcontact`.
+    ⚠️ Note what this does **not** say: the underlying figure/ground concern is real and `dlBelow10`
+    is now **0 of 11**, closed on merit. It is the *aggregate over whole-part medians* that is
+    broken, not the idea of measuring adjacency.
 - **`limbcheck` measures the preview's 22°; the match camera is 58°.** At 58°, idle passes go
   **8/11 → 0/11**. Idle *ranking* survives (ρ 0.927); **run ranking does not** (ρ 0.673). And the
   shipped spawn faces every character at **profile to camera**, burying 5.3 of ~15 joints against
