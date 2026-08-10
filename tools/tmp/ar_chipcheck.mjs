@@ -121,6 +121,21 @@ shaderErrors.length = 0;
 await page.evaluate(() => {
   window.__stage.scene.traverse((o) => {
     if (!o.name?.startsWith('ground_chip')) return;
+    // ⚠️ REPAIRED 2026-08-10. This control used to be `flatShading = true` ALONE, which
+    // relied on the bug existing: `applyRimLight` read a bare `vNormal` that three does
+    // not declare under FLAT_SHADED. `efdec5a` gave the rim an `#ifdef FLAT_SHADED`
+    // fallback normal, the combination now links, and this control went BLIND — the
+    // "guard whose coverage SHRANK when the bug was fixed" hazard (docs/LESSONS.md §13),
+    // which is exactly how driver_guard once lost 8 of its 49 checks.
+    //
+    // The defect is now injected DIRECTLY — a raw `vNormal` read that no fix upstream can
+    // satisfy — so this control cannot be repaired out from under itself again.
+    o.material.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        '#include <dithering_fragment>\n  gl_FragColor.rgb += vec3(0.0) * normalize(vNormal).x;',
+      );
+    };
     o.material.flatShading = true;
     o.material.needsUpdate = true;
   });
