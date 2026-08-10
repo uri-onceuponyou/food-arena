@@ -161,6 +161,39 @@ export interface BodyArchetype {
    * measured 0.1441 mean with 8 of 11 below the weakest plate.
    *
    * The head SHRINKS to pay for it, so total height does not move.
+   *
+   * ── 🔴 THE COST OF A NONZERO VALUE, MEASURED AT THE CAMERA URI JUDGES ───────
+   * A gap builds a COLUMN and a COLLAR (`rig.ts`, `neckGap > 0`). Those are correct
+   * structure only while the food mass HIDES them; a column the mass does not hide is
+   * a third mass at the character's most prominent junction. Uri, on taco:
+   * *"No mouth, seems like a hat or something."*
+   *
+   * Measured 2026-08-11 by ABLATION on the shipped lobby capture — the column and
+   * collar painted `#FF00FF`, captured through `cr2_shot`, magenta counted, with the
+   * unablated capture as a zero-scoring control:
+   *
+   *   char      neck px on a 900x1400 lobby capture
+   *   hotdog          9767      ← LANKY, `neckFraction: 0.065`
+   *   sushi           5085
+   *   soup            4289
+   *   pizza           1914
+   *   burrito            0      ← the only one whose mass covers it
+   *
+   * Four of the five characters that build a neck put 2k-10k px of it on screen.
+   * `shots/rg/normal_fit/hotdog.png` is the worked example and it is unambiguous: a
+   * peach column with a hard black ring at its base, between the bun and the torso.
+   *
+   * ⚠️ The old table in `rig.ts` measured this at the MATCH camera (pitch 58), where
+   * it reads as 86% HIDDEN, and treated the shortfall as a defect to close. **That
+   * sign is backwards and it is corrected in `rig.ts`.** Occlusion costs
+   * `Δy / tan(pitch)` of forward overhang, so the lobby demands 4.4x more than the
+   * match camera does — verifying at 58 cannot see this at all.
+   *
+   * **So a nonzero value here is a commitment that every character on this archetype
+   * has forward OVERHANG at its chin.** Check with `node tools/tmp/rg_neckz.mjs`
+   * before raising one, and note that `0` is fully supported: STUB uses it, and
+   * `taco.ts` opted out with an exact compensation that leaves R and `headCentreY`
+   * identical to six figures.
    */
   readonly neckFraction: number;
   readonly footClearance: number;

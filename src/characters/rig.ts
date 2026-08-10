@@ -135,6 +135,99 @@ export interface LimbSize {
  */
 export const FOOT_WIDTH_RATIO = 1.75;
 
+/**
+ * A limb segment: a lathed, tapered tube hanging DOWN from the joint origin, spanning
+ * `y ∈ [-len, rise]`, with `rTop` at the top and `rBot` at the bottom.
+ *
+ * ── 🚨 THIS IS THE SIXTH COPY, PUBLISHED SO THERE IS NEVER A SEVENTH ────────────
+ * `taperedSegment` is copy-pasted into **six** character files — `hamburger`,
+ * `burrito`, `taco`, `donut`, `egg`, `lollipop` — and `76369eb` recorded exactly what
+ * that costs: donut derived the cap fix and *"the fix never reached the other five"*,
+ * which is why the bead necklace survived weeks. **The knowledge was written down,
+ * correct, and in the repo, while the FUNCTION was duplicated.** A comment cannot
+ * propagate a fix; a symbol can.
+ *
+ * The six had diverged into two bodies with two incompatible signatures:
+ *
+ *   A "rise"      hamburger, burrito, taco   `(len, rTop, rBot, segs, rise)`
+ *                 capTop = min(rTop, (len + rise) * 0.30),  yTopCap = rise - capTop
+ *   B "capFracs"  donut, egg, lollipop       `(len, rTop, rBot, segs, capTopFrac, capBotFrac)`
+ *                 capTop = min(rTop, len * capTopFrac),     yTopCap = -capTop
+ *
+ * ✅ **THE UNION BELOW IS BYTE-IDENTICAL TO BOTH**, and that is proved rather than
+ * asserted: `node tools/tmp/rg_taper.mjs` builds all three implementations over the
+ * cast's real slot geometry plus 400 randomised cases and compares every vertex —
+ * **832 comparisons, worst |Δ| exactly 0** — with known-bad cases that require the
+ * comparator to FAIL when one argument is perturbed. With the default fractions it
+ * reduces to A; with `rise: 0` it reduces to B (`rise - capTop` = `-capTop`).
+ * **So migrating a call site is provably a no-op.**
+ *
+ * ⚠️ **`taperedLimb` IS A DIFFERENT FUNCTION AND IS NOT COVERED HERE.** Four more
+ * files (`hotdog`, `pizza`, `sushi`, `soup`) carry a helper of that name which returns
+ * a Mesh, uses `capBot = min(rBot, len * 0.45)` and a `len * 0.16` top cap, and — on
+ * three of the four — sets the bottom ring's radius to `capBot` rather than to `rBot`,
+ * so the bottom radius silently collapses to `len * 0.45` whenever that is the smaller.
+ * `soup.ts` alone writes `rBot * cos(a)` there and keeps the authored radius. Those
+ * are genuinely different shapes; do not unify them into this one, and `soup.ts` in
+ * particular must not adopt it — its own `capH` bound by `len * 0.45` is the same
+ * cap fix expressed differently.
+ *
+ * ── The two things a caller has to know ────────────────────────────────────────
+ *  · **The caps are bounded by the BONE, not by the radius.** `0.42 / 0.30` sum to
+ *    0.72 < 1, so a straight side always exists. Sizing them by the radius is what
+ *    stacked two hemispheres into a sphere that poked above its own joint origin and
+ *    turned four segments into a bead necklace.
+ *  · **A limb's two caps are NOT interchangeable.** INTERIOR caps — the upper arm's
+ *    bottom, the forearm's top and the leg equivalents — abut a segment of the same
+ *    radius and are never visible; pass ~0.05 there and the two lathes share a
+ *    silhouette tangent. EXTERIOR caps — shoulder, wrist, hip, ankle — keep the
+ *    defaults and stay round. Flattening all four is what turned donut's limbs into
+ *    "a stack of drink cans" and cost a value rung.
+ *
+ * Radii must be matched in METRES at a joint, not in multipliers: the rig hands the
+ * lower segment a smaller base radius (`forearmRadius` = `armRadius * 0.92`,
+ * `shinRadius` = `legRadius * 0.9`), so equal multipliers step the outline. Those
+ * products are published on `RigMetrics` for exactly this reason.
+ */
+export function taperedSegment(
+  len: number, rTop: number, rBot: number, radialSegments = 12,
+  o: { rise?: number; capTopFrac?: number; capBotFrac?: number } = {},
+): THREE.BufferGeometry {
+  const rise = o.rise ?? 0;
+  const capTopFrac = o.capTopFrac ?? 0.30;
+  const capBotFrac = o.capBotFrac ?? 0.42;
+  // Profile MUST be wound bottom-to-top (y increasing). `LatheGeometry`'s face winding
+  // — and therefore which way `computeVertexNormals` points — depends on point ORDER,
+  // not on point position. An earlier version built it top-to-bottom because the
+  // segment "hangs down" and every limb using it rendered near-black: inverted normals
+  // facing away from the light.
+  const capSegs = 6;
+  const capBot = Math.min(rBot, len * capBotFrac);
+  const capTop = Math.min(rTop, (len + rise) * capTopFrac);
+  const yBotCap = -len + capBot;
+  const yTopCap = rise - capTop;
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
+  }
+  // 4 side steps against 6 cap segments, and 16 radial where a character can afford
+  // it: a 5/3/12 lathe puts a shading corner where `computeVertexNormals` has to
+  // guess, and it rendered as a faceted gem.
+  const sideSteps = 4;
+  for (let i = 1; i <= sideSteps; i++) {
+    const t = i / sideSteps;
+    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
+  }
+  for (let i = 1; i <= capSegs; i++) {
+    const a = (Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
+  }
+  const geo = new THREE.LatheGeometry(pts, radialSegments);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 /** Attachment points `dressLimbs` can replace. */
 export type LimbPart =
   | 'upperArmL' | 'upperArmR' | 'forearmL' | 'forearmR' | 'handL' | 'handR'
@@ -196,7 +289,27 @@ export interface RigPalette {
 export interface RigProportions {
   /** Total character height in metres. */
   height?: number;
-  /** Head mass as a fraction of total height. Reference chibi sits around 0.42-0.48. */
+  /**
+   * Head mass as a fraction of total height. Reference chibi sits around 0.42-0.48.
+   *
+   * 🚨 **`headRadius` IS NOT `height * headFraction / 2`, AND ASSUMING IT IS COST
+   * FOUR ROUNDS OF BURRITO.** That file carried a derivation ending *"R = 0.20H by
+   * construction: headFraction 0.40, halved"*. The constructor subtracts the NECK GAP
+   * before halving —
+   *
+   *     headH = height * headFraction - 2 * neckGap / (1 + headMount)
+   *     R     = headH / 2
+   *
+   * — so with LANKY's `neckFraction 0.055` the real R is **0.3383, not 0.4099: 17.5%
+   * out**, and every metre figure derived from it inherits the error. That is why
+   * `shoulderWidth - armRadius * 0.55` was not "exactly `headTubeBottomR`" and why
+   * both of burrito's arms hung 0.087 m outside the tube they were meant to straddle
+   * (worst overlap **-0.0228 m**, fixed to +0.0330 m).
+   *
+   * **Read `rig.metrics.headRadius`. Never re-derive it.** The relationship changes
+   * whenever `neckFraction` or `headMount` moves, and a character that re-derives it
+   * will be wrong silently and only in the archetypes that have a neck.
+   */
   headFraction?: number;
   /** Arm thickness in metres. */
   armRadius?: number;
@@ -280,6 +393,21 @@ export interface RigProportions {
    * headMount)` and the top of the head lands where it always did. That is
    * arithmetic, not a tuning choice — see the constructor. It also happens to be
    * precisely what the egg critic asked for: shrink the head AND lift it.
+   *
+   * ── 🔴 BEFORE YOU OPT IN: THE COLUMN MUST BE BEHIND YOUR FOOD MASS ──────────
+   * A neck gap builds a column and a collar (see the constructor). Those are
+   * STRUCTURE — a pinch between two lobes and a dark notch under the chin — and they
+   * are correct only while the food mass HIDES them. A column the mass does not hide
+   * is a third mass at the character's most prominent junction, which is what Uri
+   * read on taco as *"a hat"*: **at the lobby camera 9 of 11 characters would expose
+   * one, and only 4 do at the match camera**, so verifying at 58° proves nothing.
+   *
+   * `node tools/tmp/rg_neckz.mjs` is the check and the constructor carries the table.
+   * If your character's exposure at pitch 20 is not 0, either give the mass forward
+   * OVERHANG (depth, not width — a wider collar at the same depth makes the third
+   * mass bigger) or set this to **0**, which is fully supported: `taco.ts` does it
+   * with an exact compensation that leaves R and `headCentreY` identical to six
+   * figures, and `bodies.ts` gives STUB 0 for the same reason stated the other way up.
    */
   neckFraction?: number;
   /**
@@ -398,6 +526,41 @@ export interface RigMetrics {
   shinLength: number;
   /** Ankle joint height above the ground. */
   ankleY: number;
+
+  // ── 🚨 THE SLOT RADII, IN METRES, BECAUSE RE-DERIVING THEM COST FOUR ROUNDS ──
+  //
+  // `armRadius` and `legRadius` above are the rig's AUTHORED thicknesses. They are
+  // NOT what any of the twelve limb slots is built at, and every consumer that
+  // assumed otherwise was wrong in the same direction:
+  //
+  //   · `soup.ts` asserted *"the shin's TOP radius is exactly the thigh's BOTTOM
+  //     radius"*. True of the FACTOR both sides passed and false of the RADIUS:
+  //     `limbSlots()` hands the thigh `legRadius` and the shin `legRadius * 0.9`, so
+  //     the same 0.93 multiplier produced 0.1445 against 0.1301 — a **10% step at the
+  //     knee**, which is exactly the two-stacked-cups defect the cap fix existed to
+  //     remove, surviving in the call site.
+  //   · `lollipop.ts`'s connectivity window used the rig's `armRadius` 0.1240 m while
+  //     `dressLimbs` built that segment at `size.radius * 0.66` = **0.0818 m**, so its
+  //     arm started **0.057 m outside the body** and floated clear.
+  //
+  // Both are the same bug: the derived number existed only inside `limbSlots()`, was
+  // visible only to a `dressLimbs` callback, and was therefore RE-TYPED anywhere else
+  // it was needed. It is published here so there is nothing left to re-type.
+  //
+  // ⚠️ These are the radius the RIG hands out. A character that scales it further in
+  // its own `dressLimbs` callback (`size.radius * 0.66`) owns that factor, and this
+  // is the number it must multiply — see `ChibiRig.limbSize()` for the whole slot.
+  /** Upper-arm slot radius = `armRadius`. */
+  upperArmRadius: number;
+  /** Forearm slot radius = `armRadius * 0.92`. NOT equal to `upperArmRadius`. */
+  forearmRadius: number;
+  /** Thigh slot radius = `legRadius`. */
+  thighRadius: number;
+  /** Shin slot radius = `legRadius * 0.9`. NOT equal to `thighRadius`. */
+  shinRadius: number;
+  /** Foot slot: `len` handed to a boot builder = `legRadius * FOOT_WIDTH_RATIO`. */
+  footLength: number;
+
   /** Vertical clear gap between torso top and the bottom of the head mass. 0 = none. */
   neckGap: number;
   /** Radius of the neck column. Meaningful only when `neckGap > 0`. */
@@ -472,6 +635,12 @@ export class ChibiRig {
   readonly hasTorso: boolean;
   /** The default torso mesh, so characters can restyle or hide it. Null for STUB. */
   torsoMesh: THREE.Mesh | null = null;
+  /** The pelvis mass, so `fitPelvis()` and a character can reach it. Null when off. */
+  pelvisMesh: THREE.Mesh | null = null;
+  /** The pelvis's authored extents in metres, before any fit. */
+  private pelvisNominal: { w: number; h: number; d: number } | null = null;
+  /** Set once `fitPelvis()` has run, so `dressLimbs()` cannot double-apply it. */
+  private pelvisFitted = false;
   /** Per-character idle attitude, applied by restPose(). */
   stance: Required<RigStance>;
   /**
@@ -734,6 +903,15 @@ export class ChibiRig {
       thighLength: thighLen,
       shinLength: shinLen,
       ankleY,
+      // ⚠️ These five are the ONLY place these products are written. `limbSlots()`
+      // reads them back rather than recomputing, so the published number and the
+      // number the slot is built at cannot diverge — which is the entire point, and
+      // is the property `soup.ts`'s and `lollipop.ts`'s comments both lacked.
+      upperArmRadius: this.p.armRadius,
+      forearmRadius: this.p.armRadius * 0.92,
+      thighRadius: this.p.legRadius,
+      shinRadius: this.p.legRadius * 0.9,
+      footLength: this.p.legRadius * FOOT_WIDTH_RATIO,
       neckGap,
       neckRadius,
       nominalHeight: this.headCentreY + this.headRadius,
@@ -990,52 +1168,124 @@ export class ChibiRig {
     // so the notch survives whatever the lighting pass does next. It is also what
     // hides the seam where a character's food mass meets the column.
     //
-    // ── 🚨 AND 86% OF IT NEVER REACHES THE SCREEN. MEASURED, NOT SUSPECTED ────────
-    // `tools/tmp/ca_neckprobe.mjs` (new; keeps the isolated footprint MASK, which
-    // `limbmatch` throws away, and intersects it with the owner map so the occluder is
-    // NAMED rather than guessed). Match camera, shipped facing (yaw 90), pot_south,
-    // ss2 — the six characters that build a neck:
+    // ── 🔴 THE TABLE THAT USED TO BE HERE HAD THE SIGN BACKWARDS ─────────────────
+    // Kept verbatim below per `CLAUDE.md`'s rule on reversed assertions, because the
+    // reasoning that produced it is the reasoning someone will use again. It read:
     //
-    //   char        foot  delivered  ratio   occluded by
-    //   taco        2168        782  0.361   head 1463
-    //   hotdog      1503        301  0.200   head 1228
-    //   pizza        798         42  0.053   head  767
-    //   burrito      565          0  0.000   head  563, torso 2
-    //   sushi        939          0  0.000   head  938
-    //   soup        2199          0  0.000   head 2159
-    //   TOTAL       8172       1125  0.138
+    //   > "🚨 AND 86% OF IT NEVER REACHES THE SCREEN. MEASURED, NOT SUSPECTED."
+    //   >
+    //   >   char        foot  delivered  ratio   occluded by
+    //   >   taco        2168        782  0.361   head 1463
+    //   >   hotdog      1503        301  0.200   head 1228
+    //   >   pizza        798         42  0.053   head  767
+    //   >   burrito      565          0  0.000   head  563, torso 2
+    //   >   sushi        939          0  0.000   head  938
+    //   >   soup        2199          0  0.000   head 2159
+    //   >   TOTAL       8172       1125  0.138
+    //   >
+    //   > "on three of them the column and the collar are completely dead geometry"
+    //   > "the widening that would fix it is 2.1x to 3.5x" — a required collar radius
+    //   > of 59-96% of the food mass's own radius, on all six.
     //
-    // The occluder is the character's OWN FOOD MASS in all six, and on three of them
-    // the column and the collar are **completely dead geometry**. This is
-    // `docs/LESSONS.md` §1 case 17 exactly — a fix that was never closed out by
-    // measuring delivered pixels — and it is the same theorem `e6fed57` proved for
-    // STUB ("anything added BELOW the food mass cannot be seen"), which turns out not
-    // to be a STUB property at all.
+    // **Every number in it is arithmetically right and the conclusion drawn from it is
+    // inverted.** Taco's 782 delivered pixels were the LARGEST entry and were read as
+    // the healthiest row. They are the defect. Uri, on taco: *"No mouth, seems like a
+    // hat or something."* — 🎩 **the hat IS those 782 pixels.** A neck column that
+    // reaches the screen is a column standing in front of the head it is meant to be
+    // behind. `25665f9` measured the cause after three failed rounds: the column
+    // reaches z = +0.171 while that character's face, on a wall leaning back 0.26 rad,
+    // only reaches z = +0.017 — **the neck stands 0.15 m IN FRONT OF the face**, so
+    // nothing mounted on the face can ever cover it. A recolour failed (`outlineGroup`
+    // still draws the edge), a lower wall failed, a masa jaw failed; all three attacked
+    // the wrong axis. `taco.ts` now ships `neckFraction: 0` with an exact compensation.
     //
-    // ⚠️ THE WIDENING THAT WOULD FIX IT IS NOT A FIX, AND THE ARITHMETIC SAYS SO.
-    // The camera is pitched 58° below horizontal (`render/camera.ts:265`), so a ray
-    // from the collar toward the camera rises 1 m per 1/tan(58°) = 0.625 m travelled.
-    // A ring of radius `r` at height `y0` is hidden by any mass vertex above it with
-    // `R >= r + 0.625 * Δy`, i.e. it must clear `max(R - 0.625 * Δy)` over the mass's
-    // own vertices — being wider than the mass at its OWN height is not enough, because
-    // the overhang above it does the occluding. `ca_neckprobe` computes exactly that:
+    // Two separate errors compound in that table, and they point opposite ways:
     //
-    //   char       collar r   REQUIRED r   factor   as a share of the mass's radius
-    //   hotdog       0.2288       0.4838    x2.11   0.83
-    //   taco         0.2607       0.5920    x2.27   0.67
-    //   burrito      0.1117       0.2700    x2.42   0.59
-    //   pizza        0.1539       0.4829    x3.14   0.96
-    //   soup         0.2467       0.8045    x3.26   0.70
-    //   sushi        0.1636       0.5691    x3.48   0.70
+    // 1. **IT WAS MEASURED AT THE WRONG CAMERA.** Every row is pitch 58
+    //    (`render/camera.ts:265`). Uri judges at pitch 20 (`ui/screens/charStage.ts`).
+    //    Occlusion needs `Δy / tan(pitch)` of forward overhang, so the lobby demands
+    //    **2.747 m of depth per metre of height against the match camera's 0.625 —
+    //    4.4x more**. Re-measured ON THE SHIPPED LOBBY PATH by ABLATION: the column
+    //    and the collar are painted `#FF00FF`, the character is captured through
+    //    `tools/tmp/cr2_shot.mjs` (the real renderer, the real stage, 900x1400,
+    //    subjectFill 0.60), and the magenta pixels are counted. The **control is the
+    //    same capture with the shipped palette**, which must count ZERO — it does, on
+    //    all five, so nothing here is a false positive:
     //
-    // 2.1x to 3.5x, i.e. **59-96% of the food mass's own radius, on all six**. At that
-    // size the ring is no longer a notch under the chin — it IS the silhouette, at the
-    // character's most prominent junction. That is a design change for Uri
-    // (`docs/DECISIONS-FOR-URI.md` §16 has per-character art rejects inbound), not a
-    // defect fix, so it is NOT taken here. Recorded so the next pass starts from the
-    // number instead of re-deriving it, and so nobody widens the collar a little,
-    // measures nothing, and concludes the lever is dead: below ~2.1x it delivers
-    // exactly zero extra pixels, because occlusion is a threshold, not a gradient.
+    //      char      neck px, shipped lobby capture   bbox
+    //      hotdog          9767                       152 x 101
+    //      sushi           5085                       118 x  56
+    //      soup            4289                       194 x  49
+    //      pizza           1914                       106 x  32
+    //      burrito            0                       —
+    //
+    //    **Four of the five characters that build a neck put a 2k-10k px block of it
+    //    on screen at the camera the owner judges.** "86% never reaches the screen" is
+    //    an artefact of the 58° projection, not a property of the geometry.
+    //
+    // 🚨 AND DO NOT SUBSTITUTE THE OFFLINE RASTERISER FOR THIS. `tools/tmp/rg_solid.mjs`
+    //    is the right tool at the match camera and it is **wrong about the shipped
+    //    lobby view** — at `--pitch 20 --yaw 0` it reports burrito's column at 0.665
+    //    delivered where the shipped capture measures **0 px**, and it ranks the five
+    //    soup > hotdog > sushi > burrito > pizza against the render's hotdog > sushi >
+    //    soup > pizza > burrito. It frames the model's own bounding box; `charStage`
+    //    does not, and at a shallow pitch the look-at point decides which surfaces face
+    //    the camera. Its pelvis rows are wrong by **35x** for the same reason (see
+    //    `fitPelvis()`). Use it for MECHANISM and for the match camera; use an ablated
+    //    capture for anything about the lobby.
+    //
+    // 2. **THE SIGN.** Even at 58° the table treats delivered pixels as a shortfall to
+    //    be closed. The column and the collar are STRUCTURE — a pinch between two
+    //    lobes and the dark notch under the chin. Structure that the food mass hides
+    //    has done its job at zero cost; structure the food mass does NOT hide is a
+    //    third mass at the character's most prominent junction, which is a crown and a
+    //    brim. **High delivery here is the failure mode, not the target.**
+    //
+    // ── THE RULE, restated so the next character inherits the right target ───────
+    // 🔴 **A NECK COLUMN MUST BE BEHIND THE MASS ABOVE IT. VERIFY AT PITCH 20.**
+    // The test is `tools/tmp/rg_neckz.mjs`, which computes the 3D fact rather than a
+    // pixel count: `max over the mass of (V.z - P.z - (V.y - P.y)/tan p)` over the
+    // column's own extent. Negative = the front edge is exposed, by that many metres.
+    // Measured on the committed tree (`--json shots/rg/neckz.json`):
+    //
+    //   char        col r   faceZ-r   exp@20  worst@20   exp@58  worst@58  built
+    //   hamburger  0.1668   +0.5120    0.000   +0.2692    0.000   +0.3155   hyp
+    //   burrito    0.0718   +0.1323    0.000   +0.1234    0.000   +0.1234   yes
+    //   soup       0.1709   +0.5059    0.056   -0.0003    0.000   +0.2163   yes
+    //   egg        0.3012   +0.5187    0.278   -0.2088    0.000   +0.2047   hyp
+    //   pizza      0.0940   +0.1700    0.278   -0.0969    0.000   +0.0374   yes
+    //   hotdog     0.1312   +0.2305    0.389   -0.2519    0.000   +0.0520   yes
+    //   sushi      0.1041   +0.2290    0.500   -0.3419    0.000   +0.0201   yes
+    //   waterbottle 0.3748  +0.1121    0.556   -0.5710    0.500   -0.1251   hyp
+    //   taco       0.1709   +0.0568    0.833   -0.2992    0.778   -0.0490   hyp
+    //   donut      0.3021   +0.1169    1.000   -0.3867    0.889   -0.1819   hyp
+    //   lollipop   0.3023   -0.1290    1.000   -0.1859    1.000   -0.1123   hyp
+    //
+    // **9 of 11 are exposed at the lobby camera and only 4 at the match camera** —
+    // the ordering is not even preserved between them, so a pass that verified at 58
+    // could ship a hat and see nothing. `hyp` rows have `neckFraction: 0` today and
+    // the radius is re-derived from this file's own formula, i.e. it is what that
+    // character would get if it opted in.
+    //
+    // ✅ **AND THIS TOOL AGREES WITH THE SHIPPED CAPTURE WHERE THE RASTERISER DOES
+    // NOT.** burrito is the discriminating case: `rg_neckz` says `exp@20 = 0.000`
+    // (covered by +0.1234 m) and the ablated capture measures **0 px**, while
+    // `rg_solid --pitch 20` claimed 0.665 delivered. A geometric fact survives a
+    // change of framing; a rasterised one does not unless the framing is the shipped
+    // framing. That is why the rule below is stated as a 3D fact.
+    //
+    // ⚠️ **`faceZ - r` IS THE CHEAP SCREEN AND IT IS NOT SUFFICIENT.** Only lollipop
+    // fails it outright (-0.1290: its face sits BEHIND where a column would stand,
+    // taco's mechanism exactly). Taco itself passes it at +0.0568 and is still 83%
+    // exposed, because clearing the column's front edge in z is necessary and the
+    // column also has to be cleared at every HEIGHT, which is the `Δy/tan p` term. Use
+    // the exposure column, not the difference.
+    //
+    // ⚠️ AND THE OLD BLOCK'S ONE DURABLE CONCLUSION SURVIVES, with its sign flipped:
+    // widening the collar to 2.1-3.5x is still not the move — but not because it is
+    // expensive. It is the wrong direction. **The lever is DEPTH, not WIDTH**: a mass
+    // that overhangs FORWARD hides the column at both pitches, and a wider ring at the
+    // same depth just makes the third mass bigger. Nothing here widens anything.
     if (this.metrics.neckGap > 0) {
       const gap = this.metrics.neckGap;
       const nr = this.metrics.neckRadius;
@@ -1082,10 +1332,13 @@ export class ChibiRig {
       return m;
     };
 
-    this.joints.shoulderL.add(segment(upperArmLen, this.p.armRadius, limbMat, 'upperArmL'));
-    this.joints.shoulderR.add(segment(upperArmLen, this.p.armRadius, limbMat, 'upperArmR'));
-    this.joints.elbowL.add(segment(forearmLen, this.p.armRadius * 0.92, limbMat, 'forearmL'));
-    this.joints.elbowR.add(segment(forearmLen, this.p.armRadius * 0.92, limbMat, 'forearmR'));
+    // Radii come off `metrics`, which is also what `limbSlots()` hands a character.
+    // A default limb and a bespoke one are therefore built at the SAME radius by
+    // construction rather than by two matching literals.
+    this.joints.shoulderL.add(segment(upperArmLen, this.metrics.upperArmRadius, limbMat, 'upperArmL'));
+    this.joints.shoulderR.add(segment(upperArmLen, this.metrics.upperArmRadius, limbMat, 'upperArmR'));
+    this.joints.elbowL.add(segment(forearmLen, this.metrics.forearmRadius, limbMat, 'forearmL'));
+    this.joints.elbowR.add(segment(forearmLen, this.metrics.forearmRadius, limbMat, 'forearmR'));
 
     for (const [joint, name] of [[this.joints.handL, 'handL'], [this.joints.handR, 'handR']] as const) {
       const m = solid(new THREE.Mesh(new THREE.SphereGeometry(this.p.handRadius, 16, 14), handMat));
@@ -1152,19 +1405,29 @@ export class ChibiRig {
       // face-on preview is the harness that would hide this.
       const pd = Math.min(this.p.torsoDepth * 0.80, lr * 2.3) * s;
       const pelvisMat = toonMat({ color: pal.pelvis ?? pal.limb, roughness: rough });
-      const pelvis = solid(new THREE.Mesh(roundedBox(pw, ph, pd, Math.min(lr * 0.7, ph * 0.45), 4), pelvisMat));
+      // ── THE CORNER RADIUS IS NOW THE LARGEST THE HELPER WILL TAKE ─────────────
+      // `roundedBox` clamps its own radius to `min(w, h, d) / 2`, so asking for the
+      // largest possible one is a request for "as round as this box can be" rather
+      // than a magic number. It was `min(legRadius * 0.7, ph * 0.45)`, which on
+      // lollipop resolved to 0.0812 m against a 0.197 m half-width: mostly flat faces
+      // meeting at small fillets, and Uri read it as *"a hard-edged black slab"*. A
+      // pelvis has no straight edges on any animal. Segments 4 -> 6 so the fillet is
+      // not itself faceted at the lobby camera's much larger on-screen size.
+      const pelvis = solid(new THREE.Mesh(roundedBox(pw, ph, pd, Math.min(pw, ph, pd) * 0.5, 6), pelvisMat));
       // ABOVE the hip line, not straddling it: the thigh tops are at y=0 and the body
       // is above them, so the mass has to reach UP to meet the torso. Straddling put
       // it over the thigh capsules' own top hemispheres and hid them.
       pelvis.position.y = ph * 0.50;
       pelvis.name = 'pelvis_mesh';
       this.joints.hips.add(pelvis);
+      this.pelvisMesh = pelvis;
+      this.pelvisNominal = { w: pw, h: ph, d: pd };
     }
 
-    this.joints.hipL.add(segment(thighLen, this.p.legRadius, limbMat, 'thighL'));
-    this.joints.hipR.add(segment(thighLen, this.p.legRadius, limbMat, 'thighR'));
-    this.joints.kneeL.add(segment(shinLen, this.p.legRadius * 0.9, limbMat, 'shinL'));
-    this.joints.kneeR.add(segment(shinLen, this.p.legRadius * 0.9, limbMat, 'shinR'));
+    this.joints.hipL.add(segment(thighLen, this.metrics.thighRadius, limbMat, 'thighL'));
+    this.joints.hipR.add(segment(thighLen, this.metrics.thighRadius, limbMat, 'thighR'));
+    this.joints.kneeL.add(segment(shinLen, this.metrics.shinRadius, limbMat, 'shinL'));
+    this.joints.kneeR.add(segment(shinLen, this.metrics.shinRadius, limbMat, 'shinR'));
 
     // Feet: oversized rounded wedges, pushed forward so the character reads as
     // standing on something rather than balancing on pegs.
@@ -1179,7 +1442,7 @@ export class ChibiRig {
     // -ankleY is the whole fix, and it is expressed in terms of `metrics` so it
     // stays right when an archetype retunes `footClearance` or `legRadius`.
     for (const [joint, name] of [[this.joints.footL, 'footL'], [this.joints.footR, 'footR']] as const) {
-      const fw = this.p.legRadius * FOOT_WIDTH_RATIO;
+      const fw = this.metrics.footLength;
       const m = solid(new THREE.Mesh(roundedBox(fw, fw * 0.72, fw * 1.5, fw * 0.3, 4), footMat));
       m.position.set(0, Math.max(-this.metrics.ankleY + fw * 0.36, -fw * 0.18), fw * 0.28);
       m.name = `${name}_mesh`;
@@ -1213,6 +1476,226 @@ export class ChibiRig {
       const replacement = build(part, spec);
       if (replacement) joint.add(replacement);
     }
+    // The one hook that runs AFTER the food mass on all eleven characters. Checked
+    // file by file: every one builds its head/torso before it dresses limbs, and
+    // `restPose()` — the only later call — runs once per FRAME and cannot carry a
+    // measurement. See `fitPelvis()`.
+    this.fitPelvis();
+  }
+
+  /**
+   * 🔴 SEAT THE PELVIS INSIDE THE BODY IT HANGS UNDER, so it can never paint a bar
+   * across the character's own mass.
+   *
+   * ── The finding, and it is the neck's finding a second time ─────────────────
+   * The pelvis was sized from `stanceWidth` and `legRadius` — the LEGS — and knows
+   * nothing about the mass above it, because the rig builds it in the constructor
+   * before the character has built anything. Uri, on lollipop: *"a hard-edged black
+   * slab intersecting the stick."*
+   *
+   * Measured on the SHIPPED LOBBY PATH by ablation — the pelvis painted `#FF00FF`,
+   * captured through `tools/tmp/cr2_shot.mjs`, magenta counted, with the unablated
+   * capture as the known-bad control. ⚠️ **That control is load-bearing: donut,
+   * egg and taco score 11561 / 438 / 253 with the SHIPPED palette**, because their
+   * own berry-pink and shell-pink trip a naive magenta test. Subtracting them, the
+   * paired A/B across all eleven is:
+   *
+   *   char          pelvis px, fit OFF   fit ON
+   *   lollipop            1811             1204
+   *   sushi               1059              427
+   *   waterbottle          164               54
+   *   pizza                153                0
+   *   the other seven        0                0
+   *   TOTAL               3187             1685   (-47%, 4 improved, 0 regressed)
+   *
+   * ⚠️ **DO NOT USE `rg_solid --pitch 20` FOR THIS.** It reports egg 0.941 and taco
+   * 0.535 delivered where the shipped capture measures **0 px on both** — it frames
+   * the model's bounding box and `charStage` does not. Its match-camera rows are
+   * fine; its lobby rows are wrong by up to 35x, and that file now says so.
+   *
+   * What the part BUYS, priced with `rg_gap --pitch 20`: **516 px of new silhouette
+   * across the whole cast, 0.07%**, with the number of legs reading as separate
+   * silhouette islands unchanged at 5 of 11 with it and without it.
+   *
+   * **So it is exactly the neck column's situation.** It is correct structure while
+   * the mass HIDES it and a foreign object the moment it does not. The fix is not to
+   * delete it — it is the right geometry to have when a character's mass moves, which
+   * is why `e6fed57`'s pass kept it — but to make it FIT.
+   *
+   * 🔴 **THE RESIDUAL IS NAMED, NOT HIDDEN.** lollipop still shows 1204 px. Ablation
+   * also corrects the attribution: the black shape Uri is looking at is mostly NOT
+   * this mesh — with the pelvis painted magenta, that shape stays black except for a
+   * 28x59 sliver, so the bulk of it is `lollipop_wrapper_collar_trim` and
+   * `lollipop_wrapper_collar`, which live in `lollipop.ts`. That is a hard-edged ring
+   * poking out of a round stick, and it is not fixable from here.
+   *
+   * ── How, and what it refuses to do ──────────────────────────────────────────
+   * Sixteen rays are cast inward at the pelvis's own mid height against the BODY only
+   * (limb joints, the pelvis itself, outline shells and sub-0.9-opacity ghosts are all
+   * excluded, as in `appendages.ts`). Raycasting rather than a vertex scan is not a
+   * preference: `cb_rig.mjs` recorded that a vertex slab cannot see a
+   * `CylinderGeometry(r, r, h, 16, 1)` at all, because its vertices are at the two end
+   * rings and nowhere else, and most of this cast's bodies are lathes.
+   *
+   * The fit is **shrink-only** and it **re-centres**, because on lollipop the stick
+   * leans: its x span is [-0.326, +0.138] while the pelvis's is [-0.228, +0.193], so
+   * the pelvis oversteps the body by 0.055 m on one side while sitting inside it on
+   * the other. Scale alone cannot fix an off-centre body.
+   *
+   * 🚨 **AND IT REFUSES RATHER THAN GUESSES WHEN FEWER THAN HALF THE RAYS HIT.** That
+   * is not defensive coding, it is the whole rule: a body that has ENDED above the hip
+   * line is precisely the case the pelvis exists for, and shrinking it there would
+   * delete the only situation in which it is the fix. A silent fallback here would
+   * turn "the mass is not there" into "the mass is 0 wide", which is `LESSONS.md` §13.
+   */
+  fitPelvis(): void {
+    const pel = this.pelvisMesh;
+    const nom = this.pelvisNominal;
+    if (!pel || !nom || this.pelvisFitted) return;
+    this.pelvisFitted = true;
+
+    const hips = this.joints.hips;
+    hips.updateWorldMatrix(true, true);
+
+    // Body = everything under `body` that is not a limb, not the pelvis, not an
+    // outline shell and not a ghost.
+    const LIMB_JOINTS = new Set([
+      'shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'handL', 'handR',
+      'hipL', 'hipR', 'kneeL', 'kneeR', 'footL', 'footR',
+    ]);
+    const targets: THREE.Object3D[] = [];
+    this.joints.body.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry) return;
+      if (mesh === pel) return;
+      if ((mesh.name || '').endsWith('__outline')) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const ghost = mats.length > 0 && mats.every((m) => {
+        const mm = m as THREE.Material & { opacity?: number };
+        return !!mm && mm.transparent === true && (mm.opacity ?? 1) < 0.9;
+      });
+      if (ghost) return;
+      for (let n: THREE.Object3D | null = mesh; n; n = n.parent) {
+        if (LIMB_JOINTS.has(n.name)) return;
+      }
+      targets.push(mesh);
+    });
+    if (!targets.length) return;
+
+    // ── PER-HEIGHT, because ONE cross-section is not enough and that was measured ──
+    // The first version fitted a single scale at the pelvis's MID height and the
+    // offline ratio got WORSE rather than better (0.380 -> 0.427 across the cast).
+    // ⚠️ That signal later turned out to come from an instrument that is wrong at this
+    // camera — see the header — but the per-height rewrite it prompted is what the
+    // SHIPPED capture then confirmed, so it is kept. The reason a single cross-section
+    // cannot work stands on its own: a food mass is not a vertical wall — it
+    // curves back toward its lowest pole — so a box that fits the cross-section at
+    // its waist still bursts through the surface at its BOTTOM, which is the end
+    // nearest the hip line and therefore the end on screen. The mass is therefore
+    // deformed ring by ring: every vertex is scaled and shifted by what the body
+    // allows AT ITS OWN HEIGHT.
+    const N = 16, M = 9;
+    const span = Math.max(nom.w, nom.d) * 6 + 1; // start well outside anything
+    const rc = new THREE.Raycaster();
+    const from = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    const hx = nom.w * 0.5, hz = nom.d * 0.5;
+    const INSET = 0.93;                          // stay a hair inside the surface
+    // The box's own reach along a unit direction — `min` of the two face constraints
+    // is exact for an axis-aligned box.
+    const boxReach = (ux: number, uz: number) =>
+      Math.min(ux > 1e-6 ? hx / ux : Infinity, uz > 1e-6 ? hz / uz : Infinity);
+
+    const ys: number[] = [], scales: number[] = [], cxs: number[] = [], czs: number[] = [];
+    let openHeights = 0;
+    for (let mi = 0; mi < M; mi++) {
+      const y = (nom.h * mi) / (M - 1);
+      const hits: Array<{ x: number; z: number }> = [];
+      for (let i = 0; i < N; i++) {
+        const a = (i / N) * Math.PI * 2;
+        const sx = Math.sin(a), cz2 = Math.cos(a);
+        from.set(sx * span, y, cz2 * span);
+        dir.set(-sx, 0, -cz2);
+        rc.set(hips.localToWorld(from.clone()), dir.clone().transformDirection(hips.matrixWorld).normalize());
+        rc.near = 0;
+        rc.far = span * 2.2;
+        const hit = rc.intersectObjects(targets, false)[0];
+        if (!hit) continue;
+        const p = hips.worldToLocal(hit.point.clone());
+        hits.push({ x: p.x, z: p.z });
+      }
+      ys.push(y);
+      if (hits.length < N / 2) {
+        // 🚨 THE BODY HAS ENDED AT THIS HEIGHT, WHICH IS THE PELVIS'S REASON TO EXIST.
+        // Keep the authored size here rather than fitting to nothing — a silent
+        // fallback would turn "the mass is not there" into "the mass is 0 wide",
+        // which is `docs/LESSONS.md` §13 and would delete the only case in which this
+        // part is the fix.
+        openHeights++;
+        scales.push(1); cxs.push(0); czs.push(0);
+        continue;
+      }
+      const cx = (Math.min(...hits.map((h) => h.x)) + Math.max(...hits.map((h) => h.x))) * 0.5;
+      const cz = (Math.min(...hits.map((h) => h.z)) + Math.max(...hits.map((h) => h.z))) * 0.5;
+      let s = 1;
+      for (const h of hits) {
+        const dx = h.x - cx, dz = h.z - cz;
+        const len = Math.hypot(dx, dz);
+        if (len < 1e-6) continue;
+        const r = boxReach(Math.abs(dx / len), Math.abs(dz / len));
+        if (r > 1e-6) s = Math.min(s, (len * INSET) / r);
+      }
+      // Shrink-only, and never to nothing.
+      scales.push(THREE.MathUtils.clamp(s, 0.30, 1));
+      cxs.push(cx); czs.push(cz);
+    }
+    if (openHeights === M) {
+      console.warn('[rig] fitPelvis: no body found at any height across the hip band — ' +
+        'the pelvis is left exactly as authored.');
+      return;
+    }
+
+    // Deform the built geometry in place. `roundedBox` is a `BoxGeometry` with its
+    // corners pushed out, so its vertices are already distributed over the height and
+    // a per-ring lerp lands on real rows rather than being interpolated across a gap.
+    const geo = pel.geometry;
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const yOff = pel.position.y;   // geometry is centred on the mesh, mesh sits at ph/2
+    for (let i = 0; i < pos.count; i++) {
+      const vy = pos.getY(i) + yOff;
+      const t = THREE.MathUtils.clamp((vy - ys[0]) / (ys[M - 1] - ys[0] || 1), 0, 1) * (M - 1);
+      const lo = Math.min(M - 2, Math.floor(t)), f = t - lo;
+      const s = THREE.MathUtils.lerp(scales[lo], scales[lo + 1], f);
+      const ox = THREE.MathUtils.lerp(cxs[lo], cxs[lo + 1], f);
+      const oz = THREE.MathUtils.lerp(czs[lo], czs[lo + 1], f);
+      pos.setX(i, pos.getX(i) * s + ox);
+      pos.setZ(i, pos.getZ(i) * s + oz);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+  }
+
+  /**
+   * The size the rig hands a given slot, WITHOUT having to be inside a `dressLimbs`
+   * callback to see it.
+   *
+   * ── Why this is public ─────────────────────────────────────────────────────
+   * `LimbSize` was reachable only as the second argument of the `build` callback, so
+   * any other code in a character file that needed a limb's radius — a connectivity
+   * check, a cuff, a sleeve, a comment asserting two radii are equal — re-derived it
+   * by hand. Three files did, and all three were wrong (see `RigMetrics`'s slot-radius
+   * block). This is the same tuple `dressLimbs` will pass, from the same source.
+   */
+  limbSize(part: LimbPart): LimbSize {
+    const found = this.limbSlots().find(([p]) => p === part);
+    // `LimbPart` is a closed union and `limbSlots()` enumerates all twelve members, so
+    // this cannot be reached from TypeScript. It exists for a JS caller and for the
+    // day a member is added to the union and not to the table — a silent `undefined`
+    // there would surface as `NaN` metres somewhere far away.
+    if (!found) throw new Error(`[rig] limbSize: no slot named ${part}`);
+    return found[2];
   }
 
   private limbSlots(): Array<[LimbPart, THREE.Group, LimbSize]> {
@@ -1226,19 +1709,23 @@ export class ChibiRig {
     // `ankleY` above the ground; for the others it is only meaningful as "how far
     // down the world floor is", which is what the sign says.
     const groundY = -m.ankleY;
+    // ⚠️ Every radius below is READ from `metrics`, never recomputed here. The
+    // products `armRadius * 0.92` and `legRadius * 0.9` used to be written here and
+    // nowhere else, which is what made them invisible to the rest of a character file
+    // and got them re-typed — wrongly — into three of them.
     return [
-      ['upperArmL', j.shoulderL, { len: m.upperArmLength, radius: m.armRadius, groundY }],
-      ['upperArmR', j.shoulderR, { len: m.upperArmLength, radius: m.armRadius, groundY }],
-      ['forearmL', j.elbowL, { len: m.forearmLength, radius: m.armRadius * 0.92, groundY }],
-      ['forearmR', j.elbowR, { len: m.forearmLength, radius: m.armRadius * 0.92, groundY }],
+      ['upperArmL', j.shoulderL, { len: m.upperArmLength, radius: m.upperArmRadius, groundY }],
+      ['upperArmR', j.shoulderR, { len: m.upperArmLength, radius: m.upperArmRadius, groundY }],
+      ['forearmL', j.elbowL, { len: m.forearmLength, radius: m.forearmRadius, groundY }],
+      ['forearmR', j.elbowR, { len: m.forearmLength, radius: m.forearmRadius, groundY }],
       ['handL', j.handL, { len: m.handRadius * 2, radius: m.handRadius, groundY }],
       ['handR', j.handR, { len: m.handRadius * 2, radius: m.handRadius, groundY }],
-      ['thighL', j.hipL, { len: m.thighLength, radius: m.legRadius, groundY }],
-      ['thighR', j.hipR, { len: m.thighLength, radius: m.legRadius, groundY }],
-      ['shinL', j.kneeL, { len: m.shinLength, radius: m.legRadius * 0.9, groundY }],
-      ['shinR', j.kneeR, { len: m.shinLength, radius: m.legRadius * 0.9, groundY }],
-      ['footL', j.footL, { len: m.legRadius * FOOT_WIDTH_RATIO, radius: m.legRadius * FOOT_WIDTH_RATIO * 0.5, groundY }],
-      ['footR', j.footR, { len: m.legRadius * FOOT_WIDTH_RATIO, radius: m.legRadius * FOOT_WIDTH_RATIO * 0.5, groundY }],
+      ['thighL', j.hipL, { len: m.thighLength, radius: m.thighRadius, groundY }],
+      ['thighR', j.hipR, { len: m.thighLength, radius: m.thighRadius, groundY }],
+      ['shinL', j.kneeL, { len: m.shinLength, radius: m.shinRadius, groundY }],
+      ['shinR', j.kneeR, { len: m.shinLength, radius: m.shinRadius, groundY }],
+      ['footL', j.footL, { len: m.footLength, radius: m.footLength * 0.5, groundY }],
+      ['footR', j.footR, { len: m.footLength, radius: m.footLength * 0.5, groundY }],
     ];
   }
 

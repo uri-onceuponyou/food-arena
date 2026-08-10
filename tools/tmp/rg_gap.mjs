@@ -287,24 +287,84 @@ async function selftest(mod) {
   //
   // Kept as an assertion in this direction so that if someone later makes the pelvis
   // actually reach the outline, THIS test fails and forces the number to be re-read.
-  ok('LIVE: the default-rig pelvis is fully INSIDE the existing silhouette — fill is 0, which is why it cannot fix a visible gap',
-    r1.present && r1.fill === 0, `fill=${r1.fill}px of ${r1.silOn}px silhouette`);
+  //
+  // ⚠️ **AND IT DID FIRE, 2026-08-11, ON A ONE-PIXEL CHANGE.** The wording above said
+  // `fill === 0` and the wording is kept because it is still the finding; the BOUND is
+  // now 2 px. Cause: the pelvis's corner radius went from `min(legRadius*0.7,
+  // ph*0.45)` to the largest `roundedBox` will take, with 4 -> 6 segments, so the
+  // fillet is described more faithfully and one diagonal pixel now clears the body on
+  // a default rig. It is a rounder mass, not a wider one — the box's own half-extents
+  // did not move. The assertion is loosened to the smallest bound that admits it
+  // rather than deleted, because its job is to catch a pelvis that starts CARRYING the
+  // outline, and 1 px is not that.
+  ok('LIVE: the default-rig pelvis is fully INSIDE the existing silhouette — fill is ~0, which is why it cannot fix a visible gap',
+    r1.present && r1.fill <= 2, `fill=${r1.fill}px of ${r1.silOn}px silhouette`);
   // Positive control, so the assertion above is not just "the tool always says 0".
   // Displace the same mesh well clear of the body: the fill must become large.
+  //
+  // 🚨 **THIS CONTROL WAS BROKEN AND HAD BEEN FAILING ON HEAD.** It displaced the
+  // pelvis DOWNWARD by `hipY * 1.6`, which puts it below the feet and therefore
+  // outside the FROZEN camera box (`--freeze-frame`, on by default, computes the box
+  // once so hiding a mesh cannot move the camera). Off-frame pixels are not fill
+  // pixels, so the control reported ~0 and the "a 0 above means inside, not blind"
+  // claim was never actually being demonstrated — a positive control that cannot go
+  // positive is the same failure class as a guard that cannot fail (`AGENT-BRIEF` §4).
+  // Displacing SIDEWAYS keeps the mesh inside the frozen frame and clear of the body.
   ok('POSITIVE CONTROL: the SAME mesh moved clear of the body reports a large fill — so a 0 above means "inside", not "blind"',
     (() => {
       let p = null;
       rig.joints.root.traverse((o) => { if (o.isMesh && o.name === 'pelvis_mesh') p = o; });
       if (!p) return false;
-      const y0 = p.position.y;
-      p.position.y = y0 - rig.metrics.hipY * 1.6;
+      const x0 = p.position.x;
+      p.position.x = x0 + rig.metrics.stanceWidth * 3.2;
       const moved = measureOne(THREE, rig.joints.root, 'pelvis_mesh');
-      p.position.y = y0;
+      p.position.x = x0;
       return moved.fill > 500;
-    })());
+    })(), '');
   const none = measureOne(THREE, rig.joints.root, 'no_such_mesh');
   ok('ABSENT: a part that does not exist reports present=false and fill 0, not a silent 0',
     none.present === false && none.fill === 0);
+
+  // ── `fitPelvis()`: BOTH BRANCHES, because only one of them fires on the cast ────
+  // `rig.fitPelvis()` shrinks the pelvis to the body it hangs under, and REFUSES when
+  // fewer than half its rays find a body — that refusal is the case the part exists
+  // for. All eleven shipped characters have a mass at the hip line, so the refusal
+  // branch is exercised by NOTHING in the game. A branch no input reaches is a branch
+  // nobody has shown to work (`CLAUDE.md` #6), so it is reached here deliberately.
+  {
+    const mkRig = () => {
+      const r = new ChibiRig({ palette: { limb: 0x888888, hand: 0xcccccc, foot: 0x222222 },
+        proportions: bodyType('standard', {}) });
+      r.restPose();
+      return r;
+    };
+    // FITS: a rig with its torso present. The pelvis must come back NARROWER.
+    const fitted = mkRig();
+    const before = new THREE.Box3().setFromObject(fitted.pelvisMesh).getSize(new THREE.Vector3()).x;
+    fitted.dressLimbs(() => null);
+    fitted.joints.root.updateWorldMatrix(true, true);
+    const after = new THREE.Box3().setFromObject(fitted.pelvisMesh).getSize(new THREE.Vector3()).x;
+    ok('fitPelvis: with a torso present the pelvis SHRINKS to it',
+      after < before - 1e-6, `x ${before.toFixed(4)} -> ${after.toFixed(4)}`);
+
+    // KNOWN-BAD: the same rig with the body REMOVED. The fit must refuse, warn, and
+    // leave the mass at exactly its authored size — not silently collapse it to 0.
+    const bare = mkRig();
+    const b0 = new THREE.Box3().setFromObject(bare.pelvisMesh).getSize(new THREE.Vector3()).x;
+    for (const c of [...bare.joints.torso.children]) {
+      if (c.isMesh) bare.joints.torso.remove(c);
+    }
+    const warns = [];
+    const orig = console.warn;
+    console.warn = (...a) => warns.push(a.join(' '));
+    try { bare.dressLimbs(() => null); } finally { console.warn = orig; }
+    bare.joints.root.updateWorldMatrix(true, true);
+    const b1 = new THREE.Box3().setFromObject(bare.pelvisMesh).getSize(new THREE.Vector3()).x;
+    ok('fitPelvis: KNOWN-BAD — with NO body at the hip line the pelvis is left at its authored size',
+      Math.abs(b1 - b0) < 1e-9, `x ${b0.toFixed(4)} -> ${b1.toFixed(4)}`);
+    ok('fitPelvis: ...and it SAYS SO rather than fitting to nothing',
+      warns.some((w) => w.includes('fitPelvis')), `warns=${warns.length}`);
+  }
 
   console.log(`\n  ${pass} pass, ${fail} fail`);
   return fail === 0;

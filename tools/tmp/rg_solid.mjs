@@ -23,6 +23,25 @@
  *     other agents currently measuring on this machine. A full cast sweep is ~6 s
  *     against ~8 minutes.
  *
+ * ── 🚨 IT IS WRONG ABOUT THE LOBBY CAMERA. MEASURED, 2026-08-11 ──────────────
+ * `makeCamera` FRAMES THE MODEL'S OWN BOUNDING BOX and looks at its centre.
+ * `ui/screens/charStage.ts` does not — it uses `subjectFill 0.60` about its own
+ * subject point — and at a shallow pitch the look-at point is what decides which
+ * surfaces face the camera. At the MATCH camera's 58° that barely matters, which is
+ * what this tool was written and selftested for. At the lobby's 20° it matters a lot:
+ *
+ *   part / char        this tool, --pitch 20 --yaw 0    ablated shipped capture
+ *   neck_column burrito   1151/1732 = 0.665                     0 px
+ *   pelvis_mesh egg       6082/6462 = 0.941                     0 px
+ *   pelvis_mesh taco      3260/6099 = 0.535                     0 px
+ *
+ * — and the RANKING is not preserved either. **Do not quote a `--pitch 20` number
+ * from this tool.** The instrument for the lobby is ABLATION: paint the part
+ * `#FF00FF`, capture through `tools/tmp/cr2_shot.mjs`, count magenta, and run the
+ * same count on an unablated capture as the known-bad control — three of this cast's
+ * palettes (donut, egg, taco) contain pinks that trip a naive magenta test, and that
+ * control is what caught them.
+ *
  * ── What it is NOT ───────────────────────────────────────────────────────────
  * It rasterises GEOMETRY. There is no shading, no light, no shadow, no post chain and
  * no anti-aliasing. So it answers "is this mass reachable by the camera?" exactly, and
@@ -185,17 +204,53 @@ function raster(THREE, tris, cam, only = null) {
   return { own, names, zbuf };
 }
 
+/**
+ * A PNG of the ownership map, three-way false-coloured: the named part in RED where it
+ * DELIVERS, blue where it is buried, and the rest of the figure in grey.
+ *
+ * 🚨 **`--png` WAS DOCUMENTED IN THIS FILE'S OWN USAGE BLOCK AND WAS NEVER
+ * IMPLEMENTED.** The flag parsed to a path and nothing read it, so the tool exited 0
+ * having written nothing — a silent no-op wearing a documented interface, which is
+ * `docs/LESSONS.md` §13's failure mode with the arrow reversed. It matters here
+ * because the numbers this tool prints are the reason to look at pixels: lollipop's
+ * pelvis reads **0.716 delivered** and **93 px of new silhouette**, and only the map
+ * says whether those 1561 painted-over pixels are a slab across the stick or a rim
+ * behind the thighs.
+ */
+async function writeOwnPng(path, full, iso, part, W, H) {
+  const sharp = (await import('sharp')).default;
+  const fullKey = full.names.indexOf(part);
+  const isoKey = iso.names.indexOf(part);
+  const rgb = Buffer.alloc(W * H * 3);
+  for (let i = 0; i < W * H; i++) {
+    const v = full.own[i];
+    let r = 24, g = 24, b = 32;                        // background
+    if (v >= 0) {
+      const n = full.names[v] || '';
+      const h = [...n].reduce((a, c) => a + c.charCodeAt(0), 0);
+      r = 105 + (h % 55); g = 105 + ((h >> 3) % 55); b = 112 + ((h >> 6) % 55);
+    }
+    if (v >= 0 && v === fullKey) { r = 255; g = 30; b = 30; }        // DELIVERED
+    else if (iso.own[i] === isoKey && isoKey >= 0) { r = 20; g = 70; b = 190; } // BURIED
+    rgb[i * 3] = r; rgb[i * 3 + 1] = g; rgb[i * 3 + 2] = b;
+  }
+  await sharp(rgb, { raw: { width: W, height: H, channels: 3 } }).png().toFile(path);
+  return path;
+}
+
 /** Delivered / footprint / occluders for a set of part names. */
-function measure(THREE, root, parts) {
+function measure(THREE, root, parts, png = null) {
   const tris = collect(THREE, root);
   const box = new THREE.Box3().setFromObject(root);
   const cam = makeCamera(THREE, box);
   const full = raster(THREE, tris, cam);
+  if (png) png.full = full;
   const present = new Set(tris.map((t) => t[9]));
   const out = {};
   for (const part of parts) {
     if (!present.has(part)) { out[part] = null; continue; }
     const iso = raster(THREE, tris, cam, (n) => n === part);
+    if (png) (png.iso ??= {})[part] = iso;
     const key = iso.names.indexOf(part);
     let footprint = 0;
     const occl = new Map();
@@ -303,14 +358,31 @@ if (flag('--selftest')) {
 
 const { createCharacter, THREE } = mod;
 const PARTS = list('--parts', DEFAULT_PARTS.join(','));
+const PNG_DIR = arg('--png', null);
 const rows = [];
+const maps = [];
 const { warns } = captureWarnings(() => {
   for (const id of IDS) {
     const c = createCharacter(id);
     c.rig.animate({ elapsed: T, move01: MOVE });
-    rows.push({ id, archetype: ARCHETYPE[id], m: measure(THREE, c.rig.joints.root, PARTS) });
+    const png = PNG_DIR ? {} : null;
+    rows.push({ id, archetype: ARCHETYPE[id], m: measure(THREE, c.rig.joints.root, PARTS, png) });
+    if (png) maps.push({ id, png });
   }
 });
+if (PNG_DIR) {
+  const { mkdirSync } = await import('node:fs');
+  const p = await import('node:path');
+  const dir = p.isAbsolute(PNG_DIR) ? PNG_DIR : p.join(process.cwd(), PNG_DIR);
+  mkdirSync(dir, { recursive: true });
+  for (const { id, png } of maps) {
+    for (const part of PARTS) {
+      if (!png.iso?.[part]) continue;
+      const out = p.join(dir, `${id}_${part}_p${PITCH}_y${YAW}.png`);
+      console.log('wrote ' + (await writeOwnPng(out, png.full, png.iso[part], part, W, H)));
+    }
+  }
+}
 
 console.log(`delivered pixels at the SHIPPED view — pitch ${PITCH}deg, fov ${FOV}, yaw ${YAW}, ${W}x${H}, t=${T}s move=${MOVE}`);
 console.log('ratio = delivered / own-footprint. `-` = the part does not exist on this character.\n');
