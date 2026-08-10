@@ -140,6 +140,17 @@ const SWIRL_RED = CANDY_RED;    // the disc's ribbon, both faces
 // Two values on the disc becomes four, all but the anchor above the ground band.
 const CANDY_TEAL = '#3FD3B8';
 const CANDY_SUN = '#FFC53D';
+// ── The LEG family, and why the legs are red at all ─────────────────────────
+// Arms and legs on this character were the same geometry in the same two tones with
+// the same stripe rings, so she read as a four-legged thing on a stick. The pairs
+// are now split on HUE — teal sleeves, red trousers — and the legs still ALTERNATE
+// down their own length, because `valuescan --mode gate` steers on `minDL`, the
+// weakest CONTACT pair, and a limb flattened to one tone takes `hipL|kneeL` to ~0.
+// The first draft of this did exactly that and would have failed the gate.
+// CANDY_RED is also the value this palette was missing: BOOT sits at 0.05 and
+// LIMB_TEAL at 0.78 with nothing between them, so the legs are a rung in their own
+// right rather than a repeat of the arms.
+const CANDY_RED_DEEP = '#A81E31';   // shin — one rung under CANDY_RED
 // The cellophane twist above the disc. Pale and cool rather than near-black — see
 // `buildSilhouetteEvents` for the render that reversed that, and note it is a HALF-STEP
 // above CANDY_WHITE so the twist separates from the candy's own top edge instead of
@@ -301,7 +312,10 @@ class DiscCap {
  * `size.radius` — she is a slender candy-on-a-stick character, and the rig's
  * default limb thickness read as far too stocky for that read.
  */
-function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+function taperedSegment(
+  len: number, rTop: number, rBot: number, radialSegments = 12,
+  capTopFrac = 0.30, capBotFrac = 0.42,
+): THREE.BufferGeometry {
   // Profile MUST be wound bottom-to-top (y increasing), matching every other
   // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
   // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
@@ -309,25 +323,56 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   // earlier version of this function built the profile top-to-bottom and every
   // limb using it rendered near-black: inverted normals facing away from the
   // light. The y=0/y=-len hang-down placement is unchanged.
-  const capSegs = 5;
+  //
+  // ── 🚨 THE CAPS WERE SIZED BY THE RADIUS AND NOT BY THE BONE ────────────────
+  // Taken VERBATIM from `donut.ts:145`, which derived it; six independent copies of
+  // this helper exist and donut's fix never reached the other five. Read that file
+  // for the full derivation. The short version, and the part that differs on THIS
+  // character, is worth stating because it is a DIFFERENT symptom of one bug:
+  //
+  // The old code emitted a straight side only when `len >= rTop + rBot`, and when it
+  // did not it clamped with `yTopSafe = Math.max(...)` — which does not shrink the
+  // caps, it stacks two full hemispheres into a sphere that pokes above its own joint
+  // origin. `tools/tmp/cb_rig.mjs` prints the arithmetic. **On lollipop that branch
+  // never fires** — every bone here has ratio 0.64-0.74 — so the dramatic failure is
+  // not what this character had. What it had is the MILD half of the same bug: with
+  // caps of height `rBot` and `rTop` and a bone only ~1.35x their sum, the "straight
+  // side" is **11-26% of the bone** and the other 74-89% is two hemispheres. Rendered
+  // (`shots/cb/before/lollipop.png`) that is a ball, four to a limb, and Uri's
+  // *"limbs disattached or intersecting with the body"* names the result exactly.
+  //
+  // So the ball read has TWO causes and the ratio test only catches one. Bounding the
+  // caps by the BONE — 0.42/0.30 of `len`, sum 0.72 < 1 so a straight side always
+  // exists — catches both, and it is the same code either way.
+  //
+  // ── AND THE CAP FRACTIONS ARE ARGUMENTS, WHICH IS THE OTHER HALF OF THE FIX ──
+  // Bounding the caps by the bone still leaves every segment tapering to a POINT at
+  // both ends — `pts` starts at `(0, -len)`, on the axis — so the limb pinches to
+  // zero width at every joint, and `outlineGroup` gives each segment its own ink
+  // hull, which traces the pinch. That is a bead whatever the albedo is.
+  // INTERIOR caps (the upper arm's bottom, the forearm's top, and the leg
+  // equivalents) abut a segment of the same radius and are never visible, so a
+  // caller passes ~0.05 for that end and the two lathes share a silhouette tangent.
+  // EXTERIOR caps (shoulder, wrist, hip, ankle) keep 0.30/0.42 and stay round —
+  // flattening THOSE is what turned donut's limbs into a stack of drink cans.
+  const capSegs = 6;
+  const capBot = Math.min(rBot, len * capBotFrac);
+  const capTop = Math.min(rTop, len * capTopFrac);
+  const yBotCap = -len + capBot;
+  const yTopCap = -capTop;
   const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
   }
-  const yBotCap = -len + rBot;
-  const yTopCap = -rTop;
-  if (yTopCap >= yBotCap) {
-    const sideSteps = 3;
-    for (let i = 1; i <= sideSteps; i++) {
-      const t = i / sideSteps;
-      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-    }
+  const sideSteps = 4;
+  for (let i = 1; i <= sideSteps; i++) {
+    const t = i / sideSteps;
+    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
   }
-  const yTopSafe = Math.max(yTopCap, yBotCap);
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
   }
   const geo = new THREE.LatheGeometry(pts, radialSegments);
   geo.computeVertexNormals();
@@ -414,7 +459,41 @@ export class LollipopCharacter extends BaseCharacter {
         // half-width, and 0.185H = 0.370 m sat just outside the far end — measured,
         // the entire right arm was its own connected component (4,038 px at idle,
         // 4,400 at run) while the left one, pulled in by `hipSway`, was not.
-        shoulderWidth: H * 0.17,
+        //
+        // ── 🚨 0.17H -> 0.135H. THE WINDOW ABOVE IS CORRECT ARITHMETIC ON TWO ────
+        // ── INPUTS THAT HAD BOTH GONE STALE UNDER IT ────────────────────────────
+        // Uri, on the lobby render: *"Limbs, and torso intersecting, making the face
+        // invisible sometimes"* — and on this character it is the plainest detachment
+        // in the cast: all four limbs float clear of the stick with daylight between.
+        // Neither the window nor the value derived from it was ever wrong as written.
+        // Both of its numbers stopped being true:
+        //
+        //   1. `stickR` IS NOT 0.32R. The code four hundred lines down says
+        //      `R * 0.28` — **0.2016 m, not 0.230 m.** The comment was accurate when
+        //      it was written and the constant moved without it.
+        //   2. THE ARM IS NOT `armRadius` WIDE. `dressLimbs` built the upper arm at
+        //      `size.radius * 0.66` — **0.0818 m against the 0.1240 m the window
+        //      assumes.** The window was solved for a limb 52% thicker than the one
+        //      that gets built.
+        //
+        // Both errors push the same way, so they compound: inner edge = 0.340 −
+        // 0.0818 = **0.2582 m against a stick surface at 0.2016 m**, i.e. the arm
+        // starts **0.057 m OUTSIDE the body** — about 30 px at the lobby camera,
+        // which is exactly what the render shows.
+        //
+        // Fixed on BOTH terms rather than by moving the pivot alone, because the
+        // thin limb is independently the bead-necklace defect this pass is here for:
+        // the arm goes to 0.95 of the rig radius (0.1178 m) and the pivot to 0.135H
+        // (0.270 m), giving inner edge 0.1522 m and a **+0.049 m overlap** — while
+        // the outer edge at 0.388 m still stands 0.186 m proud of the stick, which is
+        // the other half of the window and the reason it cannot simply be pulled in.
+        //
+        // ⚠️ `limbmatch --mode chars` reports `detach 0 px, isl 1` for this character
+        // at BOTH yaw 0 and yaw 90, BEFORE and AFTER. It is not wrong: at the 58deg
+        // match camera the figure is ~190 px tall, the gap is sub-pixel and the ink
+        // hulls bridge it. This defect is only visible at the lobby camera, which is
+        // CLAUDE.md #3 in its purest form — the shallow view is the DETECTOR.
+        shoulderWidth: H * 0.135,
         // ── STUB's widened 0.225H stance is wrong for a character this narrow ────
         // Every other STUB mass is 0.5-1.0m wide at hip height and needed the legs
         // pushed out from under it. This one is a 0.41m stick, so 0.45m of stance
@@ -438,7 +517,23 @@ export class LollipopCharacter extends BaseCharacter {
         // connected component, 8,406 px at idle. The stance is what pays for that
         // overlap on this character, so the stance is what has to move with it.
         // 0.11H restores a 0.10 m (~25 px) bridge on both sides.
-        stanceWidth: H * 0.145,
+        // ── 0.145H -> 0.132H, the same correction as `shoulderWidth` above ───────
+        // The thigh has the identical stale term: built at `size.radius * 0.66` =
+        // 0.0766 m, so its inner edge sat at 0.290 − 0.0766 = **0.2134 m** against a
+        // stick that is 0.2016-0.2117 m — a bridge of about ONE MILLIMETRE, which is
+        // zero at any camera. The thigh goes to 1.10 of the rig radius (0.1276 m,
+        // deliberately FATTER than the arm's 0.95 — legs read as legs partly by being
+        // the heavier pair) and the stance to 0.132H = 0.264 m, for an inner edge of
+        // 0.1364 m and a **+0.065 m overlap**.
+        // ── 0.132H -> 0.115H, and the reason is `hipSway`, not the arithmetic ────
+        // Rendered at 0.132H the LEFT leg overlaps the stick cleanly and the RIGHT
+        // one hangs ~27 px clear, which is the signature of an offset rather than a
+        // width: `hipSway` 0.20 and `twist` 0.30 swing the stick off the hip line, so
+        // a stance solved for a centred body is right on one side and wrong on the
+        // other. The sway is this character's whole "cocky, hip-shot" read and is not
+        // being spent to fix a geometry error, so the stance absorbs it instead —
+        // 0.115H leaves ~0.099 m of overlap, more than the swing.
+        stanceWidth: H * 0.115,
         // Same override as Donut's, for the opposite mass: STUB's raised 0.26 is
         // right for a bottom-heavy food, but this character's food is a DISC on a
         // stick and the disc's underside starts at y=0.93m. Lifting the pivot
@@ -886,22 +981,49 @@ export class LollipopCharacter extends BaseCharacter {
     // own wrapper-petal cuff; hands are miniature glossy lollipops (a swirl ring
     // echoing the head disc), and feet are dark pointed candy-shoe boots.
     const stickLimbMat = toonMat({ color: LIMB_TEAL, roughness: 0.55 });
-    const stickLimbDarkMat = toonMat({ color: LIMB_TEAL_DARK, roughness: 0.55 });
+    const forearmMat = toonMat({ color: LIMB_TEAL_DARK, roughness: 0.55 });
+    const cuffMat = toonMat({ color: WRAPPER_INK, roughness: 0.5 });
     const stripeMat = toonMat({ color: CANDY_RED, roughness: 0.55 });
+    const legMat = toonMat({ color: CANDY_RED, roughness: 0.55 });
+    const legDeepMat = toonMat({ color: CANDY_RED_DEEP, roughness: 0.55 });
     const candyHandMat = glossyMat({ color: CANDY_RED, roughness: 0.14, rim: true });
     const candySwirlMat = candyMat;
+
+    // ── 🚨 THE FOUR LIMBS WERE ONE OBJECT IN FOUR PLACES ────────────────────────
+    // The old mapping put `upperArm` WITH `thigh` and `forearm` WITH `shin`, so an
+    // arm and a leg were the same geometry, the same two materials, the same stripe
+    // rings, differing only in the terminal cap. Rendered at the lobby camera that
+    // is four identical candy chains hanging off a stick, and the character reads as
+    // a four-legged thing rather than as a figure. Split on four cues at once:
+    //
+    //   ARMS  teal sleeve, red candy-cane stripes, a dark cuff, a glossy red candy
+    //         ball for a hand — the light, busy, round pair.
+    //   LEGS  solid CANDY_RED for their whole length with NO stripes at all, and the
+    //         near-black boot — the dark, plain, blocky pair. Red is also the value
+    //         this palette was missing between BOOT (0.05) and LIMB_TEAL (0.78): the
+    //         legs are now a rung in their own right rather than a repeat of the arms.
+    //
+    // And the two-tone alternation ALONG each limb is gone. `outlineGroup` gives every
+    // mesh its own inverted hull, so a value flip at the elbow put a different colour
+    // inside every ink contour — which is a bead, not a joint. One tone per limb, with
+    // radii continuous across the joint, leaves the contour as the only separator.
     this.rig.dressLimbs((part, size) => {
       switch (part) {
-        case 'upperArmL': case 'upperArmR':
-        case 'thighL': case 'thighR': {
+        case 'upperArmL': case 'upperArmR': {
           const g = new THREE.Group();
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.66, size.radius * 0.52, 10), stickLimbMat);
+          // ── 0.66 -> 0.95 OF THE RIG RADIUS, AND IT IS AN ATTACHMENT FIX ────────
+          // See the `shoulderWidth` note in the constructor: the connectivity window
+          // this character's proportions are solved against was computed with the
+          // RIG's `armRadius` (0.124) while this call site built the segment at 0.66
+          // of it (0.082). The arm was 0.042 m thinner than the arithmetic that
+          // placed it, on a body 0.20 m wide, and that is most of the gap.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.95, size.radius * 0.80, 12, 0.30, 0.05), stickLimbMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           g.add(m);
-          for (const f of [0.28, 0.62]) {
-            const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.58, size.radius * 0.1, 6, 14), stripeMat);
+          for (const f of [0.34, 0.70]) {
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.86, size.radius * 0.11, 6, 14), stripeMat);
             ring.rotation.x = Math.PI / 2;
             ring.position.y = -size.len * f;
             ring.userData.noOutline = true;
@@ -909,22 +1031,50 @@ export class LollipopCharacter extends BaseCharacter {
           }
           return g;
         }
-        case 'forearmL': case 'forearmR':
-        case 'shinL': case 'shinR': {
+        case 'forearmL': case 'forearmR': {
           const g = new THREE.Group();
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.52, size.radius * 0.38, 10), stickLimbDarkMat);
+          // Top radius matches the upper arm's bottom in METRES, not in multiplier:
+          // 0.80 * 0.1240 = 0.0992 against 0.870 * 0.1140 = 0.0992. The rig gives the
+          // forearm a smaller base radius (`armRadius * 0.92`), so equal multipliers
+          // would put a step in the outline at the elbow.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.870, size.radius * 0.70, 12, 0.05, 0.30), forearmMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           g.add(m);
-          for (const f of [0.22, 0.5, 0.78]) {
-            const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.44, size.radius * 0.08, 6, 14), stripeMat);
+          for (const f of [0.30, 0.62]) {
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.72, size.radius * 0.09, 6, 14), stripeMat);
             ring.rotation.x = Math.PI / 2;
             ring.position.y = -size.len * f;
             ring.userData.noOutline = true;
             g.add(ring);
           }
+          // The cuff — the one shape that says "sleeve" rather than "leg", and the
+          // only place `LIMB_TEAL_DARK` still appears now that the forearm is not a
+          // second tone. `noOutline`: an ink hull round a ring this small at this
+          // on-screen size is most of the ring.
+          const cuff = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.64, size.radius * 0.14, 6, 14), cuffMat);
+          cuff.rotation.x = Math.PI / 2;
+          cuff.position.y = -size.len * 0.94;
+          cuff.userData.noOutline = true;
+          cuff.castShadow = true;
+          g.add(cuff);
           return g;
+        }
+        case 'thighL': case 'thighR': {
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.10, size.radius * 0.92, 12, 0.30, 0.05), legMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
+        }
+        case 'shinL': case 'shinR': {
+          // 0.92 * 0.1160 = 0.1067 against 1.022 * 0.1044 = 0.1067.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.022, size.radius * 0.84, 12, 0.05, 0.34), legDeepMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          return m;
         }
         case 'handL': case 'handR': {
           const g = new THREE.Group();

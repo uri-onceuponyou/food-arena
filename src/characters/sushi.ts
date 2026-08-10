@@ -408,7 +408,10 @@ function crossStrap(p: Profile, o: {
  * `rBot`. Reused per-character with different taper ratios so each cast member's
  * limbs read as their own shape rather than a shared uniform capsule.
  */
-function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12): THREE.Mesh {
+function taperedLimb(
+  len: number, rTop: number, rBot: number, mat: THREE.Material, segs = 12,
+  capBotFrac = 0.45,
+): THREE.Mesh {
   // Points MUST run bottom → top for LatheGeometry's automatic normals to face
   // outward (this file's own PROFILE lathe follows the same rule). Getting it
   // backwards was a round 1 defect: the real mesh got face-culled invisible and
@@ -418,7 +421,17 @@ function taperedLimb(len: number, rTop: number, rBot: number, mat: THREE.Materia
   // pose rotates the shoulder/hip to, reads as a flat flag/wing sticking out of
   // the joint rather than blending into it. The dome keeps almost the whole
   // length budget for the actual tapered shaft.
-  const capBot = Math.min(rBot, len * 0.45);
+  // ── `capBotFrac` IS AN ARGUMENT, AND IT IS THE BEAD FIX ─────────────────────
+  // The bottom tip is a full rounded hemisphere, which is right at the WRIST and at
+  // the ANKLE and wrong at the ELBOW and the KNEE. At an interior joint the segment
+  // tapers to a point and the next one flares back out from the same point, so the
+  // limb pinches to zero width there — and `outlineGroup` gives every mesh its own
+  // inverted hull, so the pinch is traced in ink. A chain of segments that each
+  // pinch to nothing and each carry their own outline is a string of beads, which is
+  // what `donut.ts` and `egg.ts` were rebuilt this pass to stop being. Here the top
+  // cap is already a shallow dome, so only the BOTTOM needed to become a caller's
+  // choice: interior ends pass ~0.10 and abut cleanly, exterior ends keep 0.45.
+  const capBot = Math.min(rBot, len * capBotFrac);
   const capTopH = Math.min(rTop * 0.42, len * 0.16);
   const wallBotY = -(len - capBot);
   const wallTopY = -capTopH;
@@ -1470,13 +1483,62 @@ export class SushiCharacter extends BaseCharacter {
     // fell 15.44% -> 13.89% of the frame — and on a roster of eleven, reading smaller
     // than the others is its own defect. The lean is unchanged, so they still rake rather
     // than stand up as antennae; the length is what comes back.
-    for (const [azimuth, lean, len] of [
-      [-Math.PI * 0.76, 1.05, 1.00], [-Math.PI * 0.94, 0.80, 0.84],
+    //
+    // ── 🚨 "THEY STILL RAKE RATHER THAN STAND UP AS ANTENNAE" WAS FALSE AT THE ───
+    // ── CAMERA THAT MATTERS, AND THE REASON IS PROJECTION, NOT ANGLE ────────────
+    // The sentence above is kept because the mistake in it is instructive. The rake
+    // was real: `lean` 1.05 is `atan(1.05)` = **46 degrees off vertical**, measured in
+    // three dimensions, and nobody mis-derived it. But both azimuths — `-0.76pi` and
+    // `-0.94pi` — point almost straight BACKWARD, so the rake is almost entirely in
+    // −z. At the lobby camera (`charStage.ts`, pitch 20, yaw 0) a backward rake
+    // projects to very nearly VERTICAL: 46 degrees of real lean survives as about 15
+    // on screen. Rendered (`shots/cb/before/sushi.png`) they are two thin rods
+    // standing off the crown, which is `DECISIONS-FOR-URI` §40 pattern 1 — the sixth
+    // instance in this file alone — still live after the round that claimed to fix it.
+    // ⚠️ The general form: **an angle chosen in 3D is not an angle the player sees.
+    // A silhouette fix has to be verified in the PROJECTION it is a fix for.**
+    //
+    // Three changes, none of which give back the size round 3 bought:
+    // ── ⚠️ AND CROSSING THEM WAS TRIED FIRST AND MADE IT WORSE ──────────────────
+    // Round 4a kept one anchor on each side of the back and aimed each stick with a
+    // lateral component opposite to its own anchor, so the pair crossed. Rendered
+    // (`shots/cb/a2/sushi.png`) that is **more** antenna-like, not less: crossing
+    // moved the sticks apart in x, which turned a back-raked pair into a
+    // LEFT-AND-RIGHT pair — one rod above each side of the head, mirrored. The read
+    // is not caused by the angle between two sticks. It is caused by BILATERAL
+    // SYMMETRY: one long thin thing above each side of a head is an antenna, an ear
+    // or a horn, and §40 is five-for-five on that whatever the thing is made of.
+    //
+    // So the fix is asymmetry, and both sticks move to ONE side:
+    //   · both anchors sit back-LEFT, close together, so there is nothing above the
+    //     right side of the head at all and no pair for the eye to mirror;
+    //   · the aim is set EXPLICITLY and is dominated by +x. It is not derived from
+    //     `out` any more, and that is the point — `out` at a back azimuth is nearly
+    //     all −z, so every lean built from it rakes BACKWARD, which is the direction
+    //     the camera cannot see. The two directions here are 56 and 48 degrees off
+    //     vertical IN THE IMAGE PLANE, so the lean survives projection.
+    //   · they open into a shallow V from a common origin, which is the shape of two
+    //     sticks pushed into a bun — a carried object, not a body part.
+    // ⚠️ VERIFY THIS AT THE LOBBY CAMERA, not in the numbers: the defect it fixes is
+    // invisible to every metric this repo produces, and the round that thought it had
+    // already fixed it is the paragraph above.
+    for (const [azimuth, len, dir] of [
+      // ── LENGTH 1.00/0.86 -> 1.30/1.10, AND IT IS PAYING BACK A MEASURED COST ──
+      // Moving both sticks to one side cost real silhouette: `limbmatch --mode chars`
+      // hullDef **0.3175 -> 0.2230** at yaw 90 and **0.3513 -> 0.2725** at yaw 0, and
+      // appendages 2 -> 1. That is the number the sticks were added for in the first
+      // place, so it has to be paid rather than waved through — but it is paid in
+      // LENGTH, which the antenna read does not care about, and not in symmetry,
+      // which is the only thing it does care about. ⚠️ Length is also what round 3
+      // spent to buy projected SIZE (15.44% -> 13.89% of the ladder crop when they
+      // were raked back); this gets it back on the axis the camera can see.
+      [-Math.PI * 0.80, 1.30, new THREE.Vector3(1.45, 1.0, -0.35)],
+      [-Math.PI * 0.92, 1.10, new THREE.Vector3(0.95, 1.0, -0.55)],
     ] as const) {
-      const { at, out } = massAnchor(head, box, { azimuth, height01: 0.74, inset: 0.30 });
+      const { at } = massAnchor(head, box, { azimuth, height01: 0.62, inset: 0.30 });
       const g = new THREE.Group();
       g.name = 'sushi_chopstick';
-      aim(g, at, out.clone().multiplyScalar(lean).add(new THREE.Vector3(0, 1, 0)).normalize());
+      aim(g, at, dir.clone().normalize());
       g.add(rod(stickMat, { len: R * len, rBase: R * 0.062, rTip: R * 0.034, seg: 7 }));
       // The pale lacquered butt — a real chopstick's one marking, and the thing that
       // stops a plain brown rod reading as a twig or an antenna.
@@ -1571,10 +1633,31 @@ export class SushiCharacter extends BaseCharacter {
           // MEGAPHONE, not an arm — it is the shape that made the shoulders read as
           // funnels in the lobby render, and it also widened the joint ball's own
           // footprint at the torso, which is the seam that measures worst here.
-          return taperedLimb(size.len, size.radius * 1.02, size.radius * 0.90, upperLimbMat);
+          // ── 🚨 1.02/0.90 -> 0.88/0.78, BECAUSE THE ARM AND THE LEG WERE THE SAME ──
+          // `upperArm` and `thigh` shared `upperLimbMat` AND were 1.02 against 1.05 —
+          // three percent apart. `forearm` and `shin` shared `noriLimbMat` and were
+          // 0.80 against 0.88. So an arm and a leg were the same mass in the same two
+          // materials, and the character read as four legs under a rice dome.
+          //
+          // The split is PROPORTION ONLY, and that is forced rather than chosen: this
+          // file's value ladder is the most expensively-bought in the cast (see the
+          // rim table above — `torso|shoulderL` was knowingly spent to buy
+          // `shoulderL|elbowL` and `hipL|kneeL`), and sushi's `minDL` is 0.079 with
+          // one pair already under 0.10. Moving any limb albedo to separate the pairs
+          // would spend a seam that has already been paid for once. Arms go to 0.88
+          // and legs to 1.16 — 32% apart in multiplier and 0.1257 m against 0.1559 m
+          // in metres — which is a difference at 250 px and 3% was not.
+          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.78, upperLimbMat, 12, 0.10);
         case 'forearmL':
         case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, noriLimbMat);
+          // ── AND THE ELBOW HAD A STEP IN IT, WHICH IS ITS OWN BEAD ─────────────
+          // The rig hands the forearm a smaller base radius (`armRadius * 0.92`), so
+          // equal-looking multipliers are NOT equal diameters: 0.80 * 0.1314 = 0.1051
+          // against an upper arm ending at 0.90 * 0.1428 = 0.1285 — the forearm was
+          // **18% narrower than the arm it hangs off**, a visible shoulder-of-mutton
+          // step at the elbow. Matched in metres instead: 0.848 * 0.1314 = 0.1114
+          // against 0.78 * 0.1428 = 0.1114.
+          return taperedLimb(size.len, size.radius * 0.848, size.radius * 0.60, noriLimbMat);
         case 'handL':
         case 'handR': {
           // Rice-ball fists: white against the orange forearm, so the hands read as
@@ -1584,10 +1667,14 @@ export class SushiCharacter extends BaseCharacter {
         }
         case 'thighL':
         case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.05, size.radius * 0.88, upperLimbMat);
+          // The heavier pair — see the note on `upperArm`. `capBotFrac` 0.10 because
+          // this end is the KNEE and is covered by the shin.
+          return taperedLimb(size.len, size.radius * 1.16, size.radius * 1.00, upperLimbMat, 12, 0.10);
         case 'shinL':
         case 'shinR':
-          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.70, noriLimbMat);
+          // Continuity in metres, as at the elbow: 1.111 * 0.1210 = 0.1344 against
+          // the thigh's 1.00 * 0.1344 = 0.1344.
+          return taperedLimb(size.len, size.radius * 1.111, size.radius * 0.86, noriLimbMat);
         case 'footL':
         case 'footR':
           // Lacquered nori boots with a rice-pale sole — the dark value moves to

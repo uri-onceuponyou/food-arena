@@ -70,7 +70,21 @@ const LIMB_PINK = '#DE6491';       // upper arm / thigh — mid
 // it into a sphere. Lifting the shin/forearm rung is the safe side of that pair to
 // move: `shoulderL|elbowL` has 0.29 of margin and `p05` is 0.08 against a 0.180 cap,
 // carried by the beanie and the boots, not by this tone.
-const LIMB_PINK_DARK = '#9A3455';  // forearm / shin — dark
+const LIMB_PINK_DARK = '#9A3455';  // thigh's partner — the shin, dark
+// ── THE SLEEVE IS DOUGH, AND THAT IS WHAT SEPARATES AN ARM FROM A LEG ────────
+// See the `dressLimbs` note: arms and legs were byte-identical masses in identical
+// tones and the character read as four-legged. Every VALUE on this model is spoken
+// for (`head|shoulderL` 0.0315, `kneeL|footL` cleared by 0.0015), so the pairs are
+// split on HUE instead — the arms move into the donut's own gold, the legs keep the
+// berry-pink. Chosen so each new boundary is better than the one it replaces:
+//   ring GLAZE 0.72  ->  sleeve 0.32   `head|shoulderL`   was a mid-pink arm on a
+//                                       light-pink ring, the weakest pair on the
+//                                       character; gold is a full step away
+//   sleeve 0.32      ->  cuff 0.16     `shoulderL|elbowL`
+//   cuff 0.16        ->  mitt 0.72     `elbowL|handL`, the glaze mitt unchanged
+// and the legs' three pairs are untouched because their three tones are untouched.
+const SLEEVE_DOUGH = '#C98A4E';    // upper arm — baked dough, one step under DOUGH
+const SLEEVE_DOUGH_DARK = '#8A5324'; // forearm — the same family, one rung down
 
 // ── The ATTACHMENT masses, and why they are DOUGH and not a fifth pink ───────
 // Donut is STUB: `torsoFraction: 0`, so there is no body between the ring and the
@@ -142,7 +156,10 @@ const SPRINKLE_COLORS = ['#E63946', '#7CB518', '#FFC93C', '#7C4DFF', '#2E86D8', 
  * wedge every other character in this file gives it, which is the point: a cast
  * that shares a helper but tunes it per-character reads as one family, not one mould.
  */
-function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+function taperedSegment(
+  len: number, rTop: number, rBot: number, radialSegments = 12,
+  capTopFrac = 0.30, capBotFrac = 0.42,
+): THREE.BufferGeometry {
   // Profile MUST be wound bottom-to-top (y increasing), matching every other
   // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
   // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
@@ -169,6 +186,28 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   // each segment also pokes up through the segment above it. Four of those in a
   // chain, in two alternating values, is a bead necklace by construction.
   //
+  // ── ⚠️ THE CLAIM THAT USED TO CLOSE THIS PARAGRAPH WAS FALSE. IT READ: ───────
+  //
+  //   > "…which turned the bead necklace into limbs."
+  //
+  // It did not. It is kept here per CLAUDE.md's rule on reversed assertions, because
+  // the mistake is more useful than the sentence: **the fix below is correct, it was
+  // correctly measured, and the defect it was claimed to close was still there in the
+  // very next render.** Rendered at the lobby camera on the committed tree
+  // (`shots/cb/before/donut.png`, pitch 20 — the camera Uri judges), donut is four
+  // chains of alternating pink and berry lumps hanging off a ring.
+  //
+  // The bead had THREE causes and this fix addressed one of them:
+  //   1. caps sized by RADIUS instead of by BONE — fixed here, genuinely;
+  //   2. every segment tapering to a POINT at both ends, so the limb pinches to zero
+  //      width at every joint and the ink hull traces the pinch — see the interior/
+  //      exterior cap note further down, which is the fix for that;
+  //   3. the ALTERNATING VALUE between adjacent segments, which puts a different
+  //      colour inside each of those traced contours and confirms the read.
+  // Fixing (1) alone leaves (2) and (3) intact, and (2)+(3) are sufficient on their
+  // own. `docs/LESSONS.md` §6b, in the form that costs the most: a probe told us what
+  // was broken and we read it as telling us what the viewer was reacting to.
+  //
   // The fix is to bound each cap by the BONE, not by the radius: the cap heights are
   // clamped to 0.42/0.30 of `len` (sum 0.72 < 1, so a straight side always exists)
   // while the cap's WIDTH stays `rBot`/`rTop`. Two consequences, both wanted:
@@ -191,9 +230,40 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   // What DOES survive from that round is the resolution: 6 cap segments against 4
   // side steps, and 16 radial, because a 5/3/12 lathe put a shading corner where
   // `computeVertexNormals` has to guess and rendered as a faceted gem.
+  //
+  // ── 🚨 AND 0.42/0.30 EVERYWHERE IS WHY THE FIX ABOVE DID NOT FINISH THE JOB ──
+  // The committed claim directly under this block used to read *"turned the bead
+  // necklace into limbs"*. **It was wrong, and it is corrected in place below.** The
+  // fix above is real and it is the reason a segment no longer pokes through the one
+  // over it — but rendered at the lobby camera afterwards, donut still read as four
+  // bead chains, and the reason is the OTHER end of the same profile.
+  //
+  // Every segment was a CLOSED CAPSULE: `pts` starts at `(0, -len)`, a point on the
+  // axis, so each segment tapers to nothing at its bottom, and the next segment down
+  // starts from a point at exactly the same place and flares back out. So even with
+  // perfectly matched radii the limb has a full pinch to ZERO WIDTH at every joint —
+  // and `outlineGroup` draws an ink hull round each one, so the pinch is traced. That
+  // is a bead by construction, at any albedo, and no value scheme survives it.
+  //
+  // The previous round tried to remove it by shortening ALL FOUR caps to 0.18/0.14
+  // and got flat-ended cylinders — "a stack of drink cans" — because that also
+  // flattened the SHOULDER and the WRIST, which are the two caps you can actually
+  // see. The distinction it missed is that a limb's caps are not interchangeable:
+  //
+  //   INTERIOR caps (the upper arm's BOTTOM, the forearm's TOP, and their leg
+  //   equivalents) meet an abutting segment of the same radius and are NEVER VISIBLE.
+  //   Flattening those to ~0.05 of the bone makes the two lathes share a silhouette
+  //   tangent, so the limb runs as one continuous taper through the joint.
+  //
+  //   EXTERIOR caps (the shoulder, the wrist, the hip, the ankle) are the ones the
+  //   drink-can round flattened by mistake. They keep 0.30/0.42 and stay round.
+  //
+  // Hence the two fractions are ARGUMENTS now, defaulting to the values above so
+  // every existing call site is byte-identical. A caller that knows which end of its
+  // bone faces a neighbour passes ~0.05 for that end and nothing else changes.
   const capSegs = 6;
-  const capBot = Math.min(rBot, len * 0.42);
-  const capTop = Math.min(rTop, len * 0.30);
+  const capBot = Math.min(rBot, len * capBotFrac);
+  const capTop = Math.min(rTop, len * capTopFrac);
   const yBotCap = -len + capBot;
   const yTopCap = -capTop;
   const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
@@ -348,7 +418,41 @@ export class DonutCharacter extends BaseCharacter {
         // NEGATIVE z there opens outward; positive would fold it across the body.
         shoulderL: -0.30, shoulderR: 0.26,
         elbowL: -0.55, elbowR: -0.65,
-        twist: 0.22, headTilt: 0.22, headTurn: -0.30,
+        // ── 🚨 THE TWO EYES RENDER AT DIFFERENT SIZES, AND THE FACE SITS LOW-LEFT ─
+        // Uri, on egg: *"the two eyes are drastically different sizes"* — and donut
+        // has egg's defect from egg's mechanism, on a head that is three times the
+        // area. `fb9d9da` derived it: the face is a child of `head`, `head` carries
+        // `headTurn` and `twist` and BOTH are yaw, so an eye authored at theta ±t
+        // images at ±t plus the net yaw and the two widths come out in the ratio
+        // `cos(t - yaw) / cos(t + yaw)`.
+        //
+        // Measured on this character rather than assumed. `eyeX = ±0.50R` puts each
+        // eye at `asin(0.50)` = **0.524 rad** off the axis, and the net yaw is
+        // `headTurn + twist` = −0.30 + 0.22 = **−0.08 rad**:
+        //
+        //     cos(0.524 − 0.08) / cos(0.524 + 0.08) = 0.9032 / 0.8231 = **1.097**
+        //
+        // i.e. one sclera renders about 10% wider than the other. Read off
+        // `shots/cb/a1/donut.png` the two sclerae span **88 px and 100 px** — 1.136,
+        // which is that arithmetic plus the perspective of the nearer eye. −0.30 ->
+        // −0.26 takes the net yaw to −0.04 and the predicted ratio to **1.047**.
+        //
+        // ⚠️ AND THE SECOND HALF IS `headTilt`, WHICH IS A ROLL AND NOT A YAW. At
+        // 0.22 rad the two eyes sit **120 px apart vertically** in a 1400 px frame,
+        // which on a large flat disc reads as the whole face having slid into the
+        // lower-left quadrant with the ring's hole stranded above it — the "face off
+        // the centreline of a large curved head" note. 0.22 -> 0.12.
+        //
+        // ⚠️ WHY NOTHING IS COUNTER-ROTATED HERE, when egg's equivalent edit
+        // compensated five features: on egg the crack path, the cowl seam and both
+        // clasps are authored at fixed head-local THETAS, so moving `headTurn` drags
+        // them round the shell and the A/B measures four changes at once. Donut's
+        // head furniture is placed by `massAnchor`/`surfaceZ` off the CURRENT mesh,
+        // and the beanie is radially symmetric about the crown, so a 0.04 rad yaw
+        // change moves the sprinkles and the drips with the head — which is what
+        // rotating a head is supposed to do. The one thing authored against an
+        // absolute azimuth is the face itself, and moving the face IS the edit.
+        twist: 0.22, headTilt: 0.12, headTurn: -0.26,
         hipSway: 0.12, lean: -0.03,
         // Bouncy still reads with the feet apart — arguably better, since a rocked-
         // back weight needs a base to be rocked back ON. Measured at the shipped
@@ -593,6 +697,8 @@ export class DonutCharacter extends BaseCharacter {
     // matte dough limbs, echoing the head's own matte-dough/glossy-glaze contrast.
     const limbPinkMat = toonMat({ color: LIMB_PINK, roughness: 0.7 });
     const limbPinkDarkMat = toonMat({ color: LIMB_PINK_DARK, roughness: 0.7 });
+    const sleeveDoughMat = toonMat({ color: SLEEVE_DOUGH, roughness: 0.7 });
+    const sleeveDoughDarkMat = toonMat({ color: SLEEVE_DOUGH_DARK, roughness: 0.7 });
     const glazeHandMat = glossyMat({ color: GLAZE, roughness: 0.16 });
     // Roughness 0.22 -> 0.34. `glossyMat` carries `clearcoat: 0.6`, so at 0.22 the
     // boot returns a broad specular and its measured p50 rose 0.0599 -> 0.1000 once
@@ -611,29 +717,65 @@ export class DonutCharacter extends BaseCharacter {
         // 0.935*0.1198 = 0.112, leg 0.86*0.1218 = 0.1048 against 0.956*0.1096 =
         // 0.1048 — which is what turns two abutting meshes into one limb that
         // changes colour at the joint instead of two beads on a string.
+        // ── 🚨 AND THE FOUR LIMBS WERE THE SAME OBJECT IN FOUR PLACES ──────────
+        // `upperArm` and `thigh` shared `limbPinkMat`, `forearm` and `shin` shared
+        // `limbPinkDarkMat`, and the radii differed by 4%. So an arm and a leg were
+        // the same mass in the same two tones, distinguishable only by the terminal
+        // cap — a glaze mitt against a choc boot, the two smallest elements on the
+        // character — and the read at the lobby camera is a four-legged animal.
+        //
+        // The split is on HUE, not on value, and that is deliberate: every value on
+        // this character is already spoken for. `head|shoulderL` is the weakest
+        // boundary on the model at `dLcontact` **0.0315**, because a mid-pink arm
+        // meets a light-pink ring; `hips|thighL` needs the haunch's berry to stay
+        // clear of the thigh; `kneeL|footL` cleared its gate by **0.0015**. Moving
+        // any of those four tones to separate the pairs breaks one of them.
+        //
+        // ⚠️ SO THE ARMS TAKE THE DOUGH FAMILY AND THE LEGS KEEP THE BERRY FAMILY.
+        // That is not a new idea — it is the fix the removed-cuff note at the bottom
+        // of this file explicitly names: *"the honest fix is lighting or a DIFFERENT
+        // ARM TONE, not a shape bolted onto the boundary to satisfy the statistic."*
+        // A hoop at the shoulder was built, measured and rejected there; recolouring
+        // the sleeve buys the same boundary with no new geometry at all, and gold on
+        // a glazed donut is the food's own second colour rather than an invention —
+        // it is the band already visible inside the ring.
         case 'upperArmL': case 'upperArmR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.98, size.radius * 0.86, 16), limbPinkMat);
+          // `capBotFrac` 0.05: this end meets the forearm's top at the same radius
+          // and is never seen. See the interior/exterior cap note in
+          // `taperedSegment` — this is the argument that stops the limb pinching to
+          // zero width at the elbow, which is what an ink hull traces as a bead.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.90, size.radius * 0.79, 16, 0.30, 0.05), sleeveDoughMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           return m;
         }
         case 'thighL': case 'thighR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.02, size.radius * 0.86, 16), limbPinkMat);
+          // 1.02 -> 1.12 while the arm went 0.98 -> 0.90. The two were within 4% of
+          // each other, which at this on-screen size is no difference at all; they
+          // are now 24% apart, and the heavier pair being the LEGS is the one
+          // proportion cue that survives any pose.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.12, size.radius * 0.945, 16, 0.30, 0.05), limbPinkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           return m;
         }
         case 'forearmL': case 'forearmR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.935, size.radius * 0.78, 16), limbPinkDarkMat);
+          // Top radius matches the upper arm's bottom in METRES, not in multiplier:
+          // 0.79 * 0.1302 = 0.1029 against 0.859 * 0.1198 = 0.1029. The rig hands the
+          // lower segment a smaller base radius (`forearm = armRadius * 0.92`), so
+          // equal multipliers would put a step in the outline at the elbow.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.859, size.radius * 0.72, 16, 0.05, 0.30), sleeveDoughDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           return m;
         }
         case 'shinL': case 'shinR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.956, size.radius * 0.80, 16), limbPinkDarkMat);
+          // Same continuity, on the leg: 0.945 * 0.1218 = 0.1151 against
+          // 1.05 * 0.1096 = 0.1151.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.05, size.radius * 0.88, 16, 0.05, 0.34), limbPinkDarkMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;

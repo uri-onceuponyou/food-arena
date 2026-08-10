@@ -245,8 +245,30 @@ const LIMB_LILAC_SHADOW = '#150E22';
  */
 const GARMENT = '#241A38';
 const GARMENT_LIT = '#3E3157';
-/** Yolk-gold hands, deepened. At #FFC23C they were a sixth light mass. */
-const YOLK_HAND = '#3A2408';
+/**
+ * Yolk-gold hands.
+ *
+ * ── ⚠️ #3A2408 -> #8A5A16, AND BOTH ENDS OF THIS ARE REVERSALS ──────────────
+ * The wording this replaces is kept because it is still true at the end it was
+ * written about:
+ *
+ *   > "Yolk-gold hands, deepened. At #FFC23C they were a sixth light mass."
+ *
+ * That was right: 0.62 of luma on a character that is already four near-whites is
+ * another one, and it was correctly reversed. What went wrong is the SIZE of the
+ * reversal — #3A2408 is luma **0.152**, which is not "deepened", it is a NEAR-BLACK
+ * hand at the end of a near-black arm. Measured this pass, `valuescan --mode gate`
+ * at the shipped station: `elbowL|handL` `dLcontact` **0.006** — the forearm and the
+ * hand differ by about one 8-bit step where they meet, so the wrist does not exist.
+ *
+ * #8A5A16 is luma ~0.374: a full step over the 0.066 forearm, and still well under
+ * the shell's own 0.42 over 93.7% of the character, so it cannot be the light mass
+ * #FFC23C was — a 1%-area part at 0.374 is not competing with a 94%-area part at
+ * 0.42. It is also the cast-wide grammar this file's limb note already cites
+ * ("light extremities on a mid body"), which the near-black version silently opted
+ * out of.
+ */
+const YOLK_HAND = '#8A5A16';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shell surface — single source of truth for both the mesh and every decal.
@@ -580,7 +602,10 @@ function buildCrackLine(
  * `size.radius` — she is a small, delicate character, and the rig's default
  * limb thickness read as too stocky for that.
  */
-function taperedSegment(len: number, rTop: number, rBot: number, radialSegments = 12): THREE.BufferGeometry {
+function taperedSegment(
+  len: number, rTop: number, rBot: number, radialSegments = 12,
+  capTopFrac = 0.30, capBotFrac = 0.42,
+): THREE.BufferGeometry {
   // Profile MUST be wound bottom-to-top (y increasing), matching every other
   // lathe helper in this cast (`bunDome`, `roundedPuck` in `hamburger.ts`) —
   // LatheGeometry's face winding (and therefore `computeVertexNormals`'s
@@ -588,25 +613,58 @@ function taperedSegment(len: number, rTop: number, rBot: number, radialSegments 
   // earlier version of this function built the profile top-to-bottom and every
   // limb using it rendered near-black: inverted normals facing away from the
   // light. The y=0/y=-len hang-down placement is unchanged.
-  const capSegs = 5;
+  //
+  // ── 🚨 THE CAPS WERE SIZED BY THE RADIUS AND NOT BY THE BONE ────────────────
+  // Taken VERBATIM from `donut.ts:145`, which derived it. Six independent copies of
+  // this helper exist across the cast and donut's fix reached only `hamburger.ts`;
+  // this is the third. The one thing worth restating here is which HALF of the bug
+  // this character had, because the loud half is not it:
+  //
+  // The old code emitted a straight side only when `len >= rTop + rBot`, and when it
+  // did not, `yTopSafe = Math.max(...)` stacked two FULL hemispheres into a sphere
+  // that pokes above its own joint origin. `tools/tmp/cb_rig.mjs` prints that test
+  // and **egg never trips it** — her four bones come out at ratio 0.64-0.89, all
+  // under 1. What she had instead is the QUIET half: caps of height `rBot`/`rTop` on
+  // a bone barely longer than their sum leave a straight side of **11-36% of the
+  // bone**, and the rest is two hemispheres. Rendered at the lobby camera
+  // (`shots/cb/before/egg.png`) each limb is three dark balls on a string, which is
+  // the same defect hamburger's critic called *"a chain of three separate orange
+  // balls per side"* — arrived at from the other side of the same `if`.
+  //
+  // ⚠️ So a ratio under 1 is NOT a clean bill of health, and reading `fb9d9da`'s
+  // table as one would have skipped this file. Bounding the caps by the BONE —
+  // 0.42/0.30 of `len`, sum 0.72 < 1 so a straight side always exists — is the fix
+  // for both halves, and it is the same code either way.
+  //
+  // ── AND THE CAP FRACTIONS ARE ARGUMENTS, WHICH IS THE OTHER HALF OF THE FIX ──
+  // Bounding the caps by the bone still leaves every segment tapering to a POINT at
+  // both ends — `pts` starts at `(0, -len)`, on the axis — so the limb pinches to
+  // zero width at every joint, and `outlineGroup` gives each segment its own ink
+  // hull, which traces the pinch. That is a bead whatever the albedo is, and on this
+  // character the albedo cannot help: all four limb tones sit between 0.04 and 0.15.
+  // INTERIOR caps (the upper arm's bottom, the forearm's top, and the leg
+  // equivalents) abut a segment of the same radius and are never visible, so a
+  // caller passes ~0.05 for that end and the two lathes share a silhouette tangent.
+  // EXTERIOR caps (shoulder, wrist, hip, ankle) keep 0.30/0.42 and stay round —
+  // flattening THOSE is what turned donut's limbs into a stack of drink cans.
+  const capSegs = 6;
+  const capBot = Math.min(rBot, len * capBotFrac);
+  const capTop = Math.min(rTop, len * capTopFrac);
+  const yBotCap = -len + capBot;
+  const yTopCap = -capTop;
   const pts: THREE.Vector2[] = [new THREE.Vector2(0, -len)];
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + rBot - Math.cos(a) * rBot));
+    pts.push(new THREE.Vector2(Math.sin(a) * rBot, -len + capBot - Math.cos(a) * capBot));
   }
-  const yBotCap = -len + rBot;
-  const yTopCap = -rTop;
-  if (yTopCap >= yBotCap) {
-    const sideSteps = 3;
-    for (let i = 1; i <= sideSteps; i++) {
-      const t = i / sideSteps;
-      pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
-    }
+  const sideSteps = 4;
+  for (let i = 1; i <= sideSteps; i++) {
+    const t = i / sideSteps;
+    pts.push(new THREE.Vector2(THREE.MathUtils.lerp(rBot, rTop, t), THREE.MathUtils.lerp(yBotCap, yTopCap, t)));
   }
-  const yTopSafe = Math.max(yTopCap, yBotCap);
   for (let i = 1; i <= capSegs; i++) {
     const a = (Math.PI / 2) * (i / capSegs);
-    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopSafe + Math.sin(a) * rTop));
+    pts.push(new THREE.Vector2(Math.cos(a) * rTop, yTopCap + Math.sin(a) * capTop));
   }
   const geo = new THREE.LatheGeometry(pts, radialSegments);
   geo.computeVertexNormals();
@@ -997,26 +1055,156 @@ export class EggCharacter extends BaseCharacter {
     const limbShellShadowMat = toonMat({ color: LIMB_LILAC_SHADOW, roughness: 0.42 });
     const yolkHandMat = glossyMat({ color: YOLK_HAND, roughness: 0.2 }); // deepened — see YOLK_HAND
     const crackFootMat = toonMat({ color: CRACK_DARK, roughness: 0.5 });
+    // ── 🚨 THE SHELL TRIM, AND IT IS PAYING A MEASURED DEBT ─────────────────────
+    // Joining the limb segments (see `dressLimbs`) fixed the bead and CREATED a
+    // problem the bead was hiding. `valuescan --mode gate`, this pass, both arms
+    // recomputed on frozen trees:
+    //
+    //   char   minDL          n<.10   weakB%        weakBc%          verdict
+    //   egg    0.182 -> 0.167   0->0   61.8 -> 76.2   0.0 -> 38.1    FAIL (unchanged)
+    //
+    // 🚨 `weakBc%` — the CONTACT-LOCAL count, the one `3ad20e2` proved is the real
+    // quantity and the one this pass was told to steer on — went from **0.0 to 38.1**.
+    // ⚠️ AND THE HEADLINE NUMBER OVERSTATES IT, WHICH IS ITS OWN LESSON. Before this
+    // pass egg's `adjacent` list had **two entries**; after, it has more, because four
+    // separated beads per limb DO NOT TOUCH and a joined limb does. So the denominator
+    // is not the same denominator: 0.0% was not "no weak boundaries", it was "almost no
+    // boundaries". A metric that improves when geometry falls apart is not measuring
+    // what it is being read as measuring.
+    //
+    // It is still a real defect: `kneeL|footL` and `hipL|kneeL` both measure **0.001**,
+    // which is two 8-bit steps, i.e. the knee and the ankle do not exist. The cause is
+    // this character's own recorded corner — every limb tone she owns sits between 0.043
+    // and 0.152 of albedo (`LIMB_LILAC_SHADOW`'s note: *"not enough room between the
+    // thigh, the shin and the boot to fit three 0.10 steps at 111 px. That is a geometry
+    // answer, not an albedo one"*) — and with the beads gone there is no longer a
+    // rounded highlight per segment doing the separating by accident.
+    //
+    // So the step is bought as a SHAPE, at exactly the two boundaries that measure zero:
+    // a thin pale shell-chip band at the top of the shin and at the top of the boot. It
+    // is the character's own motif rather than a new colour, it is the reference's
+    // light-trim grammar, and it lands ON the contact where `dLcontact` is sampled.
+    // ⚠️ It is deliberately THIN. A wide band is another segment, and another segment is
+    // another bead — the defect this whole pass exists to remove.
+    const shellTrimMat = toonMat({ color: SHELL_BODY, roughness: 0.42 });
+    const shellTrim = (ringR: number, tubeR: number, y: number): THREE.Mesh => {
+      const t = new THREE.Mesh(new THREE.TorusGeometry(ringR, tubeR, 6, 16), shellTrimMat);
+      t.rotation.x = Math.PI / 2;
+      t.position.y = y;
+      // `noOutline`: an ink hull round a ring this small at this on-screen size is most
+      // of the ring, and the trim would render as a black band — the exact inversion of
+      // what it is here to do.
+      t.userData.noOutline = true;
+      t.castShadow = true;
+      return t;
+    };
+    // ── 🚨 ARMS AND LEGS WERE THE SAME OBJECT, AND SHE READ AS A FOUR-LEGGED BUG ──
+    //
+    // The old mapping put `upperArm` and `thigh` in one `case` and `forearm` and
+    // `shin` in the other — so an arm and a leg were byte-identical geometry in
+    // byte-identical materials, differing ONLY in the terminal cap: a yolk teardrop
+    // versus a shell chip, the two smallest elements on the character. At the lobby
+    // camera that is four indistinguishable dark chains under a pale ovoid, and the
+    // read is an insect. `fb9d9da` deleted two scarf tails for making it SIX of them
+    // and stopped there; the four that were left are the same finding.
+    //
+    // The split below uses four independent cues, because any one of them can be
+    // defeated by pose or by foreshortening at 58deg:
+    //   1. SHAPE   the legs wear a BOOT with a shaft that climbs over the ankle and
+    //              is wider than the shin inside it; the arms end in a round bulb.
+    //              A boot is the single least ambiguous "this is a leg" cue there is,
+    //              and it survives foreshortening at 58deg because it is a mass, not
+    //              a marking.
+    //   2. PROPORTION  legs are ~23% fatter than arms at every station. The rig hands
+    //              this character `armRadius` 0.1253 > `legRadius` 0.1172 — arms
+    //              THICKER than legs, which is backwards for every chibi reference —
+    //              so the multipliers here have to overturn it, not merely differ.
+    //   3. CUFF    the arms get a dark ring at the wrist and nothing else does, which
+    //              is the reference's own sleeve grammar (mid sleeve, dark cuff,
+    //              light glove) and is the shape that reads as CLOTHING on a limb.
+    //   4. TERMINAL  a round yolk bulb wider than the wrist it grows from, against a
+    //              flat wide floor-seated chip.
+    //
+    // ⚠️ NOT ONE ALBEDO CHANGES, AND TWO EARLIER DRAFTS THAT DID CHANGE ONE WERE
+    // DISCARDED ON THIS FILE'S OWN RECORD.
+    //   · Giving each limb ONE flat tone — arms all lilac, legs all shadow — reads
+    //     well and would FAIL THE SHIPPED GATE: `valuescan --mode gate` steers on
+    //     `minDL`, the weakest CONTACT pair, and flattening a limb takes
+    //     `shoulderL|elbowL` and `hipL|kneeL` to ~0 and `minDL` with them.
+    //   · Adding a third, lighter rung for the sleeve moves the forearm up to the
+    //     old upper-arm tone — and `elbowL|handL` is forearm-against-`YOLK_HAND`,
+    //     which is 0.086 of albedo today and 0.033 after. A cue bought by breaking a
+    //     boundary is not a cue, it is a trade, and this character has no value left
+    //     to trade: see `LIMB_LILAC_SHADOW` above — *"there is not enough room
+    //     between the thigh, the shin and the boot to fit three 0.10 steps at 111 px.
+    //     That is a geometry answer, not an albedo one."*
+    // So the split is entirely geometric, and the bead is fixed geometrically too:
+    // it is not caused by the value step at the joint but by the SILHOUETTE pinching
+    // to zero width there — every segment tapered to a point at both ends and
+    // `outlineGroup` traced the pinch. Interior cap fractions unpinch it at no cost
+    // to any boundary. Keep the steps; unpinch the joint.
     this.rig.dressLimbs((part, size) => {
       switch (part) {
-        case 'upperArmL': case 'upperArmR':
-        case 'thighL': case 'thighR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.82, size.radius * 0.6, 12), limbShellMat);
+        case 'upperArmL': case 'upperArmR': {
+          // `capBotFrac` 0.05 — this end abuts the forearm at the same radius and is
+          // never visible; see `taperedSegment`'s interior/exterior cap note.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.86, size.radius * 0.70, 12, 0.30, 0.05), limbShellMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           return m;
         }
-        case 'forearmL': case 'forearmR':
-        case 'shinL': case 'shinR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.6, size.radius * 0.42, 12), limbShellShadowMat);
+        case 'forearmL': case 'forearmR': {
+          // Radii are continuous across the elbow in METRES: 0.70 * 0.1253 = 0.0877
+          // against 0.761 * 0.1152 = 0.0877. The rig gives the forearm a smaller base
+          // radius (`armRadius * 0.92`), so equal multipliers would step the outline.
+          const g = new THREE.Group();
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.761, size.radius * 0.60, 12, 0.05, 0.30), limbShellShadowMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          g.add(m);
+          // The cuff. `noOutline` deliberately: an ink hull around a ring this small
+          // at this on-screen size is most of the ring, and it would read as a black
+          // bracelet rather than as the end of a sleeve.
+          const cuff = new THREE.Mesh(
+            new THREE.TorusGeometry(size.radius * 0.62, size.radius * 0.13, 6, 14), limbShellShadowMat
+          );
+          cuff.rotation.x = Math.PI / 2;
+          cuff.position.y = -size.len * 0.90;
+          cuff.userData.noOutline = true;
+          cuff.castShadow = true;
+          g.add(cuff);
+          return g;
+        }
+        case 'thighL': case 'thighR': {
+          // 1.06 against the arm's 0.86 — and on the RIG's own radii, which run the
+          // wrong way for this character (`armRadius` 0.1253 > `legRadius` 0.1172),
+          // so 1.06 * 0.1172 = 0.1242 against 0.86 * 0.1253 = 0.1078: the leg ends up
+          // 15% fatter in metres from a 23% gap in multipliers. The multiplier is not
+          // the cue; the metre is.
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.06, size.radius * 0.90, 12, 0.30, 0.05), limbShellMat);
           m.name = `${part}_mesh`;
           m.castShadow = true;
           m.receiveShadow = true;
           return m;
+        }
+        case 'shinL': case 'shinR': {
+          // 0.90 * 0.1172 = 0.1055 against 1.0 * 0.1055 = 0.1055.
+          const g = new THREE.Group();
+          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.0, size.radius * 0.80, 12, 0.05, 0.34), limbShellShadowMat);
+          m.name = `${part}_mesh`;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          g.add(m);
+          g.add(shellTrim(size.radius * 1.02, size.radius * 0.115, -size.len * 0.07));
+          return g;
         }
         case 'handL': case 'handR': {
-          const drop = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.5, 14, 12), yolkHandMat);
+          // 0.50 -> 0.60 of the hand radius. The forearm now ENDS at 0.50 of its own
+          // radius, and a bulb the same width as the wrist it grows from is not a
+          // terminal — it is more limb. It has to be visibly wider to close the arm.
+          const drop = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.6, 14, 12), yolkHandMat);
           drop.position.y = -size.radius * 0.62;
           drop.scale.set(1, 1.5, 1);
           drop.name = `${part}_mesh`;
@@ -1042,9 +1230,38 @@ export class EggCharacter extends BaseCharacter {
           chip.position.set(0, Math.max(size.groundY + size.len * 0.25, -size.len * 0.36), size.radius * 0.25);
           chip.rotation.y = Math.PI / 5;
           chip.name = `${part}_mesh`;
+          // ── THE BOOT SHAFT: cue 1 of the arm/leg split ────────────────────────
+          // A chip lying flat on the floor is a foot, but at the lobby camera it is
+          // 12 px of a 1000 px figure and it disappears under the leg above it — so
+          // it was doing none of the work of distinguishing a leg from an arm. The
+          // shaft climbs BACK UP over the ankle, wider than the shin it sleeves, in
+          // the same crack tone: the leg now ends in a mass instead of a dot.
+          //
+          // ⚠️ It is parented to the FOOT joint, not the shin, so it swings with the
+          // ankle in the run cycle and cannot shear off the leg mid-stride — the
+          // failure mode the chip's own comment above records for a cone tip.
+          // ⚠️ And it changes no albedo: it is `crackFootMat`, the tone that was
+          // already here. `kneeL|footL` is measured shin-against-foot and both sides
+          // of that pair are untouched; what changes is the AREA the foot side
+          // occupies, which is the term that was too small to survive at 111 px.
+          const g = new THREE.Group();
+          g.add(chip);
+          const shaft = new THREE.Mesh(
+            taperedSegment(size.len * 0.46, size.radius * 1.06, size.radius * 1.28, 12, 0.14, 0.30),
+            crackFootMat
+          );
+          // Hangs from the ANKLE (y = 0 in this joint's frame) down over the boot, so
+          // its top is buried in the shin and its bottom meets the chip. `taperedSegment`
+          // spans y in [-len, 0], so no offset is needed and none should be added: an
+          // offset here is what lifts a boot off its own foot when the pose changes.
+          shaft.name = `${part}_shaft`;
+          shaft.castShadow = true;
+          shaft.receiveShadow = true;
+          g.add(shaft);
+          g.add(shellTrim(size.radius * 1.14, size.radius * 0.105, -size.len * 0.07));
           chip.castShadow = true;
           chip.receiveShadow = true;
-          return chip;
+          return g;
         }
         default:
           return null;
