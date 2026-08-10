@@ -323,7 +323,53 @@ export const FOOD_ICONS: Record<string, string> = {
    *  blue faceted crystal is the game's own premium CURRENCY (`gem` — the §32 defect in
    *  reverse), a cube is the four loot boxes, a disc is `cap`, a drop is `droplets`, and
    *  a vessel is a chef's hat 3/3 as measured above. **That is a design call, not a
-   *  drawing one, and it is parked for Uri.** */
+   *  drawing one, and it is parked for Uri.**
+   *
+   *  ── ⚠️ RE-MEASURED AT THE SIZE IT ACTUALLY SHIPS AT. IT HOLDS, 6 OF 6. ──────
+   *  Every round above was judged at **20 px, dark-on-cream**, because that is what the
+   *  plate harness draws. `tools/tmp/ic_delivered.mjs` walked the real screens and that
+   *  is not a condition this game has. Delivered, measured off the rendered DOM:
+   *
+   *      glyph    where it ships                     box        plate
+   *      shards   `.chars-ability-em`, char select   23.2 px    WHITE, ink outline
+   *      shards   `.hud-weapon-emoji`, match HUD     24-26 px   #EFEAF7, ink outline
+   *      range    `.chars-fact`, char select         13.8 px    INK PILL, CREAM outline
+   *
+   *  So the plate drew `range` **56% too large with its polarity inverted**, and drew
+   *  `shards` 14% too small. Re-run at those measured conditions, two independent
+   *  three-judge panels, 65 forced-choice candidates:
+   *
+   *      shards -> "a double-headed arrow"   3/3 and 3/3   = **6 of 6**
+   *      range  -> named correctly           3/3 and 3/3   = **6 of 6**
+   *
+   *  The collision is one-directional and total. It is not an artefact of the harness,
+   *  it survives the correction, and it is the most reproducible result in the set.
+   *  ⚠️ Note the two glyphs also ship IN THE SAME BOX: Water Bottle's Glass Shards pill
+   *  carries this icon at 23.2 px and the `range` chip 40 px below it.
+   *
+   *  🚨 AND THE INSTRUMENT WAS SHOWN THE ANSWER FIRST. A control plate was rendered with
+   *  `range`'s ARTWORK substituted into the `shards` tile — identical pixels under two
+   *  names, a collision by construction. Judges named the forged tile "a double-headed
+   *  arrow" 3/3: **exactly the same answer, at the same rate, as the real glyph.** To a
+   *  blind reader at the delivered size, the shipped `shards` is indistinguishable from
+   *  literally pasting the `range` icon into its place. The same control proves the
+   *  method has teeth rather than crying collision at everything: forging `boxRed`'s art
+   *  into `gift`'s tile produced a mutual `gift <-> boxRed` swap that does NOT appear on
+   *  the real plate, where both score 3/3.
+   *
+   *  ⚠️ THE SHARPENED DIAGNOSIS, and it is narrower than "fragments have no silhouette".
+   *  The two dominant fragments have apexes pointing in roughly OPPOSITE directions along
+   *  one diagonal. That is not *like* a double-headed arrow; it is the construction of
+   *  one. With the drafts above, all three arrangements are now measured: **opposed = a
+   *  double arrow, co-directional = arrows, scattered = arrows.** A pale triangle is an
+   *  arrowhead at every size and in every arrangement, so no rearrangement of triangles
+   *  can pass. That is precisely why this stays a subject question and not a drawing one.
+   *
+   *  ⚠️ **AND DO NOT FIX IT FROM THE `range` SIDE.** It is the obvious move — `range` is
+   *  the generic glyph and `shards` has eight failed drafts — and it is refused on the
+   *  same measurement that refused the droplet-with-a-spin-arc for `cap` (§10): `range`
+   *  scores **6/6**. Spending one of the set's strongest glyphs to repair one of its
+   *  weakest has been tried in this file before and it cost both. */
   shards: `
 <path d="M2.2 3.4 12.6 8.8 6.6 18.2z" fill="${P.ice}"/>
 <path d="M15.2 2.6 22 11.4 13.4 13.6z" fill="${P.iceHi}"/>

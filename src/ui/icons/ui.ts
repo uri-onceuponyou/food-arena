@@ -175,6 +175,76 @@ export const UI_ICONS: Record<string, string> = {
 <path d="M10.3 9.8h3.4v5.4h-3.4z" fill="${P.mustard}" stroke-width="1.4"/>
 <circle cx="12" cy="12.9" r="0.85" fill="${P.wood}" stroke="none"/>`,
 
+  /** ── boxBurger's COLOURWAY, and why it alone kept reading as a present ──────
+   *
+   *  The clasp above fixed three boxes of four and this one REGRESSED; the block above
+   *  named the likely cause (`P.ketchup` on `P.gold` is a red bow on a gold lid) and
+   *  said it was "one colour swap away from a test". Re-measured at the DELIVERED size
+   *  — 14.4 CSS px on white in the drop-rates sheet, which is where the four boxes
+   *  actually ship smallest, not the 20 px the plate harness assumed — it is still
+   *  **0/3, "a wrapped gift" x2 + "a treasure chest" x1**, while `boxRed` and
+   *  `boxPineapple` are 3/3 and `gift` itself is 3/3.
+   *
+   *  ⚠️ THE CAUSE IS NOT THE HUE. `boxRed` is red-and-gold, `gift` is red-and-gold, and
+   *  the two separate perfectly. What separates them is that a box has a LID and a
+   *  present has a RIBBON, so the reader has to be able to see the lid seam. Contrast
+   *  ratios, front vs lid, across the family:
+   *
+   *      boxPineapple  1.53      boxRed  1.40      boxFire  1.64      boxBurger  1.36
+   *
+   *  boxBurger is the only one below 1.40: `P.gold` and `P.mustard` are a third of a
+   *  stop apart, so at 14 px it has no visible lid at all — it is one flat gold mass
+   *  with a coloured block on it, which is a present.
+   *
+   *  And there is a second inversion, which is the sharper of the two. In all three
+   *  boxes that pass, the clasp contrasts MORE with the front than with the lid, so it
+   *  reads as an object sitting ON the box:
+   *
+   *      box            clasp/front   clasp/lid
+   *      boxPineapple      3.77          2.45
+   *      boxRed            3.24          2.31
+   *      boxFire           3.65          2.22
+   *      boxBurger         2.39          3.24   <- inverted
+   *
+   *  boxBurger's clasp is the only one that is LID-dominant, and its clasp/lid ratio of
+   *  **3.24 is exactly `gift`'s ribbon-against-body ratio, to two decimal places**. A
+   *  dark block laid across a light lid at a present's own contrast is a present, and no
+   *  amount of clasp geometry undoes that.
+   *
+   *  ── THE FIX THOSE RATIOS IMPLY WAS BUILT, MEASURED AND REVERTED ────────────
+   *  WAS: `box(P.goldDark, P.gold, P.cream, BURGER_EMBLEM)` — body darkened so it could
+   *  carry a light clasp like its three siblings. On paper it lands inside the passing
+   *  family's envelope: front/lid **1.82**, clasp/front **3.45**, clasp/lid **1.90**,
+   *  front-dominant. Kept here because the numbers are right and the *outcome* was not.
+   *
+   *  Measured on the same delivered-size plate, same seed, identical tile positions,
+   *  three fresh judges each side:
+   *
+   *      answer given to boxBurger      before            after
+   *      "a wrapped gift"               2/3               **0/3**
+   *      "a treasure chest"             1/3               **3/3**
+   *      correct                        0/3               0/3
+   *
+   *  The gift read WAS killed, exactly as the ratios predicted. It simply moved onto
+   *  `chest`, which is the other container the set draws, is not exempt, and is the FREE
+   *  rung against boxBurger's 900 coins — so the new collision is no cheaper than the
+   *  old one. `chest` is a brown body under a gold band; `P.goldDark` is brown enough at
+   *  14 px to be one.
+   *
+   *  ⚠️ AND THE CONTROL MOVED, WHICH IS THE REAL REASON THIS IS A REVERT AND NOT A
+   *  REGRESSION. `boxRed`'s art did not change by one byte and it went **3/3 -> 0/3**
+   *  across the same two rounds ("a treasure chest" x2, "a wrapped gift" x1), and
+   *  box-named-"a wrapped gift" across all four boxes sat at **2 of 12 before and 2 of
+   *  12 after**. A three-judge panel cannot resolve a single icon in this family: the
+   *  panel-to-panel swing on FIXED art is the full 0/3-to-3/3 range, which is wider than
+   *  any effect being looked for. So the honest statement is not "this made boxBurger
+   *  worse" — it is **"this round could not tell, and the aggregate did not move."**
+   *  CLAUDE.md #10: state the resolution floor before acting on a change inside it.
+   *
+   *  What that costs to settle is a PAIRED plate — the before-art and after-art tiles on
+   *  ONE plate seen by ONE judge in ONE round, so the panel's chest-happiness cancels the
+   *  way identical seeds cancel in a matchup delta. That is the next move here, and it is
+   *  not a redraw. */
   boxBurger: box(P.gold, P.mustard, P.ketchup, BURGER_EMBLEM),
   boxPineapple: box(P.grape, P.grapeHi, P.mustard, LEAF_EMBLEM),
   boxRed: box(P.ketchup, '#E9536A', P.mustard, BOW_EMBLEM),
