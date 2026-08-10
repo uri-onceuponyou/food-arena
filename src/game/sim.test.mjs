@@ -58,7 +58,7 @@ import {
   // imported rather than re-derived — a copy of `maxHpFor`'s arithmetic in the test
   // would pass forever against a `sim.ts` that had stopped calling it.
   maxHpFor, speedFor, healthMultiplier, speedMultiplier, kitDps, damageStatFor, powerIndex,
-  HEALTH_BASELINE_STAT, SPEED_TOP_STAT, STAT_MAX_DISPLAY, RARITY_ORDER,
+  HEALTH_BASELINE_STAT, HEALTH_PER_STAT, SPEED_TOP_STAT, STAT_MAX_DISPLAY, RARITY_ORDER,
   // Section 23: same rule — the level multipliers are imported, never re-derived, so a
   // `sim.ts` that stopped applying them cannot leave this section green.
   LEVEL_MIN, LEVEL_MAX, LEVEL_HEALTH_PER_LEVEL, LEVEL_DAMAGE_PER_LEVEL,
@@ -3031,9 +3031,27 @@ console.log('\n23. Character levels');
     // The RATIO is still the point — it is why one line in an instrument was worth 50.6 pp
     // on this character and nothing anywhere else — so the threshold moves rather than
     // going away, and it stays well clear of a rounding error.
+    //
+    // 🚨 THIS CHECK CONSTRAINS TWO CONSTANTS IN TWO SECTIONS, AND NEITHER SAYS SO, WHICH
+    // IS WHY THE FAILURE MESSAGE NOW DERIVES BOTH BOUNDS INSTEAD OF PRINTING TWO NUMBERS:
+    //   * `healAmount` must clear a quarter of the pool — at the shipped 70 HP that is
+    //     **> 17.5, i.e. 18 or more.** `DECISIONS §28` invites Uri to pick any integer in
+    //     15..21, so **15, 16 and 17 turn this red**: the MEASURED range and the ADMISSIBLE
+    //     range are not the same range. If he picks one, move the threshold and keep the
+    //     old wording (as this check already did once at 1/3), do not move the heal back.
+    //   * `rules.ts:HEALTH_PER_STAT` has a FLOOR here too, because Hamburger holds the
+    //     roster's minimum health stat and its pool GROWS as that scale shrinks:
+    //     100*(1 - 3p) < 4*healAmount gives p > 0.0933 at healAmount 18, against a shipped
+    //     0.10. That is the reason the Legendary pass found no sub-point lever.
+    const pool = maxHpFor('hamburger', PLAYER_MAX_HP);
+    const minHeal = Math.floor(pool / 4) + 1;
+    const minPerStat = (PLAYER_MAX_HP - 4 * heal.healAmount)
+      / (PLAYER_MAX_HP * (HEALTH_BASELINE_STAT - CHARACTERS.hamburger.stats.health));
     check('…the heal restores over a quarter of that pool in one press',
-      heal.healAmount / maxHpFor('hamburger', PLAYER_MAX_HP) > 1 / 4,
-      `${heal.healAmount} of ${maxHpFor('hamburger', PLAYER_MAX_HP)} HP`);
+      heal.healAmount / pool > 1 / 4,
+      `${heal.healAmount} of ${pool} HP — this check needs healAmount >= ${minHeal} `
+      + `(DECISIONS §28 offers 15..21; ${minHeal > 15 ? `15..${minHeal - 1} are NOT admissible` : 'all admissible'}) `
+      + `and HEALTH_PER_STAT > ${minPerStat.toFixed(4)} (shipped ${HEALTH_PER_STAT})`);
   }
 
   // ── (d) THE SIM LETS THE PLAYER HEAL — so (c) is an INSTRUMENT gap, not a defect ──

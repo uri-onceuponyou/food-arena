@@ -1701,7 +1701,9 @@ export const RARITY_CARD_COLORS: Record<Rarity, string> = {
 //     BYTE-IDENTICALLY — verified 110/110 cells on both policies before anything else).
 //   * The vitals: `healAmount` 25 -> 18, below. NOT `stats.health` — the heal IS the
 //     character, and it is the only lever that reaches it without moving the vitals that
-//     `6447a68` measured at 7-12 pp of rarity guard per point.
+//     `6447a68` measured at 7-12 pp of rarity guard per point. (⚠️ That per-point figure
+//     is stale — the fixed driver reads **13.5-27.9 pp**, see `HEALTH_PER_STAT` — which
+//     makes the choice to move the heal rather than the vitals more right, not less.)
 //   * STILL NOT the terrain-slow fix. Priced on the block at `SPLAT_DURATION_MS`; it
 //     regresses the settled count 17 -> 19 and is worth 0.6 pp of this split.
 //
@@ -1756,6 +1758,97 @@ export const RARITY_CARD_COLORS: Record<Rarity, string> = {
 // consistently across every heal-capable variant. The game did not change; the
 // measurement of it did. **Every past "aggregate ~= 50%" statement now reads ~= 57% for a
 // competent player** — which puts `DECISIONS §12`'s parked difficulty dial back in play.
+//
+// ── 🚨 THE SUSHI/LEGENDARY PASS WAS RUN. IT IS REFUSED, AND HERE IS WHY ─────
+//
+// The paragraph above ends "the next balance pass is a SUSHI/LEGENDARY pass ... and it has
+// to push Legendary UP". It was run, on the same instrument, and the answer is that
+// **there is no admissible lever finer than the band it would have to land inside.**
+//
+// Speed is inert (see `SPEED_PER_STAT`) and Sushi is already at the `SPEED_TOP_STAT` cap,
+// so the only per-character lever is the card's integer `health` bar. Measured with
+// `stage_kit.mjs --stat <id>.health=<n>` + `roster_lab.mjs --seeds 32`, shipped arena,
+// fixed driver, paired on identical seeds, and VALIDATED FIRST with a NO-OP STAGING
+// CONTROL — an unchanged staged copy reproduces the unstaged run **220/220 cells
+// bit-identical across both policies**, so nothing in the harness is moving. Admissibility
+// against `sim.test.mjs` §22's structural bounds was checked before any match was run, by
+// `tools/tmp/bl_vitals_gate.mjs` (5/5 selftest, every bound shown to FAIL on a known-bad
+// roster); all six candidates below are admissible, so §22 is not what refuses them.
+//
+//   SUSHI         health      4        5 (ship)     6         7
+//     strength             30.3%       43.8%      59.8%     73.9%   steps +13.5/+16.0/+14.1
+//     TIER SPREAD          14.69 pp  **8.05 pp** **7.03 pp** 14.77 pp
+//
+//   WATER BOTTLE  health      5        6 (ship)     7
+//     strength             27.5%       46.3%      74.2%           steps +18.8/+27.9
+//     TIER SPREAD          18.20 pp  **8.05 pp**   9.53 pp
+//
+// Both ladders are MONOTONE, so this is a slope and not a threshold artefact. The slope is
+// **13.5 to 27.9 pp of strength per ONE card point** — see the correction at
+// `HEALTH_PER_STAT`, whose "7-12 pp" was measured on the PRE-FIX driver and is stale by
+// about 2x.
+//
+// ── THE ARITHMETIC THAT DECIDES IT ──────────────────────────────────────────
+//
+// The band to be closed is **8.05 pp wide and already clears the ~9 pp aggregate floor.**
+// The finest step available is **13.5 pp**. The lever is **1.7x to 3.5x coarser than the
+// defect**, so every rung either leaves Legendary where it is or throws it past the top:
+// of the six candidates measured, exactly ONE lowers the spread at all.
+//
+//   sushi health 6:  spread 8.05 -> 7.03 pp · settled 14/110 (UNCHANGED) · aggregate
+//                    57.6 -> 56.3% · on `chase`, 35.78 -> 32.97 pp.
+//
+// **That 1.02 pp is INSIDE the ~9 pp floor and is not a resolved improvement.** What it
+// costs IS resolved, and it is bigger:
+//
+//   roster strength sd      3.0 -> 4.2 pp
+//   roster strength range   9.7 -> **16.6 pp**          (+6.9 pp — 6.8x what was bought)
+//   Sushi                   43.8% (roster MINIMUM) -> 59.8% (roster MAXIMUM)
+//   Cyber                   48.7 -> 45.5%, and becomes the new BOTTOM tier
+//   Lollipop                47.7 -> **43.3%**, the new roster minimum
+//
+// 🚨 **The roster's floor does not come up. It goes DOWN by 0.5 pp** — Sushi at 43.8% is
+// replaced by Lollipop at 43.3% — while the ceiling rises 6.4 pp. The outlier is not
+// removed; it changes sign and grows, and the bottom tier moves from Legendary to Cyber.
+// That is the same shape the kit sweep already refused under "DISTINCTIVENESS AND POWER
+// ARE THE SAME LEVER": *a compensating lever quantised as coarsely as the thing it has to
+// cancel.* Two-character moves are worse, not better — `sushi 6 + waterbottle 7` reads
+// **20.23 pp**, and any compensating cut on another tier is the same 13.5-27.9 pp step
+// pointed the other way.
+//
+// ── AND THERE IS NO SUB-POINT LEVER, FOR A REASON IN A DIFFERENT SECTION ────
+//
+// `HEALTH_PER_STAT` is the one continuous knob on the durability axis, so shrinking it
+// would shrink the step. It **cannot go below ~0.0933**, and the bound is NOT §22(h)'s
+// durability-range floor (that binds only at ~0.067) — it is `sim.test.mjs` §25(c), which
+// requires Hamburger's heal to restore over a QUARTER of its pool. Hamburger holds the
+// roster's minimum health stat, so its pool GROWS as the scale shrinks:
+// `100*(1 - 3p) < 4*healAmount` gives `p > (100 - 4*healAmount)/300`, i.e. **0.0933** at
+// `healAmount: 18`. The shipped 0.10 clears it by 0.0067 — about 7%. So the knob can only
+// go UP, which makes the step coarser still.
+//
+// 🚨 **AND THE SAME INEQUALITY READ THE OTHER WAY IS A LIVE HAZARD IN `DECISIONS §28`,**
+// which offers Uri any integer in **15..21** for `healAmount`. At the shipped `p = 0.10`
+// Hamburger's pool is 70, so §25(c) needs `healAmount > 17.5`: **15, 16 and 17 turn that
+// gate RED.** The MEASURED range and the ADMISSIBLE range are not the same range, and
+// nothing said so. If Uri picks one of the three, the threshold is what moves — keeping
+// the old wording with the reason, exactly as it already did once at 1/3 -> 1/4 — not the
+// heal, and not this constant.
+//
+// ── WHAT IS ACTUALLY TRUE OF THE ROSTER, STATED PLAINLY ─────────────────────
+//
+// Nothing here needs fixing. On `smart2` the roster reads settled **14/110**, sd **3.0
+// pp**, range **9.7 pp**, tier spread **8.05 pp** — every one of them the best this
+// project has measured, and the tier spread is inside Uri's guard. "Legendary is at the
+// bottom" is a true statement about an 8 pp band, not a defect, and no instrument here can
+// resolve it. (`chase` reads 35.78 pp, but it never has been inside the floor and is
+// dominated by Pizza at 9.4% — 0.0% as player across all 320 of its matches.)
+//
+// ⚠️ The one quantity here that IS outside every floor, and it is NOT a stats problem:
+// **Sushi's role split is +30.7 pp** — asPlayer 59.1% against asAI **28.4%**, the roster's
+// worst AI half (next worst Taco 34.1%) under an above-average player half. Legendary is
+// not weak; the AI cannot play it. Water Bottle is the same shape at +15.7 pp. That is
+// `ai.ts`, which this pass does not own, and it is the only lead left worth pulling.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2172,9 +2265,31 @@ export const HEALTH_BASELINE_STAT = 6;
  * one below it. 0.10 halves that and lets the roster use the card's FULL 1-10 range
  * (authored 3..10 = 70% to 140% of the role pool) instead of huddling around the middle.
  *
- * ⚠️ It is still coarse. One point moves a character 7-12 pp, so the tier ramp cannot be
- * tuned finer than about 10 pp per character. That is a property of an integer display
- * scale being the source of truth, and it is the price of the card being unable to lie.
+ * ⚠️ IT IS FAR COARSER THAN THIS COMMENT SAID, AND THE OLD WORDING IS KEPT BECAUSE FOUR
+ * OTHER PLACES QUOTE IT. It read:
+ *
+ *     "⚠️ It is still coarse. One point moves a character 7-12 pp, so the tier ramp cannot
+ *      be tuned finer than about 10 pp per character."
+ *
+ * That figure came from `vitals_probe.mjs` on the PRE-FIX driver — the one that could not
+ * press a heal and ranked weapons by authored `damage` (`docs/LESSONS.md` §5/§15). Re-run
+ * on the fixed driver as a full monotone ladder (`stage_kit.mjs --stat <id>.health=<n>` +
+ * `roster_lab.mjs --seeds 32`, 32 seeds x 110 matchups, paired, with a no-op staging
+ * control at 220/220 cells bit-identical), one point is worth:
+ *
+ *     SUSHI         h4 30.3% -> h5 43.8% -> h6 59.8% -> h7 73.9%   (+13.5 / +16.0 / +14.1)
+ *     WATER BOTTLE  h5 27.5% -> h6 46.3% -> h7 74.2%               (+18.8 / +27.9)
+ *
+ * **13.5 to 27.9 pp per point, not 7-12** — stale by about 2x. The conclusion the old
+ * wording drew is not weakened by that, it is doubled: an integer display scale that is
+ * the source of truth cannot tune anything finer than one point, and one point is now
+ * measured at 1.7x to 3.5x the width of the entire rarity band it would have to land
+ * inside. The full arithmetic, and the pass it refuses, is recorded above `CHARACTERS`
+ * under "THE SUSHI/LEGENDARY PASS WAS RUN".
+ *
+ * ⚠️ And this constant has a HARD FLOOR at **~0.0933**, which is not obvious from here:
+ * `sim.test.mjs` §25(c) requires Hamburger's heal to clear a quarter of its pool, and
+ * Hamburger's pool GROWS as this shrinks. See the same record for the derivation.
  */
 export const HEALTH_PER_STAT = 0.10;
 
@@ -2252,6 +2367,9 @@ export function speedMultiplier(id: CharacterId): number {
 //    describing the base character. It also has to be continuous for a second reason:
 //    one card point is worth 7-12 pp of measured strength, so a 0-10 integer scale cannot
 //    express fifteen steps even in principle.
+//    ⚠️ "7-12 pp" IS STALE — it was measured on the pre-fix driver, and the fixed one reads
+//    **13.5-27.9 pp** (see `HEALTH_PER_STAT`). The argument is not weakened, it is doubled:
+//    the integer step is even further from what fifteen levels need.
 //
 // 2. **IT IS ROLE-AGNOSTIC, BY CONSTRUCTION.** Uri: *"The game eventually should be humans
 //    vs. humans. We will incorporate AI players to enrich. They need to be adjusted to the
@@ -2572,6 +2690,10 @@ export function powerIndex(id: CharacterId): number {
 //     So the finest admissible step either side of the shipped 6 is +-1 point = 7-12 pp of
 //     one character = 3.5-6 pp of its two-character tier, against a window of about 5 pp.
 //     A compensating lever quantised as coarsely as the thing it has to cancel.
+//     ⚠️ "7-12 pp" IS STALE and this finding gets STRONGER, not weaker: re-measured on the
+//     fixed driver the step is **13.5-27.9 pp** of one character = 6.8-14 pp of its tier
+//     (see `HEALTH_PER_STAT`). The Legendary pass above hit exactly this wall independently
+//     and refused for the same reason, which is now two elements agreeing.
 //  3. **THE ONE CANDIDATE THAT LANDS THE GUARD BUYS ALMOST NOTHING.** `fast gun + hp 7`
 //     holds 5.86 pp and raises roster behavioural spread +0.046 against a measured floor
 //     of 0.030 — resolvable, and 1.5x its own noise. It pays for that with -0.59 pp of

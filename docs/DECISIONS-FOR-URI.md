@@ -1452,6 +1452,11 @@ the heal feel like a non-event when you play it, 20 is free — it costs 3.2 pp 
 under the floor. Below 15 the spread gets *worse* again, because Normal then falls past Legendary on
 the other side.
 
+> 🚨 **CORRECTION (2026-08-10): the range above is 18–21, not 15–21.** `sim.test.mjs` §25(c) requires
+> the heal to clear a quarter of Hamburger's 70 HP pool, i.e. `healAmount > 17.5`, so **15, 16 and 17
+> turn a gate red.** The measured ladder and the admissible range were never the same range and
+> nothing said so. If you want one of the three anyway, say so — the threshold moves, not the heal.
+
 **⚠️ One thing you should know, because it changes what the next balance pass is about.**
 The constraint has **moved off Hamburger**. At 18 the tiers read:
 
@@ -1464,6 +1469,16 @@ not by anything at the top. **Sushi is the weakest character in every driver var
 Every document here frames tier spread as a Hamburger problem; that framing expired the moment the
 driver was fixed. **The next balance pass is a Sushi/Legendary pass, and it has to push Legendary
 UP** — there is no version of pushing Hamburger further down that helps.
+
+> ✅ **RUN, AND REFUSED — 2026-08-10. Nothing here needs you; this is recorded so it is not run
+> twice.** Health is the only lever (speed is inert, Sushi is already at the speed cap), and the
+> measured ladder says **one card health point is worth 13.5–27.9 pp** of a character's strength —
+> **1.7× to 3.5× wider than the whole 8.05 pp band it would have to land inside.** Of six candidates
+> only one lowers the spread at all (Sushi health 6: 8.05 → 7.03 pp), that 1.02 pp is *inside* the
+> ~9 pp floor and therefore not a real improvement, and it costs a real one: the roster's strength
+> range goes 9.7 → 16.6 pp, Sushi flips from the weakest character to the strongest, and Cyber takes
+> Legendary's place at the bottom. **The roster's floor does not rise — it falls 0.5 pp.** Full
+> arithmetic in `rules.ts` under "THE SUSHI/LEGENDARY PASS WAS RUN".
 
 **And a second-order note, for whoever runs that pass.** At 18, Hamburger's role split has flipped
 sign and grown: **asPlayer 62.5% / asAI 44.4% = −18.1 pp** (it was −9.4 pp at heal 25, inside the
