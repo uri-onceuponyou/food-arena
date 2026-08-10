@@ -25,6 +25,31 @@
  * `--fa-safe-*` are declared on `:root`, which means a test can override them with
  * an inline style on `<html>` and simulate a notch without a device — that is how
  * the acceptance test for safe areas is actually run.
+ *
+ * ── 🚨 THE ORDERING CONTRACT, and it is not a style preference ────────────────
+ * **A media query adds NO SPECIFICITY.** Two rules with the same selector are ordered
+ * by SOURCE POSITION alone, so a rule inside a NARROWER `@media` written ABOVE one
+ * inside a wider `@media` — or above the unconditioned base rule — can never win
+ * anywhere. This is not hypothetical: it cost the adoption pass twice in one pass
+ * (`git log f5a6229`, defect 2). A compact block written above its base collapsed three
+ * `flex: 1 1 0` rows to ~8px each, and a `@media (max-height: 460px)` rule written
+ * before an identical selector inside `@media (max-height: 560px)` **delivered 2.44px
+ * of the 16.39px it was written to move.**
+ *
+ *     BASE first, then WIDEST condition, then NARROWEST. Never the reverse.
+ *
+ * This file's own rungs are what a screen overrides, so a rung that a screen can
+ * silently lose is a rung that does not hold. `tools/tmp/dc_guard.mjs` enforces it
+ * across every injected stylesheet: it reads the shipped CSSOM, and for any two rules
+ * with the same selector where the earlier one's media condition is a SUBSET of the
+ * later one's, it reports the earlier declaration as dead and then asks a browser what
+ * the live element actually receives.
+ *
+ * ⚠️ And two components in this file carry their own scars from the same pass — see
+ * `.ds-bar` (a track and a fill both need `display: block`, because an inline box
+ * discards a height) and `.fa-level-xp` (a caption inside a clipped track needs
+ * `white-space: nowrap`, because a wrap is clipped through both lines). Both are
+ * guarded by `dc_guard`, which ablates the declaration and requires the check to fail.
  */
 
 const STYLE_ID = 'fa-screen-styles';
@@ -546,7 +571,11 @@ const CSS = `
 }
 /* Taller than round 1's 16px hairline, and it carries its own numeric readout —
    a critic called the old bar "invisible for what is core progression". */
+/* 'display: block' for the reason recorded in full on '.ds-bar' below: a track that
+   states a height and a fill that states 'height: 100%' are both discarded on an inline
+   box, and every current caller only survives by being a flex item. */
 .fa-level-track {
+  display: block;
   position: relative;
   flex: 1 1 auto;
   min-width: 40px;
@@ -558,17 +587,31 @@ const CSS = `
   box-shadow: var(--ds-e2);
 }
 .fa-level-fill {
+  display: block;
   height: 100%;
   border-radius: var(--ds-r-pill);
   background: repeating-linear-gradient(45deg, var(--lettuce) 0 10px, #9BE03A 10px 20px);
   transition: width 0.4s ease-out;
 }
+/* 🚨 'white-space: nowrap', AND THIS ONE SHIPPED BROKEN RATHER THAN LATENT.
+   The caption is 'position: absolute; inset: 0' inside a track with 'overflow: hidden',
+   so when it wraps the second line is CLIPPED and the first is clipped through its
+   middle. 'git log f5a6229' defect 3: lifting the level labels 9.92 -> 11.04px took
+   ~10px off the track between them and this caption wrapped inside a 14px bar at
+   852x480. 'home.ts' paid for it by deleting its trailing "Lv 18" label -- a screen
+   deleting information to work around a missing declaration in the shared layer.
+   Measured with 'tools/tmp/dc_guard.mjs' on a track derived 12px narrower than the run
+   needs: 2 line boxes, 26px of text in a 20px track. With nowrap, 1 line box.
+   ⚠️ Blast radius is bounded BY CONSTRUCTION, not by hope: the element is out of flow
+   and its parent clips, so nothing outside the track can move. 'da_census' confirms it
+   on the two unowned screens that render this class. */
 .fa-level-xp {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
   font-family: 'Rubik', sans-serif;
   font-weight: var(--ds-w-bold);
   font-size: clamp(0.69rem, 1.4vh, 0.76rem);
@@ -591,7 +634,9 @@ const CSS = `
   font-size: clamp(0.69rem, 1.45vh, 0.8rem);
   white-space: nowrap;
 }
+/* 'display: block' on both, for the reason recorded in full on '.ds-bar' below. */
 .fa-stat-track {
+  display: block;
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
@@ -602,6 +647,7 @@ const CSS = `
   overflow: hidden;
 }
 .fa-stat-fill {
+  display: block;
   height: 100%;
   border-radius: var(--ds-r-pill);
   transition: width 0.32s cubic-bezier(0.2, 0.9, 0.3, 1);
@@ -1398,7 +1444,26 @@ const CSS = `
    Five independent implementations today, at four different heights, three border
    widths and two fill idioms. The caller supplies the fill colour and the width;
    everything else is here. */
+/* 🚨 'display: block' IS LOAD-BEARING ON BOTH THE TRACK AND THE FILL.
+   A track states a 'height' and a fill states 'height: 100%' plus a caller-supplied
+   width, and an INLINE box silently discards all three. Measured on the pre-fix sheet
+   with 'tools/tmp/dc_guard.mjs', mounting the component as a '<span>' inside an
+   ordinary block parent -- which is exactly how 'home.ts' writes it:
+
+     .ds-bar--sm   track  4px wide in a 280px parent, computed height 14px, RENDERED 28
+     .ds-bar       track  6px wide in a 280px parent, computed height 22px, RENDERED 30
+     the fill      0px wide in a 0px inner track, in every case
+
+   Every caller TODAY happens to be a flex ITEM, which blockifies it, so the track has
+   never been seen broken -- but the FILL is not a flex item, and it shipped as an empty
+   track on home's road card the first time '.ds-bar' was adopted ('git log f5a6229',
+   defect 1). 'menu_accept' and 'ud_defects' both passed it; it was found by reading a
+   PNG. A component that only works inside a flex parent is a trap, not a component.
+   ⚠️ This is computed-NEUTRAL on every current caller: a flex item's computed 'display'
+   is already 'block', and every fill in the tree is a '<div>' or carries its own
+   'display: block'. Proven with 'da_census' over 70 properties on all five screens. */
 .ds-bar {
+  display: block;
   position: relative;
   flex: 1 1 auto;
   min-width: 40px;
@@ -1412,6 +1477,7 @@ const CSS = `
 .ds-bar--sm { height: 14px; border-width: var(--ds-stroke-1); box-shadow: none; }
 .ds-bar--lg { height: 30px; }
 .ds-bar-fill {
+  display: block;
   height: 100%;
   border-radius: var(--ds-r-pill);
   background: var(--ds-bar-ink, var(--lettuce));
@@ -1421,13 +1487,16 @@ const CSS = `
   transition: width 0.4s ease-out;
 }
 /* The numeric readout INSIDE the track. A bar with no number is a decoration, and a
-   critic called ours "invisible for what is core progression" when it had none. */
+   critic called ours "invisible for what is core progression" when it had none.
+   ⚠️ 'white-space: nowrap' is the same defect as the fill's 'display', one component
+   over: see '.fa-level-xp' above, where it shipped rather than stayed latent. */
 .ds-bar-cap {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
   font-family: 'Rubik', sans-serif;
   font-weight: var(--ds-w-bold);
   font-size: var(--ds-t1);
