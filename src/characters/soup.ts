@@ -1005,21 +1005,56 @@ export class SoupCharacter extends BaseCharacter {
       // same WORLD side. (With the explicit basis above, local +X is world-ish +X
       // on both eyes, which is what makes that possible — under the old
       // `setFromUnitVectors` roll it was not.)
+      // ── 🚨 IT FOLLOWED THE PUPIL'S SHIFT AND STILL SAT ON THE RIM ───────────────
+      // The comment below is about the pupil's INWARD shift and it is satisfied. The
+      // defect is the offset UP: read at 10x off the shipped lobby camera
+      // (`shots/ey/zoom/soup-Leye.png`) the white breaks the pupil's upper-left edge
+      // and runs into the sclera, so the dark reads as a "C". `tools/tmp/ey_pacman.mjs`
+      // scores it **0.8842** against burrito's genuinely-whole 0.9679.
+      //
+      // The arithmetic, which nobody had done in the eye's own frame: the pupil sits at
+      // y = -0.020R and the glint at y = +0.048R, so the OFFSET is 0.068R, not 0.048R —
+      // reading an absolute position as an offset is the trap, and `hotdog.ts` records
+      // the same one.
+      //   normalised centre  sqrt((.038/.112)^2 + (.068/.112)^2) = 0.696
+      //   plus glint radius  0.325 along that direction              -> **1.02**
+      // i.e. 2% OUTSIDE the pupil before bloom is counted. `egg.ts` carries the two
+      // pixel-space terms that make even a passing in-plane sum insufficient (BLOOM:
+      // `flatMat` white is 1.000 against `stage.ts`'s 0.80 threshold, so 2-3 px of glow
+      // eat the rim; BURIAL: a glint centred behind the pupil's front face emerges as a
+      // cap displaced outward). Target is 0.62, not 0.82.
+      //   offset 0.038/0.068 -> 0.014/0.026 (absolute y +0.048 -> +0.006)
+      //          0.264 + 0.357 = **0.621**, a 38% margin
+      //   z      0.098 -> 0.111R with `scale.z 0.5 -> 0.45`, so the lens sits 0.004R
+      //          PROUD of the pupil's front face (0.1073R at that offset) instead of
+      //          0.011R behind it.
       const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.040, 10, 10), flatMat('#ffffff'));
       glint.name = 'soup_eye_glint';
       // Follows the pupil's own inward shift, or it drifts off the dark disc it is
       // supposed to sit on and lands on white, where a white glint is invisible.
-      glint.position.set(-sx * R * 0.060 - R * 0.038, R * 0.048, R * 0.098);
-      glint.scale.set(1, 0.85, 0.5);
+      glint.position.set(-sx * R * 0.060 - R * 0.014, R * 0.006, R * 0.111);
+      glint.scale.set(1, 0.85, 0.45);
       glint.userData.noOutline = true;
       eye.add(glint);
       // A second, much smaller bounce low on the opposite side. Two highlights of
       // very different size is what stops an eye reading as plastic — it is the one
       // piece of Egg's eye the per-part measurement said we were still short of.
+      //
+      // ⚠️ AND IT WAS NOT THERE. `docs/LESSONS.md` §1 again, in its cheapest form: the
+      // pupil's front face at this bounce's own offset is 0.1023R and the bounce's
+      // front reached only **0.0985R**, so it was drawn entirely INSIDE the pupil and
+      // the eye has carried one highlight, not two, for as long as the file has said
+      // it carries two. Read the before crop — there is a single white dot.
+      // z 0.090 -> 0.104R with `scale.z 0.45` puts its front at 0.1117R, 0.009R proud.
+      // OFFSET FROM THE PUPIL's centre — which is at y = -0.020R, so the ABSOLUTE y is
+      // -0.049R — pulled 0.048/0.032 -> 0.044/0.029 (0.470 + 0.152 = 0.622) so it
+      // clears the rim by the same margin, and it stays 0.0229R (~6 px) clear of the
+      // key glint: `pizza.ts` records what happens when two highlights are pulled in
+      // far enough to touch — they render as one lumpy shape, not as two lights.
       const glint2 = new THREE.Mesh(new THREE.SphereGeometry(R * 0.017, 8, 8), flatMat('#ffffff'));
       glint2.name = 'soup_eye_glint2';
-      glint2.position.set(-sx * R * 0.060 + R * 0.048, -R * 0.052, R * 0.090);
-      glint2.scale.set(1, 0.9, 0.5);
+      glint2.position.set(-sx * R * 0.060 + R * 0.044, -R * 0.049, R * 0.104);
+      glint2.scale.set(1, 0.9, 0.45);
       glint2.userData.noOutline = true;
       eye.add(glint2);
 
