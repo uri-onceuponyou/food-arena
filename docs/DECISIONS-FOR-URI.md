@@ -1599,13 +1599,37 @@ reveals you; the bush survives. Here the concealment object is **destroyed**, so
   destroys their own hiding place. It does **not** fully solve it: a player who hides and never
   attacks still breaks an AI that cannot search. §29a stands.
 
-### 🖼️ §29a — screenshot requested, being produced
+### 🖼️ §29a — **THE SCREENSHOT IS RENDERED AND WAITING FOR YOU**
 
 > *"send a screenshot so i can evaluate"*
 
-Fair — "168 wu" is not a thing anyone can picture. A rendered comparison at **shipped match
-framing** is in flight: candidate plate sizes against a character for scale, including one
-deliberately over the limit so the failure is visible rather than described.
+**`shots/conceal/concealment-scale.png`** — four panels at **shipped match framing**, identical
+camera, character in frame for scale:
+
+| panel | size | verdict |
+|---|---|---|
+| 1 | 120 wu | safe |
+| 2 | 168 wu | the limit |
+| 3 | 300 wu | **over** — the dead core the AI can never see into is drawn in red |
+| 4 | five patches at 110–130 wu | the recommendation |
+
+*(The old wording said this was "in flight". It was produced in `44af5e8`, its caption corrected in
+`eb676ba` — the "same hiding area" figure was 80%, not 100% — and it has been waiting since. Kept
+above so it is clear the artefact was not missing, only the sentence.)*
+
+### 🧯 AND THE CEILING COSTS FAR LESS THAN IT SOUNDS — this was measured LATER and belongs here
+
+Measured in **`d03e5d5`** on a 5 wu lattice: **the shipped kitchen's largest square that is clear of
+cover AND outside the 248.25 wu endgame keep-out is 285 wu**, and it is jammed against the west wall
+at (143, 428). The only genuinely 300 wu clear square sits on the hub, *inside* the keep-out.
+
+**So the AI's limit (168 wu) and the map's limit (285 wu, in one degenerate corner) are within about
+one prop of each other.** The "big hero hiding place" branch was never really available on this map,
+independently of whether the AI can search. That materially shrinks what you are being asked to give
+up — and it was not on the answer sheet when the question was written.
+
+⚠️ Your §29c answer already removes the *ambush* camper — attacking destroys the plate. What remains
+is only the player who hides and **never attacks**, and small patches remove that too.
 
 ### ✅ §26 — rarity is acquisition rarity ONLY. The 4.5× level cost is therefore WRONG.
 
