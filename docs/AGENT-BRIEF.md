@@ -1,0 +1,114 @@
+# Agent brief — paste-by-reference preamble
+
+**Every build agent should be pointed at this file.** It lives in the repo *deliberately*: this
+content previously sat in a session scratchpad under `/private/tmp`, that directory was cleaned
+mid-session, and agents were briefed at a dead path for hours. They fell back to `CLAUDE.md` and
+were fine — but a brief that can silently vanish is not a brief.
+
+Read this, then `CLAUDE.md`, then the sections of `docs/LESSONS.md` your brief names.
+
+---
+
+## 1. YOUR OWNED FILE SET
+
+Your brief names it. **You may not edit any file outside it.** One owner per file set held across
+~200 agents with zero clobbering; it broke exactly once, when the orchestrator assigned `rig.ts` to
+two agents at once and a commit swept a peer's in-flight work under the wrong message.
+
+🚨 **Pathspec form does NOT protect you from a second owner.** `git commit -- <path>` commits the
+**working tree** for that path, including a peer's uncommitted edits to the *same file*. **If you
+find changes in your file you did not write, stop and report — do not commit them.**
+
+**The release valve:** a **provably additive, non-behavioural** fix — a comment, a user-facing
+string, a doc line — may cross a boundary if you (a) verify the file is **clean in `git status`**
+immediately before and after, (b) change **nothing executable**, and (c) **declare it**. ⚠️ A row in
+`docs/TOOLS.md`'s gate table is **executable** (`gatecount` runs what it lists) and is *not* covered.
+
+## 2. NEVER
+
+- **`git stash`** — blast radius is the whole repo. 🚨 **And `git pull --rebase --autostash` CREATES
+  a stash.** Don't pull with a dirty tree; commit your own files first, or use `headserve.mjs`.
+- **`git commit --amend`** — a peer pushed between an agent's `git log -1` and its amend.
+- **`pkill -f <pattern>`** — every agent runs the same tool names, so your pattern matches theirs.
+  **Kill by PID.** `snapsweep.mjs` kills on a *derived bound*, which is why it is safe.
+- **`git add -f` anything under `reference/`** — and 🚨 **describing those plates counts as
+  publishing them. This repo is PUBLIC.** Describe the compositional ROLE, never the artwork.
+- **Measuring on the shared dev server (`:5173`).**
+- **`URL=$(node tools/snapshot.mjs --json | ...)`** — `--json` never exits; `$(...)` blocks forever
+  and reads exactly like a hung build.
+
+## 3. MEASUREMENT
+
+```bash
+node tools/tmp/with_snapshot.mjs -- <cmd> --url '{URL}'    # placeholder is literally {URL}
+```
+
+🚨 **`snapshot.mjs` copies the WORKING tree — "frozen" is not "clean."** It stops changes *during*
+your run; it does not remove peers' half-saved work. **For any A/B you will quote, snapshot a
+DETACHED WORKTREE of a known commit.**
+⚠️ A fresh snapshot's **first** client eats a dep-optimisation reload that presents as
+`execution context was destroyed`. Warm it with a cheap page load.
+⚠️ **`window.__screenReady` IS NOT A PAINT** — measured opacity 0.000 when it flips. Wait on
+`tools/tmp/settle.mjs`, and on the screen's **NAME**.
+
+## 4. THE RULES THAT COST THE MOST WHEN BROKEN
+
+1. **Read every PNG you produce with the Read tool and LOOK at it.** Judging a description instead
+   of an image is this project's most common failure — and it is what caught a per-part run where
+   four panels showed the wrong body part while all five numeric checks passed green.
+2. **"It isn't there" means it IS there and is INVISIBLE** — true **twenty** times.
+   ⚠️ The twentieth: a shader that never linked drew nothing for three rounds, because the
+   **shadow-depth program has no rim patch** and kept drawing each chip's contact shadow. **A mesh's
+   shadow, outline or decal can be drawn by a DIFFERENT program from the mesh.** Ablate to an
+   unmissable colour and require the frame to MOVE.
+3. **Probe before you loop** — nine for nine. ⚠️ **But a probe tells you what is broken, not that
+   fixing it is what the viewer reacts to** (`LESSONS.md` §6b).
+4. **VALIDATE EVERY INSTRUMENT AGAINST A KNOWN-BAD INPUT.** A guard not shown to FAIL is not a
+   guard — and a guard can also be **tautological**. **Ask of every assertion: what implementation
+   would fail this?** If you cannot name one, it is a comment with a tick next to it.
+5. **State a metric's RESOLUTION FLOOR before acting on a change in it.** Aggregate win rate
+   **~9 pp**; pacing **~0.8 s**; the blind critic **±1.4** (~1.0 with two independent critics).
+   ⚠️ A **paired per-matchup delta on identical seeds is EXACT** and is a **different quantity** from
+   an aggregate. Never conflate them.
+6. **An acceptance test proves you moved the thing you NAMED, not that it was the thing.** Ask what
+   fraction of the frame your metric governs and what is **excluded from it by policy**.
+   ⚠️ And read backwards: **a flat metric is not evidence a change did nothing** — ask what the
+   metric can *express*.
+7. **A BASELINE IS ITSELF A MEASUREMENT.** Comparing against an unvalidated one manufactures a
+   regression as convincingly as a real bug does.
+8. **Measure the artefact you SHIP, on the PATH you ship it to.** A 404 on the deployed build
+   survived 427 audio assertions because every one pointed at `/`.
+9. **Two cameras, and they expose different defects.** Lobby `charStage.ts` **pitch 20** (what Uri
+   judges); match `camera.ts` **58**. A limb through a torso is wrong at both. **Fix the geometry,
+   verify at both, diagnose up close.**
+
+## 5. GATES
+
+```bash
+npx tsc --noEmit
+node tools/tmp/gatecount.mjs     # ← EXPECTED COUNTS LIVE ONLY IN docs/TOOLS.md's gate table
+node tools/verify-head.mjs       # the COMMITTED tree — run before EVERY push
+```
+
+🔴 **Do not write an expected count anywhere but that table.** `gatecount` refuses a second copy
+**even one that agrees** — today's agreeing copy is next month's stale one. Eight counts went stale
+in one session and every one was found by an agent tripping over it.
+
+**Commit with pathspec form.** Commit messages carry the reasoning and the measurements; this log is
+a primary source. **When an assertion encodes a reversed rule, change it and keep the old wording
+above it with the reason.**
+
+## 6. ART DIRECTION — settled, and it contradicts generic advice
+
+Brawl Stars is **NOT cel-shaded**. Smooth-shaded, hyper-saturated, high-key, vinyl-toy, soft
+specular, almost no ink outline. **No filmic tonemapping.**
+⚠️ **Do not fix anything by desaturating — falsified four times.**
+⚠️ **And "adding cool chroma is the cheap lever" is STALE** — warm now FAILS LOW (0.053 vs a 0.072
+minimum) while cool is over target. **Re-read `arena-scan --baseline` before assuming a direction.**
+
+## 7. REPORT FORMAT
+
+Lead with **what landed** (SHAs + before/after + floor), then **what you REVERTED and the number
+that killed it**, then **what you could NOT verify**. *"I could not verify this"* is a valuable
+answer; a plausible measurement treated as fact has cost this project real time. Name any
+**out-of-set defect** you found, and anything that needs **Uri**.
