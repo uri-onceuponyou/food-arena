@@ -370,6 +370,22 @@ const driverFor = (arena, sim) => createScriptedPlayer({
  * `opts.pin(stateA, stateB, tick)` runs after every step on BOTH states identically, which
  * is how the forced-immortal and countdown-only corpora are built without a second harness.
  * `opts.maxTicks` caps the loop for a corpus that has no natural end.
+ *
+ * ── `opts.configs` — THE SAME HARNESS ABOVE TWO FIGHTERS ────────────────────
+ *
+ * `createMatch` gained a FIGHTER LIST form on 2026-08-11 (the 3-argument form is a compat
+ * overload). Passing `configs` selects it, which is what lets `--nfighter` run N=3..6 through
+ * the differ, the driver, the corpus pins and the non-vacuity bookkeeping that already exist
+ * here rather than through a second harness that would have to be validated all over again.
+ * `playerId`/`enemyId` are still passed, and are still what seeds the rng — the formula is
+ * unchanged so a two-fighter row here is still the same match as a row in `roster_lab`.
+ *
+ * ⚠️ The scripted driver has a TWO-SEAT VIEW (`state.player` / `state.enemy`) BY DESIGN, so
+ * above two fighters it is a deterministic STIMULUS, not a model of how a human would play a
+ * six-way brawl. Everything `--nfighter` claims is self-consistency — determinism, no NaN,
+ * one step per fighter per tick, iteration order — and none of it is a claim about balance.
+ * A 4-6 fighter balance number is a different quantity and the instrument for it does not
+ * exist (`DECISIONS §49b` says so explicitly).
  */
 function lockstepMatch(arena, simA, simB, driver, playerId, enemyId, policy, seed, added, opts = {}) {
   const cmpEvents = opts.events !== false;
@@ -378,8 +394,9 @@ function lockstepMatch(arena, simA, simB, driver, playerId, enemyId, policy, see
   // makes a row here the SAME match as a row there.
   const rnd = rng(seed * 7919 + playerId.length * 131 + enemyId.length * 17 + policy.length);
   const levels = opts.levels ?? LEVELS;
-  const stateA = simA.createMatch(arena, playerId, enemyId, levels);
-  const stateB = simB.createMatch(arena, playerId, enemyId, levels);
+  const configs = opts.configs ?? null;
+  const stateA = configs ? simA.createMatch(arena, configs) : simA.createMatch(arena, playerId, enemyId, levels);
+  const stateB = configs ? simB.createMatch(arena, configs) : simB.createMatch(arena, playerId, enemyId, levels);
   if (opts.pin) opts.pin(stateA, stateB, 0);
   const decide = driver.POLICY_FNS[policy](rnd);
   const loop = driver.createDecisionLoop({ decide, reactBase: 150, reactJit: seed === 0 ? 0 : 60, rnd });
@@ -433,7 +450,14 @@ const ABLATIONS = [
   {
     name: 'Fighter.id (swapped)',
     expect: { state: 'live', events: 'live' },
-    why: 'read by opponentOf, sightingIndex, fighterBit, spawnProjectile and applyDamage',
+    // ⚠️ THIS LINE NAMED `opponentOf` FIRST UNTIL 2026-08-11, AND IT STOPPED BEING TRUE
+    // WITHOUT THE ROW CHANGING COLOUR. The target rule split, and `nearestLivingOpponent`
+    // compares POSITIONS and object identity — it never reads an id. The row is still `live`
+    // for the readers below, so a stale rationale would have ridden along under a green
+    // verdict indefinitely. Kept in the diff rather than silently corrected, because "the
+    // reason a test passes changed" is the thing worth recording.
+    why: 'read by the per-slot input lookup, sightingIndex, fighterBit, the trail mask, '
+      + "spawnProjectile's owner/target, applyDamage's attacker and resolveTimeout's rung 3",
     perturb: (st) => { st.fighters[0].id = 1; st.fighters[1].id = 0; },
     mask: (p) => /^state\.(fighters\[\d+\]|player|enemy)\.id$/.test(p),
   },
@@ -558,6 +582,290 @@ const ABLATIONS = [
     mask: (p) => /^state\.trailMarks\[\d+\]\.(damagedMask|damaged)$/.test(p),
   },
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// N-FIGHTER SELF-CONSISTENCY — the arm that only exists once the cap is above 2
+//
+// 🚨 THERE IS NO BASELINE TO BE BIT-IDENTICAL TO ABOVE TWO FIGHTERS. `--bitid` compares the
+// working tree against an extracted commit, and no commit before 2026-08-11 could seat three
+// fighters at all — so the acceptance question changes shape: not "is it the same as before"
+// but "is it CONSISTENT WITH ITSELF".
+//
+// Four properties, and each one is a mechanism this project has actually been bitten by:
+//
+//   DETERMINISM      same inputs, same result, twice — and same SEED, same result, from two
+//                    independent driver instances. Every balance number in the repo rests on
+//                    this; `roster_lab`, `match-sim` and `--bitid` are all void without it.
+//   NO NaN           a non-finite position is how "the AI walks to the wrong place" becomes
+//                    "the AI is nowhere". ⚠️ `firstDiff` treats NaN === NaN as EQUAL (two NaNs
+//                    are the same state), so a NaN in BOTH sims passes the determinism arm
+//                    silently. It has to be scanned for separately, and that is not a
+//                    belt-and-braces addition — it is the hole the differ has by design.
+//   ONE STEP EACH    every fighter is stepped exactly once per tick. Recovered by PATCHING
+//                    the fighter loop to record the ids it visits, not by reading the source.
+//   ITERATION ORDER  a pure function of `createMatch`'s argument order — an ARRAY walk, never
+//                    a Map/Set/Record. Map traversal follows insertion order, which is the
+//                    classic lockstep-desync mechanism.
+//
+// ── AND THE KNOWN-BAD IS A REVERSED FIGHTER LOOP ────────────────────────────
+//
+// A battery whose every row asserts "nothing went wrong" passes beautifully when it is
+// broken. So the same corpus is run against a sim whose ONLY difference is that the fighter
+// loop walks `state.fighters` backwards, and BOTH halves must catch it: the order recorder
+// must report the reversed order, and the differ must find a real behavioural divergence.
+// If reversing the turn order were invisible, the order would not be a game rule and this
+// whole battery would be measuring nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The one line of `sim.ts` the order instrumentation attaches to.
+ *
+ * ⚠️ AN ANCHOR ON CODE, NOT ON A COMMENT — the same lesson `--selftest` §E's second edit
+ * learned the hard way twice (a comment is rewritten exactly when the rule under it changes
+ * meaning, which is when a control matters most). `applied` is asserted at every call site,
+ * so a patch that silently matches nothing is a loud failure rather than a green no-op.
+ */
+const FIGHTER_LOOP_ANCHOR = `    for (const fighter of state.fighters) {
+      let moved: boolean;`;
+
+/** Positions, velocities and pools that must be finite. `-Infinity` timer sentinels are legitimate and excluded. */
+function nonFiniteFaults(state) {
+  const bad = [];
+  const want = (v, path) => { if (!Number.isFinite(v)) bad.push(`${path}=${v}`); };
+  want(state.elapsed, 'elapsed');
+  want(state.safeRadius, 'safeRadius');
+  want(state.timeRemaining, 'timeRemaining');
+  for (const f of state.fighters) {
+    want(f.x, `fighters[${f.id}].x`); want(f.y, `fighters[${f.id}].y`);
+    want(f.hp, `fighters[${f.id}].hp`); want(f.maxHp, `fighters[${f.id}].maxHp`);
+    want(f.facing.x, `fighters[${f.id}].facing.x`); want(f.facing.y, `fighters[${f.id}].facing.y`);
+  }
+  for (const p of state.projectiles) {
+    want(p.x, `projectile ${p.id}.x`); want(p.y, `projectile ${p.id}.y`);
+    want(p.vx, `projectile ${p.id}.vx`); want(p.vy, `projectile ${p.id}.vy`);
+    want(p.damage, `projectile ${p.id}.damage`);
+  }
+  for (const s of state.sightings) {
+    want(s.x, 'sighting.x'); want(s.y, 'sighting.y'); want(s.at, 'sighting.at');
+  }
+  return bad;
+}
+
+/**
+ * `n` fighters on a ring around the arena centre, characters rotated off `CHARACTER_IDS`.
+ *
+ * ⚠️ THE SPAWNS ARE THIS TOOL'S, NOT THE ARENA'S, AND THAT IS DELIBERATE ON BOTH SIDES.
+ * `ArenaDefinition` declares exactly two spawn points and `createMatch` REFUSES to invent a
+ * third (see `sim.ts:defaultSpawn`) — spawn placement for 4-6 fighters is part of the
+ * 2800x2000 layout pass, where `DECISIONS §48` requires true 180° point symmetry as a
+ * fairness constraint. A ring generated here is a MEASUREMENT FIXTURE: even, deterministic,
+ * and explicitly not a proposal. The radius is the shipped player spawn's own distance from
+ * the centre, so the fixture sits where fighters already start rather than somewhere new.
+ */
+function ringConfigs(arena, n, rotation = 0) {
+  const cx = arena.center.x;
+  const cy = arena.center.y;
+  const r = Math.hypot(arena.playerSpawn.x - cx, arena.playerSpawn.y - cy);
+  const a0 = Math.atan2(arena.playerSpawn.y - cy, arena.playerSpawn.x - cx);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = a0 + (i * 2 * Math.PI) / n;
+    out.push({
+      characterId: CHARACTER_IDS[(i + rotation) % CHARACTER_IDS.length],
+      spawn: { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r },
+    });
+  }
+  return out;
+}
+
+/**
+ * THE BATTERY ITSELF — ONE implementation, called by `--selftest` (small) and `--nfighter`
+ * (the full corpus). Two copies of a battery is two batteries that will disagree; this file
+ * already carries the scar of four hardcoded copies of one module list.
+ *
+ * `ok(name, cond, detail)` is the caller's recorder, so the same rows count towards
+ * `--selftest`'s documented total and print in `--nfighter`'s table.
+ */
+async function nFighterBattery({ arena, ns, seeds, rotations, maxTicks, policy, ok, verbose }) {
+  // The instrumented sim: identical to the working tree except that the fighter loop records
+  // which slot it visits. Run SOLO, never in lockstep — the recorder is on `globalThis` and
+  // two sims sharing it would interleave.
+  const ORD = patchedSimDir('nf-order', [
+    ['sim.ts', FIGHTER_LOOP_ANCHOR,
+      `    for (const fighter of state.fighters) {
+      (globalThis.__nfOrder ??= []).push(fighter.id);
+      let moved: boolean;`],
+  ]);
+  ok('the order recorder was actually patched into sim.ts\'s fighter loop', ORD.applied[0]);
+  const ORDERED = await loadSim(ORD.dir);
+
+  // THE KNOWN-BAD: the same recorder, on a loop that walks the fighters BACKWARDS.
+  const REV = patchedSimDir('nf-reversed', [
+    ['sim.ts', FIGHTER_LOOP_ANCHOR,
+      `    for (const fighter of state.fighters.slice().reverse()) {
+      (globalThis.__nfOrder ??= []).push(fighter.id);
+      let moved: boolean;`],
+  ]);
+  ok('the REVERSED-loop known-bad was actually patched in', REV.applied[0]);
+  const REVERSED = await loadSim(REV.dir);
+
+  const driver = driverFor(arena, LIVE);
+  /** Step one match solo, harvesting the per-tick visit order the patched loop records. */
+  const runRecorded = (sim, configs, seed) => {
+    const rnd = rng(seed * 7919 + configs[0].characterId.length * 131 + configs[1].characterId.length * 17 + policy.length);
+    const state = sim.createMatch(arena, configs);
+    const loop = driver.createDecisionLoop({ decide: driver.POLICY_FNS[policy](rnd), reactBase: 150, reactJit: seed === 0 ? 0 : 60, rnd });
+    const perTick = [];
+    let ticks = 0, events = 0, deaths = 0, playTicks = 0;
+    const nan = [];
+    // ── A KNOCKOUT MUST NOT END A BRAWL, MEASURED RATHER THAN CONSTRUCTED ────
+    // `sim.test.mjs` §28(e) builds this case by hand with `applyDamage`; this is the same
+    // rule caught in the wild. On the tick a `match-ended` fires with clock LEFT — i.e. a
+    // knockout, not `resolveTimeout` — exactly one fighter must still be up. Reading it as
+    // "end on the first death" is the single most natural way to generalise `applyDamage`,
+    // and it would turn a six-way brawl into a first-blood race.
+    const endFaults = [];
+    while (state.phase !== 'ended' && ticks < maxTicks) {
+      globalThis.__nfOrder = [];
+      const wasPlaying = state.phase === 'playing';
+      const evs = sim.stepMatch(state, DT, loop.next(state, DT));
+      ticks++;
+      events += evs.length;
+      for (const e of evs) if (e.type === 'death') deaths++;
+      if (evs.some((e) => e.type === 'match-ended') && state.timeRemaining > 0) {
+        const up = state.fighters.filter((f) => f.alive && f.hp > 0);
+        if (up.length !== 1) endFaults.push(`knockout end with ${up.length} fighters up at tick ${ticks}`);
+      }
+      if (wasPlaying) {
+        playTicks++;
+        perTick.push(globalThis.__nfOrder.join(','));
+      }
+      if (nan.length === 0) nan.push(...nonFiniteFaults(state));
+    }
+    globalThis.__nfOrder = [];
+    const koEnd = state.phase === 'ended' && state.winnerId !== null && state.timeRemaining > 0;
+    return { state, perTick, ticks, events, deaths, playTicks, nan, endFaults, koEnd };
+  };
+
+  const rows = [];
+  for (const n of ns) {
+    const want = Array.from({ length: n }, (_, i) => i).join(',');
+    let matches = 0, ticks = 0, events = 0, deaths = 0, playTicks = 0;
+    const nanFaults = [];
+    const orderFaults = [];
+    const detFaults = [];
+    const seedFaults = [];
+    const argFaults = [];
+    const endFaults = [];
+    let permuteChanged = 0, permuteSame = 0, koEnds = 0, koDeathsRight = 0;
+
+    for (let rot = 0; rot < rotations; rot++) {
+      const configs = ringConfigs(arena, n, rot);
+      for (let s = 0; s < seeds; s++) {
+        // ── DETERMINISM (a): one driver, two sims, per-tick state AND events ──
+        const twice = lockstepMatch(arena, LIVE, LIVE, driver,
+          configs[0].characterId, configs[1].characterId, policy, s, undefined, { configs, maxTicks });
+        matches++; ticks += twice.tick; events += twice.events; deaths += twice.deaths; playTicks += twice.playTicks;
+        if (twice.diff) detFaults.push(`n=${n} rot${rot} s${s} @${twice.tick}: ${twice.diff}`);
+
+        // ── DETERMINISM (b): the SAME SEED through two independent runs ────────
+        // A different claim from (a): (a) proves the sim is a function of its inputs, this
+        // proves the whole pipeline — rng, decision loop, sim — is a function of the seed.
+        const r1 = runRecorded(ORDERED, configs, s);
+        const r2 = runRecorded(ORDERED, configs, s);
+        const seedDiff = firstDiff(comparable(r1.state), comparable(r2.state), 'state');
+        if (seedDiff) seedFaults.push(`n=${n} rot${rot} s${s}: ${seedDiff}`);
+
+        // ── ONE STEP EACH, IN SLOT ORDER ──────────────────────────────────────
+        const wrong = r1.perTick.filter((t) => t !== want);
+        if (wrong.length) orderFaults.push(`n=${n} rot${rot} s${s}: ${wrong.length}/${r1.perTick.length} ticks visited [${wrong[0]}] not [${want}]`);
+        if (r1.nan.length) nanFaults.push(`n=${n} rot${rot} s${s}: ${r1.nan.slice(0, 3).join(' ')}`);
+        if (r1.endFaults.length) endFaults.push(`n=${n} rot${rot} s${s}: ${r1.endFaults[0]}`);
+        if (r1.koEnd) {
+          koEnds++;
+          // A knockout ending means everyone but the winner is down, so the match must have
+          // produced exactly n-1 deaths. Counted rather than asserted per run, so a corpus
+          // that never reached a knockout at all shows up as 0 instead of as green.
+          if (r1.deaths === n - 1) koDeathsRight++;
+        }
+
+        // ── SLOT i IS ARGUMENT i ──────────────────────────────────────────────
+        const fresh = LIVE.createMatch(arena, configs);
+        for (let i = 0; i < n; i++) {
+          const f = fresh.fighters[i];
+          if (f.id !== i || f.characterId !== configs[i].characterId
+            || f.x !== configs[i].spawn.x || f.y !== configs[i].spawn.y) {
+            argFaults.push(`n=${n} rot${rot} slot ${i}: ${f.characterId}@(${f.x},${f.y}) vs ${configs[i].characterId}@(${configs[i].spawn.x},${configs[i].spawn.y})`);
+          }
+        }
+
+        // ── POSITIVE CONTROL: ARGUMENT ORDER IS LOAD-BEARING ──────────────────
+        // Same spawns, characters rotated by one. If this produced the same match, "slot
+        // order is a game rule" would be decoration and every row above would be vacuous.
+        if (s === 0) {
+          const permuted = configs.map((c, i) => ({ ...c, characterId: configs[(i + 1) % n].characterId }));
+          const pr = runRecorded(ORDERED, permuted, s);
+          if (firstDiff(comparable(pr.state), comparable(r1.state), 'state')) permuteChanged++;
+          else permuteSame++;
+        }
+      }
+    }
+
+    ok(`N=${n}: deterministic — same inputs, same result, over state AND events in order`,
+      detFaults.length === 0,
+      detFaults[0] ?? `${matches} matches, ${ticks.toLocaleString()} ticks, ${events.toLocaleString()} events`);
+    ok(`N=${n}: …and the same SEED replays exactly, from two independent driver instances`,
+      seedFaults.length === 0, seedFaults[0] ?? `${matches} replays`);
+    ok(`N=${n}: no NaN or non-finite position, velocity, pool, ring or belief`,
+      nanFaults.length === 0, nanFaults[0] ?? `${playTicks.toLocaleString()} playing ticks scanned`);
+    ok(`N=${n}: every fighter stepped EXACTLY once per tick, in slot order [${want}]`,
+      orderFaults.length === 0, orderFaults[0] ?? `${playTicks.toLocaleString()} playing ticks, all [${want}]`);
+    ok(`N=${n}: slot i is createMatch ARGUMENT i (character and spawn)`,
+      argFaults.length === 0, argFaults[0] ?? `${rotations} rotations x ${n} slots`);
+    ok(`N=${n}: POSITIVE CONTROL — permuting the argument order changes the match`,
+      permuteChanged > 0 && permuteSame === 0, `${permuteChanged} changed, ${permuteSame} identical`);
+    // Non-vacuity. A battery that ran 0 playing ticks would pass every row above.
+    ok(`N=${n}: a knockout does NOT end the match — ${n - 1} fall, one is left standing`,
+      endFaults.length === 0 && koEnds > 0 && koDeathsRight === koEnds,
+      endFaults[0] ?? `${koEnds} matches ended by knockout, ${koDeathsRight} of them after exactly ${n - 1} deaths`);
+    ok(`N=${n}: the corpus is NOT vacuous — real playing ticks, real events, real deaths`,
+      playTicks > 1000 && events > 100 && deaths > 0,
+      `${playTicks.toLocaleString()} playing ticks, ${events.toLocaleString()} events, ${deaths} deaths`);
+
+    rows.push({ n, matches, ticks, events, deaths, playTicks });
+    if (verbose) {
+      console.log(`   N=${n}  ${matches} matches  ${ticks.toLocaleString()} ticks `
+        + `(${playTicks.toLocaleString()} playing)  ${events.toLocaleString()} events  ${deaths} deaths`);
+    }
+  }
+
+  // ── THE KNOWN-BAD, ONCE, AT THE LARGEST N ─────────────────────────────────
+  {
+    const n = ns[ns.length - 1];
+    const configs = ringConfigs(arena, n, 0);
+    const want = Array.from({ length: n }, (_, i) => i).join(',');
+    const rev = Array.from({ length: n }, (_, i) => n - 1 - i).join(',');
+    const r = runRecorded(REVERSED, configs, 0);
+    ok(`KNOWN-BAD: the order recorder CATCHES a reversed fighter loop at N=${n}`,
+      r.perTick.length > 0 && r.perTick.every((t) => t === rev),
+      `${r.perTick.length} ticks, first [${r.perTick[0]}], want reversed [${rev}]`);
+    ok('…and it is not simply stuck printing whatever it is handed (the live loop is forward)',
+      want !== rev);
+    // And the reversal has to be a REAL behavioural difference, or turn order is not a rule.
+    const clash = lockstepMatch(arena, LIVE, REVERSED, driver,
+      configs[0].characterId, configs[1].characterId, policy, 0, undefined, { configs, maxTicks });
+    ok('…and the differ finds a real divergence, so slot order IS a game rule',
+      clash.diff !== null, clash.diff ? `tick ${clash.tick}: ${clash.diff}` : `IDENTICAL over ${clash.tick} ticks`);
+    // ⚠️ AND AT TWO SEATS TOO. If reversing the loop only mattered above N=2, the whole
+    // "slot order is a game rule" claim would be new rather than long-standing, and every
+    // pre-2026-08-11 balance number would rest on something this battery had never tested.
+    const two = lockstepMatch(arena, LIVE, REVERSED, driver, 'donut', 'hamburger', policy, 0, undefined, { maxTicks });
+    ok('…and the same reversal diverges at TWO seats, through the legacy 3-argument form',
+      two.diff !== null, two.diff ? `tick ${two.tick}: ${two.diff}` : `IDENTICAL over ${two.tick} ticks`);
+  }
+
+  return rows;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // --selftest : the differ must FAIL on every field the sim owns
@@ -755,12 +1063,19 @@ if (args.selftest) {
     target.alive = false;
     const __hitEv = events.pop();
     events.push({ type: 'death',`],
+      // \u26a0\ufe0f AND THE SECOND ANCHOR WAS *STILL* TOO LONG \u2014 IT QUOTED A COMMENT.
+      // It read `    if (state.phase === 'playing') {\n      // \u26a0\ufe0f THE KNOCKOUT WINNER`, and
+      // the cap-raising change rewrote that comment (the knockout block is now gated on a
+      // survivor COUNT, not on a death). `applied[1]` went false and this control silently
+      // became a no-op \u2014 caught by the `applied` assertion below, which is the second time
+      // that assertion has earned its place. A COMMENT IS NOT A LANDMARK: comments are
+      // rewritten every time the rule underneath them changes meaning, which is precisely
+      // when a known-bad control matters most. The anchor is now the one line of CODE the
+      // insertion has to precede, and nothing else.
       ['combat.ts',
-        `    if (state.phase === 'playing') {
-      // \u26a0\ufe0f THE KNOCKOUT WINNER`,
+        `    if (state.phase === 'playing') {`,
         `    events.push(__hitEv);
-    if (state.phase === 'playing') {
-      // \u26a0\ufe0f THE KNOCKOUT WINNER`],
+    if (state.phase === 'playing') {`],
     ]);
     ok('the event-order known-bad was actually patched into combat.ts (both edits landed)',
       applied[0] && applied[1], `applied ${JSON.stringify(applied)}`);
@@ -916,7 +1231,74 @@ if (args.selftest) {
       `centre ${(keepout + 100).toFixed(0)} wu out, near edge ${(keepout - 100).toFixed(0)} wu out`);
   }
 
+  // ── H. N-FIGHTER SELF-CONSISTENCY, N=3..6 ─────────────────────────────────
+  //
+  // The arm that only exists once `MAX_FIGHTERS` is above 2. There is no earlier commit to
+  // be bit-identical TO up here, so the claim is self-consistency — and the battery carries
+  // its own known-bad (a reversed fighter loop) because a table of "nothing went wrong" rows
+  // passes just as well when it is broken. One implementation, shared with `--nfighter`,
+  // which runs the same rows over a much larger corpus on the shipped arena.
+  //
+  // ⚠️ ON A RING FIXTURE WITH A REAL FOG SCHEDULE, not on `CLEAR`'s deliberately-absurd
+  // `maxSafeRadius: 5000`. Without a closing ring nobody is forced to fight, the corpus
+  // reaches zero deaths, and the non-vacuity row below is what would have caught that.
+  {
+    await nFighterBattery({
+      arena: { ...CLEAR, maxSafeRadius: 900 },
+      ns: [3, 4, 5, 6],
+      seeds: 1,
+      rotations: 2,
+      maxTicks: 3400,
+      policy: 'smart2',
+      ok,
+      verbose: false,
+    });
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail > 0 ? 1 : 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// --nfighter : the same battery, on the shipped arena, over a real corpus
+// ─────────────────────────────────────────────────────────────────────────────
+
+if (args.nfighter) {
+  if (!BASE_ARENA) { console.error(`no arena at ${ARENA_PATH}`); process.exit(1); }
+  const ns = String(args.n ?? '3,4,5,6').split(',').map(Number);
+  const rotations = Number(args.rotations ?? 4);
+  const seeds = Number(args.seeds ?? 8);
+  const maxTicks = Number(args['max-ticks'] ?? 4000);
+
+  console.log('\n══ N-FIGHTER SELF-CONSISTENCY ══  the arm with no baseline to compare against');
+  console.log(`   arena ${BASE_ARENA.id} ${BASE_ARENA.width}x${BASE_ARENA.height}, ${BASE_ARENA.cover.length} cover, `
+    + `${BASE_ARENA.hazards.length} hazards, ring ${BASE_ARENA.maxSafeRadius}`);
+  console.log(`   N ${ns.join(',')} x ${rotations} character rotations x ${seeds} seeds, dt ${DT}, driver rev ${DRIVER_REV}`);
+  console.log('   FLOOR: EXACT on every row. Determinism, NaN, one-step-per-fighter and slot');
+  console.log('          order are all all-or-nothing — this is not a statistical test.');
+  console.log('   ⚠️ NOTHING HERE IS A BALANCE CLAIM. The scripted driver has a two-seat view by');
+  console.log('      design, so above N=2 it is a deterministic stimulus. A 4-6 fighter balance');
+  console.log('      number is a different quantity and its instrument does not exist (§49b).\n');
+
+  let pass = 0, fail = 0;
+  const ok = (name, cond, detail = '') => {
+    if (cond) { pass++; console.log(`   PASS  ${name}${detail ? `  ${detail}` : ''}`); }
+    else { fail++; console.log(`   FAIL  ${name}${detail ? `  ${detail}` : ''}`); }
+  };
+  const t0 = Date.now();
+  const rows = await nFighterBattery({
+    arena: BASE_ARENA, ns, seeds, rotations, maxTicks, policy: POLICIES[0], ok, verbose: false,
+  });
+
+  console.log('\n   corpus');
+  console.log('   N   matches      ticks        playing      events       deaths');
+  for (const r of rows) {
+    console.log(`   ${String(r.n).padEnd(3)} ${String(r.matches).padStart(7)}  ${r.ticks.toLocaleString().padStart(11)}  `
+      + `${r.playTicks.toLocaleString().padStart(11)}  ${r.events.toLocaleString().padStart(11)}  ${String(r.deaths).padStart(6)}`);
+  }
+  const tot = rows.reduce((a, r) => ({ ticks: a.ticks + r.ticks, events: a.events + r.events, deaths: a.deaths + r.deaths }), { ticks: 0, events: 0, deaths: 0 });
+  console.log(`   TOTAL          ${tot.ticks.toLocaleString().padStart(11)}               ${tot.events.toLocaleString().padStart(11)}  ${String(tot.deaths).padStart(6)}`);
+  console.log(`\n   ${pass} passed, ${fail} failed   wall ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   process.exit(fail > 0 ? 1 : 0);
 }
 
@@ -1448,5 +1830,5 @@ if (args.traffic) {
   process.exit(0);
 }
 
-console.error('conceal_lab: pass one of --selftest, --bitid, --occupancy, --traffic');
+console.error('conceal_lab: pass one of --selftest, --bitid, --nfighter, --ablate, --occupancy, --traffic');
 process.exit(1);

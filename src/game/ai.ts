@@ -77,10 +77,19 @@
  *
  * `stepAI(state, self, dt, events)`. It used to read `state.enemy` and `state.player`, which
  * made "the AI" A PLACE rather than a fighter — two AI-controlled fighters would have shared
- * one seat and driven each other. Its target comes from `state.ts:opponentOf`, the single
- * target rule, and its belief from one cell of `MatchState.sightings` addressed by
- * `sightingIndex(self.id, target.id, n)` rather than from a match-wide `aiSighting`. Proven
- * bit-identical at N=2 over state AND events; see the acceptance run in the commit message.
+ * one seat and driven each other. Its target comes from the single target rule — since
+ * 2026-08-11 `state.ts:nearestLivingOpponent`, the same function `combat.ts:attemptAttack`
+ * calls, so aim and shot cannot land on different fighters — and its belief from one cell of
+ * `MatchState.sightings` addressed by `sightingIndex(self.id, target.id, n)` rather than
+ * from a match-wide `aiSighting`. Proven bit-identical at N=2 over state AND events; see the
+ * acceptance runs in the two commit messages.
+ *
+ * ⚠️ NOTHING IN THIS FILE IS A SEARCH BEHAVIOUR, AND THE CAP COMING OFF DID NOT ADD ONE.
+ * `stepAI` walks to where it last saw its target and stops (`rules.ts:1034`), which
+ * `DECISIONS §48` measures as the binding constraint on the ×4 arena — 12.00 s to first
+ * contact at 27 props, 21.09 s at 108, monotone in prop count. More fighters shortens the
+ * expected distance to the NEAREST one, which helps; it is not the fix, and claiming it
+ * would be attributing a pacing result to a change that was measured for bit-identity.
  *
  * ── AND THE SHAPE HAS LEFT THIS FILE ────────────────────────────────────────
  *
@@ -119,7 +128,7 @@ import {
   type WeaponType,
 } from './rules.ts';
 import type { Fighter, GameEvent, MatchState } from './state.ts';
-import { opponentOf, sightingIndex } from './state.ts';
+import { nearestLivingOpponent, sightingIndex } from './state.ts';
 import { attemptAttack } from './combat.ts';
 import { isVisibleFrom, moveToward } from './movement.ts';
 
@@ -525,9 +534,30 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   // read both seats off the match by name, which made "the AI" a place rather than a
   // fighter: two AI-controlled fighters would have shared one `state.enemy` and driven each
   // other. `sim.ts`'s fighter loop now hands it whichever slot it is stepping, and the
-  // target comes from the one target rule (`state.ts:opponentOf`).
-  const target = opponentOf(state, self);
-  if (self.hp <= 0 || target.hp <= 0) return false;
+  // target comes from the one target rule.
+  //
+  // ── ⚠️ AND IT IS `nearestLivingOpponent` NOW, NOT `opponentOf` ─────────────
+  //
+  // Was `const target = opponentOf(state, self); if (self.hp <= 0 || target.hp <= 0) return
+  // false;` — EXACTLY equivalent at two seats, because `opponentOf`'s answer with `hp <= 0`
+  // is precisely this function's `null` (`alive` is written only where `hp` reaches 0). At
+  // six it is the difference between an AI that fights whoever is nearest and an AI that
+  // stares at slot 0 forever.
+  //
+  // 🚨 IT MUST BE THE SAME FUNCTION `combat.ts:attemptAttack` CALLS, and this is the reason:
+  // everything below prices a weapon against THIS target's separation (`pressValue(w,
+  // adist)`), points `facing` at it, and then hands `attemptAttack` a weapon INDEX — which
+  // resolves the target again. Two rules there and the AI ranks its kit against one fighter
+  // while swinging at another, which is not a bug any balance instrument in this repo could
+  // localise. Same call, same tick, nothing moves in between. See `state.ts`.
+  //
+  // ⚠️ The target is chosen on TRUE positions while everything below acts on the BELIEF. That
+  // is deliberate and it is the same split `isVisibleFrom` already draws: WHO you are
+  // fighting is not a perception question (you know who hit you), WHERE they are is. Making
+  // the choice belief-based would let a fighter forget an opponent exists by walking behind
+  // a plate, which is a design change, not a generalisation.
+  const target = nearestLivingOpponent(state, self);
+  if (self.hp <= 0 || target === null) return false;
 
   const now = state.elapsed;
 
@@ -541,7 +571,7 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
    * ⚠️ It used to say `state.player.x/y`, because there was one AI and one human and the
    * function read both seats off the match by name. The GUARD is unchanged — one read, three
    * derived sites — but the quantity it is about is now the fighter this call was handed
-   * and the fighter `opponentOf` returned, not two properties of `MatchState`.
+   * and the fighter the target rule returned, not two properties of `MatchState`.
    *
    * `tools/tmp/p4_coverdensity.mjs`'s probe report found that this function read the
    * player's TRUE position at three independent sites, and that they were not all derived

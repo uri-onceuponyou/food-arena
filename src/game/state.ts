@@ -83,19 +83,52 @@ export type Controller = 'human' | 'ai';
 export type FighterRole = 'player' | 'enemy';
 
 /**
- * THE TWO-SEAT SEAM, in ONE place.
+ * THE SEAT CAP.
  *
- * The whole point of this refactor was to do the container, the identity, the iteration
- * order, the perception matrix, the target rule and the event protocol at N=2 — under the
- * differ, where the right answer is already known — and to raise the cap LAST. This is
- * the cap. Every place that still assumes exactly two fighters names this constant or
- * `opponentOf` below, so raising it is a search for two identifiers rather than a reading
- * of four files.
+ * ⚠️ **WAS `2`, AND THE WORDING BELOW IT USED TO READ:** *"THE TWO-SEAT SEAM, in ONE place…
+ * Every place that still assumes exactly two fighters names this constant or `opponentOf`
+ * below, so raising it is a search for two identifiers rather than a reading of four
+ * files."* Kept, because that prediction is the record of what the container step bought
+ * and it came true: raising the cap visited exactly those two identifiers, plus the two
+ * signatures (`createMatch`, `stepMatch`) that were deliberately left alone at step 1.
+ *
+ * **6, because `DECISIONS §48` sizes the ×4 arena for "4-6 players"** and the top of that
+ * range is the number the layout, the fog schedule and the concealment count were all
+ * measured against. It is a CEILING, not a length: `fighters.length` is now anything from
+ * `MIN_FIGHTERS` to this, and `createMatch`'s legacy 3-argument form still builds exactly
+ * two. Nothing shipped calls the list form yet.
+ *
+ * ⚠️ The real ceiling above this one is `fighterBit`'s int32 coercion at 31 slots, which
+ * `sim.test.mjs` §27(a) asserts rather than assumes.
  */
-export const MAX_FIGHTERS = 2;
+export const MAX_FIGHTERS = 6;
 
 /**
- * The legacy seat name for a slot. Only slots 0 and 1 have one; see `MAX_FIGHTERS`.
+ * THE FLOOR, and it is a real rule rather than a formality.
+ *
+ * A one-fighter match has no opponent, so `nearestLivingOpponent` returns null on tick 1 and
+ * every branch below it becomes the "nothing to hit" path — a match that can only end on the
+ * clock, with a `resolveTimeout` winner decided by a sort over one element. That is not a
+ * game, and admitting it would mean every caller of `attemptAttack`/`stepAI` carrying a null
+ * case that only a degenerate match can reach. `createMatch` refuses it instead.
+ */
+export const MIN_FIGHTERS = 2;
+
+/**
+ * The legacy seat name for a slot.
+ *
+ * ⚠️ **ONLY SLOTS 0 AND 1 HAVE A MEANINGFUL ONE, AND ABOVE `MIN_FIGHTERS` THIS IS A
+ * DELIBERATE LIE.** Slot 4 is not "the enemy"; it is slot 4. The mapping stays TOTAL — every
+ * slot gets a string — because `FighterRole` is a two-valued type consumed by four
+ * out-of-set files (`ui/hud.ts`, `game/match.ts`, `game/vfx.ts`, `audio/director.ts`) and by
+ * ~1,089 untyped `.mjs` references, and a `null` or a third value there is a runtime break
+ * `tsc` cannot find. Every `*Role` field is a MIRROR that no gameplay decision reads
+ * (`conceal_lab.mjs --ablate` measures that rather than asserting it), so the lie costs
+ * nothing inside the sim and keeps every consumer compiling and running unchanged.
+ *
+ * => **A consumer that needs to tell slot 2 from slot 5 must read the `*Id`.** Every event
+ * and every damage source carries one.
+ *
  * Exported so `createMatch` and `sim.test.mjs` state the mapping once instead of twice.
  */
 export function roleOfSlot(id: FighterId): FighterRole {
@@ -132,12 +165,24 @@ export interface Fighter {
    *
    * ⚠️ **LIVE, NOT DEAD, AND THE FIRST DRAFT OF THIS COMMENT CLAIMED THE OPPOSITE.** It
    * said the field was "deliberately unread by gameplay in the hot path", which read
-   * plausibly and was false: `opponentOf`, `sightingIndex`, `fighterBit`, `spawnProjectile`
-   * and `applyDamage` all read it, so swapping the two ids makes a fighter its own
-   * opponent. `conceal_lab.mjs --ablate` catches it on the FIRST match it runs, which is
-   * what the ablation is FOR — the design defended its new fields with "unread state cannot
-   * change behaviour", an argument from code reading, and `CLAUDE.md` #6 says not to trust
-   * those. This one was wrong.
+   * plausibly and was false. `conceal_lab.mjs --ablate` catches a swap on the FIRST match it
+   * runs, which is what the ablation is FOR — the design defended its new fields with "unread
+   * state cannot change behaviour", an argument from code reading, and `CLAUDE.md` #6 says not
+   * to trust those. This one was wrong.
+   *
+   * The readers, and the list is checked rather than remembered — ⚠️ it named `opponentOf`
+   * first until 2026-08-11, and `opponentOf` is no longer called by the sim at all (the
+   * target rule split; `nearestLivingOpponent` compares POSITIONS and object identity, never
+   * ids). A comment that lists call sites goes stale exactly when the code is refactored,
+   * which is when someone is most likely to read it:
+   *
+   *   `sim.ts:stepMatch`         `perSlot[fighter.id]` — which input this seat gets
+   *   `sim.ts:applyWorldTick`    `fighterBit(victim.id)`, and `mark.ownerId !== fighter.id`
+   *   `sim.ts:stepProjectiles`   `state.fighters[p.targetId]` — the victim, by slot
+   *   `sim.ts:resolveTimeout`    `a.id - b.id` — the timeout tiebreak's rung 3
+   *   `ai.ts:stepAI`             `sightingIndex(self.id, target.id, n)` — the belief cell
+   *   `combat.ts:spawnProjectile` the projectile's `ownerId` / `targetId`
+   *   `combat.ts:applyDamage`    `state.fighters[source.attackerId]` — whose `damageMul`
    */
   id: FighterId;
   /** Who supplies this fighter's inputs. `sim.ts`'s fighter loop branches on this. */
@@ -489,6 +534,13 @@ export interface MatchState {
    * @deprecated LEGACY SEAT ALIAS. `player` IS `fighters[0]` and `enemy` IS `fighters[1]` —
    * the SAME OBJECTS, aliased by reference.
    *
+   * ⚠️ **ABOVE TWO FIGHTERS `enemy` IS NOT "THE OPPONENT", IT IS SLOT 1.** The alias is
+   * defined by its INDEX and always has been; at N=2 the two readings coincide and there was
+   * nothing to distinguish. `createMatch`'s legacy 3-argument form still builds exactly two
+   * fighters, so every shipped caller keeps the reading it has. A consumer that wants "the
+   * fighter my player is fighting" must ask `nearestLivingOpponent`, and one that wants a
+   * particular seat must index `fighters`.
+   *
    * ⚠️ REAL, OWN, ENUMERABLE PROPERTIES, NOT GETTERS, AND THAT IS LOAD-BEARING. The
    * bit-identity proof (`conceal_lab.mjs --bitid`) walks the state with
    * `Object.keys`/spread; a getter is not an own enumerable data property, so defining
@@ -528,12 +580,19 @@ export interface MatchState {
    *   * ALLOCATED ONCE. `stepAI` mutates a cell in place; nothing ever pushes or splices,
    *     so the container's identity and length are constant for the life of a match.
    *
-   * ⚠️ TODAY EXACTLY ONE CELL IS EVER WRITTEN OR READ — `[1 * 2 + 0]`, the enemy's belief
-   * about the player, which is what `aiSighting` below aliases. There is deliberately no
-   * mirror for a human: a human already knows where they are, and the scripted player in
-   * `tools/tmp/scripted_player.mjs` is a measuring instrument with perfect information BY
-   * DESIGN (see its header) — giving it perception would change every recorded balance
-   * number in the project for a reason that has nothing to do with the game.
+   * ⚠️ **WHICH CELLS ARE LIVE IS NOW A FUNCTION OF THE ROSTER, NOT A CONSTANT.** This used
+   * to read *"TODAY EXACTLY ONE CELL IS EVER WRITTEN OR READ — `[1 * 2 + 0]`"*, and that was
+   * true while every match had one human in slot 0 and one AI in slot 1. With the cap raised
+   * it is one cell PER AI-CONTROLLED FIGHTER — row `self.id`, column whichever fighter
+   * `nearestLivingOpponent` returned this tick, so an AI that switches targets leaves a
+   * stale belief behind in the column it left. That is correct and intended: the belief
+   * belongs to the PAIR, which is the whole reason the scalar became a matrix.
+   *
+   * There is still deliberately no mirror for a human: a human already knows where they are,
+   * and the scripted player in `tools/tmp/scripted_player.mjs` is a measuring instrument
+   * with perfect information BY DESIGN (see its header) — giving it perception would change
+   * every recorded balance number in the project for a reason that has nothing to do with
+   * the game.
    */
   sightings: Sighting[];
   /**
@@ -582,34 +641,126 @@ export interface MatchState {
 /**
  * @deprecated The legacy two-seat opponent rule, on seat NAMES. Still exported and still
  * correct at N=2; `game/match.ts` and `audio/director.ts` both use it and neither was
- * touched. Inside the sim, use `opponentOf`.
+ * touched. ⚠️ Said "inside the sim, use `opponentOf`" until 2026-08-11; the sim now asks
+ * `nearestLivingOpponent` (who do I hit) or `lastFighterStanding` (who won), because those
+ * were two questions wearing one name.
  */
 export function otherRole(role: FighterRole): FighterRole {
   return role === 'player' ? 'enemy' : 'player';
 }
 
 /**
- * 🚨 THE TARGET RULE, AND THE ONLY PLACE THE SIM ASSUMES THERE ARE TWO FIGHTERS.
+ * 🚨 THE TARGET RULE — **AND IT SPLIT IN TWO WHEN THE CAP CAME OFF, BECAUSE IT WAS TWO
+ * QUESTIONS WEARING ONE NAME.**
  *
- * "Who is my opponent" is asked in five places — the melee/ranged target in
- * `combat.ts:attemptAttack`, the attacker behind a weapon hit in `combat.ts:applyDamage`,
- * the winner on a knockout, the AI's perception target in `ai.ts:stepAI`, and the trail's
- * victim list in `sim.ts:applyWorldTick`. Before this refactor each one answered it for
- * itself with `otherRole(...)` or with a literal `'player'`/`'enemy'`, which is five copies
- * of a rule that is about to stop being true.
+ * ── WHAT THIS FUNCTION USED TO SAY, AND WHY IT IS KEPT ──────────────────────
  *
- * ⚠️ AT N>2 THIS IS NOT A FUNCTION OF ONE FIGHTER AT ALL — it becomes "nearest living
- * fighter that is not me", or a team rule, and it needs the asker's intent. That is exactly
- * why it is one named function with one call site per question rather than a `!==`
- * scattered through four files: the N>2 change is a rewrite of THIS, plus a decision about
- * what each caller wants, and nothing else.
+ * At `MAX_FIGHTERS === 2` this was the whole rule, and its own doc predicted its end:
  *
- * Throws nothing and asserts nothing at N=2 by design — it is on the per-tick path. The
- * invariant it rests on (`fighters.length === MAX_FIGHTERS`) is asserted once, in
- * `sim.test.mjs` §27, and once per match by `createMatch`'s construction.
+ *   > *"AT N>2 THIS IS NOT A FUNCTION OF ONE FIGHTER AT ALL — it becomes 'nearest living
+ *   > fighter that is not me', or a team rule, and it needs the asker's intent. That is
+ *   > exactly why it is one named function with one call site per question rather than a
+ *   > `!==` scattered through four files: the N>2 change is a rewrite of THIS, plus a
+ *   > decision about what each caller wants, and nothing else."*
+ *
+ * That is exactly what happened. The five askers wanted three different answers:
+ *
+ *   asker                                    wants                       now calls
+ *   `combat.ts:attemptAttack`  (who do I hit) nearest LIVING, not me      `nearestLivingOpponent`
+ *   `ai.ts:stepAI`             (who do I watch) the same fighter, always  `nearestLivingOpponent`
+ *   `combat.ts:applyDamage`    (who won)      the LAST ONE STANDING       `lastFighterStanding`
+ *   `sim.ts:applyWorldTick`    (who treads it) ALL others                 the fighter loop
+ *   this function              — the N=2 identity all three collapse to —
+ *
+ * ⚠️ **IT IS NO LONGER CALLED BY THE SIM, AND IT IS NOT DEAD.** It is the ORACLE the split
+ * is checked against: `sim.test.mjs` §28(a) requires `nearestLivingOpponent` and
+ * `lastFighterStanding` to agree with this function on a live two-fighter match, tick by
+ * tick, which is the machine-checked form of *"every split reduces exactly to today's
+ * behaviour at N=2"*. A test that re-derived the two-seat answer inline would only ever be
+ * testing its own copy of it.
+ *
+ * @deprecated Two-seat only. Returns garbage above `MIN_FIGHTERS` by construction — slot 4
+ * asks for its opponent and gets slot 0 — which is why nothing in the sim calls it.
  */
 export function opponentOf(state: MatchState, fighter: Fighter): Fighter {
   return state.fighters[fighter.id === 0 ? 1 : 0];
+}
+
+/**
+ * WHO THIS FIGHTER IS AIMING AT: the nearest fighter that is not itself and is still up.
+ *
+ * ── WHY "NEAREST", AND WHY IT IS ONE FUNCTION AND NOT TWO ───────────────────
+ *
+ * `combat.ts:attemptAttack` and `ai.ts:stepAI` must resolve the SAME fighter or the AI aims
+ * at one opponent and hits another: `stepAI` picks a weapon by `pressValue(w, separation)`
+ * against its target, points `facing` at it, and then hands `attemptAttack` a weapon index
+ * — which resolves its own target a few lines later. Two rules there is a mis-aimed melee
+ * cone and a projectile whose `targetId` is not the fighter its damage was priced against.
+ * So there is one rule, stated here, called by both, on the same tick with nothing moving
+ * in between.
+ *
+ * "Nearest" rather than "lowest slot" for the reason rung 1 of the timeout tiebreak exists:
+ * a slot-ordered rule hands seat 0 a standing, unearned advantage (it would be attacked by
+ * everyone, always). "Nearest" is earned, symmetric, and it is the rule a player would state.
+ *
+ * ⚠️ TIES BREAK ON THE LOWER SLOT — `<` and not `<=`, so the first fighter found at the
+ * minimum distance keeps it. Two opponents at EXACTLY equal distance is a measure-zero case
+ * in a float world, and picking arbitrarily on it would be non-determinism smuggled into a
+ * sim whose determinism underwrites every balance number in the project. That is the one
+ * place slot order survives in this rule, it is stated out loud, and it is unreachable in
+ * practice rather than merely rare.
+ *
+ * ⚠️ RETURNS `null` WHEN NOTHING IS LEFT TO SHOOT AT, and both callers handle it as the
+ * "attempted, nothing to hit" outcome the melee branch already had. At N=2 that null is
+ * exactly `opponentOf(...).hp <= 0`, which is the condition both callers already tested for
+ * — see `combat.ts:attemptAttack` for why the state is unreachable while `phase` is
+ * `'playing'` at all.
+ *
+ * `alive && hp > 0` rather than either alone: `alive` is written only by `applyDamage` at
+ * the instant `hp` reaches 0, so the two agree for any state the sim itself produces — but
+ * instruments pin `hp` directly (`match-sim.mjs:768`'s forced-immortal idiom is the shipped
+ * example) and the conjunction is the one that cannot be surprised by that.
+ */
+export function nearestLivingOpponent(state: MatchState, fighter: Fighter): Fighter | null {
+  let best: Fighter | null = null;
+  let bestDist = Infinity;
+  for (const other of state.fighters) {
+    if (other === fighter || !other.alive || other.hp <= 0) continue;
+    const d = Math.hypot(other.x - fighter.x, other.y - fighter.y);
+    if (d < bestDist) {
+      bestDist = d;
+      best = other;
+    }
+  }
+  return best;
+}
+
+/**
+ * THE KNOCKOUT WINNER: the only fighter left standing, or `null` while more than one is.
+ *
+ * ⚠️ A DIFFERENT QUESTION FROM `nearestLivingOpponent`, AND AT N=2 THE SAME ANSWER — which
+ * is exactly why they were one function and had to stop being one. "The other one" is the
+ * survivor only while there are two; at six, a knockout is one death among five survivors
+ * and the match keeps going. `combat.ts:applyDamage` therefore ends the match on this
+ * returning non-null rather than on a death happening.
+ *
+ * Returns `null` for zero survivors too, which is not the same statement as "nobody won" and
+ * is deliberately not resolved here: at N=2 the first death sets `phase = 'ended'`, so the
+ * second death in the same tick never reaches this at all (`applyDamage` gates the whole
+ * winner block on `phase === 'playing'`). Above N=2 a simultaneous last-two wipe would leave
+ * the match `'playing'` with nobody in it and the clock would resolve it through
+ * `resolveTimeout` — which is a ranked sort over the fighter list and has an answer for
+ * every fighter, alive or not. That is a defensible outcome rather than a designed one, and
+ * it is recorded here so whoever meets it knows it was seen.
+ */
+export function lastFighterStanding(state: MatchState): Fighter | null {
+  let survivor: Fighter | null = null;
+  for (const f of state.fighters) {
+    if (!f.alive || f.hp <= 0) continue;
+    if (survivor !== null) return null; // two or more up: nobody has won yet
+    survivor = f;
+  }
+  return survivor;
 }
 
 /**
@@ -653,6 +804,41 @@ export interface MatchInput {
    */
   attack: boolean;
 }
+
+/**
+ * 🚨 WHAT `stepMatch` TAKES FOR ITS THIRD ARGUMENT — **ONE INPUT, OR ONE PER SLOT.**
+ *
+ * ── WHY A UNION RATHER THAN A NEW SIGNATURE ─────────────────────────────────
+ *
+ * A second human seat needs an input PER FIGHTER. `stepMatch(state, dt, input)` has **148
+ * call sites in this repo and `tsc` can see 4 of them** — the rest are `.mjs` instruments
+ * and the compiler is blind to every one. A third parameter, or a required array, would
+ * therefore not produce a compile break that finds them; it would produce a SILENT RUNTIME
+ * break in four fifths of the surface that measures this game. That is the same measurement
+ * that decided `createMatch`'s compat overload and it is not a style preference.
+ *
+ * So the parameter WIDENS instead:
+ *
+ *   * a bare `MatchInput` **BROADCASTS** — every human-controlled fighter is handed the same
+ *     object, which at one human seat is bit-for-bit what the sim already did. Every
+ *     existing caller is in this case and none of them changed.
+ *   * an ARRAY is **PER SLOT**: `inputs[fighter.id]`. A hole (`null`/`undefined`/short
+ *     array) is `NEUTRAL_INPUT` — a seat with nobody in it stands still rather than
+ *     inheriting its neighbour's controls.
+ *
+ * ⚠️ AN ARRAY, INDEXED BY SLOT — never a `Map`, `Record` or object keyed by name, for the
+ * same reason `MatchState.fighters` is an array: a keyed container's traversal order depends
+ * on insertion order, and a sim whose determinism underwrites every balance number in the
+ * project cannot take an input whose association depends on how the caller built it.
+ *
+ * ⚠️ AND BROADCAST IS NOT "THE DEFAULT" — IT IS A DIFFERENT RULE, and above one human seat
+ * it is the WRONG one: two humans handed one `MatchInput` move in lockstep. It is kept
+ * because it is exactly today's behaviour and today's behaviour has 148 callers, not because
+ * it generalises. `sim.test.mjs` §28(c) pins both readings, including that they DIVERGE the
+ * moment a second slot is human — a compat shim nobody can tell from the real thing is a
+ * compat shim that will be used by mistake.
+ */
+export type MatchInputs = MatchInput | readonly (MatchInput | null | undefined)[];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Events — the VFX/observation surface

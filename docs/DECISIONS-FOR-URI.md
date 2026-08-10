@@ -2722,11 +2722,22 @@ a measurable answer, not a taste call, so it is not being sent back to Uri.
 
 ---
 
-## 49. ❓ TWO BALANCE CALLS THAT ONLY EXIST ONCE THERE ARE MORE THAN TWO FIGHTERS
+## 49. ❓ THE BALANCE CALLS THAT ONLY EXIST ONCE THERE ARE MORE THAN TWO FIGHTERS
 
-Both surfaced by the N-fighter container (`cdcdd65`). **Neither blocks anything tonight** — at N=2
-both are provably identical to today, and the seat cap is still pinned at 2. They must be answered
-**before the cap is raised**, because each one silently picks a winner otherwise.
+⚠️ **WAS "TWO BALANCE CALLS"; IT IS THREE, AND THE PRECONDITION IN THE NEXT SENTENCE HAS CHANGED.**
+This opened: *"Both surfaced by the N-fighter container (`cdcdd65`). **Neither blocks anything
+tonight** — at N=2 both are provably identical to today, and the seat cap is still pinned at 2. They
+must be answered **before the cap is raised**, because each one silently picks a winner otherwise."*
+
+**The cap is now raised** (`MAX_FIGHTERS` 2 → 6). Nothing about 49a or 49b changed, and nothing is
+blocked: `createMatch`'s legacy `(arena, playerId, enemyId, levels)` form still builds **exactly
+two** fighters, all 74 call sites in the repo use it, and **nothing in `src/` seats more than two**.
+The list form that can seat 3–6 exists and has no caller outside the instruments. So the sentence
+now reads: **these must be answered before anything SHIPS a match with more than two seats**, and a
+third one (49c) came into existence with the list form.
+
+At two fighters every one of them is provably identical to today — measured tick-for-tick over both
+state and events against `cdcdd65`, not argued.
 
 ### 49a — the timeout tiebreak's rung 3 is now "the LOWER SLOT wins"
 
@@ -2766,3 +2777,47 @@ That is a **balance** decision, not a correctness one, and the honest options ar
 ⚠️ **Do not answer this from the 1v1 balance table.** `roster_lab`, `kit_lab` and `match-sim` all
 assume a 110-cell **1v1** matchup grid; a 4–6 fighter balance number is a **different quantity** and
 the instrument for it does not exist yet. Whoever prices this builds that first.
+
+### 49c — ❓ NEW: which HP / size dial does **seat 2 and up** get?
+
+Surfaced by raising the cap. `createMatch` now takes a FIGHTER LIST (the 3-argument form is a
+compat overload and every shipped call site still uses it). At **two** fighters the dials are
+unchanged and proven bit-identical: slot 0 gets `PLAYER_MAX_HP` (100), `PLAYER_SIZE`,
+`HIT_RADIUS_VS_PLAYER`; slot 1 gets `ENEMY_MAX_HP` (90), `ENEMY_SIZE`, `HIT_RADIUS_VS_ENEMY`.
+
+Above two, **every slot from 1 up gets the ENEMY dial** — the smallest rule that reduces exactly
+to today, and it is a CHOICE rather than a derivation. A six-way brawl built this way seats one
+100 HP fighter against five 90 HP ones: a standing **+11% pool advantage to whoever `createMatch`
+listed first**, which is the same shape as §49a's rung 3.
+
+⚠️ **At 1v1 that asymmetry is the point.** `ENEMY_MAX_HP` 150 → 90 is AUTHORISED DEVIATION #9 and
+it is your difficulty dial (§12, §15). In a free-for-all there is no "the enemy", so the dial has
+no obvious meaning and it silently becomes a seat advantage instead.
+
+**Options:**
+- **keep the seat dial** (in force) — slot 0 is "the human seat" and keeps its 100 HP edge at
+  every match size. Zero work, and invisible until somebody plays a 6-way and loses seat 3.
+- **one pool above 1v1** — everyone gets `PLAYER_MAX_HP` when `fighters.length > 2`, and
+  `ENEMY_MAX_HP` keeps its meaning in the duel only. Symmetric; makes the brawl a different game
+  object from the duel, which it arguably already is.
+- **let LEVEL carry the difficulty instead** — your own stated direction is *"AI players need to
+  be adjusted to the player's level"*, and `Fighter.level` already scales both pool and damage.
+  Then `ENEMY_MAX_HP` is a duel-only constant and the brawl is flat.
+
+⚠️ **Do not answer this from the 1v1 balance table**, for the same reason as §49b: `roster_lab`,
+`kit_lab` and `match-sim` all assume a 110-cell **1v1** matchup grid. A 4–6 fighter balance number
+is a different quantity and the instrument for it does not exist yet.
+
+**Nothing is blocked by this.** The legacy `createMatch(arena, playerId, enemyId, levels)` form
+still builds exactly two fighters, all 74 call sites in the repo use it, and nothing in `src/`
+seats more than two.
+
+### 49d — ℹ️ NOT a decision for you: spawns above slot 1 are REFUSED, on purpose
+
+`ArenaDefinition` declares exactly two spawn points, so `createMatch` **throws** when a list seats
+a fighter in slot 2+ without an explicit `spawn` rather than inventing a ring around the centre.
+That is deliberate: spawn placement for 4–6 fighters is part of §48's layout pass, where true 180°
+point symmetry is a **competitive-fairness** constraint in the same category as `aspect.mjs`. A
+default invented in `sim.ts` would be a second, quieter source of truth for it, it would produce
+balance numbers, and it would look like it worked. → **The arena pass owns this**; the sim will
+refuse loudly until it lands.

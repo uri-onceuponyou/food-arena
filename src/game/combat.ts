@@ -32,7 +32,7 @@ import {
   type Weapon,
 } from './rules.ts';
 import type { DamageSource, Fighter, GameEvent, MatchState, Vec2 } from './state.ts';
-import { opponentOf } from './state.ts';
+import { lastFighterStanding, nearestLivingOpponent } from './state.ts';
 import { breakConcealment } from './movement.ts';
 
 const RAD2DEG = 180 / Math.PI;
@@ -162,16 +162,30 @@ export function applyDamage(
     target.alive = false;
     events.push({ type: 'death', fighterRole: target.role, fighterId: target.id });
     if (state.phase === 'playing') {
-      // ⚠️ THE KNOCKOUT WINNER IS THE TARGET RULE'S ANSWER, not `otherRole`. At N=2 they
-      // are the same fighter. At N>2 "the other one" does not exist and this becomes
-      // "the last one standing", which is a check on `fighters`, not on this target —
-      // one of the two identifiers (`opponentOf`, `MAX_FIGHTERS`) that raising the cap
-      // has to visit. See `state.ts:opponentOf`.
-      const victor = opponentOf(state, target);
-      state.phase = 'ended';
-      state.winner = victor.role;
-      state.winnerId = victor.id;
-      events.push({ type: 'match-ended', winner: victor.role, winnerId: victor.id });
+      // ── ⚠️ A KNOCKOUT IS NO LONGER THE END OF THE MATCH. IT USED TO SAY: ─────
+      //
+      //   > *"THE KNOCKOUT WINNER IS THE TARGET RULE'S ANSWER, not `otherRole`. At N=2 they
+      //   > are the same fighter. At N>2 'the other one' does not exist and this becomes
+      //   > 'the last one standing', which is a check on `fighters`, not on this target —
+      //   > one of the two identifiers (`opponentOf`, `MAX_FIGHTERS`) that raising the cap
+      //   > has to visit."*
+      //
+      // That is what it is now. The block is gated on a SURVIVOR COUNT rather than on a
+      // death: `lastFighterStanding` returns non-null only when exactly one fighter is up,
+      // so at two seats the death that just happened ends the match (identical), and at six
+      // it is one knockout among four survivors and the clock keeps running.
+      //
+      // ⚠️ The gate moved from "somebody died" to "only one is left", and those are the same
+      // sentence only at N=2. Reading it the other way — end the match on the first death —
+      // is the single most natural way to write this, and it would turn a six-player brawl
+      // into a first-blood race that no instrument in this repo measures.
+      const victor = lastFighterStanding(state);
+      if (victor !== null) {
+        state.phase = 'ended';
+        state.winner = victor.role;
+        state.winnerId = victor.id;
+        events.push({ type: 'match-ended', winner: victor.role, winnerId: victor.id });
+      }
     }
   }
 }
@@ -244,11 +258,28 @@ export function attemptAttack(
 ): boolean {
   if (state.phase !== 'playing') return false;
 
-  // ⚠️ THE TARGET RULE, ASKED ONCE. Was `otherRole(attackerRole)` — see `state.ts:opponentOf`
-  // for why the five places that asked this question now share one answer, and for what has
-  // to change at N>2 (this caller wants "nearest living fighter that is not me"; the
-  // knockout winner wants "the last one standing"; they are not the same generalisation).
-  const target = opponentOf(state, attacker);
+  // ── ⚠️ THE TARGET RULE, AND IT IS THE SPLIT NOW. IT USED TO SAY: ───────────
+  //
+  //   > *"THE TARGET RULE, ASKED ONCE. Was `otherRole(attackerRole)` — see
+  //   > `state.ts:opponentOf` for why the five places that asked this question now share one
+  //   > answer, and for what has to change at N>2 (this caller wants 'nearest living fighter
+  //   > that is not me'; the knockout winner wants 'the last one standing'; they are not the
+  //   > same generalisation)."*
+  //
+  // Both of those exist now and this caller takes the first. `ai.ts:stepAI` calls the SAME
+  // function on the SAME tick with nothing moved in between, which is what keeps an AI's aim
+  // and its shot on one fighter — see `nearestLivingOpponent`.
+  //
+  // ⚠️ `null` MEANS NOTHING IS LEFT TO HIT, AND IT IS UNREACHABLE WHILE `phase === 'playing'`.
+  // `applyDamage` is the only writer of `hp`, it sets `hp` to exactly 0 and `alive` to false
+  // together, and it ends the match in the same statement — so a fighter at 0 HP implies the
+  // match is over, and the guard at the top of this function has already returned. The null
+  // branch below is therefore what the melee branch's old `if (target.hp <= 0) return true;`
+  // was: a spent attempt with nothing to connect with. It is written for every weapon type
+  // rather than melee alone because "there is nobody to shoot at" is not a melee-shaped fact,
+  // and because at six seats it stops being unreachable the moment somebody removes the
+  // phase gate. `sim.test.mjs` §28(d) pins the unreachability rather than assuming it.
+  const target = nearestLivingOpponent(state, attacker);
   const weapons = CHARACTERS[attacker.characterId].weapons;
   const w = weapons[weaponIndex];
   if (!w) return false;
@@ -342,8 +373,16 @@ export function attemptAttack(
     return true;
   }
 
+  // WAS `if (target.hp <= 0) return true;` INSIDE THE MELEE BRANCH — "attempted, cooldown
+  // consumed, nothing to hit". Hoisted above every branch and re-expressed as "no living
+  // opponent", which is the same statement at two seats and the correct one at six. The
+  // `self` branch above deliberately runs FIRST and is exempt: a heal targets its caster, so
+  // it works in an empty arena, and gating it here would be `ai.ts`'s oldest defect shape
+  // (a rule stated once and implemented twice) reintroduced in the shared path — §26(l)
+  // already asserts both directions of that exemption for the concealment reveal.
+  if (target === null) return true;
+
   if (w.type === 'melee') {
-    if (target.hp <= 0) return true; // attempted, cooldown consumed, nothing to hit
     const toTargetX = target.x - attacker.x;
     const toTargetY = target.y - attacker.y;
     const dist = Math.hypot(toTargetX, toTargetY);

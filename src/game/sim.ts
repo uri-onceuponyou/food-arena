@@ -37,6 +37,30 @@
  * that `tsc` cannot see**, so a signature change here fails silently at runtime in four
  * fifths of the instruments rather than loudly at compile time. Raising the cap is a
  * separate step and it visits `state.ts:MAX_FIGHTERS` and `state.ts:opponentOf`.
+ *
+ * ── 2026-08-11: THE CAP CAME OFF, AND THE PREDICTION ABOVE HELD ─────────────
+ *
+ * `MAX_FIGHTERS` is **6** (`DECISIONS §48`: the ×4 arena is sized for "4-6 players"). The
+ * paragraph above forecast that raising it would visit `MAX_FIGHTERS` and `opponentOf` —
+ * and it did, plus the two signatures that paragraph itself deferred:
+ *
+ *   * **`createMatch` takes a FIGHTER LIST**, with the 3-argument `(arena, playerId,
+ *     enemyId, levels)` form kept as a compat OVERLOAD that delegates to it. Not one line of
+ *     any of the 74 existing call sites changed.
+ *   * **`stepMatch` takes ONE INPUT *OR* ONE PER SLOT** (`state.ts:MatchInputs`). A bare
+ *     `MatchInput` broadcasts — exactly today's behaviour with one human seat — and an array
+ *     is indexed by slot. **148 call sites, `tsc` sees 4** (grep over `src/` + `tools/`).
+ *   * **`opponentOf` SPLIT BY ASKER.** "Who do I shoot" became `nearestLivingOpponent`; "who
+ *     won" became `lastFighterStanding`; "who treads my trail" was already the fighter loop.
+ *     They are three different questions that were indistinguishable at two fighters.
+ *
+ * Every one of those reduces EXACTLY to the previous behaviour at N=2, and that is a
+ * measurement rather than an argument — `conceal_lab.mjs --bitid --sim-ref cdcdd65` over the
+ * `normal` / `timeout` / `countdown` corpora at three level splits, compared per tick over
+ * both the whole state and the returned `GameEvent[]` in order. The acceptance run is in the
+ * commit message. `conceal_lab.mjs --nfighter` is the arm that only exists now: N=3..6 for
+ * self-consistency (determinism, no NaN, every fighter stepped exactly once per tick, and
+ * iteration order a pure function of `createMatch`'s argument order).
  */
 
 import {
@@ -70,8 +94,11 @@ import {
   type CharacterId,
 } from './rules.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
-import type { Fighter, GameEvent, MatchInput, MatchState, Sighting, Splat, TrailMark } from './state.ts';
-import { createFighter, fighterBit, sightingIndex } from './state.ts';
+import type {
+  Controller, Fighter, FighterId, GameEvent, MatchInput, MatchInputs, MatchState, Sighting, Splat,
+  TrailMark, Vec2,
+} from './state.ts';
+import { createFighter, fighterBit, MAX_FIGHTERS, MIN_FIGHTERS, sightingIndex } from './state.ts';
 import { applyDamage, attemptAttack, isOnOwnTrail } from './combat.ts';
 import { boxesOverlap, isHidden, isVisibleFrom, tryMove } from './movement.ts';
 import { stepAI } from './ai.ts';
@@ -117,14 +144,117 @@ export interface MatchLevels {
   enemy?: number;
 }
 
+/**
+ * ONE ENTRY IN `createMatch`'s FIGHTER LIST — what a slot needs, minus everything the seat
+ * already implies.
+ *
+ * ⚠️ NOT the same type as `state.ts:FighterSpec`, deliberately. `FighterSpec` is what
+ * `createFighter` needs and every field of it is REQUIRED, because that factory must never
+ * guess. This is what a CALLER should have to know, and the answer is "which character, and
+ * where" — the pools, the collision size and the hit radius are the seat's, not the
+ * caller's, and a caller that had to pass `HIT_RADIUS_VS_ENEMY` by hand would eventually
+ * pass `PLAYER_SIZE` into it (they are adjacent plain numbers; see `FighterSpec`'s own note
+ * on why it stopped being positional).
+ *
+ * ── 🚨 THE DEFAULTS ARE A BALANCE DECISION ABOVE TWO FIGHTERS, AND IT IS PARKED ──
+ *
+ * At N=2 the defaults reproduce the legacy 3-argument form EXACTLY — slot 0 gets the PLAYER
+ * dial (`PLAYER_MAX_HP`, `PLAYER_SIZE`, `HIT_RADIUS_VS_PLAYER`, `arena.playerSpawn`, facing
+ * +x) and slot 1 the ENEMY dial. That equivalence is measured, not asserted: the legacy form
+ * is implemented BY calling this one, and `--bitid` compares the result against `cdcdd65`
+ * tick for tick.
+ *
+ * Above two, **every slot from 1 up gets the ENEMY dial**, and that is the smallest rule
+ * that reduces to today — but it is a CHOICE, not a derivation: `ENEMY_MAX_HP` is 90 against
+ * `PLAYER_MAX_HP`'s 100 (`rules.ts` AUTHORISED DEVIATION #9), so a 6-fighter free-for-all
+ * built this way seats one 100 HP fighter against five 90 HP ones. In a 1v1 that asymmetry
+ * IS Uri's difficulty dial and it is pointed the right way; in a brawl it is a standing
+ * advantage to seat 0, which is the same shape as the timeout tiebreak's rung 3
+ * (`DECISIONS §49a`). **Parked for Uri as §49c — do not tune it here, and `rules.ts` is not
+ * this file set's to tune anyway.** A caller that disagrees passes `maxHp` explicitly.
+ */
+export interface FighterConfig {
+  characterId: CharacterId;
+  /** Default: slot 0 is `'human'`, every other slot is `'ai'`. */
+  controller?: Controller;
+  /** `rules.ts` `LEVEL_MIN`..`LEVEL_MAX`; clamped. Default `LEVEL_MIN`, where every multiplier is 1.0. */
+  level?: number;
+  /**
+   * Where this fighter starts.
+   *
+   * ⚠️ **REQUIRED FOR SLOT 2 AND UP, AND THAT IS THE POINT.** `ArenaDefinition` declares
+   * exactly two spawns (`playerSpawn`, `enemySpawn`), so slots 0 and 1 default from the
+   * arena and there is nothing for slot 2 to default FROM. `createMatch` throws rather than
+   * inventing a ring of spawn points here: spawn placement is arena geometry, `src/arena/**`
+   * owns it, and `DECISIONS §48` is explicit that the 2800x2000 layout — including where 4-6
+   * fighters start on it, at true 180° point symmetry — is a layout pass with its own
+   * fairness constraint. A default here would be a second, quieter source of truth for it,
+   * and it would look like it worked.
+   */
+  spawn?: Vec2;
+  /** Default: +x for slot 0, -x for slot 1 (the legacy pair), and "look at `arena.center`" above that. */
+  facing?: Vec2;
+  /** Default: `maxHpFor(characterId, <seat pool>, level)`. See the balance note above. */
+  maxHp?: number;
+  /** Collision AABB. Default `PLAYER_SIZE` for slot 0, `ENEMY_SIZE` above it. */
+  size?: number;
+  /** Incoming-projectile hit radius. Default `HIT_RADIUS_VS_PLAYER` for slot 0, `..._VS_ENEMY` above it. */
+  hitRadius?: number;
+}
+
+/**
+ * ⚠️ THE 3-ARGUMENT FORM IS A COMPAT OVERLOAD AND IT IS NOT GOING ANYWHERE SOON.
+ *
+ * **74 `createMatch` call sites live in this repo and `tsc` can see 2 of them** — everything
+ * else is an untyped `.mjs` instrument. Replacing this signature would not produce a compile
+ * break that finds them; it would produce a silent runtime break in the tools that measure
+ * the game, which is the trap that decided the whole shape of this refactor. So the list
+ * form is ADDITIVE, the legacy form is implemented by calling it, and both are pinned by
+ * `sim.test.mjs` §28(b).
+ */
+export function createMatch(arena: ArenaDefinition, fighters: readonly FighterConfig[]): MatchState;
 export function createMatch(
   arena: ArenaDefinition,
   playerCharacterId: CharacterId,
   enemyCharacterId: CharacterId,
-  levels: MatchLevels = {},
+  levels?: MatchLevels,
+): MatchState;
+export function createMatch(
+  arena: ArenaDefinition,
+  a: readonly FighterConfig[] | CharacterId,
+  enemyCharacterId?: CharacterId,
+  levels?: MatchLevels,
 ): MatchState {
-  const playerLevel = clampLevel(levels.player ?? LEVEL_MIN);
-  const enemyLevel = clampLevel(levels.enemy ?? LEVEL_MIN);
+  // The discriminator is the ARGUMENT'S SHAPE, not an options flag, because every one of the
+  // 74 existing call sites passes a bare string here and none of them can be asked to
+  // declare which form it meant. `Array.isArray` is total over both alternatives.
+  if (Array.isArray(a)) {
+    // ⚠️ THE MIXED CALL IS REFUSED RATHER THAN IGNORED. `createMatch(arena, [...], undefined,
+    // { player: 15 })` would otherwise DROP the levels silently — a balance run at level 1
+    // reported as level 15, which is precisely the class of defect the `--levels` arm of
+    // `conceal_lab` exists to expose (at `LEVEL_MIN` every multiplier is 1.0, so the mistake
+    // is invisible in the numbers). `tsc` refuses it for the 2 typed call sites and cannot
+    // see the other 72, so it is a runtime throw as well.
+    if (enemyCharacterId !== undefined || levels !== undefined) {
+      throw new TypeError('createMatch: the fighter-list form takes no third or fourth argument;'
+        + ' put `level` on each FighterConfig instead');
+    }
+    return createMatchFromList(arena, a);
+  }
+  const lv = levels ?? {};
+  return createMatchFromList(arena, [
+    { characterId: a as CharacterId, level: lv.player },
+    { characterId: enemyCharacterId as CharacterId, level: lv.enemy },
+  ]);
+}
+
+function createMatchFromList(arena: ArenaDefinition, configs: readonly FighterConfig[]): MatchState {
+  if (configs.length < MIN_FIGHTERS || configs.length > MAX_FIGHTERS) {
+    throw new RangeError(
+      `createMatch: ${configs.length} fighters; the sim seats ${MIN_FIGHTERS}..${MAX_FIGHTERS}`
+      + ' (see state.ts MIN_FIGHTERS / MAX_FIGHTERS)',
+    );
+  }
 
   // ── PER-CHARACTER POOLS, ON TOP OF THE ROLE DIAL (rules.ts DEVIATION #10) ──
   // `maxHpFor` multiplies the ROLE base by the character's own `stats.health`, so
@@ -134,35 +264,28 @@ export function createMatch(
   // of it, so `maxHpFor` stays linear in its `roleBaseHp` at every level — which is what
   // `sim.test.mjs` §22(b) asserts and what keeps `ENEMY_MAX_HP` a working dial.
   //
-  // ⚠️ THE SIGNATURE IS STILL `(arena, playerId, enemyId, levels)` AND THAT IS DELIBERATE.
-  // 68 of the 71 `createMatch` call sites in this repo are in `.mjs` files that `tsc`
-  // cannot see. Widening this to take a fighter LIST is the step-1b change; doing it here
-  // would have broken four fifths of the instruments silently, at runtime, with no compile
-  // error anywhere — which is exactly the trap that decided this design.
-  const fighters: Fighter[] = [
-    createFighter({
-      id: 0,
-      controller: 'human',
-      characterId: playerCharacterId,
-      spawn: arena.playerSpawn,
-      maxHp: maxHpFor(playerCharacterId, PLAYER_MAX_HP, playerLevel),
-      size: PLAYER_SIZE,
-      hitRadius: HIT_RADIUS_VS_PLAYER,
-      facing: { x: 1, y: 0 },
-      level: playerLevel,
-    }),
-    createFighter({
-      id: 1,
-      controller: 'ai',
-      characterId: enemyCharacterId,
-      spawn: arena.enemySpawn,
-      maxHp: maxHpFor(enemyCharacterId, ENEMY_MAX_HP, enemyLevel),
-      size: ENEMY_SIZE,
-      hitRadius: HIT_RADIUS_VS_ENEMY,
-      facing: { x: -1, y: 0 },
-      level: enemyLevel,
-    }),
-  ];
+  // ⚠️ `clampLevel` RUNS HERE AS WELL AS INSIDE `createFighter`, and the duplication is
+  // load-bearing rather than sloppy: `maxHpFor` is handed the level too, so an out-of-range
+  // level that was clamped only in the factory would bake a POOL from the raw number and a
+  // `damageMul` from the clamped one. The legacy path clamped before calling `maxHpFor` for
+  // exactly this reason; the list path has to as well or the compat overload stops being
+  // one. `clampLevel` is idempotent, so the second application is free.
+  const fighters: Fighter[] = configs.map((cfg, id) => {
+    const lvl = clampLevel(cfg.level ?? LEVEL_MIN);
+    const seatIsPlayer = id === 0;
+    const spawn = cfg.spawn ?? defaultSpawn(arena, id);
+    return createFighter({
+      id,
+      controller: cfg.controller ?? (seatIsPlayer ? 'human' : 'ai'),
+      characterId: cfg.characterId,
+      spawn,
+      maxHp: cfg.maxHp ?? maxHpFor(cfg.characterId, seatIsPlayer ? PLAYER_MAX_HP : ENEMY_MAX_HP, lvl),
+      size: cfg.size ?? (seatIsPlayer ? PLAYER_SIZE : ENEMY_SIZE),
+      hitRadius: cfg.hitRadius ?? (seatIsPlayer ? HIT_RADIUS_VS_PLAYER : HIT_RADIUS_VS_ENEMY),
+      facing: cfg.facing ?? defaultFacing(arena, id, spawn),
+      level: lvl,
+    });
+  });
 
   /**
    * EVERY OBSERVER STARTS THE MATCH KNOWING WHERE EVERY FIGHTER SPAWNED.
@@ -207,8 +330,13 @@ export function createMatch(
     winnerId: null,
     arena,
     sightings,
-    // The legacy name for the one cell anything reads today: observer 1 (the AI) on
-    // target 0 (the human). The SAME object, not a copy.
+    // The legacy name for the cell a two-fighter match reads: observer 1 on target 0. The
+    // SAME object, not a copy.
+    // ⚠️ IT IS STILL SLOT 1's BELIEF ABOUT SLOT 0 AND NOTHING MORE. This used to be
+    // documented as "the one cell anything reads today", which was true at a cap of two and
+    // is not a definition — with more seats, every AI-driven fighter writes its own row and
+    // this name sees one of them. Kept because four out-of-set files and ~1,089 untyped
+    // `.mjs` references read it, all of them in two-fighter matches.
     aiSighting: sightings[sightingIndex(1, 0, n)],
     // Every plate starts the match intact — a restart is a fresh set of cover, which is why
     // this is per-match state and not a mutation of the shared arena. See the field doc.
@@ -217,7 +345,72 @@ export function createMatch(
   };
 }
 
-export function stepMatch(state: MatchState, dt: number, input: MatchInput): GameEvent[] {
+/**
+ * WHERE SLOT `id` STARTS WHEN THE CALLER DID NOT SAY.
+ *
+ * 🚨 **IT THROWS ABOVE SLOT 1 RATHER THAN INVENTING A SPAWN, AND THAT IS THE WHOLE POINT.**
+ * `ArenaDefinition` declares exactly two spawn points. A fallback here — a ring around
+ * `arena.center`, a grid, anything — would be `sim.ts` authoring arena geometry, i.e. a
+ * second source of truth for the one quantity `DECISIONS §48` is most explicit about:
+ *
+ *   > *"Preserve true 180 degree point symmetry … Every added prop needs its partner. **This
+ *   > is competitive fairness, the same category as `aspect.mjs`**"*
+ *
+ * Spawn placement for 4-6 fighters is part of that layout pass and it belongs to
+ * `src/arena/**`. An invented default would put fighters somewhere plausible, produce
+ * balance numbers, and be wrong in a way no instrument here could see — which is exactly
+ * the failure mode this project names "it looked like it worked".
+ */
+function defaultSpawn(arena: ArenaDefinition, id: FighterId): Vec2 {
+  if (id === 0) return arena.playerSpawn;
+  if (id === 1) return arena.enemySpawn;
+  throw new RangeError(
+    `createMatch: slot ${id} has no spawn. ArenaDefinition declares playerSpawn and enemySpawn only,`
+    + ' so slots 2 and up must pass `spawn` explicitly — arena geometry is src/arena/**\'s to own'
+    + ' (DECISIONS §48: spawn placement is part of the 180° point-symmetry fairness constraint).',
+  );
+}
+
+/**
+ * WHICH WAY SLOT `id` LOOKS ON TICK 0.
+ *
+ * Slots 0 and 1 keep the literal +x / -x the two-seat form has always used — the two shipped
+ * spawns face each other across the map, so those literals ARE "look at the middle" and
+ * changing them to the derived form would move the first tick of every recorded match.
+ * Above that the derivation is the honest one: face `arena.center`, which the arena already
+ * declares, so no new geometry is invented (see `defaultSpawn`).
+ *
+ * A spawn exactly ON the centre has no bearing to it — the same degeneracy `combat.ts`
+ * answers for a coincident melee and `ai.ts` for a coincident aim — so it falls back to +x
+ * rather than dividing by zero. `createFighter` must receive a non-zero facing: nothing else
+ * in the sim ever writes a zero one, and `spawnProjectile`'s `atan2(0, 0)` is exactly 0,
+ * which is how "a cornered AI fires due east" got into this project once already.
+ */
+function defaultFacing(arena: ArenaDefinition, id: FighterId, spawn: Vec2): Vec2 {
+  if (id === 0) return { x: 1, y: 0 };
+  if (id === 1) return { x: -1, y: 0 };
+  const dx = arena.center.x - spawn.x;
+  const dy = arena.center.y - spawn.y;
+  const m = Math.hypot(dx, dy);
+  return m > 1e-6 ? { x: dx / m, y: dy / m } : { x: 1, y: 0 };
+}
+
+/**
+ * THE INPUT A SEAT GETS WHEN NOBODY IS DRIVING IT.
+ *
+ * Frozen, and shared rather than allocated per tick: `stepMatch` runs 60 times a second in
+ * the game and ~26 million times in one `--bitid` run, and `tools/perf.mjs --mode alloc`
+ * exists because this file's per-tick allocations are measured. Nothing writes through a
+ * `MatchInput` — `applyAim` and `moveFighter` only read — so one shared object is safe, and
+ * `Object.freeze` is what makes that a guarantee instead of a habit.
+ */
+const NEUTRAL_INPUT: MatchInput = Object.freeze({
+  move: Object.freeze({ x: 0, y: 0 }),
+  selectedWeapon: 0,
+  attack: false,
+}) as MatchInput;
+
+export function stepMatch(state: MatchState, dt: number, input: MatchInputs): GameEvent[] {
   const events: GameEvent[] = [];
   state.elapsed += dt;
 
@@ -255,17 +448,32 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInput): Gam
      *     once (which slot, who drives it, which HP dial); only the middle one belongs in
      *     this decision, and Uri's stated direction is humans in any number of slots.
      *
-     * ⚠️ ONE `MatchInput` FOR THE WHOLE MATCH IS THE REMAINING TWO-SEAT ASSUMPTION HERE.
-     * With one human it is unambiguous. A second human seat needs an input PER SLOT, which
-     * is a `stepMatch` signature change and therefore reaches all 71 call sites — it is
-     * step 1b, deliberately not this change. Nothing else in this loop assumes N=2.
+     * ── ⚠️ AND THE INPUT IS PER SLOT NOW. IT USED TO SAY: ─────────────────────
+     *
+     *   > *"ONE `MatchInput` FOR THE WHOLE MATCH IS THE REMAINING TWO-SEAT ASSUMPTION HERE.
+     *   > With one human it is unambiguous. A second human seat needs an input PER SLOT,
+     *   > which is a `stepMatch` signature change and therefore reaches all 71 call sites —
+     *   > it is step 1b, deliberately not this change."*
+     *
+     * That is this change. `perSlot` is non-null only when the caller passed an ARRAY;
+     * otherwise every human seat is handed the same object, which with one human seat is
+     * bit-for-bit what the loop did before. The branch is hoisted out of the loop because
+     * `Array.isArray` per fighter per tick is a type check in the hot path for a question
+     * that cannot change inside one call. See `state.ts:MatchInputs` for why the compat
+     * shim exists at all (148 call sites; `tsc` sees 4).
      */
+    const perSlot = Array.isArray(input) ? (input as readonly (MatchInput | null | undefined)[]) : null;
     for (const fighter of state.fighters) {
       let moved: boolean;
       if (fighter.controller === 'human') {
-        applyAim(fighter, input);
-        if (input.attack) attemptAttack(state, fighter, input.selectedWeapon, events);
-        moved = moveFighter(state, fighter, dt, input);
+        // A hole in the array — a shorter list, an explicit null, a seat nobody is sitting
+        // in — is NEUTRAL, never the previous slot's input. `?? NEUTRAL_INPUT` rather than a
+        // length check, so `[a, , c]` and `[a, null, c]` and a 2-long array all mean the
+        // same thing.
+        const fi = perSlot === null ? (input as MatchInput) : (perSlot[fighter.id] ?? NEUTRAL_INPUT);
+        applyAim(fighter, fi);
+        if (fi.attack) attemptAttack(state, fighter, fi.selectedWeapon, events);
+        moved = moveFighter(state, fighter, dt, fi);
       } else {
         moved = stepAI(state, fighter, dt, events);
       }
@@ -330,6 +538,16 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInput): Gam
  *     tiebreak the sim has no quantity for, and this change is required to be
  *     bit-identical. => **This is the one line in `sim.ts` where slot advantage re-enters
  *     at N>2, and it needs a decision before the cap is raised.**
+ *
+ *     🚨 **THE CAP IS NOW RAISED AND THIS IS STILL UNANSWERED — DELIBERATELY.** It is
+ *     `DECISIONS §49a`, parked with Uri, and it stays in force UNCHANGED until he answers:
+ *     the alternatives (a genuine draw, fewest deaths, most damage dealt) each either move
+ *     the N=2 answer, invent a quantity the sim does not track, or reach into the economy —
+ *     `GameEvent.match-ended` requires a non-null winner and the payout table has no draw
+ *     row. Nothing in `src/` may seat more than two fighters until it is answered, and today
+ *     nothing does: `createMatch`'s legacy form still builds exactly two, and the list form
+ *     has no caller outside the instruments. `sim.test.mjs` §27(c) constructs all three
+ *     rungs by hand, so whatever Uri picks lands against a pinned baseline.
  *
  * ── AND IT IS A RANKED SORT NOW, NOT A TWO-WAY COMPARISON ───────────────────
  *

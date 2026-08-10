@@ -49,7 +49,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   CHARACTERS, CHARACTER_IDS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
-  MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, POT, TRAIL,
+  MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, ENEMY_SIZE, POT, TRAIL,
   COUNTDOWN_FROM, COUNTDOWN_START_FLASH_MS,
   REGEN_DELAY_MS, REGEN_TICK_MS, REGEN_AMOUNT, STUN_DURATION_MS, SLOW_DURATION_MS,
   STUN_GRACE_MS, SLOW_GRACE_MS,
@@ -90,8 +90,14 @@ import {
 // Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
 // no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
 // walked is the thing the sim actually moves.
+// Section 28 needs the two halves the single `opponentOf` split into, plus `opponentOf`
+// itself — which is kept for exactly this purpose. It is the N=2 ORACLE the split is checked
+// against, so §28(a) can state "every split reduces exactly to today's behaviour at N=2" as
+// a machine-checked claim rather than as prose. A test that re-derived the two-seat answer
+// inline would only be testing its own copy of it.
 import {
-  createFighter, fighterBit, MAX_FIGHTERS, opponentOf, roleOfSlot, sightingIndex,
+  createFighter, fighterBit, lastFighterStanding, MAX_FIGHTERS, MIN_FIGHTERS,
+  nearestLivingOpponent, opponentOf, roleOfSlot, sightingIndex,
 } from './state.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
@@ -3984,8 +3990,16 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
 
     check('MatchState carries a fighters ARRAY, not a Map/Set/Record',
       Array.isArray(state.fighters), `${Object.prototype.toString.call(state.fighters)}`);
-    check(`…of exactly MAX_FIGHTERS (${MAX_FIGHTERS})`,
-      state.fighters.length === MAX_FIGHTERS, `${state.fighters.length}`);
+    // ⚠️ WAS `…of exactly MAX_FIGHTERS (2)` — `state.fighters.length === MAX_FIGHTERS`.
+    // That assertion encoded a rule that has since been reversed: `MAX_FIGHTERS` was the
+    // LENGTH of every match while the cap was pinned at 2, and it is now a CEILING
+    // (`MIN_FIGHTERS`..`MAX_FIGHTERS`). The old wording is kept because the change of meaning
+    // is the whole point of the step: a test that still demanded equality would have failed
+    // for the right reason and been "fixed" by raising a number.
+    check(`the legacy 3-argument form still seats exactly ${MIN_FIGHTERS} (not MAX_FIGHTERS, now ${MAX_FIGHTERS})`,
+      state.fighters.length === MIN_FIGHTERS, `${state.fighters.length}`);
+    check(`…and MIN_FIGHTERS ${MIN_FIGHTERS} <= MAX_FIGHTERS ${MAX_FIGHTERS}, with room above the pair`,
+      MIN_FIGHTERS === 2 && MAX_FIGHTERS > MIN_FIGHTERS);
     check('`fighters[i].id === i` — the identity invariant every id in the sim indexes on',
       state.fighters.every((f, i) => f.id === i), state.fighters.map((f) => f.id).join(','));
     // The bitmask ceiling. A JS bitwise operator coerces to int32, so slot 31 is the last
@@ -4246,6 +4260,441 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
     ]);
     check('KNOWN-BAD: the auditor catches a forged id/role mismatch AND a missing id',
       forged.bad.length === 2, forged.bad.join(' | '));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 28. THE CAP OFF: PER-SLOT INPUT, A FIGHTER LIST, AND THE TARGET RULE SPLIT
+//
+// §27 built the container at a cap of 2. This is the step that raises it — `MAX_FIGHTERS` 2
+// -> 6 (`DECISIONS §48` sizes the x4 arena for "4-6 players"), `createMatch` taking a fighter
+// LIST behind a compat overload, `stepMatch` taking one input OR one per slot, and
+// `opponentOf` splitting into `nearestLivingOpponent` (who do I hit) and
+// `lastFighterStanding` (who won).
+//
+// ⚠️ THE BIT-IDENTITY PROOF IS STILL `tools/tmp/conceal_lab.mjs --bitid`, and the N=3..6
+// SELF-CONSISTENCY arm is `--nfighter`. This section pins what a tick count cannot say:
+//
+//   (a) each split REDUCES to `opponentOf` at N=2 — checked against that function itself,
+//       kept for exactly this purpose, rather than against a fresh copy of the two-seat rule;
+//   (b) the two `createMatch` forms build the SAME state, field for field;
+//   (c) broadcast and per-slot input agree at one human seat and DIVERGE at two — a compat
+//       shim nobody can tell from the real thing is one that gets used by mistake;
+//   (d) the "no living opponent" branch is unreachable while `phase === 'playing'`, measured
+//       over real matches rather than argued from the source;
+//   (e) a 6-fighter match holds every §27 invariant, and its ITERATION ORDER is observable
+//       from the event stream rather than asserted.
+// ─────────────────────────────────────────────────────────────────────────────
+
+console.log('\n28. The cap off: per-slot input, a fighter list, and the split target rule');
+{
+  /**
+   * Structural equality with EXACT numbers, skipping functions.
+   *
+   * ⚠️ NOT `JSON.stringify`, and the reason is a real hazard rather than fastidiousness:
+   * this state is full of `-Infinity` sentinels (`lastDamagedAt`, `revealedUntil`, every
+   * `lastUsed` slot, both `StatusTimers` deadlines) and `JSON.stringify` turns every one of
+   * them into `null`. Two states that differed only in those fields would compare EQUAL, and
+   * they are precisely the fields a mis-built fighter gets wrong.
+   */
+  const deepDiff = (a, b, path = '') => {
+    if (a === b) return null;
+    if (typeof a !== typeof b) return `${path}: type ${typeof a} vs ${typeof b}`;
+    if (typeof a === 'number') {
+      if (Number.isNaN(a) && Number.isNaN(b)) return null;
+      return `${path}: ${a} !== ${b}`;
+    }
+    if (typeof a !== 'object' || a === null || b === null) return `${path}: ${a} !== ${b}`;
+    if (Array.isArray(a) !== Array.isArray(b)) return `${path}: array vs object`;
+    if (Array.isArray(a)) {
+      if (a.length !== b.length) return `${path}.length: ${a.length} !== ${b.length}`;
+      for (let i = 0; i < a.length; i++) {
+        const d = deepDiff(a[i], b[i], `${path}[${i}]`);
+        if (d) return d;
+      }
+      return null;
+    }
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      if (typeof a[k] === 'function' || typeof b[k] === 'function') continue;
+      if (!(k in a) || !(k in b)) return `${path}.${k}: present on one side only`;
+      const d = deepDiff(a[k], b[k], `${path}.${k}`);
+      if (d) return d;
+    }
+    return null;
+  };
+  const stateOnly = ({ arena: _a, ...rest }) => rest;
+
+  // ── (a) EVERY SPLIT REDUCES TO `opponentOf` AT N=2 ────────────────────────
+  {
+    const state = createMatch(makeArena({ maxSafeRadius: 900 }), 'donut', 'hamburger');
+    let ticks = 0;
+    let deaths = 0;
+    let agreedTarget = 0;
+    let agreedWinner = 0;
+    const breaks = [];
+    for (let i = 0; i < 4000 && state.phase !== 'ended'; i++) {
+      for (const f of state.fighters) {
+        const legacy = opponentOf(state, f);
+        const split = nearestLivingOpponent(state, f);
+        // The claim, exactly: with two seats the nearest LIVING opponent is "the other one"
+        // whenever the other one is up, and `null` in precisely the case the old callers
+        // tested for with `target.hp <= 0`.
+        const want = legacy.alive && legacy.hp > 0 ? legacy : null;
+        if (split === want) agreedTarget++;
+        else breaks.push(`tick ${ticks} slot ${f.id}: nearestLivingOpponent gave ${split && split.id} want ${want && want.id}`);
+      }
+      for (const ev of stepMatch(state, 16.667, { move: { x: 1, y: 0.3 }, selectedWeapon: 0, attack: true })) {
+        if (ev.type === 'death') deaths++;
+      }
+      ticks++;
+      // `lastFighterStanding` is only the same question as `opponentOf` while EXACTLY one
+      // fighter is down, which is the only state the knockout block ever asks it from — and
+      // that state exists only AFTER the killing tick, which is also the tick the loop
+      // condition ends on. Checked here rather than at the top for exactly that reason: the
+      // first draft asked before the step and found the case 0 times in 4000 ticks, which is
+      // a green row measuring nothing.
+      const down = state.fighters.filter((f) => !f.alive || f.hp <= 0);
+      if (down.length === 1) {
+        if (lastFighterStanding(state) === opponentOf(state, down[0])) agreedWinner++;
+        else breaks.push(`tick ${ticks}: lastFighterStanding disagreed with opponentOf on the survivor`);
+      }
+    }
+    check('the corpus this reduction runs on is not vacuous — a real match, run to a knockout',
+      ticks > 200 && deaths >= 1, `${ticks} ticks, ${deaths} deaths`);
+    check('`nearestLivingOpponent` reduces EXACTLY to `opponentOf` on every tick, both slots',
+      breaks.length === 0 && agreedTarget === ticks * 2, `${agreedTarget}/${ticks * 2}; ${breaks.slice(0, 3).join(' | ')}`);
+    check('…and `lastFighterStanding` names the same survivor `opponentOf` did',
+      agreedWinner >= 1, `${agreedWinner} ticks with exactly one fighter down`);
+
+    // KNOWN-BAD / POSITIVE CONTROL: they are DIFFERENT functions above two seats, so a
+    // reduction that held everywhere would mean the split had not happened. Three fighters
+    // in a line: slot 1's nearest is slot 2, and `opponentOf` insists on slot 0.
+    const arena3 = makeArena({ width: 2000, height: 2000, maxSafeRadius: 4000 });
+    const three = createMatch(arena3, [
+      { characterId: 'hamburger', spawn: { x: 100, y: 1000 } },
+      { characterId: 'donut', spawn: { x: 900, y: 1000 } },
+      { characterId: 'pizza', spawn: { x: 1000, y: 1000 } },
+    ]);
+    check('KNOWN-BAD: at three seats the split DISAGREES with `opponentOf` — it is a real split',
+      nearestLivingOpponent(three, three.fighters[1]) === three.fighters[2]
+      && opponentOf(three, three.fighters[1]) === three.fighters[0],
+      `nearest=${nearestLivingOpponent(three, three.fighters[1]).id}, opponentOf=${opponentOf(three, three.fighters[1]).id}`);
+    check('…and `lastFighterStanding` is null while more than one is up, whatever just died',
+      lastFighterStanding(three) === null);
+    three.fighters[0].alive = false;
+    three.fighters[0].hp = 0;
+    check('…and null is not "no survivor": two of three up is still null',
+      lastFighterStanding(three) === null);
+    three.fighters[2].alive = false;
+    three.fighters[2].hp = 0;
+    check('…and it names the one that is left once it is the only one',
+      lastFighterStanding(three) === three.fighters[1]);
+
+    // Ties: the ONE place slot order survives in the target rule, stated out loud in
+    // `state.ts` and pinned here so it cannot drift to "last wins" or to arbitrary.
+    const tied = createMatch(arena3, [
+      { characterId: 'hamburger', spawn: { x: 1000, y: 1000 } },
+      { characterId: 'donut', spawn: { x: 1000, y: 800 } },
+      { characterId: 'pizza', spawn: { x: 1000, y: 1200 } },
+    ]);
+    check('an exact distance tie breaks on the LOWER slot (deterministic, never arbitrary)',
+      nearestLivingOpponent(tied, tied.fighters[0]) === tied.fighters[1]);
+  }
+
+  // ── (b) THE `createMatch` COMPAT OVERLOAD ─────────────────────────────────
+  {
+    const arena = makeArena();
+    const legacy = createMatch(arena, 'sushi', 'taco', { player: 11, enemy: 4 });
+    const list = createMatch(arena, [
+      { characterId: 'sushi', level: 11 },
+      { characterId: 'taco', level: 4 },
+    ]);
+    const d = deepDiff(stateOnly(legacy), stateOnly(list), 'state');
+    check('the 3-argument form and the fighter LIST build the identical state, field for field',
+      d === null, d ?? 'identical');
+    check('…and the shared arena object is the same reference in both (not a copy)',
+      legacy.arena === arena && list.arena === arena);
+
+    // KNOWN-BAD: `deepDiff` has to be able to fail, or the row above is a comment with a
+    // tick next to it. Two things it must catch — a different level, and an `-Infinity`
+    // sentinel, which is exactly what `JSON.stringify` would have flattened to null.
+    const other = createMatch(arena, [{ characterId: 'sushi', level: 12 }, { characterId: 'taco', level: 4 }]);
+    check('KNOWN-BAD: the comparator catches a one-level difference between the two forms',
+      deepDiff(stateOnly(legacy), stateOnly(other), 'state') !== null);
+    const nudged = createMatch(arena, 'sushi', 'taco', { player: 11, enemy: 4 });
+    nudged.player.lastDamagedAt = 0; // was -Infinity
+    check('KNOWN-BAD: …and a -Infinity sentinel that became 0 (JSON.stringify would not)',
+      deepDiff(stateOnly(legacy), stateOnly(nudged), 'state') !== null,
+      JSON.stringify(-Infinity));
+
+    // The default LADDER, slot by slot. Stated here because it is a balance decision above
+    // two seats (parked with Uri) and a silent change to it would look like a tuning pass.
+    const six = createMatch(makeArena({ width: 3000, height: 3000, maxSafeRadius: 4000 }), [
+      { characterId: 'hamburger' },
+      { characterId: 'donut' },
+      { characterId: 'pizza', spawn: { x: 2800, y: 200 } },
+      { characterId: 'egg', spawn: { x: 200, y: 2800 } },
+      { characterId: 'soup', spawn: { x: 2800, y: 2800 } },
+      { characterId: 'sushi', spawn: { x: 1500, y: 200 } },
+    ]);
+    check('slot 0 gets the PLAYER dial and every slot above it the ENEMY dial (DECISIONS §49c)',
+      six.fighters[0].controller === 'human'
+      && six.fighters[0].size === PLAYER_SIZE && six.fighters[0].hitRadius === HIT_RADIUS_VS_PLAYER
+      && six.fighters.slice(1).every((f) => f.controller === 'ai'
+        && f.size === ENEMY_SIZE && f.hitRadius === HIT_RADIUS_VS_ENEMY),
+      six.fighters.map((f) => `${f.id}:${f.controller}:${f.size}`).join(' '));
+    check('…and the pools follow the same seat dial, through `maxHpFor` and nothing else',
+      six.fighters[0].maxHp === maxHpFor('hamburger', PLAYER_MAX_HP, LEVEL_MIN)
+      && six.fighters[1].maxHp === maxHpFor('donut', ENEMY_MAX_HP, LEVEL_MIN)
+      && six.fighters[5].maxHp === maxHpFor('sushi', ENEMY_MAX_HP, LEVEL_MIN));
+    check('…and slots 0/1 keep the literal +x/-x facing the two-seat form always used',
+      six.fighters[0].facing.x === 1 && six.fighters[0].facing.y === 0
+      && six.fighters[1].facing.x === -1 && six.fighters[1].facing.y === 0);
+    check('…while a slot above them looks at `arena.center`, derived and unit-length',
+      approx(Math.hypot(six.fighters[2].facing.x, six.fighters[2].facing.y), 1)
+      && six.fighters[2].facing.x < 0 && six.fighters[2].facing.y > 0,
+      JSON.stringify(six.fighters[2].facing));
+    check('…and every §27 container invariant still holds at six seats',
+      six.fighters.length === 6 && six.fighters.every((f, i) => f.id === i)
+      && six.sightings.length === 36 && new Set(six.sightings).size === 36
+      && six.player === six.fighters[0] && six.enemy === six.fighters[1]
+      && six.sightings.every((s, i) => {
+        const t = six.fighters[i % 6];
+        return s.x === t.x && s.y === t.y && s.at === 0;
+      }));
+    check('…and `fighterBit` still gives all six a distinct bit inside the int32 ceiling',
+      new Set(six.fighters.map((f) => fighterBit(f.id))).size === 6 && MAX_FIGHTERS <= 31);
+
+    // The REFUSALS. Every one is a throw rather than a clamp, because a match that quietly
+    // seats a different number of fighters than it was asked for is a balance run nobody
+    // can reproduce.
+    const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+    check(`a list below MIN_FIGHTERS (${MIN_FIGHTERS}) is REFUSED, not padded`,
+      throws(() => createMatch(arena, [{ characterId: 'donut' }])));
+    check(`…and one above MAX_FIGHTERS (${MAX_FIGHTERS}) is REFUSED, not truncated`,
+      throws(() => createMatch(arena, new Array(MAX_FIGHTERS + 1).fill({ characterId: 'donut' }))));
+    check('…and a slot above 1 with NO spawn is REFUSED — arena geometry is src/arena/**\'s',
+      throws(() => createMatch(arena, [
+        { characterId: 'donut' }, { characterId: 'donut' }, { characterId: 'donut' },
+      ])));
+    check('…and the SAME list with an explicit spawn is accepted (the refusal is the spawn, not the count)',
+      !throws(() => createMatch(arena, [
+        { characterId: 'donut' }, { characterId: 'donut' },
+        { characterId: 'donut', spawn: { x: 500, y: 500 } },
+      ])));
+    // A MIXED call would otherwise DROP the levels silently, and at LEVEL_MIN every
+    // multiplier is exactly 1.0 — so the resulting balance run would look right and be
+    // wrong. That is the same blindness `conceal_lab --levels` exists to expose.
+    check('…and a fighter LIST with a levels argument is REFUSED, never silently ignored',
+      throws(() => createMatch(arena, [{ characterId: 'donut' }, { characterId: 'pizza' }], undefined, { player: 15 })));
+  }
+
+  // ── (c) BROADCAST vs PER-SLOT INPUT ───────────────────────────────────────
+  {
+    const arena = makeArena({ maxSafeRadius: 4000 });
+    const drive = { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: false };
+
+    // At ONE human seat the two readings are the same match. This is the compat claim in
+    // miniature; `conceal_lab --bitid` is the same claim over 26M ticks.
+    const bcast = playingMatch(arena, 'hamburger', 'donut');
+    const slots = playingMatch(arena, 'hamburger', 'donut');
+    for (let i = 0; i < 120; i++) {
+      stepMatch(bcast, 16.667, drive);
+      stepMatch(slots, 16.667, [drive]);
+    }
+    const d = deepDiff(stateOnly(bcast), stateOnly(slots), 'state');
+    check('with one human seat, a bare MatchInput and a 1-long array are the same match',
+      d === null, d ?? '120 ticks identical');
+
+    // 🚨 AND THEY MUST DIVERGE AT TWO HUMAN SEATS, or the shim is indistinguishable from the
+    // real thing and will be reached for by accident. Slot 1 is HUMAN here, which is the
+    // configuration `Controller` was split out of `FighterRole` to make expressible.
+    const twoHumanArena = makeArena({ maxSafeRadius: 4000 });
+    const mk = () => {
+      const s = createMatch(twoHumanArena, [
+        { characterId: 'hamburger' },
+        { characterId: 'donut', controller: 'human' },
+      ]);
+      s.phase = 'playing';
+      return s;
+    };
+    const both = mk();
+    const one = mk();
+    const start = one.fighters[1].x;
+    for (let i = 0; i < 60; i++) {
+      stepMatch(both, 16.667, drive);        // broadcast: BOTH humans walk
+      stepMatch(one, 16.667, [drive]);       // per-slot: only slot 0 has an input
+    }
+    check('two human seats: broadcast moves BOTH, so the shim is not silently per-slot',
+      both.fighters[1].x > start, `${start} -> ${both.fighters[1].x}`);
+    check('…and a short array leaves slot 1 NEUTRAL — a hole is not the neighbour\'s input',
+      one.fighters[1].x === start, `${start} -> ${one.fighters[1].x}`);
+    check('…so the two readings genuinely DIVERGE (the compat shim is distinguishable)',
+      deepDiff(stateOnly(both), stateOnly(one), 'state') !== null);
+
+    // An explicit `null` and a missing element must mean the same thing as each other, and
+    // a per-slot entry must actually REACH slot 1 rather than being dropped.
+    const holed = mk();
+    const nulled = mk();
+    const driven = mk();
+    for (let i = 0; i < 60; i++) {
+      stepMatch(holed, 16.667, [drive]);
+      stepMatch(nulled, 16.667, [drive, null]);
+      stepMatch(driven, 16.667, [drive, { move: { x: -1, y: 0 }, selectedWeapon: 0, attack: false }]);
+    }
+    check('an explicit null and a missing element are the same neutral seat',
+      deepDiff(stateOnly(holed), stateOnly(nulled), 'state') === null);
+    check('…and slot 1\'s OWN input reaches slot 1, in its own direction',
+      driven.fighters[1].x < start && driven.fighters[0].x > driven.fighters[0].size,
+      `slot1 ${start} -> ${driven.fighters[1].x}`);
+
+    // The ATTACK half of the per-slot input, which travels a different path (`attemptAttack`
+    // with `fi.selectedWeapon`) from the movement half.
+    const firing = mk();
+    const evs = stepMatch(firing, 16.667, [
+      null,
+      { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: true },
+    ]);
+    const fired = evs.filter((e) => e.type === 'weapon-fired');
+    check('a per-slot ATTACK fires that slot\'s weapon and only that slot\'s',
+      fired.length === 1 && fired[0].fighterId === 1,
+      fired.map((e) => `${e.fighterId}:${e.weaponKey}`).join(',') || 'none');
+  }
+
+  // ── (d) THE "NO LIVING OPPONENT" BRANCH IS UNREACHABLE WHILE PLAYING ──────
+  //
+  // `attemptAttack` and `stepAI` both handle a null target. `combat.ts` argues that state
+  // cannot occur while `phase === 'playing'`, because `applyDamage` zeroes `hp`, clears
+  // `alive` and ends the match in the same statement. That is an argument from code reading,
+  // which `CLAUDE.md` #6 says not to trust — so it is measured.
+  {
+    let ticks = 0;
+    let deaths = 0;
+    const violations = [];
+    for (const [p, e] of [['donut', 'hamburger'], ['egg', 'pizza'], ['lollipop', 'soup']]) {
+      const state = createMatch(makeArena({ maxSafeRadius: 700 }), p, e);
+      for (let i = 0; i < 4000 && state.phase !== 'ended'; i++) {
+        for (const ev of stepMatch(state, 16.667, { move: { x: 1, y: 0.4 }, selectedWeapon: 0, attack: true })) {
+          if (ev.type === 'death') deaths++;
+        }
+        ticks++;
+        if (state.phase === 'playing' && state.fighters.some((f) => !f.alive || f.hp <= 0)) {
+          violations.push(`${p}>${e} tick ${i}`);
+        }
+      }
+    }
+    check('a fighter at 0 HP implies the match is NOT `playing` — measured, not argued',
+      violations.length === 0 && deaths >= 3 && ticks > 600,
+      `${ticks} ticks, ${deaths} deaths, ${violations.length} violations`);
+
+    // And what the branch DOES when it is forced. Reachable only by hand, and pinned so a
+    // future change to it is a decision rather than an accident.
+    const forced = playingMatch(makeArena(), 'hamburger', 'donut');
+    forced.enemy.hp = 0;
+    forced.enemy.alive = false;
+    const tomato = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Tomato');
+    const evs = [];
+    const ok = attemptAttack(forced, forced.player, tomato, evs);
+    check('forced: a ranged press with nobody alive is SPENT — cooldown gone, no projectile',
+      ok === true && forced.player.lastUsed[tomato] === forced.elapsed
+      && forced.projectiles.length === 0
+      && evs.filter((e) => e.type === 'weapon-fired').length === 1
+      && evs.filter((e) => e.type === 'projectile-spawned').length === 0,
+      evs.map((e) => e.type).join(','));
+    // The `self` exemption, in the same forced state: a heal targets its caster, so it must
+    // still work in an empty arena. Gating it on a living opponent would be `ai.ts`'s oldest
+    // defect shape (a rule stated once, implemented twice) in the shared path.
+    const heal = CHARACTERS.hamburger.weapons.findIndex((w) => w.type === 'self');
+    forced.player.hp = 10;
+    const healEvs = [];
+    attemptAttack(forced, forced.player, heal, healEvs);
+    check('…but the SELF weapon still heals — it targets its caster, not an opponent',
+      forced.player.hp > 10 && healEvs.some((e) => e.type === 'heal' && e.fighterId === 0),
+      `hp ${forced.player.hp}`);
+  }
+
+  // ── (e) SIX SEATS: ITERATION ORDER, OBSERVED ─────────────────────────────
+  //
+  // `MatchState.fighters` documents slot order as a GAME RULE — who fires first inside a
+  // tick, whose trail mark exists before the other walks onto it. A test that read
+  // `state.fighters.map(f => f.id)` would be checking the array, not the loop. So the order
+  // is recovered from the EVENT STREAM, which is the thing the rule is about.
+  {
+    const arena = makeArena({ width: 3000, height: 3000, maxSafeRadius: 4000 });
+    const spawns = [
+      { x: 400, y: 400 }, { x: 2600, y: 2600 }, { x: 2600, y: 400 },
+      { x: 400, y: 2600 }, { x: 1500, y: 400 }, { x: 1500, y: 2600 },
+    ];
+    // Six DONUTS, every one human-driven, every one primed to drop a trail mark on the next
+    // qualifying tick. Donut is the roster's only `hasTrail` character, so a mark per fighter
+    // per tick is the one per-fighter event this loop can be made to emit on demand.
+    const state = createMatch(arena, spawns.map((spawn) => ({
+      characterId: 'donut', controller: 'human', spawn,
+    })));
+    state.phase = 'playing';
+    for (const f of state.fighters) f.trailDropTimer = TRAIL.dropIntervalMs;
+    const walk = { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: false };
+    const evs = stepMatch(state, 16.667, state.fighters.map(() => walk));
+    const order = evs.filter((e) => e.type === 'trail-mark-created').map((e) => e.ownerId);
+    check('every one of six fighters is stepped EXACTLY once in a tick — six marks, no repeats',
+      order.length === 6 && new Set(order).size === 6, `[${order.join(',')}]`);
+    check('…and the loop walks them in SLOT order, recovered from the event stream',
+      order.join(',') === '0,1,2,3,4,5', `[${order.join(',')}]`);
+    // ⚠️ ON A FRESH MATCH, not on the stepped one above — everybody just walked, so the
+    // stepped positions are the spawns plus one tick of the same broadcast movement. The
+    // first draft asserted it after the step and failed by exactly 1.88 wu on all six, which
+    // is the check working.
+    const fresh = createMatch(arena, spawns.map((spawn) => ({ characterId: 'donut', spawn })));
+    check('…and slot i is `createMatch` ARGUMENT i, which is what makes slot order the caller\'s',
+      fresh.fighters.every((f, i) => f.x === spawns[i].x && f.y === spawns[i].y),
+      fresh.fighters.map((f, i) => `${i}:(${f.x},${f.y}) vs (${spawns[i].x},${spawns[i].y})`).join(' '));
+
+    // "Stepped exactly once" again, through a completely different observable: `regenTimer`
+    // accumulates `dt` per `applyWorldTick` call, so a fighter stepped twice would carry 2dt.
+    const regen = createMatch(arena, spawns.slice(0, 4).map((spawn) => ({ characterId: 'pizza', spawn })));
+    regen.phase = 'playing';
+    for (const f of regen.fighters) f.hp = f.maxHp - 1; // eligible, and never damaged
+    stepMatch(regen, 16.667, noInput);
+    check('…corroborated by a second observable: regenTimer advances by exactly one dt',
+      regen.fighters.every((f) => approx(f.regenTimer, 16.667)),
+      regen.fighters.map((f) => f.regenTimer.toFixed(4)).join(' '));
+
+    // A six-fighter match must run without producing a NaN anywhere. Non-finite coordinates
+    // are how "the AI walks to the wrong place" becomes "the AI is nowhere at all", and the
+    // path that produces them (a zero-length bearing) has bitten this sim twice already.
+    const live = createMatch(arena, spawns.map((spawn, i) => ({
+      characterId: CHARACTER_IDS[i % CHARACTER_IDS.length], spawn,
+    })));
+    live.phase = 'playing';
+    let nonFinite = 0;
+    for (let i = 0; i < 900; i++) {
+      stepMatch(live, 16.667, noInput);
+      for (const f of live.fighters) {
+        if (!Number.isFinite(f.x) || !Number.isFinite(f.y) || !Number.isFinite(f.hp)) nonFinite++;
+      }
+      for (const pr of live.projectiles) {
+        if (!Number.isFinite(pr.x) || !Number.isFinite(pr.y) || !Number.isFinite(pr.vx)) nonFinite++;
+      }
+    }
+    check('900 ticks of a 6-fighter match produce no non-finite position, velocity or HP',
+      nonFinite === 0, `${nonFinite} non-finite readings`);
+
+    // A KNOCKOUT AT SIX SEATS IS NOT THE END OF THE MATCH. This is the single most natural
+    // thing to get wrong when generalising `applyDamage`, and it is invisible at N=2.
+    const brawl = createMatch(arena, spawns.map((spawn) => ({ characterId: 'hamburger', spawn })));
+    brawl.phase = 'playing';
+    const kill = [];
+    applyDamage(brawl, brawl.fighters[3], 1e9, null, { kind: 'fog' }, kill);
+    check('a knockout with four fighters still up does NOT end the match',
+      brawl.phase === 'playing' && brawl.winner === null && brawl.winnerId === null
+      && kill.some((e) => e.type === 'death' && e.fighterId === 3)
+      && !kill.some((e) => e.type === 'match-ended'),
+      `phase ${brawl.phase}, events ${kill.map((e) => e.type).join(',')}`);
+    for (const id of [0, 1, 2, 4]) applyDamage(brawl, brawl.fighters[id], 1e9, null, { kind: 'fog' }, kill);
+    check('…and the LAST knockout does, naming the one fighter left standing',
+      brawl.phase === 'ended' && brawl.winnerId === 5
+      && kill.filter((e) => e.type === 'match-ended').length === 1,
+      `phase ${brawl.phase}, winnerId ${brawl.winnerId}`);
   }
 }
 
