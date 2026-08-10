@@ -48,7 +48,13 @@ function args(argv) {
   return o;
 }
 const A = args(process.argv);
-const URL_BASE = A.url ?? 'http://localhost:5190';
+// ⚠️ `PREVIEW_BASE` must be honoured, not just `--url`. `with_snapshot.mjs` injects PREVIEW_BASE
+// into the child automatically and that is how every other tool here is driven
+// (`arena-scan.mjs:654`, `aspect.mjs:27`, `shoot.mjs:37`, `match-play.mjs:81` all read it). Without
+// it this tool silently fell back to 5190 under `headserve` and died with ERR_CONNECTION_REFUSED —
+// which reads exactly like a broken build rather than a tool pointed at the wrong port. Same class
+// as `aspect.mjs` defaulting to the shared dev server, which cost three separate agents.
+const URL_BASE = A.url ?? process.env.PREVIEW_BASE ?? 'http://localhost:5190';
 const TAG = A.tag ?? 'run';
 const OUT = `shots/floorprobe/${TAG}`;
 const W = 1600, H = 900;
