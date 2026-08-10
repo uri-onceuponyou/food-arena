@@ -11,6 +11,17 @@
  * every field of both fighters, every projectile, every splat, every trail mark, the ring,
  * the clock, the id counter.
  *
+ * 🚨 **AND, SINCE 2026-08-10, THE `GameEvent[]` `stepMatch` RETURNS — IN ORDER.** Until
+ * then it compared state ONLY, so the project's "0 differing ticks in 3,283,873" was a
+ * STATE-ONLY number and the stream `match.ts` / `game/vfx.ts` / `ui/hud.ts` /
+ * `audio/director.ts` are built on was never in it. `--selftest` §E is the proof that the
+ * extension does something: a sim whose only difference is that `death` precedes
+ * `hit-landed` inside one tick is passed by the old harness and failed by this one.
+ *
+ * ⚠️ **AND A TICK COUNT IS NOT A CORPUS.** `--corpus normal,timeout,countdown` names three,
+ * because matches end by KNOCKOUT and a `normal` sweep therefore barely executes
+ * `resolveTimeout`, while the countdown path runs no fighter loop at all. See `CORPORA`.
+ *
  * This is the only thing that lets a LATER balance delta be attributed to concealment
  * rather than to the plumbing that carries it. It is the same proof `LEVEL_MIN` used
  * ("level 1 is bit-identical to the pre-levels build, proven tick-for-tick"), and it is
@@ -88,17 +99,55 @@ const args = (() => {
 // everyone at once.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The six modules a standalone copy of the sim needs, in ONE place in this file.
+ *
+ * ⚠️ There are FOUR hardcoded copies of this list in the repo — `match-sim.mjs:76`,
+ * `roster_lab.mjs:307`, and (until 2026-08-10) two in this file. A seventh module under
+ * `src/game/` therefore means finding all of them, which is why the N-fighter refactor
+ * deliberately added none. Two of the four are now one; the other two are not this file's.
+ */
+const SIM_MODULES = ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts'];
+
 function extractSimAt(ref) {
   const sha = execFileSync('git', ['rev-parse', '--short', ref], { cwd: ROOT, encoding: 'utf8' }).trim();
   const dir = join(tmpdir(), `fa-conceal-simref-${sha}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, 'game'), { recursive: true });
   mkdirSync(join(dir, 'arena'), { recursive: true });
-  for (const f of ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts']) {
+  for (const f of SIM_MODULES) {
     writeFileSync(join(dir, 'game', f), execFileSync('git', ['show', `${ref}:src/game/${f}`], { cwd: ROOT, encoding: 'utf8' }));
   }
   writeFileSync(join(dir, 'arena', 'types.ts'), execFileSync('git', ['show', `${ref}:src/arena/types.ts`], { cwd: ROOT, encoding: 'utf8' }));
   return { dir: join(dir, 'game'), sha };
+}
+
+/**
+ * A copy of the WORKING TREE's sim with one or more literal source edits applied — the
+ * shape every known-bad control in `--selftest` takes.
+ *
+ * `edits` is `[file, from, to]` triples. Each one is required to actually change the
+ * source: a control built on a replacement that silently matched nothing is a control that
+ * passes for the wrong reason, which is the single most common way an instrument in this
+ * repo has lied. Returns `{ dir, applied }` where `applied` is per-edit booleans, so the
+ * caller asserts the patch landed rather than assuming it.
+ */
+function patchedSimDir(tag, edits) {
+  const root = join(tmpdir(), `fa-conceal-${tag}`);
+  const dir = join(root, 'game');
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  mkdirSync(join(root, 'arena'), { recursive: true });
+  for (const f of SIM_MODULES) writeFileSync(join(dir, f), readFileSync(`${ROOT}/src/game/${f}`, 'utf8'));
+  writeFileSync(join(root, 'arena', 'types.ts'), readFileSync(`${ROOT}/src/arena/types.ts`, 'utf8'));
+  const applied = [];
+  for (const [file, from, to] of edits) {
+    const before = readFileSync(join(dir, file), 'utf8');
+    const after = before.replace(from, to);
+    applied.push(after !== before);
+    writeFileSync(join(dir, file), after);
+  }
+  return { dir, applied };
 }
 
 async function loadSim(dir) {
@@ -132,6 +181,29 @@ function withDerivedRing(data) {
   };
 }
 const BASE_ARENA = ARENA_DATA ? withDerivedRing(ARENA_DATA) : null;
+
+/**
+ * ⚠️ `--levels p:e` — AND WITHOUT IT THIS TOOL CANNOT SEE A MIS-RESOLVED ATTACKER.
+ *
+ * `createMatch`'s levels default to `LEVEL_MIN`, where `levelDamageMultiplier` is EXACTLY
+ * 1.0 on both sides. `combat.ts:applyDamage` multiplies every weapon and trail hit by the
+ * ATTACKER's `damageMul` — so at level 1 a sim that identified the wrong attacker would
+ * deal identical damage and this harness would print PASS. That is precisely the shape of
+ * hole `docs/LESSONS.md` §15c is about: a large tick count attached to a claim the corpus
+ * cannot express.
+ *
+ * The N-fighter refactor replaced `state[otherRole(targetRole)]` with
+ * `state.fighters[source.attackerId]`, which is exactly that resolution — so it must be
+ * measured at levels where the two multipliers DIFFER. `--levels 15:1` gives 1.70 against
+ * 1.00, and any mis-attribution moves a damage number on the first hit.
+ *
+ * Empty (the default) keeps the historical corpus: both sides at LEVEL_MIN.
+ */
+const LEVELS = (() => {
+  if (!args.levels || args.levels === true) return {};
+  const [p, e] = String(args.levels).split(':').map(Number);
+  return { player: p, enemy: e };
+})();
 
 const DT = Number(args.dt ?? 16.667);
 const SEEDS = Number(args.seeds ?? 32);
@@ -172,8 +244,14 @@ const POLICIES = String(args.policies ?? 'smart2').split(',');
  * Pass `added = null` for STRICT mode, where an addition is itself a difference. The
  * selftest runs both modes against known-bad inputs, because a differ with a tolerance in
  * it has to be shown to still fail on the thing the tolerance does not cover.
+ *
+ * `ignore(path) -> boolean` masks a path out of the comparison entirely. It exists for
+ * `--ablate` and for nothing else: an ablation deliberately perturbs one field and asks
+ * whether ANYTHING ELSE moved, so the perturbed field itself must not be reported. It is
+ * `null` on every other path through this file, including `--bitid`.
  */
-function firstDiff(a, b, path, added) {
+function firstDiff(a, b, path, added, ignore) {
+  if (ignore && ignore(path)) return null;
   if (a === b) return null;
   const ta = typeof a;
   const tb = typeof b;
@@ -189,7 +267,7 @@ function firstDiff(a, b, path, added) {
   if (Array.isArray(a)) {
     if (a.length !== b.length) return `${path}.length: ${a.length} !== ${b.length}`;
     for (let i = 0; i < a.length; i++) {
-      const d = firstDiff(a[i], b[i], `${path}[${i}]`, added);
+      const d = firstDiff(a[i], b[i], `${path}[${i}]`, added, ignore);
       if (d) return d;
     }
     return null;
@@ -197,6 +275,7 @@ function firstDiff(a, b, path, added) {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const k of keys) {
     if (typeof a[k] === 'function' || typeof b[k] === 'function') continue;
+    if (ignore && ignore(`${path}.${k}`)) continue;
     const inA = k in a;
     const inB = k in b;
     if (inA && !inB) {
@@ -206,7 +285,7 @@ function firstDiff(a, b, path, added) {
       continue;
     }
     if (!inA && inB) return `${path}.${k}: REMOVED from the live state — a baseline field vanished`;
-    const d = firstDiff(a[k], b[k], `${path}.${k}`, added);
+    const d = firstDiff(a[k], b[k], `${path}.${k}`, added, ignore);
     if (d) return d;
   }
   return null;
@@ -263,32 +342,77 @@ const driverFor = (arena, sim) => createScriptedPlayer({
  * from sim A's state and the identical `MatchInput` is handed to both. The first tick on
  * which the two states disagree is therefore attributable to the sim and to nothing else,
  * which is the only reason to run this at all.
+ *
+ * ── 🚨 IT COMPARES THE RETURNED EVENTS TOO, AND UNTIL 2026-08-10 IT DID NOT ──
+ *
+ * `stepMatch` returns a `GameEvent[]`. That array is HALF the sim's contract and it is the
+ * half `match.ts`, `game/vfx.ts`, `ui/hud.ts` and `audio/director.ts` actually consume —
+ * every explosion, every damage number, every note of the score is driven off it and off
+ * nothing else. This function used to compare `comparable(state)` and throw the events on
+ * the floor, so the famous **"0 differing ticks in 3,283,873" was a STATE-ONLY number**:
+ * a change that reordered two events inside a tick, or dropped one entirely, would have
+ * been reported as bit-identical. Quoting that figure for a change that touches the event
+ * protocol would be quoting a number for a claim it does not support — exactly the failure
+ * `docs/LESSONS.md` §15c exists to prevent.
+ *
+ * The extension is validated the same way the state differ is: `--selftest` §E builds a sim
+ * whose ONLY difference is that a killing blow emits `death` BEFORE `hit-landed` instead of
+ * after — every field of every object identical at every tick, only the order inside one
+ * array changed. **The state-only harness passes it and the extended one fails it.** If it
+ * could not, the extension would be decoration.
+ *
+ * Order is significant, deliberately: `audio/director.ts` and `game/vfx.ts` both react to
+ * the stream in the order they receive it, so "same multiset, different order" is a real
+ * behavioural difference and not a formatting one.
+ *
+ * `opts.events === false` selects the OLD, state-only behaviour. It exists for one purpose
+ * — being the control the known-bad above is measured against — and nothing else uses it.
+ * `opts.pin(stateA, stateB, tick)` runs after every step on BOTH states identically, which
+ * is how the forced-immortal and countdown-only corpora are built without a second harness.
+ * `opts.maxTicks` caps the loop for a corpus that has no natural end.
  */
-function lockstepMatch(arena, simA, simB, driver, playerId, enemyId, policy, seed, added) {
+function lockstepMatch(arena, simA, simB, driver, playerId, enemyId, policy, seed, added, opts = {}) {
+  const cmpEvents = opts.events !== false;
+  const ignore = opts.ignore ?? null;
   // Seed formula is `pacing_ladder.mjs`'s / `roster_lab.mjs`'s, unchanged — that is what
   // makes a row here the SAME match as a row there.
   const rnd = rng(seed * 7919 + playerId.length * 131 + enemyId.length * 17 + policy.length);
-  const stateA = simA.createMatch(arena, playerId, enemyId);
-  const stateB = simB.createMatch(arena, playerId, enemyId);
+  const levels = opts.levels ?? LEVELS;
+  const stateA = simA.createMatch(arena, playerId, enemyId, levels);
+  const stateB = simB.createMatch(arena, playerId, enemyId, levels);
+  if (opts.pin) opts.pin(stateA, stateB, 0);
   const decide = driver.POLICY_FNS[policy](rnd);
   const loop = driver.createDecisionLoop({ decide, reactBase: 150, reactJit: seed === 0 ? 0 : 60, rnd });
 
   const HARD_CAP = MATCH_DURATION_MS * 1.6 + 20000;
+  const maxTicks = opts.maxTicks ?? Infinity;
   let tick = 0;
-  while (stateA.phase !== 'ended' && stateA.elapsed < HARD_CAP) {
+  // Bookkeeping so a corpus can be shown to be NON-VACUOUS by its own output rather than
+  // by argument: a run that compared a million ticks and never saw a death has not tested
+  // the death path, and a run whose `playTicks` is 0 has not tested the fighter loop.
+  let events = 0, deaths = 0, playTicks = 0, endTicks = 0, countdownTicks = 0;
+  while (stateA.phase !== 'ended' && stateA.elapsed < HARD_CAP && tick < maxTicks) {
     const input = loop.next(stateA, DT);
-    simA.stepMatch(stateA, DT, input);
-    simB.stepMatch(stateB, DT, input);
+    const phaseBefore = stateA.phase;
+    const evA = simA.stepMatch(stateA, DT, input);
+    const evB = simB.stepMatch(stateB, DT, input);
     tick++;
-    const d = firstDiff(comparable(stateA), comparable(stateB), 'state', added);
-    if (d) return { tick, diff: d, elapsed: stateA.elapsed };
+    events += evA.length;
+    for (const e of evA) if (e.type === 'death') deaths++;
+    if (phaseBefore === 'countdown') countdownTicks++;
+    else if (phaseBefore === 'playing') playTicks++;
+    else endTicks++;
+    let d = firstDiff(comparable(stateA), comparable(stateB), 'state', added, ignore);
+    if (!d && cmpEvents) d = firstDiff(evA, evB, 'events', added, ignore);
+    if (d) return { tick, diff: d, elapsed: stateA.elapsed, events, deaths, playTicks, countdownTicks, endTicks, state: stateA };
+    if (opts.pin) opts.pin(stateA, stateB, tick);
   }
   // The B match must also have ENDED — a B that is still playing when A stops is a
   // divergence the per-tick walk would have caught, but asserting it costs nothing and
   // rules out a differ that silently compares nothing.
-  const d = firstDiff(comparable(stateA), comparable(stateB), 'state', added);
-  if (d) return { tick, diff: d, elapsed: stateA.elapsed };
-  return { tick, diff: null, elapsed: stateA.elapsed };
+  const d = firstDiff(comparable(stateA), comparable(stateB), 'state', added, ignore);
+  if (d) return { tick, diff: d, elapsed: stateA.elapsed, events, deaths, playTicks, countdownTicks, endTicks, state: stateA };
+  return { tick, diff: null, elapsed: stateA.elapsed, events, deaths, playTicks, countdownTicks, endTicks, state: stateA };
 }
 
 const MATCHUPS = (() => {
@@ -296,6 +420,144 @@ const MATCHUPS = (() => {
   for (const a of CHARACTER_IDS) for (const b of CHARACTER_IDS) if (a !== b) out.push([a, b]);
   return out;
 })();
+
+/** Flip between the only two values a two-valued legacy field can hold. */
+const flip = (v, a, b) => (v === a ? b : a);
+
+/**
+ * `path` masks, as predicates. ⚠️ EVERY ALIAS OF A PERTURBED FIELD MUST BE MASKED:
+ * `state.player` IS `state.fighters[0]`, so a perturbation of one is visible at both paths
+ * and a mask that named only one would report the ablation as its own result.
+ */
+const ABLATIONS = [
+  {
+    name: 'Fighter.id (swapped)',
+    expect: { state: 'live', events: 'live' },
+    why: 'read by opponentOf, sightingIndex, fighterBit, spawnProjectile and applyDamage',
+    perturb: (st) => { st.fighters[0].id = 1; st.fighters[1].id = 0; },
+    mask: (p) => /^state\.(fighters\[\d+\]|player|enemy)\.id$/.test(p),
+  },
+  {
+    name: 'Fighter.controller (swapped)',
+    expect: { state: 'live', events: 'live' },
+    why: "sim.ts's fighter loop branches on it — swapping puts the AI in the human's seat",
+    perturb: (st) => {
+      st.fighters[0].controller = 'ai';
+      st.fighters[1].controller = 'human';
+    },
+    mask: (p) => /^state\.(fighters\[\d+\]|player|enemy)\.controller$/.test(p),
+  },
+  {
+    name: 'Fighter.hitRadius (+1 on both)',
+    expect: { state: 'live', events: 'live' },
+    why: 'the field that replaced stepProjectiles\' targetRole ternary; if it were dead the ternary would still be there',
+    perturb: (st) => { for (const f of st.fighters) f.hitRadius += 1; },
+    mask: (p) => /^state\.(fighters\[\d+\]|player|enemy)\.hitRadius$/.test(p),
+  },
+  {
+    name: 'Fighter.role (swapped) — the WHOLE mirror closure',
+    expect: { state: 'dead', events: 'live' },
+    why: 'no gameplay decision reads any *Role mirror; the event protocol still carries them',
+    perturb: (st) => { for (const f of st.fighters) f.role = flip(f.role, 'player', 'enemy'); },
+    // ⚠️ THE MASK IS THE CLOSURE, NOT THE FIELD, AND THE FIRST VERSION WAS THE FIELD.
+    // It masked `fighters[*].role` alone and reported FAULT — live in state — on
+    // `projectiles[3].ownerRole: "player" !== "enemy"`. That was not behaviour: it is
+    // `spawnProjectile` copying `owner.role` into the projectile's own mirror, i.e. the
+    // perturbation flowing into a SECOND mirror rather than into a decision. The claim
+    // being tested is "no `*Role` mirror anywhere is read by a gameplay decision", so the
+    // mask has to cover every place a role is mirrored TO. `winnerId` is deliberately left
+    // UNMASKED beside `winner`, so a genuinely different outcome still fails.
+    mask: (p) => /^state\.(fighters\[\d+\]|player|enemy)\.role$/.test(p)
+      || /^state\.projectiles\[\d+\]\.(ownerRole|targetRole)$/.test(p)
+      || /^state\.trailMarks\[\d+\]\.ownerRole$/.test(p)
+      || p === 'state.winner',
+  },
+  {
+    name: 'sightings[0] — the (0,0) DIAGONAL cell',
+    expect: { state: 'dead', events: 'dead' },
+    why: 'a fighter does not need to remember where it saw itself; the diagonal exists to keep the index one expression',
+    perturb: (st) => { st.sightings[0].x += 1; st.sightings[0].y -= 1; st.sightings[0].at += 1; },
+    mask: (p) => /^state\.sightings\[0\]\./.test(p),
+  },
+  {
+    name: 'sightings[1] — the UNUSED observer row (human on AI)',
+    expect: { state: 'dead', events: 'dead' },
+    why: 'there is deliberately no perception for a human; the scripted driver has perfect information BY DESIGN',
+    perturb: (st) => { st.sightings[1].x += 1; st.sightings[1].y -= 1; st.sightings[1].at += 1; },
+    mask: (p) => /^state\.sightings\[1\]\./.test(p),
+  },
+  {
+    name: 'sightings[3] — the (1,1) DIAGONAL cell',
+    expect: { state: 'dead', events: 'dead' },
+    why: 'as sightings[0]',
+    perturb: (st) => { st.sightings[3].x += 1; st.sightings[3].y -= 1; st.sightings[3].at += 1; },
+    mask: (p) => /^state\.sightings\[3\]\./.test(p),
+  },
+  {
+    name: 'sightings[2] — the read cell, on the SHIPPED arena',
+    expect: { state: 'dead', events: 'dead' },
+    // ⚠️ THIS ONE WAS DECLARED `live` AND CAME BACK `dead`, AND THE INSTRUMENT WAS RIGHT.
+    // On an arena with NO concealment regions `isVisibleFrom` is true on every tick, so
+    // `stepAI` OVERWRITES this cell with the target's true position at the top of its own
+    // body — before it reads `tx, ty` from it. A perturbation therefore cannot survive into
+    // a decision. That is the *whole* concealment inertness claim, restated on the matrix:
+    // with no regions, the belief is refreshed before use on 2.5M playing ticks. It is a
+    // property of the ARENA, not of the container, which is why the row below re-runs the
+    // same perturbation on an arena that has regions and REQUIRES it to be live.
+    why: 'with no concealment the belief is refreshed before it is read, on every tick',
+    perturb: (st) => { st.sightings[2].x += 1; },
+    // `aiSighting` is the SAME OBJECT as `sightings[2]`, so both paths carry the change.
+    mask: (p) => /^state\.(sightings\[2\]|aiSighting)\./.test(p),
+  },
+  {
+    name: 'sightings[2] — the read cell, on an arena WITH concealment',
+    expect: { state: 'live', events: 'live' },
+    why: "the AI's whole perception; if this were dead, stepAI would not be reading the matrix at all",
+    arena: 'conceal',
+    perturb: (st) => { st.sightings[2].x += 1; },
+    mask: (p) => /^state\.(sightings\[2\]|aiSighting)\./.test(p),
+  },
+  {
+    name: 'MatchState.winnerId',
+    expect: { state: 'dead', events: 'dead' },
+    why: 'written by the sim, read by nothing in it; the events recompute it from the fighter',
+    perturb: (st) => { st.winnerId = 7; },
+    mask: (p) => p === 'state.winnerId',
+  },
+  {
+    name: 'Projectile.ownerRole / targetRole (flipped)',
+    expect: { state: 'dead', events: 'dead' },
+    why: 'legacy mirrors of ownerId/targetId; stepProjectiles resolves the victim by slot',
+    perturb: (st) => {
+      for (const pr of st.projectiles) {
+        pr.ownerRole = flip(pr.ownerRole, 'player', 'enemy');
+        pr.targetRole = flip(pr.targetRole, 'player', 'enemy');
+      }
+    },
+    mask: (p) => /^state\.projectiles\[\d+\]\.(ownerRole|targetRole)$/.test(p),
+  },
+  {
+    name: 'TrailMark.ownerRole (flipped)',
+    expect: { state: 'dead', events: 'dead' },
+    why: 'legacy mirror of ownerId; the trail loop matches on the slot',
+    perturb: (st) => { for (const m of st.trailMarks) m.ownerRole = flip(m.ownerRole, 'player', 'enemy'); },
+    mask: (p) => /^state\.trailMarks\[\d+\]\.ownerRole$/.test(p),
+  },
+  {
+    name: 'TrailMark.damaged (flipped) — the legacy boolean',
+    expect: { state: 'dead', events: 'dead' },
+    why: 'replaced by damagedMask; kept only because a REMOVED field is a hard failure in the differ',
+    perturb: (st) => { for (const m of st.trailMarks) m.damaged = !m.damaged; },
+    mask: (p) => /^state\.trailMarks\[\d+\]\.damaged$/.test(p),
+  },
+  {
+    name: 'TrailMark.damagedMask (low bits flipped)',
+    expect: { state: 'live', events: 'live' },
+    why: 'the field that replaced the boolean; a spent mark becomes unspent and bites again',
+    perturb: (st) => { for (const m of st.trailMarks) m.damagedMask ^= 3; },
+    mask: (p) => /^state\.trailMarks\[\d+\]\.(damagedMask|damaged)$/.test(p),
+  },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // --selftest : the differ must FAIL on every field the sim owns
@@ -440,27 +702,177 @@ if (args.selftest) {
   // the same modules with a single balance constant changed. If the harness cannot tell
   // these apart, `--bitid` printing IDENTICAL means nothing.
   {
-    const dir = join(tmpdir(), 'fa-conceal-selftest-bad', 'game');
-    rmSync(join(tmpdir(), 'fa-conceal-selftest-bad'), { recursive: true, force: true });
-    mkdirSync(dir, { recursive: true });
-    mkdirSync(join(tmpdir(), 'fa-conceal-selftest-bad', 'arena'), { recursive: true });
-    for (const f of ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts']) {
-      writeFileSync(join(dir, f), readFileSync(`${ROOT}/src/game/${f}`, 'utf8'));
-    }
-    writeFileSync(join(tmpdir(), 'fa-conceal-selftest-bad', 'arena', 'types.ts'),
-      readFileSync(`${ROOT}/src/arena/types.ts`, 'utf8'));
     // One character's speed stat, moved by the smallest step that can matter. Chosen over
     // a damage change because it perturbs POSITION, which is the quantity a "the AI walks
     // to the wrong place" bug would move — i.e. exactly what this harness must catch.
-    const rules = readFileSync(join(dir, 'rules.ts'), 'utf8');
-    const patched = rules.replace('export const AI_CHASE_SPEED = 0.07;', 'export const AI_CHASE_SPEED = 0.0700001;');
-    ok('the known-bad sim was actually patched (a no-op patch would fake this control)',
-      patched !== rules);
-    writeFileSync(join(dir, 'rules.ts'), patched);
+    const { dir, applied } = patchedSimDir('selftest-bad', [
+      ['rules.ts', 'export const AI_CHASE_SPEED = 0.07;', 'export const AI_CHASE_SPEED = 0.0700001;'],
+    ]);
+    ok('the known-bad sim was actually patched (a no-op patch would fake this control)', applied[0]);
     const BAD = await loadSim(dir);
     const r = lockstepMatch(CLEAR, LIVE, BAD, driver, 'pizza', 'soup', 'smart2', 0);
     ok('a sim whose AI_CHASE_SPEED differs in the 7th digit is caught, and caught EARLY',
       r.diff !== null && r.tick < 800, `first divergence at tick ${r.tick}: ${r.diff}`);
+  }
+
+  // ── E. KNOWN-BAD: AN EVENT-ONLY DIVERGENCE, WHICH THE OLD HARNESS COULD NOT SEE ──
+  //
+  // 🚨 THE HOLE THIS CLOSES. Until 2026-08-10 `lockstepMatch` compared `comparable(state)`
+  // and threw away the `GameEvent[]` that `stepMatch` returns — so the project's
+  // "0 differing ticks in 3,283,873" was a STATE-ONLY number, and the event stream that
+  // `match.ts`, `game/vfx.ts`, `ui/hud.ts` and `audio/director.ts` are built on was
+  // unmeasured. A change that reordered, dropped or duplicated an event would have printed
+  // BIT-IDENTITY: PASS.
+  //
+  // The control is the smallest possible event-only difference: `combat.ts:applyDamage`
+  // emits `hit-landed` BEFORE the death block. Patched, a killing blow emits
+  // `death`, `match-ended`, `hit-landed` instead of `hit-landed`, `death`, `match-ended`.
+  // Same multiset, same fields, same values — only the order inside one array. Every field
+  // of every fighter, projectile, splat, mark, the ring, the clock and the id counter is
+  // untouched, which is what makes this a test of the EXTENSION and not of the state walk.
+  //
+  // Both directions are asserted, because either alone proves nothing:
+  //   * the STATE-ONLY harness (`events: false`) must PASS it — if it failed, the
+  //     difference would not be event-only and the control would be measuring the wrong
+  //     thing;
+  //   * the extended harness must FAIL it, at the tick the death happens.
+  // And the run is required to have contained a death at all: a corpus with no killing blow
+  // could not express this difference, so a green pair would be vacuous.
+  {
+    // ⚠️ THE ANCHOR IS DELIBERATELY SHORT AND PAYLOAD-INDEPENDENT. A first version quoted
+    // the whole `hit-landed` push, and the N-fighter change (which added `targetId` to it)
+    // stopped it matching — the `applied[0]` assertion below caught that loudly, which is
+    // what it is for, but a control that needs editing every time an event gains a field is
+    // a control that will one day be edited into a no-op. `events.pop()` takes whatever
+    // `hit-landed` currently looks like and re-pushes it verbatim after the death block, so
+    // the ONLY thing this sim differs by is the order of two entries in one array.
+    const { dir, applied } = patchedSimDir('selftest-evorder', [
+      ['combat.ts',
+        `  if (target.hp === 0) {
+    target.alive = false;
+    events.push({ type: 'death',`,
+        `  if (target.hp === 0) {
+    target.alive = false;
+    const __hitEv = events.pop();
+    events.push({ type: 'death',`],
+      ['combat.ts',
+        `    if (state.phase === 'playing') {
+      // \u26a0\ufe0f THE KNOCKOUT WINNER`,
+        `    events.push(__hitEv);
+    if (state.phase === 'playing') {
+      // \u26a0\ufe0f THE KNOCKOUT WINNER`],
+    ]);
+    ok('the event-order known-bad was actually patched into combat.ts (both edits landed)',
+      applied[0] && applied[1], `applied ${JSON.stringify(applied)}`);
+    const EVBAD = await loadSim(dir);
+    const stateOnly = lockstepMatch(CLEAR, LIVE, EVBAD, driver, 'pizza', 'soup', 'smart2', 0, undefined, { events: false });
+    const withEvents = lockstepMatch(CLEAR, LIVE, EVBAD, driver, 'pizza', 'soup', 'smart2', 0);
+    ok('the corpus this control runs on actually contains a killing blow (not vacuous)',
+      stateOnly.deaths >= 1, `${stateOnly.deaths} death events in ${stateOnly.tick} ticks`);
+    ok('KNOWN-BAD: the OLD state-only harness reports a reordered event stream as IDENTICAL',
+      stateOnly.diff === null, stateOnly.diff ?? `${stateOnly.tick} ticks, ${stateOnly.events} events, state-only`);
+    ok('…and the EXTENDED harness catches it, in the event array',
+      withEvents.diff !== null && withEvents.diff.startsWith('events'),
+      `tick ${withEvents.tick}: ${withEvents.diff}`);
+    // Order-only is the subtle case; a MISSING and an EXTRA event are the obvious ones and
+    // are pinned directly on the differ so the claim does not rest on one patched sim.
+    {
+      const a = [{ type: 'death', fighterRole: 'player' }];
+      const b = [{ type: 'death', fighterRole: 'player' }, { type: 'heal', fighterRole: 'enemy', amount: 3 }];
+      ok('the event differ catches a MISSING event (array length)', firstDiff(a, b, 'events', new Set()) !== null);
+      ok('…and an event whose payload differs by one field',
+        firstDiff([{ type: 'heal', fighterRole: 'enemy', amount: 3 }],
+          [{ type: 'heal', fighterRole: 'enemy', amount: 4 }], 'events', new Set()) !== null);
+      ok('…and two identical streams are still reported identical',
+        firstDiff(b, b.map((e) => ({ ...e })), 'events', new Set()) === null);
+    }
+  }
+
+  // ── G. THE CORPUS ITSELF CAN BE BLIND, AND `--levels` IS WHY ──────────────
+  //
+  // 🚨 A TICK COUNT IS A CLAIM ABOUT WHAT THE CORPUS CAN EXPRESS, NOT ABOUT ITS SIZE.
+  //
+  // `createMatch`'s levels default to `LEVEL_MIN`, where `levelDamageMultiplier` is exactly
+  // 1.0 for BOTH fighters. `combat.ts:applyDamage` multiplies every weapon and trail hit by
+  // the ATTACKER's `damageMul` — so at level 1 a sim that resolved the WRONG attacker deals
+  // the identical number and 15.6M bit-identical ticks would say nothing about it. The
+  // N-fighter refactor replaced `state[otherRole(targetRole)]` with
+  // `state.fighters[source.attackerId]`, which is that exact resolution.
+  //
+  // The control is a sim that scales damage by the TARGET's multiplier instead of the
+  // attacker's — the smallest possible mis-attribution. It must be INVISIBLE at 1v1 levels
+  // and CAUGHT at 15-vs-1, and both halves are asserted: the first is what proves the
+  // default corpus is blind here, the second is what proves `--levels` fixes it.
+  {
+    const { dir, applied } = patchedSimDir('selftest-attacker', [
+      ['combat.ts',
+        'const dealt = attacker ? amount * attacker.damageMul : amount;',
+        'const dealt = attacker ? amount * target.damageMul : amount;'],
+    ]);
+    ok('the wrong-attacker known-bad was actually patched into combat.ts', applied[0]);
+    const ATK = await loadSim(dir);
+    const flat = lockstepMatch(CLEAR, LIVE, ATK, driver, 'pizza', 'soup', 'smart2', 0, undefined, { levels: {} });
+    const tilted = lockstepMatch(CLEAR, LIVE, ATK, driver, 'pizza', 'soup', 'smart2', 0, undefined, { levels: { player: 15, enemy: 1 } });
+    ok('KNOWN-BAD: at LEVEL_MIN the corpus is BLIND to a wrong-attacker resolution',
+      flat.diff === null, flat.diff ?? `${flat.tick} ticks, ${flat.events} events`);
+    ok('…and `--levels 15:1` catches the same sim, because the two multipliers now differ',
+      tilted.diff !== null, `tick ${tilted.tick}: ${tilted.diff}`);
+    // …and the tilted corpus must not be reporting a difference for some OTHER reason:
+    // the unpatched sim against itself at the same levels has to stay identical.
+    const control = lockstepMatch(CLEAR, LIVE, LIVE, driver, 'pizza', 'soup', 'smart2', 0, undefined, { levels: { player: 15, enemy: 1 } });
+    ok('…and the same levels against the UNPATCHED sim are still bit-identical (drift control)',
+      control.diff === null, control.diff ?? `${control.tick} ticks`);
+  }
+
+  // ── F. THE ABLATION BATTERY'S OWN MACHINERY ───────────────────────────────
+  //
+  // `--ablate` proves fields dead by perturbing them and finding nothing. That is a shape
+  // of test that passes beautifully when it is broken: a mask that matched every path, or a
+  // perturbation that never fired, would report the whole table dead and green. So the two
+  // parts that could silently do nothing are pinned here.
+  {
+    const a = { x: 1, y: 2 };
+    const b = { x: 9, y: 2 };
+    ok('an ignore mask suppresses the path it names',
+      firstDiff(a, b, 'state', undefined, (p) => p === 'state.x') === null);
+    ok('…and does NOT suppress anything else',
+      firstDiff(a, { x: 1, y: 3 }, 'state', undefined, (p) => p === 'state.x') !== null);
+    ok('…and with no mask the same difference is still caught (the mask is what changed it)',
+      firstDiff(a, b, 'state', undefined, null) !== null);
+
+    // A table of nothing but "dead" expectations cannot fail. Half of these must be LIVE,
+    // and each mask must be a mask on ONE field rather than on the state.
+    const live = ABLATIONS.filter((x) => x.expect.state === 'live' || x.expect.events === 'live');
+    ok('the ablation table carries POSITIVE controls, not only dead-field claims',
+      live.length >= 4 && live.length < ABLATIONS.length,
+      `${live.length} live of ${ABLATIONS.length}`);
+    const total = ABLATIONS.filter((x) => ['state.elapsed', 'state.phase', 'state.fighters[0].hp']
+      .some((p) => x.mask(p)));
+    ok('…and no mask swallows a path it has no business hiding',
+      total.length === 0, total.map((x) => x.name).join(', '));
+    // And the perturbations must actually change something: a no-op perturb would make
+    // every row "dead" for the wrong reason.
+    {
+      const probe = LIVE.createMatch(CLEAR, 'donut', 'donut');
+      probe.projectiles.push({
+        id: 1, ownerId: 0, targetId: 1, ownerRole: 'player', targetRole: 'enemy',
+        weapon: LIVE.RULES.CHARACTERS.donut.weapons[0], x: 0, y: 0, vx: 0, vy: 0,
+        traveled: 0, damage: 1, color: '#fff', emoji: 'x',
+      });
+      probe.trailMarks.push({
+        id: 2, ownerId: 0, ownerRole: 'player', x: 0, y: 0, expiresAt: 1e9,
+        damagedMask: 0, damaged: false,
+      });
+      const noops = [];
+      for (const ab of ABLATIONS) {
+        const before = JSON.stringify(comparable(probe));
+        ab.perturb(probe);
+        if (JSON.stringify(comparable(probe)) === before) noops.push(ab.name);
+        ab.perturb(probe); // most are involutions; the rest are restored by the fresh probe
+      }
+      ok('every ablation perturbation actually changes the state it is handed',
+        noops.length === 0, noops.join(', ') || `${ABLATIONS.length} perturbations`);
+    }
   }
 
   // ── D. The concealment predicates answer known geometry ───────────────────
@@ -512,53 +924,271 @@ if (args.selftest) {
 // --bitid
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * THE THREE CORPORA, AND WHY ONE OF THEM IS NOT ENOUGH.
+ *
+ * A tick count is not a corpus. `normal` runs matches to their natural end, and matches end
+ * by KNOCKOUT — so `sim.ts:resolveTimeout` is barely executed by it, and the countdown
+ * phase is ~230 of a ~900-tick match. Quoting one big number from `normal` for a change
+ * that rewrites the timeout tiebreak, or that sits inside the `phase === 'playing'` gate,
+ * attaches the number to a claim it does not support.
+ *
+ *   normal     natural end. KO-dominated. Exercises the fighter loop, combat, projectiles,
+ *              ground effects and the death path. Barely touches `resolveTimeout`.
+ *   timeout    FORCED-IMMORTAL. Both fighters get `hp = maxHp = 1e9` at tick 0 — the
+ *              `tools/match-sim.mjs:768` idiom — so no killing blow can land inside the
+ *              45 s clock and every match is decided by `resolveTimeout`. Reports which
+ *              tiebreak RUNG each match landed on, because a corpus that only ever reaches
+ *              rung 1 has not tested rungs 2 and 3.
+ *   countdown  `countdownTick` is pinned to 0 in BOTH sims after every step, so the
+ *              countdown never elapses and `phase` never leaves `'countdown'` — asserted,
+ *              not assumed. 10 s per match of the path that runs NO fighter loop at all.
+ *              This is the half of `stepMatch` an N-fighter change cannot reach, and
+ *              proving it untouched is a different claim from proving the other half equal.
+ *
+ * Every pin is applied to A and B identically, from the harness, so it can never itself be
+ * a divergence.
+ */
+const CORPORA = {
+  normal: { pin: null, maxTicks: undefined },
+  timeout: {
+    // ONCE, at tick 0 — not every tick. Damage still lands and still moves the HP
+    // FRACTION, which is what rung 1 compares; it simply cannot reach zero in 45 s. A
+    // per-tick re-pin would force every match onto rung 2 and hide rung 1 entirely.
+    pin: (a, b, tick) => {
+      if (tick !== 0) return;
+      for (const st of [a, b]) {
+        for (const f of [st.player, st.enemy]) { f.hp = 1e9; f.maxHp = 1e9; }
+      }
+    },
+    maxTicks: undefined,
+  },
+  countdown: {
+    // The counter is allowed to RUN — it is rewound one step before it would reach 0, so
+    // `stepCountdown` keeps crossing its 1000 ms boundary and keeps emitting real
+    // `countdown-tick` events, while `phase` never reaches `'playing'`. Pinning
+    // `countdownTick` to 0 instead would freeze the branch and produce a corpus with zero
+    // events in it, which would compare the event stream against nothing.
+    pin: (a, b) => {
+      for (const st of [a, b]) if (st.countdownValue <= 1) st.countdownValue = 3;
+    },
+    maxTicks: 600, // 10.0 s at dt 16.667
+  },
+};
+
 if (args.bitid) {
   if (!BASE_ARENA) { console.error(`no arena at ${ARENA_PATH}`); process.exit(1); }
   const ref = String(args['sim-ref'] ?? 'HEAD');
   const REF = extractSimAt(ref);
   const BASE = await loadSim(REF.dir);
   const driver = driverFor(BASE_ARENA, LIVE);
+  const corpora = String(args.corpus ?? 'normal').split(',');
+  for (const c of corpora) {
+    if (!CORPORA[c]) { console.error(`unknown --corpus ${c}; one of ${Object.keys(CORPORA).join(',')}`); process.exit(1); }
+  }
 
   console.log(`\n══ BIT-IDENTITY ══  working tree vs ${ref} (${REF.sha})`);
   console.log(`   ${MATCHUPS.length} matchups x ${SEEDS} seeds x ${POLICIES.length} polic${POLICIES.length === 1 ? 'y' : 'ies'}`
-    + ` = ${MATCHUPS.length * SEEDS * POLICIES.length} matches, driver rev ${DRIVER_REV}, dt ${DT}`);
+    + ` = ${MATCHUPS.length * SEEDS * POLICIES.length} matches per corpus, driver rev ${DRIVER_REV}, dt ${DT}`);
   console.log(`   arena ${BASE_ARENA.id} ${BASE_ARENA.width}x${BASE_ARENA.height}, `
     + `${BASE_ARENA.cover.length} cover, ${BASE_ARENA.hazards.length} hazards, `
     + `${(BASE_ARENA.concealment ?? []).length} concealment`);
+  console.log(`   corpora ${corpora.join(', ')}`);
+  console.log(`   levels  ${LEVELS.player === undefined ? 'default (LEVEL_MIN both sides — damageMul 1.0, see --levels)'
+    : `player ${LEVELS.player} vs enemy ${LEVELS.enemy}`}`);
+  console.log('   COMPARED PER TICK: the whole MatchState (minus the shared arena object)');
+  console.log('                      AND the GameEvent[] stepMatch returns, in order.');
   console.log('   FLOOR: EXACT. This is not a statistical test — one differing tick is a failure.\n');
 
-  const t0 = Date.now();
-  let matches = 0, ticks = 0;
-  const failures = [];
   const added = new Set();
-  for (const policy of POLICIES) {
-    for (const [p, e] of MATCHUPS) {
-      for (let s = 0; s < SEEDS; s++) {
-        const r = lockstepMatch(BASE_ARENA, LIVE, BASE, driver, p, e, policy, s, added);
-        matches++; ticks += r.tick;
-        if (r.diff) failures.push(`${policy} ${p}>${e} seed ${s} @ tick ${r.tick} (${(r.elapsed / 1000).toFixed(2)}s): ${r.diff}`);
-      }
-      if (matches % 550 === 0) {
-        process.stderr.write(`   ${matches} matches, ${(ticks / 1e6).toFixed(2)}M ticks, `
-          + `${failures.length} divergent, ${((Date.now() - t0) / 1000).toFixed(0)}s\n`);
+  let anyFail = 0;
+  const summary = [];
+  for (const corpus of corpora) {
+    const { pin, maxTicks } = CORPORA[corpus];
+    const t0 = Date.now();
+    let matches = 0, ticks = 0, events = 0, deaths = 0;
+    let playTicks = 0, countdownTicks = 0, endTicks = 0;
+    // Which timeout rung decided each match, recovered from the FINAL state rather than
+    // from inside the sim: equal HP fractions means rung 1 could not decide it.
+    const rungs = [0, 0, 0];
+    let timeouts = 0;
+    const failures = [];
+    for (const policy of POLICIES) {
+      for (const [p, e] of MATCHUPS) {
+        for (let s = 0; s < SEEDS; s++) {
+          const r = lockstepMatch(BASE_ARENA, LIVE, BASE, driver, p, e, policy, s, added, { pin, maxTicks });
+          matches++; ticks += r.tick; events += r.events; deaths += r.deaths;
+          playTicks += r.playTicks; countdownTicks += r.countdownTicks; endTicks += r.endTicks;
+          if (corpus === 'timeout' && r.diff === null) {
+            const st = r.state;
+            if (st && r.deaths === 0 && st.winner !== null) {
+              timeouts++;
+              const pf = st.player.hp / st.player.maxHp;
+              const ef = st.enemy.hp / st.enemy.maxHp;
+              const pd = Math.hypot(st.player.x - BASE_ARENA.center.x, st.player.y - BASE_ARENA.center.y);
+              const ed = Math.hypot(st.enemy.x - BASE_ARENA.center.x, st.enemy.y - BASE_ARENA.center.y);
+              rungs[pf !== ef ? 0 : pd !== ed ? 1 : 2]++;
+            }
+          }
+          if (r.diff) failures.push(`${corpus} ${policy} ${p}>${e} seed ${s} @ tick ${r.tick} (${(r.elapsed / 1000).toFixed(2)}s): ${r.diff}`);
+          // The corpus must be what it says it is. `countdown` claims `phase` never reaches
+          // `'playing'`; if it did, the corpus would silently become a short `normal` run
+          // and its whole point — covering the path that runs NO fighter loop — would be
+          // gone while still printing a large tick count.
+          else if (corpus === 'countdown' && r.playTicks > 0) {
+            failures.push(`${corpus} ${policy} ${p}>${e} seed ${s}: phase reached 'playing' for ${r.playTicks} ticks — corpus is not countdown-only`);
+          } else if (corpus === 'timeout' && r.deaths > 0) {
+            failures.push(`${corpus} ${policy} ${p}>${e} seed ${s}: ${r.deaths} deaths — the forced-immortal pin did not hold`);
+          }
+        }
+        if (matches % 550 === 0) {
+          process.stderr.write(`   [${corpus}] ${matches} matches, ${(ticks / 1e6).toFixed(2)}M ticks, `
+            + `${failures.length} divergent, ${((Date.now() - t0) / 1000).toFixed(0)}s\n`);
+        }
       }
     }
+    console.log(`   ── corpus ${corpus} ─────────────────────────────────────────────`);
+    console.log(`      matches      ${matches}`);
+    console.log(`      ticks        ${ticks.toLocaleString()}  (countdown ${countdownTicks.toLocaleString()} / playing ${playTicks.toLocaleString()} / ended ${endTicks.toLocaleString()})`);
+    console.log(`      events       ${events.toLocaleString()} compared in order, ${deaths} of them deaths`);
+    if (corpus === 'timeout') {
+      console.log(`      timeouts     ${timeouts} matches decided by resolveTimeout`
+        + `  — rung1 HP-fraction ${rungs[0]}, rung2 zone ${rungs[1]}, rung3 slot ${rungs[2]}`);
+    }
+    console.log(`      divergent    ${failures.length}`);
+    console.log(`      wall         ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    if (failures.length) {
+      console.log('      FIRST DIVERGENCES:');
+      for (const f of failures.slice(0, 10)) console.log(`        ${f}`);
+    }
+    anyFail += failures.length;
+    summary.push({ corpus, matches, ticks, events, deaths, failures: failures.length });
   }
 
-  console.log(`\n   matches      ${matches}`);
-  console.log(`   ticks        ${ticks.toLocaleString()} compared field-by-field`);
-  console.log(`   divergent    ${failures.length}`);
-  console.log(`   wall         ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-  console.log(`   ADDED FIELDS ${added.size} — present in the live state, absent at ${ref}. Declared, not ignored:`);
+  console.log(`\n   ADDED FIELDS ${added.size} — present in the live state/events, absent at ${ref}. Declared, not ignored:`);
   for (const f of [...added].sort()) console.log(`                  ${f}`);
-  if (failures.length) {
-    console.log('\n   FIRST DIVERGENCES:');
-    for (const f of failures.slice(0, 10)) console.log(`     ${f}`);
-    console.log(`\n   BIT-IDENTITY: FAIL (${failures.length} of ${matches} matches diverged)`);
+  const totalTicks = summary.reduce((a, r) => a + r.ticks, 0);
+  const totalEvents = summary.reduce((a, r) => a + r.events, 0);
+  if (anyFail) {
+    console.log(`\n   BIT-IDENTITY: FAIL (${anyFail} divergent matches)`);
     process.exit(1);
   }
-  console.log(`\n   BIT-IDENTITY: PASS — 0 differing ticks in ${ticks.toLocaleString()}`);
+  console.log(`\n   BIT-IDENTITY: PASS — 0 differing ticks in ${totalTicks.toLocaleString()}`
+    + `, over BOTH the per-tick state AND the ${totalEvents.toLocaleString()} events in order`);
+  console.log(`   corpora: ${summary.map((r) => `${r.corpus} ${r.matches}m/${r.ticks.toLocaleString()}t/${r.events.toLocaleString()}e`).join('  ·  ')}`);
   process.exit(0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// --ablate : DEAD-STATE ABLATION
+//
+// 🚨 THE ARGUMENT THIS REPLACES IS "UNREAD STATE CANNOT CHANGE BEHAVIOUR", AND THAT IS AN
+// ARGUMENT FROM CODE READING.
+//
+// The N-fighter container adds fields that are claimed to be inert at N=2 — the `sightings`
+// diagonal, the unused observer row, `Fighter.role`, `winnerId`, and the `*Role` mirrors on
+// projectiles and trail marks. `CLAUDE.md` #6 is explicit that a claim like that is exactly
+// what not to trust: nineteen instruments in this repo have returned confident wrong
+// answers, and "I read the code and nothing reads it" is how every one of them started.
+//
+// So each field is perturbed BEHAVIOURALLY, on every tick, in one of two otherwise
+// identical sims, with that field alone masked out of the comparison — and the whole corpus
+// must come back with zero differing ticks in state AND events.
+//
+// ── AND HALF THE TABLE IS A POSITIVE CONTROL, WHICH IS THE POINT ────────────
+//
+// A battery that only ever asserts "nothing happened" passes just as well when it is
+// broken: a harness that forgot to apply its own perturbation, or that masked the whole
+// state instead of one path, reports every field dead. So every entry carries a DECLARED
+// expectation, and the LIVE ones must diverge:
+//
+//   * `id`, `controller`, `hitRadius` and `damagedMask` are load-bearing and must be caught.
+//     `hitRadius` in particular is the proof that `Fighter.hitRadius` really did replace
+//     `sim.ts`'s `targetRole === 'player' ? ... : ...` ternary rather than sitting beside it.
+//   * `role` is the interesting one: DEAD in the state and LIVE in the events. That is a
+//     precise statement of what the legacy mirrors are for — no gameplay decision reads
+//     them, and the event protocol still carries them for four out-of-set consumers.
+//
+// Each entry is therefore run TWICE: once with the event comparison off (does the STATE
+// move?) and once with it on (does anything at all move?).
+// ─────────────────────────────────────────────────────────────────────────────
+
+if (args.ablate) {
+  if (!BASE_ARENA) { console.error(`no arena at ${ARENA_PATH}`); process.exit(1); }
+  // Two arenas, because one ablation is VACUOUS on the shipped map — see the two
+  // `sightings[2]` rows. The concealment arena is `--occupancy`'s own candidate set, so it
+  // is the same geometry that tool already reports on rather than a second invention.
+  const ARENAS = {
+    shipped: BASE_ARENA,
+    conceal: { ...BASE_ARENA, concealment: candidateRegions(BASE_ARENA) },
+  };
+  const DRIVERS = { shipped: driverFor(ARENAS.shipped, LIVE), conceal: driverFor(ARENAS.conceal, LIVE) };
+  const seeds = Number(args.seeds ?? 2);
+  const only = args.only ? String(args.only) : null;
+  const table = ABLATIONS.filter((a) => !only || a.name.includes(only));
+
+  console.log('\n══ DEAD-STATE ABLATION ══  the live sim against ITSELF, one field perturbed every tick');
+  console.log(`   ${MATCHUPS.length} matchups x ${seeds} seeds x ${POLICIES.length} polic${POLICIES.length === 1 ? 'y' : 'ies'}`
+    + ` = ${MATCHUPS.length * seeds * POLICIES.length} matches per field per pass, 2 passes`);
+  console.log('   FLOOR: EXACT. A field declared DEAD must produce 0 differing ticks; one declared');
+  console.log('          LIVE must produce at least one. Both directions are failures.\n');
+  console.log('   field                                                      state    events   verdict');
+
+  let faults = 0;
+  const t0 = Date.now();
+  for (const ab of table) {
+    // Two passes: state-only, then state+events. `stopEarly` short-circuits a field we
+    // EXPECT to be live — the first divergence answers the question and the remaining
+    // matches cost minutes.
+    const arenaKey = ab.arena ?? 'shipped';
+    const arena = ARENAS[arenaKey];
+    const driver = DRIVERS[arenaKey];
+    const run = (withEvents) => {
+      let divergent = 0, first = null, matches = 0, ticks = 0;
+      for (const policy of POLICIES) {
+        for (const [p, e] of MATCHUPS) {
+          for (let s = 0; s < seeds; s++) {
+            const r = lockstepMatch(arena, LIVE, LIVE, driver, p, e, policy, s, undefined, {
+              events: withEvents,
+              ignore: ab.mask,
+              // Perturb B ONLY, after every step, so a field that is overwritten by the sim
+              // each tick (the live sighting cell) stays perturbed instead of washing out.
+              pin: (_a, b) => ab.perturb(b),
+            });
+            matches++; ticks += r.tick;
+            if (r.diff) {
+              divergent++;
+              if (!first) first = `${p}>${e} s${s} @${r.tick}: ${r.diff}`;
+              const expectLive = (withEvents ? ab.expect.events : ab.expect.state) === 'live';
+              if (expectLive) return { divergent, first, matches, ticks, early: true };
+            }
+          }
+        }
+      }
+      return { divergent, first, matches, ticks, early: false };
+    };
+    const stateRun = run(false);
+    const bothRun = run(true);
+    const stateVerdict = stateRun.divergent > 0 ? 'live' : 'dead';
+    // "events" here means "anything the state pass did not already see".
+    const eventsVerdict = bothRun.divergent > 0 ? 'live' : 'dead';
+    const ok = stateVerdict === ab.expect.state && eventsVerdict === ab.expect.events;
+    if (!ok) faults++;
+    console.log(`   ${ab.name.padEnd(58)} ${stateVerdict.padEnd(8)} ${eventsVerdict.padEnd(8)} `
+      + `${ok ? 'OK' : `FAULT — expected ${ab.expect.state}/${ab.expect.events}`}`);
+    console.log(`     ${ab.why}`);
+    console.log(`     state pass ${stateRun.matches} matches / ${stateRun.ticks.toLocaleString()} ticks, `
+      + `${stateRun.divergent} divergent${stateRun.early ? ' (stopped early)' : ''}`
+      + `${stateRun.first ? ` — ${stateRun.first}` : ''}`);
+    if (eventsVerdict !== stateVerdict) {
+      console.log(`     +events   ${bothRun.matches} matches / ${bothRun.ticks.toLocaleString()} ticks, `
+        + `${bothRun.divergent} divergent${bothRun.early ? ' (stopped early)' : ''}`
+        + `${bothRun.first ? ` — ${bothRun.first}` : ''}`);
+    }
+  }
+  console.log(`\n   ${table.length - faults} of ${table.length} fields matched their declared expectation`
+    + `   wall ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  process.exit(faults > 0 ? 1 : 0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

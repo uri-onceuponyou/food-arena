@@ -81,11 +81,18 @@ import {
   // the same reason — the claim is that the window IS the workhorse projectile's flight
   // time, so the assertion is the derivation and not the number 500.
   CONCEAL_ATTACK_REVEAL_MS, FLIGHT_MS,
+  // Section 27: the N-fighter container. The two hit radii are imported rather than
+  // written as 25.2 / 26 because the claim is that `Fighter.hitRadius` CARRIES the same
+  // number the projectile loop's ternary used to branch on — a literal here would still
+  // pass after either constant moved.
+  HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY,
 } from './rules.ts';
 // Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
 // no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
 // walked is the thing the sim actually moves.
-import { createFighter } from './state.ts';
+import {
+  createFighter, fighterBit, MAX_FIGHTERS, opponentOf, roleOfSlot, sightingIndex,
+} from './state.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
 // `rules.ts` and moved once already (the 2026-08-03 retune, see `REACH`). Tests that
@@ -782,9 +789,9 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);
     for (let i = 0; i < MAX_MARKS; i++) {
       state.trailMarks.push({
-        id: 10_000 + i, ownerRole: 'enemy',
+        id: 10_000 + i, ownerId: 1, ownerRole: 'enemy',
         x: arena.center.x, y: arena.center.y,
-        expiresAt: state.elapsed + TRAIL.durationMs, damaged: false,
+        expiresAt: state.elapsed + TRAIL.durationMs, damagedMask: 0, damaged: false,
       });
     }
     return state;
@@ -820,8 +827,8 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     state.enemy.x = arena.center.x + 800; state.enemy.y = arena.center.y;
     state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);
     state.trailMarks.push({
-      id: 99, ownerRole: 'enemy', x: arena.center.x, y: arena.center.y,
-      expiresAt: state.elapsed + TRAIL.durationMs, damaged: false,
+      id: 99, ownerId: 1, ownerRole: 'enemy', x: arena.center.x, y: arena.center.y,
+      expiresAt: state.elapsed + TRAIL.durationMs, damagedMask: 0, damaged: false,
     });
     const hp0 = state.player.hp;
     stepMatch(state, 16.667, noInput);
@@ -1146,7 +1153,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     state.enemy.x = 900; state.enemy.y = 900;
     state.enemy.facing = { x: facing.x, y: facing.y };
     const events = [];
-    stepAI(state, 16.667, events);
+    stepAI(state, state.enemy, 16.667, events);
     return { state, events };
   }
 
@@ -1232,7 +1239,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     state.enemy.x = 900; state.enemy.y = 900;
     state.enemy.facing = { x: 1, y: 0 };
     state.enemy.status.stunnedUntil = state.elapsed + 5000;
-    stepAI(state, 16.667, []);
+    stepAI(state, state.enemy, 16.667, []);
     check('coincident AND stunned: still no bearing, so still no re-point',
       state.enemy.facing.x === 1 && state.enemy.facing.y === 0,
       JSON.stringify(state.enemy.facing));
@@ -1329,7 +1336,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     // Any damage restarts the clock — the property that makes this "out of combat"
     // rather than "a passive trickle".
     const events = [];
-    applyDamage(state, 'player', 5, null, { kind: 'fog' }, events);
+    applyDamage(state, state.player, 5, null, { kind: 'fog' }, events);
     let healsAfterHit = 0;
     const tHit = state.elapsed;
     while (state.elapsed - tHit < REGEN_DELAY_MS - 50) {
@@ -1471,7 +1478,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
         state.player.hp = PLAYER_MAX_HP; // isolate the status from the kill
         const key = effect === 'stun' ? 'stunnedUntil' : 'slowedUntil';
         const before = state.player.status[key];
-        applyDamage(state, 'player', 0, effect, src, []);
+        applyDamage(state, state.player, 0, effect, src, []);
         if (state.player.status[key] > before) applications++; else refused++;
         if (t < state.player.status[key]) { run += DT; if (run > longest) longest = run; } else run = 0;
       }
@@ -1490,7 +1497,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       const state = playingMatch(makeArena());
       const src = { kind: 'weapon', weaponKey: 'T', weaponName: 'test' };
       state.elapsed = 1000;
-      applyDamage(state, 'player', 0, 'stun', src, []);
+      applyDamage(state, state.player, 0, 'stun', src, []);
       check('a stun sets a ready-at of duration + grace',
         approx(statusReadyAt(state.player, 'stun'), 1000 + STUN_DURATION_MS + STUN_GRACE_MS),
         `${statusReadyAt(state.player, 'stun')} vs ${1000 + STUN_DURATION_MS + STUN_GRACE_MS}`);
@@ -1499,7 +1506,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       // so this really is a shrug-off window and not a longer stun wearing a new name.
       state.elapsed = 1000 + STUN_DURATION_MS + STUN_GRACE_MS - 1;
       const held = state.player.status.stunnedUntil;
-      applyDamage(state, 'player', 0, 'stun', src, []);
+      applyDamage(state, state.player, 0, 'stun', src, []);
       check('inside the grace window a fresh stun is refused',
         state.player.status.stunnedUntil === held, `${state.player.status.stunnedUntil} vs ${held}`);
       check('and the fighter is NOT stunned during that window',
@@ -1508,7 +1515,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
 
       // Exactly when the grace ends it lands again, at full duration. Capped, not deleted.
       state.elapsed = 1000 + STUN_DURATION_MS + STUN_GRACE_MS;
-      applyDamage(state, 'player', 0, 'stun', src, []);
+      applyDamage(state, state.player, 0, 'stun', src, []);
       check('once the grace ends the stun lands again at full duration',
         approx(state.player.status.stunnedUntil, state.elapsed + STUN_DURATION_MS));
     }
@@ -1519,10 +1526,10 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       const state = playingMatch(makeArena());
       const src = { kind: 'weapon', weaponKey: 'T', weaponName: 'test' };
       state.elapsed = 0;
-      applyDamage(state, 'player', 0, 'slow', src, []);
+      applyDamage(state, state.player, 0, 'slow', src, []);
       check('a slow sets a ready-at of duration + grace',
         approx(statusReadyAt(state.player, 'slow'), SLOW_DURATION_MS + SLOW_GRACE_MS));
-      applyDamage(state, 'player', 0, 'stun', src, []);
+      applyDamage(state, state.player, 0, 'stun', src, []);
       check('a stun still lands on an already-slowed fighter (the two graces are independent)',
         approx(state.player.status.stunnedUntil, STUN_DURATION_MS));
     }
@@ -1536,8 +1543,8 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       const src = { kind: 'weapon', weaponKey: 'T', weaponName: 'test' };
       state.elapsed = 0;
       const events = [];
-      applyDamage(state, 'player', 10, 'stun', src, events);
-      applyDamage(state, 'player', 10, 'stun', src, events); // status refused, damage not
+      applyDamage(state, state.player, 10, 'stun', src, events);
+      applyDamage(state, state.player, 10, 'stun', src, events); // status refused, damage not
       // Against the fighter's OWN pool: per-character health (rules.ts DEVIATION #10)
       // means `PLAYER_MAX_HP` is the role BASE, not any particular fighter's maximum.
       // The rule under test is "full damage", which is a statement about the delta.
@@ -1597,7 +1604,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       // measures weapon range rather than steering.
       state.enemy.lastUsed = state.enemy.lastUsed.map(() => state.elapsed);
       state.elapsed += 16.667;
-      stepAI(state, 16.667, []);
+      stepAI(state, state.enemy, 16.667, []);
       closestToPot = Math.min(closestToPot, Math.hypot(state.enemy.x - 700, state.enemy.y - 500));
       closestToPlayer = Math.min(closestToPlayer, Math.hypot(state.enemy.x - state.player.x, state.enemy.y - state.player.y));
       if (Math.hypot(state.enemy.x - 700, state.enemy.y - 500) < POT.dangerRadius) insideBurn++;
@@ -1624,7 +1631,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       state.player.hp = 1e9; state.player.maxHp = 1e9;
       state.enemy.hp = Math.max(1, state.enemy.hp);
       state.elapsed += 16.667;
-      stepAI(state, 16.667, []);
+      stepAI(state, state.enemy, 16.667, []);
       const r = Math.hypot(state.enemy.x - 700, state.enemy.y - 500);
       furthest = Math.max(furthest, r);
       if (r > state.safeRadius) outside++;
@@ -1649,7 +1656,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       state.player.hp = 1e9; state.player.maxHp = 1e9;
       state.enemy.lastUsed = state.enemy.lastUsed.map(() => -1e9);
       const events = [];
-      stepAI(state, 16.667, events);
+      stepAI(state, state.enemy, 16.667, events);
       return events.some((e) => e.type === 'weapon-fired');
     };
     check('an AI standing INSIDE the fire moves instead of shooting',
@@ -1670,7 +1677,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       state.player.x = 900; state.player.y = 500;
       state.enemy.lastUsed = state.enemy.lastUsed.map(() => -1e9);
       const events = [];
-      stepAI(state, 16.667, events);
+      stepAI(state, state.enemy, 16.667, events);
       return events.filter((e) => e.type === 'weapon-fired' && e.weaponKey === heal.key).length;
     };
     // ⚠️ AGAINST THE ENEMY FIGHTER'S OWN POOL. `rules.ts` states the rule as a FRACTION of
@@ -1703,7 +1710,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
       state.player.hp = 1e9; state.player.maxHp = 1e9;
       state.enemy.lastUsed = state.enemy.lastUsed.map(() => state.elapsed);
       state.elapsed += 16.667;
-      stepAI(state, 16.667, []);
+      stepAI(state, state.enemy, 16.667, []);
       drift = Math.max(drift, Math.abs(state.enemy.y - 500));
       closest = Math.min(closest, Math.hypot(state.enemy.x - 400, state.enemy.y - 500));
     }
@@ -1902,7 +1909,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     state.player.facing = { x: -1, y: 0 }; // pointing AWAY: a 360-degree cone needs no bearing
     const hp0 = state.enemy.hp;
     const evs = [];
-    attemptAttack(state, 'player', giantIdx, evs);
+    attemptAttack(state, state.player, giantIdx, evs);
     check('the slam lands beyond every other weapon\'s reach, unaimed, and stuns',
       state.enemy.hp === hp0 - giant.damage && state.enemy.status.stunnedUntil > state.elapsed,
       `dealt ${hp0 - state.enemy.hp} at ${otherReach + 100}wu (next-longest reach ${otherReach}wu), stunned=${state.enemy.status.stunnedUntil > state.elapsed}`);
@@ -1911,7 +1918,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   // ── (g) A STUN IS A MOVEMENT LOCK, NOT A SILENCE ──────────────────────────
   //
   // `rules.ts` states the rule in one line: "stunned = movement locked to 0". `sim.ts`
-  // implements exactly that — `movePlayer` reads `stunnedUntil` and `attemptAttack` is
+  // implements exactly that — `moveFighter` (was `movePlayer`) reads `stunnedUntil` and `attemptAttack` is
   // called unconditionally, so a stunned player is rooted and keeps shooting.
   //
   // `ai.ts:stepAI` used NOT to: it gated `chosenIndex` on `aiFrozen`, so a stunned AI was
@@ -1979,7 +1986,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     const before = { x: state.enemy.x, y: state.enemy.y };
     const events = [];
     state.elapsed += TICK;
-    stepAI(state, TICK, events);
+    stepAI(state, state.enemy, TICK, events);
     return {
       fired: events.filter((e) => e.type === 'weapon-fired' && e.fighterRole === 'enemy').map((e) => e.weaponKey),
       moved: Math.hypot(state.enemy.x - before.x, state.enemy.y - before.y),
@@ -1989,7 +1996,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
 
   // ── (a) A STUN LOCKS MOVEMENT. IT DOES NOT SILENCE. ───────────────────────
   //
-  // `rules.ts` says it once — "stunned = movement locked to 0" — and `sim.ts:movePlayer`
+  // `rules.ts` says it once — "stunned = movement locked to 0" — and `sim.ts:moveFighter` (was `movePlayer`)
   // implements exactly that: a stunned player still aims, still fires, and only its
   // `speed` goes to 0 (§19(g) asserts that half). `ai.ts` read the same flag as "the
   // enemy's turn does not happen", gating the facing, the heal, the whole flee branch
@@ -2068,7 +2075,7 @@ console.log('\n8. Countdown -> playing transition (sanity)');
         }
       };
       const fired = [];
-      attemptAttack(state, 'enemy', wi, fired);
+      attemptAttack(state, state.enemy, wi, fired);
       take(fired);
       state.phase = 'ended';
       for (let t = 0; t < 4000 && state.projectiles.length; t += TICK) {
@@ -2401,7 +2408,7 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
 
   // ── (c) SPEED REACHES THE SIM — MEASURED, NOT COMPUTED ────────────────────
   //
-  // Driven through the real `movePlayer`: a straight run across open ground with no
+  // Driven through the real `moveFighter` (was `movePlayer`): a straight run across open ground with no
   // slow, no trail and no cover, so the only thing that can decide the distance is the
   // character's own speed.
   {
@@ -2428,7 +2435,7 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
       const expected = speedFor(id, PLAYER_SPEED) * TICK * 60;
       if (Math.abs(run(id) - expected) > 1e-6) wrong.push(`${id} moved ${run(id).toFixed(3)} vs ${expected.toFixed(3)}`);
     }
-    check('every character MOVES at its own speed through the real movePlayer',
+    check('every character MOVES at its own speed through the real moveFighter',
       wrong.length === 0, wrong.slice(0, 3).join(' · '));
 
     // Not all the same — otherwise the check above passes on a roster where the axis
@@ -2481,7 +2488,7 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
       for (let t = 0; t < 60; t++) {
         state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);    // never fires, always moves
         state.elapsed += TICK;
-        stepAI(state, TICK, []);
+        stepAI(state, state.enemy, TICK, []);
       }
       return Math.abs(state.enemy.x - x0);
     };
@@ -2752,8 +2759,8 @@ console.log('\n23. Character levels');
     const hi = createMatch(arena, 'hamburger', 'pizza', { player: LEVEL_MAX, enemy: LEVEL_MAX });
     const lo = createMatch(arena, 'hamburger', 'pizza');
     const evHi = [], evLo = [];
-    applyDamage(hi, 'enemy', 10, null, { kind: 'weapon', weaponKey: 'k', weaponName: 'n' }, evHi);
-    applyDamage(lo, 'enemy', 10, null, { kind: 'weapon', weaponKey: 'k', weaponName: 'n' }, evLo);
+    applyDamage(hi, hi.enemy, 10, null, { kind: 'weapon', weaponKey: 'k', weaponName: 'n', attackerId: 0 }, evHi);
+    applyDamage(lo, lo.enemy, 10, null, { kind: 'weapon', weaponKey: 'k', weaponName: 'n', attackerId: 0 }, evLo);
     check('a weapon hit is scaled by the ATTACKER\'s level',
       Math.abs(evHi[0].amount - 10 * levelDamageMultiplier(LEVEL_MAX)) < 1e-9
       && evLo[0].amount === 10,
@@ -2764,15 +2771,15 @@ console.log('\n23. Character levels');
 
     const evFog = [], evHaz = [];
     const fogState = createMatch(arena, 'hamburger', 'pizza', { player: LEVEL_MAX, enemy: LEVEL_MAX });
-    applyDamage(fogState, 'player', 10, null, { kind: 'fog' }, evFog);
-    applyDamage(fogState, 'player', 10, null, { kind: 'hazard' }, evHaz);
+    applyDamage(fogState, fogState.player, 10, null, { kind: 'fog' }, evFog);
+    applyDamage(fogState, fogState.player, 10, null, { kind: 'hazard' }, evHaz);
     check('the fog and the pot are NOT scaled by anybody\'s level',
       evFog[0].amount === 10 && evHaz[0].amount === 10,
       `fog ${evFog[0].amount}, hazard ${evHaz[0].amount}`);
 
     const evTrail = [];
     const trailState = createMatch(arena, 'donut', 'pizza', { player: LEVEL_MAX, enemy: LEVEL_MIN });
-    applyDamage(trailState, 'enemy', 10, null, { kind: 'trail', ownerRole: 'player' }, evTrail);
+    applyDamage(trailState, trailState.enemy, 10, null, { kind: 'trail', ownerId: 0, ownerRole: 'player' }, evTrail);
     check('a trail mark is scaled by its OWNER, who may not be the target\'s opponent-of-record',
       Math.abs(evTrail[0].amount - 10 * levelDamageMultiplier(LEVEL_MAX)) < 1e-9,
       `${evTrail[0].amount}`);
@@ -2929,7 +2936,7 @@ console.log('\n23. Character levels');
   // `rules.ts` states the rule twice, in prose, for BOTH ground effects, and both times
   // for *anyone*: "Standing-water hazard: slows anyone inside it" and "Splatter left by
   // `splatter: true` weapons — slows anyone standing in it". It is implemented ONCE, in
-  // `sim.ts:movePlayer`, which is the only caller of `terrainSlowFactor()` that scales a
+  // `sim.ts:moveFighter` (was `movePlayer`), which is the only caller of `terrainSlowFactor()` that scales a
   // speed. `ai.ts:stepAI` builds its own `aiSlowMult` from the STATUS slow alone. So the
   // enemy walks through every puddle and every splat in the game at full speed.
   //
@@ -3176,7 +3183,8 @@ console.log('\n23. Character levels');
   const openArena = (concealment) => makeArena({ maxSafeRadius: 50_000, concealment });
   /** A bare fighter for the movement-layer checks — no match, no AI, no `stepMatch`. */
   const createFighterLike = () =>
-    createFighter('player', 'hamburger', { x: 0, y: 0 }, 100, PLAYER_SIZE, { x: 1, y: 0 });
+    createFighter({ id: 0, controller: 'human', characterId: 'hamburger', spawn: { x: 0, y: 0 },
+      maxHp: 100, size: PLAYER_SIZE, hitRadius: HIT_RADIUS_VS_PLAYER, facing: { x: 1, y: 0 } });
 
   // ── (a) INERT WHEN ABSENT ─────────────────────────────────────────────────
   //
@@ -3471,7 +3479,7 @@ console.log('\n23. Character levels');
       // fires — §20(d)'s rule — which is deliberate: the control has to be a real match.
       state.enemy.status.stunnedUntil = Infinity;
       const evs = [];
-      attemptAttack(state, 'player', homingIndex, evs);
+      attemptAttack(state, state.player, homingIndex, evs);
       const mine = state.projectiles.filter((p) => p.ownerRole === 'player').map((p) => p.id);
       const vy0 = state.projectiles.filter((p) => mine.includes(p.id)).map((p) => p.vy);
       // The target steps 400 wu off the projectiles' axis, deep inside the region.
@@ -3948,6 +3956,296 @@ console.log('\n23. Character levels');
       .filter((f) => isWriter(readFileSync(join(gameDir, f), 'utf8')));
     check('`Fighter.revealedUntil` is written in exactly one file, and it is combat.ts',
       writers.length === 1 && writers[0] === 'combat.ts', `writers: [${writers.join(', ')}]`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 27. THE N-FIGHTER CONTAINER, AT A CAP PINNED TO 2
+//
+// `MatchState` used to have exactly `player: Fighter` and `enemy: Fighter`, which made the
+// sim hard 1v1 at the type level (`DECISIONS §48`: the x4 arena "requires the N-fighter
+// refactor first"). It now has `fighters: Fighter[]`, an N x N `sightings` matrix, a slot
+// id on everything that names a fighter, and a ranked timeout tiebreak — at N=2, under the
+// bit-identity differ, with the seat names kept as aliases.
+//
+// ⚠️ THE BIT-IDENTITY PROOF LIVES IN `tools/tmp/conceal_lab.mjs --bitid`, NOT HERE, and
+// that division is deliberate: this section pins the INVARIANTS the proof rests on — that
+// the aliases are the same objects, that the matrix index is what it claims, that the
+// ranked sort reproduces the two-way comparison it replaced RUNG BY RUNG. A tick count
+// cannot say any of those, and one of them (rung 3) is never reached by any corpus: the
+// forced-immortal sweep resolved 3520 timeouts and landed on it 0 times.
+// ─────────────────────────────────────────────────────────────────────────────
+
+console.log('\n27. The N-fighter container (cap pinned to 2)');
+{
+  // ── (a) THE CONTAINER AND ITS INVARIANTS ──────────────────────────────────
+  {
+    const state = createMatch(makeArena(), 'hamburger', 'donut');
+
+    check('MatchState carries a fighters ARRAY, not a Map/Set/Record',
+      Array.isArray(state.fighters), `${Object.prototype.toString.call(state.fighters)}`);
+    check(`…of exactly MAX_FIGHTERS (${MAX_FIGHTERS})`,
+      state.fighters.length === MAX_FIGHTERS, `${state.fighters.length}`);
+    check('`fighters[i].id === i` — the identity invariant every id in the sim indexes on',
+      state.fighters.every((f, i) => f.id === i), state.fighters.map((f) => f.id).join(','));
+    // The bitmask ceiling. A JS bitwise operator coerces to int32, so slot 31 is the last
+    // one `fighterBit` can express — asserted rather than assumed, so raising the cap past
+    // it fails here instead of wrapping silently.
+    check('MAX_FIGHTERS is inside the int32 ceiling `fighterBit` imposes',
+      MAX_FIGHTERS <= 31, `${MAX_FIGHTERS}`);
+    check('…and fighterBit gives every slot its own distinct bit',
+      new Set(state.fighters.map((f) => fighterBit(f.id))).size === state.fighters.length
+      && state.fighters.every((f) => fighterBit(f.id) > 0));
+
+    // ⚠️ SAME OBJECTS, not equal ones. `===`, deliberately.
+    check('`state.player` IS `fighters[0]` and `state.enemy` IS `fighters[1]` (identity, not equality)',
+      state.player === state.fighters[0] && state.enemy === state.fighters[1]);
+    // The differ walks the state with Object.keys/spread. A getter is not an own enumerable
+    // DATA property, so defining the aliases as accessors would silently drop both fighters
+    // out of `conceal_lab --bitid` and it would still print PASS. This is the guard on that.
+    const isOwnDataProp = (o, k) => {
+      const d = Object.getOwnPropertyDescriptor(o, k);
+      return !!d && d.enumerable === true && 'value' in d;
+    };
+    check('KNOWN-BAD: the descriptor check REJECTS a getter and a non-enumerable property',
+      !isOwnDataProp(Object.defineProperty({}, 'player', { get: () => 1, enumerable: true }), 'player')
+      && !isOwnDataProp(Object.defineProperty({}, 'player', { value: 1, enumerable: false }), 'player')
+      && isOwnDataProp({ player: 1 }, 'player'));
+    check('…and both aliases are own ENUMERABLE DATA properties, so the differ can see them',
+      isOwnDataProp(state, 'player') && isOwnDataProp(state, 'enemy'));
+
+    check('`roleOfSlot` is what wrote each fighter\'s legacy role',
+      state.fighters.every((f) => f.role === roleOfSlot(f.id)), state.fighters.map((f) => f.role).join(','));
+    check('slot 0 is the human and slot 1 is driven by the AI',
+      state.fighters[0].controller === 'human' && state.fighters[1].controller === 'ai');
+
+    // `hitRadius` moved off `sim.ts`'s `targetRole === 'player' ? ... : ...` ternary and
+    // onto the fighter. The values are imported from `rules.ts`, so this fails if the field
+    // stops carrying the number the ternary used to branch on.
+    check('each fighter carries the hit radius the projectile ternary used to branch on',
+      state.player.hitRadius === HIT_RADIUS_VS_PLAYER && state.enemy.hitRadius === HIT_RADIUS_VS_ENEMY,
+      `${state.player.hitRadius} / ${state.enemy.hitRadius}`);
+    check('…and the two are actually different, so the test is not vacuous',
+      HIT_RADIUS_VS_PLAYER !== HIT_RADIUS_VS_ENEMY);
+
+    check('`opponentOf` never returns the fighter itself, and is an involution',
+      state.fighters.every((f) => opponentOf(state, f) !== f
+        && opponentOf(state, opponentOf(state, f)) === f));
+  }
+
+  // ── (b) THE PERCEPTION MATRIX ─────────────────────────────────────────────
+  {
+    const arena = makeArena();
+    const state = createMatch(arena, 'pizza', 'soup');
+    const n = state.fighters.length;
+
+    check('`sightings` is a SQUARE n x n matrix, allocated once',
+      Array.isArray(state.sightings) && state.sightings.length === n * n, `${state.sightings.length}`);
+    check('…row-major: `sightingIndex(o, t, n)` is o*n + t, and every cell is distinct',
+      new Set(state.sightings).size === n * n
+      && state.sightings.every((_, i) => i === sightingIndex(Math.floor(i / n), i % n, n)));
+    // The seed generalises `sim.ts`'s single spawn-seed line, which exists so the
+    // no-concealment case is bit-identical FROM TICK 1: `stepAI` reads the belief before
+    // anything has refreshed it.
+    check('every cell is seeded with its TARGET\'s spawn, at t=0 — including the diagonal',
+      state.sightings.every((s, i) => {
+        const t = state.fighters[i % n];
+        return s.x === t.x && s.y === t.y && s.at === 0;
+      }));
+    check('`aiSighting` IS `sightings[sightingIndex(1, 0, n)]` — the same object, not a copy',
+      state.aiSighting === state.sightings[sightingIndex(1, 0, n)]);
+    // Identity stability: a resized or reallocated matrix would break the alias silently,
+    // and the alias is what four out-of-set consumers still read.
+    const cells = state.sightings.slice();
+    const arr = state.sightings;
+    for (let i = 0; i < 400; i++) stepMatch(state, 16.667, noInput);
+    check('…and a whole match neither reallocates the matrix nor replaces a cell',
+      state.sightings === arr && state.sightings.length === cells.length
+      && state.sightings.every((s, i) => s === cells[i])
+      && state.aiSighting === state.sightings[sightingIndex(1, 0, n)]);
+    check('…nor reorders `fighters`, which IS the turn order',
+      state.fighters[0] === state.player && state.fighters[1] === state.enemy
+      && state.fighters.every((f, i) => f.id === i));
+  }
+
+  // ── (c) THE TIMEOUT TIEBREAK, RUNG BY RUNG, AGAINST THE RULE IT REPLACED ──
+  //
+  // `resolveTimeout` was a two-way comparison and is now a ranked sort. The forced-immortal
+  // corpus (`conceal_lab --bitid --corpus timeout`, 3520 matches) resolved rung 1 in 3516
+  // of them and rung 2 in 4 — and rung 3 in ZERO. A tick count over that corpus therefore
+  // says nothing about the rung where slot advantage re-enters at N>2, so it is constructed
+  // here instead, and checked against the LEGACY FORMULA written out longhand rather than
+  // against a copy of the new one.
+  {
+    const legacyWinner = (pf, ef, pd, ed) =>
+      (pf !== ef ? (pf > ef ? 'player' : 'enemy') : (pd <= ed ? 'player' : 'enemy'));
+
+    /**
+     * One frozen tick that ends on the whistle. Everything that could move a fighter or its
+     * HP inside that tick is disabled — the AI is rooted, every weapon is on an unreachable
+     * cooldown, the player's input is zero, regen is blocked by a fresh `lastDamagedAt`, and
+     * the ring is at `MIN_SAFE_RADIUS` with both fighters inside it — so the state the
+     * tiebreak sees is exactly the state set up here.
+     */
+    const timeoutWinner = ({ pHp, pMax, eHp, eMax, pOff, eOff }) => {
+      const arena = makeArena({ maxSafeRadius: 4000 });
+      const state = playingMatch(arena, 'hamburger', 'hamburger');
+      const cx = arena.center.x;
+      const cy = arena.center.y;
+      state.player.x = cx - pOff; state.player.y = cy;
+      state.enemy.x = cx + eOff; state.enemy.y = cy;
+      state.player.hp = pHp; state.player.maxHp = pMax;
+      state.enemy.hp = eHp; state.enemy.maxHp = eMax;
+      state.player.lastDamagedAt = state.elapsed;
+      state.enemy.lastDamagedAt = state.elapsed;
+      state.enemy.status.stunnedUntil = state.elapsed + 10_000; // rooted: no chase this tick
+      state.player.lastUsed = state.player.lastUsed.map(() => Infinity);
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);
+      state.timeRemaining = 0;
+      const events = stepMatch(state, 16.667, noInput);
+      return {
+        winner: state.winner,
+        winnerId: state.winnerId,
+        ended: events.filter((e) => e.type === 'match-ended'),
+        moved: state.player.x !== cx - pOff || state.enemy.x !== cx + eOff,
+        hpMoved: state.player.hp !== pHp || state.enemy.hp !== eHp,
+        phase: state.phase,
+      };
+    };
+
+    const CASES = [
+      { name: 'rung 1: the player has the higher HP FRACTION', pHp: 60, pMax: 100, eHp: 30, eMax: 90, pOff: 100, eOff: 100 },
+      { name: 'rung 1: the enemy has the higher HP FRACTION', pHp: 30, pMax: 100, eHp: 60, eMax: 90, pOff: 100, eOff: 100 },
+      // Different POOLS, same fraction — the rung exists because "most HP left" would hand
+      // the bigger pool a head start it did nothing to earn.
+      { name: 'rung 1 does not fire on equal fractions from unequal pools', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 300 },
+      { name: 'rung 2: level on HP, the player is nearer the centre', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 300 },
+      { name: 'rung 2: level on HP, the enemy is nearer the centre', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 300, eOff: 100 },
+      // ⚠️ RUNG 3. Zero of 3520 forced-immortal timeouts reached it.
+      { name: 'rung 3: level on BOTH — the tie goes to the lower slot', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 100 },
+      { name: 'rung 1 with a zero pool: hp/0 is 0, not NaN', pHp: 10, pMax: 0, eHp: 1, eMax: 90, pOff: 100, eOff: 100 },
+    ];
+
+    let agreed = 0;
+    const disagreements = [];
+    for (const c of CASES) {
+      const r = timeoutWinner(c);
+      const pf = c.pMax > 0 ? c.pHp / c.pMax : 0;
+      const ef = c.eMax > 0 ? c.eHp / c.eMax : 0;
+      const want = legacyWinner(pf, ef, c.pOff, c.eOff);
+      const ok = r.winner === want && !r.moved && !r.hpMoved
+        && r.phase === 'ended' && r.ended.length === 1
+        && r.ended[0].winner === want && r.ended[0].winnerId === (want === 'player' ? 0 : 1)
+        && r.winnerId === (want === 'player' ? 0 : 1);
+      if (ok) agreed++;
+      else disagreements.push(`${c.name}: got ${r.winner}/${r.winnerId} want ${want}, moved=${r.moved} hpMoved=${r.hpMoved}`);
+      check(`the ranked sort reproduces the two-way rule — ${c.name}`, ok,
+        `winner ${r.winner} (slot ${r.winnerId})`);
+    }
+    check('…on every constructed case, and the fixture really was frozen for the tick',
+      agreed === CASES.length, disagreements.join(' | '));
+
+    // KNOWN-BAD: the fixture has to be able to FAIL. If `timeoutWinner` silently produced
+    // the same answer whatever it was handed, all seven rows above would be one row.
+    const both = new Set(CASES.map((c) => timeoutWinner(c).winner));
+    check('KNOWN-BAD: the fixture returns BOTH answers across the cases, so it is not stuck',
+      both.size === 2, [...both].join(','));
+  }
+
+  // ── (d) `damagedMask`: PER-VICTIM, AND EQUIVALENT TO THE BOOLEAN AT N=2 ───
+  {
+    const arena = makeArena({ width: 2000, height: 2000 });
+    const state = playingMatch(arena, 'hamburger', 'donut');
+    state.player.x = arena.center.x; state.player.y = arena.center.y;
+    state.enemy.x = arena.center.x + 800; state.enemy.y = arena.center.y;
+    state.enemy.lastUsed = state.enemy.lastUsed.map(() => Infinity);
+    const mark = {
+      id: 4242, ownerId: 1, ownerRole: 'enemy', x: arena.center.x, y: arena.center.y,
+      expiresAt: state.elapsed + TRAIL.durationMs, damagedMask: 0, damaged: false,
+    };
+    state.trailMarks.push(mark);
+
+    const hp0 = state.player.hp;
+    stepMatch(state, 16.667, noInput);
+    check('a mark that bites sets the VICTIM\'s bit, and only that bit',
+      mark.damagedMask === fighterBit(state.player.id)
+      && (mark.damagedMask & fighterBit(state.enemy.id)) === 0,
+      `mask ${mark.damagedMask}, victim bit ${fighterBit(state.player.id)}`);
+    check('…and the legacy boolean mirrors `damagedMask !== 0` exactly',
+      mark.damaged === (mark.damagedMask !== 0));
+    check('…and it dealt TRAIL.damage once', hp0 - state.player.hp === TRAIL.damage);
+
+    const hp1 = state.player.hp;
+    stepMatch(state, 16.667, noInput);
+    check('…and does not bite the same victim twice', state.player.hp === hp1);
+
+    // The bit is what stops it, not the boolean: clear the bit and it bites again.
+    mark.damagedMask &= ~fighterBit(state.player.id);
+    const hp2 = state.player.hp;
+    stepMatch(state, 16.667, noInput);
+    check('KNOWN-BAD: clearing the victim\'s BIT (leaving `damaged` true) makes it bite again',
+      hp2 - state.player.hp === TRAIL.damage,
+      `damaged is still ${mark.damaged}; lost ${hp2 - state.player.hp}`);
+  }
+
+  // ── (e) THE EVENT PROTOCOL NAMES EVERY FIGHTER BY SLOT ────────────────────
+  //
+  // Every `GameEvent` that identifies a fighter carries a `*Id` beside the legacy `*Role`.
+  // This walks a REAL match's whole event stream and requires the two to agree on every
+  // one — a mirror that is written in two places is a mirror that will disagree.
+  {
+    const FIELDS = [
+      ['weapon-fired', 'fighterRole', 'fighterId'],
+      ['projectile-spawned', 'ownerRole', 'ownerId'],
+      ['hit-landed', 'targetRole', 'targetId'],
+      ['heal', 'fighterRole', 'fighterId'],
+      ['death', 'fighterRole', 'fighterId'],
+      ['trail-mark-created', 'ownerRole', 'ownerId'],
+      ['match-ended', 'winner', 'winnerId'],
+    ];
+    const audit = (evs) => {
+      const seen = new Map();
+      const bad = [];
+      for (const ev of evs) {
+        for (const [type, roleKey, idKey] of FIELDS) {
+          if (ev.type !== type) continue;
+          seen.set(type, (seen.get(type) ?? 0) + 1);
+          if (typeof ev[idKey] !== 'number' || roleOfSlot(ev[idKey]) !== ev[roleKey]) {
+            bad.push(`${type}.${idKey}=${ev[idKey]} vs .${roleKey}=${ev[roleKey]}`);
+          }
+        }
+        if (ev.type === 'hit-landed' && ev.source.kind === 'weapon') {
+          seen.set('source.weapon', (seen.get('source.weapon') ?? 0) + 1);
+          if (typeof ev.source.attackerId !== 'number') bad.push('hit-landed.source.attackerId missing');
+        }
+        if (ev.type === 'hit-landed' && ev.source.kind === 'trail') {
+          seen.set('source.trail', (seen.get('source.trail') ?? 0) + 1);
+          if (roleOfSlot(ev.source.ownerId) !== ev.source.ownerRole) bad.push('hit-landed.source.trail id/role disagree');
+        }
+      }
+      return { seen, bad };
+    };
+
+    // A real Donut match, so the trail source and a death both actually occur.
+    const state = createMatch(makeArena({ width: 1400, height: 1000, maxSafeRadius: 700 }), 'donut', 'hamburger');
+    const all = [];
+    for (let i = 0; i < 4000 && state.phase !== 'ended'; i++) {
+      for (const ev of stepMatch(state, 16.667, { move: { x: 1, y: 0.2 }, selectedWeapon: 0, attack: true })) all.push(ev);
+    }
+    const { seen, bad } = audit(all);
+    check('a real match emits every fighter-naming event kind at least once',
+      seen.size >= 6, `${all.length} events: ${[...seen.entries()].map(([k, v]) => `${k}x${v}`).join(' ')}`);
+    check('…and the slot id agrees with the legacy seat name on every single one',
+      bad.length === 0, bad.slice(0, 4).join(' | '));
+
+    // KNOWN-BAD: the auditor must fail on a deliberately mismatched pair, or "0 bad" means
+    // nothing. Both directions — a wrong id and a missing one.
+    const forged = audit([
+      { type: 'death', fighterRole: 'player', fighterId: 1 },
+      { type: 'heal', fighterRole: 'enemy', amount: 1 },
+    ]);
+    check('KNOWN-BAD: the auditor catches a forged id/role mismatch AND a missing id',
+      forged.bad.length === 2, forged.bad.join(' | '));
   }
 }
 

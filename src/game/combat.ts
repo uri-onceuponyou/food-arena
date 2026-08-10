@@ -2,10 +2,15 @@
  * Combat resolution: firing weapons, applying damage/status, spawning projectiles.
  *
  * `attemptAttack` is the single entry point for BOTH the player and the AI — the AI
- * (see `ai.ts`) calls it with `attackerRole: 'enemy'` and a weapon index it already
- * chose. Sharing one function is what guarantees the two sides play by identical
- * rules (cooldown consumption, melee cone check, projectile spawning) with no
- * special-casing between them.
+ * (see `ai.ts`) hands it the fighter it is driving and a weapon index it already
+ * chose, exactly as `sim.ts` hands it the human's.
+ *
+ * Sharing one function is what guarantees the two sides play by identical rules (cooldown
+ * consumption, melee cone check, projectile spawning) with no special-casing between them.
+ *
+ * ⚠️ IT TAKES A `Fighter`, NOT A SEAT NAME. It used to take `attackerRole: FighterRole` —
+ * a two-valued string, so `attemptAttack(state, 'enemy', ...)` was the only way to say
+ * "this one" and there could only ever be two of them.
  *
  * `applyDamage` is likewise the single place HP ever goes down, for every source:
  * weapon hits, Donut's trail, the central hazard, and the closing fog. Every one of
@@ -26,8 +31,8 @@ import {
   type StatusEffect,
   type Weapon,
 } from './rules.ts';
-import type { DamageSource, Fighter, FighterRole, GameEvent, MatchState, Vec2 } from './state.ts';
-import { otherRole } from './state.ts';
+import type { DamageSource, Fighter, GameEvent, MatchState, Vec2 } from './state.ts';
+import { opponentOf } from './state.ts';
 import { breakConcealment } from './movement.ts';
 
 const RAD2DEG = 180 / Math.PI;
@@ -45,15 +50,14 @@ const DEG2RAD = Math.PI / 180;
 const MELEE_COINCIDENT_EPS = 1e-6;
 
 /**
- * True if `role`'s character has a live Sticky Trail mark of its own underneath it.
+ * True if `fighter`'s character has a live Sticky Trail mark of its own underneath it.
  * Used both for the ranged trail-damage boost here and for the movement speed boost
  * in `sim.ts` (kept here so both call sites share one definition).
  */
-export function isOnOwnTrail(state: MatchState, role: FighterRole): boolean {
-  const fighter = state[role];
+export function isOnOwnTrail(state: MatchState, fighter: Fighter): boolean {
   if (!CHARACTERS[fighter.characterId].hasTrail) return false;
   return state.trailMarks.some(
-    (mark) => mark.ownerRole === role && Math.hypot(fighter.x - mark.x, fighter.y - mark.y) < TRAIL.radius,
+    (mark) => mark.ownerId === fighter.id && Math.hypot(fighter.x - mark.x, fighter.y - mark.y) < TRAIL.radius,
   );
 }
 
@@ -78,7 +82,7 @@ export function statusReadyAt(fighter: Fighter, effect: 'slow' | 'stun'): number
 }
 
 /**
- * Apply `amount` damage to `targetRole`, optionally inflicting a status effect,
+ * Apply `amount` damage to `target`, optionally inflicting a status effect,
  * clamping HP, recording the hit for regen/VFX purposes, and ending the match if
  * this was the killing blow. This is the ONLY place fighter HP is reduced anywhere
  * in the sim — combat hits, trail damage, the central hazard, and fog all funnel
@@ -93,13 +97,12 @@ export function statusReadyAt(fighter: Fighter, effect: 'slow' | 'stun'): number
  */
 export function applyDamage(
   state: MatchState,
-  targetRole: FighterRole,
+  target: Fighter,
   amount: number,
   effect: StatusEffect,
   source: DamageSource,
   events: GameEvent[],
 ): void {
-  const target = state[targetRole];
   if (!target.alive) return;
 
   // ── THE LEVEL TERM IS APPLIED HERE, AND ONLY HERE ──────────────────────────
@@ -113,16 +116,21 @@ export function applyDamage(
   // the fog or the central hazard — those are the ARENA hitting you, and making them
   // scale with your level would mean levelling up made the map more dangerous. So:
   //
-  //   'weapon'  the attacker is the target's opponent, always — a weapon can only ever
-  //             be aimed at the other fighter (`attemptAttack` passes `otherRole`, and a
-  //             projectile's `targetRole` is fixed to the opponent at spawn).
-  //   'trail'   the source carries `ownerRole` explicitly, because a Sticky Trail mark
+  //   'weapon'  the source carries `attackerId` explicitly. ⚠️ IT USED TO SAY *"the
+  //             attacker is the target's opponent, ALWAYS — a weapon can only ever be
+  //             aimed at the other fighter"* and DERIVE it with `otherRole(targetRole)`.
+  //             That was true, and it is the first sentence in this file that stops being
+  //             true at three fighters: a hit would then be scaled by the level of whoever
+  //             happened not to be the victim. The rule is now STATED by the thing that
+  //             knows it — `attemptAttack` for a melee swing, the projectile's own
+  //             `ownerId` for a shot that outlives the tick that fired it.
+  //   'trail'   the source carries `ownerId` explicitly, because a Sticky Trail mark
   //             outlives the tick that dropped it.
   //   'fog' / 'hazard'  no attacker, no scaling.
   //
   // `damageMul` is exactly 1.0 at LEVEL_MIN, so every pre-levels match is bit-identical.
-  const attacker = source.kind === 'weapon' ? state[otherRole(targetRole)]
-    : source.kind === 'trail' ? state[source.ownerRole]
+  const attacker = source.kind === 'weapon' ? state.fighters[source.attackerId]
+    : source.kind === 'trail' ? state.fighters[source.ownerId]
     : null;
   const dealt = attacker ? amount * attacker.damageMul : amount;
 
@@ -148,23 +156,30 @@ export function applyDamage(
   // level multiplier, which is precisely the class of defect (`DECISIONS §13`) where a
   // screen shows a number the model does not compute. `hud.ts` already rounds it for
   // display and `setBar` already ceils HP, so a continuous term needs nothing downstream.
-  events.push({ type: 'hit-landed', targetRole, amount: dealt, effect, source, x: target.x, y: target.y });
+  events.push({ type: 'hit-landed', targetRole: target.role, targetId: target.id, amount: dealt, effect, source, x: target.x, y: target.y });
 
   if (target.hp === 0) {
     target.alive = false;
-    events.push({ type: 'death', fighterRole: targetRole });
+    events.push({ type: 'death', fighterRole: target.role, fighterId: target.id });
     if (state.phase === 'playing') {
+      // ⚠️ THE KNOCKOUT WINNER IS THE TARGET RULE'S ANSWER, not `otherRole`. At N=2 they
+      // are the same fighter. At N>2 "the other one" does not exist and this becomes
+      // "the last one standing", which is a check on `fighters`, not on this target —
+      // one of the two identifiers (`opponentOf`, `MAX_FIGHTERS`) that raising the cap
+      // has to visit. See `state.ts:opponentOf`.
+      const victor = opponentOf(state, target);
       state.phase = 'ended';
-      state.winner = otherRole(targetRole);
-      events.push({ type: 'match-ended', winner: state.winner });
+      state.winner = victor.role;
+      state.winnerId = victor.id;
+      events.push({ type: 'match-ended', winner: victor.role, winnerId: victor.id });
     }
   }
 }
 
 function spawnProjectile(
   state: MatchState,
-  ownerRole: FighterRole,
-  targetRole: FighterRole,
+  owner: Fighter,
+  target: Fighter,
   weapon: Weapon,
   angleOffsetDeg: number,
   damage: number,
@@ -184,8 +199,10 @@ function spawnProjectile(
   const id = state.nextId++;
   state.projectiles.push({
     id,
-    ownerRole,
-    targetRole,
+    ownerId: owner.id,
+    targetId: target.id,
+    ownerRole: owner.role,
+    targetRole: target.role,
     weapon,
     x: origin.x,
     y: origin.y,
@@ -200,7 +217,8 @@ function spawnProjectile(
   events.push({
     type: 'projectile-spawned',
     id,
-    ownerRole,
+    ownerRole: owner.role,
+    ownerId: owner.id,
     weaponKey: weapon.key,
     x: origin.x,
     y: origin.y,
@@ -210,7 +228,7 @@ function spawnProjectile(
 }
 
 /**
- * Attempt one attack with `weapons[weaponIndex]` for `attackerRole`. Returns false
+ * Attempt one attack with `weapons[weaponIndex]` for `attacker`. Returns false
  * only when the attack could not even be attempted (unknown weapon slot, or still
  * on cooldown) — everything else (too far, wrong facing for a melee cone, target
  * already dead) still returns true and still consumes the cooldown, because that is
@@ -220,15 +238,17 @@ function spawnProjectile(
  */
 export function attemptAttack(
   state: MatchState,
-  attackerRole: FighterRole,
+  attacker: Fighter,
   weaponIndex: number,
   events: GameEvent[],
 ): boolean {
   if (state.phase !== 'playing') return false;
 
-  const attacker = state[attackerRole];
-  const targetRole = otherRole(attackerRole);
-  const target = state[targetRole];
+  // ⚠️ THE TARGET RULE, ASKED ONCE. Was `otherRole(attackerRole)` — see `state.ts:opponentOf`
+  // for why the five places that asked this question now share one answer, and for what has
+  // to change at N>2 (this caller wants "nearest living fighter that is not me"; the
+  // knockout winner wants "the last one standing"; they are not the same generalisation).
+  const target = opponentOf(state, attacker);
   const weapons = CHARACTERS[attacker.characterId].weapons;
   const w = weapons[weaponIndex];
   if (!w) return false;
@@ -236,7 +256,7 @@ export function attemptAttack(
   const now = state.elapsed;
   if (now - attacker.lastUsed[weaponIndex] < w.cooldown) return false;
   attacker.lastUsed[weaponIndex] = now;
-  events.push({ type: 'weapon-fired', fighterRole: attackerRole, weaponKey: w.key });
+  events.push({ type: 'weapon-fired', fighterRole: attacker.role, fighterId: attacker.id, weaponKey: w.key });
 
   // ── ATTACKING SPENDS YOUR COVER (DECISIONS §29c) ───────────────────────────
   //
@@ -275,7 +295,8 @@ export function attemptAttack(
     for (const box of breakConcealment(attacker.x, attacker.y, state.arena, state.brokenConcealment)) {
       events.push({
         type: 'concealment-broken',
-        ownerRole: attackerRole,
+        ownerRole: attacker.role,
+        ownerId: attacker.id,
         x: box.x,
         y: box.y,
         w: box.w,
@@ -317,7 +338,7 @@ export function attemptAttack(
     const healAmount = (w.healAmount ?? 0) * levelHealthMultiplier(attacker.level);
     const healed = Math.min(healAmount, attacker.maxHp - attacker.hp);
     attacker.hp = Math.min(attacker.maxHp, attacker.hp + healAmount);
-    if (healed > 0) events.push({ type: 'heal', fighterRole: attackerRole, amount: healed });
+    if (healed > 0) events.push({ type: 'heal', fighterRole: attacker.role, fighterId: attacker.id, amount: healed });
     return true;
   }
 
@@ -365,7 +386,7 @@ export function attemptAttack(
       if (angleTo > cone / 2) return true; // "wrong direction"
     }
 
-    applyDamage(state, targetRole, w.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name }, events);
+    applyDamage(state, target, w.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: attacker.id }, events);
     return true;
   }
 
@@ -375,12 +396,12 @@ export function attemptAttack(
 
   if (w.comboParts) {
     for (const part of w.comboParts) {
-      spawnProjectile(state, attackerRole, targetRole, w, part.angle, part.damage, part.color, part.emoji, origin, facing, events);
+      spawnProjectile(state, attacker, target, w, part.angle, part.damage, part.color, part.emoji, origin, facing, events);
     }
     return true;
   }
 
-  const boosted = !!w.trailBoosted && isOnOwnTrail(state, attackerRole);
+  const boosted = !!w.trailBoosted && isOnOwnTrail(state, attacker);
   const dmg = boosted ? Math.round(w.damage * TRAIL.damageBoost) : w.damage;
 
   if (w.pellets && w.pellets > 1) {
@@ -389,10 +410,10 @@ export function attemptAttack(
       const offset = (i - (w.pellets - 1) / 2) * spread;
       const color = w.pelletColors ? w.pelletColors[i % w.pelletColors.length] : undefined;
       const emoji = w.pelletEmojis ? w.pelletEmojis[i % w.pelletEmojis.length] : undefined;
-      spawnProjectile(state, attackerRole, targetRole, w, offset, dmg, color, emoji, origin, facing, events);
+      spawnProjectile(state, attacker, target, w, offset, dmg, color, emoji, origin, facing, events);
     }
   } else {
-    spawnProjectile(state, attackerRole, targetRole, w, 0, dmg, undefined, undefined, origin, facing, events);
+    spawnProjectile(state, attacker, target, w, 0, dmg, undefined, undefined, origin, facing, events);
   }
   return true;
 }

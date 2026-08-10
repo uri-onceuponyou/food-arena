@@ -119,7 +119,12 @@ function pressValue(attackerId, targetId, wi, d, mode = TARGET_MODE) {
   };
 
   const fired = [];
-  attemptAttack(state, 'enemy', wi, fired);
+  // ⚠️ A FIGHTER, NOT A SEAT NAME. `attemptAttack` took `attackerRole: 'enemy'` until the
+  // N-fighter container landed (2026-08-10) and now takes the `Fighter` itself — a seat name
+  // can only ever address two of them. Declared as an out-of-set edit by that pass: this
+  // file is the validator `ai.ts`'s PRESS_VALUE block cites ("183 of 183 cells exact"), and
+  // the old call threw rather than measuring wrongly.
+  attemptAttack(state, state.enemy, wi, fired);
   take(fired);
 
   // Park the phase so the playing block — aim, player movement, `stepAI`, the world

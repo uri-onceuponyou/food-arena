@@ -107,7 +107,8 @@ export const MATCH_DURATION_MS = 45_000; // 0:45
  *
  * `COUNTDOWN_FROM * 1000 + COUNTDOWN_START_FLASH_MS` is the ONLY block of a match in
  * which the simulation is, by construction, incapable of doing anything: `stepMatch`
- * gates `applyAim`, `attemptAttack`, `movePlayer`, `stepAI` and `applyWorldTick` on
+ * gates `applyAim`, `attemptAttack`, `moveFighter` (named `movePlayer` until 2026-08-10),
+ * `stepAI` and `applyWorldTick` on
  * `phase === 'playing'`, so during the countdown the two fighters stand on their spawns
  * and no code path can change that. It was **5,700 ms**.
  *
@@ -724,7 +725,8 @@ export const REGEN_AMOUNT = 2;
  * ── ⚠️ "ANYONE" IS NOT TRUE TODAY, AND THE SAME IS TRUE OF `PUDDLE_SLOW_FACTOR` ──
  *
  * MEASURED AND PARKED, 2026-08-05. Both of this file's terrain-slow rules are stated
- * for *anyone*, and both are implemented ONCE — in `sim.ts:movePlayer`, which is the
+ * for *anyone*, and both are implemented ONCE — in `sim.ts:moveFighter` (named
+ * `movePlayer` until 2026-08-10), which is the
  * only caller of `terrainSlowFactor()` that scales a speed. `ai.ts:stepAI` builds its
  * own `aiSlowMult` out of the STATUS slow alone. **The enemy walks through every puddle
  * and every splat in the game at full speed.**
@@ -767,7 +769,7 @@ export const REGEN_AMOUNT = 2;
  * So it is a real defect with a real cost, and it is NOT the Hamburger role split it was
  * hunted for: it moves that split 50.6 -> 50.0 pp. Whoever owns `sim.ts` should land it
  * the moment the settled count can afford +2 — the honest place for it is
- * `sim.ts:movePlayer`'s own `terrainSlowFactor()` being shared with `ai.ts` through
+ * `sim.ts:moveFighter`'s own `terrainSlowFactor()` being shared with `ai.ts` through
  * `movement.ts`, which exists precisely so the two sides can share a movement rule
  * without an import cycle. `sim.test.mjs` §25(a) is a guard in BOTH directions, so
  * landing it fails the test and forces the record to be re-read.

@@ -38,7 +38,8 @@
  *   * TERRAIN SLOW REACHES THE PLAYER AND NOT THE ENEMY. `rules.ts` states it twice, in
  *     prose, and both times for *anyone* — `PUDDLE_SLOW_FACTOR` ("slows anyone inside
  *     it") and `SPLAT_DURATION_MS` ("slows anyone standing in it"). It is implemented
- *     once, in `sim.ts:movePlayer`, the only caller of `terrainSlowFactor()` that scales
+ *     once, in `sim.ts:moveFighter` (named `movePlayer` until 2026-08-10), the only caller
+ *     of `terrainSlowFactor()` that scales
  *     a speed. `aiSlowMult` below is built out of the STATUS slow alone, so the enemy
  *     crosses every puddle and every splat in the game at full speed.
  *
@@ -66,11 +67,20 @@
  *
  *     This is the ONLY one of the six that was closed before it shipped, and only because
  *     it was PROBED rather than reviewed. All three sites now derive from `tx, ty` in the
- *     perception block of `stepAI`, `state.player` appears nowhere else in the function,
- *     and `sim.test.mjs` §26(e) pins all three behaviourally in ONE experiment with its
+ *     perception block of `stepAI`, the TARGET is read nowhere else in the function, and
+ *     `sim.test.mjs` §26(e) pins all three behaviourally in ONE experiment with its
  *     ablation. There is a fourth reader OUTSIDE this file — homing projectiles re-aim
  *     every tick — handled at `sim.ts:stepProjectiles` through the same predicate and
  *     pinned by §26(g).
+ *
+ * ── AND `stepAI` NOW TAKES THE FIGHTER IT IS DRIVING (2026-08-10) ───────────
+ *
+ * `stepAI(state, self, dt, events)`. It used to read `state.enemy` and `state.player`, which
+ * made "the AI" A PLACE rather than a fighter — two AI-controlled fighters would have shared
+ * one seat and driven each other. Its target comes from `state.ts:opponentOf`, the single
+ * target rule, and its belief from one cell of `MatchState.sightings` addressed by
+ * `sightingIndex(self.id, target.id, n)` rather than from a match-wide `aiSighting`. Proven
+ * bit-identical at N=2 over state AND events; see the acceptance run in the commit message.
  *
  * ── AND THE SHAPE HAS LEFT THIS FILE ────────────────────────────────────────
  *
@@ -108,7 +118,8 @@ import {
   type Weapon,
   type WeaponType,
 } from './rules.ts';
-import type { GameEvent, MatchState } from './state.ts';
+import type { Fighter, GameEvent, MatchState } from './state.ts';
+import { opponentOf, sightingIndex } from './state.ts';
 import { attemptAttack } from './combat.ts';
 import { isVisibleFrom, moveToward } from './movement.ts';
 
@@ -251,7 +262,7 @@ const ALLOW_HEAL: WeaponAllow = { melee: false, ranged: false, self: true };
  * and is skipped. Module-level function references, never per-tick closures — `stepAI`
  * runs every tick of every match and this file allocates nothing in the steady state.
  */
-type WeaponRank = (state: MatchState, w: Weapon, index: number, adist: number) => number;
+type WeaponRank = (state: MatchState, self: Fighter, w: Weapon, index: number, adist: number) => number;
 
 /**
  * ── WHAT A PRESS IS WORTH, AND WHY IT IS NOT `damage` ────────────────────────
@@ -450,7 +461,7 @@ export function pressValue(w: Weapon, adist: number): number {
   return v;
 }
 
-const rankPressValue: WeaponRank = (_state, w, _index, adist) => pressValue(w, adist);
+const rankPressValue: WeaponRank = (_state, _self, w, _index, adist) => pressValue(w, adist);
 
 /**
  * The AI's only defensive resource. See `rules.ts` AUTHORISED DEVIATION #7 — until
@@ -458,12 +469,11 @@ const rankPressValue: WeaponRank = (_state, w, _index, adist) => pressValue(w, a
  * character. `-Infinity` for a heal that is not worth spending yet, which is how the
  * "not hurt enough" and "would overheal" rules reach the one selector.
  */
-const rankHeal: WeaponRank = (state, w) => {
-  const enemy = state.enemy;
+const rankHeal: WeaponRank = (_state, self, w) => {
   const heal = w.healAmount ?? 0;
   if (heal <= 0) return -Infinity;
-  if (enemy.hp > enemy.maxHp * AI_SELF_HEAL_HP_FRACTION) return -Infinity; // not hurt enough
-  if (enemy.maxHp - enemy.hp < heal) return -Infinity; // would overheal — wait
+  if (self.hp > self.maxHp * AI_SELF_HEAL_HP_FRACTION) return -Infinity; // not hurt enough
+  if (self.maxHp - self.hp < heal) return -Infinity; // would overheal — wait
   return heal;
 };
 
@@ -475,9 +485,8 @@ const rankHeal: WeaponRank = (state, w) => {
  * weapon has no `range`, so `range ?? Infinity` makes the reach test a no-op for it
  * rather than a special case.
  */
-function pickWeapon(state: MatchState, adist: number, allow: WeaponAllow, rank: WeaponRank): number | null {
-  const enemy = state.enemy;
-  const weapons = CHARACTERS[enemy.characterId].weapons;
+function pickWeapon(state: MatchState, self: Fighter, adist: number, allow: WeaponAllow, rank: WeaponRank): number | null {
+  const weapons = CHARACTERS[self.characterId].weapons;
   const now = state.elapsed;
 
   let bestIndex: number | null = null;
@@ -485,9 +494,9 @@ function pickWeapon(state: MatchState, adist: number, allow: WeaponAllow, rank: 
   for (let i = 0; i < weapons.length; i++) {
     const w = weapons[i];
     if (!allow[w.type]) continue;
-    if (now - enemy.lastUsed[i] < w.cooldown) continue;
+    if (now - self.lastUsed[i] < w.cooldown) continue;
     if (adist > (w.range ?? Infinity)) continue;
-    const score = rank(state, w, i, adist);
+    const score = rank(state, self, w, i, adist);
     // Strict `>` (not `>=`) preserves "first weapon wins on a tie", matching the
     // prototype's stable `Array.sort` + take-first. It is also what excludes a
     // `-Infinity` rank without a second test.
@@ -509,28 +518,37 @@ function pickWeapon(state: MatchState, adist: number, allow: WeaponAllow, rank: 
  * Sticky Trail drop, exactly mirroring how the prototype's trail-drop condition is
  * "keys were pressed", not "position changed".
  */
-export function stepAI(state: MatchState, dt: number, events: GameEvent[]): boolean {
+export function stepAI(state: MatchState, self: Fighter, dt: number, events: GameEvent[]): boolean {
   if (state.phase !== 'playing') return false;
 
-  const enemy = state.enemy;
-  const player = state.player;
-  if (enemy.hp <= 0 || player.hp <= 0) return false;
+  // ⚠️ `self` AND `target`, NOT `state.enemy` AND `state.player`. This function used to
+  // read both seats off the match by name, which made "the AI" a place rather than a
+  // fighter: two AI-controlled fighters would have shared one `state.enemy` and driven each
+  // other. `sim.ts`'s fighter loop now hands it whichever slot it is stepping, and the
+  // target comes from the one target rule (`state.ts:opponentOf`).
+  const target = opponentOf(state, self);
+  if (self.hp <= 0 || target.hp <= 0) return false;
 
   const now = state.elapsed;
 
   /**
-   * ── PERCEPTION: THE ONE PLACE THIS FILE LOOKS AT THE PLAYER ────────────────
+   * ── PERCEPTION: THE ONE PLACE THIS FILE LOOKS AT ITS TARGET ────────────────
    *
-   * Everything below is derived from `tx, ty` — WHERE THE ENEMY BELIEVES THE PLAYER IS —
-   * and `state.player.x/y` appears nowhere else in `stepAI` after these five lines. That
-   * is the entire point of the block, and it is a guard rather than a tidy-up.
+   * Everything below is derived from `tx, ty` — WHERE THIS FIGHTER BELIEVES ITS TARGET IS —
+   * and `target.x/y` appears nowhere else in `stepAI` after these five lines. That is the
+   * entire point of the block, and it is a guard rather than a tidy-up.
+   *
+   * ⚠️ It used to say `state.player.x/y`, because there was one AI and one human and the
+   * function read both seats off the match by name. The GUARD is unchanged — one read, three
+   * derived sites — but the quantity it is about is now the fighter this call was handed
+   * and the fighter `opponentOf` returned, not two properties of `MatchState`.
    *
    * `tools/tmp/p4_coverdensity.mjs`'s probe report found that this function read the
    * player's TRUE position at three independent sites, and that they were not all derived
    * from one another:
    *
    *   1. `adx/ady` here             — separation, weapon-range gating, press value, intent
-   *   2. `enemy.facing` below       — aim; `combat.ts` resolves the melee cone AND the
+   *   2. `self.facing` below        — aim; `combat.ts` resolves the melee cone AND the
    *                                   projectile heading off it, `match.ts` rotates the
    *                                   model by it (derived from 1, so it followed for free)
    *   3. the CHASE NAV TARGET       — `steer(..., player.x, player.y)` passed the player's
@@ -550,32 +568,44 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
    *
    * ⚠️ INERT BY CONSTRUCTION WHEN NO ARENA SUPPLIES CONCEALMENT. `isVisibleFrom` returns
    * `true` unconditionally for an empty region list, so `sighting` is refreshed to the
-   * player's exact position on every tick and `tx, ty === player.x, player.y` identically.
+   * target's exact position on every tick and `tx, ty === target.x, target.y` identically.
    * That is not an argument, it is the acceptance test: `tools/tmp/conceal_lab.mjs --bitid`
    * runs 110 matchups x 32 seeds against a `--sim-ref` extraction of the previous commit
    * and requires ZERO differing ticks.
+   *
+   * ⚠️ AND IT IS STRONGER THAN "INERT": `conceal_lab.mjs --ablate` perturbs THIS CELL on
+   * EVERY TICK of its whole corpus on the shipped arena and finds **zero** difference in
+   * state or events, because the refresh above happens before the read below. The same
+   * perturbation on an arena that HAS regions diverges. The belief is not merely equal to
+   * the truth with no cover — it is causally unreachable. (No count here on purpose: the
+   * corpus size is `--seeds`, and the tool prints what it actually ran.)
    */
-  // ⚠️ `state, player` ARE THE §29c ARGUMENTS, AND THIS ONE CALL IS WHY THE RULE REACHES
+  // ⚠️ `state, target` ARE THE §29c ARGUMENTS, AND THIS ONE CALL IS WHY THE RULE REACHES
   // ALL THREE SITES. Destroyed cover (`MatchState.brokenConcealment`) and the reveal window
   // a fighter's own attack buys (`Fighter.revealedUntil`) are per-MATCH facts that
   // `ArenaDefinition` cannot carry — it is one shared object across every match a process
   // runs. Because the perception block below derives `tx, ty` from this single boolean, and
-  // `state.player` appears nowhere else in `stepAI`, adding them here routes the reveal to
+  // `target` is read nowhere else in `stepAI`, adding them here routes the reveal to
   // the separation, the facing AND the nav target in one edit. Route it to two of the three
   // and you get the sixth instance of this file's oldest defect; `sim.test.mjs` §26(k)
   // pins all three behaviourally in one experiment, with its ablation.
-  const visible = isVisibleFrom(enemy.x, enemy.y, player.x, player.y, state.arena, state, player);
-  const sighting = state.aiSighting;
+  const visible = isVisibleFrom(self.x, self.y, target.x, target.y, state.arena, state, target);
+  // THIS OBSERVER'S ROW, THIS TARGET'S COLUMN. One cell of `MatchState.sightings`, mutated
+  // in place — the belief belongs to the pair, not to the match, which is why the single
+  // `state.aiSighting` became an N x N matrix. At N=2 the index is 1 * 2 + 0 = 2, which is
+  // exactly the cell `aiSighting` aliases, so this reads and writes the same object it
+  // always did.
+  const sighting = state.sightings[sightingIndex(self.id, target.id, state.fighters.length)];
   if (visible) {
-    sighting.x = player.x;
-    sighting.y = player.y;
+    sighting.x = target.x;
+    sighting.y = target.y;
     sighting.at = now;
   }
   const tx = sighting.x;
   const ty = sighting.y;
 
-  const adx = tx - enemy.x;
-  const ady = ty - enemy.y;
+  const adx = tx - self.x;
+  const ady = ty - self.y;
   const separation = Math.hypot(adx, ady);
   // `|| 1` keeps the historical range-check behaviour at zero separation (0 and 1 are
   // both inside every weapon's range), but it must NOT be used to derive a direction —
@@ -605,14 +635,15 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
    */
   const hasBearing = separation > 1e-6;
 
-  const fleeing = enemy.hp < enemy.maxHp * AI_FLEE_HP_FRACTION;
-  const aiSlowMult = now < enemy.status.slowedUntil ? AI_SLOW_MULTIPLIER : 1;
+  const fleeing = self.hp < self.maxHp * AI_FLEE_HP_FRACTION;
+  const aiSlowMult = now < self.status.slowedUntil ? AI_SLOW_MULTIPLIER : 1;
 
   /**
    * ── WHAT A STUN LOCKS ────────────────────────────────────────────────────
    *
    * `rules.ts` states the rule once — `STUN_DURATION_MS`, "stunned = movement locked
-   * to 0" — and `sim.ts:movePlayer` implements exactly that and nothing more: a
+   * to 0" — and `sim.ts:moveFighter` (was `movePlayer`) implements exactly that and
+   * nothing more: a
    * stunned player still aims (`applyAim` is unconditional) and still fires
    * (`attemptAttack` is called before the movement ever runs). Only `speed` goes to 0.
    *
@@ -627,7 +658,7 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
    * `attemptedMove`, the Sticky Trail drop that movement earns, exactly as a stunned
    * player's zeroed `mdx/mdy` does. It suppresses nothing else.
    */
-  const rooted = now < enemy.status.stunnedUntil;
+  const rooted = now < self.status.stunnedUntil;
 
   /**
    * FACING IS AIM, NOT TRAVEL. It is read by `combat.ts` for the melee cone and the
@@ -670,7 +701,7 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
    * FIX — same device, opposite direction, so neither can be undone by accident.
    */
   if (hasBearing) {
-    enemy.facing = { x: adx / adist, y: ady / adist };
+    self.facing = { x: adx / adist, y: ady / adist };
   }
 
   let attemptedMove = false;
@@ -698,7 +729,7 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
   // The steering needs to know where the fighter WANTED to go, so it can round a hazard
   // on the side that still makes progress. That is `fleeing` ? away : toward.
   const intentSign = fleeing ? -1 : 1;
-  const danger = dangerSteer(state, enemy.x, enemy.y,
+  const danger = dangerSteer(state, self.x, self.y,
     (intentSign * adx) / adist, (intentSign * ady) / adist);
   const urgent = danger >= AI_ESCAPE_PRIORITY;
   /**
@@ -717,8 +748,8 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
     if (m < EPS) return;
     STEER.dirX = bx / m;
     STEER.dirY = by / m;
-    STEER.navX = enemy.x + STEER.dirX * STEER_LEAD;
-    STEER.navY = enemy.y + STEER.dirY * STEER_LEAD;
+    STEER.navX = self.x + STEER.dirX * STEER_LEAD;
+    STEER.navY = self.y + STEER.dirY * STEER_LEAD;
   };
 
   /**
@@ -733,7 +764,7 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
 
   // The heal is chosen before the flee/chase split because it is worth the same in both,
   // and it consumes the tick's ATTACK exactly like any other weapon — never both.
-  const healIndex = escaping ? null : pickWeapon(state, adist, ALLOW_HEAL, rankHeal);
+  const healIndex = escaping ? null : pickWeapon(state, self, adist, ALLOW_HEAL, rankHeal);
 
   if (fleeing) {
     // ⚠️ NOTHING WRITES `facing` HERE ANY MORE. A line that pointed it directly away from
@@ -741,7 +772,7 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
     // it. Aim is set once, at the player, in the facing block above — read it before
     // re-introducing anything that turns a retreating fighter's aim with its feet.
     if (!rooted) {
-      const step = speedFor(enemy.characterId, AI_FLEE_SPEED) * dt * aiSlowMult;
+      const step = speedFor(self.characterId, AI_FLEE_SPEED) * dt * aiSlowMult;
       // Flee target is directly away from the player, so slide around cover toward
       // that point rather than pinning against it — now bent back inside the ring, which
       // is the whole reason a retreating AI used to run itself into the fog. At zero
@@ -750,8 +781,8 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
       // That is unchanged by the aim fix and is the movement half of the same degeneracy
       // `hasBearing` answers for the aim — see the facing block.
       steer(-adx / adist, -ady / adist,
-        enemy.x - (adx / adist) * STEER_LEAD, enemy.y - (ady / adist) * STEER_LEAD);
-      moveToward(enemy, STEER.dirX, STEER.dirY, step, state.arena, STEER.navX, STEER.navY);
+        self.x - (adx / adist) * STEER_LEAD, self.y - (ady / adist) * STEER_LEAD);
+      moveToward(self, STEER.dirX, STEER.dirY, step, state.arena, STEER.navX, STEER.navY);
       attemptedMove = true;
     }
     // Fires whether or not it managed to move: the flee branch has always done both in
@@ -776,19 +807,19 @@ export function stepAI(state: MatchState, dt: number, events: GameEvent[]): bool
     // bush you cannot see into. The HEAL is deliberately exempt — it targets the caster,
     // needs no sight of anyone, and gating it here would be the "a rule stated once and
     // implemented twice" defect this file is named for, one branch deeper.
-    const shotIndex = healIndex ?? (visible ? pickWeapon(state, adist, ALLOW_OFFENSIVE, rankPressValue) : null);
-    if (shotIndex !== null) attemptAttack(state, 'enemy', shotIndex, events);
+    const shotIndex = healIndex ?? (visible ? pickWeapon(state, self, adist, ALLOW_OFFENSIVE, rankPressValue) : null);
+    if (shotIndex !== null) attemptAttack(state, self, shotIndex, events);
   } else {
-    const chosenIndex = escaping ? null : (healIndex ?? (visible ? pickWeapon(state, adist, ALLOW_OFFENSIVE, rankPressValue) : null));
+    const chosenIndex = escaping ? null : (healIndex ?? (visible ? pickWeapon(state, self, adist, ALLOW_OFFENSIVE, rankPressValue) : null));
     if (chosenIndex !== null) {
-      attemptAttack(state, 'enemy', chosenIndex, events);
+      attemptAttack(state, self, chosenIndex, events);
     } else if (!rooted) {
-      const step = speedFor(enemy.characterId, AI_CHASE_SPEED) * dt * aiSlowMult;
+      const step = speedFor(self.characterId, AI_CHASE_SPEED) * dt * aiSlowMult;
       // ⚠️ `tx, ty`, NOT `player.x, player.y`. This is site 3 of the three named in the
       // perception block above, and it was the DIRECT read — the one an implementation
       // that only replaced `adx/ady` would have left pointing at the truth.
       steer(adx / adist, ady / adist, tx, ty);
-      moveToward(enemy, STEER.dirX, STEER.dirY, step, state.arena, STEER.navX, STEER.navY);
+      moveToward(self, STEER.dirX, STEER.dirY, step, state.arena, STEER.navX, STEER.navY);
       attemptedMove = true;
     }
   }

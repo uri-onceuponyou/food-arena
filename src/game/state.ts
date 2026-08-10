@@ -28,7 +28,91 @@ import type { ArenaDefinition } from '../arena/types.ts';
 // which ones this match has destroyed.
 import type { ConcealBox } from './movement.ts';
 
+/**
+ * A FIGHTER'S IDENTITY: its SLOT INDEX in `MatchState.fighters`.
+ *
+ * 🚨 `state.fighters[i].id === i` IS AN INVARIANT, not a convention. Every id in the sim —
+ * a projectile's owner and target, a trail mark's owner, a `DamageSource`'s attacker, the
+ * `sightings` matrix's row and column, the `damagedMask` bit — is an index into that one
+ * array, so "who is this" and "where do I find them" are the same question with the same
+ * answer. `sim.test.mjs` §27(a) asserts it rather than trusting it.
+ *
+ * A NUMBER and not a string, and an ARRAY INDEX and not a handle, because the alternative
+ * costs determinism: a `Map`/`Record` keyed by name iterates in insertion order, and
+ * insertion order is the classic lockstep-desync mechanism. Iteration order here is a pure
+ * function of `createMatch`'s arguments.
+ */
+export type FighterId = number;
+
+/**
+ * WHO DECIDES THIS FIGHTER'S INPUTS. Split out of `FighterRole`, which fused three
+ * separate concepts into one two-valued string:
+ *
+ *   1. WHICH SEAT this is            -> `FighterId` (the slot index)
+ *   2. WHO DRIVES IT                 -> this type
+ *   3. WHICH SPAWN / HP DIAL it got  -> `createMatch`'s arguments, and nothing else
+ *
+ * They were the same question only because there were exactly two fighters and exactly one
+ * of them was a human. Uri's stated direction is *"the game eventually should be humans vs.
+ * humans… AI players need to be adjusted to the player's level"* — i.e. any number of
+ * either, in any slot. Nothing in the sim reads `role` to decide behaviour any more;
+ * `sim.ts`'s fighter loop branches on THIS.
+ */
+export type Controller = 'human' | 'ai';
+
+/**
+ * @deprecated LEGACY SEAT NAME. Meaningful only while `fighters.length === 2`.
+ *
+ * Kept — deliberately, and not as an oversight — for two reasons that are both measurements
+ * rather than preferences:
+ *
+ *   1. **`tsc` cannot see four fifths of the callers.** A grep over `src/` + `tools/` found
+ *      **1,307 references to this refactor's surface, of which 1,089 (83%) are in `.mjs`
+ *      files**, and **68 of 71 `createMatch` call sites are untyped**. Deleting this type
+ *      would NOT produce a compile break that finds them; it would produce a silent runtime
+ *      break in the instruments that measure the game.
+ *   2. **Removing a field is a hard failure in the bit-identity differ** (`conceal_lab.mjs`
+ *      `firstDiff`), by design — "tolerate a missing key" is a hole big enough to hide a
+ *      deleted field in. A field that is added is declared and printed; a field that
+ *      vanishes is a regression.
+ *
+ * So every `*Role` field below is now a MIRROR of the corresponding `*Id`, written at the
+ * same moment and never read by gameplay logic. `ui/hud.ts`, `game/match.ts`, `game/vfx.ts`
+ * and `audio/director.ts` still consume them, and none of those files was touched.
+ */
 export type FighterRole = 'player' | 'enemy';
+
+/**
+ * THE TWO-SEAT SEAM, in ONE place.
+ *
+ * The whole point of this refactor was to do the container, the identity, the iteration
+ * order, the perception matrix, the target rule and the event protocol at N=2 — under the
+ * differ, where the right answer is already known — and to raise the cap LAST. This is
+ * the cap. Every place that still assumes exactly two fighters names this constant or
+ * `opponentOf` below, so raising it is a search for two identifiers rather than a reading
+ * of four files.
+ */
+export const MAX_FIGHTERS = 2;
+
+/**
+ * The legacy seat name for a slot. Only slots 0 and 1 have one; see `MAX_FIGHTERS`.
+ * Exported so `createMatch` and `sim.test.mjs` state the mapping once instead of twice.
+ */
+export function roleOfSlot(id: FighterId): FighterRole {
+  return id === 0 ? 'player' : 'enemy';
+}
+
+/**
+ * The bit this fighter occupies in a per-victim mask (see `TrailMark.damagedMask`).
+ *
+ * ⚠️ 31 SLOTS MAX, because a JS bitwise operator coerces to int32. That is 5x the 4–6
+ * fighters `DECISIONS §48` is sizing the arena for, and it is asserted rather than assumed:
+ * `MAX_FIGHTERS` is checked against it in `sim.test.mjs` §27, so the day somebody types 32
+ * the suite says so instead of the mask silently wrapping.
+ */
+export function fighterBit(id: FighterId): number {
+  return 1 << id;
+}
 
 export interface Vec2 {
   x: number;
@@ -43,6 +127,22 @@ export interface StatusTimers {
 }
 
 export interface Fighter {
+  /**
+   * This fighter's SLOT INDEX. `state.fighters[i].id === i` — see `FighterId`.
+   *
+   * ⚠️ **LIVE, NOT DEAD, AND THE FIRST DRAFT OF THIS COMMENT CLAIMED THE OPPOSITE.** It
+   * said the field was "deliberately unread by gameplay in the hot path", which read
+   * plausibly and was false: `opponentOf`, `sightingIndex`, `fighterBit`, `spawnProjectile`
+   * and `applyDamage` all read it, so swapping the two ids makes a fighter its own
+   * opponent. `conceal_lab.mjs --ablate` catches it on the FIRST match it runs, which is
+   * what the ablation is FOR — the design defended its new fields with "unread state cannot
+   * change behaviour", an argument from code reading, and `CLAUDE.md` #6 says not to trust
+   * those. This one was wrong.
+   */
+  id: FighterId;
+  /** Who supplies this fighter's inputs. `sim.ts`'s fighter loop branches on this. */
+  controller: Controller;
+  /** @deprecated LEGACY SEAT NAME — mirrors `roleOfSlot(id)`. See `FighterRole`. */
   role: FighterRole;
   characterId: CharacterId;
   /**
@@ -72,6 +172,25 @@ export interface Fighter {
   maxHp: number;
   /** Full width/height of the AABB used for movement collision (PLAYER_SIZE / ENEMY_SIZE). */
   size: number;
+  /**
+   * The radius inside which a projectile aimed at THIS fighter counts as a hit
+   * (`rules.ts` `HIT_RADIUS_VS_PLAYER` / `HIT_RADIUS_VS_ENEMY`).
+   *
+   * ── IT MOVED HERE FROM A TERNARY, AND THE TERNARY WAS THE BUG SHAPE ─────────
+   *
+   * `sim.ts:stepProjectiles` used to read
+   * `p.targetRole === 'player' ? HIT_RADIUS_VS_PLAYER : HIT_RADIUS_VS_ENEMY`. That is a
+   * property of the TARGET expressed as a two-way branch on a seat name: correct at N=2,
+   * meaningless at N=3, and exactly the "a rule stated once and implemented twice" shape
+   * `ai.ts`'s header documents six instances of. A fighter now carries its own hit radius
+   * and the projectile loop reads it, so a third fighter needs no third branch.
+   *
+   * ⚠️ THIS ONE IS *LIVE*, unlike `id` and `controller` — `conceal_lab.mjs --ablate` is
+   * REQUIRED to see a divergence when it is perturbed. That is what proves the field is
+   * actually wired to the projectile path rather than a copy the ternary still shadows;
+   * it is the positive control that makes the dead-field results mean something.
+   */
+  hitRadius: number;
   facing: Vec2;
   status: StatusTimers;
   alive: boolean;
@@ -165,19 +284,41 @@ export interface Fighter {
   revealedUntil: number;
 }
 
-export function createFighter(
-  role: FighterRole,
-  characterId: CharacterId,
-  spawn: Vec2,
-  maxHp: number,
-  size: number,
-  initialFacing: Vec2,
-  level: number = LEVEL_MIN,
-): Fighter {
+/**
+ * Everything a slot needs to become a fighter.
+ *
+ * A NAMED OBJECT rather than the seven positional arguments this used to take, and the
+ * reason is the same one that motivates the whole refactor: the old signature began
+ * `(role, characterId, spawn, maxHp, size, ...)` — a seat name first, then five values
+ * whose meaning depended on it. Adding `id`, `controller` and `hitRadius` to that list
+ * would have produced a ten-positional call in which `PLAYER_SIZE` and
+ * `HIT_RADIUS_VS_PLAYER` sit adjacent and are both plain numbers. Transposing them
+ * compiles, and `tsc` sees only 3 of the 71 call sites in this repo.
+ */
+export interface FighterSpec {
+  id: FighterId;
+  controller: Controller;
+  characterId: CharacterId;
+  spawn: Vec2;
+  maxHp: number;
+  /** Collision AABB size (PLAYER_SIZE / ENEMY_SIZE). */
+  size: number;
+  /** Incoming-projectile hit radius (HIT_RADIUS_VS_PLAYER / HIT_RADIUS_VS_ENEMY). */
+  hitRadius: number;
+  facing: Vec2;
+  level?: number;
+}
+
+export function createFighter(spec: FighterSpec): Fighter {
+  const { id, controller, characterId, spawn, maxHp, size, hitRadius, facing: initialFacing } = spec;
   const weaponCount = CHARACTERS[characterId].weapons.length;
-  const lvl = clampLevel(level);
+  const lvl = clampLevel(spec.level ?? LEVEL_MIN);
   return {
-    role,
+    id,
+    controller,
+    // The legacy mirror, derived HERE and nowhere else, so no call site can hand in a role
+    // that disagrees with its own slot.
+    role: roleOfSlot(id),
     characterId,
     level: lvl,
     damageMul: levelDamageMultiplier(lvl),
@@ -186,6 +327,7 @@ export function createFighter(
     hp: maxHp,
     maxHp,
     size,
+    hitRadius,
     facing: { x: initialFacing.x, y: initialFacing.y },
     status: { slowedUntil: -Infinity, stunnedUntil: -Infinity },
     alive: true,
@@ -211,6 +353,9 @@ export function createFighter(
  * owns, and the next observer that needs one (the radar; a second AI when this becomes 1v1
  * human-vs-human with bots, which is Uri's stated direction) would either share it wrongly
  * or grow a second copy.
+ *
+ * ⚠️ THAT SECOND OBSERVER NOW EXISTS AS A ROW RATHER THAN AS A COPY — see
+ * `MatchState.sightings`, of which the old single `aiSighting` is one cell.
  */
 export interface Sighting {
   /** The target's position at the last tick on which the observer could see it. */
@@ -232,8 +377,17 @@ export interface Sighting {
 
 export interface Projectile {
   id: number;
+  /** Slot of the fighter that fired it. Authoritative; `ownerRole` mirrors it. */
+  ownerId: FighterId;
+  /**
+   * Slot of the only fighter this projectile can hit. Authoritative; `targetRole` mirrors
+   * it, and `sim.ts:stepProjectiles` resolves the victim through `state.fighters[targetId]`
+   * rather than through a seat name.
+   */
+  targetId: FighterId;
+  /** @deprecated legacy mirror of `ownerId`. */
   ownerRole: FighterRole;
-  /** The only fighter this projectile can hit (the owner's opponent). */
+  /** @deprecated legacy mirror of `targetId`. */
   targetRole: FighterRole;
   weapon: Weapon;
   x: number;
@@ -261,11 +415,39 @@ export interface Splat {
 
 export interface TrailMark {
   id: number;
+  /** Slot of the fighter that dropped it. Authoritative; `ownerRole` mirrors it. */
+  ownerId: FighterId;
+  /** @deprecated legacy mirror of `ownerId`. */
   ownerRole: FighterRole;
   x: number;
   y: number;
   expiresAt: number;
-  /** Each mark can damage the opponent at most once. */
+  /**
+   * WHICH FIGHTERS THIS MARK HAS ALREADY BITTEN — one bit per slot (`fighterBit`).
+   *
+   * ── WHY A MASK AND NOT A BOOLEAN, AT A CAP OF TWO ──────────────────────────
+   *
+   * `damaged: boolean` below means "this mark has been spent". With exactly two fighters
+   * that is unambiguous: a mark has exactly one possible victim, so "spent" and "spent on
+   * X" are the same statement. With three it is not, and the boolean silently picks a
+   * rule: **the first victim in slot order consumes the mark and everyone else walks
+   * through it free.** That is a slot advantage — the same category as the timeout
+   * tiebreak's rung 3 — introduced by a field that was never meant to express a policy.
+   *
+   * A per-victim mask has no such rule to get wrong: each fighter is bitten at most once by
+   * each mark, independently, in any iteration order. It is ORDER-FREE, which is the
+   * property that matters, because the alternative would make the trail's damage depend on
+   * the order `fighters` happens to be walked in.
+   *
+   * At N=2 it is exactly equivalent, and that is not an argument either: it is the
+   * `--bitid` result. The one victim's bit is set on exactly the ticks the boolean was set.
+   */
+  damagedMask: number;
+  /**
+   * @deprecated LEGACY MIRROR of `damagedMask !== 0`. Kept because a field that DISAPPEARS
+   * is a hard failure in the bit-identity differ, deliberately — see `FighterRole`. Nothing
+   * reads it; `sim.ts` writes it beside the mask.
+   */
   damaged: boolean;
 }
 
@@ -284,15 +466,80 @@ export interface MatchState {
   startFlashTimer: number;
   timeRemaining: number;
   safeRadius: number;
+  /**
+   * 🚨 THE CONTAINER. EVERY FIGHTER IN THE MATCH, IN SLOT ORDER, AND `fighters[i].id === i`.
+   *
+   * ── AN ARRAY. NEVER A `Map`, `Set`, `Record` OR OBJECT-KEY WALK ────────────
+   *
+   * Iteration order must be a pure function of `createMatch`'s arguments and of nothing
+   * else. A `Map` traverses in INSERTION order and a plain object in a key order that
+   * depends on whether a key parses as an integer — so either one makes "who acts first"
+   * an emergent property of how the container was built. That is the classic lockstep
+   * desync mechanism, and this sim's determinism is what underwrites every balance number
+   * in the project (`roster_lab`, `match-sim`, `conceal_lab --bitid`, the whole of §22).
+   *
+   * ── THE ORDER IS ITSELF A GAME RULE, NOT AN IMPLEMENTATION DETAIL ──────────
+   *
+   * Slot order decides who fires first inside a tick, whose trail mark is dropped before
+   * the other walks onto it, and — at N>2 — who a shared resource goes to. It is stated
+   * once, here, and `sim.ts`'s fighter loop is the only place it is consumed.
+   */
+  fighters: Fighter[];
+  /**
+   * @deprecated LEGACY SEAT ALIAS. `player` IS `fighters[0]` and `enemy` IS `fighters[1]` —
+   * the SAME OBJECTS, aliased by reference.
+   *
+   * ⚠️ REAL, OWN, ENUMERABLE PROPERTIES, NOT GETTERS, AND THAT IS LOAD-BEARING. The
+   * bit-identity proof (`conceal_lab.mjs --bitid`) walks the state with
+   * `Object.keys`/spread; a getter is not an own enumerable data property, so defining
+   * these as accessors would silently drop both fighters out of the comparison and the
+   * differ would print PASS while comparing nothing. The differ would also see a REMOVED
+   * field, which it treats as a hard failure — correctly.
+   *
+   * They cost one reference each and they are why ~1,089 untyped `.mjs` references and
+   * four out-of-set consumers (`ui/hud.ts`, `game/match.ts`, `game/vfx.ts`,
+   * `audio/director.ts`) needed zero changes.
+   */
   player: Fighter;
+  /** @deprecated LEGACY SEAT ALIAS — the same object as `fighters[1]`. */
   enemy: Fighter;
   projectiles: Projectile[];
   splats: Splat[];
   trailMarks: TrailMark[];
+  /** @deprecated legacy mirror of `winnerId`. */
   winner: FighterRole | null;
+  /** Slot of the winning fighter, or null while the match is undecided. */
+  winnerId: FighterId | null;
   arena: ArenaDefinition;
   /**
-   * THE AI's BELIEF about where the player is — the only perception state in the sim.
+   * THE PERCEPTION MATRIX: what every observer believes about every target.
+   *
+   * Row-major and SQUARE — `sightings[observer * fighters.length + target]` — allocated
+   * once in `createMatch`, never resized, never reordered, never reallocated. Three
+   * properties, each deliberate:
+   *
+   *   * SQUARE, INCLUDING THE DIAGONAL. `sightings[i * n + i]` exists and is never read: a
+   *     fighter does not need to remember where it saw itself. Keeping it square is what
+   *     keeps the index ONE arithmetic expression with no conditional in it, and a branch
+   *     in an index is a place for an off-by-one to hide. The cost is `n` unread cells and
+   *     it is measured, not argued: `conceal_lab.mjs --ablate` perturbs the diagonal at
+   *     tick 0 over the whole corpus and requires zero differing ticks.
+   *   * FLAT, NOT NESTED. One array, no per-row allocation, no per-tick indirection.
+   *   * ALLOCATED ONCE. `stepAI` mutates a cell in place; nothing ever pushes or splices,
+   *     so the container's identity and length are constant for the life of a match.
+   *
+   * ⚠️ TODAY EXACTLY ONE CELL IS EVER WRITTEN OR READ — `[1 * 2 + 0]`, the enemy's belief
+   * about the player, which is what `aiSighting` below aliases. There is deliberately no
+   * mirror for a human: a human already knows where they are, and the scripted player in
+   * `tools/tmp/scripted_player.mjs` is a measuring instrument with perfect information BY
+   * DESIGN (see its header) — giving it perception would change every recorded balance
+   * number in the project for a reason that has nothing to do with the game.
+   */
+  sightings: Sighting[];
+  /**
+   * @deprecated LEGACY ALIAS — THE SAME `Sighting` OBJECT as `sightings[1 * 2 + 0]`.
+   *
+   * THE AI's BELIEF about where the player is.
    *
    * `ai.ts:stepAI` derives every one of its decisions from this and never from
    * `state.player.x/y`: the separation that gates weapon range, the facing it aims and
@@ -301,10 +548,9 @@ export interface MatchState {
    * with no concealment regions in the arena it is the true position on every tick and the
    * AI is bit-identical to the one that read the player directly.
    *
-   * There is deliberately no mirror for the player: a human already knows where they are,
-   * and the scripted player in `tools/tmp/scripted_player.mjs` is a measuring instrument
-   * with perfect information by design (see its header) — giving it perception would change
-   * every recorded balance number for a reason that has nothing to do with the game.
+   * An alias by REFERENCE, not a copy: `stepAI` mutates the cell and this name sees it,
+   * because they are one object. A copy would be a second statement of the same belief and
+   * the two would drift the first time anyone forgot to write both.
    */
   aiSighting: Sighting;
   /**
@@ -333,8 +579,48 @@ export interface MatchState {
   nextId: number;
 }
 
+/**
+ * @deprecated The legacy two-seat opponent rule, on seat NAMES. Still exported and still
+ * correct at N=2; `game/match.ts` and `audio/director.ts` both use it and neither was
+ * touched. Inside the sim, use `opponentOf`.
+ */
 export function otherRole(role: FighterRole): FighterRole {
   return role === 'player' ? 'enemy' : 'player';
+}
+
+/**
+ * 🚨 THE TARGET RULE, AND THE ONLY PLACE THE SIM ASSUMES THERE ARE TWO FIGHTERS.
+ *
+ * "Who is my opponent" is asked in five places — the melee/ranged target in
+ * `combat.ts:attemptAttack`, the attacker behind a weapon hit in `combat.ts:applyDamage`,
+ * the winner on a knockout, the AI's perception target in `ai.ts:stepAI`, and the trail's
+ * victim list in `sim.ts:applyWorldTick`. Before this refactor each one answered it for
+ * itself with `otherRole(...)` or with a literal `'player'`/`'enemy'`, which is five copies
+ * of a rule that is about to stop being true.
+ *
+ * ⚠️ AT N>2 THIS IS NOT A FUNCTION OF ONE FIGHTER AT ALL — it becomes "nearest living
+ * fighter that is not me", or a team rule, and it needs the asker's intent. That is exactly
+ * why it is one named function with one call site per question rather than a `!==`
+ * scattered through four files: the N>2 change is a rewrite of THIS, plus a decision about
+ * what each caller wants, and nothing else.
+ *
+ * Throws nothing and asserts nothing at N=2 by design — it is on the per-tick path. The
+ * invariant it rests on (`fighters.length === MAX_FIGHTERS`) is asserted once, in
+ * `sim.test.mjs` §27, and once per match by `createMatch`'s construction.
+ */
+export function opponentOf(state: MatchState, fighter: Fighter): Fighter {
+  return state.fighters[fighter.id === 0 ? 1 : 0];
+}
+
+/**
+ * `sightings[observer * n + target]` — the perception matrix's index, stated ONCE.
+ *
+ * Inlined by V8 to a multiply-add; it is a function rather than an expression at each call
+ * site because a row-major index written twice is a row-major index written differently
+ * twice, and the second one is a transposition nobody can see from the call site.
+ */
+export function sightingIndex(observer: FighterId, target: FighterId, n: number): number {
+  return observer * n + target;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -372,21 +658,39 @@ export interface MatchInput {
 // Events — the VFX/observation surface
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * ── THE EVENT PROTOCOL NAMES FIGHTERS BY SLOT, AND MIRRORS THE SEAT NAME ────
+ *
+ * Every member of `GameEvent` and of `DamageSource` that identifies a fighter now carries
+ * BOTH a `*Id` (authoritative) and the legacy `*Role` (a mirror, written at the same
+ * moment). Nothing in `src/game/` reads the role half.
+ *
+ * Additive rather than a replacement, and that was a measurement rather than taste. The
+ * consumers of this stream are `game/match.ts`, `game/vfx.ts`, `ui/hud.ts` and
+ * `audio/director.ts` — none of them in this refactor's file set — plus every `.mjs`
+ * instrument in `tools/`, which `tsc` cannot see at all. Three of those consumers recover
+ * the ATTACKER with `otherRole(ev.targetRole)`, a two-seat rule living outside the sim;
+ * `hit-landed` now states it as `attackerId` so they will not have to keep deriving it,
+ * and `applyDamage` no longer derives it either.
+ */
 export type DamageSource =
-  | { kind: 'weapon'; weaponKey: string; weaponName: string }
-  | { kind: 'trail'; ownerRole: FighterRole }
+  /** `attackerId` is the slot that fired it. A weapon hit ALWAYS has an attacker. */
+  | { kind: 'weapon'; weaponKey: string; weaponName: string; attackerId: FighterId }
+  /** A Sticky Trail mark outlives the tick that dropped it, so it carries its own owner. */
+  | { kind: 'trail'; ownerId: FighterId; ownerRole: FighterRole }
   | { kind: 'hazard' }
   | { kind: 'fog' };
 
 export type GameEvent =
   | { type: 'countdown-tick'; value: number }
   | { type: 'match-started' }
-  | { type: 'match-ended'; winner: FighterRole }
-  | { type: 'weapon-fired'; fighterRole: FighterRole; weaponKey: string }
+  | { type: 'match-ended'; winner: FighterRole; winnerId: FighterId }
+  | { type: 'weapon-fired'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string }
   | {
       type: 'projectile-spawned';
       id: number;
       ownerRole: FighterRole;
+      ownerId: FighterId;
       weaponKey: string;
       x: number;
       y: number;
@@ -397,16 +701,17 @@ export type GameEvent =
   | {
       type: 'hit-landed';
       targetRole: FighterRole;
+      targetId: FighterId;
       amount: number;
       effect: StatusEffect;
       source: DamageSource;
       x: number;
       y: number;
     }
-  | { type: 'heal'; fighterRole: FighterRole; amount: number }
-  | { type: 'death'; fighterRole: FighterRole }
+  | { type: 'heal'; fighterRole: FighterRole; fighterId: FighterId; amount: number }
+  | { type: 'death'; fighterRole: FighterRole; fighterId: FighterId }
   | { type: 'splat-created'; x: number; y: number }
-  | { type: 'trail-mark-created'; ownerRole: FighterRole; x: number; y: number }
+  | { type: 'trail-mark-created'; ownerRole: FighterRole; ownerId: FighterId; x: number; y: number }
   /**
    * A concealment region was DESTROYED by the fighter hiding under it attacking from it
    * (`DECISIONS §29c`). Carries the box's own geometry, not an index, for the same reason
@@ -422,4 +727,4 @@ export type GameEvent =
    * member of this union: the sim states what happened, the presentation layers decide what
    * that looks like and what it sounds like.
    */
-  | { type: 'concealment-broken'; ownerRole: FighterRole; x: number; y: number; w: number; h: number; kind?: string };
+  | { type: 'concealment-broken'; ownerRole: FighterRole; ownerId: FighterId; x: number; y: number; w: number; h: number; kind?: string };
