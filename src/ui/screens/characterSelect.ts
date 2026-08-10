@@ -283,8 +283,17 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
    * describe the CHARACTER. `rules.ts` DEVIATION #11 is explicit that a level must not
    * write into them: doing so would either turn those gates red or re-create the defect
    * `DECISIONS §13` exists to have fixed — a card that says something the model does not
-   * compute. It also could not work: one card point is worth 7-12 pp of measured strength,
-   * so a 0-10 integer scale cannot express fifteen levels even in principle.
+   * compute. It also could not work: one card point is worth 13.5-27.9 pp of measured
+   * strength, so a 0-10 integer scale cannot express fifteen levels even in principle.
+   *
+   * ⚠️ That figure USED to read "7-12 pp", and the old wording is kept here per CLAUDE.md
+   * because several packets quote it. It came from the PRE-FIX driver — the one whose
+   * scripted player could not heal — and it is stale by roughly 2x. Re-measured on the
+   * fixed driver in `6cc2438`: Sushi h4->h7 gives 30.3 / 43.8 / 59.8 / 73.9, Water Bottle
+   * h5->h7 gives 27.5 / 46.3 / 74.2. The conclusion above does not just survive the
+   * correction, it gets STRONGER: a coarser point makes the integer scale less able to
+   * express a level, not more. Corrected here rather than in the balance pass itself
+   * because this file had a live owner at the time and rule 9 outranks a tidy diff.
    *
    * So the level is a SEPARATE, CONTINUOUS readout, and it states the two numbers the
    * simulation literally computes:
