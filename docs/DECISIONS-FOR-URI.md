@@ -2429,7 +2429,54 @@ they are moving exactly this quantity.
 
 ---
 
-## 46. ❓ `shards` reads as "a double-headed arrow" 6/6, and NO REARRANGEMENT OF TRIANGLES CAN FIX IT
+## 46. ❌ WITHDRAWN — `shards` did NOT reproduce. **You do not need to decide anything here.**
+
+🚨 **THIS SECTION ASKED YOU A QUESTION AND THE QUESTION WAS WRONG. Read this box, not the section
+below it** — the original text is kept verbatim because it is what was in front of you, and because
+how it failed is worth more than the answer would have been.
+
+**Re-run at the corrected delivered size, `shards` was called "a double-headed arrow" ZERO times** —
+across **nine judge readings, three panels and two protocols**. Zoomed: 3/3 correct. Unzoomed: 0/3,
+but as *seaweed* ×3, not as an arrow. `range` was 3/3 correct everywhere. **Nothing is asked of you.**
+
+### Why the original was wrong, which is the part that matters
+
+The 6/6 came from two rounds of an instrument whose between-round swing on **byte-identical art** was
+later measured as *the full range* — the same instrument that scored `boxRed` 3/3 then 0/3 without a
+byte changing. Two rounds of that are not 6 of 6; they are one reading, repeated.
+
+And underneath it sat a second error nobody had controlled for. Same PNG, same 63 tiles, same
+candidate list, same model — **only the protocol differed**:
+
+| protocol | score |
+|---|---|
+| judge may zoom | **96.3%** (61/61/60 of 63) |
+| one look at native size | **67.2%** (43/40/44 of 63) |
+| the historical rounds | 62–72% |
+
+**29 points from the protocol alone**, and every historical round sits squarely in the no-zoom band.
+**This instrument was measuring judge acuity and icon quality mixed together, and never controlled
+the second.** The failures are not even the same failures between the two arms. Whether the original
+judges magnified cannot be recovered — the answer sheets do not record it.
+
+**The rule that comes out of this: never quote an icon verdict without its protocol.** That now sits
+in `docs/TOOLS.md` next to the scorer.
+
+### What is actually true after the re-run
+
+- **box → gift is CLOSED**: zero of 45 at the corrected size (r3-zoom 0/12, r3-nozoom 0/12, r4 0/21).
+- **`boxBurger`'s colourway is not the lever** — the paired plate the earlier pass asked for was
+  built and run: shipped 1/3, the reverted candidate 1/3, clasp-only 1/3. **Δ = 0.** Twin floor
+  clean: 0 of 6 pairs disagreed on byte-identical art.
+- **`patty → cap` is gone** (3/3 both arms). What survives is a real mutual swap `slow ↔ cap`, and
+  at low acuity `coin` reading as a round *food* (tomato, egg) rather than as a cap.
+- The earlier claim that *"the boxBurger fix killed the gift read and moved it onto `chest`"* was
+  between-round noise. **The revert was right for the wrong reason.**
+
+---
+
+<details>
+<summary>Original section 46, kept verbatim. It is refuted above.</summary>
 
 **This one needs you, because the remaining fix is a SUBJECT change and that is a taste call.**
 
@@ -2465,6 +2512,8 @@ declined before. Flagging rather than repeating it.
 **Your call:** what should Glass Shards *look* like? Any answer that is not "two triangles" is
 actionable. ⚠️ A subject change also needs its candidate string updated in
 `tools/tmp/icon_score.mjs`, or the blind test will keep scoring it against the old answer.
+
+</details>
 
 ---
 

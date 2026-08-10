@@ -330,7 +330,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **60**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **65**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -406,6 +406,11 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/cw_verify_knownbad.mjs` | **13** | ⚠️ browser. Proves `arena_probe --verify` was BLIND to a dropped concealment list, as an ablation against a **derived** pre-fix ref so it survives a rebase. Carries a tripwire for the way the blindness got in: **zero boxes is indistinguishable from "no plates"** |
 | `node tools/tmp/burger_lab.mjs --selftest` | **16** | where the two drivers' matches diverge for one character — the instrument behind the 50.6 pp Hamburger role split. **Was undocumented** |
 | `node tools/tmp/roster_lab.mjs --selftest` | **9** | per-character strength, settled-matchup count and rarity roll-up on the FIXED driver. **Was undocumented.** ~26 s, the slowest offline gate |
+| `node tools/tmp/icon_score.mjs --selftest` | **9** | forced-choice blind naming scorer, confusion matrix, mutual swaps. ⚠️ **Never quote a score from it without the PROTOCOL** — see the acuity note in "Known instrument limits" |
+| `node tools/tmp/ic_spec.mjs --selftest` | **15** | distils the delivered-size sweep into the spec the harness draws from, so nothing is hand-transcribed. Carries the SITE rule that fixed `boxFire` being drawn **2.56× larger than its three siblings**: occlusion invalidates a colour *sample*, not a *bounding box* |
+| `node tools/tmp/ic_pair.mjs --selftest` | **7** | paired-plate scorer — both variants, one round, one judge. Exists because a 3-judge panel's swing on **byte-identical art** is the full range. Carries its own **twin floor** (byte-identical pairs must not disagree) |
+| `node tools/tmp/ic_contrast.mjs` | ⚠️ browser, **no documented count** | ablation: is the icon actually painted. Deliberately unnumbered — its checked count is **not stable under GPU contention** (`0 of 24` with 36 icons silently unexamined, vs `0 of 57` on three quiet runs). A number that shrinks under load would present as doc drift and get "fixed" in the doc |
+| `node tools/tmp/ic_plate.mjs --selftest --url <snapshot>` | ⚠️ browser | the delivered size/polarity fixture. **Known-bad input: it draws the harness AS IT HISTORICALLY SHIPPED** (20 px cream for everything) and requires the catch — `range` **by name, with polarity inverted**, plus `range` on size, `shards`, `heal` |
 | `node tools/tmp/ac_engage.mjs --selftest` | **20** | how `stepAI` engages vs how the scripted player does — press rate, press separation, kit-expression share, blind-fire share, impatience. Built to find the Sushi role split and instead **refuted four candidate mechanisms**, including the favourite: the AI presses from *closer* (69 vs 90 wu) and expresses **65%** of its kit against the player's 50%. Its positioning is better, not worse |
 | `node tools/tmp/ac_homing.mjs --selftest` | **11** | whether a homing projectile can close on a receding target given `range` as **cumulative path length**. **Predicted 47% before the mirror measured 47%** — two instruments sharing no code. This is the tool that found the systemic role asymmetry: `PLAYER_SPEED` 120 vs `AI_CHASE_SPEED` 70 means the human always shoots at the slow one |
 | `node tools/tmp/hc_occluders.mjs --selftest` | **4** | ⚠️ **the guard for the silent-occluder class** — a `transparent: true` material that still writes depth and rejects whatever is beneath it. Sweeps the arena for the authoring mistake and **is shown to FAIL on the bug it guards**: 3/4 on the tree that had it, naming both puddles, 4/4 after the fix, and its known-bad input re-injects the defect live. Found `M.dust` in `shared.ts` by the same sweep |

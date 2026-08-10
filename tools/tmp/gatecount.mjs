@@ -267,6 +267,9 @@ const OFFLINE = [
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
+  { key: 'tools/tmp/icon_score.mjs --selftest', probes: [pr(['tools/tmp/icon_score.mjs', '--selftest'], /^selftest (\d+) pass \/ \d+ fail/m)] },
+  { key: 'tools/tmp/ic_spec.mjs --selftest',   probes: [pr(['tools/tmp/ic_spec.mjs', '--selftest'], /^ic_spec selftest (\d+) pass \/ \d+ fail/m)] },
+  { key: 'tools/tmp/ic_pair.mjs --selftest',   probes: [pr(['tools/tmp/ic_pair.mjs', '--selftest'], /^ic_pair selftest (\d+) pass \/ \d+ fail/m)] },
   { key: 'tools/tmp/ac_engage.mjs --selftest', probes: [pr(['tools/tmp/ac_engage.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/ac_homing.mjs --selftest', probes: [pr(['tools/tmp/ac_homing.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/bl_vitals_gate.mjs --selftest', probes: [pr(['tools/tmp/bl_vitals_gate.mjs', '--selftest'], SLASH_ASSERT)] },
@@ -316,6 +319,19 @@ const SKIP = [
   ['tools/tmp/shop_accept.mjs',            'browser',     'reads displayed prices off the DOM'],
   ['tools/tmp/name_accept.mjs',            'browser',     'types into the real name field'],
   ['tools/tmp/chip_probe.mjs',             'browser',     '6 viewports × 2 states'],
+  // ⚠️ Keyed on the FULL command as the table writes it, args included — the SKIP registry matches
+  // the row string, not the script path. Keying it on `tools/tmp/ic_plate.mjs` alone produced
+  // `UNREG ... --selftest --url <snapshot>`, which reads like a missing registration rather than a
+  // near-miss on a key. Compare `tools/audio-probe.mjs --mode all` below.
+  ['tools/tmp/ic_plate.mjs --selftest --url <snapshot>', 'browser', 'renders the delivered-size fixture against a snapshot; its known-bad input is the harness AS IT HISTORICALLY SHIPPED'],
+  // ⚠️ SKIP for a SECOND reason on top of "browser", and it is the interesting one: its checked
+  // count is NOT STABLE UNDER GPU CONTENTION. Observed `0 of 24` with "no verdict: 0" on one run
+  // while five agents were rendering, against `0 of 57` with "no verdict: 3" on three consecutive
+  // quiet runs. 24 + 0 != 60, so that run silently examined 36 fewer icons and still printed a
+  // clean verdict. A count that shrinks under load would be documented as drift by `gatecount`
+  // and "fixed" by editing the doc — so it gets no documented number at all until the flake is
+  // understood. Same reasoning as `audio-probe --mode live` two rows up.
+  ['tools/tmp/ic_contrast.mjs',            'browser',     'ablation: is the icon actually painted. ⚠️ checked count varies under GPU contention (24 vs 57 observed) — deliberately NOT given a documented number'],
   ['tools/audio-probe.mjs --mode all',     'browser',     'OfflineAudioContext lives in a page; and --mode live is PROVEN flake (29/29, 27/29, 26/29 on untouched HEAD)'],
   ['tools/tmp/quality_api.mjs',            'browser',     'render tiers, needs a GL context'],
   ['tools/tmp/dpr_probe.mjs',              'browser',     'DPR cap, needs a GL context'],
