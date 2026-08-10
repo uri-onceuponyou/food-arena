@@ -2571,3 +2571,47 @@ mismatch is a fact; the direction is yours.
 `flag` and `party` render **only at a completed trophy road** (`home.ts:424`, `trophyRoad.ts:405`,
 `trophyRoad.ts:187`) — unreachable on any normal profile, and never measured until now. Not a bug on
 its own, but it means neither has ever been seen by a judge or by you.
+
+---
+
+## 48. ✅ THE ARENA GROWS ×4 IN **AREA** — 1400×1000 → 2800×2000
+
+> *"Arena x4 - area to accommodate 4-6 players"*
+
+Uri, 2026-08-10, answering the one ambiguity that was blocking the work. **×4 AREA, not ×4 linear**
+— so **2× on each edge**, 1400×1000 → **2800×2000**. (×4 linear would have been 5600×4000, i.e. 16×
+the area.) Per-fighter space roughly triples going 2 → 6 fighters, which is the reading that matches
+the stated purpose.
+
+**Do not reopen this.** What follows are the consequences, not the decision.
+
+### 🚨 EVERY ONE OF THESE IS ANCHORED TO 1400×1000 AND MUST BE RE-DERIVED, NOT SCALED BY EYE
+
+1. **Fog.** `shared.ts:115` derives the closing schedule from `ARENA_HALF_DIAGONAL`; `rules.ts:900`
+   says explicitly that the r=545 close is anchored to the ARENA, not to the weapon. The half
+   diagonal **doubles**. The fog either closes twice as far or takes longer, and match pacing moves
+   with it — floor ~0.8 s of contact / ~4 pp dead time.
+2. **The AI has NO SEARCH BEHAVIOUR** (`rules.ts:1034`). `stepAI` walks to where it last saw you and
+   stops. A 2× longer map makes every lost-contact event longer. ⚠️ **This is the same piece of work
+   as the concealment ceiling in §29a** — `CONCEAL_REVEAL_RADIUS` does not scale with the arena, so
+   a 4× map needs ~4× the patch COUNT rather than bigger patches.
+3. **Balance.** Every weapon REACH, damage radius and movement speed is in these units. The spawn-gap
+   sweep ran all 110 matchups at gaps 1080/1000/920/840/760 **on this layout** (`kitchen.ts:541`) and
+   is void at a new size. Report AGGREGATE (floor ~9 pp) and PAIRED per-matchup (exact) separately.
+4. **Camera / fairness.** `FAIR_PLAY` in `render/camera.ts`; `tools/aspect.mjs` must still PASS at
+   0.00 wu. With 4–6 fighters the framing question changes shape entirely — a 2-fighter rule may
+   have no 6-fighter answer.
+5. **Apron + perf.** `apron.ts` covers everything outside the playfield; `floor.ts:885` scatters
+   ~1/3 of 875 tiles density-modulated over 1400×1000. At constant density **×4 area is ×4 tiles.**
+
+### ⚠️ AND THE HONEST RISK, STATED BEFORE THE WORK STARTS
+
+**A ×4 arena with only TWO fighters will almost certainly play WORSE**, and that is expected rather
+than a regression: the same two fighters have four times the floor to find each other on, against an
+AI that cannot search. The sim is **hard 1v1 at the type level** — `MatchState` has exactly
+`player: Fighter` and `enemy: Fighter` (`state.ts:287`) — so the 4–6 fighters this arena is *for*
+require the N-fighter refactor first.
+
+=> **Measure the 1v1 pacing cost BEFORE shipping the size**, and report it. If it is severe, the
+arena wants to land WITH the roster change rather than before it. That is a sequencing question with
+a measurable answer, not a taste call, so it is not being sent back to Uri.
