@@ -330,7 +330,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **77**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **78**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -406,6 +406,7 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/cw_verify_knownbad.mjs` | **13** | ⚠️ browser. Proves `arena_probe --verify` was BLIND to a dropped concealment list, as an ablation against a **derived** pre-fix ref so it survives a rebase. Carries a tripwire for the way the blindness got in: **zero boxes is indistinguishable from "no plates"** |
 | `node tools/tmp/burger_lab.mjs --selftest` | **16** | where the two drivers' matches diverge for one character — the instrument behind the 50.6 pp Hamburger role split. **Was undocumented** |
 | `node tools/tmp/roster_lab.mjs --selftest` | **9** | per-character strength, settled-matchup count and rarity roll-up on the FIXED driver. **Was undocumented.** ~26 s, the slowest offline gate |
+| `node tools/tmp/dup_census.mjs --selftest` | **26** | normalised-function-BODY duplication across `src/`, which `sentinel`'s whole-file clone census structurally cannot see (it scans `tools/**.mjs`, 300-line minimum, 0.90 floor — the six files carrying a byte-identical `taperedSegment` peak at **0.0478** whole-file similarity). **Registration buys a SEAT, never a budget** — the `995417e` inversion refused by construction. ⚠️ Its floors sit in **measured gaps** and both shadows print every run: a first draft at `MIN_TOKENS = 60` hid an **eleven-copy** helper **by two tokens** |
 | `node tools/tmp/rg_neckz.mjs --selftest` | **10** | whether a character's face can ever occlude the rig's neck column, by exact triangle clipping. **9 of 11 characters are exposed at pitch 20 against 4 at pitch 58, and the ordering is NOT preserved** — the reason the old neck table had its sign backwards. ⚠️ Its first implementation was a vertex scan and **failed its own known-bad**; that method is kept as a required failure |
 | `node tools/tmp/rg_taper.mjs --selftest` | **8** | proves the shared `taperedSegment` is equivalent to BOTH divergent dialects it replaces — **832 comparisons, worst \|Δ\| exactly 0**. Known-bads require failure. This is what made the six-copy consolidation a refactor rather than a rewrite |
 | `node tools/tmp/rg_gap.mjs --selftest` | **13** | `fitPelvis()` — 16 rays × 9 heights, deforming ring-by-ring and **re-centring as well as shrinking** (one cross-section is not enough; a mass curves back at its lowest pole). ⚠️ **It REFUSES when fewer than half the rays find a body**, which is the pelvis's whole reason to exist — no shipped character reaches that branch, so it is proved against a deliberately torso-less rig |

@@ -142,8 +142,24 @@ export const FOOT_WIDTH_RATIO = 1.75;
  * ── 🚨 THIS IS THE SIXTH COPY, PUBLISHED SO THERE IS NEVER A SEVENTH ────────────
  * `taperedSegment` is copy-pasted into **six** character files — `hamburger`,
  * `burrito`, `taco`, `donut`, `egg`, `lollipop` — and `76369eb` recorded exactly what
- * that costs: donut derived the cap fix and *"the fix never reached the other five"*,
- * which is why the bead necklace survived weeks. **The knowledge was written down,
+ * that costs: donut derived the cap fix and *"the fix never reached the other five"*.
+ *
+ * ⚠️ **THAT SENTENCE IS OFF BY TWO, AND IT IS KEPT ABOVE BECAUSE THE ERROR IS THE
+ * POINT.** Measured on the real bytes at `76369eb` by `tools/tmp/dup_census.mjs` (26),
+ * which hashes normalised function BODIES rather than files:
+ *
+ *     donut  egg  lollipop   7e1b00bbca37 / d8fa47404efc -> 94a96cbb5540   MOVED
+ *     burrito  hamburger  taco            1de44ac6c8e4 -> 1de44ac6c8e4     FROZEN
+ *
+ * **Three of six moved, not one** — and the three frozen were *still* frozen eleven
+ * commits later. So the commit that fixed half the family is also what CREATED the
+ * split, which is worse than the sentence it replaces, not softer. Asserted as arm `K4`
+ * so this correction cannot go stale the way the sentence above did.
+ *
+ * ⚠️ And an EXACT-duplicate census would never have fired on it: across that fix every
+ * summary such a census produces moved in the direction that reads as progress —
+ * partition `3/2/1 -> 3/3`, distinct bodies `3 -> 2`, members in groups `5 -> 6`. A
+ * falling count of distinct bodies **is** what consolidation looks like. **The knowledge was written down,
  * correct, and in the repo, while the FUNCTION was duplicated.** A comment cannot
  * propagate a fix; a symbol can.
  *
