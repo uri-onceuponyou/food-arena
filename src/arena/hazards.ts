@@ -708,6 +708,131 @@ function makeGreaseSurfaceTexture(highlightHex: string): THREE.CanvasTexture {
   return tex;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE PUDDLE WAS DEPTH-REJECTING THE CHARACTER'S CONTACT SHADOW
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `src/render/stage.ts` landed a per-fighter contact decal at y = 0.09 (48e5f6c). It
+// works: `tools/tmp/cs_charcontact.mjs --ours` measures the OPPOSITE flank — the one a
+// directional cast shadow can never darken — going 0.000 -> 0.137 / 0.074 / 0.144 of
+// the floor's own value at three open-floor stations.
+//
+// `grease_in` was the ONLY one of `arena-scan`'s 18 stations whose dL and rank did not
+// move at all when that decal landed (-0.050 -> -0.050, rank 7 -> 7) while the other
+// seventeen moved -0.024 +/- 0.003. That uniformity is what made it a finding rather
+// than noise, and the cause is one flag:
+//
+//     name         mat            y      renderOrder  transparent  depthWrite
+//     contact:decal              0.090       2            true        false
+//     puddle       kpal:grease   0.150       0            true        TRUE     <-
+//     puddle_wet_rim greaseRim   0.250       0           false        true     <-
+//
+// `docs/LESSONS.md` §1, "also, adjacent": **a transparent material without
+// `depthWrite: false` still writes depth and silently occludes.** The body draws first
+// (renderOrder 0), stamps depth at y = 0.15, and the decal at y = 0.09 fails its depth
+// test over the whole disc. The opaque wet rim does the same in a ring at y = 0.25.
+//
+// MEASURED, not reasoned about (`tools/tmp/hc_probe.mjs`, the §1 unmissable-probe
+// technique — the decal's texture forced to a magenta multiply, which kills the floor's
+// green channel outright, and the frame required to MOVE):
+//
+//     pixels changed inside the puddle's own screen disc, n = 57807 px
+//       magenta decal, shipped                       1238   ( 2.1%)   <- the sliver
+//       magenta decal, puddle depthWrite:false      48619   (84.1%)      that escapes
+//
+// Rendered and looked at (`shots/hc/z_probe_magenta.png`): the magenta quad is plainly
+// there on the tile and stops DEAD on the puddle's edge.
+//
+// ── WHY THIS IS FIXED HERE AND NOT BY RAISING THE DECAL ─────────────────────
+// Raising `CONTACT_Y` past 0.25 would put the character's shadow over every prop kick
+// and plinth in the arena, and at the match camera's 58 deg pitch a decal 16 cm higher
+// projects 0.10 m toward the viewer — peter-panning, manufactured to fix an occlusion
+// problem. The pot's own contact ring records the identical lesson twenty lines up:
+// **the fix for a draw-order bug is draw order.**
+//
+// ── AND A FIGHTER IN WATER GENUINELY DOES CAST — the physics agrees ─────────
+// The alternative honest answer was "a puddle SHOULD occlude it, because a fighter
+// standing in water grounds differently". It should not. These are films a few
+// millimetres deep on the same floor: the light the fighter's body blocks never reaches
+// the liquid either, so the darkening belongs ON the puddle surface, not underneath it.
+// The grease pool is also the arena's worst figure/ground station by a distance (see
+// the `GREASE_BODY_L_DROP` note above) — deleting the one grounding cue that reaches it
+// is the opposite of what that finding asks for.
+//
+// ── WHAT IT DELIVERED. Paired, identical stations, HEAD vs HEAD+this file ───
+// `cs_charcontact --ours`, the DECAL's own contribution isolated by a third render with
+// the contact group hidden, as a fraction of the floor's own value:
+//
+//   station                       opposite flank        shade flank
+//   560:900  standing in grease   0.000 -> 0.141      0.000 -> 0.084
+//   840:100  standing in water    0.000 -> 0.153      0.000 -> 0.114
+//   570:430  open floor, CONTROL  0.137 -> 0.137      0.086 -> 0.086
+//
+// The control is unchanged to three decimals across two independent servers, which is
+// what says the move is this file and not a peer. The open-floor band this had to reach
+// was 0.074-0.144; grease lands inside it and water 0.009 above its top.
+//
+// `valuescan --mode dl --only grease_in`, all ELEVEN characters, the same pairing:
+// mean hero-vs-ground dL 0.1601 -> 0.2173 (+0.0572, spread +0.046..+0.063), and the
+// last character below this project's 0.10 standard (hotdog, 0.0835) clears it at
+// 0.1405 — 11 of 11. Its `gridDL` moves -0.044 -> -0.070, i.e. by -0.026: the station
+// that would not move now moves by the same -0.024 +/- 0.003 its seventeen peers did.
+//
+// ⚠️ ONE THING GOT SLIGHTLY DARKER AND IT IS NOT THE SHADOW. The pool's own AO halo
+// was ALSO being depth-rejected by the pool, and now leaks through the body's 0.15-0.18
+// of transmission. Mean luma inside the disc, contact decals hidden, against a
+// HEAD-to-HEAD drift control of 0.0001: grease 0.42550 -> 0.42291, water 0.59320 ->
+// 0.58977. Attributed by hiding the halo as well, at which point the two trees agree to
+// 0.0003. That is 0.6% of the pool's value — 26x the drift floor, so it is real, and
+// ~3% of one step of the `GREASE_BODY_L_DROP` sweep, so it is not worth a counter-move.
+//
+// ── THE ORDER, STATED RATHER THAN INFERRED FROM Y ───────────────────────────
+// With the depth write gone, draw order is all that decides who covers whom, and three
+// of the four layers here need a specific place in it. `renderOrder` is compared
+// numerically, so fractions are legal and are used deliberately: every value below is
+// strictly less than the character decal's 2, and their internal order is unchanged
+// from what the depth buffer used to enforce.
+//
+//   halo 1.0   the puddle's own grounding AO. FIRST, and that is load-bearing: its
+//              texture is DARK IN THE MIDDLE (alpha 0.58 at u=0 falling to 0 at u=1),
+//              a density that was invisible only because the body's depth write hid
+//              it. Drawn after the body it would repaint the whole pool indigo.
+//   body 1.2   the pool itself.
+//   surf 1.4   the oily sheen / ripples. Was 2 — an exact TIE with the character
+//              decal, broken by three's back-to-front depth sort in the wrong
+//              direction, so the sheen streaks drew OVER the shadow. Visible in
+//              `shots/hc/z_probe_magenta_nodepthwrite.png`: two orange streaks
+//              crossing an otherwise magenta pool.
+//   rim  1.6   the wet edge. Opaque today, so it lives in the OPAQUE queue and its
+//              depth write cannot be removed on its own — an opaque mesh that writes
+//              no depth is overdrawn by the tile field, which sorts after it
+//              front-to-back. It is moved into the transparent queue at opacity 1
+//              instead, where `src*1 + dst*0` is bit-identical compositing.
+// ─────────────────────────────────────────────────────────────────────────────
+const PUDDLE_RENDER_ORDER = { halo: 1.0, body: 1.2, surf: 1.4, rim: 1.6 } as const;
+
+/**
+ * A clone of `mat` that no longer writes depth.
+ *
+ * A CLONE rather than a mutation: `M.grease`/`M.water`/`M.greaseRim`/`M.waterRim` are
+ * built once in `shared.ts` and reach exactly one call site each today, but a shared
+ * material mutated by a builder is a booby trap for the second call site, and this
+ * file has already been burned once by editing something whose definition lives in
+ * another file (see the "half of that rework that did not land" note above).
+ * `Material.clone()` copies `name`, so `tools/tmp/matcover.mjs` and `whomat.mjs` still
+ * attribute these surfaces to `kpal:grease` / `kpal:greaseRim` rather than to
+ * `(unnamed)` — the exact regression the naming note on `buildHazardGround` records.
+ */
+function nonOccluding(mat: THREE.Material): THREE.Material {
+  const out = mat.clone();
+  // Opacity is untouched. `transparent` is forced on only because a material has to be
+  // in the transparent queue for `depthWrite: false` to mean "draws over the floor
+  // without stamping depth"; at opacity 1 the blend is an exact passthrough.
+  out.transparent = true;
+  out.depthWrite = false;
+  return out;
+}
+
 /** Ripple + caustic surface detail for the water puddle — concentric rings radiating
  * from an off-centre "drip point" plus a couple of bright caustic patches, so the
  * disc reads as disturbed liquid rather than a painted circle. */
@@ -777,7 +902,9 @@ export function buildPuddleVisual(
   // the water pool is the north hazard, no character fails a station on it (mean dL
   // +0.274 at `water_near`), and it is already the darker of the two after the round
   // that pulled both bodies down.
-  const bodyMat = isGrease ? darkenedBody(mat, GREASE_BODY_L_DROP) : mat;
+  // `nonOccluding` is what stops the pool depth-rejecting the fighter's own contact
+  // decal — see the long note on `PUDDLE_RENDER_ORDER`.
+  const bodyMat = nonOccluding(isGrease ? darkenedBody(mat, GREASE_BODY_L_DROP) : mat);
 
   // Grounding — puddles previously had NO contact shadow at all, so they floated
   // free with no dark boundary separating them from the floor.
@@ -794,6 +921,9 @@ export function buildPuddleVisual(
   const shadow = buildContactShadow(M.contactShadow, R * 2, R * 2, 1.35);
   shadow.position.x = gp.x;
   shadow.position.z = gp.z;
+  // Same value `buildContactShadow` already sets, restated here because it is now
+  // ORDER and not the depth buffer that keeps this underneath the pool.
+  shadow.renderOrder = PUDDLE_RENDER_ORDER.halo;
   g.add(shadow);
   // This group is never yawed (see the positioning note above), so the world shadow
   // direction is also the local one.
@@ -802,6 +932,7 @@ export function buildPuddleVisual(
   const disc = mesh(new THREE.CircleGeometry(R, 32), bodyMat, 'puddle');
   disc.rotation.x = -Math.PI / 2;
   disc.position.set(gp.x, FLOOR_Y.decal, gp.z);
+  disc.renderOrder = PUDDLE_RENDER_ORDER.body;
   noOutline(disc);
   g.add(disc);
 
@@ -826,7 +957,9 @@ export function buildPuddleVisual(
   surf.name = isGrease ? 'puddle_grease_surface__no_outline' : 'puddle_water_surface__no_outline';
   surf.rotation.x = -Math.PI / 2;
   surf.position.set(gp.x, FLOOR_Y.decal + 0.01, gp.z);
-  surf.renderOrder = 2;
+  // Was 2 — a tie with the character contact decal, and the tie-break is a depth sort
+  // that put the sheen ON TOP of the shadow. See `PUDDLE_RENDER_ORDER`.
+  surf.renderOrder = PUDDLE_RENDER_ORDER.surf;
   noOutline(surf);
   g.add(surf);
 
@@ -838,11 +971,15 @@ export function buildPuddleVisual(
   const trimW = R * 0.045;
   const trim = mesh(
     new THREE.RingGeometry(R - trimW, R + trimW, 40),
-    rimMat,
+    // Opaque at y = 0.25, so it stamped depth 16 cm above the character's contact
+    // decal and cut a hard ring through it for any fighter standing near the pool's
+    // edge. See `PUDDLE_RENDER_ORDER`: opacity is untouched, only the queue moves.
+    nonOccluding(rimMat),
     'puddle_wet_rim'
   );
   trim.rotation.x = -Math.PI / 2;
   trim.position.set(gp.x, FLOOR_Y.fine, gp.z);
+  trim.renderOrder = PUDDLE_RENDER_ORDER.rim;
   noOutline(trim);
   g.add(trim);
 
