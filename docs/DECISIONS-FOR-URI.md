@@ -2426,3 +2426,75 @@ donut (a torus head's centre-to-face vector is not its surface normal; predicted
 ⚠️ **And the live cast overhaul is already moving it, hard, in both directions** — lollipop
 **−56.3 → +65.8**, donut −19.6 → −30.0, egg +7.8 → +17.9. Whether or not those agents intend to,
 they are moving exactly this quantity.
+
+---
+
+## 46. ❓ `shards` reads as "a double-headed arrow" 6/6, and NO REARRANGEMENT OF TRIANGLES CAN FIX IT
+
+**This one needs you, because the remaining fix is a SUBJECT change and that is a taste call.**
+
+The Glass Shards ability icon was named *"a double-headed arrow"* by blind judges **3/3 and 3/3 —
+6 of 6.** The confusion is with the UI **`range` chip**, which is an actual double-headed arrow, and
+the two ship **in the same box**: on character select the Glass Shards pill carries `shards` at
+23.2 px with the `range` chip **40 px below it**. Same screen, same eye movement, two meanings.
+
+**Measured on a forged plate before any of this was believed:** `range`'s *artwork* was substituted
+into `shards`'s tile — identical pixels, two names — and judges named it "a double-headed arrow"
+**3/3, the same answer at the same rate as the real glyph.** So the collision is in the shape, not
+in the label or the tile.
+
+### Why it cannot be fixed by moving the triangles
+
+All three possible arrangements were rendered and judged:
+
+| arrangement | reads as |
+|---|---|
+| apexes **opposed** along one diagonal (shipped) | a double-headed arrow |
+| apexes **co-directional** | arrows |
+| **scattered** | arrows |
+
+Two sharp triangles at a distance read as arrowheads whatever you do with them. **The subject has to
+change** — something that is recognisably broken glass rather than two pointed shapes.
+
+### What was NOT done, deliberately
+
+`range` was **not** touched. It scores **6/6 correct**, and `§10` already refused exactly this trade
+once for `cap` — degrading a glyph that works to rescue one that doesn't is a trade this project has
+declined before. Flagging rather than repeating it.
+
+**Your call:** what should Glass Shards *look* like? Any answer that is not "two triangles" is
+actionable. ⚠️ A subject change also needs its candidate string updated in
+`tools/tmp/icon_score.mjs`, or the blind test will keep scoring it against the old answer.
+
+---
+
+## 47. ❓ ONE ability carries TWO different emoji depending on which screen you are on
+
+**Measured across the whole roster: 1 mismatch in 31 weapons / 34 abilities.** Every other same-named
+move carries the same emoji on both surfaces. Lollipop's is the sole outlier:
+
+```
+rules.ts:2020   weapon   'Giant Lollipop'  emoji '🍭'   → `lollipop` icon, match HUD weapon bar
+rules.ts:2024   ability  'Giant Lollipop'  emoji '💫'   → `stun` icon, character select
+```
+
+Same move, two icons, depending on the screen. It is also **why the `lollipop` icon is authored but
+nearly unreachable** — it renders in exactly one place in the entire game.
+
+**Two defensible directions and they are genuinely different choices:**
+- **💫 everywhere** — matches the move's actual `effect: 'stun'`, and retires a glyph that renders
+  once. Functional.
+- **🍭 everywhere** — keeps the character's own identity on their signature move. Thematic.
+
+⚠️ **NOTHING WAS CHANGED, and the reason matters.** The obvious argument for 💫 is that `lollipop`
+scored **0/3 ("a map pin")** in the blind test — but that score was taken at the harness's **20 px
+fallback, not at a measured delivered size**, because the glyph never rendered un-occluded in the
+sweep. The agent that measured it said so explicitly. **Acting on it would be acting on exactly the
+kind of number this project keeps getting caught by** (see `§45`, and `docs/LESSONS.md` §6b). The
+mismatch is a fact; the direction is yours.
+
+### Two more icons that are authored and effectively unreachable
+
+`flag` and `party` render **only at a completed trophy road** (`home.ts:424`, `trophyRoad.ts:405`,
+`trophyRoad.ts:187`) — unreachable on any normal profile, and never measured until now. Not a bug on
+its own, but it means neither has ever been seen by a judge or by you.
