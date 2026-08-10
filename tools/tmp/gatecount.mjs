@@ -267,6 +267,7 @@ const OFFLINE = [
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
+  { key: 'tools/tmp/cb_rig.mjs --selftest',    probes: [pr(['tools/tmp/cb_rig.mjs', '--selftest'], /^cb_rig --selftest: (\d+)\/\d+ passed/m)] },
   { key: 'tools/tmp/dc_guard.mjs --selftest',  probes: [pr(['tools/tmp/dc_guard.mjs', '--selftest'], /^dc_guard selftest: (\d+)\/\d+ pass/m)] },
   { key: 'tools/tmp/icon_score.mjs --selftest', probes: [pr(['tools/tmp/icon_score.mjs', '--selftest'], /^selftest (\d+) pass \/ \d+ fail/m)] },
   { key: 'tools/tmp/ic_spec.mjs --selftest',   probes: [pr(['tools/tmp/ic_spec.mjs', '--selftest'], /^ic_spec selftest (\d+) pass \/ \d+ fail/m)] },

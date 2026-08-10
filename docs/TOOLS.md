@@ -330,7 +330,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **66**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **67**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -406,6 +406,7 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/cw_verify_knownbad.mjs` | **13** | ⚠️ browser. Proves `arena_probe --verify` was BLIND to a dropped concealment list, as an ablation against a **derived** pre-fix ref so it survives a rebase. Carries a tripwire for the way the blindness got in: **zero boxes is indistinguishable from "no plates"** |
 | `node tools/tmp/burger_lab.mjs --selftest` | **16** | where the two drivers' matches diverge for one character — the instrument behind the 50.6 pp Hamburger role split. **Was undocumented** |
 | `node tools/tmp/roster_lab.mjs --selftest` | **9** | per-character strength, settled-matchup count and rarity roll-up on the FIXED driver. **Was undocumented.** ~26 s, the slowest offline gate |
+| `node tools/tmp/cb_rig.mjs --selftest` | **17** | per-segment cap/radius arithmetic on the built rig — the tool that showed `taperedSegment`'s degenerate branch **never fires on egg or lollipop** (ratios 0.64–0.89), so reading the hamburger table as a clean bill of health would have skipped both. ⚠️ Carries a **retired method as a required failure**: a vertex-slab attachment test that reported lollipop's shoulder attached at +0.148 m while the PNG shows daylight, because `CylinderGeometry(…,16,1)` has vertices only at its end rings and it was reading the wrapper collar. The replacement is a raycast with a **mandatory** `bodyNames` argument |
 | `node tools/tmp/dc_guard.mjs --selftest` | **40** | design-system component guard: that `.ds-bar`/`.fa-level-*` fills render **at all**, that a clipped caption cannot wrap, and that no declaration is dead by source order. ⚠️ **Every render check ABLATES the declaration it protects on each invocation** and requires the measurement to fail, then restores and requires it to pass — an ablation that passes exits non-zero as `TAUTOLOGICAL`. The browser arm (`--url <snapshot>`) is not gatecount-runnable and **expects 2 CASCADE faults today**, both cross-file in `characterSelect.ts` |
 | `node tools/tmp/icon_score.mjs --selftest` | **9** | forced-choice blind naming scorer, confusion matrix, mutual swaps. ⚠️ **Never quote a score from it without the PROTOCOL** — see the acuity note in "Known instrument limits" |
 | `node tools/tmp/ic_spec.mjs --selftest` | **15** | distils the delivered-size sweep into the spec the harness draws from, so nothing is hand-transcribed. Carries the SITE rule that fixed `boxFire` being drawn **2.56× larger than its three siblings**: occlusion invalidates a colour *sample*, not a *bounding box* |
