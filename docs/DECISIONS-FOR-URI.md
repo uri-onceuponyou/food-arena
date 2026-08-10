@@ -2640,6 +2640,74 @@ between hiding places, on a map whose AI cannot search. Prop positions currently
 2800x2000 field. More cover shortens sightlines and creates contact, so an empty box would measure far
 worse and give the wrong sequencing answer.
 
+### 🔴 MEASURED — **DO NOT SHIP 2800x2000 UNTIL THE SIM HOLDS 4-6 FIGHTERS**
+
+`0a63d96` + `09fca76`, via `tools/tmp/ax_layout.mjs` (22). 110 matchups x 8 seeds x 2 policies per
+arm, identical seeds, **timing untouched** so the countdown-reseed trap does not apply.
+**SELF-PAIR drift control: two copies of the shipped dump -> 0/110 matchups moved, bit-identical.**
+
+| arm | props / density | first contact | % of clock | duty | no contact | agg win |
+|---|---|---|---|---|---|---|
+| **1400x1000 shipped** | 27 / 20.11% | **5.67 s** | 13% | **33.5%** | 0/880 | 57.5% |
+| 2800x2000 naive stretch | 27 / 5.03% | 12.00 s | 27% | 24.8% | 0/880 | 55.3% |
+| **2800x2000 built to the rules above** | 103 / 19.49% | **18.44 s** | 41% | **23.1%** | 30/880 | **44.1%** |
+| 2800x2000 uniform tiling | 108 / 20.11% | 21.09 s | 47% | 16.1% | 39/880 | 51.9% |
+
+Against the floors: first contact is **8x-19x the 0.8 s floor**, duty **2x-4x the 4 pp floor**, and
+the HUB arm's aggregate win moves **-13.4 pp, outside the ~9 pp floor** (`chase` policy on the same
+arm collapses 40.9% -> **1.7%**). The **paired** per-matchup delta is exact and is a separate
+quantity: **95 of 110 matchups moved, mean 33 pp, max 100 pp.** The balance table is not the same
+table at the new size.
+
+**Your layout rules were the best arm measured** — density held, one pot dead centre at shipped
+scale, true 180 degree point symmetry — and it still costs **+12.77 s to first contact**. It beats a
+naive tiling; it does not rescue a 1v1 match.
+
+### ❌ AND ONE CLAIM IN MY OWN AMENDMENT WAS FALSIFIED
+
+I wrote *"more cover shortens sightlines and creates contact, so measure at the populated layout."*
+The first half is **measured false**. First contact is **monotonic in prop count at fixed size**:
+
+    12.00 s (27 props)  ->  18.44 s (103)  ->  21.09 s (108)
+
+**Cover does not create contact in this sim; it blocks the approach** — both fighters path around 4x
+more boxes, against an AI with no search behaviour. The advice to measure on the populated layout was
+still right, and the rules are still right for the FRAME and for concealment. **Density is not a
+pacing lever.**
+
+**The fog is not a recovery lever either.** Sweeping `maxSafeRadius` 1985/1600/1300 moves first
+contact 21.09 / 20.77 / 20.72 s — a 0.37 s spread, *inside* the floor — while never-contacted gets
+**worse** (39 -> 98/880). A tighter ring damages before it herds. So the §48.1 answer is **derive
+it**: the relative schedule is scale-invariant (1.1543 -> 1.1538) and only the absolute sweep doubles
+(22.1 -> 44.1 wu/s). ⚠️ Pinning the 1x literal 993 on a 2x map is degenerate — both spawns start
+*outside* it, **880/880 no contact**, every match over in 2.03 s.
+
+### ⚠️ TWO THINGS THAT ONLY BREAK AT THE NEW SIZE
+
+- **A single centre pot becomes lethal to pacing when cover is dense.** Four quadrant pots vs none is
+  *bit-identical*. **One** pot at the exact centre with dense cover: contact 36.6 s, duty 3.3%,
+  **542-801 of 880 matches with ZERO contact**, decided by fog. The same geometry is harmless at
+  1400x1000. Traced: AI stalled 50% of the match, longest unbroken stall 18.6 s (`rules.ts:1034`).
+  **This does not argue against the centre pot** — it argues that the searchless AI is the binding
+  constraint, and it is the same constraint as §29a.
+- **`MIN_SAFE_RADIUS` (140 wu) does not scale.** The endgame duel window shrinks 6.4 s -> 3.2 s and
+  now opens *after* first contact, so the 100/150 HP asymmetry it exists to prevent re-opens (fog
+  dealt 50.3 to the player, 0.0 to the enemy).
+
+### ✅ WHAT THE SIZE DOES **NOT** BREAK
+- **`aspect.mjs` PASSES at 0.00 wu.** `FAIR_PLAY.radiusUnits` derives from `REACH`, never from the
+  arena — the camera is **size-independent by construction**.
+- **Concealment scales cleanly**: buildable 80x80 cells **86 -> 652**. The ~168 wu ceiling is
+  unchanged, so ~20 patches at 110-130 wu. Rule 5 holds.
+- **Perf is survivable but not free**: draw calls 868 -> **574** (culling), triangles 451,278 ->
+  **1,051,644** (+2.33x — `InstancedMesh` is not per-instance culled, so floor scatter tracks *area*).
+
+### => THE SEQUENCING ANSWER
+**The arena ships WITH the N-fighter refactor, not before it.** Nothing in `src/` was changed. The
+work is not wasted: the layout rules, the fog derivation, the concealment count and the two
+scale-only defects above are all now measured and written down, so the arena pass becomes execution
+rather than discovery the moment the roster can fill it.
+
 ### ⚠️ AND THE HONEST RISK, STATED BEFORE THE WORK STARTS
 
 **A ×4 arena with only TWO fighters will almost certainly play WORSE**, and that is expected rather
