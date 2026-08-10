@@ -268,6 +268,11 @@ const OFFLINE = [
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/bl_vitals_gate.mjs --selftest', probes: [pr(['tools/tmp/bl_vitals_gate.mjs', '--selftest'], SLASH_ASSERT)] },
+  // Captures the NUMERATOR, not the denominator. `SLASH_ASSERT` above takes the denominator, which
+  // is fine when a tool only prints on success but would let `hc_occluders 3/4` satisfy a doc value
+  // of 4 — a failing guard reported as an intact one. This is the guard for the silent-occluder
+  // class, so it is the last one that should be able to fail quietly.
+  { key: 'tools/tmp/hc_occluders.mjs --selftest', probes: [pr(['tools/tmp/hc_occluders.mjs', '--selftest'], /^hc_occluders\s+(\d+)\/\d+\s*$/m)] },
   { key: 'tools/tmp/conceal_lab.mjs --selftest', probes: [pr(['tools/tmp/conceal_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/burger_lab.mjs --selftest',  probes: [pr(['tools/tmp/burger_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/driver_guard.mjs',           probes: [pr(['tools/tmp/driver_guard.mjs'], /^driver_guard: (\d+) passed, \d+ failed/m)] },
