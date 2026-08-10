@@ -100,7 +100,53 @@ const LIMB_TOAST_DARK = '#3E1F09'; // forearm / shin — dark
  * right value for a patty depends on what else is in the frame with it. Hue is held;
  * only value moved.
  */
-const PATTY = '#2A1408';
+/**
+ * ── 🚨 #2A1408 -> #4A2410, AND THIS IS THE THIRD AND LAST CAUSE OF THE HIPS ─────
+ * WAS `#2A1408`, luma **0.090**. `3ad20e2` and `75daec3` closed the other two causes
+ * of Uri's "hips look detached" — the apron's contour (0.70 -> 0.58 -> 0.46 of the
+ * bun's height) and a 0.305 luma cliff where `LIMB_TOAST` met the bun, cut to 0.200
+ * by `LIMB_THIGH` — and both rounds ended "IMPROVED, NOT CLOSED" with the residual
+ * named as this constant. It was left alone as "a `valuescan` round of its own".
+ *
+ * ── IT IS NOT A `valuescan` ROUND, AND THAT IS WHY THREE PASSES COULD NOT CLOSE IT ─
+ * `tools/tmp/cf_ablate.mjs` paints one named mesh through the SHIPPED path and counts
+ * the pixels it owns. The patty owns:
+ *
+ *   pitch 20 (charStage.ts, the LOBBY camera Uri judges)   9,886 px   **0.785%** of frame
+ *   pitch 58 (camera.ts, the MATCH camera)                   240 px   **0.019%** of frame
+ *
+ * **`valuescan` measures pitch 58. At the camera every previous round steered on, this
+ * element is 240 pixels — it structurally cannot see the thing it was asked about.**
+ * `docs/LESSONS.md` §6b read backwards: a flat metric is not evidence a change did
+ * nothing; ask what the metric can express. The patty is occluded at 58 by the cheese
+ * slab overhanging it (`CHEESE_R` 0.74R against `PATTY_R` 0.60R) and fully visible at
+ * 20. It is a LOBBY defect and only a lobby instrument can price it.
+ *
+ * ── AND THE SAME OVERHANG IS WHY THE ALBEDO IS THE RIGHT LEVER ─────────────────
+ * Ablated (`shots/cf/ablate/hb-patty-p20.png`), the black waist band IS exactly the
+ * patty: it runs from the cheese's underside to the apron's top edge, and the dark at
+ * the hips proper — where the thighs attach — is the BOTTOM BUN, a different mesh
+ * (1.537% of the same frame). Recessed 0.14R behind the cheese, the patty never sees
+ * the key light, so at 0.090 albedo it renders as a hole rather than as meat.
+ *
+ * Four candidates rendered through the shipped path with no source edit
+ * (`cf_ablate --color`, `shots/cf/patty/`) and judged by eye at the lobby camera:
+ *   #2A1408  0.090  shipped — a black slot. The defect.
+ *   #3A1C0C  0.130  the centre reads brown; the LEFT HALF is still black. Not enough.
+ *   #4A2410  0.167  the whole band reads as a seared patty.            <- ships
+ *   #5E2E14  0.213  reads well, but closes on `LIMB_THIGH` #8A5220 (0.354) — the exact
+ *                   body/limb merge `75daec3` spent that constant to open. Rejected.
+ *   (hidden)        proves the diagnosis and answers the identity question: with the
+ *                   patty gone the band is warm bun and the black is gone — and the
+ *                   character is a bun with salad in it. **The patty stays.**
+ *
+ * ⚠️ 0.167 is ABOVE the bottom bun's albedo (#43220B, 0.154) and that inversion is
+ * deliberate: the two are not lit alike. The bun's flank faces the key; the patty sits
+ * under an overhang. In the RENDER the patty still reads at or below the bun.
+ * ⚠️ `PATTY_DARK` is NOT lifted with it — it is shared with `foot`, and lifting it
+ * would repaint the boots to fix the grill marks.
+ */
+const PATTY = '#4A2410';
 const PATTY_DARK = '#0C0603';     // and the boots are darker than the shins above them
 /**
  * ── ❌ #43220B -> #7B4415 WAS BUILT, MEASURED AND REVERTED. THE NUMBER THAT
@@ -1043,8 +1089,31 @@ export class HamburgerCharacter extends BaseCharacter {
       // 3. THE CATCHLIGHT — an explicit mesh, `flatMat`, so it is 1.0 luma at every
       //    lighting angle. `noOutline`: an ink hull around a 2 mm highlight turns it
       //    grey, which is the failure this exact element exists to avoid.
+      // ── ⚠️ AND IT WAS 1.0% OUTSIDE ITS OWN PUPIL. LATENT PAC-MAN. ─────────────
+      // The same defect `fb9d9da` fixed on egg, `75daec3` on pizza and found on hotdog
+      // at 0.0003 of margin. This face is the fourth from that recipe. The pupil is an
+      // ELLIPSE — `SphereGeometry(EYE_R * 0.52)` scaled 1.14 in y — so the rim is not a
+      // single number and the naive circular check passes it. In units of `EYE_R`:
+      //
+      //   pupil semi-axes            a = 0.520   b = 0.593  (0.52 * 1.14)
+      //   glint offset from pupil    (0.200, 0.260)  ->  |d| = 0.3280, dir (0.610, 0.793)
+      //   pupil rim along that dir   0.5623
+      //   glint outer edge           0.3280 + 0.240 = 0.5680     +0.0057 = 1.0% PAST
+      //
+      // It does not render as an obvious bite only because the lash covers the top of
+      // the pupil, which is luck, not margin — exactly hotdog's situation.
+      // Pulled to 82% of the rim (the number pizza's fix settled on): |d| 0.3280 ->
+      // 0.2210, outer edge 0.4610, an 18% margin.
+      // ⚠️ **The RADIUS is deliberately not reduced.** §40 pattern 2 is that ~0% of our
+      // eye pixels clear 0.85 luma against the reference's 31%, so shrinking the one
+      // pure-white mass on the face to buy margin would pay for this defect with that
+      // one. Moving it inward instead should *increase* visible white, because the part
+      // that was overhanging the sclera was adding no contrast at all.
+      // `z` 0.74 -> 0.769 keeps the 0.0204 of proud clearance it had: the pupil is
+      // scaled 0.52 in z, so a light moved toward the axis rides a surface that has
+      // risen 0.029 under it, and leaving z alone would sink it into the pupil.
       const glint = new THREE.Mesh(new THREE.SphereGeometry(EYE_R * 0.24, 10, 8), glintMat);
-      glint.position.set(-sx * EYE_R * 0.30, EYE_R * 0.46, EYE_R * 0.74);
+      glint.position.set(-sx * EYE_R * 0.235, EYE_R * 0.375, EYE_R * 0.769);
       glint.userData.noOutline = true;
       glint.name = 'eye_glint__no_outline';
       eyeG.add(glint);
@@ -1216,6 +1285,19 @@ export class HamburgerCharacter extends BaseCharacter {
       // deliberately: `PATTY`/`PATTY_DARK` are this file's dark rung and the value
       // pass used them to buy `p05`, so moving them is a `valuescan` round of its own
       // and not a free ride on this one.
+      // ── ✅ DIAGNOSIS CONFIRMED BY ABLATION; THE PARKING REASON WAS WRONG ────────
+      // The paragraph above is kept because its diagnosis is exactly right and its
+      // conclusion sent this defect round the loop a third time. Confirmed rather than
+      // inferred: `cf_ablate.mjs` paints `patty` alone through the shipped path and the
+      // magenta IS that band, cheese-underside to apron-top, while the dark at the hips
+      // proper is `bottom_bun_mesh` (`shots/cf/ablate/`). Both were "the black band".
+      // 🚨 BUT IT IS NOT "A `valuescan` ROUND OF ITS OWN", AND THAT IS WHY IT SURVIVED
+      // THREE PASSES: `valuescan` measures the MATCH camera, where the cheese overhang
+      // (0.74R vs the patty's 0.60R) hides this mesh completely — **9,886 px at pitch
+      // 20 against 240 px at pitch 58, 0.785% of the frame against 0.019%.** The
+      // instrument it was deferred to cannot see it. `PATTY` is now #4A2410 (0.167) and
+      // `valuescan` is BYTE-FLAT across the change, which is the proof, not the alarm.
+      // ⚠️ `PATTY_DARK` is still untouched and is still shared with `foot`.
       bottomBun.receiveShadow = true;
       group.add(bottomBun);
 

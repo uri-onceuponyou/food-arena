@@ -431,15 +431,43 @@ function taperedLimb(
   // what `donut.ts` and `egg.ts` were rebuilt this pass to stop being. Here the top
   // cap is already a shallow dome, so only the BOTTOM needed to become a caller's
   // choice: interior ends pass ~0.10 and abut cleanly, exterior ends keep 0.45.
-  const capBot = Math.min(rBot, len * capBotFrac);
+  //
+  // ── 🚨 AND THAT ARGUMENT DID THE EXACT OPPOSITE, BECAUSE ONE NUMBER WAS DOING ──
+  // ── TWO JOBS. `soup.ts` HAD ALREADY FOUND AND FIXED THIS, ONE FILE OVER. ──────
+  // The paragraph above is kept because its reasoning is right and its implementation
+  // inverted it. WAS: `capBot = min(rBot, len * capBotFrac)`, used as BOTH the cap's
+  // height AND its radius, with the wall's bottom point then placed at `capBot`. So
+  // shrinking the CAP silently shrank the whole bottom of the SEGMENT, and passing the
+  // small interior value made the limb taper to a spike instead of abutting flush:
+  //
+  //   slot      len     rTop      rBot asked   capBot got   wall taper
+  //   upperArm  0.2416  0.1257 m  0.1114 m     0.0242 m     0.1257 -> 0.0242  (-81%)
+  //   thigh     0.2841  0.1559 m  0.1344 m     0.0284 m     0.1559 -> 0.0284  (-82%)
+  //
+  // Read `shots/cf/before/sushi_p20.png` at the SHIPPED LOBBY CAMERA: four salmon
+  // ICE-CREAM CONES hanging in mid-air, each ending in a point above a black lump.
+  // ⚠️ **And the two call sites below both carry a comment asserting the joint is
+  // matched in metres, which was true of the numbers passed in and false of the
+  // geometry that came out** — the forearm's 0.1114 m top met an upper arm ending at
+  // 0.0242 m, a **4.6x step at the elbow**; the shin's 0.1344 m top met a thigh
+  // ending at 0.0284 m, **4.7x at the knee**. Same class as `docs/LESSONS.md` §12's
+  // capsule degeneracy: a geometry helper quietly changing shape behind its own API.
+  //
+  // The cap now carries TWO numbers, exactly as `soup.ts`'s copy already does: `rBot`
+  // horizontally, so the wall keeps the radius it was asked for, and `capH` vertically,
+  // so a short cap is a SQUASHED dome rather than a truncated segment.
+  // ⚠️ Byte-identical wherever `rBot <= len * capBotFrac`, which is both DEFAULT call
+  // sites here (forearm 0.0788 <= 0.0992, shin 0.1041 <= 0.1046) — `capH` collapses to
+  // `rBot` and every lathe point is unchanged. Only the two interior joints move.
+  const capH = Math.min(rBot, len * capBotFrac);
   const capTopH = Math.min(rTop * 0.42, len * 0.16);
-  const wallBotY = -(len - capBot);
+  const wallBotY = -(len - capH);
   const wallTopY = -capTopH;
   const CAP = 5;
   const pts: THREE.Vector2[] = [];
   for (let i = CAP; i >= 0; i--) {
     const a = (i / CAP) * Math.PI * 0.5;
-    pts.push(new THREE.Vector2(capBot * Math.cos(a), wallBotY - capBot * Math.sin(a)));
+    pts.push(new THREE.Vector2(rBot * Math.cos(a), wallBotY - capH * Math.sin(a)));
   }
   pts.push(new THREE.Vector2(rTop, wallTopY));
   const TCAP = 4;
@@ -1090,12 +1118,62 @@ export class SushiCharacter extends BaseCharacter {
       // Catchlights: a main one on the pupil's upper-outer edge and a small secondary
       // one opposite it. Two is what a reference eye carries, and the second is what
       // stops the first reading as a printed dot.
-      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.028, 10, 8), flatMat('#ffffff'));
-      glint.position.set(-R * 0.014, R * 0.048, R * 0.088);
+      //
+      // ── 🚨 "ON THE PUPIL'S UPPER-OUTER EDGE" WAS LITERAL, AND BOTH WERE OFF IT ──
+      // The wording above is kept because it names the bug. A catchlight placed ON an
+      // edge is a catchlight HALF OUTSIDE the pupil, and outside the pupil is the white
+      // sclera — so the two whites merge and the pupil renders with a bite taken out of
+      // it. `fb9d9da` fixed this on egg, `75daec3` on pizza (whose code said *"so they
+      // straddle its edge"* out loud) and found hotdog tangent at 0.0003 of margin.
+      // Sushi is the fourth face built from the same recipe and it was the worst of them.
+      // Arithmetic, in units of R, against a pupil of radius 0.068 centred (0.016, 0.012):
+      //
+      //   element  radius   |offset|   outer edge   vs rim 0.068
+      //   glint    0.028    0.0469     0.0749        +0.0069  = 10% PAST the rim
+      //   glint2   0.013    0.0544     0.0674        -0.0006  = 0.9% margin (tangent)
+      //
+      // Read `shots/cf/zoom/su-eyeL-p20.png`: the main catchlight is a white SLAB
+      // hanging off the pupil's upper-left, continuous with the sclera, and the second
+      // one sits astride the lower rim. Both are pulled in to the same 82% of the rim
+      // pizza's fix settled on — outer edge 0.0562 and 0.0558 against 0.068, a ~17.5%
+      // margin each — keeping their directions, so the gaze and the "two catchlights,
+      // opposed" reading are unchanged. The main one also drops 0.028 -> 0.0245 (36% of
+      // the pupil radius, pizza's number) because pulling a light that big straight in
+      // would have parked it on the pupil's axis and killed the upper-outer placement.
+      // ⚠️ `z` rises with it: the pupil is a sphere scaled 0.55 in z, so a catchlight
+      // moved toward the axis must move FORWARD by the same surface it is riding on or
+      // it sinks inside the pupil and stops rendering.
+      //
+      // ── 🚨 AND THE 82%-OF-THE-RIM FIX WAS RENDERED AND STILL TOUCHED THE RIM ────
+      // `shots/cf/zoom/su-eyeL-a1.png`. The arithmetic above is correct and it is
+      // arithmetic about the WRONG SPACE. A catchlight stands 0.036R PROUD of the
+      // pupil's centre plane, and this eye's own outward normal is ~24 degrees off the
+      // camera axis at the lobby framing (measured: the pupil projects 117 px wide by
+      // 128 px tall, and `acos(117/128)` = 24.4 deg). So the standoff buys the glint
+      // `0.036R * sin(24.4)` = **0.0147R of PURE SIDEWAYS SLIDE** that the pupil under
+      // it does not get, while the pupil's own half-width shrinks by `cos(24.4)`:
+      //
+      //   design offset          measured on screen      ratio
+      //   dx  -0.30 of rim   ->  -0.62 of projected rim   2.08x
+      //   dy  +0.36 of rim   ->  +0.29 of projected rim   0.81x
+      //
+      // ⚠️ **THIS IS THE SAME THEOREM AS THE CHOPSTICKS IN `buildSilhouetteEvents`, AND
+      // AS THE PITCHED CAMERA: an offset chosen in 3D is not an offset the player sees.
+      // Anything standing off a surface at depth z buys `z*sin(theta)` of screen travel
+      // that the surface itself gets none of.** A face element positioned against a rim
+      // has to be solved in the PROJECTION, or the margin is spent by parallax.
+      // The x term is therefore driven to ZERO and the whole offset is carried in y,
+      // which is the axis the yaw does not touch: the parallax then supplies the
+      // up-and-OUTWARD placement the comment above asks for, for free and correctly.
+      //   glint   local (0, +0.018) from the pupil centre; projected |off| 0.023R
+      //           against a projected rim of 0.0622R -> outer edge **0.76 of the rim**
+      //   glint2  local (0, -0.030); projected outer edge **0.73 of the rim**
+      const glint = new THREE.Mesh(new THREE.SphereGeometry(R * 0.0245, 10, 8), flatMat('#ffffff'));
+      glint.position.set(R * 0.016, R * 0.030, R * 0.093);
       glint.userData.noOutline = true;
       eye.add(glint);
       const glint2 = new THREE.Mesh(new THREE.SphereGeometry(R * 0.013, 8, 6), flatMat('#ffffff'));
-      glint2.position.set(R * 0.048, -R * 0.032, R * 0.082);
+      glint2.position.set(R * 0.016, -R * 0.018, R * 0.089);
       glint2.userData.noOutline = true;
       eye.add(glint2);
 
