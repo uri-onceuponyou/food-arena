@@ -330,7 +330,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **56**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **57**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -406,6 +406,7 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/cw_verify_knownbad.mjs` | **13** | ⚠️ browser. Proves `arena_probe --verify` was BLIND to a dropped concealment list, as an ablation against a **derived** pre-fix ref so it survives a rebase. Carries a tripwire for the way the blindness got in: **zero boxes is indistinguishable from "no plates"** |
 | `node tools/tmp/burger_lab.mjs --selftest` | **16** | where the two drivers' matches diverge for one character — the instrument behind the 50.6 pp Hamburger role split. **Was undocumented** |
 | `node tools/tmp/roster_lab.mjs --selftest` | **9** | per-character strength, settled-matchup count and rarity roll-up on the FIXED driver. **Was undocumented.** ~26 s, the slowest offline gate |
+| `node tools/tmp/bl_vitals_gate.mjs --selftest` | **5** | prices a proposed vitals change against §22's structural bounds before it is measured. Every bound is shown to FAIL on a known-bad roster, so a green result means the bound was tested — not that it was skipped. Refused nothing in the Sushi/Legendary pass, which is how that pass established §22 was not the thing blocking it |
 | `node tools/tmp/limbmatch.mjs --selftest` | **27** | hull deficiency / appendages / share — **computable on a reference plate**. `--mode control` adds 9 more, but they render in a browser and are not part of this contract |
 | `node tools/tmp/sepscan.mjs --selftest` | **38** | internal separation (neck pinch, chin notch, head:body area). `--mode control` adds 8 more, browser-side and outside this contract |
 | `node tools/tmp/trail_probe.mjs` | controls 3 | same-frame ablation of ground marks vs floor **and** cast |

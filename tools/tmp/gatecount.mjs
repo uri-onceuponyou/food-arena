@@ -267,6 +267,7 @@ const OFFLINE = [
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
+  { key: 'tools/tmp/bl_vitals_gate.mjs --selftest', probes: [pr(['tools/tmp/bl_vitals_gate.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/conceal_lab.mjs --selftest', probes: [pr(['tools/tmp/conceal_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/burger_lab.mjs --selftest',  probes: [pr(['tools/tmp/burger_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/driver_guard.mjs',           probes: [pr(['tools/tmp/driver_guard.mjs'], /^driver_guard: (\d+) passed, \d+ failed/m)] },
