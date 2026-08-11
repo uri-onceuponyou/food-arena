@@ -569,17 +569,47 @@ const V = {
     // ever drawn while 3/3 magnified is `boxBurger`'s signature — a DELIVERED SIZE result.
     // The remaining variable is the PLATE, which lives in `src/ui/screens/`.
     //
-    // 🔴 AND THEN `620bf7f` BOUGHT BOTH OUT-OF-SET VARIABLES — 16.55 px on the shell's
+    // 🔴 THE 16.55 px HAPPENED. THE CREAM CHIP DID NOT — `620bf7f`'s message describes a
+    // plate change that never landed in `trophyRoad.ts`, and `shots/si/after2/spec.json`
+    // records it anyway, so r10 below was judged at rgb(253,234,212) while the site ships on
+    // saturated orange rgb(226,85,44). Caught by photographing the element, not by any
+    // control. Re-run on the shipped plate as r11 (n=3) and r12 (n=6):
+    //
+    //     arm                       r10 cream n=3   r11 orange n=3   r12 orange n=6
+    //     A0  dome + bar                 0/3              0/3              1/6
+    //     A   VAULT + bar             **3/3**             1/3              2/6
+    //     E   dome + strap               0/3           **3/3**             1/6
+    //     F   vault + strap               —                —               0/6
+    //
+    // 🚨 r12's twin `stun` split **5 of 6** on byte-identical art, so the FLOOR for a
+    // failing subject is 5 of 6 and every delta above is 1 or 2. NOTHING SEPARATES. r10's
+    // failing twin split 0 of 3 (consistent misread, buys nothing) and r11's twins all came
+    // back legible (no floor for a failing subject at all) — both headline results sat inside
+    // a floor their own round could not measure. The vault lid stays only because it is the
+    // one arm whose paired delta points the same way in all three rounds (+3/+1/+1) while E
+    // goes +0/+3/-1 and F is the worst arm drawn; it is UNRESOLVED, not won.
+    // → The lever left is the PLATE, and it is in `src/ui/screens/trophyRoad.ts`.
+    //
+    // The paragraph this replaces read: `620bf7f` BOUGHT BOTH OUT-OF-SET VARIABLES — 16.55 px on the shell's
     // cream `.fa-chip` rgb(253,234,212) — for **Δ 0**, and the KIND of failure changed:
     // scattered container guesses became "a grilled burger patty", UNANIMOUS, on two
     // independent plates. A rotating misread is noise; a unanimous one names a shape. So
-    // a fourth drawing variable WAS spent, against the block above, and it worked:
-    //     A  0/3 native ("a grilled burger patty" x3), 3/3 magnified
-    //     D  **3/3 native (Δ +3)**, 3/3 magnified (Δ +0)   — SHIPPED
-    //     E  0/3 native (Δ +0, patty x3 again), 3/3 magnified (Δ +0)
-    // E is the control that settles it: with the horizontal bar GONE and the dome kept,
-    // the answer is still "a grilled burger patty" 3 of 3. The lid was a TRUE SEMICIRCLE
-    // (rise 8.9 on a half-width of 8.9), so the top 45% of the glyph was a top bun.
+    // a fourth drawing variable WAS spent, against the block above — and on the CREAM
+    // plate it read as a clean +3, which is the number the table above refutes.
+    {
+      // 🚨 THE RETIRED DOME, DECLARED EXPLICITLY, BECAUSE [A] IS NO LONGER IT.
+      // [A] draws whatever `src/ui/icons/` contains and `01945f2` pasted [D] into it, so
+      // any further round needs the pre-fix art as its own arm or there is nothing to
+      // measure against. This is byte-identical to what shipped before `01945f2`.
+      id: 'A0',
+      note: '[r11 seed 71, on the plate that actually SHIPS — 16.55 px on rgb(226,85,44): see the verdict comment above] THE RETIRED SEMICIRCULAR LID, kept as an explicit arm so the fix can be re-measured after the paste.',
+      svg: `
+<path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
+<path d="M3.1 11.6a8.9 8.9 0 0 1 17.8 0z" fill="${P.woodHi}"/>
+<path d="M2.6 10.2h18.8v3H2.6z" fill="${P.gold}" stroke-width="1.4"/>
+<path d="M10.3 9.8h3.4v5.4h-3.4z" fill="${P.mustard}" stroke-width="1.4"/>
+<circle cx="12" cy="12.9" r="0.85" fill="${P.wood}" stroke="none"/>`,
+    },
     { id: 'A', note: '[r10 seed 53, at the POST-620bf7f condition — 16.55 px on the cream chip: 0/3 native, "a grilled burger patty" x3; 3/3 magnified] SHIPPED — five stroked shapes plus a 0.39 px keyhole. ⚠️ The rest of this note describes the RETIRED condition and is kept because arms B and C were measured in it: at 11.03 px on rgb(228,91,51) not one fill cleared 2:1 (wood 1.88, woodHi 1.24, gold 1.73; the ink outline 5.05). On the cream chip those are 5.77 / 3.79 / 1.77 and the plate is no longer the defect.' },
     {
       id: 'B',
@@ -601,7 +631,7 @@ const V = {
     },
     {
       id: 'D',
-      note: '[r10 seed 53: 3/3 native, delta +3 — RESOLVED; 3/3 magnified, delta +0. SHIPPED] THE LID STOPS BEING A DOME. The shipped lid is a TRUE SEMICIRCLE — rise 8.9 on a half-width of 8.9 — so the top 45% of the glyph is a round brown crown over a light horizontal bar over a brown base, which is a burger in three strata. It becomes a barrel VAULT: 3.4 units of vertical lid wall, then a crown of rise 4.2, i.e. rise/half-width 1.00 -> 0.47. ONE variable, the lid path. Body, band, clasp, keyhole, colours and shape count all byte-identical. Object 18.8x17.3 -> 18.8x16.0 units, aspect 1.09 -> 1.19 (patty is 1.44).',
+      note: '[SHIPPED, BUT UNRESOLVED. r10 (cream, a plate that does not ship): 3/3 native, delta +3. r11 (orange, ships): 1/3, delta +1 over A0. r12 (orange, n=6): 2/6, delta +1 over A0 — against a measured floor of 5 of 6. Kept because it is the only arm whose paired delta points the same way in all three rounds] THE LID STOPS BEING A DOME. The shipped lid is a TRUE SEMICIRCLE — rise 8.9 on a half-width of 8.9 — so the top 45% of the glyph is a round brown crown over a light horizontal bar over a brown base, which is a burger in three strata. It becomes a barrel VAULT: 3.4 units of vertical lid wall, then a crown of rise 4.2, i.e. rise/half-width 1.00 -> 0.47. ONE variable, the lid path. Body, band, clasp, keyhole, colours and shape count all byte-identical. Object 18.8x17.3 -> 18.8x16.0 units, aspect 1.09 -> 1.19 (patty is 1.44).',
       svg: `
 <path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
 <path d="M3.1 8.2a8.9 4.2 0 0 1 17.8 0v3.4z" fill="${P.woodHi}"/>
@@ -611,11 +641,21 @@ const V = {
     },
     {
       id: 'E',
-      note: '[r10 seed 53: 0/3 native, delta +0 — "a grilled burger patty" x3, unchanged from A; 3/3 magnified, delta +0. NOT SHIPPED, and it is the CONTROL that proves the crown rather than the horizontal bar was the defect] THE COMPETING MECHANISM — THE DIVISION’S AXIS, DOME UNTOUCHED. The other half of "a flat two-tone lozenge" is the full-width horizontal gold bar, which reads as the filling layer between two buns. It becomes a VERTICAL strap over the crown and down the front with a lock plate at the seam. Same shape count, same colours, dome byte-identical.',
+      note: '[NOT SHIPPED, and its direction does not hold. r10 (cream): 0/3, delta +0. r11 (orange): 3/3, delta +3 over A0. r12 (orange, n=6): 1/6, delta 0 over A0. +0 / +3 / -1 across three rounds is what an effect inside the floor looks like] THE COMPETING MECHANISM — THE DIVISION’S AXIS, DOME UNTOUCHED. The other half of "a flat two-tone lozenge" is the full-width horizontal gold bar, which reads as the filling layer between two buns. It becomes a VERTICAL strap over the crown and down the front with a lock plate at the seam. Same shape count, same colours, dome byte-identical.',
       svg: `
 <path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
 <path d="M3.1 11.6a8.9 8.9 0 0 1 17.8 0z" fill="${P.woodHi}"/>
 <path d="M10.1 4.6h3.8v14.6h-3.8z" fill="${P.gold}" stroke-width="1.4"/>
+<path d="M9.3 11h5.4v3.8H9.3z" fill="${P.mustard}" stroke-width="1.4"/>
+<circle cx="12" cy="12.9" r="0.85" fill="${P.wood}" stroke="none"/>`,
+    },
+    {
+      id: 'F',
+      note: '[r12 seed 97, n=6: **0/6**, the worst arm anyone has drawn for this glyph — "a loot box with a burger on it" x5. NOT SHIPPED] THE UNION — D’s barrel VAULT lid AND E’s vertical strap. Exists because D and E each won one round and lost the other, and the two rounds differ in plate, seed, judges and composition all at once, so neither can be attributed. If both cues are real this is the drawing that survives both; if only one is, F cannot beat the arm that carries it. The strap starts inside the flatter crown, so its top edge moves 4.6 -> 7.0 and its bottom stays at 19.2.',
+      svg: `
+<path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
+<path d="M3.1 8.2a8.9 4.2 0 0 1 17.8 0v3.4z" fill="${P.woodHi}"/>
+<path d="M10.1 7h3.8v12.2h-3.8z" fill="${P.gold}" stroke-width="1.4"/>
 <path d="M9.3 11h5.4v3.8H9.3z" fill="${P.mustard}" stroke-width="1.4"/>
 <circle cx="12" cy="12.9" r="0.85" fill="${P.wood}" stroke="none"/>`,
     },

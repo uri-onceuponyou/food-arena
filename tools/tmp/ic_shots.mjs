@@ -146,5 +146,19 @@ await shoot('fact-pill-slow-desk', DESK, async (page) => {
   throw new Error('no .chars-fact mentioning slow on any character');
 });
 
+// 9. THE FREE CONTAINER AT ITS ONLY DELIVERED SITE — `chest` in `.tr-inv-empty`, the
+//    trophy road's empty-inventory state. It had never been photographed, which is how a
+//    glyph that three rounds judged on a synthesised plate could ship at 11.03 px on a
+//    saturated orange chip for as long as it did; `620bf7f` moved it to 16.55 px on the
+//    shell's cream `.fa-chip`, and `01945f2` changed its lid. The harness draws the right
+//    px on the right plate — this is the actual element, so the two can disagree and be
+//    seen to.
+await shoot('trophy-inv-chest-desk', DESK, async (page) => {
+  await at(page, 'trophies');
+  const el = await page.$('.tr-inv-empty');
+  if (!el) throw new Error('no .tr-inv-empty — the inventory is not in its empty state');
+  return pad(await el.boundingBox(), 14);
+});
+
 await browser.close();
 console.log(`\nwrote ${OUT}`);

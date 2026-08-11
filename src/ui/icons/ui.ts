@@ -305,7 +305,56 @@ export const UI_ICONS: Record<string, string> = {
    *  with a single chest before anyone acts on it.
    *  ⚠️ And the magnified arm is a ceiling with no floor at all — every tile 3/3, every
    *  twin legible, 98.6% overall. A magnified round would have called the shipped dome
-   *  fine, for the third time in this corner. */
+   *  fine, for the third time in this corner.
+   *
+   *  ── 🔴 THAT ENTIRE RESULT WAS MEASURED ON A PLATE THAT DOES NOT SHIP ────────
+   *  Kept above, verbatim and wrong, because how it failed is the finding. `620bf7f`'s
+   *  message says the hint moved onto the shell's cream `.fa-chip` and quotes the new
+   *  ratios — **and `trophyRoad.ts` never changed.** Its own source comment says so in
+   *  as many words (*"the plate was the other candidate variable and is NOT spent … that
+   *  was NOT changed here"*), and `shots/si/after2/spec.json`, the spec the round above
+   *  drew from, records the chip anyway. The site still ships on **saturated orange
+   *  rgb(226,85,44)**, where `P.wood` is 1.88:1 and `P.gold` 1.73 — not the 5.77 and 3.25
+   *  the round was run at. Caught by PHOTOGRAPHING THE ELEMENT (`ic_shots.mjs` shot 9,
+   *  `shots/ic/ctx10/trophy-inv-chest-desk.png`), which nobody had ever done. A harness
+   *  can be given the wrong plate and every control in it still passes.
+   *
+   *  ── RE-RUN ON THE SHIPPED PLATE, AND THE FLOOR FINALLY BRACKETED ───────────
+   *  r11 (seed 71, 3 judges) and r12 (seed 97, **6 judges**), both at 16.55 px on
+   *  rgb(226,85,44). `A0` is the retired semicircular lid, declared as an explicit arm and
+   *  proved byte-identical to what shipped at `1410077`; `A` is the vault lid this file now
+   *  carries; `E` is the vertical strap; `F` is the union of the two.
+   *
+   *      arm                       r10 (cream, n=3)   r11 (orange, n=3)   r12 (orange, n=6)
+   *      A0  dome + horizontal bar        0/3                0/3                 1/6
+   *      A   VAULT + horizontal bar    **3/3**               1/3                 2/6
+   *      E   dome + vertical strap        0/3             **3/3**                1/6
+   *      F   vault + vertical strap        —                  —                  0/6
+   *
+   *  🔴 AND r12 IS THE FIRST OF THE THREE WHOSE TWIN CONTROL ACTUALLY BRACKETED:
+   *  `stun` split **5 of 6** — two byte-identical tiles drawing sparkle/star, star/star,
+   *  loot-box/chest, loot-box/flame-box from the same judge. **The floor for a failing
+   *  subject here is 5 of 6, and every delta above is 1 or 2.** So *nothing* separates:
+   *  r10's +3 came from a round whose failing twin split 0 of 3 (misread consistently, which
+   *  buys nothing), and r11's twins all came back LEGIBLE, so it had no floor for a failing
+   *  subject at all. **Both headline results were inside a floor their own round could not
+   *  measure.** CLAUDE.md #10, and I am the one who broke it.
+   *
+   *  WHY THE VAULT LID STAYS ANYWAY, STATED AS THE WEAK CLAIM IT IS: it is the only arm
+   *  whose PAIRED delta against the retired dome points the same way in all three
+   *  independent rounds (+3, +1, +1; 6 of 12 judge-readings against 1 of 12), while `E`
+   *  goes +0 / +3 / −1 and `F` is the worst arm anyone has drawn. No single round resolves
+   *  it, and reverting would be an equally unmeasured action. **It is UNRESOLVED, not won.**
+   *
+   *  🔴 THE LEVER THAT IS ACTUALLY LEFT IS THE PLATE, AND IT IS OUT OF SET. Every arm ever
+   *  drawn is ≤ 2/6 on orange; the one round on cream is the only one in which any drawing
+   *  of this glyph has ever been named correctly at native size. The wrong answers are the
+   *  same four every time — "a loot box with a burger on it", "a grilled burger patty",
+   *  "a red loot box with a bow", "a treasure chest" — i.e. the container family plus the
+   *  burger, which is what a low-contrast warm mass collapses to. → **Land the cream chip
+   *  that `620bf7f` measured and did not ship.** That is `src/ui/screens/trophyRoad.ts`.
+   *  Do not spend another drawing variable here first; four have now been spent and the
+   *  instrument cannot see any of them. */
   chest: `
 <path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
 <path d="M3.1 8.2a8.9 4.2 0 0 1 17.8 0v3.4z" fill="${P.woodHi}"/>
