@@ -1618,6 +1618,73 @@ export class HamburgerCharacter extends BaseCharacter {
       }
     });
 
+    // ── 🔴 THE SHOULDER BRIDGE IS THE PATTY, NOT THE ARM ──────────────────────
+    // `ChibiRig.fitShoulders()` (de4bb11) builds a deltoid per side in `palette.limb`
+    // — the UPPER ARM's own tone — because on most of the cast the bridge is the top
+    // of the arm. On this character it is not: `SEAM_EMBED` (see the vertical layout
+    // above) exists precisely so that *"the patty layer itself — not just its lower
+    // edge — surrounds the arm's attachment point"*. The bridge therefore sits INSIDE
+    // the patty band, under the cheese overhang, and `cf_ablate --names shoulder_bridge`
+    // shows exactly that: two wedges between the cheese's underside and the arm mound,
+    // **11,083 px at the lobby camera (0.880% of frame) and 7,374 px at the match
+    // camera (0.585%)** — this character's largest single new surface in a generation.
+    //
+    // ── AND IT SHIPPED A REAL GATE FAILURE ────────────────────────────────────
+    // `valuescan --mode gate`, paired on the same tree either side of the bridge:
+    //
+    //   hamburger    range   p05 (cap 0.180)   steps@10
+    //   no bridge    0.7196  0.1581            7
+    //   pal.limb     0.6828  0.1948  🔴 FAIL   6
+    //
+    // 7,374 px of `LIMB_TOAST` (#AD6C29, luma 0.459) landed in the one place this
+    // character could least afford it. `p05` is the DARK ANCHOR, and hamburger's dark
+    // budget is the third-thinnest in the cast: at pitch 58 the burger's whole filling
+    // band is occluded by the crown, so the darks are the brows, the boots, the
+    // forearms and nothing else. The tail is measurably that thin — p2.5 0.1364,
+    // p05 0.1948, p7.5 0.2857 — so ~2% of the matte arriving above 0.40 moves `p05`
+    // 0.037 on its own.
+    //
+    // ❌ THE TWO OBVIOUS LEVERS ARE ALREADY REFUTED WITH NUMBERS, DO NOT RE-DERIVE:
+    //   · brightening `BUN_DARK` moves `p05` the WRONG WAY (+0.5 of p05 per unit of
+    //     bun albedo — see that constant; #43220B -> #7B4415 gave 0.166 -> 0.238);
+    //   · `bottomBun.receiveShadow = false` was ablated and the frame did not move.
+    // And darkening the bridge inside `rig.ts` is not available either: the same
+    // material serves sushi, where it would land at 0.088 against near-black nori.
+    // The remedy has to come out of THIS file's dark budget, and it does.
+    //
+    // ── WHAT LANDS, AND IT IS A MATERIAL SWAP, NOT A NEW CONSTANT ─────────────
+    // The bridge takes `pattyMat` — the material of the layer it is physically inside.
+    // Rendered through the shipped path with no source edit (`cf_ablate --color`,
+    // `shots/nm/probe/`), measured over the bridge's own magenta mask:
+    //
+    //   colour              bridge luma p10/p50/p90 @58     read at BOTH cameras
+    //   #AD6C29 shipped     (0.459 albedo)                  a SECOND orange lobe
+    //   #8A5220 LIMB_THIGH  0.281 / 0.364 / 0.460           soft, but p05 unmoved
+    //   #6B3A14             0.182 / 0.246 / 0.336           p05 still ~0.19
+    //   #4A2410 PATTY       0.114 / 0.159 / 0.250           <- ships
+    //   #43220B BUN_DARK    0.105 / 0.149 / 0.241           same read, 0.01 darker
+    //
+    // Judged on the pictures first (`shots/nm/probe/sheet_shoulder_p20.png` and
+    // `_p58.png`, six panels each: no-bridge / shipped / four candidates). The shipped
+    // limb tone reads as a bulb duplicated beside the arm — two orange balls. At the
+    // patty's own value the arm instead emerges from a SHADOWED SOCKET under the
+    // cheese, which is what the geometry actually is, and the silhouette is untouched
+    // because only the albedo moved. #43220B is a tie by eye and is not taken: the
+    // patty is the layer the bridge occupies, so reusing its material keeps one fact
+    // in one place instead of coupling the shoulder to the bottom bun's constant.
+    //
+    // ⚠️ NOT a `Material.clone()` — `docs/LESSONS.md`: `clone()` silently drops
+    // `onBeforeCompile`, which cost 54 sites their Fresnel rim. The existing material
+    // instance is reused, and the rig's now-orphaned one is disposed (it is built
+    // locally in `fitShoulders()` and nothing else references it).
+    {
+      const bridges = [this.rig.shoulderBridge.L, this.rig.shoulderBridge.R]
+        .filter((b): b is THREE.Mesh => b !== null);
+      const orphan = bridges.length ? bridges[0].material : null;
+      for (const bridge of bridges) bridge.material = pattyMat;
+      if (orphan && !Array.isArray(orphan)) orphan.dispose();
+    }
+
     // ── Spatula prop — gripped in the right fist ────────────────────────────
     // The roster's one distinctive silhouette landmark, and what a Patty Smash
     // swing actually reads as swinging. Attached to the rig's own `handR` joint

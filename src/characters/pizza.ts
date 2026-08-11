@@ -43,7 +43,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
-import { bodyType } from './bodies';
+import { bodyType, withoutNeck } from './bodies';
 import { curl, knob, localBounds, massAnchor } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
@@ -331,7 +331,33 @@ export class PizzaCharacter extends BaseCharacter {
       // 30% wide for the wedge read — and the archetype's ratio then dragged the
       // WAIST out to match, giving a barrel nearly as broad as the shoulders. A
       // head only reads as the hero form if the body under it is smaller.
-      proportions: bodyType('standard', {
+      // ── 🔴 `withoutNeck()`: 1,914 px OF COLUMN UNDER A WEDGE THAT LEANS BACK ──
+      // The smallest of the four migrations and still not free. Measured by ABLATION
+      // through the shipped lobby path (column and collar painted `#FF00FF`, captured
+      // at `charStage.ts`'s pitch 20, magenta counted, unablated control scores zero):
+      // **1,914 px in a 106 x 32 box.**
+      //
+      // `25d5579`'s rule: a column is free while the mass above it HIDES it and a
+      // foreign object the moment it does not. A pizza slice is a flat triangle whose
+      // point is UP — its mass is above and BEHIND the column, not overhanging it —
+      // and this file's own dough-over-the-shoulders block (see `dressTorso`) already
+      // does the bridging a collar would. So STANDARD's `neckFraction: 0.055` =
+      // 0.1155 m buys nothing here and delivers a bare peg at the one camera Uri
+      // judges from. ⚠️ Occlusion costs `Δy / tan(pitch)` of forward overhang —
+      // 2.747 m per metre at the lobby's 20° against 0.625 at the match's 58°, 4.4x.
+      //
+      // ⚠️ WRAPPING `bodyType()` IS THE WHOLE POINT AND `neckFraction: 0` ALONE IS A
+      // BUG. The constructor pays for the gap out of the head radius
+      // (`headH = height*headFraction - 2*gap/(1+headMount)`), so dropping the knob on
+      // its own GROWS R and DROPS the head centre, and this character's face, crust
+      // rim and every topping are placed against that radius. `withoutNeck()` is that
+      // arithmetic on the RESOLVED proportions: headFraction 0.46 -> 0.400860,
+      // headMount 0.86 -> 1.134410. Verified by BUILDING both rigs off the shipped
+      // file — `node tools/tmp/nm_neck.mjs --against <baseline> --migrated pizza`:
+      // R 0.420903 and headCentreY 1.634130 IDENTICAL, every other published metric
+      // unchanged. The comparator is required to FAIL on the naive drop
+      // (`--knownbad naive`) and does, on all three archetypes that carry a neck.
+      proportions: withoutNeck(bodyType('standard', {
         // 0.26H -> 0.235H. Pizza passes at idle and FAILS at run: measured, the
         // left arm breaks off into its own 9,032 px connected component during the
         // stride (`--anims run`), because the run cycle's own arm swing adds to a
@@ -355,7 +381,7 @@ export class PizzaCharacter extends BaseCharacter {
         armRadius: CHARACTER_HEIGHT * 0.062,     // a touch thicker than stock, still a limb
         handRadius: CHARACTER_HEIGHT * 0.074,
         legRadius: CHARACTER_HEIGHT * 0.050,     // slimmer, tapering — continues the wedge's own narrowing
-      }),
+      })),
       // Confident, presenting swagger — one hand planted on the hip (heavy elbow
       // tuck on the right), head cocked and turned toward camera. Distinct from
       // every other character in this file's own cast slice: the only one with a

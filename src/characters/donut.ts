@@ -933,11 +933,55 @@ export class DonutCharacter extends BaseCharacter {
 
     // ── Icing drips ───────────────────────────────────────────────────────────
     const dripMat = toonMat({ color: GLAZE, roughness: 0.34 });
+    /**
+     * ── 🔴 TWO OF THESE WERE ANCHORED ON THE RING'S OWN HOLE AXIS ─────────────
+     * WAS `[Math.PI * 0.90, 0.48, 0.86]` and `[-Math.PI * 0.86, 0.40, 0.66]`, and
+     * both were BACK azimuths. `massAnchor` fires its ray through the mass's own
+     * centre, so on a torus whose hole faces +Z a front or back ray runs **down the
+     * hole and touches nothing** — at every height between the hole's two lips. Both
+     * anchors therefore fell through to the bounding-box branch, which for this shape
+     * is not an approximation of the geometry, it is a place the geometry is not:
+     * `s.z` is only `2 * tubeR`, so the fallback put each drip at |x| ~ 0.12 of the
+     * box width and near the back face — i.e. INSIDE THE HOLE. Read
+     * `shots/nm/donut_hole_p58.png`, cropped from the SHIPPED tree: a pale pink shard
+     * with a black socket at its root standing in the middle of the ring. That socket
+     * is `curl`'s open tube end, which the comment below already warns about, seen
+     * from the one direction the lobby camera cannot look.
+     *
+     * ⚠️ THE OBVIOUS FIX IS ALREADY REFUTED AND MUST NOT BE RE-TRIED. `de4bb11` built
+     * a recovery INSIDE `massAnchor` that held the azimuth and swept `height01`
+     * nearest-first until a ray hit. It satisfied its own contract — both anchors on
+     * a surface, zero fallbacks — and it made the character WORSE, because the first
+     * surface a hole-axis ray meets is the hole's INNER LIP (measured 0.007 m and
+     * 0.033 m from the ring's own axis). **6,615 px at pitch 20 and 6,629 at 58**, and
+     * it was reverted. A torus has no surface on its own hole axis at ANY height, so
+     * the fix belongs here: ask for the drip where the ring exists.
+     *
+     * ── WHERE THE RING EXISTS, SWEPT AT CONSTRUCTION TIME ─────────────────────
+     * 41 azimuths x 7 heights through `massAnchor` itself, inside this method, before
+     * any drip is added — ⚠️ which is the only place the answer is valid: `de4bb11`
+     * records that re-running `massAnchor` on a FINISHED character reports
+     * `exact: true` at a surface 0.05 m from the axis, because by then the tree
+     * carries `outlineGroup`'s baked hulls and a hull is an inverted shell.
+     *
+     *   height01 0.40 / 0.48, reach of the returned anchor from the ring's axis:
+     *     azimuth   0.25pi  0.35  0.45  0.55  0.60  0.65  0.70  0.75  0.90(pi)
+     *     reach      0.416  0.491 0.585 0.562 0.525 0.466 0.370 0.196  MISS
+     *
+     * Outside |azimuth| in [0.25pi, 0.70pi] the ray misses the ring entirely; past
+     * 0.65pi it only grazes the tube tangentially and the anchor collapses toward the
+     * axis, which is the same defect by another route. **0.62pi is the furthest
+     * BACK a drip can go and still leave the outer rim** (reach ~0.50 against the
+     * working drips' 0.556-0.577), so it is what the two back drips become. That
+     * keeps the design this method exists for — four drips spread around the ring so
+     * two are broadside at any facing — as far as a torus permits it, and the two
+     * that moved are still on the ring's back half (z ~ -0.20).
+     */
     const drips: Array<[number, number, number]> = [
       [Math.PI * 0.46, 0.52, 1.00],
       [-Math.PI * 0.40, 0.44, 0.78],
-      [Math.PI * 0.90, 0.48, 0.86],
-      [-Math.PI * 0.86, 0.40, 0.66],
+      [Math.PI * 0.62, 0.48, 0.86],
+      [-Math.PI * 0.62, 0.40, 0.66],
     ];
     // ── 🚨 RE-SHAPED: THESE WERE READING AS HORNS ────────────────────────────
     // *"A pointed mass either side of a head reads as an ear or a horn — five for

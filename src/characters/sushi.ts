@@ -589,6 +589,44 @@ export class SushiCharacter extends BaseCharacter {
       // A nigiri is a compact block that still needs a waist under it, so the
       // middle body suits it; the tweaks below keep Sushi's own "arms held close
       // in, feet planted wide" read on top of the baseline.
+      // ── ❌ `withoutNeck()` WAS BUILT, RENDERED AND REVERTED HERE. THE NUMBER ──
+      // ──    THAT KILLED IT: THE HEAD BECOMES ITS OWN 121,177 px ISLAND ────────
+      // `25d5579` measured this character's neck column by ABLATION at the lobby
+      // camera — **5,085 px in a 118 x 56 box**, second worst in the cast after
+      // hotdog's 9,767 — and established the rule that a column the mass does not
+      // hide is a foreign object rather than a shortfall. `rg_neckz` agrees on the
+      // 3D fact: `exp@20 = 0.722` of this column's band is uncovered at the lobby
+      // pitch (and 0.000 at the match's 58, which is why four rounds never saw it).
+      // Both numbers are right. Both are about the column being VISIBLE.
+      //
+      // 🚨 NEITHER OF THEM ASKS WHETHER ANYTHING ELSE SPANS THE GAP, AND NOTHING
+      // DOES. `withoutNeck(bodyType(...))` was applied here exactly as `bodies.ts`
+      // documents, R and `headCentreY` held IDENTICAL (0.605500 / 1.653245, |Δ| 0 —
+      // `nm_neck.mjs --against`), and the head simply floats: the maki roll's top
+      // stops 0.1155 m below the rice bed's underside, so what the column was doing
+      // was CARRYING THE JOIN. Measured on the shipped path with `tools/tmp/
+      // nm_island.mjs` (matte = shipped frame minus the `rig_root`-hidden frame,
+      // 4-connected components, and its known-bad requires a head lifted 0.6 m to
+      // split the matte — it does):
+      //
+      //   sushi, lobby pitch 20   components 1 -> 2   (225,143 body + 121,177 HEAD)
+      //   sushi, match  pitch 58   components 1 -> 1   (byte-identical frame)
+      //
+      // `shots/nm/zoom_sushi2.png` at 4x needs no threshold: a clean band of
+      // BACKGROUND between the rice and the roll. Uri has rejected three sheets for
+      // "disconnected" already; a floating HEAD is a worse instance of that defect
+      // than an ugly column is of any other.
+      //
+      // ⚠️ SO THE MIGRATION IS NOT WRONG, IT IS INCOMPLETE, and the missing half is
+      // GEOMETRY in this file. `dressTorsoAsSushi` caps the roll at
+      // `min(torsoH * 0.46, shoulderWidth - armRadius * 1.15)` and the FIRST term
+      // binds (0.2995 against 0.3083 — `de4bb11` measured which branch), so closing
+      // 0.1155 m means growing the roll ~39%, which moves the shoulder bridge that
+      // has just landed and the whole silhouette with it. That is a design round,
+      // not a wrap of one call, and it is handed over rather than forced.
+      // ✅ soup and pizza took the same migration and hold at ONE component at both
+      // cameras — their masses already reach the torso top. The list was not wrong
+      // about the column; it was silent about the join.
       proportions: bodyType('standard', {
         // `headFraction` up from STANDARD's 0.46: the nigiri is now a WIDE, LOW
         // bed rather than a tall lathe (see the PROFILE rewrite), so it needs more

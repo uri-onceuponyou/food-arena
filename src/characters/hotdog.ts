@@ -383,6 +383,41 @@ export class HotDogCharacter extends BaseCharacter {
       // the rig assumes — so the whole frame is scaled up to land the top of the
       // bun at the cast's standard height. Measured, not guessed: `shoot.mjs
       // --char hotdog` prints the real bounding height.
+      // ── ❌ `withoutNeck()` WAS BUILT, RENDERED AND REVERTED HERE. THE NUMBER ──
+      // ──    THAT KILLED IT: THE HEAD BECOMES ITS OWN 68,940 px ISLAND ─────────
+      // This character has the worst neck column in the cast and the measurement is
+      // not in dispute. ABLATED through the shipped lobby path by `25d5579` (column
+      // and collar painted `#FF00FF`, captured at `charStage.ts`'s pitch 20, magenta
+      // counted, unablated control scores zero): **9,767 px in a 152 x 101 box** —
+      // *"a peach column with a hard black ring at its base, between the bun and the
+      // torso"*. `shots/nm/neck_before/hotdog_p20.png` shows it plainly. LANKY's
+      // `neckFraction: 0.065` is 0.1405 m and this head is a HORIZONTAL sausage
+      // whose vertical extent is only ~0.5R above the head origin (see `height`
+      // below), so it overhangs almost nothing.
+      //
+      // 🚨 AND DELETING IT IS STRICTLY WORSE, BECAUSE THE COLUMN IS THE JOIN.
+      // `withoutNeck(bodyType(...))` was applied exactly as `bodies.ts` documents,
+      // with R and `headCentreY` held IDENTICAL (0.356665 / 1.784190, |Δ| 5.6e-17 —
+      // `nm_neck.mjs --against`), and the head then floats clear of the torso.
+      // Measured on the shipped path with `tools/tmp/nm_island.mjs` (matte = shipped
+      // frame minus the `rig_root`-hidden frame, 4-connected components; its
+      // known-bad requires a head lifted 0.6 m to split the matte, and it does):
+      //
+      //   hotdog, lobby pitch 20   components 1 -> 2   (193,441 body + 68,940 HEAD)
+      //   hotdog, match  pitch 58   components 1 -> 1
+      //
+      // ⚠️ The `bun_neck` block below is NOT the bridge and believing it was is what
+      // made this look safe: it is a child of `head`, so it moves with the head and
+      // spans nothing. Read `shots/nm/neck_after/hotdog_p20.png` — a hot dog hovering
+      // above its own body. Uri has rejected three sheets for "disconnected"; a
+      // floating HEAD is the worst available instance of that defect.
+      //
+      // ⚠️ SO THE MIGRATION IS NOT WRONG, IT IS INCOMPLETE. The missing half is
+      // geometry IN THIS FILE — the split-bun torso would have to rise 0.1405 m to
+      // meet the head, which is a design round on this character's whole proportion
+      // block, not a wrap of one call. Handed over rather than forced at the end of
+      // a session. ✅ soup and pizza took the same migration and hold at ONE
+      // component at both cameras, because their masses already reach the torso top.
       proportions: bodyType('lanky', {
         height: H,
         // 0.21H -> 0.175H, with `torsoWidth` widened below to meet it. Same defect as

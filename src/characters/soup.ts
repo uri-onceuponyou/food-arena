@@ -40,7 +40,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
-import { bodyType } from './bodies';
+import { bodyType, withoutNeck } from './bodies';
 // `loop` is deliberately no longer imported: it built the two torus arcs that read
 // as ears. See `buildSilhouetteEvents`.
 import { aim, knob, localBounds, massAnchor, rod } from './appendages';
@@ -457,17 +457,29 @@ export class SoupCharacter extends BaseCharacter {
         // ⚠️ "only a fallback that is never actually rendered" WAS TRUE OF THE LIMB
         // SLOTS AND FALSE OF EVERYTHING ELSE, and believing it is how `GLAZE_GREY`
         // ended up describing a colour nothing wore. `dressLimbs()` overrides the
-        // eight limb parts; the TORSO, the NECK COLUMN and the COLLAR are built by
-        // `rig.ts` straight off this palette and reach the screen unchanged. STOUT
-        // carries `neckFraction: 0.055`, so this character has had a neck column
-        // and a collar the whole time, drawn in `limb` (cream) and in
-        // `foot * 0.55`. They are named here now.
+        // eight limb parts; the TORSO is built by `rig.ts` straight off this palette
+        // and reaches the screen unchanged.
         limb: CERAMIC,
         hand: MITT_CREAM,
         foot: BOOT_STONE,
         torso: GLAZE_GREY,
-        neck: LEG_STONE,        // a stoneware throat, darker than both lobes it joins
-        collar: RIM_TRIM,       // the same near-black band the bowl's rim wears
+        // ── 🔴 THESE TWO NOW DESCRIBE NOTHING, AND THAT IS DELIBERATE ────────────
+        // KEPT ABOVE THE CORRECTION, per `CLAUDE.md`'s rule on reversed assertions.
+        // WAS: *"STOUT carries `neckFraction: 0.055`, so this character has had a
+        // neck column and a collar the whole time, drawn in `limb` (cream) and in
+        // `foot * 0.55`. They are named here now."* True when written, and naming
+        // them is what made the next question askable: HOW MUCH of them reaches the
+        // screen. Ablated at the lobby camera the answer was **4,289 px**, and
+        // `25d5579` had by then established that a column the mass does not hide is
+        // a defect rather than a shortfall. `proportions` below drops the column, so
+        // `rig.ts` builds neither mesh and these two colours are unreachable.
+        //
+        // They stay, unused, for one reason: they are the ONLY record of what the
+        // column and collar were painted, and re-deriving that costs an ablation.
+        // ⚠️ If `neckFraction` ever comes back on this character, it comes back with
+        // these; if it does not, delete both. Do NOT retune them — nothing reads them.
+        neck: LEG_STONE,        // (unreachable) a stoneware throat, darker than both lobes it joined
+        collar: RIM_TRIM,       // (unreachable) the same near-black band the bowl's rim wears
         limbRoughness: 0.5,
       },
       // Structural fix, round 4: the face was sitting on a narrow neck BELOW the
@@ -480,7 +492,39 @@ export class SoupCharacter extends BaseCharacter {
       // limbs, low centre of mass. A bowl of soup is the heaviest, most planted
       // thing on the roster and this is the archetype built for that read.
       // `handRadius` stays small on purpose: these are handle caps, not mitts.
-      proportions: bodyType('stout', {
+      // ── 🔴 `withoutNeck()`: 4,289 px OF COLUMN, AND THIS FILE ALREADY SAID SO ──
+      // Measured by ABLATION through the shipped lobby path (column and collar
+      // painted `#FF00FF`, captured at `charStage.ts`'s pitch 20, magenta counted,
+      // unablated control scores zero): **4,289 px in a 194 x 49 box.**
+      //
+      // The palette block above names it: *"STOUT carries `neckFraction: 0.055`, so
+      // this character has had a neck column and a collar the whole time"* — found
+      // while correcting `GLAZE_GREY`, colour-named, and never priced. This is the
+      // price, and it is the exact defect round 4 of this file already fixed one
+      // level up: *"the face was sitting on a narrow neck BELOW the bowl (a small
+      // creature wearing the bowl as a hat)"*. `headFraction: 0.58` and the pot stand
+      // both exist to make the bowl sit ON the body; a 0.1155 m bare column between
+      // them re-opens the same read from the one camera that can see it. A bowl
+      // flares OUT and UP — it overhangs nothing below its own rim — so there is no
+      // chin here for a column to hide under.
+      // ⚠️ Occlusion costs `Δy / tan(pitch)` of forward overhang — 2.747 m per metre
+      // at the lobby's 20° against 0.625 at the match's 58°, **4.4x**.
+      //
+      // ⚠️ WRAPPING `bodyType()` IS THE WHOLE POINT AND `neckFraction: 0` ALONE IS A
+      // BUG. The constructor pays for the gap out of the head radius
+      // (`headH = height*headFraction - 2*gap/(1+headMount)`), so dropping the knob on
+      // its own GROWS R and DROPS the head centre, taking the bowl, the broth, the
+      // face and every accessory placed against `bowlSurface` with it. `withoutNeck()`
+      // is that arithmetic on the RESOLVED proportions, so the tweaks below are
+      // already folded in: headFraction 0.58 -> 0.521489, headMount 0.88 -> 1.090934.
+      // Verified by BUILDING both rigs off the shipped file — `node tools/tmp/
+      // nm_neck.mjs --against <baseline> --migrated soup`: R 0.547564 and headCentreY
+      // 1.716507 IDENTICAL, every other published metric unchanged. The comparator is
+      // required to FAIL on the naive drop (`--knownbad naive`) and does.
+      // 🚨 SEE `buildPotStand`: `m.neckRadius` GOES TO ZERO WITH THE COLUMN, and the
+      // stand's throat was solved off it. That is a second, silent consequence of
+      // this line and it is corrected there rather than absorbed.
+      proportions: withoutNeck(bodyType('stout', {
         headFraction: 0.58,                     // the bowl dominates the silhouette
         handRadius: CHARACTER_HEIGHT * 0.062,   // small rounded cap, not a mitt
         // 0.25H -> 0.305H. The bowl is 0.32-0.34m half-wide at shoulder height and
@@ -559,7 +603,7 @@ export class SoupCharacter extends BaseCharacter {
         // as they did — the planted read and the hull deficiency the splay bought
         // are carried by the ankle, not by the hip.
         stanceWidth: CHARACTER_HEIGHT * 0.225,
-      }),
+      })),
       // Serene and still — the calmest, most nearly-neutral stance in the cast,
       // matching the unsettling-patient no-mouth-then-mouth face. Distinct from
       // every other character's stance in this file's own slice: the only one
@@ -1269,7 +1313,22 @@ export class SoupCharacter extends BaseCharacter {
     const rShoulder = m.shoulderWidth - m.armRadius * 0.45;
     const rHip = m.stanceWidth * 0.98;
     const rBelly = Math.max(rShoulder, rHip) * 1.06;
-    const rNeck = Math.max(m.neckRadius * 1.30, m.torsoWidth * 0.16);
+    // ── 🚨 THIS WAS `m.neckRadius * 1.30`, AND `m.neckRadius` IS NOW ZERO ───────
+    // `proportions` above drops the rig's neck column (`withoutNeck()`), and
+    // `rig.ts` computes `neckRadius = neckGap > 0 ? neckHalf * neckRatio : 0`. So the
+    // old expression would have fallen through to its own `torsoWidth * 0.16` floor
+    // and narrowed this stand's throat **0.2222 -> 0.1302 m, -41%**, for a reason
+    // that has nothing to do with a neck column — and `standRadiusAt` is what every
+    // accessory on this character is placed against, so it would have moved them too.
+    // A silent geometry change riding along on a value fix is exactly the class this
+    // file's `GLAZE_GREY` note is about.
+    //
+    // Restated in terms that do not depend on a column existing, and it is the SAME
+    // number: `neckRadius = min(torsoWidth/2, headRadius) * neckRatio`, `neckRatio`
+    // defaults to 0.42 (`rig.ts:753`), so `* 1.30` is `* 0.546` of that same min.
+    // On the shipped proportions the torso half-width binds (0.4069 against R
+    // 0.5476), giving 0.22215375 m — byte-identical to what shipped.
+    const rNeck = Math.max(Math.min(m.torsoWidth * 0.5, m.headRadius) * 0.546, m.torsoWidth * 0.16);
     // How far the stand's skirt drops BELOW the hip line. Capped at a third of the
     // thigh, or the leg disappears into the body and the character loses its legs
     // the way `egg.ts` lost its ovoid — the trade `docs/DECISIONS-FOR-URI.md` §40

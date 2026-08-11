@@ -275,19 +275,26 @@ if (MODE === 'bridge') {
 
 // ── anchor ──────────────────────────────────────────────────────────────────
 if (MODE === 'anchor') {
-  // ── THE ALLOWLIST IS THE GATE ───────────────────────────────────────────────
+  // ── THE ALLOWLIST IS THE GATE, AND IT IS NOW EMPTY ─────────────────────────
   // A box fallback is a point on NO SURFACE — `taco.ts` calls it a build failure at
-  // its own call site and it is right. Two exist on HEAD and both are donut's, so a
-  // bare "exit non-zero on any fallback" would be a gate that fails on the shipped
-  // tree, i.e. a gate nobody can add to the battery.
+  // its own call site and it is right.
   //
-  // So the two known ones are NAMED here, with the fix, and anything else fails. A
-  // known entry that stops firing ALSO fails, because a stale allowlist is a stale
-  // count and this repo has paid for eight of those in one session.
-  const KNOWN = [
-    { id: 'donut', azimuth: '2.83', height01: '0.48', why: 'icing drip at the BACK of a torus — the ray runs down the hole' },
-    { id: 'donut', azimuth: '-2.70', height01: '0.40', why: 'the mirror of the above' },
-  ];
+  // WAS, and kept per `CLAUDE.md`'s rule on reversed assertions:
+  //   { id: 'donut', azimuth:  '2.83', height01: '0.48',
+  //     why: 'icing drip at the BACK of a torus — the ray runs down the hole' },
+  //   { id: 'donut', azimuth: '-2.70', height01: '0.40', why: 'the mirror of the above' },
+  // — *"Two exist on HEAD and both are donut's, so a bare 'exit non-zero on any
+  // fallback' would be a gate that fails on the shipped tree, i.e. a gate nobody can
+  // add to the battery."* True when written. **Both were fixed in `donut.ts` by moving
+  // those drips from 0.90pi / -0.86pi to ±0.62pi**, an azimuth where the ring exists
+  // — swept at construction time, 41 azimuths x 7 heights, see that file — so the
+  // entries went STALE and this gate correctly FAILED until they were removed. That
+  // is the allowlist doing exactly what it was built to do.
+  //
+  // The list stays as a mechanism rather than being deleted: the cast is at ZERO box
+  // fallbacks, so any new one is a real defect and must fail. Add an entry only with
+  // the cause and the fix written next to it, and expect to remove it again.
+  const KNOWN = [];
   const seen = [];
   let unexpected = 0;
   for (const id of IDS) {
@@ -304,8 +311,14 @@ if (MODE === 'anchor') {
   const stale = KNOWN.filter((k) => !seen.includes(k));
   for (const k of stale) console.log(`\n🔴 STALE allowlist entry — ${k.id} azimuth ${k.azimuth} no longer falls back. Remove it.`);
   console.log(`\n${seen.length} known bounding-box fallback(s), ${unexpected} new, ${stale.length} stale.`);
-  console.log('FIX (character files, not this one): donut.ts should ask for those two drips at an '
-    + 'azimuth where its ring exists — a torus has no surface on its own hole axis at ANY height.');
+  // Printed only when there is something to fix. It used to print unconditionally and
+  // named donut's two drips, which is stale advice now that they are fixed — a tool
+  // that keeps prescribing a completed fix is the same class as a stale count.
+  if (unexpected) {
+    console.log('FIX (character files, not this one): ask for the appendage at an azimuth and height '
+      + 'where that mass EXISTS. A torus has no surface on its own hole axis at ANY height, and a '
+      + 'height search finds the hole\'s inner lip — built, rendered, reverted (see `massAnchor`).');
+  }
   if (unexpected || stale.length) process.exit(1);
 }
 
@@ -587,22 +600,30 @@ if (flag('--selftest')) {
   });
 
   // ── massAnchor's fallback, and what makes it a fallback ─────────────────────
-  T('donut is the ONLY character on the bounding-box fallback, and it has TWO', () => {
-    // ⚠️ An intermediate version of this assertion read *"TWO anchors relocate to a
-    // real surface, ZERO fall back to the box"* and it PASSED — against a height
-    // search that was later reverted for putting both drips inside the donut's hole
-    // (see `massAnchor`). Kept above per CLAUDE.md's rule on reversed assertions: the
-    // test was green and the render was worse, which is the whole reason a passing
-    // test is not a finished job.
+  T('NO character is on the bounding-box fallback', () => {
+    // ⚠️ TWO PREVIOUS WORDINGS, BOTH KEPT per CLAUDE.md's rule on reversed assertions,
+    // because the difference between them is the whole lesson:
+    //
+    //   1. *"TWO anchors relocate to a real surface, ZERO fall back to the box"* —
+    //      PASSED, against a height search inside `massAnchor` that was later reverted
+    //      for putting both of donut's drips inside its own hole. Green test, worse
+    //      render.
+    //   2. *"donut is the ONLY character on the bounding-box fallback, and it has
+    //      TWO"* — correct while the defect was live, and it FAILED the moment the
+    //      defect was actually fixed. That failure is this assertion working: it
+    //      pinned a shipped-tree FACT, and the fact changed.
+    //
+    // The fix that changed it is in `donut.ts`, not here: those two drips moved from
+    // 0.90pi / -0.86pi to ±0.62pi, an azimuth where the ring exists. So the cast is at
+    // ZERO and the assertion can finally say what it always wanted to.
     let n = 0;
     for (const id of ALL_IDS) {
       const { warns } = build(id);
       const c = warns.filter((w) => w.includes('[appendages] NO MASS')).length;
-      if (id === 'donut') { if (c !== 2) throw new Error(`donut has ${c} fallbacks, expected 2`); }
-      else if (c) throw new Error(`${id} has ${c} fallback(s) — new, and unallowed`);
+      if (c) throw new Error(`${id} has ${c} bounding-box fallback(s) — an anchor on NO SURFACE`);
       n += c;
     }
-    if (n !== 2) throw new Error(`cast total ${n}, expected 2`);
+    if (n !== 0) throw new Error(`cast total ${n}, expected 0`);
   });
 
   T('KNOWN-BAD: the fallback is RECORDED, not just logged', () => {
