@@ -1673,6 +1673,21 @@ export class HamburgerCharacter extends BaseCharacter {
     // patty is the layer the bridge occupies, so reusing its material keeps one fact
     // in one place instead of coupling the shoulder to the bottom bun's constant.
     //
+    // ── WHAT IT BOUGHT, PAIRED ON ONE COMMIT, ONE FILE OVERLAID ──────────────
+    // `valuescan --mode chars --ids hamburger`, both arms under `headserve --ref
+    // e876c3d`, the after arm as a single-file `--overlay` so no peer's edit can enter:
+    //
+    //   arm            range    p05 (cap 0.180)   steps@10   p2.5     px
+    //   pal.limb       0.6841   0.1934  🔴 FAIL   6          0.1354   6549
+    //   pattyMat       0.7185   0.1590     PASS   7          0.1146   6549
+    //
+    // **Restored to within 0.0009 of the pre-bridge 0.1581, and `px` is identical on
+    // both arms** — the silhouette does not move, because only the albedo did.
+    // ⚠️ The FAIL reads 0.1934 here and 0.1948 in the table above. Same defect, two
+    // runs: the table is `de4bb11`'s own paired `--mode gate`, this is `--mode chars`
+    // re-measured on `e876c3d`. Both are quoted with their run rather than averaged —
+    // the 0.0014 between them is a `srcId` apart and neither is the other's control.
+    //
     // ⚠️ NOT a `Material.clone()` — `docs/LESSONS.md`: `clone()` silently drops
     // `onBeforeCompile`, which cost 54 sites their Fresnel rim. The existing material
     // instance is reused, and the rig's now-orphaned one is disposed (it is built
