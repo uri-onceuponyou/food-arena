@@ -416,6 +416,46 @@ function ribbedLimb(
 // now that the rest of the webbing has gone too, so nothing in this file implies a
 // fabric layer that no longer exists.
 
+/**
+ * A brow STROKE: an ellipsoid bent into a shallow arch along its own length.
+ *
+ * `taco.ts` established that a brow has to be an ellipsoid rather than a capsule or a
+ * rod — *"two brown RODS lying on a gold dome, each with its own ink outline … a strip
+ * of tape"* — because a capsule and a torus tube are the SAME thickness from end to end,
+ * i.e. they have ENDS, and a brow ridge does not: it tapers to nothing. (A `TorusGeometry`
+ * with an arc below 2π is worse than a capsule at that: it caps nothing, so its ends are
+ * open holes into the tube.)
+ *
+ * What this adds to a plain ellipsoid is the ARCH, and it exists because the two files
+ * this session touched disagreed about which mattered: `taco.ts` shipped straight
+ * ellipsoids, this file shipped an arc and recorded that a straight rod *"read as a
+ * floating dash at lobby scale"*. Both are right about their own half — the taper is what
+ * stops the tape read, the curve is what makes a 6-px mark recognisable as a brow — and
+ * there is no reason to choose. Displacing y by `arch·(1-u²)` gives a rise that is
+ * greatest at the middle and exactly zero at both tips, so the taper is untouched by it.
+ *
+ * ⚠️ The long axis is +X (a sphere scaled in x), NOT +Y (`CapsuleGeometry`'s axis) and
+ * NOT a sweep angle (`TorusGeometry`'s). Any rotation copied from either construction is
+ * out by 90° and will stand a brow on end — silently, in a diff that looks like a rename.
+ *
+ * ⚠️ It is duplicated in `lollipop.ts` rather than shared. The shared home would be
+ * `appendages.ts`, which belongs to another owner; one owner per file set is the
+ * constraint that has held across ~200 agents and a 20-line helper is not worth breaking
+ * it for. If a third character wants this, promote it then.
+ */
+function browStroke(a: number, b: number, c: number, arch: number): THREE.BufferGeometry {
+  const g = new THREE.SphereGeometry(1, 24, 12);
+  const p = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i) * a;
+    const u = x / a;
+    p.setXYZ(i, x, p.getY(i) * b + arch * (1 - u * u), p.getZ(i) * c);
+  }
+  p.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
+}
+
 /** A grip-ridge ring — the same "thin darker ring around a cylindrical wall" motif
  * the head's cap already uses, echoed here as the limb's cuff/joint accent. */
 function ridgeRing(y: number, radius: number, thickness: number, mat: THREE.Material): THREE.Mesh {
@@ -1088,16 +1128,99 @@ export class WaterBottleCharacter extends BaseCharacter {
       // Deliberately ASYMMETRIC — the right brow sits higher and cocks harder.
       // A mirrored pair is the "matched, no personality" pattern flagged across
       // the cast; egg.ts's worry crease makes the same trade for the same reason.
-      const brow = new THREE.Mesh(
-        new THREE.TorusGeometry(R * 0.125, R * 0.028, 6, 16, Math.PI * 0.62),
-        browMat
-      );
+      //
+      // ── 🚨 THE ARC WAS RIGHT AND THE MOUNT WAS WRONG: IT WAS OFF THE WALL ───────
+      // The paragraph above is kept because it is still true about SHAPE and it is
+      // exactly why the real defect survived three rounds — everyone kept re-judging
+      // the curve. Read at 6x off the shipped lobby camera
+      // (`shots/bw/before/waterbottle_p20.zoom.png`), the two brows hang in mid-air
+      // over bare blue, nowhere near the eyes; the ablation
+      // (`shots/bw/before/wb_ablate_p20.png`) makes it unarguable.
+      //
+      // The cause is one line: `eyeG.add(brow)` with `position.y = R * 0.245`. The eye
+      // group's frame is the wall's TANGENT PLANE AT THE EYE, so a feature 0.245R up
+      // that plane goes straight up — while the bottle's own wall is TAPERING IN above
+      // the eyes (`SHELL_PROFILE` runs 0.478R at y 0.16 to 0.458R at y 0.28, into the
+      // shoulder). Everything else on this face is placed with `shellSurface`, this
+      // file's own exact-surface helper, for precisely this reason; the brow was the
+      // one feature that was not. The arithmetic, at the brow's own height:
+      //
+      //   wall radius there                 0.4605R
+      //   brow radius (eye mount + local z) 0.471 + 0.032 + 0.040 = 0.543R
+      //   -> the brow stood **0.083R off the wall**, half an eye radius of thin air.
+      //
+      // And that stand-off, not the arc, is what made it read as a detached dash. It is
+      // also why the TWO SHIPPED CAMERAS DISAGREED SIX-FOLD about the same geometry,
+      // measured with `tools/tmp/bw_brow.mjs` (column-wise gap between the brow's lower
+      // edge and the sclera's upper edge, over the sclera's own rendered height):
+      //
+      //     camera            L        R
+      //     lobby  (20)    0.324    0.433      <- floating, plainly
+      //     match  (58)    0.051    0.028      <- almost touching
+      //
+      // A steep camera projects a thing that is FORWARD of the eye downward onto it, so
+      // 58° was hiding a defect the lobby shows — `CLAUDE.md` #3's case, from the other
+      // direction. Solving the stand-off collapses the disagreement instead of trading
+      // one camera for the other, which is the test of a geometric fix.
+      //
+      // The fix is to mount the brow like every other feature here: on `shellSurface`
+      // at ITS OWN height, along the TRUE surface normal (not the horizontal-only
+      // `outward` the eye uses — up here the wall tilts back ~9.5° and the brow should
+      // lie on the shoulder, not stand off it).
+      //   yF        0.222 (left) / 0.236 (right), absolute, same units as SHELL_PROFILE.
+      //             Keeps "the right sits higher"; both come DOWN toward the eye.
+      //             ⚠️ ROUND 1 STOPPED AT 0.248 / 0.264 AND IT IS KEPT HERE BECAUSE OF
+      //             WHAT IT MEASURED. Predicting the seat from the authored numbers put
+      //             it at gapFrac ~0.10; it rendered at 0.228 / 0.261. The missing term
+      //             is the ARCH: `browStroke` raises the stroke's middle, and the
+      //             stroke's middle is exactly the column where the sclera's own top is
+      //             highest, so an arch of `k` opens the gap the column-wise metric
+      //             reports by `k`. An arch is a property of the SILHOUETTE and it was
+      //             being reasoned about as if it were a property of the outline only.
+      //             So round 2 spends it on both: arch 0.032R -> 0.024R and 0.026 off
+      //             each yF.
+      //   offset    0.030R along the normal, so the stroke beds onto the wall with its
+      //             back ~0.006R proud — no gap to read as a float, no burial in a
+      //             transmissive shell.
+      //   shape     `browStroke` — a tapered, arched ellipsoid with `noOutline`. The
+      //             torus was a tube with OPEN ENDS (`TorusGeometry` caps nothing below
+      //             a full 2π) wearing an inverted ink hull; that is `taco.ts`'s "strip
+      //             of tape" exactly. Half-length 0.148R against a 0.168R sclera puts
+      //             the span at ~0.88 of the eye, from a measured 0.72/0.67 — `taco.ts`:
+      //             *"a brow shorter than the eye it sits over reads as a smudge."*
+      //   arch      0.024R of rise against the torus's 0.043R: a brow, not a rainbow.
+      //
+      // Paired, both arms rendered on `headserve --ref e876c3d` with only this file
+      // overlaid, same instrument, same framing:
+      //
+      //             lobby 20        match 58        span (brow px / eye px)
+      //   before   0.324 / 0.433   0.051 / 0.028      0.72 / 0.67
+      //   after    0.132 / 0.157   0.020 / 0.009      0.87 / 0.81
+      //
+      // The lobby float is down 2.5x and the two cameras now agree to a factor of ~6
+      // instead of ~15 — the residual is the sclera's own forward bulge, which this pass
+      // deliberately does not touch (the pupils were fixed in `d3cd714`/`fb6e0e6` and
+      // `ey_pacman` is unchanged to four decimals across this change: 0.9763 / 0.9639
+      // before and after, at the lobby camera, on the same rect).
+      // ⚠️ At 58 the brows now REST on the eyes rather than clearing them. That is
+      // correct for a steep down-angle and it was checked on the render, not inferred:
+      // `shots/bw/after/waterbottle_p58.zoom.png` shows two tapered strokes sitting on
+      // the lids, not one merged mass. If a later pass wants daylight there, raise
+      // `browYF`, not the arch — the arch is what opens the gap at the eye's apex, i.e.
+      // exactly where the lobby camera is looking.
+      const browYF = sx > 0 ? 0.236 : 0.222;
+      const bs = shellSurface(sx * EYE_THETA, browYF);
+      const browG = new THREE.Group();
+      browG.position.copy(bs.pos).addScaledVector(bs.normal, R * 0.030);
+      browG.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), bs.normal);
+      face.add(browG);
+
+      const brow = new THREE.Mesh(browStroke(R * 0.148, R * 0.026, R * 0.024, R * 0.024), browMat);
       brow.name = 'waterbottle_brow';
-      brow.rotation.z = Math.PI * 0.5 - Math.PI * 0.31 + sx * 0.16;
-      brow.position.set(0, sx > 0 ? R * 0.245 : R * 0.215, R * 0.04);
-      brow.scale.set(1, 0.78, 0.7);
+      brow.rotation.z = sx * 0.16;
+      brow.userData.noOutline = true;
       brow.castShadow = true;
-      eyeG.add(brow);
+      browG.add(brow);
     }
 
     // ── THE MOUTH NOW HAS AN INTERIOR ─────────────────────────────────────────

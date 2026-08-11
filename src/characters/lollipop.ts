@@ -251,6 +251,45 @@ function mouthShape(w: number, h: number, pad = 0, hole?: THREE.Shape): THREE.Sh
 }
 
 /**
+ * A brow STROKE: an ellipsoid bent into a shallow arch along its own length.
+ *
+ * `taco.ts` established that a brow has to be an ellipsoid rather than a capsule or a
+ * rod — *"two brown RODS lying on a gold dome, each with its own ink outline … a strip
+ * of tape"* — because a capsule is a cylinder with two caps and therefore has the SAME
+ * thickness from end to end, i.e. it has ENDS, and a brow ridge does not. It tapers to
+ * nothing.
+ *
+ * What this adds to a plain ellipsoid is the ARCH, and it exists because the two files
+ * this session touched disagreed about which mattered: `taco.ts` shipped straight
+ * ellipsoids, `waterbottle.ts` shipped an arc and recorded that a straight rod *"read as
+ * a floating dash at lobby scale"*. Both are right about their own half — the taper is
+ * what stops the tape read and the curve is what makes a 6-px mark recognisable as a
+ * brow — and there is no reason to choose. Displacing y by `arch·(1-u²)` gives an
+ * arch that is highest at the middle and exactly zero at both tips, so the taper is
+ * untouched by it.
+ *
+ * ⚠️ The long axis is +X (a sphere scaled in x), NOT +Y (`CapsuleGeometry`'s axis). Any
+ * rotation copied from a capsule construction is 90° out and will stand a brow on end.
+ *
+ * ⚠️ It is duplicated in `waterbottle.ts` rather than shared. The shared home would be
+ * `appendages.ts`, which belongs to another owner; one owner per file set is the
+ * constraint that has held across ~200 agents and a 20-line helper is not worth breaking
+ * it for. If a third character wants this, promote it then.
+ */
+function browStroke(a: number, b: number, c: number, arch: number): THREE.BufferGeometry {
+  const g = new THREE.SphereGeometry(1, 24, 12);
+  const p = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i) * a;
+    const u = x / a;
+    p.setXYZ(i, x, p.getY(i) * b + arch * (1 - u * u), p.getZ(i) * c);
+  }
+  p.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
  * The candy disc's front/back surface, as a SHALLOW SPHERICAL CAP.
  *
  * The disc used to be a flat cylinder, which is two problems at once: real hard candy
@@ -1378,28 +1417,99 @@ export class LollipopCharacter extends BaseCharacter {
       eye.add(glint2);
 
       // ── LASH LINE — the old closed-eye arc, demoted to BOUNDING the eye ───────
-      // Capping the top ~155° of the sclera. Its tilt is the character's asymmetry now:
-      // the right lid rides higher and cocks harder, which is the same "confident, a
-      // little sassy" read the wink carried, without shutting an eye.
+      // Capping the top of the sclera. Its tilt is the character's asymmetry now: the
+      // right lid rides higher and cocks harder, which is the same "confident, a little
+      // sassy" read the wink carried, without shutting an eye.
+      //
+      // ── 🚨 IT WAS NOT A LASH LINE, IT WAS A SPECTACLE RIM ───────────────────────
+      // Read at 6x off the shipped lobby camera (`shots/bw/before/lollipop_p20.zoom.png`)
+      // and ablated (`shots/bw/before/lolli_ablate_p20.png`, lid painted cyan): the arc
+      // is a THICK BLACK RING standing OUTSIDE the white all the way round the top and
+      // both sides, and with the ink brow rod parallel above it the pair reads as a pair
+      // of round eyeglasses — a frame and a temple arm. Three terms, all of them width:
+      //
+      //   tube      `eyeR * 0.17`, i.e. a band **0.34 eyeR thick**. `taco.ts` ships
+      //             0.10 EYE_R and states the rule this violated: *"Kept thin on
+      //             purpose: the sclera has to win the value contest inside its own
+      //             outline."* Here the ink was winning it.
+      //   reach     torus radius 0.94 + tube 0.17 = **1.11 eyeR**, against a sclera of
+      //             1.00 x 1.06 — so the band stood 0.11 eyeR PROUD OF THE EYE on every
+      //             side. A lid that is outside the eye is not a lid, it is a frame.
+      //   arc       0.86π = 155°, which wraps past both corners and closes the ring.
+      //   ink hull  `outlineGroup(this.root)` runs after `buildFace`, so an inverted
+      //             ink hull was drawn around an ink lid: 0.004 m of pure extra width
+      //             (~1.6 px a side at lobby framing) bought nothing, because an ink
+      //             outline round an ink mass has no edge to draw.
+      //
+      // Now: half the tube, the outer edge INSIDE the sclera's silhouette (0.90 + 0.085
+      // = 0.985 eyeR), 0.74π of arc, and `noOutline`. Rotation follows the arc's own
+      // midpoint — an arc of 0.74π is centred at 0.37π, so 0.13π puts its middle at the
+      // top exactly as 0.07π did for 0.86π. z 0.12 -> 0.14 eyeR keeps the band's front
+      // face on the sclera's surface now that the tube is thinner (front face
+      // 0.14 + 0.085*0.55 = 0.187 against a sclera surface of 0.40*sqrt(1-0.90^2) =
+      // 0.174 eyeR at that radius, so it sits 0.013 proud rather than sunk).
       const lidArc = new THREE.Mesh(
-        new THREE.TorusGeometry(eyeR * 0.94, eyeR * 0.17, 8, 22, Math.PI * 0.86),
+        new THREE.TorusGeometry(eyeR * 0.90, eyeR * 0.085, 8, 22, Math.PI * 0.74),
         toonMat({ color: ink, roughness: 0.35 })
       );
-      lidArc.rotation.z = Math.PI * 0.07 + sx * 0.16;
-      lidArc.position.z = eyeR * 0.12;
+      lidArc.name = `lollipop_lid_${sx > 0 ? 'r' : 'l'}`;
+      lidArc.rotation.z = Math.PI * 0.13 + sx * 0.16;
+      lidArc.position.z = eyeR * 0.14;
       lidArc.scale.set(1, 1.06, 0.55);
+      lidArc.userData.noOutline = true;
       lidArc.castShadow = true;
       eye.add(lidArc);
 
       // Brows — real shaded geometry on their own decal, so they share the eyes' tangent
       // plane and cannot drift out of it. Cocked hard on the right, high and level on the
       // left.
-      const brow = decal(sx * eyeX * 1.02, eyeY + eyeR * (sx > 0 ? 1.44 : 1.30), LIFT);
+      //
+      // ── 🚨 AND THE BROW WAS THE SECOND BAND: A CAPSULE IS A ROD ─────────────────
+      // `taco.ts` retired this exact construction — *"two brown RODS lying on a gold
+      // dome, each with its own ink outline … a strip of tape"* — and fixed it with
+      // ELLIPSOIDS carrying `noOutline`. A capsule is a cylinder with two caps: it has
+      // the SAME thickness from end to end, so it has ends, and a brow ridge has none.
+      // Measured with `tools/tmp/bw_brow.mjs` at the lobby camera on this file's own
+      // before arm: it also spanned only **0.60 of the eye it sits over** (taco ships
+      // 0.78), and `taco.ts` names that too — *"a brow shorter than the eye it sits over
+      // reads as a smudge."*
+      //
+      // `browStroke` is an ellipsoid ARCHED along its own length, so it tapers to
+      // nothing at both ends AND keeps the eyebrow curve. Numbers:
+      //   half-length  0.625 -> 0.80 eyeR  (spanFrac 0.60 -> ~0.80, taco's ratio)
+      //   half-depth   0.115 -> 0.10 eyeR  thinner, because the arch adds y-extent
+      //   arch         0.07 eyeR of rise at the middle
+      //   noOutline    the ink hull round an ink stroke, again — pure width
+      //   seat         1.44 / 1.30 -> 1.24 / 1.14 eyeR above the eye's centre. The
+      //                before arm measured the brow floating **0.184 and 0.235 of the
+      //                sclera's own rendered height** clear of it at the lobby camera.
+      //                `taco.ts` seats its calm brow at 0.0199F over a 0.331F eye, i.e.
+      //                6%, and that is the number this is aimed at.
+      //
+      // Paired, both arms rendered on `headserve --ref e876c3d` with only this file
+      // overlaid, `bw_brow` column-wise gap over the sclera's own rendered height, and
+      // the ink share of the eye region (`bandFrac` = (brow+lid)px / (brow+lid+eye)px):
+      //
+      //             lobby 20        match 58        bandFrac 20 / 58
+      //   before   0.184 / 0.235   0.085 / 0.133      0.302 / 0.385
+      //   after    0.105 / 0.081   0.053 / 0.071      0.171 / 0.211
+      //   span     0.61 / 0.60  -> 0.77 / 0.76 of the eye it sits over
+      //
+      // BOTH cameras improve on every row, which is the test `CLAUDE.md` #3 sets: a
+      // change that only looks right at one pitch is a cheat. `ey_pacman` on the same
+      // paired renders held at **0.9747 -> 0.9764** and **0.9616 -> 0.9616** — the
+      // pupils are not touched by any line here and the measurement says so.
+      // ⚠️ The rotation is re-derived, not copied: `CapsuleGeometry`'s long axis is +Y
+      // and an ellipsoid's is +X, so the old `PI/2 - sx*k` becomes `-sx*k` for the same
+      // line. Getting this wrong stands both brows on end and it is silent in a diff.
+      const brow = decal(sx * eyeX * 1.02, eyeY + eyeR * (sx > 0 ? 1.24 : 1.14), LIFT);
       const browMesh = new THREE.Mesh(
-        new THREE.CapsuleGeometry(eyeR * 0.115, eyeR * 1.02, 4, 8),
+        browStroke(eyeR * 0.80, eyeR * 0.10, eyeR * 0.085, eyeR * 0.07),
         toonMat({ color: ink, roughness: 0.4 })
       );
-      browMesh.rotation.z = Math.PI / 2 - sx * (sx > 0 ? 0.42 : 0.20);
+      browMesh.name = `lollipop_brow_${sx > 0 ? 'r' : 'l'}`;
+      browMesh.rotation.z = -sx * (sx > 0 ? 0.42 : 0.20);
+      browMesh.userData.noOutline = true;
       browMesh.castShadow = true;
       brow.add(browMesh);
     }
