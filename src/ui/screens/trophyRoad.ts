@@ -1305,6 +1305,76 @@ const CSS = `
 
 .fa-tr .tr-odds { font-size: clamp(0.69rem, 1.4vh, 0.8rem); }
 
+/* ── THE GLYPH IS UNCOUPLED FROM ITS LABEL'S FONT-SIZE AT FOUR SITES ──────────
+   🔴 'chest' AND 'boxBurger' WERE A DELIVERED-SIZE DEFECT, AND THIS FILE OWNS THE SIZE.
+
+   Both glyphs carry the identical signature across every blind round ever run:
+   **0 of 3 native on every arm ever drawn, 3 of 3 magnified.** Six drawing variables
+   moved 'boxBurger' by Δ +0 each ('13fb98c', 'a77ff30'); both of 'chest''s in-file
+   variables are spent — ink budget Δ +0/+0 and a plate-value move Δ +0 native and −2
+   MAGNIFIED ('7f71f20'). Two glyphs failing the same way at 11.0–11.8 px and passing at
+   magnification is a size result, not a drawing one, and every icon here is
+   'width: 1em' on an '<svg>', so its size is whatever its LABEL's font-size happens to
+   be. That is the whole bug: a 24-unit drawing with five stacked outlined shapes was
+   being asked to survive at the size of the 11px caption beside it.
+
+   'characterSelect.ts:1047' had already reached the same conclusion from the other end
+   and shipped this exact mechanism — *"the glyph runs a little larger than its own text.
+   11px was measured to be below the floor for any mark with internal structure."*
+
+   ── WHERE 16 px COMES FROM. It is measured, and it is a POPULATION, not a promise ──
+   Pooled over the two most recent native panels (r8 seed 13 + r9 seed 21, shipped arms
+   only, 3 blind judges each), joined to 'shots/ic/spec.json''s delivered px:
+
+       < 12 px   16 icons   59.8 %          14 – 17 px    4 icons   95.8 %
+      12 – 14    11 icons   72.7 %          17 – 21       4 icons   96.7 %
+
+   ⚠️ Bigger sites may host simpler glyphs, so this is a trend and not a controlled
+   experiment; it is read as "aim for >=16 px", never as "16 px guarantees a read". The
+   controlled half is the paired plate, which is what actually decided this change.
+
+   ── WHAT THE SPACE WAS TAKEN FROM, MEASURED ('tools/tmp/si_fit.mjs') ─────────
+   Delivered px at 844x390 / 1280x800 / 390x844, and the cost of each:
+
+     .tr-odds         11.03 -> 16.55   11.19 -> 16.80   11.81 -> 17.72   FREE
+                      the button is 'height: var(--tap)', so this costs zero height and
+                      a few px of width in a bottom bar whose inventory row scrolls.
+     .tr-inv-empty    11.03 -> 16.55   12.00 -> 18.00   12.66 -> 18.98
+                      line box 13 -> 17.08. '.tr-bottom' is 'min-height: var(--tap)' and
+                      absorbs it whole in landscape (44 -> 44); in PORTRAIT the bar
+                      stacks and grows 67 -> 71.14, which comes out of '.tr-body', i.e.
+                      out of the road panel, which is a scroller.
+     .tr-nextval      11.52 -> 16.70   13.59 -> 19.72   14.34 -> 20.80
+                      the only site with a real bill: '.tr-nextline' 14 -> 17.2 grows
+                      '.tr-hero' 51 -> 54.2, and the hero takes its height out of the
+                      road below it — '.tr-road''s vertical overflow goes 7px -> 10px at
+                      844x390. It was ALREADY a scroller in both axes (2731px across).
+     .tr-odds-title   11.83 -> 17.16   14.39 -> 20.88   15.03 -> 21.80
+                      five titles in the drop-rates sheet; '.tr-sheet-scroll' goes
+                      609 -> 625 / 232 -> 251 / 367 -> 401 px of scroll. Already a
+                      scroller by construction.
+
+   🔴 NOTHING WAS TAKEN FROM ANY TEXT. 'scrollWidth - clientWidth' on '.tr-nextval',
+   '.tr-inv-empty', '.tr-odds' and '.tr-odds-title' is **0 before and 0 after at all
+   three viewports** — not one run ellipsised — and no icon left its clipping ancestor.
+
+   ⚠️ AND THE PLATE WAS THE OTHER CANDIDATE VARIABLE AND IS NOT SPENT. '.tr-inv-empty'
+   is the only glyph in the game on a saturated orange plate, and every fill this glyph
+   uses fails 2:1 against it (wood 1.88, woodHi 1.24, gold 1.73; the ink outline is
+   5.05). That was NOT changed here: at 16.55 px the domed lid, the gold band and the
+   clasp resolve on the orange anyway — read in 'shots/si/fit1/crop-inv-after.png' — so
+   the size alone answered it. If a later round needs more, the plate is still available
+   and giving this hint the same cream pill '.tr-open' already uses is the cheap move.
+
+   ⚠️ '.fa-ic-portrait' is listed with '.fa-ic' on '.tr-nextval' on purpose: when the
+   next reward is a CHARACTER that slot renders a portrait, and scaling only one of the
+   two would make the same slot two different sizes depending on what is next. */
+.fa-tr .tr-odds .fa-ic { font-size: 1.5em; }
+.fa-tr .tr-inv-empty .fa-ic { font-size: 1.5em; }
+.fa-tr .tr-nextval .fa-ic,
+.fa-tr .tr-nextval .fa-ic-portrait { font-size: 1.45em; }
+.fa-tr .tr-odds-title .fa-ic { font-size: 1.45em; }
+
 /* ── Sheets (reveal / drop rates / store) ─────────────────────────────────── */
 .fa-tr .tr-sheet {
   position: absolute;

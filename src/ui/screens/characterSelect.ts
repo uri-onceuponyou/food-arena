@@ -1133,7 +1133,37 @@ const CSS = `
      available without deleting a number a player buys with: the level block's readouts
      and its 44px Upgrade button are untouched. */
   .fa-chars .chars-detail { gap: 2px; padding: 4px; }
-  .fa-chars .chars-stats { gap: 1px; }
+  /* ⚠️ DELETED, NOT MOVED: '.fa-chars .chars-stats { gap: 1px; }' stood here.
+     'dc_guard' reported it as two CASCADE faults ('row-gap' and 'column-gap') because a
+     media query adds NO SPECIFICITY: the '@media (max-height: 560px)' block below sets
+     'gap: var(--ds-s1)' on the same selector and is written LATER, so at <=460 the later
+     block wins and the delivered value is 3px against a declared 1px. The file already
+     solved that trap once — the block at the foot of the 560 one is there on purpose,
+     with its own measurement.
+
+     🔴 SO THE REFLEX WAS TO MOVE THIS ONE BELOW TOO, AND THE REFLEX WAS WRONG, BECAUSE
+     THE AXIS TURNED UNDER THE DECLARATION. The base rule is 'flex-direction: column',
+     and 'gap: 1px' was authored FOR THAT COLUMN — the bill above it is entirely in
+     VERTICAL pixels ("the notched landscape budget", "16.39px cut off the first ability
+     row"). The 560 block turns this element into 'flex-direction: row', and <=460 is a
+     strict subset of <=560, so at every viewport this declaration could ever apply to,
+     the element is a ROW with 'flex-wrap: nowrap' and the surviving axis is HORIZONTAL.
+
+     Measured on the live element ('tools/tmp/si_gap.mjs'), 3px -> 1px, at the three
+     viewports where both queries are live:
+
+         844x390    .chars-stats 163.23x48.17 -> 163.23x48.17   Δh 0.00
+         852x393    .chars-stats 164.91x48.17 -> 164.91x48.17   Δh 0.00
+         852x460    .chars-stats 164.91x48.17 -> 164.91x48.17   Δh 0.00
+         detail overflow Δ 0 · first ability row's clearance Δ 0.00 at all three
+
+     It buys **0.00px of the budget it was written to buy**, at every viewport. The only
+     thing that moves is +1.32px of width per stat cell, and no '.ds-row-label' overflows
+     in either arm (Damage/Health/Speed all 0 before and 0 after), so it does not even
+     pay off the D2 truncation the 560 block already bought with '--ds-track-tight'.
+     Re-ordering it would therefore ship a 1px horizontal gap that no author asked for.
+     Deleted; the reasoning is kept here because the next reader will see 'dc_guard''s
+     fault disappear and wonder which way it was fixed. */
   .fa-chars .chars-level { padding: 2px 6px; gap: 2px; }
   .fa-chars .chars-abilities { gap: 4px; }
   .fa-chars .chars-ability-desc { line-height: 1.25; }

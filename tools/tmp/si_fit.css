@@ -1,0 +1,8 @@
+/* CANDIDATE v1 — size only, no plate change. The glyph is decoupled from its label's
+   font-size at the four trophy-road sites that deliver `chest` / `boxBurger` under the
+   16px floor. Same mechanism and same reason as `characterSelect.ts:1047`. */
+.fa-tr .tr-odds .fa-ic { font-size: 1.5em; }
+.fa-tr .tr-inv-empty .fa-ic { font-size: 1.5em; }
+.fa-tr .tr-nextval .fa-ic,
+.fa-tr .tr-nextval .fa-ic-portrait { font-size: 1.45em; }
+.fa-tr .tr-odds-title .fa-ic { font-size: 1.45em; }
