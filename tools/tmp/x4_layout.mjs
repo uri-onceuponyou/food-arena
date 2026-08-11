@@ -340,11 +340,32 @@ export const CONCEAL_NORTH = [
   [100, 500, 110, 'tray_rack'],
 ];
 
-/** Three mirror pairs, one per bay. Only the north-half seat is written; §sym mirrors it. */
+/**
+ * Three mirror pairs, one per bay. Only the north-half seat is written; §sym mirrors it.
+ *
+ * 🔴 **THIS TABLE IS THE GENERATOR `kitchen.ts`'s HEADER POINTS AT, SO A STALE ROW HERE IS A
+ * SILENT REVERT, NOT A STALE COMMENT.** Pair B and pair C used to read:
+ *
+ *     { x: 1150, y: 210 },  // pair B — the north wall lane (slots 2/3)
+ *     { x: 2560, y: 300 },  // pair C — the north-east corner bay (slots 4/5)
+ *
+ * `2d3e9bd` replaced those two seats in `kitchen.ts` — seat unfairness **2.680 → 0.342
+ * places of 6** over 600 matches (permuted-null floor 0.315), and all six seats deal damage
+ * in **600 of 600** matches, up from 74.5%. The old pair was left here because `2d3e9bd` did
+ * not own this file, and **every check below stayed green on it**: the old seats are legal,
+ * symmetric, well-separated and in one nav component. They are simply the seating where the
+ * unpursued pair took 511 of 600 first places. So nothing in this file could have caught a
+ * regeneration that reverted the fix, and the guard lives in `kx_seatfair --selftest` §A3,
+ * which imports `build()` from here and requires its `spawns` to EQUAL the shipped dump.
+ *
+ * ⚠️ **Do not "tidy" these back into a nicer-looking table.** The shape is forced, not
+ * chosen — `kx_seatfair`'s header proves the σ-fixed (diametric) pair must be the INNERMOST
+ * one, so the three pairs cannot share a radius.
+ */
 export const SPAWN_NORTH = [
-  { x: 300, y: 810 },   // pair A — the west bay (slots 0/1, the duel pair)
-  { x: 1150, y: 210 },  // pair B — the north wall lane (slots 2/3)
-  { x: 2560, y: 300 },  // pair C — the north-east corner bay (slots 4/5)
+  { x: 300, y: 810 },   // pair A — the west bay (slots 0/1 = playerSpawn/enemySpawn, the 1v1 duel)
+  { x: 2670, y: 290 },  // pair B — the NE corner bay (slots 2/3), outboard of the pantry
+  { x: 1590, y: 510 },  // pair C — the hub ring (slots 4/5), the DIAMETRIC pair, which duels itself
 ];
 
 /** The two slow hazards. Named `puddleSouth` / `puddleNorth` in source — `arena_probe`'s

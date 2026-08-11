@@ -49,12 +49,26 @@ const ARENA = JSON.parse(readFileSync(`${ROOT}/tools/arena.gameplay.json`, 'utf8
  * One station per district of the layout `kitchen.ts` declares, so the set covers the map
  * rather than one quadrant of it. Coordinates are the DISTRICT's own, not a spawn's,
  * except where a district IS a spawn bay.
+ *
+ * 🔴 **NO NOTE HERE NAMES A SLOT ANY MORE — THE SLOT LABEL IS DERIVED FROM THE SHIPPED DUMP.**
+ * ⚠️ Three of these captions used to read, and were wrong for four hours:
+ *
+ *     west_bay    'slot 0/1 spawn bay: …'      ← still true
+ *     north_lane  'slot 2/3 spawn bay: …'      ← FALSE: no seat within 536 wu of it
+ *     ne_bay      'slot 4/5 spawn bay: …'      ← WRONG PAIR: it is slot 2/3's bay now
+ *
+ * `2d3e9bd` moved pair B to (2670,290) and pair C to (1590,510) — seat unfairness 2.680 →
+ * 0.342 places of 6 over 600 matches. **The stations stayed valid** (they are districts, and
+ * the districts did not move); only the captions went stale, which is the failure mode a
+ * hand-maintained label always has. So the label is now computed against
+ * `tools/arena.gameplay.json` at print time and cannot disagree with the map: a caption that
+ * has to be edited when a coordinate moves will eventually not be.
  */
 const STATIONS = [
   { id: 'hub', x: ARENA.center.x, y: ARENA.center.y - 190, note: 'the boiling pot, the four stove islands and the sink counter — the one thing that did NOT scale' },
-  { id: 'west_bay', x: 300, y: 810, note: 'slot 0/1 spawn bay: the freezer stack north, the prep peninsula east' },
-  { id: 'north_lane', x: 1150, y: 210, note: 'slot 2/3 spawn bay: the north wall service line' },
-  { id: 'ne_bay', x: 2560, y: 300, note: 'slot 4/5 spawn bay: the pantry nook west, the wall counter north' },
+  { id: 'west_bay', x: 300, y: 810, note: 'the west bay: the freezer stack north, the prep peninsula east' },
+  { id: 'north_lane', x: 1150, y: 210, note: 'the north wall service line' },
+  { id: 'ne_bay', x: 2560, y: 300, note: 'the north-east corner bay: the pantry nook west, the wall counter north' },
   { id: 'pantry_ne', x: 2350, y: 560, note: 'the NE pantry nook and its wood pad, looking north' },
   { id: 'cook_line_e', x: 1980, y: 700, note: 'the east cook line — two stove islands butted into one run (NEW structure)' },
   { id: 'prep_galley_w', x: 830, y: 700, note: 'the west prep galley and the pantry shelf beside it' },
@@ -62,6 +76,29 @@ const STATIONS = [
   { id: 'north_wall', x: 1400, y: 260, note: 'the north wall centrepiece and the hub approach island' },
   { id: 'west_strip', x: 120, y: 500, note: 'the west wall strip: barrels flush to the bound, concealment patch beside' },
 ];
+
+/**
+ * How close a station has to be to a shipped seat before it is CALLED that seat's bay.
+ *
+ * 200 wu is deliberately tighter than the frame: the match camera shows far more ground than
+ * this, so a seat 300 wu away is still in shot — but "this station IS the slot 2/3 bay" is a
+ * stronger claim than "a seat is somewhere in the picture", and the caption makes the stronger
+ * one. At 200 wu `west_bay` binds at 0.0 wu and `ne_bay` at 110.5; the next nearest station is
+ * 355 wu from any seat, so nothing here sits on the threshold.
+ */
+const SPAWN_TAG_WU = 200;
+
+/** The slot label for a station, or null — read from the dump, never typed. */
+function spawnAt(st) {
+  let best = -1, bd = Infinity;
+  ARENA.spawns.forEach((s, i) => {
+    const d = Math.hypot(s.x - st.x, s.y - st.y);
+    if (d < bd) { bd = d; best = i; }
+  });
+  if (best < 0 || bd > SPAWN_TAG_WU) return null;
+  const pair = best - (best % 2);
+  return { seat: best, pair, d: bd, at: ARENA.spawns[best] };
+}
 
 const sha = (b) => createHash('sha256').update(b).digest('hex').slice(0, 16);
 
@@ -123,11 +160,31 @@ try {
     if (!parked || r.errors.length) bad++;
     console.log(`  ${parked && !r.errors.length ? 'ok  ' : 'FAIL'} ${st.id.padEnd(15)} asked (${st.x},${st.y})  landed ${r.at ? `(${r.at.x},${r.at.y})` : 'nowhere'}`);
     console.log(`       ${r.png}  sha ${r.sha}`);
-    console.log(`       ${st.note}`);
+    const sp = spawnAt(st);
+    console.log(`       ${sp ? `[slot ${sp.pair}/${sp.pair + 1} SPAWN BAY — seat ${sp.seat} at (${sp.at.x},${sp.at.y}), ${sp.d.toFixed(1)} wu away] ` : ''}${st.note}`);
     if (r.errors.length) console.log(`       JS: ${r.errors.slice(0, 2).join(' | ')}`);
   }
 } finally {
   await browser.close();
 }
+
+// ── Which spawn bays nothing photographed ───────────────────────────────────
+// ⚠️ NON-EMPTY FIRST. `[].every()` / a loop that never runs would report "every bay has a
+// station" on a dump with no spawns at all — three guards went vacuous in one session exactly
+// that way. The pair is the unit, not the seat: the map is 180°-point-symmetric, so a station
+// on the north-half seat photographs the pair.
+if (!Array.isArray(ARENA.spawns) || ARENA.spawns.length === 0) {
+  bad++;
+  console.log('\n  🔴 tools/arena.gameplay.json has NO spawns — the bay labels above are vacuous, not clean.');
+} else {
+  const missing = [];
+  for (let k = 0; k < ARENA.spawns.length; k += 2) {
+    const s = ARENA.spawns[k];
+    if (!STATIONS.some((st) => Math.hypot(s.x - st.x, s.y - st.y) <= SPAWN_TAG_WU)) missing.push(`${k}/${k + 1} (${s.x},${s.y})`);
+  }
+  console.log(`\n  spawn pairs (${ARENA.spawns.length / 2} in the dump) with NO station within ${SPAWN_TAG_WU} wu: `
+    + `${missing.length ? `${missing.join(' · ')} — nothing here photographs ${missing.length === 1 ? 'that bay' : 'those bays'}` : 'none'}`);
+}
+
 console.log(`\n${bad ? `${bad} station(s) did not park or threw` : 'every station parked and rendered'} — NOW READ THE PNGs.\n`);
 process.exitCode = bad ? 1 : 0;

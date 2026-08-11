@@ -478,31 +478,47 @@ async function selftest() {
     })(),
     `radii ${shipped.map((p) => Math.hypot(p.x - arena.center.x, p.y - arena.center.y).toFixed(0)).join('/')}`);
 
-  // §A3 🔴 A DECLARED DIVERGENCE, NOT A COMMENT. `tools/tmp/x4_layout.mjs` is the GENERATOR
-  //     `kitchen.ts`'s own header points at ("the generator is the place to edit it"), and its
-  //     `SPAWN_NORTH` table still holds the PRE-FIX pair B/C. It is not this pass's file, so it
-  //     was reported rather than edited — and a report is not a guard. This row is: it goes RED
-  //     the moment either side moves, including the dangerous direction, where somebody
-  //     regenerates `kitchen.ts` from the stale generator and silently reverts the fix.
-  //     ⚠️ WHEN `SPAWN_NORTH` IS UPDATED, DELETE THIS ROW — its failure message says so.
-  const X4 = readFileSync(`${ROOT}/tools/tmp/x4_layout.mjs`, 'utf8');
-  const x4North = [...X4.matchAll(/\{\s*x:\s*(\d+),\s*y:\s*(\d+)\s*\}/g)]
-    .map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
-  const x4Spawns = (() => {
-    const blk = /export const SPAWN_NORTH = \[([\s\S]*?)\];/.exec(X4);
-    return blk ? [...blk[1].matchAll(/x:\s*(\d+),\s*y:\s*(\d+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) })) : [];
-  })();
-  void x4North;
-  const northHalf = [shipped[0], shipped[2], shipped[4]];
-  const agrees = x4Spawns.length === 3 && x4Spawns.every((p, i) => p.x === northHalf[i].x && p.y === northHalf[i].y);
-  const isOldTable = x4Spawns.length === 3 && x4Spawns.every((p, i) => p.x === OLD_SIX[i * 2].x && p.y === OLD_SIX[i * 2].y);
-  ok('ROUTED: x4_layout.mjs:SPAWN_NORTH is STALE, and stale in exactly the declared way',
-    !agrees && isOldTable,
-    agrees
-      ? '✅ SPAWN_NORTH now AGREES with the shipped dump — the divergence is closed. DELETE THIS ROW.'
-      : isOldTable
-        ? `still [${x4Spawns.map((p) => `${p.x},${p.y}`).join(' ')}] vs shipped [${northHalf.map((p) => `${p.x},${p.y}`).join(' ')}]`
-        : `🔴 SPAWN_NORTH is neither the old table NOR the shipped seats — somebody changed it to a THIRD thing: [${x4Spawns.map((p) => `${p.x},${p.y}`).join(' ')}]`);
+  // §A3 🔴 THE GENERATOR MUST STILL PRODUCE THE MAP THAT SHIPPED.
+  //
+  //     ⚠️ **THIS ROW USED TO ASSERT THE OPPOSITE, AND THE OLD WORDING IS KEPT HERE BECAUSE
+  //     THE TRANSITION IS THE POINT.** When `2d3e9bd` landed the new seats it did not own
+  //     `tools/tmp/x4_layout.mjs`, so that file's `SPAWN_NORTH` still held the PRE-FIX pair
+  //     B/C — and a report is not a guard, so this row pinned the divergence instead:
+  //
+  //         ok('ROUTED: x4_layout.mjs:SPAWN_NORTH is STALE, and stale in exactly the
+  //             declared way', !agrees && isOldTable, …)   // regex over the source text
+  //
+  //     That was the right assertion while the divergence existed and the WRONG one the
+  //     moment it was closed: **an assertion that pins a bug goes red as soon as the bug is
+  //     fixed.** `SPAWN_NORTH` now carries `(300,810)/(2670,290)/(1590,510)`, so the row is
+  //     re-pointed at the invariant that outlives the fix — the generator and the shipped map
+  //     AGREE — and it still goes RED in the dangerous direction, which was never "the table
+  //     is old" but *"somebody regenerates `kitchen.ts` from this file and silently reverts a
+  //     0.342-place seating back to a 2.680-place one"*.
+  //
+  //     Two upgrades over the old form, both deliberate:
+  //       * it calls the generator's own **`build()`** rather than regexing `SPAWN_NORTH`, so
+  //         the mirror transform and the interleave order (`A, σA, B, σB, C, σC`) are under
+  //         test too — a `mirrorPt` that lost a sign would pass the regex and fail here;
+  //       * it asserts **length 6 BEFORE** `every()`. Three guards went vacuous in one session
+  //         because `[].every()` returns `true`; a `build()` that returned no spawns at all
+  //         would otherwise report agreement.
+  //     ⚠️ Nothing here is a substitute for `x4_layout`'s own checks: the OLD table passed
+  //     every one of them (legal, symmetric, 892 wu apart, one nav component). Legality is not
+  //     fairness, which is why this row exists in THIS file.
+  const { build: x4Build } = await import(`${ROOT}/tools/tmp/x4_layout.mjs`);
+  const gen = x4Build().spawns;
+  const fmt = (ps) => ps.map((p) => `${p.x},${p.y}`).join(' ');
+  const genAgrees = gen.length === 6
+    && gen.every((p, i) => p.x === shipped[i].x && p.y === shipped[i].y);
+  ok('the GENERATOR x4_layout.mjs:build() still produces the SHIPPED six — regenerating kitchen.ts is a no-op',
+    genAgrees,
+    gen.length !== 6
+      ? `🔴 build() returned ${gen.length} spawns, not 6 — the non-empty guard, not a formality`
+      : genAgrees
+        ? `generated [${fmt(gen)}]`
+        : `🔴 GENERATOR [${fmt(gen)}]\n           SHIPPED   [${fmt(shipped)}]\n           Regenerating kitchen.ts from x4_layout.mjs would CHANGE THE MAP. `
+          + `2d3e9bd measured the shipped seating at 0.342 places of spread over 600 matches against 2.680 for the seating before it.`);
 
   // §B A POSITIVE CONTROL. Without it, a `targetGraph` that returned `perfect: false`
   //    unconditionally would pass §A and silently reject every candidate in the search.
