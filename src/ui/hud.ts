@@ -16,7 +16,15 @@ import {
   FOG_DAMAGE,
   FOG_TICK_MS,
   MATCH_DURATION_MS,
-  MIN_SAFE_RADIUS,
+  // 🚨 `MIN_SAFE_RADIUS` IS GONE AND THAT IS A BUG FIX, NOT TIDYING. It stopped being
+  // the ring's floor in `4bb64e4`: the endgame ring now scales with the seat count
+  // (140 at N<=4, 187.42 at N=5, **237.00 at N=6**) and collapses to 0 in sudden death
+  // (`f87d407`). This file kept comparing against the bare constant, so above two seats
+  // it told a fighter standing 100 wu from the centre "FINAL RING" — the edge will never
+  // reach you — **while the fog burned them at 50 HP/s.** `ringFloorFor` is the one
+  // function that knows both rules; see `zoneInfo`.
+  ringFloorFor,
+  suddenDeathActive,
   type CharacterId,
   type Weapon,
 } from '../game/rules';
@@ -802,6 +810,16 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     msUntilEdge: number | null;
     /** The ring's floor is outside the player: the edge will never reach them. */
     holds: boolean;
+    /**
+     * `DECISIONS §2` sudden death is running: the safe radius is ZERO, so there is no
+     * inside, nobody can get to safety, and the match resolves on HP.
+     *
+     * Derived from `timeRemaining` through `rules.ts:suddenDeathActive` rather than
+     * inferred from `safeRadius === 0`, because those are different claims: a radius
+     * that happens to read zero could be a rounding artefact or a QA station, while the
+     * predicate is the sim's own switch and is the thing the copy below is about.
+     */
+    sudden: boolean;
   } {
     const maxR = state.arena.maxSafeRadius;
     // THE LOCAL SEAT, not "the player" — the zone readout is one client's answer to
@@ -810,10 +828,27 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     const dist = Math.hypot(me.x - state.arena.center.x, me.y - state.arena.center.y);
     const outside = dist > state.safeRadius;
     const shrinkPerMs = maxR / MATCH_DURATION_MS; // world units of radius per ms
-    const holds = dist <= MIN_SAFE_RADIUS;
+    // ⚠️ `ringFloorFor(n, t)`, NOT `MIN_SAFE_RADIUS`. TWO rules moved under this line and
+    // it followed neither, and they broke it in OPPOSITE directions — which is why the
+    // fix is one function call and not one adjusted constant:
+    //
+    //   * SUDDEN DEATH (`f87d407`) drops the floor to **0**. The old test `dist <= 140`
+    //     therefore still returned TRUE for anyone within 140 wu of the centre, so the
+    //     pill read "FINAL RING" — *the edge will never reach you* — **while the fog was
+    //     burning them at 50 HP/s.** This is the dangerous direction: a readout that
+    //     actively contradicts the damage the player is taking.
+    //   * THE SEAT-COUNT FLOOR (`4bb64e4`) raises it to 187.42 at N=5 and **237.00 at
+    //     N=6**. There the old test returned FALSE for 140 < dist <= floor, so those
+    //     fighters got "REACHES YOU 0:07" — a countdown to an arrival that never
+    //     happens, which is the exact defect the comment above says `holds` exists to
+    //     prevent. Quieter, and still a lie.
+    //
+    // `ringFloorFor` is the one place both rules live. Nothing here may re-derive them.
+    const holds = dist <= ringFloorFor(state.fighters.length, state.timeRemaining);
     return {
       outside,
       holds,
+      sudden: suddenDeathActive(state.timeRemaining),
       radius01: maxR > 0 ? Math.max(0, Math.min(1, state.safeRadius / maxR)) : 0,
       msUntilEdge:
         outside || holds || shrinkPerMs <= 0 ? null : (state.safeRadius - dist) / shrinkPerMs,
@@ -905,6 +940,10 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     const live = state.phase === 'playing';
     const info = zoneInfo(state);
     const danger = live && info.outside && localFighter(state).alive;
+    // Gated on `live` for the same reason `danger` is: `timeRemaining` stays inside the
+    // sudden-death window after the match ends, and the result card is drawn over this
+    // HUD, so an ended match must not keep shouting a live instruction underneath it.
+    const sudden = live && info.sudden;
     const maxR = state.arena.maxSafeRadius;
 
     // ── THIS LINE WAS MISSING, AND THREE CSS RULES WAITED ON IT ────────────────
@@ -925,7 +964,44 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     zoneEl.classList.toggle('is-imminent', !danger && info.msUntilEdge !== null && info.msUntilEdge < imminentMs(maxR));
     zoneBarEl.style.width = `${(info.radius01 * 100).toFixed(1)}%`;
 
-    if (danger) {
+    if (sudden) {
+      // ── 🚨 SUDDEN DEATH: THE HUD WAS INSTRUCTING THE PLAYER TO DO SOMETHING THAT
+      //    DOES NOT EXIST ────────────────────────────────────────────────────────
+      // Uri, `DECISIONS §2`: *"after 30 seconds reduce the fog to all screen and the one
+      // who has more HP wins. (Sudden Death)"*. `f87d407` shipped it, and when it fires
+      // `SUDDEN_DEATH_RADIUS` is **0**: there is no inside, every fighter is outside, and
+      // everyone burns. The three readouts below all kept their normal wording, so the
+      // screen said "OUTSIDE THE ZONE", "GET INSIDE" and "RUN TO THE ZONE" — three
+      // instructions to reach a place that no longer exists, plus a chevron pointing at
+      // it. That is worse than saying nothing: it spends the player's last seconds on an
+      // errand while the thing that decides the match is their HP bar.
+      //
+      // It is rare and decisive, which is the combination that most needs explaining:
+      // **5.0% of matches at N=2** over an 880-match census, **31 of 44 ending on the
+      // collapse tick itself**, and the HP leader took **43 of 43** decided. A player
+      // meets this once and has to be able to tell what happened.
+      //
+      // So the copy states the two facts that are true and actionable, in the order the
+      // player needs them: WHAT is happening, then HOW it resolves. It deliberately does
+      // NOT print the burn rate — that is universal now, so it is no longer a reason to
+      // move, and "MOST HP WINS" is the only line here that changes what a player does.
+      //
+      // WIDTH, against this pill's documented budget (136px of content at <=720, where
+      // the longest shipped runs are "REACHES YOU 0:06" at 124px/12.5px and
+      // "OUTSIDE THE ZONE" at 115px/10px): both new runs are SHORTER in glyph count than
+      // the run they replace at the same size, so neither can become the new binding
+      // constraint. Measured rendered rather than assumed — see the commit message.
+      // ⚠️ NO LEADING GLYPH, unlike "▲ OUTSIDE THE ZONE" — and that is a deliberate
+      // break from the pattern beside it. `ft_glyphs` measured this project's loaded
+      // faces drawing **0 of 44** candidate symbols (▲, ⚙, ✓, ⭐, 🏆 all fall through to
+      // the platform font), so a skull here is whatever the DEVICE decides: monochrome
+      // on the desktop this was authored on, a full-colour emoji on the phone that
+      // actually meets it. Read at 667x375 it looked like a padlock. The words plus the
+      // pill's own alarm styling — violet plate, 0.6 s pulse, white 11px label — carry
+      // the state without betting on a codepoint nothing here ships a glyph for.
+      zoneLabelEl.textContent = 'SUDDEN DEATH';
+      zoneValueEl.textContent = 'MOST HP WINS';
+    } else if (danger) {
       zoneLabelEl.textContent = '\u25B2 OUTSIDE THE ZONE';
       zoneValueEl.textContent = `−${FOG_DPS} HP/s`;
     } else {
@@ -1071,11 +1147,21 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           : (f.alive && fighterVisibleTo(state, observer, f) ? 'block' : 'none');
     });
     radarEl.classList.toggle('is-danger', danger);
-    radarCapEl.textContent = danger ? 'GET INSIDE' : 'SAFE ZONE';
+    // "GET INSIDE" is an instruction; during sudden death there is no inside to get to,
+    // so the cap names the STATE instead. It stays a shrink-to-fit pill: 12 glyphs at
+    // 9px/800 against "GET INSIDE"'s 10, inside a 105px card at <=720 — measured, not
+    // assumed, because this pill has no width of its own to clip against.
+    radarCapEl.textContent = sudden ? 'SUDDEN DEATH' : danger ? 'GET INSIDE' : 'SAFE ZONE';
 
     // ── Danger vignette + chevron ────────────────────────────────────────────
     fogEdgeEl.classList.toggle('is-on', danger);
-    const arrow = danger ? frame.safeArrow ?? null : null;
+    // 🚨 AND THE CHEVRON IS THE WORST OF THE THREE, SO IT IS REMOVED OUTRIGHT.
+    // The label and the cap were merely wrong words; this is a 140px arrow pointing at a
+    // safe zone of radius ZERO. `match.ts` computes it from the direction to the arena
+    // centre, which stays a perfectly well-defined direction after the ring collapses —
+    // so it keeps drawing, confidently, at a destination that cannot help. Hiding it is
+    // the honest answer: there is no direction to run, and the copy above says so.
+    const arrow = danger && !sudden ? frame.safeArrow ?? null : null;
     if (arrow) {
       safeArrowEl.style.display = 'block';
       safeArrowLabelEl.style.display = 'block';

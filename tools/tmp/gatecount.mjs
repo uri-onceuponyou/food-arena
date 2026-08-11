@@ -403,6 +403,7 @@ const SKIP = [
   ['tools/tmp/sk_shake.mjs --selftest', 'browser', 'frozen-frame bit-identity with camera shake ACTIVE, plus the dt>0 positive control; needs a real Stage.render() and a GL context'],
   ['tools/tmp/h49_ab.mjs --ref <sha>', 'browser', 'the §49f 2-fighter identity battery; overlays ONLY hud.ts so a peer mid-edit in src/game cannot leak in'],
   ['tools/tmp/h49_chips.mjs', 'browser', 'the chip rail above two seats, in BOTH DOM states — the touch state is the one that caught a real overlap'],
+  ['tools/tmp/lu_sudden.mjs', 'browser', 'the sudden-death HUD: copy, the hidden chevron and the SEAT-SCALED ring floor, at N=2 and N=6; needs a live sim and reaches the state through fogRadius=0'],
   ['tools/tmp/lu_land.mjs', 'browser', 'the landscape-phone control layout: corner, centre column, hint/tray clearance, touch floor, safe-area insets, and a REAL CDP touch to prove the resting hints are transient'],
   ['tools/tmp/np_ab.mjs',        'browser', 'the N=2 presentation identity battery: 4 served arms, 9 compared fields, per-file tree control, roster-swap known-bad'],
   ['tools/tmp/np_nfighter.mjs', 'browser', 'N=3..6 presentation self-consistency + slot-swap known-bad'],
