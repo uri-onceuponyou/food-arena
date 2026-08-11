@@ -268,6 +268,7 @@ const OFFLINE = [
   { key: 'tools/tmp/kx_seatfair.mjs --selftest', probes: [pr(['tools/tmp/kx_seatfair.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/kx_fogcover.mjs --selftest', probes: [pr(['tools/tmp/kx_fogcover.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/rc_prose.mjs', probes: [pr(['tools/tmp/rc_prose.mjs'], /(\d+)\/\d+ checks passed/)] },
+  { key: 'tools/tmp/nk_neckgate.mjs --selftest', probes: [pr(['tools/tmp/nk_neckgate.mjs', '--selftest'], /(\d+) pass, \d+ fail/)] },
   { key: 'tools/tmp/p5_dlprobe.mjs',             probes: [pr(['tools/tmp/p5_dlprobe.mjs'], S)] },
   { key: 'tools/match-sim.mjs --selftest',       probes: [pr(['tools/match-sim.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
