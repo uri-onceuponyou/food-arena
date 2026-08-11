@@ -3692,3 +3692,89 @@ the sticky trail and the 31 fps floor itself making everything read as clunky.
    WebKit is *worse* than Chromium here — plausible, it routes WebGL through a separate GPU process —
    **the ranking gets stronger, not weaker.** A cable and macOS Safari's Develop menu closes it.
 4. **Thermals over a 45 s match.** A phone that starts at 31 fps does not stay there.
+
+---
+
+## 57. ✅ MULTIPLAYER INFRASTRUCTURE LANDED 2026-08-11 — `915bbaf`, `2ec44da`. **One thing now needs Uri: the payout curve for 3–6 seats.**
+
+Uri asked for *"infrastructure for multiplayer game (host games, leagues, online multiplayer game)"*.
+§52 decided the shape (authoritative sim + local prediction, host peer first, movable to Node later
+**without touching `src/game/`**). That constraint held: **`src/game/` is untouched by a single line**,
+because three decisions made before there was any network turned out right — `stepMatch` already took
+one input per slot, `fighters` was already a slot-ordered array, and `createMatch` already refused to
+invent a spawn. `src/net/` is new and nothing shipped imports it, so the bundle is unchanged.
+
+### 🚨 §52's OWN STATED FALLBACK DOES NOT WORK — and §8's reason 4 is falsified
+
+§52 said *"`structuredClone` preserves all of it"*. **It does not: `structuredClone(state)` throws
+`DataCloneError` on a real `MatchState`**, because `arena.build` is a required method. Every
+`structuredClone` figure in `docs/NETCODE.md` §6 was taken against the **data-only**
+`arena.gameplay.json`, not against the shipped object. **`postMessage(state)` throws for the same
+reason**, which falsifies §8's *reason 4* for the design (*"the serialisation bill is deferrable,
+postMessage costs zero"*).
+
+⚠️ **This does NOT reverse §52.** The other four reasons stand, and the transform that was supposed to
+be deferrable now simply exists. But the fallback everyone would have reached for is not there, and
+this was believed on the strength of a measurement taken against the wrong object.
+
+### The wire format, and the control that makes the other 66 checks worth reading
+
+Not a field list — **one alias-aware structural walker with three consumers** (encode / decode / clone).
+A field list rots silently the day `state.ts` grows a field; this carries plain data of any shape
+unregistered, carries reference topology generically, and **refuses by path** anything it has no rule
+for. `refTopology` prints the reference census and the gate asserts it, so a lost *or added* alias goes
+red with a diff.
+
+**The JSON known-bad, `nw_wire.mjs` B4: `JSON.stringify(original) === JSON.stringify(corrupted)` is
+TRUE.** That is the whole point — **the corruption is in identity, not values, so the obvious check
+passes on it.** On a live N=6 state the JSON round trip breaks all 3 aliases, flattens **39 of 39**
+`-Infinity` sentinels to `null`, loses `brokenConcealment`'s arena reference identity, and — not listed
+anywhere before — turns **12 real array holes** in `hazardTimers` into present `null`s.
+
+Also caught: the aim quantisation **was not idempotent** (75 of 4,000 inputs changed on second
+application). Replaced with a max-norm, a fixed point by construction.
+
+### What the loopback proves — and one arm that would have lied
+
+**Proves exactly:** at zero latency the client's predicted view is **bit-identical** to the host's at
+every snapshot (200/200 at N=2; **798/798 across six clients at N=6**); the host's `inputLog` replays
+bit-identically from a fresh `createMatch`; host and client share **zero** objects except the arena; the
+authority check fires on a forged seat.
+
+⚠️ **The arm that looks like a pass and is a tautology:** `errorWu` is **exactly 0 at any latency** with
+one human and no loss — it measures the client's own self-consistency, **not agreement with the host**.
+A rig running only that arm would report *"prediction is perfect at 100 ms"* and be measuring nothing.
+What the real arm shows: at 3 ticks of delay the local fighter **leads by 4.01 wu** and remote fighters
+**lag by 15.07 wu** — the gap an interpolation layer would hide, and there is no interpolation layer yet.
+
+## ❓ NEEDS URI — the only new decision here: **what does a 3–6 player match pay?**
+
+`MATCH_PAYOUT` prices **exactly two outcomes**, win and loss. There is no placement curve anywhere for
+3rd through 6th, and `applyMatchResult` **throws rather than inventing one** — which is the right
+behaviour and also means **a six-player match cannot currently pay out at all.**
+
+This is a design call, not a technical one, which is why it is here rather than decided:
+
+- **How steep?** Brawl-Stars-like games pay the top half and charge the bottom half, which makes 4th of
+  6 a real loss. A flat-ish curve is friendlier and makes placement matter less.
+- **Does 6th of 6 pay zero, or go negative?** §49a already decided the *ordering* (*"fewest deaths, then
+  lower slot"*); this is the money on top of it.
+- **Does the curve scale with N**, so 3rd of 6 and 3rd of 4 differ?
+
+⚠️ **Anything chosen here interacts with the trophy road and the store**, both of which are tuned
+against the current two-outcome payout — so the honest answer is that a curve cannot be dropped in
+without re-checking `economy.test.mjs`'s progression assertions. **If Uri would rather not spend a
+decision on it, the safe default is a curve that preserves today's expected value at N=2 exactly and
+interpolates upward**, so nothing already tuned moves. That is reversible; a generous curve shipped and
+then cut is not.
+
+### What remains before this is multiplayer rather than infrastructure for it
+
+1. **A real transport** — WebRTC DataChannel behind `Transport`, plus signalling. Nothing above changes.
+2. **Delta compression — the top item.** Full snapshots cost **981.6 KiB/s for six clients** at 20 Hz.
+   §2 measured a binary delta at ~220 B against ~8 KB: a **~37× saving that is not built.**
+3. **Interpolation of remote fighters** — the 15.07 wu lag is currently drawn raw.
+4. **The payout curve above.**
+5. **A backend decision.** ⚠️ Nothing was provisioned, no account created, no endpoint in any committed
+   file; `NetConfig` defaults to connect-to-nothing. That stays true until Uri says otherwise.
+6. **Reconnection, spectator UI, matchmaking** — none exist.
