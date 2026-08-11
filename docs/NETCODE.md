@@ -28,6 +28,13 @@
 run first as a HOST PEER (one client authoritative, WebRTC to the rest), later as a Node process,
 because the sim runs unchanged in both.**
 
+✅ **DECIDED (`DECISIONS §52`, 2026-08-11) and now BUILT as infrastructure — see `src/net/`.**
+The wire format, the transport seam, the loopback, the host peer, prediction/reconciliation and
+the lobby/league model all exist and are gated by `tools/tmp/nw_wire.mjs` and
+`tools/tmp/nw_stack.mjs`. ⚠️ **No real transport, no signalling, no server and no delta
+compression** — read `nw_stack.mjs`'s header for the exact list of what the loopback can and
+cannot prove before quoting any of it.
+
 **The number that decides it: 2.66 µs.** That is one six-human tick — 0.016% of real time,
 ≈ 6,260 concurrent matches per core. Server CPU is the *only* resource an authoritative design
 spends that lockstep saves, and here it is free. Lockstep's remaining advantages are bandwidth
@@ -340,6 +347,22 @@ corridors on the bigger map while every timing number here stays flat.
 | `JSON.parse(JSON.stringify(…))` | **3 BROKEN** — `player !== fighters[0]`, `enemy !== fighters[1]`, `aiSighting !== sightings[n+0]` |
 | `structuredClone` | ALL HOLD |
 | hand clone (arena by reference) | ALL HOLD |
+
+> 🚨 **CORRECTION, 2026-08-11, from `tools/tmp/nw_wire.mjs` D9 — the `structuredClone` row is
+> right about what it measured and does NOT transfer to the shipped arena.**
+> `structuredClone(state)` **throws `DataCloneError`** on a real `MatchState`, because
+> `arena/types.ts` declares `build(): THREE.Group` as a REQUIRED method and the structured
+> clone algorithm refuses a function. Every number in this section was taken against
+> `tools/arena.gameplay.json`, a **data-only** arena cache with no methods on it — so the
+> aliases really do survive (D10 reproduces that), but only on an arena that has been stripped.
+> With the arena made data-only it also **deep-copies it** (D11), so `state.arena` becomes a
+> stranger to the one the renderer holds and `brokenConcealment` then points into the copy
+> (D12). The hand clone is the only option that works on the arena the game actually ships.
+> ⚠️ And a **fourth** loss on the JSON trip that this section does not list: `Fighter.hazardTimers`
+> is documented *"sparse; grows lazily"* and `sim.ts:applyWorldTick` writes it at the hazard's
+> index, so it has real array **HOLES** — 12 of them in the N=6 fixture. `JSON.stringify` turns
+> a hole into `null` and `JSON.parse` gives back a present `null`. Benign today, because
+> `(hazardTimers[idx] ?? 0)` reads both as 0. Which is exactly why nobody would ever notice.
 
 This is not pedantry. `state.ts` is explicit that `state.player` **is** `state.fighters[0]` — the
 same object — and that making them getters instead would silently break the bit-identity differ.
