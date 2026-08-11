@@ -368,6 +368,36 @@ export const PLAYER_MAX_HP = 100;
  * `PLAYER_MAX_HP` is deliberately NOT the lever: it is the number every HUD bar, every
  * damage figure and every reference to "a 100 HP player" in this repo is written
  * against.
+ *
+ * ── 🚨 2026-08-11: THE VALUE IS UNCHANGED; ITS SCOPE IS NOT (DECISIONS §49c) ──
+ *
+ * **AUTHORISED DEVIATION #9 IS NOT REVERSED. 90 STAYS, AND THE CURVE ABOVE STAYS TRUE.**
+ * What moved is what this constant *is*. Everything above describes it as **the difficulty
+ * dial** (`DECISIONS §12`, `§15`) — full stop, as though the game had one enemy forever.
+ * Uri, answering the "which dial does seat 2 and up get" question:
+ *
+ *   > *"AI player is currently only for testing the game. Later on when real PvP occurs
+ *   > each player has it stats based on the level if their brawler"*
+ *
+ * The AI opponent is a **test harness, not a design target**. So this is the difficulty
+ * dial **FOR A BOT OPPONENT** — a TESTING constant — and it means something in exactly two
+ * places:
+ *
+ *   1. today's **single-player duel**, where slot 1 is a bot and turning this is still how
+ *      the game gets easier or harder. `sim.ts:createMatchFromList` gates it on
+ *      `configs.length === MIN_FIGHTERS` and nothing else;
+ *   2. the **measuring instruments** — `roster_lab`, `kit_lab`, `match-sim`,
+ *      `pacing_ladder`, `roster_table`, `level_lab`, `burger_lab`, `selfheal_probe`,
+ *      `e2e_timeout_finder` — which encode the 100/90 split as the world because a 1v1
+ *      matchup grid IS their world. **They may keep it. Nothing that SHIPS may.**
+ *
+ * Above two fighters **no slot gets a different pool because of its index**: every fighter
+ * is built from `PLAYER_MAX_HP` and separated only by `Fighter.level` and its character's
+ * card. ⛔ "Keep the seat dial" is retired permanently — do not re-offer it.
+ *
+ * ⚠️ Read this before quoting the curve: every number in it was measured in a **1v1 against
+ * a bot**, which is now the only configuration this constant describes. It is not a
+ * free-for-all balance figure and there is no instrument in this repo that produces one.
  */
 export const ENEMY_MAX_HP = 90;
 export const PLAYER_SIZE = 42;

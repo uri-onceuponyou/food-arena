@@ -4091,8 +4091,41 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
   // here instead, and checked against the LEGACY FORMULA written out longhand rather than
   // against a copy of the new one.
   {
-    const legacyWinner = (pf, ef, pd, ed) =>
-      (pf !== ef ? (pf > ef ? 'player' : 'enemy') : (pd <= ed ? 'player' : 'enemy'));
+    // ── ⚠️ THE LONGHAND FORMULA GAINED A RUNG. IT USED TO BE, VERBATIM: ───────
+    //
+    //   > `const legacyWinner = (pf, ef, pd, ed) =>`
+    //   >   `(pf !== ef ? (pf > ef ? 'player' : 'enemy') : (pd <= ed ? 'player' : 'enemy'));`
+    //
+    // Kept because the SHAPE of the change matters: the old two-way rule folded rungs 2 and
+    // 3 into one `<=` — "nearer the centre, and on an exact tie the player" — and that fold
+    // is exactly where `DECISIONS §49a` inserts. Uri, 2026-08-11: *"Fewest deaths, then
+    // lower slot"*. The `<=` is therefore split into a strict `<` plus two more rungs, and
+    // when the two deaths counts are equal the new formula must collapse back to the old
+    // one character for character. Every case below is checked against THIS, written out
+    // longhand, rather than against a copy of `resolveTimeout`'s comparator.
+    const longhandWinner = (pf, ef, pd, ed, pDeaths, eDeaths) => (
+      pf !== ef ? (pf > ef ? 'player' : 'enemy')
+        : pd !== ed ? (pd < ed ? 'player' : 'enemy')
+          : pDeaths !== eDeaths ? (pDeaths < eDeaths ? 'player' : 'enemy')
+            : 'player'            // rung 4: the lower slot, and slot 0 is the player
+    );
+    // The collapse, asserted rather than assumed: with equal deaths the four-rung formula
+    // IS the two-rung one it replaced, over a grid that reaches every branch of both.
+    {
+      const old = (pf, ef, pd, ed) => (pf !== ef ? (pf > ef ? 'player' : 'enemy') : (pd <= ed ? 'player' : 'enemy'));
+      const vals = [0, 0.5, 1];
+      let same = 0;
+      let cells = 0;
+      for (const pf of vals) for (const ef of vals) for (const pd of vals) for (const ed of vals) {
+        cells++;
+        if (longhandWinner(pf, ef, pd, ed, 0, 0) === old(pf, ef, pd, ed)) same++;
+      }
+      check('the four-rung formula collapses to the two-rung one it replaced when deaths are equal',
+        same === cells, `${same}/${cells}`);
+      // KNOWN-BAD: and it must NOT collapse when they differ, or the new rung is decoration.
+      check('KNOWN-BAD: …and it DIVERGES from it the moment the deaths differ',
+        longhandWinner(0.5, 0.5, 1, 1, 1, 0) === 'enemy' && old(0.5, 0.5, 1, 1) === 'player');
+    }
 
     /**
      * One frozen tick that ends on the whistle. Everything that could move a fighter or its
@@ -4100,8 +4133,15 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
      * cooldown, the player's input is zero, regen is blocked by a fresh `lastDamagedAt`, and
      * the ring is at `MIN_SAFE_RADIUS` with both fighters inside it — so the state the
      * tiebreak sees is exactly the state set up here.
+     *
+     * ⚠️ `pDeaths`/`eDeaths` are written STRAIGHT ONTO the fighters, which is the only way
+     * to reach rung 3 at all: with no respawn in the sim a fighter's count is 0 or 1 and
+     * `deaths === 1` iff `hp === 0`, so rung 1 has already sorted every corpse below every
+     * survivor before rung 3 is consulted. The rung is real, it is total, and it is INERT on
+     * every state real play can produce — which is what the `--bitid` acceptance measures
+     * and what these rows construct around.
      */
-    const timeoutWinner = ({ pHp, pMax, eHp, eMax, pOff, eOff }) => {
+    const timeoutWinner = ({ pHp, pMax, eHp, eMax, pOff, eOff, pDeaths = 0, eDeaths = 0 }) => {
       const arena = makeArena({ maxSafeRadius: 4000 });
       const state = playingMatch(arena, 'hamburger', 'hamburger');
       const cx = arena.center.x;
@@ -4110,6 +4150,7 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
       state.enemy.x = cx + eOff; state.enemy.y = cy;
       state.player.hp = pHp; state.player.maxHp = pMax;
       state.enemy.hp = eHp; state.enemy.maxHp = eMax;
+      state.player.deaths = pDeaths; state.enemy.deaths = eDeaths;
       state.player.lastDamagedAt = state.elapsed;
       state.enemy.lastDamagedAt = state.elapsed;
       state.enemy.status.stunnedUntil = state.elapsed + 10_000; // rooted: no chase this tick
@@ -4123,6 +4164,7 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
         ended: events.filter((e) => e.type === 'match-ended'),
         moved: state.player.x !== cx - pOff || state.enemy.x !== cx + eOff,
         hpMoved: state.player.hp !== pHp || state.enemy.hp !== eHp,
+        deathsMoved: state.player.deaths !== pDeaths || state.enemy.deaths !== eDeaths,
         phase: state.phase,
       };
     };
@@ -4135,9 +4177,27 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
       { name: 'rung 1 does not fire on equal fractions from unequal pools', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 300 },
       { name: 'rung 2: level on HP, the player is nearer the centre', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 300 },
       { name: 'rung 2: level on HP, the enemy is nearer the centre', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 300, eOff: 100 },
-      // ⚠️ RUNG 3. Zero of 3520 forced-immortal timeouts reached it.
-      { name: 'rung 3: level on BOTH — the tie goes to the lower slot', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 100 },
+      // ── ⚠️ RUNG 3 IS NEW AND RUNG 4 IS THE OLD RUNG 3 (DECISIONS §49a) ──
+      // This row used to be named `'rung 3: level on BOTH — the tie goes to the lower slot'`
+      // and it is now rung 4, unchanged in every value: with both counts at 0 the deaths
+      // rung ties and the slot decides, exactly as before. That is the row `--bitid` rests
+      // on. Zero of 3520 forced-immortal timeouts reached even the old rung 3.
+      { name: 'rung 4: level on HP, ground AND deaths — the tie goes to the lower slot', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 100 },
+      // RUNG 3 ITSELF. The lower slot would take both of these; fewest deaths overrules it
+      // in one direction and agrees with it in the other, so the pair proves the rung is
+      // ordered ABOVE the slot rather than merely present.
+      { name: 'rung 3: level on HP and ground — the enemy has died more, the player wins', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 100, pDeaths: 0, eDeaths: 1 },
+      { name: 'rung 3: …and the PLAYER having died more hands it to the enemy, over its own slot', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 100, pDeaths: 2, eDeaths: 1 },
+      // Rungs 1 and 2 still outrank it: a fighter that has never died still loses to one
+      // that is ahead on pool or on ground. A rung inserted at the wrong depth passes the
+      // two rows above and fails these.
+      { name: 'rung 1 still outranks deaths — more deaths but a better fraction wins', pHp: 60, pMax: 100, eHp: 30, eMax: 90, pOff: 100, eOff: 100, pDeaths: 3, eDeaths: 0 },
+      { name: 'rung 2 still outranks deaths — more deaths but nearer the centre wins', pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 300, pDeaths: 3, eDeaths: 0 },
       { name: 'rung 1 with a zero pool: hp/0 is 0, not NaN', pHp: 10, pMax: 0, eHp: 1, eMax: 90, pOff: 100, eOff: 100 },
+      // The ONE state real play can produce that reaches rung 3 with unequal counts: the
+      // `f.maxHp > 0 ?` guard hands a LIVING fighter fraction 0, so it can meet a corpse
+      // here. The corpse has one death and loses, which is the rung doing its job.
+      { name: 'rung 3: a zero-pool survivor outranks a corpse it is level with on fraction', pHp: 10, pMax: 0, eHp: 0, eMax: 90, pOff: 100, eOff: 100, pDeaths: 0, eDeaths: 1 },
     ];
 
     let agreed = 0;
@@ -4146,24 +4206,147 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
       const r = timeoutWinner(c);
       const pf = c.pMax > 0 ? c.pHp / c.pMax : 0;
       const ef = c.eMax > 0 ? c.eHp / c.eMax : 0;
-      const want = legacyWinner(pf, ef, c.pOff, c.eOff);
-      const ok = r.winner === want && !r.moved && !r.hpMoved
+      const want = longhandWinner(pf, ef, c.pOff, c.eOff, c.pDeaths ?? 0, c.eDeaths ?? 0);
+      const ok = r.winner === want && !r.moved && !r.hpMoved && !r.deathsMoved
         && r.phase === 'ended' && r.ended.length === 1
         && r.ended[0].winner === want && r.ended[0].winnerId === (want === 'player' ? 0 : 1)
         && r.winnerId === (want === 'player' ? 0 : 1);
       if (ok) agreed++;
-      else disagreements.push(`${c.name}: got ${r.winner}/${r.winnerId} want ${want}, moved=${r.moved} hpMoved=${r.hpMoved}`);
-      check(`the ranked sort reproduces the two-way rule — ${c.name}`, ok,
+      else disagreements.push(`${c.name}: got ${r.winner}/${r.winnerId} want ${want}, moved=${r.moved} hpMoved=${r.hpMoved} deathsMoved=${r.deathsMoved}`);
+      check(`the ranked sort reproduces the longhand rule — ${c.name}`, ok,
         `winner ${r.winner} (slot ${r.winnerId})`);
     }
     check('…on every constructed case, and the fixture really was frozen for the tick',
       agreed === CASES.length, disagreements.join(' | '));
 
     // KNOWN-BAD: the fixture has to be able to FAIL. If `timeoutWinner` silently produced
-    // the same answer whatever it was handed, all seven rows above would be one row.
+    // the same answer whatever it was handed, all the rows above would be one row.
     const both = new Set(CASES.map((c) => timeoutWinner(c).winner));
     check('KNOWN-BAD: the fixture returns BOTH answers across the cases, so it is not stuck',
       both.size === 2, [...both].join(','));
+    // KNOWN-BAD: and the DEATHS input specifically has to be able to flip it. Two runs of
+    // one case differing in nothing but `eDeaths` — if the fixture ignored the field (a
+    // typo'd key, a fighter object rebuilt after the write) every deaths row above would
+    // still pass, because they also differ from each other in name only.
+    check('KNOWN-BAD: flipping ONLY `eDeaths` on one case flips the winner',
+      timeoutWinner({ pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 100, pDeaths: 1, eDeaths: 1 }).winner === 'player'
+      && timeoutWinner({ pHp: 50, pMax: 100, eHp: 45, eMax: 90, pOff: 100, eOff: 100, pDeaths: 1, eDeaths: 0 }).winner === 'enemy');
+
+    // ── AND THE SAME RUNG, ABOVE TWO SEATS, WHERE §49a ACTUALLY BITES ─────────
+    //
+    // The rows above are a DUEL, where rung 3 is unreachable in real play (a knockout ends
+    // a two-seat match before the clock can — §28(d) measures that, so `resolveTimeout`
+    // never sees a two-seat corpse). The rung exists for the brawl, so it is constructed at
+    // six seats too: everyone level on pool and on ground, separated by nothing but how
+    // often they have gone down. Slot 5 wins over slots 0..4, which is the whole point —
+    // the old rung would have handed it to slot 0 forever.
+    {
+      const arena = makeArena({ width: 3000, height: 3000, maxSafeRadius: 4000 });
+      const cx = arena.center.x;
+      const cy = arena.center.y;
+      const RING = 400;
+      const DEATHS = [3, 3, 2, 2, 1, 0];   // slot 5 is the cleanest, slot 0 the most-killed
+      const state = createMatch(arena, DEATHS.map((_, i) => ({
+        characterId: 'hamburger',
+        // Every fighter the SAME distance from the centre, so rung 2 cannot decide it, and
+        // spread around a circle so no two share a position.
+        spawn: { x: cx + RING * Math.cos((i / 6) * Math.PI * 2), y: cy + RING * Math.sin((i / 6) * Math.PI * 2) },
+      })));
+      state.phase = 'playing';
+      state.fighters.forEach((f, i) => {
+        f.hp = 50; f.maxHp = 100;                 // rung 1 ties
+        f.deaths = DEATHS[i];
+        f.lastDamagedAt = state.elapsed;          // regen blocked
+        f.status.stunnedUntil = state.elapsed + 10_000; // rooted
+        f.lastUsed = f.lastUsed.map(() => Infinity);
+      });
+      const distances = state.fighters.map((f) => Math.hypot(f.x - cx, f.y - cy));
+      check('the six-seat fixture really is level on rungs 1 and 2 (or rung 3 decides nothing)',
+        new Set(state.fighters.map((f) => f.hp / f.maxHp)).size === 1
+        && distances.every((d) => approx(d, distances[0])),
+        distances.map((d) => d.toFixed(6)).join(' '));
+      state.timeRemaining = 0;
+      const events = stepMatch(state, 16.667, noInput);
+      const ended = events.filter((e) => e.type === 'match-ended');
+      check('at six seats the FEWEST DEATHS wins the whistle, not the lowest slot (DECISIONS §49a)',
+        state.winnerId === 5 && ended.length === 1 && ended[0].winnerId === 5,
+        `winnerId ${state.winnerId} with deaths [${state.fighters.map((f) => f.deaths).join(',')}]`);
+      check('…and no fighter died, was moved or was healed by the whistle tick',
+        state.fighters.every((f, i) => f.deaths === DEATHS[i] && f.hp === 50 && f.alive)
+        && events.every((e) => e.type !== 'death'),
+        state.fighters.map((f) => `${f.id}:${f.hp}/${f.deaths}`).join(' '));
+      // KNOWN-BAD: give the lowest slot the cleanest sheet instead and the answer must move.
+      // Without this the row above passes for a comparator that returned slot 5 by accident
+      // (a reversed `id` rung, a sort on the wrong key).
+      const mirrored = createMatch(arena, DEATHS.map((_, i) => ({
+        characterId: 'hamburger',
+        spawn: { x: cx + RING * Math.cos((i / 6) * Math.PI * 2), y: cy + RING * Math.sin((i / 6) * Math.PI * 2) },
+      })));
+      mirrored.phase = 'playing';
+      mirrored.fighters.forEach((f, i) => {
+        f.hp = 50; f.maxHp = 100;
+        f.deaths = [...DEATHS].reverse()[i];
+        f.lastDamagedAt = mirrored.elapsed;
+        f.status.stunnedUntil = mirrored.elapsed + 10_000;
+        f.lastUsed = f.lastUsed.map(() => Infinity);
+      });
+      mirrored.timeRemaining = 0;
+      stepMatch(mirrored, 16.667, noInput);
+      check('KNOWN-BAD: mirror the death sheet and slot 0 wins — the rung reads deaths, not ids',
+        mirrored.winnerId === 0, `winnerId ${mirrored.winnerId}`);
+      // …and with every sheet EQUAL the slot rung is still the floor at six seats.
+      const flat = createMatch(arena, DEATHS.map((_, i) => ({
+        characterId: 'hamburger',
+        spawn: { x: cx + RING * Math.cos((i / 6) * Math.PI * 2), y: cy + RING * Math.sin((i / 6) * Math.PI * 2) },
+      })));
+      flat.phase = 'playing';
+      flat.fighters.forEach((f) => {
+        f.hp = 50; f.maxHp = 100;
+        f.deaths = 2;
+        f.lastDamagedAt = flat.elapsed;
+        f.status.stunnedUntil = flat.elapsed + 10_000;
+        f.lastUsed = f.lastUsed.map(() => Infinity);
+      });
+      flat.timeRemaining = 0;
+      stepMatch(flat, 16.667, noInput);
+      check('…and with every death sheet EQUAL the lower slot is still the floor (rung 4)',
+        flat.winnerId === 0, `winnerId ${flat.winnerId}`);
+    }
+
+    // ── `deaths` IS A REAL COUNTER, WRITTEN BY THE KILL PATH ──────────────────
+    //
+    // Everything above WRITES the field by hand, so on its own it proves the comparator
+    // reads a number and nothing about where that number comes from. This is the other
+    // half: a real knockout in a real match must move it, exactly once, in step with the
+    // `death` event — otherwise rung 3 would be reading a field that is 0 forever.
+    {
+      const state = playingMatch(makeArena({ maxSafeRadius: 4000 }), 'hamburger', 'donut');
+      check('every fighter starts the match on a clean sheet',
+        state.fighters.every((f) => f.deaths === 0));
+      let deathEvents = 0;
+      for (let i = 0; i < 4000 && state.phase !== 'ended'; i++) {
+        for (const ev of stepMatch(state, 16.667, { move: { x: 1, y: 0.2 }, selectedWeapon: 0, attack: true })) {
+          if (ev.type === 'death') deathEvents++;
+        }
+      }
+      const totalDeaths = state.fighters.reduce((a, f) => a + f.deaths, 0);
+      check('a real knockout increments `deaths`, once, on the fighter that went down',
+        deathEvents === 1 && totalDeaths === 1
+        && state.fighters.every((f) => f.deaths === (f.alive ? 0 : 1)),
+        `${deathEvents} death events, counts [${state.fighters.map((f) => f.deaths).join(',')}]`);
+      // The invariant the rung's inertness rests on, asserted on a real corpse rather than
+      // argued: with no respawn, `deaths === 1` iff the fighter is at 0 HP.
+      check('…and with no respawn, `deaths === 1` iff `hp === 0` — which is why rung 3 is inert today',
+        state.fighters.every((f) => (f.deaths === 1) === (f.hp === 0)),
+        state.fighters.map((f) => `${f.id}:${f.hp}/${f.deaths}`).join(' '));
+      // KNOWN-BAD: a second hit on the corpse must NOT count again. `applyDamage`'s
+      // `if (!target.alive) return` is what stops it, and a counter incremented anywhere
+      // else in the file would double here.
+      const corpse = state.fighters.find((f) => !f.alive);
+      for (let i = 0; i < 60; i++) stepMatch(state, 16.667, { move: { x: -1, y: 0 }, selectedWeapon: 0, attack: true });
+      check('KNOWN-BAD: hitting a corpse for another second does not count a second death',
+        corpse.deaths === 1, `${corpse.deaths}`);
+    }
   }
 
   // ── (d) `damagedMask`: PER-VICTIM, AND EQUIVALENT TO THE BOOLEAN AT N=2 ───
@@ -4428,7 +4611,27 @@ console.log('\n28. The cap off: per-slot input, a fighter list, and the split ta
       JSON.stringify(-Infinity));
 
     // The default LADDER, slot by slot. Stated here because it is a balance decision above
-    // two seats (parked with Uri) and a silent change to it would look like a tuning pass.
+    // two seats and a silent change to it would look like a tuning pass.
+    //
+    // ── ⚠️ THESE TWO ROWS ENCODED A RULE URI HAS SINCE REVERSED. THEY READ: ────
+    //
+    //   > `'slot 0 gets the PLAYER dial and every slot above it the ENEMY dial (DECISIONS §49c)'`
+    //   >   `six.fighters[0].size === PLAYER_SIZE && … hitRadius === HIT_RADIUS_VS_PLAYER`
+    //   >   `&& six.fighters.slice(1).every((f) => f.size === ENEMY_SIZE && f.hitRadius === HIT_RADIUS_VS_ENEMY)`
+    //   > `'…and the pools follow the same seat dial, through maxHpFor and nothing else'`
+    //   >   `six.fighters[1].maxHp === maxHpFor('donut', ENEMY_MAX_HP, LEVEL_MIN)`
+    //   >   `&& six.fighters[5].maxHp === maxHpFor('sushi', ENEMY_MAX_HP, LEVEL_MIN)`
+    //
+    // Kept verbatim rather than deleted, because the reversal is the point: that WAS the
+    // shipped rule, it was recorded as a choice parked with Uri, and he answered it on
+    // 2026-08-11 — *"AI player is currently only for testing the game. Later on when real
+    // PvP occurs each player has it stats based on the level if their brawler."* The AI
+    // opponent is a TEST HARNESS, so `ENEMY_MAX_HP` is a bot-opponent constant and above two
+    // seats no slot may be dialled by its index. A test that still demanded the old ladder
+    // would have failed for exactly the right reason and been "fixed" by re-reading it.
+    //
+    // ⚠️ `controller` is deliberately still checked the old way: it was never part of the
+    // dial. It says who supplies the input, and slot 0 is still the local human seat.
     const six = createMatch(makeArena({ width: 3000, height: 3000, maxSafeRadius: 4000 }), [
       { characterId: 'hamburger' },
       { characterId: 'donut' },
@@ -4437,16 +4640,78 @@ console.log('\n28. The cap off: per-slot input, a fighter list, and the split ta
       { characterId: 'soup', spawn: { x: 2800, y: 2800 } },
       { characterId: 'sushi', spawn: { x: 1500, y: 200 } },
     ]);
-    check('slot 0 gets the PLAYER dial and every slot above it the ENEMY dial (DECISIONS §49c)',
+    check('above two seats NO slot is dialled by its index — one flat body (DECISIONS §49c)',
+      six.fighters.every((f) => f.size === PLAYER_SIZE && f.hitRadius === HIT_RADIUS_VS_PLAYER),
+      six.fighters.map((f) => `${f.id}:${f.size}/${f.hitRadius}`).join(' '));
+    check('…and slot 0 is still the local human seat while every other seat is a bot',
       six.fighters[0].controller === 'human'
-      && six.fighters[0].size === PLAYER_SIZE && six.fighters[0].hitRadius === HIT_RADIUS_VS_PLAYER
-      && six.fighters.slice(1).every((f) => f.controller === 'ai'
-        && f.size === ENEMY_SIZE && f.hitRadius === HIT_RADIUS_VS_ENEMY),
-      six.fighters.map((f) => `${f.id}:${f.controller}:${f.size}`).join(' '));
-    check('…and the pools follow the same seat dial, through `maxHpFor` and nothing else',
+      && six.fighters.slice(1).every((f) => f.controller === 'ai'),
+      six.fighters.map((f) => `${f.id}:${f.controller}`).join(' '));
+    check('…and every pool comes from PLAYER_MAX_HP through `maxHpFor`, character card and level only',
       six.fighters[0].maxHp === maxHpFor('hamburger', PLAYER_MAX_HP, LEVEL_MIN)
-      && six.fighters[1].maxHp === maxHpFor('donut', ENEMY_MAX_HP, LEVEL_MIN)
-      && six.fighters[5].maxHp === maxHpFor('sushi', ENEMY_MAX_HP, LEVEL_MIN));
+      && six.fighters[1].maxHp === maxHpFor('donut', PLAYER_MAX_HP, LEVEL_MIN)
+      && six.fighters[5].maxHp === maxHpFor('sushi', PLAYER_MAX_HP, LEVEL_MIN));
+    // KNOWN-BAD: the row above passes just as well if `maxHpFor` collapsed to a constant, or
+    // if the two role bases happened to be equal. Both are ruled out here, so "flat" is a
+    // measured claim about the seats and not about the arithmetic.
+    check('KNOWN-BAD: the two role bases DIFFER, so "every seat on PLAYER_MAX_HP" is not vacuous',
+      PLAYER_MAX_HP !== ENEMY_MAX_HP
+      && maxHpFor('donut', PLAYER_MAX_HP, LEVEL_MIN) !== maxHpFor('donut', ENEMY_MAX_HP, LEVEL_MIN),
+      `${PLAYER_MAX_HP}/${ENEMY_MAX_HP}`);
+    check('…and the flat pools are still PER-CHARACTER, not one number for the table',
+      new Set(six.fighters.map((f) => f.maxHp)).size > 1,
+      six.fighters.map((f) => `${f.characterId}:${f.maxHp}`).join(' '));
+    // …and LEVEL is what separates two seats now, which is the whole of Uri's answer.
+    {
+      const levelled = createMatch(makeArena({ width: 3000, height: 3000, maxSafeRadius: 4000 }), [
+        { characterId: 'donut', level: LEVEL_MIN },
+        { characterId: 'donut', level: LEVEL_MAX },
+        { characterId: 'donut', level: LEVEL_MAX, spawn: { x: 2800, y: 200 } },
+      ]);
+      check('…and LEVEL is the ONLY thing that separates two seats on the same character',
+        levelled.fighters[0].maxHp === maxHpFor('donut', PLAYER_MAX_HP, LEVEL_MIN)
+        && levelled.fighters[1].maxHp === maxHpFor('donut', PLAYER_MAX_HP, LEVEL_MAX)
+        && levelled.fighters[1].maxHp === levelled.fighters[2].maxHp
+        && levelled.fighters[1].damageMul === levelled.fighters[2].damageMul
+        && levelled.fighters[1].maxHp > levelled.fighters[0].maxHp,
+        levelled.fighters.map((f) => `${f.id}:L${f.level}:${f.maxHp}:x${f.damageMul}`).join(' '));
+    }
+    // ── AND THE DUEL KEEPS THE BOT DIAL, UNCHANGED. AUTHORISED DEVIATION #9 STANDS ──
+    // This is the other half of the same rule and the half `--bitid` rests on: at exactly
+    // two seats slot 1 IS the bot the difficulty is dialled against, so `ENEMY_MAX_HP`,
+    // `ENEMY_SIZE` and `HIT_RADIUS_VS_ENEMY` still apply there and only there.
+    {
+      const duel = createMatch(makeArena(), 'hamburger', 'donut');
+      check('the DUEL keeps the bot-opponent dial on slot 1 — ENEMY_MAX_HP is not reversed',
+        duel.fighters[0].maxHp === maxHpFor('hamburger', PLAYER_MAX_HP, LEVEL_MIN)
+        && duel.fighters[1].maxHp === maxHpFor('donut', ENEMY_MAX_HP, LEVEL_MIN)
+        && duel.fighters[1].hitRadius === HIT_RADIUS_VS_ENEMY
+        && duel.fighters[1].size === ENEMY_SIZE,
+        `${duel.fighters[0].maxHp}/${duel.fighters[1].maxHp}`);
+      // The gate is the SEAT COUNT, not the slot index: the same character in the same slot
+      // gets a different pool at two seats and at three. Without this row the two claims
+      // above could both hold while the implementation keyed on something else entirely.
+      const trio = createMatch(makeArena({ width: 3000, height: 3000, maxSafeRadius: 4000 }), [
+        { characterId: 'hamburger' },
+        { characterId: 'donut' },
+        { characterId: 'pizza', spawn: { x: 2800, y: 200 } },
+      ]);
+      check('…and the gate is the SEAT COUNT: slot 1 is 90-based at two seats and 100-based at three',
+        trio.fighters[1].maxHp === maxHpFor('donut', PLAYER_MAX_HP, LEVEL_MIN)
+        && trio.fighters[1].maxHp !== duel.fighters[1].maxHp
+        && trio.fighters[1].hitRadius === HIT_RADIUS_VS_PLAYER,
+        `duel ${duel.fighters[1].maxHp} vs trio ${trio.fighters[1].maxHp}`);
+      // An explicit override still wins at every seat count — that is how an INSTRUMENT
+      // keeps a 100/90 split above two seats if its own question needs one.
+      const forced = createMatch(makeArena({ width: 3000, height: 3000, maxSafeRadius: 4000 }), [
+        { characterId: 'hamburger' },
+        { characterId: 'donut', maxHp: maxHpFor('donut', ENEMY_MAX_HP, LEVEL_MIN), hitRadius: HIT_RADIUS_VS_ENEMY },
+        { characterId: 'pizza', spawn: { x: 2800, y: 200 } },
+      ]);
+      check('…and an explicit maxHp/hitRadius still overrides the flat default above two seats',
+        forced.fighters[1].maxHp === maxHpFor('donut', ENEMY_MAX_HP, LEVEL_MIN)
+        && forced.fighters[1].hitRadius === HIT_RADIUS_VS_ENEMY);
+    }
     check('…and slots 0/1 keep the literal +x/-x facing the two-seat form always used',
       six.fighters[0].facing.x === 1 && six.fighters[0].facing.y === 0
       && six.fighters[1].facing.x === -1 && six.fighters[1].facing.y === 0);

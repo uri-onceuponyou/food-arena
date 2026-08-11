@@ -239,6 +239,29 @@ export interface Fighter {
   facing: Vec2;
   status: StatusTimers;
   alive: boolean;
+  /**
+   * HOW MANY TIMES THIS FIGHTER HAS BEEN KNOCKED OUT THIS MATCH — `sim.ts:resolveTimeout`'s
+   * rung 3, and its only reader.
+   *
+   * `DECISIONS §49a`, answered by Uri 2026-08-11: *"Fewest deaths, then lower slot"*. The
+   * tiebreak needed a quantity that belongs to the FIGHTER rather than to `createMatch`'s
+   * argument order, and the sim did not track one.
+   *
+   * ⚠️ **A STORED COUNTER, NOT `alive ? 0 : 1`, AND THE DIFFERENCE IS THE WHOLE POINT.**
+   * With no respawn anywhere in the sim this field is 0 or 1 and `deaths === 1` iff
+   * `hp === 0` — so today a derivation would compute the identical number, and rung 3 is
+   * inert because rung 1 has already sorted every corpse below every survivor. The counter
+   * exists because it is the shape that stays CORRECT when respawns land: a derived
+   * `alive ? 0 : 1` would silently reset to 0 the moment a respawn set `alive = true`, and
+   * "fewest deaths" would quietly become "who is standing right now" with no compile error
+   * and no test failure. Recording the count is cheap; re-deriving it later is not.
+   *
+   * Written at exactly one place — `combat.ts:applyDamage`, beside `alive = false`, which
+   * is the sim's only writer of `alive` and returns early for an already-dead target, so
+   * the counter cannot double-count a corpse. `resolveTimeout` never writes it: a timeout
+   * is not a knockout.
+   */
+  deaths: number;
   /** Per-weapon cooldown tracking. Index-aligned with CHARACTERS[characterId].weapons. */
   lastUsed: number[];
   /** Per-hazard damage-tick accumulator. Index-aligned with arena.hazards (sparse; grows lazily). */
@@ -376,6 +399,7 @@ export function createFighter(spec: FighterSpec): Fighter {
     facing: { x: initialFacing.x, y: initialFacing.y },
     status: { slowedUntil: -Infinity, stunnedUntil: -Infinity },
     alive: true,
+    deaths: 0,
     lastUsed: new Array(weaponCount).fill(-Infinity),
     hazardTimers: [],
     fogTimer: 0,

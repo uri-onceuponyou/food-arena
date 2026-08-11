@@ -156,7 +156,7 @@ export interface MatchLevels {
  * pass `PLAYER_SIZE` into it (they are adjacent plain numbers; see `FighterSpec`'s own note
  * on why it stopped being positional).
  *
- * ── 🚨 THE DEFAULTS ARE A BALANCE DECISION ABOVE TWO FIGHTERS, AND IT IS PARKED ──
+ * ── 🚨 THE DEFAULTS: A BOT-OPPONENT DIAL AT TWO SEATS, FLAT ABOVE (DECISIONS §49c) ──
  *
  * At N=2 the defaults reproduce the legacy 3-argument form EXACTLY — slot 0 gets the PLAYER
  * dial (`PLAYER_MAX_HP`, `PLAYER_SIZE`, `HIT_RADIUS_VS_PLAYER`, `arena.playerSpawn`, facing
@@ -164,14 +164,23 @@ export interface MatchLevels {
  * is implemented BY calling this one, and `--bitid` compares the result against `cdcdd65`
  * tick for tick.
  *
- * Above two, **every slot from 1 up gets the ENEMY dial**, and that is the smallest rule
- * that reduces to today — but it is a CHOICE, not a derivation: `ENEMY_MAX_HP` is 90 against
- * `PLAYER_MAX_HP`'s 100 (`rules.ts` AUTHORISED DEVIATION #9), so a 6-fighter free-for-all
- * built this way seats one 100 HP fighter against five 90 HP ones. In a 1v1 that asymmetry
- * IS Uri's difficulty dial and it is pointed the right way; in a brawl it is a standing
- * advantage to seat 0, which is the same shape as the timeout tiebreak's rung 3
- * (`DECISIONS §49a`). **Parked for Uri as §49c — do not tune it here, and `rules.ts` is not
- * this file set's to tune anyway.** A caller that disagrees passes `maxHp` explicitly.
+ * ⚠️ **THIS BLOCK USED TO SAY**: *"Above two, every slot from 1 up gets the ENEMY dial, and
+ * that is the smallest rule that reduces to today — but it is a CHOICE, not a derivation…
+ * in a brawl it is a standing advantage to seat 0. **Parked for Uri as §49c.**"* It was
+ * answered on 2026-08-11 and the answer is not one of the options it offered:
+ *
+ *   > *"AI player is currently only for testing the game. Later on when real PvP occurs
+ *   > each player has it stats based on the level if their brawler"*
+ *
+ * So **above two fighters every slot gets the SAME dial** and the only things that separate
+ * two fighters are `Fighter.level` and the character's card. `ENEMY_MAX_HP` is not a
+ * balance dial for the shipped game at all — it is the difficulty dial for a BOT OPPONENT,
+ * which exists only in the two-seat duel and in the measuring instruments. Its VALUE is
+ * untouched (AUTHORISED DEVIATION #9 stands); its SCOPE is what moved. See
+ * `createMatchFromList` for the one line that implements it.
+ *
+ * A caller that disagrees still passes `maxHp` / `size` / `hitRadius` explicitly — which is
+ * how an INSTRUMENT keeps a 100/90 split above two seats if it wants one.
  */
 export interface FighterConfig {
   characterId: CharacterId;
@@ -194,11 +203,11 @@ export interface FighterConfig {
   spawn?: Vec2;
   /** Default: +x for slot 0, -x for slot 1 (the legacy pair), and "look at `arena.center`" above that. */
   facing?: Vec2;
-  /** Default: `maxHpFor(characterId, <seat pool>, level)`. See the balance note above. */
+  /** Default: `maxHpFor(characterId, <seat pool>, level)`. See the dial note above. */
   maxHp?: number;
-  /** Collision AABB. Default `PLAYER_SIZE` for slot 0, `ENEMY_SIZE` above it. */
+  /** Collision AABB. Default `ENEMY_SIZE` for the DUEL's slot 1, `PLAYER_SIZE` everywhere else. */
   size?: number;
-  /** Incoming-projectile hit radius. Default `HIT_RADIUS_VS_PLAYER` for slot 0, `..._VS_ENEMY` above it. */
+  /** Incoming-projectile hit radius. Default `HIT_RADIUS_VS_ENEMY` for the DUEL's slot 1, `..._VS_PLAYER` everywhere else. */
   hitRadius?: number;
 }
 
@@ -270,18 +279,64 @@ function createMatchFromList(arena: ArenaDefinition, configs: readonly FighterCo
   // `damageMul` from the clamped one. The legacy path clamped before calling `maxHpFor` for
   // exactly this reason; the list path has to as well or the compat overload stops being
   // one. `clampLevel` is idempotent, so the second application is free.
+  //
+  // ── 🚨 THE BOT-OPPONENT DIAL, AND WHY IT STOPS AT TWO SEATS (DECISIONS §49c) ──
+  //
+  // ⚠️ **THIS USED TO READ `seatIsPlayer = id === 0` AND DIAL EVERY SLOT ABOVE 0 AS "THE
+  // ENEMY", AT EVERY MATCH SIZE.** That was the smallest rule that reduced to the duel, and
+  // it was recorded as a CHOICE parked with Uri rather than a derivation. Uri answered it
+  // on 2026-08-11 and the answer reframes the constant rather than picking an option:
+  //
+  //   > *"AI player is currently only for testing the game. Later on when real PvP occurs
+  //   > each player has it stats based on the level if their brawler"*
+  //
+  // The AI opponent is a **test harness, not a design target**. So `ENEMY_MAX_HP` is not
+  // the shipped game's balance dial at all — it is the difficulty dial **for a bot
+  // opponent**, which is a two-seat single-player idea, and above two seats there is no
+  // "the enemy" for it to describe. `isBotDuel` is therefore the ONLY gate on it:
+  //
+  //   * at two seats, slot 1 is the bot the duel is dialled against and keeps
+  //     `ENEMY_MAX_HP` / `ENEMY_SIZE` / `HIT_RADIUS_VS_ENEMY` **unchanged** — AUTHORISED
+  //     DEVIATION #9 (`ENEMY_MAX_HP` 150 -> 90) is NOT reversed by this, and this line is
+  //     what keeps `--bitid` at N=2 exact;
+  //   * above two seats **no slot gets a different dial because of its index**. Every
+  //     fighter is built from the same role base, and the only things that separate two
+  //     fighters are `Fighter.level` and the character's own card — which is what Uri's
+  //     sentence says the shipped game is.
+  //
+  // ⛔ "Keep the seat dial" is RETIRED PERMANENTLY. Do not re-offer or re-derive it.
+  //
+  // ⚠️ The flat base is `PLAYER_MAX_HP`, not an average of the two, because 100 is the
+  // number every HUD bar, every damage figure and every "a 100 HP player" in this repo is
+  // written against (`rules.ts` says so at the constant). `PLAYER_SIZE === ENEMY_SIZE`
+  // already, so the size dial moves nothing today — and `DECISIONS §52b` measured what it
+  // WOULD cost if it ever did: `movement.ts:navGrid` keys its passability cache on the
+  // requested size, so alternating sizes between consecutive seats produced **1,114 full
+  // grid rebuilds over 680 playing ticks against 1**. Flattening the seats removes that
+  // trap rather than merely not springing it.
+  //
+  // ⚠️ `controller` is NOT part of this and stays keyed on the slot: it says who supplies
+  // the inputs, not what the fighter is made of, and slot 0 is still the local human seat.
+  // The remaining bot asymmetry in the sim lives there and is correct under this same
+  // answer — `ai.ts` moves at `AI_CHASE_SPEED` (0.07) where a human moves at `PLAYER_SPEED`
+  // (0.12), a 1.71x gap that applies to whoever is driven by a bot at any match size, and
+  // vanishes on its own when every seat is human.
+  const isBotDuel = configs.length === MIN_FIGHTERS;
   const fighters: Fighter[] = configs.map((cfg, id) => {
     const lvl = clampLevel(cfg.level ?? LEVEL_MIN);
-    const seatIsPlayer = id === 0;
+    const seatIsLocal = id === 0;
+    // The seat this match's difficulty is dialled against: the duel's bot opponent, and
+    // nothing else, ever. `false` for every seat of a 3..6 fighter brawl.
+    const seatIsBotOpponent = isBotDuel && !seatIsLocal;
     const spawn = cfg.spawn ?? defaultSpawn(arena, id);
     return createFighter({
       id,
-      controller: cfg.controller ?? (seatIsPlayer ? 'human' : 'ai'),
+      controller: cfg.controller ?? (seatIsLocal ? 'human' : 'ai'),
       characterId: cfg.characterId,
       spawn,
-      maxHp: cfg.maxHp ?? maxHpFor(cfg.characterId, seatIsPlayer ? PLAYER_MAX_HP : ENEMY_MAX_HP, lvl),
-      size: cfg.size ?? (seatIsPlayer ? PLAYER_SIZE : ENEMY_SIZE),
-      hitRadius: cfg.hitRadius ?? (seatIsPlayer ? HIT_RADIUS_VS_PLAYER : HIT_RADIUS_VS_ENEMY),
+      maxHp: cfg.maxHp ?? maxHpFor(cfg.characterId, seatIsBotOpponent ? ENEMY_MAX_HP : PLAYER_MAX_HP, lvl),
+      size: cfg.size ?? (seatIsBotOpponent ? ENEMY_SIZE : PLAYER_SIZE),
+      hitRadius: cfg.hitRadius ?? (seatIsBotOpponent ? HIT_RADIUS_VS_ENEMY : HIT_RADIUS_VS_PLAYER),
       facing: cfg.facing ?? defaultFacing(arena, id, spawn),
       level: lvl,
     });
@@ -523,7 +578,33 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
  *  2. ZONE CONTROL — nearer the ring's centre wins. A real, earned signal (holding the
  *     middle is contested ground), deterministic, and it is what separates two
  *     fighters who are level on HP.
- *  3. ⚠️ THE LOWER SLOT. **THIS RUNG CHANGED MEANING WITHOUT CHANGING VALUE.**
+ *  3. ⚠️ **FEWEST DEATHS — `DECISIONS §49a`, ANSWERED BY URI 2026-08-11.** ⚠️ THIS RUNG
+ *     USED TO BE "THE LOWER SLOT", AND THAT WORDING IS KEPT IMMEDIATELY BELOW because the
+ *     rung it describes did not disappear — it MOVED DOWN to rung 4 and still decides
+ *     every case this one cannot.
+ *
+ *     Uri's answer, verbatim: *"Fewest deaths, then lower slot"*. So the first thing that
+ *     separates two fighters who are level on pool AND on ground is **how many times each
+ *     has been knocked out** — an earned signal in exactly the sense rung 1 demands, and
+ *     the LAST rung that is a property of the FIGHTER at all: everything below it is
+ *     `createMatch`'s argument order.
+ *
+ *     🚨 **AND IT IS INERT TODAY, PROVABLY, AT EVERY N — MEASURE IT DO NOT ASSUME IT.**
+ *     `Fighter.deaths` is incremented at the single `combat.ts:applyDamage` choke point
+ *     that is also the only writer of `alive`, and that function returns early for a dead
+ *     target. There is **no respawn**, so `deaths` is 0 or 1 and `deaths === 1` iff
+ *     `hp === 0`. Rung 1 already ranks every `hp === 0` fighter last (fraction 0 against
+ *     any survivor's > 0), so two fighters that reach rung 3 are either both alive
+ *     (0 == 0) or both dead (1 == 1) and this rung ties. The one exception is the
+ *     degenerate `maxHp <= 0` seat, where the `f.maxHp > 0 ?` guard hands a LIVING fighter
+ *     fraction 0 and it can meet a corpse here — and there the rung fires and is right.
+ *     => **This changes no reachable outcome at N=2** (a knockout ends a duel before the
+ *     clock can, so a two-seat timeout has two living fighters and two zeroes), which is
+ *     what keeps the `--bitid` acceptance intact. It is a rung that becomes LOAD-BEARING
+ *     the day respawns exist, and a counter is the only shape that survives that day; a
+ *     `f.alive ? 0 : 1` derivation would have been a restatement of rung 1 forever.
+ *  4. ⚠️ THE LOWER SLOT. **THIS RUNG CHANGED MEANING WITHOUT CHANGING VALUE** (and has
+ *     since changed NUMBER without changing either — it was rung 3 until §49a landed).
  *     It used to read "THE HUMAN" — two fighters identical on both measures are
  *     indistinguishable by every quantity the sim has, so the tie went to the player,
  *     deliberately the opposite of the behaviour it replaced (where the tie went to the
@@ -533,21 +614,16 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
  *     At N>2 THEY ARE NOT THE SAME RULE. "The lower slot" hands a standing, permanent
  *     advantage to whoever `createMatch` happened to list first — which is exactly the
  *     kind of unearned edge rung 1 exists to refuse: *"most HP left" hands whoever owns the
- *     bigger pool a head start on a criterion it did nothing to earn.* It is recorded here
- *     rather than fixed because ANY replacement changes the N=2 answer or invents a
- *     tiebreak the sim has no quantity for, and this change is required to be
- *     bit-identical. => **This is the one line in `sim.ts` where slot advantage re-enters
- *     at N>2, and it needs a decision before the cap is raised.**
+ *     bigger pool a head start on a criterion it did nothing to earn.*
  *
- *     🚨 **THE CAP IS NOW RAISED AND THIS IS STILL UNANSWERED — DELIBERATELY.** It is
- *     `DECISIONS §49a`, parked with Uri, and it stays in force UNCHANGED until he answers:
- *     the alternatives (a genuine draw, fewest deaths, most damage dealt) each either move
- *     the N=2 answer, invent a quantity the sim does not track, or reach into the economy —
- *     `GameEvent.match-ended` requires a non-null winner and the payout table has no draw
- *     row. Nothing in `src/` may seat more than two fighters until it is answered, and today
- *     nothing does: `createMatch`'s legacy form still builds exactly two, and the list form
- *     has no caller outside the instruments. `sim.test.mjs` §27(c) constructs all three
- *     rungs by hand, so whatever Uri picks lands against a pinned baseline.
+ *     ⚠️ **IT IS STILL THE LAST RUNG AND IT IS STILL THAT UNEARNED EDGE.** §49a did not
+ *     remove slot advantage; it put one earned quantity in front of it. The paragraph this
+ *     replaces said the rung *"needs a decision before the cap is raised"* and that
+ *     *"ANY replacement changes the N=2 answer or invents a tiebreak the sim has no
+ *     quantity for"* — the second half turned out to be the interesting one, and the answer
+ *     was to ADD the quantity (`Fighter.deaths`) rather than to replace the rung. Kept as
+ *     the floor because the comparator must be TOTAL: `id` is unique, so this line is what
+ *     makes the sort independent of `Array.prototype.sort`'s stability.
  *
  * ── AND IT IS A RANKED SORT NOW, NOT A TWO-WAY COMPARISON ───────────────────
  *
@@ -560,7 +636,10 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
  *
  * Note there is no `death` event and both fighters stay `alive` — a timeout is not a
  * knockout, and consumers that read `state.winner` (HUD game-over card, trophy
- * recording, audio director) all key off `match-ended`, which does fire.
+ * recording, audio director) all key off `match-ended`, which does fire. It follows that
+ * this function never increments `deaths` either: it READS the rung it added and writes
+ * nothing, so losing on the whistle is not a knockout for the purposes of the next match
+ * any more than it is for this one.
  */
 function resolveTimeout(state: MatchState, events: GameEvent[]): void {
   const { arena } = state;
@@ -574,7 +653,8 @@ function resolveTimeout(state: MatchState, events: GameEvent[]): void {
     const da = toCentre(a);
     const db = toCentre(b);
     if (da !== db) return da - db;              // rung 2: nearer the ring's centre
-    return a.id - b.id;                         // rung 3: the lower slot — see above
+    if (a.deaths !== b.deaths) return a.deaths - b.deaths; // rung 3: FEWEST DEATHS (§49a)
+    return a.id - b.id;                         // rung 4: the lower slot — see above
   });
 
   const winner = ranked[0];

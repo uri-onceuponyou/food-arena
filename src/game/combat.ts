@@ -161,6 +161,23 @@ export function applyDamage(
   if (target.hp === 0) {
     target.alive = false;
     events.push({ type: 'death', fighterRole: target.role, fighterId: target.id });
+    // `DECISIONS §49a` — the timeout tiebreak's rung 3 is "fewest deaths", so the count has
+    // to exist. It is incremented HERE and nowhere else, for the reason this whole function
+    // exists: `applyDamage` is the single choke point for HP reduction, its
+    // `if (!target.alive) return` guard makes a second entry on a corpse impossible, and a
+    // counter maintained anywhere else would be a second statement of "this fighter went
+    // down". It sits immediately under the `death` event it must always agree with.
+    //
+    // 🚨 **AND IT IS BELOW THAT EVENT RATHER THAN BESIDE `alive = false` FOR A REASON THAT
+    // IS NOT STYLE.** `conceal_lab.mjs --selftest`'s event-ORDER known-bad anchors on the
+    // literal three lines `if (target.hp === 0) { / target.alive = false; / events.push({
+    // type: 'death',` and rewrites them; its second edit then references a `const` the first
+    // one declares. Landing anything — including a comment — between those lines makes edit
+    // 1 miss while edit 2 still applies, and the patched sim dies with a ReferenceError
+    // instead of failing that tool's own `applied[0]` assertion cleanly. Measured, not
+    // predicted: this line was written beside `alive = false` first and `--selftest` crashed.
+    // **Do not move it back up, and do not put a comment between those three lines.**
+    target.deaths++;
     if (state.phase === 'playing') {
       // ── ⚠️ A KNOCKOUT IS NO LONGER THE END OF THE MATCH. IT USED TO SAY: ─────
       //
