@@ -65,8 +65,14 @@
  */
 
 import { CHARACTERS, MIN_SAFE_RADIUS, REGEN_AMOUNT, type CharacterId, type Weapon } from '../game/rules';
-import type { GameEvent, MatchState, FighterRole } from '../game/state';
-import { otherRole } from '../game/state';
+import type { Fighter, GameEvent, MatchState, FighterId, FighterRole } from '../game/state';
+// The presentation-side seat rules, stated once for all four consumers of the event
+// stream. ⚠️ `otherRole` is gone from this file — `state[otherRole(ev.targetRole)]` was
+// "whoever is not the victim", which is the attacker only while there are two fighters.
+// `roster.ts` explains why every resolver keeps a role fallback: this file is driven by
+// `tools/audio-probe.mjs`, whose duck-typed states carry NO `fighters` array and whose
+// synthetic `hit-landed` events carry NO `targetId` and NO `attackerId`.
+import { fighterOf, fightersOf, LOCAL_SLOT, slotOf, weaponAttackerOf } from '../game/roster';
 import { Priority, type AudioEngine } from './engine';
 import * as S from './sounds';
 import type { SoundFn, SynthCtx } from './synth';
@@ -187,12 +193,19 @@ const AMBIENCE_PAN_SPREAD = 0.42;
 
 export interface MatchAudioOptions {
   /** Which fighter is the local listener. Always `player` in the shipped game;
-   * parameterised because a spectator or replay view would move it. */
+   * parameterised because a spectator or replay view would move it.
+   *
+   * ⚠️ A SEAT NAME, and therefore only able to name slots 0 and 1. Kept because it is
+   * the published option and `tools/audio-probe.mjs` constructs directors with it; use
+   * `listenerId` to name any other slot. Ignored when `listenerId` is given. */
   listener?: FighterRole;
+  /** Which SLOT is the local listener. `roster.ts:LOCAL_SLOT` by default, which is what
+   * `listener: 'player'` meant and is the only seat the shipped game ever sits in. */
+  listenerId?: FighterId;
 }
 
 export class MatchAudio {
-  private readonly listenerRole: FighterRole;
+  private readonly listenerSlot: number;
   private lastFogSoundAt = -Infinity;
   private lastHealSoundAt = -Infinity;
   /** One-shot latch for the ring reaching `MIN_SAFE_RADIUS`. See `watchZone`. */
@@ -208,15 +221,9 @@ export class MatchAudio {
    * carrying a status hit must be read as LANDED (a fresh fighter is always ready), and
    * `NaN !== anything` gives exactly that with no extra branch.
    */
-  private statusBefore: Record<FighterRole, { stun: number; slow: number }> = {
-    player: { stun: NaN, slow: NaN },
-    enemy: { stun: NaN, slow: NaN },
-  };
+  private statusBefore: { stun: number; slow: number }[] = [];
   /** Consumed once per batch, per target, per effect. See `statusWrittenThisFrame`. */
-  private statusWriterUnclaimed: Record<FighterRole, { stun: boolean; slow: boolean }> = {
-    player: { stun: false, slow: false },
-    enemy: { stun: false, slow: false },
-  };
+  private statusWriterUnclaimed: { stun: boolean; slow: boolean }[] = [];
   /** False when the `MatchState` handed in does not carry `status` at all — see
    * `openStatusWindow`. Nothing is voiced as a refusal while this is false. */
   private statusTrackable = false;
@@ -232,7 +239,7 @@ export class MatchAudio {
     private readonly engine: AudioEngine,
     opts: MatchAudioOptions = {},
   ) {
-    this.listenerRole = opts.listener ?? 'player';
+    this.listenerSlot = opts.listenerId ?? (opts.listener === 'enemy' ? 1 : LOCAL_SLOT);
   }
 
   /**
@@ -292,8 +299,11 @@ export class MatchAudio {
     // correct by coincidence, and per-match state that survives a match is exactly the
     // kind of thing a later change silently starts depending on. Asserted rather than
     // assumed: `--mode dispatch` drives a second match through a `reset()` director.
-    this.statusBefore = { player: { stun: NaN, slow: NaN }, enemy: { stun: NaN, slow: NaN } };
-    this.statusWriterUnclaimed = { player: { stun: false, slow: false }, enemy: { stun: false, slow: false } };
+    // Emptied rather than refilled with two seats: `openStatusWindow` sizes both arrays
+    // from the roster it is handed, so a second match with a different seat count cannot
+    // inherit the first one's length.
+    this.statusBefore = [];
+    this.statusWriterUnclaimed = [];
     this.statusTrackable = false;
     // Both matter for match two. `nextAmbienceAt` is an absolute match time and the
     // clock restarts at zero, so leaving it would suppress the bed for as long as the
@@ -314,7 +324,7 @@ export class MatchAudio {
    * field must therefore mean "cannot tell", never "refused" — `vfx.ts` reaches the
    * same conclusion for its own snapshot: **no signal beats a wrong one.**
    */
-  private static statusTimestamps(f: MatchState['player']): { stun: number; slow: number } | null {
+  private static statusTimestamps(f: Fighter): { stun: number; slow: number } | null {
     const st = (f as { status?: { stunnedUntil?: number; slowedUntil?: number } }).status;
     if (!st || typeof st.stunnedUntil !== 'number' || typeof st.slowedUntil !== 'number') return null;
     return { stun: st.stunnedUntil, slow: st.slowedUntil };
@@ -349,33 +359,37 @@ export class MatchAudio {
    * so the ring pop and the sound can never disagree about a given hit.
    */
   private openStatusWindow(state: MatchState): void {
-    const p = MatchAudio.statusTimestamps(state.player);
-    const e = MatchAudio.statusTimestamps(state.enemy);
-    this.statusTrackable = p !== null && e !== null;
-    if (p === null || e === null) return;
-    const now = { player: p, enemy: e };
-    for (const role of ['player', 'enemy'] as const) {
-      const before = this.statusBefore[role];
-      this.statusWriterUnclaimed[role] = {
-        stun: now[role].stun !== before.stun,
-        slow: now[role].slow !== before.slow,
+    const roster = fightersOf(state);
+    const now = roster.map((f) => MatchAudio.statusTimestamps(f));
+    // ⚠️ EVERY fighter must carry timers, not just the first two. `statusTrackable` is
+    // the "cannot tell" flag the offline probe's duck-typed state depends on, and a
+    // partial roster is exactly the case where a refusal must not be voiced.
+    this.statusTrackable = now.length > 0 && now.every((t) => t !== null);
+    if (!this.statusTrackable) return;
+    for (let slot = 0; slot < now.length; slot++) {
+      const before = this.statusBefore[slot] ?? { stun: NaN, slow: NaN };
+      const cur = now[slot]!;
+      this.statusWriterUnclaimed[slot] = {
+        stun: cur.stun !== before.stun,
+        slow: cur.slow !== before.slow,
       };
     }
   }
 
   /** Carry this batch's timestamps forward to be the next batch's "before". */
   private closeStatusWindow(state: MatchState): void {
-    for (const role of ['player', 'enemy'] as const) {
-      const ts = MatchAudio.statusTimestamps(state[role]);
-      if (ts) this.statusBefore[role] = ts;
-    }
+    fightersOf(state).forEach((f, slot) => {
+      const ts = MatchAudio.statusTimestamps(f);
+      if (ts) this.statusBefore[slot] = ts;
+    });
   }
 
   /** True when this event's status was discarded by the grace rule. */
-  private wasStatusRefused(role: FighterRole, effect: 'stun' | 'slow'): boolean {
+  private wasStatusRefused(slot: number, effect: 'stun' | 'slow'): boolean {
     if (!this.statusTrackable) return false;
-    if (this.statusWriterUnclaimed[role][effect]) {
-      this.statusWriterUnclaimed[role][effect] = false;
+    const claim = this.statusWriterUnclaimed[slot];
+    if (claim?.[effect]) {
+      claim[effect] = false;
       return false;
     }
     return true;
@@ -465,7 +479,18 @@ export class MatchAudio {
     this.nextAmbienceAt = state.elapsed + S.AMBIENCE_PERIOD_S * 1000;
     const walk = (this.ambienceChunk * AMBIENCE_PAN_STRIDE) % 1;
     this.ambienceChunk++;
-    const gap = Math.hypot(state.player.x - state.enemy.x, state.player.y - state.enemy.y);
+    // ⚠️ WAS `hypot(player - enemy)` — the distance between slots 0 and 1, which at six
+    // fighters would leave the bed calm while four of them brawled in a corner. The
+    // question the bed is asking is "is anybody about to be in a fight near anybody",
+    // so it is the CLOSEST PAIR. Identical at two seats: there is exactly one pair.
+    const roster = fightersOf(state);
+    let gap = Infinity;
+    for (let i = 0; i < roster.length; i++) {
+      for (let j = i + 1; j < roster.length; j++) {
+        const d = Math.hypot(roster[i].x - roster[j].x, roster[i].y - roster[j].y);
+        if (d < gap) gap = d;
+      }
+    }
     const fighting = state.elapsed - this.lastCombatAt < AMBIENCE_CALM_MS || gap < AMBIENCE_ENGAGE_WU;
     this.engine.play(S.kitchenBed(), {
       gain: fighting ? AMBIENCE_GAIN_FIGHT : AMBIENCE_GAIN_CALM,
@@ -501,8 +526,15 @@ export class MatchAudio {
         // `=== true` rather than a truthiness test on purpose, so a partial/duck-typed
         // state (the offline probe builds one) takes the knockout path rather than
         // silently reclassifying every ending.
-        const timeout = state.player.alive === true && state.enemy.alive === true;
-        const won = ev.winner === this.listenerRole;
+        // ⚠️ WAS `state.player.alive === true && state.enemy.alive === true`. `every` is
+        // the same statement at two seats and the right one above two — a six-way that
+        // reaches the clock with four survivors is a timeout, and the two-seat form only
+        // ever asked about slots 0 and 1. The `=== true` per fighter is unchanged and is
+        // still load-bearing: a duck-typed state with no `alive` field must take the
+        // KNOCKOUT path rather than silently reclassifying every ending.
+        const roster = fightersOf(state);
+        const timeout = roster.length > 0 && roster.every((f) => f.alive === true);
+        const won = slotOf(ev.winnerId, ev.winner) === this.listenerSlot;
         this.engine.play(timeout ? S.matchEndTimeout(won) : S.matchEnd(won), {
           priority: Priority.Critical,
         });
@@ -514,7 +546,7 @@ export class MatchAudio {
         // several hundred ms to arrive, and a bed that only ducks once something lands
         // is a bed sitting at full level underneath the shot that caused it.
         this.lastCombatAt = state.elapsed;
-        this.playCast(ev.fighterRole, ev.weaponKey, state);
+        this.playCast(fighterOf(state, ev.fighterId, ev.fighterRole), ev.weaponKey, state);
         break;
 
       case 'hit-landed':
@@ -527,19 +559,19 @@ export class MatchAudio {
         // (Hamburger's 25 HP Onion Ring) always plays.
         if (ev.amount <= REGEN_AMOUNT && state.elapsed - this.lastHealSoundAt < HEAL_MIN_INTERVAL_MS) break;
         this.lastHealSoundAt = state.elapsed;
-        const f = state[ev.fighterRole];
+        const f = fighterOf(state, ev.fighterId, ev.fighterRole);
         this.engine.play(S.heal(), { ...this.place(f.x, f.y, state), key: 'heal' });
         break;
       }
 
       case 'death': {
-        const f = state[ev.fighterRole];
+        const f = fighterOf(state, ev.fighterId, ev.fighterRole);
         this.engine.play(S.death(), {
           ...this.place(f.x, f.y, state),
           priority: Priority.Critical,
           // A death is the loudest thing that can happen to you; give the local
           // player's own death full level regardless of where they are standing.
-          gain: ev.fighterRole === this.listenerRole ? 1 : undefined,
+          gain: slotOf(ev.fighterId, ev.fighterRole) === this.listenerSlot ? 1 : undefined,
         });
         break;
       }
@@ -562,8 +594,7 @@ export class MatchAudio {
     }
   }
 
-  private playCast(role: FighterRole, weaponKey: string, state: MatchState): void {
-    const fighter = state[role];
+  private playCast(fighter: Fighter, weaponKey: string, state: MatchState): void {
     const weapon = CHARACTERS[fighter.characterId].weapons.find((w) => w.key === weaponKey);
     if (!weapon) return;
 
@@ -594,7 +625,8 @@ export class MatchAudio {
     // consumed in event order to stay attributable: today only `kind: 'weapon'` ever
     // carries an effect (trail, hazard and fog all pass `null` to `applyDamage`), but a
     // future stunning hazard must not be able to hand its claim to the next weapon hit.
-    const shrugged = ev.effect === 'stun' && this.wasStatusRefused(ev.targetRole, 'stun');
+    const targetSlot = slotOf(ev.targetId, ev.targetRole);
+    const shrugged = ev.effect === 'stun' && this.wasStatusRefused(targetSlot, 'stun');
 
     // Ambient damage sources are categorically not weapon hits — `match.ts` already
     // treats fog this way visually (no burst, no shake, a violet "ZONE" number) and
@@ -620,7 +652,9 @@ export class MatchAudio {
     // discards the `ev.source` discriminant narrowing inside a closure, so reading
     // it there would not compile.
     const weaponKey = ev.source.weaponKey;
-    const attacker = state[otherRole(ev.targetRole)];
+    // ⚠️ WAS `state[otherRole(ev.targetRole)]`. See the import block: the id is the
+    // attacker, "not the victim" only happens to be the attacker at two seats.
+    const attacker = weaponAttackerOf(state, ev.source, ev.targetRole);
     const weapon = CHARACTERS[attacker.characterId].weapons.find((w) => w.key === weaponKey);
     const bespoke = weapon ? getWeaponSfx(attacker.characterId, weapon.key)?.impact : undefined;
     const sound =
@@ -635,8 +669,8 @@ export class MatchAudio {
 
     // The extra "you are being hit" layer, local player only. See `sounds.ts` ->
     // `hurt()`: this is the audio counterpart of `match.ts`'s `targetBias` on shake.
-    if (ev.targetRole === this.listenerRole) {
-      const target = state[ev.targetRole];
+    if (targetSlot === this.listenerSlot) {
+      const target = fighterOf(state, ev.targetId, ev.targetRole);
       this.engine.play(S.hurt(target.hp / target.maxHp), {
         gain: 0.9,
         key: 'hurt',
@@ -680,7 +714,7 @@ export class MatchAudio {
 
   /** Pan + distance gain for a world-unit position, relative to the listener. */
   private place(xWU: number, yWU: number, state: MatchState): { pan: number; gain: number } {
-    const me = state[this.listenerRole];
+    const me = fightersOf(state)[this.listenerSlot] ?? state.player;
     const dx = xWU - me.x;
     const dy = yWU - me.y;
     const pan = Math.max(-1, Math.min(1, dx / PAN_FULL_WU)) * PAN_MAX;

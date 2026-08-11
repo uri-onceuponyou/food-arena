@@ -42,7 +42,10 @@
  */
 
 import * as THREE from 'three';
-import type { FighterRole, MatchState, Projectile, Splat, TrailMark, Vec2 } from './state';
+import type { Fighter, FighterRole, MatchState, Projectile, Splat, TrailMark, Vec2 } from './state';
+// The presentation-side seat rules, stated once for all four consumers of the event
+// stream — see `roster.ts` for why every resolver has a legacy-role fallback.
+import { fighterOf, fightersOf, slotOf } from './roster';
 import { SPLAT_RADIUS, TRAIL } from './rules';
 // The sim's own predicate for "may this status be applied yet", exported by
 // `combat.ts` specifically so this layer can render the shrug-off window without
@@ -99,9 +102,19 @@ declare global {
     /** QA-only per-tick fighter snapshot, refreshed every `sync()` call — lets a
      * Playwright driver steer input off real positions/HP/terrain-slow state instead
      * of guessing from rendered pixels (e.g. to script a player walking into a puddle
-     * while dodging the AI). Never read by game logic. */
-    __vfxDebugFighters?: Record<FighterRole, { x: number; y: number; hp: number; alive: boolean; terrainSlowFactor: number }>;
+     * while dodging the AI). Never read by game logic.
+     *
+     * 🚨 `player` AND `enemy` ARE A PUBLISHED CONTRACT — twenty-two files under `tools/`
+     * read them by name. They are slot 0 and slot 1, which is exactly what `state.ts`
+     * says the aliases they were named after mean. `slots` is the N-fighter form and was
+     * ADDED beside them rather than replacing them; a probe that needs slot 2 and up
+     * reads `slots`, and every existing probe keeps compiling and running unchanged. */
+    __vfxDebugFighters?: Record<FighterRole, VfxFighterSnapshot> & { slots?: VfxFighterSnapshot[] };
   }
+}
+
+interface VfxFighterSnapshot {
+  x: number; y: number; hp: number; alive: boolean; terrainSlowFactor: number;
 }
 
 type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash' | 'coverScuff';
@@ -541,13 +554,34 @@ const GLAZE_VARIANTS = 3;
  * was trusted — including this file's own claim about `splatMat`, which turned out to be
  * stale by the width of the whole defect.
  */
-const TRAIL_COLOR: Record<FighterRole, string> = {
+/**
+ * ⚠️ **A LIST INDEXED BY SLOT, WHERE IT WAS `Record<FighterRole, string>`.** A two-key
+ * record cannot hold a third fighter's trail, and the fallback a missing key produces is
+ * `undefined` handed to `new THREE.Color()`, which is black — a mark that vanishes into
+ * the floor rather than an obviously-wrong one.
+ *
+ * 🚨 **ENTRIES 0 AND 1 ARE THE MEASURED HEXES ABOVE AND MUST NOT MOVE.** Everything the
+ * comment above establishes is about those two values against the floor as it is today.
+ *
+ * 🔴 **ENTRIES 2..5 ARE UNMEASURED AND ARE PARKED WITH URI (`DECISIONS §49e`).** They are
+ * placed in the same L band as the two that were measured (rim luma ~0.72-0.78, high
+ * saturation) and spread around the wheel away from the arena's walkable rose 330-340 —
+ * but the whole point of the block above is that this cannot be settled by reading a hue
+ * wheel, only by ablating against the floor and the cast. Nothing seats more than two
+ * fighters, so no shipped frame contains one of these yet, and they exist so that the
+ * first six-way match draws six distinguishable trails instead of four black ones.
+ */
+const TRAIL_COLOR: readonly string[] = [
   /** hue 352 — 21 degrees off the arena's WALKABLE rose 330-340 AND off Donut's own
    * 331, still unmistakably the pink family the #FF9EC4 damage number belongs to. */
-  player: '#F5475E',
+  '#F5475E',
   /** hue 42, the gold family of the #FFD27A damage number. */
-  enemy: '#F5C147',
-};
+  '#F5C147',
+  '#47C4F5', // hue 197 — cyan
+  '#6BE05A', // hue 112 — green
+  '#B36BF5', // hue 273 — violet
+  '#F58A47', // hue 24  — orange
+];
 /**
  * Splat RIM colour, and this one was assumed rather than measured for a long time.
  * Rule 3 asserts "`splatMat` at luma 0.44 honours that" — against a floor that has
@@ -1347,10 +1381,31 @@ export class VfxLayer {
   // itself. Three variants x two roles plus three splat variants is nine materials,
   // all built once here and disposed in `dispose()`.
   private readonly splatMats = this.glazeTex.map((t) => this.groundMarkMat(SPLAT_COLOR, t));
-  private readonly trailMats: Record<FighterRole, THREE.MeshBasicMaterial[]> = {
-    player: this.glazeTex.map((t) => this.groundMarkMat(TRAIL_COLOR.player, t)),
-    enemy: this.glazeTex.map((t) => this.groundMarkMat(TRAIL_COLOR.enemy, t)),
-  };
+  /**
+   * Trail materials PER SLOT, built on first use rather than up front.
+   *
+   * ⚠️ LAZY IS THE POINT, not an optimisation. Eagerly building `MAX_FIGHTERS x
+   * GLAZE_VARIANTS` = 18 materials would allocate 12 of them for fighters that do not
+   * exist in any shipped match, and this file's own comment above counts the materials it
+   * builds ("Three variants x two roles plus three splat variants is nine materials, all
+   * built once here and disposed in `dispose()`"). Built on demand, a two-fighter match
+   * allocates exactly the six it allocated before and the count in that sentence stays
+   * true. `dispose()` walks whatever exists.
+   */
+  private readonly trailMats: THREE.MeshBasicMaterial[][] = [];
+
+  private trailMatsFor(slot: number): THREE.MeshBasicMaterial[] {
+    let mats = this.trailMats[slot];
+    if (!mats) {
+      // `?? TRAIL_COLOR[0]` rather than a throw: a mark whose owner is off the end of the
+      // palette should draw in a real colour, not crash a frame. Unreachable while
+      // `TRAIL_COLOR.length >= MAX_FIGHTERS`, which `np_nfighter.mjs` asserts.
+      const color = TRAIL_COLOR[slot] ?? TRAIL_COLOR[0];
+      mats = this.glazeTex.map((t) => this.groundMarkMat(color, t));
+      this.trailMats[slot] = mats;
+    }
+    return mats;
+  }
 
   /**
    * One persistent ground-mark material: dark, saturated, textured, alpha-shaped, and
@@ -1386,15 +1441,38 @@ export class VfxLayer {
   /** One shared dashed annulus for both roles' ward bands — see the `WARD_*` block. */
   private readonly wardGeo = buildDashedAnnulusGeometry(WARD_RING_INNER, WARD_RING_OUTER, WARD_DASHES, WARD_DASH_DUTY);
 
-  private readonly statusByRole: Record<FighterRole, StatusVisual>;
+  /**
+   * ONE STATUS TELEGRAPH PER SLOT — slow ring, frost tint, stun stars, ward band.
+   *
+   * ⚠️ **BUILT FOR `MIN_FIGHTERS` IN THE CONSTRUCTOR AND GROWN IN `sync()`**, which is a
+   * deliberately different lifetime from `trailMats` above and the reason is scene-graph
+   * ORDER. Each `StatusVisual` adds six objects to `this.group`, and sibling order is what
+   * three falls back on when its transparent sort finds a tie. The constructor adds the
+   * particle, wedge and ring pools and then these; `sync()` adds the pooled projectile,
+   * splat and trail meshes. Building the first two here keeps that sequence character for
+   * character identical to the two-role version, and growth happens at the TOP of `sync()`
+   * — before any pool runs — so a third fighter's visuals land in the same place in the
+   * order a third role's would have.
+   */
+  private readonly statusBySlot: StatusVisual[] = [];
+  /** Builds one `StatusVisual`, adding its six objects to `this.group`. Assigned in the
+   * constructor because it closes over the shared geometry/texture fields. */
+  private buildStatusVisual!: () => StatusVisual;
+
+  /** Grow the per-slot visual/telemetry arrays to `n` seats. Idempotent, and never
+   * shrinks: a match that ends does not destroy the seats, `clear()` resets them. */
+  private ensureSlots(n: number): void {
+    while (this.statusBySlot.length < n) {
+      this.statusBySlot.push(this.buildStatusVisual());
+      this.slowSplashState.push({ lastX: NaN, lastY: NaN, distAccum: 0 });
+      this.statusSnapshot.push({ x: NaN, y: NaN, stunReady: true, slowReady: true });
+    }
+  }
   /** Per-fighter footstep-distance tracking for puddle splashes (see
    * `PUDDLE_SPLASH_DIST_WU`) — `lastX`/`lastY` start at `NaN` so the very first
    * `sync()` call after construction/restart never reads a bogus huge "jump"
    * distance from an uninitialised position. */
-  private readonly slowSplashState: Record<FighterRole, { lastX: number; lastY: number; distAccum: number }> = {
-    player: { lastX: NaN, lastY: NaN, distAccum: 0 },
-    enemy: { lastX: NaN, lastY: NaN, distAccum: 0 },
-  };
+  private readonly slowSplashState: { lastX: number; lastY: number; distAccum: number }[] = [];
 
   /**
    * Last `sync()`'s answer to "could a stun/slow have landed on this fighter", plus
@@ -1409,10 +1487,7 @@ export class VfxLayer {
    * pushes `hit-landed` with `x: target.x, y: target.y`, so the hit's coordinates are
    * the target's own position for that tick.
    */
-  private statusSnapshot: Record<FighterRole, { x: number; y: number; stunReady: boolean; slowReady: boolean }> = {
-    player: { x: NaN, y: NaN, stunReady: true, slowReady: true },
-    enemy: { x: NaN, y: NaN, stunReady: true, slowReady: true },
-  };
+  private statusSnapshot: { x: number; y: number; stunReady: boolean; slowReady: boolean }[] = [];
 
   constructor(scene: THREE.Scene) {
     this.group.name = 'vfx_layer';
@@ -1547,7 +1622,10 @@ export class VfxLayer {
       };
     };
 
-    this.statusByRole = { player: buildStatusVisual(), enemy: buildStatusVisual() };
+    // See `statusBySlot`: two up front (that is `MIN_FIGHTERS`, and it is what every
+    // shipped match seats), the rest grown at the top of `sync()`.
+    this.buildStatusVisual = buildStatusVisual;
+    this.ensureSlots(2);
 
     // QA-only on-demand spawn — see the `__vfxSpawnTest` declaration above.
     window.__vfxSpawnTest = (kind, xWU, yWU, amount = 14, color = '#FFC93C', who, weaponKey) => {
@@ -1605,15 +1683,23 @@ export class VfxLayer {
   }
 
   sync(state: MatchState): void {
+    const roster = fightersOf(state);
+    // 🚨 BEFORE ANY POOL. See `statusBySlot`: growth has to happen at a fixed point in
+    // the frame or a new seat's telegraph lands in a different place in the scene graph
+    // depending on which tick it first appeared on.
+    this.ensureSlots(roster.length);
+
+    // ⚠️ THE `player`/`enemy` KEYS ARE A PUBLISHED CONTRACT. Twenty-two instruments read
+    // `window.__vfxDebugFighters.player` / `.enemy` by name (grep over `tools/`), so they
+    // stay exactly where they were and mean exactly what `state.ts` says the aliases
+    // mean: slot 0 and slot 1. `slots` is ADDED for anything that needs slot 2 and up.
+    const snap = (f: Fighter) => ({
+      x: f.x, y: f.y, hp: f.hp, alive: f.alive, terrainSlowFactor: f.terrainSlowFactor,
+    });
     window.__vfxDebugFighters = {
-      player: {
-        x: state.player.x, y: state.player.y, hp: state.player.hp,
-        alive: state.player.alive, terrainSlowFactor: state.player.terrainSlowFactor,
-      },
-      enemy: {
-        x: state.enemy.x, y: state.enemy.y, hp: state.enemy.hp,
-        alive: state.enemy.alive, terrainSlowFactor: state.enemy.terrainSlowFactor,
-      },
+      player: snap(roster[0]),
+      enemy: snap(roster[1] ?? roster[0]),
+      slots: roster.map(snap),
     };
 
     // SIM-time delta since the last `sync()` call, in seconds — handed to bespoke
@@ -1664,7 +1750,7 @@ export class VfxLayer {
         // `update` callback below — which only receives the pool's `Object3D`, not
         // the weapon that made it — knows which path to take without a second
         // lookup or a parallel id-keyed map.
-        const owner = state[p.ownerRole];
+        const owner = fighterOf(state, p.ownerId, p.ownerRole);
         const bespoke = getWeaponVfx(owner.characterId, p.weapon.key);
         if (bespoke?.projectile) {
           const pos = groundPos(p.x, p.y);
@@ -1687,7 +1773,7 @@ export class VfxLayer {
         return mesh;
       },
       (obj, p) => {
-        const owner = state[p.ownerRole];
+        const owner = fighterOf(state, p.ownerId, p.ownerRole);
         const bespoke = obj.userData.weaponVfx as WeaponVfx | undefined;
         const pos = groundPos(p.x, p.y);
 
@@ -1759,7 +1845,7 @@ export class VfxLayer {
       this.group,
       state.trailMarks,
       (t) => {
-        const mesh = new THREE.Mesh(this.trailGeo, this.trailMats[t.ownerRole][t.id % GLAZE_VARIANTS]);
+        const mesh = new THREE.Mesh(this.trailGeo, this.trailMatsFor(slotOf(t.ownerId, t.ownerRole))[t.id % GLAZE_VARIANTS]);
         mesh.rotation.set(-Math.PI / 2, 0, spinForId(t.id));
         return mesh;
       },
@@ -1777,9 +1863,9 @@ export class VfxLayer {
 
     // ── Status telegraphs: slow (character tint + ground ring + puddle splash) /
     // stun (orbiting stars) ────────────────────────────────────────────────────
-    (['player', 'enemy'] as const).forEach((role) => {
-      const fighter = state[role];
-      const vis = this.statusByRole[role];
+    roster.forEach((fighter, slot) => {
+      const vis = this.statusBySlot[slot];
+      if (!vis) return;
       const pos = groundPos(fighter.x, fighter.y);
 
       // Two independent slow SOURCES — a puddle underfoot (`terrainSlowFactor`, the
@@ -1819,7 +1905,7 @@ export class VfxLayer {
       // accumulated rather than timer-based so the cadence tracks however fast the
       // fighter is actually moving (and stops the instant they stop, even if still
       // standing in the puddle).
-      const splash = this.slowSplashState[role];
+      const splash = this.slowSplashState[slot];
       if (terrainSlowed) {
         if (Number.isFinite(splash.lastX)) {
           splash.distAccum += Math.hypot(fighter.x - splash.lastX, fighter.y - splash.lastY);
@@ -1838,7 +1924,7 @@ export class VfxLayer {
       // `statusReadyAt` is the sim's own predicate, imported rather than copied.
       const stunReady = state.elapsed >= statusReadyAt(fighter, 'stun');
       const slowReady = state.elapsed >= statusReadyAt(fighter, 'slow');
-      this.statusSnapshot[role] = { x: fighter.x, y: fighter.y, stunReady, slowReady };
+      this.statusSnapshot[slot] = { x: fighter.x, y: fighter.y, stunReady, slowReady };
 
       // GRACE only — the window where the effect has expired but cannot be re-applied
       // and nothing else is telegraphing. While a status is ACTIVE its own telegraph
@@ -1944,8 +2030,7 @@ export class VfxLayer {
     // Ward-band refusal pops. On this clock, not `sync()`'s, for the same reason
     // every other one-shot here is: a solid hit triggers hit-stop, and the feedback
     // for that hit must not freeze along with the world.
-    for (const role of ['player', 'enemy'] as const) {
-      const vis = this.statusByRole[role];
+    for (const vis of this.statusBySlot) {
       if (vis.wardPop > 0) vis.wardPop = Math.max(0, vis.wardPop - dtSeconds);
     }
 
@@ -2348,13 +2433,14 @@ export class VfxLayer {
    * impact burst around it is wearing.
    */
   private flagStatusRefused(xWU: number, yWU: number, effect: 'stun' | 'slow', weaponColor: string): void {
-    for (const role of ['player', 'enemy'] as const) {
-      const snap = this.statusSnapshot[role];
+    for (let slot = 0; slot < this.statusSnapshot.length; slot++) {
+      const snap = this.statusSnapshot[slot];
       if (!Number.isFinite(snap.x)) continue;
       if (Math.hypot(snap.x - xWU, snap.y - yWU) > 1) continue;
       const ready = effect === 'stun' ? snap.stunReady : snap.slowReady;
       if (ready) return; // it landed — nothing to say
-      const vis = this.statusByRole[role];
+      const vis = this.statusBySlot[slot];
+      if (!vis) continue;
       vis.wardPop = WARD_POP_SECONDS;
       vis.wardPopColor.set(weaponColor).lerp(WHITE, 0.35);
       return;
@@ -2947,8 +3033,8 @@ export class VfxLayer {
     for (const eff of this.transientEffects) this.group.remove(eff.object);
     this.transientEffects.length = 0;
     this.lastSyncElapsedMs = 0;
-    for (const role of ['player', 'enemy'] as const) {
-      const vis = this.statusByRole[role];
+    for (let slot = 0; slot < this.statusBySlot.length; slot++) {
+      const vis = this.statusBySlot[slot];
       vis.slowRing.visible = false;
       vis.slowRingDark.visible = false;
       vis.slowTint.visible = false;
@@ -2957,12 +3043,12 @@ export class VfxLayer {
       vis.wardPop = 0;
       // A stale snapshot carried into a fresh match would let the first hit of the
       // new match consult the previous match's timers.
-      this.statusSnapshot[role] = { x: NaN, y: NaN, stunReady: true, slowReady: true };
+      this.statusSnapshot[slot] = { x: NaN, y: NaN, stunReady: true, slowReady: true };
       // Reset footstep-distance tracking too — see the `slowSplashState` field
       // comment: stale `lastX`/`lastY` from the match just ended, carried into a
       // fresh spawn position, would otherwise read as one huge instantaneous "jump"
       // and could fire a splash burst on the very first tick of the new match.
-      const splash = this.slowSplashState[role];
+      const splash = this.slowSplashState[slot];
       splash.lastX = NaN;
       splash.lastY = NaN;
       splash.distAccum = 0;
@@ -2977,6 +3063,9 @@ export class VfxLayer {
     this.splatGeo.dispose();
     this.trailGeo.dispose();
     this.splatMats.forEach((m) => m.dispose());
+    // `trailMats` is SPARSE by construction (built on first use, per slot), so a
+    // `for..of` over it would visit holes. `Object.values` skips them, which is exactly
+    // what is wanted and is why this line reads the same as it did over the record.
     Object.values(this.trailMats).forEach((mats) => mats.forEach((m) => m.dispose()));
     this.glazeTex.forEach((t) => t.dispose());
     this.materialCache.forEach((m) => m.dispose());
@@ -2995,8 +3084,7 @@ export class VfxLayer {
     this.wedgeGeoCache.clear();
     this.ringUnitGeo.dispose();
     this.wardGeo.dispose();
-    for (const role of ['player', 'enemy'] as const) {
-      const vis = this.statusByRole[role];
+    for (const vis of this.statusBySlot) {
       (vis.slowRing.material as THREE.Material).dispose();
       vis.slowRing.geometry.dispose();
       (vis.slowRingDark.material as THREE.Material).dispose();

@@ -2737,6 +2737,12 @@ The list form that can seat 3–6 exists and has no caller outside the instrumen
 now reads: **these must be answered before anything SHIPS a match with more than two seats**, and a
 third one (49c) came into existence with the list form.
 
+⚠️ **AND IT IS FIVE NOW, NOT THREE.** The header above is kept as written because it is the record
+of what each step cost. Making the PRESENTATION N-capable added **49e** (four of the six trail
+colours are unmeasured) and **49f** (the top bar seats six nameplates by squeezing). Both are still
+invisible today for the same reason as 49a–49c: **nothing in `src/` seats more than two**, and the
+two-fighter frame is measured byte-identical at both shipped cameras.
+
 At two fighters every one of them is provably identical to today — measured tick-for-tick over both
 state and events against `cdcdd65`, not argued.
 
@@ -2822,6 +2828,53 @@ point symmetry is a **competitive-fairness** constraint in the same category as 
 default invented in `sim.ts` would be a second, quieter source of truth for it, it would produce
 balance numbers, and it would look like it worked. → **The arena pass owns this**; the sim will
 refuse loudly until it lands.
+
+⚠️ **AND THE PRESENTATION PASS DID NOT WORK AROUND IT.** Making the renderer N-capable needed a
+way to actually put six fighters on screen, and the QA parameter that does it
+(`?fighters=<id>@<x>,<y>;…`, `match.ts`) is a **transport for coordinates the probe chose** — it
+carries no placement policy of its own, exactly like the existing `?px=`/`?py=`. The ring the
+instrument uses lives in `tools/tmp/np_nfighter.mjs` and nothing shipped reads it.
+
+### 49e — ❓ NEW: four of the six trail colours are UNMEASURED
+
+Donut's Sticky Trail is drawn from a per-slot colour. Slots 0 and 1 are the two hexes the debris
+pass **measured against the floor and the cast** (`#F5475E` rose, `#F5C147` gold — `vfx.ts`'s hue
+contract, and the `trail_probe` numbers that produced them: the old mark was **0.3 degrees** of hue
+from the floor it lay on). Above two fighters there were no colours at all, and a missing entry
+composites to **black**, so four of six trails would have been an unreadable hole in the floor.
+
+Four have been added — cyan `#47C4F5`, green `#6BE05A`, violet `#B36BF5`, orange `#F58A47` — placed
+in the same luma band as the measured pair and spread away from the arena's WALKABLE rose 330–340.
+🔴 **They are NOT measured.** The whole point of the block they sit in is that this cannot be
+settled from a hue wheel: the first attempt at the two that ARE measured took the marks uniformly
+dark, fixed the floor collision, and created a *cast* collision in its place at |dL| 0.132.
+
+**Nothing is blocked.** No shipped match seats a third fighter, so no shipped frame contains one of
+these. Whoever runs the 4–6 fighter arena pass should re-run `trail_probe` against the new floor
+with all six. ⚠️ And note the standing warning: **warm chroma is the scarce budget in this frame
+today** (0.053 against a 0.072 minimum), so adding three cool hues is exactly the direction
+`arena-scan --baseline` says to check before assuming.
+
+### 49f — ❓ NEW: the top bar seats six nameplates by SQUEEZING, and it shows
+
+The HUD's fighter nameplates are now built one per slot instead of being a hard-coded pair. At two
+fighters the DOM is character-for-character what it was (measured: byte-identical). At six, the top
+bar is a flex row with `flex: 1 1 260px` per plate, so six plates plus the clock **compress to
+~45% of their design width** and the clock is pushed hard left off centre. Photographed at 1280×720
+in `shots/np/nf6.png`.
+
+It is *legible* — every name, every HP number and every portrait is readable — but it is not a
+design, it is a consequence. The honest options, none of them chosen:
+
+- **keep the squeeze** — zero work, and it is what a 4-player match would ship with today;
+- **local seat left, everyone else as small chips** — the Brawl Stars / Zooba pattern: your own
+  bar full size, opponents reduced to portrait + a short bar;
+- **drop the opponent bars entirely above 1v1** and rely on the floating pills over each head,
+  which already exist and are already per-slot.
+
+⚠️ **This is a LAYOUT call and it needs a plate, not a rule.** `menu_accept_portrait` measures the
+2-fighter bar on three phone widths and passes; there is no equivalent for six, and building one
+before the shape is chosen would pin the wrong thing.
 
 ---
 

@@ -20,7 +20,12 @@ import {
   type CharacterId,
   type Weapon,
 } from '../game/rules';
-import type { FighterRole, MatchState } from '../game/state';
+// ⚠️ `FighterRole` is GONE from this file's imports and that is the headline: nothing in
+// the HUD reads a seat NAME any more. Slots come from `roster.ts`, and the only two-valued
+// strings left are the CSS modifiers `--player` / `--enemy`, which are a look, not an
+// identity (see `buildFighterSlots`).
+import type { Fighter, MatchState } from '../game/state';
+import { fightersOf, LOCAL_SLOT, localFighter, slotKey, slotOf } from '../game/roster';
 import { isVisibleFrom } from '../game/movement';
 // The guaranteed-visible radius. It lives with the camera because the camera is what
 // guarantees it, but it is a GAMEPLAY number — "how far can this player possibly see"
@@ -75,10 +80,26 @@ export interface HudFrameInfo {
 export interface Hud {
   /** Call once per frame with the live match state. */
   update(state: MatchState, frame: HudFrameInfo): void;
-  /** Call once, as soon as the two fighters are known, to label bars and build weapon slots. */
-  setCharacters(playerId: CharacterId, enemyId: CharacterId): void;
-  /** Position the floating name+health pills above each fighter's head. Pass null to hide one. */
-  updateFloatingBars(player: ScreenPoint | null, enemy: ScreenPoint | null, player01: number, enemy01: number): void;
+  /**
+   * Call once, as soon as the roster is known, to label bars and build weapon slots.
+   *
+   * ⚠️ TAKES A LIST IN SLOT ORDER, where it used to take `(playerId, enemyId)`. Two
+   * positional `CharacterId`s cannot express three fighters, and a third parameter would
+   * have been a `CharacterId | undefined` that every existing caller passes nothing for —
+   * which is a signature that compiles at every arity and means something different at
+   * each. `ids[i]` is slot `i`; `ids.length` is how many seats the HUD builds.
+   */
+  setCharacters(ids: readonly CharacterId[]): void;
+  /**
+   * Position the floating name+health pills above each fighter's head, in SLOT ORDER.
+   * A `null` point hides that fighter's pill — which is the one channel concealment and
+   * death both ride (see `match.ts`'s "SURFACE 2 OF 3").
+   *
+   * Two parallel arrays rather than one array of pairs: `points` comes from projecting a
+   * model and `health01` from the sim, they are produced by different expressions at the
+   * call site, and pairing them there would only move the zip.
+   */
+  updateFloatingBars(points: readonly (ScreenPoint | null)[], health01: readonly number[]): void;
   /** Spawn a rising, fading damage/heal number at a screen point. Pooled — safe to
    * call as often as hits land, never allocates a new DOM node. */
   spawnDamageNumber(point: ScreenPoint, amount: number, opts?: { heal?: boolean; fog?: boolean }): void;
@@ -110,12 +131,32 @@ export interface Hud {
  *
  * ── ⚠️ THE ASYMMETRY, WHICH IS THE ONLY WAY TO GET THIS WRONG ────────────────
  *
- * The sim is SYMMETRIC — `Fighter.concealed` is published for both fighters and either
- * can be standing under a plate. The RENDERER IS NOT: it is one human's client, the
- * camera follows `state.player`, and a player who hides must still see themselves or
- * the frame reads as a crash. So the observer is always `state.player` and the target is
- * always `state.enemy`, in that order, stated once here so no call site can transpose
- * them. Nothing in this file or in `match.ts` ever hides `state.player`.
+ * ⚠️ **THIS PARAGRAPH USED TO SAY SOMETHING THAT IS NOW FALSE, AND IT IS KEPT ABOVE ITS
+ * REPLACEMENT BECAUSE IT WAS RIGHT FOR AS LONG AS THERE WERE TWO SEATS:**
+ *
+ *   > *"The sim is SYMMETRIC — `Fighter.concealed` is published for both fighters and
+ *   > either can be standing under a plate. The RENDERER IS NOT: it is one human's client,
+ *   > the camera follows `state.player`, and a player who hides must still see themselves
+ *   > or the frame reads as a crash. So the observer is always `state.player` and the
+ *   > target is always `state.enemy`, in that order, stated once here so no call site can
+ *   > transpose them."*
+ *
+ * The FIRST half is still exactly the rule and it is the whole point of this function.
+ * The SECOND half named the two seats a two-fighter sim had. `state.fighters` now seats up
+ * to `MAX_FIGHTERS`, so "the target is always `state.enemy`" would mean *slot 1 is the only
+ * fighter that can ever be hidden* — with slots 2..5 drawn, blipped and pilled through
+ * their cover. Generalised, the rule is:
+ *
+ *   * the OBSERVER is always `roster.ts:LOCAL_SLOT` — the seat this screen belongs to;
+ *   * the TARGET is any OTHER fighter, asked one at a time;
+ *   * **the observer is never hidden from itself.** Nothing in this file or in `match.ts`
+ *     ever hides the local fighter, and `match.ts` skips `LOCAL_SLOT` explicitly rather
+ *     than relying on this predicate returning `true` for a fighter asked about itself.
+ *
+ * The argument order is still the trap and is still stated once: observer first, target
+ * second, both as whole `Fighter` objects rather than as coordinate pairs, so a
+ * transposition is a type-checked mistake at every call site instead of four swapped
+ * numbers that compile.
  *
  * ── ⚠️ WHY NOT `state.enemy.concealed` ──────────────────────────────────────
  *
@@ -143,18 +184,30 @@ export interface Hud {
  * Degenerates to `true` on every arena that ships no `concealment` list, which today is
  * all of them — so this is currently a no-op by construction, not by luck.
  */
-export function enemyVisibleToPlayer(state: MatchState): boolean {
-  // ⚠️ `state, state.enemy` ARE THE §29c ARGUMENTS, and omitting them made THE PLAYER'S OWN
+export function fighterVisibleTo(state: MatchState, observer: Fighter, target: Fighter): boolean {
+  // ⚠️ `state, target` ARE THE §29c ARGUMENTS, and omitting them made THE PLAYER'S OWN
   // SCREEN the only observer still resolving concealment against DECLARED regions instead of
   // STANDING ones. Two facts live on the match, not the arena, and `ArenaDefinition` cannot
   // carry either — it is one shared object across every match a process runs:
-  //   `MatchState.brokenConcealment`  a plate the enemy shattered by attacking from under it
+  //   `MatchState.brokenConcealment`  a plate the target shattered by attacking from under it
   //   `Fighter.revealedUntil`         the window a fighter's own attack buys the other side
   // Without them the radar would keep hiding an enemy who had just destroyed their cover and
   // fired at you — the sim would treat them as seen while the HUD treated them as hidden, and
   // that disagreement between two readers of one rule is this project's oldest defect shape.
   // `ai.ts` takes the same two arguments at its own single call site for the same reason.
-  return isVisibleFrom(state.player.x, state.player.y, state.enemy.x, state.enemy.y, state.arena, state, state.enemy);
+  return isVisibleFrom(observer.x, observer.y, target.x, target.y, state.arena, state, target);
+}
+
+/**
+ * @deprecated THE TWO-SEAT SPELLING of `fighterVisibleTo(state, local, state.enemy)`.
+ *
+ * Kept for the same reason `state.ts` keeps `otherRole` and `opponentOf`: it is named in
+ * `rules.ts`'s and `movement.ts`'s CONCEALMENT notes as the presentation-side predicate, and
+ * a symbol that four comments point at should not simply stop existing. It is not called by
+ * anything in `src/` — both call sites went to the general form, one per non-local slot.
+ */
+export function enemyVisibleToPlayer(state: MatchState): boolean {
+  return fighterVisibleTo(state, localFighter(state), state.enemy);
 }
 
 const STYLE_ID = 'hud-styles';
@@ -237,17 +290,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       <div class="hud-fogtick" data-el="fogtick"></div>
 
       <div class="hud-topbar-scrim"></div>
+      <!-- ── The fighter nameplates are BUILT, not declared ────────────────────
+           state.fighters seats up to MAX_FIGHTERS, so a static two-fighter
+           template is a two-fighter game. buildFighterSlots() below inserts one
+           block per slot — slot 0 BEFORE this clock and every other slot AFTER it,
+           which reproduces the old declaration order (player, clock, enemy) exactly
+           at two fighters. The clock stays declared here because it is the one child
+           of this bar that is not per-fighter and it is what the others are placed
+           relative to. -->
       <div class="hud-topbar" data-el="topbar">
-        <div class="hud-fighter hud-fighter--player">
-          <div class="hud-fighter-pill">
-            <div class="hud-fighter-emoji" data-el="player-emoji"></div>
-            <div class="hud-fighter-name" data-el="player-name"></div>
-          </div>
-          <div class="hud-healthbar hud-healthbar--player" data-el="player-bar">
-            <div class="hud-healthbar-fill" data-el="player-fill"></div>
-            <div class="hud-healthbar-text" data-el="player-hp"></div>
-          </div>
-        </div>
         <div class="hud-clock">
           <div class="hud-timer" data-el="timer">3:00</div>
           <!-- Closing-fog readout. Sits directly under the match clock because the
@@ -260,16 +311,6 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
               <div class="hud-zone-value" data-el="zone-value">--</div>
             </div>
             <div class="hud-zone-track"><div class="hud-zone-bar" data-el="zone-bar"></div></div>
-          </div>
-        </div>
-        <div class="hud-fighter hud-fighter--enemy">
-          <div class="hud-fighter-pill">
-            <div class="hud-fighter-name" data-el="enemy-name"></div>
-            <div class="hud-fighter-emoji" data-el="enemy-emoji"></div>
-          </div>
-          <div class="hud-healthbar hud-healthbar--enemy" data-el="enemy-bar">
-            <div class="hud-healthbar-fill" data-el="enemy-fill"></div>
-            <div class="hud-healthbar-text" data-el="enemy-hp"></div>
           </div>
         </div>
       </div>
@@ -297,24 +338,17 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       </div>
       <div class="hud-safearrow-label" data-el="safearrow-label">RUN TO THE ZONE</div>
 
-      <!-- Deliberately NO name TEXT here — the top-corner nameplates are the one
+      <!-- The floating per-fighter pills are BUILT by buildFighterSlots() and
+           inserted immediately before the radar below, which is exactly where they
+           were declared — DOM order here is paint order, and the pills must stay
+           under the radar and over the weapon tray.
+
+           Deliberately NO name TEXT on them — the top-corner nameplates are the one
            canonical place to read "who is who"; repeating the full name would just
-           split attention between two labels for the same two fighters. A small
+           split attention between two labels for the same fighters. A small
            emoji badge (matching the corner pill's language, not its text) plus a
            chunky bar on a solid backing plate keeps this legible against any floor
            colour without reintroducing that duplicate readout. -->
-      <div class="hud-float hud-float--player" data-el="float-player">
-        <div class="hud-float-pill">
-          <div class="hud-float-emoji" data-el="float-player-emoji"></div>
-          <div class="hud-float-bar"><div class="hud-float-fill" data-el="float-player-fill"></div></div>
-        </div>
-      </div>
-      <div class="hud-float hud-float--enemy" data-el="float-enemy">
-        <div class="hud-float-pill">
-          <div class="hud-float-emoji" data-el="float-enemy-emoji"></div>
-          <div class="hud-float-bar"><div class="hud-float-fill" data-el="float-enemy-fill"></div></div>
-        </div>
-      </div>
 
       <!-- ── Closing-fog boundary readouts ────────────────────────────────────
            The 3D boundary (src/arena/fogRing.ts) answers "where is the edge" only
@@ -339,8 +373,10 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           <div class="hud-radar-arena" data-el="radar-arena">
             <div class="hud-radar-grid"></div>
           </div>
-          <div class="hud-radar-dot hud-radar-dot--enemy" data-el="radar-enemy"></div>
-          <div class="hud-radar-dot hud-radar-dot--player" data-el="radar-player"></div>
+          <!-- Blips are BUILT (see buildFighterSlots) and appended here in the order
+               OPPONENTS-then-LOCAL, so the local dot paints last and is never covered by
+               someone standing on top of it. That is the order these two were declared
+               in, and at two fighters the DOM is character-for-character the same. -->
         </div>
         <div class="hud-radar-cap" data-el="radar-cap">SAFE ZONE</div>
       </div>
@@ -395,16 +431,6 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     return el;
   };
 
-  const playerName = q<HTMLDivElement>('player-name');
-  const enemyName = q<HTMLDivElement>('enemy-name');
-  const playerEmoji = q<HTMLDivElement>('player-emoji');
-  const enemyEmoji = q<HTMLDivElement>('enemy-emoji');
-  const playerBar = q<HTMLDivElement>('player-bar');
-  const enemyBar = q<HTMLDivElement>('enemy-bar');
-  const playerFill = q<HTMLDivElement>('player-fill');
-  const enemyFill = q<HTMLDivElement>('enemy-fill');
-  const playerHpText = q<HTMLDivElement>('player-hp');
-  const enemyHpText = q<HTMLDivElement>('enemy-hp');
   const timerEl = q<HTMLDivElement>('timer');
   const weaponsEl = q<HTMLDivElement>('weapons');
   const countdownEl = q<HTMLDivElement>('countdown');
@@ -415,12 +441,12 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const gameoverBtn = q<HTMLButtonElement>('gameover-btn');
 
   const topbarEl = q<HTMLDivElement>('topbar');
-  const floatPlayer = q<HTMLDivElement>('float-player');
-  const floatEnemy = q<HTMLDivElement>('float-enemy');
-  const floatPlayerEmoji = q<HTMLDivElement>('float-player-emoji');
-  const floatEnemyEmoji = q<HTMLDivElement>('float-enemy-emoji');
-  const floatPlayerFill = q<HTMLDivElement>('float-player-fill');
-  const floatEnemyFill = q<HTMLDivElement>('float-enemy-fill');
+  // ⚠️ BY CLASS, NOT BY A NEW `data-el`. Adding `data-el="clock"` was the ONLY
+  // difference `np_identity` found between the two-fighter DOM this file used to emit and
+  // the one it builds now — one attribute, on one element, and it moved the HUD digest.
+  // The acceptance test is worth more than a tidier handle, so the anchor is the class
+  // that was already there and the DOM is byte-identical at two fighters.
+  const clockEl = root.querySelector<HTMLDivElement>('.hud-clock')!;
 
   const dmgLayer = q<HTMLDivElement>('dmg-layer');
   const screenflashEl = q<HTMLDivElement>('screenflash');
@@ -432,8 +458,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const radarEl = q<HTMLDivElement>('radar');
   const radarSafeEl = q<HTMLDivElement>('radar-safe');
   const radarArenaEl = q<HTMLDivElement>('radar-arena');
-  const radarPlayerEl = q<HTMLDivElement>('radar-player');
-  const radarEnemyEl = q<HTMLDivElement>('radar-enemy');
+  const radarMapEl = q<HTMLDivElement>('radar-map');
   const radarCapEl = q<HTMLDivElement>('radar-cap');
   const fogEdgeEl = q<HTMLDivElement>('fogedge');
   const fogTickEl = q<HTMLDivElement>('fogtick');
@@ -442,6 +467,111 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const aimStickEl = q<HTMLDivElement>('aim-stick');
   const aimReticleEl = q<HTMLDivElement>('aim-reticle');
   const muteEl = q<HTMLDivElement>('mute');
+
+  // ── Per-fighter DOM, POOLED BY SLOT ────────────────────────────────────────
+  //
+  // 🚨 THIS BLOCK IS THE ONE PLACE THE HUD KNOWS HOW MANY FIGHTERS THERE ARE.
+  // It replaces a static two-fighter template plus fourteen singleton
+  // `q<HTMLDivElement>('player-…' / 'enemy-…')` fetches. Three rules govern it, and
+  // all three are compatibility constraints rather than taste:
+  //
+  //  1. **SLOTS 0 AND 1 KEEP THEIR EXACT `data-el` NAMES AND CLASSES.** `player-name`,
+  //     `enemy-hp`, `float-enemy`, `radar-player`, `.hud-fighter--player`,
+  //     `.hud-radar-dot--enemy` and friends are selected by name from at least ten
+  //     instruments, two of them shipped gates (`menu_accept_portrait` reads
+  //     `.hud-fighter--player` / `.hud-fighter--enemy`; `cw_conceal_view` reads
+  //     `[data-el="radar-enemy"]` and `[data-el="float-enemy"]`). See `roster.ts:slotKey`.
+  //     A guard that silently stops matching is this project's most expensive
+  //     recurring failure, so this is a contract.
+  //  2. **THE DOM AT TWO FIGHTERS IS THE OLD DOM, ELEMENT FOR ELEMENT AND IN ORDER.**
+  //     Nameplates go [slot 0, clock, slot 1…]; float pills go immediately before the
+  //     radar; blips go opponents-then-local inside the radar map. That ordering is
+  //     paint order and it was load-bearing in three places already documented above.
+  //  3. **SLOT 1 AND UP SHARE THE `--enemy` MODIFIER**, which is exactly what
+  //     `state.ts:roleOfSlot` says the seat name of every non-zero slot is. Slot 4 is
+  //     not "the enemy" — but it is not the local player either, and the whole visual
+  //     language of this HUD (red vs green, right-aligned vs left) is that one
+  //     distinction. `querySelector('.hud-fighter--enemy')` therefore keeps returning
+  //     slot 1, which is what every existing instrument means by it.
+  //
+  // Rebuilt only when the COUNT changes, so a restart at the same size touches no DOM.
+  interface FighterSlotEls {
+    name: HTMLDivElement; emoji: HTMLDivElement;
+    bar: HTMLDivElement; fill: HTMLDivElement; hpText: HTMLDivElement;
+    float: HTMLDivElement; floatEmoji: HTMLDivElement; floatFill: HTMLDivElement;
+    blip: HTMLDivElement;
+  }
+  let fighterSlots: FighterSlotEls[] = [];
+
+  function buildFighterSlots(n: number): void {
+    if (fighterSlots.length === n) return;
+    for (const s of fighterSlots) { s.bar.parentElement?.remove(); s.float.remove(); s.blip.remove(); }
+    fighterSlots = [];
+
+    for (let i = 0; i < n; i++) {
+      const key = slotKey(i);
+      // `--player` for the local seat, `--enemy` for every other one. See rule 3.
+      const mod = i === 0 ? 'player' : 'enemy';
+
+      const plate = document.createElement('div');
+      plate.className = `hud-fighter hud-fighter--${mod}`;
+      // The pill is MIRRORED on the opponent side — portrait outboard, name inboard —
+      // and that was expressed as two hand-written templates. It is one branch now.
+      const pill = i === 0
+        ? `<div class="hud-fighter-emoji" data-el="${key}-emoji"></div>` +
+          `<div class="hud-fighter-name" data-el="${key}-name"></div>`
+        : `<div class="hud-fighter-name" data-el="${key}-name"></div>` +
+          `<div class="hud-fighter-emoji" data-el="${key}-emoji"></div>`;
+      plate.innerHTML =
+        `<div class="hud-fighter-pill">${pill}</div>` +
+        `<div class="hud-healthbar hud-healthbar--${mod}" data-el="${key}-bar">` +
+          `<div class="hud-healthbar-fill" data-el="${key}-fill"></div>` +
+          `<div class="hud-healthbar-text" data-el="${key}-hp"></div>` +
+        `</div>`;
+      if (i === 0) topbarEl.insertBefore(plate, clockEl);
+      else topbarEl.appendChild(plate);
+
+      const float = document.createElement('div');
+      float.className = `hud-float hud-float--${mod}`;
+      float.dataset.el = `float-${key}`;
+      float.innerHTML =
+        `<div class="hud-float-pill">` +
+          `<div class="hud-float-emoji" data-el="float-${key}-emoji"></div>` +
+          `<div class="hud-float-bar"><div class="hud-float-fill" data-el="float-${key}-fill"></div></div>` +
+        `</div>`;
+      // ⚠️ `radarEl.parentElement`, NOT `root`. The template's outermost element is
+      // `.hud-root`, so the radar is `root`'s GRANDchild and `root.insertBefore(…, radarEl)`
+      // throws `NotFoundError: the node before which the new node is to be inserted is not
+      // a child of this node` — inside `createHud`, i.e. the match screen never mounts and
+      // `__gameReady` never fires. Caught by `np_dbg.mjs` on the first overlay run.
+      radarEl.parentElement!.insertBefore(float, radarEl);
+
+      const blip = document.createElement('div');
+      blip.className = `hud-radar-dot hud-radar-dot--${mod}`;
+      blip.dataset.el = `radar-${key}`;
+      // Opponents first, the local dot last, so nothing can paint over "where am I".
+      if (i === 0) radarMapEl.appendChild(blip);
+      else radarMapEl.insertBefore(blip, radarMapEl.querySelector('.hud-radar-dot--player'));
+
+      fighterSlots.push({
+        name: plate.querySelector(`[data-el="${key}-name"]`)!,
+        emoji: plate.querySelector(`[data-el="${key}-emoji"]`)!,
+        bar: plate.querySelector(`[data-el="${key}-bar"]`)!,
+        fill: plate.querySelector(`[data-el="${key}-fill"]`)!,
+        hpText: plate.querySelector(`[data-el="${key}-hp"]`)!,
+        float,
+        floatEmoji: float.querySelector(`[data-el="float-${key}-emoji"]`)!,
+        floatFill: float.querySelector(`[data-el="float-${key}-fill"]`)!,
+        blip,
+      });
+    }
+  }
+
+  // Built at `MIN_FIGHTERS` up front rather than waiting for `setCharacters`, so no
+  // caller order can leave `update()` looking at a HUD with no health bars in it —
+  // which is what a lazily-built one would do if anything ever rendered a frame
+  // between construction and the roster being known.
+  buildFighterSlots(2);
 
   // ── Mute indicator ─────────────────────────────────────────────────────────
   // Driven off `audio.onChange` rather than off the keypress, which is the whole
@@ -598,7 +728,10 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     holds: boolean;
   } {
     const maxR = state.arena.maxSafeRadius;
-    const dist = Math.hypot(state.player.x - state.arena.center.x, state.player.y - state.arena.center.y);
+    // THE LOCAL SEAT, not "the player" — the zone readout is one client's answer to
+    // "am I in the fog", so it is a `roster.ts:LOCAL_SLOT` question by construction.
+    const me = localFighter(state);
+    const dist = Math.hypot(me.x - state.arena.center.x, me.y - state.arena.center.y);
     const outside = dist > state.safeRadius;
     const shrinkPerMs = maxR / MATCH_DURATION_MS; // world units of radius per ms
     const holds = dist <= MIN_SAFE_RADIUS;
@@ -672,7 +805,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   function renderZone(state: MatchState, frame: HudFrameInfo): void {
     const live = state.phase === 'playing';
     const info = zoneInfo(state);
-    const danger = live && info.outside && state.player.alive;
+    const danger = live && info.outside && localFighter(state).alive;
     const maxR = state.arena.maxSafeRadius;
 
     // ── THIS LINE WAS MISSING, AND THREE CSS RULES WAITED ON IT ────────────────
@@ -809,22 +942,35 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     radarArenaEl.style.width = spanW(aw);
     radarArenaEl.style.height = spanH(ah);
 
-    radarPlayerEl.style.left = wx(state.player.x);
-    radarPlayerEl.style.top = wy(state.player.y);
-    radarPlayerEl.style.display = state.player.alive ? 'block' : 'none';
-    radarEnemyEl.style.left = wx(state.enemy.x);
-    radarEnemyEl.style.top = wy(state.enemy.y);
     // ⚠️ SURFACE 1 OF 3. The blip is the purest position leak on the screen — it reports
-    // the enemy's exact coordinates on a map with no occlusion at all, so shipping
-    // concealment without this line makes the mechanic read as BROKEN: you hide, the AI
+    // a fighter's exact coordinates on a map with no occlusion at all, so shipping
+    // concealment without this makes the mechanic read as BROKEN: you hide, the AI
     // demonstrably loses you, and your own radar keeps tracking it perfectly. Uri,
     // `docs/DECISIONS-FOR-URI.md` §30: *"plates and other kitchen objects you can hide
     // under — fully hidden"* — blip, HP bar AND model, not the half-measure.
     //
-    // `alive` still gates it independently: a dead enemy is hidden whether or not it
+    // `alive` still gates it independently: a dead fighter is hidden whether or not it
     // died inside a region, which is the pre-existing rule and is not concealment's to
     // change.
-    radarEnemyEl.style.display = state.enemy.alive && enemyVisibleToPlayer(state) ? 'block' : 'none';
+    //
+    // ⚠️ THE LOCAL SLOT IS GATED ON `alive` ALONE and never on visibility — see this
+    // file's header. The predicate would in fact answer `true` for a fighter asked about
+    // itself, but relying on that would make "you can always see yourself" an emergent
+    // property of `isVisibleFrom`'s distance test rather than a stated rule.
+    const observer = localFighter(state);
+    // Indexed by POSITION in the list, not by `f.id`: a duck-typed instrument state has
+    // fighters with no `id` on them at all (see `roster.ts`), and `fightersOf` returns
+    // them in slot order either way.
+    fightersOf(state).forEach((f, i) => {
+      const dot = fighterSlots[i]?.blip;
+      if (!dot) return;
+      dot.style.left = wx(f.x);
+      dot.style.top = wy(f.y);
+      dot.style.display =
+        i === LOCAL_SLOT
+          ? (f.alive ? 'block' : 'none')
+          : (f.alive && fighterVisibleTo(state, observer, f) ? 'block' : 'none');
+    });
     radarEl.classList.toggle('is-danger', danger);
     radarCapEl.textContent = danger ? 'GET INSIDE' : 'SAFE ZONE';
 
@@ -909,15 +1055,19 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   }
 
   return {
-    setCharacters(playerId, enemyId) {
-      playerCharId = playerId;
-      playerName.textContent = CHARACTERS[playerId].name;
-      enemyName.textContent = CHARACTERS[enemyId].name;
-      playerEmoji.innerHTML = portraitMarkup(playerId, { crop: 'head' });
-      enemyEmoji.innerHTML = portraitMarkup(enemyId, { crop: 'head' });
-      floatPlayerEmoji.innerHTML = portraitMarkup(playerId, { crop: 'head' });
-      floatEnemyEmoji.innerHTML = portraitMarkup(enemyId, { crop: 'head' });
-      buildWeaponSlots(CHARACTERS[playerId].weapons);
+    setCharacters(ids) {
+      buildFighterSlots(ids.length);
+      playerCharId = ids[LOCAL_SLOT] ?? null;
+      ids.forEach((id, i) => {
+        const s = fighterSlots[i];
+        if (!s) return;
+        s.name.textContent = CHARACTERS[id].name;
+        s.emoji.innerHTML = portraitMarkup(id, { crop: 'head' });
+        s.floatEmoji.innerHTML = portraitMarkup(id, { crop: 'head' });
+      });
+      // The weapon tray is the LOCAL seat's, and only the local seat's — it is a
+      // control surface, not a readout.
+      if (playerCharId) buildWeaponSlots(CHARACTERS[playerCharId].weapons);
       // generate:false is load bearing. This runs at match start; standing up an
       // offscreen renderer here to make a 24px badge would be a hitch in a live
       // fight. Character select has already warmed the shared cache in every real
@@ -926,21 +1076,22 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     },
 
     update(state, frame) {
-      setBar(playerFill, playerHpText, state.player.hp, state.player.maxHp);
-      setBar(enemyFill, enemyHpText, state.enemy.hp, state.enemy.maxHp);
       timerEl.textContent = formatTime(state.timeRemaining);
 
-      // Danger pulse once a fighter's own bar reads critically low — a fast,
-      // unmistakable "you are about to die" signal that doesn't depend on reading
-      // the numeric text at all.
-      const playerFrac = state.player.maxHp > 0 ? state.player.hp / state.player.maxHp : 0;
-      const enemyFrac = state.enemy.maxHp > 0 ? state.enemy.hp / state.enemy.maxHp : 0;
-      playerBar.classList.toggle('is-low', state.player.alive && playerFrac <= LOW_HP_FRACTION);
-      enemyBar.classList.toggle('is-low', state.enemy.alive && enemyFrac <= LOW_HP_FRACTION);
+      fightersOf(state).forEach((f, i) => {
+        const s = fighterSlots[i];
+        if (!s) return;
+        setBar(s.fill, s.hpText, f.hp, f.maxHp);
+        // Danger pulse once a fighter's own bar reads critically low — a fast,
+        // unmistakable "you are about to die" signal that doesn't depend on reading
+        // the numeric text at all.
+        const frac = f.maxHp > 0 ? f.hp / f.maxHp : 0;
+        s.bar.classList.toggle('is-low', f.alive && frac <= LOW_HP_FRACTION);
+      });
 
       if (playerCharId) {
         const weapons = CHARACTERS[playerCharId].weapons;
-        const lastUsed = state.player.lastUsed;
+        const lastUsed = localFighter(state).lastUsed;
         weaponSlots.forEach((slot, i) => {
           const w = weapons[i];
           if (!w) return;
@@ -980,28 +1131,42 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
       if (state.phase === 'ended') {
         gameoverEl.style.display = 'flex';
-        const won = state.winner === 'player';
+        const roster = fightersOf(state);
+        // The result card is the LOCAL seat's verdict, so "won" is "did MY slot win",
+        // not "did slot 0 win". Identical today (they are the same slot) and it stops
+        // being identical the moment a second human sits down.
+        const winnerSlot = slotOf(state.winnerId ?? undefined, state.winner ?? 'player');
+        const won = winnerSlot === LOCAL_SLOT;
         gameoverTitleEl.textContent = won ? 'VICTORY!' : 'DEFEAT!';
         gameoverTitleEl.classList.toggle('is-win', won);
         gameoverTitleEl.classList.toggle('is-lose', !won);
 
-        const winnerRole: FighterRole = state.winner ?? 'player';
-        const loserRole: FighterRole = winnerRole === 'player' ? 'enemy' : 'player';
-        const winnerChar = CHARACTERS[state[winnerRole].characterId];
-        const loserChar = CHARACTERS[state[loserRole].characterId];
+        const winnerFighter = roster[winnerSlot] ?? roster[0];
+        const winnerChar = CHARACTERS[winnerFighter.characterId];
         // ── "defeated" is only true of a KNOCKOUT ─────────────────────────────
-        // `sim.ts` now ends a match that runs out of clock, and it does so WITHOUT a
+        // `sim.ts` ends a match that runs out of clock, and it does so WITHOUT a
         // death: `resolveTimeout` picks a winner on HP fraction, then zone control,
-        // then the human, and deliberately leaves both fighters `alive`. So a timeout
-        // is exactly the case where nobody defeated anybody, and that is also the
-        // case a player is most likely to want explained — they are looking at a
-        // result screen with two living fighters on it. Both fighters still standing
-        // is the tell, and it costs one comparison.
-        const timedOut = state.player.alive && state.enemy.alive;
+        // then the lower slot, and deliberately leaves every fighter `alive`. So a
+        // timeout is exactly the case where nobody defeated anybody, and that is also
+        // the case a player is most likely to want explained — they are looking at a
+        // result screen with living fighters on it. Everybody still standing is the
+        // tell, and it costs one pass over the roster.
+        //
+        // ⚠️ WAS `state.player.alive && state.enemy.alive`. `every` is the same
+        // statement at two seats and the RIGHT one above two: a six-way that reaches
+        // the clock with four survivors is a timeout, and the two-seat form would only
+        // have asked about slots 0 and 1.
+        const timedOut = roster.every((f) => f.alive);
+        // The losers are everyone who is not the winner, in slot order. At two fighters
+        // that list has exactly one entry and this markup is character-for-character
+        // what the two-seat version emitted — which is the whole acceptance test.
+        const losers = roster.filter((_, i) => i !== winnerSlot);
         gameoverSubtitleEl.innerHTML =
-          `<span class="hud-go-emoji">${portraitMarkup(state[winnerRole].characterId, { crop: 'head' })}</span>${winnerChar.name}` +
+          `<span class="hud-go-emoji">${portraitMarkup(winnerFighter.characterId, { crop: 'head' })}</span>${winnerChar.name}` +
           `<span class="hud-go-vs">${timedOut ? 'outlasted' : 'defeated'}</span>` +
-          `<span class="hud-go-emoji">${portraitMarkup(state[loserRole].characterId, { crop: 'head' })}</span>${loserChar.name}`;
+          losers
+            .map((f) => `<span class="hud-go-emoji">${portraitMarkup(f.characterId, { crop: 'head' })}</span>${CHARACTERS[f.characterId].name}`)
+            .join('');
         hydratePortraits(gameoverSubtitleEl, { generate: false });
 
         const elapsedMs = Math.max(0, MATCH_DURATION_MS - state.timeRemaining);
@@ -1019,7 +1184,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       }
     },
 
-    updateFloatingBars(player, enemy, player01, enemy01) {
+    updateFloatingBars(points, health01) {
       const floor = floatFloorY();
       const place = (el: HTMLElement, p: ScreenPoint): void => {
         // Clamped, not hidden. A fighter above the top of the frame is exactly when
@@ -1029,24 +1194,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         const x = Math.min(Math.max(p.x, FLOAT_HALF_W), window.innerWidth - FLOAT_HALF_W);
         el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
       };
-      if (player) {
-        floatPlayer.style.display = 'flex';
-        place(floatPlayer, player);
-        const frac = Math.max(0, Math.min(1, player01));
-        floatPlayerFill.style.width = `${(frac * 100).toFixed(1)}%`;
-        floatPlayerFill.classList.toggle('is-low', frac > 0 && frac <= LOW_HP_FRACTION);
-      } else {
-        floatPlayer.style.display = 'none';
-      }
-      if (enemy) {
-        floatEnemy.style.display = 'flex';
-        place(floatEnemy, enemy);
-        const frac = Math.max(0, Math.min(1, enemy01));
-        floatEnemyFill.style.width = `${(frac * 100).toFixed(1)}%`;
-        floatEnemyFill.classList.toggle('is-low', frac > 0 && frac <= LOW_HP_FRACTION);
-      } else {
-        floatEnemy.style.display = 'none';
-      }
+      fighterSlots.forEach((s, i) => {
+        const p = points[i] ?? null;
+        if (!p) { s.float.style.display = 'none'; return; }
+        s.float.style.display = 'flex';
+        place(s.float, p);
+        const frac = Math.max(0, Math.min(1, health01[i] ?? 0));
+        s.floatFill.style.width = `${(frac * 100).toFixed(1)}%`;
+        s.floatFill.classList.toggle('is-low', frac > 0 && frac <= LOW_HP_FRACTION);
+      });
     },
 
     spawnDamageNumber(point, amount, opts) {

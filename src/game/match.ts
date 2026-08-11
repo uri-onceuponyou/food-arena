@@ -17,10 +17,16 @@ import type { ArenaDefinition } from '../arena/types';
 import { createCharacter } from '../characters/registry';
 import type { CharacterModel } from '../characters/types';
 import { createFogRing, type FogRing } from '../arena/fogRing';
-import { createMatch, stepMatch, type MatchLevels } from './sim';
+import { createMatch, stepMatch, type FighterConfig, type MatchLevels } from './sim';
 import { enemyLevelFor } from './economy';
 import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchState } from './state';
-import { otherRole } from './state';
+// The presentation-side seat rules, stated once for all four consumers of the event
+// stream. `otherRole` is gone from this file: every "the other one" reconstruction it
+// used to do — the damage-source colour, the impact VFX origin, the knockback direction —
+// is now `ev.source.attackerId` through `weaponAttackerOf`.
+import {
+  fighterOf, fightersOf, LOCAL_SLOT, localFighter, slotOf, trailOwnerOf, weaponAttackerOf,
+} from './roster';
 import { boxesOverlap } from './movement';
 import { CHARACTER_IDS, CHARACTERS, LEVEL_MIN, MATCH_DURATION_MS, MIN_SAFE_RADIUS, clampLevel, type CharacterId, type Weapon } from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
@@ -32,13 +38,15 @@ import { VfxLayer } from './vfx';
 // touches the renderer, and every call into it is failure-tolerant by contract, so
 // an audio problem degrades to silence rather than to a stalled frame.
 import { createMatchAudio, type MatchAudio } from '../audio';
-// `enemyVisibleToPlayer` is concealment's ONE presentation-side predicate, shared by all
-// three surfaces that could leak the opponent's position (radar blip, floating HP pill,
+// `fighterVisibleTo` is concealment's ONE presentation-side predicate, shared by all
+// three surfaces that could leak an opponent's position (radar blip, floating HP pill,
 // 3D model). It is declared in `hud.ts` rather than here purely for import direction:
 // `match.ts` imports `hud.ts` and not the other way round, so this is the only placement
 // that lets both files call one copy instead of growing two. Its header carries the
-// asymmetry rule — observer is always `state.player`, target is always `state.enemy`.
-import { createHud, enemyVisibleToPlayer, type Hud, type ScreenPoint } from '../ui/hud';
+// asymmetry rule — the observer is always the LOCAL seat, the target is any other
+// fighter, asked one at a time. ⚠️ It was `enemyVisibleToPlayer(state)` and took no
+// target at all, which is a predicate that can only ever hide slot 1.
+import { createHud, fighterVisibleTo, type Hud, type ScreenPoint } from '../ui/hud';
 
 declare global {
   interface Window {
@@ -263,6 +271,51 @@ function characterFromQuery(param: string): CharacterId | null {
   return raw && (CHARACTER_IDS as readonly string[]).includes(raw) ? (raw as CharacterId) : null;
 }
 
+/**
+ * QA-ONLY: `?fighters=<id>@<x>,<y>;<id>@<x>,<y>;…` — seat 3 to `MAX_FIGHTERS` fighters.
+ *
+ * ── 🚨 WHY THIS EXISTS, AND WHY IT CARRIES ITS OWN SPAWNS ──────────────────
+ *
+ * The sim has seated up to six fighters since `1b506d6`. **Nothing in `src/` calls the list
+ * form**, so before this parameter there was no way to put a third fighter on screen at all
+ * — and "the presentation is N-capable" would have shipped measured only by reading the
+ * code, which is this project's most-repeated failure. `tools/tmp/np_nfighter.mjs` is the
+ * consumer.
+ *
+ * ⚠️ **THE SPAWNS COME FROM THE CALLER, NOT FROM THIS FILE, AND THAT IS `DECISIONS §49d`
+ * BEING OBEYED RATHER THAN WORKED AROUND.** `ArenaDefinition` declares exactly two spawn
+ * points, and `sim.ts:createMatch` deliberately THROWS for a slot 2+ with no explicit
+ * `spawn` rather than inventing a ring — because spawn placement for 4-6 fighters is part
+ * of §48's layout pass, where 180° point symmetry is a competitive-fairness constraint in
+ * the same category as `aspect.mjs`. A default invented HERE would be exactly the second,
+ * quieter source of truth the sim refused to become, and it would produce balance numbers,
+ * and it would look like it worked. So this parameter is a TRANSPORT for coordinates a
+ * probe chose; it contains no placement policy of its own, exactly like `?px=`/`?py=`.
+ *
+ * Absent, malformed or shorter than 3 entries -> `null`, and the session takes the shipped
+ * two-fighter path with not one branch changed. Never read by game logic.
+ */
+function fightersFromQuery(): FighterConfig[] | null {
+  const raw = new URLSearchParams(location.search).get('fighters');
+  if (!raw) return null;
+  const out: FighterConfig[] = [];
+  for (const part of raw.split(';')) {
+    const [idPart, posPart] = part.split('@');
+    const id = idPart?.trim();
+    if (!id || !(CHARACTER_IDS as readonly string[]).includes(id)) return null;
+    const cfg: FighterConfig = { characterId: id as CharacterId };
+    if (posPart) {
+      const [x, y] = posPart.split(',').map(Number);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      cfg.spawn = { x, y };
+    }
+    out.push(cfg);
+  }
+  // Two or fewer is refused rather than honoured: at two seats the legacy form is the
+  // measured-identical path and there is no reason for a QA parameter to route around it.
+  return out.length >= 3 ? out : null;
+}
+
 /** QA-only numeric URL override, same spirit as `?simSpeed=`. */
 function numberFromQuery(param: string): number | null {
   const raw = new URLSearchParams(location.search).get(param);
@@ -288,8 +341,26 @@ export class GameSession {
   /** Both fighters' levels. Symmetric by construction — see `GameSessionOptions`. */
   private readonly levels: MatchLevels;
 
-  private playerModel: CharacterModel;
-  private enemyModel: CharacterModel;
+  /**
+   * THE ROSTER, IN SLOT ORDER — `characterIds[i]` is the character in `fighters[i]`.
+   *
+   * `playerId`/`enemyId` above stay as the two-seat inputs this session is CONSTRUCTED
+   * from (a URL param, a menu choice, `enemyLevelFor`); this is what the renderer keys
+   * off. They are the same two values today and `spawnMatch` derives one from the other.
+   */
+  private readonly characterIds: CharacterId[];
+  /** QA-only 3..6 fighter roster, or `null` for the shipped two-seat path. See
+   * `fightersFromQuery`. */
+  private readonly qaFighters = fightersFromQuery();
+  /**
+   * ONE MODEL PER SLOT, index-aligned with `state.fighters`.
+   *
+   * ⚠️ WAS `playerModel` + `enemyModel`, which is a two-fighter renderer at the field
+   * level. Everything downstream that used to branch on a seat name — the concealment
+   * hide, the run/idle animation, the floating pill, the knockback nudge — is now one
+   * loop over this array, so a third fighter needs no third branch anywhere.
+   */
+  private models: CharacterModel[] = [];
   private state: MatchState;
 
   private readonly clock = new THREE.Clock();
@@ -411,10 +482,9 @@ export class GameSession {
   // 3D model's root position, decaying quickly — it is added AFTER `syncModelTransform`
   // writes the sim-authoritative position each frame, and never touches `MatchState`,
   // so sim and render can never desync over it.
-  private readonly knockback: Record<FighterRole, { x: number; z: number }> = {
-    player: { x: 0, z: 0 },
-    enemy: { x: 0, z: 0 },
-  };
+  // Indexed by SLOT, grown to match the roster in `spawnMatch`. A `Record<FighterRole,…>`
+  // has exactly two keys by type, so it could not have held a third fighter's nudge.
+  private knockback: { x: number; z: number }[] = [];
 
   constructor(private readonly opts: GameSessionOptions) {
     this.playerId = opts.playerCharacterId ?? characterFromQuery('player') ?? DEFAULT_PLAYER;
@@ -423,6 +493,13 @@ export class GameSession {
     // a screenshot pass reach a levelled fighter with no upgrade UI in the way.
     const lvl = clampLevel(opts.playerLevel ?? numberFromQuery('level') ?? LEVEL_MIN);
     this.levels = { player: lvl, enemy: enemyLevelFor(lvl) };
+    // The roster, in slot order. `createMatch`'s legacy 3-argument form still builds
+    // exactly two fighters (`state.ts`), so this is exactly two entries today — but it
+    // is the ONE place the renderer's fighter count is decided, and every array below
+    // (`models`, `knockback`, the HUD's slots) is sized from it.
+    this.characterIds = this.qaFighters
+      ? this.qaFighters.map((f) => f.characterId)
+      : [this.playerId, this.enemyId];
     const requestedSpeed = Number(new URLSearchParams(location.search).get('simSpeed'));
     this.simSpeed = Number.isFinite(requestedSpeed) && requestedSpeed > 0 ? Math.min(50, requestedSpeed) : 1;
 
@@ -457,10 +534,12 @@ export class GameSession {
       onRestart: () => this.restart(),
       onSelectWeapon: (index) => this.input.selectWeapon(index),
     });
-    this.hud.setCharacters(this.playerId, this.enemyId);
+    this.hud.setCharacters(this.characterIds);
 
     this.input = new InputController(this.stage.canvas);
-    this.input.setWeaponCount(CHARACTERS[this.playerId].weapons.length);
+    // The LOCAL SEAT's weapon count, which is `playerId` on every shipped flow and is the
+    // QA roster's slot 0 when one is present — `characterIds[LOCAL_SLOT]` states that once.
+    this.input.setWeaponCount(CHARACTERS[this.characterIds[LOCAL_SLOT]].weapons.length);
 
     // Mouse capture. Everything it needs from the session is already public — it
     // pauses and resumes through the SAME `pause()`/`resume()` the screen layer's
@@ -473,10 +552,15 @@ export class GameSession {
       onLockChange: (locked) => this.input.setPointerLocked(locked),
     });
 
-    // Placeholders assigned for real by spawnMatch() below (kept non-null for TS).
-    this.state = createMatch(this.arena, this.playerId, this.enemyId, this.levels);
-    this.playerModel = createCharacter(this.playerId);
-    this.enemyModel = createCharacter(this.enemyId);
+    // Placeholder assigned for real by spawnMatch() below (kept non-null for TS).
+    // `models` starts empty and `spawnMatch` fills it — it disposes and rebuilds the
+    // whole array every time, so there is nothing here for it to tear down.
+    //
+    // ⚠️ HEAD ALSO BUILT TWO THROWAWAY `CharacterModel`s HERE and disposed them one line
+    // later inside `spawnMatch`. Removing them changes no pixel — it is 2,532 fewer
+    // `THREE.MathUtils.generateUUID` draws, measured by `tools/tmp/np_rng.mjs`, which is
+    // why `np_identity.mjs` seeds UUID randomness on its own stream.
+    this.state = this.newMatch();
     this.spawnMatch();
 
     window.__matchDebug = this.debug;
@@ -546,26 +630,36 @@ export class GameSession {
     this.hud.dispose();
     this.vfx.dispose();
     this.fogRing.dispose();
-    this.playerModel.dispose();
-    this.enemyModel.dispose();
+    for (const m of this.models) m.dispose();
     this.stage.dispose();
   }
 
+  /** The ONE place a `MatchState` is built. Two seats through the legacy 3-argument form
+   * — which is what every shipped flow takes and what the identity battery measures — or
+   * the list form when the QA roster parameter is present. */
+  private newMatch(): MatchState {
+    return this.qaFighters
+      ? createMatch(this.arena, this.qaFighters)
+      : createMatch(this.arena, this.playerId, this.enemyId, this.levels);
+  }
+
   private spawnMatch(): void {
-    this.state = createMatch(this.arena, this.playerId, this.enemyId, this.levels);
+    this.state = this.newMatch();
     this.applyQaSetup();
 
-    this.stage.scene.remove(this.playerModel.root, this.enemyModel.root);
-    this.playerModel.dispose();
-    this.enemyModel.dispose();
-
-    this.playerModel = createCharacter(this.playerId);
-    this.enemyModel = createCharacter(this.enemyId);
-    this.stage.scene.add(this.playerModel.root, this.enemyModel.root);
-    this.syncModelTransform(this.playerModel, this.state.player);
-    this.syncModelTransform(this.enemyModel, this.state.enemy);
-    this.playerModel.play('idle');
-    this.enemyModel.play('idle');
+    // ⚠️ IN SLOT ORDER, and the order is load-bearing rather than tidy: `scene.add`
+    // order decides sibling order in the scene graph, which decides the draw order of
+    // ties in three's transparent sort. The old code added `(playerModel, enemyModel)`
+    // in one call; this adds slot 0 then slot 1 then the rest, which is the same
+    // sequence at two fighters.
+    for (const m of this.models) { this.stage.scene.remove(m.root); m.dispose(); }
+    const roster = fightersOf(this.state);
+    this.models = roster.map((f, i) => createCharacter(this.characterIds[i] ?? f.characterId));
+    for (const m of this.models) this.stage.scene.add(m.root);
+    this.models.forEach((m, i) => {
+      this.syncModelTransform(m, roster[i]);
+      m.play('idle');
+    });
 
     this.vfx.clear();
     this.audio.reset();
@@ -581,10 +675,13 @@ export class GameSession {
     this.feel.responses.knockback = 0; this.feel.responses.damageNumber = 0; this.feel.responses.screenFlash = 0;
     this.feel.frames = 0; this.feel.frozenFrames = 0; this.feel.repayingFrames = 0;
     this.feel.peakHitAmount = 0; this.feel.peakShakeM = 0; this.feel.lastHitStopMs = 0;
-    this.knockback.player.x = 0; this.knockback.player.z = 0;
-    this.knockback.enemy.x = 0; this.knockback.enemy.z = 0;
+    // Reallocated rather than zeroed in place: the roster length can change between
+    // matches once anything seats more than two, and a stale sixth entry holding the
+    // previous match's nudge is exactly the class of bug `vfx.ts:clear()` documents.
+    this.knockback = roster.map(() => ({ x: 0, z: 0 }));
 
-    const startPos = groundPos(this.state.player.x, this.state.player.y);
+    const me = localFighter(this.state);
+    const startPos = groundPos(me.x, me.y);
     this.stage.rig.snapTo(startPos.x, startPos.z);
     this.stage.lighting.focus(startPos.x, startPos.z);
 
@@ -604,8 +701,9 @@ export class GameSession {
   /** Apply the QA-only `?fogRadius=` / `?px=` / `?py=` overrides to a fresh match.
    * A no-op unless those params are on the URL — see the field comments. */
   private applyQaSetup(): void {
-    if (this.qaPlayerX !== null) this.state.player.x = this.qaPlayerX;
-    if (this.qaPlayerY !== null) this.state.player.y = this.qaPlayerY;
+    const me = localFighter(this.state);
+    if (this.qaPlayerX !== null) me.x = this.qaPlayerX;
+    if (this.qaPlayerY !== null) me.y = this.qaPlayerY;
     if (this.qaPlayerX !== null || this.qaPlayerY !== null) this.checkQaSpawn();
 
     if (this.qaFogRadius === null) return;
@@ -645,7 +743,7 @@ export class GameSession {
    * So: say so, once, loudly, and publish it for probes. See `MatchDebug`.
    */
   private checkQaSpawn(): void {
-    const p = this.state.player;
+    const p = localFighter(this.state);
     const box = this.arena.cover.find((o) => boxesOverlap(p.x, p.y, p.size, p.size, o.x, o.y, o.w, o.h));
     this.debug.qaSpawnInsideCover = box
       ? `${box.kind ?? 'cover'} @(${box.x},${box.y}) ${box.w}x${box.h}`
@@ -671,7 +769,8 @@ export class GameSession {
   private aimCursor(): { from: ScreenPoint; at: ScreenPoint } | null {
     const off = this.input.aimOffsetPx;
     if (!off) return null;
-    const from = this.projectPointToScreen(this.state.player.x, this.state.player.y, 0);
+    const me = localFighter(this.state);
+    const from = this.projectPointToScreen(me.x, me.y, 0);
     if (!from) return null;
     return { from, at: { x: from.x + off.x, y: from.y + off.y } };
   }
@@ -703,9 +802,10 @@ export class GameSession {
           // Unproject the cursor's ground-plane hit (3D metres) back to world units,
           // then express it as a direction FROM the player — MatchInput.aim is a
           // facing vector, not a target point.
+          const me = localFighter(this.state);
           aim = {
-            x: toWorldUnits(hit.x) - this.state.player.x,
-            y: toWorldUnits(hit.z) - this.state.player.y,
+            x: toWorldUnits(hit.x) - me.x,
+            y: toWorldUnits(hit.z) - me.y,
           };
         }
       }
@@ -731,12 +831,21 @@ export class GameSession {
   private colorForDamageSource(targetRole: FighterRole, source: DamageSource): string {
     switch (source.kind) {
       case 'weapon': {
-        const attacker = this.state[otherRole(targetRole)];
+        // ⚠️ WAS `this.state[otherRole(targetRole)]` — "whoever is not the victim",
+        // which is a correct attacker only while there are two fighters and a
+        // plausible-looking wrong one at three. `DamageSource` carries `attackerId`
+        // for exactly this; see `roster.ts:weaponAttackerOf` for why the seat name
+        // survives as a fallback rather than being deleted.
+        const attacker = weaponAttackerOf(this.state, source, targetRole);
         const weapon = CHARACTERS[attacker.characterId].weapons.find((w) => w.key === source.weaponKey);
         return weapon?.color ?? '#FFFFFF';
       }
       case 'trail':
-        return source.ownerRole === 'player' ? '#FF9EC4' : '#FFD27A';
+        // The local seat's trail is rose, everyone else's is gold. A two-way tint on a
+        // ROLE would have made slots 2..5 all read as "the enemy's trail", which is at
+        // least honest, but keying it on the local slot says the thing the player needs
+        // to know: is this puddle mine.
+        return slotOf(source.ownerId, source.ownerRole) === LOCAL_SLOT ? '#FF9EC4' : '#FFD27A';
       case 'hazard':
         return '#FF7A3D';
       case 'fog':
@@ -774,14 +883,15 @@ export class GameSession {
 
   /** Nudge a fighter's VISUAL model away from an attack source. Sim positions are
    * never touched — see the `knockback` field comment. */
-  private applyKnockback(targetRole: FighterRole, fromX: number, fromY: number, amount: number): void {
-    const target = this.state[targetRole];
+  private applyKnockback(targetSlot: number, fromX: number, fromY: number, amount: number): void {
+    const target = fightersOf(this.state)[targetSlot];
+    const kb = this.knockback[targetSlot];
+    if (!target || !kb) return;
     const dx = target.x - fromX;
     const dy = target.y - fromY;
     const mag = Math.hypot(dx, dy);
     if (mag < 1e-4) return;
     const impulse = THREE.MathUtils.clamp(amount, 0, 0.22);
-    const kb = this.knockback[targetRole];
     kb.x += (dx / mag) * impulse;
     kb.z += (dy / mag) * impulse;
     this.feel.responses.knockback++;
@@ -795,7 +905,10 @@ export class GameSession {
     // its burst correctly — `applyDamage` always pushes `hit-landed` immediately
     // before `death` in the same batch (combat.ts), so this is always populated by
     // the time `death` is processed.
-    const lastHitColor: Partial<Record<FighterRole, string>> = {};
+    // Indexed by SLOT. A `Partial<Record<FighterRole, string>>` has two keys by type,
+    // so at three fighters the third one's death burst would have been tinted with
+    // whatever slot 1 was last hit by.
+    const lastHitColor: (string | undefined)[] = [];
 
     for (const ev of events) {
       // QA census of the event → feel edge. Keyed exactly as `feel_census.mjs` keys
@@ -808,8 +921,9 @@ export class GameSession {
 
       switch (ev.type) {
         case 'weapon-fired': {
-          const model = ev.fighterRole === 'player' ? this.playerModel : this.enemyModel;
-          const fighter = this.state[ev.fighterRole];
+          const model = this.models[slotOf(ev.fighterId, ev.fighterRole)];
+          const fighter = fighterOf(this.state, ev.fighterId, ev.fighterRole);
+          if (!model) break;
           const weapons = CHARACTERS[fighter.characterId].weapons;
           const weaponIndex = weapons.findIndex((w) => w.key === ev.weaponKey);
           const weapon = weapons[weaponIndex < 0 ? 0 : weaponIndex];
@@ -839,7 +953,8 @@ export class GameSession {
           break;
         }
         case 'hit-landed': {
-          const model = ev.targetRole === 'player' ? this.playerModel : this.enemyModel;
+          const targetSlot = slotOf(ev.targetId, ev.targetRole);
+          const model = this.models[targetSlot];
           // ⚠️ `intensity` is passed and is currently IGNORED — `CharacterModel.play`
           // declares `opts.intensity` (characters/types.ts) and `BaseCharacter.play`
           // does not read it. It is passed anyway, deliberately, because this is where
@@ -850,10 +965,10 @@ export class GameSession {
           // at least tries. Wiring it is one line in `applyHitFlash`, in a file this
           // owner does not have; see the report accompanying this commit. Until then
           // this call site is correct and inert rather than absent and forgotten.
-          model.play('hit', { intensity: THREE.MathUtils.clamp(ev.amount / 12, 0.25, 1) });
+          model?.play('hit', { intensity: THREE.MathUtils.clamp(ev.amount / 12, 0.25, 1) });
 
           const color = this.colorForDamageSource(ev.targetRole, ev.source);
-          lastHitColor[ev.targetRole] = color;
+          lastHitColor[targetSlot] = color;
 
           // ── Closing fog: deliberately NOT the generic impact treatment ────────
           // Fog damage used to run the exact same code path as a weapon hit —
@@ -868,7 +983,9 @@ export class GameSession {
           if (ev.source.kind === 'fog') {
             const fogPos = this.projectPointToScreen(ev.x, ev.y, 1.3);
             if (fogPos) { this.hud.spawnDamageNumber(fogPos, ev.amount, { fog: true }); this.feel.responses.damageNumber++; }
-            if (ev.targetRole === 'player') { this.hud.flashFogTick(); this.feel.responses.screenFlash++; }
+            // The edge vignette is the LOCAL screen's "the zone is killing YOU" —
+            // it must not fire because somebody else took a fog tick.
+            if (targetSlot === LOCAL_SLOT) { this.hud.flashFogTick(); this.feel.responses.screenFlash++; }
             break;
           }
 
@@ -878,7 +995,7 @@ export class GameSession {
           // the generic burst, exactly as before this system existed.
           let impactSource: { weapon: Weapon; characterId: CharacterId; fromXWU: number; fromYWU: number } | undefined;
           if (ev.source.kind === 'weapon') {
-            const attackerFighter = this.state[otherRole(ev.targetRole)];
+            const attackerFighter = weaponAttackerOf(this.state, ev.source, ev.targetRole);
             const weaponKey = ev.source.weaponKey;
             const weapon = CHARACTERS[attackerFighter.characterId].weapons.find((w) => w.key === weaponKey);
             if (weapon) {
@@ -928,7 +1045,9 @@ export class GameSession {
           // `FeelDebug.frozenFrames` / `repayingFrames`.
           const isWeaponHit = ev.source.kind === 'weapon';
           const shakeBase = THREE.MathUtils.clamp(0.012 + ev.amount * 0.0175, 0.012, GameSession.SHAKE_MAX_M);
-          const targetBias = ev.targetRole === 'player' ? 1.25 : 1;
+          // The kick is 25% harder when the hit landed on THIS screen's fighter —
+          // a local-seat bias, not a slot-0 one.
+          const targetBias = targetSlot === LOCAL_SLOT ? 1.25 : 1;
           this.kick(shakeBase * targetBias * (isWeaponHit ? 1 : 0.45));
 
           if (isWeaponHit) {
@@ -936,11 +1055,11 @@ export class GameSession {
           }
 
           if (ev.source.kind === 'weapon') {
-            const attacker = this.state[otherRole(ev.targetRole)];
-            this.applyKnockback(ev.targetRole, attacker.x, attacker.y, 0.05 + ev.amount * 0.006);
+            const attacker = weaponAttackerOf(this.state, ev.source, ev.targetRole);
+            this.applyKnockback(targetSlot, attacker.x, attacker.y, 0.05 + ev.amount * 0.006);
           } else if (ev.source.kind === 'trail') {
-            const owner = this.state[ev.source.ownerRole];
-            this.applyKnockback(ev.targetRole, owner.x, owner.y, 0.03);
+            const owner = trailOwnerOf(this.state, ev.source);
+            this.applyKnockback(targetSlot, owner.x, owner.y, 0.03);
           }
           break;
         }
@@ -968,7 +1087,7 @@ export class GameSession {
           break;
         }
         case 'heal': {
-          const fighter = this.state[ev.fighterRole];
+          const fighter = fighterOf(this.state, ev.fighterId, ev.fighterRole);
           this.vfx.spawnHealPulse(fighter.x, fighter.y);
           this.feel.responses.vfx++;
           const screenPos = this.projectPointToScreen(fighter.x, fighter.y, 1.6);
@@ -976,10 +1095,10 @@ export class GameSession {
           break;
         }
         case 'death': {
-          const model = ev.fighterRole === 'player' ? this.playerModel : this.enemyModel;
-          model.play('death');
-          const fighter = this.state[ev.fighterRole];
-          const color = lastHitColor[ev.fighterRole] ?? '#FFFFFF';
+          const slot = slotOf(ev.fighterId, ev.fighterRole);
+          this.models[slot]?.play('death');
+          const fighter = fighterOf(this.state, ev.fighterId, ev.fighterRole);
+          const color = lastHitColor[slot] ?? '#FFFFFF';
           this.vfx.spawnDeathBurst(fighter.x, fighter.y, color);
           this.feel.responses.vfx++;
           this.kick(0.42, 3);
@@ -1028,7 +1147,8 @@ export class GameSession {
    * where a hand-derived angle would silently rot.
    */
   private safeArrow(): { at: ScreenPoint; angleRad: number } | null {
-    const p = this.state.player;
+    // The chevron points THIS SCREEN'S fighter at safety, so it is a local-seat read.
+    const p = localFighter(this.state);
     const dx = this.arena.center.x - p.x;
     const dy = this.arena.center.y - p.y;
     const mag = Math.hypot(dx, dy);
@@ -1064,8 +1184,9 @@ export class GameSession {
     d.moveX = moveX;
     d.moveY = moveY;
     d.attack = attack;
-    d.facingX = this.state.player.facing.x;
-    d.facingY = this.state.player.facing.y;
+    const me = localFighter(this.state);
+    d.facingX = me.facing.x;
+    d.facingY = me.facing.y;
     d.selectedWeapon = this.input.selectedWeapon;
     d.pointerLocked = this.input.pointerLocked;
     d.frames++;
@@ -1076,8 +1197,7 @@ export class GameSession {
    * so the nudge still reads as a snappy pop even while the sim is frozen. */
   private decayKnockback(rawDtSeconds: number): void {
     const decay = Math.exp(-rawDtSeconds * 14);
-    for (const role of ['player', 'enemy'] as const) {
-      const kb = this.knockback[role];
+    for (const kb of this.knockback) {
       kb.x *= decay;
       kb.z *= decay;
       if (Math.abs(kb.x) < 1e-4) kb.x = 0;
@@ -1135,8 +1255,11 @@ export class GameSession {
     if (stepDtMs < rawDtMs * 0.5) this.feel.frozenFrames++;
     else if (stepDtMs > rawDtMs * 1.05) this.feel.repayingFrames++;
 
-    const prevPlayer = { x: this.state.player.x, y: this.state.player.y };
-    const prevEnemy = { x: this.state.enemy.x, y: this.state.enemy.y };
+    // One entry per slot, in slot order. `moved` is the run/idle discriminant and the
+    // model's `moveSpeed01`, and it has to be asked per fighter — the two-variable form
+    // could only ever answer it for two of them.
+    const roster = fightersOf(this.state);
+    const prev = roster.map((f) => ({ x: f.x, y: f.y }));
 
     const input = this.buildInput();
     const events = stepMatch(this.state, stepDtMs, input);
@@ -1150,18 +1273,20 @@ export class GameSession {
     // what was asked for — the aim pipeline's output, not its input.
     this.publishDebug(input.move.x, input.move.y, input.attack === true);
 
-    const playerMoved = this.state.player.x !== prevPlayer.x || this.state.player.y !== prevPlayer.y;
-    const enemyMoved = this.state.enemy.x !== prevEnemy.x || this.state.enemy.y !== prevEnemy.y;
+    const moved = roster.map((f, i) => f.x !== prev[i].x || f.y !== prev[i].y);
 
-    this.syncModelTransform(this.playerModel, this.state.player);
-    this.syncModelTransform(this.enemyModel, this.state.enemy);
     // Layer the visual-only knockback nudge on top of the sim-authoritative position
     // written just above — never the other way around, so the sim position always
     // wins next frame and the two can't drift apart.
-    this.playerModel.root.position.x += this.knockback.player.x;
-    this.playerModel.root.position.z += this.knockback.player.z;
-    this.enemyModel.root.position.x += this.knockback.enemy.x;
-    this.enemyModel.root.position.z += this.knockback.enemy.z;
+    this.models.forEach((m, i) => {
+      const f = roster[i];
+      if (!f) return;
+      this.syncModelTransform(m, f);
+      const kb = this.knockback[i];
+      if (!kb) return;
+      m.root.position.x += kb.x;
+      m.root.position.z += kb.z;
+    });
     this.decayKnockback(rawDtSeconds);
 
     // ⚠️ SURFACE 3 OF 3 — the model itself. Uri, §30: *"plates and other kitchen objects
@@ -1179,29 +1304,38 @@ export class GameSession {
     // in the right place the instant it reappears, with no one-frame pop at the old
     // position, and nothing here has to be re-synced on the reveal path.
     //
-    // ⚠️ `this.enemyModel` ONLY. `playerModel.root.visible` is never assigned anywhere in
-    // this file — a player who hides must always see themselves, and vanishing your own
-    // character reads as a crash rather than as a mechanic.
-    this.enemyModel.root.visible = enemyVisibleToPlayer(this.state);
+    // ⚠️ EVERY SLOT EXCEPT `LOCAL_SLOT`, and the skip is EXPLICIT. It used to read
+    // `this.enemyModel` ONLY, with the note *"`playerModel.root.visible` is never
+    // assigned anywhere in this file — a player who hides must always see themselves,
+    // and vanishing your own character reads as a crash rather than as a mechanic."*
+    // That rule is unchanged and is now enforced by the `i === LOCAL_SLOT` continue
+    // rather than by the absence of a line: `fighterVisibleTo` would in fact return
+    // true for a fighter asked about itself, and leaning on that would make "you can
+    // always see yourself" a consequence of a distance test instead of a stated rule.
+    const observer = localFighter(this.state);
+    this.models.forEach((m, i) => {
+      if (i === LOCAL_SLOT) return;
+      const f = roster[i];
+      if (f) m.root.visible = fighterVisibleTo(this.state, observer, f);
+    });
 
-    if (this.state.player.alive) this.playerModel.play(playerMoved ? 'run' : 'idle');
-    if (this.state.enemy.alive) this.enemyModel.play(enemyMoved ? 'run' : 'idle');
+    this.models.forEach((m, i) => {
+      if (roster[i]?.alive) m.play(moved[i] ? 'run' : 'idle');
+    });
 
     // Character animation runs on `stepDtSeconds` (hit-stop-scaled) so attack swings,
     // run cycles and the hit-flash visibly hitch along with the sim on a solid hit —
     // that shared pause across sim + character motion IS the hit-stop.
     const elapsedSeconds = this.state.elapsed / 1000;
-    this.playerModel.update({
-      dt: stepDtSeconds,
-      elapsed: elapsedSeconds,
-      moveSpeed01: this.state.player.alive && playerMoved ? 1 : 0,
-      health01: this.state.player.hp / this.state.player.maxHp,
-    });
-    this.enemyModel.update({
-      dt: stepDtSeconds,
-      elapsed: elapsedSeconds,
-      moveSpeed01: this.state.enemy.alive && enemyMoved ? 1 : 0,
-      health01: this.state.enemy.hp / this.state.enemy.maxHp,
+    this.models.forEach((m, i) => {
+      const f = roster[i];
+      if (!f) return;
+      m.update({
+        dt: stepDtSeconds,
+        elapsed: elapsedSeconds,
+        moveSpeed01: f.alive && moved[i] ? 1 : 0,
+        health01: f.hp / f.maxHp,
+      });
     });
 
     this.arena.update?.(stepDtSeconds, elapsedSeconds);
@@ -1220,17 +1354,23 @@ export class GameSession {
       this.stage.rig,
     );
 
-    const playerPos = groundPos(this.state.player.x, this.state.player.y);
-    this.stage.rig.follow(playerPos.x, playerPos.z);
-    this.stage.lighting.focus(playerPos.x, playerPos.z);
+    // The camera follows THIS SCREEN'S seat. One client, one camera, one subject.
+    const localPos = groundPos(observer.x, observer.y);
+    this.stage.rig.follow(localPos.x, localPos.z);
+    this.stage.lighting.focus(localPos.x, localPos.z);
 
     // TEMP DEBUG: ground-plane screen projections for scripted aim in
     // tools/tmp/vfx_convert_capture.mjs (the floating HUD pill sits well above the
     // head, which makes a Playwright driver systematically overshoot when raycasting
     // mouse position back to the ground plane, per `buildInput()`'s aim math).
+    // ⚠️ THE `player`/`enemy` KEYS ARE A PUBLISHED CONTRACT, not an internal shape:
+    // twelve instruments read `__vfxDebugScreen.player` / `.enemy` by name, including
+    // `tools/match-play.mjs` and the `cw_conceal_view` gate. `slots` is ADDED for
+    // anything that needs slot 2 and up; neither existing key moves.
     (window as any).__vfxDebugScreen = {
-      player: this.projectPointToScreen(this.state.player.x, this.state.player.y, 0),
-      enemy: this.projectPointToScreen(this.state.enemy.x, this.state.enemy.y, 0),
+      player: this.projectPointToScreen(roster[0].x, roster[0].y, 0),
+      enemy: roster[1] ? this.projectPointToScreen(roster[1].x, roster[1].y, 0) : null,
+      slots: roster.map((f) => this.projectPointToScreen(f.x, f.y, 0)),
     };
 
     this.hud.update(this.state, {
@@ -1241,15 +1381,19 @@ export class GameSession {
       // cursor with nothing on screen to orient by.
       aim: this.aimCursor(),
     });
-    // ⚠️ SURFACE 2 OF 3 — the enemy's floating HP pill. `updateFloatingBars` hides a bar
+    // ⚠️ SURFACE 2 OF 3 — the floating HP pills. `updateFloatingBars` hides a bar
     // whose screen point is `null`, and `projectToScreen` already returns `null` for a
     // dead fighter, so concealment rides the SAME null channel rather than inventing a
-    // second way to hide the same element. The player's own pill takes `alive` unchanged.
+    // second way to hide the same element. The local seat's own pill takes `alive`
+    // unchanged — same explicit `LOCAL_SLOT` skip as the model hide above.
     this.hud.updateFloatingBars(
-      this.projectToScreen(this.playerModel, this.state.player.alive),
-      this.projectToScreen(this.enemyModel, this.state.enemy.alive && enemyVisibleToPlayer(this.state)),
-      this.state.player.hp / this.state.player.maxHp,
-      this.state.enemy.hp / this.state.enemy.maxHp,
+      this.models.map((m, i) => {
+        const f = roster[i];
+        if (!f) return null;
+        const shown = i === LOCAL_SLOT ? f.alive : f.alive && fighterVisibleTo(this.state, observer, f);
+        return this.projectToScreen(m, shown);
+      }),
+      roster.map((f) => f.hp / f.maxHp),
     );
 
     // Camera (follow lerp + shake decay) always runs in real time — a shaking camera
