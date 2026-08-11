@@ -308,6 +308,16 @@ if (args.selftest) {
         writeFileSync(join(dir, 'game', f), execFileSync('git', ['show', `${REF}:src/game/${f}`], { cwd: ROOT, encoding: 'utf8' }));
       }
       writeFileSync(join(dir, 'arena', 'types.ts'), execFileSync('git', ['show', `${REF}:src/arena/types.ts`], { cwd: ROOT, encoding: 'utf8' }));
+      // ⚠️ AND THE ARENA IS THE THIRD THING IN THAT BOX. The two warnings above pinned the
+      // SIM and then the DRIVER, each after the check fired on a legitimate change and was
+      // wrong to. The map was never pinned, so the child loaded `tools/arena.gameplay.json`
+      // LIVE — and on 2026-08-11 an arena pass moved 8 cover boxes to close 14 unreachable
+      // pockets and added 6 concealment regions, and this check read 26.6% against the
+      // recorded 27.2% and "failed". Right to fail, wrong check, for the third time and the
+      // same reason one level further out. Verified by bisect before touching it: 9/9 at
+      // `189d6ed` and at `3ae6749`, failing only after the layout commit — so it was NOT
+      // pre-existing, and the published number was NOT stale.
+      writeFileSync(join(dir, 'arena.gameplay.json'), execFileSync('git', ['show', `${REF}:tools/arena.gameplay.json`], { cwd: ROOT, encoding: 'utf8' }));
     } catch (e) {
       dir = null;
       ok(`cross-check: could be pinned to ${REF}`, false, String(e).split('\n')[0]);
@@ -319,6 +329,8 @@ if (args.selftest) {
         [new URL(import.meta.url).pathname, '--seeds', '8', '--policies', 'smart2,chase', '--sim', join(dir, 'game'),
          // Pin the DRIVER to the rev that published 27.2 / 18.8, exactly as `--sim` pins
          // the sim. Without these the child inherits the working tree's driver.
+         // Pin the MAP too — see the note at the extraction above.
+         '--arena', join(dir, 'arena.gameplay.json'),
          '--no-player-heal', '--damage-ranking-key'],
         { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       const grab = (name) => {
