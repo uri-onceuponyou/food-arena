@@ -46,9 +46,12 @@
  * 10-tile one inside an otherwise 60%-correct sheet — and requires BOTH to be refused,
  * plus four sheets that must NOT fire (normal, perfect, uniformly wrong, and two
  * coincidental neighbour matches) so the predicate cannot be tautological.
- * ⚠️ The six REAL r13 sheets run too, but only as an optional arm: `shots/` is
- * gitignored, so a selftest that required them would pass here and fail on a clean
- * checkout and under `verify-head.mjs`. They print SKIP when absent.
+ * ⚠️ The six REAL r13 sheets run too, but as an UNCOUNTED arm: `shots/` is gitignored,
+ * so a selftest that required them would pass here and fail on a clean checkout and
+ * under `verify-head.mjs`, and one that COUNTED them would print 13 here and 7 there —
+ * a registered gate count that depends on files git does not carry. They print SKIP when
+ * absent and `(uncounted)` when present, and they can still fail the run.
+ * **The registered count is 7.**
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -169,6 +172,16 @@ if (IS_MAIN && 'selftest' in a) {
   // ── OPTIONAL: the REAL sheets, when this working tree still has the round. These are
   //    the inputs the predicate was actually built from, so they are worth running when
   //    present — but they can never be required, because `shots/` is gitignored.
+  //
+  // 🔴 AND THEY DO NOT COUNT TOWARD THE TALLY, WHICH IS THE WHOLE POINT. The first cut
+  //    added them to `pass`, so this tool printed **13 on a working tree that still had
+  //    the round and 7 on the committed tree** — a gate count that depends on the
+  //    presence of gitignored files, i.e. a registered number that is wrong for whoever
+  //    runs it next. `gatecount` compares the printed count against `docs/TOOLS.md` and
+  //    would have reported that as doc drift, which is precisely the failure mode
+  //    `CLAUDE.md`'s gate-count rule exists to stop. **The registered count is 7.** A
+  //    real-sheet arm can still FAIL the run — it increments `fail` — it just cannot
+  //    change the number when it passes.
   const K = 'shots/ic/r13/r13.key.json';
   if (existsSync(K)) {
     const rk = JSON.parse(readFileSync(K, 'utf8'));
@@ -182,10 +195,16 @@ if (IS_MAIN && 'selftest' in a) {
       }
       return m;
     };
-    check('REAL M1 (slipped from tile 33) is REFUSED', slipWindows(sheet('M1'), rBy, rc).length > 0, true);
-    check('REAL M2 (slipped tiles 57..66 only) is REFUSED', slipWindows(sheet('M2'), rBy, rc).length > 0, true);
-    check('REAL M3 (clean, same plate and protocol) is ACCEPTED', slipWindows(sheet('M3'), rBy, rc), []);
-    for (const j of ['N1', 'N2', 'N3']) check(`REAL ${j} (native plate, clean) is ACCEPTED`, slipWindows(sheet(j), rBy, rc), []);
+    /** Same assertion, but it may only ever SUBTRACT from the result, never add. */
+    const extra = (name, got, want) => {
+      const ok = JSON.stringify(got) === JSON.stringify(want);
+      if (!ok) fail++;
+      console.log(`  ${ok ? 'ok  ' : 'FAIL'}  (uncounted) ${name}  got ${JSON.stringify(got)}`);
+    };
+    extra('REAL M1 (slipped from tile 33) is REFUSED', slipWindows(sheet('M1'), rBy, rc).length > 0, true);
+    extra('REAL M2 (slipped tiles 57..66 only) is REFUSED', slipWindows(sheet('M2'), rBy, rc).length > 0, true);
+    extra('REAL M3 (clean, same plate and protocol) is ACCEPTED', slipWindows(sheet('M3'), rBy, rc), []);
+    for (const j of ['N1', 'N2', 'N3']) extra(`REAL ${j} (native plate, clean) is ACCEPTED`, slipWindows(sheet(j), rBy, rc), []);
   } else {
     console.log(`  SKIP  the 6 real r13 sheets (${K} absent — shots/ is gitignored)`);
   }
