@@ -11,10 +11,27 @@ this machine, it says that instead.
 > **Not a port.** Renderer, sim and UI stay exactly as they are. Nothing here asks for a change to
 > `src/render/`, `src/game/` or `src/ui/`.
 >
-> **The wrapper choice is Uri's.** Capacitor vs a hand-rolled WebView vs something else is parked
-> in `docs/DECISIONS-FOR-URI.md` **§51** with what each costs. This file is deliberately
-> wrapper-agnostic: every requirement below is expressed as a capability, not as an API call in
-> somebody's SDK.
+> ⚠️ **THIS PARAGRAPH USED TO READ *"The wrapper choice is Uri's… parked in §51"*. IT IS ANSWERED:
+> §51a DECIDED CAPACITOR** (2026-08-11, Uri: *"Not technical - Pick for me."*). Kept because the
+> staleness is the lesson — a decision landed in one file and the sentence describing it as open
+> stayed true-looking in another, which is this project's most repeated documentation defect.
+>
+> **Cordova was refused on a number**, not a preference: it defaults to `file://`, a `file://`
+> document has an **opaque origin**, so `<script type="module">` fails CORS — measured
+> `net::ERR_FAILED`, **0 canvases, stuck on the boot curtain forever with the URL it asked for
+> correct**. Capacitor serves from a custom scheme with a **real origin**, which is the one thing
+> this bundle actually needs, and it supplies orientation lock and safe-area insets natively.
+>
+> 🚨 **AND THE THING A WRAPPER DOES NOT BUY: FRAME RATE.** §33's *"this is why i want to move to
+> app"* was answered by measurement — Capacitor, a WebView and Safari all run **the same WebGL
+> renderer at the same speed**. A wrapper buys orientation lock, fullscreen, no browser chrome and
+> a real origin. **It buys nothing on draw calls, shader cost or touch latency.** Phone performance
+> was therefore fixed on its own terms instead (**928 → 423 draw calls**, main thread **−47.9%**),
+> and that work is what made the phone playable — not the wrapper, which is still unbuilt.
+>
+> This file stays deliberately wrapper-agnostic below: every requirement is expressed as a
+> **capability**, not as an API call in somebody's SDK. That is still the right shape — Capacitor
+> is the decision, not a dependency.
 
 ---
 
