@@ -94,6 +94,15 @@ const SCALEY = get('--scaley', '').split(',').filter(Boolean).map((s) => {
   return { name, k: Number(k) };
 });
 const PAINT = get('--paint', 'neck');
+/**
+ * ⚠️ THE JOIN IS MEASURED ON ONE ANIMATION PHASE UNLESS YOU SAY OTHERWISE. `t=1.5`
+ * `anim=idle` is what `cr2_shot` and `nm_island` freeze, and the idle cycle rotates
+ * `torso.x` by +-0.065 and `head.x` by -+0.075 — at ~0.45 m of lever that is ~0.03 m
+ * of relative travel at the neck, which is the same order as the overlap a join is
+ * bought with. Sweep `--t` before believing a single-phase "1 component".
+ */
+const TS = get('--t', '1.5').split(',').map(Number);
+const ANIMS = get('--anim', 'idle').split(',');
 const W = 900, H = 1400;
 
 if (!BASE) { console.error('need PREVIEW_BASE or --url'); process.exit(2); }
@@ -120,8 +129,9 @@ const browser = await chromium.launch({ args: LAUNCH_ARGS });
  * matched nothing must not be readable as "the change did nothing".
  */
 async function capture(id, pitch, opts = {}) {
+  const t = opts.t ?? TS[0], anim = opts.anim ?? ANIMS[0];
   const url = `${BASE}/preview.html?piece=character&id=${id}&pitch=${pitch}&yaw=${YAW}&fill=${FILL}`
-    + `&t=1.5&anim=idle&shot=1&bg=3d2b21`;
+    + `&t=${t}&anim=${anim}&shot=1&bg=3d2b21`;
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   await page.route('**/@vite/client', (r) => r.fulfill({ status: 200, contentType: 'application/javascript', body: HMR_STUB }));
   await page.goto(url, { waitUntil: 'load', timeout: 120_000 });
@@ -204,9 +214,26 @@ async function island(id, pitch, opts) {
     const chroma = Math.max(dr, dg, db) - Math.min(dr, dg, db);
     if (mag >= MINSHADOW || chroma >= MINSHADOW) { solid[j] = 1; solidPx++; }
   }
-  const { sizes } = components(solid, W, H);
+  const { label, sizes } = components(solid, W, H);
   const big = sizes.map((s, i) => [i, s]).filter(([, s]) => s >= MIN).sort((x, y) => y[1] - x[1]);
-  return { solidPx, nComp: big.length, sizes: big.map(([, s]) => s), png: A.buf, info: A.info };
+  // Every component's bounding box, because "2 components" is not a finding until you
+  // know WHICH 68 pixels — a detached head and a clipped chopstick tip are the same
+  // integer and completely different bugs.
+  const boxes = new Map();
+  for (let j = 0; j < W * H; j++) {
+    const id = label[j];
+    if (id < 0) continue;
+    const x = j % W, y = (j / W) | 0;
+    const b = boxes.get(id) ?? { x0: W, x1: -1, y0: H, y1: -1 };
+    if (x < b.x0) b.x0 = x; if (x > b.x1) b.x1 = x;
+    if (y < b.y0) b.y0 = y; if (y > b.y1) b.y1 = y;
+    boxes.set(id, b);
+  }
+  const bboxes = big.map(([i, s]) => {
+    const b = boxes.get(i);
+    return `${s}px @ x[${b.x0}-${b.x1}] y[${b.y0}-${b.y1}]`;
+  });
+  return { solidPx, nComp: big.length, sizes: big.map(([, s]) => s), bboxes, png: A.buf, info: A.info };
 }
 
 /** magenta pixels, and the control that must be 0. */
@@ -310,12 +337,14 @@ if (KNOWNBAD === 'selfpair') {
 } else if (MODE === 'island') {
   const names = resolve(HIDE);
   console.log(`n2_probe island   hide=[${names.join(', ') || '—'}]   yaw ${YAW}  fill ${FILL}  min ${MIN} px  shadow floor ${MINSHADOW}`);
-  console.log('id           pitch  hidden  solidPx  components  sizes');
-  for (const id of IDS) for (const p of PITCHES) {
-    const r = await island(id, p, { hide: names, shift: SHIFT, scaley: SCALEY });
-    console.log(`${id.padEnd(12)} ${String(p).padStart(5)}  ${String(r.info.hidden).padStart(6)}`
-      + `  ${String(r.solidPx).padStart(7)}  ${String(r.nComp).padStart(10)}  ${r.sizes.slice(0, 6).join(', ')}`);
-    await save(`${id}_p${p}_${HIDE === 'none' ? 'shipped' : HIDE}.png`, r.png);
+  console.log(`id           pitch  anim      t  hidden  solidPx  components  sizes`);
+  for (const id of IDS) for (const p of PITCHES) for (const anim of ANIMS) for (const t of TS) {
+    const r = await island(id, p, { hide: names, shift: SHIFT, scaley: SCALEY, t, anim });
+    console.log(`${id.padEnd(12)} ${String(p).padStart(5)}  ${anim.padEnd(5)} t${String(t).padStart(5)}`
+      + `  ${String(r.info.hidden).padStart(6)}  ${String(r.solidPx).padStart(7)}  ${String(r.nComp).padStart(10)}`
+      + `  ${r.sizes.slice(0, 6).join(', ')}${r.nComp > 1 ? `   🔴 SPLIT — ${r.bboxes.join(' | ')}` : ''}`);
+    if (r.nComp > 1) bad++;
+    await save(`${id}_p${p}_${anim}_t${t}_${HIDE === 'none' ? 'shipped' : HIDE}.png`, r.png);
   }
 } else if (MODE === 'neckpx') {
   const names = resolve(PAINT);
