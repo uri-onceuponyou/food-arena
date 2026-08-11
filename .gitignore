@@ -23,3 +23,11 @@ shots/
 
 # Original 2D prototypes — reference only, kept local and never published.
 reference/prototypes/
+
+# Uri's own device captures (screen recordings, phone screenshots). Local only.
+# ⚠️ `reference/video/` was NOT covered when the first recording landed here, so a
+# 4.9 MB capture of his phone sat committable for the length of one session. The rule
+# in CLAUDE.md is about `reference/` as a whole, not about the two folders that happened
+# to exist when it was written — so this ignores the directory, not a file pattern.
+reference/video/
+reference/videos/
