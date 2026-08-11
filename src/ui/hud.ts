@@ -83,6 +83,24 @@ export interface HudFrameInfo {
    * this stays null, so the two can never be drawn at once.
    */
   aim?: { from: ScreenPoint; at: ScreenPoint } | null;
+  /**
+   * WHERE THE LOCAL SEAT FINISHED — the one thing the result card cannot say today.
+   *
+   * 🔴 The six-player acceptance pass measured the defect: the card lists every loser
+   * in SLOT order, so a six-way always reads `EGG defeated HAMBURGER DONUT TACO SUSHI
+   * PIZZA` — **identical whether you came 2nd or 6th.** For five of the six players
+   * that is the entire result of the match, and it is not on the screen.
+   *
+   * ⚠️ IT IS OPTIONAL AND THE HUD DOES NOT COMPUTE IT, DELIBERATELY. A rank does not
+   * exist at this boundary yet: `onPhase(phase, winner)` carries a ROLE, and `sim.ts`
+   * publishes a winner rather than a finishing order. `DECISIONS §49a` fixes the
+   * ordering as *"fewest deaths, then lower slot"* and that belongs to whoever owns the
+   * match result, not to a renderer — a HUD that derived its own would be a second
+   * source of truth for the one number the player cares most about, which is the shape
+   * of all five recorded `ai.ts` defects. So this is a SOCKET: absent (today) the card
+   * renders exactly as it did, and the moment a rank is supplied it is drawn.
+   */
+  place?: { place: number; of: number } | null;
 }
 
 export interface Hud {
@@ -425,6 +443,11 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       <div class="hud-gameover" data-el="gameover">
         <div class="hud-gameover-card">
           <div class="hud-gameover-title" data-el="gameover-title"></div>
+          <!-- The local seat's finishing PLACE. Empty and display:none unless
+               HudFrameInfo.place is supplied — see that field. Declared between the
+               title and the subtitle because that is the reading order of the sentence
+               it completes: "DEFEAT! / 4th of 6 / EGG defeated ...". -->
+          <div class="hud-gameover-place" data-el="gameover-place"></div>
           <div class="hud-gameover-subtitle" data-el="gameover-subtitle"></div>
           <div class="hud-gameover-stats" data-el="gameover-stats"></div>
           <button class="hud-gameover-btn" data-el="gameover-btn" type="button">Play Again</button>
@@ -444,6 +467,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const countdownEl = q<HTMLDivElement>('countdown');
   const gameoverEl = q<HTMLDivElement>('gameover');
   const gameoverTitleEl = q<HTMLDivElement>('gameover-title');
+  const gameoverPlaceEl = q<HTMLDivElement>('gameover-place');
   const gameoverSubtitleEl = q<HTMLDivElement>('gameover-subtitle');
   const gameoverStatsEl = q<HTMLDivElement>('gameover-stats');
   const gameoverBtn = q<HTMLButtonElement>('gameover-btn');
@@ -1346,13 +1370,48 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         // that list has exactly one entry and this markup is character-for-character
         // what the two-seat version emitted — which is the whole acceptance test.
         const losers = roster.filter((_, i) => i !== winnerSlot);
+        // ── ONE VERB FOR EVERYBODY IS WRONG ABOVE TWO SEATS, AND §58 IS WHY ────────
+        // `timedOut` is `roster.every(alive)`, so a single death anywhere makes the
+        // whole line read "defeated" — and since sudden death collapses the ring at
+        // 30 s and burns everyone at 50 HP/s, a six-way typically ends with SOME
+        // fighters dead and SOME still standing at different HP. The card then claims
+        // the winner "defeated" four people who are alive on the same screen.
+        //
+        // Split by the one fact the sim already publishes per fighter — `alive`. Nobody
+        // is ranked here and nothing is inferred: a dead loser was defeated, a living
+        // one was outlasted, and that is exactly what `f.alive` means.
+        //
+        // ⚠️ AT TWO SEATS THIS IS THE SAME MARKUP, CHARACTER FOR CHARACTER, and that is
+        // the standing acceptance test rather than a nicety: one loser, either dead
+        // (one "defeated" group, no "outlasted" group) or alive (the reverse), which is
+        // precisely what `timedOut ? 'outlasted' : 'defeated'` emitted. `timedOut` is
+        // still read below for the stats line, where it is the right question.
+        const named = (f: { characterId: CharacterId }): string =>
+          `<span class="hud-go-emoji">${portraitMarkup(f.characterId, { crop: 'head' })}</span>${CHARACTERS[f.characterId].name}`;
+        const group = (verb: string, list: readonly typeof roster[number][]): string =>
+          (list.length ? `<span class="hud-go-vs">${verb}</span>${list.map(named).join('')}` : '');
         gameoverSubtitleEl.innerHTML =
-          `<span class="hud-go-emoji">${portraitMarkup(winnerFighter.characterId, { crop: 'head' })}</span>${winnerChar.name}` +
-          `<span class="hud-go-vs">${timedOut ? 'outlasted' : 'defeated'}</span>` +
-          losers
-            .map((f) => `<span class="hud-go-emoji">${portraitMarkup(f.characterId, { crop: 'head' })}</span>${CHARACTERS[f.characterId].name}`)
-            .join('');
+          named(winnerFighter)
+          + group('defeated', losers.filter((f) => !f.alive))
+          + group('outlasted', losers.filter((f) => f.alive));
         hydratePortraits(gameoverSubtitleEl, { generate: false });
+
+        // ── The finishing place, when somebody upstream knows it ──────────────────
+        // Absent today at every seat count, so this branch writes nothing and the
+        // element stays `display: none` — the card is byte-identical to before. See
+        // `HudFrameInfo.place` for why the HUD does not derive it.
+        const place = frame.place ?? null;
+        if (place && place.of > 1) {
+          const n = place.place;
+          const suffix = (n % 100 >= 11 && n % 100 <= 13) ? 'th'
+            : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th';
+          gameoverPlaceEl.textContent = `${n}${suffix} of ${place.of}`;
+          gameoverPlaceEl.classList.toggle('is-podium', n <= 3);
+          gameoverPlaceEl.style.display = 'block';
+        } else {
+          gameoverPlaceEl.textContent = '';
+          gameoverPlaceEl.style.display = 'none';
+        }
 
         const elapsedMs = Math.max(0, MATCH_DURATION_MS - state.timeRemaining);
         // On a timeout, say WHY. "Match time 0:45" alone reads as a knockout that
@@ -2449,6 +2508,27 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 }
 .hud-gameover-title.is-win { color: #6FE0A8; }
 .hud-gameover-title.is-lose { color: #FF6B5C; }
+/* ── The finishing place ──────────────────────────────────────────────────────
+   display: none in the SHEET, not only from script, so a card rendered before
+   update() has ever run cannot flash an empty row. Above two seats this is the
+   result of the match for five of the six players and the card could not say it.
+
+   Cream, not the title's win/lose green or red: the title already carries that
+   verdict at 48px, and a second element in the same two colours would read as a
+   repeat rather than as new information. The podium tint is the one exception —
+   #F4A300 is the same amber the countdown and the trophy road use. */
+.hud-gameover-place {
+  display: none;
+  margin-top: -10px;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: 26px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #FFF3DE;
+  -webkit-text-stroke: 1px #1a1224;
+}
+.hud-gameover-place.is-podium { color: #F4A300; }
 .hud-gameover-subtitle {
   display: flex;
   align-items: center;
@@ -3087,6 +3167,101 @@ html.fa-touch-capable .hud-topbar--chips ~ .hud-radar {
     border-radius: 16px;
   }
   html.fa-touch-capable .hud-weapons .hud-weapon-emoji { font-size: 26px; }
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     ...AND THE CLOCK LIES DOWN, BECAUSE IT BECAME THE BIGGEST OCCLUDER IN THE FRAME
+
+     🚨 THE TRAY PASS ABOVE MEASURED WHAT IT LEFT BEHIND, AND THE ANSWER WAS THIS
+     COLUMN. Same instrument, same three viewports, same currency — the share of
+     FAIR_PLAY.radiusUnits (199.2 wu) a control HIDES:
+
+         viewport   the tray BEFORE that pass   the clock column, after it
+         ────────   ─────────────────────────   ──────────────────────────
+         844x390    7.92%                       13.12%
+         667x375    5.75%                        9.01%
+         932x430    6.45%                       10.21%
+
+     So the control this HUD had never questioned was hiding two-thirds more of the
+     guaranteed arena than the one Uri complained about.
+
+     ── WHY IT IS EXPENSIVE, AND IT IS NOT "BECAUSE IT IS BIG" ─────────────────
+     lu_occlude now reports the disc's TOP ARC. The guarantee is a DISC around the
+     local fighter, so on a pitched frame it has a top edge, and ground above that
+     edge is more than 199.2 wu away and is worth EXACTLY ZERO however many pixels it
+     covers. Measured, at all three landscape phone viewports:
+
+         844x390  the arc is at y = 52px (13.3% down the frame)
+         667x375                  y = 52px (13.9%)
+         932x430                  y = 60px (14.0%)
+
+     ⚠️ AND THE ARC IS AN ARC — it PEAKS at the horizontal centre and falls away to
+     both sides, which is why the two nameplates, 300px wide and 65px tall each, cost
+     0.07% between them while a 196x108 column at dead centre costs 13.12%. The top
+     centre is the most expensive square the frame has. So the lever is HEIGHT, not
+     area: a control that fits above its own local arc is free, and a wide short one
+     is cheaper than a narrow tall one of the same area because its ends reach out to
+     where the arc is lower.
+
+     ── THE SHAPE ─────────────────────────────────────────────────────────────
+     The column becomes a ROW — timer pill beside the zone plate rather than above it
+     — at the sizes the max-width:720px block already ships to phones, and the bar
+     lifts from 14px to 6px off the top so the row lands inside the free band instead
+     of straddling it. Measured on the same three viewports, share of the guaranteed
+     arena hidden by the clock (lu_occlude, .hud-clock box / its two ink leaves):
+
+         viewport   before            after            top bar height, touch
+         ────────   ───────────────   ──────────────   ─────────────────────
+         844x390    13.12% / 12.51%   0.49% / 0.47%    122px -> 71px
+         667x375     9.01% /  9.01%   0.93% / 0.85%    103px -> 63px
+         932x430    10.21% /  9.91%   0.00% / 0.00%
+
+     and every control together goes 16.44% -> 4.33%, 20.86% -> 12.58%,
+     12.13% -> 2.21%. The known-bad arm reinstates the pre-change plate inline and
+     reproduces 12.51 / 9.01 / 9.91 exactly, so the before column is a paired reading
+     on this same tree rather than a number remembered from another one.
+
+     ⚠️ THE PLATE ITSELF IS NOT RESTYLED AND THAT IS DELIBERATE. Every value below is
+     lifted verbatim from the max-width:720px block, which a landscape phone MISSES
+     because it is 844 or 932 CSS px wide — wide, but only 390 tall. That block is
+     the phone treatment; the breakpoint that gates it is a width, and a landscape
+     phone fails a width test while being exactly the device it was written for. This
+     rule is keyed on the pointer and the orientation, like the tray rule above it,
+     and it hands the same plate to the same device through the right predicate.
+
+     ⚠️ AND .hud-zone-row STAYS STACKED. Its own comment records that a side-by-side
+     label+value overflowed the plate at every viewport and in every state, and that
+     stacking is what gave the VALUE its 15px (12.5px here). Laying the CLOCK down is
+     not the same change as laying the ZONE's contents down, and only the first one is
+     made here — the second would spend a measured legibility fix to buy pixels the
+     arc has already made free.
+
+     ⚠️ IT COSTS THE NAMEPLATES SOME WIDTH AND THAT IS STATED, NOT HIDDEN. The clock
+     is the middle of a three-part flex row, so a wider clock is narrower nameplates.
+     Measured as painted area over the pair (lu_occlude's own rect sum, height
+     unchanged): 39 000px2 -> 36 615 at 844 (-6.1% of width) and 26 391 -> 22 020 at
+     667 (-16.6%). 667 is the one that has to be argued for rather than waved through,
+     and the argument is that it buys 8.2 points of the guaranteed arena back and
+     leaves a 232px-class plate at ~194px, which still holds "HAMBURGER" and a
+     "70 / 70" bar at the sizes this viewport already uses.
+
+     ⚠️ AT 667 IT ALSO WRAPS THE SIX-SEAT CHIP RAIL, AND THAT WAS CHECKED RATHER THAN
+     ASSUMED. The rail needs 220px of side track and the wider clock leaves less, so
+     it goes to two rows — which .hud-chips is built to do. h49_chips --touch is
+     551/551 either way, and the bar it produces is SHORTER than before at every cell:
+     122 -> 71px at 844 (all seat counts) and 103 -> 63px at 667, rising only to 89px
+     at six seats there, against the 102px the clock column alone used to cost. The
+     touch radar derives its top from --fa-topbar-b, so it follows all of that for
+     free. */
+  html.fa-touch-capable .hud-topbar { top: calc(var(--fa-safe-t, 0px) + 6px); }
+  html.fa-touch-capable .hud-clock { flex-direction: row; align-items: flex-start; gap: 6px; }
+  html.fa-touch-capable .hud-timer { font-size: 16px; padding: 4px 12px; }
+  html.fa-touch-capable .hud-zone { width: 156px; padding: 3px 7px 5px; }
+  html.fa-touch-capable .hud-zone-label { font-size: 9px; letter-spacing: 0.08em; }
+  html.fa-touch-capable .hud-zone-value { font-size: 12.5px; }
+  /* (0,4,1), so it beats .hud-zone.is-danger .hud-zone-label at (0,3,1). Without it
+     the alarm state would keep the desktop 11px and the row would grow ~2px taller in
+     exactly the state the player is being burned in. */
+  html.fa-touch-capable .hud-zone.is-danger .hud-zone-label { font-size: 10px; }
 }
 /* ⚠️ THE AIM STICK'S RESTING HINT HAS TO MOVE OFF THIS CLUSTER, AND THAT RULE IS NOT
    HERE. It lives beside the element it restyles, in game/touch.ts (search for
