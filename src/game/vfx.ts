@@ -486,6 +486,28 @@ const PUDDLE_SPLASH_DIST_WU = 18;
 //     flatter than that floor.
 //  4. Nothing in this file may enter BLOCKING violet 258-268. Nothing does — `INK`
 //     (264) is only ever a MIX TARGET at 0.14 strength, never a fill.
+//  5. A PROJECTILE IN FLIGHT is governed by SIZE FIRST, and by rule 1 second.
+//
+//     ⚠️ THIS RULE EXISTS BECAUSE RULES 1-4 COULD NOT HAVE CAUGHT THE DEFECT URI
+//     REPORTED. Every rule above is about COLOUR, and the tomato projectile's colour
+//     was never the problem: measured by same-frame ablation on `189d6ed`
+//     (`tools/tmp/pj_probe.mjs`), it delivered **35 px** against the generic
+//     projectile's **677** — 1/19th of the area, one part in 41,000 of the frame — at
+//     a perfectly respectable 18 degrees of hue from the floor. A contract that only
+//     asks "what colour is it" will pass an object that is not there, and this one
+//     did, for as long as bespoke projectiles have existed.
+//
+//     So: a projectile's own bounding radius must reach `PROJECTILE_MIN_R` (0.26 m,
+//     25% of `CHARACTER_HEIGHT`, half of what the generic path has always drawn, and
+//     well inside the sim's own 1.26 m `HIT_RADIUS_VS_PLAYER`), and its halo must sit
+//     at `PROJECTILE_HALO_L` — which is rule 1's ">= 0.15 above the cast's 0.302",
+//     satisfied by 0.358, and additionally above the ARENA FLOOR's measured 0.4809,
+//     which rule 1 does not ask for and a projectile needs because it spends its whole
+//     life over the tile field rather than on top of a character.
+//     Both are enforced in `vfx.ts` for EVERY weapon, generic and bespoke, and neither
+//     can be un-met by a weapon file. The instrument that checks it is
+//     `tools/tmp/pj_probe.mjs`, and its known-bad is a projectile forced to the
+//     background's own measured colour, which it must call invisible.
 //
 // Verified with `node tools/arena-scan.mjs --url $URL --baseline
 // tools/scan/colour-baseline.json`: no colour regressions, and hue overlap /
@@ -1093,6 +1115,273 @@ function buildGlazeMarkTexture(variant: number): THREE.CanvasTexture {
   return tex;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// THE PROJECTILE LEGIBILITY SHELL — Uri: *"the tomato projectile is almost
+// invisible. let's rework all projectiles. they should be vivid and clear until
+// they explode."*
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ── WHAT IT ACTUALLY WAS, MEASURED — AND IT IS NOT THE TRAIL BUG ────────────────
+//
+// The obvious prior was `b967242`: the ground trail was **0.7 degrees of hue** from
+// the floor it lay on, and a projectile is a warm ball over a rose floor. It is a
+// different fault, and the difference decides the fix. Measured by same-frame
+// ablation on `189d6ed` (`tools/tmp/pj_probe.mjs`, 23 ranged weapons, delivered
+// pixels + OKLab distance from the LOCAL background, sampled across each flight):
+//
+//     hamburger.Tomato   BESPOKE, r 0.11 m     35 px    dE 0.17
+//     hamburger.Lettuce  GENERIC, r 0.50 m    677 px    dE 0.26
+//
+// **Nineteen times the delivered area, for the same hit.** The tomato is not badly
+// coloured; it is 4.5x smaller in radius than the generic ball it replaced, i.e.
+// **1/20th of the pixels**, and 35 px on a 1600x900 frame is one part in 41,000. A
+// hue rotation cannot fix an object that is not there. `hamburger.ts` already caught
+// the same class of error in its own impact hook — *"it is 4% of a character across
+// and simply sub-perceptual"* — fixed it for `impact`/`cast` with `SPLAT_UNIT`, and
+// left the projectile at tomato scale on the stated ground that *"a tomato in flight
+// genuinely is tomato-sized"*. That is true of tomatoes and false of brawlers.
+//
+// ── WHY THIS IS A TREATMENT IN THIS FILE AND NOT ELEVEN EDITS IN `vfx/weapons/` ──
+//
+// Because there are 23 ranged weapons across 11 files, because 13 of them route
+// through the bespoke path and 10 through the generic one, and because the fault is a
+// PROPERTY OF THE CAMERA, not of any weapon: at pitch 58 from ~30 m, a sub-0.2 m
+// object is a few pixels whatever colour it is. A per-weapon fix would have to be
+// made, and re-made, 23 times, and every author would have to rediscover the same
+// number. A shell that derives its own size from the projectile it is wrapping is
+// made once and is correct for the 24th weapon nobody has written yet.
+//
+// ⚠️ AND IT DELIBERATELY DOES NOT TOUCH THE SCULPT. `hamburger.ts:trail()` writes
+// `obj.scale` every frame (the squash pulse); `donut.ts`, `burrito.ts`, `egg.ts` and
+// `taco.ts` write rotation. Anything this file set on the pooled object would be
+// overwritten by the weapon on the next frame, silently — so the shell is a SEPARATE
+// pooled object, keyed by the same projectile id, that reads only the projectile's
+// world position. No weapon file is touched and none can break it.
+//
+// ── THE TWO PARTS, AND WHAT EACH ONE IS FOR ────────────────────────────────────
+//
+//  1. A SIZE FLOOR ON THE SCULPT. The projectile is scaled up until its own bounding
+//     radius reaches `PROJECTILE_MIN_R`, and not one step further — a weapon already
+//     at or above it is not touched at all. This is the lever that fixes the actual
+//     fault, and it keeps the thing on screen looking like a tomato rather than
+//     turning it into a coloured dot.
+//  2. HALO — a camera-facing sprite ringing the (now correctly sized) sculpt, with a
+//     TRANSPARENT CENTRE so the sculpt reads through it, a bright vivid band, and a
+//     thin DARK OUTER RIM. The rim is the value-straddle and it is not optional:
+//     `b967242` measured that "the cast band and the floor band are only ~0.10 luma
+//     apart, so no single value is far from both", and a projectile crosses the rose
+//     tile (L 0.48), the pale plank pad and the cast itself inside one flight.
+//
+// ── WHAT WAS BUILT, MEASURED, LOOKED AT AND REMOVED ────────────────────────────
+//
+// **A GROUND SHADOW under the projectile.** It is the obvious third part, it is a
+// real brawler idiom, and here it is worth nothing: a projectile flies at
+// `PROJECTILE_HEIGHT` 0.5 m and the match camera is pitched 58 degrees, so its shadow
+// lands `0.5 / tan(58)` = **0.31 m** down-screen from the shot — which is INSIDE the
+// halo's own radius at every size this file produces. It rendered correctly and was
+// composited under a band at alpha 0.86, contributing 14% of its own value. The
+// zoomed PNG is what caught it; the mesh was in the scene, visible, correctly
+// oriented and at the right height, and the census counted it. `docs/LESSONS.md` §1
+// again: it was there, and it was invisible. Removed rather than enlarged, because
+// making it clear of the halo would mean a shadow further from its own object than
+// the object is wide, and that reads as a second projectile.
+//
+// **A HALO WITH A SOLID CENTRE.** The first version ramped alpha 0.30 -> 0.86 outward
+// with no hole. Measured, it was a success — Tomato 34 px -> 279 px, 8.2x — and the
+// PNG is why it did not ship: a 0.30-alpha wash still covers the sculpt, so a tomato
+// became **a flat red chip with a dark hole in the middle**, indistinguishable from
+// the aim reticle and from every other weapon's chip. "Vivid and clear" is not "large
+// and anonymous". The number was right and the picture was wrong (non-negotiable #3).
+//
+// ── THE TRAPS THIS FILE HAS ALREADY PAID FOR, ALL OF WHICH APPLY HERE ───────────
+//
+//  * **NOT ADDITIVE.** Additive blending over this arena's bright warm floor makes a
+//    WASH, not a core — the particle pool above is additive and is *sparks*, which is
+//    the case additive is for. Both shell materials use normal blending.
+//  * **`depthWrite: false` on both.** Three defaults it TRUE, and a transparent
+//    depth-writing mesh is this file's most-repeated bug (`docs/LESSONS.md` §1).
+//  * **`renderOrder` <= 6, NEVER above.** `arena/fogRing.ts` puts the fog CURTAIN at
+//    **7**. Anything above it draws THROUGH the fog of war, and `tools/tmp/hw_ord.mjs`
+//    already caught exactly that with a hazard wisp at 8 leaking the central hazard.
+//    A projectile halo at 8 would leak an unseen enemy's return fire. The sculpt is
+//    opaque so the fog already covers it; the shell must inherit that, not undo it.
+//  * **The rim is DARK, not bright.** Pellet weapons put 3-5 shots in the air at once
+//    (Rice 5, Candy 3, Shards 3, Spray 3, Catch 3) with 14-40 degrees of spread, so
+//    their halos overlap — and `buildGlazeMarkTexture` above records, at length, that
+//    a BRIGHT rim on overlapping marks stacks into concentric contour rings while a
+//    DARK one draws a single contour around the union. Same geometry, same answer.
+//
+// ── HUE CONTRACT (top of file) ──────────────────────────────────────────────────
+// The halo is a TRANSIENT COMBAT EFFECT and takes rule 1: it must clear the cast's
+// measured luma (0.302) by >= 0.15 UPWARD. `PROJECTILE_HALO_L` is the floor that
+// enforces it, and it is set above the ARENA FLOOR's 0.48 as well, which rule 1 does
+// not ask for but a projectile needs — a transient burst is drawn on top of a
+// character, a projectile spends its whole life over the tile field.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Bounding radius, in metres, that every projectile is scaled up to reach.
+ *
+ * 0.26 m is a **0.52 m ball, 25% of `CHARACTER_HEIGHT`**. Three independent anchors
+ * put it there and none of them is taste:
+ *
+ *  * The generic projectile this file has always drawn is `SphereGeometry(wu(10))` —
+ *    radius 0.50 m. Every bespoke weapon that replaced it made its own projectile
+ *    SMALLER, and nothing checked. This floor is still half of what the generic path
+ *    was, so it is a floor and not a new norm.
+ *  * The SIM's own hit test is `dist(projectile, target) < hitRadius`, and
+ *    `rules.ts:HIT_RADIUS_VS_PLAYER` is `PLAYER_SIZE * 0.6` = 25.2 wu = **1.26 m**.
+ *    A 0.52 m visual is well inside the tolerance the game already grants, so this
+ *    makes the picture MORE honest about the hitbox, not less — the 0.22 m tomato was
+ *    understating it by 5.7x.
+ *  * `hamburger.ts` already reached the same conclusion about its own IMPACT hook and
+ *    wrote the reasoning down — *"it is 4% of a character across and simply
+ *    sub-perceptual"* — then exempted the projectile on the grounds that *"a tomato in
+ *    flight genuinely is tomato-sized"*. That is true of tomatoes.
+ *
+ * ⚠️ NEVER SHRINKS. A weapon already at or above this is scaled by exactly 1.0 and is
+ * bit-identical to what it was.
+ */
+const PROJECTILE_MIN_R = 0.26;
+/**
+ * Ceiling on the size floor's own multiplier.
+ *
+ * A guard, not a tuning dial: if a future weapon returns an `Object3D` whose bounding
+ * box is degenerate — an empty Group, a mesh whose geometry has not been built yet —
+ * `PROJECTILE_MIN_R / tiny` is unbounded and would put a 40 m sculpt in the arena.
+ * With the clamp the worst case is a projectile 2.4x too big, which is visible and
+ * fixable rather than a frame that renders nothing but one weapon.
+ */
+const PROJECTILE_MAX_UPSCALE = 2.4;
+/** Halo radius as a multiple of the projectile's bounding radius AFTER the size floor. */
+const PROJECTILE_SHELL_SCALE = 1.65;
+/**
+ * Halo radius floor and ceiling, in metres.
+ *
+ * The floor guarantees a ring wide enough to read at match framing even behind the
+ * smallest sculpt; the ceiling stops the generic 0.5 m ball — already 677 px and
+ * legible — from growing an aura it does not need. Between them the shell is
+ * proportionate, which is what makes it correct for a weapon nobody has written yet.
+ */
+const PROJECTILE_HALO_MIN_R = 0.36;
+const PROJECTILE_HALO_MAX_R = 0.64;
+/**
+ * HSL lightness floor for the halo, in sRGB.
+ *
+ * 0.66 clears the cast's 0.302 by 0.358 (rule 1 asks 0.15) and the arena floor's
+ * measured 0.4809 by 0.18. `Math.max` rather than an assignment, so a weapon whose
+ * colour is already lighter than this — Rice `#FFFFFF`, Disc `#F4E9DA`, Egg's
+ * `#FFF8EA` — is not DARKENED into a grey by its own legibility treatment.
+ */
+const PROJECTILE_HALO_L = 0.66;
+/**
+ * Saturation multiplier for the halo.
+ *
+ * ⚠️ THE HALO IS NOT A WHITE MIX, AND THAT IS DELIBERATE. Every other transient in
+ * this file buys its separation by mixing toward `WHITE`, which is correct for a
+ * 120 ms flash and wrong for something on screen for a second: `CLAUDE.md` records
+ * "do not fix anything by desaturating" as falsified FOUR times, and `arena-scan`'s
+ * standing rail today is that **warm chroma FAILS LOW (0.0596 against a 0.0725
+ * floor)** while cool is over target. Raising HSL lightness at constant S already
+ * costs chroma — it is `(1 - |2L - 1|) * S` — so S is pushed up to pay some of that
+ * back. "Vivid" is the word Uri used and it is the opposite of a white mix.
+ */
+const PROJECTILE_HALO_SAT_MUL = 1.25;
+/** Below the fog CURTAIN's 7 — see the block above. Above the ground stack. */
+const PROJECTILE_HALO_RENDER_ORDER = 6;
+
+/**
+ * The halo's alpha/value profile, as a radial ramp.
+ *
+ * RGB is a MULTIPLIER on the sprite's colour (the same technique
+ * `buildGlazeMarkTexture` uses), which is what lets one texture carry both the bright
+ * body and the dark rim in the weapon's OWN hue family — the rim is a deep version of
+ * the same colour, not a foreign ink line, so a projectile never stops looking like
+ * its weapon.
+ *
+ * ── THE CENTRE IS WEAK, AND IT IS NEITHER SOLID NOR A HOLE. BOTH WERE BUILT ─────
+ *
+ * Alpha runs 0.22 in the middle to 0.90 at 0.82 of the radius. That number is the
+ * third value tried and the two it replaces are why it is where it is:
+ *
+ *  * **0.30 flat, no hole** turned every projectile into the same coloured chip. The
+ *    tomato read as a red disc with a dark hole in it — legible, and no longer a
+ *    tomato. Measured a success (34 px -> 279 px); the PNG is what rejected it.
+ *  * **0.00 out to 0.46, a true hole** fixed that and broke the pellet weapons. Rice
+ *    Spray's grains are far smaller than the hole even after the size floor, so five
+ *    white ANNULI flew across the arena with pink floor showing through the middle of
+ *    each — a soap-bubble read, and a ring is the shockwave vocabulary this file uses
+ *    for `spawnImpactBurst`, not the projectile vocabulary.
+ *
+ * A weak centre is the only one of the three that is correct for BOTH a sculpt that
+ * fills the halo and one that does not: where the sculpt is, it is depth-rejected and
+ * costs nothing; where the sculpt is not, it is a glow rather than a hole.
+ */
+function buildProjectileHaloTexture(): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0.00, 'rgba(255,255,255,0.22)');
+  g.addColorStop(0.44, 'rgba(255,255,255,0.34)');
+  g.addColorStop(0.62, 'rgba(255,255,255,0.78)');
+  g.addColorStop(0.82, 'rgba(255,255,255,0.90)');
+  // The dark rim. Narrow (0.88 -> 1.00 of the radius, the outer half already fading)
+  // for the reason `buildGlazeMarkTexture` records at length: overlapping marks stack
+  // a rim into concentric contours, and pellet weapons put FIVE of these in the air at
+  // once (Rice 5, Candy/Shards/Spray/Catch 3). DARK rather than bright so that
+  // stacking draws ONE contour around the union instead of one per pellet — measured
+  // there, and confirmed here on a five-pellet volley's own PNG.
+  g.addColorStop(0.88, 'rgba(70,70,70,0.86)');
+  g.addColorStop(0.96, 'rgba(48,48,48,0.55)');
+  g.addColorStop(1.00, 'rgba(40,40,40,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * A weapon colour taken to the value and chroma a projectile halo needs, in sRGB HSL.
+ *
+ * ⚠️ DONE ON THE HEX IN sRGB RATHER THAN THROUGH `THREE.Color.getHSL`. Three's colour
+ * management converts a hex to LINEAR-sRGB on construction, so `getHSL` on the
+ * resulting object answers a question about linear values while every measured number
+ * in this file — the cast's 0.302, the floor's 0.4809, the hue contract's whole table
+ * — is HSL lightness of the *rendered sRGB pixel*. Mixing the two spaces is how a
+ * "measured" threshold quietly stops being the thing that was measured.
+ */
+function haloColorFor(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d > 1e-6) {
+    if (mx === r) h = ((g - b) / d) % 6;
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60; if (h < 0) h += 360;
+  }
+  const l0 = (mx + mn) / 2;
+  const s0 = d < 1e-6 ? 0 : d / (1 - Math.abs(2 * l0 - 1));
+  const l = Math.max(l0, PROJECTILE_HALO_L);
+  const s = Math.min(1, s0 * PROJECTILE_HALO_SAT_MUL);
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const o = l - c / 2;
+  let rr = 0, gg = 0, bb = 0;
+  if (h < 60) { rr = c; gg = x; } else if (h < 120) { rr = x; gg = c; }
+  else if (h < 180) { gg = c; bb = x; } else if (h < 240) { gg = x; bb = c; }
+  else if (h < 300) { rr = x; bb = c; } else { rr = c; bb = x; }
+  const to = (v: number): string => Math.round((v + o) * 255).toString(16).padStart(2, '0');
+  return `#${to(rr)}${to(gg)}${to(bb)}`;
+}
+
 /**
  * Angular crystal/shard silhouette — a hard-edged faceted polygon with a bright
  * off-centre highlight facet, NOT another soft circle. A critic pass specifically
@@ -1316,6 +1605,13 @@ interface StatusVisual {
 export class VfxLayer {
   private readonly group = new THREE.Group();
   private readonly projectilePool = new Map<number, THREE.Object3D>();
+  /**
+   * One legibility shell per live projectile, keyed by the SAME projectile id — see
+   * the `PROJECTILE SHELL` block. A second pool rather than children of the
+   * projectile, because five weapon files write the pooled object's scale/rotation
+   * every frame and would drag a child along with them.
+   */
+  private readonly shellPool = new Map<number, THREE.Object3D>();
   private readonly splatPool = new Map<number, THREE.Object3D>();
   private readonly trailPool = new Map<number, THREE.Object3D>();
   private readonly materialCache = new Map<string, THREE.Material>();
@@ -1351,6 +1647,16 @@ export class VfxLayer {
   private readonly trailGeo = new THREE.PlaneGeometry(2 * wu(TRAIL.radius) / GLAZE_FILL, 2 * wu(TRAIL.radius) / GLAZE_FILL);
   /** One texture per lobe silhouette, shared by every ground-mark material. */
   private readonly glazeTex = Array.from({ length: GLAZE_VARIANTS }, (_, i) => buildGlazeMarkTexture(i));
+
+  // ── Projectile legibility shell — see the block above `buildProjectileHaloTexture` ──
+  private readonly haloTex = buildProjectileHaloTexture();
+  /** One halo material per WEAPON COLOUR, not per projectile: a three-pellet volley
+   * shares one, exactly as the generic projectile sphere shares `materialCache`. */
+  private readonly haloMats = new Map<string, THREE.SpriteMaterial>();
+  /** Scratch box for `measureShell`. Allocated once; `setFromObject` overwrites it
+   * completely on every call, so there is no state to leak between projectiles. */
+  private readonly shellBox = new THREE.Box3();
+  private readonly shellSize = new THREE.Vector3();
 
   // Splat/trail records don't carry a source colour (see `state.ts`), so these use one
   // fixed tint each rather than trying to recover the weapon that made them.
@@ -1767,15 +2073,26 @@ export class VfxLayer {
           };
           const obj = bespoke.projectile(ctx);
           obj.userData.weaponVfx = bespoke;
+          // ⚠️ NAMED, and it is not decoration. `docs/AGENT-BRIEF.md` §3: "an UNNAMED
+          // mesh is invisible to every diagnostic here" — ablation, part maps and the
+          // per-part tools all key on `name`. Until this line, no instrument in the
+          // repo could find a projectile except by reaching into this class's private
+          // `projectilePool`, which is exactly what `pj_probe.mjs` had to do to
+          // measure the bug in the first place.
+          obj.name = `projectile:${owner.characterId}.${p.weapon.key}`;
+          this.measureShell(obj);
           return obj;
         }
         const mesh = new THREE.Mesh(this.projectileGeo, this.materialFor(p.color));
+        mesh.name = `projectile:${owner.characterId}.${p.weapon.key}`;
+        this.measureShell(mesh);
         return mesh;
       },
       (obj, p) => {
         const owner = fighterOf(state, p.ownerId, p.ownerRole);
         const bespoke = obj.userData.weaponVfx as WeaponVfx | undefined;
         const pos = groundPos(p.x, p.y);
+        const k = (obj.userData.shellSpec as { scale: number } | undefined)?.scale ?? 1;
 
         if (!bespoke) {
           // ── Generic path — unchanged from before this system existed. ──────────
@@ -1788,9 +2105,9 @@ export class VfxLayer {
           if (p.arrived) {
             const peckT = (p.peckTimer ?? 0) / 500;
             const pulse = 1 + Math.sin(peckT * Math.PI) * 0.5;
-            mesh.scale.setScalar(pulse);
+            mesh.scale.setScalar(pulse * k);
           } else {
-            mesh.scale.setScalar(1);
+            mesh.scale.setScalar(k);
           }
           mesh.position.set(pos.x, PROJECTILE_HEIGHT, pos.z);
           return;
@@ -1802,6 +2119,29 @@ export class VfxLayer {
         // Default orientation (face travel direction), same convention `match.ts`
         // uses for character facing — a `trail()` hook is free to override this.
         if (dir.x !== 0 || dir.y !== 0) obj.rotation.y = Math.atan2(dir.x, dir.y);
+        // ── THE SIZE FLOOR, HANDED TO THE WEAPON IN ITS OWN SCALE SPACE ──────────
+        //
+        // 🚨 THE WEAPON MUST READ AND WRITE ITS OWN SCALE, NOT OURS. Nine `trail()`
+        // hooks touch `obj.scale`, and they split two ways: `hamburger`/`pizza`/
+        // `hotdog`/`sushi` ASSIGN it every frame (`obj.scale.set(1/squash, squash, ...)`)
+        // while `donut`/`burrito`/`egg`/`taco`/`soup`/`waterbottle` never touch it at
+        // all. A bare `obj.scale.multiplyScalar(k)` after the hook is correct for the
+        // first group and COMPOUNDS EXPONENTIALLY for the second — 1.7x, 2.9x, 4.9x,
+        // one factor per frame, until the projectile fills the arena.
+        //
+        // So the weapon's own scale is stashed and restored around the call: the hook
+        // always sees exactly what it last wrote, in a space where 1.0 means "the size
+        // I authored", and this file multiplies on top purely for rendering. No weapon
+        // file is touched, no hook has to learn about this, and a hook added tomorrow
+        // that assigns scale and one that ignores it are both already correct.
+        // ⚠️ SEEDED FROM THE OBJECT'S OWN SCALE, NOT FROM 1. Two `projectile()` hooks
+        // return a sculpt already scaled — `sushi.Catch` at 0.6, `taco.Double` at 1.12 —
+        // and a `new Vector3(1,1,1)` seed would have silently reset both on their first
+        // update, changing two weapons' shipped size as a side effect of a legibility
+        // pass. `??=` evaluates this exactly once, on the first update, when `obj.scale`
+        // is still whatever the hook authored.
+        const authored = (obj.userData.__authoredScale ??= obj.scale.clone()) as THREE.Vector3;
+        obj.scale.copy(authored);
         if (bespoke.trail) {
           const ctx: WeaponVfxCtx = {
             THREE,
@@ -1817,6 +2157,67 @@ export class VfxLayer {
           };
           bespoke.trail(ctx);
         }
+        authored.copy(obj.scale);
+        obj.scale.multiplyScalar(k);
+      },
+    );
+
+    // ── THE PROJECTILE LEGIBILITY SHELL ────────────────────────────────────────
+    //
+    // Runs AFTER the projectile pool and that ordering is load-bearing twice over:
+    // the shell's radius is measured from the projectile's own geometry, which has to
+    // exist first; and a shell must never be drawn for a frame in which its
+    // projectile is not, or a hit would leave a halo hanging in the air for one
+    // frame. Sharing `syncPool` and the projectile's own `id` makes both automatic —
+    // the shell is created and destroyed by exactly the events that create and
+    // destroy the shot, including `vfx.ts:2613`'s "removed by `syncPool`" case.
+    //
+    // ⚠️ The shot's own `p.color` is read here, not the halo's. `p.color` is
+    // `Weapon.color` from `rules.ts`, which is owned elsewhere and is load-bearing for
+    // weapon identity, the HUD chip and the splat; this file derives a HALO colour
+    // from it (`haloColorFor`) and changes nothing in `rules.ts`.
+    syncPool<Projectile>(
+      this.shellPool,
+      this.group,
+      state.projectiles,
+      (p) => {
+        const owner = fighterOf(state, p.ownerId, p.ownerRole);
+        const key = `${owner.characterId}.${p.weapon.key}`;
+        // The projectile pool ran first (see the block above), so its object exists and
+        // already carries the measurement. `??` rather than `!`: a future caller that
+        // reordered the pools would get a legible default instead of a crash.
+        const spec = this.projectilePool.get(p.id)?.userData.shellSpec as { haloR: number } | undefined;
+        const r = spec?.haloR ?? PROJECTILE_HALO_MIN_R;
+
+        const shell = new THREE.Group();
+        shell.name = `projectile_shell:${key}`;
+
+        let haloMat = this.haloMats.get(p.color);
+        if (!haloMat) {
+          haloMat = new THREE.SpriteMaterial({
+            map: this.haloTex,
+            color: new THREE.Color(haloColorFor(p.color)),
+            transparent: true,
+            opacity: 1,
+            // ⚠️ NOT `AdditiveBlending`. See the block above `buildProjectileHaloTexture`:
+            // additive over this arena's bright warm floor is a wash, and it would also
+            // erase the dark rim the texture carries, which is the half of the treatment
+            // that survives a light background.
+            depthWrite: false,
+          });
+          this.haloMats.set(p.color, haloMat);
+        }
+        const halo = new THREE.Sprite(haloMat);
+        halo.name = `projectile_halo:${key}`;
+        halo.scale.set(r * 2, r * 2, 1);
+        halo.renderOrder = PROJECTILE_HALO_RENDER_ORDER;
+        shell.add(halo);
+
+        return shell;
+      },
+      (obj, p) => {
+        const pos = groundPos(p.x, p.y);
+        obj.position.set(pos.x, PROJECTILE_HEIGHT, pos.z);
       },
     );
 
@@ -3019,7 +3420,10 @@ export class VfxLayer {
   /** Drop every tracked mesh AND reset one-shot effects — call on match restart so
    * stale VFX (a burst mid-fade, a status ring) doesn't linger into the next match. */
   clear(): void {
-    for (const pool of [this.projectilePool, this.splatPool, this.trailPool]) {
+    // `shellPool` is listed here and not left to `syncPool` for the same reason the
+    // other three are: `clear()` runs on a match restart, when `state.projectiles`
+    // becomes empty without any pool ever being asked to sync against it again.
+    for (const pool of [this.projectilePool, this.shellPool, this.splatPool, this.trailPool]) {
       for (const obj of pool.values()) this.group.remove(obj);
       pool.clear();
     }
@@ -3071,6 +3475,15 @@ export class VfxLayer {
     this.materialCache.forEach((m) => m.dispose());
     this.materialCache.clear();
 
+    // Projectile legibility shell. `haloMats` is keyed by weapon colour, so a match
+    // that fired three differently-coloured weapons holds three. The size measurement
+    // has no cache to clear — it lives on each projectile's own `userData` and dies
+    // with the object, which is what makes it correct for the weapons that draw more
+    // than one sculpt under one key.
+    this.haloTex.dispose();
+    this.haloMats.forEach((m) => m.dispose());
+    this.haloMats.clear();
+
     this.glowTex.dispose();
     this.softDiscTex.dispose();
     this.starTex.dispose();
@@ -3093,6 +3506,53 @@ export class VfxLayer {
       vis.stunStars.forEach((s) => (s.material as THREE.Material).dispose());
       vis.wardMat.dispose();
     }
+  }
+
+  /**
+   * Measure ONE projectile and stash what the legibility shell needs on it: the
+   * size-floor multiplier and the halo radius that follows from it.
+   *
+   * ⚠️ MEASURED FROM THE GEOMETRY, NOT DECLARED. A table of per-weapon radii would be
+   * a 23-row constant that nobody updates when a weapon file changes its sculpt, and
+   * `docs/LESSONS.md` is full of exactly that failure — a number that was true when it
+   * was written. `Box3.setFromObject` walks the real meshes, so a weapon that grows or
+   * shrinks its projectile gets a proportionate shell on the next match with no edit
+   * here and no edit there.
+   *
+   * 🚨 PER OBJECT, NOT PER WEAPON KEY, AND THAT IS NOT AN OPTIMISATION I SKIPPED. The
+   * first version cached by `characterId.weaponKey` and would have been WRONG for the
+   * weapons that draw more than one sculpt under one key: `taco.Double` returns an
+   * onion OR a filling clump depending on `comboIndex(ctx)`, and `burrito.Swarm`'s own
+   * header says it *"draws four completely different projectiles"*. Whichever spawned
+   * first would have sized all the others. Per object is exact, and it is cheap:
+   * `Box3.setFromObject` transforms eight corners of each mesh's cached
+   * `geometry.boundingBox`, so it is O(meshes), not O(vertices), and it runs once per
+   * spawn — five times per Rice Spray volley, roughly seven times a second at worst.
+   *
+   * The WORLD box is used and its SIZE, not its corners: size is invariant to the
+   * object's position (which is the shooter's, and arbitrary). `max` of the three
+   * extents rather than the mean, so an elongated sculpt is measured across its LONG
+   * axis — under-measuring an elongated projectile would scale it up until its long
+   * axis was enormous, which is the opposite of the guard that is wanted.
+   *
+   * 🚨 CALLED FROM THE PROJECTILE POOL'S `create` AND NOWHERE ELSE. That is the only
+   * moment the sculpt is at its authored scale; from the first `update` onward this
+   * file has already multiplied it by the answer, and a re-measure would compound.
+   */
+  private measureShell(obj: THREE.Object3D): void {
+    let base = wu(10);
+    this.shellBox.setFromObject(obj);
+    if (!this.shellBox.isEmpty()) {
+      this.shellBox.getSize(this.shellSize);
+      const m = 0.5 * Math.max(this.shellSize.x, this.shellSize.y, this.shellSize.z);
+      if (m > 1e-4) base = m;
+    }
+    // `Math.max(1, ...)` is the "never shrinks" half of `PROJECTILE_MIN_R`'s contract:
+    // a weapon already at or above the floor gets exactly 1.0 and is bit-identical.
+    const scale = Math.min(PROJECTILE_MAX_UPSCALE, Math.max(1, PROJECTILE_MIN_R / base));
+    const haloR = Math.min(PROJECTILE_HALO_MAX_R,
+      Math.max(PROJECTILE_HALO_MIN_R, base * scale * PROJECTILE_SHELL_SCALE));
+    obj.userData.shellSpec = { scale, haloR };
   }
 
   private materialFor(color: string): THREE.Material {
