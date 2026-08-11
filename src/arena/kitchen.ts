@@ -158,8 +158,11 @@
  *   - SUPPLY BARRELS sit FLUSH to the west and east walls (x = w/2). Not pushed inboard:
  *     at 30 wu off the wall they strand a strip of visible floor nothing can enter, which
  *     is rule 4 and which **Uri found by playing**.
- *   - SIX SPAWNS, in three 180°-point-symmetric pairs, one pair per BAY (west, north lane,
- *     north-east corner). See the spawn block for the measurements.
+ *   - SIX SPAWNS, in three 180°-point-symmetric pairs, one pair per BAY (west, north-east
+ *     corner, hub ring). ⚠️ **It was (west, NORTH LANE, north-east corner) until 2026-08-11**
+ *     — the north-lane pair was worth **2.68 places of 6** because nobody's nearest opponent
+ *     was them, so it moved inboard to the hub ring where it duels itself. See the spawn
+ *     block: separation was never the binding fairness constraint, the targeting graph was.
  *
  * ── Every CoverBox has exactly one matching visual, built by the same call ───────
  * `addCover()` is the single place a collision box gets created, and it always
@@ -1121,24 +1124,114 @@ export const createKitchenArena: ArenaFactory = () => {
   // read **0/70, DEAD, at 9.0 s**, with both bay-sharers the worst-hurt seats and both
   // north-lane seats the healthiest.
   //
-  // On this map the three pairs get three BAYS, designed rather than searched for, and the
-  // number that matters is the one that killed the small map:
+  // ── 🚨 AND SEPARATING THE SEATS WAS NOT THE SAME THING AS MAKING THEM FAIR ──
   //
-  //     slot 0/1  (300,810)  / (2500,1190)   the WEST bay      worst runway  99 wu
-  //     slot 2/3  (1150,210) / (1650,1790)   the NORTH lane    worst runway 189 wu
-  //     slot 4/5  (2560,300) / (240,1700)    the NE corner bay worst runway  94 wu
+  // **The old positions below cleared every rule above and were still worth 2.68 places out
+  // of 6.** `sx_census --n 6 --matches 600`, roster shuffled every match so character
+  // strength averages out, fair mean placement = 3.50:
   //
-  //     minimum pairwise separation over all 15 pairs: **892.0 wu** (slots 0 and 5)
-  //     against `REACH.rangedMax` = 140. **No weapon in the game reaches between any two
-  //     spawns**, with 6.4× to spare — against 75.2 wu, which was inside a melee swing.
+  //     seat              0      1      2      3      4      5
+  //     OLD spawn radius  1116   1116    829    829   1355   1355
+  //     OLD mean place    4.51   4.46   1.83   1.97   4.08   4.15   ± 0.038 .. 0.061
+  //     OLD 1st places      16     19    273    238     29     25
+  //
+  // The north-lane pair took **511 of 600 first places and essentially no last places**,
+  // while dealing **58/64 damage against ~130** and walking **1,797 wu against ~1,000**.
+  // 🔴 **They won by NOT PARTICIPATING**, and the reason is `nearestLivingOpponent`, which
+  // is what both `ai.ts:stepAI` and `combat.ts:attemptAttack` steer by. At t=0 the six seats
+  // form a DIGRAPH — one out-edge each, to the nearest opponent — and the old set paired
+  // 0↔5 and 1↔4 off at 892 wu while seats 2 and 3 sat 1,040 wu from anyone. Two duels ground
+  // each other down and the unpursued pair strolled in.
+  //
+  // ⚠️ **"EQUALISE THE SPAWN RADIUS" IS FALSIFIED BY ITS OWN TABLE** — it predicts the order
+  // 2,3 then 0,1 then 4,5; the measured order is 2,3 then **4,5** then 0,1, i.e. the MIDDLE
+  // radius is the worst seat. ⚠️ **And so is "equalise the distance to the nearest
+  // opponent"**, which was built and measured rather than argued about: a seating with all
+  // six nearest-opponent distances **exactly equal at 814.0 wu** came out at **3.05 places of
+  // spread — WORSE than the layout it replaced** (`4.83 4.57 3.96 4.04 1.78 1.80`), and the
+  // seats that won were exactly the two nobody targeted.
+  //
+  // **The quantity that decides a seat is its IN-DEGREE: how many opponents pick it as their
+  // nearest at t=0.** in-degree 0 → ~1.9 places · 1 → ~4.1 · 2 → ~4.4, reproduced on three
+  // independent seatings and on `sx_census --arm rotate` (which rotates the spawn LIST, so
+  // the profile follows the COORDINATES and not the slot index).
+  //
+  // ── WHAT THE SIX SEATS MUST SATISFY, AND WHY THE SHAPE IS FORCED ────────────
+  //
+  // Six in-degrees sum to six, so *"nobody is unpursued"* and *"everybody is pursued exactly
+  // once"* are the same requirement. Three facts then pin the layout completely:
+  //
+  //   (i)   a nearest-neighbour digraph has **no directed cycle longer than 2** (following
+  //         its edges strictly decreases distance), so in-degree 1 everywhere ⇒ a **perfect
+  //         matching into MUTUAL pairs**. A "circle of death" is not available.
+  //   (ii)  `sp_gate` §A requires seat `2k+1` to be the exact 180° image of seat `2k`, so the
+  //         whole configuration is invariant under the point reflection σ and σ must map that
+  //         matching to itself. An involution on THREE pairs has an odd orbit count, so at
+  //         least one pair is σ-fixed — and σ has no fixed points off the map centre, so a
+  //         σ-fixed pair is `{2k, 2k+1}` itself: a DIAMETRIC pair duelling across the middle.
+  //   (iii) that diametric pair is `2r` across, so for `2r` to be its own minimum every other
+  //         seat must be further out than it. **It is necessarily the INNERMOST pair.**
+  //
+  // ⇒ **exactly one C2 pair duels itself across the map and is the closest pair to the
+  // centre; the other four cross-match.** Not a layout that was liked — the only shape the
+  // constraints admit. 🚨 **And the cost is real: the three pairs therefore CANNOT share one
+  // radius**, so `sp_place:score`'s `radiusSpread` ("the fog closes on the centre, so an
+  // unequal radius is an unequal countdown") can no longer be driven to zero. Equal
+  // centrality and a fair targeting graph are mutually exclusive here; the measurement chose.
+  //
+  //     slot 0/1  (300,810)  / (2500,1190)   the WEST bay        r 1116  runway 99 wu
+  //     slot 2/3  (2670,290) / (130,1710)    the NE corner bay   r 1455  runway 89 wu
+  //     slot 4/5  (1590,510) / (1210,1490)   the HUB ring        r  526  runway 84 wu
+  //
+  //     targeting digraph  0↔3 · 1↔2 · 4↔5      in-degree 1 1 1 1 1 1
+  //     nearest opponent   916 916 916 916 1051 1051 wu
+  //     minimum pairwise separation over all 15 pairs: **915.9 wu** (slots 0 and 3)
+  //     against `REACH.rangedMax` = 140 — 6.5× clear, and up from 892.0.
+  //
+  // ── RESULT, and the floor it is stated against ──────────────────────────────
+  //
+  //     seat              0      1      2      3      4      5
+  //     mean place      3.70   3.64   3.43   3.48   3.35   3.41   ± 0.057 .. 0.078
+  //     1st places       116    106    121    123     73     61
+  //     damage dealt     121    126    127    126    142    143
+  //
+  // **Spread 2.680 → 0.342 places.** ⚠️ The SE is not the spread's own scale — the spread is
+  // the RANGE of six correlated means, so a perfectly fair seating still shows one. Measured
+  // by permuting the seat labels within each match (`kx_seatfair --stats`, 4,000 reps), which
+  // destroys the seat effect while preserving the place distribution and the sum-to-21
+  // constraint exactly: **the floor is 0.315 places at the 95th percentile.** So the old
+  // 2.680 is 8.5× the floor (p = 0.0002) and this is 1.09× it (p = 0.02) — a small residual
+  // probably remains, and **no individual seat is distinguishable from 3.50** (worst |z| =
+  // 2.54 against a null 95th percentile of 2.66, p = 0.07).
+  //
+  // 🚨 **DO NOT RE-TUNE THIS ON A 200-MATCH RUN.** At 200 matches two candidates measured
+  // 0.40 and 0.70 and the ranking looked obvious; at 600 they read 0.39 and **0.34** and it
+  // REVERSED. The 0.30-place gap was inside the floor.
+  //
+  // Everything else moved with it: **all six seats deal damage in 600/600 matches** (was
+  // 74.5% of matches with all six engaged, and 53 of 1,200 seat-matches that never dealt any
+  // damage at all — now 0), and mean path length spread collapsed 907–1,797 wu → 1,245–1,408.
+  // ⚠️ **One consequence to know:** matches now reach the 30 s sudden-death trigger **90.5%**
+  // of the time, up from 66.0%, and run 32.55 s → 33.96 s. Everyone being engaged from the
+  // opening is what does it. `DECISIONS §58(a)` treats sudden death as a real final phase, so
+  // this is louder rather than wrong — but it is a pacing change and it is declared.
   //
   // Every seat clears every rule `sp_place.mjs` applies, and they are IMPORTED from it
   // rather than restated: legal for a 42 wu body, ≥ 60 wu of travel in ALL FOUR cardinals
   // over a ±21 wu band, no cardinal run STOPPING within half a body of the pot's 95 wu burn
   // ring, outside the 496.25 wu endgame keep-out, `isConcealed` false at t=0, clear of both
-  // slow puddles. ⚠️ **The runway rule is the binding one and it binds by 47×** — on the
-  // small map, dropping it alone took 2,186 admissible cells to 103,926 — which is why each
-  // bay here is an authored void rather than whatever gap the props happened to leave.
+  // slow puddles (nearest is 557.3 wu, unchanged — pair A is what sets it and pair A did not
+  // move). ⚠️ **The runway rule is the binding one and it binds by 47×** — on the small map,
+  // dropping it alone took 2,186 admissible cells to 103,926 — which is why each bay here is
+  // an authored void rather than whatever gap the props happened to leave.
+  //
+  // 🚨 **AND THAT SENTENCE IS NOW A CHECK RATHER THAN AN ASPIRATION.** Legality is a POINT
+  // test, so a cell can clear every rule while sitting on a knife edge: the first candidate
+  // this search returned had a **legal halo of 2 wu**, against 20–30 wu for every seat the
+  // ×4 map shipped with. `kx_seatfair --search --halo 20` requires every lattice cell within
+  // 20 wu to be legal too. These six measure **20 / 20 / 22 / 22 / 20 / 20 wu** on a 2 wu
+  // lattice, and the innermost pair clears the endgame keep-out by **29.25 wu** rather than
+  // the 4.75 the un-haloed best offered.
   //
   // ⚠️ **AND ALL SIX ARE IN ONE NAV COMPONENT AT THE 20 wu CELL**, checked against
   // `movement.ts:navGrid`'s own arithmetic (140×100 cells, 9,062 passable, 1 component).
@@ -1146,20 +1239,27 @@ export const createKitchenArena: ArenaFactory = () => {
   // path between them, and no other gate here would say so.
   //
   // `spawns[0]`/`spawns[1]` are the `playerSpawn`/`enemySpawn` OBJECTS, not copies of their
-  // numbers, so a two-fighter match cannot drift from what the duel has always read. The
-  // list is interleaved so N=2, N=4 and N=6 are each a complete set of mirror pairs; N=3 and
-  // N=5 cannot be symmetric at any ordering, and `sp_gate.mjs` says so per N rather than
-  // pretending otherwise.
+  // numbers, so a two-fighter match cannot drift from what the duel has always read.
+  // 🔴 **They are also DELIBERATELY UNMOVED.** By (iii) pair A can never be the diametric
+  // pair (it is 2,232 wu across), so the fix never needed them — and every 1v1 number in the
+  // project is measured on those two coordinates: 110 matchups, the pacing ladder,
+  // `roster_table`, `sim.test.mjs`. **N=2 is bit-identical to the build before this commit.**
+  // The list is interleaved so N=2, N=4 and N=6 are each a complete set of mirror pairs; N=3
+  // and N=5 cannot be symmetric at any ordering, and `sp_gate.mjs` says so per N rather than
+  // pretending otherwise. ✅ **N=4 is a perfect matching too, with a nearest-opponent spread
+  // of exactly 0.0 wu** (seats 0–3: 0↔3 and 1↔2, all four at 915.9).
   //
   // ⚠️ **WHAT POINT SYMMETRY BUYS, STATED PLAINLY:** a C2-symmetric map admits exactly one
   // exact statement — **seat 2k is congruent to seat 2k+1**. It cannot make pair A congruent
   // to pair B; that needs the ARENA to be invariant under a 3-fold rotation and it is not.
-  // The residual is measured and printed by `sp_place --search` rather than left implied.
+  // The residual is measured and printed by `sp_place --search` rather than left implied —
+  // and the three C2 pairs above agree to **0.06, 0.05 and 0.06 places**, which is the
+  // in-run evidence that the symmetry is real and that slot order costs nothing measurable.
   const playerSpawn = { x: 300, y: 810 };
   const enemySpawn = { x: ARENA_W - 300, y: ARENA_H - 810 };
 
-  const SPAWN_P2X = 1150, SPAWN_P2Y = 210;  // the north wall lane, west of the centrepiece
-  const SPAWN_P3X = 2560, SPAWN_P3Y = 300;  // the north-east corner bay, outboard of the pantry
+  const SPAWN_P2X = 2670, SPAWN_P2Y = 290;  // the north-east corner bay, outboard of the pantry
+  const SPAWN_P3X = 1590, SPAWN_P3Y = 510;  // the hub ring — the INNERMOST pair, which duels itself
   const spawns = [
     playerSpawn,
     enemySpawn,
