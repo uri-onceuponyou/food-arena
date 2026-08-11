@@ -267,6 +267,14 @@ const OFFLINE = [
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
+  { key: 'tools/tmp/r2_probe.mjs --selftest', probes: [pr(['tools/tmp/r2_probe.mjs', '--selftest'], S)] },
+  // Three probes because the doc cell states three numbers — known / new / stale. ARITY exists to
+  // make that correspondence mandatory: a cell cannot gain a number that nothing measures.
+  { key: 'tools/tmp/r2_probe.mjs --mode anchor', probes: [
+    pr(['tools/tmp/r2_probe.mjs', '--mode', 'anchor'], /^(\d+) known bounding-box fallback/m),
+    pr(['tools/tmp/r2_probe.mjs', '--mode', 'anchor'], /known bounding-box fallback\(s\), (\d+) new/m),
+    pr(['tools/tmp/r2_probe.mjs', '--mode', 'anchor'], /, (\d+) stale\./m),
+  ] },
   { key: 'tools/tmp/ey_pacman.mjs --selftest', probes: [pr(['tools/tmp/ey_pacman.mjs', '--selftest'], /^ey_pacman selftest: (\d+)\/\d+\s*$/m)] },
   { key: 'tools/tmp/cf_taper.mjs --selftest', probes: [pr(['tools/tmp/cf_taper.mjs', '--selftest'], /^cf_taper --selftest: (\d+) pass, \d+ fail/m)] },
   { key: 'tools/tmp/hm_audit.mjs --selftest', probes: [pr(['tools/tmp/hm_audit.mjs', '--selftest'], S)] },
