@@ -28,12 +28,18 @@
  *   `--knownbad lift`   lifts the `head` joint by `--dy` and requires the reported
  *                       gap to grow by exactly that much (1e-9). A gap metric that
  *                       does not move when the head moves is measuring nothing.
- *   `--knownbad sort`   the two characters this pass owns must report a POSITIVE gap
- *                       and the two that shipped the migration (soup, pizza) must
- *                       report a NON-positive one, on the same run. That is the
- *                       discrimination the whole instrument claims; if it cannot
- *                       reproduce the split that `nm_island` measured in pixels, its
- *                       numbers are not about the same defect.
+ *   `--knownbad sort`   TWO-SIDED, and deliberately NOT written against a snapshot of
+ *                       the cast: every character that carries a food mass on a torso
+ *                       must report a NON-positive gap as shipped, and the SAME
+ *                       characters must report a positive one once the head is lifted
+ *                       `--dy`. A one-sided version of this was the first draft and it
+ *                       went stale the moment the two characters it named were fixed —
+ *                       it demanded hotdog and sushi be POSITIVE, which was the defect.
+ *                       ⚠️ Its discriminating run is on record rather than in the
+ *                       assertion: measured on `a419871`, before the fix, this metric
+ *                       reported hotdog +0.0253 and sushi +0.0642 against soup -0.0555
+ *                       and pizza -0.0299 — i.e. it reproduced in METRES the split
+ *                       `nm_island` had found in PIXELS, which is the claim.
  *
  * ── USE ─────────────────────────────────────────────────────────────────────
  *   node tools/tmp/n2_geom.mjs --ids hotdog,sushi
@@ -100,7 +106,22 @@ function measure(id, lift = 0) {
   const { value } = captureWarnings(() => mod.createCharacter(id));
   const rig = value.rig;
   rig.restPose();
-  if (lift) rig.joints.head.position.y += lift;
+  if (lift) {
+    // 🚨 `head.position.y += lift` IS NOT A LIFT OF `lift` METRES, and the known-bad
+    // caught it: the head joint hangs off a torso that `RigStance.lean`/`twist` have
+    // rotated, so a LOCAL +Y step lands `lift * cos(tilt)` up in WORLD Y. Measured on
+    // the first version — 0.6 asked for, 0.592870 delivered on hotdog (lean 0.16) and
+    // 0.599651 on sushi (lean -0.02) — which is exactly the cos factor and read as the
+    // metric being 1.2% wrong. It was the DISPLACEMENT that was wrong.
+    // ⚠️ `nm_island.mjs` does the same `o.position.y += lift` for its own known-bad. It
+    // is harmless there because that test only asks whether the count RISES, and a 1%
+    // short lift still splits a matte — but the number it reports is not the number it
+    // names, and anything that ever asserts on the magnitude will inherit this.
+    const parent = rig.joints.head.parent;
+    parent.updateWorldMatrix(true, false);
+    const toLocal = new THREE.Matrix3().setFromMatrix4(parent.matrixWorld).invert();
+    rig.joints.head.position.add(new THREE.Vector3(0, lift, 0).applyMatrix3(toLocal));
+  }
   rig.joints.root.updateWorldMatrix(true, true);
 
   const headJoint = rig.joints.head;
@@ -164,18 +185,22 @@ if (KNOWNBAD === 'lift') {
 
 // ── --knownbad sort ─────────────────────────────────────────────────────────
 if (KNOWNBAD === 'sort') {
-  console.log('KNOWN-BAD: this instrument must reproduce the split nm_island measured in PIXELS.\n'
-    + '  hotdog, sushi  (reverted, head became its own island)   gap MUST be > 0\n'
-    + '  soup,   pizza  (migrated and shipped, 1 component)      gap MUST be <= 0\n');
+  console.log('KNOWN-BAD, two-sided: every torso-bearing character must report a NON-positive');
+  console.log(`gap as shipped, and a POSITIVE one with its head lifted ${DY} m.\n`);
+  const ids = IDS.length ? IDS : ['hotdog', 'sushi', 'soup', 'pizza', 'burrito'];
   let bad = 0;
-  for (const [id, want] of [['hotdog', '>'], ['sushi', '>'], ['soup', '<='], ['pizza', '<=']]) {
+  for (const id of ids) {
     const r = measure(id, 0);
-    const ok = want === '>' ? r.gap > 0 : r.gap <= 0;
-    console.log(`${id.padEnd(12)} gap ${r.gap.toFixed(6)}  (want ${want} 0)  body top ${r.bodyTop.toFixed(4)} by ${r.bodyTopBy}`
-      + `   head bottom ${r.headBot.toFixed(4)} by ${r.headBotBy}   ${ok ? '✓' : '🔴'}`);
-    if (!ok) bad++;
+    const l = measure(id, DY);
+    const okJoined = r.gap <= 0;
+    const okSplit = l.gap > 0;
+    console.log(`${id.padEnd(12)} shipped ${r.gap.toFixed(6)} (want <= 0) ${okJoined ? '✓' : '🔴'}`
+      + `   head +${DY} m ${l.gap.toFixed(6)} (want > 0) ${okSplit ? '✓' : '🔴'}`
+      + `   body top ${r.bodyTop.toFixed(4)} by ${r.bodyTopBy}   head bottom ${r.headBot.toFixed(4)} by ${r.headBotBy}`);
+    if (!okJoined) bad++;
+    if (!okSplit) bad++;
   }
-  console.log(bad ? `\n🔴 KNOWN-BAD FAILED on ${bad}` : '\n✓ the gap sorts the cast the way the pixels did.');
+  console.log(bad ? `\n🔴 KNOWN-BAD FAILED on ${bad} check(s)` : '\n✓ joined as shipped, and the metric can go positive.');
   process.exit(bad ? 1 : 0);
 }
 
