@@ -133,7 +133,7 @@ export function stimulus(seed, tick, slot) {
  * least one with it overwritten. Options force the two shapes the sim will not produce on
  * demand.
  */
-export function buildLivedState(arena, n, { ticks = 400, seed = 12345, dt = 1000 / 60, humans = 1, holes = true, broken = true } = {}) {
+export function buildLivedState(arena, n, { ticks = 400, seed = 12345, dt = 1000 / 60, humans = 1 } = {}) {
   const state = createMatch(arena, fixtureConfigs(arena, n, { humans }));
   for (let t = 0; t < ticks; t++) {
     const inputs = [];
@@ -141,33 +141,102 @@ export function buildLivedState(arena, n, { ticks = 400, seed = 12345, dt = 1000
     stepMatch(state, dt, inputs);
     if (state.phase === 'ended') break;
   }
-  if (holes) {
-    // ── REAL ARRAY HOLES, reachable in the shipped sim ──
-    // `sim.ts:applyWorldTick` writes `fighter.hazardTimers[idx]` at the HAZARD'S index, and
-    // `state.ts` documents the array as "sparse; grows lazily". A fighter that meets hazard 3
-    // before hazard 0 therefore has holes at 0..2. Forced here because which hazard a fighter
-    // meets first is a property of the layout, not of the codec.
-    state.fighters[0].hazardTimers[3] = 12.5;
-  }
-  if (broken && arena.concealment && arena.concealment.length > 0) {
-    // ── REAL ARENA REFERENCES in `brokenConcealment` ──
-    // `combat.ts:attemptAttack` pushes boxes here by reference when a fighter attacks from
-    // inside one. Forced, because that needs a fighter standing in a plate at the moment it
-    // fires. What matters to the codec is that these are THE SAME OBJECTS as the arena's.
+  return forceEdgeShapes(state, arena);
+}
+
+/**
+ * The two shapes the sim will not produce on demand, forced onto a finished state.
+ *
+ * Stated ONCE and applied by all three builders, rather than inline in each — a fixture that
+ * covers a shape in one arm and quietly not in another is a coverage claim nobody can check.
+ * Both are reachable in the shipped sim; which arm reaches them is a property of the layout and
+ * of who walked where, not of the codec.
+ */
+function forceEdgeShapes(state, arena) {
+  // REAL ARRAY HOLES: `sim.ts:applyWorldTick` writes `hazardTimers` at the HAZARD'S index and
+  // `state.ts` documents the array as "sparse; grows lazily", so meeting hazard 3 before hazard
+  // 0 leaves holes at 0..2.
+  state.fighters[0].hazardTimers[3] = 12.5;
+  // REAL ARENA REFERENCES: `combat.ts:attemptAttack` pushes boxes here BY REFERENCE when a
+  // fighter attacks from inside one. Without these the `conceal/identity` guard is vacuous.
+  if (arena.concealment && arena.concealment.length > 0 && state.brokenConcealment.length === 0) {
     state.brokenConcealment.push(arena.concealment[0], arena.concealment[2]);
   }
   return state;
+}
+
+/**
+ * A state with the SUDDEN-DEATH RING COLLAPSED — `DECISIONS §2`, shipped in `f87d407`.
+ *
+ * 🚨 **THE FIXTURE DID NOT COVER THIS AND THE CODEC HAD NEVER SEEN IT.** `buildLivedState`
+ * runs 400 ticks = 6.67 s. Sudden death arms at `SUDDEN_DEATH_MS`, which is **30 s of PLAYING**
+ * — about tick 2,023 once the ~223-tick countdown is paid — so every wire number this repo had
+ * was measured on states where `safeRadius` was still hundreds of world units and nobody had
+ * died. `MatchState` now reaches `safeRadius === 0` with the whole arena lethal, which is a
+ * region of the state space the round trip had never been asked about.
+ *
+ * ⚠️ **IT THROWS IF IT DOES NOT GET THERE**, rather than returning whatever it ended up with.
+ * A builder that silently hands back an ordinary mid-match state would make the new coverage
+ * fake while every check went green — the same failure shape as the two known-bads in
+ * `nw_stack.mjs` that passed falsely because they tampered with a tick inside the countdown.
+ */
+export function buildSuddenDeathState(arena, n, { seed = 4242, dt = 1000 / 60, humans = 1, maxTicks = 4000, dwell = 30 } = {}) {
+  const state = createMatch(arena, fixtureConfigs(arena, n, { humans }));
+  let armedAt = -1;
+  for (let t = 0; t < maxTicks; t++) {
+    const inputs = [];
+    for (let s2 = 0; s2 < n; s2++) inputs.push(s2 < humans ? stimulus(seed, t, s2) : null);
+    stepMatch(state, dt, inputs);
+    // ── 🚨 FORCED IMMORTAL, AND IT IS THE ONLY WAY TO GET HERE ──────────────────
+    // First attempt ran a plain match and threw: **N=2 ends by knockout at 13.35 s** and sudden
+    // death arms at 30 s of playing, so a duel NEVER reaches it. That is a fact about the game,
+    // not a limitation of the fixture — and it is worth recording, because it means the state
+    // region this arm covers is one only a stalemate produces.
+    // `match-sim.mjs`'s forced-immortal idiom is what the §49a timeout corpus already uses for
+    // exactly this reason. HP is pinned AFTER the tick, so every damage event, `lastDamagedAt`
+    // write and ring interaction still happens; only the death is suppressed.
+    for (const f of state.fighters) { f.hp = f.maxHp; f.alive = true; }
+    if (armedAt < 0 && state.phase === 'playing' && state.safeRadius === 0) armedAt = t;
+    if (armedAt >= 0 && t - armedAt >= dwell) return forceEdgeShapes(state, arena);
+    if (state.phase === 'ended') break;
+  }
+  throw new Error(`buildSuddenDeathState: N=${n} never reached safeRadius 0`
+    + ` (phase ${state.phase}, safeRadius ${state.safeRadius}, elapsed ${state.elapsed.toFixed(0)}ms)`);
+}
+
+/**
+ * A state after the whistle: `phase === 'ended'`, a winner recorded, corpses in the array.
+ *
+ * The shapes only this arm produces are the ones a mid-match state cannot have —
+ * `winner`/`winnerId` non-null (so the legacy mirror is exercised on a real value rather than
+ * on `null`), `alive: false` with `deaths: 1`, and `lastDamagedAt` holding a real timestamp
+ * where a fresh fighter holds `-Infinity`. Throws if the match never ends, for the same reason
+ * as above.
+ */
+export function buildEndedState(arena, n, { seed = 4242, dt = 1000 / 60, humans = 1, maxTicks = 6000 } = {}) {
+  const state = createMatch(arena, fixtureConfigs(arena, n, { humans }));
+  for (let t = 0; t < maxTicks; t++) {
+    const inputs = [];
+    for (let s2 = 0; s2 < n; s2++) inputs.push(s2 < humans ? stimulus(seed, t, s2) : null);
+    stepMatch(state, dt, inputs);
+    if (state.phase === 'ended') return forceEdgeShapes(state, arena);
+  }
+  throw new Error(`buildEndedState: N=${n} still ${state.phase} after ${maxTicks} ticks`);
 }
 
 /** `IS_MAIN` guard — see the header. Importing this file must have no side effects. */
 const IS_MAIN = import.meta.url === `file://${process.argv[1]}`;
 if (IS_MAIN) {
   const arena = makeFixtureArena();
-  for (const n of [2, 6]) {
-    const st = buildLivedState(arena, n);
-    console.log(`N=${n}  phase=${st.phase} elapsed=${st.elapsed.toFixed(1)}ms`
-      + ` fighters=${st.fighters.length} projectiles=${st.projectiles.length}`
-      + ` trailMarks=${st.trailMarks.length} splats=${st.splats.length}`
-      + ` sightings=${st.sightings.length} broken=${st.brokenConcealment.length}`);
-  }
+  const show = (label, st) => {
+    console.log(`${label.padEnd(18)} phase=${st.phase.padEnd(8)} elapsed=${st.elapsed.toFixed(0).padStart(6)}ms`
+      + ` safeR=${st.safeRadius.toFixed(1).padStart(7)} fighters=${st.fighters.length}`
+      + ` alive=${st.fighters.filter((f) => f.alive).length}`
+      + ` winnerId=${String(st.winnerId)}`
+      + ` proj=${st.projectiles.length} trails=${st.trailMarks.length} splats=${st.splats.length}`
+      + ` broken=${st.brokenConcealment.length}`);
+  };
+  for (const n of [2, 6]) show(`lived N=${n}`, buildLivedState(arena, n));
+  for (const n of [2, 6]) show(`suddenDeath N=${n}`, buildSuddenDeathState(arena, n));
+  for (const n of [2, 6]) show(`ended N=${n}`, buildEndedState(arena, n));
 }

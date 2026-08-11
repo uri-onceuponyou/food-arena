@@ -48,8 +48,9 @@ import { createMatch, stepMatch, type FighterConfig } from '../game/sim.ts';
 import type { CharacterId } from '../game/rules.ts';
 import type { GameEvent, MatchInput, MatchState } from '../game/state.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
-import { b64ToBytes, decodeInputFrame, quantizeInput } from './inputCodec.ts';
-import { arenaFingerprint, encodeMatchState } from './wire.ts';
+import { b64ToBytes, bytesToB64, decodeInputFrame, encodeInputFrame, quantizeInput } from './inputCodec.ts';
+import { arenaFingerprint, encodeMatchState, type WireState } from './wire.ts';
+import { diffWire } from './delta.ts';
 import {
   PROTOCOL_VERSION,
   type NetMessage,
@@ -72,6 +73,24 @@ export interface HostSessionOptions {
   dtMs?: number;
   /** Ticks between authoritative snapshots. Default 3 (≈20 Hz), per `NET_CONFIG_DEFAULTS`. */
   snapshotEveryTicks?: number;
+  /**
+   * `'delta'` (default) sends only what changed; `'full'` sends the whole state every time.
+   *
+   * Measured over a 900-tick six-seat match (`nw_delta.mjs` §S): full snapshots mean
+   * **10,657 B**, deltas mean **1,501 B** — **7.1x**, or **1,248.9 -> 175.9 KiB/s** across six
+   * clients at 20 Hz. `'full'` is kept because it is the arm every correctness claim is
+   * measured against, and because a delta stream with no keyframes cannot be joined.
+   */
+  snapshotMode?: 'full' | 'delta';
+  /**
+   * Force a full keyframe at least this often, in ticks. Default 300 (5 s at 59.999 Hz).
+   *
+   * ⚠️ Not an optimisation — it is the recovery path. A client that has missed a delta cannot
+   * use any later one (the base tick will never match again), so without a periodic keyframe
+   * its only way back is to ASK, and a client that has gone quiet cannot ask. `nw_stack.mjs`
+   * proves recovery on a 10% lossy link both ways: by request, and by waiting.
+   */
+  keyframeEveryTicks?: number;
   /** Record `(tick, inputs[])` so the match is exactly replayable. Default true. */
   recordInputLog?: boolean;
 }
@@ -100,6 +119,20 @@ export class HostSession {
 
   private readonly transport: Transport;
   private readonly snapshotEveryTicks: number;
+  private readonly snapshotMode: 'full' | 'delta';
+  private readonly keyframeEveryTicks: number;
+  /**
+   * The last thing every client was told, and when.
+   *
+   * ⚠️ **ONE SHARED BASELINE FOR EVERY CLIENT, DELIBERATELY.** Per-client baselines would mean
+   * a diff per client per tick and a divergent recovery path for each; one baseline means one
+   * diff broadcast to all, and a client that falls off it is put back ON it by being sent the
+   * baseline itself rather than a fresh encode. A keyframe that is not the baseline would leave
+   * the receiver one tick away from it and resyncing forever.
+   */
+  private baselineWire: WireState | null = null;
+  private baselineTick = -1;
+  private lastKeyframeTick = -1;
   private readonly buffers: SeatBuffer[];
   /**
    * ⚠️ **AN ARRAY INDEXED BY SLOT, NOT A `Map<PeerId, Slot>`.** `slotOfPeer` is a linear scan
@@ -120,7 +153,17 @@ export class HostSession {
   private readonly recordInputLog: boolean;
 
   /** Live counters, so a gate can assert traffic instead of trusting it. */
-  readonly stats = { inputsAccepted: 0, inputsRejected: 0, snapshotsSent: 0, ticks: 0 };
+  readonly stats = {
+    inputsAccepted: 0, inputsRejected: 0, snapshotsSent: 0, ticks: 0,
+    /** Full keyframes sent — at tick 0, on the keyframe interval, and on every `resync`. */
+    keyframesSent: 0,
+    /** Deltas sent. */
+    deltasSent: 0,
+    /** `resync` requests answered. A non-zero count on a clean link means something is wrong. */
+    resyncs: 0,
+    /** Bytes of `JSON.stringify` on what was broadcast, so bandwidth is measured not estimated. */
+    bytesSent: 0,
+  };
 
   constructor(opts: HostSessionOptions) {
     this.transport = opts.transport;
@@ -128,6 +171,8 @@ export class HostSession {
     this.seats = opts.seats;
     this.dtMs = opts.dtMs ?? 1000 / 60;
     this.snapshotEveryTicks = Math.max(1, Math.trunc(opts.snapshotEveryTicks ?? 3));
+    this.snapshotMode = opts.snapshotMode ?? 'delta';
+    this.keyframeEveryTicks = Math.max(1, Math.trunc(opts.keyframeEveryTicks ?? 300));
     this.recordInputLog = opts.recordInputLog !== false;
 
     for (let i = 0; i < this.seats.length; i++) {
@@ -286,22 +331,21 @@ export class HostSession {
             dtMs: this.dtMs,
             tick: this.tickNo,
           });
-          this.transport.send(from, {
-            t: 'snapshot',
-            tick: this.tickNo,
-            state: encodeMatchState(this.matchState),
-            // ⚠️ NOT `this.pendingEvents` — those already played for everyone else and a
-            // joiner must not be handed a backlog of explosions that happened before it
-            // arrived. It gets the STATE they produced, which is the whole point of the
-            // state being authoritative.
-            events: [],
-            ackTick: this.buffers.map((b) => b.appliedTick),
-            applied: [],
-          });
+          // ⚠️ THE BASELINE, not a fresh encode — see `sendKeyframeTo`. A joiner keyframed to
+          // a tick the delta stream is not based on would reject the next delta and resync
+          // immediately, which reads exactly like a lossy link.
+          this.sendKeyframeTo(from);
         }
         return;
       }
       case 'input': return this.handleInput(from, msg.b);
+      case 'resync': {
+        // No authority check: a client can only ask for what it is already entitled to see, and
+        // refusing would strand it. It IS counted, because a resync on a clean link means a bug.
+        this.stats.resyncs++;
+        this.sendKeyframeTo(from);
+        return;
+      }
       case 'bye': return;
       default: return;   // clients do not send anything else; ignore rather than throw
     }
@@ -357,18 +401,57 @@ export class HostSession {
   }
 
   private sendSnapshot(applied: (MatchInput | null)[]): void {
-    const state = this.state;
-    const msg: NetMessage = {
-      t: 'snapshot',
-      tick: this.tickNo,
-      state: encodeMatchState(state),
-      events: this.pendingEvents,
-      ackTick: this.buffers.map((b) => b.appliedTick),
-      applied: applied.map((i) => (i ? { ...i } : null)),
-    };
+    const wire = encodeMatchState(this.state);
+    const events = this.pendingEvents;
     this.pendingEvents = [];
+    const ackTick = this.buffers.map((b) => b.appliedTick);
+    const appliedB64 = bytesToB64(encodeInputFrame(this.tickNo, applied));
+
+    const keyframeDue = this.baselineWire === null
+      || this.snapshotMode === 'full'
+      || this.tickNo - this.lastKeyframeTick >= this.keyframeEveryTicks;
+
+    let msg: NetMessage;
+    if (keyframeDue) {
+      msg = { t: 'snapshot', tick: this.tickNo, state: wire, events, ackTick, applied: appliedB64 };
+      this.lastKeyframeTick = this.tickNo;
+      this.stats.keyframesSent++;
+    } else {
+      // The baseline is non-null here by the branch above.
+      const d = diffWire(this.baselineWire as WireState, wire, this.baselineTick, this.tickNo);
+      msg = { t: 'delta', tick: this.tickNo, base: this.baselineTick, d, events, ackTick, applied: appliedB64 };
+      this.stats.deltasSent++;
+    }
+    this.baselineWire = wire;
+    this.baselineTick = this.tickNo;
+    this.stats.bytesSent += JSON.stringify(msg).length;
     this.transport.broadcast(msg);
     this.stats.snapshotsSent++;
+  }
+
+  /**
+   * Put one peer back on the shared baseline.
+   *
+   * ⚠️ Sends `baselineWire`, NOT a fresh `encodeMatchState(this.state)`. The two differ whenever
+   * the host has stepped since the last broadcast, and a client keyframed to a tick that is not
+   * the baseline would reject the very next delta and ask again — a resync loop that looks like
+   * packet loss and is not.
+   */
+  private sendKeyframeTo(peer: PeerId): void {
+    if (this.baselineWire === null || this.matchState === null) return;
+    const msg: NetMessage = {
+      t: 'snapshot',
+      tick: this.baselineTick,
+      state: this.baselineWire,
+      // ⚠️ NOT `pendingEvents` — those belong to the broadcast stream and dropping them here
+      // would delete them for everybody. A resyncing client gets the STATE they produced.
+      events: [],
+      ackTick: this.buffers.map((b) => b.appliedTick),
+      applied: bytesToB64(encodeInputFrame(this.baselineTick, [])),
+    };
+    this.stats.bytesSent += JSON.stringify(msg).length;
+    this.stats.keyframesSent++;
+    this.transport.send(peer, msg);
   }
 }
 

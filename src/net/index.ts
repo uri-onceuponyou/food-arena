@@ -82,6 +82,18 @@ export {
   type Transport,
 } from './transport.ts';
 
+export {
+  DELTA_VERSION,
+  DeltaError,
+  canonicaliseWire,
+  deltaBytes,
+  deltaOpCount,
+  diffWire,
+  patchWire,
+  wirePathTable,
+  type WireDelta,
+} from './delta.ts';
+
 export { HostSession, type AppliedTick, type HostSessionOptions } from './host.ts';
 export { ClientSession, type ClientSessionOptions, type ReconcileReport } from './client.ts';
 
@@ -101,7 +113,7 @@ export {
   shuffleSeats,
   standings,
   toWireSeats,
-  twoSeatCurve,
+  placementCurve,
   type League,
   type LeagueEntrant,
   type LeagueMatchResult,

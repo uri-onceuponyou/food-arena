@@ -50,8 +50,9 @@ import { createMatch, stepMatch, type FighterConfig } from '../game/sim.ts';
 import type { CharacterId } from '../game/rules.ts';
 import type { GameEvent, MatchInput, MatchState } from '../game/state.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
-import { bytesToB64, encodeInputFrame, neutralInput, quantizeInput } from './inputCodec.ts';
-import { arenaFingerprint, cloneMatchState, decodeMatchState, WIRE_VERSION } from './wire.ts';
+import { b64ToBytes, bytesToB64, decodeInputFrame, encodeInputFrame, neutralInput, quantizeInput } from './inputCodec.ts';
+import { arenaFingerprint, cloneMatchState, decodeMatchState, WIRE_VERSION, type WireState } from './wire.ts';
+import { DeltaError, patchWire } from './delta.ts';
 import { PROTOCOL_VERSION, type NetMessage, type PeerId, type Slot, type WireSeat } from './protocol.ts';
 import type { Transport } from './transport.ts';
 
@@ -117,6 +118,17 @@ export class ClientSession {
 
   private events: GameEvent[] = [];
   private lastReconcile: ReconcileReport | null = null;
+  /**
+   * The wire tree the next delta will be applied to, and the tick it is.
+   *
+   * Kept as the WIRE TREE rather than re-encoding `authoritative` each time, for one reason
+   * that is correctness rather than speed: `encodeMatchState(decodeMatchState(w))` is provably
+   * `w` (`nw_wire.mjs` C2), so re-encoding would also work — but it would make the delta base
+   * depend on a round trip through the decoder, so a decoder bug would silently become a delta
+   * bug and the two would be impossible to tell apart.
+   */
+  private baseWire: WireState | null = null;
+  private baseTick = -1;
 
   readonly stats = {
     snapshots: 0,
@@ -129,6 +141,14 @@ export class ClientSession {
     rejects: 0,
     /** Set if `match-start` carried an arena fingerprint this client cannot match. */
     arenaMismatch: false,
+    /** Full keyframes received. */
+    keyframes: 0,
+    /** Deltas applied. */
+    deltas: 0,
+    /** Deltas DISCARDED because their base was not this client's — every one asks for a keyframe. */
+    deltasRefused: 0,
+    /** `resync` requests sent. */
+    resyncsRequested: 0,
   };
 
   constructor(opts: ClientSessionOptions) {
@@ -226,24 +246,39 @@ export class ClientSession {
         this.remoteApplied = new Array<MatchInput | null>(msg.seats.length).fill(null);
         this.sendTick = msg.tick;
         this.ackTick = msg.tick - 1;
+        // A fresh match invalidates any delta base carried over from a previous one.
+        this.baseWire = null;
+        this.baseTick = -1;
+        return;
+      }
+      case 'delta': {
+        // 🚨 THE BASE CHECK, AND IT IS THE ONLY THING BETWEEN THIS CLIENT AND A PLAUSIBLE,
+        // WRONG MATCH. `nw_delta.mjs` D5: a delta applied to a same-shape base one tick out
+        // resolves every index and decodes to a state that passes every integrity invariant
+        // while being no tick of any match. Refuse and ask; never apply and hope.
+        if (this.baseWire === null || msg.base !== this.baseTick) {
+          this.stats.deltasRefused++;
+          this.requestResync();
+          return;
+        }
+        let patched: WireState;
+        try {
+          patched = patchWire(this.baseWire, msg.d, this.baseTick);
+        } catch (e) {
+          // A version mismatch or an unresolvable path. Both mean "this stream is not for the
+          // tree I hold"; both recover the same way.
+          if (!(e instanceof DeltaError)) throw e;
+          this.stats.deltasRefused++;
+          this.requestResync();
+          return;
+        }
+        this.stats.deltas++;
+        this.absorb(patched, msg.tick, msg.events, msg.ackTick, msg.applied);
         return;
       }
       case 'snapshot': {
-        this.stats.snapshots++;
-        this.events.push(...msg.events);
-        const before = this.localPos();
-        this.authoritative = decodeMatchState(msg.state, this.arena);
-        this.remoteApplied = msg.applied.length > 0 ? msg.applied.slice() : this.remoteApplied;
-        if (this.slotNo !== null && msg.ackTick[this.slotNo] !== undefined) {
-          this.ackTick = msg.ackTick[this.slotNo];
-        }
-        const replayed = this.rebuildPrediction();
-        const after = this.localPos();
-        const errorWu = before && after ? Math.sqrt((after.x - before.x) ** 2 + (after.y - before.y) ** 2) : 0;
-        this.stats.replayed += replayed;
-        this.stats.sumErrorWu += errorWu;
-        if (errorWu > this.stats.maxErrorWu) this.stats.maxErrorWu = errorWu;
-        this.lastReconcile = { tick: msg.tick, replayed, errorWu };
+        this.stats.keyframes++;
+        this.absorb(msg.state, msg.tick, msg.events, msg.ackTick, msg.applied);
         return;
       }
       case 'reject': {
@@ -251,6 +286,53 @@ export class ClientSession {
         return;
       }
       default: return;
+    }
+  }
+
+  private requestResync(): void {
+    this.stats.resyncsRequested++;
+    this.transport.send(this.hostPeer, { t: 'resync', have: this.baseTick });
+  }
+
+  /**
+   * Take an authoritative wire tree — however it arrived — and rebuild everything from it.
+   *
+   * ⚠️ **ONE PATH FOR KEYFRAMES AND DELTAS.** The delta branch differs only in how it OBTAINS
+   * the tree; everything after that — decode, reconcile, measure — must be identical or the two
+   * transports would drift apart in exactly the situation where nobody is watching (a lossy
+   * link, where keyframes and deltas interleave).
+   */
+  private absorb(
+    wire: WireState,
+    tick: number,
+    events: GameEvent[],
+    ackTick: number[],
+    appliedB64: string,
+  ): void {
+    {
+        this.stats.snapshots++;
+        this.events.push(...events);
+        const before = this.localPos();
+        this.baseWire = wire;
+        this.baseTick = tick;
+        this.authoritative = decodeMatchState(wire, this.arena);
+        // ⚠️ Decoded rather than trusted: the host applied what IT decoded from the client's
+        // frame, and this decodes the same bytes with the same codec, so the two replays cannot
+        // disagree about what a seat did without the codec itself being wrong — which
+        // `nw_wire.mjs` F2 gates separately.
+        let applied: (MatchInput | null)[] = [];
+        try { applied = decodeInputFrame(b64ToBytes(appliedB64)).inputs; } catch { applied = []; }
+        this.remoteApplied = applied.length > 0 ? applied.slice() : this.remoteApplied;
+        if (this.slotNo !== null && ackTick[this.slotNo] !== undefined) {
+          this.ackTick = ackTick[this.slotNo];
+        }
+        const replayed = this.rebuildPrediction();
+        const after = this.localPos();
+        const errorWu = before && after ? Math.sqrt((after.x - before.x) ** 2 + (after.y - before.y) ** 2) : 0;
+        this.stats.replayed += replayed;
+        this.stats.sumErrorWu += errorWu;
+        if (errorWu > this.stats.maxErrorWu) this.stats.maxErrorWu = errorWu;
+        this.lastReconcile = { tick, replayed, errorWu };
     }
   }
 

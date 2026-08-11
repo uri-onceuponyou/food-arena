@@ -19,9 +19,13 @@
  */
 
 import { CHARACTER_IDS, type CharacterId } from '../../game/rules';
+// ⚠️ THE SEAT FLOOR IS IMPORTED, NOT WRITTEN AS `2`. `recordResult` is the duel, and the sim's
+// own name for "a duel's seat count" is `MIN_FIGHTERS` — the same constant
+// `economy/state.ts:applyMatchResult` passes. A literal here would be a second statement of it.
+import { MIN_FIGHTERS } from '../../game/state';
 import {
   adoptLegacyBalance,
-  applyMatchResult,
+  applyMatchPlacement,
   buyContainer,
   canLevelUp,
   characterLevel,
@@ -37,6 +41,8 @@ import {
   ownedSet,
   serialize as serializeEconomy,
   totalContainers,
+  placementRank01,
+  placementWeight01,
   winsToNextChest,
   type ContainerKind,
   type ContainerResult,
@@ -53,6 +59,27 @@ const STORAGE_KEY = 'food-arena.profile.v1';
 export const XP_PER_LEVEL = 250;
 export const XP_WIN = 100;
 export const XP_LOSS = 35;
+
+/**
+ * XP for one finisher, interpolated across the SAME normalised rank the trophy and coin curves
+ * use — see `recordPlacement` for why this is interpolated rather than binary.
+ *
+ * It is `economy/trophyRoad.ts:placementCoins`'s body with the XP endpoints substituted, and it
+ * lives here rather than there because `XP_WIN`/`XP_LOSS` are menu-layer numbers that
+ * `game/economy/` deliberately does not own. **The SHAPE is imported, not copied**
+ * (`placementWeight01`), so there is exactly one statement of the curve in the product and a
+ * steepness retune moves XP, coins and trophies together.
+ *
+ * ⚠️ Endpoints are exact at every seat count: `w` is pinned to 0 at first place and 1 at last
+ * by early returns inside `placementWeight01`, so first ALWAYS pays `XP_WIN` and last ALWAYS
+ * pays `XP_LOSS` — including at two seats, where those are the only two ranks that exist.
+ * `Math.round` matches `placementCoins`, so XP stays an integer and the level bar never shows a
+ * fraction of a point.
+ */
+export function placementXp(place: number, seats: number): number {
+  const w = placementWeight01(placementRank01(place, seats));
+  return Math.round(XP_WIN - w * (XP_WIN - XP_LOSS));
+}
 
 export interface ProfileData {
   name: string;
@@ -238,19 +265,82 @@ export class PlayerProfile {
   }
 
   /**
-   * Bank a finished match: win/loss record, XP, trophies, coins and progress toward
-   * the next free chest, in one write.
+   * Bank a finished match at a known PLACE in a field of `seats`. 0-based, best first.
    *
-   * Returns what the match paid so a caller can celebrate it. `matchScreen.ts` calls
-   * this and ignores the return value, which is fine — the trophy road picks the
-   * same payout back up off `lastMatch` the next time it is opened.
+   * Win/loss record, XP, trophies, coins and progress toward the next free chest, in one write.
+   * Returns what the match paid so a caller can celebrate it.
+   *
+   * ── 🚨 THE `wins` COUNTER FOLLOWS `LastMatch.won`, IT DOES NOT RE-DERIVE IT ──
+   *
+   * `applyMatchPlacement` runs FIRST and the counter reads `paid.won` off it, rather than
+   * testing `place === 0` here. Both would give the same answer today; only one of them stays
+   * right when the economy changes its mind about what a win is. That is not hypothetical —
+   * the economy already holds TWO different answers on purpose:
+   *
+   *   * `LastMatch.won` is `place === 0` — the displayed W/L record, "did you win it";
+   *   * `placementBanksChestWin` is `rank01 < 0.5` — the chest faucet, "did you do well".
+   *
+   * Third of six banks chest credit and is not a win. Re-deriving either one here would make
+   * this file a second, quieter source of truth for a question `trophyRoad.ts` has answered
+   * twice deliberately.
+   *
+   * ── 🚨 XP IS INTERPOLATED ON THE SAME NORMALISED RANK. THIS WAS A DECISION. ──
+   *
+   * `XP_WIN`/`XP_LOSS` were a SECOND two-outcome ladder that nobody had noticed, sitting
+   * outside `game/economy/`'s file set and therefore outside the pass that priced placements
+   * (`721ce3c`). Two answers were available and the binary one was rejected:
+   *
+   *   * **binary** (`place === 0 ? XP_WIN : XP_LOSS`) pays 2nd of six and 6th of six the same
+   *     100-vs-35 cliff. That is *exactly* the defect `placementRank01` exists to remove —
+   *     re-installed in a second ladder, one commit after the first was fixed. A stopgap whose
+   *     cost is a known bug is not a stopgap, it is the bug with a comment on it.
+   *   * **interpolated** — `placementXp` below — is the identical shape as `placementCoins`,
+   *     costs one import and no new constant, and `XP_WIN`/`XP_LOSS` stay the only XP numbers
+   *     in the product.
+   *
+   * ⚠️ **And it is a NO-OP AT TWO SEATS BY CONSTRUCTION, not by tuning.**
+   * `placementWeight01` pins its endpoints with early returns *before* `Math.pow`, so
+   * `w(0) === 0` and `w(1) === 1` for every exponent; a two-seat match only ever produces
+   * `r ∈ {0, 1}`; so `placementXp(0, 2) === XP_WIN` and `placementXp(1, 2) === XP_LOSS`
+   * exactly. `tools/tmp/nw_profile.mjs` proves the whole delegation below against a FROZEN
+   * ORACLE of the pre-change body over a seeded career rather than asserting it.
+   *
+   * ⚠️ **What it does NOT decide:** whether 100/35 are the right endpoints at all, and whether
+   * the account-level curve should stay flat (`XP_PER_LEVEL`). Both are live-ops calls and both
+   * are untouched. This changes only how the span between the two shipped numbers is divided
+   * among more than two finishers.
    */
-  recordResult(won: boolean): LastMatch {
-    if (won) { this.data.wins++; this.data.xp += XP_WIN; }
-    else { this.data.losses++; this.data.xp += XP_LOSS; }
-    const paid = applyMatchResult(this.data.economy, won);
+  recordPlacement(place: number, seats: number): LastMatch {
+    const paid = applyMatchPlacement(this.data.economy, place, seats);
+    if (paid.won) this.data.wins++;
+    else this.data.losses++;
+    this.data.xp += placementXp(place, seats);
     this.commit();
     return paid;
+  }
+
+  /**
+   * Bank a finished DUEL. The two-outcome form every shipped call site still uses.
+   *
+   * ⚠️ **IT DELEGATES, AND THAT IS DELIBERATE RATHER THAN TIDY.** The body used to be three
+   * lines of its own:
+   *
+   *     if (won) { this.data.wins++; this.data.xp += XP_WIN; }
+   *     else { this.data.losses++; this.data.xp += XP_LOSS; }
+   *     const paid = applyMatchResult(this.data.economy, won);
+   *
+   * Keeping that alongside `recordPlacement` would be two bodies for one rule — the shape
+   * `rules.ts` documents six defects of, and the exact reason `economy/state.ts` routed
+   * `applyMatchResult` through `applyMatchPlacement` rather than keeping a parallel one. Two
+   * bodies let a future XP retune move the six-seat path and leave the duel behind, with
+   * nothing red anywhere.
+   *
+   * The signature, the return value and every number are unchanged, and that is measured, not
+   * claimed: `tools/tmp/nw_profile.mjs` replays a 2,000-match seeded career through a frozen
+   * transcription of the old body and compares the WHOLE serialised profile.
+   */
+  recordResult(won: boolean): LastMatch {
+    return this.recordPlacement(won ? 0 : 1, MIN_FIGHTERS);
   }
 
   /** Mark the last match's payout as already celebrated, so it shows once. */

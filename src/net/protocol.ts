@@ -34,6 +34,7 @@
  */
 
 import type { GameEvent, MatchInput } from '../game/state.ts';
+import type { WireDelta } from './delta.ts';
 import type { WireState } from './wire.ts';
 
 /**
@@ -116,12 +117,51 @@ export type NetMessage =
       /** Per slot: the input tick the host last APPLIED. The client replays strictly after it. */
       ackTick: number[];
       /**
-       * Per slot: the input the host applied on this tick, or `null` for a seat it held
-       * neutral. The client replays remote seats with these rather than freezing them —
-       * costs 7 B/seat and removes the most visible reconciliation artefact.
+       * The input the host applied on this tick, per slot, as a base64 `encodeInputFrame`.
+       *
+       * 🚨 **IT WENT THROUGH THE INPUT CODEC BECAUSE MEASURING SAID SO.** It was a raw
+       * `(MatchInput | null)[]` until `nw_stack.mjs` X6 put a number on it: at six seats the
+       * JSON form is **~540 B against a ~1,500 B delta — a third of the message**, which is
+       * absurd for a field the client uses only to replay remote seats. `inputCodec.ts` exists
+       * to make an input 7 bytes and was being used in exactly one direction.
+       *
+       * ⚠️ It also makes the two directions agree by construction: the host now replays what it
+       * *decoded*, and the client replays the same decode of the same bytes, so a quantisation
+       * that disagreed between them could not survive the round trip unnoticed.
        */
-      applied: (MatchInput | null)[];
+      applied: string;
     }
+  /**
+   * host -> client. The same payload as `snapshot`, minus the ~96% of it the receiver already
+   * has (`delta.ts`).
+   *
+   * 🚨 **`base` IS NOT BOOKKEEPING — IT IS THE ONLY THING BETWEEN A CLIENT AND A PLAUSIBLE,
+   * WRONG MATCH.** A delta applied to a base of the same SHAPE but a different tick resolves
+   * every index, lands every value somewhere real, and decodes to a state that passes every
+   * integrity invariant while being no tick of any match — measured in `nw_delta.mjs` D5. A
+   * receiver whose base is not `base` must discard it and ask for a keyframe, never apply it.
+   * (A base of a DIFFERENT shape is caught structurally by `patchWire`; only the same-shape
+   * case is silent, which is exactly why the tick is on the wire.)
+   */
+  | {
+      t: 'delta';
+      tick: number;
+      base: number;
+      d: WireDelta;
+      events: GameEvent[];
+      ackTick: number[];
+      /** Base64 `encodeInputFrame` — see `snapshot.applied`. */
+      applied: string;
+    }
+  /**
+   * client -> host: "I cannot use your deltas; send me a keyframe."
+   *
+   * Sent on a base mismatch, a version mismatch, or a first delta before any snapshot. `have`
+   * is the tick the client is actually on, so the host can log the gap rather than guess it.
+   * ⚠️ The host answers with its **current baseline**, not a fresh encode — a keyframe that is
+   * not the baseline would leave the client one tick off it and resyncing forever.
+   */
+  | { t: 'resync'; have: number }
   /** either direction. */
   | { t: 'bye'; reason?: string }
   /** host -> client, when a client did something it is not allowed to do. */

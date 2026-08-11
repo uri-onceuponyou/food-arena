@@ -34,6 +34,11 @@
 import type { CharacterId } from '../game/rules.ts';
 import { LEVEL_MIN } from '../game/rules.ts';
 import { MAX_FIGHTERS, MIN_FIGHTERS } from '../game/state.ts';
+// ⚠️ THE PAYOUT CURVE IS IMPORTED, NEVER RESTATED. `economy/trophyRoad.ts` owns it; this
+// module does the league bookkeeping and nothing else. `placementCurve` is re-exported below
+// so a caller that wants the whole field's deltas for DISPLAY does not have to reach past this
+// seam to get them — but the arithmetic has exactly one home.
+import { placementCurve, placementTrophyDelta } from '../game/economy/trophyRoad.ts';
 import { createRng } from '../game/economy/rng.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
 import type { LobbyStatus, PeerId, Slot, WireSeat } from './protocol.ts';
@@ -300,49 +305,81 @@ export function enterLeague(league: League, playerId: string, trophies = 0): Lea
 }
 
 /**
- * A trophy delta per finishing position.
+ * A trophy delta per finishing position, best first.
  *
- * 🚨 **THIS IS AN ARGUMENT, NOT A CONSTANT, AND THAT IS DELIBERATE.** `economy/tuning.ts` is
- * the single source of truth for progression and it currently prices exactly two outcomes:
- * `trophiesWin: 15`, and a loss of `min(cap, base + floor(trophies / per))` with a grace band
- * below 100. **There is no placement curve anywhere in this repo**, because until `cdcdd65`
- * there was nothing above two seats to have one.
+ * ✅ **THE OPEN ITEM THIS TYPE WAS WAITING FOR IS CLOSED — `721ce3c`.** This block used to read:
  *
- * Inventing one here would put a second, quieter source of truth for progression in a
- * networking module — the exact *"one rule stated once and implemented twice"* shape
- * `rules.ts` documents six instances of. So the curve comes in from the caller, `tuning.ts`
- * owns it when it exists, and this function does the arithmetic and nothing else.
- * **Reported as an open item for Uri / the economy owner; not decided here.**
+ *   > *"`economy/tuning.ts` … currently prices exactly two outcomes … **There is no placement
+ *   > curve anywhere in this repo** … So the curve comes in from the caller, `tuning.ts` owns
+ *   > it when it exists, and this function does the arithmetic and nothing else. **Reported as
+ *   > an open item for Uri / the economy owner; not decided here.**"*
+ *
+ * It exists now, and it is `economy/trophyRoad.ts:placementCurve(seats, trophies)`, indexed on
+ * **normalised rank** `r = place / (seats - 1)` rather than on raw place — so 3rd of six
+ * (r = 0.40) and 3rd of four (r = 0.67) are priced apart, which a place-indexed table cannot do
+ * and gets wrong at one of the two. Proven a no-op at two seats against a frozen oracle.
+ *
+ * The type stays, and the `curve` argument stays OPTIONAL rather than being deleted, for one
+ * reason that is not backwards compatibility: an exhibition or a fixed-rate event wants a curve
+ * that is not the ladder's. What is gone is `twoSeatCurve`, and with it the hardcoded `15`.
  */
 export type PlacementCurve = readonly number[];
 
 /**
- * A 1v1 curve derived from the SHIPPED numbers, so a two-seat league needs no new decision.
+ * @deprecated ⚠️ **REMOVED — `twoSeatCurve(loss)` RETURNED `[15, -loss]` AND THAT `15` WAS A
+ * HARDCODED LITERAL WHERE `MATCH_PAYOUT.trophiesWin` BELONGED.** Retuning `trophiesWin` would
+ * have left the league silently paying the old rate, with nothing red anywhere: the number is
+ * right today, so no test comparing it against itself could ever fail. Use
+ * `placementCurve(2, trophies)`, which reads the constant.
  *
- * `[+15, -loss]` is exactly `MATCH_PAYOUT` at two seats. The loss term depends on the loser's
- * current trophy count, so it cannot be a constant here; `twoSeatCurve` builds the pair for a
- * given loser. Anything above two seats has no shipped answer and must be passed in.
+ * Kept as a comment rather than as a shim, because a shim would still be a second statement of
+ * the payout — and `state.ts` documents the identical judgement for `FighterRole`: the wording
+ * survives, the behaviour does not.
  */
-export function twoSeatCurve(loss: number): PlacementCurve {
-  return [15, -loss];
-}
 
-/** Apply a finished match. Pure: mutates only the league passed in, and returns the deltas. */
+/**
+ * Apply a finished match. Pure: mutates only the league passed in, and returns the deltas.
+ *
+ * 🚨 **BY DEFAULT EVERY FINISHER IS PRICED AT THEIR OWN STANDING, AND THE CURVE FORM IS THE
+ * EXCEPTION.** This is the defect the economy pass named in `trophyRoad.ts:placementCurve`:
+ *
+ *   > *"Every entry is priced at the SAME standing … a field whose members sit at different
+ *   > standings needs one call per finisher (`placementTrophyDelta`), not one curve."*
+ *
+ * A league is exactly that field. `MATCH_PAYOUT`'s loss term is
+ * `min(cap, base + floor(trophies / per))` with a grace band below 100, so it is a function of
+ * the LOSER'S OWN trophy count — and a single curve has to pick one player's standing and pay
+ * everybody at it. Measured on the real numbers: a 3,000-trophy loser priced on a curve built
+ * at 0 trophies is charged **0 instead of -10**, because the 0-trophy player is inside the
+ * grace band and the 3,000-trophy one is at the cap. `nw_stack.mjs` P-KB asserts exactly that
+ * gap, so the per-finisher path is a measurement rather than a preference.
+ *
+ * Passing `curve` explicitly overrides it, for the fixed-rate case — and then the old
+ * simplification applies and is the caller's to own.
+ */
 export function applyMatchResult(
   league: League,
   result: LeagueMatchResult,
-  curve: PlacementCurve,
+  curve?: PlacementCurve,
 ): { playerId: string; delta: number; trophies: number }[] {
-  if (curve.length < result.placements.length) {
+  const seats = result.placements.length;
+  if (curve !== undefined && curve.length < seats) {
     throw new RangeError(
-      `applyMatchResult: curve has ${curve.length} positions for ${result.placements.length} finishers.`
-      + ' The placement curve belongs to economy/tuning.ts and is passed in rather than invented here.',
+      `applyMatchResult: curve has ${curve.length} positions for ${seats} finishers.`
+      + ' The placement curve belongs to economy/trophyRoad.ts (placementCurve) and is passed in'
+      + ' rather than invented here.',
     );
   }
   const out: { playerId: string; delta: number; trophies: number }[] = [];
-  for (let pos = 0; pos < result.placements.length; pos++) {
+  for (let pos = 0; pos < seats; pos++) {
     const entrant = enterLeague(league, result.placements[pos]);
-    const delta = curve[pos];
+    // ⚠️ THE ENTRANT'S OWN STANDING, READ BEFORE THE WRITE. `placementTrophyDelta` refuses an
+    // out-of-range seat count or place rather than clamping, in the house style of
+    // `sim.ts:createMatch` and `toWireSeats` below — a silently clamped payout is one nobody
+    // can trace back to a match.
+    const delta = curve !== undefined
+      ? curve[pos]
+      : placementTrophyDelta(pos, seats, entrant.trophies);
     // Trophies never go below zero — `economy/state.ts` holds the same floor for the same
     // reason, and a league that could push a player negative would disagree with the road.
     entrant.trophies = Math.max(0, entrant.trophies + delta);
@@ -352,6 +389,18 @@ export function applyMatchResult(
   }
   return out;
 }
+
+/**
+ * Re-exported so a caller holding a `League` can price the whole field for DISPLAY without
+ * reaching past this seam into `game/economy/`.
+ *
+ * ⚠️ **A RE-EXPORT, NOT A WRAPPER, AND THE DIFFERENCE IS THE WHOLE POINT.** A wrapper here
+ * would be a second place the payout could be adjusted, which is the defect `twoSeatCurve` was.
+ * This is the same function object; `nw_stack.mjs` asserts the identity rather than assuming it.
+ * And note what it is FOR: `applyMatchResult` does **not** use it, because a real field sits at
+ * different standings — see that function.
+ */
+export { placementCurve };
 
 /**
  * Standings, best first.
