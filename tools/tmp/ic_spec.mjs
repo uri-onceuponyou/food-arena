@@ -50,6 +50,15 @@
  *     lollipop  26 px on #EFEAF7, the HUD weapon plate                 (was 20 px on cream)
  *     party     40 px on white, a trophy-road node                     (was 20 px on cream)
  *
+ * ⚠️ THE `lollipop` LINE ABOVE IS WRONG AND IS KEPT SO THE CORRECTION HAS SOMETHING TO
+ * POINT AT. Measured 2026-08-11 against the two files it was written from: BOTH rows at
+ * `desk/match/lollipop :: hud-weapon-emoji` (`lollipop` and `hammer`) are
+ * `occluded: true`, so the site has no clean sample from itself OR from a co-sited
+ * sibling and rule 3 skips it entirely. `lollipop` is therefore **absent from
+ * `shots/ic/spec.json`**, which is what that file has always contained — the claim was
+ * never true of the output. Its state is `unmeasured`, exactly like `flag`, and any
+ * verdict quoting it has to say so.
+ *
  * `flag` stays unmeasured: it is `neverRendered` — it needs a COMPLETED trophy road, so
  * it is unreachable on a normal profile. It is marked `unmeasured` in the output and any
  * verdict quoting it must say so.
@@ -60,6 +69,35 @@
  *
  * Several delivered files may be merged: a sweep that had to force a state (a specific
  * match, a specific character) is still a measurement of the same screens.
+ *
+ * ── 🚨 AND THAT MERGE IS WHY THIS TOOL REFUSES ON OVERLAP ───────────────────
+ * "a sweep that had to force a state is still a measurement of the same screens" is
+ * true, and it is exactly the hazard: a forced-state sweep re-walks the WHOLE app, so
+ * `lollipop.json` — taken to reach `desk/match/lollipop`, THREE sites nothing else
+ * could reach — carried **260 of its 263 sites as a second copy of sites
+ * `delivered.json` already had**, including the entire `desk/trophies/odds ::
+ * tr-odds-title` row. The merge was unfiltered and the selection rule is SMALLEST-WINS,
+ * so a re-sweep taken after `620bf7f` grew those titles 14.39 -> 20.88 px still
+ * produced `boxBurger` at **14.39**: the stale copy won, silently, by being smaller.
+ *
+ * ⚠️ **IT NEVER BIT BEFORE BECAUSE THE TWO AGREED.** 248 of the 260 shared sites match
+ * to the pixel; 12 disagree (`play` on eleven character cards, `pin` on the odds sheet
+ * 25.83 vs 27.50). That is precisely how an agreeing duplicate becomes a stale one, and
+ * this project already enforces the reasoning one level up: `gatecount` refuses a second
+ * copy of a documented count **even one that agrees**, because *"today's agreeing copy
+ * is next month's stale one."* Nothing enforced it for measurement INPUTS. Now this does.
+ *
+ * So: **any site measured by more than one source is a hard refusal**, agreeing or not.
+ * A silent merge that picks a winner is how this happened, so no winner is picked. The
+ * remedy is a DECLARATION, not a tolerance:
+ *
+ *   node tools/tmp/ic_spec.mjs shots/ic/delivered.json shots/ic/lollipop.json \
+ *        --superseded shots/ic/lollipop.json --out shots/ic/spec.json
+ *
+ * `--superseded <file>` drops from that file every site another source also measured —
+ * it contributes ONLY what nothing else could reach. It is a filter, never a winner-pick,
+ * so it cannot resurrect a stale number; and it makes the operator state which sweep is
+ * the older one instead of letting `Math.min` decide.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -86,18 +124,123 @@ const rgb = (s) => {
 };
 const med = (v) => { const s = [...v].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
 
+/** A ROW's identity for duplicate detection: one ICON at one SITE.
+ *  Not the px value — the value is what gets COMPARED once two sources claim the same
+ *  identity. Keying on the value instead would make an agreeing duplicate invisible,
+ *  which is the entire failure mode this exists for. */
+export const rowSite = (r) => `${r.vp}/${r.screen}::${r.host}|${r.name}`;
+
+/** Normalise the argument `buildSpec` has always taken (paths, or `{rows}` objects)
+ *  into named sources, because a refusal has to be able to NAME the file. */
+export function loadSources(files) {
+  return files.map((f, i) => (typeof f === 'string'
+    ? { file: f, rows: JSON.parse(readFileSync(f, 'utf8')).rows }
+    : { file: f.file ?? `<inline #${i + 1}>`, rows: f.rows }));
+}
+
+const named = (rows) => rows.filter((r) => r && r.name && r.name !== '?');
+const pxOf = (r) => +Math.min(r.w, r.h).toFixed(2);
+
+/**
+ * Which sites more than one source measured — the duplicate census.
+ *
+ * Reports EVERY shared site, not only the disagreeing ones. 248 of the 260 shared sites
+ * in the real pair agree to the pixel and that agreement is what let the twelfth-hour
+ * staleness through, so "they agree" is not a defence and is not treated as one.
+ */
+export function overlapReport(sources) {
+  const bySite = new Map();               // site -> Map(srcIdx -> Set(px))
+  for (let i = 0; i < sources.length; i++) {
+    for (const r of named(sources[i].rows)) {
+      const k = rowSite(r);
+      const per = bySite.get(k) ?? bySite.set(k, new Map()).get(k);
+      (per.get(i) ?? per.set(i, new Set()).get(i)).add(pxOf(r));
+    }
+  }
+  const shared = [];
+  for (const [site, per] of bySite) {
+    if (per.size < 2) continue;
+    const arms = [...per.entries()].map(([i, s]) => ({ file: sources[i].file, px: [...s].sort((a, b) => a - b) }));
+    const agrees = arms.every((a) => JSON.stringify(a.px) === JSON.stringify(arms[0].px));
+    shared.push({ site, arms, agrees });
+  }
+  const unique = sources.map((s, i) => ({
+    file: s.file,
+    total: new Set(named(s.rows).map(rowSite)).size,
+    onlyHere: [...bySite].filter(([, per]) => per.size === 1 && per.has(i)).length,
+  }));
+  return { shared, disagreeing: shared.filter((s) => !s.agrees), unique };
+}
+
+/**
+ * Drop from each `--superseded` source every site an AUTHORITATIVE source also measured.
+ *
+ * Deliberately NOT "the later file wins": positional authority is a convention, and a
+ * convention that decides which measurement survives is the thing that broke here. The
+ * operator names the older sweep; everything it uniquely reached still lands.
+ * Two superseded sources that overlap EACH OTHER are not resolved by this and are still
+ * refused — there is no authority to defer to.
+ */
+export function applySuperseded(sources, supersededFiles) {
+  const sup = new Set(supersededFiles);
+  const unknown = [...sup].filter((f) => !sources.some((s) => s.file === f));
+  const authoritative = new Set();
+  for (const s of sources) if (!sup.has(s.file)) for (const r of named(s.rows)) authoritative.add(rowSite(r));
+  const kept = sources.map((s) => {
+    if (!sup.has(s.file)) return { ...s, dropped: 0 };
+    const rows = s.rows.filter((r) => !(r && r.name && r.name !== '?' && authoritative.has(rowSite(r))));
+    return { ...s, rows, dropped: s.rows.length - rows.length };
+  });
+  return { kept, unknown };
+}
+
+/** The refusal text. Kept next to the check so the message cannot drift from the rule. */
+export function formatOverlap(rep) {
+  const lines = [
+    `REFUSED: ${rep.shared.length} site(s) are measured by more than one source.`,
+    '',
+    'A site is one (viewport, screen, host, icon). The selection rule here is',
+    'SMALLEST-WINS, so a stale duplicate does not announce itself — it just wins.',
+    `${rep.shared.length - rep.disagreeing.length} of these AGREE and ${rep.disagreeing.length} DISAGREE;`,
+    'agreement is not a defence (today\'s agreeing copy is next month\'s stale one).',
+    '',
+    'per source:',
+  ];
+  for (const u of rep.unique) lines.push(`  ${u.file}   ${u.total} sites, ${u.onlyHere} reachable ONLY here`);
+  if (rep.disagreeing.length) {
+    lines.push('', `sites whose sources DISAGREE (${rep.disagreeing.length}, first 12):`);
+    for (const d of rep.disagreeing.slice(0, 12)) {
+      lines.push(`  ${d.site}\n      ${d.arms.map((a) => `${a.px.join('/')} px  ${a.file}`).join('\n      ')}`);
+    }
+  }
+  lines.push('', 'FIX — name the older sweep, do not let Math.min decide:',
+    '  --superseded <file>   drops from <file> every site another source also measured,',
+    '                        so it contributes only what nothing else could reach.');
+  return lines.join('\n');
+}
+
 /**
  * Build the spec from one or more `ic_delivered.mjs` outputs.
+ *
+ * ⚠️ THROWS on cross-source overlap unless `opts.overlapResolved` is set. The check
+ * lives HERE and not only in the CLI on purpose: a future consumer that imports
+ * `buildSpec` inherits the refusal rather than re-implementing the merge that broke.
  *
  * Exported so `--selftest` can drive it with synthetic rows, which is the only way the
  * site rule can be shown to FAIL on the inputs it exists for. CLAUDE.md #6.
  */
-export function buildSpec(files) {
-  const rows = [];
-  for (const f of files) {
-    const d = typeof f === 'string' ? JSON.parse(readFileSync(f, 'utf8')) : f;
-    for (const r of d.rows) if (r.name && r.name !== '?') rows.push(r);
+export function buildSpec(files, opts = {}) {
+  const sources = loadSources(files);
+  if (!opts.overlapResolved && sources.length > 1) {
+    const rep = overlapReport(sources);
+    if (rep.shared.length) {
+      const e = new Error(formatOverlap(rep));
+      e.overlap = rep;
+      throw e;
+    }
   }
+  const rows = [];
+  for (const s of sources) for (const r of named(s.rows)) rows.push(r);
 
   // ── Site plates. A site is one (viewport, screen, host class). ─────────────
   // Only UNOCCLUDED, VISIBLE rows with a pixel sample contribute. An occluded row's
@@ -263,6 +406,51 @@ if (IS_MAIN && process.argv[2] === '--selftest') {
   // 8. Non-square boxes are measured on the SHORT side — a 40x12 pill is a 12 px icon.
   check('a non-square box is measured on its short side', spec([row({ name: 'g', w: 40, h: 12 })]).get('g').px, 12);
 
+  // 9. THE DUPLICATE-SOURCE REFUSAL, on fixtures reduced from the real failure.
+  //    Fails on: the unfiltered `rows.push(...)` merge this tool shipped with — which
+  //    returns 14.39 (the stale copy) and prints nothing.
+  {
+    const fresh = { file: 'fresh.json', rows: [row({ name: 'boxBurger', w: 20.88, h: 20.88, screen: 'odds', host: 'tr-odds-title' })] };
+    const stale = { file: 'stale.json', rows: [row({ name: 'boxBurger', w: 14.39, h: 14.39, screen: 'odds', host: 'tr-odds-title' })] };
+    let threw = null;
+    try { buildSpec([fresh, stale]); } catch (e) { threw = e; }
+    check('a site measured by two sources is REFUSED, not silently won by the smaller',
+      [threw !== null, threw?.overlap.shared.length, threw?.overlap.disagreeing.length],
+      [true, 1, 1]);
+    // The agreeing case is the dangerous one and gets its own assertion: a rule that
+    // only refused on DISAGREEMENT would have passed the real pair 248 times out of 260.
+    const twin = { file: 'twin.json', rows: [row({ name: 'boxBurger', w: 20.88, h: 20.88, screen: 'odds', host: 'tr-odds-title' })] };
+    let threw2 = null;
+    try { buildSpec([fresh, twin]); } catch (e) { threw2 = e; }
+    check('an AGREEING duplicate is refused too', [threw2 !== null, threw2?.overlap.disagreeing.length], [true, 0]);
+    // A single source can repeat a site freely — 38 `trophy` rows are one sweep, not two.
+    const twice = { file: 'one.json', rows: [
+      row({ name: 'boxBurger', w: 20.88, h: 20.88, screen: 'odds', host: 'tr-odds-title' }),
+      row({ name: 'boxBurger', w: 14.39, h: 14.39, screen: 'odds', host: 'tr-odds-title' }),
+    ] };
+    check('a site repeated WITHIN one source is not an overlap', buildSpec([twice]).spec.get('boxBurger').px, 14.39);
+  }
+
+  // 10. `--superseded` DROPS, it does not pick a winner. The stale file keeps only what
+  //     nothing else reached; the shared site comes back at the authoritative value.
+  //     Fails on: "last file wins" / "first file wins", i.e. any positional convention.
+  {
+    const fresh = { file: 'fresh.json', rows: [row({ name: 'boxBurger', w: 20.88, h: 20.88, screen: 'odds', host: 'tr-odds-title' })] };
+    const stale = { file: 'stale.json', rows: [
+      row({ name: 'boxBurger', w: 14.39, h: 14.39, screen: 'odds', host: 'tr-odds-title' }),
+      row({ name: 'lollipop', w: 26, h: 26, screen: 'match/lollipop', host: 'hud-weapon' }),
+    ] };
+    const { kept } = applySuperseded([fresh, stale], ['stale.json']);
+    const { spec: s } = buildSpec(kept, { overlapResolved: true });
+    check('--superseded keeps the authoritative size and the unreachable site, drops the duplicate',
+      [kept[1].dropped, s.get('boxBurger').px, s.get('lollipop').px, overlapReport(kept).shared.length],
+      [1, 20.88, 26, 0]);
+    // Two stale sources overlapping EACH OTHER have no authority to defer to.
+    const { kept: k2 } = applySuperseded([stale, { ...stale, file: 'stale2.json' }], ['stale.json', 'stale2.json']);
+    check('two superseded sources overlapping each other are still refused',
+      overlapReport(k2).shared.length > 0, true);
+  }
+
   // ── POSITIVE CONTROL on the real measurement, if it is present. ────────────
   // A checker that only ever runs on fixtures proves the fixtures, not the tree.
   if (existsSync('shots/ic/delivered.json')) {
@@ -279,6 +467,37 @@ if (IS_MAIN && process.argv[2] === '--selftest') {
       [...s.values()].filter((v) => v.px === 20 && v.bg === LEGACY_HARNESS.bg).length, 0);
   }
 
+  // ── THE REAL HISTORICAL KNOWN-BAD PAIR ────────────────────────────────────
+  // `shots/ic/spec.json` was built from exactly these two files by exactly the merge
+  // that is now refused. Not a synthetic reduction — the pair that shipped.
+  if (existsSync('shots/ic/delivered.json') && existsSync('shots/ic/lollipop.json')) {
+    const real = ['shots/ic/delivered.json', 'shots/ic/lollipop.json'];
+    let threw = null;
+    try { buildSpec(real); } catch (e) { threw = e; }
+    const rep = threw?.overlap;
+    check('REAL PAIR: delivered.json + lollipop.json is REFUSED',
+      [threw !== null, rep.shared.length, rep.disagreeing.length], [true, 260, 12]);
+    // The specific block the failure came through, named so the assertion cannot be
+    // satisfied by overlap somewhere harmless.
+    check('REAL PAIR: the trophies/odds title row is one of the duplicates',
+      rep.shared.some((x) => x.site.startsWith('desk/trophies/odds::tr-odds-title')), true);
+    // `--superseded` resolves it, and the arithmetic is stated rather than "> 0": 408
+    // of lollipop.json's 415 rows are duplicates and 7 are sites nothing else reached.
+    // A filter that dropped the lot would satisfy "overlap is now zero" just as well.
+    const { kept } = applySuperseded(loadSources(real), ['shots/ic/lollipop.json']);
+    check('REAL PAIR: --superseded drops 408 duplicate rows and keeps the 7 unique ones',
+      [overlapReport(kept).shared.length, kept[1].dropped, kept[1].rows.length], [0, 408, 7]);
+    // ⚠️ AND THE PUNCHLINE, measured: those 7 rows change NOTHING. Every one of them is
+    // on an all-occluded site (`hud-weapon-emoji`) or already covered, so the second
+    // source contributed zero icons and zero sizes to the spec that shipped — it was
+    // pure duplicate risk. Refusing the merge costs this pair exactly nothing.
+    const solo = buildSpec(['shots/ic/delivered.json']).spec;
+    const merged = buildSpec(kept, { overlapResolved: true }).spec;
+    check('REAL PAIR: the second source moved NOTHING — merged spec == delivered-only spec',
+      [solo.size, merged.size, JSON.stringify([...merged]) === JSON.stringify([...solo])],
+      [63, 63, true]);
+  }
+
   console.log(`\nic_spec selftest ${pass} pass / ${fail} fail`);
   process.exit(fail ? 1 : 0);
 }
@@ -286,14 +505,44 @@ if (IS_MAIN && process.argv[2] === '--selftest') {
 // ─────────────────────────────────────────────────────────────────────────────
 if (IS_MAIN) {
 const args = process.argv.slice(2);
-const files = args.filter((s) => !s.startsWith('--') && args[args.indexOf(s) - 1] !== '--out');
-const out = args.includes('--out') ? args[args.indexOf('--out') + 1] : 'shots/ic/spec.json';
-if (!files.length) {
-  console.error('usage: ic_spec.mjs <delivered.json...> [--out shots/ic/spec.json]');
+/** ⚠️ Positional scan, not `args.filter(... args.indexOf(s) ...)`.
+ *  `indexOf` returns the FIRST index of a string, so the old form mis-classified any
+ *  repeated argument — and `--out shots/ic/spec.json` twice, or a source path equal to
+ *  the out path, silently changed which files were read. A merge tool that can be wrong
+ *  about WHICH files it merged is the same class of bug as the one below. */
+const files = [];
+const superseded = [];
+let out = 'shots/ic/spec.json';
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--out') { out = args[++i]; continue; }
+  if (args[i] === '--superseded') { superseded.push(args[++i]); continue; }
+  if (args[i].startsWith('--')) continue;
+  files.push(args[i]);
+}
+if (!files.length || files.includes(undefined) || out === undefined) {
+  console.error('usage: ic_spec.mjs <delivered.json...> [--superseded <file>]... [--out shots/ic/spec.json]');
   process.exit(2);
 }
 
-const { spec, skipped } = buildSpec(files);
+// ── THE DUPLICATE-SOURCE REFUSAL ─────────────────────────────────────────────
+// Runs BEFORE anything is built, because the failure it catches is invisible in the
+// output: a stale row wins on being smaller and the spec looks entirely normal.
+const { kept, unknown } = applySuperseded(loadSources(files), superseded);
+if (unknown.length) {
+  console.error(`--superseded names a file that is not a source: ${unknown.join(', ')}`);
+  console.error(`sources are: ${files.join(', ')}`);
+  process.exit(2);
+}
+for (const s of kept) {
+  if (s.dropped) console.log(`SUPERSEDED  ${s.file}: ${s.dropped} row(s) dropped — those sites are measured by an authoritative source`);
+}
+const overlap = overlapReport(kept);
+if (overlap.shared.length) {
+  console.error(`\n${formatOverlap(overlap)}\n`);
+  process.exit(2);
+}
+
+const { spec, skipped } = buildSpec(kept, { overlapResolved: true });
 const registry = registryNames();
 const unmeasured = registry ? [...registry].filter((n) => !spec.has(n)).sort() : [];
 
@@ -301,6 +550,10 @@ const obj = Object.fromEntries([...spec.entries()].sort((a, b) => a[1].px - b[1]
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify({
   sources: files,
+  /** Which sources were declared stale, and how many duplicate rows that dropped. A
+   *  spec that leaned on a declaration must carry the declaration, or the next reader
+   *  cannot tell a filtered merge from an unfiltered one. */
+  superseded: kept.filter((s) => s.dropped).map((s) => ({ file: s.file, droppedRows: s.dropped })),
   built: new Date().toISOString(),
   /** ⚠️ CONSUMERS MUST REFUSE TO PLATE THESE, not default them. */
   unmeasured,
