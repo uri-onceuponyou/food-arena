@@ -144,8 +144,9 @@
  *   node tools/tmp/kx_seatfair.mjs --emit /tmp/a.json --spawns "x,y;x,y;…"
  *   node tools/tmp/kx_seatfair.mjs --selftest              # OFFLINE, no browser
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -577,7 +578,9 @@ async function selftest() {
 
   // §H `--emit` must change ONLY the seats. A dump that silently re-derived cover or the
   //    ring would make every A/B a two-variable experiment.
-  const tmp = `${ROOT}/tools/tmp/kx_emit_selftest.json`;
+  // Written to the OS temp dir, not `tools/tmp/`: an empty artefact left in the repo shows up
+  // in every peer's `git status` forever, and this selftest runs constantly.
+  const tmp = `${tmpdir()}/kx_emit_selftest.json`;
   emit(arena, good, tmp);
   const back = JSON.parse(readFileSync(tmp, 'utf8'));
   const stripSeats = (o) => JSON.stringify({ ...o, spawns: null, playerSpawn: null, enemySpawn: null });
@@ -585,7 +588,7 @@ async function selftest() {
     `cover ${back.cover.length} vs ${arena.cover.length}, maxSafeRadius ${back.maxSafeRadius} vs ${arena.maxSafeRadius}`);
   ok('--emit keeps spawns[0..1] identical to playerSpawn/enemySpawn (sp_gate §C)',
     back.spawns[0].x === back.playerSpawn.x && back.spawns[1].y === back.enemySpawn.y);
-  writeFileSync(tmp, '');
+  rmSync(tmp, { force: true });
 
   console.log(`\n${n - bad} passed, ${bad} failed\n`);
   return bad;
