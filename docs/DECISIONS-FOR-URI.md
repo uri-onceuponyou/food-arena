@@ -4277,3 +4277,112 @@ its full damage**.
 880 matches stepped in lockstep against HEAD with one driver feeding both: **847 diverge, 0 before the
 whistle, 0 before the first `projectile-spawned`.** `attemptAttack` is reachable only inside
 `phase === 'playing'`.
+
+---
+
+## 64. 🔴 THE SIX-PLAYER ACCEPTANCE RUN — it works, and it has five defects no unit gate could see
+
+Everything in §48–§63 was verified in isolation; **nothing had verified them together.** This is that run:
+four full renderer matches to a result card with **zero page errors and zero failed requests**, plus
+400 sim matches with **0 unresolved and 0 timeouts**. Measured on a detached worktree while four peers
+were live.
+
+**Verdict: a six-player match is playable end to end.** Nothing crashes, nothing hangs, the HUD is
+correctly wired, and the frame survives easily. **And every one of the five defects below was invisible
+to every gate this project owns** — which is the same thing that was true of both of Uri's own best bug
+reports.
+
+### 1. 🔴 EVERY MATCH PAYS AS A DUEL. The whole payout curve is unreachable.
+
+`ui/screens/matchScreen.ts:124` is `recordResult(winner === 'player')` — **a boolean**, and a tree-wide
+census found it is **the only payout call site outside the economy.**
+
+| place of 6 (at 500 trophies) | 1st | 2nd | 3rd | 4th | 5th | 6th |
+|---|---|---|---|---|---|---|
+| the curve | 15/60/100 | **11/52/87** | **7/44/74** | **3/36/61** | **−1/28/48** | −5/20/35 |
+| what ships | 15/60/100 | **−5/20/35** | **−5/20/35** | **−5/20/35** | **−5/20/35** | −5/20/35 |
+
+Priced on a real 200-match place distribution: **underpays 4.16–6.92 trophies, 11.1 coins and 18.0 XP
+per match.** ⚠️ **The API is fine** — `nw_profile` is 21/21 including §61's own known-bad, and **at two
+seats the two paths agree exactly at every standing.** This is purely the join, **which is exactly what
+§61 predicted this run would find.**
+
+### 2. 🔴 THE SPAWN DECIDES THE MATCH — worth **2.64 places out of 6**
+
+200 matches, roster shuffled every match so character strength averages out (fair = 3.50):
+
+| seat | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| mean placement | 4.49 | 4.45 | **1.85** | **2.06** | 3.98 | 4.17 |
+| ± SE | 0.097 | 0.094 | 0.064 | 0.077 | 0.120 | 0.091 |
+| 1st places | 5 | 7 | **85** | **81** | 19 | 3 |
+
+**Spread 2.64 places against a worst-seat SE of 0.120 — 22× the noise.** The north-lane pair took
+**166 of 200 firsts and zero lasts.** It is the **spawn**, not the slot: rotating the spawn list moves the
+advantage with the coordinates. Confirmed independently with six *identical* fighters.
+
+🚨 **The mechanism is the good part: the favoured pair WINS BY NOT PARTICIPATING.** They deal **half the
+damage** and walk 1,767 wu against ~1,000 — `nearestLivingOpponent` pairs the other four off at 892 wu
+while they sit 1,040 wu from anyone. **So the predictor is distance to the nearest opponent, not distance
+to centre**, and "equalise the radii" is a hypothesis rather than the fix.
+
+### 3. The result card cannot tell you where you finished
+
+`hud.ts:1260` builds the loser list **in slot order**, so a six-player match always reads
+`EGG defeated HAMBURGER DONUT TACO SUSHI PIZZA` — **identical whether you came 2nd or 6th.** No trophies,
+coins or XP on it. And `onPhase(phase, winner)` carries **a role, not a rank**, so the place does not
+exist at the HUD boundary at all.
+
+### 4. 🔴 Every off-screen opponent gets an HP pill pinned to the frame edge
+
+`updateFloatingBars` **clamps into the viewport instead of hiding**. **63.7–82.9% of opponent pills drawn
+at six seats belong to a fighter outside the viewport**; mean distance to a living opponent is **1,534 wu**
+against a `FAIR_PLAY` radius of 199.2. ⚠️ **The clamp is correct for its authored case** (*"a fighter above
+the top of the frame"*). At six seats it becomes **a permanent free read on every opponent's HP and
+bearing** — quietly undoing the fog of war and the concealment feature.
+
+### 5. 🔴 The fog canopy misses the corners — **`FIELD_OUTER_UNITS = 1500` is the 1× number**
+
+`fogRing.ts:207` justifies it with *"the arena's half-diagonal is ~860"*. **860.2 is the OLD map.** The
+×4 map's is **1720.5** and the furthest standable cell is **1691.2**. ⚠️ **`779dc62`'s commit message
+repeats the false claim**, so the log is wrong too.
+
+**7,413 of 228,319 standable cells (3.25%) sit outside the canopy** — 3.25% of the map, **100% lethal
+there.** The PNG is `f87d407`'s defect signature back again: HUD reading *"OUTSIDE THE ZONE −50 HP/s"*,
+radar saying *"GET INSIDE"*, fighter standing on **bright fully-lit floor.**
+
+### ✅ What is genuinely closed — including both of Uri's own reports
+
+- **Concealment: 20 of 20 plates 100% standable, `isConcealed` true at every centroid.** *"I can't hide
+  under concealments"* is closed on the ×4 map.
+- **Unreachable regions: none.** 0 sealed, 0 phantom, 0 face gaps at every body width; one nav component.
+- **Sudden death decides correctly:** reaches the trigger in **65.5%** of six-seat matches, `resolveTimeout`
+  **0/200**, HP leader wins **108/108** on fog alone. The unreachability assertion has a known-bad
+  (`--arm immortal`) that **turns it red 8/8**.
+- **Spawns:** 892.0 wu minimum separation, every seat moved in 200/200, all six dealt damage in 79%.
+
+### ✅ Perf at six seats — cheaper than projected
+
+| | mobile `low` | desktop |
+|---|---|---|
+| N=2, shipped spawns | **423** | 483 |
+| N=6, shipped spawns | **445 (+22)** | 531 |
+| N=6, all six in a 190 wu ring | 1175 | 1051 |
+
+§56 projected the cast would add **+900–1,300 draws**; on the merged-props build the worst case is **+752**
+— and **the worst case never occurred: across four six-seat matches the camera never held more than 3 of 6.**
+**The real six-player frame costs +22 draws over the duel.** The static-prop merge bought more than enough.
+
+### ⚠️ AND THE REASON DEFECT 1 IS NOT COSTING URI ANYTHING TODAY
+
+**Six-player is reachable only through the QA `?fighters=` parameter.** `matchScreen` always builds two
+seats — **nothing a player can press produces a third fighter.** That is what keeps the payout defect
+theoretical, and it is also **the one thing that must change before six seats ship.**
+
+### Two vacuous checks, declared by the run's own author
+
+`sx_pay` §D **printed `ok` next to an evidence line describing the failure** — it counted the *declaration*
+`recordPlacement(place, seats)` as a call site. And a polarity control fired **once in 200 matches**,
+because both reducers prefer the lower id on a tie, so at `hpSpread === 0` *"the winner had the least HP"*
+is true exactly when *"the most"* is. **Neither was caught by a check.** That is now **seven** instances
+tonight of a control that could not distinguish its own two arms.
