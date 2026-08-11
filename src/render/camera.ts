@@ -162,7 +162,50 @@ export const FAIR_PLAY = {
  * => CONSTRAINT ON THE ARENA OWNERS: see the note on `SUPPORTED_ASPECT.max`.
  */
 export const SUPPORTED_ASPECT = {
-  /** 4:3 — iPad, the narrowest landscape we support. Narrower than this is masked. */
+  /**
+   * 4:3 — iPad, the narrowest landscape we support. Narrower than this is masked.
+   *
+   * ── 🚨 WIDENING THIS COSTS 2.96x THE ARENA DEPTH, AND `aspect.mjs` CANNOT SEE IT ─────
+   *
+   * This constant is the single biggest item on `docs/PHONE.md`'s page: it takes **43% of
+   * a phone's screen in portrait**, more than the browser's chrome does. It gets proposed
+   * for widening roughly once per phone pass, so the trade is measured here rather than
+   * re-argued. `node tools/tmp/sc2_screen.mjs`, two builds differing in this one number,
+   * iPhone 15 portrait at full screen:
+   *
+   *              canvas       game/screen   guaranteed R   visible DEPTH
+   *   min 4/3    393 x 295       34.6%        199.22 wu       462 wu
+   *   min 0.46   393 x 852      100.0%        199.22 wu      1181 wu
+   *   (landscape 852 x 393      100.0%        199.22 wu       398 wu)
+   *
+   * 🚨 **`tools/aspect.mjs` PASSES AT 0.00 wu ON BOTH.** That is not a bug in it — it
+   * checks the SPREAD of `guaranteedRadiusUnits`, which is a FLOOR that
+   * `computeFairDistance()` holds at EVERY aspect by construction. The quantity that moves
+   * is the **BLEED**, and nothing gates the bleed. So "widen it, aspect.mjs still passes"
+   * is a confident wrong answer from a real instrument — CLAUDE.md #6 — and the fairness
+   * gate must not be quoted as evidence FOR this change.
+   *
+   * What a widened mask would actually hand a portrait player: **2.96x the arena depth a
+   * landscape player sees on the same phone** (1181 wu against 398), because a narrow
+   * aspect is width-binding, so `distForWidth` scales with `1/tanHalfH` and the camera
+   * retreats. Today's 4:3 portrait already sees 1.16x, and that bounded surplus is exactly
+   * what the cap is for.
+   *
+   * And a THIRD cost, visible in the pixels rather than the numbers — read
+   * `shots/sc2/WIDE_0_46_iPhone_15_standalone.png`: at 2.5x the camera distance the depth
+   * fog saturates and washes the entire top half of the frame flat orange, and the fighter
+   * is a speck. The atmospheric schedule is tuned for the shipped distance range. Widening
+   * does not just trade fairness for area; it breaks the look.
+   *
+   * A derived middle point, for anyone who wants one (closed form above, NOT measured):
+   * `min: 1` gives a 393x393 portrait canvas — 46.1% of the screen — at 589 wu of depth,
+   * i.e. 1.48x a landscape player instead of today's 1.16x.
+   *
+   * => **DO NOT WIDEN THIS.** `docs/DECISIONS-FOR-URI.md` §14 is already answered by Uri —
+   * *"i think the game should be landscape. Portrait can't serve the game. When it will be
+   * in an app, we'll force landscape."* Portrait gets a **rotate prompt** (`src/ui/**`),
+   * and the app wrapper gets the lock (§51a). Both delete the case; neither costs a wu.
+   */
   min: 4 / 3,
   /**
    * 21:9 — ultrawide desktop and 21:9 phones (Xperia). Wider than this is masked.
