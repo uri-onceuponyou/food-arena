@@ -153,13 +153,38 @@ if (IS_MAIN) {
         r.find((x) => x.id === '22f-damage-bar-is-kit')?.ok === false,
         r.find((x) => x.id === '22f-damage-bar-is-kit')?.detail);
     }
-    // 2. Move one stat point into the 3-way tie at 19 -> §22(g) must go red. This is the
+    // 2. Move one stat point into the biggest tie -> §22(g) must go red. This is the
     //    zero-margin case the header warns about, proved rather than asserted.
+    //
+    //    ⚠️ THE POINT TO MOVE IS DERIVED, NOT WRITTEN DOWN, AND THAT IS THE WHOLE LESSON.
+    //    The first version hard-coded `burrito.speed=6`, chosen against a card whose stat
+    //    totals had a 3-way tie at 19. DEVIATION #13 moved Pizza's derived damage bar 4 -> 5,
+    //    the tie moved from 19 to 20, and this KNOWN-BAD QUIETLY STOPPED BEING BAD — it went
+    //    green while asserting that a broken card is rejected. A known-bad that no longer
+    //    reproduces the bug is worse than no known-bad, because it still prints PASS.
     {
-      const r = await mk('g', ['burrito.speed=6']);
-      ok('KNOWN-BAD: one stat point into the tie at 19 fails §22(g)',
-        r.find((x) => x.id === '22g-card-discriminates')?.ok === false,
-        r.find((x) => x.id === '22g-card-discriminates')?.detail);
+      const totals = Object.fromEntries(live.CHARACTER_IDS.map((id) => [id,
+        live.CHARACTERS[id].stats.damage + live.CHARACTERS[id].stats.health + live.CHARACTERS[id].stats.speed]));
+      const counts = {};
+      for (const t of Object.values(totals)) counts[t] = (counts[t] ?? 0) + 1;
+      const biggest = Number(Object.keys(counts).reduce((a, b) => (counts[b] > counts[a] ? b : a)));
+      // A character one point away from the biggest tie, whose `speed` bar can carry the
+      // move without leaving the 1..STAT_MAX_DISPLAY scale (§22(f) would mask the failure).
+      const donor = live.CHARACTER_IDS.find((id) => {
+        const d = biggest - totals[id];
+        if (Math.abs(d) !== 1) return false;
+        const s = live.CHARACTERS[id].stats.speed + d;
+        return s >= 1 && s <= live.STAT_MAX_DISPLAY;
+      });
+      ok('a donor exists for the §22(g) known-bad (the set is checked before it is used)',
+        !!donor, donor ? `${donor} total ${totals[donor]} -> ${biggest}` : `no character is one point from the ${counts[biggest]}-way tie at ${biggest}`);
+      if (donor) {
+        const to = live.CHARACTERS[donor].stats.speed + (biggest - totals[donor]);
+        const r = await mk('g', [`${donor}.speed=${to}`]);
+        ok(`KNOWN-BAD: one stat point into the ${counts[biggest]}-way tie at ${biggest} fails §22(g)`,
+          r.find((x) => x.id === '22g-card-discriminates')?.ok === false,
+          `${donor}.speed=${to} · ${r.find((x) => x.id === '22g-card-discriminates')?.detail}`);
+      }
     }
     // 3. Flatten the health axis -> §22(h) durability range must go red.
     //    ⚠️ THE FIRST DRAFT OF THIS KNOWN-BAD DID NOT FAIL, and that is worth keeping:
