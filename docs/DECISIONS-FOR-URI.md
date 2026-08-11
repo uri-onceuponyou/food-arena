@@ -4754,3 +4754,104 @@ is answered, and not before.**
 `src/ui/screens/matchScreen.ts` (+31/−2) — unavoidable, because the payout exists only as the return value
 of banking, which happens there. Clean in `git status` before and after, and **committed separately as
 `e60117d` so it can be reverted alone**, leaving `7743f08` building with the socket unfilled.
+
+---
+
+## 71. ✅ PER-ICON SCORING IS RETIRED — it cannot be made to reproduce, and the reason is ARITHMETIC. ❓ **Three icons need a one-line answer from Uri.**
+
+`706c35c`. **9 independent panels × 3 judges × 63 icons = 1,701 judgements**, art byte-identical across
+plates, only the shuffle differing.
+
+| | |
+|---|---|
+| two panels reproduce an exact 0..3 score | **65.2%** |
+| **the arithmetic ceiling** at each icon's own p | **65.8%** |
+| ICC | 0.4936 — 3 judges on one plate are worth **1.51** independent |
+| panels for ±1 judge of 3 / ±0.5 / ±0.25 | **6 / 23 / 92** (18 / 69 / 276 judges) |
+| at 27 judges | **26 of 63 resolve. 33 stay UNRESOLVED.** |
+
+🚨 **The measured value sits ON the ceiling, so better judges buy nothing.** A 3-judge panel has four
+possible values and a sampling SD of 0.87, so **two *perfect* panels agree on the exact score only 31.3%
+of the time.** This is not a judge-quality problem and no affordable panel count fixes it.
+
+**Two facts sharpen it past the model:**
+
+- ⚠️ **The within-round floor is 33%.** 36 of 108 twin readings gave **byte-identical art two different
+  names** — one judge, one plate, one pass. `gift` scored **27/27 at one grid position and 18/27 at
+  another, same pixels.** **A paired Δ of 1 of 3 is noise** — which is exactly where six of this
+  project's Δ +0 icon results were measured.
+- 🔴 **Eight unanimous panels were reversed by the tenth.** `heal` scored 0/3 eight consecutive times
+  (Wilson [0.01, 0.32], printed BROKEN), then 2/3, then **3/3**. Tile order and label proximity were both
+  tested and **the cause was not found.**
+
+✅ **And a control the judging pipeline never had:** three tiles drew another icon's pixels under their
+own key name — the pool **named the SOURCE 6 of 9 and the KEY NAME 0 of 9.** The judges read pixels.
+
+### One standing belief falsified
+
+`ui.ts` concluded boxBurger's failure was *"a legibility floor at 11.83 px."* Across all 63 icons,
+**legibility does not depend on delivered size — Pearson r = −0.076, and the sub-12 px band is the MOST
+legible (0.828).** Corrected in place, old wording kept.
+
+### What reproduces at 10 panels / 30 judges
+
+- **`wrap`: 0 of 30, every panel, 100% reproducing** — the only per-icon failure verdict in the set that
+  never wavered
+- **`chest ↔ boxBurger`**: 23 of 60 readings of the pair cross. **Neither is exempt.**
+- `wave → slow` 17/30 (one-way) · `mustardblast → patty` 14/30 — **the collision r13 hoped was a bad
+  round is real** · `heal → gem` 22/30 but bimodal, **do not act**
+- **`shards` was called "a double-headed arrow" 0 of 30 while `range` scored 30/30** — §46's withdrawal
+  confirmed at 30 judges
+
+**No glyph was changed, and that is the finding rather than an omission.**
+
+## ❓ THE THREE THAT NEED URI — and one fact makes "leave it" legitimate for all three
+
+🚨 **Every one of these icons ships immediately beside its own label** — `${icon('stun')} Stun`,
+`${containerIcon(kind)} ${def.name}`, and the ability pill's own name. **None is ever asked to carry
+meaning alone.** That moves all three from bug to polish: a wrong read fights the label, but nothing is
+unusable. **"Leave it" is a real answer.**
+
+### `boxBurger` — the tier-1 purchasable container (8/30, → `chest` ×7; `chest` names it back 16/30)
+
+It is a **box**, and the set draws three other boxes plus `chest` — the shared silhouette is deliberate,
+the collision is not, and `chest` is the **free** rung against boxBurger's 900 coins. **Six drawing
+variables already spent, all Δ +0.**
+
+1. **Drop the food emblem; make the rung a countable mark** (1–4 pips on the lid) — `tierPips()` already
+   ships as *text* beside it, so the icon would agree with the label instead of competing.
+2. **Make tier 1 not a box** — a folded-top paper bag or takeaway carton. No other glyph has that
+   silhouette and it is on-theme.
+3. **Four rungs, four different objects.** Costs the family read, buys four readable rungs.
+
+### `stun` — the stun status effect (11/30, → `star` ×8, `sparkle` ×6)
+
+**Three glyphs in one star family with three meanings.** And `stun` is the **most unstable glyph in the
+set**: its two byte-identical tiles got different names in **17 of 27** readings.
+
+1. **Stay in the family but change the silhouette class** — a halo/arc of small stars, a ring rather than
+   a mass.
+2. **Retire `sparkle` instead** (its "rewards to claim" job can be a dot badge) and let `stun` own the
+   four-point mark, which is the more universal stun symbol. **Structural — fixes the family, not one
+   member.**
+3. **Leave it.** The pill already reads "Stun" beside it.
+
+⚠️ **Avoid spiral eyes** — `slow` is a snail-shell spiral on the same pill row. ⚠️ And `icon_score.mjs`'s
+candidate string *describes the current drawing*, so **any redraw leaving the star family must land its
+new string in the same commit** or it will be scored wrong for succeeding.
+
+### `wrap` — Burrito's "Burrito Disc" (**0 of 30, ten panels, 100% reproducing**)
+
+The strongest evidence in the set, and **all three geometric axes are closed by measurement**: 45° is a
+blade *either way* (mirroring moved the answer from `damage` to `slash`, 3/3 unanimous); upright is a
+vessel (the 1.7-unit outline renders a gold tin can); horizontal is `mustardblast` and `patty`. Colour is
+a proven null. **A rolled burrito is a fat rounded bar, and every orientation of a fat rounded bar is
+already owned.**
+
+1. **Draw it END-ON — a tortilla spiral disc.** The weapon is literally called Burrito **Disc**, and a
+   spiral disc is the one silhouette class no blade has. ⚠️ Risk: `slow` is a spiral and `patty` is a
+   brown disc.
+2. **Depict the throw, not the object** — the bar plus a circular motion arc. The ring is what breaks the
+   blade read, and it keeps the subject.
+3. **Change the weapon's object entirely.** Biggest blast radius — but **§30 is the precedent: the mustard
+   bottle became a hot dog and gained +2.**
