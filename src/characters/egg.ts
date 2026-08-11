@@ -140,6 +140,37 @@ const INK = PALETTE.ink;            // the eye RIM — the cast's shared ink, on
  *
  * Every other key passed and most improved: range 0.856 -> 0.861, p05 0.078 ->
  * 0.072, steps@0.10 6 -> 6, stations with dL < 0.10 0 -> 0, invalid 0 -> 0.
+ *
+ * ── 🔴 THE FAIL IS STILL HERE, IT IS PRE-EXISTING, AND HERE IS THE PAIRED PROOF ──
+ * Recorded 2026-08-11 because the next agent to run this gate will otherwise spend a
+ * round re-deriving it. `valuescan --mode gate --ids egg,taco,donut,lollipop,
+ * waterbottle`, recomputed on BOTH trees under `headserve` — before at `d3cd714^`,
+ * after at the eye pass's own tree, 90 stations each:
+ *
+ *   char          range   p05  steps  minDL  n<.10  nInv  weakB%  weakBc%  flip  verdict
+ *   egg  BEFORE   0.862 0.071      7  0.175      0     0    70.1     22.8     2  FAIL
+ *   egg  AFTER    0.862 0.071      7  0.175      0     0    70.1     22.8     2  FAIL
+ *   lolli BEFORE  0.843 0.105      7  0.201      0     0    25.3     12.8     2  FAIL
+ *   lolli AFTER   0.843 0.105      7  0.201      0     0    25.3     12.8     2  FAIL
+ *   taco  BEFORE  0.694 0.175      7  0.190      0     0     0.0     20.4     3  PASS
+ *   taco  AFTER   0.717 0.178      7  0.192      0     0     0.0     20.4     3  PASS
+ *   donut BEFORE  0.795 0.090      8  0.208      0     0     0.0     38.9     4  PASS
+ *   donut AFTER   0.791 0.091      8  0.208      0     0     0.0     38.9     4  PASS
+ *   water BEFORE  0.721 0.118      7  0.134      0     0    12.6     44.0     4  PASS
+ *   water AFTER   0.720 0.118      7  0.133      0     0    12.6     44.0     4  PASS
+ *
+ * **Egg's and lollipop's FAILs are BYTE-IDENTICAL across the change** — every column,
+ * including `worstStn`. They are inherited from HEAD and were not caused by the pass
+ * that happened to be running when they were first seen, which is the exact shape of
+ * a manufactured regression and the reason the control was run at all.
+ *
+ * The three non-zero moves are all explained by geometry and none is a value change:
+ * taco's `range` +0.023 / `p05` +0.003 / `minDL` +0.002 (its brow bars lost their
+ * inverted-hull ink and its tooth band changed outline, so the face part's luma
+ * distribution moved — all three IMPROVED); donut's `range` -0.004 (its catchlight
+ * went 0.036R -> 0.030R, removing a few unlit-white 1.000 pixels, and `range` is
+ * max - min); waterbottle -0.001, which is noise. `weakBc%`, `flip`, `n<.10`, `nInv`
+ * and `worstStn` are identical on ALL FIVE.
  */
 
 /**
