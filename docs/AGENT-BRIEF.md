@@ -63,6 +63,15 @@ your run; it does not remove peers' half-saved work. **For any A/B you will quot
 DETACHED WORKTREE of a known commit.**
 ⚠️ A fresh snapshot's **first** client eats a dep-optimisation reload that presents as
 `execution context was destroyed`. Warm it with a cheap page load.
+🚨 **CSS ANIMATIONS RUN ON THE DOCUMENT TIMELINE, NOT `requestAnimationFrame`.** So **freezing rAF
+does not still them**, and **every rAF-frozen probe in this repo has been animating CSS the whole
+time**. Worse, `locator('canvas').screenshot()` is a **page capture clipped to the canvas box**, so a
+`position: fixed` HUD keyframe lands inside every PNG you think is "the canvas". Measured: one arena
+station self-paired at **471,742 px of 1,440,000 with rAF already frozen**, and **0 px** once the CSS
+was stilled. Still them explicitly (`PAGE_STILL_HUD` / `--still-hud`) or mark the station
+non-comparable. ⚠️ Related: *"freezing the clock is not freezing the loop"* — `__feelDebug.frames`
+counts rAF turns, so a paused sim clock still leaves the loop running.
+
 🚨 **`page.evaluate()` GRANTS TRANSIENT USER ACTIVATION.** Playwright issues it over CDP with
 `userGesture: true`. Proved on `about:blank` with a page-side sampler: `isActive` false at 1003 ms,
 **true at 1205 ms, from a single `page.evaluate(() => 1)`.** So a probe's own bookkeeping read hands
