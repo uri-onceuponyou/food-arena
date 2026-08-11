@@ -66,6 +66,49 @@ export interface ArenaDefinition {
   playerSpawn: { x: number; y: number };
   enemySpawn: { x: number; y: number };
 
+  /**
+   * EVERY SEAT'S START, IN SLOT ORDER — the N-fighter superset of the two above.
+   *
+   * ── 🚨 WHY THIS IS AN ADDITION AND NOT A REPLACEMENT ────────────────────────
+   * `playerSpawn` / `enemySpawn` have **74 `createMatch` call sites and 1,307 references,
+   * 1,089 of them (83%) in untyped `.mjs`** that `tsc` cannot see. Replacing the pair would
+   * not produce a compile break that finds them; it would produce a silent runtime break in
+   * the tools that measure the game. So this list is added ALONGSIDE, and
+   * `spawns[0]`/`spawns[1]` **are** `playerSpawn`/`enemySpawn` — not copies of their
+   * coordinates, the same two objects, so they cannot drift. A two-fighter match reads
+   * exactly what it read before (`conceal_lab --bitid`: **0 differing ticks in 41,722,453**).
+   *
+   * ── WHY IT EXISTS AT ALL: `sim.ts:defaultSpawn` THREW ────────────────────────
+   * `createMatch` refused slot 2 and up rather than inventing a ring, because spawn
+   * placement for 4-6 fighters is arena geometry and `DECISIONS §48` makes true 180° point
+   * symmetry a **competitive-fairness** constraint in the same category as `tools/aspect.mjs`.
+   * A default invented in `sim.ts` would be a second, quieter source of truth for it, it
+   * would produce balance numbers, and it would look like it worked. This field is the owner
+   * that refusal was waiting for.
+   *
+   * ── THE CONTRACT ON WHOEVER AUTHORS ONE ─────────────────────────────────────
+   *   * **PAIRS, ALWAYS.** Entry `2k` and entry `2k+1` must be exact 180° images of each
+   *     other about `center`. An ODD count is geometrically impossible: the unpaired spawn
+   *     would have to be its own image, i.e. sit exactly on `center` — which on the shipped
+   *     kitchen is inside the boiling pot's own CoverBox and inside the 248.25 wu endgame
+   *     keep-out. The concealment list has the identical constraint for the identical reason.
+   *   * **INTERLEAVED, SO EVERY EVEN N IS SYMMETRIC.** Slots 0..N-1 are what an N-fighter
+   *     match seats, so ordering the list pair-by-pair makes N=2, N=4 and N=6 each a
+   *     complete set of mirror pairs. N=3 and N=5 cannot be symmetric at any ordering.
+   *   * **EVERY ENTRY MUST PASS `tools/tmp/spawn_runway.mjs`** — 60 wu of clear travel in
+   *     all four cardinals over a ±21 wu lateral band, and no run may STOP inside a damage
+   *     hazard. That rule is not a formality here: it is what makes this list *hard*. See
+   *     `kitchen.ts`'s spawn block for what it costs on a 1400×1000 map.
+   *   * **AND THE FAIRNESS IT BUYS IS PAIRWISE, NOT GLOBAL.** A C2-symmetric map can promise
+   *     `seat 2k ≡ seat 2k+1` and nothing more; making pair A congruent to pair B would need
+   *     the arena itself to be invariant under a 3-fold rotation, and it is not.
+   *
+   * Optional: an arena that omits it plays exactly as it did before the field existed, and
+   * `createMatch` goes back to throwing above slot 1 — which is the correct behaviour for an
+   * arena that has not done this work.
+   */
+  spawns?: readonly { x: number; y: number }[];
+
   cover: CoverBox[];
   hazards: HazardZone[];
 

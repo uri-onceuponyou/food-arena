@@ -123,6 +123,11 @@
  *     cover at all beyond r=650. They used to stand in the middle of the spawn lane.
  * Player spawns west-north, enemy east-south, both in open floor well clear of cover
  * so neither side opens the match already boxed in.
+ *   - SIX SPAWNS, in three 180°-point-symmetric pairs (`spawns`, below). The duel's two are
+ *     pair A and are untouched. 🔴 **The map has room for exactly TWO admissible spawn
+ *     regions per half**, so pair C shares the west/east bay with pair A at 75.2 wu — inside
+ *     `REACH.meleeHeavy`. At four seats the map is fine (509.8 wu); at six it is not. See
+ *     the spawn block for the sweep, and `shots/sp/admissible.png` for the picture.
  *
  * ── Every CoverBox has exactly one matching visual, built by the same call ───────
  * `addCover()` is the single place a collision box gets created, and it always
@@ -740,6 +745,82 @@ export const createKitchenArena: ArenaFactory = () => {
   const playerSpawn = { x: 160, y: 390 };
   const enemySpawn = { x: ARENA_W - 160, y: ARENA_H - 390 };
 
+  // ── SEATS 2..5 — the N-fighter spawn list (DECISIONS §49d) ───────────────────
+  //
+  // `sim.ts:createMatch` THREW for slot 2 and up rather than inventing a ring, because
+  // spawn placement for 4-6 fighters is arena geometry and §48 makes true 180° point
+  // symmetry a competitive-fairness constraint in the same category as `tools/aspect.mjs`.
+  // This is the owner that refusal was waiting for. `spawns[0]`/`spawns[1]` are the two
+  // objects above — not copies of their numbers — so a two-fighter match cannot drift from
+  // what it has always read, and it is MEASURED rather than assumed:
+  // `conceal_lab --bitid --corpus normal,timeout,countdown` run against the pre-change dump
+  // and this one reports the same 15,674,938 ticks and 4,280,119 in-order events with
+  // 0 divergent on both, and `match-sim --all-matchups` is byte-identical across the two at
+  // policies smart, chase and idle.
+  //
+  // ── THREE PAIRS, AND AN ODD COUNT IS IMPOSSIBLE ─────────────────────────────
+  // Exactly the argument the concealment block above makes: under a 180° point symmetry
+  // every spawn is paired with its image, so an unpaired one would have to BE its image —
+  // i.e. sit on the map centre, which is inside the boiling pot's own CoverBox and inside
+  // the 248.25 wu endgame keep-out. So 3 pairs, 6 seats, interleaved so that N=2, N=4 and
+  // N=6 are each a complete set of mirror pairs.
+  //
+  // ── 🔴 THE MAP HAS ROOM FOR EXACTLY TWO SPAWN REGIONS PER HALF, AND THIS IS THE
+  //    MEASURED CASE FOR §48'S 2800x2000 ARENA ────────────────────────────────
+  // `tools/tmp/sp_place.mjs` swept all 327,561 cells of a 2 wu lattice against every rule a
+  // spawn has to satisfy — legal for a 42 wu body, `spawn_runway`-clean (60 wu in all four
+  // cardinals over a ±21 wu band), no cardinal run STOPPING in the pot's burn ring, outside
+  // the endgame keep-out, not concealed at t=0, not in a grease puddle — and **2,186 cells
+  // survived, in FOUR regions that are two mirror pairs**:
+  //
+  //     the spawn bay      x 81..195,  y 366..406   114 x 40 wu   (and its 180° image)
+  //     the north lane     x 556..583, y  81..93     27 x 12 wu   (and its 180° image)
+  //
+  // Everything else on the map fails, and the runway rule is the binding one by 47x:
+  // dropping it alone takes 2,186 cells to 103,926. `shots/sp/admissible.png` is the picture.
+  //
+  // So pair A (the shipped duel pair) and pair C SHARE THE SPAWN BAY. The bay's absolute
+  // best is 77.6 wu and this pair takes **75.2 wu** — inside `REACH.meleeHeavy` (84),
+  // outside `REACH.meleeStrong` (70). **At six seats two fighters begin the match a heavy
+  // swing apart, and it is not theoretical**: a real 6-fighter match, photographed in
+  // `shots/sp/n6-playing.png`, is 9 s old and reads
+  //
+  //     slot 0   0/70  DEAD   75.2 wu from slot 4        slot 2   71/80    509.8 wu from anyone
+  //     slot 5  11/140  0.08  75.2 wu from slot 1        slot 3  120/120   509.8 wu from anyone
+  //     slot 1  28/110  0.25                             slot 4   90/90
+  //
+  // — the two worst-hurt seats are both bay-sharers, and the two healthiest are both out in
+  // the north lane. The paired control is the SAME RUN at N=3 and N=4: same map, same frozen
+  // clock, same seeded rng, same cast prefix, spawns 509.8 wu apart — **nobody dead, and at
+  // N=3 nobody below full health**. At four seats the map is fine. That is the number §48
+  // was missing — the 1400x1000 kitchen seats FOUR, not six.
+  //
+  // ── WHY THESE EXACT CELLS ───────────────────────────────────────────────────
+  // Inside each region, separation trades against robustness 1 wu for 1 wu (both bays are
+  // bounded by the west/east wall, so every wu you move outboard is a wu off the west
+  // runway). The north lane is the tighter region and its deepest interior cell is only
+  // 7 wu from a refusal, so BOTH new pairs are placed at depth 7 / worst-cardinal runway
+  // 66 wu — matching the tightest region's robustness and spending everything else on
+  // separation. Measured, all six, by `tools/tmp/spawn_runway.mjs --layout` (16/16 per
+  // pair) and `tools/tmp/ap_reach.mjs --layout` (0 sealed, 0 phantom, one component, at
+  // body-visual 18/20/22/24/26).
+  //
+  // ⚠️ THE MIRROR IS A TRANSFORM IN SOURCE, exactly as the concealment pairs are, and
+  // `tools/tmp/sp_gate.mjs` asserts the symmetry on the SHIPPED DUMP — the data the game
+  // actually builds — and is shown to FAIL on a one-wu perturbation of any entry.
+  // Named consts rather than a table+loop for the same reason the concealment block gives:
+  // `arena_probe.mjs`'s source extractor cannot evaluate a loop variable.
+  const SPAWN_P2X = 570, SPAWN_P2Y = 87;   // the north lane, between the spice cart and the sink counter
+  const SPAWN_P3X = 87, SPAWN_P3Y = 372;   // the spawn bay, outboard of the shipped pair
+  const spawns = [
+    playerSpawn,
+    enemySpawn,
+    { x: SPAWN_P2X, y: SPAWN_P2Y },
+    { x: ARENA_W - SPAWN_P2X, y: ARENA_H - SPAWN_P2Y },
+    { x: SPAWN_P3X, y: SPAWN_P3Y },
+    { x: ARENA_W - SPAWN_P3X, y: ARENA_H - SPAWN_P3Y },
+  ];
+
   // ── The value lift ───────────────────────────────────────────────────────────
   // LAST, after everything is in `root`, because it walks the finished graph. See the
   // long note above `ARENA_VALUE_GAMMA` in `./shared.ts` for the measurement that
@@ -762,6 +843,7 @@ export const createKitchenArena: ArenaFactory = () => {
     maxSafeRadius: MAX_SAFE_RADIUS,
     playerSpawn,
     enemySpawn,
+    spawns,
     cover,
     hazards,
     concealment,

@@ -33,6 +33,17 @@ try {
     maxSafeRadius: a.maxSafeRadius,
     playerSpawn: a.playerSpawn,
     enemySpawn: a.enemySpawn,
+    // THE N-FIGHTER SPAWN LIST (`src/arena/types.ts:ArenaDefinition.spawns`, DECISIONS §49d).
+    // Without this line every one of the 39 tools above builds an `ArenaDefinition` with no
+    // seats above slot 1, so `createMatch` keeps throwing in Node while the browser has the
+    // list — the sim measured against a layout that does not exist, which is the exact
+    // second-source-of-truth failure the `concealment` note below is about.
+    //
+    // ⚠️ CONDITIONAL, not `?? []`, for the same two reasons as `concealment`: `undefined` is
+    // dropped by both `JSON.stringify` and `page.evaluate`'s serialiser, so an arena that
+    // declares no list produces a BYTE-IDENTICAL dump to the one before this key existed,
+    // and a dropped list cannot masquerade as an empty one to `arena_probe --verify`.
+    spawns: a.spawns ? a.spawns.map((s) => ({ x: s.x, y: s.y })) : undefined,
     cover: a.cover.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h, kind: c.kind })),
     hazards: a.hazards.map((h) => ({
       x: h.x, y: h.y, radius: h.radius, kind: h.kind,
