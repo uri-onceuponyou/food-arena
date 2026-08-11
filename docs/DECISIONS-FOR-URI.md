@@ -4607,7 +4607,7 @@ projectile-rule change. **The verdict line is wrong; the numbers underneath it a
 
 ## 69. ✅ SEAT UNFAIRNESS CLOSED — **2.680 → 0.342 places** — and the quantity that had to be equal was nobody's first guess
 
-`d1d9f9e`. §64 measured the spawn set as worth **2.64 places out of 6**. It is now **0.342**, and no
+`2d3e9bd` (⚠️ **this section first cited `d1d9f9e`, which is an unrelated tmpdir cleanup — my error, caught by the agent I gave it to; the fog commit below was swapped with it in the same way**). §64 measured the spawn set as worth **2.64 places out of 6**. It is now **0.342**, and no
 individual seat is distinguishable from fair.
 
 | seat | 0 | 1 | 2 | 3 | 4 | 5 |
@@ -4670,7 +4670,7 @@ coordinates.** Anyone regenerating from it **silently reverts this entire fix**,
 like a routine regeneration. `kx_seatfair --selftest` §A3 now asserts the divergence is exactly the
 declared one and **goes red if either side moves.** Being fixed properly.
 
-## ✅ And the fog canopy is derived — `2d3e9bd`
+## ✅ And the fog canopy is derived — `06da604`
 
 `FIELD_OUTER_UNITS = ARENA_HALF_DIAGONAL + APRON_OUT` = **2480.47 wu**, from two constants that already
 move with the map, bounded exactly against the furthest standable cell (1691.2) plus the camera's

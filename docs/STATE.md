@@ -130,13 +130,13 @@ Everything above still stands; this is what happened after it. **Full detail per
 |---|---|
 | **Phone frame** | draw calls **928 → 423** (−54.4%), main thread **−47.9%** against a ±0.71 ms floor. The 1,908 static props are one mesh per material. The ×4 map now costs **less** main thread than the build Uri played. `5aa4655` |
 | **Landscape controls** | weapon tray hides **7.92% → 0.00%** of the guaranteed-visible arena; the clock **13.12% → 0.49%**; all controls 22.6% → 4.3% at 844×390. `bd39464` `b2f2cb1` `f1f2a40` `845716a` |
-| **Seat fairness** | spawn advantage **2.680 → 0.342 places** of 6; all six seats deal damage in **600/600** (was 74.5%). `d1d9f9e` |
+| **Seat fairness** | spawn advantage **2.680 → 0.342 places** of 6; all six seats deal damage in **600/600** (was 74.5%). `2d3e9bd` |
 | **Roster** | range **27.8 → 9.8 pp**, tier spread 16.2 → 6.1, **no mechanic touched**. `33318a1` |
 | **Ranged reach** | **23 of 23 → 2 of 23** weapons cannot connect at their own press gate. `af35362` `a9da836` |
 | **Sudden death** | ships; `resolveTimeout` fires **0/880**. `f87d407` |
 | **Payouts** | the 3–6 seat curve exists *and now reaches the game* — a 3rd-of-6 finish was paid as a 1v1 loss. `721ce3c` `a588066` `bb00d66` |
 | **Multiplayer** | wire codec + delta compression **7.1×**, `src/game/` untouched. `915bbaf` `a588066` |
-| **Fog** | no longer renders as nothing at radius 0, and now covers the corners (**3.25% of standable ground was outside it**). `779dc62` `2d3e9bd` |
+| **Fog** | no longer renders as nothing at radius 0, and now covers the corners (**3.25% of standable ground was outside it**). `779dc62` `06da604` |
 | **Gates** | **0 faults**, 69 verified / 57 skipped, up from 12 faults. |
 
 ### 🚨 THE ONE LESSON THIS SESSION ACTUALLY TAUGHT
