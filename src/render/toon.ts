@@ -840,6 +840,286 @@ function bakeHulls(space: THREE.Object3D, meshes: THREE.Mesh[], mat: OutlineMate
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// STATIC BATCHING — the whole set dressing, in one mesh per material
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A subtree carrying this in `userData` is never merged, and neither is anything
+ * under it. Set it on anything whose transform, geometry or child list changes at
+ * runtime — the merge bakes world matrices into vertex data, so a merged part is
+ * frozen where it stood.
+ *
+ * ⚠️ This is an OPT-OUT, and that is deliberate. An opt-IN would have to be
+ * remembered by every future prop author, and the failure mode of forgetting it is
+ * a silent 17x draw-call regression that nothing in the gate battery would catch.
+ * The failure mode of forgetting the opt-out is a visibly frozen prop, which is
+ * loud — and `tools/tmp/mg_probe.mjs` measures which meshes actually move over a
+ * live match rather than trusting either list.
+ */
+export const MERGE_SKIP = 'mergeSkip';
+
+export interface MergeStaticReport {
+  /** Drawables removed from the graph. */
+  removed: number;
+  /** Merged meshes created — one per (material, shadow flags, layers, attributes). */
+  created: number;
+  /** Drawables deliberately left alone: skipped subtrees, singletons, odd geometry. */
+  kept: number;
+  /** Empty containers pruned once their meshes moved into a merged mesh. */
+  prunedGroups: number;
+}
+
+/**
+ * Collapse every STATIC mesh under `root` into one mesh per render bucket, baked
+ * into `root`'s own space.
+ *
+ * ── WHY THIS EXISTS, WITH THE MEASUREMENT THAT MOTIVATED IT ─────────────────
+ * `tools/tmp/pf_census.mjs` on the shipped bundle at the phone tier: a match frame
+ * is 942 draw calls, of which **613 are the arena props — 118 in the main pass and
+ * 495 in the SHADOW pass** — carried by **1,924 drawables for 111 props**, about 17
+ * meshes each. `pf_ablate.mjs` priced the same set at **-8.00 ms of a 14.70 ms
+ * main-thread frame** when detached entirely, of which **-2.30 ms is pure
+ * `updateMatrixWorld`** over 2,111 objects — a cost no culling can reach, because
+ * `Object3D.updateMatrixWorld` does not test `.visible`.
+ *
+ * None of that is shader, material or texture cost: across the x4 map commit GL
+ * programs went 26 -> 25 and texture bytes did not move at all. It is object count.
+ *
+ * ── WHY MERGING IS SAFE HERE AND MERGING THE HULLS WAS NOT ENOUGH ───────────
+ * `mergeOutlines`/`bakeHulls` above already merge the arena's INK, and they drop
+ * every attribute except position and normal because the hull shader reads nothing
+ * else. A real prop reads `uv` (every major surface carries a canvas texture) and
+ * may carry vertex colours, so this keeps the FULL attribute set and refuses to
+ * merge across two geometries that disagree about it.
+ *
+ * The bucket key is (material, castShadow, receiveShadow, renderOrder, layers,
+ * attribute signature). Every one of those is a per-DRAW property that a merged
+ * mesh can only hold one of, so folding across any of them would change the image:
+ * merging across `castShadow` alone would either invent shadows or delete them.
+ *
+ * ── WHAT THIS DOES NOT CHANGE, AND WHY THE FRAME IS BIT-IDENTICAL ───────────
+ * Object-level frustum culling is a pure optimisation: submitting geometry the
+ * camera cannot see produces the same pixels as not submitting it, because the GPU
+ * clips it anyway. So a merged mesh spanning the whole arena draws the same frame
+ * as 1,900 separately-culled ones — it just submits more triangles to do it. The
+ * arena's props are **268,600 triangles in total** against a frame that already
+ * submits 1,095,807, so that trade is small and it is paid on the GPU, which this
+ * frame has 6.2x of spare.
+ *
+ * ⚠️ `Material.clone()` silently drops `onBeforeCompile` and that has cost this
+ * project a shipped bug across 54 sites. This function **never clones a material**:
+ * the merged mesh is handed the exact instance its sources shared, so the Fresnel
+ * rim patch, the ramp and every uniform come with it untouched.
+ */
+export function mergeStaticMeshes(root: THREE.Object3D, label = 'merged'): MergeStaticReport {
+  root.updateMatrixWorld(true);
+  const toLocal = new THREE.Matrix4().copy(root.matrixWorld).invert();
+
+  const report: MergeStaticReport = { removed: 0, created: 0, kept: 0, prunedGroups: 0 };
+  const buckets = new Map<string, { mat: THREE.Material; meshes: MergeSource[] }>();
+
+  const walk = (o: THREE.Object3D): void => {
+    if (o.userData?.[MERGE_SKIP]) return;
+    const m = o as THREE.Mesh;
+    if (m.isMesh) {
+      const key = bucketKey(m);
+      if (key === null) report.kept++;
+      else {
+        const e = buckets.get(key) ?? { mat: m.material as THREE.Material, meshes: [] };
+        // The world matrix is CAPTURED HERE, before anything is detached. Reading
+        // it later would recompute it from a parent chain the merge has already
+        // taken apart, and a prop would bake at the wrong place — plausibly, and
+        // only in whichever bucket happened to be processed last.
+        e.meshes.push({ mesh: m, world: m.matrixWorld.clone() });
+        buckets.set(key, e);
+      }
+    }
+    for (const c of [...o.children]) walk(c);
+  };
+  walk(root);
+
+  for (const [, { mat, meshes }] of buckets) {
+    // A bucket of one is already one draw call. Merging it would only move it in
+    // the graph and lose its own frustum culling for nothing.
+    if (meshes.length < 2) { report.kept++; continue; }
+    const geo = bakeGeometries(meshes, toLocal);
+    if (!geo) { report.kept += meshes.length; continue; }
+    const src = meshes[0].mesh;
+    const out = new THREE.Mesh(geo, mat);
+    // AGENT-BRIEF §3: an UNNAMED mesh is invisible to every diagnostic here.
+    out.name = `${label}:${src.name || 'mesh'}:${meshes.length}`;
+    out.castShadow = src.castShadow;
+    out.receiveShadow = src.receiveShadow;
+    out.renderOrder = src.renderOrder;
+    out.layers.mask = src.layers.mask;
+    for (const m of meshes) m.mesh.removeFromParent();
+    root.add(out);
+    report.removed += meshes.length;
+    report.created++;
+  }
+
+  // Prune the containers the merge emptied. A `cover:*` group with no drawables
+  // left is 100% of a `updateMatrixWorld` walk for 0% of a frame — and the walk is
+  // the -2.30 ms this function exists to remove.
+  const prune = (o: THREE.Object3D): boolean => {
+    if (o.userData?.[MERGE_SKIP]) return false;
+    for (const c of [...o.children]) if (prune(c)) { c.removeFromParent(); report.prunedGroups++; }
+    const any = o as THREE.Mesh & { isLight?: boolean; isCamera?: boolean };
+    return o !== root && o.children.length === 0
+      && !any.isMesh && !any.isLight && !any.isCamera
+      && !(o as THREE.Points).isPoints && !(o as THREE.Sprite).isSprite;
+  };
+  prune(root);
+
+  return report;
+}
+
+/** A merge source, with the world matrix it had BEFORE anything was detached. */
+interface MergeSource { mesh: THREE.Mesh; world: THREE.Matrix4 }
+
+/**
+ * The per-draw identity of a mesh: two meshes may only be merged if this matches.
+ * `null` means "not mergeable at all" — reported as kept rather than merged.
+ */
+function bucketKey(m: THREE.Mesh): string | null {
+  if (!m.visible) return null;                    // hidden: leave it hidden, alone
+  // A mesh with children would take its whole subtree out of the graph when it is
+  // detached. Measured on the shipped arena (`tools/tmp/mg_probe.mjs`): ZERO of the
+  // 1,908 static prop drawables have children, so refusing them costs nothing and
+  // removes an entire class of bug rather than handling it.
+  if (m.children.length) return null;
+  if (Array.isArray(m.material)) return null;     // multi-material draw groups
+  if ((m as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) return null;
+  if ((m as unknown as { isSkinnedMesh?: boolean }).isSkinnedMesh) return null;
+  const geo = m.geometry;
+  const mat = m.material as THREE.Material | undefined;
+  if (!geo || !mat) return null;
+  if (geo.morphAttributes && Object.keys(geo.morphAttributes).length) return null;
+  // ⚠️ THERE IS NO `geometry.groups` TEST HERE, AND THE FIRST VERSION HAD ONE.
+  // `THREE.BoxGeometry` emits SIX groups, one per face, so `groups.length > 1`
+  // rejected essentially every prop in the arena: the first run of this merge
+  // collapsed 452 of 1,908 drawables instead of 1,908, and the count looked like a
+  // plausible partial success rather than a bug.
+  // Groups only ever mean anything when `object.material` IS AN ARRAY —
+  // `WebGLRenderer.projectObject` and `WebGLShadowMap.renderObject` both branch on
+  // `Array.isArray(material)` and ignore `geometry.groups` entirely otherwise, in
+  // both the main and the shadow pass. The array case is already refused above, so
+  // by this line groups are dead data and the merged geometry deliberately carries
+  // none.
+  const pos = geo.getAttribute('position');
+  if (!pos) return null;
+  // The attribute SET has to match exactly. A merged buffer with a hole in its uv
+  // channel is a texture read of garbage, which renders plausibly and wrongly —
+  // this repo's most expensive failure mode.
+  const sig = Object.keys(geo.attributes).sort()
+    .map((k) => {
+      const a = geo.attributes[k] as THREE.BufferAttribute;
+      return `${k}:${a.itemSize}:${a.normalized ? 1 : 0}`;
+    }).join(',');
+  return [
+    mat.uuid, sig,
+    m.castShadow ? 1 : 0, m.receiveShadow ? 1 : 0,
+    m.renderOrder | 0, m.layers.mask,
+  ].join('|');
+}
+
+/**
+ * Bake `meshes` into one geometry expressed in the frame `toLocal` maps world into.
+ *
+ * Every attribute the sources carry survives. `position` is transformed by the full
+ * world matrix, `normal` by the normal matrix and renormalised, and everything else
+ * — uv, uv1, colour — is copied verbatim, which is correct because none of them is
+ * a spatial quantity.
+ *
+ * ⚠️ A MIRRORED PROP FLIPS TRIANGLE WINDING. A matrix with a negative determinant
+ * (an authored `scale.x = -1`, which is how a mirror-pair prop is cheapest to
+ * build) reverses front and back faces. Three handles that per-object via
+ * `material.side` and the renderer's own front-face flip; a merged mesh has ONE
+ * winding for all of it, so the indices of a mirrored source are emitted reversed.
+ * Without this, half a mirror-symmetric arena renders inside-out under backface
+ * culling — and it would look fine from the one angle you happened to shoot.
+ */
+function bakeGeometries(meshes: MergeSource[], toLocal: THREE.Matrix4): THREE.BufferGeometry | null {
+  const names = Object.keys(meshes[0].mesh.geometry.attributes);
+  let vTotal = 0;
+  let iTotal = 0;
+  for (const { mesh } of meshes) {
+    const g = mesh.geometry;
+    const p = g.getAttribute('position');
+    if (!p) return null;
+    vTotal += p.count;
+    iTotal += g.index ? g.index.count : p.count;
+  }
+  if (vTotal === 0) return null;
+
+  const out = new THREE.BufferGeometry();
+  const dst = new Map<string, THREE.BufferAttribute>();
+  for (const n of names) {
+    const a = meshes[0].mesh.geometry.getAttribute(n) as THREE.BufferAttribute;
+    const arr = new Float32Array(vTotal * a.itemSize);
+    dst.set(n, new THREE.BufferAttribute(arr, a.itemSize, a.normalized));
+  }
+  const index = vTotal > 65535 ? new Uint32Array(iTotal) : new Uint16Array(iTotal);
+
+  const v = new THREE.Vector3();
+  const mw = new THREE.Matrix4();
+  const nm = new THREE.Matrix3();
+  let vOff = 0;
+  let iOff = 0;
+  for (const { mesh, world } of meshes) {
+    mw.multiplyMatrices(toLocal, world);
+    nm.getNormalMatrix(mw);
+    const flip = mw.determinant() < 0;
+    const g = mesh.geometry;
+    const p = g.getAttribute('position') as THREE.BufferAttribute;
+
+    for (const n of names) {
+      const src = g.getAttribute(n) as THREE.BufferAttribute | undefined;
+      const d = dst.get(n)!;
+      if (!src) return null;
+      if (n === 'position') {
+        for (let i = 0; i < src.count; i++) {
+          v.fromBufferAttribute(src, i).applyMatrix4(mw);
+          d.setXYZ(vOff + i, v.x, v.y, v.z);
+        }
+      } else if (n === 'normal') {
+        for (let i = 0; i < src.count; i++) {
+          v.fromBufferAttribute(src, i).applyMatrix3(nm).normalize();
+          d.setXYZ(vOff + i, v.x, v.y, v.z);
+        }
+      } else {
+        const w = src.itemSize;
+        for (let i = 0; i < src.count; i++) {
+          if (w >= 1) d.setX(vOff + i, src.getX(i));
+          if (w >= 2) d.setY(vOff + i, src.getY(i));
+          if (w >= 3) d.setZ(vOff + i, src.getZ(i));
+          if (w >= 4) d.setW(vOff + i, src.getW(i));
+        }
+      }
+    }
+
+    const idx = g.index;
+    const n = idx ? idx.count : p.count;
+    const at = (k: number): number => (idx ? idx.getX(k) : k) + vOff;
+    if (flip) {
+      for (let t = 0; t + 2 < n; t += 3) {
+        index[iOff + t] = at(t + 2); index[iOff + t + 1] = at(t + 1); index[iOff + t + 2] = at(t);
+      }
+    } else {
+      for (let k = 0; k < n; k++) index[iOff + k] = at(k);
+    }
+    iOff += n;
+    vOff += p.count;
+  }
+
+  for (const [n, a] of dst) out.setAttribute(n, a);
+  out.setIndex(new THREE.BufferAttribute(index, 1));
+  out.computeBoundingSphere();
+  out.computeBoundingBox();
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Shared geometry helpers — chunky rounded forms
 // ─────────────────────────────────────────────────────────────────────────────
 

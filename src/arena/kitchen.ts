@@ -199,7 +199,7 @@
 import * as THREE from 'three';
 import type { ArenaDefinition, ArenaFactory, CoverBox, HazardZone } from './types';
 import type { ConcealBox } from '../game/movement';
-import { outlineGroup } from '../render/toon';
+import { outlineGroup, mergeStaticMeshes, MERGE_SKIP } from '../render/toon';
 import { groundPos } from '../units';
 import { POT, PUDDLE_SLOW_FACTOR } from '../game/rules';
 import {
@@ -782,10 +782,18 @@ export const createKitchenArena: ArenaFactory = () => {
   // is its own image. Every other box in this file is written with a partner.
   const pot = buildPot(M);
   const potPos = groundPos(CENTER.x, CENTER.y);
-  addCover(propsGroup, cover, M, {
+  const potCover = addCover(propsGroup, cover, M, {
     x: CENTER.x, y: CENTER.y, w: POT.bodyRadius * 2, h: POT.bodyRadius * 2, kind: 'boiling_pot',
     build: () => pot.group,
   });
+  // THE ONE PROP THAT MOVES. `ambient.ts` drives its bubbles, steam and burner flame
+  // every frame off the mesh references `buildPot` hands back, so its subtree must
+  // never be baked into the static batch below — a merged part is frozen where it
+  // stood, and a frozen boiling pot is a silent visual bug no draw-call number would
+  // show. Measured rather than reasoned: `tools/tmp/mg_probe.mjs` sampled every
+  // `matrixWorld` under `arena_props` over 90 frames of a live match and found
+  // **exactly 8 moving drawables, all of them here** — 1,908 of 1,924 are static.
+  potCover.userData[MERGE_SKIP] = true;
 
   root.add(propsGroup);
   // BLOCKING gets the heaviest ink line in the arena — far past anything decoration
@@ -803,6 +811,42 @@ export const createKitchenArena: ArenaFactory = () => {
   // thickness and one colour — the merge path can only combine hulls that share a
   // material.
   outlineGroup(propsGroup, 0.016, undefined, { merge: true });
+
+  // ── STATIC BATCHING — 1,908 drawables into one mesh per material ─────────────
+  //
+  // 🚨 THE PHONE IS A DRAW-CALL PROBLEM, AND THIS FILE OWNS MOST OF IT.
+  // Measured on the shipped bundle at the phone tier (`low`, buffer 1055x487,
+  // ANGLE/Metal, CPU x4) by `tools/tmp/pf_census.mjs` and `pf_ablate.mjs`:
+  //
+  //   a phone frame = 14.70 ms of main-thread JS against 2.37 ms of GPU  (CPU-bound 6.2x)
+  //   942 draw calls, of which 613 are THIS group — 118 main + 495 SHADOW
+  //   1,924 drawables for 111 props, ~17 meshes each, none of them batched
+  //   detaching the group entirely: -8.00 ms (54.4%), of which -2.30 ms is pure
+  //     `updateMatrixWorld` over 2,111 objects — a cost NO culling can reach,
+  //     because `Object3D.updateMatrixWorld` does not test `.visible`
+  //
+  // It is not shaders, materials or textures: across the x4 map commit GL programs
+  // went 26 -> 25 and texture bytes did not move at all (7.48 MB both sides). What
+  // moved was object count, 1,416 -> 3,126.
+  //
+  // ⚠️ AND THIS IS WHY THE SHADOW PATCH `b1ab8b0` PROPOSED IS NOT NEEDED.
+  // That commit priced taking the static props OUT of the shadow pass at -495 draws
+  // and refused it on a picture: every counter, crate and island lost its cast
+  // shadow and sat on the floor as a sticker. Batching gets the SAME 495 draws back
+  // — the merged meshes cast exactly the same shadow from exactly the same
+  // triangles — because the cost was never the shadow, it was submitting it 495
+  // times.
+  //
+  // ⚠️ `preview.html` opts out. It looks props up by their `cover:<kind>` group
+  // (`src/preview.ts:341`) and frames the Box3 of what it finds, and every per-prop
+  // critic plate this project has ever shot goes through that path. Batching empties
+  // those groups by design, so the preview keeps the unbatched graph. The game does
+  // not need them: nothing in `src/game/**` or `src/render/**` reads a prop by name.
+  // `?merge=0` is the same escape hatch for a paired A/B inside ONE bundle, which is
+  // the only way to measure this at less than `perf.mjs`'s 22% between-process noise.
+  if (!/preview\.html$/.test(location.pathname) && !location.search.includes('merge=0')) {
+    mergeStaticMeshes(propsGroup, 'props');
+  }
 
   // Hazard ground marking (visual only — not collidable, not a CoverBox). Scorch +
   // glow ring + heat wisps, radius driven directly off POT.dangerRadius so it always

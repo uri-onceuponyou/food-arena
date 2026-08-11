@@ -790,11 +790,29 @@ export class Stage {
     //
     // ...for an arena that does not move. `render()` now recomputes the map only
     // when something it depends on has actually changed. Read `scheduleShadowUpdate`
-    // before assuming that means "only when the player moves": the honest accounting
-    // is that during play the two fighters move every frame and each is ~85 casters,
-    // so a match still pays most of this. What it removes is every frame where
-    // nothing moves — menus, the results overlay, thumbnail and preview plates — and
-    // it is what makes the focus quantisation in `lighting.ts` worth anything.
+    // before assuming that means "only when the player moves".
+    //
+    // ⚠️ THE PARAGRAPH THAT USED TO CLOSE THIS BLOCK WAS TRUE WHEN WRITTEN AND IS NOW
+    // FALSE TWICE OVER. It read, verbatim:
+    //
+    //     "the honest accounting is that during play the two fighters move every frame
+    //      and each is ~85 casters, so a match still pays most of this"
+    //
+    // Measured on the shipped bundle at the phone tier (`pf_census.mjs`, ec4f5af): on
+    // the x4 map the shadow pass was **551 of 928 draws — 59.4% of the frame — and
+    // 523 of them were the ARENA**. The two fighters were 28. The reasoning inverted
+    // because the map grew 4x and the props with it, not because anything here changed.
+    //
+    // And the second reversal, which is why the paragraph is gone rather than
+    // corrected: the fix was never in this file. `arena/kitchen.ts` now batches its
+    // 1,908 static prop meshes into ~80 by material, so the SAME shadow, cast by the
+    // SAME triangles, costs **84 draws instead of 523** — the shadow pass falls
+    // 551 -> 112 with no change to the picture. A fingerprint that re-renders the map
+    // when the fighters move is fine; re-rendering it 1,657 casters at a time was not.
+    //
+    // What this still removes is every frame where nothing moves — menus, the results
+    // overlay, thumbnail and preview plates — and it is what makes the focus
+    // quantisation in `lighting.ts` worth anything.
     if (opts.shadows !== false && this.profile.shadows) {
       this.shadowsOn = true;
       this.renderer.shadowMap.enabled = true;
