@@ -85,11 +85,38 @@
  * acceptance runs in the two commit messages.
  *
  * ⚠️ NOTHING IN THIS FILE IS A SEARCH BEHAVIOUR, AND THE CAP COMING OFF DID NOT ADD ONE.
- * `stepAI` walks to where it last saw its target and stops (`rules.ts:1034`), which
- * `DECISIONS §48` measures as the binding constraint on the ×4 arena — 12.00 s to first
- * contact at 27 props, 21.09 s at 108, monotone in prop count. More fighters shortens the
- * expected distance to the NEAREST one, which helps; it is not the fix, and claiming it
- * would be attributing a pacing result to a change that was measured for bit-identity.
+ * `stepAI` walks to where it last saw its target and stops (the claim is at
+ * `src/arena/types.ts:95`, not at `rules.ts:1034`).
+ *
+ * WAS: *"…which `DECISIONS §48` measures as the binding constraint on the ×4 arena — 12.00 s
+ * to first contact at 27 props, 21.09 s at 108, monotone in prop count."* The prop-count
+ * numbers are correct and unchanged. **THE ATTRIBUTION IS FALSIFIED**, and it is kept above
+ * rather than deleted because it is quoted in three documents and a reader will find it.
+ *
+ * ── WHAT WAS MEASURED, 2026-08-11, `tools/tmp/as_cost.mjs` (32) ─────────────
+ *
+ * The counterfactual is an ORACLE arm — `visible` forced true here and nothing else changed —
+ * which is a hard UPPER BOUND on what any search behaviour could ever buy, since a search
+ * behaviour guesses where the target went and an oracle already knows. 110 matchups × 8 seeds
+ * × 2 policies per arm, identical seeds, timing untouched, self-pair drift control 0/110:
+ *
+ *   map                      aggregate win        first contact    PAIRED matchups moved
+ *   1400×1000 (shipped)      57.6% -> 57.6%       5.67 -> 5.67 s   2 of 110, max 12.5 pp
+ *   2800×2000 (§48 hub)      42.7% -> 42.7%      18.45 -> 18.45 s  **0 of 110, BIT-IDENTICAL**
+ *
+ * And §48's *"traced: AI stalled 50% of the match, longest unbroken stall 18.6 s"* was traced
+ * to the wrong cause. Re-run on the layout §48 was measured on (`git show b9bc00e~1`), which
+ * reproduces its published table to the digit: `match-sim`'s stall rule reads **51.45% of
+ * samples, longest 22.50 s** — and the belief was stale for **0 of 2,020,248 playing ticks**,
+ * because that map declared no concealment at all, so `isVisibleFrom` returned true
+ * unconditionally. **100% of that stall was an AI that could see exactly where its target was
+ * and could not get there.** It was navigation, and `b9bc00e` — which closed 14 unreachable
+ * pockets — fixed it: on today's layout the same fixture goes from 542/801 of 880 matches
+ * with zero contact to 26/45, contact 36.60 s -> 22.29 s, duty 3.3% -> 16.6%.
+ *
+ * So the ×4 pacing cost is real and this file is not where it lives. More fighters shortens
+ * the expected distance to the NEAREST one, which helps; it is not the fix either, and
+ * claiming it would be attributing a pacing result to a change measured for bit-identity.
  *
  * ── AND THE SHAPE HAS LEFT THIS FILE ────────────────────────────────────────
  *
