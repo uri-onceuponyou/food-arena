@@ -74,7 +74,26 @@ export const FOOD_ICONS: Record<string, string> = {
    *  low-variance arm, swapping with `wrap` and then with `cap`. On that arm this drawing
    *  was never broken at all; the "bomb" answers came from arms that were also mis-scoring
    *  icons nobody has ever complained about. Reverted, with the measurement kept so the
-   *  next pass does not spend the same budget again. */
+   *  next pass does not spend the same budget again.
+   *
+   *  ── STILL UNCHANGED, AND THIS TIME IT IS THE FLOOR THAT STOPS IT, NOT THE ARM ──
+   *  The mass is 14.5 x 16.3, i.e. a near-circle, and the only thing about this glyph that
+   *  is not a circle is one cream bone end at the UPPER RIGHT. A bone that enters a mass
+   *  has to LEAVE it. One variable — a second knob-pair at the lower left, mirrored through
+   *  the mass so the two ends are roughly collinear through its centre, everything else
+   *  byte-identical. Paired, 73 tiles, 3 judges per protocol:
+   *      A  shipped, one bone end     0/3 native   2/3 magnified
+   *      B  two bone ends             1/3  Δ +1    3/3  Δ +1
+   *  ⚠️ NOT SHIPPED. The native floor in this round is **1 of 3** — `boxFire`, the declared
+   *  ILLEGIBLE twin, split on 3 of 3 judges — so a +1 on a subject sitting at 0/3 is inside
+   *  the noise by construction, and `CLAUDE.md` #10 is explicit that a metric's floor is
+   *  stated before acting rather than after. It is the strongest of this pass's parked arms:
+   *  +1 in the SAME direction at both protocols, no loss anywhere, single variable, named
+   *  mechanism. It wants one more paired plate, not a redraw. Arm [B] of `meat` in
+   *  `ic_mkvariants.mjs` is the drawing.
+   *  ⚠️ Worth recording separately: A's native misreads this round were **"a snail shell
+   *  spiral" x2**, i.e. `slow` — a collision neither glyph's notes have ever mentioned, and
+   *  both are a warm round mass with a small appendage off one side. */
   meat: `
 <path d="M2.6 12.8c0-4.6 3.4-7.6 7.6-7.6 4.3 0 6.9 2.9 6.9 6.5 0 4.9-3.4 8.7-7.6 8.7-4.1 0-6.9-3.2-6.9-7.6z" fill="${P.meat}"/>
 <path d="M6.8 9.8c2.6-.8 4.5.2 5.5 2.5" stroke="${P.meatHi}" stroke-width="1.8"/>
@@ -102,6 +121,38 @@ export const FOOD_ICONS: Record<string, string> = {
 <path d="M8.4 8.6c-1.1 2.5-1.3 5.6 0 9.1M15.6 8.6c1.1 2.5 1.3 5.6 0 9.1" stroke="${P.violet}" stroke-width="1.4"/>
 <path d="M12 6.4c.4-2.1 1.9-3.2 3.6-3.4-.4 2.1-1.7 3.2-3.6 3.4z" fill="${P.lettuce}" stroke-width="1.3"/>`,
 
+  /** UNCHANGED, and this entry is mostly about what CANNOT be drawn at this size.
+   *
+   *  The standing diagnosis was a collision: delivered ink 17.61 x 9.09 (1.94:1) against
+   *  `range`'s 10.12 x 4.48 (2.26:1), i.e. a flat lozenge with two outward triangles is a
+   *  double-headed arrow. ⚠️ THE DATA DOES NOT SUPPORT IT. Across two earlier native
+   *  panels the wrong answers were flag x2, range x1, mustardblast x1, meat x2 — a
+   *  DIFFERENT answer nearly every round, which is a legibility failure and not a
+   *  collision (`LESSONS.md` §3), and those have opposite fixes.
+   *
+   *  🚨 THREE CANDIDATES WERE DRAWN AND ALL THREE WERE REJECTED ON RENDER, BEFORE ANY
+   *  JUDGE, FOR ONE ARITHMETIC REASON. At the delivered 22.72 px one viewBox unit is
+   *  0.947 px and the inherited outline is 1.7 units, i.e. **0.85 units of ink inset on
+   *  each side of every path**. A wrapper twist pinched to a 2.2-unit waist therefore has
+   *  0.5 units of fill left at its neck; widened to 4.2 it has 2.5; and a two-lobed fan
+   *  notched from x 2.7 to x 4.9 leaves 1.9 units between the notch apex and the body.
+   *  All three rendered as a DARK X with a pink dot in it — `close` or `sparkle` —
+   *  strictly worse than the arrow they were meant to fix, and **every numeric control
+   *  passed on all three**. Only reading the PNG caught it (CLAUDE.md #3).
+   *  → **Nothing narrower than about 5 units shows fill in this icon system at 22.72 px.**
+   *    That rules out every twist geometry that works by REMOVING area, which is the whole
+   *    family "pinch the wrapper concave" belongs to. Recorded in `ic_mkvariants.mjs`.
+   *
+   *  What was measurable instead was the AXIS — byte-identical geometry inside a
+   *  `rotate(-20 12 12)`, costing no ink at all, on the theory that `range` is strictly
+   *  horizontal and cannot follow a tilt. Paired, 73 tiles, 3 judges per protocol:
+   *      A  shipped, horizontal    **3/3** native   2/3 magnified
+   *      C  the same art at -20    3/3  Δ +0        3/3  Δ +1
+   *  🔴 THE SHIPPED ARM SCORED 3/3 AT NATIVE SIZE, so the defect did not reproduce and
+   *  the native Δ is measured against a ceiling the round supplied. Not shipped: the only
+   *  non-zero number is +1 at the protocol that is explicitly not the decision arm, and a
+   *  "never worse in one round" is exactly the reasoning `boxBurger` burned six variables
+   *  on. The tilt is drawn and kept as arm [C] for a plate where [A] reproduces 0/3. */
   candy: `
 <ellipse cx="12" cy="12" rx="5.3" ry="4.7" fill="${P.candy}"/>
 <path d="M6.8 10.1 2.7 7.2v9.6l4.1-2.9z" fill="${P.candyHi}"/>
@@ -521,8 +572,33 @@ export const FOOD_ICONS: Record<string, string> = {
    *  mustard zigzag"). That is a feature — the weapon bar's first slot showing the
    *  character's signature — and the two never share a screen at this size: portraits are
    *  round 3D renders on the roster, this is a flat glyph in the HUD. */
+  /*  🔴 …AND THE PROTRUSION ABOVE WAS 1.5 PX. The intent was right and the number was
+   *  never checked. WAS: `M7.2 11.4h9.6a4.3 4.3 0 0 1 0 8.6H7.2a4.3 4.3 0 0 1 0-8.6z`,
+   *  a bun stadium spanning x 2.9..21.1 under a sausage stadium spanning x 1.3..22.7 —
+   *  so "the sausage PROTRUDES past the bun at both ends" cleared it by **1.6 units,
+   *  which at the delivered 22.72 px is 1.5 px**, i.e. one antialiased edge. What ships
+   *  at that clearance is one wide two-tone horizontal lozenge, and `patty` is two
+   *  stacked flat ellipses of identical width. Both native panels said so: "a grilled
+   *  burger patty" x3 and x2.
+   *
+   *  ── ONE VARIABLE: THE BUN IS NARROWER. Paired, 73 tiles, 3 judges per protocol ──
+   *      arm                                          native        magnified
+   *      A  shipped, 1.6 units of clearance           0/3           2/3
+   *         ("a grilled burger patty" x3)
+   *      B  bun 2.9..21.1 -> 5.4..18.6, so the
+   *         sausage clears it by 4.1 units = 3.9 px   **2/3  Δ +2**  2/3  Δ +0
+   *  Nothing else moved: same sausage, same bun height, same zigzag, same colours.
+   *  ⚠️ FLOOR: this round's twins were declared to BRACKET and did — `tomato` (legible)
+   *  split 0 of 3, `gift` 1 of 3, `boxFire` (illegible) **3 of 3**. So ±1 of 3 is noise
+   *  for a failing subject here and only the +2 clears it.
+   *  ⚠️ WHERE THE CONFUSION WENT: REDUCED, not moved. "a grilled burger patty" went
+   *  3 of 3 -> 1 of 3 and the freed judge answered CORRECTLY rather than picking a new
+   *  neighbour — the first time this instrument has produced that. `patty` itself was
+   *  unchanged on the plate and scored 1/3, so the answer was never taken from it.
+   *  ⚠️ Δ +0 magnified, at 2/3 both ways: a judge that can resolve 1.5 px of clearance
+   *  never had the defect. The gap between the two rows IS the defect. */
   mustardblast: `
-<path d="M7.2 11.4h9.6a4.3 4.3 0 0 1 0 8.6H7.2a4.3 4.3 0 0 1 0-8.6z" fill="#E8B15C"/>
+<path d="M9.7 11.4h4.6a4.3 4.3 0 0 1 0 8.6H9.7a4.3 4.3 0 0 1 0-8.6z" fill="#E8B15C"/>
 <path d="M5 6.6h14a3.7 3.7 0 0 1 0 7.4H5a3.7 3.7 0 0 1 0-7.4z" fill="#C2452F"/>
 <path d="M5.6 12 9 8.8 12.4 12 15.8 8.8 19.2 12" stroke="${P.mustard}" stroke-width="2.8"/>`,
 
@@ -554,7 +630,25 @@ export const FOOD_ICONS: Record<string, string> = {
    *  worse than the crescent it replaced. The quill/feather answers were free-form only,
    *  and once the scorer stopped counting "claw slash mark" and "scratch marks" as wrong —
    *  which they plainly are not, for a glyph whose job is to say *slash* — most of the
-   *  free-form gap closed too. Reverted. */
+   *  free-form gap closed too. Reverted.
+   *
+   *  ── DIAGNOSED, NOT REDRAWN. THE MECHANISM IS CONTRAST, AND IT IS MEASURABLE. ──
+   *  This glyph has sat at 1/3, 1/3, 0/3 across three native panels with no named cause.
+   *  It has one: **it is white on white.** WCAG contrast of each element against this
+   *  glyph's own delivered plate, rgb(255,255,255):
+   *      `P.steel` #DCD6E8 crescent      **1.42:1**
+   *      `P.white` #FFFFFF highlight     **1.00:1**  ← literally invisible, and it is
+   *                                                     2.2 units wide across the mass
+   *      #9C93B0 trailing strokes         2.91:1
+   *  So at 22.72 px on white the only things a reader gets are the ink OUTLINE of the
+   *  crescent and two thin grey strokes — a set of thin curved lines with no mass at all.
+   *  That predicts the misreads exactly, and they are what three panels gave: swirl,
+   *  "a breaking wave" x2, "glass shards" x2, "seaweed" x2. **Every one of those is
+   *  another set of curved marks**, and which one is free varies by round, which is why
+   *  this reads as an unstable legibility failure rather than a collision.
+   *  → The fix is a VALUE, not another silhouette: this is the one glyph in the set whose
+   *    main mass is lighter than its plate. `CLAUDE.md` also has warm chroma as the scarce
+   *    budget right now, and steel is the coldest thing in the palette. Untested. */
   slash: `
 <path d="M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z" fill="${P.steel}"/>
 <path d="M20.4 3.6C13.4 7.4 8.2 12.4 4.4 18.8" stroke="${P.white}" stroke-width="2.2"/>
@@ -584,7 +678,44 @@ export const FOOD_ICONS: Record<string, string> = {
    *  judged on its own and poorly when judges are asked to *name* it, which is the
    *  signature of a glyph that is DISTINCT but not DESCRIPTIVE. That is a real weakness and
    *  it is not fixed here; it is also not worth another silhouette, because the silhouette
-   *  is not what is failing. */
+   *  is not what is failing.
+   *
+   *  ── 🔴 THAT LAST SENTENCE IS NOW FALSIFIED, AND SO IS ITS REPLACEMENT. ────────
+   *  Two independent native panels named this glyph **"a sword" 3 of 3**, i.e. `damage`,
+   *  which ships in the same fact rows. It is a ONE-WAY COLLISION, not the legibility
+   *  failure recorded above: `damage` is a pale steel bar running SW->NE with a red-wrapped
+   *  grip at its SW end, and this is a pale cream bar running SW->NE with a gold stub
+   *  BEYOND its NE end — same axis, same direction, same pale-on-white value, and the stub
+   *  is exactly where a pommel goes. Three earlier redraws all kept the 45 degrees.
+   *  Paired, 73 tiles, 3 judges per protocol, twins bracketed (`boxFire` illegible split
+   *  3 of 3 native, so the native floor for a failing subject is 1):
+   *
+   *      arm                                    native                    magnified
+   *      A  shipped                             0/3  "a sword" x3         3/3
+   *      C  SAME 45-degree bar, the same gold
+   *         foil moved from a stub past the
+   *         upper end to a BAND across the
+   *         middle                              0/3  "a sword" x3  Δ +0   3/3  Δ +0
+   *      B  the diagonal LOST — upright, warm
+   *         tan, folded flap, lettuce ruffle    0/3  Δ +0                 **0/3  Δ -3**
+   *
+   *  🔴 C IS THE CONTROL AND IT SETTLES THE CAUSE: with the hilt removed and the axis
+   *  kept, the sword answer is UNANIMOUS AND UNCHANGED. With the axis removed, it is
+   *  GONE — zero of three. **The 45-degree diagonal is the sword; the foil position is
+   *  not.** That is the transferable result of this pass and it is exact and paired.
+   *
+   *  ⚠️ AND B IS STILL A REVERT, DECISIVELY, because losing the collision is not the
+   *  same as gaining the read. B's native misreads were "an onion" x2 + "a chunk of meat
+   *  on the bone" x1, and MAGNIFIED it was **"a pot of honey" 3 of 3** against 3/3 for
+   *  both diagonal arms. Both wrong answers are the same object and both are shipped
+   *  icons: `onion` is a pale vertical ovoid with a GREEN SPROUT ON TOP and `honey` is a
+   *  vertical vessel with a lid — so an upright tan mass with a green ruffle spilling out
+   *  of its top is one of those two at every acuity. **The lettuce, which was added to
+   *  break the silhouette, is what named it.** A -3 at the protocol that can actually see
+   *  the drawing is a strictly worse drawing, whatever the native row says.
+   *  → The next arm is upright WITHOUT anything green on top: the outline break has to
+   *    come from the tortilla itself (an open spiral end), not from a garnish that two
+   *    neighbours already own. Do NOT re-test the mid-band; C answered it. */
   wrap: `
 <path d="M4.4 17.6 15.6 6.4a4.4 4.4 0 0 1 3.6 3.6L8 21.2a4.4 4.4 0 0 1-3.6-3.6z" fill="#EFE0C4"/>
 <path d="M15.6 6.4a4.4 4.4 0 0 1 3.6 3.6l2.8-2.8a4.4 4.4 0 0 0-3.6-3.6z" fill="#E9B44C"/>
@@ -630,7 +761,21 @@ export const FOOD_ICONS: Record<string, string> = {
    *  So it is closed now. A LID wider than the neck is the one silhouette feature no bowl
    *  can have, and it sits at the top of the grid where nothing occludes it. The drip runs
    *  down the outside, which is still the statement of the ability (something left
-   *  behind), and it now reads against the jar rather than against the rim. */
+   *  behind), and it now reads against the jar rather than against the rim.
+   *
+   *  ── DIAGNOSED, NOT REDRAWN, AND THE DIAGNOSIS IS "IT IS NOT ACTUALLY FAILING". ──
+   *  Listed as a reproducing failure at 1/3, 1/3; a third native panel put it at **2/3**.
+   *  Pooled over three panels its answers are: correct x4, `chest` x2, `patty` x1,
+   *  `cap` x1, `dough` x1 — mid-table, and unstable in the way that means nobody is
+   *  colliding with it. The one repeat is worth writing down because it points at a
+   *  glyph that IS failing: **honey -> `chest` twice**, and both are a rounded container
+   *  with a horizontal light band across the middle. `chest` is 0/3 on every arm ever
+   *  drawn (see `ui.ts`), so the shared reading is that glyph's problem, not this one's.
+   *  ⚠️ One measurement to keep for whoever does redraw it: `P.mustardHi` #FFDD6B is
+   *  **1.33:1 against this glyph's white plate** and 2.22:1 against the #C98A00 jar. The
+   *  belly band and the drip are therefore interior-only marks — the drip's protrusion
+   *  past the jar is carried by ink alone. Do not spend a variable on either of them
+   *  expecting the silhouette to change. */
   honey: `
 <path d="M5.4 3.4h13.2v3.4H5.4z" fill="${P.gold}"/>
 <path d="M8.2 6.6h7.6v2.6H8.2z" fill="#C98A00"/>

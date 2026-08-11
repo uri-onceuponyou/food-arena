@@ -149,5 +149,75 @@
       "note": "HANDS MADE VISIBLE, GEOMETRY UNTOUCHED. Ketchup rather than the inherited outline colour, and 2.4 units rather than 1.9 — one concept (\"the hands can be seen\"), two parameters, stated. Ketchup reads on BOTH sides of this glyph: 2.7:1 against the lavender dial and 3.6:1 against the ink plate, so unlike ink or cream it cannot vanish on either. If C alone recovers the read, this was an invisible-element bug and not a silhouette one.",
       "svg": "\n<circle cx=\"12\" cy=\"13.6\" r=\"7.7\" fill=\"#C9B8DE\"/>\n<path d=\"M9.5 2.4h5\" stroke-width=\"2.1\"/>\n<path d=\"M12 2.4v3.5\" stroke-width=\"2.1\"/>\n<path d=\"M12 9.4v4.3h3.3\" stroke=\"#D62839\" stroke-width=\"2.4\"/>"
     }
+  ],
+  "wrap": [
+    {
+      "id": "A",
+      "note": "SHIPPED — a pale cream bar at 45° with a gold stub past its upper end. \"a sword\" x3 on two independent native panels, and x3 again here."
+    },
+    {
+      "id": "B",
+      "note": "THE DIAGONAL IS GONE. Upright, 11.6 x 16.8 (1:1.45), warm tan rather than near-white so the glyph is a MASS on white instead of an outline, an asymmetric FOLDED FLAP at the top (a capsule has two identical ends; this has a peak and a round base) and a lettuce ruffle SPILLING PAST the top edge. No axis a blade can share. ⚠️ The first cut of this arm gave it a 3.8-unit leaf; rendered, that is 3.6 px with a 1.6 px outline round it and it came back as a green dot. Widened to 8.8 units for the same reason `candy` [B] was rewidened — at 22.72 px the outline eats any element under ~6 units.",
+      "svg": "\n<path d=\"M6.2 15.6V8.8L12.4 4.6l5.4 4.4v6.6a5.8 5.8 0 0 1-11.6 0z\" fill=\"#E9B44C\"/>\n<path d=\"M6.2 8.8 12.4 4.6 17.8 9l-5.5 2.2z\" fill=\"#CE8F2E\" stroke=\"none\"/>\n<path d=\"M8.4 13.4c1.8 1.8 5.4 2.1 7.6.3M8 17.2c1.8 1.8 5.4 2.1 7.6.3\" stroke=\"#CE8F2E\" stroke-width=\"1.7\"/>\n<path d=\"M7.8 6.2c1.2-2.8 2.8-4 4.6-3.6 2 .5 3.4 1.9 4.2 4.2-3 1.2-6 1-8.8-.6z\" fill=\"#7CB518\"/>"
+    },
+    {
+      "id": "C",
+      "note": "THE DIAGONAL KEPT, THE HILT REMOVED. Byte-identical tortilla and fold marks; the same gold foil is moved from a stub past the upper end to a band ACROSS the bar at its midpoint, perpendicular to the axis. One variable: where the foil is. A blade has one thing at one end; a wrapped thing has a band round its middle.",
+      "svg": "\n<path d=\"M4.4 17.6 15.6 6.4a4.4 4.4 0 0 1 3.6 3.6L8 21.2a4.4 4.4 0 0 1-3.6-3.6z\" fill=\"#EFE0C4\"/>\n<path d=\"M8 13.1 11.1 10l4.5 4.5-3.1 3.1z\" fill=\"#E9B44C\"/>\n<path d=\"M8.4 13.6 11.2 16.4M11.6 10.4 14.4 13.2\" stroke=\"#CBB289\" stroke-width=\"1.8\"/>"
+    }
+  ],
+  "mustardblast": [
+    {
+      "id": "A",
+      "note": "SHIPPED — after this pass, the narrow bun. Before it, a bun clearing the sausage by 1.6 units = 1.5 px, 0/3 native, \"a grilled burger patty\" x3."
+    },
+    {
+      "id": "B",
+      "note": "ONE VARIABLE: THE BUN IS NARROWER. Bun stadium 2.9..21.1 -> 5.4..18.6, so the sausage clears it by 4.1 units = 3.9 px at each end. Nothing else moves — same sausage, same bun height, same zigzag, same colours. The silhouette stops being one lozenge and becomes a cylinder through a shorter cylinder.",
+      "svg": "\n<path d=\"M9.7 11.4h4.6a4.3 4.3 0 0 1 0 8.6H9.7a4.3 4.3 0 0 1 0-8.6z\" fill=\"#E8B15C\"/>\n<path d=\"M5 6.6h14a3.7 3.7 0 0 1 0 7.4H5a3.7 3.7 0 0 1 0-7.4z\" fill=\"#C2452F\"/>\n<path d=\"M5.6 12 9 8.8 12.4 12 15.8 8.8 19.2 12\" stroke=\"#FFC93C\" stroke-width=\"2.8\"/>"
+    }
+  ],
+  "candy": [
+    {
+      "id": "A",
+      "note": "SHIPPED — a near-circular body with two outward-pointing quadrilaterals. Straight edges, no waist. 0/3 native on two earlier panels; 3/3 on the plate that judged the tilt."
+    },
+    {
+      "id": "B",
+      "note": "🔴 NOT DRAWN — REJECTED ON RENDER, the third cut in a row to be. THE OUTER EDGE IS NOTCHED: the shipped quadrilateral exactly, except its straight vertical back edge becomes a V pointing INWARD, so each twist is a two-lobed fan. The reasoning was that a notch is a GAP rather than a thin fill and would therefore survive the outline where a pinch does not. It does survive — and it leaves each lobe 1.9 units thick between the notch apex (x 4.9) and the body edge (x 6.8), which the 1.7-unit outline erodes to nothing. Rendered, it is MORE star-like than the shipped arm, not less. Kept as a record so the next pass does not redraw it: at 22.72 px nothing narrower than ~5 units shows fill in this icon system, and that rules out every twist geometry that works by removing area.",
+      "svg": "\n<ellipse cx=\"12\" cy=\"12\" rx=\"5.3\" ry=\"4.7\" fill=\"#FF6FA5\"/>\n<path d=\"M6.8 10.1 2.7 7.2 4.9 12 2.7 16.8 6.8 13.9z\" fill=\"#FFB3D1\"/>\n<path d=\"M17.2 10.1 21.3 7.2 19.1 12 21.3 16.8 17.2 13.9z\" fill=\"#FFB3D1\"/>\n<path d=\"M9.7 10.4a3 3 0 0 1 2-1.5\" stroke=\"#FFF3DE\" stroke-width=\"1.6\"/>"
+    },
+    {
+      "id": "C",
+      "note": "THE AXIS. Byte-identical geometry rotated -20 degrees about the centre — the same trick `cap` uses, and the exact inverse of what fixed `coin` (there a tilt CAUSED the misread; here the horizontal symmetry is what makes a body-with-two-lateral-appendages an arrow). `range` is strictly horizontal and cannot follow a tilt. One variable, and it costs no ink at all.",
+      "svg": "\n<g transform=\"rotate(-20 12 12)\">\n<ellipse cx=\"12\" cy=\"12\" rx=\"5.3\" ry=\"4.7\" fill=\"#FF6FA5\"/>\n<path d=\"M6.8 10.1 2.7 7.2v9.6l4.1-2.9z\" fill=\"#FFB3D1\"/>\n<path d=\"M17.2 10.1 21.3 7.2v9.6l-4.1-2.9z\" fill=\"#FFB3D1\"/>\n<path d=\"M9.7 10.4a3 3 0 0 1 2-1.5\" stroke=\"#FFF3DE\" stroke-width=\"1.6\"/>\n</g>"
+    }
+  ],
+  "meat": [
+    {
+      "id": "A",
+      "note": "SHIPPED — one bone end, upper right. The rest of the silhouette is a circle. Native misreads that round were \"a snail shell spiral\" x2, i.e. `slow`."
+    },
+    {
+      "id": "B",
+      "note": "ONE VARIABLE: A SECOND BONE END AT THE LOWER LEFT. Same knob-pair construction as the shipped one, mirrored through the mass so the two ends are roughly collinear through its centre — one bone passing behind the meat rather than one thing stuck to its corner. Mass, highlight and the existing bone are byte-identical.",
+      "svg": "\n<path d=\"M2.6 12.8c0-4.6 3.4-7.6 7.6-7.6 4.3 0 6.9 2.9 6.9 6.5 0 4.9-3.4 8.7-7.6 8.7-4.1 0-6.9-3.2-6.9-7.6z\" fill=\"#8B3A2E\"/>\n<path d=\"M6.8 9.8c2.6-.8 4.5.2 5.5 2.5\" stroke=\"#D98A72\" stroke-width=\"1.8\"/>\n<path d=\"M14.4 7.6h4.8a1.5 1.5 0 0 1 0 3h-4.8a1.5 1.5 0 0 1 0-3z\" fill=\"#FFF3DE\"/>\n<circle cx=\"19.6\" cy=\"7.2\" r=\"1.9\" fill=\"#FFF3DE\"/>\n<circle cx=\"19.6\" cy=\"10.6\" r=\"1.9\" fill=\"#FFF3DE\"/>\n<path d=\"M4.2 16.4h3.4a1.5 1.5 0 0 1 0 3H4.2a1.5 1.5 0 0 1 0-3z\" fill=\"#FFF3DE\"/>\n<circle cx=\"4\" cy=\"16.2\" r=\"1.9\" fill=\"#FFF3DE\"/>\n<circle cx=\"4\" cy=\"19.6\" r=\"1.9\" fill=\"#FFF3DE\"/>"
+    }
+  ],
+  "chest": [
+    {
+      "id": "A",
+      "note": "SHIPPED — five stroked shapes plus a 0.39 px keyhole; not one fill clears 2:1 against its own plate (wood 1.88, woodHi 1.24, gold 1.73; the ink outline is 5.05)."
+    },
+    {
+      "id": "B",
+      "note": "INK BUDGET ONLY. The gold band and the mustard clasp lose their 1.4-unit strokes and the keyhole is deleted; the body and the domed lid keep theirs, because those two ARE the silhouette and the silhouette is the only thing holding this glyph off a plate it has 1.87:1 against. Three ink outlines instead of five, one fewer shape, identical geometry and identical colours.",
+      "svg": "\n<path d=\"M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z\" fill=\"#8B4A22\"/>\n<path d=\"M3.1 11.6a8.9 8.9 0 0 1 17.8 0z\" fill=\"#B4622A\"/>\n<path d=\"M2.6 10.2h18.8v3H2.6z\" fill=\"#F4A300\" stroke=\"none\"/>\n<path d=\"M10.3 9.8h3.4v5.4h-3.4z\" fill=\"#FFC93C\" stroke=\"none\"/>"
+    },
+    {
+      "id": "C",
+      "note": "B, PLUS THE BODY VALUE. Body #8B4A22 -> #5A2E17 (1.87:1 -> 3.18:1 against the orange plate) and the dome #B4622A -> #8B4A22, so the wood stops being the same value as the plate it sits on. ⚠️ This is a VALUE move, not a desaturation — 61%->59% HSL saturation, 34%->22% lightness — because desaturating has been falsified four times here. If C beats B, the plate is the defect and the fix is not in this file set.",
+      "svg": "\n<path d=\"M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z\" fill=\"#5A2E17\"/>\n<path d=\"M3.1 11.6a8.9 8.9 0 0 1 17.8 0z\" fill=\"#8B4A22\"/>\n<path d=\"M2.6 10.2h18.8v3H2.6z\" fill=\"#F4A300\" stroke=\"none\"/>\n<path d=\"M10.3 9.8h3.4v5.4h-3.4z\" fill=\"#FFC93C\" stroke=\"none\"/>"
+    }
   ]
 }

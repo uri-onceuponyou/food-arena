@@ -209,6 +209,49 @@ export const UI_ICONS: Record<string, string> = {
 <circle cx="12" cy="10.2" r="2.6" fill="${P.cream}"/>`,
 
   // ── Containers ─────────────────────────────────────────────────────────────
+  /** UNCHANGED. Two arms were built, measured and NOT shipped, and between them they
+   *  rule out both variables that live in this file — which makes the remaining one an
+   *  out-of-set finding rather than a drawing problem.
+   *
+   *  This is the smallest glyph in the set: **11.03 px**, and the ONLY glyph delivered on
+   *  the `tr-inv-empty` plate, rgb(228,91,51). Two things about it are arithmetic:
+   *   * INK BUDGET — five separately ink-stroked shapes inside 8.6 x 8.0 delivered units.
+   *     One viewBox unit is 0.46 px here, so the default 1.7-unit stroke is 0.78 px, drawn
+   *     round five outlines, plus a 0.85-unit keyhole which is **0.39 px** and cannot
+   *     resolve at all. That is `coin`'s disease, and `coin`'s interior-strokes-only arm
+   *     recovered 2 of 3 on its own.
+   *   * VALUE AGAINST THE PLATE — WCAG contrast of every fill this glyph uses, against
+   *     its own plate: `P.wood` #8B4A22 **1.88:1**, `P.woodHi` #B4622A **1.24:1**,
+   *     `P.gold` #F4A300 **1.73:1**, and the ink outline **5.05:1**. Not one fill clears
+   *     2:1. The glyph is its OUTLINE and nothing else, which is the worst possible
+   *     arrangement for a shape whose ink budget is already spent five times over.
+   *
+   *  Paired, 73 tiles, 3 judges per protocol, twins declared to bracket:
+   *      arm                                          native        magnified
+   *      A  shipped                                   0/3           3/3
+   *      B  band + clasp lose their strokes, keyhole
+   *         deleted; silhouette outlines kept         0/3  Δ +0     3/3  Δ +0
+   *      C  B, plus body #8B4A22 -> #5A2E17 and dome
+   *         #B4622A -> #8B4A22 (1.88:1 -> 3.18:1)     0/3  Δ +0     **1/3  Δ -2**
+   *  ⚠️ C is a VALUE move and not a desaturation (61%->59% HSL saturation, 34%->22%
+   *  lightness); desaturating has been falsified four times here and this was not that.
+   *  It still lost 2 of 3 magnified — the darker body reads as a different object once you
+   *  can see it — so the plate-contrast lever is spent as well as the ink one.
+   *
+   *  🔴 WHAT THE WRONG ANSWERS SAY IS THE FINDING, AND IT IS THE SAME FOR ALL THREE ARMS.
+   *  Every native miss across all three was another CONTAINER: A -> boxFire x2 +
+   *  boxBurger x1, B -> boxRed x2 + boxBurger x1, C -> boxFire x1 + boxRed x1 + rice x1.
+   *  At 11 px the DOMED LID does not survive, so this is a rectangle with a horizontal
+   *  band across it, which is exactly what `box()` draws four times. Nothing that stays
+   *  inside a 24-unit box outline can separate them at 11 px.
+   *
+   *  🚨 AND IT IS NOW THE SECOND GLYPH WITH THIS SIGNATURE: **0/3 native on every arm ever
+   *  drawn, 3/3 magnified**, which is what `boxBurger` has been recording for five rounds.
+   *  Two glyphs failing identically at 11.0-11.8 px while passing at magnification is a
+   *  DELIVERED SIZE result, not a drawing one. The third variable is the PLATE — the site
+   *  itself — and `tr-inv-empty` lives in `src/ui/screens/`, outside this file set.
+   *  → Reported, not attempted: this glyph needs more delivered pixels or a plate that is
+   *    not saturated orange. Do not spend a fourth drawing variable on it from here. */
   chest: `
 <path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
 <path d="M3.1 11.6a8.9 8.9 0 0 1 17.8 0z" fill="${P.woodHi}"/>

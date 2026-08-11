@@ -376,6 +376,188 @@ const V = {
 <path d="M12 9.4v4.3h3.3" stroke="${P.ketchup}" stroke-width="2.4"/>`,
     },
   ],
+
+  // ── wrap — 22.72 px on WHITE. "a sword" x3 on BOTH reproducing panels. ──────
+  // This is a ONE-WAY COLLISION with `damage`, not the legibility failure the icon's own
+  // comment records. `damage` is a pale steel bar running SW→NE with a red-wrapped grip
+  // at the SW end; `wrap` is a pale cream bar running SW→NE with a gold stub BEYOND its
+  // NE end. Same axis, same direction, same pale-on-white value, and the gold stub is in
+  // exactly the place a pommel goes. Three earlier redraws all kept the 45°.
+  // The two halves of the diagnosis, separated:
+  //   [C] keeps the diagonal and moves the foil from the END to a BAND ACROSS THE MIDDLE.
+  //   [B] loses the diagonal entirely.
+  // If C alone recovers it, the sword was the HILT; if only B does, it was the AXIS.
+  wrap: [
+    // 🔴 VERDICT: NEITHER SHIPPED, AND [C] IS THE ARM THAT MADE THE FINDING.
+    //     A  0/3 native ("a sword" x3), 3/3 magnified
+    //     C  0/3 native ("a sword" x3), 3/3 magnified   Δ +0 / +0 — the hilt is NOT the cause
+    //     B  0/3 native ("an onion" x2), 0/3 magnified  Δ +0 / **-3** — the axis IS the cause,
+    //        and an upright tan mass with a green ruffle on top is `onion` or `honey`.
+    // The lettuce, added to break the silhouette, is what named it. Next arm: upright with
+    // the outline break coming from the tortilla itself, nothing green on top.
+    { id: 'A', note: 'SHIPPED — a pale cream bar at 45° with a gold stub past its upper end. "a sword" x3 on two independent native panels, and x3 again here.' },
+    {
+      id: 'B',
+      note: 'THE DIAGONAL IS GONE. Upright, 11.6 x 16.8 (1:1.45), warm tan rather than near-white so the glyph is a MASS on white instead of an outline, an asymmetric FOLDED FLAP at the top (a capsule has two identical ends; this has a peak and a round base) and a lettuce ruffle SPILLING PAST the top edge. No axis a blade can share. ⚠️ The first cut of this arm gave it a 3.8-unit leaf; rendered, that is 3.6 px with a 1.6 px outline round it and it came back as a green dot. Widened to 8.8 units for the same reason `candy` [B] was rewidened — at 22.72 px the outline eats any element under ~6 units.',
+      svg: `
+<path d="M6.2 15.6V8.8L12.4 4.6l5.4 4.4v6.6a5.8 5.8 0 0 1-11.6 0z" fill="#E9B44C"/>
+<path d="M6.2 8.8 12.4 4.6 17.8 9l-5.5 2.2z" fill="#CE8F2E" stroke="none"/>
+<path d="M8.4 13.4c1.8 1.8 5.4 2.1 7.6.3M8 17.2c1.8 1.8 5.4 2.1 7.6.3" stroke="#CE8F2E" stroke-width="1.7"/>
+<path d="M7.8 6.2c1.2-2.8 2.8-4 4.6-3.6 2 .5 3.4 1.9 4.2 4.2-3 1.2-6 1-8.8-.6z" fill="${P.lettuce}"/>`,
+    },
+    {
+      id: 'C',
+      note: 'THE DIAGONAL KEPT, THE HILT REMOVED. Byte-identical tortilla and fold marks; the same gold foil is moved from a stub past the upper end to a band ACROSS the bar at its midpoint, perpendicular to the axis. One variable: where the foil is. A blade has one thing at one end; a wrapped thing has a band round its middle.',
+      svg: `
+<path d="M4.4 17.6 15.6 6.4a4.4 4.4 0 0 1 3.6 3.6L8 21.2a4.4 4.4 0 0 1-3.6-3.6z" fill="#EFE0C4"/>
+<path d="M8 13.1 11.1 10l4.5 4.5-3.1 3.1z" fill="#E9B44C"/>
+<path d="M8.4 13.6 11.2 16.4M11.6 10.4 14.4 13.2" stroke="#CBB289" stroke-width="1.8"/>`,
+    },
+  ],
+
+  // ── mustardblast — 22.72 px on WHITE. "a grilled burger patty" x3, x2. ──────
+  // Both glyphs are wide two-tone horizontal lozenges. MEASURED: the sausage stadium
+  // spans x 1.3..22.7 and the bun stadium x 2.9..21.1, so the sausage clears the bun by
+  // **1.6 units = 1.5 px** at this size — which is one antialiased edge. `patty` is two
+  // stacked flat ellipses of identical width; at 1.5 px of protrusion this is the same
+  // drawing. The icon's own comment already claims the protrusion as a design feature
+  // ("the sausage PROTRUDES past the bun at both ends", `chick`'s lesson) — the intent was
+  // right and the number was never checked.
+  mustardblast: [
+    // 🔴 VERDICT: [B] WON AND IS NOW SHIPPED. native 0/3 -> 2/3 (Δ +2 of 3) against a
+    // measured native floor of 1 (`boxFire`, the declared ILLEGIBLE twin, split 3 of 3);
+    // magnified 2/3 -> 2/3 (Δ +0). [A] is therefore now the SAME ART as [B]; the pair is
+    // kept so `--handover mustardblast=B` can prove the paste by pixels.
+    { id: 'A', note: 'SHIPPED — after this pass, the narrow bun. Before it, a bun clearing the sausage by 1.6 units = 1.5 px, 0/3 native, "a grilled burger patty" x3.' },
+    {
+      id: 'B',
+      note: 'ONE VARIABLE: THE BUN IS NARROWER. Bun stadium 2.9..21.1 -> 5.4..18.6, so the sausage clears it by 4.1 units = 3.9 px at each end. Nothing else moves — same sausage, same bun height, same zigzag, same colours. The silhouette stops being one lozenge and becomes a cylinder through a shorter cylinder.',
+      svg: `
+<path d="M9.7 11.4h4.6a4.3 4.3 0 0 1 0 8.6H9.7a4.3 4.3 0 0 1 0-8.6z" fill="#E8B15C"/>
+<path d="M5 6.6h14a3.7 3.7 0 0 1 0 7.4H5a3.7 3.7 0 0 1 0-7.4z" fill="#C2452F"/>
+<path d="M5.6 12 9 8.8 12.4 12 15.8 8.8 19.2 12" stroke="${P.mustard}" stroke-width="2.8"/>`,
+    },
+  ],
+
+  // ── candy — 22.72 px on WHITE. "a double-headed arrow" = `range`. ───────────
+  // Delivered ink is 17.61 x 9.09 (1.94:1) and `range`'s is 10.12 x 4.48 (2.26:1) — the
+  // same proportion. The wrapper twists are QUADRILATERALS with a straight vertical outer
+  // edge and straight top and bottom edges, i.e. two arrowheads, and the body between them
+  // is only 1.13:1, i.e. a shaft joint. A wrapper twist is not a triangle: it PINCHES to a
+  // waist at the body and then flares into a fluted fan. That waist is the one feature an
+  // arrowhead cannot have — an arrowhead attaches at its widest point.
+  candy: [
+    // 🔴 VERDICT: NOT SHIPPED, AND THE ROUND COULD NOT ANSWER. [A] scored **3/3 native**
+    // on the deciding plate, so the defect did not reproduce and [C]'s Δ is measured
+    // against a ceiling the round itself supplied. [C] 3/3 native (Δ +0), 3/3 magnified
+    // against [A]'s 2/3 (Δ +1). Kept for a plate where [A] reproduces 0/3.
+    { id: 'A', note: 'SHIPPED — a near-circular body with two outward-pointing quadrilaterals. Straight edges, no waist. 0/3 native on two earlier panels; 3/3 on the plate that judged the tilt.' },
+    // 🚨 THE BRIEFED MECHANISM — "pinch the wrapper twists concave" — WAS DRAWN TWICE AND
+    // REJECTED ON RENDER, BEFORE ANY JUDGE, AND THE REASON IS ARITHMETIC RATHER THAN TASTE.
+    // At 22.72 px one viewBox unit is 0.947 px and the inherited outline is 1.7 units, i.e.
+    // 0.85 units of ink inset on EACH side of a path. A twist pinched to a 2.2-unit waist
+    // therefore has 0.5 units of fill left at its neck; widened to 4.2 it has 2.5, and the
+    // two-lobed fan beyond it is a pair of ~3-unit slivers that are eroded the same way.
+    // Both cuts rendered as a DARK X with a pink dot in the middle — `close` or `sparkle`,
+    // strictly worse than the arrow they were meant to fix — while the shipped straight
+    // quadrilateral, which is 4.1 units wide over its whole length, still shows its pale
+    // `candyHi`. Every numeric control passed on both. CLAUDE.md #3, twice in one pass.
+    // **A concave pinch is not drawable in this icon system at this size.** What replaces
+    // it are two changes that live where ink survives — the OUTER BOUNDARY, and the AXIS.
+    {
+      id: 'B',
+      note: '🔴 NOT DRAWN — REJECTED ON RENDER, the third cut in a row to be. THE OUTER EDGE IS NOTCHED: the shipped quadrilateral exactly, except its straight vertical back edge becomes a V pointing INWARD, so each twist is a two-lobed fan. The reasoning was that a notch is a GAP rather than a thin fill and would therefore survive the outline where a pinch does not. It does survive — and it leaves each lobe 1.9 units thick between the notch apex (x 4.9) and the body edge (x 6.8), which the 1.7-unit outline erodes to nothing. Rendered, it is MORE star-like than the shipped arm, not less. Kept as a record so the next pass does not redraw it: at 22.72 px nothing narrower than ~5 units shows fill in this icon system, and that rules out every twist geometry that works by removing area.',
+      svg: `
+<ellipse cx="12" cy="12" rx="5.3" ry="4.7" fill="${P.candy}"/>
+<path d="M6.8 10.1 2.7 7.2 4.9 12 2.7 16.8 6.8 13.9z" fill="${P.candyHi}"/>
+<path d="M17.2 10.1 21.3 7.2 19.1 12 21.3 16.8 17.2 13.9z" fill="${P.candyHi}"/>
+<path d="M9.7 10.4a3 3 0 0 1 2-1.5" stroke="${P.cream}" stroke-width="1.6"/>`,
+    },
+    {
+      id: 'C',
+      note: 'THE AXIS. Byte-identical geometry rotated -20 degrees about the centre — the same trick `cap` uses, and the exact inverse of what fixed `coin` (there a tilt CAUSED the misread; here the horizontal symmetry is what makes a body-with-two-lateral-appendages an arrow). `range` is strictly horizontal and cannot follow a tilt. One variable, and it costs no ink at all.',
+      svg: `
+<g transform="rotate(-20 12 12)">
+<ellipse cx="12" cy="12" rx="5.3" ry="4.7" fill="${P.candy}"/>
+<path d="M6.8 10.1 2.7 7.2v9.6l4.1-2.9z" fill="${P.candyHi}"/>
+<path d="M17.2 10.1 21.3 7.2v9.6l-4.1-2.9z" fill="${P.candyHi}"/>
+<path d="M9.7 10.4a3 3 0 0 1 2-1.5" stroke="${P.cream}" stroke-width="1.6"/>
+</g>`,
+    },
+  ],
+
+  // ── meat — 22.72 px on WHITE. The bone leaves the mass on ONE side only. ────
+  // The brown mass is 14.5 x 16.3, i.e. a near-circle, and the only thing that is not a
+  // circle about this glyph is a cream bone end at the UPPER RIGHT. A round dark mass with
+  // one small pale thing off one corner has already been named "a bomb with a fuse" by two
+  // judges. A bone that enters a mass has to LEAVE it: two ends, opposite corners, roughly
+  // collinear through the centre, is the universal meat-on-the-bone construction and it is
+  // the silhouette that stops the mass being a circle.
+  meat: [
+    // 🔴 VERDICT: NOT SHIPPED — INSIDE THE FLOOR, NOT DISPROVEN. [A] 0/3 native / 2/3
+    // magnified; [B] 1/3 native (Δ +1) / 3/3 magnified (Δ +1). The native floor that round
+    // was 1 of 3 (`boxFire` twins split on every judge), so +1 on a subject at 0/3 is noise
+    // by construction. Same direction at both protocols, no loss anywhere, one variable —
+    // the best-placed parked arm in this file. It wants another paired plate, not a redraw.
+    { id: 'A', note: 'SHIPPED — one bone end, upper right. The rest of the silhouette is a circle. Native misreads that round were "a snail shell spiral" x2, i.e. `slow`.' },
+    {
+      id: 'B',
+      note: 'ONE VARIABLE: A SECOND BONE END AT THE LOWER LEFT. Same knob-pair construction as the shipped one, mirrored through the mass so the two ends are roughly collinear through its centre — one bone passing behind the meat rather than one thing stuck to its corner. Mass, highlight and the existing bone are byte-identical.',
+      svg: `
+<path d="M2.6 12.8c0-4.6 3.4-7.6 7.6-7.6 4.3 0 6.9 2.9 6.9 6.5 0 4.9-3.4 8.7-7.6 8.7-4.1 0-6.9-3.2-6.9-7.6z" fill="${P.meat}"/>
+<path d="M6.8 9.8c2.6-.8 4.5.2 5.5 2.5" stroke="${P.meatHi}" stroke-width="1.8"/>
+<path d="M14.4 7.6h4.8a1.5 1.5 0 0 1 0 3h-4.8a1.5 1.5 0 0 1 0-3z" fill="${P.cream}"/>
+<circle cx="19.6" cy="7.2" r="1.9" fill="${P.cream}"/>
+<circle cx="19.6" cy="10.6" r="1.9" fill="${P.cream}"/>
+<path d="M4.2 16.4h3.4a1.5 1.5 0 0 1 0 3H4.2a1.5 1.5 0 0 1 0-3z" fill="${P.cream}"/>
+<circle cx="4" cy="16.2" r="1.9" fill="${P.cream}"/>
+<circle cx="4" cy="19.6" r="1.9" fill="${P.cream}"/>`,
+    },
+  ],
+
+  // ── chest — 11.03 px on a SATURATED ORANGE plate, rgb(228,91,51). ───────────
+  // The smallest glyph in the set bar none, and the only one delivered on that plate. Two
+  // things are measurable about it and neither has been tested:
+  //  * INK BUDGET. Five separately ink-stroked shapes inside 8.6 x 8.0 delivered units.
+  //    At 11.03 px one viewBox unit is 0.46 px, so the default 1.7-unit stroke is 0.78 px
+  //    and it is drawn round five outlines plus a 0.85-unit keyhole (0.39 px, which cannot
+  //    resolve at all). This is `coin`'s disease exactly, and `coin`'s [C] arm — interior
+  //    strokes removed, silhouette untouched — recovered 2 of 3 on its own.
+  //  * VALUE AGAINST THE PLATE. P.wood #8B4A22 on rgb(228,91,51) is **1.87:1**; the ink
+  //    outline on the same plate is 4.94:1. So the body carries almost nothing and the
+  //    glyph IS its outline — which is the worst possible arrangement for a shape whose
+  //    ink budget is already spent five times over.
+  // ⚠️ The PLATE is the third variable and it is NOT testable from this file set:
+  // `tr-inv-empty` lives in `src/ui/screens/`. Reported, not attempted.
+  chest: [
+    // 🔴 VERDICT: NEITHER SHIPPED, AND BETWEEN THEM THEY RULE OUT BOTH IN-FILE VARIABLES.
+    //     A  0/3 native, 3/3 magnified
+    //     B  0/3 native (Δ +0), 3/3 magnified (Δ +0)   — ink budget is not the lever
+    //     C  0/3 native (Δ +0), 1/3 magnified (**Δ -2**) — plate contrast is not either
+    // Every native miss on all three arms was another CONTAINER, so at 11 px the domed lid
+    // does not survive and this is what `box()` draws four times. 0/3 native on every arm
+    // ever drawn while 3/3 magnified is `boxBurger`'s signature — a DELIVERED SIZE result.
+    // The remaining variable is the PLATE, which lives in `src/ui/screens/`.
+    { id: 'A', note: 'SHIPPED — five stroked shapes plus a 0.39 px keyhole; not one fill clears 2:1 against its own plate (wood 1.88, woodHi 1.24, gold 1.73; the ink outline is 5.05).' },
+    {
+      id: 'B',
+      note: 'INK BUDGET ONLY. The gold band and the mustard clasp lose their 1.4-unit strokes and the keyhole is deleted; the body and the domed lid keep theirs, because those two ARE the silhouette and the silhouette is the only thing holding this glyph off a plate it has 1.87:1 against. Three ink outlines instead of five, one fewer shape, identical geometry and identical colours.',
+      svg: `
+<path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
+<path d="M3.1 11.6a8.9 8.9 0 0 1 17.8 0z" fill="${P.woodHi}"/>
+<path d="M2.6 10.2h18.8v3H2.6z" fill="${P.gold}" stroke="none"/>
+<path d="M10.3 9.8h3.4v5.4h-3.4z" fill="${P.mustard}" stroke="none"/>`,
+    },
+    {
+      id: 'C',
+      note: 'B, PLUS THE BODY VALUE. Body #8B4A22 -> #5A2E17 (1.87:1 -> 3.18:1 against the orange plate) and the dome #B4622A -> #8B4A22, so the wood stops being the same value as the plate it sits on. ⚠️ This is a VALUE move, not a desaturation — 61%->59% HSL saturation, 34%->22% lightness — because desaturating has been falsified four times here. If C beats B, the plate is the defect and the fix is not in this file set.',
+      svg: `
+<path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.pattyDark}"/>
+<path d="M3.1 11.6a8.9 8.9 0 0 1 17.8 0z" fill="${P.wood}"/>
+<path d="M2.6 10.2h18.8v3H2.6z" fill="${P.gold}" stroke="none"/>
+<path d="M10.3 9.8h3.4v5.4h-3.4z" fill="${P.mustard}" stroke="none"/>`,
+    },
+  ],
 };
 
 /** ── THE KNOWN-BAD-INPUT GUARD FOR THIS FILE ────────────────────────────────
