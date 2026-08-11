@@ -2724,6 +2724,35 @@ a measurable answer, not a taste call, so it is not being sent back to Uri.
 
 ---
 
+## 49. ✅ ANSWERED BY URI 2026-08-11 — four of the five are decided
+
+> **49a** *"Fewest deaths, then lower slot"*
+> **49b** *"Keep per-victim (in force)"*
+> **49c** *"AI player is currently only for testing the game. Later on when real PvP occurs each
+> player has it stats based on the level if their brawler"*
+> **49f** *"Local seat full, others as chips"*
+
+🚨 **49c IS A BIGGER STATEMENT THAN THE OPTION IT ANSWERS, AND IT REFRAMES A CONSTANT.** Uri's answer
+says the AI opponent is a **test harness, not a design target**. So `ENEMY_MAX_HP` (90) is not a
+balance dial for the shipped game at all — it is a **testing constant**, and in real play *every*
+fighter's pool and damage come from `Fighter.level` and its character's card. That means:
+- above 1v1 there is **no asymmetric seat**: fighters are dialled by LEVEL, not by slot
+- `ENEMY_MAX_HP` keeps meaning **only** where the opponent is a bot, i.e. the current single-player
+  duel and the measuring instruments
+- ⚠️ and it retires §49c's "keep the seat dial" option permanently — **do not re-offer it.**
+⚠️ It also touches `roster_lab`/`kit_lab`/`match-sim`, which all encode the 100/90 split as the world.
+They are **instruments** and may keep it; nothing that SHIPS may.
+
+**49e is not a decision** — it is a measurement task (four trail colours unmeasured; re-probe against
+the floor during the §48 arena pass). **49d was never Uri's** — spawns above slot 1 belong to §48.
+
+⚠️ **The original text is kept below in full**, because it is the record of what each step cost and
+of the precondition that changed twice.
+
+---
+
+### 🔒 ORIGINAL §49 — kept verbatim; the answers above supersede the "Options" lists
+
 ## 49. ❓ THE BALANCE CALLS THAT ONLY EXIST ONCE THERE ARE MORE THAN TWO FIGHTERS
 
 ⚠️ **WAS "TWO BALANCE CALLS"; IT IS THREE, AND THE PRECONDITION IN THE NEXT SENTENCE HAS CHANGED.**
