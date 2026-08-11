@@ -1231,20 +1231,60 @@ const CSS = `
 .fa-tr .tr-inventory::-webkit-scrollbar { display: none; }
 .fa-tr .tr-bottom-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 
+/* ── THE ORANGE PLATE IS SPENT. This is the move the size pass named and deferred ──
+   The block further down ('WHAT THE SPACE WAS TAKEN FROM') closes with:
+
+     "the plate is still available and giving this hint the same cream pill '.tr-open'
+      already uses is the cheap move."
+
+   It has now been measured twice by an icon pass and it is not optional. Every fill
+   this glyph draws with, against its own backdrop:
+
+     on the saturated orange   1.80 · 1.18 · 1.81 · 2.45      (the ink outline 4.82)
+     on this cream pill        5.77 · 3.79 · 1.77 · 1.31 · 15.48
+
+   NOT ONE FILL CLEARED 2:1 ON THE ORANGE. The '-webkit-text-stroke: 2px' that used to
+   be here existed only to rescue legibility on that plate — an ink box drawn around
+   every letterform because the letterform itself could not be seen. On a cream pill it
+   is unnecessary, so it goes with the plate rather than being left behind as a habit.
+
+   🚨 AND THERE IS A RECORD TO CORRECT. An earlier pass's commit message ('620bf7f')
+   CLAIMED this hint had already moved to the cream chip. It never landed. A later round
+   was then judged against a spec that recorded the chip while the game shipped the
+   orange — i.e. there is a measurement on file for a plate that did not exist. Landing
+   it is what makes that record true, which is why this is a fix and not a preference.
+
+   The plate is '.tr-open''s, character for character, because these two are the same
+   row in the same bar and the empty state should be the full state minus its contents.
+   'strong' takes '--ketchup-ink' rather than '--mustard' for the reason stated on
+   '.tr-open-cta' twenty lines below: on THIS gradient '--ketchup' measures 4.17:1 and
+   '--ketchup-ink' 5.9:1 — mustard on cream is nearer 1.3 and was never a candidate once
+   the backdrop changed. '--fa-ic-ink' is set for the same reason the active tab sets it:
+   the chest glyph inherits its ink from that token, and a token left on cream would put
+   a cream chest on a cream pill.
+
+   ⚠️ This is a fix routed in from an icon pass that could not reach this file. It is
+   local to '.tr-inv-empty': no shared token moves, so the blast radius is this rule. */
 .fa-tr .tr-inv-empty {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: var(--tap);
+  padding: 0 12px;
   font-family: 'Rubik', sans-serif;
   font-weight: 800;
   font-size: clamp(0.69rem, 1.5vh, 0.82rem);
-  color: var(--cream);
-  /* A drop shadow sits UNDER the glyph, so the type still meets the orange backdrop
-     on three sides. An ink stroke encloses it — same treatment as '.fa-title'. */
-  -webkit-text-stroke: 2px var(--ink);
-  paint-order: stroke fill;
-  text-shadow: 0 2px 0 rgba(26,18,36,0.75);
+  background: linear-gradient(180deg, #FFFFFF 0%, #EFE2CC 100%);
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  color: var(--ink);
+  --fa-ic-ink: var(--ink);
   white-space: nowrap;
 }
-.fa-tr .tr-inv-empty strong { color: var(--mustard); }
+.fa-tr .tr-inv-empty strong { color: var(--ketchup-ink); }
 
 /* A held container is a button, always. There is no state in which one of these is
    drawn and cannot be opened — the row is built from what the player actually holds. */
@@ -1365,6 +1405,12 @@ const CSS = `
    clasp resolve on the orange anyway — read in 'shots/si/fit1/crop-inv-after.png' — so
    the size alone answered it. If a later round needs more, the plate is still available
    and giving this hint the same cream pill '.tr-open' already uses is the cheap move.
+
+   🔵 THE PLATE IS NOW SPENT — a later round did need more. See the block on
+   '.tr-inv-empty' above: the orange went, the cream pill landed, and the
+   '-webkit-text-stroke' that was propping it up went with it. This paragraph is kept
+   because it is the one that correctly identified the remaining variable and named the
+   exact remedy; the only thing it got wrong was expecting not to need it.
 
    ⚠️ '.fa-ic-portrait' is listed with '.fa-ic' on '.tr-nextval' on purpose: when the
    next reward is a CHARACTER that slot renders a portrait, and scaling only one of the

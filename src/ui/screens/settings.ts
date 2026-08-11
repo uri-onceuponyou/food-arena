@@ -1092,6 +1092,47 @@ const CSS = `
    and to the SCROLLER rather than to a pseudo-element over it, because an overlay
    inside a scroll container scrolls away with the content it is meant to be marking.
    Same idiom the trophy road's track already uses on its horizontal axis. */
+/* ── LANDSCAPE PHONE: at the NARROW end the two columns above never happen ───
+   🚨 URI: "it seems like it was designed for vertical and not horizontal. its the same
+   of all game menus." Settings is the clearest case in the build.
+
+   The track above asks a minimum of 400px per column, so two of them plus the 6px gap
+   need 806px of content box. Measured, not predicted (tools/tmp/lu_dbg2 reading the
+   computed grid on the live screen):
+
+     viewport    content box   tracks BEFORE          scroll height
+     ─────────   ───────────   ────────────────────   ─────────────
+     932x430     902px         446.09 + 446.09  (2)   869px
+     844x390     817px         403.50 + 403.50  (2)   884px
+     667x375     646px         641.66           (1)   1170px
+
+   ⚠️ SO THE FIRST DRAFT OF THIS COMMENT WAS WRONG AND IS WORTH SAYING SO. It claimed
+   844 was "a tie that the gap loses". It is not: 817 >= 806, two columns already, and
+   this rule does not move a pixel there or at 932. The whole defect lives at 667x375,
+   where auto-fit collapses to ONE column and the screen becomes a single full-width
+   vertical list — 1170px of it inside a 263px window, four and a half screens of
+   scrolling with the right two thirds of every row empty. That IS a portrait layout; it
+   simply was not written as one.
+
+   ⚠️ AND 400 IS NOT A NUMBER TO LOWER GLOBALLY. The rule above says why, from
+   measurement: "as many as fit" at 1600 gave four 340px columns and squeezed
+   'Sound effects' down to 'Sound ...'. So the smaller minimum is scoped to landscape
+   AND short — a phone held sideways — and 300 is chosen to be the largest value that
+   fixes 667 without ever admitting a THIRD column at any of the three:
+
+     two at 667    2 x 300 +  6 =  606  <=  646   yes, tracks come out at 317.83
+     three at 667  3 x 300 + 12 =  912  >   646   no
+     three at 844  3 x 300 + 12 =  912  >   817   no
+     three at 932  3 x 300 + 12 =  912  >   902   no   (the closest call, by 10px)
+
+   AFTER: 667x375 goes to two 317.83px tracks and its scroll height falls 1170 -> 931,
+   a 20.4% cut, with 844 and 932 byte-identical. Height is the scarce axis in landscape
+   and width is the one already paid for; this spends the second to buy the first. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .fa-settings .set-body {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  }
+}
 .fa-settings .set-body.is-more {
   /* Fades to 72%, NOT to nothing. A mask composites the type together with its own
      panel, so a fade to transparent drops the whole row's contrast against the warm
