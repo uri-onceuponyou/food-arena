@@ -54,6 +54,15 @@
  *                   do not is measuring something other than what it names. This is
  *                   the check that ties this instrument to the validated one.
  *
+ * ⚠️ EVERY CELL IS SUMMARISED BY ITS MEDIAN, WHICH IS THE WRONG STATISTIC FOR AN
+ * ARM THAT MAKES THE COST BURSTY. `shadow-every-3` skips two frames in three, so
+ * its median frame is a CHEAP one and the reported ΔJS (-1.60 ms) is the saving on
+ * the median frame, not the mean (which is ~2/3 of the every-frame saving). Read
+ * `Δdraws` alongside it: an arm reporting the FULL -571 while ΔJS is only a third
+ * of `shadow-off`'s is a throttle, not a removal. And note the shape: a throttle
+ * converts a uniformly expensive frame into two cheap and one expensive, which is
+ * the wrong direction for a JUDDER complaint even when the mean improves.
+ *
  * ── USAGE ───────────────────────────────────────────────────────────────────
  *   PH_SCRATCH=<dir> node tools/tmp/ph_serve.mjs --start --ref <sha>
  *   PH_SCRATCH=<dir> node tools/tmp/pf_ablate.mjs                    # all arms, cpu x4
@@ -291,6 +300,36 @@ const SAMPLER = `
         r.shadowMap.enabled = false;
         break;
       }
+      /**
+       * THROTTLE THE SHADOW REDRAW instead of removing it. scheduleShadowUpdate
+       * sets needsUpdate whenever ANY caster moves 1 mm, and the two fighters move
+       * every frame, so the WHOLE map — 1,657 casters, of which 1,615 never move —
+       * is re-rendered 60 times a second. Letting the request through only every
+       * Nth frame keeps every shadow in the picture and lags the moving ones by at
+       * most (N-1) frames. Priced here; the LOOK cost is a separate question and
+       * pf_look.mjs is the tool for it.
+       */
+      case 'shadow-every-2': case 'shadow-every-3': case 'shadow-every-4': {
+        const N = Number(arm.slice(-1));
+        const desc = Object.getOwnPropertyDescriptor(r.shadowMap, 'needsUpdate');
+        let want = false, live = false, n = 0;
+        Object.defineProperty(r.shadowMap, 'needsUpdate', {
+          configurable: true,
+          get: () => live,
+          set: (v) => { if (v) want = true; else live = false; },
+        });
+        const tick = () => {
+          if (want && (n++ % N === 0)) { live = true; want = false; }
+          h = requestAnimationFrame(tick);
+        };
+        let h = requestAnimationFrame(tick);
+        undo.push(() => {
+          cancelAnimationFrame(h);
+          if (desc) Object.defineProperty(r.shadowMap, 'needsUpdate', desc);
+          else { delete r.shadowMap.needsUpdate; r.shadowMap.needsUpdate = true; }
+        });
+        break;
+      }
       case 'shadow-static': {
         // Keep the shadow map, stop REDRAWING it. Prices the per-frame redraw
         // separately from the pass existing at all.
@@ -370,7 +409,7 @@ const ARMS_DEFAULT = [
   'shadow-off', 'shadow-static', 'props-hide', 'props-detach', 'floor-hide', 'floor-detach',
   'arena-hide', 'arena-detach', 'cast-hide', 'cast-detach', 'outlines-hide',
   'conceal-hide', 'apron-hide', 'vfx-hide', 'vfx-load', 'fog-hide', 'post-off', 'hud-off',
-  'props-noshadow', 'floor-quarter',
+  'props-noshadow', 'floor-quarter', 'shadow-every-2', 'shadow-every-3', 'shadow-every-4',
 ];
 
 async function boot() {
