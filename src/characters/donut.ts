@@ -968,9 +968,14 @@ export class DonutCharacter extends BaseCharacter {
      *     azimuth   0.25pi  0.35  0.45  0.55  0.60  0.65  0.70  0.75  0.90(pi)
      *     reach      0.416  0.491 0.585 0.562 0.525 0.466 0.370 0.196  MISS
      *
-     * Outside |azimuth| in [0.25pi, 0.70pi] the ray misses the ring entirely; past
-     * 0.65pi it only grazes the tube tangentially and the anchor collapses toward the
-     * axis, which is the same defect by another route. **0.62pi is the furthest
+     * ⚠️ THERE ARE TWO FAILURE BANDS AND THEY ARE NOT THE SAME FAILURE — a first
+     * draft of this note collapsed them into "outside [0.25pi, 0.70pi] the ray misses
+     * entirely", which the table on the line above contradicts at 0.75pi. Precisely:
+     *   · |azimuth| <= 0.20pi or >= 0.80pi — the ray MISSES. Bounding-box fallback.
+     *   · 0.20-0.25pi and 0.70-0.80pi — it HITS, tangentially, and the anchor
+     *     collapses toward the axis (0.75pi returns reach 0.196 against a working
+     *     drip's 0.56). Different mechanism, same visible defect: a drip in the hole.
+     * So the usable band is the interior, and **0.62pi is the furthest
      * BACK a drip can go and still leave the outer rim** (reach ~0.50 against the
      * working drips' 0.556-0.577), so it is what the two back drips become. That
      * keeps the design this method exists for — four drips spread around the ring so
