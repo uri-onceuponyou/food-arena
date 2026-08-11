@@ -507,6 +507,20 @@ WebRTC DataChannel and receive deltas — **and moved to a Node process later wi
 4. **The serialisation bill is deferrable.** `postMessage` uses the structured clone algorithm,
    which §6 measures as preserving every alias. So the host-peer form exercises the whole
    architecture with **zero** encoder work; the encoder is only needed at a real network hop.
+
+   > 🚨 **CORRECTION, 2026-08-11 — REASON 4 IS FALSE FOR THE ARENA THE GAME SHIPS, and it was
+   > measured rather than reasoned.** `port1.postMessage(state)` on a live N=6 `MatchState`
+   > throws **`DataCloneError`**, for the same cause as §6's correction: `arena/types.ts`
+   > declares `build(): THREE.Group` as a REQUIRED method and the structured clone algorithm
+   > refuses a function. `postMessage(state minus arena)` does not throw, which isolates it.
+   > So a Web-Worker or host-peer boundary does **not** cost zero encoder work — it costs
+   > exactly the transform that excludes the arena and refers to it instead.
+   > ⚠️ **This does not reverse §52.** It removes one of five supporting reasons; reasons 1
+   > (2.66 µs), 2 (32 implementation-approximated call sites), 3 (cheating) and 5 (rollback's
+   > event replay) are untouched, and the transform in question **now exists** — `src/net/wire.ts`,
+   > gated at `tools/tmp/nw_wire.mjs` 67/67. The bill was not deferrable; it was small.
+   > It is also the reason the encoder had to be written before anything could be tested, rather
+   > than after a network appeared.
 5. **Rollback's own arithmetic argues against it here.** It is free at 2.66 µs/tick and 19% of a
    frame per 8-tick rollback the moment the match contains bots — and a live 6-player game fills
    empty seats with bots. Plus it is the only design that replays the `GameEvent[]` stream
