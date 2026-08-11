@@ -118,14 +118,32 @@ export function scaleArena(src, opts) {
     center: { x: width / 2, y: height / 2 },
     maxSafeRadius: derivedMaxSafe(width, height, matchDurationMs),
     playerSpawn: null, enemySpawn: null,
+    // 🚨 `spawns` AND `concealment` WERE MISSING FROM THIS OBJECT ENTIRELY until 2026-08-11,
+    //    and the check below said `mode=copy is bit-identical to the shipped dump`. It was
+    //    not: it compared against a HAND-LISTED SUBSET of the dump's keys, so the two fields
+    //    it dropped were the two it did not list. **A synthesiser and its identity test
+    //    written from the same mental model share the same blind spot** — the check's own
+    //    comment says it exists because "a hand-written dump synthesiser drops a field", and
+    //    it then failed to catch a hand-written dump synthesiser dropping two.
+    //    The identity check now compares the FULL key set, so a third dropped field fails.
+    //    ⚠️ Consequence worth naming: every arena this tool has ever built had NO
+    //    concealment, so every pacing number measured on one describes a map with the
+    //    concealment rules switched off. `mode: 'copy'` — the arm `as_cost` uses as its
+    //    baseline — was affected too.
+    spawns: [], concealment: [],
     cover: [], hazards: [],
   };
+  /** Concealment regions map exactly like cover boxes: position transformed, size scaled by `s`. */
+  const conceal = (src.concealment ?? []);
+  const seats = (src.spawns ?? []);
 
   if (mode === 'copy') {
     out.playerSpawn = { ...src.playerSpawn };
     out.enemySpawn = { ...src.enemySpawn };
     out.cover = src.cover.map((c) => ({ ...c }));
     out.hazards = src.hazards.map((h) => ({ ...h }));
+    out.spawns = seats.map((p) => ({ ...p }));
+    out.concealment = conceal.map((b) => ({ ...b }));
     return out;
   }
 
@@ -134,6 +152,8 @@ export function scaleArena(src, opts) {
     out.enemySpawn = { x: src.enemySpawn.x * k, y: src.enemySpawn.y * k };
     out.cover = src.cover.map((c) => ({ ...c, x: c.x * k, y: c.y * k, w: c.w * s, h: c.h * s }));
     out.hazards = src.hazards.map((h) => ({ ...h, x: h.x * k, y: h.y * k, radius: h.radius * s }));
+    out.spawns = seats.map((p) => ({ ...p, x: p.x * k, y: p.y * k }));
+    out.concealment = conceal.map((c) => ({ ...c, x: c.x * k, y: c.y * k, w: c.w * s, h: c.h * s }));
     return out;
   }
 
@@ -150,6 +170,8 @@ export function scaleArena(src, opts) {
         const mapY = (y) => iy * src.height + (flipY ? src.height - y : y);
         for (const c of src.cover) out.cover.push({ ...c, x: mapX(c.x), y: mapY(c.y), w: c.w, h: c.h });
         for (const h of src.hazards) out.hazards.push({ ...h, x: mapX(h.x), y: mapY(h.y) });
+        // Concealment tiles with the cover it dresses — same mirror, same size.
+        for (const c of conceal) out.concealment.push({ ...c, x: mapX(c.x), y: mapY(c.y), w: c.w, h: c.h });
       }
     }
     if (onePot) {
@@ -168,6 +190,7 @@ export function scaleArena(src, opts) {
     // wu, so `1x -> stretch` isolates SCALE and `stretch -> tile` isolates COVER DENSITY.
     out.playerSpawn = { x: src.playerSpawn.x * k, y: src.playerSpawn.y * k };
     out.enemySpawn = { x: src.enemySpawn.x * k, y: src.enemySpawn.y * k };
+    out.spawns = seats.map((p) => ({ ...p, x: p.x * k, y: p.y * k }));
     // A spawn must not land inside a cover box (the fighter would start embedded).
     for (const spawn of [out.playerSpawn, out.enemySpawn]) {
       let guard = 0;
@@ -219,6 +242,8 @@ export function scaleArena(src, opts) {
         const mapX = (x) => ix * src.width + (flipX ? src.width - x : x);
         const mapY = (y) => iy * src.height + (flipY ? src.height - y : y);
         for (const c of outer) out.cover.push({ ...c, x: mapX(c.x), y: mapY(c.y) });
+        // Concealment is never a hub prop (the endgame keep-out forbids it), so it tiles whole.
+        for (const c of conceal) out.concealment.push({ ...c, x: mapX(c.x), y: mapY(c.y) });
         // `stove_island` is the one hub kind that is also just a big blocking counter, so
         // the quadrant copies stay: they are the "new structure" the outer map needs, and
         // dropping them would put the density this arm exists to hold below `stretch`'s.
@@ -246,6 +271,7 @@ export function scaleArena(src, opts) {
 
     out.playerSpawn = { x: src.playerSpawn.x * k, y: src.playerSpawn.y * k };
     out.enemySpawn = { x: src.enemySpawn.x * k, y: src.enemySpawn.y * k };
+    out.spawns = seats.map((p) => ({ ...p, x: p.x * k, y: p.y * k }));
     return out;
   }
 
@@ -318,13 +344,38 @@ if (args.selftest) {
   //    drops a field — which is the whole risk of a hand-written dump synthesiser.
   {
     const c = scaleArena(shipped, { mode: 'copy', k: 1, matchDurationMs: T });
-    ok('mode=copy is bit-identical to the shipped dump',
-      JSON.stringify(c) === JSON.stringify({
-        id: shipped.id, displayName: shipped.displayName, width: shipped.width, height: shipped.height,
-        center: shipped.center, maxSafeRadius: shipped.maxSafeRadius,
-        playerSpawn: shipped.playerSpawn, enemySpawn: shipped.enemySpawn,
-        cover: shipped.cover, hazards: shipped.hazards,
-      }));
+    // ⚠️ REWRITTEN. Old check, kept because its failure is the lesson:
+    //      ok('mode=copy is bit-identical to the shipped dump',
+    //         JSON.stringify(c) === JSON.stringify({ id, displayName, width, height, center,
+    //           maxSafeRadius, playerSpawn, enemySpawn, cover, hazards }));
+    //    That compared `c` against a HAND-LISTED SUBSET of the dump's keys — so the two keys
+    //    `scaleArena` dropped (`spawns`, `concealment`) were exactly the two the check did
+    //    not list, and "bit-identical" was asserted against a copy of the same omission.
+    //    It now compares the KEY SET first and then every key by value, so the next dropped
+    //    field fails on the first line instead of being invisible to the second.
+    const wantKeys = Object.keys(shipped).sort();
+    const gotKeys = Object.keys(c).sort();
+    ok('mode=copy carries EVERY key the shipped dump has (no field is silently dropped)',
+      JSON.stringify(gotKeys) === JSON.stringify(wantKeys),
+      gotKeys.join(',') === wantKeys.join(',') ? `${gotKeys.length} keys`
+        : `missing [${wantKeys.filter((x) => !gotKeys.includes(x)).join(',')}] extra [${gotKeys.filter((x) => !wantKeys.includes(x)).join(',')}]`);
+    const differing = wantKeys.filter((key) => JSON.stringify(c[key]) !== JSON.stringify(shipped[key]));
+    ok('mode=copy is bit-identical to the shipped dump, key by key',
+      differing.length === 0, differing.join(',') || `${wantKeys.length} keys equal`);
+    // KNOWN-BAD, and it is the defect this row failed to catch for its whole life: an
+    // output with one key removed must be REFUSED. A subset comparison passes it.
+    {
+      const dropped = { ...c }; delete dropped.concealment;
+      ok('…and the KNOWN-BAD (a dump synthesiser that drops `concealment`) is refused',
+        JSON.stringify(Object.keys(dropped).sort()) !== JSON.stringify(wantKeys),
+        `${Object.keys(dropped).length} keys vs ${wantKeys.length}`);
+    }
+    ok('…and the concealment regions survive `copy` in full (they used to be dropped)',
+      c.concealment.length === shipped.concealment.length && c.concealment.length > 0,
+      `${c.concealment.length} of ${shipped.concealment.length}`);
+    ok('…and so do the N-fighter spawns',
+      c.spawns.length === shipped.spawns.length && c.spawns.length > 0,
+      `${c.spawns.length} of ${shipped.spawns.length}`);
   }
 
   // 3. stretch k=1 is also identity. Fails for an off-by-one in the mapping.
@@ -461,7 +512,11 @@ if (args.selftest) {
     }
     // …and the SHIPPED map passes it, which is what makes the check a fairness test of
     // the game rather than a property of this tool's own arithmetic.
-    ok('…and the SHIPPED 1400x1000 map passes the same check unmodified',
+    // ⚠️ The label was hardcoded `the SHIPPED 1400x1000 map` and went on saying so after
+    //    `6631446` made the shipped map 2800x2000 — while the ASSERTION was always reading
+    //    `shipped`, i.e. whatever the dump is. So the row was correct and its label was a
+    //    lie, which is the harder defect to notice: nothing goes red. Read from the dump now.
+    ok(`…and the SHIPPED ${shipped.width}x${shipped.height} map passes the same check unmodified`,
       pointSymmetryFaults(shipped).length === 0, pointSymmetryFaults(shipped).slice(0, 2).join(' · '));
   }
 

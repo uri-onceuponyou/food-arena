@@ -1214,10 +1214,41 @@ if (args.selftest) {
     // `CLEAR`'s deliberately-absurd `maxSafeRadius: 5000` — the keepout is derived from
     // the ring, so a 5000 wu ring keeps out the whole map and the test would pass
     // vacuously in one direction and fail spuriously in the other.
-    const RING = BASE_ARENA ? BASE_ARENA.maxSafeRadius : 993;
+    const RING = BASE_ARENA ? BASE_ARENA.maxSafeRadius : 1985;
     const keepout = concealmentKeepoutRadius(RING);
-    ok('the keepout is derived from the ring and lands where the endgame is fought',
-      keepout > 200 && keepout < 400, `maxSafeRadius ${RING} -> keepout ${keepout.toFixed(2)} wu`);
+    // ⚠️ REPLACED for `6631446`. Old assertion, kept because it is what this row shipped as
+    //    and because its failure mode is the lesson:
+    //        ok('the keepout is derived from the ring and lands where the endgame is fought',
+    //           keepout > 200 && keepout < 400, ...)
+    //    That band was measured on the 1400x1000 map (ring 993 -> keepout 248.25) and written
+    //    as two literals. The x4 map's ring is 1985, so the keepout is **496.25** and the row
+    //    went red — correctly, but for a reason that has nothing to do with concealment.
+    // 🚨 The row's own headline was "the keepout is DERIVED FROM THE RING", and it then
+    //    asserted two constants. **A hardcoded window is the one thing that cannot check a
+    //    derivation.** So it now checks the derivation itself, three ways, none of which
+    //    carries a map-scale literal:
+    const { MIN_SAFE_RADIUS, CONCEAL_ENDGAME_PROGRESS } = LIVE.RULES;
+    //  (a) longhand, from the two rules constants — NOT by calling the function under test.
+    const longhand = Math.max(MIN_SAFE_RADIUS, RING * (1 - CONCEAL_ENDGAME_PROGRESS));
+    ok('the keepout is exactly max(MIN_SAFE_RADIUS, ring x (1 - CONCEAL_ENDGAME_PROGRESS))',
+      Math.abs(keepout - longhand) < 1e-9,
+      `maxSafeRadius ${RING} -> keepout ${keepout.toFixed(2)} wu (longhand ${longhand.toFixed(2)})`);
+    //  (b) it lands strictly inside the ring and at or above the floor — the "where the
+    //      endgame is fought" claim, stated scale-free instead of as [200,400].
+    ok('…and it lands strictly inside the ring, at or above MIN_SAFE_RADIUS',
+      keepout >= MIN_SAFE_RADIUS && keepout < RING,
+      `${MIN_SAFE_RADIUS} <= ${keepout.toFixed(2)} < ${RING}`);
+    //  (c) 🚨 THE KNOWN-BAD THE OLD ROW COULD NOT HAVE: feed it TWO rings and require the
+    //      answer to MOVE with them. A hardcoded keepout — the exact defect that a hardcoded
+    //      window would have hidden — passes (a) and (b) on one ring and fails here.
+    //      Both arms are above the MIN_SAFE_RADIUS floor, so neither is clamped.
+    ok('…and it SCALES: the 1x ring (993) gives 248.25 and the x4 ring (1985) gives 496.25',
+      Math.abs(concealmentKeepoutRadius(993) - 248.25) < 1e-9
+      && Math.abs(concealmentKeepoutRadius(1985) - 496.25) < 1e-9,
+      `993 -> ${concealmentKeepoutRadius(993).toFixed(2)} · 1985 -> ${concealmentKeepoutRadius(1985).toFixed(2)}`);
+    ok('…and the floor still clamps a ring small enough to need it (so the max() is live)',
+      concealmentKeepoutRadius(MIN_SAFE_RADIUS) === MIN_SAFE_RADIUS,
+      `ring ${MIN_SAFE_RADIUS} -> ${concealmentKeepoutRadius(MIN_SAFE_RADIUS)}`);
     ok('the endgame keepout guard FAILS on a hub-placed region (a guard not shown to fail is not a guard)',
       concealmentInsideRadius(withBox, keepout).length === 1, `keepout ${keepout.toFixed(2)} wu`);
     const far = { ...CLEAR, concealment: [{ x: 100, y: 100, w: 60, h: 60 }] };

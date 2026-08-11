@@ -622,13 +622,34 @@ async function selftest() {
     console.log(`         tightest region sits ${(margins[0] - keepout).toFixed(2)} wu outside the keepout`);
 
     // KNOWN-BAD, both ways.
+    // ⚠️ Only w/h matter to the ceiling test, so its x/y are inert — moved to the x4 map
+    //    anyway so nobody reads (260,375) as a live coordinate.
     check('KNOWN-BAD: a 300 wu region is refused by the ceiling',
-      [{ x: 260, y: 375, w: 300, h: 300 }].filter((b) => Math.max(b.w, b.h) > ceiling).length === 1);
+      [{ x: 520, y: 750, w: 300, h: 300 }].filter((b) => Math.max(b.w, b.h) > ceiling).length === 1);
     check('KNOWN-BAD: a hub-placed region is refused by the keepout',
       nearest({ x: arena.center.x, y: arena.center.y, w: 120, h: 120 }) < keepout);
-    check('KNOWN-BAD: a BAND whose CENTRE is legal but whose near edge reaches the hub is refused',
-      nearest({ x: 260, y: 500, w: 700, h: 120 }) < keepout,
-      'nearest-point, not centre — a centre-only guard passes this');
+    // ⚠️ REBUILT for 6631446 (x4). Old fixture, kept because it is the one this check was
+    //    written against: `{ x: 260, y: 500, w: 700, h: 120 }` on the 1400x1000 map, where
+    //    keepout was 248.25 — centre 440 wu out (legal), nearest point 90 wu out (refused).
+    //    On the x4 map the keepout is 496.25 and that same band's nearest point is **904 wu**
+    //    from centre, so it is comfortably legal and the check asserted nothing at all. It
+    //    did not fail quietly — it failed loudly, which is the only reason this is a fix
+    //    and not an archaeology exercise.
+    //    The x4 rebuild reproduces the ORIGINAL GEOMETRY rather than the original numbers:
+    //    centre 700 wu out (>= 496.25, legal), near edge 350 wu out (< 496.25, refused).
+    // 🚨 And the fixture now asserts BOTH halves. The old one only asserted `nearest <
+    //    keepout`, which any band overlapping the hub satisfies — including one whose centre
+    //    is also inside the keepout, i.e. one that a centre-only guard would ALSO refuse.
+    //    That version could not have distinguished the two guards it exists to distinguish.
+    {
+      const band = { x: 700, y: 1000, w: 700, h: 120 };
+      const bandCentre = Math.hypot(band.x - arena.center.x, band.y - arena.center.y);
+      check('KNOWN-BAD: a BAND whose CENTRE is legal but whose near edge reaches the hub is refused',
+        nearest(band) < keepout && bandCentre >= keepout,
+        `nearest ${nearest(band).toFixed(1)} < ${keepout.toFixed(2)} <= centre ${bandCentre.toFixed(1)}`);
+      check('  CONTROL: ...and a centre-only guard would have PASSED that same band',
+        bandCentre >= keepout, 'which is the whole reason the guard reads the nearest point');
+    }
 
     // Every region must be STANDABLE, or it is decoration you cannot get under.
     const f = flood(arena, BODY, [arena.playerSpawn, arena.enemySpawn]);

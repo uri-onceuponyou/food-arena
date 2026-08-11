@@ -28,13 +28,24 @@
  *     — `animations: 'disabled'` on the screenshot;
  *   * `window.__gameReady` is not a paint — frames are cranked after it.
  *
- * ── 🔴 IT EXITS NON-ZERO ON TODAY'S MAP, AND THAT IS THE RESULT ─────────────
- * One row fails at N=6: **no fighter is dead 9 s into the match.** Slot 0 is, and slot 5 is
- * on 11 HP, because slots 0/4 and 1/5 open **75.2 wu apart** — the best the 1400x1000
- * kitchen can do with three pairs (`kitchen.ts`'s spawn block). N=3 and N=4 are the paired
- * control in the same run and finish at full health. **Do NOT register this as a gate and
- * do NOT weaken the row to make it green**: it is a true statement about a shipped map, and
- * it goes away when `DECISIONS §48`'s 2800x2000 arena lands, not before.
+ * ── ✅ IT USED TO EXIT NON-ZERO ON THE 1400x1000 MAP. THAT MAP IS GONE ──────
+ * OLD WORDING, kept because it is the record of what this tool was built to prove and
+ * because the prediction in its last sentence came true exactly:
+ *
+ *   "🔴 IT EXITS NON-ZERO ON TODAY'S MAP, AND THAT IS THE RESULT
+ *    One row fails at N=6: **no fighter is dead 9 s into the match.** Slot 0 is, and slot 5
+ *    is on 11 HP, because slots 0/4 and 1/5 open **75.2 wu apart** — the best the 1400x1000
+ *    kitchen can do with three pairs (`kitchen.ts`'s spawn block). N=3 and N=4 are the
+ *    paired control in the same run and finish at full health. **Do NOT register this as a
+ *    gate and do NOT weaken the row to make it green**: it is a true statement about a
+ *    shipped map, and it goes away when `DECISIONS §48`'s 2800x2000 arena lands, not before."
+ *
+ * `6631446` landed that arena. The closest two spawns are now **892 wu** apart against 75.2,
+ * so the bay collision this file measured no longer exists. The `no fighter is dead` row
+ * stays — it is the one that should now PASS, and it is the only evidence that the fix is
+ * real rather than assumed. ⚠️ It is still **not registered as a gate**: it is browser-bound
+ * and its verdict depends on nine seconds of a live match, which is not a number `gatecount`
+ * can diff.
  *
  * ── USAGE ───────────────────────────────────────────────────────────────────
  *   node tools/tmp/with_snapshot.mjs -- node tools/tmp/sp_shot.mjs --url '{URL}'
@@ -204,17 +215,35 @@ try {
       + `${s.alive ? '' : '   ← DEAD'}`));
     check(`[N=${n}] no fighter is dead 9 s into the match`,
       play.slots?.every((s) => s.alive), JSON.stringify(play.slots?.map((s, i) => [i, Math.round(s.hp), s.alive])));
-    // THE CAUSAL CLAIM, AS A TEST RATHER THAN AS A PARAGRAPH. If the damage at N=6 were
-    // just "six fighters is a busier match", it would not land preferentially on the four
-    // seats that share a bay. `n < 6` has no bay-sharing seat, so the row is skipped there
-    // — and N=3/N=4 are the PAIRED CONTROL for it: same map, same clock, same cast prefix.
-    if (n === 6) {
-      const shared = [0, 1, 4, 5];                            // the two bay pairs, 75.2 wu apart
-      const order = play.slots.map((_, i) => i).sort((a, b) => (frac(a) ?? 1) - (frac(b) ?? 1));
-      check('[N=6] the two WORST-hurt seats are ones that share a spawn bay (the 75.2 wu opening)',
-        order.slice(0, 2).every((i) => shared.includes(i)),
-        `damage order (worst first): ${order.join(',')} — bay-sharing seats are ${shared.join(',')}`);
-    }
+    // ── 🔴 RETIRED for `6631446`, and NOT because it went red. Because it went GREEN and
+    //    could no longer go red. Old row, kept verbatim with its rationale, because the
+    //    rationale was good and only the map moved:
+    //
+    //      "THE CAUSAL CLAIM, AS A TEST RATHER THAN AS A PARAGRAPH. If the damage at N=6
+    //       were just 'six fighters is a busier match', it would not land preferentially on
+    //       the four seats that share a bay. `n < 6` has no bay-sharing seat, so the row is
+    //       skipped there — and N=3/N=4 are the PAIRED CONTROL for it: same map, same clock,
+    //       same cast prefix."
+    //
+    //         if (n === 6) {
+    //           const shared = [0, 1, 4, 5];   // the two bay pairs, 75.2 wu apart
+    //           const order = play.slots.map((_, i) => i)
+    //             .sort((a, b) => (frac(a) ?? 1) - (frac(b) ?? 1));
+    //           check('[N=6] the two WORST-hurt seats are ones that share a spawn bay '
+    //                 + '(the 75.2 wu opening)',
+    //             order.slice(0, 2).every((i) => shared.includes(i)), ...);
+    //         }
+    //
+    //    🚨 WHY IT IS RETIRED RATHER THAN RE-AIMED. There are no bay-sharing seats left —
+    //    the closest two spawns are 892 wu apart — so `shared` names nothing. Worse, the row
+    //    is now **unconditionally true**: with nobody hurt, `frac(i)` is 1.0 for all six,
+    //    `Array.prototype.sort` is stable, so `order` is `[0,1,2,3,4,5]` and its first two
+    //    are `[0,1]`, which are in `shared`. It cannot fail. And even with real damage it
+    //    would pass **40% of the time by chance** — picking 2 of 6 that both fall in a set
+    //    of 4 is C(4,2)/C(6,2) = 6/15.
+    //    **A row that passes when its subject no longer exists is worse than a red one**,
+    //    because green is what people read. The `no fighter is dead` row above is the
+    //    honest successor: same question, and it can still fail.
   }
 } finally {
   await browser.close();

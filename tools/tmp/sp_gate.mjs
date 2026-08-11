@@ -191,42 +191,79 @@ export function sourceFaults(arena) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// THE ENDGAME AT N SEATS — `MIN_SAFE_RADIUS` does NOT scale (DECISIONS §48)
+// THE ENDGAME AT N SEATS — the floor SCALES WITH N as of `4bb64e4` (DECISIONS §53b)
 // ─────────────────────────────────────────────────────────────────────────────
 /**
- * `sim.ts:480` — `safeRadius = max(MIN_SAFE_RADIUS, maxSafeRadius × (1 − progress))`. So
- * every match that goes the distance ends on a 140 wu disc, at EVERY arena size and at
- * EVERY fighter count. The pot sits in the middle of it and is SOLID
- * (`POT.bodyRadius × 2` = 104 wu box, blocking a 42 wu centre out to 73 wu) with a
- * `dangerRadius` 95 wu burn ring around it.
+ * ⚠️ REVERSED. The old wording, kept verbatim because it is what `DECISIONS §48` says and
+ * what several packets quote — and because the reversal is the point:
  *
- * So the endgame floor is an ANNULUS, and the honest description of six seats is the width
- * of that annulus against the width of a body — measured here, not guessed.
+ *   "THE ENDGAME AT N SEATS — `MIN_SAFE_RADIUS` does NOT scale (DECISIONS §48)
+ *    `sim.ts:480` — `safeRadius = max(MIN_SAFE_RADIUS, maxSafeRadius × (1 − progress))`. So
+ *    every match that goes the distance ends on a 140 wu disc, at EVERY arena size and at
+ *    EVERY fighter count. […] ⚠️ This is a §48 item and it is NOT fixed by a bigger arena —
+ *    the floor is a constant."
+ *
+ * `4bb64e4` made it a function of N. `rules.ts:1130` now exports
+ *
+ *     minSafeRadiusFor(N) = max(MIN_SAFE_RADIUS,
+ *                               ENDGAME_STANDOFF / sin(pi/N) − POT.dangerRadius)
+ *     ENDGAME_STANDOFF    = REACH.rangedMax + max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY)
+ *
+ * = 140 at N<=4 (the POT term still binds), 187.42 at N=5, **237.00 at N=6** (the SPACING
+ * term binds). So the sentence this function printed for months — "the same disc at 2 seats
+ * and at 6" — was FALSE by 97 wu at six seats.
+ *
+ * 🚨 This block is REPORT-ONLY: nothing here is asserted, which is exactly why it went on
+ * printing a false headline through the commit that falsified it and through the x4 map
+ * after that. **An unasserted line is not checked by anything.** It is left report-only
+ * deliberately — the assertion that matters lives in `sim.test.mjs` §29 and in
+ * `rg2_mutants.mjs` — but the reason is recorded here so the next reader knows the sentence
+ * is only as fresh as the last person to read it.
+ *
+ * ⚠️ AND THE RING NEVER REACHES THIS FLOOR IN A SHIPPED MATCH (`rules.ts:1194`): sudden
+ * death fires at 30 s, where the scheduled radius is 661.67 wu — 2.8x the N=6 floor. The
+ * table below therefore describes the floor's GEOMETRY, not a state any match arrives at.
+ *
+ * The pot sits in the middle and is SOLID (`POT.bodyRadius × 2` = 104 wu box, blocking a
+ * 42 wu centre out to 73 wu) with a `dangerRadius` 95 wu burn ring around it. So the
+ * endgame floor is an ANNULUS, and the honest description of six seats is the width of that
+ * annulus against the width of a body — measured here, not guessed.
  */
+const HIT_RADIUS_MAX = Math.max(
+  PLAYER_SIZE * Number(/export const HIT_RADIUS_VS_PLAYER = PLAYER_SIZE \* ([\d.]+)/.exec(RULES)[1]),
+  ruleNum(/export const HIT_RADIUS_VS_ENEMY = ([\d.]+)/),
+);
+const ENDGAME_STANDOFF = REACH.rangedMax + HIT_RADIUS_MAX;
+/** `rules.ts:minSafeRadiusFor`, re-derived here rather than imported (this file reads no TS). */
+const minSafeRadiusFor = (n) => (!Number.isFinite(n) || n < 3
+  ? MIN_SAFE_RADIUS
+  : Math.max(MIN_SAFE_RADIUS, ENDGAME_STANDOFF / Math.sin(Math.PI / n) - POT_DANGER));
+
 function endgame(arena) {
   const rIn = POT_DANGER;                                   // inside this the ground burns
-  const rOut = MIN_SAFE_RADIUS;                             // outside this the fog burns
   const rBlock = POT_BODY + PLAYER_SIZE / 2;                // a 42 wu centre cannot get closer
-  const bandWu = rOut - rIn;
-  const midR = (rIn + rOut) / 2;
-  console.log(`\n== THE ENDGAME, AT ${MIN_SAFE_RADIUS} wu — the same disc at 2 seats and at 6 (DECISIONS §48: MIN_SAFE_RADIUS does NOT scale)`);
-  console.log(`   fog floor            r = ${rOut} wu        (rules.ts:MIN_SAFE_RADIUS, 50 HP/s outside)`);
+  console.log(`\n== THE ENDGAME — the floor SCALES WITH N as of 4bb64e4 (DECISIONS §53b), ${MIN_SAFE_RADIUS} wu at N<=4 and ${minSafeRadiusFor(6).toFixed(2)} at N=6`);
+  console.log(`   ⚠️ This REVERSES §48's "MIN_SAFE_RADIUS does NOT scale". It does now.`);
+  console.log(`   ENDGAME_STANDOFF     = ${ENDGAME_STANDOFF} wu   (REACH.rangedMax ${REACH.rangedMax} + max hit radius ${HIT_RADIUS_MAX})`);
   console.log(`   pot burn ring        r = ${rIn} wu         (POT.dangerRadius, 32 HP/s inside)`);
   console.log(`   pot solid box        r = ${rBlock} wu         (POT.bodyRadius + half a body — a centre cannot go closer)`);
-  console.log(`   => the 0 HP/s floor is an ANNULUS ${bandWu} wu wide. A body is ${PLAYER_SIZE} wu.`);
-  console.log(`      That is ${(bandWu / PLAYER_SIZE).toFixed(2)} body widths of radial room, for every fighter, at every N.`);
-  const circ = 2 * Math.PI * midR;
-  console.log(`\n   ${'N'.padStart(3)} ${'arc each'.padStart(10)} ${'gap between neighbours'.padStart(23)} ${'chord'.padStart(8)}   inside which weapon`);
+  console.log(`   ⚠️ maxSafeRadius is ${arena.maxSafeRadius} wu on this ${arena.width}x${arena.height} map, and sudden death fires at 30 s`);
+  console.log(`      where the scheduled radius is ${(arena.maxSafeRadius * (1 - 30 / 45)).toFixed(2)} wu — so NO SHIPPED MATCH REACHES THE FLOOR.`);
+  console.log(`\n   ${'N'.padStart(3)} ${'floor'.padStart(8)} ${'annulus'.padStart(9)} ${'arc each'.padStart(10)} ${'gap'.padStart(7)} ${'chord'.padStart(8)}   inside which weapon`);
   for (const n of [2, 3, 4, 5, 6]) {
-    const arc = circ / n;
+    const rOut = minSafeRadiusFor(n);                       // outside this the fog burns
+    const bandWu = rOut - rIn;
+    const midR = (rIn + rOut) / 2;
+    const arc = (2 * Math.PI * midR) / n;
     const gap = arc - PLAYER_SIZE;
     const chord = 2 * midR * Math.sin(Math.PI / n);
     const inside = Object.entries(REACH).filter(([, v]) => chord <= v).sort((a, b) => a[1] - b[1])[0];
-    console.log(`   ${String(n).padStart(3)} ${arc.toFixed(0).padStart(9)}wu ${gap.toFixed(0).padStart(22)}wu ${chord.toFixed(0).padStart(7)}wu   ${inside ? `${inside[0]} (${inside[1]})` : 'nothing — out of every reach'}`);
+    console.log(`   ${String(n).padStart(3)} ${rOut.toFixed(2).padStart(7)}wu ${bandWu.toFixed(1).padStart(8)}wu ${arc.toFixed(0).padStart(9)}wu ${gap.toFixed(0).padStart(6)}wu ${chord.toFixed(0).padStart(7)}wu   ${inside ? `${inside[0]} (${inside[1]})` : 'nothing — out of every reach'}`);
   }
   console.log(`\n   Read the last column as: at that seat count, two fighters standing evenly spaced on the`);
   console.log(`   endgame ring are ALREADY inside that weapon's range of each other, before either moves.`);
-  console.log(`   ⚠️ This is a §48 item and it is NOT fixed by a bigger arena — the floor is a constant.\n`);
+  console.log(`   §53b's whole point is that the chord is now HELD AT ENDGAME_STANDOFF as N rises, instead`);
+  console.log(`   of collapsing — which is what a constant floor did.\n`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,9 +345,17 @@ async function selftest() {
       symmetryFaults(s.map((p, i) => (i === 4 ? { ...p, x: p.x + 1 } : p)), arena.center).length > 0);
     check('KNOWN-BAD: nudging its PARTNER by 1 wu is caught too (not just slot 0 of a pair)',
       symmetryFaults(s.map((p, i) => (i === 5 ? { ...p, y: p.y + 1 } : p)), arena.center).length > 0);
+    // ⚠️ WAS `[{x:160,y:390},{x:1240,y:390}]` — an axis mirror about x=700, i.e. about the
+    //    1400x1000 map's centre. On the x4 map those two points are not a mirror of ANY kind
+    //    about (1400,1000), so the row went on passing while testing nothing it names: it
+    //    refused an arbitrary pair, not an axis mirror. Rebuilt from the shipped seat and
+    //    the CURRENT centre: mirror(300,810) is (2500,1190); the AXIS mirror is (2500,810).
     check('KNOWN-BAD: an AXIS mirror (x flipped, y kept) is refused',
-      symmetryFaults([{ x: 160, y: 390 }, { x: 1240, y: 390 }], arena.center).length > 0,
+      symmetryFaults([{ x: s[0].x, y: s[0].y }, { x: arena.width - s[0].x, y: s[0].y }], arena.center).length > 0,
       'a checker that only tested x would pass this');
+    check('  CONTROL: …and the true POINT mirror of that same seat is accepted',
+      symmetryFaults([{ x: s[0].x, y: s[0].y }, mirror(s[0], arena)], arena.center).length === 0,
+      'so the row above refuses the AXIS mirror specifically, not any pair it is handed');
     check('KNOWN-BAD: SWAPPING two pairs\' partners is caught',
       symmetryFaults([s[0], s[3], s[2], s[1], s[4], s[5]], arena.center).length > 0,
       'the list is still a symmetric SET; the PAIRING is what broke, and slots are what seats fighters');
@@ -334,12 +379,21 @@ async function selftest() {
   {
     check('CONTROL: the shipped list passes', runwayFaults(arena).length === 0);
     // The pot pin, as a whole PAIR: a centre-line seat whose east run ends flush on the pot.
-    const pinned = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: 280, y: 500 }, { x: 1120, y: 500 }] };
+    // ⚠️ WAS `{x:280,y:500}` / `{x:1120,y:500}` — the `60c5b92` pin on the 1400x1000 map. On
+    //    the x4 map (280,500) is INSIDE the north-west walk-in freezer, so the fixture failed
+    //    with five cover faults instead of the one hazard fault it is asserting. Rebuilt to
+    //    the same GEOMETRY: (800,1000) is on the centre line, 600 wu west of the x4 centre
+    //    (outside the 496.25 keep-out), and its east run ends flush on the pot at
+    //    clearance -19.0 against a 21 wu margin. `sp_place`'s pin row uses the same seat.
+    const pinned = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: 800, y: 1000 }, { x: 2000, y: 1000 }] };
     const f = runwayFaults(pinned);
     check('KNOWN-BAD: a centre-line pair whose run ends on the pot is caught by the shipped tool',
       f.length === 1 && /hazard/.test(f[0]), f.join(' '));
     // And a seat with plenty of hazard clearance but a blocked cardinal.
-    const boxed = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: 700, y: 250 }, { x: 700, y: 750 }] };
+    // ⚠️ WAS `{x:700,y:250}` / `{x:700,y:750}` — 24 wu from the 1x sink counter at (700,170).
+    //    The x4 sink counter is at (1400,670), 150x70: its north face is y=635, so a body
+    //    centred at y = 635 − 21 − 24 = 590 stands 24 wu clear of it.
+    const boxed = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: 1400, y: 590 }, { x: 1400, y: 1410 }] };
     check('KNOWN-BAD: a seat 24 wu from the sink counter is caught by the runway half',
       runwayFaults(boxed).some((x) => /runway/.test(x)), runwayFaults(boxed).join(' '));
   }
@@ -347,11 +401,27 @@ async function selftest() {
   console.log('\n§E/§F — the per-seat checks');
   {
     check('CONTROL: the shipped list passes', seatFaults(arena).length === 0);
-    const inPot = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: 700, y: 500 }, { x: 700, y: 500 }] };
+    // ⚠️ ALL THREE FIXTURES REBUILT for `6631446`. Every one of them was a 1x coordinate,
+    //    and the interesting part is that only TWO of the three went red:
+    //      inPot     (700,500)  — on the x4 map this is inside a HERB CRATE at (700,465).
+    //                             The row went on passing while asserting nothing about the
+    //                             pot. **A green known-bad is not evidence it still aims at
+    //                             the thing it names.** Now the pot's own centre.
+    //      inConceal (260,375)  — no longer a concealment patch anywhere. Failed loudly.
+    //                             Now `arena.concealment[0]`, read from the dump.
+    //      nearHub   (700,620)  — 156 wu from the 1x centre, 782 wu from the x4 one, i.e.
+    //                             far OUTSIDE the 496.25 keep-out. Failed loudly.
+    //                             Now 120 wu off the centre, the same offset the 1x fixture
+    //                             used (and `sp_place`'s centre-adjacent row uses).
+    //    Each is now built from `arena` rather than from a literal, so the next map change
+    //    moves them instead of stranding them.
+    const inPot = { ...arena, spawns: [...arena.spawns.slice(0, 4), { ...arena.center }, { ...arena.center }] };
     check('KNOWN-BAD: a seat inside the pot is caught', seatFaults(inPot).length > 0);
-    const inConceal = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: 260, y: 375 }, { x: 1140, y: 625 }] };
-    check('KNOWN-BAD: a seat that starts CONCEALED is caught', seatFaults(inConceal).some((x) => /concealment/.test(x)));
-    const nearHub = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: 700, y: 620 }, { x: 700, y: 380 }] };
+    const patch = arena.concealment[0];
+    const inConceal = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: patch.x, y: patch.y }, mirror(patch, arena)] };
+    check(`KNOWN-BAD: a seat that starts CONCEALED is caught (${patch.kind}@${patch.x},${patch.y})`,
+      seatFaults(inConceal).some((x) => /concealment/.test(x)));
+    const nearHub = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: arena.center.x, y: arena.center.y + 120 }, { x: arena.center.x, y: arena.center.y - 120 }] };
     check('KNOWN-BAD: a seat inside the endgame keep-out is caught', seatFaults(nearHub).some((x) => /keepout/.test(x)));
     // A seat sealed away from the rest: walled off by a razor wall the flood cannot cross.
     const walled = {

@@ -545,21 +545,101 @@ async function selftest() {
     check('KNOWN-BAD: …and a legal cell 120 wu off it is still refused by the keep-out',
       violations({ x: arena.center.x, y: arena.center.y + 120 }, arena).some((v) => v.startsWith('inside-keepout')),
       violations({ x: arena.center.x, y: arena.center.y + 120 }, arena).join(' '));
+    // ⚠️ ALL FOUR COORDINATES BELOW WERE REBUILT for `6631446` (1400x1000 -> 2800x2000).
+    //    Old fixtures, kept because they are what these rows were proved on and because two
+    //    of them are the reason this comment exists:
+    //      freezer      (230, 190)   — the 1x freezer's own box
+    //      west wall    (  5, 500)
+    //      concealment  (260, 375)
+    //      grease       (560, 900)
+    //    🚨 THE INTERESTING PART IS WHICH ONES SURVIVED. `(5, 500)` still says out-of-bounds
+    //    and `(230, 190)` still says inside-cover — the second **by luck**: an x4 freezer
+    //    happens to sit at (300,300) and (230,190) clips its corner. Two rows went on
+    //    passing while pointing at nothing anybody chose. The other two failed loudly, which
+    //    is the only reason the pair above was ever looked at. **A green row is not evidence
+    //    its fixture is still aimed at something.**
+    //    Each replacement is now pinned to a NAMED feature of the shipped dump rather than
+    //    to a coordinate that used to be one, so the next map change fails them all together.
     check('KNOWN-BAD: a spawn inside the freezer is refused (cover)',
-      violations({ x: 230, y: 190 }, arena).includes('inside-cover'));
+      violations({ x: 300, y: 300 }, arena).includes('inside-cover'));
     check('KNOWN-BAD: a spawn 5 wu from the west wall is refused (out-of-bounds)',
-      violations({ x: 5, y: 500 }, arena).includes('out-of-bounds'));
-    check('KNOWN-BAD: a spawn on a concealment patch is refused',
-      violations({ x: 260, y: 375 }, arena).some((v) => v.startsWith('in-concealment')));
-    check('KNOWN-BAD: a spawn in the grease puddle is refused',
-      violations({ x: 560, y: 900 }, arena).some((v) => v.startsWith('in-slow-hazard')));
+      violations({ x: 5, y: arena.center.y }, arena).includes('out-of-bounds'));
+    // `arena.concealment[0]` — asserted to BE a patch, so this cannot go stale silently.
+    {
+      const patch = arena.concealment[0];
+      check(`KNOWN-BAD: a spawn on a concealment patch is refused (${patch.kind}@${patch.x},${patch.y})`,
+        violations({ x: patch.x, y: patch.y }, arena).some((v) => v.startsWith('in-concealment')));
+    }
+    // 🚨 THE SLOW-HAZARD ROW CANNOT BE WRITTEN AS A COORDINATE ON THIS MAP AT ALL, and the
+    //    reason is a finding rather than an inconvenience.
+    //
+    //    `violations()` returns EARLY on `inside-cover` (see its own comment: the two that
+    //    make the march meaningless). So a spawn buried in a prop never reaches the
+    //    slow-hazard branch. And on `ec4f5af` **both slow puddles are entirely buried**:
+    //    swept at 1 wu with the sim's own predicate, **0 of 7,845 cells inside either 50 wu
+    //    puddle disc is legal standing ground**, and over the full 71 wu slow FIELD
+    //    (`radius + half a body`, the distance this very branch tests) exactly **1 of
+    //    15,813** is. Three props bury each — a hub stove island plus two crates. The
+    //    nearest legal reachable ground to a puddle centre is **75 wu**, i.e. outside the
+    //    field. Two slow hazards that no fighter can enter are dead content; that is a
+    //    `src/arena/kitchen.ts` defect and is reported, not worked around here.
+    //
+    //    Earlier fixtures, kept as the record of the coordinate chase this replaces:
+    //      (560, 900)   — the 1x grease puddle. Not a puddle at any scale on the x4 map.
+    //      (1860, 1220) — correct on `6631446`, buried by a crate `21fb6be` moved. It was
+    //                     right for ONE COMMIT.
+    //
+    //    So the row is rebuilt to test the RULE instead of hunting a cell: inject a slow
+    //    hazard onto ground that is known-clean — the shipped player spawn, which the
+    //    positive control above has just proved clears every constraint — and require the
+    //    branch to fire. That is map-independent by construction, and the un-injected arena
+    //    is its own control, so the injection is provably what caused the refusal.
+    {
+      const clean = { ...arena.playerSpawn };
+      const withPuddle = { ...arena, hazards: [...arena.hazards, { x: clean.x, y: clean.y, radius: 50, kind: 'slow', slowFactor: 0.45 }] };
+      check('  CONTROL: the shipped player spawn has NO violations on the shipped arena',
+        violations(clean, arena).length === 0, violations(clean, arena).join(' '));
+      check('KNOWN-BAD: …and a slow puddle dropped on that exact spawn refuses it',
+        violations(clean, withPuddle).some((v) => v.startsWith('in-slow-hazard')),
+        violations(clean, withPuddle).join(' '));
+      check('  CONTROL: …and the puddle is the ONLY reason it is refused',
+        violations(clean, withPuddle).length === 1, violations(clean, withPuddle).join(' '));
+      // …and the census that produced the finding above, printed rather than asserted.
+      // ⚠️ NOT an assertion: a row that asserts a defect's PRESENCE goes red the day it is
+      //    fixed (`as_cost`'s A1 is exactly that trap, live right now). Printed so it is
+      //    visible on every run and cannot become a lie.
+      for (const h of arena.hazards.filter((z) => z.kind === 'slow')) {
+        let cells = 0, legal = 0;
+        for (let x = Math.round(h.x - h.radius); x <= h.x + h.radius; x++) {
+          for (let y = Math.round(h.y - h.radius); y <= h.y + h.radius; y++) {
+            if (Math.hypot(x - h.x, y - h.y) > h.radius) continue;
+            cells++;
+            if (!blocked(x, y, PLAYER_SIZE, arena.cover)) legal++;
+          }
+        }
+        console.log(`         slow puddle @${h.x},${h.y} r${h.radius}: ${legal} of ${cells} cells standable`
+          + `${legal === 0 ? '   ← 🔴 NOBODY CAN EVER ENTER IT (kitchen.ts)' : ''}`);
+      }
+    }
     // The pot pin, restated as a test: a spawn on the centre line west of the pot has a
-    // legal cell, a legal keep-out radius and a 347 wu east runway — and that runway ENDS
-    // flush against the pot's CoverBox at r=73, INSIDE its 95 wu burn ring. This is
-    // `60c5b92` exactly, and it is the reason the shipped spawns are offset 110 wu off the
+    // legal cell, a legal keep-out radius and an east runway — and that runway ENDS
+    // flush against the pot's CoverBox, INSIDE its 95 wu burn ring. This is
+    // `60c5b92` exactly, and it is the reason the shipped spawns are offset off the
     // centre line. (700,260) was tried first and is a WORSE fixture: it is inside the
     // keep-out too, so it would have "passed" this row for the wrong reason.
-    const pin = { x: 280, y: 500 };
+    //
+    // 🚨 REBUILT for `6631446`. Old pin, kept because it is the `60c5b92` coordinate every
+    //    packet quotes: `{ x: 280, y: 500 }` — 420 wu west of the 1x centre, keep-out 248.25,
+    //    east runway 347 wu ending flush on the pot at r=73.
+    //    On the x4 map (280,500) is **inside the north-west walk-in freezer** at (300,500),
+    //    so it was refused `inside-cover` and the row failed loudly. It is worth being
+    //    precise about why that is lucky: had the x4 layout left (280,500) on open floor, the
+    //    row would have gone on passing with the runway rule never reached.
+    //    (800,1000) reproduces the ORIGINAL GEOMETRY: on the centre line, 600 wu west of the
+    //    x4 centre (>= the 496.25 keep-out), east runway ends flush on the pot at
+    //    clearance -19.0 against a 21 wu margin. The CONTROL below is what makes it the
+    //    right coordinate — it is refused for EXACTLY ONE reason, and that reason is the pin.
+    const pin = { x: 800, y: 1000 };
     check('KNOWN-BAD: a centre-line spawn whose run ends flush on the pot is refused (the 60c5b92 pin)',
       violations(pin, arena).some((v) => v.startsWith('run-stops-in-hazard')), violations(pin, arena).join(' '));
     check('  CONTROL: …and it is NOT refused for any other reason (so the pin is what caught it)',

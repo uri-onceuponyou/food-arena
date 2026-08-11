@@ -181,14 +181,57 @@ if (args.selftest) {
   // A flat win-rate curve is the RESULT this tool exists to prove. That makes it
   // indistinguishable from a tool that silently ignores levels — so the asymmetric case
   // has to move, or flatness proves nothing.
+  //
+  // 🚨 REBUILT for `6631446`, and the failure is worth stating precisely because the
+  //    obvious diagnosis was wrong.
+  //
+  //    OLD FIXTURE, kept because it is what this row shipped as:
+  //        const lo = cellWinRate('hamburger', 'pizza', 'smart2', LEVEL_MIN, LEVEL_MIN);
+  //        const hi = cellWinRate('hamburger', 'pizza', 'smart2', LEVEL_MAX, LEVEL_MIN);
+  //        ok('a level-15 player beats a level-1 enemy more often than a level-1 player does',
+  //           hi > lo, ...);
+  //
+  //    On the 1400x1000 map that cell read L1vL1 **87.5%** -> L15vL1 100.0%: one seed of
+  //    headroom, and it passed. On 2800x2000 hamburger beats pizza on all 8 seeds at level 1,
+  //    so the cell reads **100.0% -> 100.0%** and `hi > lo` is false. The row went red.
+  //
+  //    ⚠️ THE OBVIOUS READING — "the instrument is pinned at its ceiling and can no longer
+  //    detect level scaling" — IS FALSE, and it was measured rather than argued. Sweeping all
+  //    110 matchups at 16 seeds on the x4 map: **40 cells are unsaturated at level 1 and every
+  //    one of them rises**, the largest by 93.8 pp (`burrito vs egg`, 6.3% -> 100.0%). The
+  //    whole 110x8 grid moves **55.00% -> 99.32%**. The instrument had lost nothing. **ONE
+  //    HAND-PICKED CELL had saturated**, and a hand-picked cell is a sample of size one.
+  //
+  //    So the fix is not a different cell — that is the same bug with a different literal,
+  //    one balance pass from recurring. It is (a) a DECLARED PANEL instead of a pick, and
+  //    (b) an explicit headroom guard, which is the row that would have caught this on the
+  //    day instead of six commits later.
+  //
+  //    The panel is every character against the NEXT one in `CHARACTER_IDS`, cyclically: 11
+  //    cells, every character appearing exactly once as player and once as enemy. It is
+  //    declared by construction rather than chosen, so it cannot be tuned to a result, and
+  //    it covers the whole roster. Measured here: L1vL1 **47.73%** -> L15vL1 **98.86%**,
+  //    mirror **48.86%**.
   {
-    const lo = cellWinRate('hamburger', 'pizza', 'smart2', LEVEL_MIN, LEVEL_MIN);
-    const hi = cellWinRate('hamburger', 'pizza', 'smart2', LEVEL_MAX, LEVEL_MIN);
+    const panel = CHARACTER_IDS.map((p, i) => [p, CHARACTER_IDS[(i + 1) % CHARACTER_IDS.length]]);
+    const panelRate = (pl, en) => mean(panel.map(([a, b]) => cellWinRate(a, b, 'smart2', pl, en)));
+    // Binomial SE on the panel as a whole. The effect below is ~10x this, which is the only
+    // reason a strict inequality on 8 seeds is safe to assert.
+    const se = Math.sqrt(0.25 / (panel.length * SEEDS));
+    const lo = panelRate(LEVEL_MIN, LEVEL_MIN);
+    const hi = panelRate(LEVEL_MAX, LEVEL_MIN);
+
+    // 🚨 THE ROW THAT WOULD HAVE CAUGHT `6631446` ON THE DAY. Assert the baseline has room
+    //    to move BEFORE asserting that it moves. A saturated baseline makes the next row
+    //    unfalsifiable, and an unfalsifiable row reads exactly like a passing one.
+    ok('the level-1 baseline has HEADROOM — it is not saturated at 0% or 100%',
+      lo > 0 && lo < 1, `panel L1vL1 ${pct(lo)} over ${panel.length} matchups x ${SEEDS} seeds`);
     ok('a level-15 player beats a level-1 enemy more often than a level-1 player does',
-      hi > lo, `L1vL1 ${pct(lo)} -> L15vL1 ${pct(hi)}`);
-    const mirror = cellWinRate('hamburger', 'pizza', 'smart2', LEVEL_MAX, LEVEL_MAX);
+      hi > lo + 4 * se,
+      `panel L1vL1 ${pct(lo)} -> L15vL1 ${pct(hi)}  (+${((hi - lo) * 100).toFixed(1)} pp, SE ${(se * 100).toFixed(1)} pp)`);
+    const mirror = panelRate(LEVEL_MAX, LEVEL_MAX);
     ok('…and a MIRRORED level pairing lands back near the level-1 answer',
-      Math.abs(mirror - lo) < 0.30, `L1vL1 ${pct(lo)} vs L15vL15 ${pct(mirror)}`);
+      Math.abs(mirror - lo) < 0.30, `panel L1vL1 ${pct(lo)} vs L15vL15 ${pct(mirror)}`);
   }
 
   // ── D. LEVEL 1 IS BIT-IDENTICAL TO THE PRE-LEVELS CALL PATH ──────────────

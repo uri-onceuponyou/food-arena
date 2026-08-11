@@ -367,21 +367,32 @@ import { execFileSync } from 'node:child_process';
 // plain numbers on purpose: this tool must keep working when `src/` is mid-edit by
 // five other agents, so it imports nothing from the app.
 // ─────────────────────────────────────────────────────────────────────────────
-const ARENA_W = 1400, ARENA_H = 1000;
-const CENTRE = { x: 700, y: 500 };
+// ⚠️ WAS `1400, 1000` / `{700, 500}` until `6631446` took the map to x4 (2800x2000).
+//    Old wording kept because it is what every recorded colour number before that commit
+//    was measured on: "const ARENA_W = 1400, ARENA_H = 1000; const CENTRE = {x:700,y:500}".
+//    Nothing here noticed the change on its own — the 1x table is self-consistent, so
+//    `validate()` went on cheerfully approving 18 stations against a layout that had
+//    stopped existing. The selftest's dump cross-check is what caught it, twice now.
+const ARENA_W = 2800, ARENA_H = 2000;
+const CENTRE = { x: 1400, y: 1000 };
 /**
  * `shared.ts` computes this as `ARENA_HALF_DIAGONAL / (1 - FOG_FIRST_CONTACT_S*1000 /
- * MATCH_DURATION_MS)` = 860.23 / (1 - 6/45) = 993, and `match.ts:applyQaSetup` clamps
+ * MATCH_DURATION_MS)` = 1720.47 / (1 - 6/45) = 1985, and `match.ts:applyQaSetup` clamps
  * `?fogRadius=` to it. Passing the real maximum is what parks the ring genuinely OFF the
- * map: the furthest corner is 860 wu from centre, so anything below that fogs the
+ * map: the furthest corner is 1720 wu from centre, so anything below that fogs the
  * corners. This file used to pass 850, which put the fog wall INSIDE the `edge_west`
  * frame and mixed death-zone colour into a "normal play" colour sample. Same class as
  * everything else in this file: a number that was right when it was written (the clock
  * was 180 s and the maximum was 890) and silently stopped being right.
+ * ⚠️ WAS `993` — correct for the 1400x1000 map, and 993 is now INSIDE the playfield
+ * (the corner is 1720 wu out), so a run that still passed it would have fogged all four
+ * corners while claiming the ring was parked off the map. The selftest asserts this
+ * against the dump for exactly that reason.
  */
-const MAX_SAFE_RADIUS = 993;
-const GREASE = { x: 560, y: 900 };
-const WATER = { x: 840, y: 100 };
+const MAX_SAFE_RADIUS = 1985;
+/** `kitchen.ts:784` — `puddleSouth` is dressed `M.grease`, `puddleNorth` is `M.water`. */
+const GREASE = { x: 1830, y: 1250 };
+const WATER = { x: 970, y: 750 };
 const PLAYER_SIZE = 42;           // rules.ts; the fighter's collision box
 
 /**
@@ -404,27 +415,56 @@ const PLAYER_SIZE = 42;           // rules.ts; the fighter's collision box
  * `validate()` below tests BOTH and refuses to scan on either.
  */
 const COVER = [
-  // ⚠️ REGENERATED 2026-08-11 from `tools/arena.gameplay.json` after the reachability pass moved 8
-  //    boxes to close 14 unreachable pockets. This table is a SECOND SOURCE OF TRUTH for the
-  //    layout, inlined deliberately so this file works without importing the arena — and the
-  //    selftest below asserts it box-for-box against the dump, which is exactly what caught the
-  //    drift. It has now caught it twice. Keep it that way; regenerate, never hand-edit.
-  [430, 300, 170, 90], [970, 300, 170, 90], [430, 700, 170, 90], [970, 700, 170, 90], // stove_island
-  [980, 120, 55, 55], [420, 880, 55, 55],                                             // stacked_pots
-  [450, 120, 50, 50], [950, 880, 50, 50],                                             // spice_cart
-  [230, 190, 230, 190], [1170, 810, 230, 190],                                        // freezer
-  [1120, 150, 90, 90], [280, 850, 90, 90],                                            // herb_crate
-  [1215, 148, 80, 80], [185, 852, 80, 80],                                            // produce_crate_tall
-  [1175, 235, 110, 70], [225, 765, 110, 70],                                          // flour_sacks
-  [80, 600, 160, 55], [265, 685, 160, 55], [1320, 400, 160, 55], [1135, 315, 160, 55], // prep_counter
-  [30, 250, 60, 50], [24, 750, 48, 46], [1370, 750, 60, 50], [1376, 250, 48, 46],     // supply_barrel
-  [700, 830, 150, 70],                                                                // fryer_counter
-  [700, 170, 150, 70],                                                                // sink_counter
-  [700, 500, 104, 104],                                                               // boiling_pot
+  // ⚠️ REGENERATED 2026-08-11 from `tools/arena.gameplay.json` for `6631446`, the x4 map:
+  //    27 boxes on 1400x1000 -> 111 boxes on 2800x2000. Rule 1 of that pass is "hold cover
+  //    DENSITY, not prop size", so every box below is drawn from the same size set as the
+  //    27 it replaces — that is why the sizes repeat and the count is ~4x.
+  //    This table is a SECOND SOURCE OF TRUTH for the layout, inlined deliberately so this
+  //    file works without importing the arena — and the selftest below asserts it box-for-box
+  //    against the dump, which is exactly what caught the drift. It has now caught it THREE
+  //    times. Keep it that way; regenerate, never hand-edit. The generator is one line:
+  //      node -e "const d=require('./tools/arena.gameplay.json');
+  //               console.log(d.cover.map(c=>`[${c.x}, ${c.y}, ${c.w}, ${c.h}],`).join('\n'))"
+  //    Grouped by box size (the old table grouped by prop NAME, which the dump does not carry).
+  [300, 300, 230, 190], [2500, 1700, 230, 190], [300, 500, 230, 190], [2500, 1500, 230, 190],
+  [2450, 700, 230, 190], [350, 1300, 230, 190],  // 230x190 x6  (walk-in freezer)
+  [1080, 760, 170, 90], [1720, 1240, 170, 90], [1720, 760, 170, 90], [1080, 1240, 170, 90],
+  [1400, 430, 170, 90], [1400, 1570, 170, 90], [2100, 650, 170, 90], [700, 1350, 170, 90],
+  [2100, 745, 170, 90], [700, 1255, 170, 90],  // 170x90 x10  (stove island; the first four are the hub)
+  [1400, 1000, 104, 104],  // 104x104 x1  (boiling_pot — dead centre, the one unique box)
+  [1400, 670, 150, 70], [1400, 1330, 150, 70], [775, 135, 150, 70], [2025, 1865, 150, 70],
+  [2015, 135, 150, 70], [785, 1865, 150, 70],  // 150x70 x6  (sink / fryer counter)
+  [1400, 120, 160, 55], [1400, 1880, 160, 55], [2720, 135, 160, 55], [80, 1865, 160, 55],
+  [700, 650, 160, 55], [2100, 1350, 160, 55], [700, 720, 160, 55], [2100, 1280, 160, 55],
+  [1950, 430, 160, 55], [850, 1570, 160, 55], [2150, 900, 160, 55], [650, 1100, 160, 55],
+  [450, 910, 160, 55], [2350, 1090, 160, 55],  // 160x55 x14  (prep_counter)
+  [150, 900, 90, 90], [2650, 1100, 90, 90], [1720, 140, 90, 90], [1080, 1860, 90, 90],
+  [2585, 135, 90, 90], [215, 1865, 90, 90], [2300, 250, 90, 90], [500, 1750, 90, 90],
+  [2400, 345, 90, 90], [400, 1655, 90, 90], [700, 465, 90, 90], [2100, 1535, 90, 90],
+  [950, 670, 90, 90], [1850, 1330, 90, 90], [1000, 380, 90, 90], [1800, 1620, 90, 90],  // 90x90 x16  (herb_crate)
+  [2295, 425, 110, 70], [505, 1575, 110, 70], [2745, 520, 110, 70], [55, 1480, 110, 70],
+  [700, 380, 110, 70], [2100, 1620, 110, 70], [1000, 470, 110, 70], [1800, 1530, 110, 70],  // 110x70 x8  (flour_sacks)
+  [300, 650, 80, 80], [2500, 1350, 80, 80], [135, 720, 80, 80], [2665, 1280, 80, 80],
+  [1815, 140, 80, 80], [985, 1860, 80, 80], [2400, 250, 80, 80], [400, 1750, 80, 80],
+  [2300, 340, 80, 80], [500, 1660, 80, 80], [950, 760, 80, 80], [1850, 1240, 80, 80],
+  [1740, 380, 80, 80], [1060, 1620, 80, 80], [2450, 845, 80, 80], [350, 1155, 80, 80],  // 80x80 x16  (produce_crate_tall)
+  [525, 135, 55, 55], [2275, 1865, 55, 55], [892, 135, 55, 55], [1908, 1865, 55, 55],
+  [700, 790, 55, 55], [2100, 1210, 55, 55], [1400, 345, 55, 55], [1400, 1655, 55, 55],
+  [1950, 495, 55, 55], [850, 1505, 55, 55], [2262, 900, 55, 55], [538, 1100, 55, 55],  // 55x55 x12  (stacked_pots)
+  [30, 250, 60, 50], [2770, 1750, 60, 50], [585, 135, 60, 50], [2215, 1865, 60, 50],
+  [1288, 120, 60, 50], [1512, 1880, 60, 50], [1512, 120, 60, 50], [1288, 1880, 60, 50],
+  [2770, 200, 60, 50], [30, 1800, 60, 50], [2770, 590, 60, 50], [30, 1410, 60, 50],
+  [1740, 460, 60, 50], [1060, 1540, 60, 50],  // 60x50 x14  (supply_barrel)
+  [958, 135, 50, 50], [1842, 1865, 50, 50], [2120, 135, 50, 50], [680, 1865, 50, 50],
+  [450, 845, 50, 50], [2350, 1155, 50, 50],  // 50x50 x6  (spice_cart)
+  [2776, 750, 48, 46], [24, 1250, 48, 46],  // 48x46 x2  (supply_barrel, the two clipped by the wall)
 ];
 /** Where the AI starts; the flood below runs from here, so "reachable" means
- *  "reachable by a fighter in a real match", not "connected to something". */
-const ENEMY_SPAWN = { x: 1240, y: 610 };
+ *  "reachable by a fighter in a real match", not "connected to something".
+ *  ⚠️ WAS `{ x: 1240, y: 610 }` on the 1400x1000 map. On 2800x2000 that point is still
+ *  legal ground, so the flood still ran and still returned ONE PIECE — the stalest
+ *  possible kind of green. It is `6631446`'s `enemySpawn`, asserted against the dump. */
+const ENEMY_SPAWN = { x: 2500, y: 1190 };
 /** Clearance a station must keep from every cover box, in world units. `movement.ts`
  *  refuses a step whose destination overlaps, i.e. within `(PLAYER_SIZE + w)/2`, so the
  *  minimum honest clearance is PLAYER_SIZE/2 = 21. This was 18 — LOOSER than the real
@@ -506,12 +546,29 @@ function validate(stations) {
  * The stations.
  *
  * `x`/`y` are where the PLAYER stands; the camera centres its ground window there.
- * At 16:9 each station shows ~579 x 398 wu, so the 1400x1000 playfield needs ~6
- * views to be covered once and these 17 oversample the lanes and hazards, which is
- * where a player actually spends the match.
+ * At 16:9 each station shows ~579 x 398 wu — a CAMERA property, so `6631446` did not
+ * change it while quadrupling the map.
+ *
+ * 🚨 ALL EIGHTEEN OF THESE WERE 1x COORDINATES UNTIL `6631446`+1, so the whole sweep
+ * sampled the NORTH-WEST QUADRANT and nothing else. Measured, by frame overlap against
+ * the four quadrants of the 2800x2000 map: the shipped 1x list covered
+ * **NW 18 / NE 2 / SW 2 / SE 0** — a quarter of the map had not one frame in it — while
+ * this list covers **NW 9 / NE 7 / SW 9 / SE 8**. `--selftest` §F asserts that, with the
+ * 1x list reproduced verbatim as its known-bad input, so this cannot silently recur.
+ *
+ * ⚠️ COVERAGE IS BY SYMMETRY CLASS, NOT BY AREA, and the number is worth stating plainly:
+ * 18 frames x 579x398 wu is **0.74x** the 2800x2000 playfield, against **3.0x** on the map
+ * these stations were chosen for. That is not a hole, because `kitchen.ts` is 180deg
+ * point-symmetric about CENTRE — every dressing cluster has an identical twin opposite it,
+ * and the 1x list was itself west-weighted on a symmetric map for the same reason. But it
+ * IS a reduction in oversampling, so a future colour pass that wants tighter per-station
+ * variance should add stations rather than assume the old headroom is still there.
  *
  * Hazard stations deliberately stand OFF the hazard, not on it, so the hazard sits
- * about a fifth of the frame off-centre instead of filling it.
+ * about a fifth of the frame off-centre instead of filling it. ⚠️ The offsets are in
+ * FRAME units, not map units, so they did NOT scale with the map: the puddles are still
+ * radius 50 and the frame is still 579x398. They changed DIRECTION only, because the 1x
+ * offsets (-130,-95) and (+130,+95) both land inside a hub stove island on the new map.
  */
 const STATIONS = [
   // ── normal play, the west half (player spawn side) ──────────────────────────
@@ -519,15 +576,19 @@ const STATIONS = [
   // this station stayed at y=500, so a station whose entire purpose is "what the player
   // sees at the whistle" was 110wu from where the player actually stands. Cheap to miss,
   // and exactly the class of drift this file is supposed to be immune to.
-  { id: 'spawn_west',    x: 160,  y: 390, fog: MAX_SAFE_RADIUS, note: 'THE player spawn (kitchen.ts playerSpawn), looking east down the west lane' },
+  { id: 'spawn_west',    x: 300,  y: 810, fog: MAX_SAFE_RADIUS, note: 'THE player spawn (kitchen.ts playerSpawn), looking east down the west lane' },
   // Both of these were INSIDE A SEALED POCKET until 60c5b92 opened the centre line —
   // legal ground that nothing could walk to. Verified reachable by `validate()` now.
-  { id: 'west_lane',     x: 340,  y: 500, fog: MAX_SAFE_RADIUS, note: 'primary combat lane: the two west prep counters and the spill decals between them' },
-  { id: 'west_choke',    x: 400,  y: 500, fog: MAX_SAFE_RADIUS, note: 'mid-lane, looking east into the hub (the barrels that used to pinch here moved to the far strips in 60c5b92)' },
+  { id: 'west_lane',     x: 600,  y: 1000, fog: MAX_SAFE_RADIUS, note: 'primary combat lane: the west prep counters and the spill decals between them' },
+  { id: 'west_choke',    x: 900,  y: 1000, fog: MAX_SAFE_RADIUS, note: 'mid-lane, looking east into the hub' },
   // ── the hub. Never centred on the pot. ─────────────────────────────────────
-  { id: 'pot_south',     x: 700,  y: 640, fog: MAX_SAFE_RADIUS, note: 'pot 140wu north of the player — hazard in frame, not filling it' },
-  { id: 'pot_diagonal',  x: 570,  y: 430, fog: MAX_SAFE_RADIUS, note: 'hub diagonal: the pot, the NW stove island and the west prep counter in one frame' },
-  { id: 'hub_north',     x: 700,  y: 320, fog: MAX_SAFE_RADIUS, note: 'north lane mouth: sink counter, both north stove islands, pot rim at the bottom of frame' },
+  // The hub did NOT scale with the map: `x4_layout`'s rule 2 keeps one pot dead centre at
+  // its shipped 104x104 and the four islands at their shipped +/-270,+/-200 offsets. So
+  // these three moved by exactly the centre's displacement (+700,+500) plus whatever it
+  // took to clear a prop, and the framing they were chosen for is unchanged.
+  { id: 'pot_south',     x: 1400, y: 1200, fog: MAX_SAFE_RADIUS, note: 'pot 200wu north of the player — hazard in frame, not filling it' },
+  { id: 'pot_diagonal',  x: 1140, y: 940, fog: MAX_SAFE_RADIUS, note: 'hub diagonal: the pot, the NW hub island and the west prep counter in one frame' },
+  { id: 'hub_north',     x: 1400, y: 780, fog: MAX_SAFE_RADIUS, note: 'north lane mouth: sink counter, both north hub islands, pot rim at the bottom of frame' },
   // ── corners: the four landmark clusters ────────────────────────────────────
   // ── MOVED for 60c5b92. All four of the old positions landed inside a prop that had
   //    been somewhere else when they were chosen: (430,240) in the NW stove island,
@@ -536,18 +597,40 @@ const STATIONS = [
   //    frames were measured anyway. That alone manufactured a false colour regression
   //    (cast/env hue overlap read 0.1785 -> 0.2363, while on the 14 legal stations it had
   //    IMPROVED, 0.1742 -> 0.1674). A future colour pass would have chased it.
-  { id: 'freezer_nw',    x: 430,  y: 420, fog: MAX_SAFE_RADIUS, note: 'NW corner: walk-in freezer beyond the north-west stove island' },
-  { id: 'pantry_ne',     x: 1150, y: 420, fog: MAX_SAFE_RADIUS, note: 'NE pantry cluster: flour sacks and the east prep counter, crates beyond' },
-  { id: 'pantry_sw',     x: 400,  y: 800, fog: MAX_SAFE_RADIUS, note: 'SW pantry cluster: herb crate, tall crate, flour sacks, prep counter and stacked pots together' },
-  { id: 'freezer_se',    x: 1000, y: 580, fog: MAX_SAFE_RADIUS, note: 'SE quadrant: stove island, east prep counter, walk-in freezer beyond' },
+  //
+  // ── AND MOVED AGAIN for 6631446 (x4). The failure this time was the mirror image of the
+  //    one above: nothing landed inside a prop, so `validate()` stayed green, and the four
+  //    "corner" stations quietly became four MID-NORTH-WEST stations on a map four times
+  //    the size. A guard that only asks "is this legal ground?" cannot see that.
+  { id: 'freezer_nw',    x: 560,  y: 400, fog: MAX_SAFE_RADIUS, note: 'NW corner: the two stacked walk-in freezers at (300,300)/(300,500), prep counter in front' },
+  { id: 'pantry_ne',     x: 2200, y: 500, fog: MAX_SAFE_RADIUS, note: 'NE pantry cluster: flour sacks, herb and produce crates, the east prep counter beyond' },
+  { id: 'pantry_sw',     x: 650,  y: 1700, fog: MAX_SAFE_RADIUS, note: 'SW pantry cluster: herb crate, tall crate, flour sacks, prep counter and stacked pots together' },
+  { id: 'freezer_se',    x: 2240, y: 1600, fog: MAX_SAFE_RADIUS, note: 'SE corner: the two stacked walk-in freezers at (2500,1500)/(2500,1700), crates in front' },
   // ── service counters + decoration density ──────────────────────────────────
-  { id: 'fryer_south',   x: 560,  y: 790, fog: MAX_SAFE_RADIUS, note: 'fryer counter, chalkboard, stacked pots, south apron edge' },
+  { id: 'fryer_south',   x: 1400, y: 1450, fog: MAX_SAFE_RADIUS, note: 'fryer counter, chalkboard, stacked pots, the south hub island' },
   // ── map edge: does the apron hold the frame? ───────────────────────────────
-  { id: 'edge_west',     x: 70,   y: 500, fog: MAX_SAFE_RADIUS, note: 'hard west edge — apron/kerb occupies a third of the frame' },
+  { id: 'edge_west',     x: 70,   y: 1000, fog: MAX_SAFE_RADIUS, note: 'hard west edge — apron/kerb occupies a third of the frame' },
   // ── hazard puddles, approach framing ───────────────────────────────────────
-  { id: 'grease_near',   x: GREASE.x - 130, y: GREASE.y - 95, fog: MAX_SAFE_RADIUS, note: 'grease puddle off-centre, as you approach it' },
-  { id: 'grease_in',     x: GREASE.x, y: GREASE.y, fog: MAX_SAFE_RADIUS, note: 'STANDING IN the grease puddle — the slowed player read' },
-  { id: 'water_near',    x: WATER.x + 130, y: WATER.y + 95, fog: MAX_SAFE_RADIUS, note: 'water puddle off-centre, as you approach it' },
+  // ⚠️ The offsets are FRAME-relative and did not scale (see the header). Their DIRECTION
+  //    changed: the 1x (-130,-95)/(+130,+95) both land inside a hub stove island now.
+  { id: 'grease_near',   x: GREASE.x - 110, y: GREASE.y - 130, fog: MAX_SAFE_RADIUS, note: 'grease puddle off-centre, as you approach it' },
+  // 🚨 `grease_in` NO LONGER STANDS IN THE GREASE, BECAUSE NOTHING CAN. Measured on
+  //    `ec4f5af`, cell by cell over both slow puddles at 1 wu on the SIM's own collision
+  //    predicate (`coverAt(x, y, 0)`, no station clearance): **0 of 7,845 cells inside
+  //    either 50 wu puddle disc is legal standing ground**, and over the full 71 wu slow
+  //    FIELD (radius + half a body, the distance at which the sim starts slowing you)
+  //    exactly **1 of 15,813** is. Three props bury each one — a hub stove island plus a
+  //    herb crate and a produce crate at (1850,1240)/(1850,1330) and their mirrors.
+  //    The nearest legal, reachable ground to the puddle centre is **75 wu** away, i.e.
+  //    OUTSIDE the slow field entirely.
+  //    ⚠️ That is a defect in `src/arena/kitchen.ts`, not in this file, and it is reported
+  //    rather than worked around: two slow hazards that no fighter can enter are dead
+  //    content. This station is placed at that nearest legal cell so the puddle still
+  //    fills its share of the frame, and its note NO LONGER CLAIMS a slowed-player read —
+  //    a station note that describes a state the map cannot produce is the same class of
+  //    lie as a stale fixture.
+  { id: 'grease_in',     x: GREASE.x, y: GREASE.y - 75, fog: MAX_SAFE_RADIUS, note: 'the grease puddle at the closest standable ground — 75 wu out, because its centre is buried under three props' },
+  { id: 'water_near',    x: WATER.x + 90, y: WATER.y + 130, fog: MAX_SAFE_RADIUS, note: 'water puddle off-centre, as you approach it' },
   // ── the closing fog death zone ─────────────────────────────────────────────
   //
   // 🚨 `unstill` — THESE THREE FRAMES ARE NOT STILL WHEN THEY ARE SAMPLED, and it is
@@ -590,9 +673,17 @@ const STATIONS = [
   // +/-0.004 and the chroma aggregate <= 0.0001 run to run, ~100x under every tolerance.
   // So `--still-hud` is OFF by default: seeking a keyframe to t=0 is deterministic but
   // BIASED, and a colour baseline wants an unbiased sample of the shipped look.
-  { id: 'fog_boundary',  x: 1090, y: 500, fog: 420, unstill: 'hud-css', note: 'safe-zone wall ~30wu ahead of the player' },
-  { id: 'fog_inside',    x: 1240, y: 500, fog: 420, unstill: 'hud-css', note: 'standing INSIDE the death zone, 50 HP/s' },
-  { id: 'fog_late',      x: 700,  y: 340, fog: 200, unstill: 'hud-css', note: 'late match, ring closed to 200wu around the pot' },
+  //
+  // ⚠️ THE `fog` RADII DOUBLED WITH THE MAP, and they had to: they are absolute world
+  // units measured from CENTRE, so the 1x 420/200 would have put the ring 420 wu out on a
+  // map whose corner is 1720 wu out — a "boundary" station standing 810 wu deep inside the
+  // death zone and a "late" station outside its own ring. The COMPOSITION is what is held
+  // fixed, because the camera window did not change: the wall is still ~30 wu ahead at
+  // `fog_boundary`, still ~120 wu behind you at `fog_inside`, still ~40 wu ahead at
+  // `fog_late`. Distances from CENTRE: 810 / 960 / 360.6.
+  { id: 'fog_boundary',  x: 2210, y: 1000, fog: 840, unstill: 'hud-css', note: 'safe-zone wall ~30wu ahead of the player' },
+  { id: 'fog_inside',    x: 2360, y: 1000, fog: 840, unstill: 'hud-css', note: 'standing INSIDE the death zone, 50 HP/s' },
+  { id: 'fog_late',      x: 1040, y: 1000, fog: 400, unstill: 'hud-css', note: 'late match, ring closed to 400wu around the pot' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1837,15 +1928,30 @@ async function modeSelftest() {
       console.log('  ⚠ tools/arena.gameplay.json absent — cross-check skipped');
     }
 
-    // Derived by hand from COVER: the NW stove island is [430,300,170,90], so a fighter
-    // centred at (430,300) overlaps it by its whole extent.
-    check('a station on the NW stove island centre is rejected',
-      validate([{ id: 't', x: 430, y: 300 }]).length, 1);
-    // 300 + 45 (half height) + 21 (half fighter) + 24 (clearance) = 390. 420 clears it.
-    check('the verified replacement 60wu clear of that island is accepted',
-      validate([{ id: 't', x: 430, y: 420 }]).length, 0);
+    // Derived by hand from COVER: the NW HUB island is [1080,760,170,90], so a fighter
+    // centred at (1080,760) overlaps it by its whole extent.
+    // ⚠️ OLD WORDING, kept because it is what the 60c5b92 pass was proved on and the
+    //    arithmetic below is a rewrite of it, not a new idea:
+    //      "the NW stove island is [430,300,170,90], so a fighter centred at (430,300)
+    //       overlaps it by its whole extent" / "300 + 45 + 21 + 24 = 390. 420 clears it."
+    //    Both coordinates are floor on the x4 map, so the old pair would have gone on
+    //    passing — the ACCEPT half vacuously, and the REJECT half not at all.
+    check('a station on the NW hub island centre is rejected',
+      validate([{ id: 't', x: 1080, y: 760 }]).length, 1);
+    // 760 + 45 (half height) + 21 (half fighter) + 24 (clearance) = 850. 880 clears it.
+    check('the verified replacement 30wu clear of that island is accepted',
+      validate([{ id: 't', x: 1080, y: 880 }]).length, 0);
     check('a station outside the playfield is rejected',
-      validate([{ id: 't', x: 5, y: 500 }]).length, 1);
+      validate([{ id: 't', x: 5, y: 1000 }]).length, 1);
+    // 🚨 THE KNOWN-BAD FOR THIS FILE'S OWN STALENESS. Every check above is satisfied by a
+    //    1400x1000 ARENA_W/ARENA_H just as happily as by 2800x2000, because they all probe
+    //    the near edge and the middle. These two probe the SIZE: (2000,1500) is ordinary
+    //    floor now and was 600 wu outside the map that the constants above used to name,
+    //    and (2795,1000) is outside this one. A stale ARENA_W/ARENA_H fails the first.
+    check('a station in the far half of the x4 map is ACCEPTED (fails on a 1x ARENA_W/H)',
+      validate([{ id: 't', x: 2000, y: 1500 }]).length, 0);
+    check('...and one 5wu past the FAR wall is still rejected',
+      validate([{ id: 't', x: ARENA_W - 5, y: 1000 }]).length, 1);
     // The flood is what catches sealed ground. Prove it finds SOMETHING and that the
     // arena is currently one piece: every legal lattice node must be reachable.
     const R = buildReachable();
@@ -1854,7 +1960,7 @@ async function modeSelftest() {
     check('the flood actually visited most of the map', R.nReached > nLegal * 0.99, true);
     // And a point inside a prop is by construction not reachable, so the two tests are
     // not the same test wearing two hats.
-    check('a point inside the freezer is not reachable', isReachable(230, 190), false);
+    check('a point inside the freezer is not reachable', isReachable(300, 300), false);
 
     // The baseline-identity guard, exercised through the REAL function, on the real
     // failure: the four stations 60c5b92 left inside props, with their IDs unchanged.
@@ -1883,15 +1989,74 @@ async function modeSelftest() {
     const bad = validate(STATIONS);
     check('every shipped station is on legal, reachable ground', bad.length, 0);
     if (bad.length) bad.forEach((m) => console.log(`      ${m}`));
-    check('the four moved stations are where 60c5b92 needs them',
+    // ⚠️ REVERSED for 6631446. Old wording, kept because five packets quote it and because
+    //    it is the record of what 60c5b92 needed:
+    //      check('the four moved stations are where 60c5b92 needs them', ...,
+    //            'freezer_nw@430,420 freezer_se@1000,580 pantry_ne@1150,420 pantry_sw@400,800');
+    //    All four of those points are still legal, reachable floor on the x4 map, so this
+    //    assertion did not fail when the map quadrupled — it went on pinning four stations
+    //    into one quadrant. Pinning coordinates is still right; the coordinates changed.
+    check('the four corner stations are where 6631446 needs them',
       STATIONS.filter((s) => ['freezer_nw', 'pantry_ne', 'pantry_sw', 'freezer_se'].includes(s.id))
         .map((s) => `${s.id}@${s.x},${s.y}`).sort().join(' '),
-      'freezer_nw@430,420 freezer_se@1000,580 pantry_ne@1150,420 pantry_sw@400,800');
+      'freezer_nw@560,400 freezer_se@2240,1600 pantry_ne@2200,500 pantry_sw@650,1700');
     // The three that were sealed before 60c5b92. Named explicitly so re-sealing the
     // centre line can never quietly restore the old defect.
     for (const id of ['west_lane', 'west_choke', 'fog_boundary']) {
       const s = STATIONS.find((z) => z.id === id);
       check(`${id} (sealed before 60c5b92) is reachable`, isReachable(s.x, s.y), true);
+    }
+
+    // ── 🚨 QUADRANT COVERAGE — the check that would have caught 6631446 on the day ──────
+    //
+    // Every guard above asks "is this station on legal, reachable ground?". Not one of them
+    // asks "does this station set look at the whole MAP?", and that is precisely the hole
+    // the x4 commit fell through: all eighteen 1x coordinates stayed legal, so `validate()`
+    // returned 0 faults while a quarter of the playfield went unsampled.
+    //
+    // A station's frame is the camera's ground window — 579 x 398 wu, a CAMERA property, so
+    // it did not scale with the map. Count frames that OVERLAP each quadrant (a frame on a
+    // centre line legitimately serves two), and require every quadrant to get at least
+    // MIN_PER_QUADRANT of them.
+    //
+    // ⚠️ 4 is a CHOSEN threshold, not a measured one, and it is stated as such for the same
+    // reason the colour rails are: a chosen number presented as a measured one is how
+    // instruments start lying. It is chosen to sit in the measured gap between the two real
+    // inputs below — the 1x list scores 0 in its worst quadrant, this list scores 7.
+    {
+      const VIEW_W = 579, VIEW_H = 398, MIN_PER_QUADRANT = 4;
+      const quadCoverage = (list) => {
+        const quads = [
+          [0, CENTRE.x, 0, CENTRE.y], [CENTRE.x, ARENA_W, 0, CENTRE.y],
+          [0, CENTRE.x, CENTRE.y, ARENA_H], [CENTRE.x, ARENA_W, CENTRE.y, ARENA_H],
+        ];
+        return quads.map(([qx0, qx1, qy0, qy1]) => list.filter(({ x, y }) =>
+          x + VIEW_W / 2 > qx0 && x - VIEW_W / 2 < qx1 && y + VIEW_H / 2 > qy0 && y - VIEW_H / 2 < qy1).length);
+      };
+      const cov = quadCoverage(STATIONS);
+      check(`every quadrant gets >= ${MIN_PER_QUADRANT} station frames  [NW/NE/SW/SE ${cov.join('/')}]`,
+        Math.min(...cov) >= MIN_PER_QUADRANT, true);
+
+      // KNOWN-BAD: the station list EXACTLY AS IT SHIPPED on the 1400x1000 map, verbatim,
+      // scored against the 2800x2000 one. Not a synthetic mutant — the real defect.
+      const ONE_X = [[160, 390], [340, 500], [400, 500], [700, 640], [570, 430], [700, 320],
+        [430, 420], [1150, 420], [400, 800], [1000, 580], [560, 790], [70, 500],
+        [430, 805], [560, 900], [970, 195], [1090, 500], [1240, 500], [700, 340]]
+        .map(([x, y]) => ({ x, y }));
+      const bad1x = quadCoverage(ONE_X);
+      check(`KNOWN-BAD: the shipped 1x list leaves a quadrant EMPTY  [NW/NE/SW/SE ${bad1x.join('/')}]`,
+        Math.min(...bad1x), 0);
+      check('...and it is the SOUTH-EAST quadrant, the corner furthest from the 1x map',
+        bad1x[3], 0);
+      // …and TWELVE of those eighteen are still perfectly legal, reachable ground on the x4
+      // map, which is why the placement guard could not be relied on to catch this. It is
+      // not blind — it flags 6 — but "6 faults" reads as "move six stations", and moving
+      // six stations would have left the same quadrant empty. **A partial catch is the most
+      // expensive kind**: it produces a to-do list that, completed, still ships the bug.
+      // MEASURED, not asserted from the shape: 6 of 18.
+      check('...while 12 of those 18 are STILL legal, reachable ground — so acting on the '
+        + 'placement guard alone would have "fixed" this and left SE empty',
+        18 - validate(ONE_X.map((p, i) => ({ id: `x${i}`, ...p }))).length, 12);
     }
   }
 
