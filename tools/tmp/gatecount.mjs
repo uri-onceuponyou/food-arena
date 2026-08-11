@@ -347,6 +347,9 @@ const SKIP = [
   // like a well-behaved offline count.
   ['tools/tmp/hw_ord.mjs --selftest',    'browser', 'renderOrder choice for a transparent ground-stack material; ignores --selftest, runs the real probe'],
   ['tools/tmp/hw_burner.mjs --selftest', 'browser', 'the burner ablation with its positive control; ignores --selftest, runs the real probe'],
+  ['tools/tmp/ft_faces.mjs --selftest', 'browser', 'text-overflow census + font rulers across 5 screens x 4 viewports'],
+  ['tools/tmp/ft_glyphs.mjs --selftest --url <snapshot>', 'browser', 'which codepoints a loaded face actually DRAWS — the question a network waterfall cannot ask'],
+  ['tools/tmp/ft_basepath.mjs --dist <dist> --base /food-arena/', 'browser', '@font-face url() at a non-root base; ab_basepath structurally cannot see it'],
   ['tools/tmp/np_ab.mjs',        'browser', 'the N=2 presentation identity battery: 4 served arms, 9 compared fields, per-file tree control, roster-swap known-bad'],
   ['tools/tmp/np_nfighter.mjs', 'browser', 'N=3..6 presentation self-consistency + slot-swap known-bad'],
   ['tools/tmp/ab_basepath.mjs --selftest', 'browser', 'four vite builds plus a real page per cell; verdict is a PASS/FAIL matrix, not a count'],
