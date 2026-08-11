@@ -914,3 +914,281 @@ self-describing.
 → **The same defect underlies the stale-cache bug in the same tool: a tool that gives no observable
 account of its own state cannot be distinguished from a broken one.** Judge a long-running probe by
 its own per-row output, never by CPU or mtime.
+
+---
+
+## 17. 🚨 TEN CONTROLS THAT COULD NOT FAIL, IN ONE SESSION — none caught by another check
+
+§13 ends with the rule *"ask of every assertion: what implementation would FAIL this?"* The next
+session produced **ten** that no implementation could. Every one was found by an agent
+**re-deriving something it had been told was already true** — not one by a gate, a review, or a
+second run.
+
+**The mechanisms are all different and all invisible, which is why they are enumerated rather than
+summarised:**
+
+1. a fixture pointing at **a herb crate** — and its sibling, *"24 wu from the sink counter"*, was
+   open floor
+2. an **"axis mirror" mirroring about the OLD centre** (`x=700` on a map whose centre is 1400).
+   Both of those were **green the whole time**
+3. a **known-bad placed where the bug could not express itself**, so both arms passed and the
+   control certified the check it existed to falsify
+4. **`[].every()` returning `true` after a fix emptied the filtered set — three times, in three
+   files.** Assert `length === N` *before* `every()`
+5. a **differ blinded to a field that had nothing to drop yet** — the fighters had not met, so `hp`
+   had not moved in either arm
+6. a **wrong-base demonstration sitting inside the countdown**, where nothing moves, so the wrong
+   base and the right one produce identical frames
+7. a **sentinel written onto a field that already held it**
+8. a **call-site census counting the function DECLARATION as a call site** — it printed `ok` beside
+   an evidence line describing the failure
+9. a suite reporting **227 passed, 0 failed, unchanged** straight through a feature rewrite whose
+   struct grew two fields (it is 271 now)
+10. **two arms of ONE instrument false BY CONSTRUCTION** — the sub-head below
+
+**The compression, and it is this session's single most useful sentence:**
+
+> **A passing test is not evidence the thing it points at is right. `--selftest` validates a tool's
+> LOGIC, never where the tool is POINTED.**
+
+`valuescan --selftest` read **105/105** while **14 of its 18 stations were in the wrong quadrant**
+and **eleven were standing inside solid props**. `np_nfighter` read **62/62** with its measuring ring
+**1,077 wu off centre**. The logic was flawless in both. Aim is a different property and no amount of
+logic testing can reach it.
+
+### A check that compares two numbers must compare the same KIND of number
+
+`hl_sweep`'s SWAP arm failed **12 of 22** for a day and was the only thing holding the instrument
+INVALID. It was not a defect in the subject at all. **Eleven of the twelve failures were luma-only
+and all the same sign** — and that signature is diagnostic:
+
+> `cloth.bg.luma` is the **rendered frame**; `clothColor()` is the **material**. A lit surface reads
+> brighter than its own albedo, so the **0.06** threshold was cutting through the middle of **one
+> continuous population**, with rows landing either side of it by **0.001**.
+
+Replaced with a nearest-match test — *is this closer to cloth or to home* — where the lighting offset
+cancels: replayed on the recorded 23-weapon run, **11/23 → 22/23**, tightest margin **7.0×**,
+known-bad turns all 23 red, the other seven controls byte-identical.
+
+**That was the SECOND arm of the same tool to be false by construction.** The first was PIX:
+`vfx.ts` splits on the **weapon's** colour and `hl_sweep` split on the **halo material's** — the same
+number *only while the bug existed*. One instrument, two arms, both comparing quantities that were
+equal by accident.
+
+→ **A threshold between two populations is meaningless unless both sides were measured the same
+way.** The tell is cheap: if the failures are **one-signed** and **cluster against** the threshold
+rather than away from it, there is one population, not two.
+
+### An assertion pinned to a BUG goes red the moment the bug is fixed
+
+`kx_seatfair` §A3 asserted *"the divergence is exactly the declared one"*. `c469da2` then fixed the
+generator, and a **correct** tree failed the gate. The repair is not a weaker assertion — it is
+knowing which kind of statement you are making:
+
+- a claim about an **invariant** is an assertion. §A3 was re-pointed at one that outlives the fix: it
+  calls the generator's own `build()` instead of regexing the source, so the mirror transform and the
+  seat interleave are under test, and it now asserts **agreement**.
+- a claim about a **defect's current extent** is a **census, and must be PRINTED, not asserted.**
+
+`sp_place` encodes the second in a comment over the loop that produced its own headline finding —
+*"NOT an assertion: a row that asserts a defect's PRESENCE goes red the day it is fixed"* — and
+prints `slow puddle @x,y r: N of M cells standable ← 🔴 NOBODY CAN EVER ENTER IT` on every run. The
+finding stays visible and can never quietly become a lie.
+
+---
+
+## 18. 🚨 A STALE COORDINATE THAT IS STILL LEGAL — the class nothing here could see
+
+`6631446` changed two constants: `ARENA_W/H`, **1400×1000 → 2800×2000**. Everything *derived* from
+them was correct that commit. Every literal **copy** of the old geometry began describing a map that
+does not exist — and stayed green for a whole session, because:
+
+> **The 1× playfield is exactly the NW quadrant of the ×4 one, so every stale coordinate stayed
+> LEGAL.**
+
+A bounds check passes. A cover check passes. `--selftest` passes. The number is simply pointing at
+the wrong quarter of a map four times the size.
+
+**Eleven were found one at a time, each by accident, four of them green throughout.** The systematic
+sweep then found **12 more** — 821 candidates, 94 flagged, ~50 adjudicated, **one false positive
+(~0.5%)** — plus **63 enumerated and frozen** on a stated risk. A plain grep for the thirteen suspect
+numbers returns **2,534 hits across 639 files** and is useless, because most `1000` and `500` are
+milliseconds; `al_lib.mjs` extracts by **syntactic role** instead — `?px=`/`&py=` in a URL,
+`fogRadius:`, self-declared `{w,h,cx,cy,maxR}`, named arena constants, station tables in all three
+row shapes.
+
+**The worst instance was the tool that plays the game.** `tools/match-play.mjs`, this project's only
+watch-the-whole-thing-on-screen instrument, held `ARENA={w:1400,h:1000,cx:700,cy:500,maxR:890}`: it
+sent its scripted hands to a fog-avoidance point **1,077 wu inside the NW quadrant**, read every
+telemetry radius **2.23× low** and every sim timestamp **4× high**, and **11 of its 16 shot marks
+were unreachable** on a 45 s clock. `h49_chips` spawned **2 of 6 seats outside the ring, taking
+50 HP/s from the first tick.** And `simfix.mjs` sat at **NW 18 / NE 0 / SW 0 / SE 0**, four stations
+inside a `CoverBox` — so **every A/B it produced compared two pictures of the wrong quarter of the
+map.** It now reads `window.__matchArena` live and **THROWS rather than defaulting**, which is the
+repair that generalises: *a fixture must derive its aim from the subject, or refuse to run.*
+
+### Legality is not fairness
+
+Run on the **stale spawn table**, `x4_layout` printed **✅ EVERY CHECK PASSED** and `--selftest`
+**54/54**. Those seats were legal, symmetric, ~892 wu apart and inside one nav component. They were
+also worth **2.680 places of 6** in spawn advantage. Every property the checker knew how to test was
+true; the property that decided the game was not one of them.
+
+→ **`gatecount` cannot see this class by construction.** It checks that a gate's *count* matches its
+documented count, and **a mis-aimed fixture keeps its count perfectly.** `tools/tmp/al_guard.mjs` is
+the gate that can: three arms — the exact 1× scalars, one-quadrant clustering, and *standing inside a
+prop* — behind an acknowledgement list that **may only shrink**.
+
+⚠️ **Would another resize be safe? "Safer, not safe."** Dozens of files now hold a hardcoded **2800 /
+1985**, so **today's correct literals are the next generation's stale ones.** The guard catches the
+class; it does not stop the class being created.
+
+### And the ARITHMETIC half of the same rot is invisible to a coordinate sweep
+
+Three prose defects survived the repo-wide literal sweep because they are **divisions, not
+positions**, and a position-keyed census cannot see a wrong quotient. Sharpest: `hud.ts`'s
+imminent-warning worked example computes `199.2 / (993/45000) = 9.0 s` and the real answer is
+**4.5 s** — *the alarm documents twice the lead it actually gives*, because the edge now sweeps
+44.1 wu/s instead of 22.1. **Nothing executable was wrong in any of the three**; all derive at run
+time, which is precisely why they could rot unnoticed.
+
+⚠️ And note the gate-design constraint this project's own house style imposes: because the rule is
+**keep the old wording above the new with the reason**, a grep for a stale number **fails a correctly
+fixed file**. `rc_prose.mjs` therefore tests not *"is the number present"* but **"is it QUOTED"** —
+derived through an esbuild bridge, so the expected value comes from the code rather than from the
+comment. Run against the pre-change tree it is red on all four known sites **and on three nobody had
+found.**
+
+---
+
+## 19. The ORCHESTRATOR was wrong six times, and agents caught five
+
+The main conversation is not a privileged source. Six things it published this session were
+falsified, and **five were overturned by an agent that re-derived a premise instead of pasting it:**
+
+| the claim | what was true |
+|---|---|
+| *"`level_lab` is pinned at its instrument ceiling"* | **FALSE.** 40 of 110 cells unsaturated and every one rises, max **93.8 pp**; the whole grid moves **55.00% → 99.32%**. **One hand-picked cell had saturated and it was generalised to the instrument.** |
+| *"`git archive HEAD` is the clean-tree method"* — recommended **twice** | **WRONG TREE.** Five gates shell out to `git` and die without a `.git`: **8 faults where a real worktree reports 2 — a wrong CAUSE, not a wrong number.** Use `git worktree add --detach`, with `node_modules` **and** `reference` symlinked; a worktree with no `node_modules` kills seven gates on a missing import and they look exactly like seven broken gates. |
+| *"`hl_sweep`'s fix emptied its own validator corpus"* | **FALSE.** The corpus was never empty — the **default split stopped partitioning it** (see §17). |
+| *"the rank has to come out of the sim's final state"* | **It cannot.** Every loser ends `alive:false, hp:0, deaths:1` — **1.000 distinct (hp,deaths) among losers** at 2, 3, 4 and 6 seats — so a final-state resolver ranks by nothing and degenerates to slot order. Reversed elimination order agrees with slot order in **0.0% of six-seat matches**. The order is in the **death event stream**. |
+| a routed patch, `.map(s => roster[s]).filter(Boolean)` | **Silently DROPS fighters** when the order is short, duplicated or out of range — a fighter vanishing off the result screen, invisible at the two seats everything else is tested at. Computed rather than argued: on a 3-entry order it lists **3 of 5 losers.** Shipped code validates the order **is a permutation** and otherwise falls back wholesale. |
+| two swapped SHAs, and an `h49_chips` row that never said what it was quoted as saying | caught on re-reading, not by an agent |
+
+→ **A brief is a hypothesis, not a fact, and the orchestrator's confidence is not evidence.** Say so
+in every brief: *verify the claims you are given; a claim that does not check out is a result, not a
+nuisance.* Five of these were expensive to be wrong about and cheap to catch — the level_lab one
+would have retired a working instrument, and the `filter(Boolean)` one would have shipped a result
+card that deletes players.
+
+⚠️ **And when a correction lands, keep the old wording next to it with the reason.** Done five times
+this session and never deleted — `docs/STATE.md` and `docs/DECISIONS-FOR-URI.md` both carry the
+superseded claim above its replacement, because the *reason a wrong thing was believed* is the part
+that stops it being believed again.
+
+---
+
+## 20. A STANDARD ERROR IS NOT ALWAYS THE SCALE OF THE THING YOU ARE MEASURING
+
+Seat fairness is *"how far apart are the six seats' mean finishing places"*. The reflex is a standard
+error on a mean. **It is the wrong quantity**: the statistic is the **RANGE OF SIX CORRELATED
+MEANS** — correlated because the six places in one match must sum to 21, so one seat doing well
+*forces* another to do badly. No closed form applies.
+
+The floor had to be **built**, by **label permutation**: shuffle the seat labels within each match,
+4,000 reps, preserving the place distribution exactly. That turned an apparent **8.5× the floor**
+into **1.09×**, and the worst seat from **43.8σ** to **2.54 against a null 95th percentile of 2.66**.
+Same data. The nominal test was answering a question nobody had asked.
+
+**And the under-powered version of the same measurement had already misled its own author:**
+
+| matches | candidate A | candidate B |
+|---|---|---|
+| 200 | 0.40 | 0.70 |
+| 600 | **0.39** | **0.34** |
+
+**The ranking REVERSED.** Shipping on the 200-match run would have taken the worse layout — and a
+seat with a **2 wu** legal halo against 20–30 wu for every seat that shipped.
+
+→ Two rules, and the second is the general one:
+- **Do not re-tune a six-seat layout on a 200-match run.** The floor is **0.315 places** (label
+  permutation) and the observed gap at 200 was inside it.
+- **Before quoting an error bar, ask whether it describes the statistic you are actually reporting.**
+  A per-unit SE says nothing about a *range*, a *max*, or any order statistic — and a range over
+  correlated units has no analytic floor at all. When there is no formula, **permute the labels and
+  measure the null yourself.** Cheap, assumption-free, and it is the only thing that made this number
+  honest.
+
+---
+
+## 21. The JOIN between two correct pieces is where the bugs live
+
+Three in one night, all in the payout path, none findable by either side's own tests:
+
+- **A whole league priced off ONE curve.** `lobby.ts` built a single `placementCurve` and applied it
+  to the field — while `trophyRoad.ts:placementCurve` says outright that *"a field whose members sit
+  at different standings needs one call per finisher"*, and a league is exactly that field. Measured:
+  a **3,000-trophy loser priced on a curve built at 0 trophies is charged 0 instead of −10**, because
+  the grace band belongs to the rookie, not the veteran. **Ten trophies a match, silently, forever.**
+- **Every match paid as a duel.** `matchScreen.ts:124` was
+  `ctx.profile.recordResult(winner === 'player')` — a **boolean**, forwarded as
+  `recordPlacement(won ? 0 : 1, MIN_FIGHTERS)`. The only payout call site outside the economy module,
+  and not seat-aware. At 500 trophies a six-player match paid **2nd, 3rd, 4th AND 5th the LAST-PLACE
+  rate** (−5 / 20 / 35) instead of 11/52/87, 7/44/74, 3/36/61 and −1/28/48. **The 3–6 seat curve was
+  complete, correct, tested 21/21 — and unreachable from the game.**
+- **The same defect re-installed one commit later, in a second ladder.** XP turned out to be its own
+  two-outcome ladder; the proposed binary stopgap **pays 2nd of six and 6th of six identically** —
+  the exact defect normalised rank exists to remove. Rejected on that number, and interpolated on the
+  same normalised rank instead.
+
+→ **Both pieces being right is not evidence the system is right, and a unit gate is the exact shape
+that cannot see the join.** This is why the six-player **end-to-end** acceptance run was worth its
+cost, and it is the same reason **Uri's own two best bug reports were invisible to every gate**
+(§10): he was the only thing exercising the whole path.
+
+### Corollary — ask what your gates structurally CANNOT reach
+
+Found while wiring the above: **nothing under `src/ui/` can be imported by any Node instrument in
+this repo**, because its imports are extension-less and resolve only under Vite/`tsc`. **No Node gate has ever
+reached the UI layer** — `nw_profile` esbuilds a bridge entry just to get at `profile.ts`. That is
+not a defect; it is **a coverage shape nobody chose**, and it explains why the two payout joints above
+both sat in UI-adjacent code. **Every project has one. Find yours before you trust a green board.**
+
+---
+
+## 22. §6 read backwards: judge at shipped framing, DIAGNOSE at 4×
+
+§6 says judge at shipped framing, and it stands. Its complement is real too: **a defect can be
+invisible to every layout check and obvious the moment you magnify it.**
+
+The result card's trophy chip **measured square at 18×18** — so no layout row could see anything
+wrong — and at 4× it rendered as **a gold sliver with a dash under it**, because its handles and stem
+are `--fa-ic-ink` strokes, near-black by default, on a near-black plate. Fixed at 22 px with
+`--fa-ic-ink: #F3E7D6`; all three icons then read at a glance.
+
+→ Exactly the two-camera rule in `CLAUDE.md`, one level down: **the magnified view does not make the
+defect wrong, it makes it VISIBLE.** A contrast or geometry fault is a fault at every zoom, so
+diagnose where it is legible and confirm where it ships. A number that describes a *bounding box*
+cannot describe *what is inside it* — **no layout assertion is a substitute for reading the PNG.**
+
+---
+
+## 23. `tools/tmp` is a FLAT NAMESPACE shared by every agent
+
+A pass wrote `tools/tmp/pj_*.mjs`. `tools/tmp/pj_probe.mjs` was already a **committed** projectile
+legibility probe, and **the write destroyed 1,294 lines of it.** Recovered whole from git, nothing
+lost, declared rather than quietly fixed, and the new files renamed `mp_*`.
+
+`??` in `git status` is the only thing separating your files from a peer's, and it does not warn you
+before `Write` overwrites a **tracked** one.
+
+→ **`git ls-files tools/tmp | grep <prefix>` before you claim a prefix.** This is rule 9's sibling and
+its blind spot: **one-owner-per-file protects the files that exist; nothing protects the name of a
+file you are about to create.**
+
+**Same shape, same night, a different resource:** three agents collided on the **shared default output
+path** `shots/vl` — two trees, one directory. A sweep found **119 default output sites** across the
+tools directory. **A default that is a fixed path is a shared resource**, so a tool that writes to one
+must either claim it (a lock file, a PID suffix) or take it from the caller. And a related smell worth
+recognising: `kx_seatfair --emit`'s selftest left an **empty JSON in `tools/tmp` on every run** — a
+tool that litters the shared namespace as a side effect of *testing itself*.
