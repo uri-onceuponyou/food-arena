@@ -202,10 +202,26 @@ if (import.meta.main && args.selftest) {
   // projectile's own speed cannot be caught by a turn rate this low, and a stationary one
   // always is.
   {
-    const perp = fireOnce('sushi', 'Catch', 95, 160, 90);
+    // ⚠️ THE SPEED IS DERIVED NOW. IT USED TO BE A TYPED `160`, AND THE OLD LINE WAS:
+    //
+    //     const perp = fireOnce('sushi', 'Catch', 95, 160, 90);
+    //
+    // Section D below already records that Big Catch moved from `SPEED.maxSlow` to
+    // `SPEED.max` — **160 -> 280 wu/s** — and this row kept the literal. So the phrase in
+    // its own name, *"the projectile's own speed"*, stopped naming the projectile's speed,
+    // and 160 drifted into the band where the target is not fast enough to cost anything.
+    // `DECISIONS §50b` (`af35362`, retirement denominated in the TARGET's frame) widened
+    // that band until the cell read **27/27 against a stationary 27/27** and the row went
+    // red. Measured on the shipped tree: perpendicular at the DERIVED 280 wu/s takes
+    // **0 of 27**, so the claim is true again and it is true for the stated reason.
+    //
+    // 🚨 A literal that names a value living in `rules.ts` is a fixture that will go stale
+    // the day that value moves — the seventh instance of that class this session.
+    const spd = CHARACTERS.sushi.weapons.find((w) => w.key === 'Catch').speed;
+    const perp = fireOnce('sushi', 'Catch', 95, spd, 90);
     const still = fireOnce('sushi', 'Catch', 95, 0, 90);
     ok('perpendicular flight at the projectile\'s own speed loses ground on a stationary one',
-      perp.dealt < still.dealt, `${perp.dealt} vs ${still.dealt}`);
+      perp.dealt < still.dealt, `${perp.dealt} vs ${still.dealt} at a DERIVED ${spd} wu/s (was a typed 160)`);
   }
   {
     const a = fireOnce('sushi', 'Catch', 95, 120, 0);
@@ -240,14 +256,43 @@ if (import.meta.main && args.selftest) {
   // Both cells are still printed, deliberately. A reader who sees `18/27  27/27` can tell
   // that one cell went full *because the weapon was fixed*, which is information; a reader
   // who only saw a green tick could not.
+  //
+  // 🚨 AND THE THIRD VERSION IS HERE BECAUSE THE SECOND WENT STALE THE SAME WAY THE FIRST
+  // DID — BY SATURATION, NOT BY BEING WRONG. It read:
+  //
+  //     const partial = [
+  //       fireOnce('sushi', 'Catch', 95, 120, 90),   // perpendicular at player speed
+  //       fireOnce('sushi', 'Catch', 95, 85, 45),    // 45° at flee speed
+  //     ];
+  //
+  // `DECISIONS §50b` (`af35362`) denominates projectile retirement in the TARGET's frame,
+  // which buys reach back against anything that is running — so BOTH hand-picked cells
+  // resolved to a clean 27/27 and `.some` had nothing left to be true of. Twice now, two
+  // cells have been enough to state the claim and not enough to keep stating it.
+  //
+  // **So the cells are a DECLARED GRID expressed as fractions of the projectile's own
+  // speed, and the whole grid is printed.** Measured across 6 fractions × 3 headings on the
+  // shipped tree: 9 of 18 cells are strictly partial, and the boundary moved from ~120 wu/s
+  // to ~200 wu/s under §50b, which is the finding a single saturated cell was hiding.
+  //
+  // ⚠️ AND THE GRID'S OWN SIZE IS ASSERTED FIRST. `[].some(…)` is `false` and `[].every(…)`
+  // is `true`; the ranged pass caught a fallback guard passing on an emptied set by exactly
+  // that route. A filter before an assertion needs its input proved non-empty.
   {
-    const partial = [
-      fireOnce('sushi', 'Catch', 95, 120, 90),   // perpendicular at player speed
-      fireOnce('sushi', 'Catch', 95, 85, 45),    // 45° at flee speed — FULL since SPEED.max
-    ];
+    const spd = CHARACTERS.sushi.weapons.find((w) => w.key === 'Catch').speed;
+    const cells = [];
+    for (const frac of [0.43, 0.57, 0.71, 0.86, 1.00, 1.14]) {
+      for (const th of [45, 90, 135]) {
+        const speed = Math.round(frac * spd);
+        cells.push({ speed, th, r: fireOnce('sushi', 'Catch', 95, speed, th) });
+      }
+    }
+    ok('the non-degeneracy grid is NON-EMPTY before anything is filtered out of it',
+      cells.length > 0, `${cells.length} cells at ${spd} wu/s × {0.43…1.14} × {45°,90°,135°}`);
+    const partial = cells.filter((c) => c.r.dealt > 0 && c.r.dealt < c.r.expected);
     ok('some cell IS strictly partial — the rig resolves more than {0, full}',
-      partial.some((r) => r.dealt > 0 && r.dealt < r.expected),
-      partial.map((r) => `${r.dealt}/${r.expected}`).join('  '));
+      partial.length > 0,
+      `${partial.length} of ${cells.length} partial · ${cells.map((c) => `${c.speed}@${c.th}=${c.r.dealt}/${c.r.expected}`).join(' ')}`);
   }
   // ── E. A NON-HOMING projectile is UNAFFECTED by the target's heading past the
   //       point of no return, because it never re-aims. If this failed, the rig

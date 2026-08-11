@@ -632,8 +632,12 @@ if (args.selftest) {
     {
       const rawHub = scaleArena(src, { mode: 'hub', k: 2, matchDurationMs: MATCH_DURATION_MS });
       const ours = tileConcealment(src.concealment ?? [], src.width, src.height, 2);
+      // ⚠️ `ours.length > 0` is load-bearing: two EMPTY lists stringify identically, so
+      // without it this row would pass loudest exactly when `scaleArena` had dropped the
+      // field again — the failure it exists to detect. Same shape as a `.every()` over an
+      // emptied set returning true, which the ranged pass caught in its own fallback guard.
       ok('A1b …and at k=2 it tiles them EXACTLY as this file does, so fixture()\'s re-add is a no-op and only the keepout cut still bites',
-        JSON.stringify(rawHub.concealment) === JSON.stringify(ours),
+        ours.length > 0 && JSON.stringify(rawHub.concealment) === JSON.stringify(ours),
         `scaleArena ${(rawHub.concealment ?? []).length} vs tileConcealment ${ours.length}, identical: ${JSON.stringify(rawHub.concealment) === JSON.stringify(ours)}`);
     }
     // KNOWN-BAD for A1: the historical behaviour must still be CAUGHT by the same comparison,

@@ -323,7 +323,31 @@ const OFFLINE = [
   ] },
   { key: 'tools/tmp/ey_pacman.mjs --selftest', probes: [pr(['tools/tmp/ey_pacman.mjs', '--selftest'], /^ey_pacman selftest: (\d+)\/\d+\s*$/m)] },
   { key: 'tools/tmp/cf_taper.mjs --selftest', probes: [pr(['tools/tmp/cf_taper.mjs', '--selftest'], /^cf_taper --selftest: (\d+) pass, \d+ fail/m)] },
-  { key: 'tools/tmp/hm_audit.mjs --selftest', probes: [pr(['tools/tmp/hm_audit.mjs', '--selftest'], S)] },
+  // ⚠️ `tools/tmp/hm_audit.mjs --selftest` was registered here at 12 and is GONE — the file
+  //    was RETIRED 2026-08-11, the `perf_tier.mjs` precedent four rows above the SKIP list's
+  //    end. Two independent reasons, and neither is "it went red":
+  //      (a) ITS PURPOSE IS DISCHARGED. It existed to PRICE the projectile-retirement
+  //          options; `DECISIONS §50b`/`af35362` shipped the target-frame option, and its
+  //          closed form `reach = range − S·flight + hitRadius` is a property of the OLD
+  //          rule, so a table computed from that arithmetic now prints the old answer with
+  //          total confidence on a tree where it is false.
+  //      (b) ITS STAGING WAS STRUCTURALLY FRAGILE. `--rules` substituted on LITERAL SOURCE
+  //          STRINGS (`p.traveled += Math.hypot(moveX, moveY);` and the `p.traveled >=
+  //          w.range` test), both rewritten by that pass, so it threw `matched 0 times,
+  //          refusing to guess`. It refused loudly rather than measuring an unpatched sim,
+  //          which is the correct behaviour and also the end of the road for that method.
+  //    `tools/tmp/tf_reach.mjs` SUBSUMES the measuring half and is registered below: it
+  //    MEASURES the sim instead of computing a law, and prints the closed form beside it as
+  //    a control. Nothing imported `hm_audit` — every other mention of it is prose.
+  //    §F1 asserts every OFFLINE probe points at a file that EXISTS, so the deletion and
+  //    its de-registration had to land together or not at all.
+  //
+  // ── THE RANGED PASS'S OWN INSTRUMENTS (`DECISIONS §50b`/`§63`) ────────────────────────
+  // Both offline and fast — timed before registering (the `hw_ord` lesson): 0.8 s and 0.2 s.
+  // Neither imports playwright; both guard their CLI on `import.meta.main`.
+  // ⚠️ NUMERATOR, not `SLASH_ASSERT`'s denominator — `hc_occluders`'s rule.
+  { key: 'tools/tmp/tf_reach.mjs --selftest', probes: [pr(['tools/tmp/tf_reach.mjs', '--selftest'], /^\s*(\d+)\/\d+ assertions passed\s*$/m)] },
+  { key: 'tools/tmp/tf_bitid.mjs --selftest', probes: [pr(['tools/tmp/tf_bitid.mjs', '--selftest'], /^\s*(\d+)\/\d+ assertions passed\s*$/m)] },
   { key: 'tools/tmp/dup_census.mjs --selftest', probes: [pr(['tools/tmp/dup_census.mjs', '--selftest'], /^\s*(\d+)\/\d+ selftest arms passed\s*$/m)] },
   { key: 'tools/tmp/rg_neckz.mjs --selftest', probes: [pr(['tools/tmp/rg_neckz.mjs', '--selftest'], /^\s*(\d+) pass, \d+ fail\s*$/m)] },
   { key: 'tools/tmp/rg_taper.mjs --selftest', probes: [pr(['tools/tmp/rg_taper.mjs', '--selftest'], /^\s*(\d+) pass, \d+ fail\s*$/m)] },
@@ -353,11 +377,17 @@ const OFFLINE = [
   { key: 'tools/tmp/ac_engage.mjs --selftest', probes: [pr(['tools/tmp/ac_engage.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/ac_homing.mjs --selftest', probes: [pr(['tools/tmp/ac_homing.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/bl_vitals_gate.mjs --selftest', probes: [pr(['tools/tmp/bl_vitals_gate.mjs', '--selftest'], SLASH_ASSERT)] },
-  // Captures the NUMERATOR, not the denominator. `SLASH_ASSERT` above takes the denominator, which
-  // is fine when a tool only prints on success but would let `hc_occluders 3/4` satisfy a doc value
-  // of 4 — a failing guard reported as an intact one. This is the guard for the silent-occluder
-  // class, so it is the last one that should be able to fail quietly.
-  { key: 'tools/tmp/hc_occluders.mjs --selftest', probes: [pr(['tools/tmp/hc_occluders.mjs', '--selftest'], /^hc_occluders\s+(\d+)\/\d+\s*$/m)] },
+  // ⚠️ `tools/tmp/hc_occluders.mjs --selftest` was registered OFFLINE here and has MOVED TO
+  //    SKIP — **it launches Chromium** (`const { chromium } = await import('playwright')`),
+  //    so it was booting a GPU probe on every `gatecount` run. Exactly the `hw_ord` /
+  //    `hw_burner` defect, which this file already records two ways, and it presented the
+  //    same way: `GATE-FAIL … exited 1` inside a full battery run, against **exit 0 on three
+  //    consecutive standalone runs of the same worktree**. A count that only fails under
+  //    contention reads as doc drift and gets "fixed" in the doc.
+  //    The numerator note below is kept with it, because it is still the right pattern for
+  //    whoever runs it: `SLASH_ASSERT` takes the denominator, which would let `hc_occluders
+  //    3/4` satisfy a documented 4 — a failing guard reported as an intact one, in the guard
+  //    for the silent-occluder class.
   { key: 'tools/tmp/conceal_lab.mjs --selftest', probes: [pr(['tools/tmp/conceal_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/burger_lab.mjs --selftest',  probes: [pr(['tools/tmp/burger_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/driver_guard.mjs',           probes: [pr(['tools/tmp/driver_guard.mjs'], /^driver_guard: (\d+) passed, \d+ failed/m)] },
@@ -413,6 +443,7 @@ const SKIP = [
   // like a well-behaved offline count.
   ['tools/tmp/hw_ord.mjs --selftest',    'browser', 'renderOrder choice for a transparent ground-stack material; ignores --selftest, runs the real probe'],
   ['tools/tmp/hw_burner.mjs --selftest', 'browser', 'the burner ablation with its positive control; ignores --selftest, runs the real probe'],
+  ['tools/tmp/hc_occluders.mjs --selftest', 'browser', 'the silent-occluder sweep — it imports playwright and launches Chromium; registered OFFLINE by mistake until 2026-08-11, where it read exit 0 standalone and GATE-FAIL inside a contended battery run'],
   ['tools/tmp/bw_brow.mjs --selftest', 'browser', 'column-wise brow-to-eye gap and eye-region ink share, ablated through the shipped render path'],
   ['tools/tmp/si_gap.mjs --selftest',  'browser', 'delivered geometry of a shadowed CSS declaration on the live element'],
   ['tools/tmp/si_fit.mjs --selftest',  'browser', 'what a larger icon costs its host — line box, overflow, tap target'],
