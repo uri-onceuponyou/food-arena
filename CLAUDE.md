@@ -48,6 +48,15 @@ Not style preferences. Every one exists because breaking it cost hours.
    injects `PREVIEW_BASE` into the child automatically.
    ⚠️ **Never `URL=$(node tools/snapshot.mjs --json | ...)`** — `--json` does not exit; that hangs forever.
 
+   🚨 **BUT "FROZEN" IS NOT "CLEAN", AND THE SHIPPED LAUNCHER FREEZES THE *WORKING* TREE.**
+   `with_snapshot` spawns `snapshot.mjs` with **no `cwd`**, so what it copies is whatever directory
+   the shell happens to be in — peers' half-saved edits included. It stops changes *during* your run;
+   it does not remove the ones already sitting there. That is right for the ordinary case and wrong
+   for **any A/B you will quote**, which must describe a commit that actually exists.
+   → Build a detached worktree (rule 8's recipe) and point at it:
+   `node tools/tmp/sx_snap.mjs --root <dir> -- <cmd> --url {URL}` — identical `{URL}`/`{DIR}` and
+   `PREVIEW_BASE` contract, cwd-aware, same PID-recorded teardown.
+
 3. **Judge rendered pixels. Read the PNG with the Read tool and actually look at it.** Judging a
    description instead of an image is this project's most common failure.
 
@@ -99,7 +108,25 @@ Not style preferences. Every one exists because breaking it cost hours.
    the blind critic itself, a driver copied into ten tools, a cache serving stale JSON, and a guard
    whose coverage *shrank* when a bug was fixed. **A guard that has not been shown to FAIL on the bug
    it guards against is not a guard.** `tools/tmp/sentinel.mjs` encodes this: MOVES, HOLDS, ORDERS,
-   SELF-PAIR. ⚠️ **This line quoted sentinel's own count and carried a stale `17/17`** <!-- gatecount: historical -->
+   SELF-PAIR.
+
+   🚨 **AND A GUARD CAN PASS BY HAVING NOTHING LEFT TO CHECK — `[].every()` returns `true`.** That
+   exact vacuity fired **three times, in three files, in one session**, always because a fix *emptied
+   the filtered set the assertion ran over*. Same class, different disguises, all green: a fixture
+   pointed at the wrong object; a known-bad planted where the bug **cannot express itself**; a differ
+   blinded to a field that had nothing to drop yet; a sentinel written onto a field already holding
+   it; a wrong-base demo staged inside the countdown, where nothing moves; a census counting the
+   **function declaration** as a call site; and two arms of one instrument false *by construction* —
+   comparing a rendered frame's **luma** against a material's **colour**, incommensurable units, so a
+   single threshold cut through one continuous population.
+   → **If you FILTER a set before asserting over it, assert the set is NON-EMPTY FIRST.**
+   → **`--selftest` validates a tool's LOGIC. It never validates where the tool is POINTED.**
+   `valuescan` read a perfect selftest while 14 of its 18 stations sat in the wrong quadrant and
+   eleven stood inside solid props. **A passing test is not evidence that the thing it points at is
+   right**, and every one of these was caught by an agent **re-deriving something it had been told
+   was already true** — never by another check.
+
+   ⚠️ **This line quoted sentinel's own count and carried a stale `17/17`** <!-- gatecount: historical -->
    long after it was 32 — one of six counts that went stale in a single session, every one found by
    an agent tripping over it rather than by a check. Counts now live in exactly one place,
    `docs/TOOLS.md`'s gate table, and `node tools/tmp/gatecount.mjs` refuses a second copy in this
@@ -116,7 +143,23 @@ Not style preferences. Every one exists because breaking it cost hours.
    is the natural way to pull a branch with a dirty tree — so the ban is easy to break while trying
    to be careful. Done 2026-08-06; it happened to be a no-op that re-applied immediately, and the
    agent declared it. **That was luck, not care.** If you must pull with peers mid-edit: don't.
-   Commit your own files with pathspec form first, or work from `git archive HEAD` (`headserve.mjs`).
+   Commit your own files with pathspec form first, or work from a clean tree built the right way ↓
+
+   🚨 **`git archive HEAD` IS THE WRONG CLEAN TREE, and this file recommended it.** It writes a
+   directory with **no `.git`** — and **five gates shell out to `git`**, so they die on the missing
+   repo rather than on anything real: the battery reported **8 faults where a real worktree reports
+   2**. That is a wrong **CAUSE**, not merely a wrong number, and it sends you debugging gates that
+   were never broken. The recipe, and both symlinks are load-bearing:
+
+   ```bash
+   git worktree add --detach /tmp/fa-clean <sha>
+   ln -s "$PWD/node_modules" /tmp/fa-clean/node_modules   # omit this and seven gates die on a
+   ln -s "$PWD/reference"    /tmp/fa-clean/reference      # missing import, looking exactly broken
+   ```
+
+   `git archive` is still correct for **serving a committed bundle to a browser** — `headserve.mjs`,
+   `verify-head.mjs` — because nothing inside those exports runs `git`. It is wrong as *a tree to run
+   the battery in*. Pair the worktree with `sx_snap.mjs` (rule 2) to measure on it.
 
 8b. 🚨 **KILL BY PID, NEVER BY PATTERN.** `pkill -f "<toolname>"` matched **two peers' snapshot
    servers** and killed them mid-measurement (2026-08-06; they restarted, so it cost time rather
@@ -142,16 +185,33 @@ Not style preferences. Every one exists because breaking it cost hours.
    report** as an out-of-set edit. Anything else: report it to the orchestrator to route. Two agents
    did exactly this correctly this session and both declared it.
 
+   🚨 **AND `tools/tmp/` IS ONE FLAT NAMESPACE THAT EVERY AGENT WRITES INTO.** A filename prefix is a
+   convention, not a reservation, and nobody is told who holds one. A `Write` to a name a peer had
+   already committed **destroyed 1,294 lines of a working tool** — recovered from HEAD, so it cost
+   time rather than work, and only because it *was* committed. `??` in `git status` is the only
+   signal you get, and it distinguishes untracked from tracked, never yours from a peer's.
+   → **`git ls-files tools/tmp` before you claim a prefix, and `Read` before you `Write`.** `Edit`
+   refuses to touch a file you have not read; `Write` has no such interlock, which is precisely why
+   this happened with `Write` and not with `Edit`.
+
 10. **State a metric's RESOLUTION FLOOR before acting on a change in it.** Known floors: aggregate
-    win rate **~9 pp**, pacing **~0.8 s of contact / ~4 pp dead time**, the blind critic **±1.4
-    points**. **Every one of these was discovered AFTER someone had already acted inside it** — a
-    whole character programme was steered by score moves of 0.25–1.0, and two passes were reported as
-    regressions that never cleared the noise.
+    win rate **~9 pp** · pacing **~0.8 s of contact / ~4 pp dead time** · the blind critic **±1.4
+    points** · FFA placement **0.978 places** single-phase · seat spread **0.315 places** · main-thread
+    JS **±1.28–1.76 ms** · draw counts **EXACT**. **Every one of these was discovered AFTER someone had
+    already acted inside it** — a whole character programme was steered by score moves of 0.25–1.0, and
+    two passes were reported as regressions that never cleared the noise.
 
     ⚠️ And a **paired per-matchup delta on identical seeds is EXACT** — it is a *different quantity*
     from an aggregate and must be reported separately. `roster_table`'s aggregate once moved 0.8 pp,
     inside the floor, while **58 of 110 individual matchups moved, max 34.4 pp**. Conflating them
     hides exactly that.
+
+    ⚠️ **AND A STANDARD ERROR IS NOT ALWAYS THE RIGHT SCALE — ask what the statistic *is* first.**
+    The seat-fairness spread is the **range of six correlated means** measured over one shared set of
+    matches; the arms are not independent samples, so the SE of any one mean says nothing about how
+    far apart six of them should land by chance. Its floor had to be built by **permuting the seat
+    labels** and reading the null range. Reaching for the standard formula because it is the standard
+    formula is how a floor gets quoted an order of magnitude too tight.
 
 11. **Commit with pathspec form** — `git commit -F - -- <paths>` commits exactly those paths
     regardless of the index. Peers stage files under you constantly; `git add X && git commit` once
@@ -168,6 +228,10 @@ Not style preferences. Every one exists because breaking it cost hours.
     index, not against a second owner. **If you find changes in your file you did not write, stop
     and report — do not commit them under your message.**
 
+    ⚠️ **Chain edit-then-commit with `&&`, never `;`.** A `;` let a commit run after its edit had
+    already failed an assertion, and the message described a change that never landed. The log is a
+    primary source here; a commit that lies is worse than one that never happened.
+
 ---
 
 ## Gates before every commit
@@ -178,7 +242,7 @@ node src/game/sim.test.mjs
 node src/game/economy/economy.test.mjs
 node tools/aspect.mjs                     # PASS, 0.00wu — competitive fairness, not a nicety
 node tools/verify-head.mjs                # the committed tree builds
-node tools/tmp/driver_guard.mjs           # no 14th copy, + both `bestWeapon` faults
+node tools/tmp/driver_guard.mjs           # the driver census, + both `bestWeapon` faults
 node tools/tmp/sentinel.mjs               # the meta-guard: MOVES / HOLDS / ORDERS / SELF-PAIR
 PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept.mjs
 PREVIEW_BASE=<snapshot> node tools/tmp/menu_accept_portrait.mjs
@@ -217,9 +281,28 @@ the reason** — done five times this session, never deleted.
 | `src/audio/` | Procedural synthesis, zero assets except the theme. Second consumer of the same event stream. |
 | `src/render/` | `stage` (post chain), `lighting`, `camera` (fair-play radius), `toon` (shared materials), `quality` (tiers). |
 | `src/characters/` | `rig.ts` + `bodies.ts` (4 archetypes) + one file per character. |
-| `src/arena/` | Floor, hazards, props, apron, textures, ambient, shared palette. |
+| `src/arena/` | Floor, hazards, props, apron, textures, ambient. `shared.ts` is the single source of truth for MAP SCALE and the palette. |
 | `src/ui/screens/` | Shell/router, home, character select, trophy road, settings, opening, shop, match. |
 | `tools/` | See `docs/TOOLS.md`. |
+
+**Map scale — `src/arena/shared.ts`, and anything in any file that says otherwise is STALE.**
+The arena is **2800×2000** (`ARENA_W`/`ARENA_H`), centre **1400,1000**, with **six** spawns; it was
+1400×1000 with two until `6631446`, i.e. ×4 the area. `MAX_FIGHTERS` is **6** (`src/game/state.ts`).
+The endgame ring **scales with fighter count** — `minSafeRadiusFor(N)` in `rules.ts`, 140 at N≤4 up to
+237.00 at N=6 — and `SUDDEN_DEATH_MS` collapses it to zero at **30 s**, which no shipped schedule ever
+reaches on its own.
+
+🚨 **STALE MAP LITERALS ARE INVISIBLE TO EVERY LEGALITY CHECK, WHICH IS WHY THEY HID FOR A SESSION.**
+The 1× playfield is **exactly the NW quadrant** of the ×4 one, so every stale coordinate is still a
+**legal** coordinate — "is this point on the map?" cannot see the class, and neither can `gatecount`,
+which checks that a gate's count matches its documented count and has nothing to say about whether the
+gate is **pointed anywhere real**. A mis-aimed fixture keeps its count perfectly. Eleven were found one
+at a time by accident — four of them green the whole time — and a systematic sweep then found a dozen more.
+→ `node tools/tmp/al_guard.mjs` now catches it on three detectors that *do* work — exact 1× scalars,
+one-quadrant clustering, and a station standing inside a prop.
+⚠️ **Is another resize safe now? Safer, not safe.** Dozens of files hold a hardcoded `2800`/`1985`, so
+today's correct literals are the next generation's stale ones. **Derive from `shared.ts`. Never retype
+a coordinate.**
 
 **Art direction** — verified against reference plates, and it contradicts the original brief's prose:
 Brawl Stars is **not cel-shaded**. Smooth-shaded, hyper-saturated, high-key, vinyl-toy, soft specular,
@@ -284,6 +367,17 @@ direction; the rails move as the arena changes, and the standing advice ages wit
   dispatching reactively one-at-a-time wastes the scarcer resource, which is wall-clock, not agents.
 - Every brief must carry: the owned file set, the snapshot rule, "never `git stash`", the
   known-bad-input rule, the ±1.4 critic floor, and the relevant traps from `docs/LESSONS.md`.
+- 🚨 **AND IT MUST SAY: VERIFY EVERY CLAIM IN THIS BRIEF AGAINST THE TREE BEFORE ACTING ON IT.**
+  The orchestrator — the main conversation — published **six** falsifiable claims in one session and
+  **every one was wrong**: an instrument declared "pinned at its ceiling" that had 40 of 110 cells
+  unsaturated; `git archive HEAD` as the clean tree, twice; a corpus called empty that was never
+  empty (its *default split* had stopped partitioning, because two files split on different colours
+  and those colours were equal only while the bug existed); "the rank comes out of the sim's final
+  state" when every loser ends bit-identical and the order lives in the **death event stream**; a
+  routed patch whose `.filter(Boolean)` silently **dropped fighters**; and two swapped SHAs.
+  **Agents caught five of the six, always by re-deriving rather than pasting.** An orchestrator sees
+  summaries; the agent is the only one holding the file. **Contradicting the brief is the job, and a
+  claim that does not check out is a RESULT — report it.**
 - **An agent's last message is not its state.** It narrates the step it is *beginning* and often
   finishes several more. Check the diff before writing a resume note.
 - **When one dies, assess the tree and resume via `SendMessage`** — they die mid-file, not
