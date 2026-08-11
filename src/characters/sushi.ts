@@ -1384,6 +1384,15 @@ export class SushiCharacter extends BaseCharacter {
     // policy that was itself gated on `clipShare`, and the weighted-weak share does not
     // move at all. `docs/LESSONS.md` §7 — take the symptom, re-derive the cause — with
     // the correction landing on my own hypothesis this time.
+    //
+    // ⚠️ EVERY NUMBER IN THE PARAGRAPH ABOVE PREDATES `de4bb11`'s SHOULDER BRIDGE, and
+    // the bridge moved this exact pair further than anything in it: whole-part `dL`
+    // 0.2259 -> 0.0014 and `weakBoundaryPct` 7.8 -> 20.3 against a cap of 15. The cause
+    // was not the rim and not this wall — it was a deltoid painted in the ARM's albedo
+    // and parented to `torso`, so the torso's own median became a measurement of the
+    // arm. **See the block at the end of `dressLimbs`**, which fixes it there. The
+    // reasoning here still stands on its own terms; it is just no longer the largest
+    // term in this seam.
     const wall = new THREE.Mesh(new THREE.CylinderGeometry(rollR, rollR, rollD, 30, 1, true), noriMat);
     wall.name = 'sushi_maki_wall';
     wall.castShadow = true;
@@ -1800,6 +1809,49 @@ export class SushiCharacter extends BaseCharacter {
           return null;
       }
     });
+
+    // ── 🔴 THE SHOULDER BRIDGE IS THE ROLL, NOT THE ARM ──────────────────────
+    // `ChibiRig.fitShoulders()` (de4bb11) builds a deltoid per side in `palette.limb`
+    // — here `LIMB_SALMON_DEEP` — and parents it to `torso`, which on this character
+    // is the near-black maki roll (`NORI` #0E1712). This character had the LARGEST
+    // gaps in the cast (+0.0981 m left, +0.0846 m right), so it got the largest
+    // bridge, and the bridge is therefore a big salmon mass counted as TORSO.
+    //
+    // ── WHAT THAT COST, MEASURED, AND IT IS A SECOND GATE FAILURE FROM THAT ──
+    // ── COMMIT THAT NOTHING REPORTED ────────────────────────────────────────
+    // `valuescan --mode chars`, `de4bb11`'s own paired before/after runs
+    // (`shots/r2/vl_before` vs `shots/r2/vl`):
+    //
+    //   sushi                    before    after
+    //   torso p50                0.1667 -> 0.3824   the roll's median, on the ARM'S tone
+    //   torso|shoulderL dL       0.2259 -> 0.0014   a 0.2245 collapse over 59 contacts
+    //   head|torso dL            0.3475 -> 0.1318
+    //   weakBoundaryPct          7.8    -> 20.3     against a cap of 15  🔴 FAIL
+    //
+    // It is the SAME mechanism as hamburger's `p05` regression from the same commit:
+    // the bridge carries the limb's albedo into a part group whose own albedo is
+    // different, and the part-vs-part statistic is computed on the group. Nothing in
+    // `de4bb11`'s report saw it because its table carried range/p05/steps only.
+    //
+    // ⚠️ AND THE FIX IS NOT "DARKEN THE BRIDGE IN `rig.ts`" — that was considered and
+    // refused there, because one multiplier serves eleven characters and on this one
+    // it would land at 0.088 against near-black nori. The fix is per character and it
+    // is the same rule hamburger's file states: **the bridge takes the material of
+    // the mass it is INSIDE.** Here that is the roll's own nori wall, so it reads as
+    // the maki reaching out to meet the arm rather than as the arm reaching in, and
+    // `torso|shoulderL` measures a roll against an arm again instead of an arm
+    // against itself.
+    // ⚠️ NOT a `Material.clone()` — `clone()` silently drops `onBeforeCompile` and
+    // cost 54 sites their Fresnel rim. `noriAccentMat` is the same recipe as the
+    // roll's own wall material (`glossyMat({ color: NORI, roughness: 0.3, rim: true })`
+    // in `dressTorsoAsSushi`), reused; the rig's orphaned material is disposed.
+    {
+      const bridges = [this.rig.shoulderBridge.L, this.rig.shoulderBridge.R]
+        .filter((b): b is THREE.Mesh => b !== null);
+      const orphan = bridges.length ? bridges[0].material : null;
+      for (const bridge of bridges) bridge.material = noriAccentMat;
+      if (orphan && !Array.isArray(orphan)) orphan.dispose();
+    }
   }
 
   /** The rig owns all body motion; the base class's whole-body pass would fight it. */
