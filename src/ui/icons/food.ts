@@ -24,6 +24,39 @@
  * design, and a weapon whose glyph is missing falls through to its emoji rather than
  * to a blank. Colours are drawn from the same palette the weapons' own `color` fields
  * use, so a red weapon has a red icon.
+ *
+ * ── 🚨 THE INSTRUMENT ITSELF WAS MEASURED, 2026-08-11. READ `ui.ts`'s HEADER. ──
+ * `tools/tmp/xr_repro.mjs`: 10 independent panels × 3 judges × 63 icons, one plate per
+ * panel, art byte-identical, protocol NATIVE (nozoom). Headline, so nobody has to open
+ * the other file to know whether to start a redraw:
+ *
+ *   * a 3-judge panel is worth **1.51** independent judges (ρ = 0.494, DEFF 1.99);
+ *   * two panels agree on the exact 0..3 score **65.2%** of the time, against a
+ *     **65.8%** arithmetic ceiling for a perfect instrument — the scale, not the judges;
+ *   * the within-round floor is **36 of 108** twin readings splitting on identical art,
+ *     so **a paired Δ of 1 of 3 is noise**, and this file's six Δ +0 results were all
+ *     measured inside it;
+ *   * ±0.5 of a judge on one icon costs **23 panels / 69 judges**.
+ *
+ * → **A per-icon absolute score is only usable at 0-of-N and N-of-N.** Everything in
+ *   between is UNRESOLVED at any affordable panel count.
+ *
+ * ── WHAT THAT SETTLES IN THIS FILE, 10 panels / 30 judges ───────────────────
+ *     wrap          **0 of 30**, ten panels, 100% reproducing — the only per-icon
+ *                   FAILURE verdict in the whole set that reproduced on every panel.
+ *                   damage x14 ("a sword"), lollipop x9, ketchupslip x5. All three
+ *                   drawing axes are already closed below; this is the SUBJECT.
+ *     mustardblast  6/30, **patty x14** — the collision `67373e5` hoped was a bad
+ *                   round is real and reproducing. The honest claim stays "the narrow
+ *                   bun beat the wide bun by 2 of 3 on one plate", not "patty is fixed".
+ *     wave → slow   **17 of 30**, one-way (`slow` is never named `wave`). A breaking
+ *                   wave's curl and a snail shell's spiral are the same silhouette.
+ *     swirl         2/30, scattered over TEN answers (puffer x7, slash x6, party x4…) —
+ *                   illegible rather than colliding, so no single arm can fix it.
+ *     slash/shards  10/30 and 10/30, trading `wave`/`seaweed`/each other, which is
+ *                   `67373e5` §4's "one pool of curved-mark answers" at 30 judges.
+ *     `shards` was called "a double-headed arrow" **0 of 30** while `range` scored
+ *     **30/30**. `DECISIONS §46` stays withdrawn; do not reopen it.
  */
 
 import { P, starPath } from './svg';

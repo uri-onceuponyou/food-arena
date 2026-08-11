@@ -31,6 +31,52 @@
  *    lock plate, so it is unmistakable at any size and it separates cleanly from the
  *    four purchasable BOXES, which keep the square silhouette on purpose (they are
  *    boxes; the free one is a chest — the model already names them that way).
+ *
+ * ── 🚨 READ THIS BEFORE YOU DRAW ANOTHER VARIANT. THE INSTRUMENT WAS MEASURED. ──
+ * `tools/tmp/xr_repro.mjs`, 2026-08-11: **10 independent panels × 3 judges × 63 icons,
+ * one plate per panel, art byte-identical, protocol NATIVE (nozoom) throughout.** Every
+ * number below is at that protocol and must never be quoted without it (`DECISIONS §46`).
+ *
+ *  * **A 3-judge panel is worth 1.51 independent judges, not 3.** Intra-plate
+ *    correlation ρ = **0.494** (pooled ANOVA, df 504/1134), design effect 1.99. Judges
+ *    on one plate are half-redundant with each other.
+ *  * **The 4-level scale cannot express a reproducible per-icon score.** Two panels
+ *    agree on the exact 0..3 value **65.2%** of the time — against an ARITHMETIC CEILING
+ *    of **65.8%** for a perfect instrument. There is nothing left to fix in the judges;
+ *    a 3-judge panel scoring a p ≈ 0.5 icon reproduces at 20/64 = 31.3% by construction.
+ *  * **Cost of a reproducible per-icon number:** ±1 judge of 3 needs **6 panels /
+ *    18 judges**; ±0.5 of a judge needs **23 panels / 69 judges**; ±0.25 needs 92 / 276.
+ *  * **The within-round floor is 33%.** 36 of 108 twin readings — byte-identical art,
+ *    two tiles, ONE judge, ONE pass — got two different names. `gift` scored **27/27 at
+ *    one grid position and 18/27 at the other**, same pixels. A paired Δ of 1 of 3 is
+ *    noise, and six of this file's Δ +0 results were measured inside that.
+ *  * At 27 judges only **26 of 63** icons resolve as CLOSED and **4** as BROKEN; **33
+ *    are UNRESOLVED and cannot be given a verdict at any affordable panel count.**
+ *  * 🔴 **AND A SIX-PANEL UNANIMOUS VERDICT STILL REVERSED.** `heal` scored 0/3 on eight
+ *    panels — CI [0.01, 0.32], i.e. BROKEN — and then **3/3 on the tenth**. The cause is
+ *    not tile order (`gem` preceded `heal` on the reversing plate and on a 0/3 one) and
+ *    not proximity to `health` (r = none over 10 plates). **I could not find it.**
+ *
+ * → **Do not spend another drawing variable on a single icon's absolute score.** The
+ *   only per-icon verdicts this instrument can carry are 0-of-N and N-of-N.
+ *
+ * ── ONE STANDING BELIEF IN THIS FILE IS FALSIFIED BY IT ─────────────────────
+ * `boxBurger`'s note below concludes *"a legibility floor at 11.83 px rather than a
+ * drawing defect."* Across the 63 shipped icons, **legibility does not depend on
+ * delivered size**: Pearson r(px, legibility) = **−0.076**, and the smallest band
+ * (< 12 px, 11 icons) is the **most** legible at 0.828. ⚠️ The 14–18 px band is worst
+ * (0.630) because it holds the four loot boxes and `chest`, which is content, not size.
+ * Size is not the explanation for any of these failures.
+ *
+ * ── THE COLLISIONS THAT DID REPRODUCE, 10 panels / 30 judges ────────────────
+ *     chest → boxBurger  16/30   and boxBurger → chest 7/30 — a true mutual swap,
+ *                                neither exempt, 23 of 60 readings of the pair cross
+ *     heal  → gem        22/30   green heart + cream cross on ink = a small faceted
+ *                                coloured polygon with light interior lines
+ *     stun  → star/sparkle 14/30 the semantic collision `stun`'s own note names
+ *     medal → nothing     2/30   scattered over six answers: illegible, not colliding
+ * `range` scored **30/30** and `shards` was called "a double-headed arrow" **0 of 30**.
+ * `DECISIONS §46`'s withdrawal is now confirmed at 30 judges; do not reopen it.
  */
 
 import { P, starPath } from './svg';
