@@ -460,11 +460,41 @@ export class CameraRig {
     this.shakeDecay = decay;
   }
 
+  /**
+   * 🚨 THE `dtSeconds > 0` GUARD IS A MEASUREMENT FIX, NOT A FEEL CHANGE.
+   *
+   * The decay below is multiplied by `dtSeconds`; the RE-RANDOMISATION under it was
+   * not. So at `dt = 0` the amount never fell, the exit test at the bottom was never
+   * reached, and **every call re-rolled `shakeOffset` to a new random vector** — while
+   * `Stage.render()` calls this before it draws. A frozen frame was therefore not a
+   * frozen camera: measured on `189d6ed`, **344 of 344 frozen frames drifted, up to
+   * 349 px of mask**, and every rAF-frozen probe in this repo that renders twice with
+   * shake alive has been diffing two different camera positions. `feel_probe.mjs`
+   * zeroes the offset around its own captures for exactly this reason and never
+   * generalised it (`docs/AGENT-BRIEF.md` §3).
+   *
+   * ⚠️ **The guard is chosen so the SHIPPED feel is unchanged by construction.** At any
+   * `dt > 0` — every frame the player ever sees — the condition is true and the body
+   * below is byte-for-byte the code that shipped: same decay, same three `Math.random`
+   * draws in the same order, same exit threshold. Only `dt <= 0` behaves differently,
+   * and there the new behaviour is the honest one: no time passed, so the shake HOLDS
+   * its offset instead of inventing a new sample out of nothing.
+   *
+   * ⚠️ `shell.ts` clamps its rAF delta with `Math.max(0, …)`, so `dt === 0` also occurs
+   * in real play (first frame, or two rAF callbacks on one timestamp). Holding is
+   * correct there too — a zero-length frame that moved the camera was always a bug,
+   * it was simply invisible next to the 16 ms ones.
+   *
+   * Do NOT "fix" this by stilling the shake for probes some other way (a debug flag, a
+   * global): the defect is in the integrator, and a probe-only workaround leaves the
+   * next probe to rediscover it, which is how this survived to be found by a drift
+   * control on an unrelated pass.
+   */
   update(dtSeconds: number): void {
     const t = 1 - Math.pow(1 - this.followLerp, dtSeconds * 60);
     this.target.lerp(this.desired, t);
 
-    if (this.shakeAmount > 0.0001) {
+    if (dtSeconds > 0 && this.shakeAmount > 0.0001) {
       this.shakeAmount = Math.max(0, this.shakeAmount - this.shakeDecay * this.shakeAmount * dtSeconds);
       const a = this.shakeAmount;
       this.shakeOffset.set(
