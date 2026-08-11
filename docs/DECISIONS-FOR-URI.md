@@ -3320,3 +3320,123 @@ constant**, which is why it is answered here rather than inside §48.
 => The final ring must hold N fighters at a fightable spacing. ⚠️ **The fog schedule is derived from
 this radius**, so it must be re-derived rather than pinned, and the change is measurable at N=2 as a
 no-op or it is wrong.
+
+---
+
+## 54. ✅ ANSWERED 2026-08-11 — Uri cleared the whole backlog, and delegated the technical calls
+
+> **§52** *"Decide what is best for the project. i don't understand the technicalities."*
+> **§51a** *"Not technical - Pick for me."*
+> **§50a** *"chick is faster than the egg"*
+> **§50b** *"do what is needed"*
+> **§33** *"the phone experience is very bad. VFX looks clunky and the in browser gameplay is not playable. this is why i want to move to app."*
+> **§2** *"no. after 30 seconds reduce the fog to all screen and the one who has more HP wins. (Sudden Death)"*
+> **§47 / §35 / §17 / §27** *"you decide"* · **§9** *"not sure what it means"*
+
+### 🚨 §33 IS NOT AN AUDIO ANSWER — IT IS THE MOST IMPORTANT LINE IN THE MESSAGE
+
+It was asked as *"does the theme play on your phone"*. The answer is that **the game is not playable
+on a phone at all**: *"VFX looks clunky and the in browser gameplay is not playable."*
+
+⚠️ **AND THE INFERENCE IN IT NEEDS CORRECTING BEFORE ANY WORK IS AIMED AT IT.** *"this is why i want
+to move to app"* — **a wrapper will not fix this.** Capacitor, a WebView and Safari all run **the same
+WebGL renderer at the same frame rate**. An app buys orientation lock, fullscreen, no browser chrome,
+no CDN round-trip and a real origin. It buys **nothing** on draw calls, triangle count, shader cost or
+touch latency. **If the frame is slow in mobile Safari it will be slow in the app.**
+→ **Phone performance is now the top item and it is its own investigation**, not a side-effect of
+§51a. Everything measured on this project has been measured on desktop SwiftShader.
+
+### §52 — DECIDED: authoritative simulation with local prediction, host peer first
+
+Uri delegated it. Taking the measured recommendation: **2.66 µs/tick** with six humans is 0.016% of a
+core (~6,260 concurrent matches), so **server CPU — the only thing lockstep saves — is free here**,
+while lockstep *requires* bit-identical `Math.hypot`/trig across V8, JSC and SpiderMonkey over **32
+implementation-approximated call sites**, which no measurement can guarantee.
+⚠️ **Build it as a host PEER first and move it to Node later without touching `src/game/`.** And
+⚠️ **`MatchState` does not survive a JSON round trip** — three alias invariants break *silently*
+(`player` stops being `fighters[0]`), seven `-Infinity` sentinels flatten to `null` — while
+`structuredClone` preserves all of it. **The obvious wire format corrupts state in a way nothing
+reports.**
+
+### §51a — DECIDED: Capacitor
+
+⚠️ **Cordova is refused on a number** — it defaults to `file://`, and a `file://` document has an
+**opaque origin**, so `<script type="module">` fails CORS: measured `net::ERR_FAILED`, 0 canvases,
+stuck on the boot curtain forever **with the URL it asked for correct**. Capacitor serves from a
+custom scheme with a **real origin**, which is the one thing the bundle actually needs; it is the
+smallest delta from the static build we already ship (proven to work at any base, `ab_basepath` 4/4),
+and it supplies orientation lock and safe-area insets natively. A hand-rolled WebView is the same work
+without the ecosystem; a PWA does not give reliable iOS fullscreen or audio.
+⚠️ **It does not fix §33.** See above.
+
+### §50a — Egg's chick must be FASTER THAN EGG. That is now a derivable constraint, not a taste call.
+
+Egg's card speed is **4**; `PLAYER_SPEED` is 0.12 and `AI_CHASE_SPEED` 0.07 wu/ms, scaled by
+`speedFor`. `Hatch!` sits on `SPEED.maxDrift` = **80 wu/s**, which is slower than **every fighter in
+the game** — so the projectile can never catch anything, in either role.
+=> **The rung must be raised until the chick's speed exceeds Egg's own delivered speed with margin.**
+⚠️ **`FLIGHT_MS.drift`'s comment calls it *"a chick that waddles at you"*** — that flavour is now
+overruled by Uri, who says the chick is faster than the egg. **Update the comment; do not preserve the
+waddle.**
+⚠️ **Damage compensation is INTEGER LUCK at this scale** — damage moves Egg ~17.8 pp per point inside
+an 8.8 pp band. Report the tier table every iteration.
+
+### §50b — DECIDED: fix the retirement rule at its root
+
+**23 of 23 ranged weapons cannot connect at their own press gate against a fleeing human**, because
+`stepProjectiles` retires on **cumulative path length** while the human flees at 120 and the AI at 70.
+⚠️ **Displacement is NOT the fix** — it refunds only path spent *turning*, and a straight chase has no
+turn, so it changes Egg by **nothing** (27 → 27). **Denominate the budget in the target's frame.**
+**The price is stated and now authorised: a new age-cap constant, every ranged weapon stronger, all
+110 matchups moving at once.**
+⚠️ `pickWeapon`'s gate and `stepProjectiles`' retirement must end up denominated in the **same
+quantity**, or the belief/budget split reappears somewhere else.
+
+### §2 — SUDDEN DEATH replaces the timeout tiebreak
+
+> *"after 30 seconds reduce the fog to all screen and the one who has more HP wins."*
+
+**Reading, flagged rather than assumed:** at **30 s of the 45 s match** the safe radius collapses to
+**zero** so the fog covers the whole arena and everyone takes ring damage; the match then resolves to
+whoever is left, which is whoever had more HP. **No draw. No tiebreak rungs.**
+⚠️ **This supersedes §49a** (*"fewest deaths, then lower slot"*) **for the 1v1 timeout**, because a
+timeout with a collapsed ring should no longer be reachable. **§49a's rungs stay implemented** — they
+are still the resolver of record if the clock ever runs out — but they should now be unreachable, and
+that is worth asserting rather than assuming.
+⚠️ **It also interacts with §53b** (the ring scales with N). Sudden death is the ring going to zero;
+§53b is the ring's size before that. **They must be derived together.**
+
+### §9 — explained, then decided: NO wind-up
+
+**What it means:** Lollipop's `giantSlam` resolves **on the same tick it is cast**. There is no
+wind-up frame, so it **cannot be dodged — only explained after the fact**. The question was whether it
+should telegraph.
+**Decision: leave it.** It is bounded by construction (an undodgeable hit may not exceed the biggest
+dodgeable one — Water Bottle's Mega Splash at 18), `render/camera.ts` deliberately excludes it from
+the fair-play radius, and its attribution cue is verified readable with the caster off screen. Adding
+a wind-up is **a new deferred-resolution path in `combat.ts`**, where melee is instantaneous — a real
+sim change for a defect nobody has reported from play.
+
+### §47 — DECIDED: 🍭 everywhere
+
+One mismatch in 31 weapons / 34 abilities. The move is **named** "Giant Lollipop" and it is the
+character's signature; the emoji should say *which move*, not *what status it applies*. Change the
+**ability** entry `💫 → 🍭`. ⚠️ The 0/3 score on the `lollipop` glyph is **not** a reason — it was
+taken at a 20 px fallback the game never ships.
+
+### §35 — DECIDED: leave the corner nameplate showing a concealed enemy's HP
+
+Edge 2 already **closed** (`f0e7aed`). Edge 1 stands as built: the nameplate reports **HP, not
+position**, so it leaks nothing about where they are; it is a fixed layout element, so hiding it
+leaves a hole; and it tells you nothing you did not already know from having hit them.
+
+### §17 — DECIDED: leave the hurt grunt at `gain: 0.9`
+
+Its evidence **predates the contact spray**, so re-measuring is cheaper than changing. Uri has played
+this build and the one audio complaint on record was a 404, not a mix balance.
+
+### §27 — DECIDED: leave the title card's cool cove
+
+Already in force, already measured, already written into `opening.ts` in numbers. It protects
+character select (**7.00, the strongest screen in the build**) and home, which consume the same
+constant. Reversing later is additive and cheap.
