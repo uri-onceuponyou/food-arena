@@ -39,6 +39,30 @@ string, a doc line — may cross a boundary if you (a) verify the file is **clea
 immediately before and after, (b) change **nothing executable**, and (c) **declare it**. ⚠️ A row in
 `docs/TOOLS.md`'s gate table is **executable** (`gatecount` runs what it lists) and is *not* covered.
 
+## 1b. 🚨 DO NOT SPEND AGENTS ON WHAT URI IS ABOUT TO DO BETTER
+
+**Burned ~1M tokens on 2026-08-11**, five agents sent to judge the freshly-deployed build from five
+angles — dispatched in the same turn Uri said *"let's push all so I can test everything."* He was
+already opening it. **A human playing the game is the better instrument for every subjective question
+that fan-out was asked**, and this project's own record says so: *"the two most valuable bug reports
+on this project came from you simply playing it — clicks not firing, and the character not facing the
+cursor. Both were invisible to `tsc`, to the assertions, and to every screenshot."*
+
+**Split the work by what each side is actually good at:**
+
+| question | who |
+|---|---|
+| does it build, resolve, 200, base-path correctly, stay bit-identical | **gates** — cheap, exact, already exist |
+| does it look right, feel right, read right | **Uri** — free, and better than any critic here |
+| what specifically is wrong and why | **agents**, AFTER he says something is wrong |
+
+⚠️ **The trigger is the word "I".** *"so I can test"*, *"I'll look tomorrow"*, *"let me play it"* —
+that is a handover, not a request for a second opinion. **Verify the mechanical half, hand it over,
+and stop.**
+⚠️ And a standing opt-in to fan out is **permission, not justification.** Scale to the question:
+five agents to re-derive an aesthetic judgement a human is seconds from making is waste however it
+was authorised.
+
 ## 2. NEVER
 
 - **`git stash`** — blast radius is the whole repo. 🚨 **And `git pull --rebase --autostash` CREATES
