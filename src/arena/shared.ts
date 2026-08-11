@@ -20,6 +20,12 @@
 
 import * as THREE from 'three';
 import type { CoverBox } from './types';
+// TYPE-ONLY, and for the same structural reason `arena/types.ts` imports it type-only:
+// `game/movement.ts` imports `ArenaDefinition` from `./types`, and a VALUE import of a
+// `game/` module here would close a runtime cycle through the arena. `import type` is
+// erased by both tsc and esbuild, so no cycle exists in the emitted graph.
+import type { ConcealBox } from '../game/movement';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { toonMat, glossyMat, flatMat, roundedBox, RAMP_SOFT } from '../render/toon';
 import { wu, groundPos } from '../units';
 import { PALETTE, MATCH_DURATION_MS } from '../game/rules';
@@ -882,6 +888,38 @@ export const KPAL = {
   // spend it without touching a value relationship anything depends on.
   utilityMat: '#4B7186',
   utilityMatDark: '#375868',
+
+  // ── CONCEALMENT — the one prop family that BLOCKS NOTHING AND HIDES YOU ──────
+  //
+  // Uri, `DECISIONS §29b`: *"it's supposed to be plates and other kitchen objects you
+  // can hide under — fully hidden. Bushes don't make sense in a kitchen."* So this is a
+  // service table's linen with plates and trays stacked on it, not foliage.
+  //
+  // ⚠️ **THE HUE IS CONSTRAINED FROM THREE SIDES, AND TWO OF THEM ARE ALREADY SPENT.**
+  //   * It may not read as a HAZARD. The arena's hazard grammar is a hard saturated rim
+  //     in a reserved hue — `hazardStripeBright` #FFB300, `hazardGlowHot` #FF5A1E,
+  //     `greaseRim` #8A6A22, `waterRim` #4A8AA6 — so saturated amber and saturated teal
+  //     are both taken, and a player must never confuse "hide here" with "burn here".
+  //   * It may not read as BLOCKING. Blocking is the near-black plum `coverPlinth`
+  //     #2E2440 plus the arena's heaviest ink line (0.016). Concealment carries NO
+  //     outline at all, deliberately — that is the whole legibility cue for walk-through.
+  //   * It may not spend the budget the frame has none of. Measured 2026-08-06: warm
+  //     chroma FAILS LOW (0.053 against a 0.072 minimum) while cool sits at 0.427 against
+  //     a 0.343 target. So this family is warm, and it is deliberately the LOW-CHROMA
+  //     warm — a high-value linen — because the mat is a large ground surface and a
+  //     saturated one would land in hazard territory by sheer intensity.
+  //
+  // The rim IS traced on the region's exact bound, borrowing the hazard grammar's one
+  // good idea (`buildPuddleVisual`: "a hard, opaque rim traced exactly on its real
+  // radius") without borrowing its hue: a player has to know exactly where concealment
+  // starts, because standing 5 wu outside it is the difference between hidden and shot.
+  concealCloth: '#E9DCC0',
+  /** Traced on the region's true edge. Tan, not amber — well clear of `greaseRim`. */
+  concealClothRim: '#C29A5E',
+  /** Stacked plates. The brightest thing in the family, so the cluster reads at 58°. */
+  concealPlate: '#F7F1E4',
+  /** The band around a plate stack and the trays — the family's warm chroma. */
+  concealTrayWarm: '#C9552F',
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1167,6 +1205,17 @@ export function buildMaterials() {
     debrisBerry: toonMat({ color: KPAL.debrisBerry, roughness: 0.55 }),
     utilityMat: toonMat({ color: KPAL.utilityMat, ramp: RAMP_SOFT(), roughness: 0.65, map: utilityMatTex }),
     utilityMatDark: toonMat({ color: KPAL.utilityMatDark, ramp: RAMP_SOFT(), roughness: 0.68, map: utilityMatTex }),
+
+    // ── Concealment. See the KPAL block for why the hue is what it is. ─────────
+    // The cloth borrows `utilityMatTex` rather than growing a twelfth canvas: it is the
+    // same kind of surface (a large flat ground mat whose job is to not be a flat fill)
+    // and reusing the instance costs nothing. `concealPlate` is glossier than anything
+    // else on the floor on purpose — a plate stack has to catch a highlight to read as
+    // crockery rather than as another pale decal.
+    concealCloth: toonMat({ color: KPAL.concealCloth, ramp: RAMP_SOFT(), roughness: 0.72, map: utilityMatTex }),
+    concealClothRim: flatMat(KPAL.concealClothRim),
+    concealPlate: toonMat({ color: KPAL.concealPlate, roughness: 0.28 }),
+    concealTrayWarm: toonMat({ color: KPAL.concealTrayWarm, roughness: 0.5 }),
 
     // Fake ambient occlusion — a soft dark radial decal dropped under ROUND props
     // (the pot) so they read as sitting ON the floor with real contact darkening,
@@ -1895,4 +1944,177 @@ export function addCover(propsGroup: THREE.Group, cover: CoverBox[], M: Material
   propsGroup.add(group);
   cover.push({ x: spec.x, y: spec.y, w: spec.w, h: spec.h, kind: spec.kind });
   return group;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONCEALMENT — the same contract as `addCover`, for the list that blocks NOTHING
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri, `DECISIONS §29b`, on what these are: *"it's supposed to be plates and other
+// kitchen objects you can hide under — fully hidden. Bushes don't make sense in a
+// kitchen."* And `§29c`: *"attacking from under it will break it and reveal you. You can
+// also step out and attack."* Both halves of that rule are already implemented in
+// `game/movement.ts` + `game/combat.ts`; **the mechanic has simply never had a region to
+// act on.** Uri, playing the shipped build: *"i can't hide under conceilments or break
+// them."* There was nothing to hide under. That is what this pair of functions is for.
+//
+// ⚠️ **THE ONE THING THAT MUST NOT HAPPEN IS A CONCEALMENT BOX REACHING `arena.cover`.**
+// `arena/types.ts` says it at the field and `movement.ts` says it at the type: the two
+// lists are separate PRECISELY so that nothing which reads `cover` can see this one, and
+// that separation is the entire implementation of "walk-through". So `addConceal` takes a
+// `ConcealBox[]` and `addCover` takes a `CoverBox[]`, and the two interfaces are
+// nominally distinct despite identical fields. Passing the wrong array is a type error at
+// the call site rather than a silent gameplay bug.
+//
+// ⚠️ **AND IT MUST NOT CARRY THE BLOCKING INK LINE.** `kitchen.ts` gives `propsGroup` a
+// 0.016 outline — far past anything decoration carries — because that heavy line IS the
+// arena's "this collides" cue. A walk-through patch inside `propsGroup` would inherit it
+// and tell the player the exact opposite of the truth, so `addConceal` takes its own
+// parent group and marks it `noOutline`.
+
+export interface ConcealSpec {
+  x: number; y: number; w: number; h: number; kind: string;
+  yawDeg?: number;
+  build: (wM: number, dM: number) => THREE.Group;
+}
+
+/**
+ * Register ONE walk-through region and build its matching visual, in one statement —
+ * the same "there is no path to declaring one without the other" guarantee `addCover`
+ * gives, for the list where the mistake is more expensive: a region with no visual is a
+ * player vanishing on open floor, and a visual with no region is Uri's actual bug report.
+ */
+export function addConceal(
+  concealGroup: THREE.Group,
+  concealment: ConcealBox[],
+  M: Materials,
+  spec: ConcealSpec,
+): THREE.Group {
+  const group = spec.build(wu(spec.w), wu(spec.h));
+  const p = groundPos(spec.x, spec.y);
+  group.position.set(p.x, 0, p.z);
+  if (spec.yawDeg) group.rotation.y = THREE.MathUtils.degToRad(spec.yawDeg);
+  group.name = `conceal:${spec.kind}`;
+  noOutline(group);
+  concealGroup.add(group);
+  concealment.push({ x: spec.x, y: spec.y, w: spec.w, h: spec.h, kind: spec.kind });
+  void M;
+  return group;
+}
+
+/**
+ * A service table's linen with plates and trays stacked on it — the thing you duck under.
+ *
+ * ── EVERYTHING HERE IS UNDER 0.80 m ON PURPOSE ──────────────────────────────
+ * `CHARACTER_HEIGHT` is 2.10 m and the match camera pitches 58 degrees, so a canopy tall
+ * enough to physically cover a fighter would also hide the floor the fighter stands on
+ * for a screen-height above it. It does not need to: `§29b` is FULLY HIDDEN and the
+ * renderer removes the opponent's model outright, so the geometry's job is to say
+ * *"this ground hides you"*, not to occlude. Every reference plate delivers its
+ * concealment as a tinted GROUND PATCH with clutter on it, at ankle-to-knee height, for
+ * exactly this reason.
+ *
+ * ── THE RIM IS ON THE TRUE BOUND, TO THE WORLD UNIT ─────────────────────────
+ * Standing 5 wu outside a region is the difference between hidden and shot, and the
+ * membership rule is the fighter's CENTRE (`movement.ts:isConcealed`), so the drawn edge
+ * has to be the real edge. It is traced at `FLOOR_Y.fine`, the same layer the hazard
+ * rings use, and for the same reason: a hazard the player cannot see the boundary of is
+ * a coin toss, and so is a hiding place.
+ *
+ * ── THE SCATTER IS A FIXED TABLE, NOT AN RNG ────────────────────────────────
+ * Every patch ships with a point-symmetric partner (`kitchen.ts` generates it by
+ * transform), and the pair must be identical under 180 degrees or the map is not fair.
+ * A seeded RNG would be deterministic per PROCESS and still give the two patches
+ * different clutter unless the seed were derived from position, which is one more thing
+ * to get wrong. Fractions of the patch's own extent, so one table serves every size.
+ */
+export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.Group {
+  const g = new THREE.Group();
+
+  // The linen. Rounded, and inset a hair below the rim so the rim reads as an edge
+  // rather than as a stripe painted on the cloth.
+  const cloth = mesh(
+    roundedBox(wM * 0.985, 0.02, dM * 0.985, Math.min(wM, dM) * 0.09),
+    M.concealCloth,
+    'conceal_cloth',
+  );
+  cloth.position.y = FLOOR_Y.decal;
+  cloth.castShadow = false;
+  g.add(cloth);
+
+  // The rim, ON the true bound: a thin frame of four bars rather than a scaled quad, so
+  // the line width is absolute and does not thicken with the patch. Merged into ONE
+  // geometry — see the draw-call note below.
+  const RIM = 0.09;
+  const rimParts: THREE.BufferGeometry[] = [];
+  for (const [sx, sz, w, d] of [
+    [0, dM / 2 - RIM / 2, wM, RIM],
+    [0, -(dM / 2 - RIM / 2), wM, RIM],
+    [wM / 2 - RIM / 2, 0, RIM, dM],
+    [-(wM / 2 - RIM / 2), 0, RIM, dM],
+  ] as const) {
+    const b = new THREE.BoxGeometry(w, 0.02, d);
+    b.translate(sx, FLOOR_Y.fine, sz);
+    rimParts.push(b);
+  }
+  const rim = mesh(mergeGeometries(rimParts, false)!, M.concealClothRim, 'conceal_rim');
+  rim.castShadow = false;
+  rim.receiveShadow = false;
+  g.add(rim);
+
+  // Plate stacks and trays. `u`/`v` are fractions of the half-extent, `r` a fraction of
+  // the smaller extent, `h` a height in metres, `plates` the number of discs.
+  //
+  // ⚠️ **THE RADII WERE HALVED AFTER LOOKING AT THE FIRST RENDER**, and the number that
+  // settled it came out of the same frame: at `r` 0.075..0.130 of a 130 wu patch the
+  // discs were **1.0 to 1.7 m ACROSS — as wide as the character is** (`shots/ap`, first
+  // pass), so six of them read as giant coins on a mat rather than as a cluttered service
+  // table. At 0.042..0.070 they are 0.55..0.91 m, which is crockery, and there are eleven
+  // instead of six so the density carries the read that the size no longer does.
+  // `docs/LESSONS.md` on judging the image and not the description: the first table
+  // looked entirely reasonable as numbers.
+  const CLUTTER: ReadonlyArray<readonly [number, number, number, number, number]> = [
+    [-0.60, -0.55, 0.058, 0.40, 5],
+    [-0.44, -0.34, 0.048, 0.24, 3],
+    [-0.14, -0.66, 0.043, 0.18, 2],
+    [0.16, -0.50, 0.066, 0.52, 6],
+    [0.52, -0.62, 0.050, 0.30, 4],
+    [0.63, -0.20, 0.070, 0.62, 7],
+    [0.40, 0.16, 0.045, 0.22, 3],
+    [0.60, 0.55, 0.056, 0.38, 5],
+    [0.12, 0.63, 0.042, 0.18, 2],
+    [-0.28, 0.48, 0.062, 0.46, 6],
+    [-0.62, 0.24, 0.049, 0.28, 4],
+  ];
+  //
+  // ── ⚠️ MERGED PER MATERIAL, AND THE FIRST DRAFT WAS NOT ─────────────────────
+  // Eleven stacks of 2-7 discs is 47 meshes per patch; six patches is 282, plus a cloth
+  // and four rim bars each. Measured on the unmerged draft with `tools/perf.mjs --mode
+  // counts`: **draw calls 868 -> 1,177, i.e. +309 — a 36% rise for one feature**, on a
+  // game whose owner plays it on a phone. Merging by material takes each patch to FOUR
+  // draws (cloth, rim, plates, trays) and the whole feature to 24. It is safe here for
+  // the same reason `kitchen.ts`'s `outlineGroup(..., { merge: true })` is: every part
+  // going into one buffer already shares one material, so nothing about the shading
+  // changes. The discs keep their world positions because each geometry is `translate`d
+  // into patch-local space before the merge, exactly as `apron.ts` does for the kerb.
+  const short = Math.min(wM, dM);
+  const plateParts: THREE.BufferGeometry[] = [];
+  const trayParts: THREE.BufferGeometry[] = [];
+  for (const [u, v, r, h, plates] of CLUTTER) {
+    const x = u * (wM / 2), z = v * (dM / 2);
+    const rad = r * short;
+    const step = h / plates;
+    for (let i = 0; i < plates; i++) {
+      // Alternating plate / warm tray, so a stack reads as crockery rather than as one
+      // extruded cylinder — the same "silhouette variety inside a cluster" instinct the
+      // pantry crates carry, at a tenth of the scale.
+      const isTray = i % 2 === 1;
+      const disc = puck(rad * (isTray ? 0.94 : 1), step * 0.86, 16);
+      disc.translate(x, FLOOR_Y.fine + step * (i + 0.5), z);
+      (isTray ? trayParts : plateParts).push(disc);
+    }
+  }
+  g.add(mesh(mergeGeometries(plateParts, false)!, M.concealPlate, 'conceal_plates'));
+  g.add(mesh(mergeGeometries(trayParts, false)!, M.concealTrayWarm, 'conceal_trays'));
+  return g;
 }
