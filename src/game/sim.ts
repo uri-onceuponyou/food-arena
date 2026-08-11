@@ -90,6 +90,9 @@ import {
   speedFor,
   SPLAT_DURATION_MS,
   SPLAT_RADIUS,
+  SUDDEN_DEATH_RADIUS,
+  SUDDEN_DEATH_REMAINING_MS,
+  suddenDeathActive,
   TRAIL,
   type CharacterId,
 } from './rules.ts';
@@ -509,10 +512,30 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
     // how a second, quieter source of truth gets born. At two seats the call is one
     // comparison and a constant return — no `Math.sin` is evaluated — so the shipped duel's
     // hot path is unchanged as well as its output.
-    state.safeRadius = Math.max(
-      minSafeRadiusFor(state.fighters.length),
-      state.arena.maxSafeRadius * (1 - progress),
-    );
+    //
+    // ── 🚨 AND SUDDEN DEATH IS A CAP THAT DOMINATES THAT FLOOR (DECISIONS §2) ──
+    //
+    // Uri, 2026-08-11: *"after 30 seconds reduce the fog to all screen and the one who
+    // has more HP wins."* So from `SUDDEN_DEATH_MS` there is no safe ground at all.
+    //
+    // ⚠️ IT IS A TERNARY AND NOT A THIRD TERM IN THE `Math.max`, AND THAT IS THE WHOLE
+    // ARITHMETIC. `Math.max(0, 661.67)` is 661.67 — at the 30 s trigger the scheduled
+    // radius is still 661.67 wu on the 2800x2000 map (4.73x the N<=4 floor), so a floor
+    // of zero changes nothing and the collapse would silently not happen. Sudden death
+    // REPLACES the schedule; `minSafeRadiusFor` floors it while it is still running.
+    // `rules.ts:ringFloorFor` is the same fact for the three READERS of the floor, which
+    // do want a `max`-shaped answer; this is the one site that needs the cap.
+    //
+    // Monotonicity survives: 0 is below every value the branch above can produce, so
+    // `safeRadius` is still non-increasing for the life of a match — which is what
+    // `audio/director.ts`'s one-shot latch and `ui/hud.ts`'s `msUntilEdge` inversion are
+    // both built on.
+    state.safeRadius = suddenDeathActive(state.timeRemaining)
+      ? SUDDEN_DEATH_RADIUS
+      : Math.max(
+        minSafeRadiusFor(state.fighters.length),
+        state.arena.maxSafeRadius * (1 - progress),
+      );
   }
 
   // Ground-effect expiry runs unconditionally, matching the prototype (it is never
@@ -569,6 +592,12 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
       }
       applyWorldTick(state, fighter, dt, moved, events);
     }
+    // The fog is applied OUT OF the fighter loop during sudden death, and only then.
+    // See `applySuddenDeathFog` — the ordering inside that pass is the whole reason
+    // "the one who has more HP wins" is a true sentence rather than a nearly-true one.
+    // Placed here, before `stepProjectiles`, so the fog keeps its existing position in
+    // the tick relative to shots already in the air.
+    if (suddenDeathActive(state.timeRemaining)) applySuddenDeathFog(state, dt, events);
   }
 
   // Projectiles update every tick regardless of match phase — faithfully
@@ -580,6 +609,17 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
   // Time limit. Resolved AFTER everything else in the tick, so a killing blow — or a
   // projectile that was already in the air — landing on the final tick still decides
   // the match as a knockout rather than being overridden by the clock.
+  //
+  // ⚠️ **AND SINCE DECISIONS §2 THIS IS UNREACHABLE IN A REAL MATCH.** Sudden death
+  // abolishes safe ground at 30 s and the fog burns the biggest pool in the game down in
+  // 4.8 s, so the clock cannot reach 0 with anyone alive: 10.2 s of headroom, asserted
+  // from the constants in `sim.test.mjs` §30. It is NOT dead code and must not be
+  // deleted — it stays the resolver of record, it is what an INSTRUMENT that pins HP (the
+  // forced-immortal corpus) still reaches, and it comes straight back into reach if
+  // `SUDDEN_DEATH_MS`, `FOG_DAMAGE` or the level cap moves. §30 measures the
+  // unreachability on real matches AND is shown to fail on a sudden-death-disabled sim
+  // (`tools/tmp/sd_lab.mjs --selftest`), because an unreachability assertion that cannot
+  // fail is decoration.
   if (state.phase === 'playing' && state.timeRemaining <= 0) {
     resolveTimeout(state, events);
   }
@@ -600,6 +640,24 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
  * (`ENEMY_MAX_HP` is 90 as of AUTHORISED DEVIATION #9, so that ordering has inverted; the
  * floor's job is symmetric in the pools and did not change with it.) `MIN_SAFE_RADIUS`
  * removes that, and this decides what is left.
+ *
+ * ── 🚨 SUPERSEDED FOR THE 1v1 TIMEOUT BY DECISIONS §2 — AND STILL IMPLEMENTED ──
+ *
+ * Uri, 2026-08-11: *"no. after 30 seconds reduce the fog to all screen and the one who
+ * has more HP wins."* That answers the question §2 asked (draw, or ties to the human?)
+ * by removing it: with the ring abolished at 30 s the whistle is 10.2 s further away than
+ * the fog needs to kill the largest pool in the game, so **this function no longer decides
+ * a real match at all.** The rungs below stay exactly as they are, for three reasons —
+ * they remain the resolver of record if the clock ever does run out; a forced-immortal
+ * instrument corpus still reaches them; and the unreachability is a property of three
+ * constants that can move. It is ASSERTED rather than assumed (`sim.test.mjs` §30).
+ *
+ * ⚠️ **AND THE TWO RESOLVERS DISAGREE ABOUT RUNG 1 ON PURPOSE.** This one ranks by HP
+ * FRACTION; sudden death ranks by ABSOLUTE HP, because a flat 50 HP/s drain against
+ * unequal pools is exactly "who has more HP" and that is the quantity Uri named. The
+ * fraction argument below is still right about a WHISTLE — it just is not what was asked
+ * for about a fog. The one case both can reach — two fighters level on everything — is
+ * resolved the same way by both, to the LOWER SLOT (see `applySuddenDeathFog`'s sort).
  *
  * ── The tiebreak, and why each rung ─────────────────────────────────────────
  *
@@ -934,6 +992,12 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   }
 
   // Closing fog.
+  //
+  // ⚠️ NOT DURING SUDDEN DEATH. `stepMatch` runs `applySuddenDeathFog` after the whole
+  // fighter loop instead, and leaving this branch live as well would burn everyone twice
+  // per tick. The guard is the predicate rather than `safeRadius === 0` so that the two
+  // sites cannot disagree about what "sudden death" means.
+  if (suddenDeathActive(state.timeRemaining)) return;
   const distFromCenter = Math.hypot(fighter.x - state.arena.center.x, fighter.y - state.arena.center.y);
   if (distFromCenter > state.safeRadius && fighter.hp > 0) {
     fighter.fogTimer += dt;
@@ -943,6 +1007,94 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
     }
   } else {
     fighter.fogTimer = 0;
+  }
+}
+
+/**
+ * SUDDEN DEATH's fog — DECISIONS §2, and the half of it that is not the radius.
+ *
+ * Uri's rule has two clauses and the second one is a CLAIM ABOUT THE OUTCOME: *"the one
+ * who has more HP wins."* Collapsing the ring is necessary for it and **it is not
+ * sufficient**, for two measured reasons, both of which this function exists to remove.
+ *
+ * ── 1. THE FOG IS QUANTISED, SO SLOT ORDER WAS DECIDING IT ──────────────────
+ *
+ * The fog deals `FOG_DAMAGE` (15) every `FOG_TICK_MS`, so a fighter dies after
+ * `ceil(hp / 15)` ticks. Two fighters land in the SAME bucket whenever their HP differs
+ * by less than 15 — 100 against 91 is one bucket — and in the ordinary per-fighter path
+ * the tick that kills both walks `state.fighters` in SLOT order. `combat.ts:applyDamage`
+ * ends the match the instant `lastFighterStanding` returns non-null, so the fighter
+ * processed FIRST dies first and the other is declared the winner. **A 100 HP fighter in
+ * slot 0 therefore lost to a 91 HP fighter in slot 1** — the unearned slot advantage
+ * `resolveTimeout`'s rung 1 exists to refuse, arriving through the back door.
+ *
+ * Fixed by ordering the pass ASCENDING BY HP, so the weakest is always eliminated first
+ * and the survivor is always the strongest. The tie-break inside equal HP is DESCENDING
+ * id, which makes the LOWEST slot the last one processed and therefore the winner — the
+ * same direction as `resolveTimeout`'s rung 4 (*"the lower slot"*, `DECISIONS §49a`), so
+ * the two resolvers agree about the one case neither can separate on merit.
+ *
+ * ── 2. THE FOG CLOCK WAS PER FIGHTER, SO IT WAS NOT A COMMON DRAIN ──────────
+ *
+ * `Fighter.fogTimer` accumulates only while that fighter is outside the ring, so at the
+ * collapse a fighter already in the fog carries an advanced timer and burns EARLIER than
+ * a fighter who was safe — with more HP and still dying first. So the cadence here is
+ * derived from the match clock instead, which is common to everyone by construction:
+ * the tick fires on the boundary crossing of
+ *
+ *     ticksSinceCollapse = floor((SUDDEN_DEATH_REMAINING_MS - timeRemaining) / FOG_TICK_MS)
+ *
+ * `fogTimer` is neither read nor written here — nothing else reads it, and rewriting it
+ * would be a second statement of the same schedule.
+ *
+ * ── WHAT THIS DOES *NOT* PROMISE ────────────────────────────────────────────
+ *
+ * The guarantee is stated exactly, because an over-stated one is worse than none:
+ * **absent damage from any source other than the fog, the fighter with the most HP when
+ * sudden death begins is the last one standing.** Weapons, the trail and the pot all keep
+ * working during sudden death — Uri asked for a fog, not for a ceasefire — so a fighter
+ * who is shot, or who stands in the pot, can still lose from ahead. That is play
+ * deciding the match, which is the outcome every rung of `resolveTimeout` also prefers.
+ */
+function applySuddenDeathFog(state: MatchState, dt: number, events: GameEvent[]): void {
+  // The boundary crossing, on the match clock. `timeRemaining` was decremented by exactly
+  // `dt` at the top of this tick and is nowhere near its `Math.max(0, …)` clamp (sudden
+  // death starts at 15 000 ms), so `+ dt` recovers the previous reading exactly.
+  const since = SUDDEN_DEATH_REMAINING_MS - state.timeRemaining;
+  if (Math.floor(since / FOG_TICK_MS) === Math.floor((since - dt) / FOG_TICK_MS)) return;
+
+  // A sorted COPY of the index list, never `state.fighters` itself: that array is the
+  // iteration order for the whole game (see the fighter loop), and a match that permuted
+  // its own turn order on the tick the fog closed in would be a desync visible only in
+  // the final frame. Same reasoning, and same shape, as `resolveTimeout`.
+  const order = state.fighters.slice().sort((a, b) => (a.hp !== b.hp ? a.hp - b.hp : b.id - a.id));
+  for (const fighter of order) {
+    // 🚨 STOP THE MOMENT THE MATCH IS DECIDED — MEASURED, NOT DEFENSIVE. With every fighter
+    // inside one fog tick of each other they all die on the SAME tick, so without this the
+    // pass walks past `combat.ts`'s `lastFighterStanding` and kills the fighter it has just
+    // declared the winner: 6 deaths out of 6 seats, `state.winner` naming a corpse for the
+    // victory screen to draw. The ordinary fighter loop deliberately does NOT stop on a
+    // phase change (the prototype's projectile loop keeps running for one more tick and
+    // `stepMatch` reproduces that), but a fog that keeps burning after the whistle is a
+    // different thing: it damages a fighter for whom the match is over.
+    if (state.phase !== 'playing') break;
+    if (!fighter.alive || fighter.hp <= 0) continue;
+    // ⚠️ THE SAME PREDICATE THE ORDINARY FOG USES — `dist > safeRadius` — AND NOT AN
+    // UNCONDITIONAL BURN. This pass differs from the per-fighter path in its CLOCK and
+    // its ORDER, in nothing else, so there is still exactly one statement of "who is in
+    // the fog" and every consumer that reads `state.safeRadius` (the HUD's `outside`, the
+    // 3D boundary, every instrument) stays in agreement with the damage.
+    //
+    // At `SUDDEN_DEATH_RADIUS` the one point this exempts is the arena centre itself, to
+    // the last bit. On the shipped kitchen it is unreachable — `arena/hazards.ts`
+    // registers the pot as a solid `POT.bodyRadius * 2` box, so `movement.ts:tryMove`
+    // holds every fighter's centre at least `POT.bodyRadius + PLAYER_SIZE / 2` = 73 wu
+    // out — and `sim.test.mjs` §30 asserts that on a real match rather than assuming it.
+    // A synthetic arena with no hazard CAN park a fighter there, which is why several of
+    // §10's timeout fixtures still work: they sit on the centre on purpose.
+    const dist = Math.hypot(fighter.x - state.arena.center.x, fighter.y - state.arena.center.y);
+    if (dist <= state.safeRadius) continue;
+    applyDamage(state, fighter, FOG_DAMAGE, null, { kind: 'fog' }, events);
   }
 }
 

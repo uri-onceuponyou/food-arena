@@ -92,6 +92,13 @@ import {
   // from `REACH`/`POT`/`HIT_RADIUS_*` and compares. A literal 166 or 237 here would keep
   // passing after the ladder, the hit radius or the hazard moved out from under it.
   ENDGAME_STANDOFF, minSafeRadiusFor,
+  // Section 30: `DECISIONS §2`, sudden death. Every one of these is imported rather than
+  // written as 30 000 / 15 000 / 0, because the section's whole claim is that the collapse
+  // and its consequences are DERIVED — the window is `MATCH_DURATION_MS - SUDDEN_DEATH_MS`,
+  // the unreachability of `resolveTimeout` is that window against `FOG_DAMAGE` and the
+  // largest pool the roster can build, and the ring's floor is superseded rather than
+  // deleted. A literal here would keep passing after any of them moved.
+  SUDDEN_DEATH_MS, SUDDEN_DEATH_RADIUS, SUDDEN_DEATH_REMAINING_MS, suddenDeathActive, ringFloorFor,
 } from './rules.ts';
 // Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
 // no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
@@ -585,6 +592,27 @@ console.log('\n8. Countdown -> playing transition (sanity)');
     `closest approach ${closest.toFixed(1)}, Candy Barrage reach ${donutReach}`);
 }
 
+/**
+ * 🚨 **EVERY WHISTLE TICK IS ALSO A SUDDEN-DEATH FOG TICK, AND THE ARITHMETIC IS EXACT.**
+ *
+ * `SUDDEN_DEATH_REMAINING_MS` (15 000) is an exact multiple of `FOG_TICK_MS` (300), so the
+ * 50th fog tick after the collapse lands precisely on `timeRemaining === 0` — the same tick
+ * `resolveTimeout` runs on, and the fog runs FIRST (`stepMatch` resolves the clock after
+ * everything else in the tick, deliberately). There is no `dt` that avoids it: the crossing
+ * is at `since === 15000` whatever step size gets you there.
+ *
+ * So every fixture below that constructs a whistle and stands a fighter anywhere but the
+ * exact arena centre has to state its HP as **what the resolver should SEE, plus the one
+ * fog tick that lands first**. Derived from `FOG_DAMAGE` rather than written as +15, so the
+ * fixtures move with the constant.
+ *
+ * ⚠️ These fixtures construct a state the shipped game can no longer reach at all (see
+ * `DECISIONS §2` and §30 below). They are kept, and they are still driven through the real
+ * `stepMatch`, because `resolveTimeout` remains the resolver of record and an instrument
+ * that pins HP still reaches it.
+ */
+const preFog = (hp) => hp + FOG_DAMAGE;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 10. THE CLOCK ENDS THE MATCH (regression)
 //
@@ -691,15 +719,30 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   // (d) Level on HP -> zone control decides, and it can go either way. Two runs with
   //     only the POSITIONS swapped: if the rule were role-determined both would agree.
   {
-    const a = atTheWhistle();
-    a.state.player.x = a.arena.center.x + 10;
-    a.state.enemy.x = a.arena.center.x + 400;
-    stepMatch(a.state, 200, noInput);
+    // ⚠️ HP AND `lastDamagedAt` ARE SET EXPLICITLY HERE AND USED NOT TO BE. Moving the pair
+    // off the centre re-admits the sudden-death fog tick every whistle now carries (see
+    // `preFog`), and a flat 15 HP against two DIFFERENT pools breaks the rung-1 tie this
+    // case depends on — leaving both at full HP made rung 1 decide and left rung 2 untested.
+    // Half of each pool, pre-fogged, so the fractions are exactly equal when the resolver
+    // looks; `lastDamagedAt` blocks the regen that a below-max pool would otherwise start
+    // (worth +REGEN_AMOUNT to each side, which breaks the tie again by a different route).
+    const levelOnFraction = (side) => {
+      const w = atTheWhistle();
+      for (const f of [w.state.player, w.state.enemy]) {
+        f.hp = preFog(0.5 * f.maxHp);
+        f.lastDamagedAt = w.state.elapsed;
+      }
+      w.state.player.x = w.arena.center.x + side.player;
+      w.state.enemy.x = w.arena.center.x + side.enemy;
+      stepMatch(w.state, 200, noInput);
+      return w;
+    };
+    const a = levelOnFraction({ player: 10, enemy: 400 });
+    const b = levelOnFraction({ player: 400, enemy: 10 });
 
-    const b = atTheWhistle();
-    b.state.player.x = b.arena.center.x + 400;
-    b.state.enemy.x = b.arena.center.x + 10;
-    stepMatch(b.state, 200, noInput);
+    check('the rung-2 fixture really is level on rung 1 when the resolver sees it',
+      a.state.player.hp / a.state.player.maxHp === a.state.enemy.hp / a.state.enemy.maxHp,
+      `${a.state.player.hp}/${a.state.player.maxHp} vs ${a.state.enemy.hp}/${a.state.enemy.maxHp}`);
 
     check('level on HP: the fighter nearer the ring centre wins', a.state.winner === 'player', `winner=${a.state.winner}`);
     check('level on HP: and it is genuinely positional, not role-determined',
@@ -745,25 +788,57 @@ console.log('\n8. Countdown -> playing transition (sanity)');
   state.player.hp = state.player.maxHp = 1e9;
   state.enemy.hp = state.enemy.maxHp = 1e9;
   let minSeen = Infinity;
+  let minWhileClosing = Infinity;
+  let collapsedTicks = 0;
   for (let i = 0; i < 600 && state.phase === 'playing'; i++) {
     stepMatch(state, 100, noInput);
     minSeen = Math.min(minSeen, state.safeRadius);
+    if (suddenDeathActive(state.timeRemaining)) collapsedTicks += state.safeRadius === SUDDEN_DEATH_RADIUS ? 1 : 0;
+    else minWhileClosing = Math.min(minWhileClosing, state.safeRadius);
   }
-  check('safeRadius never drops below MIN_SAFE_RADIUS over a whole match',
-    minSeen >= MIN_SAFE_RADIUS - 1e-9, `min seen ${minSeen}`);
+  // ⚠️ THIS CHECK USED TO READ `safeRadius never drops below MIN_SAFE_RADIUS over a whole
+  // match`, `minSeen >= MIN_SAFE_RADIUS - 1e-9`. **`DECISIONS §2` reversed it on purpose:**
+  // sudden death abolishes safe ground at 30 s, so the ring DOES reach zero — that is the
+  // feature. The floor's job is unchanged for the 30 s it governs, so the claim is split
+  // rather than deleted: the floor holds while the ring is CLOSING, and is exactly
+  // `SUDDEN_DEATH_RADIUS` afterwards.
+  check('safeRadius never drops below MIN_SAFE_RADIUS while the ring is still closing',
+    minWhileClosing >= MIN_SAFE_RADIUS - 1e-9, `min while closing ${minWhileClosing}`);
+  check('…and it is exactly SUDDEN_DEATH_RADIUS on every tick after the collapse (DECISIONS §2)',
+    minSeen === SUDDEN_DEATH_RADIUS && collapsedTicks > 100,
+    `min seen ${minSeen}, ${collapsedTicks} collapsed ticks`);
 
-  // The point of the floor: at the whistle there is still ground that costs nothing.
+  // The point of the floor: while the ring is still closing there is ground that costs
+  // nothing.
+  //
+  // ⚠️ THIS BLOCK USED TO SAY *"at the whistle there is still ground that costs nothing"*
+  // and set `timeRemaining = 100`. **It was a silent FALSE PASS the moment `DECISIONS §2`
+  // landed** — at the whistle the ring is at `SUDDEN_DEATH_RADIUS` and that annulus is
+  // lethal — and it went on passing only because `stepMatch(st, 99, …)` happens to land
+  // between two 300 ms fog ticks. A row that passes on the tick boundary rather than on the
+  // rule is worse than a red one. Both halves are now asserted, at a clock reading on each
+  // side of the collapse, and the second half is what makes the first non-vacuous.
   {
-    const st = playingMatch(makeArena({ width: 2000, height: 2000 }));
-    st.timeRemaining = 100;
-    // Stand in the safe annulus: outside the pot, inside the floored ring.
-    const r = (POT.dangerRadius + MIN_SAFE_RADIUS) / 2;
-    st.player.x = st.arena.center.x + r; st.player.y = st.arena.center.y;
-    st.enemy.x = st.arena.center.x - r; st.enemy.y = st.arena.center.y;
-    const hp0 = st.player.hp;
-    stepMatch(st, 99, noInput);
-    check('a fighter in the final annulus takes no fog damage at the whistle',
-      st.player.hp === hp0, `hp ${hp0} -> ${st.player.hp}, R=${st.safeRadius}`);
+    const annulus = (timeRemaining) => {
+      const st = playingMatch(makeArena({ width: 2000, height: 2000 }));
+      st.timeRemaining = timeRemaining;
+      // Stand in the safe annulus: outside the pot, inside the floored ring.
+      const r = (POT.dangerRadius + MIN_SAFE_RADIUS) / 2;
+      st.player.x = st.arena.center.x + r; st.player.y = st.arena.center.y;
+      st.enemy.x = st.arena.center.x - r; st.enemy.y = st.arena.center.y;
+      const hp0 = st.player.hp;
+      // A whole fog period, so the answer cannot depend on which side of a 300 ms boundary
+      // the step happens to land on — the defect this rewrite exists to remove.
+      stepMatch(st, FOG_TICK_MS, noInput);
+      return { lost: hp0 - st.player.hp, R: st.safeRadius };
+    };
+    const closing = annulus(SUDDEN_DEATH_REMAINING_MS + 2 * FOG_TICK_MS);
+    check('a fighter in the final annulus takes no fog damage while the ring is closing',
+      closing.lost === 0, `lost ${closing.lost}, R=${closing.R}`);
+    const collapsed = annulus(SUDDEN_DEATH_REMAINING_MS);
+    check('…and the SAME ground burns once sudden death has collapsed the ring (DECISIONS §2)',
+      collapsed.lost === FOG_DAMAGE && collapsed.R === SUDDEN_DEATH_RADIUS,
+      `lost ${collapsed.lost}, R=${collapsed.R}`);
   }
 
   // The clock must stay far enough above the fog's first-contact time that
@@ -4140,6 +4215,13 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
      * the ring is at `MIN_SAFE_RADIUS` with both fighters inside it — so the state the
      * tiebreak sees is exactly the state set up here.
      *
+     * ⚠️ **THE PARENTHESIS ABOVE ABOUT THE RING IS NO LONGER TRUE AND IS KEPT AS THE
+     * RECORD.** Since `DECISIONS §2` the ring at the whistle is `SUDDEN_DEATH_RADIUS`, so
+     * nobody is inside it and the ONE thing this fixture could not disable is the fog. It is
+     * paid for instead of suppressed — see `preFog` — and `hpMoved` below now asserts that
+     * exactly one fog tick landed on each living fighter, which is a stronger statement than
+     * the "nothing moved" it replaced: a second tick, or none, fails it.
+     *
      * ⚠️ `pDeaths`/`eDeaths` are written STRAIGHT ONTO the fighters, which is the only way
      * to reach rung 3 at all: with no respawn in the sim a fighter's count is 0 or 1 and
      * `deaths === 1` iff `hp === 0`, so rung 1 has already sorted every corpse below every
@@ -4154,8 +4236,13 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
       const cy = arena.center.y;
       state.player.x = cx - pOff; state.player.y = cy;
       state.enemy.x = cx + eOff; state.enemy.y = cy;
-      state.player.hp = pHp; state.player.maxHp = pMax;
-      state.enemy.hp = eHp; state.enemy.maxHp = eMax;
+      // ⚠️ `preFog` — see its definition above §10. The whistle tick is ALWAYS a
+      // sudden-death fog tick and it runs BEFORE `resolveTimeout`, so what the fixture
+      // writes here is not what the resolver sees unless the tick is paid for. A fighter
+      // already on 0 is skipped by `applySuddenDeathFog` (`hp <= 0`), so it must not be
+      // pre-fogged or the corpse would become a survivor.
+      state.player.hp = pHp > 0 ? preFog(pHp) : pHp; state.player.maxHp = pMax;
+      state.enemy.hp = eHp > 0 ? preFog(eHp) : eHp; state.enemy.maxHp = eMax;
       state.player.deaths = pDeaths; state.enemy.deaths = eDeaths;
       state.player.lastDamagedAt = state.elapsed;
       state.enemy.lastDamagedAt = state.elapsed;
@@ -4169,6 +4256,8 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
         winnerId: state.winnerId,
         ended: events.filter((e) => e.type === 'match-ended'),
         moved: state.player.x !== cx - pOff || state.enemy.x !== cx + eOff,
+        // Exactly the intended HP, i.e. exactly ONE sudden-death fog tick landed on each
+        // living fighter and nothing else touched them. See `preFog`.
         hpMoved: state.player.hp !== pHp || state.enemy.hp !== eHp,
         deathsMoved: state.player.deaths !== pDeaths || state.enemy.deaths !== eDeaths,
         phase: state.phase,
@@ -4260,7 +4349,11 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
       })));
       state.phase = 'playing';
       state.fighters.forEach((f, i) => {
-        f.hp = 50; f.maxHp = 100;                 // rung 1 ties
+        // `preFog` — the whistle tick is also a sudden-death fog tick and it lands BEFORE
+        // `resolveTimeout`, so 50 is what the resolver must SEE, not what is written here.
+        // Six fighters on a 400 wu ring are all outside `SUDDEN_DEATH_RADIUS`, so all six
+        // pay exactly one tick and rung 1 still ties.
+        f.hp = preFog(50); f.maxHp = 100;         // rung 1 ties
         f.deaths = DEATHS[i];
         f.lastDamagedAt = state.elapsed;          // regen blocked
         f.status.stunnedUntil = state.elapsed + 10_000; // rooted
@@ -4290,7 +4383,7 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
       })));
       mirrored.phase = 'playing';
       mirrored.fighters.forEach((f, i) => {
-        f.hp = 50; f.maxHp = 100;
+        f.hp = preFog(50); f.maxHp = 100;
         f.deaths = [...DEATHS].reverse()[i];
         f.lastDamagedAt = mirrored.elapsed;
         f.status.stunnedUntil = mirrored.elapsed + 10_000;
@@ -4307,7 +4400,7 @@ console.log('\n27. The N-fighter container (cap pinned to 2)');
       })));
       flat.phase = 'playing';
       flat.fighters.forEach((f) => {
-        f.hp = 50; f.maxHp = 100;
+        f.hp = preFog(50); f.maxHp = 100;
         f.deaths = 2;
         f.lastDamagedAt = flat.elapsed;
         f.status.stunnedUntil = flat.elapsed + 10_000;
@@ -5027,22 +5120,49 @@ console.log('\n29. The endgame ring scales with fighter count (DECISIONS §53b)'
     let drift = 0;
     let sawFloor = 0;
     let ticks = 0;
+    let closingTicks = 0;
+    let collapsedTicks = 0;
     let prev = Infinity;
     let rose = 0;
+    let minWhileClosing = Infinity;
     for (let i = 0; i < 600 && st.phase === 'playing'; i++) {
       stepMatch(st, 100, noInput);
       const progress = 1 - st.timeRemaining / MATCH_DURATION_MS;
       const legacy = Math.max(MIN_SAFE_RADIUS, st.arena.maxSafeRadius * (1 - progress));
-      if (st.safeRadius !== legacy) drift++;
-      if (st.safeRadius === MIN_SAFE_RADIUS) sawFloor++;
+      if (suddenDeathActive(st.timeRemaining)) {
+        collapsedTicks += st.safeRadius === SUDDEN_DEATH_RADIUS ? 1 : 0;
+      } else {
+        closingTicks++;
+        minWhileClosing = Math.min(minWhileClosing, st.safeRadius);
+        if (st.safeRadius !== legacy) drift++;
+        if (st.safeRadius === MIN_SAFE_RADIUS) sawFloor++;
+      }
       if (st.safeRadius > prev) rose++;
       prev = st.safeRadius;
       ticks++;
     }
-    check('the corpus this no-op runs on is not vacuous — a full match that REACHES the floor',
-      ticks > 400 && sawFloor > 50, `${ticks} ticks, ${sawFloor} at the floor`);
-    check('every tick of a two-fighter match has the pre-change `max(MIN_SAFE_RADIUS, …)` radius',
-      drift === 0, `${drift} of ${ticks} ticks differ`);
+    // ⚠️ THIS ROW USED TO READ *"the corpus this no-op runs on is not vacuous — a full match
+    // that REACHES the floor"*, `ticks > 400 && sawFloor > 50`. **`DECISIONS §2` made that
+    // impossible and the reversal is the headline finding of that pass**, so the row now
+    // asserts the opposite and prints the numbers that say why:
+    //
+    //   tFloor = MATCH_DURATION_MS * (1 - floor / maxSafeRadius) = 38.66 s at 993 wu / N=2
+    //   sudden death fires at SUDDEN_DEATH_MS                    = 30.00 s
+    //
+    // so the ring is cut off 8.66 s short of its own floor on THIS fixture, and 11.83 s
+    // short on the shipped 1985 wu arena. `minSafeRadiusFor` is not dead — it is the floor
+    // for the 30 s it governs, which is what `drift` still measures — but nothing in a real
+    // match ever stands on it.
+    check('the ring NEVER reaches minSafeRadiusFor at the shipped constants — sudden death is 8.7 s earlier',
+      sawFloor === 0 && closingTicks > 250 && collapsedTicks > 100
+      && MATCH_DURATION_MS * (1 - MIN_SAFE_RADIUS / st.arena.maxSafeRadius) > SUDDEN_DEATH_MS,
+      `${ticks} ticks (${closingTicks} closing, ${collapsedTicks} collapsed), ${sawFloor} at the floor, `
+      + `tFloor ${(MATCH_DURATION_MS * (1 - MIN_SAFE_RADIUS / st.arena.maxSafeRadius) / 1000).toFixed(2)} s `
+      + `vs trigger ${(SUDDEN_DEATH_MS / 1000).toFixed(2)} s`);
+    check('every CLOSING tick of a two-fighter match still has the pre-change `max(MIN_SAFE_RADIUS, …)` radius',
+      drift === 0 && minWhileClosing > MIN_SAFE_RADIUS, `${drift} of ${closingTicks} closing ticks differ, min ${minWhileClosing}`);
+    check('…and every tick after the trigger is exactly SUDDEN_DEATH_RADIUS',
+      collapsedTicks === ticks - closingTicks, `${collapsedTicks} of ${ticks - closingTicks}`);
     check('…and the ring is monotone non-increasing (a fog that recedes would break two latches)',
       rose === 0, `${rose} ticks rose`);
   }
@@ -5154,6 +5274,7 @@ console.log('\n29. The endgame ring scales with fighter count (DECISIONS §53b)'
     six.phase = 'playing';
     for (const f of six.fighters) { f.hp = f.maxHp = 1e9; }
     let minSeen = Infinity;
+    let minWhileClosing = Infinity;
     let rose = 0;
     let prev = Infinity;
     let ticks = 0;
@@ -5162,13 +5283,29 @@ console.log('\n29. The endgame ring scales with fighter count (DECISIONS §53b)'
       if (six.safeRadius > prev) rose++;
       prev = six.safeRadius;
       minSeen = Math.min(minSeen, six.safeRadius);
+      if (!suddenDeathActive(six.timeRemaining)) minWhileClosing = Math.min(minWhileClosing, six.safeRadius);
       ticks++;
     }
-    check('a six-fighter match bottoms out at the six-fighter floor, not the constant one',
-      approx(minSeen, minSafeRadiusFor(N), 1e-9) && minSeen > MIN_SAFE_RADIUS,
-      `min seen ${minSeen} vs ${minSafeRadiusFor(N)} (constant floor ${MIN_SAFE_RADIUS})`);
-    check('…over a full match, monotone non-increasing, and the run reached the floor',
-      rose === 0 && ticks > 400, `${rose} rises in ${ticks} ticks`);
+    // ⚠️ THIS ROW USED TO READ *"a six-fighter match bottoms out at the six-fighter floor,
+    // not the constant one"*, `approx(minSeen, minSafeRadiusFor(N))`. Since `DECISIONS §2`
+    // it bottoms out at ZERO like every other seat count, so the §53b claim has to be made
+    // where it is still observable: the ring the SCHEDULE reaches before the collapse is
+    // `maxSafeRadius * (1 - SUDDEN_DEATH_MS / MATCH_DURATION_MS)` — the same at every N —
+    // and the six-seat floor is what it WOULD have stopped at. Both are asserted, and the
+    // gap between them is printed, because that gap is the §53b/§2 tension itself.
+    const scheduledFloor = six.arena.maxSafeRadius * (1 - SUDDEN_DEATH_MS / MATCH_DURATION_MS);
+    // The band, not a tolerance: the last CLOSING tick lands somewhere inside one step of
+    // the trigger, and one 100 ms step is `maxSafeRadius * 100 / MATCH_DURATION_MS` wu of
+    // radius. Derived from the step size so a different `dt` here cannot silently loosen it.
+    const oneStep = six.arena.maxSafeRadius * (100 / MATCH_DURATION_MS);
+    check('a six-fighter match is cut off ABOVE the six-fighter floor — §53b never binds at the shipped trigger',
+      minWhileClosing >= scheduledFloor - 1e-9 && minWhileClosing <= scheduledFloor + oneStep + 1e-9
+      && minWhileClosing > minSafeRadiusFor(N)
+      && minSeen === SUDDEN_DEATH_RADIUS,
+      `closing floor ${minWhileClosing.toFixed(2)} vs six-seat floor ${minSafeRadiusFor(N).toFixed(2)} `
+      + `(constant floor ${MIN_SAFE_RADIUS}); min seen ${minSeen}`);
+    check('…over a full match, monotone non-increasing, and the run reached the collapse',
+      rose === 0 && ticks > 400 && minSeen === SUDDEN_DEATH_RADIUS, `${rose} rises in ${ticks} ticks`);
 
     // THE SEATED COUNT, NOT THE LIVING ONE — and this is invisible to `--bitid`, because at
     // two seats the two counts only ever differ on the tick the match ends. Reading the
@@ -5179,17 +5316,40 @@ console.log('\n29. The endgame ring scales with fighter count (DECISIONS §53b)'
       // already blown and `stepMatch` skips the whole ring block once `phase !== 'playing'` —
       // `safeRadius` was simply frozen at its last value and the row passed against a sim
       // that read the living count. The phase is asserted below so it cannot go quiet again.
-      const st = createMatch(arena, Array.from({ length: N }, (_, i) => ({ characterId: 'hamburger', spawn: ringSpawn(i) })));
+      // ⚠️ 260 TICKS AND A 500 wu OPENING RING, NOT 400 ON THE SHIPPED ONE — AND BOTH
+      // NUMBERS ARE THE SAME LESSON, ONE CONSTANT FURTHER IN.
+      //
+      // The 400 was chosen because a 500-tick loop ran 50 s of a 45 s match, `stepMatch`
+      // skips the ring block once `phase !== 'playing'`, and the row passed against a sim
+      // that read the LIVING count off a frozen `safeRadius`. Since `DECISIONS §2` a
+      // COLLAPSED ring is exactly as inert: at `SUDDEN_DEATH_RADIUS` the radius is zero at
+      // every seat count, so any tick past 30 s (300 ticks at 100 ms) is vacuous too.
+      //
+      // Worse, on the SHIPPED opening ring the six-seat floor is never reached at all
+      // (tFloor 34.26 s at 993 wu against a 30 s trigger), so there is no window in which
+      // the floor binds. The fixture therefore uses an opening ring small enough that it
+      // does — 500 wu puts tFloor at 23.67 s — which is the only configuration where
+      // "seated, not living" is observable. That the SHIPPED arena has no such window is
+      // asserted separately above; here the rule itself is what is being tested.
+      const tight = makeArena({ width: 3000, height: 3000, maxSafeRadius: 500 });
+      const st = createMatch(tight, Array.from({ length: N }, (_, i) => ({ characterId: 'hamburger', spawn: ringSpawn(i) })));
       st.phase = 'playing';
       for (const f of st.fighters) { f.hp = f.maxHp = 1e9; }
-      for (let i = 0; i < 400 && st.phase === 'playing'; i++) stepMatch(st, 100, noInput);
+      for (let i = 0; i < 260 && st.phase === 'playing'; i++) stepMatch(st, 100, noInput);
       const atFloor = st.safeRadius;
       for (const id of [3, 4, 5]) applyDamage(st, st.fighters[id], 1e9, null, { kind: 'fog' }, []);
       stepMatch(st, 100, noInput);
       check('three of six knocked out does NOT reopen the close — the ring reads the SEATED count',
-        st.phase === 'playing' && st.fighters.filter((f) => f.alive).length === 3
+        st.phase === 'playing' && !suddenDeathActive(st.timeRemaining)
+        && st.fighters.filter((f) => f.alive).length === 3
         && approx(st.safeRadius, minSafeRadiusFor(N), 1e-9) && approx(atFloor, minSafeRadiusFor(N), 1e-9),
         `phase ${st.phase}, ${atFloor} -> ${st.safeRadius}, three-seat floor would be ${minSafeRadiusFor(3)}`);
+      // …and that same fixture is §53b's POSITIVE control, which the shipped arena can no
+      // longer supply: a six-fighter match DOES bottom out on the six-fighter floor, above
+      // the constant one, whenever the schedule has time to get there before the collapse.
+      check('a six-fighter match bottoms out at the six-fighter floor, not the constant one',
+        approx(atFloor, minSafeRadiusFor(N), 1e-9) && atFloor > MIN_SAFE_RADIUS,
+        `${atFloor} vs ${minSafeRadiusFor(N)} (constant floor ${MIN_SAFE_RADIUS})`);
     }
 
     // A fighter standing where the endgame is actually fought takes nothing at the whistle.
@@ -5345,17 +5505,40 @@ console.log('\n29. The endgame ring scales with fighter count (DECISIONS §53b)'
     // §53b's headline: a bigger arena does NOT fix the annulus, because the floor is not a
     // function of the arena. Asserted against the LIVE SIM on two arenas of different size,
     // not against the formula, so a floor that quietly picked up an arena term would fail.
+    // ⚠️ THE MEASUREMENT MOVED FROM "the whole match" TO "while the ring is closing", AND
+    // THE ROW BELOW USED TO READ `floorOn(R1) === floorOn(R4) && floorOn(R1) === MIN_SAFE_RADIUS`
+    // over every tick. Since `DECISIONS §2` every arena bottoms out at zero, so that
+    // comparison would be true for a reason that has nothing to do with §53b — two arenas
+    // agreeing because both were abolished. Restricting it to the closing window keeps it
+    // measuring the floor. Neither arena REACHES the floor at the shipped trigger, which is
+    // the second row and is §2's cost to §53b stated as a number.
     const floorOn = (maxSafeRadius) => {
       const st = playingMatch(makeArena({ width: 2000, height: 2000, maxSafeRadius }));
       st.player.hp = st.player.maxHp = 1e9;
       st.enemy.hp = st.enemy.maxHp = 1e9;
       let min = Infinity;
-      for (let i = 0; i < 600 && st.phase === 'playing'; i++) { stepMatch(st, 100, noInput); min = Math.min(min, st.safeRadius); }
+      for (let i = 0; i < 600 && st.phase === 'playing'; i++) {
+        stepMatch(st, 100, noInput);
+        if (!suddenDeathActive(st.timeRemaining)) min = Math.min(min, st.safeRadius);
+      }
       return min;
     };
+    // The FLOOR itself is arena-independent — asserted on the function, which is where the
+    // claim lives, since the live sim can no longer reach it on either arena.
     check('the floor is INDEPENDENT of arena size — a 2x map does not widen the final annulus',
-      floorOn(R1) === floorOn(R4) && floorOn(R1) === MIN_SAFE_RADIUS,
-      `${floorOn(R1)} vs ${floorOn(R4)}`);
+      minSafeRadiusFor(2) === MIN_SAFE_RADIUS && minSafeRadiusFor(MAX_FIGHTERS) === minSafeRadiusFor(MAX_FIGHTERS)
+      && concealmentKeepoutRadius(R1) !== concealmentKeepoutRadius(R4),
+      `floor ${MIN_SAFE_RADIUS} on both; keepout ${concealmentKeepoutRadius(R1).toFixed(2)} / ${concealmentKeepoutRadius(R4).toFixed(2)}`);
+    // Band, not tolerance — one 100 ms step of radius. See the six-seat row above.
+    const inBand = (R) => {
+      const want = R * (1 - SUDDEN_DEATH_MS / MATCH_DURATION_MS);
+      const step = R * (100 / MATCH_DURATION_MS);
+      const got = floorOn(R);
+      return got >= want - 1e-9 && got <= want + step + 1e-9 && got > MIN_SAFE_RADIUS;
+    };
+    check('…and NEITHER arena reaches it before sudden death — the closing ring stops at maxR/3 (DECISIONS §2)',
+      inBand(R1) && inBand(R4),
+      `${floorOn(R1).toFixed(2)} / ${floorOn(R4).toFixed(2)} against a ${MIN_SAFE_RADIUS} floor`);
 
     // The coupling `rules.ts` deliberately does NOT make: `concealmentKeepoutRadius` still
     // floors on `MIN_SAFE_RADIUS` because it cannot import `MAX_FIGHTERS`. So the
@@ -5365,6 +5548,286 @@ console.log('\n29. The endgame ring scales with fighter count (DECISIONS §53b)'
       concealmentKeepoutRadius(R1) >= minSafeRadiusFor(MAX_FIGHTERS)
       && concealmentKeepoutRadius(R4) >= minSafeRadiusFor(MAX_FIGHTERS),
       `keepout ${concealmentKeepoutRadius(R1).toFixed(2)} / ${concealmentKeepoutRadius(R4).toFixed(2)} vs ring ${minSafeRadiusFor(MAX_FIGHTERS)}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 30. SUDDEN DEATH (DECISIONS §2)
+//
+// Uri, 2026-08-11: *"no. after 30 seconds reduce the fog to all screen and the one who
+// has more HP wins. (Sudden Death)"*
+//
+// Three claims, and they fail for three different reasons, so they are asserted apart:
+//
+//   (a) THE DERIVATION — where 30 s sits in the fog schedule, and the two things it
+//       supersedes (§53b's floor, and §49a's whistle).
+//   (b) THE OUTCOME — "the one who has more HP wins" is TRUE, including inside one fog
+//       quantum, where it was false until `applySuddenDeathFog` ordered the pass.
+//   (c) THE UNREACHABILITY of `resolveTimeout` — measured on real matches, with a
+//       control proving the fixture is capable of producing a timeout at all.
+//
+// 🚨 (c) IS THE ONE THAT IS EASY TO WRITE TAUTOLOGICALLY. An "X never happens" row passes
+// for a fixture that could never have produced X in the first place. The paired control
+// below is the answer inside this file; `tools/tmp/sd_lab.mjs --selftest` is the answer
+// outside it, and it runs the identical scenario against a sim with the collapse patched
+// out and requires the row to FAIL there.
+// ─────────────────────────────────────────────────────────────────────────────
+
+console.log('\n30. Sudden death (DECISIONS §2)');
+{
+  // ── (a) THE DERIVATION ────────────────────────────────────────────────────
+  {
+    check('`SUDDEN_DEATH_MS` is Uri\'s 30 s and sits strictly inside the clock',
+      SUDDEN_DEATH_MS === 30_000 && SUDDEN_DEATH_MS < MATCH_DURATION_MS,
+      `${SUDDEN_DEATH_MS} of ${MATCH_DURATION_MS}`);
+    check('the window is DERIVED from the clock, not typed',
+      SUDDEN_DEATH_REMAINING_MS === MATCH_DURATION_MS - SUDDEN_DEATH_MS,
+      `${SUDDEN_DEATH_REMAINING_MS}`);
+    check('`suddenDeathActive` reads the CLOCK, not `elapsed` — false at the whistle-to-be, true at the trigger',
+      !suddenDeathActive(MATCH_DURATION_MS) && !suddenDeathActive(SUDDEN_DEATH_REMAINING_MS + 1)
+      && suddenDeathActive(SUDDEN_DEATH_REMAINING_MS) && suddenDeathActive(0),
+      `${SUDDEN_DEATH_REMAINING_MS}`);
+
+    // `ringFloorFor` is the one thing the three shipped READERS of the floor call. It has to
+    // reduce to `minSafeRadiusFor` before the trigger and to zero after it, at every N.
+    let floorOk = 0;
+    let floorRows = 0;
+    for (let n = 2; n <= MAX_FIGHTERS; n++) {
+      for (const tr of [MATCH_DURATION_MS, SUDDEN_DEATH_REMAINING_MS + 1, SUDDEN_DEATH_REMAINING_MS, 0]) {
+        floorRows++;
+        const want = tr <= SUDDEN_DEATH_REMAINING_MS ? SUDDEN_DEATH_RADIUS : minSafeRadiusFor(n);
+        if (ringFloorFor(n, tr) === want) floorOk++;
+      }
+    }
+    check('`ringFloorFor` is `minSafeRadiusFor` before the trigger and SUDDEN_DEATH_RADIUS after, at every N',
+      floorOk === floorRows, `${floorOk}/${floorRows}`);
+
+    // 🚨 THE TENSION, STATED AS A NUMBER. The ring is cut off 9.6-11.8 s short of the floor
+    // §53b derives, on the shipped 2800x2000 arena. This is not a failure — it is the cost
+    // of Uri's 30 s, and it is asserted so that moving either constant makes it visible.
+    const ARENA_MAX = Math.round(Math.hypot(2800 / 2, 2000 / 2) / (1 - 6000 / MATCH_DURATION_MS));
+    check('the shipped arena\'s derived opening ring reproduces §48\'s 1985 wu',
+      ARENA_MAX === 1985, `${ARENA_MAX}`);
+    const tFloor = (n) => MATCH_DURATION_MS * (1 - minSafeRadiusFor(n) / ARENA_MAX);
+    const rAtTrigger = ARENA_MAX * (1 - SUDDEN_DEATH_MS / MATCH_DURATION_MS);
+    check('at the trigger the ring is still 661.67 wu — 4.73x the N<=4 floor, 2.79x the N=6 one',
+      approx(rAtTrigger, 661.667, 0.01)
+      && approx(rAtTrigger / minSafeRadiusFor(2), 4.73, 0.01)
+      && approx(rAtTrigger / minSafeRadiusFor(MAX_FIGHTERS), 2.79, 0.01),
+      `${rAtTrigger.toFixed(3)} wu`);
+    let short = 0;
+    const shortRows = [];
+    for (let n = 2; n <= MAX_FIGHTERS; n++) {
+      shortRows.push(`N=${n} tFloor ${(tFloor(n) / 1000).toFixed(3)}s`);
+      if (tFloor(n) > SUDDEN_DEATH_MS) short++;
+    }
+    check('🚨 §53b\'s floor is NEVER REACHED at any seat count — sudden death is 9.6-11.8 s earlier',
+      short === MAX_FIGHTERS - 1
+      && approx((tFloor(2) - SUDDEN_DEATH_MS) / 1000, 11.826, 0.01)
+      && approx((tFloor(MAX_FIGHTERS) - SUDDEN_DEATH_MS) / 1000, 9.627, 0.01),
+      `${shortRows.join(' · ')} vs trigger ${(SUDDEN_DEATH_MS / 1000).toFixed(2)}s`);
+
+    // WHY THE CLOCK CAN STILL BE 45 s: the window has to outlast the biggest pool the
+    // roster can build, or the collapse resolves nothing and the whistle decides after all.
+    let worstHp = 0;
+    let worstWho = '';
+    for (const id of CHARACTER_IDS) {
+      for (const base of [PLAYER_MAX_HP, ENEMY_MAX_HP]) {
+        const h = maxHpFor(id, base, LEVEL_MAX);
+        if (h > worstHp) { worstHp = h; worstWho = `${id}@${base}`; }
+      }
+    }
+    const burnMs = Math.ceil(worstHp / FOG_DAMAGE) * FOG_TICK_MS;
+    check('the sudden-death window outlasts the LARGEST pool in the game with headroom',
+      burnMs < SUDDEN_DEATH_REMAINING_MS && worstHp === 238 && burnMs === 4800,
+      `worst pool ${worstHp} (${worstWho}) burns in ${burnMs} ms of a ${SUDDEN_DEATH_REMAINING_MS} ms window `
+      + `(headroom ${SUDDEN_DEATH_REMAINING_MS - burnMs} ms)`);
+
+    // The exact-centre exemption `SUDDEN_DEATH_RADIUS = 0` leaves is unreachable on any
+    // arena carrying the pot as a solid box, which is what `arena/hazards.ts` registers.
+    check('the one point a zero ring exempts is inside the pot\'s solid box — nobody can stand there',
+      POT.bodyRadius + PLAYER_SIZE / 2 > SUDDEN_DEATH_RADIUS && SUDDEN_DEATH_RADIUS === 0,
+      `centre blocked to ${POT.bodyRadius + PLAYER_SIZE / 2} wu`);
+  }
+
+  /**
+   * A frozen brawl that reaches the trigger with a known HP ladder and NOTHING else able to
+   * change it: every fighter rooted, every weapon on an unreachable cooldown, `maxHp === hp`
+   * so out-of-combat regen cannot top anyone up, no hazards on the arena, and every fighter
+   * the same distance from the centre so `resolveTimeout`'s rungs 1-3 all tie if it ever
+   * runs.
+   *
+   * 🚨 **THE 100 wu STAND RADIUS IS THE WHOLE COUNTERFACTUAL AND IT WAS 300 FIRST.** At 300
+   * the fixture still resolves without sudden death — the legacy ring passes 300 wu at
+   * 31.4 s and burns them anyway — so "the timeout is unreachable" would have been proved
+   * against a scenario that never reached it either way, which is the tautology this whole
+   * section is written to avoid. **100 wu is inside `MIN_SAFE_RADIUS` (140)**, so under the
+   * pre-§2 rule these fighters are in the permanent safe annulus for the entire match, take
+   * zero fog, and the clock decides. Sudden death is therefore the ONLY thing standing
+   * between this fixture and a timeout — `sd_lab.mjs --selftest` patches the collapse out
+   * and gets one.
+   *
+   * Returns the whole story, not a verdict, so each row below can name its own claim.
+   */
+  const suddenDeathRun = (hps, { centre = false } = {}) => {
+    const arena = makeArena({ width: 3000, height: 3000, maxSafeRadius: 993 });
+    const N = hps.length;
+    const R = 100;
+    const state = createMatch(arena, hps.map((_, i) => ({
+      characterId: 'hamburger',
+      spawn: centre
+        ? { x: arena.center.x, y: arena.center.y }
+        : {
+          x: arena.center.x + R * Math.cos((i / N) * Math.PI * 2),
+          y: arena.center.y + R * Math.sin((i / N) * Math.PI * 2),
+        },
+    })));
+    state.phase = 'playing';
+    state.fighters.forEach((f, i) => {
+      f.hp = f.maxHp = hps[i];
+      f.status.stunnedUntil = state.elapsed + 1e9; // rooted for the whole match
+      f.lastUsed = f.lastUsed.map(() => Infinity);
+    });
+    const DT = 16.667;
+    // ⚠️ THE LOOP BOUND IS DERIVED FROM THE CLOCK, +2 s OF SLACK, AND IT IS ASSERTED BELOW.
+    // A 500-tick loop once ran 50 s of a 45 s match and froze `safeRadius`, so a row passed
+    // against the bug it named. `capped` is returned so no row here can do the same.
+    const maxTicks = Math.ceil((MATCH_DURATION_MS + 2000) / DT);
+    let ticks = 0;
+    let deaths = 0;
+    let timedOut = false;
+    let firstFogAt = null;
+    let collapseAt = null;
+    while (state.phase === 'playing' && ticks < maxTicks) {
+      const before = state.timeRemaining;
+      const events = stepMatch(state, DT, noInput);
+      ticks++;
+      if (collapseAt === null && suddenDeathActive(state.timeRemaining) && !suddenDeathActive(before)) {
+        collapseAt = MATCH_DURATION_MS - state.timeRemaining;
+      }
+      for (const e of events) {
+        if (e.type === 'death') deaths++;
+        if (e.type === 'hit-landed' && e.effect === undefined) { /* unused */ }
+      }
+      if (firstFogAt === null && state.fighters.some((f) => f.hp < hps[f.id])) {
+        firstFogAt = MATCH_DURATION_MS - state.timeRemaining;
+      }
+      // A timeout leaves everyone alive and emits no `death` — that is `resolveTimeout`'s
+      // documented signature and it is how this fixture tells the two resolvers apart.
+      if (state.phase === 'ended' && state.fighters.every((f) => f.alive)) timedOut = true;
+    }
+    return {
+      state,
+      winnerId: state.winnerId,
+      ticks,
+      capped: ticks >= maxTicks,
+      deaths,
+      timedOut,
+      firstFogAt,
+      collapseAt,
+      endedAtPlayMs: MATCH_DURATION_MS - state.timeRemaining,
+    };
+  };
+
+  // ── (b) THE OUTCOME: "the one who has more HP wins" ───────────────────────
+  {
+    // THE HARD CASE, and the one that was WRONG before `applySuddenDeathFog` ordered the
+    // pass: an HP gap SMALLER than one fog tick. `ceil(hp / 15)` puts both fighters in the
+    // same bucket, the killing tick walks them in slot order, and `combat.ts` declares the
+    // match the instant one is left — so the fighter with MORE HP died first and lost.
+    let ok = 0;
+    const rows = [];
+    for (let gap = 1; gap < FOG_DAMAGE; gap++) {
+      // Both arms of the same gap: the strong fighter in slot 0, then in slot 1. A resolver
+      // that answered "the lower slot" would pass one arm and fail the other.
+      const low = suddenDeathRun([100, 100 - gap]);
+      const high = suddenDeathRun([100 - gap, 100]);
+      const good = low.winnerId === 0 && high.winnerId === 1
+        && !low.timedOut && !high.timedOut && !low.capped && !high.capped;
+      if (good) ok++;
+      else rows.push(`gap ${gap}: ${low.winnerId}/${high.winnerId}`);
+    }
+    check(`the fighter with MORE HP wins at every gap inside one fog tick (1..${FOG_DAMAGE - 1} HP), in both slots`,
+      ok === FOG_DAMAGE - 1, rows.join(' · ') || `${ok}/${FOG_DAMAGE - 1}`);
+
+    // And across a bucket boundary, where even the unordered pass got it right — kept so a
+    // regression that broke the EASY case cannot hide behind the hard one.
+    const wide = suddenDeathRun([100, 40]);
+    check('…and at a gap wider than a fog tick', wide.winnerId === 0 && !wide.timedOut, `winner ${wide.winnerId}`);
+
+    // EXACTLY LEVEL: nothing on merit separates them, so the LOWER SLOT wins — the same
+    // direction as `resolveTimeout`'s rung 4, which is why `applySuddenDeathFog` sorts ties
+    // by DESCENDING id (the lowest slot is processed last and is the one left standing).
+    const level = suddenDeathRun([100, 100]);
+    check('exactly level on HP hands it to the LOWER SLOT, agreeing with resolveTimeout\'s rung 4',
+      level.winnerId === 0, `winner ${level.winnerId}`);
+
+    // SIX SEATS, both directions. The ladder is 1 HP per seat — every gap inside one tick,
+    // so all six die on the same tick and only the ORDER of the pass can separate them.
+    const up = suddenDeathRun([90, 91, 92, 93, 94, 95]);
+    const down = suddenDeathRun([95, 94, 93, 92, 91, 90]);
+    check('at six seats the most-HP fighter is the last one standing, whichever slot holds it',
+      up.winnerId === 5 && down.winnerId === 0 && !up.timedOut && !down.timedOut,
+      `${up.winnerId} / ${down.winnerId}`);
+    check('…and every one of the other five went down — it is a knockout, not a whistle',
+      up.deaths === 5 && down.deaths === 5, `${up.deaths} / ${down.deaths} deaths`);
+
+    // ⚠️ NON-VACUITY. Every row above would also pass on a fixture where the fog never
+    // fired and the clock never ran — so the fixture has to be shown to DO the thing.
+    check('the fixture really reaches the collapse, and takes its first damage there and not before',
+      approx(up.collapseAt, SUDDEN_DEATH_MS, 20) && up.firstFogAt !== null
+      && up.firstFogAt >= SUDDEN_DEATH_MS && up.firstFogAt <= SUDDEN_DEATH_MS + FOG_TICK_MS + 20,
+      `collapse at ${up.collapseAt} ms, first damage at ${up.firstFogAt} ms`);
+    check('…and every living fighter is burning within one FOG_TICK_MS of the collapse',
+      up.state.fighters.filter((f) => f.deaths === 1).length === 5,
+      up.state.fighters.map((f) => `${f.id}:${f.hp}`).join(' '));
+  }
+
+  // ── (c) `resolveTimeout` IS UNREACHABLE ───────────────────────────────────
+  {
+    const runs = [
+      suddenDeathRun([100, 93]),
+      suddenDeathRun([238, 231]),                       // the largest pool in the game
+      suddenDeathRun([90, 91, 92, 93, 94, 95]),
+      suddenDeathRun([238, 238, 238, 238, 238, 237]),   // six of the largest pool
+    ];
+    check('no real match reaches the whistle — sudden death resolves every one of them',
+      runs.every((r) => !r.timedOut && !r.capped && r.deaths >= 1),
+      runs.map((r) => `${r.endedAtPlayMs.toFixed(0)}ms/${r.deaths}d${r.timedOut ? ' TIMEOUT' : ''}`).join(' · '));
+    check('…and every one ends inside SUDDEN_DEATH_MS + the worst burn-down, not at the clock',
+      runs.every((r) => r.endedAtPlayMs >= SUDDEN_DEATH_MS && r.endedAtPlayMs < SUDDEN_DEATH_MS + 4800 + 100),
+      runs.map((r) => `${(r.endedAtPlayMs / 1000).toFixed(2)}s`).join(' · '));
+
+    // 🚨 THE CONTROL THAT STOPS THE ROW ABOVE BEING A TAUTOLOGY. The identical fixture with
+    // every fighter standing on the exact arena centre — the one point `SUDDEN_DEATH_RADIUS`
+    // exempts — takes no fog at all and DOES reach the whistle. So the assertion can fail,
+    // and what makes it pass is the collapse rather than the shape of the fixture.
+    //
+    // ⚠️ This is a control, NOT the known-bad. The known-bad is a sim with the collapse
+    // patched out, which cannot be built inside this file: `tools/tmp/sd_lab.mjs --selftest`
+    // builds it and requires these rows to go red against it.
+    // …and the property that makes the fixture a counterfactual at all, asserted rather
+    // than left in a comment: the stand radius is INSIDE `MIN_SAFE_RADIUS`, so under the
+    // pre-§2 rule nobody in it ever takes fog and the clock has to decide.
+    const stand = Math.hypot(
+      runs[0].state.fighters[0].x - runs[0].state.arena.center.x,
+      runs[0].state.fighters[0].y - runs[0].state.arena.center.y,
+    );
+    check('the fixture stands INSIDE the legacy floor — without the collapse it could only time out',
+      stand < MIN_SAFE_RADIUS && stand > SUDDEN_DEATH_RADIUS,
+      `${stand.toFixed(2)} wu against a ${MIN_SAFE_RADIUS} wu floor`);
+
+    const centred = suddenDeathRun([100, 93], { centre: true });
+    check('CONTROL: the same fixture with nobody in the fog DOES reach the whistle',
+      centred.timedOut && centred.deaths === 0 && !centred.capped
+      && approx(centred.endedAtPlayMs, MATCH_DURATION_MS, 20),
+      `timedOut=${centred.timedOut} deaths=${centred.deaths} at ${centred.endedAtPlayMs.toFixed(0)} ms`);
+    // …and when it does, it is `resolveTimeout` that answers — level on rungs 1-3, so the
+    // lower slot takes it even though slot 1 has LESS HP. That is the rule §2 supersedes,
+    // still implemented, still correct on its own terms.
+    check('…and `resolveTimeout` still answers it by its own rungs (§49a), unchanged',
+      centred.winnerId === 0 && centred.state.fighters.every((f) => f.alive),
+      `winner ${centred.winnerId}`);
   }
 }
 

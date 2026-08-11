@@ -64,7 +64,7 @@
  * measures that separation rather than assuming it.
  */
 
-import { CHARACTERS, MIN_SAFE_RADIUS, REGEN_AMOUNT, type CharacterId, type Weapon } from '../game/rules';
+import { CHARACTERS, REGEN_AMOUNT, ringFloorFor, type CharacterId, type Weapon } from '../game/rules';
 import type { Fighter, GameEvent, MatchState, FighterId, FighterRole } from '../game/state';
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream. ⚠️ `otherRole` is gone from this file — `state[otherRole(ev.targetRole)]` was
@@ -426,7 +426,17 @@ export class MatchAudio {
     // A number rather than an exact equality: `safeRadius` is clamped with `Math.max`,
     // so it lands exactly on the floor — but an arena or schedule change should not
     // silently break the cue, and a half-unit band costs nothing.
-    if (state.safeRadius > MIN_SAFE_RADIUS + 0.5) {
+    //
+    // ⚠️ THIS READ `MIN_SAFE_RADIUS` UNTIL 2026-08-11, AND IT WAS WRONG TWICE OVER.
+    //   * The floor scales with seat count (`DECISIONS §53b`): at five and six fighters
+    //     the ring stops at 187.42 / 237.00, so a 140 wu comparison would have waited
+    //     for a radius that never arrives and the cue would never have fired at all.
+    //   * The floor is ZERO once sudden death begins (`DECISIONS §2`). `ringFloorFor`
+    //     carries both, so this latch now fires on the sudden-death collapse — the
+    //     moment the squeeze does not stop but COMPLETES. That is the right instant for
+    //     this cue and it is the only zone cue there is; a dedicated sudden-death sting
+    //     would be a new entry in `sfx.ts`, which is not this pass's to write.
+    if (state.safeRadius > ringFloorFor(state.fighters.length, state.timeRemaining) + 0.5) {
       this.sawRingAboveFloor = true;
       return;
     }

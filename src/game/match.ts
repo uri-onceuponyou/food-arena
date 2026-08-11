@@ -20,6 +20,10 @@ import { createFogRing, type FogRing } from '../arena/fogRing';
 import { createMatch, stepMatch, type FighterConfig, type MatchLevels } from './sim';
 import { enemyLevelFor } from './economy';
 import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchState } from './state';
+// ⚠️ `otherRole` came BACK to this file on 2026-08-11, for exactly one QA-only caller —
+// see `qaFillEvent`. The comment below is about the GAMEPLAY reconstructions, and those
+// are still gone: nothing in `handleEvents` resolves an attacker by "the other one".
+import { otherRole } from './state';
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream. `otherRole` is gone from this file: every "the other one" reconstruction it
 // used to do — the damage-source colour, the impact VFX origin, the knockback direction —
@@ -28,7 +32,10 @@ import {
   fighterOf, fightersOf, LOCAL_SLOT, localFighter, slotOf, trailOwnerOf, weaponAttackerOf,
 } from './roster';
 import { boxesOverlap } from './movement';
-import { CHARACTER_IDS, CHARACTERS, LEVEL_MIN, MATCH_DURATION_MS, MIN_SAFE_RADIUS, clampLevel, type CharacterId, type Weapon } from './rules';
+import {
+  CHARACTER_IDS, CHARACTERS, LEVEL_MIN, MATCH_DURATION_MS, minSafeRadiusFor,
+  SUDDEN_DEATH_MS, SUDDEN_DEATH_RADIUS, SUDDEN_DEATH_REMAINING_MS, clampLevel, type CharacterId, type Weapon,
+} from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 import { InputController } from './input';
 import { createPointerLock, type PointerLockController } from './pointerLock';
@@ -324,6 +331,53 @@ function numberFromQuery(param: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * QA-ONLY: fill the IDENTITY fields a hand-written `window.__feelEvent` payload omits.
+ *
+ * ## The defect this removes, and why it cost more than a crash
+ *
+ * `window.__feelEvent({ type: 'hit-landed', source: { kind: 'trail' } })` threw
+ * `TypeError: Cannot read properties of undefined (reading 'x')`, while `weapon`,
+ * `hazard` and `fog` all worked. The asymmetry is not luck: `weaponAttackerOf` resolves
+ * through `otherRole(targetRole)`, and `otherRole(undefined)` returns `'player'` — a real
+ * fighter — so the weapon branch has a working fallback by accident. `trailOwnerOf` reads
+ * `source.ownerRole` **directly**, and `state[undefined]` is `undefined`, so the very next
+ * line (`owner.x`) faults.
+ *
+ * 🚨 **AND IT SILENTLY COST A WHOLE CLASS OF MEASUREMENT.** This hook is the only way to
+ * put a VFX event in a frame on demand, and on the 2800x2000 arena that is not a
+ * convenience: the camera follows the local seat, the opponent starts ~2,500 wu away and
+ * first contact is **18.4 s**, so a probe watching a real match has no hit on screen to
+ * measure. The pass sent at Uri's *"VFX looks clunky"* came back **unresolved** because one
+ * of the hook's four source kinds faulted.
+ *
+ * ## Why the fix is HERE and not in `handleEvents`
+ *
+ * `handleEvents` is the real gameplay path and the sim always populates these fields —
+ * `sim.ts` pushes `{ kind: 'trail', ownerId, ownerRole }` at the single site that can emit
+ * one. Softening the consumer would make the renderer tolerant of a malformed event
+ * stream, which is exactly the tolerance that hides a real defect. The synthetic caller is
+ * the thing that is allowed to be lazy, so the filling happens at the synthetic entry
+ * point and nowhere else.
+ *
+ * ## Provably a no-op for the three kinds that already worked
+ *
+ * `targetRole` defaults to `'enemy'`, which is what the downstream readers already
+ * resolved `undefined` to: `slotOf(undefined, undefined)` is 1 and `slotOf(undefined,
+ * 'enemy')` is 1; `otherRole(undefined)` is `'player'` and `otherRole('enemy')` is
+ * `'player'`. So weapon / hazard / fog take the identical path before and after — asserted
+ * rather than argued by `tools/tmp/sd_feelevent.mjs`, which drives all four kinds through
+ * the real hook in a real browser and is shown to FAIL on `trail` without this function.
+ */
+function qaFillEvent(ev: GameEvent): GameEvent {
+  if (ev.type !== 'hit-landed') return ev;
+  const targetRole: FighterRole = ev.targetRole ?? 'enemy';
+  const source = ev.source.kind === 'trail' && ev.source.ownerRole === undefined
+    ? { ...ev.source, ownerRole: otherRole(targetRole) }
+    : ev.source;
+  return { ...ev, targetRole, source };
+}
+
 /** Metres above a fighter's feet the floating HUD pill should anchor to. */
 const FLOAT_BAR_HEIGHT = CHARACTER_HEIGHT + 0.35;
 
@@ -432,6 +486,15 @@ export class GameSession {
   private readonly qaFogRadius = numberFromQuery('fogRadius');
   private readonly qaPlayerX = numberFromQuery('px');
   private readonly qaPlayerY = numberFromQuery('py');
+
+  /**
+   * QA-only: `?fogRingRaw=1` hands `arena/fogRing.ts` the sim's LITERAL `safeRadius`
+   * instead of `fogDisplayRadius()`'s epsilon. It exists to keep an out-of-set defect
+   * REPRODUCIBLE rather than described — with it set, `?fogRadius=0` renders the
+   * sudden-death frame with no boundary at all, which is the bug `fogDisplayRadius`
+   * works around. Delete both when the one-character fix lands in `fogRing.ts`.
+   */
+  private readonly qaFogRingRaw = numberFromQuery('fogRingRaw') === 1;
 
   /** QA mirror of the input → sim edge. Allocated once; see `MatchDebug`. */
   private readonly debug: MatchDebug = {
@@ -565,7 +628,7 @@ export class GameSession {
 
     window.__matchDebug = this.debug;
     window.__feelDebug = this.feel;
-    window.__feelEvent = (ev: GameEvent) => this.handleEvents([ev]);
+    window.__feelEvent = (ev: GameEvent) => this.handleEvents([qaFillEvent(ev)]);
     // See the declaration: the only way to render concealment before an arena declares
     // regions. `tools/tmp/cw_conceal_view.mjs` is the consumer.
     window.__matchArena = this.arena;
@@ -686,7 +749,7 @@ export class GameSession {
     this.stage.lighting.focus(startPos.x, startPos.z);
 
     this.fogRing.update(
-      this.state.safeRadius,
+      this.fogDisplayRadius(),
       this.state.elapsed / 1000,
       this.state.phase === 'playing',
       this.stage.rig,
@@ -696,6 +759,34 @@ export class GameSession {
     // has to see (it hides the post-match "back to menu" button again).
     this.lastPhase = null;
     this.notifyPhase();
+  }
+
+  /**
+   * The radius handed to the 3D boundary. Identical to `state.safeRadius` EXCEPT during
+   * sudden death, where it is a hair above zero instead of zero.
+   *
+   * 🚨 **THIS IS A WORKAROUND FOR AN OUT-OF-SET DEFECT AND IT SHOULD BE DELETED.**
+   * `arena/fogRing.ts:update` opens with `const wanted = active && safeRadiusUnits > 0`
+   * and ramps the WHOLE boundary out when that is false — so handing it the sim's literal
+   * `SUDDEN_DEATH_RADIUS` (0) makes the fog **disappear at exactly the moment it covers
+   * the arena**, which is the precise opposite of `DECISIONS §2`. Verified by rendering,
+   * not by reading: `?fogRadius=0` on the shipped build, before and after.
+   *
+   * The correct fix is one character in a file this pass does not own —
+   * `safeRadiusUnits >= 0`. `fogRing.ts` then behaves correctly at zero on its own terms:
+   * `curtainHeight(0)` clamps to `CHARACTER_HEIGHT`, `setRadius(0)` produces no NaN, and
+   * the canopy's outer ring is `max(FIELD_OUTER_UNITS, r + 200)` = 1500 wu, so the danger
+   * field covers everything the camera can show. **Remove this method when that lands.**
+   *
+   * The epsilon is deliberately far below one world unit: it must clear a `> 0` test and
+   * must not be a radius anybody could stand inside. It is presentation-only and never
+   * reaches the sim — `state.safeRadius` stays exactly 0, which is what the fog damage,
+   * the HUD's `outside` test and every instrument read.
+   */
+  private fogDisplayRadius(): number {
+    const r = this.state.safeRadius;
+    if (this.qaFogRingRaw) return r;
+    return r === SUDDEN_DEATH_RADIUS && this.state.phase === 'playing' ? 1e-6 : r;
   }
 
   /** Apply the QA-only `?fogRadius=` / `?px=` / `?py=` overrides to a fresh match.
@@ -708,16 +799,69 @@ export class GameSession {
 
     if (this.qaFogRadius === null) return;
     const maxR = this.arena.maxSafeRadius;
-    // The ring bottoms out at MIN_SAFE_RADIUS (see `rules.ts`), so a request below it
-    // has no corresponding moment on the clock to rewind to — clamp rather than hand
-    // back a fog state the sim would immediately overwrite on the next tick, which
-    // would read as a broken screenshot rather than an out-of-range parameter.
-    const wantR = THREE.MathUtils.clamp(this.qaFogRadius, MIN_SAFE_RADIUS, maxR);
-    const frac = THREE.MathUtils.clamp(wantR / maxR, 0, 1);
     this.state.phase = 'playing';
     this.state.countdownValue = 0;
     this.state.countdownTick = 0;
     this.state.startFlashTimer = 0;
+
+    // ── THE REACHABLE RING STATES ARE NOT AN INTERVAL ANY MORE ────────────────
+    //
+    // `DECISIONS §2` abolishes the ring at `SUDDEN_DEATH_MS`, so the set of radii a match
+    // ever HOLDS is `(maxR/3, maxR]` — the linear close — plus the single point
+    // `SUDDEN_DEATH_RADIUS`. Everything between is skipped in one tick. A parameter that
+    // rewinds the clock to a requested radius therefore has two branches, not one clamp.
+    //
+    // ⚠️ TWO THINGS MOVED UNDER THIS BLOCK ON 2026-08-11 AND IT USED TO BE ONE LINE,
+    // `clamp(this.qaFogRadius, MIN_SAFE_RADIUS, maxR)`:
+    //
+    //   * `MIN_SAFE_RADIUS` is only the floor at N <= 4 (`DECISIONS §53b`) — a no-op in
+    //     the duel and wrong at five and six seats.
+    //   * **`minSafeRadiusFor` is no longer the binding low end at all.** The lowest radius
+    //     the schedule reaches is `maxR * SUDDEN_DEATH_REMAINING_MS / MATCH_DURATION_MS` =
+    //     661.67 wu — 4.73x the 140 wu floor. A request of, say, 200 wu set `timeRemaining`
+    //     to 4 534 ms, INSIDE the sudden-death window, and the next tick overwrote
+    //     `safeRadius` with 0: exactly the "fog state the sim would immediately overwrite"
+    //     the old clamp was written to prevent, arriving through a constant it never knew
+    //     about.
+    //
+    // 🚨 AND CLAMPING **UP** TO 661.67 DOES NOT FIX IT — MEASURED TWICE, WHICH IS WHY THE
+    // LOW END SNAPS **DOWN** INSTEAD. `suddenDeathActive` is `timeRemaining <=
+    // SUDDEN_DEATH_REMAINING_MS`, so clamping to exactly `maxR/3` lands exactly ON the
+    // trigger: `?fogRadius=1` rendered a full-arena violet frame at 0:15 reading "OUTSIDE
+    // THE ZONE −50 HP/s" (mean luma 71.3 against 124 for a real boundary frame). Adding a
+    // millisecond of clock did not fix it either — at `?simSpeed=0.02` one millisecond of
+    // sim is 50 ms of wall clock and the collapse still arrived long before the capture
+    // settled (mean 70.8, unchanged). **The bottom of the schedule is an OPEN bound and no
+    // margin makes it closed**, so a request at or below it resolves to the one ring state
+    // down there that is STABLE: sudden death itself. `?fogRadius=0` is the canonical way
+    // to ask for it, and every smaller-than-reachable request now means the same thing
+    // rather than silently photographing something else.
+    const lowestScheduled = Math.max(
+      minSafeRadiusFor(this.state.fighters.length),
+      maxR * (SUDDEN_DEATH_REMAINING_MS / MATCH_DURATION_MS),
+    );
+    if (this.qaFogRadius <= lowestScheduled) {
+      // ⚠️ SAID OUT LOUD, BECAUSE SEVERAL SHIPPED INSTRUMENTS ASK FOR RADII THAT NO LONGER
+      // EXIST — `hudshot` (260/300), `hud_fogedge` (300), `hud_accept`'s danger station
+      // (300), `kbdverdict` / `input_accept` (545) and `arena-scan`'s colour-baseline
+      // stations (200/400/420) all predate `DECISIONS §2`. Every one of them now gets the
+      // sudden-death frame, which is a DIFFERENT picture from the one their baseline was
+      // measured on. A silent snap would have them re-baselining against a dark violet
+      // arena and never knowing why; the migration is one number, `> lowestScheduled`.
+      if (this.qaFogRadius > SUDDEN_DEATH_RADIUS) {
+        console.warn(
+          `[QA] ?fogRadius=${this.qaFogRadius} is below the lowest radius the schedule ever reaches `
+          + `(${lowestScheduled.toFixed(2)} wu — DECISIONS §2 collapses the ring at ${SUDDEN_DEATH_MS / 1000} s). `
+          + 'Snapped to SUDDEN DEATH (radius 0). Ask for a larger radius if you wanted a ring.',
+        );
+      }
+      this.state.timeRemaining = SUDDEN_DEATH_REMAINING_MS;
+      this.state.safeRadius = SUDDEN_DEATH_RADIUS;
+      return;
+    }
+
+    const wantR = THREE.MathUtils.clamp(this.qaFogRadius, lowestScheduled, maxR);
+    const frac = THREE.MathUtils.clamp(wantR / maxR, 0, 1);
     this.state.timeRemaining = MATCH_DURATION_MS * frac;
     this.state.safeRadius = wantR;
   }
@@ -1348,7 +1492,7 @@ export class GameSession {
     // The boundary is driven off the sim, but its drift/pulse runs on real time so it
     // keeps breathing through hit-stop (a frozen wall would read as a rendering hitch).
     this.fogRing.update(
-      this.state.safeRadius,
+      this.fogDisplayRadius(),
       this.clock.elapsedTime,
       this.state.phase === 'playing',
       this.stage.rig,

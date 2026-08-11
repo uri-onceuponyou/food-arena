@@ -1128,6 +1128,11 @@ export const ENDGAME_STANDOFF = REACH.rangedMax + Math.max(HIT_RADIUS_VS_PLAYER,
  * small, not empty — it just is not the same "small" for two fighters and for six.
  */
 export function minSafeRadiusFor(fighterCount: number): number {
+  // ⚠️ AT THE SHIPPED CONSTANTS THIS FUNCTION'S RESULT IS NEVER REACHED — see
+  // `SUDDEN_DEATH_MS` below, which collapses the ring 9.6-11.8 s before the schedule
+  // would arrive here. It is not dead: it is the floor for every t < SUDDEN_DEATH_MS,
+  // and it binds again the moment either constant moves. The block below carries the
+  // arithmetic rather than leaving it to be re-derived.
   const n = Math.floor(fighterCount);
   // ⚠️ Below three there is no "evenly spaced neighbour" to be spaced FROM: at two the
   // chord is the diameter, and at one it does not exist — `Math.sin(Math.PI / 1)` is
@@ -1141,6 +1146,152 @@ export function minSafeRadiusFor(fighterCount: number): number {
   // any question about libm reproducibility, and keeps the hot path's cost unchanged.
   if (!Number.isFinite(n) || n < 3) return MIN_SAFE_RADIUS;
   return Math.max(MIN_SAFE_RADIUS, ENDGAME_STANDOFF / Math.sin(Math.PI / n) - POT.dangerRadius);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUDDEN DEATH — DECISIONS §2, answered by Uri 2026-08-11
+// ─────────────────────────────────────────────────────────────────────────────
+//
+//   > *"no. after 30 seconds reduce the fog to all screen and the one who has more HP
+//   > wins. (Sudden Death)"*
+//
+// The "no." answers the question §2 actually asked — *is a draw preferable to "ties go
+// to the human"?* — and replaces the whole question: there is no tie to break, because
+// the fog resolves the match before the whistle can.
+//
+// ── THE STEP, AND WHY IT IS NOT A FAST SWEEP ────────────────────────────────
+//
+// Two readings of *"reduce the fog to all screen"* were available and they are NOT
+// equivalent. A ramp — sweep the ring from wherever it is down to zero over a few
+// seconds — is the gentler one, and it is WRONG, because of Uri's SECOND clause. Under a
+// ramp the fighter nearer the centre is engulfed LAST, so the match is decided by
+// POSITION and only tie-broken by HP. Under a step every fighter is outside at the same
+// instant, burning at the same flat 50 HP/s, so time-to-death is a strictly increasing
+// function of HP alone. **The step is the only reading under which "the one who has more
+// HP wins" is a true sentence**, so the step is what ships.
+//
+// Note this also makes the resolution ABSOLUTE HP, not the HP FRACTION `resolveTimeout`
+// rung 1 uses. That is a deliberate, stated change of rule and it is Uri's words: a flat
+// drain against unequal pools is exactly "who has more HP", and the fraction argument
+// (*"the bigger pool did nothing to earn a head start"*) does not survive an answer that
+// names the raw quantity.
+//
+// ── WHERE 30 s SITS IN THE FOG SCHEDULE — MEASURED, AND IT CONTRADICTS §53b ──
+//
+// `arena/shared.ts` derives `maxSafeRadius = halfDiagonal / (1 - 6000/T)` = **1985 wu**
+// on the 2800x2000 map (`DECISIONS §48`). `sim.ts` closes the ring linearly, so at the
+// 30 s trigger the scheduled radius is
+//
+//     R(30 s) = 1985 * (1 - 30/45) = 661.67 wu
+//
+// while `minSafeRadiusFor` returns 140 (N<=4), 187.42 (N=5), 237.00 (N=6). So:
+//
+//     N     floor    tFloor     endgame window   SD fires BEFORE tFloor by   R(30)/floor
+//     2-4   140.00   41.826 s   3.174 s          11.826 s                    4.73x
+//     5     187.42   40.751 s   4.249 s          10.751 s                    3.53x
+//     6     237.00   39.627 s   5.373 s           9.627 s                    2.79x
+//
+// 🚨 **THE RING NEVER REACHES `minSafeRadiusFor(N)` IN A SHIPPED MATCH.** §53b's floor —
+// answered by Uri in the same message, and derived from the reach ladder in the block
+// above — governs a radius the schedule is cut off 9.6-11.8 s short of. To reach it
+// first, the trigger would have to be >= 41.83 s (N<=4) or >= 39.63 s (N=6), i.e. sudden
+// death would fire inside the last 3.2-5.4 s. **That is not what was asked for.**
+//
+// ⚠️ **This is REPORTED, not resolved by substituting a different number.** Uri gave 30 s;
+// the assumption under which it ships is stated here: *the endgame spacing rule is what
+// the ring is FOR while it is closing, and sudden death is the deliberate abolition of
+// safe ground — so the spacing floor is superseded rather than violated.* If the two are
+// ever wanted to coexist, the lever is the TRIGGER, not the floor. Nothing here is pinned:
+// both halves are computed from `MATCH_DURATION_MS`, `arena.maxSafeRadius`, `POT` and the
+// `REACH` ladder at run time, so moving any of them moves this table with it.
+//
+// ── WHY THE 45 s CLOCK STILL HAS TO BE 15 s LONGER THAN THIS ────────────────
+//
+// The sudden-death window has to be long enough to actually kill the biggest pool in the
+// game, or the collapse would resolve nothing and the whistle would decide after all:
+//
+//     worst pool anywhere   maxHpFor('pizza', PLAYER_MAX_HP, LEVEL_MAX) = 238 HP
+//     fog burn-down         ceil(238 / FOG_DAMAGE) = 16 ticks * FOG_TICK_MS = 4 800 ms
+//     window                MATCH_DURATION_MS - SUDDEN_DEATH_MS          = 15 000 ms
+//     headroom                                                            10 200 ms
+//
+// `sim.test.mjs` §30 asserts that inequality from the constants rather than from 4800,
+// so raising a health card, the level cap or `SUDDEN_DEATH_MS` cannot quietly put the
+// timeout back in reach.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How far into a match sudden death begins. **Uri's number, verbatim: 30 seconds.**
+ *
+ * Measured in PLAY time — the clock `MATCH_DURATION_MS` counts down — not in `elapsed`,
+ * which includes the countdown. `state.timeRemaining` is the only quantity the sim has
+ * that starts at a known value and is unaffected by `COUNTDOWN_FROM`, which is exactly
+ * the property `driver_guard.mjs` exists to protect: a sudden death keyed off `elapsed`
+ * would move with the countdown and re-seed every balance number in the project.
+ */
+export const SUDDEN_DEATH_MS = 30_000;
+
+/**
+ * The clock reading at which sudden death starts — **15 000 ms**, derived, never typed.
+ * `state.timeRemaining <= this` is the predicate, and it is the one `suddenDeathActive`
+ * implements so the comparison exists once.
+ */
+export const SUDDEN_DEATH_REMAINING_MS = MATCH_DURATION_MS - SUDDEN_DEATH_MS;
+
+/**
+ * The safe radius during sudden death: **zero. There is no safe ground.**
+ *
+ * Named rather than written as `0` at the two sites that need it, because "the ring is
+ * at its floor" and "the ring has been abolished" are different statements that would
+ * otherwise both read as a bare literal.
+ *
+ * ⚠️ At exactly 0 the only point costing 0 HP/s is the arena centre itself, and
+ * `sim.ts`'s fog test is `dist > safeRadius` — a strict inequality. On the shipped
+ * kitchen that point is unreachable anyway (`arena/hazards.ts` registers the pot as a
+ * solid `bodyRadius * 2` box, so `movement.ts:tryMove` keeps every fighter's CENTRE at
+ * least `POT.bodyRadius + PLAYER_SIZE / 2` = 73 wu out), but the sim does not depend on
+ * that: `sim.test.mjs` §30 asserts that every living fighter takes fog damage within one
+ * `FOG_TICK_MS` of the collapse, on a real match, rather than assuming the geometry.
+ */
+export const SUDDEN_DEATH_RADIUS = 0;
+
+/**
+ * Has sudden death begun? **Takes `MatchState.timeRemaining`, not `elapsed`.**
+ *
+ * A predicate rather than an inlined comparison because it has five readers across four
+ * files — `sim.ts` (the ring and the fog pass), `ui/hud.ts` (the zone readout's `holds`),
+ * `audio/director.ts` (the floor latch) and `game/match.ts` (the QA fog override) — and a
+ * rule stated once and implemented differently elsewhere is the single defect shape this
+ * codebase has recorded most often (five AI driver bugs, all of it).
+ *
+ * `phase` is deliberately NOT consulted: `timeRemaining` is `MATCH_DURATION_MS` for the
+ * whole countdown and is never rewound, so this is false until the match is genuinely
+ * 30 s old and stays true afterwards. Callers that care about the phase already have it.
+ */
+export function suddenDeathActive(timeRemaining: number): boolean {
+  return timeRemaining <= SUDDEN_DEATH_REMAINING_MS;
+}
+
+/**
+ * The lowest radius the closing ring can be at, **at this instant of this match** —
+ * `SUDDEN_DEATH_RADIUS` once sudden death has begun, `minSafeRadiusFor(n)` before it.
+ *
+ * This is what every READER of the ring's floor wants, and until 2026-08-11 all three of
+ * them compared against the bare `MIN_SAFE_RADIUS` constant: `audio/director.ts`'s
+ * one-shot "the ring has stopped" latch, `ui/hud.ts`'s `holds` ("the edge will never
+ * reach you"), and `game/match.ts`'s QA clamp. Each was a no-op at N<=4 and WRONG above
+ * it — and each becomes wrong again, at every N, the moment the ring can collapse: a HUD
+ * that says *"the edge will never reach you"* to a fighter standing 100 wu from the
+ * centre while the fog burns them at 50 HP/s is the exact class of defect `DECISIONS §13`
+ * names (a screen showing a number the model does not compute).
+ *
+ * ⚠️ It is a FLOOR, not the radius. `sim.ts` does not clamp with it during sudden death —
+ * `max(0, 661.67)` is 661.67, which is the ring the collapse exists to abolish. Sudden
+ * death is a CAP that dominates the floor, and the one place that arithmetic lives is
+ * `sim.ts`'s ternary. See there.
+ */
+export function ringFloorFor(fighterCount: number, timeRemaining: number): number {
+  return suddenDeathActive(timeRemaining) ? SUDDEN_DEATH_RADIUS : minSafeRadiusFor(fighterCount);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
