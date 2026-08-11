@@ -657,6 +657,15 @@ export class ChibiRig {
   private pelvisNominal: { w: number; h: number; d: number } | null = null;
   /** Set once `fitPelvis()` has run, so `dressLimbs()` cannot double-apply it. */
   private pelvisFitted = false;
+  /**
+   * The two shoulder bridges built by `fitShoulders()`, or null on a side that
+   * needed none. Published so a character can restyle or remove one.
+   */
+  shoulderBridge: { L: THREE.Mesh | null; R: THREE.Mesh | null } = { L: null, R: null };
+  /** Set once `fitShoulders()` has run, so `dressLimbs()` cannot double-apply it. */
+  private shouldersFitted = false;
+  /** Kept so `fitShoulders()` can build in the character's own limb tone. */
+  private readonly palette: RigPalette;
   /** Per-character idle attitude, applied by restPose(). */
   stance: Required<RigStance>;
   /**
@@ -705,6 +714,7 @@ export class ChibiRig {
   private readonly p: Required<RigProportions>;
 
   constructor(opts: ChibiRigOptions) {
+    this.palette = opts.palette;
     const st = opts.stance ?? {};
     this.stance = {
       shoulderL: st.shoulderL ?? 0.30,
@@ -1496,7 +1506,13 @@ export class ChibiRig {
     // file by file: every one builds its head/torso before it dresses limbs, and
     // `restPose()` — the only later call — runs once per FRAME and cannot carry a
     // measurement. See `fitPelvis()`.
+    //
+    // ⚠️ ORDER IS LOAD-BEARING. `fitPelvis()` fits to "the body", which it defines as
+    // everything under `body` that is not under a limb joint — and a shoulder bridge
+    // is parented to `torso`, so it would qualify. Running the pelvis FIRST keeps its
+    // measurement byte-identical to what it was before bridges existed.
     this.fitPelvis();
+    this.fitShoulders();
   }
 
   /**
@@ -1691,6 +1707,247 @@ export class ChibiRig {
     geo.computeVertexNormals();
     geo.computeBoundingBox();
     geo.computeBoundingSphere();
+  }
+
+  /**
+   * 🔴 THE ARM DOES NOT REACH THE BODY, AND NO `shoulderWidth` CAN FIX IT.
+   *
+   * ── The finding ─────────────────────────────────────────────────────────────
+   * Read `shots/r2/before/sushi_p20.png` and `hamburger_p20.png` at the SHIPPED
+   * LOBBY CAMERA: on both, each upper arm is a floating cylinder with a clear band
+   * of BACKGROUND between it and the body. It is the arms' version of the report
+   * that produced `fitPelvis()` — *"the legs are disconnected from the body"* — and
+   * at pitch 58 the foreshortening hides most of it, which is why four rounds of
+   * limb work never landed on it.
+   *
+   * ── Why a character file CANNOT close it ────────────────────────────────────
+   * `sushi.ts` caps its maki-roll torso at
+   *
+   *     rollR = min(torsoH * 0.46, shoulderWidth - armRadius * 1.15)
+   *
+   * and then builds its own upper arm at `size.radius * 0.88`. Both terms move with
+   * `shoulderWidth`, so widening the shoulder moves the arm out and the cap out with
+   * it and the daylight is unchanged. (⚠️ On the SHIPPED numbers the FIRST term
+   * binds — `torsoH * 0.46 = 0.2995` against `shoulderWidth - armRadius * 1.15 =
+   * 0.3083` — so the tidy `armRadius * (1.15 - 0.88) = 0.0385 m` derivation is the
+   * wrong branch of the `min`, and the real gap is larger. Measured, not derived:
+   * **0.0981 m on the left and 0.0846 m on the right**, `r2_probe --mode bridge`.)
+   *
+   * ── What this builds, and why it is not a foreign object ────────────────────
+   * A DELTOID: one ellipsoid per shoulder, in the character's own limb tone, running
+   * from just inside the body's surface out to the arm's own centreline, with its
+   * cross-section capped at the ARM'S OWN RADIUS so it can never be thicker than the
+   * limb it belongs to. It is the top of the arm, which is the part of an arm this
+   * rig never had — `buildLimbs` starts the upper arm AT the pivot and hangs it
+   * straight down, so there was never any geometry between the pivot and the body.
+   *
+   * ⚠️ **It DOES rise above the pivot**, by `armR - 0.15 * upperArmLength` — 0.075 m
+   * on sushi — because it is centred on the row the gap is measured at rather than
+   * one radius down. That is deliberate (the daylight starts AT the pivot, so a
+   * bridge whose top stopped there would leave the top of it open) and it is stated
+   * here because "capped at the arm's radius" is about the CROSS-SECTION and a reader
+   * could otherwise infer it never exceeds the arm's silhouette anywhere. Read
+   * `shots/r2/after/sushi_p20.png` and `hamburger_p20.png`: it reads as a rounded
+   * shoulder on both, at both cameras.
+   *
+   * That cap is what keeps it honest, and it is the same rule the neck column and
+   * the pelvis were re-derived under: **structure the mass hides is free; structure
+   * it does not hide is a foreign object.** A bridge spans exactly the daylight it
+   * closes — inside the body at one end, inside the arm at the other — so the only
+   * pixels it can add are pixels that were background between two parts of one
+   * character.
+   *
+   * ── Measured, per side, on the SHIPPED tree, at `--f 0.15` of the upper arm ──
+   *   char        L gap    L/armR    R gap    R/armR   built
+   *   sushi      +0.0981    0.90    +0.0846    0.76    both
+   *   lollipop   -0.0394     --     +0.0679    0.76    R
+   *   taco         (no body on the ray)  +0.0684  0.59  R
+   *   donut      +0.0365    0.38    +0.0541    0.57    both
+   *   egg        +0.0186    0.21    -0.0722     --     L
+   *   hamburger  +0.0330    0.20    +0.0169    0.10    both
+   *   burrito    -0.0168     --     -0.0167     --     none
+   *   pizza      -0.1985     --     -0.1762     --     none
+   *   soup       -0.0379     --     -0.0403     --     none
+   *   waterbottle-0.0597     --     -0.0168     --     none
+   *   hotdog     -0.0121     --     -0.0235     --     none
+   *
+   * **Five of eleven characters get nothing and are byte-identical.** Negative is
+   * the healthy state: the arm is already inside the mass.
+   *
+   * ── 🚨 IT REFUSES IN THREE CASES RATHER THAN GUESSING ───────────────────────
+   *  1. **No body on the ray at all** (taco's LEFT side today). The mass has ENDED
+   *     at that height on that side; a bridge would be a limb-coloured bar reaching
+   *     into open air. Warn and build nothing — the same rule `fitPelvis()` follows
+   *     when fewer than half its rays land.
+   *  2. **`gap <= armR * 0.05`.** The arm already meets the body; a mesh here would
+   *     be entirely inside two other meshes and cost a draw call for nothing.
+   *  3. **`gap > armR * 1.5`.** This is the one that matters. A gap that much larger
+   *     than the arm is not a shoulder that fails to reach — it is a body that is
+   *     somewhere else entirely, and bridging it would grow a NEW limb segment out
+   *     of the torso. No shipped character reaches this branch (worst is sushi at
+   *     0.90), so it is proved in `r2_probe --selftest` against a synthetic rig
+   *     rather than by assertion.
+   *
+   * ── The two rays are fired from OPPOSITE ENDS, and that is not a style choice ─
+   * `three` honours `material.side` and the cast is `FrontSide`, so a ray fired from
+   * the body AXIS outward never sees the body — every wall it would cross faces away
+   * — but DOES see the arm's INNER face, which is the surface wanted. The body and
+   * the arm's outer face are found by a ray fired from OUTSIDE inward. A probe that
+   * fired both from the axis returned `NaN` for the body on six of eleven characters
+   * and read exactly like "there is no body there".
+   */
+  fitShoulders(): void {
+    if (this.shouldersFitted) return;
+    this.shouldersFitted = true;
+
+    // ── MEASURED IN THE REST POSE, NOT AT IDENTITY, AND THAT IS NOT COSMETIC ────
+    // Nothing poses the rig during construction — `solveArmClearance()` deliberately
+    // leaves every joint at identity — but NOTHING IS EVER RENDERED AT IDENTITY:
+    // `animate()` calls `restPose()` on every frame, which opens both shoulders by
+    // the authored stance PLUS the solved `armClearance`, i.e. up to 0.30 rad of
+    // extra outward swing. Measuring at identity therefore reads the arm 0.03-0.05 m
+    // further IN than it will ever be drawn, and it silently declined to build on
+    // donut and lollipop, whose daylight only opens once the arms swing out.
+    //
+    // ⚠️ **AND THE POSE MUST BE PUT BACK.** `solveArmClearance()` records why in
+    // full: characters build geometry after this hook, `appendages.ts` resolves
+    // anchors by RAYCASTING the head, and `head` carries `headTurn`/`headTilt` in the
+    // rest pose — so leaving a pose behind here would move every such anchor on every
+    // character, which is a whole-cast art change disguised as a shoulder fix.
+    // `restPose()` writes only rotations (plus `body`'s already-identity position and
+    // scale), so clearing every joint's rotation restores exactly what the
+    // constructor guaranteed.
+    // Save what was actually there rather than assuming identity — an assumption is
+    // how a restore silently becomes a change.
+    const saved = Object.values(this.joints).map((g) => ({
+      g, r: g.rotation.clone(), p: g.position.clone(), s: g.scale.clone(),
+    }));
+    this.restPose();
+    this.joints.root.updateWorldMatrix(true, true);
+    try {
+      this.fitShouldersPosed(this.joints.torso);
+    } finally {
+      for (const { g, r, p, s } of saved) { g.rotation.copy(r); g.position.copy(p); g.scale.copy(s); }
+      this.joints.root.updateWorldMatrix(true, true);
+    }
+  }
+
+  private fitShouldersPosed(torso: THREE.Group): void {
+    torso.updateWorldMatrix(true, true);
+
+    // Same definition of "the body" as `fitPelvis()`: everything under `body` that
+    // is not a limb, not the pelvis, not an outline shell and not a ghost.
+    const LIMB_JOINTS = new Set([
+      'shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'handL', 'handR',
+      'hipL', 'hipR', 'kneeL', 'kneeR', 'footL', 'footR',
+    ]);
+    const usable = (mesh: THREE.Mesh): boolean => {
+      if (!mesh.isMesh || !mesh.geometry) return false;
+      if ((mesh.name || '').endsWith('__outline')) return false;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const ghost = mats.length > 0 && mats.every((m) => {
+        const mm = m as THREE.Material & { opacity?: number };
+        return !!mm && mm.transparent === true && (mm.opacity ?? 1) < 0.9;
+      });
+      return !ghost;
+    };
+    const body: THREE.Object3D[] = [];
+    this.joints.body.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!usable(mesh)) return;
+      if (mesh === this.pelvisMesh) return;
+      // A bridge built for the OTHER side is a child of `torso` and would otherwise
+      // qualify as "the body". It cannot be the first hit from this side's direction,
+      // so this changes nothing today — it is here so that stays true if the seat
+      // moves.
+      if ((mesh.name || '').startsWith('shoulder_bridge_')) return;
+      for (let n: THREE.Object3D | null = mesh; n; n = n.parent) if (LIMB_JOINTS.has(n.name)) return;
+      body.push(mesh);
+    });
+    if (!body.length) return;
+
+    const rough = this.palette.limbRoughness ?? 0.62;
+    const mat = toonMat({ color: this.palette.limb, roughness: rough });
+    const rc = new THREE.Raycaster();
+    const from = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+
+    for (const side of ['L', 'R'] as const) {
+      const joint = this.joints[side === 'L' ? 'shoulderL' : 'shoulderR'];
+      const arm: THREE.Object3D[] = [];
+      joint.traverse((o) => { if (usable(o as THREE.Mesh)) arm.push(o); });
+      if (!arm.length) continue;
+
+      // `shoulderL/R` sit at `(±shoulderWidth, shoulderY, 0)` in TORSO-LOCAL space, so
+      // in that frame "outward" is exactly ±x and the body axis is x = 0. Working in
+      // the torso's frame is what makes the bridge an axis-aligned ellipsoid instead
+      // of a basis problem, and it is why it is parented to `torso` rather than to the
+      // shoulder: the outer end sits at the PIVOT, which is the one point a shoulder
+      // rotation cannot move, so the bridge stays inside the arm at any pose while its
+      // inner end stays inside the body.
+      const sgn = side === 'L' ? -1 : 1;
+      const reach = this.p.shoulderWidth;
+      if (reach < 1e-4) continue;
+      // One row, `PROBE_F` of an upper arm below the pivot. The pivot row itself is
+      // useless: a lathe's top ring sits exactly AT the joint origin, so a horizontal
+      // ray there grazes a point and reports the arm as infinitely thin.
+      const PROBE_F = 0.15;
+      const y = this.metrics.shoulderY - this.metrics.upperArmLength * PROBE_F;
+      const span = reach * 4 + 2;
+      /** First hit along a torso-local ray, as a distance from the body axis. */
+      const shoot = (targets: THREE.Object3D[], outward: boolean): number | null => {
+        from.set(outward ? 0 : sgn * span, y, 0);
+        dir.set(outward ? sgn : -sgn, 0, 0);
+        rc.set(torso.localToWorld(from.clone()), dir.clone().transformDirection(torso.matrixWorld).normalize());
+        rc.near = 0;
+        rc.far = span * 1.2;
+        const hit = rc.intersectObjects(targets, false)[0];
+        if (!hit) return null;
+        return outward ? hit.distance : span - hit.distance;
+      };
+      const armInner = shoot(arm, true);
+      const armOuter = shoot(arm, false);
+      const bodyOuter = shoot(body, false);
+      if (armInner === null || armOuter === null) continue;
+      if (bodyOuter === null) {
+        // Case 1. Not defensive coding: a mass that has ended before the shoulder is
+        // the one case where a bridge would be pure invention.
+        console.warn(`[rig] fitShoulders: no body found on the ${side} shoulder ray — no bridge built.`);
+        continue;
+      }
+      const armR = (armOuter - armInner) * 0.5;
+      const gap = armInner - bodyOuter;
+      if (!(armR > 1e-4)) continue;
+      if (gap <= armR * 0.05) continue;                       // Case 2 — already attached.
+      if (gap > armR * 1.5) {                                 // Case 3 — not a shoulder gap.
+        console.warn(`[rig] fitShoulders: ${side} gap ${gap.toFixed(4)} m is ${(gap / armR).toFixed(2)}x the arm's own `
+          + 'radius — that is a body somewhere else, not a shoulder that fails to reach. No bridge built.');
+        continue;
+      }
+
+      // Inner end buried half an arm-radius inside the body so no crack can open at
+      // the seam; outer end at the arm's own centreline, which is the deepest point
+      // of the limb and therefore the attachment that survives a swing.
+      const inner = bodyOuter - armR * 0.5;
+      const outer = reach;
+      const half = (outer - inner) * 0.5;
+      // A scaled sphere, deliberately. `CapsuleGeometry` degenerates into a SPHERE
+      // whenever `len < 2r` (`docs/LESSONS.md` §12) and this bridge is SHORTER than
+      // it is thick on every character that gets one — it is squarely inside that
+      // failure band, and a squashed ellipsoid is what a deltoid looks like anyway.
+      const bridge = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), mat);
+      bridge.scale.set(half, armR, armR);
+      bridge.position.set(sgn * (inner + half), y, 0);
+      bridge.name = `shoulder_bridge_${side}`;
+      bridge.castShadow = true;
+      bridge.receiveShadow = true;
+      // ⚠️ NOT tagged `rigDefaultLimb`, and unlike the pelvis's inert tag that is
+      // load-bearing here: `torso` is not one of the twelve slots `dressLimbs()`
+      // scans, but a character CAN call `dressLimbs()` a second time, and the tag
+      // would then mean "strip me" to a future slot table that included the torso.
+      torso.add(bridge);
+      this.shoulderBridge[side] = bridge;
+    }
   }
 
   /**

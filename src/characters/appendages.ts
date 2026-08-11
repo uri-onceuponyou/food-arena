@@ -357,6 +357,65 @@ export function curl(
   return solid(new THREE.Mesh(g, mat));
 }
 
+export interface MassAnchorResult {
+  at: THREE.Vector3;
+  out: THREE.Vector3;
+  /**
+   * **True when `at` is a point ON THE MASS'S SURFACE.** False means every ray on
+   * this azimuth missed and `at` came from the bounding box, which for any
+   * non-convex mass is a point that is provably on no surface at all.
+   * `taco.ts` states the consequence correctly: *"a `hit: false` from `massAnchor`
+   * is a build failure, not noise."*
+   */
+  hit: boolean;
+  /** True when the ray at the EXACT requested azimuth and height hit. */
+  exact: boolean;
+  /** The `height01` actually used — equal to the request when `exact`. */
+  height01: number;
+}
+
+export interface MassAnchorEvent {
+  /**
+   * `fallback` — the ray found nothing, so the anchor came from the bounding box and
+   * is on NO SURFACE.
+   *
+   * ⚠️ The union deliberately keeps one member. A reverted version also emitted
+   * `moved` (the ray missed and a nearby height was used); it is gone because it made
+   * donut worse, and the reason is written out at the fallback site. Kept as a union
+   * so a future recovery has somewhere to report itself instead of being silent.
+   */
+  kind: 'fallback';
+  root: string;
+  azimuth: number;
+  /** The height01 asked for. */
+  requested: number;
+  /** The height01 used. Equal to `requested` for a `fallback`. */
+  used: number;
+}
+
+/**
+ * Every anchor that did NOT land where it was asked to, since module load.
+ *
+ * 🚨 THE POINT OF THIS ARRAY. The fallback below has always warned, and the warning
+ * has always gone to a browser console that nothing reads — donut shipped **two**
+ * mis-anchored icing drips behind exactly that warning for as long as it has had
+ * them. A console line is not a signal; a value a test can assert on is.
+ * `tools/tmp/r2_probe.mjs --mode anchor` reads it back off the construction warnings
+ * and gates on an ALLOWLIST: the two known donut entries are named with their fix,
+ * anything else fails, and a listed entry that stops firing ALSO fails so the list
+ * cannot go stale the way six documented counts did in one session.
+ *
+ * ⚠️ **READ IT AT CONSTRUCTION TIME, NOT AFTERWARDS.** Calling `massAnchor` again on
+ * a finished character does NOT reproduce what it did: by then the tree also carries
+ * `outlineGroup`'s baked hulls, which this function's filter does not exclude — and
+ * a hull is an inverted shell, so it answers the ray where the food does not. A
+ * post-hoc re-run of donut's two failing azimuths reports `exact: true` at a surface
+ * **0.05 m from the ring's own axis**, i.e. inside the hole. That is the log's
+ * reason for existing rather than a nicety.
+ */
+const ANCHOR_LOG: MassAnchorEvent[] = [];
+export function massAnchorLog(): ReadonlyArray<MassAnchorEvent> { return ANCHOR_LOG; }
+
 /**
  * Where an appendage should start and which way it should point, solved by
  * RAYCASTING the food mass at the requested height.
@@ -389,36 +448,81 @@ export function massAnchor(
   root: THREE.Object3D,
   box: THREE.Box3,
   o: { azimuth: number; height01: number; inset?: number },
-): { at: THREE.Vector3; out: THREE.Vector3; hit: boolean } {
+): MassAnchorResult {
   const c = box.getCenter(new THREE.Vector3());
   const s = box.getSize(new THREE.Vector3());
   const inset = o.inset ?? 0.25;
   const sx = Math.sin(o.azimuth), cz = Math.cos(o.azimuth);
   const out = new THREE.Vector3(sx, 0, cz).normalize();
-  const y = box.min.y + s.y * o.height01;
   const span = Math.max(s.x, s.z) * 1.5 + 1e-3;
 
   root.updateWorldMatrix(true, true);
-  const from = new THREE.Vector3(c.x + sx * span, y, c.z + cz * span);
-  const rc = new THREE.Raycaster(root.localToWorld(from.clone()),
-    out.clone().negate().transformDirection(root.matrixWorld).normalize(), 0, span * 2.2);
-  const hits = rc.intersectObject(root, true)
-    .filter((h) => !isEvent(h.object) && !isGhost(h.object as THREE.Mesh));
+  const dir = out.clone().negate().transformDirection(root.matrixWorld).normalize();
+  const shoot = (h01: number): THREE.Vector3 | null => {
+    const y = box.min.y + s.y * h01;
+    const from = new THREE.Vector3(c.x + sx * span, y, c.z + cz * span);
+    const rc = new THREE.Raycaster(root.localToWorld(from.clone()), dir.clone(), 0, span * 2.2);
+    const hits = rc.intersectObject(root, true)
+      .filter((hh) => !isEvent(hh.object) && !isGhost(hh.object as THREE.Mesh));
+    return hits.length ? root.worldToLocal(hits[0].point.clone()) : null;
+  };
 
-  if (!hits.length) {
-    // No geometry on that ray at all. Fall back to the box, keep `hit: false` so the
-    // caller can see it, and SAY SO — a silent fallback here is precisely how five
-    // characters shipped a floating island in round 2 without anything complaining.
-    // `docs/LESSONS.md` §13: an instrument that fails quietly is worse than none.
-    console.warn(`[appendages] no mass at azimuth ${o.azimuth.toFixed(2)} height01 ` +
-      `${o.height01.toFixed(2)} on ${root.name || '(unnamed)'} — anchor fell back to the bounding box`);
-    return {
-      at: new THREE.Vector3(c.x + sx * s.x * 0.5 * (1 - inset), y, c.z + cz * s.z * 0.5 * (1 - inset)),
-      out,
-      hit: false,
-    };
-  }
-  const surface = root.worldToLocal(hits[0].point.clone());
-  const reach = Math.hypot(surface.x - c.x, surface.z - c.z);
-  return { at: surface.addScaledVector(out, -inset * Math.max(reach, 1e-3)), out, hit: true };
+  const finish = (surface: THREE.Vector3, h01: number, exact: boolean): MassAnchorResult => {
+    const reach = Math.hypot(surface.x - c.x, surface.z - c.z);
+    return { at: surface.addScaledVector(out, -inset * Math.max(reach, 1e-3)), out, hit: true, exact, height01: h01 };
+  };
+
+  const direct = shoot(o.height01);
+  if (direct) return finish(direct, o.height01, true);
+
+  // ── 🔴 THE MASS IS NOT ON THAT RAY, AND THE BOX POINT IS IN MID-AIR ─────────
+  // Donut is the worked example and it is arithmetic, not bad luck: its head is a
+  // TORUS whose hole faces +Z, so at a front or back azimuth the ray fired through
+  // the mass's own centre travels **down the hole** and leaves the far side having
+  // touched nothing, at every height between the hole's two lips. Two of its four
+  // icing drips (azimuth 0.90PI at height01 0.48, and -0.86PI at 0.40) are anchored
+  // that way on a point that is on no surface, and until now nothing but a console
+  // line said so.
+  //
+  // ── ⚠️ A SEARCH WAS BUILT HERE, RENDERED, AND REVERTED. THE NUMBER THAT ─────
+  // ── KILLED IT IS IN `shots/r2/after/donut_p58.png` ──────────────────────────
+  // It held the azimuth and swept `height01` nearest-first in 0.02 steps until a ray
+  // hit — which is exactly the recovery `burrito.ts` writes BY HAND at its own call
+  // site, so it looked like promoting a decision the cast had already made. It
+  // worked, by its own contract: both of donut's anchors landed ON the surface, 0.04
+  // of the mass's height from where they were asked for, and `massAnchorLog()` went
+  // to zero fallbacks.
+  //
+  // **And it made the character worse.** The surface a hole-axis ray first meets is
+  // the hole's INNER LIP — measured 0.007 m and 0.033 m from the ring's own axis —
+  // so the drips were relocated INTO the hole and, at the match camera looking down
+  // into it, render as a pink shard with a dark socket at its root standing in the
+  // middle of the donut. 6,615 px moved at pitch 20 and 6,629 at pitch 58, and the
+  // p58 frame is unambiguous next to `shots/r2/before/donut_p58.png`. That is
+  // donut.ts's own documented "horn" read, arriving from the one direction the lobby
+  // views cannot see, plus the uncapped-tube socket its `curl` comment already warns
+  // about.
+  //
+  // So the honest position is the one this file already had, minus the silence:
+  // **there is no mass on that ray, a bounding-box point is the only thing left, and
+  // the FIX belongs to the caller** — donut should ask for those two drips at an
+  // azimuth where its ring exists, which is a character-file decision. What changes
+  // here is that the failure is now a value a test asserts on rather than a console
+  // line: see `massAnchorLog()` and `tools/tmp/r2_probe.mjs --mode anchor`.
+  //
+  // `docs/LESSONS.md` §13: an instrument that fails quietly is worse than none.
+  ANCHOR_LOG.push({
+    kind: 'fallback', root: root.name || '(unnamed)', azimuth: o.azimuth, requested: o.height01, used: o.height01,
+  });
+  console.warn(`[appendages] NO MASS at azimuth ${o.azimuth.toFixed(2)} height01 `
+    + `${o.height01.toFixed(2)} on ${root.name || '(unnamed)'} — anchor fell back to the bounding `
+    + 'box and is NOT ON ANY SURFACE. Move the azimuth to where this mass exists.');
+  const y = box.min.y + s.y * o.height01;
+  return {
+    at: new THREE.Vector3(c.x + sx * s.x * 0.5 * (1 - inset), y, c.z + cz * s.z * 0.5 * (1 - inset)),
+    out,
+    hit: false,
+    exact: false,
+    height01: o.height01,
+  };
 }

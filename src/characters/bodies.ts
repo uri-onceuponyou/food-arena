@@ -539,6 +539,71 @@ export function bodyType(name: BodyArchetypeName, tweaks: RigProportions = {}): 
 }
 
 /**
+ * 🔴 OPT OUT OF THE NECK COLUMN **WITHOUT MOVING THE HEAD**.
+ *
+ * ── Why this is a function and not a note telling you to do the arithmetic ───
+ * `neckFraction: 0` is fully supported and is the right answer for any character
+ * whose food mass does not OVERHANG its own chin — measured, 9 of 11 would expose a
+ * column at the lobby camera, and four of the five that build one put **1,914 to
+ * 9,767 px** of it on screen there (`rig.ts`, `neckGap > 0`). But dropping the knob
+ * on its own MOVES THE HEAD, because the constructor pays for the gap out of the
+ * head radius:
+ *
+ *     headH = height * headFraction - 2 * gap / (1 + headMount)
+ *     R     = headH / 2
+ *     centre = torsoTopY + gap + R * headMount
+ *
+ * Setting `gap = 0` with `headFraction` untouched therefore grows R and drops the
+ * centre, and the character's whole face, mouth and every appendage anchored against
+ * `localBounds` moves with it. `taco.ts` opted out correctly by hand and its two
+ * compensating literals — `headFraction: 0.461490`, `headMount: 1.118344` — are what
+ * this function reproduces:
+ *
+ *     headFraction' = 2R / height          headMount' = headMount + gap / R
+ *
+ * ⚠️ **THE TRAP IS THAT `R` IS NOT `height * headFraction / 2`**, and assuming it is
+ * cost burrito four rounds (see `RigProportions.headFraction`). That is exactly why
+ * this must not be re-derived per character: the relationship changes whenever
+ * `neckFraction` or `headMount` moves, and a hand-typed copy goes wrong silently and
+ * only on the archetypes that have a neck.
+ *
+ * ── Use ─────────────────────────────────────────────────────────────────────
+ * ```ts
+ * proportions: withoutNeck(bodyType('standard', { torsoFraction: 0.31, ... })),
+ * ```
+ * It takes RESOLVED proportions — i.e. wrap the `bodyType()` call, do not pass an
+ * archetype name — so a character's own tweaks are already folded in. Verified by
+ * BUILDING both rigs and comparing: `node tools/tmp/r2_probe.mjs --selftest` asserts
+ * `headRadius` and `headCentreY` are equal to **1e-9** on every archetype and on
+ * every character's real proportions, and asserts that the NAIVE drop is not.
+ *
+ * 🚨 **THIS IS NOT A DECISION, IT IS THE ARITHMETIC FOR ONE.** Whether a given
+ * character SHOULD drop its neck is a question about whether its mass hides the
+ * column, and the check is `node tools/tmp/rg_neckz.mjs`. A character whose mass
+ * does overhang its chin should keep the gap: the column and collar are the pinch
+ * and the dark notch under the chin that two blind critics asked for, and they cost
+ * nothing while they are hidden.
+ */
+export function withoutNeck(p: RigProportions): RigProportions {
+  const height = p.height ?? CHARACTER_HEIGHT;
+  const headFraction = p.headFraction ?? 0.46;
+  const headMount = p.headMount ?? 0.86;
+  const gap = height * (p.neckFraction ?? 0);
+  if (gap <= 0) return { ...p, neckFraction: 0 };
+  // The SAME clamp the constructor applies, because inverting a clamped value with
+  // the unclamped formula is how a "compensation" ends up compensating for a number
+  // the rig never used.
+  const headH = Math.max(height * 0.05, height * headFraction - (2 * gap) / (1 + headMount));
+  const R = headH * 0.5;
+  return {
+    ...p,
+    neckFraction: 0,
+    headFraction: (2 * R) / height,
+    headMount: headMount + gap / R,
+  };
+}
+
+/**
  * Which archetype each character uses. Single source of truth for the roster, so
  * the cohort a character belongs to is answerable without opening eleven files.
  * A character file still calls `bodyType()` itself — this is documentation that
