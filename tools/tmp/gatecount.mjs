@@ -267,6 +267,7 @@ const OFFLINE = [
   { key: 'tools/match-sim.mjs --selftest',       probes: [pr(['tools/match-sim.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
+  { key: 'tools/tmp/pc_lab.mjs --selftest',      probes: [pr(['tools/tmp/pc_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   // Registered OFFLINE despite 6 browser references in the file: `--selftest` returns in 0.15 s and
   // never reaches `runCapture`. Timed before registering, after `hw_ord`/`hw_burner` were put on
