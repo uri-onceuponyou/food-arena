@@ -267,6 +267,7 @@ const OFFLINE = [
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
+  { key: 'tools/tmp/nc_measure.mjs --selftest', probes: [pr(['tools/tmp/nc_measure.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/r2_probe.mjs --selftest', probes: [pr(['tools/tmp/r2_probe.mjs', '--selftest'], S)] },
   // Three probes because the doc cell states three numbers — known / new / stale. ARITY exists to
   // make that correspondence mandatory: a cell cannot gain a number that nothing measures.
