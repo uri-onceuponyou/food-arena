@@ -106,6 +106,14 @@ snapshot server on the box), importing `da_census.mjs` **fell through into `runC
 20 captures. Related: a module that reads `process.argv` **at module scope** made `valuescan
 --selftest` run a *different* tool's selftest and exit. **Guard the main path; keep the exports.**
 
+🚨 **CAMERA SHAKE RE-RANDOMISES ON EVERY `render()`, SO A FROZEN FRAME IS NOT A FROZEN CAMERA.**
+`render/camera.ts:CameraRig.update()` multiplies the shake **decay** by `dtSeconds` but **not the
+re-randomisation** — so at `dt = 0` the branch never exits and **every `stage.render()` call moves
+the camera to a new random offset**, and `Stage.render()` calls `rig.update()` before drawing.
+Measured: **344 of 344 frozen frames drifted, up to 349 px of mask.** **Every rAF-frozen probe here
+that renders twice with shake active has been measuring a moving camera.** `feel_probe.mjs` forced
+the offset to zero for exactly this reason and never generalised it. **Zero the shake explicitly.**
+
 🚨 **CSS ANIMATIONS RUN ON THE DOCUMENT TIMELINE, NOT `requestAnimationFrame`.** So **freezing rAF
 does not still them**, and **every rAF-frozen probe in this repo has been animating CSS the whole
 time**. Worse, `locator('canvas').screenshot()` is a **page capture clipped to the canvas box**, so a
