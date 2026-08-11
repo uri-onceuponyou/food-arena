@@ -36,7 +36,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
-import { bodyType } from './bodies';
+import { bodyType, withoutNeck } from './bodies';
 // `aim`, `rod` and `knob` went with the duplicate mustard bottle — see
 // `buildSilhouetteEvents`. `curl` is still the bandana tail's constructor.
 import { curl, localBounds, massAnchor } from './appendages';
@@ -418,7 +418,87 @@ export class HotDogCharacter extends BaseCharacter {
       // block, not a wrap of one call. Handed over rather than forced at the end of
       // a session. ✅ soup and pizza took the same migration and hold at ONE
       // component at both cameras, because their masses already reach the torso top.
-      proportions: bodyType('lanky', {
+      //
+      // ── ✅ IT SHIPS. THE MISSING HALF WAS ONE FORM, AND "0.1405 m" WAS THE ─────
+      // ──    WRONG NUMBER — THE REAL SHORTFALL IS 0.12 m OF THE TORSO SAUSAGE ───
+      // The 0.1405 m above is `neckGap`, i.e. the RIG's gap. It is not the gap the
+      // camera sees, because the head carries its own `bun_neck` block down into it:
+      // measured on the built rig (`tools/tmp/n2_geom.mjs`, world AABBs at restPose),
+      // `bun_neck` bottoms out at y 1.425836 against the torso sausage's top at
+      // 1.400536 — **0.0253 m apart, not 0.1405**.
+      //
+      // 🚨 AND 0.0253 m OF AIR NEEDED 0.12 m OF LIFT TO CLOSE, BECAUSE THE GAP IS
+      // NOT VERTICAL — IT IS A WEDGE IN Z. The torso sausage sits forward
+      // (`sausZ`, plus `lean: 0.16` carrying its top further forward still) and
+      // reaches z +0.35..0.49, while the head's `bun_neck` is back at z +0.016..0.229.
+      // At the lobby camera screen height is `y·cos p − z·sin p`, so **0.23 m of extra
+      // forward reach costs 0.079 of screen height and swamps the 0.024 the vertical
+      // gap is worth** — the shallow camera looks straight into the wedge between two
+      // masses that very nearly touch. This is `25d5579`'s own `Δy / tan(pitch)` rule
+      // arriving from the other side, and it is why a raise derived on paper from
+      // `headCentreY`, R and `headMount` lands 5x short.
+      //
+      // SWEPT IN THE BROWSER, no source edit, on one frozen tree — `n2_probe --mode
+      // sweep` displaces one named object and re-counts components (`--hide neck`
+      // renders the migrated character exactly, because `withoutNeck()` changes
+      // nothing in the scene graph except deleting `neck_column`/`neck_collar`):
+      //
+      //   torso sausage +dy      p20 components      p58
+      //     0.00                  2  (193,441 + 68,940)   1
+      //     0.06                  2  (193,854 + 68,940)   1
+      //     0.09                  1  — but a HAIRLINE: `shots/n2/zoom/hd_saus090.png`
+      //                              still shows background between the two masses
+      //                              across most of the width
+      //     0.12                  1  — a real contact band  ← ships
+      //     0.15                  1
+      //
+      // ❌ THREE OTHER CANDIDATES WERE RENDERED AND REJECTED, each on its picture:
+      //   · raise the whole `hotdog_torso` group (+0.09 joins) — it lifts the bun
+      //     lobes off the hip line too and bares the thighs.
+      //   · lengthen `bun_neck` downward (k 2.0, +0.121 m, joins) — that is the neck
+      //     column again in cream. `shots/n2/zoom/hd_bn200.png`: a bread slab hanging
+      //     under the chin, i.e. exactly the third-mass-at-the-junction that
+      //     `bodies.ts` says a column must not be.
+      //   · raise the two torso bun lobes (+0.15 joins) — `shots/n2/zoom/hd_lobe15.png`
+      //     reads as two cream EARS beside the head, and it closes on one side only.
+      // The sausage wins because it is the character's own landmark: the body's meat
+      // rising into the bun is what a hot dog IS, and `rules.ts` already asks for
+      // "a PLUMP sausage nestled in a split bun".
+      //
+      // ── WHAT IT BOUGHT, ON THE EDIT ITSELF, PAIRED ───────────────────────────
+      // BEFORE is `headserve --ref a419871` (an explicit immutable SHA, not `HEAD` —
+      // peers push during a run); AFTER is a `with_snapshot` freeze of this tree.
+      //
+      //   neck px, ablation at the SHIPPED lobby path   p20  8,726 -> 0   (152 x 102 box)
+      //     (`n2_probe --mode neckpx`, unpainted control p58  2,432 -> 0   (130 x 49)
+      //      scores 0 magenta on every arm)
+      //   components, `n2_probe --mode island`          p20      2 -> 1
+      //                                                 p58      1 -> 1
+      //   R                                             0.356665, |Δ| 5.55e-17
+      //   headCentreY                                   1.784190, |Δ| 0
+      //   whole-figure AABB                             BIT-IDENTICAL, y -0.068241 ..
+      //                                                 2.028442 — the join was bought
+      //                                                 entirely INSIDE the silhouette
+      //
+      // ⚠️ The known-bad is what makes "1 component" worth anything: with the head
+      // joint lifted 0.6 m the count MUST rise, and it does at BOTH pitches on both
+      // migrated characters (1 -> 2). Before this edit that check was VOID at pitch 20
+      // — the arm was already 2 components, and "2 -> 2" is not evidence of anything.
+      // ⚠️ `valuescan` is a pitch-58 instrument and is structurally blind to this fix.
+      // What it DOES see is the cost, and the cost is real: `neck_collar` was
+      // `pal.foot` darkened 0.55x — this character's darkest small element — so losing
+      // it raises the dark anchor. `--mode gate --ids hotdog,sushi`, paired, before
+      // under `headserve --ref a419871`:
+      //
+      //   range 0.768 -> 0.751 (>= 0.636)   p05 0.122 -> 0.139 (<= 0.180, 0.041 of
+      //   margin left)   steps@10 7 -> 7   weakB% 0.0 -> 0.0 (cap 15)
+      //
+      // 🔴 The gate exits 1 on BOTH arms on `dlBelow10` — 4 of 18 stations below 0.10,
+      // the SAME four before and after, worst `fryer_south`, per-station dL agreeing to
+      // ~0.001 across the pair. That is an ARENA fact (`west_lane` 0.024, `west_choke`
+      // 0.005, `grease_in` 0.014 are ground-luma collapses), pre-existing on a419871,
+      // and it is recorded here so the next reader does not attribute it to this edit.
+      proportions: withoutNeck(bodyType('lanky', {
         height: H,
         // 0.21H -> 0.175H, with `torsoWidth` widened below to meet it. Same defect as
         // burrito: inner edge 0.348 m against a 0.259 m torso half-width, so the right
@@ -433,7 +513,7 @@ export class HotDogCharacter extends BaseCharacter {
         // 0.062H -> 0.087H, matching burrito on the same archetype. Small, and
         // measured as small — see the `splay` note in `stance`.
         stanceWidth: CHARACTER_HEIGHT * 0.087,
-      }),
+      })),
       // Slouched and sleepy — weight dropped onto one hip, one shoulder
       // drooping low, head lolling to the side. Distinct from every other
       // character's stance in this file's own cast slice: the only one with a
@@ -505,6 +585,12 @@ export class HotDogCharacter extends BaseCharacter {
           new THREE.CapsuleGeometry(lobeR, lobeLen, 6, 16),
           sx > 0 ? bunMat : bunShadeMat
         );
+        // ⚠️ NAMED, and it was not. An UNNAMED mesh is invisible to every diagnostic in
+        // this repo — ablation, the part maps, `n2_probe --shift` and the per-part pass
+        // all key on `name` — so the two largest forms on this torso could not be
+        // measured, hidden or A/B'd individually. Naming them changes nothing that
+        // renders; it is what let the neck-join sweep below price the lobes at all.
+        lobe.name = sx > 0 ? 'hotdog_torso_lobe_r' : 'hotdog_torso_lobe_l';
         lobe.position.set(sx * size.w * 0.33, size.h * 0.54, -size.d * 0.06);
         lobe.rotation.z = sx * 0.05;
         lobe.scale.z = 0.9;
@@ -529,8 +615,29 @@ export class HotDogCharacter extends BaseCharacter {
       // lobes become a jacket at its sides, which is the read: a hot dog whose
       // meat runs all the way down, not a mannequin with a decal.
       const sausR = size.w * 0.30;
-      const sausLen = size.h * 0.44;
-      const sausCY = size.h * 0.58;
+      // ── 🔴 +0.12 m OF LENGTH, ALL OF IT UPWARD: THIS IS THE NECK MIGRATION'S ──
+      // ──    OTHER HALF, AND WITHOUT IT THE HEAD IS ITS OWN 68,940 px ISLAND ────
+      // See the `proportions` block for the whole account. The short version: with
+      // `neck_column` gone, nothing spans `torsoTopY` to the bun, and the sweep that
+      // priced every candidate says this form has to reach 0.12 m higher for the two
+      // masses to share a real contact band (0.09 joins by a HAIRLINE and was
+      // rejected on `shots/n2/zoom/hd_saus090.png`).
+      //
+      // ⚠️ THE RISE IS SPENT ENTIRELY ON THE TOP. `sausLen` takes the full 0.12 and
+      // `sausCY` half of it, so the LOWER cap does not move — which is the constraint
+      // the paragraph above was written for, and the reason this is not a `position.y`
+      // nudge: translating the capsule closes the neck and opens the hip, and the
+      // reject sheet for that is `shots/n2/sweep_hotdog/hotdog_p20_dy0.090.png`.
+      //
+      // ⚠️ The old wording "total height is `sausLen + 2*sausR` and it is kept inside
+      // `size.h`" is KEPT above because its reasoning stands, but it was ALREADY
+      // FALSE of the numbers it described: 0.44h + 0.6w = 0.697 m against a `size.h`
+      // of 0.596 m, i.e. the capsule was 1.17x the torso box before this pass touched
+      // it. It is 1.37x now. The invariant that actually matters — and that this
+      // block does hold — is the LOWER cap clearing the hip line.
+      const RISE = size.h * 0.2012;                    // = 0.1200 m on the shipped rig
+      const sausLen = size.h * 0.44 + RISE;
+      const sausCY = size.h * 0.58 + RISE * 0.5;
       const sausZ = size.d * 0.20;
       const sausage = new THREE.Mesh(new THREE.CapsuleGeometry(sausR, sausLen, 6, 16), meatMat);
       sausage.name = 'hotdog_torso_sausage';
@@ -613,8 +720,33 @@ export class HotDogCharacter extends BaseCharacter {
     // -0.90R, which cancels the headCentreY offset almost exactly regardless of
     // R), hidden behind the bun lobes' own footprint from every angle the game
     // camera uses. The lobes themselves stay a moderate, readable height.
-    const NECK_W = R * 0.95, NECK_D = R * 0.44, NECK_H = R * 0.34;
-    const NECK_Y = -R * 0.90 + NECK_H / 2;
+    //
+    // ⚠️ "CANCELS THE headCentreY OFFSET ALMOST EXACTLY" IS FALSE AND THE NECK
+    // MIGRATION IS WHAT EXPOSED IT. Kept above because the FORM is still right and
+    // the reasoning for having a separate block still stands. The arithmetic:
+    // `headCentreY - torsoTopY` is `neckGap + headMount * R`, which with the column
+    // gone is 0.86R — so a bottom pinned at -0.90R clears the torso top by 0.04R and
+    // the cancellation is off by a third of the block's own height. It was masked for
+    // four rounds by `neck_column`, which spanned the difference and more.
+    //
+    // 🔴 THE BLOCK IS 0.085R DEEPER, AND THAT IS THE WHOLE CHANGE ON THIS SIDE OF
+    // THE JOIN. The torso sausage does the reaching (see `dressTorso`); this only
+    // closes a notch on the LEFT of the contact, where the bun's underside was still
+    // showing background against the sausage's dome. Swept on the shipped tree —
+    // `n2_probe --mode sweep --scalegroup bun_neck`, which scales about the block's
+    // own TOP so nothing above it moves — k 1.00 / 1.25 / 1.50 all hold ONE
+    // component, and 1.25 is where `shots/n2/zoom/after_bn_k1.250.png` shows the band
+    // go continuous. Beyond that it starts to be a slab: k 2.0 was rejected outright
+    // on `shots/n2/zoom/hd_bn200.png` when it was tried as the whole fix.
+    //
+    // ⚠️ THE TOP IS PINNED, NOT THE BOTTOM, and that is load-bearing: `LOBE_Y` below
+    // is measured off this block's top, so growing `NECK_H` the natural way would
+    // raise the bun lobes — and `H` at the top of this file is tuned so the bun's
+    // apex lands at the cast's standard height. The extra length is subtracted from
+    // the bottom instead, so the head's bounding box only grows DOWNWARD.
+    const NECK_DROP = R * 0.085;                     // = 0.0303 m on the shipped rig
+    const NECK_W = R * 0.95, NECK_D = R * 0.44, NECK_H = R * 0.34 + NECK_DROP;
+    const NECK_Y = -R * 0.90 - NECK_DROP + NECK_H / 2;
 
     // ── THE BUN WAS EATING THE FACE, AND THE NUMBER SAYS BY HOW MUCH ───────────
     // `LOBE_H` was 0.58R and the sausage seat 0.35 * SAUS_R. Take the front lobe's

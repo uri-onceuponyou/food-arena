@@ -48,7 +48,7 @@ import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
-import { bodyType } from './bodies';
+import { bodyType, withoutNeck } from './bodies';
 import { aim, localBounds, massAnchor, rod } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
 
@@ -627,7 +627,69 @@ export class SushiCharacter extends BaseCharacter {
       // ✅ soup and pizza took the same migration and hold at ONE component at both
       // cameras — their masses already reach the torso top. The list was not wrong
       // about the column; it was silent about the join.
-      proportions: bodyType('standard', {
+      //
+      // ── ✅ IT SHIPS. AND "GROW THE ROLL ~39%" WAS THE WRONG PRICE BY 3x ────────
+      // The 0.1155 m above is `neckGap` — the RIG's gap — and the paragraph turned it
+      // into "the roll must grow 39%" by assuming the roll has to climb the whole of
+      // it. It does not: the roll already stops only 0.0642 m short of the rice bed
+      // (`tools/tmp/n2_geom.mjs`, world AABBs on the built rig — `sushi_maki_wall`
+      // tops out at y 1.220150, `sushi_rice` bottoms at 1.284345), and the join needs
+      // the TOP to move, not the whole form.
+      //
+      // SWEPT IN THE BROWSER, no source edit, on one frozen tree — `n2_probe --mode
+      // sweep` displaces `sushi_maki_roll` and re-counts components, with `--hide neck`
+      // rendering the migrated character exactly (`withoutNeck()` changes nothing in
+      // the scene graph except deleting `neck_column`/`neck_collar`, so hiding those
+      // two IS the migration):
+      //
+      //   roll +dy    p20 components              p58
+      //     0.00       2  (225,128 + 121,177)      1
+      //     0.04       1  — but a TANGENT: `shots/n2/zoom/sushi_p20_dy040.png` shows
+      //                    the dome touching the chin at a point
+      //     0.07       1  — a real contact band  ← ships
+      //     0.10       1
+      //     0.13       1
+      //
+      // So the roll's top rises 0.07 m and its BOTTOM does not move — see
+      // `dressTorsoAsSushi`, where the span is now written as two explicit fractions
+      // of `torsoH` instead of one stretch cap. The shoulder bridge that `cc91f38`
+      // repainted is untouched: nothing here moves `rollR`, which is what
+      // `shoulderWidth - armRadius * 1.15` and `fitShoulders` are measured against.
+      //
+      // ── WHAT IT BOUGHT, ON THE EDIT ITSELF, PAIRED ───────────────────────────
+      // BEFORE is `headserve --ref a419871` (an explicit immutable SHA, not `HEAD` —
+      // peers push during a run); AFTER is a `with_snapshot` freeze of this tree.
+      //
+      //   neck px, ablation at the SHIPPED lobby path   p20  4,610 -> 0   (121 x 57 box)
+      //     (`n2_probe --mode neckpx`, unpainted control p58     20 -> 0   (14 x 2)
+      //      scores 0 magenta on every arm)
+      //   components, `n2_probe --mode island`          p20      2 -> 1
+      //                                                 p58      1 -> 1
+      //   R                                             0.605500, |Δ| 0
+      //   headCentreY                                   1.653245, |Δ| 0
+      //   whole-figure AABB                             BIT-IDENTICAL, y -0.065000 ..
+      //                                                 2.272550 — the join was bought
+      //                                                 entirely INSIDE the silhouette
+      //
+      // 🚨 THAT p58 ROW — **4,610 px at the lobby camera against 20 at the match** —
+      // is the whole reason four rounds shipped this column: a 230x ratio, so an
+      // instrument that measures 58 sees literally two pixel-rows of the defect.
+      // ⚠️ The known-bad is what makes "1 component" worth anything: with the head
+      // joint lifted 0.6 m the count MUST rise, and it does at BOTH pitches (1 -> 2).
+      // Before this edit that check was VOID at pitch 20 — the arm was already 2
+      // components, and "2 -> 2" is not evidence of anything.
+      //
+      // ⚠️ `valuescan` is a pitch-58 instrument and is structurally blind to this fix.
+      // It is also flat, which is the honest result: `--mode gate --ids hotdog,sushi`,
+      // paired, before under `headserve --ref a419871` — range 0.843 -> 0.846, p05
+      // 0.103 -> 0.101, steps@10 7 -> 7, weakB% 7.8 -> 7.9, weakBc% 19.5 -> 19.6.
+      // Every one of those is inside the noise, which is what a change that trades a
+      // salmon column for more near-black roll should do. (hotdog pays 0.017 of p05 on
+      // the same edit, because ITS collar was the darkest thing it had.)
+      // 🔴 The gate exits 1 on BOTH arms on `dlBelow10` — 6 of 18 stations below 0.10,
+      // the SAME six before and after. Pre-existing on a419871 and an ARENA fact, not
+      // this edit's; recorded so the next reader does not attribute it here.
+      proportions: withoutNeck(bodyType('standard', {
         // `headFraction` up from STANDARD's 0.46: the nigiri is now a WIDE, LOW
         // bed rather than a tall lathe (see the PROFILE rewrite), so it needs more
         // radius to reach the same top-of-head. Measured with
@@ -677,7 +739,7 @@ export class SushiCharacter extends BaseCharacter {
         // made the shin 0.207 m long against a 0.147 m radius — a sphere, per
         // `bodies.ts`'s leg note — and `kneeL` measured 0.000 delivered at run.
         legRadius: CHARACTER_HEIGHT * 0.064,     // thick, stout
-      }),
+      })),
       // Poised and refined — arms held close in rather than out, a slight
       // aloof over-the-shoulder glance. Distinct from every other stance in
       // this file's own cast slice: the only near-symmetric, closed-arm pose.
@@ -1332,11 +1394,32 @@ export class SushiCharacter extends BaseCharacter {
     // for, so the group is stretched along its own local Z — which the quaternion
     // below maps to WORLD Y — until the roll fills the torso's height. The cut face
     // becomes a slight upright oval, which still reads as maki.
-    const rollStretch = Math.min(1.35, (torsoH * 0.92) / (2 * rollR));
+    //
+    // ── 🔴 THE SPAN IS NOW TWO EXPLICIT ENDS, AND THE TOP ONE IS THE NECK JOIN ──
+    // WAS: `rollStretch = min(1.35, (torsoH * 0.92) / (2 * rollR))` with the group at
+    // `torsoH * 0.5`. That put the roll's ends at 0.04 and 0.96 of `torsoH` — a form
+    // centred on the torso and stopping 0.026 m SHORT of the torso top — and it was
+    // written to answer "fill the torso's height", which is not the question the neck
+    // migration asks. With `neck_column` gone the roll is the only thing that can
+    // reach the rice bed, and at 0.96 it does not: the head became its own 121,177 px
+    // island at the lobby camera. See the `proportions` block for the swept table; the
+    // top has to reach **1.07 of `torsoH`** for a contact band rather than a tangent.
+    //
+    // Written as two ends instead of a stretch cap so the two facts are separable: the
+    // BOTTOM (0.04) is unchanged and is what keeps the roll clear of the hip line and
+    // the rice sash below it, and the TOP (1.07) is the join and is the only number
+    // this pass moved. The `min(1.35, ...)` cap survives for the reason it was added —
+    // a stretch past ~1.35 turns the cut face from an oval into a slot.
+    // ⚠️ The stretch was 0.99987 before this — i.e. the roll was ROUND, and the
+    // "slight upright oval" the paragraph above promises did not exist. It does now
+    // (1.1194), and it is wanted twice over: the file's own `roll.quaternion` note
+    // says a perfectly circular bullseye is the strongest porthole cue there is.
+    const rollBotF = 0.04, rollTopF = 1.07;
+    const rollStretch = Math.min(1.35, (torsoH * (rollTopF - rollBotF)) / (2 * rollR));
 
     const roll = new THREE.Group();
     roll.name = 'sushi_maki_roll';
-    roll.position.set(0, torsoH * 0.5, 0);
+    roll.position.set(0, torsoH * (rollTopF + rollBotF) * 0.5, 0);
     // Axis along Z so the cut face points at the camera. Set as an explicit
     // quaternion rather than composed Euler angles — composing rotation.x then
     // rotation.y on a disc is what has tipped planes edge-on elsewhere in this
