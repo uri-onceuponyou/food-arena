@@ -368,6 +368,8 @@ const SKIP = [
   ['tools/tmp/ft_faces.mjs --selftest', 'browser', 'text-overflow census + font rulers across 5 screens x 4 viewports'],
   ['tools/tmp/ft_glyphs.mjs --selftest --url <snapshot>', 'browser', 'which codepoints a loaded face actually DRAWS — the question a network waterfall cannot ask'],
   ['tools/tmp/ft_basepath.mjs --dist <dist> --base /food-arena/', 'browser', '@font-face url() at a non-root base; ab_basepath structurally cannot see it'],
+  ['tools/tmp/h49_ab.mjs --ref <sha>', 'browser', 'the §49f 2-fighter identity battery; overlays ONLY hud.ts so a peer mid-edit in src/game cannot leak in'],
+  ['tools/tmp/h49_chips.mjs', 'browser', 'the chip rail above two seats, in BOTH DOM states — the touch state is the one that caught a real overlap'],
   ['tools/tmp/np_ab.mjs',        'browser', 'the N=2 presentation identity battery: 4 served arms, 9 compared fields, per-file tree control, roster-swap known-bad'],
   ['tools/tmp/np_nfighter.mjs', 'browser', 'N=3..6 presentation self-consistency + slot-swap known-bad'],
   ['tools/tmp/ab_basepath.mjs --selftest', 'browser', 'four vite builds plus a real page per cell; verdict is a PASS/FAIL matrix, not a count'],
