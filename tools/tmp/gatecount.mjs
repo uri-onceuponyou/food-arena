@@ -263,6 +263,8 @@ const OFFLINE = [
   { key: 'tools/tmp/valuescan.mjs --selftest',   probes: [pr(['tools/tmp/valuescan.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/haloprobe.mjs --selftest',   probes: [pr(['tools/tmp/haloprobe.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/lu_occlude.mjs --selftest', probes: [pr(['tools/tmp/lu_occlude.mjs', '--selftest'], S)] },
+  { key: 'tools/tmp/lu2_qafog.mjs --selftest', probes: [pr(['tools/tmp/lu2_qafog.mjs', '--selftest'], S)] },
+  { key: 'tools/tmp/lu2_offscreen.mjs --selftest', probes: [pr(['tools/tmp/lu2_offscreen.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/p5_dlprobe.mjs',             probes: [pr(['tools/tmp/p5_dlprobe.mjs'], S)] },
   { key: 'tools/match-sim.mjs --selftest',       probes: [pr(['tools/match-sim.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
