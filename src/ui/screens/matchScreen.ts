@@ -49,6 +49,7 @@
 import { startGame, type GameSession } from '../../game/match';
 import { CHARACTERS } from '../../game/rules';
 import { MAX_FIGHTERS, MIN_FIGHTERS, type MatchPhase } from '../../game/state';
+import { placementXp } from './profile';
 import type { Route, Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
 import { el } from './fx';
@@ -147,8 +148,36 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
             && outcome.localPlace >= 0
             && outcome.seats >= MIN_FIGHTERS
             && outcome.seats <= MAX_FIGHTERS;
-          if (payable && outcome) ctx.profile.recordPlacement(outcome.localPlace, outcome.seats);
-          else ctx.profile.recordResult(winner === 'player');
+          const paid = payable && outcome
+            ? ctx.profile.recordPlacement(outcome.localPlace, outcome.seats)
+            : ctx.profile.recordResult(winner === 'player');
+
+          // ── 🚨 AND NOW THE PLAYER IS TOLD WHAT IT PAID ────────────────────────
+          //
+          // `DECISIONS §64` defect 3: the payouts above became correct in `bb00d66` and
+          // stayed **invisible** — a 3rd-of-6 finish banks +9 trophies, 44 coins and 74 XP
+          // and the result card said none of it. `GameSession.showPayout` is the socket,
+          // matching the one `48ad6ca` opened for the finishing PLACE.
+          //
+          // 🚨 **THE RETURN VALUE OF THE ONE BANK ABOVE, NEVER A SECOND CALL.** The payout
+          // is applied as a SIDE EFFECT of banking — `recordPlacement` mutates the economy
+          // and commits it — so a display that "looked up" what the match paid would bank
+          // it twice, which looks perfect on screen and silently doubles every trophy the
+          // player owns. That is why this reads `paid` and why nothing below the session
+          // boundary can reach the economy at all.
+          //
+          // ⚠️ `paid.place`/`paid.seats` RATHER THAN `outcome`, deliberately: they are what
+          // `applyMatchPlacement` actually banked (it stores its own arguments on
+          // `LastMatch`), so the XP shown is the XP added even on the `recordResult`
+          // fallback, where `outcome` is null or unpayable. `placementXp` is a pure
+          // function of those two numbers — the same call `recordPlacement` just made, not
+          // a second application of it.
+          session.showPayout({
+            trophies: paid.trophies,
+            coins: paid.coins,
+            xp: placementXp(paid.place, paid.seats),
+            chests: paid.chests,
+          });
         }
         root.classList.add('is-ended');
       } else {
