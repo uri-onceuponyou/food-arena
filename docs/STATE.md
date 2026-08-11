@@ -1,6 +1,7 @@
 # State — what is done, what is pending
 
-**As of commit `bd068d0`.** Every commit verified with `tools/verify-head.mjs` before push.
+**As of commit `6650bf6`.** Every commit verified with `tools/verify-head.mjs` before push.
+**Deployed and live** at `https://uri-onceuponyou.github.io/food-arena/`.
 
 > ⚠️ **The header used to read *"as of `b967242`, 125 commits into an unattended session… working
 > tree clean."* Kept because the staleness is itself the lesson:** this line is the first thing a new
@@ -114,6 +115,85 @@ and still shipped an empty quadrant.**
 
 Also live: **triangles went 480,094 → 1,316,686 (×2.74)** and meshes ×2.34 — onto a phone Uri already
 describes as unplayable (§33). Nothing in this project has ever measured a mobile GPU.
+**↑ THAT SENTENCE IS NOW OUT OF DATE IN BOTH HALVES — see the next section.**
+
+---
+
+## 📌 THE REST OF 2026-08-11 — the phone got fixed, the game got fair, and SEVEN GUARDS TURNED OUT VACUOUS
+
+Everything above still stands; this is what happened after it. **Full detail per item in
+`docs/DECISIONS-FOR-URI.md` §56–§69** — this is the index, not the record.
+
+### Shipped, and Uri can play all of it now
+
+| | |
+|---|---|
+| **Phone frame** | draw calls **928 → 423** (−54.4%), main thread **−47.9%** against a ±0.71 ms floor. The 1,908 static props are one mesh per material. The ×4 map now costs **less** main thread than the build Uri played. `5aa4655` |
+| **Landscape controls** | weapon tray hides **7.92% → 0.00%** of the guaranteed-visible arena; the clock **13.12% → 0.49%**; all controls 22.6% → 4.3% at 844×390. `bd39464` `b2f2cb1` `f1f2a40` `845716a` |
+| **Seat fairness** | spawn advantage **2.680 → 0.342 places** of 6; all six seats deal damage in **600/600** (was 74.5%). `d1d9f9e` |
+| **Roster** | range **27.8 → 9.8 pp**, tier spread 16.2 → 6.1, **no mechanic touched**. `33318a1` |
+| **Ranged reach** | **23 of 23 → 2 of 23** weapons cannot connect at their own press gate. `af35362` `a9da836` |
+| **Sudden death** | ships; `resolveTimeout` fires **0/880**. `f87d407` |
+| **Payouts** | the 3–6 seat curve exists *and now reaches the game* — a 3rd-of-6 finish was paid as a 1v1 loss. `721ce3c` `a588066` `bb00d66` |
+| **Multiplayer** | wire codec + delta compression **7.1×**, `src/game/` untouched. `915bbaf` `a588066` |
+| **Fog** | no longer renders as nothing at radius 0, and now covers the corners (**3.25% of standable ground was outside it**). `779dc62` `2d3e9bd` |
+| **Gates** | **0 faults**, 69 verified / 57 skipped, up from 12 faults. |
+
+### 🚨 THE ONE LESSON THIS SESSION ACTUALLY TAUGHT
+
+**Seven independent controls could not distinguish their own two arms, and three of those passed by
+having nothing left to check.** Not one was caught by another check — every one was found by an agent
+re-deriving something it had been told was already true.
+
+The mechanisms, because they are all different and all invisible:
+
+- a fixture pointing at **a herb crate**, and an "axis mirror" mirroring about **the old centre** — both
+  green
+- a known-bad placed **where the bug could not express itself**, so both arms passed
+- `[].every()` returning `true` after a fix **emptied the set** the guard filtered on — **three times, in
+  three different files**
+- a differ blinded to a field that **had nothing to drop yet**; a wrong-base demo **inside the countdown**,
+  where nothing moves; a sentinel written onto a field **already holding it**
+- a call-site census counting the **function declaration** as a call site, printing `ok` next to an
+  evidence line describing the failure
+- a suite reporting **227 passed, unchanged**, straight through a feature rewrite it could not see
+- **two arms of one instrument FALSE BY CONSTRUCTION** — comparing a *rendered frame's luma* against a
+  *material's colour*, where a lit surface reads brighter, so the threshold cut through one continuous
+  population with rows landing either side by **0.001**
+
+> **A passing test is not evidence the thing it points at is right.** `--selftest` validates a tool's
+> logic, never where the tool is *pointed*: `valuescan` read **105/105** while **14 of its 18 stations**
+> were in the wrong quadrant and eleven were **inside solid props**.
+
+### 🚨 And the one-sentence reason the map change hid for so long
+
+> **The 1× playfield is exactly the NW quadrant of the ×4 one, so every stale coordinate stayed legal.**
+
+No legality check could ever have found that class. Eleven were found one at a time by accident; a
+systematic sweep then found **12 more with a 0.5% false-positive rate**, plus 63 enumerated and frozen.
+`al_guard.mjs` now catches the class. ⚠️ **Would another resize be safe? "Safer, not safe"** — ~30 files
+now hold a hardcoded **2800/1985**, so today's correct literals are the next generation's stale ones.
+
+### Corrections to things written above and in DECISIONS, kept rather than deleted
+
+- **`level_lab` was NOT at an instrument ceiling** (40 of 110 cells unsaturated, grid 55.00 → 99.32%)
+- **`hl_sweep`'s corpus was never emptied** — the *default split stopped partitioning it*, because
+  `vfx.ts` splits on the **weapon's** colour and the tool splits on the **halo material's**
+- **`git archive HEAD` is the wrong clean tree** — use `git worktree add --detach`
+- **"the rank comes from the sim's final state"** — it cannot; every loser ends `hp:0, deaths:1`
+  identically, so a final-state resolver degenerates to slot order. The order is in the **death event
+  stream**
+- **the `h49_chips` row never said `+156`** — I passed on a stale reading
+
+### 🔴 Live for the next session
+
+- **Six-player has NO entry point** — reachable only via `?fighters=`. Three design questions are Uri's:
+  where the affordance lives, how the other five are chosen, what level five bots are.
+- **Sudden death now fires in 90.5% of matches** (was 66.0%) because the seat fix made all six engage —
+  so `DECISIONS §58`'s parked trigger question is now about the **normal** ending.
+- The result card's loser list is still slot-ordered, and shows no trophies/coins/XP (in flight).
+- `x4_layout.mjs:SPAWN_NORTH` is a **stale generator that would silently revert the seat fix** (in flight,
+  guarded meanwhile).
 
 **Open for Uri:** nothing is blocking. He cleared the entire backlog on 2026-08-11 (`DECISIONS §54`)
 and answered §49 and §53; §43 and §46 are closed — **do not re-ask any of them.** What he owes is
