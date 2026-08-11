@@ -75,6 +75,64 @@ const POT_TICK_MS = num(/tickMs: (\d+)/, 'POT.tickMs');
 const MIN_SAFE_RADIUS = num(/export const MIN_SAFE_RADIUS = (\d+)/, 'MIN_SAFE_RADIUS');
 const CONCEAL_ENDGAME_PROGRESS = num(/export const CONCEAL_ENDGAME_PROGRESS = ([\d.]+)/, 'CONCEAL_ENDGAME_PROGRESS');
 const MELEE_HEAVY = num(/meleeHeavy: (\d+)/, 'REACH.meleeHeavy');
+const RANGED_MAX = num(/rangedMax: (\d+)/, 'REACH.rangedMax');
+
+/**
+ * 🔴 THE LARGEST FINAL RING THIS ARENA CAN BE ASKED TO CLOSE TO — IMPORTED, NOT RE-DERIVED.
+ *
+ * `4bb64e4`: `MIN_SAFE_RADIUS` is no longer a constant. `sim.ts` closes the fog to
+ * `minSafeRadiusFor(N)` = `max(MIN_SAFE_RADIUS, ENDGAME_STANDOFF / sin(pi/N) - POT.dangerRadius)`,
+ * and at `MAX_FIGHTERS` = 6 that is **237.00 wu**, not 140. `§53a` puts six players on THIS
+ * map and no other, so 237 is the number that binds here.
+ *
+ * ⚠️ **THE FIRST DRAFT RE-DERIVED IT AND WAS WRONG BY 1.60 wu WITHIN THE HOUR.** It read
+ * `REACH.rangedMax` out of `rules.ts` and added `PLAYER_SIZE * 0.6` for the hit radius,
+ * which is `HIT_RADIUS_VS_PLAYER` — but `ENDGAME_STANDOFF` takes the **max** of that and
+ * `HIT_RADIUS_VS_ENEMY`, and they are not equal. It printed **235.40** against the sim's
+ * **237.00**, i.e. it would have certified a layout 1.6 wu inside the real ring while
+ * displaying a green tick. The sim's own function is imported instead. There is no version
+ * of this file that is allowed to own a second copy of that arithmetic.
+ */
+const { minSafeRadiusFor } = await import(`${ROOT}/src/game/rules.ts`);
+const { MAX_FIGHTERS } = await import(`${ROOT}/src/game/state.ts`);
+export function finalRing(n = MAX_FIGHTERS) { return minSafeRadiusFor(n); }
+
+/**
+ * RULE 6 — NOTHING SOLID MAY STAND INSIDE THE LARGEST FINAL RING, PLUS A BODY.
+ *
+ * The fog's last safe circle is the only ground left at the end of a match. If a solid
+ * CoverBox sits inside it, six fighters are funnelled into a ring they cannot occupy — and
+ * no other gate here would say so, because the box is legal, reachable, symmetric and
+ * correctly spaced from its neighbours.
+ *
+ * The threshold is DERIVED and it is the same one the 1400x1000 hub was placed by:
+ * *"outside MIN_SAFE_RADIUS + a fighter's own reach"*, i.e. `ring + PLAYER_SIZE`. The
+ * exact minimum is `ring + PLAYER_SIZE/2` — a box blocks fighter CENTRES out to its own
+ * face plus a half body, so at `ring + 21` the whole ring disc is standable — and the
+ * second half body is the reserve, so that the ring is not merely standable but enterable
+ * and leaveable at its edge. `kitchen.ts` rule 3 is on record that a 4 wu clearance is a
+ * coincidence rather than a clearance; this shipped at 4.35 and is now at 68.3.
+ *
+ * ⚠️ THE POT IS EXEMPT, AND THAT IS NOT A LOOPHOLE. `minSafeRadiusFor` SUBTRACTS
+ * `POT.dangerRadius` in its own derivation, so the ring is already sized as an annulus
+ * around the pot. Every OTHER solid box is a surprise the formula never saw.
+ * ⚠️ CONCEALMENT IS EXEMPT TOO, and deliberately: a patch blocks nothing and can be shot
+ * through, so a patch inside the ring is cover the endgame can actually use. The 20 shipped
+ * patches are all outside it anyway — `concealmentKeepoutRadius` (496.25) is stricter.
+ */
+export function ringFaults(arena, margin = PLAYER_SIZE) {
+  const need = finalRing() + margin;
+  const out = [];
+  for (const c of arena.cover) {
+    if (c.kind === 'boiling_pot') continue;
+    const d = Math.hypot(
+      Math.max(0, Math.abs(c.x - arena.center.x) - c.w / 2),
+      Math.max(0, Math.abs(c.y - arena.center.y) - c.h / 2),
+    );
+    if (d < need) out.push(`${c.kind}@${c.x},${c.y} nearest ${d.toFixed(2)} wu < ${need.toFixed(2)} (ring ${finalRing().toFixed(2)} + ${margin})`);
+  }
+  return out;
+}
 
 /** `shared.ts`'s own derivation, duplicated so this tool runs before the edit lands. */
 const FOG_FIRST_CONTACT_S = 6;
@@ -149,10 +207,37 @@ export const GAP_CORRIDOR_MIN = PLAYER_SIZE + 2 * NAV_CELL_AT_X4;
 //                in all four cardinals.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * 🔴 THE HUB ISLAND OFFSETS, AND THEY ARE DERIVED FROM `minSafeRadiusFor(MAX_FIGHTERS)`.
+ *
+ * They were ±270/±200 on the 1400x1000 map, chosen so the island's INNER CORNER sat at
+ * hypot(185,155) = 241 wu — *"outside MIN_SAFE_RADIUS + a fighter's own reach"*, i.e.
+ * `140 + PLAYER_SIZE = 182`. That derivation is still right. **The constant it was run
+ * against is not.**
+ *
+ * `4bb64e4` made `MIN_SAFE_RADIUS` a function of the fighter count:
+ *
+ *     minSafeRadiusFor(N) = max(MIN_SAFE_RADIUS, ENDGAME_STANDOFF / sin(pi/N) - POT.dangerRadius)
+ *     N=2..4 -> 140.00     N=5 -> 187.42     N=6 -> **237.00**
+ *
+ * and `§53a` puts six players on THIS map and no other, so this is the arena that closes at
+ * **237**, not at 140. At ±270/±200 the four islands sat at 241.35 — **4.35 wu inside the
+ * only clearance that matters**, which is precisely the "four wu is not a clearance, it is a
+ * coincidence" failure `kitchen.ts` rule 3 already records. Re-running the ORIGINAL rule
+ * against the NEW constant gives 237 + 42 = 279, and ±320/±240 puts the inner corner at
+ * hypot(235,195) = **305.3 wu**.
+ *
+ * ⚠️ THIS IS NOT A HUB THAT GREW. Every island is still 170x90, the pot is untouched, the
+ * service counters have not moved, and the same expression places them — the number moved
+ * because the constant under it moved. A hub PINNED at ±270 on a map that closes at 237
+ * would funnel six fighters into a ring containing four solid boxes.
+ */
+const HUB_DX = 320, HUB_DY = 240;
+
 /** The hub. Written relative to CENTER so "at its current scale" is literal. */
 export const HUB = [
-  [CX - 270, CY - 200, 170, 90, 'stove_island', { build: 'buildStoveIsland(M, w, d)' }],
-  [CX + 270, CY - 200, 170, 90, 'stove_island', { build: 'buildStoveIsland(M, w, d, { panRack: true })' }],
+  [CX - HUB_DX, CY - HUB_DY, 170, 90, 'stove_island', { build: 'buildStoveIsland(M, w, d)' }],
+  [CX + HUB_DX, CY - HUB_DY, 170, 90, 'stove_island', { build: 'buildStoveIsland(M, w, d, { panRack: true })' }],
   [CX, CY - 330, 150, 70, 'sink_counter', { yawDeg: 180, build: "buildServiceCounter(M, w, d, 'sink')" }],
 ];
 
@@ -206,8 +291,8 @@ export const NORTH = [
   [700, 650, 160, 55, 'prep_counter', { build: 'buildPrepCounter(M, w, d, { rollingPin: true })' }],
   [700, 720, 160, 55, 'prep_counter', { build: 'buildPrepCounter(M, w, d, { knifeBlock: true })' }],
   [700, 790, 55, 55, 'stacked_pots', { build: 'buildLanePots(M, w, d)' }],
-  [910, 560, 90, 90, 'herb_crate', { build: 'buildHerbCrate(M, w, d)' }],
-  [910, 650, 80, 80, 'produce_crate_tall', { build: 'buildCrateTall(M, w, d)' }],
+  [950, 670, 90, 90, 'herb_crate', { build: 'buildHerbCrate(M, w, d)' }],
+  [950, 760, 80, 80, 'produce_crate_tall', { build: 'buildCrateTall(M, w, d)' }],
 
   // ── Mid band, west-inner: the north lane's shoulder ────────────────────────
   [1000, 380, 90, 90, 'herb_crate', { build: 'buildHerbCrate(M, w, d)' }],
@@ -565,6 +650,14 @@ async function report(arena) {
   console.log(`   cover ${arena.cover.length} boxes · density ${(density * 100).toFixed(2)}% (shipped 1x: ${shipped.cover.length} / ${(shippedDensity * 100).toFixed(2)}%)`);
   console.log(`   concealment ${arena.concealment.length} patches · hazards ${arena.hazards.length} · maxSafeRadius ${arena.maxSafeRadius} · keep-out ${keepout(arena).toFixed(2)} wu`);
   console.log(`   nav cell at this size: ${NAV_CELL_AT_X4} wu  =>  legal gap band is <= ${GAP_SLIT_MAX} or >= ${GAP_CORRIDOR_MIN} wu`);
+  {
+    const need = finalRing() + PLAYER_SIZE;
+    const solid = arena.cover.filter((c) => c.kind !== 'boiling_pot')
+      .map((c) => Math.hypot(Math.max(0, Math.abs(c.x - arena.center.x) - c.w / 2), Math.max(0, Math.abs(c.y - arena.center.y) - c.h / 2)))
+      .sort((p, q) => p - q);
+    console.log(`   final ring at N=${MAX_FIGHTERS}: ${finalRing().toFixed(2)} wu (was a flat ${MIN_SAFE_RADIUS} before 4bb64e4) · nearest SOLID cover ${solid[0].toFixed(2)} wu`);
+    console.log(`   => ${(solid[0] - finalRing()).toFixed(2)} wu of clearance, against ${PLAYER_SIZE} required and ${(PLAYER_SIZE / 2)} strictly needed`);
+  }
 
   let bad = 0;
   const section = (name, faults, show = 8) => {
@@ -579,6 +672,7 @@ async function report(arena) {
   section('mesh clips (overlapping cover)', overlapFaults(arena));
   section(`illegal gaps (${GAP_SLIT_MAX} < gap < ${GAP_CORRIDOR_MIN})`, gapFaults(arena));
   section('diagonal notches (a collar channel narrower than 2 nav cells)', notchFaults(arena));
+  section(`RULE 6 — solid cover inside the N=${MAX_FIGHTERS} final ring (${finalRing().toFixed(2)}) + a body`, ringFaults(arena));
   for (const v of [18, 22, 26]) {
     const d = deepRegions(arena, v);
     section(`deep band regions at body-visual ${v} (shipped 1x scores 0)`, d.map((c) => `(${c.x},${c.y}) depth ${c.depth} wu`));
@@ -732,6 +826,15 @@ async function selftest() {
   const nav = navReport(arena);
   check(`all six spawns share ONE nav component at cell ${nav.cell}`, nav.oneComponent, `${nav.comps} components, spawns in ${[...new Set(nav.spawnComps)].join(',')}`);
 
+  // ── §C2 — RULE 6, the constraint `4bb64e4` created and this map is the only one it
+  //          binds on (`§53a`: six players only on the x4 map).
+  const solid = arena.cover.filter((c) => c.kind !== 'boiling_pot')
+    .map((c) => Math.hypot(Math.max(0, Math.abs(c.x - arena.center.x) - c.w / 2), Math.max(0, Math.abs(c.y - arena.center.y) - c.h / 2)))
+    .sort((p, q) => p - q);
+  check(`RULE 6: no solid box inside the N=${MAX_FIGHTERS} final ring (${finalRing().toFixed(2)}) + a body`,
+    ringFaults(arena).length === 0, ringFaults(arena).slice(0, 3).join(' · '));
+  console.log(`         nearest solid cover ${solid[0].toFixed(2)} wu = ${(solid[0] - finalRing()).toFixed(2)} wu of clearance`);
+
   // §D — the symmetry check is not a tautology.
   console.log('\n§D — the guards are shown to FAIL');
   {
@@ -790,6 +893,58 @@ async function selftest() {
       deepRegions(broken, 22).length > 0, `${deepRegions(broken, 22).length} cells`);
   }
   {
+    // 🔴 THE ROW THAT WOULD HAVE CAUGHT THE SHIPPED DEFECT. The four hub islands were at
+    // CENTER +-270/200 — the 1400x1000 offsets, correct against a flat `MIN_SAFE_RADIUS`
+    // of 140 and **4.35 wu inside** `minSafeRadiusFor(6)` = 237. It passed every other
+    // check in this file: legal, reachable, point-symmetric, correctly gapped. Restoring
+    // exactly that geometry must FAIL, or rule 6 is a comment with a tick next to it.
+    const broken = JSON.parse(JSON.stringify(arena));
+    for (const c of broken.cover) {
+      if (c.kind !== 'stove_island') continue;
+      const dx = c.x - CX, dy = c.y - CY;
+      if (Math.abs(dx) !== HUB_DX || Math.abs(dy) !== HUB_DY) continue;   // hub islands only
+      c.x = CX + Math.sign(dx) * 270;
+      c.y = CY + Math.sign(dy) * 200;
+    }
+    // The mid-west pair goes back with them: it moved (910,560)/(910,650) ->
+    // (950,670)/(950,760) ONLY because the islands did, so reverting one and not the other
+    // reconstructs a tree that never existed and the row would fail for the wrong reason.
+    // It did, first time — kept as the reason this fixture is written the long way.
+    for (const c of broken.cover) {
+      if (c.kind === 'herb_crate' && c.x === 950 && c.y === 670) { c.x = 910; c.y = 560; }
+      if (c.kind === 'herb_crate' && c.x === W - 950 && c.y === H - 670) { c.x = W - 910; c.y = H - 560; }
+      if (c.kind === 'produce_crate_tall' && c.x === 950 && c.y === 760) { c.x = 910; c.y = 650; }
+      if (c.kind === 'produce_crate_tall' && c.x === W - 950 && c.y === H - 760) { c.x = W - 910; c.y = H - 650; }
+    }
+    const f = ringFaults(broken);
+    check('KNOWN-BAD: the SHIPPED ±270/±200 hub is refused — it sat 4.35 wu inside the N=6 ring',
+      f.length === 4, `${f.length} faults: ${f[0] ?? ''}`);
+    check('  …and that EXACT geometry passes every OTHER check here, which is why it shipped',
+      gapFaults(broken).length === 0 && notchFaults(broken).length === 0
+      && overlapFaults(broken).length === 0 && symmetryFaults(broken).length === 0
+      && deepRegions(broken, 18).length === 0 && deepRegions(broken, 22).length === 0,
+      `gaps ${gapFaults(broken).length} · notches ${notchFaults(broken).length} · clips ${overlapFaults(broken).length}`
+      + ` · symmetry ${symmetryFaults(broken).length} · deep ${deepRegions(broken, 22).length}`);
+    // …and the threshold is not vacuous in the other direction: a box just OUTSIDE it passes.
+    const okBox = JSON.parse(JSON.stringify(arena));
+    okBox.cover.push({ x: CX, y: CY + finalRing() + PLAYER_SIZE + 46, w: 90, h: 90, kind: 'probe_ok' });
+    check('CONTROL: a box one wu outside the threshold is NOT refused', ringFaults(okBox).length === 0);
+    const badBox = JSON.parse(JSON.stringify(arena));
+    badBox.cover.push({ x: CX, y: CY + finalRing() + PLAYER_SIZE + 44, w: 90, h: 90, kind: 'probe_bad' });
+    check('KNOWN-BAD: …and one wu inside it IS', ringFaults(badBox).length === 1);
+  }
+  {
+    // The ring itself is the SIM's, imported, never re-derived here — the first draft of
+    // this file re-derived it and was wrong by 1.60 wu (235.40 vs 237.00) within the hour,
+    // because `ENDGAME_STANDOFF` takes the MAX of two hit radii that are not equal.
+    check('the final ring is rules.ts:minSafeRadiusFor, not a second copy of its arithmetic',
+      Math.abs(finalRing(6) - 237) < 1e-9 && finalRing(2) === 140,
+      `N=6 ${finalRing(6).toFixed(5)} · N=2 ${finalRing(2)}`);
+    check('KNOWN-BAD: the re-derivation this file used to carry is 1.60 wu SHORT',
+      Math.abs((RANGED_MAX + PLAYER_SIZE * 0.6) / Math.sin(Math.PI / 6) - 95 - finalRing(6)) > 1.5,
+      'a duplicated constant drifted inside one session');
+  }
+  {
     const broken = JSON.parse(JSON.stringify(arena));
     broken.concealment.push({ x: 700, y: 300, w: 300, h: 300, kind: 'too_big' });
     check('KNOWN-BAD: a 300 wu patch is refused by the 168 wu AI ceiling', concealFaults(broken).some((f) => f.includes('AI ceiling')));
@@ -846,13 +1001,40 @@ async function selftest() {
       arena.hazards.filter((h) => h.kind === 'damage').length === 1
       && arena.hazards.find((h) => h.kind === 'damage').radius === shipped.hazards.find((h) => h.kind === 'damage').radius);
     const isl = arena.cover.filter((c) => c.kind === 'stove_island');
-    const hubIsl = isl.filter((c) => Math.hypot(c.x - CX, c.y - CY) < 400);
+    const hubIsl = isl.filter((c) => Math.hypot(c.x - CX, c.y - CY) < 450);
     const sIsl = shipped.cover.filter((c) => c.kind === 'stove_island');
-    check('the four hub islands keep their exact offsets from CENTER and their 170x90 box',
-      hubIsl.length === 4 && hubIsl.every((c) => sIsl.some((s0) => Math.abs(Math.abs(s0.x - shipped.center.x) - Math.abs(c.x - CX)) < 1e-9 && Math.abs(Math.abs(s0.y - shipped.center.y) - Math.abs(c.y - CY)) < 1e-9 && s0.w === c.w && s0.h === c.h)),
-      `${hubIsl.length} within 400 wu`);
-    check('KNOWN-BAD: a hub scaled with the map would put an island 540 wu out, not 270',
-      Math.abs(hubIsl[0].x - CX) === 270);
+
+    // ⚠️ THIS ROW USED TO READ, AND PASSED, UNTIL 4bb64e4:
+    //
+    //     check('the four hub islands keep their exact offsets from CENTER and their
+    //            170x90 box', hubIsl.every((c) => sIsl.some((s0) => |s0.x - c.x| == 0 ...)))
+    //
+    // It is kept above rather than deleted because it was the RIGHT assertion for the
+    // constant it was written against and the wrong one afterwards. `MIN_SAFE_RADIUS` was
+    // flat 140; ±270/±200 put the island's inner corner at 241 wu, i.e. `140 + PLAYER_SIZE`
+    // with 59 wu to spare, and pinning the offsets was the honest way to say "the hub did
+    // not grow". `4bb64e4` made the ring a function of N and `§53a` put six players on this
+    // map, so the ring became **237** and those same offsets became **4.35 wu inside it** —
+    // an assertion that actively defended the defect.
+    //
+    // What replaces it is what the pinned numbers were STANDING IN FOR: the island's SIZE
+    // is unchanged, its placement is still a pure ±(DX,DY) about CENTER, and the offsets
+    // are DERIVED from the ring rather than typed. A hub that grew with the map would fail
+    // the size row; a hub pinned to the old offsets fails rule 6 in §D.
+    check('the four hub islands keep their 1x SIZE — the hub did not scale with the map',
+      hubIsl.length === 4 && hubIsl.every((c) => sIsl.some((s0) => s0.w === c.w && s0.h === c.h)),
+      `${hubIsl.length} within 450 wu · ${[...new Set(hubIsl.map((c) => `${c.w}x${c.h}`))].join(' ')}`);
+    check('…and their placement is still a pure ±(DX,DY) about CENTER',
+      hubIsl.length === 4 && hubIsl.every((c) => Math.abs(Math.abs(c.x - CX) - HUB_DX) < 1e-9
+        && Math.abs(Math.abs(c.y - CY) - HUB_DY) < 1e-9)
+      && new Set(hubIsl.map((c) => `${Math.sign(c.x - CX)},${Math.sign(c.y - CY)}`)).size === 4,
+      `±${HUB_DX}/±${HUB_DY}`);
+    check('…and DX/DY are DERIVED: the inner corner clears the N=6 ring by a body',
+      Math.hypot(HUB_DX - 85, HUB_DY - 45) >= finalRing() + PLAYER_SIZE,
+      `inner corner ${Math.hypot(HUB_DX - 85, HUB_DY - 45).toFixed(2)} wu vs ${(finalRing() + PLAYER_SIZE).toFixed(2)} needed`);
+    check('KNOWN-BAD: a hub SCALED with the map would put an island 540 wu out, not 320',
+      HUB_DX < 540 && HUB_DX > 270,
+      `${HUB_DX} — bigger than the 1x 270 because the RING moved, not because the map did`);
   }
 
   // §H — rule 5: the concealment CEILING did not scale, so the COUNT did.

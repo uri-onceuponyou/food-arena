@@ -24,9 +24,10 @@
  *      fighters INTO each other; if the middle is the most cluttered part of the map
  *      it forces them into furniture instead. Measured on the 1400x1000 layout,
  *      occlusion rose 30.6% -> 67.7% as the ring shrank, because the four stove islands'
- *      inner corners sat **138 wu from centre — inside MIN_SAFE_RADIUS (140)**. At
- *      ±270/±200 the inner corner sits at 241 wu and the whole 150..250 wu band is 0.3%
- *      solid: the endgame is a ring around ONE pillar, as intended.
+ *      inner corners sat **138 wu from centre — inside MIN_SAFE_RADIUS (140)**. At ±270/±200
+ *      the inner corner sat at 241 wu and the endgame became a ring around ONE pillar, as
+ *      intended. ⚠️ **±270/±200 is now ±320/±240 and 241 is now 305** — see rule 6: the
+ *      ring itself moved to 237 at six seats, so the same argument produces a wider hub.
  *      → `arena_probe.mjs --occl` must end BELOW where it starts.
  *      ⚠️ **At 2800x2000 this rule got EASIER and its number moved.** The hub keeps its
  *      exact 1x offsets (rule 2), so the entire r < 500 wu disc holds nothing but the pot,
@@ -94,6 +95,40 @@
  *
  *      → `node tools/tmp/ap_reach.mjs --body-visual {18,20,22,24,26}` must report ZERO
  *        sealed pockets, ZERO phantom pockets and ZERO face gaps at every width.
+ *
+ *   6. 🔴 **NOTHING SOLID MAY STAND INSIDE THE LARGEST FINAL RING, PLUS A BODY.** The fog's
+ *      last safe circle is the only ground left at the end of a match. A solid CoverBox
+ *      inside it funnels six fighters into a ring they cannot occupy — and **no other rule
+ *      in this file would say so**, because such a box is legal, reachable, point-symmetric
+ *      and correctly gapped from its neighbours.
+ *
+ *      `4bb64e4` made the ring a function of the fighter count:
+ *
+ *          minSafeRadiusFor(N) = max(MIN_SAFE_RADIUS, ENDGAME_STANDOFF/sin(pi/N) - POT.dangerRadius)
+ *          N = 2..4 -> 140.00     N = 5 -> 187.42     N = 6 -> **237.00**
+ *
+ *      and `§53a` puts six players on THIS map and no other, so **this is the arena that
+ *      closes at 237**. The threshold is `ring + PLAYER_SIZE` = 279 — the SAME rule the
+ *      1400x1000 hub was placed by (*"outside MIN_SAFE_RADIUS + a fighter's own reach"*),
+ *      re-run against the constant that moved. The exact minimum is `ring + PLAYER_SIZE/2`
+ *      (a box blocks fighter CENTRES out to its face plus a half body, so at ring+21 the
+ *      whole disc is standable); the second half body makes the ring enterable and
+ *      leaveable at its edge rather than merely occupiable.
+ *
+ *      🚨 **THIS SHIPPED WRONG ONCE, BY 4.35 wu.** The first version of this file kept the
+ *      1x hub offsets ±270/±200 verbatim, which is the right instinct for rule 2 and put
+ *      the islands' inner corner at **241.35 wu — inside the ring**. It passed every other
+ *      check here. `tools/tmp/x4_layout.mjs` now restores exactly that geometry as a
+ *      known-bad and requires rule 6 to refuse it while everything else still passes,
+ *      because a guard that has not been shown to fail on its own bug is not a guard.
+ *
+ *      ⚠️ **THE POT IS EXEMPT AND THAT IS NOT A LOOPHOLE**: `minSafeRadiusFor` SUBTRACTS
+ *      `POT.dangerRadius` in its own derivation, so the ring is already sized as an annulus
+ *      around the pot. Every OTHER solid box is a surprise the formula never saw.
+ *      ⚠️ **CONCEALMENT IS EXEMPT TOO, deliberately**: a patch blocks nothing and can be
+ *      shot through, so a patch inside the ring is cover the endgame can actually use.
+ *      → `node tools/tmp/x4_layout.mjs` must report RULE 6 with ZERO faults. Shipped
+ *        clearance: nearest solid cover **295.00 wu, 58.00 wu clear of the ring.**
  *
  *   5. **~4x THE CONCEALMENT PATCH COUNT, AT THE UNCHANGED ~168 wu CAP.** `§48` rule 5:
  *      `CONCEAL_REVEAL_RADIUS` does not scale with the arena, so a patch wider than
@@ -220,20 +255,34 @@ export const createKitchenArena: ArenaFactory = () => {
   if (!location.search.includes('apron=0')) root.add(buildApron());
 
   // ── The central stove hub, at CENTER and at its 1400x1000 SCALE (§48 rule 2) ─
+  //
+  // ⚠️ **±320/±240, AND THE 1x MAP'S ±270/±200 IS KEPT HERE BECAUSE IT WAS RIGHT.** That
+  // pair was chosen so the island's INNER CORNER sat at hypot(185,155) = 241 wu — *"outside
+  // MIN_SAFE_RADIUS + a fighter's own reach"*, i.e. 140 + PLAYER_SIZE = 182, with 59 wu to
+  // spare. The derivation still stands. **The constant under it does not**: `4bb64e4` made
+  // the final ring `minSafeRadiusFor(N)`, which at MAX_FIGHTERS = 6 is **237**, and 241.35
+  // is 4.35 wu inside it. Re-running the ORIGINAL rule against the NEW constant gives
+  // 237 + 42 = 279, and ±320/±240 puts the inner corner at hypot(235,195) = **305.29**.
+  //
+  // **THIS IS NOT A HUB THAT GREW.** Every island is still 170x90, the pot is untouched,
+  // the service counters have not moved, and the same `CENTER ± (DX, DY)` expression places
+  // them. The number moved because the ring moved. A hub PINNED at ±270 on a map that
+  // closes at 237 is the funnel rule 6 exists to prevent, and `x4_layout --selftest` §D
+  // restores exactly it as the known-bad.
   addCover(propsGroup, cover, M, {
-    x: CENTER.x - 270, y: CENTER.y - 200, w: 170, h: 90, kind: 'stove_island',
+    x: CENTER.x - 320, y: CENTER.y - 240, w: 170, h: 90, kind: 'stove_island',
     build: (w, d) => buildStoveIsland(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x + 270, y: CENTER.y + 200, w: 170, h: 90, kind: 'stove_island', yawDeg: 180,
+    x: CENTER.x + 320, y: CENTER.y + 240, w: 170, h: 90, kind: 'stove_island', yawDeg: 180,
     build: (w, d) => buildStoveIsland(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x + 270, y: CENTER.y - 200, w: 170, h: 90, kind: 'stove_island',
+    x: CENTER.x + 320, y: CENTER.y - 240, w: 170, h: 90, kind: 'stove_island',
     build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x - 270, y: CENTER.y + 200, w: 170, h: 90, kind: 'stove_island', yawDeg: 180,
+    x: CENTER.x - 320, y: CENTER.y + 240, w: 170, h: 90, kind: 'stove_island', yawDeg: 180,
     build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
   });
   addCover(propsGroup, cover, M, {
@@ -533,19 +582,19 @@ export const createKitchenArena: ArenaFactory = () => {
     build: (w, d) => buildLanePots(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: 910, y: 560, w: 90, h: 90, kind: 'herb_crate',
+    x: 950, y: 670, w: 90, h: 90, kind: 'herb_crate',
     build: (w, d) => buildHerbCrate(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 910, y: ARENA_H - 560, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    x: ARENA_W - 950, y: ARENA_H - 670, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
     build: (w, d) => buildHerbCrate(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: 910, y: 650, w: 80, h: 80, kind: 'produce_crate_tall',
+    x: 950, y: 760, w: 80, h: 80, kind: 'produce_crate_tall',
     build: (w, d) => buildCrateTall(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 910, y: ARENA_H - 650, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
+    x: ARENA_W - 950, y: ARENA_H - 760, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
     build: (w, d) => buildCrateTall(M, w, d),
   });
 

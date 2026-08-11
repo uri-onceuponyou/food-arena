@@ -2078,8 +2078,11 @@ export function buildFloor(M: Materials): THREE.Group {
     // The service counters, still written against CENTER because they are hub props.
     [CENTER.x, CENTER.y - 330, 110], [CENTER.x, CENTER.y + 330, 110],
     // The four hub stove islands themselves — the busiest cooking surfaces on the map.
-    [CENTER.x - 270, CENTER.y - 200, 110], [CENTER.x + 270, CENTER.y - 200, 110],
-    [CENTER.x - 270, CENTER.y + 200, 110], [CENTER.x + 270, CENTER.y + 200, 110],
+    // ⚠️ ±320/±240, not the 1x ±270/±200: `4bb64e4` made the fog's final radius a function
+    // of the fighter count and at six seats it is 237 wu, not 140, so `kitchen.ts` had to
+    // push the islands out of the ring. Traffic follows GEOMETRY — these move with them.
+    [CENTER.x - 320, CENTER.y - 240, 110], [CENTER.x + 320, CENTER.y - 240, 110],
+    [CENTER.x - 320, CENTER.y + 240, 110], [CENTER.x + 320, CENTER.y + 240, 110],
     // The two mid-map cook lines and the two prep galleys — the NEW structure the ×4
     // space bought, and the reason the middle band is walked at all.
     [700, 700, 120], [ARENA_W - 700, ARENA_H - 700, 120],
@@ -2497,8 +2500,18 @@ export function buildFloor(M: Materials): THREE.Group {
   // islands are new structure at this size and get their own, so "there is grease beside
   // every stove" stays true of the whole map rather than of the hub only.
   // Each sits clear of its island's own CoverBox, checked against the box edges.
+  //
+  // ⚠️ THE FOUR HUB ENTRIES ARE WRITTEN AGAINST CENTER, AND THAT IS THE SECOND TIME THIS
+  // TABLE HAS BEEN CAUGHT BY THE SAME THING. They were literals at the islands' old
+  // ±270/±200 offsets; `4bb64e4` moved the islands to ±320/±240 (the N=6 final ring is 237
+  // wu, not 140, so nothing solid may sit inside it) and all four splats would have been
+  // BURIED UNDER an island body — 30 wu of grease delivering zero pixels, which is exactly
+  // the failure the 2026-08-05 note above records. Each now sits 40 wu outboard of its
+  // island's away-from-hub face, so it cannot be buried by a ±40 wu nudge in either
+  // direction, and it moves with the hub instead of with a remembered coordinate.
   const stoveGrease: Array<[number, number]> = [
-    [1010, 730], [1790, 730], [1010, 1270], [1790, 1270], // the four hub islands
+    [CENTER.x - 320, CENTER.y - 325], [CENTER.x + 320, CENTER.y - 325], // the four hub islands
+    [CENTER.x - 320, CENTER.y + 325], [CENTER.x + 320, CENTER.y + 325],
     [2230, 590], [ARENA_W - 2230, ARENA_H - 590],         // the east / west cook lines
     [1520, 380], [ARENA_W - 1520, ARENA_H - 380],         // the north / south lane islands
   ];
