@@ -152,7 +152,9 @@ const OWNED = {
   'tools/tmp/faceframe.mjs': 'geometry',
   'tools/tmp/menu_roster_frame.mjs': 'geometry',     // clicks a card; ALSO had a hardcoded port
   'tools/perf.mjs': 'geometry',                      // soft, time-boxed: a perf harness must not die on paint
-  'tools/tmp/perf_tier.mjs': 'geometry',
+  // ⚠️ `tools/tmp/perf_tier.mjs` was here and was DELETED 2026-08-11 — it was a verbatim
+  //    copy of `tools/perf.mjs` that had diverged twice, and `perf.mjs --query <q>` now
+  //    subsumes it. Its role was 'geometry', for the same reason `perf.mjs`'s is.
   'tools/tmp/settle_geom_ab.mjs': 'validator',       // its subject IS the unsettled frame
 
   // Verdicts CSS cannot reach. Annotated at the top of each file with WHAT the verdict

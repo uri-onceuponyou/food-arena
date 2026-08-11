@@ -22,7 +22,9 @@
  * knob below was chosen from a timing. Every one of them moves a counter that is the
  * same number on an iPhone as it is here: draw calls, post-chain fill, render-target
  * bytes, program links, drawing-buffer pixels. Measured deltas are tabulated in
- * `TIERS` below and reproduced by `tools/tmp/perf_tier.mjs`.
+ * `TIERS` below and reproduced by `tools/perf.mjs --query '&tier=X'`. (⚠️ That was
+ * `tools/tmp/perf_tier.mjs` until 2026-08-11: a verbatim copy of `perf.mjs` that had
+ * diverged twice, deleted once `perf.mjs --query` subsumed it.)
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,7 +79,7 @@ export interface TierProfile {
 
 /**
  * ── What each tier costs, measured ──────────────────────────────────────────
- * `node tools/tmp/perf_tier.mjs --mode counts --scene match --query '&tier=X'`,
+ * `node tools/perf.mjs --mode counts --scene match --query '&tier=X'`,
  * desktop 1300x740 @ DPR 1, against a frozen snapshot. Draw calls and triangles are
  * per frame; fill is post-chain megapixels shaded per frame.
  *

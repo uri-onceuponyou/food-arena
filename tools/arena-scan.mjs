@@ -679,12 +679,49 @@ const STATIONS = [
   // map whose corner is 1720 wu out — a "boundary" station standing 810 wu deep inside the
   // death zone and a "late" station outside its own ring. The COMPOSITION is what is held
   // fixed, because the camera window did not change: the wall is still ~30 wu ahead at
-  // `fog_boundary`, still ~120 wu behind you at `fog_inside`, still ~40 wu ahead at
-  // `fog_late`. Distances from CENTRE: 810 / 960 / 360.6.
+  // `fog_boundary` and still ~120 wu behind you at `fog_inside`.
+  //
+  // 🚨 AND A SECOND, INDEPENDENT INVALIDATION LANDED THE SAME DAY: `DECISIONS §2` /
+  //    `f87d407` ABOLISHES THE RING AT 30 s. `match.ts:applyQaSetup` therefore treats the
+  //    reachable ring states as a set that is NOT an interval — `(maxR/3, maxR]` plus the
+  //    single point 0 — and **any `?fogRadius=` at or below `maxR × 15000/45000` = 661.67 wu
+  //    SNAPS TO SUDDEN DEATH (radius 0)**, with a console warning and no error. It renders a
+  //    full-arena violet wash, mean luma 71.3 against 124 for a real boundary frame.
+  //    A station that requests one does not fail; it silently photographs a different frame.
+  //
+  //    `fog_boundary` and `fog_inside` ask for 840 and are unaffected. `fog_late` asked for
+  //    **400** and was snapping.
+  //
+  // ⚠️ AND IT IS NOT FIXED BY "ASK FOR MORE". `fog_late`'s whole subject was a NEARLY-CLOSED
+  //    ring — 200 wu on the 1x map, 400 here — and **no shipped match ever holds a ring that
+  //    tight any more**: the schedule is cut off at 661.67 wu, 9.6-11.8 s before it would
+  //    arrive lower (`rules.ts:1194`). **The frame this station was written to capture no
+  //    longer exists.** So it is re-aimed at the honest successor — the TIGHTEST RING THE
+  //    SCHEDULE ACTUALLY REACHES — and its note says so, rather than naming a radius the
+  //    game cannot produce. 700 rather than 661.67 because the bottom of the schedule is an
+  //    OPEN bound: a request of exactly 661.67 lands on the sudden-death trigger and was
+  //    measured snapping anyway.
+  //
+  // ⚠️ Deliberately NOT re-purposed as a sudden-death station. That frame is a full-screen
+  //    violet wash and this file is a COLOUR BUDGET: one station of it would move the
+  //    aggregate by more than any grade change this tool exists to judge. If someone wants
+  //    sudden death measured, it needs its own pass with its own baseline, not a seat in
+  //    this one.
+  //
+  // Distances from CENTRE: 810 / 960 / 660.
   { id: 'fog_boundary',  x: 2210, y: 1000, fog: 840, unstill: 'hud-css', note: 'safe-zone wall ~30wu ahead of the player' },
   { id: 'fog_inside',    x: 2360, y: 1000, fog: 840, unstill: 'hud-css', note: 'standing INSIDE the death zone, 50 HP/s' },
-  { id: 'fog_late',      x: 1040, y: 1000, fog: 400, unstill: 'hud-css', note: 'late match, ring closed to 400wu around the pot' },
+  { id: 'fog_late',      x: 740,  y: 1000, fog: 700, unstill: 'hud-css', note: 'the TIGHTEST ring a shipped match ever holds (661.67 wu is the floor; sudden death abolishes the ring below it) — wall ~40wu ahead' },
 ];
+/**
+ * The lowest `?fogRadius=` that still renders a RING rather than snapping to sudden death.
+ * Mirrors `match.ts:applyQaSetup`'s `lowestScheduled` for the duel: `maxR × (MATCH_DURATION_MS
+ * − SUDDEN_DEATH_MS) / MATCH_DURATION_MS`. Duplicated as a number for the same reason
+ * everything else here is — this file imports nothing from the app — and `--selftest` asserts
+ * every station against it, so a future §2-style change fails loudly instead of quietly
+ * photographing a violet wash.
+ */
+const LOWEST_SCHEDULED_FOG = MAX_SAFE_RADIUS * (15000 / 45000);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE COLOUR BUDGET CONTRACT
@@ -2057,6 +2094,37 @@ async function modeSelftest() {
       check('...while 12 of those 18 are STILL legal, reachable ground — so acting on the '
         + 'placement guard alone would have "fixed" this and left SE empty',
         18 - validate(ONE_X.map((p, i) => ({ id: `x${i}`, ...p }))).length, 12);
+    }
+
+    // ── 🚨 EVERY STATION'S `fog` MUST BE A RADIUS THE SCHEDULE ACTUALLY REACHES ────
+    //
+    // `DECISIONS §2` / `f87d407` abolishes the ring at 30 s, so `match.ts:applyQaSetup`
+    // SNAPS any `?fogRadius=` at or below `maxR × 15000/45000` = 661.67 wu to SUDDEN DEATH
+    // (radius 0) — a full-arena violet wash, mean luma 71.3 against 124 for a real boundary
+    // frame. It warns on the console and does NOT error, so a stale station does not fail:
+    // **it silently photographs a different frame and the colour numbers land in the
+    // baseline anyway.** That is the same failure class as a stale coordinate, arriving
+    // through a constant this file never knew about, and nothing here could see it.
+    //
+    // `fog_late` asked for 400 and was snapping. It is the second independent invalidation
+    // of this station table in one day.
+    {
+      const low = STATIONS.filter((s) => s.fog <= LOWEST_SCHEDULED_FOG);
+      check(`every station's fog is > ${LOWEST_SCHEDULED_FOG.toFixed(2)} wu, the lowest radius the schedule reaches`
+        + (low.length ? `  [${low.map((s) => `${s.id}@fog${s.fog}`).join(' ')}]` : ''), low.length, 0);
+      // KNOWN-BAD: the value `fog_late` shipped with until this was found. A guard that has
+      // not been shown to fail is not a guard — and this one is worth proving precisely
+      // because the defect it catches is INVISIBLE at runtime (a warning, not an error).
+      check(`KNOWN-BAD: fog_late's pre-§2 400 wu is refused (400 <= ${LOWEST_SCHEDULED_FOG.toFixed(2)}) — it snaps to sudden death`,
+        400 <= LOWEST_SCHEDULED_FOG, true);
+      // CONTROL: and the bound is not so high that everything fails it — the three real
+      // ring stations pass, so the row is not vacuously refusing the whole table.
+      check(`  CONTROL: the three fog stations DO ask for reachable rings (${STATIONS.filter((s) => s.unstill === 'hud-css').map((s) => `${s.id}@${s.fog}`).join(' ')})`,
+        STATIONS.filter((s) => s.unstill === 'hud-css').every((s) => s.fog > LOWEST_SCHEDULED_FOG), true);
+      // …and the bound itself is re-derived rather than copied: it is exactly one third of
+      // `maxSafeRadius`, because sudden death fires with 15 s of a 45 s match left.
+      check(`...and the bound is maxSafeRadius x (MATCH_DURATION - SUDDEN_DEATH)/MATCH_DURATION (${LOWEST_SCHEDULED_FOG.toFixed(2)} vs ${(MAX_SAFE_RADIUS / 3).toFixed(2)})`,
+        Math.abs(LOWEST_SCHEDULED_FOG - MAX_SAFE_RADIUS / 3) < 1e-9, true);
     }
   }
 

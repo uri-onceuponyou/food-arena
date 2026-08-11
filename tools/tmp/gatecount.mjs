@@ -275,6 +275,9 @@ const OFFLINE = [
   { key: 'tools/tmp/sp_gate.mjs --selftest',  probes: [pr(['tools/tmp/sp_gate.mjs', '--selftest'], /^\s*PASS\s+(\d+) passed, \d+ failed\s*$/m)] },
   { key: 'tools/tmp/ap_reach.mjs --selftest', probes: [pr(['tools/tmp/ap_reach.mjs', '--selftest'], /^\s*PASS\s+(\d+) passed, \d+ failed\s*$/m)] },
   { key: 'tools/tmp/s49_mutants.mjs', probes: [pr(['tools/tmp/s49_mutants.mjs'], S)] },
+  // Sudden death (`DECISIONS §2`). Offline, ~2 s. Its own known-bad battery is six patched
+  // sims, each required to break exactly the claim it names.
+  { key: 'tools/tmp/sd_lab.mjs --selftest', probes: [pr(['tools/tmp/sd_lab.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/da_census.mjs --selftest', probes: [pr(['tools/tmp/da_census.mjs', '--selftest'], S)] },
   // ⚠️ NOT `S`. This tool appends its own wall-clock to the count line (`27 passed, 0 failed
   //    wall 58.1s`), and `S` anchors on `$`. Matched with `\b` instead so a trailing note cannot
@@ -402,6 +405,7 @@ const SKIP = [
   ['tools/tmp/lu_land.mjs', 'browser', 'the landscape-phone control layout: corner, centre column, hint/tray clearance, touch floor, safe-area insets, and a REAL CDP touch to prove the resting hints are transient'],
   ['tools/tmp/np_ab.mjs',        'browser', 'the N=2 presentation identity battery: 4 served arms, 9 compared fields, per-file tree control, roster-swap known-bad'],
   ['tools/tmp/np_nfighter.mjs', 'browser', 'N=3..6 presentation self-consistency + slot-swap known-bad'],
+  ['tools/tmp/sd_feelevent.mjs', 'browser', 'the sudden-death feel event through the shipped event stream'],
   ['tools/tmp/x4_shot.mjs', 'browser', 'photographs a real 3/4/6-fighter opening on the arena\'s own ×4 spawns; its verdict is a set of PNGs plus a phase/HP census, not a number'],
   // ⚠️ SLOWEST browser gate registered here — over ten minutes on a contended box. Its
   //    selftest is AGGREGATE and needs the WHOLE 23-weapon sweep: one weapon exercises the

@@ -52,7 +52,9 @@
  * fourteenth copy born DURING the audit. `driver_guard.mjs` closes that specific
  * driver. The general shape — a 1,500-line instrument duplicated so a fix reaches one
  * copy and not the other — is not closed, and this session found a live instance:
- * `tools/tmp/perf_tier.mjs` is `tools/perf.mjs` with three lines changed.
+ * `tools/tmp/perf_tier.mjs` was `tools/perf.mjs` with three lines changed. ⚠️ It has since
+ * DIVERGED TWICE and been DELETED (2026-08-11) — see the retired `CLONES` entry below; the
+ * registry is the record of why the census works this way, not a list of live files.
  *
  * The census is a REGISTRY, not a nag. A pair that is not registered fails. A
  * registered pair that DIVERGES past its recorded budget fails — which is the actual
@@ -529,23 +531,45 @@ async function registry() {
  * a subject at all. That is not hypothetical; it happened to the first entry here, hours
  * after the entry was written, and the census printed a `note` and exited 0.
  */
+/**
+ * 🚨 RETIRED ENTRY — `tools/perf.mjs :: tools/tmp/perf_tier.mjs`, deleted 2026-08-11.
+ *
+ * Kept in full because this entry is the reason `cloneCensus` is registry-driven rather
+ * than discovery-driven, and because the outcome it predicted is the one that happened:
+ *
+ *   budget: 12
+ *   why: 'perf_tier is perf.mjs plus a `--query` flag that pins a render tier. 8 differing
+ *     lines today (a const, a comment block, two URL concatenations). This is the shape
+ *     that put a stale scripted-player driver into ten tools with five still carrying the
+ *     defect — THE RIGHT FIX IS `perf.mjs --query <q>` AND DELETING THE COPY, which is the
+ *     perf owner's call, not this guard's. The budget is what makes a divergent fix show up
+ *     as a FAILURE instead of as silence.
+ *
+ *     ⚠️ AND THIS ENTRY IS THE ONE THAT PROVED THE CENSUS ITSELF WRONG. On 2026-08-11 the
+ *     false-positive reload guard was fixed in `tools/perf.mjs` (9e1061c) and NOT in the
+ *     copy — the exact event the sentence above says would show up as a FAILURE. It did
+ *     not. The fix added 190 lines, similarity fell 0.9926 -> 0.8621, the pair dropped below
+ *     CLONE_MIN_SIMILARITY, and a discovery-driven census stopped looking at it:
+ *     `note … (or renamed)`, exit 0, 171 diverged lines never counted against this budget
+ *     of 12. Both files are checked BY REGISTRATION now.'
+ *
+ * The census then caught it a SECOND time, on a second unported fix: `4be0733` gave
+ * `perf.mjs` `hasTouch`/`isMobile` (so `--device mobile` finally selects the `low` tier
+ * instead of `high` — post-chain fill drops 14.6x) and the copy kept measuring `high`.
+ * The pair read **86.86% identical, 185 lines diverged against a budget of 12**.
+ *
+ * `perf.mjs` then gained `--query` (default `''`, byte-identical URLs) and
+ * `--mode tierselftest`, so the copy was strictly subsumed and is deleted. Verified by
+ * diffing the two files' non-comment lines before deleting: `perf.mjs` is a strict superset
+ * — it carries `--query`, `hasTouch`/`isMobile`, `--angle` and `--mode tierselftest`, and
+ * the copy carried nothing `perf.mjs` lacks.
+ *
+ * ⚠️ `--selftest`'s clone arms are UNAFFECTED and still 44/44: they read the two files'
+ * real bytes out of `git show 9e1061c^` and `git show 9e1061c`, which are permanent. A
+ * historical fixture cannot be deleted out from under a test, which is exactly why it was
+ * built from git rather than from the tree.
+ */
 const CLONES = {
-  'tools/perf.mjs :: tools/tmp/perf_tier.mjs': {
-    budget: 12,
-    why: 'perf_tier is perf.mjs plus a `--query` flag that pins a render tier. 8 differing '
-      + 'lines today (a const, a comment block, two URL concatenations). This is the shape '
-      + 'that put a stale scripted-player driver into ten tools with five still carrying the '
-      + 'defect — the right fix is `perf.mjs --query <q>` and deleting the copy, which is '
-      + 'the perf owner\'s call, not this guard\'s. The budget is what makes a divergent '
-      + 'fix show up as a FAILURE instead of as silence.'
-      + '\n\n      ⚠️ AND THIS ENTRY IS THE ONE THAT PROVED THE CENSUS ITSELF WRONG. On '
-      + '2026-08-11 the false-positive reload guard was fixed in `tools/perf.mjs` (9e1061c) '
-      + 'and NOT in the copy — the exact event the sentence above says would show up as a '
-      + 'FAILURE. It did not. The fix added 190 lines, similarity fell 0.9926 -> 0.8621, the '
-      + 'pair dropped below CLONE_MIN_SIMILARITY, and a discovery-driven census stopped '
-      + 'looking at it: `note … (or renamed)`, exit 0, 171 diverged lines never counted '
-      + 'against this budget of 12. Both files are checked BY REGISTRATION now.',
-  },
   'tools/tmp/limbcheck.mjs :: tools/tmp/limbcheck_pitch.mjs': {
     budget: 26,
     why: 'FOUND BY THIS CENSUS ON ITS FIRST RUN. 93.3% identical, 21 lines diverged today: a '
