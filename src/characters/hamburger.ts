@@ -1969,16 +1969,72 @@ export class HamburgerCharacter extends BaseCharacter {
     // `lettuce_frill` blob became a 197 px DETACHED ISLAND at the lobby the moment the
     // leaves stopped bridging it — `LETTUCE_BASE_R` 0.70R -> 0.74R closed it, which is
     // the same 877 px floating-pea defect this file already fixed once.
+    //
+    // ── 🚨 ROUND 4: ROUND 3 BROKE THE COUNT AND LEFT THE PAIR. MEASURED IN PIXELS. ──
+    // Round 3 went 3 leaves -> 5 "at irregular azimuths, so there is no MIRRORED PAIR
+    // left". Read the ablation (`shots/c2/ears/hb_leaves_p20_zoom.png`,
+    // `cf_ablate --names lettuce_leaf --mode paint`, 13,317 px = 1.06% of the lobby
+    // frame): the leaves own **two wedges of near-identical size at near-identical
+    // height, one on each side of the head.** The count changed; the pair did not.
+    //
+    // Because two of the five were a mirrored pair to within 3.6 DEGREES:
+    //   -0.74PI len 1.02 lift -0.42   |   +0.76PI len 0.96 lift -0.38
+    // `massAnchor`'s azimuth is 0 at +Z and +PI/2 at +X, so the sagittal mirror is
+    // exactly `theta -> -theta`. Those two are 0.02PI from being each other's image,
+    // 6% apart in length and 10% in lift. **Irregular NUMBERS are not an irregular
+    // SILHOUETTE.** What the player sees is the LATERAL projection `len * |sin az|`
+    // — the same theorem as the raking attempt this file already refuted, where a 46
+    // degree rake projected to ~15 on screen:
+    //   round 3   LEFT max 0.744 (-0.74PI)   RIGHT max 0.657 (+0.76PI)   ratio 1.13
+    //   round 4   LEFT max 0.786 (-0.72PI)   RIGHT max 0.452 (+0.44PI)   ratio 1.74
+    // A 13% difference is a matched pair with a manufacturing tolerance. Burrito's
+    // accepted answer is *one asymmetric leaf*, so the flank leaves are now ONE long
+    // and ONE short, not two of a size.
+    //
+    // `height01` also becomes per-leaf. It was 0.46 for all five, so every leaf left
+    // the stack at the same altitude — and "two masses at the same height either side
+    // of a head" is the ear signal stated literally. The spread is deliberately small
+    // (0.40-0.50) because `massAnchor` RAYCASTS at that height: outside the lettuce
+    // band the ray would land on the tomato below or the crown above and the leaf
+    // would sprout from the wrong layer.
+    //
+    // ⚠️ TOTAL LEAF LENGTH GOES DOWN, 3.92 -> 3.44 of `rStack`, which is the direction
+    // this file's own cape failure demands (five long droopers composed a green mantle
+    // and the burger vanished behind it). Round 3's other two findings are NOT undone:
+    // every `lift` is still negative (a mass hanging DOWN off a collar is lettuce; the
+    // same mass angled UP beside a head is an ear), and there are still five, because
+    // *"a ring of five is a frill; two is a face"*.
+    //
+    // JUDGED ON THE PICTURES FIRST, at BOTH shipped cameras
+    // (`shots/c2/ears/sheet_hb_p20.png`, `sheet_hb_p58.png`, and the ablation sheet
+    // `sheet_ablate_p20.png` where the leaves are painted magenta): at pitch 20 the two
+    // matched side spikes at collar height are gone and the green now spills asymmetric
+    // and DOWN over the tomato; at pitch 58 the pair of points either side of the crown
+    // becomes ONE, on the left.
+    // Then measured. `ch_hamburger_sil.mjs`, and 🚨 THAT TOOL IGNORES `headserve`
+    // ENTIRELY — `rg_lib`'s `buildBundle` esbuilds straight out of the REPO, so both
+    // arms of a `--ref`-pinned A/B measure the WORKING TREE and come back byte-identical.
+    // The before arm below is a DETACHED WORKTREE of 576d7fe with `node_modules`
+    // symlinked, and the `area` column differing (85967 vs 85418) is the freshness
+    // proof that the two arms really are two trees:
+    //   view                  hullDef before -> after     islands
+    //   lobby pitch20 yaw 0    0.2968 -> 0.2986  +0.0018   1 -> 1
+    //   lobby pitch20 yaw22    0.2536 -> 0.2639  +0.0103   1 -> 1
+    //   match pitch58 yaw90    0.2811 -> 0.3117  +0.0306   1 -> 1
+    // All three move the way this file wants (more silhouette events, not fewer) and
+    // nothing detaches — which matters because shortening the +0.76PI leaf is exactly
+    // the move that made a `lettuce_frill` blob a 197 px island the last time.
+    // `nm_island` at both cameras: 1 component, 572,675 px at p20 / 535,736 at p58.
     const leafMat = toonMat({ color: LETTUCE_FRILL, roughness: 0.72 });
-    const leaves: Array<[azimuth: number, len: number, lift: number]> = [
-      [Math.PI * 1.00, 1.18, -0.30],
-      [-Math.PI * 0.74, 1.02, -0.42],
-      [Math.PI * 0.76, 0.96, -0.38],
-      [-Math.PI * 0.33, 0.40, -0.60],
-      [Math.PI * 0.22, 0.36, -0.66],
+    const leaves: Array<[azimuth: number, len: number, lift: number, height01: number]> = [
+      [Math.PI * 0.90, 1.24, -0.30, 0.44],
+      [-Math.PI * 0.72, 1.02, -0.36, 0.50],
+      [Math.PI * 0.44, 0.46, -0.60, 0.40],
+      [-Math.PI * 0.34, 0.40, -0.64, 0.47],
+      [Math.PI * 0.16, 0.32, -0.70, 0.43],
     ];
-    for (const [azimuth, len, lift] of leaves) {
-      const { at, out } = massAnchor(head, box, { azimuth, height01: 0.46, inset: 0.20 });
+    for (const [azimuth, len, lift, height01] of leaves) {
+      const { at, out } = massAnchor(head, box, { azimuth, height01, inset: 0.20 });
       const g = new THREE.Group();
       g.name = 'hamburger_lettuce_point';
       aim(g, at, out.clone().add(new THREE.Vector3(0, lift, 0)).normalize(), Math.PI * 0.5);

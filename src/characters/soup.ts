@@ -741,7 +741,30 @@ export class SoupCharacter extends BaseCharacter {
     // Rim trim — a thin contrasting band just under the rolled rim lip (the new
     // profile's h 0.86-0.94 flare), the "costume colour contrast" the reference bar
     // calls for, echoed on the torso.
-    const trimTop = 0.90, trimBottom = 0.80;
+    //
+    // ── 🚨 0.80-0.90 -> 0.86-0.94, AND THE COMMENT ABOVE IS WHERE THE BAND SAYS ──
+    // ──    IT LIVES. IT WAS 0.06 OF BOWL HEIGHT LOWER, AND THAT GAP IS WHY THE ──
+    // ──    BROW HAS NEVER RENDERED A SINGLE PIXEL ──────────────────────────────
+    // MEASURED, `cf_ablate --id soup --names soup_brow`, on `headserve --ref 576d7fe`:
+    // **paint = 0 changed px and hide = 0 changed px, at pitch 20 AND pitch 58.**
+    // Not "hard to see" — the brow owns nothing. `buildFace` has the arithmetic; the
+    // short version is that the sclera's top reaches head-local y **+0.0625R** and
+    // this band's bottom edge was at **+0.0800R**, so the entire wall available for a
+    // brow was **0.0175R ~ 4 px** at lobby framing and the brow was inside the eyeball.
+    // `docs/LESSONS.md` §1 for the twenty-second time, and the SECOND time on this
+    // exact element — the note in `buildFace` records the first (it was parented
+    // inside the eye group), and moving it onto the wall did not help because the
+    // eyeball stands 0.084R proud OF that wall.
+    //
+    // 0.86-0.94 is not a nudge to make room; it is where this comment already said the
+    // band was, and it is strictly better geometry as well. `BOWL_PROFILE` has a
+    // vertex at h 0.86 and another at 0.94, so between them the lathe is ONE straight
+    // segment and the trim's cone is EXACTLY parallel to it at a constant 2% offset.
+    // At 0.80-0.90 the cone spanned the kink at 0.86 and only approximated the wall.
+    //   band height   0.135R -> 0.108R  (-20%; `RIM_TRIM` is also the boots and the
+    //                                    sash, so the dark rung does not live here alone)
+    //   bottom edge   y +0.080R -> +0.161R, i.e. 0.0985R of bare ceramic above the eye
+    const trimTop = 0.94, trimBottom = 0.86;
     const trimTopPt = bowlSurface(0, trimTop);
     const trimBotPt = bowlSurface(0, trimBottom);
     const trimRadiusTop = new THREE.Vector2(trimTopPt.pos.x, trimTopPt.pos.z).length() * 1.02;
@@ -1126,17 +1149,72 @@ export class SoupCharacter extends BaseCharacter {
       // It is now placed on the BOWL'S OWN SURFACE, above the eye, by the same
       // `bowlSurface` call everything else here uses — so it is on the wall by
       // construction rather than at a remembered offset from something else.
-      const browPt = bowlSurface(sx * EYE_THETA * 0.98, EYE_H + 0.105);
+      //
+      // ── 🚨 AND THAT FIX DID NOT WORK EITHER. IT WAS STILL 0 PIXELS. ────────────
+      // `cf_ablate --id soup --names soup_brow` on `headserve --ref 576d7fe`:
+      // **paint 0 changed px, hide 0 changed px, at pitch 20 AND at pitch 58.** Both
+      // arms of the known-bad, both cameras, four runs. `docs/LESSONS.md` §1 twice on
+      // one mesh; the first wording is kept above because it is the only record of
+      // where the brow used to be, and because being RIGHT about "put it on the wall"
+      // is exactly what made the second failure invisible.
+      //
+      // Being on the wall is not enough, because THE EYEBALL STANDS PROUD OF THE WALL
+      // and reaches HIGHER than the brow did. All heights are head-local Y, R = head
+      // radius, bowl base y = -1.0R and bowl height 1.35R:
+      //   eye centre        -1.0R + 0.630 * 1.35R              = -0.1495R
+      //   sclera half-height  R*0.200 * scale.y 1.06           =  0.2120R
+      //   SCLERA TOP                                           = +0.0625R
+      //   old brow centre   -1.0R + (0.630 + 0.105) * 1.35R    = -0.0078R  ← 0.070R
+      //                                                          BELOW the sclera top
+      // The sclera at that height still projects 0.062R out of the wall while the
+      // brow's own front reached 0.034R, so the brow was drawn INSIDE the eyeball at
+      // very nearly the eye's own azimuth. That is why `hide` moves nothing: there is
+      // no camera from which any part of it is the frontmost surface.
+      //
+      // Placed off the SCLERA'S TOP now instead of off `EYE_H`, so it cannot drift
+      // back inside the eye when either moves, and inverted through `bowlSurface`'s
+      // own linear h->y map rather than through a remembered 1.35R:
+      const scleraTopY = pos.y + R * 0.212;
+      const yAt0 = bowlSurface(0, 0).pos.y, yAt1 = bowlSurface(0, 1).pos.y;
+      const hOfY = (y: number): number => (y - yAt0) / (yAt1 - yAt0);
+      // ── SHAPE: an ELLIPSOID, not a capsule, and `noOutline` ────────────────────
+      // `taco.ts` round 3 / `egg.ts` round 5, two independent blind critics: *"the
+      // mouth and brow marks look like flat pasted-on decals rather than sculpted
+      // features"*. **Nothing in nature that is part of a face has parallel sides**,
+      // and a `CapsuleGeometry` is parallel sides plus a sudden round end, wrapped in
+      // its own closed inverted-hull contour. Both go.
+      // The mark is also made LONGER AND LEANER rather than mass-preserved. taco's
+      // derivation preserves a capsule's silhouette area because taco's brow was
+      // already visible and the round was about shape alone; here the capsule's area
+      // is 0.00966R^2 OF NOTHING, so there is no mass to preserve — and taco's own
+      // note says the failure it fixed was "two fat brown ovals" and that *a brow
+      // reads as a brow by being a thin stroke*. b/a is taco's 0.18, not the capsule's
+      // 0.235, and the half-length goes 0.1145R -> 0.175R so the brow is 87% of the
+      // eye's width instead of 57% (taco: *"a brow shorter than the eye it sits over
+      // reads as a smudge"*).
+      const BROW_A = R * 0.175, BROW_B = R * 0.020, BROW_TILT = 0.10;
+      // Tilted, the ellipsoid's own vertical half-extent is
+      // sqrt((a sin t)^2 + (b cos t)^2) = 0.0265R, NOT b — the term that makes a
+      // clearance sum done on `b` alone read as clear when it is not.
+      const browHalfH = Math.hypot(BROW_A * Math.sin(BROW_TILT), BROW_B * Math.cos(BROW_TILT));
+      // 0.020R of BARE ceramic under the mark, the same order as taco's 0.020F.
+      const browY = scleraTopY + R * 0.020 + browHalfH;
+      const browPt = bowlSurface(sx * EYE_THETA * 0.98, hOfY(browY));
       const browOut = new THREE.Vector3(browPt.pos.x, 0, browPt.pos.z).normalize();
       const browG = new THREE.Group();
       faceBasis(browG, browPt.pos.clone().addScaledVector(browOut, R * 0.012), browOut);
       face.add(browG);
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(R * 0.022, R * 0.185, 4, 8), browMat);
+      const brow = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 10), browMat);
       brow.name = 'soup_brow';
+      brow.scale.set(BROW_A, BROW_B, R * 0.016);
       // Flat, not angled into a V — a V reads as annoyed, and soup is the serene
       // one. The tiny `sx` tilt lifts the OUTER end, which is calm/knowing; the
       // inner-end lift is the angry direction (verified on egg's own crease note).
-      brow.rotation.z = Math.PI / 2 + sx * 0.10;
+      // ⚠️ The `PI/2` is gone with the capsule: a capsule's long axis is +Y and this
+      // ellipsoid's is +X, so `Rz(PI/2 + sx*t)` and `Rz(sx*t)` send them to the SAME
+      // unsigned direction. Same tilt, same sign, same read.
+      brow.rotation.z = sx * BROW_TILT;
+      brow.userData.noOutline = true;
       brow.castShadow = true;
       browG.add(brow);
     }

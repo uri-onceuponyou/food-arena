@@ -1293,14 +1293,61 @@ export class DonutCharacter extends BaseCharacter {
       // between them — read as a PNG they are two stray ink dashes floating near the
       // hole, not brows. The sclera's top is now at 0.182R, so 0.255R/0.235R keeps a
       // deliberate 0.05-0.07R gap and nothing more.
+      //
+      // ── 🚨 THEY WERE CAPSULES WITH AN INK OUTLINE, i.e. TWO STRIPS OF TAPE ──────
+      // Read at 3x off the shipped lobby camera (`shots/c2/before/donut_face_p20.png`)
+      // both brows are black RODS: parallel sides for their whole length, a sudden
+      // round end, and a closed inverted-hull contour around each. `taco.ts` round 3
+      // and `egg.ts` round 5 are the same finding from two independent blind critics
+      // — *"the mouth and brow marks look like flat pasted-on decals rather than
+      // sculpted features"* — and the conclusion transfers verbatim: **nothing in
+      // nature that is part of a face has parallel sides.**
+      //
+      // ELLIPSOIDS, which taper to nothing at both ends the way a brow ridge does,
+      // with the minor axis derived so the mark keeps its visual MASS rather than the
+      // 0.785 of it a naive scale swap gives. `taco.ts` carries the derivation: a
+      // capsule of radius r and shaft L covers `2rL + pi*r^2`, and setting that equal
+      // to `pi*a*b` with `a = (L + 2r)/2` fixes b.
+      //   r .026R  L .15R  ->  area .0099237 R^2,  a = .101R  ->  b = .03128R
+      // The depth follows taco's own ratio (z / capsule radius 0.72-0.75), so the mark
+      // sits in the icing rather than standing off it: 0.026 * 0.73 = 0.019R.
+      //
+      // ── ⚠️ AND `a = .101R` WAS THE CAPSULE'S LENGTH, WHICH WAS ITSELF TOO SHORT ──
+      // `tools/tmp/bw_brow.mjs` (a peer's, landed the same hour) measures `spanFrac` =
+      // brow width / sclera width IN RENDERED PIXELS. The straight capsule->ellipsoid
+      // swap measured **0.594 / 0.612** at the lobby camera against taco's authored
+      // 0.779 / 0.828 — so preserving the capsule's length preserved a defect taco's
+      // own note names in one line: *"a brow shorter than the eye it sits over reads as
+      // a smudge."* The eye here is 0.330R wide (`SCLERA_R` 0.165R, scale.x 1).
+      //   a .101R -> .140R   total 0.280R, spanFrac 0.848 — in taco's family
+      //   b       -> .02257R  MASS HELD at .0099237 R^2, so the mark is longer and
+      //                       LEANER rather than bigger. A brow is a LINE.
+      // Seating re-checked at the new half-height, which the tilt inflates:
+      //   right (tilt .36)  half-h .0537R, bottom .0313R, sclera top .0115R -> .0198R
+      //   left  (tilt .04)  half-h .0233R, bottom .0417R                    -> .0302R
+      //
+      // ⚠️ `noOutline` IS LOAD-BEARING, not tidiness. The inverted-hull ink draws a
+      // CLOSED CONTOUR around any proud mark, and that contour is what says "separate
+      // object glued on" instead of "relief in this surface". Dropping it is safe here
+      // for `taco.ts`'s stated reason — the mark is DARK on a LIGHT pad (`PALETTE.ink`
+      // against the gold icing band), so it holds its own edge without help.
+      //
+      // ⚠️ AND THE ROTATION IS NOT THE SAME NUMBER. A capsule's long axis is +Y, so
+      // the old value carried a `PI/2` to lay it flat; an ellipsoid scaled on X is
+      // already flat. `Rz(PI/2 - sx*t)` sends (0,1,0) to (-cos s, sin s, 0), which as
+      // an unsigned direction is `-sx*t` off +X — so the tilt keeps its sign and its
+      // magnitude exactly, and the asymmetry `rules.ts` protects is untouched.
       const browY = eyeY + (sx > 0 ? R * 0.255 : R * 0.235);
       const browTilt = sx > 0 ? 0.36 : 0.04;
       const brow = new THREE.Mesh(
-        new THREE.CapsuleGeometry(R * 0.026, R * 0.15, 4, 8),
+        new THREE.SphereGeometry(1, 20, 10),
         toonMat({ color: PALETTE.ink, roughness: 0.4 })
       );
+      brow.name = `donut_brow_${sx > 0 ? 'R' : 'L'}`;
+      brow.scale.set(R * 0.140, R * 0.0226, R * 0.019);
       brow.position.set(eyeX, browY, surfaceZ(eyeX, browY, R * 0.012));
-      brow.rotation.z = Math.PI / 2 - sx * browTilt;
+      brow.rotation.z = -sx * browTilt;
+      brow.userData.noOutline = true;
       brow.castShadow = true;
       face.add(brow);
     }

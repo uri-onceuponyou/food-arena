@@ -78,15 +78,40 @@ const LIMB_CHAR = '#331C0D';
 // reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
 // segment comes back UP, the lower segment holds the dark, and the boot takes its own
 // darkest tone instead of sharing the shin's.
+//
+// ⚠️ THE LAST CLAUSE IS KEPT AND IT WAS WRONG, AND THIS PARAGRAPH SAYS WHY IN ITS OWN
+// FIRST LINE. *"Mid sleeve, dark cuff, light glove"* is ALTERNATION; *"the boot takes
+// its own darkest tone"* is a RAMP, and the same paragraph prescribed one and built the
+// other. The ARM obeys it — `LIMB_MID` -> `LIMB_CHAR` -> `PEPPERONI` mitt (p50 0.317),
+// `elbowL|handL` dL 0.173. The LEG did not: `LIMB_MID` -> `LIMB_CHAR` -> `CRUST_CHAR`
+// put a third rung UNDER a rung that was already 0.098 of luma, and both rungs
+// therefore rendered as the same black. `kneeL|footL` measured **dL 0.0001 over 33
+// contacts**, which is one 39th of the 8-bit floor. See `BOOT_CRUST` and the boot's
+// call site in `dressLimbs`.
 /** Upper arm / thigh, and every joint ball. `LIMB_CHAR` stays on forearm and shin. */
 const LIMB_MID = '#6B3A16';
 const SAUCE = PALETTE.tomato;  // '#E63946' — thin margin peeking past the cheese
 const CHEESE = '#FFDE73';      // melted top layer — pushed brighter than the dough so it pops
 const PEPPERONI = '#A8301E';   // wet cured meat — the MITT, a step lighter than the cuff above it
-// Feet deliberately break from the crust family altogether — a charred-crust-bottom
-// brown, dark enough to be a real value drop against the pale CRUST limbs rather than
-// a slightly-darker shade of the same tan.
+// ⚠️ THE SENTENCE BELOW IS KEPT BECAUSE IT WAS TRUE AND THEN THE FRAME MOVED UNDER IT.
+// WAS: *"Feet deliberately break from the crust family altogether — a charred-crust-
+// bottom brown, dark enough to be a real value drop against the pale CRUST limbs
+// rather than a slightly-darker shade of the same tan."*
+// That was written when the limbs were `CRUST` (#F7CE86, luma 0.80). PASS 2 took the
+// lower limb to `LIMB_CHAR` #331C0D, and against THAT there is no drop left to make:
+// measured on the shipped tree, `kneeL` p50 **0.0982** and `footL` p50 **0.0983**.
+// See `buildCrustBoot` for what the boot is now and what the pair measures.
 const CRUST_CHAR = '#160A03';
+/**
+ * The boot UPPER. `PASS 2`'s own stated grammar is *"mid sleeve, dark cuff, light
+ * glove"* — alternation — and the ARM obeys it (`LIMB_MID` -> `LIMB_CHAR` ->
+ * `PEPPERONI` mitt, `elbowL|handL` dL 0.173). The LEG did not: `LIMB_MID` ->
+ * `LIMB_CHAR` -> `CRUST_CHAR` is a RAMP into black, and the third rung is
+ * indistinguishable from the second. This is the leg's light rung — the baked crust
+ * roll the head already wears at the base of the slice, so it repeats a colour this
+ * file declared rather than inventing a fourth brown.
+ */
+const BOOT_CRUST = CRUST_RIM;
 
 // ── Costume layer ────────────────────────────────────────────────────────────
 // A fresh independent art director named the missing costume/accessory layer as
@@ -262,19 +287,32 @@ function buildDoughMitt(R: number, side: 1 | -1, mat: THREE.Material): THREE.Gro
 }
 
 /**
- * A hearty charred-crust wedge boot: toe box + a proud sole plate + an ankle cuff
- * blending up into the shin — a real boot silhouette, not the rig's single blocky
- * wedge. `fw` is the foot-width scale the rig hands `dressLimbs` for this slot.
+ * A hearty crust wedge boot: toe box + a proud sole plate + an ankle cuff blending up
+ * into the shin — a real boot silhouette, not the rig's single blocky wedge. `fw` is
+ * the foot-width scale the rig hands `dressLimbs` for this slot.
+ *
+ * ⚠️ `bodyMat` is the UPPER and `trimMat` is the SOLE, and which tone goes in which
+ * slot is the whole of the `kneeL|footL` fix — see the call site in `dressLimbs`. The
+ * old wording is kept because it named the defect: *"a hearty CHARRED-crust wedge
+ * boot"*. Charring the upper is what made the boot the same value as the shin above
+ * it; the char belongs on the sole.
  */
 function buildCrustBoot(fw: number, bodyMat: THREE.Material, trimMat: THREE.Material): THREE.Group {
   const g = new THREE.Group();
+  // ⚠️ NAMED so `cf_ablate --names pizza_boot_upper --color <hex>` can sweep this
+  // albedo through the SHIPPED path with no source edit. Both meshes were anonymous,
+  // which is why the `kneeL|footL` collapse below had to be diagnosed from a metric
+  // instead of from a rendered candidate. Names are inert here — the only names the
+  // render path keys off are the `__outline` / `__no_outline` suffixes in `toon.ts`.
   const upper = new THREE.Mesh(roundedBox(fw * 0.92, fw * 0.62, fw * 1.30, fw * 0.22, 3), bodyMat);
+  upper.name = 'pizza_boot_upper';
   upper.position.set(0, -fw * 0.10, fw * 0.22);
   upper.castShadow = true;
   upper.receiveShadow = true;
   g.add(upper);
 
   const sole = new THREE.Mesh(roundedBox(fw * 1.02, fw * 0.22, fw * 1.55, fw * 0.10, 2), trimMat);
+  sole.name = 'pizza_boot_sole';
   sole.position.set(0, -fw * 0.46, fw * 0.30);
   sole.castShadow = true;
   sole.receiveShadow = true;
@@ -1534,6 +1572,7 @@ export class PizzaCharacter extends BaseCharacter {
     const doughDarkMat = toonMat({ color: LIMB_CHAR, roughness: 0.8 });
     const pepMat = glossyMat({ color: PEPPERONI, roughness: 0.18 });
     const charMat = toonMat({ color: CRUST_CHAR, roughness: 0.75 });
+    const bootMat = toonMat({ color: BOOT_CRUST, roughness: 0.72 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {
@@ -1607,7 +1646,40 @@ export class PizzaCharacter extends BaseCharacter {
           return taperedLimb(size.len, size.radius * 1.14, size.radius * 0.90, doughDarkMat, 16, size.len * 0.12);
         case 'footL':
         case 'footR':
-          return buildCrustBoot(size.len, charMat, doughDarkMat);
+          // ── 🔴 `kneeL|footL` dL 0.0001 OVER 33 CONTACTS — 8.1 pp OF A 16.7% FAIL ──
+          // WAS `buildCrustBoot(size.len, charMat, doughDarkMat)`: upper `CRUST_CHAR`
+          // (the darkest tone in the file) under a shin already at `LIMB_CHAR`, with
+          // the SOLE in the shin's own tone. So the boot's two rungs were "blacker
+          // than the shin" and "exactly the shin", and its whole-part median landed
+          // 0.0001 from the shin's. Rendered at the LOBBY camera the shin and the
+          // boot are one black mass with no ankle in it.
+          // Now: light crust upper, `CRUST_CHAR` SOLE PLATE. The roles are swapped,
+          // not removed — the character keeps its darkest tone (and therefore its
+          // `p05` dark anchor) on the sole, where a boot's dark actually belongs.
+          // MEASURED, `valuescan --mode chars --ids pizza`, paired under `headserve
+          // --ref 576d7fe` with this file as the only `--overlay`:
+          //
+          //   key                       before    after     gate
+          //   kneeL|footL dLcontact     0.0906 -> 0.2730    the STEERING number; the
+          //                                                 8-bit floor is 0.0039
+          //   kneeL|footL dL            0.0001 -> 0.4945    over 33 -> 35 contacts
+          //   footL p50                 0.0983 -> 0.5966    kneeL p50 0.0982 -> 0.1021
+          //   footL p10                 0.0690 -> 0.0588    the SOLE is now the
+          //                                                 darkest pixel on the model
+          //   weakBoundaryPct           16.67  -> 8.54      <= 15   🔴 FAIL -> PASS
+          //   steps@10                  6      -> 7         >= 6, reference MEDIAN 7
+          //   p05                       0.0946 -> 0.1115    <= 0.180
+          //   range                     0.8137 -> 0.7969    >= 0.636
+          //   figure/ground dL          0.3012 -> 0.3190
+          // ⚠️ `weakBoundaryPct` is NOT what this was steered on — it is a cliff and it
+          // produced a false FAIL and a false PASS in one run. It is quoted because it
+          // is the gate's verdict key, not because it drove the choice.
+          // 🚨 AND +1.1 pp OF THE 16.7 WAS A DENOMINATOR ARTEFACT, NOT A DEFECT: the
+          // neck migration (`a44d36d`) deleted two HEALTHY pairs (`neck|torso` dL 0.386
+          // over 18 contacts, `head|neck` 0.548 over 28), so contacts went 436 -> 408
+          // with the numerator unchanged. No pair's dL moved more than 0.0013. It was
+          // already 15.6 before the neck went; this pair was always the whole of it.
+          return buildCrustBoot(size.len, bootMat, charMat);
         default:
           return null;
       }
