@@ -36,13 +36,30 @@ const out = get('--out', 'shots/tier/colour');
 // A subset of `arena-scan.mjs`'s station list, coordinates copied verbatim: two lanes,
 // the hub, a pantry, an edge and a hazard. Six is enough to see a colour shift that is
 // global to the post chain, which is the only kind a tier can cause.
+/**
+ * ⚠️ RE-AIMED FOR THE ×4 MAP, 2026-08-11. WAS THE 1× TABLE, VERBATIM:
+ *   { id: 'spawn_west', x: 160, y: 500, fog: 850 },
+ *   { id: 'west_lane', x: 340, y: 500, fog: 850 },
+ *   { id: 'pot_diagonal', x: 570, y: 430, fog: 850 },
+ *   { id: 'pantry_ne', x: 1150, y: 330, fog: 850 },
+ *   { id: 'edge_west', x: 70, y: 500, fog: 850 },
+ *   { id: 'fryer_south', x: 560, y: 790, fog: 850 },
+ *
+ * `6631446` took the arena 1400×1000 → 2800×2000 and this copy did not follow, so all
+ * six stations sat in the **NW quadrant** of the shipped map — `west_lane` and
+ * `fryer_south` inside a `CoverBox`, where nothing can stand — and `fog: 850` was the 1×
+ * `MAX_SAFE_RADIUS` (the real one is 1985), which puts a fog wall through the frame.
+ * Coordinates below are `tools/arena-scan.mjs`'s current, `--selftest`-validated table
+ * for the same station ids; quadrant coverage is now NW 2 / NE 1 / SW 2 / SE 1.
+ * `tools/tmp/al_guard.mjs` fails on the old values.
+ */
 const STATIONS = [
-  { id: 'spawn_west', x: 160, y: 500, fog: 850 },
-  { id: 'west_lane', x: 340, y: 500, fog: 850 },
-  { id: 'pot_diagonal', x: 570, y: 430, fog: 850 },
-  { id: 'pantry_ne', x: 1150, y: 330, fog: 850 },
-  { id: 'edge_west', x: 70, y: 500, fog: 850 },
-  { id: 'fryer_south', x: 560, y: 790, fog: 850 },
+  { id: 'spawn_west', x: 300, y: 810, fog: 1985 },
+  { id: 'west_lane', x: 600, y: 1000, fog: 1985 },
+  { id: 'pot_diagonal', x: 1140, y: 940, fog: 1985 },
+  { id: 'pantry_ne', x: 2200, y: 500, fog: 1985 },
+  { id: 'edge_west', x: 70, y: 1000, fog: 1985 },
+  { id: 'fryer_south', x: 1400, y: 1450, fog: 1985 },
 ];
 const TIERS = ['high', 'medium', 'low'];
 

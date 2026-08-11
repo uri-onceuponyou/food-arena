@@ -100,7 +100,14 @@
  */
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i < 0 ? d : process.argv[i + 1]; };
 const BASE = arg('url', process.env.PREVIEW_BASE ?? 'http://localhost:5173');
-const STATION = arg('station', '560:900');
+// ⚠️ RE-AIMED FOR THE ×4 MAP, 2026-08-11 (`6631446` took the arena 1400×1000 →
+// 2800×2000; these defaults did not follow). `560:900` was the 1× grease puddle; `6955c04` then moved the puddle
+// itself to (1950,1100), so the default was stale to TWO commits at once.
+// Coordinates are `tools/arena-scan.mjs`'s current, --selftest-validated stations for
+// the same ids, and `fogRadius` is the shipped `maxSafeRadius` 1985 — the old 993 was
+// the 1× value, which puts a death-zone wall through the frame. `tools/tmp/al_guard.mjs`
+// fails on the old values.
+const STATION = arg('station', '1950:1100');
 const W = 1600, H = 900;
 
 /** Above this the question does not arise: nothing is authored to draw underneath a
@@ -188,7 +195,7 @@ const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftsha
 const p = await b.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 p.on('pageerror', (e) => console.error('PAGEERROR', String(e)));
 await p.route('**/@vite/client*', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: HMR_STUB }));
-await p.goto(`${BASE}/?player=hamburger&enemy=donut&px=${sx}&py=${sy}&fogRadius=993&simSpeed=0.02&pointerLock=0`, { waitUntil: 'networkidle', timeout: 90000 });
+await p.goto(`${BASE}/?player=hamburger&enemy=donut&px=${sx}&py=${sy}&fogRadius=1985&simSpeed=0.02&pointerLock=0`, { waitUntil: 'networkidle', timeout: 90000 });
 await p.waitForFunction('window.__gameReady === true', null, { timeout: 90000 });
 await p.waitForTimeout(1500);
 

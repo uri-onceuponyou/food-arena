@@ -494,7 +494,13 @@ if (has('ours')) {
   const OUT = `shots/contact/${TAG}`;
   const PLAYER = arg('player', 'hamburger');
   const ENEMY = arg('enemy', 'donut');
-  const STATIONS = arg('stations', '570:430,1150:420,340:500').split(',');
+  // ⚠️ RE-AIMED FOR THE ×4 MAP, 2026-08-11 (`6631446` took the arena 1400×1000 →
+  // 2800×2000; these defaults did not follow). **`340:500` sat inside a `freezer`.**
+  // Coordinates are `tools/arena-scan.mjs`'s current, --selftest-validated stations for
+  // the same ids, and `fogRadius` is the shipped `maxSafeRadius` 1985 — the old 993 was
+  // the 1× value, which puts a death-zone wall through the frame. `tools/tmp/al_guard.mjs`
+  // fails on the old values.
+  const STATIONS = arg('stations', '1140:940,2200:500,600:1000').split(',');
   const W = 1600, H = 900;
   await mkdir(OUT, { recursive: true });
 
@@ -585,7 +591,7 @@ if (has('ours')) {
     const p = await b.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
     p.on('pageerror', (e) => console.error('PAGEERROR', String(e)));
     await p.route('**/@vite/client*', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: HMR_STUB }));
-    await p.goto(`${BASE}/?player=${PLAYER}&enemy=${ENEMY}&px=${sx}&py=${sy}&fogRadius=993&simSpeed=0.02&pointerLock=0`, { waitUntil: 'networkidle', timeout: 90000 });
+    await p.goto(`${BASE}/?player=${PLAYER}&enemy=${ENEMY}&px=${sx}&py=${sy}&fogRadius=1985&simSpeed=0.02&pointerLock=0`, { waitUntil: 'networkidle', timeout: 90000 });
     await p.waitForFunction('window.__gameReady === true', null, { timeout: 90000 });
     await p.waitForTimeout(1800);
     const info = await p.evaluate(`(${INFO})(1.05)`);

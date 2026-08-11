@@ -86,7 +86,10 @@ const UA_IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleW
  */
 const STATIONS = [
   { id: 'hub', x: 1400, y: 1000 },      // the central stove hub + pot + service counters
-  { id: 'nw', x: 380, y: 380 },         // the walk-in freezer stack
+  // ⚠️ WAS `x: 380, y: 380` — **inside** the (300,300) freezer's collision box, so the
+  // station named for the freezer stack was standing in it and `escapeCover` moved the
+  // fighter before the shot. 120 wu east, which SEES the stack instead of occupying it.
+  { id: 'nw', x: 500, y: 400 },         // the walk-in freezer stack, seen from the east
   { id: 'pantry', x: 2350, y: 500 },    // crates, sacks, herb boxes
   { id: 'south', x: 1830, y: 1450 },    // spice carts, barrels, the chalkboard
 ];

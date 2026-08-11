@@ -390,9 +390,29 @@ const CENTRE = { x: 1400, y: 1000 };
  * against the dump for exactly that reason.
  */
 const MAX_SAFE_RADIUS = 1985;
-/** `kitchen.ts:784` — `puddleSouth` is dressed `M.grease`, `puddleNorth` is `M.water`. */
-const GREASE = { x: 1830, y: 1250 };
-const WATER = { x: 970, y: 750 };
+/**
+ * The two slow puddles. `kitchen.ts:901` — `puddleSouth` is dressed `M.grease`,
+ * `puddleNorth` is `M.water` (the north one is the 180° mirror, `ARENA_W/H − south`).
+ *
+ * ── ⚠️ OLD WORDING AND OLD VALUES, KEPT BECAUSE THEY ARE THE BUG ────────────────
+ *     `/** kitchen.ts:784 — puddleSouth is dressed M.grease, puddleNorth is M.water. *\/`
+ *     `const GREASE = { x: 1830, y: 1250 };`
+ *     `const WATER  = { x: 970,  y: 750  };`
+ *
+ * 🚨 **THOSE WERE A STALE COPY, AND THEY WENT STALE ELEVEN HOURS AFTER THIS FILE WAS
+ * RE-FIXTURED FOR THE ×4 MAP.** `6955c04` moved both puddles — *"both slow puddles were
+ * 20 wu inside a crate — 0 of 7,845 cells standable"* — from (1830,1250)/(970,750) to
+ * **(1950,1100)/(850,900)**. This file's copies did not follow, so its three hazard
+ * stations were aimed **165 and 190 wu off the puddle they are named for**, and nothing
+ * went red: `--selftest` cross-checked `COVER`, `ENEMY_SPAWN` and `MAX_SAFE_RADIUS`
+ * against the dump and **never checked these two**. Same class as the ×4 pass, one
+ * commit later, in the file that pass had just finished fixing.
+ *
+ * Now asserted against `tools/arena.gameplay.json`'s `slow` hazards in `--selftest` §F,
+ * exactly as `COVER` is, so the next move cannot be silent.
+ */
+const GREASE = { x: 1950, y: 1100 };
+const WATER = { x: 850, y: 900 };
 const PLAYER_SIZE = 42;           // rules.ts; the fighter's collision box
 
 /**
@@ -629,7 +649,16 @@ const STATIONS = [
   //    fills its share of the frame, and its note NO LONGER CLAIMS a slowed-player read —
   //    a station note that describes a state the map cannot produce is the same class of
   //    lie as a stale fixture.
-  { id: 'grease_in',     x: GREASE.x, y: GREASE.y - 75, fog: MAX_SAFE_RADIUS, note: 'the grease puddle at the closest standable ground — 75 wu out, because its centre is buried under three props' },
+  //
+  // ✅ **AND THAT DEFECT IS NOW FIXED, SO THE WORKAROUND IS GONE.** `6955c04` moved both
+  //    puddles clear of the crates: **7,845 of 7,845 cells inside each 50 wu disc are
+  //    standable** for a 42 wu body, re-measured here against the corrected centres. The
+  //    `− 75` offset existed only because the centre was unreachable, so it is dropped and
+  //    the station stands IN the grease again, which is what its id always claimed.
+  //    The paragraph above is kept because it is the reason the offset existed at all.
+  //    WAS: `{ x: GREASE.x, y: GREASE.y - 75, … note: 'the grease puddle at the closest
+  //          standable ground — 75 wu out, because its centre is buried under three props' }`
+  { id: 'grease_in',     x: GREASE.x, y: GREASE.y, fog: MAX_SAFE_RADIUS, note: 'standing in the grease puddle — reachable again since 6955c04 moved it clear of the crates' },
   { id: 'water_near',    x: WATER.x + 90, y: WATER.y + 130, fog: MAX_SAFE_RADIUS, note: 'water puddle off-centre, as you approach it' },
   // ── the closing fog death zone ─────────────────────────────────────────────
   //
@@ -1961,6 +1990,17 @@ async function modeSelftest() {
       check('COVER has the same number of boxes as the dump', COVER.length, dump.cover.length);
       check('ENEMY_SPAWN matches the dump', `${ENEMY_SPAWN.x},${ENEMY_SPAWN.y}`, `${dump.enemySpawn.x},${dump.enemySpawn.y}`);
       check('MAX_SAFE_RADIUS matches the dump', MAX_SAFE_RADIUS, dump.maxSafeRadius);
+      // 🚨 ADDED 2026-08-11. `GREASE`/`WATER` are a second source of truth for the two
+      // slow hazards in exactly the way `COVER` is for the boxes — and they were the ONE
+      // hand-copied table this block did not check, so `6955c04`'s puddle move left three
+      // stations aimed 165/190 wu off the thing they are named for while §F stayed green.
+      // The `slow` pair is sorted by x so the assertion does not depend on dump order.
+      const slow = dump.hazards.filter((h) => h.kind === 'slow').sort((a, b) => a.x - b.x);
+      check('there are exactly two `slow` hazards to bind GREASE/WATER to', slow.length, 2);
+      if (slow.length === 2) {
+        check('WATER matches the dump\'s north/west slow puddle', `${WATER.x},${WATER.y}`, `${slow[0].x},${slow[0].y}`);
+        check('GREASE matches the dump\'s south/east slow puddle', `${GREASE.x},${GREASE.y}`, `${slow[1].x},${slow[1].y}`);
+      }
     } else {
       console.log('  ⚠ tools/arena.gameplay.json absent — cross-check skipped');
     }

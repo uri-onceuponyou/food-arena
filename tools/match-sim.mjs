@@ -1070,11 +1070,19 @@ if (args.occlusion) {
 
   // Weight positions by whether they are inside the safe ring at three moments of
   // the match, because "where people stand" is not uniform — the fog decides it.
-  const rings = [
-    { name: 't=0s   R=890', R: arena.maxSafeRadius },
-    { name: 't=90s  R=445', R: arena.maxSafeRadius * 0.5 },
-    { name: 't=140s R=198', R: arena.maxSafeRadius * 0.22 },
-  ];
+  // ⚠️ THE RADII WERE ALWAYS DERIVED; THE LABELS WERE NOT, AND BOTH HALVES WENT STALE.
+  //   WAS: 't=0s   R=890' / 't=90s  R=445' / 't=140s R=198'
+  // `890` is the 1× map's `maxSafeRadius` (the shipped one is 1985, so every printed
+  // radius was 2.2× the label) and `90 s`/`140 s` are points on the 180 s clock, which
+  // has been **45 s** since 2026-08-05 — so two of the three rows were labelled with
+  // moments that occur after the match has ended. A derived value under a literal label
+  // is the worst of both: the number moves, the caption does not, and the caption is
+  // what a reader quotes. Both are computed now, from the same two constants.
+  const RING_FRACTIONS = [1, 0.5, 0.22];
+  const rings = RING_FRACTIONS.map((f) => ({
+    name: `t=${Math.round(MATCH_DURATION_MS / 1000 * (1 - f))}s R=${Math.round(arena.maxSafeRadius * f)}`,
+    R: arena.maxSafeRadius * f,
+  }));
 
   console.log(`\n══ COVER OCCLUSION — fraction of firing directions blocked before max reach ══`);
   console.log(`   ${arena.cover.length} cover boxes, ${(arena.cover.reduce((a, c) => a + c.w * c.h, 0) / (arena.width * arena.height) * 100).toFixed(1)}% of the floor is solid\n`);

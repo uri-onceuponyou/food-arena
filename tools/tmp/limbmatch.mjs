@@ -87,16 +87,34 @@ export const injectQuery=(u)=>u; export const updateStyle=noop; export const rem
 export const ErrorOverlay=class{}; export default {};`;
 
 /**
- * `tools/arena-scan.mjs`'s CORRECTED coordinates — not `valuescan`'s, which had
- * copied five station names from before `60c5b92` and kept coordinates that land
- * inside a `CoverBox`. `pot_south` (the default here) was never one of them.
+ * ⚠️ OLD WORDING, AND IT WAS TRUE WHEN WRITTEN AND FALSE BY THE TIME IT MATTERED:
+ *
+ *   *"`tools/arena-scan.mjs`'s CORRECTED coordinates — not `valuescan`'s, which had
+ *   copied five station names from before `60c5b92` and kept coordinates that land
+ *   inside a `CoverBox`. `pot_south` (the default here) was never one of them."*
+ *
+ *   const MAX_SAFE_RADIUS = 850;
+ *   spawn_west: { x: 160, y: 390 }, pot_south: { x: 700, y: 640 },
+ *   hub_north:  { x: 700, y: 320 }, west_lane: { x: 340, y: 500 },
+ *
+ * 🚨 **A COMMENT THAT SAYS "CORRECTED" IS A CLAIM WITH A TIMESTAMP ON IT, AND THIS ONE
+ * OUTLIVED ITS MAP.** Those were arena-scan's corrected **1×** coordinates; `6631446`
+ * doubled the arena and this copy did not follow. On the shipped 2800×2000 map all four
+ * sit in the NW quadrant and **`pot_south` — the default station, the one nearly every
+ * limbmatch run has used — is inside a `prep_counter`**, with `west_lane` inside a
+ * `freezer`. The irony is exact: this table was written to avoid inheriting `valuescan`'s
+ * stale copy and became one, by the same mechanism, one map change later.
+ *
+ * `850` was the 1× `MAX_SAFE_RADIUS`; the shipped one is 1985. Coordinates below are
+ * arena-scan's CURRENT table (whose `--selftest` §F pins them to legal ground and to
+ * ≥4 stations per quadrant), and `tools/tmp/al_guard.mjs` fails on the old ones.
  */
-const MAX_SAFE_RADIUS = 850;
+const MAX_SAFE_RADIUS = 1985;   // arena-scan.mjs:392, == the dump's maxSafeRadius
 const STATIONS = {
-  spawn_west: { x: 160, y: 390, fog: MAX_SAFE_RADIUS },
-  pot_south: { x: 700, y: 640, fog: MAX_SAFE_RADIUS },
-  hub_north: { x: 700, y: 320, fog: MAX_SAFE_RADIUS },
-  west_lane: { x: 340, y: 500, fog: MAX_SAFE_RADIUS },
+  spawn_west: { x: 300, y: 810, fog: MAX_SAFE_RADIUS },
+  pot_south: { x: 1400, y: 1200, fog: MAX_SAFE_RADIUS },
+  hub_north: { x: 1400, y: 780, fog: MAX_SAFE_RADIUS },
+  west_lane: { x: 600, y: 1000, fog: MAX_SAFE_RADIUS },
 };
 
 const JOINTS = ['face', 'head', 'neck', 'torso', 'hips', 'shoulderL', 'shoulderR',

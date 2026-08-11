@@ -692,6 +692,72 @@ async function crop(page, path, centre) {
 
 const hueDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
 
+/**
+ * ── SWAP, AS A DISCRIMINATIVE TEST. THE ABSOLUTE ONE WAS MEASURING TWO DIFFERENT
+ *    QUANTITIES AND CALLING THEM ONE. ─────────────────────────────────────────────
+ *
+ * WAS:
+ *   SWAP: !!(cloth && cloth.bg && clothColor
+ *     && hueDist(cloth.bg.hue, clothColor.hue) < 12
+ *     && Math.abs(cloth.bg.luma - clothColor.luma) < 0.06),
+ *
+ * 🚨 **12 of 22 FAIL, AND 11 OF THE 12 FAIL ON THE LUMA ARM ALONE, ALL WITH THE SAME
+ * SIGN.** Re-read off the completed 23-weapon run (`shots/hl/sweep/hl_sweep.p58.json`,
+ * 2.9 h on a snapshot of `af35362`):
+ *
+ *   * hue passes on **22 of 23** — worst 4.3° against a 12° tolerance;
+ *   * `bg.luma − clothColor.luma` is **positive on 21 of 23**, spread **+0.029 … +0.074**,
+ *     median +0.047. It is ONE continuous population and the 0.06 threshold cuts through
+ *     the middle of it. Rows landed either side by as little as 0.001.
+ *
+ * The cause is that the two numbers are not comparable: `cloth.bg.luma` is measured off
+ * the **rendered frame** — lit, tone-mapped, with the rim term — while `clothColor()`
+ * returns the **material's own colour**. A lit surface reads brighter than its base
+ * colour, by an amount that depends on how much of the patch the mask happens to cover.
+ * The old test therefore asked "is the render equal to the material?", which is false by
+ * construction, and its threshold was a bias-bracket rather than a decision boundary.
+ *
+ * ⚠️ **AND IT WAS NEVER TESTING WHAT ITS OWN DOC SAYS IT TESTS** — *"a patch that silently
+ * failed to move produces a complete confident answer"*. That is a question about WHICH of
+ * two known surfaces the background is, and the answer to it is a **nearest-match**, not a
+ * tolerance: the background must be closer to the cloth than to `home`. Both candidates
+ * are then measured through the same rendered pipeline, so the lit-surface offset cancels
+ * instead of being budgeted for.
+ *
+ * Replayed over the same 23 recorded rows (`--replay`, which is how this claim is checked
+ * without spending 2.9 h of browser): **12 fail → 1**, and the margin stops being marginal
+ * — the tightest passing row is **7.0×** and the one remaining failure is 3.1× the other
+ * way with a 23.6° hue error. A threshold that separated its population by 0.001 now
+ * separates it by a factor of seven.
+ *
+ * 🔴 **THE SURVIVOR IS REAL AND IS NOT WAVED THROUGH: `waterbottle.Cap`.** dHue **23.6°**,
+ * and it is the only sizeable NEGATIVE luma delta (−0.0845) — the opposite sign from every
+ * other row, so it is not the bias this fix removes. Its own numbers say why: `dist` is
+ * **104.5 wu** against 28.4 for the next weapon and it flies **4 live pellets**, while the
+ * patch it is moved onto is a 130 wu `plate_stack`. The mask overruns the patch and part
+ * of it samples floor. That is a COVERAGE defect in the harness, not in the fix, and
+ * closing it needs a browser run to verify — so it is left red and named.
+ *
+ * `axisScale` normalises each axis by its own historical tolerance so hue and luma are
+ * comparable, and the two constants are the very ones the old test used.
+ */
+const HUE_TOL = 12, LUMA_TOL = 0.06;
+const colourDist = (bg, ref) =>
+  Math.hypot(hueDist(bg.hue, ref.hue) / HUE_TOL, (bg.luma - ref.luma) / LUMA_TOL);
+
+/**
+ * @returns {{ok: boolean, why: string}} — `why` is printed on failure, because "FAIL" on
+ * a control that has been wrong once already is not a useful thing to hand the next agent.
+ */
+export function swapControl(clothBg, clothColor, homeBg) {
+  if (!clothBg || !clothColor || !homeBg) return { ok: false, why: 'no cloth station measured' };
+  const hue = hueDist(clothBg.hue, clothColor.hue);
+  if (hue >= HUE_TOL) return { ok: false, why: `bg hue ${clothBg.hue.toFixed(1)}° is ${hue.toFixed(1)}° from the cloth's ${clothColor.hue.toFixed(1)}° (tol ${HUE_TOL}°)` };
+  const dc = colourDist(clothBg, clothColor), dh = colourDist(clothBg, homeBg);
+  if (!(dc < dh)) return { ok: false, why: `bg is nearer HOME than the cloth (d_cloth ${dc.toFixed(2)} vs d_home ${dh.toFixed(2)}) — the patch did not take` };
+  return { ok: true, why: `d_cloth ${dc.toFixed(2)} vs d_home ${dh.toFixed(2)} — ${(dh / dc).toFixed(1)}× nearer the cloth` };
+}
+
 /** One station: baseline + every candidate + the pictures. */
 async function station(page, tag, ctx) {
   const base = await page.evaluate(() => window.__hl.measure());
@@ -754,8 +820,7 @@ async function runWeapon(page, charId, w, dir) {
   const controls = {
     N: home.base.n >= 20,
     A: home.hidden.n === 0 && (!cloth || cloth.hidden.n === 0),
-    SWAP: !!(cloth && cloth.bg && clothColor
-      && hueDist(cloth.bg.hue, clothColor.hue) < 12 && Math.abs(cloth.bg.luma - clothColor.luma) < 0.06),
+    SWAP: swapControl(cloth?.bg, clothColor, home.bg).ok,
     DIFF: !!(cloth && cloth.bg && home.bg
       && (hueDist(cloth.bg.hue, home.bg.hue) > 8 || Math.abs(cloth.bg.luma - home.bg.luma) > 0.05)),
     PAIR: home.base.n >= 20 && home.pair.n === home.base.n && home.pair.deMed === home.base.deMed,
@@ -775,6 +840,7 @@ async function runWeapon(page, charId, w, dir) {
     pitch: PITCH, aim: { dx: AIM_DX, dy: AIM_DY }, split: SPLIT,
     dist: census.distUnits[0], haloHex: census.haloHex, concealCount: census.conceal.length, counts,
     move: mv, clothColor,
+    swapWhy: swapControl(cloth?.bg, clothColor, home.bg).why,
     settleDrift: { dn: settle.n - home.base.n, dde: +((settle.deMed ?? 0) - (home.base.deMed ?? 0)).toFixed(6) },
     pairDrift: { dn: home.pair.n - home.base.n, dde: +(home.pair.deMed - home.base.deMed).toFixed(6) },
     restoreDrift: { dn: homeAgain.n - home.base.n, dde: +(homeAgain.deMed - home.base.deMed).toFixed(6) },
@@ -993,6 +1059,78 @@ function summary(results) {
   }
 }
 
+/**
+ * ── `--replay <run.json>` — RE-JUDGE A RECORDED RUN, OFFLINE, IN A SECOND ──────────
+ *
+ * This tool is **~7 min per weapon under SwiftShader, ~2.9 h for all 23**, and its own
+ * history is a sequence of claims made from partial reads of long runs: a *"6 of the
+ * first 6"* that turned out to be five of the twelve, and *"the corpus is empty"* when it
+ * was merely unpartitioned. **A partial read of a long run is a different quantity from
+ * the run**, and the fix for that is not discipline, it is a mode that re-evaluates the
+ * *whole* recorded run in a second.
+ *
+ * Every control that is a pure function of what the row already stores is recomputed
+ * here, so a change to a predicate can be judged against **the same 23 rows** the old one
+ * was judged on, before anyone spends the 2.9 h.
+ *
+ *   node tools/tmp/hl_sweep.mjs --replay shots/hl/sweep/hl_sweep.p58.json
+ */
+async function replay(file) {
+  const raw = JSON.parse(await readFile(resolve(file), 'utf8'));
+  const rows = (Array.isArray(raw) ? raw : (raw.rows ?? raw.results ?? Object.values(raw)))
+    .filter((r) => r && r.controls && r.cloth && r.home);
+  // ⚠️ Assert the set is NON-EMPTY before asserting over it — `[].every()` is `true`, and
+  // three controls in this repo went vacuous through exactly that door in one session.
+  if (rows.length === 0) {
+    console.error(`hl_sweep --replay: ${file} holds no rows with a cloth station. Nothing to judge.`);
+    process.exitCode = 1;
+    return;
+  }
+  let was = 0, now = 0;
+  console.log(`\n── SWAP replayed over ${rows.length} recorded rows from ${file}\n`);
+  for (const r of rows) {
+    const v = swapControl(r.cloth.bg, r.clothColor, r.home.bg);
+    if (r.controls.SWAP) was++;
+    if (v.ok) now++;
+    const changed = r.controls.SWAP !== v.ok ? (v.ok ? '  ← FIXED' : '  ← REGRESSED') : '';
+    console.log(`  ${(v.ok ? 'PASS' : 'FAIL').padEnd(5)}${pad(`${r.char}.${r.weapon}`, 22)}`
+      + `was ${r.controls.SWAP ? 'PASS' : 'FAIL'}   ${v.why}${changed}`);
+  }
+  console.log(`\n  SWAP: recorded ${was}/${rows.length} pass → replayed ${now}/${rows.length} pass`);
+
+  /**
+   * 🚨 THE KNOWN-BAD, ON EVERY ROW, BECAUSE A CONTROL THAT ONLY EVER PASSES IS NOT A
+   * CONTROL — and the failure mode this arm exists for is *"the patch silently failed to
+   * move"*. So feed it exactly that: the cloth station's background replaced by the HOME
+   * background, which is what would be measured if `moveClothUnderProjectile` no-opped.
+   * ⚠️ The old absolute test would have passed several of these outright, because it never
+   * looked at `home` at all — it asked only whether the reading was near the cloth's
+   * material colour, and a `home` reading that happened to be within 0.06 luma of it
+   * satisfied that. The nearest-match formulation cannot: `d(home, home)` is zero.
+   */
+  const kb = rows.map((r) => swapControl(r.home.bg, r.clothColor, r.home.bg));
+  const kbPass = kb.filter((v) => v.ok).length;
+  console.log(`  KNOWN-BAD  the patch never moved (cloth bg := home bg): `
+    + `${kbPass === 0 ? `all ${rows.length} rows go RED ✅` : `🔴 ${kbPass} of ${rows.length} STILL PASS`}`);
+  if (kbPass) process.exitCode = 1;
+  // ...and the paired positive control, so "everything fails" cannot masquerade as rigour.
+  const posPass = rows.filter((r) => swapControl(r.cloth.bg, r.clothColor, r.home.bg).ok).length;
+  console.log(`  CONTROL    the real cloth reading still passes on ${posPass} of ${rows.length} `
+    + `— the arm discriminates rather than rejecting everything`);
+  if (posPass === 0) process.exitCode = 1;
+  // The controls that are not being changed must replay IDENTICALLY. Without this the
+  // replay could "fix" SWAP by having quietly re-read a different file.
+  const others = ['N', 'A', 'DIFF', 'PAIR', 'RESTORE', 'NULL', 'PIX'];
+  for (const k of others) {
+    const n = rows.filter((r) => r.controls[k]).length;
+    console.log(`  ${k.padEnd(8)} ${n}/${rows.length} (unchanged by this pass)`);
+  }
+  process.exitCode = now === rows.length ? 0 : 1;
+}
+
 /** IS_MAIN guard — `docs/AGENT-BRIEF.md` §3. */
 const IS_MAIN = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
-if (IS_MAIN) await main();
+if (IS_MAIN) {
+  if (args.replay) await replay(String(args.replay));
+  else await main();
+}

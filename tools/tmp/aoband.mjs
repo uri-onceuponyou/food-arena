@@ -302,7 +302,14 @@ const sharp = (await import('sharp')).default;
 // accident. Environment first, flag second, shared dev server never by default.
 const BASE = arg('url', null) && !arg('url').startsWith('$') ? arg('url') : (process.env.PREVIEW_BASE || 'http://localhost:5173');
 const OUT = arg('out', 'shots/arena/aoband');
-const STATIONS = arg('stations', '570:430,1150:420,340:500').split(',');
+// ⚠️ RE-AIMED FOR THE ×4 MAP, 2026-08-11 (`6631446` took the arena 1400×1000 →
+// 2800×2000; these defaults did not follow). **`340:500` sat inside a `freezer` and 1,172 wu from centre**, so the
+// gate photographed a fighter buried in a prop inside the fog.
+// Coordinates are `tools/arena-scan.mjs`'s current, --selftest-validated stations for
+// the same ids, and `fogRadius` is the shipped `maxSafeRadius` 1985 — the old 993 was
+// the 1× value, which puts a death-zone wall through the frame. `tools/tmp/al_guard.mjs`
+// fails on the old values.
+const STATIONS = arg('stations', '1140:940,2200:500,600:1000').split(',');
 const PLAYER = arg('player', 'hamburger');
 const NULLRUN = has('null');
 const HMR_STUB = `const noop=()=>{};export const createHotContext=()=>({accept:noop,acceptExports:noop,dispose:noop,prune:noop,invalidate:noop,on:noop,off:noop,send:noop,decline:noop,data:{}});export const injectQuery=(u)=>u;export const updateStyle=noop;export const removeStyle=noop;export const ErrorOverlay=class{};export default {};`;
@@ -371,7 +378,7 @@ for (const st of STATIONS) {
   const [sx, sy] = st.split(':').map(Number);
   const p = await b.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   await p.route('**/@vite/client*', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: HMR_STUB }));
-  await p.goto(`${BASE}/?player=${PLAYER}&enemy=donut&px=${sx}&py=${sy}&fogRadius=993&simSpeed=0.02&pointerLock=0`, { waitUntil: 'networkidle', timeout: 90000 });
+  await p.goto(`${BASE}/?player=${PLAYER}&enemy=donut&px=${sx}&py=${sy}&fogRadius=1985&simSpeed=0.02&pointerLock=0`, { waitUntil: 'networkidle', timeout: 90000 });
   await p.waitForFunction('window.__gameReady === true', null, { timeout: 90000 });
   await p.waitForTimeout(1500);
   const info = await p.evaluate(`(${SCENE})()`);

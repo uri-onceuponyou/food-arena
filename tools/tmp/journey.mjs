@@ -52,7 +52,7 @@
  */
 
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { settleScreen, captureSettled, describe } from './settle.mjs';
 
 const LAUNCH_ARGS = [
@@ -78,7 +78,18 @@ const VIEWPORTS = {
 const VP = VIEWPORTS[VIEWPORT_NAME];
 if (!VP) { console.error(`unknown --viewport ${VIEWPORT_NAME}; have ${Object.keys(VIEWPORTS)}`); process.exit(2); }
 
-const ARENA = { cx: 700, cy: 500, potR: 95 };
+/**
+ * ⚠️ WAS `const ARENA = { cx: 700, cy: 500, potR: 95 };` — **the 1× map's centre.**
+ * `6631446` moved it to (1400,1000), so the scripted hands here ran the fog-avoidance
+ * leg (`dc > R - 30 → head for the centre`) toward a point **1,077 wu inside the NW
+ * quadrant**, and the pot-orbit leg circled 95 wu of open floor with no pot in it.
+ * Read from the dump so the next map change carries it. `potR` is the `damage` hazard's
+ * own radius, taken from the same file rather than repeated.
+ */
+const ARENA_DUMP = JSON.parse(readFileSync(new URL('../arena.gameplay.json', import.meta.url), 'utf8'));
+const POT = ARENA_DUMP.hazards.find((h) => h.kind === 'damage');
+if (!POT) throw new Error('journey: no `damage` hazard in tools/arena.gameplay.json — refusing to guess the pot');
+const ARENA = { cx: ARENA_DUMP.center.x, cy: ARENA_DUMP.center.y, potR: POT.radius };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // results

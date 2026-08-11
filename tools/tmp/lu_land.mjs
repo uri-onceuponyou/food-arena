@@ -99,7 +99,11 @@ async function probe(browser, vp, { touch, notch, knownBad }) {
   const page = await ctx.newPage();
   const errs = [];
   page.on('pageerror', (e) => errs.push(String(e)));
-  await page.goto(`${BASE}/?player=hamburger&enemy=donut&px=340&py=500&fogRadius=850&simSpeed=0.02&pointerLock=0`,
+  // ⚠️ RE-AIMED 2026-08-11. WAS `px=340&py=500&fogRadius=850` — the 1× map's `west_lane`
+  // and the 1× `maxSafeRadius`. On the shipped 2800×2000 map that point is **inside a
+  // `freezer` CoverBox** and **1,172 wu from centre against an 850 wu ring**, so this
+  // registered gate has been photographing a fighter buried in a prop, in the death zone.
+  await page.goto(`${BASE}/?player=hamburger&enemy=donut&px=600&py=1000&fogRadius=1985&simSpeed=0.02&pointerLock=0`,
     { waitUntil: 'domcontentloaded', timeout: 90_000 });
   await page.waitForFunction('window.__gameReady === true', null, { timeout: 120_000 });
   await page.waitForFunction(() => window.__matchDebug?.phase === 'playing', null, { timeout: 120_000 });

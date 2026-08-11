@@ -141,7 +141,23 @@ const TOUCH = has('--touch');
  * is the arena pass's call and `sim.ts` throws rather than inventing a ring. A measuring
  * fixture, not a spawn policy; nothing shipped reads it.
  */
-const CENTER = { x: 700, y: 500 };
+/**
+ * ⚠️ WAS `const CENTER = { x: 700, y: 500 };` — **the 1× map's centre**, 1,077 wu from the
+ * shipped one.
+ *
+ * 🚨 This is `np_nfighter`'s defect, in the file that says on the line above that it was
+ * *"lifted verbatim from `np_nfighter.mjs`"*. That tool was fixed (DECISIONS §65: *"62
+ * passed, 0 failed with its measuring ring 1,077 wu off centre"*); **the copy was not**,
+ * and this file is a REGISTERED GATE, so it has been green the whole time.
+ *
+ * The consequence is not cosmetic. `rosterParam` lays the cast on a 190 wu ring about
+ * this point and the probe loads `?fogRadius=900`; measured against the shipped arena,
+ * **two of the six seats land 1,021 and 1,036 wu from the true centre — outside the
+ * requested ring, taking 50 HP/s from the first tick**, with the death-zone wash over
+ * the frame this tool exists to photograph. Re-centred, all six are inside the ring and
+ * clear of every `CoverBox`.
+ */
+const CENTER = { x: 1400, y: 1000 };   // tools/arena.gameplay.json `center`
 const RING = 190;
 const CAST = ['hamburger', 'donut', 'taco', 'egg', 'sushi', 'pizza'];
 const rosterParam = (n) => CAST.slice(0, n).map((id, i) => {

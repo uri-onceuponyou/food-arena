@@ -279,7 +279,7 @@ for (const [n, st] of [[2, S2], [6, S6]]) {
   st.fighters[0].y = NaN;
   st.fighters[1].regenTimer = Infinity;
   st.fighters[2].fogTimer = undefined;
-  st.fighters[3].characterId = ' pretending-to-be-a-token';
+  st.fighters[3].characterId = '\u0000pretending-to-be-a-token';
   const rt = decodeMatchState(encodeMatchState(st), ARENA);
   ok('C12 -0 survives as -0', Object.is(rt.fighters[0].x, -0));
   ok('C13 NaN survives as NaN', Number.isNaN(rt.fighters[0].y));
@@ -287,7 +287,7 @@ for (const [n, st] of [[2, S2], [6, S6]]) {
   ok('C15 a PRESENT undefined stays present-and-undefined',
     'fogTimer' in rt.fighters[2] && rt.fighters[2].fogTimer === undefined);
   ok('C16 a string that looks like a wire token is escaped and restored',
-    rt.fighters[3].characterId === ' pretending-to-be-a-token');
+    rt.fighters[3].characterId === '\u0000pretending-to-be-a-token');
   // KNOWN-BAD for all five: JSON destroys every one of them.
   const jrt = JSON.parse(JSON.stringify(st));
   ok('C17 KNOWN-BAD  JSON turns -0 into +0, NaN into null and drops a present undefined',

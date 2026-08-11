@@ -73,17 +73,40 @@ const W = Number(args.w ?? 1600), H = Number(args.h ?? 900);
 const SHOTS = Number(args.shots ?? 4);
 const GAP_MS = Number(args.gap ?? 220);
 const SIM_SPEED = args['sim-speed'] ?? '0.02';
-const MAX_SAFE_RADIUS = 993;   // mirrors arena-scan.mjs
+// ⚠️ WAS `const MAX_SAFE_RADIUS = 993;   // mirrors arena-scan.mjs`. **993 is the 1× map's
+// value under the current 45 s clock** — `shared.ts` derives it as `860.23 / (1 − 6/45)`,
+// and 860.23 is the 1400×1000 half-diagonal. The mirror stopped mirroring at `6631446`;
+// arena-scan.mjs:392 has said 1985 since. Verified against `tools/arena.gameplay.json`.
+const MAX_SAFE_RADIUS = 1985;  // mirrors arena-scan.mjs:392 and the dump's maxSafeRadius
 
 /** The three fog stations, plus two `arena-scan` stations that are KNOWN STILL.
  *  Coordinates copied from `tools/arena-scan.mjs`'s STATIONS — same frames, so the
  *  numbers here are about the same samples the colour baseline is built from. */
+/**
+ * ⚠️ RE-AIMED FOR THE ×4 MAP AND FOR SUDDEN DEATH, 2026-08-11. WAS:
+ *   { id: 'pot_south',    x: 700,  y: 640, fog: MAX_SAFE_RADIUS, expect: 'still' },
+ *   { id: 'spawn_west',   x: 160,  y: 390, fog: MAX_SAFE_RADIUS, expect: 'still' },
+ *   { id: 'fog_boundary', x: 1090, y: 500, fog: 420, expect: 'fog' },
+ *   { id: 'fog_inside',   x: 1240, y: 500, fog: 420, expect: 'fog' },
+ *   { id: 'fog_late',     x: 700,  y: 340, fog: 200, expect: 'fog' },
+ *
+ * TWO independent invalidations, both silent:
+ *   1. `6631446` doubled the map; every coordinate above is a 1× one, all five landed in
+ *      the NW quadrant, and `pot_south` (700,640) is inside a `prep_counter`.
+ *   2. `DECISIONS §2` abolishes the ring at 30 s, so `match.ts:applyQaSetup` SNAPS any
+ *      `fogRadius` at or below **661.67 wu** to sudden death — a full-arena violet wash.
+ *      The three `expect: 'fog'` rows asked for 420/420/200, so **all three were
+ *      photographing the same sudden-death frame**, not three points on a ring. This
+ *      file's whole subject is whether those frames are STILL; it was measuring a frame
+ *      the schedule cannot produce.
+ * Coordinates and radii below are `tools/arena-scan.mjs`'s current fog stations.
+ */
 const STATIONS = [
-  { id: 'pot_south',    x: 700,  y: 640, fog: MAX_SAFE_RADIUS, expect: 'still' },
-  { id: 'spawn_west',   x: 160,  y: 390, fog: MAX_SAFE_RADIUS, expect: 'still' },
-  { id: 'fog_boundary', x: 1090, y: 500, fog: 420, expect: 'fog' },
-  { id: 'fog_inside',   x: 1240, y: 500, fog: 420, expect: 'fog' },
-  { id: 'fog_late',     x: 700,  y: 340, fog: 200, expect: 'fog' },
+  { id: 'pot_south',    x: 1400, y: 1200, fog: MAX_SAFE_RADIUS, expect: 'still' },
+  { id: 'spawn_west',   x: 300,  y: 810,  fog: MAX_SAFE_RADIUS, expect: 'still' },
+  { id: 'fog_boundary', x: 2210, y: 1000, fog: 840, expect: 'fog' },
+  { id: 'fog_inside',   x: 2360, y: 1000, fog: 840, expect: 'fog' },
+  { id: 'fog_late',     x: 740,  y: 1000, fog: 700, expect: 'fog' },
 ];
 
 const HMR_STUB = `const noop=()=>{};

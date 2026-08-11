@@ -39,11 +39,20 @@
  *     consistent, repeatable pair of hands — not a skill benchmark.
  *
  * ── Use ─────────────────────────────────────────────────────────────────────
- *   URL=$(node tools/snapshot.mjs --json | python3 -c "import json,sys;print(json.load(sys.stdin)['url'])")
- *   node tools/match-play.mjs --url $URL --out shots/match/run1
- *   node tools/match-play.mjs --url $URL --direct --player sushi --enemy sushi --out shots/match/sushi
- *   node tools/match-play.mjs --url $URL --direct --policy idle --out shots/match/stall
- *   node tools/match-play.mjs --url $URL --fogRadius 120 --out shots/match/endgame  # jump to the squeeze
+ *   node tools/tmp/with_snapshot.mjs -- node tools/match-play.mjs --url '{URL}' --out shots/match/run1
+ *   node tools/tmp/with_snapshot.mjs -- node tools/match-play.mjs --url '{URL}' --direct --player sushi --enemy sushi --out shots/match/sushi
+ *   node tools/tmp/with_snapshot.mjs -- node tools/match-play.mjs --url '{URL}' --direct --policy idle --out shots/match/stall
+ *   node tools/tmp/with_snapshot.mjs -- node tools/match-play.mjs --url '{URL}' --fogRadius 700 --out shots/match/endgame  # jump to the squeeze
+ *
+ * ⚠️ THE OLD FIRST LINE HERE WAS THE HANG THIS PROJECT DOCUMENTS AND BANS:
+ *   `URL=$(node tools/snapshot.mjs --json | python3 -c "...")`
+ * `--json` **does not exit**, so `$(...)` blocks forever and reads exactly like a hung
+ * build (CLAUDE.md non-negotiable #2). The placeholder in `with_snapshot` is literally
+ * `{URL}` and it injects `PREVIEW_BASE` into the child for you.
+ *
+ * ⚠️ AND `--fogRadius 120` WAS UNREACHABLE. `match.ts:applyQaSetup` snaps any request at
+ * or below the lowest scheduled radius (**661.67 wu** on the shipped map) to SUDDEN
+ * DEATH — a full-arena violet frame, not "the squeeze". Ask for something above it.
  *
  * `--enemy` ONLY applies with `--direct`. On the full menu route the opponent is
  * chosen by `ui/screens/characterSelect.ts:pickOpponent`, which is `Math.random()` —
@@ -87,16 +96,92 @@ const ENEMY = String(args.enemy ?? 'donut');
 const POLICY = String(args.policy ?? 'smart');
 const DIRECT = !!args.direct;
 const MAX_WALL_MS = Number(args.maxWall ?? 900_000);
-/** Sim-clock marks (seconds since the fight started) to capture a frame at. */
-const SHOT_MARKS = String(args.marks ?? '0,1,2,3,5,8,12,18,25,35,50,70,95,120,150,175')
-  .split(',').map(Number);
+/**
+ * Sim-clock marks (seconds since the fight started) to capture a frame at.
+ *
+ * ⚠️ WAS a hardcoded `0,1,2,3,5,8,12,18,25,35,50,70,95,120,150,175` — a schedule for the
+ * 180 s clock. `MATCH_DURATION_MS` is 45 s and has been since 2026-08-05, so **eleven of
+ * those sixteen marks were unreachable**: the match ended at sim 45 and marks 50…175
+ * never fired. The strip silently lost two thirds of its density and nothing said so.
+ * Now derived from the match duration the page itself reports (`deriveMarks`), unless
+ * `--marks` is passed explicitly.
+ */
+const MARKS_ARG = args.marks === undefined ? null : String(args.marks).split(',').map(Number);
+
+/** Sixteen marks over a match of `durationS`, dense early where the reading changes fastest. */
+function deriveMarks(durationS) {
+  const FRACTIONS = [0, 0.02, 0.04, 0.07, 0.11, 0.18, 0.27, 0.4, 0.55, 0.67, 0.78, 0.87, 0.93, 0.97, 1];
+  return [...new Set(FRACTIONS.map((f) => Math.round(f * durationS * 10) / 10))];
+}
 
 if (BASE.includes(':5173')) {
   console.error('\n!! --url points at the SHARED dev server. Use tools/snapshot.mjs.\n' +
     '   Peers saving mid-run will invalidate this whole strip.\n');
 }
 
-const ARENA = { w: 1400, h: 1000, cx: 700, cy: 500, maxR: 890 };
+/**
+ * ── 🚨 THE ARENA IS READ LIVE. IT USED TO BE A LITERAL, AND IT WAS THE 1× MAP. ──────
+ *
+ * WAS: `const ARENA = { w: 1400, h: 1000, cx: 700, cy: 500, maxR: 890 };`
+ *
+ * `6631446` took `ARENA_W/H` from 1400×1000 to **2800×2000**. Everything DERIVED from
+ * those two constants was correct the same commit; every literal COPY of the old
+ * geometry silently began describing a map that does not exist. This was one of them,
+ * and it is the only "play the whole thing on screen" tool in the project, so it was
+ * the one that mattered most:
+ *
+ *   * `cx/cy` is the point the scripted hands run to when the ring closes. At (700,500)
+ *     that is a point in the **NW quadrant of the real map, 1,077 wu from the true
+ *     centre (1400,1000)** — so the fog-avoidance policy ran INTO the fog, and
+ *     `dc = hypot(p - centre)` was measured from the wrong origin for the whole match.
+ *   * `maxR: 890` scaled every `R` written to `telemetry.json`. The shipped
+ *     `maxSafeRadius` is **1985**, so every ring radius in every strip was **2.23×
+ *     too small** — and the driver's own `dc > R - 30` test compared a wrong distance
+ *     against a wrong radius.
+ *   * `w`/`h` were never read at all, which is why nothing ever went red.
+ *
+ * Now read from `window.__matchArena` (`game/match.ts:645` — the session's own
+ * `ArenaDefinition`, the same object the sim collides against), and it **throws rather
+ * than defaulting**: a tool that quietly falls back to a guessed centre is exactly how
+ * `np_nfighter` passed 62/62 with its measuring ring 1,077 wu off (DECISIONS §65).
+ */
+async function readArena(page) {
+  const a = await page.evaluate(() => {
+    const m = window.__matchArena;
+    if (!m) return null;
+    return { w: m.width, h: m.height, cx: m.center.x, cy: m.center.y, maxR: m.maxSafeRadius };
+  });
+  if (!a || ![a.w, a.h, a.cx, a.cy, a.maxR].every((n) => Number.isFinite(n) && n > 0)) {
+    throw new Error('match-play: window.__matchArena is absent or malformed — refusing to guess '
+      + `the arena (got ${JSON.stringify(a)}). game/match.ts publishes it once a session exists.`);
+  }
+  return a;
+}
+
+/**
+ * The match length, in seconds, read out of the page's OWN `rules.ts`.
+ *
+ * ⚠️ WAS a literal `180` inside the sample loop (`simT = 180 * (1 - radius01)`).
+ * `MATCH_DURATION_MS` went 180 s → **45 s** on 2026-08-05 and this never followed, so
+ * **every sim timestamp this tool has printed since was 4× too large** — a 45 s match
+ * was reported as 180 s of sim time, and `simSecondsPerWallSecond` with it.
+ */
+async function readClock(page) {
+  const c = await page.evaluate(async () => {
+    const m = await import('/src/game/rules.ts');
+    return { durationMs: m.MATCH_DURATION_MS, suddenDeathMs: m.SUDDEN_DEATH_MS };
+  });
+  if (!Number.isFinite(c?.durationMs) || c.durationMs <= 0) {
+    throw new Error(`match-play: could not read MATCH_DURATION_MS from the page (got ${JSON.stringify(c)}).`);
+  }
+  return { durationS: c.durationMs / 1000, suddenDeathS: (c.suddenDeathMs ?? 0) / 1000 };
+}
+
+/** `m:ss` off the HUD → seconds remaining, or null. */
+function parseTimer(text) {
+  const m = /^(\d+):(\d{2})$/.exec(String(text ?? '').trim());
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // the hands
@@ -112,7 +197,7 @@ function axesToward(px, py, tx, ty) {
   return { x: q(dx / m), y: q(dy / m) };
 }
 
-function makePolicy(kind, weapons) {
+function makePolicy(kind, weapons, arena) {
   // Reach of the highest-damage weapon — the distance a player actually fights at.
   const usable = weapons.filter((w) => w.type !== 'self' && (w.range ?? 0) <= 140);
   const band = (usable.length
@@ -136,10 +221,10 @@ function makePolicy(kind, weapons) {
       detourSign = -detourSign; detourUntil = t + 900; hist.length = 0;
     }
 
-    const dc = Math.hypot(p.x - ARENA.cx, p.y - ARENA.cy);
+    const dc = Math.hypot(p.x - arena.cx, p.y - arena.cy);
     let target;
     if (dc > R - 30) {
-      target = { x: ARENA.cx, y: ARENA.cy };            // the ring beats everything
+      target = { x: arena.cx, y: arena.cy };            // the ring beats everything
     } else if (kind === 'chase' || d > band) {
       target = { x: e.x, y: e.y };
     } else if (d < band * 0.5) {
@@ -243,6 +328,15 @@ export const ErrorOverlay=class{}; export default {};`,
 
   await page.waitForFunction('window.__gameReady === true', null, { timeout: 180_000 });
 
+  // ── the map and the clock, read rather than assumed ───────────────────────
+  // Both were literals here and both were stale; see `readArena` / `readClock`.
+  const ARENA = await readArena(page);
+  const { durationS, suddenDeathS } = await readClock(page);
+  const SHOT_MARKS = MARKS_ARG ?? deriveMarks(durationS);
+  timeline.push({ wall: Date.now() - t0,
+    step: `arena ${ARENA.w}x${ARENA.h} centre (${ARENA.cx},${ARENA.cy}) maxR ${Math.round(ARENA.maxR)}`
+      + ` · clock ${durationS}s, sudden death ${suddenDeathS}s · marks [${SHOT_MARKS.join(',')}]` });
+
   // The menu route picks the opponent at RANDOM (`characterSelect.ts:pickOpponent`),
   // so the only trustworthy source for who is actually fighting is the HUD itself.
   const actual = await page.evaluate(() => ({
@@ -301,7 +395,7 @@ export const ErrorOverlay=class{}; export default {};`,
     }));
   }).catch(() => []);
 
-  const decide = makePolicy(POLICY, weapons.length ? weapons : [{ type: 'ranged', range: 120, damage: 10 }]);
+  const decide = makePolicy(POLICY, weapons.length ? weapons : [{ type: 'ranged', range: 120, damage: 10 }], ARENA);
 
   // ── the loop ──────────────────────────────────────────────────────────────
   const samples = [];
@@ -310,6 +404,7 @@ export const ErrorOverlay=class{}; export default {};`,
   let marksLeft = [...SHOT_MARKS];
   let fightStartedAt = null;      // sim seconds when phase left countdown
   let sawFirstDamage = false, sawFirstFogWarn = false, sawFirstFogDanger = false;
+  let clockSkew = 0;              // worst |bar clock − mm:ss clock| seen, reported below
   let lastPHp = null, lastEHp = null;
   let ended = false;
 
@@ -328,10 +423,29 @@ export const ErrorOverlay=class{}; export default {};`,
     try { r = await page.evaluate(READ); } catch { break; }
     if (!r.f) { await page.waitForTimeout(120); continue; }
 
-    // Sim clock, read out of the game's own zone bar. `safeRadius = maxR *
+    // ── Sim clock ────────────────────────────────────────────────────────────
+    // WAS: `180 * (1 - r.radius01)`, with the note *"`safeRadius = maxR *
     // timeRemaining / MATCH_DURATION`, so the bar IS the clock at ~0.2 s resolution —
-    // finer than the mm:ss readout and available every frame.
-    const simT = r.radius01 !== null && !Number.isNaN(r.radius01) ? 180 * (1 - r.radius01) : null;
+    // finer than the mm:ss readout and available every frame."*
+    //
+    // Two things had gone stale under it, in different ways:
+    //   1. THE CONSTANT. `MATCH_DURATION_MS` is 45 s, so the literal 180 made every
+    //      timestamp 4× too large. Now `durationS`, read from the page's own rules.ts.
+    //   2. THE SHAPE. The bar stopped being a clock at all past `SUDDEN_DEATH_MS`:
+    //      `sim.ts:534` REPLACES the schedule with `SUDDEN_DEATH_RADIUS = 0` from 30 s,
+    //      so `radius01` pins to 0 for the last third of every match and inverting it
+    //      returns `durationS` forever. The mm:ss readout keeps counting, so it is the
+    //      fallback there — 1 s resolution instead of 0.2 s, and correct instead of
+    //      saturated.
+    const bar01 = r.radius01 !== null && !Number.isNaN(r.radius01) ? r.radius01 : null;
+    const timerLeft = parseTimer(r.timer);
+    const barT = bar01 !== null && bar01 > 0 ? durationS * (1 - bar01) : null;
+    const timerT = timerLeft !== null ? durationS - timerLeft : null;
+    const simT = barT ?? timerT;
+    // A standing cross-check, printed in the summary rather than asserted: while the bar
+    // is on its linear segment the two clocks must agree. A divergence means the fog
+    // schedule and the readout have parted company, which is a real defect either way.
+    if (barT !== null && timerT !== null) clockSkew = Math.max(clockSkew, Math.abs(barT - timerT));
     const inFight = r.countdown === null && !r.ended;
     if (inFight && fightStartedAt === null) {
       fightStartedAt = simT ?? 0;
@@ -340,7 +454,7 @@ export const ErrorOverlay=class{}; export default {};`,
     }
 
     const p = r.f.player, e = r.f.enemy;
-    const R = (r.radius01 ?? 1) * ARENA.maxR;
+    const R = (r.radius01 ?? 1) * ARENA.maxR;   // ARENA.maxR is the live `maxSafeRadius`
     samples.push({
       wall: Date.now() - t0, simT,
       px: Math.round(p.x), py: Math.round(p.y), php: p.hp,
@@ -417,6 +531,8 @@ export const ErrorOverlay=class{}; export default {};`,
   const summary = {
     base: BASE, requestedPlayer: PLAYER, requestedEnemy: ENEMY, actualMatchup: actual, policy: POLICY, viewport: [W, H],
     wallMs: Date.now() - t0,
+    arena: ARENA, matchDurationS: durationS, suddenDeathS, shotMarks: SHOT_MARKS,
+    clockSkewS: +clockSkew.toFixed(2),
     samples: samples.length,
     simSecondsCovered: +(last - first).toFixed(1),
     simSecondsPerWallSecond: +(((last - first) / ((Date.now() - t0) / 1000)) || 0).toFixed(2),
@@ -437,6 +553,8 @@ export const ErrorOverlay=class{}; export default {};`,
   console.log(`\n   ${samples.length} samples over ${summary.simSecondsCovered}s of sim time`);
   console.log(`   sim ran at ${summary.simSecondsPerWallSecond}x wall clock (SwiftShader; NOT a performance number)`);
   console.log(`   within 170wu of each other: ${summary.engagedFrac === null ? '—' : `${(summary.engagedFrac * 100).toFixed(1)}%`}`);
+  console.log(`   arena ${ARENA.w}x${ARENA.h} centre (${ARENA.cx},${ARENA.cy}) maxR ${Math.round(ARENA.maxR)} · clock ${durationS}s`
+    + ` · worst bar-vs-mm:ss clock skew ${clockSkew.toFixed(2)}s`);
   console.log(`   ${frames.length} frames -> ${OUT}`);
   if (pageErrors.length) console.log(`   !! ${pageErrors.length} page errors`);
 

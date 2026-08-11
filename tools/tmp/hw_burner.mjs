@@ -40,7 +40,13 @@ const BASE = arg('url', process.env.PREVIEW_BASE ?? 'http://localhost:5173');
 const OUT = arg('out', 'shots/hw/burner');
 const W = 1600, H = 900;
 /** The two `tools/arena-scan.mjs` stations whose whole purpose is to frame the pot. */
-const STATIONS = (arg('stations', 'pot_south=700:640,pot_diagonal=570:430')).split(',').map((s) => {
+// ⚠️ RE-AIMED FOR THE ×4 MAP, 2026-08-11 (`6631446` took the arena 1400×1000 →
+// 2800×2000; these defaults did not follow). **`pot_south=700:640` sat inside a `prep_counter`.**
+// Coordinates are `tools/arena-scan.mjs`'s current, --selftest-validated stations for
+// the same ids, and `fogRadius` is the shipped `maxSafeRadius` 1985 — the old 993 was
+// the 1× value, which puts a death-zone wall through the frame. `tools/tmp/al_guard.mjs`
+// fails on the old values.
+const STATIONS = (arg('stations', 'pot_south=1400:1200,pot_diagonal=1140:940')).split(',').map((s) => {
   const [id, xy] = s.split('='); const [x, y] = xy.split(':').map(Number); return { id, x, y };
 });
 const MATS = (arg('mats', 'kpal:flame,kpal:flameCore')).split(',');
@@ -108,7 +114,7 @@ for (const S of STATIONS) {
   page.setDefaultTimeout(180000);
   page.on('pageerror', (e) => console.error('PAGEERROR', String(e)));
   await page.route('**/@vite/client*', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: HMR_STUB }));
-  await page.goto(`${BASE}/?player=hamburger&enemy=donut&px=${S.x}&py=${S.y}&fogRadius=993&simSpeed=0.02&pointerLock=0`, { waitUntil: 'networkidle', timeout: 90000 });
+  await page.goto(`${BASE}/?player=hamburger&enemy=donut&px=${S.x}&py=${S.y}&fogRadius=1985&simSpeed=0.02&pointerLock=0`, { waitUntil: 'networkidle', timeout: 90000 });
   await page.waitForFunction('window.__gameReady === true', null, { timeout: 90000 });
   await page.waitForTimeout(1500);
   const info = await page.evaluate(`(${PREP})(${JSON.stringify(MATS)})`);

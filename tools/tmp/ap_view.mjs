@@ -34,7 +34,7 @@
  *   node tools/tmp/with_snapshot.mjs -- node tools/tmp/ap_view.mjs --url {URL}
  */
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
@@ -52,10 +52,30 @@ const LAUNCH = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-sw
 /** WORLD_SCALE from `src/units.ts` — metres per world unit. Read, never typed. */
 const WORLD_SCALE = 0.05;
 
+/**
+ * ⚠️ RE-AIMED FOR THE ×4 MAP, 2026-08-11. WAS:
+ *   { id: 'conceal_in',  x: 260, y: 375, note: 'standing INSIDE the P1 plate patch' },
+ *   { id: 'conceal_out', x: 260, y: 500, note: 'beside P1, 125 wu south of its centre' },
+ *   { id: 'conceal_p3',  x: 380, y: 560, note: 'inside the P3 west-lane crate stack' },
+ *
+ * 🚨 **THE PATCHES THEMSELVES MOVED AND THESE DID NOT.** `6631446` re-laid the
+ * concealment out for the 2800×2000 map; the first plate stack is at **(555,290)** and
+ * the first crate stack at **(700,910)**. The three coordinates above are the 1× plate
+ * positions, and on the shipped map **all three land inside a `freezer`** — so the
+ * station named *"standing INSIDE the P1 plate patch"* was standing inside a walk-in
+ * freezer with no concealment anywhere in frame, and `escapeCover` shoved the fighter
+ * out of it before the shutter. Note the irony recorded three lines below: the previous
+ * pass fixed exactly this failure for two OTHER stations and left these three.
+ * Coordinates are read from `tools/arena.gameplay.json`'s `concealment` list.
+ */
+const CONCEAL = JSON.parse(readFileSync(new URL('../arena.gameplay.json', import.meta.url), 'utf8')).concealment;
+const P1 = CONCEAL.find((c) => c.kind === 'plate_stack');
+const P3 = CONCEAL.find((c) => c.kind === 'crate_stack');
+if (!P1 || !P3) throw new Error('ap_view: no plate_stack/crate_stack in the arena dump — refusing to guess');
 const STATIONS = [
-  { id: 'conceal_in', x: 260, y: 375, note: 'standing INSIDE the P1 plate patch' },
-  { id: 'conceal_out', x: 260, y: 500, note: 'beside P1, 125 wu south of its centre' },
-  { id: 'conceal_p3', x: 380, y: 560, note: 'inside the P3 west-lane crate stack' },
+  { id: 'conceal_in', x: P1.x, y: P1.y, note: 'standing INSIDE the P1 plate patch' },
+  { id: 'conceal_out', x: P1.x, y: P1.y + 125, note: 'beside P1, 125 wu south of its centre' },
+  { id: 'conceal_p3', x: P3.x, y: P3.y, note: 'inside the P3 crate stack' },
   // ⚠️ Both of these were at (130,250) / (1150,300) on the first pass, which are INSIDE
   // the freezer's and the prep counter's inflated collision boxes — `escapeCover` shoved
   // the fighter out and the frames photographed a floating HP pill behind a prop. Placed
