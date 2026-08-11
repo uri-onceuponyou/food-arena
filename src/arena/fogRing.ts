@@ -512,7 +512,25 @@ export function createFogRing(centerUnits: { x: number; y: number }): FogRing {
       const dt = Math.min(0.25, Math.max(0, elapsedSeconds - lastElapsed));
       lastElapsed = elapsedSeconds;
 
-      const wanted = active && safeRadiusUnits > 0;
+      // ⚠️ WAS `safeRadiusUnits > 0`, AND THAT TEST WAS A SHIPPED DEFECT.
+      // It read as a guard against a degenerate radius. It is not: radius ZERO is the
+      // one radius at which this boundary matters MOST — sudden death drives the ring
+      // to exactly 0 and the canopy is then supposed to cover the whole arena. The old
+      // test ramped the entire boundary OUT at that instant, so the fog disappeared at
+      // the moment it was meant to swallow the screen, while the HUD still read
+      // "OUTSIDE THE ZONE −50 HP/s". Measured on the shipped build, not inferred:
+      // `?fogRadius=0&fogRingRaw=1` renders at mean luma 130.6 against a no-fog frame's
+      // 132.3 — statistically the same picture — and 72.0 with the boundary actually
+      // drawn. Before sudden death landed, radius 0 was unreachable in a real match,
+      // which is why a wrong test survived: `MIN_SAFE_RADIUS` never let it fire.
+      //
+      // Zero is well-defined the whole way down and was checked rather than assumed:
+      // `curtainHeight(0)` clamps to `CHARACTER_HEIGHT` (no NaN, no zero-height wall),
+      // `setRadius(0)` writes a degenerate inner edge with no division anywhere, and the
+      // canopy's outer ring is `max(FIELD_OUTER_UNITS, r + 200)` = 1500 wu, so the danger
+      // field still covers every corner of a 2800x2000 map. A NEGATIVE radius remains
+      // refused, which is what a guard here should ever have meant.
+      const wanted = active && safeRadiusUnits >= 0;
       // Snap ON, ramp OFF — a zone visual may never under-state danger, so it is only
       // ever allowed to be late to leave, never late to arrive.
       fade = wanted ? 1 : Math.max(0, fade - dt / FADE_OUT_SECONDS);

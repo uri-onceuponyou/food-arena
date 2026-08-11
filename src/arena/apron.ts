@@ -292,6 +292,14 @@
  * asked whoever built the apron to look at a late-match frame. Measured, at
  * `?fogRadius=420` from the NW corner at 21:9, as luma p90-p10 over a large crop:
  *
+ * ⚠️ **`?fogRadius=420` NO LONGER REPRODUCES THAT FRAME — DO NOT COPY IT.** Sudden
+ * death (`game/rules.ts`, `R(30 s) = 661.67 wu`) made every request below 661.67 snap
+ * to the sudden-death frame with a console warning, so a station asking for 420 is now
+ * measuring a full-canopy screen rather than a mid-collapse one. The numbers below were
+ * taken before that and are kept because they are still the answer to the question they
+ * were asked; to RE-measure, request a radius above 661.67 (or `?fogRadius=0` for the
+ * sudden-death frame, which is now the only stable low-radius station).
+ *
  *                       no fog    under the 0.72-alpha canopy
  *     apron               78.6                17.3
  *     playfield floor     84.4                18.2
