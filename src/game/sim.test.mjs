@@ -105,6 +105,10 @@ import {
   // that the reference speed is the roster's own movement cap. A literal 120 or 3500 here
   // would keep passing after `PLAYER_SPEED`, `SPEED_TOP_STAT` or the reach ladder moved.
   FLEE_REFERENCE_SPEED, projectileMaxAgeMs, AI_CHASE_SPEED,
+  // Section 31(g): `DECISIONS §50a`. `SPEED` comes in so the orphaned `maxDrift` rung can be
+  // used as the KNOWN-BAD the roster guard is shown to reject — a guard nothing has ever
+  // failed is not a guard.
+  SPEED,
 } from './rules.ts';
 // Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
 // no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
@@ -5930,7 +5934,7 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
     while (t < durationMs && (st.projectiles.length > 0 || t === 0)) {
       pin(t);
       const live = st.projectiles.map((p) => ({
-        id: p.id, traveled: p.traveled, age: p.age ?? 0,
+        id: p.id, traveled: p.traveled, age: p.age ?? 0, arrived: !!p.arrived,
         path: ((p.age ?? 0) * Math.hypot(p.vx, p.vy)) / 1000,
       }));
       const evs = stepMatch(st, TF_DT, noInput);
@@ -5945,7 +5949,13 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
           // and a hit is charged `sep − hitRadius`, so a row that read `last` alone would
           // see every successful shot as an under-spent budget and pass for the wrong
           // reason. That is exactly how the first draft of (d) failed, on all 21.
-          if (books && e.reason === 'expired') lastExpired = books;
+          //
+          // 🚨 `arrived` IS NOT DECORATION. A `peckHits` weapon that has LANDED is removed
+          // with reason `'expired'` once its pecks run out (`stepProjectiles`' peck branch),
+          // so `reason` alone reports Egg's Hatch! as a miss on a tick where it has just
+          // delivered its whole authored 15. The second draft of (d) failed on exactly that
+          // and on nothing else — one weapon, and it is the weapon §50a is about.
+          if (books && e.reason === 'expired' && !books.arrived) lastExpired = books;
         }
       }
       t += TF_DT;
@@ -5967,10 +5977,15 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
     check('KNOWN-BAD: under path-length retirement the shipped law puts ALL 23 ranged weapons short of their own press gate',
       shortfall.length === 23 && shortfall.every((r, i) => r.law < rangedWeapons[i].w.range),
       shortfall.map((r) => `${r.key} ${r.law.toFixed(0)}`).join(' · '));
-    // …and the one weapon the law sends NEGATIVE, which is the whole of `DECISIONS §50a`.
-    const hatch = shortfall.find((r) => r.key === 'egg/Hatch');
-    check('…and it is NEGATIVE for the one weapon slower than the roster itself (egg/Hatch)',
-      hatch.law < 0, `${hatch.law.toFixed(1)} wu`);
+    // …and on the ORPHANED RUNG the same law goes NEGATIVE, which is the whole of §50a:
+    // a weapon there has negative reach at every range on the ladder, so it is not weak,
+    // it is inert.
+    // ⚠️ THIS ROW USED TO NAME `egg/Hatch` AND WAS CORRECT UNTIL §50a MOVED IT. Kept as a
+    // claim about the RUNG rather than about a weapon, because that is the durable fact and
+    // because a row naming a weapon goes stale the moment the weapon is fixed.
+    const orphanLaw = REACH.rangedMax - (TOP_HUMAN * FLIGHT_MS.drift) / 1000 + HIT_RADIUS_VS_ENEMY;
+    check('…and on the orphaned `FLIGHT_MS.drift` rung that law is NEGATIVE at every range — inert, not weak (§50a)',
+      orphanLaw < 0, `${orphanLaw.toFixed(1)} wu at the ladder's longest reach`);
   }
 
   // ── (b) THE GATE IS DELIVERABLE — the defect, stated as its own repair ────
@@ -5991,9 +6006,14 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
 
     // THE TWO EXEMPTIONS ARE NAMED AND EACH CARRIES ITS OWN REASON, so neither can quietly
     // become "the rule did not work". Both are still measured, not waved through.
+    //
+    // ⚠️ THIS ROW USED TO READ `{egg/Hatch (too slow — §50a), taco/Double}` and it was
+    // correct then. `DECISIONS §50a` moved `Hatch!` onto a rung that can close, so the
+    // set is down to one — kept as a named set rather than a count so the next weapon
+    // that lands in it has to be justified in this file rather than absorbed into a number.
     const exempt = rangedWeapons.filter(({ w }) => !canClose(w) || !hasAxisShot(w));
-    check('the exemption set is exactly {egg/Hatch (too slow — §50a), taco/Double (both parts off-axis)}',
-      exempt.length === 2 && exempt.some((e) => e.w.key === 'Hatch') && exempt.some((e) => e.w.key === 'Double'),
+    check('the exemption set is exactly {taco/Double — both parts authored off-axis, a SPREAD limit no retirement rule can repair}',
+      exempt.length === 1 && exempt[0].w.key === 'Double',
       exempt.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
   }
 
@@ -6075,15 +6095,22 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
       capKilled.length === 0, capKilled.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
 
     // …and the converse, which is what makes the row above a claim rather than a filter.
-    // For a weapon too slow to close, the FALLBACK cap is the retirement rule — it fires at
-    // the authored flight time, which is exactly when path-length retirement used to fire —
-    // so this deviation is a provable NO-OP for it. That is why `Hatch!` did not get better
-    // for free and why `DECISIONS §50a` is a separate change and not a consequence of this
-    // one. The set is derived, so it empties itself when §50a lands.
-    const tooSlow = rangedWeapons.filter(({ w }) => !canClose(w));
-    check('CONVERSE: a weapon too slow to close is retired by the FALLBACK cap — this deviation is a no-op for it',
-      tooSlow.every((r) => !budgetRanOut(r)),
-      tooSlow.map(({ id, w }) => `${id}/${w.key} v${w.speed} < ${FLEE_REFERENCE_SPEED}`).join(' · ') || 'none — §50a has landed');
+    // For a weapon too slow to close, the FALLBACK cap IS the shipped rule: it fires at the
+    // authored flight time, which is exactly when path-length retirement used to fire, so
+    // §50b is a provable NO-OP for such a weapon. That is why `Hatch!` did not get better
+    // for free, and why §50a had to be a separate change.
+    //
+    // ⚠️ ASSERTED AS ARITHMETIC ON A SYNTHETIC WEAPON, NOT AS A FILTER OVER THE ROSTER —
+    // and the reason is worth keeping. The first version filtered `rangedWeapons` for
+    // `!canClose`, which was a real behavioural test while Egg sat at 80 wu/s and became a
+    // VACUOUS one the moment §50a landed and the set emptied: `[].every(...)` is `true`, so
+    // the row would have gone on printing `ok` while testing nothing at all. Feeding
+    // `projectileMaxAgeMs` the orphaned rung directly keeps it a live claim forever.
+    const orphan = { speed: SPEED.maxDrift, range: REACH.rangedMax };
+    check('CONVERSE: for a weapon too slow to close, the fallback cap IS the authored flight time — §50b is a no-op for it',
+      approx(projectileMaxAgeMs(orphan), FLIGHT_MS.drift, 1e-9)
+      && approx(projectileMaxAgeMs(orphan), (orphan.range / orphan.speed) * 1000, 1e-9),
+      `${projectileMaxAgeMs(orphan).toFixed(1)} ms vs FLIGHT_MS.drift ${FLIGHT_MS.drift}`);
   }
 
   // ── (e) …AND THE ONE CASE IT DOES EXIST FOR ───────────────────────────────
@@ -6137,6 +6164,51 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
     });
     check('against a STATIONARY target all 23 ranged weapons still deliver their whole press value at the full gate',
       bad.length === 0, bad.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
+  }
+
+  // ── (g) §50a — THE CHICK IS FASTER THAN THE EGG, AND SO IS EVERYTHING ELSE ──
+  //
+  // Uri: *"chick is faster than the egg."* That reads as flavour and is a derivable
+  // constraint: a projectile slower than its own owner catches nothing in either role, so
+  // the weapon is not weak, it is INERT — and `FLIGHT_MS.drift`'s *"a chick that waddles
+  // at you"* was the intent AND the defect. The rule is generalised to the whole roster
+  // here, because the next weapon anyone authors on that rung would hit the same wall.
+  {
+    const slower = rangedWeapons.filter(({ w }) => w.speed <= FLEE_REFERENCE_SPEED);
+    check('EVERY ranged weapon in the roster is faster than the roster itself — §50a, generalised',
+      slower.length === 0,
+      slower.map(({ id, w }) => `${id}/${w.key} ${w.speed} <= ${FLEE_REFERENCE_SPEED}`).join(' · '));
+
+    // 🚨 THE KNOWN-BAD THE ROW ABOVE IS SHOWN TO REJECT. `SPEED.maxDrift` is still exported
+    // — deleting it would delete the derivation of why nothing may sit there — so it is
+    // used as the input the guard must refuse. A guard nothing has ever failed is not a
+    // guard, and this one can be handed its own failing case from the same file it polices.
+    check('KNOWN-BAD: the orphaned `SPEED.maxDrift` rung FAILS that test, and nothing in the roster is on it',
+      SPEED.maxDrift <= FLEE_REFERENCE_SPEED
+      && rangedWeapons.every(({ w }) => w.speed !== SPEED.maxDrift),
+      `maxDrift ${SPEED.maxDrift} vs reference ${FLEE_REFERENCE_SPEED}`);
+
+    // Uri's sentence, literally, in BOTH roles — through `speedFor`, never a literal, so it
+    // survives a move of `PLAYER_SPEED`, `SPEED_PER_STAT` or Egg's own card speed.
+    const HATCH = CHARACTERS.egg.weapons.find((w) => w.key === 'Hatch');
+    const eggHuman = speedFor('egg', PLAYER_SPEED) * 1000;
+    const eggChase = speedFor('egg', AI_CHASE_SPEED) * 1000;
+    check('the chick is faster than the egg, in the role where the egg is fastest, with margin',
+      HATCH.speed > eggHuman * 1.25,
+      `chick ${HATCH.speed} wu/s vs egg ${eggHuman.toFixed(1)} (${(HATCH.speed / eggHuman).toFixed(2)}x)`);
+    check('…and in the role the sim drives, where the margin is larger still',
+      HATCH.speed > eggChase * 1.25,
+      `chick ${HATCH.speed} wu/s vs egg ${eggChase.toFixed(1)} (${(HATCH.speed / eggChase).toFixed(2)}x)`);
+
+    // …and the consequence that was the whole point: it now arrives. `Hatch!` gated at 140
+    // and reached 27 wu against a fleeing human — one wu past `HIT_RADIUS_VS_ENEMY`, i.e.
+    // "already touching you" — while Egg's own MELEE reaches 84.
+    const r = press('egg', 'Hatch', HATCH.range, TOP_HUMAN);
+    check('Hatch! connects at its own press gate against a fleeing human — it reached 27 wu of a 140 wu gate before §50a',
+      r.dealt > 0, `dealt ${r.dealt} at ${HATCH.range} wu`);
+    const TACKLE = CHARACTERS.egg.weapons.find((w) => w.key === 'Tackle');
+    check('…so the roster\'s longest-ranged weapon no longer connects at a THIRD of its owner\'s punching distance',
+      HATCH.range > TACKLE.range, `Hatch! ${HATCH.range} vs Egg Tackle ${TACKLE.range}`);
   }
 }
 

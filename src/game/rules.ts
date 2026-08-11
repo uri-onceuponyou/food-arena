@@ -1550,14 +1550,28 @@ export const FLIGHT_MS = {
   /** 4.2 evade windows. Big, readable, telegraphed shots. Reach tax: 105 wu. */
   slow: 875,
   /**
-   * 8.3 evade windows. Egg's Hatch! — a chick that waddles at you.
+   * 8.3 evade windows. 🚨 **AN ORPHAN RUNG — NOTHING MAY SIT HERE. DO NOT AUTHOR A WEAPON
+   * ONTO IT.**
    *
-   * ⚠️ **THE WADDLE IS THE INTENT AND IT IS ALSO THE DEFECT.** The tax at this rung is
-   * **210 wu against a fleeing human**, which is more than `REACH.rangedMax` (140) — so a
-   * weapon on this rung has NEGATIVE reach at every range on the ladder. It is not that
-   * `Hatch!` is slow; it is that at 80 wu/s the chick is slower than **every fighter in
-   * the game** (105.6-120 wu/s in the human role, 61.6-70 in the AI's), so there is no
-   * separation at which it catches anyone who is walking away. See `SPEED.maxDrift`.
+   * ⚠️ THE OLD WORDING, KEPT ABOVE ITS REVERSAL AS THIS FILE'S HOUSE RULE REQUIRES:
+   *
+   * > *"8.3 evade windows. Egg's Hatch! — a chick that waddles at you."*
+   * > *"**THE WADDLE IS THE INTENT AND IT IS ALSO THE DEFECT.** The tax at this rung is
+   * > **210 wu against a fleeing human**, which is more than `REACH.rangedMax` (140) — so a
+   * > weapon on this rung has NEGATIVE reach at every range on the ladder. It is not that
+   * > `Hatch!` is slow; it is that at 80 wu/s the chick is slower than **every fighter in
+   * > the game** (105.6-120 wu/s in the human role, 61.6-70 in the AI's), so there is no
+   * > separation at which it catches anyone who is walking away."*
+   *
+   * **THE WADDLE IS OVERRULED. `DECISIONS §50a` — Uri: *"chick is faster than the egg."***
+   * That reads as flavour and is a derivable constraint: a projectile slower than its own
+   * owner cannot catch anything in either role, so the weapon is not weak, it is INERT.
+   * `Hatch!` moved to `SPEED.maxSlow` and this rung now carries no weapon.
+   *
+   * It is kept rather than deleted because the arithmetic above is the whole derivation of
+   * why, and because deleting the rung would delete the warning with it. The guard that
+   * actually stops a weapon landing here is not this comment: `sim.test.mjs` §31(g) fails
+   * if ANY ranged weapon in the roster is authored slower than `FLEE_REFERENCE_SPEED`.
    */
   drift: 1750,
 } as const;
@@ -1610,7 +1624,14 @@ export const SPEED = {
    */
   /** 160 wu/s */ maxSlow: projectileSpeed(REACH.rangedMax, FLIGHT_MS.slow),
   /**
-   * 80 wu/s. Egg's Hatch!, and nothing else.
+   * 80 wu/s. 🚨 **AN ORPHAN RUNG SINCE `DECISIONS §50a`. NOTHING SITS HERE AND NOTHING MAY.**
+   *
+   * ⚠️ THE OLD FIRST LINE, KEPT ABOVE ITS REVERSAL: *"80 wu/s. Egg's Hatch!, and nothing
+   * else."* Uri's answer to §50a — *"chick is faster than the egg"* — moved `Hatch!` to
+   * `maxSlow`, for the reasons the whole of the rest of this comment already gave. The
+   * derivation below is not history: it is why nothing may come back to this rung, and
+   * `sim.test.mjs` §31(g) is the guard that enforces it against every ranged weapon in the
+   * roster rather than against this one constant.
    *
    * ── 🚨 THIS RUNG IS SLOWER THAN EVERY FIGHTER IN THE GAME ───────────────────
    *
@@ -1668,9 +1689,60 @@ export const SPEED = {
    *    tuned result. Every roster quantity in both landing rows moves INSIDE the ~9 pp
    *    aggregate floor, so the balance neither argues for the change nor against it.
    *
-   * => It is a TASTE call between two feels — a chick that waddles, versus a weapon that
-   * works — and it is parked in `docs/DECISIONS-FOR-URI.md` §50 rather than decided here.
-   * ⚠️ If it is ever taken, `drift` becomes an ORPHAN RUNG with no weapon on it.
+   * ⚠️ THE PARAGRAPH THAT USED TO CLOSE THIS COMMENT, KEPT ABOVE ITS REVERSAL:
+   *
+   * > *"=> It is a TASTE call between two feels — a chick that waddles, versus a weapon
+   * > that works — and it is parked in `docs/DECISIONS-FOR-URI.md` §50 rather than decided
+   * > here. ⚠️ If it is ever taken, `drift` becomes an ORPHAN RUNG with no weapon on it."*
+   *
+   * ── ✅ DECIDED. URI: *"chick is faster than the egg."* ──────────────────────
+   *
+   * It was NOT a taste call. A projectile slower than its own owner catches nothing in
+   * either role, so the character was carrying an INERT weapon, not a slow one — and `drift`
+   * is indeed an orphan rung now. `Hatch!` sits on `maxSlow`: 160 wu/s is the SMALLEST rung
+   * clearing both constraints at once (1.52x Egg's own delivered 105.6 wu/s, and above the
+   * 120 wu/s `FLEE_REFERENCE_SPEED` that `projectileMaxAgeMs` needs for the shot to be able
+   * to close at all).
+   *
+   * ⚠️ **THE TABLE ABOVE IS PRE-§50b AND MUST NOT BE READ AS A PREDICTION OF TODAY.** It was
+   * measured under path-length retirement, where a raised speed bought reach only by
+   * shortening the flight; under the target-frame budget the same rung buys the WHOLE gate.
+   * Re-measured on the shipped rule — `roster_lab --seeds 32`, 3520 matches per row, paired
+   * on identical seeds against the tree immediately before §50a (`af35362`):
+   *
+   *      candidate                    egg strength  smart2 / chase    roster range   settled
+   *      pre-§50a (80 wu/s, damage 5)        44.5%  /  54.8%              28.1 pp    28/110
+   *      160 wu/s, damage 5                  65.6%  /  59.2%              27.3 pp    27/110
+   *      160 wu/s, damage 4  <-- SHIPPED     45.5%  /  40.9%              27.8 pp    29/110
+   *      160 wu/s, damage 3                  29.8%  /  24.7%              37.2 pp    33/110
+   *
+   * ⚠️ **THREE POINTS, NOT TWO, BECAUSE A SLOPE THROUGH TWO POINTS IS A LINE THROUGH TWO
+   * POINTS.** 5 -> 4 is **20.1 pp** and 4 -> 3 is **15.7 pp** (smart2); the mean **17.9 pp per
+   * point** reproduces the pre-§50b table's 17.8 almost exactly. The lever did NOT get finer
+   * when the weapon started working, so §50a's warning stands unchanged: one point of damage
+   * is 64% of the entire roster band and no integer lands a character on a mean.
+   *
+   * 🚨 **AND THE TWO DRIVERS DISAGREE ABOUT WHICH INTEGER IS THE NO-OP — BY MORE THAN A WHOLE
+   * POINT OF DAMAGE. NO SINGLE-PARAMETER COMPENSATION CAN HOLD BOTH.** Against the pre-§50a
+   * baseline, `damage 4` is **+0.9 pp on smart2 (inside the ~9 pp floor) and −13.9 on chase
+   * (outside it)**, while `damage 5` is the mirror image: **+21.1 on smart2, +4.4 on chase**.
+   * The mechanism is not mysterious — a CHASING opponent was always reachable by an 80 wu/s
+   * chick (a closing target needs no reach at all), so on that policy the speed fix is worth
+   * ~nothing and only the damage cut lands. A cooldown raise from `damage 5` cannot square it
+   * either: it would have to cost smart2 4.8x what it costs chase, and press-rate scales both
+   * together. **This is not a tuning failure; it is the measurement.**
+   *
+   * **Damage 4 ships because it holds the CHARACTER still on the stronger driver while the
+   * WEAPON is repaired** — 44.5% -> 45.5% on a run where **90 of 110 matchups moved** (paired,
+   * exact, max |Δ| 34.4 pp). Uri asked for a chick faster than the egg, not for a stronger
+   * Egg. Damage 3 also drops the card's derived `damage` bar 7 -> 6 (`damageStatFor`), so it
+   * is not a free integer either; damage 4 and 5 both leave the bar at 7.
+   *
+   * ⚠️ NO THIRD CONSTANT WAS TOUCHED, DELIBERATELY. Egg sits 4.5 pp under a mean that is 50%
+   * by construction — inside the ~9 pp floor. Reaching for the cooldown to close THAT would be
+   * steering inside a resolution floor, which `CLAUDE.md` #10 exists to forbid, and it would
+   * put a third simultaneous constant on one character in a session where 110 matchups are
+   * already moving for a different reason.
    */
   /**  80 wu/s */ maxDrift: projectileSpeed(REACH.rangedMax, FLIGHT_MS.drift),
 } as const;
@@ -2647,7 +2719,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     face: 'EYES: open eyes with catchlights — sclera, pupil and highlight built as three separate meshes. ⭐ THIS IS THE CAST REFERENCE; the other ten are being brought up to it, so changes here propagate. What it still needs, and there are two things: (a) the sclera must become the BRIGHTEST VALUE ANYWHERE ON THE CHARACTER — measured, even egg has 0% of its eye pixels above 0.85 luma against the reference plates\' 31.1% and 34.1%, because what it has today is a catchlight where a sclera belongs; and (b) THE PUPIL IS CENTRED. `egg.ts` sets it to x = 0, so egg stares dead ahead and has no gaze — offset it horizontally like every other character in this brief. A centred pupil reads dead even when everything else is right, and it is the one element of the standard the cast reference itself does not meet. MOUTH: straight and deadpan — KEEP THE DEADPAN, it is the whole personality and nothing else in the cast has it — but give it an interior value step behind the lip so it reads as an opening. The worried brow creases are correct: an egg has no hair, so worry reads as a raised shell ridge rather than eyebrows, and the asymmetric inner-end lift is what makes it a raised eyebrow instead of two symmetric worry lines. 🚨 SILHOUETTE — THE THING TO ACTUALLY FIX. A clean uncut TRUE OVOID (fuller at the bottom, tapering) is recorded at `egg.ts:206` as "the one thing Egg had going for it in the silhouette test". The lifted lid broke the crown and the flanking shell shards read as EARS, and both were added to signal "egg" while destroying the shape that signalled it better. Restore the ovoid; move any cracking cue onto the surface as a decal rather than into the outline. PERSONALITY: deadpan, stoic, slightly anxious under it.',
     weapons: [
       { key: 'Tackle', name: 'Egg Tackle', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, emoji: '🥚' },
-      { key: 'Hatch', name: 'Hatch!', type: 'ranged', range: REACH.rangedMax, damage: 5, cooldown: 2600, speed: SPEED.maxDrift, color: '#FFE9A8', effect: null, homing: true, peckHits: 3, peckInterval: 500, emoji: '🐣' },
+      // ⚠️ WAS `speed: SPEED.maxDrift` (80 wu/s) — DECISIONS §50a, Uri: *"chick is faster
+      // than the egg."* That is a derivable constraint rather than a taste call, and
+      // `SPEED.maxSlow` is the SMALLEST rung that satisfies both halves of it: 160 wu/s is
+      // 1.52x Egg's own delivered 105.6 and 1.33x the roster's 120 wu/s movement cap, which
+      // is also the minimum `rules.ts:projectileMaxAgeMs` needs for the shot to close at
+      // all. Two independent constraints, one rung. `sim.test.mjs` §31(g) asserts the
+      // derivation, never the number.
+      { key: 'Hatch', name: 'Hatch!', type: 'ranged', range: REACH.rangedMax, damage: 4, cooldown: 2600, speed: SPEED.maxSlow, color: '#FFE9A8', effect: null, homing: true, peckHits: 3, peckInterval: 500, emoji: '🐣' },
       { key: 'Shards', name: 'Shell Shards', type: 'ranged', range: REACH.rangedMid, damage: 4, cooldown: 1000, speed: SPEED.mid, color: '#F4E9DA', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💥' },
     ],
     abilities: [
