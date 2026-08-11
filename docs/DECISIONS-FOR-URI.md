@@ -3272,3 +3272,41 @@ of 358 cells"*.
    server is the only form that survives the host quitting mid-match.
 3. **Is multiplayer even next?** Everything above is true whenever you get to it. The sim will not
    drift out from under it — the bit-identity differ is a standing gate.
+
+---
+
+## 53. ✅ ANSWERED 2026-08-11 — the current map seats FOUR, and the endgame ring scales with N
+
+> **53a** *"6 players only on the ×4 map"*
+> **53b** *"Scale the radius with player count"*
+
+### 53a — 1400×1000 IS A FOUR-PLAYER MAP. Ship four now; six waits for §48.
+
+Uri said it from play — *"this map can't fit 6 players"* — and `sp_place.mjs` (**22**) then measured
+it: of **327,561** cells on a 2 wu lattice, **2,186** satisfy every spawn rule, in **two** mirror-pair
+regions. Three pairs need three, so pair C shares the west bay with pair A at **75.2 wu — inside
+`REACH.meleeHeavy` (84)**. An exhaustive 1 wu search caps it at **77.6**.
+
+Observed, not inferred: at 9 s of a seeded N=6 match slot 0 reads **0/70, dead**, and **the two
+worst-hurt seats are both bay-sharers while the two healthiest are both in the north lane**
+(`shots/sp/n6-playing.png`). ✅ **The paired control in the same run is healthy: N=3 and N=4 spawn
+509.8 wu apart and nobody died.**
+
+**So four players is shippable on the shipped map today, and six is gated on the ×4 arena.** That
+makes **§48 the path to six**, not an optional enlargement.
+⚠️ **Three alternatives were offered and rejected, so nobody re-derives them:** letting two seats
+start concealed (would have bought 143.9 wu — clear of every weapon — at the cost of 2 of 6 players
+starting hidden); relaxing the runway rule (it binds by **47×**: dropping it alone takes 2,186 →
+103,926 cells); and re-placing the six concealment patches.
+
+### 53b — `MIN_SAFE_RADIUS` scales with fighter count
+
+It is **140 wu and constant**, while the pot burns to r=95 and blocks a centre to r=73 — so the
+0 HP/s floor is an **annulus 45 wu wide, 1.07 body widths, at every N AND every arena size.** Evenly
+spaced neighbours: **N=4 chord 166 wu** (outside every reach) → **N=5 138 wu, inside `rangedMax`** →
+**N=6 117 wu, inside `rangedLong`**. ⚠️ **A bigger arena does not fix this — the floor is a
+constant**, which is why it is answered here rather than inside §48.
+
+=> The final ring must hold N fighters at a fightable spacing. ⚠️ **The fog schedule is derived from
+this radius**, so it must be re-derived rather than pinned, and the change is measurable at N=2 as a
+no-op or it is wrong.
