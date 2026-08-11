@@ -1245,11 +1245,26 @@ async function main() {
         const burst = await page.evaluate(() => window.__pj.measureBurst());
         await page.evaluate(() => window.__clk.resume());
         log(`\n══ FLIGHT vs IMPACT, same units, ${charId}.${w0.key} at ${Number(args.dmg ?? 8)} damage ═══════`);
-        log(`  projectile in flight   ${pad(flightPx.n, 8)}px   dE ${flightPx.deMed}`);
-        log(`  impact burst           ${pad(burst.n, 8)}px   dE ${burst.deMed}   (${burst.roots} transient objects)`);
-        log(`  burst / flight         ${(burst.n / Math.max(1, flightPx.n)).toFixed(2)}x`
-          + `   — and the flight signature goes to ZERO at the same instant, because the`);
-        log(`                                    projectile and its shell are both removed by \`syncPool\`.`);
+        log(`  projectile in flight   ${pad(flightPx.n, 8)}px   dE ${flightPx.deMed ?? '-'}`);
+        log(`  impact burst           ${pad(burst.n, 8)}px   dE ${burst.deMed ?? '-'}   (${burst.roots} transient objects)`);
+        if (!flightPx.n) {
+          // ⚠️ REFUSED, NOT DIVIDED. The first run of this mode printed
+          // "burst / flight 216.00x" from a flight arm of ZERO — the shot had already
+          // expired when the frame was frozen, so the ratio was `216 / max(1, 0)` and
+          // meant nothing at all. `docs/AGENT-BRIEF.md` §4.4: an assertion nothing can
+          // fail is a comment with a tick next to it, and a RATIO with a zero
+          // denominator is the same thing wearing a number.
+          log(`  → REFUSED: the flight arm caught NO projectile (it had already expired`);
+          log(`    when the frame was frozen). A ratio against zero is not a measurement.`);
+          failures++;
+        } else {
+          log(`  burst / flight         ${(burst.n / flightPx.n).toFixed(2)}x`);
+        }
+        log(`  ⚠️ WHAT IS CERTAIN WITHOUT THIS RATIO: the projectile AND its shell are both`);
+        log(`    removed by \`syncPool\` on the same tick the hit lands, so the flight`);
+        log(`    signature goes to zero discontinuously. The transition is an event by`);
+        log(`    construction. Whether the BURST is louder than the flight now is a`);
+        log(`    separate question and \`tools/tmp/vfx_wcov.mjs --only <char>\` is its tool.`);
       }
 
       await page.close();
