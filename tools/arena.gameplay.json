@@ -831,15 +831,15 @@
       "tickMs": 250
     },
     {
-      "x": 1830,
-      "y": 1250,
+      "x": 1950,
+      "y": 1100,
       "radius": 50,
       "kind": "slow",
       "slowFactor": 0.45
     },
     {
-      "x": 970,
-      "y": 750,
+      "x": 850,
+      "y": 900,
       "radius": 50,
       "kind": "slow",
       "slowFactor": 0.45

@@ -871,11 +871,35 @@ export const createKitchenArena: ArenaFactory = () => {
   // box for box — offline with it. If more puddles are ever wanted, teach the extractor
   // FIRST.
   //
-  // Both moved outboard with the map: at r=559 wu from centre they sit just OUTSIDE the
-  // 496.25 wu endgame keep-out, which is where the 1x pair sat relative to its own
+  // Both sit outboard of the endgame: at **r = 559.0 wu** from centre they are just
+  // OUTSIDE the 496.25 wu keep-out, which is where the 1x pair sat relative to its own
   // 248.25 wu keep-out. A slow field inside the final ring is a coin-flip, not a hazard.
-  const puddleSouth = { x: 1830, y: 1250, radius: 50 };
-  const puddleNorth = { x: ARENA_W - 1830, y: ARENA_H - 1250, radius: 50 };
+  //
+  // 🚨 THE PREVIOUS PAIR WAS (1830, 1250) / (970, 750) AND NEITHER COULD EVER BE
+  // STEPPED IN. Measured by the gate re-fixture pass on the x4 map: **0 of 7,845 cells
+  // inside either 50 wu puddle is standable**, 1 of 15,813 over the full 71 wu field a
+  // body can touch, and the nearest legal ground was 75 wu OUTSIDE the hazard. Two
+  // hazards that render perfectly and are mechanically inert — `docs/LESSONS.md` §1
+  // inverted: not invisible-but-present, but present-but-unreachable.
+  //
+  // The cause was a coordinate, not a derivation. (1830, 1250) is **20 wu INSIDE the
+  // `produce_crate_tall` at (1850, 1240)**, with the 170x90 `stove_island` at
+  // (1720, 1240) closing the only other side to a 5 wu slot. A 42 wu fighter needs its
+  // centre 21 wu clear of every CoverBox, so the whole disc was inside solid geometry.
+  //
+  // The new pair is the site that maximises cover clearance among the symmetric
+  // candidates at r = 559: **clearance 116.6 wu** to the nearest CoverBox, against the
+  // 71 wu (50 + half a body) needed for EVERY cell of the disc to be standable — 45.6 wu
+  // of margin — and 557 wu from the nearest of the six spawns, so no seat starts in a
+  // slow field. Point symmetry is preserved by construction, as everywhere else here.
+  //
+  // ⚠️ AND THE 559 IN THE PARAGRAPH ABOVE WAS ALREADY WRONG BEFORE THIS COMMIT. The old
+  // pair sat at hypot(430, 250) = **497.4 wu**, i.e. 1.15 wu outside the keep-out rather
+  // than the 62.75 the comment claimed. Both numbers describing this pair were false and
+  // each one hid the other: the coordinates were unreachable, and the prose said they
+  // were somewhere they were not. The new pair makes the sentence true.
+  const puddleSouth = { x: 1950, y: 1100, radius: 50 };
+  const puddleNorth = { x: ARENA_W - 1950, y: ARENA_H - 1100, radius: 50 };
   hazards.push(
     { x: puddleSouth.x, y: puddleSouth.y, radius: puddleSouth.radius, kind: 'slow', slowFactor: PUDDLE_SLOW_FACTOR },
     { x: puddleNorth.x, y: puddleNorth.y, radius: puddleNorth.radius, kind: 'slow', slowFactor: PUDDLE_SLOW_FACTOR }
