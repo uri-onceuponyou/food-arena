@@ -487,14 +487,23 @@ export class GameSession {
   private readonly qaPlayerX = numberFromQuery('px');
   private readonly qaPlayerY = numberFromQuery('py');
 
-  /**
-   * QA-only: `?fogRingRaw=1` hands `arena/fogRing.ts` the sim's LITERAL `safeRadius`
-   * instead of `fogDisplayRadius()`'s epsilon. It exists to keep an out-of-set defect
-   * REPRODUCIBLE rather than described — with it set, `?fogRadius=0` renders the
-   * sudden-death frame with no boundary at all, which is the bug `fogDisplayRadius`
-   * works around. Delete both when the one-character fix lands in `fogRing.ts`.
-   */
-  private readonly qaFogRingRaw = numberFromQuery('fogRingRaw') === 1;
+  /* ⚠️ `?fogRingRaw=1` USED TO LIVE HERE AND IS GONE — `779dc62` DELETED THE DEFECT IT
+     EXISTED TO REPRODUCE. Its old wording, kept because a removed QA parameter is
+     otherwise indistinguishable from one that never worked:
+
+       > QA-only: `?fogRingRaw=1` hands `arena/fogRing.ts` the sim's LITERAL
+       > `safeRadius` instead of `fogDisplayRadius()`'s epsilon. It exists to keep an
+       > out-of-set defect REPRODUCIBLE rather than described — with it set,
+       > `?fogRadius=0` renders the sudden-death frame with no boundary at all, which
+       > is the bug `fogDisplayRadius` works around. **Delete both when the
+       > one-character fix lands in `fogRing.ts`.**
+
+     That fix landed (`fogRing.ts:update` now opens `active && safeRadiusUnits >= 0`),
+     so both are deleted here as that comment instructed. The defect is still
+     reproducible — on the OLD BUILD, which is where a known-bad belongs:
+     `tools/tmp/mg_fog.mjs --baseline <pre-779dc62 url>` drives exactly that arm, and
+     a `?fogRingRaw=1` on a build newer than this one is simply an unknown parameter
+     and is ignored, which is the same thing the raw path now does anyway. */
 
   /** QA mirror of the input → sim edge. Allocated once; see `MatchDebug`. */
   private readonly debug: MatchDebug = {
@@ -749,7 +758,7 @@ export class GameSession {
     this.stage.lighting.focus(startPos.x, startPos.z);
 
     this.fogRing.update(
-      this.fogDisplayRadius(),
+      this.state.safeRadius,
       this.state.elapsed / 1000,
       this.state.phase === 'playing',
       this.stage.rig,
@@ -761,33 +770,46 @@ export class GameSession {
     this.notifyPhase();
   }
 
-  /**
-   * The radius handed to the 3D boundary. Identical to `state.safeRadius` EXCEPT during
-   * sudden death, where it is a hair above zero instead of zero.
-   *
-   * 🚨 **THIS IS A WORKAROUND FOR AN OUT-OF-SET DEFECT AND IT SHOULD BE DELETED.**
-   * `arena/fogRing.ts:update` opens with `const wanted = active && safeRadiusUnits > 0`
-   * and ramps the WHOLE boundary out when that is false — so handing it the sim's literal
-   * `SUDDEN_DEATH_RADIUS` (0) makes the fog **disappear at exactly the moment it covers
-   * the arena**, which is the precise opposite of `DECISIONS §2`. Verified by rendering,
-   * not by reading: `?fogRadius=0` on the shipped build, before and after.
-   *
-   * The correct fix is one character in a file this pass does not own —
-   * `safeRadiusUnits >= 0`. `fogRing.ts` then behaves correctly at zero on its own terms:
-   * `curtainHeight(0)` clamps to `CHARACTER_HEIGHT`, `setRadius(0)` produces no NaN, and
-   * the canopy's outer ring is `max(FIELD_OUTER_UNITS, r + 200)` = 1500 wu, so the danger
-   * field covers everything the camera can show. **Remove this method when that lands.**
-   *
-   * The epsilon is deliberately far below one world unit: it must clear a `> 0` test and
-   * must not be a radius anybody could stand inside. It is presentation-only and never
-   * reaches the sim — `state.safeRadius` stays exactly 0, which is what the fog damage,
-   * the HUD's `outside` test and every instrument read.
-   */
-  private fogDisplayRadius(): number {
-    const r = this.state.safeRadius;
-    if (this.qaFogRingRaw) return r;
-    return r === SUDDEN_DEATH_RADIUS && this.state.phase === 'playing' ? 1e-6 : r;
-  }
+  /* ── `fogDisplayRadius()` WAS HERE AND IS DELETED — the defect it papered over is
+     fixed at source in `779dc62`. Its own comment carried the instruction, and it is
+     kept here rather than dropped, because a workaround whose reason has been removed
+     is otherwise the hardest kind of code to delete safely later:
+
+       > 🚨 THIS IS A WORKAROUND FOR AN OUT-OF-SET DEFECT AND IT SHOULD BE DELETED.
+       > `arena/fogRing.ts:update` opens with `const wanted = active && safeRadiusUnits
+       > > 0` and ramps the WHOLE boundary out when that is false — so handing it the
+       > sim's literal `SUDDEN_DEATH_RADIUS` (0) makes the fog disappear at exactly the
+       > moment it covers the arena […] The correct fix is one character in a file this
+       > pass does not own — `safeRadiusUnits >= 0`. **Remove this method when that
+       > lands.**
+
+     `fogRing.ts:533` now reads `const wanted = active && safeRadiusUnits >= 0`, so
+     `this.state.safeRadius` goes to the boundary unmodified at both call sites and the
+     presentation layer no longer holds a private opinion about what the sim's zero
+     means. `state.safeRadius` was ALWAYS exactly 0 — the epsilon never reached the sim,
+     the fog damage, the HUD's `outside` test or any instrument — so nothing downstream
+     of the sim can observe this deletion.
+
+     ⚠️ VERIFIED FROM PIXELS, WITH THE OLD BUILD AS THE KNOWN-BAD, because "it still
+     looks fine" is worthless against a defect that was invisible by construction.
+     `mg_fog.mjs`, `?fogRadius=0&simSpeed=0.05`, 844x390 at dpr 3, mean whole-frame luma:
+
+       arm                              raw path   workaround path   no-fog control
+       pre-fix build (5aa4655)             116.9              44.3            116.5
+       this tree (fix + no workaround)      44.3              44.3            116.5
+
+     The known-bad REPRODUCES — 116.9 against a 116.5 control, with
+     `fog_boundary.visible === false`, i.e. the old build's sudden-death frame IS the
+     no-fog frame — which is what licenses reading the rest of the table.
+     🚨 AND THE ROW THAT ACTUALLY RETIRES THIS METHOD IS THE DRIFT CONTROL, NOT THE FIX:
+     the workaround path reads 44.3 on both builds. The epsilon and the literal zero
+     render the same frame, so deleting it removes a branch and not a behaviour.
+
+     ⚠️ `&simSpeed=0.05` IS LOAD-BEARING. Sudden death does 50 HP/s to everyone, so at
+     real speed the match is over in about two seconds and `fogRing.update`'s `active`
+     flag (`phase === 'playing'`) correctly fades the boundary out — an earlier run of
+     this exact measurement photographed six cells of an ALREADY-ENDED match and passed
+     for the wrong reason. */
 
   /** Apply the QA-only `?fogRadius=` / `?px=` / `?py=` overrides to a fresh match.
    * A no-op unless those params are on the URL — see the field comments. */
@@ -1255,8 +1277,44 @@ export class GameSession {
     }
   }
 
+  /**
+   * Is the GROUND point under `(xM, zM)` actually inside the frame?
+   *
+   * 🚨 THIS TEST DID NOT EXIST AND THE HUD CLAMPED INSTEAD, WHICH AT SIX SEATS IS A
+   * PERMANENT FREE READ ON EVERY OPPONENT. Both projection helpers below returned a
+   * point for any fighter in front of the far plane, and `hud.ts:updateFloatingBars`
+   * then clamps x into `[56, innerWidth - 56]` and y down to the top bar — so a fighter
+   * 2 000 wu away got an HP pill pinned to the frame edge on the side they were on.
+   * Measured by the six-player acceptance pass: **63.7-82.9% of all opponent HP pills
+   * drawn at six seats belonged to a fighter whose projected point was outside a
+   * 1280x720 viewport**, at a mean separation of 1 534 wu (max 2 470) against
+   * `FAIR_PLAY.radiusUnits` of 199.2. `spawnDamageNumber` shares the clamp, so fog
+   * `-15`s for fighters two thousand units away landed on the edge as well.
+   *
+   * ⚠️ THE CLAMP ITSELF IS NOT THE BUG AND IS DELIBERATELY LEFT ALONE. Its comment
+   * describes a real, correct case — *"a fighter above the top of the frame is exactly
+   * when you most want to know their HP"* — and at TWO seats the opponent is nearly
+   * always on screen or dead, so the clamp could only ever fire in that case. Six seats
+   * is what turned a legitimate clamp into a bearing leak, and it quietly undoes both
+   * the fog of war and the concealment feature (`DECISIONS §29c`) at the same time.
+   *
+   * So the boundary moves rather than the clamp: **the HUD may clamp a point that is on
+   * screen; it may not be handed one that is not.** The test is on the fighter's GROUND
+   * point, not on the pill's anchor, and that is the whole precision of it — the anchor
+   * sits `FLOAT_BAR_HEIGHT` above the root, so it leaves the top of the frame while the
+   * fighter is still standing in it, which is exactly the case the clamp exists for.
+   * Testing the anchor would delete that case; testing the feet preserves it.
+   */
+  private groundOnScreen(xM: number, zM: number): boolean {
+    this.projectVec.set(xM, 0, zM);
+    this.projectVec.project(this.stage.rig.camera);
+    return this.projectVec.z <= 1
+      && Math.abs(this.projectVec.x) <= 1 && Math.abs(this.projectVec.y) <= 1;
+  }
+
   private projectToScreen(model: CharacterModel, alive: boolean): { x: number; y: number } | null {
     if (!alive) return null;
+    if (!this.groundOnScreen(model.root.position.x, model.root.position.z)) return null;
     this.projectVec.set(model.root.position.x, FLOAT_BAR_HEIGHT, model.root.position.z);
     this.projectVec.project(this.stage.rig.camera);
     if (this.projectVec.z > 1) return null;
@@ -1268,9 +1326,13 @@ export class GameSession {
   }
 
   /** Project an arbitrary WORLD-UNIT point (e.g. a hit location, not a character
-   * root) to screen space, for floating damage numbers. */
+   * root) to screen space, for floating damage numbers. Same off-screen rejection as
+   * `projectToScreen` and for the same reason: a damage number is a readout about a
+   * fighter, so one drawn for an off-screen fighter is the same free read the HP pill
+   * was — and `spawnDamageNumber` clamps identically. */
   private projectPointToScreen(xWU: number, yWU: number, heightM: number): { x: number; y: number } | null {
     const pos = groundPos(xWU, yWU);
+    if (!this.groundOnScreen(pos.x, pos.z)) return null;
     this.projectVec.set(pos.x, heightM, pos.z);
     this.projectVec.project(this.stage.rig.camera);
     if (this.projectVec.z > 1) return null;
@@ -1492,7 +1554,7 @@ export class GameSession {
     // The boundary is driven off the sim, but its drift/pulse runs on real time so it
     // keeps breathing through hit-stop (a frozen wall would read as a rendering hitch).
     this.fogRing.update(
-      this.fogDisplayRadius(),
+      this.state.safeRadius,
       this.clock.elapsedTime,
       this.state.phase === 'playing',
       this.stage.rig,
