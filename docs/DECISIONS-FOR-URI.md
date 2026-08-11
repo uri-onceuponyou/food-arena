@@ -8,9 +8,33 @@ Answer any subset. Unanswered items stay on the stated assumption.
 
 ---
 
-## The answer sheet — everything at a glance
+## 🔴 OPEN RIGHT NOW — four questions, four one-line answers
 
-You can settle most of this with one word each. Detail is in the numbered sections below.
+**As of `63407e8`, 2026-08-12.** Everything else on this page is history; these four are live.
+**Nothing is blocking** — every one has a default in force and running.
+
+| # | question | in force | what I'd do | cost to reverse |
+|---|---|---|---|---|
+| **§66** | 🔴 **Six-player has NO way in.** Where does the button live? How are the other five chosen? What level are five bots? | QA URL only | **Answer (1) and I'll wire it — ~15 lines.** A "Brawl" tile on home, five bots at your own level, is the smallest coherent version | it is new UI; nothing existing changes |
+| **§58** | **Sudden death fires at 30 s. Is that right?** ⚠️ It now decides **90.5%** of six-player matches (was 66%) — the seat fix made all six actually fight | 30 s | **Keep 30 s.** Moving it to ~42 s makes the scaled ring real but leaves sudden death lasting **3.2 s** — a blip, not a phase | one constant, nothing pinned |
+| **§71** | **Three icon subjects** — `boxBurger`, `stun`, `wrap` | as drawn | ⚠️ **"Leave it" is a real answer for all three** — every one ships beside its own text label. If you pick one, pick `wrap`: 0 of 30 judges, ten panels, and all three geometric options are closed by measurement | one drawing each |
+| **§33** | **Your phone model + iOS version, and a fresh 10-second capture** | unknown | **This is the only experiment that turns "−47.9% on desktop" into a real number on your device** | — |
+
+**If you only do one thing: play it for ten minutes.** The two most valuable bug reports this project
+has ever had came from exactly that, and both were invisible to every gate here. It has changed a lot
+since you last played — the map is 4× bigger, the controls moved off the play area, and the frame is
+**54% cheaper**.
+
+**If you only answer one thing: §66.** It is the only one holding real work back, and it unblocks two
+finished things that are currently unreachable (the payout curve and the result card).
+
+---
+
+## The history — everything previously parked, and where it landed
+
+⚠️ **This table used to be the answer sheet and told you *"if you only answer one thing: #6"* — which
+had been resolved for days.** It is kept as the record; the live questions are above. Detail for every
+row is in the numbered sections below.
 
 | # | question | in force now | my recommendation | cost to reverse |
 |---|---|---|---|---|
