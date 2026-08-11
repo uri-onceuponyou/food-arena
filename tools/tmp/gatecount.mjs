@@ -262,6 +262,7 @@ const OFFLINE = [
   { key: 'tools/arena-scan.mjs --selftest',      probes: [pr(['tools/arena-scan.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/valuescan.mjs --selftest',   probes: [pr(['tools/tmp/valuescan.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/haloprobe.mjs --selftest',   probes: [pr(['tools/tmp/haloprobe.mjs', '--selftest'], S)] },
+  { key: 'tools/tmp/lu_occlude.mjs --selftest', probes: [pr(['tools/tmp/lu_occlude.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/p5_dlprobe.mjs',             probes: [pr(['tools/tmp/p5_dlprobe.mjs'], S)] },
   { key: 'tools/match-sim.mjs --selftest',       probes: [pr(['tools/match-sim.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
@@ -301,6 +302,9 @@ const OFFLINE = [
   { key: 'tools/tmp/ir_ladder_anchors.mjs --selftest', probes: [pr(['tools/tmp/ir_ladder_anchors.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/ir_pathsweep.mjs --selftest',     probes: [pr(['tools/tmp/ir_pathsweep.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/ax_layout.mjs --selftest', probes: [pr(['tools/tmp/ax_layout.mjs', '--selftest'], SLASH_ASSERT)] },
+  // The ×4 arena that SHIPPED, as opposed to `ax_layout`'s candidate scalings. Offline and
+  // ~1 s: no browser reference in the file, timed before registering (the `hw_ord` lesson).
+  { key: 'tools/tmp/x4_layout.mjs --selftest', probes: [pr(['tools/tmp/x4_layout.mjs', '--selftest'], /^\s*PASS\s+(\d+) passed, \d+ failed\s*$/m)] },
   // NUMERATOR, not `SLASH_ASSERT`'s denominator — same reason as `hc_occluders` below. This
   // gate's whole subject is a set of numbers that are close to ZERO ("search buys nothing"),
   // and a partially-failing selftest reported as intact is the one failure mode that would
@@ -312,6 +316,9 @@ const OFFLINE = [
   { key: 'tools/tmp/icon_score.mjs --selftest', probes: [pr(['tools/tmp/icon_score.mjs', '--selftest'], /^selftest (\d+) pass \/ \d+ fail/m)] },
   { key: 'tools/tmp/ic_spec.mjs --selftest',   probes: [pr(['tools/tmp/ic_spec.mjs', '--selftest'], /^ic_spec selftest (\d+) pass \/ \d+ fail/m)] },
   { key: 'tools/tmp/ic_pair.mjs --selftest',   probes: [pr(['tools/tmp/ic_pair.mjs', '--selftest'], /^ic_pair selftest (\d+) pass \/ \d+ fail/m)] },
+  // ⚠️ Its whole output carries exactly ONE `n/n` line (checked: 1 match), so the bare
+  //    ratio pattern is unambiguous here and would be AMBIGUOUS in most other tools.
+  { key: 'tools/tmp/sc2_icons.mjs --selftest', probes: [pr(['tools/tmp/sc2_icons.mjs', '--selftest'], /^\s*(\d+)\/\d+\s*$/m)] },
   { key: 'tools/tmp/ac_engage.mjs --selftest', probes: [pr(['tools/tmp/ac_engage.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/ac_homing.mjs --selftest', probes: [pr(['tools/tmp/ac_homing.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/bl_vitals_gate.mjs --selftest', probes: [pr(['tools/tmp/bl_vitals_gate.mjs', '--selftest'], SLASH_ASSERT)] },
@@ -392,10 +399,25 @@ const SKIP = [
   ['tools/tmp/sk_shake.mjs --selftest', 'browser', 'frozen-frame bit-identity with camera shake ACTIVE, plus the dt>0 positive control; needs a real Stage.render() and a GL context'],
   ['tools/tmp/h49_ab.mjs --ref <sha>', 'browser', 'the §49f 2-fighter identity battery; overlays ONLY hud.ts so a peer mid-edit in src/game cannot leak in'],
   ['tools/tmp/h49_chips.mjs', 'browser', 'the chip rail above two seats, in BOTH DOM states — the touch state is the one that caught a real overlap'],
+  ['tools/tmp/lu_land.mjs', 'browser', 'the landscape-phone control layout: corner, centre column, hint/tray clearance, touch floor, safe-area insets, and a REAL CDP touch to prove the resting hints are transient'],
   ['tools/tmp/np_ab.mjs',        'browser', 'the N=2 presentation identity battery: 4 served arms, 9 compared fields, per-file tree control, roster-swap known-bad'],
   ['tools/tmp/np_nfighter.mjs', 'browser', 'N=3..6 presentation self-consistency + slot-swap known-bad'],
+  ['tools/tmp/x4_shot.mjs', 'browser', 'photographs a real 3/4/6-fighter opening on the arena\'s own ×4 spawns; its verdict is a set of PNGs plus a phase/HP census, not a number'],
+  // ⚠️ SLOWEST browser gate registered here — over ten minutes on a contended box. Its
+  //    selftest is AGGREGATE and needs the WHOLE 23-weapon sweep: one weapon exercises the
+  //    "picture changed" side and has nothing to assert on the null side, and vice versa,
+  //    so `--chars`/`--weapon` make it INVALID rather than merely narrower.
+  ['tools/tmp/hl_sweep.mjs --selftest', 'browser', 'weapon-halo sweep + 8 controls; needs the full 23-weapon sweep for its aggregate selftest to be valid'],
+  ['tools/tmp/sc2_manifest.mjs', 'browser', 'Add-to-Home-Screen manifest at 3 bases + 4 known-bad controls. ⚠️ 3 of 54 are RED today: its "pure HEAD has no manifest" control was pinned before 92e794a LANDED the manifest'],
+  ['tools/tmp/sc2_screen.mjs', 'browser', 'what a standalone home-screen launch changes about the frame — the guaranteed radius is unchanged, so aspect.mjs structurally cannot see it'],
+  ['tools/perf.mjs --mode tierselftest', 'browser', 'the known-bad input for `--device mobile`: arm A reproduces the pre-4be0733 bug (`high`), B is the fix (`low`), C a tablet (`medium`), D the desktop control'],
   ['tools/tmp/ab_basepath.mjs --selftest', 'browser', 'four vite builds plus a real page per cell; verdict is a PASS/FAIL matrix, not a count'],
-  ['tools/tmp/perf_tier.mjs --mode navselftest', 'browser', 'the same reload-guard proof for the CLONE of perf.mjs'],
+  // ⚠️ `tools/tmp/perf_tier.mjs --mode navselftest` was registered here and is GONE — the
+  //    file was deleted 2026-08-11 (a verbatim copy of `perf.mjs` that had diverged twice;
+  //    `perf.mjs --query <q>` subsumes it). Its reason was 'the same reload-guard proof for
+  //    the CLONE of perf.mjs'. §F2 asserts every SKIP entry points at a file that EXISTS, so
+  //    leaving this row would have failed gatecount's own selftest — which is the check that
+  //    makes a deletion and its registration land together or not at all.
   // ⚠️ SKIP for a SECOND reason on top of "browser", and it is the interesting one: its checked
   // count is NOT STABLE UNDER GPU CONTENTION. Observed `0 of 24` with "no verdict: 0" on one run
   // while five agents were rendering, against `0 of 57` with "no verdict: 3" on three consecutive

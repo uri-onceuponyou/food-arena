@@ -779,4 +779,66 @@ const CSS = `
   .tch-hint-ring { width: 76px; height: 76px; }
   .tch-hint { gap: 5px; }
 }
+
+/* ── LANDSCAPE: the aim hint steps aside for the cluster this HUD now parks in that
+   corner ────────────────────────────────────────────────────────────────────
+   ui/hud.ts moves the weapon tray out of the bottom-CENTRE — where it was hiding
+   5.75-7.92% of the 199.2 wu the camera guarantees every player can see — into a
+   two-column cluster in the bottom-RIGHT, which is this genre's place for the buttons
+   the firing thumb has to reach. That corner is where this hint sits.
+
+   The stick FLOATS, so this ring is a suggestion about where a thumb usually rests and
+   never a pad. But a suggestion drawn underneath four buttons is a bad suggestion, and
+   the two DO collide at 17% — measured, not predicted, at the widest phone:
+
+     cluster left edge  = W - safe-r - 12 - (2 x 58px + 8px gap)  = W - 136 = 708 at 844
+     hint ring          = centre 700, 76px wide  ->  662..738     30px INSIDE the cluster
+     hint LABEL         = centre 700, 92px       ->  654..746     38px INSIDE, and lower,
+                                                                 so it lands on the
+                                                                 cluster's second row
+
+   ⚠️ THE FIRST FIX WAS A PERCENTAGE AND THE PERCENTAGE WAS THE WRONG UNIT. Moving this
+   to 26% cleared the cluster at every width, but a percentage measures from the wrong
+   end: the cluster's left edge is a CONSTANT distance from the right of the screen, so
+   a percentage over-corrects on a wide phone and barely corrects on a narrow one. It
+   pushed the hint 69px past what was needed at 844 and 23px at 667 — inboard, toward
+   the middle of the frame, which is the expensive ground. Measured on
+   tools/tmp/lu_occlude.mjs, the hints' own share of the guaranteed view went UP:
+
+       844x390   1.51%  ->  5.46%
+       667x375   7.64%  ->  8.90%
+       932x430   0.99%  ->  4.42%
+
+   i.e. a third of the tray's saving was handed straight back. A CONSTANT px offset
+   gives a constant 12px of clearance at every width and keeps the hint as far outboard
+   as the cluster allows, which is the cheapest place it can be:
+
+     194 = 12 (safe gutter) + 124 (cluster) + 12 (clearance) + 46 (half the label)
+
+   ⚠️ 124 IS A CONSTANT ONLY BECAUSE ui/hud.ts WAS MADE TO MAKE IT ONE. Its 720px
+   breakpoint used to take a slot to 46px, so the cluster was 124px wide above it and
+   100px below, and one offset here could not be right at both: at 174 it cleared 667
+   and collided by 8px at 844, 932 and 740. lu_land.mjs found that — it is the defect
+   arm C exists for. The tray now pins 58px in this layout at every width, which also
+   hands the phone the BIGGER touch target rather than the smaller one.
+
+   The bottom offset drops from 22% to 14% for the same reason: the bottom edge of a 58
+   degree frame is the cheapest ground on screen, and a resting thumb is low anyway.
+
+   ⚠️ THIS MOVES THE HINT AND NOTHING ELSE. Where a stick may be PLANTED is unchanged —
+   ZONE_SPLIT is untouched, and W - 194 is still far inside the aim half at every
+   landscape phone width — and a finger landing on a weapon slot belongs to the slot by
+   this module's own coexistence rule (ownsTarget refuses a control), which is the
+   property that lets a button sit inside the aim half at all.
+
+   ⚠️ Scoped to fa-touch-capable + landscape to match the tray rule EXACTLY. If one of
+   the two ever moves without the other, the hint lands back under the buttons — so if
+   you change 194, change .hud-weapons in ui/hud.ts in the same commit.
+   tools/tmp/lu_land.mjs asserts the two do not overlap, so it will say so. */
+@media (orientation: landscape) {
+  html.fa-touch-capable .tch-hint--aim {
+    right: calc(var(--fa-safe-r, 0px) + 194px);
+    bottom: calc(var(--fa-safe-b, 0px) + 14%);
+  }
+}
 `;

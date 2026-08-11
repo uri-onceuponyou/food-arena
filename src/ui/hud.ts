@@ -2107,6 +2107,13 @@ html.fa-touch-capable .hud-radar {
 }
 
 /* ── Weapon bar ───────────────────────────────────────────────────────────── */
+/* 🚨 REVERSED FOR LANDSCAPE TOUCH — the paragraph below is kept as written because it
+   is the reasoning that was overturned, and it is wrong in an instructive way. See
+   "THE TRAY LEAVES THE CENTRE OF PLAY" at the very bottom of this sheet. In short: it
+   reasons entirely about THUMBS and says nothing about the WORLD. Both thumbs really
+   are clear of the bottom-centre band; the arena is not, and bottom-centre was hiding
+   5.75-7.92% of the 199.2 wu every player is guaranteed to see. Desktop and portrait
+   are unchanged and still get exactly what this paragraph describes. */
 /* Bottom-CENTRE, which on a phone in landscape is the one band along the bottom edge
    that neither thumb rests on — the sticks live in the two lower corners. It is also
    the only HUD element a touch player has to be able to HIT rather than read, which is
@@ -2900,4 +2907,104 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 html.fa-touch-capable .hud-topbar--chips ~ .hud-radar {
   top: calc(var(--fa-topbar-b, 118px) + 16px);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LANDSCAPE PHONE: THE TRAY LEAVES THE CENTRE OF PLAY
+   ═══════════════════════════════════════════════════════════════════════════
+
+   🚨 URI, FROM A LANDSCAPE PHONE: "the weapon choosing is on the most critical part
+   of the screen where most gameplay happens." He is right, and the rule this replaces
+   said the opposite in as many words — .hud-weapons above still opens with
+
+       "Bottom-CENTRE, which on a phone in landscape is the one band along the bottom
+        edge that neither thumb rests on"
+
+   which is true about THUMBS and silent about the WORLD. Both thumbs are indeed clear
+   of it; the arena is not. That sentence is kept above rather than deleted, because it
+   records the reasoning this rule reverses.
+
+   ── THE MEASUREMENT THAT SETTLES IT ────────────────────────────────────────
+   tools/tmp/lu_occlude.mjs scores a control in the one currency that means anything
+   here: the share of FAIR_PLAY.radiusUnits (199.2 wu, camera.ts, derived from
+   rules.ts) that it HIDES. Not pixels — a pixel at the bottom of a 58 degree frame
+   shows a fraction of the ground a pixel at the top does, so a pixel metric flatters
+   every control along the bottom edge, which is where all of them are.
+
+   Measured at e10baf6, fa-touch on, three landscape phone viewports:
+
+       viewport    weapon tray hides    all controls together
+       ─────────   ──────────────────   ─────────────────────
+       844x390     7.92% of the disc    21.88%
+       667x375     5.75%                22.66%
+       932x430     6.45%                17.01%
+
+   ── WHY THE CORNER IS NOT JUST TIDIER, IT IS ARITHMETICALLY CHEAPER ────────
+   The guarantee is a DISC inscribed in the frame. A disc inscribed in a rectangle
+   does not reach the rectangle's corners — so ground area hidden by a corner control
+   tends to zero while ground hidden by a centre-bottom one does not. The reference
+   pattern this genre settled on ("controls in the corners, the centre kept clear") is
+   therefore not a style: it is the layout that minimises exactly this quantity, and
+   the instrument arrives at it independently.
+
+   ── THE SHAPE ──────────────────────────────────────────────────────────────
+   A two-column cluster pinned to the BOTTOM-RIGHT corner, i.e. on the fire thumb's
+   own side, which is where this genre puts the buttons that thumb has to reach. Slots
+   stay 46px — the touch floor this HUD already committed to, and the reason the tray
+   is not simply made smaller. Four weapons give 2x2; the roster runs 1 to 4 weapons
+   (rules.ts: donut 1, lollipop 2, six at 3, three at 4) and a wrapping two-column grid
+   holds every one of them without a second template.
+
+   ⚠️ SCOPED TO html.fa-touch-capable AND TO LANDSCAPE, AND BOTH HALVES ARE LOAD-BEARING.
+   * fa-touch-capable, because a DESKTOP tray is a readout with 1-4 printed on it, not
+     a control a thumb must hit; bottom-centre is where the eye already is and nothing
+     about it is in anyone's way. It also means menu_accept's five landscape viewports
+     and every existing headless probe see byte-identical pixels, so this pass cannot
+     move a number it was not aimed at.
+   * (orientation: landscape), because portrait is DECISIONS §14's rotate-prompt case
+     and menu_accept_portrait (219) is a shipped gate over it. Portrait keeps the
+     centre tray it was measured with.
+   ⚠️ NOT keyed on width. A tablet in landscape is a coarse pointer with two thumbs on
+   the same two corners; the defect is the pointer and the orientation, not the size. */
+@media (orientation: landscape) {
+  html.fa-touch-capable .hud-weapons {
+    left: auto;
+    transform: none;
+    right: calc(var(--fa-safe-r, 0px) + 12px);
+    bottom: calc(var(--fa-safe-b, 0px) + 12px);
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    justify-items: center;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ── 58px HERE EVEN BELOW 720, AND THAT IS A REVERSAL WORTH READING ────────
+     The max-width: 720px rule above takes a slot to 46px, and its own comment calls 46
+     "the touch floor for the one HUD control a phone must be able to hit". It was never
+     a preference for a smaller button — it was arithmetic forced by FOUR OF THEM IN A
+     ROW: 4 x 58 + 3 x 10 = 262px of a 667px frame, sitting across the middle. In two
+     columns the constraint is gone (2 x 58 + 8 = 124px), so the phone gets the LARGER
+     target rather than the smaller one, which is the right way round and was not
+     available before.
+
+     🚨 AND FIXING IT HERE IS WHAT MAKES THE CLUSTER ONE WIDTH AT EVERY VIEWPORT.
+     That is not tidiness, it is the fix for a measured defect: game/touch.ts has to
+     place the aim hint clear of this cluster, and it can only do that with a constant
+     if the cluster IS a constant. The first cut let the 720px breakpoint through, so the
+     cluster was 124px wide above it and 100px below — and tools/tmp/lu_land.mjs caught
+     an 8px label collision at 844, 932 and 740 and a clean pass at 667, from ONE
+     offset that was correct for the narrow case only. Two files, two stylesheets, one
+     silent coupling. Now: 124px everywhere, and lu_land asserts the clearance. */
+  html.fa-touch-capable .hud-weapons .hud-weapon-slot {
+    width: 58px;
+    height: 58px;
+    border-radius: 16px;
+  }
+  html.fa-touch-capable .hud-weapons .hud-weapon-emoji { font-size: 26px; }
+}
+/* ⚠️ THE AIM STICK'S RESTING HINT HAS TO MOVE OFF THIS CLUSTER, AND THAT RULE IS NOT
+   HERE. It lives beside the element it restyles, in game/touch.ts (search for
+   "the cluster this HUD now parks in that corner"), because .tch-hint--aim is that
+   module's element and a cross-file rule for it is a rule nobody maintaining either
+   file would find. The arithmetic tying the two together is written out there. */
 `;
