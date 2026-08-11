@@ -499,15 +499,31 @@ const PUDDLE_SPLASH_DIST_WU = 18;
 //
 //     So: a projectile's own bounding radius must reach `PROJECTILE_MIN_R` (0.26 m,
 //     25% of `CHARACTER_HEIGHT`, half of what the generic path has always drawn, and
-//     well inside the sim's own 1.26 m `HIT_RADIUS_VS_PLAYER`), and its halo must sit
-//     at `PROJECTILE_HALO_L` — which is rule 1's ">= 0.15 above the cast's 0.302",
-//     satisfied by 0.358, and additionally above the ARENA FLOOR's measured 0.4809,
-//     which rule 1 does not ask for and a projectile needs because it spends its whole
-//     life over the tile field rather than on top of a character.
+//     well inside the sim's own 1.26 m `HIT_RADIUS_VS_PLAYER`), and its halo must
+//     SEPARATE FROM THE GROUND IT IS SEEN AGAINST — upward for a weapon darker than
+//     that ground, DOWNWARD for one lighter than it.
+//
+//     ⚠️ THE ONE-DIRECTIONAL WORDING IS KEPT HERE BECAUSE IT WAS TRUE FOR ONE MORNING:
+//       *"...and its halo must sit at `PROJECTILE_HALO_L` — which is rule 1's '>= 0.15
+//       above the cast's 0.302', satisfied by 0.358, and additionally above the ARENA
+//       FLOOR's measured 0.4809, which rule 1 does not ask for and a projectile needs
+//       because it spends its whole life over the tile field rather than on top of a
+//       character."*
+//     `b9bc00e` then laid six CREAM CONCEALMENT PATCHES on that tile field, rendering
+//     at 0.81 luma. "Above the floor" stopped being a single direction the moment the
+//     arena had two floors 0.33 luma apart, and eight weapons whose own colour is
+//     0.83–1.00 were left with a halo of their own pale colour on the paler of the two.
+//     `tools/tmp/p2_bgcross.mjs` measured the collision (Spearman ρ of dE against the
+//     weapon's OWN lightness = **−0.738**, against 0.238 for hue distance) and
+//     `tools/tmp/hl_sweep.mjs` measured the fix on both surfaces at once. Rule 1 is
+//     still satisfied for those eight — by their SCULPT, which clears the cast by
+//     0.53–0.70 — and the halo is what clears the ground. See `PROJECTILE_HALO_L_DARK`.
 //     Both are enforced in `vfx.ts` for EVERY weapon, generic and bespoke, and neither
-//     can be un-met by a weapon file. The instrument that checks it is
-//     `tools/tmp/pj_probe.mjs`, and its known-bad is a projectile forced to the
-//     background's own measured colour, which it must call invisible.
+//     can be un-met by a weapon file. The instruments that check it are
+//     `tools/tmp/pj_probe.mjs` — known-bad: a projectile forced to the background's own
+//     measured colour, which it must call invisible — and `tools/tmp/hl_sweep.mjs`,
+//     whose known-bad is the OPPOSITE: fifteen weapons that must come back byte- and
+//     digit-identical, in the pixels as well as in the median.
 //
 // Verified with `node tools/arena-scan.mjs --url $URL --baseline
 // tools/scan/colour-baseline.json`: no colour regressions, and hue overlap /
@@ -1166,11 +1182,20 @@ function buildGlazeMarkTexture(variant: number): THREE.CanvasTexture {
 //     fault, and it keeps the thing on screen looking like a tomato rather than
 //     turning it into a coloured dot.
 //  2. HALO — a camera-facing sprite ringing the (now correctly sized) sculpt, with a
-//     TRANSPARENT CENTRE so the sculpt reads through it, a bright vivid band, and a
-//     thin DARK OUTER RIM. The rim is the value-straddle and it is not optional:
+//     TRANSPARENT CENTRE so the sculpt reads through it, a vivid band, and a thin DARK
+//     OUTER RIM. The rim is the value-straddle and it is not optional:
 //     `b967242` measured that "the cast band and the floor band are only ~0.10 luma
 //     apart, so no single value is far from both", and a projectile crosses the rose
 //     tile (L 0.48), the pale plank pad and the cast itself inside one flight.
+//
+//     ⚠️ AND THE BAND'S VALUE IS NOT ALWAYS BRIGHT — IT IS THE COUNTERPART OF THE
+//     SCULPT. Fifteen weapons are darker than the ground and keep the bright band
+//     (`PROJECTILE_HALO_L` 0.66); eight are lighter than the palest ground surface the
+//     arena now has and get a DARK one (`PROJECTILE_HALO_L_DARK` 0.40). A bright band
+//     on a `#FFE9A8` weapon over `b9bc00e`'s cream cloth is the same colour as the
+//     cloth, which is the whole reason this paragraph has a second half. Measured over
+//     both surfaces on one frozen frame: the eight rise 1.76-4.63x on their WORST
+//     background, and the fifteen come back unchanged to four decimals.
 //
 // ── WHAT WAS BUILT, MEASURED, LOOKED AT AND REMOVED ────────────────────────────
 //
@@ -1266,14 +1291,103 @@ const PROJECTILE_SHELL_SCALE = 1.65;
 const PROJECTILE_HALO_MIN_R = 0.36;
 const PROJECTILE_HALO_MAX_R = 0.64;
 /**
- * HSL lightness floor for the halo, in sRGB.
+ * HSL lightness for the halo of a weapon DARKER than the ground it flies over.
  *
  * 0.66 clears the cast's 0.302 by 0.358 (rule 1 asks 0.15) and the arena floor's
- * measured 0.4809 by 0.18. `Math.max` rather than an assignment, so a weapon whose
- * colour is already lighter than this — Rice `#FFFFFF`, Disc `#F4E9DA`, Egg's
- * `#FFF8EA` — is not DARKENED into a grey by its own legibility treatment.
+ * measured 0.4809 by 0.18.
+ *
+ * ⚠️ THE OLD WORDING IS KEPT HERE BECAUSE IT WAS RIGHT AND THEN THE ARENA MOVED:
+ *   *"`Math.max` rather than an assignment, so a weapon whose colour is already lighter
+ *   than this — Rice `#FFFFFF`, Disc `#F4E9DA`, Egg's `#FFF8EA` — is not DARKENED into
+ *   a grey by its own legibility treatment."*
+ * That reasoning holds only while the palest surface in the arena is the 0.4809 tile.
+ * `b9bc00e` gave the arena six CONCEALMENT patches the same morning — cream ground
+ * cloth (`arena/shared.ts:concealCloth` #E9DCC0, crockery #F7F1E4) which renders at
+ * **0.81 luma, and 0.86 under a shot** — and a floor with no ceiling is a NO-OP for
+ * exactly the weapons that then need help. Measured on the cloth, `pizza.Dough` scored
+ * dE **0.0779** against a roster median near 0.28. See `PROJECTILE_HALO_L_DARK`.
  */
 const PROJECTILE_HALO_L = 0.66;
+/**
+ * HSL lightness for the halo of a weapon LIGHTER than the ground it flies over.
+ *
+ * ── THE RULE: A HALO IS THE VALUE COUNTERPART OF ITS SCULPT, NOT A COPY OF IT ────
+ *
+ * `PROJECTILE_HALO_L` above is one half of a two-sided rule that was only ever written
+ * down as one side. A dark weapon gets a LIGHT ring; a weapon that is already its own
+ * light source gets a DARK one. Both are the same statement — *separate the shot from
+ * the ground it is seen against* — and the direction is dictated by the weapon, not
+ * chosen. `b967242` and hue-contract rule 3 reached this conclusion for ground marks
+ * already: *"a warm surface only competes with the cast when it shares the cast's VALUE
+ * as well as its hue"*, and a mark on a pale floor must be **spent dark**.
+ *
+ * ── WHY 0.40, AND WHY IT IS NOT THE VALUE THE SWEEP SCORED BEST ─────────────────
+ *
+ * `tools/tmp/hl_sweep.mjs` walked 0.68 → 0.28 on one frozen mid-flight frame, at BOTH
+ * stations, with fifteen weapons held as an exact null control. On the CLOTH the score
+ * rises at every step down (`pizza.Dough` 0.0779 → 0.1735 → 0.2088 → 0.2366 → 0.2654 →
+ * **0.3345** → 0.4737 → 0.6241) — so the cloth alone would choose black.
+ *
+ * 🚨 THE ROSE TILE IS WHAT MAKES THE WINDOW, AND `sushi.Rice` DRAWS IT EXACTLY. Its
+ * HOME dE does not fall or rise monotonically; it makes a **V with its minimum at
+ * 0.46**: 0.6309 base → 0.3412 → 0.2917 → 0.2332 → **0.2229** → 0.3181 → 0.4363 →
+ * 0.5328. That trough is not noise and it is not a property of the weapon — it is the
+ * halo passing THROUGH the tile's own rendered value (0.5476 under the shot; the file's
+ * canonical floor figure is 0.4809). A treatment that lands in 0.46–0.55 is invisible
+ * on the tile for the identical reason the shipped one is invisible on the cloth.
+ * So the value must sit BELOW that band, and the sweep cannot say how far below,
+ * because it has no term for anything except separation (`docs/AGENT-BRIEF.md` §4.6 —
+ * ask what the metric can EXPRESS; this one cannot express "too dark"). Two constraints
+ * it is blind to close the window from the other side:
+ *
+ *  * **Above the cast, which lives at 0.302.** A halo darker than a fighter turns a
+ *    projectile crossing one into a hole punched in them, and re-creates on the cast
+ *    exactly the collision this change removes from the ground. 0.40 keeps 0.098 of
+ *    clearance; 0.34 keeps 0.038; 0.28 is DARKER than the cast.
+ *  * **Chroma is a parabola in L peaking at 0.5.** `(1 - |2L - 1|) * S` gives 0.80·S at
+ *    0.40 against 0.34·S at `#FFE9A8`'s own 0.829, so this treatment MORE THAN DOUBLES
+ *    the halo's chroma — Dough/Noodle/Hatch 0.341 → 0.800, Disc/Shards 0.125 → 0.541 —
+ *    and all five of those are WARM, which `arena-scan` currently reports as the scarce
+ *    budget. Every step below 0.40 hands chroma back.
+ *
+ * The admissible window is therefore roughly **0.38–0.44** and 0.40 is in it. The best
+ * score on the sweep was 0.28 and it is rejected.
+ *
+ * ⚠️ `#FFFFFF` (sushi.Rice) HAS S = 0, SO IT BECOMES **#666666** AND GAINS NOTHING BUT
+ * VALUE — there is no chroma in the source to redistribute. This is not the banned "fix
+ * by desaturating" (nothing is removed, and the halo is still a deep version of the
+ * weapon's own colour, which is what the rim has always been), and the legibility win is
+ * the largest in the roster: on the cloth its five pellets are currently the same white
+ * as the CROCKERY PROPS scattered on that cloth, so it is an identity collision as well
+ * as a contrast one, and `shots/hl/ladder/sushi.Rice.cloth.*.png` shows both states.
+ * But a grey ring is the one output of this rule that is not "vivid", and the cause is
+ * upstream: `rules.ts` gives Rice the only ACHROMATIC weapon colour in the roster. A
+ * faintly tinted white would give this treatment something to work with. Reported to
+ * that file's owner, not changed here.
+ */
+const PROJECTILE_HALO_L_DARK = 0.40;
+/**
+ * The lightness above which a weapon is treated as its own light source.
+ *
+ * ⚠️ NOT A TUNED CONSTANT — IT SITS IN AN EMPTY BAND. The 23 ranged halo colours are
+ * bimodal with a **0.104-wide gap and nothing in it**: eight sit at 0.8294–1.000
+ * (`#FFE9A8` 0.829, `#BFEFFF` 0.874, `#F4E9DA` 0.906, `#FFFFFF` 1.000) and the next
+ * one down is `#FFD873` at 0.7255, then 0.7176, 0.7157. **Any split in 0.73–0.82
+ * selects exactly the same eight**, so this number can move by ±0.05 without changing
+ * a single pixel — which is what makes it a threshold rather than a dial. 0.78 is
+ * near the centre of the band.
+ *
+ * A hard split is also correct rather than merely convenient: a smooth ramp between
+ * the two treatments would pass intermediate weapons through ~0.53, and the rose tile
+ * renders at 0.48–0.55. The blend of the two right answers is the one wrong answer.
+ *
+ * ⚠️ THE NEXT WEAPON DOWN IS THE ONE TO WATCH. `pizza.Cheese` `#FFD873` (0.7255) is
+ * outside this rule and scores dE **0.1586** on the cloth — the worst of the fifteen
+ * this rule does not touch. Including it would mean a split at 0.72, which leaves
+ * **0.008** of margin to `donut.Candy` (0.7176), and Candy scores 0.357 on the cloth
+ * and needs nothing. Reported rather than absorbed.
+ */
+const PROJECTILE_HALO_L_SPLIT = 0.78;
 /**
  * Saturation multiplier for the halo.
  *
@@ -1285,6 +1399,11 @@ const PROJECTILE_HALO_L = 0.66;
  * floor)** while cool is over target. Raising HSL lightness at constant S already
  * costs chroma — it is `(1 - |2L - 1|) * S` — so S is pushed up to pay some of that
  * back. "Vivid" is the word Uri used and it is the opposite of a white mix.
+ *
+ * ⚠️ AND FOR THE EIGHT WEAPONS ON `PROJECTILE_HALO_L_DARK` THE SAME ALGEBRA RUNS THE
+ * OTHER WAY: that chroma term is a parabola peaking at L 0.5, so DARKENING 0.829 → 0.40
+ * does not cost chroma, it **more than doubles** it (0.341·S → 0.800·S). The multiplier
+ * below is a top-up for the light treatment and a bonus on the dark one.
  */
 const PROJECTILE_HALO_SAT_MUL = 1.25;
 /** Below the fog CURTAIN's 7 — see the block above. Above the ground stack. */
@@ -1369,7 +1488,16 @@ function haloColorFor(hex: string): string {
   }
   const l0 = (mx + mn) / 2;
   const s0 = d < 1e-6 ? 0 : d / (1 - Math.abs(2 * l0 - 1));
-  const l = Math.max(l0, PROJECTILE_HALO_L);
+  // TWO-SIDED, and the branch order matters: a weapon above the split is ASSIGNED the
+  // dark value, never `Math.min`-ed toward it. A ceiling below the 0.66 floor would
+  // drag every halo in the game down to it — including the dark half the floor exists
+  // to rescue — and that is precisely the change that would move all 23 weapons and
+  // break the null control. FOURTEEN of the twenty-three weapons are provably untouched
+  // — measured, not asserted: identical dE to four decimals at both stations and
+  // byte-identical crops. `burrito.Swarm` is the fifteenth and is a PARTIAL case: it
+  // draws four sculpts under one key and exactly one of its four halo colours
+  // (`#F4E9DA`, shared with `burrito.Disc`) is above the split.
+  const l = l0 >= PROJECTILE_HALO_L_SPLIT ? PROJECTILE_HALO_L_DARK : Math.max(l0, PROJECTILE_HALO_L);
   const s = Math.min(1, s0 * PROJECTILE_HALO_SAT_MUL);
   const c = (1 - Math.abs(2 * l - 1)) * s;
   const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
