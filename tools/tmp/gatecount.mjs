@@ -356,6 +356,7 @@ const SKIP = [
   // like a well-behaved offline count.
   ['tools/tmp/hw_ord.mjs --selftest',    'browser', 'renderOrder choice for a transparent ground-stack material; ignores --selftest, runs the real probe'],
   ['tools/tmp/hw_burner.mjs --selftest', 'browser', 'the burner ablation with its positive control; ignores --selftest, runs the real probe'],
+  ['tools/tmp/bw_brow.mjs --selftest', 'browser', 'column-wise brow-to-eye gap and eye-region ink share, ablated through the shipped render path'],
   ['tools/tmp/si_gap.mjs --selftest',  'browser', 'delivered geometry of a shadowed CSS declaration on the live element'],
   ['tools/tmp/si_fit.mjs --selftest',  'browser', 'what a larger icon costs its host — line box, overflow, tap target'],
   ['tools/tmp/si_pair.mjs --selftest', 'browser', 'paired plate that can vary SIZE per arm; ic_pair structurally cannot'],

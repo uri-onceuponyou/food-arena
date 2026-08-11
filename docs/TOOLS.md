@@ -362,7 +362,7 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **95**, and
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **96**, and
 every one exists because something shipped past its absence.
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
@@ -451,6 +451,7 @@ counts and sit with `chars_metrics`:
 | `node tools/tmp/rg_taper.mjs --selftest` | **8** | proves the shared `taperedSegment` is equivalent to BOTH divergent dialects it replaces — **832 comparisons, worst \|Δ\| exactly 0**. Known-bads require failure. This is what made the six-copy consolidation a refactor rather than a rewrite |
 | `node tools/tmp/rg_gap.mjs --selftest` | **13** | `fitPelvis()` — 16 rays × 9 heights, deforming ring-by-ring and **re-centring as well as shrinking** (one cross-section is not enough; a mass curves back at its lowest pole). ⚠️ **It REFUSES when fewer than half the rays find a body**, which is the pelvis's whole reason to exist — no shipped character reaches that branch, so it is proved against a deliberately torso-less rig |
 | `node tools/tmp/rg_solid.mjs --selftest` | **7** | ⚠️ **VALID AT PITCH 58 ONLY.** It frames the model's own bbox; `charStage` does not. At pitch 20 it reported burrito's neck column at 0.665 where the shipped capture measures **0 px**, and egg's pelvis at 0.941 where the capture measures **0** — **wrong by up to 35×, ranking not preserved.** Caught only by reading the PNG |
+| `node tools/tmp/bw_brow.mjs --selftest` | ⚠️ browser, **6** | column-wise brow-to-eye gap and eye-region ink share, ablated through the shipped render path at either camera. ⚠️ **Never quote it for pupils — that is `ey_pacman`.** 🚨 **Its first version classified a LIT frame by dominant channel and reported `lid = 101,125 px` on a character with NO LID MESH** (a pale-blue bottle is `G && B && !R`) — and it **survived its own hidden-brow known-bad on 8 px of stray magenta.** The scene is blacked out first now, and two of its six arms exist only because of that |
 | `node tools/tmp/si_gap.mjs --selftest` | ⚠️ browser, **8** | measures a shadowed CSS declaration on the **live element**. It is what let `characterSelect.ts`'s `gap: 1px` be **deleted rather than re-ordered**: Δh **0.00** at three viewports, because the declaration was authored for a `column` and ≤460 is a strict subset of ≤560 where the element is always a `nowrap` **row**. It bought 0.00 px of the vertical budget it was written for |
 | `node tools/tmp/si_fit.mjs --selftest` | ⚠️ browser, **7** | what a larger icon costs its host — line box, `scrollWidth − clientWidth`, tap target. Used to prove **nothing came out of any text** when five icon sites grew: 0 clipped before, 0 after, at three viewports |
 | `node tools/tmp/si_pair.mjs --selftest` | ⚠️ browser, **9** | a paired plate that can vary **SIZE** per arm. ⚠️ Exists because **`ic_pair` structurally cannot ask a size question** — its page keys box and plate off `SPEC.icons[name]`, so both arms of a subject share one size. It also **states when its own floor is unusable**: if the illegible twin splits 0 of 3 it was misread *consistently*, and only \|Δ\|≥2 resolves |
