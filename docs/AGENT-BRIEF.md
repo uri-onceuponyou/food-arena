@@ -63,6 +63,16 @@ your run; it does not remove peers' half-saved work. **For any A/B you will quot
 DETACHED WORKTREE of a known commit.**
 ⚠️ A fresh snapshot's **first** client eats a dep-optimisation reload that presents as
 `execution context was destroyed`. Warm it with a cheap page load.
+🚨 **`rg_lib.loadCast` IGNORES `headserve` ENTIRELY — SO A `--ref`-PINNED A/B READS THE WORKING TREE
+FOR BOTH ARMS.** `buildBundle` esbuilds straight out of `REPO`. Both arms then return byte-identical
+numbers on every column, **which reads exactly like "the change did nothing"** — the most dangerous
+possible failure, because a null result is a normal outcome here and nobody re-checks it. **Every
+tool built on `rg_lib` inherits this.** For a pinned A/B, use a **detached worktree of the SHA** with
+`node_modules` symlinked, not `--ref`.
+
+⚠️ **An UNNAMED mesh is invisible to every diagnostic here.** Ablation, part maps and the brow/eye
+tools all key on `name`. If you build geometry you may later need to measure, name it.
+
 🚨 **A TOOL THAT EXPORTS ANYTHING NEEDS AN `IS_MAIN` GUARD, AND THREE HERE DID NOT.** Making a
 function importable — the right instinct, so a second tool reuses a validated rig instead of copying
 it — silently makes the whole CLI path run on import. Measured tonight: importing `snapsweep.mjs`
