@@ -4006,12 +4006,37 @@ over the full 71 wu slow field. Nearest legal ground is **75 wu outside**. **Two
 ever enter.** `sp_place` now *prints* this every run and deliberately does **not** assert it — a bug-pin
 that goes red when the bug is fixed is a trap. Routed to the arena owner.
 
-### ⚠️ A fix that emptied its own validator's corpus
+### ⚠️ A guard whose default stopped partitioning its corpus
 
-**`hl_sweep --selftest` is INVALID, not merely red.** `50c5272` (the halo ceiling) moved **every weapon
-to one side of the 0.75 split**, so its `PIX` control has nothing left to exercise. The fix removed the
-population its own guard was written to discriminate. Nothing is wrong with the shipped behaviour; the
-guard can no longer speak about it.
+🚨 **THE SENTENCE THAT STOOD HERE WAS WRONG AND IS KEPT FOR THE LESSON:** *"`50c5272` moved every weapon
+to one side of the 0.75 split, so its `PIX` control has nothing left to exercise — the fix emptied the
+population its own guard was written to discriminate."* **The corpus was never empty.**
+
+Measured over all **33 shipped halo colours**: `--split 0.75` selects **0 of 33**, and **0.53 selects 23**.
+The real cause is subtler and more useful: **`vfx.ts` splits on the WEAPON's colour; `hl_sweep:retarget`
+splits on the HALO MATERIAL's.** Those were the same number **only while the bug existed** — the fix made
+them different, and the guard's default went on pointing at the old one. **The corpus stopped being
+partitioned, which is not the same thing as being empty**, and I reported the wrong mechanism because I
+inferred it from a count instead of measuring the population.
+
+Re-aimed rather than retired, and it is now **strictly more instrument**: `PIX` went from vacuous to
+exercised, and a full live run then derived **0.5294 from the shipped materials on its own** — two paths,
+no shared code, same answer. ⚠️ **Still INVALID on one control, `SWAP` at 12 of 22** (reproducing an
+inherited 12-of-23; an earlier "6 of 6" reading of mine was a partial read). Every other control passes
+22/22. **Routed, not papered over.**
+
+### 🚨 AND THE SAME CLASS, ONE FILE OVER, WITH A GREEN COUNT THE WHOLE TIME
+
+**`valuescan --selftest` was 105/105 green throughout — while 14 of its 18 stations were measuring the
+wrong place.** The whole table was 1× coordinates on the ×4 map: **eleven stations were inside a
+`CoverBox`**, and quadrant coverage was **NW 18 / NE 0 / SW 0 / SE 0.** Now 2 of 18, spread 4/2/5/7.
+**`--selftest` structurally cannot see this** — it validates the tool's logic, not where the tool is
+pointed. Exactly `arena-scan`'s defect in a second file, found only because someone re-derived the table
+rather than trusting the green.
+
+⚠️ And one station was **re-aimed rather than migrated, deliberately**: `fog_late` was named for a
+nearly-closed ring, and **no shipped match holds one any more** since sudden death collapses it. It now
+says so in place of pretending.
 
 ### Still red, all routed, none from this work
 
@@ -4386,3 +4411,58 @@ theoretical, and it is also **the one thing that must change before six seats sh
 because both reducers prefer the lower id on a tie, so at `hpSpread === 0` *"the winner had the least HP"*
 is true exactly when *"the most"* is. **Neither was caught by a check.** That is now **seven** instances
 tonight of a control that could not distinguish its own two arms.
+
+---
+
+## 65. ✅ THE GATE BATTERY IS AT **ZERO FAULTS** — 69 verified, 57 skipped. And two gaps `gatecount` structurally could not see.
+
+Measured at `09c84d4` on a `git worktree --detach` tree. Baseline was 2; three more appeared from peers'
+commits mid-run and all are closed. Four new netcode gates registered with every count personally
+re-run — `nw_wire` **67**, `nw_stack` **77**, `nw_delta` **28**, `nw_profile` **21** — plus `s49_mutants`
+**29**, `as_cost` **34**, `sc2_manifest` **55**, `ac_homing` **12**, `np_nfighter` **64**, `tf_reach` **9**,
+`tf_bitid` **2**, `sim.test.mjs` **476**, `gatecount --selftest` **42**.
+
+### 🚨 Two gaps the guard-checker could not detect about itself
+
+- **`hc_occluders` was registered OFFLINE and launches Chromium** — so **`gatecount` has been booting a
+  GPU probe on every run.** It failed only *under contention*: `GATE-FAIL` inside a battery, **exit 0 on
+  three consecutive standalone runs of the same worktree.** A flake that is deterministic when you check
+  it alone is the hardest kind to believe.
+- **`tf_reach` and `tf_bitid` were committed with no table row at all.** ⚠️ **`gatecount` faults on a row
+  without an entry, and never on a file without a row** — so an unregistered gate is invisible to the
+  thing whose job is registration. Both now registered.
+
+### The re-fixtures, each with the known-bad it was shown to fail on
+
+- **`s49_mutants`** — sudden death makes every timeout tick a **fog** tick, taking 15 HP *absolute* off
+  both fighters, so ties built from unequal pools (50/100 vs 45/90) stop being ties: 0.3500 vs 0.3333.
+  ⚠️ **Only one of the three broken rows went red** — a rung-2 row kept passing **with the right answer
+  decided by the wrong rung**, so "revert and watch it fail" was never available for it.
+- **`as_cost`** — A1 was a **bug-pin** asserting that `scaleArena` *drops* concealment; `72d50a4` fixed
+  the bug, so the pin inverted. Old wording kept; known-bad is the historical drop.
+- **`sc2_manifest`** — the *"no manifest"* control now **ablates the shipped build** (three removals, each
+  required to bite) with a paired positive control on the same dist at the same base, instead of relying
+  on a pre-manifest HEAD that no longer exists.
+- **`ac_homing`** — the literal `160` was a weapon's **old speed**; derived, it reads 0/27.
+- **`np_nfighter`** — the pre-change file was run as a control: **62 passed, 0 failed with its measuring
+  ring 1,077 wu off centre.** Centre is now read live and `resolveCenter` **throws rather than defaulting**.
+
+### `hm_audit` — RETIRED, with the reason recorded
+
+Its purpose (pricing the retirement options) is discharged now that the relative-frame rule shipped, and
+it was structurally fragile besides: **it staged mutations by substituting on literal source strings**,
+both of which `af35362` rewrote. A tool that patches source by exact text match breaks silently the day
+anyone touches the line.
+
+### Two small items routed
+
+- **`hl_sweep`'s `SWAP` control, 12 of 22** — the only thing keeping it invalid. Needs a browser owner.
+- **`nw_wire.mjs` contains two literal NUL bytes** (written raw rather than escaped). Legitimate test
+  data — but `file` reports the source as **binary** and **`grep` silently skips it**, so that file is
+  invisible to every text search in the repo. One-character fix, zero behaviour change.
+
+### ⚠️ A correction to §62
+
+I reported `docs/TOOLS.md`'s `h49_chips` row as saying `+156 --touch` against a measured 551. **There is
+no `+156` anywhere in the file** — the row already reads **293** (551 with `--touch`), landed in
+`bd39464`. I passed on a stale reading without checking it.
