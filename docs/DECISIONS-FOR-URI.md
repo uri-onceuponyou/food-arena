@@ -4027,3 +4027,81 @@ Nothing lost and the tree builds, but that commit is mislabelled forever, and HE
 for two hours specifically to avoid doing the same to the peer. **Pathspec protects you from your own
 index, never from a second agent in your file** — CLAUDE.md rule 11, demonstrated for the third time
 this session.
+
+---
+
+## 61. ✅ DELTA COMPRESSION + THE CURVE WIRED THROUGH — `a588066`. **And wiring it up found a silent 10-trophy-per-match bug.**
+
+### 🔴 The bug that only appeared when two correct pieces were connected
+
+`src/net/lobby.ts` priced a whole league off **one shared curve**. But `trophyRoad.ts:placementCurve`
+says outright that *"a field whose members sit at different standings needs one call per finisher"* —
+and a league is exactly that field. Measured: **a 3,000-trophy loser priced on a curve built at 0
+trophies is charged 0 instead of −10**, because the grace band belongs to the rookie, not the veteran.
+**A 10-trophy error every match, silently.**
+
+`applyMatchResult` now prices **every finisher at their own standing**; the curve argument survives as an
+explicit override for a fixed-rate event. ⚠️ **Neither the payout pass nor the netcode pass could have
+found this alone** — the curve was right, the caller was right about two seats, and the defect lived in
+the join. That is the case for the six-player end-to-end acceptance run now in flight.
+
+Also gone: **`twoSeatCurve`'s hardcoded `15`** where `MATCH_PAYOUT.trophiesWin` belonged — retune the
+constant and the league would have kept paying the old rate.
+
+### XP was a SECOND two-outcome ladder. It is now interpolated, not stubbed.
+
+Six-seat XP: **100 / 87 / 74 / 61 / 48 / 35**, on the same normalised rank as trophies and coins, and it
+*imports* the shared weight function rather than copying it — so a steepness retune (§59) moves all
+three together.
+
+⚠️ **The binary stopgap was rejected on a number, not a preference: it pays 2nd of six and 6th of six
+identically** — precisely the defect normalised rank exists to remove, re-installed in a second ladder
+one commit after the first was fixed, **and invisible at two seats where both agree.**
+
+### Delta compression — **7.1× on payload, 4.3× on the wire**
+
+10,657 → **1,501 B** at N=6; host-side broadcast 187.6 → **44.1 KiB/s** at 20 Hz. It diffs the **wire
+tree, not the state**, so it inherits everything the codec already proves and cannot get aliases or
+sentinels wrong. **There is no field-id table** — both ends enumerate the base they already agree on, so
+a new field in `state.ts` appears by itself on both ends. Recovery under 12% loss: 362 deltas refused,
+320 keyframes served, **every client recovered**.
+
+⚠️ Note what remains: §2's ~220 B figure is a **binary encoding layer BELOW this one**, not a better
+diff. This is 7.1×; that is a further step.
+
+### 🚨 THREE known-bads passed falsely before they were fixed — each certified the check it was meant to falsify
+
+This is the fourth independent instance tonight of the same failure, and the three mechanisms are worth
+naming because they are all invisible:
+
+- the differ blinded to `hp` **had nothing to drop** — the fighters had not met yet
+- the wrong-base demonstration sat **inside the countdown**, where nothing moves
+- a sentinel was written onto a field **already holding it**
+
+**Ask of every control: could this scenario distinguish the two arms at all?**
+
+### And one asserted claim was simply false
+
+*"A different-shape wrong base is always caught structurally."* Measured instead: **385 threw, 13 patched
+silently — 3%.** So the structural catch is a bonus and **the base tick is the guard.** Recorded because
+the assertion sounded like a proof and was an assumption.
+
+### ⚠️ A structural gap nobody had noticed: **no Node gate has ever reached the UI layer**
+
+**`src/ui/**` cannot be imported by any Node instrument in this repo** — its imports are extension-less
+and resolve only under Vite/tsc. `nw_profile.mjs` esbuilds a single bridge entry to get at `profile.ts`.
+Every UI check this project owns is therefore a *browser* check; there has never been a unit-level one.
+That is not a defect, but it explains a coverage shape nobody chose.
+
+### A deviation from instruction, declared and accepted
+
+The brief said *"add a sibling to `recordResult`, do not change it"*. The agent made `recordResult`
+**delegate** instead, on the grounds that two bodies for one rule is exactly what the economy pass had
+just refused. **Accepted** — and it is proven rather than argued: a **2,000-match seeded career** replayed
+through a frozen transcription of the pre-change body, compared on the **whole serialised profile after
+every match**, bit-identical, with a one-XP-point tamper shown to be caught.
+
+### Still not built
+
+A real transport and signalling · **interpolation of remote fighters** (they lag **15.07 wu** at 3 ticks
+and nothing hides it) · the binary encoding under the delta · reconnection, spectator UI, matchmaking.
