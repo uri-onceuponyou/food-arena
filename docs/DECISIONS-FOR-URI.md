@@ -4684,3 +4684,73 @@ uniformly canopied.
 ⚠️ **Its known-bad ladder is the point, and worth copying**: `1500` turns three sections red; **`1721`
 passes two of them** and is caught only by the last two; `9999` passes three and fails the fourth; and an
 empty standable set **fails section 0 rather than printing "0 of 0" green.**
+
+---
+
+## 70. ✅ THE RESULT CARD IS FINISHED — `7743f08`, `e60117d`. **And the patch I routed would have deleted fighters.**
+
+The six-player card now reads **"DEFEAT! / 5TH OF 6 / EGG defeated HAMBURGER TACO PIZZA SUSHI DONUT /
+Match time 0:32 / 🏆+3 🪙+28 ⭐+48 xp"** — real placement, real elimination order, real payout. Slot order
+would have printed `SUSHI HAMBURGER DONUT TACO PIZZA`: **genuinely different**, and the local seat sits
+4th in the list, agreeing with *"5th of 6"*.
+
+### 🚨 The agent refused the patch I gave it, and computed the counterfactual instead of arguing
+
+I routed `.map(s => roster[s]).filter(Boolean)` as an exact patch. **It silently DROPS fighters** when the
+order is short, duplicated or out of range — and §C measures it rather than asserting it: **on a 3-entry
+order it lists 3 of 5 losers.** A fighter vanishing off the result screen, **invisible at two seats**,
+where every order has exactly one loser. Shipped code validates the order is a **permutation** and
+otherwise falls back wholesale to the old expression, kept verbatim above it.
+
+**Two-seat byte-identity is proved, not asserted:** 24 end states rendered through the real `hud.ts`
+against an oracle recorded on a detached worktree of the pre-change commit — **24/24 identical**, with the
+new hidden payout element asserted as a **subtraction** so that anything *else* moving goes red.
+
+⚠️ **And §A declares itself TAUTOLOGICAL in its own header** — removing the winner from a two-element
+permutation leaves one fighter in every possible order. **That is why two seats are safe, and why §A
+compares against an oracle that can move rather than against itself.** Naming your own tautology is the
+opposite of the seven vacuous controls this session produced.
+
+### The payout cannot double-bank, proven three ways
+
+`match.ts`/`hud.ts` import nothing from `game/economy/` (`--arm fakeimport` red) · a real six-fighter
+match banks **+3/+28/+48** against a card reading **+3/+28/+48** · and the totals are **frozen across 20
+rendered frames** — a render-side bank would have multiplied them 20× (`--arm poison` red).
+
+⚠️ **§E first reported a coin delta of 528 against a card saying 28** — which looks exactly like a
+double-bank and was a **missing baseline**: `profile.ts` only writes on change, so 500 starting coins were
+being measured against zero.
+
+### 🚨 Three prose defects the repo-wide sweep MISSED — because they are arithmetic, not coordinates
+
+- **`hud.ts`'s imminent-warning worked example computes `199.2 / (993/45000) = 9.0 s`. The real answer on
+  the shipped clock is 4.5 s — the alarm documents TWICE the lead it gives.**
+- *"265 wu of a 993 wu opening ring"* is **13.4%**, not the stated 26.7%.
+- A *"890 → 993"* progression that stopped at the second of three values.
+
+**A census keyed to positions cannot see a wrong division.** Both `src/audio/` comments also predate
+sudden death — the ring never reaches `minSafeRadiusFor(N)` now, so that cue fires at the 30 s collapse.
+
+### And a defect only a 4× zoom could find
+
+At normal size the trophy chip was **a gold sliver with a dash under it**: its handles and stem are ink
+strokes, near-black by default, **on a near-black plate**. ⚠️ **It measured square at 18×18, so no layout
+row could ever have seen it.** Fixed at 22 px with a light ink token; all three chips now read at a glance.
+
+### 🔴 KNOWN, NOT FIXED — the six-fighter card does not fit a phone
+
+At **430×932** the card is **705 px wide with its left edge at −138 px**: the winner's portrait and name
+are **entirely off-screen** and the last loser's portrait is clipped. **Pre-existing** — the subtitle was
+always a non-wrapping flex row — and **unreachable in shipped play**, because six seats only exist behind
+`?fighters=`.
+
+**Deliberately stopped rather than forced:** the fix needs a per-fighter wrapper span so `flex-wrap`
+cannot separate a name from its portrait, and that **moves the two-seat card's DOM** — the one thing this
+pass was required to keep byte-identical. ⚠️ **This becomes urgent the moment §66's six-player entry point
+is answered, and not before.**
+
+### One out-of-set edit, declared and isolated
+
+`src/ui/screens/matchScreen.ts` (+31/−2) — unavoidable, because the payout exists only as the return value
+of banking, which happens there. Clean in `git status` before and after, and **committed separately as
+`e60117d` so it can be reverted alone**, leaving `7743f08` building with the socket unfilled.
