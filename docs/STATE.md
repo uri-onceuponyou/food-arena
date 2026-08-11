@@ -1,6 +1,6 @@
 # State — what is done, what is pending
 
-**As of commit `0bcbdf0`.** Every commit verified with `tools/verify-head.mjs` before push.
+**As of commit `bd068d0`.** Every commit verified with `tools/verify-head.mjs` before push.
 
 > ⚠️ **The header used to read *"as of `b967242`, 125 commits into an unattended session… working
 > tree clean."* Kept because the staleness is itself the lesson:** this line is the first thing a new
@@ -40,10 +40,65 @@ version, with the section that supersedes each:
   at 70. Every homing weapon is worth ~2× in a human's hands.
 - **More cover does NOT create contact.** First contact is monotonic in prop count.
 - **A ×4 arena costs +12.77 s to first contact at N=2** and must ship WITH the roster change
-  (`DECISIONS §48`).
+  (`DECISIONS §48`). ✅ **This one held — see below, and it is the only half of §48 that did.**
 
-**Open for Uri:** §29a (screenshot sent), §47, §49a/b, plus §2/§9/§17/§27/§33. §43 and §46 are
-closed — do not re-ask them.
+---
+
+## 📌 LANDED SINCE, 2026-08-11 — the map doubled and the ring learned to count
+
+- 🔴 **The ×4 arena SHIPPED** (`6631446`). `ARENA_W/H` 1400×1000 → **2800×2000**; `shared.ts` moved by
+  two constants and everything downstream derives. The acceptance test whose own header said *"it goes
+  away when §48's arena lands, not before"* reports **37/37**, and the N=6 census at 9.0 s has all six
+  seats at **full health** — on the old map slot 0 was dead. Six spawns in six separate admissible
+  regions, **892.0 wu minimum pairwise separation** (was 75.2), 111 props at *lower* density than
+  before, `ap_reach` clean at every body width 18–26.
+- **The endgame ring scales with fighter count** (`4bb64e4`). `minSafeRadiusFor(N) = max(MIN_SAFE_RADIUS,
+  ENDGAME_STANDOFF / sin(π/N) − POT.dangerRadius)` — **140** at N≤4, **187.42** at N=5, **237.00** at
+  N=6. N=2 proved a no-op over **45,959,702 ticks / 12,503,511 in-order events / 0 divergent**.
+- **The eight palest weapons had a halo the colour of the ground** (`50c5272`). `PROJECTILE_HALO_L` was
+  a lightness floor *with no ceiling*, so weapons already at 0.83–1.00 got a halo of their own pale
+  colour over cream cloth. A threshold at 0.78 (sitting in a 0.104-wide empty band) sends those eight
+  dark instead: **1.76–4.63× on their worst background**, fifteen others unchanged to four decimals.
+
+### 🚨 §48's fixture was NEAR-EXACT on the one thing it measured and wrong about everything it inferred
+
+This is the finding worth carrying, and it is more useful than "the prediction was wrong":
+
+| | §48 predicted | measured |
+|---|---|---|
+| first contact | **+12.77 s** | **+12.75 s** (5.67 → 18.42) |
+| win rate | −13.4 pp | **−2.6 pp** — inside the ~9 pp floor |
+| chase policy | collapses to 1.7% | **41.5%** |
+| never-contacted | 30/880 | **0/880, both arms** |
+| draw calls | *fall* | **rise** 896 → 1,012 (+12.9%) |
+
+**The one number §48 actually simulated — time to first contact — came in within 0.02 s.** Every other
+row is a *consequence* it reasoned to from that number, and every one of those is wrong, three of them
+in the opposite direction. The draw-call miss has a named cause (it read the **stretch** arm; what
+shipped is the **held-density** one, so more props end up in frame, not fewer). The behavioural rows do
+not: fighters that take 12.75 s longer to meet simply did not stop meeting.
+
+⚠️ **`bd068d0`'s commit message garbles this** — it says the fixture was *"right about the mechanism and
+wrong about its size by 5×"*, which conflates the first-contact row (near-exact) with the win-rate row
+(5.15× too large). Amend is forbidden, so the correction lives here: **the split is measured-vs-inferred,
+not mechanism-vs-size.**
+
+### 🔴 And the cost, being paid right now
+
+Six gates went red **on HEAD** the moment the map committed — `arena-scan`, `ap_reach`, `sp_place`,
+`sp_gate`, `conceal_lab`, `level_lab` — every one carrying a 1400×1000 literal. Confirmed on a clean
+`git archive HEAD` tree, not inferred from the working tree, **where six of the seven failures had been
+correctly attributed to a peer's uncommitted dump right up until that dump was committed.** `arena-scan`
+is the big one: its 18 stations are all 1× coordinates, so they now sample only the NW quadrant.
+**`level_lab` is a finding, not a fixture** — the level-1 player now wins **100.0%** (was 87.5%), so it
+is pinned at its ceiling and can no longer tell level 1 from level 15.
+
+Also live: **triangles went 480,094 → 1,316,686 (×2.74)** and meshes ×2.34 — onto a phone Uri already
+describes as unplayable (§33). Nothing in this project has ever measured a mobile GPU.
+
+**Open for Uri:** nothing is blocking. He cleared the entire backlog on 2026-08-11 (`DECISIONS §54`)
+and answered §49 and §53; §43 and §46 are closed — **do not re-ask any of them.** What he owes is
+device-side only: **his phone model, its iOS version, and a landscape Safari screenshot.**
 
 
 Judgement calls live in **`docs/DECISIONS-FOR-URI.md`** — read that first if you are Uri; it opens
