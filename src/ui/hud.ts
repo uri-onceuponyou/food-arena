@@ -447,6 +447,12 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   // The acceptance test is worth more than a tidier handle, so the anchor is the class
   // that was already there and the DOM is byte-identical at two fighters.
   const clockEl = root.querySelector<HTMLDivElement>('.hud-clock')!;
+  // The template's outermost element, and the only place a custom property set from JS
+  // reaches every HUD child: `.hud-radar`, `.hud-dmg-layer` and the float pills are all
+  // its children, so `--fa-topbar-b` (see floatFloorY) has to live here rather than on
+  // any one of them. ⚠️ By CLASS, for the same reason as `clockEl` above — a new
+  // `data-el` on a shipped element moved the HUD digest once and is not worth a handle.
+  const hudRootEl = root.querySelector<HTMLDivElement>('.hud-root')!;
 
   const dmgLayer = q<HTMLDivElement>('dmg-layer');
   const screenflashEl = q<HTMLDivElement>('screenflash');
@@ -502,19 +508,85 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     blip: HTMLDivElement;
   }
   let fighterSlots: FighterSlotEls[] = [];
+  /**
+   * The opponents' rail — EXISTS ONLY ABOVE TWO SEATS. See `buildFighterSlots`.
+   * Held in the closure rather than re-queried because a rebuild has to delete it, and
+   * a stale `.hud-chips` left behind by a 6→2 restart would be an empty grid column
+   * that pushed the clock off centre in a two-fighter match.
+   */
+  let chipsEl: HTMLDivElement | null = null;
 
+  /**
+   * ── ABOVE TWO SEATS THE OPPONENTS BECOME CHIPS ────────────────────────────
+   *
+   * `DECISIONS §49f`, answered by Uri 2026-08-11: *"Local seat full, others as chips"*.
+   *
+   * The problem it answers is measurable rather than aesthetic. Six plates at
+   * `flex: 1 1 260px` share one flex row with the clock, so at 1280×720 each one
+   * compressed to ~45% of its design width AND the clock — the only element in the bar
+   * that is not per-fighter — was shoved to x≈288 of 1280 by the four plates piled up
+   * to its right (`shots/np/nf6.png`). Every readout was still legible; the bar just
+   * was not a design.
+   *
+   * So above two seats the top bar stops being one flex row and becomes three columns:
+   *
+   *     [ the local fighter, full size ]   [ clock ]   [ opponent chips, right ]
+   *              1fr                         auto              1fr
+   *
+   * Two equal `1fr` side columns is what actually centres the clock — it is centred by
+   * the GRID, not by however much plate happens to sit either side of it, which is the
+   * property the old flex row could not have at any plate width.
+   *
+   * 🚨 **AND IT APPLIES ABOVE TWO SEATS ONLY, WHICH IS THE WHOLE ACCEPTANCE TEST.**
+   * `3980e6e` measured the two-fighter DOM as character-for-character what it was, and
+   * the entire N-fighter presentation rests on that. So at `n === 2` this function must
+   * emit exactly what it emitted before this change: no `hud-topbar--chips` class, no
+   * `.hud-chips` element, no `--chip` modifier. Everything new is gated on `chipped`,
+   * every new CSS rule is a descendant of one of those two hooks, and `np_ab`'s
+   * base-vs-work arms are what prove it rather than this comment.
+   *
+   * ⚠️ A CHIP IS THE SAME ELEMENTS, RESTYLED — not a second template. `data-el`
+   * `${key}-name`, `${key}-bar`, `${key}-fill`, `${key}-hp` and the `.hud-fighter-name`
+   * / `.hud-healthbar-text` classes all still exist on a chip and still carry their own
+   * slot's text; the name and the numeric HP are `display: none` at chip size because
+   * 48px cannot hold either at a readable weight. That is deliberate and it is the
+   * reference pattern — the PORTRAIT is the identity at this size — but it does mean
+   * `np_nfighter`'s "every nameplate names its own slot" and "every HP readout carries
+   * its own slot's hp" are, above two seats, assertions about the DOM's WIRING rather
+   * than about something a player reads. They are still worth exactly what they were
+   * built for (a pooled HUD writing every fighter into slot 1), and `h49_chips.mjs`
+   * measures the things a player DOES read.
+   */
   function buildFighterSlots(n: number): void {
     if (fighterSlots.length === n) return;
     for (const s of fighterSlots) { s.bar.parentElement?.remove(); s.float.remove(); s.blip.remove(); }
     fighterSlots = [];
+    chipsEl?.remove();
+    chipsEl = null;
+
+    const chipped = n > 2;
+    // ⚠️ `toggle(…, false)` at two fighters, not a bare `add` under an `if`. The class
+    // has to be REMOVED on a 6→2 restart, and `class="hud-topbar"` round-trips through
+    // `DOMTokenList` unchanged — which is asserted by `np_ab`'s HUD digest, not assumed.
+    topbarEl.classList.toggle('hud-topbar--chips', chipped);
+    if (chipped) {
+      chipsEl = document.createElement('div');
+      chipsEl.className = 'hud-chips';
+      chipsEl.dataset.el = 'chips';
+      topbarEl.appendChild(chipsEl);
+    }
 
     for (let i = 0; i < n; i++) {
       const key = slotKey(i);
       // `--player` for the local seat, `--enemy` for every other one. See rule 3.
       const mod = i === 0 ? 'player' : 'enemy';
+      const chip = chipped && i > 0;
 
       const plate = document.createElement('div');
-      plate.className = `hud-fighter hud-fighter--${mod}`;
+      // Composed in the ONE assignment rather than `add`ed afterwards: at two fighters
+      // this string has to be byte-for-byte `hud-fighter hud-fighter--player`, and a
+      // second `classList` call is a second chance for a stray space.
+      plate.className = `hud-fighter hud-fighter--${mod}${chip ? ' hud-fighter--chip' : ''}`;
       // The pill is MIRRORED on the opponent side — portrait outboard, name inboard —
       // and that was expressed as two hand-written templates. It is one branch now.
       const pill = i === 0
@@ -528,7 +600,11 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           `<div class="hud-healthbar-fill" data-el="${key}-fill"></div>` +
           `<div class="hud-healthbar-text" data-el="${key}-hp"></div>` +
         `</div>`;
+      // Slot 0 before the clock, every opponent after it — which at two fighters is the
+      // old declaration order (player, clock, enemy) exactly. Above two, the opponents
+      // go INTO the rail instead, so the grid sees three children and not n+1.
       if (i === 0) topbarEl.insertBefore(plate, clockEl);
+      else if (chipsEl) chipsEl.appendChild(plate);
       else topbarEl.appendChild(plate);
 
       const float = document.createElement('div');
@@ -768,15 +844,26 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
    * it is read only when the viewport dimensions change — `innerWidth`/`innerHeight`
    * are plain reads and do not. There is no resize hook on `Hud` to hang it off, and
    * inventing one would put the same read on a path that has no other reason to exist.
+   *
+   * ⚠️ ...AND THE VIEWPORT IS NO LONGER THE ONLY INPUT. The cache key gained the SEAT
+   * COUNT, because the bar's height now depends on it: the chip rail wraps when its
+   * column cannot hold it, so the same viewport measures 102px at two seats and 141px
+   * at six (390 wide, measured). Before the rail existed the bar was one row at every
+   * count and the count could not matter — which is exactly why keying only on the
+   * viewport was correct then and is a stale-cache bug now. A restart at a different
+   * size never resizes the window, so nothing else would have invalidated it.
    */
   const FLOAT_HALF_W = 56;
   let floatFloor = 0;
   let floatFloorW = -1;
   let floatFloorH = -1;
+  let floatFloorN = -1;
   function floatFloorY(): number {
-    if (window.innerWidth !== floatFloorW || window.innerHeight !== floatFloorH) {
+    if (window.innerWidth !== floatFloorW || window.innerHeight !== floatFloorH
+      || fighterSlots.length !== floatFloorN) {
       floatFloorW = window.innerWidth;
       floatFloorH = window.innerHeight;
+      floatFloorN = fighterSlots.length;
       // + the pill's own height, because the transform anchors its BOTTOM edge
       // (`translate(-50%, -100%)`), plus clearance so it does not kiss the bar.
       // 36 = 28 + 8. The pill is 28px tall by construction — an 18px emoji well (the
@@ -794,6 +881,18 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // a property of where the fighters happen to be — and it costs only the tail of
       // an animation that is already at opacity 0 by then. See .hud-dmg-layer.
       dmgLayer.style.setProperty('--fa-dmg-top', `${Math.max(0, Math.round(bottom + 2))}px`);
+      // ── ...and the SAME boundary again, for anything that has to sit BELOW the bar ──
+      // 🚨 THE TOUCH RADAR'S `top` WAS A CONSTANT DERIVED FROM AN ASSUMED BAR HEIGHT, AND
+      // THE CHIP RAIL BROKE THAT ASSUMPTION. On a real phone `html.fa-touch-capable` moves
+      // the radar into the TOP-RIGHT corner at `safe-t + 96px` (118 below 400px wide) —
+      // numbers whose own comment says they were "chosen against a clock column that ended
+      // around y=90". Above two seats the rail grows from that same corner and wraps when
+      // its column cannot hold it, and then the bar is 141px tall at 390 and 229px at 360.
+      // Measured by `h49_chips --touch` before this line existed: the rail overlapped
+      // `.hud-radar` at ALL THREE portrait widths `menu_accept_portrait` covers, and at
+      // none of them in the plain DOM state — i.e. exactly the state no probe was looking
+      // at. Publishing the bar's real bottom lets the rule below derive instead of assume.
+      hudRootEl.style.setProperty('--fa-topbar-b', `${Math.max(0, Math.round(bottom))}px`);
     }
     return floatFloor;
   }
@@ -1436,6 +1535,109 @@ const CSS = `
   0%, 100% { box-shadow: inset 0 2px 4px rgba(0,0,0,0.5), 0 2px 0 rgba(0,0,0,0.35), 0 0 0 rgba(230,57,70,0); }
   50% { box-shadow: inset 0 2px 4px rgba(0,0,0,0.5), 0 2px 0 rgba(0,0,0,0.35), 0 0 14px 3px rgba(255,60,60,0.85); }
 }
+
+/* ── ABOVE TWO SEATS: local bar full size, opponents as chips ─────────────────
+   DECISIONS 49f, Uri: "Local seat full, others as chips". See buildFighterSlots
+   for the shape; this is the whole of the styling and NONE of it can reach a
+   two-fighter match — every selector below is a descendant of, or is,
+   .hud-topbar--chips / .hud-chips / .hud-fighter--chip, and none of those three
+   strings appears in the DOM at n === 2.
+
+   ⚠️ NOTE FOR ANYONE EDITING THIS BLOCK: THERE ARE NO BACKTICKS IN IT, ON PURPOSE.
+   This whole sheet is a template literal, so one backtick in a CSS comment ends the
+   string and the file stops parsing — which is exactly what the first draft of this
+   block did, and it is the failure menu_accept.mjs's header already records as "the
+   very next backtick to break hud.ts".
+
+   ⚠️ PLACEMENT IS LOAD-BEARING AND IT IS THE CASCADE TRAP FROM THE OTHER SIDE.
+   .hud-fighter--chip and .hud-fighter are BOTH (0,1,0), so between those two only
+   source order decides — which is why this block sits AFTER .hud-fighter rather
+   than beside it. In the other direction the specificity works FOR us and that is
+   also deliberate: ".hud-fighter--chip .hud-healthbar" is (0,2,0) against the
+   max-width:720px block's ".hud-healthbar" at (0,1,0), and a media query adds NO
+   specificity — so a chip keeps its own height on a phone without this block having
+   to restate itself inside every media query. The phone rules below still own
+   everything they owned before, because none of them names a chip. */
+
+/* The three columns. Two EQUAL 1fr side tracks are what centres the clock: it is
+   centred by the grid, not by however much plate happens to sit either side, which
+   is the property the flex row could not have at any plate width. 1fr and not
+   minmax(0, 1fr) on purpose — a 0 minimum lets a wide rail overflow LEFTWARD over
+   the clock, and an auto minimum makes it push the clock a few px instead, which is
+   the failure that degrades rather than the one that collides. */
+.hud-topbar--chips {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+}
+/* FULL SIZE means literally the width it has in a 1v1, and it is measured that way
+   (h49_chips compares n=6 against n=2 on the same viewport, and gets 100% at all
+   three). No max-width here on purpose: the base .hud-fighter rule already caps at
+   380px, and adding a second, smaller cap made the local bar 300px at 1280 against
+   380px at two fighters — 79%, i.e. a squeeze of its own, which is the exact defect
+   this section exists to remove. Below 380px of track the plate is bounded by the
+   1fr column instead, which is the same arithmetic the flex row gave it. */
+.hud-topbar--chips .hud-fighter--player {
+  justify-self: start;
+  width: 100%;
+}
+.hud-topbar--chips .hud-clock { justify-self: center; }
+
+/* Right-aligned so the rail grows INWARD from the corner as seats are added — the
+   last chip is always in the same place, which is what makes 3, 4 and 6 read as the
+   same HUD. Wraps rather than squeezes: this whole section exists because squeezing
+   was the failure, so the overflow behaviour must not be a squeeze either. A wrapped
+   second row is picked up automatically by floatFloorY(), which reads the top bar's
+   live bottom edge, so the floating pills and the damage-layer clip follow it. */
+.hud-chips {
+  justify-self: end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hud-fighter--chip {
+  flex: 0 0 auto;
+  width: 48px;
+  max-width: none;
+  align-items: center;
+  gap: 3px;
+}
+/* A chip IS its portrait: the pill's plate and border are chrome around a 30px disc
+   that already carries its own dark rim below, and drawing both put two concentric
+   outlines on a 48px element. */
+.hud-fighter--chip .hud-fighter-pill {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  gap: 0;
+}
+/* Present, wired to its own slot, and not drawn. 48px cannot hold "HAMBURGER" at a
+   weight this HUD would ship, and the rendered head crop identifies the character
+   faster than 8px type would. The element stays so nothing that reads it by name
+   stops matching — see buildFighterSlots' note on what that costs np_nfighter. */
+.hud-fighter--chip .hud-fighter-name { display: none; }
+.hud-fighter--chip .hud-fighter-emoji {
+  width: 30px;
+  height: 30px;
+  font-size: 18px;
+  /* The dark rim sits OUTSIDE the red identity ring, so the chip reads on a bright
+     tile the same way the nameplate's opaque pill does on one. */
+  box-shadow: 0 0 0 2px rgba(26,18,36,0.92), 0 2px 0 rgba(0,0,0,0.35);
+}
+.hud-fighter--chip .hud-healthbar {
+  height: 11px;
+  border-width: 2px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5), 0 2px 0 rgba(0,0,0,0.35);
+}
+.hud-fighter--chip .hud-healthbar-fill { inset: 1px; right: auto; }
+/* "99 / 108" at 12px in an 11px track is unreadable AND overflows it. The bar's
+   FILL is the readout at this size; the number lives on the float pill over the
+   fighter's own head and on the local seat's full bar. */
+.hud-fighter--chip .hud-healthbar-text { display: none; }
 
 .hud-clock {
   flex: 0 0 auto;
@@ -2515,6 +2717,25 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 @media (max-width: 720px) {
   .hud-fighter-name { font-size: 12px; }
   .hud-healthbar { height: 18px; }
+  /* ── The chip rail, narrowed ────────────────────────────────────────────────
+     Arithmetic, not taste, and it is the same geometry the radar/tray rules at the
+     bottom of this sheet are derived from. The rail must fit ONE of the two 1fr side
+     tracks or it wraps:
+
+       track = (W - 28 padding - 156 clock - 20 gap) / 2
+       rail  = (n - 1) chips x (chipW + 5 gap) - 5
+
+     At the narrowest width this regime has to hold, 667 (a landscape phone at
+     667x375), the track is 231px and five chips at 40px measure 220px — inside it.
+     At 48px they would measure 260px and wrap to a second row, which is legible but
+     is the "consequence rather than a design" the chip section exists to replace.
+     The local plate needs no cap of its own here: its 1fr track IS 231px, which is
+     the same width the two-fighter flex row gives it at this viewport, and
+     h49_chips asserts the two are equal to within half a pixel. */
+  .hud-chips { gap: 5px; }
+  .hud-fighter--chip { width: 40px; }
+  .hud-fighter--chip .hud-fighter-emoji { width: 26px; height: 26px; font-size: 15px; }
+  .hud-fighter--chip .hud-healthbar { height: 10px; }
   .hud-timer { font-size: 16px; padding: 4px 12px; }
   .hud-weapon-slot { width: 46px; height: 46px; border-radius: 13px; }
   /* 24px, not 20px, and this is the whole of a measured legibility fix.
@@ -2549,6 +2770,39 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
   .hud-radar-map { width: 105px; height: 75px; }
   .hud-radar-dot { width: 8px; height: 8px; }
 }
+
+/* ── BELOW 660px THE CHIP RAIL GETS ITS OWN ROW, because its column runs out ──
+   Arithmetic, and the same shape as the two rules further down. The side track is
+   (W - 28 padding - 156 clock - 20 gap) / 2 and five chips measure 5 x 45 - 5 =
+   220px, so the rail stops fitting its column at W = 664. Below that it wrapped
+   into a ragged two- or three-row block in the corner — measured by h49_chips at
+   141px of top bar at 390 and 229px at 360, against 102px at two seats — which is
+   the same "consequence rather than a design" this pass exists to remove, rotated
+   90 degrees.
+
+   Spanning the full bar instead gives 332px of content at 360 for a 220px rail, so
+   it is ONE centred row at every phone width and the bar is 151px rather than 229.
+   The clock does not move: it is still row 1, column 2 of a 1fr / auto / 1fr grid,
+   and nothing placed in row 2 can shift it. Asserted at 0.0px, not assumed.
+
+   ⚠️ 660 IS THE CROSSOVER ROUNDED **DOWN**, AND THAT DIRECTION IS THE DELIBERATE
+   ONE — it is the opposite of what the 460px rule below does, so do not "fix" it to
+   match. On a short landscape phone HEIGHT is the scarce resource: at 667x375 the
+   rail still fits its column and the bar is 102px (27% of that frame), while the
+   centred row would make it 151px (40%). So the 661-668 band — where a device with
+   a side inset can still wrap — is deliberately left to WRAP, and the derived radar
+   rule at the bottom of this sheet is what makes wrapping safe instead of colliding.
+   That is the division of labour: THIS rule is about the bar's HEIGHT, the radar
+   rule is about COLLISIONS, and only the second one has to hold at every width. */
+@media (max-width: 660px) {
+  .hud-topbar--chips .hud-chips {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: center;
+    justify-content: center;
+  }
+}
+
 /* Short viewports (19.5:9 / 21:9 phones) — keep the radar clear of the weapon bar. */
 @media (max-height: 640px) {
   .hud-radar-map { width: 105px; height: 75px; }
@@ -2610,5 +2864,40 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
    widget a different shape on phones than on desktop. */
 @media (max-width: 400px) {
   html.fa-touch-capable .hud-radar { top: calc(var(--fa-safe-t, 0px) + 118px); }
+}
+
+/* ── ...and above two seats the touch radar STOPS GUESSING where the bar ends ──
+   🚨 THE TWO RULES ABOVE ARE CONSTANTS DERIVED FROM AN ASSUMED BAR HEIGHT, AND THE
+   CHIP RAIL BROKE THE ASSUMPTION. Their own comments say so: 96 was chosen against
+   "a clock column that ended around y=90", and 118 is "the clock's 102 plus a 16px
+   gutter". Both are true of a bar that is one row at every seat count, which it was
+   until this pass. With a rail it is 102px at two seats, 141px at six on a 390-wide
+   phone and 229px at six on a 360-wide one — so the radar, which touch moves into
+   the TOP-RIGHT CORNER the rail grows from, ends up underneath it.
+
+   Measured by h49_chips --touch before this rule existed: .hud-chips overlapped
+   .hud-radar at ALL THREE portrait widths menu_accept_portrait covers (360, 390,
+   430) and at NONE of them in the plain DOM state — i.e. the collision lived
+   entirely in the state no probe was looking at, which is why the probe now walks
+   both and why .hud-radar is in its landmark set at all despite being a SIBLING
+   of the top bar rather than a child.
+
+   ⚠️ AND THIS COMMENT LOST ITS BACKTICKS THE HARD WAY, TWICE IN ONE PASS. The sheet
+   is a template literal; one backtick in a CSS comment ends the string and the file
+   stops parsing. Do not put them back.
+
+   --fa-topbar-b is the bar's measured bottom, published by floatFloorY() on the
+   same layout read that already feeds the float pills and the damage-layer clip —
+   no new getBoundingClientRect, and it re-reads when the SEAT COUNT changes as well
+   as the viewport (see that function's cache note).
+
+   ⚠️ SCOPED TO .hud-topbar--chips, AND THAT IS THE ACCEPTANCE TEST, NOT TIDINESS.
+   At two fighters the class does not exist, this selector cannot match, and the two
+   rules above keep their exact constants — so the duel's pixels are untouched. The
+   118px fallback is today's ≤400 value, so even a frame rendered before the first
+   layout read lands where it lands now. Specificity (0,3,1) beats (0,2,1), which is
+   what lets it win without !important and without reordering anything above it. */
+html.fa-touch-capable .hud-topbar--chips ~ .hud-radar {
+  top: calc(var(--fa-topbar-b, 118px) + 16px);
 }
 `;
