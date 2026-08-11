@@ -63,6 +63,15 @@ your run; it does not remove peers' half-saved work. **For any A/B you will quot
 DETACHED WORKTREE of a known commit.**
 ⚠️ A fresh snapshot's **first** client eats a dep-optimisation reload that presents as
 `execution context was destroyed`. Warm it with a cheap page load.
+🚨 **A TOOL THAT EXPORTS ANYTHING NEEDS AN `IS_MAIN` GUARD, AND THREE HERE DID NOT.** Making a
+function importable — the right instinct, so a second tool reuses a validated rig instead of copying
+it — silently makes the whole CLI path run on import. Measured tonight: importing `snapsweep.mjs`
+**printed a live sweep report** (so `node anything.mjs` that imported it would have killed every
+snapshot server on the box), importing `da_census.mjs` **fell through into `runCapture`** and, with
+`PREVIEW_BASE` set — which it is inside every `with_snapshot` child — would launch Chromium and walk
+20 captures. Related: a module that reads `process.argv` **at module scope** made `valuescan
+--selftest` run a *different* tool's selftest and exit. **Guard the main path; keep the exports.**
+
 🚨 **CSS ANIMATIONS RUN ON THE DOCUMENT TIMELINE, NOT `requestAnimationFrame`.** So **freezing rAF
 does not still them**, and **every rAF-frozen probe in this repo has been animating CSS the whole
 time**. Worse, `locator('canvas').screenshot()` is a **page capture clipped to the canvas box**, so a

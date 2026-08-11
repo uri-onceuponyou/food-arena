@@ -267,6 +267,10 @@ const OFFLINE = [
   { key: 'tools/tmp/level_lab.mjs --selftest',   probes: [pr(['tools/tmp/level_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/kit_lab.mjs --selftest',     probes: [pr(['tools/tmp/kit_lab.mjs', '--selftest'], SLASH_ASSERT)] },
   { key: 'tools/tmp/roster_lab.mjs --selftest',  probes: [pr(['tools/tmp/roster_lab.mjs', '--selftest'], SLASH_ASSERT)] },
+  // Registered OFFLINE despite 6 browser references in the file: `--selftest` returns in 0.15 s and
+  // never reaches `runCapture`. Timed before registering, after `hw_ord`/`hw_burner` were put on
+  // this path while IGNORING `--selftest` entirely and made gatecount boot a GPU probe every run.
+  { key: 'tools/tmp/da_census.mjs --selftest', probes: [pr(['tools/tmp/da_census.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/nc_measure.mjs --selftest', probes: [pr(['tools/tmp/nc_measure.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/r2_probe.mjs --selftest', probes: [pr(['tools/tmp/r2_probe.mjs', '--selftest'], S)] },
   // Three probes because the doc cell states three numbers — known / new / stale. ARITY exists to
