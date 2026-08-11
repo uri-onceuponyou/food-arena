@@ -56,12 +56,53 @@ const LAUNCH = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-sw
  * with no explicit spawn rather than inventing a ring, because 4-6 fighter placement is
  * §48's layout pass and 180° point symmetry there is a competitive-fairness constraint.
  * These are a MEASURING FIXTURE, not a placement rule: a ring of radius 190 wu about the
- * kitchen's centre (700, 500), inside `FAIR_PLAY.radiusUnits` (199.2) so every fighter is
- * on screen at every aspect, and wide enough that `REACH.rangedMax` (140) cannot reach
- * across it on the first frames. Nothing shipped reads them.
+ * kitchen's centre, inside `FAIR_PLAY.radiusUnits` (199.2) so every fighter is on screen at
+ * every aspect, and wide enough that `REACH.rangedMax` (140) cannot reach across it on the
+ * first frames. Nothing shipped reads them.
+ *
+ * ══════════════════════════════════════════════════════════════════════════════
+ *  🚨 THE CENTRE IS DERIVED FROM THE RUNNING GAME, NOT TYPED. IT USED TO BE TYPED.
+ * ══════════════════════════════════════════════════════════════════════════════
+ *
+ * THE OLD LINE, kept because the reason generalises:
+ *
+ *     const CENTER = { x: 700, y: 500 };     // "the kitchen's centre (700, 500)"
+ *
+ * `6631446` shipped the ×4 arena and moved the centre to **(1400, 1000)**, so this ring sat
+ * 1,077 wu off it — in the NW quadrant of a map whose middle it claimed to be. It cost the
+ * landscape pass a false failure before that agent stopped trusting the constant, and it is
+ * the **seventh** fixture in one session that was wrong because a literal outlived the thing
+ * it described (`DECISIONS §60` lists four more, all of which were still PASSING).
+ *
+ * ⚠️ **AND RETYPING `{1400, 1000}` WOULD BE THE SAME BUG ONE MAP-CHANGE LATER.** So the
+ * centre is read from `window.__matchArena` (`match.ts:634` — the live `ArenaDefinition`
+ * the renderer is actually drawing) on a throwaway two-fighter page before any measurement
+ * runs, and `resolveCenter` THROWS if it cannot get it. A fixture that silently fell back to
+ * a literal would be indistinguishable from one that derived it.
  */
-const CENTER = { x: 700, y: 500 };
+let CENTER = null;
 const RING = 190;
+
+/**
+ * Read the arena centre off a live match. Throws rather than defaulting — see above.
+ * `window.__matchArena` is the same object reference `match.ts` hands the renderer, so this
+ * is the map being drawn, not a dump of it that could have gone stale.
+ */
+async function resolveCenter(browser) {
+  const page = await browser.newPage({ viewport: { width: W, height: H } });
+  try {
+    await page.goto(`${BASE}/?player=hamburger&enemy=donut&pointerLock=0&simSpeed=1`,
+      { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.waitForFunction(() => !!window.__matchArena?.center, null, { timeout: 60_000 });
+    const a = await page.evaluate(() => ({
+      center: { ...window.__matchArena.center }, width: window.__matchArena.width, height: window.__matchArena.height,
+    }));
+    if (!Number.isFinite(a.center?.x) || !Number.isFinite(a.center?.y)) {
+      throw new Error(`window.__matchArena.center is not a point: ${JSON.stringify(a.center)}`);
+    }
+    return a;
+  } finally { await page.close(); }
+}
 const CAST = ['hamburger', 'donut', 'taco', 'egg', 'sushi', 'pizza'];
 const ringSpawn = (i, n) => {
   const a = (i / n) * Math.PI * 2;
@@ -173,6 +214,21 @@ const browser = await chromium.launch({ args: LAUNCH });
 const sizes = ONLY ? [Number(ONLY)] : [3, 4, 5, 6];
 const seen = {};
 try {
+  // ── THE CENTRE, DERIVED BEFORE ANY MEASUREMENT — see the block above `CENTER`. ──
+  const live = await resolveCenter(browser);
+  CENTER = live.center;
+  console.log(`── ARENA (derived from window.__matchArena) ─────────────────`);
+  console.log(`   ${live.width}x${live.height}, centre ${CENTER.x},${CENTER.y} · ring ${RING} wu\n`);
+  check('the fixture ring is centred on the arena the RENDERER is drawing, not on a literal',
+    Math.abs(CENTER.x - live.width / 2) < 1 && Math.abs(CENTER.y - live.height / 2) < 1,
+    `centre ${CENTER.x},${CENTER.y} vs half-extent ${live.width / 2},${live.height / 2}`);
+  // KNOWN-BAD: the retired literal, required to be WRONG on this map. If the arena ever
+  // returns to 1400x1000 this row goes red and the paragraph above gets re-read — which is
+  // the point. A fixture whose known-bad also passes is asserting nothing (`DECISIONS §60`).
+  check('KNOWN-BAD  the retired literal {700,500} is NOT this arena\'s centre',
+    !(CENTER.x === 700 && CENTER.y === 500),
+    `it is ${CENTER.x},${CENTER.y} — the literal was ${Math.hypot(CENTER.x - 700, CENTER.y - 500).toFixed(0)} wu out`);
+
   for (const n of sizes) {
     console.log(`── N = ${n} ──────────────────────────────────────────────`);
     const r = await shoot(browser, n, { tag: `nf${n}` });

@@ -440,7 +440,7 @@ const SKIP = [
   //    selftest is AGGREGATE and needs the WHOLE 23-weapon sweep: one weapon exercises the
   //    "picture changed" side and has nothing to assert on the null side, and vice versa,
   //    so `--chars`/`--weapon` make it INVALID rather than merely narrower.
-  ['tools/tmp/hl_sweep.mjs --selftest', 'browser', 'weapon-halo sweep + 8 controls; needs the full 23-weapon sweep for its aggregate selftest to be valid'],
+  ['tools/tmp/hl_sweep.mjs --selftest', 'browser', 'weapon-halo sweep + 8 controls; its aggregate selftest needs one halo on EACH side of --split (0.53 since 2026-08-11 — 0.75 selected 0 of 33 after 50c5272). ⚠️ STILL INVALID on SWAP, which fails on every weapon measured'],
   ['tools/tmp/sc2_manifest.mjs', 'browser', 'Add-to-Home-Screen manifest at 3 bases + 5 known-bad/control rows. Its NO-MANIFEST control is an ABLATION of the shipped build, not a pure-HEAD tree — it was the latter until 2026-08-11 and went 3-of-54 RED the moment 92e794a landed the manifest'],
   ['tools/tmp/sc2_screen.mjs', 'browser', 'what a standalone home-screen launch changes about the frame — the guaranteed radius is unchanged, so aspect.mjs structurally cannot see it'],
   ['tools/perf.mjs --mode tierselftest', 'browser', 'the known-bad input for `--device mobile`: arm A reproduces the pre-4be0733 bug (`high`), B is the fix (`low`), C a tablet (`medium`), D the desktop control'],

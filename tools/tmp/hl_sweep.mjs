@@ -100,17 +100,46 @@ const DELTA = Number(args.delta ?? 6);
 const SIM_SPEED = String(args.simSpeed ?? '0.35');
 const MIN_DIST = Number(args.minDist ?? 26);
 /**
- * The lightness above which a weapon is treated as ITS OWN LIGHT SOURCE and its halo
- * is driven DOWN instead of up.
+ * The HALO lightness above which `retarget` moves a material. **0.53 since 2026-08-11.**
  *
- * 0.75 is not a round number picked for tidiness: the roster is bimodal with a 0.10
- * gap and nothing in it. Eight halo colours sit at 0.829–1.000 (`#FFE9A8` 0.829,
- * `#BFEFFF` 0.874, `#F4E9DA` 0.906, `#FFFFFF` 1.000) and the next one down is 0.725
- * (`#FFD873`), then 0.718, 0.716. Any split in 0.73–0.82 selects exactly the same
- * eight weapons, so the threshold is insensitive over a 0.09-wide band — which is the
- * property that makes it a threshold rather than a tuned constant.
+ * ══════════════════════════════════════════════════════════════════════════════
+ *  🚨 THE FIX THIS TOOL MEASURED EMPTIED ITS OWN VALIDATOR'S CORPUS, AND THE ROOT
+ *     CAUSE IS THAT TWO DIFFERENT QUANTITIES WERE WEARING ONE NUMBER
+ * ══════════════════════════════════════════════════════════════════════════════
+ *
+ * THE OLD WORDING, kept because it was correct on the tree it was written for:
+ *
+ *   > *"The lightness above which a weapon is treated as ITS OWN LIGHT SOURCE and its
+ *   > halo is driven DOWN instead of up. 0.75 is not a round number picked for tidiness:
+ *   > the roster is bimodal with a 0.10 gap and nothing in it. Eight halo colours sit at
+ *   > 0.829–1.000 (`#FFE9A8` 0.829, `#BFEFFF` 0.874, `#F4E9DA` 0.906, `#FFFFFF` 1.000)
+ *   > and the next one down is 0.725 (`#FFD873`), then 0.718, 0.716."*
+ *
+ * Read that against `retarget` below: the shipped rule (`vfx.ts:haloColorFor`) splits on
+ * **the WEAPON's own colour**, and `retarget` splits on **the HALO MATERIAL's colour**.
+ * Those were the same number only while the bug was present — a pale weapon's halo *was*
+ * its own pale colour, which is the defect. `50c5272` assigned those eight
+ * `PROJECTILE_HALO_L_DARK`, so **the coincidence the split relied on is exactly what the
+ * fix removed.**
+ *
+ * Re-measured over all 33 shipped halo colours (every ranged weapon of all 11 characters,
+ * `haloColorFor` applied to each sculpt colour):
+ *
+ *     halo lightnesses present   0.4000 (10)  0.6600 (19)  0.6686  0.7157  0.7176  0.7255
+ *     --split 0.75  ->  0 of 33 above ... PIX never sees a moved halo -> INSTRUMENT INVALID
+ *     --split 0.70  ->  3 of 33 above
+ *     --split 0.53  -> 23 of 33 above, 10 below   <- the only gap in the set, 0.40 -> 0.66
+ *
+ * So the corpus is NOT gone; the DEFAULT stopped partitioning it. 0.53 is the midpoint of
+ * the one gap the shipped palette has, and it is insensitive over 0.41–0.65 — the same
+ * property the old paragraph claimed for 0.75, re-derived on today's palette.
+ *
+ * ⚠️ **This is a re-aim, not a loosening.** At 0.75 the `PIX` control was VACUOUS — it
+ * asserted nothing on any weapon. At 0.53 it is exercised on 23 of 33. Strictly more of
+ * the instrument runs, and the selftest now *names the number* when the corpus stops
+ * straddling the split instead of reporting a bare INVALID.
  */
-const SPLIT = Number(args.split ?? 0.75);
+const SPLIT = Number(args.split ?? 0.53);
 const LS = String(args.ls ?? '0.68,0.60,0.52,0.46,0.40,0.34').split(',').map(Number).filter((x) => x > 0);
 /** Which candidate gets photographed. Defaults to the darkest asked for. */
 const SHOT_L = Number(args.shotL ?? LS[LS.length - 1]);
@@ -127,6 +156,33 @@ const REPO = resolve(new URL('../..', import.meta.url).pathname);
 const log = (...a) => console.log(...a);
 const pad = (s, n) => String(s).padEnd(n);
 const md5 = (buf) => createHash('md5').update(buf).digest('hex').slice(0, 12);
+
+/** sRGB HSL lightness of a `#rrggbb`, the same way `retarget` computes it page-side. */
+function lightnessOf(hex) {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  if (!Number.isFinite(n)) return NaN;
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  return (Math.max(r, g, b) + Math.min(r, g, b)) / 2;
+}
+
+/**
+ * The widest gap in a set of halo lightnesses, and its midpoint.
+ *
+ * 🚨 This is the answer to "my corpus does not straddle the split" — the question that cost
+ * this file a full INVALID run on 2026-08-11 and had to be diagnosed by hand from
+ * `rules.ts`. `null` means the palette has collapsed to ONE lightness, and then no split
+ * partitions it and INVALID is the honest verdict rather than a fixable default.
+ */
+function widestGap(lightnesses) {
+  const d = [...new Set(lightnesses.filter(Number.isFinite).map((x) => +x.toFixed(4)))].sort((a, b) => a - b);
+  if (d.length < 2) return null;
+  let best = null;
+  for (let i = 1; i < d.length; i++) {
+    const gap = +(d[i] - d[i - 1]).toFixed(4);
+    if (!best || gap > best.gap) best = { gap, lo: d[i - 1], hi: d[i], mid: +(((d[i - 1] + d[i]) / 2).toFixed(4)) };
+  }
+  return { ...best, distinct: d };
+}
 
 /** `rules.ts` parsed, not imported — same reason `pj_probe` gives: it is TypeScript. */
 async function rangedWeapons() {
@@ -874,8 +930,33 @@ async function main() {
     for (const x of rows) {
       log(`  ${pad(x.char + '.' + x.weapon, 20)}${order.map((k) => `${k} ${x.controls[k] ? 'PASS' : 'FAIL'}`).join(' · ')}`);
     }
-    if (!anyNull) log(`  ⚠️ NULL was VACUOUS on every weapon run — include one whose halo is below ${SPLIT}.`);
-    if (!anyMoved) log(`  ⚠️ PIX never saw a moved halo — include one whose halo is above ${SPLIT}.`);
+    /**
+     * 🚨 THE CORPUS CENSUS, PRINTED EVERY RUN — and it is the half that was missing.
+     *
+     * On 2026-08-11 this file reported a bare `PIX never saw a moved halo` and the reason
+     * took a separate offline derivation to find: `50c5272` had moved every halo to one
+     * side of the then-default 0.75 (see `SPLIT`'s block). A validator that knows its
+     * corpus emptied should say WHICH split would refill it, not leave that to the reader.
+     */
+    const census = rows.flatMap((x) => (x.haloHex || []).map(lightnessOf));
+    const gap = widestGap(census);
+    const counts = new Map();
+    for (const l of census) { const k = (+l.toFixed(4)).toFixed(4); counts.set(k, (counts.get(k) ?? 0) + 1); }
+    log(`  halo-lightness CENSUS over ${census.length} material(s) in ${rows.length} weapon page(s):`);
+    log(`      ${[...counts.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).map(([k, n]) => `${k}×${n}`).join('  ')}`);
+    log(`      above --split ${SPLIT}: ${census.filter((l) => l >= SPLIT).length}   below: ${census.filter((l) => l < SPLIT).length}`);
+    if (gap) log(`      widest gap ${gap.lo} → ${gap.hi} (${gap.gap}), midpoint ${gap.mid}`);
+    else log('      🔴 ONE distinct lightness only — NO split can partition this palette');
+    if (!anyNull) {
+      log(`  ⚠️ NULL was VACUOUS on every weapon run — no halo sits below --split ${SPLIT}.`);
+      log(gap ? `      → the palette DOES straddle ${gap.mid}; re-run with --split ${gap.mid}.`
+        : '      → the palette has collapsed to one lightness; this instrument cannot be made valid on it.');
+    }
+    if (!anyMoved) {
+      log(`  ⚠️ PIX never saw a moved halo — no halo sits at or above --split ${SPLIT}.`);
+      log(gap ? `      → the palette DOES straddle ${gap.mid}; re-run with --split ${gap.mid}.`
+        : '      → the palette has collapsed to one lightness; this instrument cannot be made valid on it.');
+    }
     const ok = rows.every((x) => order.every((k) => x.controls[k])) && anyNull && anyMoved;
     log(ok ? `  → INSTRUMENT VALID (${order.length}/${order.length} controls, both sides exercised)`
       : '  → INSTRUMENT INVALID — nothing above is trustworthy');
