@@ -3593,3 +3593,102 @@ not per-commit.**
 - ⚠️ **There is no `ScreenOrientation.lock()` call anywhere in the codebase**, and on iPhone it is a
   silent no-op regardless. Forcing landscape on iOS Safari is not available; it comes with the
   wrapper (§51a, Capacitor), which is the one thing a wrapper genuinely does buy.
+
+---
+
+## 56. ✅ MEASURED 2026-08-11 — §33 ANSWERED. The phone is a **draw-call** problem, the fix is known, and **the ×4 map must not be deployed to Uri until it lands.**
+
+§33 was Uri's most important line — *"the phone experience is very bad. VFX looks clunky and the in
+browser gameplay is not playable."* It has now been measured on the production bundle at the tier a
+phone actually gets (`low`, buffer 1055×487 @1.25, ANGLE/Metal, CPU ×4).
+
+### 🔴 The timing fact that gates the deploy
+
+| | when |
+|---|---|
+| the build Uri actually played (`gh-pages` `a0bf880`) | 2026-08-11 **08:05** |
+| his screen capture | 2026-08-11 **16:04** |
+| `6631446`, the ×4 arena | 2026-08-11 **16:33** |
+
+**Uri's capture predates the ×4 map by 29 minutes.** Everything he reported describes the
+**1400×1000** map. That build measures **7.40 ms** of main-thread JS at cpu ×4; HEAD measures
+**11.00 ms (+48.6%)**. Projecting his measured **30.93 fps** forward by that ratio gives
+**≈21–26 fps** — derived, and labelled as derived, because not all of his frame is JS this can see.
+
+=> **Do not publish the ×4 map to him until the patches below land.** The deploy is being held.
+
+### The frame, measured
+
+**JS 14.70 ms = 8.70 pre-draw + 6.00 renderer-submit · GPU 2.37 ms · 942 draws · 1,095,807 triangles.**
+**The main thread is 6.2× the GPU.**
+
+🚨 **It is NOT shaders, materials or textures — that is now settled.** Across the ×4 commit GL programs
+went **26 → 25** and texture bytes **7.48 MB → 7.48 MB**, flat. What moved is **object count**: objects
+1,416 → 3,126, prop drawables 486 → **1,924** (×3.96), floor instances 2,609 → **10,685** (×4.10).
+
+🚨 **The shadow pass is 557 of 934 draws — 59.6% of the whole frame — and 495 of those are props that
+never move.** `stage.ts:1735` re-hashes every visible caster each frame; the fighters move a millimetre,
+the hash changes, and it re-renders **all 1,657 casters, 1,615 of them static**. ⚠️ `stage.ts:787-789`
+already priced this at *"302 draws, 43.6%"* and concluded the fighters were most of it. **The fighters
+are now 28 of 557.** That reasoning was correct when written and the map grew out from under it.
+
+### The ranked fix — and why it is a PREREQUISITE, not an optimisation
+
+| | patch | measured | look cost |
+|---|---|---|---|
+| 1 | **Merge the static arena props by material** — `toon.ts`'s `merge` option already exists for exactly this and says *"ONLY VALID FOR A GROUP WHOSE PARTS NEVER MOVE"*. 1,924 drawables for 111 props, none merged. | bound **−8.00 ms (54.4%), −613 draws**; expected **−4 to −6 ms** | **zero** — parts don't move relative to each other |
+| 2 | **Split the shadow map static/dynamic** | **−495 draws = −52.5% of the frame**, −2.2 to −2.9 ms — *the same saving as switching shadows off*, keeping the fighters' | ⚠️ **non-zero — only a PNG caught it** |
+| 3 | Distance-cull the ground scatter | **GPU −0.53 ms (−22.4%)**; CPU nothing | none |
+
+🚨 **One visible character is 245 draw calls.** At N=2 the opponent is usually frustum-culled and draws
+zero — first contact is 18.4 s. **At 4–6 fighters on screen the cast alone adds ~900–1,300 draws on top
+of today's 942.** The ×4 map exists *for* 4–6 fighters. **Patch 1 is a precondition of the roster
+change, not a tidy-up after it.**
+
+Measured non-levers, so nobody spends a day on them: bloom, SMAA and the post chain are **already off**
+at `low`; HUD DOM, VFX, fog, apron and concealment are **every one inside the resolution floor**.
+
+### ⚠️ TWO EARLIER CLAIMS OF MINE ARE WITHDRAWN
+
+- **The *"post-chain fill −14.6×"* result is NOT a saving available to ship.** `detectTier()` already
+  returned `low` on a real phone — **that fix was to the measurement harness, not to the game.** It is
+  the difference between two tiers, one of which a phone never received. Ablating the post chain for
+  real is **−1 draw and −0.36 ms of GPU**. I reported it as the largest shippable lever found here.
+  It is not a shippable lever at all.
+- **The judder numbers I quoted were an instrument artefact.** *"8 of 60 repeats at 30 Hz, 19 of 59 at
+  60 Hz"* came from a tool that seeks on **a fixed grid it is told**, so **a grid finer than the
+  source's frame interval returns the same frame twice**. Proof: a synthesised clip containing **zero**
+  repeats, sampled that way at 2× its own rate, reports **48.1% "repeats"**; at 1× it reports 0.0%.
+
+### The real judder measurement — worse than the artefact, and better founded
+
+Measured by walking `requestVideoFrameCallback` (one callback per **presented** frame, carrying its
+`mediaTime`), so the rate is measured rather than assumed. Capture is **59.88 fps** container; window
+6–24 s:
+
+- **393 of 813 presented frames repeat (48.3%)**, robust to a 4× threshold sweep
+- ⇒ **30.93 distinct frames per second**
+- run lengths 138×1, 66×2, 25×3, 4×4, 1×5, 1×6, **3×7** — steady ~31 fps with excursions to 20 and
+  15 fps and **real 50–117 ms stalls during motion**
+- ⚠️ the two longest runs (651 ms, 735 ms) are in the first 4 s and are surrounded by **0.000% motion**
+  — **a static screen, not a stall.** The old tool would have made them the headline.
+
+### *"VFX looks clunky"* — UNRESOLVED, and the reason is worth recording
+
+It could not be made into a frame-cost claim: the VFX layer is **0.14% of the frame's triangles** and
+hiding it moved **zero** draws over 200 frames. But the ablation could not answer the question either,
+because **on the ×4 map the camera follows the local seat, the enemy is ~2,500 wu away, and first
+contact is 18.4 s — a probe watching an idle player never has a hit on screen.** The synthetic event
+hook that would fix that has a **broken `trail` kind** (`__feelEvent` throws; the other three work),
+now routed. **Reported as unresolved, not as zero.** The live candidates are a recorded look defect in
+the sticky trail and the 31 fps floor itself making everything read as clunky.
+
+### What still needs a real device — named precisely
+
+1. **Uri's phone model and iOS version.** Still outstanding; every number above is phone-class dependent.
+2. **A second 10-second capture AFTER the ×4 map deploys.** The one experiment that settles the
+   projection above.
+3. **WebKit's per-draw-call overhead.** The whole ranking rests on draw submission being the cost. If
+   WebKit is *worse* than Chromium here — plausible, it routes WebGL through a separate GPU process —
+   **the ranking gets stronger, not weaker.** A cable and macOS Safari's Develop menu closes it.
+4. **Thermals over a 45 s match.** A phone that starts at 31 fps does not stay there.
