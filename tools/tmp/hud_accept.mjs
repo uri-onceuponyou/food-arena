@@ -249,13 +249,37 @@ const VIEWPORTS = [
  * the ring is that wide, so a fight state is one navigation away instead of 5.7 s of
  * countdown at SwiftShader's ~9 fps.
  *
- * `px/py` are checked against `arena.cover` by `match.ts:checkQaSpawn` and it warns
- * loudly on a bad placement — (1180, 820) is clear (LESSONS section 10: a QA parameter
- * can manufacture a bug that does not exist).
+ * ⚠️ BOTH OF THESE STATIONS WERE PHOTOGRAPHING SUDDEN DEATH, FOR TWO DIFFERENT REASONS,
+ * AND ONLY ONE OF THEM PRINTS A WARNING. Measured by `tools/tmp/lu2_qafog.mjs`, which
+ * reads `phase`, HP and the live zone readout for the old and the new URL side by side:
+ *
+ *   * `danger` asked for **300 wu**, which is below the 661.67 floor the schedule
+ *     reaches before `DECISIONS §2` collapses the ring, so it SNAPPED — the frame read
+ *     "SUDDEN DEATH / MOST HP WINS". That one warns on the console.
+ *   * `fight` asked for **700 wu**, which is legal, and still lost. `applyQaSetup`
+ *     rewinds the clock to reach a radius, so r leaves `45000 x r / 1985 - 15000` ms of
+ *     SIM before the collapse: **869 ms at 700 wu, against a 4 000 ms settle.** Both
+ *     fighters were down 15 HP to the sudden-death burn by the time the shutter opened.
+ *     **Nothing warns about this one** — it is a legal radius with no clock behind it.
+ *
+ * So the migration is TWO numbers, not one: a radius above the floor AND enough clock.
+ * `fight` takes 1600 wu (21 s of headroom, ring comfortably outside the spawn); `danger`
+ * takes the lowest reachable ring plus `simSpeed=0.05`, which buys a 2 500 ms capture
+ * 20x its own duration.
+ *
+ * ⚠️ AND `px/py` MOVED, BECAUSE THE ARENA DID. `match.ts:checkQaSpawn` warns loudly on a
+ * bad placement and it was warning: (1180, 820) was picked against a 1400x1000 map
+ * centred on (700, 500), and on today's 2800x2000 map centred on (1400, 1000) it is
+ * 284 wu from the middle — INSIDE the ring, not outside it — and overlaps
+ * `stove_island` @(1080,760) 170x90, where `movement.ts` refuses every step. The comment
+ * that used to sit here said "(1180, 820) is clear", citing LESSONS section 10 on QA
+ * parameters manufacturing bugs; it was true when written and the map moved under it.
+ * (2360, 1640) is that point through the x2 scale, is clear of cover, and sits 1154 wu
+ * out — 454 wu outside a 700 wu ring.
  */
 const STATES = [
-  { name: 'fight', q: 'fogRadius=700', settle: 4000 },
-  { name: 'danger', q: 'fogRadius=300&px=1180&py=820', settle: 2500 },
+  { name: 'fight', q: 'fogRadius=1600', settle: 4000 },
+  { name: 'danger', q: 'fogRadius=700&px=2360&py=1640&simSpeed=0.05', settle: 2500 },
   // The RESULT CARD. Not "in-match" strictly, but it is `hud.ts`, it is 100% of what
   // the player reads at the end of every match, and it was where a leftover damage
   // number was found printed between "Match time" and the Play Again button. simSpeed

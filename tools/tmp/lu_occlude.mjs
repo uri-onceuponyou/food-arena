@@ -72,6 +72,9 @@ const has = (k) => a.includes(k);
 const get = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
 const BASE = (get('--url', process.env.PREVIEW_BASE) ?? 'http://localhost:5188').replace(/\/$/, '');
 const SAVE = get('--save', null);
+/** `--map` also writes a `-map.png` per viewport: the disc's ground-area density with
+ *  every control stroked over it. Needs `--save`. */
+const MAP = has('--map');
 const CELL = 4; // px per grid cell — 4 is well below the smallest control (40px slot)
 
 /**
@@ -108,9 +111,20 @@ const CONTROLS = [
   { name: 'radar card', sel: ['.hud-radar'] },
   { name: 'nameplates', sel: ['.hud-fighter'] },
   { name: 'clock + zone', sel: ['.hud-clock'] },
+  // ⚠️ `.hud-clock` ABOVE IS A LAYOUT BOX, WHICH THIS FILE'S OWN HEADER FORBIDS —
+  // added 2026-08-11 so the contradiction is measured rather than argued. It is a
+  // centred flex COLUMN holding a narrow timer pill over a 196px zone plate, so its
+  // rect carries a wedge of empty gap either side of the timer that the world shows
+  // straight through. That row is KEPT unchanged so §62's published 13.12% still
+  // reproduces from this tool; this row is the honest one, and the gap between them
+  // is printed as `clock box - ink` below. Both are reported; neither is deleted.
+  { name: 'clock INK', sel: ['.hud-timer', '.hud-zone'] },
   { name: 'stick hints', sel: ['.tch-hint-ring', '.tch-hint-label'] },
   { name: 'mute badge', sel: ['.hud-mute'] },
 ];
+/** Rows that are a strict superset of another row — excluded from ALL (union) so the
+ *  union is over INK, and from the per-row loop's `all` accumulator. */
+const BOX_ROWS = new Set(['clock + zone']);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -196,8 +210,18 @@ const DISC_FN = `() => {
       if (mx * mx + my * my <= R_WU * R_WU) { inDisc[i] = 1; discArea += A; discCells++; }
     }
   }
+  // 🚨 THE ONE NUMBER A LAYOUT DECISION NEEDS, AND A BINNED PROFILE CANNOT GIVE IT.
+  // The guarantee is a DISC, so on screen it has a TOP ARC — above which the ground is
+  // further than 199.2 wu and is worth exactly zero however many pixels it occupies.
+  // A control that fits entirely above this line is free. Reported exactly (to the
+  // 4 px cell) rather than as "somewhere in the first bin", because the whole point of
+  // the number is to size a control against it.
+  let discTopY = -1;
+  for (let r = 0; r < ch && discTopY < 0; r++) {
+    for (let c = 0; c < cw; c++) if (inDisc[r * cw + c]) { discTopY = r * CELL; break; }
+  }
   return {
-    cell: CELL, cw, ch, vw, vh, discArea, discCells,
+    cell: CELL, cw, ch, vw, vh, discArea, discCells, discTopY,
     area: Array.from(area), inDisc: Array.from(inDisc),
     view: window.__fairView(),
     canvas: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },
@@ -227,6 +251,78 @@ function discUnder(disc, rects) {
   }
   return { wu2, cells };
 }
+
+/**
+ * WHERE THE EXPENSIVE GROUND IS, BY SCREEN BAND.
+ *
+ * 🚨 THIS IS THE ROW THAT EXPLAINS EVERY OTHER ROW, AND IT WAS MISSING. The headline
+ * numbers say a top-centre control is expensive and a bottom-corner one is free, and
+ * that reads as an assertion about taste unless you can see the density that produces
+ * it. A pixel at the top of a 58 degree frame shows several times the ground a pixel at
+ * the bottom does — but only up to the point where the ground it shows has left the
+ * 199.2 wu disc entirely, after which it is worth exactly ZERO. So the profile is not
+ * monotonic in screen height and cannot be reasoned about from the pitch alone:
+ * the mass sits in a band, and moving a control ABOVE that band is as good as moving it
+ * below it. Printed for every viewport so a layout decision can name the band it moved
+ * a control out of.
+ */
+function bandProfile(disc, nBands = 10) {
+  const rowsPerBand = Math.max(1, Math.ceil(disc.ch / nBands));
+  const out = [];
+  for (let b = 0; b * rowsPerBand < disc.ch; b++) {
+    const r0 = b * rowsPerBand, r1 = Math.min(disc.ch, r0 + rowsPerBand);
+    let wu2 = 0, cells = 0;
+    for (let r = r0; r < r1; r++) {
+      for (let c = 0; c < disc.cw; c++) {
+        const i = r * disc.cw + c;
+        if (!disc.inDisc[i]) continue;
+        wu2 += disc.area[i];
+        cells++;
+      }
+    }
+    out.push({
+      y0: r0 * disc.cell, y1: r1 * disc.cell, wu2, cells,
+      perPx: cells > 0 ? wu2 / (cells * disc.cell * disc.cell) : 0,
+    });
+  }
+  return out;
+}
+
+/**
+ * The page-side overlay, so the numbers above can be LOOKED AT (`CLAUDE.md` §3).
+ * Each in-disc cell is tinted by its ground area relative to the frame's own maximum —
+ * cyan is cheap ground, magenta is expensive — and every control's rect is stroked. A
+ * band that is black is ground the guarantee does not cover, and a control sitting on
+ * black costs nothing however large it is.
+ */
+const MAP_FN = `(disc, groups) => {
+  const old = document.getElementById('lu-map');
+  if (old) old.remove();
+  const cv = document.createElement('canvas');
+  cv.id = 'lu-map';
+  cv.width = disc.vw; cv.height = disc.vh;
+  cv.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;z-index:2147483646;pointer-events:none';
+  document.body.appendChild(cv);
+  const g = cv.getContext('2d');
+  let max = 0;
+  for (let i = 0; i < disc.area.length; i++) if (disc.inDisc[i] && disc.area[i] > max) max = disc.area[i];
+  for (let r = 0; r < disc.ch; r++) {
+    for (let c = 0; c < disc.cw; c++) {
+      const i = r * disc.cw + c;
+      if (!disc.inDisc[i]) continue;
+      const t = max > 0 ? disc.area[i] / max : 0;
+      g.fillStyle = 'rgba(' + Math.round(60 + 195 * t) + ',' + Math.round(230 - 200 * t) + ',255,0.42)';
+      g.fillRect(c * disc.cell, r * disc.cell, disc.cell, disc.cell);
+    }
+  }
+  g.lineWidth = 2;
+  g.font = '11px monospace';
+  for (const g2 of groups) {
+    g.strokeStyle = g2.color; g.fillStyle = g2.color;
+    for (const r of g2.rects) { g.strokeRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2); }
+    if (g2.rects[0]) g.fillText(g2.name, g2.rects[0].x + 3, g2.rects[0].y - 3);
+  }
+}`;
 
 function selftest() {
   let pass = 0, fail = 0;
@@ -270,6 +366,26 @@ function selftest() {
   t('two rects of identical PIXEL area score differently — the metric is not px in disguise',
     cheap !== dear && dear === 10 * cheap, `${cheap} vs ${dear}`);
 
+  // ── bandProfile, against a disc whose bands are DELIBERATELY UNEQUAL ────────
+  // Four rows of four 4px cells. Row r is worth (r+1) wu² per cell, and the last row is
+  // outside the disc. A profile that reported "pixels per band" — the obvious wrong
+  // implementation, and the one a pixel metric would give — passes none of the last two.
+  const bw = 4, bh = 4;
+  const barea = new Array(bw * bh);
+  const bin = new Array(bw * bh).fill(1);
+  for (let r = 0; r < bh; r++) for (let c = 0; c < bw; c++) barea[r * bw + c] = r + 1;
+  for (let c = 0; c < bw; c++) bin[3 * bw + c] = 0;
+  const bdisc = { cell: 4, cw: bw, ch: bh, area: barea, inDisc: bin };
+  const prof = bandProfile(bdisc, 4);
+  t('the profile has one band per requested split', prof.length === 4, `got ${prof.length}`);
+  t('the bands SUM to the whole in-disc area — nothing is dropped or double-counted',
+    prof.reduce((s, b) => s + b.wu2, 0) === 4 * (1 + 2 + 3), JSON.stringify(prof.map((b) => b.wu2)));
+  t('a band whose ground is outside the disc scores 0 however many pixels it holds',
+    prof[3].wu2 === 0 && prof[3].cells === 0, JSON.stringify(prof[3]));
+  t('two bands of identical PIXEL count report different wu² per px — the profile is not a pixel histogram',
+    prof[0].cells === prof[2].cells && prof[0].perPx * 3 === prof[2].perPx,
+    `${prof[0].perPx} vs ${prof[2].perPx}`);
+
   // ⚠️ THE SUMMARY LINE'S SHAPE IS A CONTRACT, NOT A STYLE. gatecount's OFFLINE probe
   // matches /^\s*(\d+) passed, \d+ failed\s*$/m — the count must START the line. A first
   // draft printed "lu_occlude --selftest  9 passed, 0 failed", which that regex cannot
@@ -280,7 +396,7 @@ function selftest() {
 
 if (has('--selftest')) selftest();
 
-async function readFrame(browser, vp, { save = null, knownBad = false, tag = '' } = {}) {
+async function readFrame(browser, vp, { save = null, knownBad = false, clockBad = false, tag = '' } = {}) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height }, hasTouch: true, isMobile: true, deviceScaleFactor: 1,
   });
@@ -314,6 +430,39 @@ async function readFrame(browser, vp, { save = null, knownBad = false, tag = '' 
     });
     await sleep(250);
   }
+  if (clockBad) {
+    // ── The SECOND known-bad, for the clock column (`CLAUDE.md` §6) ──────────
+    //
+    // 🚨 THE FIRST VERSION OF THIS FAILED ITS OWN TEST AND THE FAILURE IS THE LESSON.
+    // It restated the DESKTOP plate (196px, 22px timer) as inline styles and called
+    // that the known-bad — but on the tree it was measuring, the desktop plate WAS
+    // what shipped at 844 and 932, so the arm reproduced the shipped layout and came
+    // back "NOT WORSE" at two of three viewports. A known-bad has to be the state the
+    // change LEAVES, not a state guessed at; and because the pre-change layout came
+    // from a max-width:720px block, that state is DIFFERENT at 667 than at 844/932.
+    // Restated below as exactly that: undo the landscape rule, and let the width
+    // decide which of the two pre-change layouts is restored. (`CLAUDE.md` §6 —
+    // "a guard that has not been shown to FAIL on the bug it guards against is not a
+    // guard", and this one had to be shown to fail before it was one.)
+    //
+    // ⚠️ IT RESTORES THE GEOMETRY, NOT THE POSITION. `h49_chips` asserts the clock is
+    // centred to within 2px above two seats, so a known-bad that moved it sideways
+    // would be testing a change nobody is allowed to make.
+    await page.evaluate(() => {
+      const narrow = window.innerWidth <= 720;   // the max-width:720px block
+      const set = (sel, css) => { const e = document.querySelector(sel); if (e) e.setAttribute('style', css); };
+      set('.hud-topbar', 'top: calc(var(--fa-safe-t, 0px) + 14px);');
+      set('.hud-clock', 'flex-direction: column; align-items: center; gap: 5px;');
+      set('.hud-timer', narrow ? 'font-size:16px;padding:4px 12px;' : 'font-size:22px;padding:6px 16px;');
+      set('.hud-zone', narrow ? 'width:156px;padding:3px 7px 5px;' : 'width:196px;padding:4px 8px 6px;');
+      const danger = document.querySelector('.hud-zone')?.classList.contains('is-danger');
+      set('.hud-zone-label', narrow
+        ? `font-size:${danger ? 10 : 9}px;letter-spacing:0.08em;`
+        : `font-size:${danger ? 11 : 9.5}px;letter-spacing:0.1em;`);
+      set('.hud-zone-value', narrow ? 'font-size:12.5px;' : 'font-size:15px;');
+    });
+    await sleep(250);
+  }
   const out = await page.evaluate((groups) => {
     const res = {};
     for (const g of groups) {
@@ -332,9 +481,27 @@ async function readFrame(browser, vp, { save = null, knownBad = false, tag = '' 
   }, CONTROLS);
   const disc = await page.evaluate(`(${DISC_FN})()`);
   if (!disc) throw new Error(`lu_occlude: the fair-disc probe returned null at ${vp.tag}`);
+  const suffix = `${tag}${knownBad ? '-knownbad' : ''}${clockBad ? '-clockbad' : ''}`;
   if (save) {
     await mkdir(save, { recursive: true });
-    await page.screenshot({ path: `${save}/${vp.tag}${tag}${knownBad ? '-knownbad' : ''}.png` });
+    await page.screenshot({ path: `${save}/${vp.tag}${suffix}.png` });
+    if (MAP) {
+      // Invoked the same way `DISC_FN` is — an explicit call inside the evaluated
+      // string — so there is no dependence on how Playwright treats a string that
+      // happens to resolve to a function. `area` is rounded to 2dp purely to keep the
+      // payload small; the map is a picture, and nothing is scored off it.
+      const palette = ['#FF3B30', '#00E5FF', '#FFD400', '#7CFF4F', '#FF8AF0', '#FFFFFF', '#9AA0FF'];
+      const payload = JSON.stringify({
+        cell: disc.cell, cw: disc.cw, ch: disc.ch, vw: disc.vw, vh: disc.vh,
+        area: disc.area.map((v) => Math.round(v * 100) / 100), inDisc: disc.inDisc,
+      });
+      const groups = JSON.stringify(CONTROLS
+        .map((g, i) => ({ name: g.name, color: palette[i % palette.length], rects: out[g.name] ?? [] }))
+        .filter((g) => g.rects.length));
+      await page.evaluate(`(${MAP_FN})(${payload}, ${groups})`);
+      await sleep(120);
+      await page.screenshot({ path: `${save}/${vp.tag}${suffix}-map.png` });
+    }
   }
   await context.close();
   return { rects: out, disc, errs };
@@ -362,21 +529,44 @@ async function main() {
       + `(${pct(disc.discArea, ideal).toFixed(1)}%) ────`);
     console.log('   control        rects  screen px            hides wu²      % of the guaranteed view');
     const all = [];
+    const score = {};
     for (const g of CONTROLS) {
       const rs = rects[g.name] ?? [];
       if (!rs.length) { console.log(`   ${g.name.padEnd(14)} (absent)`); continue; }
-      all.push(...rs);
+      // ⚠️ A LAYOUT BOX IS EXCLUDED FROM THE UNION, NOT FROM THE TABLE. `clock + zone`
+      // is `.hud-clock`'s rect and it CONTAINS `clock INK`, so adding both to `all`
+      // would let the container's empty gap into the "every control together" row —
+      // the exact overcount this file's header records for `.hud-topbar`.
+      if (!BOX_ROWS.has(g.name)) all.push(...rs);
       const d = discUnder(disc, rs);
+      score[g.name] = pct(d.wu2, disc.discArea);
       const px = rs.reduce((s, r) => s + r.width * r.height, 0);
       console.log(`   ${g.name.padEnd(14)} ${String(rs.length).padStart(5)}  ${String(Math.round(px)).padStart(7)} px  `
-        + `${' '.repeat(6)}${String(Math.round(d.wu2)).padStart(8)}      ${pct(d.wu2, disc.discArea).toFixed(2).padStart(6)}%`);
+        + `${' '.repeat(6)}${String(Math.round(d.wu2)).padStart(8)}      ${pct(d.wu2, disc.discArea).toFixed(2).padStart(6)}%`
+        + (BOX_ROWS.has(g.name) ? '   ← layout box, not ink; excluded from the union' : ''));
     }
     const u = discUnder(disc, all);
     console.log(`   ${'ALL (union)'.padEnd(14)} ${String(all.length).padStart(5)}  ${' '.repeat(10)}  `
       + `${' '.repeat(6)}${String(Math.round(u.wu2)).padStart(8)}      ${pct(u.wu2, disc.discArea).toFixed(2).padStart(6)}%`);
+    if (score['clock + zone'] != null && score['clock INK'] != null) {
+      console.log(`   clock box − ink = ${(score['clock + zone'] - score['clock INK']).toFixed(2)} pp `
+        + '— the wedge either side of the timer pill that the world shows straight through');
+    }
+    console.log(`   the disc's TOP ARC is at y = ${disc.discTopY}px (${pct(disc.discTopY, disc.vh).toFixed(1)}% down the frame) `
+      + '— everything above that line is ground the guarantee does not cover, and is free');
+    console.log('   band profile (top → bottom of the frame): share of the disc, and wu² per screen px');
+    for (const b of bandProfile(disc)) {
+      const share = pct(b.wu2, disc.discArea);
+      console.log(`     y ${String(b.y0).padStart(4)}–${String(b.y1).padStart(4)}  `
+        + `${share.toFixed(2).padStart(6)}%  ${b.perPx.toFixed(3).padStart(7)} wu²/px  `
+        + '█'.repeat(Math.round(share * 1.5)));
+    }
     const tray = discUnder(disc, rects['weapon tray'] ?? []);
     console.log('');
-    summary.push({ tag: vp.tag, tray: pct(tray.wu2, disc.discArea), all: pct(u.wu2, disc.discArea), disc });
+    summary.push({
+      tag: vp.tag, tray: pct(tray.wu2, disc.discArea), all: pct(u.wu2, disc.discArea),
+      clockBox: score['clock + zone'] ?? 0, clockInk: score['clock INK'] ?? 0, disc,
+    });
   }
 
   if (has('--known-bad')) {
@@ -394,9 +584,25 @@ async function main() {
     console.log('');
   }
 
+  if (has('--known-bad-clock')) {
+    console.log('── KNOWN-BAD ARM: the clock column forced back to its full-size plate ────');
+    for (const vp of VIEWPORTS) {
+      const { rects, disc } = await readFrame(browser, vp, { save: SAVE, clockBad: true });
+      const d = discUnder(disc, rects['clock INK'] ?? []);
+      const bad = pct(d.wu2, disc.discArea);
+      const s = summary.find((x) => x.tag === vp.tag);
+      const worse = bad > (s?.clockInk ?? 0) + 1e-9;
+      console.log(`   ${vp.tag}  the full-size plate hides ${bad.toFixed(2)}% of the guaranteed view, `
+        + `shipped hides ${s ? s.clockInk.toFixed(2) : '?'}%   ${worse ? 'KNOWN-BAD IS WORSE ✓' : 'NOT WORSE ✗ — the instrument is not reading the rule that moved'}`);
+      if (!worse) process.exitCode = 1;
+    }
+    console.log('');
+  }
+
   console.log('HEADLINE — share of the 199.2 wu guaranteed-visible arena hidden by a control');
   for (const s of summary) {
-    console.log(`  ${s.tag}: weapon tray ${s.tray.toFixed(2)}%   ·   every control together ${s.all.toFixed(2)}%`);
+    console.log(`  ${s.tag}: weapon tray ${s.tray.toFixed(2)}%   ·   clock ink ${s.clockInk.toFixed(2)}% `
+      + `(box ${s.clockBox.toFixed(2)}%)   ·   every control together ${s.all.toFixed(2)}%`);
   }
   await browser.close();
 }

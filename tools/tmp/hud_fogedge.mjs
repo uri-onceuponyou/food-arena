@@ -50,7 +50,35 @@ function mean(px, W, x, y, w, h) {
 
 const browser = await chromium.launch({ args: LAUNCH_ARGS });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
-await page.goto(`${BASE}/?screen=match&player=hamburger&enemy=taco&pointerLock=0&fogRadius=300&px=1180&py=820`, { waitUntil: 'domcontentloaded', timeout: 180_000 });
+/* ── THE DANGER STATION, MIGRATED — AND IT WAS BROKEN THREE SEPARATE WAYS ──────
+   It read `fogRadius=300&px=1180&py=820` and every one of those three numbers had
+   quietly stopped meaning what it was written to mean. Measured, not inferred
+   (tools/tmp/lu2_qafog.mjs, which prints the old and the new station side by side):
+
+   1. `fogRadius=300` is BELOW the lowest radius the schedule ever reaches. DECISIONS
+      §2 collapses the ring at 30 s, so the reachable band is (661.67, 1985] wu and
+      anything under it snaps to SUDDEN DEATH with a console warning. The frame this
+      file was photographing read "SUDDEN DEATH / MOST HP WINS" with the whole arena
+      under the canopy — not "the player is outside a closing ring", which is the state
+      the edge burn exists to signal.
+   2. 🚨 A RADIUS ABOVE THE FLOOR IS NOT ENOUGH EITHER, AND NOTHING WARNS ABOUT THAT.
+      `applyQaSetup` resolves a radius by rewinding the clock, so a request of r leaves
+      `45000 x r / 1985 - 15000` ms of SIM before sudden death fires — 869 ms at 700 wu.
+      A 2 500 ms settle at simSpeed 1 spends three times that. `simSpeed=0.05` buys the
+      capture 20x its own duration in wall clock and is load-bearing here, not tidiness.
+   3. 🚨 (1180, 820) IS INSIDE A PROP. It was chosen against the 1400x1000 arena, whose
+      centre was (700, 500); the map is now 2800x2000 centred on (1400, 1000), so that
+      point is 284 wu from the middle — INSIDE any ring over 285 — and `checkQaSpawn`
+      warns that it overlaps `stove_island` @(1080,760) 170x90, where movement.ts
+      refuses every step. (2360, 1640) is the same point mapped through the x2 scale,
+      is clear of cover, and is 1154 wu out, i.e. 454 wu deep in the field at r=700.
+
+   ⚠️ DEEP IN THE FIELD, NOT ON THE BOUNDARY, AND THAT IS THE POINT. This file ablates
+   an HTML vignette against the arena behind it, and its own header says the difficulty
+   is that "by the time the player is outside it, the ARENA ITSELF is under a violet fog
+   curtain". A station straddling the boundary would average a fogged background with an
+   unfogged one and flatter the result. */
+await page.goto(`${BASE}/?screen=match&player=hamburger&enemy=taco&pointerLock=0&fogRadius=700&px=2360&py=1640&simSpeed=0.05`, { waitUntil: 'domcontentloaded', timeout: 180_000 });
 await page.waitForFunction('window.__gameReady === true', null, { timeout: 240_000 });
 await page.waitForTimeout(2500);
 
@@ -62,7 +90,25 @@ await page.evaluate(() => {
   e.style.opacity = '1';
 });
 await page.waitForTimeout(300);
-const on = await page.evaluate(() => !!document.querySelector('.hud-fogedge')?.classList.contains('is-on'));
+/* 🚨 THE STATION HAS TO BE SHOWN TO HAVE REACHED THE STATE IT ABLATES. `on` was read
+   and PRINTED and never checked, so every failure mode above — a snapped radius, a
+   sudden-death collapse, a spawn inside a prop, an ended match — produced a full table
+   of confident dLuma numbers describing an element that was not switched on. There is
+   no tolerance to guess at here: `is-on` is a boolean and the run is void without it. */
+const station = await page.evaluate(() => ({
+  on: !!document.querySelector('.hud-fogedge')?.classList.contains('is-on'),
+  phase: window.__matchDebug?.phase ?? null,
+  zone: `${document.querySelector('[data-el="zone-label"]')?.textContent} / ${document.querySelector('[data-el="zone-value"]')?.textContent}`,
+}));
+const on = station.on;
+if (!on || station.phase !== 'playing') {
+  console.error(`\n🚨 hud_fogedge: the danger station did not arrive — .hud-fogedge.is-on=${on}, `
+    + `phase=${station.phase}, zone="${station.zone}". Every number below would describe an element `
+    + 'that is not switched on. See the station comment above for the three ways this URL has broken before.');
+  await browser.close();
+  process.exit(1);
+}
+console.log(`   station reached: phase=${station.phase}  zone="${station.zone}"  .hud-fogedge.is-on=${on}`);
 await page.screenshot({ path: `${OUT}/on.png`, timeout: 180_000 });
 await page.evaluate(() => { document.querySelector('.hud-fogedge').style.display = 'none'; });
 await page.waitForTimeout(300);
