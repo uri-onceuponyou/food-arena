@@ -16,6 +16,8 @@ Remote: https://github.com/uri-onceuponyou/food-arena — push freely.
 | **`docs/STATE.md`** | What is DONE (with evidence) and what is PENDING (ranked). Start here. |
 | **`docs/DECISIONS-FOR-URI.md`** | Every judgement call parked for Uri, with what was assumed and what reversing costs. Opens with a one-screen answer sheet. |
 | **`docs/LESSONS.md`** | Every hard-won learning. Reading it is cheaper than re-learning any of it. |
+| 🚨 **`docs/AGENT-BRIEF.md`** | **The preamble EVERY build agent must be pointed at** — owned file set, the snapshot rule, the known-bad rule, the traps. ⚠️ **It exists in the repo because this content once sat in a session scratchpad that was cleaned mid-session, and agents were briefed at a dead path for hours. It then grew 200 lines and was referenced by ZERO files — the file that exists so a brief cannot vanish had vanished from the handover.** |
+| `docs/NETCODE.md` · `docs/PHONE.md` | The transport decision priced on this sim (§52); the phone capture protocol and what it asks Uri for. Both grew several hundred lines this session and were nearly undiscoverable for the same reason. |
 | **`docs/APP.md`** | What a mobile wrapper must supply, measured rather than assumed — the scheme requirement (`file://` is unbootable), the audio-unlock number, safe areas, fonts, payload. |
 | **`docs/TOOLS.md`** | The runbook and the gate battery. Most tools exist to answer a question that cost real time. |
 | `PROGRESS.md`, `LAUNCH_PLAN.md` | Historical. Superseded by `docs/LESSONS.md` where they overlap. |
@@ -199,7 +201,7 @@ Not style preferences. Every one exists because breaking it cost hours.
 10. **State a metric's RESOLUTION FLOOR before acting on a change in it.** Known floors: aggregate
     win rate **~9 pp** · pacing **~0.8 s of contact / ~4 pp dead time** · the blind critic **±1.4
     points** · FFA placement **0.978 places** single-phase · seat spread **0.315 places** · main-thread
-    JS **±1.28–1.76 ms** · draw counts **EXACT**. **Every one of these was discovered AFTER someone had
+    JS **±0.71 ms**, from a null arm (`DECISIONS §62`) · draw counts **EXACT**. 🚨 **A floor of *"±1.28–1.76 ms"* circulated for a whole session, was quoted into agent briefs, and DOES NOT EXIST in this repo — it was never measured. Kept here because rule 10 publishing a fabricated floor is the sharpest possible illustration of rule 10.** **Every one of these was discovered AFTER someone had
     already acted inside it** — a whole character programme was steered by score moves of 0.25–1.0, and
     two passes were reported as regressions that never cleared the noise.
 
@@ -327,7 +329,10 @@ direction; the rails move as the arena changes, and the standing advice ages wit
 
 ## Security constraints — permanent
 
-- **`reference/prototypes/` and `reference/images/` are gitignored and must NEVER be committed,
+- **`reference/prototypes/`, `reference/images/` AND `reference/video/`** — ⚠️ **the last was added to
+  `.gitignore` only on 2026-08-11 (`e65d255`), after a 4.9 MB phone capture sat committable. Phone
+  captures land there, and the next thing this project asks Uri for is a screen recording.**
+  All three **are gitignored and must NEVER be committed,
   copied into `src/`, or published.** They are the original 2D prototypes and third-party
   screenshots. Prototypes were once stripped from all git history because one contained a live
   Supabase key. **Never `git add -f` anything under `reference/`.**

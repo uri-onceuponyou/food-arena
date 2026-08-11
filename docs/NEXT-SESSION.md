@@ -118,7 +118,10 @@ THE RANKED PIPELINE — ranked, with the reason for the rank
 8. ⚪ ic_spec's 24-vs-16 is THE ONE STANDING gatecount FAULT AND IT IS AN ARTIFACT — do
    not "fix" it. Eight of its arms read the gitignored shots/ tree, so it reads one number
    on a working tree and another on a committed one, and the committed one is the
-   contract. gatecount measures the committed tree. Confirmed by running both.
+   contract. ^ THAT MECHANISM IS WRONG: gatecount builds no tree and runs each tool where you
+   invoke it. ic_spec counts 8 extra arms when the GITIGNORED shots/ tree is populated, so a
+   working dir reads 24 and A FRESH CLONE READS 16 AND SEES 0 FAULTS. If you are starting
+   clean, expect zero — not one.
    Same shape: x4_shot reports which spawn bays have no station within SPAWN_TAG_WU
    (200 wu) — a coverage note it is designed to print, not a failure.
 
@@ -164,6 +167,10 @@ OPERATIONAL — the things a fresh session actually trips over
   * MEASURE ON A FROZEN SNAPSHOT, never the shared dev server:
     node tools/tmp/with_snapshot.mjs -- <cmd> --url {URL}   (the placeholder is {URL})
     ⚠️ Never URL=$(node tools/snapshot.mjs --json | ...) — --json does not exit; it hangs.
+    🚨 "FROZEN" IS NOT "CLEAN". with_snapshot spawns snapshot.mjs with NO cwd, so it freezes
+    whatever directory your shell is in — the WORKING tree, peers' half-saved edits included.
+    For anything you will quote, point it at the worktree below:
+        node tools/tmp/sx_snap.mjs --root <worktree> -- <cmd> --url {URL}
   * THE CLEAN-TREE METHOD IS git worktree add --detach WITH node_modules AND reference
     SYMLINKED IN. NOT git archive HEAD — five gates shell out to git and die without a
     .git directory, reporting a wrong CAUSE and not merely a wrong number.
@@ -172,7 +179,14 @@ OPERATIONAL — the things a fresh session actually trips over
     on a derived bound rather than a name.
   * NEVER git stash — including --autostash, which creates one. Commit with pathspec
     form: git commit -F - -- <paths>. Never git commit --amend.
-  * ONE OWNER PER FILE SET. It held across ~200 agents with zero clobbering. Pathspec
+  * tools/tmp IS ONE FLAT NAMESPACE THAT EVERY AGENT WRITES INTO. A prefix is a convention,
+    not a reservation, and ?? in git status is the only signal. Run
+    git ls-files tools/tmp | grep <prefix> before you claim one, and Read before you Write —
+    a Write over a name a peer had committed destroyed 1,294 lines of a working tool.
+    (Edit refuses an unread file. Write has no such interlock. That asymmetry is the bug.)
+  * ONE OWNER PER FILE SET. It held across ~200 agents with zero clobbering IN THE ASSIGNED
+    SOURCE SETS — a qualifier that is NOT pedantry: the one clobbering on record happened in
+    tools/tmp, where nothing is assigned at all. Pathspec
     protects you from other FILES, not from a second agent in YOUR file.
   * Full runbook and the gate battery: docs/TOOLS.md. The non-negotiables and why each
     one exists: CLAUDE.md. Do not restate either from memory.
@@ -248,7 +262,8 @@ RESOLUTION FLOORS — state one before acting on a change in a metric:
   aggregate win rate ~9 pp · pacing ~0.8 s contact / ~4 pp dead time · blind critic +-1.4
   points · FFA placement 0.978 places single-phase · seat spread 0.315 places (a LABEL
   PERMUTATION, not a standard error — it is the range of six correlated means) ·
-  main-thread JS +-1.28-1.76 ms · draw counts EXACT
+  main-thread JS +-0.71 ms (null arm, DECISIONS §62) · draw counts EXACT
+  ^ a "+-1.28-1.76 ms" floor circulated all session and DOES NOT EXIST. Never measured.
   ⚠️ A PAIRED PER-MATCHUP DELTA ON IDENTICAL SEEDS IS EXACT, and it is a DIFFERENT
   QUANTITY from an aggregate. roster_table's aggregate once moved 0.8 pp, inside the
   floor, while 58 of 110 individual matchups moved, max 34.4 pp. Report them separately.
@@ -303,11 +318,13 @@ Both survive as visual work, but they now sit **behind rank 1**, and the reason 
 
 ### Two things a fresh session would still be missing
 
-1. **`docs/STATE.md`'s "🔴 Live for the next session" list is stale in two rows** — it says the result
-   card is still slot-ordered with no payout (finished in `7743f08`/`e60117d`, §70) and that
-   `x4_layout.mjs:SPAWN_NORTH` is an unfixed time bomb (fixed in `c469da2`; the guard **inverted** from
-   asserting divergence to asserting agreement). Its header SHA is also 14 commits behind. STATE.md
-   documents that exact failure mode about itself; it has recurred.
+1. ⚠️ **THIS ITEM IS ITSELF STALE AND IS KEPT AS THE DEMONSTRATION.** It said `docs/STATE.md`'s live
+   list was wrong in two rows — the result card and `x4_layout:SPAWN_NORTH`. **Both are recorded as
+   closed in STATE.md**, which was rewritten *after* this file (`12f6e4d` after `871676b`) by a peer
+   working from the same brief. **Trust STATE.md's corrections list over this paragraph.**
+   The failure is the one this whole session is about: two documents written simultaneously against
+   one brief, each reproducing an error the other had already killed. Item 2 below is unaffected and
+   is the more valuable half.
 2. **`tools/scan/colour-baseline.json` is stale again** — provenance `36ee0a6`, **61 commits before the
    map doubled**. `d0f52c2` re-baselined it six days late and wrote up why a permanently-firing gate
    gets switched off. Nothing checks the baseline's age, so it will keep happening. That is rank 1's

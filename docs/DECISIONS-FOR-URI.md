@@ -4733,7 +4733,8 @@ new hidden payout element asserted as a **subtraction** so that anything *else* 
 ⚠️ **And §A declares itself TAUTOLOGICAL in its own header** — removing the winner from a two-element
 permutation leaves one fighter in every possible order. **That is why two seats are safe, and why §A
 compares against an oracle that can move rather than against itself.** Naming your own tautology is the
-opposite of the seven vacuous controls this session produced.
+opposite of the vacuous controls this session produced (**the count is in `docs/LESSONS.md` §17 and
+nowhere else — four files gave it four different values**).
 
 ### The payout cannot double-bank, proven three ways
 

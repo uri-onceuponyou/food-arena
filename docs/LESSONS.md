@@ -919,6 +919,13 @@ its own per-row output, never by CPU or mtime.
 
 ## 17. 🚨 TEN CONTROLS THAT COULD NOT FAIL, IN ONE SESSION — none caught by another check
 
+> 🔴 **THE COUNT LIVES HERE AND NOWHERE ELSE. Do not restate it in another file.**
+> It was written as **seven** in two files, **nine** in a third and **ten** here, all describing the
+> same enumeration — because the fixture/axis-mirror pair is one item or two and the three
+> `[].every()` instances are one item or three. **`gatecount` polices the gate table and cannot see
+> prose counts elsewhere**, so this is CLAUDE.md rule 6's *"six documented counts went stale in a
+> single session"* recurring **inside the four documents written to record it.** Ten is the count.
+
 §13 ends with the rule *"ask of every assertion: what implementation would FAIL this?"* The next
 session produced **ten** that no implementation could. Every one was found by an agent
 **re-deriving something it had been told was already true** — not one by a gate, a review, or a

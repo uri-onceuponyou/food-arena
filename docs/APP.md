@@ -274,6 +274,11 @@ the theme is the one asset that goes through a media element.
 
 ## 8. Fonts — the wrapper must bundle them, and here is the cost of not doing it
 
+🚨 **FALSIFIED BY `be16f16` AND KEPT FOR THE LESSON — THE FONTS ARE SELF-HOSTED AND THE GAME MAKES NO
+EXTERNAL REQUEST AT ALL.** `index.html:96` says so in place, and `index.html:153-154` preload local
+`woff2`. ⚠️ **This file was touched this session (`f387716`) and so LOOKS current**, which is how a
+falsified paragraph survives in a file five other documents point at. Original wording follows.
+
 `index.html` loads **Rubik** and **Heebo** from `fonts.googleapis.com`. That is the only external
 network request the game makes, and an app is offline-capable by definition.
 

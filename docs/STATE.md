@@ -141,10 +141,18 @@ a permanent AI-denial zone**, so nothing may exceed ~168 wu across. Every shippe
 - `n2_geom --ids all --knownbad sort` fails 3 checks; its header claims coverage its default does not
   deliver.
 - `ic_spec` prints **24 on a working tree and 16 on a committed one** — 8 arms read the gitignored
-  `shots/` tree. **16 is the contract** because `gatecount` measures the committed number. Stable,
+  `shots/` tree. ⚠️ **The mechanism circulated for this was WRONG: `gatecount` does not build or measure a
+  committed tree — it has no `git worktree` and no `git archive` and runs each tool wherever you invoke
+  it.** `ic_spec` simply counts 8 extra arms when the **gitignored** `shots/` tree is populated. So a
+  working directory reads **24** and **a fresh clone reads 16 and sees `gatecount: 0 FAULTS`** — this
+  "standing fault" is an artifact of having run the shot tools, not a property of the repo. **16 is the
+  documented number because it is what a clean machine reproduces.** Stable,
   documented, and the reason this row read 24 for so long: *every agent who "checked" it checked a
   working tree.*
-- `sx_fog`'s hub-ring spawn bay has **no screenshot station within 200 wu**.
+- `x4_shot` prints which spawn bays have no screenshot station within `SPAWN_TAG_WU` (200 wu) — a
+  coverage note it is **designed to print**, not a failure. ⚠️ **This circulated as an `sx_fog` defect
+  and `sx_fog` has no spawn-bay arm at all** — it is a 2×3 grid of {sudden death, wide ring} ×
+  {centre, mid, corner} and passes 2/2.
 - `src/characters/taco.ts:949` cites `rig.ts:602/630`. ⚠️ **Both numbers are stale and so is the
   replacement that was circulated for them** — the lines the comment actually describes (head shrink;
   head mount above the neck gap) are **`rig.ts:811` and `rig.ts:838`** on `07c5294`. Verified by
@@ -254,7 +262,10 @@ three of those came out in the opposite direction.
 
 ---
 
-# 6. 🚨 THE DOMINANT LESSON — nine vacuous controls, none caught by another check
+# 6. 🚨 THE DOMINANT LESSON — controls that could not fail, none caught by another check
+
+⚠️ **The count is in `docs/LESSONS.md` §17 and deliberately not repeated here** — it was written as
+seven, nine and ten in four files describing one enumeration, which is exactly the defect §17 is about.
 
 **Every one was found by an agent re-deriving something it had been told was already true.** Not one
 was caught by another check. The mechanisms are all different and all invisible:
@@ -704,7 +715,11 @@ is not the same as resolving the class.**
   there. At half that radius it re-acquires; at **double, it never does** — final separation 363 wu,
   never sighted. **A large patch is a permanent AI-denial zone**, so nothing may exceed ~**168 wu**
   across. This independently reproduces the reference GRAIN finding from the opposite direction:
-  *dozens of small patches, not a few big masses.* **Big hero bushes stay off the table** unless
+  *dozens of small patches, not a few big masses.* ⚠️ **And building AI search is now PRICED rather than
+merely unbuilt: `as_cost`'s ORACLE arm — `visible` forced true, a hard upper bound on anything a search
+behaviour could buy — moves the aggregate +0.0 pp at 1400×1000 and is BIT-IDENTICAL, 0 of 110, at
+2800×2000, on both policies (`d8b455d`). The ~168 wu cap is not a workaround for a missing feature; it
+is why the feature would buy nothing.** **Big hero bushes stay off the table** unless
   someone builds AI search.
 - **Our 21.36% cover share reproduces** (n=12 canonical stations, ablation-validated). ⚠️ **The
   "35–45%" reference has NO instrument anywhere in this repo** — it is one critic's prose about four
