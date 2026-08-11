@@ -189,11 +189,29 @@ export interface BodyArchetype {
    * `Δy / tan(pitch)` of forward overhang, so the lobby demands 4.4x more than the
    * match camera does — verifying at 58 cannot see this at all.
    *
-   * **So a nonzero value here is a commitment that every character on this archetype
-   * has forward OVERHANG at its chin.** Check with `node tools/tmp/rg_neckz.mjs`
-   * before raising one, and note that `0` is fully supported: STUB uses it, and
-   * `taco.ts` opted out with an exact compensation that leaves R and `headCentreY`
-   * identical to six figures.
+   * ── ⚠️ THAT TABLE IS HISTORY: FOUR OF ITS FIVE ROWS HAVE MIGRATED ────────────
+   * pizza and soup, then hotdog and sushi (`64462eb`), all through `withoutNeck()`
+   * below; taco had already opted out by hand. **Today exactly one character in the
+   * cast builds a `neck_column` — burrito — and it delivers 0 px, the row the table
+   * already had right.** Re-measured 2026-08-11, `node tools/tmp/rg_neckz.mjs`:
+   * 8 of 11 would expose a column at the lobby camera against 4 at the match camera,
+   * and `node tools/tmp/nk_neckgate.mjs` is that rule as something that FAILS.
+   *
+   * 🚨 **SO EVERY NONZERO VALUE BELOW IS NOW A DEFAULT NOBODY KEEPS, AND THAT IS
+   * DELIBERATE RATHER THAN ROT.** STOUT and STANDARD (0.055) and LANKY (0.065) still
+   * declare a gap, and every character on STOUT and STANDARD unwinds it; on LANKY,
+   * burrito keeps it and hotdog does not. The values stay because they are what the
+   * reference measurement asked for and because `withoutNeck()` needs a nonzero gap to
+   * invert — an archetype that shipped `0` would silently deny a future character the
+   * pinch, and the arithmetic to opt back IN is the part that goes wrong by hand.
+   * **The archetype offers the neck; the character decides.** Changing one of these to
+   * `0` is a cast-wide head-size change, not a tidy-up.
+   *
+   * **A nonzero value here is a commitment that a character adopting it unmodified has
+   * forward OVERHANG at its chin.** Check with `node tools/tmp/rg_neckz.mjs` before
+   * raising one, and note that `0` is fully supported: STUB uses it, and `taco.ts`
+   * opted out with an exact compensation that leaves R and `headCentreY` identical to
+   * six figures.
    */
   readonly neckFraction: number;
   readonly footClearance: number;
@@ -543,11 +561,11 @@ export function bodyType(name: BodyArchetypeName, tweaks: RigProportions = {}): 
  *
  * ── Why this is a function and not a note telling you to do the arithmetic ───
  * `neckFraction: 0` is fully supported and is the right answer for any character
- * whose food mass does not OVERHANG its own chin — measured, 9 of 11 would expose a
- * column at the lobby camera, and four of the five that build one put **1,914 to
- * 9,767 px** of it on screen there (`rig.ts`, `neckGap > 0`). But dropping the knob
- * on its own MOVES THE HEAD, because the constructor pays for the gap out of the
- * head radius:
+ * whose food mass does not OVERHANG its own chin — measured 2026-08-11, **8 of 11
+ * would expose a column at the lobby camera**, and when five of them still built one
+ * four put **1,914 to 9,767 px** of it on screen there (`rig.ts`, `neckGap > 0`;
+ * burrito is the only builder left). But dropping the knob on its own MOVES THE HEAD,
+ * because the constructor pays for the gap out of the head radius:
  *
  *     headH = height * headFraction - 2 * gap / (1 + headMount)
  *     R     = headH / 2
@@ -583,6 +601,43 @@ export function bodyType(name: BodyArchetypeName, tweaks: RigProportions = {}): 
  * does overhang its chin should keep the gap: the column and collar are the pinch
  * and the dark notch under the chin that two blind critics asked for, and they cost
  * nothing while they are hidden.
+ *
+ * ── 🚨 AND THE HEAD FALLS OFF. THIS FUNCTION DOES NOT HOLD IT ON. ────────────
+ * `withoutNeck()` holds R, `headCentreY`, `torsoTopY` and every other published metric
+ * identical — that is its entire contract, and `nm_neck.mjs --against` verifies it
+ * 11/11. **It does not put anything back where the column was.** `a44d36d` applied it
+ * to four characters and had to REVERT two: with `neck_column` gone, hotdog's and
+ * sushi's heads became their own **68,940 px and 121,177 px islands** at the lobby
+ * camera. So "the metrics are unchanged" and "the character still reads as one body"
+ * are different claims, and only the first one is this function's.
+ *
+ * ⚠️ **THE RAISE YOU NEED IS NOT THE GAP YOU REMOVED — IT IS ~5x LARGER, AND THE
+ * HANDOVER THAT SAID OTHERWISE HAD THE TWO VALUES SWAPPED.** `64462eb` priced it on
+ * the built rig instead of on paper (`n2_geom.mjs`, world AABBs at restPose):
+ *
+ *     char     head's lowest mesh        torso's highest mesh        real air gap
+ *     hotdog   bun_neck        1.425836  hotdog_torso_sausage 1.400536   0.0253 m
+ *     sushi    sushi_rice      1.284345  sushi_maki_wall      1.220150   0.0642 m
+ *
+ * hotdog's 0.0253 m of air needed **0.12 m of lift**, because screen height at the
+ * lobby camera is `y·cos p − z·sin p` and the gap is a WEDGE IN Z: its torso sausage
+ * reaches z +0.35..0.49 while the head's bun sits back at +0.016..0.229, and 0.23 m of
+ * extra forward reach costs 0.079 of screen height against the 0.024 the vertical gap
+ * is worth. The shallow camera looks straight into the wedge. **Any raise derived from
+ * `neckGap`, R and `headCentreY` alone lands short.**
+ *
+ * So the migration is three steps, not one:
+ *   1. `withoutNeck()` — the arithmetic, so nothing moves;
+ *   2. `n2_geom.mjs --knownbad sort` — the head must be NON-positive against the torso;
+ *   3. `nm_island.mjs --pitch 20 --knownbad split` — ONE component, and the detector
+ *      must still split when the head is lifted, or its "1" means nothing.
+ * ⚠️ Step 3 is at **pitch 20**, and that is not a formality: the two island counts
+ * above were both found there. What is measured rather than assumed is that the two
+ * pitches disagree at all — on the shipped tree, 2026-08-11, taco reports **3
+ * components at pitch 20 and 1 at pitch 58**, and the extras are its lettuce sprigs
+ * rather than its neck (`n2_probe --hide taco_lettuce` takes it 3 -> 1). Whether the
+ * reverted hotdog and sushi also read as 1 at 58 was never measured, so it is not
+ * claimed here.
  */
 export function withoutNeck(p: RigProportions): RigProportions {
   const height = p.height ?? CHARACTER_HEIGHT;

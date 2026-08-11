@@ -415,15 +415,28 @@ export interface RigProportions {
    * STRUCTURE — a pinch between two lobes and a dark notch under the chin — and they
    * are correct only while the food mass HIDES them. A column the mass does not hide
    * is a third mass at the character's most prominent junction, which is what Uri
-   * read on taco as *"a hat"*: **at the lobby camera 9 of 11 characters would expose
+   * read on taco as *"a hat"*: **at the lobby camera 8 of 11 characters would expose
    * one, and only 4 do at the match camera**, so verifying at 58° proves nothing.
    *
-   * `node tools/tmp/rg_neckz.mjs` is the check and the constructor carries the table.
+   * `node tools/tmp/rg_neckz.mjs` is the check, `node tools/tmp/nk_neckgate.mjs` is the
+   * same rule as something that FAILS, and the constructor carries the table.
    * If your character's exposure at pitch 20 is not 0, either give the mass forward
    * OVERHANG (depth, not width — a wider collar at the same depth makes the third
    * mass bigger) or set this to **0**, which is fully supported: `taco.ts` does it
    * with an exact compensation that leaves R and `headCentreY` identical to six
    * figures, and `bodies.ts` gives STUB 0 for the same reason stated the other way up.
+   *
+   * 🚨 **AND OPTING OUT IS NOT FREE, WHICH IS THE HALF THAT GETS LOST.** This knob's
+   * column is the only geometry spanning `torsoTopY` to the food mass. `a44d36d`
+   * dropped it on hotdog and sushi and had to REVERT both, because their heads became
+   * their own 68,940 px and 121,177 px islands at the lobby camera; `64462eb` landed
+   * them only after raising each torso to close the gap. ⚠️ **The raise you derive on
+   * paper from `neckGap` will be ~5x short** — hotdog's real air gap was 0.0253 m and
+   * it needed 0.12 m of lift, because screen height at pitch 20 is `y·cos p − z·sin p`
+   * and the gap is a wedge in Z, so a mass that sits forward swamps the vertical gap.
+   * Measure it (`n2_geom`), then verify the head is still ONE component (`nm_island
+   * --knownbad split`). **Today exactly one character in the cast builds a column:
+   * burrito, 0.000 exposed at both pitches.**
    */
   neckFraction?: number;
   /**
@@ -1249,6 +1262,15 @@ export class ChibiRig {
     //    on screen at the camera the owner judges.** "86% never reaches the screen" is
     //    an artefact of the 58° projection, not a property of the geometry.
     //
+    //    ⚠️ **THAT TABLE IS NOW A RECORD OF A CAST THAT NO LONGER EXISTS. FOUR OF ITS
+    //    FIVE ROWS HAVE SINCE MIGRATED OFF THE COLUMN** — pizza and soup, then hotdog
+    //    and sushi in `64462eb`, all through `bodies.ts`'s `withoutNeck()`; taco had
+    //    already opted out by hand. It is kept because it is the measurement that
+    //    justified those migrations, and because the ABLATION METHOD is the one to
+    //    reuse. It is not a description of the shipped tree. Today **exactly one
+    //    character builds a `neck_column` — burrito — and it delivers 0 px**, which is
+    //    the row the old table already had right for the right reason.
+    //
     // 🚨 AND DO NOT SUBSTITUTE THE OFFLINE RASTERISER FOR THIS. `tools/tmp/rg_solid.mjs`
     //    is the right tool at the match camera and it is **wrong about the shipped
     //    lobby view** — at `--pitch 20 --yaw 0` it reports burrito's column at 0.665
@@ -1272,26 +1294,40 @@ export class ChibiRig {
     // The test is `tools/tmp/rg_neckz.mjs`, which computes the 3D fact rather than a
     // pixel count: `max over the mass of (V.z - P.z - (V.y - P.y)/tan p)` over the
     // column's own extent. Negative = the front edge is exposed, by that many metres.
-    // Measured on the committed tree (`--json shots/rg/neckz.json`):
+    // Re-measured on the working tree **2026-08-11**, after the `withoutNeck()`
+    // migrations landed (`node tools/tmp/rg_neckz.mjs`). ⚠️ The previous copy of this
+    // table is superseded rather than kept: its `built` column said `yes` for soup,
+    // pizza, hotdog and sushi, and all four have since migrated — a stale `built`
+    // column is worse than no column, because it says the gate covers a character it
+    // does not. The numbers it carried are in `25d5579`.
     //
     //   char        col r   faceZ-r   exp@20  worst@20   exp@58  worst@58  built
     //   hamburger  0.1668   +0.5120    0.000   +0.2692    0.000   +0.3155   hyp
-    //   burrito    0.0718   +0.1323    0.000   +0.1234    0.000   +0.1234   yes
-    //   soup       0.1709   +0.5059    0.056   -0.0003    0.000   +0.2163   yes
+    //   burrito    0.0718   +0.1323    0.000   +0.1234    0.000   +0.1234   YES
+    //   hotdog     0.1312   +0.2319    0.000   +0.1619    0.000   +0.1619   hyp
+    //   soup       0.1709   +0.5081    0.056   -0.0177    0.000   +0.2163   hyp
+    //   sushi      0.1041   +0.2322    0.111   -0.1578    0.000   +0.0628   hyp
     //   egg        0.3012   +0.5187    0.278   -0.2088    0.000   +0.2047   hyp
-    //   pizza      0.0940   +0.1700    0.278   -0.0969    0.000   +0.0374   yes
-    //   hotdog     0.1312   +0.2305    0.389   -0.2519    0.000   +0.0520   yes
-    //   sushi      0.1041   +0.2290    0.500   -0.3419    0.000   +0.0201   yes
-    //   waterbottle 0.3748  +0.1121    0.556   -0.5710    0.500   -0.1251   hyp
-    //   taco       0.1709   +0.0568    0.833   -0.2992    0.778   -0.0490   hyp
-    //   donut      0.3021   +0.1169    1.000   -0.3867    0.889   -0.1819   hyp
-    //   lollipop   0.3023   -0.1290    1.000   -0.1859    1.000   -0.1123   hyp
+    //   waterbottle 0.3748  +0.1102    0.556   -0.5710    0.500   -0.1251   hyp
+    //   pizza      0.0940   +0.1673    0.667   -0.1168    0.000   +0.0387   hyp
+    //   taco       0.1709   +0.0602    0.833   -0.2992    0.778   -0.0490   hyp
+    //   donut      0.3021   +0.0927    1.000   -0.3867    0.889   -0.1819   hyp
+    //   lollipop   0.3023   -0.1336    1.000   -0.1859    1.000   -0.1123   hyp
     //
-    // **9 of 11 are exposed at the lobby camera and only 4 at the match camera** —
+    // **8 of 11 are exposed at the lobby camera and only 4 at the match camera** —
     // the ordering is not even preserved between them, so a pass that verified at 58
     // could ship a hat and see nothing. `hyp` rows have `neckFraction: 0` today and
     // the radius is re-derived from this file's own formula, i.e. it is what that
-    // character would get if it opted in.
+    // character would get if it opted in. **`YES` is now a set of ONE.**
+    //
+    // 🎯 **THE ONE ROW THAT MOVED FOR A REASON WE CAN NAME: hotdog, 0.389 -> 0.000 at
+    // the lobby.** `64462eb` raised its split-bun torso to close the gap its migration
+    // opened, and the same 0.12 m that rejoined the head also put the bun over where a
+    // column would stand. A geometric fix improves both views and both defects at once;
+    // that is the shape of a real one. pizza (0.278 -> 0.667) and sushi (0.500 -> 0.111)
+    // moved from their own mass edits, and neither cause is attributed here because
+    // neither was measured — **the table is a measurement, the attribution would be a
+    // guess, and this file has already shipped one of those.**
     //
     // ✅ **AND THIS TOOL AGREES WITH THE SHIPPED CAPTURE WHERE THE RASTERISER DOES
     // NOT.** burrito is the discriminating case: `rg_neckz` says `exp@20 = 0.000`
@@ -1301,8 +1337,8 @@ export class ChibiRig {
     // framing. That is why the rule below is stated as a 3D fact.
     //
     // ⚠️ **`faceZ - r` IS THE CHEAP SCREEN AND IT IS NOT SUFFICIENT.** Only lollipop
-    // fails it outright (-0.1290: its face sits BEHIND where a column would stand,
-    // taco's mechanism exactly). Taco itself passes it at +0.0568 and is still 83%
+    // fails it outright (-0.1336: its face sits BEHIND where a column would stand,
+    // taco's mechanism exactly). Taco itself passes it at +0.0602 and is still 83%
     // exposed, because clearing the column's front edge in z is necessary and the
     // column also has to be cleared at every HEIGHT, which is the `Δy/tan p` term. Use
     // the exposure column, not the difference.
@@ -1312,6 +1348,49 @@ export class ChibiRig {
     // expensive. It is the wrong direction. **The lever is DEPTH, not WIDTH**: a mass
     // that overhangs FORWARD hides the column at both pitches, and a wider ring at the
     // same depth just makes the third mass bigger. Nothing here widens anything.
+    //
+    // ── 🚨 AND HERE IS THE OTHER HALF, WHICH THE SIGN FLIP MADE EASY TO LOSE ─────
+    // Reading "delivered neck pixels" as a shortfall was wrong. **Reading "zero neck
+    // pixels" as a pass is wrong in the OPPOSITE direction, and it has already shipped
+    // once.** This block builds the only geometry that spans `torsoTopY` to the food
+    // mass. Delete it and there are two ways to reach zero:
+    //
+    //   the mass covers the column   ← the target
+    //   the head is a separate island ← `a44d36d`, which reverted two migrations
+    //                                   because hotdog's and sushi's heads became
+    //                                   their own 68,940 px and 121,177 px components
+    //                                   at the lobby camera
+    //
+    // **`rg_neckz` cannot tell those apart** — it asks whether a column is exposed, and
+    // a character with no column has nothing to expose, so it returns the same answer
+    // for a hidden neck and for a head that fell off. Neither can a delivered-pixel
+    // count, which is what makes this the same trap wearing the other sign. The two
+    // tools that CAN, each with a known-bad that fails on the real defect:
+    //
+    //   node tools/tmp/n2_geom.mjs --knownbad sort              # offline, in metres
+    //   PREVIEW_BASE=<snapshot> node tools/tmp/nm_island.mjs \
+    //        --ids <ids> --pitch 20 --knownbad split --dy 0.5   # pixels, the verdict
+    //
+    // Measured 2026-08-11 on a frozen snapshot, pitch 20: burrito, hotdog and sushi are
+    // **1 component** each and `--knownbad split` (head lifted 0.5 m) **DETECTED on 4 of
+    // 4** — so the attachment detector still fails on a genuinely detached head, which
+    // is the only thing that makes today's zeros worth anything.
+    // ⚠️ taco reports **3** components at pitch 20 and 1 at pitch 58, and the two extras
+    // are **not the neck** — ABLATED, not assumed: `n2_probe --hide taco_lettuce`
+    // matches 18 objects and takes it 3 -> 1 (405005/1593/128 px -> 401377 px). They are
+    // the two lettuce sprigs that clear the shell's open top, which `taco.ts` authored
+    // deliberately as silhouette events. Recorded here because a future reader will
+    // otherwise read that 3 as this block's problem.
+    //
+    // ── The rule, as something that FAILS ────────────────────────────────────────
+    // `node tools/tmp/nk_neckgate.mjs` turns the paragraph above the table into a gate:
+    // the set of characters that build a column is pinned and asserted NON-EMPTY (it is
+    // a set of one, and `[].every()` is `true`), and every member must be 0.000 exposed
+    // at BOTH pitches. Validated against a real source edit rather than only against
+    // mutated JSON: restoring `neckFraction: 0.055` to `taco.ts` in a detached worktree
+    // makes it fail 1.000 / 1.000, and the lobby capture of that tree is the gold column
+    // with the black ring under the chin that Uri called *"a hat"*. The match capture of
+    // the same tree shows almost nothing — which is the whole argument for two cameras.
     if (this.metrics.neckGap > 0) {
       const gap = this.metrics.neckGap;
       const nr = this.metrics.neckRadius;
