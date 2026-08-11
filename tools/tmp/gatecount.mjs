@@ -369,6 +369,7 @@ const SKIP = [
   ['tools/tmp/ft_faces.mjs --selftest', 'browser', 'text-overflow census + font rulers across 5 screens x 4 viewports'],
   ['tools/tmp/ft_glyphs.mjs --selftest --url <snapshot>', 'browser', 'which codepoints a loaded face actually DRAWS — the question a network waterfall cannot ask'],
   ['tools/tmp/ft_basepath.mjs --dist <dist> --base /food-arena/', 'browser', '@font-face url() at a non-root base; ab_basepath structurally cannot see it'],
+  ['tools/tmp/p2_bgcross.mjs --selftest', 'browser', 'projectile legibility across the surfaces it actually crosses; 8 controls incl. an exact null'],
   ['tools/tmp/pj_probe.mjs --selftest', 'browser', 'projectile legibility by same-frame ablation; known-bad is a sculpt painted the background\'s own measured colour'],
   // ⚠️ BROWSER, and it could not be anything else: its acceptance test is "N renders of ONE frozen
   // frame are bit-identical", which needs a real `Stage.render()` and a real GL context. Its
