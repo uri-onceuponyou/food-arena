@@ -6,8 +6,20 @@
  *  READ THIS BEFORE TRUSTING ANY NUMBER THIS TOOL PRINTS
  * ═════════════════════════════════════════════════════════════════════════════
  *
- * Every headless browser available here rasterises with **SwiftShader, on the CPU**.
- * The project has measured ~9-10 fps under it. That number is not a performance
+ * ⚠️ **THIS PARAGRAPH USED TO SAY "EVERY HEADLESS BROWSER AVAILABLE HERE RASTERISES WITH
+ * SWIFTSHADER". THAT IS FALSE, AND IT WAS FALSE THE WHOLE TIME.** Kept above its
+ * correction because it shaped four years of conclusions in this repo. SwiftShader is
+ * what **this file's own launch flags asked for** — `--use-angle=swiftshader`, copied into
+ * every tool in `tools/`. `tools/tmp/ph_gpu.mjs` probed four launch configurations on this
+ * box: with `--use-angle=metal`, headless Chromium gets `ANGLE (Apple, ANGLE Metal
+ * Renderer: Apple M5 Pro)` **and `EXT_disjoint_timer_query_webgl2`**. Pass `--angle metal`.
+ *
+ * The default is still SwiftShader, deliberately: every stored `--json` baseline in this
+ * repo was taken under it, and changing the rasteriser under `--baseline` would
+ * manufacture regressions. But the *reason* the timings below are untrustworthy has
+ * changed, and so has the remedy.
+ *
+ * Under SwiftShader the project has measured ~9-10 fps. That number is not a performance
  * signal — it is a property of the harness. It has already caused one wrong
  * conclusion on this project (an agent polling an analyser from rAF at SwiftShader's
  * frame rate missed 4 of 5 audio events and reported the game as nearly silent).
@@ -42,6 +54,16 @@
  *   node tools/perf.mjs --mode boot    --scene match,home            # boot, by file
  *   node tools/perf.mjs --mode leak                                  # home->match->home
  *   node tools/perf.mjs --mode navselftest                           # the reload guard's own gate
+ *   node tools/perf.mjs --mode tierselftest                          # `--device mobile`'s own gate
+ *   node tools/perf.mjs --mode counts --device mobile --angle metal  # a real GPU, labelled
+ *
+ * 🐞 `--device mobile` MEASURED THE WRONG TIER FOR THIS FILE'S WHOLE LIFE. `newPage()`
+ * passed no `hasTouch`/`isMobile`, `detectTier()` gates on `pointer: coarse` +
+ * `maxTouchPoints > 0`, and so every run labelled "mobile" resolved **`high`** — DPR 2,
+ * bloom on, SMAA on: the one tier a phone never gets. Fixed 2026-08-11 in the `DEVICES`
+ * block below, with `--mode tierselftest` as the known-bad input. **Any "mobile" number in
+ * this repo dated before that is a `high` measurement wearing a phone's viewport**, and
+ * `meta.emulation` in a `--json` report now records which it was.
  *
  * ⚠️ `--mode navselftest` is the known-bad input for the "page reloaded mid-run" warning.
  * That warning was a 100% FALSE POSITIVE until 2026-08-10: it counted `framenavigated`,
@@ -60,6 +82,12 @@
  *   --url  http://localhost:5188   base URL (START YOUR OWN VITE; :5173 is shared)
  *   --w --h                        viewport (default 1300x740; --device mobile for 844x390)
  *   --device desktop|mobile|tablet|ultrawide
+ *                                  `mobile` and `tablet` now emulate TOUCH. Override with
+ *                                  --touch / --no-touch when you want the other one.
+ *   --angle swiftshader|metal|default
+ *                                  rasteriser. Default swiftshader (every stored baseline
+ *                                  was taken under it). `metal` is a real Apple GPU and is
+ *                                  labelled `metal-apple-desktop` in the report's meta.
  *   --frames N                     frames to sample (default 60)
  *   --samples N                    ablate only: how many DIFFERENT combat moments to
  *                                  re-measure image contribution at (default 5). One
@@ -101,16 +129,41 @@ const JSON_OUT = arg('--json', null);
 const BASELINE = arg('--baseline', null);
 const VERBOSE_TIMING = flag('--unsafe-timing');
 
+/**
+ * ── 🐞 `--device mobile` HAD NEVER MEASURED A PHONE'S TIER ───────────────────
+ *
+ * These entries used to carry `{ w, h, dpr }` only, and `newPage()` passed exactly those
+ * three to `browser.newPage()`. `detectTier()` (`src/render/quality.ts`) gates on
+ * `matchMedia('(pointer: coarse)').matches && navigator.maxTouchPoints > 0` and returns
+ * **`high`** the moment that gate fails — and without `hasTouch`/`isMobile` Chromium
+ * reports a fine pointer and zero touch points. So a run labelled `--device mobile`
+ * resolved to `high`: DPR 2, bloom on, SMAA on.
+ *
+ * **Every "mobile" number this project owns was therefore taken on the one tier a phone
+ * never gets.** Confirmed live before the fix (`docs/PHONE.md` §2d) and re-provable at any
+ * time with `--mode tierselftest`, which runs the OLD page options and the NEW ones side
+ * by side and fails if they agree — a guard that has not been shown to fail is not a guard.
+ *
+ * `hasTouch` is what moves `pointer: coarse` and `maxTouchPoints`; `isMobile` is what makes
+ * Chromium report a phone-sized `window.screen`, which `detectTier`'s second gate
+ * (`screenShortEdgeCssPx <= 500`) reads. Both are needed and they do different jobs.
+ * ⚠️ `desktop` and `ultrawide` deliberately stay untouched: they are meant to be `high`,
+ * and adding touch there would demote them and silently re-baseline every desktop number.
+ */
 const DEVICES = {
   desktop: { w: 1300, h: 740, dpr: 1 },
-  mobile: { w: 844, h: 390, dpr: 2 }, // iPhone 14 landscape CSS px, DPR capped by Stage
-  tablet: { w: 1024, h: 768, dpr: 2 },
+  // iPhone 14 landscape CSS px, DPR capped by Stage. `auto` must resolve `low` here.
+  mobile: { w: 844, h: 390, dpr: 2, hasTouch: true, isMobile: true },
+  // A tablet is touch-primary too. `auto` resolves `medium` at this short edge (768 > 500).
+  tablet: { w: 1024, h: 768, dpr: 2, hasTouch: true, isMobile: true },
   ultrawide: { w: 1720, h: 720, dpr: 1 },
 };
 const dev = DEVICES[arg('--device', 'desktop')] ?? DEVICES.desktop;
 const W = Number(arg('--w', dev.w));
 const H = Number(arg('--h', dev.h));
 const DPR = Number(arg('--dpr', dev.dpr));
+const HAS_TOUCH = flag('--no-touch') ? false : (flag('--touch') || !!dev.hasTouch);
+const IS_MOBILE = flag('--no-touch') ? false : (flag('--touch') || !!dev.isMobile);
 
 /** Scenes. `ready` is the in-page predicate that says "this scene is fully up". */
 const SCENES = {
@@ -145,10 +198,57 @@ const SCENES = {
 const SCENE_ARG = arg('--scene', 'match');
 const SCENE_NAMES = SCENE_ARG === 'all' ? Object.keys(SCENES) : SCENE_ARG.split(',');
 
+/**
+ * ── THE RASTERISER IS NOW A CHOICE, AND THE HEADER'S CLAIM WAS TOO STRONG ────
+ *
+ * This file has said since its first line that "every headless browser available here
+ * rasterises with SwiftShader, on the CPU". **That is a property of the FLAG, not of the
+ * machine.** `tools/tmp/ph_gpu.mjs` probed four launch configurations on this box and
+ * three of them get a real Apple GPU in headless, with `EXT_disjoint_timer_query_webgl2`:
+ *
+ *     headless-shell, --use-angle=swiftshader   ANGLE (Google, SwiftShader)   timerQuery false
+ *     headless,       --use-angle=metal         ANGLE (Apple, Metal)          timerQuery true
+ *
+ * SwiftShader is kept as the DEFAULT on purpose — every stored `--json` baseline in this
+ * repo was taken under it, and silently changing the rasteriser under a regression gate
+ * would manufacture regressions. `--angle metal` is opt-in and is labelled in `meta`.
+ *
+ * ⚠️ A desktop Apple GPU is a **4-6× optimistic** proxy for a phone on GPU-core count
+ * alone, before the memory-bandwidth gap and before thermal throttling. It is the right
+ * FAMILY (tile-based deferred rendering, like every A-series part) where SwiftShader is
+ * not even the right cost model — but it is not a phone, and any number taken with it
+ * must carry that label.
+ */
+/**
+ * Extra query string appended to every scene URL, so a run can be pinned to a render tier
+ * (`--query '&tier=low'`). Every scene URL already contains a `?`, so this must start `&`.
+ *
+ * 🚨 THIS EXISTS TO DELETE `tools/tmp/perf_tier.mjs`. That file is a **verbatim copy of
+ * this one** whose only intended difference is these four lines, and `sentinel`'s clone
+ * registry names the remedy in its own entry: *"the right fix is `perf.mjs --query <q>`
+ * and deleting the copy, which is the perf owner's call, not this guard's."* The copy has
+ * already been caught once missing a fix that landed here (`9e1061c`, the reload
+ * false-positive) and it is missing the `hasTouch`/`isMobile` fix above right now — so
+ * **`perf_tier.mjs --device mobile` still measures `high`.**
+ *
+ * ⚠️ THE COPY IS NOT DELETED BY THIS COMMIT and that is not an oversight: it is registered
+ * in FOUR files this pass does not own — `sentinel.mjs`'s `CLONES`, `gatecount.mjs`'s SKIP
+ * registry, `docs/TOOLS.md`'s gate table (executable) and `capture_audit.mjs`'s role map —
+ * plus a usage line in `src/render/quality.ts`. Deleting it needs one commit that touches
+ * all five. Until then `sentinel` FAILS on this pair, **and it is right to**: the two
+ * files now disagree about what `--device mobile` means.
+ */
+const QUERY = arg('--query', '');
+
+const ANGLE = arg('--angle', 'swiftshader');
+if (!['swiftshader', 'metal', 'default'].includes(ANGLE)) {
+  console.error(`unknown --angle ${ANGLE} (swiftshader | metal | default)`); process.exit(2);
+}
 const LAUNCH_ARGS = [
   '--use-gl=angle',
-  '--use-angle=swiftshader',
-  '--enable-unsafe-swiftshader',
+  ...(ANGLE === 'swiftshader'
+    ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+    : ANGLE === 'metal' ? ['--use-angle=metal', '--enable-gpu'] : []),
   '--enable-webgl',
   '--ignore-gpu-blocklist',
   '--disable-gpu-sandbox',
@@ -488,7 +588,14 @@ export const ErrorOverlay=class{}; export default {};`,
 }
 
 async function newPage(browser, { instrument = 'full' } = {}) {
-  const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: DPR });
+  // `hasTouch`/`isMobile` are the whole of the §2d fix — see the DEVICES block. Without
+  // them `detectTier()` returns `high` for `--device mobile`.
+  const page = await browser.newPage({
+    viewport: { width: W, height: H },
+    deviceScaleFactor: DPR,
+    hasTouch: HAS_TOUCH,
+    isMobile: IS_MOBILE,
+  });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -589,7 +696,7 @@ function navLine(page) {
 async function gotoScene(page, name) {
   const s = SCENES[name];
   if (!s) throw new Error(`unknown scene "${name}". known: ${Object.keys(SCENES).join(', ')}`);
-  await page.goto(BASE + s.url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+  await page.goto(BASE + s.url + QUERY, { waitUntil: 'domcontentloaded', timeout: 90_000 });
   await page.waitForFunction(s.ready, null, { timeout: 120_000 });
   // Stamp AFTER `ready`: the shell's first `replaceState` has already happened by then, so
   // a stamp that survives to read-out proves the same-document router traffic did not
@@ -1397,7 +1504,7 @@ async function modeBoot(browser) {
 
       const t0 = Date.now();
       const s = SCENES[name];
-      await page.goto(BASE + s.url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+      await page.goto(BASE + s.url + QUERY, { waitUntil: 'domcontentloaded', timeout: 90_000 });
       await page.waitForFunction(s.ready, null, { timeout: 120_000 });
       const tReady = Date.now() - t0;
       // `--mode boot` navigates itself rather than through `gotoScene` (it must own the
@@ -1632,6 +1739,95 @@ async function modeNavSelftest(browser) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MODE: tierselftest — THE KNOWN-BAD INPUT FOR `--device mobile`
+//
+//   node tools/tmp/headserve.mjs -- node tools/perf.mjs --mode tierselftest --url {URL}
+//
+// The bug this proves is not hypothetical and it is not old: until this commit, every
+// `--device mobile` run in this repo measured tier `high`. `detectTier()` gates on
+// `pointer: coarse` + `maxTouchPoints > 0`, `newPage()` passed neither, and the failure is
+// SILENT — the run prints a viewport of 844x390 and a plausible set of counts, and the
+// only tell is a `pixelRatio 2` with bloom and SMAA present in a report labelled "mobile".
+//
+// FOUR ARMS IN ONE INVOCATION, so the fix cannot be reported without its own control:
+//   A. OLD    the page options this file used to pass. MUST resolve `high` — that is the
+//             bug, reproduced, and it is what makes arm B mean anything.
+//   B. NEW    + hasTouch + isMobile. MUST resolve `low`.
+//   C. TABLET + hasTouch + isMobile at 1024x768. MUST resolve `medium` — this is what
+//             separates "detection works" from "isMobile forces low", which would pass
+//             arm B for the wrong reason.
+//   D. DESKTOP no touch, 1300x740. MUST stay `high` — the fix must not demote desktop,
+//             where every stored `--json` baseline in this repo was taken.
+//
+// And one check that is not about labels at all: the two tiers must differ in a knob that
+// costs something (`pixelRatioCap`). A tier name that changes while the render does not
+// would be a report, not a measurement.
+// ─────────────────────────────────────────────────────────────────────────────
+async function modeTierSelftest(browser) {
+  let pass = 0, fail = 0;
+  const results = [];
+  const check = (name, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (ok) { pass++; console.log(`  ✓ ${name.padEnd(72)} ${JSON.stringify(got)}`); }
+    else { fail++; console.log(`  ✗ ${name.padEnd(72)} got ${JSON.stringify(got)}  want ${JSON.stringify(want)}`); }
+    return ok;
+  };
+
+  const ARMS = [
+    { id: 'A. OLD    (844x390, no hasTouch/isMobile — what this file used to do)', opts: { viewport: { width: 844, height: 390 }, deviceScaleFactor: 2 } },
+    { id: 'B. NEW    (844x390, hasTouch+isMobile — a phone)', opts: { viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true } },
+    { id: 'C. TABLET (1024x768, hasTouch+isMobile)', opts: { viewport: { width: 1024, height: 768 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true } },
+    { id: 'D. DESKTOP(1300x740, no touch)', opts: { viewport: { width: 1300, height: 740 }, deviceScaleFactor: 1 } },
+  ];
+
+  const seen = {};
+  for (const arm of ARMS) {
+    const page = await browser.newPage(arm.opts);
+    try {
+      await stubHmr(page);
+      // `?quality=` is not a thing; the stored CHOICE could be `auto` or a pinned tier from
+      // a previous profile in this browser context. A fresh context per arm means the
+      // profile is empty, so `choice` is `auto` and `detected` is what `auto` would pick.
+      await page.goto(`${BASE}/?screen=home&pointerLock=0`, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+      await page.waitForFunction('window.__quality && window.__quality.signals', null, { timeout: 90_000 });
+      const q = await page.evaluate(`(() => {
+        const q = window.__quality;
+        return {
+          detected: q.detected, choice: q.choice, tier: q.tier,
+          coarse: q.signals.coarsePointer, touchPoints: q.signals.maxTouchPoints,
+          shortEdge: q.signals.screenShortEdgeCssPx, dpr: q.signals.devicePixelRatio,
+          pixelRatioCap: q.profile.pixelRatioCap, bloom: q.profile.bloom, smaa: q.profile.smaa,
+        };
+      })()`);
+      seen[arm.id[0]] = q;
+      results.push({ arm: arm.id, ...q });
+      console.log(`\n${arm.id}`);
+      console.log(`     detected=${q.detected}  choice=${q.choice}  coarsePointer=${q.coarse}  maxTouchPoints=${q.touchPoints}  screenShortEdge=${q.shortEdge}`);
+      console.log(`     profile: pixelRatioCap=${q.pixelRatioCap}  bloom=${q.bloom}  smaa=${q.smaa}`);
+    } catch (e) {
+      fail++; console.log(`  ✗ ${arm.id} threw: ${e.message}`);
+    } finally { await page.close(); }
+  }
+
+  console.log('');
+  const A = seen.A, B = seen.B, C = seen.C, D = seen.D;
+  check('A/KNOWN-BAD: the old page options report a FINE pointer', A?.coarse, false);
+  check('A/KNOWN-BAD: …and zero touch points', A?.touchPoints, 0);
+  check('A/KNOWN-BAD: …so `--device mobile` resolved `high` — THE BUG, reproduced', A?.detected, 'high');
+  check('B/FIX: hasTouch gives a coarse pointer', B?.coarse, true);
+  check('B/FIX: …and a non-zero maxTouchPoints', B?.touchPoints > 0, true);
+  check('B/FIX: isMobile gives a phone-sized window.screen (<=500 is the second gate)', B?.shortEdge <= 500, true);
+  check('B/FIX: …so a phone now resolves `low`', B?.detected, 'low');
+  check('A vs B: the two arms DISAGREE (else this whole mode is tautological)', A?.detected !== B?.detected, true);
+  check('C/NOT-A-BLUNT-FORCE: a tablet-sized touch device resolves `medium`, not `low`', C?.detected, 'medium');
+  check('D/POSITIVE CONTROL: desktop is untouched and still `high`', D?.detected, 'high');
+  check('THE TIER COSTS SOMETHING: low and high differ in pixelRatioCap', A?.pixelRatioCap !== B?.pixelRatioCap, true);
+
+  console.log(`\n${pass} passed, ${fail} failed`);
+  return { mode: 'tierselftest', pass, fail, results, verdict: fail === 0 ? 'PASS' : 'FAIL' };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // baseline comparison
 // ─────────────────────────────────────────────────────────────────────────────
 const WATCH = [
@@ -1664,8 +1860,11 @@ function compareBaseline(base, now) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 async function main() {
-  console.log(`perf.mjs  mode=${MODE}  scenes=${SCENE_NAMES.join(',')}  viewport=${W}x${H}@${DPR}  frames=${FRAMES}`);
-  console.log(`RASTERISER: SwiftShader (CPU). Frame time is NOT reported as performance — see file header.\n`);
+  console.log(`perf.mjs  mode=${MODE}  scenes=${SCENE_NAMES.join(',')}  viewport=${W}x${H}@${DPR}  frames=${FRAMES}`
+    + `  touch=${HAS_TOUCH}/mobile=${IS_MOBILE}`);
+  console.log(ANGLE === 'metal'
+    ? `RASTERISER: ANGLE/Metal — a REAL Apple desktop GPU. Right family as a phone (TBDR), but 4-6× OPTIMISTIC.\n`
+    : `RASTERISER: SwiftShader (CPU). Frame time is NOT reported as performance — see file header.\n`);
   const browser = await chromium.launch({ args: LAUNCH_ARGS });
   let report;
   try {
@@ -1675,12 +1874,23 @@ async function main() {
     else if (MODE === 'boot') report = await modeBoot(browser);
     else if (MODE === 'leak') report = await modeLeak(browser);
     else if (MODE === 'navselftest') report = await modeNavSelftest(browser);
+    else if (MODE === 'tierselftest') report = await modeTierSelftest(browser);
     else { console.error(`unknown --mode ${MODE}`); process.exit(2); }
   } finally {
     await browser.close();
   }
 
-  report.meta = { at: new Date().toISOString(), base: BASE, viewport: { W, H, DPR }, frames: FRAMES, rasteriser: 'swiftshader-cpu' };
+  report.meta = {
+    at: new Date().toISOString(), base: BASE, viewport: { W, H, DPR }, frames: FRAMES,
+    // ⚠️ LABELLED, ALWAYS. A stored baseline taken under SwiftShader and a run taken under
+    // Metal are not comparable, and `--baseline` has no way to know which it is holding
+    // unless it is written down. `metal-apple-desktop` additionally means "4-6× optimistic
+    // as a phone proxy" everywhere it appears.
+    rasteriser: ANGLE === 'metal' ? 'metal-apple-desktop' : ANGLE === 'default' ? 'chromium-default' : 'swiftshader-cpu',
+    // The §2d fix: whether this run's page was a touch device at all. Every "mobile"
+    // report written before 2026-08-11 has `hasTouch: false` implicitly and measured `high`.
+    emulation: { hasTouch: HAS_TOUCH, isMobile: IS_MOBILE, device: arg('--device', 'desktop') },
+  };
   if (JSON_OUT) {
     await mkdir(dirname(resolve(JSON_OUT)), { recursive: true });
     await writeFile(JSON_OUT, JSON.stringify(report, null, 2));
