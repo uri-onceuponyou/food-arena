@@ -6213,6 +6213,186 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 32. THE POST-REACH REBALANCE (rules.ts DEVIATION #13, DECISIONS §63)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// §31 (`af35362`) made every ranged weapon connect at its own press gate — 23 of 23 could
+// not, now 2 of 23. It is correct, it is NOT being undone, and it had a price Uri
+// authorised in advance: the roster spread DOUBLED (14.2 -> 28.1 pp) and settled matchups
+// went 18 -> 28 of 110. The reason is structural rather than accidental. The fix's benefit
+// is proportional to how much of a kit is spent at long reach, so the biggest winner was
+// the roster's only 4-pellet HOMING weapon at `REACH.rangedMax` — Burrito's Topping Swarm,
+// 48 wu -> 140 wu of effective reach, +13.3 pp — and the biggest losers were the character
+// with no ranged weapon at all (Lollipop, which got nothing) and the weakest kit in the
+// game (Pizza).
+//
+// ⚠️ **THE OUTCOME OF THIS PASS CANNOT LIVE IN A UNIT TEST AND IS NOT ASSERTED HERE.**
+// Roster range is a 7,040-match quantity; `tools/tmp/roster_lab.mjs --seeds 32` owns it and
+// the commit message carries the measurement. §22(h) already records what happens when a
+// MODEL of that number is made a gate: the model disagreed with 7,040 matches, and the next
+// person to satisfy the gate would have made the game worse.
+//
+// What IS assertable is the SHAPE of the change — the class the fix over-rewarded, and the
+// two structural rules the compensation had to obey.
+{
+  console.log('\n32. The post-reach rebalance — the shape, not the outcome');
+
+  /** Sustained HP/s from one weapon, the same pricing `kitDps` uses. */
+  const perPress = (w) => (w.comboParts
+    ? w.comboParts.reduce((a, p) => a + p.damage, 0)
+    : (w.damage ?? 0) * (w.pellets ?? 1) * (w.peckHits ?? 1));
+  const perSecond = (w) => (perPress(w) / w.cooldown) * 1000;
+
+  // ── (a) THE CLASS §31 OVER-REWARDED, NAMED ───────────────────────────────
+  //
+  // A weapon that HOMES and reaches `REACH.rangedMax` is the hardest press in the game to
+  // avoid: it cannot be outrun (§31 asserts every ranged weapon is faster than the roster),
+  // it steers, and after §31 it arrives. That combination is what turned one authored
+  // number into +13.3 pp on one character, so the class is pinned by name — a fourth member
+  // must be a decision somebody makes on purpose, not something that appears.
+  {
+    const cls = CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons
+      .filter((w) => w.homing && (w.range ?? 0) === REACH.rangedMax)
+      .map((w) => `${id}:${w.key}`));
+    // 🚨 EMPTINESS FIRST. Three guards went vacuous on this project in one session, one of
+    // them in this exact file set, because a filtered set emptied and `[].every()` returned
+    // true. Every row below asserts over `cls`, so `cls` is asserted non-empty first.
+    check('the max-reach HOMING class is non-empty before anything is asserted over it',
+      cls.length > 0, `[${cls.join(', ')}]`);
+    check('…and it is exactly the three weapons DEVIATION #13 was written around',
+      cls.join(' ') === 'burrito:Swarm egg:Hatch sushi:Catch', `[${cls.join(', ')}]`);
+
+    // ⚠️ THIS RATCHET PASSED BEFORE DEVIATION #13 TOO, AND SAYING SO IS THE POINT. It is
+    // not evidence the rebalance was needed — the evidence for that is 7,040 matches. It is
+    // a bound on how far the class may grow: an undodgeable, unoutrunnable press must never
+    // become the thing a kit mostly IS, because that is a kit with no counterplay at any
+    // separation. Burrito was the closest to it at 31.3% of its own kit and is now 21.7%.
+    const dominant = [];
+    for (const id of CHARACTER_IDS) {
+      const ws = CHARACTERS[id].weapons.filter((w) => w.type !== 'self');
+      for (const w of ws) {
+        if (!(w.homing && (w.range ?? 0) === REACH.rangedMax)) continue;
+        const best = Math.max(...ws.map(perSecond));
+        if (perSecond(w) >= best) dominant.push(`${id}:${w.key} ${perSecond(w).toFixed(2)} of ${best.toFixed(2)} HP/s`);
+      }
+    }
+    check('no max-reach homing weapon is the largest single contributor to its own kit',
+      dominant.length === 0, dominant.join(' · '));
+  }
+
+  // ── (b) THE COMPENSATION IS PAID AT THE OTHER END OF THE REACH LADDER ────
+  //
+  // Burrito's nerf and Burrito's buff are ONE change and the pair is meant to be readable
+  // out of `rules.ts` alone: power came off the weapon at the LONGEST rung, which is where
+  // §31 changed everything, and went onto the weapon at the SHORTEST rung, which is where
+  // §31 changed nothing. Stated as a derivation over `REACH` rather than as the two numbers,
+  // because the numbers are balance constants and the ladder is the design.
+  {
+    const ws = CHARACTERS.burrito.weapons;
+    const swarm = ws.find((w) => w.key === 'Swarm');
+    const roll = ws.find((w) => w.key === 'Roll');
+    const rungs = Object.values(REACH).filter((r) => r <= REACH.rangedMax);
+    check('Burrito\'s homing swarm sits on the LONGEST rung §31 touched',
+      swarm.range === REACH.rangedMax && REACH.rangedMax === Math.max(...rungs),
+      `Swarm ${swarm.range} · ladder max ${Math.max(...rungs)}`);
+    check('…and its compensation sits on the SHORTEST rung in the whole ladder',
+      roll.range === REACH.meleeQuick && REACH.meleeQuick === Math.min(...rungs),
+      `Roll ${roll.range} · ladder min ${Math.min(...rungs)}`);
+  }
+
+  // ── (c) A SPECIAL MUST BE STRICTLY THE BIGGEST PRESS, NOT JOINTLY ────────
+  //
+  // §19(a) asserts `perPress(special) >= kit maximum`, which a TIE satisfies. **A tie was
+  // the first draft of this deviation** — Lollipop's Smash raised 16 -> 17 against a Giant
+  // Lollipop of 17 — and a tie is exactly the defect §19(a) exists to stop. Both drivers
+  // (`ai.ts:pickHighestDamageWeapon` and `scripted_player.mjs:bestWeapon`) keep the first
+  // STRICTLY greatest press value they find, and the swing is authored first, so at a tie
+  // the special stops being chosen anywhere inside the swing's own reach. That is the
+  // 8-second ability reduced to a long-range poke that §19(a)'s own record describes.
+  // The draft was dropped and the point went onto the Giant instead: 17 -> 18.
+  {
+    const offenders = [];
+    for (const id of CHARACTER_IDS) {
+      const ws = CHARACTERS[id].weapons.filter((w) => w.type !== 'self');
+      const specials = ws.filter((w) => w.giantSlam || w.comboParts);
+      for (const sp of specials) {
+        const rivals = ws.filter((w) => w !== sp).map(perPress);
+        if (rivals.length && perPress(sp) <= Math.max(...rivals)) {
+          offenders.push(`${id}:${sp.key} ${perPress(sp)} vs rival ${Math.max(...rivals)}`);
+        }
+      }
+    }
+    check('every special is STRICTLY the biggest press its owner has — a tie is not enough',
+      offenders.length === 0, offenders.join(' · '));
+  }
+
+  // ── (d) …AND THE DRIVER REALLY DOES PICK IT, WITH THE TIE SHOWN TO BREAK IT ──
+  //
+  // (c) is an assertion about `rules.ts`. This is the consequence it exists to protect,
+  // measured through the real `stepAI`: at melee separation, with every cooldown ready,
+  // Lollipop's AI must fire the SLAM. The known-bad is the tie itself — the same tick with
+  // Giant temporarily lowered to the swing's value must fire the SWING, which is what
+  // proves this row can fail and what proves (c) is not decoration.
+  {
+    const slamTick = () => {
+      const arena = makeArena({ width: 4000, height: 4000, maxSafeRadius: 1e6 });
+      const state = playingMatch(arena, 'donut', 'lollipop');
+      state.enemy.x = 2000; state.enemy.y = 2000;
+      state.player.x = 2050; state.player.y = 2000;      // 50 wu — inside Smash's 70
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => -1e9);
+      const evs = [];
+      state.elapsed += 16.667;
+      stepAI(state, state.enemy, 16.667, evs);
+      return evs.filter((e) => e.type === 'weapon-fired').map((e) => e.weaponKey);
+    };
+    check('Lollipop\'s AI fires the SLAM at melee range, not the swing',
+      slamTick().includes('Giant'), `fired [${slamTick().join(', ')}]`);
+
+    // KNOWN-BAD: the row above must be capable of naming the OTHER weapon. Put the slam on
+    // cooldown and the identical tick has to fall through to the swing — otherwise "fires
+    // Giant" is a fixture that can only ever say Giant.
+    const onCooldown = (() => {
+      const arena = makeArena({ width: 4000, height: 4000, maxSafeRadius: 1e6 });
+      const state = playingMatch(arena, 'donut', 'lollipop');
+      state.enemy.x = 2000; state.enemy.y = 2000;
+      state.player.x = 2050; state.player.y = 2000;
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      const giantIdx = CHARACTERS.lollipop.weapons.findIndex((w) => w.key === 'Giant');
+      state.enemy.lastUsed = state.enemy.lastUsed.map(() => -1e9);
+      state.enemy.lastUsed[giantIdx] = state.elapsed;             // slam not ready
+      const evs = [];
+      state.elapsed += 16.667;
+      stepAI(state, state.enemy, 16.667, evs);
+      return evs.filter((e) => e.type === 'weapon-fired').map((e) => e.weaponKey);
+    })();
+    check('KNOWN-BAD: with the slam on cooldown the same tick fires the SWING instead',
+      onCooldown.includes('Smash') && !onCooldown.includes('Giant'), `fired [${onCooldown.join(', ')}]`);
+
+    // 🚨 AND THE TIE ITSELF IS ASSERTED ARITHMETICALLY, BECAUSE IT CANNOT BE STAGED BY
+    // MUTATION — a trap worth writing down. The first draft of this row set
+    // `CHARACTERS.lollipop.weapons[Giant].damage = 16` at run time and required the tick to
+    // fire Smash. **It fired Giant, and the row failed while the mechanism it doubted was
+    // perfectly correct**: `ai.ts` ranks on `pressValue`, whose table is a `WeakMap` built
+    // ONCE at module load, so a runtime edit to `w.damage` changes nothing the AI reads.
+    // A test that had asserted the opposite direction would have passed vacuously forever.
+    // So the tie is proved from the two rules instead, both read out of the shipped code:
+    // `pickWeapon` compares with strict `>` ("first weapon wins on a tie", its own comment),
+    // and the swing is authored BEFORE the slam in the weapons array.
+    {
+      const ws = CHARACTERS.lollipop.weapons;
+      const iSmash = ws.findIndex((w) => w.key === 'Smash');
+      const iGiant = ws.findIndex((w) => w.key === 'Giant');
+      check('the swing is authored FIRST, so a tie would hand it every melee-range press',
+        iSmash < iGiant, `Smash at ${iSmash}, Giant at ${iGiant}`);
+      check('…which is why the slam has to win STRICTLY, and does',
+        pressValue(ws[iGiant], 0) > pressValue(ws[iSmash], 0),
+        `Giant ${pressValue(ws[iGiant], 0)} vs Smash ${pressValue(ws[iSmash], 0)}`);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) {

@@ -2680,11 +2680,39 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     weapons: [
       // Disc sits one rung below Swarm so Burrito keeps its 240-vs-260 ordering.
       { key: 'Disc', name: 'Burrito Disc', type: 'ranged', range: REACH.rangedLong, damage: 10, cooldown: 850, speed: SPEED.long, color: '#F4E9DA', effect: null, emoji: '🌯' },
-      { key: 'Roll', name: 'Roll Stun', type: 'melee', range: REACH.meleeQuick, damage: 4, cooldown: 1400, cone: 100, color: '#FFC93C', effect: 'stun', emoji: '🌀' },
+      // 4 -> 6 with the Swarm nerf below, and the two are ONE change: DEVIATION #13 moves
+      // power out of the max-reach homing swarm and into the weapon at 58 wu, because 58 wu
+      // is exactly where `af35362` changed nothing. Measured on the shipped constants, one
+      // knob at a time from HEAD (`roster_lab --seeds 8`, paired): Roll 4->5 is worth
+      // **+10.6 pp smart2 / +5.6 chase**, 4->6 **+10.6 / +14.4**, 4->7 **+11.9 / +20.0** —
+      // i.e. its smart2 response SATURATES at 5 while its chase response keeps climbing.
+      // That makes it the only lever found in this pass that moves the two policies by
+      // materially different amounts, and it is the reason Burrito's chase cost is -14.8 pp
+      // here instead of the -23.4 the swarm nerf alone produces.
+      { key: 'Roll', name: 'Roll Stun', type: 'melee', range: REACH.meleeQuick, damage: 6, cooldown: 1400, cone: 100, color: '#FFC93C', effect: 'stun', emoji: '🌀' },
       // ⚠️ THE SECOND HOMING WEAPON IN THE RACE `SPEED.maxSlow` DOCUMENTS, AND THE ONE
-      //   THE SUSHI FIX DOES NOT TRANSFER TO. Effective reach against a fleeing human is
-      //   51 wu against a 140 wu press gate (36%); against a fleeing AI 92 wu (66%), so it
-      //   is worth 1.89x more in a human's hands with no decision differing.
+      //   THE SUSHI FIX DOES NOT TRANSFER TO.
+      //
+      //   🚨 THE REACH FIGURES BELOW ARE PRE-`af35362` AND ARE KEPT ONLY AS THE RECORD OF
+      //   WHY THIS WEAPON WAS PRICED AS IT WAS. They read:
+      //
+      //     > "Effective reach against a fleeing human is 51 wu against a 140 wu press gate
+      //     >  (36%); against a fleeing AI 92 wu (66%), so it is worth 1.89x more in a
+      //     >  human's hands with no decision differing."
+      //
+      //   `af35362` (DECISIONS §50b) denominated the retirement budget in the TARGET'S
+      //   frame, and this weapon went **48 wu -> 140 wu against a fleeing human** — the
+      //   largest reach gain in the roster. Nothing about the weapon changed; it simply
+      //   started arriving. So its damage had been set against a delivery of roughly a
+      //   third of a press, and at full delivery Burrito measured **+13.3 pp**, the biggest
+      //   winner of that commit, and the roster spread doubled (14.2 -> 28.1 pp).
+      //
+      //   => DEVIATION #13: 5 -> 4 per pellet AND 3000 -> 3600 ms. Sustained output
+      //   6.67 -> 4.44 HP/s (-33%), which is about the reciprocal of the reach it gained.
+      //   `pellets: 4` is deliberately UNTOUCHED — `src/vfx/weapons/burrito.ts` builds one
+      //   distinct silhouette per `pelletColors` slot, so dropping to 3 orphans a topping
+      //   form; it measured 1.4 pp better on smart2 range and was refused for that reason.
+      //
       //   `sushi.Catch`'s one-token fix (`maxSlow` -> `max`) was STAGED AND MEASURED here
       //   and REFUSED: this is the roster's WIDEST FAN at 55°, and `HOMING_TURN_RATE` is
       //   angular, so at 280 wu/s the outer pellets cannot turn back inside 60 wu. Half
@@ -2694,7 +2722,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       //   lever that helps this weapon without a close-range cost is the retirement rule,
       //   which lives in `sim.ts` and is priced there rather than guessed at here.
       {
-        key: 'Swarm', name: 'Topping Swarm', type: 'ranged', range: REACH.rangedMax, damage: 5, cooldown: 3000, speed: SPEED.maxSlow, color: '#7CB518', effect: null,
+        key: 'Swarm', name: 'Topping Swarm', type: 'ranged', range: REACH.rangedMax, damage: 4, cooldown: 3600, speed: SPEED.maxSlow, color: '#7CB518', effect: null,
         pellets: 4, spreadDeg: 55, homing: true,
         pelletColors: ['#7CB518', '#E63946', '#FFC93C', '#F4E9DA'],
         pelletEmojis: ['🥬', '🍅', '🧀', '🧅'],
@@ -2752,7 +2780,27 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // ── AUTHORISED DEVIATION #8 (2026-08-05): LOLLIPOP — see the block above
       //    `CHARACTERS` for the full measurement. damage 11 -> 16 and 10 -> 17.
       { key: 'Smash', name: 'Lollipop Smash', type: 'melee', range: REACH.meleeStrong, damage: 16, cooldown: 750, cone: 80, color: '#E63946', effect: null, emoji: '🔨' },
-      { key: 'Giant', name: 'Giant Lollipop', type: 'melee', range: REACH.ultimateSlam, damage: 17, cooldown: 8000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
+      // ── DEVIATION #13 (2026-08-11): 17 -> 18 and 8000 -> 7000 ms.
+      //
+      //   Lollipop is the roster's ONLY kit with no `ranged` weapon, so `af35362`'s reach
+      //   fix — which made every ranged weapon in the game connect at its own press gate —
+      //   was worth exactly nothing to it while ten other kits got better around it. It
+      //   fell to LAST on `smart2` (40.3%) with the roster mean pinned at 50.0 by
+      //   construction. The repair is put entirely on the SPECIAL rather than on the swing,
+      //   for two reasons that are both already stated in `sim.test.mjs` §19:
+      //     * §19(a) requires a special to be the biggest press its owner has. Raising the
+      //       SWING to 17 measured slightly better on Burrito's chase number but left
+      //       Smash and Giant TIED at 17 — and a tie is exactly the defect §19(a) exists
+      //       to stop, because both drivers take the first strictly-greatest press value
+      //       and the special stops being chosen inside melee range.
+      //     * §19(b) caps an undodgeable slam at the biggest DODGEABLE hit in the roster,
+      //       which is Water Bottle's Mega Splash at 18. **18 sits exactly on that ceiling
+      //       and nothing may go past it** — if Mega Splash ever drops, this must drop with
+      //       it, and §19(b) will say so.
+      //   Measured (32 seeds x 110 matchups, paired): lollipop 40.3% -> 54.8% on `smart2`
+      //   and 37.3% -> 45.8% on `chase`. It is the only change in DEVIATION #13 that moves
+      //   the same character the same way on BOTH policies.
+      { key: 'Giant', name: 'Giant Lollipop', type: 'melee', range: REACH.ultimateSlam, damage: 18, cooldown: 7000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
     ],
     abilities: [
       { emoji: '🔨', name: 'Lollipop Smash', desc: 'Swings herself like a hammer for heavy damage' },
@@ -2762,7 +2810,11 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   pizza: {
     id: 'pizza', name: 'Pizza', emoji: '🍕', rarity: 'Neon',
-    stats: { damage: 4, health: 10, speed: 5 }, hasTrail: false,
+    // ⚠️ `damage` WAS 4 AND IS NOW 5, AND IT WAS NOT HAND-EDITED. It is DERIVED
+    // (`damageStatFor`) from the kit below, whose Tomato Splat went 6 -> 7 in
+    // DEVIATION #13: `kitDps` 15.63 -> 16.74 HP/s, and 16.74 / 3.5 rounds to 5.
+    // `sim.test.mjs` §22(f) fails if this line and the weapon table ever disagree.
+    stats: { damage: 5, health: 10, speed: 5 }, hasTrail: false,
     // WAS: 'Closed eyes, smiling. Triangular slice with pepperoni and a crust base.'
     //   Uri: "face is TERRIBLE" (DECISIONS §42) — the second-harshest verdict in the cast, and
     //   the second character specified with CLOSED eyes. The correlation with the closed-eye
@@ -2770,7 +2822,19 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     face: 'EYES: OPEN. The closed eyes are the entirety of Uri\'s "face is terrible" and they are removed — this was the second-worst-rated face in the cast and the second one specified shut. White sclera as the brightest value on the character (the slice is tan-on-tan, so the eye whites will be the only real value anchor on it), dark pupils offset for gaze, a catchlight each, and the old closed-smiling arc demoted to the upper lash line. MOUTH: a wide confident grin with a dark throat and a visible lower lip. SILHOUETTE: a triangular slice with pepperoni and a crust base — the triangle is the protected landmark here, unlike the rest of the cast\'s shapes, because it is the whole read at gameplay distance. ⚠️ But the melted cheese strands must not hang as two points either side of the head — Uri named that construction on four other characters and it reads as ears whatever it is made of. Drape them across the FRONT of the slice or run them continuously round the edge. ⚠️ And watch the tan-on-tan trap this file already records: slice, torso and limbs were literally the same constant, putting head, arms, legs and body inside a third of a stop. The face is where the missing value range gets paid back first. PERSONALITY: broad, loud, confident tank.',
     weapons: [
       { key: 'Dough', name: 'Dough Balls', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 850, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '⚪' },
-      { key: 'Tomato', name: 'Tomato Splat', type: 'ranged', range: REACH.rangedMid, damage: 6, cooldown: 900, speed: SPEED.mid, color: '#E63946', effect: null, splatter: true, emoji: '🍅' },
+      // ── DEVIATION #13 (2026-08-11): 6 -> 7, and it moves the CARD BAR 4 -> 5.
+      //
+      //   Pizza is the roster's designated wall — the biggest pool (140) carrying the
+      //   weakest kit — and `§22(h)`'s "health COMPENSATES the kit" is the design rule that
+      //   makes that legitimate. `af35362` broke the compensation from the other side: it
+      //   made every ranged kit in the game land at its own press gate, and Pizza's three
+      //   short weapons gained least of anyone's, so it fell to 39.5% on `smart2` while the
+      //   mean stayed pinned at 50.0. One point on ONE of its three weapons was the finest
+      //   step available and it was still worth **+9.2 pp** — the card's integer scale
+      //   cannot be tuned finer than this, which is `HEALTH_PER_STAT`'s lesson on the other
+      //   axis. Tomato Splat rather than Dough Balls because Dough measured **+19.4 pp** at
+      //   the same +1, i.e. more than twice the gap that needed closing.
+      { key: 'Tomato', name: 'Tomato Splat', type: 'ranged', range: REACH.rangedMid, damage: 7, cooldown: 900, speed: SPEED.mid, color: '#E63946', effect: null, splatter: true, emoji: '🍅' },
       { key: 'Cheese', name: 'Cheese Blind', type: 'ranged', range: REACH.rangedClose, damage: 4, cooldown: 1300, speed: SPEED.close, color: '#FFD873', effect: 'stun', emoji: '🧀' },
     ],
     abilities: [
