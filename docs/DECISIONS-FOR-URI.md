@@ -4466,3 +4466,139 @@ anyone touches the line.
 I reported `docs/TOOLS.md`'s `h49_chips` row as saying `+156 --touch` against a measured 551. **There is
 no `+156` anywhere in the file** — the row already reads **293** (551 with `--touch`), landed in
 `bd39464`. I passed on a stale reading without checking it.
+
+---
+
+## 66. ✅ THE PAYOUT JOIN IS FIXED — `bb00d66`. **And my own brief's premise was wrong; the agent probed instead of believing me.**
+
+`matchScreen.ts:124` now banks `recordPlacement(outcome.localPlace, outcome.seats)`. The card reads
+**"DEFEAT! / 3RD OF 6"** in podium gold, and the gate is **proven red on the old HEAD** (3 passed /
+3 failed) and **21/0** after. A driven six-seat match finishing 3rd was paid as a 1v1 loss — **9 trophies,
+24 coins and 39 XP short.**
+
+### 🚨 I briefed it wrong, and the probe is the reason it works
+
+I wrote: *"the rank has to come out of the sim's final state."* **It cannot.** Measured on real matches
+through real `stepMatch`:
+
+| seats | matches | ended by knockout | alive at end | distinct `(hp, deaths)` among LOSERS |
+|---|---|---|---|---|
+| 2 / 3 / 4 | 60 each | all | 1 | **1.000 (max 1)** |
+| 6 | 40 | all | 1 | **1.000 (max 1)** |
+
+**Every loser ends `alive:false, hp:0, deaths:1` — identically** — because `applyDamage` clamps at zero
+and nothing respawns, and there is never a second survivor because `lastFighterStanding` ends the match
+on the (N−1)th knockout. **A final-state resolver ranks losers by nothing and degenerates to slot
+order — the very bug it was meant to fix.** The order exists only in the `death` **event stream**.
+Reversed elimination order agrees with slot order in **53.3% (N=3), 26.7% (N=4), 0.0% (N=6)** — so at six
+seats the two are unrelated.
+
+⚠️ **My second claim was also wrong:** I said sudden death would *"end the match with several fighters
+alive at different HP."* It does not — the fog pass breaks on `phase !== 'playing'`, so **exactly one
+survives, every time.**
+
+### ⚠️ Still open on the card
+
+- **The loser LIST is still slot-ordered** — `SUSHI defeated HAMBURGER DONUT TACO PIZZA EGG`. Trivially
+  fixable now that the rank exists; routed with an exact patch.
+- **No trophies, coins or XP on the card.** A player paid +9/44/74 for 3rd of 6 **is told none of it.**
+
+### ❓ NEEDS URI — the six-player entry point is a design question, not plumbing
+
+**The session plumbing already exists** (`newMatch()` takes a list); the wiring is ~15 lines. What is
+missing is all yours:
+
+1. **Where does the affordance live?** There is no mode selector anywhere in the game.
+2. **How are the other five chosen?** `characterSelect.ts:432` uses `pickOpponent()` — a **one**-opponent
+   random picker — and matchmaking does not exist.
+3. **What level are five bots?** `enemyLevelFor` mirrors a single opponent.
+
+⚠️ **Until this is answered, six-player is reachable only through the QA `?fighters=` URL** — which is
+also the only reason the payout defect never cost you anything.
+
+### 🚨 A near-miss worth recording: an agent's `Write` destroyed 1,294 lines of a committed tool
+
+It chose the prefix `pj_` for a new instrument; `tools/tmp/pj_probe.mjs` already existed. Recovered whole
+from git, nothing lost. **`tools/tmp` is a flat namespace shared by every agent and `??` in `git status`
+is the only signal.** The rule now: **`git ls-files tools/tmp | grep <prefix>` before claiming one.**
+
+---
+
+## 67. ✅ EVERY SURVIVING 1× LITERAL, SWEPT — 12 fixed, 63 frozen, **0.5% false-positive rate**
+
+Tonight found eleven stale map literals **one at a time, each by accident**. This pass went looking.
+
+| | |
+|---|---|
+| raw grep for the 13 suspect numbers | **2,534 hits / 639 files** — useless, most `1000`/`500` are milliseconds |
+| extracted by **syntactic role** | 821 candidates → **94** flagged in code → ~50 adjudicated |
+| **real** | **12 fixed + 63 enumerated and frozen** |
+| **false positives** | **exactly one** (~0.5%) |
+
+### 🚨 The one-sentence explanation of why every one of these stayed GREEN
+
+> **The 1× playfield is exactly the NW quadrant of the ×4 one, so every stale coordinate stayed legal.**
+
+No legality check could ever have found this class. That is why `valuescan` read 105/105 with 14 of 18
+stations wrong, and why four `sp_gate`/`sp_place` fixtures passed while pointing at a herb crate.
+
+**The worst one found:** `match-play.mjs` — the project's only *"play the whole thing on screen"* tool —
+sent hands to a point **1,077 wu inside the NW quadrant**, reported every radius **2.23× low** and every
+timestamp **4× high**, and had **11 of 16 shot marks unreachable** on a 45 s clock. **`h49_chips` spawned
+2 of 6 seats outside the ring, taking 50 HP/s.** And `arena-scan`'s hazard stations were stale to a
+commit **eleven hours old**.
+
+**The guard is the deliverable:** `al_guard.mjs`, 19/19 on the tree and 24/24 selftest, **proved red by a
+real tree revert**. ⚠️ **Its own selftest caught three defects in itself** — including one that silently
+killed coverage on 8 files, **found only because the flagged count FELL.**
+
+⚠️ **Would another arena resize be safe? "Safer, not safe" — the honest answer.** What is genuinely
+derived survives. What would still break: the 63 frozen probe URLs (enumerated, so you get the list
+immediately), and **~30 files now holding a hardcoded 2800/1985 — today's correct literals are the next
+generation's stale ones.**
+
+---
+
+## 68. ✅ THE ROSTER IS BACK UNDER CONTROL — range **27.8 → 9.8 pp**, and no mechanic was touched
+
+`33318a1`. `sim.ts`/`combat.ts`/`ai.ts`/`movement.ts` are **byte-identical** — §63's retirement fix is
+intact. **Five weapon constants**, plus one *derived* card bar.
+
+| | smart2 | chase |
+|---|---|---|
+| **roster range** | **27.8 → 9.8 pp** | 68.4 → 63.4 pp |
+| settled | 29 → **23** /110 | 43 → 46 /110 |
+| tier spread | 16.2 → **6.1 pp** | 50.4 → 46.8 pp |
+| aggregate *(inside the ~9 pp floor — context, not a result)* | 65.9 → 67.5% | 41.7 → 40.7% |
+| **paired, EXACT** | **40/110 moved, max 68.8, mean 6.7** | 27/110 moved, max 75.0, mean 4.6 |
+
+**Range is now below even the pre-fix 14.2 pp. Settled is not** (23 against 18) — **and that was reported
+rather than smoothed over**: a flat roster and a roster with few decided matchups are different
+properties.
+
+### The policy split reproduced on a second character — and the lever that broke it
+
+§50a found the two drivers disagreeing about Egg. **Every Burrito knob costs `chase` 1.3–2.4× what it
+costs `smart2`**, and solving for (smart2 −13, chase 0) needs a knob scaled **3.7×** — which does not
+exist. **`Roll` Stun is the only non-degenerate lever**: its smart2 response **saturates** (4→5 +10.6,
+4→6 +10.6, 4→7 +11.9) while chase keeps climbing (+5.6, +14.4, +20.0). **`smart2` was optimised and the
+price is stated: Burrito 49.4% → 34.5% on `chase`.** No third constant was reached for.
+
+### ⚠️ And the countdown-reseed tool's one-line verdict is a FALSE POSITIVE here
+
+It says *"INSIDE"*. The arithmetic says otherwise: **432 of 880 diverged — exactly `880 − 8·7·8`, the
+matches involving one of the three changed characters**, and every match between the other eight is
+bit-identical. The 160 "before the first shot" are **exactly `880 − 10·9·8`, the Lollipop matches**, whose
+changed weapon is **melee** and spawns no projectile. The tool's second clause was written for a
+projectile-rule change. **The verdict line is wrong; the numbers underneath it are right.**
+
+### Mechanic-not-constant findings, routed
+
+- **`scripted_player.mjs:preferredRange` sets the movement band from the highest AUTHORED damage** — its
+  own comment flags this as an unmeasured rung. **It is why no `rules.ts` constant can ever square the
+  two policies.**
+- **`pressValue`'s table is a `WeakMap` built once at module load** — mutating a weapon's damage at run
+  time changes nothing the AI ranks on. **A test staged that way passes vacuously.**
+- **Lollipop's slam now sits exactly on the undodgeable ceiling.** If that ceiling ever drops, Giant must
+  drop with it.
+- **Refused:** a change measuring **1.4 pp better** was declined because it would orphan a VFX form.
