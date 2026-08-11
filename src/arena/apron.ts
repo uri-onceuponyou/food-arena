@@ -356,14 +356,18 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { toonMat } from '../render/toon';
 import { wu } from '../units';
-import { ARENA_W, ARENA_H } from './shared';
+import { ARENA_W, ARENA_H, APRON_OUT } from './shared';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Extents
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** How far the service floor runs past every bound, world units. See the header. */
-const APRON_OUT = 760;
+// `APRON_OUT` — how far the service floor runs past every bound — MOVED to `./shared.ts`
+// on 2026-08-11. It gained a second consumer (`fogRing.ts` derives the danger canopy's
+// outer radius from it, so the canopy covers every surface the camera can reach) and a
+// constant with two consumers belongs with the other map-scale constants rather than being
+// copied. The derivation that produced 760 is still in this file's header, and the trap it
+// closes is unchanged: nothing here may reach past it.
 /** How far out props are placed. Just past the 470 wu worst-case view reach. */
 const DRESS_OUT = 540;
 /** Distance at which the floor's value ramp bottoms out, world units. */

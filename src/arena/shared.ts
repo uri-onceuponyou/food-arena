@@ -84,6 +84,36 @@ export const CENTER = { x: ARENA_W / 2, y: ARENA_H / 2 }; // 1400, 1000
 export const ARENA_HALF_DIAGONAL = Math.hypot(ARENA_W / 2, ARENA_H / 2); // ≈ 1720.47
 
 /**
+ * How far the apron's service floor runs past EVERY bound, world units.
+ *
+ * ── Why it lives here rather than in `apron.ts`, where it was authored ──────────
+ *
+ * It is the outer extent of everything this game ever DRAWS, so it is a map-scale
+ * constant and it now has a second consumer: `fogRing.ts` derives `FIELD_OUTER_UNITS`
+ * from `ARENA_HALF_DIAGONAL + APRON_OUT`, because the danger canopy has to cover every
+ * surface the camera can reach and the apron is the outermost of them. It was moved here
+ * rather than copied — `fogRing` importing `apron` would be the renderer's boundary
+ * effect depending on the set dressing, and a second literal `760` is the exact failure
+ * this whole edit is fixing one generation later.
+ *
+ * ── The number, which is SOLVED and not chosen ─────────────────────────────────
+ *
+ * A player is clamped to `[21, W−21] × [21, H−21]` (`movement.ts`, half a body) and the
+ * camera is player-centred, so the furthest the view ever reaches past a bound is the
+ * frustum's own ground corner. Solved off `camera.ts`'s numbers in `apron.ts`'s header:
+ *
+ *     aspect   camera dist   lateral reach   up-screen   down-screen
+ *     4:3        30.88 m        311 wu         319 wu       143 wu
+ *     21:9       26.62 m        470 wu         275 wu       123 wu
+ *
+ * **470 wu is the worst case in any direction.** 760 is well past it on every side at
+ * zero extra cost — the apron ring is the same vertex count either way — so no future
+ * camera tweak can re-open a hole. `apron.ts`'s `DRESS_OUT` (540) is the separate,
+ * tighter bound for where PROPS stop.
+ */
+export const APRON_OUT = 760;
+
+/**
  * Seconds of play before the closing ring first cuts into the playfield.
  *
  * Uri's call: *"Start the circle bigger. So it touches first the arena after 5-7

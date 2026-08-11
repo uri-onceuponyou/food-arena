@@ -63,6 +63,7 @@
 
 import * as THREE from 'three';
 import { wu, groundPos, CHARACTER_HEIGHT } from '../units';
+import { ARENA_HALF_DIAGONAL, APRON_OUT } from './shared';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Look
@@ -203,9 +204,59 @@ const FADE_OUT_SECONDS = 0.5;
 /** Ring resolution. 128 keeps the inner edge visually smooth at r = 850 wu. */
 const SEG = 128;
 
-/** How far out the danger field is drawn, in world units. The arena's half-diagonal
- * is ~860, so this covers every corner plus the cosmetic-bleed apron beyond it. */
-const FIELD_OUTER_UNITS = 1500;
+/**
+ * How far out the danger field is drawn, in world units.
+ *
+ * ⚠️ **THIS WAS `const FIELD_OUTER_UNITS = 1500` AND ITS OWN COMMENT SAID WHY IT WAS
+ * WRONG. The old wording, kept because it was TRUE when it was written and quietly stopped
+ * being true:**
+ *
+ *   > *"How far out the danger field is drawn, in world units. The arena's half-diagonal
+ *   > is ~860, so this covers every corner plus the cosmetic-bleed apron beyond it."*
+ *
+ * **860.2 is the 1400×1000 half-diagonal.** The arena went ×4 in area on 2026-08-11
+ * (`DECISIONS §48`) and the half-diagonal doubled to **1720.47** — so a literal 1500 stopped
+ * covering the corners the sentence promised, while the sentence itself still read as a
+ * justification. 🚨 **`779dc62`'s commit message repeats the false claim** — *"the canopy's
+ * outer ring is `max(FIELD_OUTER_UNITS, r + 200)` = 1500 wu, so the danger field still
+ * covers every corner of a 2800×2000 map"* — so the log is wrong too, and the correction
+ * lives in the commit that carries this change rather than being made silently.
+ *
+ * ── What it cost, measured rather than reasoned about (`sx_fog.mjs`) ────────────
+ *
+ * **7,413 of 228,319 standable cells (3.25%) sat outside the canopy** — 3.25% of the map on
+ * which sudden death is **100% lethal and looks completely safe**. Mean canvas luma, sudden
+ * death against a wide ring at the same position: centre **120.0 → 42.9** (−77.1) · mid
+ * **136.8 → 74.3** (−62.6) · **corner 77.8 → 64.9 (−12.9)**. The centre drop is the positive
+ * control that proves the instrument sees the canopy at all. The corner frame was
+ * `f87d407`'s own defect signature back again: HUD reading *"▲ OUTSIDE THE ZONE −50 HP/s"*,
+ * a "RUN TO THE ZONE" arrow, the radar saying "GET INSIDE" — and the fighter standing on
+ * bright, fully-lit floor.
+ *
+ * ── DERIVED, because a literal 1721 is the same bug one map change later ────────
+ *
+ * The requirement is not "reach the corners", it is **"reach past everything the camera can
+ * show"**, and both terms of that are already named constants that move with the map:
+ *
+ *   `ARENA_HALF_DIAGONAL`  the furthest point of the playfield (1720.47).
+ *   `APRON_OUT`            how far the apron's service floor runs past every bound (760),
+ *                          itself solved from `camera.ts`'s worst-case ground reach of
+ *                          470 wu with margin. Nothing is ever drawn beyond it.
+ *
+ * So `ARENA_HALF_DIAGONAL + APRON_OUT` = **2480.47 wu** is the radius that contains every
+ * drawn surface in every direction. It DOMINATES the true worst case with room to spare:
+ * the furthest a fighter can stand is `hypot(W/2 − 21, H/2 − 21)` = **1691.2 wu** (the
+ * bounds clamp is half a body), and the camera reaches at most 470 wu past them, so no
+ * ground pixel outside **2161.2 wu** can ever be on screen — 319 wu of margin.
+ *
+ * ⚠️ **Widening the annulus costs no vertices and no draw calls.** `SEG × rings` is
+ * unchanged, the outer band is a single flat-alpha ring, and fragments outside the viewport
+ * are clipped by the rasteriser — so this is the same mesh reaching further, not more mesh.
+ * `setRadius` already computes `max(FIELD_OUTER_UNITS, safeRadius + 200)`, so at the opening
+ * ring (1985) the field was ALREADY 2185 wu wide; only the small-radius end was short, which
+ * is why nothing caught it until sudden death made radius 0 reachable.
+ */
+const FIELD_OUTER_UNITS = ARENA_HALF_DIAGONAL + APRON_OUT;
 
 /**
  * One ring of an annulus profile, ordered inner to outer, positioned in world units
@@ -527,9 +578,16 @@ export function createFogRing(centerUnits: { x: number; y: number }): FogRing {
       // Zero is well-defined the whole way down and was checked rather than assumed:
       // `curtainHeight(0)` clamps to `CHARACTER_HEIGHT` (no NaN, no zero-height wall),
       // `setRadius(0)` writes a degenerate inner edge with no division anywhere, and the
-      // canopy's outer ring is `max(FIELD_OUTER_UNITS, r + 200)` = 1500 wu, so the danger
-      // field still covers every corner of a 2800x2000 map. A NEGATIVE radius remains
-      // refused, which is what a guard here should ever have meant.
+      // canopy's outer ring is `max(FIELD_OUTER_UNITS, r + 200)`.
+      //
+      // 🚨 **THE SENTENCE THAT STOOD HERE WAS FALSE AND IS KEPT, BECAUSE IT IS THE SECOND
+      // HALF OF THE SAME BUG:** *"= 1500 wu, so the danger field still covers every corner
+      // of a 2800x2000 map."* It does not — that map's half-diagonal is 1720.47 and its
+      // furthest standable cell is 1691.2 wu out, so **7,413 of 228,319 standable cells
+      // (3.25%) were outside the canopy and lethal while looking safe.** The arithmetic was
+      // done against the OLD map's 860 and never re-done; see `FIELD_OUTER_UNITS`, which is
+      // now derived and is 2480.47 on this map. A NEGATIVE radius remains refused, which is
+      // what a guard here should ever have meant.
       const wanted = active && safeRadiusUnits >= 0;
       // Snap ON, ramp OFF — a zone visual may never under-state danger, so it is only
       // ever allowed to be late to leave, never late to arrive.
