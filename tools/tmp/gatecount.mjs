@@ -275,6 +275,11 @@ const OFFLINE = [
   { key: 'tools/tmp/ap_reach.mjs --selftest', probes: [pr(['tools/tmp/ap_reach.mjs', '--selftest'], /^\s*PASS\s+(\d+) passed, \d+ failed\s*$/m)] },
   { key: 'tools/tmp/s49_mutants.mjs', probes: [pr(['tools/tmp/s49_mutants.mjs'], S)] },
   { key: 'tools/tmp/da_census.mjs --selftest', probes: [pr(['tools/tmp/da_census.mjs', '--selftest'], S)] },
+  // ⚠️ NOT `S`. This tool appends its own wall-clock to the count line (`27 passed, 0 failed
+  //    wall 58.1s`), and `S` anchors on `$`. Matched with `\b` instead so a trailing note cannot
+  //    make a healthy gate read as UNPARSEABLE. Third pattern I have mis-written this session by
+  //    not looking at the tool's RAW BYTES first.
+  { key: 'tools/tmp/nf_ffa.mjs --selftest', probes: [pr(['tools/tmp/nf_ffa.mjs', '--selftest'], /^\s*(\d+) passed, \d+ failed\b/m)] },
   { key: 'tools/tmp/nc_measure.mjs --selftest', probes: [pr(['tools/tmp/nc_measure.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/r2_probe.mjs --selftest', probes: [pr(['tools/tmp/r2_probe.mjs', '--selftest'], S)] },
   // Three probes because the doc cell states three numbers — known / new / stale. ARITY exists to
@@ -296,6 +301,11 @@ const OFFLINE = [
   { key: 'tools/tmp/ir_ladder_anchors.mjs --selftest', probes: [pr(['tools/tmp/ir_ladder_anchors.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/ir_pathsweep.mjs --selftest',     probes: [pr(['tools/tmp/ir_pathsweep.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/ax_layout.mjs --selftest', probes: [pr(['tools/tmp/ax_layout.mjs', '--selftest'], SLASH_ASSERT)] },
+  // NUMERATOR, not `SLASH_ASSERT`'s denominator — same reason as `hc_occluders` below. This
+  // gate's whole subject is a set of numbers that are close to ZERO ("search buys nothing"),
+  // and a partially-failing selftest reported as intact is the one failure mode that would
+  // let a wrong zero through.
+  { key: 'tools/tmp/as_cost.mjs --selftest', probes: [pr(['tools/tmp/as_cost.mjs', '--selftest'], /^\s*(\d+)\/\d+ assertions passed\s*$/m)] },
   { key: 'tools/tmp/cb_rig.mjs --selftest',    probes: [pr(['tools/tmp/cb_rig.mjs', '--selftest'], /^cb_rig --selftest: (\d+)\/\d+ passed/m)] },
   { key: 'tools/tmp/dc_guard.mjs --selftest',  probes: [pr(['tools/tmp/dc_guard.mjs', '--selftest'], /^dc_guard selftest: (\d+)\/\d+ pass/m)] },
   { key: 'tools/tmp/icon_score.mjs --selftest', probes: [pr(['tools/tmp/icon_score.mjs', '--selftest'], /^selftest (\d+) pass \/ \d+ fail/m)] },
