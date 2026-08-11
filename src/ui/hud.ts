@@ -101,6 +101,74 @@ export interface HudFrameInfo {
    * renders exactly as it did, and the moment a rank is supplied it is drawn.
    */
   place?: { place: number; of: number } | null;
+  /**
+   * THE WHOLE FINISHING ORDER — `order[k]` is the SLOT that finished `k`th, best first.
+   *
+   * 🔴 The loser list under the title was `roster.filter((_, i) => i !== winnerSlot)` —
+   * SLOT order — so a six-way read `SUSHI defeated HAMBURGER DONUT TACO PIZZA EGG`
+   * whichever way the match actually went. `place` (above) landed the *number*; this is
+   * what makes the four names under it agree with that number instead of contradicting it.
+   * Worth more than tidiness: `roster.ts:resolvePlaces`' own measurement is that reversed
+   * elimination order agrees with slot order in **0.0% of six-seat matches**, so at six
+   * seats the slot-order list named the wrong runner-up *every single time*.
+   *
+   * ⚠️ SAME SOCKET DISCIPLINE AS `place`, FOR THE SAME REASON. The HUD does not derive
+   * it — the rank is not in the final state at all (every loser ends `hp: 0, deaths: 1,
+   * alive: false` in 220 of 220 real matches; only the ORDER OF THE `death` EVENTS
+   * separates them, and only `game/match.ts` sees those). Absent, the card renders exactly
+   * as it did.
+   *
+   * ⚠️ AND IT IS VALIDATED AS A PERMUTATION BEFORE IT IS TRUSTED, rather than being
+   * indexed into hopefully — see the use site. A short or duplicated list would silently
+   * DROP fighters off the card, which is a worse defect than the one this fixes.
+   */
+  order?: readonly number[] | null;
+  /**
+   * WHAT THE MATCH PAID — rendered, never computed. Null (or absent) draws nothing.
+   *
+   * 🔴 The six-player acceptance run (`DECISIONS §64`) measured the payout join and
+   * `bb00d66` fixed it, so a player finishing 3rd of 6 is now paid **+9 trophies, 44 coins
+   * and 74 XP** — and was told **none of it**. The result card is the one screen a player
+   * reads word for word at the end of a match; the trophy road's floating delta only
+   * appears if they happen to walk to that screen.
+   *
+   * 🚨 **THE HUD MUST NOT BE ABLE TO PRODUCE THIS NUMBER, AND STRUCTURALLY CANNOT.**
+   * The payout is applied as a SIDE EFFECT of banking the result
+   * (`profile.recordPlacement` mutates the economy and commits it), so anything that
+   * recomputed it here would either bank a second time or become a second source of truth
+   * for money. `ui/screens/matchScreen.ts` banks exactly once behind its own `banked`
+   * guard and hands the RETURN VALUE down; `game/match.ts` carries it and imports nothing
+   * from the economy at all. `tools/tmp/rc_card.mjs` §D asserts the banked trophy delta
+   * equals the number on the card rather than twice it, and has a known-bad arm that
+   * banks twice and goes red.
+   *
+   * ⚠️ It does NOT mark `LastMatch.seen`. That flag belongs to `trophyRoad.ts`'s floating
+   * congratulation, which is a different surface with a different job; setting it from
+   * here would silently delete that flourish.
+   */
+  payout?: MatchPayout | null;
+}
+
+/**
+ * ONE MATCH'S EARNINGS, AS PLAIN NUMBERS.
+ *
+ * Deliberately NOT `economy/state.ts:LastMatch` — that type carries `won`, `place`,
+ * `seats` and `seen`, every one of which the card either already knows from `place`/the
+ * title or has no business touching. It is also declared HERE, in the renderer, rather
+ * than in the economy: this is the shape the card can DRAW, and a renderer that imported
+ * the economy's type would be one refactor away from importing its functions.
+ *
+ * `xp` is separate from the others because it is: `recordPlacement` returns `LastMatch`
+ * (trophies/coins/chests) and adds XP through `placementXp` without returning it, so the
+ * call site is where the two halves of one payout meet.
+ */
+export interface MatchPayout {
+  /** Trophy delta. **Signed** — 5th and 6th of six are negative, and the card says so. */
+  trophies: number;
+  coins: number;
+  xp: number;
+  /** Free-chest credit banked by this match, if any. Omitted/0 draws no chip. */
+  chests?: number;
 }
 
 export interface Hud {
@@ -326,7 +394,17 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
            relative to. -->
       <div class="hud-topbar" data-el="topbar">
         <div class="hud-clock">
-          <div class="hud-timer" data-el="timer">3:00</div>
+          <!-- ⚠️ THIS PLACEHOLDER READ 3:00 UNTIL 2026-08-11 AND THE CLOCK HAS NOT BEEN
+               THREE MINUTES SINCE rules.ts SET MATCH_DURATION_MS = 45_000. It is
+               overwritten by the first update(), so nothing on screen was ever wrong — but
+               a markup literal is read by the next person as a statement of fact about the
+               clock, and this one contradicted the one true source by 4x. Kept as the full
+               duration rather than as an empty string so the element still has its shipped
+               WIDTH before the first frame paints.
+               (No backticks in this comment on purpose: the whole block is a template
+               literal, and a backtick here closes it — which is exactly how this comment
+               failed to compile the first time it was written.) -->
+          <div class="hud-timer" data-el="timer">0:45</div>
           <!-- Closing-fog readout. Sits directly under the match clock because the
                two are the SAME number: the safe radius is a pure function of time
                remaining (see zoneInfo() below), so reading them as one column is
@@ -450,6 +528,12 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           <div class="hud-gameover-place" data-el="gameover-place"></div>
           <div class="hud-gameover-subtitle" data-el="gameover-subtitle"></div>
           <div class="hud-gameover-stats" data-el="gameover-stats"></div>
+          <!-- What the match PAID. Empty and display:none unless HudFrameInfo.payout is
+               supplied — see that field, and note that the HUD is handed these numbers and
+               cannot compute them. Declared LAST before the button because it is the one
+               thing on this card the player is about to act on: read the verdict, read the
+               reward, press the button. -->
+          <div class="hud-gameover-payout" data-el="gameover-payout"></div>
           <button class="hud-gameover-btn" data-el="gameover-btn" type="button">Play Again</button>
         </div>
       </div>
@@ -470,6 +554,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   const gameoverPlaceEl = q<HTMLDivElement>('gameover-place');
   const gameoverSubtitleEl = q<HTMLDivElement>('gameover-subtitle');
   const gameoverStatsEl = q<HTMLDivElement>('gameover-stats');
+  const gameoverPayoutEl = q<HTMLDivElement>('gameover-payout');
   const gameoverBtn = q<HTMLButtonElement>('gameover-btn');
 
   const topbarEl = q<HTMLDivElement>('topbar');
@@ -785,10 +870,19 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
    * 45 s and `MAX_SAFE_RADIUS` derives from it, so the edge sweeps 22.1 wu/s and the
    * same 12 s buys **265 wu**. Two things go wrong at once at that size:
    *
-   *  1. It cries wolf. 265 wu of a 993 wu opening ring is most of the standing
-   *     positions inside it, so the alarm animation would be running for a large
-   *     share of every match — and `docs/LESSONS.md` §9's lesson is that a warning
-   *     which cries wolf gets ignored, which is worse than no warning.
+   *  1. It cries wolf. ⚠️ THE ARITHMETIC HERE WAS THE 1x MAP'S AND IS KEPT BECAUSE IT
+   *     IS WHY THE RULE BELOW EXISTS:
+   *
+   *       > *"265 wu of a 993 wu opening ring is most of the standing positions inside
+   *       > it, so the alarm animation would be running for a large share of every
+   *       > match."*
+   *
+   *     The arena went x4 on 2026-08-11, so the ring opens at 1985 wu and sweeps at
+   *     44.1 wu/s — a flat 12 s now buys **529 wu**, and the share is 13.4% of the
+   *     opening radius rather than 26.7%. The number moved; the conclusion did not,
+   *     because 12 s of alarm is a quarter of a 45 s match whatever the radius is.
+   *     `docs/LESSONS.md` §9: a warning which cries wolf gets ignored, which is worse
+   *     than no warning.
    *  2. It warns about something INVISIBLE. The camera guarantees the player sees
    *     `FAIR_PLAY.radiusUnits` (199.2 wu) in every direction and no more. At 265 wu
    *     the pill would be flashing about a curtain that is off screen and stays off
@@ -801,8 +895,20 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
    * 40 s away and an alarm running for a fifth of a match is the cry-wolf failure
    * again from the other end. Both terms are derived; neither is a magic number.
    *
-   *   45 s clock:   199.2 / (993/45000)  = 9.0 s
-   *   180 s clock:  199.2 / (890/180000) = 40.3 s -> capped to 12 s (unchanged)
+   * ⚠️ **THE WORKED EXAMPLE BELOW WAS RE-EVALUATED ON 2026-08-11 AND BOTH OLD ROWS ARE
+   * KEPT, BECAUSE THEY ARE THE HISTORY OF ONE DERIVED NUMBER MOVING TWICE:**
+   *
+   *   > *"45 s clock:   199.2 / (993/45000)  = 9.0 s"*
+   *   > *"180 s clock:  199.2 / (890/180000) = 40.3 s -> capped to 12 s (unchanged)"*
+   *
+   * The x4 arena doubled the opening radius again, so the current row is:
+   *
+   *   45 s clock, x4 map:  199.2 / (1985/45000) = 4.5 s
+   *
+   * **The alarm now has half the lead it had, and that is the schedule's doing, not a
+   * retune** — the edge sweeps 44.1 wu/s instead of 22.1, so the same guaranteed-visible
+   * 199.2 wu is crossed in half the time. Nothing here is pinned: both terms are read at
+   * run time, which is exactly why this comment could go stale while the code stayed right.
    */
   function imminentMs(maxR: number): number {
     const shrinkPerMs = maxR / MATCH_DURATION_MS; // world units of radius per ms
@@ -1089,9 +1195,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     // of 19.6s. Clamping the disc to 100% does not fix that; a clamped disc is still
     // a flat rectangle.
     //
-    // And it gets worse, not better, as the clock shortens: T went 180s -> 45s this
-    // session and MAX_SAFE_RADIUS is derived from T, so the opening ring grew 890 ->
-    // 993 wu. Nothing below is allowed to hardcode either number.
+    // And it gets worse, not better, as the clock shortens and as the map grows.
+    // ⚠️ THIS SENTENCE STOPPED AT THE SECOND OF THREE VALUES AND IS KEPT AS WRITTEN:
+    //
+    //   > *"T went 180s -> 45s this session and MAX_SAFE_RADIUS is derived from T, so the
+    //   > opening ring grew 890 -> 993 wu."*
+    //
+    // The x4 arena (2026-08-11) doubled the half-diagonal the radius derives from, so the
+    // full sequence is 890 -> 993 -> 1985 wu. Nothing below is allowed to hardcode ANY of
+    // the three, which is the only reason this comment ageing three times cost nothing.
     //
     // So: zoom out until the boundary is on the card, and draw the arena's own
     // rectangle inside the fog field. What the player then reads is the DANGER
@@ -1366,10 +1478,44 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         // the clock with four survivors is a timeout, and the two-seat form would only
         // have asked about slots 0 and 1.
         const timedOut = roster.every((f) => f.alive);
-        // The losers are everyone who is not the winner, in slot order. At two fighters
-        // that list has exactly one entry and this markup is character-for-character
-        // what the two-seat version emitted — which is the whole acceptance test.
-        const losers = roster.filter((_, i) => i !== winnerSlot);
+        // ── THE LOSERS, IN FINISHING ORDER — AND THIS COMMENT USED TO SAY "IN SLOT
+        //    ORDER", WHICH WAS THE DEFECT ─────────────────────────────────────────
+        //
+        // ⚠️ **KEPT ABOVE ITS REPLACEMENT BECAUSE IT WAS TRUE, AND WAS THE BUG:**
+        //
+        //   > *"The losers are everyone who is not the winner, in slot order. At two
+        //   > fighters that list has exactly one entry and this markup is
+        //   > character-for-character what the two-seat version emitted — which is the
+        //   > whole acceptance test."*
+        //
+        // Every clause of that is correct and the conclusion is still the acceptance test.
+        // What it missed is that "in slot order" is INVISIBLE at two seats — one loser is
+        // one loser in any order — so a rule that is only wrong above two seats shipped
+        // looking finished. `DECISIONS §64` measured it: a six-way read
+        // `SUSHI defeated HAMBURGER DONUT TACO PIZZA EGG` **identically whether you came
+        // 2nd or 6th**, and `resolvePlaces`' own numbers say slot order agrees with the
+        // real order in 0.0% of six-seat matches.
+        //
+        // 🚨 THE ORDER IS VALIDATED AS A PERMUTATION, NOT INDEXED INTO HOPEFULLY. A list
+        // that is short, has a duplicate or carries an out-of-range slot would silently
+        // drop fighters OFF the card — a fighter vanishing from the result screen is a
+        // worse defect than the one being fixed here, and it would be invisible at the
+        // seat count everything else is tested at. Anything that is not a permutation of
+        // this roster's slots falls back WHOLESALE to the old expression, which is the
+        // line quoted above, unchanged.
+        //
+        // ⚠️ AT TWO SEATS THE TWO BRANCHES ARE THE SAME LIST, and that is proved rather
+        // than asserted: `tools/tmp/rc_card.mjs` §A renders both arms through this exact
+        // function over every reachable two-seat end state and compares `innerHTML` byte
+        // for byte, with a `--arm shuffled` known-bad that goes red.
+        const order = frame.order ?? null;
+        const orderIsPermutation = order !== null
+          && order.length === roster.length
+          && order.every((s) => Number.isInteger(s) && s >= 0 && s < roster.length)
+          && new Set(order).size === roster.length;
+        const losers = (order && orderIsPermutation)
+          ? order.filter((s) => s !== winnerSlot).map((s) => roster[s])
+          : roster.filter((_, i) => i !== winnerSlot);
         // ── ONE VERB FOR EVERYBODY IS WRONG ABOVE TWO SEATS, AND §58 IS WHY ────────
         // `timedOut` is `roster.every(alive)`, so a single death anywhere makes the
         // whole line read "defeated" — and since sudden death collapses the ring at
@@ -1423,6 +1569,34 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         gameoverStatsEl.innerHTML = timedOut
           ? `${icon('timer')} Time up — no knockout`
           : `${icon('timer')} Match time ${formatDuration(elapsedMs)}`;
+
+        // ── What the match paid ───────────────────────────────────────────────────
+        // Absent unless somebody upstream banked a result and handed the numbers back,
+        // so this branch writes nothing on any card that is not a real, banked match —
+        // a QA `?fighters=` run, an instrument's detached HUD, or a restart. See
+        // `HudFrameInfo.payout` for why the HUD may not produce these itself.
+        const payout = frame.payout ?? null;
+        if (payout) {
+          // Signed on trophies and unsigned nowhere: 5th and 6th of six LOSE trophies
+          // (-1 and -5 at 500), and a card that printed "5" for a five-trophy loss would
+          // be the single most expensive lie this screen could tell. Coins and XP have no
+          // negative branch in the economy, so their `+` is honest by construction.
+          const chip = (name: string, value: number, suffix = ''): string =>
+            `<span class="hud-go-pay">${icon(name)}<b>${value > 0 ? '+' : ''}${value}</b>${
+              suffix ? `<i>${suffix}</i>` : ''}</span>`;
+          gameoverPayoutEl.innerHTML =
+            chip('trophy', payout.trophies)
+            + chip('coin', payout.coins)
+            // XP carries a LABEL and the other two do not, deliberately: a trophy and a
+            // coin are self-evident from their own icon, and a star is not — it is the
+            // one quantity here a player could read as a third currency.
+            + chip('star', payout.xp, 'xp')
+            + (payout.chests ? chip('chest', payout.chests) : '');
+          gameoverPayoutEl.style.display = 'flex';
+        } else {
+          gameoverPayoutEl.innerHTML = '';
+          gameoverPayoutEl.style.display = 'none';
+        }
       } else {
         gameoverEl.style.display = 'none';
       }
@@ -2567,6 +2741,65 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
   font-size: 13px;
   color: #C9B8DE;
   letter-spacing: 0.02em;
+}
+/* ── What the match paid ──────────────────────────────────────────────────────
+   display: none in the SHEET for the same reason .hud-gameover-place is: a card
+   that rendered before update() ran would otherwise flash an empty row.
+
+   A chip row rather than a sentence. Three numbers read as three numbers at a
+   glance; "You earned 9 trophies, 44 coins and 74 XP" is a line of prose on the
+   one screen a player wants to leave. The plate under each chip is what keeps a
+   -5 legible next to a +44 without colouring them differently — the sign is the
+   information, and tinting it green/red would repeat the title's verdict. */
+.hud-gameover-payout {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  margin-top: -4px;
+}
+.hud-go-pay {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px 5px 8px;
+  border-radius: 999px;
+  background: rgba(10,6,16,0.5);
+  border: 2px solid #1a1224;
+  font-family: 'Rubik', sans-serif;
+  color: #FFF3DE;
+  /* ── The icon OUTLINE has to flip on a dark plate, and this was measured ──────
+     icons/index.ts draws every stroke as var(--fa-ic-ink) defaulting to #1a1224,
+     which is the right answer on the cream menus and is INVISIBLE on this chip.
+     Photographed at 4x in shots/rc/pay_crop.png: the trophy's handles and stem are
+     ink strokes, so at 18px on a near-black plate it rendered as a gold sliver with
+     a dash under it — a cup with no handles. The coin and the star survived only
+     because they are solid fills. One variable on the container flips all three,
+     which is exactly what that file says the variable is for. */
+  --fa-ic-ink: #F3E7D6;
+}
+.hud-go-pay b {
+  font-weight: 900;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+.hud-go-pay i {
+  font-style: normal;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #C9B8DE;
+}
+/* 22px, not the 18px this shipped at for one round, and the reason is in the trophy.
+   icons/ui.ts draws its handles as 1.8-unit strokes in a 24-unit box, so at 18px they land
+   at 1.35px and wash out — the glyph reads as a gold sliver rather than a cup, which is
+   exactly the failure the coin's own comment records at 11px ("1.7 units of ink is 0.78px
+   drawn"). Measured square at both sizes (rc_card §D, 18x18 then 22x22), so this is the
+   icon's minimum legible size and not a layout bug.
+   (No backticks: this whole sheet is a template literal and one would close it.) */
+.hud-go-pay .fa-ic {
+  width: 22px;
+  height: 22px;
 }
 .hud-gameover-btn {
   pointer-events: auto;

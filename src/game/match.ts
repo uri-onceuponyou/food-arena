@@ -54,7 +54,10 @@ import { createMatchAudio, type MatchAudio } from '../audio';
 // asymmetry rule — the observer is always the LOCAL seat, the target is any other
 // fighter, asked one at a time. ⚠️ It was `enemyVisibleToPlayer(state)` and took no
 // target at all, which is a predicate that can only ever hide slot 1.
-import { createHud, fighterVisibleTo, type Hud, type ScreenPoint } from '../ui/hud';
+import {
+  createHud, fighterVisibleTo,
+  type Hud, type HudFrameInfo, type MatchPayout, type ScreenPoint,
+} from '../ui/hud';
 
 declare global {
   interface Window {
@@ -486,6 +489,22 @@ export class GameSession {
    */
   private endedOutcome: MatchOutcome | null = null;
 
+  /**
+   * WHAT THIS MATCH PAID, HANDED DOWN FROM THE SCREEN THAT BANKED IT. See `showPayout`.
+   *
+   * 🚨 **A CARRIED VALUE, NEVER A COMPUTED ONE, AND THAT IS WHAT MAKES A DOUBLE-BANK
+   * IMPOSSIBLE FROM HERE.** The payout is applied as a SIDE EFFECT of banking
+   * (`profile.recordPlacement` mutates the economy and commits it), so the difference
+   * between "render the payout" and "bank the payout again" is one import. This file has
+   * neither: it imports nothing from `game/economy/` or `ui/screens/`, and this field is
+   * three numbers.
+   *
+   * Cleared in `notifyPhase` on every non-`'ended'` transition — beside `endedOutcome`,
+   * for the same reason it is cleared there: a restart re-enters `'countdown'`, and a
+   * stale payout would put the LAST match's trophies on the NEXT match's card.
+   */
+  private endedPayout: MatchPayout | null = null;
+
   private readonly clock = new THREE.Clock();
   private raf = 0;
   private disposed = false;
@@ -740,7 +759,7 @@ export class GameSession {
       selectedWeapon: this.input.selectedWeapon,
       safeArrow: this.safeArrow(),
       aim: null,
-      place: this.hudPlace(),
+      ...this.hudResult(),
     });
   }
 
@@ -1452,7 +1471,62 @@ export class GameSession {
     // appear on exactly this transition.
     this.pointerLock.setMatchActive(this.state.phase !== 'ended');
     this.endedOutcome = this.state.phase === 'ended' ? this.outcome() : null;
+    // ⚠️ CLEARED BEFORE THE CALLBACK, NOT AFTER. `matchScreen.ts` calls `showPayout`
+    // from INSIDE this callback, on this very transition — clearing afterwards would
+    // throw away the payout in the same turn it arrives.
+    if (this.state.phase !== 'ended') this.endedPayout = null;
     this.opts.onPhase?.(this.state.phase, this.state.winner, this.endedOutcome);
+  }
+
+  /**
+   * 🚨 PUT A BANKED PAYOUT ON THE RESULT CARD. The screen layer's one-way edge IN.
+   *
+   * `DECISIONS §64` defect 3: `bb00d66` made a 3rd-of-6 finish pay **+9 trophies, 44
+   * coins and 74 XP** and the player was told **none of it** — the card had no money on
+   * it at all. `48ad6ca` opened `HudFrameInfo.place` as a socket for the RANK on exactly
+   * this principle; this is the same shape for the REWARD.
+   *
+   * ── 🚨 WHY IT IS A HANDOFF AND NOT A LOOKUP ────────────────────────────────
+   *
+   * **The payout is applied as a side effect of banking the result.**
+   * `profile.recordPlacement(place, seats)` calls `applyMatchPlacement`, which MUTATES
+   * the economy, and then commits it to storage. So a session that "fetched" its own
+   * payout would be banking the match a second time — a bug that looks perfect on screen
+   * (the numbers are right!) and silently doubles every trophy, coin and XP the player
+   * has ever earned. That is why this takes plain numbers from the ONE call that already
+   * happened, and why this file imports nothing from `game/economy/` or `ui/screens/`.
+   *
+   * `matchScreen.ts` banks exactly once per match behind its own `banked` flag and passes
+   * the return value straight here. `tools/tmp/rc_card.mjs` §D plays a real match through
+   * the shipped screens and asserts the banked trophy delta equals the number ON THE CARD
+   * rather than twice it, with a `--arm twice` known-bad that banks a second time and
+   * turns the row red.
+   *
+   * Idempotent and order-free: calling it twice with the same numbers renders the same
+   * card, and calling it before the `'ended'` transition is harmless — `hudResult()`
+   * gates it on `endedOutcome`, so a payout can only reach a card that exists.
+   */
+  showPayout(payout: MatchPayout | null): void {
+    this.endedPayout = payout;
+  }
+
+  /**
+   * THE THREE END-OF-MATCH FIELDS, BUILT IN ONE PLACE.
+   *
+   * ⚠️ **BECAUSE THERE ARE TWO `hud.update` CALL SITES AND THEY MUST NOT DRIFT.** `pause()`
+   * builds a frame as well as `loop()` does, and `place` was already duplicated across
+   * both; adding `order` and `payout` beside it would have made that three chances for a
+   * paused result card to disagree with a running one. One object, spread at both.
+   *
+   * `payout` is gated on `endedOutcome` rather than standing alone so that every field
+   * here has the SAME lifetime — non-null on an ended match, null everywhere else.
+   */
+  private hudResult(): Pick<HudFrameInfo, 'place' | 'order' | 'payout'> {
+    return {
+      place: this.hudPlace(),
+      order: this.endedOutcome?.places ?? null,
+      payout: this.endedOutcome ? this.endedPayout : null,
+    };
   }
 
   /**
@@ -1716,13 +1790,13 @@ export class GameSession {
       // not just 'playing', so the countdown is not five seconds of an invisible
       // cursor with nothing on screen to orient by.
       aim: this.aimCursor(),
-      // 🔴 THE RESULT CARD COULD NOT SAY WHERE YOU FINISHED. `hud.ts` lists the losers with
-      // `filter(i !== winnerSlot)` in SLOT order, so a six-way reads
-      // `EGG defeated HAMBURGER DONUT TACO SUSHI PIZZA` whether you came 2nd or 6th — and
-      // for five of six players that is the entire result of the match. `HudFrameInfo.place`
-      // is the socket the HUD deliberately left open rather than deriving a rank it has no
-      // right to; this is what fills it.
-      place: this.hudPlace(),
+      // 🔴 THE RESULT CARD COULD NOT SAY WHERE YOU FINISHED, WHO CAME SECOND, OR WHAT IT
+      // PAID. Three sockets `hud.ts` deliberately left open rather than deriving answers it
+      // has no right to — the rank (`place`), the finishing order the loser list is printed
+      // in (`order`), and the money (`payout`, which arrives from `matchScreen.ts` through
+      // `showPayout` because banking it is what produces it). This is what fills all three,
+      // and `hudResult()` is why the paused frame above cannot disagree with this one.
+      ...this.hudResult(),
     });
     // ⚠️ SURFACE 2 OF 3 — the floating HP pills. `updateFloatingBars` hides a bar
     // whose screen point is `null`, and `projectToScreen` already returns `null` for a

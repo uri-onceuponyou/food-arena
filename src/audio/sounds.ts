@@ -998,21 +998,48 @@ export function matchStart(): SoundFn {
 }
 
 /**
- * The ring reaching its floor — `MIN_SAFE_RADIUS`, the moment the fog STOPS closing.
+ * The ring reaching its floor — the moment the fog stops closing.
  *
  * This state did not exist when the catalogue was written: the ring used to shrink to
- * zero, so there was never a moment when it stopped. `sim.ts` now floors it at 140 wu
- * and the HUD calls the resulting state "FINAL RING". Measured against the shipped
- * arena (`maxSafeRadius` 993) the floor is reached at play-time **t=38.66 s of 45 s**,
- * so this fires once, roughly six seconds before the whistle, and never again.
+ * zero, so there was never a moment when it stopped. `sim.ts` floors it and the HUD calls
+ * the resulting state "FINAL RING".
  *
- * **How often that happens today: never.** `tools/tmp/audio_census.mjs` ran 363 real
- * matches across three player policies and the longest was 25.1 s of play — the ring
- * floor was reached in 0 of them, and only forcing both fighters immortal gets there
- * (121/121, at play-time 38.65 s against the 38.66 s schedule). That is a fact about
- * the AI and the pacing, not about this sound: the state exists in `sim.ts`, a human
- * who kites can reach it, and a cue that only exists once someone finally gets there
- * is not a cue anyone will remember to add later.
+ * ⚠️ **WHAT FOLLOWED HERE STATED THE 1x MAP'S SCHEDULE AS CURRENT. IT IS KEPT ABOVE ITS
+ * REPLACEMENT BECAUSE IT WAS TRUE, AND MEASURED, UNTIL 2026-08-11:**
+ *
+ *   > *"`sim.ts` now floors it at 140 wu and the HUD calls the resulting state 'FINAL
+ *   > RING'. Measured against the shipped arena (`maxSafeRadius` 993) the floor is reached
+ *   > at play-time **t=38.66 s of 45 s**, so this fires once, roughly six seconds before
+ *   > the whistle, and never again.*
+ *   >
+ *   > *How often that happens today: never. `tools/tmp/audio_census.mjs` ran 363 real
+ *   > matches across three player policies and the longest was 25.1 s of play — the ring
+ *   > floor was reached in 0 of them, and only forcing both fighters immortal gets there
+ *   > (121/121, at play-time 38.65 s against the 38.66 s schedule)."*
+ *
+ * **Three numbers in that moved, and none of them lives in this file.**
+ *
+ *   * `maxSafeRadius` is **1985 wu**. The arena went x4 in area (`DECISIONS §48`) and
+ *     `arena/shared.ts` derives the opening radius from the half-diagonal, so it doubled
+ *     with the map; the figure in the quotation above is the 1x map's.
+ *   * The floor is no longer the constant 140. `rules.ts:minSafeRadiusFor(N)` scales it
+ *     with the seat count (`DECISIONS §53b`) — 140 at N<=4, 187.42 at N=5, **237.00 at
+ *     N=6**.
+ *   * 🚨 **And the ring never reaches it.** Sudden death (`DECISIONS §2`) collapses the
+ *     ring to zero at `SUDDEN_DEATH_MS` = **30 s of 45 s**, which `rules.ts`' own table
+ *     puts **9.6-11.8 s before** the schedule would arrive at any of those floors.
+ *
+ * So this cue now fires on the **sudden-death collapse at t=30 s** — the moment the squeeze
+ * does not stop but COMPLETES — 15 s before the whistle rather than 6. That is not a
+ * reinterpretation: `audio/director.ts:watchZone` was changed to latch on
+ * `ringFloorFor(N, timeRemaining)`, which returns 0 while sudden death is active, precisely
+ * so this stayed one cue rather than becoming two.
+ *
+ * ⚠️ **AND THE "never happens" MEASUREMENT IS NOT SIMPLY INVERTED, IT IS UNMEASURED.** The
+ * 0-of-363 figure was counted against a floor that no longer governs, on a map a quarter
+ * of this one's size. The only fresh number is `DECISIONS §64`: **six-seat matches reach
+ * the sudden-death trigger 65.5% of the time.** The two-seat rate has not been re-measured
+ * since the map changed and is not claimed here.
  *
  * Deliberately a RELEASE rather than an alarm, and that is the whole design argument:
  * everything else the zone does is pressure (`fogTick` is a nag with no transient at

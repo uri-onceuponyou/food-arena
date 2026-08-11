@@ -406,13 +406,25 @@ export class MatchAudio {
    * it — so audio derives it from the same number the HUD reads.
    *
    * Latched, and one-shot per match: `safeRadius` sits AT the floor for every remaining
-   * tick (measured: 6.34 s of a 45 s match, ~380 ticks), so an unlatched test would
-   * fire the cue several hundred times.
+   * tick, so an unlatched test would fire the cue several hundred times.
    *
-   * `sawRingAboveFloor` guards the degenerate case where an arena's `maxSafeRadius` is
-   * already <= the floor: without it, such an arena would announce "the ring has
-   * stopped" on the first playing tick, which is true but useless. The shipped arena is
-   * 993 wu against a 140 wu floor, so this only ever matters for a future arena.
+   * ⚠️ **BOTH NUMBERS THAT USED TO QUANTIFY THAT WERE THE 1x MAP'S, AND ARE KEPT HERE
+   * BECAUSE THEY WERE RIGHT UNTIL 2026-08-11:**
+   *
+   *   > *"(measured: 6.34 s of a 45 s match, ~380 ticks)"* — and *"The shipped arena is
+   *   > 993 wu against a 140 wu floor, so this only ever matters for a future arena."*
+   *
+   * The arena went x4 (`DECISIONS §48`) so `maxSafeRadius` is **1985 wu**, and the floor
+   * scales with the seat count (`DECISIONS §53b`) to at most **237.00 wu at N=6** — but
+   * neither is what the latch waits for any more. Sudden death (`DECISIONS §2`) drops the
+   * ring to **zero at t=30 s of 45 s**, 9.6-11.8 s before the schedule would reach any of
+   * those floors, so the dwell is now the **15 s** of sudden death (~900 ticks at 60 Hz)
+   * and the latch is what stops those 900 ticks from being 900 cues.
+   *
+   * `sawRingAboveFloor` still guards the degenerate case where an arena's `maxSafeRadius`
+   * is already <= the floor: without it, such an arena would announce "the ring has
+   * stopped" on the first playing tick, which is true but useless. At 1985 wu against a
+   * floor of at most 237 that remains a future arena's problem, not this one's.
    *
    * The HUD's "FINAL RING" label is deliberately NOT what is voiced here. That label is
    * PLAYER-RELATIVE (`dist <= MIN_SAFE_RADIUS` — am I standing inside the final ring),
