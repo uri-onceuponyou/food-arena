@@ -171,7 +171,9 @@ Not style preferences. Every one exists because breaking it cost hours.
    a name.
 
 9. **One owner per file set.** Parallel agents in the same file clobber each other. The hardest
-   constraint in this project — it held across ~200 agents with zero clobbering.
+   constraint in this project — it held across ~200 agents with zero clobbering **in the assigned
+   source sets**. ⚠️ That qualifier is new and it is not pedantry: the one clobbering on record
+   happened in `tools/tmp/`, where nothing is *assigned* at all — see the flat-namespace note below.
 
    ⚠️ **But it has a cost, so it has a RELEASE VALVE.** Three agents in one session found real
    defects they were forbidden to fix: the shop still promising *"Epic or better"* two hours after
