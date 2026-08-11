@@ -2620,10 +2620,12 @@ seats at **full health** — on the map this replaces, slot 0 was 0/70 and dead.
   arm and this is the held-density one.
 - 🔴 **The cost, and it is being paid now:** six gates went red *on HEAD* the moment this committed,
   every one carrying a 1400×1000 literal — `arena-scan` (its 18 stations now sample only the NW
-  quadrant), `ap_reach`, `sp_place`, `sp_gate`, `conceal_lab`, `level_lab`. Confirmed on a clean
-  `git archive HEAD` tree. Being re-fixtured; **`level_lab` is a finding rather than a fixture** — the
-  level-1 player now wins **100.0%** (was 87.5%), so that instrument is pinned at its ceiling and can
-  no longer tell level 1 from level 15.
+  quadrant), `ap_reach`, `sp_place`, `sp_gate`, `conceal_lab`, `level_lab`. **All closed** — `gatecount`
+  went 12 faults → 2, neither survivor from this work. ⚠️ **The sentence that stood here — *"`level_lab`
+  is a finding rather than a fixture, pinned at its ceiling and unable to tell level 1 from level 15"* —
+  was FALSE and is kept for the lesson.** Measured: **40 of 110 cells are unsaturated and every one
+  rises** (max 93.8 pp), the full grid moving **55.00% → 99.32%**. **One hand-picked cell had saturated**
+  and I generalised from it to the whole instrument. See §60.
 
 ### 🚨 EVERY ONE OF THESE IS ANCHORED TO 1400×1000 AND MUST BE RE-DERIVED, NOT SCALED BY EYE
 
@@ -3950,3 +3952,78 @@ it**, and if Uri picks §58 option **(c) lengthen the match**, it moves material
   normalised-rank interpolation; it is being decided deliberately rather than stubbed silently.
 - `src/ui/screens/home.ts` needs **nothing**, and `trophyRoad.ts`'s screen already renders `trophies === 0`
   correctly via its `is-flat` class — so 4th of six works untouched.
+
+---
+
+## 60. ✅ THE GATE BATTERY IS GREEN AGAIN — 12 faults → 2. **And four fixtures were passing while testing something nobody chose.**
+
+The seven gates the ×4 map broke are closed (`72d50a4`, `336a85b`, `f27973f`, `9c10722`), every one
+proved red on a known-bad first. `gatecount` on a clean worktree: **12 faults → 2**, neither from this
+work.
+
+### 🚨 The finding that matters most: a green gate can be testing the wrong thing entirely
+
+**Four of the eleven fixtures moved were still PASSING at their 1× coordinates — while testing something
+nobody chose.** Found only by re-deriving each one from the new map, never by a red run:
+
+- `sp_gate`'s *"seat inside the pot"* fixture was pointing at **a herb crate**
+- *"24 wu from the sink counter"* was pointing at **open floor**
+- the *"axis mirror"* was a mirror about **the old centre**
+- `sp_place`'s freezer still reported `inside-cover` **by luck**
+
+⚠️ **Reverting to the 1× coordinate is NOT a valid known-bad for those four** — they passed at 1× too.
+Each had to be proved non-tautological by feeding it a *legal* input and requiring the row to go red.
+
+And the automated guard for exactly this was a **partial** catch: `arena-scan`'s placement check flagged
+**6 of 18** stations. **Acting on its list would have moved six and still shipped an empty quadrant**
+(coverage was 18/2/2/0, SE empty).
+
+### 🚨 TWO CLAIMS OF MINE FALSIFIED — both believed on a method rather than a measurement
+
+- **`level_lab` was NOT at an instrument ceiling.** I reported it as *"a finding, not a fixture — the
+  level-1 player wins 100.0%, so it can no longer tell level 1 from level 15."* Measured: **40 of 110
+  cells are unsaturated and every one rises**, max **93.8 pp**, the full grid moving **55.00% → 99.32%**.
+  **One hand-picked cell had saturated and I generalised from it to the instrument.** It now runs a
+  declared 11-cell cyclic panel (47.7% → 98.9%, **+51.1 pp against 5.3 pp of standard error**) **plus a
+  row asserting the baseline has headroom *before* asserting it moves** — the guard my framing skipped.
+- 🚨 **`git archive HEAD` is the WRONG clean-tree method for this battery, and I recommended it twice.**
+  Five of these gates shell out to `git` and die without a `.git` directory: **it reported 8 faults where
+  a real worktree reports 2 — a wrong CAUSE, not merely a wrong number.** Use **`git worktree add
+  --detach`** with `node_modules` **and** `reference` symlinked. (My own first attempt was worse: no
+  `node_modules`, so seven gates died on a missing import and looked exactly like seven broken gates.)
+
+### 🚨 And a third: `ic_spec`'s "drift" was real, and every check of it was made on the wrong tree
+
+Two agents reported doc **24** vs tree **16**; a third ran it, got 24, and reported the drift claim false.
+**All three were right about what they saw.** Eight of its arms read gitignored `shots/`, so it prints
+**24 on a working tree and 16 on a committed one.** *"I checked and it's fine"* was a working-tree check
+every time — the same class of error as this session's HEAD-vs-tree attribution mistakes, one layer down.
+
+### 🔴 A real gameplay defect found on the way: BOTH SLOW PUDDLES ARE UNREACHABLE
+
+`src/arena/kitchen.ts`: **0 of 7,845 cells** inside either 50 wu puddle is standable, and **1 of 15,813**
+over the full 71 wu slow field. Nearest legal ground is **75 wu outside**. **Two hazards no fighter can
+ever enter.** `sp_place` now *prints* this every run and deliberately does **not** assert it — a bug-pin
+that goes red when the bug is fixed is a trap. Routed to the arena owner.
+
+### ⚠️ A fix that emptied its own validator's corpus
+
+**`hl_sweep --selftest` is INVALID, not merely red.** `50c5272` (the halo ceiling) moved **every weapon
+to one side of the 0.75 split**, so its `PIX` control has nothing left to exercise. The fix removed the
+population its own guard was written to discriminate. Nothing is wrong with the shipped behaviour; the
+guard can no longer speak about it.
+
+### Still red, all routed, none from this work
+
+`s49_mutants` **22/24** (sudden death changed the timeout tiebreak under §49a's mutant battery) ·
+`as_cost` **30/32** · `sc2_manifest` **51/54** (its *"pure HEAD has no manifest"* control predates the
+manifest landing) · `valuescan.mjs:230-232` still requests a fog radius that snaps to sudden death.
+
+### And rule 11's hazard fired again, in the other direction
+
+**Registry edits to `gatecount.mjs` were swept into a peer's weapon-tray commit by pathspec form.**
+Nothing lost and the tree builds, but that commit is mislabelled forever, and HEAD sat inconsistent
+(a registered gate with no doc row) until the follow-up closed it. The agent then held `docs/TOOLS.md`
+for two hours specifically to avoid doing the same to the peer. **Pathspec protects you from your own
+index, never from a second agent in your file** — CLAUDE.md rule 11, demonstrated for the third time
+this session.

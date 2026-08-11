@@ -86,12 +86,31 @@ not mechanism-vs-size.**
 ### 🔴 And the cost, being paid right now
 
 Six gates went red **on HEAD** the moment the map committed — `arena-scan`, `ap_reach`, `sp_place`,
-`sp_gate`, `conceal_lab`, `level_lab` — every one carrying a 1400×1000 literal. Confirmed on a clean
-`git archive HEAD` tree, not inferred from the working tree, **where six of the seven failures had been
-correctly attributed to a peer's uncommitted dump right up until that dump was committed.** `arena-scan`
-is the big one: its 18 stations are all 1× coordinates, so they now sample only the NW quadrant.
-**`level_lab` is a finding, not a fixture** — the level-1 player now wins **100.0%** (was 87.5%), so it
-is pinned at its ceiling and can no longer tell level 1 from level 15.
+`sp_gate`, `conceal_lab`, `level_lab` — every one carrying a 1400×1000 literal, plus `sentinel` as a
+seventh. **All closed** (`72d50a4`, `336a85b`, `f27973f`, `9c10722`): `gatecount` on a clean worktree
+went **12 faults → 2**, and neither survivor belongs to that work.
+
+⚠️ **TWO THINGS I WROTE IN THIS SECTION WERE WRONG. Both are corrected below and the wrong wording is
+kept, because each was believed on the strength of a method rather than a measurement.**
+
+- 🚨 **I wrote *"`level_lab` is a finding, not a fixture — the level-1 player now wins 100.0%, so it is
+  pinned at its ceiling and can no longer tell level 1 from level 15."* FALSE.** Measured: **40 of 110
+  cells are unsaturated and every one of them rises**, max **93.8 pp**; the full grid moves
+  **55.00% → 99.32%**. **One hand-picked cell had saturated** and I generalised from it to the
+  instrument. It now runs a declared 11-cell cyclic panel (47.7% → 98.9%, **+51.1 pp against 5.3 pp of
+  standard error**) *plus a row that asserts the baseline has headroom before asserting it moves* —
+  which is the guard my framing would have skipped.
+- 🚨 **I recommended `git archive HEAD` as the clean-tree method, twice, to several agents. It is the
+  WRONG TREE for this battery.** Five of these gates shell out to `git` and die without a `.git`
+  directory — **it reported 8 faults where a real worktree reports 2, and it reports a wrong CAUSE, not
+  merely a wrong number.** Use **`git worktree add --detach`** with `node_modules` **and** `reference`
+  symlinked in. (My own first run of it was worse still: no `node_modules` at all, so seven gates died
+  on a missing import and looked exactly like seven broken gates.)
+
+`arena-scan` was the big one and the reason is worth keeping: its 18 stations were all 1× coordinates,
+so quadrant coverage was **18/2/2/0 with SE empty**. ⚠️ **And the placement guard that was supposed to
+catch this was a PARTIAL catch — it flagged 6 of 18. Acting on its list would have moved six stations
+and still shipped an empty quadrant.**
 
 Also live: **triangles went 480,094 → 1,316,686 (×2.74)** and meshes ×2.34 — onto a phone Uri already
 describes as unplayable (§33). Nothing in this project has ever measured a mobile GPU.
