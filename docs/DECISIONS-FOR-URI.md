@@ -3859,3 +3859,94 @@ routed. Before sudden death existed, radius 0 was unreachable in a real match.
 ⚠️ **And sudden death invalidates every QA station requesting a fog radius below 661.67 wu** — nine
 tools plus `apron.ts`'s documented `?fogRadius=420`. They do not error; they **silently render the
 sudden-death frame** with a console warning. Migration is one number: request **> 661.67**. Routed.
+
+---
+
+## 59. ✅ §57's PARKED PAYOUT QUESTION IS BUILT — `721ce3c`. ❓ **Uri's answer is now ONE NUMBER, and every option is priced.**
+
+A six-player match can pay out. The curve is indexed on **normalised rank** `r = place/(seats−1)`, which
+answers §57's third question directly: **3rd of 6 is r=0.40 → +5; 3rd of 4 is r=0.67 → −2.** A raw-place
+table pays them the same and is wrong at one of the two.
+
+| seats | trophies (above the grace band) | coins | mean/match |
+|---|---|---|---|
+| 2 | +15 −10 | 60 20 | 2.500 |
+| 3 | +15 +3 −10 | 60 40 20 | 2.667 |
+| 4 | +15 +7 −2 −10 | 60 47 33 20 | 2.500 |
+| 5 | +15 +9 +3 −4 −10 | 60 50 40 30 20 | 2.600 |
+| 6 | **+15 +10 +5 0 −5 −10** | 60 52 44 36 28 20 | 2.500 |
+
+**Last place pays exactly what losing a 1v1 pays today** — it *is* r=1, so it takes the shipped loss
+term verbatim: **zero inside the grace band**, so a new player still cannot go backwards at six seats.
+Coins floor at `coinsLoss`, so **every finisher at every seat count is paid something.**
+
+### ❓ THE ONE DECISION LEFT: how steep? `MATCH_PAYOUT.placementSteepness`
+
+| k | six seats | who gains / holds / loses | trophies/match | matches to finish the road |
+|---|---|---|---|---|
+| 0.6 | +15 +5 +1 −3 −7 −10 | 1,2,3 / — / 4,5,6 | 0.17 | **1084** 🔴 |
+| **1.0 (shipped)** | **+15 +10 +5 0 −5 −10** | **1,2,3 / 4th / 5,6** | **2.50** | **576** ✅ |
+| 1.6 | +15 +13 +9 +4 −2 −10 | 1,2,3,4 / — / 5,6 | 4.83 | **404** 🔴 |
+
+**In plain terms:** at **k=1.0** finishing 4th of 6 is a wash — you keep what you had. At **k=0.6** the
+bottom half is punished and the road takes nearly twice as long. At **k=1.6** four of six seats gain and
+the road finishes in two-thirds the time. **Both alternatives require retuning the trophy road; the
+shipped value does not.**
+
+⚠️ **The dial CANNOT reach the 1v1 at any value.** Endpoints are pinned *structurally* (`r<=0`→0,
+`r>=1`→1, evaluated **before** the exponent), and two seats only ever produce r∈{0,1}. Asserted against
+exponents 0, 0.25, 0.6, 1, 1.6, 4, 8, Infinity and NaN. **So Uri's answer is a one-value edit that needs
+no re-verification of the shipped duel.** `node tools/tmp/pc_lab.mjs --compare` prints the sheet above.
+
+### 🚨 THE FINDING THAT MATTERS MOST HERE HAS NOTHING TO DO WITH PAYOUTS
+
+**`economy.test.mjs` covered NOTHING above two seats — and could not see this change at all.**
+
+It called `applyMatchResult(state, boolean)` **97 times and never once with a seat count**. The words
+`placement`, `seat` and `position` appeared **zero** times in the whole file. A complete placement curve
+was then written, `applyMatchResult` was rewritten to delegate through it, and a persisted struct grew
+two fields — and the suite reported **227 passed, 0 failed, unchanged.** It is now **271**.
+
+Of four deliberate mutations later run against the shipped source, **three were invisible to the
+pre-existing suite.** ⚠️ **Green was necessary and nowhere near sufficient**, and nothing but writing the
+coverage would have revealed that.
+
+### What was proven, and what is honestly not claimed
+
+- **N=2 is a no-op, proven against a FROZEN ORACLE** — the pre-curve body transcribed from
+  `MATCH_PAYOUT`, importing nothing from the new curve — over **8 careers × 500 = 4,000 matches** across
+  win rates 0.0 to 1.0. ⚠️ Compared as a **transcript, not a final balance**: two errors that cancel
+  leave identical final coins and a different transcript, and that is the known-bad it was shown to fail
+  on.
+- **Pacing cannot move with seat count.** Linear-on-normalised-rank has the same mean payout at every N.
+  Road completion **594 matches at 2 seats → 576 at 6, Δ −18**, against a stated floor of **±102**
+  (2 sd over seeds). Inside it.
+- ⚠️ **NOT claimed: that the curve is *right* at six seats.** Nothing above two seats has a before-value,
+  and no measurement of real 6-player placement distributions exists in this repo. What is claimed is
+  that it is coherent, monotone, endpoint-exact, EV-neutral and pacing-neutral. The field model behind
+  the career numbers is **a model**, labelled as one everywhere it prints.
+
+### One honest cost, taken deliberately rather than rounded away
+
+`winsTowardChest` is an integer that `deserialize` floors, so fractional chest credit would **discard
+progress on every reload**. So chests stay integral and the cost is priced: chests/match **0.600 (2) ·
+0.429 (3) · 0.618 (4) · 0.515 (5) · 0.627 (6)** — flat to ±4.5% except at three seats, **28.5% slower**,
+because r=0.5 lands exactly on 2nd of 3. The comparison is **strict**, which puts that coin flip on the
+conservative side; `<=` was +28.5% — the same magnitude in the direction that cannot be walked back.
+
+### ⚠️ A number §58 may have just staled
+
+`MATCH_PACING.sessionSeconds = 15.5` was measured **before** sudden death shipped. Sudden death ends the
+~5% of matches that reach 30 s and would previously have run to 45 s, so the true mean is now **~14.8 s**.
+It is never asserted, by design, so no gate is red — **but every "hours to unlock" figure derives from
+it**, and if Uri picks §58 option **(c) lengthen the match**, it moves materially.
+
+### Routed, not made (out of set)
+
+- **`src/net/lobby.ts`** hardcodes `15` where `MATCH_PAYOUT.trophiesWin` belongs — retune the constant
+  and the league silently pays the old rate.
+- **`src/ui/screens/profile.ts`** needs a `recordPlacement` sibling. ⚠️ **And it contains a SECOND
+  two-outcome ladder nobody had noticed: `XP_WIN`/`XP_LOSS`.** The consistent answer is the same
+  normalised-rank interpolation; it is being decided deliberately rather than stubbed silently.
+- `src/ui/screens/home.ts` needs **nothing**, and `trophyRoad.ts`'s screen already renders `trophies === 0`
+  correctly via its `is-flat` class — so 4th of six works untouched.
