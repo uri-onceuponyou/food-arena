@@ -48,7 +48,7 @@
 
 import { startGame, type GameSession } from '../../game/match';
 import { CHARACTERS } from '../../game/rules';
-import type { MatchPhase } from '../../game/state';
+import { MAX_FIGHTERS, MIN_FIGHTERS, type MatchPhase } from '../../game/state';
 import type { Route, Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
 import { el } from './fx';
@@ -117,11 +117,38 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     // mirrors it inside `GameSession` — see `enemyLevelFor`, which is where Uri's
     // "AI players adjust to the player's level" answer is expressed exactly once.
     playerLevel: ctx.profile.characterLevel(route.player),
-    onPhase(phase: MatchPhase, winner) {
+    onPhase(phase: MatchPhase, winner, outcome) {
       if (phase === 'ended') {
         if (!banked) {
           banked = true;
-          ctx.profile.recordResult(winner === 'player');
+          // ── 🚨 THE PAYOUT JOIN ──────────────────────────────────────────────
+          // This was `ctx.profile.recordResult(winner === 'player')` — a BOOLEAN, which
+          // `profile.ts` forwards as `recordPlacement(won ? 0 : 1, MIN_FIGHTERS)`. So
+          // **every match this product has ever played paid as a duel**, and the whole
+          // 3-6 seat curve built in `DECISIONS §59` and wired through in `§61` was
+          // unreachable from the game. At 500 trophies a six-player match paid 2nd, 3rd,
+          // 4th AND 5th the LAST-PLACE rate — -5 trophies / 20 coins / 35 XP — instead of
+          // 11/52/87, 7/44/74, 3/36/61 and -1/28/48. Priced over a real place
+          // distribution that is **4.16-6.92 trophies, 11.1 coins and 18.0 XP per match**,
+          // silently, every match. `tools/tmp/mp_join.mjs` is the gate and it is RED on
+          // the line this replaces.
+          //
+          // ⚠️ THE FALLBACK IS THE OLD LINE, NOT A GUESS. A session that hands over no
+          // outcome, or one whose seat count `trophyRoad.ts:placementRank01` would THROW
+          // on, pays exactly what it paid before — correct at two seats, which is the only
+          // seat count that path can reach.
+          //
+          // ⚠️ AND IT IS A NO-OP AT TWO SEATS BY CONSTRUCTION, NOT BY TUNING: at two seats
+          // `resolvePlaces` returns [winner, loser], so `localPlace` is 0 or 1 and `seats`
+          // is 2 — the exact arguments `recordResult` forwards. `mp_join.mjs` §B proves
+          // that against the shipped boolean path at every standing rather than asserting
+          // it.
+          const payable = outcome !== null
+            && outcome.localPlace >= 0
+            && outcome.seats >= MIN_FIGHTERS
+            && outcome.seats <= MAX_FIGHTERS;
+          if (payable && outcome) ctx.profile.recordPlacement(outcome.localPlace, outcome.seats);
+          else ctx.profile.recordResult(winner === 'player');
         }
         root.classList.add('is-ended');
       } else {

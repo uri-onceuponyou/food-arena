@@ -29,7 +29,8 @@ import { otherRole } from './state';
 // used to do — the damage-source colour, the impact VFX origin, the knockback direction —
 // is now `ev.source.attackerId` through `weaponAttackerOf`.
 import {
-  fighterOf, fightersOf, LOCAL_SLOT, localFighter, slotOf, trailOwnerOf, weaponAttackerOf,
+  fighterOf, fightersOf, LOCAL_SLOT, localFighter, resolvePlaces, slotOf, trailOwnerOf,
+  weaponAttackerOf, type PlacementInput,
 } from './roster';
 import { boxesOverlap } from './movement';
 import {
@@ -234,6 +235,41 @@ export interface MatchDebug {
   frames: number;
 }
 
+/**
+ * 🚨 WHERE EVERY SEAT FINISHED — the one thing `onPhase` could not say.
+ *
+ * It carried a ROLE, so `matchScreen.ts` could only ask "did slot 0 win" and banked
+ * `recordResult(boolean)`, which `profile.ts` forwards as `recordPlacement(won ? 0 : 1,
+ * MIN_FIGHTERS)`. **Every match on the product paid as a duel**, and the 3-6 seat payout
+ * curve (`DECISIONS §59`, `§61`) was unreachable from the game.
+ *
+ * The ranking RULE is `roster.ts:resolvePlaces` — the file that already states the other
+ * seat rules once for all four presentation modules — and its header carries the
+ * measurement that decides its shape: **the rank is NOT derivable from the final state.**
+ * Every loser ends `hp: 0, deaths: 1, alive: false`, identically, in 220 of 220 real
+ * matches. Only the ORDER OF THE `death` EVENTS separates them, and this file is the only
+ * one that sees `GameEvent[]` — which is why the TRACKING lives here and the RULE does not.
+ *
+ * ⚠️ PLAIN DATA, NOT LIVE `Fighter` OBJECTS. `GameSessionOptions.onPhase`'s own comment
+ * promises the screen layer reacts *"WITHOUT polling `MatchState` from outside"*, and the
+ * sim keeps mutating for one more tick after `phase` flips (`sim.ts`'s projectile loop
+ * reproduces the prototype's extra tick deliberately). Four fields, built once per match.
+ */
+export interface MatchOutcome {
+  /** How many seats this match had — `profile.recordPlacement`'s second argument. */
+  readonly seats: number;
+  /** Every slot, best first. `places[k]` is the slot that finished `k`th. */
+  readonly places: readonly number[];
+  /**
+   * Where the LOCAL seat finished, **ZERO-BASED** — 0 is first, `seats - 1` is last.
+   * ⚠️ `hud.ts` renders the ONE-based *"4th of 6"*; that `+ 1` happens at that one call
+   * site and nowhere else. See `roster.ts:placeOf`.
+   */
+  readonly localPlace: number;
+  /** The slot `sim.ts` declared the winner, or `null` if the match never resolved. */
+  readonly winnerId: number | null;
+}
+
 export interface GameSessionOptions {
   /** Mount point for the WebGL canvas. */
   container: HTMLElement;
@@ -250,7 +286,12 @@ export interface GameSessionOptions {
    * button — WITHOUT polling `MatchState` from outside or reaching into the HUD.
    * The session stays the only owner of match state; this is the one-way edge out.
    */
-  onPhase?: (phase: MatchState['phase'], winner: FighterRole | null) => void;
+  onPhase?: (
+    phase: MatchState['phase'],
+    winner: FighterRole | null,
+    /** Non-null on the `'ended'` transition only. See `MatchOutcome`. */
+    outcome: MatchOutcome | null,
+  ) => void;
   /**
    * The player's CHARACTER level for `playerCharacterId`, 1-15 (`rules.ts` DEVIATION #11).
    *
@@ -416,6 +457,34 @@ export class GameSession {
    */
   private models: CharacterModel[] = [];
   private state: MatchState;
+
+  /**
+   * THE SLOTS KNOCKED OUT THIS MATCH, EARLIEST FIRST — and the ONLY record of that order
+   * in the product. See `MatchOutcome` for why the final state cannot supply it.
+   *
+   * Appended in `handleEvents`'s `death` case, so the order here IS `stepMatch`'s order and
+   * no second rule states it. Cleared in `spawnMatch` beside every other per-match
+   * accumulator, for the reason `projectileOrigins.clear()` gives one line away: a restart
+   * replaces the whole `MatchState`, and a stale entry would rank the NEXT match's
+   * finishers off the last one's knockouts.
+   */
+  private readonly eliminated: number[] = [];
+
+  /**
+   * THIS MATCH'S FINISHING ORDER, COMPUTED ONCE ON THE `'ended'` TRANSITION.
+   *
+   * ⚠️ **CACHED RATHER THAN RECOMPUTED PER FRAME, AND THAT IS CORRECTNESS BEFORE IT IS
+   * COST.** The result card stays up until the player presses something, so a per-frame
+   * `outcome()` would re-rank on every one of those frames — off a `MatchState` the sim is
+   * still stepping for one more tick (`sim.ts`'s projectile loop deliberately reproduces
+   * the prototype's extra tick), and off an `eliminated` list that can still grow if a
+   * projectile already in the air lands after the whistle. The card and the payout would
+   * then be able to disagree with each other. Computed once, at the transition, is also
+   * the only reading under which `onPhase` and `HudFrameInfo.place` are the same answer.
+   *
+   * Null in every phase but `'ended'`, which is what clears it on restart.
+   */
+  private endedOutcome: MatchOutcome | null = null;
 
   private readonly clock = new THREE.Clock();
   private raf = 0;
@@ -671,6 +740,7 @@ export class GameSession {
       selectedWeapon: this.input.selectedWeapon,
       safeArrow: this.safeArrow(),
       aim: null,
+      place: this.hudPlace(),
     });
   }
 
@@ -740,6 +810,9 @@ export class GameSession {
     // `projectile-destroyed` — the whole `MatchState` is replaced above. Without this
     // the map keeps one entry per unresolved shot, forever, across every restart.
     this.projectileOrigins.clear();
+    // Same class of bug as the line above, and a more expensive one: last match's knockout
+    // order would rank this match's finishers, and it would pay them.
+    this.eliminated.length = 0;
     this.hitStopBudgetMs = 0;
     this.hitStopBankedMs = 0;
     for (const k of Object.keys(this.feel.events)) this.feel.events[k] = 0;
@@ -1262,6 +1335,8 @@ export class GameSession {
         }
         case 'death': {
           const slot = slotOf(ev.fighterId, ev.fighterRole);
+          // The one record of knockout ORDER anywhere. `MatchOutcome`.
+          this.eliminated.push(slot);
           this.models[slot]?.play('death');
           const fighter = fighterOf(this.state, ev.fighterId, ev.fighterRole);
           const color = lastHitColor[slot] ?? '#FFFFFF';
@@ -1376,7 +1451,62 @@ export class GameSession {
     // button and the screen layer's "back to menu" both need a real cursor, and both
     // appear on exactly this transition.
     this.pointerLock.setMatchActive(this.state.phase !== 'ended');
-    this.opts.onPhase?.(this.state.phase, this.state.winner);
+    this.endedOutcome = this.state.phase === 'ended' ? this.outcome() : null;
+    this.opts.onPhase?.(this.state.phase, this.state.winner, this.endedOutcome);
+  }
+
+  /**
+   * The result card's finishing line, in `hud.ts`'s ONE-BASED form — `{ place: 4, of: 6 }`
+   * renders *"4th of 6"*.
+   *
+   * 🚨 **THE `+ 1` HAPPENS HERE AND NOWHERE ELSE.** `MatchOutcome.localPlace` is ZERO-based
+   * because that is what `profile.recordPlacement(place, seats)` takes; `HudFrameInfo.place`
+   * is ONE-based because that is what a human reads. Two conventions for one quantity is the
+   * shape that pays 6th place a 5th-place cheque, so there is exactly one conversion in the
+   * product and it is this line.
+   *
+   * Null in every phase but `'ended'`, and null for a seat count of one, which is what
+   * `hud.ts` already gates its own element on (`place.of > 1`).
+   */
+  private hudPlace(): { place: number; of: number } | null {
+    const o = this.endedOutcome;
+    if (!o || o.seats <= 1 || o.localPlace < 0) return null;
+    return { place: o.localPlace + 1, of: o.seats };
+  }
+
+  /**
+   * The finishing order, as plain data. See `MatchOutcome`; the RULE is
+   * `roster.ts:resolvePlaces` and this only feeds it.
+   */
+  private outcome(): MatchOutcome {
+    // `fightersOf` rather than `state.fighters` for the reason every other consumer in this
+    // file uses it: `roster.ts` states the "which container is the roster" rule once, and
+    // the duck-typed states instruments build do not all carry a `fighters` array.
+    const roster = fightersOf(this.state);
+    const input: PlacementInput = {
+      seats: roster.map((f, i) => ({
+        // The array INDEX, not `f.id`. `fighters[i].id === i` is a sim invariant, but
+        // `fightersOf`'s `[player, enemy]` fallback can be handed a pair an instrument
+        // built, where the index is the authority.
+        id: i,
+        alive: f.alive,
+        hp: f.hp,
+        maxHp: f.maxHp,
+        x: f.x,
+        y: f.y,
+        deaths: f.deaths,
+      })),
+      center: { x: this.arena.center.x, y: this.arena.center.y },
+      eliminated: this.eliminated,
+      winnerId: this.state.winnerId ?? null,
+    };
+    const places = resolvePlaces(input);
+    return {
+      seats: input.seats.length,
+      places,
+      localPlace: places.indexOf(LOCAL_SLOT),
+      winnerId: input.winnerId,
+    };
   }
 
   private readonly handleResize = (): void => this.resize();
@@ -1586,6 +1716,13 @@ export class GameSession {
       // not just 'playing', so the countdown is not five seconds of an invisible
       // cursor with nothing on screen to orient by.
       aim: this.aimCursor(),
+      // 🔴 THE RESULT CARD COULD NOT SAY WHERE YOU FINISHED. `hud.ts` lists the losers with
+      // `filter(i !== winnerSlot)` in SLOT order, so a six-way reads
+      // `EGG defeated HAMBURGER DONUT TACO SUSHI PIZZA` whether you came 2nd or 6th — and
+      // for five of six players that is the entire result of the match. `HudFrameInfo.place`
+      // is the socket the HUD deliberately left open rather than deriving a rank it has no
+      // right to; this is what fills it.
+      place: this.hudPlace(),
     });
     // ⚠️ SURFACE 2 OF 3 — the floating HP pills. `updateFloatingBars` hides a bar
     // whose screen point is `null`, and `projectToScreen` already returns `null` for a
