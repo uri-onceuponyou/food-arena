@@ -47,6 +47,17 @@
  * against a stationary background — which is exactly the experiment that showed
  * "desaturate the environment" was the wrong instruction.
  *
+ * ⚠️ **`--swap` AND BROWSER *GATES* DO NOT MIX. MEASURE WITH IT; GATE WITHOUT IT.**
+ * The live symlink lets Vite discover a dependency it has not pre-bundled and issue a
+ * FULL PAGE RELOAD in the middle of a `page.evaluate`. Measured 2026-08-11 by two agents
+ * on the same night: `menu_accept` read **349/353 once against a `snap_hold --swap`
+ * snapshot and 361/361 on a plain frozen snapshot of the same tree**. Nothing was wrong
+ * with the build — the reload destroyed the execution context mid-assertion, and a gate
+ * that does not retry reports that as a regression. (`da_census` survives it only
+ * because it retries on `Execution context was destroyed` with a FRESH page.)
+ * Same family as: **`--swap` does not work on an HTML file with an inline module
+ * script** — Vite serves the transformed HTML, so the symlink is bypassed.
+ *
  * Then point any tool at it:
  *
  *   node tools/arena-scan.mjs --url http://localhost:PORT --out shots/scan/x

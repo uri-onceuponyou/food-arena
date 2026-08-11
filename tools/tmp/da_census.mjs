@@ -43,9 +43,17 @@
  * Peers are live in `src/render/`, `src/characters/` and `src/arena/` right now, so
  * "before" and "after" taken against two separate snapshots are two different trees and
  * the diff is meaningless (LESSONS §5). Run this under `tools/tmp/snap_hold.mjs` with
+ * a `--swap` for each screen file YOUR pass owns — e.g.
  * `--swap src/ui/screens/home.ts --swap src/ui/screens/characterSelect.ts`: everything
- * freezes, MY two files stay symlinked to the live tree, and the only thing that moves
+ * freezes, YOUR files stay symlinked to the live tree, and the only thing that moves
  * between the two runs is the edit.
+ *
+ * ⚠️ **AND A `--swap` SNAPSHOT IS NOT SAFE FOR A BROWSER *GATE*.** The live symlink lets
+ * Vite discover an unbundled dependency and issue a FULL PAGE RELOAD mid-`evaluate`:
+ * `menu_accept` read **349/353 once against a `snap_hold --swap` snapshot and 361/361 on
+ * a plain frozen one**. This tool survives it only because it RETRIES (see
+ * `captureOneRetrying`) — a gate that does not retry reports the reload as a regression.
+ * Measure with `--swap`; gate on a plain snapshot.
  *
  * ── What the DRIFT CONTROL is for HERE, which is the opposite of ds_neutral ───
  * There it separates "an edit changed something" from capture noise. Here the edit is
@@ -66,18 +74,34 @@
  * verdict is "yes, things changed" would be a check that cannot fail (LESSONS §13) and
  * must never be counted as one.
  *
+ * ── 🚨 `--owned` IS AN INPUT, NOT A PROPERTY OF THIS TOOL ─────────────────────
+ * The blast-radius claim is "the screens this pass did NOT edit came back with zero
+ * property diffs". Which screens those are is a fact about the PASS, and this tool
+ * hard-defaulted it to the one pass it was written for (`home,characters`) while
+ * `--owned` went undocumented. A later pass that legitimately edited `trophies` had its
+ * real, intended diffs printed as `<<< OUT OF SET — INVESTIGATE`: the tool did not
+ * report a wrong number, it attached the wrong CLAIM to a right one, which is worse
+ * because the number survives review and the label is what gets quoted.
+ *
+ * So `--owned` is REQUIRED by `--compare`, its names are CHECKED against the screens
+ * actually captured, and there is no default. A default here is a guess about someone
+ * else's file set — the same shape as the guessed tolerance CLAUDE.md #4 forbids, and
+ * the same shape as `ic_spec`'s silent merge picking a winner.
+ *
  * Usage:
  *   node tools/tmp/da_census.mjs --selftest
  *   node tools/tmp/da_census.mjs --url <snapshot> --out shots/da --label before
  *   node tools/tmp/da_census.mjs --url <snapshot> --out shots/da --label control
- *   ... edit home.ts / characterSelect.ts ...
+ *   ... edit the screen files your pass owns ...
  *   node tools/tmp/da_census.mjs --url <snapshot> --out shots/da --label after
- *   node tools/tmp/da_census.mjs --compare shots/da before after --control control
+ *   node tools/tmp/da_census.mjs --compare shots/da before after --control control \
+ *        --owned home,characters
  */
 
 import { chromium } from 'playwright';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { settleScreen, captureSettled } from './settle.mjs';
 
@@ -268,6 +292,38 @@ export function diffCensus(a, b) {
   return { diffs, added, removed, customDiffs, elementsA: a.count, elementsB: b.count };
 }
 
+/**
+ * Resolve `--owned` against the screens actually captured.
+ *
+ * Pure and exported so the selftest can drive it, because every failure mode here is
+ * SILENT in the report:
+ *
+ *   absent      -> the old hardcoded `home,characters`, which mislabels a trophies pass.
+ *   `--owned`   -> `parseArgs` yields boolean `true`; `String(true).split(',')` is
+ *   with no       `['true']`, so NOTHING is owned and every real diff is filed as
+ *   value         foreign. A bare flag reads as "I declared it" and means the opposite.
+ *   typo        -> `--owned trophy` for `trophies` does the same thing, and the report
+ *                  looks exactly like a genuine out-of-set finding.
+ *   unmatched   -> `--owned settings` on a run that only captured home/characters is a
+ *                  claim about a screen the census never looked at.
+ *
+ * Returns `{ owned }` or `{ error }`; the caller exits 2. It never guesses.
+ */
+export function resolveOwned(raw, captured) {
+  const seen = [...new Set(captured)].sort();
+  const say = (msg) => ({ error: `${msg}\n  screens captured in this run: ${seen.join(', ') || '(none)'}`
+    + `\n  declare your pass's screens explicitly, e.g. --owned ${seen[0] ?? 'home'}` });
+  if (raw === undefined || raw === null) {
+    return say('--owned is REQUIRED: which screens this pass edited is a fact about the pass, not about this tool.');
+  }
+  if (raw === true) return say('--owned was given with no value, which would own NOTHING and file every real diff as foreign.');
+  const owned = String(raw).split(',').map((s) => s.trim()).filter(Boolean);
+  if (!owned.length) return say('--owned resolved to an empty list.');
+  const unknown = owned.filter((s) => !seen.includes(s));
+  if (unknown.length) return say(`--owned names ${unknown.length} screen(s) this run never captured: ${unknown.join(', ')}.`);
+  return { owned: new Set(owned) };
+}
+
 /** The key a control-derived noise entry is stored under. Element AND property, never
  *  element alone: a component whose `box-shadow` animates is not thereby licensed to
  *  change its `border-radius`, and a per-element excuse would grant exactly that. */
@@ -430,6 +486,23 @@ async function runCompare(args) {
 
   console.log(`\nADOPTION CENSUS — what moved, ${labelA} -> ${labelB}${control ? `  (drift control: ${labelA} vs ${control})` : ''}\n`);
 
+  /** Which screens this pass is ALLOWED to move. Named up front, so "the other screens
+   *  did not move" is an assertion made before the numbers arrive rather than a
+   *  description of whatever came back. Resolved FIRST, before any pixel work, so a bad
+   *  declaration costs a second rather than a full comparison.
+   *  ⚠️ Previously `new Set(String(args.owned ?? 'home,characters').split(','))` — the
+   *  default is gone. It was a guess about someone else's file set and it mislabelled a
+   *  trophies pass's real diffs as `OUT OF SET`. Kept here because the wording is the
+   *  reason: a hardcoded owned set makes the tool's central CLAIM a property of the tool. */
+  const resolved = resolveOwned(args.owned, A.records.map((r) => r.screen));
+  if (resolved.error) {
+    console.error(`REFUSED: ${resolved.error}\n`);
+    process.exit(2);
+  }
+  const OWNED = resolved.owned;
+  console.log(`  owned by this pass (declared): ${[...OWNED].join(', ')}`);
+  console.log(`  every other captured screen must come back with ZERO property diffs\n`);
+
   /**
    * THE CONTROL DEFINES THE NOISE SET — it is not a tolerance anyone guessed.
    *
@@ -457,11 +530,6 @@ async function runCompare(args) {
     console.log('');
   }
 
-  /** Which screens this pass is ALLOWED to move. Named up front, so "the other three
-   *  did not move" is an assertion made before the numbers arrive rather than a
-   *  description of whatever came back. */
-  const OWNED = new Set(String(args.owned ?? 'home,characters').split(','));
-
   const pixelRows = [];
   const byProp = new Map();     // property -> occurrences, across owned screens
   let unownedMoves = 0;
@@ -475,7 +543,7 @@ async function runCompare(args) {
     const owned = OWNED.has(ra.screen);
     if (!owned) unownedMoves += moved;
     if (owned) for (const x of real) byProp.set(x.prop, (byProp.get(x.prop) ?? 0) + 1);
-    console.log(`  ${ra.screen}@${ra.vp}${owned ? '' : '   [NOT THIS PASS’S SCREEN]'}`);
+    console.log(`  ${ra.screen}@${ra.vp}${owned ? '' : '   [NOT DECLARED IN --owned]'}`);
     console.log(`    computed-style census   ${ra.census.count} elements   ${real.length} property diffs`
       + `${excused ? ` (+${excused} inside the control's own noise set)` : ''}`
       + `, ${d.added.length} added, ${d.removed.length} removed, ${d.customDiffs.length} token diffs`
@@ -529,17 +597,22 @@ async function runCompare(args) {
     console.log('');
   }
 
-  console.log('── WHICH PROPERTIES MOVED, on the screens this pass owns ──');
+  console.log(`── WHICH PROPERTIES MOVED, on the DECLARED screens (${[...OWNED].join(', ')}) ──`);
   for (const [p, n] of [...byProp].sort((a, b) => b[1] - a[1])) {
     console.log(`  ${String(n).padStart(5)}  ${p}`);
   }
-  if (!byProp.size) console.log('  (none — the adoption changed NOTHING, which for this pass is a failure to report)');
+  if (!byProp.size) console.log('  (none — the edit changed NOTHING on the screens it claims, which is a failure to report)');
 
   console.log('\n── BLAST RADIUS ──');
-  console.log(`  screens NOT edited by this pass (${[...new Set(A.records.map((r) => r.screen))].filter((s) => !OWNED.has(s)).join(', ') || 'none captured'}): `
+  const foreign = [...new Set(A.records.map((r) => r.screen))].filter((s) => !OWNED.has(s));
+  console.log(`  screens NOT declared in --owned (${foreign.join(', ') || 'none captured'}): `
     + `${unownedMoves === 0 ? '0 property diffs, 0 added, 0 removed, 0 token diffs — UNTOUCHED' : `${unownedMoves} moves — OUT OF SET`}`);
-  console.log('  (this is the claim no screenshot of my own two screens could make: the shared');
-  console.log('   layer was adopted from MY files, so nobody else\'s screen may have moved.)');
+  console.log('  (this is the claim no screenshot of the edited screens could make: a shared layer');
+  console.log('   is edited from ONE file set, so no screen outside that set may have moved.)');
+  if (!foreign.length) {
+    console.log('  ⚠️ EVERY captured screen was declared owned, so NO blast-radius claim is made here.');
+    console.log('     Capture the screens you did not edit too, or this section proves nothing.');
+  }
 
   if (C) {
     console.log('\n── PIXELS ──');
@@ -561,7 +634,9 @@ async function runCompare(args) {
   }
   console.log('');
   await writeFile(`${root}/adoption-${labelA}-${labelB}.json`, JSON.stringify(
-    { labelA, labelB, control, byProp: [...byProp], unownedMoves, pixelRows }, null, 2));
+    // `owned` is recorded because `unownedMoves` is meaningless without it — a stored
+    // "0 moves out of set" that does not say WHICH set is not a blast-radius claim.
+    { labelA, labelB, control, owned: [...OWNED], notOwned: foreign, byProp: [...byProp], unownedMoves, pixelRows }, null, 2));
   // ALWAYS 0. See the header: this is a report, not a gate.
   process.exit(0);
 }
@@ -678,13 +753,65 @@ async function selftest() {
     await Promise.all([unlink(p1), unlink(p2)]);
   }
 
+  // KNOWN-BAD 8: THE OWNED SET. Every arm here is a way this tool used to attach the
+  // WRONG CLAIM to a right number — the failure that is invisible in the output,
+  // because the diffs are real and only the label is wrong.
+  {
+    const captured = ['home', 'characters', 'trophies', 'shop', 'settings'];
+    const ok = resolveOwned('trophies', captured);
+    t('a declared screen is owned', [ok.error, [...ok.owned]], [undefined, ['trophies']]);
+    t('two declared screens, whitespace tolerated', [...resolveOwned(' home , characters ', captured).owned], ['home', 'characters']);
+
+    // The historical default. `trophies` was NOT owned, so a trophies pass's real diffs
+    // printed as `OUT OF SET — INVESTIGATE`. Asserted as the concrete mislabel rather
+    // than "the default is gone", so the assertion names the bug.
+    const legacyDefault = new Set(String('home,characters').split(','));
+    t('KNOWN-BAD: the old hardcoded default files a trophies pass as foreign',
+      legacyDefault.has('trophies'), false);
+
+    // Absent, bare, empty and typo'd all REFUSE. A bare `--owned` is the nastiest:
+    // `parseArgs` hands back boolean `true`, `String(true).split(',')` is `['true']`,
+    // so nothing is owned and every real diff is filed as foreign — a flag that reads
+    // as a declaration and means its opposite.
+    t('absent --owned refuses', typeof resolveOwned(undefined, captured).error, 'string');
+    t('bare --owned (boolean true) refuses instead of owning nothing',
+      [typeof resolveOwned(true, captured).error, resolveOwned(true, captured).owned], ['string', undefined]);
+    t('empty --owned refuses', typeof resolveOwned('', captured).error, 'string');
+    t('a TYPO refuses instead of silently owning nothing',
+      resolveOwned('trophy', captured).error.includes('trophy'), true);
+    t('a screen the run never captured refuses',
+      resolveOwned('settings', ['home', 'characters']).error.includes('settings'), true);
+    // The refusal has to be actionable: it names what WAS captured, or the operator
+    // cannot tell a typo from a capture that skipped the screen.
+    t('the refusal names the captured screens',
+      resolveOwned(undefined, ['home', 'trophies']).error.includes('home, trophies'), true);
+  }
+
   console.log(`\n  ${pass} passed, ${fail} failed\n`);
   process.exit(fail ? 1 : 0);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-const args = parseArgs(process.argv);
-if (args.selftest) await selftest();
-else if (args.compare) await runCompare({ ...args, _: [args.compare === true ? args._[0] : args.compare, ...args._] });
-else await runCapture(args);
+/** True only when this file is the process entry point.
+ *
+ *  🚨 REQUIRED, because this file EXPORTS a comparator (`diffCensus`, `filterNoisy`,
+ *  `diffPng`, `resolveOwned`) and, without it, `import { diffCensus } from
+ *  './da_census.mjs'` falls through to `runCapture(args)` — reading the IMPORTER's
+ *  argv and, whenever `PREVIEW_BASE` happens to be set (it is, inside every
+ *  `with_snapshot` child), silently launching Chromium and walking 5 screens × 4
+ *  viewports before the importer's first line runs. Proved by importing it: the module
+ *  threw `need --url (or PREVIEW_BASE)` from `runCapture` — i.e. the import HAD entered
+ *  the capture path, and only an unset env var stopped it.
+ *  Same guard, same reason, as `ic_spec.mjs` and `snapsweep.mjs`: a module that reads
+ *  the process's arguments cannot also be a library. `ft_faces.mjs` copies this tool's
+ *  viewport list "verbatim" rather than importing it, which is a workaround for exactly
+ *  this. */
+const IS_MAIN = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
+
+if (IS_MAIN) {
+  const args = parseArgs(process.argv);
+  if (args.selftest) await selftest();
+  else if (args.compare) await runCompare({ ...args, _: [args.compare === true ? args._[0] : args.compare, ...args._] });
+  else await runCapture(args);
+}
