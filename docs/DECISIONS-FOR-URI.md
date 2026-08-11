@@ -4192,3 +4192,88 @@ measured bottom. **It is now the largest single occluder in the frame.**
 - **`da_census` is a clean NEGATIVE ONLY** — 0 property diffs, but it *structurally cannot see* either menu
   edit (one element is absent from its captures, the other only changes at a viewport it does not capture).
   **A green from an instrument that cannot see the change is not evidence.** The plates are.
+
+---
+
+## 63. ✅ §50a AND §50b LANDED — `af35362`, `a9da836`. **23 of 23 ranged weapons could not connect; now 2 of 23.** ❓ And the roster spread doubled, as the stated price.
+
+### §50b — `range` was two quantities wearing one number
+
+`stepProjectiles` now charges a tick with the ground the shot **gained on its target** rather than the
+path it flew, refunded only when the target is receding. **The proof that `pickWeapon`'s gate and the
+retirement are finally the same quantity is executable** (`sim.test.mjs` §31c): a Lettuce Fling pressed
+at 120 wu against a *fleeing* target is charged **93.3 wu against a separation crossed of 94**, while the
+path it actually flew is **365.3 wu**. The same press at a *stationary* target is charged 93.3352 and flew
+93.3352 — identical to **1.3e-13**. Under the old rule those two columns were the same number *by
+definition*, so that row is red on the old rule. **`pickWeapon` needed no change at all.**
+
+The age cap is derived, not picked: `range / (speed − 120 wu/s)`, the roster's own movement cap. It
+**provably never truncates a legal shot**, and exists for **exactly one case in the shipped game** — a
+trail-boosted Donut at 152.28 wu/s that `SPEED.maxSlow` closes on at 7.72 wu/s. Budget alone would chase
+it for **18.1 seconds**.
+
+**Reach: 23/23 → 2/23 cannot connect at their own press gate, in both roles.** Cost: lifetime mean
+280 → 285 ms, **0 wu outside the map**, concurrency unchanged (max 14/tick) — **no draw-call cost.**
+
+### ❓ THE PRICE URI AUTHORISED HAS ARRIVED, AND IT IS BIGGER THAN THE HEADLINE
+
+| | before | after |
+|---|---|---|
+| roster range | 14.2 pp | **28.1 pp** |
+| settled matchups | 18/110 | **28/110** |
+
+⚠️ **The aggregate is NOT the result and must not be quoted as one.** smart2 moved 59.3% → 67.4%
+(+8.1 pp) — **inside the ~9 pp floor.** The real quantity is the paired per-matchup delta on identical
+seeds, which is **exact**: **49 of 110 matchups moved, max |Δ| 81.3 pp, mean 8.6 pp.** Winners burrito
++13.3 and donut +9.7; losers pizza −8.1 and **egg −7.5** — everyone else's kit started working while
+Hatch! was still inert, which is §50a's case seen from the other side.
+
+=> **A re-balance around the new reach is its own pass, and it must be steered by the paired table.**
+Steering it by the 8.1 pp aggregate would be steering inside a floor — the exact error this project has
+made before. Uri authorised the price and said not to hold the roster still; **whether 28.1 pp is
+acceptable is his call, and the pass is queued.**
+
+### §50a — the chick is faster than the egg, and the interesting part is that the two drivers disagree
+
+`Hatch!` moved from `SPEED.maxDrift` (80 wu/s — slower than **every fighter in the game**) to
+`SPEED.maxSlow` (160), the *smallest* rung clearing both constraints: 1.52× Egg's delivered 105.6 wu/s
+and above the 120 the age cap needs. **Reach 27 → 140 wu.** `FLIGHT_MS.drift`'s *"a chick that waddles at
+you"* is reversed with its old wording kept, because the arithmetic in it is the reason nothing may
+return to that rung.
+
+Damage compensation was measured at **three** points, not two: **20.1 and 15.7 pp per point, mean 17.9** —
+reproducing the pre-fix 17.8. **The lever did not get finer when the weapon started working.**
+
+🚨 **And the finding worth more than the integer: the two drivers disagree about which damage value is the
+no-op, by more than a whole point.** d4 is **+0.9 pp on smart2** (inside the floor) and **−13.9 on chase**
+(outside); d5 is the mirror (+21.1 / +4.4). The mechanism is real — **a *chasing* opponent was always
+reachable by an 80 wu/s chick**, so on that policy the speed fix is worth nothing and only the damage cut
+lands. **No single-parameter compensation exists**: a cooldown raise would have to cost smart2 4.8× what
+it costs chase. **d4 ships because it holds the character still on the stronger driver**, the chase cost
+is stated rather than hidden, and no third constant was touched to paper over it.
+
+### Two instruments broken BY the fix — and both are now asserting a defect that no longer exists
+
+- **`ac_homing --selftest` 11/11 → 9/11.** Both failing rows assert the pre-fix behaviour (*"perpendicular
+  flight loses ground on a stationary one"*: 18 vs 27, now 27 vs 27). **Correctly false.** Re-authoring,
+  not deletion.
+- **`hm_audit --selftest` THROWS** — and the reason is worth keeping: **it patches source by exact string
+  match**, on two literals the fix rewrote. A tool that stages a mutation by literal substitution breaks
+  silently the day anyone touches the line. Its purpose (pricing the retirement options) is arguably
+  discharged now that the relative-frame option shipped.
+
+⚠️ **And the pass caught its own guard going vacuous:** a fallback assertion filtered the roster for
+weapons on an orphan speed rung, and **the moment the fix emptied that set, `[].every()` returned `true`
+and the guard passed by having nothing to check.** Third instance tonight of that exact shape.
+
+Two instrument off-by-ones also documented rather than worked around: `press` reads a projectile's books
+*before* the tick that kills it, so a budget-killed shot always reads one step short — **the first draft
+failed on all 23 and looked exactly like the finding.** And a weapon that has **landed** is removed with
+reason `'expired'`, so reading `reason` alone reports Egg's Hatch! as a miss **on the tick it delivered
+its full damage**.
+
+### Countdown-reseed: measured, and it is OUTSIDE
+
+880 matches stepped in lockstep against HEAD with one driver feeding both: **847 diverge, 0 before the
+whistle, 0 before the first `projectile-spawned`.** `attemptAttack` is reachable only inside
+`phase === 'playing'`.
