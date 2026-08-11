@@ -3778,3 +3778,84 @@ then cut is not.
 5. **A backend decision.** ⚠️ Nothing was provisioned, no account created, no endpoint in any committed
    file; `NetConfig` defaults to connect-to-nothing. That stays true until Uri says otherwise.
 6. **Reconnection, spectator UI, matchmaking** — none exist.
+
+---
+
+## 58. ✅ SUDDEN DEATH LANDED `f87d407` — ❓ **and it makes §53b's ring UNREACHABLE. Two of Uri's own answers cannot both bind.**
+
+§2 shipped exactly as asked: *"after 30 seconds reduce the fog to all screen and the one who has more
+HP wins."* At the 30 s trigger the safe radius collapses to zero, everyone burns, and the last fighter
+standing is whoever had more HP. **`resolveTimeout` fired 0 times in an 880-match census** — §49a's
+rungs are now provably unreachable, which is what §2 said should happen, asserted rather than assumed.
+
+### ❓ THE DECISION — one line from Uri closes it
+
+On the 2800×2000 map `maxSafeRadius` derives to **1985 wu**, so at 30 s the ring is still **661.67 wu**.
+For §53b's floor to ever be reached, the trigger would have to be **later than the ring's arrival**:
+
+| N | §53b floor | ring reaches it at | §2 fires at | gap |
+|---|---|---|---|---|
+| 2–4 | 140.00 | **41.83 s** | 30 s | fires **11.83 s early** |
+| 5 | 187.42 | 40.75 s | 30 s | 10.75 s early |
+| 6 | 237.00 | **39.63 s** | 30 s | **9.63 s early** |
+
+**`minSafeRadiusFor(N)` is now unreachable at every seat count.** §53b's work is not wasted — it still
+shapes the ring *while it is closing* — but **the endgame spacing it was built to guarantee never
+happens.** Uri answered §2 and §53b in the same message and they cannot both hold in a 45 s match:
+
+- **(a) KEEP 30 s — recommended.** Sudden death is a real **15-second** final phase. The census says it
+  works: it fires in **5.0%** of N=2 matches, **31 of 44 end on the collapse tick**, and the HP leader
+  won **43 of 43** decided. §53b becomes the shape of the closing ring rather than a floor anyone
+  reaches.
+- **(b) MOVE THE TRIGGER to ≥ 41.83 s** (39.63 s at six seats) so the ring floor binds. ⚠️ **This all
+  but deletes sudden death** — it would last **3.17 s**, which is a blip, not a phase.
+- **(c) LENGTHEN THE MATCH** so both fit. The only option that keeps everything, and it changes every
+  pacing number in the project.
+
+=> **Assumption in force until Uri says otherwise: (a).** §53b governs the ring while closing; §2
+supersedes it at the trigger. Nothing is pinned — the whole table above is computed at run time from
+`MATCH_DURATION_MS`, `arena.maxSafeRadius`, `POT` and `REACH`, and asserted in `sim.test.mjs` §30.
+
+### It is a STEP, not a ramp — and Uri's second clause is what decided it
+
+Under a gradual ramp the fighter nearer the centre is engulfed last, so **position decides the match and
+HP only breaks ties.** Only a step makes *"the one who has more HP wins"* a true sentence. That also
+makes the resolution **absolute HP**, not `resolveTimeout`'s HP *fraction* — a deliberate rule change,
+stated rather than slipped in.
+
+### 🚨 Collapsing the ring was NOT sufficient. Three things would have shipped wrong.
+
+1. **The fog is quantised** (15 HP per 300 ms), so any HP gap **under 15** put two fighters in the same
+   bucket and the killing tick walked **slot order** — **a 100 HP fighter in slot 0 lost to a 91 HP
+   fighter in slot 1.** The exact opposite of what Uri asked for. Fixed by ordering the pass ascending
+   by HP, ties by descending id so the lowest slot survives, agreeing with §49a rung 4.
+2. **`Fighter.fogTimer` is per-fighter**, so anyone already burning died *earlier with more HP*. The
+   cadence is now derived from the match clock.
+3. **Without a `phase !== 'playing'` break the pass killed the winner it had just declared** — 6 deaths
+   from 6 seats, with `state.winner` naming a corpse.
+
+### And the control had to be fixed before it was a control
+
+With the test fighters at 300 wu, **both unreachability known-bads came back green** — the legacy ring
+passes 300 wu at 31.4 s and burns them anyway, so that scenario never reached a timeout in *either* arm.
+Moving them to **100 wu** — inside `MIN_SAFE_RADIUS`, where pre-§2 they sit in the permanent safe
+annulus and only the clock can end the match — turned both rows red. **A known-bad placed where the bug
+cannot express itself is not a known-bad.**
+
+N=2 bit-identity before the trigger: **3,520 matches · 5,410,470 ticks · 537,095 events in order ·
+0 divergent**, holding over the whole state *and* the returned `GameEvent[]` in order, and deliberately
+excluding everything after the trigger — which is the behaviour Uri asked to change. **Outside the
+countdown-reseed path**: the trigger keys off `state.timeRemaining`, which is `MATCH_DURATION_MS` for
+the entire countdown, so no decision, rng draw or reaction offset moves.
+
+### 🚨 A shipped defect it exposed: the fog RENDERS AS NOTHING at radius 0
+
+`src/arena/fogRing.ts:~505` fades the whole boundary out at radius 0 — **so the fog disappears at the
+exact moment it is supposed to cover the arena.** Measured: `?fogRadius=0&fogRingRaw=1` renders at mean
+luma **130.6** against a no-fog frame's **132.3**, while the HUD reads *"OUTSIDE THE ZONE −50 HP/s"*.
+With the fix: **72.0**, a canopy over the whole screen. **The fix is one character (`> 0` → `>= 0`)**,
+routed. Before sudden death existed, radius 0 was unreachable in a real match.
+
+⚠️ **And sudden death invalidates every QA station requesting a fog radius below 661.67 wu** — nine
+tools plus `apron.ts`'s documented `?fogRadius=420`. They do not error; they **silently render the
+sudden-death frame** with a console warning. Migration is one number: request **> 661.67**. Routed.
