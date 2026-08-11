@@ -3520,3 +3520,76 @@ this build and the one audio complaint on record was a 404, not a mix balance.
 Already in force, already measured, already written into `opening.ts` in numbers. It protects
 character select (**7.00, the strongest screen in the build**) and home, which consume the same
 constant. Reversing later is additive and cheap.
+
+---
+
+## 55. ✅ MEASURED 2026-08-11 — the phone screen. **Uri's instinct to force landscape is now a number, and the portrait half of the plan is worth NOTHING.**
+
+Uri, on his own phone: *"force full screen horizontal on game launch."* That is now measured rather
+than assumed, and the measurement **splits his sentence in two** — the *horizontal* half is worth a
+lot and the *full screen* half is worth nothing without it.
+
+`tools/tmp/sc2_screen.mjs`, 40 cells, reading the real canvas rect out of `Stage.resize()`:
+
+| device | Safari tab | added to home screen |
+|---|---|---|
+| iPhone 15 **landscape** | 75.2% | **100.0%** |
+| iPhone 14 landscape | 77.5% | **100.0%** |
+| 16 Pro Max landscape | 77.7% | **100.0%** |
+| Pixel 7 landscape | 80.2% | **100.0%** |
+| iPhone 15 **portrait** | 34.6% | **34.6% — ZERO GAIN** |
+
+🚨 **The two losses are NOT additive, which is how everyone including me had been reasoning about
+them.** In portrait the canvas is **width-bound**: `Stage.resize()` sets `h = cw / (4/3)` and never
+reads viewport height at all, so every one of the ~193 CSS pixels reclaimed from browser chrome lands
+**in the letterbox**. Identical on all five devices tested. Both PNGs were read: same arena strip,
+more empty dark space. **Portrait standalone is not bigger, it is emptier.**
+
+=> **Add-to-Home-Screen is a LANDSCAPE feature.** It takes 75–80% of the screen to 100%. In portrait
+it is a no-op. This does not weaken Uri's request — it sharpens it: **the orientation is the whole
+prize, and the fullscreen is the reward for getting it.**
+
+### The 4:3 mask — DECIDED (Uri delegated it): **DO NOT WIDEN.** And the fairness gate cannot be cited either way.
+
+The obvious way to reclaim the portrait letterbox is to widen `SUPPORTED_ASPECT.min` from `4/3`.
+Two builds differing **only** in that constant, iPhone 15 portrait:
+
+| `min` | canvas | share of screen | guaranteed R | visible arena **depth** |
+|---|---|---|---|---|
+| `4/3` | 393×295 | 34.6% | 199.22 wu | 462 wu |
+| `0.46` | 393×852 | **100.0%** | 199.22 wu | **1181 wu** |
+| *(landscape, for scale)* | 852×393 | 100.0% | 199.22 wu | 398 wu |
+
+It gains 2.89× the pixels and loses on three counts:
+
+1. **Competitive fairness.** A portrait player would see **2.96× the arena depth** of a landscape
+   player. Today that ratio is 1.16×.
+2. 🚨 **`tools/aspect.mjs` PASSES at 0.00 wu on BOTH arms — so it must not be cited for this.** It
+   checks the *floor*, which `computeFairDistance()` holds at every aspect **by construction**;
+   nothing gates the *bleed*. **The fairness gate is structurally blind to the exact change it looks
+   like it authorises.** A green `aspect.mjs` here means "the thing I measure is unaffected", not
+   "this is fair" — and that is the single easiest way this decision could have been got wrong.
+3. **The look breaks.** The PNG was read: at 2.5× camera distance the depth fog saturates the whole
+   upper frame flat orange and the fighter is a speck.
+
+A middle point exists and is derived, not guessed — `min: 1` gives 393×393, 46.1% of screen, 1.48×
+depth. **Not taken**, because the landscape path reaches 100% with zero fairness cost and portrait is
+not the orientation this game is being aimed at.
+
+### 🔴 The one action standing between all of this and Uri's phone
+
+**The deploy is stale.** `gh-pages` still serves a bundle with **no manifest in it**, so
+Add-to-Home-Screen currently buys him nothing on any device. Rebuilding with
+`DEPLOY_BASE=/food-arena/` and pushing `dist/` publishes whatever HEAD holds for every agent running
+at that moment, so it is sequenced deliberately: **it happens once the in-flight mobile work lands,
+not per-commit.**
+
+### Could not be measured here, and it is worth knowing which
+
+- **Real `env(safe-area-inset-*)` values.** Chromium reports 0 whatever it emulates, so the
+  `black-translucent` inset behaviour is a **platform claim, not a measurement**.
+- **Anything about WebKit specifically.** Standalone mode is emulated as *the viewport change it
+  causes* — exact for canvas geometry, and silent about everything else iOS does.
+- ⚠️ **There is no `ScreenOrientation.lock()` call anywhere in the codebase**, and on iPhone it is a
+  silent no-op regardless. Forcing landscape on iOS Safari is not available; it comes with the
+  wrapper (§51a, Capacitor), which is the one thing a wrapper genuinely does buy.
