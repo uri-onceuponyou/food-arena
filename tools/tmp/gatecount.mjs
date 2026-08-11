@@ -286,6 +286,33 @@ const OFFLINE = [
   //    not looking at the tool's RAW BYTES first.
   { key: 'tools/tmp/nf_ffa.mjs --selftest', probes: [pr(['tools/tmp/nf_ffa.mjs', '--selftest'], /^\s*(\d+) passed, \d+ failed\b/m)] },
   { key: 'tools/tmp/nc_measure.mjs --selftest', probes: [pr(['tools/tmp/nc_measure.mjs', '--selftest'], S)] },
+  /**
+   * ── THE FOUR NETCODE GATES (`DECISIONS §52`/`§57`) ──────────────────────────────────
+   *
+   * All four are pure Node — no `playwright` import, no browser reference, no `git`
+   * shell-out — and were TIMED before registering, which is the `hw_ord` lesson: 0.26 s
+   * (`nw_wire`), 2.58 s (`nw_stack`), 10.26 s (`nw_delta`), 0.07 s (`nw_profile`).
+   *
+   * ⚠️ **THE PATTERN IS UNANCHORED AT THE START, DELIBERATELY.** Their summary line begins
+   * with an emoji — `✅  nw_wire: 67/67 checks passed` — so `^` cannot be used. Read off the
+   * RAW BYTES of a real run rather than guessed (the third mis-written pattern in this file
+   * came from not doing that), and checked for ambiguity: `<tool>: n/n checks passed`
+   * matches **exactly once** in each tool's whole output.
+   *
+   * ⚠️ **NUMERATOR, NOT DENOMINATOR** — `hc_occluders`'s rule. `SLASH_ASSERT` would take the
+   * denominator, and then a `12/67` run would satisfy a documented 67: a failing gate
+   * reported as an intact one.
+   *
+   * ⚠️ **`--selftest` IS INERT IN ALL FOUR** — none of them reads it (`nw_wire`/`nw_delta`
+   * take `--sizes`, `nw_stack` takes `--latency`, `nw_profile` reads no argv at all), so a
+   * bare run and this key measure the same battery. Recorded because `hw_ord`/`hw_burner`
+   * were registered OFFLINE on exactly this assumption when it was FALSE for them and the
+   * flag was hiding a GPU probe. Here it hides nothing; verified by running both forms.
+   */
+  { key: 'tools/tmp/nw_wire.mjs --selftest',    probes: [pr(['tools/tmp/nw_wire.mjs', '--selftest'], /nw_wire: (\d+)\/\d+ checks passed/m)] },
+  { key: 'tools/tmp/nw_stack.mjs --selftest',   probes: [pr(['tools/tmp/nw_stack.mjs', '--selftest'], /nw_stack: (\d+)\/\d+ checks passed/m)] },
+  { key: 'tools/tmp/nw_delta.mjs --selftest',   probes: [pr(['tools/tmp/nw_delta.mjs', '--selftest'], /nw_delta: (\d+)\/\d+ checks passed/m)] },
+  { key: 'tools/tmp/nw_profile.mjs --selftest', probes: [pr(['tools/tmp/nw_profile.mjs', '--selftest'], /nw_profile: (\d+)\/\d+ checks passed/m)] },
   { key: 'tools/tmp/r2_probe.mjs --selftest', probes: [pr(['tools/tmp/r2_probe.mjs', '--selftest'], S)] },
   // Three probes because the doc cell states three numbers — known / new / stale. ARITY exists to
   // make that correspondence mandatory: a cell cannot gain a number that nothing measures.
@@ -414,7 +441,7 @@ const SKIP = [
   //    "picture changed" side and has nothing to assert on the null side, and vice versa,
   //    so `--chars`/`--weapon` make it INVALID rather than merely narrower.
   ['tools/tmp/hl_sweep.mjs --selftest', 'browser', 'weapon-halo sweep + 8 controls; needs the full 23-weapon sweep for its aggregate selftest to be valid'],
-  ['tools/tmp/sc2_manifest.mjs', 'browser', 'Add-to-Home-Screen manifest at 3 bases + 4 known-bad controls. ⚠️ 3 of 54 are RED today: its "pure HEAD has no manifest" control was pinned before 92e794a LANDED the manifest'],
+  ['tools/tmp/sc2_manifest.mjs', 'browser', 'Add-to-Home-Screen manifest at 3 bases + 5 known-bad/control rows. Its NO-MANIFEST control is an ABLATION of the shipped build, not a pure-HEAD tree — it was the latter until 2026-08-11 and went 3-of-54 RED the moment 92e794a landed the manifest'],
   ['tools/tmp/sc2_screen.mjs', 'browser', 'what a standalone home-screen launch changes about the frame — the guaranteed radius is unchanged, so aspect.mjs structurally cannot see it'],
   ['tools/perf.mjs --mode tierselftest', 'browser', 'the known-bad input for `--device mobile`: arm A reproduces the pre-4be0733 bug (`high`), B is the fix (`low`), C a tablet (`medium`), D the desktop control'],
   ['tools/tmp/ab_basepath.mjs --selftest', 'browser', 'four vite builds plus a real page per cell; verdict is a PASS/FAIL matrix, not a count'],

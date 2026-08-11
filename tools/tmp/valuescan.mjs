@@ -209,27 +209,82 @@ export const ErrorOverlay=class{}; export default {};`;
  * A fighter centred in a CoverBox is also exactly where `tryMove` refuses every step
  * (`docs/LESSONS.md` §10), so no real match ever produces those frames.
  * `tools/tmp/stationvalidate.mjs` reproduces the whole thing in ~20 ms.
+ *
+ * ══════════════════════════════════════════════════════════════════════════════
+ *  🚨 AND IT HAPPENED AGAIN, WHOLESALE. THE ×4 MAP LEFT **14 OF 18** DEFECTIVE.
+ * ══════════════════════════════════════════════════════════════════════════════
+ *
+ * `6631446` shipped the ×4 arena (1400×1000 → 2800×2000, centre 700,500 → 1400,1000,
+ * `maxSafeRadius` 850 → 1985). `arena-scan` re-derived all eighteen of its stations from
+ * the new map; **this file did not**, so the 1× table below sat unchanged for a second
+ * time — the identical failure its own paragraph above describes, at four times the size.
+ * Measured 2026-08-11 against the shipped dump (`tools/arena.gameplay.json` at `af35362`),
+ * fighter footprint 42 wu plus arena-scan's own 24 wu clearance band:
+ *
+ *     the 1× table   14 of 18 defective   ELEVEN inside a CoverBox (spawn_west, west_lane,
+ *                                         west_choke, pot_south, hub_north, freezer_nw,
+ *                                         pantry_sw, freezer_se, grease_near, grease_in,
+ *                                         water_near, and fog_boundary/fog_late as well),
+ *                                         THREE requesting a snapped fog radius
+ *                    quadrant coverage    NW 18 · NE 0 · SW 0 · SE 0
+ *     arena-scan     quadrant coverage    NW 4 · NE 2 · SW 5 · SE 7
+ *
+ * **Three quarters of the map had not one frame in it, and eleven of the eighteen frames
+ * were photographing a prop.** `--mode dl` takes its mask from an environment-hidden
+ * render and its luma from the SHIPPED frame, so an occluded station reports the PROP'S
+ * luma as the character's — the mechanism the paragraph above already traced to
+ * `dlBelow10` failing for all eleven characters on both sides of a value pass.
+ *
+ * ── AND THE THREE FOG STATIONS HAD A SECOND, INDEPENDENT DEFECT ──────────────
+ * `DECISIONS §2` / `f87d407` abolishes the ring at 30 s, so `match.ts` SNAPS any
+ * `?fogRadius=` at or below **661.67 wu** (`maxR × SUDDEN_DEATH_REMAINING_MS /
+ * MATCH_DURATION_MS`) to sudden death — a full-arena violet wash — with a console warning
+ * and **no error**. All three of `fog_boundary` 420, `fog_inside` 420 and `fog_late` 200
+ * were silently photographing that frame instead of the ring they name.
+ *
+ * ⚠️ **AND "ASK FOR MORE" IS NOT UNIFORMLY THE FIX.** Asked of each station separately:
+ *   • `fog_boundary` (the safe-zone wall just ahead of the player) and `fog_inside`
+ *     (standing in the death zone) describe a RELATIVE position against the wall, and both
+ *     are still reachable — 840 wu puts the wall where each wants it on the ×4 map.
+ *   • `fog_late` is the one that is NOT simply migrated. Its subject was a NEARLY-CLOSED
+ *     ring, and **no shipped match holds one any more** — the schedule's floor is 661.67
+ *     and sudden death abolishes the ring below it. It is re-aimed at the tightest ring
+ *     the schedule actually reaches (700) and it no longer measures what it was named for.
+ *     `arena-scan`'s row carries the same note, arrived at independently.
+ *
+ * The table below is `arena-scan`'s current list verbatim — which is what the first line of
+ * this comment always claimed it was, and is the only version that has ever been validated
+ * against the cover table and a quadrant sweep (`arena-scan --selftest` §F).
+ * ⚠️ `stationsHash` therefore changes, so every cached `dl.json` measured on the 1× table
+ * is refused rather than compared. That is the hash doing its job, not a regression.
  */
-const MAX_SAFE_RADIUS = 850, GREASE = { x: 560, y: 900 }, WATER = { x: 840, y: 100 };
+const MAX_SAFE_RADIUS = 1985, GREASE = { x: 1830, y: 1250 }, WATER = { x: 970, y: 750 };
 const STATIONS = [
-  { id: 'spawn_west', x: 160, y: 390, fog: MAX_SAFE_RADIUS },   // was 160,500 — the spawn moved in 60c5b92
-  { id: 'west_lane', x: 340, y: 500, fog: MAX_SAFE_RADIUS },
-  { id: 'west_choke', x: 400, y: 500, fog: MAX_SAFE_RADIUS },
-  { id: 'pot_south', x: 700, y: 640, fog: MAX_SAFE_RADIUS },
-  { id: 'pot_diagonal', x: 570, y: 430, fog: MAX_SAFE_RADIUS },
-  { id: 'hub_north', x: 700, y: 320, fog: MAX_SAFE_RADIUS },
-  { id: 'freezer_nw', x: 430, y: 420, fog: MAX_SAFE_RADIUS },   // was 430,240 — inside the NW stove island
-  { id: 'pantry_ne', x: 1150, y: 420, fog: MAX_SAFE_RADIUS },   // was 1150,330 — inside a prep counter
-  { id: 'pantry_sw', x: 400, y: 800, fog: MAX_SAFE_RADIUS },    // was 270,665 — inside a prep counter
-  { id: 'freezer_se', x: 1000, y: 580, fog: MAX_SAFE_RADIUS },  // was 1000,700 — inside the SE stove island
-  { id: 'fryer_south', x: 560, y: 790, fog: MAX_SAFE_RADIUS },
-  { id: 'edge_west', x: 70, y: 500, fog: MAX_SAFE_RADIUS },
-  { id: 'grease_near', x: GREASE.x - 130, y: GREASE.y - 95, fog: MAX_SAFE_RADIUS },
-  { id: 'grease_in', x: GREASE.x, y: GREASE.y, fog: MAX_SAFE_RADIUS },
-  { id: 'water_near', x: WATER.x + 130, y: WATER.y + 95, fog: MAX_SAFE_RADIUS },
-  { id: 'fog_boundary', x: 1090, y: 500, fog: 420 },
-  { id: 'fog_inside', x: 1240, y: 500, fog: 420 },
-  { id: 'fog_late', x: 700, y: 340, fog: 200 },
+  { id: 'spawn_west', x: 300, y: 810, fog: MAX_SAFE_RADIUS },
+  { id: 'west_lane', x: 600, y: 1000, fog: MAX_SAFE_RADIUS },
+  { id: 'west_choke', x: 900, y: 1000, fog: MAX_SAFE_RADIUS },
+  { id: 'pot_south', x: 1400, y: 1200, fog: MAX_SAFE_RADIUS },
+  { id: 'pot_diagonal', x: 1140, y: 940, fog: MAX_SAFE_RADIUS },
+  { id: 'hub_north', x: 1400, y: 780, fog: MAX_SAFE_RADIUS },
+  { id: 'freezer_nw', x: 560, y: 400, fog: MAX_SAFE_RADIUS },
+  { id: 'pantry_ne', x: 2200, y: 500, fog: MAX_SAFE_RADIUS },
+  { id: 'pantry_sw', x: 650, y: 1700, fog: MAX_SAFE_RADIUS },
+  { id: 'freezer_se', x: 2240, y: 1600, fog: MAX_SAFE_RADIUS },
+  { id: 'fryer_south', x: 1400, y: 1450, fog: MAX_SAFE_RADIUS },
+  { id: 'edge_west', x: 70, y: 1000, fog: MAX_SAFE_RADIUS },
+  // ⚠️ The hazard offsets are in FRAME units, not map units, so they did NOT scale with the
+  // map — they changed DIRECTION only, because the 1× offsets (-130,-95) and (+130,+95) both
+  // land inside a hub stove island now. `grease_in` stands 75 wu OUT from the puddle centre,
+  // which is the closest standable ground: the centre itself is buried under three props.
+  { id: 'grease_near', x: GREASE.x - 110, y: GREASE.y - 130, fog: MAX_SAFE_RADIUS },
+  { id: 'grease_in', x: GREASE.x, y: GREASE.y - 75, fog: MAX_SAFE_RADIUS },
+  { id: 'water_near', x: WATER.x + 90, y: WATER.y + 130, fog: MAX_SAFE_RADIUS },
+  // 🔴 ALL THREE WERE BELOW 661.67 AND SNAPPED TO SUDDEN DEATH — see the block above.
+  { id: 'fog_boundary', x: 2210, y: 1000, fog: 840 },   // was 1090,500 fog 420
+  { id: 'fog_inside', x: 2360, y: 1000, fog: 840 },     // was 1240,500 fog 420
+  // ⚠️ RE-AIMED, NOT MIGRATED: 200 wu asked for a nearly-closed ring that no shipped match
+  // reaches any more. 700 is the tightest the schedule holds. It is a different frame.
+  { id: 'fog_late', x: 740, y: 1000, fog: 700 },        // was 700,340 fog 200
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

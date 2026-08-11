@@ -608,9 +608,43 @@ if (args.selftest) {
   // ── A. The two `ax_layout` traps, asserted so the workaround cannot rot ──
   {
     const raw = scaleArena(src, { mode: 'copy', k: 1, matchDurationMs: MATCH_DURATION_MS });
-    ok('A1 ax_layout:scaleArena DROPS arena.concealment (the trap this file works around)',
-      !('concealment' in raw) && (src.concealment ?? []).length > 0,
-      `shipped dump declares ${(src.concealment ?? []).length} regions; scaleArena returns ${'concealment' in raw ? 'them' : 'NONE'}`);
+    // ⚠️ REVERSED 2026-08-11. THE OLD WORDING, KEPT BECAUSE THE REASON MATTERS:
+    //
+    //     ok('A1 ax_layout:scaleArena DROPS arena.concealment (the trap this file works around)',
+    //       !('concealment' in raw) && (src.concealment ?? []).length > 0, …);
+    //
+    // `72d50a4` fixed `scaleArena` to ride BOTH dropped fields — `spawns` and `concealment` —
+    // through all four modes, so the trap this file was built around no longer exists and the
+    // row that pinned it was asserting the bug's presence. A bug-pin that goes red when the bug
+    // is fixed is a trap (`sp_place`'s puddle census carries the same note), so it is inverted
+    // here rather than deleted: the property under test is now that the field SURVIVES, with the
+    // historical drop as the known-bad. Measured on the shipped dump at `af35362`.
+    ok('A1 ax_layout:scaleArena now CARRIES arena.concealment through — 72d50a4 (was: it DROPPED it)',
+      'concealment' in raw && JSON.stringify(raw.concealment) === JSON.stringify(src.concealment)
+      && (src.concealment ?? []).length > 0,
+      `shipped dump declares ${(src.concealment ?? []).length} regions; scaleArena returns ${(raw.concealment ?? []).length}, identical: ${JSON.stringify(raw.concealment) === JSON.stringify(src.concealment)}`);
+    // 🚨 AND THE HALF THAT MAKES THE INVERSION USEFUL RATHER THAN CEREMONIAL: the workaround
+    // this file built for the trap is now a PROVEN NO-OP on the re-add. `fixture()` throws
+    // `scaleArena`'s list away and rebuilds it with `tileConcealment`; at k=2 the two are
+    // byte-identical, so only the KEEPOUT CUT below it is still doing work. Stated as an
+    // assertion so that if `scaleArena`'s tiling ever diverges from this file's, B1's claim
+    // about "the x4 fixture tiles to 4x" stops being a claim about code nobody is running.
+    {
+      const rawHub = scaleArena(src, { mode: 'hub', k: 2, matchDurationMs: MATCH_DURATION_MS });
+      const ours = tileConcealment(src.concealment ?? [], src.width, src.height, 2);
+      ok('A1b …and at k=2 it tiles them EXACTLY as this file does, so fixture()\'s re-add is a no-op and only the keepout cut still bites',
+        JSON.stringify(rawHub.concealment) === JSON.stringify(ours),
+        `scaleArena ${(rawHub.concealment ?? []).length} vs tileConcealment ${ours.length}, identical: ${JSON.stringify(rawHub.concealment) === JSON.stringify(ours)}`);
+    }
+    // KNOWN-BAD for A1: the historical behaviour must still be CAUGHT by the same comparison,
+    // or the inverted row would pass on any object at all.
+    {
+      const dropped = { ...raw };
+      delete dropped.concealment;
+      ok('A1c KNOWN-BAD: the pre-72d50a4 drop is still caught by that same comparison',
+        !('concealment' in dropped)
+        && !('concealment' in dropped && JSON.stringify(dropped.concealment) === JSON.stringify(src.concealment)));
+    }
     const fixed = fixture(src, 'copy', 1);
     ok('A2 …and this file\'s fixture carries every one of them, unmodified',
       JSON.stringify(fixed.concealment) === JSON.stringify(src.concealment));

@@ -30,10 +30,28 @@
  * wrong in, and it is precisely the resolution step under test.
  *
  * ── The controls, because a guard that has not FAILED is not a guard ────────
- *   NO-MANIFEST   the tree at HEAD, which has no manifest and no Apple meta at all.
+ *   NO-MANIFEST   the shipped build with the manifest wiring ABLATED out of it.
  *                 **This is the most important row in the file**: it proves the gate
  *                 would have failed on the state this pass found, rather than passing
  *                 vacuously on anything.
+ *
+ *                 ⚠️ **IT USED TO READ `freeze([])` — "the tree at HEAD, which has no
+ *                 manifest and no Apple meta at all" — AND THAT SENTENCE STOPPED BEING
+ *                 TRUE THE MOMENT THE PASS SHIPPED.** `92e794a` landed the manifest, so
+ *                 from that commit the control was reading its own success as a failure:
+ *                 3 of 54 red, correctly measured, asserting a world that no longer
+ *                 exists. Old wording kept here because the reason is the general one —
+ *                 **a control pinned to a TREE decays; a control pinned to an ABLATION
+ *                 does not.** `cw_verify_knownbad` makes the same move for the same
+ *                 reason ("a derived pre-fix ref so it survives a rebase"), and
+ *                 `tt_flatrim` records the opposite outcome: `ar_chipcheck`'s control
+ *                 was *fixed out from under it*.
+ *
+ *                 The ablation strips the `<link rel=manifest>`, the `apple-touch-icon`
+ *                 and the `apple-mobile-web-app-capable` meta from the built `index.html`
+ *                 and deletes `manifest.webmanifest` from the dist — i.e. it reconstructs
+ *                 the pre-`92e794a` SHAPE from the shipped artefact, at the same base, so
+ *                 the paired un-ablated probe above it is the positive control.
  *   ABS-ICON      the shipped dist with the manifest's icon srcs rewritten root-absolute.
  *   ABS-START     …and with `start_url` rewritten to `/`, which must resolve OUTSIDE
  *                 the served base.
@@ -167,6 +185,33 @@ function mutate(dist, kind, base) {
     const after = before.replace(/href="[^"]*?(manifest\.webmanifest|icons\/[A-Za-z0-9._-]+)"/g, 'href="/$1"');
     if (after === before) throw new Error(`DEBASE-HREF changed NOTHING in index.html (base ${base}) — this control would pass vacuously`);
     writeFileSync(html, after);
+  } else if (kind === 'STRIP-MANIFEST') {
+    /**
+     * Reconstruct the pre-`92e794a` SHAPE from the shipped artefact — see the header. Three
+     * independent removals, because the three claims below are independent: a build that
+     * kept the Apple meta while losing the link would still be a defect, and a control that
+     * removed everything with one regex could not tell the two apart.
+     *
+     * Each removal is REQUIRED to have bitten, for the same reason `DEBASE-HREF` throws: a
+     * control that silently no-ops passes vacuously, which is the failure this file exists
+     * to refuse.
+     */
+    const before = readFileSync(html, 'utf8');
+    let after = before;
+    const cuts = [
+      ['<link rel=manifest>', /<link\b[^>]*rel="?[^">]*\bmanifest\b[^">]*"?[^>]*>\s*/gi],
+      ['<link rel=apple-touch-icon>', /<link\b[^>]*rel="?[^">]*\bapple-touch-icon\b[^">]*"?[^>]*>\s*/gi],
+      ['<meta name=apple-mobile-web-app-capable>', /<meta\b[^>]*name="apple-mobile-web-app-capable"[^>]*>\s*/gi],
+    ];
+    for (const [what, re] of cuts) {
+      const next = after.replace(re, '');
+      if (next === after) throw new Error(`STRIP-MANIFEST removed no ${what} from index.html (base ${base}) — this control would pass vacuously`);
+      after = next;
+    }
+    writeFileSync(html, after);
+    // …and the document itself, so "no manifest" means the historical shape rather than an
+    // orphaned file nothing links to.
+    rmSync(mf, { force: true });
   }
   return out;
 }
@@ -238,22 +283,33 @@ for (const cell of CELLS) {
   if (!KEEP) rmSync(dist, { recursive: true, force: true });
 }
 
-// ── the row that matters most: the tree as it was before this pass ──────────
+// ── the row that matters most: the shipped artefact with the manifest ABLATED ──
+// ⚠️ This block used to build `freeze([])` — pure HEAD — and assert HEAD had no manifest.
+// `92e794a` landed the manifest and the control started reading its own success as a
+// failure (3 of 54 red, correctly). See the header: a control pinned to a TREE decays, a
+// control pinned to an ABLATION does not.
 {
-  const headTree = freeze([]);      // pure HEAD, no overlay
-  trees.push(headTree);
-  const dist = build(headTree, '/food-arena/');
-  const r = await probe(dist, '/food-arena/', 'NO-MANIFEST');
+  const dist = build(tree, '/food-arena/');
+  // The PAIRED positive control, on the SAME dist at the SAME base, so "absent" below can
+  // only be attributed to the ablation and never to the base or to a broken probe. Without
+  // it, a build that 404'd its own index.html would satisfy all three known-bads.
+  const pos = await probe(dist, '/food-arena/', 'NO-MANIFEST/paired');
+  const stripped = mutate(dist, 'STRIP-MANIFEST', '/food-arena/');
+  const r = await probe(stripped, '/food-arena/', 'NO-MANIFEST');
   const m = r.m;
-  console.log(`  NO-MANIFEST (pure HEAD, base /food-arena/)`);
+  console.log(`  NO-MANIFEST (shipped build, manifest wiring ABLATED, base /food-arena/)`);
+  console.log(`    paired un-ablated     link ${JSON.stringify(pos.m.link)}  apple ${pos.m.apple ? pos.m.apple.attr : 'ABSENT'}  capable ${JSON.stringify(pos.m.metas?.['apple-mobile-web-app-capable'])}`);
   console.log(`    <link rel=manifest>   ${JSON.stringify(m.link)}`);
   console.log(`    apple-touch-icon      ${m.apple ? m.apple.attr : 'ABSENT'}`);
   console.log(`    apple-capable meta    ${JSON.stringify(m.metas?.['apple-mobile-web-app-capable'])}`);
-  push('KNOWN-BAD NO-MANIFEST: HEAD really has no <link rel=manifest> — the gate would have FIRED on the state this pass found', !m.manifest, String(m.link));
+  push('POSITIVE CONTROL: the SAME build at the SAME base DOES carry all three — so the three rows below measure the ablation, not the base',
+    !!pos.m.manifest && !!pos.m.apple && pos.m.metas?.['apple-mobile-web-app-capable'] === 'yes',
+    `link ${String(pos.m.link)} · apple ${String(pos.m.apple?.attr)} · capable ${String(pos.m.metas?.['apple-mobile-web-app-capable'])}`);
+  push('KNOWN-BAD NO-MANIFEST: with the wiring ablated there is no <link rel=manifest> — the gate would have FIRED on the state this pass found', !m.manifest, String(m.link));
   push('KNOWN-BAD NO-MANIFEST: …and no apple-mobile-web-app-capable either', m.metas?.['apple-mobile-web-app-capable'] === null, String(m.metas?.['apple-mobile-web-app-capable']));
   push('KNOWN-BAD NO-MANIFEST: …and no apple-touch-icon, so iOS uses a page screenshot', !m.apple, String(m.apple?.attr));
-  push('POSITIVE CONTROL: HEAD still loads clean otherwise (the probe is not simply broken)', r.bad.length === 0, r.bad.join(' | ') || 'clean');
-  if (!KEEP) rmSync(dist, { recursive: true, force: true });
+  push('POSITIVE CONTROL: the ablated build still loads clean otherwise (the probe is not simply broken)', r.bad.length === 0, r.bad.join(' | ') || 'clean');
+  if (!KEEP) { rmSync(dist, { recursive: true, force: true }); rmSync(stripped, { recursive: true, force: true }); }
   console.log('');
 }
 
