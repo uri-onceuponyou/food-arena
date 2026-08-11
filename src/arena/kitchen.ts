@@ -3,131 +3,128 @@
  * 4-cabinet / 2-island / 1-pot layout into a full Brawl-Stars-scale map.
  *
  * ── Layout concept ───────────────────────────────────────────────────────────────
- * 1400 x 1000 world units (vs the prototype's 900 x 600) laid out with true 180°
- * point symmetry around the centre so both spawns face an identical, fair map.
+ * **2800 x 2000 world units**, laid out with true 180° point symmetry around the centre
+ * so every spawn faces an identical, fair map.
  *
- * ── The four rules the layout must satisfy, and why ──────────────────────────────
- * Read these before moving any prop. Each one was a measured defect, and every one of
- * them is re-checkable in seconds with `tools/tmp/arena_probe.mjs` (1-3) or
- * `tools/tmp/ap_reach.mjs` (4).
+ * ⚠️ **IT WAS 1400 x 1000 UNTIL 2026-08-11, AND THE OLD NUMBER IS KEPT HERE ON PURPOSE.**
+ * `DECISIONS §48`, Uri: *"Arena x4 - area to accommodate 4-6 players"* — **x4 AREA, not x4
+ * linear**, so x2 on each edge. `§53a`, the same day: *"6 players only on the x4 map."*
+ * `sp_place.mjs` had just measured why: of 327,561 candidate cells on the 1400x1000 map
+ * only **2,186** satisfied every spawn rule, in **two** mirror-pair regions, so a third
+ * pair had to share the west bay at **75.2 wu — inside `REACH.meleeHeavy`** and slot 0 was
+ * dead nine seconds into a real match. **The small map seats FOUR.** This one seats six,
+ * and the acceptance test for that claim is the spawn block at the bottom of this file.
+ *
+ * ── The FIVE rules the layout must satisfy, and why ──────────────────────────────
+ * Read these before moving any prop. Every one was a measured defect, and every one is
+ * re-checkable in seconds: `tools/tmp/arena_probe.mjs` (1-3), `tools/tmp/ap_reach.mjs` (4)
+ * and `tools/tmp/x4_layout.mjs` (3, 4, 5 and the size rules, all at once).
  *
  *   1. **COVER DENSITY MUST FALL TOWARD THE CENTRE.** The closing ring has to force
  *      fighters INTO each other; if the middle is the most cluttered part of the map
- *      it forces them into furniture instead. Measured on the shipped layout,
- *      occlusion rose 30.6% -> 67.7% as the ring shrank from 993 to MIN_SAFE_RADIUS,
- *      because the four stove islands' inner corners sat **138 wu from centre — inside
- *      MIN_SAFE_RADIUS (140)** — and the spice carts sat at 175. The endgame annulus
- *      literally touched them. The islands are now at ±270/±200 (inner corner 241 wu),
- *      the carts and lane pots are out on the service wall, and the whole 150..250 wu
- *      band is 0.3% solid: the endgame is a ring around ONE pillar, as intended.
+ *      it forces them into furniture instead. Measured on the 1400x1000 layout,
+ *      occlusion rose 30.6% -> 67.7% as the ring shrank, because the four stove islands'
+ *      inner corners sat **138 wu from centre — inside MIN_SAFE_RADIUS (140)**. At
+ *      ±270/±200 the inner corner sits at 241 wu and the whole 150..250 wu band is 0.3%
+ *      solid: the endgame is a ring around ONE pillar, as intended.
  *      → `arena_probe.mjs --occl` must end BELOW where it starts.
+ *      ⚠️ **At 2800x2000 this rule got EASIER and its number moved.** The hub keeps its
+ *      exact 1x offsets (rule 2), so the entire r < 500 wu disc holds nothing but the pot,
+ *      four islands and two service counters, while ~104 props live outside it. Density
+ *      genuinely falls toward the centre now instead of merely not rising.
  *
- *   2. **NO PROP MAY SEAL A POCKET.** Two prep counters plus two lane barrels sealed
- *      `x 301..415` and `x 985..1099`, both `y 469..531` — 114x63 wu each, **1.9% of
- *      all legal standing space that nothing could ever enter**, one of them containing
- *      a hanging sign nobody could ever walk up to. A small prop dropped in the gap
- *      between two large ones is exactly how this happens, and it is invisible in a
- *      screenshot. → `arena_probe.mjs --truth` must print ONE PIECE.
+ *   2. **THE POT / CENTRAL HUB STAYS IN THE MIDDLE AT ITS CURRENT SCALE.** Uri, on how to
+ *      grow the map: *"Obviously adding more obstacles, keeping the pot in the middle,
+ *      things like that."* **A hub that doubles is a different game object; a hub that
+ *      stays put becomes the landmark a bigger map needs.** So the pot, the four stove
+ *      islands at CENTER ± 270/200 and the two service counters at CENTER.y ± 330 are
+ *      written as offsets FROM CENTER and are byte-for-byte the 1400x1000 hub, moved.
+ *      `x4_layout --selftest` §G asserts that against the shipped 1x dump.
  *
- *   3. **A SPAWN'S STRAIGHT-AHEAD RUN MUST NOT END IN FURNITURE OR IN A HAZARD** —
- *      **AND THE RULE IS ABOUT A CORRIDOR, NOT A RAY.** A player holding one direction
- *      out of the shipped spawn travelled **38 wu** before a barrel stopped it dead
- *      (`tryMove` tests the destination and does not slide). With the lane cleared the
- *      run became 700 wu — and then ran into the boiling pot, whose CoverBox stops a
- *      fighter at r=73 while its damage ring is r=95, i.e. it **pins you inside the
- *      fire**. Hence the spawns are offset 110 wu off the centre line (still exactly
- *      point-symmetric), so the natural run out of spawn passes clear of both the pot's
- *      box and its 95 wu burn ring.
- *
- *      ⚠️ **AND THEN THE SAME BUG CAME BACK, 6 wu WIDE, BECAUSE THE MEASUREMENT WAS A
- *      SINGLE RAY.** `arena_probe.mjs --route` walks one line out of the spawn point and
- *      reported 700 / 84 / 318 wu on this layout — all healthy. `tools/tmp/input_accept.mjs`
- *      then measured a player holding W travelling **6.0 wu**, which is 0.14 of a body
- *      length and exactly ONE step (`PLAYER_SPEED` 0.12 wu/ms x the loop's 50 ms dt
- *      clamp). Both numbers were right. A ray is measure-zero and a fighter is not: the
- *      west `prep_counter` at (265,330,160x55) inflates to a collision box of
- *      **x 164..366, y 281.5..378.5** against a 42 wu body, and the player spawn (160,390)
- *      sat **4.0 wu west of one face and 11.5 wu south of the other**. Four wu of lateral
- *      drift — a tenth of a body — took the north runway from 84 wu to 11.5, and the run
- *      TOWARD THE ENEMY from 1219 wu to **4.0**. The counter had been placed by exactly
- *      that arithmetic: "x=265 so the inflated west edge (265-80-21=164) clears the
- *      spawn's x=160", i.e. deliberately, by 4 wu.
- *      → `tools/tmp/spawn_runway.mjs` is the acceptance test. It measures the WORST case
- *        over a +-21 wu lateral band (the fighter's own half-width) in all four cardinals
- *        from BOTH spawns, and requires 60 wu — 0.5 s of held input, 1.43 body lengths.
- *        Cardinals only, because `tryMove` resolves x and y independently, so a diagonal
- *        that is refused on one axis still travels on the other; only a cardinal can stop
- *        a fighter dead. It also fails if a run STOPS inside a damage hazard, which is the
- *        pot pin above stated as a test instead of as a paragraph.
+ *   3. **TRUE 180° POINT SYMMETRY — competitive fairness, the same category as
+ *      `tools/aspect.mjs`.** It is the easiest thing in the world to break while placing
+ *      ~110 props by hand, so **it is not placed by hand**: `tools/tmp/x4_layout.mjs`
+ *      holds the NORTH HALF only and generates the south by transform, and every mirror
+ *      below is written `ARENA_W - K` / `ARENA_H - K` rather than as a typed coordinate.
+ *      `ap_reach --selftest` §F then asserts the symmetry on the BROWSER DUMP — the data
+ *      the game actually builds, not the source that claims to build it — and is shown to
+ *      FAIL on a 1 wu nudge of any single box.
  *
  *   4. 🔴 **NO GAP BETWEEN TWO FACES MAY BE WIDER THAN THE DRAWN BODY AND NARROWER THAN
- *      THE COLLIDING ONE.** Uri, playing the shipped build 2026-08-11:
+ *      THE COLLIDING ONE.** Uri, playing the 1400x1000 build 2026-08-11:
  *      *"there are regions in the map that are unreachable due to obstacles."* He was
- *      right, and no gate here could see it, because the space is not SEALED — the flood
- *      `arena_probe --truth` runs still printed ONE PIECE, 0.00% sealed, 100% ceiling.
+ *      right, and no gate could see it, because the space is not SEALED — the flood
+ *      `arena_probe --truth` runs printed ONE PIECE, 0.00% sealed, 100% ceiling throughout.
  *
- *      A character is DRAWN 20.5 wu wide (Donut) to 35.2 wu (Hamburger) and COLLIDES as
- *      **`PLAYER_SIZE` = 42, for every one of them**. So a gap of roughly 20..42 wu
- *      between two mesh faces — or between a face and an arena wall — is floor you can
- *      SEE, that reads as somewhere you could stand, and that no fighter can ever enter.
- *      It is not a pocket in the sim's own space, so a legal-space flood is structurally
- *      blind to it.
+ *      A character is DRAWN 19.1 wu wide (Donut) to 36.1 wu (Hamburger) and COLLIDES as
+ *      **`PLAYER_SIZE` = 42, for every one of them**. So a gap of roughly 19..42 wu is
+ *      floor you can SEE, that reads as somewhere you could stand, and that no fighter can
+ *      ever enter. **Fourteen of them shipped on the small map**, in seven point-symmetric
+ *      pairs, deepest point 68 wu from anywhere standable.
  *
- *      🚨 **AND THE THRESHOLD IS THE NARROWEST CHARACTER, NOT THE AVERAGE ONE.** The first
- *      pass fixed everything above **26 wu** — a figure derived from one pixel measurement
- *      (`shots/conceal/panels.json` charBox: 73 px against a 304.66 px-per-100-wu ruler =
- *      23.96 wu) — and re-running the probe at 20 wu found **six more gaps still open**,
- *      including two the same pass had walked past. `tools/tmp/ap_view.mjs` measures the
- *      model's world-space extent with no camera in it and the cast spans **20.5 to 35.2
- *      wu**, so a 25 wu gap is a slit for Hamburger and a see-through wall for Donut.
- *      Every gap now sits at or below **18 wu** or at or above 42.
+ *      🚨 **AND AT 2800x2000 THE BAND IS WIDER, BECAUSE THE NAV GRID SILENTLY HALVED ITS
+ *      RESOLUTION.** `movement.ts:NAV_MAX_CELLS` is 40,000; this arena at the shipped
+ *      10 wu cell needs 56,000, so `navGrid` doubles the cell to **20 wu** — and
+ *      `NAV_CELL`'s own doc block records that **cell 20 already failed the 1400x1000
+ *      kitchen's tightest legal gap** (it cost 7 of 358 cells). A corridor narrower than a
+ *      body plus two cells is a corridor the flow field cannot see, so the AI walks past
+ *      it. `movement.ts` is not this file's to change, so the constant is answered as a
+ *      LAYOUT RULE instead:
  *
- *      **FOURTEEN of them shipped, in seven point-symmetric pairs**: 30 and 36 wu behind
- *      the four supply barrels (against the outer wall), 32.5 wu over 95 wu of run between
- *      the flour sacks and the rollingPin prep counter, 37.5 wu between the stacked pots
- *      and the herb crate, 25 wu between the herb crate and the tall crate, 20 wu between
- *      the tall crate and the flour sacks, and 20 wu between the knifeBlock counter and
- *      the west wall. Deepest point 68 wu from anywhere standable.
- *      → `node tools/tmp/ap_reach.mjs --body-visual 18` must report ZERO. Its `--selftest`
- *        builds a room whose doorway is 30 wu and requires a sealed pocket, a phantom
- *        pocket and a face gap; the 120 wu control requires none of the three.
+ *          **EVERY face-to-face gap is <= 16 wu (a slit) or >= 82 wu (a corridor).**
+ *          82 = `PLAYER_SIZE` (42) + 2 x the 20 wu nav cell. The 16..82 band is illegal
+ *          and it strictly contains rule 4's own 19..42 band, so one rule now covers both.
  *
- *      Below the narrowest drawn body is a SLIT — nothing can stand in it and nothing
- *      looks like it could, so a slit is fine and several ship deliberately (the pantry
- *      crates are 10-18 wu apart). Above 42 wu is a corridor. **The band in between is the
- *      only illegal case, and it is measured against the SMALLEST character.**
+ *      ⚠️ **16 AND NOT 18, AND THE 2 wu IS A MEASURED DEFECT RATHER THAN A MARGIN.** The
+ *      first pass used 18 — "at or below the narrowest drawn body" — and a north-wall gap
+ *      of EXACTLY 18 against a body-visual of EXACTLY 18 left a **measure-zero legal line**
+ *      down the middle of the slit, because the collision test is a strict `<`.
+ *      `ap_reach --body-visual 18` reported it as a real PHANTOM POCKET: 124 wu², 60 wu
+ *      long, ONE lattice cell wide, 46 wu from anywhere standable. The gap was legal by
+ *      the letter of the rule and produced exactly the defect the rule exists to prevent,
+ *      so the rule moved off its own boundary.
+ *
+ *      ⚠️ **AND A FACE-GAP CHECK IS STRUCTURALLY BLIND TO THE DIAGONAL CASE.** Two props
+ *      that overlap on NEITHER axis have no face gap at all, and their 21 wu collision
+ *      collars can still leave a channel between them — measured at **0.5 wu** between the
+ *      north-wall pot stack and the NW freezer, which `ap_reach` then reported as a 16 wu
+ *      deep band region on a map whose 1400x1000 predecessor scores ZERO.
+ *      `x4_layout.mjs:notchFaults` moves the test into INFLATED space, where a fighter's
+ *      centre actually lives, and is the only check that can see it.
+ *
+ *      → `node tools/tmp/ap_reach.mjs --body-visual {18,20,22,24,26}` must report ZERO
+ *        sealed pockets, ZERO phantom pockets and ZERO face gaps at every width.
+ *
+ *   5. **~4x THE CONCEALMENT PATCH COUNT, AT THE UNCHANGED ~168 wu CAP.** `§48` rule 5:
+ *      `CONCEAL_REVEAL_RADIUS` does not scale with the arena, so a patch wider than
+ *      `2 x 84` = 168 wu has an interior `stepAI` can never see into, however big the map
+ *      gets. **More objects, not bigger ones** — 6 patches became **20**, all still
+ *      110-130 wu. The keep-out they must clear DID scale, 248.25 -> **496.25 wu**, so
+ *      every patch sits out past r=500.
  *
  * ── The map itself ───────────────────────────────────────────────────────────────
- *   - A central STOVE HUB: the boiling pot alone in a wide clearing, with 4 diagonal
- *     stove islands pushed out to the edge of that clearing. This is the classic
- *     "danger in the middle, cover on the corners" BS arena hub — the cardinal lanes
- *     are open and the diagonals are blocked, and the hub itself is lethal to linger
- *     in. The pot is SOLID (see the `boiling_pot` CoverBox below): the burning ground
- *     is the ring around it, not the vessel, so the middle of the map is a pillar you
- *     fight around rather than a hole fighters vanish into.
- *   - Two big WALK-IN FREEZERS anchor the NW/SE corners: single huge landmark props
- *     that fully block sightlines and give a hard flank route around the hub.
- *   - Two PANTRY clusters (crates + flour sacks) anchor the NE/SW corners: several
- *     smaller boxes clustered tight, reading as one nook but with more silhouette
- *     variety than the freezers.
- *   - Two PREP STATIONS. Each is a mid-lane counter plus a WALL PENINSULA out on the far
- *     west / far east strip, and neither one is inside a spawn's corridor. They used to
- *     straddle the lane 80 wu either side of the centre line (which made the spawn an
- *     alcove and sealed the pockets above), and then to tuck under the freezer (which is
- *     what put a collision face 4 wu from the player spawn — see rule 3).
- *   - A SERVICE LINE runs along the north and south walls: a sink (north) / fryer
- *     (south) counter flanked by the spice cart and the stacked pots that used to sit
- *     beside the pot. Each service counter still sits beside a slowing puddle (grease
- *     / spilled water) — the required slow hazard, doubled for symmetry.
- *   - Four SUPPLY BARRELS sit in the far west and east strips, where the map had no
- *     cover at all beyond r=650. They used to stand in the middle of the spawn lane.
- * Player spawns west-north, enemy east-south, both in open floor well clear of cover
- * so neither side opens the match already boxed in.
- *   - SIX SPAWNS, in three 180°-point-symmetric pairs (`spawns`, below). The duel's two are
- *     pair A and are untouched. 🔴 **The map has room for exactly TWO admissible spawn
- *     regions per half**, so pair C shares the west/east bay with pair A at 75.2 wu — inside
- *     `REACH.meleeHeavy`. At four seats the map is fine (509.8 wu); at six it is not. See
- *     the spawn block for the sweep, and `shots/sp/admissible.png` for the picture.
+ *   - A central STOVE HUB, unchanged from 1400x1000 and unchanged in size: the boiling pot
+ *     alone in a wide clearing, four stove islands pushed out to the edge of it, a sink
+ *     counter north and a fryer counter south. The classic "danger in the middle, cover on
+ *     the corners" hub — cardinal lanes open, diagonals blocked, the hub lethal to linger
+ *     in. On a map four times the size it is the LANDMARK, which is the whole argument for
+ *     not growing it.
+ *   - WALK-IN FREEZERS anchor the NW and SE corners, now stacked two deep with a crate
+ *     tucked under, and a second walk-in stands mid-map east and west as the inboard wall
+ *     of each spawn bay.
+ *   - PANTRY NOOKS anchor the NE and SW corners: five boxes clustered tight, reading as one
+ *     nook with more silhouette variety than a freezer.
+ *   - A SERVICE LINE runs the full length of the north and south walls — pot stacks,
+ *     barrels, spice carts and counters, the 1x idiom extended outward rather than
+ *     sprinkled.
+ *   - COOK LINES and PREP GALLEYS are the new structure the extra space bought: paired
+ *     counters and paired stove islands butted into single long runs, so the middle band
+ *     has real lanes and rooms instead of scattered clutter.
+ *   - SUPPLY BARRELS sit FLUSH to the west and east walls (x = w/2). Not pushed inboard:
+ *     at 30 wu off the wall they strand a strip of visible floor nothing can enter, which
+ *     is rule 4 and which **Uri found by playing**.
+ *   - SIX SPAWNS, in three 180°-point-symmetric pairs, one pair per BAY (west, north lane,
+ *     north-east corner). See the spawn block for the measurements.
  *
  * ── Every CoverBox has exactly one matching visual, built by the same call ───────
  * `addCover()` is the single place a collision box gets created, and it always
@@ -135,8 +132,8 @@
  * declaring one without the other.
  *
  * ── Module map ───────────────────────────────────────────────────────────────────
- * This file owns ONLY `createKitchenArena()` itself: the layout (every `addCover`
- * call site and its coordinates), the CoverBox/hazard lists, and wiring `update()`.
+ * This file owns ONLY `createKitchenArena()` itself: the layout (every `addCover` call
+ * site and its coordinates), the CoverBox/hazard lists, and wiring `update()`.
  * Everything each prop/system actually LOOKS like lives in its own module so a
  * separate agent can iterate on one without colliding with another:
  *
@@ -148,6 +145,20 @@
  *   - `./props/counters.ts` — stove islands, prep counters, service counters.
  *   - `./props/storage.ts`  — freezer, produce/herb crates, flour sacks, lane pots.
  *   - `./props/smallProps.ts` — spice carts, supply barrels, chalkboard, pipes, signs.
+ *
+ * ⚠️ **THE LAYOUT BELOW IS GENERATED, AND THE GENERATOR IS THE PLACE TO EDIT IT.**
+ * `tools/tmp/x4_layout.mjs` holds the NORTH HALF as a table, mirrors it by transform,
+ * checks symmetry / mesh clips / the 16..82 gap band / diagonal notches / deep band
+ * regions / the nav graph at cell 20 / every spawn rule / the concealment cap and the
+ * density, and only then emits these call sites. Hand-editing a coordinate here is
+ * allowed and is exactly how the 1400x1000 map accumulated fourteen unreachable regions:
+ * **run `node tools/tmp/x4_layout.mjs` after any edit, by hand or not.**
+ *
+ * ⚠️ And the call sites are LITERAL rather than a table+loop for one concrete reason:
+ * `arena_probe.mjs`'s source extractor evaluates each site's coordinate expressions
+ * against a scope of `ARENA_W`/`ARENA_H`/`CENTER`/`POT` plus this file's own UPPERCASE
+ * numeric consts, so `x: px` from a loop variable is not evaluable — it threw rather than
+ * answering, which took `--verify` offline with it.
  */
 
 import * as THREE from 'three';
@@ -208,268 +219,474 @@ export const createKitchenArena: ArenaFactory = () => {
   // past every bound and why the boundary is a raised kerb rather than a drop-off.
   if (!location.search.includes('apron=0')) root.add(buildApron());
 
-  // ── Central stove hub ────────────────────────────────────────────────────────
-  //
-  // ⚠️ `HUB_ISLAND_DX/DY` are the single most load-bearing pair of numbers in this
-  // file. They were ±175/±150, which put each island's INNER CORNER at
-  // hypot(175−85, 150−45) = **138 wu from centre — inside `MIN_SAFE_RADIUS` (140)**.
-  // The last standable annulus of every long match was therefore wedged between the
-  // pot and four counters, and measured occlusion CLIMBED 30.6% → 67.7% as the ring
-  // closed: the closing zone was herding fighters into furniture instead of into each
-  // other, the exact inverse of what a closing zone is for.
-  //
-  // At ±270/±200 the inner corner sits at hypot(185, 155) = **241 wu**, which is
-  // outside `MIN_SAFE_RADIUS` + a fighter's own reach, so nothing but the pot is
-  // shootable from the endgame annulus. Series now 27.7% → 25.2%, peak 31.3%.
-  //
-  // The outward limit is the freezer, not taste: at DX > 270 the island's west face
-  // (CENTER.x − DX − 85) crosses the NW freezer's east face at x=345 and the two
-  // meshes intersect. `arena_probe.mjs --audit` reports that as a MESH CLIP.
-  const HUB_ISLAND_W = 170, HUB_ISLAND_H = 90;
-  const HUB_ISLAND_DX = 270, HUB_ISLAND_DY = 200;
+  // ── The central stove hub, at CENTER and at its 1400x1000 SCALE (§48 rule 2) ─
   addCover(propsGroup, cover, M, {
-    x: CENTER.x - HUB_ISLAND_DX, y: CENTER.y - HUB_ISLAND_DY, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island',
+    x: CENTER.x - 270, y: CENTER.y - 200, w: 170, h: 90, kind: 'stove_island',
     build: (w, d) => buildStoveIsland(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x + HUB_ISLAND_DX, y: CENTER.y - HUB_ISLAND_DY, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island',
+    x: CENTER.x + 270, y: CENTER.y + 200, w: 170, h: 90, kind: 'stove_island', yawDeg: 180,
+    build: (w, d) => buildStoveIsland(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: CENTER.x + 270, y: CENTER.y - 200, w: 170, h: 90, kind: 'stove_island',
     build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x - HUB_ISLAND_DX, y: CENTER.y + HUB_ISLAND_DY, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island', yawDeg: 180,
-    build: (w, d) => buildStoveIsland(M, w, d),
+    x: CENTER.x - 270, y: CENTER.y + 200, w: 170, h: 90, kind: 'stove_island', yawDeg: 180,
+    build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x + HUB_ISLAND_DX, y: CENTER.y + HUB_ISLAND_DY, w: HUB_ISLAND_W, h: HUB_ISLAND_H, kind: 'stove_island', yawDeg: 180,
-    build: (w, d) => buildStoveIsland(M, w, d),
-  });
-
-  // ── Service line, north and south walls ──────────────────────────────────────
-  // The stacked pots (was CENTER.y ± 242) and the spice carts (was CENTER.x ± 175)
-  // used to be the "chokepoint prop in the lane mouth" of the old hub. Both sat inside
-  // the endgame annulus's reach — the carts at 175 wu from centre were the single
-  // biggest contributor to the 67.7% endgame occlusion, since a fighter anywhere in
-  // the annulus is within one weapon reach of them.
-  //
-  // They keep their job — clutter with silhouette variety, and a counterpoint to the
-  // long service counters — out on the wall line instead, where cover SHOULD be dense.
-  // Kept clear of the exhaust pipes at (375,80)/(1025,920) and of both puddles.
-  // ⚠️ The stacked pots moved x 1010 -> 980, and that is rule 4 as well: at 1010 the
-  // pots stood 37.5 wu from the pantry's herb crate over 43 wu of run — see-through,
-  // impassable — and at 980 the gap is 67.5 wu, a corridor a body can use. Nothing else
-  // is within 177 wu of them on the north wall.
-  addCover(propsGroup, cover, M, {
-    x: 980, y: 120, w: 55, h: 55, kind: 'stacked_pots',
-    build: (w, d) => buildLanePots(M, w, d),
+    x: CENTER.x, y: CENTER.y - 330, w: 150, h: 70, kind: 'sink_counter', yawDeg: 180,
+    build: (w, d) => buildServiceCounter(M, w, d, 'sink'),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 980, y: ARENA_H - 120, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
-    build: (w, d) => buildLanePots(M, w, d),
-  });
-  addCover(propsGroup, cover, M, {
-    x: 450, y: 120, w: 50, h: 50, kind: 'spice_cart',
-    build: (w, d) => buildSpiceCart(M, w, d),
-  });
-  addCover(propsGroup, cover, M, {
-    x: ARENA_W - 450, y: ARENA_H - 120, w: 50, h: 50, kind: 'spice_cart', yawDeg: 180,
-    build: (w, d) => buildSpiceCart(M, w, d),
+    x: CENTER.x, y: CENTER.y + 330, w: 150, h: 70, kind: 'fryer_counter',
+    build: (w, d) => buildServiceCounter(M, w, d, 'fryer'),
   });
 
-  // ── Walk-in freezers (NW / SE) ───────────────────────────────────────────────
+  // ── NW walk-in freezer stack — the 1x corner landmark, now two deep ─────────
   addCover(propsGroup, cover, M, {
-    x: 230, y: 190, w: 230, h: 190, kind: 'freezer',
+    x: 300, y: 300, w: 230, h: 190, kind: 'freezer',
     build: (w, d) => buildFreezerSized(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 230, y: ARENA_H - 190, w: 230, h: 190, kind: 'freezer', yawDeg: 180,
+    x: ARENA_W - 300, y: ARENA_H - 300, w: 230, h: 190, kind: 'freezer', yawDeg: 180,
     build: (w, d) => buildFreezerSized(M, w, d),
   });
-
-  // ── Pantry clusters (NE / SW) ────────────────────────────────────────────────
-  // One crate in each pantry cluster is the cool-toned herb crate rather than the
-  // warm produce crate — every prop cluster in the arena carries at least one
-  // deliberate counterpoint hue instead of being uniformly orange/tan.
   addCover(propsGroup, cover, M, {
-    x: 1120, y: 150, w: 90, h: 90, kind: 'herb_crate',
-    build: (w, d) => buildHerbCrate(M, w, d),
+    x: 300, y: 500, w: 230, h: 190, kind: 'freezer',
+    build: (w, d) => buildFreezerSized(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 1120, y: ARENA_H - 150, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
-    build: (w, d) => buildHerbCrate(M, w, d),
+    x: ARENA_W - 300, y: ARENA_H - 500, w: 230, h: 190, kind: 'freezer', yawDeg: 180,
+    build: (w, d) => buildFreezerSized(M, w, d),
   });
-  // ⚠️ The tall crate moved (1230,140) -> (1215,148), and that is rule 4 measured against
-  // the NARROWEST character rather than the widest. At (1230,140) it stood 25.0 wu from
-  // the herb crate over 75 wu of run and 20.0 wu from the flour sacks over 40 wu — both
-  // comfortably under `PLAYER_SIZE`, and both WIDER than Donut is drawn (20.5 wu of
-  // world-space model, `tools/tmp/ap_view.mjs`). Hamburger is drawn 35.2 wu, so those two
-  // gaps are slits for one character and see-through walls for another. Now 10.0 and 12.0
-  // wu: slits for every character in the roster.
   addCover(propsGroup, cover, M, {
-    x: 1215, y: 148, w: 80, h: 80, kind: 'produce_crate_tall',
+    x: 300, y: 650, w: 80, h: 80, kind: 'produce_crate_tall',
     build: (w, d) => buildCrateTall(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 1215, y: ARENA_H - 148, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
+    x: ARENA_W - 300, y: ARENA_H - 650, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
     build: (w, d) => buildCrateTall(M, w, d),
   });
-  addCover(propsGroup, cover, M, {
-    x: 1175, y: 235, w: 110, h: 70, kind: 'flour_sacks',
-    build: (w, d) => buildFlourSack(M, w, d),
-  });
-  addCover(propsGroup, cover, M, {
-    x: ARENA_W - 1175, y: ARENA_H - 235, w: 110, h: 70, kind: 'flour_sacks', yawDeg: 180,
-    build: (w, d) => buildFlourSack(M, w, d),
-  });
 
-  // ── Prep stations ────────────────────────────────────────────────────────────
-  //
-  // Was a PAIR STRADDLING THE LANE at x=340, y=420/580 — a 105 wu gap between them on
-  // the centre line. Together with the two lane barrels below, that pair is what sealed
-  // `x 301..415, y 469..531` (and its twin): a 114x63 wu pocket of legal standing space
-  // that **nothing in the game could ever enter**, 1.9% of the map, found by a 2 wu
-  // lattice flood and invisible to every other test. It is also the "alcove" the
-  // navigation work had to build a flow field to escape — the player spawned in a bay
-  // whose only exit was that gap, with a barrel parked in front of it.
-  //
-  // ── The knife-block counters MOVED OFF THE SPAWN CORRIDOR. This is rule 3. ───────
-  //
-  // They were at (265, CENTER.y-170) and its mirror, chosen so "the counter's inflated
-  // west edge (265 - 80 - 21 = 164) clears the player spawn's x=160". It clears it by
-  // **4.0 wu — 0.095 of a body length**, and that is not a clearance, it is a coincidence.
-  // Against a 42 wu fighter the box inflates to x 164..366, y 281.5..378.5 while the spawn
-  // is (160,390), so the spawn sat 4.0 wu west of one collision face and 11.5 wu south of
-  // the other. Measured with `tools/tmp/spawn_runway.mjs`, which walks the +-21 wu band a
-  // body actually occupies instead of the single ray `arena_probe --route` walks:
-  //
-  //     direction          centre ray     worst over the body's own width
-  //     north                 84.0 wu     **11.5 wu**  at +4.5 wu of drift
-  //     toward the enemy    1219.0 wu     ** 4.0 wu**  at -21 wu of drift
-  //     south                319.0 wu       231.5 wu
-  //
-  // `tools/tmp/input_accept.mjs` caught the north case in the LIVE GAME at **6.0 wu**: an
-  // 11.5 wu runway delivered in 6 wu steps (PLAYER_SPEED 0.12 wu/ms x the loop's 50 ms dt
-  // clamp) is one step and then nothing. The 4.0 wu case is worse and nothing reported it
-  // at all — it is the run TOWARD THE ENEMY, i.e. the first thing every match does.
-  //
-  // THE COUNTER COULD NOT BE FIXED IN PLACE, and the proof is two inequalities. To clear
-  // the spawn's N/S corridor its collision box must start east of 181, and to avoid
-  // clipping the NW stove island its mesh must end west of 345 — so `w + 21 <= 164`, i.e.
-  // **no counter wider than 143 fits there at all**. To clear the E/W corridor its
-  // collision box must end north of 369 while its mesh starts south of the freezer at 285
-  // — so `h + 21 <= 84`, i.e. **h <= 63 with zero margin**. (That second one is structural:
-  // anything tucked under the freezer extends the freezer's own collision shadow south by
-  // half its mesh plus half its collision box plus 21, so it ALWAYS shortens the north
-  // runway below the freezer's 84.) Shrinking to fit was measured: at 120x42 the guard
-  // passes, but only out to a +-38 wu band against +-85 wu for moving it — one bad
-  // prop-nudge from the same bug.
-  //
-  // So it moves to the far west/east strip as a WALL PENINSULA, which also serves rule 1:
-  // r=467 -> r=608 from centre, the same band the barrels were moved to for the same
-  // reason ("beyond r=650 the shipped layout was 7% solid"). Measured over the whole
-  // layout: the occlusion series 27.7% -> 25.2% becomes **29.7% -> 25.2%** (peak 31.3% ->
-  // 30.9%, i.e. it falls further and peaks lower), floor still ONE PIECE, ceiling still
-  // 352/352 = 100.0%, 0 mesh clips, 6 pinches — unchanged. The spawn bay keeps a wall at
-  // both ends: the freezer 84 wu north, this counter 161.5 wu south, open to the east.
-  //
-  // ⚠️ The two `rollingPin` counters did NOT move. Their nearest collision face is 231.5 wu
-  // from the spawn and they were never part of this defect.
-  // ⚠️ The knifeBlock counter moved x 100 -> 80, which puts it FLUSH against the west
-  // wall. It is described above as a WALL PENINSULA and it was standing 20.0 wu off the
-  // wall over 55 wu of run — rule 4's band for every character narrower than 20 wu of
-  // drawn body, and a peninsula that does not touch the wall is not a peninsula anyway.
-  // Its collision face relative to the player spawn is unchanged in the axis that
-  // matters: the spawn (160,390) sits inside this box's inflated x range before and
-  // after, so the 161.5 wu south runway `spawn_runway.mjs` measures does not move.
-  addCover(propsGroup, cover, M, {
-    x: 80, y: CENTER.y + 100, w: 160, h: 55, kind: 'prep_counter',
-    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
-  });
-  // ⚠️ The rollingPin counter moved CENTER.y+170 -> CENTER.y+185, and that is rule 4.
-  // At +170 its inboard face stood 32.5 wu from the pantry's flour sacks over 95 wu of
-  // run — inside the see-through-but-impassable band — stranding a 114 x 32 wu corridor
-  // of visible floor. At +185 the gap is 17.5 wu: the sacks read as stacked AGAINST the
-  // counter, which is what a kitchen looks like anyway, and 17.5 is a SLIT (well under
-  // the 26 wu drawn body), so there is no floor left in between to be stranded.
-  //
-  // ⚠️ **+200 WAS TRIED FIRST AND PRODUCED A 4 wu SLIVER**, which is a worse defect than
-  // the one being fixed: this counter's inflated west edge (265-80-21 = 164) and the
-  // knifeBlock counter's inflated east edge (100+80+21 = 201) overlap in x for 37 wu, so
-  // the y band between the two inflated boxes is a legal channel NARROWER THAN THE 10 wu
-  // NAV CELL — legal for a fighter, invisible to the flow field. At +185 the two inflated
-  // boxes OVERLAP by 12 wu in y and no channel exists at all. `arena_probe --audit` is
-  // what caught it; it exits non-zero on a sliver.
-  // Checked on the way out: 87.5 wu clear of the herb crate, and the nearest collision
-  // face to the player spawn goes 231.5 -> 246.5 wu, i.e. further away.
-  addCover(propsGroup, cover, M, {
-    x: 265, y: CENTER.y + 185, w: 160, h: 55, kind: 'prep_counter',
-    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
-  });
-  addCover(propsGroup, cover, M, {
-    x: ARENA_W - 80, y: ARENA_H - (CENTER.y + 100), w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
-    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
-  });
-  addCover(propsGroup, cover, M, {
-    x: ARENA_W - 265, y: ARENA_H - (CENTER.y + 185), w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
-    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
-  });
-
-  // ── Supply barrels — far west / far east strips ──────────────────────────────
-  // These used to stand squarely IN the spawn lane at x=250/460, to break the
-  // spawn-to-spawn sightline. Three measurements retired that idea:
-  //   * that sightline is 1080 wu long and the camera guarantees only 199.2 wu, so no
-  //     player has ever seen down it;
-  //   * `tryMove` tests the destination and does NOT slide, so a player holding one
-  //     direction out of spawn walked **38 wu** and stopped dead against the first
-  //     barrel — 0.9 of a body length, the very first thing anyone does in a match;
-  //   * with the prep counters they sealed the two dead pockets described above.
-  // Removing them took the shortest legal spawn-to-spawn route 1341 wu -> 1171 wu
-  // (detour factor 1.24x -> 1.06x) and the runway 38 wu -> 700 wu.
-  //
-  // They land in the far west/east strips because that is where the map had NO cover
-  // at all: beyond r=650 the shipped layout was 7% solid and beyond r=750 it was 0.0%,
-  // while r=150..250 was its densest band. Density now falls toward the centre, which
-  // is rule 1 at the top of this file.
-  //
-  // ── ⚠️ AND THEY ARE FLUSH TO THE WALL BECAUSE OF RULE 4 BELOW. WAS x = 60. ────
-  // At x=60 the west face sat 30 wu from the bound (24 wu for the smaller pair, 36 wu
-  // on the mirror), which is inside the 26..42 wu band rule 4 names: WIDE ENOUGH TO SEE
-  // FLOOR THROUGH, TOO NARROW FOR A 42 wu BODY TO ENTER. Four strips of visible,
-  // permanently unreachable floor, 30-36 wu wide and 46-50 wu long, one behind each
-  // barrel. **Uri found these by playing.**
-  //
-  // Flush (x = w/2) rather than pushed inboard, and the lane arithmetic is why: the NW
-  // freezer's west face is at x=115, so the whole lane is 115 wu wide. Two walkable
-  // corridors need 60 + 60 = 120 wu of clearance around a barrel of any size — it does
-  // not fit, at ANY width or position. Flush spends the entire lane on ONE side, and
-  // that side goes from **completely blocked today** (the barrel's inflated box x[9,111]
-  // covers every legal centre in x 21..94) to a 55 wu corridor. This change only ADDS
-  // reachable floor. The kerb's lip reaches 1 wu inside the bound (`apron.ts:945`), so
-  // the barrel rests against it rather than floating off it.
+  // ── West wall strip — flush to the wall (x = w/2), b9bc00e rule 4 ───────────
   addCover(propsGroup, cover, M, {
     x: 30, y: 250, w: 60, h: 50, kind: 'supply_barrel',
     build: (w, d) => buildSupplyBarrel(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: 24, y: 750, w: 48, h: 46, kind: 'supply_barrel',
-    build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
-  });
-  addCover(propsGroup, cover, M, {
-    x: ARENA_W - 30, y: ARENA_H - 250, w: 60, h: 50, kind: 'supply_barrel',
+    x: ARENA_W - 30, y: ARENA_H - 250, w: 60, h: 50, kind: 'supply_barrel', yawDeg: 180,
     build: (w, d) => buildSupplyBarrel(M, w, d),
   });
   addCover(propsGroup, cover, M, {
-    x: ARENA_W - 24, y: ARENA_H - 750, w: 48, h: 46, kind: 'supply_barrel',
+    x: 135, y: 720, w: 80, h: 80, kind: 'produce_crate_tall',
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 135, y: ARENA_H - 720, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 150, y: 900, w: 90, h: 90, kind: 'herb_crate',
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 150, y: ARENA_H - 900, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+
+  // ── North wall service line, west run ───────────────────────────────────────
+  addCover(propsGroup, cover, M, {
+    x: 525, y: 135, w: 55, h: 55, kind: 'stacked_pots',
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 525, y: ARENA_H - 135, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 585, y: 135, w: 60, h: 50, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 585, y: ARENA_H - 135, w: 60, h: 50, kind: 'supply_barrel', yawDeg: 180,
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 775, y: 135, w: 150, h: 70, kind: 'sink_counter', yawDeg: 180,
+    build: (w, d) => buildServiceCounter(M, w, d, 'sink'),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 775, y: ARENA_H - 135, w: 150, h: 70, kind: 'sink_counter',
+    build: (w, d) => buildServiceCounter(M, w, d, 'sink'),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 892, y: 135, w: 55, h: 55, kind: 'stacked_pots',
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 892, y: ARENA_H - 135, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 958, y: 135, w: 50, h: 50, kind: 'spice_cart',
+    build: (w, d) => buildSpiceCart(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 958, y: ARENA_H - 135, w: 50, h: 50, kind: 'spice_cart', yawDeg: 180,
+    build: (w, d) => buildSpiceCart(M, w, d),
+  });
+
+  // ── North wall centrepiece ──────────────────────────────────────────────────
+  addCover(propsGroup, cover, M, {
+    x: 1288, y: 120, w: 60, h: 50, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1288, y: ARENA_H - 120, w: 60, h: 50, kind: 'supply_barrel', yawDeg: 180,
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 1400, y: 120, w: 160, h: 55, kind: 'prep_counter',
+    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1400, y: ARENA_H - 120, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 1512, y: 120, w: 60, h: 50, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1512, y: ARENA_H - 120, w: 60, h: 50, kind: 'supply_barrel', yawDeg: 180,
     build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
   });
 
-  // ── Service counters (fryer south / sink north) ──────────────────────────────
+  // ── North wall service line, east run ───────────────────────────────────────
   addCover(propsGroup, cover, M, {
-    x: CENTER.x, y: 830, w: 150, h: 70, kind: 'fryer_counter',
+    x: 1720, y: 140, w: 90, h: 90, kind: 'herb_crate',
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1720, y: ARENA_H - 140, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 1815, y: 140, w: 80, h: 80, kind: 'produce_crate_tall',
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1815, y: ARENA_H - 140, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2015, y: 135, w: 150, h: 70, kind: 'fryer_counter',
     build: (w, d) => buildServiceCounter(M, w, d, 'fryer'),
   });
   addCover(propsGroup, cover, M, {
-    x: CENTER.x, y: 170, w: 150, h: 70, kind: 'sink_counter', yawDeg: 180,
-    build: (w, d) => buildServiceCounter(M, w, d, 'sink'),
+    x: ARENA_W - 2015, y: ARENA_H - 135, w: 150, h: 70, kind: 'fryer_counter', yawDeg: 180,
+    build: (w, d) => buildServiceCounter(M, w, d, 'fryer'),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2120, y: 135, w: 50, h: 50, kind: 'spice_cart',
+    build: (w, d) => buildSpiceCart(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2120, y: ARENA_H - 135, w: 50, h: 50, kind: 'spice_cart', yawDeg: 180,
+    build: (w, d) => buildSpiceCart(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2585, y: 135, w: 90, h: 90, kind: 'herb_crate',
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2585, y: ARENA_H - 135, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2720, y: 135, w: 160, h: 55, kind: 'prep_counter',
+    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2720, y: ARENA_H - 135, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
+  });
+
+  // ── NE pantry nook — crates and sacks stacked tight, the 1x idiom scaled up ───
+  addCover(propsGroup, cover, M, {
+    x: 2300, y: 250, w: 90, h: 90, kind: 'herb_crate',
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2300, y: ARENA_H - 250, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2400, y: 250, w: 80, h: 80, kind: 'produce_crate_tall',
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2400, y: ARENA_H - 250, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2300, y: 340, w: 80, h: 80, kind: 'produce_crate_tall',
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2300, y: ARENA_H - 340, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2400, y: 345, w: 90, h: 90, kind: 'herb_crate',
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2400, y: ARENA_H - 345, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2295, y: 425, w: 110, h: 70, kind: 'flour_sacks',
+    build: (w, d) => buildFlourSack(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2295, y: ARENA_H - 425, w: 110, h: 70, kind: 'flour_sacks', yawDeg: 180,
+    build: (w, d) => buildFlourSack(M, w, d),
+  });
+
+  // ── East wall strip ─────────────────────────────────────────────────────────
+  addCover(propsGroup, cover, M, {
+    x: 2770, y: 200, w: 60, h: 50, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2770, y: ARENA_H - 200, w: 60, h: 50, kind: 'supply_barrel', yawDeg: 180,
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2745, y: 520, w: 110, h: 70, kind: 'flour_sacks',
+    build: (w, d) => buildFlourSack(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2745, y: ARENA_H - 520, w: 110, h: 70, kind: 'flour_sacks', yawDeg: 180,
+    build: (w, d) => buildFlourSack(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2770, y: 590, w: 60, h: 50, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2770, y: ARENA_H - 590, w: 60, h: 50, kind: 'supply_barrel', yawDeg: 180,
+    build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2776, y: 750, w: 48, h: 46, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2776, y: ARENA_H - 750, w: 48, h: 46, kind: 'supply_barrel', yawDeg: 180,
+    build: (w, d) => buildSupplyBarrel(M, w, d, { dark: true }),
+  });
+
+  // ── Mid band west — the pantry shelf and the prep galley (NEW STRUCTURE) ────
+  addCover(propsGroup, cover, M, {
+    x: 700, y: 380, w: 110, h: 70, kind: 'flour_sacks',
+    build: (w, d) => buildFlourSack(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 700, y: ARENA_H - 380, w: 110, h: 70, kind: 'flour_sacks', yawDeg: 180,
+    build: (w, d) => buildFlourSack(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 700, y: 465, w: 90, h: 90, kind: 'herb_crate',
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 700, y: ARENA_H - 465, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 700, y: 650, w: 160, h: 55, kind: 'prep_counter',
+    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 700, y: ARENA_H - 650, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 700, y: 720, w: 160, h: 55, kind: 'prep_counter',
+    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 700, y: ARENA_H - 720, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 700, y: 790, w: 55, h: 55, kind: 'stacked_pots',
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 700, y: ARENA_H - 790, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 910, y: 560, w: 90, h: 90, kind: 'herb_crate',
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 910, y: ARENA_H - 560, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 910, y: 650, w: 80, h: 80, kind: 'produce_crate_tall',
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 910, y: ARENA_H - 650, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+
+  // ── Mid band west-inner — the north lane's shoulder ─────────────────────────
+  addCover(propsGroup, cover, M, {
+    x: 1000, y: 380, w: 90, h: 90, kind: 'herb_crate',
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1000, y: ARENA_H - 380, w: 90, h: 90, kind: 'herb_crate', yawDeg: 180,
+    build: (w, d) => buildHerbCrate(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 1000, y: 470, w: 110, h: 70, kind: 'flour_sacks',
+    build: (w, d) => buildFlourSack(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1000, y: ARENA_H - 470, w: 110, h: 70, kind: 'flour_sacks', yawDeg: 180,
+    build: (w, d) => buildFlourSack(M, w, d),
+  });
+
+  // ── North hub approach — one island and a pot stack, the lane's only furniture ───
+  addCover(propsGroup, cover, M, {
+    x: 1400, y: 345, w: 55, h: 55, kind: 'stacked_pots',
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1400, y: ARENA_H - 345, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 1400, y: 430, w: 170, h: 90, kind: 'stove_island',
+    build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1400, y: ARENA_H - 430, w: 170, h: 90, kind: 'stove_island', yawDeg: 180,
+    build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
+  });
+
+  // ── Mid band east-inner ─────────────────────────────────────────────────────
+  addCover(propsGroup, cover, M, {
+    x: 1740, y: 380, w: 80, h: 80, kind: 'produce_crate_tall',
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1740, y: ARENA_H - 380, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 1740, y: 460, w: 60, h: 50, kind: 'supply_barrel',
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1740, y: ARENA_H - 460, w: 60, h: 50, kind: 'supply_barrel', yawDeg: 180,
+    build: (w, d) => buildSupplyBarrel(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 1950, y: 430, w: 160, h: 55, kind: 'prep_counter',
+    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1950, y: ARENA_H - 430, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 1950, y: 495, w: 55, h: 55, kind: 'stacked_pots',
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 1950, y: ARENA_H - 495, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+
+  // ── Mid band east — a cook line, two stove islands butted into one run ──────
+  addCover(propsGroup, cover, M, {
+    x: 2100, y: 650, w: 170, h: 90, kind: 'stove_island',
+    build: (w, d) => buildStoveIsland(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2100, y: ARENA_H - 650, w: 170, h: 90, kind: 'stove_island', yawDeg: 180,
+    build: (w, d) => buildStoveIsland(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2100, y: 745, w: 170, h: 90, kind: 'stove_island',
+    build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2100, y: ARENA_H - 745, w: 170, h: 90, kind: 'stove_island', yawDeg: 180,
+    build: (w, d) => buildStoveIsland(M, w, d, { panRack: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2150, y: 900, w: 160, h: 55, kind: 'prep_counter',
+    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2150, y: ARENA_H - 900, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    build: (w, d) => buildPrepCounter(M, w, d, { rollingPin: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2262, y: 900, w: 55, h: 55, kind: 'stacked_pots',
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2262, y: ARENA_H - 900, w: 55, h: 55, kind: 'stacked_pots', yawDeg: 180,
+    build: (w, d) => buildLanePots(M, w, d),
+  });
+
+  // ── East room — the second walk-in, anchoring the east bay's inboard wall ───
+  addCover(propsGroup, cover, M, {
+    x: 2450, y: 700, w: 230, h: 190, kind: 'freezer',
+    build: (w, d) => buildFreezerSized(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2450, y: ARENA_H - 700, w: 230, h: 190, kind: 'freezer', yawDeg: 180,
+    build: (w, d) => buildFreezerSized(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 2450, y: 845, w: 80, h: 80, kind: 'produce_crate_tall',
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 2450, y: ARENA_H - 845, w: 80, h: 80, kind: 'produce_crate_tall', yawDeg: 180,
+    build: (w, d) => buildCrateTall(M, w, d),
+  });
+
+  // ── The west bay's inboard wall — what makes the bay a BAY and not a lane ───
+  addCover(propsGroup, cover, M, {
+    x: 450, y: 845, w: 50, h: 50, kind: 'spice_cart',
+    build: (w, d) => buildSpiceCart(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 450, y: ARENA_H - 845, w: 50, h: 50, kind: 'spice_cart', yawDeg: 180,
+    build: (w, d) => buildSpiceCart(M, w, d),
+  });
+  addCover(propsGroup, cover, M, {
+    x: 450, y: 910, w: 160, h: 55, kind: 'prep_counter',
+    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
+  });
+  addCover(propsGroup, cover, M, {
+    x: ARENA_W - 450, y: ARENA_H - 910, w: 160, h: 55, kind: 'prep_counter', yawDeg: 180,
+    build: (w, d) => buildPrepCounter(M, w, d, { knifeBlock: true }),
   });
 
   // ── Central hazard — the boiling pot ─────────────────────────────────────────
@@ -487,7 +704,7 @@ export const createKitchenArena: ArenaFactory = () => {
   //     at r=68           45.2% .. 101.4%, head 98.2% .. 102.1%
   //     at r=95 (the ring) 93.0% .. 101.3%, head 98% ..
   //
-  // and the closing fog funnels BOTH fighters here at the end of every match.
+  // and the closing fog funnels EVERY fighter here at the end of every match.
   //
   // ── Why a CoverBox and not a visual fix ──────────────────────────────────────
   // The alternative was to stop the pot swallowing (transparent broth, a shorter
@@ -511,6 +728,9 @@ export const createKitchenArena: ArenaFactory = () => {
   // the diagonals; that is the AABB tax every round prop pays, and it costs nothing
   // in truthfulness because the thing a player reads danger off is the caution-tape
   // ring traced on r=95, not the pot's own edge.
+  //
+  // ⚠️ It is the ONE prop a 180 degree point symmetry allows to be unpaired, because it
+  // is its own image. Every other box in this file is written with a partner.
   const pot = buildPot(M);
   const potPos = groundPos(CENTER.x, CENTER.y);
   addCover(propsGroup, cover, M, {
@@ -529,9 +749,10 @@ export const createKitchenArena: ArenaFactory = () => {
   //
   // `{ merge: true }` bakes every prop's outline hull into ONE mesh instead of one per
   // prop. Measured: **−45 draw calls per frame** against a per-pixel image change of
-  // 0.0002/255, i.e. free. It is safe here precisely because this is a single
-  // whole-group call at one thickness and one colour — the merge path can only combine
-  // hulls that share a material.
+  // 0.0002/255, i.e. free — and it matters four times as much at 111 props as it did at
+  // 27. It is safe here precisely because this is a single whole-group call at one
+  // thickness and one colour — the merge path can only combine hulls that share a
+  // material.
   outlineGroup(propsGroup, 0.016, undefined, { merge: true });
 
   // Hazard ground marking (visual only — not collidable, not a CoverBox). Scorch +
@@ -547,8 +768,21 @@ export const createKitchenArena: ArenaFactory = () => {
   ];
 
   // ── Slowing hazards — grease puddle (south) + spilled water (north) ─────────
-  const puddleSouth = { x: 560, y: 900, radius: 50 };
-  const puddleNorth = { x: ARENA_W - 560, y: ARENA_H - 900, radius: 50 };
+  //
+  // ⚠️ TWO, NOT EIGHT, AND THAT IS A DELIBERATE EXCEPTION TO "4x THE PROPS".
+  // Rule 1 is about COVER density; a slow hazard is not cover and adding six more would
+  // have been a balance change smuggled in under a layout pass. The pair is also load
+  // bearing for a gate: `arena_probe.mjs`'s source extractor reads exactly the two
+  // identifiers `puddleSouth` and `puddleNorth`, so a third puddle would take
+  // `--verify` — the guard that proves this source and `tools/arena.gameplay.json` agree
+  // box for box — offline with it. If more puddles are ever wanted, teach the extractor
+  // FIRST.
+  //
+  // Both moved outboard with the map: at r=559 wu from centre they sit just OUTSIDE the
+  // 496.25 wu endgame keep-out, which is where the 1x pair sat relative to its own
+  // 248.25 wu keep-out. A slow field inside the final ring is a coin-flip, not a hazard.
+  const puddleSouth = { x: 1830, y: 1250, radius: 50 };
+  const puddleNorth = { x: ARENA_W - 1830, y: ARENA_H - 1250, radius: 50 };
   hazards.push(
     { x: puddleSouth.x, y: puddleSouth.y, radius: puddleSouth.radius, kind: 'slow', slowFactor: PUDDLE_SLOW_FACTOR },
     { x: puddleNorth.x, y: puddleNorth.y, radius: puddleNorth.radius, kind: 'slow', slowFactor: PUDDLE_SLOW_FACTOR }
@@ -567,7 +801,7 @@ export const createKitchenArena: ArenaFactory = () => {
 
   // ── Chalkboard menu — freestanding, thin, decorative only ───────────────────
   const board = buildChalkboardMenu(M);
-  const boardPos = groundPos(600, 760);
+  const boardPos = groundPos(1150, 1450);
   board.position.set(boardPos.x, 0, boardPos.z);
   board.rotation.y = THREE.MathUtils.degToRad(20);
   // No outline here, deliberately: the chalkboard has no CoverBox — it's pure
@@ -577,101 +811,81 @@ export const createKitchenArena: ArenaFactory = () => {
   root.add(board);
 
   // ── Round-6 kitchen-motif clutter — pipes + signage, height variety ──────────
-  // Exhaust pipes beside both freezers: the tallest silhouette in either back
+  // Exhaust pipes beside both freezer stacks: the tallest silhouette in either back
   // corner, giving those corners a foreground/midground/background read instead of
   // one uniform freezer-height block (see `buildExhaustPipe`). Decoration only — no
   // CoverBox, placed just clear of the freezer's own footprint.
   const pipeNW = buildExhaustPipe(M);
-  const pipeNWPos = groundPos(375, 80);
+  const pipeNWPos = groundPos(450, 180);
   pipeNW.position.set(pipeNWPos.x, 0, pipeNWPos.z);
   root.add(pipeNW);
   const pipeSE = buildExhaustPipe(M);
-  const pipeSEPos = groundPos(ARENA_W - 375, ARENA_H - 80);
+  const pipeSEPos = groundPos(ARENA_W - 450, ARENA_H - 180);
   pipeSE.position.set(pipeSEPos.x, 0, pipeSEPos.z);
   root.add(pipeSE);
 
-  // Hanging order-tag signs — signage motif, tucked against the freezer's inboard
-  // face at the mouth of the north (west sign) / south (east sign) flank route.
+  // Hanging order-tag signs — signage motif, tucked against the freezer stack's north
+  // face at the mouth of the west (north sign) / east (south sign) flank route.
   //
-  // They used to stand at (365,500)/(1035,500), which the 2 wu lattice flood showed was
-  // **inside one of the two sealed pockets** — a decoration nothing in the game could
-  // ever walk up to. That is also why nobody noticed these are collision-free: with the
-  // pockets healed, a sign left in the open lane would be a solid-looking post players
-  // walk straight through. (350,180) sits 5 wu clear of the freezer mesh but inside the
-  // band a 42 wu fighter's centre can never occupy, so it cannot be walked through at
-  // all. Same convention as the exhaust pipes and the chalkboard: decoration only.
+  // They used to stand at (365,500)/(1035,500) on the 1400x1000 map, which the 2 wu
+  // lattice flood showed was **inside one of the two sealed pockets** — a decoration
+  // nothing in the game could ever walk up to. That is also why nobody noticed these are
+  // collision-free: in an open lane a sign is a solid-looking post players walk straight
+  // through. (300,190) sits 15 wu clear of the freezer mesh but INSIDE the band a 42 wu
+  // fighter's centre can never occupy (its inflated box is y 184..416), so it cannot be
+  // walked through at all. Same convention as the exhaust pipes and the chalkboard:
+  // decoration only.
   const signW = buildHangingSign(M);
-  const signWPos = groundPos(350, 180);
+  const signWPos = groundPos(300, 190);
   signW.position.set(signWPos.x, 0, signWPos.z);
   root.add(signW);
   const signE = buildHangingSign(M, 180);
-  const signEPos = groundPos(ARENA_W - 350, ARENA_H - 180);
+  const signEPos = groundPos(ARENA_W - 300, ARENA_H - 190);
   signE.position.set(signEPos.x, 0, signEPos.z);
   signE.rotation.y = THREE.MathUtils.degToRad(180);
   root.add(signE);
 
-  // ── CONCEALMENT — plates and trays you hide under (DECISIONS §29) ────────────
+  // ── CONCEALMENT — plates and trays you hide under (DECISIONS §29, §48 rule 5) ─
   //
-  // Uri, playing the shipped build 2026-08-11: *"i can't hide under conceilments or break
-  // them."* Both halves of the mechanic have been built and inert since `f0e7aed` — the
-  // radar blip, the floating HP pill, the 3D model, the player's own screen, projectile
-  // re-aim, `CONCEAL_ATTACK_REVEAL_MS` and `breakConcealment` are all wired and proven
-  // bit-identical when no region exists (`conceal_lab --bitid`: 0 differing ticks in
-  // 3,283,873). **NO ARENA HAS EVER DECLARED A REGION.** That is the entire bug: there is
-  // nothing to hide under, so there is also nothing to break by attacking. §29c is not
-  // missing, it has never had an object to act on.
+  // Uri, playing the 1400x1000 build 2026-08-11: *"i can't hide under conceilments or
+  // break them."* Both halves of the mechanic have been built and inert since `f0e7aed` —
+  // the radar blip, the floating HP pill, the 3D model, the player's own screen,
+  // projectile re-aim, `CONCEAL_ATTACK_REVEAL_MS` and `breakConcealment` are all wired and
+  // proven bit-identical when no region exists. `b9bc00e` placed the first six.
   //
-  // ── SIX PATCHES, AND WHY IT IS NOT THE FIVE THAT WERE RECOMMENDED ───────────
-  // `shots/conceal/concealment-scale.png` panel 4 recommends "a field of ~5 at 110-130
-  // wu". Five is IMPOSSIBLE here: true 180 degree point symmetry pairs every patch with
-  // its opposite, so an odd count forces one patch centred on the map centre — and the
-  // map centre is inside `concealmentKeepoutRadius` (248.25 wu on this arena), which
-  // `movement.ts:concealmentInsideRadius` refuses. So three PAIRS, at 110/120/130 wu.
+  // ── TWENTY PATCHES, AND THE COUNT IS THE ONLY THING THAT SCALED ─────────────
+  // `§48` rule 5: `CONCEAL_REVEAL_RADIUS` is fixed at `REACH.meleeHeavy` = 84 wu, so a
+  // patch wider than 168 wu has an interior `stepAI` — which has NO search behaviour — can
+  // never see into, **however big the map gets**. So the ~168 wu ceiling is unchanged and
+  // the COUNT went 6 -> 20 instead. Same instinct as rule 1: more objects, not bigger ones.
   //
-  // ── EVERY SIZE IS AN AI CONSTRAINT, NOT A TASTE ONE (§29a) ──────────────────
-  // `stepAI` has no search behaviour: it walks to where it last saw you and can see
-  // `CONCEAL_REVEAL_RADIUS` (84 wu) from there. A patch wider than ~168 wu therefore has
-  // an interior the AI can NEVER see into — measured both ways, at half the radius it
-  // re-acquires and at double it never does (final separation 363 wu). 110-130 leaves a
-  // negative dead core at every one of these.
+  // ── WHAT DID SCALE: THE KEEP-OUT, AND IT DOUBLED ────────────────────────────
+  // `concealmentKeepoutRadius` is `max(MIN_SAFE_RADIUS, maxSafeRadius x (1 −
+  // CONCEAL_ENDGAME_PROGRESS))`, and `maxSafeRadius` is derived from the half-diagonal —
+  // so it went **248.25 -> 496.25 wu**. Every patch below clears it; the tightest sits
+  // 15.4 wu outside. That is also why there is no patch anywhere near the hub: the whole
+  // r < 500 disc is refused by the same rule that refuses one on the map centre.
   //
-  // ── PLACED FOR THE HUMAN'S ROUTES, AND THE SYMMETRY MAKES THAT FREE ─────────
-  // `conceal_lab --traffic` (440 matches, 317,430 playing ticks) found the two fighters
-  // barely share ground: the player's hot cells are (200,360) 5.87% and (280,360) 5.78%,
-  // the enemy's are (1000,440) 12.71% and (1160,520) 11.87%, and **the player is at
-  // 0.000% in the enemy's two busiest cells.** That reads as "one region set cannot serve
-  // both" — and on a point-symmetric map it is the opposite. Each fighter camps its OWN
-  // spawn quadrant, and those two quadrants are 180 degree images of each other, so a
-  // MIRROR PAIR automatically puts one patch in the player's traffic and the other in the
-  // enemy's. P1 covers the player's two hottest cells; P1's mirror sits in the enemy's
-  // approach; P3's mirror covers the enemy's single hottest cell (1000,440).
+  // ── AN ODD COUNT IS STILL IMPOSSIBLE ────────────────────────────────────────
+  // True 180° point symmetry pairs every patch with its opposite, so an unpaired one would
+  // have to BE its own image — i.e. sit exactly on the map centre, inside the pot's
+  // CoverBox and inside the keep-out. So ten PAIRS, at 110/120/130 wu.
   //
   // ── THE MIRROR IS A TRANSFORM IN SOURCE, AND THE TEST IS ON THE SHIPPED DATA ─
-  // Point symmetry is a COMPETITIVE-FAIRNESS constraint in the same category as
-  // `tools/aspect.mjs`, and hand-typing a mirrored coordinate is exactly how it breaks.
-  // Each pair is therefore written ONCE as a named constant and mirrored as
-  // `ARENA_W - K` / `ARENA_H - K`, which is the same idiom every mirrored prop above
-  // uses, and `tools/tmp/ap_reach.mjs --selftest` §F asserts point symmetry of BOTH
-  // lists on the BROWSER DUMP — the data the game actually builds — and is shown to
-  // FAIL on a one-box perturbation.
+  // Each pair is written ONCE as a named constant and mirrored as `ARENA_W - K` /
+  // `ARENA_H - K`, and `ap_reach --selftest` §F asserts point symmetry of BOTH lists on the
+  // BROWSER DUMP — the data the game actually builds — and is shown to FAIL on a one-box
+  // perturbation. Named consts rather than a table+loop because `arena_probe.mjs`'s source
+  // extractor cannot evaluate a loop variable.
   //
-  // ⚠️ **A `for` LOOP OVER A TABLE WAS WRITTEN FIRST AND HAD TO BE REVERTED.**
-  // `tools/tmp/arena_probe.mjs`'s source extractor evaluates each call site's coordinate
-  // expressions against a scope of `ARENA_W`/`ARENA_H`/`CENTER`/`POT` plus the file's own
-  // UPPERCASE numeric consts, so `x: px` from a loop variable is not evaluable — it threw
-  // rather than answering, which took `--verify` (the guard that proves this source and
-  // `tools/arena.gameplay.json` agree box-for-box) offline with it. Named consts are
-  // readable by that extractor and give the loop's real benefit anyway: the number
-  // appears once.
+  // Every patch is >= 95% standable, measured: a patch overlapping a prop's collision
+  // collar is decoration you cannot get under.
   const concealment: ConcealBox[] = [];
   const concealGroup = new THREE.Group();
   concealGroup.name = 'arena_concealment';
   noOutline(concealGroup);
 
-  // P1 — the spawn-lane plates. Covers the player's two busiest cells ((200,360) 5.87%,
-  // (280,360) 5.78%); nearest corner 377.7 wu from centre; 4 wu clear of the NW freezer's
-  // collision shadow, so every wu of it is standable.
-  const CONCEAL_P1X = 260, CONCEAL_P1Y = 375, CONCEAL_P1S = 130;
+  const CONCEAL_P1X = 555, CONCEAL_P1Y = 290, CONCEAL_P1S = 130;
   addConceal(concealGroup, concealment, M, {
     x: CONCEAL_P1X, y: CONCEAL_P1Y, w: CONCEAL_P1S, h: CONCEAL_P1S, kind: 'plate_stack',
     build: (w, d) => buildConcealPatch(M, w, d),
@@ -681,10 +895,7 @@ export const createKitchenArena: ArenaFactory = () => {
     kind: 'plate_stack', yawDeg: 180,
     build: (w, d) => buildConcealPatch(M, w, d),
   });
-
-  // P2 — the north service line's tray racks, in the lane between the sink counter and
-  // the pantry. Nearest corner 286.2 wu from centre.
-  const CONCEAL_P2X = 850, CONCEAL_P2Y = 175, CONCEAL_P2S = 110;
+  const CONCEAL_P2X = 1070, CONCEAL_P2Y = 220, CONCEAL_P2S = 110;
   addConceal(concealGroup, concealment, M, {
     x: CONCEAL_P2X, y: CONCEAL_P2Y, w: CONCEAL_P2S, h: CONCEAL_P2S, kind: 'tray_rack',
     build: (w, d) => buildConcealPatch(M, w, d),
@@ -694,12 +905,7 @@ export const createKitchenArena: ArenaFactory = () => {
     kind: 'tray_rack', yawDeg: 180,
     build: (w, d) => buildConcealPatch(M, w, d),
   });
-
-  // P3 — the west lane mouth, the last cover before the hub. Nearest corner 260.0 wu from
-  // centre, i.e. 11.75 wu outside the keepout — the tightest of the three, and the reason
-  // it is 120 rather than 130. Its MIRROR (1020,440) lands on the enemy's single hottest
-  // cell, (1000,440) at 12.71%.
-  const CONCEAL_P3X = 380, CONCEAL_P3Y = 560, CONCEAL_P3S = 120;
+  const CONCEAL_P3X = 700, CONCEAL_P3Y = 910, CONCEAL_P3S = 120;
   addConceal(concealGroup, concealment, M, {
     x: CONCEAL_P3X, y: CONCEAL_P3Y, w: CONCEAL_P3S, h: CONCEAL_P3S, kind: 'crate_stack',
     build: (w, d) => buildConcealPatch(M, w, d),
@@ -709,6 +915,76 @@ export const createKitchenArena: ArenaFactory = () => {
     kind: 'crate_stack', yawDeg: 180,
     build: (w, d) => buildConcealPatch(M, w, d),
   });
+  const CONCEAL_P4X = 1400, CONCEAL_P4Y = 235, CONCEAL_P4S = 120;
+  addConceal(concealGroup, concealment, M, {
+    x: CONCEAL_P4X, y: CONCEAL_P4Y, w: CONCEAL_P4S, h: CONCEAL_P4S, kind: 'tray_rack',
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  addConceal(concealGroup, concealment, M, {
+    x: ARENA_W - CONCEAL_P4X, y: ARENA_H - CONCEAL_P4Y, w: CONCEAL_P4S, h: CONCEAL_P4S,
+    kind: 'tray_rack', yawDeg: 180,
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  const CONCEAL_P5X = 1215, CONCEAL_P5Y = 420, CONCEAL_P5S = 120;
+  addConceal(concealGroup, concealment, M, {
+    x: CONCEAL_P5X, y: CONCEAL_P5Y, w: CONCEAL_P5S, h: CONCEAL_P5S, kind: 'plate_stack',
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  addConceal(concealGroup, concealment, M, {
+    x: ARENA_W - CONCEAL_P5X, y: ARENA_H - CONCEAL_P5Y, w: CONCEAL_P5S, h: CONCEAL_P5S,
+    kind: 'plate_stack', yawDeg: 180,
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  const CONCEAL_P6X = 1910, CONCEAL_P6Y = 290, CONCEAL_P6S = 120;
+  addConceal(concealGroup, concealment, M, {
+    x: CONCEAL_P6X, y: CONCEAL_P6Y, w: CONCEAL_P6S, h: CONCEAL_P6S, kind: 'crate_stack',
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  addConceal(concealGroup, concealment, M, {
+    x: ARENA_W - CONCEAL_P6X, y: ARENA_H - CONCEAL_P6Y, w: CONCEAL_P6S, h: CONCEAL_P6S,
+    kind: 'crate_stack', yawDeg: 180,
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  const CONCEAL_P7X = 2650, CONCEAL_P7Y = 380, CONCEAL_P7S = 110;
+  addConceal(concealGroup, concealment, M, {
+    x: CONCEAL_P7X, y: CONCEAL_P7Y, w: CONCEAL_P7S, h: CONCEAL_P7S, kind: 'tray_rack',
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  addConceal(concealGroup, concealment, M, {
+    x: ARENA_W - CONCEAL_P7X, y: ARENA_H - CONCEAL_P7Y, w: CONCEAL_P7S, h: CONCEAL_P7S,
+    kind: 'tray_rack', yawDeg: 180,
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  const CONCEAL_P8X = 2470, CONCEAL_P8Y = 975, CONCEAL_P8S = 120;
+  addConceal(concealGroup, concealment, M, {
+    x: CONCEAL_P8X, y: CONCEAL_P8Y, w: CONCEAL_P8S, h: CONCEAL_P8S, kind: 'plate_stack',
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  addConceal(concealGroup, concealment, M, {
+    x: ARENA_W - CONCEAL_P8X, y: ARENA_H - CONCEAL_P8Y, w: CONCEAL_P8S, h: CONCEAL_P8S,
+    kind: 'plate_stack', yawDeg: 180,
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  const CONCEAL_P9X = 2660, CONCEAL_P9Y = 860, CONCEAL_P9S = 110;
+  addConceal(concealGroup, concealment, M, {
+    x: CONCEAL_P9X, y: CONCEAL_P9Y, w: CONCEAL_P9S, h: CONCEAL_P9S, kind: 'crate_stack',
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  addConceal(concealGroup, concealment, M, {
+    x: ARENA_W - CONCEAL_P9X, y: ARENA_H - CONCEAL_P9Y, w: CONCEAL_P9S, h: CONCEAL_P9S,
+    kind: 'crate_stack', yawDeg: 180,
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  const CONCEAL_P10X = 100, CONCEAL_P10Y = 500, CONCEAL_P10S = 110;
+  addConceal(concealGroup, concealment, M, {
+    x: CONCEAL_P10X, y: CONCEAL_P10Y, w: CONCEAL_P10S, h: CONCEAL_P10S, kind: 'tray_rack',
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
+  addConceal(concealGroup, concealment, M, {
+    x: ARENA_W - CONCEAL_P10X, y: ARENA_H - CONCEAL_P10Y, w: CONCEAL_P10S, h: CONCEAL_P10S,
+    kind: 'tray_rack', yawDeg: 180,
+    build: (w, d) => buildConcealPatch(M, w, d),
+  });
 
   root.add(concealGroup);
 
@@ -716,102 +992,57 @@ export const createKitchenArena: ArenaFactory = () => {
   const dust = buildDustField(M, 40);
   root.add(dust.mesh);
 
-  // ── Spawns ────────────────────────────────────────────────────────────────────
+  // ── Spawns — SIX, in three 180°-point-symmetric pairs, one pair per BAY ──────
   //
-  // ── Why y is 390 and not CENTER.y ────────────────────────────────────────────
-  // 180° point symmetry forces the segment between two spawns through the arena
-  // centre, and the arena centre is a 32 HP/s hazard. On the centre line that is not
-  // merely a coincidence, it is a trap: `POT.bodyRadius*2` blocks a fighter's centre
-  // at r=73 while `POT.dangerRadius` burns from r=95, so a player holding one
-  // direction out of spawn ran 466 wu, jammed flush against the pot **inside its burn
-  // ring**, and cooked. Measured with the scripted `chase` player over all 110
-  // matchups: the pot went from 0% of all damage dealt to **71%**, and the naive
-  // player's win rate collapsed 47.3% -> 12.7%, without one balance constant moving.
-  // The old lane barrels had hidden this by stopping everyone 38 wu from spawn.
+  // ── 🔴 THIS IS THE ACCEPTANCE TEST FOR THE WHOLE ×4 MAP ─────────────────────
   //
-  // Offsetting each spawn 110 wu off the centre line — still exactly point-symmetric,
-  // so both sides remain identical — puts the straight-ahead run clear of both the pot
-  // box (needs |dy| > 73) and its burn ring (needs |dy| > 95). Pot share falls to 25%
-  // and the naive win rate recovers to 39.1%. The offset costs 22 wu of spawn
-  // separation (1080 -> 1102 straight line) and nothing else.
+  // `§53a`, Uri: *"6 players only on the ×4 map."* The 1400×1000 kitchen seats FOUR, and
+  // that is measured rather than asserted: `sp_place.mjs` swept all 327,561 cells of a 2 wu
+  // lattice against every rule a spawn has to satisfy and **2,186 survived, in TWO mirror-
+  // pair regions**. Three pairs need three regions, so pair C shared the west bay with pair
+  // A at **75.2 wu — inside `REACH.meleeHeavy` (84)** — and in a real seeded N=6 match slot 0
+  // read **0/70, DEAD, at 9.0 s**, with both bay-sharers the worst-hurt seats and both
+  // north-lane seats the healthiest.
   //
-  // ── Why the SEPARATION did not change ────────────────────────────────────────
-  // Swept through all 110 matchups at gaps 1080/1000/920/840/760 on this layout.
-  // Dead time did not improve (56.6 / 55.6 / 58.9 / 58.1 / 57.6%) because shortening
-  // the walk shortens the match by about as much, while the scripted player's win rate
-  // climbed 56.4% -> 90.0% as the spawns approached the hub. Pulling the spawns in buys
-  // 1.7 s of contact time and costs a 34 pp balance swing, so it was not taken. The
-  // pacing win came from the ROUTE (1341 -> 1171 wu) instead — see the barrels above.
-  const playerSpawn = { x: 160, y: 390 };
-  const enemySpawn = { x: ARENA_W - 160, y: ARENA_H - 390 };
+  // On this map the three pairs get three BAYS, designed rather than searched for, and the
+  // number that matters is the one that killed the small map:
+  //
+  //     slot 0/1  (300,810)  / (2500,1190)   the WEST bay      worst runway  99 wu
+  //     slot 2/3  (1150,210) / (1650,1790)   the NORTH lane    worst runway 189 wu
+  //     slot 4/5  (2560,300) / (240,1700)    the NE corner bay worst runway  94 wu
+  //
+  //     minimum pairwise separation over all 15 pairs: **892.0 wu** (slots 0 and 5)
+  //     against `REACH.rangedMax` = 140. **No weapon in the game reaches between any two
+  //     spawns**, with 6.4× to spare — against 75.2 wu, which was inside a melee swing.
+  //
+  // Every seat clears every rule `sp_place.mjs` applies, and they are IMPORTED from it
+  // rather than restated: legal for a 42 wu body, ≥ 60 wu of travel in ALL FOUR cardinals
+  // over a ±21 wu band, no cardinal run STOPPING within half a body of the pot's 95 wu burn
+  // ring, outside the 496.25 wu endgame keep-out, `isConcealed` false at t=0, clear of both
+  // slow puddles. ⚠️ **The runway rule is the binding one and it binds by 47×** — on the
+  // small map, dropping it alone took 2,186 admissible cells to 103,926 — which is why each
+  // bay here is an authored void rather than whatever gap the props happened to leave.
+  //
+  // ⚠️ **AND ALL SIX ARE IN ONE NAV COMPONENT AT THE 20 wu CELL**, checked against
+  // `movement.ts:navGrid`'s own arithmetic (140×100 cells, 9,062 passable, 1 component).
+  // A layout whose seats sit in different nav components has an AI that literally cannot
+  // path between them, and no other gate here would say so.
+  //
+  // `spawns[0]`/`spawns[1]` are the `playerSpawn`/`enemySpawn` OBJECTS, not copies of their
+  // numbers, so a two-fighter match cannot drift from what the duel has always read. The
+  // list is interleaved so N=2, N=4 and N=6 are each a complete set of mirror pairs; N=3 and
+  // N=5 cannot be symmetric at any ordering, and `sp_gate.mjs` says so per N rather than
+  // pretending otherwise.
+  //
+  // ⚠️ **WHAT POINT SYMMETRY BUYS, STATED PLAINLY:** a C2-symmetric map admits exactly one
+  // exact statement — **seat 2k is congruent to seat 2k+1**. It cannot make pair A congruent
+  // to pair B; that needs the ARENA to be invariant under a 3-fold rotation and it is not.
+  // The residual is measured and printed by `sp_place --search` rather than left implied.
+  const playerSpawn = { x: 300, y: 810 };
+  const enemySpawn = { x: ARENA_W - 300, y: ARENA_H - 810 };
 
-  // ── SEATS 2..5 — the N-fighter spawn list (DECISIONS §49d) ───────────────────
-  //
-  // `sim.ts:createMatch` THREW for slot 2 and up rather than inventing a ring, because
-  // spawn placement for 4-6 fighters is arena geometry and §48 makes true 180° point
-  // symmetry a competitive-fairness constraint in the same category as `tools/aspect.mjs`.
-  // This is the owner that refusal was waiting for. `spawns[0]`/`spawns[1]` are the two
-  // objects above — not copies of their numbers — so a two-fighter match cannot drift from
-  // what it has always read, and it is MEASURED rather than assumed:
-  // `conceal_lab --bitid --corpus normal,timeout,countdown` run against the pre-change dump
-  // and this one reports the same 15,674,938 ticks and 4,280,119 in-order events with
-  // 0 divergent on both, and `match-sim --all-matchups` is byte-identical across the two at
-  // policies smart, chase and idle.
-  //
-  // ── THREE PAIRS, AND AN ODD COUNT IS IMPOSSIBLE ─────────────────────────────
-  // Exactly the argument the concealment block above makes: under a 180° point symmetry
-  // every spawn is paired with its image, so an unpaired one would have to BE its image —
-  // i.e. sit on the map centre, which is inside the boiling pot's own CoverBox and inside
-  // the 248.25 wu endgame keep-out. So 3 pairs, 6 seats, interleaved so that N=2, N=4 and
-  // N=6 are each a complete set of mirror pairs.
-  //
-  // ── 🔴 THE MAP HAS ROOM FOR EXACTLY TWO SPAWN REGIONS PER HALF, AND THIS IS THE
-  //    MEASURED CASE FOR §48'S 2800x2000 ARENA ────────────────────────────────
-  // `tools/tmp/sp_place.mjs` swept all 327,561 cells of a 2 wu lattice against every rule a
-  // spawn has to satisfy — legal for a 42 wu body, `spawn_runway`-clean (60 wu in all four
-  // cardinals over a ±21 wu band), no cardinal run STOPPING in the pot's burn ring, outside
-  // the endgame keep-out, not concealed at t=0, not in a grease puddle — and **2,186 cells
-  // survived, in FOUR regions that are two mirror pairs**:
-  //
-  //     the spawn bay      x 81..195,  y 366..406   114 x 40 wu   (and its 180° image)
-  //     the north lane     x 556..583, y  81..93     27 x 12 wu   (and its 180° image)
-  //
-  // Everything else on the map fails, and the runway rule is the binding one by 47x:
-  // dropping it alone takes 2,186 cells to 103,926. `shots/sp/admissible.png` is the picture.
-  //
-  // So pair A (the shipped duel pair) and pair C SHARE THE SPAWN BAY. The bay's absolute
-  // best is 77.6 wu and this pair takes **75.2 wu** — inside `REACH.meleeHeavy` (84),
-  // outside `REACH.meleeStrong` (70). **At six seats two fighters begin the match a heavy
-  // swing apart, and it is not theoretical**: a real 6-fighter match, photographed in
-  // `shots/sp/n6-playing.png`, is 9 s old and reads
-  //
-  //     slot 0   0/70  DEAD   75.2 wu from slot 4        slot 2   71/80    509.8 wu from anyone
-  //     slot 5  11/140  0.08  75.2 wu from slot 1        slot 3  120/120   509.8 wu from anyone
-  //     slot 1  28/110  0.25                             slot 4   90/90
-  //
-  // — the two worst-hurt seats are both bay-sharers, and the two healthiest are both out in
-  // the north lane. The paired control is the SAME RUN at N=3 and N=4: same map, same frozen
-  // clock, same seeded rng, same cast prefix, spawns 509.8 wu apart — **nobody dead, and at
-  // N=3 nobody below full health**. At four seats the map is fine. That is the number §48
-  // was missing — the 1400x1000 kitchen seats FOUR, not six.
-  //
-  // ── WHY THESE EXACT CELLS ───────────────────────────────────────────────────
-  // Inside each region, separation trades against robustness 1 wu for 1 wu (both bays are
-  // bounded by the west/east wall, so every wu you move outboard is a wu off the west
-  // runway). The north lane is the tighter region and its deepest interior cell is only
-  // 7 wu from a refusal, so BOTH new pairs are placed at depth 7 / worst-cardinal runway
-  // 66 wu — matching the tightest region's robustness and spending everything else on
-  // separation. Measured, all six, by `tools/tmp/spawn_runway.mjs --layout` (16/16 per
-  // pair) and `tools/tmp/ap_reach.mjs --layout` (0 sealed, 0 phantom, one component, at
-  // body-visual 18/20/22/24/26).
-  //
-  // ⚠️ THE MIRROR IS A TRANSFORM IN SOURCE, exactly as the concealment pairs are, and
-  // `tools/tmp/sp_gate.mjs` asserts the symmetry on the SHIPPED DUMP — the data the game
-  // actually builds — and is shown to FAIL on a one-wu perturbation of any entry.
-  // Named consts rather than a table+loop for the same reason the concealment block gives:
-  // `arena_probe.mjs`'s source extractor cannot evaluate a loop variable.
-  const SPAWN_P2X = 570, SPAWN_P2Y = 87;   // the north lane, between the spice cart and the sink counter
-  const SPAWN_P3X = 87, SPAWN_P3Y = 372;   // the spawn bay, outboard of the shipped pair
+  const SPAWN_P2X = 1150, SPAWN_P2Y = 210;  // the north wall lane, west of the centrepiece
+  const SPAWN_P3X = 2560, SPAWN_P3Y = 300;  // the north-east corner bay, outboard of the pantry
   const spawns = [
     playerSpawn,
     enemySpawn,

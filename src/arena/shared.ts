@@ -44,12 +44,44 @@ import {
 // Map constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ARENA_W = 1400;
-export const ARENA_H = 1000;
-export const CENTER = { x: ARENA_W / 2, y: ARENA_H / 2 }; // 700, 500
+/**
+ * ── ×4 AREA, 2026-08-11. `DECISIONS §48`, Uri: *"Arena x4 - area to accommodate 4-6
+ *    players"*, and `§53a`: *"6 players only on the ×4 map."* ───────────────────
+ *
+ * Was 1400 × 1000. **×4 AREA, not ×4 linear** — so ×2 on each edge. (×4 linear would have
+ * been 5600 × 4000, i.e. 16× the area.) This is the size decision, settled by Uri and not
+ * reopenable here; `src/arena/kitchen.ts`'s header carries the layout that fills it and
+ * the five rules that layout had to satisfy.
+ *
+ * 🔴 **EVERYTHING DOWNSTREAM IS DERIVED, AND THAT IS THE WHOLE REASON THIS EDIT IS TWO
+ * LINES.** `MAX_SAFE_RADIUS` below, `apron.ts`'s every bound, `floor.ts`'s tile grid and
+ * chip scatter and border trim, `ambient.ts`'s dust volume and `camera.ts`'s fair-play
+ * radius all read these two constants or a formula over them. Measured consequences:
+ *
+ *   * **The fog is DERIVED and stays derived.** The relative schedule is scale-invariant
+ *     (the ring still opens at 1.1538 × the half-diagonal); only the ABSOLUTE sweep
+ *     doubles, 22.1 → 44.1 wu/s. ⚠️ Pinning the 1× literal 993 on this map is degenerate —
+ *     it was measured at **880/880 matches with no contact, every match over in 2.03 s**,
+ *     because both spawns start outside the opening ring.
+ *   * **The endgame keep-out doubles with it**: `max(MIN_SAFE_RADIUS, maxSafeRadius ×
+ *     (1 − CONCEAL_ENDGAME_PROGRESS))` goes 248.25 → **496.25 wu**. Every concealment
+ *     patch and every spawn has to clear it, which is why `kitchen.ts`'s 20 patches all
+ *     sit out past r=500.
+ *   * **`tools/aspect.mjs` cannot break on size** and is verified, not assumed:
+ *     `FAIR_PLAY.radiusUnits` derives from `REACH`, never from the arena.
+ *   * **`movement.ts:NAV_MAX_CELLS` (40,000) IS hit.** 2800 × 2000 at the shipped 10 wu
+ *     nav cell needs 56,000, so `navGrid` silently doubles its cell to **20 wu**. That is
+ *     not fixed here — `movement.ts` is not this module's file — it is answered as a
+ *     LAYOUT RULE: every face-to-face gap in `kitchen.ts` is ≤ 16 wu or ≥ 82 wu
+ *     (= `PLAYER_SIZE` + 2 nav cells), so no corridor exists that the flow field cannot
+ *     see. `tools/tmp/x4_layout.mjs` asserts it.
+ */
+export const ARENA_W = 2800;
+export const ARENA_H = 2000;
+export const CENTER = { x: ARENA_W / 2, y: ARENA_H / 2 }; // 1400, 1000
 
 /** Half-diagonal of the playfield — the distance to its FARTHEST point, a corner. */
-export const ARENA_HALF_DIAGONAL = Math.hypot(ARENA_W / 2, ARENA_H / 2); // ≈ 860.23
+export const ARENA_HALF_DIAGONAL = Math.hypot(ARENA_W / 2, ARENA_H / 2); // ≈ 1720.47
 
 /**
  * Seconds of play before the closing ring first cuts into the playfield.
@@ -99,8 +131,17 @@ export const FOG_FIRST_CONTACT_S = 6;
  * the half-diagonal by then:
  *
  *     R0 = halfDiagonal / (1 − t / MATCH_DURATION)
- *        = 860.23 / (1 − 6/45)
- *        ≈ 993
+ *        = 1720.47 / (1 − 6/45)
+ *        ≈ 1985
+ *
+ * ⚠️ **THE OLD WORKING IS KEPT ABOVE THE NEW ONE BECAUSE THE FORMULA DID NOT CHANGE.**
+ * At 1400×1000 the same expression read `860.23 / (1 − 6/45) ≈ 993`; the arena went ×4 in
+ * area on 2026-08-11 (`DECISIONS §48`) and the half-diagonal doubled, so the ring opens at
+ * 1985 and sweeps at 44.1 wu/s instead of 22.1. **The RELATIVE schedule is unchanged to
+ * four decimals** (1.1543 → 1.1538 × the half-diagonal), which is the property that makes
+ * deriving it rather than pinning it the whole point: `tools/tmp/ax_layout.mjs --selftest`
+ * asserts both halves of that sentence, and a literal 993 on this map was measured at
+ * 880/880 matches with zero contact.
  *
  * Derived from the arena dimensions and the match length rather than written as a literal,
  * so resizing the map or changing the match duration cannot silently re-create the

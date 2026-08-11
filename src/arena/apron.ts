@@ -785,8 +785,18 @@ function buildServiceFloor(): THREE.Mesh {
   // cannot represent the 110 wu mottle octave `apronShade` asks for — it aliased into
   // long diagonal banding instead of patches. 32 wu spacing is comfortably inside it.
   // The cost is ~2,300 extra vertices in a mesh that is built once and never touched.
-  const NS = 44;
-  const WE = 36;
+  //
+  // 🔴 **AND IT IS A SPACING, NOT A COUNT — WHICH IS WHY IT IS DERIVED NOW.** It shipped
+  // as the literals `NS = 44` / `WE = 36`, which delivered 31.8 / 27.8 wu of spacing on a
+  // 1400 × 1000 playfield. The arena went ×4 in area on 2026-08-11 (`DECISIONS §48`) and
+  // those same literals would have delivered **63.6 / 55.6 wu** — i.e. they would have
+  // silently reproduced round 2's exact defect, the 64 wu grid that aliased the mottle
+  // into diagonal banding, on a map twice as wide. Nothing would have failed; the apron
+  // would just have gone back to looking like a gradient. Pinning a COUNT for a quantity
+  // that is really a DENSITY is the same class of bug as pinning the fog's 993.
+  const APRON_VERTEX_SPACING = 32;
+  const NS = Math.ceil(ARENA_W / APRON_VERTEX_SPACING);
+  const WE = Math.ceil(ARENA_H / APRON_VERTEX_SPACING);
   const CR = 20;
 
   // Sides. North/south span the full width; west/east fill only between them, so the

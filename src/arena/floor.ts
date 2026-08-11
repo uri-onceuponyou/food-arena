@@ -727,14 +727,22 @@ function buildLaneWear(M: Materials, rimMat: THREE.Material): THREE.Group {
   // the hub's spice-cart rug), plus denser stain clusters layered on top at the
   // spots actually visible between cover (the gaps around the two barrels) so the
   // path reads as worn EVERYWHERE, not just at three isolated dots.
-  g.add(buildPathStrip(M.floorGrime, 172, 500, 483, 500, 6191, 36));
-  g.add(buildPathStrip(M.floorGrime, ARENA_W - 172, ARENA_H - 500, ARENA_W - 483, ARENA_H - 500, 6197, 36));
+  //
+  // ⚠️ RE-ANCHORED FOR THE ×4 ARENA (`DECISIONS §48`), not scaled. The 1400×1000 ribbon
+  // ran 172,500 -> 483,500, which was that map's spawn->hub running line. On this map the
+  // west bay sits at (300,810) and the open lane out of it runs EAST along y≈1000 — the
+  // only unobstructed straight line between the bay and the hub clearing — so that is
+  // where the wear goes. A path strip left on the old coordinates would have been a worn
+  // route to nowhere, which is `docs/LESSONS.md` §1 with the props moving instead of the
+  // decal.
+  g.add(buildPathStrip(M.floorGrime, 380, 1000, 720, 1000, 6191, 36));
+  g.add(buildPathStrip(M.floorGrime, ARENA_W - 380, ARENA_H - 1000, ARENA_W - 720, ARENA_H - 1000, 6197, 36));
 
   // [cx, cy, baseR, seed] — west-side sites; mirrored 180° for the east side below.
   const sites: Array<[number, number, number, number]> = [
-    [185, 500, 22, 6101], // just past spawn, before the first barrel
-    [358, 503, 44, 6131], // the open gap between the two staggered barrels
-    [458, 500, 20, 6151], // the short gap between the prep-counter corridor and the hub's spice-cart rug
+    [400, 1000, 22, 6101], // the bay mouth, where the lane opens out of the prep counter
+    [560, 1003, 44, 6131], // the open middle of the lane
+    [700, 1000, 20, 6151], // the last clear floor before the hub's own service mat
   ];
   for (const [cx, cy, r, seed] of sites) {
     g.add(buildStainCluster(M.floorGrime, cx, cy, seed, r, rimMat));
@@ -882,7 +890,7 @@ function buildDebrisPile(mats: THREE.Material[], cx: number, cy: number, seed: n
  *              deleted discs           these chips
  *   size       6-14wu (15-35% tile)    3.4-6.2wu (8.5-15% tile) — the measured ref ratio
  *   shading    flat, one tinted fill   solid geometry, lit face + shaded face + shadow
- *   count      ~1/3 of 875 tiles       density-modulated scatter over 1400x1000wu
+ *   count      ~1/3 of 875 tiles       density-modulated scatter over the whole playfield
  *   band       MID (tile-sized)        OBJECT (sub-tile, above the texture's 1-2.5px)
  *
  * ── THE VALUE CONTRACT THIS FILE RUNS ON IS NOT SUSPENDED ───────────────────
@@ -2058,11 +2066,24 @@ export function buildFloor(M: Materials): THREE.Group {
     // ⚠️ Traffic follows GEOMETRY. Everything below tracks a `kitchen.ts` footprint, so
     // it moves when that does — 2026-08-05: the prep stations left the centre line, the
     // barrels left the lane entirely, and the stove islands went ±175/±150 -> ±270/±200.
-    [265, 500, 120], [ARENA_W - 265, 500, 120], // spawn bay mouth, between the prep pair
-    [430, 445, 110], [ARENA_W - 430, ARENA_H - 445, 110], // the main spawn-to-hub lane
-    [CENTER.x, 830, 110], [CENTER.x, 170, 110], // service counters
-    // The four stove islands themselves — the busiest cooking surfaces on the map.
-    [430, 300, 110], [970, 300, 110], [430, 700, 110], [970, 700, 110],
+    // 2026-08-11: the arena went ×4 in area (`DECISIONS §48`) and this whole block was
+    // re-derived rather than scaled. The HUB rows above are written against `CENTER` and
+    // therefore needed no edit at all, which is the argument for writing them that way.
+    //
+    // The three SPAWN BAYS are new entries and they are the highest-traffic floor on the
+    // map by construction: every match starts with six fighters standing on one of them.
+    [300, 810, 140], [ARENA_W - 300, ARENA_H - 810, 140],   // the west / east bay
+    [1150, 210, 130], [ARENA_W - 1150, ARENA_H - 210, 130], // the north / south wall lane
+    [2560, 300, 130], [ARENA_W - 2560, ARENA_H - 300, 130], // the NE / SW corner bay
+    // The service counters, still written against CENTER because they are hub props.
+    [CENTER.x, CENTER.y - 330, 110], [CENTER.x, CENTER.y + 330, 110],
+    // The four hub stove islands themselves — the busiest cooking surfaces on the map.
+    [CENTER.x - 270, CENTER.y - 200, 110], [CENTER.x + 270, CENTER.y - 200, 110],
+    [CENTER.x - 270, CENTER.y + 200, 110], [CENTER.x + 270, CENTER.y + 200, 110],
+    // The two mid-map cook lines and the two prep galleys — the NEW structure the ×4
+    // space bought, and the reason the middle band is walked at all.
+    [700, 700, 120], [ARENA_W - 700, ARENA_H - 700, 120],
+    [2100, 700, 120], [ARENA_W - 2100, ARENA_H - 700, 120],
   ];
   /** 0 at rest, 1 at the dead centre of a wear zone. Squared falloff so a zone has a
    * soft, spatially-motivated core rather than a hard-edged disc. */
@@ -2345,10 +2366,10 @@ export function buildFloor(M: Materials): THREE.Group {
   // `kitchen.ts`, move its mat.** `tools/tmp/arena_probe.mjs --map` shows the layout;
   // an overview render shows the orphans, and nothing else will.
   const hubMatZones: Array<[number, number, number, number]> = [
-    [450, 120, 110, 110], // NW service line, under the spice cart
-    [ARENA_W - 450, ARENA_H - 120, 110, 110], // SE mirror
-    [1010, 120, 115, 115], // NE service line, under the stacked pots
-    [ARENA_W - 1010, ARENA_H - 120, 115, 115], // SW mirror
+    [775, 135, 175, 105], // north wall, under the west service counter
+    [ARENA_W - 775, ARENA_H - 135, 175, 105], // south mirror
+    [2015, 135, 175, 105], // north wall, under the east service counter
+    [ARENA_W - 2015, ARENA_H - 135, 175, 105], // south mirror
   ];
   // Round-6 fix: these used to be a THICKER patch (0.04) sitting ABOVE a wider, offset
   // "trim" box floating 0.06 BELOW it — two slabs stepped apart read exactly like a
@@ -2441,18 +2462,18 @@ export function buildFloor(M: Materials): THREE.Group {
   // the lead barrel gives that stretch of open floor the same "someone was just
   // working here" beat the pantry corners already get, instead of it being the one
   // stretch of floor with cover but zero storytelling.
-  g.add(buildDebrisPile(debrisMats, 372, 470, 6301, 4, 14));
-  g.add(buildDebrisPile(debrisMats, ARENA_W - 372, ARENA_H - 470, 6317, 4, 14));
+  g.add(buildDebrisPile(debrisMats, 250, 760, 6301, 4, 14));
+  g.add(buildDebrisPile(debrisMats, ARENA_W - 250, ARENA_H - 760, 6317, 4, 14));
 
   // Small oil-drip stains hugging the base of the barrel lane's two barrels — a
   // second, visibly SEPARATE mark inside the same frame as the bigger lane-wear
   // patch, so the wear reads as a recurring condition of this stretch of floor
   // rather than one isolated smudge (a critic's exact phrasing for what was
   // missing: "doesn't repeat or vary anywhere else in the room").
-  g.add(buildStainShape(M.floorGrime, 250, 540, 6401, 14, 8));
-  g.add(buildStainShape(M.floorGrime, 460, 460, 6409, 12, 7));
-  g.add(buildStainShape(M.floorGrime, ARENA_W - 250, ARENA_H - 540, 6421, 14, 8));
-  g.add(buildStainShape(M.floorGrime, ARENA_W - 460, ARENA_H - 460, 6429, 12, 7));
+  g.add(buildStainShape(M.floorGrime, 110, 330, 6401, 14, 8));
+  g.add(buildStainShape(M.floorGrime, 240, 760, 6409, 12, 7));
+  g.add(buildStainShape(M.floorGrime, ARENA_W - 110, ARENA_H - 330, 6421, 14, 8));
+  g.add(buildStainShape(M.floorGrime, ARENA_W - 240, ARENA_H - 760, 6429, 12, 7));
 
   // Round-2: grease spatter at the actual cooking surfaces — a critic scored the
   // floor 3/10 and named this precisely ("no grease spatter near the hot-dog
@@ -2468,7 +2489,19 @@ export function buildFloor(M: Materials): THREE.Group {
   // delivering zero pixels, `docs/LESSONS.md` §1 with the props moving instead of the
   // decal. Each sits ~10 wu clear of its island's outboard face, checked against the
   // spice cart, the flour sacks, the herb crate and the SE freezer.
-  const stoveGrease: Array<[number, number]> = [[430, 215], [970, 215], [430, 785], [970, 785]];
+  //
+  // ⚠️ RE-DERIVED FOR THE ×4 ARENA. The four HUB islands did not move relative to CENTER,
+  // but CENTER did — (700,500) -> (1400,1000) — so every one of these coordinates was
+  // stale by exactly that offset and all four splats would have landed on bare floor in
+  // the map's north-west quadrant. The two mid-map COOK LINES and the north/south lane
+  // islands are new structure at this size and get their own, so "there is grease beside
+  // every stove" stays true of the whole map rather than of the hub only.
+  // Each sits clear of its island's own CoverBox, checked against the box edges.
+  const stoveGrease: Array<[number, number]> = [
+    [1010, 730], [1790, 730], [1010, 1270], [1790, 1270], // the four hub islands
+    [2230, 590], [ARENA_W - 2230, ARENA_H - 590],         // the east / west cook lines
+    [1520, 380], [ARENA_W - 1520, ARENA_H - 380],         // the north / south lane islands
+  ];
   stoveGrease.forEach(([sx, sy], i) => g.add(buildGreaseSplat(M, stainRim, sx, sy, 7401 + i * 53, 30)));
 
   // Worn-floor marks near the service counters — a confident grease pool behind the
@@ -2476,10 +2509,14 @@ export function buildFloor(M: Materials): THREE.Group {
   // smaller trailing satellite stain further out (the mess spreading, not a single
   // isolated dot). Placed on the OUTER side of each counter, clear of both the
   // counter's own CoverBox and the hub service mat that sits on its inner side.
-  g.add(buildGreaseSplat(M, stainRim, 705, 895, 7201, 34));
-  g.add(buildStainShape(M.floorGrime, 758, 932, 7219, 16, 8));
-  g.add(buildStainCluster(M.floorWet, 705, 105, 7241, 30, stainRim));
-  g.add(buildStainShape(M.floorWet, 655, 72, 7259, 15, 8));
+  // ⚠️ Written against CENTER now rather than as literals, because these follow the two
+  // service counters and those are HUB props — `kitchen.ts` places them at CENTER.y ± 330
+  // at every arena size. The 1400×1000 literals (705,895)/(705,105) were the same points
+  // expressed against a centre that has since moved.
+  g.add(buildGreaseSplat(M, stainRim, CENTER.x, CENTER.y + 400, 7201, 34));
+  g.add(buildStainShape(M.floorGrime, CENTER.x + 70, CENTER.y + 445, 7219, 16, 8));
+  g.add(buildStainCluster(M.floorWet, CENTER.x, CENTER.y - 400, 7241, 30, stainRim));
+  g.add(buildStainShape(M.floorWet, CENTER.x - 70, CENTER.y - 445, 7259, 15, 8));
 
   // ── Wood pantry pads (NE + SW) — the worst blocking-vs-walkable read left ───
   //
@@ -2522,9 +2559,12 @@ export function buildFloor(M: Materials): THREE.Group {
   padMat.color.multiplyScalar(0.81);
   const padSeamMat = cloneToon(M.woodSeam);
   padSeamMat.color.multiplyScalar(0.93);
+  // Sized to the whole NE / SW pantry NOOK (x 2240..2460, y 205..460 and its 180° image),
+  // not to one crate — a pad that peeks out from under a single prop is the "raised
+  // platform?" read this file spent a round killing.
   const woodPads: Array<[number, number, number, number]> = [
-    [1170, 185, 280, 260],
-    [230, 815, 280, 260],
+    [2350, 330, 300, 320],
+    [ARENA_W - 2350, ARENA_H - 330, 300, 320],
   ];
   for (const [px, py, pw, ph] of woodPads) {
     const pad = mesh(roundedBox(wu(pw), 0.05, wu(ph), 0.12, 3), padMat, 'floor_woodpad');
@@ -2577,9 +2617,17 @@ export function buildFloor(M: Materials): THREE.Group {
   // stains at (460,460)/(940,540) under its own decal — `docs/LESSONS.md` §1, a decal
   // hidden by a decal 3 mm above it. 400x280 keeps both stains outside its edge and
   // lands mean saturation back at baseline with the warm share still inside the band.
+  //
+  // ⚠️ FOUR CORNER PADS NOW, NOT TWO. The ×4 arena has two walk-in freezer footprints per
+  // half — the NW corner STACK (230×485 of prop, x 185..415, y 205..690) and the mid-map
+  // east room (x 2335..2565, y 605..885) — and the second one anchors a spawn bay, which
+  // is the most-looked-at floor on the map. Each pad is sized to its whole cluster, as
+  // the note above requires, not to one prop.
   const utilityPads: Array<[number, number, number, number]> = [
-    [230, 190, 420, 340],
-    [ARENA_W - 230, ARENA_H - 190, 420, 340],
+    [300, 445, 380, 580],
+    [ARENA_W - 300, ARENA_H - 445, 380, 580],
+    [2450, 745, 340, 380],
+    [ARENA_W - 2450, ARENA_H - 745, 340, 380],
     [CENTER.x, CENTER.y, 400, 280],
   ];
   for (const [px, py, pw, ph] of utilityPads) {
@@ -2705,7 +2753,7 @@ export function buildFloor(M: Materials): THREE.Group {
   // don't cohere into a story" gap: a produce crate with no dropped produce, a flour
   // sack with no spilled flour. Plus a small dropped-produce pile beside each, echoing
   // the hub debris ring at pantry scale.
-  const sackSpills: Array<[number, number]> = [[1175, 235], [ARENA_W - 1175, ARENA_H - 235]];
+  const sackSpills: Array<[number, number]> = [[2295, 425], [ARENA_W - 2295, ARENA_H - 425]];
   sackSpills.forEach(([sx, sy], i) => {
     // `flourPale`, not `M.flour` — same argument as the lane spill above. In the
     // `pantry_ne` scan frame this mark was the second brightest mass in shot after
