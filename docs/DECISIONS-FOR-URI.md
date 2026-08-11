@@ -2699,9 +2699,26 @@ it**: the relative schedule is scale-invariant (1.1543 -> 1.1538) and only the a
 - **A single centre pot becomes lethal to pacing when cover is dense.** Four quadrant pots vs none is
   *bit-identical*. **One** pot at the exact centre with dense cover: contact 36.6 s, duty 3.3%,
   **542-801 of 880 matches with ZERO contact**, decided by fog. The same geometry is harmless at
-  1400x1000. Traced: AI stalled 50% of the match, longest unbroken stall 18.6 s (`rules.ts:1034`).
-  **This does not argue against the centre pot** — it argues that the searchless AI is the binding
-  constraint, and it is the same constraint as §29a.
+  1400x1000.
+
+  ❌ **THE ATTRIBUTION BELOW IS FALSIFIED. Kept verbatim because it steered a whole workstream.**
+  > *"Traced: AI stalled 50% of the match, longest unbroken stall 18.6 s (`rules.ts:1034`). This does
+  > not argue against the centre pot — it argues that the searchless AI is the binding constraint,
+  > and it is the same constraint as §29a."*
+
+  🚨 **It was NAVIGATION, not search.** `as_cost.mjs` (**32**) reproduced that table to the digit on
+  `git show b9bc00e~1`, then read the belief cell `stepAI` itself writes: **stale for 0 of 2,020,248
+  playing ticks.** That map declared **no concealment**, so `isVisibleFrom` returned true
+  unconditionally — **100% of the stall was an AI that could see exactly where its target was and
+  could not get there.**
+  ✅ **`b9bc00e`'s reachability pass fixed it** — same fixture, today's layout: never-contacted
+  **542/801 → 26/45**, contact **36.60 → 22.29 s**, duty **3.3% → 16.6%**. Isolated against
+  concealment: stripping the plates gives the same numbers.
+  ⚠️ **The citation was wrong too** — the constraint lives at `src/arena/types.ts:95`, not
+  `rules.ts:1034`, and it is a *behavioural* claim rather than a cost one.
+  ⇒ **Do not build AI search.** An ORACLE arm — `visible` forced true, a hard upper bound on what any
+  search could buy — moves the aggregate **+0.0 pp at both map sizes** and is **bit-identical, 0 of
+  110 paired matchups, at ×4**.
 - **`MIN_SAFE_RADIUS` (140 wu) does not scale.** The endgame duel window shrinks 6.4 s -> 3.2 s and
   now opens *after* first contact, so the 100/150 HP asymmetry it exists to prevent re-opens (fog
   dealt 50.3 to the player, 0.0 to the enemy).
