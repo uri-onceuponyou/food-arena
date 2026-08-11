@@ -42,6 +42,7 @@ You can settle most of this with one word each. Detail is in the numbered sectio
 | **8** | Pointer lock | shipped as built | ✅ **ANSWERED — Uri: "works good"** | — |
 | **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
 | **51** | 🆕 **The mobile app — which wrapper?** | nothing chosen | **the bundle already survives a third base (4/4, with both known-bad controls failing), so this is a wrapper pick + one `index.html` line.** ⚠️ `file://` is measured UNBOOTABLE — it needs a scheme | a wrapper is swappable; no `src/` change either way |
+| **52** | 🆕 **Multiplayer transport — authoritative server, lockstep, or rollback?** | nothing chosen, nothing shipped | **authoritative, with prediction of your own fighter — host peer first.** The number: a six-human tick costs **2.66 µs** (0.016% of real time, ~6,260 matches/core), so the CPU lockstep saves is free, while the bit-identical floats it *requires* span **32 impl-approximated call sites** across three browser engines. Full evidence in `docs/NETCODE.md` | no `src/` change either way; the sim already takes one input per slot |
 
 **If you only do one thing:** play it for ten minutes. The two most valuable bug reports this
 project has ever had came from exactly that, and both were invisible to every gate here.
@@ -3115,3 +3116,124 @@ the tap, **which itself grants a user gesture** — and duly reported the theme 
 at all**. Caught by its own control, and the probe is now built so the measurement never talks to
 the page until it is over.
 
+
+---
+
+## 52. ❓ MULTIPLAYER TRANSPORT — authoritative server, lockstep, or rollback?
+
+**Nothing is blocked and nothing shipped.** No `src/` file was touched by this pass. The sim
+already seats six and already takes one input per slot, so this is the *next* question, not a
+prerequisite for anything in flight.
+
+📄 **The full evidence is `docs/NETCODE.md`.** Every number below comes from
+`node tools/tmp/nc_measure.mjs`, whose 18 instrument checks each carry a known-bad input.
+
+### The one thing that makes this decidable at all
+
+The sim is **pure, deterministic and seeded** — bit-identical over **26,388,976 ticks and
+7,039,194 events in order** (`cdcdd65`, `1b506d6`), with **0 `Math.random` draws measured live
+over 17,628 real ticks** and **0 clock reads**. Most games cannot even consider lockstep. This
+one can. **Any design that spends that property is the wrong design**, and none of the three
+below spends it.
+
+### The measured comparison
+
+| | authoritative server | lockstep | rollback |
+|---|---|---|---|
+| client sends | 0.64 KiB/s | 0.64 KiB/s | 0.64 KiB/s |
+| client receives, 6 seats | 12.9 KiB/s binary delta @60 Hz | 2.11 KiB/s | 2.11 KiB/s + sync |
+| CPU, 6 **humans** | **2.66 µs/tick** — 0.016% of real time | same, on **every** client | same × rollback depth |
+| CPU, 5 **bots** | 399.50 µs/tick — 2.40% | same, on every client incl. the phone | **3.2 ms per 8-tick rollback = 19% of a frame** |
+| needs identical floats on every browser? | **no** | **yes** — 32 call sites | **yes** — same 32 |
+| needs `MatchState` to serialise? | **yes, and it does not today** | **no** | only the first sync |
+| re-fires the VFX/audio event stream? | no | no | **yes** — 0.335 events/tick |
+| survives a hacked client? | **yes** | no | no |
+
+**Bandwidth does not decide this.** Even the dumbest option — a full JSON snapshot 20×/s at six
+seats — is 158.7 KiB/s, and it fits on a phone.
+
+### 🔵 My recommendation, and the number behind it
+
+**Authoritative simulation with client-side prediction of your own fighter. Built first as a HOST
+PEER** (one player's browser runs the match, the rest send inputs over WebRTC), **and moved to a
+real server later without touching `src/game/`.**
+
+**The number: 2.66 µs.** That is one six-human tick — **0.016% of real time, ≈6,260 concurrent
+matches per CPU core.** Server CPU is the *only* resource an authoritative design spends that
+lockstep saves, and here it costs essentially nothing. What lockstep must buy instead is
+bit-identical floating point across V8, Safari's JavaScriptCore and Firefox's SpiderMonkey over
+**32 implementation-approximated call sites** (27 `Math.hypot`, 5 trig) — and that cannot be
+bought with a measurement, only with a 32-site rewrite and a cross-engine test rig we do not have.
+
+Two supporting reasons, both specific to this game rather than general advice:
+
+* **This repo is public and the game has a HIDING mechanic.** Under lockstep or rollback every
+  client holds the whole state, so §29's concealment is decoration against a modified client.
+  Only the authoritative model can withhold what a player should not see.
+* **Rollback breaks on bots, and a live 6-player game fills empty seats with bots.** It is free at
+  six humans (0.17% of a frame per 8-tick rollback) and 19% of a frame with five bots — 45% at
+  p99. It is also the only design that **re-fires the event stream**, so every damage number,
+  explosion and note of the score would have to become idempotent.
+
+### ⚠️ What choosing my recommendation costs you
+
+Stated because a recommendation that only lists its upsides is an advertisement:
+
+* **Infrastructure, eventually.** §51 wraps the *client*; there is no backend anywhere in this
+  repo. The host-peer form postpones that; it does not avoid it.
+* **`MatchState` does not survive a round trip today.** `JSON.parse(JSON.stringify(state))` breaks
+  **3 alias invariants silently** (`player` stops being `fighters[0]`), loses **7 `-Infinity`
+  sentinels** to `null`, and drops the arena references `brokenConcealment` holds by identity. A
+  network hop needs a hand-written encoder that every future `state.ts` field must be added to.
+  ⚠️ **But `postMessage` uses the structured clone algorithm, which preserves all of it** — so the
+  host-peer form costs **zero** serialisation work and the bill only arrives at a real server.
+* **The AI is 150× the sim.** A six-human tick is 2.66 µs; the same tick with six bots is 399.50 µs,
+  and **99.2% of that is `stepAI`**. A phone acting as host spends 2.4% of its frame budget
+  simulating before it renders anything.
+
+### ℹ️ 52b — NOT a decision: what this changes about §49
+
+None of §49a–§49f is decided here, but three of them get cheaper or dearer depending on 52:
+
+* **§49a (timeout tiebreak).** Under an authoritative server it is a **config value** changeable
+  mid-season; under lockstep/rollback it is a **protocol version** needing a forced client update.
+  Still cheap either way — 3,520 forced-immortal timeouts reached rung 3 **zero** times.
+* **§49c (the seat dial) has a MEASURED cost if you differentiate seats by SIZE rather than HP.**
+  `movement.ts:navGrid` caches one passability grid per arena and keys the cache on the fighter's
+  size. Today every fighter is 42 wu, so the grid is built **once, ever**. Give seat 0 a different
+  body and consecutive AI seats alternate the requested size: **1,114 full grid rebuilds over 680
+  playing ticks, against 1.** → **Prefer the HP dial to the size dial**, whichever option you pick.
+  (This is a latent bug in its own right — it would bite the moment anyone varied `Fighter.size`
+  for any reason. Reported out of set; `movement.ts` is not this pass's file.)
+* **§49d (spawns above slot 1) turns out to be netcode-correct already.** Under lockstep or
+  rollback every peer must compute the *same* spawn points, and a derived ring is `Math.cos` +
+  `Math.sin` — two of the 32 risky call sites — so **a derived ring would be a desync at tick 0,
+  before anybody moved.** `sim.ts` already refuses to invent spawns and `match.ts`'s QA
+  `?fighters=` parameter is already a transport for coordinates somebody else chose. Nothing to
+  change; the existing refusal is right for a second reason.
+
+§49b is transport-neutral (the `damagedMask` is order-free, which is exactly what a replicated
+tick needs) and §49e/§49f are presentation and unaffected.
+
+### 🚨 52c — NOT a decision, but the arena pass needs to know
+
+`NAV_MAX_CELLS` is **40,000** and its own comment says *"Never hit at 1400×1000"*. **§48 makes the
+arena 2800×2000**, which at the shipped 10 wu cell is **56,000 cells — over the cap** — so
+`movement.ts:navGrid` doubles the cell to **20 wu** and the grid stays 140×100. Verified against
+the real `navGrid` on a bare arena of each size.
+
+So the AI's pathfinding does **not** get four times more expensive on the bigger map — **its
+resolution silently halves.** And `NAV_CELL`'s own doc block records that **cell 20 already failed
+the shipped kitchen's tightest legal gap** (an 11 wu band of legal centre positions) and *"cost 7
+of 358 cells"*.
+
+→ **One constant, owned by the §48 arena pass.** Nothing to decide; it needs to be on their list.
+
+### ❓ 52a — the actual question for you
+
+1. **Which transport?** Authoritative (my recommendation) · lockstep · rollback · "not yet".
+2. **If authoritative: host peer first, or wait for a real server?** Host peer needs only a
+   signalling service and exercises the whole architecture with zero serialisation work. A real
+   server is the only form that survives the host quitting mid-match.
+3. **Is multiplayer even next?** Everything above is true whenever you get to it. The sim will not
+   drift out from under it — the bit-identity differ is a standing gate.
