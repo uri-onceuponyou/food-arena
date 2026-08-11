@@ -151,7 +151,8 @@ every push.**
 
 | tool | answers |
 |---|---|
-| `tools/arena-scan.mjs` | **The whole-arena scoreboard.** 18 player-centred stations through the live game. Reports `playerRank` in a 16×9 salience grid, player-vs-surround luma/saturation, a hue histogram, channel clipping — **and the cumulative colour budget nobody was watching**: absolute mean saturation / warm chroma / cool chroma measured the same way the reference figures were, split ENVIRONMENT vs CAST by an exact matte, with a hue-collision number. `--list`, `--only`, `--sim-speed 0.02` for byte-comparable runs. See the colour-budget block below. |
+| `tools/arena-scan.mjs` | **The whole-arena scoreboard.** 18 player-centred stations through the live game. Reports `playerRank` in a 16×9 salience grid, player-vs-surround luma/saturation, a hue histogram, channel clipping — **and the cumulative colour budget nobody was watching**: absolute mean saturation / warm chroma / cool chroma measured the same way the reference figures were, split ENVIRONMENT vs CAST by an exact matte, with a hue-collision number. `--list`, `--only`, `--sim-speed 0.02` for byte-comparable runs. See the colour-budget block below. 🚨 `--list` now prints a **still?** column — the three fog stations are **NOT still when sampled** and no pixel-identity claim may be quoted from them without `--still-hud`. |
+| `tools/tmp/sc_fogstill.mjs` | **Why the three fog stations move when nothing is touched**, and the reusable fix. `gl_occl_ab` refused at `fog_inside` on a self-pair of **110,963–472,512 px of 1,440,000 with rAF already frozen** against **0 px** at `pot_south`. Measured cause: **100% `src/ui/hud.ts` CSS keyframes** (`hud-fogedge-breathe`, `hud-zone-alarm` ×2, `hud-safearrow-throb`) — **CSS runs on the document timeline, not on `requestAnimationFrame`**, and `locator('canvas').screenshot()` is a page capture clipped to the canvas box, so they land in every "canvas" PNG. *Freezing the loop is not freezing the page.* Three arms per station (rAF frozen / + CSS stilled / HUD hidden) with two known-still control stations; exports **`PAGE_STILL_HUD`** — three lines that take all three stations to **0 px**. Any probe here that stubs rAF and diffs two captures needs it. |
 | `tools/aspect.mjs` | Viewport fairness. Must PASS at **0.00wu spread** across 4:3 → 32:9 → portrait. |
 | `tools/perf.mjs` | `--mode counts\|ablate\|alloc\|boot\|leak`. `--json` baselines, `--baseline` regression gate. **Hardware-independent numbers only** — it refuses to print timings as performance without `--unsafe-timing`. |
 | `tools/audio-probe.mjs` | `--mode all\|depth\|identity\|live`. **Assertions from real rendered samples** via `OfflineAudioContext` on the production path. ⚠️ **`OfflineAudioContext` has no media element, so NO offline assertion can ever see the theme track** — that is how a 404 on the deployed build survived every one of them (`docs/LESSONS.md` §3b). |
@@ -171,6 +172,17 @@ node tools/arena-scan.mjs --url $URL --json tools/scan/colour-baseline.json     
 node tools/arena-scan.mjs --ref-plates reference/images/curated/gameplay         # re-derive the reference figures
 node tools/arena-scan.mjs --selftest               # synthetic frames, no browser — count in the gate table
 node tools/arena-scan.mjs --no-role                # skip the cast matte / HUD-free capture
+node tools/arena-scan.mjs --still-hud              # pause the HUD's CSS keyframes before capture
+```
+
+🚨 **RE-BASELINE THROUGH `headserve --ref <sha>`, NEVER BARE.** `--json` now records the commit it
+measured, and `--baseline` reads it back and prints how far HEAD has moved since — but the only
+authoritative answer comes from whatever served the URL. Run bare, the tool marks the sha
+`trust=assumed` and says out loud that it is a guess. The previous baseline carried a *hand-written*
+sha that nothing wrote and nothing read, which is exactly how it went stale unnoticed:
+
+```bash
+node tools/tmp/headserve.mjs --ref <sha> -- node tools/arena-scan.mjs --json tools/scan/colour-baseline.json
 ```
 
 **Run the gate before and after any colour pass.** Two independently-correct desaturation passes
@@ -194,13 +206,33 @@ took warm chroma to 0.067 against a reference 0.145 because each only measured i
   round as **provisional**; do not reach for `--allow-refused`, which means something else.
 - `--sim-speed 0.02` freezes the sim, **not the shaders** — fog stations drift ±0.004 on
   `playerSalience` run to run. `playerRank` never moves.
+- 🚨 **AND IT DOES NOT FREEZE THE PAGE.** The three fog stations are **not still when sampled**:
+  two captures with nothing touched differ by **10.5k / 478k / 14.2k px of 1,440,000** (two runs), and
+  **100% of it is `src/ui/hud.ts` CSS keyframes**, which run on the document timeline and ignore a
+  stubbed `requestAnimationFrame`. `--list` flags them; `--still-hud` takes all three to **0 px**.
+  The colour numbers are unaffected (≤0.0001, ~100× under tolerance) — **pixel-identity claims are
+  not.** See `tools/tmp/sc_fogstill.mjs`.
+- 🔴 **`playerRankMedian` HAS A MEASURED RESOLUTION FLOOR OF ±1.5 PLACES — do not act inside it.**
+  Four full sweeps of ONE pinned tree gave **29.5 / 29.5 / 31 / 30**. Seventeen of eighteen stations
+  were rank-**identical** in all four; the whole spread is `fog_inside` alone (**27 / 26 / 37 / 30**),
+  re-ranking with the phase of the HUD's screen-edge wash. The gate fires at **+4**, i.e. ~2.7× the
+  floor — real, but nothing like the ~100× the chroma rails enjoy. `--still-hud` collapses it to
+  zero. ⚠️ The header used to claim `playerRank` was "identical everywhere"; that is **falsified**.
+- ⚠️ **A BASELINE IS ITSELF A MEASUREMENT.** The stored one manufactured a `player salience rank
+  19.5 → 31 REGRESSION` for six days, on **both arms of a HEAD-to-HEAD drift control**, purely by
+  being 238 commits old. Re-measuring `3dcbc9a` today reproduced its stored numbers to ≤0.0002 —
+  it was never wrong, only **stale**. `--baseline` now prints the reference's commit and how many
+  `src/` commits have landed since, and says whether a REGRESSION is attributable to your tree.
 
-**Where the arena stands as of this baseline:** meanSat **0.324** vs reference 0.493 (FAIL — below
-the lowest of eleven plates at 0.370, and only 0.022 above the 0.302 three critics called "muddy");
-warm chroma **0.064** vs 0.145 (FAIL, 44% of reference); cool 0.252 and warm *share* 0.214 both
-PASS. The frame is **under-chromatic overall, not warm-heavy — there is nothing here to
-desaturate.** Meanwhile 19.1% of all environment chroma sits inside the hero's ±30° hue band and
-37% of the loudest non-player cells are wearing the cast's own hue.
+**Where the arena stands as of this baseline (2026-08-11 @ `36ee0a6`):** meanSat **0.4706** vs
+reference 0.493 (PASS — was 0.324 at the previous baseline); mean chroma **0.3253** against a 0.325
+target, arrived; cool **0.4078**, warm *share* **0.1258**, both PASS. **Warm chroma 0.0596 is the
+one rail still FAILing** — 41% of the reference, below the 0.0725 floor. **Warm is the scarce
+budget; adding cool is no longer a free lever** (cool is already 19% over target). 12.0% of
+environment chroma sits inside the hero's ±30° hue band and 30% of the loudest non-player cells
+wear the cast's own hue. **Baked in and now invisible: `playerRankMedian` 19.5 → 30**, a ten-place
+salience loss accumulated over 104 `src/` commits and attributable to no single pass — see
+`colour-baseline.json`'s `bakedInRegressions`.
 
 ### Scratch probes worth reusing (`tools/tmp/`)
 `matcover.mjs` (exact share-of-frame per material, and the colour it *arrives* at) ·
@@ -382,7 +414,7 @@ counts and sit with `chars_metrics`:
 | `tools/tmp/name_accept.mjs` | **29** | name sanitiser, both entry paths |
 | `tools/tmp/chip_probe.mjs` | **72** | pause chip vs thumb zone, 6 viewports × 2 states |
 | `node tools/audio-probe.mjs --mode all` | **427** | ⚠️ `--mode live`'s countdown-onset checks are **pre-existing load flake, PROVEN not assumed** — untouched HEAD on a clean isolated server gave **29/29, 27/29, 26/29 on three consecutive runs**. Do not attribute them to your change without that control. Judge by **depth 91 / identity 78**. |
-| `node tools/arena-scan.mjs --selftest` | **105** | colour-budget metric + the station-placement guard |
+| `node tools/arena-scan.mjs --selftest` | **132** | colour-budget metric + the station-placement guard + **§D2 baseline PROVENANCE** and **§D3 the non-still stations**. ⚠️ Was **105** before the 2026-08-11 re-baseline; a run reporting 105 is an OLD TREE. §D2's known-bads are the four ways a stored baseline lies about which tree it came from — no `HEADSERVE_SHA` (the sha is a *guess*), `--overlay` (the tree is the commit **plus** someone's uncommitted file), `--worktree` (not a commit at all), and a recorded sha that is not in the repo — plus the staleness count that would have named the six-day-old reference on sight. §D3 asserts the three fog stations stay flagged **from the fog geometry**, not from a hand-kept list |
 | `node tools/match-sim.mjs --selftest` | **15** | the scripted policies, against a hand-derivable answer |
 | `node tools/tmp/valuescan.mjs --selftest` | **105** | value-ladder metric on synthetic frames. ⚠️ Was **57** until `c3e3fbc`/`fc3d048` and **78** until the `dLcontact` pass; a run reporting 57 or 78 is an OLD TREE, not a pass. §L and §M are the two known-bad-input proofs — §L shows `dL` returning a confident **wrong** answer in both directions, §M shows a `__meta` stamp lifted off another file being **refused** |
 | `node tools/tmp/p5_dlprobe.mjs` | **12** | the derivation behind §L. `--live <dir>` recomputes `dLcontact` for all 11 characters from an existing `--mode chars` output **with no browser**, and refuses any character whose recovered owner map does not reproduce the recorded contact counts exactly |

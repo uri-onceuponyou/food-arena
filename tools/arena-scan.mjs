@@ -170,14 +170,36 @@
  *
  * MEASURED NOISE FLOOR — "byte-comparable" is an overstatement, and it matters for
  * any gate. Running the tool twice against the SAME frozen snapshot:
- *   • `playerRank`, `dominantHueDeg`: identical everywhere
  *   • `playerSalience` +/-0.004, `deltaLuma` +/-0.002, `hueHist` bins +/-0.002,
  *     `clipped` +/-0.01pp — and ONLY at the fog stations plus `pantry_ne`
  *   • `pot_south` and the other normal-play stations ARE byte-identical
  *   • the cumulative chroma aggregate drifts <= 0.0001 run to run
  * `simSpeed` slows the SIM; the fog ring and ambient shaders animate on wall clock, so
- * a station with a live ring on screen never freezes completely. Every gate tolerance
+ * a station with a live ring on screen never freezes completely. Every chroma tolerance
  * below is ~100x that floor, which is why the gate does not cry wolf.
+ *
+ * ⚠️ THE OLD LINE HERE READ "`playerRank`, `dominantHueDeg`: identical everywhere".
+ * FALSIFIED 2026-08-11 and kept above in corrected form rather than deleted, because it
+ * is the row the regression gate reports and someone would otherwise treat a 1-place
+ * move as signal. THREE full sweeps of ONE pinned tree (36ee0a6, arms A / B / D):
+ *
+ * FOUR full sweeps of ONE pinned tree (36ee0a6; arms A / B / D / E in `shots/sc/`):
+ *
+ *      station        A    B    D    E   spread     17 of 18 stations: spread 0, all four.
+ *      fog_inside    27   26   37   30      11  <-- ONE station, and it is one of the
+ *      every other  ==   ==   ==   ==       0      three flagged `unstill` below.
+ *
+ *      playerRankMedian  29.5  29.5  31  30   -> RESOLUTION FLOOR ~ +/-1.5 PLACES
+ *      playerRankMean    26.1  26.1  26.7  26.3
+ *      every chroma aggregate                    spread <= 0.0006
+ *
+ * The cause is not the arena. `fog_inside`'s frame carries the HUD's breathing screen-
+ * EDGE wash, and how many edge cells out-rank the player depends on where a 0.9 s CSS
+ * sine happened to be — see STATIONS' `unstill` block. **DO NOT ACT ON A `playerRankMedian`
+ * MOVE UNDER ~1.5 PLACES.** The gate fires at +4, so it is ~2.7x the floor — real, but
+ * nothing like the ~100x the chroma rails enjoy. `--still-hud` collapses this floor to
+ * zero; the shipped baseline is deliberately taken WITHOUT it (an unbiased sample of the
+ * look a player actually gets), and `--baseline` refuses to compare across the two.
  *
  * KNOWN GAP: this cannot reliably put COMBAT VFX in frame. The AI has to cross the
  * map to engage, and `--sim-speed 6 --settle 7000` still only advanced 19s of match
@@ -209,6 +231,11 @@
  *   node tools/arena-scan.mjs --selftest               # synthetic-input validation,
  *                                                      # no browser, no server
  *   node tools/arena-scan.mjs --no-role                # skip the cast matte
+ *   node tools/arena-scan.mjs --still-hud              # pause the HUD's CSS keyframes
+ *                                                      # before capture. OFF by default:
+ *                                                      # needed for PIXEL-IDENTITY work,
+ *                                                      # wrong for colour numbers. See
+ *                                                      # STATIONS' `unstill` block.
  *
  * Outputs, per station <id>:
  *   <out>/<id>.png          full frame, HUD included  <- this is what critics see
@@ -262,27 +289,69 @@
  * reference is not desaturated, and acting on it is what produced the overshoot the
  * colour budget below now watches for.
  *
- * ── Colour baseline, 2026-08-05, 18/18 stations (`tools/scan/colour-baseline.json`) ──
+ * ── Colour baseline, 2026-08-11 @ 36ee0a6, 18/18 (`tools/scan/colour-baseline.json`) ──
  *
- *   frame       meanSat 0.324   chroma 0.208   warm 0.064   cool 0.252   warm/total 0.214
+ * Taken through `node tools/tmp/headserve.mjs --ref 36ee0a6 --`, so the commit is a
+ * stated fact the tool recorded and `--baseline` reads back, not a hand-written note.
+ *
+ *   frame       meanSat 0.4706  chroma 0.3253  warm 0.0596  cool 0.4078  warm/total 0.1258
  *   reference   meanSat 0.493   chroma 0.325   warm 0.145   cool 0.343   warm/total 0.297
- *   arena only  meanSat 0.320                  warm 0.058   cool 0.254   warm/total 0.197
+ *   arena only  meanSat 0.4827                 warm 0.0580  cool 0.4219  warm/total 0.1189
  *
- *   FAIL  mean saturation 0.324 — below the lowest of eleven plates (0.370), and only
- *         0.022 above the 0.302 three critics read as "muddy".
- *   FAIL  warm chroma 0.064 — 44% of the reference. This reproduces the recorded 0.067
- *         to within run noise, so the STATE.md item-8 overshoot is confirmed, not
- *         inferred.
- *   PASS  cool chroma 0.252, warm SHARE 0.214. The frame is not warm-heavy; it is
- *         under-chromatic overall. There is nothing here to desaturate.
+ *   FAIL  warm chroma 0.0596 — 41% of the reference, below the 0.0725 band floor. The
+ *         ONE rail still out of contract, and `--gate` still fires on it.
+ *   PASS  mean saturation 0.4706 (was 0.324 at the previous baseline), mean chroma
+ *         0.3253 against a 0.325 target — arrived. cool 0.4078, warm SHARE 0.1258.
+ *   ⚠️ WARM IS THE SCARCE BUDGET, still. Nothing here wants desaturating, and adding
+ *         cool is no longer a free lever: coolChroma is 19% OVER its target already.
  *
- *   HUE COLLISION, and it names the top finding: the cast lives in bins 0-30/30-60
- *   (0.18 / 0.71 of its own chroma) and the ENVIRONMENT puts 0.05 / 0.14 in the SAME
- *   two bins — 19.1% of all environment chroma sits inside the hero's +/-30 deg band,
- *   and 37% of the loudest non-player cells across the sweep are wearing it. Worst
- *   offenders: grease_near 0.351, pot_diagonal 0.348, fryer_south 0.288, pantry_sw
- *   0.267, pantry_ne 0.260, pot_south 0.255. Cleanest: freezer_nw 0.035, edge_west
- *   0.057 — the two stations dominated by cool steel, which is the contract working.
+ *   playerRank median 30 · mean 26.3 of 144 cells — and read the floor block above
+ *   before treating any move in it as signal.
+ *
+ * ── WHY THIS REPLACED THE 2026-08-05 @ 3dcbc9a BASELINE ────────────────────────
+ * That file was six days and 238 commits stale (104 touching `src/`, +32,898 lines) and
+ * fired exactly one row on EVERY run — `player salience rank (median) 19.5 -> 31,
+ * REGRESSION` — including on BOTH ARMS of a HEAD-to-HEAD drift control. Three agents in
+ * one night were told to disregard it. A gate that always fires gets switched off.
+ *
+ * ⚠️ AND IT WAS NOT INVENTING THE NUMBER. `3dcbc9a` was re-served from `git archive` and
+ * swept again with the CURRENT tool on 2026-08-11 (`shots/sc/C-3dcbc9a-knownbad`):
+ *
+ *              stored 2026-08-05   re-measured 2026-08-11
+ *   meanSat          0.4434              0.4436
+ *   warmChroma       0.0525              0.0525
+ *   warmShare        0.1195              0.1194
+ *   playerRankMedian   19.5                19.5
+ *
+ * It reproduces to <= 0.0002, and EXACTLY on the row that was firing. So the old
+ * baseline described its own tree correctly; the failure was purely that the tree moved
+ * ten salience places under it and every run since charged that to whatever change was
+ * being tested. (It also proves this re-baseline changed the REFERENCE and not the
+ * INSTRUMENT — same tool, same numbers on the same tree.) The proof, every arm served
+ * from `git archive` at an EXPLICIT sha so no peer commit could enter one:
+ *
+ *   F  36ee0a6 vs THE SHIPPED FILE  0 regressions, exit 0  <- the drift control is CLEAN
+ *                                                             on the artefact that ships.
+ *                                                             `playerRankMedian 30 -> 31`,
+ *                                                             inside its own floor.
+ *   C  3dcbc9a vs this baseline     4 regressions, exit 1  <- and it still catches a real
+ *                                                             difference: meanSat -0.0270,
+ *                                                             meanChroma -0.0456,
+ *                                                             arenaMeanSat -0.0363, and
+ *                                                             warmShare LEFT the band.
+ *   B, D  earlier arms of the same shape against the arm-A file, which differs from the
+ *         shipped one by <= 0.0006 on every chroma rail. Both clean.
+ *
+ * ⚠️ WHAT THIS BAKES IN. The 19.5 -> 30 rank loss is now the reference and is therefore
+ * INVISIBLE to future runs. It is real and it is nobody's: it accumulated over 104 src/
+ * commits. `colour-baseline.json`'s `bakedInRegressions` says so, and attacking it needs
+ * a fresh paired A/B rather than this gate.
+ *
+ *   HUE COLLISION — the cast lives in bins 0-30/30-60 (0.15 / 0.62 of its own chroma)
+ *   and the ENVIRONMENT puts 0.02 / 0.09 in the SAME two bins; hueOverlap 0.1834,
+ *   12.0% of env chroma inside the hero's +/-30 deg band, and 30% of the loudest
+ *   non-player cells across the sweep are wearing it. Cleanest stations remain the ones
+ *   dominated by cool steel, which is the contract working.
  */
 
 import { chromium } from 'playwright';
@@ -478,9 +547,50 @@ const STATIONS = [
   { id: 'grease_in',     x: GREASE.x, y: GREASE.y, fog: MAX_SAFE_RADIUS, note: 'STANDING IN the grease puddle — the slowed player read' },
   { id: 'water_near',    x: WATER.x + 130, y: WATER.y + 95, fog: MAX_SAFE_RADIUS, note: 'water puddle off-centre, as you approach it' },
   // ── the closing fog death zone ─────────────────────────────────────────────
-  { id: 'fog_boundary',  x: 1090, y: 500, fog: 420, note: 'safe-zone wall ~30wu ahead of the player' },
-  { id: 'fog_inside',    x: 1240, y: 500, fog: 420, note: 'standing INSIDE the death zone, 50 HP/s' },
-  { id: 'fog_late',      x: 700,  y: 340, fog: 200, note: 'late match, ring closed to 200wu around the pot' },
+  //
+  // 🚨 `unstill` — THESE THREE FRAMES ARE NOT STILL WHEN THEY ARE SAMPLED, and it is
+  // NOT the arena. Measured `tools/tmp/sc_fogstill.mjs`, pinned at 36ee0a6, one page
+  // load per station, `requestAnimationFrame` stubbed exactly as `gl_occl_ab` does it —
+  // two captures 220 ms apart with NOTHING touched:
+  //
+  //     station            rAF frozen    + HUD CSS stilled    HUD hidden
+  //     pot_south               0 px            0 px             0 px   <- control
+  //     spawn_west              0 px            0 px             0 px   <- control
+  //     fog_boundary  10,531-13,073 px          0 px             0 px
+  //     fog_inside   471,742-478,143 px         0 px             0 px   <- 33% of frame
+  //     fog_late      13,173-14,161 px          0 px             0 px
+  //
+  // Ranges, because TWO independent runs of the probe were taken and the raw counts are
+  // supposed to differ — they sample a 0.6-1.2 s sine at whatever phase the page was in.
+  // What does NOT differ is the conclusion: 0 px stilled and 0 px HUD-hidden, both runs,
+  // all three stations, with the two control stations at 0 px throughout.
+  //
+  // 100% of it is `src/ui/hud.ts`'s CSS keyframes — `hud-fogedge-breathe` (a screen-EDGE
+  // wash), `hud-zone-alarm` x2, `hud-safearrow-throb` — all `infinite`, all armed by the
+  // death zone and by nothing else on the map. **CSS animations run on the document
+  // timeline, not on `requestAnimationFrame`**, so every "rAF frozen" probe in this repo
+  // is still animating them; and Playwright's `locator('canvas').screenshot()` is a page
+  // capture clipped to the canvas box, so they land in every "canvas" PNG. Look at
+  // `shots/sc/fogstill/fog_inside_A_raf_mask.png`: a bright vignette ring, the zone pill,
+  // the safe arrow, the radar and the weapon slots — and a dead-black arena in the middle.
+  //
+  // `docs/LESSONS.md`'s "freezing the clock is not freezing the loop", one step further
+  // out: **freezing the loop is not freezing the PAGE.**
+  //
+  // CONSEQUENCE FOR ANY PIXEL-IDENTITY CLAIM: a self-pair, drift control or A/B taken at
+  // these three stations without `--still-hud` (or the equivalent — `PAGE_STILL_HUD` in
+  // `tools/tmp/sc_fogstill.mjs`) is measuring the HUD's alarm animation. `gl_occl_ab`
+  // refused outright here for exactly this reason (1a5b808: self-pair 110,963-472,512 px
+  // of 1,440,000 against 0 px at `pot_south`). It was right to refuse.
+  //
+  // CONSEQUENCE FOR THE COLOUR NUMBERS: none worth acting on, and that is measured too —
+  // this file's noise floor says these stations plus `pantry_ne` drift `playerSalience`
+  // +/-0.004 and the chroma aggregate <= 0.0001 run to run, ~100x under every tolerance.
+  // So `--still-hud` is OFF by default: seeking a keyframe to t=0 is deterministic but
+  // BIASED, and a colour baseline wants an unbiased sample of the shipped look.
+  { id: 'fog_boundary',  x: 1090, y: 500, fog: 420, unstill: 'hud-css', note: 'safe-zone wall ~30wu ahead of the player' },
+  { id: 'fog_inside',    x: 1240, y: 500, fog: 420, unstill: 'hud-css', note: 'standing INSIDE the death zone, 50 HP/s' },
+  { id: 'fog_late',      x: 700,  y: 340, fog: 200, unstill: 'hud-css', note: 'late match, ring closed to 200wu around the pot' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -623,9 +733,17 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv);
 
 if (args.list) {
-  console.log('id                x     y     fogRadius  note');
+  console.log('id                x     y     fogRadius  still?      note');
   for (const s of STATIONS) {
-    console.log(`${s.id.padEnd(16)} ${String(s.x).padEnd(5)} ${String(s.y).padEnd(5)} ${String(s.fog).padEnd(10)} ${s.note}`);
+    console.log(`${s.id.padEnd(16)} ${String(s.x).padEnd(5)} ${String(s.y).padEnd(5)} ${String(s.fog).padEnd(10)} ${(s.unstill ? `NOT(${s.unstill})` : 'still').padEnd(11)} ${s.note}`);
+  }
+  const un = STATIONS.filter((s) => s.unstill);
+  if (un.length) {
+    console.log(`\n  ⚠ ${un.length} station(s) are NOT STILL when sampled: ${un.map((s) => s.id).join(', ')}`);
+    console.log('    Their frames move between two captures with nothing touched — up to 33% of the');
+    console.log('    frame — because the DOM HUD\'s CSS keyframes do not stop when rAF is stubbed.');
+    console.log('    NO PIXEL-IDENTITY CLAIM MAY BE QUOTED FROM THEM without --still-hud. The colour');
+    console.log('    numbers are unaffected (drift <= 0.0001, ~100x under tolerance). See STATIONS.');
   }
   process.exit(0);
 }
@@ -667,6 +785,26 @@ const JSON_OUT = typeof args.json === 'string' ? args.json : null;
 const BASELINE = typeof args.baseline === 'string' ? args.baseline : null;
 const WANT_ROLE = !args['no-role'];
 const GATE = !!args.gate;
+/**
+ * Pause the DOM HUD's CSS keyframes before capturing. OFF by default — see the
+ * `unstill` block in STATIONS for the measurement and for why the default is off.
+ *
+ * Kept as an inline copy of `tools/tmp/sc_fogstill.mjs`'s `PAGE_STILL_HUD` rather than
+ * an import, for the same reason the COVER table is inlined: this file must keep working
+ * when `tools/tmp` is mid-edit by another agent, and a gate that imports a scratch probe
+ * inherits its owner. The two are asserted equivalent by neither — say so out loud
+ * rather than imply a link that is not checked.
+ */
+const STILL_HUD = !!args['still-hud'];
+const PAGE_STILL_HUD = () => {
+  const s = document.createElement('style');
+  s.id = 'sc-still';
+  s.textContent = '*,*::before,*::after{animation-play-state:paused!important;'
+                + 'transition:none!important;caret-color:transparent!important}';
+  document.head.appendChild(s);
+  for (const a of document.getAnimations()) { try { a.currentTime = 0; a.pause(); } catch { /* finished */ } }
+  return document.getAnimations().filter((a) => a.playState === 'running').length;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Metrics
@@ -1203,6 +1341,138 @@ function baselineIdentityError(base, now) {
   ].join('\n');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PROVENANCE — "which tree was this measured on", recorded BY THE TOOL.
+//
+// 🚨 A BASELINE IS ITSELF A MEASUREMENT (docs/AGENT-BRIEF.md §7), and this one spent
+// six days manufacturing a regression nobody could attribute.
+//
+// `tools/scan/colour-baseline.json` was taken at `3dcbc9a` on 2026-08-05. By 2026-08-11
+// HEAD was 238 commits ahead, 104 of them touching `src/` (+32,898 lines). Every run of
+// `--baseline` in between fired exactly one row — `player salience rank (median)
+// 19.5 -> 31, REGRESSION` — and it fired IDENTICALLY ON BOTH ARMS OF A HEAD-TO-HEAD
+// DRIFT CONTROL (1a5b808 re-established it on a pinned ref containing none of the
+// change under test). It was never a regression. It was the stored reference being six
+// days old, and three separate agents in one night were told to disregard the line.
+// A gate that always fires is a gate that gets switched off — the same failure mode
+// `compareBaseline`'s DIRECTIONAL rule was written to avoid, arriving through the
+// reference instead of through the rule.
+//
+// The old file DID carry a hand-written `sha` field. It was correct and it was useless,
+// because nothing wrote it (an agent added it by hand after the fact) and nothing read
+// it. So both halves are mechanical now: the tool RECORDS what it measured, and
+// `--baseline` READS it back and says how far the tree has moved since.
+//
+// ⚠️ Provenance is REPORTED, never gated on, and it must never soften a verdict. The
+// fault was a wrong reference, not a tight check — widening a tolerance here would hide
+// the next real regression instead of the last fake one.
+// ─────────────────────────────────────────────────────────────────────────────
+function git(...a) {
+  try {
+    return execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch { return ''; }
+}
+
+/**
+ * What tree did this run actually measure?
+ *
+ * The ONLY authoritative answer comes from whatever served the URL, which is why
+ * `tools/tmp/headserve.mjs` exports `HEADSERVE_SHA`. Asking git for `HEAD` here is a
+ * GUESS: it describes this checkout at the moment the sweep FINISHED, and a full sweep
+ * takes ~25 minutes during which peers push. That exact gap is what 1a5b808 unpicked.
+ * So the trust level is recorded next to the sha, never merged into it.
+ */
+function scanProvenance() {
+  const mode = process.env.HEADSERVE_MODE || '';
+  const served = (process.env.HEADSERVE_SHA || '').trim();
+  const overlay = (process.env.HEADSERVE_OVERLAY || '').split(',').filter(Boolean);
+  const headNow = git('rev-parse', 'HEAD');
+  const srcDirty = git('status', '--porcelain', '--', 'src').split('\n').filter(Boolean).length;
+
+  let sha = served, trust = 'served', why = `tools/tmp/headserve.mjs archived this commit and served it at ${BASE}`;
+  if (mode === 'worktree') {
+    sha = ''; trust = 'worktree';
+    why = 'headserve --worktree: a WORKING TREE, not a commit. Not reproducible; do not store as a baseline.';
+  } else if (!served) {
+    sha = headNow; trust = 'assumed';
+    why = 'NO HEADSERVE_SHA — this is `git rev-parse HEAD` in this checkout, which is a GUESS about what '
+        + `${BASE} was serving. Re-run under \`node tools/tmp/headserve.mjs --ref <sha> --\` to record it for real.`;
+  }
+  if (overlay.length) {
+    trust = 'served+overlay';
+    why = `headserve served ${served.slice(0, 7)} PLUS live working-tree ${overlay.join(', ')} — `
+        + 'the measured tree is NOT that commit. Valid as an A/B arm, invalid as a stored baseline.';
+  }
+  return {
+    sha, shaShort: sha ? sha.slice(0, 7) : '', trust, why,
+    overlay, headAtWrite: headNow,
+    srcDirtyFiles: srcDirty,
+    // Recorded because a stilled run and an unstilled one are DIFFERENT SAMPLES of the
+    // same tree, and the difference lands on `playerRankMedian` (see the floor block in
+    // the header). `--baseline` refuses to compare across the two silently.
+    stillHud: STILL_HUD,
+    // The OTHER way a baseline goes stale: the instrument moved under it. A stored
+    // number is only comparable to a number the same code produced.
+    tool: {
+      path: 'tools/arena-scan.mjs',
+      blob: git('hash-object', 'tools/arena-scan.mjs'),
+      committed: git('hash-object', 'tools/arena-scan.mjs') === git('rev-parse', 'HEAD:tools/arena-scan.mjs'),
+    },
+    generated: new Date().toISOString(),
+  };
+}
+
+/**
+ * How far has the tree moved since that baseline was taken? Returns null when the
+ * question cannot be asked (no recorded sha, or the sha is not in this repo).
+ *
+ * `srcCommits` is the number that matters: `arena-scan` measures rendered pixels, so a
+ * baseline is stale exactly when `src/` moved under it. Doc-only commits do not.
+ */
+function baselineStaleness(base) {
+  const p = base.provenance ?? {};
+  const sha = p.sha || base.sha || '';                     // `base.sha` = the hand-written legacy field
+  if (!sha) return { sha: '', known: false, why: 'the baseline records NO commit — it predates provenance' };
+  // `cat-file -e` communicates through its EXIT CODE and prints nothing, so `git()`
+  // returns '' for both outcomes and testing it would be a tautology. rev-parse prints.
+  if (git('rev-parse', '--verify', '--quiet', `${sha}^{commit}`) === '') {
+    return { sha, known: false, why: 'the recorded commit is not in this repository' };
+  }
+  const n = (spec, path) => {
+    const out = path ? git('rev-list', '--count', spec, '--', path) : git('rev-list', '--count', spec);
+    return out === '' ? null : Number(out);
+  };
+  return {
+    sha, shaShort: sha.slice(0, 7), known: true,
+    trust: p.trust ?? '(legacy: hand-written, unverified)',
+    generated: p.generated ?? base.generated ?? '(unrecorded)',
+    commits: n(`${sha}..HEAD`), srcCommits: n(`${sha}..HEAD`, 'src'),
+    toolMoved: p.tool?.blob ? p.tool.blob !== git('hash-object', 'tools/arena-scan.mjs') : null,
+  };
+}
+
+/**
+ * SAME TREE, DIFFERENT SAMPLE. A `--still-hud` run and a bare one disagree on
+ * `playerRankMedian` by ~1.5 places for reasons that have nothing to do with the arena,
+ * so comparing across the two is a rubric mismatch — the class of error CLAUDE.md rule 7
+ * bans for critic scores, arriving here through a CLI flag instead.
+ *
+ * A named function rather than four lines inline, for the reason `baselineIdentityError`
+ * gives: a guard nobody can call is a guard nobody can test. `--selftest` exercises it.
+ * Returns a printable message, or null when the two runs are comparable.
+ */
+function stillHudMismatch(base, nowStill) {
+  const wasStill = base.provenance?.stillHud;
+  if (wasStill === undefined) return '  (baseline predates the stillHud flag — assuming it was taken WITHOUT --still-hud)';
+  if (!!wasStill === !!nowStill) return null;
+  return [
+    `\n  🚨 MISMATCH: the baseline was taken ${wasStill ? 'WITH' : 'WITHOUT'} --still-hud and this run is ${nowStill ? 'WITH' : 'WITHOUT'} it.`,
+    '     These are different samples of the same tree. `playerRankMedian` alone moves',
+    '     ~1.5 places between them, entirely from fog_inside. Re-run with the flag set the',
+    '     same way, or re-baseline; do not read the rows below as a comparison.',
+  ].join('\n');
+}
+
 /** PASS / FAIL each rail against its band, plus the hard "muddy" floor. */
 function railStatus(agg) {
   const out = [];
@@ -1623,6 +1893,107 @@ async function modeSelftest() {
     }
   }
 
+  // ── PROVENANCE, exercised on the exact shapes that produced the six-day fake
+  //    regression. Every check below has a KNOWN-BAD input it must FAIL on; a guard
+  //    that has not been shown to fail is not a guard (CLAUDE.md rule 6).
+  console.log('\nD2. provenance: the tool records WHICH TREE it measured, and reads it back');
+  {
+    const save = { m: process.env.HEADSERVE_MODE, s: process.env.HEADSERVE_SHA, o: process.env.HEADSERVE_OVERLAY };
+    const set = (m, s, o) => {
+      if (m == null) delete process.env.HEADSERVE_MODE; else process.env.HEADSERVE_MODE = m;
+      if (s == null) delete process.env.HEADSERVE_SHA; else process.env.HEADSERVE_SHA = s;
+      if (o == null) delete process.env.HEADSERVE_OVERLAY; else process.env.HEADSERVE_OVERLAY = o;
+    };
+    const FAKE = 'a'.repeat(40);
+
+    set('ref', FAKE, '');
+    const served = scanProvenance();
+    check('a headserve-served run records the SERVED sha, not this checkout\'s HEAD', served.sha, FAKE);
+    check('...and marks it trust=served', served.trust, 'served');
+
+    // KNOWN-BAD 1 — the state EVERY run was in before headserve exported anything, and
+    // the state that let a hand-written sha go unchecked for six days. It must not be
+    // allowed to look identical to a served run.
+    set(null, null, null);
+    const guessed = scanProvenance();
+    check('KNOWN-BAD no HEADSERVE_SHA: the sha is marked ASSUMED, not served', guessed.trust, 'assumed');
+    check('...and it says out loud that it is a guess about what the URL served',
+      /GUESS/.test(guessed.why), true);
+    check('...and it is NOT silently equal to a served run\'s trust level', guessed.trust === served.trust, false);
+
+    // KNOWN-BAD 2 — an overlay arm. Legal as an A/B arm, INVALID as a stored baseline,
+    // because the tree served is the commit plus somebody's uncommitted file.
+    set('ref', FAKE, 'src/characters/rig.ts');
+    const ovl = scanProvenance();
+    check('KNOWN-BAD --overlay: the run does NOT claim to be that commit', ovl.trust, 'served+overlay');
+    check('...and names the overlaid path', ovl.overlay.join(','), 'src/characters/rig.ts');
+
+    // KNOWN-BAD 3 — --worktree. Not a commit at all.
+    set('worktree', '', '');
+    const wt = scanProvenance();
+    check('KNOWN-BAD --worktree: no sha is claimed', wt.sha, '');
+    check('...and it is flagged as not reproducible', /not reproducible/i.test(wt.why), true);
+    set(save.m, save.s, save.o);
+
+    // ── STALENESS. The 2026-08-05 baseline vs 2026-08-11 HEAD is the known-bad input:
+    //    same station set, same rails, same tool — and one row fires anyway.
+    const head = git('rev-parse', 'HEAD');
+    check('a baseline taken at HEAD reports 0 src/ commits behind',
+      baselineStaleness({ provenance: { sha: head } }).srcCommits, 0);
+    // KNOWN-BAD the real shape: a baseline taken before a src/ commit landed. Derived
+    // rather than hardcoded (the real case was `3dcbc9a`, 238 commits and 104 src/
+    // commits behind HEAD on 2026-08-11) so the check does not rot into a SKIP the day
+    // that sha ages out of a shallow clone — and so its COUNT is stable, which
+    // `gatecount` reads.
+    const prevSrc = git('rev-list', '--max-count=1', '--skip=1', 'HEAD', '--', 'src');
+    const s = baselineStaleness({ provenance: { sha: prevSrc } });
+    check('KNOWN-BAD a baseline older than the last src/ commit is seen as BEHIND HEAD', s.srcCommits > 0, true);
+    check('...and the ancestor case is not confused with the descendant case',
+      baselineStaleness({ provenance: { sha: head } }).srcCommits < s.srcCommits, true);
+    // The LEGACY shape: `sha` at the top level, hand-written, no `provenance` block.
+    // It must still be read rather than reported as "no commit recorded".
+    check('a legacy hand-written top-level `sha` is still read', baselineStaleness({ sha: head }).known, true);
+    check('...and is labelled as unverified rather than as trust=served',
+      /legacy/i.test(baselineStaleness({ sha: head }).trust), true);
+    // KNOWN-BAD 4 — a baseline with no sha at all, and one whose sha is not in the repo.
+    check('KNOWN-BAD a baseline with NO recorded commit cannot be assessed', baselineStaleness({}).known, false);
+    check('KNOWN-BAD an unknown commit is refused, not treated as up to date',
+      baselineStaleness({ provenance: { sha: 'f'.repeat(40) } }).known, false);
+    // The run records whether it stilled the HUD, because a stilled sweep and an
+    // unstilled one disagree on playerRankMedian by ~1.5 places on the SAME tree.
+    check('the run records whether --still-hud was applied', scanProvenance().stillHud, STILL_HUD);
+    // KNOWN-BAD both ways round, plus BOTH positive controls — a checker that always
+    // screamed would otherwise "pass" every refusal test here.
+    const mm = (was, now) => stillHudMismatch({ provenance: { stillHud: was } }, now);
+    check('KNOWN-BAD stilled baseline vs unstilled run is refused', /MISMATCH/.test(mm(true, false) ?? ''), true);
+    check('KNOWN-BAD unstilled baseline vs stilled run is refused', /MISMATCH/.test(mm(false, true) ?? ''), true);
+    check('CONTROL both unstilled compares silently', mm(false, false), null);
+    check('CONTROL both stilled compares silently', mm(true, true), null);
+    check('a baseline predating the flag is not falsely refused',
+      /MISMATCH/.test(stillHudMismatch({ provenance: {} }, false) ?? ''), false);
+    check('...and the shipped baseline records the flag, so that branch is not live',
+      JSON.parse(await readFile('tools/scan/colour-baseline.json', 'utf8')).provenance?.stillHud, false);
+  }
+
+  // ── The three stations that are NOT STILL when sampled. Asserted here so that
+  //    deleting the flag, or adding a fourth death-zone station without it, is a gate
+  //    failure rather than a silent return to quoting a 33%-of-frame self-pair.
+  console.log('\nD3. the non-still stations are declared, and the declaration matches the cause');
+  {
+    const un = STATIONS.filter((s) => s.unstill).map((s) => s.id).sort().join(',');
+    check('exactly the three fog stations are flagged unstill', un, 'fog_boundary,fog_inside,fog_late');
+    check('...and the flag names the CAUSE, not just "noisy"',
+      STATIONS.filter((s) => s.unstill).every((s) => s.unstill === 'hud-css'), true);
+    // The cause is "the HUD alarm is armed", and the HUD alarm is armed by standing at or
+    // outside the safe radius. So the flag must track the GEOMETRY, not a hand-kept list:
+    // any station whose fog radius is small enough to arm the zone readout is unstill.
+    const armed = (s) => s.fog < MAX_SAFE_RADIUS;
+    check('KNOWN-BAD every station with a live (non-parked) fog ring is flagged',
+      STATIONS.filter(armed).every((s) => !!s.unstill), true);
+    check('...and no station with the ring parked off the map is flagged',
+      STATIONS.filter((s) => !armed(s)).some((s) => !!s.unstill), false);
+  }
+
   console.log('\nE. the reference figures reproduce (skipped if reference/ is absent)');
   try {
     const rc = await modeRefPlates('reference/images/curated/gameplay');
@@ -1711,6 +2082,17 @@ export const ErrorOverlay=class{}; export default {};`;
           process.exit(2);
         }
 
+        // ── OPTIONAL: still the HUD's CSS keyframes before any capture. See STATIONS'
+        //    `unstill` block. VERIFIED, not assumed: `PAGE_STILL_HUD` returns the number
+        //    of animations STILL running afterwards, and a non-zero answer is announced.
+        //    A stylesheet that failed to apply is indistinguishable from a still page.
+        let stillLeft = null;
+        if (STILL_HUD) {
+          stillLeft = await page.evaluate(PAGE_STILL_HUD);
+          await page.waitForTimeout(150);
+          if (stillLeft) console.error(`  ⚠ ${s.id}: --still-hud left ${stillLeft} animation(s) RUNNING. This frame is not still.`);
+        }
+
         const view = await page.evaluate(() => (window.__fairView ? window.__fairView() : null));
         await page.screenshot({ path: full, timeout: 90000 });
         await page.locator('canvas').first().screenshot({ path: canvasPng, timeout: 90000 });
@@ -1774,7 +2156,9 @@ export const ErrorOverlay=class{}; export default {};`;
         await annotate(full, join(OUT, `${s.id}.marked.png`), m);
         if (mask) await matteOverlay(nohudPng ?? canvasPng, join(OUT, `${s.id}.matte.png`), mask);
         const { _cells, ...clean } = m;
-        results.push({ ...s, url, view, ok: true, errors, matte, metrics: clean });
+        // `...s` carries the station's own `unstill` flag straight into metrics.json, so
+        // a later reader of the JSON alone can tell a non-still station from a still one.
+        results.push({ ...s, url, view, ok: true, errors, matte, metrics: clean, stillHud: STILL_HUD ? { applied: true, animationsLeft: stillLeft } : false });
 
         const col = clean.colour.all;
         console.log(
@@ -1819,16 +2203,61 @@ export const ErrorOverlay=class{}; export default {};`;
   const agg = aggregate(results);
   const rails = agg ? railStatus(agg) : [];
 
+  const prov = scanProvenance();
   const report = {
+    // FIRST key in the file on purpose: the next reader must not have to scroll 5,800
+    // lines of station data to find out which tree this describes.
+    provenance: prov,
     base: BASE, viewport: [W, H], player: PLAYER, enemy: ENEMY, simSpeed: SIM_SPEED,
-    generated: new Date().toISOString(),
+    generated: prov.generated,
     reference: REF, aggregate: agg, rails, stations: results,
   };
   await writeFile(join(OUT, 'metrics.json'), JSON.stringify(report, null, 2));
   if (JSON_OUT) {
     await mkdir(dirname(resolve(JSON_OUT)), { recursive: true });
+    // ── A RE-BASELINE MUST NOT ERASE THE RECORD OF WHAT THE LAST ONE HID.
+    //    `bakedInRegressions` is editorial by nature — it is the human sentence "this
+    //    baseline makes X invisible" — and `src/render/stage.ts` cross-references it by
+    //    name. It was therefore hand-maintained, and a re-baseline silently dropped it.
+    //    So the HISTORY half is mechanical now (copied, never invented) and only the new
+    //    editorial line is left to a human, with a loud reminder that it is missing.
+    //    docs/LESSONS.md §13: a green gate must not be mistaken for a healthy rail.
+    let carried = null;
+    try {
+      const prev = JSON.parse(await readFile(resolve(JSON_OUT), 'utf8'));
+      if (prev?.aggregate) {
+        carried = {
+          provenance: prev.provenance ?? null,
+          sha: prev.provenance?.sha ?? prev.sha ?? null,
+          shaShort: prev.provenance?.shaShort ?? prev.shaShort ?? null,
+          shaNote: prev.shaNote ?? null,
+          generated: prev.provenance?.generated ?? prev.generated ?? null,
+          values: prev.aggregate.values ?? null,
+          bakedInRegressions: prev.bakedInRegressions ?? null,
+          supersedes: prev.supersedes ? '(one level deeper — see the previous file in git history)' : null,
+        };
+      }
+    } catch { /* no previous baseline at this path, or unreadable — first write */ }
+    if (carried) report.supersedes = carried;
     await writeFile(resolve(JSON_OUT), JSON.stringify(report, null, 2));
     console.log(`\nwrote baseline ${JSON_OUT}`);
+    if (carried) {
+      console.log(`  superseded ${carried.shaShort ?? '(unknown commit)'} — its values and bakedInRegressions were CARRIED FORWARD`);
+      console.log('    into `supersedes`, mechanically. 🔴 NOW WRITE THIS BASELINE\'S OWN `bakedInRegressions`:');
+      console.log('    every rail that is FAILing, and every number that just became the reference and is');
+      console.log('    therefore invisible to the next run. That sentence is the only part a tool cannot write.');
+    }
+    console.log(`  provenance: ${prov.sha ? prov.shaShort : '(no commit)'}  trust=${prov.trust}`);
+    console.log(`              ${prov.why}`);
+    // A stored baseline is judged against for weeks. If its provenance is a guess, say
+    // so AT WRITE TIME, when re-running under headserve still costs one command.
+    if (prov.trust !== 'served') {
+      console.log('\n  ⚠ THIS BASELINE\'S PROVENANCE IS NOT AUTHORITATIVE. A baseline is itself a');
+      console.log('    measurement; one taken on an unidentified tree manufactures regressions for');
+      console.log('    everyone downstream (see scanProvenance()). Prefer:');
+      console.log(`      node tools/tmp/headserve.mjs --ref ${prov.headAtWrite.slice(0, 7) || '<sha>'} -- node tools/arena-scan.mjs --json ${JSON_OUT}`);
+    }
+    if (prov.srcDirtyFiles) console.log(`  ⚠ ${prov.srcDirtyFiles} file(s) dirty under src/ in this checkout at write time.`);
   }
 
   // Contact sheets, 6 per sheet, so the whole map is one glance.
@@ -1849,6 +2278,21 @@ export const ErrorOverlay=class{}; export default {};`;
   const lines = [];
   lines.push(`WHOLE-ARENA SCAN  ${new Date().toISOString()}`);
   lines.push(`${BASE}  ${W}x${H}  player=${PLAYER} enemy=${ENEMY} simSpeed=${SIM_SPEED}`);
+  lines.push(`tree: ${prov.sha ? prov.shaShort : '(no commit)'}  trust=${prov.trust}${prov.overlay.length ? `  overlay ${prov.overlay.join(',')}` : ''}`);
+  {
+    const un = okResults.filter((r) => r.unstill);
+    if (un.length && !STILL_HUD) {
+      lines.push('');
+      lines.push(`⚠ NOT STILL WHEN SAMPLED (--still-hud was not passed): ${un.map((r) => r.id).join(', ')}`);
+      lines.push('  Two captures with nothing touched differ by up to 33% of the frame at fog_inside,');
+      lines.push('  100% of it src/ui/hud.ts CSS keyframes (CSS runs off the document timeline, not rAF).');
+      lines.push('  The colour numbers below are unaffected (<=0.0001 drift). NO PIXEL-IDENTITY claim');
+      lines.push('  may be quoted from these rows. See STATIONS `unstill` in tools/arena-scan.mjs.');
+    } else if (un.length) {
+      lines.push(`stilled: --still-hud applied; ${un.map((r) => r.id).join(', ')} are byte-comparable, and the`);
+      lines.push('  keyframes are frozen at t=0 — deterministic, but a BIASED sample of the shipped look.');
+    }
+  }
   lines.push('');
   lines.push('station          rank  pLuma  ringLuma   dL   pSat ringSat  domHue share  clip0 clip255  loudest (cell rgb)');
   for (const r of results) {
@@ -1944,6 +2388,35 @@ export const ErrorOverlay=class{}; export default {};`;
     if (idErr) { console.error(`\n${BASELINE} ${idErr}`); process.exit(2); }
     if (base.aggregate.stationKeys && !agg.stationKeys) console.log('\n  (this run predates stationKeys — position check skipped)');
     if (!base.aggregate.stationKeys) console.log('\n  (baseline predates stationKeys — a MOVED station would not be caught; re-baseline)');
+    // ── WHICH TREE IS THE REFERENCE? Printed BEFORE the table, because it decides how
+    //    to read every row under it. See scanProvenance().
+    const st = baselineStaleness(base);
+    console.log(`\n── the BASELINE itself: ${BASELINE} ──`);
+    if (!st.known) {
+      console.log(`  ⚠ ${st.why}. Staleness CANNOT BE ASSESSED, so a REGRESSION below may be`);
+      console.log('    this run, or may be the tree having moved since. Re-baseline under headserve.');
+    } else {
+      console.log(`  taken at ${st.shaShort}  (${st.generated})   trust=${st.trust}`);
+      const stale = (st.srcCommits ?? 0) > 0;
+      console.log(`  HEAD is ${st.commits ?? '?'} commit(s) ahead, ${st.srcCommits ?? '?'} of them touching src/`);
+      if (st.toolMoved) console.log('  ⚠ tools/arena-scan.mjs ITSELF has changed since — the instrument moved too.');
+      if (stale) {
+        console.log('\n  🟡 STALE BASELINE. Every row below compares TODAY\'S TREE against a tree that is');
+        console.log(`     ${st.srcCommits} src/ commit(s) old. A REGRESSION here says the arena moved since ${st.shaShort};`);
+        console.log('     it does NOT say your change moved it. To tell those apart, either re-baseline');
+        console.log(`     (\`--json ${BASELINE}\` under \`headserve --ref <sha>\`) or run this same command on a`);
+        console.log('     tree WITHOUT your change — if the row fires there too, it is not yours.');
+        console.log('     (2026-08-05..11: a 6-day-old baseline fired `player salience rank 19.5 -> 31`');
+        console.log('      on BOTH arms of a HEAD-to-HEAD control. Three agents were told to ignore it.)');
+      } else {
+        console.log('  ✓ no src/ commit since — a REGRESSION below is attributable to this tree.');
+      }
+    }
+    // ── SAME TREE, DIFFERENT SAMPLE. A stilled run and an unstilled one disagree on
+    //    `playerRankMedian` by ~1.5 places for reasons that have nothing to do with the
+    //    arena, so comparing across the two is a rubric mismatch — the class of error
+    //    CLAUDE.md rule 7 bans for critic scores, arriving through a CLI flag instead.
+    { const m = stillHudMismatch(base, STILL_HUD); if (m) console.log(m); }
     console.log(`\n── colour budget vs baseline: ${BASELINE} ──`);
     console.log('  rail                          base      now     target   moved      verdict');
     for (const row of compareBaseline(base.aggregate, agg)) {
@@ -1951,6 +2424,12 @@ export const ErrorOverlay=class{}; export default {};`;
       if (row.verdict === 'REGRESSION') bad++;
     }
     console.log(bad ? `\n  ${bad} colour regression(s). A pass that moves TOWARD the reference never fires this.` : '\n  no colour regressions.');
+    // The exit code is UNCHANGED by staleness, deliberately. Provenance explains a
+    // verdict; softening the verdict would hide the next real regression to excuse the
+    // last fake one, and the fault was the reference, not the threshold.
+    if (bad && st.known && (st.srcCommits ?? 0) > 0) {
+      console.log(`  ⚠ ...but read the STALE BASELINE note above first: the reference is ${st.srcCommits} src/ commits old.`);
+    }
   }
   if (GATE) {
     const failed = rails.filter((r) => r.status === 'FAIL');
