@@ -308,6 +308,7 @@ const OFFLINE = [
   { key: 'tools/tmp/as_cost.mjs --selftest', probes: [pr(['tools/tmp/as_cost.mjs', '--selftest'], /^\s*(\d+)\/\d+ assertions passed\s*$/m)] },
   { key: 'tools/tmp/cb_rig.mjs --selftest',    probes: [pr(['tools/tmp/cb_rig.mjs', '--selftest'], /^cb_rig --selftest: (\d+)\/\d+ passed/m)] },
   { key: 'tools/tmp/dc_guard.mjs --selftest',  probes: [pr(['tools/tmp/dc_guard.mjs', '--selftest'], /^dc_guard selftest: (\d+)\/\d+ pass/m)] },
+  { key: 'tools/tmp/ic_collect.mjs --selftest', probes: [pr(['tools/tmp/ic_collect.mjs', '--selftest'], /^ic_collect selftest (\d+) pass \/ \d+ fail/m)] },
   { key: 'tools/tmp/icon_score.mjs --selftest', probes: [pr(['tools/tmp/icon_score.mjs', '--selftest'], /^selftest (\d+) pass \/ \d+ fail/m)] },
   { key: 'tools/tmp/ic_spec.mjs --selftest',   probes: [pr(['tools/tmp/ic_spec.mjs', '--selftest'], /^ic_spec selftest (\d+) pass \/ \d+ fail/m)] },
   { key: 'tools/tmp/ic_pair.mjs --selftest',   probes: [pr(['tools/tmp/ic_pair.mjs', '--selftest'], /^ic_pair selftest (\d+) pass \/ \d+ fail/m)] },
