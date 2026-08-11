@@ -228,6 +228,20 @@ export const FOG_DAMAGE = 15;
  * is unchanged and is if anything more clearly right for it: the argument was never
  * "protect the player", it was "the endgame must be decided by play and not by whichever
  * pool happens to be smaller", and that is symmetric in the pools by construction.
+ *
+ * ── 🚨 2026-08-11: THIS IS NO LONGER "THE" FLOOR. IT IS THE FLOOR AT N <= 4 ──
+ *
+ * **The value is unchanged and the reasoning above is unchanged.** What moved is its
+ * SCOPE. Everything above describes it as the floor, full stop, as though a match had two
+ * seats forever — and the sentence *"a 45 wu-wide safe annulus around the pot"* is true at
+ * every fighter count, which is precisely the defect `DECISIONS §53b` names: six fighters
+ * finished the match standing on a one-body-wide ring, already inside each other's range.
+ *
+ * `minSafeRadiusFor(n)` below is what `sim.ts` reads now. It returns **exactly this
+ * constant for n <= 4** — so the duel and the four-player match are bit-identical to the
+ * shipped game — and a larger, derived radius at 5 and 6. This constant keeps its own job:
+ * it is the POT term of that maximum, the radius below which "safe ground" does not exist
+ * at any fighter count. Nothing here is reversed; a second term was added beside it.
  */
 export const MIN_SAFE_RADIUS = 140;
 
@@ -968,6 +982,168 @@ export const REACH = {
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// THE ENDGAME RING SCALES WITH FIGHTER COUNT — DECISIONS §53b
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri, 2026-08-11, answering §53b: *"Scale the radius with player count"*.
+//
+// ── THE DEFECT, AND WHY A BIGGER ARENA DOES NOT FIX IT ──────────────────────
+//
+// `MIN_SAFE_RADIUS` was 140 wu and CONSTANT, while `POT.dangerRadius` burns out to 95 and
+// the pot's solid box (`POT.bodyRadius * 2`, registered by `arena/hazards.ts`) blocks a
+// fighter's CENTRE inside 73. So the ground that costs 0 HP/s at the end of every match
+// was an annulus **45 wu wide — 1.07 body widths — at every fighter count and at every
+// arena size.** ⚠️ `MAX_SAFE_RADIUS` never enters that expression, so doubling the map
+// changes nothing about it. That is why §53b is answered here and not inside §48.
+//
+// ── WHERE A FIGHTER ACTUALLY STANDS, AND WHY THE CHORD IS MEASURED THERE ────
+//
+// The safe annulus runs from the pot's burn ring (`POT.dangerRadius`) out to the fog
+// (`safeRadius`). BOTH edges cost HP. The one circle inside it adjacent to neither is
+//
+//     rStand = (POT.dangerRadius + safeRadius) / 2
+//
+// so that is where the endgame is fought and that is where spacing has to be measured.
+// N fighters spread evenly on it stand one chord apart:
+//
+//     chord = 2 * rStand * sin(pi/N) = (POT.dangerRadius + safeRadius) * sin(pi/N)
+//
+// The 2 and the /2 cancel — which is why the POT radius appears in the answer at all. A
+// derivation that "simplifies" it away is not tidier, it is a different (and wrong) rule:
+// it re-creates the annulus by pricing the ring as though the middle of it were standable.
+// ⚠️ And this is the CONSERVATIVE circle: N points on the OUTER edge of the annulus are
+// strictly further apart, so any real placement only gains room over this bound.
+//
+// ── THE BAND: THE TOP OF THE LADDER, PLUS THE HIT RADIUS ────────────────────
+//
+// The rule is that **no fighter is inside any weapon's reach of a neighbour while
+// standing still**, so closing to a fight is a decision rather than the starting state.
+//
+// That is `ENDGAME_STANDOFF` below, and each half of it is forced:
+//
+//   * `REACH.rangedMax` (140) is the ladder's ceiling — the longest reach any weapon has,
+//     ultimates aside. Any shorter rung leaves live weapons on the ring: at
+//     `REACH.meleeHeavy` (84) every one of the four ranged rungs still reaches.
+//   * `+ max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY)` because a projectile's usable
+//     reach is `range + the TARGET's hit radius`: `sim.ts:stepProjectiles` expires it at
+//     `traveled >= w.range` and connects it inside `target.hitRadius`. `render/camera.ts`
+//     computes the same quantity as `MAX_THREAT_REACH` and calls it "the attacker's usable
+//     reach". The MAX over the two constants rather than the player's alone is deliberate:
+//     `Fighter.hitRadius` is per-fighter (25.2 for every seat of a 3-6 brawl, 26 for the
+//     bot in a duel), the bound must hold for the larger, and taking the max makes this
+//     independent of `DECISIONS §49c`'s seat dial — which has already changed once.
+//
+// 🚨 AND THE MAX EARNS ITS 0.8 wu FOR A SECOND, MEASURED REASON: **the exact boundary is
+// not a miss, it is a coin flip in the last ulp.** `traveled` is a running SUM of per-tick
+// step lengths, so 874 additions of 0.16 reach 139.99999999999773 rather than 140, the
+// expiry does not fire, and the hit test runs once more at 25.99999999999 against a 26 wu
+// radius. The distance is computed on ABSOLUTE coordinates, so the same shot at the same
+// separation resolves differently depending on where on the map it is taken — measured, it
+// lands in a 3000 wu arena and misses in a 4000 wu one. `sim.test.mjs` §29(d) runs that
+// sweep and asserts the INDETERMINACY rather than a direction. Taking the max puts the
+// binding chord (166.00) 0.8 wu clear of a brawl's real 165.2 wu reach — ~5e15 ulps —
+// instead of exactly on it. The 0.8 is spent out of N=4's headroom and leaves 0.17 wu
+// there, which is enough: no seat count moves for it.
+//
+// ⚠️ `REACH.ultimateSlam` (400) is EXCLUDED, exactly as `render/camera.ts` excludes it from
+// `FAIR_PLAY.radiusUnits` and for the same reason: it is an 8 s map-scale ultimate whose
+// tell is the screen-filling slam. Covering it would demand a 500 wu final ring.
+//
+// ── AND THE UPPER BOUND THIS LANDS INSIDE, WHICH IS THE PART THAT MAKES IT A DESIGN ──
+//
+// `FAIR_PLAY.radiusUnits` = `REACH.rangedMax + HIT_RADIUS_VS_PLAYER + 34.0` = **199.2 wu**
+// is the disc every supported aspect ratio is guaranteed to show around you. 166 sits
+// inside it. So the final ring is exactly: **every neighbour is out of reach and still on
+// screen** — you can see the fighter you cannot yet hit. A longer band would push the
+// fighter who is about to shoot you off camera, which is the failure the whole `REACH`
+// retune exists to remove.
+//
+// ── WHAT IT PRODUCES ───────────────────────────────────────────────────────
+//
+//     N   floor    binds     rStand   chord      vs the shipped 140
+//     2   140.00   pot       117.50   235.00     unchanged
+//     3   140.00   pot       117.50   203.52     unchanged
+//     4   140.00   pot       117.50   166.17     unchanged  <-- 0.17 wu of margin
+//     5   187.42   spacing   141.21   166.00     +47.42
+//     6   237.00   spacing   166.00   166.00     +97.00
+//
+// The threshold sits between 4 and 5, which is exactly what §53b's own table says: N=4's
+// 166 wu chord is *"outside every reach — fine"*, N=5's 138 is inside `rangedMax` and
+// N=6's 117 is inside `rangedLong`. The derivation reproduces that verdict rather than
+// being fitted to it — the two floors were derived independently and N=4 fell out.
+//
+// ⚠️ **N=4 CLEARS BY 0.17 wu AND THAT RAZOR IS STATED, NOT SMOOTHED.** It is the reason
+// the duel and the four-player match stay bit-identical. A one-unit move in
+// `POT.dangerRadius`, in `PLAYER_SIZE` (via `HIT_RADIUS_VS_PLAYER`) or in
+// `REACH.rangedMax` takes N=4 off 140, so `sim.test.mjs` §29(b) PRINTS the per-N margin
+// instead of only asserting the sign — the day it flips should be visible in the run that
+// flips it, not in the balance table three passes later.
+//
+// ── THE FOG SCHEDULE IS DERIVED FROM THIS. NEVER PIN IT. ───────────────────
+//
+// `sim.ts` closes the ring as `max(minSafeRadiusFor(N), maxSafeRadius * (1 - progress))`,
+// so the floor decides the moment the ring STOPS:
+//
+//     tFloor = MATCH_DURATION_MS * (1 - floor / arena.maxSafeRadius)
+//
+// Both terms are read at run time; neither is a literal. §48 measured the endgame window
+// at N=2 as **6.4 s on the shipped map and 3.2 s on the x4 map** — this formula gives
+// 6.34 s and 3.17 s, which is what says the schedule model here is the shipped one. At
+// N=6 it gives **10.74 s** and **5.37 s**: scaling the floor with N gives back part of
+// what the bigger arena costs, which was one of §48's two named scale-only defects.
+// ⚠️ Pinning a literal here is a MEASURED failure mode, not a hypothetical — the 1x
+// literal 993 carried onto a 2x map put both spawns OUTSIDE the opening ring: 880/880 no
+// contact, every match over in 2.03 s.
+//
+// ── THE SEATED COUNT, NOT THE LIVING ONE ───────────────────────────────────
+//
+// `sim.ts` passes `state.fighters.length`, which never changes for the life of a match.
+// Reading the LIVING count would make the ring GROW as fighters die — a fog that recedes,
+// un-lethalling ground someone is already burning on, and breaking the monotonicity that
+// `audio/director.ts`'s one-shot floor latch and `ui/hud.ts`'s `msUntilEdge` inversion are
+// both built on. A closing ring is a SCHEDULE, and a schedule is known at the whistle.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The separation at which one fighter standing still cannot be touched by another
+ * standing still: the longest weapon `range` in the game plus the largest hit radius a
+ * target can carry. **166 wu.** Derived, never authored — see the block above for why
+ * each half is forced and why `REACH.ultimateSlam` is excluded.
+ */
+export const ENDGAME_STANDOFF = REACH.rangedMax + Math.max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY);
+
+/**
+ * The floor on the closing ring for a match of `fighterCount` fighters — the radius the
+ * fog stops at, and the only thing `sim.ts` clamps `safeRadius` with.
+ *
+ * `max` of two independently derived terms, each binding in its own regime:
+ *
+ *   * `MIN_SAFE_RADIUS` — the POT term. Safe ground must exist at all. Binds at N <= 4.
+ *   * `ENDGAME_STANDOFF / sin(pi/N) - POT.dangerRadius` — the SPACING term, the smallest
+ *     radius whose mid-annulus chord reaches `ENDGAME_STANDOFF`. Binds at N >= 5.
+ *
+ * It returns the SMALLEST radius satisfying both, deliberately: a larger ring would also
+ * satisfy the spacing rule and would spend endgame seconds buying room nobody asked for.
+ * The genre convention at the top of `MIN_SAFE_RADIUS` still holds — a final circle is
+ * small, not empty — it just is not the same "small" for two fighters and for six.
+ */
+export function minSafeRadiusFor(fighterCount: number): number {
+  const n = Math.floor(fighterCount);
+  // ⚠️ Below three there is no "evenly spaced neighbour" to be spaced FROM: at two the
+  // chord is the diameter, and at one it does not exist — `Math.sin(Math.PI / 1)` is
+  // 1.22e-16 rather than 0, so an unguarded formula would return 1.4e18 instead of
+  // throwing, and a degenerate one-fighter state would silently get an infinite safe zone.
+  //
+  // The guard is not hiding a discontinuity: at n = 2 the spacing term is 166 - 95 = 71 wu,
+  // far below the floor, so both paths give `MIN_SAFE_RADIUS` and `sim.test.mjs` §29(a)
+  // asserts they agree. It also means the SHIPPED DUEL evaluates no `Math.sin` at all —
+  // one comparison and a constant return — which is what keeps `--bitid` at N=2 free of
+  // any question about libm reproducibility, and keeps the hot path's cost unchanged.
+  if (!Number.isFinite(n) || n < 3) return MIN_SAFE_RADIUS;
+  return Math.max(MIN_SAFE_RADIUS, ENDGAME_STANDOFF / Math.sin(Math.PI / n) - POT.dangerRadius);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CONCEALMENT — walk-through cover, stated ONCE because it has four readers
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -1145,6 +1321,16 @@ export const CONCEAL_ENDGAME_PROGRESS = 0.75;
  * eye. 248.25 is the derived floor, deliberately looser than that advice — an arena agent
  * following the advice satisfies this constant with 52 wu to spare, and an arena agent who
  * ignores it still cannot put a bush in the hub.
+ *
+ * ⚠️ **THIS STILL FLOORS ON `MIN_SAFE_RADIUS`, NOT ON `minSafeRadiusFor(MAX_FIGHTERS)`,
+ * AND THAT IS A CHOICE.** `state.ts` imports this file, so `MAX_FIGHTERS` cannot be read
+ * here without a cycle — and coupling them would MOVE the keepout silently rather than
+ * surface a conflict, which is the wrong failure mode for a competitive-fairness rule.
+ * The relationship is asserted instead: on the shipped kitchen the keepout is 248.25
+ * against a **237 wu six-fighter ring** (11.25 wu of margin) and on the x4 map 496.25, so
+ * no concealment can sit inside the final ring at any seat count today.
+ * `sim.test.mjs` §29(e) is that row, and it is the one that fails first if
+ * `ENDGAME_STANDOFF` is ever derived upward.
  */
 export function concealmentKeepoutRadius(maxSafeRadius: number): number {
   return Math.max(MIN_SAFE_RADIUS, maxSafeRadius * (1 - CONCEAL_ENDGAME_PROGRESS));

@@ -86,6 +86,12 @@ import {
   // number the projectile loop's ternary used to branch on — a literal here would still
   // pass after either constant moved.
   HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY,
+  // Section 29: `DECISIONS §53b`, the endgame ring scaling with fighter count. Both come in
+  // for the same reason every derived constant above does — the section's claim is that the
+  // floor is DERIVED from the reach ladder and the pot, so it re-derives the chord longhand
+  // from `REACH`/`POT`/`HIT_RADIUS_*` and compares. A literal 166 or 237 here would keep
+  // passing after the ladder, the hit radius or the hazard moved out from under it.
+  ENDGAME_STANDOFF, minSafeRadiusFor,
 } from './rules.ts';
 // Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
 // no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
@@ -4960,6 +4966,405 @@ console.log('\n28. The cap off: per-slot input, a fighter list, and the split ta
       brawl.phase === 'ended' && brawl.winnerId === 5
       && kill.filter((e) => e.type === 'match-ended').length === 1,
       `phase ${brawl.phase}, winnerId ${brawl.winnerId}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 29. THE ENDGAME RING SCALES WITH FIGHTER COUNT (DECISIONS §53b)
+//
+// ⚠️ **NO CORPUS CAN SHOW THIS.** Nothing in `src/` seats more than two fighters, and even
+// at N=2 the endgame ring is reached by only the last 6.34 s of a match that goes the
+// distance. So this section is built the way §49a's rung was: the geometry is CONSTRUCTED
+// by hand, the chord is asserted against the reach ladder written longhand, and the
+// known-bad battery lives outside — `node tools/tmp/rg2_mutants.mjs`, one deliberately
+// wrong sim per failure mode: a radius that ignores N, one that ignores the pot, the chord
+// off by one seat in each direction, its factor of 2 applied twice, the hit radius dropped
+// or taken as a `min`, the pot floor dropped, the guard widened, the LIVING count read
+// instead of the seated one, and `sim.ts` pinning the count at 2. Every one is caught, and
+// its §0 is the positive control that says so non-vacuously.
+//
+// The one thing that IS reachable — that the shipped duel is untouched — is asserted here
+// against the live sim tick by tick, and proven bit-for-bit by `conceal_lab --bitid`.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n29. The endgame ring scales with fighter count (DECISIONS §53b)');
+{
+  /** Where a fighter stands in the final annulus: adjacent to neither hazard. Longhand. */
+  const standRadius = (floor) => (POT.dangerRadius + floor) / 2;
+  /** The gap between two of N fighters spread evenly on that circle. Longhand. */
+  const chordAt = (n, floor) => 2 * standRadius(floor) * Math.sin(Math.PI / n);
+
+  // ── (a) N <= 4 IS A NO-OP, AND THE GUARD IS NOT HIDING A DISCONTINUITY ────
+  {
+    check('`minSafeRadiusFor(2)` is EXACTLY the shipped constant — the duel is untouched',
+      minSafeRadiusFor(2) === MIN_SAFE_RADIUS, `${minSafeRadiusFor(2)} !== ${MIN_SAFE_RADIUS}`);
+    check('…and so are N=3 and N=4, so `DECISIONS §53a`\'s four-player map is untouched too',
+      minSafeRadiusFor(3) === MIN_SAFE_RADIUS && minSafeRadiusFor(4) === MIN_SAFE_RADIUS,
+      `${minSafeRadiusFor(3)} / ${minSafeRadiusFor(4)}`);
+
+    // The n < 3 early return could be hiding a jump: the spacing term might have been
+    // ABOVE the floor at n=2 and simply not evaluated. Write the general formula out here
+    // and check it agrees, so the guard is proven to be a guard against sin(pi/1) and not
+    // a special case with a different answer in it.
+    const generalAt2 = Math.max(MIN_SAFE_RADIUS, ENDGAME_STANDOFF / Math.sin(Math.PI / 2) - POT.dangerRadius);
+    check('the n<3 early return agrees with the general formula at n=2 (it guards sin(pi/1), not a special case)',
+      generalAt2 === minSafeRadiusFor(2), `general ${generalAt2} vs guarded ${minSafeRadiusFor(2)}`);
+
+    // Degenerate inputs. `Math.sin(Math.PI / 1)` is 1.2246e-16, not 0, so an unguarded
+    // formula returns 1.4e18 rather than throwing — a one-fighter state would silently get
+    // an infinite safe zone and the fog would never bite.
+    check('a degenerate fighter count (1, 0, NaN) returns the floor, not 1.4e18',
+      minSafeRadiusFor(1) === MIN_SAFE_RADIUS && minSafeRadiusFor(0) === MIN_SAFE_RADIUS
+      && minSafeRadiusFor(NaN) === MIN_SAFE_RADIUS,
+      `${minSafeRadiusFor(1)} / ${minSafeRadiusFor(0)} / ${minSafeRadiusFor(NaN)}`);
+
+    // The live sim, tick for tick, against the pre-change formula written longhand. This is
+    // the unit-suite half of the bit-identity claim: `conceal_lab --bitid` proves it across
+    // 110 matchups, and this proves the one line that changed still evaluates to the old
+    // expression at two seats even when nothing else in a match is happening.
+    const st = playingMatch(makeArena({ width: 2000, height: 2000, maxSafeRadius: 993 }));
+    st.player.hp = st.player.maxHp = 1e9;
+    st.enemy.hp = st.enemy.maxHp = 1e9;
+    let drift = 0;
+    let sawFloor = 0;
+    let ticks = 0;
+    let prev = Infinity;
+    let rose = 0;
+    for (let i = 0; i < 600 && st.phase === 'playing'; i++) {
+      stepMatch(st, 100, noInput);
+      const progress = 1 - st.timeRemaining / MATCH_DURATION_MS;
+      const legacy = Math.max(MIN_SAFE_RADIUS, st.arena.maxSafeRadius * (1 - progress));
+      if (st.safeRadius !== legacy) drift++;
+      if (st.safeRadius === MIN_SAFE_RADIUS) sawFloor++;
+      if (st.safeRadius > prev) rose++;
+      prev = st.safeRadius;
+      ticks++;
+    }
+    check('the corpus this no-op runs on is not vacuous — a full match that REACHES the floor',
+      ticks > 400 && sawFloor > 50, `${ticks} ticks, ${sawFloor} at the floor`);
+    check('every tick of a two-fighter match has the pre-change `max(MIN_SAFE_RADIUS, …)` radius',
+      drift === 0, `${drift} of ${ticks} ticks differ`);
+    check('…and the ring is monotone non-increasing (a fog that recedes would break two latches)',
+      rose === 0, `${rose} ticks rose`);
+  }
+
+  // ── (b) THE CHORD, LONGHAND, AGAINST THE REACH LADDER ────────────────────
+  {
+    check('`ENDGAME_STANDOFF` is derived from the ladder, not authored',
+      ENDGAME_STANDOFF === REACH.rangedMax + Math.max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY),
+      `${ENDGAME_STANDOFF}`);
+
+    // The rung the standoff has to sit under, derived exactly as `render/camera.ts` derives
+    // `FAIR_PLAY.radiusUnits` (max range + hit radius + a reaction distance that is
+    // `TRAIL.speedBoost` closing speeds over one evade window). The design claim is that a
+    // neighbour on the final ring is OUT OF REACH AND STILL ON SCREEN, so both bounds hold.
+    const fairRadius = REACH.rangedMax + HIT_RADIUS_VS_PLAYER + TRAIL.speedBoost * HIT_RADIUS_VS_PLAYER;
+    check(`the standoff is inside the fair-play disc (${ENDGAME_STANDOFF} < ${fairRadius.toFixed(2)}) — out of reach, still on screen`,
+      ENDGAME_STANDOFF < fairRadius, `${ENDGAME_STANDOFF} vs ${fairRadius}`);
+
+    const margins = [];
+    for (let n = 2; n <= MAX_FIGHTERS; n++) {
+      const floor = minSafeRadiusFor(n);
+      const chord = chordAt(n, floor);
+      margins.push(`N=${n} r=${floor.toFixed(2)} chord=${chord.toFixed(2)} (+${(chord - ENDGAME_STANDOFF).toFixed(2)})`);
+    }
+    // PRINTED, not only asserted: N=4 clears by 0.17 wu and that razor is what keeps the
+    // four-player match bit-identical. The day a pot or ladder change flips it, it should be
+    // visible in the run that flips it.
+    console.log(`     chord ladder: ${margins.join('  ')}`);
+
+    let tight = 0;
+    let outside = 0;
+    for (let n = 2; n <= MAX_FIGHTERS; n++) {
+      const floor = minSafeRadiusFor(n);
+      if (chordAt(n, floor) >= ENDGAME_STANDOFF - 1e-9) outside++;
+      // Where the SPACING term binds the ring is the SMALLEST radius that satisfies the
+      // rule, so the chord lands exactly on the standoff. This is the two-sided half of the
+      // claim and it is what catches a radius that ignores the pot: dropping
+      // `- POT.dangerRadius` gives a ring that is too BIG, which passes a one-sided test.
+      if (floor > MIN_SAFE_RADIUS && approx(chordAt(n, floor), ENDGAME_STANDOFF, 1e-9)) tight++;
+    }
+    check(`no fighter on the final ring is inside another's reach, N=2..${MAX_FIGHTERS}`,
+      outside === MAX_FIGHTERS - 1, `${outside} of ${MAX_FIGHTERS - 1}`);
+    check('…and where the spacing term binds, the ring is the SMALLEST radius that satisfies it',
+      tight === 2, `${tight} of 2 (N=5, N=6)`);
+
+    // WHICH term binds, per N. A radius that ignored N would floor everywhere; a radius that
+    // ignored the pot would never floor. Both are caught by pinning the regime boundary.
+    const bindsPot = [];
+    const bindsSpacing = [];
+    for (let n = 2; n <= MAX_FIGHTERS; n++) (minSafeRadiusFor(n) === MIN_SAFE_RADIUS ? bindsPot : bindsSpacing).push(n);
+    check('the POT term binds at N=2..4 and the SPACING term at N=5..6 — the threshold is between 4 and 5',
+      bindsPot.join(',') === '2,3,4' && bindsSpacing.join(',') === '5,6',
+      `pot ${bindsPot.join(',')} | spacing ${bindsSpacing.join(',')}`);
+
+    // KNOWN-BAD, and it is the shipped defect: §53b's own table, re-derived here. The
+    // constant floor put N=5 inside `rangedMax` and N=6 inside `rangedLong`.
+    const old5 = chordAt(5, MIN_SAFE_RADIUS);
+    const old6 = chordAt(6, MIN_SAFE_RADIUS);
+    check(`KNOWN-BAD: at the constant 140 floor, N=5 (${old5.toFixed(1)}) is inside REACH.rangedMax and N=6 (${old6.toFixed(1)}) inside REACH.rangedLong`,
+      old5 < REACH.rangedMax && old5 < ENDGAME_STANDOFF && old6 < REACH.rangedLong,
+      `${old5} / ${old6}`);
+    check('…and N=4 at the same constant floor was already fine, which is why it does not move',
+      chordAt(4, MIN_SAFE_RADIUS) >= ENDGAME_STANDOFF,
+      `${chordAt(4, MIN_SAFE_RADIUS)} vs ${ENDGAME_STANDOFF}`);
+
+    // The whole roster, structurally: no authored weapon reaches across the standoff.
+    // `REACH.ultimateSlam` is excluded exactly as `render/camera.ts` excludes it from the
+    // fair-play radius — an 8 s map-scale ultimate whose tell is the slam visual.
+    const maxTargetHit = Math.max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY);
+    const overreach = [];
+    let weapons = 0;
+    for (const id of CHARACTER_IDS) {
+      for (const w of CHARACTERS[id].weapons) {
+        if (w.giantSlam) continue;
+        weapons++;
+        if (w.range + maxTargetHit > ENDGAME_STANDOFF) overreach.push(`${id}/${w.key} ${w.range}`);
+      }
+    }
+    check(`no weapon in the roster reaches across the standoff (${weapons} weapons, giantSlam excluded)`,
+      weapons >= 30 && overreach.length === 0, overreach.join(', '));
+  }
+
+  // ── (c) MONOTONIC, AND THE POT RULE FROM §11 GENERALISED TO EVERY N ──────
+  {
+    let dips = 0;
+    let potBreaks = 0;
+    for (let n = MIN_FIGHTERS; n <= MAX_FIGHTERS; n++) {
+      if (n > MIN_FIGHTERS && minSafeRadiusFor(n) < minSafeRadiusFor(n - 1)) dips++;
+      if (minSafeRadiusFor(n) < POT.dangerRadius + PLAYER_SIZE / 2) potBreaks++;
+    }
+    check('the floor is non-decreasing in fighter count',
+      dips === 0, `${dips} dips`);
+    check(`the §11 rule holds at EVERY seat count: the floor clears ${POT.dangerRadius} by at least half a body`,
+      potBreaks === 0, `${potBreaks} counts break it`);
+    check('the largest ring still closes — the six-fighter floor is far inside the shipped opening radius',
+      minSafeRadiusFor(MAX_FIGHTERS) < 993 * 0.5,
+      `${minSafeRadiusFor(MAX_FIGHTERS)} vs 993`);
+  }
+
+  // ── (d) THE LIVE SIM AT SIX SEATS, AND ONE REAL PROJECTILE ACROSS THE CHORD ──
+  {
+    const N = MAX_FIGHTERS;
+    const arena = makeArena({ width: 3000, height: 3000, maxSafeRadius: 993 });
+    const ringSpawn = (i) => ({
+      x: arena.center.x + 900 * Math.cos((i / N) * Math.PI * 2),
+      y: arena.center.y + 900 * Math.sin((i / N) * Math.PI * 2),
+    });
+    const six = createMatch(arena, Array.from({ length: N }, (_, i) => ({ characterId: 'hamburger', spawn: ringSpawn(i) })));
+    six.phase = 'playing';
+    for (const f of six.fighters) { f.hp = f.maxHp = 1e9; }
+    let minSeen = Infinity;
+    let rose = 0;
+    let prev = Infinity;
+    let ticks = 0;
+    for (let i = 0; i < 600 && six.phase === 'playing'; i++) {
+      stepMatch(six, 100, noInput);
+      if (six.safeRadius > prev) rose++;
+      prev = six.safeRadius;
+      minSeen = Math.min(minSeen, six.safeRadius);
+      ticks++;
+    }
+    check('a six-fighter match bottoms out at the six-fighter floor, not the constant one',
+      approx(minSeen, minSafeRadiusFor(N), 1e-9) && minSeen > MIN_SAFE_RADIUS,
+      `min seen ${minSeen} vs ${minSafeRadiusFor(N)} (constant floor ${MIN_SAFE_RADIUS})`);
+    check('…over a full match, monotone non-increasing, and the run reached the floor',
+      rose === 0 && ticks > 400, `${rose} rises in ${ticks} ticks`);
+
+    // THE SEATED COUNT, NOT THE LIVING ONE — and this is invisible to `--bitid`, because at
+    // two seats the two counts only ever differ on the tick the match ends. Reading the
+    // living count would restart the close under the survivors: at three left the floor
+    // would drop 237 -> 140 and the fog would eat 97 wu of ground they were standing on.
+    {
+      // ⚠️ 400 ticks, NOT 500. The first draft ran 50 s of a 45 s match, so the whistle had
+      // already blown and `stepMatch` skips the whole ring block once `phase !== 'playing'` —
+      // `safeRadius` was simply frozen at its last value and the row passed against a sim
+      // that read the living count. The phase is asserted below so it cannot go quiet again.
+      const st = createMatch(arena, Array.from({ length: N }, (_, i) => ({ characterId: 'hamburger', spawn: ringSpawn(i) })));
+      st.phase = 'playing';
+      for (const f of st.fighters) { f.hp = f.maxHp = 1e9; }
+      for (let i = 0; i < 400 && st.phase === 'playing'; i++) stepMatch(st, 100, noInput);
+      const atFloor = st.safeRadius;
+      for (const id of [3, 4, 5]) applyDamage(st, st.fighters[id], 1e9, null, { kind: 'fog' }, []);
+      stepMatch(st, 100, noInput);
+      check('three of six knocked out does NOT reopen the close — the ring reads the SEATED count',
+        st.phase === 'playing' && st.fighters.filter((f) => f.alive).length === 3
+        && approx(st.safeRadius, minSafeRadiusFor(N), 1e-9) && approx(atFloor, minSafeRadiusFor(N), 1e-9),
+        `phase ${st.phase}, ${atFloor} -> ${st.safeRadius}, three-seat floor would be ${minSafeRadiusFor(3)}`);
+    }
+
+    // A fighter standing where the endgame is actually fought takes nothing at the whistle.
+    {
+      const st = createMatch(arena, Array.from({ length: N }, (_, i) => ({ characterId: 'hamburger', spawn: ringSpawn(i) })));
+      st.phase = 'playing';
+      st.timeRemaining = 100;
+      const r = (POT.dangerRadius + minSafeRadiusFor(N)) / 2;
+      st.fighters.forEach((f, i) => {
+        const a = (i / N) * Math.PI * 2;
+        f.x = arena.center.x + r * Math.cos(a);
+        f.y = arena.center.y + r * Math.sin(a);
+      });
+      const hp0 = st.fighters.map((f) => f.hp);
+      stepMatch(st, 99, noInput);
+      check('six fighters spread on the final ring take no fog and no pot damage at the whistle',
+        st.fighters.every((f, i) => f.hp === hp0[i]),
+        `R=${st.safeRadius}, r=${r}, hp ${st.fighters.map((f) => f.hp).join('/')}`);
+    }
+
+    // ── THE PROJECTILE. The claim is about the COMBAT CODE, not about my arithmetic. ──
+    //
+    // The longest authored ranged weapon, chosen from the roster rather than named, fired
+    // point-blank-accurately at a neighbour exactly one chord away. `stepProjectiles`
+    // expires it at `traveled >= w.range` BEFORE the hit test, and connects only inside
+    // `target.hitRadius` — so this is the real reach, not a model of it.
+    const LONGEST = (() => {
+      let best = null;
+      for (const id of CHARACTER_IDS) {
+        for (const w of CHARACTERS[id].weapons) {
+          if (w.type !== 'ranged' || w.giantSlam || w.homing || w.pellets) continue;
+          if (!best || w.range > best.w.range) best = { id, w, index: CHARACTERS[id].weapons.indexOf(w) };
+        }
+      }
+      return best;
+    })();
+    check(`the longest plain ranged weapon in the roster is at REACH.rangedMax (${LONGEST && LONGEST.id}/${LONGEST && LONGEST.w.key})`,
+      !!LONGEST && LONGEST.w.range === REACH.rangedMax, LONGEST ? `${LONGEST.w.range}` : 'none found');
+
+    /**
+     * Fire `LONGEST` from slot 0 at slot 1, `gap` wu away in a `seats`-fighter match, and
+     * report the damage dealt. Spare seats sit 900 wu out so slot 1 is unambiguously the
+     * nearest opponent, and the fixture's ring never closes so nothing burns.
+     */
+    const shootAcross = (gap, seats, width = 4000) => {
+      const a = makeArena({ width, height: width, maxSafeRadius: 4000 });
+      const configs = [
+        { characterId: LONGEST.id, spawn: { x: a.center.x, y: a.center.y } },
+        { characterId: LONGEST.id, spawn: { x: a.center.x + gap, y: a.center.y } },
+      ];
+      for (let i = 2; i < seats; i++) {
+        const ang = 1.2 + ((i - 2) / 4) * Math.PI * 2;
+        configs.push({ characterId: LONGEST.id, spawn: { x: a.center.x + 900 * Math.cos(ang), y: a.center.y + 900 * Math.sin(ang) } });
+      }
+      const st = createMatch(a, configs);
+      st.phase = 'playing';
+      st.fighters[0].facing = { x: 1, y: 0 };
+      // ⚠️ EVERY SEAT DRIVEN BY `noInput`, NOT STUNNED. The first draft stunned the target
+      // and measured a hit at 166 wu: `stepAI` walks slot 1 toward slot 0 at
+      // `AI_CHASE_SPEED` for the projectile's whole 875 ms flight — 61 wu of closing — so
+      // the test was measuring a CHASE, not a reach. Flipping `controller` makes the seat
+      // read `noInput` and hold still, which is the state the claim is about.
+      for (const f of st.fighters) f.controller = 'human';
+      const hp0 = st.fighters[1].hp;
+      const ev = [];
+      attemptAttack(st, st.fighters[0], LONGEST.index, ev);
+      for (let i = 0; i < 4000 && st.projectiles.length > 0; i++) stepMatch(st, 1, noInput);
+      return {
+        hitRadius: st.fighters[1].hitRadius,
+        fired: ev.some((e) => e.type === 'projectile-spawned'),
+        moved: Math.abs(st.fighters[1].x - (st.arena.center.x + gap)) + Math.abs(st.fighters[1].y - st.arena.center.y),
+        damage: hp0 - st.fighters[1].hp,
+      };
+    };
+
+    const across = shootAcross(chordAt(N, minSafeRadiusFor(N)), N);
+    check('the shot is really fired, the target really holds still, and it carries the BRAWL hit radius',
+      across.fired && across.moved === 0 && across.hitRadius === HIT_RADIUS_VS_PLAYER, JSON.stringify(across));
+    check(`the longest weapon does NOT connect across the six-fighter chord (${chordAt(N, minSafeRadiusFor(N)).toFixed(2)} wu)`,
+      across.damage === 0, `dealt ${across.damage}`);
+    // The same claim at the seat count that does NOT move, where the 0.17 wu razor lives.
+    const at4 = shootAcross(chordAt(4, minSafeRadiusFor(4)), 4);
+    check(`…nor across the four-fighter chord (${chordAt(4, minSafeRadiusFor(4)).toFixed(2)} wu) — the ring that did not have to move`,
+      at4.damage === 0, `dealt ${at4.damage}`);
+
+    // POSITIVE CONTROL, and it is the shipped defect stated as an experiment: the SAME
+    // weapon, the SAME code, at the chord the constant 140 floor produced at six seats.
+    const oldChord = chordAt(N, MIN_SAFE_RADIUS);
+    const before = shootAcross(oldChord, N);
+    check(`KNOWN-BAD: the same weapon DOES connect across the old constant-floor chord (${oldChord.toFixed(2)} wu)`,
+      before.fired && before.damage > 0, `dealt ${before.damage}`);
+    const oldChord5 = chordAt(5, MIN_SAFE_RADIUS);
+    const before5 = shootAcross(oldChord5, 5);
+    check(`KNOWN-BAD: …and across the old FIVE-fighter chord too (${oldChord5.toFixed(2)} wu, §53b's 138)`,
+      before5.fired && before5.damage > 0, `dealt ${before5.damage}`);
+
+    // ── 🚨 WHY `ENDGAME_STANDOFF` TAKES THE **MAX** OF THE TWO HIT RADII ─────
+    //
+    // MEASURED, and it is the reason this is not `+ HIT_RADIUS_VS_PLAYER` alone: at a
+    // separation of EXACTLY `range + hitRadius` the outcome is not a miss, it is a coin
+    // flip in the last ulp. `stepProjectiles` expires on `p.traveled >= w.range`, and
+    // `traveled` is a running sum of per-tick step lengths — 874 additions of 0.16 reach
+    // **139.99999999999773, not 140**, so the expiry does not fire and the hit test runs
+    // one more time at a distance of 25.99999999999 against a 26 wu radius. Worse, the
+    // distance is `hypot(p.x - target.x, …)` on ABSOLUTE coordinates, so the same shot at
+    // the same separation resolves differently depending on WHERE ON THE MAP it is taken:
+    // measured, it lands in a 3000 wu arena and misses in a 4000 wu one.
+    //
+    // The sweep below is the experiment, and it asserts the INDETERMINACY rather than a
+    // direction — asserting "the boundary is a hit" would itself be a row pinned to a float
+    // coin flip. Taking the MAX makes the binding chord 166.00 against a brawl's real
+    // 165.2 wu reach — 0.8 wu clear, ~5e15 ulps — while `HIT_RADIUS_VS_ENEMY` only ever
+    // belongs to the bot in a two-seat duel, where the spacing term never binds anyway. The
+    // 0.8 wu is free: it fits inside the 0.17 wu of headroom N=4 already had, so no seat
+    // count moves for it.
+    const placements = [3000, 3200, 3400, 3600, 3800, 4000];
+    const exact = placements.map((w) => shootAcross(REACH.rangedMax + HIT_RADIUS_VS_ENEMY, 2, w));
+    check('KNOWN-BAD: at EXACTLY `range + hitRadius` the shot lands at some map positions and misses at others — the boundary is a float coin flip',
+      exact.every((r) => r.hitRadius === HIT_RADIUS_VS_ENEMY)
+      && exact.some((r) => r.damage > 0) && exact.some((r) => r.damage === 0),
+      `damage by arena width: ${placements.map((w, i) => `${w}:${exact[i].damage}`).join(' ')}`);
+    check('…and one wu further out it misses at EVERY position, so that row is a boundary and not "nothing reaches"',
+      placements.every((w) => shootAcross(REACH.rangedMax + HIT_RADIUS_VS_ENEMY + 1, 2, w).damage === 0));
+    check('…while the six-fighter chord misses at every position too — the 0.8 wu is what buys that',
+      placements.every((w) => shootAcross(chordAt(N, minSafeRadiusFor(N)), N, w).damage === 0));
+  }
+
+  // ── (e) THE SCHEDULE IS RE-DERIVED, NEVER PINNED ─────────────────────────
+  {
+    // `arena/shared.ts` derives the opening radius from the half diagonal and the clock, so
+    // both numbers below are computed the same way rather than quoted: 993 on the shipped
+    // 1400x1000 kitchen and 1985 on §48's 2800x2000.
+    const FOG_FIRST_CONTACT_MS = 6000;
+    const openingRadius = (w, h) => Math.round(Math.hypot(w / 2, h / 2) / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS));
+    const R1 = openingRadius(1400, 1000);
+    const R4 = openingRadius(2800, 2000);
+    check('the opening ring re-derives to the shipped 993 at 1x and 1985 at 2x linear',
+      R1 === 993 && R4 === 1985, `${R1} / ${R4}`);
+
+    /** Seconds of endgame: the ring stops when the linear close reaches the floor. */
+    const windowS = (maxR, n) => (MATCH_DURATION_MS * (minSafeRadiusFor(n) / maxR)) / 1000;
+
+    // §48 measured this pair at N=2 and published it as "6.4 s -> 3.2 s". Reproducing it
+    // from the live formula is what says the schedule model here is the shipped one — and
+    // it is the row that fails if anyone pins a literal in place of the derivation.
+    check('§48\'s published N=2 endgame window re-derives: 6.4 s on the 1x map, 3.2 s on the 2x',
+      approx(windowS(R1, 2), 6.34, 0.01) && approx(windowS(R4, 2), 3.17, 0.01),
+      `${windowS(R1, 2).toFixed(2)} s / ${windowS(R4, 2).toFixed(2)} s`);
+    check('…and scaling the floor with N gives part of it back at six seats (10.74 s / 5.37 s)',
+      approx(windowS(R1, MAX_FIGHTERS), 10.74, 0.01) && approx(windowS(R4, MAX_FIGHTERS), 5.37, 0.01),
+      `${windowS(R1, MAX_FIGHTERS).toFixed(2)} s / ${windowS(R4, MAX_FIGHTERS).toFixed(2)} s`);
+
+    // §53b's headline: a bigger arena does NOT fix the annulus, because the floor is not a
+    // function of the arena. Asserted against the LIVE SIM on two arenas of different size,
+    // not against the formula, so a floor that quietly picked up an arena term would fail.
+    const floorOn = (maxSafeRadius) => {
+      const st = playingMatch(makeArena({ width: 2000, height: 2000, maxSafeRadius }));
+      st.player.hp = st.player.maxHp = 1e9;
+      st.enemy.hp = st.enemy.maxHp = 1e9;
+      let min = Infinity;
+      for (let i = 0; i < 600 && st.phase === 'playing'; i++) { stepMatch(st, 100, noInput); min = Math.min(min, st.safeRadius); }
+      return min;
+    };
+    check('the floor is INDEPENDENT of arena size — a 2x map does not widen the final annulus',
+      floorOn(R1) === floorOn(R4) && floorOn(R1) === MIN_SAFE_RADIUS,
+      `${floorOn(R1)} vs ${floorOn(R4)}`);
+
+    // The coupling `rules.ts` deliberately does NOT make: `concealmentKeepoutRadius` still
+    // floors on `MIN_SAFE_RADIUS` because it cannot import `MAX_FIGHTERS`. So the
+    // relationship is asserted instead — and this is the row that fails first if
+    // `ENDGAME_STANDOFF` is ever derived upward past what the arena rule reserves.
+    check('no concealment can sit inside the LARGEST final ring, on either arena size',
+      concealmentKeepoutRadius(R1) >= minSafeRadiusFor(MAX_FIGHTERS)
+      && concealmentKeepoutRadius(R4) >= minSafeRadiusFor(MAX_FIGHTERS),
+      `keepout ${concealmentKeepoutRadius(R1).toFixed(2)} / ${concealmentKeepoutRadius(R4).toFixed(2)} vs ring ${minSafeRadiusFor(MAX_FIGHTERS)}`);
   }
 }
 

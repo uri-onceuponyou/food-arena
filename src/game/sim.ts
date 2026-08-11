@@ -77,7 +77,7 @@ import {
   clampLevel,
   LEVEL_MIN,
   MATCH_DURATION_MS,
-  MIN_SAFE_RADIUS,
+  minSafeRadiusFor,
   maxHpFor,
   PLAYER_MAX_HP,
   PLAYER_SIZE,
@@ -488,7 +488,31 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
     // The floor is what makes the timeout rule below reachable at all: without it the
     // ring reaches 0, nowhere costs 0 HP/s for the last seconds, and the smaller HP
     // pool (always the player's) dies before the whistle. See `MIN_SAFE_RADIUS`.
-    state.safeRadius = Math.max(MIN_SAFE_RADIUS, state.arena.maxSafeRadius * (1 - progress));
+    //
+    // ── ⚠️ THE FLOOR IS A FUNCTION OF THE SEAT COUNT NOW (DECISIONS §53b) ─────
+    //
+    // This line used to read `Math.max(MIN_SAFE_RADIUS, …)` — a 140 wu CONSTANT, which
+    // made the final 0 HP/s annulus 45 wu wide (1.07 body widths) at every fighter count
+    // and every arena size, so six fighters finished the match standing on a one-body ring
+    // already inside each other's range. `minSafeRadiusFor` carries the whole derivation;
+    // it returns exactly `MIN_SAFE_RADIUS` for n <= 4, which is what keeps the shipped
+    // duel bit-identical.
+    //
+    // `state.fighters.length` is the SEATED count and is fixed for the life of a match
+    // (nothing pushes to or splices that array). The LIVING count would make the ring GROW
+    // as fighters die — a fog that recedes — and `safeRadius` being monotone non-increasing
+    // is relied on by `audio/director.ts`'s one-shot floor latch and by `ui/hud.ts`'s
+    // inversion of this very formula.
+    //
+    // Called per tick rather than cached on the state: `MatchState` is `state.ts`'s to
+    // shape, and a copy of a fairness derivation stored beside the thing it constrains is
+    // how a second, quieter source of truth gets born. At two seats the call is one
+    // comparison and a constant return — no `Math.sin` is evaluated — so the shipped duel's
+    // hot path is unchanged as well as its output.
+    state.safeRadius = Math.max(
+      minSafeRadiusFor(state.fighters.length),
+      state.arena.maxSafeRadius * (1 - progress),
+    );
   }
 
   // Ground-effect expiry runs unconditionally, matching the prototype (it is never
