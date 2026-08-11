@@ -4105,3 +4105,90 @@ every match**, bit-identical, with a one-XP-point tamper shown to be caught.
 
 A real transport and signalling · **interpolation of remote fighters** (they lag **15.07 wu** at 3 ticks
 and nothing hides it) · the binary encoding under the delta · reconnection, spectator UI, matchmaking.
+
+---
+
+## 62. ✅ THE PHONE IS FIXED AND DEPLOYED — 928 draws → 423, and the controls are out of the play area
+
+Both halves of §33 and §52 landed and are **live at `https://uri-onceuponyou.github.io/food-arena/`**
+(`f1f2a40`; ten assets verified 200, manifest and icons included).
+
+### The draw-call fix — `5aa4655`, measured on the same bundle `?merge=0` apart
+
+| | unbatched | batched | Δ |
+|---|---|---|---|
+| draws/frame | **928** | **423** | **−505 (−54.4%)** |
+| …of which shadow | 551 | 112 | **−439 (−79.7%)** |
+| scene objects | 3,126 | 1,124 | −2,002 |
+| shadow casters | 1,657 | 186 | −1,471 |
+
+**Main thread −5.15 ms of 10.75 ms (−47.9%)**, against a **±0.71 ms floor measured from a null arm** —
+7.3× the floor. GPU **+0.24 ms**, the price of losing frustum culling on merged meshes.
+🔴 **The ×4 map now costs LESS main thread than the build Uri actually played**, rather than the +48.6%
+it cost three hours earlier.
+
+**Patch 2 came free.** An earlier pass priced removing prop shadows at −495 draws and **refused it on a
+picture**. Batching returns **−439 shadow draws while casting the identical shadow from the identical
+triangles.** No static/dynamic split was needed; the residual is ~84 draws ≈ 0.3 ms, inside the floor.
+
+**Proved it cannot have changed the look:** geometry identity both arms (268,600 tris / 217,273 verts
+identical), **mean per-vertex world deviation 1.74e-6 m = 0.21 float32 ulp**, and a 0.5 mm nudge — 22×
+larger — *is* caught by the same check. PNGs read at both cameras, 58° and a close 22°: indistinguishable.
+The 0.26%-of-pixels residual was bisected to the 0.21-ulp re-rounding deciding **surfaces that were
+already z-fighting**.
+
+⚠️ **One patch was built, measured and thrown away, which is the result.** The ground-scatter cull cost
+**+22 draw calls to save 81,776 triangles** — a net loss on a CPU-bound frame at 5.9 µs/draw, and inside
+the floor either way. It also falsified its own brief: **the 867,750 "scatter" triangles are the TILE
+FIELD, not the chips**, and **the shadow frustum, not the camera, is what keeps 9 of 12 tiles alive.**
+
+### The controls — `bd39464`, `b2f2cb1`, `f1f2a40`
+
+Uri: *"the weapon choosing is on the most critical part of the screen where most gameplay happens."*
+
+**Instrumented in WORLD UNITS, not pixels** — the score is the share of `FAIR_PLAY.radiusUnits` (199.2 wu,
+the arena *every* device is guaranteed to show) that a control hides. ⚠️ **A pixel metric flatters
+bottom-edge controls** — a bottom pixel of a 58° frame covers ~⅓ the ground of a top one — **and that is
+where every control is.**
+
+| | 844×390 | 667×375 | 932×430 |
+|---|---|---|---|
+| weapon tray before | 7.92% | 5.75% | 6.45% |
+| weapon tray **after** | **0.00%** | **3.13%** | **0.00%** |
+| all controls | 22.62 → **17.05%** | 22.66 → **20.86%** | 17.64 → **12.42%** |
+
+**A disc inscribed in a rectangle never reaches its corners** — so *"corners for controls, centre clear"*
+is what mathematically minimises this quantity. The instrument reached the reference layout **without
+being shown a plate.** Scoped to touch **and** landscape: desktop bottom-centre unchanged at 0.00 px,
+portrait untouched, and `menu_accept` 361/361 + `menu_accept_portrait` 219/219 unmoved. Slots are **58 px**,
+not the 46 px "touch floor" — that number was arithmetic forced by four-in-a-row, so **the phone gets the
+bigger button.**
+
+### Menus: ONE real offender, three false alarms
+
+Uri's *"it seems like it was designed for vertical… its the same of all game menus"* is **true of exactly
+one screen.** Home, character select and shop are **already** three-column landscape at **96.7–97.2% of
+width**. **Settings** was the portrait one — a 1170 px column in a 263 px window at 667×375 — and the
+cause was **160 pixels**: a 400 px track minimum needs 806 and that viewport gives 646. Scroll **1170 →
+931 (−20.4%)**, with 844 and 932 byte-identical.
+
+### The zone pill was lying in BOTH directions
+
+Now `ringFloorFor(fighters.length, timeRemaining)`. Before: during **sudden death** (floor 0) it said
+*"FINAL RING"* while the fog burned at 50 HP/s; at **N=6** (floor 237) it counted down to an arrival that
+never happens. Copy is now **"SUDDEN DEATH / MOST HP WINS"**. ⚠️ No leading glyph — `ft_glyphs` measured
+**0 of 44 symbols actually drawn** by the loaded faces, and ☠ rendered as a padlock.
+
+### 🔴 The next occluder is now the CLOCK, and it is bigger than the tray ever was
+
+**The clock + zone column hides 13.12% of the guaranteed-visible arena at 844×390** — larger than the
+weapon tray's 7.92% that this pass removed. Untouched, because `h49_chips` derives the chip rail from its
+measured bottom. **It is now the largest single occluder in the frame.**
+
+### Two instrument faults found and worth propagating
+
+- **`np_nfighter`'s `CENTRE = {700,500}` is stale** — the ×4 map moved it to `{1400,1000}`. It cost a false
+  failure before being derived live.
+- **`da_census` is a clean NEGATIVE ONLY** — 0 property diffs, but it *structurally cannot see* either menu
+  edit (one element is absent from its captures, the other only changes at a viewport it does not capture).
+  **A green from an instrument that cannot see the change is not evidence.** The plates are.
