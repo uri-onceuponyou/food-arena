@@ -4602,3 +4602,85 @@ projectile-rule change. **The verdict line is wrong; the numbers underneath it a
 - **Lollipop's slam now sits exactly on the undodgeable ceiling.** If that ceiling ever drops, Giant must
   drop with it.
 - **Refused:** a change measuring **1.4 pp better** was declined because it would orphan a VFX form.
+
+---
+
+## 69. ✅ SEAT UNFAIRNESS CLOSED — **2.680 → 0.342 places** — and the quantity that had to be equal was nobody's first guess
+
+`d1d9f9e`. §64 measured the spawn set as worth **2.64 places out of 6**. It is now **0.342**, and no
+individual seat is distinguishable from fair.
+
+| seat | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| mean placement | 3.70 | 3.64 | 3.43 | 3.48 | 3.35 | 3.41 |
+| ± SE | 0.078 | 0.074 | 0.073 | 0.075 | 0.059 | 0.057 |
+
+⚠️ **N=2 is bit-identical over 200 matches** — pair A was pinned, so `playerSpawn`/`enemySpawn` and every
+1v1 number in the project are untouched. **All six seats now deal damage in 600/600 matches** (was 74.5%;
+53 of 1,200 seat-matches dealt none — now **0 of 3,600**).
+
+### 🚨 The answer: the IN-DEGREE OF THE SPAWN-TIME TARGETING DIGRAPH
+
+Not radius. Not spacing. **How many opponents pick you as their nearest at t=0.** `stepAI` and
+`attemptAttack` both steer by `nearestLivingOpponent`, so the six seats form a digraph with one out-edge
+each, and in-degree orders the measured table exactly on **three independent seatings** (in-degree 0 →
+~1.9 places, 1 → ~4.0, 2 → ~4.5).
+
+**Both obvious alternatives were FALSIFIED BY CONSTRUCTION rather than argued away:**
+
+- **Equal radius** is refuted by the baseline's own table — it predicts 2,3 then 0,1 then 4,5; measured is
+  2,3 then **4,5** then 0,1. **The middle radius is the worst seat.**
+- **Equal nearest-opponent distance was BUILT** — a legal seating with all six distances **exactly equal
+  at 814.0 wu**, and better centrality spreads than the shipped map — and it measured **3.05 places,
+  WORSE than the map it replaced**, with the two unpursued seats winning. **That control is the reason
+  this is not an elaborate way of equalising the wrong quantity.**
+
+### And the layout's shape is FORCED, not chosen — with a cost that has to be stated
+
+Nearest-neighbour digraphs have no cycle longer than 2, so in-degree 1 everywhere ⇒ a perfect matching
+into mutual pairs. The map's C2 symmetry means σ must fix at least one pair; a σ-fixed pair is diametric;
+and a diametric pair is only its own minimum if everything else is further out ⇒ **it is necessarily the
+innermost pair.**
+
+=> **Equal centrality and a fair targeting graph are mutually exclusive on a C2 map.** The three pairs
+cannot share a radius. That is a **stated cost**, not an oversight.
+
+### 🚨 The resolution floor already misled its own author — and the fix was to build the right floor
+
+**A standard error is not the spread's scale**: the spread is the **range of six correlated means**. The
+floor was built by **label permutation** — 4,000 reps preserving the place distribution and the sum-to-21
+constraint — giving a 95th percentile of **0.315 places**. Old: 2.680 = **8.5× the floor**, worst seat
+**43.8σ**. New: 0.342 = **1.09×**, worst seat **2.54σ against a null 95th of 2.66.**
+
+⚠️ **At 200 matches two candidate layouts read 0.40 and 0.70. At 600 they read 0.39 and 0.34 — the
+ranking REVERSED.** Shipping on the 200-match run would have taken the worse layout **and** a seat with a
+**2 wu legal halo** against 20–30 wu for every shipped one.
+
+### ⚠️ Declared side effect
+
+**Sudden death now fires in 90.5% of matches, up from 66.0%**, and matches run 32.55 → 33.96 s. Six
+fighters who all actually engage take longer to resolve. This makes §58's parked question — *"is 30 s the
+right trigger?"* — **materially more important than it was**: sudden death is now the normal ending, not
+the exception.
+
+### 🔴 And a live time bomb, guarded rather than left
+
+**`tools/tmp/x4_layout.mjs:SPAWN_NORTH` — the GENERATOR `kitchen.ts` points at — still holds the OLD
+coordinates.** Anyone regenerating from it **silently reverts this entire fix**, and the revert would look
+like a routine regeneration. `kx_seatfair --selftest` §A3 now asserts the divergence is exactly the
+declared one and **goes red if either side moves.** Being fixed properly.
+
+## ✅ And the fog canopy is derived — `2d3e9bd`
+
+`FIELD_OUTER_UNITS = ARENA_HALF_DIAGONAL + APRON_OUT` = **2480.47 wu**, from two constants that already
+move with the map, bounded exactly against the furthest standable cell (1691.2) plus the camera's
+worst-case ground reach (470) = 2161.2, with **319 wu spare**.
+
+Paired A/B on two worktrees differing only by this diff: **only the position that was outside moved** —
+corner luma **64.917 → 27.927**, centre and mid unchanged to **±0.03**. PNGs read: the before-corner is
+`f87d407`'s signature (bright pink floor, canopy a hard diagonal edge away to the right); the after is
+uniformly canopied.
+
+⚠️ **Its known-bad ladder is the point, and worth copying**: `1500` turns three sections red; **`1721`
+passes two of them** and is caught only by the last two; `9999` passes three and fails the fourth; and an
+empty standable set **fails section 0 rather than printing "0 of 0" green.**
