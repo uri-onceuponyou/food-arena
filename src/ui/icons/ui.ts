@@ -209,9 +209,16 @@ export const UI_ICONS: Record<string, string> = {
 <circle cx="12" cy="10.2" r="2.6" fill="${P.cream}"/>`,
 
   // ── Containers ─────────────────────────────────────────────────────────────
-  /** UNCHANGED. Two arms were built, measured and NOT shipped, and between them they
-   *  rule out both variables that live in this file — which makes the remaining one an
-   *  out-of-set finding rather than a drawing problem.
+  /** 🔴 THE LID CHANGED. The block below is the record of the 11.03 px condition and it
+   *  ends with *"do not spend a fourth drawing variable on it from here"* — that sentence
+   *  is now REVERSED and is kept verbatim, because it was correct for the condition it was
+   *  written in and wrong the moment `620bf7f` changed the condition. **Read the block
+   *  below first; the finding that supersedes it is at the end, under THE FOURTH VARIABLE.**
+   *
+   *  ── The historical record, at 11.03 px on rgb(228,91,51) ──────────────────
+   *  Two arms were built, measured and NOT shipped, and between them they ruled out both
+   *  variables that live in this file — which made the remaining one an out-of-set finding
+   *  rather than a drawing problem.
    *
    *  This is the smallest glyph in the set: **11.03 px**, and the ONLY glyph delivered on
    *  the `tr-inv-empty` plate, rgb(228,91,51). Two things about it are arithmetic:
@@ -251,10 +258,57 @@ export const UI_ICONS: Record<string, string> = {
    *  DELIVERED SIZE result, not a drawing one. The third variable is the PLATE — the site
    *  itself — and `tr-inv-empty` lives in `src/ui/screens/`, outside this file set.
    *  → Reported, not attempted: this glyph needs more delivered pixels or a plate that is
-   *    not saturated orange. Do not spend a fourth drawing variable on it from here. */
+   *    not saturated orange. Do not spend a fourth drawing variable on it from here.
+   *
+   *  ── THE FOURTH VARIABLE. THE LID WAS A TRUE SEMICIRCLE, AND THAT IS A BUN ───
+   *  `620bf7f` bought both out-of-set variables the block above asked for — 11.03 -> 16.55
+   *  px, and the saturated orange plate replaced by the shell's cream `.fa-chip`
+   *  rgb(253,234,212), which took `P.wood` from 1.88:1 to 5.77 and `P.woodHi` from 1.24 to
+   *  3.79. **Δ 0.** But the KIND of failure changed, and that is what made this drawable:
+   *  at 11 px the misses were scattered container guesses, and at 16.55 px on cream the
+   *  glyph is legible as a shape for the first time and the answer is **"a grilled burger
+   *  patty", unanimous, on two independent plates** — a stable ONE-WAY collision (the real
+   *  `patty` tile keeps its own answer). A rotating misread is noise; a unanimous one names
+   *  a shape.
+   *
+   *  And the shape is arithmetic. The lid was `a8.9 8.9`: **rise 8.9 on a half-width of
+   *  8.9, i.e. a TRUE SEMICIRCLE.** So the top 45% of the object was a round brown crown,
+   *  the full-width `P.gold` bar was a light horizontal stripe under it, and the body was a
+   *  second brown mass under that — a burger in three strata, with the crown doing the work
+   *  of a top bun. Two arms, one variable each, on one paired plate (70 tiles, seed 53,
+   *  3 native + 3 magnified judges, twins tomato/gift/stun):
+   *
+   *      arm                                            native          magnified
+   *      A  shipped, semicircular lid                   0/3  patty x3   3/3
+   *      D  the lid becomes a barrel VAULT: 3.4 units
+   *         of vertical wall, then a crown of rise 4.2.
+   *         rise/half-width 1.00 -> 0.47. Body, band,
+   *         clasp, keyhole, colours, shape count all
+   *         byte-identical.                             **3/3  Δ +3**   3/3  Δ +0
+   *      E  the DIVISION'S AXIS instead: dome untouched,
+   *         the full-width horizontal bar replaced by a
+   *         vertical strap + lock plate                 0/3  patty x3   3/3  Δ +0
+   *                                                          **Δ +0**
+   *
+   *  **E is the control and it settles the cause.** The competing story was that the
+   *  horizontal gold bar was the filling between two buns; with the bar gone and the dome
+   *  kept, the answer is *still* "a grilled burger patty" 3 of 3, unchanged. The crown was
+   *  the whole defect and the bar never was — so this is `slow` and `timer` a third time:
+   *  the SILHOUETTE is the lever and the interior composition is not.
+   *
+   *  ⚠️ WHERE THE CONFUSION WENT — OUT, ONTO THE BOX FAMILY, AND IT COST NOTHING YET.
+   *  `boxBurger` was named "a treasure chest" 3/3 and `boxFire` 2/3 on this plate, where in
+   *  `r9` they were tomato/padlock/house. Both were 0/3 native before and are 0/3 now, so
+   *  no score moved — but the answer they attract is this glyph's name. ⚠️ Read it as a
+   *  caution and not a result: this plate carried THREE chest tiles, one of them
+   *  unmistakable, and the shipped screens carry one. It has to be re-measured on a plate
+   *  with a single chest before anyone acts on it.
+   *  ⚠️ And the magnified arm is a ceiling with no floor at all — every tile 3/3, every
+   *  twin legible, 98.6% overall. A magnified round would have called the shipped dome
+   *  fine, for the third time in this corner. */
   chest: `
 <path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
-<path d="M3.1 11.6a8.9 8.9 0 0 1 17.8 0z" fill="${P.woodHi}"/>
+<path d="M3.1 8.2a8.9 4.2 0 0 1 17.8 0v3.4z" fill="${P.woodHi}"/>
 <path d="M2.6 10.2h18.8v3H2.6z" fill="${P.gold}" stroke-width="1.4"/>
 <path d="M10.3 9.8h3.4v5.4h-3.4z" fill="${P.mustard}" stroke-width="1.4"/>
 <circle cx="12" cy="12.9" r="0.85" fill="${P.wood}" stroke="none"/>`,

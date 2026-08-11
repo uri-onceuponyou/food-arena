@@ -515,6 +515,36 @@ const V = {
     },
   ],
 
+  // ── slash — 22.72 px on PURE WHITE, and the whole glyph is lighter than that ─
+  // 🔴 VERDICT: BOTH ARMS REVERTED, AND THE PREMISE DID NOT REPRODUCE EITHER.
+  //     A  3/3 native, 3/3 magnified     — and 1/3 in r8, 0/3 in r9 on IDENTICAL art
+  //     B  1/3 native (**Δ -2**), 3/3 magnified (Δ +0)   — "a lettuce leaf" x2
+  //     C  2/3 native (Δ -1, unresolved), 3/3 magnified (Δ +0)
+  // A SLASH IS A MARK, NOT AN OBJECT. Filling the crescent turns a motion mark into a
+  // solid tapered blade with two veins beside it, which is a leaf — and `lettuce` scored
+  // 3/3 on the same plate, so the answer was not a leftover being dumped somewhere free.
+  // C took half the mass change and half the loss. So "silhouette beats interior detail"
+  // has a boundary: it holds for glyphs that depict an OBJECT, and for a glyph that
+  // depicts an ACTION the thin open outline IS the reading.
+  slash: [
+    { id: 'A', note: '[r10 seed 53: 3/3 native, 3/3 magnified — and 1/3 in r8, 0/3 in r9 on IDENTICAL art, i.e. the full range] SHIPPED. Not one element clears 2:1 against its own delivered plate rgb(255,255,255): the P.steel crescent 1.42, the P.white highlight 1.00 (invisible, and 2.2 units wide across the mass), the #9C93B0 trail 2.91.' },
+    {
+      id: 'B',
+      note: '[r10 seed 53: 1/3 native, delta -2 — "a lettuce leaf" x2; 3/3 magnified, delta +0. REVERTED] THE MASS GETS A VALUE. Crescent #DCD6E8 -> #5B2E8C: 1.42 -> 9.48:1 against the plate, trail #9C93B0 -> the same 9.48. Geometry byte-identical. The white highlight is DELETED rather than recoloured, and that is part of the same variable: at 1.00:1 on a 1.42:1 mass it contributes nothing, while on a dark mass a 2.2-unit white stroke down the middle would put the pale core straight back. NOT a desaturation — same hue family, h260->h269, saturation UP 28->51%, lightness DOWN 87->36%.',
+      svg: `
+<path d="M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z" fill="${P.grapeDark}"/>
+<path d="M8.6 21.4c3.4-2.8 6.2-5.6 8.4-8.6M14.4 21.6c2.4-2 4.4-4 6-6.2" stroke="${P.grapeDark}" stroke-width="1.8"/>`,
+    },
+    {
+      id: 'C',
+      note: '[r10 seed 53: 2/3 native, delta -1 — UNRESOLVED, the failing twin split 0 of 3 so only |delta|>=2 resolves; 3/3 magnified, delta +0. REVERTED] THE CONTROL — INTERIOR ONLY, MASS UNTOUCHED. The crescent stays #DCD6E8 at 1.42:1 and the invisible highlight is made as loud as it can be: #FFFFFF -> #5B2E8C at the same 2.2 units, 6.70:1 against the steel it sits on, with the same trail as B. This is timer[C] and slow[C] again.',
+      svg: `
+<path d="M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z" fill="${P.steel}"/>
+<path d="M20.4 3.6C13.4 7.4 8.2 12.4 4.4 18.8" stroke="${P.grapeDark}" stroke-width="2.2"/>
+<path d="M8.6 21.4c3.4-2.8 6.2-5.6 8.4-8.6M14.4 21.6c2.4-2 4.4-4 6-6.2" stroke="${P.grapeDark}" stroke-width="1.8"/>`,
+    },
+  ],
+
   // ── chest — 11.03 px on a SATURATED ORANGE plate, rgb(228,91,51). ───────────
   // The smallest glyph in the set bar none, and the only one delivered on that plate. Two
   // things are measurable about it and neither has been tested:
@@ -538,10 +568,22 @@ const V = {
     // does not survive and this is what `box()` draws four times. 0/3 native on every arm
     // ever drawn while 3/3 magnified is `boxBurger`'s signature — a DELIVERED SIZE result.
     // The remaining variable is the PLATE, which lives in `src/ui/screens/`.
-    { id: 'A', note: 'SHIPPED — five stroked shapes plus a 0.39 px keyhole; not one fill clears 2:1 against its own plate (wood 1.88, woodHi 1.24, gold 1.73; the ink outline is 5.05).' },
+    //
+    // 🔴 AND THEN `620bf7f` BOUGHT BOTH OUT-OF-SET VARIABLES — 16.55 px on the shell's
+    // cream `.fa-chip` rgb(253,234,212) — for **Δ 0**, and the KIND of failure changed:
+    // scattered container guesses became "a grilled burger patty", UNANIMOUS, on two
+    // independent plates. A rotating misread is noise; a unanimous one names a shape. So
+    // a fourth drawing variable WAS spent, against the block above, and it worked:
+    //     A  0/3 native ("a grilled burger patty" x3), 3/3 magnified
+    //     D  **3/3 native (Δ +3)**, 3/3 magnified (Δ +0)   — SHIPPED
+    //     E  0/3 native (Δ +0, patty x3 again), 3/3 magnified (Δ +0)
+    // E is the control that settles it: with the horizontal bar GONE and the dome kept,
+    // the answer is still "a grilled burger patty" 3 of 3. The lid was a TRUE SEMICIRCLE
+    // (rise 8.9 on a half-width of 8.9), so the top 45% of the glyph was a top bun.
+    { id: 'A', note: '[r10 seed 53, at the POST-620bf7f condition — 16.55 px on the cream chip: 0/3 native, "a grilled burger patty" x3; 3/3 magnified] SHIPPED — five stroked shapes plus a 0.39 px keyhole. ⚠️ The rest of this note describes the RETIRED condition and is kept because arms B and C were measured in it: at 11.03 px on rgb(228,91,51) not one fill cleared 2:1 (wood 1.88, woodHi 1.24, gold 1.73; the ink outline 5.05). On the cream chip those are 5.77 / 3.79 / 1.77 and the plate is no longer the defect.' },
     {
       id: 'B',
-      note: 'INK BUDGET ONLY. The gold band and the mustard clasp lose their 1.4-unit strokes and the keyhole is deleted; the body and the domed lid keep theirs, because those two ARE the silhouette and the silhouette is the only thing holding this glyph off a plate it has 1.87:1 against. Three ink outlines instead of five, one fewer shape, identical geometry and identical colours.',
+      note: '[SPENT — 7f71f20, at 11.03 px on the orange plate: 0/3 native (delta +0), 3/3 magnified (delta +0)] INK BUDGET ONLY. The gold band and the mustard clasp lose their 1.4-unit strokes and the keyhole is deleted; the body and the domed lid keep theirs, because those two ARE the silhouette and the silhouette is the only thing holding this glyph off a plate it has 1.87:1 against. Three ink outlines instead of five, one fewer shape, identical geometry and identical colours.',
       svg: `
 <path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
 <path d="M3.1 11.6a8.9 8.9 0 0 1 17.8 0z" fill="${P.woodHi}"/>
@@ -550,12 +592,32 @@ const V = {
     },
     {
       id: 'C',
-      note: 'B, PLUS THE BODY VALUE. Body #8B4A22 -> #5A2E17 (1.87:1 -> 3.18:1 against the orange plate) and the dome #B4622A -> #8B4A22, so the wood stops being the same value as the plate it sits on. ⚠️ This is a VALUE move, not a desaturation — 61%->59% HSL saturation, 34%->22% lightness — because desaturating has been falsified four times here. If C beats B, the plate is the defect and the fix is not in this file set.',
+      note: '[SPENT — 7f71f20, at 11.03 px on the orange plate: 0/3 native (delta +0), 1/3 magnified (delta -2)] B, PLUS THE BODY VALUE. Body #8B4A22 -> #5A2E17 (1.87:1 -> 3.18:1 against the orange plate) and the dome #B4622A -> #8B4A22, so the wood stops being the same value as the plate it sits on. ⚠️ This is a VALUE move, not a desaturation — 61%->59% HSL saturation, 34%->22% lightness — because desaturating has been falsified four times here. If C beats B, the plate is the defect and the fix is not in this file set.',
       svg: `
 <path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.pattyDark}"/>
 <path d="M3.1 11.6a8.9 8.9 0 0 1 17.8 0z" fill="${P.wood}"/>
 <path d="M2.6 10.2h18.8v3H2.6z" fill="${P.gold}" stroke="none"/>
 <path d="M10.3 9.8h3.4v5.4h-3.4z" fill="${P.mustard}" stroke="none"/>`,
+    },
+    {
+      id: 'D',
+      note: '[r10 seed 53: 3/3 native, delta +3 — RESOLVED; 3/3 magnified, delta +0. SHIPPED] THE LID STOPS BEING A DOME. The shipped lid is a TRUE SEMICIRCLE — rise 8.9 on a half-width of 8.9 — so the top 45% of the glyph is a round brown crown over a light horizontal bar over a brown base, which is a burger in three strata. It becomes a barrel VAULT: 3.4 units of vertical lid wall, then a crown of rise 4.2, i.e. rise/half-width 1.00 -> 0.47. ONE variable, the lid path. Body, band, clasp, keyhole, colours and shape count all byte-identical. Object 18.8x17.3 -> 18.8x16.0 units, aspect 1.09 -> 1.19 (patty is 1.44).',
+      svg: `
+<path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
+<path d="M3.1 8.2a8.9 4.2 0 0 1 17.8 0v3.4z" fill="${P.woodHi}"/>
+<path d="M2.6 10.2h18.8v3H2.6z" fill="${P.gold}" stroke-width="1.4"/>
+<path d="M10.3 9.8h3.4v5.4h-3.4z" fill="${P.mustard}" stroke-width="1.4"/>
+<circle cx="12" cy="12.9" r="0.85" fill="${P.wood}" stroke="none"/>`,
+    },
+    {
+      id: 'E',
+      note: '[r10 seed 53: 0/3 native, delta +0 — "a grilled burger patty" x3, unchanged from A; 3/3 magnified, delta +0. NOT SHIPPED, and it is the CONTROL that proves the crown rather than the horizontal bar was the defect] THE COMPETING MECHANISM — THE DIVISION’S AXIS, DOME UNTOUCHED. The other half of "a flat two-tone lozenge" is the full-width horizontal gold bar, which reads as the filling layer between two buns. It becomes a VERTICAL strap over the crown and down the front with a lock plate at the seam. Same shape count, same colours, dome byte-identical.',
+      svg: `
+<path d="M3.1 11.6h17.8v6.7a1.7 1.7 0 0 1-1.7 1.7H4.8a1.7 1.7 0 0 1-1.7-1.7z" fill="${P.wood}"/>
+<path d="M3.1 11.6a8.9 8.9 0 0 1 17.8 0z" fill="${P.woodHi}"/>
+<path d="M10.1 4.6h3.8v14.6h-3.8z" fill="${P.gold}" stroke-width="1.4"/>
+<path d="M9.3 11h5.4v3.8H9.3z" fill="${P.mustard}" stroke-width="1.4"/>
+<circle cx="12" cy="12.9" r="0.85" fill="${P.wood}" stroke="none"/>`,
     },
   ],
 };

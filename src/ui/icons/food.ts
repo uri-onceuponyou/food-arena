@@ -648,7 +648,47 @@ export const FOOD_ICONS: Record<string, string> = {
    *  this reads as an unstable legibility failure rather than a collision.
    *  → The fix is a VALUE, not another silhouette: this is the one glyph in the set whose
    *    main mass is lighter than its plate. `CLAUDE.md` also has warm chroma as the scarce
-   *    budget right now, and steel is the coldest thing in the palette. Untested. */
+   *    budget right now, and steel is the coldest thing in the palette. Untested.
+   *
+   *  ── 🔴 IT WAS TESTED. THE VALUE FIX IS A REVERT, AND THE PREMISE WAS ALSO WRONG ──
+   *  The paragraph above is kept verbatim because every number in it is a correct pixel
+   *  measurement — and it is `docs/LESSONS.md` §6b in its purest form so far: **a probe told
+   *  me what was broken and did not tell me that fixing it was what the viewer reacts to.**
+   *  Paired, 70 tiles, seed 53, twins tomato/gift/stun, 3 native + 3 magnified judges:
+   *
+   *      arm                                            native            magnified
+   *      A  shipped: steel 1.42:1, white highlight
+   *         1.00:1, #9C93B0 trail 2.91:1               **3/3**            3/3
+   *      B  the MASS gets a value — crescent and trail
+   *         both #5B2E8C, 1.42 -> 9.48:1, geometry
+   *         byte-identical, the invisible white
+   *         highlight deleted                          1/3  **Δ -2**      3/3  Δ +0
+   *         wrong: "a lettuce leaf" x2
+   *      C  the CONTROL — mass untouched at 1.42:1, the
+   *         invisible highlight made as loud as it can
+   *         be (#FFFFFF -> #5B2E8C at 2.2u, 6.70:1 on
+   *         the steel), same trail as B                2/3  Δ -1          3/3  Δ +0
+   *
+   *  🚨 AND THE PREMISE — "0/3 across three native panels" — DID NOT REPRODUCE. Identical
+   *  art, three native rounds: **1/3 (r8), 0/3 (r9), 3/3 (r10).** That is the full range on
+   *  byte-identical artwork, the same swing `ic_pair.mjs`'s header measured across 24 of 63
+   *  icons, and it means the standing story that this glyph "sits at 0/3 with no named
+   *  cause" was one reading repeated. ⚠️ Nor is A's 3/3 a claim that this glyph is fine:
+   *  `swirl`, `wave` and `shards` were ALL 0/3 in this round and churning among each other,
+   *  so "a sword slash" was uncontested. **The paired Δ is exact; the absolute is not.**
+   *
+   *  ── WHY MASS MAKES IT WORSE, WHICH IS THE REUSABLE PART ────────────────────
+   *  A SLASH IS A MARK, NOT AN OBJECT. Filling the crescent turns a motion mark into a
+   *  solid tapered blade with two veins beside it, and that is a leaf. This is not the
+   *  wrong answer being dumped somewhere free: `lettuce` scored 3/3 on the same plate, so
+   *  three judges who had already named the real leaf still preferred "a lettuce leaf" for
+   *  the filled arm. And C, which is half the mass change, took half the loss.
+   *  ⚠️ So "SILHOUETTE BEATS INTERIOR DETAIL" — true for `slow`, `timer` and `chest` — has a
+   *  boundary: it applies to glyphs that depict an OBJECT. For a glyph that depicts an
+   *  ACTION, the thin open outline IS the reading, and giving it mass names it as a thing.
+   *  Both arms reverted. Do not spend the next variable on this glyph's value or its
+   *  interior; if it is spent at all, it belongs on the TRAIL, which is the only part of
+   *  this drawing that says "motion" rather than "shape". */
   slash: `
 <path d="M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z" fill="${P.steel}"/>
 <path d="M20.4 3.6C13.4 7.4 8.2 12.4 4.4 18.8" stroke="${P.white}" stroke-width="2.2"/>
