@@ -1327,7 +1327,13 @@ export class SoupCharacter extends BaseCharacter {
     // number: `neckRadius = min(torsoWidth/2, headRadius) * neckRatio`, `neckRatio`
     // defaults to 0.42 (`rig.ts:753`), so `* 1.30` is `* 0.546` of that same min.
     // On the shipped proportions the torso half-width binds (0.4069 against R
-    // 0.5476), giving 0.22215375 m — byte-identical to what shipped.
+    // 0.5476), giving 0.22215375 m.
+    // ⚠️ NOT bit-identical, and saying so because a rounded claim is how a real drift
+    // hides later: `0.42 * 1.30` and the literal `0.546` differ by one ULP, so the
+    // product differs by **2.78e-17 m**. Twenty-six orders of magnitude below a pixel;
+    // the empirical check is that soup's match-camera frame is **0 changed px** across
+    // this whole pass and the lobby diff is confined to a 205 x 59 band at the collar
+    // (`shots/nm/neck_before` vs `shots/nm/neck_after`), i.e. the stand did not move.
     const rNeck = Math.max(Math.min(m.torsoWidth * 0.5, m.headRadius) * 0.546, m.torsoWidth * 0.16);
     // How far the stand's skirt drops BELOW the hip line. Capped at a third of the
     // thigh, or the leg disappears into the body and the character loses its legs
