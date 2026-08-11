@@ -8,6 +8,91 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#C1272D" />
   <title>Food Fight Arena</title>
+  <!-- ── HOME SCREEN. This is the biggest measured win available to the phone, and until
+       now it did not exist at all. ───────────────────────────────────────────────────
+
+       WHAT WAS MEASURED, page-side, on the shipped production bundle (`docs/PHONE.md` §1
+       and §5.1): the served document carried NO `<link rel="manifest">` and NO
+       `apple-mobile-web-app-capable`. Without either signal iOS opens a home-screen
+       shortcut in BROWSER display mode — chrome and all — so **"Add to Home Screen"
+       bought nothing.**
+
+       WHAT IT IS WORTH, MEASURED — `node tools/tmp/sc2_screen.mjs`, which loads the real
+       game at each viewport and reads the CANVAS RECT our own `Stage.resize()` computed.
+       Five devices, tab viewport vs full screen:
+
+           iPhone 15   LANDSCAPE   canvas 734x343 -> 852x393    75.2% of screen -> 100.0%
+           iPhone 14   LANDSCAPE   canvas 750x340 -> 844x390    77.5%           -> 100.0%
+           16 Pro Max  LANDSCAPE   canvas 838x390 -> 956x440    77.7%           -> 100.0%
+           Pixel 7     LANDSCAPE   canvas 840x360 -> 915x412    80.2%           -> 100.0%
+
+       🚨 AND IN PORTRAIT IT IS WORTH **NOTHING**, WHICH WAS NOT OBVIOUS AND IS THE MOST
+       USEFUL THING THIS PASS MEASURED:
+
+           iPhone 15   PORTRAIT    viewport 393x659 -> 393x852   (+193 px of height)
+                                   canvas  393x295 -> 393x295    34.6% -> 34.6%  (ZERO)
+
+       The two losses are NOT additive. In portrait the canvas is **width-bound by the 4:3
+       mask** — `Stage.resize()` sets `h = cw / (4/3)`, which does not read the viewport
+       height at all — so every one of those 193 extra pixels lands in the letterbox. The
+       screenshots make it plainer than the number does: `shots/sc2/SHIPPED_iPhone_15_tab
+       .png` and `..._standalone.png` show the SAME arena strip with more empty dark space
+       around it. Portrait standalone is not bigger; it is emptier.
+       => **The manifest is a LANDSCAPE win.** Portrait needs the rotate prompt that
+       `DECISIONS §14` already decided on ("i think the game should be landscape. Portrait
+       can't serve the game."), and that prompt lives in `src/ui/**`, not here.
+
+       🚨 AND THE CHROME LOSS IS OTHERWISE PERMANENT. iOS Safari collapses its toolbar
+       when a page scrolls; this page can never scroll (`overflow: hidden` below, plus
+       `body { position: fixed }`, measured `scrollHeight === innerHeight` in both
+       orientations). That CSS is CORRECT for a game — allowing scroll would trade chrome
+       for a rubber-banding play surface — so the numbers above are not a worst case,
+       they are the only case. A home-screen launch is the only way out of it on iOS.
+
+       WHAT THESE TAGS CANNOT DO, so nobody re-derives it. **They cannot lock an iPhone to
+       landscape.** From MDN's browser-compat-data, fetched rather than recalled:
+         • manifest `orientation`      -> `safari: false` -> `safari_ios: false`
+         • `ScreenOrientation.lock()`  -> `safari: false` (desktop AND iOS)
+         • `Element.requestFullscreen` -> iOS 16.4 *partial*: "Only available on iPad,
+                                          not on iPhone"
+         • manifest `display: standalone` -> `safari_ios: 11.3` ✅ — the half that works
+       So a PWA gets FULLSCREEN on iPhone and NOT landscape lock, and no code in `src/`
+       can change that. `orientation: landscape` in the manifest is honoured on Android
+       Chrome (where it also grants a real lock) and inert on iOS. Landscape lock on
+       iPhone is the native wrapper's job — `docs/DECISIONS-FOR-URI.md` §51a, decided.
+       ⚠️ Deliberately NO `ScreenOrientation.lock()` call anywhere: on iOS it is a silent
+       no-op, and a lock that silently does nothing is worse than none — it reads as
+       shipped in the diff and as broken on the device.
+
+       WHY `black-translucent`. It puts the app UNDER the status bar, so the web view gets
+       the FULL screen rather than the screen minus a status bar; the safe-area plumbing
+       that makes that survivable already exists (`src/ui/screens/theme.ts` reads
+       `env(safe-area-inset-*)`, and the `viewport-fit=cover` above is what makes those
+       insets report anything but 0). ⚠️ Not measured on hardware — Chromium reports
+       `env(safe-area-inset-*)` as 0 whatever it is emulating, so the inset half of this is
+       a platform claim. The `menu_accept` battery already runs a notch/no-notch axis.
+
+       WHY BOTH `apple-mobile-web-app-capable` AND `mobile-web-app-capable`. The Apple-
+       prefixed name is the one iOS has honoured since 11.3 and still does; the unprefixed
+       one is the standard Chrome reads and warns about the absence of. They are two
+       spellings of one intent and cost 60 bytes.
+
+       WHY THE MANIFEST HREF MAY BE ROOT-ABSOLUTE WHEN THE MANIFEST'S OWN URLS MAY NOT.
+       The rule is "does Vite PARSE this position", not "which directory is the file in".
+       Vite's HTML transform has an explicit `noInlineLinkRels` set containing `manifest`,
+       `icon` and `apple-touch-icon`, so it RESOLVES and RE-BASES these three hrefs the
+       same way it does the font preloads below — verified in the emitted bundle at `/`,
+       `/food-arena/` and `./`. It does NOT parse `manifest.webmanifest`, so every URL
+       INSIDE that file is relative. `node tools/tmp/sc2_manifest.mjs` builds at three
+       bases and re-injects both the de-based href and a root-absolute icon path as
+       required failures — a guard that has not been shown to FAIL is not a guard. -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Food Fight" />
   <!-- ── FONTS ARE SELF-HOSTED. This used to be three <link> tags to Google Fonts and
        they were the ONLY external request the game made. ─────────────────────────────
 

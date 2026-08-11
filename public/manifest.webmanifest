@@ -1,0 +1,54 @@
+{
+  "$comment": [
+    "The reasoning, the measurements and the platform-capability matrix live in index.html's",
+    "HOME-SCREEN block, next to the three tags that make this file reachable. Two rules govern",
+    "this file and both are load-bearing:",
+    "  1. EVERY URL IN HERE IS RELATIVE. `public/` is copied VERBATIM — Vite rewrites URLs it",
+    "     PARSES (an HTML href, a CSS url()) and it does not parse this file. A `/icons/...` or",
+    "     a `/` start_url resolves at base `/` and 404s on the `/food-arena/` deploy and in the",
+    "     wrapper — the `src/audio/music.ts` `'/audio/...'` bug wearing a new extension.",
+    "  2. `orientation` is INERT ON iOS (MDN bcd manifests/webapp/orientation.json: safari false).",
+    "     It is honoured on Android Chrome, where it also grants a real lock.",
+    "Gated by `node tools/tmp/sc2_manifest.mjs`, which re-injects the root-absolute form as a",
+    "required failure. Unknown manifest members are ignored by spec; this one is documentation."
+  ],
+
+  "name": "Food Fight Arena",
+  "short_name": "Food Fight",
+  "description": "Real-time 3D food brawler. Pick a fighter, throw the kitchen.",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["games"],
+
+  "start_url": "./",
+  "scope": "./",
+
+  "display": "standalone",
+  "display_override": ["fullscreen"],
+
+  "orientation": "landscape",
+
+  "background_color": "#16101f",
+  "theme_color": "#C1272D",
+
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
