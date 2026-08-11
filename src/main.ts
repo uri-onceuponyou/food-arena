@@ -36,7 +36,11 @@ import type { Route } from './ui/screens/types';
 const params = new URLSearchParams(location.search);
 
 /** Parameters that only make sense inside a live match — see the header. */
-const MATCH_ONLY_PARAMS = ['player', 'enemy', 'simSpeed', 'fogRadius', 'px', 'py'];
+// ⚠️ `fighters` was MISSING here, so `?fighters=…` alone booted the title card and
+// `__gameReady` never fired — a 90 s timeout that reads exactly like the sim refusing to
+// seat the match. `np_nfighter` never hit it because it also passes `fogRadius`, which is
+// on this list: a second parameter was masking the gap in the first.
+const MATCH_ONLY_PARAMS = ['player', 'enemy', 'simSpeed', 'fogRadius', 'px', 'py', 'fighters'];
 
 function characterParam(name: string, fallback: CharacterId): CharacterId {
   const raw = params.get(name);

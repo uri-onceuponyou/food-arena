@@ -417,8 +417,19 @@ function createMatchFromList(arena: ArenaDefinition, configs: readonly FighterCo
  * the failure mode this project names "it looked like it worked".
  */
 function defaultSpawn(arena: ArenaDefinition, id: FighterId): Vec2 {
+  // ⚠️ Slots 0 and 1 read the NAMED fields, not `spawns[0]`/`[1]`, even though the arena
+  // now publishes both and `kitchen.ts` makes them the same OBJECTS. The named path is
+  // what 41,722,453 ticks of bit-identity were measured through, and routing the duel
+  // through a new array would make that proof describe a different code path than the one
+  // that ships. `sp_gate --selftest` pins the two to the same objects instead.
   if (id === 0) return arena.playerSpawn;
   if (id === 1) return arena.enemySpawn;
+  // Slots 2+ now resolve if — and only if — the ARENA declares them. `0fffa1e` added
+  // `spawns` to `ArenaDefinition` with three 180°-mirrored pairs, so the refusal below is
+  // no longer reached on the shipped kitchen. It stays for every arena that has not done
+  // the work: the throw is the thing that kept an invented default out of `sim.ts`.
+  const declared = arena.spawns?.[id];
+  if (declared) return { x: declared.x, y: declared.y };
   throw new RangeError(
     `createMatch: slot ${id} has no spawn. ArenaDefinition declares playerSpawn and enemySpawn only,`
     + ' so slots 2 and up must pass `spawn` explicitly — arena geometry is src/arena/**\'s to own'
