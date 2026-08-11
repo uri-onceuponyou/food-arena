@@ -2597,6 +2597,34 @@ the stated purpose.
 
 **Do not reopen this.** What follows are the consequences, not the decision.
 
+### ✅ LANDED 2026-08-11 as `6631446` — and the fixture that said it would fail was WRONG
+
+`ARENA_W/H` is 2800×2000. `shared.ts` changed by **two constants**; everything downstream is derived.
+The acceptance test whose own header said *"IT EXITS NON-ZERO ON TODAY'S MAP… it goes away when §48's
+2800×2000 arena lands, not before"* now reports **37/37**, and the N=6 census at 9.0 s has all six
+seats at **full health** — on the map this replaces, slot 0 was 0/70 and dead.
+
+- **Six spawns in six separate admissible regions.** Minimum pairwise separation over all 15 pairs is
+  **892.0 wu** against `REACH.rangedMax` 140 — 6.4× clear, against **75.2 wu** before. Admissible
+  cells 2,186 → **34,242 in 36 regions**; all six in one nav component.
+- **111 props** (was 27) at **17.92%** density (was 20.11%), no prop rescaled; hub unchanged;
+  concealment 6 → **20 patches**. `ap_reach` at body widths 18/20/22/24/26: **0 sealed, 0 phantom,
+  0 face gaps.**
+- ⚠️ **§48's own fixture mispredicted its own outcome.** It predicted −13.4 pp on win rate, chase
+  collapsing to 1.7%, and 30/880 matches never making contact. Measured: **−2.6 pp** (inside the
+  ~9 pp floor), chase **41.5%**, and **0/880 never-contacted in both arms.** First contact did move,
+  5.67 s → **18.42 s**, and duty halved, 33.5% → 18.9%. These are **1v1** numbers; balance at 4–6 is
+  not claimed.
+- ⚠️ **Perf moved the opposite way to the prediction too**: §48 said draw calls would *fall*. They
+  rose 896 → **1,012** (+12.9%) and triangles ×2.74, because that prediction came from the stretch
+  arm and this is the held-density one.
+- 🔴 **The cost, and it is being paid now:** six gates went red *on HEAD* the moment this committed,
+  every one carrying a 1400×1000 literal — `arena-scan` (its 18 stations now sample only the NW
+  quadrant), `ap_reach`, `sp_place`, `sp_gate`, `conceal_lab`, `level_lab`. Confirmed on a clean
+  `git archive HEAD` tree. Being re-fixtured; **`level_lab` is a finding rather than a fixture** — the
+  level-1 player now wins **100.0%** (was 87.5%), so that instrument is pinned at its ceiling and can
+  no longer tell level 1 from level 15.
+
 ### 🚨 EVERY ONE OF THESE IS ANCHORED TO 1400×1000 AND MUST BE RE-DERIVED, NOT SCALED BY EYE
 
 1. **Fog.** `shared.ts:115` derives the closing schedule from `ARENA_HALF_DIAGONAL`; `rules.ts:900`
@@ -3337,6 +3365,41 @@ constant**, which is why it is answered here rather than inside §48.
 => The final ring must hold N fighters at a fightable spacing. ⚠️ **The fog schedule is derived from
 this radius**, so it must be re-derived rather than pinned, and the change is measurable at N=2 as a
 no-op or it is wrong.
+
+### ✅ LANDED 2026-08-11 as `4bb64e4`
+
+`src/game/rules.ts` exports **`minSafeRadiusFor(N) = max( MIN_SAFE_RADIUS , ENDGAME_STANDOFF / sin(π/N) − POT.dangerRadius )`**
+— two derived terms, each binding in its own regime.
+
+| N | ring | binds | chord between neighbours |
+|---|---|---|---|
+| 2 | 140.00 | pot | 235.00 |
+| 3 | 140.00 | pot | 203.52 |
+| 4 | 140.00 | pot — **0.17 wu of margin** | 166.17 |
+| 5 | 187.42 | spacing | 166.00 |
+| **6** | **237.00** | spacing | 166.00 |
+
+**The threshold falls between 4 and 5 — this section's own verdict, reproduced rather than fitted.**
+The chord is measured at the **mid-annulus** `(dangerRadius + safeRadius)/2`, the only circle adjacent
+to neither the burn ring nor the fog; the 2 and the /2 cancel, which is *why* the pot radius appears
+in the answer. The standoff band is `REACH.rangedMax` + the larger hit radius = **166 wu**, which lands
+inside `FAIR_PLAY.radiusUnits` (199.2), so the final ring is *out of reach and still on screen*.
+
+**N=2 is a proven no-op**, as this section required: 45,959,702 ticks across three level configurations,
+12,503,511 events in order, **0 divergent, 0 added fields** — measured on a detached worktree because a
+peer had 32 uncommitted lines in one of the six compared modules.
+
+⚠️ **The finding worth keeping: `range + hitRadius` is not a miss, it is a coin flip in the last ulp.**
+`p.traveled` is a running sum — 874 additions of 0.16 reach 139.99999999999773, so expiry does not fire,
+the hit test runs once more, and sees 25.99999999999 against a 26 wu radius. And distance is computed on
+**absolute** coordinates, so **the same shot at the same separation lands in a 3000 wu arena and misses in
+a 4000 wu one.** The standoff therefore takes the *larger* of the two hit radii (166, not 165.2) to put
+the binding chord 0.8 wu clear of the razor. The gate asserts the **indeterminacy**, not a direction.
+
+🔴 **Consequence for §48's new map:** at six seats the ring closes to **237 wu**, and the ×4 layout's
+nearest solid cover sits at **241.35 wu** — 3.65 wu of clearance. **Nothing solid may come inside ~237 wu
+of centre** or six fighters get funnelled into a ring they cannot occupy. Concealment inside it is fine —
+it is cover you can shoot through.
 
 ---
 
