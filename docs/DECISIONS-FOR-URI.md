@@ -1969,7 +1969,7 @@ concealment is precisely the feature it would defeat. Worth a note now rather th
 
 ---
 
-## 36. ❓ The trail can only get ~27° of hue from the floor, and that is an ARENA decision
+## 36. ✅ NOT A DECISION — resolved by measurement. The trail's own hypotheses were both false and the cap is a fact, not a choice.
 
 Not blocking; recorded because it caps a whole class of future VFX work and cannot be fixed where
 anyone would look for it.
@@ -2315,7 +2315,17 @@ than a sclera, so **the whole cast moves, not just the seven Uri has reviewed.**
 
 ---
 
-## 43. ❓ Our UI chrome is CREAM; the reference's is NEAR-BLACK. That is a decision, not a defect.
+## 43. ❌ WITHDRAWN — the metric behind it CANNOT RESOLVE ITS OWN GAP. Do not answer this.
+
+🚨 **This asked Uri to choose a chrome direction on a number that was never able to support the
+question.** `dark%` has a measured resolution floor of **±4.26** against a gap of **0.87** between our
+5.17 home and our 7.00 character select — **a fifth of the noise** — and that was measured **eight
+hours BEFORE this section was written**, by a different agent whose work its author had not seen.
+Rule 10 forbids acting on it. The section's own closing caveat also disqualifies its evidence: the
+reference side scored **7.12 ± 1.22** against a recorded 8.17, with **4 of 17 rounds discarded**.
+Acting on it would mean darkening the art to satisfy an instrument. **Original text kept below.**
+
+### 🔒 ORIGINAL §43 — refuted above
 
 Measured across 17 isolated UI elements, ours against the reference plates by identical code:
 
