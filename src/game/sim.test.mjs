@@ -99,6 +99,12 @@ import {
   // largest pool the roster can build, and the ring's floor is superseded rather than
   // deleted. A literal here would keep passing after any of them moved.
   SUDDEN_DEATH_MS, SUDDEN_DEATH_RADIUS, SUDDEN_DEATH_REMAINING_MS, suddenDeathActive, ringFloorFor,
+  // Section 31: `DECISIONS §50b`, the retirement rule denominated in the target's frame.
+  // Both come in for the same reason as everything above — the section's claim is that the
+  // age cap is DERIVED (`range / (speed − FLEE_REFERENCE_SPEED)`) rather than picked, and
+  // that the reference speed is the roster's own movement cap. A literal 120 or 3500 here
+  // would keep passing after `PLAYER_SPEED`, `SPEED_TOP_STAT` or the reach ladder moved.
+  FLEE_REFERENCE_SPEED, projectileMaxAgeMs, AI_CHASE_SPEED,
 } from './rules.ts';
 // Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
 // no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
@@ -5828,6 +5834,309 @@ console.log('\n30. Sudden death (DECISIONS §2)');
     check('…and `resolveTimeout` still answers it by its own rungs (§49a), unchanged',
       centred.winnerId === 0 && centred.state.fighters.every((f) => f.alive),
       `winner ${centred.winnerId}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 31. The retirement budget is denominated in the TARGET'S FRAME (DECISIONS §50b)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `range` was doing two jobs and one of them was a lie: `ai.ts:pickWeapon` refuses to press
+// past `w.range` (so it is a SEPARATION) while `stepProjectiles` retired on `traveled >=
+// range` where `traveled` was CUMULATIVE PATH LENGTH (so it was a PATH BUDGET). Those
+// coincide only against a target that is standing still, and every cell that ever validated
+// `pressValue` is a stationary target. Measured on the tree before this section existed
+// (`tools/tmp/tf_reach.mjs --sim <HEAD extract>`): **23 of 23 ranged weapons could not
+// connect at their own press gate against a fleeing human, and 23 of 23 could not against a
+// fleeing AI.** Hamburger's Lettuce Fling gates at 140 and reached 62.
+//
+// 🚨 THE KNOWN-BAD FOR THIS WHOLE SECTION IS THE SHIPPED RULE ITSELF, and it is stated as
+// arithmetic in (a) so it is checkable here rather than only in a commit message: under
+// path-length retirement the reach obeys `range − S·flight + hitRadius`, which is strictly
+// less than `range` for every weapon with a positive flight time. Every row below that
+// asserts "connects at the gate" therefore FAILS on the rule this section replaces, by
+// construction and not by hope. The external half — the same 23 weapons measured on a git
+// extract of the old sim — is in the commit message.
+console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b)');
+{
+  const TF_DT = 16.667;
+  /** Big, empty and fog-free: the claim is about the projectile, not about the ring. */
+  const TF_ARENA = makeArena({ width: 4000, height: 4000, maxSafeRadius: 100000 });
+  const TOP_HUMAN = Math.max(...CHARACTER_IDS.map((id) => speedFor(id, PLAYER_SPEED) * 1000));
+  const TOP_CHASE = Math.max(...CHARACTER_IDS.map((id) => speedFor(id, AI_CHASE_SPEED) * 1000));
+
+  const rangedWeapons = [];
+  for (const id of CHARACTER_IDS) {
+    for (const w of CHARACTERS[id].weapons) {
+      if (w.type !== 'ranged' || !w.speed || !w.range) continue;
+      rangedWeapons.push({ id, w, index: CHARACTERS[id].weapons.indexOf(w) });
+    }
+  }
+
+  /**
+   * A weapon that puts SOMETHING on the line of fire. A combo weapon's parts are all
+   * authored off-axis, and an even pellet count has no centre pellet, so a straight-fleeing
+   * target simply walks out of the cone — a SPREAD limit no retirement rule can repair.
+   * Homing is exempt because every pellet steers back onto the target whatever its offset.
+   */
+  const hasAxisShot = (w) => !!w.homing || (!w.comboParts && (!w.pellets || w.pellets % 2 === 1));
+  /** A shot slower than the roster's own movement cap can never close on its fastest runner. */
+  const canClose = (w) => (w.speed ?? 0) > FLEE_REFERENCE_SPEED;
+
+  /**
+   * ONE press, at separation `sep`, against a target that then travels at `fleeSpeed` wu/s
+   * on heading `thetaDeg` (0 = directly away from the attacker).
+   *
+   * Both seats are flipped to `human` and fed `noInput`, which is §29's idiom and the
+   * reason it is used here too: it makes the fighters hold whatever position this fixture
+   * writes, so the target's trajectory is EXACTLY the prescribed one rather than a driver's
+   * — §29's own header records a first draft that stunned the target and accidentally
+   * measured a chase. HP is pinned above anything one press can spend so a volley is never
+   * truncated by a death.
+   *
+   * Returns the delivered damage AND the projectile's books at the moment it died, because
+   * the section's central claim is about what the budget was CHARGED, not only about
+   * whether the shot landed.
+   */
+  const press = (id, key, sep, fleeSpeed, thetaDeg = 0, durationMs = 5000) => {
+    const ws = CHARACTERS[id].weapons;
+    const index = ws.findIndex((x) => x.key === key);
+    const w = ws[index];
+    const st = createMatch(TF_ARENA, id, id);
+    st.phase = 'playing';
+    for (const f of st.fighters) f.controller = 'human';
+    const AX = TF_ARENA.center.x;
+    const AY = TF_ARENA.center.y;
+    const vx = Math.cos((thetaDeg * Math.PI) / 180) * fleeSpeed;
+    const vy = Math.sin((thetaDeg * Math.PI) / 180) * fleeSpeed;
+    const HUGE = 1e7;
+    const pin = (t) => {
+      st.fighters[0].x = AX; st.fighters[0].y = AY;
+      st.fighters[1].x = AX + sep + (vx * t) / 1000;
+      st.fighters[1].y = AY + (vy * t) / 1000;
+      for (const f of st.fighters) { f.hp = HUGE; f.maxHp = HUGE; }
+    };
+    pin(0);
+    st.fighters[0].facing = { x: 1, y: 0 };
+    const spawn = [];
+    attemptAttack(st, st.fighters[0], index, spawn);
+    const fired = spawn.some((e) => e.type === 'projectile-spawned');
+
+    let t = 0;
+    let dealt = 0;
+    let last = null;         // the books of the last projectile alive before it died
+    let lastExpired = null;  // …restricted to the ones that EXPIRED rather than landed
+    let firstHitAt = null;
+    while (t < durationMs && (st.projectiles.length > 0 || t === 0)) {
+      pin(t);
+      const live = st.projectiles.map((p) => ({
+        id: p.id, traveled: p.traveled, age: p.age ?? 0,
+        path: ((p.age ?? 0) * Math.hypot(p.vx, p.vy)) / 1000,
+      }));
+      const evs = stepMatch(st, TF_DT, noInput);
+      for (const e of evs) {
+        if (e.type === 'hit-landed' && e.targetId === 1 && e.source?.weaponKey === key) {
+          dealt += e.amount;
+          if (firstHitAt === null) firstHitAt = live.find((x) => x.id === e.id) ?? live[0] ?? null;
+        } else if (e.type === 'projectile-destroyed') {
+          const books = live.find((x) => x.id === e.id) ?? null;
+          if (books) last = books;
+          // Split out the EXPIRY, because "destroyed" also covers landing on the target —
+          // and a hit is charged `sep − hitRadius`, so a row that read `last` alone would
+          // see every successful shot as an under-spent budget and pass for the wrong
+          // reason. That is exactly how the first draft of (d) failed, on all 21.
+          if (books && e.reason === 'expired') lastExpired = books;
+        }
+      }
+      t += TF_DT;
+    }
+    return { fired, dealt, expected: pressValue(w, sep), last, lastExpired, firstHitAt, weapon: w };
+  };
+
+  // ── (a) THE KNOWN-BAD, AS ARITHMETIC: THE SHIPPED RULE COULD NOT DO THIS ──
+  //
+  // `reach = range − S·flight + hitRadius` is the closed form of path-length retirement,
+  // published by `hm_audit --ladder` and reproduced to the digit by `tf_reach` on a HEAD
+  // extract. Asserting it here is what makes every "connects at the gate" row below a real
+  // test: if the old rule could have passed them, they would prove nothing.
+  {
+    const shortfall = rangedWeapons.map(({ id, w }) => {
+      const flightMs = (w.range / w.speed) * 1000;
+      return { key: `${id}/${w.key}`, law: w.range - (TOP_HUMAN * flightMs) / 1000 + HIT_RADIUS_VS_ENEMY };
+    });
+    check('KNOWN-BAD: under path-length retirement the shipped law puts ALL 23 ranged weapons short of their own press gate',
+      shortfall.length === 23 && shortfall.every((r, i) => r.law < rangedWeapons[i].w.range),
+      shortfall.map((r) => `${r.key} ${r.law.toFixed(0)}`).join(' · '));
+    // …and the one weapon the law sends NEGATIVE, which is the whole of `DECISIONS §50a`.
+    const hatch = shortfall.find((r) => r.key === 'egg/Hatch');
+    check('…and it is NEGATIVE for the one weapon slower than the roster itself (egg/Hatch)',
+      hatch.law < 0, `${hatch.law.toFixed(1)} wu`);
+  }
+
+  // ── (b) THE GATE IS DELIVERABLE — the defect, stated as its own repair ────
+  //
+  // Every ranged weapon that CAN close and has something on the line of fire connects at
+  // exactly the separation `pickWeapon` will press it from, against the fastest human in
+  // the roster running straight away. The predicate is derived rather than a count, so it
+  // updates itself when §50a moves Egg off a rung slower than the fighters.
+  {
+    const eligible = rangedWeapons.filter(({ w }) => canClose(w) && hasAxisShot(w));
+    const misses = eligible.filter(({ id, w }) => press(id, w.key, w.range, TOP_HUMAN).dealt <= 0);
+    check(`every ranged weapon that can close and has an axis shot connects at its own press gate vs a fleeing human (${eligible.length} of ${rangedWeapons.length})`,
+      eligible.length >= 21 && misses.length === 0,
+      misses.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
+    const missesAI = eligible.filter(({ id, w }) => press(id, w.key, w.range, TOP_CHASE).dealt <= 0);
+    check('…and against a fleeing AI, which is the same claim in the role the sim drives',
+      missesAI.length === 0, missesAI.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
+
+    // THE TWO EXEMPTIONS ARE NAMED AND EACH CARRIES ITS OWN REASON, so neither can quietly
+    // become "the rule did not work". Both are still measured, not waved through.
+    const exempt = rangedWeapons.filter(({ w }) => !canClose(w) || !hasAxisShot(w));
+    check('the exemption set is exactly {egg/Hatch (too slow — §50a), taco/Double (both parts off-axis)}',
+      exempt.length === 2 && exempt.some((e) => e.w.key === 'Hatch') && exempt.some((e) => e.w.key === 'Double'),
+      exempt.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
+  }
+
+  // ── (c) WHAT THE BUDGET IS CHARGED — the executable form of "same quantity" ──
+  //
+  // 🚨 THIS IS THE ROW THAT DISTINGUISHES THE TWO RULES DIRECTLY, and it needs no second
+  // sim to do it. At the moment a fleeing target is hit, the shot has been charged the
+  // SEPARATION IT CROSSED (`sep − hitRadius`, the hit test fires at the radius, not at
+  // zero) — while the PATH it actually flew is far longer. Under path-length retirement
+  // those two numbers are the same by definition, so this row is red on the old rule.
+  {
+    const sep = 120;
+    const r = press('hamburger', 'Lettuce', sep, TOP_HUMAN);
+    const crossed = sep - HIT_RADIUS_VS_ENEMY;
+    check('a fleeing target is hit having been charged the SEPARATION crossed, not the path flown',
+      r.dealt > 0 && r.firstHitAt !== null && Math.abs(r.firstHitAt.traveled - crossed) < 6,
+      r.firstHitAt ? `charged ${r.firstHitAt.traveled.toFixed(1)} vs separation crossed ${crossed}` : 'no hit');
+    check('…and the path it flew is far longer than the budget it spent — the refund is real and large',
+      r.firstHitAt !== null && r.firstHitAt.path > r.firstHitAt.traveled * 3,
+      r.firstHitAt ? `path ${r.firstHitAt.path.toFixed(1)} vs charged ${r.firstHitAt.traveled.toFixed(1)}` : 'no hit');
+
+    // THE CONTROL, and it is the one that says the fixture can tell the arms apart at all:
+    // the SAME weapon at the SAME separation against a STATIONARY target is charged its
+    // whole path, to a millionth of a world unit. That is the shipped rule, still running.
+    const still = press('hamburger', 'Lettuce', sep, 0);
+    check('CONTROL: against a STATIONARY target the charge and the path are the same number — the rule reduces exactly',
+      still.dealt > 0 && still.firstHitAt !== null
+      && Math.abs(still.firstHitAt.traveled - still.firstHitAt.path) < 1e-6,
+      still.firstHitAt ? `charged ${still.firstHitAt.traveled} vs path ${still.firstHitAt.path}` : 'no hit');
+  }
+
+  // ── (d) THE AGE CAP IS DERIVED, AND IT IS UNREACHABLE BY ANYTHING WITH LEGS ──
+  {
+    const wrong = rangedWeapons.filter(({ w }) => {
+      const closing = w.speed - FLEE_REFERENCE_SPEED;
+      const want = (w.range / (closing > 0 ? closing : w.speed)) * 1000;
+      return !approx(projectileMaxAgeMs(w), want, 1e-9);
+    });
+    check('the age cap is `range / (speed − FLEE_REFERENCE_SPEED)` for every weapon that can close, and the authored flight time for one that cannot',
+      wrong.length === 0, wrong.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
+    check('FLEE_REFERENCE_SPEED is the roster\'s own movement cap, not a number typed here',
+      approx(FLEE_REFERENCE_SPEED, TOP_HUMAN, 1e-9) && FLEE_REFERENCE_SPEED === PLAYER_SPEED * 1000,
+      `${FLEE_REFERENCE_SPEED} vs fastest fighter ${TOP_HUMAN}`);
+
+    // Property 1: against anything moving at or under the reference the BUDGET always
+    // retires the shot first, so the cap can never truncate a legal shot. Two halves,
+    // because a shot ends in one of two ways and only checking one would leave the other
+    // free to be cap-driven:
+    //
+    //   * the shots that LAND must land strictly inside the cap;
+    //   * the shots that EXPIRE must expire with the budget SPENT (`traveled >= range`),
+    //     which is the cap not being what killed them.
+    const eligible = rangedWeapons.filter(({ w }) => canClose(w) && hasAxisShot(w));
+    const lateHits = eligible.filter(({ id, w }) => {
+      const r = press(id, w.key, w.range, TOP_HUMAN);
+      return r.firstHitAt === null || r.firstHitAt.age >= projectileMaxAgeMs(w);
+    });
+    check('every legal shot LANDS strictly inside its own age cap — the cap never truncates one',
+      lateHits.length === 0, lateHits.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
+
+    // A perpendicular runner is the miss case: the refund is ~0 there (nothing is given
+    // back along the heading), so a shot that misses must run its budget out, at the
+    // authored flight time, exactly as the shipped rule did.
+    //
+    // ⚠️ THE ONE-TICK TOLERANCE IS NOT SLOP, IT IS THE INSTRUMENT'S OWN OFF-BY-ONE, and
+    // without it this row failed on all 23 and looked exactly like the finding. `press`
+    // reads a projectile's books BEFORE the tick that destroys it (afterwards there is
+    // nothing to read), so a budget-killed shot is always recorded one step SHORT of its
+    // range. Comparing against `range` alone therefore says "cap-killed" about every shot
+    // in the game. The claim is "the budget was what ran out", so the comparison has to
+    // allow the step that ran it out.
+    const budgetRanOut = ({ id, w }) => {
+      const r = press(id, w.key, w.range, TOP_HUMAN, 90);
+      const oneStep = (w.speed * TF_DT) / 1000;
+      return r.lastExpired === null || r.lastExpired.traveled + oneStep >= w.range - 1e-9;
+    };
+    const capKilled = rangedWeapons.filter(({ w }) => canClose(w)).filter((r) => !budgetRanOut(r));
+    check('…and a shot that MISSES expires with its budget spent, not at the cap',
+      capKilled.length === 0, capKilled.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
+
+    // …and the converse, which is what makes the row above a claim rather than a filter.
+    // For a weapon too slow to close, the FALLBACK cap is the retirement rule — it fires at
+    // the authored flight time, which is exactly when path-length retirement used to fire —
+    // so this deviation is a provable NO-OP for it. That is why `Hatch!` did not get better
+    // for free and why `DECISIONS §50a` is a separate change and not a consequence of this
+    // one. The set is derived, so it empties itself when §50a lands.
+    const tooSlow = rangedWeapons.filter(({ w }) => !canClose(w));
+    check('CONVERSE: a weapon too slow to close is retired by the FALLBACK cap — this deviation is a no-op for it',
+      tooSlow.every((r) => !budgetRanOut(r)),
+      tooSlow.map(({ id, w }) => `${id}/${w.key} v${w.speed} < ${FLEE_REFERENCE_SPEED}`).join(' · ') || 'none — §50a has landed');
+  }
+
+  // ── (e) …AND THE ONE CASE IT DOES EXIST FOR ───────────────────────────────
+  //
+  // 🚨 A KNOWN-BAD PLACED WHERE THE BUG CANNOT EXPRESS ITSELF IS NOT A KNOWN-BAD — §30's
+  // own header records both of its unreachability rows coming back green from a fixture
+  // that could never have reached a timeout in EITHER arm. So the speed below is not
+  // invented: it is derived from the shipped roster, and the derivation is asserted first.
+  {
+    const boosted = Math.max(...CHARACTER_IDS
+      .filter((id) => CHARACTERS[id].hasTrail)
+      .map((id) => speedFor(id, PLAYER_SPEED) * TRAIL.speedBoost * 1000));
+    check('a shipped character really can exceed the reference speed — the Sticky Trail boost is the only thing that does',
+      boosted > FLEE_REFERENCE_SPEED && boosted < 200,
+      `${boosted.toFixed(2)} wu/s vs a ${FLEE_REFERENCE_SPEED} wu/s reference`);
+
+    const LETTUCE = CHARACTERS.hamburger.weapons.find((w) => w.key === 'Lettuce');
+    const wouldNeedMs = (LETTUCE.range / (LETTUCE.speed - boosted)) * 1000;
+    check('…and the budget alone would keep a shot chasing it for MORE THAN FOUR TIMES the cap — which is what the cap is for',
+      LETTUCE.speed > boosted && wouldNeedMs > 4 * projectileMaxAgeMs(LETTUCE),
+      `${(wouldNeedMs / 1000).toFixed(1)} s of budget against a ${(projectileMaxAgeMs(LETTUCE) / 1000).toFixed(2)} s cap`);
+
+    const r = press('hamburger', 'Lettuce', LETTUCE.range, boosted, 0, 20000);
+    check('the shot against a trail-boosted runner dies by the CAP, with its budget still unspent',
+      r.last !== null && r.last.traveled < LETTUCE.range - 1e-9
+      && approx(r.last.age, projectileMaxAgeMs(LETTUCE), 2 * TF_DT),
+      r.last ? `age ${r.last.age.toFixed(0)} ms (cap ${projectileMaxAgeMs(LETTUCE).toFixed(0)}), charged ${r.last.traveled.toFixed(1)} of ${LETTUCE.range}` : 'never died');
+    check('…and it really does escape: the same press against the same runner lands NOTHING',
+      r.dealt === 0, `${r.dealt}`);
+
+    // THE PAIRED ARM. One wu/s slower — under the reference rather than over it — and the
+    // same press lands and is retired by the BUDGET. Without this row the one above would
+    // be satisfied by a sim that simply deleted every projectile at the cap.
+    const under = press('hamburger', 'Lettuce', LETTUCE.range, FLEE_REFERENCE_SPEED);
+    check('PAIRED CONTROL: one reference-speed slower and the same press lands, retired by the budget and not by the cap',
+      under.dealt > 0 && under.firstHitAt !== null && under.firstHitAt.age < projectileMaxAgeMs(LETTUCE),
+      `dealt ${under.dealt} at ${under.firstHitAt ? under.firstHitAt.age.toFixed(0) : '—'} ms`);
+  }
+
+  // ── (f) NOTHING ABOUT A STATIONARY TARGET MOVED ──────────────────────────
+  //
+  // The whole of `press_value.mjs`'s 183 validated cells, §20(b), §29's chord rows and every
+  // published reach are measured against a target that is standing still. The refund is
+  // exactly zero there — `target.x - p.tx` is exactly 0 — so the arithmetic is unchanged.
+  // Stated here as a behavioural row over the whole roster rather than left to the 450
+  // assertions above to imply.
+  {
+    const bad = rangedWeapons.filter(({ id, w }) => {
+      const r = press(id, w.key, w.range, 0);
+      return !(r.dealt >= r.expected - 1e-9);
+    });
+    check('against a STATIONARY target all 23 ranged weapons still deliver their whole press value at the full gate',
+      bad.length === 0, bad.map(({ id, w }) => `${id}/${w.key}`).join(' · '));
   }
 }
 

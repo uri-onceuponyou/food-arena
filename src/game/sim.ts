@@ -83,6 +83,7 @@ import {
   PLAYER_SIZE,
   PLAYER_SPEED,
   PUDDLE_SLOW_FACTOR,
+  projectileMaxAgeMs,
   REGEN_AMOUNT,
   REGEN_DELAY_MS,
   REGEN_TICK_MS,
@@ -1189,11 +1190,43 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
     const hitWall = state.arena.cover.some((o) =>
       boxesOverlap(newX, newY, PROJECTILE_COVER_SIZE, PROJECTILE_COVER_SIZE, o.x, o.y, o.w, o.h),
     );
-    p.traveled += Math.hypot(moveX, moveY);
+    // ── THE BUDGET IS DENOMINATED IN THE TARGET'S FRAME ──────────────────────
+    //
+    // `rules.ts` AUTHORISED DEVIATION #12 carries the derivation and the price; this is
+    // the whole of the implementation. `traveled` is charged with the ground this step
+    // GAINED on the target, not with the ground it covered:
+    //
+    //     gained = |move| − (targetMove · moveHat)      refunded only when positive
+    //
+    // so `range` means a SEPARATION here exactly as it does at `ai.ts:pickWeapon`'s press
+    // gate, and the two can no longer diverge. Three properties, in the order they matter:
+    //
+    //   * A STATIONARY TARGET IS BIT-IDENTICAL to the shipped rule. `target.x - p.tx` is
+    //     exactly 0, so `refund` is exactly 0 and this reduces to `+= Math.hypot(...)` —
+    //     which is why §29's chord rows, `press_value.mjs`'s 183 cells and every reach
+    //     ever published against a still target reproduce to the digit. The refund is
+    //     subtracted from the TARGET'S displacement rather than recomputed from absolute
+    //     positions for exactly this reason: `(a + m − t) − (a − t)` is not `m` in floats.
+    //   * A TARGET RUNNING INTO THE SHOT IS NOT CHARGED TO IT. `refund > 0` clamps that
+    //     side: a closing target would otherwise EXTEND the shot's reach past its gate.
+    //   * A SHOT THAT CANNOT GAIN GROUND SPENDS NOTHING, so the budget alone would never
+    //     retire it. `projectileMaxAgeMs` is the termination guarantee, and it is derived
+    //     rather than picked — see its own doc comment for why it is provably unreachable
+    //     for every fighter running under its own legs.
+    const step = Math.hypot(moveX, moveY);
+    let gained = step;
+    if (step > 0 && p.tx !== undefined && p.ty !== undefined) {
+      const refund = ((target.x - p.tx) * moveX + (target.y - p.ty) * moveY) / step;
+      if (refund > 0) gained = step - refund;
+    }
+    p.tx = target.x;
+    p.ty = target.y;
+    p.age = (p.age ?? 0) + dt;
+    p.traveled += gained > 0 ? gained : 0;
     p.x = newX;
     p.y = newY;
 
-    if (hitWall || p.traveled >= (w.range ?? Infinity)) {
+    if (hitWall || p.traveled >= (w.range ?? Infinity) || p.age >= projectileMaxAgeMs(w)) {
       if (w.splatter) spawnSplat(state, p.x, p.y, events);
       removeProjectile(state, i, hitWall ? 'hit-cover' : 'expired', events);
       continue;

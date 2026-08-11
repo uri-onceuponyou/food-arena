@@ -1675,6 +1675,121 @@ export const SPEED = {
   /**  80 wu/s */ maxDrift: projectileSpeed(REACH.rangedMax, FLIGHT_MS.drift),
 } as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECTILE RETIREMENT — the budget is denominated in the TARGET'S FRAME
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── AUTHORISED DEVIATION #12 (2026-08-11): `range` MEANS ONE THING NOW ───────
+//
+// Uri, on `DECISIONS §50b`: *"do what is needed."* The price was stated before he
+// answered and is paid in full here: a new age cap, every ranged weapon meaningfully
+// stronger, all 110 matchups moving at once.
+//
+// ── THE DEFECT, WHICH WAS NEVER A BALANCE PROBLEM ───────────────────────────
+//
+// `range` was doing two jobs and one of them was a lie:
+//
+//   * `ai.ts:pickWeapon` refuses to press past `w.range`, so `range` is the SEPARATION a
+//     fighter believes the weapon works at. Both drivers share that line.
+//   * `sim.ts:stepProjectiles` used to retire a shot at `traveled >= range` where
+//     `traveled` was CUMULATIVE PATH LENGTH, so `range` was also the PATH BUDGET.
+//
+// Those coincide only when the target is standing still, and every one of the 183 cells
+// that validated `pressValue` is a stationary target. Measured (`tf_reach.mjs`, on the
+// tree before this deviation): **23 of 23 ranged weapons cannot connect at their own
+// press gate against a fleeing human, and 23 of 23 cannot against a fleeing AI.**
+// Hamburger's Lettuce Fling gates at 140 and reached **62**.
+//
+// ── WHY IT IS FIXED HERE AND NOT WITH A NUMBER ──────────────────────────────
+//
+// Two cheaper levers were measured and REFUTED, and they are recorded so nobody
+// re-derives them (`SPEED.maxDrift` carries the long version):
+//
+//   * MORE RANGE cannot pay for it. `reach = range − S·flight + hitRadius`, so the tax is
+//     `S·flight` and the range CANCELS. And `REACH.rangedMax` also sets the camera.
+//   * RETIRING ON DISPLACEMENT refunds only the path a shot spends TURNING. A straight
+//     chase has no turn, so it refunds nothing: measured on Egg, **27 wu -> 27 wu**.
+//
+// What is left is the frame the budget is measured in. `stepProjectiles` now charges a
+// tick with the ground the shot GAINED on its target — the projectile's step minus the
+// target's motion along the projectile's own heading, refunded only when the target is
+// receding (a target running INTO a shot does not extend it). On a stationary target the
+// refund is exactly zero and the arithmetic is bit-identical to the shipped rule, which
+// is why `press_value.mjs`'s 183 cells, `sim.test.mjs` §29's chord rows and every reach
+// ever published against a still target all still hold to the digit.
+//
+// ── THE TWO NUMBERS ARE NOW THE SAME QUANTITY, AND THAT IS THE POINT ────────
+//
+// In the target's rest frame the target does not move, so the separation `pickWeapon`
+// gates on IS the distance the shot has to cross, and `traveled` IS that distance being
+// crossed. A press admitted at `adist <= range` therefore has budget `range >= adist` for
+// a crossing that costs `adist` — with `hitRadius` to spare, because the hit test fires
+// at `hitRadius` and not at zero. The belief and the budget cannot diverge again without
+// one of them changing units.
+//
+// ⚠️ **THE PRICE, STATED: EVERY RANGED WEAPON GETS STRONGER AND THE WHOLE ROSTER MOVES.**
+// That is not a side effect; it is what fixing this means. Do not try to hold the roster
+// still — measure where it lands. See the commit message for the paired per-matchup
+// table, which is the real result (the aggregate is inside its own ~9 pp floor by
+// construction, because every matchup moves in both directions at once).
+
+/**
+ * The fastest a fighter RUNS, wu/s — the reference speed the retirement budget is
+ * guaranteed against.
+ *
+ * `PLAYER_SPEED` is a CAP, not a centre (see `SPEED_TOP_STAT`): `speedFor` only ever
+ * scales it DOWN, so 120 wu/s is the fastest anything in the roster moves under its own
+ * legs, in either role. `sim.test.mjs` asserts that against the live roster rather than
+ * trusting this sentence.
+ *
+ * ⚠️ **ONE THING IN THE GAME EXCEEDS IT, DELIBERATELY, AND THAT IS WHY THE AGE CAP
+ * EXISTS.** `TRAIL.speedBoost` (1.35) is applied in `sim.ts:moveFighter` to a fighter
+ * standing on its own Sticky Trail — 152.28 wu/s for Donut, the only character with
+ * `hasTrail`. That is **faster than `SPEED.maxSlow` (160) can close on with any margin
+ * worth the name**, and it is the single case in the shipped game where a shot can be
+ * outrun. Getting away from a slow shot is what the boost is FOR, so the rule is not
+ * "guarantee delivery against it" — it is "make sure the shot still dies".
+ */
+export const FLEE_REFERENCE_SPEED = PLAYER_SPEED * 1000;
+
+/**
+ * The hard age cap for one shot, in ms: how long its budget can possibly take to spend.
+ *
+ * ── DERIVED FROM THE LADDER, NOT PICKED ─────────────────────────────────────
+ *
+ * A shot fired at the press gate has to cross `range` in the target's frame, and against
+ * a target receding at `FLEE_REFERENCE_SPEED` it closes at `speed − FLEE_REFERENCE_SPEED`.
+ * So `range / (speed − FLEE_REFERENCE_SPEED)` is not a taste call — it is the exact time
+ * the budget takes to run out at the worst legal flee. Two properties follow, and both
+ * are asserted rather than asserted-in-prose:
+ *
+ *   1. **IT NEVER TRUNCATES A LEGAL SHOT.** For any target moving at `S <= FLEE_REFERENCE_
+ *      SPEED` the budget accrues at `>= speed − S >= speed − FLEE_REFERENCE_SPEED` per
+ *      unit time, so the BUDGET always retires the shot at or before this cap. Against
+ *      every fighter running under its own legs the cap is provably unreachable, and the
+ *      whole of §50b's guarantee comes from the budget rule alone.
+ *   2. **IT IS THE ONLY THING THAT KILLS A SHOT THAT CANNOT GAIN GROUND.** A trail-boosted
+ *      Donut (152.28 wu/s) outruns `SPEED.maxSlow` (160) to within 7.72 wu/s: without a
+ *      cap that shot would chase for 18 seconds. This is the case the cap exists for and
+ *      it is the ONLY one in the shipped roster.
+ *
+ * ⚠️ **THE FALLBACK IS NOT A DEFAULT, IT IS THE OLD RULE.** A weapon slower than
+ * `FLEE_REFERENCE_SPEED` can never close on the fastest runner at all, so
+ * `range / (speed − FLEE_REFERENCE_SPEED)` is meaningless (negative or infinite) and the
+ * cap falls back to the authored flight time `range / speed` — which is exactly when the
+ * SHIPPED path-length rule retired it. So this deviation is a **no-op for any weapon that
+ * cannot outrun the roster**, which is why Egg's `Hatch!` needed `DECISIONS §50a` as a
+ * SEPARATE change and did not get better for free. `sim.test.mjs` asserts that no such
+ * weapon is authored — that assertion is §50a generalised to the whole roster.
+ */
+export function projectileMaxAgeMs(w: Weapon): number {
+  const speed = w.speed ?? 0;
+  const range = w.range ?? 0;
+  if (speed <= 0) return 0;
+  const closing = speed - FLEE_REFERENCE_SPEED;
+  return (range / (closing > 0 ? closing : speed)) * 1000;
+}
+
 /**
  * How long an attack keeps you visible, whatever cover you are standing in.
  * **This constant belongs to the CONCEALMENT block above** and lives down here only

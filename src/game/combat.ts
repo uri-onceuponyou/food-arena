@@ -240,6 +240,14 @@ function spawnProjectile(
     vx: dirX * speed,
     vy: dirY * speed,
     traveled: 0,
+    // The origin of the frame `traveled` is denominated in — see `Projectile.traveled` and
+    // `rules.ts` AUTHORISED DEVIATION #12. Captured HERE rather than defaulted on the first
+    // step so the shot's very first tick is charged in the same units as every later one;
+    // a shot that spent one tick on the shipped path-length rule would silently overpay by
+    // ~2 wu, which is inside nothing and is exactly the kind of seam that survives a decade.
+    tx: target.x,
+    ty: target.y,
+    age: 0,
     damage,
     color: resolvedColor,
     emoji: resolvedEmoji,

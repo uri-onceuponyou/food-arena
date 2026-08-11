@@ -463,7 +463,30 @@ export interface Projectile {
   y: number;
   vx: number;
   vy: number;
+  /**
+   * Budget spent, in world units — and **it is denominated in the TARGET'S FRAME**, not
+   * in the projectile's own path.
+   *
+   * ⚠️ IT USED TO BE CUMULATIVE PATH LENGTH AND THE OLD NAME STILL FITS THE NEW RULE ONLY
+   * BECAUSE THE TWO COINCIDE ON A STATIONARY TARGET. `sim.ts:stepProjectiles` now charges
+   * a tick with the ground it GAINED on its target and refunds the ground the target gave
+   * back, so `range` means the same thing here as it does at `ai.ts:pickWeapon`'s press
+   * gate — a separation. See `rules.ts:projectileMaxAgeMs` and `DECISIONS §50b`.
+   */
   traveled: number;
+  /**
+   * The target's position when this projectile last stepped, i.e. the origin of the frame
+   * `traveled` is measured in. `undefined` on the first step (and for a projectile built
+   * by a fixture rather than by `combat.ts:spawnProjectile`), which charges that tick at
+   * the full path length — the shipped rule, and the conservative direction.
+   */
+  tx?: number;
+  ty?: number;
+  /**
+   * Milliseconds since spawn. The termination guarantee: a shot whose target outruns it
+   * gains no ground, so it would never spend its budget. See `rules.ts:projectileMaxAgeMs`.
+   */
+  age?: number;
   /** Resolved per-shot damage (pellet/comboPart/trail-boost already applied). */
   damage: number;
   /** Resolved per-shot color/emoji, for a VFX layer — not authoritative gameplay data. */
