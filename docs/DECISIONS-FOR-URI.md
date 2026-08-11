@@ -2732,6 +2732,12 @@ a measurable answer, not a taste call, so it is not being sent back to Uri.
 > player has it stats based on the level if their brawler"*
 > **49f** *"Local seat full, others as chips"*
 
+✅ **49a AND 49c ARE LANDED — `3ae6749`.** Bit-identity held: **41,722,453 ticks / 12,423,915 events
+in order, 0 divergent**, across default, 15:1 and 1:15 level arms, plus 38/38 self-consistency at
+N=3–6. ⚠️ **49a is inert at every N today** and that is expected, not a failure: `deaths ∈ {0,1}` and
+`deaths === 1` iff `hp === 0`, which rung 1 has already sorted. It becomes reachable the day respawns
+exist. 49b needed no work (per-victim already ships). **49f is in flight.**
+
 🚨 **49c IS A BIGGER STATEMENT THAN THE OPTION IT ANSWERS, AND IT REFRAMES A CONSTANT.** Uri's answer
 says the AI opponent is a **test harness, not a design target**. So `ENEMY_MAX_HP` (90) is not a
 balance dial for the shipped game at all — it is a **testing constant**, and in real play *every*

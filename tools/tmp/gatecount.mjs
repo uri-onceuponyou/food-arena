@@ -270,6 +270,7 @@ const OFFLINE = [
   // Registered OFFLINE despite 6 browser references in the file: `--selftest` returns in 0.15 s and
   // never reaches `runCapture`. Timed before registering, after `hw_ord`/`hw_burner` were put on
   // this path while IGNORING `--selftest` entirely and made gatecount boot a GPU probe every run.
+  { key: 'tools/tmp/s49_mutants.mjs', probes: [pr(['tools/tmp/s49_mutants.mjs'], S)] },
   { key: 'tools/tmp/da_census.mjs --selftest', probes: [pr(['tools/tmp/da_census.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/nc_measure.mjs --selftest', probes: [pr(['tools/tmp/nc_measure.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/r2_probe.mjs --selftest', probes: [pr(['tools/tmp/r2_probe.mjs', '--selftest'], S)] },
