@@ -95,9 +95,13 @@ export const STARTER_CHARACTER: CharacterId = CHARACTER_IDS[0]; // hamburger
  * What one completed match is worth.
  *
  * The prototype's trophy ladder is for a SIX-PLAYER match (+15 / +10 / +4 / +2 / 0 /
- * negative). This game is 1v1, so there is no middle: `stepMatch` reports a winner
+ * negative). This game WAS 1v1, so there was no middle: `stepMatch` reported a winner
  * and nothing else. The mapping is therefore win = the prototype's 1st place, loss =
  * the prototype's last place, with its exact scaling formula preserved.
+ *
+ * ⚠️ **THE SIM NOW SEATS SIX** (`state.ts:MAX_FIGHTERS`), so "there is no middle" stopped
+ * being true. See `placementSteepness` below and `trophyRoad.ts:placementCurve` for the
+ * 3-to-6-seat curve, which is built FROM the two numbers here rather than beside them.
  *
  * ── The grace band is mine, and it matters ─────────────────────────────────
  * Straight prototype rules take trophies off a brand-new player from their very
@@ -134,6 +138,91 @@ export const MATCH_PAYOUT = {
    * 8-10 minutes of play at the assumed win rate.
    */
   winsPerChest: 3,
+
+  /**
+   * ── THE 3-TO-6-SEAT PLACEMENT CURVE, AS ONE NUMBER ──────────────────────────
+   *
+   * `DECISIONS §57` asked what a 3-6 player match pays, and parked it with a stated safe
+   * default: *"a curve that preserves today's expected value at N=2 exactly and interpolates
+   * upward, so nothing already tuned moves. That is reversible; a generous curve shipped and
+   * then cut is not."* This constant is that default, and it is the ONLY dial in it.
+   *
+   * ── HOW THE CURVE IS INDEXED, AND WHY IT IS NOT BY PLACE ────────────────────
+   *
+   * Everything is a function of the NORMALISED rank `r = place / (seats - 1)`, not of `place`.
+   * §57's own third question is why: *"3rd of 4 is the bottom half and 3rd of 6 is the top
+   * half. A curve indexed on raw placement gets this wrong."* On `r`, 3rd of 6 is r = 0.40
+   * (top half, **+5 trophies**) and 3rd of 4 is r = 0.67 (bottom half, **-2 trophies**). A
+   * raw-place table would pay them the same and be wrong at one of the two seat counts.
+   *
+   * `r` is 0 for first and 1 for last **at every seat count**, so:
+   *
+   *   trophies = trophiesWin - w(r) * (trophiesWin + trophyLoss(standing))
+   *   coins    = coinsWin    - w(r) * (coinsWin    - coinsLoss)
+   *   chest    = a win is banked iff r < 0.5
+   *
+   * where `w` is `trophyRoad.ts:placementWeight01` — this exponent, with the two ENDPOINTS
+   * PINNED STRUCTURALLY rather than arithmetically (`r <= 0` returns 0, `r >= 1` returns 1,
+   * before any `Math.pow` runs).
+   *
+   * ── ⚠️ WHAT THAT PINNING BUYS, AND IT IS THE LOAD-BEARING PROPERTY ──────────
+   *
+   * **At two seats `r` is only ever 0 or 1**, so the two seats take the two endpoints and
+   * **N=2 is byte-identical to the shipped two-outcome payout — for ANY value of this
+   * constant, including 0 and Infinity.** The steepness dial cannot reach the 1v1 game. That
+   * is asserted directly (`economy.test.mjs` section 3b drives w() at 0, 0.6, 1, 1.6, 8 and
+   * Infinity), and it is why answering §57 with a different number is a one-value edit that
+   * needs no re-verification of the shipped economy.
+   *
+   * ── 1.0 IS LINEAR, AND LINEAR WAS CHOSEN BY MEASUREMENT ─────────────────────
+   *
+   * The reason to prefer linear over any other shape is not taste. Measured with
+   * `tools/tmp/pc_lab.mjs` over a Plackett-Luce field calibrated to the 60% win rate the
+   * pacing section already simulates (player weight 1.5 against N-1 opponents at 1.0), the
+   * expected payout **per match** is flat in the seat count:
+   *
+   *     seats        2       3       4       5       6      (400k placements each)
+   *     trophies   4.99    5.17    5.02    5.12    5.01     (shipped 1v1 EV: 5.00)
+   *     coins     43.98   43.99   44.02   43.99   44.01     (shipped 1v1 EV: 44.0)
+   *
+   * That is the constraint §57 warned about — *"the trophy road and the store are both tuned
+   * against the current two-outcome payout"* — discharged rather than argued: **the road's
+   * pacing does not move when the seat count does.** The residual +-0.17 trophies is integer
+   * rounding at odd seat counts and nothing else; it is exactly 0 at 2, 4 and 6.
+   *
+   * A steeper or flatter exponent breaks that flatness on purpose, and that is the trade Uri
+   * is choosing. At six seats above the grace band (loss capped at 10):
+   *
+   *     k     1st  2nd  3rd  4th  5th  6th   gain / hold / lose   per match   vs shipped
+   *     0.6   +15   +5   +1   -3   -7  -10   1,2,3 / -- / 4,5,6      0.17        -93%   harsh
+   *     1.0   +15  +10   +5    0   -5  -10   1,2,3 /  4 / 5,6        2.50          0%   SHIPPED
+   *     1.6   +15  +13   +9   +4   -2  -10   1,2,3,4 / -- / 5,6      4.83        +93%   friendly
+   *
+   * ⚠️ **The three-way split is the decision, not a "break-even place".** An earlier draft of
+   * this table quoted one — and named the first LOSING seat, which is a different seat from the
+   * neutral one exactly when the curve passes through zero, as the shipped one does at 4th of
+   * six. Three groups instead: who leaves with more, who leaves level, who leaves with less.
+   *
+   * ⚠️ Only the middle row leaves the tuned economy where it is. Measured over 12 seeded careers
+   * (`pc_lab --compare`), road completion runs **594 matches at two seats → 576 at six** on
+   * k=1.0, inside the ±121 the two-seat arm's own spread allows; **1084 on k=0.6** and **404 on
+   * k=1.6**, both far outside. **1.6 nearly doubles trophy income at six seats**, and a road
+   * that pays out twice as fast cannot be slowed later without taking something away. That
+   * asymmetry is the whole reason the conservative row is the default.
+   *
+   * The coin swing is far smaller than the trophy swing and is worth knowing before arguing
+   * about steepness: mean coins per six-seat match are **36.3 / 40.0 / 43.7** across the three,
+   * i.e. ±9% against the trophy column's ±93%.
+   *
+   * ── WHAT LAST PLACE GETS, WHICH §57 ASKED SEPARATELY ────────────────────────
+   *
+   * **Exactly what losing a 1v1 costs today, and nothing new was invented.** Last place is
+   * `r = 1`, so it takes the shipped loss term verbatim: **zero** below `trophyLossGraceBelow`
+   * (a new player still cannot go backwards at six seats), rising to `trophyLossCap`. Coins
+   * are floored at `coinsLoss` by the same endpoint pinning, so **every finisher at every seat
+   * count is paid coins** — the participation rule this table already states, unchanged.
+   */
+  placementSteepness: 1.0,
 } as const;
 
 /**

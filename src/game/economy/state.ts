@@ -33,9 +33,13 @@ import {
   STARTING_BALANCE,
   type ContainerKind,
 } from './tuning.ts';
+// ⚠️ `../state.ts` is the SIM's state module, not this file. Two files, same name.
+import { MAX_FIGHTERS, MIN_FIGHTERS } from '../state.ts';
 import { createRng, randomSeed } from './rng.ts';
 import { rollContainer, type ContainerResult } from './containers.ts';
-import { claimable, resolveReward, trophyDelta } from './trophyRoad.ts';
+import {
+  claimable, placementBanksChestWin, placementCoins, placementTrophyDelta, resolveReward,
+} from './trophyRoad.ts';
 import { levelUpCost, type LevelPrice } from './levels.ts';
 import { emptyReward, mergeReward, type Reward } from './reward.ts';
 
@@ -45,10 +49,24 @@ import { emptyReward, mergeReward, type Reward } from './reward.ts';
 
 /** What the last finished match paid, so the trophy road can celebrate it once. */
 export interface LastMatch {
+  /**
+   * First place. **Not "top half"** — at six seats 2nd is a good result and still not a win,
+   * which is what every screen reading this field already means by the word.
+   */
   won: boolean;
   trophies: number;
   coins: number;
   chests: number;
+  /**
+   * 0-based finishing position, and `seats` is how many finished.
+   *
+   * ⚠️ **ADDITIVE, AND OLD BLOBS PREDATE THEM.** `deserialize` fills them from `won`
+   * (`place = won ? 0 : 1`, `seats = 2`), which is exactly what a stored two-outcome result
+   * meant — so a save written before the curve reads back as the 1v1 it was, rather than as a
+   * defaulted 1st place. Every screen that only reads `won` keeps working untouched.
+   */
+  place: number;
+  seats: number;
   /** Set true the first time a screen has shown it. */
   seen: boolean;
 }
@@ -153,22 +171,41 @@ export function spend(state: EconomyState, coins: number, gems: number): boolean
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Bank one finished match.
+ * Bank one finished match at a known PLACE in a field of `seats`.
  *
- * Trophies, coins and the win-count toward a free chest, all in one call, returning
- * what changed so a screen can animate it. Milestones are NOT auto-granted — see the
- * claiming note in `trophyRoad.ts`.
+ * Trophies, coins and the win-count toward a free chest, all in one call, returning what
+ * changed so a screen can animate it. Milestones are NOT auto-granted — see the claiming note
+ * in `trophyRoad.ts`.
+ *
+ * ── 🚨 THE 1v1 PATH RUNS THROUGH HERE, AND THAT IS THE POINT ────────────────
+ *
+ * `applyMatchResult(state, won)` is now `applyMatchPlacement(state, won ? 0 : 1, MIN_FIGHTERS)`
+ * — **one code path, not two.** The alternative (keep the old body, add a parallel placement
+ * body) is the shape `rules.ts` documents six defects of: *a rule stated once and implemented
+ * twice*. Two bodies would let a future retune move the six-seat curve and leave the duel
+ * behind, and nothing would go red.
+ *
+ * ⚠️ **The cost of that choice is that "N=2 is unchanged" becomes true BY CONSTRUCTION, and a
+ * test which asserts it against this same code would be tautological.** So it is not asserted
+ * here: `economy.test.mjs` section 3b proves it against a FROZEN ORACLE — the pre-curve body
+ * transcribed from `MATCH_PAYOUT` and `trophyLoss` alone, replayed match-for-match over a
+ * seeded career and compared on the whole serialised state. See the header there for what that
+ * proof holds over and what it deliberately excludes.
  */
-export function applyMatchResult(state: EconomyState, won: boolean): LastMatch {
-  const delta = trophyDelta(state.trophies, won);
+export function applyMatchPlacement(
+  state: EconomyState,
+  place: number,
+  seats: number,
+): LastMatch {
+  const delta = placementTrophyDelta(place, seats, state.trophies);
   state.trophies = Math.max(0, state.trophies + delta);
   state.bestTrophies = Math.max(state.bestTrophies, state.trophies);
 
-  const coins = won ? MATCH_PAYOUT.coinsWin : MATCH_PAYOUT.coinsLoss;
+  const coins = placementCoins(place, seats);
   state.coins += coins;
 
   let chests = 0;
-  if (won) {
+  if (placementBanksChestWin(place, seats)) {
     state.winsTowardChest++;
     while (state.winsTowardChest >= MATCH_PAYOUT.winsPerChest) {
       state.winsTowardChest -= MATCH_PAYOUT.winsPerChest;
@@ -177,9 +214,22 @@ export function applyMatchResult(state: EconomyState, won: boolean): LastMatch {
     state.containers.chest += chests;
   }
 
-  const result: LastMatch = { won, trophies: delta, coins, chests, seen: false };
+  const result: LastMatch = { won: place === 0, trophies: delta, coins, chests, place, seats, seen: false };
   state.lastMatch = result;
   return result;
+}
+
+/**
+ * Bank one finished DUEL. The two-outcome form every shipped call site still uses.
+ *
+ * Kept as its own exported function rather than folded into an optional argument, for the same
+ * reason `sim.ts:createMatch` kept its legacy 3-argument form: 1v1 is not going away, `won` is
+ * what `profile.ts:recordResult` and `matchScreen.ts` actually have, and a boolean that has to
+ * be translated into a placement at every call site is a translation that will eventually be
+ * done backwards somewhere.
+ */
+export function applyMatchResult(state: EconomyState, won: boolean): LastMatch {
+  return applyMatchPlacement(state, won ? 0 : 1, MIN_FIGHTERS);
 }
 
 /** Wins still needed for the next free chest. */
@@ -443,11 +493,32 @@ export function deserialize(raw: unknown): EconomyState {
 
   if (o.lastMatch && typeof o.lastMatch === 'object') {
     const lm = o.lastMatch as Record<string, unknown>;
+    const won = lm.won === true;
+    // ── The pre-curve blob has no `place`/`seats`, and the fallback is not a default ──
+    // A stored two-outcome result MEANT first-or-second of two, so that is what it reads back
+    // as. Defaulting to `{ place: 0, seats: 2 }` would silently promote every stored loss to a
+    // win on the results card. `seats` is validated against the sim's own bounds and `place`
+    // against `seats`, because a blob claiming 4th of 2 would make `placementRank01` throw
+    // inside a screen render — and this module's whole contract is that a bad blob is a data
+    // problem solved here, never a crash the boot path discovers.
+    const seats = Number.isInteger(lm.seats)
+      && (lm.seats as number) >= MIN_FIGHTERS && (lm.seats as number) <= MAX_FIGHTERS
+      ? lm.seats as number
+      : MIN_FIGHTERS;
+    const place = Number.isInteger(lm.place)
+      && (lm.place as number) >= 0 && (lm.place as number) < seats
+      ? lm.place as number
+      : (won ? 0 : seats - 1);
     state.lastMatch = {
-      won: lm.won === true,
+      // DERIVED from `place`, never copied from the blob: `won` and `place` are two spellings
+      // of one fact, and a hand-edited blob claiming a win at 4th of six must resolve to one
+      // answer rather than render a victory card over a fourth-place payout.
+      won: place === 0,
       trophies: typeof lm.trophies === 'number' && Number.isFinite(lm.trophies) ? Math.trunc(lm.trophies) : 0,
       coins: num(lm.coins, 0),
       chests: num(lm.chests, 0),
+      place,
+      seats,
       seen: lm.seen === true,
     };
   }

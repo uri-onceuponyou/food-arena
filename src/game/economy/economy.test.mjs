@@ -42,13 +42,16 @@ import { containerOdds, containerOddsLine, formatPercent, rollContainer, totalWe
 import {
   claimable, milestoneFace, nextMilestone, resolveReward, roadEnd, roadProgress,
   trophyDelta, trophyLoss,
+  placementBanksChestWin, placementCoins, placementCurve, placementRank01,
+  placementTrophyDelta, placementWeight01,
 } from './trophyRoad.ts';
+import { MAX_FIGHTERS, MIN_FIGHTERS } from '../state.ts';
 import { describeReward, emptyReward, mergeReward, pluralise } from './reward.ts';
 import { bonusPercent, formatPrice, grantProduct, storeAvailable, storeProducts } from './store.ts';
 import {
-  applyMatchResult, buyContainer, claimAll, claimMilestone, createEconomy, deserialize,
-  grantReward, openContainer, ownedSet, serialize, spend, totalContainers, winsToNextChest,
-  adoptLegacyBalance, canLevelUp, characterLevel, coinsSpentOnLevels, levelUp,
+  applyMatchPlacement, applyMatchResult, buyContainer, claimAll, claimMilestone, createEconomy,
+  deserialize, grantReward, openContainer, ownedSet, serialize, spend, totalContainers,
+  winsToNextChest, adoptLegacyBalance, canLevelUp, characterLevel, coinsSpentOnLevels, levelUp,
   nextLevelPrice, rosterLevelProgress01,
 } from './state.ts';
 
@@ -197,6 +200,409 @@ console.log('\n3. Match payout');
   check('chests accrue at the intended rate over 12 wins',
     s5.containers.chest === Math.floor(12 / MATCH_PAYOUT.winsPerChest),
     `held ${s5.containers.chest}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3b. THE 3-TO-6-SEAT PLACEMENT CURVE (`DECISIONS §57`)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── ⚠️ WHAT THIS SECTION EXISTS TO STOP ────────────────────────────────────────
+//
+// Before it, this file called `applyMatchResult(state, boolean)` **97 times and never once
+// with a seat count**, and the words "placement", "seat" and "position" appeared in it zero
+// times. The whole placement curve was then written, `applyMatchResult` was rewritten to
+// delegate through it, and `LastMatch` grew two fields — and the suite reported **227 passed,
+// 0 failed, unchanged**. A green run of the old suite is *necessary and not sufficient*: it
+// could not fail on this change, so it was not testing it.
+//
+// ── THE PROOF THAT MAKES THE CURVE REVERSIBLE, AND WHAT IT HOLDS OVER ────────
+//
+// The load-bearing claim is that **two seats pay exactly what they paid before**. It is proven
+// against a FROZEN ORACLE — `oracleApply` below is the pre-curve body of `applyMatchResult`,
+// transcribed from `MATCH_PAYOUT` and `trophyLoss` and importing nothing from the placement
+// code — replayed match-for-match over seeded careers and compared as a TRANSCRIPT, not as a
+// final balance.
+//
+//   HOLDS OVER: `trophies`, `bestTrophies`, `coins`, `gems`, every `containers` kind,
+//     `claimed`, `unlocked`, `winsTowardChest`, `levels`, `seed`, `rolls`, and the returned
+//     payout's `won` / `trophies` / `coins` / `chests` / `seen` — after EVERY match, over
+//     8 seeded careers x 500 matches = 4,000 matches, spanning the grace band, the escalating
+//     penalty and the loss cap, at win rates 0.0, 0.35, 0.5, 0.6, 0.85 and 1.0.
+//   DELIBERATELY EXCLUDES: `LastMatch.place` and `LastMatch.seats`, which did not exist before
+//     the change and so cannot be "preserved" — they are checked separately, below. And it
+//     says nothing about three or more seats, which is a NEW quantity with no before-value.
+//
+// ── EVERY ASSERTION BELOW WAS SHOWN TO FAIL ON A NAMED BAD INPUT ─────────────
+//
+// The specific tautology this domain invites is an assertion that rebuilds the curve from the
+// same constants it is checking — it would pass on any curve, including a broken one. So every
+// invariant here is written as a PREDICATE OVER A CURVE FUNCTION and then run twice: once on
+// the shipped one, and once on a deliberately wrong one that it must reject.
+
+console.log('\n3b. Placement curve, 2-6 seats');
+{
+  const SEATS = [];
+  for (let n = MIN_FIGHTERS; n <= MAX_FIGHTERS; n++) SEATS.push(n);
+  // Standings chosen to straddle every regime of `trophyLoss`: inside the grace band, the
+  // first trophy above it, mid-road where the penalty is still climbing, and past the cap.
+  const STANDINGS = [0, 99, MATCH_PAYOUT.trophyLossGraceBelow, 500, 1500, 50000];
+
+  // ── (a) THE FROZEN ORACLE — the body `applyMatchResult` had before the curve ──
+  //
+  // Transcribed rather than imported, deliberately. This is the only copy of the old rule left
+  // anywhere, and if it is ever deleted the N=2 no-op stops being provable.
+  function oracleApply(state, won) {
+    const delta = won ? MATCH_PAYOUT.trophiesWin : -trophyLoss(state.trophies);
+    state.trophies = Math.max(0, state.trophies + delta);
+    state.bestTrophies = Math.max(state.bestTrophies, state.trophies);
+    const coins = won ? MATCH_PAYOUT.coinsWin : MATCH_PAYOUT.coinsLoss;
+    state.coins += coins;
+    let chests = 0;
+    if (won) {
+      state.winsTowardChest++;
+      while (state.winsTowardChest >= MATCH_PAYOUT.winsPerChest) {
+        state.winsTowardChest -= MATCH_PAYOUT.winsPerChest;
+        chests++;
+      }
+      state.containers.chest += chests;
+    }
+    return { won, trophies: delta, coins, chests, seen: false };
+  }
+
+  /**
+   * Replay one career and return a TRANSCRIPT — one line per match.
+   *
+   * ⚠️ A transcript, not a final state, and that is the whole design of the check: two payout
+   * rules that differ on match 10 and differ back on match 11 leave identical balances. The
+   * known-bad `compensating` below is exactly that career, and it exists so nobody can later
+   * "simplify" this to a final-balance comparison without a gate going red.
+   */
+  function replay(applyFn, seed, matches, winRate) {
+    const s = createEconomy(seed);
+    const rng = createRng(seed);
+    const lines = [];
+    for (let i = 0; i < matches; i++) {
+      const won = rng.next() < winRate;
+      const paid = applyFn(s, won, i);
+      claimAll(s);
+      lines.push([
+        s.trophies, s.bestTrophies, s.coins, s.gems, s.winsTowardChest, s.rolls,
+        CONTAINER_KINDS.map((k) => s.containers[k]).join('.'),
+        s.claimed.join('.'), s.unlocked.join('.'),
+        Object.entries(s.levels).sort().map(([k, v]) => `${k}=${v}`).join('.'),
+        // Only the five fields that existed before the curve. `place`/`seats` are excluded
+        // by policy — see the section header.
+        `${paid.won}|${paid.trophies}|${paid.coins}|${paid.chests}|${paid.seen}`,
+      ].join(' '));
+    }
+    return lines.join('\n');
+  }
+
+  const ARMS = [
+    { seed: 20260811, winRate: 0.60 }, { seed: 4242, winRate: 0.50 },
+    { seed: 777, winRate: 0.35 }, { seed: 31337, winRate: 0.85 },
+    { seed: 99, winRate: 0.0 }, { seed: 1234, winRate: 1.0 },
+    { seed: 8080, winRate: 0.60 }, { seed: 555, winRate: 0.45 },
+  ];
+  const MATCHES = 500;
+  const shipped = ARMS.map((a) => replay((s, won) => applyMatchResult(s, won), a.seed, MATCHES, a.winRate));
+  const oracle = ARMS.map((a) => replay((s, won) => oracleApply(s, won), a.seed, MATCHES, a.winRate));
+
+  check(`N=2 is UNCHANGED: ${ARMS.length} careers x ${MATCHES} matches transcribe identically to the pre-curve rule`,
+    shipped.every((t, i) => t === oracle[i]),
+    shipped.map((t, i) => t === oracle[i] ? null : `arm ${i} (seed ${ARMS[i].seed}, wr ${ARMS[i].winRate}) diverges`)
+      .filter(Boolean).join('; '));
+
+  // ⚠️ KNOWN-BAD #1: ONE trophy, on ONE match, in four thousand. If the comparator cannot see
+  // this it is measuring nothing. Applied unconditionally on match 313 so it does not depend on
+  // which way a coin landed in any particular arm.
+  const offByOne = ARMS.map((a) => replay((s, won, i) => {
+    const paid = oracleApply(s, won);
+    if (i === 313) { s.trophies += 1; s.bestTrophies = Math.max(s.bestTrophies, s.trophies); }
+    return paid;
+  }, a.seed, MATCHES, a.winRate));
+  check('...and the comparator FAILS on a single trophy in 4,000 matches (not a vacuous pass)',
+    offByOne.every((t, i) => t !== oracle[i]),
+    `${offByOne.filter((t, i) => t === oracle[i]).length} of ${ARMS.length} arms failed to notice`);
+
+  // ⚠️ KNOWN-BAD #2: two errors that cancel. Final balances identical; transcript must differ.
+  const compensating = ARMS.map((a) => replay(
+    (s, won, i) => {
+      const paid = oracleApply(s, won);
+      if (i === 100) s.coins += 7;
+      if (i === 101) s.coins -= 7;
+      return paid;
+    }, a.seed, MATCHES, a.winRate));
+  const finalCoinsMatch = ARMS.every((a) => {
+    const cmp = createEconomy(a.seed); const orc = createEconomy(a.seed);
+    const r1 = createRng(a.seed); const r2 = createRng(a.seed);
+    for (let i = 0; i < MATCHES; i++) {
+      const w1 = r1.next() < a.winRate; oracleApply(cmp, w1);
+      if (i === 100) cmp.coins += 7; if (i === 101) cmp.coins -= 7;
+      oracleApply(orc, r2.next() < a.winRate);
+    }
+    return cmp.coins === orc.coins;
+  });
+  check('...and FAILS on two errors that cancel, which a final-balance check would pass',
+    finalCoinsMatch && compensating.every((t, i) => t !== oracle[i]),
+    `final balances equal: ${finalCoinsMatch}; `
+    + `${compensating.filter((t, i) => t === oracle[i]).length} of ${ARMS.length} arms failed to notice`);
+
+  // ── (b) THE NEW FIELDS. Excluded from the proof above, so checked here. ──────
+  {
+    const s = seeded();
+    const w = applyMatchResult(s, true);
+    check('a 1v1 win reports place 0 of 2', w.place === 0 && w.seats === MIN_FIGHTERS && w.won === true);
+    const l = applyMatchResult(seeded(), false);
+    check('a 1v1 loss reports last of 2', l.place === MIN_FIGHTERS - 1 && l.seats === MIN_FIGHTERS && l.won === false);
+    const third = applyMatchPlacement(seeded(), 2, 6);
+    check('third of six reports itself, and is NOT a win',
+      third.place === 2 && third.seats === 6 && third.won === false, JSON.stringify(third));
+    check('only FIRST place is a win — 2nd of six is a good result and still not one',
+      applyMatchPlacement(seeded(), 1, 6).won === false
+      && applyMatchPlacement(seeded(), 0, 6).won === true);
+  }
+
+  // ── (c) ENDPOINTS ARE PINNED AT EVERY SEAT COUNT AND EVERY STEEPNESS ────────
+  //
+  // This is what makes the whole thing reversible: the steepness dial in `tuning.ts` cannot
+  // reach the shipped duel, because two seats only ever produce r = 0 and r = 1.
+  const ADVERSARIAL_K = [0, 0.25, 0.6, 1, 1.6, 4, 8, Infinity, NaN];
+  function endpointsPinned(weightFn) {
+    return ADVERSARIAL_K.every((k) => weightFn(0, k) === 0 && weightFn(1, k) === 1);
+  }
+  check('the curve weight pins BOTH endpoints at every exponent, including 0, Infinity and NaN',
+    endpointsPinned(placementWeight01),
+    ADVERSARIAL_K.map((k) => `k=${k}: w(0)=${placementWeight01(0, k)} w(1)=${placementWeight01(1, k)}`).join(' · '));
+  // ⚠️ KNOWN-BAD: the same curve WITHOUT the structural early-returns. `Math.pow(0, 0)` is 1 in
+  // JS, so an unpinned weight pays FIRST PLACE THE LOSER'S RATE at k=0. This is the exact bug
+  // the two early returns exist to make unreachable.
+  const unpinnedWeight = (r, k) => Math.pow(r, k);
+  check('...and that check REJECTS the arithmetic-only version it replaced (Math.pow(0,0) === 1)',
+    endpointsPinned(unpinnedWeight) === false,
+    `unpinned w(0) at k=0 is ${unpinnedWeight(0, 0)}`);
+
+  check('two seats pay exactly the shipped duel at EVERY exponent, adversarial ones included',
+    ADVERSARIAL_K.every((k) => STANDINGS.every((t) => {
+      const c = placementCurve(MIN_FIGHTERS, t, k);
+      return c.length === 2 && c[0] === MATCH_PAYOUT.trophiesWin && c[1] === -trophyLoss(t);
+    })));
+
+  check('first place always pays the shipped WIN and last always pays the shipped LOSS, 2-6 seats',
+    SEATS.every((n) => STANDINGS.every((t) =>
+      placementTrophyDelta(0, n, t) === trophyDelta(t, true)
+      && placementTrophyDelta(n - 1, n, t) === trophyDelta(t, false))),
+    SEATS.map((n) => `${n}:[${placementCurve(n, 500).join(',')}]`).join(' '));
+
+  // ── (d) MONOTONE. A curve that ever pays a worse finish more is not a ladder. ──
+  function monotone(curveFn) {
+    return SEATS.every((n) => STANDINGS.every((t) => {
+      const c = curveFn(n, t);
+      return c.every((v, i) => i === 0 || v <= c[i - 1]);
+    }));
+  }
+  check('the curve never pays a worse placement more, at any seat count or standing',
+    monotone((n, t) => placementCurve(n, t)));
+  // ⚠️ KNOWN-BAD: a plausible-looking hand table with one seat out of order.
+  check('...and the monotonicity check REJECTS a table with 3rd and 4th swapped',
+    monotone((n) => n === 6 ? [15, 10, 0, 5, -5, -10] : [15, -10]) === false);
+
+  // ── (e) §57's THIRD QUESTION: does the curve scale with N? ──────────────────
+  //
+  // *"3rd of 4 is the bottom half and 3rd of 6 is the top half. A curve indexed on raw
+  // placement gets this wrong."* Written as a predicate so the wrong design can be run
+  // through it and rejected, rather than described in a comment.
+  function scalesWithSeats(deltaFn) {
+    const t = 1500; // above the loss cap, where the two halves are furthest apart
+    return deltaFn(2, 6, t) !== deltaFn(2, 4, t) && deltaFn(2, 6, t) > 0 && deltaFn(2, 4, t) < 0;
+  }
+  check('3rd of SIX is the top half (+) and 3rd of FOUR is the bottom half (-) — the curve scales with N',
+    scalesWithSeats((p, n, t) => placementTrophyDelta(p, n, t)),
+    `3rd of 6 = ${placementTrophyDelta(2, 6, 1500)}, 3rd of 4 = ${placementTrophyDelta(2, 4, 1500)}`);
+  // ⚠️ KNOWN-BAD: the raw-place table §57 warned about. It pays 3rd the same in both fields.
+  const rawPlaceTable = [15, 10, 5, 0, -5, -10];
+  check('...and that check REJECTS a raw-placement-indexed table, which is the design §57 warned about',
+    scalesWithSeats((p) => rawPlaceTable[p]) === false,
+    `raw table pays 3rd = ${rawPlaceTable[2]} whether the field is four or six`);
+
+  check('normalised rank is 0 for first and 1 for last at every seat count',
+    SEATS.every((n) => placementRank01(0, n) === 0 && placementRank01(n - 1, n) === 1));
+
+  // ── (f) THE GRACE BAND SURVIVES SIX SEATS ──────────────────────────────────
+  //
+  // The band is why a new player does not read the first hour as standing still. Six seats
+  // must not be the place it quietly stops applying.
+  function graceHolds(deltaFn) {
+    return SEATS.every((n) => [0, 1, 50, MATCH_PAYOUT.trophyLossGraceBelow - 1]
+      .every((t) => Array.from({ length: n }, (_, p) => deltaFn(p, n, t)).every((d) => d >= 0)));
+  }
+  check('NOBODY loses trophies inside the grace band, at any seat count — last of six included',
+    graceHolds(placementTrophyDelta),
+    `last of 6 at 0 trophies: ${placementTrophyDelta(5, 6, 0)}`);
+  // ⚠️ KNOWN-BAD: the obvious wrong implementation — price the span off the CAP rather than off
+  // the finisher's own standing. It is what you write if you forget `trophyLoss` is a function.
+  const cappedSpan = (p, n, t) => Math.round(
+    MATCH_PAYOUT.trophiesWin - placementWeight01(placementRank01(p, n)) * (MATCH_PAYOUT.trophiesWin + MATCH_PAYOUT.trophyLossCap));
+  check('...and that check REJECTS a curve priced off trophyLossCap instead of the standing',
+    graceHolds(cappedSpan) === false,
+    `it would take ${-cappedSpan(5, 6, 0)} trophies off a brand-new player's sixth place`);
+
+  // ── (g) COINS: everybody is paid, nobody is overpaid ───────────────────────
+  check('every finisher at every seat count is paid coins, bounded by the shipped pair',
+    SEATS.every((n) => Array.from({ length: n }, (_, p) => placementCoins(p, n))
+      .every((c) => Number.isInteger(c) && c >= MATCH_PAYOUT.coinsLoss && c <= MATCH_PAYOUT.coinsWin)),
+    SEATS.map((n) => `${n}:[${Array.from({ length: n }, (_, p) => placementCoins(p, n)).join(',')}]`).join(' '));
+  check('coins land exactly on the shipped win/loss rates at the two ends, 2-6 seats',
+    SEATS.every((n) => placementCoins(0, n) === MATCH_PAYOUT.coinsWin
+      && placementCoins(n - 1, n) === MATCH_PAYOUT.coinsLoss));
+
+  // ── (h) THE PROPERTY THAT DISCHARGES §57's WARNING ABOUT THE ROAD ───────────
+  //
+  // §57: *"anything chosen here interacts with the trophy road and the store, both of which are
+  // tuned against the current two-outcome payout."* The default is chosen so that it does not:
+  // a linear curve on normalised rank has the SAME mean payout per match at every seat count,
+  // so the road's pacing cannot move when the seat count does.
+  //
+  // ⚠️ RESOLUTION: the mean over seats is EXACT ARITHMETIC — no seeds, no sampling, no floor to
+  // quote. The residual is integer rounding alone, and it is exactly 0 at even seat counts.
+  function meanPerMatch(n, t, k) {
+    const c = placementCurve(n, t, k);
+    return c.reduce((a, b) => a + b, 0) / n;
+  }
+  const evTarget = (t) => (MATCH_PAYOUT.trophiesWin - trophyLoss(t)) / 2; // the 1v1 average player
+  check('mean payout per match is FLAT in the seat count — the road cannot be retuned by seating six',
+    SEATS.every((n) => STANDINGS.every((t) => Math.abs(meanPerMatch(n, t) - evTarget(t)) <= 0.2)),
+    SEATS.map((n) => `${n}:${meanPerMatch(n, 1500).toFixed(3)}`).join(' ') + ` vs ${evTarget(1500)}`);
+  check('...and is EXACTLY the 1v1 mean at even seat counts — the residual is integer rounding only',
+    [2, 4, 6].every((n) => STANDINGS.every((t) => meanPerMatch(n, t) === evTarget(t))));
+  // ⚠️ KNOWN-BAD: the "friendly" exponent Uri may prefer. It is a real option and it is NOT
+  // EV-neutral — this check is what would go red if it were adopted without re-tuning the road,
+  // which is precisely the interaction §57 asked about.
+  check('...and that check REJECTS the friendlier k=1.6 shape, which nearly doubles six-seat income',
+    SEATS.some((n) => Math.abs(meanPerMatch(n, 1500, 1.6) - evTarget(1500)) > 0.2),
+    `k=1.6 at six seats: ${meanPerMatch(6, 1500, 1.6).toFixed(3)} vs ${evTarget(1500)}`);
+
+  // ── (i) THE CHEST FAUCET — the one step in an otherwise continuous curve ────
+  check('the chest rule is exactly today at two seats: first banks, last does not',
+    placementBanksChestWin(0, 2) === true && placementBanksChestWin(1, 2) === false);
+  check('the chest rule is the top half, strictly — 2nd of THREE banks nothing (r = 0.5 exactly)',
+    placementBanksChestWin(1, 3) === false && placementBanksChestWin(0, 3) === true);
+  check('at six seats the top three bank a chest win and the bottom three do not',
+    [0, 1, 2].every((p) => placementBanksChestWin(p, 6))
+    && [3, 4, 5].every((p) => !placementBanksChestWin(p, 6)));
+  check('last place NEVER banks a chest, at any seat count',
+    SEATS.every((n) => placementBanksChestWin(n - 1, n) === false));
+  {
+    // The faucet actually running, not just the predicate.
+    const s = seeded();
+    let chests = 0;
+    for (let i = 0; i < MATCH_PAYOUT.winsPerChest; i++) chests += applyMatchPlacement(s, 2, 6).chests;
+    check('three third-of-six finishes earn one chest, exactly as three 1v1 wins do',
+      chests === 1 && s.containers.chest === 1, `${chests} / ${s.containers.chest}`);
+    const t = seeded();
+    for (let i = 0; i < 30; i++) applyMatchPlacement(t, 3, 6);
+    check('thirty fourth-of-six finishes earn none', t.containers.chest === 0);
+  }
+
+  // ── (j) REFUSALS. A payout that silently clamps is a payout nobody can trace. ──
+  const throws = (fn) => { try { fn(); return false; } catch (e) { return e instanceof RangeError; } };
+  check('a seat count below the sim floor is REFUSED, not clamped',
+    throws(() => placementRank01(0, MIN_FIGHTERS - 1)) && throws(() => placementCurve(1, 0)));
+  check('a seat count above the sim ceiling is REFUSED',
+    throws(() => placementRank01(0, MAX_FIGHTERS + 1)));
+  check('a non-integer seat count is REFUSED', throws(() => placementRank01(0, 2.5)));
+  check('a place outside the field is REFUSED at both ends',
+    throws(() => placementRank01(-1, 6)) && throws(() => placementRank01(6, 6))
+    && throws(() => placementTrophyDelta(9, 4, 0)));
+  check('...and the refusal reaches the state mutator too',
+    throws(() => applyMatchPlacement(seeded(), 3, 3)));
+  {
+    // A refused placement must leave the player untouched — the same atomicity §13(e) asserts
+    // for a refused upgrade. A payout that half-applies before throwing is worse than no payout.
+    const s = seeded();
+    const before = JSON.stringify(serialize(s));
+    try { applyMatchPlacement(s, 7, 4); } catch { /* expected */ }
+    check('a refused placement changes NOTHING about the player', JSON.stringify(serialize(s)) === before);
+  }
+
+  // ── (k) THE PERSISTED BLOB, INCLUDING ONE WRITTEN BEFORE THE CURVE EXISTED ──
+  {
+    const s = seeded(606);
+    applyMatchPlacement(s, 4, 6);
+    const round = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+    check('a placement result survives the round trip',
+      JSON.stringify(round.lastMatch) === JSON.stringify(s.lastMatch), JSON.stringify(round.lastMatch));
+
+    // The blob shape that shipped before this change: `won`, no `place`, no `seats`.
+    const legacyLoss = deserialize({ lastMatch: { won: false, trophies: -8, coins: 20, chests: 0, seen: true } });
+    check('a pre-curve blob\'s LOSS reads back as last of two, not as a defaulted first place',
+      legacyLoss.lastMatch.place === MIN_FIGHTERS - 1 && legacyLoss.lastMatch.seats === MIN_FIGHTERS
+      && legacyLoss.lastMatch.won === false, JSON.stringify(legacyLoss.lastMatch));
+    const legacyWin = deserialize({ lastMatch: { won: true, trophies: 15, coins: 60, chests: 1, seen: false } });
+    check('a pre-curve blob\'s WIN reads back as first of two',
+      legacyWin.lastMatch.place === 0 && legacyWin.lastMatch.seats === MIN_FIGHTERS
+      && legacyWin.lastMatch.won === true);
+
+    check('a blob claiming a seat count the sim refuses is repaired, never thrown on',
+      deserialize({ lastMatch: { won: true, seats: 99, place: 40 } }).lastMatch.seats === MIN_FIGHTERS);
+    check('a blob claiming 4th of two is repaired',
+      deserialize({ lastMatch: { won: false, seats: 2, place: 3 } }).lastMatch.place === MIN_FIGHTERS - 1);
+    check('`won` is DERIVED from place, so a blob cannot claim a victory at fourth of six',
+      deserialize({ lastMatch: { won: true, seats: 6, place: 3 } }).lastMatch.won === false);
+  }
+
+  // ── (l) PACING AT SIX SEATS — the road still finishes ───────────────────────
+  //
+  // ⚠️ THE BOUNDS ARE IN MATCHES, for the same reason section 9's are: hours multiply by a
+  // session length that lives in another file. And the placement stream is a MODEL, named as
+  // one — Plackett-Luce with the player at weight 1.5 against N-1 opponents at 1.0, which
+  // reproduces the 60% win rate section 9 already assumes when the field is two.
+  function placeFor(rng, seats, strength = 1.5) {
+    const w = [strength, ...new Array(seats - 1).fill(1)];
+    const alive = w.map((_, i) => i);
+    for (let pos = 0; pos < seats; pos++) {
+      let tot = 0;
+      for (const i of alive) tot += w[i];
+      let x = rng.next() * tot;
+      let chosen = alive[alive.length - 1];
+      for (const i of alive) { x -= w[i]; if (x <= 0) { chosen = i; break; } }
+      if (chosen === 0) return pos;
+      alive.splice(alive.indexOf(chosen), 1);
+    }
+    return seats - 1;
+  }
+  {
+    const rows = [];
+    for (const n of SEATS) {
+      const s = createEconomy(20260811);
+      const rng = createRng(20260811);
+      let firstChar = null;
+      let complete = null;
+      const firstNode = TROPHY_ROAD.find((m) => m.reward.type === 'character');
+      for (let m = 1; m <= 6000 && complete === null; m++) {
+        applyMatchPlacement(s, placeFor(rng, n), n);
+        claimAll(s);
+        if (firstChar === null && s.claimed.includes(firstNode.trophies)) firstChar = m;
+        if (s.claimed.length === TROPHY_ROAD.length) complete = m;
+      }
+      rows.push({ n, firstChar, complete, coins: s.coins, chests: s.containers.chest });
+    }
+    console.log(`     seats -> first character / road complete (matches), Plackett-Luce s=1.5:`);
+    for (const r of rows) {
+      console.log(`       ${r.n}: first=${r.firstChar}  complete=${r.complete}`
+        + `  chests=${r.chests}  curve@1500=[${placementCurve(r.n, 1500).join(', ')}]`);
+    }
+    check('the road completes at EVERY seat count, not just at two',
+      rows.every((r) => r.complete !== null), rows.map((r) => `${r.n}:${r.complete}`).join(' '));
+    check('the FIRST character is still one sitting at every seat count (<= 20 matches)',
+      rows.every((r) => r.firstChar !== null && r.firstChar <= 20),
+      rows.map((r) => `${r.n}:${r.firstChar}`).join(' '));
+    // The load-bearing pacing claim: seating six must not shift the road by more than the
+    // spread the two-seat arm already has across seeds (section 9 quotes sd 51 on this figure).
+    const spread = Math.max(...rows.map((r) => r.complete)) - Math.min(...rows.map((r) => r.complete));
+    check('road completion across 2-6 seats stays inside the 2-seat run-to-run spread (sd 51 -> 2 sd = 102)',
+      spread <= 102, `spread ${spread} matches across seat counts`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
