@@ -40,15 +40,23 @@
  *   `--knownbad selfpair`  same tree twice: 0 differing pixels, EXACTLY (camera shake
  *                          is zeroed by `a1a85e5`, so 0 is the real answer, not a
  *                          tolerance).
- *   `--knownbad hide`      `--hide` must actually remove pixels. Two-sided and stated
- *                          WITHOUT naming which characters have a column, because this
- *                          pass changes that: matched-objects > 0 must coincide exactly
- *                          with changedPx > 0 on every character, AND at least one
- *                          character in the run must match. A hide that silently
- *                          matches nothing is the failure this catches, and it is what
- *                          makes every `--hide neck` number worth reading.
- *                          ⚠️ Give it an id that still builds a column — after this
- *                          pass that is `burrito` alone.
+ *   `--knownbad hide`      Three cells, because the two obvious formulations are BOTH
+ *                          wrong and both were written before this one:
+ *                            A  a name that matches nothing  -> 0 matched, 0 changed
+ *                            B  `rig_root`                   -> >0 matched, >0 changed
+ *                            C  `neck`                       -> changedPx > 0 must
+ *                               IMPLY matched > 0, and nothing more.
+ *                          🚨 C IS ONE-WAY ON PURPOSE. "matched > 0 must coincide with
+ *                          changedPx > 0" was the second draft and **burrito refutes
+ *                          it**: it builds a column, `--hide` matches all 4 objects,
+ *                          and the frame does not move by a single pixel — because its
+ *                          own mass hides the column completely, which is the whole
+ *                          reason `25d5579` scored it 0 px and used it as the control.
+ *                          A guard that cannot tell "matched nothing" from "matched
+ *                          something invisible" would have called that a failure. B is
+ *                          what proves the mechanism is live without needing any
+ *                          character to have a visible column — which, after this pass,
+ *                          none does.
  *   `--knownbad control`   the magenta control: an unpainted frame must score 0.
  *
  * ── USE ─────────────────────────────────────────────────────────────────────
@@ -233,23 +241,28 @@ if (KNOWNBAD === 'selfpair') {
 } else if (KNOWNBAD === 'hide') {
   // Two-sided. A hide that matches nothing must not read as "no effect", and a hide
   // that matches something must actually move the frame.
-  console.log('KNOWN-BAD hide: matched-objects > 0 must coincide EXACTLY with changedPx > 0,');
-  console.log('                on every character, and at least one must match.\n');
+  console.log('KNOWN-BAD hide — three cells per character:');
+  console.log('  A  a name nothing carries   -> matched 0, changed 0');
+  console.log('  B  rig_root                 -> matched > 0, changed > 0   (the mechanism is live)');
+  console.log('  C  neck                     -> changed > 0 IMPLIES matched > 0, and no more:');
+  console.log('     a column that exists and is fully HIDDEN by the food mass legitimately');
+  console.log('     changes nothing. burrito is exactly that, and it refuted the previous');
+  console.log('     two-way version of this check.\n');
   const names = resolve('neck');
-  let anyMatched = 0;
-  for (const id of [...IDS, 'hamburger']) for (const p of PITCHES) {
-    const A = await capture(id, p, {});
-    const B = await capture(id, p, { hide: names });
-    const d = await diffPx(A.buf, B.buf);
-    const ok = (B.info.hidden > 0) === (d > 0);
-    if (B.info.hidden > 0) anyMatched++;
-    console.log(`${id.padEnd(12)} p${p}  matched ${B.info.hidden} objects, changedPx ${d}   ${ok ? '✓' : '🔴'}`);
-    if (!ok) bad++;
-  }
-  if (!anyMatched) {
-    console.log('\n🔴 NOTHING MATCHED IN THE WHOLE RUN — "0 objects, 0 px" is self-consistent and');
-    console.log('   proves nothing. Point this at a character that still builds a column.');
-    bad++;
+  for (const id of [...IDS]) for (const p of PITCHES) {
+    const base = await capture(id, p, {});
+    const cells = [
+      ['A none', ['n2_no_such_mesh'], (m, d) => m === 0 && d === 0],
+      ['B root', ['rig_root'], (m, d) => m > 0 && d > 0],
+      ['C neck', names, (m, d) => !(d > 0) || m > 0],
+    ];
+    for (const [label, hide, want] of cells) {
+      const arm = await capture(id, p, { hide });
+      const d = await diffPx(base.buf, arm.buf);
+      const ok = want(arm.info.hidden, d);
+      console.log(`${id.padEnd(12)} p${p}  ${label}  matched ${String(arm.info.hidden).padStart(3)}  changedPx ${String(d).padStart(7)}   ${ok ? '✓' : '🔴'}`);
+      if (!ok) bad++;
+    }
   }
 } else if (KNOWNBAD === 'control') {
   for (const id of IDS) for (const p of PITCHES) {
