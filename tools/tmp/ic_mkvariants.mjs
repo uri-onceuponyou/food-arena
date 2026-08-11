@@ -395,7 +395,29 @@ const V = {
     //        and an upright tan mass with a green ruffle on top is `onion` or `honey`.
     // The lettuce, added to break the silhouette, is what named it. Next arm: upright with
     // the outline break coming from the tortilla itself, nothing green on top.
-    { id: 'A', note: 'SHIPPED — a pale cream bar at 45° with a gold stub past its upper end. "a sword" x3 on two independent native panels, and x3 again here.' },
+    //
+    // 🔴 r13 VERDICT (seed 23, 74 tiles, native floor 1–2 of 3): NOTHING SHIPS, AND THE
+    //    STANDING MECHANISM IS NOW SHARPER AND WORSE.
+    //      A  0/3 native — shards / hammer / sword       1/3 magnified
+    //      D  0/3 native — **"a sword slash" x3**  Δ +0  1/3 magnified  Δ +0
+    //      G  0/3 native — shards / hammer / sword  Δ +0 1/3 magnified  Δ +0
+    //    [D] IS THE FINDING. Mirrored onto the OTHER diagonal, the glyph did not stop
+    //    being a blade — it changed WHICH blade, from `damage` ("a sword", 1 of 3 on [A])
+    //    to `slash` ("a sword slash", **3 of 3, unanimous**). So `7f71f20`'s "the 45°
+    //    diagonal IS the sword" was too specific: **it is not the sword's diagonal, it is
+    //    ANY diagonal.** A pale elongated bar at 45° is a bladed-weapon gesture and this
+    //    icon set already ships two of those. That closes the axis as a variable in both
+    //    directions and it is why a fourth redraw is not the answer here.
+    //    [G] IS A PERFECT NULL, and a stronger one than a Δ: all three native judges gave
+    //    [A] and [G] the SAME answer as each other — shards / hammer / sword, in the same
+    //    order — on artwork that differs in 4.02% of plate pixels. `a77ff30` measured
+    //    colour at Δ 0 on `boxBurger`; this is the same result with the wrong answers
+    //    held fixed too. **Value is not the lever on this glyph.**
+    //    ⚠️ CAVEAT ON THE ABSOLUTE, NOT ON THE Δ: `damage` itself scored **0/3** in this
+    //    round (seaweed x2) and `slash` **0/3**, so both blade answers were unclaimed and
+    //    every wrap tile could take one. The paired Δ is exact; "a sword" being available
+    //    is a property of this plate.
+    { id: 'A', note: '[r13 seed 23: 0/3 native — glass shards / hammer / sword; 1/3 magnified] SHIPPED — a pale cream bar at 45° with a gold stub past its upper end. "a sword" x3 on two independent native panels, and x3 again in r9.' },
     {
       id: 'B',
       note: 'THE DIAGONAL IS GONE. Upright, 11.6 x 16.8 (1:1.45), warm tan rather than near-white so the glyph is a MASS on white instead of an outline, an asymmetric FOLDED FLAP at the top (a capsule has two identical ends; this has a peak and a round base) and a lettuce ruffle SPILLING PAST the top edge. No axis a blade can share. ⚠️ The first cut of this arm gave it a 3.8-unit leaf; rendered, that is 3.6 px with a 1.6 px outline round it and it came back as a green dot. Widened to 8.8 units for the same reason `candy` [B] was rewidened — at 22.72 px the outline eats any element under ~6 units.',
@@ -413,6 +435,72 @@ const V = {
 <path d="M8 13.1 11.1 10l4.5 4.5-3.1 3.1z" fill="#E9B44C"/>
 <path d="M8.4 13.6 11.2 16.4M11.6 10.4 14.4 13.2" stroke="#CBB289" stroke-width="1.8"/>`,
     },
+    // ── r13. [C] settled that the AXIS is the sword and the hilt is not. That leaves two
+    //    questions the round could not separate, because [B] changed the axis AND the
+    //    subject AND the colourway AND added a garnish all at once:
+    //      [D] is it the DIAGONAL, or is it THIS diagonal? `damage`'s blade runs
+    //          (20.6,1.6) -> (6.4,14.8), i.e. NE-to-SW, and `wrap`'s bar runs
+    //          (4.4,17.6) -> (15.6,6.4), i.e. SW-to-NE. SAME LINE. [D] mirrors the
+    //          shipped art about x=12 and changes nothing else — zero ink, byte-identical
+    //          geometry, one variable, and it is the only arm that can tell "a bar at 45
+    //          degrees is a sword" apart from "a bar on the sword's OWN diagonal is a
+    //          sword". If [D] recovers, the fix costs one transform.
+    //      [E] the upright arm REDONE with B's two named killers removed: nothing green,
+    //          and no lid. B was "an onion" x2 native and "a pot of honey" 3/3 magnified;
+    //          both of those are VERTICALLY SYMMETRIC masses with something on top.
+    { id: 'D', note: '[r13 seed 23: 0/3 native, Δ +0 — but the misread became **"a sword slash" x3, UNANIMOUS**, where [A] scattered over shards/hammer/sword; 1/3 magnified, Δ +0. NOT SHIPPED — this is the confusion MOVING and CONCENTRATING, which is the opposite of `mustardblast`\'s reduction] THE OTHER DIAGONAL. Byte-identical shipped art inside translate(24,0) scale(-1,1), i.e. mirrored about x=12, so the bar runs NW-to-SE and the gold foil sits past the UPPER-LEFT end. `damage` runs NE-to-SW with its red grip at the LOWER-LEFT, so after the mirror the two share neither the axis nor the position of their one asymmetric feature. One variable, no ink spent, and it is the cheapest possible test of whether [C]\'s finding is about diagonality or about this specific line.',
+      svg: `
+<g transform="translate(24,0) scale(-1,1)">
+<path d="M4.4 17.6 15.6 6.4a4.4 4.4 0 0 1 3.6 3.6L8 21.2a4.4 4.4 0 0 1-3.6-3.6z" fill="#EFE0C4"/>
+<path d="M15.6 6.4a4.4 4.4 0 0 1 3.6 3.6l2.8-2.8a4.4 4.4 0 0 0-3.6-3.6z" fill="#E9B44C"/>
+<path d="M8.4 13.6 11.2 16.4M11.6 10.4 14.4 13.2" stroke="#CBB289" stroke-width="1.8"/>
+</g>`,
+    },
+    // 🚨 [E] AND [F] WERE REJECTED ON RENDER, BEFORE ANY JUDGE, AND THEY CLOSE A WHOLE
+    //    FAMILY THE WAY `candy`'s pinched twists did. Both render as a GOLD TIN CAN —
+    //    read `shots/ic/d13/big.png`, tiles 6 and 10, beside `honey` at tile 12. The
+    //    arithmetic is the same one that killed the concave twist: at 22.72 px the
+    //    inherited outline is 1.7 units, so every closed shape is drawn with 0.85 units
+    //    of ink inset per side. An upright tube therefore delivers two heavy vertical
+    //    ink rails and one heavy ink ellipse at the top, and THAT IS A CYLINDER — the
+    //    "open mouth" cut at -13.6 degrees is indistinguishable from a rim, and the one
+    //    diagonal seam inside is 1.8 units of low-contrast stroke between two rails that
+    //    are 1.7 units each. Leaning it 22 degrees ([F]) makes a leaning can.
+    //    → **An UPRIGHT TUBE cannot be drawn in this icon system at this size: the
+    //      outline turns it into a vessel whatever is done to its ends.** That is the
+    //      same class of finding as `candy`'s "nothing narrower than ~5 units shows
+    //      fill", and it retires the entire "upright without a garnish" direction
+    //      `food.ts` asked for after [B] — the garnish was never the only problem.
+    //    What is left that is neither the sword's diagonal nor an upright vessel is
+    //    [D] (the OTHER diagonal) and [G] (the shared VALUE), below.
+    {
+      id: 'E',
+      note: '🔴 NOT JUDGED — REJECTED ON RENDER: it is a GOLD TIN CAN (shots/ic/d13/big.png tile 10, beside `honey` at tile 12). UPRIGHT WITHOUT A LID AND WITHOUT A GARNISH — the arm `food.ts` asked for after [B]. Three differences from [B], each against one of B\'s two measured wrong answers: (1) NOTHING GREEN, because the lettuce ruffle is what named it `onion`; (2) the top is an OPEN SLANTED MOUTH in the roll\'s own darker interior rather than a folded flap, because `honey`\'s lid is a full-width horizontal bar and `onion`\'s sprout sits on the mid-line — a mouth cut at -13.6 degrees is neither; (3) the body is a tucked-end tube, NOT an ovoid: flat sides, square shoulders, 3.2-unit bottom corners. One long seam diagonal across the body is the whole interior (ink budget), because the tortilla overlap is the only interior mark that says "rolled".',
+      svg: `
+<path d="M6.2 8.2 17.8 5.4v11.6a3.2 3.2 0 0 1-3.2 3.2H9.4a3.2 3.2 0 0 1-3.2-3.2z" fill="#E9B44C"/>
+<ellipse cx="12" cy="6.8" rx="5.7" ry="2.7" transform="rotate(-13.6 12 6.8)" fill="#CE8F2E"/>
+<path d="M6.8 17.8 17.2 9" stroke="#CE8F2E" stroke-width="1.8"/>`,
+    },
+    {
+      id: 'F',
+      note: '🔴 NOT JUDGED — REJECTED ON RENDER: it is a LEANING gold tin can (shots/ic/d13/big.png tile 6). DIAGNOSTIC ONLY — [E] leaning. Byte-identical to [E] inside rotate(-22 12 12), so the tube is 22 degrees off VERTICAL and 68 off the sword\'s line. It was drawn to answer "if [E] renders as a vessel, does a lean stop it" — and the answer is measured and no: a lean does not stop an outline from being a cylinder.',
+      svg: `
+<g transform="rotate(-22 12 12)">
+<path d="M6.2 8.2 17.8 5.4v11.6a3.2 3.2 0 0 1-3.2 3.2H9.4a3.2 3.2 0 0 1-3.2-3.2z" fill="#E9B44C"/>
+<ellipse cx="12" cy="6.8" rx="5.7" ry="2.7" transform="rotate(-13.6 12 6.8)" fill="#CE8F2E"/>
+<path d="M6.8 17.8 17.2 9" stroke="#CE8F2E" stroke-width="1.8"/>
+</g>`,
+    },
+    // `7f71f20` named FOUR properties this glyph shares with `damage`: same axis, same
+    // direction, SAME PALE-ON-WHITE VALUE, and a feature where a pommel goes. [C] spent
+    // the feature (Δ +0), [D] spends the axis. [G] spends the third one, and it is the
+    // only one that costs no geometry at all: `fills` substitutes positionally into the
+    // shipped markup's own `fill=` attributes, so this arm cannot drift from the drawing.
+    // ⚠️ It is NOT a desaturation (falsified four times here) and not a hue rotation
+    // either — it is a VALUE EXCHANGE between the two masses already in the glyph: the
+    // tortilla takes the darker warm value and the foil takes the pale one. Warm chroma
+    // is also the scarce budget on this frame (`CLAUDE.md`, measured 2026-08-06).
+    { id: 'G', note: '[r13 seed 23: 0/3 native, Δ +0; 1/3 magnified, Δ +0. NOT SHIPPED — and the null is stronger than the Δ: all three native judges gave [A] and [G] the SAME wrong answer as each other, so 4.02% of plate pixels of value change moved not one reading] THE VALUE, AND ONLY THE VALUE. Byte-identical geometry; the two fills exchange roles — tortilla #EFE0C4 (a pale near-white, **1.30:1** against its own white plate — and `damage`\'s steel blade is **1.30:1** against ITS plate, the same number to two decimals) -> #E2A94E (**2.10:1**), foil #E9B44C -> #F2E3C6. `damage` is a PALE STEEL bar on the same diagonal, so this removes the third of the four properties the two glyphs share while [D] removes the first. Uses `fills`, not `svg`, so no markup is transcribed.', fills: ['#E2A94E', '#F2E3C6'] },
   ],
 
   // ── mustardblast — 22.72 px on WHITE. "a grilled burger patty" x3, x2. ──────
@@ -451,6 +539,21 @@ const V = {
     // on the deciding plate, so the defect did not reproduce and [C]'s Δ is measured
     // against a ceiling the round itself supplied. [C] 3/3 native (Δ +0), 3/3 magnified
     // against [A]'s 2/3 (Δ +1). Kept for a plate where [A] reproduces 0/3.
+    //
+    // 🔴 r13 SAYS THE SAME THING A SECOND TIME, AND THAT NOW SETTLES IT — **STOP SPENDING
+    //    ON THIS GLYPH.** Seed 23, fresh plate, fresh judges, three arms:
+    //        A  2/3 native   3/3 magnified
+    //        C  2/3  Δ +0    3/3  Δ +0
+    //        D  2/3  Δ +0    3/3  Δ +0
+    //    Every arm scored identically at BOTH protocols, and the single native miss was
+    //    the SAME judge giving the SAME wrong answer ("a fish caught on a hook") to all
+    //    three tiles — i.e. one judge's reading of a shape, not a property of any arm.
+    //    Pooled across the two rounds that carried it as a subject, the shipped arm is
+    //    3/3 and 2/3 native. **The legibility failure this glyph was dispatched for does
+    //    not reproduce**, and a subject whose shipped arm scores 2–3 of 3 cannot show a
+    //    gain: five arms have now been drawn for it, three were rejected on render and
+    //    two measured Δ +0 twice each. `candy` is CLOSED, not parked — the next variable
+    //    spent here needs a round in which [A] actually fails first.
     { id: 'A', note: 'SHIPPED — a near-circular body with two outward-pointing quadrilaterals. Straight edges, no waist. 0/3 native on two earlier panels; 3/3 on the plate that judged the tilt.' },
     // 🚨 THE BRIEFED MECHANISM — "pinch the wrapper twists concave" — WAS DRAWN TWICE AND
     // REJECTED ON RENDER, BEFORE ANY JUDGE, AND THE REASON IS ARITHMETIC RATHER THAN TASTE.
@@ -484,6 +587,30 @@ const V = {
 <path d="M9.7 10.4a3 3 0 0 1 2-1.5" stroke="${P.cream}" stroke-width="1.6"/>
 </g>`,
     },
+    // ── r13. THE DIAGNOSIS CHANGED AND THE ARMS HAVE NOT CAUGHT UP. `7f71f20` showed the
+    //    `range` collision is NOT what this glyph has: pooled over the native panels the
+    //    wrong answers are flag x2, range x1, mustardblast x1, meat x2 — a different
+    //    answer nearly every round, which `LESSONS.md` §3 classes as a LEGIBILITY failure,
+    //    and the prescription for that is the opposite of the one for a collision:
+    //    LESS DETAIL AND MORE MASS, not a more distinctive outline. [A] and [C] are both
+    //    collision arms (the axis), so neither has ever tested the actual diagnosis.
+    //    Two arms, in the order the file's own rule puts them:
+    {
+      id: 'D',
+      note: '[r13 seed 23: 2/3 native against [A]\'s 2/3, Δ +0 — the SAME judge missed all three arms with the SAME wrong answer; 3/3 magnified, Δ +0. NOT SHIPPED, and see the verdict block: the failure did not reproduce for the second round running] INK BUDGET — the cream highlight arc is DELETED and nothing else moves. It is a 1.6-unit stroke, i.e. 1.5 px, curving inside a body that is 10.6 units across whose own inherited outline already eats 0.85 units from each side. That is `coin`\'s disease exactly (three separately ink-stroked shapes inside an 8 px circle) and `coin`\'s fix was to remove interior strokes, 0/3 -> 3/3. One variable, subtractive, and it cannot change the silhouette.',
+      svg: `
+<ellipse cx="12" cy="12" rx="5.3" ry="4.7" fill="${P.candy}"/>
+<path d="M6.8 10.1 2.7 7.2v9.6l4.1-2.9z" fill="${P.candyHi}"/>
+<path d="M17.2 10.1 21.3 7.2v9.6l-4.1-2.9z" fill="${P.candyHi}"/>`,
+    },
+    {
+      id: 'E',
+      note: '🔴 NOT JUDGED — REJECTED ON RENDER, the FOURTH `candy` arm to be, and by the same arithmetic. Read `shots/ic/d13/big.png` tile 7 against tile 11: the two twists come back as DARK BLOCKS, not as pale pink fans, so the glyph is a pink square between two black brackets — a film reel, strictly worse than the bowtie it replaces. The shipped twist is 4.1 units of horizontal extent and just holds its `candyHi`; this one is 3.9 and does not. ⚠️ **So the ~5-unit floor is not a soft one: 4.1 units survives and 3.9 does not**, and the difference is 0.2 units = 0.19 px. Nothing about the body changed the outcome — the body IS bolder here — the arm died on 0.2 units of wing. ONE BOLD MASS — a PILLOW, not a lozenge. The 10.6 x 9.4 ellipse becomes a 13.2 x 13.2 rounded square, so the body goes from 57% of the glyph\'s width to 65% and from 9.4 units of height to 13.2; the twists keep their flare but are shorter, and the cream arc is gone with them. Delivered aspect 1.94:1 -> ~1.55:1, which is the number that matters: every one of the pooled wrong answers (flag, range, mustardblast, meat) is a WIDE FLAT thing, and `range` itself is 2.26:1. ⚠️ Deliberately NOT a circle — `lollipop` is a P.candy disc of r 6.3 and is a live candidate string. The two straight sides and the square shoulders are what keep this a wrapped sweet rather than a ball. Multiple variables on purpose: a legibility failure is not a one-variable question, and `LESSONS.md` §3 prescribes mass for it.',
+      svg: `
+<path d="M8 5.4h8a2.6 2.6 0 0 1 2.6 2.6v8a2.6 2.6 0 0 1-2.6 2.6H8a2.6 2.6 0 0 1-2.6-2.6V8A2.6 2.6 0 0 1 8 5.4z" fill="${P.candy}"/>
+<path d="M5.8 9.4 1.9 6.6v10.8l3.9-2.8z" fill="${P.candyHi}"/>
+<path d="M18.2 9.4l3.9-2.8v10.8l-3.9-2.8z" fill="${P.candyHi}"/>`,
+    },
   ],
 
   // ── meat — 22.72 px on WHITE. The bone leaves the mass on ONE side only. ────
@@ -499,10 +626,36 @@ const V = {
     // was 1 of 3 (`boxFire` twins split on every judge), so +1 on a subject at 0/3 is noise
     // by construction. Same direction at both protocols, no loss anywhere, one variable —
     // the best-placed parked arm in this file. It wants another paired plate, not a redraw.
-    { id: 'A', note: 'SHIPPED — one bone end, upper right. The rest of the silhouette is a circle. Native misreads that round were "a snail shell spiral" x2, i.e. `slow`.' },
+    //
+    // 🚨 IT GOT ONE, AND IT IS **DISPROVEN**. r13, seed 23, the plate the paragraph above
+    //    asked for — and the two protocols came back at OPPOSITE EXTREMES on one plate,
+    //    one round, one set of pixels:
+    //
+    //        A  **3/3 native**  (its best score ever)     **0/3 magnified**  — "a pot of honey" x3
+    //        B  **0/3 native**  Δ **-3**                  **3/3 magnified**  Δ **+3**
+    //
+    //    B's three native misses are the mechanism, verbatim: "dough balls", "a chef's
+    //    hat", "a party popper". Every one of those is SEVERAL SMALL PALE ROUND THINGS,
+    //    which is exactly what a second knob-pair delivers at 22.72 px: each knob is
+    //    r 1.9, i.e. 3.8 units = 3.6 px, and the 1.7-unit outline eats 1.6 px of it, so
+    //    four knobs are four ~2 px cream dots scattered round a brown mass. At 5x they
+    //    resolve into two bone ends and the drawing is unambiguous — hence +3.
+    //    → **B IS A BETTER DRAWING AND A WORSE ICON**, and this is the cleanest proof in
+    //      this whole directory that the magnified arm is not the decision arm. The
+    //      earlier complaint about it (`13fb98c`, `620bf7f`, `d7af2e0`) was that it sits
+    //      at a CEILING and carries no information. Here it carries the MAXIMUM possible
+    //      information and points **the other way**, at full amplitude, on both arms.
+    //    → And `CLAUDE.md` #10 / this brief's rule 1 are vindicated exactly as written:
+    //      r9's "+1 at both protocols, same direction, no loss, one variable, named
+    //      mechanism" was the most promising parked arm in the file and it was **noise**.
+    //      A second panel was the whole difference. DO NOT re-run this arm.
+    //    ⚠️ A's magnified "a pot of honey" x3 is a NEW collision and worth keeping: a warm
+    //      rounded mass with a light horizontal band is `honey`, which is the same
+    //      description `honey`'s own notes give for its collision with `chest`.
+    { id: 'A', note: '[r13 seed 23: **3/3 native**, 0/3 magnified — "a pot of honey" x3] SHIPPED — one bone end, upper right. The rest of the silhouette is a circle. Native misreads in r9 were "a snail shell spiral" x2, i.e. `slow`; in r13 there were none.' },
     {
       id: 'B',
-      note: 'ONE VARIABLE: A SECOND BONE END AT THE LOWER LEFT. Same knob-pair construction as the shipped one, mirrored through the mass so the two ends are roughly collinear through its centre — one bone passing behind the meat rather than one thing stuck to its corner. Mass, highlight and the existing bone are byte-identical.',
+      note: '🔴 DISPROVEN AT r13, DO NOT RE-RUN — 0/3 native (Δ **-3**, "dough balls" / "a chef\'s hat" / "a party popper", i.e. several small pale round things) against 3/3 magnified (Δ +3). A better drawing and a worse icon. ONE VARIABLE: A SECOND BONE END AT THE LOWER LEFT. Same knob-pair construction as the shipped one, mirrored through the mass so the two ends are roughly collinear through its centre — one bone passing behind the meat rather than one thing stuck to its corner. Mass, highlight and the existing bone are byte-identical.',
       svg: `
 <path d="M2.6 12.8c0-4.6 3.4-7.6 7.6-7.6 4.3 0 6.9 2.9 6.9 6.5 0 4.9-3.4 8.7-7.6 8.7-4.1 0-6.9-3.2-6.9-7.6z" fill="${P.meat}"/>
 <path d="M6.8 9.8c2.6-.8 4.5.2 5.5 2.5" stroke="${P.meatHi}" stroke-width="1.8"/>
@@ -526,6 +679,27 @@ const V = {
   // C took half the mass change and half the loss. So "silhouette beats interior detail"
   // has a boundary: it holds for glyphs that depict an OBJECT, and for a glyph that
   // depicts an ACTION the thin open outline IS the reading.
+  //
+  // 🔴 r13 VERDICT: THE LAST TWO ONE-VARIABLE MOVES ARE BOTH Δ +0, AND THE FOURTH
+  //    INDEPENDENT NATIVE PANEL PUTS THE SHIPPED ART AT 0/3.
+  //        A  0/3 native (shards x2, sword x1)   1/3 magnified
+  //        D  0/3  Δ +0                          2/3  Δ +1 (inside the magnified floor of 1)
+  //        E  0/3  Δ +0 — "glass shards" x3      1/3  Δ +0
+  //    [E] settles something the file could not: the trail recolour was the ONE component
+  //    [B] and [C] had in common, so it was the standing suspect for carrying part of
+  //    their loss. Alone it is worth exactly nothing — which means [B]'s -2 and [C]'s -1
+  //    belong to the CRESCENT, where `food.ts` already put them. Nothing further is owed
+  //    to the trail; `food.ts`'s "if a variable is spent at all, it belongs on the TRAIL"
+  //    is now SPENT and answered.
+  //    ⚠️ THE ABSOLUTE ACROSS FOUR NATIVE PANELS ON BYTE-IDENTICAL ART IS NOW
+  //    **1/3, 0/3, 3/3, 0/3**. Not a trend, the full range twice over.
+  //    ⚠️ AND WHERE THE WRONG ANSWER COMES FROM IS THE PART TO REUSE: `shards` itself
+  //    scored **0/3** in this round (fish / breaking wave / swap arrows), so "glass
+  //    shards" was UNCLAIMED and all three slash tiles took it. In r10, where slash
+  //    scored 3/3, `swirl`/`wave`/`shards` were the ones churning. **These four glyphs
+  //    are one pool of curved-mark answers and which of them scores is which of them got
+  //    there first.** That is a FIELD property, not a property of any one drawing, and it
+  //    is why per-glyph redraws here keep returning Δ +0.
   slash: [
     { id: 'A', note: '[r10 seed 53: 3/3 native, 3/3 magnified — and 1/3 in r8, 0/3 in r9 on IDENTICAL art, i.e. the full range] SHIPPED. Not one element clears 2:1 against its own delivered plate rgb(255,255,255): the P.steel crescent 1.42, the P.white highlight 1.00 (invisible, and 2.2 units wide across the mass), the #9C93B0 trail 2.91.' },
     {
@@ -541,6 +715,31 @@ const V = {
       svg: `
 <path d="M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z" fill="${P.steel}"/>
 <path d="M20.4 3.6C13.4 7.4 8.2 12.4 4.4 18.8" stroke="${P.grapeDark}" stroke-width="2.2"/>
+<path d="M8.6 21.4c3.4-2.8 6.2-5.6 8.4-8.6M14.4 21.6c2.4-2 4.4-4 6-6.2" stroke="${P.grapeDark}" stroke-width="1.8"/>`,
+    },
+    // ── r13. [B] and [C] both LOST, and they shared a component nobody isolated: BOTH
+    //    recoloured the TRAIL to #5B2E8C. So the trail change has been measured twice,
+    //    never alone, and both times bundled with a change to the crescent. `food.ts`
+    //    names the trail as the one place the next variable belongs ("the only part of
+    //    this drawing that says motion rather than shape"), so it gets measured alone.
+    //    The other untested one-variable move is the exact opposite of adding anything:
+    //    the #FFFFFF highlight is 1.00:1 against its own white plate and 2.2 units wide
+    //    ACROSS a mass that is itself only 1.42:1 — i.e. an invisible stroke splitting a
+    //    nearly invisible mass. [B] deleted it while filling the crescent; [C] recoloured
+    //    it. DELETING IT ON ITS OWN is `coin`'s ink-budget fix and has never been drawn.
+    {
+      id: 'D',
+      note: '[r13 seed 23: 0/3 native, Δ +0; 2/3 magnified, Δ +1 — inside the magnified floor of 1. NOT SHIPPED] INK BUDGET — the invisible highlight is DELETED and nothing else moves. #FFFFFF on rgb(255,255,255) is 1.00:1, so this stroke has never been visible; what it has been doing is splitting a 1.42:1 crescent into two thinner 1.42:1 lobes at 2.2 units of separation. `coin` went 0/3 -> 3/3 by dropping a tilt and its interior strokes, and this is the same move: remove a mark that costs geometry and delivers no value. The mark stays a MARK — no fill is added, no value is changed, the crescent and trail are byte-identical to the shipped ones.',
+      svg: `
+<path d="M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z" fill="${P.steel}"/>
+<path d="M8.6 21.4c3.4-2.8 6.2-5.6 8.4-8.6M14.4 21.6c2.4-2 4.4-4 6-6.2" stroke="#9C93B0" stroke-width="1.8"/>`,
+    },
+    {
+      id: 'E',
+      note: '[r13 seed 23: 0/3 native, Δ +0 — and the misread went UNANIMOUS, "glass shards" x3 against [A]\'s x2; 1/3 magnified, Δ +0. NOT SHIPPED. So the trail was NOT carrying [B]\'s -2 or [C]\'s -1: alone it is worth nothing, which means those losses belong to the crescent, exactly where the file said they did] THE TRAIL ALONE GETS A VALUE — #9C93B0 -> #5B2E8C, 2.91:1 -> 9.48:1, at the same 1.8 units, same geometry, same two strokes. The crescent stays at 1.42:1 and the 1.00:1 highlight stays exactly where it is. This isolates the ONE component [B] and [C] had in common, which is the only reason either of their numbers can still be read: if the trail was carrying part of their loss, this arm is negative on its own; if it was carrying the gain they both failed to show, it is positive on its own. A slash is a MARK, and the trail is the only part of this mark that says motion rather than shape.',
+      svg: `
+<path d="M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z" fill="${P.steel}"/>
+<path d="M20.4 3.6C13.4 7.4 8.2 12.4 4.4 18.8" stroke="${P.white}" stroke-width="2.2"/>
 <path d="M8.6 21.4c3.4-2.8 6.2-5.6 8.4-8.6M14.4 21.6c2.4-2 4.4-4 6-6.2" stroke="${P.grapeDark}" stroke-width="1.8"/>`,
     },
   ],

@@ -93,7 +93,38 @@ export const FOOD_ICONS: Record<string, string> = {
    *  `ic_mkvariants.mjs` is the drawing.
    *  ⚠️ Worth recording separately: A's native misreads this round were **"a snail shell
    *  spiral" x2**, i.e. `slow` — a collision neither glyph's notes have ever mentioned, and
-   *  both are a warm round mass with a small appendage off one side. */
+   *  both are a warm round mass with a small appendage off one side.
+   *
+   *  ── 🚨 IT GOT ITS SECOND PLATE, AND ARM B IS **DISPROVEN**. DO NOT RE-RUN IT. ──
+   *  r13, seed 23, 74 tiles, twins `stun`/`chest` (failing) + `tomato`/`gift` (passing),
+   *  which BRACKETED: the passing pair split 0 of 3 each, the failing pair 2 of 3 and
+   *  1 of 3, so the native floor for a failing subject is 1–2 of 3. One plate, one round,
+   *  one set of pixels, and THE TWO PROTOCOLS CAME BACK AT OPPOSITE EXTREMES:
+   *
+   *      arm                   native                    magnified
+   *      A  one bone end       **3/3** (its best ever)    **0/3**  "a pot of honey" x3
+   *      B  two bone ends      **0/3   Δ -3**             **3/3   Δ +3**
+   *
+   *  B's three native misses ARE the mechanism, verbatim: "dough balls", "a chef's hat",
+   *  "a party popper" — every one of them SEVERAL SMALL PALE ROUND THINGS. That is
+   *  exactly what a second knob-pair delivers at 22.72 px: a knob is r 1.9, i.e. 3.8
+   *  units = 3.6 px, and the inherited 1.7-unit outline eats 1.6 px of it, so four knobs
+   *  are four ~2 px cream dots scattered round a brown mass. At 5x they resolve into two
+   *  bone ends and the drawing is unambiguous — which is the +3.
+   *  → **B IS A BETTER DRAWING AND A WORSE ICON.** This is the cleanest evidence in this
+   *    file that the magnified arm is not the decision arm. The standing complaint about
+   *    it was that it sits at a CEILING and carries no information (`13fb98c`, `620bf7f`,
+   *    `d7af2e0`); here it carries the maximum possible information and points **the
+   *    other way at full amplitude**. A ceiling can be argued with. This cannot.
+   *  → And the parked arm was the best-placed one in the whole file — "+1 in the SAME
+   *    direction at both protocols, no loss anywhere, single variable, named mechanism".
+   *    It was noise. **A second panel was the entire difference**, which is `CLAUDE.md`
+   *    #10 costing nothing for once, because the arm was parked rather than shipped.
+   *  ⚠️ A's magnified "a pot of honey" x3 is a NEW and unrecorded collision, and it is the
+   *    same sentence `honey`'s own notes use for its collision with `chest`: a warm
+   *    rounded mass with a light horizontal band. `P.meatHi`'s 1.8-unit arc is that band.
+   *    Nothing is owed to it — A scores 3/3 where it ships — but it is where a future
+   *    magnified round's confusion will come from. */
   meat: `
 <path d="M2.6 12.8c0-4.6 3.4-7.6 7.6-7.6 4.3 0 6.9 2.9 6.9 6.5 0 4.9-3.4 8.7-7.6 8.7-4.1 0-6.9-3.2-6.9-7.6z" fill="${P.meat}"/>
 <path d="M6.8 9.8c2.6-.8 4.5.2 5.5 2.5" stroke="${P.meatHi}" stroke-width="1.8"/>
@@ -152,7 +183,26 @@ export const FOOD_ICONS: Record<string, string> = {
    *  the native Δ is measured against a ceiling the round supplied. Not shipped: the only
    *  non-zero number is +1 at the protocol that is explicitly not the decision arm, and a
    *  "never worse in one round" is exactly the reasoning `boxBurger` burned six variables
-   *  on. The tilt is drawn and kept as arm [C] for a plate where [A] reproduces 0/3. */
+   *  on. The tilt is drawn and kept as arm [C] for a plate where [A] reproduces 0/3.
+   *
+   *  ── 🔴 THAT PLATE WAS RUN AND [A] DID NOT FAIL AGAIN. THIS GLYPH IS CLOSED. ──
+   *  r13, seed 23, fresh plate, fresh judges, a third arm, and a round whose twins
+   *  bracketed at both protocols:
+   *      A  shipped                  2/3 native   3/3 magnified
+   *      C  the -20 degree tilt      2/3  Δ +0    3/3  Δ +0
+   *      D  the cream highlight arc
+   *         DELETED (ink budget)     2/3  Δ +0    3/3  Δ +0
+   *  Identical at both protocols on all three arms — and the single native miss was the
+   *  SAME judge giving the SAME wrong answer ("a fish caught on a hook") to all three
+   *  tiles, i.e. one reader's reading of a shape rather than a property of any arm.
+   *  Pooled over the two rounds that carried it as a subject the shipped arm is 3/3 and
+   *  2/3 native. **The legibility failure this glyph was dispatched for does not
+   *  reproduce**, and a subject sitting at 2–3 of 3 cannot show a gain.
+   *  → Five arms have now been drawn for `candy`: three rejected on render by the outline
+   *    arithmetic, two measured at Δ +0 twice each. It is CLOSED, not parked. The next
+   *    variable spent here needs a round in which [A] actually fails first — and the
+   *    older "double-headed arrow / `range` collision" story is dead twice over, since
+   *    `range` scored 3/3 in this round while every candy tile kept its own answer. */
   candy: `
 <ellipse cx="12" cy="12" rx="5.3" ry="4.7" fill="${P.candy}"/>
 <path d="M6.8 10.1 2.7 7.2v9.6l4.1-2.9z" fill="${P.candyHi}"/>
@@ -596,7 +646,20 @@ export const FOOD_ICONS: Record<string, string> = {
    *  neighbour — the first time this instrument has produced that. `patty` itself was
    *  unchanged on the plate and scored 1/3, so the answer was never taken from it.
    *  ⚠️ Δ +0 magnified, at 2/3 both ways: a judge that can resolve 1.5 px of clearance
-   *  never had the defect. The gap between the two rows IS the defect. */
+   *  never had the defect. The gap between the two rows IS the defect.
+   *
+   *  ── ⚠️ AND THE ABSOLUTE DID NOT HOLD, WHICH IS RECORDED RATHER THAN EXPLAINED AWAY ──
+   *  On the r13 plate this glyph — the SHIPPED, post-fix art, unchanged by one byte —
+   *  scored **0/3 native, "a grilled burger patty" x2** and "a rolled burrito" x1. That
+   *  is the same wrong answer the +2 was bought to remove, from a fresh panel four days
+   *  later, as a distractor rather than a subject.
+   *  It does NOT retract the +2: a paired Δ inside one round is exact, and 0/3 here is an
+   *  ABSOLUTE from a different round, which `ic_pair.mjs`'s own header measured as
+   *  swinging the full range on byte-identical art (24 of 63 icons moved by >=1 of 3
+   *  across two panels). But it is the fourth glyph in this file to show it, and it means
+   *  the honest claim for `mustardblast` is *"the narrow bun beat the wide bun by 2 of 3
+   *  on one plate"* and NOT *"the patty collision is fixed"*. If it is ever a subject
+   *  again, the paired arm to run against is the shipped one, not the retired one. */
   mustardblast: `
 <path d="M9.7 11.4h4.6a4.3 4.3 0 0 1 0 8.6H9.7a4.3 4.3 0 0 1 0-8.6z" fill="#E8B15C"/>
 <path d="M5 6.6h14a3.7 3.7 0 0 1 0 7.4H5a3.7 3.7 0 0 1 0-7.4z" fill="#C2452F"/>
@@ -688,7 +751,32 @@ export const FOOD_ICONS: Record<string, string> = {
    *  ACTION, the thin open outline IS the reading, and giving it mass names it as a thing.
    *  Both arms reverted. Do not spend the next variable on this glyph's value or its
    *  interior; if it is spent at all, it belongs on the TRAIL, which is the only part of
-   *  this drawing that says "motion" rather than "shape". */
+   *  this drawing that says "motion" rather than "shape".
+   *
+   *  ── 🔴 THE TRAIL WAS SPENT AT r13 AND IT IS WORTH NOTHING. THE SENTENCE ABOVE IS
+   *     NOW ANSWERED RATHER THAN OUTSTANDING. ────────────────────────────────────
+   *  Two one-variable arms, seed 23, twins bracketing at both protocols:
+   *      A  shipped                              0/3 native   1/3 magnified
+   *      D  INK BUDGET — the 1.00:1 white
+   *         highlight DELETED, nothing else      0/3  Δ +0     2/3  Δ +1 (floor 1)
+   *      E  THE TRAIL ALONE — #9C93B0 -> #5B2E8C,
+   *         2.91:1 -> 9.48:1, geometry identical  0/3  Δ +0     1/3  Δ +0
+   *  [E] is the one that settles something. Recolouring the trail was the ONE component
+   *  [B] and [C] shared, so it was the standing suspect for carrying part of their loss.
+   *  **Alone it is worth exactly zero**, which means [B]'s -2 and [C]'s -1 belong to the
+   *  CRESCENT — where this note already put them. `coin`'s ink-budget move ([D]) is also
+   *  worth zero here, so the invisible highlight was neither helping nor hurting.
+   *  ⚠️ THE ABSOLUTE ACROSS FOUR INDEPENDENT NATIVE PANELS ON BYTE-IDENTICAL ART IS NOW
+   *  **1/3 (r8), 0/3 (r9), 3/3 (r10), 0/3 (r13)** — the full range, twice over.
+   *  ⚠️ AND THE REUSABLE PART IS A FIELD PROPERTY, NOT A DRAWING ONE. In r13 `shards`
+   *  itself scored **0/3** (a fish / a breaking wave / swap arrows), so "glass shards"
+   *  was UNCLAIMED and all three slash tiles took it — [E] unanimously. In r10, where
+   *  slash scored 3/3, it was `swirl`/`wave`/`shards` that were churning instead.
+   *  **`slash`, `shards`, `swirl` and `wave` are one pool of curved-mark answers, and
+   *  which of them scores is largely which of them got there first.** That is why five
+   *  arms on this glyph have produced four Δ +0s and two reverts and no gain, and it is
+   *  an argument for changing what one of the FOUR depicts rather than redrawing this
+   *  one a sixth time. Do not spend another variable on `slash` alone. */
   slash: `
 <path d="M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z" fill="${P.steel}"/>
 <path d="M20.4 3.6C13.4 7.4 8.2 12.4 4.4 18.8" stroke="${P.white}" stroke-width="2.2"/>
@@ -755,7 +843,51 @@ export const FOOD_ICONS: Record<string, string> = {
    *  the drawing is a strictly worse drawing, whatever the native row says.
    *  → The next arm is upright WITHOUT anything green on top: the outline break has to
    *    come from the tortilla itself (an open spiral end), not from a garnish that two
-   *    neighbours already own. Do NOT re-test the mid-band; C answered it. */
+   *    neighbours already own. Do NOT re-test the mid-band; C answered it.
+   *
+   *  ── 🚨 r13 RAN BOTH REMAINING VARIABLES AND CLOSED ALL THREE AXES. NOTHING SHIPS,
+   *     AND WHAT IS LEFT IS NOT A DRAWING DECISION. ───────────────────────────────
+   *      A  shipped                            0/3 native (shards/hammer/sword)  1/3 mag
+   *      D  THE OTHER DIAGONAL — byte-identical
+   *         art mirrored about x=12, so the bar
+   *         runs NW-SE and `damage` runs NE-SW  0/3  Δ +0   **"a sword slash" x3**  1/3 +0
+   *      G  THE VALUE — tortilla #EFE0C4 (1.30:1
+   *         against its own white plate) and
+   *         foil exchange roles, -> #E2A94E
+   *         (2.10:1). Geometry untouched.       0/3  Δ +0                          1/3 +0
+   *
+   *  🔴 [D] SHARPENS `7f71f20`'s FINDING AND MAKES IT WORSE. Mirrored onto the opposite
+   *  diagonal the glyph did not stop being a blade — it changed WHICH blade, from
+   *  `damage` ("a sword", 1 of 3 on the shipped arm) to `slash` ("a sword slash", **3 of
+   *  3, unanimous**). So "the 45 degree diagonal IS the sword" was too specific: **it is
+   *  not the sword's diagonal, it is ANY diagonal.** A pale elongated bar at 45 degrees
+   *  is a bladed-weapon gesture and this set already ships two of those. A scattered
+   *  wrong answer becoming a unanimous one is the confusion CONCENTRATING, which is the
+   *  exact opposite of what `mustardblast`'s fix did, so [D] is a revert on kind even at
+   *  Δ +0 on score.
+   *  🔴 [G] IS A PERFECT NULL, AND STRONGER THAN ITS Δ: all three native judges gave [A]
+   *  and [G] the SAME answer as each other — shards / hammer / sword, in that order —
+   *  across artwork differing in 4.02% of plate pixels. `a77ff30` measured colour at Δ 0
+   *  on `boxBurger`; this repeats it with the WRONG ANSWERS held fixed too.
+   *  🔴 AND THE UPRIGHT FAMILY IS CLOSED BY ARITHMETIC, NOT BY A JUDGE. The arm this note
+   *  asked for above — upright, nothing green, an open mouth instead of a folded flap —
+   *  was drawn, and so was a 22-degree leaning version of it. **Both render as a GOLD TIN
+   *  CAN** and were rejected before any judge saw them (`shots/ic/d13/big.png`, tiles 6
+   *  and 10, beside `honey` at tile 12). The reason is the same one that killed `candy`'s
+   *  concave twists: at 22.72 px the inherited outline is 1.7 units, so an upright tube
+   *  delivers two heavy vertical ink rails plus a heavy ink ellipse at the top, and that
+   *  IS a cylinder — the mouth is indistinguishable from a rim whatever angle it is cut
+   *  at, and leaning it only leans the can.
+   *  → **All three axes are now spent: 45 degrees is a blade, EITHER way; upright is a
+   *    vessel; horizontal is `mustardblast` and `patty`.** Four redraws, a mirror and a
+   *    colourway have all returned Δ +0. This is the same place `boxBurger` and `stun`
+   *    reached, and it has the same answer: the remaining move is a SUBJECT change, which
+   *    is Uri's call (`DECISIONS-FOR-URI` §30 is the precedent — the mustard bottle became
+   *    a hot dog and gained +2). Do not spend a seventh variable on the drawing.
+   *  ⚠️ CAVEAT ON THE ABSOLUTE, NOT ON THE PAIRED Δ: `damage` scored 0/3 in this round
+   *  ("seaweed" x2) and `slash` 0/3, so both blade answers were unclaimed and every wrap
+   *  tile could take one. The Δs are exact; "a sword" being available is a property of
+   *  this plate. */
   wrap: `
 <path d="M4.4 17.6 15.6 6.4a4.4 4.4 0 0 1 3.6 3.6L8 21.2a4.4 4.4 0 0 1-3.6-3.6z" fill="#EFE0C4"/>
 <path d="M15.6 6.4a4.4 4.4 0 0 1 3.6 3.6l2.8-2.8a4.4 4.4 0 0 0-3.6-3.6z" fill="#E9B44C"/>

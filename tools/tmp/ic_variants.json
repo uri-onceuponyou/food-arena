@@ -153,7 +153,7 @@
   "wrap": [
     {
       "id": "A",
-      "note": "SHIPPED — a pale cream bar at 45° with a gold stub past its upper end. \"a sword\" x3 on two independent native panels, and x3 again here."
+      "note": "[r13 seed 23: 0/3 native — glass shards / hammer / sword; 1/3 magnified] SHIPPED — a pale cream bar at 45° with a gold stub past its upper end. \"a sword\" x3 on two independent native panels, and x3 again in r9."
     },
     {
       "id": "B",
@@ -164,6 +164,29 @@
       "id": "C",
       "note": "THE DIAGONAL KEPT, THE HILT REMOVED. Byte-identical tortilla and fold marks; the same gold foil is moved from a stub past the upper end to a band ACROSS the bar at its midpoint, perpendicular to the axis. One variable: where the foil is. A blade has one thing at one end; a wrapped thing has a band round its middle.",
       "svg": "\n<path d=\"M4.4 17.6 15.6 6.4a4.4 4.4 0 0 1 3.6 3.6L8 21.2a4.4 4.4 0 0 1-3.6-3.6z\" fill=\"#EFE0C4\"/>\n<path d=\"M8 13.1 11.1 10l4.5 4.5-3.1 3.1z\" fill=\"#E9B44C\"/>\n<path d=\"M8.4 13.6 11.2 16.4M11.6 10.4 14.4 13.2\" stroke=\"#CBB289\" stroke-width=\"1.8\"/>"
+    },
+    {
+      "id": "D",
+      "note": "[r13 seed 23: 0/3 native, Δ +0 — but the misread became **\"a sword slash\" x3, UNANIMOUS**, where [A] scattered over shards/hammer/sword; 1/3 magnified, Δ +0. NOT SHIPPED — this is the confusion MOVING and CONCENTRATING, which is the opposite of `mustardblast`'s reduction] THE OTHER DIAGONAL. Byte-identical shipped art inside translate(24,0) scale(-1,1), i.e. mirrored about x=12, so the bar runs NW-to-SE and the gold foil sits past the UPPER-LEFT end. `damage` runs NE-to-SW with its red grip at the LOWER-LEFT, so after the mirror the two share neither the axis nor the position of their one asymmetric feature. One variable, no ink spent, and it is the cheapest possible test of whether [C]'s finding is about diagonality or about this specific line.",
+      "svg": "\n<g transform=\"translate(24,0) scale(-1,1)\">\n<path d=\"M4.4 17.6 15.6 6.4a4.4 4.4 0 0 1 3.6 3.6L8 21.2a4.4 4.4 0 0 1-3.6-3.6z\" fill=\"#EFE0C4\"/>\n<path d=\"M15.6 6.4a4.4 4.4 0 0 1 3.6 3.6l2.8-2.8a4.4 4.4 0 0 0-3.6-3.6z\" fill=\"#E9B44C\"/>\n<path d=\"M8.4 13.6 11.2 16.4M11.6 10.4 14.4 13.2\" stroke=\"#CBB289\" stroke-width=\"1.8\"/>\n</g>"
+    },
+    {
+      "id": "E",
+      "note": "🔴 NOT JUDGED — REJECTED ON RENDER: it is a GOLD TIN CAN (shots/ic/d13/big.png tile 10, beside `honey` at tile 12). UPRIGHT WITHOUT A LID AND WITHOUT A GARNISH — the arm `food.ts` asked for after [B]. Three differences from [B], each against one of B's two measured wrong answers: (1) NOTHING GREEN, because the lettuce ruffle is what named it `onion`; (2) the top is an OPEN SLANTED MOUTH in the roll's own darker interior rather than a folded flap, because `honey`'s lid is a full-width horizontal bar and `onion`'s sprout sits on the mid-line — a mouth cut at -13.6 degrees is neither; (3) the body is a tucked-end tube, NOT an ovoid: flat sides, square shoulders, 3.2-unit bottom corners. One long seam diagonal across the body is the whole interior (ink budget), because the tortilla overlap is the only interior mark that says \"rolled\".",
+      "svg": "\n<path d=\"M6.2 8.2 17.8 5.4v11.6a3.2 3.2 0 0 1-3.2 3.2H9.4a3.2 3.2 0 0 1-3.2-3.2z\" fill=\"#E9B44C\"/>\n<ellipse cx=\"12\" cy=\"6.8\" rx=\"5.7\" ry=\"2.7\" transform=\"rotate(-13.6 12 6.8)\" fill=\"#CE8F2E\"/>\n<path d=\"M6.8 17.8 17.2 9\" stroke=\"#CE8F2E\" stroke-width=\"1.8\"/>"
+    },
+    {
+      "id": "F",
+      "note": "🔴 NOT JUDGED — REJECTED ON RENDER: it is a LEANING gold tin can (shots/ic/d13/big.png tile 6). DIAGNOSTIC ONLY — [E] leaning. Byte-identical to [E] inside rotate(-22 12 12), so the tube is 22 degrees off VERTICAL and 68 off the sword's line. It was drawn to answer \"if [E] renders as a vessel, does a lean stop it\" — and the answer is measured and no: a lean does not stop an outline from being a cylinder.",
+      "svg": "\n<g transform=\"rotate(-22 12 12)\">\n<path d=\"M6.2 8.2 17.8 5.4v11.6a3.2 3.2 0 0 1-3.2 3.2H9.4a3.2 3.2 0 0 1-3.2-3.2z\" fill=\"#E9B44C\"/>\n<ellipse cx=\"12\" cy=\"6.8\" rx=\"5.7\" ry=\"2.7\" transform=\"rotate(-13.6 12 6.8)\" fill=\"#CE8F2E\"/>\n<path d=\"M6.8 17.8 17.2 9\" stroke=\"#CE8F2E\" stroke-width=\"1.8\"/>\n</g>"
+    },
+    {
+      "id": "G",
+      "note": "[r13 seed 23: 0/3 native, Δ +0; 1/3 magnified, Δ +0. NOT SHIPPED — and the null is stronger than the Δ: all three native judges gave [A] and [G] the SAME wrong answer as each other, so 4.02% of plate pixels of value change moved not one reading] THE VALUE, AND ONLY THE VALUE. Byte-identical geometry; the two fills exchange roles — tortilla #EFE0C4 (a pale near-white, **1.30:1** against its own white plate — and `damage`'s steel blade is **1.30:1** against ITS plate, the same number to two decimals) -> #E2A94E (**2.10:1**), foil #E9B44C -> #F2E3C6. `damage` is a PALE STEEL bar on the same diagonal, so this removes the third of the four properties the two glyphs share while [D] removes the first. Uses `fills`, not `svg`, so no markup is transcribed.",
+      "fills": [
+        "#E2A94E",
+        "#F2E3C6"
+      ]
     }
   ],
   "mustardblast": [
@@ -191,16 +214,26 @@
       "id": "C",
       "note": "THE AXIS. Byte-identical geometry rotated -20 degrees about the centre — the same trick `cap` uses, and the exact inverse of what fixed `coin` (there a tilt CAUSED the misread; here the horizontal symmetry is what makes a body-with-two-lateral-appendages an arrow). `range` is strictly horizontal and cannot follow a tilt. One variable, and it costs no ink at all.",
       "svg": "\n<g transform=\"rotate(-20 12 12)\">\n<ellipse cx=\"12\" cy=\"12\" rx=\"5.3\" ry=\"4.7\" fill=\"#FF6FA5\"/>\n<path d=\"M6.8 10.1 2.7 7.2v9.6l4.1-2.9z\" fill=\"#FFB3D1\"/>\n<path d=\"M17.2 10.1 21.3 7.2v9.6l-4.1-2.9z\" fill=\"#FFB3D1\"/>\n<path d=\"M9.7 10.4a3 3 0 0 1 2-1.5\" stroke=\"#FFF3DE\" stroke-width=\"1.6\"/>\n</g>"
+    },
+    {
+      "id": "D",
+      "note": "[r13 seed 23: 2/3 native against [A]'s 2/3, Δ +0 — the SAME judge missed all three arms with the SAME wrong answer; 3/3 magnified, Δ +0. NOT SHIPPED, and see the verdict block: the failure did not reproduce for the second round running] INK BUDGET — the cream highlight arc is DELETED and nothing else moves. It is a 1.6-unit stroke, i.e. 1.5 px, curving inside a body that is 10.6 units across whose own inherited outline already eats 0.85 units from each side. That is `coin`'s disease exactly (three separately ink-stroked shapes inside an 8 px circle) and `coin`'s fix was to remove interior strokes, 0/3 -> 3/3. One variable, subtractive, and it cannot change the silhouette.",
+      "svg": "\n<ellipse cx=\"12\" cy=\"12\" rx=\"5.3\" ry=\"4.7\" fill=\"#FF6FA5\"/>\n<path d=\"M6.8 10.1 2.7 7.2v9.6l4.1-2.9z\" fill=\"#FFB3D1\"/>\n<path d=\"M17.2 10.1 21.3 7.2v9.6l-4.1-2.9z\" fill=\"#FFB3D1\"/>"
+    },
+    {
+      "id": "E",
+      "note": "🔴 NOT JUDGED — REJECTED ON RENDER, the FOURTH `candy` arm to be, and by the same arithmetic. Read `shots/ic/d13/big.png` tile 7 against tile 11: the two twists come back as DARK BLOCKS, not as pale pink fans, so the glyph is a pink square between two black brackets — a film reel, strictly worse than the bowtie it replaces. The shipped twist is 4.1 units of horizontal extent and just holds its `candyHi`; this one is 3.9 and does not. ⚠️ **So the ~5-unit floor is not a soft one: 4.1 units survives and 3.9 does not**, and the difference is 0.2 units = 0.19 px. Nothing about the body changed the outcome — the body IS bolder here — the arm died on 0.2 units of wing. ONE BOLD MASS — a PILLOW, not a lozenge. The 10.6 x 9.4 ellipse becomes a 13.2 x 13.2 rounded square, so the body goes from 57% of the glyph's width to 65% and from 9.4 units of height to 13.2; the twists keep their flare but are shorter, and the cream arc is gone with them. Delivered aspect 1.94:1 -> ~1.55:1, which is the number that matters: every one of the pooled wrong answers (flag, range, mustardblast, meat) is a WIDE FLAT thing, and `range` itself is 2.26:1. ⚠️ Deliberately NOT a circle — `lollipop` is a P.candy disc of r 6.3 and is a live candidate string. The two straight sides and the square shoulders are what keep this a wrapped sweet rather than a ball. Multiple variables on purpose: a legibility failure is not a one-variable question, and `LESSONS.md` §3 prescribes mass for it.",
+      "svg": "\n<path d=\"M8 5.4h8a2.6 2.6 0 0 1 2.6 2.6v8a2.6 2.6 0 0 1-2.6 2.6H8a2.6 2.6 0 0 1-2.6-2.6V8A2.6 2.6 0 0 1 8 5.4z\" fill=\"#FF6FA5\"/>\n<path d=\"M5.8 9.4 1.9 6.6v10.8l3.9-2.8z\" fill=\"#FFB3D1\"/>\n<path d=\"M18.2 9.4l3.9-2.8v10.8l-3.9-2.8z\" fill=\"#FFB3D1\"/>"
     }
   ],
   "meat": [
     {
       "id": "A",
-      "note": "SHIPPED — one bone end, upper right. The rest of the silhouette is a circle. Native misreads that round were \"a snail shell spiral\" x2, i.e. `slow`."
+      "note": "[r13 seed 23: **3/3 native**, 0/3 magnified — \"a pot of honey\" x3] SHIPPED — one bone end, upper right. The rest of the silhouette is a circle. Native misreads in r9 were \"a snail shell spiral\" x2, i.e. `slow`; in r13 there were none."
     },
     {
       "id": "B",
-      "note": "ONE VARIABLE: A SECOND BONE END AT THE LOWER LEFT. Same knob-pair construction as the shipped one, mirrored through the mass so the two ends are roughly collinear through its centre — one bone passing behind the meat rather than one thing stuck to its corner. Mass, highlight and the existing bone are byte-identical.",
+      "note": "🔴 DISPROVEN AT r13, DO NOT RE-RUN — 0/3 native (Δ **-3**, \"dough balls\" / \"a chef's hat\" / \"a party popper\", i.e. several small pale round things) against 3/3 magnified (Δ +3). A better drawing and a worse icon. ONE VARIABLE: A SECOND BONE END AT THE LOWER LEFT. Same knob-pair construction as the shipped one, mirrored through the mass so the two ends are roughly collinear through its centre — one bone passing behind the meat rather than one thing stuck to its corner. Mass, highlight and the existing bone are byte-identical.",
       "svg": "\n<path d=\"M2.6 12.8c0-4.6 3.4-7.6 7.6-7.6 4.3 0 6.9 2.9 6.9 6.5 0 4.9-3.4 8.7-7.6 8.7-4.1 0-6.9-3.2-6.9-7.6z\" fill=\"#8B3A2E\"/>\n<path d=\"M6.8 9.8c2.6-.8 4.5.2 5.5 2.5\" stroke=\"#D98A72\" stroke-width=\"1.8\"/>\n<path d=\"M14.4 7.6h4.8a1.5 1.5 0 0 1 0 3h-4.8a1.5 1.5 0 0 1 0-3z\" fill=\"#FFF3DE\"/>\n<circle cx=\"19.6\" cy=\"7.2\" r=\"1.9\" fill=\"#FFF3DE\"/>\n<circle cx=\"19.6\" cy=\"10.6\" r=\"1.9\" fill=\"#FFF3DE\"/>\n<path d=\"M4.2 16.4h3.4a1.5 1.5 0 0 1 0 3H4.2a1.5 1.5 0 0 1 0-3z\" fill=\"#FFF3DE\"/>\n<circle cx=\"4\" cy=\"16.2\" r=\"1.9\" fill=\"#FFF3DE\"/>\n<circle cx=\"4\" cy=\"19.6\" r=\"1.9\" fill=\"#FFF3DE\"/>"
     }
   ],
@@ -218,6 +251,16 @@
       "id": "C",
       "note": "[r10 seed 53: 2/3 native, delta -1 — UNRESOLVED, the failing twin split 0 of 3 so only |delta|>=2 resolves; 3/3 magnified, delta +0. REVERTED] THE CONTROL — INTERIOR ONLY, MASS UNTOUCHED. The crescent stays #DCD6E8 at 1.42:1 and the invisible highlight is made as loud as it can be: #FFFFFF -> #5B2E8C at the same 2.2 units, 6.70:1 against the steel it sits on, with the same trail as B. This is timer[C] and slow[C] again.",
       "svg": "\n<path d=\"M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z\" fill=\"#DCD6E8\"/>\n<path d=\"M20.4 3.6C13.4 7.4 8.2 12.4 4.4 18.8\" stroke=\"#5B2E8C\" stroke-width=\"2.2\"/>\n<path d=\"M8.6 21.4c3.4-2.8 6.2-5.6 8.4-8.6M14.4 21.6c2.4-2 4.4-4 6-6.2\" stroke=\"#5B2E8C\" stroke-width=\"1.8\"/>"
+    },
+    {
+      "id": "D",
+      "note": "[r13 seed 23: 0/3 native, Δ +0; 2/3 magnified, Δ +1 — inside the magnified floor of 1. NOT SHIPPED] INK BUDGET — the invisible highlight is DELETED and nothing else moves. #FFFFFF on rgb(255,255,255) is 1.00:1, so this stroke has never been visible; what it has been doing is splitting a 1.42:1 crescent into two thinner 1.42:1 lobes at 2.2 units of separation. `coin` went 0/3 -> 3/3 by dropping a tilt and its interior strokes, and this is the same move: remove a mark that costs geometry and delivers no value. The mark stays a MARK — no fill is added, no value is changed, the crescent and trail are byte-identical to the shipped ones.",
+      "svg": "\n<path d=\"M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z\" fill=\"#DCD6E8\"/>\n<path d=\"M8.6 21.4c3.4-2.8 6.2-5.6 8.4-8.6M14.4 21.6c2.4-2 4.4-4 6-6.2\" stroke=\"#9C93B0\" stroke-width=\"1.8\"/>"
+    },
+    {
+      "id": "E",
+      "note": "[r13 seed 23: 0/3 native, Δ +0 — and the misread went UNANIMOUS, \"glass shards\" x3 against [A]'s x2; 1/3 magnified, Δ +0. NOT SHIPPED. So the trail was NOT carrying [B]'s -2 or [C]'s -1: alone it is worth nothing, which means those losses belong to the crescent, exactly where the file said they did] THE TRAIL ALONE GETS A VALUE — #9C93B0 -> #5B2E8C, 2.91:1 -> 9.48:1, at the same 1.8 units, same geometry, same two strokes. The crescent stays at 1.42:1 and the 1.00:1 highlight stays exactly where it is. This isolates the ONE component [B] and [C] had in common, which is the only reason either of their numbers can still be read: if the trail was carrying part of their loss, this arm is negative on its own; if it was carrying the gain they both failed to show, it is positive on its own. A slash is a MARK, and the trail is the only part of this mark that says motion rather than shape.",
+      "svg": "\n<path d=\"M2.4 21.6C2 9 9 2 21.6 2.4 15 8 11 12 2.4 21.6z\" fill=\"#DCD6E8\"/>\n<path d=\"M20.4 3.6C13.4 7.4 8.2 12.4 4.4 18.8\" stroke=\"#FFFFFF\" stroke-width=\"2.2\"/>\n<path d=\"M8.6 21.4c3.4-2.8 6.2-5.6 8.4-8.6M14.4 21.6c2.4-2 4.4-4 6-6.2\" stroke=\"#5B2E8C\" stroke-width=\"1.8\"/>"
     }
   ],
   "chest": [

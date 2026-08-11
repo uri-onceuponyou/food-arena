@@ -76,6 +76,29 @@ for (let i = 0; i < n; i++) {
     + `<rect width="${side}" height="${LABEL}" fill="#1a1224"/>`
     + `<text x="6" y="19" font-family="monospace" font-size="17" fill="#FFF3DE">${i + 1}${name ? `. ${name}` : ''}</text></svg>`);
   composites.push({ input: svg, left: c * side, top: r * (side + LABEL) + side });
+
+  // ── 🚨 THE INDEX IS ALSO STAMPED INSIDE THE TILE, AND THAT IS NOT COSMETIC ──
+  // Measured on the r13 magnified plate: TWO OF THREE judges answered a whole band of
+  // tiles one plate row off — M1 from tile 33 to 66, M2 across 57..66 — while all three
+  // NATIVE judges, on the same 74 tiles in the same order, slipped on nothing. The
+  // difference is this layout: the caption above is a thin strip UNDER a 230 px tile, so
+  // at 8 columns and 10 rows a number sits nearer the tile BELOW its own than that
+  // tile's own centre, and the whole grid is 4.7 MP, i.e. downsampled before a judge
+  // ever sees it. `ic_collect --selftest` now refuses such a sheet; this stops it being
+  // produced. A number drawn INSIDE the crop travels with the glyph, so a row-slip
+  // stops being an available mistake rather than a detected one.
+  // ⚠️ It is placed in the tile's TOP-LEFT CORNER, outside the plate's rounded square:
+  // the crop is `crop` viewBox-units wide and centred on a glyph that occupies the
+  // middle third, so at every scale this file is used at, the chip cannot touch ink.
+  // Verified by reading the PNG, which is the only check that could have caught the
+  // fault it is fixing.
+  const chipW = Math.round(side * 0.30), chipH = Math.round(side * 0.16);
+  const badge = Buffer.from(
+    `<svg width="${chipW}" height="${chipH}" xmlns="http://www.w3.org/2000/svg">`
+    + `<rect width="${chipW}" height="${chipH}" rx="${Math.round(chipH * 0.3)}" fill="#1a1224" fill-opacity="0.88"/>`
+    + `<text x="${chipW / 2}" y="${chipH * 0.74}" text-anchor="middle" font-family="monospace" `
+    + `font-size="${Math.round(chipH * 0.72)}" font-weight="bold" fill="#FFD34F">${i + 1}</text></svg>`);
+  composites.push({ input: badge, left: c * side + 2, top: r * (side + LABEL) + 2 });
 }
 
 await sharp({ create: { width: cols * side, height: rows * (side + LABEL), channels: 3, background: '#3a3040' } })

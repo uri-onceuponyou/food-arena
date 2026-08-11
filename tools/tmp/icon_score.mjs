@@ -103,6 +103,19 @@ export const SUBJECT = {
   'a double-headed arrow': 'range',
   'a stopwatch': 'timer',
   'a green heart with a cross': 'heal',
+  // ⚠️ THIS CANDIDATE STRING IS A DESCRIPTION OF THE CURRENT DRAWING, NOT OF THE ABILITY,
+  // AND THAT MAKES `stun` UNFIXABLE ON THIS INSTRUMENT. Any redraw that leaves the star
+  // family has NO CORRECT STRING TO BE SCORED AGAINST — it would be marked wrong for
+  // succeeding. Every other entry here names a THING (a padlock, a tomato, a stopwatch);
+  // this one names a composition. It is the reason `stun` has only ever been usable as an
+  // ILLEGIBLE TWIN — which it is very good at: 3 of 3 judges split it magnified and 2 of 3
+  // native at r13, 5 of 6 at r12, 3 of 3 at r11, i.e. the most reliable failing-twin
+  // bracket this instrument has.
+  // 🔴 NOT CHANGED HERE, DELIBERATELY. Adding a second entry changes the TASK, so the
+  // round that adds it is not comparable with the rounds before it — `DECISIONS-FOR-URI`
+  // §30 did exactly that for `mustardblast` and had to declare it. Whoever redraws `stun`
+  // must add the string IN THE SAME COMMIT as the redraw and say so in the message, and
+  // must not do it in a round that is measuring anything else.
   'a big star with a small star beside it': 'stun',
   'a snail shell spiral': 'slow',
   'a medal on ribbons': 'medal',
