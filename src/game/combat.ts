@@ -24,6 +24,8 @@ import {
   CONCEAL_ATTACK_REVEAL_MS,
   SLOW_DURATION_MS,
   SLOW_GRACE_MS,
+  STATUS_DR_SCALES,
+  STATUS_DR_WINDOW_MS,
   STUN_DURATION_MS,
   STUN_GRACE_MS,
   TRAIL,
@@ -79,6 +81,47 @@ export function statusReadyAt(fighter: Fighter, effect: 'slow' | 'stun'): number
   return effect === 'stun'
     ? fighter.status.stunnedUntil + STUN_GRACE_MS
     : fighter.status.slowedUntil + SLOW_GRACE_MS;
+}
+
+/**
+ * How many applications deep the NEXT one would be — `rules.ts:STATUS_DR_SCALES`.
+ *
+ * Zero once `STATUS_DR_WINDOW_MS` has passed since the last APPLIED status, so a fighter
+ * left alone recovers to full duration. Clamped at the last index so a long chain settles
+ * on "immune" instead of running off the end of the table.
+ *
+ * ⚠️ **The window is measured from the last APPLIED status, never from the last hit.** If a
+ * refused application refreshed `*AppliedAt`, an attacker who keeps firing into immunity
+ * would keep the target immune for ever — the same defect with its sign flipped, and it is
+ * silent because "nothing happens" looks identical either way.
+ */
+export function drNextStacks(fighter: Fighter, effect: 'slow' | 'stun', elapsed: number): number {
+  const st = fighter.status;
+  const appliedAt = effect === 'stun' ? st.stunAppliedAt : st.slowAppliedAt;
+  const stacks = effect === 'stun' ? st.stunStacks : st.slowStacks;
+  // ⚠️ `fresh` yields index 0 — FULL duration — not 1. A first-ever application must not
+  // arrive already diminished, and `-Infinity` makes the very first call `fresh` by
+  // construction. (Written as `fresh ? 1` first; the 100% rung would have been unreachable
+  // and every status in the game would have been permanently half strength.)
+  const fresh = elapsed - appliedAt >= STATUS_DR_WINDOW_MS;
+  return Math.min(fresh ? 0 : stacks + 1, STATUS_DR_SCALES.length - 1);
+}
+
+/**
+ * The duration the NEXT application of `effect` would have, in ms. **0 means immune.**
+ *
+ * Exported for the same reason `statusReadyAt` is — the HUD must be able to show the player
+ * that the next one will be shorter, and `sim.test.mjs` must assert the predicate the sim
+ * uses rather than a re-derived copy of it. `rules.ts` states five AI driver bugs that were
+ * all one shape: *a rule stated once in `rules.ts` and implemented differently elsewhere.*
+ */
+export function drDurationFor(
+  fighter: Fighter,
+  effect: 'slow' | 'stun',
+  elapsed: number,
+  baseMs: number,
+): number {
+  return baseMs * STATUS_DR_SCALES[drNextStacks(fighter, effect, elapsed)];
 }
 
 /**
@@ -174,11 +217,21 @@ export function applyDamage(
   // by ONE weapon whose cooldown outran its own stun.
   if (effect === 'slow') {
     if (state.elapsed >= statusReadyAt(target, 'slow')) {
-      target.status.slowedUntil = state.elapsed + SLOW_DURATION_MS;
+      const ms = drDurationFor(target, 'slow', state.elapsed, SLOW_DURATION_MS);
+      if (ms > 0) {
+        target.status.slowStacks = drNextStacks(target, 'slow', state.elapsed);
+        target.status.slowAppliedAt = state.elapsed;
+        target.status.slowedUntil = state.elapsed + ms;
+      }
     }
   } else if (effect === 'stun') {
-    if (state.elapsed >= statusReadyAt(target, 'stun')) {
-      target.status.stunnedUntil = state.elapsed + STUN_DURATION_MS;
+    const stunMs = state.elapsed >= statusReadyAt(target, 'stun')
+      ? drDurationFor(target, 'stun', state.elapsed, STUN_DURATION_MS)
+      : 0;
+    if (stunMs > 0) {
+      target.status.stunStacks = drNextStacks(target, 'stun', state.elapsed);
+      target.status.stunAppliedAt = state.elapsed;
+      target.status.stunnedUntil = state.elapsed + stunMs;
       // ── TERMINATOR 2: AN APPLIED STUN CANCELS A WIND-UP ────────────────────
       //
       // 🚨 **INSIDE THE `statusReadyAt` GUARD, NOT BESIDE THE `hit-landed` EVENT, AND THE

@@ -157,6 +157,26 @@ export interface StatusTimers {
   slowedUntil: number;
   /** Match-elapsed-ms timestamp until which movement is locked to zero. */
   stunnedUntil: number;
+  /**
+   * DIMINISHING RETURNS bookkeeping — `rules.ts:STATUS_DR_SCALES`, `DECISIONS §75(a)`.
+   *
+   * `*AppliedAt` is the elapsed-ms of the last status that was actually APPLIED (never a
+   * refused one — see the constant's header), and `*Stacks` indexes `STATUS_DR_SCALES`.
+   *
+   * 🚨 **THESE ARE REAL OWN ENUMERABLE PROPERTIES SEEDED IN `createFighter`, NOT OPTIONAL
+   * FIELDS AND NOT GETTERS.** `conceal_lab --bitid` walks state with `Object.keys`/spread,
+   * so an accessor or an `undefined`-until-first-use field is **silently dropped from the
+   * differ** and a divergence in it would compare equal — the exact shape of the blinded
+   * differ `nw_delta` exists to catch. Same reason `cast` is a real `null`, not absent.
+   *
+   * ⚠️ And they live on the FIGHTER, never on the weapon: `CHARACTERS` is a module-level
+   * `Record` and `ai.ts:PRESS_VALUE` keys on **Weapon object identity**, so weapon records
+   * are process-wide singletons shared by every match and every seat.
+   */
+  slowAppliedAt: number;
+  slowStacks: number;
+  stunAppliedAt: number;
+  stunStacks: number;
 }
 
 /**
@@ -443,7 +463,14 @@ export function createFighter(spec: FighterSpec): Fighter {
     size,
     hitRadius,
     facing: { x: initialFacing.x, y: initialFacing.y },
-    status: { slowedUntil: -Infinity, stunnedUntil: -Infinity },
+    status: {
+      slowedUntil: -Infinity,
+      stunnedUntil: -Infinity,
+      slowAppliedAt: -Infinity,
+      slowStacks: 0,
+      stunAppliedAt: -Infinity,
+      stunStacks: 0,
+    },
     alive: true,
     deaths: 0,
     lastUsed: new Array(weaponCount).fill(-Infinity),

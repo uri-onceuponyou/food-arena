@@ -514,7 +514,44 @@ export const ENEMY_MAX_HP = 90;
 export const PLAYER_SIZE = 42;
 export const ENEMY_SIZE = 42;
 
-/** Base movement: px per ms. Prototype: `0.12 * dt * speedMult`. */
+/**
+ * Base movement: px per ms.
+ *
+ * ── 🔴 `DECISIONS §75(b)` IS ANSWERED (0.12 -> 0.09) AND DELIBERATELY **NOT LANDED HERE** ──
+ *
+ * Uri answered; this constant did not move, and the reason is recorded so nobody lands it
+ * as a one-line edit. **Implemented, measured, reverted:** at 0.09 the derived cast window
+ * moves with it — `escapeBoundaryMs` 795 -> **1060.61 ms**, so `waterbottle.Mega`'s
+ * geometry-derived `castMs` becomes **1400**, and at 1400 an AI **can** clear
+ * `REACH.meleeHeavy` from separation 0 (**98.00 wu of travel against 84 needed**). Five
+ * `sim.test.mjs` rows encode the opposite and would have to be REVERSED, not retuned.
+ *
+ * 🚨 **AND IT SURFACED A QUESTION THAT IS URI'S, NOT A TUNING DETAIL: `AI_CHASE_SPEED` IS
+ * A SEPARATE CONSTANT AND DID NOT MOVE.** Dropping only the player takes the gap from
+ * **1.71x to 1.29x** — bots close on you more easily and flee more effectively. *"All
+ * characters are moving too fast"* plausibly means both should move; the option he was
+ * shown was priced in terms of the PLAYER closing weapon range, so it does not settle it.
+ * **Answer that first**; changing one without the other is a balance change wearing a
+ * feel change's clothes.
+ *
+ * The measurement below stands and is why the answer is 0.09 when it lands:
+ *
+ * ⚠️ **`0.12` — "Prototype: `0.12 * dt * speedMult`" — kept because the prototype value
+ * is the reason it was never questioned.** Uri played and reported *"all characters are
+ * moving too fast"*. Measured against the reach table rather than argued:
+ *
+ *   at 120 wu/s   close `rangedMax` 140 wu in **1.17 s** · `rangedMid` 116 in 0.97 s
+ *                 cross your own 42 wu body in **0.35 s** · cross the 2800 wu map in 23.3 s
+ *   at  90 wu/s   `rangedMax` **1.56 s** · `rangedMid` 1.29 s · map 31.1 s
+ *
+ * **A ranged weapon whose maximum reach is closed in 1.17 s is not a ranged weapon**, and
+ * 0.35 s per body length is the twitchiness the report is about.
+ *
+ * 🚨 **THIS IS AFFORDABLE ONLY BECAUSE OF `§72`.** Map crossing 23.3 s -> 31.1 s is 20.7% of
+ * the 150 s clock; on the 45 s clock it would have been **69%**, and `DECISIONS §1` already
+ * recorded that **13.0 s of a 19.6 s match was spent walking to contact**. The two changes
+ * are one decision made twice — do not move this constant without re-reading the clock.
+ */
 export const PLAYER_SPEED = 0.12;
 /** AI chase / flee speeds. Prototype: `0.07 * dt` and `0.085 * dt`. */
 export const AI_CHASE_SPEED = 0.07;
@@ -783,6 +820,41 @@ export const STUN_DURATION_MS = 2000; // stunned = movement locked to 0
  */
 export const STUN_GRACE_MS = 500;
 export const SLOW_GRACE_MS = 500;
+
+/**
+ * DIMINISHING RETURNS — `DECISIONS §75(a)`, and the grace above was NOT enough.
+ *
+ * ⚠️ **The block above says the grace "bounds the longest unbroken movement lock to exactly
+ * `STUN_DURATION_MS`". That is TRUE and it was the wrong bound.** It bounds one *unbroken*
+ * application; it says nothing about the *duty cycle* of a chain. Uri played and reported
+ * being held in place — measured, `duration / (ceil((duration + grace) / cooldown) * cooldown)`:
+ *
+ *     Noodle  cd 1000  slow  **83.3%**      Cheese  cd 1300  stun  **76.9%**
+ *     Tomato  cd  800  slow    78.1%        Roll    cd 1400  stun    71.4%
+ *     Glass   cd 1100  stun    60.6%
+ *
+ * 🚨 **THREE FACTS THAT RULE OUT THE OBVIOUS FIXES, AND THE FIRST IS THE IMPORTANT ONE:**
+ *
+ * 1. **The duty cycle is a SAWTOOTH in cooldown, so a LONGER cooldown can be WORSE.** Cheese
+ *    at 1300 ms locks **76.9%** while Glass at 1100 ms locks **60.6%** — 2x1300 lands just
+ *    past the 2500 ms cycle, 3x1100 overshoots it by 800. **"Lengthen the cooldowns" could
+ *    have worsened the exact complaint**, and no gate here would have shown it.
+ * 2. **`Noodle`'s 1000 ms cooldown divides the 3000 ms cycle EXACTLY**, re-applying on the
+ *    frame the guard opens, indefinitely. That is a RESONANCE, not a tuning miss — and it is
+ *    why raising the grace only moves which cooldowns resonate.
+ * 3. **`statusReadyAt` is PER-EFFECT**, so slow and stun immunity are independent timers and
+ *    a character carrying one of each runs BOTH locks at once.
+ *
+ * So the scale is applied to the DURATION, which no cooldown can divide its way around:
+ * each application inside `STATUS_DR_WINDOW_MS` of the previous one is shorter than the last,
+ * and the fourth is refused outright. Being chain-targeted still hurts and always ends.
+ *
+ * ⚠️ **The window is measured from the last APPLIED status, not from the last hit** — a
+ * refused application must not extend the punishment, or immunity becomes self-sustaining
+ * and the fighter is permanently immune (which is the same defect wearing the other sign).
+ */
+export const STATUS_DR_SCALES = [1, 0.5, 0.25, 0] as const;
+export const STATUS_DR_WINDOW_MS = 8_000;
 
 /**
  * Out-of-combat regeneration.

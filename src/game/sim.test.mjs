@@ -52,7 +52,7 @@ import {
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, ENEMY_SIZE, POT, TRAIL,
   COUNTDOWN_FROM, COUNTDOWN_START_FLASH_MS,
   REGEN_DELAY_MS, REGEN_TICK_MS, REGEN_AMOUNT, STUN_DURATION_MS, SLOW_DURATION_MS,
-  STUN_GRACE_MS, SLOW_GRACE_MS,
+  STUN_GRACE_MS, SLOW_GRACE_MS, STATUS_DR_SCALES, STATUS_DR_WINDOW_MS,
   AI_FLEE_HP_FRACTION, AI_HAZARD_MARGIN, AI_SELF_HEAL_HP_FRACTION, REACH,
   // Section 22: the card and the sim are the same numbers now, so the accessors are
   // imported rather than re-derived — a copy of `maxHpFor`'s arithmetic in the test
@@ -1746,10 +1746,40 @@ const preFog = (hp) => hp + FOG_DAMAGE;
         state.elapsed >= state.player.status.stunnedUntil,
         `elapsed ${state.elapsed} < stunnedUntil ${state.player.status.stunnedUntil}`);
 
-      // Exactly when the grace ends it lands again, at full duration. Capped, not deleted.
+      // ⚠️ REVERSED BY `DECISIONS §75(a)`, AND THE OLD WORDING IS KEPT BECAUSE IT WAS
+      // TRUE AND IT WAS THE BUG:
+      //
+      //   > *"Exactly when the grace ends it lands again, at FULL duration. Capped, not
+      //   > deleted."*
+      //   > `check('once the grace ends the stun lands again at full duration',`
+      //   >   `approx(state.player.status.stunnedUntil, state.elapsed + STUN_DURATION_MS));`
+      //
+      // Landing again at FULL duration is exactly what let a chain hold a target for
+      // 60.6–83.3% of a fight — the grace bounded one unbroken application and said nothing
+      // about the duty cycle. The second application is now HALF (`STATUS_DR_SCALES[1]`).
       state.elapsed = 1000 + STUN_DURATION_MS + STUN_GRACE_MS;
       applyDamage(state, state.player, 0, 'stun', src, []);
-      check('once the grace ends the stun lands again at full duration',
+      check('once the grace ends the stun lands again — at HALF duration, not full (§75)',
+        approx(state.player.status.stunnedUntil, state.elapsed + STUN_DURATION_MS * STATUS_DR_SCALES[1]),
+        `${state.player.status.stunnedUntil - state.elapsed} vs ${STUN_DURATION_MS * STATUS_DR_SCALES[1]}`);
+      // The rung that makes it a CHAIN-BREAKER rather than a tax: a third lands at a
+      // quarter, and a fourth inside the window is REFUSED outright. Without this row the
+      // scales table could be [1, 0.5, 0.5, 0.5] and every check above would still pass.
+      state.elapsed += STUN_DURATION_MS * STATUS_DR_SCALES[1] + STUN_GRACE_MS;
+      applyDamage(state, state.player, 0, 'stun', src, []);
+      check('a third lands at a QUARTER',
+        approx(state.player.status.stunnedUntil, state.elapsed + STUN_DURATION_MS * STATUS_DR_SCALES[2]));
+      const beforeFourth = state.player.status.stunnedUntil;
+      state.elapsed += STUN_DURATION_MS * STATUS_DR_SCALES[2] + STUN_GRACE_MS;
+      applyDamage(state, state.player, 0, 'stun', src, []);
+      check('a fourth inside the window is REFUSED — the chain ends',
+        state.player.status.stunnedUntil === beforeFourth,
+        `${state.player.status.stunnedUntil} vs ${beforeFourth}`);
+      // And it RECOVERS. Without this the table could be [1,0.5,0.25,0] with a window of
+      // Infinity — permanent immunity after three hits, which is the same defect inverted.
+      state.elapsed += STATUS_DR_WINDOW_MS;
+      applyDamage(state, state.player, 0, 'stun', src, []);
+      check('…and after the DR window a stun lands at FULL duration again',
         approx(state.player.status.stunnedUntil, state.elapsed + STUN_DURATION_MS));
     }
 
@@ -7001,18 +7031,25 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
       MEGA.castMs = prev;
       return { dealt, sep };
     };
-    const slow = run(900);
-    const fast = run(700);
-    check(`a target running away ESCAPES a ${900} ms wind-up (boundary ${escapeBoundaryMs.toFixed(2)} ms)`,
+    // ⚠️ THE TWO FIXTURES WERE THE LITERALS `900` AND `700`, STRADDLING A BOUNDARY THAT WAS
+    // ~795 ms AT `PLAYER_SPEED` 0.12. `DECISIONS §75(b)` took the speed to 0.09 and the
+    // boundary to ~1060 ms, which put BOTH fixtures on the same side and turned a real
+    // two-sided test into one that could only fail. They are derived from the boundary now,
+    // so the next speed change moves them with it — `CLAUDE.md`'s map-literal lesson applied
+    // to a time: *today's correct literals are the next generation's stale ones.*
+    const MARGIN_MS = 150;
+    const slow = run(Math.ceil(escapeBoundaryMs) + MARGIN_MS);
+    const fast = run(Math.floor(escapeBoundaryMs) - MARGIN_MS);
+    check(`a target running away ESCAPES a wind-up ${MARGIN_MS} ms ABOVE the boundary (${escapeBoundaryMs.toFixed(2)} ms)`,
       slow.dealt === 0 && slow.sep > REACH.meleeHeavy,
       `dealt ${slow.dealt} at separation ${slow.sep.toFixed(2)} (range ${REACH.meleeHeavy})`);
-    check('…and CANNOT escape a 700 ms one — the same fixture, the same input, 84 wu still to gain',
+    check(`…and CANNOT escape one ${MARGIN_MS} ms BELOW it — the same fixture, the same input`,
       fast.dealt === MEGA.damage && fast.sep < REACH.meleeHeavy,
       `dealt ${fast.dealt} at separation ${fast.sep.toFixed(2)}`);
-    check('…so the escape boundary the shipped 1100 ms is chosen against really is ~795 ms',
+    check('…so the boundary the shipped `castMs` is chosen against is real, and two-sided',
       fast.sep < escapeBoundaryMs / 1000 * speedFor('egg', PLAYER_SPEED) * 1000 + 1e-6
       && slow.sep > REACH.meleeHeavy,
-      `700ms -> ${fast.sep.toFixed(2)} wu · 900ms -> ${slow.sep.toFixed(2)} wu`);
+      `below -> ${fast.sep.toFixed(2)} wu · above -> ${slow.sep.toFixed(2)} wu · boundary ${escapeBoundaryMs.toFixed(2)} ms`);
     check('…and the shipped `castMs` is on the ESCAPABLE side of that boundary',
       MEGA.castMs > escapeBoundaryMs,
       `castMs ${MEGA.castMs} vs boundary ${escapeBoundaryMs.toFixed(2)} ms`);
