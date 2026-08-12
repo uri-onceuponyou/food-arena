@@ -74,11 +74,47 @@
  *     the `gatecount: historical` marker removed ................... DUP
  *     the gate table deleted outright .............................. throws
  *
- * ⚠️ KNOWN LIMIT, stated rather than left to be discovered: the duplicate scan reads a **two-line
- * window** around each mention. A count three or more lines from the tool's name is not seen. The
- * window is deliberate — measured on the real files, two lines produce exactly one hit and it is a
- * genuine historical quote, while wider windows start reporting unrelated prose, and a guard that
- * cries wolf gets switched off. `<!-- gatecount: historical -->` is the annotated exemption.
+ * ─── EXACTLY WHAT "REFUSES A SECOND COPY" MEANS, MEASURED 2026-08-12 ────────
+ * 🚨 Three documents and this header all claimed more than the tool does, so the claim is now
+ * written next to the numbers that bound it. **Two files, path-named mentions, a two-line window:**
+ *
+ *   SCOPE.   Exactly two documents are read — `CLAUDE.md` and `docs/TOOLS.md`. **NOT
+ *            `docs/STATE.md`, NOT `docs/AGENT-BRIEF.md`, not `docs/LESSONS.md`.** `docs/STATE.md`
+ *            already carried an unpoliced gate count while three files said it could not.
+ *   HANDLE.  A line is only examined if it contains the gate's **`.mjs` PATH** (`findDuplicateCopies`
+ *            line 1: `if (!lines[i].includes(p)) continue`). A count beside a **bare tool name**
+ *            (`` `ic_spec` prints 24 ``) names no path and is invisible.
+ *   WINDOW.  That line and the next. A count three or more lines from the name is not seen.
+ *
+ * ⚠️ **AND THE OLD WORDING HERE, KEPT WITH THE REASON, WAS A MEASUREMENT THAT HAD GONE STALE:**
+ * *"measured on the real files, two lines produce exactly one hit and it is a genuine historical
+ * quote."* It produced **ZERO** hits by 2026-08-12. The one hit was `CLAUDE.md`'s `17/17` quote; the
+ * paragraph around it grew until the name and the count were **19 lines apart**, the scan stopped
+ * reaching it, and its `gatecount: historical` marker went **decorative** — suppressing nothing,
+ * while looking exactly like it was suppressing something. Fixed by naming the path on the marker's
+ * own line, and §G now asserts that it is still load-bearing.
+ *
+ * ⚠️ **WIDENING WAS PRICED BEFORE IT WAS REJECTED**, on the real `CLAUDE.md` / `docs/TOOLS.md` /
+ * `docs/STATE.md` / `docs/AGENT-BRIEF.md`, counting true vs false positives:
+ *
+ *     paths, 2 files, window 1  (SHIPPED) ....  0 hits
+ *     paths, 2 files, window 3 / window 6 ....  0 hits          — widening the WINDOW buys nothing
+ *     paths, + STATE + BRIEF, window 1 .......  1 hit,  0 true  — "`healAmount` 25 → **18**"
+ *     paths, + STATE + BRIEF, window 3 .......  2 hits, 0 true  — + "**2800**", the arena width
+ *     BARE NAMES, 2 files, same line only ....  3 hits, 0 true  — all three the camera pitch **58**
+ *     BARE NAMES, + STATE + BRIEF, window 1 .. 17 hits, 1 true  — pitch, heal, ρ, rule numbers…
+ *
+ * The one true positive a bare-name scan finds (`docs/STATE.md`'s `ic_spec` count) costs sixteen
+ * false ones, and these documents are full of historical numbers **on purpose** — the house style
+ * is to keep old values beside new ones. A guard that cries wolf gets switched off, and then it
+ * guards nothing. So the tool stayed narrow and **the claim was narrowed to match it** in
+ * `CLAUDE.md`, `docs/STATE.md`, `docs/AGENT-BRIEF.md` and `docs/TOOLS.md`.
+ *
+ * ⚠️ One claim that was made about this tool and is **FALSE**, recorded so it is not re-derived:
+ * *"the guard would not have caught the defect it exists to commemorate."* The real pre-`d9788eb`
+ * line was ``  `tools/tmp/sentinel.mjs` (17/17) encodes this: MOVES, HOLDS, `` — path and count on
+ * ONE line. Fed to `check()` it produces `DUP`. §G3 runs that exact line; §B4 has always asserted
+ * its shape.
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -89,6 +125,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const TOOLS_MD = 'docs/TOOLS.md';
 const CLAUDE_MD = 'CLAUDE.md';
+
+/**
+ * 🚨 THE ENTIRE SCOPE OF THE DUPLICATE SCAN, NAMED SO IT CAN BE ASSERTED.
+ *
+ * It used to be an anonymous two-element array literal inside `check()`, which made the scope a
+ * fact nobody could check and four documents claimed wrongly — `docs/STATE.md` said *"`gatecount`
+ * refuses a second copy even one that agrees"* about **itself** while carrying an unpoliced gate
+ * count. Adding a document here obliges you to update the wording in `CLAUDE.md`,
+ * `docs/TOOLS.md`, `docs/STATE.md` and `docs/AGENT-BRIEF.md`; `--selftest` §G5 is the tripwire.
+ */
+export const SCANNED_DOCS = [TOOLS_MD, CLAUDE_MD];
 
 /* ══════════════════════════════════════════════════════════════════════════
    PURE PARSERS — every one is exercised by --selftest against a broken input
@@ -190,10 +237,20 @@ const HISTORICAL = 'gatecount: historical';
  * carries a count **within a two-line window** is a second copy: the count is usually on the same
  * line (`# 253`, `(32/32)`) but markdown prose wraps, so the line after counts too.
  *
- * Reported whether or not it agrees — see the header. The window is TWO lines and not more on
- * purpose: an over-eager guard gets switched off, and then it guards nothing. Measured on the real
- * `CLAUDE.md` and `docs/TOOLS.md`, a two-line window produces exactly one hit and it is a genuine
- * historical quote; a wider one would start reporting unrelated prose.
+ * Reported whether or not it agrees — see the header.
+ *
+ * 🚨 **THE HANDLE IS THE `.mjs` PATH, WHICH IS THE TOOL'S BIGGEST BLIND SPOT AND ITS ONLY DEFENCE
+ * AGAINST NOISE.** `lines[i].includes(p)` below is the whole filter: a count beside a **bare tool
+ * name** is never examined. That is deliberate and priced — see the widening table in the file
+ * header (bare names cost 16 false positives for 1 true one on the real documents) — but it is a
+ * blind spot, not a guarantee, and §G4 asserts it explicitly so it is visible rather than
+ * discovered. The window is TWO lines for the same reason.
+ *
+ * ⚠️ **THE OLD WORDING HERE, KEPT WITH THE REASON:** *"Measured on the real `CLAUDE.md` and
+ * `docs/TOOLS.md`, a two-line window produces exactly one hit and it is a genuine historical
+ * quote."* True when written, **zero hits by 2026-08-12** — the quote's paragraph grew until its
+ * tool name was 19 lines from its count. A measurement quoted in a docstring ages exactly like a
+ * gate count in a doc, which is the thing this entire file exists to prevent.
  */
 export function findDuplicateCopies(files, gateKeys, exempt) {
   const paths = gateKeys.map((k) => [k, scriptPathOf(k)]).filter(([, p]) => p);
@@ -364,12 +421,28 @@ const OFFLINE = [
   // rotting — and `al_guard` is specifically the guard against the class that hid the ×4
   // map change for a session. An unregistered guard is a guard that dies quietly.
   //
-  // ⚠️ `al_guard`'s BARE run is the live gate and is NOT registered: it exits 1 at HEAD on
-  //    two hits in `docs/LESSONS.md:1028`, where the lesson about the stale-1×-literal class
-  //    quotes the historical defect verbatim. Registering it would make this tool
-  //    permanently red for a reason that is not a stale count. Its row says so in full.
+  // ⚠️ OLD, KEPT WITH THE REASON — this is the reversal, not a deletion:
+  //    *"`al_guard`'s BARE run is the live gate and is NOT registered: it exits 1 at HEAD on two
+  //    hits in `docs/LESSONS.md:1028`, where the lesson about the stale-1×-literal class quotes
+  //    the historical defect verbatim. Registering it would make this tool permanently red for a
+  //    reason that is not a stale count."*
+  //    That was the right call while it was true, and the underlying cause has now been FIXED
+  //    rather than waived: `al_lib.commentMask` tested `text.slice(0, 0)` — the empty string — so
+  //    the markdown half of its own contract never ran and no `.md` line was ever masked. Markdown
+  //    is prose now, `al_guard` §M adjudicates it against `ACK`, and the bare run is **22 passed,
+  //    0 failed**. It is registered here because an UNREGISTERED guard is a guard that dies
+  //    quietly — the note three lines up says exactly that about `al_guard` itself.
+  //    ⚠️ Consequence, stated rather than discovered: a NEW stale 1× literal anywhere in `src`,
+  //    `tools` or `docs` now turns THIS tool red. That is the intent. `gatecount` reports it as
+  //    `GATE-FAIL`, and the fix is in the flagged file or in `al_guard`'s `ACK`, never here.
+  // ⚠️ NOT `S`: the summary is prefixed (`✅ PASS  al_guard: 22 passed, 0 failed`), so `^` cannot
+  //    be used, and the pattern must NOT be able to read the `--selftest` line — checked: the
+  //    literal `al_guard: ` never appears in a `--selftest` run (it prints `al_guard --selftest: `)
+  //    and matches exactly once in a bare run.
+  { key: 'tools/tmp/al_guard.mjs', probes: [pr(['tools/tmp/al_guard.mjs'], /al_guard: (\d+) passed, \d+ failed/)] },
   //    `--selftest` is what proves the arms still FAIL on the bugs they guard: 9 known-bads
-  //    re-injected verbatim, each paired with the fixed form of the same line.
+  //    re-injected verbatim, each paired with the fixed form of the same line, plus §KB-M, which
+  //    is the arm that stops the markdown fix above from being a blindfold.
   // ⚠️ NOT `S`: al_guard prefixes its summary (`✅ PASS  al_guard --selftest: N passed, …`),
   //    so `^` cannot be used. Read off a real run's raw bytes and checked for ambiguity —
   //    the pattern matches EXACTLY ONCE in the whole output.
@@ -595,8 +668,9 @@ export function check({ toolsMd, claudeMd, offline = OFFLINE, skip = SKIP, exec 
   // ── DUP: any count-bearing copy outside the canonical row ───────────────
   const exempt = new Set(docRows.map((r) => `${TOOLS_MD}:${r.line}`));
   const allKeys = [...new Set([...docRows.map((r) => r.key), ...offByKey.keys(), ...skipByKey.keys()])];
+  const textOf = { [TOOLS_MD]: toolsMd, [CLAUDE_MD]: claudeMd };
   const dups = findDuplicateCopies(
-    [{ name: TOOLS_MD, text: toolsMd }, { name: CLAUDE_MD, text: claudeMd }],
+    SCANNED_DOCS.map((name) => ({ name, text: textOf[name] })),
     allKeys, exempt,
   );
   for (const d of dups) {
@@ -954,6 +1028,93 @@ function selftest() {
   {
     const bad = SKIP.filter((s) => !s[1] || !s[2]);
     ok(bad.length === 0, 'F5  every SKIP carries a reason and an explanation', bad.map((s) => s[0]).join(', ') || 'none');
+  }
+
+  /* ─ §G  the LIVE documents, not a fixture world ─────────────────────────── */
+  /**
+   * 🚨 §A–§F all run on fixtures, and a fixture world can be the thing that is wrong.
+   *
+   * Every arm here reads the REAL `CLAUDE.md` and `docs/TOOLS.md`, because the three defects
+   * this section was written for were all invisible to a fixture:
+   *   • the `gatecount: historical` marker had gone **decorative** — it suppressed nothing, and
+   *     §B7/§B8 kept passing because they build their own two-line fixture where it does work;
+   *   • the file header carried a **measurement** ("exactly one hit") that had decayed to zero;
+   *   • the tool's blind spot — a count beside a BARE tool name — was stated nowhere and
+   *     asserted nowhere, so nobody could tell a blind spot from a guarantee.
+   *
+   * ⚠️ Note the shape: G1 and G2 are a PAIR. G1 alone is satisfied by a tool that reports
+   * nothing ever; G2 alone is satisfied by a tool that reports everything. Neither means
+   * anything without the other, which is the `selfPair` lesson (`docs/LESSONS.md` §13).
+   */
+  H('§G  the REAL documents  (fails: an exemption marker that has quietly gone decorative)');
+  const realTools = readFileSync(join(ROOT, TOOLS_MD), 'utf8');
+  const realClaude = readFileSync(join(ROOT, CLAUDE_MD), 'utf8');
+  const dupsIn = (claude) => check({ toolsMd: realTools, claudeMd: claude, run: false })
+    .faults.filter((f) => f.kind === 'DUP');
+  {
+    ok(dupsIn(realClaude).length === 0,
+       'G1  CONTROL: the shipped CLAUDE.md + TOOLS.md carry no duplicate count',
+       dupsIn(realClaude).map((d) => d.msg.slice(0, 60)).join(' | ') || 'clean');
+  }
+  {
+    const stripped = realClaude.replace(`<!-- ${HISTORICAL} -->`, '');
+    ok(stripped !== realClaude, 'G2a the `gatecount: historical` marker is still present in CLAUDE.md');
+    ok(dupsIn(stripped).length > 0,
+       'G2  KNOWN-BAD: with the marker STRIPPED the same file DUPs — i.e. the marker is LOAD-BEARING, '
+       + 'not decorative. This arm was RED on 2026-08-12: the marker had drifted 19 lines from the '
+       + 'tool name it exempts and was suppressing nothing',
+       dupsIn(stripped).map((d) => d.at ?? d.msg.slice(0, 60)).join(' | ') || 'NO DUP — the marker is inert again');
+  }
+  {
+    // The literal pre-d9788eb line, recovered with `git show 66af944:CLAUDE.md`.
+    const historical = '   it guards against is not a guard.** `tools/tmp/sentinel.mjs` (17/17) encodes this: MOVES, HOLDS,\n   ORDERS, SELF-PAIR.\n';
+    ok(dupsIn(historical).length > 0,
+       'G3  KNOWN-BAD: the REAL stale line this tool commemorates — path and count on ONE line — is '
+       + 'refused. It was claimed this tool could not catch its own founding defect; it can',
+       dupsIn(historical).map((d) => d.evidence ?? d.msg.slice(0, 50)).join(' | ') || 'NO DUP');
+  }
+  {
+    // The stated blind spot, asserted rather than left to be discovered — with the positive
+    // control beside it, because "no hit" is also what a broken scan returns.
+    const bare = 'the meta-guard `sentinel` encodes 32 selftest assertions.\n';
+    const path = 'the meta-guard `tools/tmp/sentinel.mjs` encodes 32 selftest assertions.\n';
+    ok(dupsIn(bare).length === 0 && dupsIn(path).length > 0,
+       'G4  THE BLIND SPOT, ASSERTED: a count beside a BARE tool name is NOT reported, while the '
+       + 'identical sentence naming the .mjs PATH is. Deliberate — bare names measured 16 false '
+       + 'positives for 1 true one on the real docs — but it is a limit, not a guarantee',
+       `bare ${dupsIn(bare).length}, path ${dupsIn(path).length}`);
+  }
+  {
+    /**
+     * G5 — A DOCUMENT MAY CLAIM IT IS POLICED **IF AND ONLY IF** IT IS ONE OF THE TWO READ.
+     *
+     * ⚠️ The first version of this arm asked whether the string `STATE.md` appears in this
+     * tool's source. That was a **prose sniff, not a test**: it went red the moment the header
+     * above started *naming* the file it does not read, which is the fix. Rewritten as a
+     * biconditional over the actual scanned set, so it stays correct in BOTH directions — if
+     * `docs/STATE.md` is ever added to `check()`'s inputs, this arm demands the claim come back.
+     *
+     * The falsifier is the tree as it stood on 2026-08-12: `docs/STATE.md:72` asserted
+     * *"`gatecount` refuses a second copy even one that agrees"* about itself, while line 143
+     * carried an unpoliced gate count and the tool had never opened the file.
+     */
+    ok(SCANNED_DOCS.length === 2 && SCANNED_DOCS.includes(TOOLS_MD) && SCANNED_DOCS.includes(CLAUDE_MD),
+       'G5  SCOPE, ASSERTED: the duplicate scan reads EXACTLY `docs/TOOLS.md` + `CLAUDE.md`. Adding '
+       + 'a third obliges four documents to be re-worded, and this arm is the tripwire',
+       SCANNED_DOCS.join(' + '));
+    // The exact sentence that was false. Kept verbatim rather than as a regex: a loose pattern
+    // over prose is what made the FIRST version of this arm go red on the fix that repaired it.
+    const OLD_FALSE_CLAIM = '**Do not copy a count into this file** — `gatecount` refuses a second copy even one that agrees';
+    const stateMd = readFileSync(join(ROOT, 'docs/STATE.md'), 'utf8');
+    ok(!stateMd.includes(OLD_FALSE_CLAIM),
+       'G6  KNOWN-BAD, REGRESSION: docs/STATE.md must not re-assert that `gatecount` polices IT. '
+       + 'That sentence shipped for a session while STATE.md:143 carried an unpoliced gate count '
+       + 'and this tool had never opened the file',
+       stateMd.includes(OLD_FALSE_CLAIM) ? 'the false claim is back' : 'absent');
+    ok(/`ic_spec` prints/.test(stateMd),
+       'G7  CONTROL: the count G6 is about is still IN docs/STATE.md — otherwise G6 would be '
+       + 'passing because there is nothing left to be wrong about, which is this repo\'s own '
+       + '`[].every()` vacuity class');
   }
 
   console.log(`\ngatecount --selftest: ${pass} passed, ${fail} failed`);

@@ -69,7 +69,7 @@ Every row is a commit whose message carries the measurement. **Nothing here is a
 | **fog** | no longer renders as nothing at radius 0 (the one radius sudden death is made of); now covers the corners | `779dc62` `06da604` — 3.25% of standable ground was outside it |
 | **unreachable floor** | **14 gaps in 7 mirror pairs**, wider than a drawn body and narrower than `PLAYER_SIZE` | `b9bc00e` — a render/sim mismatch a legal-space flood is structurally blind to. **The threshold is the NARROWEST character (19.1 wu), not the average one**; a first pass at 26 wu declared the kitchen clean and six were still open |
 | **icons** | per-icon absolute scoring **retired on its own arithmetic** | `706c35c` `07c5294` — a 3-judge panel is worth 1.51 judges and the 0..3 scale is at its ceiling |
-| **gates** | 12 faults → the documented residue | `docs/TOOLS.md`'s gate table is the **one** place expected counts live; run `node tools/tmp/gatecount.mjs`. **Do not copy a count into this file** — `gatecount` refuses a second copy even one that agrees |
+| **gates** | 12 faults → the documented residue | `docs/TOOLS.md`'s gate table is the **one** place expected counts live; run `node tools/tmp/gatecount.mjs`. **Do not copy a count into this file** — 🚨 **and note that NOTHING STOPS YOU: `gatecount` reads only `CLAUDE.md` and `docs/TOOLS.md`, never this file.** This row said the opposite for a session while line 143 below carried an unpoliced gate count. The rule here is on you |
 
 ## 🔴 And Uri played it mid-session, which produced the two best reports again
 
@@ -149,6 +149,13 @@ a permanent AI-denial zone**, so nothing may exceed ~168 wu across. Every shippe
   documented number because it is what a clean machine reproduces.** Stable,
   documented, and the reason this row read 24 for so long: *every agent who "checked" it checked a
   working tree.*
+  ⚠️ **This bullet is itself a SECOND COPY of a documented count, and it is UNPOLICED.** `gatecount`
+  reads `CLAUDE.md` and `docs/TOOLS.md` and nothing else, and it only recognises a copy on a line
+  that names the gate's **`.mjs` path** — `` `ic_spec` `` names none. Widening it to bare tool names
+  was measured on these documents at **17 hits, 1 true**, so the noise costs more than the blind spot
+  and the tool stayed narrow (`gatecount.mjs`'s header carries the table). The 16 above is kept
+  because the explanation is worthless without it; **if the table's `ic_spec` row ever moves, this
+  line will not tell you.**
 - `x4_shot` prints which spawn bays have no screenshot station within `SPAWN_TAG_WU` (200 wu) — a
   coverage note it is **designed to print**, not a failure. ⚠️ **This circulated as an `sx_fog` defect
   and `sx_fog` has no spawn-bay arm at all** — it is a 2×3 grid of {sudden death, wide ring} ×

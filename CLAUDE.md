@@ -128,11 +128,25 @@ Not style preferences. Every one exists because breaking it cost hours.
    right**, and every one of these was caught by an agent **re-deriving something it had been told
    was already true** — never by another check.
 
-   ⚠️ **This line quoted sentinel's own count and carried a stale `17/17`** <!-- gatecount: historical -->
+   ⚠️ **This line quoted `tools/tmp/sentinel.mjs`'s own count and carried a stale `17/17`** <!-- gatecount: historical -->
    long after it was 32 — one of six counts that went stale in a single session, every one found by
    an agent tripping over it rather than by a check. Counts now live in exactly one place,
    `docs/TOOLS.md`'s gate table, and `node tools/tmp/gatecount.mjs` refuses a second copy in this
-   file *even one that agrees*.
+   file or that one *even one that agrees* — **when the line NAMES THE SCRIPT PATH.** A count
+   sitting next to a bare tool name is invisible to it, deliberately: matching bare names was
+   measured on these documents at **3 false positives and 0 true positives**, so the blind spot is
+   cheaper than the noise. `gatecount --selftest`'s §G asserts both halves against the real files.
+
+   🚨 **AND THE `gatecount: historical` MARKER ON THE LINE ABOVE WENT INERT FOR A WHILE, WHICH IS
+   ITS OWN LESSON ABOUT ANNOTATED EXEMPTIONS.** It was load-bearing when written (`d9788eb`: the
+   name was on one line and the `17/17` on the next, inside the two-line window). The paragraph
+   then grew, the name drifted **19 lines** away from the count, the scan stopped reaching the
+   marker, and it sat there for a session looking like it was doing something — so the next agent
+   preserves it, or adds one as a "fix" for a duplicate it never suppressed. Naming the path on the
+   marker's own line put it back in the window, and **§G's known-bad now strips the marker from the
+   real `CLAUDE.md` and requires a `DUP` to appear** — the arm is red the moment it goes decorative
+   again. **An exemption that is not asserted to be doing something is indistinguishable from a
+   comment.**
 
 7. **The blind critic has a MEASURED RESOLUTION FLOOR of ±1.4 points.** σ = 0.50, and a round's two
    panels are **n=1, not n=2** (one critic scores both and agrees with itself). **Do not act on a
@@ -264,6 +278,17 @@ copy in either file even when it agrees** — today's agreeing copy is next mont
 runs no browser gate (peers are measuring on the GPU), so it is not a substitute for the browser
 half; those rows print as visible SKIPs. `docs/TOOLS.md` carries the full battery — and its own
 size, because that sentence is a documented count too and `gatecount` checks it against the table.
+
+⚠️ **"EITHER FILE" IS THE WHOLE OF IT, AND THAT SENTENCE WAS READ AS "ANYWHERE" IN THREE PLACES.**
+`gatecount` opens **`CLAUDE.md` and `docs/TOOLS.md`**, nothing else, and inside them it recognises a
+copy only on a line carrying the gate's **`.mjs` path** (that line and the next). So a count beside a
+bare tool name is invisible, and `docs/STATE.md` is not read at all — which is how it came to hold an
+unpoliced gate count *underneath its own sentence saying that could not happen*. The blind spot is
+deliberate and was priced before it was accepted: matching bare names measured **16 false positives
+for 1 true positive** across these documents, because the house style is to keep old values beside
+new ones on purpose, and a guard that cries wolf gets switched off. `gatecount --selftest` §G4/§G5
+now assert the limit instead of leaving it to be discovered. **Outside those two files the one-copy
+rule is a convention you keep, not a check that keeps you.**
 
 **Commit messages carry the reasoning and the measurements**, not just the change. This log is a
 primary source and has repeatedly been the only record of why a number is what it is. When an

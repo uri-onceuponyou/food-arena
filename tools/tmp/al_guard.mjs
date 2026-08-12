@@ -33,7 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ROOT, MAP_1X, MAXR_1X, loadArena, scanFiles, extract, classify,
-  addressesShippedArena, coverAt, quadrant,
+  addressesShippedArena, coverAt, quadrant, isDocFile,
 } from './al_lib.mjs';
 
 const IS_MAIN = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
@@ -60,6 +60,31 @@ const check = (name, ok, detail = '') => {
  * found by this pass. They are FIXED, not acknowledged.
  */
 const ACK = [
+  // ── (0) DOCUMENTATION that QUOTES the defect, and a known-bad FIXTURE ───────
+  //
+  // 🚨 These are the entries §M judges, and §M exists because markdown is masked as prose
+  // (`al_lib.commentMask`) and would otherwise be invisible to every arm. A `.md` cannot
+  // be a mis-aimed fixture — nothing in it runs — but it CAN carry a stale coordinate that
+  // the next agent copies, so it is adjudicated here rather than waved through.
+  { file: 'docs/LESSONS.md', code: '1X-SCALAR', why:
+    'the §18 lesson written ABOUT this class quotes `tools/match-play.mjs`\'s historical '
+    + '`ARENA={w:1400,h:1000,cx:700,cy:500,maxR:890}` VERBATIM, on one line, in the sentence that '
+    + 'explains it was the worst instance. The house style requires a reversed assertion to keep its '
+    + 'old wording; failing the quote would put this guard in direct conflict with that, and the '
+    + 'predictable outcome of that conflict is the guard being switched off.' },
+  { file: 'docs/LESSONS.md', code: '1X-PAIR', why:
+    'the same line: the 1× size (1400×1000) and the 1× centre (700,500) inside the same quoted '
+    + 'literal. §E kills both entries the moment that sentence is rewritten, so the exemption cannot '
+    + 'outlive the quote it exempts.' },
+  { file: 'tools/tmp/lit_clockguard.mjs', code: '1X-SCALAR', why:
+    'a KNOWN-BAD FIXTURE STRING, not an aim: `maskAt(\'await p.goto(`http://localhost:4321/'
+    + '?fogRadius=850`)\')` is the control proving `//` in a URL is a scheme separator and not a '
+    + 'comment. It is the same situation as `al_lib`/`al_sweep`/`al_guard`, which `scanFiles` '
+    + 'excludes because they describe the 1× map ON PURPOSE — but excluding the whole file would '
+    + 'blind this guard to the rest of it, so it is acknowledged by CODE instead. ⚠️ ROUTED to the '
+    + 'owner: the literal is incidental to what that control proves (any radius works), so replacing '
+    + '850 with 1985 there would retire this entry. Peer-owned file; not mine to edit.' },
+
   // ── (1) FACTS OF THE MAP, not defects ───────────────────────────────────────
   // `boiling_pot` is centred on the arena centre, so ANY fixture aimed at the exact
   // centre is "inside cover". Asserted, not assumed: `--selftest`'s last control checks
@@ -148,8 +173,14 @@ const ACK = [
     + 'a 1x coordinate. Not a gate; see the block comment above.' })),
 ];
 
-/** Recorded size of ACK. It may go DOWN freely; going UP is a deliberate, visible act. */
-const ACK_BUDGET = 70;
+/**
+ * Recorded size of ACK. It may go DOWN freely; going UP is a deliberate, visible act.
+ * ⚠️ 70 → 73 on 2026-08-12, and this is what "deliberate and visible" is supposed to look
+ * like: +2 for `docs/LESSONS.md`, which §M now judges and no arm judged before (so this is
+ * coverage ARRIVING, not debt), and +1 for `lit_clockguard`'s control string, a genuinely
+ * new hit that landed with `b203329` and is routed to its owner in the entry itself.
+ */
+const ACK_BUDGET = 73;
 
 function acknowledged(rel, code) {
   return ACK.some((a) => a.file === rel && a.code === code);
@@ -176,7 +207,15 @@ function collect() {
 function run() {
   const { arena, files, rows } = collect();
   console.log(`al_guard — arena ${arena.w}×${arena.h}, centre (${arena.cx},${arena.cy}), `
-    + `maxSafeRadius ${arena.maxSafeRadius}, half-diagonal ${arena.halfDiagonal.toFixed(2)}`);
+    // ⚠️ `maxSafeRadius` is printed AS DUMPED and labelled so, because on 2026-08-12 the dump's
+    // 1985 no longer matches what `rules.ts:fogOpeningRadiusFor` derives under `6d5c4d6`'s
+    // 150 s clock (1792 — `ax_layout --selftest` reports the gap). `loadArena` cross-checks the
+    // dump against `shared.ts` on ARENA_W/H **only**, so this one number is unverified here.
+    // NOT tightened into a throw: that would make this guard red for a defect in someone else's
+    // file, which is precisely the permanently-red-gate failure this pass removed. No arm reads
+    // it — the 1× arm compares against `MAXR_1X`, and cover/spawns come from the same dump.
+    + `maxSafeRadius ${arena.maxSafeRadius} (as dumped — UNVERIFIED, see the note in the source), `
+    + `half-diagonal ${arena.halfDiagonal.toFixed(2)}`);
   console.log(`${files.length} tracked text files · ${rows.length} candidates extracted by syntactic role\n`);
 
   // §S — THE INSTRUMENT ITSELF. Everything below filters; a filter over an empty set
@@ -198,6 +237,14 @@ function run() {
   }
   const shippedPos = rows.filter((r) => r.role === 'pos' && r.shipped && !r.inComment);
   check('there are shipped-arena positions to judge legality on', shippedPos.length > 40, `${shippedPos.length}`);
+  // §M judges markdown only. Markdown is masked as prose end to end, so if `.md` ever falls
+  // out of `scanFiles` (:109) BOTH of these go to zero and §M would then pass over an empty
+  // set — the `[].every()` vacuity, which is the exact class this whole guard was built for.
+  // These two are the non-emptiness assertion rule 6 demands BEFORE the filter runs.
+  const mdFiles = files.filter(isDocFile);
+  const mdRows = rows.filter((r) => isDocFile(r.file));
+  check('the corpus still includes markdown at all (else §M is vacuous)', mdFiles.length >= 5, `${mdFiles.length} .md files`);
+  check('candidates were extracted FROM markdown (else §M is vacuous)', mdRows.length >= 4, `${mdRows.length} candidates`);
 
   /**
    * 🚨 PROSE IS COUNTED, NEVER FAILED — and that is a design decision, not a loophole.
@@ -213,10 +260,20 @@ function run() {
    * constant justified by a wrong comment**, and this guard would have caught the
    * constant and not the sentence. Stale prose is a live defect class here; it is simply
    * not one an automated arm can separate from a deliberate historical quote.
+   *
+   * 🚨 **AND UNTIL 2026-08-12 THIS PARAGRAPH WAS TRUE OF `//` COMMENTS AND FALSE OF
+   * MARKDOWN**, because `al_lib.commentMask` tested `text.slice(0, 0)` — the empty string —
+   * so no `.md` line was ever masked and `docs/LESSONS.md:1028` failed §A and §B for
+   * quoting the very defect §18 describes. Markdown is now prose end to end. The coverage
+   * that buys is not simply given away: **§M** below judges the markdown set against the
+   * SAME acknowledgement list, so a stale coordinate in a doc is red and an adjudicated
+   * quote is green.
    */
   const prose = rows.filter((r) => r.inComment && r.flags.length);
   const code = rows.filter((r) => !r.inComment);
+  const docHits = prose.filter((r) => isDocFile(r.file));
   console.log(`(${prose.length} flagged literals sit in COMMENTS — counted, not failed; see the note in §A. `
+    + `${docHits.length} of them are in MARKDOWN and are judged by §M. `
     + `The arms below judge ${code.length} code candidates.)`);
 
   // §A — no literal equal to a 1× characteristic SCALAR, in an arena role.
@@ -261,13 +318,47 @@ function run() {
   }
   check('0 files with ≥5 stations all in one quadrant', oneQuad.length === 0, oneQuad.join('\n         '));
 
+  /**
+   * §M — THE PRICE OF MASKING MARKDOWN, PAID RATHER THAN POCKETED.
+   *
+   * §A/§B/§C judge `code` and markdown is now entirely `prose`, so without this arm the fix
+   * to `commentMask` would have bought a green run by **blinding the guard to every `.md` in
+   * the repo** — the same defect wearing the opposite sign, and a worse one, because a doc is
+   * what the next agent copies a coordinate OUT of.
+   *
+   * The arm: a flagged literal in a documentation file must be **adjudicated**, i.e. appear
+   * on `ACK` under its own code. That is the one signal available. ⚠️ It is emphatically NOT
+   * "the literal is inside backticks" or "the sentence is past tense": both were considered
+   * and neither survives contact — `docs/LESSONS.md:1028`'s deliberate quote and a stale doc
+   * coordinate look **identical** by either test, since this project's house style is to keep
+   * old values beside new ones on purpose. A guard that guesses here cries wolf, and a guard
+   * that cries wolf gets switched off.
+   *
+   * 🚨 **The implementation that FAILS this arm is the obvious fix**: mask markdown as prose
+   * and stop. §KB-M plants `match-play`'s arena object in a `.md` that nobody has
+   * acknowledged, proves the mask hides it from §A/§B, and requires §M to catch it anyway.
+   */
+  console.log('\n§M — a 1× literal in a DOCUMENT is counted by the arms above and adjudicated here');
+  const mdUnack = [];
+  for (const r of docHits) {
+    for (const f of r.flags) {
+      if (!acknowledged(r.file, f.code)) mdUnack.push(`${r.file}:${r.line}  [${f.code}] ${f.detail}\n           ${r.text.slice(0, 120)}`);
+    }
+  }
+  check('0 unacknowledged 1× literals in markdown (add an ACK entry with the reason, or fix the doc)',
+    mdUnack.length === 0, mdUnack.join('\n         '));
+
   // §E — the guard's own budget. The acknowledgement list may shrink, never grow silently.
   console.log('\n§E — the acknowledgement list is a shrinking budget, not a dumping ground');
   check(`ACK holds ≤ ${ACK_BUDGET} entries (today ${ACK.length})`, ACK.length <= ACK_BUDGET, `${ACK.length}`);
   check('every ACK entry carries a reason', ACK.every((a) => a.why && a.why.length > 30));
   // An acknowledgement for a file that no longer produces the hit is dead weight, and a
   // dead ACK entry is how a real defect gets waved through later under an old excuse.
-  const live = new Set(code.flatMap((r) => r.flags.map((f) => `${r.file}:${f.code}`)));
+  // ⚠️ `docHits` is in this union and MUST be: markdown moved out of `code` when it became
+  // prose, so reading `code` alone would have reported both `docs/LESSONS.md` entries as
+  // dead the moment they were added — a guard failing on its own new coverage. This is the
+  // §E half of the §M change and the two only make sense together.
+  const live = new Set([...code, ...docHits].flatMap((r) => r.flags.map((f) => `${r.file}:${f.code}`)));
   const dead = ACK.filter((a) => !live.has(`${a.file}:${a.code}`)).map((a) => `${a.file}:${a.code}`);
   check('0 ACK entries that no longer match anything (they would hide a future defect)',
     dead.length === 0, dead.join(', '));
@@ -376,6 +467,45 @@ function selftest() {
   const goodQ = quadOf(mk([[300, 810], [600, 1000], [1140, 940], [2200, 500], [2240, 1600], [1400, 1450]]));
   check('CONTROL  the migrated table covers all four', goodQ.n === 6
     && Object.values(goodQ.q).every((n) => n > 0), JSON.stringify(goodQ.q));
+
+  /**
+   * §KB-M — THE ARM THAT STOPS THE MARKDOWN FIX FROM BEING A BLINDFOLD.
+   *
+   * `al_lib.commentMask` masks `.md` end to end, which takes every documentation hit out of
+   * `code` and therefore out of §A/§B/§C. **Name the implementation that fails this arm:**
+   * the one-line version of that fix — mask markdown, stop there, enjoy the green run. It
+   * passes every other check in this file and silently stops guarding 11 tracked documents.
+   *
+   * So the fixture below is `match-play`'s real arena object planted in a `.md` that nobody
+   * has adjudicated, and it is asserted THREE ways, because any one alone is satisfiable by
+   * a wrong implementation:
+   *   M1  the same text in a `.mjs` still trips §A/§B — so the fixture is genuinely defective
+   *       and M2 is not passing because the extractor stopped working.
+   *   M2  in a `.md` it is masked, i.e. §A/§B really are blind to it — the loss is real.
+   *   M3  §M catches it anyway, because `docs/kb_fixture.md` is on no ACK entry.
+   *   M4  CONTROL: the identical text in an ACKNOWLEDGED document does NOT trip §M — an arm
+   *       that fires on everything is as useless as one that fires on nothing, and without
+   *       this the ACK lookup could be ignored entirely and M3 would still pass.
+   */
+  console.log('\n§KB-M — the markdown arm: masking `.md` must not be a way of buying a green run\n');
+  const MD_BAD = 'const ARENA = { w: 1400, h: 1000, cx: 700, cy: 500, maxR: 890 };';
+  const mdFlags = (rel) => extract(rel, `// __matchArena\n${MD_BAD}\n`)
+    .flatMap((h) => classify(arena, h, ctx).map((f) => ({ rel, code: f.code, inComment: h.inComment })));
+  const asCode = mdFlags('tools/tmp/kb_fixture.mjs');
+  const asDoc = mdFlags('docs/kb_fixture.md');
+  check('M1  POSITIVE CONTROL  the same literal in a `.mjs` is still a §A/§B hit in CODE — so the '
+    + 'fixture really is defective and M2 is not passing by extractor failure',
+  asCode.length >= 2 && asCode.every((f) => !f.inComment), JSON.stringify(asCode.map((f) => f.code)));
+  check('M2  the `.md` form is MASKED as prose — §A/§B/§C genuinely cannot see it, which is the '
+    + 'coverage §M has to replace',
+  asDoc.length >= 2 && asDoc.every((f) => f.inComment), JSON.stringify(asDoc.map((f) => f.code)));
+  check('M3  KNOWN-BAD  §M catches it anyway: an UNACKNOWLEDGED document carrying a 1× literal',
+    asDoc.some((f) => !acknowledged(f.rel, f.code)), `${asDoc.filter((f) => !acknowledged(f.rel, f.code)).length} unadjudicated`);
+  const asAckedDoc = mdFlags('docs/LESSONS.md');
+  check('M4  CONTROL  the identical text in an ACKNOWLEDGED document trips nothing — §M consults '
+    + 'ACK rather than failing on every document it sees',
+  asAckedDoc.length >= 2 && asAckedDoc.every((f) => acknowledged(f.rel, f.code)),
+  JSON.stringify(asAckedDoc.map((f) => `${f.code}:${acknowledged(f.rel, f.code)}`)));
 
   // And the negative control the whole design rests on: legality alone is BLIND here.
   const legal = coverAt(arena, 700, 600);

@@ -131,9 +131,35 @@ function isArenaish(text) {
  * keep the old wording above it with the reason"*). `fogRing.ts:207` was both at once —
  * a wrong constant justified by a wrong comment — which is exactly why they are counted
  * separately rather than merged.
+ *
+ * 🚨 **THE MARKDOWN HALF OF THAT SENTENCE WAS NEVER IMPLEMENTED, AND THE VACUOUS BRANCH
+ * THAT PRETENDED TO IMPLEMENT IT SAT IN THE GUARD BUILT FOR THE VACUITY CLASS.**
+ * The old first line of this function, kept here with the reason as the house style
+ * requires (*"when an assertion encodes a rule that has been reversed, change it and keep
+ * the old wording above it"*), was:
+ *
+ *     if (/\.mdx?$/.test(text.slice(0, 0))) { /* unreachable; kept for symmetry *\/ }
+ *
+ * `text.slice(0, 0)` is **the empty string**. The regex could never match, and the body
+ * was empty anyway, so it was a comment with a tick next to it — twice over. The function
+ * did not receive the path at all, which is *why* the author reached for the file text and
+ * got nothing. Consequence: **no markdown line was ever masked**, `scanFiles` accepts
+ * `.md` (:109), and so `docs/LESSONS.md:1028` — the lesson written *about* the stale-1×
+ * class, quoting `match-play`'s historical `{w:1400,h:1000,cx:700,cy:500,maxR:890}`
+ * verbatim — failed §A and §B and left `al_guard` **RED at HEAD (17 passed, 2 failed)**.
+ * A permanently-red guard gets ignored, and an ignored guard is worse than none.
+ *
+ * A `.md` here is a **documentation site**: nothing in it executes, so a 1× literal in one
+ * is a doc defect of exactly the kind `//` comments already get — **counted, never failed**
+ * by §A/§B/§C. ⚠️ That is a real loss of coverage and it is **not** left implicit: it is
+ * paid for by `al_guard`'s **§M**, which fails on any flagged markdown literal that is not
+ * on the acknowledgement list. Masking markdown *without* §M is the implementation that
+ * buys green by blinding the guard, and §KB-M is the known-bad that fails it.
  */
-function commentMask(text, lines) {
-  if (/\.mdx?$/.test(text.slice(0, 0))) { /* unreachable; kept for symmetry */ }
+export const isDocFile = (rel) => /\.mdx?$/.test(rel);
+
+function commentMask(rel, lines) {
+  if (isDocFile(rel)) return new Array(lines.length).fill(true);
   const mask = new Array(lines.length).fill(false);
   let block = false;
   lines.forEach((ln, i) => {
@@ -173,7 +199,7 @@ const DEFINES_THE_ARENA = new Set(['src/arena/kitchen.ts', 'tools/arena-dump.js'
 export function extract(rel, text) {
   const hits = [];
   const lines = text.split('\n');
-  const comment = commentMask(text, lines);
+  const comment = commentMask(rel, lines);
   const push = (i, role, value, why, extra = {}) =>
     hits.push({
       file: rel, line: i + 1, role, value, why, inComment: comment[i],
@@ -315,7 +341,19 @@ export function extract(rel, text) {
 /** Is a scalar exactly one of the 1× map's characteristic quantities, in this role? */
 export function is1xScalar(role, v) {
   const near = (a, b) => Math.abs(a - b) <= 0.6;
-  if (role === 'radius' && MAXR_1X.includes(v)) return `1× maxSafeRadius (${v}; the map's is 1985)`;
+  // ⚠️ OLD WORDING, KEPT WITH THE REASON: this returned
+  //    `` `1× maxSafeRadius (${v}; the map's is 1985)` ``
+  // and **1985 went stale on 2026-08-12** — `6d5c4d6` moved `MATCH_DURATION_MS` 45 s → 150 s and
+  // `MAX_SAFE_RADIUS = fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` now derives **1792**, which
+  // `ax_layout --selftest` reports as `derived 1792 vs dumped 1985`. `src/arena/shared.ts:225`
+  // already records that `tools/arena.gameplay.json` "bakes the stale 1985".
+  // 🚨 So the guard against hardcoded arena scalars was itself hardcoding one, in the very
+  // sentence that tells you not to. The number is gone rather than updated: today's correct
+  // literal is the next generation's stale one, which is this file's own opening argument.
+  if (role === 'radius' && MAXR_1X.includes(v)) {
+    return `1× maxSafeRadius (${v}) — the shipped one is DERIVED, `
+      + `src/arena/shared.ts:MAX_SAFE_RADIUS via rules.ts:fogOpeningRadiusFor. Do not retype it`;
+  }
   if (role === 'radius' && v === MAP_1X.fieldOuter) return `1× FIELD_OUTER_UNITS (1500)`;
   if (role === 'diag' && near(v, MAP_1X.halfDiagonal)) return `1× half-diagonal (~860)`;
   return null;

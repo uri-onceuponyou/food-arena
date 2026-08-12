@@ -179,6 +179,14 @@ node tools/verify-head.mjs       # the COMMITTED tree — run before EVERY push
 🔴 **Do not write an expected count anywhere but that table.** `gatecount` refuses a second copy
 **even one that agrees** — today's agreeing copy is next month's stale one. Eight counts went stale
 in one session and every one was found by an agent tripping over it.
+⚠️ **But do not read "refuses" as "cannot happen".** `gatecount` reads exactly two documents,
+`CLAUDE.md` and `docs/TOOLS.md` — **not this file, not `docs/STATE.md`, not `docs/LESSONS.md`** — and
+inside those two it only recognises a copy on a line that names the gate's **`.mjs` path**, plus the
+line after. A count beside a bare tool name is invisible to it. That blind spot is deliberate and
+priced (bare-name matching measured **16 false positives for 1 true one** on the real documents;
+the table is in `gatecount.mjs`'s header), but **it means the rule above is enforced in two files
+and is on you everywhere else** — which is how `docs/STATE.md` came to carry an unpoliced gate count
+under three separate sentences saying it could not.
 
 **Commit with pathspec form.** Commit messages carry the reasoning and the measurements; this log is
 a primary source. **When an assertion encodes a reversed rule, change it and keep the old wording
