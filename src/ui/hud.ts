@@ -16,6 +16,24 @@ import {
   FOG_DAMAGE,
   FOG_TICK_MS,
   MATCH_DURATION_MS,
+  // 🚨 THE RING SCHEDULE IS NO LONGER LINEAR IN THE CLOCK, SO THIS FILE MAY NOT DIVIDE.
+  // `6d5c4d6` gave the ring a HOLD (`FOG_HOLD_MS`, 25 s), then a close that lands on
+  // `minSafeRadiusFor(N)` at `FOG_CLOSE_MS` (120 s), then a hold at that floor — while the
+  // match clock runs to 150 s. `zoneInfo` and `imminentMs` both carried
+  // `shrinkPerMs = maxSafeRadius / MATCH_DURATION_MS`, a hand inversion of the schedule
+  // that shape REPLACED, and it was wrong in two directions at once: frozen for the whole
+  // 25 s hold, then **36% long at six seats** during the close, which is the DANGEROUS
+  // direction — the pill promised a fighter 23.9 s of grace where the fog was 17.5 s away,
+  // and the fog kills a full-health fighter in 2.0 s. `fogReachesRadiusAt` is `rules.ts`'
+  // own inverse of `fogRadiusAt`; it is the ONLY legal way to ask this question now.
+  // Same fix shape as `ringFloorFor` below: one function call, not one adjusted constant.
+  fogReachesRadiusAt,
+  // The SEATED floor the sim itself passes to `fogRadiusAt` (`sim.ts` — the seated count,
+  // never the living one, or a fighter dying would lift the ring; see `fogRadiusAt`'s
+  // monotonicity note). Deliberately NOT `ringFloorFor`, which returns 0 in sudden death:
+  // that is the right floor for "will the edge ever reach me" and the wrong one for
+  // "where is the schedule taking the edge".
+  minSafeRadiusFor,
   // 🚨 `MIN_SAFE_RADIUS` IS GONE AND THAT IS A BUG FIX, NOT TIDYING. It stopped being
   // the ring's floor in `4bb64e4`: the endgame ring now scales with the seat count
   // (140 at N<=4, 187.42 at N=5, **237.00 at N=6**) and collapses to 0 in sudden death
@@ -394,17 +412,21 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
            relative to. -->
       <div class="hud-topbar" data-el="topbar">
         <div class="hud-clock">
-          <!-- ⚠️ THIS PLACEHOLDER READ 3:00 UNTIL 2026-08-11 AND THE CLOCK HAS NOT BEEN
-               THREE MINUTES SINCE rules.ts SET MATCH_DURATION_MS = 45_000. It is
-               overwritten by the first update(), so nothing on screen was ever wrong — but
-               a markup literal is read by the next person as a statement of fact about the
-               clock, and this one contradicted the one true source by 4x. Kept as the full
-               duration rather than as an empty string so the element still has its shipped
-               WIDTH before the first frame paints.
+          <!-- ⚠️ THIS PLACEHOLDER HAS NOW BEEN STALE TWICE, WHICH IS THE POINT OF THE
+               COMMENT AND THE REASON tools/tmp/rc_prose.mjs GAINED A CLOCK ARM.
+               It read 3:00 until 2026-08-11, when MATCH_DURATION_MS was 45_000 — a 4x
+               contradiction of the one true source. It then read 0:45 until 2026-08-12,
+               when Uri reversed the clock to 150_000 (2:30) in 6d5c4d6. Both times it was
+               overwritten by the first update(), so nothing on screen was ever wrong — and
+               both times a markup literal sat in the file being read by the next person as
+               a statement of fact about the clock. Kept as the full duration rather than
+               as an empty string so the element still has its shipped WIDTH before the
+               first frame paints; that WIDTH is why the literal cannot simply be dropped,
+               and 2:30 is one glyph wider than 0:45, so the reservation grew with it.
                (No backticks in this comment on purpose: the whole block is a template
                literal, and a backtick here closes it — which is exactly how this comment
                failed to compile the first time it was written.) -->
-          <div class="hud-timer" data-el="timer">0:45</div>
+          <div class="hud-timer" data-el="timer">2:30</div>
           <!-- Closing-fog readout. Sits directly under the match clock because the
                two are the SAME number: the safe radius is a pure function of time
                remaining (see zoneInfo() below), so reading them as one column is
@@ -865,24 +887,40 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
    *
    * ## Why this is a DISTANCE converted to time, and not a time
    *
-   * It used to be a flat 12 s, and the comment beside it justified that as "roughly
-   * 57 wu of grace" — true only at the 180 s clock's 4.9 wu/s sweep. The clock is now
-   * 45 s and `MAX_SAFE_RADIUS` derives from it, so the edge sweeps 22.1 wu/s and the
-   * same 12 s buys **265 wu**. Two things go wrong at once at that size:
+   * ⚠️ **THE WHOLE DERIVATION BELOW IS KEPT ON QUOTE LINES. It was measured, it was
+   * right, and every rate in it divides the opening radius by the match clock — which
+   * `6d5c4d6` stopped being a legal way to ask this question:**
    *
-   *  1. It cries wolf. ⚠️ THE ARITHMETIC HERE WAS THE 1x MAP'S AND IS KEPT BECAUSE IT
-   *     IS WHY THE RULE BELOW EXISTS:
+   *   > *"It used to be a flat 12 s, and the comment beside it justified that as 'roughly
+   *   > 57 wu of grace' — true only at the 180 s clock's 4.9 wu/s sweep. The clock is now
+   *   > 45 s and `MAX_SAFE_RADIUS` derives from it, so the edge sweeps 22.1 wu/s and the
+   *   > same 12 s buys **265 wu**. Two things go wrong at once at that size:*
+   *   >
+   *   > *1. It cries wolf. ⚠️ THE ARITHMETIC HERE WAS THE 1x MAP'S AND IS KEPT BECAUSE IT
+   *   >    IS WHY THE RULE BELOW EXISTS:*
+   *   >
+   *   >    *"265 wu of a 993 wu opening ring is most of the standing positions inside it,
+   *   >    so the alarm animation would be running for a large share of every match."*
+   *   >
+   *   > *The arena went x4 on 2026-08-11, so the ring opens at 1985 wu and sweeps at
+   *   > 44.1 wu/s — a flat 12 s now buys **529 wu**, and the share is 13.4% of the opening
+   *   > radius rather than 26.7%. The number moved; the conclusion did not, because 12 s of
+   *   > alarm is a quarter of a 45 s match whatever the radius is."*
    *
-   *       > *"265 wu of a 993 wu opening ring is most of the standing positions inside
-   *       > it, so the alarm animation would be running for a large share of every
-   *       > match."*
+   *  1. It cries wolf — and today that reads differently in BOTH terms. The clock is
+   *     150 s, so 12 s of alarm is **8%** of a match rather than a quarter; and the ring
+   *     no longer sweeps `openingRadius / clock`, it sweeps `(opening - floor) /
+   *     (FOG_CLOSE_MS - FOG_HOLD_MS)` = **16.636 wu/s at N<=4**, so 12 s buys **199.6 wu**
+   *     — 11.6% of the opening radius. `docs/LESSONS.md` §9: a warning which cries wolf
+   *     gets ignored, which is worse than no warning.
    *
-   *     The arena went x4 on 2026-08-11, so the ring opens at 1985 wu and sweeps at
-   *     44.1 wu/s — a flat 12 s now buys **529 wu**, and the share is 13.4% of the
-   *     opening radius rather than 26.7%. The number moved; the conclusion did not,
-   *     because 12 s of alarm is a quarter of a 45 s match whatever the radius is.
-   *     `docs/LESSONS.md` §9: a warning which cries wolf gets ignored, which is worse
-   *     than no warning.
+   *     🚨 **AND THAT MAKES THE CAP VESTIGIAL AT THE SEAT COUNT THIS GAME SHIPS.** 12 s
+   *     buys 199.6 wu against a `FAIR_PLAY.radiusUnits` of 199.22, i.e. the derived lead
+   *     (11 975 ms, below) is BELOW the cap and the `Math.min` never binds at N<=4. It
+   *     still binds at N=5 (12 345 ms) and N=6 (12 758 ms), where the ring has less
+   *     distance to cover and therefore crosses it more slowly. The cap is kept for
+   *     exactly those two, and because it is the guard against a future schedule that
+   *     makes the lead enormous again — which is precisely what the 180 s row above was.
    *  2. It warns about something INVISIBLE. The camera guarantees the player sees
    *     `FAIR_PLAY.radiusUnits` (199.2 wu) in every direction and no more. At 265 wu
    *     the pill would be flashing about a curtain that is off screen and stays off
@@ -900,32 +938,100 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
    *
    *   > *"45 s clock:   199.2 / (993/45000)  = 9.0 s"*
    *   > *"180 s clock:  199.2 / (890/180000) = 40.3 s -> capped to 12 s (unchanged)"*
+   *   >
+   *   > *"The x4 arena doubled the opening radius again, so the current row is:*
+   *   >
+   *   >     45 s clock, x4 map:  199.2 / (1985/45000) = 4.5 s
+   *   >
+   *   > *The alarm now has half the lead it had, and that is the schedule's doing, not a
+   *   > retune — the edge sweeps 44.1 wu/s instead of 22.1, so the same guaranteed-visible
+   *   > 199.2 wu is crossed in half the time."*
    *
-   * The x4 arena doubled the opening radius again, so the current row is:
+   * ── 🚨 2026-08-12: ALL THREE ROWS DIVIDE BY A SCHEDULE THAT NO LONGER EXISTS ─
    *
-   *   45 s clock, x4 map:  199.2 / (1985/45000) = 4.5 s
+   * They are kept because they are the record of one derived number moving three times —
+   * and because the LAST of them is the sharpest illustration this file has of why the
+   * shape below changed. Every row is `radius / (openingRadius / clock)`, which is only
+   * the sweep rate while the ring is welded to the clock. `6d5c4d6` unwelded them: the
+   * ring holds for `FOG_HOLD_MS`, closes to `minSafeRadiusFor(N)` by `FOG_CLOSE_MS`, and
+   * then stops, while the clock runs on to 150 s. There is no single divisor any more.
    *
-   * **The alarm now has half the lead it had, and that is the schedule's doing, not a
-   * retune** — the edge sweeps 44.1 wu/s instead of 22.1, so the same guaranteed-visible
-   * 199.2 wu is crossed in half the time. Nothing here is pinned: both terms are read at
-   * run time, which is exactly why this comment could go stale while the code stayed right.
+   * ⚠️ And the sentence that used to sit here — *"which is exactly why this comment could
+   * go stale while the code stayed right"* — **was wrong about its own code.** Both terms
+   * WERE read at run time and the expression was still incorrect, because what went stale
+   * was not a constant but the SHAPE. A comment can only be trusted to age gracefully
+   * around an expression that asks the schedule; this one divided by it.
+   *
+   * ── WHAT IT IS NOW ─────────────────────────────────────────────────────────
+   *
+   * The same question — *how long does the edge take to cross the radius the camera
+   * guarantees the player can see?* — asked of `fogReachesRadiusAt` as the DIFFERENCE OF
+   * TWO ARRIVALS rather than as a division. Nothing here needs to know that the close is
+   * linear, so a fourth schedule change cannot silently re-price it the way the three
+   * rows above were re-priced.
+   *
+   * Measured on the shipped arena (`ARENA_HALF_DIAGONAL`, unrounded), by
+   * `tools/tmp/ht_zoneclock.mjs`:
+   *
+   *   N<=4   floor 140.00   sweep 16.636 wu/s   199.22 wu in **11 975 ms**   (uncapped)
+   *   N=5    floor 187.42   sweep 16.137 wu/s   12 345 ms -> capped to 12 000
+   *   N=6    floor 237.00   sweep 15.615 wu/s   12 758 ms -> capped to 12 000
+   *
+   * 🚨 **THE CAP DID NOT RESCUE THE OLD EXPRESSION, WHICH IS WHY THIS IS A FIX AND NOT A
+   * TIDY-UP.** The old one returned 17 369 ms at every seat count and the 12 s cap hid
+   * that — but only at N>=5. At N<=4, the seat count every shipped duel runs at, the true
+   * answer is 11 975 ms, BELOW the cap, so the alarm was starting 25 ms late and no clamp
+   * was making it right. "Correct by accident" was true of two seat counts out of four.
+   *
+   * @param floorRadius `minSafeRadiusFor(N)` — the SEATED count, matching `sim.ts`.
    */
-  function imminentMs(maxR: number): number {
-    const shrinkPerMs = maxR / MATCH_DURATION_MS; // world units of radius per ms
-    if (shrinkPerMs <= 0) return 0;
-    return Math.min(12_000, FAIR_PLAY.radiusUnits / shrinkPerMs);
+  function imminentMs(maxR: number, floorRadius: number): number {
+    // Two arrivals, subtracted. `fogReachesRadiusAt(maxR, …)` is the instant the edge
+    // leaves the opening ring (`FOG_HOLD_MS`, by construction), so the difference is the
+    // time it spends crossing those `FAIR_PLAY.radiusUnits`.
+    const sweepMs = fogReachesRadiusAt(maxR - FAIR_PLAY.radiusUnits, maxR, floorRadius)
+      - fogReachesRadiusAt(maxR, maxR, floorRadius);
+    // `!(… > 0)` rather than `<= 0` so a NaN arena falls through to 0 instead of being
+    // compared into silence — the same guard shape `fogRadiusAt` uses for the same reason.
+    // Reaches zero only on a degenerate arena whose ring opens at or below its own floor,
+    // which is `director.ts:sawRingAboveFloor`'s case.
+    if (!(sweepMs > 0)) return 0;
+    return Math.min(12_000, sweepMs);
   }
 
   /**
    * Everything the zone readouts need, derived from the sim state alone.
    *
-   * `sim.ts` shrinks the ring as
-   *   `safeRadius = max(MIN_SAFE_RADIUS, maxSafeRadius * (1 - matchProgress))`
-   * — a continuous linear close with a FLOOR, not the stepped "next circle" of a
-   * battle royale. So there is no "next shrink" to count down to; the useful number is
-   * when the edge will sweep over WHERE THE PLAYER IS STANDING, which inverts that
-   * formula. If the schedule in `sim.ts` ever stops being linear in time, this
-   * inversion has to change with it.
+   * ⚠️ **KEPT, BECAUSE ITS LAST SENTENCE CAME TRUE AND NOBODY NOTICED FOR A DAY:**
+   *
+   *   > *"`sim.ts` shrinks the ring as `safeRadius = max(MIN_SAFE_RADIUS, maxSafeRadius *
+   *   > (1 - matchProgress))` — a continuous linear close with a FLOOR, not the stepped
+   *   > 'next circle' of a battle royale. So there is no 'next shrink' to count down to;
+   *   > the useful number is when the edge will sweep over WHERE THE PLAYER IS STANDING,
+   *   > which inverts that formula. **If the schedule in `sim.ts` ever stops being linear
+   *   > in time, this inversion has to change with it.**"*
+   *
+   * ── 🚨 IT DID, IN `6d5c4d6`, AND THE INVERSION DID NOT CHANGE WITH IT ───────
+   *
+   * The schedule is now hold → close → hold at the floor (`rules.ts:fogRadiusAt`). The
+   * hand inversion `(safeRadius - dist) / (maxSafeRadius / MATCH_DURATION_MS)` survived it
+   * and was wrong in **two** directions at once, both measured by
+   * `tools/tmp/ht_zoneclock.mjs` against the forward schedule:
+   *
+   *   * **During the 25 s hold it was FROZEN.** `safeRadius` does not move before
+   *     `FOG_HOLD_MS`, so with the player standing still the pill showed the same number
+   *     for 25 s — a countdown that does not count down, announcing an arrival that is
+   *     not yet under way. 260 of 260 sampled rows in that band were wrong.
+   *   * **During the close it ran 36% LONG, which is the DANGEROUS direction.** The coded
+   *     sweep is 11.470 wu/s; the real one is 15.615 (N=6) / 16.636 (N<=4). At dist 900,
+   *     N=6, play 60 s the pill read **"REACHES YOU 0:24"** while the fog was **17.5 s**
+   *     away. A player who budgets by that walks into 50 HP/s, and the fog kills a
+   *     full-health fighter in **2.0 s**.
+   *
+   * This is the same failure `holds` below already carries the scar of, one layer up: a
+   * readout re-deriving a rule instead of calling the function that owns it. The fix is
+   * the same shape — `fogReachesRadiusAt`, `rules.ts`' own inverse — and it needs no
+   * knowledge that the close is linear, so the next schedule change cannot rot it.
    *
    * ⚠️ The floor is why `holds` exists. `MIN_SAFE_RADIUS` arrived with the 45 s clock,
    * and it means the edge STOPS. For anyone standing inside the final ring the naive
@@ -957,7 +1063,14 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     const me = localFighter(state);
     const dist = Math.hypot(me.x - state.arena.center.x, me.y - state.arena.center.y);
     const outside = dist > state.safeRadius;
-    const shrinkPerMs = maxR / MATCH_DURATION_MS; // world units of radius per ms
+    // PLAY time, not `elapsed` — the argument `fogRadiusAt` is keyed on, and the same
+    // quantity `sim.ts` passes it. Keying off `elapsed` would move the ring whenever
+    // `COUNTDOWN_FROM` moved; `timeRemaining` is `MATCH_DURATION_MS` through the countdown,
+    // so this is 0 there and the pill reads the opening ring, which is what is on screen.
+    const playMs = MATCH_DURATION_MS - state.timeRemaining;
+    // The SCHEDULE's floor, which is where the edge is being taken. `holds` below asks the
+    // different question "will it ever reach me" and needs `ringFloorFor`'s sudden-death 0.
+    const seatFloor = minSafeRadiusFor(state.fighters.length);
     // ⚠️ `ringFloorFor(n, t)`, NOT `MIN_SAFE_RADIUS`. TWO rules moved under this line and
     // it followed neither, and they broke it in OPPOSITE directions — which is why the
     // fix is one function call and not one adjusted constant:
@@ -980,8 +1093,19 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       holds,
       sudden: suddenDeathActive(state.timeRemaining),
       radius01: maxR > 0 ? Math.max(0, Math.min(1, state.safeRadius / maxR)) : 0,
+      // ⚠️ THE OLD LINE, KEPT SO THE SHAPE OF THE BUG IS LEGIBLE NEXT TO ITS FIX:
+      //
+      //   > `outside || holds || shrinkPerMs <= 0 ? null : (state.safeRadius - dist) / shrinkPerMs`
+      //
+      // `shrinkPerMs <= 0` is gone rather than translated, and that is not a dropped
+      // guard. It defended a DIVISION; there is no division left. Its real case — an
+      // arena whose ring opens at or below its own floor — is already caught by `holds`,
+      // because on such an arena `safeRadius` IS the floor, so anyone not `outside` is
+      // standing at or inside it. The subtraction below is non-negative by the same
+      // reasoning: `holds` false puts `dist` above the floor and `outside` false puts it
+      // at or inside `safeRadius`, so the edge's arrival is at or after now.
       msUntilEdge:
-        outside || holds || shrinkPerMs <= 0 ? null : (state.safeRadius - dist) / shrinkPerMs,
+        outside || holds ? null : fogReachesRadiusAt(dist, maxR, seatFloor) - playMs,
     };
   }
 
@@ -1091,7 +1215,12 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     // can see that, which is why the acceptance battery now asserts, per viewport,
     // that a state the game is definitely IN has actually been applied to the DOM.
     zoneEl.classList.toggle('is-danger', danger);
-    zoneEl.classList.toggle('is-imminent', !danger && info.msUntilEdge !== null && info.msUntilEdge < imminentMs(maxR));
+    // `imminentMs` gained the ring's floor on 2026-08-12: the alarm lead is the time the
+    // edge takes to cross `FAIR_PLAY.radiusUnits`, and on the `6d5c4d6` schedule that
+    // depends on how far the ring has to travel — which is the SEATED floor, exactly the
+    // argument `sim.ts` hands `fogRadiusAt`. It cannot be derived from `maxR` alone any more.
+    zoneEl.classList.toggle('is-imminent', !danger && info.msUntilEdge !== null
+      && info.msUntilEdge < imminentMs(maxR, minSafeRadiusFor(state.fighters.length)));
     zoneBarEl.style.width = `${(info.radius01 * 100).toFixed(1)}%`;
 
     if (sudden) {
@@ -1183,27 +1312,52 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     // used to do, and it made the radar carry NO zone information for most of every
     // match. The reason is structural, not a tuning slip:
     //
-    //   arena/shared.ts derives  MAX_SAFE_RADIUS = halfDiagonal / (1 - tContact/T)
+    // ⚠️ KEPT ON QUOTE LINES — the DERIVATION it names was deleted by `6d5c4d6`:
     //
-    // That is DELIBERATELY larger than the arena's own half-diagonal, so the corners
-    // are not inside lethal fog from t=0 (they used to be, permanently). Which means
-    // the opening circle always STRICTLY CONTAINS the playfield. Mapped card==arena,
-    // it was 142% of the box wide at t=0 and stayed >=100% until t=13.3s of a 45s
-    // match. Measured on rendered pixels: the widget was a FLAT CREAM RECTANGLE whose
+    //   > *"arena/shared.ts derives  MAX_SAFE_RADIUS = halfDiagonal / (1 - tContact/T)*
+    //   >
+    //   > *That is DELIBERATELY larger than the arena's own half-diagonal, so the corners
+    //   > are not inside lethal fog from t=0 (they used to be, permanently). Which means
+    //   > the opening circle always STRICTLY CONTAINS the playfield. Mapped card==arena,
+    //   > it was 142% of the box wide at t=0 and stayed >=100% until t=13.3s of a 45s
+    //   > match."*
+    //
+    // `rules.ts:fogOpeningRadiusFor` is now the IDENTITY on the half-diagonal — the
+    // division by the clock is gone, because `FOG_HOLD_MS` does that job explicitly. So
+    // the premise inverts in a way that does not change the conclusion:
+    //
+    //   * the opening circle is EXACTLY the half-diagonal, **1720.47 wu**, so it passes
+    //     through the four corners rather than strictly containing them. (`rules.ts` will
+    //     not let it be rounded: `Math.round` puts the corners 0.47 wu OUTSIDE at t=0.)
+    //   * it is still 122.9% of the box WIDTH at t=0, because a rectangle's circumscribed
+    //     circle is wider than the rectangle unless the rectangle is a square. Card==arena
+    //     would still open on a flat cream plate.
+    //   * and it now stays >=100% for **44.3 s at N=2 / 45.5 s at N=6, of a 150 s match** —
+    //     the ring does not move at all for the first 25 s. That is LONGER in absolute
+    //     terms than the 13.3 s it was measured at, so the argument for zooming out is
+    //     stronger than when it was written, not weaker.
+    //
+    // Measured on rendered pixels at the time: the widget was a FLAT CREAM RECTANGLE whose
     // classified pixels did not change AT ALL between t=0 and t=6s, and the zone edge
     // was still off the card at t=0, t=6s AND t=11.3s — against a mean match length
     // of 19.6s. Clamping the disc to 100% does not fix that; a clamped disc is still
     // a flat rectangle.
     //
-    // And it gets worse, not better, as the clock shortens and as the map grows.
-    // ⚠️ THIS SENTENCE STOPPED AT THE SECOND OF THREE VALUES AND IS KEPT AS WRITTEN:
+    // ⚠️ THIS SENTENCE STOPPED AT THE SECOND OF FOUR VALUES AND IS KEPT AS WRITTEN:
     //
-    //   > *"T went 180s -> 45s this session and MAX_SAFE_RADIUS is derived from T, so the
+    //   > *"And it gets worse, not better, as the clock shortens and as the map grows.
+    //   > T went 180s -> 45s this session and MAX_SAFE_RADIUS is derived from T, so the
     //   > opening ring grew 890 -> 993 wu."*
     //
-    // The x4 arena (2026-08-11) doubled the half-diagonal the radius derives from, so the
-    // full sequence is 890 -> 993 -> 1985 wu. Nothing below is allowed to hardcode ANY of
-    // the three, which is the only reason this comment ageing three times cost nothing.
+    //   > *"The x4 arena (2026-08-11) doubled the half-diagonal the radius derives from,
+    //   > so the full sequence is 890 -> 993 -> 1985 wu."*
+    //
+    // The full sequence is now **890 -> 993 -> 1985 -> 1720.47 wu**, and the fourth value
+    // is the first one that went DOWN — because it stopped being derived from the clock at
+    // all. Note what that does to the quoted claim: "it gets worse as the clock shortens"
+    // is no longer true in either direction, since the clock is not in the expression.
+    // Nothing below is allowed to hardcode ANY of the four, which is the only reason this
+    // comment ageing four times cost nothing.
     //
     // So: zoom out until the boundary is on the card, and draw the arena's own
     // rectangle inside the fog field. What the player then reads is the DANGER
@@ -2263,9 +2417,24 @@ html.fa-touch-capable .hud-radar {
    contrast problem as the stroke above, same answer. The old grid was a 22%
    near-black and it measured, on rendered pixels, 45 luma of separation on the cream
    and **1** on the fog field — invisible, the same dark-on-dark failure that hid this
-   HUD's cooldown wipe from three critics. It never showed before because the fog only
-   reached the playfield in the last seconds of a 180s match; on the 45s clock it
-   arrives while there is still a fight going on. Mixing toward the wall colour
+   HUD's cooldown wipe from three critics.
+
+   The reason it went unseen is a schedule claim, and the schedule has now moved twice
+   under it. KEPT AS WRITTEN, on quote lines:
+
+     > "It never showed before because the fog only reached the playfield in the last
+     > seconds of a 180s match; on the 45s clock it arrives while there is still a fight
+     > going on."
+
+   On Uri's schedule (6d5c4d6) first contact is FOG_HOLD_MS - 25 s - BY CONSTRUCTION
+   rather than by arithmetic: the ring opens on the arena half-diagonal, so it is already
+   touching the four corners, and it does not move at all until the hold ends. That is
+   16.7% into the 150 s clock. But the honest number for THIS comment is a different one:
+   tools/tmp/sr_ringfloor.mjs measured 880 duels at a mean play length of 22.05 s, so the
+   median match ENDS BEFORE THE FOG EVER MOVES and this grid is never seen against a fog
+   field at all. It still has to work there - the longest of those 880 ran 62.23 s, and
+   six-seat matches on this schedule are unmeasured - so the two-sided contrast below is
+   kept and is no longer load-bearing for the common case. Mixing toward the wall colour
    instead measures 24 on cream and 25 on the field: quieter than the old grid was at
    its best, present in both states, and still an order below the walls' own 100 so it
    subdivides rather than competes. */

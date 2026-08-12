@@ -414,12 +414,16 @@ export class MatchAudio {
    *   > *"(measured: 6.34 s of a 45 s match, ~380 ticks)"* — and *"The shipped arena is
    *   > 993 wu against a 140 wu floor, so this only ever matters for a future arena."*
    *
-   * The arena went x4 (`DECISIONS §48`) so `maxSafeRadius` is **1985 wu**, and the floor
-   * scales with the seat count (`DECISIONS §53b`) to at most **237.00 wu at N=6** — but
-   * neither is what the latch waits for any more. Sudden death (`DECISIONS §2`) drops the
-   * ring to **zero at t=30 s of 45 s**, 9.6-11.8 s before the schedule would reach any of
-   * those floors, so the dwell is now the **15 s** of sudden death (~900 ticks at 60 Hz)
-   * and the latch is what stops those 900 ticks from being 900 cues.
+   * ⚠️ **THE PARAGRAPH THAT REPLACED THEM IS ITSELF SUPERSEDED, SO IT JOINS THEM ON QUOTE
+   * LINES.** It was written on 2026-08-11 and reversed the next day:
+   *
+   *   > *"The arena went x4 (`DECISIONS §48`) so `maxSafeRadius` is **1985 wu**, and the
+   *   > floor scales with the seat count (`DECISIONS §53b`) to at most **237.00 wu at
+   *   > N=6** — but neither is what the latch waits for any more. Sudden death
+   *   > (`DECISIONS §2`) drops the ring to **zero at t=30 s of 45 s**, 9.6-11.8 s before
+   *   > the schedule would reach any of those floors, so the dwell is now the **15 s** of
+   *   > sudden death (~900 ticks at 60 Hz) and the latch is what stops those 900 ticks
+   *   > from being 900 cues."*
    *
    * ⚠️ **AND `6d5c4d6` REVERSED THAT PARAGRAPH TOO — KEPT ABOVE, LIKE ITS OWN PREDECESSOR.**
    * Uri's schedule decoupled the ring from the clock: `FOG_CLOSE_MS` lands the ring on
@@ -436,8 +440,16 @@ export class MatchAudio {
    *
    * ⚠️ **HOW OFTEN IT ACTUALLY FIRES: `tools/tmp/sr_ringfloor.mjs` — 0 of 880 duels.** Mean
    * play 22.05 s, longest 62.23 s, against a ring that does not begin closing until 25 s and
-   * does not stop until 120 s. Both of the numbers above ("6.34 s of a 45 s match", "~900
-   * ticks") described dwells this cue does not reach in a shipped two-seat match.
+   * does not stop until `FOG_CLOSE_MS`. Both dwell figures quoted above described a state
+   * this cue does not reach in a shipped two-seat match.
+   *
+   * ⚠️ **THOSE TWO FIGURES ARE DELIBERATELY NOT RESTATED HERE, AND THAT IS THE LESSON.**
+   * Every generation of this comment has restated a dwell as a computed number and every
+   * one has gone stale within a day of being written — this block has now aged three
+   * times. `FOG_HOLD_MS`, `FOG_CLOSE_MS` and `SUDDEN_DEATH_MS` are the schedule; cite them
+   * and the sentence survives the next reversal. `tools/tmp/rc_prose.mjs` is the gate that
+   * caught the second and third rounds of this, and a figure written inline on a live line
+   * is exactly what it reads as a live claim.
    *
    * `sawRingAboveFloor` still guards the degenerate case where an arena's `maxSafeRadius`
    * is already <= the floor: without it, such an arena would announce "the ring has

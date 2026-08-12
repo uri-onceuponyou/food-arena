@@ -1017,34 +1017,43 @@ export function matchStart(): SoundFn {
  *   > floor was reached in 0 of them, and only forcing both fighters immortal gets there
  *   > (121/121, at play-time 38.65 s against the 38.66 s schedule)."*
  *
- * **Three numbers in that moved, and none of them lives in this file.**
+ * ⚠️ **AND THE ANSWER TO IT IS ITSELF SUPERSEDED, SO IT MOVES ONTO QUOTE LINES TOO. This
+ * is the THIRD generation of this paragraph and the second reversal; the live text starts
+ * below the rule.** Only the middle bullet survives unchanged, and it is restated live.
  *
- *   * `maxSafeRadius` is **1985 wu**. The arena went x4 in area (`DECISIONS §48`) and
- *     `arena/shared.ts` derives the opening radius from the half-diagonal, so it doubled
- *     with the map; the figure in the quotation above is the 1x map's.
- *   * The floor is no longer the constant 140. `rules.ts:minSafeRadiusFor(N)` scales it
- *     with the seat count (`DECISIONS §53b`) — 140 at N<=4, 187.42 at N=5, **237.00 at
- *     N=6**.
- *   * 🚨 **And the ring never reaches it.** Sudden death (`DECISIONS §2`) collapses the
- *     ring to zero at `SUDDEN_DEATH_MS` = **30 s of 45 s**, which `rules.ts`' own table
- *     puts **9.6-11.8 s before** the schedule would arrive at any of those floors.
- *
- * So this cue now fires on the **sudden-death collapse at t=30 s** — the moment the squeeze
- * does not stop but COMPLETES — 15 s before the whistle rather than 6. That is not a
- * reinterpretation: `audio/director.ts:watchZone` was changed to latch on
- * `ringFloorFor(N, timeRemaining)`, which returns 0 while sudden death is active, precisely
- * so this stayed one cue rather than becoming two.
- *
- * ⚠️ **AND THE "never happens" MEASUREMENT IS NOT SIMPLY INVERTED, IT IS UNMEASURED.** The
- * 0-of-363 figure was counted against a floor that no longer governs, on a map a quarter
- * of this one's size. The only fresh number is `DECISIONS §64`: **six-seat matches reach
- * the sudden-death trigger 65.5% of the time.** The two-seat rate has not been re-measured
- * since the map changed and is not claimed here.
+ *   > ***Three numbers in that moved, and none of them lives in this file.***
+ *   >
+ *   >   * *`maxSafeRadius` is **1985 wu**. The arena went x4 in area (`DECISIONS §48`) and
+ *   >     `arena/shared.ts` derives the opening radius from the half-diagonal, so it
+ *   >     doubled with the map; the figure in the quotation above is the 1x map's.*
+ *   >   * *The floor is no longer the constant 140. `rules.ts:minSafeRadiusFor(N)` scales
+ *   >     it with the seat count (`DECISIONS §53b`) — 140 at N<=4, 187.42 at N=5,
+ *   >     **237.00 at N=6**.*
+ *   >   * *🚨 **And the ring never reaches it.** Sudden death (`DECISIONS §2`) collapses
+ *   >     the ring to zero at `SUDDEN_DEATH_MS` = **30 s of 45 s**, which `rules.ts`' own
+ *   >     table puts **9.6-11.8 s before** the schedule would arrive at any of those
+ *   >     floors.*
+ *   >
+ *   > *So this cue now fires on the **sudden-death collapse at t=30 s** — the moment the
+ *   > squeeze does not stop but COMPLETES — 15 s before the whistle rather than 6. That is
+ *   > not a reinterpretation: `audio/director.ts:watchZone` was changed to latch on
+ *   > `ringFloorFor(N, timeRemaining)`, which returns 0 while sudden death is active,
+ *   > precisely so this stayed one cue rather than becoming two.*
+ *   >
+ *   > *⚠️ **AND THE "never happens" MEASUREMENT IS NOT SIMPLY INVERTED, IT IS UNMEASURED.**
+ *   > The 0-of-363 figure was counted against a floor that no longer governs, on a map a
+ *   > quarter of this one's size. The only fresh number is `DECISIONS §64`: **six-seat
+ *   > matches reach the sudden-death trigger 65.5% of the time.** The two-seat rate has not
+ *   > been re-measured since the map changed and is not claimed here.*
  *
  * ═══════════════════════════════════════════════════════════════════════════════
  * 🚨 EVERYTHING ABOVE IS THE 45-SECOND CLOCK. `6d5c4d6` REVERSED THE PART IN BOLD,
  *    AND THE PARAGRAPH THAT SAID "UNMEASURED" IS NOW MEASURED.
  * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ * The one bullet that survives all three generations: the floor is not a constant.
+ * `rules.ts:minSafeRadiusFor(N)` scales it with the SEATED count (`DECISIONS §53b`) — 140
+ * at N<=4, 187.42 at N=5, 237.00 at N=6 — and `sim.ts` passes exactly that to `fogRadiusAt`.
  *
  * Uri's schedule decoupled the ring from the clock. `MATCH_DURATION_MS` is **150 000**,
  * `FOG_HOLD_MS` holds the ring for 25 s, `FOG_CLOSE_MS` lands it on `minSafeRadiusFor(N)`
@@ -1176,10 +1185,21 @@ export function matchEnd(won: boolean): SoundFn {
  * case because nobody was defeated, and audio holds the same line: a player who just
  * ran out of clock while alive must not hear the sound of being knocked out.
  *
- * Same reachability caveat as `ringFloor`: 0 of 363 scripted matches reached the
- * whistle (longest 25.1 s of a 45 s clock), and only forcing both fighters immortal
+ * Same reachability caveat as `ringFloor`, and ⚠️ **the figure it used to carry went stale
+ * the day after it was written — kept on a quote line, like every other generation of it:**
+ *
+ *   > *"0 of 363 scripted matches reached the whistle (longest 25.1 s of a 45 s clock)."*
+ *
+ * Re-measured on Uri's schedule by `tools/tmp/sr_ringfloor.mjs` — 880 duels, 110 matchups
+ * x 8 seeds, policy `smart2`, the shipped arena: mean play **22.05 s**, longest **62.23 s**.
+ * The whistle is `MATCH_DURATION_MS`, so **0 of 880** reached it, and the longest match on
+ * record ended with more than half the clock unspent. Only forcing both fighters immortal
  * produces a timeout. The ending is real, deterministic and tested; it is the AI that
  * does not currently let a match get there.
+ *
+ * ⚠️ That is a TWO-SEAT number and it is not carried to six. `DECISIONS §64`'s 65.5%
+ * sudden-death rate was measured on the 45 s clock and does not survive the reversal;
+ * six seats on this schedule is unmeasured, and nobody has run it.
  *
  * The whistle is the distinguishing layer and it is doing real work, not decoration.
  * `matchEnd` is four sustained notes with no noise in it at all; this opens with a
