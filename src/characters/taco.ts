@@ -946,8 +946,9 @@ export class TacoCharacter extends BaseCharacter {
     // lands inside the torso fold, so there is no gap for a column to bridge.
     //
     // ⚠️ AND IT IS A NO-OP ON THE HEAD'S SIZE AND PLACEMENT, BY CONSTRUCTION.
-    // `neckFraction` is not an isolated knob — `rig.ts:602` subtracts the gap from the
-    // head before halving it and `rig.ts:630` mounts the head above it — so dropping
+    // `neckFraction` is not an isolated knob — rig.ts's `const headH = Math.max(...)`
+    // subtracts `(2 * neckGap) / (1 + headMount)` from the head before halving it, and
+    // `this.headCentreY = torsoTopY + neckGap + ...` mounts the head above it — so dropping
     // it alone would have grown R by 12.7% (a 0.13 m wider shell, straight at
     // `castbox`'s hit-radius margin) and dropped the head 0.115 m. Both are cancelled
     // exactly:
@@ -962,6 +963,15 @@ export class TacoCharacter extends BaseCharacter {
     //
     // R, the shell, the fillings, the face and the standing height are byte-identical;
     // only the column and the ring are gone.
+    //
+    // 🚨 THE TWO REFERENCES ABOVE ARE EXPRESSIONS ON PURPOSE — DO NOT "TIDY" THEM BACK
+    //    INTO LINE NUMBERS. They are `rig.ts:811` and `rig.ts:838` as of `072f245`, and
+    //    that pair is a HINT, not the reference. This comment has already had its line
+    //    numbers rot TWICE: it shipped `rig.ts:602`/`rig.ts:630`, which today point at the
+    //    doc comment on the `weight` field and at `shoulderR: THREE.Group` — citations
+    //    that still read as precise while pointing at the wrong KIND of thing, which is
+    //    worse than no citation. `rig.ts` is 2000+ lines and under continuous edit, so any
+    //    line number into it is a decaying reference; a grep for the expression is not.
     //
     // The ring is not simply deleted, because it was load-bearing twice over: it is
     // the "hard dark occlusion notch under the chin" two blind critics asked for, and
