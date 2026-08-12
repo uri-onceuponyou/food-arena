@@ -75,6 +75,7 @@ import {
   HIT_RADIUS_VS_PLAYER,
   HOMING_TURN_RATE,
   clampLevel,
+  fogRadiusAt,
   LEVEL_MIN,
   MATCH_DURATION_MS,
   minSafeRadiusFor,
@@ -488,7 +489,13 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
 
   if (state.phase === 'playing') {
     state.timeRemaining = Math.max(0, state.timeRemaining - dt);
-    const progress = 1 - state.timeRemaining / MATCH_DURATION_MS;
+    // ⚠️ THIS LINE USED TO READ `const progress = 1 - state.timeRemaining / MATCH_DURATION_MS`
+    // and the ring was `maxSafeRadius * (1 - progress)` — **the ring WAS the clock.** Uri
+    // reversed that on 2026-08-12 (`rules.ts:FOG_HOLD_MS`): the ring holds for 25 s, closes,
+    // and arrives at its floor at 120 s, while the clock runs to 150 s. A single normalised
+    // `progress` cannot express a schedule with three phases, so the schedule is a function
+    // now and this is the only site that evaluates it.
+    const playMs = MATCH_DURATION_MS - state.timeRemaining;
     // The floor is what makes the timeout rule below reachable at all: without it the
     // ring reaches 0, nowhere costs 0 HP/s for the last seconds, and the smaller HP
     // pool (always the player's) dies before the whistle. See `MIN_SAFE_RADIUS`.
@@ -519,13 +526,22 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
     // Uri, 2026-08-11: *"after 30 seconds reduce the fog to all screen and the one who
     // has more HP wins."* So from `SUDDEN_DEATH_MS` there is no safe ground at all.
     //
-    // ⚠️ IT IS A TERNARY AND NOT A THIRD TERM IN THE `Math.max`, AND THAT IS THE WHOLE
-    // ARITHMETIC. `Math.max(0, 661.67)` is 661.67 — at the 30 s trigger the scheduled
-    // radius is still 661.67 wu on the 2800x2000 map (4.73x the N<=4 floor), so a floor
-    // of zero changes nothing and the collapse would silently not happen. Sudden death
-    // REPLACES the schedule; `minSafeRadiusFor` floors it while it is still running.
+    // ⚠️ IT IS A TERNARY AND NOT A THIRD TERM IN A `Math.max`, AND THAT IS THE WHOLE
+    // ARITHMETIC. `Math.max(0, R)` is R for every R the schedule produces, so a floor of
+    // zero would change nothing and the collapse would silently not happen. Sudden death
+    // REPLACES the schedule; the schedule floors itself while it is still running.
     // `rules.ts:ringFloorFor` is the same fact for the three READERS of the floor, which
     // do want a `max`-shaped answer; this is the one site that needs the cap.
+    //
+    // ⚠️ THIS COMMENT USED TO CARRY THE NUMBER THAT MADE THE CAP LOOK NECESSARY:
+    //
+    //   > *"`Math.max(0, 661.67)` is 661.67 — at the 30 s trigger the scheduled radius is
+    //   > still 661.67 wu on the 2800x2000 map (4.73x the N<=4 floor)"*
+    //
+    // That 4.73x gap WAS the bug. At the 135 s trigger the scheduled radius is now exactly
+    // `minSafeRadiusFor(N)` — the ring has been sitting on its floor for 15 s — so the
+    // collapse is a step from the final circle to nothing, which is what `DECISIONS §2`'s
+    // "the one who has more HP wins" was always meant to be stepping from.
     //
     // Monotonicity survives: 0 is below every value the branch above can produce, so
     // `safeRadius` is still non-increasing for the life of a match — which is what
@@ -533,10 +549,7 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
     // both built on.
     state.safeRadius = suddenDeathActive(state.timeRemaining)
       ? SUDDEN_DEATH_RADIUS
-      : Math.max(
-        minSafeRadiusFor(state.fighters.length),
-        state.arena.maxSafeRadius * (1 - progress),
-      );
+      : fogRadiusAt(playMs, state.arena.maxSafeRadius, minSafeRadiusFor(state.fighters.length));
   }
 
   // Ground-effect expiry runs unconditionally, matching the prototype (it is never

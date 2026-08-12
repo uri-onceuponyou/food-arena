@@ -99,8 +99,89 @@ export const PROTOTYPE_VIEWPORT = { w: 360, h: 240 } as const;
  * the fog's first contact with the arena's corners pinned at t = 6 s. That is
  * deliberate. Anything reading `arena.maxSafeRadius` as a fixed 890, or normalising a
  * widget by a hardcoded arena size, will now be wrong — see the report.
+ *
+ * ── 🚨 2026-08-12: 45 s IS REVERSED BY URI. THE CLOCK IS 150 s. ─────────────
+ *
+ * **Everything above is kept verbatim and none of it is deleted, because the measurements
+ * are still true measurements — of a game that answered a different question.** The 45 s
+ * sweep optimised ONE quantity: *given that the ring is welded to the clock, how short can
+ * the clock be before the fog becomes a co-primary damage source?* Uri's answer removes the
+ * premise. The ring is no longer welded to the clock (see `FOG_HOLD_MS` / `FOG_CLOSE_MS`),
+ * so "the clock" and "the fog schedule" are two decisions now, not one.
+ *
+ * ── WHAT MADE HIM CHANGE IT: HE PLAYED IT, AND HE WAS RIGHT ────────────────
+ *
+ *   > *"It start decreasing my HP before it reaches me… it does seem like sudden death,
+ *   > it's also written and the entire screen becomes purple. **It happens before the fog
+ *   > reaches the center.**"*
+ *
+ * That is the defect `minSafeRadiusFor` below had ALREADY written down and nobody had
+ * connected to play: at 45 s / 30 s, `SUDDEN_DEATH_MS` deleted the last third of the ring
+ * schedule, so the ring never arrived and the collapse read as an unexplained burn. A
+ * documented dead branch was a player-visible bug. **`DECISIONS §58` is answered — option
+ * (c), lengthen the match — and `DECISIONS §1`'s 45 s is reversed.**
+ *
+ * ── URI'S SCHEDULE, VERBATIM ───────────────────────────────────────────────
+ *
+ *     0:00 ────────────────────────────── 2:00 ──── 2:15 ─ 2:30
+ *          ring shrinking (centre reached)  small   SUDDEN
+ *                                           circle  DEATH
+ *
+ *   * a **~25 s HOLD** at the opening radius before the ring closes at all — *"a grace
+ *     period to find a weapon and an opponent"* on a 2800x2000 map. The old schedule bit
+ *     the corners at 6 s, 13% into a 45 s match and 4% into this one.
+ *   * the ring reaches `minSafeRadiusFor(N)` — the small final circle — at **120 s**.
+ *   * sudden death **15 s after that**, at 135 s. Not before.
+ *   * clock ceiling **150 s**.
+ *
+ * ⚠️ **EVERY BALANCE NUMBER IN THIS PROJECT WAS MEASURED AT 45 s AND IS NOW UNPRICED.**
+ * A 3.3x clock is not a constant change. Named, so nobody quotes them as current: the fog's
+ * **8.1% damage share**, the **15.5 s** session in `economy/tuning.ts:MATCH_PACING` (and
+ * therefore every "hours to unlock" figure derived from it), the **52.2%** difficulty dial,
+ * and the whole `roster_table` / `pacing_ladder` corpus. Out-of-combat regen is the one to
+ * watch: `REGEN_AMOUNT / REGEN_TICK_MS` is 10 HP/s, so 150 s of disengagement is 1,500 HP
+ * against a 100 HP pool where 45 s was 410. Re-measure, do not reason.
  */
-export const MATCH_DURATION_MS = 45_000; // 0:45
+export const MATCH_DURATION_MS = 150_000; // 2:30 — Uri's ceiling, DECISIONS §58(c)
+
+/**
+ * ── THE RING SCHEDULE, DECOUPLED FROM THE CLOCK (Uri, 2026-08-12) ──────────
+ *
+ * Until today the ring WAS the clock: `sim.ts` closed it as
+ * `maxSafeRadius * (1 - elapsed / MATCH_DURATION_MS)`, so the opening radius, the sweep
+ * rate, the arrival time and the whistle were one number wearing four hats. Uri's schedule
+ * needs the ring to finish at 120 s while the clock runs to 150 s, so they cannot be the
+ * same number any more.
+ *
+ * Two constants replace the weld, and `fogRadiusAt` below is the only place they are read:
+ *
+ *     t <= FOG_HOLD_MS                 R = openingRadius        (the grace period)
+ *     FOG_HOLD_MS < t < FOG_CLOSE_MS   R linear opening -> floor
+ *     t >= FOG_CLOSE_MS                R = floor                (the small final circle)
+ *
+ * ── WHY A HOLD RATHER THAN A LARGER OPENING RING ───────────────────────────
+ *
+ * The old trick for "nothing burns for the first t seconds" was to start the ring LARGER
+ * THAN THE MAP and let it decay in — `arena/shared.ts` solved
+ * `R0 = halfDiagonal / (1 - t/T)` for exactly that. It works, and it couples three things
+ * that have no business being coupled: move the clock and the opening radius moves, which
+ * moves the sweep rate, which moves first contact. **With an explicit hold the opening
+ * radius has exactly one job — contain the playfield at t=0 — and the answer is
+ * `ARENA_HALF_DIAGONAL`, no division and nothing to be ill-conditioned.** First contact is
+ * then `FOG_HOLD_MS` by construction rather than by arithmetic. `arena/shared.ts` carries
+ * the consequence.
+ *
+ * ── THE ARRIVAL IS THE POINT, AND IT IS ASSERTED, NOT EYEBALLED ────────────
+ *
+ * `fogRadiusAt` interpolates TO the floor, so the ring reaches `minSafeRadiusFor(N)` at
+ * exactly `FOG_CLOSE_MS` **at every N and on every arena size** — which is precisely what
+ * the old schedule could not do (it reached the floor at a time that depended on the
+ * opening radius, and `SUDDEN_DEATH_MS` arrived 9.6-11.8 s before that time at every N).
+ * `sim.test.mjs` §29 and §11 assert the arrival on the live sim; `tools/tmp/fs_sched_ring.mjs`
+ * asserts it on real matches at N=2..6 and carries the OLD constants as its known-bad.
+ */
+export const FOG_HOLD_MS = 25_000;
+export const FOG_CLOSE_MS = 120_000;
 
 /**
  * ── AUTHORISED DEVIATION #8 (2026-08-05): COUNTDOWN_FROM 5 -> 3 ─────────────
@@ -1081,16 +1162,26 @@ export const REACH = {
 //
 // ── THE FOG SCHEDULE IS DERIVED FROM THIS. NEVER PIN IT. ───────────────────
 //
-// `sim.ts` closes the ring as `max(minSafeRadiusFor(N), maxSafeRadius * (1 - progress))`,
-// so the floor decides the moment the ring STOPS:
+// ⚠️ **THE COUPLING BELOW WAS REVERSED ON 2026-08-12 AND THE OLD WORDING IS KEPT BECAUSE
+// ITS ARITHMETIC IS THE REASON THE SCHEDULE HAD TO BE DECOUPLED.** It used to read:
 //
-//     tFloor = MATCH_DURATION_MS * (1 - floor / arena.maxSafeRadius)
+//   > `sim.ts` closes the ring as `max(minSafeRadiusFor(N), maxSafeRadius * (1 - progress))`,
+//   > so the floor decides the moment the ring STOPS:
+//   >
+//   >     tFloor = MATCH_DURATION_MS * (1 - floor / arena.maxSafeRadius)
+//   >
+//   > Both terms are read at run time; neither is a literal. §48 measured the endgame window
+//   > at N=2 as **6.4 s on the shipped map and 3.2 s on the x4 map** — this formula gives
+//   > 6.34 s and 3.17 s, which is what says the schedule model here is the shipped one. At
+//   > N=6 it gives **10.74 s** and **5.37 s**: scaling the floor with N gives back part of
+//   > what the bigger arena costs, which was one of §48's two named scale-only defects.
 //
-// Both terms are read at run time; neither is a literal. §48 measured the endgame window
-// at N=2 as **6.4 s on the shipped map and 3.2 s on the x4 map** — this formula gives
-// 6.34 s and 3.17 s, which is what says the schedule model here is the shipped one. At
-// N=6 it gives **10.74 s** and **5.37 s**: scaling the floor with N gives back part of
-// what the bigger arena costs, which was one of §48's two named scale-only defects.
+// **Every one of those numbers is a symptom of the same defect: the ARENA SIZE was deciding
+// when the endgame started.** A x4 map halved the endgame window (6.34 -> 3.17 s) without
+// anyone choosing that, and the floor scaling with N was giving part of it back by
+// accident. `fogRadiusAt` makes the arrival a SCHEDULE constant: `tFloor` is `FOG_CLOSE_MS`
+// at every N and every arena size, and the endgame window is `SUDDEN_DEATH_GRACE_MS`.
+// The floor still decides WHERE the ring stops; it no longer decides WHEN.
 // ⚠️ Pinning a literal here is a MEASURED failure mode, not a hypothetical — the 1x
 // literal 993 carried onto a 2x map put both spawns OUTSIDE the opening ring: 880/880 no
 // contact, every match over in 2.03 s.
@@ -1128,11 +1219,17 @@ export const ENDGAME_STANDOFF = REACH.rangedMax + Math.max(HIT_RADIUS_VS_PLAYER,
  * small, not empty — it just is not the same "small" for two fighters and for six.
  */
 export function minSafeRadiusFor(fighterCount: number): number {
-  // ⚠️ AT THE SHIPPED CONSTANTS THIS FUNCTION'S RESULT IS NEVER REACHED — see
-  // `SUDDEN_DEATH_MS` below, which collapses the ring 9.6-11.8 s before the schedule
-  // would arrive here. It is not dead: it is the floor for every t < SUDDEN_DEATH_MS,
-  // and it binds again the moment either constant moves. The block below carries the
-  // arithmetic rather than leaving it to be re-derived.
+  // ⚠️ THIS COMMENT USED TO READ — and it was TRUE, and it was the bug Uri hit:
+  //
+  //   > *"AT THE SHIPPED CONSTANTS THIS FUNCTION'S RESULT IS NEVER REACHED — see
+  //   > `SUDDEN_DEATH_MS` below, which collapses the ring 9.6-11.8 s before the schedule
+  //   > would arrive here."*
+  //
+  // 🚨 **REVERSED 2026-08-12.** `fogRadiusAt` interpolates TO this value and lands on it at
+  // `FOG_CLOSE_MS` (120 s), and sudden death is 15 s LATER (135 s). The ring now arrives —
+  // at every N, on every arena size — and stands on this radius for a full 15 s of play
+  // before the collapse. That a documented dead branch was a player-visible defect is the
+  // whole reason this pass exists; see `MATCH_DURATION_MS`.
   const n = Math.floor(fighterCount);
   // ⚠️ Below three there is no "evenly spaced neighbour" to be spaced FROM: at two the
   // chord is the diameter, and at one it does not exist — `Math.sin(Math.PI / 1)` is
@@ -1146,6 +1243,97 @@ export function minSafeRadiusFor(fighterCount: number): number {
   // any question about libm reproducibility, and keeps the hot path's cost unchanged.
   if (!Number.isFinite(n) || n < 3) return MIN_SAFE_RADIUS;
   return Math.max(MIN_SAFE_RADIUS, ENDGAME_STANDOFF / Math.sin(Math.PI / n) - POT.dangerRadius);
+}
+
+/**
+ * The opening radius of the closing ring, for a playfield whose furthest point is
+ * `halfDiagonal` from its centre. **It is the half-diagonal**, and the identity is named
+ * rather than inlined because it is a RULE, not an accident: *the ring at t=0 contains
+ * every point a fighter can stand on, and nothing more.*
+ *
+ * ⚠️ **IT USED TO BE A DIVISION, AND THAT DIVISION IS WHY THE NUMBER MOVED FOUR TIMES.**
+ * `arena/shared.ts` solved `halfDiagonal / (1 - FOG_FIRST_CONTACT_S * 1000 / T)` to place
+ * first contact at 6 s by starting the ring OUTSIDE the map — 890, then 993 when the clock
+ * went 180 s -> 45 s, then 1985 when the arena went x4. With `FOG_HOLD_MS` doing that job
+ * explicitly the division is redundant, and the redundant part was the part that coupled
+ * the opening radius to the clock.
+ *
+ * ⚠️ **DO NOT ROUND IT DOWN.** `Math.round(1720.465…)` is 1720, which puts the four corners
+ * 0.47 wu OUTSIDE the ring at t=0 — a miniature of the exact "corners fogged from birth"
+ * bug `arena/shared.ts` documents. No fighter can reach one (`movement.ts` clamps to half a
+ * body inside each bound, so the furthest reachable point on the shipped map is 1691.28 wu
+ * from centre, 29.19 wu of margin), but the FLOOR and the props out there are drawn, and a
+ * corner that is inside the fog wall cannot be judged for hue or value.
+ */
+export function fogOpeningRadiusFor(halfDiagonal: number): number {
+  return halfDiagonal;
+}
+
+/**
+ * **THE RING SCHEDULE. The one implementation, and the reason it is a function.**
+ *
+ * @param playMs   milliseconds of PLAY elapsed — `MATCH_DURATION_MS - state.timeRemaining`.
+ *                 NOT `state.elapsed`, which includes the countdown; keying the ring off
+ *                 `elapsed` would move it whenever `COUNTDOWN_FROM` moved and re-seed every
+ *                 balance number in the project. Same property `SUDDEN_DEATH_MS` has.
+ * @param openingRadius `arena.maxSafeRadius`.
+ * @param floorRadius   `minSafeRadiusFor(state.fighters.length)` — the SEATED count.
+ *
+ * Hold, then close, then hold at the floor. Reaches `floorRadius` **exactly** at
+ * `FOG_CLOSE_MS`, which is the assertion `sim.test.mjs` §29 makes and the property the old
+ * schedule did not have.
+ *
+ * ── ⚠️ THE MONOTONICITY TRAP, WHICH THIS SHAPE MAKES WORSE, NOT BETTER ─────
+ *
+ * The old expression was `max(floor, opening * (1 - progress))`, and `sim.ts` already
+ * warned that a RISING floor (`minSafeRadiusFor` rises with N, so reading the LIVING count
+ * would raise it as fighters die) makes `safeRadius` rise — a fog that recedes, which
+ * breaks `audio/director.ts`'s one-shot floor latch and `ui/hud.ts`'s `msUntilEdge`
+ * inversion. **Here the floor is INTERPOLATED TOWARD, not clamped with, so a floor that
+ * rises mid-match lifts the radius at every t in the close, not only at the end.** The
+ * defence is unchanged and is the caller's: pass the SEATED count, which is fixed for the
+ * life of a match. `sim.test.mjs` §29(d) is the row that fails if anyone changes it.
+ *
+ * Monotone non-increasing requires `openingRadius >= floorRadius`. On any real arena that
+ * is 1720.47 against at most 237.00, but a fixture can violate it (`sim.test.mjs` uses
+ * `maxSafeRadius: 100_000` and `500` both), so the interpolation is clamped rather than
+ * trusted: an opening radius BELOW the floor yields the floor from t=0 and never rises.
+ */
+export function fogRadiusAt(playMs: number, openingRadius: number, floorRadius: number): number {
+  const open = Math.max(openingRadius, floorRadius);
+  if (!(playMs > FOG_HOLD_MS)) return open; // `!(… > …)` so NaN holds rather than closing
+  if (playMs >= FOG_CLOSE_MS) return floorRadius;
+  const closed = (playMs - FOG_HOLD_MS) / (FOG_CLOSE_MS - FOG_HOLD_MS);
+  return open + (floorRadius - open) * closed;
+}
+
+/**
+ * The inverse of `fogRadiusAt`: the play-clock reading at which the ring's edge arrives at
+ * `radius`. **Exported because two files outside the sim invert this schedule by hand and
+ * both were written against the old linear-in-the-clock one:**
+ *
+ *   * `ui/hud.ts` computes `shrinkPerMs = maxSafeRadius / MATCH_DURATION_MS` twice
+ *     (`imminentMs`, `zoneInfo.msUntilEdge`). On this schedule that is wrong in two
+ *     directions at once — it reports a countdown DURING the hold, when the edge is not
+ *     moving at all, and once the close starts it understates the sweep by 45%
+ *     (11.47 wu/s against the real 16.64).
+ *   * `game/match.ts:applyQaSetup` solves `timeRemaining = MATCH_DURATION_MS * (R / maxR)`
+ *     for `?fogRadius=`.
+ *
+ * Neither file is this pass's to edit; the correct one-line replacement is
+ * `MATCH_DURATION_MS - fogReachesRadiusAt(R, maxR, floor)` for the clock reading, and
+ * `fogReachesRadiusAt(dist, …) - playMs` for "ms until the edge reaches me".
+ *
+ * Returns `FOG_HOLD_MS` for any radius at or above the opening ring (the edge is already
+ * there and starts moving then) and `FOG_CLOSE_MS` for anything at or below the floor (the
+ * ring never goes lower — a caller wanting "and then?" wants `SUDDEN_DEATH_MS`).
+ */
+export function fogReachesRadiusAt(radius: number, openingRadius: number, floorRadius: number): number {
+  const open = Math.max(openingRadius, floorRadius);
+  if (radius >= open) return FOG_HOLD_MS;
+  if (radius <= floorRadius) return FOG_CLOSE_MS;
+  const closed = (open - radius) / (open - floorRadius);
+  return FOG_HOLD_MS + closed * (FOG_CLOSE_MS - FOG_HOLD_MS);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1178,34 +1366,60 @@ export function minSafeRadiusFor(fighterCount: number): number {
 //
 // ── WHERE 30 s SITS IN THE FOG SCHEDULE — MEASURED, AND IT CONTRADICTS §53b ──
 //
-// `arena/shared.ts` derives `maxSafeRadius = halfDiagonal / (1 - 6000/T)` = **1985 wu**
-// on the 2800x2000 map (`DECISIONS §48`). `sim.ts` closes the ring linearly, so at the
-// 30 s trigger the scheduled radius is
+// 🚨 **THIS WHOLE TABLE IS THE BUG URI PLAYED INTO. KEPT VERBATIM BELOW, BECAUSE IT IS THE
+// RECORD OF A DEFECT THAT WAS WRITTEN DOWN, ARGUED FOR, AND SHIPPED.** It was reported
+// rather than resolved, on the reasoning quoted at the end of it — and the thing that
+// reasoning missed is that a player does not experience "the spacing floor is superseded".
+// He experiences *"it start decreasing my HP before it reaches me."* The lever named in the
+// last paragraph as the one that would fix it — **the TRIGGER, not the floor** — is exactly
+// the lever Uri pulled. What follows is the old block, unedited:
 //
-//     R(30 s) = 1985 * (1 - 30/45) = 661.67 wu
+//   > `arena/shared.ts` derives `maxSafeRadius = halfDiagonal / (1 - 6000/T)` = **1985 wu**
+//   > on the 2800x2000 map (`DECISIONS §48`). `sim.ts` closes the ring linearly, so at the
+//   > 30 s trigger the scheduled radius is
+//   >
+//   >     R(30 s) = 1985 * (1 - 30/45) = 661.67 wu
+//   >
+//   > while `minSafeRadiusFor` returns 140 (N<=4), 187.42 (N=5), 237.00 (N=6). So:
+//   >
+//   >     N     floor    tFloor     endgame window   SD fires BEFORE tFloor by   R(30)/floor
+//   >     2-4   140.00   41.826 s   3.174 s          11.826 s                    4.73x
+//   >     5     187.42   40.751 s   4.249 s          10.751 s                    3.53x
+//   >     6     237.00   39.627 s   5.373 s           9.627 s                    2.79x
+//   >
+//   > 🚨 **THE RING NEVER REACHES `minSafeRadiusFor(N)` IN A SHIPPED MATCH.** §53b's floor
+//   > — answered by Uri in the same message, and derived from the reach ladder in the block
+//   > above — governs a radius the schedule is cut off 9.6-11.8 s short of. To reach it
+//   > first, the trigger would have to be >= 41.83 s (N<=4) or >= 39.63 s (N=6), i.e. sudden
+//   > death would fire inside the last 3.2-5.4 s. **That is not what was asked for.**
+//   >
+//   > ⚠️ **This is REPORTED, not resolved by substituting a different number.** Uri gave
+//   > 30 s; the assumption under which it ships is stated here: *the endgame spacing rule is
+//   > what the ring is FOR while it is closing, and sudden death is the deliberate abolition
+//   > of safe ground — so the spacing floor is superseded rather than violated.* If the two
+//   > are ever wanted to coexist, the lever is the TRIGGER, not the floor.
 //
-// while `minSafeRadiusFor` returns 140 (N<=4), 187.42 (N=5), 237.00 (N=6). So:
+// ── WHAT THE SAME TABLE READS NOW (2026-08-12) ─────────────────────────────
 //
-//     N     floor    tFloor     endgame window   SD fires BEFORE tFloor by   R(30)/floor
-//     2-4   140.00   41.826 s   3.174 s          11.826 s                    4.73x
-//     5     187.42   40.751 s   4.249 s          10.751 s                    3.53x
-//     6     237.00   39.627 s   5.373 s           9.627 s                    2.79x
+// The opening radius is `ARENA_HALF_DIAGONAL` = 1720.47 wu and the ring reaches its floor
+// at `FOG_CLOSE_MS` at EVERY N, because `fogRadiusAt` interpolates to the floor instead of
+// decaying past it:
 //
-// 🚨 **THE RING NEVER REACHES `minSafeRadiusFor(N)` IN A SHIPPED MATCH.** §53b's floor —
-// answered by Uri in the same message, and derived from the reach ladder in the block
-// above — governs a radius the schedule is cut off 9.6-11.8 s short of. To reach it
-// first, the trigger would have to be >= 41.83 s (N<=4) or >= 39.63 s (N=6), i.e. sudden
-// death would fire inside the last 3.2-5.4 s. **That is not what was asked for.**
+//     N     floor    tFloor     SD fires AFTER tFloor by   R at the trigger
+//     2-4   140.00   120.000 s  15.000 s                   140.00
+//     5     187.42   120.000 s  15.000 s                   187.42
+//     6     237.00   120.000 s  15.000 s                   237.00
 //
-// ⚠️ **This is REPORTED, not resolved by substituting a different number.** Uri gave 30 s;
-// the assumption under which it ships is stated here: *the endgame spacing rule is what
-// the ring is FOR while it is closing, and sudden death is the deliberate abolition of
-// safe ground — so the spacing floor is superseded rather than violated.* If the two are
-// ever wanted to coexist, the lever is the TRIGGER, not the floor. Nothing here is pinned:
-// both halves are computed from `MATCH_DURATION_MS`, `arena.maxSafeRadius`, `POT` and the
-// `REACH` ladder at run time, so moving any of them moves this table with it.
+// **The endgame window is now the 15 s the fighters spend STANDING ON the final circle**,
+// not the sliver of schedule between the floor and the whistle — which is what makes §53b's
+// spacing derivation govern something for the first time. The two rules no longer conflict;
+// they compose. Nothing here is pinned: every column is `FOG_CLOSE_MS`,
+// `SUDDEN_DEATH_GRACE_MS`, `POT` and the `REACH` ladder read at run time.
 //
-// ── WHY THE 45 s CLOCK STILL HAS TO BE 15 s LONGER THAN THIS ────────────────
+// ── WHY THE CLOCK STILL HAS TO BE 15 s LONGER THAN THIS ─────────────────────
+//
+// (Header was *"WHY THE 45 s CLOCK…"*. The clock is 150 s since 2026-08-12; the inequality
+// below is unchanged because both terms moved together — see `SUDDEN_DEATH_MS`.)
 //
 // The sudden-death window has to be long enough to actually kill the biggest pool in the
 // game, or the collapse would resolve nothing and the whistle would decide after all:
@@ -1221,7 +1435,31 @@ export function minSafeRadiusFor(fighterCount: number): number {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * How far into a match sudden death begins. **Uri's number, verbatim: 30 seconds.**
+ * How long after the ring ARRIVES the collapse is. **Uri's number, 2026-08-12: fifteen
+ * seconds** — *"sudden death starts 15 s after that"*, "that" being the small final circle.
+ *
+ * It is a GRACE PERIOD MEASURED FROM THE RING, and that is the whole point of naming it:
+ * the rule is *"the players get 15 s on the final circle"*, and a rule stated as a
+ * subtraction between two absolute times is a rule nobody can move safely.
+ */
+export const SUDDEN_DEATH_GRACE_MS = 15_000;
+
+/**
+ * How far into a match sudden death begins. **135 s = `FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS`.**
+ *
+ * ⚠️ **IT USED TO BE A LITERAL `30_000` — "Uri's number, verbatim: 30 seconds" — AND THAT
+ * IS THE DEFECT, NOT THE VALUE.** A literal cannot express *"after the ring closes"*, so
+ * when the ring's schedule moved the trigger did not move with it and sudden death overtook
+ * the ring by 9.6-11.8 s. See the block above for what that felt like to play.
+ *
+ * ⚠️ **AND `MATCH_DURATION_MS - SUDDEN_DEATH_MS` WOULD BE THE WRONG DERIVATION TODAY EVEN
+ * THOUGH IT GIVES THE RIGHT NUMBER.** At 150 s / 135 s the sudden-death window is exactly
+ * 15 000 ms, the same value as the grace period, so both derivations agree — by arithmetic
+ * accident, on two quantities that mean different things ("how long the collapse gets to
+ * kill" vs "how long the final circle lasts"). Deriving from the CLOCK would silently move
+ * the collapse the next time anyone lengthens the match. Deriving from `FOG_CLOSE_MS` keeps
+ * the sentence Uri actually said. `sim.test.mjs` §30 asserts the coincidence is a
+ * coincidence, so it cannot be mistaken for a definition later.
  *
  * Measured in PLAY time — the clock `MATCH_DURATION_MS` counts down — not in `elapsed`,
  * which includes the countdown. `state.timeRemaining` is the only quantity the sim has
@@ -1229,12 +1467,17 @@ export function minSafeRadiusFor(fighterCount: number): number {
  * the property `driver_guard.mjs` exists to protect: a sudden death keyed off `elapsed`
  * would move with the countdown and re-seed every balance number in the project.
  */
-export const SUDDEN_DEATH_MS = 30_000;
+export const SUDDEN_DEATH_MS = FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS;
 
 /**
  * The clock reading at which sudden death starts — **15 000 ms**, derived, never typed.
  * `state.timeRemaining <= this` is the predicate, and it is the one `suddenDeathActive`
  * implements so the comparison exists once.
+ *
+ * ⚠️ Numerically unchanged by the 2026-08-12 reschedule (45/30 and 150/135 both leave
+ * 15 000 ms), so `suddenDeathActive`'s FORM did not have to change. That invariance is a
+ * convenience and not a law — see `SUDDEN_DEATH_MS` for why the two 15 s figures are
+ * different quantities that happen to agree.
  */
 export const SUDDEN_DEATH_REMAINING_MS = MATCH_DURATION_MS - SUDDEN_DEATH_MS;
 
@@ -1482,6 +1725,34 @@ export const CONCEAL_ENDGAME_PROGRESS = 0.75;
  * no concealment can sit inside the final ring at any seat count today.
  * `sim.test.mjs` §29(e) is that row, and it is the one that fails first if
  * `ENDGAME_STANDOFF` is ever derived upward.
+ *
+ * ── 🚨 2026-08-12: THE FORMULA IS UNCHANGED AND ITS RATIONALE IS NOW HISTORICAL ──
+ *
+ * The sentence *"derived from the same formula `sim.ts` closes the ring with, evaluated at
+ * `CONCEAL_ENDGAME_PROGRESS`"* stopped being true when the ring stopped being linear in the
+ * clock (`FOG_HOLD_MS`). **The expression was deliberately NOT re-derived, and the three
+ * candidates were priced rather than argued:**
+ *
+ *     anchor                                                   shipped x4 map   1x map
+ *     `maxSafeRadius * (1 - 0.75)`            (kept, as-is)         430.12       215.06
+ *     `fogRadiusAt(0.75 * MATCH_DURATION_MS)` (honest re-derive)    264.87       196.81
+ *     `fogRadiusAt(0.75 of the CLOSE)`        (re-anchored)         535.12       320.06
+ *
+ * The honest re-derivation **LOOSENS a competitive-fairness bound by 165 wu** for no
+ * benefit — nothing is asking to put concealment nearer the middle — and the re-anchored
+ * one **TIGHTENS it past r=500, where `kitchen.ts` says all 20 shipped patches sit**, i.e.
+ * it could make the shipped arena illegal. Keeping the expression keeps the most
+ * conservative of the three and changes no arena. **What it costs is that this is now a
+ * BOUND, not a derivation**, and the doc says so instead of implying a schedule it no
+ * longer matches.
+ *
+ * ⚠️ The VALUE still moved, because `maxSafeRadius` did: **496.25 -> 430.12** on the shipped
+ * map. That is a loosening and it cannot invalidate an existing patch (all sit past r=500).
+ * ⚠️ AND THE 1x SIX-SEAT GUARANTEE IS GONE: 215.06 against a 237.00 six-fighter ring. Not
+ * live — `DECISIONS §53a` is *"6 players only on the x4 map"* — and `sim.test.mjs` §29(e)
+ * now asserts each map size against the seat count it actually ships, plus a known-bad row
+ * that states the lost guarantee out loud rather than letting it disappear into a weaker
+ * assertion.
  */
 export function concealmentKeepoutRadius(maxSafeRadius: number): number {
   return Math.max(MIN_SAFE_RADIUS, maxSafeRadius * (1 - CONCEAL_ENDGAME_PROGRESS));

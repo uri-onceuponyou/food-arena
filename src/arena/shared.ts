@@ -28,7 +28,7 @@ import type { ConcealBox } from '../game/movement';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { toonMat, glossyMat, flatMat, roundedBox, RAMP_SOFT } from '../render/toon';
 import { wu, groundPos } from '../units';
-import { PALETTE, MATCH_DURATION_MS } from '../game/rules';
+import { PALETTE, fogOpeningRadiusFor } from '../game/rules';
 import {
   makeTileWearTexture,
   makeWoodGrainTexture,
@@ -144,8 +144,25 @@ export const APRON_OUT = 760;
  * `1 - FOG_FIRST_CONTACT_S * 1000 / MATCH_DURATION_MS`, which blows up as the two
  * approach each other. At 45 s the divisor is 0.867; the assertion in
  * `src/game/sim.test.mjs` guards the relationship.
+ *
+ * ── 🚨 2026-08-12: THIS IS NO LONGER A CAUSE. IT IS A CONSEQUENCE. ─────────
+ *
+ * Uri lengthened the match and gave the ring an explicit **HOLD**
+ * (`rules.ts:FOG_HOLD_MS`, 25 s) instead of the start-outside-the-map trick, so first
+ * contact is not solved for any more — it IS the hold, and the divisor above no longer
+ * exists to be ill-conditioned. His words for why it moved 6 -> 25: *a grace period to find
+ * a weapon and an opponent on a 2800x2000 map.* 6 s was 13% into a 45 s match and would
+ * have been 4% into this one.
+ *
+ * ⚠️ **AND IT IS A LITERAL ON PURPOSE, WHICH RULE 10 WOULD ORDINARILY FORBID.** Writing
+ * `FOG_HOLD_MS / 1000` here would be the honest derivation and it BREAKS THREE TOOLS:
+ * `tools/tmp/arena_probe.mjs:120`, `tools/tmp/spawn_runway.mjs:108` and
+ * `tools/tmp/radar_probe.mjs:63` read this constant by REGEX (`= ([\d.]+)`) out of this
+ * file's text, and a non-numeric right-hand side makes `.exec(...)[1]` throw on null. The
+ * duplication is instead guarded: `node tools/tmp/fs_sched_census.mjs` fails if this number
+ * is not exactly `FOG_HOLD_MS / 1000`, and that guard is validated against a known-bad.
  */
-export const FOG_FIRST_CONTACT_S = 6;
+export const FOG_FIRST_CONTACT_S = 25;
 
 /**
  * Opening safe radius, DERIVED rather than hand-picked.
@@ -187,10 +204,32 @@ export const FOG_FIRST_CONTACT_S = 6;
  * The closing ring also has a FLOOR now (`rules.ts:MIN_SAFE_RADIUS`, 140 wu): it no longer
  * reaches zero, because a zero ring made the last seconds of a full-length match a pure HP
  * arithmetic race that the 100 HP player always lost.
+ *
+ * ── 🚨 2026-08-12: THE DIVISION IS GONE. 1985 -> 1720.4650534085254. ───────
+ *
+ * **The whole formula above existed to place first contact at 6 s by starting the ring
+ * OUTSIDE the map.** `rules.ts:FOG_HOLD_MS` does that explicitly now, so the opening radius
+ * has one job left — contain the playfield at t=0 — and `rules.ts:fogOpeningRadiusFor`
+ * names the answer: the half-diagonal. Everything above is kept because the values it
+ * produced (850 -> 890 -> 993 -> 1985) are the record of a number that moved four times
+ * without anyone deciding it should, which is the argument for removing the coupling.
+ *
+ * ⚠️ **UNROUNDED, AND THAT IS LOAD-BEARING.** `Math.round` would give 1720, putting the
+ * four corners 0.47 wu outside the ring at t=0 — a small version of the corners-fogged-from-
+ * birth bug this comment opens with. See `fogOpeningRadiusFor` for the margin arithmetic.
+ *
+ * 🚨 **THE OLD DERIVATION IS COPIED INTO DOZENS OF INSTRUMENTS AND EVERY COPY IS NOW WRONG
+ * BY 4.2%.** They recompute `Math.round(halfDiag / (1 - 6000 / MATCH_DURATION_MS))`, which
+ * on the new clock returns **1792** rather than 1720.47 — a plausible number, from a formula
+ * that no longer describes the game, inside the instruments the balance re-measure runs on.
+ * A silent 4.2% wrong fog is worse than a crash. `tools/arena.gameplay.json` additionally
+ * bakes the stale **1985**.
+ * → **`node tools/tmp/fs_sched_census.mjs` enumerates every executable copy, file and line.**
+ * The count is deliberately not written here: it is measured, it will change as the copies
+ * are fixed, and a number in prose is how six counts went stale in one session. The balance
+ * tools accept `--maxsafe` as the interim fix; `rules.ts:fogOpeningRadiusFor` is the real one.
  */
-export const MAX_SAFE_RADIUS = Math.round(
-  ARENA_HALF_DIAGONAL / (1 - (FOG_FIRST_CONTACT_S * 1000) / MATCH_DURATION_MS)
-);
+export const MAX_SAFE_RADIUS = fogOpeningRadiusFor(ARENA_HALF_DIAGONAL);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ground-shadow direction, and the round-9 removal of the baked CAST decals.
