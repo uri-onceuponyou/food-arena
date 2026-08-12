@@ -401,9 +401,39 @@ export const MATCH_PACING = {
   /**
    * MEASURED. Mean wall-clock from PLAY pressed to the winner being decided, including
    * the countdown, over 110 matchups x 8 seeds on the shipped arena
-   * (`tools/tmp/roster_lab.mjs`, policy `smart2`). Countdown is 3.7 s of it.
+   * (`tools/tmp/roster_lab.mjs --policies smart2`, `meanSessionMs`). Countdown is 3.7 s.
+   *
+   * ── ⚠️ WAS `15.5`, AND THE OLD VALUE IS KEPT HERE BECAUSE OF *WHY* IT WENT STALE ──
+   *
+   * Re-measured 2026-08-12: **25 718.7 ms**, 880 matches, same tool, same policy, same
+   * seed formula, on `tools/arena.gameplay.json` with the shipped opening ring. That is
+   * **+65.9%**, and it moves every wall-clock figure derived from `SECONDS_PER_MATCH`.
+   *
+   * 🚨 **THE OBVIOUS CULPRIT IS NOT THE CULPRIT, AND THAT IS THE POINT.** This was
+   * re-measured because `6d5c4d6` took `MATCH_DURATION_MS` from 45 s to 150 s, so the
+   * expectation was that a 3.3x longer clock is what moved it. It is not. Three arms,
+   * 880 matches each, identical seeds:
+   *
+   *     pre-6d5c4d6 sim (45 s clock, 1985 wu ring)   25 564.4 ms
+   *     HEAD, ring 1792 (the superseded derivation)  25 712.4 ms   +148.0 ms  (+0.58%)
+   *     HEAD, ring 1720.4650534085254 (shipped)      25 718.7 ms   +  6.3 ms  (+0.02%)
+   *
+   * **The clock change is worth +0.15 s and the fog schedule +0.006 s. The other +10.1 s
+   * was already there and had been for some time** — matches end on a knockout at ~22 s of
+   * play, so the ring's timetable barely touches them (`sr_ringfloor.mjs`: 0 of 880 duels
+   * reach even the START of sudden death; zone damage is 0.1 HP per match). The staleness
+   * is the accumulated balance work — the `range`/`REACH` retirement, the reach fix's
+   * payback, the ability-weapon join — none of which anyone thought of as a pacing change.
+   * ⚠️ So do NOT attribute this number to the clock in any downstream write-up, and do not
+   * assume the next clock change moves it either.
+   *
+   * ⚠️ RESOLUTION: this is a mean over 880 seeded matches and the three arms above are
+   * PAIRED on identical seeds, so the deltas between them are exact for this corpus. The
+   * quantity that has a floor is the comparison to `15.5`, which was measured on a
+   * different tree with a different roster — +10.2 s is 69x the largest paired delta here,
+   * so the direction is not in question even though the exact old-vs-new attribution is.
    */
-  sessionSeconds: 15.5,
+  sessionSeconds: 25.7,
 
   /**
    * ASSUMED, and the only number here that is not measured. Results screen, the walk back
@@ -687,10 +717,33 @@ export interface Milestone {
  *   * FULL ROSTER (Hot Dog, 2,400)         — 394 matches, ~2.8 h.
  *   * ROAD COMPLETE (3,200)                — 636 matches, ~4.5 h.
  *
- * ~2.8 hours to the full roster is the number to argue with, and it is now SHORT rather
+ * ── ⚠️ THOSE FOUR HOUR FIGURES ARE THE `15.5 s` SESSION AND ARE KEPT AS THE RECORD ──
+ *
+ * `MATCH_PACING.sessionSeconds` was re-measured on 2026-08-12 at **25.7 s** (see its
+ * comment — and note that the 45 s → 150 s clock accounts for 0.15 s of the 10.2 s move,
+ * so this is NOT "the clock got longer"). `SECONDS_PER_MATCH` goes 25.5 → **35.7 s**, a
+ * flat **×1.400** on every wall clock below. **The MATCH counts are unchanged** — they are
+ * what this model computes, and `economy.test.mjs` §9's assertions are in matches for
+ * exactly this reason, which is why nothing went red:
+ *
+ *   * FIRST CHARACTER (Donut, 60 trophies) —   4 matches, **~2.4 min**. Still one sitting.
+ *   * HALF THE ROSTER (Water Bottle, 725)  —  94 matches, **~0.9 h**.
+ *   * FULL ROSTER (Hot Dog, 2,400)         — 394 matches, **~3.9 h**.
+ *   * ROAD COMPLETE (3,200)                — 636 matches, **~6.3 h**.
+ *
+ * ~3.9 hours to the full roster is the number to argue with, and it is now SHORT rather
  * than long — deliberately shorter than any shipped brawler's (Brawl Stars is hundreds of
  * hours) because this game has 11 characters, not 90. **The long tail is no longer the
  * road at all: it is levelling** (`LEVEL_UP`).
+ *
+ * 💰 **AND THIS IS THE HALF OF URI'S PENDING EARN-RATE DECISION THAT IS NOW CONCRETE.**
+ * The question parked for him is whether the earn rate falling is acceptable. It has two
+ * independent halves and they must not be added together:
+ *   * **trophies/coins per match** — unchanged by any of this. Not one payout moved.
+ *   * **matches per hour** — 141.2 → **100.8**, because a session is 10.2 s longer.
+ * So the *only* thing that changed is that the same content takes **1.4× the wall clock**.
+ * Nothing about the road, the payouts or the level ladder needs to move to restore it;
+ * either the session gets shorter or the hour figures stand.
  *
  * ⚠️ THE SECOND HALF OF THAT SENTENCE WAS STALE. It read *"...where maxing a single Normal
  * costs 44,770 coins — more than the entire road pays out — and A CYBER COSTS 201,460."*
@@ -703,11 +756,13 @@ export interface Milestone {
  * career, and that is a DISTRIBUTION. Over 12 seeds at the 60% win rate section 9 uses:
  *
  *   * MAX ONE CHARACTER (any rarity) — 44,770 coins · **590 matches mean, sd 31**
- *     (550-638) · ~4.2 h.
+ *     (550-638) · ~4.2 h → **~5.9 h** at the re-measured 25.7 s session.
  *   * MAX THE WHOLE ROSTER (11 chars) — 492,470 coins · **10,751 matches mean, sd 27**
- *     (10,705-10,798) · ~76.2 h.
+ *     (10,705-10,798) · ~76.2 h → **~106.6 h**.
  *   * for scale, COMPLETING THE ROAD on the same runs — 577 matches mean, **sd 51**
- *     (457-638).
+ *     (457-638) · **~5.7 h**.
+ *   ⚠️ The MATCH figures are the measurement and the hours are `matches × SECONDS_PER_MATCH`
+ *   — kept in that order deliberately, because the hours are the half that goes stale.
  *
  * ⚠️ Maxing one character and finishing the whole road are the SAME SIZE of commitment —
  * 590 vs 577 matches — but do not sharpen that past "the same size". The first draft of
