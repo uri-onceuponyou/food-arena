@@ -5157,3 +5157,80 @@ not before.**
   the HUD can render the shrug-off window, because *"a player who cannot see the rule cannot learn
   it."* Diminishing returns needs the same treatment — otherwise it is invisible and reads as
   inconsistency.
+
+---
+
+## 76. 🔜 NEXT WEEK — an ADMIN PANEL: every constant tunable, nothing living in code
+
+**Uri, 2026-08-12, queued deliberately for next week — not started this session.**
+
+  > *"All game and character constants should be manageable through admin. Nothing lives in
+  > code. This way I can play around with all constants and adjust to the best gameplay.
+  > Admin shouldn't look like the game. Should be a clean, thorough and manageable admin panel.
+  > Leave a placeholder for future analytics and economics tabs."*
+
+**Why this is the right instinct:** three of this session's four best findings were tuning
+questions he could only answer by *feel* — the fog schedule, the status lock, movement speed —
+and each one cost a full round trip through an agent to change one number. A panel collapses
+that to seconds. **It is the single highest-leverage tool he could have.**
+
+### 🚨 THE FIVE CONSTRAINTS THAT WILL COST DAYS IF REDISCOVERED
+
+**1. "Nothing lives in code" collides head-on with this repo's deepest rule.**
+`CLAUDE.md`: *"`src/game/rules.ts` — Single source of truth for COMBAT. Import constants, never
+hardcode."* And this project's most-repeated defect, by a wide margin, is **one rule stated in two
+places** — five AI driver bugs, `range` as *"two quantities wearing one number"*, `damage` being
+per-pellet, the 1× map literals, the fog formula duplicated so it *"AGREED BY CONSTRUCTION"*.
+→ **The panel must not become the second place.** `rules.ts` stays authoritative; the panel edits
+an **override layer** that `rules.ts` itself reads, so there is still exactly one read path.
+
+**2. AUTHORED vs DERIVED is not a nicety — exposing a derived value re-creates §72's bug.**
+Many constants are computed, and computing them in one place is what just fixed a shipped defect:
+`MAX_SAFE_RADIUS` = `ARENA_HALF_DIAGONAL` · `SUDDEN_DEATH_MS` = `FOG_CLOSE_MS + GRACE` ·
+`minSafeRadiusFor(N)` · `enemyLevelFor()` (*"the single place Uri's answer lives"*) ·
+`fogRadiusAt`/`fogReachesRadiusAt`.
+→ **Derived values render as READ-ONLY and recompute live.** A panel that let you type
+`SUDDEN_DEATH_MS` would un-fix the exact bug he found by playing.
+
+**3. 🔴 EVERY BALANCE NUMBER IN THIS REPO IS TIED TO A CONSTANT SET, AND NOTHING RECORDS WHICH.**
+The sim is deterministic and seeded and *"that underwrites every balance number in the project"*.
+Bit-identity oracles (`csx_bitid`, `conceal_lab --bitid`, `np_ab`, `rc_oracle.json`) compare against
+recorded state. **The moment constants are tunable, an oracle without its constant set is
+meaningless**, and a measurement quoted without one is unreproducible.
+→ **Every override set gets a hash, every recorded measurement carries it, and the gates refuse a
+comparison across two different hashes** — the same refusal `arena-scan --baseline` already makes
+on a different station set (exit 2, refuse rather than compare).
+
+**4. It is a UI that writes model values — the exact surface this repo has been burned on five
+times.** The stat card was fiction; the rarity ramp ran backwards; the shop promised *"Epic or
+better"* after rarity stopped granting power; three menu screens showed *"a number the model does
+not compute"*; and **20 of 34 weapon descriptions** describe mechanics that do not exist.
+→ **A field that is displayed must be wired, and a field that is wired must be clamped where the
+sim clamps it.** Anything else is that class again, with a bigger blast radius because it looks
+authoritative.
+
+**5. It must be UNREACHABLE in the shipped player build.** A live tuning panel is a cheat surface
+and a support nightmare. `main.ts:MATCH_ONLY_PARAMS` and `verify-head`/`ab_basepath` are the
+existing precedents for "reachable only under a condition, and proved so".
+
+### WHAT WOULD MAKE IT A TUNING TOOL RATHER THAN A CONFIG EDITOR
+
+🚨 **Show DERIVED CONSEQUENCES beside every field, not just the raw value.** `§75` is the argument:
+a cooldown that happens to divide a status cycle produces an **83% lock**, and *lengthening* a
+cooldown can make it **worse** because the duty cycle is a sawtooth. Nobody could see that from a
+number in a text box. A panel that showed *"locks the target 83.3% of the time"* under the field
+would have made the defect visible before it shipped.
+Candidates already measured and cheap to surface: status lock %, effective reach vs the press gate
+(`tf_reach` — **23 of 23 weapons once could not connect at their own gate**), time-to-close each
+reach band at the current speed, fog share of damage, and the payout-per-minute the economy
+implies (**it fell ~3.3× when the clock moved and nothing noticed**).
+
+### SHAPE
+Tabs: **Combat** · **Characters** · **Arena/Schedule** · **Economy** *(placeholder)* ·
+**Analytics** *(placeholder)*. Clean and dense — explicitly **NOT** the game's look, so it must not
+adopt `src/ui/screens/theme.ts`; that is a deliberate departure from the design-system rule and
+the reason should be written where the next agent will look. Search, diff-against-defaults, reset,
+and export/import of an override set (so a good set can be committed, shared, and *quoted in a
+measurement*).
+
+**Not started. No agent dispatched. Nothing in `src/` touched.**
