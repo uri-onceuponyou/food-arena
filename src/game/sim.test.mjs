@@ -29,7 +29,7 @@ import { pressValue, stepAI } from './ai.ts';
 // Section 19 fires Lollipop's slam directly, because the thing under test is that it
 // lands from beyond every other weapon's reach WITHOUT AIM — driving it through a whole
 // match would confound that with whether the driver ever chose it.
-import { applyDamage, attemptAttack, statusReadyAt } from './combat.ts';
+import { applyDamage, attemptAttack, resolveDueCast, statusReadyAt } from './combat.ts';
 // Section 26 tests CONCEALMENT. The predicates are imported rather than re-derived for
 // the same reason `pressValue` and `statusReadyAt` are: the section's entire claim is that
 // ONE rule is read by four call sites, and a copy of the AABB test here would pass forever
@@ -113,6 +113,11 @@ import {
   // that the reference speed is the roster's own movement cap. A literal 120 or 3500 here
   // would keep passing after `PLAYER_SPEED`, `SPEED_TOP_STAT` or the reach ladder moved.
   FLEE_REFERENCE_SPEED, projectileMaxAgeMs, AI_CHASE_SPEED,
+  // Section 33: the cast system. `FOG_DPS` is imported rather than written as 50 because
+  // the AI's sudden-death refusal is DERIVED from it — a literal here would keep passing
+  // after `FOG_DAMAGE` or `FOG_TICK_MS` moved, which is exactly the drift the constant
+  // exists to prevent.
+  FOG_DPS,
   // Section 31(g): `DECISIONS §50a`. `SPEED` comes in so the orphaned `maxDrift` rung can be
   // used as the KNOWN-BAD the roster guard is shown to reject — a guard nothing has ever
   // failed is not a guard.
@@ -129,6 +134,9 @@ import {
 import {
   createFighter, fighterBit, lastFighterStanding, MAX_FIGHTERS, MIN_FIGHTERS,
   nearestLivingOpponent, opponentOf, roleOfSlot, sightingIndex,
+  // Section 33(e): the movement lock. Imported so the row asserts the predicate the sim
+  // actually calls rather than a copy of `stunned OR casting` written here.
+  movementLocked,
 } from './state.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
@@ -188,6 +196,76 @@ function makeArena({ cover = [], hazards = [], width = 2000, height = 2000, maxS
   // by the whole suite rather than only by the section that states it.
   if (concealment) arena.concealment = concealment;
   return arena;
+}
+
+/**
+ * ── COMMENTS REMOVED BY A SCANNER, NOT BY TWO REGEXES ────────────────────────
+ *
+ * Every source-scanning row in this file (§26(m), §33(e)) has to strip comments first,
+ * because this codebase documents its rules by QUOTING the code that implements them — so
+ * the files that explain a rule are the files that trip a naive scanner, and a guard that
+ * fires on documentation trains its reader to ignore it.
+ *
+ * ── ⚠️ THE OLD ONE WAS TWO REGEXES, AND IT WENT BLIND. IT READ: ─────────────
+ *
+ *   > `const stripComments = (src) => src.replace(BLOCK_RE, ' ').replace(LINE_RE, ' ');`
+ *
+ * — where `BLOCK_RE` matched a lazy block comment and `LINE_RE` matched to end of line.
+ * (The two literals are named rather than quoted here because writing the line-comment
+ * one inside a doc comment terminates the doc comment, which is the same class of
+ * problem this whole function exists to solve.)
+ *
+ * Block comments were stripped FIRST, so a `//` LINE COMMENT CONTAINING `/*` OPENED A
+ * BLOCK that ran to the next star-slash anywhere below it and swallowed every line in between.
+ * That is not a hypothetical: the sequence `/*` appears in a line comment every time this
+ * repo refers to its own source directory in prose — the glob `src/game/*.ts` — which is
+ * how it is written in `CLAUDE.md`, in `docs/AGENT-BRIEF.md` and in the very sentence that
+ * documents these scans. **Measured 2026-08-12, on the tree that added §33(e):** one such
+ * line at `sim.ts:903` opened a block that ran to the next closer and swallowed the
+ * `movementLocked(` call on line 904 — the exact line §33(e) was scanning for, one line
+ * below the prose that described the scan.
+ *
+ * ⚠️ **AND THE FIRST DRAFT OF THIS PARAGRAPH ALSO CLAIMED IT COST §26(m) A CALL. IT DID
+ * NOT, AND THE CLAIM WAS CHECKED RATHER THAN BELIEVED:** both strippers find the same
+ * 2 `isVisibleFrom` calls, because the runaway block closed at the next star-slash long
+ * before reaching `sim.ts:1217`. §26(m) escaped by luck — by where the next closer
+ * happened to be — not by design, and it would not have escaped a glob written 40 lines
+ * further down. That is the reason to fix the instrument rather than the comment: a scan
+ * that silently loses its subject reports a clean sheet forever.
+ *
+ * Reversing the two regexes does not fix it — it breaks the mirror case, a block comment
+ * whose closing star-slash shares a line with a `//`. So this walks the characters and tracks
+ * what it is inside: code, a line comment, a block comment, or a string of any of the
+ * three kinds. Strings matter because a scanned file may legitimately contain `//` inside
+ * a quoted path.
+ *
+ * ⚠️ IT DOES NOT TRACK REGEX LITERALS, and that limitation is CHECKED rather than assumed
+ * — §26(m) asserts that no file it scans carries a `/`-delimited literal containing `//`
+ * or `/*`, which is the only shape that could confuse it.
+ */
+function stripComments(raw) {
+  let out = '';
+  let mode = 'code';
+  let quote = '';
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    const n = raw[i + 1];
+    if (mode === 'code') {
+      if (c === '/' && n === '/') { mode = 'line'; out += ' '; i++; continue; }
+      if (c === '/' && n === '*') { mode = 'block'; out += ' '; i++; continue; }
+      if (c === '"' || c === "'" || c === '`') { mode = 'str'; quote = c; }
+      out += c;
+    } else if (mode === 'line') {
+      if (c === '\n') { mode = 'code'; out += c; } else out += ' ';
+    } else if (mode === 'block') {
+      if (c === '*' && n === '/') { mode = 'code'; out += '  '; i++; } else out += c === '\n' ? c : ' ';
+    } else { // inside a string of some kind
+      out += c;
+      if (c === '\\') { out += raw[i + 1] ?? ''; i++; continue; }
+      if (c === quote) { mode = 'code'; quote = ''; }
+    }
+  }
+  return out;
 }
 
 const noInput = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
@@ -2136,14 +2214,37 @@ const preFog = (hp) => hp + FOG_DAMAGE;
     state.enemy.lastUsed = state.enemy.lastUsed.map(() => -1e9);
     return state;
   }
-  /** One `stepAI` tick. Returns what the AI did with it. */
+  /** One `stepAI` tick. Returns what the AI did with it.
+   *
+   * ── ⚠️ `fired` USED TO BE `weapon-fired` ALONE, AND THAT OBSERVABLE WENT BLIND ──
+   *
+   *   > `fired: events.filter((e) => e.type === 'weapon-fired' && ...)`
+   *
+   * The RULE those rows assert — "a stun does not silence the AI", "every branch can
+   * select a weapon for every character" — is not reversed and is not weakened. What
+   * changed underneath them is what "the AI attacked" LOOKS LIKE: since
+   * `rules.ts:Weapon.castMs`, pressing a wind-up weapon emits `cast-started` and defers
+   * `weapon-fired` to the resolve `castMs` later, on a tick this single-step fixture never
+   * reaches. Water Bottle's Mega is the roster's only such weapon and it is the highest
+   * `pressValue` in its kit at every melee band, so the driver picks it — and four rows
+   * went red reporting that a stunned Water Bottle had been SILENCED when it had in fact
+   * just committed to a 1100 ms slam.
+   *
+   * That is the failure mode `CLAUDE.md` #6 is about: an instrument that keeps measuring
+   * confidently after the thing it points at has moved. The observable is now "the AI
+   * began an attack", which is both events, and it is the observable those rows always
+   * meant. Left as one list rather than two because none of the callers distinguishes —
+   * §33 is where the press/resolve split is asserted, and it needs them separate there.
+   */
   function aiTick(state) {
     const before = { x: state.enemy.x, y: state.enemy.y };
     const events = [];
     state.elapsed += TICK;
     stepAI(state, state.enemy, TICK, events);
     return {
-      fired: events.filter((e) => e.type === 'weapon-fired' && e.fighterRole === 'enemy').map((e) => e.weaponKey),
+      fired: events
+        .filter((e) => (e.type === 'weapon-fired' || e.type === 'cast-started') && e.fighterRole === 'enemy')
+        .map((e) => e.weaponKey),
       moved: Math.hypot(state.enemy.x - before.x, state.enemy.y - before.y),
       facing: state.enemy.facing,
     };
@@ -2232,6 +2333,29 @@ const preFog = (hp) => hp + FOG_DAMAGE;
       const fired = [];
       attemptAttack(state, state.enemy, wi, fired);
       take(fired);
+      // ── ⚠️ A WIND-UP DELIVERS ON A LATER TICK, AND THAT IS NOT "DELIVERS 0" ──
+      //
+      // `attemptAttack` on a `castMs` weapon only OPENS the attack. This measurement is
+      // "what does one press deliver from here", and the answer for Water Bottle's Mega
+      // is still 18 — it simply arrives 1100 ms later. Advancing the clock to the cast's
+      // own deadline and resolving it through `resolveDueCast` — the SAME function
+      // `sim.ts`'s fighter loop calls, not a copy of the rule — keeps the cell measuring
+      // the sim rather than measuring the fixture's tick budget.
+      //
+      // Nothing has moved between the press and this line (the fixture pins both
+      // fighters and `stepMatch` has not run), so the separation and facing the resolve
+      // sees are the band under test, which is the whole point of the cell.
+      //
+      // ⚠️ It runs BEFORE `phase = 'ended'` because `resolveDueCast` re-reads the phase —
+      // deliberately, so a match that ends mid-cast never resolves it (§33(i)). Putting
+      // it after would silently measure 0 for every cast weapon and look exactly like a
+      // balance finding.
+      if (state.enemy.cast !== null) {
+        const resolved = [];
+        state.elapsed = state.enemy.cast.resolvesAt;
+        resolveDueCast(state, state.enemy, resolved);
+        take(resolved);
+      }
       state.phase = 'ended';
       for (let t = 0; t < 4000 && state.projectiles.length; t += TICK) {
         state.player.x = 2000 + d; state.player.y = 2000;
@@ -4042,7 +4166,7 @@ console.log('\n23. Character levels');
   // scanner that silently matched nothing would otherwise report a clean sheet forever.
   {
     const gameDir = dirname(fileURLToPath(import.meta.url));
-    /**
+    /*
      * ⚠️ COMMENTS FIRST, AND THE FIRST DRAFT DID NOT DO THIS.
      *
      * It reported three offenders — `movement.ts: 5 args`, `rules.ts: 5 args`,
@@ -4050,8 +4174,24 @@ console.log('\n23. Character levels');
      * its own signature, so the files that explain the rule are the files that trip a naive
      * scanner. A guard that fires on documentation trains its reader to ignore it, which is
      * strictly worse than no guard.
+     *
+     * ── ⚠️ AND THE STRIPPER ITSELF WENT BLIND. IT USED TO BE DECLARED HERE: ──
+     *
+     *   > `const stripComments = (src) => src.replace(BLOCK, ' ').replace(LINE, ' ');`
+     *
+     * Two regexes, block first — so a `//` line containing the two characters that OPEN a
+     * block comment swallowed everything down to the next closer. Measured on 2026-08-12,
+     * on the tree that added §33(e): a line of prose in `sim.ts` naming this very directory
+     * as a glob blinded §33's scan to the line immediately below it.
+     *
+     * ⚠️ **THIS ROW'S OWN COUNT WAS NOT AFFECTED, AND THAT WAS MEASURED RATHER THAN
+     * ASSUMED** — both strippers find the same 2 calls, because the runaway closed before
+     * reaching `sim.ts:1217`. So this is a repair to a latent fault, not to an observed
+     * wrong answer here, and saying otherwise would have been a fabricated finding inside
+     * a section about fabricated findings. The module-level `stripComments` walks
+     * characters and tracks strings; see its header. The old wording is kept because the
+     * LESSON it states ("comments first") is still exactly right — the implementation was.
      */
-    const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
     /** Argument lists of every `isVisibleFrom(...)` CALL in `src`, paren-matched so a
      *  multi-line call and a nested `Math.hypot(...)` are both handled. */
     const callArities = (raw) => {
@@ -4086,6 +4226,23 @@ console.log('\n23. Character levels');
         + '/* also isVisibleFrom(a, b, c, d, e) */\n'
         + 'isVisibleFrom(e.x, e.y, p.x, p.y, state.arena, state, p);')) === '[7]');
 
+    // 🚨 THE STRIPPER'S ONE BLIND SPOT, CHECKED RATHER THAN ASSUMED. It does not track
+    // regex literals, so a `/`-delimited literal carrying `//` or the block-opener would
+    // confuse it. That shape does not exist in `src/game/` today and this row is what
+    // notices if it ever does — a scanner whose precondition is written down but not
+    // tested is a scanner with an untested precondition.
+    {
+      const risky = [];
+      for (const f of readdirSync(gameDir).filter((n) => n.endsWith('.ts'))) {
+        const src = readFileSync(join(gameDir, f), 'utf8');
+        for (const m of src.match(/(?<![\w)\]])\/(?![/*])(?:\\.|\[[^\]]*\]|[^/\n\\])+\/[gimsuy]*/g) ?? []) {
+          if (m.includes('//') || m.includes('/*')) risky.push(`${f}: ${m}`);
+        }
+      }
+      check('no regex literal in src/game/ carries a comment opener — the stripper\'s precondition holds',
+        risky.length === 0, risky.join(' · '));
+    }
+
     const offenders = [];
     let calls = 0;
     for (const f of readdirSync(gameDir).filter((n) => n.endsWith('.ts'))) {
@@ -4094,8 +4251,13 @@ console.log('\n23. Character levels');
         if (n !== 7) offenders.push(`${f}: ${n} args`);
       }
     }
+    // 🚨 THE FLOOR IS THE EXACT COUNT, NOT `>= 2`, AND THAT IS THE POINT OF TIGHTENING IT.
+    // `>= 2` is satisfied by a scan that has gone blind to every call it was ever going to
+    // add — which is the failure this row's stripper was just repaired for. The gameplay
+    // readers are `ai.ts:stepAI` and `sim.ts:stepProjectiles`, exactly two, and a third
+    // appearing should make somebody look at it rather than pass silently.
     check('every `isVisibleFrom` CALL in src/game/ passes the match and the target',
-      calls >= 2 && offenders.length === 0, `${calls} calls; offenders [${offenders.join(', ')}]`);
+      calls === 2 && offenders.length === 0, `${calls} calls; offenders [${offenders.join(', ')}]`);
 
     // `revealedUntil` is written in exactly one place. The same claim `applyDamage` makes
     // about HP, checked the same way, because "there are five call sites and a rule applied
@@ -6615,6 +6777,678 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 33. THE CAST SYSTEM — A WIND-UP YOU CAN SEE COMING AND MOVE OUT OF
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri authorised the mechanic and its shape in one answer: *"Build the mechanics — start
+// with the specials"*, and, asked whether a special should have a visible cast time you
+// can react to, *"Yes — a telegraph you can dodge."* So the acceptance bar for this
+// section is not "a delay happened". It is that the delay is ESCAPABLE, that escaping it
+// is a decision rather than a reflex or a formality, and that nothing without a wind-up
+// moved at all.
+//
+// ── WHAT WAS TRUE BEFORE, AND IS THE KNOWN-BAD FOR EVERY ROW BELOW ─────────
+//
+// `waterbottle.Mega`'s card promises *"launches himself up (takes a few seconds) … dumps
+// water on an enemy for huge damage"*. Its record was
+// `{ type:'melee', range: REACH.meleeHeavy, damage:18, cooldown:3500, cone:100 }` and its
+// measured wind-up was **0 ms** — 3500 was the COOLDOWN, which is a different quantity and
+// is invisible to the player being hit. Every row here fails on `git show HEAD~1`, which
+// is the cheapest known-bad available and the reason the section is written this way.
+//
+// ── THE COUNTERPLAY WINDOW, COMPUTED RATHER THAN ASSERTED ─────────────────
+//
+// A melee weapon resolves on `range` alone from a caster who cannot move, so from
+// separation 0 the target must gain `range` world units before `resolvesAt`:
+//
+//     REACH.meleeHeavy 84 wu       fastest human 700.00 ms · slowest human 795.45 ms
+//
+// Below 700 ms nobody escapes (a wind-up, not counterplay); above 795.45 ms everybody
+// escapes on reflex (a dead button). `castMs` 1100 leaves the slowest character 304.55 ms
+// of reaction and the fastest 400.00 ms — a decision, for the whole roster. (d) below
+// straddles that boundary on the real sim rather than trusting this paragraph.
+{
+  console.log('\n33. Cast times: the wind-up, the root, the dodge, and everything without one');
+
+  const CAST_TICK = 16.667;
+  const WB_WEAPONS = CHARACTERS.waterbottle.weapons;
+  const MEGA_I = WB_WEAPONS.findIndex((w) => w.key === 'Mega');
+  const MEGA = WB_WEAPONS[MEGA_I];
+  /**
+   * 🚨 THE SHIPPED VALUE, CAPTURED ONCE — BECAUSE THE FIRST DRAFT RESTORED A LITERAL.
+   *
+   * Several rows below perturb `MEGA.castMs` to stage a control, and (c) originally put
+   * `MEGA.castMs = 1100` back afterwards. Measured: zeroing the shipped `castMs` in
+   * `rules.ts` left the whole section GREEN except (a), because row (c) reinstated 1100 on
+   * the shared roster object and every row after it inherited the repair. An instrument
+   * that manufactures its own precondition passes forever — the exact class `CLAUDE.md` #6
+   * is about, reproduced inside the section that asserts it.
+   */
+  const SHIPPED_CAST_MS = MEGA.castMs;
+  const SMASH_I = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
+
+  /** A big empty arena with the ring wide open, both fighters placed by hand. */
+  const castArena = () => makeArena({ width: 4000, height: 4000, maxSafeRadius: 3000 });
+  const megaHits = (evs) => evs.filter(
+    (e) => e.type === 'hit-landed' && e.source?.kind === 'weapon' && e.source.weaponKey === 'Mega',
+  );
+
+  // ── (a) THE VACUITY GUARD FOR EVERY ROW BELOW ─────────────────────────────
+  //
+  // 🚨 `[].every()` IS `true`. That exact vacuity fired three times in three files in one
+  // session, always because a fix emptied the set an assertion ran over — and this whole
+  // section is one `castMs: 0` away from being a suite of green tests over nothing. So the
+  // set is named and asserted NON-EMPTY first, before anything filters on it.
+  {
+    const castWeapons = [];
+    for (const id of CHARACTER_IDS) {
+      for (const w of CHARACTERS[id].weapons) {
+        if ((w.castMs ?? 0) > 0) castWeapons.push(`${id}.${w.key} ${w.castMs}ms`);
+      }
+    }
+    check('the roster contains at least one weapon with a wind-up — §33 is not vacuous',
+      castWeapons.length > 0, `cast weapons: [${castWeapons.join(', ')}]`);
+    check('…and `weaponMechanics` NAMES it, so `kitSignature` can see it',
+      weaponMechanics(MEGA).includes('cast') && WEAPON_MECHANICS.includes('cast'),
+      `mechanics of Mega: [${weaponMechanics(MEGA).join('+')}]`);
+    console.log(`     cast weapons: ${castWeapons.join(' · ')}`);
+  }
+
+  // ── (b) NO `castMs` MEANS PRESS AND EFFECT IN THE SAME `stepMatch` CALL ────
+  //
+  // The claim that makes this feature landable while three consumer files are owned by
+  // other agents: 32 of the roster's 33 weapons are untouched, and "untouched" is checked
+  // rather than argued. The KNOWN-BAD gives Patty Smash a 1 ms wind-up and requires the
+  // two events to separate — 1 ms is less than a tick, so a resolve that fired eagerly
+  // would still put them together and this row would not notice.
+  {
+    const smashTick = () => {
+      const state = playingMatch(castArena(), 'hamburger', 'donut');
+      state.player.x = 2000; state.player.y = 2000;
+      state.enemy.x = 2000 + SMASH_IN_RANGE; state.enemy.y = 2000;
+      state.player.facing = { x: 1, y: 0 };
+      const evs = [];
+      attemptAttack(state, state.player, SMASH_I, evs);
+      return {
+        fired: evs.some((e) => e.type === 'weapon-fired' && e.weaponKey === 'Smash'),
+        hit: evs.some((e) => e.type === 'hit-landed'),
+        cast: state.player.cast,
+      };
+    };
+    const plain = smashTick();
+    check('a weapon with no `castMs` fires AND lands in the same `stepMatch` call',
+      plain.fired && plain.hit && plain.cast === null,
+      `fired ${plain.fired} hit ${plain.hit} cast ${JSON.stringify(plain.cast)}`);
+
+    CHARACTERS.hamburger.weapons[SMASH_I].castMs = 1;
+    const wound = smashTick();
+    delete CHARACTERS.hamburger.weapons[SMASH_I].castMs;
+    check('KNOWN-BAD: give that same weapon `castMs: 1` and the press stops landing anything',
+      !wound.fired && !wound.hit && wound.cast !== null,
+      `fired ${wound.fired} hit ${wound.hit} cast ${JSON.stringify(wound.cast)}`);
+    check('…and the mutation was undone, so no row below inherits it',
+      CHARACTERS.hamburger.weapons[SMASH_I].castMs === undefined);
+  }
+
+  // ── (c) THE WIND-UP LANDS LATE, ONCE, AND ON `castMs` — NOT ON `cooldown` ──
+  //
+  // 🚨 THE VACUITY GUARD IS A 0-CAST CONTROL OF THE SAME WEAPON IN THE SAME FIXTURE.
+  // "Nothing landed before 1100 ms" is also what a fixture with the target out of range
+  // produces, at every `castMs`, forever — a known-bad planted where the bug cannot
+  // express itself, which is a class this project has caught three times. So the identical
+  // fixture is run with `Mega.castMs` forced to 0 and REQUIRED to land immediately.
+  {
+    const fixture = () => {
+      const state = playingMatch(castArena(), 'waterbottle', 'donut');
+      state.player.x = 2000; state.player.y = 2000;
+      state.enemy.x = 2000 + 20; state.enemy.y = 2000;
+      state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+      state.player.facing = { x: 1, y: 0 };
+      return state;
+    };
+
+    const control = fixture();
+    MEGA.castMs = 0;
+    const controlEvents = [];
+    attemptAttack(control, control.player, MEGA_I, controlEvents);
+    MEGA.castMs = SHIPPED_CAST_MS;
+    check('CONTROL: the same weapon at `castMs: 0` in the same fixture lands on the press tick',
+      megaHits(controlEvents).length === 1,
+      `hits ${megaHits(controlEvents).length}; is the target actually reachable?`);
+    check('…and `castMs` was restored to whatever the ROSTER says, not to a literal',
+      MEGA.castMs === SHIPPED_CAST_MS && SHIPPED_CAST_MS > 0,
+      `castMs is ${MEGA.castMs}, shipped ${SHIPPED_CAST_MS}`);
+
+    const state = fixture();
+    const pressEvents = [];
+    const pressedAt = state.elapsed;
+    attemptAttack(state, state.player, MEGA_I, pressEvents);
+    check('pressing a wind-up weapon opens a cast and emits `cast-started`, carrying its duration',
+      state.player.cast !== null
+      && pressEvents.some((e) => e.type === 'cast-started' && e.weaponKey === 'Mega' && e.castMs === MEGA.castMs)
+      && !pressEvents.some((e) => e.type === 'weapon-fired'),
+      JSON.stringify(pressEvents.map((e) => e.type)));
+    // ⚠️ NULL-GUARDED, AND NOT AS DEFENSIVE STYLE. With the shipped `castMs` zeroed — the
+    // pre-change tree, i.e. this section's own known-bad — `cast` is null here and a bare
+    // dereference throws a `TypeError` that kills the run instead of printing a FAIL.
+    // `combat.ts` records the same lesson about `conceal_lab --selftest`: an instrument that
+    // CRASHES on its known-bad has not been shown to fail, it has been shown to break.
+    check('…and `resolvesAt` is `castMs` after the press, not `cooldown`',
+      state.player.cast !== null
+      && state.player.cast.resolvesAt - state.player.cast.startedAt === MEGA.castMs
+      && MEGA.castMs !== MEGA.cooldown,
+      `cast ${JSON.stringify(state.player.cast)}, castMs ${MEGA.castMs}, cooldown ${MEGA.cooldown}`);
+
+    let earlyHits = 0;
+    let resolveTick = null;
+    let resolveElapsed = null;
+    let totalHits = 0;
+    for (let i = 0; i < 400 && resolveTick === null; i++) {
+      state.enemy.x = 2000 + 20; state.enemy.y = 2000; // pinned: this row is about TIME
+      const evs = stepMatch(state, CAST_TICK, noInput);
+      const hits = megaHits(evs).length;
+      totalHits += hits;
+      if (evs.some((e) => e.type === 'weapon-fired' && e.weaponKey === 'Mega')) {
+        resolveTick = i; resolveElapsed = state.elapsed;
+      } else if (hits > 0) earlyHits += hits;
+    }
+    check('no `Mega` damage lands before the cast resolves',
+      earlyHits === 0, `${earlyHits} early hits`);
+    check('the resolve lands EXACTLY ONE hit, and it is the first tick at or after the deadline',
+      resolveTick !== null && totalHits === 1
+      && resolveElapsed - pressedAt >= MEGA.castMs
+      && resolveElapsed - pressedAt < MEGA.castMs + CAST_TICK,
+      `resolved after ${resolveElapsed - pressedAt} ms (want [${MEGA.castMs}, ${MEGA.castMs + CAST_TICK})), ${totalHits} hits`);
+    check('…and the record is cleared by the resolve',
+      state.player.cast === null);
+  }
+
+  // ── (d) PAIRED: THE DODGE WORKS AT 900 ms AND FAILS AT 700 ms ─────────────
+  //
+  // 🚨 ONE-SIDED IS THE TRAP. "The target escaped" is also exactly what a broken resolve
+  // produces — a cast that never fires misses everything at every duration — so the pair
+  // is what carries the claim. The target is the SLOWEST human in the roster (Egg/Soup,
+  // 105.60 wu/s), driven directly away by real `MatchInput` through the real `moveFighter`,
+  // and the boundary it straddles is `REACH.meleeHeavy / that speed` = 795.45 ms.
+  //
+  // ⚠️ RESOLUTION FLOOR: the two arms sit ±104.55 ms either side of the boundary, which is
+  // 6.3 ticks. **This row cannot resolve a `castMs` change smaller than one tick
+  // (16.667 ms)**, and a pair moved inside that would be reporting noise.
+  {
+    const escapeBoundaryMs = (REACH.meleeHeavy / (speedFor('egg', PLAYER_SPEED) * 1000)) * 1000;
+    const run = (castMs) => {
+      const prev = MEGA.castMs;
+      MEGA.castMs = castMs;
+      // Egg is the HUMAN (slot 0) so it moves at `PLAYER_SPEED`; Water Bottle is the AI
+      // caster, and the cast is opened by hand so the row measures the wind-up rather than
+      // the driver's willingness to press it.
+      const state = playingMatch(castArena(), 'egg', 'waterbottle');
+      state.enemy.x = 2000; state.enemy.y = 2000;
+      state.player.x = 2000; state.player.y = 2000;
+      state.enemy.facing = { x: 1, y: 0 };
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      const evs = [];
+      attemptAttack(state, state.enemy, MEGA_I, evs);
+      const away = { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: false };
+      let dealt = 0;
+      for (let i = 0; i < 400 && state.enemy.cast !== null; i++) {
+        for (const e of megaHits(stepMatch(state, CAST_TICK, away))) dealt += e.amount;
+      }
+      for (const e of megaHits(stepMatch(state, CAST_TICK, away))) dealt += e.amount;
+      const sep = Math.hypot(state.player.x - state.enemy.x, state.player.y - state.enemy.y);
+      MEGA.castMs = prev;
+      return { dealt, sep };
+    };
+    const slow = run(900);
+    const fast = run(700);
+    check(`a target running away ESCAPES a ${900} ms wind-up (boundary ${escapeBoundaryMs.toFixed(2)} ms)`,
+      slow.dealt === 0 && slow.sep > REACH.meleeHeavy,
+      `dealt ${slow.dealt} at separation ${slow.sep.toFixed(2)} (range ${REACH.meleeHeavy})`);
+    check('…and CANNOT escape a 700 ms one — the same fixture, the same input, 84 wu still to gain',
+      fast.dealt === MEGA.damage && fast.sep < REACH.meleeHeavy,
+      `dealt ${fast.dealt} at separation ${fast.sep.toFixed(2)}`);
+    check('…so the escape boundary the shipped 1100 ms is chosen against really is ~795 ms',
+      fast.sep < escapeBoundaryMs / 1000 * speedFor('egg', PLAYER_SPEED) * 1000 + 1e-6
+      && slow.sep > REACH.meleeHeavy,
+      `700ms -> ${fast.sep.toFixed(2)} wu · 900ms -> ${slow.sep.toFixed(2)} wu`);
+    check('…and the shipped `castMs` is on the ESCAPABLE side of that boundary',
+      MEGA.castMs > escapeBoundaryMs,
+      `castMs ${MEGA.castMs} vs boundary ${escapeBoundaryMs.toFixed(2)} ms`);
+  }
+
+  // ── (e) THE MOVEMENT LOCK IS STATED ONCE, AND THE SCAN PROVES IT ──────────
+  //
+  // 🚨 THE SINGLE HIGHEST-RISK LINE IN THIS BUILD. `sim.ts:moveFighter` and `ai.ts:stepAI`
+  // both carried `now < …status.stunnedUntil` — one constant, two implementations, in the
+  // two files whose disagreement is this codebase's most expensive recorded defect class
+  // (five AI driver bugs, all of it). Adding the cast root to one and not the other would
+  // have produced a casting human who is rooted and a casting AI who walks away from its
+  // own telegraph. Both call `state.ts:movementLocked` now, and this asserts it against the
+  // SOURCE rather than believing it, for the reason §26(m) gives: "everybody remembered" is
+  // a claim about people.
+  //
+  // ⚠️ COMMENTS ARE STRIPPED FIRST. Both files document the change by QUOTING the line they
+  // no longer contain, which is exactly the trap §26(m)'s first draft fell into.
+  //
+  // ── ⚠️ THE SET IS "FILES THAT MOVE A FIGHTER", DERIVED, NOT A HAND-WRITTEN LIST ──
+  //
+  // The first draft asserted the comparison appeared in exactly ONE file anywhere under
+  // `src/game/`, and it failed — correctly — on `vfx.ts`, which reads `stunnedUntil` twice
+  // to decide whether to draw a stun ring and a shrug-off window. That is a RENDERER
+  // reading a timer, not a second implementation of a movement rule, and widening the
+  // claim to cover it would have meant either a false failure or an exemption list, which
+  // is how a guard rots. So the population is derived from the tree instead: a MOVER is a
+  // file that CALLS `tryMove` or `moveToward`, which is what "moves a fighter" means in
+  // this sim, and it comes out as exactly the two files that used to disagree.
+  {
+    const gameDir = dirname(fileURLToPath(import.meta.url));
+    const comparesStun = (src) => /[<>]=?\s*[A-Za-z_$][\w$.]*\.status\.stunnedUntil|\.status\.stunnedUntil\s*[<>]/
+      .test(stripComments(src));
+    /** Does `src` CALL one of the two movement primitives (as opposed to declaring one)? */
+    const callsMove = (src) => {
+      const s = stripComments(src);
+      const re = /(?<![\w.])(?:tryMove|moveToward)\s*\(/g;
+      let m;
+      while ((m = re.exec(s)) !== null) if (!/function\s+$/.test(s.slice(0, m.index))) return true;
+      return false;
+    };
+    /** ⚠️ AND THE FILE THAT *DECLARES* THEM IS NOT A MOVER, WHICH THE FIRST DRAFT MISSED.
+     *  `movement.ts` calls `tryMove` from inside `moveToward`, so a call-only test named it
+     *  a third mover and then failed it for not consulting `movementLocked` — correctly by
+     *  its own definition and wrongly as a claim, because the primitive's job is to resolve
+     *  collision and the LOCK is its callers' decision. Derived from the tree (who exports
+     *  it) rather than hard-coded, so the set stays right if the primitives move house. */
+    const declaresMove = (src) => /export function (?:tryMove|moveToward)\b/.test(stripComments(src));
+    const isMover = (src) => callsMove(src) && !declaresMove(src);
+
+    check('KNOWN-BAD: the stun scanner fires on a comparison, and NOT on `statusReadyAt`\'s arithmetic',
+      comparesStun('const frozen = now < f.status.stunnedUntil;')
+      && comparesStun('if (f.status.stunnedUntil > now) return;')
+      && !comparesStun('return fighter.status.stunnedUntil + STUN_GRACE_MS;')
+      && !comparesStun('// was `now < self.status.stunnedUntil`'));
+    check('KNOWN-BAD: the mover scanner accepts a CALL, rejects the DECLARER, and ignores prose',
+      isMover('  tryMove(f, dx, dy, arena);')
+      && isMover('moveToward(self, x, y, s, arena, nx, ny);')
+      && !isMover('export function tryMove(f, dx, dy, arena) { return true; }')
+      && !isMover('export function moveToward(a) { tryMove(a, 0, 0, null); }')
+      && !isMover('// calls tryMove(f, 0, 0, arena) once per tick'));
+
+    const files = readdirSync(gameDir).filter((n) => n.endsWith('.ts'));
+    check('…and the scanned file set is non-empty, so a clean sheet means something',
+      files.length >= 5, `${files.length} files`);
+
+    const src = new Map(files.map((f) => [f, readFileSync(join(gameDir, f), 'utf8')]));
+    const movers = files.filter((f) => isMover(src.get(f)));
+    check('the sim has exactly TWO files that move a fighter, and they are sim.ts and ai.ts',
+      movers.length === 2 && movers.includes('sim.ts') && movers.includes('ai.ts'),
+      `movers: [${movers.join(', ')}]`);
+    check('NEITHER of them compares `status.stunnedUntil` — the movement lock is stated once',
+      movers.every((f) => !comparesStun(src.get(f))),
+      `offenders: [${movers.filter((f) => comparesStun(src.get(f))).join(', ')}]`);
+    check('…and BOTH of them call `movementLocked`, so neither can be locked and the other not',
+      movers.every((f) => /(?<![\w.])movementLocked\s*\(/.test(stripComments(src.get(f)))),
+      `missing: [${movers.filter((f) => !/(?<![\w.])movementLocked\s*\(/.test(stripComments(src.get(f)))).join(', ')}]`);
+
+    // The comparison still has to exist SOMEWHERE, or the rule has been deleted rather
+    // than centralised — and it must be in the file that declares the predicate.
+    const comparers = files.filter((f) => comparesStun(src.get(f)));
+    check('the comparison survives, in state.ts, beside the predicate that owns it',
+      comparers.includes('state.ts')
+      && /export function movementLocked/.test(src.get('state.ts')),
+      `comparers: [${comparers.join(', ')}]`);
+    // 📌 OUT-OF-SET OBSERVATION, recorded rather than asserted: `vfx.ts` compares it twice
+    // (the stun ring and the shrug-off window). Those are presentation reads of a published
+    // timer — the same idiom `Fighter.terrainSlowFactor` and `Fighter.concealed` exist for —
+    // and they are correctly outside this claim, which is about MOVEMENT.
+    console.log(`     stunnedUntil comparers: [${comparers.join(', ')}]  ·  movers: [${movers.join(', ')}]`);
+
+    check('the predicate itself is live: it locks on a cast with no stun anywhere in sight',
+      movementLocked({ status: { stunnedUntil: -Infinity }, cast: { weaponIndex: 0, startedAt: 0, resolvesAt: 1 } }, 0)
+      && !movementLocked({ status: { stunnedUntil: -Infinity }, cast: null }, 0)
+      && movementLocked({ status: { stunnedUntil: 100 }, cast: null }, 0));
+  }
+
+  // ── (f) A CASTING HUMAN CANNOT MOVE AND CANNOT RE-AIM ─────────────────────
+  //
+  // `ActiveCast` stores no origin and no bearing, and this is why it does not need to: the
+  // sim's only writers of `x`/`y` and `facing` all refuse while a cast is open, so the
+  // telegraph drawn at the press describes where the effect lands BY CONSTRUCTION.
+  //
+  // ⚠️ THE INPUT IS DELIBERATELY NON-ZERO AND THE CONTROL PROVES IT. A zero-input fixture
+  // passes this row trivially and forever; the same input on the same fighter with no cast
+  // open must MOVE it and TURN it.
+  {
+    const live = { move: { x: 1, y: 1 }, aim: { x: -1, y: 0 }, selectedWeapon: MEGA_I, attack: false };
+    const fixture = () => {
+      const state = playingMatch(castArena(), 'waterbottle', 'donut');
+      state.player.x = 2000; state.player.y = 2000;
+      state.enemy.x = 2000 + 20; state.enemy.y = 2000;
+      state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+      state.player.facing = { x: 1, y: 0 };
+      return state;
+    };
+
+    const control = fixture();
+    const c0 = { x: control.player.x, y: control.player.y, fx: control.player.facing.x };
+    stepMatch(control, CAST_TICK, live);
+    check('CONTROL: that same input MOVES and TURNS a fighter with no cast open',
+      Math.hypot(control.player.x - c0.x, control.player.y - c0.y) > 1e-6
+      && control.player.facing.x !== c0.fx,
+      `moved ${Math.hypot(control.player.x - c0.x, control.player.y - c0.y).toFixed(3)} · facing.x ${c0.fx} -> ${control.player.facing.x}`);
+
+    const state = fixture();
+    attemptAttack(state, state.player, MEGA_I, []);
+    const at = { x: state.player.x, y: state.player.y, fx: state.player.facing.x, fy: state.player.facing.y };
+    let drifted = null;
+    for (let i = 0; i < 400 && state.player.cast !== null; i++) {
+      stepMatch(state, CAST_TICK, live);
+      if (state.player.cast === null) break;
+      if (state.player.x !== at.x || state.player.y !== at.y
+        || state.player.facing.x !== at.fx || state.player.facing.y !== at.fy) {
+        drifted = `tick ${i}: ${state.player.x},${state.player.y} facing ${state.player.facing.x},${state.player.facing.y}`;
+        break;
+      }
+    }
+    check('a casting human is ROOTED and its AIM IS FROZEN, under full movement and aim input',
+      drifted === null, drifted ?? '');
+  }
+
+  // ── (g) ONLY AN *APPLIED* STUN CANCELS ────────────────────────────────────
+  //
+  // Three arms, and the middle one is the whole point. `applyDamage` emits `hit-landed`
+  // carrying the weapon's authored `effect` EVEN WHEN `STUN_GRACE_MS` REFUSED THE STUN —
+  // the event describes what the weapon does, not what happened to the target. A cancel
+  // driven off that event would break casts on stuns that never landed, and nothing
+  // downstream could tell the two implementations apart. So a grace-refused stun is
+  // planted and the cast is required to SURVIVE it.
+  //
+  // The rule itself is a balance decision, measured on 880 real matches
+  // (`tools/tmp/cst_interrupt.mjs`): "any damage cancels" leaves 24.8% of ultimates alive
+  // at a 900 ms wind-up — three in four dying on a 3.5 s cooldown — against 84.1% for
+  // stun-only, a 59.3 pp gap against a ±2.86 pp floor. `DECISIONS §74(a)`.
+  {
+    const openCast = (state) => {
+      const evs = [];
+      attemptAttack(state, state.player, MEGA_I, evs);
+      return evs;
+    };
+    const fixture = () => {
+      const state = playingMatch(castArena(), 'waterbottle', 'donut');
+      state.player.x = 2000; state.player.y = 2000;
+      state.enemy.x = 2000 + 20; state.enemy.y = 2000;
+      state.player.facing = { x: 1, y: 0 };
+      return state;
+    };
+
+    // ARM 1 — a non-stun hit does nothing to the cast.
+    {
+      const state = fixture();
+      openCast(state);
+      const evs = [];
+      const hpBefore = state.player.hp;
+      applyDamage(state, state.player, 9, 'slow', { kind: 'fog' }, evs);
+      check('a NON-STUN hit mid-cast leaves the wind-up running',
+        state.player.cast !== null
+        && !evs.some((e) => e.type === 'cast-cancelled')
+        && state.player.hp < hpBefore,
+        `cast ${JSON.stringify(state.player.cast)} · hp ${hpBefore} -> ${state.player.hp}`);
+    }
+
+    // ARM 2 — a stun REFUSED by the grace window does nothing either.
+    {
+      const state = fixture();
+      applyDamage(state, state.player, 1, 'stun', { kind: 'fog' }, []);
+      const stunEnds = state.player.status.stunnedUntil;
+      state.elapsed = stunEnds + 1; // expired, but still inside STUN_GRACE_MS
+      const hpBefore = state.player.hp;
+      openCast(state);
+      const evs = [];
+      applyDamage(state, state.player, 7, 'stun', { kind: 'fog' }, evs);
+      const refused = state.player.status.stunnedUntil === stunEnds;
+      check('KNOWN-BAD: a stun REFUSED by STUN_GRACE_MS does NOT cancel — the event is not the rule',
+        refused && state.player.cast !== null && !evs.some((e) => e.type === 'cast-cancelled'),
+        `refused ${refused} · cast ${state.player.cast !== null}`);
+      check('…and that arm actually landed a hit carrying `effect: stun`, so it is not vacuous',
+        state.player.hp < hpBefore
+        && evs.some((e) => e.type === 'hit-landed' && e.effect === 'stun'),
+        `hp ${hpBefore} -> ${state.player.hp}`);
+    }
+
+    // ARM 3 — an APPLIED stun kills the cast, keeps the cooldown, and lands nothing.
+    {
+      const state = fixture();
+      openCast(state);
+      const spentAt = state.player.lastUsed[MEGA_I];
+      const evs = [];
+      applyDamage(state, state.player, 7, 'stun', { kind: 'fog' }, evs);
+      check('an APPLIED stun cancels the wind-up and says so',
+        state.player.cast === null
+        && evs.some((e) => e.type === 'cast-cancelled' && e.reason === 'stun' && e.weaponKey === 'Mega'),
+        JSON.stringify(evs.map((e) => e.type)));
+      check('…the cooldown stays SPENT — an interrupt costs its victim the whole 3.5 s',
+        state.player.lastUsed[MEGA_I] === spentAt && spentAt > -Infinity,
+        `lastUsed ${state.player.lastUsed[MEGA_I]}`);
+      let dealt = 0;
+      for (let i = 0; i < 400; i++) {
+        state.enemy.x = 2000 + 20; state.enemy.y = 2000;
+        for (const e of megaHits(stepMatch(state, CAST_TICK, noInput))) dealt += e.amount;
+      }
+      check('…and no `Mega` damage ever arrives from the cast that was cancelled',
+        dealt === 0, `dealt ${dealt}`);
+    }
+  }
+
+  // ── (h) A CORPSE DOES NOT FINISH ITS WIND-UP ──────────────────────────────
+  {
+    const state = playingMatch(castArena(), 'waterbottle', 'donut');
+    state.player.x = 2000; state.player.y = 2000;
+    state.enemy.x = 2000 + 20; state.enemy.y = 2000;
+    state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+    state.player.facing = { x: 1, y: 0 };
+    attemptAttack(state, state.player, MEGA_I, []);
+    const evs = [];
+    applyDamage(state, state.player, state.player.hp, null, { kind: 'fog' }, evs);
+    check('killing a caster mid-cast clears the record and emits `cast-cancelled{death}`',
+      state.player.cast === null && !state.player.alive
+      && evs.some((e) => e.type === 'cast-cancelled' && e.reason === 'death' && e.weaponKey === 'Mega'),
+      JSON.stringify(evs.map((e) => `${e.type}${e.reason ? `:${e.reason}` : ''}`)));
+    let dealt = 0;
+    for (let i = 0; i < 200; i++) for (const e of megaHits(stepMatch(state, CAST_TICK, noInput))) dealt += e.amount;
+    check('…and the slam never lands out of the corpse',
+      dealt === 0, `dealt ${dealt}`);
+  }
+
+  // ── (i) A MATCH THAT ENDS MID-CAST LEAVES THE RECORD ALONE — DELIBERATELY ──
+  //
+  // There is no "clear every cast" statement anywhere in the sim, and this row exists so
+  // nobody tidies one in. `phase` leaves `'playing'` in TWO places (`applyDamage`'s victor
+  // block and `sim.ts:resolveTimeout`); clearing there would be two statements of one rule,
+  // which is the defect shape that has cost this project the most. Doing nothing is one
+  // rule in one place — the phase gate `resolveDueCast` re-reads — and every renderer
+  // already gates on phase.
+  {
+    const state = playingMatch(castArena(), 'waterbottle', 'donut');
+    state.player.x = 2000; state.player.y = 2000;
+    state.enemy.x = 2000 + 20; state.enemy.y = 2000;
+    state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+    state.player.facing = { x: 1, y: 0 };
+    attemptAttack(state, state.player, MEGA_I, []);
+    const record = { ...state.player.cast };
+    state.phase = 'ended';
+    state.elapsed = record.resolvesAt + 1;
+    const direct = [];
+    const fired = resolveDueCast(state, state.player, direct);
+    check('`resolveDueCast` refuses on an ended match, past the deadline, and emits nothing',
+      fired === false && direct.length === 0);
+    let dealt = 0;
+    for (let i = 0; i < 200; i++) for (const e of megaHits(stepMatch(state, CAST_TICK, noInput))) dealt += e.amount;
+    check('…and the RECORD IS UNTOUCHED — the cast is parked, not cleared',
+      state.player.cast !== null
+      && state.player.cast.weaponIndex === record.weaponIndex
+      && state.player.cast.startedAt === record.startedAt
+      && state.player.cast.resolvesAt === record.resolvesAt
+      && dealt === 0,
+      `cast ${JSON.stringify(state.player.cast)} dealt ${dealt}`);
+  }
+
+  // ── (j) DETERMINISM, WITH A CONTROL THAT PROVES THE FEATURE WAS RUNNING ────
+  //
+  // 🚨 A DETERMINISM TEST OVER A FEATURE THAT NEVER FIRED PROVES NOTHING. Two identical
+  // runs of a sim with no cast in them are identical for reasons that have nothing to do
+  // with casts. So the same corpus is run a third time with `Mega.castMs` forced to 0 and
+  // REQUIRED TO DIFFER — that difference is the evidence the first two runs were exercising
+  // the thing they claim to be exercising.
+  {
+    const trace = (castMs) => {
+      const prev = MEGA.castMs;
+      MEGA.castMs = castMs;
+      const state = playingMatch(castArena(), 'waterbottle', 'donut');
+      state.player.x = 1900; state.player.y = 2000;
+      state.enemy.x = 2000; state.enemy.y = 2000;
+      const out = [];
+      for (let i = 0; i < 600; i++) {
+        const input = { move: { x: (i % 7) - 3, y: (i % 5) - 2 }, selectedWeapon: MEGA_I, attack: i % 11 === 0 };
+        const evs = stepMatch(state, CAST_TICK, input);
+        out.push(evs.map((e) => JSON.stringify(e)).join('|'));
+        out.push(state.fighters.map((f) => [
+          f.id, f.hp, f.x, f.y, f.facing.x, f.facing.y, f.alive,
+          String(f.status.slowedUntil), String(f.status.stunnedUntil),
+          f.lastUsed.join(','), f.cast === null ? 'idle' : `${f.cast.weaponIndex}@${f.cast.startedAt}->${f.cast.resolvesAt}`,
+        ].join(',')).join(';'));
+      }
+      MEGA.castMs = prev;
+      return out.join('\n');
+    };
+    const a = trace(1100);
+    const b = trace(1100);
+    const zero = trace(0);
+    check('same seed, same inputs, two runs — bit-identical state AND event streams',
+      a === b, `${a.length} vs ${b.length} chars`);
+    check('KNOWN-BAD: the SAME corpus with the wind-up removed DIFFERS — the feature was live',
+      a !== zero);
+    check('…and the trace actually contains a cast, so it is not comparing two idle runs',
+      a.includes('cast-started') && a.includes('"type":"weapon-fired","fighterRole":"player","fighterId":0,"weaponKey":"Mega"'),
+      'no cast-started/Mega resolve in the trace');
+  }
+
+  // ── (k) THE AI OPENS A CAST IT CAN FINISH, AND REFUSES ONE IT CANNOT ───────
+  //
+  // "Must not begin a cast it cannot land" is made concrete as "must not begin one it will
+  // not be ALIVE and STANDING to finish", which is the part the AI can actually know. Two
+  // refusals, both derived from constants rather than tuned: standing in something that
+  // hurts (`urgent`, this file's existing sentence for *"already taking damage, or about to
+  // on this tick"*), and sudden death, where `SUDDEN_DEATH_RADIUS` is 0 and the whole arena
+  // burns at `FOG_DPS`.
+  //
+  // ⚠️ THE POSITIVE CONTROL COMES FIRST. Every refusal row below is satisfied by an AI that
+  // never casts at all, so the press count is asserted NON-ZERO before anything else.
+  {
+    const aiFix = ({ hazard = false, sudden = false, hp = null } = {}) => {
+      const arena = makeArena({
+        width: 4000, height: 4000, maxSafeRadius: 3000,
+        hazards: hazard ? [{ kind: 'damage', x: 2000, y: 2000, radius: 40, dps: 30 }] : [],
+      });
+      const state = playingMatch(arena, 'donut', 'waterbottle');
+      state.enemy.x = 2000; state.enemy.y = 2000;
+      state.player.x = 2000 + 20; state.player.y = 2000;
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      if (sudden) state.timeRemaining = SUDDEN_DEATH_REMAINING_MS - 1;
+      if (hp !== null) state.enemy.hp = hp;
+      return state;
+    };
+    const aiPresses = (state) => {
+      const evs = [];
+      state.elapsed += CAST_TICK;
+      stepAI(state, state.enemy, CAST_TICK, evs);
+      return evs.filter((e) => e.type === 'cast-started' && e.weaponKey === 'Mega').length;
+    };
+
+    check('POSITIVE CONTROL: on safe ground, in range, the AI DOES open the wind-up',
+      aiPresses(aiFix()) === 1, 'the AI never casts — every refusal row below is vacuous');
+
+    check('…and refuses it while standing in a damage hazard, where rooting is suicide',
+      aiPresses(aiFix({ hazard: true })) === 0);
+
+    // The budget: `hp * 1000 / FOG_DPS` ms of standing left. At 1100 ms of wind-up the
+    // crossing is 55 HP, derived here rather than written down.
+    const lethalHp = (MEGA.castMs * FOG_DPS) / 1000;
+    check('…and refuses it in sudden death when the fog would kill it first',
+      aiPresses(aiFix({ sudden: true, hp: lethalHp - 1 })) === 0, `lethal below ${lethalHp} HP`);
+    check('…but STILL CASTS in sudden death with the HP to survive it — the gate is the fog, not the phase',
+      aiPresses(aiFix({ sudden: true, hp: lethalHp + 10 })) === 1);
+    check('…and a fighter mid-cast cannot press a second thing',
+      (() => {
+        const state = aiFix();
+        aiPresses(state);
+        return state.enemy.cast !== null && aiPresses(state) === 0
+          && attemptAttack(state, state.enemy, 0, []) === false;
+      })());
+  }
+
+  // ── (l) THE AI STEERS OUT OF A TELEGRAPH IT CAN CLEAR, AND ONLY THEN ───────
+  //
+  // 🚨 WITHOUT THIS THE COUNTERPLAY EXISTS ONLY FOR THE BOT. A human moves at up to
+  // 1.71x AI chase speed and `stepAI` has no dodge branch of any kind, so a human's
+  // telegraph would be a free execute while the AI's is dodgeable on reflex — the recorded
+  // stun-silence asymmetry pointed the other way, and invisible to every AI-vs-AI corpus
+  // in the repo, which is every corpus in the repo.
+  //
+  // 🚨 AND THE KNOWN-BAD IS THE SAME FIXTURE WITH NO CAST OPEN. The shipped `dangerSteer`
+  // without a cast term is exactly a `dangerSteer` with no cast to see, so the control
+  // stages the pre-change behaviour honestly: the AI CLOSES IN. A row that only asserted
+  // "it ended outside range" would also pass for an AI that fled the pot, the ring, or
+  // nothing at all.
+  //
+  // ⚠️ THE SEPARATION IS 30 wu, NOT 0, AND THAT IS A RESULT RATHER THAN A CONVENIENCE.
+  // No AI in the roster can clear `REACH.meleeHeavy` from separation 0 inside 1100 ms —
+  // the fastest chase speed is 70.00 wu/s, worth 77.00 wu — so the achievability gate
+  // correctly refuses to try, and the last row below asserts exactly that.
+  {
+    const dodgeFix = (sep) => {
+      const state = playingMatch(castArena(), 'waterbottle', 'soup');
+      state.player.x = 2000; state.player.y = 2000;
+      state.enemy.x = 2000 + sep; state.enemy.y = 2000;
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+      state.player.facing = { x: 1, y: 0 };
+      return state;
+    };
+    const runFor = (state, ms) => {
+      for (let i = 0; i * CAST_TICK < ms; i++) stepMatch(state, CAST_TICK, noInput);
+      return Math.hypot(state.enemy.x - state.player.x, state.enemy.y - state.player.y);
+    };
+
+    const dodging = dodgeFix(30);
+    attemptAttack(dodging, dodging.player, MEGA_I, []);
+    const startX = dodging.enemy.x;
+    const sepAfter = runFor(dodging, MEGA.castMs);
+    check('an AI inside a telegraph it CAN clear ends up outside the weapon\'s reach',
+      sepAfter > REACH.meleeHeavy, `separation ${sepAfter.toFixed(2)} vs range ${REACH.meleeHeavy}`);
+    check('…and it actually moved to get there',
+      Math.abs(dodging.enemy.x - startX) > 1e-6, `moved ${(dodging.enemy.x - startX).toFixed(2)} wu`);
+
+    const control = dodgeFix(30);
+    const controlSep = runFor(control, MEGA.castMs);
+    check('KNOWN-BAD: the SAME fixture with no cast open CLOSES IN — the cast term is what moved it',
+      controlSep < 30, `separation ${controlSep.toFixed(2)} (started at 30)`);
+
+    // The achievability gate. From separation 0 the whole roster's chase speed is short of
+    // `REACH.meleeHeavy` inside `castMs`, so fleeing spends the window and still eats the
+    // slam; the AI is required NOT to try, because a range test is BINARY and 90% of the
+    // way out is worth exactly zero.
+    const fastestChase = Math.max(...CHARACTER_IDS.map((id) => speedFor(id, AI_CHASE_SPEED) * 1000));
+    check('…and no AI in the roster could clear that reach from separation 0 anyway',
+      (fastestChase * MEGA.castMs) / 1000 < REACH.meleeHeavy,
+      `${((fastestChase * MEGA.castMs) / 1000).toFixed(2)} wu of travel vs ${REACH.meleeHeavy} wu needed`);
+    const hopeless = dodgeFix(0.5);
+    attemptAttack(hopeless, hopeless.player, MEGA_I, []);
+    const hopelessSep = runFor(hopeless, MEGA.castMs);
+    check('…so from separation 0 it does NOT flee a telegraph it cannot escape',
+      hopelessSep < REACH.meleeHeavy, `separation ${hopelessSep.toFixed(2)}`);
+  }
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) {

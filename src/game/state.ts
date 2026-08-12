@@ -159,6 +159,42 @@ export interface StatusTimers {
   stunnedUntil: number;
 }
 
+/**
+ * AN ATTACK THAT HAS BEEN PRESSED AND HAS NOT GONE OFF YET — the wind-up
+ * (`rules.ts:Weapon.castMs`) that makes an ultimate something you can see coming and
+ * move out of, which is the shape Uri chose: *"a telegraph you can dodge"*.
+ *
+ * ── TWO STATES, NOT FIVE ───────────────────────────────────────────────────
+ * `cast === null` is idle and `cast !== null` is casting. There is deliberately no
+ * `phase: 'winding' | 'channelling' | 'recovering'` enum: every richer state anyone
+ * proposed turned out to be a second way of writing `elapsed >= resolvesAt`, and this
+ * codebase's most expensive recorded defect is one rule stated in two places.
+ *
+ * ── AND NO `originX/Y`, NO `facingX/Y`, WHICH IS DERIVED RATHER THAN ECONOMISED ──
+ * A cast ROOTS its caster and FREEZES its aim (`movementLocked` / `isCasting` below, read
+ * by both `sim.ts` and `ai.ts`), and `x`/`y` are written only by `movement.ts:tryMove`
+ * — reachable only from `moveFighter`/`moveToward`, both suppressed — while `facing` is
+ * written only by `sim.ts:applyAim` and `ai.ts:stepAI`, both suppressed. So the origin
+ * and the bearing of the effect are frozen BY CONSTRUCTION with no stored copy, and a
+ * telegraph drawn where the caster stands at the press cannot lie about where the effect
+ * lands. Storing them would create a second answer to "where is this going off", which
+ * could then disagree with the first.
+ *
+ * ⚠️ IT LIVES ON THE FIGHTER, NOT ON THE WEAPON. `rules.ts:CHARACTERS` is a module-level
+ * record and `ai.ts:PRESS_VALUE` is a `ReadonlyMap` keyed on **weapon object identity** —
+ * the roster's `Weapon` objects are process-wide singletons by design. A `w.castStartedAt`
+ * would therefore be shared by every seat of every match the process runs. `lastUsed[]`
+ * already solved exactly this question the same way, and `cast` is index-aligned to it.
+ */
+export interface ActiveCast {
+  /** Index into `CHARACTERS[characterId].weapons` — the SAME key `lastUsed[]` uses. */
+  weaponIndex: number;
+  /** Absolute `state.elapsed` at the press. The telegraph's clock starts here. */
+  startedAt: number;
+  /** Absolute `state.elapsed` at or after which the fighter loop resolves it. */
+  resolvesAt: number;
+}
+
 export interface Fighter {
   /**
    * This fighter's SLOT INDEX. `state.fighters[i].id === i` — see `FighterId`.
@@ -350,6 +386,16 @@ export interface Fighter {
    * A `self` press (the heal) is not an attack; see `rules.ts` under "CONCEALMENT".
    */
   revealedUntil: number;
+  /**
+   * The attack this fighter has pressed and not yet landed, or `null`. See `ActiveCast`.
+   *
+   * ⚠️ **A REAL, OWN, ENUMERABLE DATA PROPERTY, INITIALISED TO `null` — NOT `undefined`,
+   * NOT A GETTER.** `tools/tmp/conceal_lab.mjs --bitid` walks `MatchState` with
+   * `Object.keys`/spread; an accessor or an absent key is silently DROPPED from the
+   * differ, which then prints PASS while comparing nothing. Same trap `sim.ts`'s N-fighter
+   * fields hit. `createFighter` seeds it, and it is the only place any field is seeded.
+   */
+  cast: ActiveCast | null;
 }
 
 /**
@@ -410,7 +456,46 @@ export function createFighter(spec: FighterSpec): Fighter {
     terrainSlowFactor: 1,
     concealed: false,
     revealedUntil: -Infinity,
+    cast: null,
   };
+}
+
+/**
+ * Is this fighter mid-wind-up? The ONE statement of "a cast is running".
+ *
+ * Trivial by design — the value is having exactly one place that asks. Its three readers
+ * sit in three different files (`sim.ts:applyAim`, `ai.ts:stepAI`'s facing block, and
+ * `combat.ts:attemptAttack`'s refusal to press over a live cast), which is precisely the
+ * shape that produced five recorded AI defects when each site answered for itself.
+ */
+export function isCasting(f: Fighter): boolean {
+  return f.cast !== null;
+}
+
+/**
+ * ── EVERY REASON A FIGHTER CANNOT MOVE, IN ONE PLACE ────────────────────────
+ *
+ * 🚨 **THIS FUNCTION EXISTS BECAUSE THE STUN RULE WAS ALREADY STATED TWICE.**
+ * `sim.ts:moveFighter` read `now < fighter.status.stunnedUntil` and `ai.ts:stepAI` read
+ * `now < self.status.stunnedUntil` — one constant, two implementations, in the two files
+ * whose disagreement is this project's most expensive recorded defect class (five AI
+ * driver bugs, all of it; the worst was a stun that silenced the AI's shooting while the
+ * stunned player fired 100% of its shots).
+ *
+ * Adding the cast root to one of those sites and not the other would have produced the
+ * SIXTH instance, in the exact mirror of the recorded one: a casting human rooted, a
+ * casting AI walking away from its own telegraph. So both sites call this, and
+ * `sim.test.mjs` §33(e) SOURCE-SCANS `src/game/*.ts` to assert that a comparison against
+ * `status.stunnedUntil` appears in exactly one file — this one.
+ *
+ * ⚠️ MOVEMENT ONLY, EXACTLY LIKE THE STUN IT GENERALISES. A stunned fighter still aims
+ * and still fires (`rules.ts:STUN_DURATION_MS` — *"stunned = movement locked to 0"*), and
+ * this predicate must never grow into "the fighter's turn does not happen": that reading
+ * is the recorded bug. What a CAST additionally suppresses — aim, and opening a second
+ * attack — is stated separately, by `isCasting`, at the sites that own those rules.
+ */
+export function movementLocked(f: Fighter, elapsed: number): boolean {
+  return elapsed < f.status.stunnedUntil || f.cast !== null;
 }
 
 /**
@@ -918,7 +1003,44 @@ export type GameEvent =
   | { type: 'countdown-tick'; value: number }
   | { type: 'match-started' }
   | { type: 'match-ended'; winner: FighterRole; winnerId: FighterId }
+  /**
+   * THE WEAPON WENT OFF. For a weapon with no `castMs` — every weapon in the roster but
+   * one — this is emitted on the tick it was pressed, exactly as it always was.
+   *
+   * ⚠️ **FOR A CAST WEAPON IT IS EMITTED AT THE RESOLVE, NOT AT THE PRESS**, because that
+   * is the instant it describes: `match.ts` plays the attack animation off it, `vfx.ts`
+   * draws the swing arc off it, and `audio/director.ts` voices the swing off it. Emitting
+   * it at the press would put all three 1100 ms before the damage they are describing —
+   * which is the mirror of the defect this feature fixes (`vfx.ts` already calls its
+   * generic flash a *"melee wind-up"* and fires it AFTER the hit has landed).
+   * `cast-started` below is the press-time event those layers should telegraph off.
+   */
   | { type: 'weapon-fired'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string }
+  /**
+   * A WIND-UP HAS BEGUN: this fighter pressed a `castMs` weapon and is now rooted, aim
+   * frozen, until `castMs` from now. Carries the duration so a telegraph can size itself
+   * without importing the roster or re-reading the weapon table.
+   *
+   * 🚨 **AN OPPONENT-FACING TELEGRAPH DRAWN OFF THIS MUST RIDE THE SAME VISIBILITY NULL
+   * CHANNEL AS THE HP PILL** (`movement.ts:isVisibleFrom` / `hud.ts:fighterVisibleTo`).
+   * A cast bar over a concealed enemy's head leaks its position — a third surface asking
+   * one question, which is exactly the shape §26(m) source-scans for.
+   */
+  | { type: 'cast-started'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string; castMs: number }
+  /**
+   * A WIND-UP DIED BEFORE IT LANDED. The cooldown was consumed at the press and is NOT
+   * refunded — the press is spent exactly as a melee swing that misses is spent.
+   *
+   * `reason` is the terminator that fired, and the two are ordered: `applyDamage` applies
+   * the stun before it tests for death, so a blow that both stuns and kills reports
+   * `'stun'`. `RESOLVE` is not a reason here — that path emits `weapon-fired`.
+   *
+   * ⚠️ There is deliberately no `'match-end'` reason. A match ending mid-cast leaves the
+   * record ALONE and the phase gate simply never resolves it; see `sim.test.mjs` §33(i)
+   * for why clearing it in `applyDamage`'s victor block AND in `resolveTimeout` would be
+   * two statements of one rule.
+   */
+  | { type: 'cast-cancelled'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string; reason: 'stun' | 'death' }
   | {
       type: 'projectile-spawned';
       id: number;

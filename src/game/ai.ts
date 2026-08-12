@@ -149,13 +149,15 @@ import {
   AI_SLOW_MULTIPLIER,
   CHARACTERS,
   CHARACTER_IDS,
+  FOG_DPS,
   HIT_RADIUS_VS_PLAYER,
   speedFor,
+  suddenDeathActive,
   type Weapon,
   type WeaponType,
 } from './rules.ts';
 import type { Fighter, GameEvent, MatchState } from './state.ts';
-import { nearestLivingOpponent, sightingIndex } from './state.ts';
+import { isCasting, movementLocked, nearestLivingOpponent, sightingIndex } from './state.ts';
 import { attemptAttack } from './combat.ts';
 import { isVisibleFrom, moveToward } from './movement.ts';
 
@@ -213,8 +215,23 @@ const STEER = { dirX: 0, dirY: 0, navX: 0, navY: 0 };
  * Only `kind: 'damage'` hazards are avoided. The two `slow` puddles are deliberately NOT
  * — they cost movement, never HP, and steering around them would push the AI off the
  * shortest route for a cost the fog and the pot do not share.
+ *
+ * ── ⚠️ AND AN INCOMING WIND-UP IS THE THIRD HAZARD, NOT A FOURTH BRANCH ──────
+ *
+ * `ownSpeed` (wu/ms, including this tick's slow multiplier) is here for that third loop
+ * and for nothing else: a telegraph is the only hazard with a DEADLINE, so it is the only
+ * one where "can I actually clear this?" has an answer. See the loop for why the question
+ * has to be asked.
  */
-function dangerSteer(state: MatchState, x: number, y: number, intentX: number, intentY: number): number {
+function dangerSteer(
+  state: MatchState,
+  self: Fighter,
+  intentX: number,
+  intentY: number,
+  ownSpeed: number,
+): number {
+  const x = self.x;
+  const y = self.y;
   DANGER.x = 0;
   DANGER.y = 0;
   let worst = 0;
@@ -257,6 +274,74 @@ function dangerSteer(state: MatchState, x: number, y: number, intentX: number, i
       DANGER.y += (toCy / dc) * t * AI_RING_WEIGHT;
       if (t > worst) worst = t;
     }
+  }
+
+  // ── AN INCOMING WIND-UP IS A HAZARD THAT HAS NOT HAPPENED YET ──────────────
+  //
+  // This is the whole AI half of `Weapon.castMs`, and it is deliberately a third term in
+  // an existing function rather than a dodge BRANCH in `stepAI`. A branch would be a
+  // fourth thing competing with the pot, the ring and the fighter's own intent, arbitrated
+  // by whichever `if` came first; a term is arbitrated by the blend that already exists,
+  // and it inherits `AI_ESCAPE_PRIORITY` unchanged — *"surviving outranks shooting when
+  // t >= 1"* is exactly the sentence a telegraph wants, already written, already tested.
+  //
+  // 🚨 **AND IT IS WHAT MAKES THE FEATURE SYMMETRIC.** Without it the counterplay Uri
+  // asked for exists only for the bot: a human is 1.71x AI chase speed and `stepAI` has no
+  // dodge of any kind, so a human's telegraph would be a free execute while the AI's is
+  // dodgeable on reflex. That asymmetry is the same shape as the recorded stun-silence
+  // bug (the stunned player fired 100% of its shots, the stunned AI 0%) pointed the other
+  // way, and it would have measured as "the ultimate is fine" on every AI-vs-AI corpus in
+  // the repo — which is every corpus in the repo.
+  //
+  // ── THE GEOMETRY, AND WHY MELEE ONLY ─────────────────────────────────────
+  //
+  // A melee weapon resolves on `range` alone from the caster's frozen position (there is
+  // no `hitRadius` term — that is projectiles), so the threatened set is a disc of
+  // `w.range` centred on the caster. A CONE weapon threatens only a wedge of that disc;
+  // fleeing the whole disc is conservative in the safe direction and needs no bearing.
+  // ⚠️ A RANGED cast would need a different answer entirely — a ranged `range` is how far
+  // the projectile TRAVELS, not an area around the caster, and reading it as a radius here
+  // would make an AI flee a circle that does not exist. There are no ranged casts today;
+  // this refuses them explicitly rather than by accident.
+  for (const other of state.fighters) {
+    if (other === self || !other.alive) continue;
+    const cast = other.cast;
+    if (cast === null) continue;
+    const w = CHARACTERS[other.characterId].weapons[cast.weaponIndex];
+    if (w === undefined || w.type !== 'melee') continue;
+    const radius = w.range ?? 0;
+    if (radius <= 0) continue;
+
+    const dx = x - other.x;
+    const dy = y - other.y;
+    const d = Math.hypot(dx, dy);
+    const margin = d - radius; // > 0 = already outside the disc and safe
+    if (margin >= AI_HAZARD_MARGIN) continue;
+
+    // ⚠️ **ONLY RUN FROM A TELEGRAPH YOU CAN ACTUALLY CLEAR.** Without this the AI flees
+    // Lollipop's 400 wu slam for the whole 1.5 s, gets nowhere near the edge, and eats it
+    // anyway — having spent the window not shooting. A range test is BINARY: escaping 90%
+    // of the way out is worth exactly zero, so a hopeless flee is strictly worse than
+    // ignoring the cast. Same arithmetic as the caster's own "do not open what you cannot
+    // land", pointed the other way, which is why they are stated in the same units.
+    const remainingMs = Math.max(0, cast.resolvesAt - state.elapsed);
+    if (margin < 0 && -margin > ownSpeed * remainingMs) continue;
+
+    // Coincident with the caster: any direction is equally out. +x, matching the pot's
+    // own degeneracy answer above, and reachable here (measured: 1,582 of 160,642 ticks
+    // across 110 real matches sit at separation exactly 0).
+    const ux = d > EPS ? dx / d : 1;
+    const uy = d > EPS ? dy / d : 0;
+    // Same normalisation every other hazard uses: 0 at the outer edge of the margin,
+    // exactly 1 at the boundary, 2 one full margin inside it.
+    const t = Math.min(2, (AI_HAZARD_MARGIN - margin) / AI_HAZARD_MARGIN);
+    // PURE RADIAL, with no tangential term. The pot gets `HAZARD_TANGENT` because it is a
+    // fixed obstacle the fighter wants to get PAST; a cast disc is transient and there is
+    // nothing on the far side of it to reach. Straight out is the shortest path to the
+    // only thing that matters, which is `d > radius` before `resolvesAt`.
+    DANGER.x += ux * t * AI_HAZARD_WEIGHT;
+    DANGER.y += uy * t * AI_HAZARD_WEIGHT;
+    if (t > worst) worst = t;
   }
 
   return worst;
@@ -520,8 +605,30 @@ const rankHeal: WeaponRank = (_state, self, w) => {
  * consider, is it off cooldown, does it reach — and only the RANK differs. A `self`
  * weapon has no `range`, so `range ?? Infinity` makes the reach test a no-op for it
  * rather than a special case.
+ *
+ * ── `castBudgetMs` — THE FOURTH QUESTION, AND IT IS "DO NOT OPEN WHAT YOU CANNOT FINISH" ──
+ *
+ * The longest wind-up (`rules.ts:Weapon.castMs`) this fighter may commit to right now.
+ * `Infinity` is the ordinary case and refuses nothing, so every castless weapon and every
+ * caller that has nothing to say about wind-ups is unaffected — which is all of them
+ * today, because the budget only drops below `Infinity` in the two situations `stepAI`
+ * derives it from.
+ *
+ * ⚠️ It is a BUDGET IN MILLISECONDS rather than an `allowCasts` boolean deliberately. The
+ * question is never "may I cast" but "may I stand still for THIS long", and the two
+ * answers differ per weapon the moment a second cast weapon exists with a different
+ * duration. A boolean would have to be recomputed by the caller per weapon, i.e. here,
+ * i.e. twice. See `range`, which this file's own history records as *"two quantities
+ * wearing one number"* — the fix for that is not to add a third.
  */
-function pickWeapon(state: MatchState, self: Fighter, adist: number, allow: WeaponAllow, rank: WeaponRank): number | null {
+function pickWeapon(
+  state: MatchState,
+  self: Fighter,
+  adist: number,
+  allow: WeaponAllow,
+  rank: WeaponRank,
+  castBudgetMs: number,
+): number | null {
   const weapons = CHARACTERS[self.characterId].weapons;
   const now = state.elapsed;
 
@@ -532,6 +639,9 @@ function pickWeapon(state: MatchState, self: Fighter, adist: number, allow: Weap
     if (!allow[w.type]) continue;
     if (now - self.lastUsed[i] < w.cooldown) continue;
     if (adist > (w.range ?? Infinity)) continue;
+    // Strict `>=`: a wind-up that finishes exactly when the budget runs out has not
+    // finished in time. The budget is a deadline, not an allowance.
+    if ((w.castMs ?? 0) > 0 && (w.castMs ?? 0) >= castBudgetMs) continue;
     const score = rank(state, self, w, i, adist);
     // Strict `>` (not `>=`) preserves "first weapon wins on a tie", matching the
     // prototype's stable `Array.sort` + take-first. It is also what excludes a
@@ -715,7 +825,21 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
    * `attemptedMove`, the Sticky Trail drop that movement earns, exactly as a stunned
    * player's zeroed `mdx/mdy` does. It suppresses nothing else.
    */
-  const rooted = now < self.status.stunnedUntil;
+  //
+  // ── ⚠️ AND IT IS NO LONGER JUST THE STUN. IT USED TO READ: ────────────────
+  //
+  //   > `const rooted = now < self.status.stunnedUntil;`
+  //
+  // The rule that wording stated is NOT reversed — it is now stated somewhere else.
+  // `sim.ts:moveFighter` carried the identical comparison, so one constant had two
+  // implementations in the two files whose disagreement is the defect class this header
+  // is about. `state.ts:movementLocked` is the single statement, and it adds the one other
+  // thing that locks movement: an open `ActiveCast`. Putting the cast root in one of the
+  // two sites and not the other would have produced the SIXTH instance of this file's
+  // oldest bug, in the exact mirror of the recorded one — a casting human rooted while a
+  // casting AI walked away from its own telegraph. `sim.test.mjs` §33(e) source-scans for
+  // it rather than trusting this paragraph.
+  const rooted = movementLocked(self, now);
 
   /**
    * FACING IS AIM, NOT TRAVEL. It is read by `combat.ts` for the melee cone and the
@@ -757,7 +881,14 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
    * `sim.test.mjs` §20(d) was written as a guard on the DEFECT and is now a guard on the
    * FIX — same device, opposite direction, so neither can be undone by accident.
    */
-  if (hasBearing) {
+  //
+  // ⚠️ **AND A WIND-UP FREEZES IT.** `isCasting`, not `rooted`: a stunned fighter still
+  // aims (that is the paragraph above, and undoing it is the recorded bug), while a
+  // casting one must not, because `ActiveCast` stores no bearing and relies on this site
+  // and `sim.ts:applyAim` — the sim's only two writers of `facing` — both refusing. A
+  // caster that could re-aim mid-cast would make the telegraph a lie about where the
+  // effect lands, which is the one property the whole feature rests on.
+  if (hasBearing && !isCasting(self)) {
     self.facing = { x: adx / adist, y: ady / adist };
   }
 
@@ -786,8 +917,14 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   // The steering needs to know where the fighter WANTED to go, so it can round a hazard
   // on the side that still makes progress. That is `fleeing` ? away : toward.
   const intentSign = fleeing ? -1 : 1;
-  const danger = dangerSteer(state, self.x, self.y,
-    (intentSign * adx) / adist, (intentSign * ady) / adist);
+  // The speed this fighter will ACTUALLY move at this tick, in wu/ms — the branch it is
+  // about to take (`fleeing` decides that, and it is already known) times this tick's slow
+  // multiplier. Passed in rather than re-derived inside `dangerSteer` so the "can I clear
+  // this telegraph in time?" test uses the same number the movement below will use; a
+  // conservative guess there would be a second, quieter statement of the AI's own speed.
+  const ownSpeed = speedFor(self.characterId, fleeing ? AI_FLEE_SPEED : AI_CHASE_SPEED) * aiSlowMult;
+  const danger = dangerSteer(state, self,
+    (intentSign * adx) / adist, (intentSign * ady) / adist, ownSpeed);
   const urgent = danger >= AI_ESCAPE_PRIORITY;
   /**
    * Blend `DANGER` into a desired heading and nav target, in place. Writes `STEER` rather
@@ -819,9 +956,47 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
    */
   const escaping = urgent && !rooted;
 
+  /**
+   * ── HOW LONG THIS FIGHTER MAY COMMIT TO STANDING STILL, IN MS ──────────────
+   *
+   * `Infinity` — the ordinary case — refuses nothing, so nothing about weapon selection
+   * changes for a roster with no wind-ups. It drops in exactly two situations, and both
+   * are "a cast I open now will not be alive to resolve", which is the concrete form of
+   * *"the AI must not begin a cast it cannot land"*.
+   *
+   *   1. **STANDING IN SOMETHING THAT HURTS.** `urgent` is this file's existing sentence
+   *      for *"this fighter is already taking damage, or is about to on this tick"* — the
+   *      pot, the closing ring, or (new) an incoming telegraph. Rooting yourself there for
+   *      the length of a wind-up is strictly dominated by moving. ⚠️ `urgent`, NOT
+   *      `escaping`: `escaping` is false for a fighter that cannot move anyway, and the
+   *      point here is that opening a cast is a CHOICE to stop moving, which a rooted
+   *      fighter is not making. The FLEE branch deliberately still shoots while escaping —
+   *      an instant press costs it nothing — and this is the line between the two.
+   *
+   *   2. **SUDDEN DEATH.** `SUDDEN_DEATH_RADIUS` is 0, so the fog burns the whole arena at
+   *      `FOG_DPS` and there is nowhere to stand. Surviving a cast therefore costs
+   *      `castMs * FOG_DPS / 1000` HP flat, and `hp * 1000 / FOG_DPS` is how many ms of
+   *      standing this fighter has left. `pickWeapon`'s test is `castMs >= budget`, so a
+   *      wind-up that finishes exactly as the fighter dies is refused.
+   *
+   *      ⚠️ **AND THERE IS NO SIM-SIDE SUDDEN-DEATH RULE, WHICH IS A DECISION.** A cast
+   *      opened before the collapse still resolves inside it. Cancelling on the trigger
+   *      would make the moment a hidden coin-flip on when the button happened to be
+   *      pressed. The flat drain also cannot change the HP ORDER — the only thing sudden
+   *      death resolves on — so casting costs the caster nothing RELATIVE to its target;
+   *      what it costs is the rest of the match, and that is a judgement the AI makes here
+   *      rather than a rule the sim imposes on the player.
+   *
+   * ⚠️ `FOG_DPS` is imported, never written as `15 / 300`. The fog is stated once, in
+   * `rules.ts`, beside the two constants it comes from.
+   */
+  const castBudgetMs = urgent ? 0
+    : suddenDeathActive(state.timeRemaining) ? (self.hp * 1000) / FOG_DPS
+    : Infinity;
+
   // The heal is chosen before the flee/chase split because it is worth the same in both,
   // and it consumes the tick's ATTACK exactly like any other weapon — never both.
-  const healIndex = escaping ? null : pickWeapon(state, self, adist, ALLOW_HEAL, rankHeal);
+  const healIndex = escaping ? null : pickWeapon(state, self, adist, ALLOW_HEAL, rankHeal, castBudgetMs);
 
   if (fleeing) {
     // ⚠️ NOTHING WRITES `facing` HERE ANY MORE. A line that pointed it directly away from
@@ -864,10 +1039,10 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
     // bush you cannot see into. The HEAL is deliberately exempt — it targets the caster,
     // needs no sight of anyone, and gating it here would be the "a rule stated once and
     // implemented twice" defect this file is named for, one branch deeper.
-    const shotIndex = healIndex ?? (visible ? pickWeapon(state, self, adist, ALLOW_OFFENSIVE, rankPressValue) : null);
+    const shotIndex = healIndex ?? (visible ? pickWeapon(state, self, adist, ALLOW_OFFENSIVE, rankPressValue, castBudgetMs) : null);
     if (shotIndex !== null) attemptAttack(state, self, shotIndex, events);
   } else {
-    const chosenIndex = escaping ? null : (healIndex ?? (visible ? pickWeapon(state, self, adist, ALLOW_OFFENSIVE, rankPressValue) : null));
+    const chosenIndex = escaping ? null : (healIndex ?? (visible ? pickWeapon(state, self, adist, ALLOW_OFFENSIVE, rankPressValue, castBudgetMs) : null));
     if (chosenIndex !== null) {
       attemptAttack(state, self, chosenIndex, events);
     } else if (!rooted) {

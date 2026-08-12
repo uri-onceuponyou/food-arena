@@ -103,8 +103,8 @@ import type {
   Controller, Fighter, FighterId, GameEvent, MatchInput, MatchInputs, MatchState, Sighting, Splat,
   TrailMark, Vec2,
 } from './state.ts';
-import { createFighter, fighterBit, MAX_FIGHTERS, MIN_FIGHTERS, sightingIndex } from './state.ts';
-import { applyDamage, attemptAttack, isOnOwnTrail } from './combat.ts';
+import { createFighter, fighterBit, isCasting, MAX_FIGHTERS, MIN_FIGHTERS, movementLocked, sightingIndex } from './state.ts';
+import { applyDamage, attemptAttack, isOnOwnTrail, resolveDueCast } from './combat.ts';
 import { boxesOverlap, isHidden, isVisibleFrom, tryMove } from './movement.ts';
 import { stepAI } from './ai.ts';
 
@@ -592,6 +592,32 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
     const perSlot = Array.isArray(input) ? (input as readonly (MatchInput | null | undefined)[]) : null;
     for (const fighter of state.fighters) {
       let moved: boolean;
+      // ── TERMINATOR 1: A DUE WIND-UP GOES OFF AT THE TOP OF ITS OWN TURN ────
+      //
+      // Before anything else this fighter DOES, and before either controller branch, so a
+      // cast lands at exactly the point in the tick the press that bought it would have
+      // landed — same slot order, same position relative to the other seats, the same
+      // projectile step and fog pass afterwards. `resolveDueCast` owns the whole rule
+      // (is it due, clear the record, fire it, re-read the phase); this line owns only
+      // WHEN it is asked. It is called for humans and AI alike, from one site, which is
+      // the same reason `attemptAttack` is shared: two sides, one resolution.
+      //
+      // ⚠️ It runs for a fighter of EITHER controller and is not inside the `human`
+      // branch — a casting AI that never got a resolve would stand rooted forever, which
+      // is exactly the shape of the recorded stun-silence bug.
+      //
+      // 🚨 **IT SITS BELOW `let moved`, NOT ABOVE IT, AND THAT IS NOT STYLE.**
+      // `tools/tmp/conceal_lab.mjs`'s N-fighter battery instruments the turn order by
+      // TEXT-PATCHING this loop, and its `FIGHTER_LOOP_ANCHOR` is the two literal lines
+      // `for (const fighter of state.fighters) {` + `let moved: boolean;`. Landing
+      // anything between them — including a comment — makes the patch match nothing, and
+      // the recorder then reports an EMPTY visit list for every tick. Measured, not
+      // predicted: this call was written above the declaration first and took
+      // `conceal_lab --selftest` from 80/80 to 71/80, including its own known-bad and both
+      // differ arms. `combat.ts` carries the identical warning about `target.deaths++`
+      // for the identical reason. The declaration has no side effect, so below it is
+      // free; above it costs a peer's instrument.
+      resolveDueCast(state, fighter, events);
       if (fighter.controller === 'human') {
         // A hole in the array — a shorter list, an explicit null, a seat nobody is sitting
         // in — is NEUTRAL, never the previous slot's input. `?? NEUTRAL_INPUT` rather than a
@@ -838,6 +864,21 @@ function terrainSlowFactor(state: MatchState, fighter: Fighter): number {
 /** Point `fighter`'s aim at this tick's input vector. Takes the FIGHTER, not the state:
  *  a second human seat is a second caller, not a second branch. */
 function applyAim(fighter: Fighter, input: MatchInput): void {
+  // ── A WIND-UP FREEZES THE AIM, AND THAT IS THE PROPERTY THE FEATURE RESTS ON ──
+  //
+  // `ActiveCast` stores no `facingX/Y` precisely because this line makes one unnecessary:
+  // `facing` has exactly two writers in the sim — this function and `ai.ts:stepAI`'s
+  // facing block — and both refuse while a cast is running, so the bearing at the press
+  // survives to the resolve BY CONSTRUCTION. A telegraph drawn where the caster was
+  // pointing when the button went down therefore cannot lie about where the effect lands,
+  // which is what makes the wind-up dodgeable rather than merely slow.
+  //
+  // ⚠️ It is `isCasting`, NOT `movementLocked`. A STUNNED fighter still aims and still
+  // fires — `rules.ts:STUN_DURATION_MS` says *"stunned = movement locked to 0"* and
+  // nothing more, and `ai.ts`'s header records what it cost when one file read that flag
+  // as "this fighter's turn does not happen". The cast lock is wider than the stun lock,
+  // so the two predicates are deliberately separate and this site takes the wider one.
+  if (isCasting(fighter)) return;
   if (!input.aim) return;
   const mag = Math.hypot(input.aim.x, input.aim.y);
   if (mag > 1e-6) {
@@ -865,7 +906,14 @@ function moveFighter(state: MatchState, fighter: Fighter, dt: number, input: Mat
   let speedMult = terrainSlowFactor(state, fighter);
   if (isOnOwnTrail(state, fighter)) speedMult *= TRAIL.speedBoost;
   if (now < fighter.status.slowedUntil) speedMult *= SLOW_MOVE_MULTIPLIER;
-  const frozen = now < fighter.status.stunnedUntil;
+  // ⚠️ **WAS `now < fighter.status.stunnedUntil`, AND THAT WORDING IS KEPT HERE BECAUSE
+  // THE RULE IT STATED IS NOT REVERSED — IT IS NOW STATED SOMEWHERE ELSE.** The identical
+  // comparison also lived in `ai.ts:stepAI`, so one constant had two implementations in
+  // the two files whose disagreement is this project's most expensive recorded defect
+  // class. Adding the cast root to one of them and not the other would have been the sixth
+  // instance. Both now call `state.ts:movementLocked`, and `sim.test.mjs` §33(e)
+  // source-scans `src/game/*.ts` to assert the comparison survives in exactly one file.
+  const frozen = movementLocked(fighter, now);
 
   // `speedFor` scales `PLAYER_SPEED` by this character's own `stats.speed` — and it can
   // only scale DOWN (rules.ts `SPEED_TOP_STAT` is a cap, not a centre), so

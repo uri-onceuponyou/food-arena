@@ -82,6 +82,37 @@ export function statusReadyAt(fighter: Fighter, effect: 'slow' | 'stun'): number
 }
 
 /**
+ * END `fighter`'s wind-up without firing it. The one statement of "a cast died", shared by
+ * both cancelling terminators (an applied stun, and death) so the two cannot drift into
+ * clearing different things or emitting different events.
+ *
+ * ⚠️ **THE COOLDOWN IS DELIBERATELY NOT REFUNDED.** `lastUsed[weaponIndex]` was stamped at
+ * the press and stays stamped. That is the same line `attemptAttack` has always drawn —
+ * "too far", "wrong direction" and "target already dead" all consume the press — and it is
+ * what makes a stun a real counter rather than a free tempo trade: interrupting a 3.5 s
+ * ultimate costs its owner the whole 3.5 s.
+ *
+ * Callers test `fighter.cast !== null` themselves rather than having this no-op, so that a
+ * cancel site cannot silently become dead code without the reader noticing.
+ */
+function cancelCast(
+  fighter: Fighter,
+  reason: 'stun' | 'death',
+  events: GameEvent[],
+): void {
+  const c = fighter.cast;
+  if (c === null) return;
+  fighter.cast = null;
+  events.push({
+    type: 'cast-cancelled',
+    fighterRole: fighter.role,
+    fighterId: fighter.id,
+    weaponKey: CHARACTERS[fighter.characterId].weapons[c.weaponIndex].key,
+    reason,
+  });
+}
+
+/**
  * Apply `amount` damage to `target`, optionally inflicting a status effect,
  * clamping HP, recording the hit for regen/VFX purposes, and ending the match if
  * this was the killing blow. This is the ONLY place fighter HP is reduced anywhere
@@ -148,6 +179,30 @@ export function applyDamage(
   } else if (effect === 'stun') {
     if (state.elapsed >= statusReadyAt(target, 'stun')) {
       target.status.stunnedUntil = state.elapsed + STUN_DURATION_MS;
+      // ── TERMINATOR 2: AN APPLIED STUN CANCELS A WIND-UP ────────────────────
+      //
+      // 🚨 **INSIDE THE `statusReadyAt` GUARD, NOT BESIDE THE `hit-landed` EVENT, AND THE
+      // DIFFERENCE IS INVISIBLE FROM OUTSIDE.** This function emits `hit-landed` carrying
+      // the weapon's authored `effect` EVEN WHEN THE STUN WAS REFUSED — the event
+      // describes what the weapon does, and immunity is read off the target's own timers
+      // (see this function's own header). A cancel driven off the event would therefore
+      // break casts on stuns that never happened, and nothing downstream could tell:
+      // both versions emit the same `cast-cancelled`. `sim.test.mjs` §33(g) plants a
+      // grace-refused stun for exactly this and requires the cast to SURVIVE it.
+      //
+      // ── WHY A STUN AND *ONLY* A STUN, WHICH IS A BALANCE DECISION ─────────
+      //
+      // Measured by `tools/tmp/cst_interrupt.mjs` over 880 real matches, 1171 distinct
+      // press opportunities: if ANY damage cancelled, only 24.8% of ultimates would
+      // survive a 900 ms wind-up — three in four dying on a 3.5 s cooldown, which is a
+      // dead button, not counterplay. Stun-only leaves 84.1%. The gap is 59.3 pp against
+      // a ±2.86 pp floor. Parked as `DECISIONS §74(a)` with stun-only IN FORCE.
+      //
+      // The cooldown is NOT refunded: `lastUsed[]` was stamped at the press and stays
+      // stamped, exactly as a melee swing that misses stays spent.
+      if (target.cast !== null) {
+        cancelCast(target, 'stun', events);
+      }
     }
   }
 
@@ -178,6 +233,24 @@ export function applyDamage(
     // predicted: this line was written beside `alive = false` first and `--selftest` crashed.
     // **Do not move it back up, and do not put a comment between those three lines.**
     target.deaths++;
+    // ── TERMINATOR 3: A CORPSE DOES NOT FINISH ITS WIND-UP ────────────────────
+    //
+    // 🚨 **BELOW `target.deaths++`, AND THE POSITION IS LOAD-BEARING FOR THE SAME REASON
+    // THAT COUNTER'S IS.** `conceal_lab.mjs --selftest`'s event-ORDER known-bad anchors on
+    // the three literal lines `if (target.hp === 0) { / target.alive = false; / events.push({
+    // type: 'death',` and its SECOND edit references a `const` its FIRST one declares.
+    // Landing anything between those lines — including a comment — makes edit 1 miss while
+    // edit 2 applies, and the patched sim dies with a `ReferenceError` instead of failing
+    // that tool's assertion cleanly. This block is therefore below the counter, which is
+    // itself below the event, for exactly the reason recorded above it.
+    //
+    // Ordered AFTER terminator 2: `applyDamage` writes the status before it tests for
+    // death, so a blow that both stuns and kills has already cancelled with reason
+    // `'stun'` and this finds `cast === null`. That ordering is stated in the
+    // `cast-cancelled` event doc rather than left to be re-derived from this file.
+    if (target.cast !== null) {
+      cancelCast(target, 'death', events);
+    }
     if (state.phase === 'playing') {
       // ── ⚠️ A KNOCKOUT IS NO LONGER THE END OF THE MATCH. IT USED TO SAY: ─────
       //
@@ -267,13 +340,153 @@ function spawnProjectile(
 }
 
 /**
+ * ── ATTACKING SPENDS YOUR COVER (DECISIONS §29c) ─────────────────────────────
+ *
+ * Lifted out of `attemptAttack` verbatim when the cast split landed, and lifted rather
+ * than copied for the reason the whole file is arranged this way: there are now TWO
+ * moments at which a fighter has attacked — a castless weapon going off, and a cast
+ * BEGINNING — and a rule applied at one of them is a silent bug at the other. One
+ * function body, two call sites, one rule.
+ *
+ * ── WHY A CAST SPENDS IT AT THE PRESS ──────────────────────────────────────
+ *
+ * The original comment's own argument decides this: the reveal *"sits after the cooldown
+ * gate and before range, cone, target-alive and every other outcome test, so the reveal
+ * follows THE ACT OF ATTACKING and not its success."* Opening a 1100 ms wind-up is
+ * unambiguously the act of attacking — it is the loudest thing a fighter can do — so
+ * staying hidden through it would be exactly the asymmetry that rule exists to refuse.
+ * It is spent AGAIN at the resolve, which is not a second rule but the same one firing on
+ * the second act: `breakConcealment` is idempotent (`broken.includes(b)` refuses a plate
+ * already spent, "by this fighter or the other one") so no second `concealment-broken`
+ * event can be emitted, and `revealedUntil` correctly re-arms from the later instant so
+ * the caster is not hidden again the moment its slam lands.
+ *
+ * ── AND WHY A `self` PRESS DOES NEITHER ────────────────────────────────────
+ *
+ * Uri's word is *attacking*. The heal is the roster's only `self` weapon; it deals no
+ * damage, spawns no projectile, and leaks nothing about where its caster is — it is
+ * exactly the press `ai.ts` already exempts from the sight gate ("it targets the caster,
+ * needs no sight of anyone"), and making concealment treat it as an attack here while
+ * that file treats it as not-an-attack there would be this project's oldest defect shape
+ * in a new place. §26(l) asserts BOTH directions, so the exemption cannot silently widen
+ * to `ranged` nor silently vanish.
+ *
+ * ⚠️ INERT WHERE NO ARENA DECLARES A REGION: `breakConcealment` walks an empty list and
+ * `revealedUntil` is read only through `movement.ts:isHidden`, which returns false either
+ * way when nothing conceals. `tools/tmp/conceal_lab.mjs --bitid` is the proof, not this
+ * paragraph.
+ */
+function spendCover(state: MatchState, attacker: Fighter, w: Weapon, events: GameEvent[]): void {
+  if (w.type === 'self') return;
+  attacker.revealedUntil = state.elapsed + CONCEAL_ATTACK_REVEAL_MS;
+  for (const box of breakConcealment(attacker.x, attacker.y, state.arena, state.brokenConcealment)) {
+    events.push({
+      type: 'concealment-broken',
+      ownerRole: attacker.role,
+      ownerId: attacker.id,
+      x: box.x,
+      y: box.y,
+      w: box.w,
+      h: box.h,
+      kind: box.kind,
+    });
+  }
+}
+
+/**
+ * ── THE WEAPON ACTUALLY GOING OFF ────────────────────────────────────────────
+ *
+ * Everything from `weapon-fired` down: the heal, the melee cone, the projectile spawns.
+ * Was the tail of `attemptAttack` and is unchanged line for line; it is a separate
+ * function because a `castMs` weapon reaches it on a LATER TICK than the press that
+ * bought it (`resolveDueCast` below), and the alternative — a flag threaded through
+ * `attemptAttack` — would make the press path and the resolve path two implementations
+ * of one resolution rule, which is the defect shape this file's header is about.
+ *
+ * 🚨 **`weapon-fired` IS PUSHED HERE, WHICH IS WHAT MOVES IT TO THE RESOLVE.** For every
+ * weapon with no `castMs` this function is called synchronously from `attemptAttack` on
+ * the press tick, in the same position in the tick, before `spendCover` and before any
+ * outcome test — so the emitted stream is byte-identical to the pre-cast sim. That
+ * inertness on day one is what makes this landable while `match.ts`, `vfx.ts` and
+ * `audio/director.ts` are owned by other agents: they need no change, and they get the
+ * correct behaviour for free the moment a weapon grows a wind-up.
+ *
+ * Returns what `attemptAttack` always returned: false only for "could not be attempted",
+ * which at this point can only be an unknown weapon slot.
+ */
+function resolveWeapon(
+  state: MatchState,
+  attacker: Fighter,
+  weaponIndex: number,
+  events: GameEvent[],
+): boolean {
+  const weapons = CHARACTERS[attacker.characterId].weapons;
+  const w = weapons[weaponIndex];
+  if (!w) return false;
+
+  events.push({ type: 'weapon-fired', fighterRole: attacker.role, fighterId: attacker.id, weaponKey: w.key });
+  spendCover(state, attacker, w, events);
+  return deliverWeapon(state, attacker, w, events);
+}
+
+/**
+ * RESOLVE `fighter`'s wind-up if it is due — terminator 1 of `ActiveCast`, and the only
+ * one that is not a cancellation.
+ *
+ * Called once, from the top of that fighter's turn in `sim.ts`'s fighter loop, so the
+ * effect lands at the same point in the tick a press would have landed it and nothing
+ * downstream (projectiles, fog, the clock) has to know casts exist.
+ *
+ * ⚠️ **THE PHASE IS RE-READ HERE AND THAT IS NOT REDUNDANT.** The loop's own gate was
+ * evaluated before the loop began, and `applyDamage` can flip `phase` to `'ended'`
+ * mid-loop when slot 0's blow is the last one — after which slot 1 must not resolve a
+ * slam out of a finished match. Every other entry point in the sim re-reads the phase for
+ * the same reason (`attemptAttack` at its top, `stepAI` at its top); this is that rule,
+ * not a new one.
+ *
+ * ⚠️ **A MATCH THAT ENDS MID-CAST LEAVES THE RECORD ALONE.** There is no
+ * "clear every cast" statement anywhere, deliberately: `phase` leaves `'playing'` in two
+ * places (`applyDamage`'s victor block and `sim.ts:resolveTimeout`) and clearing it in
+ * both would be two statements of one rule. Doing nothing is one rule in one place — this
+ * gate — and every renderer already gates on phase. `sim.test.mjs` §33(i) pins it so
+ * nobody tidies it away.
+ *
+ * The record is cleared BEFORE the resolution runs, so a resolution that reaches
+ * `applyDamage` cannot find its own caster mid-cast and cancel what it is delivering.
+ */
+export function resolveDueCast(state: MatchState, fighter: Fighter, events: GameEvent[]): boolean {
+  if (state.phase !== 'playing') return false;
+  const c = fighter.cast;
+  if (c === null || state.elapsed < c.resolvesAt) return false;
+  fighter.cast = null;
+  return resolveWeapon(state, fighter, c.weaponIndex, events);
+}
+
+/**
  * Attempt one attack with `weapons[weaponIndex]` for `attacker`. Returns false
- * only when the attack could not even be attempted (unknown weapon slot, or still
- * on cooldown) — everything else (too far, wrong facing for a melee cone, target
- * already dead) still returns true and still consumes the cooldown, because that is
- * exactly what the prototype does: `w.lastUsed = now` is set unconditionally, before
- * any range/cone/target checks run. Whether the attack actually connected is only
- * observable via a `hit-landed`/`projectile-spawned` event in `events`.
+ * only when the attack could not even be attempted (unknown weapon slot, still
+ * on cooldown, or a wind-up already running) — everything else (too far, wrong facing
+ * for a melee cone, target already dead) still returns true and still consumes the
+ * cooldown, because that is exactly what the prototype does: `w.lastUsed = now` is set
+ * unconditionally, before any range/cone/target checks run. Whether the attack actually
+ * connected is only observable via a `hit-landed`/`projectile-spawned` event in `events`.
+ *
+ * ── ⚠️ IT IS NOW THE *PRESS*, AND FOR ONE WEAPON THE PRESS IS NOT THE ATTACK ──
+ *
+ * `rules.ts:Weapon.castMs` above 0 makes this open an `ActiveCast` and return, leaving
+ * the caster rooted with its aim frozen until `resolveDueCast` fires the attack `castMs`
+ * later. Everything the press half does — the cooldown gate, stamping `lastUsed`, and
+ * spending cover — is unchanged and happens at the PRESS in both paths, because all three
+ * are consequences of pressing rather than of connecting. That is the same line this
+ * function has always drawn: "too far", "wrong direction" and "target already dead" all
+ * still consume the press.
+ *
+ * 🚨 **A FIGHTER MID-CAST CANNOT PRESS ANYTHING.** Without that gate a caster could stack
+ * a second cast over the first (the second press would overwrite `cast` and the first
+ * weapon's cooldown would be spent on nothing) or interleave a cheap ranged shot into a
+ * window it has committed to standing still in. One `ActiveCast` per fighter, and the
+ * refusal is stated once, here, for the human and the AI alike — they share this function
+ * precisely so the two sides cannot play by different rules.
  */
 export function attemptAttack(
   state: MatchState,
@@ -283,6 +496,48 @@ export function attemptAttack(
 ): boolean {
   if (state.phase !== 'playing') return false;
 
+  const w = CHARACTERS[attacker.characterId].weapons[weaponIndex];
+  if (!w) return false;
+
+  const now = state.elapsed;
+  // The wind-up gate sits ABOVE the cooldown gate deliberately: a fighter mid-cast is not
+  // "on cooldown for this slot", it is busy for every slot, and asking the narrower
+  // question first would let a second weapon's ready cooldown answer the wider one.
+  if (attacker.cast !== null) return false;
+  if (now - attacker.lastUsed[weaponIndex] < w.cooldown) return false;
+  attacker.lastUsed[weaponIndex] = now;
+
+  const castMs = w.castMs ?? 0;
+  if (castMs > 0) {
+    attacker.cast = { weaponIndex, startedAt: now, resolvesAt: now + castMs };
+    events.push({
+      type: 'cast-started',
+      fighterRole: attacker.role,
+      fighterId: attacker.id,
+      weaponKey: w.key,
+      castMs,
+    });
+    spendCover(state, attacker, w, events);
+    return true;
+  }
+
+  // Castless: the press IS the attack, resolved synchronously, in the same position in the
+  // tick and emitting the same events in the same order as before this field existed.
+  return resolveWeapon(state, attacker, weaponIndex, events);
+}
+
+/**
+ * The outcome half: who this connects with and what it does to them. Reached from the
+ * press tick for a castless weapon and from the resolve tick for a cast one, through
+ * `resolveWeapon` in both cases, so there is exactly one implementation of "what this
+ * weapon does".
+ */
+function deliverWeapon(
+  state: MatchState,
+  attacker: Fighter,
+  w: Weapon,
+  events: GameEvent[],
+): boolean {
   // ── ⚠️ THE TARGET RULE, AND IT IS THE SPLIT NOW. IT USED TO SAY: ───────────
   //
   //   > *"THE TARGET RULE, ASKED ONCE. Was `otherRole(attackerRole)` — see
@@ -304,63 +559,14 @@ export function attemptAttack(
   // rather than melee alone because "there is nobody to shoot at" is not a melee-shaped fact,
   // and because at six seats it stops being unreachable the moment somebody removes the
   // phase gate. `sim.test.mjs` §28(d) pins the unreachability rather than assuming it.
+  //
+  // ⚠️ **AND FOR A CAST WEAPON THIS IS ASKED AT THE RESOLVE, NOT AT THE PRESS.** That is
+  // the right instant and it is deliberate: a slam that goes off 1100 ms after the button
+  // hits whoever is nearest WHEN IT LANDS. Freezing the target at the press would make the
+  // caster's aim a lie in the other direction — it would track a fighter who had walked
+  // out of the disc — and it would need a stored `targetId` on `ActiveCast`, i.e. a second
+  // answer to "who is this hitting" that could disagree with the first.
   const target = nearestLivingOpponent(state, attacker);
-  const weapons = CHARACTERS[attacker.characterId].weapons;
-  const w = weapons[weaponIndex];
-  if (!w) return false;
-
-  const now = state.elapsed;
-  if (now - attacker.lastUsed[weaponIndex] < w.cooldown) return false;
-  attacker.lastUsed[weaponIndex] = now;
-  events.push({ type: 'weapon-fired', fighterRole: attacker.role, fighterId: attacker.id, weaponKey: w.key });
-
-  // ── ATTACKING SPENDS YOUR COVER (DECISIONS §29c) ───────────────────────────
-  //
-  // Uri: *"attacking from under it will break it and reveal you. You can also step out and
-  // attack."* Both halves, at the one point in the sim where "a fighter attacked" is a
-  // fact — the same single-choke-point doctrine `applyDamage` applies to HP and to the
-  // level multiplier, and for the same reason: there are two attack paths below (melee and
-  // ranged, the second with three spawn shapes) and a rule applied in some of them is a
-  // silent bug in the rest.
-  //
-  // ── WHY *HERE*, ABOVE EVERY OUTCOME TEST ───────────────────────────────────
-  //
-  // This sits after the cooldown gate and before range, cone, target-alive and every other
-  // outcome test, so the reveal follows THE ACT OF ATTACKING and not its success. That is
-  // the same line this function already draws for the cooldown — "too far", "wrong
-  // direction" and "target already dead" all still consume the press — and it is the only
-  // version that is symmetric: an attacker cannot learn whether it connected before
-  // deciding whether it was seen, and neither can the fighter watching it.
-  //
-  // ── AND WHY A `self` PRESS DOES NEITHER ────────────────────────────────────
-  //
-  // Uri's word is *attacking*. The heal is the roster's only `self` weapon; it deals no
-  // damage, spawns no projectile, and leaks nothing about where its caster is — it is
-  // exactly the press `ai.ts` already exempts from the sight gate ("it targets the caster,
-  // needs no sight of anyone"), and making concealment treat it as an attack here while
-  // that file treats it as not-an-attack there would be this project's oldest defect shape
-  // in a new place. §26(l) asserts BOTH directions, so the exemption cannot silently widen
-  // to `ranged` nor silently vanish.
-  //
-  // ⚠️ INERT WHERE NO ARENA DECLARES A REGION: `breakConcealment` walks an empty list and
-  // `revealedUntil` is read only through `movement.ts:isHidden`, which returns false either
-  // way when nothing conceals. `tools/tmp/conceal_lab.mjs --bitid` is the proof, not this
-  // paragraph.
-  if (w.type !== 'self') {
-    attacker.revealedUntil = now + CONCEAL_ATTACK_REVEAL_MS;
-    for (const box of breakConcealment(attacker.x, attacker.y, state.arena, state.brokenConcealment)) {
-      events.push({
-        type: 'concealment-broken',
-        ownerRole: attacker.role,
-        ownerId: attacker.id,
-        x: box.x,
-        y: box.y,
-        w: box.w,
-        h: box.h,
-        kind: box.kind,
-      });
-    }
-  }
 
   if (w.type === 'self') {
     // ── THE HEAL SCALES WITH LEVEL, AND ON THE *HEALTH* LADDER ────────────────

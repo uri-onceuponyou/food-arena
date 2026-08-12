@@ -284,6 +284,22 @@ export const FOG_TICK_MS = 300;
 export const FOG_DAMAGE = 15;
 
 /**
+ * The fog's damage RATE, in HP per second — the same 15/300 the two constants above
+ * state, expressed once so nobody writes `15 / 300` again.
+ *
+ * It exists because `ai.ts` needs it: a fighter that opens a `castMs` cast during sudden
+ * death is rooted for the whole of it while the fog burns at this rate over the WHOLE
+ * arena (`SUDDEN_DEATH_RADIUS` is 0), so "will this cast kill me before it resolves" is
+ * `hp <= castMs * FOG_DPS / 1000`. Writing that arithmetic in `ai.ts` would be a second
+ * statement of the fog — the one defect shape this codebase has recorded most often —
+ * so the rate is stated HERE, beside the two numbers it is derived from.
+ *
+ * ⚠️ It is DERIVED, not authored. Moving `FOG_DAMAGE` or `FOG_TICK_MS` moves this, which
+ * is the point; do not replace it with a literal.
+ */
+export const FOG_DPS = (FOG_DAMAGE / FOG_TICK_MS) * 1000;
+
+/**
  * FLOOR on the closing ring: `safeRadius` never shrinks below this.
  *
  * Without it the ring reaches zero at the final whistle, which means the last seconds
@@ -2218,6 +2234,60 @@ export interface Weapon {
   giantSlam?: boolean;
   /** `self` type only. */
   healAmount?: number;
+
+  /**
+   * ── WIND-UP: how long this weapon takes to GO OFF after it is pressed, in ms ──
+   *
+   * Absent or 0 — every weapon in the roster but one — means the press and the effect
+   * happen in the same `stepMatch` call, which is what the sim did before this field
+   * existed. `combat.ts:attemptAttack` therefore takes exactly the same path for them
+   * and the whole sim is bit-identical without it.
+   *
+   * Above 0 the press only OPENS the attack (`Fighter.cast`); `sim.ts`'s fighter loop
+   * resolves it `castMs` later through `combat.ts:resolveDueCast`, and the caster is
+   * ROOTED and its AIM IS FROZEN for the whole window (`state.ts:movementLocked` /
+   * `isCasting`). `weapon-fired` — the event every presentation layer draws the swing
+   * off — is emitted at the RESOLVE, not at the press, so the animation and the damage
+   * describe the same instant.
+   *
+   * ── WHY IT IS A SEPARATE FIELD AND NOT A SECOND MEANING OF ANYTHING ─────────
+   *
+   * `range` is on record in this file as *"two quantities wearing one number"* —
+   * `ai.ts:pickWeapon` gates on it while `sim.ts:stepProjectiles` retires on it — and
+   * `damage` cost 50.6 pp on Hamburger by being per-PELLET where two readers assumed
+   * per-press. So this deliberately does NOT reuse `cooldown`. The two are independent
+   * and both are live:
+   *
+   *     press -> effect        castMs      (this field; the telegraph)
+   *     press -> next press    cooldown    (unchanged)
+   *
+   * `Fighter.lastUsed[i]` is still stamped at the PRESS, so press-to-press throughput is
+   * `max(cooldown, castMs)` and at 1100/3500 it is exactly the 3500 it always was.
+   * 🚨 **DO NOT "PAY THE WIND-UP BACK" WITH `cooldown -= castMs`.** Throughput did not
+   * move, so that would be a straight buff on top of a nerf that was the point.
+   *
+   * ── THE NUMBER, AND WHERE IT COMES FROM ────────────────────────────────────
+   *
+   * Uri authorised the mechanic with a stated goal: *"a telegraph you can dodge"*. That
+   * makes the duration a MEASURED quantity, not a taste one — the target must be able to
+   * leave the effect by moving during the window. For a melee weapon the effect is a
+   * disc of `range` around a caster who cannot move, so from separation 0 the escape
+   * costs `range / speedFor(character, PLAYER_SPEED)`:
+   *
+   *     REACH.meleeHeavy 84 wu       fastest human 700.00 ms · slowest human 795.45 ms
+   *
+   * Below 700 ms nobody escapes and it is a wind-up, not counterplay; above 795.45 ms
+   * everybody escapes on reflex and it is a dead button. Both ends are failures. Adding
+   * a human reaction to a sudden onset (~300 ms) puts the first duration that is a real
+   * decision for the WHOLE roster at ~1100 ms: a player who reacts inside 304.55 ms
+   * escapes, a player who does not is hit. That 304.55 ms is the counterplay window and
+   * it is the number this feature is judged on.
+   *
+   * ⚠️ **AND IT IS UNDODGEABLE AGAINST A SLOWED TARGET** — 1767.68 ms at
+   * `SLOW_MOVE_MULTIPLIER` — which matters because Water Bottle's own Spray applies
+   * `slow`. Spray -> Mega is a two-press combo on one character. `DECISIONS §74(c)`.
+   */
+  castMs?: number;
 }
 
 /**
@@ -3326,7 +3396,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Spray', name: 'Water Spray', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 850, speed: SPEED.close, color: '#BFEFFF', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💦' },
       { key: 'Glass', name: 'Glass Shards', type: 'ranged', range: REACH.rangedMid, damage: 7, cooldown: 1100, speed: SPEED.mid, color: '#BFEFFF', effect: 'stun', emoji: '🧊' },
       { key: 'Cap', name: 'Cap Shot', type: 'ranged', range: REACH.rangedLong, damage: 6, cooldown: 900, speed: SPEED.long, color: '#1E90D8', effect: 'slow', emoji: '🔵' },
-      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', emoji: '🌊' },
+      // 🌊 THE ROSTER'S ONLY CAST WEAPON, AND THE ONLY CARD THAT NAMES ITS OWN WIND-UP.
+      // Its blurb says *"takes a few seconds"* and the record had `castMs` 0 — 3500 was
+      // the COOLDOWN, which is a different quantity and is not visible to the player.
+      // 1100 ms is derived in `Weapon.castMs` from `REACH.meleeHeavy` and the roster's
+      // slowest human speed; it leaves a 304.55 ms reaction window against the slowest
+      // character and 400.00 ms against the fastest. See `DECISIONS §74`.
+      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1100, emoji: '🌊' },
     ],
     abilities: [
       { emoji: '💦', name: 'Water Spray', desc: 'Sprays water that slows enemies down a lot', weapon: 'Spray' },
@@ -3967,12 +4043,17 @@ export function weaponMechanics(w: Weapon): string[] {
   if (w.giantSlam) out.push('slam');
   if (w.trailBoosted) out.push('trailBoost');
   if (w.healAmount !== undefined) out.push('heal');
+  // A wind-up is a KIT SHAPE, not a number: it changes what pressing the weapon commits
+  // you to (rooted, aim frozen, dodgeable) in a way `damage`/`cooldown` cannot express.
+  // Named here so the distinctiveness instruments can see it — an unnamed mechanic is
+  // invisible to `kitSignature` and therefore to every measurement built on it.
+  if (w.castMs !== undefined && w.castMs > 0) out.push('cast');
   return out;
 }
 
 /** Every mechanic `weaponMechanics` can name. The roster is asserted to use all of them. */
 export const WEAPON_MECHANICS = [
-  'pellets', 'homing', 'peck', 'combo', 'splatter', 'slam', 'trailBoost', 'heal',
+  'pellets', 'homing', 'peck', 'combo', 'splatter', 'slam', 'trailBoost', 'heal', 'cast',
 ] as const;
 
 /**
