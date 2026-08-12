@@ -357,6 +357,29 @@ const OFFLINE = [
   { key: 'tools/tmp/tf_reach.mjs --selftest', probes: [pr(['tools/tmp/tf_reach.mjs', '--selftest'], /^\s*(\d+)\/\d+ assertions passed\s*$/m)] },
   { key: 'tools/tmp/tf_bitid.mjs --selftest', probes: [pr(['tools/tmp/tf_bitid.mjs', '--selftest'], /^\s*(\d+)\/\d+ assertions passed\s*$/m)] },
   { key: 'tools/tmp/dup_census.mjs --selftest', probes: [pr(['tools/tmp/dup_census.mjs', '--selftest'], /^\s*(\d+)\/\d+ selftest arms passed\s*$/m)] },
+  // ── THE THREE GUARDS THAT WERE INVISIBLE TO THIS TOOL UNTIL 2026-08-12 ────────────────
+  // `al_guard`, `n2_geom` and `sx_fog` were all committed and appeared ZERO times in
+  // docs/TOOLS.md. This tool reads the gate table and never enumerates `tools/tmp/`, so a
+  // tool that was never REGISTERED is invisible to the one check that would notice it
+  // rotting — and `al_guard` is specifically the guard against the class that hid the ×4
+  // map change for a session. An unregistered guard is a guard that dies quietly.
+  //
+  // ⚠️ `al_guard`'s BARE run is the live gate and is NOT registered: it exits 1 at HEAD on
+  //    two hits in `docs/LESSONS.md:1028`, where the lesson about the stale-1×-literal class
+  //    quotes the historical defect verbatim. Registering it would make this tool
+  //    permanently red for a reason that is not a stale count. Its row says so in full.
+  //    `--selftest` is what proves the arms still FAIL on the bugs they guard: 9 known-bads
+  //    re-injected verbatim, each paired with the fixed form of the same line.
+  // ⚠️ NOT `S`: al_guard prefixes its summary (`✅ PASS  al_guard --selftest: N passed, …`),
+  //    so `^` cannot be used. Read off a real run's raw bytes and checked for ambiguity —
+  //    the pattern matches EXACTLY ONCE in the whole output.
+  { key: 'tools/tmp/al_guard.mjs --selftest', probes: [pr(['tools/tmp/al_guard.mjs', '--selftest'], /al_guard --selftest: (\d+) passed, \d+ failed/)] },
+  // Two rows, two different questions, both offline (0.8 s / 1.1 s; no playwright import, no
+  // browser, no snapshot — `rg_lib` shells `esbuild` only, and was TIMED before registering,
+  // which is the `hw_ord` lesson). `--knownbad sort` is the live cast battery `nk_neckgate`
+  // already cites; `--selftest` is the fault battery that proves it can go red.
+  { key: 'tools/tmp/n2_geom.mjs --knownbad sort', probes: [pr(['tools/tmp/n2_geom.mjs', '--knownbad', 'sort'], S)] },
+  { key: 'tools/tmp/n2_geom.mjs --selftest',      probes: [pr(['tools/tmp/n2_geom.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/rg_neckz.mjs --selftest', probes: [pr(['tools/tmp/rg_neckz.mjs', '--selftest'], /^\s*(\d+) pass, \d+ fail\s*$/m)] },
   { key: 'tools/tmp/rg_taper.mjs --selftest', probes: [pr(['tools/tmp/rg_taper.mjs', '--selftest'], /^\s*(\d+) pass, \d+ fail\s*$/m)] },
   { key: 'tools/tmp/rg_gap.mjs --selftest',   probes: [pr(['tools/tmp/rg_gap.mjs', '--selftest'], /^\s*(\d+) pass, \d+ fail\s*$/m)] },
@@ -475,6 +498,14 @@ const SKIP = [
   ['tools/tmp/np_ab.mjs',        'browser', 'the N=2 presentation identity battery: 4 served arms, 9 compared fields, per-file tree control, roster-swap known-bad'],
   ['tools/tmp/np_nfighter.mjs', 'browser', 'N=3..6 presentation self-consistency + slot-swap known-bad'],
   ['tools/tmp/sd_feelevent.mjs', 'browser', 'the sudden-death feel event through the shipped event stream'],
+  // ⚠️ Keyed on the FULL row string, args included — the SKIP registry matches the row, not the
+  // script path (see the `ic_plate` note above; keying on the path alone reads as UNREG).
+  // BROWSER by behaviour, not by name: `import { chromium } from 'playwright'`, and its verdict
+  // is mean luma off a real `renderer.domElement.toDataURL`. It has no `--selftest`; the two
+  // assertions are a CONTRACT (one absolute positive control, one ratio row) rather than a
+  // sample, so the count is stable — verified 2 passed / 0 failed on 2026-08-12 against a
+  // snapshot of a detached worktree of 072f245.
+  ['tools/tmp/sx_fog.mjs --url <snapshot> --src-root <tree>', 'browser', 'does the sudden-death canopy actually reach the ×4 arena\'s corners — measured in PIXELS, where kx_fogcover measures the geometry; launches Chromium and reads the canvas back'],
   ['tools/tmp/x4_shot.mjs', 'browser', 'photographs a real 3/4/6-fighter opening on the arena\'s own ×4 spawns; its verdict is a set of PNGs plus a phase/HP census, not a number'],
   // ⚠️ SLOWEST browser gate registered here — over ten minutes on a contended box. Its
   //    selftest is AGGREGATE and needs the WHOLE 23-weapon sweep: one weapon exercises the
