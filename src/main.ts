@@ -11,8 +11,10 @@
  * `tools/tmp/` drives `http://localhost:5173/?player=…&enemy=…` and waits on
  * `window.__gameReady`. Rather than break all of it, the boot route is derived:
  *
- *   * `?screen=opening|home|characters|trophies|shop|settings|match` — explicit, wins
- *     over everything.
+ *   * `?screen=opening|home|characters|trophies|shop|settings|lobby|match` — explicit, wins
+ *     over everything. ⚠️ This IS a doc copy of the ladder below and it went stale once
+ *     already; `shell.ts:ROUTE_NAMES` is the set a `popstate` validates against and the two
+ *     have to be added to together.
  *   * otherwise, if ANY match-only QA parameter is present boot straight into the match,
  *     exactly as before. Those parameters have no meaning anywhere else, so their presence
  *     is an unambiguous statement of intent.
@@ -73,6 +75,11 @@ function bootRoute(profile: PlayerProfile): Route {
     const seats = seatsFromParams(params);
     return { name: 'match', player, enemy: characterParam('enemy', enemyFallback), seats };
   }
+  // `DECISIONS §74`'s lobby. It carries no arguments (`types.ts` says why at length), so
+  // `?screen=lobby` is a complete description of it and a reload lands on a working screen
+  // rather than re-deriving the boot route and showing the title card — which is the trap
+  // that once made a capture labelled `home` photograph a different screen entirely.
+  if (params.get('screen') === 'lobby') return { name: 'lobby' };
   if (params.get('screen') === 'characters') return { name: 'characters' };
   if (params.get('screen') === 'trophies') return { name: 'trophies' };
   if (params.get('screen') === 'shop') return { name: 'shop' };

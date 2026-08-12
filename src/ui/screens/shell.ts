@@ -77,6 +77,7 @@
 
 import type { Route, RouteName, Screen, ScreenContext } from './types';
 import { CHARACTER_IDS, type CharacterId } from '../../game/rules';
+import { seatCountFor } from './brawl';
 import { PlayerProfile } from './profile';
 import { ensureScreenStyles } from './theme';
 import { disposeCharacterStage } from './charStage';
@@ -87,6 +88,7 @@ import { applyStoredSettings, createSettingsScreen } from './settings';
 import { createCharacterSelectScreen } from './characterSelect';
 import { createTrophyRoadScreen } from './trophyRoad';
 import { createShopScreen } from './shop';
+import { createLobbyScreen } from './lobby';
 import { createMatchScreen } from './matchScreen';
 
 declare global {
@@ -115,11 +117,36 @@ declare global {
 
 /** Every route name, as data, so a value off `history.state` can be validated. */
 const ROUTE_NAMES: readonly string[] = [
-  'opening', 'home', 'characters', 'trophies', 'shop', 'settings', 'match',
+  'opening', 'home', 'characters', 'trophies', 'shop', 'settings', 'lobby', 'match',
 ];
 
 function isCharacterId(v: unknown): v is CharacterId {
   return typeof v === 'string' && (CHARACTER_IDS as readonly string[]).includes(v);
+}
+
+/**
+ * 🚨 **`seats` USED TO BE DROPPED BY EVERY PATH IN THIS FILE, AND IT WAS SILENT.**
+ *
+ * `parseRoute` reconstructed `{ name, player, enemy }` and `routeUrl` wrote three keys, so
+ * a match route carrying `seats: 6` survived exactly as long as nobody touched history:
+ * one `history.back()` — i.e. the **Android hardware back button** — and the same match
+ * came back as a 1v1, with nothing red anywhere. Measured on a lobby-shaped arm before this
+ * fix (`e858594`'s probe): `route.seats === 6` on mount, **absent from the URL**, and
+ * `undefined` after one back and after a reload.
+ *
+ * It hid because the flag's only caller was `main.ts`, which reads `?seats=` off the boot
+ * URL — and `routeUrl` seeds from `location.search`, so a boot parameter was copied forward
+ * by the "preserve every other query parameter" rule. **The data was present in two places
+ * and the route object still lost it.** A screen that navigates with `seats` set has no such
+ * accident to be saved by, which is why this is a prerequisite for the lobby and not a
+ * follow-up to it.
+ *
+ * `seatCountFor` rather than a `typeof v === 'number'` check: `history.state` outlives the
+ * build that wrote it, so this is untrusted input and the LEGAL range is `brawl.ts`'s to
+ * state — the same function `?seats=` is parsed through.
+ */
+function seatsOf(raw: unknown): number | undefined {
+  return typeof raw === 'number' ? seatCountFor(raw) : undefined;
 }
 
 /**
@@ -137,8 +164,10 @@ function parseRoute(raw: unknown): Route | null {
   const name = (raw as { name?: unknown }).name;
   if (typeof name !== 'string' || !ROUTE_NAMES.includes(name)) return null;
   if (name === 'match') {
-    const { player, enemy } = raw as { player?: unknown; enemy?: unknown };
-    return isCharacterId(player) && isCharacterId(enemy) ? { name, player, enemy } : null;
+    const { player, enemy, seats } = raw as { player?: unknown; enemy?: unknown; seats?: unknown };
+    return isCharacterId(player) && isCharacterId(enemy)
+      ? { name, player, enemy, seats: seatsOf(seats) }
+      : null;
   }
   return { name } as Route;
 }
@@ -162,14 +191,29 @@ function routeFromSearch(search: string): Route | null {
   if (name === 'match') {
     const player = p.get('player');
     const enemy = p.get('enemy');
-    return isCharacterId(player) && isCharacterId(enemy) ? { name, player, enemy } : null;
+    return isCharacterId(player) && isCharacterId(enemy)
+      // Parsed through `brawl.ts` exactly as `main.ts` parses the boot URL, so a
+      // hand-edited `?seats=99` is refused identically on both paths.
+      ? { name, player, enemy, seats: seatsFromSearch(p) }
+      : null;
   }
   return { name } as Route;
 }
 
+/** `?seats=` off an arbitrary search string. Same policy as `main.ts`, one function down. */
+function seatsFromSearch(p: URLSearchParams): number | undefined {
+  const raw = p.get('seats');
+  return raw === null ? undefined : seatCountFor(Number(raw));
+}
+
 function sameRoute(a: Route, b: Route): boolean {
   if (a.name !== b.name) return false;
-  if (a.name === 'match' && b.name === 'match') return a.player === b.player && a.enemy === b.enemy;
+  // ⚠️ `seats` IS part of a match's identity. Without it, 6 seats → 2 seats on the same
+  // matchup was `sameRoute`, so `historyModeFor` REPLACED instead of pushing and Back
+  // skipped straight past the six-player match the player had just left.
+  if (a.name === 'match' && b.name === 'match') {
+    return a.player === b.player && a.enemy === b.enemy && a.seats === b.seats;
+  }
   return true;
 }
 
@@ -191,9 +235,17 @@ function routeUrl(route: Route): string {
   if (route.name === 'match') {
     p.set('player', route.player);
     p.set('enemy', route.enemy);
+    // ⚠️ DELETED when absent, not left alone. `?seats=` is a MATCH-ONLY parameter
+    // (`main.ts:MATCH_ONLY_PARAMS`) and this function seeds from the current search — so a
+    // boot URL of `?seats=6` used to be copied onto every later navigation, including the
+    // two-seat duel character select starts. The URL would say 6 while the match played 2,
+    // and a reload of it would then honour the URL: the same matchup coming back with four
+    // extra fighters. Absent means absent.
+    if (route.seats === undefined) p.delete('seats'); else p.set('seats', String(route.seats));
   } else {
     p.delete('player');
     p.delete('enemy');
+    p.delete('seats');
   }
   const q = p.toString();
   return `${window.location.pathname}${q ? `?${q}` : ''}${window.location.hash}`;
@@ -312,6 +364,11 @@ export function createShell(opts: ShellOptions): Shell {
       // shell's rAF loop entirely rather than ticking an idle portrait behind it.
       case 'shop': return createShopScreen(ctx);
       case 'settings': return createSettingsScreen(ctx);
+      // Pure DOM like the shop — no `update()`, so mounting it stops the rAF loop rather
+      // than ticking an idle portrait behind it. The seat portraits are `thumbs.ts` PNGs,
+      // not a live stage, which is also why navigating here does not touch the shared
+      // WebGL context the way `match` does.
+      case 'lobby': return createLobbyScreen(ctx);
       case 'match': return createMatchScreen(ctx, route);
     }
     // Unreachable by the type system and NOT unreachable in fact. A `Route` can arrive

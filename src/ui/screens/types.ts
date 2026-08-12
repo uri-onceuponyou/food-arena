@@ -39,6 +39,31 @@ export type Route =
   | { name: 'shop' }
   | { name: 'settings' }
   /**
+   * WHERE A MATCH IS CONFIGURED — `DECISIONS §74`, Uri, 2026-08-12:
+   *
+   * > *"We need the lobby where the gameplay is set, to be able to choose how many
+   * > players, and assign bots to the one who plays locally. Also wire it up to
+   * > multiplayer — real users can join the game as well (from UI perspective); the
+   * > actual connection to multiplayer will be done later."*
+   *
+   * 🚨 **IT CARRIES NO ARGUMENTS, AND THAT IS A DECISION.** The obvious shape is
+   * `{ name: 'lobby'; player; enemy }` mirroring `match` — and it is wrong here, because
+   * the player's fighter already has ONE home (`profile.selected`, written by character
+   * select's Equip and read by home's hero) and a route field would be a second. A route
+   * argument that duplicates persisted state is a copy that goes stale the moment the
+   * player equips someone from anywhere else.
+   *
+   * The opponent is the other half: `characterSelect.ts:pickOpponent` is `Math.random()`
+   * and the lobby rolls its own seat 1 **once per mount**, so the field it SHOWS is the
+   * field it starts. Carrying that on the route would put a rolled value in the URL and
+   * in `history.state`, i.e. a Back button that re-enters the lobby with an opponent
+   * chosen for a different visit. It is screen state, so it lives in the screen.
+   *
+   * Net effect: `?screen=lobby` is complete, a reload lands on a working lobby, and there
+   * is nothing on this route that can disagree with the profile.
+   */
+  | { name: 'lobby' }
+  /**
    * A live match.
    *
    * `seats` is the `DECISIONS §66` flag and it is **default-off by being OPTIONAL**: every

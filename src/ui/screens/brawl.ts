@@ -20,6 +20,18 @@
  * answers question 1, the affordance navigates with `seats` set and this file does not
  * change.
  *
+ * ── ✅ URI ANSWERED QUESTION 1 ON 2026-08-12 (`DECISIONS §74`) ───────────────
+ * > *"We need the lobby where the gameplay is set, to be able to choose how many players,
+ * > and assign bots to the one who plays locally."*
+ *
+ * `screens/lobby.ts` is that affordance and **the paragraph above held**: it navigates
+ * with `seats` set and calls `brawlRoster` to RENDER the field it is about to seat. The
+ * one thing it needed that did not exist was the seat-count predicate as a function
+ * rather than as three lines inside a query parser — `seatCountFor` below — because a
+ * screen with its own opinion about which counts are legal is a second copy of this
+ * file's policy. `seatsFromParams` now delegates to it, so `?seats=` and the lobby's
+ * Start button cannot disagree about what `2` means.
+ *
  * ── Why a separate module rather than a block inside `matchScreen.ts` ────────
  * Two reasons, and the second is the one that matters.
  *   * Two callers already: `main.ts` reads the seat count off the URL, `matchScreen.ts`
@@ -63,11 +75,47 @@ import { MAX_FIGHTERS, MIN_FIGHTERS } from '../../game/state.ts';
 export function seatsFromParams(params: URLSearchParams): number | undefined {
   const raw = params.get('seats');
   if (raw === null) return undefined;
-  const n = Number(raw);
+  return seatCountFor(Number(raw));
+}
+
+/**
+ * THE SEAT-COUNT PREDICATE, as a function, so every caller shares one answer.
+ *
+ * `n` in and `n` out, or `undefined` for "the shipped duel" — which is what `Route.seats`
+ * carries on every shipped navigation. It is **the same three lines `seatsFromParams` used
+ * to inline**, lifted verbatim, and that function now delegates to it. Three callers today:
+ *
+ *   * `seatsFromParams` — `?seats=` (above).
+ *   * `screens/lobby.ts` — the Start button. **This is why it exists.** A lobby offering
+ *     `2 3 4 5 6` has to map its own `2` to `undefined` rather than to `2`, and a screen
+ *     that decided that for itself would be a second place the duel's one path could be
+ *     routed around. `seatCountFor(2) === undefined` is that rule, in this file, once.
+ *   * `screens/shell.ts` — validating a `seats` off `history.state`, which outlives the
+ *     build that wrote it and can carry anything at all.
+ *
+ * ⚠️ **The two guards below are byte-for-byte the ones `sp6_seats.mjs --selftest` mutates**
+ * (`nofloor` replaces the range line with `if (n < 0) return undefined;`). Moving them here
+ * keeps that known-bad pointed at live code: mutate this and `seatsFromParams` still breaks,
+ * because it has no range check of its own any more.
+ */
+export function seatCountFor(n: number): number | undefined {
   if (!Number.isInteger(n)) return undefined;
   if (n <= MIN_FIGHTERS || n > MAX_FIGHTERS) return undefined;
   return n;
 }
+
+/**
+ * Every seat count the lobby may offer, low to high — `MIN_FIGHTERS..MAX_FIGHTERS`.
+ *
+ * ⚠️ **DERIVED, so it survives the day the sim seats eight.** A hand-typed `[2,3,4,5,6]` in
+ * a screen is the same class as the 1× map literals that stayed *legal* while being wrong
+ * (`DECISIONS §67`) — nothing would fail, the lobby would simply stop offering a seat count
+ * the sim supports. Note the range starts at `MIN_FIGHTERS` while `seatCountFor` refuses it:
+ * that is not a contradiction, it is the two halves of "one path to two seats" — the lobby
+ * OFFERS 2 and expresses it as an absent flag.
+ */
+export const SEAT_CHOICES: readonly number[] =
+  Array.from({ length: MAX_FIGHTERS - MIN_FIGHTERS + 1 }, (_, i) => MIN_FIGHTERS + i);
 
 /**
  * THE FIELD, given the two fighters a route already names and how many seats to fill.

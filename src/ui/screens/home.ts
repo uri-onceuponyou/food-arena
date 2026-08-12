@@ -155,8 +155,16 @@ import { getCharacterStage, PORTRAIT_BG_CSS } from './charStage';
 /** The one mode this build ships. Named here rather than in `rules.ts` because it is
  *  a piece of front-end copy, not a balance constant — but the DURATION beside it is
  *  read from the sim so the lobby cannot promise a match length the sim does not
- *  keep. */
-const MODE_NAME = '1v1 · Kitchen Rumble';
+ *  keep.
+ *
+ *  ⚠️ **WAS `'1v1 · Kitchen Rumble'`, and the `1v1` became FALSE on 2026-08-12.**
+ *  `DECISIONS §74` gives the player a seat count of 2–6 (`screens/lobby.ts`), so a mode
+ *  line that hardcodes the field size is a claim the model stops computing the moment
+ *  anyone taps 3 — against this screen's own standing rule, quoted from the header:
+ *  *"Nothing on this screen advertises something that does not work."* The count is not
+ *  replaced with a number here, because home does not know one: the lobby opens at the
+ *  default every time and the count is state that lives there. */
+const MODE_NAME = 'Kitchen Rumble';
 
 function formatDuration(ms: number): string {
   const total = Math.round(ms / 1000);
@@ -352,10 +360,32 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     </section>
 
     <footer class="home-bottom">
-      <div class="home-mode">
-        <span class="home-mode-name">${MODE_NAME}</span>
-        <span class="home-mode-sub" data-el="modesub">${formatDuration(MATCH_DURATION_MS)} · last one standing</span>
-      </div>
+      <!-- 🚨 THE LOBBY ENTRY, AND IT IS THIS ELEMENT RATHER THAN THE CTA.
+           NOTE: no backticks anywhere in this literal. A backtick inside a template
+           string terminates it, and menu_accept parses all 88 modules for exactly this.
+           DECISIONS 74 asks for "the lobby where the gameplay is set". The obvious
+           wiring is the start button, and it is REFUSED by a measurement: journey.mjs
+           — the only end-to-end gate in this project — and tools/match-play.mjs both
+           click [data-el=start], wait for __screen === "characters", then click
+           [data-el=fight]. Re-pointing the CTA breaks both, at a 120 s timeout each, and
+           neither file is in this pass's owned set. HEAD was unbootable for 24 commits
+           with every unit gate green; a red end-to-end gate is not worth one tap.
+
+           It is also where the reference plates put mode configuration — a wide tappable
+           band immediately left of the primary CTA, mode on line 1, variant on line 2 —
+           which is the composition this element already had as a dead div. So the change
+           is that it becomes what it looks like.
+
+           ⚠️ It KEEPS .home-mode and both inner class names: home_metrics,
+           screen_metrics and menu_accept all key on them. -->
+      <button class="home-mode" type="button" data-el="mode"
+              aria-label="Match lobby — choose how many players are in the match">
+        <span class="home-mode-lines">
+          <span class="home-mode-name">${MODE_NAME}</span>
+          <span class="home-mode-sub" data-el="modesub">${formatDuration(MATCH_DURATION_MS)} · last one standing</span>
+        </span>
+        <span class="home-mode-go" aria-hidden="true">${icon('party')}</span>
+      </button>
       <button class="fa-btn fa-btn--primary" type="button" data-el="start">${icon('play')} Start Game</button>
     </footer>
 
@@ -659,8 +689,23 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   };
   root.addEventListener('click', onClick);
 
+  // UNCHANGED, deliberately. `journey.mjs` (the only end-to-end gate) and
+  // `tools/match-play.mjs` both drive this button and then wait on
+  // `__screen === "characters"`; re-pointing it at the lobby breaks both at a 120 s
+  // timeout, and neither tool is in this pass's owned set. It is also what keeps
+  // `2f907a7`'s four-arm `np_identity` bit-identity true by CONSTRUCTION — the shipped
+  // two-seat path is not touched at all. See `.home-mode` in the markup above for the
+  // lobby's entry point and the full reasoning.
   q<HTMLButtonElement>('start').addEventListener('click', () => {
     ctx.navigate({ name: 'characters' });
+  });
+
+  // `DECISIONS §74` — where the match is configured. Not routed through the delegated
+  // `[data-go]` handler above because that one maps a string to a route by name and this
+  // is the screen's second committed action, which deserves to be readable beside the
+  // first rather than as one more entry in a dispatch table.
+  q<HTMLButtonElement>('mode').addEventListener('click', () => {
+    ctx.navigate({ name: 'lobby' });
   });
 
   q<HTMLButtonElement>('settings').addEventListener('click', () => {
@@ -1856,19 +1901,50 @@ const CSS = `
    shipped reference in a blind A/B — so the same move that makes the copy readable is
    the move that makes it read as game UI rather than as a caption floating on the
    backdrop. */
+/* ⚠️ NOW A <button> (see the markup): the plate is unchanged and what is added is the
+   press physics, the 44px tap floor and a trailing glyph. 'appearance: none' and the
+   explicit font declarations are not tidiness — a <button> inherits neither family nor
+   size, and 'screen_metrics.mjs' has caught real controls shipping in Arial for exactly
+   that reason. */
 .fa-home .home-mode {
+  appearance: none;
+  cursor: pointer;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
+  flex-direction: row;
+  align-items: center;
+  gap: clamp(8px, 1vw, 14px);
+  min-height: var(--tap);
   margin-inline-start: auto;
   text-align: end;
   min-width: 0;
+  font-family: 'Rubik', sans-serif;
   padding: 6px clamp(11px, 1.4vw, 18px);
   background: linear-gradient(180deg, rgba(44,30,60,0.94) 0%, rgba(20,13,30,0.96) 100%);
   border: var(--ds-stroke-2) solid var(--ink);
   border-radius: var(--ds-r-2);
+  --ds-lip: rgba(0,0,0,0.45);
   box-shadow: var(--ds-e3), var(--ds-bevel-dark);
+  transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
+}
+.fa-home .home-mode:hover { filter: brightness(1.12); }
+.fa-home .home-mode:active { transform: translateY(3px); box-shadow: var(--ds-e0); }
+.fa-home .home-mode-lines {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  min-width: 0;
+}
+/* The affordance. A dark plate that is suddenly tappable needs to say so, and the glyph
+   is the same 'who is in the match' mark the lobby's own count chip carries — so the two
+   screens are visibly the same subject rather than two unrelated controls. */
+.fa-home .home-mode-go {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--ds-t4);
+  color: var(--mustard-hi);
+  --fa-ic-ink: var(--mustard-hi);
 }
 .fa-home .home-mode-name {
   font-family: 'Rubik', sans-serif; font-weight: var(--ds-w-black);
@@ -2121,7 +2197,24 @@ const CSS = `
 @media (max-width: 700px) {
   .fa-home .home-middle { grid-template-columns: minmax(0, 1fr); }
   .fa-home .home-col { display: none; }
-  .fa-home .home-mode { display: none; }
+  /* ⚠️ WAS '.fa-home .home-mode { display: none; }', on the reasoning that the footer's
+     copy is not durable at this width and the mode block is only a caption. That reason
+     expired on 2026-08-12: the block is now the ONLY route to the match lobby
+     (DECISIONS 74), and hiding it would make the seat count unreachable in portrait
+     except by typing '?screen=lobby' — "hidden is unmeasurable", and worse, unusable.
+     Kept here per the project's rule on reversed assertions.
+
+     It does not squeeze onto the CTA's line at 360px; it takes its own. '.home-bottom'
+     already wraps at this breakpoint, so this is one declaration, and the block goes
+     full-width and left-aligned because a right-aligned label above a full-width button
+     reads as detached from it. */
+  .fa-home .home-mode {
+    order: -1;
+    flex: 1 0 100%;
+    justify-content: space-between;
+    text-align: start;
+  }
+  .fa-home .home-mode-lines { align-items: flex-start; }
   .fa-home .home-bottom { flex-wrap: wrap; }
   /* Two rows rather than one. The spacer goes because a flex spacer inside a wrapping
      row pushes the wrap point around for no benefit; the chips take the first line and
