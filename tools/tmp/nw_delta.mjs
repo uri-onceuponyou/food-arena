@@ -35,6 +35,10 @@ import {
   checkStateIntegrity, decodeMatchState, diffStates, encodeMatchState,
 } from '../../src/net/wire.ts';
 import { createMatch, stepMatch } from '../../src/game/sim.ts';
+import {
+  COUNTDOWN_FROM, COUNTDOWN_START_FLASH_MS, FOG_CLOSE_MS, FOG_HOLD_MS, MATCH_DURATION_MS,
+  SUDDEN_DEATH_MS,
+} from '../../src/game/rules.ts';
 import { buildLivedState, buildSuddenDeathState, buildEndedState, fixtureConfigs, makeFixtureArena, stimulus } from './nw_fixture.mjs';
 
 const args = new Set(process.argv.slice(2));
@@ -60,8 +64,39 @@ const ARENA = makeFixtureArena();
 const DT = 1000 / 60;
 
 /**
+ * ── THE CLOCK, READ FROM `rules.ts` — NEVER A TICK COUNT TYPED IN HERE ──────────
+ *
+ * 🚨 **A FIXED-LENGTH CAPTURE WINDOW IS A TUNABLE, AND ON 2026-08-12 IT SILENTLY EMPTIED THE
+ * ONE KNOWN-BAD THIS FILE EXISTS FOR.** §D2's blinded differ ran over a hard-coded 1400 ticks
+ * (23.3 s). `6d5c4d6` gave the ring a 25 s HOLD before it closes at all, so the window ended
+ * **600 ticks before the first `hp` in this corpus moved** and the row reported
+ * `0 hp ops suppressed, 0 of 1400 ticks wrong` — a green control over an empty set, which is
+ * the `[].every()` failure `CLAUDE.md` #6 names.
+ *
+ * Measured, on this fixture at N=6 / humans=6 / seed 909: the countdown is
+ * `COUNTDOWN_FROM * 1000 + COUNTDOWN_START_FLASH_MS` = 3700 ms (tick 222); **no weapon lands
+ * in the first 33 s**, so the fog is the only thing that can move `hp`; the ring does not move
+ * before `FOG_HOLD_MS`; the first `hp` change is at tick 2003 (play 29 683 ms, 4.7 s into the
+ * close); and the match ends on its own at tick 3865.
+ *
+ * ⚠️ **THE FIX IS NOT "LENGTHEN THE WINDOW UNTIL IT GOES GREEN" — that is tuning a known-bad
+ * until it passes.** The window is REMOVED: the known-bad arm runs an ENTIRE match, and its
+ * only bound is the clock itself, so there is nothing left to tune. Three things are then
+ * asserted rather than assumed — that the match ended inside the bound, that the corpus
+ * contained `hp` movement AT ALL, and only then that blinding a differ to `hp` is caught.
+ */
+const COUNTDOWN_MS = COUNTDOWN_FROM * 1000 + COUNTDOWN_START_FLASH_MS;
+/** Every tick a match can possibly have: the countdown plus the whole clock, plus one. */
+const WHOLE_MATCH_TICKS = Math.ceil((COUNTDOWN_MS + MATCH_DURATION_MS) / DT) + 1;
+
+/**
  * Step a real match and, at every tick, diff → patch → compare against an INDEPENDENT full
  * encode, then decode and compare back to the state.
+ *
+ * `hpChangeTicks` is counted straight off the sim — not off the delta — so §D2a's
+ * non-emptiness claim can be made about the CORPUS independently of the machinery under test.
+ * `cappedOut` says the loop stopped because it ran out of ticks rather than because the match
+ * ended, which is the difference between "measured" and "gave up".
  */
 function sweep(n, ticks, { seed = 909, humans = 1, differ = diffWire } = {}) {
   const state = createMatch(ARENA, fixtureConfigs(ARENA, n, { humans }));
@@ -75,11 +110,23 @@ function sweep(n, ticks, { seed = 909, humans = 1, differ = diffWire } = {}) {
   let decodeMismatches = 0;
   let indexOps = 0;
   let literalOps = 0;
+  let hpChangeTicks = 0;
+  let firstHpTick = -1;
+  let ended = false;
+  let prevHp = state.fighters.map((f) => f.hp);
 
   for (let t = 1; t <= ticks; t++) {
     const inputs = [];
     for (let s = 0; s < n; s++) inputs.push(s < humans ? stimulus(seed, t, s) : null);
     stepMatch(state, DT, inputs);
+    {
+      const nowHp = state.fighters.map((f) => f.hp);
+      if (nowHp.some((h, i) => h !== prevHp[i])) {
+        hpChangeTicks++;
+        if (firstHpTick < 0) firstHpTick = t;
+      }
+      prevHp = nowHp;
+    }
 
     // THE INDEPENDENT SNAPSHOT. Produced by the encoder, never by the delta path.
     const nextWire = encodeMatchState(state);
@@ -102,11 +149,12 @@ function sweep(n, ticks, { seed = 909, humans = 1, differ = diffWire } = {}) {
 
     prevWire = patched;   // ⚠️ CHAIN FROM THE PATCHED TREE, not from `nextWire` — see §C1
     prevTick = t;
-    if (state.phase === 'ended') break;
+    if (state.phase === 'ended') { ended = true; break; }
   }
   return {
     state, bytes, ops, fullBytes, mismatches, firstMismatchTick, decodeMismatches,
     indexOps, literalOps, ticks: bytes.length,
+    hpChangeTicks, firstHpTick, ended, cappedOut: !ended && bytes.length >= ticks,
   };
 }
 
@@ -152,6 +200,16 @@ section('D. THE KNOWN-BADS — a smaller delta is what BOTH a working and a brok
   // which ~3.7 s is countdown, and six fighters spawned 892 wu apart on a 2800x2000 map had not
   // met. A known-bad with nothing to go bad on is the tautological-guard failure `CLAUDE.md` #6
   // names, and it PASSES, which is worse than failing.
+  //
+  // 🚨 **AND IT HAPPENED AGAIN, TO THE FIX.** 400 was raised to 1400 — a NUMBER, so the class
+  // of defect survived the repair. `6d5c4d6` put a 25 s hold in front of the ring; 1400 ticks
+  // is 23.3 s; the row went vacuous a second time and read `0 hp ops suppressed`. **Raising it
+  // to 4000 would have been the same mistake a third time.** The window is gone: this arm runs
+  // a WHOLE MATCH, bounded by `rules.ts`'s own clock, and the two non-emptiness rows below are
+  // what stand between a green tick and a control that cannot fail — D0 asks the SIM whether
+  // `hp` ever moved, D2a asks the BLINDED DIFFER whether it had anything to drop, and they are
+  // deliberately separate questions: a differ blinded to the wrong path name would pass D0 and
+  // fail D2a, and that is a real defect this row can now express.
   let droppedOps = 0;
   const blindDiffer = (prev, next, b, t) => {
     const d = diffWire(prev, next, b, t);
@@ -164,10 +222,25 @@ section('D. THE KNOWN-BADS — a smaller delta is what BOTH a working and a brok
     }
     return { ...d, i, v };
   };
-  const good = sweep(6, 1400, { humans: 6 });
-  const blind = sweep(6, 1400, { humans: 6, differ: blindDiffer });
-  ok('D1  CONTROL  the real differ is clean over the same ticks',
-    good.mismatches === 0, `${good.ticks} ticks`);
+  const good = sweep(6, WHOLE_MATCH_TICKS, { humans: 6 });
+  const blind = sweep(6, WHOLE_MATCH_TICKS, { humans: 6, differ: blindDiffer });
+  // ⚠️ D1 ALSO CARRIES THE DECODE CLAIM NOW, and that is a coverage repair rather than a
+  //    flourish. §C's sweeps are 900 ticks, which was 15 s of a 45 s match and is 11 s of play
+  //    on the 150 s clock — the ring does not move at all inside them any more, so §C alone no
+  //    longer round-trips a single tick of a CLOSING ring. This arm runs the whole match.
+  ok('D1  CONTROL  the real differ is clean over the same ticks, and every one of them decodes'
+    + ' back to the MatchState',
+    good.mismatches === 0 && good.decodeMismatches === 0,
+    `${good.ticks} ticks, ${good.decodeMismatches} decode mismatches`);
+  ok('D0a CONTROL ON THE CORPUS  the sweep ran a WHOLE match — it ended, it did not run out of'
+    + ' ticks', good.ended && !good.cappedOut && blind.ticks === good.ticks,
+    `${good.ticks} of a possible ${WHOLE_MATCH_TICKS} ticks, phase ${good.state.phase}`);
+  ok('D0b CONTROL ON THE CORPUS  `hp` ACTUALLY MOVED in it — asked of the SIM, not of the delta'
+    + ' machinery under test',
+    good.hpChangeTicks > 0,
+    `${good.hpChangeTicks} ticks with an hp change, first at tick ${good.firstHpTick}`
+    + ` (play ${(MATCH_DURATION_MS - good.state.timeRemaining).toFixed(0)}ms at the end;`
+    + ` FOG_HOLD_MS ${FOG_HOLD_MS}, FOG_CLOSE_MS ${FOG_CLOSE_MS})`);
   ok('D2a CONTROL ON THE KNOWN-BAD  the blinded differ actually had `hp` ops to drop',
     droppedOps > 0, `${droppedOps} hp ops suppressed`);
   ok('D2  🚨 KNOWN-BAD  a differ blinded to `hp` is CAUGHT by the independent full snapshot',
@@ -176,7 +249,12 @@ section('D. THE KNOWN-BADS — a smaller delta is what BOTH a working and a brok
   ok('D3  🚨 …and its delta is SMALLER, which is exactly what a WORKING delta also looks like —'
     + ' size can never be the test',
     mean(blind.bytes) < mean(good.bytes),
-    `blind ${mean(blind.bytes).toFixed(1)} B vs good ${mean(good.bytes).toFixed(1)} B`);
+    // ⚠️ THREE DECIMALS, DELIBERATELY. At one decimal the two read 2879.2 vs 2879.2 — a row
+    //    whose own evidence looks like it proves the opposite of what it asserts, on a gap of
+    //    0.001%. The whole point of this row is that the difference is UNUSABLE as a test, so
+    //    the evidence has to show how small it is rather than round it away.
+    `blind ${mean(blind.bytes).toFixed(3)} B vs good ${mean(good.bytes).toFixed(3)} B`
+    + ` (${(100 * (1 - mean(blind.bytes) / mean(good.bytes))).toFixed(4)}% smaller)`);
 }
 
 {
@@ -351,12 +429,25 @@ section('E. THE SHAPES A MID-MATCH SWEEP MIGHT NOT REACH');
 
 {
   // 🚨 THE STATE SPACE THAT ONLY SHIPPED ON 2026-08-11 (`f87d407`).
-  // `buildLivedState` stops at 6.7 s; sudden death arms at 30 s of playing. Before this arm
-  // existed the codec had never been asked about `safeRadius === 0`, corpses, or a set winner.
+  // `buildLivedState` stops at 6.7 s; sudden death arms at `SUDDEN_DEATH_MS` of playing. Before
+  // this arm existed the codec had never been asked about `safeRadius === 0`, corpses, or a set
+  // winner.
+  //
+  // ⚠️ **`nw_fixture.mjs:buildSuddenDeathState` DEFAULTS TO `maxTicks: 4000`, WHICH IS 66.7 s,
+  // AND SUDDEN DEATH IS NOW AT 138.7 s.** `6d5c4d6` derived `SUDDEN_DEATH_MS` from
+  // `FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS` (30 s -> 135 s of play). The builder THREW rather
+  // than handing back an ordinary mid-match state — which is exactly what its own comment
+  // promises it will do, and is the reason this was a crash and not a silently fake coverage
+  // claim. The bound is supplied from HERE, derived from `rules.ts`, because `nw_fixture.mjs`
+  // is shared with `nw_wire.mjs` and `nw_stack.mjs` and is not this file's to change.
+  // Measured: the collapse arms at tick 8321 (countdown 222 + 135 s of play), and `dwell`
+  // adds 30 more.
+  const SD_TICKS = Math.ceil((COUNTDOWN_MS + SUDDEN_DEATH_MS + 2000) / DT) + 60;
+  const buildOpts = (build) => (build === buildSuddenDeathState ? { maxTicks: SD_TICKS } : {});
   for (const [label, build] of [['suddenDeath', buildSuddenDeathState], ['ended', buildEndedState]]) {
     for (const n of [2, 6]) {
-      const a = build(ARENA, n);
-      const b = build(ARENA, n, { seed: 5150 });
+      const a = build(ARENA, n, { ...buildOpts(build) });
+      const b = build(ARENA, n, { ...buildOpts(build), seed: 5150 });
       const wa = encodeMatchState(a);
       const wb = encodeMatchState(b);
       const patched = patchWire(wa, diffWire(wa, wb, 1, 2), 1);
