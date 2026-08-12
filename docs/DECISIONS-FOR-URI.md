@@ -16,7 +16,7 @@ Answer any subset. Unanswered items stay on the stated assumption.
 | # | question | in force | what I'd do | cost to reverse |
 |---|---|---|---|---|
 | **§66** | 🔴 **Six-player has NO way in.** Where does the button live? How are the other five chosen? What level are five bots? | QA URL only | **Answer (1) and I'll wire it — ~15 lines.** A "Brawl" tile on home, five bots at your own level, is the smallest coherent version | it is new UI; nothing existing changes |
-| **§58** | **Sudden death fires at 30 s. Is that right?** ⚠️ It now decides **90.5%** of six-player matches (was 66%) — the seat fix made all six actually fight | 30 s | **Keep 30 s.** Moving it to ~42 s makes the scaled ring real but leaves sudden death lasting **3.2 s** — a blip, not a phase | one constant, nothing pinned |
+| **§58** | ✅ **ANSWERED 2026-08-12 — and by PLAYING it, not by reading this page.** Uri hit the defect in a live match and specified the replacement schedule. **→ §72.** The recommendation on this row was *"keep 30 s"* and it was **WRONG**: it treated the trigger as a tuning choice when the 30 s trigger was **truncating the ring schedule**, which is a bug | — | — | landed in §72 |
 | **§71** | **Three icon subjects** — `boxBurger`, `stun`, `wrap` | as drawn | ⚠️ **"Leave it" is a real answer for all three** — every one ships beside its own text label. If you pick one, pick `wrap`: 0 of 30 judges, ten panels, and all three geometric options are closed by measurement | one drawing each |
 | **§33** | **Your phone model + iOS version, and a fresh 10-second capture** | unknown | **This is the only experiment that turns "−47.9% on desktop" into a real number on your device** | — |
 
@@ -4880,3 +4880,81 @@ already owned.**
    blade read, and it keeps the subject.
 3. **Change the weapon's object entirely.** Biggest blast radius — but **§30 is the precedent: the mustard
    bottle became a hot dog and gained +2.**
+
+---
+
+## 72. ✅ ANSWERED — the match is 2:30, the fog HOLDS then CLOSES, and sudden death stops eating the schedule
+
+**Answered by Uri on 2026-08-12, from playing it.** This entry supersedes **§58** and **REVERSES
+§1** (*"Assumed: `MATCH_DURATION_MS` = 45 s… ❓ 45 s, or shorter?"* — the answer turned out to be
+**much longer**, and the question as posed could not have found that, because it only offered
+*shorter*).
+
+### 🔴 What he saw, and why no gate here could have
+
+> *"It seems like something in the fog doesn't make sense. It starts decreasing my HP before it
+> reaches me… it does seem like sudden death, it's also written and the entire screen becomes
+> purple. **It happens before the fog reaches the center.**"*
+
+**This repo had already written the mechanism down and never connected it to play.**
+`rules.ts:1132`, of `minSafeRadiusFor(N)`: *"at the shipped constants this function's result is
+never reached — `SUDDEN_DEATH_MS` collapses the ring 9.6–11.8 s before the schedule would arrive
+there."* `docs/STATE.md` correction 10 restates it and adds that the scaled-ring row and the
+sudden-death question *"cannot both be live"*.
+
+Both files describe it as **dead code with an academic caveat**. It is not: the ring is scheduled
+to reach the centre at `MATCH_DURATION_MS` (45 s) and sudden death fires at 30 s, so **the last
+third of the fog schedule never runs** and the phase that replaces it starts while the fog is still
+a third of the map away. A player experiences that as *the screen turning purple and burning them
+while the fog is visibly elsewhere*. **`minSafeRadiusFor(N)` — 140 / 187.42 / 237.00, derived
+longhand, proven a no-op at N≤4 over 45,959,702 ticks — has never once been reached in a shipped
+match.** So has the whole endgame-ring pass.
+
+🚨 **The lesson is not that the fog was wrong. It is that "unreachable" was recorded as a curiosity
+in two documents and by a third instrument, and nobody asked what the player sees instead.**
+`docs/LESSONS.md`'s standing claim that playing it beats every instrument here is now **five for
+five**, and this is the first one that was *already written down before he found it*.
+
+### The schedule he specified
+
+```
+0:00 ────────────────────────────── 2:00 ──── 2:15 ─ 2:30
+     ring shrinking (centre reached)  small   SUDDEN
+                                      circle  DEATH
+```
+
+| | value | what it means |
+|---|---|---|
+| `FOG_HOLD_MS` | **~25 s** | the ring HOLDS at its opening radius. New concept — today the fog first bites the corners at `FOG_FIRST_CONTACT_S` = 6 s. His reason: a grace period to find a weapon and an opponent **on a 2800×2000 map where spawns are 916 wu apart** |
+| `FOG_CLOSE_MS` | **120 s** | the ring reaches `minSafeRadiusFor(N)` — *"the fog should reach the center"* |
+| `SUDDEN_DEATH_MS` | **135 s** | *"only after 15 seconds the sudden death should start"* |
+| `MATCH_DURATION_MS` | **150 s** | clock ceiling. Was **45 s** |
+
+⚠️ **The structural half is that the ring schedule is currently WELDED TO THE CLOCK** —
+`matchProgress = elapsed / MATCH_DURATION_MS`. The ring must now finish at 120 s while the clock
+runs to 150 s, so the two have to be decoupled. `SUDDEN_DEATH_REMAINING_MS` stays exactly 15 000
+by coincidence, **which is a trap rather than a convenience**: today the two coincide by accident
+and the next person to move the clock would silently move sudden death with it.
+
+### What this costs, stated in advance rather than discovered later
+
+🚨 **EVERY BALANCE NUMBER IN THIS PROJECT WAS MEASURED AT A 45 s CLOCK.** Roster range
+27.8 → 9.8 pp, tier spread 16.2 → 6.1, the ranged-reach pass, pacing, fog share of all damage
+(8.2%, *the number the 45 s clock was itself chosen on* — §1). None of it is safe to assume at
+150 s. A re-measure is dispatched with this change, reporting **aggregate and paired separately**
+against their stated floors (aggregate win rate ~9 pp; a paired per-matchup delta on identical
+seeds is EXACT).
+
+**Two consequences are for Uri, not for us, and neither is a bug:**
+
+1. **Out-of-combat regen now runs over 150 s instead of 45 s** — 3.3× the healing window. If two
+   fighters can out-regen each other, the fog becomes the thing that decides matches rather than
+   the thing that ends stalemates. Being measured; if it happens, it is a **design** call.
+2. 💰 **The economy's earn RATE falls ~3.3×.** Payouts are per match and a match now takes 3.3× the
+   wall-clock, so trophies/coins/XP **per minute** drop by that factor unless a payout moves.
+   Nothing is broken — the curve is per-finish and correct — but *"how long to the next chest"*
+   just tripled. **The number will be quantified and handed over; the decision is yours.**
+
+⚠️ And a third, which is a *benefit*: `minSafeRadiusFor(N)` and the whole scaled-ring pass become
+**live for the first time**, which closes `STATE.md` correction 10's *"§4 item 2 and this row
+cannot both be live"* in the direction that keeps both.
