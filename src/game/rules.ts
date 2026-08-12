@@ -2244,10 +2244,113 @@ export interface DisplayStats {
   speed: number;
 }
 
-export interface AbilityBlurb {
+/**
+ * The prose half of a weapon — what the character card and the home kit grid show.
+ *
+ * ⚠️ THE OLD SHAPE IS KEPT HERE, BECAUSE THE MISSING FIELD *IS* THE BUG:
+ *
+ * > `interface AbilityBlurb { emoji: string; name: string; desc: string; }`
+ *
+ * `abilities[]` and `weapons[]` were SIBLING ARRAYS WITH NO LINK. Nothing in the type
+ * system and nothing in any gate said which weapon a blurb described, so the only join
+ * available to a consumer was a guess — by `name`, or by INDEX.
+ *
+ * ── WHY THAT WAS DANGEROUS RATHER THAN MERELY UNTIDY (measured, `wj_audit.mjs`) ──
+ *   33 of 34 abilities join to a weapon by exact `name`  (the 34th is Donut's passive)
+ *   30 of 34 ALSO join by index
+ *   `hamburger` is the ONLY character whose two arrays are in a different order, and
+ *   3 of its 4 rows disagree.
+ * **A positional join is correct for 10 of the 11 characters, which is exactly why it
+ * survived** — and an auditor with a purpose-built instrument joined positionally and
+ * produced a confidently false finding about hamburger's cards. The audit reproduced
+ * the very defect class it was auditing.
+ *
+ * ── WHERE THE SHAPE CAME FROM ───────────────────────────────────────────────
+ * In the 2D prototype the prose and the weapon records lived in two standalone HTML
+ * files that **could not import each other** — one carried 34 `desc:` and no `effect:`,
+ * the other 33 `effect:` and no `desc:`. The rebuild merged them into this file as two
+ * sibling arrays and did not add the link, so it inherited the structure that made the
+ * mismatch possible along with the data.
+ *
+ * ── THE LINK ────────────────────────────────────────────────────────────────
+ * `weapon` is the `key` of the entry in this character's own `weapons[]` that the blurb
+ * describes, or `null` for a passive with no weapon slot (Donut's Sticky Trail — the
+ * one and only such row today). It is **required**, so a new ability cannot be authored
+ * without saying what it describes, and `defineCharacter()` binds `K` to that
+ * character's actual weapon keys, so a key that does not exist is a COMPILE ERROR.
+ *
+ * 🔴 **Consumers must go through `abilityCards()` / `weaponForAbility()`.** Both join on
+ * `key`, never on position, and `abilityCards()` returns one card per ability — it can
+ * neither reorder nor drop a row. Do not reach for `def.weapons` beside `def.abilities`
+ * in a screen; `wj_guard.mjs` asserts that no file outside this one holds both.
+ *
+ * ⚠️ `name` AND `emoji` STAY ON THIS RECORD AND ARE **NOT** DERIVED FROM THE WEAPON, and
+ * that is a measurement, not laziness. All 33 joined rows already carry the weapon's
+ * name verbatim, so deriving `name` would be text-neutral — but only **32 of 33** carry
+ * the weapon's emoji: `lollipop`'s *Giant Lollipop* blurb shows 💫 where its weapon
+ * shows 🍭. Deriving the glyph would have silently changed a rendered icon on that card.
+ * The duplication that remains is guarded instead: `wj_guard.mjs` asserts name equality
+ * on all 33 and emoji equality on all but that one acknowledged divergence, so drift is
+ * a red gate rather than a silent mismatch.
+ */
+export interface AbilityBlurb<K extends string = string> {
   emoji: string;
   name: string;
   desc: string;
+  /**
+   * THE JOIN. The `key` of the weapon in THIS character's `weapons[]` that this blurb
+   * describes, or `null` for a passive with no weapon slot. Never an index.
+   */
+  weapon: K | null;
+}
+
+/**
+ * One rendered ability row: the blurb's own fields, already paired with the weapon it
+ * describes. **This is the only supported way to read the two arrays together.**
+ */
+export interface AbilityCard {
+  emoji: string;
+  name: string;
+  desc: string;
+  /** `null` only for a passive (`weapon: null`); never null because a lookup failed. */
+  weapon: Weapon | null;
+}
+
+/**
+ * Resolve one blurb to its weapon, by `key`.
+ *
+ * 🚨 THROWS on a key that resolves to nothing rather than returning `null`. This repo
+ * shipped a `.map(s => roster[s]).filter(Boolean)` that **silently dropped fighters** and
+ * listed 3 of 5; a join that quietly returns nothing is the same defect wearing a
+ * different hat. The state is unreachable by construction — `defineCharacter` will not
+ * compile a key that is not on the character — so the throw is a backstop for a hand-cast
+ * or a runtime-built def, not an expected path.
+ */
+export function weaponForAbility(def: CharacterDef, ability: AbilityBlurb): Weapon | null {
+  if (ability.weapon === null) return null;
+  const w = def.weapons.find((x) => x.key === ability.weapon);
+  if (!w) {
+    throw new Error(
+      `rules: ${def.id} ability '${ability.name}' names weapon key '${ability.weapon}', which does not exist`,
+    );
+  }
+  return w;
+}
+
+/**
+ * Every ability of a character, in authored order, each already joined to its weapon.
+ *
+ * Order-independent in `weapons[]` by construction (it looks up by `key`), and it emits
+ * **exactly one card per ability** — `abilities.map`, never a `filter` — so no row can
+ * be dropped on the way to a screen.
+ */
+export function abilityCards(def: CharacterDef): AbilityCard[] {
+  return def.abilities.map((a) => ({
+    emoji: a.emoji,
+    name: a.name,
+    desc: a.desc,
+    weapon: weaponForAbility(def, a),
+  }));
 }
 
 export interface CharacterDef {
@@ -2839,8 +2942,39 @@ export const RARITY_CARD_COLORS: Record<Rarity, string> = {
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The one constructor for a `CharacterDef`, and the reason `AbilityBlurb.weapon` is a
+ * COMPILE error rather than a runtime one.
+ *
+ * `const W` captures each character's weapon `key`s as literal types (`'Smash' |
+ * 'Tomato' | …`), and `AbilityBlurb<W[number]['key']>` then constrains every blurb's
+ * `weapon` field to that exact union. Author `weapon: 'Tomatoe'` and `tsc` says
+ * *"Type '\"Tomatoe\"' is not assignable to type '\"Smash\" | \"Tomato\" | …'"* at the
+ * line that has the typo.
+ *
+ * ⚠️ THE SHAPE OF THE SIGNATURE IS LOAD-BEARING AND THE OBVIOUS ALTERNATIVE IS SILENT.
+ * Writing it as `<const K extends string>` with `weapons: readonly (Weapon & { key: K })[]`
+ * reads better and **does not work**: `abilities` is then a SECOND inference site for `K`,
+ * so a typo widens the union to include itself and type-checks clean. Measured both forms
+ * side by side on a fixture — the `W[number]['key']` form rejects the typo, the `K` form
+ * accepts it. `K` has to be COMPUTED from the weapons array, never inferred alongside it.
+ *
+ * At runtime this is the identity function; `const` inference only marks the argument's
+ * literal positions readonly, which is a type-level artefact of inference and not a
+ * property of the object, hence the cast. (Nested mutable arrays such as `comboParts`
+ * opt out of `const` inference automatically because their declared type is mutable.)
+ */
+function defineCharacter<const W extends readonly Weapon[]>(
+  def: Omit<CharacterDef, 'weapons' | 'abilities'> & {
+    weapons: W;
+    abilities: AbilityBlurb<W[number]['key']>[];
+  },
+): CharacterDef {
+  return def as unknown as CharacterDef;
+}
+
 export const CHARACTERS: Record<CharacterId, CharacterDef> = {
-  hamburger: {
+  hamburger: defineCharacter({
     id: 'hamburger', name: 'Hamburger', emoji: '🍔', rarity: 'Normal',
     stats: { damage: 10, health: 3, speed: 5 }, hasTrail: false,
     // WAS: 'Closed happy eyes, small smile. Stacked bun/patty/lettuce/tomato silhouette.'
@@ -2877,15 +3011,20 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // NOT reach for the cooldown (measured inert) or Patty Smash (measured violent).
       { key: 'Onion', name: 'Onion Ring', type: 'self', damage: 0, cooldown: 6000, healAmount: 18, color: '#F4E9DA', effect: null, emoji: '🧅' },
     ],
+    // 🚨 THE ONE CHARACTER WHOSE TWO ARRAYS ARE IN A DIFFERENT ORDER — weapons run
+    // Smash / Tomato / Lettuce / Onion and the blurbs run Tomato / Lettuce / Smash /
+    // Onion, so 3 of these 4 rows would join to the WRONG weapon by index. It is the
+    // known-bad `wj_guard.mjs` is validated against, and the only reason the rest of
+    // the roster could tolerate a positional join for as long as it did.
     abilities: [
-      { emoji: '🍅', name: 'Tomato Toss', desc: 'Slows enemies down' },
-      { emoji: '🥬', name: 'Lettuce Fling', desc: 'Stuns enemies for a few seconds' },
-      { emoji: '🍖', name: 'Patty Smash', desc: 'Deals heavy damage' },
-      { emoji: '🧅', name: 'Onion Ring', desc: 'Heals himself' },
+      { emoji: '🍅', name: 'Tomato Toss', desc: 'Slows enemies down', weapon: 'Tomato' },
+      { emoji: '🥬', name: 'Lettuce Fling', desc: 'Stuns enemies for a few seconds', weapon: 'Lettuce' },
+      { emoji: '🍖', name: 'Patty Smash', desc: 'Deals heavy damage', weapon: 'Smash' },
+      { emoji: '🧅', name: 'Onion Ring', desc: 'Heals himself', weapon: 'Onion' },
     ],
-  },
+  }),
 
-  donut: {
+  donut: defineCharacter({
     id: 'donut', name: 'Donut', emoji: '🍩', rarity: 'Normal',
     stats: { damage: 4, health: 7, speed: 6 }, hasTrail: true,
     // WAS: 'Crooked smile, sprinkles across a pink glaze torus.'
@@ -2899,12 +3038,15 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Candy', name: 'Candy Barrage', type: 'ranged', range: REACH.rangedLong, damage: 4, cooldown: 900, speed: SPEED.long, color: '#FF6FA5', effect: null, pellets: 3, spreadDeg: 14, trailBoosted: true, emoji: '🍬' },
     ],
     abilities: [
-      { emoji: '🍬', name: 'Candy Barrage', desc: 'Throws candies that chip away health' },
-      { emoji: '🍯', name: 'Sticky Trail', desc: 'Leaves a filling trail - hurts enemies, speeds him up' },
+      { emoji: '🍬', name: 'Candy Barrage', desc: 'Throws candies that chip away health', weapon: 'Candy' },
+      // `weapon: null` — THE ONE PASSIVE IN THE ROSTER. It is `hasTrail` above, not a
+      // weapon slot, which is why this character has 2 blurbs against 1 weapon and why
+      // the join has to admit a null rather than assume a 1:1 array pairing.
+      { emoji: '🍯', name: 'Sticky Trail', desc: 'Leaves a filling trail - hurts enemies, speeds him up', weapon: null },
     ],
-  },
+  }),
 
-  taco: {
+  taco: defineCharacter({
     id: 'taco', name: 'Taco', emoji: '🌮', rarity: 'Rare',
     stats: { damage: 9, health: 4, speed: 5 }, hasTrail: false,
     // WAS: 'Trapezoid shell with a jagged crimped top edge; face floats completely outside the
@@ -2933,13 +3075,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       },
     ],
     abilities: [
-      { emoji: '🥩', name: 'Filling Toss', desc: 'Throws his filling for heavy damage' },
-      { emoji: '🧅', name: 'Onion Bomb', desc: 'Throws onion for damage' },
-      { emoji: '💥', name: 'Double Toss', desc: 'Special: throws filling and onion together for massive damage' },
+      { emoji: '🥩', name: 'Filling Toss', desc: 'Throws his filling for heavy damage', weapon: 'Filling' },
+      { emoji: '🧅', name: 'Onion Bomb', desc: 'Throws onion for damage', weapon: 'Onion' },
+      { emoji: '💥', name: 'Double Toss', desc: 'Special: throws filling and onion together for massive damage', weapon: 'Double' },
     ],
-  },
+  }),
 
-  burrito: {
+  burrito: defineCharacter({
     id: 'burrito', name: 'Burrito', emoji: '🌯', rarity: 'Rare',
     stats: { damage: 6, health: 7, speed: 7 }, hasTrail: false,
     // WAS: 'White wrap, stands upright, toppings visible at the open end.'
@@ -3001,13 +3143,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       },
     ],
     abilities: [
-      { emoji: '🌯', name: 'Burrito Disc', desc: 'Throws himself like a flying disc for damage' },
-      { emoji: '🌀', name: 'Roll Stun', desc: 'Rolls up and freezes enemies in place for a few seconds' },
-      { emoji: '✨', name: 'Topping Swarm', desc: 'Special: squeezes out all his toppings, which fly everywhere and chase enemies dealing damage - the flying toppings can be destroyed' },
+      { emoji: '🌯', name: 'Burrito Disc', desc: 'Throws himself like a flying disc for damage', weapon: 'Disc' },
+      { emoji: '🌀', name: 'Roll Stun', desc: 'Rolls up and freezes enemies in place for a few seconds', weapon: 'Roll' },
+      { emoji: '✨', name: 'Topping Swarm', desc: 'Special: squeezes out all his toppings, which fly everywhere and chase enemies dealing damage - the flying toppings can be destroyed', weapon: 'Swarm' },
     ],
-  },
+  }),
 
-  egg: {
+  egg: defineCharacter({
     id: 'egg', name: 'Egg', emoji: '🥚', rarity: 'Neon',
     stats: { damage: 7, health: 8, speed: 4 }, hasTrail: false,
     // WAS: 'Open eyes with highlights, straight neutral mouth.'
@@ -3029,13 +3171,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Shards', name: 'Shell Shards', type: 'ranged', range: REACH.rangedMid, damage: 4, cooldown: 1000, speed: SPEED.mid, color: '#F4E9DA', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💥' },
     ],
     abilities: [
-      { emoji: '🥚', name: 'Egg Tackle', desc: 'Launches herself at the enemy for big damage - slow to charge up' },
-      { emoji: '🐣', name: 'Hatch!', desc: 'She cracks open and a chick bursts out, pecking for damage' },
-      { emoji: '💥', name: 'Shell Shards', desc: 'Broken shell pieces slow enemies and chip away their health' },
+      { emoji: '🥚', name: 'Egg Tackle', desc: 'Launches herself at the enemy for big damage - slow to charge up', weapon: 'Tackle' },
+      { emoji: '🐣', name: 'Hatch!', desc: 'She cracks open and a chick bursts out, pecking for damage', weapon: 'Hatch' },
+      { emoji: '💥', name: 'Shell Shards', desc: 'Broken shell pieces slow enemies and chip away their health', weapon: 'Shards' },
     ],
-  },
+  }),
 
-  lollipop: {
+  lollipop: defineCharacter({
     id: 'lollipop', name: 'Lollipop', emoji: '🍭', rarity: 'Cyber',
     stats: { damage: 7, health: 8, speed: 7 }, hasTrail: false,
     // WAS: 'Eyes on the stick, mouth on the candy. Concentric red/white swirl disc.'
@@ -3074,12 +3216,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Giant', name: 'Giant Lollipop', type: 'melee', range: REACH.ultimateSlam, damage: 18, cooldown: 7000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
     ],
     abilities: [
-      { emoji: '🔨', name: 'Lollipop Smash', desc: 'Swings herself like a hammer for heavy damage' },
-      { emoji: '💫', name: 'Giant Lollipop', desc: 'Grows huge and hits the whole map, making everyone dizzy' },
+      { emoji: '🔨', name: 'Lollipop Smash', desc: 'Swings herself like a hammer for heavy damage', weapon: 'Smash' },
+      { emoji: '💫', name: 'Giant Lollipop', desc: 'Grows huge and hits the whole map, making everyone dizzy', weapon: 'Giant' },
     ],
-  },
+  }),
 
-  pizza: {
+  pizza: defineCharacter({
     id: 'pizza', name: 'Pizza', emoji: '🍕', rarity: 'Neon',
     // ⚠️ `damage` WAS 4 AND IS NOW 5, AND IT WAS NOT HAND-EDITED. It is DERIVED
     // (`damageStatFor`) from the kit below, whose Tomato Splat went 6 -> 7 in
@@ -3109,13 +3251,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Cheese', name: 'Cheese Blind', type: 'ranged', range: REACH.rangedClose, damage: 4, cooldown: 1300, speed: SPEED.close, color: '#FFD873', effect: 'stun', emoji: '🧀' },
     ],
     abilities: [
-      { emoji: '⚪', name: 'Dough Balls', desc: 'Throws dough balls that slow enemies down' },
-      { emoji: '🍅', name: 'Tomato Splat', desc: 'Tomatoes stick to the floor, damaging and slowing anyone who steps on them' },
-      { emoji: '🧀', name: 'Cheese Blind', desc: "Cheese sticks to an enemy's face and blocks their vision until someone hits them" },
+      { emoji: '⚪', name: 'Dough Balls', desc: 'Throws dough balls that slow enemies down', weapon: 'Dough' },
+      { emoji: '🍅', name: 'Tomato Splat', desc: 'Tomatoes stick to the floor, damaging and slowing anyone who steps on them', weapon: 'Tomato' },
+      { emoji: '🧀', name: 'Cheese Blind', desc: "Cheese sticks to an enemy's face and blocks their vision until someone hits them", weapon: 'Cheese' },
     ],
-  },
+  }),
 
-  sushi: {
+  sushi: defineCharacter({
     id: 'sushi', name: 'Sushi', emoji: '🍣', rarity: 'Legendary',
     stats: { damage: 9, health: 5, speed: 8 }, hasTrail: false,
     // WAS: 'Wide eyes, puckered lips. Rice cylinder banded with nori, salmon centre.'
@@ -3138,14 +3280,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Catch', name: 'Big Catch', type: 'ranged', range: REACH.rangedMax, damage: 9, cooldown: 3200, speed: SPEED.max, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, emoji: '🐡' },
     ],
     abilities: [
-      { emoji: '🍚', name: 'Rice Spray', desc: 'Throws a spray of rice grains - each one chips away a little health' },
-      { emoji: '🌿', name: 'Seaweed Bait', desc: 'Seaweed lures every enemy toward it while he shoots them' },
-      { emoji: '🐟', name: 'Fish Pile', desc: 'Turns into a pile of fish that attack for small damage' },
-      { emoji: '🐡', name: 'Big Catch', desc: 'Special: throws seaweed with fish - the fish grow huge and the seaweed scatters across the map, pulling enemies everywhere' },
+      { emoji: '🍚', name: 'Rice Spray', desc: 'Throws a spray of rice grains - each one chips away a little health', weapon: 'Rice' },
+      { emoji: '🌿', name: 'Seaweed Bait', desc: 'Seaweed lures every enemy toward it while he shoots them', weapon: 'Seaweed' },
+      { emoji: '🐟', name: 'Fish Pile', desc: 'Turns into a pile of fish that attack for small damage', weapon: 'Fish' },
+      { emoji: '🐡', name: 'Big Catch', desc: 'Special: throws seaweed with fish - the fish grow huge and the seaweed scatters across the map, pulling enemies everywhere', weapon: 'Catch' },
     ],
-  },
+  }),
 
-  soup: {
+  soup: defineCharacter({
     id: 'soup', name: 'Soup', emoji: '🍲', rarity: 'Epic',
     stats: { damage: 6, health: 9, speed: 4 }, hasTrail: false,
     // WAS: 'Gray steam-coloured eyes, no mouth. Wide bowl with rising steam.'
@@ -3163,13 +3305,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Dump', name: 'Soup Dump', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 3000, cone: 90, color: '#E8792A', effect: 'slow', emoji: '🌊' },
     ],
     abilities: [
-      { emoji: '💦', name: 'Soup Splash', desc: 'Throws his soup liquid - each splash chips away a little health' },
-      { emoji: '🍜', name: 'Noodle Toss', desc: 'Throws noodles that slow enemies down' },
-      { emoji: '🌊', name: 'Soup Dump', desc: 'Special: tips himself over onto an enemy, pouring all his soup and noodles - big damage and a heavy slow' },
+      { emoji: '💦', name: 'Soup Splash', desc: 'Throws his soup liquid - each splash chips away a little health', weapon: 'Splash' },
+      { emoji: '🍜', name: 'Noodle Toss', desc: 'Throws noodles that slow enemies down', weapon: 'Noodle' },
+      { emoji: '🌊', name: 'Soup Dump', desc: 'Special: tips himself over onto an enemy, pouring all his soup and noodles - big damage and a heavy slow', weapon: 'Dump' },
     ],
-  },
+  }),
 
-  waterbottle: {
+  waterbottle: defineCharacter({
     id: 'waterbottle', name: 'Water Bottle', emoji: '💧', rarity: 'Legendary',
     stats: { damage: 8, health: 6, speed: 6 }, hasTrail: false,
     // WAS: 'Eyes floating above the cap, big smile. Translucent blue bottle with a darker cap.'
@@ -3187,12 +3329,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', emoji: '🌊' },
     ],
     abilities: [
-      { emoji: '💦', name: 'Water Spray', desc: 'Sprays water that slows enemies down a lot' },
-      { emoji: '🧊', name: 'Glass Shards', desc: 'Shoots glass shards that deal damage and freeze enemies' },
-      { emoji: '🔵', name: 'Cap Shot', desc: 'Fires his cap - enemies slip when it hits' },
-      { emoji: '🌊', name: 'Mega Splash', desc: 'Special: launches himself up (takes a few seconds), his cap becomes a second bottle, and together they become one giant bottle that dumps water on an enemy for huge damage and a heavy slow' },
+      { emoji: '💦', name: 'Water Spray', desc: 'Sprays water that slows enemies down a lot', weapon: 'Spray' },
+      { emoji: '🧊', name: 'Glass Shards', desc: 'Shoots glass shards that deal damage and freeze enemies', weapon: 'Glass' },
+      { emoji: '🔵', name: 'Cap Shot', desc: 'Fires his cap - enemies slip when it hits', weapon: 'Cap' },
+      { emoji: '🌊', name: 'Mega Splash', desc: 'Special: launches himself up (takes a few seconds), his cap becomes a second bottle, and together they become one giant bottle that dumps water on an enemy for huge damage and a heavy slow', weapon: 'Mega' },
     ],
-  },
+  }),
 
   // ⚠️ THE PLAINEST KIT IN THE ROSTER, AND IT IS THE RAREST TIER. Every one of these
   // three weapons is `plain` — the only character with no pellets, homing, peck, combo,
@@ -3208,7 +3350,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   // rarity tier-spread guard past 10 pp at constant kit output, and the one that held the
   // guard bought +0.046 of behavioural spread against a 0.030 noise floor. The reason is
   // not this character; it is that the roster's behavioural space is already full.
-  hotdog: {
+  hotdog: defineCharacter({
     id: 'hotdog', name: 'Hot Dog', emoji: '🌭', rarity: 'Cyber',
     stats: { damage: 9, health: 6, speed: 8 }, hasTrail: false,
     // WAS: 'Sleepy half-closed eyes, small smile. Sausage in a bun with a mustard zigzag.'
@@ -3223,11 +3365,11 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { key: 'Slash', name: 'Bun Slash', type: 'melee', range: REACH.meleeStrong, damage: 11, cooldown: 650, cone: 75, color: '#FFC93C', effect: null, emoji: '⚔️' },
     ],
     abilities: [
-      { emoji: '💛', name: 'Mustard Blast', desc: 'Burns enemies from a distance' },
-      { emoji: '🔴', name: 'Ketchup Slip', desc: 'Makes enemies slide and lose control' },
-      { emoji: '⚔️', name: 'Bun Slash', desc: 'Powerful close-range strike' },
+      { emoji: '💛', name: 'Mustard Blast', desc: 'Burns enemies from a distance', weapon: 'Mustard' },
+      { emoji: '🔴', name: 'Ketchup Slip', desc: 'Makes enemies slide and lose control', weapon: 'Ketchup' },
+      { emoji: '⚔️', name: 'Bun Slash', desc: 'Powerful close-range strike', weapon: 'Slash' },
     ],
-  },
+  }),
 };
 
 /** Rarity display order, lowest → highest. */

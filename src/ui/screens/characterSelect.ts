@@ -28,7 +28,7 @@
 
 import {
   CHARACTERS, CHARACTER_IDS, LEVEL_MAX, PLAYER_MAX_HP, RARITY_COLORS, RARITY_CARD_COLORS,
-  REACH, levelDamageMultiplier, maxHpFor,
+  REACH, abilityCards, levelDamageMultiplier, maxHpFor,
   type CharacterId, type Weapon,
 } from '../../game/rules';
 import type { Screen, ScreenContext } from './types';
@@ -376,12 +376,24 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     }
 
     abilitiesEl.innerHTML = '';
-    for (const ability of def.abilities) {
-      // Abilities are the prose; weapons are the numbers. They are two views of the
-      // same thing and `rules.ts` names them identically, so pairing them turns a
-      // flavour list into a readout you can actually pick a fighter with — and it is
-      // what fills the detail panel instead of leaving half of it empty.
-      const weapon = def.weapons.find((w) => w.name === ability.name);
+    // Abilities are the prose; weapons are the numbers. They are two views of the
+    // same thing, so pairing them turns a flavour list into a readout you can
+    // actually pick a fighter with — and it is what fills the detail panel instead
+    // of leaving half of it empty.
+    //
+    // ⚠️ THE OLD JOIN IS KEPT HERE WITH ITS REASON, because the reason was the bug:
+    //
+    // > `const weapon = def.weapons.find((w) => w.name === ability.name);`
+    // > *"…and `rules.ts` names them identically, so pairing them…"*
+    //
+    // It named the load-bearing assumption out loud — the two arrays agreed **by
+    // convention**, with nothing in the type system or in any gate holding them
+    // together. `AbilityBlurb.weapon` is now a declared key into this character's own
+    // `weapons[]`, `abilityCards()` performs the join once, and this screen no longer
+    // touches `def.weapons` at all. Identical output on all 34 rows (33 joined + Donut's
+    // passive), proven by rendering both arms — `tools/tmp/wj_render.mjs`.
+    for (const ability of abilityCards(def)) {
+      const weapon = ability.weapon;
       const pill = el('div', 'chars-ability');
       pill.innerHTML = `
         <span class="chars-ability-em">${abilityIcon(ability.emoji)}</span>
