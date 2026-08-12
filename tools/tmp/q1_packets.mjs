@@ -88,18 +88,59 @@ const floorAt = (k) => 1.96 * Math.SQRT2 * (0.50 / Math.sqrt(Math.max(1, k)));
 /** Two arms of different size, sd 0.50 both: the 95% floor on their DIFFERENCE. */
 const floorBetween = (k1, k2) => 1.96 * 0.50 * Math.sqrt(1 / k1 + 1 / k2);
 
-// ── the drift arm: reference, never rebuild ──────────────────────────────────
-const DRIFT_SRC = join(ROOT, 'shots/review/baseline');
+// ── the drift arms: referenced, never rebuilt ────────────────────────────────
 /**
  * Six sheets exist per element, and 8 critics are wanted. c1 and c2 are repeated —
  * two critics see one identical file, which is the sd-0.50 design, not a defect.
  */
 const DRIFT_ORDER = [1, 2, 3, 4, 5, 6, 1, 2];
-/** What those exact sheets scored when they were built. From `baseline_score.mjs`. */
-const DRIFT_RECORDED = {
-  arena: { firstRead: 5.17, firstN: 6, reRead: 4.75, reReadN: 4 },
-  cast: { firstRead: 4.33, firstN: 6, reRead: 3.75, reReadN: 4 },
-};
+
+/**
+ * TWO drift sources, and they answer different questions. Both were found by reading
+ * `assignments.json` + `verdicts.json` back through `baseline_score.mjs` rather than by
+ * trusting a doc — `docs/STATE.md`'s 5.00/3.83 lives in `cr1/now`, not in `baseline`,
+ * and nothing in the repo said so.
+ *
+ *   cr1       the round `docs/STATE.md` quotes as the standing score: arena 5.00 sd 0.63,
+ *             cast 3.83 sd 0.41, n=6, canonical rubric, 2026-08-05T20:35. THIS is the
+ *             "before" the new arm is compared against, so re-scoring its sheets today
+ *             is what DE-CONFOUNDS this round's before/after from instrument drift.
+ *   baseline  the earlier round, arena 5.17 / cast 4.33 (n=6, 18:35), re-scored six
+ *             hours later at 4.75 / 3.75 (n=4, 23:43). That −0.42 / −0.58 is the whole
+ *             drift hypothesis and it is 1.30σ / 1.80σ — suggestive, not established.
+ *             8 fresh critics settle it.
+ */
+const DRIFT_SOURCES = [
+  {
+    id: 'cr1',
+    dir: join(ROOT, 'shots/review/cr1/now'),
+    recorded: {
+      arena: { reads: [{ mean: 5.00, sd: 0.63, n: 6, at: '2026-08-05T20:35Z' }] },
+      cast: { reads: [{ mean: 3.83, sd: 0.41, n: 6, at: '2026-08-05T20:35Z' }] },
+    },
+    why: 'the standing score in docs/STATE.md — the exact number this round is trying to beat',
+  },
+  {
+    id: 'base',
+    dir: join(ROOT, 'shots/review/baseline'),
+    recorded: {
+      arena: {
+        reads: [
+          { mean: 5.17, sd: 0.41, n: 6, at: '2026-08-05T18:35Z' },
+          { mean: 4.75, sd: 0.50, n: 4, at: '2026-08-05T23:43Z' },
+        ],
+      },
+      cast: {
+        reads: [
+          { mean: 4.33, sd: 0.52, n: 6, at: '2026-08-05T18:35Z' },
+          { mean: 3.75, sd: 0.50, n: 4, at: '2026-08-05T23:43Z' },
+        ],
+      },
+    },
+    why: 'two readings of ONE set of pixels already exist here; a third at k=8 settles the '
+      + '1.30σ / 1.80σ drift question outright',
+  },
+];
 
 if (args.selftest) {
   const checks = [];
@@ -126,30 +167,42 @@ if (args.selftest) {
     'KNOWN-BAD: the floor actually shrinks with k (a constant would pass every other check)',
     `${floorAt(1).toFixed(3)} > ${floorAt(6).toFixed(3)} > ${floorAt(8).toFixed(3)}`);
 
-  // the drift arm's inputs must EXIST, or the arm is a manifest pointing at nothing —
+  // Each drift arm's inputs must EXIST, or the arm is a manifest pointing at nothing —
   // the exact vacuity this repo has hit three times in one session.
-  const driftFiles = ['arena', 'cast'].flatMap((el) => [1, 2, 3, 4, 5, 6]
-    .map((i) => join(DRIFT_SRC, `${el}-c${i}`, 'sheet_1.png')));
-  add(driftFiles.length === 12, 'the drift arm names 12 sheets (non-empty before asserting over it)',
-    String(driftFiles.length));
-  const missing = driftFiles.filter((f) => !existsSync(f));
-  add(missing.length === 0, 'every drift sheet is on disk', missing.length ? missing.join(', ') : 'all 12 present');
-  const keys = driftFiles.map((f) => f.replace('sheet_1.png', 'sheet_1.key.json')).filter((f) => !existsSync(f));
-  add(keys.length === 0, 'every drift sheet still has its answer key', keys.length ? keys.join(', ') : 'all 12 present');
-  // and they must be DISTINCT — 12 pointers at one file would satisfy every check above
-  const hashes = new Set(driftFiles.filter((f) => existsSync(f)).map(sha));
-  add(hashes.size === 12, 'KNOWN-BAD: the 12 drift sheets are 12 DISTINCT images', `${hashes.size} distinct`);
-
-  // the rubric the baseline round used must still be the canonical one, byte for byte
+  add(DRIFT_SOURCES.length > 0, 'there is at least one drift source to check', `${DRIFT_SOURCES.length}`);
   const canon = join(ROOT, 'tools/review.rubric.txt');
-  const packetRubric = join(DRIFT_SRC, 'arena-c1', 'RUBRIC.txt');
-  let sameRubric = false;
-  if (existsSync(canon) && existsSync(packetRubric)) {
-    const c = readFileSync(canon);
-    sameRubric = readFileSync(packetRubric).subarray(0, c.length).equals(c);
+  for (const srcDef of DRIFT_SOURCES) {
+    const driftFiles = ['arena', 'cast'].flatMap((el) => [1, 2, 3, 4, 5, 6]
+      .map((i) => join(srcDef.dir, `${el}-c${i}`, 'sheet_1.png')));
+    add(driftFiles.length === 12, `${srcDef.id}: names 12 sheets (non-empty before asserting over it)`,
+      String(driftFiles.length));
+    const missing = driftFiles.filter((f) => !existsSync(f));
+    add(missing.length === 0, `${srcDef.id}: every drift sheet is on disk`,
+      missing.length ? missing.join(', ') : 'all 12 present');
+    const keys = driftFiles.map((f) => f.replace('sheet_1.png', 'sheet_1.key.json')).filter((f) => !existsSync(f));
+    add(keys.length === 0, `${srcDef.id}: every drift sheet still has its answer key`,
+      keys.length ? keys.join(', ') : 'all 12 present');
+    // and they must be DISTINCT — 12 pointers at one file would satisfy every check above
+    const hashes = new Set(driftFiles.filter((f) => existsSync(f)).map(sha));
+    add(hashes.size === 12, `${srcDef.id}: KNOWN-BAD — the 12 sheets are 12 DISTINCT images`,
+      `${hashes.size} distinct`);
+
+    // the rubric that round used must still be the canonical one, byte for byte
+    const packetRubric = join(srcDef.dir, 'arena-c1', 'RUBRIC.txt');
+    let sameRubric = false;
+    if (existsSync(canon) && existsSync(packetRubric)) {
+      const c = readFileSync(canon);
+      sameRubric = readFileSync(packetRubric).subarray(0, c.length).equals(c);
+    }
+    add(sameRubric, `${srcDef.id}: the canonical rubric is byte-identical to the one its packets carry`,
+      sameRubric ? 'identical' : 'DIFFERS — scores are not comparable across rubrics');
   }
-  add(sameRubric, 'the canonical rubric is byte-identical to the one the baseline packets carry',
-    sameRubric ? 'identical' : 'DIFFERS — scores are not comparable across rubrics');
+  // and the two sources must be DIFFERENT sets of pixels, or one arm is a duplicate of
+  // the other wearing a different label.
+  const [a0, b0] = DRIFT_SOURCES.map((s) => join(s.dir, 'arena-c1', 'sheet_1.png'));
+  add(existsSync(a0) && existsSync(b0) && sha(a0) !== sha(b0),
+    'KNOWN-BAD: the two drift sources are DIFFERENT pixels, not the same round twice',
+    existsSync(a0) && existsSync(b0) ? `${sha(a0).slice(0, 8)} vs ${sha(b0).slice(0, 8)}` : 'missing');
 
   for (const c of checks) console.log(`  ${c.ok ? 'ok  ' : 'FAIL'} - ${c.name}  [${c.detail}]`);
   const nOk = checks.filter((c) => c.ok).length;
@@ -281,42 +334,48 @@ for (const el of ELEMENTS) {
   });
 }
 
-// ── the drift arm: pointers only ─────────────────────────────────────────────
+// ── the drift arms: pointers only ────────────────────────────────────────────
 const drift = [];
-for (const el of ['arena', 'cast']) {
-  DRIFT_ORDER.forEach((srcIdx, i) => {
-    const dir = join(DRIFT_SRC, `${el}-c${srcIdx}`);
-    const sheet = join(dir, 'sheet_1.png');
-    if (!existsSync(sheet)) { console.error(`drift arm: missing ${sheet}`); process.exit(4); }
-    const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
-    drift.push({
-      arm: 'drift',
-      element: `drift_${el}`,
-      critic: i + 1,
-      sourcePacket: `${el}-c${srcIdx}`,
-      dir,
-      plate: m.plates?.[0] ?? null,
-      category: m.category,
-      ours: m.ours,
-      what: `DRIFT CONTROL — the BYTE-IDENTICAL sheet of 2026-08-05, unmodified. It read `
-        + `${DRIFT_RECORDED[el].firstRead} (n=${DRIFT_RECORDED[el].firstN}) that afternoon and `
-        + `${DRIFT_RECORDED[el].reRead} (n=${DRIFT_RECORDED[el].reReadN}) six hours later. `
-        + `Re-scoring it now measures the INSTRUMENT, because the pixels cannot have changed.`,
-      sheet,
-      sheetSha256: sha(sheet),
-      key: join(dir, 'sheet_1.key.json'),
-      rubricSource: m.rubricSource ?? 'tools/review.rubric.txt',
-      verified: m.capture?.verified ?? null,
-      recorded: DRIFT_RECORDED[el],
+for (const srcDef of DRIFT_SOURCES) {
+  for (const el of ['arena', 'cast']) {
+    const rec = srcDef.recorded[el];
+    const history = rec.reads.map((r) => `${r.mean} (n=${r.n}) at ${r.at}`).join(' then ');
+    DRIFT_ORDER.forEach((srcIdx, i) => {
+      const dir = join(srcDef.dir, `${el}-c${srcIdx}`);
+      const sheet = join(dir, 'sheet_1.png');
+      if (!existsSync(sheet)) { console.error(`drift arm ${srcDef.id}: missing ${sheet}`); process.exit(4); }
+      const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+      drift.push({
+        arm: 'drift',
+        element: `drift_${srcDef.id}_${el}`,
+        critic: i + 1,
+        sourcePacket: `${srcDef.id}/${el}-c${srcIdx}`,
+        dir,
+        plate: m.plates?.[0] ?? null,
+        category: m.category,
+        ours: m.ours,
+        what: `DRIFT CONTROL (${srcDef.id}) — the BYTE-IDENTICAL sheet of 2026-08-05, unmodified. `
+          + `It read ${history}. Re-scoring it now measures the INSTRUMENT, because the pixels `
+          + `cannot have changed. ${srcDef.why}.`,
+        sheet,
+        sheetSha256: sha(sheet),
+        key: join(dir, 'sheet_1.key.json'),
+        rubricSource: m.rubricSource ?? 'tools/review.rubric.txt',
+        verified: m.capture?.verified ?? null,
+        recorded: rec,
+      });
     });
-  });
+  }
 }
 
 const all = [...assignments, ...drift];
 const outFile = join(OUT, 'q1-manifest.json');
 await writeFile(outFile, JSON.stringify({
   builtAt: new Date().toISOString(),
-  head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT }).toString().trim(),
+  // ⚠️ `repoHeadAtBuild` is NOT where the pixels came from — peers land commits while
+  // this runs. `capturedAt` is the SHA the new arm was rendered from, via a snapshot of
+  // a detached clean worktree of it.
+  repoHeadAtBuild: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT }).toString().trim(),
   capturedAt: args['captured-at'] ?? null,
   rubric: 'tools/review.rubric.txt (canonical v1)',
   rubricSha256: sha(join(ROOT, 'tools/review.rubric.txt')),
