@@ -1,10 +1,33 @@
 # State — what is done, what is pending
 
-**As of commit `07c5294`, end of the unattended session of 2026-08-11 → 12.**
-Tree clean, in sync with `origin/main`, ~300 commits and ~20 agents since `b967242`.
-**Deployed and live** at `https://uri-onceuponyou.github.io/food-arena/` — the served build is
-`f5dddb4`, and its only difference from `07c5294` is **comment-only** (verified: the whole
-`f5dddb4..07c5294` diff under `src/` is comments, zero executable lines).
+**As of commit `2d618a6`, end of the ATTENDED session of 2026-08-12.** Pushed, `gatecount`
+**0 faults** on a detached worktree of HEAD, `verify-head` OK.
+**Deployed:** `gh-pages` is `322587b`, built from `cebf495`. ⚠️ **Four `src/` commits have landed
+since that deploy** (`e81df64` `4de71cb` `16b635d` `3f28b39` — the telegraph, the HUD countdown,
+the cast system). **Rebuild before asking Uri to look at any of them.**
+
+> 🔴 **THIS SESSION WAS DIFFERENT: URI WAS PRESENT AND PLAYING, AND HE FOUND MORE THAN THE
+> INSTRUMENTS DID.** The previous header's advice still stands (this line goes stale; run
+> `git log --oneline -1`), but the operational lesson is new and it is §4's:
+> **three owner reports, three real defects, none visible to any gate here** — and the first
+> of them was a bug this repo had *already written down in two files and filed as academic*.
+
+## What landed today, in one screen
+
+| | |
+|---|---|
+| 🔴 **the fog schedule** | `6d5c4d6`. Uri played into it: the ring was scheduled to reach the centre at `MATCH_DURATION_MS` and sudden death fired at 30 s of 45 s, **deleting the last third of the schedule**. Now `FOG_HOLD_MS` 25 s · `FOG_CLOSE_MS` 120 s · `SUDDEN_DEATH_MS` **derived** from the close · clock 150 s. Arrival proved at 120.00 s for every N=2..6. `DECISIONS §72` |
+| 🔴 **the cast/telegraph system** | `3f28b39`. Uri: *"a telegraph you can dodge."* `Weapon.castMs`, `Fighter.cast`, AI rows both ways. `sim.test` **494 → 544**. `waterbottle.Mega` converted (`castMs: 1100`) — **it had no VFX entry at all before**. Five ultimates remain; the mechanism is paid for |
+| 🔴 **weapon cards are fiction** | Uri found it on Water Bottle. **20 of 34 descriptions** contain a clause the sim does not do, 9 of 11 characters. Byte-identical to the 2D prototype — **and so is the mechanic set (10 slow / 5 stun both sides), so the promises were NEVER true in either codebase.** He chose BUILD over reword |
+| **six-player** | `2f907a7` — reachable behind `?seats=`, flag-off proved bit-identical. Uri then answered §66 in full (`DECISIONS §74`): a **lobby**, choose the count, bots fill, and a human-seat UI that must be honest about a transport that does not exist |
+| **the result card** | `72d6c36`. ⚠️ **It was never a six-seat defect** — 40 of 112 cards overflowed **from three seats**, and two seats overflowed whenever a chest credit made four payout chips. It was clipping in shipped play |
+| **the HUD lied about danger** | `4de71cb`. Countdown read `0:24` where the fog was 17.5 s away, and ran at all during the 25 s hold. Fixed by calling `fogReachesRadiusAt`, not by adjusting a rate |
+| **the phone, measured at last** | `d1a4f6c`. iPhone 15 Pro / iOS 26.5.2, two paired captures. **Worst frame 618.33 ms → 33.33 ms**; max == p99, so nothing exceeded two display intervals. ⚠️ Reads the CAPTURE pipeline: proves jank, **cannot prove smoothness**. ⚠️ **Both captures are PORTRAIT** — every landscape figure here describes a mode Uri does not play in |
+| **warm is no longer scarce** | `43932ce`. All 11 colour rails PASS for the first time; warm 0.0596 → 0.0823 at **114× the floor**. ⚠️ But it arrived **inside the cast's hue band** (`topCellsInCastBand` 0.296 → 0.648), which nothing gates. `DECISIONS §73` |
+
+⚠️ **`shots/` was cleaned 21.7 GB → 3.3 GB** (25,725 stale PNGs). Kept: every JSON/sidecar record,
+all blind-review packets and keys, the `:5173` crash evidence, and the doc-cited frames.
+**No tool in the repo reads a `.png`** — that was verified before deleting, not assumed.
 
 > ⚠️ **The header used to read *"as of `b967242`, 125 commits into an unattended session… working
 > tree clean"*, and then *"as of `6650bf6`"*. Kept because the staleness is itself the lesson:** this
