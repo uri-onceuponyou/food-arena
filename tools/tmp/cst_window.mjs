@@ -198,7 +198,25 @@ for (const s of meleeUlts) {
   }
   const tRoot = escapeWindow({ rangeWu, T_ms: 0, targetSpeed: slowestHuman.human, casterSpeed: 0 }).tToEscapeMs;
   const tMob = escapeWindow({ rangeWu, T_ms: 0, targetSpeed: slowestHuman.human, casterSpeed: fastestAiChase.aiChase }).tToEscapeMs;
-  console.log(`    MINIMUM T for the worst-case human to clear ${rangeWu} wu:  rooted caster ${f2(tRoot)} ms · mobile caster ${f2(tMob)} ms`);
+  const tFast = escapeWindow({ rangeWu, T_ms: 0, targetSpeed: fastestHuman.human, casterSpeed: 0 }).tToEscapeMs;
+  console.log(`    MINIMUM T to clear ${rangeWu} wu from separation 0, ROOTED caster:  fastest human ${f2(tFast)} ms · slowest human ${f2(tRoot)} ms   (mobile caster: ${f2(tMob)} ms)`);
+  // ── 🚨 A SLOWED TARGET CANNOT DODGE, AND `Mega` APPLIES `slow` ITSELF ──────
+  //
+  // Every duration this table recommends is computed on a target at FULL speed. A target
+  // already carrying `slow` moves at `SLOW_MOVE_MULTIPLIER` (0.45) of it, and its escape
+  // time scales by 1/0.45 = 2.22x. That is not a hypothetical: Water Bottle's own Water
+  // Spray is authored `effect: 'slow'` and its card says *"slows enemies down a lot"*, so
+  // Spray-then-Mega is a two-press combo that removes the counterplay this whole design
+  // exists to create. Whether that is a COMBO (good) or a HOLE (bad) is Uri's call — but
+  // it has to be a call, not an accident, so the number is printed.
+  //
+  // ⚠️ AND THE SLOW IS ASYMMETRIC: a slowed HUMAN keeps 0.45 (`SLOW_MOVE_MULTIPLIER`), a
+  // slowed AI keeps 0.35 (`AI_SLOW_MULTIPLIER`) — two separately authored constants for
+  // one word. So the same telegraph is 1.29x less escapable for a bot than for a human.
+  const slowFast = escapeWindow({ rangeWu, T_ms: 0, targetSpeed: fastestHuman.humanSlowed, casterSpeed: 0 }).tToEscapeMs;
+  const slowSlow = escapeWindow({ rangeWu, T_ms: 0, targetSpeed: slowestHuman.humanSlowed, casterSpeed: 0 }).tToEscapeMs;
+  const slowAi = escapeWindow({ rangeWu, T_ms: 0, targetSpeed: slowestAiChase.aiChaseSlowed, casterSpeed: 0 }).tToEscapeMs;
+  console.log(`    ... if the target is ALREADY SLOWED:  fastest human ${f2(slowFast)} ms · slowest human ${f2(slowSlow)} ms · slowest AI ${f2(slowAi)} ms`);
 }
 
 console.log('\n── SUDDEN DEATH: what a cast costs when the fog is burning ──');
