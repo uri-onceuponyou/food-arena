@@ -85,14 +85,39 @@ const args = (() => {
   return o;
 })();
 
-/** `arena/shared.ts` FOG_FIRST_CONTACT_S, and the same derivation as `MAX_SAFE_RADIUS`.
- *  Duplicated rather than imported because this file must run with no TS loader. The
- *  selftest asserts it against the shipped dump, so a drift here fails loudly. */
-const FOG_FIRST_CONTACT_MS = 6000;
-
-function derivedMaxSafe(width, height, matchDurationMs) {
-  return Math.round(Math.hypot(width / 2, height / 2) / (1 - FOG_FIRST_CONTACT_MS / matchDurationMs));
+/**
+ * ⚠️ **OLD WORDING, KEPT WITH THE REASON — THIS WAS THE LIVE DERIVATION UNTIL 2026-08-12.**
+ *
+ *   > `arena/shared.ts` FOG_FIRST_CONTACT_S, and the same derivation as `MAX_SAFE_RADIUS`.
+ *   > Duplicated rather than imported because this file must run with no TS loader. The
+ *   > selftest asserts it against the shipped dump, so a drift here fails loudly.
+ *   >
+ *   >     const FOG_FIRST_CONTACT_MS = 6000;
+ *   >     Math.round(hypot(w/2, h/2) / (1 - FOG_FIRST_CONTACT_MS / matchDurationMs))
+ *
+ * 🚨 **IT DID NOT FAIL LOUDLY. IT AGREED BY CONSTRUCTION UNTIL THE CLOCK MOVED.** On the 45 s
+ * clock this returned **exactly** the dump's 1985 on the shipped map and exactly 2× that at
+ * k=2 (3970), so nothing anywhere could tell the duplicate from the source. `6d5c4d6` gave the
+ * ring an explicit `FOG_HOLD_MS` and took `MATCH_DURATION_MS` 45 s → 150 s; the same expression
+ * now returns **1792**, a plausible number from a formula that no longer describes the game,
+ * and `mode: 'copy'` — the arm `as_cost` uses as its BASELINE — silently stopped being a copy.
+ *
+ * **The clock is out of it entirely now.** `rules.ts:fogOpeningRadiusFor` says the opening ring
+ * IS the half-diagonal, so the ring is proportional to the map's linear size and the honest
+ * synthesis is to **scale it with every other distance**: ×1 for `copy` (a copy is a copy), ×k
+ * for `stretch`/`tile`/`hub`. That reproduces `fogOpeningRadiusFor` exactly whenever the source
+ * dump is itself fresh — asserted below on a synthetic fresh source, so this tool is pinned to
+ * `rules.ts` and not to whatever `tools/arena.gameplay.json` happens to hold — and it propagates
+ * a STALE source visibly instead of overwriting it with a number the caller did not ask for.
+ *
+ * Kept as an exported function ONLY so `--selftest` can run it as a named known-bad.
+ */
+export function legacyClockCoupledMaxSafe(width, height, matchDurationMs, firstContactMs = 6000) {
+  return Math.round(Math.hypot(width / 2, height / 2) / (1 - firstContactMs / matchDurationMs));
 }
+
+/** The half-diagonal of a playfield — `arena/shared.ts:ARENA_HALF_DIAGONAL`'s expression. */
+const halfDiagonal = (width, height) => Math.hypot(width / 2, height / 2);
 
 /**
  * Scale a dump.
@@ -101,12 +126,16 @@ function derivedMaxSafe(width, height, matchDurationMs) {
  * @param {object} opts
  * @param {'copy'|'stretch'|'tile'} opts.mode
  * @param {number} opts.k     linear factor (area factor is k^2)
- * @param {number} opts.matchDurationMs
  * @param {boolean} [opts.scaleSizes]  scale prop w/h and hazard radii too (selftest only)
  * @param {boolean} [opts.onePot]      tile mode: keep exactly one `damage` hazard, centred
+ *
+ * ⚠️ **`opts.matchDurationMs` IS GONE, and callers that still pass it are passing nothing.**
+ * The opening ring stopped being a function of the clock in `6d5c4d6` — see
+ * `legacyClockCoupledMaxSafe` above. It is removed rather than accepted-and-ignored so that a
+ * caller reading this signature cannot believe the clock still steers the fog.
  */
 export function scaleArena(src, opts) {
-  const { mode, k, matchDurationMs, scaleSizes = false, onePot = false } = opts;
+  const { mode, k, scaleSizes = false, onePot = false } = opts;
   const width = mode === 'copy' ? src.width : src.width * k;
   const height = mode === 'copy' ? src.height : src.height * k;
   const s = scaleSizes ? k : 1;
@@ -116,7 +145,13 @@ export function scaleArena(src, opts) {
     displayName: src.displayName,
     width, height,
     center: { x: width / 2, y: height / 2 },
-    maxSafeRadius: derivedMaxSafe(width, height, matchDurationMs),
+    // 🚨 SCALED, NOT RE-DERIVED. `rules.ts:fogOpeningRadiusFor` makes the opening ring the
+    //    half-diagonal, so it is proportional to the map's linear size: `copy` is ×1 (which is
+    //    what makes the bit-identity row below a real identity rather than a coincidence) and
+    //    every scaling arm is ×k. A source dump that is itself fresh therefore comes out
+    //    exactly equal to `fogOpeningRadiusFor(halfDiagonal(width, height))` — asserted — and a
+    //    source that is stale stays visibly stale instead of being silently overwritten here.
+    maxSafeRadius: mode === 'copy' ? src.maxSafeRadius : src.maxSafeRadius * k,
     playerSpawn: null, enemySpawn: null,
     // 🚨 `spawns` AND `concealment` WERE MISSING FROM THIS OBJECT ENTIRELY until 2026-08-11,
     //    and the check below said `mode=copy is bit-identical to the shipped dump`. It was
@@ -333,17 +368,65 @@ if (args.selftest) {
   const shipped = JSON.parse(readFileSync(`${ROOT}/tools/arena.gameplay.json`, 'utf8'));
   const RULES = await import(`${ROOT}/src/game/rules.ts`);
   const T = RULES.MATCH_DURATION_MS;
+  /** What `rules.ts` says the ring opens at, for a playfield of these dimensions. */
+  const ruleRadius = (w, h) => RULES.fogOpeningRadiusFor(halfDiagonal(w, h));
 
-  // 1. The duplicated fog derivation must reproduce the SHIPPED dump's own number.
-  //    Fails if `FOG_FIRST_CONTACT_S` or the formula in `arena/shared.ts` moves.
-  ok('the duplicated fog derivation reproduces the shipped dump\'s maxSafeRadius',
-    derivedMaxSafe(shipped.width, shipped.height, T) === shipped.maxSafeRadius,
-    `derived ${derivedMaxSafe(shipped.width, shipped.height, T)} vs dumped ${shipped.maxSafeRadius}`);
+  // ── 1. THE OPENING RING, PINNED TO `rules.ts` AND NOT TO THE DUMP ─────────
+  //
+  // ⚠️ REWRITTEN. Old row, kept because its failure is the lesson:
+  //      ok('the duplicated fog derivation reproduces the shipped dump\'s maxSafeRadius',
+  //         derivedMaxSafe(shipped.width, shipped.height, T) === shipped.maxSafeRadius);
+  //    That compared one stale copy against another. Both were `hypot/(1 - 6000/T)` with the
+  //    same T, so it could only ever go red when the CLOCK moved — which is exactly when it
+  //    did, on `6d5c4d6`, reporting `derived 1792 vs dumped 1985` and pointing at neither of
+  //    the two things that are actually true: the formula is dead, and the dump is stale.
+  //
+  // The rows below separate those. 1a asks whether THIS TOOL agrees with `rules.ts` (it must,
+  // and that is testable without any dump at all); 1c asks whether the shipped dump does.
+  {
+    // 1a. Run the synthesis over a source that is fresh BY CONSTRUCTION, so the answer is a
+    //     property of `scaleArena` rather than of a file on disk. A pinned literal, the legacy
+    //     clock formula, or a `copy` that rounds all fail this.
+    const fresh = { ...shipped, maxSafeRadius: ruleRadius(shipped.width, shipped.height) };
+    const c1 = scaleArena(fresh, { mode: 'copy', k: 1 });
+    const s2 = scaleArena(fresh, { mode: 'stretch', k: 2 });
+    ok('the synthesised opening ring IS `rules.ts:fogOpeningRadiusFor(halfDiagonal)`, at both sizes',
+      c1.maxSafeRadius === ruleRadius(c1.width, c1.height)
+      && s2.maxSafeRadius === ruleRadius(s2.width, s2.height),
+      `k=1 ${c1.maxSafeRadius} vs ${ruleRadius(c1.width, c1.height)}`
+      + ` · k=2 ${s2.maxSafeRadius} vs ${ruleRadius(s2.width, s2.height)}`);
+
+    // 1b. KNOWN-BAD, and it is the implementation this file SHIPPED until 2026-08-12: the
+    //     clock-coupled derivation. On the 45 s clock it agreed to the unit; on the 150 s
+    //     clock it is 1792 against 1720.47, and rounding alone would cost the corners 0.47 wu.
+    const legacy = legacyClockCoupledMaxSafe(fresh.width, fresh.height, T);
+    ok('…and the KNOWN-BAD (the clock-coupled derivation this file used to duplicate) is refused',
+      legacy !== ruleRadius(fresh.width, fresh.height)
+      && Math.round(ruleRadius(fresh.width, fresh.height)) !== ruleRadius(fresh.width, fresh.height),
+      `legacy ${legacy} vs rule ${ruleRadius(fresh.width, fresh.height)}`
+      + ` (and Math.round would give ${Math.round(ruleRadius(fresh.width, fresh.height))})`);
+
+    // 1c. 🚨 THE INPUT. `tools/arena.gameplay.json` is written by `tools/arena-dump.html` out
+    //     of a browser build of `kitchen.ts:1291`, which reads `shared.ts:MAX_SAFE_RADIUS`.
+    //     Nothing in Node can refresh it, and hand-editing it moves every peer's balance
+    //     baseline mid-session — so when this row is RED the fix is a dump refresh, not an
+    //     edit here. It is an assertion rather than a printed note because a number in prose
+    //     is how six counts went stale in one session.
+    //     ⚠️ It went red on the dump's 1985 and green the same afternoon when a peer refreshed
+    //     the dump to 1720.4650534085254 — i.e. it is a drift detector that has now been
+    //     observed in BOTH states on the shipped tree, which is the evidence the row it
+    //     replaced never had. The old row could only go red when the CLOCK moved.
+    ok('the shipped dump\'s maxSafeRadius is the one `rules.ts` derives (a stale dump fails HERE,'
+      + ' not silently inside every fixture built from it)',
+      shipped.maxSafeRadius === ruleRadius(shipped.width, shipped.height),
+      `dumped ${shipped.maxSafeRadius} vs rules.ts ${ruleRadius(shipped.width, shipped.height)}`
+      + ` — refresh with \`node tools/match-sim.mjs --refresh-arena --url <snapshot>\``);
+  }
 
   // 2. copy is BIT-IDENTICAL. Fails for any implementation that rounds, reorders or
   //    drops a field — which is the whole risk of a hand-written dump synthesiser.
   {
-    const c = scaleArena(shipped, { mode: 'copy', k: 1, matchDurationMs: T });
+    const c = scaleArena(shipped, { mode: 'copy', k: 1 });
     // ⚠️ REWRITTEN. Old check, kept because its failure is the lesson:
     //      ok('mode=copy is bit-identical to the shipped dump',
     //         JSON.stringify(c) === JSON.stringify({ id, displayName, width, height, center,
@@ -380,22 +463,22 @@ if (args.selftest) {
 
   // 3. stretch k=1 is also identity. Fails for an off-by-one in the mapping.
   {
-    const a = scaleArena(shipped, { mode: 'stretch', k: 1, matchDurationMs: T });
-    const c = scaleArena(shipped, { mode: 'copy', k: 1, matchDurationMs: T });
+    const a = scaleArena(shipped, { mode: 'stretch', k: 1 });
+    const c = scaleArena(shipped, { mode: 'copy', k: 1 });
     ok('mode=stretch k=1 is identity', JSON.stringify(a) === JSON.stringify(c));
   }
 
   // 4. stretch k=2 doubles EVERY distance and NO size. This is the assertion that
   //    fails if sizes are scaled by accident — the exact fault `--scale-sizes` models.
   {
-    const a = scaleArena(shipped, { mode: 'stretch', k: 2, matchDurationMs: T });
+    const a = scaleArena(shipped, { mode: 'stretch', k: 2 });
     const dBefore = Math.hypot(shipped.playerSpawn.x - shipped.enemySpawn.x, shipped.playerSpawn.y - shipped.enemySpawn.y);
     const dAfter = Math.hypot(a.playerSpawn.x - a.enemySpawn.x, a.playerSpawn.y - a.enemySpawn.y);
     const sizesHeld = a.cover.every((c, i) => c.w === shipped.cover[i].w && c.h === shipped.cover[i].h)
       && a.hazards.every((h, i) => h.radius === shipped.hazards[i].radius);
     ok('stretch k=2: spawn separation doubles AND every prop size is unchanged',
       Math.abs(dAfter - 2 * dBefore) < 1e-9 && sizesHeld, `sep ${dBefore.toFixed(1)} -> ${dAfter.toFixed(1)}`);
-    const bad = scaleArena(shipped, { mode: 'stretch', k: 2, matchDurationMs: T, scaleSizes: true });
+    const bad = scaleArena(shipped, { mode: 'stretch', k: 2, scaleSizes: true });
     ok('…and the KNOWN-BAD input (--scale-sizes) is caught by that same test',
       bad.cover.some((c, i) => c.w !== shipped.cover[i].w));
   }
@@ -403,7 +486,7 @@ if (args.selftest) {
   // 5. tile k=2 holds cover DENSITY exactly and multiplies the COUNT by k^2. Fails for
   //    a tiling that drops the mirrored quadrants or double-counts the seam.
   {
-    const a = scaleArena(shipped, { mode: 'tile', k: 2, matchDurationMs: T });
+    const a = scaleArena(shipped, { mode: 'tile', k: 2 });
     const densBefore = shipped.cover.reduce((s, c) => s + c.w * c.h, 0) / (shipped.width * shipped.height);
     const densAfter = a.cover.reduce((s, c) => s + c.w * c.h, 0) / (a.width * a.height);
     ok('tile k=2: cover count x4 and areal density unchanged to 1e-12',
@@ -411,7 +494,7 @@ if (args.selftest) {
       `${shipped.cover.length} -> ${a.cover.length}, density ${densBefore.toFixed(5)} -> ${densAfter.toFixed(5)}`);
     ok('…and stretch k=2 does the OPPOSITE — same count, a quarter of the density',
       (() => {
-        const s2 = scaleArena(shipped, { mode: 'stretch', k: 2, matchDurationMs: T });
+        const s2 = scaleArena(shipped, { mode: 'stretch', k: 2 });
         const d2 = s2.cover.reduce((s, c) => s + c.w * c.h, 0) / (s2.width * s2.height);
         return s2.cover.length === shipped.cover.length && Math.abs(d2 - densBefore / 4) < 1e-12;
       })());
@@ -419,7 +502,7 @@ if (args.selftest) {
     // the only thing that differs between them is cover density. Fails for the
     // corner-anchored spawn mapping this tool shipped first (2763.8 vs 2204.4 wu).
     {
-      const s2 = scaleArena(shipped, { mode: 'stretch', k: 2, matchDurationMs: T });
+      const s2 = scaleArena(shipped, { mode: 'stretch', k: 2 });
       const sepT = Math.hypot(a.playerSpawn.x - a.enemySpawn.x, a.playerSpawn.y - a.enemySpawn.y);
       const sepS = Math.hypot(s2.playerSpawn.x - s2.enemySpawn.x, s2.playerSpawn.y - s2.enemySpawn.y);
       ok('the two 2x arms have IDENTICAL spawn separation, so stretch->tile isolates density',
@@ -431,7 +514,7 @@ if (args.selftest) {
   // 6. Every prop, hazard and spawn is INSIDE the new bounds in both arms. A prop pushed
   //    outside the playfield is unreachable cover the sim still line-of-sights against.
   for (const mode of ['stretch', 'tile']) {
-    const a = scaleArena(shipped, { mode, k: 2, matchDurationMs: T });
+    const a = scaleArena(shipped, { mode, k: 2 });
     const inside = (x, y) => x >= 0 && x <= a.width && y >= 0 && y <= a.height;
     ok(`${mode} k=2: every prop, hazard and spawn is inside the new bounds`,
       a.cover.every((c) => inside(c.x, c.y)) && a.hazards.every((h) => inside(h.x, h.y))
@@ -441,7 +524,7 @@ if (args.selftest) {
   // 7. No spawn is embedded in cover, in either arm. The shipped dump satisfies this;
   //    a tiling that puts a quadrant's furniture on top of the map corner would not.
   for (const mode of ['copy', 'stretch', 'tile']) {
-    const a = scaleArena(shipped, { mode, k: 2, matchDurationMs: T });
+    const a = scaleArena(shipped, { mode, k: 2 });
     const embedded = (p) => a.cover.some((c) => Math.abs(p.x - c.x) < c.w / 2 && Math.abs(p.y - c.y) < c.h / 2);
     ok(`${mode}: neither spawn is embedded in a cover box`,
       !embedded(a.playerSpawn) && !embedded(a.enemySpawn));
@@ -450,21 +533,60 @@ if (args.selftest) {
   // 8. The fog schedule is SCALE-INVARIANT in relative terms and NOT in absolute ones.
   //    This is the §48 fog question answered arithmetically before any match is run: it
   //    fails if someone "fixes" the derivation by pinning maxSafeRadius to a literal.
+  //
+  // ⚠️ **THE SWEEP ROW IS RE-DERIVED, AND THE ANSWER CHANGED.** Old wording, kept with the
+  //    reason, because the ARITHMETIC is the fossil rather than any coordinate:
+  //
+  //      > ok('…but its ABSOLUTE sweep speed doubles, which is the thing that has to be judged',
+  //      >    Math.abs(sweepAfter / sweepBefore - 2) < 0.01);
+  //      >    const sweepBefore = shipped.maxSafeRadius / (T / 1000);      // R / MATCH_DURATION
+  //
+  //    `R / T` was the speed of a ring that began closing at the whistle and reached zero at
+  //    the final second. `6d5c4d6` replaced that schedule outright: the ring HOLDS at its
+  //    opening radius for `FOG_HOLD_MS`, travels to `minSafeRadiusFor(N)` over
+  //    `FOG_CLOSE_MS - FOG_HOLD_MS`, and holds there — so `R / T` is wrong twice over. It
+  //    divides by a window 55 s of which the ring does not move, and it assumes a destination
+  //    of zero that the ring never reaches.
+  //
+  //    And "doubles" is no longer the right answer either: the sweep goes slightly FURTHER
+  //    than double, because the FINAL CIRCLE DOES NOT SCALE WITH THE MAP. `minSafeRadiusFor`
+  //    is a standoff between fighters (`ENDGAME_STANDOFF / sin(pi/n) - POT.dangerRadius`), not
+  //    a fraction of the arena, so a 2x map opens twice as wide and still has to arrive at the
+  //    same small circle in the same 95 s. That excess IS the assertion: a `scaleArena` that
+  //    scaled the floor along with the map would read exactly x2, and it is shown.
   {
-    const a = scaleArena(shipped, { mode: 'stretch', k: 2, matchDurationMs: T });
-    const relBefore = shipped.maxSafeRadius / Math.hypot(shipped.width / 2, shipped.height / 2);
-    const relAfter = a.maxSafeRadius / Math.hypot(a.width / 2, a.height / 2);
+    const a = scaleArena(shipped, { mode: 'stretch', k: 2 });
+    const relBefore = shipped.maxSafeRadius / halfDiagonal(shipped.width, shipped.height);
+    const relAfter = a.maxSafeRadius / halfDiagonal(a.width, a.height);
     ok('the derived ring opens at the SAME multiple of the half-diagonal at both sizes',
       Math.abs(relBefore - relAfter) < 1e-3, `${relBefore.toFixed(4)} vs ${relAfter.toFixed(4)}`);
-    const sweepBefore = shipped.maxSafeRadius / (T / 1000);
-    const sweepAfter = a.maxSafeRadius / (T / 1000);
-    ok('…but its ABSOLUTE sweep speed doubles, which is the thing that has to be judged',
-      Math.abs(sweepAfter / sweepBefore - 2) < 0.01, `${sweepBefore.toFixed(1)} -> ${sweepAfter.toFixed(1)} wu/s`);
+    // KNOWN-BAD for the row above — the exact "fix" its comment names. A pinned literal keeps
+    // the ring where it was while the map doubles, which is the corners-fogged-from-birth bug.
+    {
+      const pinned = { ...a, maxSafeRadius: shipped.maxSafeRadius };
+      ok('…and the KNOWN-BAD (maxSafeRadius pinned to a literal instead of scaled) is caught by it',
+        Math.abs(relBefore - pinned.maxSafeRadius / halfDiagonal(pinned.width, pinned.height)) >= 1e-3,
+        `pinned would read ${(pinned.maxSafeRadius / halfDiagonal(pinned.width, pinned.height)).toFixed(4)}`);
+    }
+    // The ring's travel, on the schedule that actually ships: opening -> floor, over the CLOSE
+    // window, and the floor is read from `rules.ts` at the dump's own seat count.
+    const seats = (shipped.spawns ?? []).length || 6;
+    const floor = RULES.minSafeRadiusFor(seats);
+    const closeS = (RULES.FOG_CLOSE_MS - RULES.FOG_HOLD_MS) / 1000;
+    const sweep = (radius, f) => (radius - f) / closeS;
+    const sweepBefore = sweep(shipped.maxSafeRadius, floor);
+    const sweepAfter = sweep(a.maxSafeRadius, floor);
+    const ifFloorScaled = sweep(a.maxSafeRadius, floor * 2);
+    ok('…and its ABSOLUTE sweep speed MORE than doubles, because the final circle does NOT scale',
+      sweepAfter / sweepBefore > 2 && Math.abs(ifFloorScaled / sweepBefore - 2) < 1e-9,
+      `${sweepBefore.toFixed(2)} -> ${sweepAfter.toFixed(2)} wu/s over the ${closeS.toFixed(0)}s close`
+      + ` (x${(sweepAfter / sweepBefore).toFixed(3)}); floor(${seats})=${floor.toFixed(2)} fixed —`
+      + ' a floor that scaled with the map would read exactly x2');
   }
 
   // ── 9. THE `hub` ARM — Uri's three rules, each as an assertion ────────────
   {
-    const a = scaleArena(shipped, { mode: 'hub', k: 2, matchDurationMs: T });
+    const a = scaleArena(shipped, { mode: 'hub', k: 2 });
 
     // (a) Hub membership is what this tool thinks it is. Fails on a `kitchen.ts` rename
     //     — which would otherwise empty the hub and leave the arm silently pot-less.
@@ -490,7 +612,7 @@ if (args.selftest) {
     // (c) RULE 1 — density held. `stretch` is the counter-example, so assert BOTH ways
     //     or the test passes for a layout that merely has more props than nothing.
     const dens = (x) => x.cover.reduce((s, c) => s + c.w * c.h, 0) / (x.width * x.height);
-    const st = scaleArena(shipped, { mode: 'stretch', k: 2, matchDurationMs: T });
+    const st = scaleArena(shipped, { mode: 'stretch', k: 2 });
     ok('RULE 1: cover density is within 15% of the shipped map — and stretch is not',
       Math.abs(dens(a) / dens(shipped) - 1) < 0.15 && dens(st) / dens(shipped) < 0.3,
       `hub ${(dens(a) * 100).toFixed(2)}% · shipped ${(dens(shipped) * 100).toFixed(2)}% · stretch ${(dens(st) * 100).toFixed(2)}%`);
@@ -533,14 +655,20 @@ const RULES = await import(`${ROOT}/src/game/rules.ts`);
 const out = scaleArena(src, {
   mode: String(args.mode ?? 'copy'),
   k: Number(args.k ?? 1),
-  matchDurationMs: RULES.MATCH_DURATION_MS,
   scaleSizes: !!args['scale-sizes'],
   onePot: !!args['one-pot'],
 });
 
 const dens = out.cover.reduce((s, c) => s + c.w * c.h, 0) / (out.width * out.height);
 const sep = Math.hypot(out.playerSpawn.x - out.enemySpawn.x, out.playerSpawn.y - out.enemySpawn.y);
-console.log(`${args.mode ?? 'copy'} k=${args.k ?? 1}: ${out.width}x${out.height} · cover ${out.cover.length} (density ${(dens * 100).toFixed(2)}%) · hazards ${out.hazards.length} · spawn sep ${sep.toFixed(1)} wu · maxSafeRadius ${out.maxSafeRadius}`);
+// ⚠️ `RULES` used to be imported only to feed `matchDurationMs` into `scaleArena`, and it
+//    would have become a dead binding when that option was removed. It reports the drift
+//    instead: the ring this tool WROTE against what `rules.ts` says a map this size opens at,
+//    so a stale input dump is visible on the one line the CLI prints rather than only inside
+//    `--selftest`. `[STALE INPUT]` here means `tools/arena.gameplay.json` needs a refresh.
+const ruleR = RULES.fogOpeningRadiusFor(Math.hypot(out.width / 2, out.height / 2));
+const drift = Math.abs(out.maxSafeRadius - ruleR) < 1e-9 ? '' : ` [STALE INPUT: rules.ts says ${ruleR}]`;
+console.log(`${args.mode ?? 'copy'} k=${args.k ?? 1}: ${out.width}x${out.height} · cover ${out.cover.length} (density ${(dens * 100).toFixed(2)}%) · hazards ${out.hazards.length} · spawn sep ${sep.toFixed(1)} wu · maxSafeRadius ${out.maxSafeRadius}${drift}`);
 
 if (args.out) {
   const p = resolve(String(args.out));

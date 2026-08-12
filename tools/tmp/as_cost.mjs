@@ -218,16 +218,27 @@ function boxSymmetryFaults(boxes, center, tol = 1e-6) {
  * would be a before on a map that no longer exists.
  */
 function fixture(src, mode, k, onePot = false) {
-  const a = scaleArena(src, { mode, k, matchDurationMs: MATCH_DURATION_MS, onePot });
+  // ⚠️ `matchDurationMs` USED TO BE PASSED HERE and is gone from `scaleArena`'s contract:
+  //    `6d5c4d6` decoupled the opening ring from the clock (`rules.ts:fogOpeningRadiusFor`),
+  //    and while the option still existed this call was steering the fixture's fog with a
+  //    constant that no longer touches it. `MATCH_DURATION_MS` is still imported — the sim
+  //    arms below read it — so removing it from this call is not a dead import.
+  const a = scaleArena(src, { mode, k, onePot });
   const regions = src.concealment ?? [];
   a.concealment = mode === 'copy' ? regions.map((b) => ({ ...b }))
     : tileConcealment(regions, src.width, src.height, k);
   /**
    * ⚠️ AND THE TILING CANNOT KEEP ALL 4k^2 OF THEM — the ENDGAME ANNULUS GREW.
    *
-   * `concealmentKeepoutRadius` is `maxSafeRadius * 0.25`, and `maxSafeRadius` is derived
-   * from the half-diagonal, so it DOUBLES with the map: 248.25 wu at 1400x1000, 496.25 at
-   * 2800x2000. A tiling that holds patch density therefore drops 4 of 24 patches into the
+   * `concealmentKeepoutRadius` is `max(MIN_SAFE_RADIUS, maxSafeRadius * (1 - CONCEAL_ENDGAME_
+   * PROGRESS))`, and `maxSafeRadius` is proportional to the half-diagonal, so it DOUBLES with
+   * the map. ⚠️ **The two figures this paragraph used to name — 248.25 wu at 1400x1000 and
+   * 496.25 at 2800x2000 — were a function of `tools/arena.gameplay.json`, and that file moved
+   * on 2026-08-12: the dump baked the pre-`6d5c4d6` opening radius 1985 and now carries
+   * `rules.ts`'s 1720.4650534085254, so the same expression reads **430.12 at 2800x2000**.
+   * B9 below asserts the RATIO and not either number for exactly that reason — it read
+   * 496.25 -> 992.50 on the stale dump and 430.12 -> 860.23 on the refreshed one, and passes
+   * on both.** A tiling that holds patch density therefore drops patches into the
    * hub's keep-out, where §29a forbids them. They are removed here, which is why the x4
    * fixture carries fewer than 4x the patches and why that is the right number rather than
    * a shortfall. Symmetric by construction — the shipped map is point-symmetric and the
@@ -701,9 +712,30 @@ if (args.selftest) {
       `${two.concealment.length} regions at x4`);
     ok('B8 KNOWN-BAD: dropping ONE region without its partner IS caught by B7\'s check',
       boxSymmetryFaults(two.concealment.slice(1), two.center).length > 0);
+    // ⚠️ **B9 WENT RED ON `6d5c4d6` AND THE GAME CONSTANT WAS NOT THE CAUSE.** It read
+    //    `496.25 -> 896.00` (x1.806, under the 1.9 bar) because `ax_layout:scaleArena` was
+    //    RE-DERIVING the x4 opening radius from `MATCH_DURATION_MS` with the pre-`6d5c4d6`
+    //    formula: on the 45 s clock that returned exactly 2x the source (3970) and on the
+    //    150 s clock it returns 3584. `scaleArena` now SCALES the ring with the map instead,
+    //    so this row is back to the `496.25 -> 992.50` `docs/TOOLS.md` records — and it gets
+    //    there without touching `concealmentKeepoutRadius`, which is Uri's arena constant and
+    //    was never the defect. (Re-deriving it honestly through `fogRadiusAt` would have
+    //    LOOSENED a fairness bound by 165 wu; anchoring it to the close would have pushed it
+    //    past r=500, where `kitchen.ts` puts all 20 shipped patches. Neither was needed.)
+    //
+    // 🚨 The bar is the RATIO, not either absolute, and the dump proved the point the same
+    //    day: it was refreshed from 1985 to 1720.4650534085254 while this file was being
+    //    fixed, and the row went 496.25 -> 992.50 to 430.12 -> 860.23 without moving off
+    //    x2.000. A row pinned to either absolute would have gone red on a CORRECTION.
+    //    What FAILS it is a synthesiser that does not scale the ring at all (ratio 1.0) —
+    //    which is what shipped for one commit, and is B9b.
     ok('B9 the endgame keepout GREW with the map — which is why the cut exists at all',
       concealmentKeepoutRadius(two.maxSafeRadius) > 1.9 * concealmentKeepoutRadius(src.maxSafeRadius),
       `${concealmentKeepoutRadius(src.maxSafeRadius).toFixed(2)} -> ${concealmentKeepoutRadius(two.maxSafeRadius).toFixed(2)} wu`);
+    // KNOWN-BAD for B9 — a fixture whose ring did not scale is refused by the same expression.
+    ok('B9b KNOWN-BAD: a fixture whose opening ring did NOT scale with the map fails B9',
+      !(concealmentKeepoutRadius(src.maxSafeRadius) > 1.9 * concealmentKeepoutRadius(src.maxSafeRadius)),
+      `unscaled would read ${concealmentKeepoutRadius(src.maxSafeRadius).toFixed(2)} -> ${concealmentKeepoutRadius(src.maxSafeRadius).toFixed(2)} wu (x1.000)`);
   }
 
   // ── C. The staging is real, and a missed anchor REPORTS a miss ───────────

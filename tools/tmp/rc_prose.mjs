@@ -93,6 +93,55 @@ const mmss = (ms) => {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
 
+/**
+ * A live sentence that states a superseded MATCH CLOCK, in the one shape these files
+ * actually use: **a duration written as a fraction of the match** — *"30 s of 45 s"*,
+ * *"25.1 s of a 45 s clock"*, *"13.3s of a 45s match"*.
+ *
+ * ## Why this class was missing, and why it is the one that just moved
+ *
+ * §B chases the RADIUS because the map went x4. `6d5c4d6` moved the other axis:
+ * `MATCH_DURATION_MS` 45 s -> 150 s. Every sentence that quantified something as a share of
+ * the clock is now wrong by 3.3x — *"12 s of alarm is a quarter of a 45 s match"* is 8% of
+ * this one — and none of it is a coordinate, an identifier or a radius, so neither the
+ * repo-wide 1x literal sweep nor §B can see any of it. That is the same gap this file was
+ * built for; it just had one axis in it.
+ *
+ * ## The two ways this could have been unusable, and what is done instead
+ *
+ *   * **Naming the superseded numbers.** Matching `45` or `30` would be this file hardcoding
+ *     exactly what it exists to ban, and would go stale on the next clock. So the test is
+ *     *"is the denominator today's clock?"*, read from `rules.ts`.
+ *   * **Firing on correct prose.** A bare seconds figure is not a clock — `src/ui/hud.ts`
+ *     legitimately says *"a mean match length of 19.6s"*, and a checker that cannot tell a
+ *     measurement from a constant gets switched off. Two narrowings: the figure must be the
+ *     DENOMINATOR of an `X of Y` fraction, and it must be inside a plausible match-clock
+ *     window. `19.6` is excluded by the window; `180` — the clock before 45 — is inside it
+ *     and IS flagged, correctly, because a sentence saying *"on the 45s clock it arrives
+ *     while there is still a fight going on"* teaches a reader the wrong clock.
+ *
+ * The same exemptions as §B apply and for the same reasons: a line that also states TODAY'S
+ * clock is a history sentence and cannot mislead, and `file.ts:123` is a citation.
+ *
+ * @param line   one source line
+ * @param nowSeconds  `MATCH_DURATION_MS / 1000`
+ * @returns the superseded denominators on this line, as written
+ */
+function staleClockHits(line, nowSeconds) {
+  const deRef = line.replace(/\.(ts|mjs|js):\d+/g, '');
+  if (new RegExp(`\\b${nowSeconds}\\b`).test(deRef)) return [];
+  const out = [];
+  const re = /\bof (?:a |an |the )?(\d+(?:\.\d+)?)\s*s(?:ec|ecs|econd|econds)?\b/g;
+  let m;
+  while ((m = re.exec(deRef)) !== null) {
+    const v = Number(m[1]);
+    // 30..600 s brackets every clock this game has shipped (180 -> 45 -> 150) with room
+    // either side, and excludes the sub-30 s durations these files measure and quote.
+    if (v >= 30 && v <= 600 && v !== nowSeconds) out.push(m[1]);
+  }
+  return out;
+}
+
 async function main() {
   const bridge = loadConstants();
   const K = await import(bridge.out);
@@ -117,8 +166,11 @@ async function main() {
   // well: it is the exact fossil `277e680` chased through twelve files, and a sentence can
   // state it without the word `maxSafeRadius` anywhere near it.
   const AUDIT = ['src/audio/sounds.ts', 'src/audio/director.ts', 'src/ui/hud.ts', 'src/game/match.ts'];
+  const nowSeconds = K.MATCH_DURATION_MS / 1000;
   let quotedSeen = 0;
+  let quotedClockSeen = 0;
   let liveOffenders = [];
+  let liveClockOffenders = [];
   for (const f of AUDIT) {
     let body = read(f);
     // KNOWN-BAD: put the old sentence back, unquoted, exactly as it shipped.
@@ -137,6 +189,14 @@ async function main() {
       //   * `fogRing.ts:533` is a FILE AND LINE, not a radius. The first version flagged it
       //     because the sentence around it says "safeRadiusUnits" — a checker that cannot
       //     tell a citation from a measurement will eventually be switched off.
+      // ── the CLOCK arm, same two exemptions, same quoted/live split ──────────
+      {
+        const clock = staleClockHits(line, nowSeconds);
+        if (clock.length) {
+          if (isQuoted(line)) quotedClockSeen++;
+          else liveClockOffenders.push(`${f}:${i + 1} [${clock.join(',')}s]`);
+        }
+      }
       const deRef = line.replace(/\.(ts|mjs|js):\d+/g, '');
       if (deRef.includes(String(nowRadius))) return;
       const nums = deRef.match(/\b\d{3,4}(?:\.\d+)?\b/g) ?? [];
@@ -154,6 +214,19 @@ async function main() {
   check('no live sentence states a superseded safe radius',
     liveOffenders.length === 0,
     liveOffenders.length ? liveOffenders.slice(0, 4).join('  ') : `${AUDIT.length} files clean`);
+  // ⚠️ THE REMEDY IS IN THE EVIDENCE STRING ON PURPOSE. This arm's likeliest failure mode is
+  // being switched off for firing on prose someone believes is fine — and the commonest such
+  // case is a superseded figure quoted INLINE (`"6.34 s of a 45 s match"`) rather than on a
+  // blockquote line. `isQuoted` is blockquote-only, deliberately and identically to the radius
+  // arm above, because `CLAUDE.md`'s house style IS the blockquote; so the answer is to move
+  // the sentence rather than to widen the classifier, and saying so here costs nothing.
+  check('no live sentence states a superseded MATCH CLOCK',
+    liveClockOffenders.length === 0,
+    liveClockOffenders.length
+      ? `${liveClockOffenders.length} sites, clock is now ${nowSeconds}s: ${liveClockOffenders.slice(0, 8).join('  ')}`
+        + '  — fix by restating on today\'s clock, or by moving the old sentence onto a'
+        + ' blockquote line (`*   >`) as the house style asks'
+      : `${AUDIT.length} files clean at ${nowSeconds}s`);
 
   // ── §C the classifier is not vacuous ───────────────────────────────────────
   // 🚨 A FILTER THAT EMPTIES ITS OWN SET PASSES EVERY ASSERTION OVER IT. Three controls
@@ -162,6 +235,20 @@ async function main() {
   // non-empty, and prove both branches of `isQuoted` on fixed inputs.
   check('superseded figures are present and classified as quoted',
     quotedSeen > 0, `${quotedSeen} quoted historical lines`);
+  check('superseded CLOCK figures are present and classified as quoted',
+    quotedClockSeen > 0, `${quotedClockSeen} quoted historical clock lines`);
+  // 🚨 THE CLOCK DETECTOR IS PROVED ON FIXED INPUTS, NOT ON THE CORPUS — because the corpus
+  // row above is RED today (`src/ui/hud.ts` and both `src/audio/**` files carry the 45 s
+  // clock), and a `--arm` known-bad that plants a defect into an already-red row proves
+  // nothing at all. A row cannot be shown to go red by a plant if it was never green: that is
+  // the vacuous-control failure with the roles reversed. So the four branches are exercised
+  // directly, and every one of them is a real mistake this detector has to survive.
+  check('the clock detector tells a stale clock from today\'s, and a measurement from a clock',
+    staleClockHits(' * ring to zero at `SUDDEN_DEATH_MS` = **30 s of 45 s**', 150).length === 1
+      && staleClockHits(' * 25 s of hold out of a 150 s match', 150).length === 0
+      && staleClockHits(' * the zone edge was off the card against a mean match length of 19.6s', 150).length === 0
+      && staleClockHits(' * 12 s of alarm was a quarter of a 45 s match; the clock is 150 s now', 150).length === 0,
+    'stale x1 hit, current/short-measurement/history x3 clean');
   check('the quoted/live classifier distinguishes its two arms',
     isQuoted(' *   > *"maxSafeRadius 993"*') === true
       && isQuoted(' //   > the old 993') === true

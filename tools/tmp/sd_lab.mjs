@@ -136,18 +136,33 @@ const {
 // ─────────────────────────────────────────────────────────────────────────────
 // Arena — the ring is DERIVED, never read from the cache
 //
-// `arena/shared.ts` derives `maxSafeRadius` from `MATCH_DURATION_MS`, so a dump goes stale
-// the moment the clock moves. Recomputed here from the same formula, identical to
-// `conceal_lab.mjs` and `roster_lab.mjs`, so a row here is the same match as a row there.
+// ⚠️ **OLD WORDING, KEPT WITH THE REASON, BECAUSE THE DERIVATION IT DEFENDS IS THE THING
+//    THAT WENT STALE:**
+//
+//   > `arena/shared.ts` derives `maxSafeRadius` from `MATCH_DURATION_MS`, so a dump goes stale
+//   > the moment the clock moves. Recomputed here from the same formula, identical to
+//   > `conceal_lab.mjs` and `roster_lab.mjs`, so a row here is the same match as a row there.
+//   >
+//   >     const FOG_FIRST_CONTACT_MS = 6000;
+//   >     maxSafeRadius: Math.round(hypot(w/2, h/2) / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS))
+//
+// The reasoning was right and the formula is dead. `6d5c4d6` gave the ring an explicit
+// `FOG_HOLD_MS` instead of starting it outside the map, so the opening radius is no longer a
+// function of the clock at all — `rules.ts:fogOpeningRadiusFor` says it IS the half-diagonal.
+// The expression above returns **1792** on the 150 s clock against a shipped 1720.47: a
+// plausible number, a dead formula, and 4.2% of fog nobody would have questioned.
+//
+// So it is READ FROM `rules.ts` now rather than duplicated. The cache's own `maxSafeRadius`
+// is still overridden — the reason for that has not changed, and `tools/arena.gameplay.json`
+// currently bakes the pre-`6d5c4d6` 1985.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
 const ARENA_DATA = existsSync(ARENA_PATH) ? JSON.parse(readFileSync(ARENA_PATH, 'utf8')) : null;
-const FOG_FIRST_CONTACT_MS = 6000;
 const BASE_ARENA = ARENA_DATA ? {
   ...ARENA_DATA,
-  maxSafeRadius: Math.round(
-    Math.hypot(ARENA_DATA.width / 2, ARENA_DATA.height / 2) / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS),
+  maxSafeRadius: LIVE.RULES.fogOpeningRadiusFor(
+    Math.hypot(ARENA_DATA.width / 2, ARENA_DATA.height / 2),
   ),
   build: () => null,
   update: () => {},
@@ -418,11 +433,22 @@ async function selftest() {
   // bearing.
   const BADS = [
     {
-      name: 'THE COLLAPSE REMOVED — `safeRadius` keeps the old floored schedule',
+      name: 'THE COLLAPSE REMOVED — `safeRadius` keeps the ordinary fog schedule',
       tag: 'nocollapse',
+      // ⚠️ **ANCHOR RE-CUT. Old wording, kept with the reason:**
+      //      > 'state.safeRadius = suddenDeathActive(state.timeRemaining)\n      ? SUDDEN_DEATH_RADIUS\n      : Math.max('
+      //      >   ->  'state.safeRadius = false\n      ? SUDDEN_DEATH_RADIUS\n      : Math.max('
+      //    `6d5c4d6` replaced the `Math.max(floor, opening * (1 - progress))` tail with the one
+      //    schedule implementation, `fogRadiusAt(playMs, …)`, so the anchor's last line stopped
+      //    existing and the replace matched nothing. **The row that caught it is the
+      //    `applied` assertion, not any claim about sudden death** — which is the whole reason
+      //    every known-bad here is checked for having landed before it is believed.
+      //    The anchor is now cut ABOVE the branch tail so a further change to the schedule
+      //    expression cannot silently un-arm this control again; the ternary's condition is
+      //    the only thing this patch is about.
       edits: [['sim.ts',
-        'state.safeRadius = suddenDeathActive(state.timeRemaining)\n      ? SUDDEN_DEATH_RADIUS\n      : Math.max(',
-        'state.safeRadius = false\n      ? SUDDEN_DEATH_RADIUS\n      : Math.max(']],
+        'state.safeRadius = suddenDeathActive(state.timeRemaining)\n      ? SUDDEN_DEATH_RADIUS',
+        'state.safeRadius = false\n      ? SUDDEN_DEATH_RADIUS']],
       // With no collapse the frozen fixture stands inside the floored ring for the whole
       // match, takes no fog at all, and the clock decides — which is exactly the state
       // §30(c) asserts is unreachable.
@@ -477,9 +503,25 @@ async function selftest() {
       mustHold: ['noTimeout'],
     },
     {
-      name: 'THE TRIGGER PUSHED PAST THE CLOCK — SUDDEN_DEATH_MS = 60 s',
+      name: 'THE TRIGGER PUSHED PAST THE CLOCK — SUDDEN_DEATH_MS beyond MATCH_DURATION_MS',
       tag: 'latetrigger',
-      edits: [['rules.ts', 'export const SUDDEN_DEATH_MS = 30_000;', 'export const SUDDEN_DEATH_MS = 60_000;']],
+      // ⚠️ **ANCHOR RE-CUT, AND THE OLD ONE WAS A LITERAL THAT NO LONGER EXISTS.** Old wording,
+      //    kept with the reason:
+      //      > ['rules.ts', 'export const SUDDEN_DEATH_MS = 30_000;',
+      //      >              'export const SUDDEN_DEATH_MS = 60_000;']
+      //    `6d5c4d6` made the constant DERIVED — `FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS` — so
+      //    the literal vanished and the replace matched nothing. The replacement is derived
+      //    too, deliberately: `60_000` was "past the clock" only because the clock was 45 s,
+      //    and re-typing a number that beats today's 150 s clock would go stale the next time
+      //    Uri moves it. `MATCH_DURATION_MS + SUDDEN_DEATH_GRACE_MS` is past the clock at every
+      //    clock, which is the property this known-bad is actually about.
+      //    ⚠️ It also drives `SUDDEN_DEATH_REMAINING_MS` negative, which is exactly right:
+      //    `suddenDeathActive(timeRemaining)` can then never be true, so the collapse never
+      //    arms and the frozen fixture — standing inside the ring's floor — takes no fog at
+      //    all and runs to `resolveTimeout`.
+      edits: [['rules.ts',
+        'export const SUDDEN_DEATH_MS = FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS;',
+        'export const SUDDEN_DEATH_MS = MATCH_DURATION_MS + SUDDEN_DEATH_GRACE_MS;']],
       // The constant, not the code: a schedule change alone must be able to put the timeout
       // back in reach, which is why §30 asserts the window against the burn-down rather than
       // asserting "no timeout" on its own.
