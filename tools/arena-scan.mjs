@@ -376,20 +376,37 @@ import { execFileSync } from 'node:child_process';
 const ARENA_W = 2800, ARENA_H = 2000;
 const CENTRE = { x: 1400, y: 1000 };
 /**
- * `shared.ts` computes this as `ARENA_HALF_DIAGONAL / (1 - FOG_FIRST_CONTACT_S*1000 /
- * MATCH_DURATION_MS)` = 1720.47 / (1 - 6/45) = 1985, and `match.ts:applyQaSetup` clamps
- * `?fogRadius=` to it. Passing the real maximum is what parks the ring genuinely OFF the
- * map: the furthest corner is 1720 wu from centre, so anything below that fogs the
- * corners. This file used to pass 850, which put the fog wall INSIDE the `edge_west`
- * frame and mixed death-zone colour into a "normal play" colour sample. Same class as
- * everything else in this file: a number that was right when it was written (the clock
- * was 180 s and the maximum was 890) and silently stopped being right.
- * ⚠️ WAS `993` — correct for the 1400x1000 map, and 993 is now INSIDE the playfield
- * (the corner is 1720 wu out), so a run that still passed it would have fogged all four
- * corners while claiming the ring was parked off the map. The selftest asserts this
- * against the dump for exactly that reason.
+ * The opening radius of the closing ring. **It is the arena's half-diagonal and nothing
+ * else** — `rules.ts:fogOpeningRadiusFor` is the one implementation and it is the identity
+ * function, and `arena/shared.ts:MAX_SAFE_RADIUS` is `fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)`.
+ * DERIVED here from this file's own `ARENA_W`/`ARENA_H`, never retyped, which is the whole
+ * point: the rule is *the ring at t=0 contains every point a fighter can stand on and
+ * nothing more*, and a rule survives a resize where a literal does not.
+ *
+ * ── ⚠️ OLD WORDING AND OLD VALUE, KEPT BECAUSE THEY ARE THE BUG ────────────────
+ *
+ *   > *"`shared.ts` computes this as `ARENA_HALF_DIAGONAL / (1 - FOG_FIRST_CONTACT_S*1000 /
+ *   > MATCH_DURATION_MS)` = 1720.47 / (1 - 6/45) = 1985, and `match.ts:applyQaSetup` clamps
+ *   > `?fogRadius=` to it. [...] Same class as everything else in this file: a number that
+ *   > was right when it was written (the clock was 180 s and the maximum was 890) and
+ *   > silently stopped being right.*
+ *   >
+ *   > *⚠️ WAS `993` — correct for the 1400x1000 map, and 993 is now INSIDE the playfield
+ *   > (the corner is 1720 wu out), so a run that still passed it would have fogged all four
+ *   > corners while claiming the ring was parked off the map."*
+ *
+ * That paragraph diagnosed its own successor and did not survive it. `6d5c4d6` DECOUPLED
+ * the ring from the clock — `FOG_HOLD_MS` holds it for 25 s, `FOG_CLOSE_MS` closes it to
+ * `minSafeRadiusFor(N)` — so the division is gone, and the division was the part that
+ * coupled this number to `MATCH_DURATION_MS` and moved it three times: **890 → 993 → 1985 →
+ * 1720.4650534085254**. The literal `1985` survived that commit here and in 25 other tools;
+ * on the 150 s clock the superseded formula returns **1792**, 4.2% high, plausible, silent.
+ *
+ * ⚠️ **DO NOT ROUND IT.** `Math.round` gives 1720, which puts the four corners 0.47 wu
+ * OUTSIDE the ring at t=0 — the miniature of the corners-fogged-from-birth bug the `993`
+ * note above is about. These stations pass this value straight into `?fogRadius=`.
  */
-const MAX_SAFE_RADIUS = 1985;
+const MAX_SAFE_RADIUS = Math.hypot(ARENA_W / 2, ARENA_H / 2);
 /**
  * The two slow puddles. `kitchen.ts:901` — `puddleSouth` is dressed `M.grease`,
  * `puddleNorth` is `M.water` (the north one is the 180° mirror, `ARENA_W/H − south`).
@@ -737,20 +754,91 @@ const STATIONS = [
   //    sudden death measured, it needs its own pass with its own baseline, not a seat in
   //    this one.
   //
+  // ══ 🚨 A THIRD INVALIDATION, 2026-08-12 (`6d5c4d6`), AND IT IS THE FIRST ONE THAT DOES
+  //    NOT MOVE A SINGLE RADIUS ON THESE THREE ROWS. Everything above is KEPT VERBATIM,
+  //    including the numbers that are now wrong, because the two 661.67s and the "no
+  //    shipped match ever holds a ring that tight any more" are the record of a prediction
+  //    that was correct and of an implementation that could not deliver it.
+  //
+  //    What moved: Uri's schedule DECOUPLED the ring from the clock. `FOG_HOLD_MS` holds it
+  //    at the opening radius for 25 s, `FOG_CLOSE_MS` sweeps it to `minSafeRadiusFor(N)` by
+  //    120 s, and `SUDDEN_DEATH_MS` is 135 s. So:
+  //
+  //      * the sudden-death SNAP bound fell from **661.67 → 172.05 wu** (`LOWEST_SCHEDULED_FOG`
+  //        below). No station here was ever near it and none is now; the guard rows that
+  //        pinned 400 as a known-bad had to move, because **400 wu is legal again**.
+  //      * *"no shipped match ever holds a ring that tight"* is FALSE again: the ring now
+  //        genuinely arrives at 140 wu (N=2) at 120 s and HOLDS it for 15 s. `fog_late`'s
+  //        original subject — a nearly-closed ring — exists once more.
+  //
+  // 🚨 AND THE ONE THAT ACTUALLY TOUCHES THE PIXELS IN THIS BASELINE: `match.ts:applyQaSetup`
+  //    STILL INVERTS THE OLD LINEAR SCHEDULE (`timeRemaining = MATCH_DURATION_MS × wantR /
+  //    maxR`) and the schedule is no longer linear in the clock. So `?fogRadius=` is now a
+  //    REQUEST THE SIM DOES NOT HONOUR — it sets `safeRadius` to what you asked, and the very
+  //    next tick `applyWorldTick` overwrites it from `fogRadiusAt(playMs, …)`. Measured on the
+  //    shipped constants at N=2:
+  //
+  //        asked 840 → the sim holds  859.29 wu   (+19.29, the wall ~19 wu FURTHER out)
+  //        asked 700 → the sim holds  656.23 wu   (−43.77, the wall ~44 wu CLOSER in)
+  //
+  //    Both stations still show a ring, still frame it, and still produce plausible colour —
+  //    which is exactly why nothing caught it. **The compositions these three rows document
+  //    ("wall ~30 wu ahead", "~40 wu ahead") are off by those amounts until `applyQaSetup`
+  //    is migrated to `rules.ts:fogReachesRadiusAt`, which is a ONE-LINE change in a file
+  //    this pass does not own.** The radii are deliberately NOT re-tuned to compensate:
+  //    compensating in the station table would bake the bug into the baseline and make the
+  //    real fix look like a regression. Re-baseline AFTER `applyQaSetup` is fixed, not before.
+  //
   // Distances from CENTRE: 810 / 960 / 660.
-  { id: 'fog_boundary',  x: 2210, y: 1000, fog: 840, unstill: 'hud-css', note: 'safe-zone wall ~30wu ahead of the player' },
+  { id: 'fog_boundary',  x: 2210, y: 1000, fog: 840, unstill: 'hud-css', note: 'safe-zone wall ~30wu ahead of the player (applyQaSetup delivers 859.29 wu, not 840 — see the block above)' },
   { id: 'fog_inside',    x: 2360, y: 1000, fog: 840, unstill: 'hud-css', note: 'standing INSIDE the death zone, 50 HP/s' },
-  { id: 'fog_late',      x: 740,  y: 1000, fog: 700, unstill: 'hud-css', note: 'the TIGHTEST ring a shipped match ever holds (661.67 wu is the floor; sudden death abolishes the ring below it) — wall ~40wu ahead' },
+  // ⚠️ OLD NOTE, KEPT: 'the TIGHTEST ring a shipped match ever holds (661.67 wu is the floor;
+  //    sudden death abolishes the ring below it) — wall ~40wu ahead'. Both clauses died with
+  //    `6d5c4d6`: the floor is 172.05 and the ring is no longer abolished before it arrives.
+  { id: 'fog_late',      x: 740,  y: 1000, fog: 700, unstill: 'hud-css', note: 'a mid-close ring — NO LONGER the tightest one a match holds, since 6d5c4d6 lands the ring on minSafeRadiusFor(N)=140 at 120s and holds it (applyQaSetup delivers 656.23 wu, not 700)' },
 ];
 /**
- * The lowest `?fogRadius=` that still renders a RING rather than snapping to sudden death.
- * Mirrors `match.ts:applyQaSetup`'s `lowestScheduled` for the duel: `maxR × (MATCH_DURATION_MS
- * − SUDDEN_DEATH_MS) / MATCH_DURATION_MS`. Duplicated as a number for the same reason
- * everything else here is — this file imports nothing from the app — and `--selftest` asserts
- * every station against it, so a future §2-style change fails loudly instead of quietly
- * photographing a violet wash.
+ * The schedule, restated as named constants rather than as a fraction spelled out in
+ * digits. This file imports nothing from the app **on purpose** (it has to keep working
+ * while five agents are mid-edit in `src/`), so these are replicas — but they are replicas
+ * `tools/tmp/lit_clockguard.mjs` §A judges against the live `rules.ts` every run, which an
+ * anonymous `15000 / 45000` was not.
+ * ⚠️ `MIN_SAFE_RADIUS_DUEL` is `rules.ts:minSafeRadiusFor(2)`. It is not the binding term
+ * today and `--selftest` asserts that it is not, so if it ever becomes binding somebody
+ * has to look rather than inherit it.
  */
-const LOWEST_SCHEDULED_FOG = MAX_SAFE_RADIUS * (15000 / 45000);
+const MATCH_DURATION_MS = 150_000;
+const SUDDEN_DEATH_REMAINING_MS = 15_000;
+const MIN_SAFE_RADIUS_DUEL = 140;
+/**
+ * The lowest `?fogRadius=` that still renders a RING rather than snapping to sudden death.
+ * Mirrors `match.ts:applyQaSetup`'s `lowestScheduled` for the duel.
+ *
+ * ── ⚠️ OLD WORDING AND OLD VALUE, KEPT BECAUSE THEY ARE THE BUG ────────────────
+ *   > *"Mirrors `match.ts:applyQaSetup`'s `lowestScheduled` for the duel: `maxR ×
+ *   > (MATCH_DURATION_MS − SUDDEN_DEATH_MS) / MATCH_DURATION_MS`. Duplicated as a number
+ *   > [...] so a future §2-style change fails loudly instead of quietly photographing a
+ *   > violet wash."*
+ *   > `const LOWEST_SCHEDULED_FOG = MAX_SAFE_RADIUS * (15000 / 45000);`
+ *
+ * The prediction was right and the implementation could not deliver it: `6d5c4d6` is
+ * exactly that future §2-style change, and this line went on computing **661.67** — 1985 ×
+ * ⅓ — from two literals that had both moved, so nothing failed loudly. The live bound is
+ * **172.05 wu**, and the two numbers are 3.8× apart. Written symbolically now so that
+ * `lit_clockguard` §A owns the constants and §B has no fraction left to mis-read.
+ *
+ * 🚨 **AND THIS BOUND IS AN ARTEFACT OF A BUG IN `applyQaSetup`, NOT A FACT ABOUT THE RING.**
+ * `applyQaSetup` still inverts the OLD linear schedule (`timeRemaining = MATCH_DURATION_MS ×
+ * wantR / maxR`) — see the note on the fog stations — and 172.05 is where that inversion
+ * crosses the sudden-death trigger. The radius the *schedule* actually bottoms out at is
+ * `minSafeRadiusFor(N)` = 140 at N=2, held from `FOG_CLOSE_MS` to `SUDDEN_DEATH_MS`. When
+ * `applyQaSetup` is migrated to `rules.ts:fogReachesRadiusAt`, this bound becomes
+ * `MIN_SAFE_RADIUS_DUEL` and the `MAX_SAFE_RADIUS` term drops out entirely.
+ */
+const LOWEST_SCHEDULED_FOG = Math.max(
+  MIN_SAFE_RADIUS_DUEL,
+  MAX_SAFE_RADIUS * (SUDDEN_DEATH_REMAINING_MS / MATCH_DURATION_MS),
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE COLOUR BUDGET CONTRACT
@@ -1990,6 +2078,19 @@ async function modeSelftest() {
       check('COVER has the same number of boxes as the dump', COVER.length, dump.cover.length);
       check('ENEMY_SPAWN matches the dump', `${ENEMY_SPAWN.x},${ENEMY_SPAWN.y}`, `${dump.enemySpawn.x},${dump.enemySpawn.y}`);
       check('MAX_SAFE_RADIUS matches the dump', MAX_SAFE_RADIUS, dump.maxSafeRadius);
+      // 🚨 AND THAT CROSS-CHECK WAS VACUOUS FOR A DAY, WHICH IS WHY THESE THREE ROWS EXIST.
+      // `lit_clockguard`'s §F note names it exactly: this file's copy and the dump were "two
+      // stale copies of the same number, so the cross-check confirms them against each other
+      // and stays GREEN while the live derivation has moved". It did — both said 1985 while
+      // `arena/shared.ts` derived 1720.465. The fix is not a better comparison, it is that
+      // one side is now a DERIVATION (`Math.hypot(ARENA_W/2, ARENA_H/2)`) and the other a
+      // dump, so agreement means something. These rows pin the two ways it can go wrong.
+      check('...and the dump is the half-diagonal, not a rounded copy of it (round() fogs the four corners at t=0)',
+        Math.abs(dump.maxSafeRadius - Math.hypot(dump.width / 2, dump.height / 2)) < 1e-9, true);
+      check('KNOWN-BAD: the superseded clock-coupled derivation is REFUSED (halfDiag / (1 - 25000/150000) = 2064.56)',
+        Math.abs(MAX_SAFE_RADIUS - Math.hypot(ARENA_W / 2, ARENA_H / 2) / (1 - 25_000 / MATCH_DURATION_MS)) > 1, true);
+      check('KNOWN-BAD: and so are both literals it has shipped as — 1985 (x4 map, 45s clock) and 1792 (the same formula on the 150s clock)',
+        Math.abs(MAX_SAFE_RADIUS - 1985) > 1 && Math.abs(MAX_SAFE_RADIUS - 1792) > 1, true);
       // 🚨 ADDED 2026-08-11. `GREASE`/`WATER` are a second source of truth for the two
       // slow hazards in exactly the way `COVER` is for the boxes — and they were the ONE
       // hand-copied table this block did not check, so `6955c04`'s puddle move left three
@@ -2148,23 +2249,55 @@ async function modeSelftest() {
     //
     // `fog_late` asked for 400 and was snapping. It is the second independent invalidation
     // of this station table in one day.
+    //
+    // ── ⚠️ 2026-08-12 (`6d5c4d6`): THE BOUND MOVED 3.8x AND TWO ROWS BELOW WERE REVERSED.
+    //    Old wording kept above and inline; what changed is that the ring is no longer
+    //    welded to the clock, so the sudden-death snap now bites at **172.05 wu**, not
+    //    661.67. Consequences for this block, both of them the *opposite* of intuition:
+    //      * the guard got WEAKER, not stronger — 489.62 wu of radius that used to be
+    //        refused is now legal, so this row can no longer be relied on to catch a stale
+    //        low station on its own.
+    //      * **the KNOWN-BAD stopped being bad.** `400 <= 172.05` is false, so the row that
+    //        proved this detector fires would have PASSED VACUOUSLY — asserting `false`
+    //        against `true` and going red is the good outcome; a known-bad that quietly
+    //        starts describing a legal input is `CLAUDE.md` rule 6's exact failure.
     {
       const low = STATIONS.filter((s) => s.fog <= LOWEST_SCHEDULED_FOG);
       check(`every station's fog is > ${LOWEST_SCHEDULED_FOG.toFixed(2)} wu, the lowest radius the schedule reaches`
         + (low.length ? `  [${low.map((s) => `${s.id}@fog${s.fog}`).join(' ')}]` : ''), low.length, 0);
-      // KNOWN-BAD: the value `fog_late` shipped with until this was found. A guard that has
-      // not been shown to fail is not a guard — and this one is worth proving precisely
-      // because the defect it catches is INVISIBLE at runtime (a warning, not an error).
-      check(`KNOWN-BAD: fog_late's pre-§2 400 wu is refused (400 <= ${LOWEST_SCHEDULED_FOG.toFixed(2)}) — it snaps to sudden death`,
-        400 <= LOWEST_SCHEDULED_FOG, true);
+      // KNOWN-BAD. A guard that has not been shown to fail is not a guard — and this one is
+      // worth proving precisely because the defect it catches is INVISIBLE at runtime (a
+      // warning, not an error).
+      // ⚠️ OLD ROW, KEPT: `KNOWN-BAD: fog_late's pre-§2 400 wu is refused (400 <= 661.67)`.
+      //    It was true and load-bearing for one day. 400 wu is a legal request again, so the
+      //    known-bad is now a radius that is STILL below the live bound — 170, two wu under
+      //    it, which is also the tightest possible statement of where the bound is.
+      check(`KNOWN-BAD: 170 wu is refused (170 <= ${LOWEST_SCHEDULED_FOG.toFixed(2)}) — it snaps to sudden death`,
+        170 <= LOWEST_SCHEDULED_FOG, true);
+      // …and the retired known-bad, asserted in its NEW direction so the reversal itself is
+      // pinned: 400 wu snapped before `6d5c4d6` and does not now. If a future schedule
+      // change puts the bound back above 400, this row says so instead of staying silent.
+      check('...and `fog_late`\'s pre-§2 400 wu is LEGAL again on Uri\'s schedule (it was not, until 6d5c4d6)',
+        400 > LOWEST_SCHEDULED_FOG, true);
       // CONTROL: and the bound is not so high that everything fails it — the three real
       // ring stations pass, so the row is not vacuously refusing the whole table.
       check(`  CONTROL: the three fog stations DO ask for reachable rings (${STATIONS.filter((s) => s.unstill === 'hud-css').map((s) => `${s.id}@${s.fog}`).join(' ')})`,
         STATIONS.filter((s) => s.unstill === 'hud-css').every((s) => s.fog > LOWEST_SCHEDULED_FOG), true);
-      // …and the bound itself is re-derived rather than copied: it is exactly one third of
-      // `maxSafeRadius`, because sudden death fires with 15 s of a 45 s match left.
-      check(`...and the bound is maxSafeRadius x (MATCH_DURATION - SUDDEN_DEATH)/MATCH_DURATION (${LOWEST_SCHEDULED_FOG.toFixed(2)} vs ${(MAX_SAFE_RADIUS / 3).toFixed(2)})`,
-        Math.abs(LOWEST_SCHEDULED_FOG - MAX_SAFE_RADIUS / 3) < 1e-9, true);
+      // …and the bound itself is re-derived rather than copied.
+      // ⚠️ OLD ROW, KEPT: `...the bound is maxSafeRadius x (MATCH_DURATION - SUDDEN_DEATH) /
+      //    MATCH_DURATION` compared against `MAX_SAFE_RADIUS / 3`, "because sudden death
+      //    fires with 15 s of a 45 s match left". The `/ 3` was a coincidence of the 45 s
+      //    clock and it is now `/ 10`; re-deriving against a second hardcoded ratio only
+      //    ever proved the two literals agreed with each other. Re-derived against the
+      //    SEPARATE constants instead, with the non-binding floor term named.
+      check(`...and the bound is maxSafeRadius x SUDDEN_DEATH_REMAINING/MATCH_DURATION (${LOWEST_SCHEDULED_FOG.toFixed(4)})`,
+        Math.abs(LOWEST_SCHEDULED_FOG - MAX_SAFE_RADIUS * (SUDDEN_DEATH_REMAINING_MS / MATCH_DURATION_MS)) < 1e-9, true);
+      // 🚨 AND THE ROW THAT SAYS WHICH TERM IS DOING THE WORK. `applyQaSetup` takes the MAX
+      // of the sudden-death crossing and `minSafeRadiusFor(N)`; today the former binds at
+      // 172.05 against 140. If the floor ever binds instead, `LOWEST_SCHEDULED_FOG` stops
+      // depending on `MAX_SAFE_RADIUS` at all and every comment above it goes stale silently.
+      check(`...and the SUDDEN-DEATH term is the binding one (${(MAX_SAFE_RADIUS * (SUDDEN_DEATH_REMAINING_MS / MATCH_DURATION_MS)).toFixed(2)} > minSafeRadiusFor(2) ${MIN_SAFE_RADIUS_DUEL})`,
+        MAX_SAFE_RADIUS * (SUDDEN_DEATH_REMAINING_MS / MATCH_DURATION_MS) > MIN_SAFE_RADIUS_DUEL, true);
     }
   }
 

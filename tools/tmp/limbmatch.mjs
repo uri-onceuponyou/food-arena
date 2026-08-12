@@ -52,7 +52,7 @@
  */
 import { chromium } from 'playwright';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { VL } from './valuelib.mjs';
@@ -105,11 +105,38 @@ export const ErrorOverlay=class{}; export default {};`;
  * `freezer`. The irony is exact: this table was written to avoid inheriting `valuescan`'s
  * stale copy and became one, by the same mechanism, one map change later.
  *
- * `850` was the 1× `MAX_SAFE_RADIUS`; the shipped one is 1985. Coordinates below are
- * arena-scan's CURRENT table (whose `--selftest` §F pins them to legal ground and to
- * ≥4 stations per quadrant), and `tools/tmp/al_guard.mjs` fails on the old ones.
+ * ⚠️ OLD WORDING, KEPT FOR THE SAME REASON AS THE BLOCK ABOVE — it is the next turn of
+ * the same wheel, and it took eight days:
+ *
+ *   *"`850` was the 1× `MAX_SAFE_RADIUS`; the shipped one is 1985."*
+ *   `const MAX_SAFE_RADIUS = 1985;   // arena-scan.mjs:392, == the dump's maxSafeRadius`
+ *
+ * 🚨 **THE COMMENT THAT DIAGNOSED A STALE LITERAL WAS ITSELF A STALE LITERAL, AND ITS
+ * PROVENANCE NOTE POINTED AT A SECOND COPY OF THE SAME STALE NUMBER.** `arena-scan.mjs:392`
+ * said 1985 and the dump said 1985, so "== the dump's maxSafeRadius" was true and meant
+ * nothing: three copies agreeing is not three confirmations. `6d5c4d6` decoupled the ring
+ * from the clock and the shipped opening radius is now the arena's **half-diagonal**,
+ * 1720.4650534085254 — `rules.ts:fogOpeningRadiusFor`, which is the identity function.
+ *
+ * Read from the dump rather than retyped, and the dump is now the derivation:
+ * `arena-scan --selftest` §F asserts `dump.maxSafeRadius === hypot(width/2, height/2)`, so
+ * a stale dump fails there instead of silently parking this file's ring inside the map.
+ * Coordinates below are arena-scan's CURRENT table (whose `--selftest` §F pins them to
+ * legal ground and to ≥4 stations per quadrant), and `tools/tmp/al_guard.mjs` fails on the
+ * old ones.
  */
-const MAX_SAFE_RADIUS = 1985;   // arena-scan.mjs:392, == the dump's maxSafeRadius
+const ARENA_DUMP = JSON.parse(
+  readFileSync(new URL('../arena.gameplay.json', import.meta.url), 'utf8'),
+);
+const MAX_SAFE_RADIUS = Math.hypot(ARENA_DUMP.width / 2, ARENA_DUMP.height / 2);
+if (Math.abs(MAX_SAFE_RADIUS - ARENA_DUMP.maxSafeRadius) > 1e-9) {
+  // NOT a warning. A ring parked inside the map fogs the corners of every frame this tool
+  // measures a silhouette in, and it does it plausibly — the exact class this whole comment
+  // block is about. Better to refuse to run than to produce a believable wrong hull.
+  throw new Error(`limbmatch: tools/arena.gameplay.json maxSafeRadius ${ARENA_DUMP.maxSafeRadius} `
+    + `!= hypot(${ARENA_DUMP.width}/2, ${ARENA_DUMP.height}/2) = ${MAX_SAFE_RADIUS}. `
+    + 'The dump is stale — see rules.ts:fogOpeningRadiusFor.');
+}
 const STATIONS = {
   spawn_west: { x: 300, y: 810, fog: MAX_SAFE_RADIUS },
   pot_south: { x: 1400, y: 1200, fog: MAX_SAFE_RADIUS },

@@ -421,9 +421,27 @@ export class MatchAudio {
    * those floors, so the dwell is now the **15 s** of sudden death (~900 ticks at 60 Hz)
    * and the latch is what stops those 900 ticks from being 900 cues.
    *
+   * ⚠️ **AND `6d5c4d6` REVERSED THAT PARAGRAPH TOO — KEPT ABOVE, LIKE ITS OWN PREDECESSOR.**
+   * Uri's schedule decoupled the ring from the clock: `FOG_CLOSE_MS` lands the ring on
+   * `minSafeRadiusFor(N)` at **120 s** and `SUDDEN_DEATH_MS` is **135 s**, so the ring now
+   * arrives **15 s BEFORE** the collapse at every seat count, and `ringFloorFor` returns
+   * `minSafeRadiusFor(N)` at that instant rather than 0. **The latch is back to firing on
+   * the ring genuinely stopping** — the reading this comment originally described — and the
+   * dwell is the 15 s from arrival to collapse rather than the 15 s of sudden death. Not one
+   * line of code below changed: `ringFloorFor` already carried both cases, which is the
+   * whole reason the reversal costs nothing.
+   * ⚠️ And `maxSafeRadius` is **1720.4650534085254 wu** now, not 1985 —
+   * `rules.ts:fogOpeningRadiusFor` is the identity on the arena half-diagonal, with no
+   * division by the clock left in it. Never retype it; `arena/shared.ts` derives it.
+   *
+   * ⚠️ **HOW OFTEN IT ACTUALLY FIRES: `tools/tmp/sr_ringfloor.mjs` — 0 of 880 duels.** Mean
+   * play 22.05 s, longest 62.23 s, against a ring that does not begin closing until 25 s and
+   * does not stop until 120 s. Both of the numbers above ("6.34 s of a 45 s match", "~900
+   * ticks") described dwells this cue does not reach in a shipped two-seat match.
+   *
    * `sawRingAboveFloor` still guards the degenerate case where an arena's `maxSafeRadius`
    * is already <= the floor: without it, such an arena would announce "the ring has
-   * stopped" on the first playing tick, which is true but useless. At 1985 wu against a
+   * stopped" on the first playing tick, which is true but useless. At 1720.47 wu against a
    * floor of at most 237 that remains a future arena's problem, not this one's.
    *
    * The HUD's "FINAL RING" label is deliberately NOT what is voiced here. That label is

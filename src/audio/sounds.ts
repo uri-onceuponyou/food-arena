@@ -1041,6 +1041,44 @@ export function matchStart(): SoundFn {
  * the sudden-death trigger 65.5% of the time.** The two-seat rate has not been re-measured
  * since the map changed and is not claimed here.
  *
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 🚨 EVERYTHING ABOVE IS THE 45-SECOND CLOCK. `6d5c4d6` REVERSED THE PART IN BOLD,
+ *    AND THE PARAGRAPH THAT SAID "UNMEASURED" IS NOW MEASURED.
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ * Uri's schedule decoupled the ring from the clock. `MATCH_DURATION_MS` is **150 000**,
+ * `FOG_HOLD_MS` holds the ring for 25 s, `FOG_CLOSE_MS` lands it on `minSafeRadiusFor(N)`
+ * at **120 s**, and `SUDDEN_DEATH_MS` is `FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS` = **135 s**.
+ * So the claim above — *"the ring never reaches it"*, sudden death arriving 9.6–11.8 s
+ * EARLY — is false: **the ring now arrives first, by 15 s, at every seat count.** This cue
+ * is back to meaning what its name says. `rules.ts:fogRadiusAt` interpolates TO the floor
+ * rather than decaying past it, so the arrival is a schedule constant rather than an
+ * accident of arithmetic, and `audio/director.ts:watchZone`'s `ringFloorFor` latch fires on
+ * the genuine stop at 120 s instead of on the collapse at 30 s. **No code moved.**
+ *
+ * And the opening radius moved a third time: `1985` above was `halfDiagonal / (1 − 6000/T)`
+ * on the 45 s clock. `rules.ts:fogOpeningRadiusFor` is now the one derivation and it is the
+ * IDENTITY on the half-diagonal — **1720.4650534085254 wu**. (On the 150 s clock the old
+ * formula returns 1792: 4.2% high, plausible, and silent. Do not retype either number;
+ * `arena/shared.ts:MAX_SAFE_RADIUS` derives it.)
+ *
+ * ── HOW OFTEN THIS CUE FIRES, MEASURED RATHER THAN ASSUMED ──────────────────
+ *
+ * `tools/tmp/sr_ringfloor.mjs`, 880 matches (110 matchups × 8 seeds, policy `smart2`, the
+ * shipped 2800×2000 dump) — the same corpus `roster_lab` measures pacing on:
+ *
+ *   mean play length **22.05 s** · LONGEST **62.23 s**
+ *   reached the ring floor (120 s): **0 / 880**
+ *   reached sudden death   (135 s): **0 / 880**
+ *   the longest match ended **57.77 s** before the ring lands.
+ *
+ * So the answer to *"how often does this fire?"* is **still never in a duel**, but for the
+ * opposite reason and with a far bigger margin than the 0-of-363 that opened this comment:
+ * matches end long before the ring moves at all, not just before it stops. ⚠️ That is a
+ * TWO-SEAT number. `DECISIONS §64`'s 65.5% six-seat figure was measured on the 45 s clock
+ * and is NOT carried forward here; six seats on this schedule is unmeasured, and the honest
+ * statement is that nobody has run it.
+ *
  * Deliberately a RELEASE rather than an alarm, and that is the whole design argument:
  * everything else the zone does is pressure (`fogTick` is a nag with no transient at
  * all), and the one thing this event means is that the pressure has stopped growing.
