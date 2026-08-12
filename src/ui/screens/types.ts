@@ -38,7 +38,22 @@ export type Route =
    */
   | { name: 'shop' }
   | { name: 'settings' }
-  | { name: 'match'; player: CharacterId; enemy: CharacterId };
+  /**
+   * A live match.
+   *
+   * `seats` is the `DECISIONS §66` flag and it is **default-off by being OPTIONAL**: every
+   * shipped navigation omits it (`characterSelect.ts:444` is the only one) and gets the
+   * two-fighter duel this product has always played. Present and in
+   * `MIN_FIGHTERS+1..MAX_FIGHTERS`, `matchScreen.ts` seats that many — `player` and `enemy`
+   * keep their meaning as seats 0 and 1, and `screens/brawl.ts:brawlRoster` fills the rest.
+   *
+   * ⚠️ **A SEAT COUNT AND NOT A ROSTER, deliberately.** A route carrying the finished list
+   * would put the "which five characters" policy in whichever screen happened to navigate —
+   * i.e. one copy per affordance — and that policy is a **design default Uri may overrule**
+   * (`brawl.ts` says so at length). One rule, one file, and a route field a future mode
+   * selector can set without knowing it exists.
+   */
+  | { name: 'match'; player: CharacterId; enemy: CharacterId; seats?: number };
 
 export type RouteName = Route['name'];
 

@@ -13,10 +13,13 @@
  *
  *   * `?screen=opening|home|characters|trophies|shop|settings|match` — explicit, wins
  *     over everything.
- *   * otherwise, if ANY match-only QA parameter is present (`player`, `enemy`,
- *     `simSpeed`, `fogRadius`, `px`, `py`) boot straight into the match, exactly as
- *     before. Those parameters have no meaning anywhere else, so their presence is
- *     an unambiguous statement of intent.
+ *   * otherwise, if ANY match-only QA parameter is present boot straight into the match,
+ *     exactly as before. Those parameters have no meaning anywhere else, so their presence
+ *     is an unambiguous statement of intent.
+ *     ⚠️ **The list is `MATCH_ONLY_PARAMS` below and NOT a copy of it here.** This sentence
+ *     used to enumerate six of them and had already gone stale on `fighters` — a doc copy
+ *     of a list is a list that disagrees with itself, which is `CLAUDE.md`'s standing rule
+ *     about counts applied to a set.
  *   * otherwise, home.
  *
  *   * otherwise, the OPENING title card, which continues to home on the first tap or
@@ -31,6 +34,7 @@ import { createShell } from './ui/screens/shell';
 import { audio } from './audio';
 import { PlayerProfile } from './ui/screens/profile';
 import { CHARACTER_IDS, type CharacterId } from './game/rules';
+import { seatsFromParams } from './ui/screens/brawl';
 import type { Route } from './ui/screens/types';
 
 const params = new URLSearchParams(location.search);
@@ -40,7 +44,11 @@ const params = new URLSearchParams(location.search);
 // `__gameReady` never fired — a 90 s timeout that reads exactly like the sim refusing to
 // seat the match. `np_nfighter` never hit it because it also passes `fogRadius`, which is
 // on this list: a second parameter was masking the gap in the first.
-const MATCH_ONLY_PARAMS = ['player', 'enemy', 'simSpeed', 'fogRadius', 'px', 'py', 'fighters'];
+// ⚠️ `seats` is here for exactly the reason the paragraph above records about `fighters`:
+// `?seats=6` alone would otherwise boot the title card, `__gameReady` would never fire, and
+// it would read as the sim refusing to seat the match. That note is the only reason this
+// did not happen a second time, one parameter later.
+const MATCH_ONLY_PARAMS = ['player', 'enemy', 'simSpeed', 'fogRadius', 'px', 'py', 'fighters', 'seats'];
 
 function characterParam(name: string, fallback: CharacterId): CharacterId {
   const raw = params.get(name);
@@ -57,7 +65,13 @@ function bootRoute(profile: PlayerProfile): Route {
     // Any opponent but yourself. `donut` was the old hardcoded default and stays the
     // fallback so existing captures frame the same matchup.
     const enemyFallback: CharacterId = player === 'donut' ? 'hamburger' : 'donut';
-    return { name: 'match', player, enemy: characterParam('enemy', enemyFallback) };
+    // `DECISIONS §66`'s flag, and it is a PASS-THROUGH: the whole policy — what counts as a
+    // legal seat count, and what `undefined` means — lives in `screens/brawl.ts`, so this
+    // file has no second opinion about it. `undefined` is what every other route carries and
+    // what every shipped navigation produces, so a bare `/` and every existing `?player=`
+    // probe reach `matchScreen` with the field absent, exactly as before this line existed.
+    const seats = seatsFromParams(params);
+    return { name: 'match', player, enemy: characterParam('enemy', enemyFallback), seats };
   }
   if (params.get('screen') === 'characters') return { name: 'characters' };
   if (params.get('screen') === 'trophies') return { name: 'trophies' };

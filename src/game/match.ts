@@ -20,6 +20,9 @@ import { createFogRing, type FogRing } from '../arena/fogRing';
 import { createMatch, stepMatch, type FighterConfig, type MatchLevels } from './sim';
 import { enemyLevelFor } from './economy';
 import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchState } from './state';
+// The seat range, imported rather than written as 2 and 6. `state.ts` owns it; a literal
+// here is a number that goes stale the day the sim seats eight and stays LEGAL while it does.
+import { MAX_FIGHTERS, MIN_FIGHTERS } from './state';
 // ⚠️ `otherRole` came BACK to this file on 2026-08-11, for exactly one QA-only caller —
 // see `qaFillEvent`. The comment below is about the GAMEPLAY reconstructions, and those
 // are still gone: nothing in `handleEvents` resolves an attacker by "the other one".
@@ -307,6 +310,33 @@ export interface GameSessionOptions {
    * pass it produces a bit-identical match to the one this build produced before levels.
    */
   playerLevel?: number;
+  /**
+   * SEAT 3..`MAX_FIGHTERS` — `DECISIONS §66`'s flag. Character ids in SLOT ORDER.
+   *
+   * Absent (or `undefined`, which is what `matchScreen.ts` passes on every shipped
+   * navigation) → the session takes the two-seat path with **not one branch changed**:
+   * `newMatch` calls the same legacy 3-argument `createMatch` overload, `characterIds` is
+   * built by the same expression, and nothing downstream can tell this field exists.
+   *
+   * ⚠️ **A ROSTER, NOT A SEAT COUNT AND NOT A `FighterConfig[]`.** A seat count would make
+   * this file choose characters — a matchmaking policy in the sim/render bridge. A
+   * `FighterConfig[]` would let a caller pass `spawn`, `maxHp` or `level` per seat, which is
+   * two doors this file is deliberately not opening: **spawns** belong to `src/arena/**`
+   * (see `fightersFromQuery`'s note and `sim.ts:defaultSpawn`), and **levels** belong to
+   * `economy/levels.ts:enemyLevelFor` — see `playerLevel` above, which is explicit that a
+   * caller able to set the two sides independently would be a caller that could silently
+   * un-answer Uri's *"AI players are adjusted to the player's level"*. Every non-local seat
+   * here gets `enemyLevelFor(playerLevel)`, from the single `this.levels` this session
+   * already computes.
+   *
+   * ⚠️ **SLOT ORDER IS LOAD-BEARING.** Slot *i* takes `arena.spawns[i]`, and `kitchen.ts`
+   * interleaves that array into 180°-mirrored pairs; re-ordering a roster re-seats the map.
+   * `ui/screens/brawl.ts:brawlRoster` is the one rule that builds one, and it says why.
+   *
+   * ⚠️ Ignored below `MIN_FIGHTERS + 1` entries — the duel has exactly one code path and a
+   * flag does not get to route around it. `fightersFromQuery` refuses the same way.
+   */
+  roster?: readonly CharacterId[];
 }
 
 const DEFAULT_PLAYER: CharacterId = 'hamburger';
@@ -333,15 +363,24 @@ function characterFromQuery(param: string): CharacterId | null {
  * code, which is this project's most-repeated failure. `tools/tmp/np_nfighter.mjs` is the
  * consumer.
  *
- * ⚠️ **THE SPAWNS COME FROM THE CALLER, NOT FROM THIS FILE, AND THAT IS `DECISIONS §49d`
- * BEING OBEYED RATHER THAN WORKED AROUND.** `ArenaDefinition` declares exactly two spawn
- * points, and `sim.ts:createMatch` deliberately THROWS for a slot 2+ with no explicit
- * `spawn` rather than inventing a ring — because spawn placement for 4-6 fighters is part
- * of §48's layout pass, where 180° point symmetry is a competitive-fairness constraint in
- * the same category as `aspect.mjs`. A default invented HERE would be exactly the second,
- * quieter source of truth the sim refused to become, and it would produce balance numbers,
- * and it would look like it worked. So this parameter is a TRANSPORT for coordinates a
- * probe chose; it contains no placement policy of its own, exactly like `?px=`/`?py=`.
+ * ⚠️ **THIS BLOCK USED TO SAY**: *"THE SPAWNS COME FROM THE CALLER, NOT FROM THIS FILE…
+ * `ArenaDefinition` declares exactly two spawn points, and `sim.ts:createMatch`
+ * deliberately THROWS for a slot 2+ with no explicit `spawn` rather than inventing a
+ * ring."* **The premise stopped being true and the conclusion did not.** `0fffa1e` added
+ * `spawns` to `ArenaDefinition` and `kitchen.ts:1263` declares **six** — three
+ * 180°-mirrored pairs — so `sim.ts:defaultSpawn` now resolves slots 2+ from the arena and
+ * **that throw is unreachable on the shipped kitchen.** It is still reachable, and still
+ * correct, for any arena that has not done the layout work; `sim.ts:432` says exactly that
+ * at the branch. Kept above the correction because the REASON is unchanged and is the load-
+ * bearing half: spawn placement for 4-6 fighters is §48's layout pass, where 180° point
+ * symmetry is a competitive-fairness constraint in the same category as `aspect.mjs`, so a
+ * default invented HERE would be the second, quieter source of truth the sim refused to
+ * become — it would produce balance numbers, and it would look like it worked.
+ *
+ * So this parameter stays a TRANSPORT for coordinates a probe chose, with no placement
+ * policy of its own, exactly like `?px=`/`?py=` — and the PRODUCT's N-seat path
+ * (`GameSessionOptions.roster`) passes **no spawn at all**, which is the same rule reaching
+ * the opposite decision now that the arena declares the answer.
  *
  * Absent, malformed or shorter than 3 entries -> `null`, and the session takes the shipped
  * two-fighter path with not one branch changed. Never read by game logic.
@@ -450,6 +489,20 @@ export class GameSession {
   /** QA-only 3..6 fighter roster, or `null` for the shipped two-seat path. See
    * `fightersFromQuery`. */
   private readonly qaFighters = fightersFromQuery();
+  /**
+   * THE PRODUCT'S 3..6 SEAT ROSTER — `DECISIONS §66`'s flag, or `null` for the duel.
+   *
+   * ⚠️ **NOT A SECOND `qaFighters`, AND THE DIFFERENCE IS THE SPAWNS.** `?fighters=` is a
+   * *transport for coordinates a probe chose* and carries its own `spawn` per entry, because
+   * it predates `ArenaDefinition.spawns` (`0fffa1e`). This one carries **character ids and
+   * nothing else**: `sim.ts:defaultSpawn` reads `arena.spawns[i]`, so the seat positions come
+   * from the arena that owns them and this file states no placement policy at all. That is
+   * the difference between using the source of truth and becoming a second one.
+   *
+   * `qaFighters` still WINS when both are present — it is the more specific request (it
+   * names positions) and every `np_*` instrument depends on it.
+   */
+  private readonly roster: readonly CharacterId[] | null;
   /**
    * ONE MODEL PER SLOT, index-aligned with `state.fighters`.
    *
@@ -653,13 +706,22 @@ export class GameSession {
     // a screenshot pass reach a levelled fighter with no upgrade UI in the way.
     const lvl = clampLevel(opts.playerLevel ?? numberFromQuery('level') ?? LEVEL_MIN);
     this.levels = { player: lvl, enemy: enemyLevelFor(lvl) };
+    // ⚠️ THE LENGTH TEST IS `> MIN_FIGHTERS`, NOT `>= MIN_FIGHTERS`. A two-entry roster is
+    // refused so the duel keeps exactly one code path — see the field doc. `slice()` because
+    // this is a caller's array and a session holds it for the life of the match: a caller
+    // that mutated it afterwards would re-seat the NEXT restart and nothing would say so.
+    this.roster = opts.roster && opts.roster.length > MIN_FIGHTERS && opts.roster.length <= MAX_FIGHTERS
+      ? opts.roster.slice()
+      : null;
     // The roster, in slot order. `createMatch`'s legacy 3-argument form still builds
-    // exactly two fighters (`state.ts`), so this is exactly two entries today — but it
-    // is the ONE place the renderer's fighter count is decided, and every array below
-    // (`models`, `knockback`, the HUD's slots) is sized from it.
+    // exactly two fighters (`state.ts`), so this is exactly two entries on every shipped
+    // navigation — but it is the ONE place the renderer's fighter count is decided, and
+    // every array below (`models`, `knockback`, the HUD's slots) is sized from it.
     this.characterIds = this.qaFighters
       ? this.qaFighters.map((f) => f.characterId)
-      : [this.playerId, this.enemyId];
+      : this.roster
+        ? this.roster.slice()
+        : [this.playerId, this.enemyId];
     const requestedSpeed = Number(new URLSearchParams(location.search).get('simSpeed'));
     this.simSpeed = Number.isFinite(requestedSpeed) && requestedSpeed > 0 ? Math.min(50, requestedSpeed) : 1;
 
@@ -795,13 +857,37 @@ export class GameSession {
     this.stage.dispose();
   }
 
-  /** The ONE place a `MatchState` is built. Two seats through the legacy 3-argument form
-   * — which is what every shipped flow takes and what the identity battery measures — or
-   * the list form when the QA roster parameter is present. */
+  /**
+   * The ONE place a `MatchState` is built. **Three callers of two `createMatch` overloads,
+   * and the LAST branch is the shipped one** — every navigation the product makes today
+   * lands there, byte for byte the call this file has always made.
+   *
+   * 1. `?fighters=` — the QA transport, which carries its own coordinates.
+   * 2. `DECISIONS §66`'s roster flag — character ids only. **No `spawn` is passed**, so
+   *    `sim.ts:defaultSpawn` resolves slot *i* to `arena.spawns[i]` and the arena stays the
+   *    single source of truth for placement (`kx_seatfair`'s 2.680 → 0.342 places lives in
+   *    that array, and a caller that re-seated it would revert the fix while every legality
+   *    check went on passing).
+   * 3. the duel.
+   *
+   * ⚠️ **THE LEVEL GOES ON EACH `FighterConfig`, BECAUSE THE LIST FORM REFUSES A `levels`
+   * ARGUMENT AND THROWS** — `sim.ts` refuses the mixed call rather than dropping it
+   * silently, since at `LEVEL_MIN` every multiplier is 1.0 and a dropped level is invisible
+   * in the numbers. Non-local seats read `this.levels.enemy`, which is
+   * `enemyLevelFor(playerLevel)` computed once in the constructor: **five bots at the
+   * player's level, through the single function that expresses that answer.** There is no
+   * per-seat level input anywhere on this class, deliberately — see `roster` in
+   * `GameSessionOptions`.
+   */
   private newMatch(): MatchState {
-    return this.qaFighters
-      ? createMatch(this.arena, this.qaFighters)
-      : createMatch(this.arena, this.playerId, this.enemyId, this.levels);
+    if (this.qaFighters) return createMatch(this.arena, this.qaFighters);
+    if (this.roster) {
+      return createMatch(this.arena, this.roster.map((characterId, slot) => ({
+        characterId,
+        level: slot === LOCAL_SLOT ? this.levels.player : this.levels.enemy,
+      })));
+    }
+    return createMatch(this.arena, this.playerId, this.enemyId, this.levels);
   }
 
   private spawnMatch(): void {

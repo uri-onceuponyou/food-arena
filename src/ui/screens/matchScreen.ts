@@ -49,6 +49,7 @@
 import { startGame, type GameSession } from '../../game/match';
 import { CHARACTERS } from '../../game/rules';
 import { MAX_FIGHTERS, MIN_FIGHTERS, type MatchPhase } from '../../game/state';
+import { brawlRoster } from './brawl';
 import { placementXp } from './profile';
 import type { Route, Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
@@ -109,11 +110,43 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
    *  — so the result must be banked exactly once per completed match. */
   let banked = false;
 
+  // ── 🚨 DECISIONS §66'S FLAG, AND IT IS OFF UNLESS A ROUTE SAYS OTHERWISE ─────
+  //
+  // `route.seats` is OPTIONAL and every shipped navigation omits it
+  // (`characterSelect.ts:444` is the only one in the product), so `roster` is `undefined`
+  // and `startGame` takes the two-seat path with not one branch changed — `match.ts`
+  // ignores the field entirely when it is absent.
+  //
+  // ⚠️ **THAT IS GUARDED IN TWO PLACES AND NEITHER OF THEM IS AN ARGUMENT.**
+  // `tools/tmp/sp6_seats.mjs` §D is a source census — no screen but `main.ts` may set
+  // `seats`, and `Route.match.seats` must stay optional; both are proved red by mutating the
+  // real tree (`--selftest`, seven mutations, each required to fail the row it aims at).
+  // `tools/tmp/sp6_play.mjs` §A is the behavioural half: it boots the shipped URL with no
+  // `seats` and requires exactly two plates, and its known-bad `--arm leak` appends
+  // `&seats=6` — so the control is falsified by the on-state rather than by nothing, which
+  // is the only thing that makes it a measurement of the FLAG and not of the number 2.
+  //
+  // ⚠️ **NO AFFORDANCE IS INVENTED HERE.** §66 asks three questions and only ONE of them
+  // (which five characters) has a defensible default; **where the button lives** is Uri's,
+  // and a "Brawl" tile guessed here would be a design decision shipped under a wiring
+  // commit. So the flag arrives as a route field plus `?seats=`, exactly like `?player=`,
+  // and when Uri answers, the affordance sets `seats` and nothing below this line moves.
+  //
+  // ⚠️ The rule that picks the other fighters is `./brawl.ts`, NOT this file — it is a
+  // design default Uri may want to overrule and it has to be findable to be overruled.
+  const roster = route.seats === undefined
+    ? undefined
+    : brawlRoster(route.player, route.enemy, route.seats);
+
   const session: GameSession = startGame({
     container: ctx.gameHost,
     hudRoot: ctx.hudRoot,
     playerCharacterId: route.player,
     enemyCharacterId: route.enemy,
+    // `undefined` on every shipped navigation, which is identical to omitting the property:
+    // `match.ts` reads `opts.roster && …`. Passed unconditionally rather than spread in, so
+    // there is one call site to read rather than two shapes of one.
+    roster,
     // The player's CHARACTER level (not the account level on the home bar). The opponent
     // mirrors it inside `GameSession` — see `enemyLevelFor`, which is where Uri's
     // "AI players adjust to the player's level" answer is expressed exactly once.
@@ -207,7 +240,13 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   };
   window.addEventListener('keydown', onKey);
 
-  exitBtn.title = `${CHARACTERS[route.player].name} vs ${CHARACTERS[route.enemy].name}`;
+  // The matchup, for a hover tooltip. Derived from `roster` when there is one rather than
+  // from `route.player`/`route.enemy`, which at six seats would name two of six and read as
+  // a duel — the same "a two-fighter string describing an N-fighter match" shape that paid a
+  // six-player match as a 1v1 loss two screens down.
+  exitBtn.title = roster
+    ? roster.map((id) => CHARACTERS[id].name).join(' · ')
+    : `${CHARACTERS[route.player].name} vs ${CHARACTERS[route.enemy].name}`;
 
   return {
     root,
