@@ -86,13 +86,73 @@ export const MAP_1X = { w: 1400, h: 1000, cx: 700, cy: 500, halfDiagonal: 860.23
  *   **850** — the hand-set value before it was derived at all;
  *   **890** — `860.23 / (1 − 6/180)`, the derived value on the 180 s clock;
  *   **993** — `860.23 / (1 − 6/45)`, the derived value after the clock went 45 s.
- * The shipped map's is **1985**. ⚠️ `993` was the one that nearly got away: it is the
- * *newest* of the three, so a file holding it looks freshly maintained —
- * `tools/tmp/sc_fogstill.mjs` carried it under the comment *"mirrors arena-scan.mjs"*.
+ *
+ * ⚠️ **OLD WORDING, KEPT WITH THE REASON:** this line read *"The shipped map's is **1985**."*
+ * That was true from `6631446` until `6d5c4d6`, and **it is the same defect this file exists
+ * to catch, in the sentence that defines the catalogue of that defect.** The shipped value is
+ * `src/arena/shared.ts:MAX_SAFE_RADIUS`, derived through `rules.ts:fogOpeningRadiusFor`; it is
+ * not written here and must not be. `loadArena().maxSafeRadius` is the read.
+ *
+ * ⚠️ `993` was the one that nearly got away: it is the *newest* of the three, so a file
+ * holding it looks freshly maintained — `tools/tmp/sc_fogstill.mjs` carried it under the
+ * comment *"mirrors arena-scan.mjs"*. **1985 is now that same trap one generation on**, which
+ * is what `MAXR_RETIRED_X4` below is for.
  */
 export const MAXR_1X = [850, 890, 993];
 
+/**
+ * Every value `maxSafeRadius` has held on the ×4 map and no longer holds.
+ *
+ * 🚨 **THE 1× CATALOGUE ABOVE WAS ONLY EVER HALF THE CLASS, AND THE MISSING HALF IS WHY THE
+ * TWO SENTENCES THIS PASS FIXED WERE WRONG.** `is1xScalar` recognises 850/890/993 and nothing
+ * else, so a file holding a retired ×4 radius is invisible to every arm of `al_guard` —
+ * **24 radius-role sites in 14 tracked files, measured 2026-08-12**, and the live figure is
+ * printed by `al_guard`'s §X rather than restated here. The opening ring stopped being a
+ * number a tool could copy the moment it became a derivation; these are the values it left
+ * behind:
+ *
+ *   **1985** — `Math.round(1720.465 / (1 − 6/45))`. The derived opening ring from `6631446`
+ *              until `6d5c4d6`, and what `tools/arena.gameplay.json` baked until `56aa864`
+ *              refreshed the dump.
+ *   **1792** — `Math.round(1720.465 / (1 − 6/150))`: what that SAME dead formula returns on
+ *              the 150 s clock. **It was never the opening ring for one frame of one match.**
+ *              It is what every surviving COPY of the formula computes today, which is exactly
+ *              why it reads as a fresh number — `ax_layout` keeps it as
+ *              `legacyClockCoupledMaxSafe`, exported only as a named known-bad.
+ *
+ * ⚠️ **DELIBERATELY NOT WIRED INTO `classify`.** Doing so would fail `al_guard` on 24 hits in
+ * peer-owned files, which is the permanently-red-gate failure `al_guard`'s own ACK block was
+ * written to remove; a gate that is red for somebody else's file gets switched off, and then
+ * it guards nothing. §X applies it HARD to the three files `scanFiles` excludes — the only
+ * ones this file set owns — and prints the rest as a routed census.
+ */
+export const MAXR_RETIRED_X4 = [1985, 1792];
+
+/** Is this scalar a RETIRED ×4 opening ring, in a radius role? Mirrors `is1xScalar`. */
+export function isRetiredX4Scalar(role, v) {
+  if (role !== 'radius' && role !== 'diag') return null;
+  if (!MAXR_RETIRED_X4.includes(v)) return null;
+  return `retired ×4 maxSafeRadius (${v}) — superseded by `
+    + `src/arena/shared.ts:MAX_SAFE_RADIUS via rules.ts:fogOpeningRadiusFor. Read it, do not retype it`;
+}
+
 // ── file enumeration ─────────────────────────────────────────────────────────
+
+/**
+ * The three files `scanFiles` drops, named ONCE so the exemption and the arm that covers it
+ * cannot drift apart.
+ *
+ * 🚨 **THIS WHOLE-FILE EXEMPTION IS WHERE BOTH FALSEHOODS THIS PASS FIXED WERE LIVING.**
+ * They describe the 1× map on purpose, as data, so scanning them normally would fail every
+ * run — but "exempt from the 1× arms" was silently taken as "exempt from adjudication", and
+ * the guard against retyped arena scalars spent a day retyping two. That is `al_guard` §M's
+ * argument about markdown (*"a `.md` cannot be a mis-aimed fixture, but it CAN carry a stale
+ * coordinate the next agent copies, so it is adjudicated rather than waved through"*) applied
+ * to the one hole §M does not cover. `al_guard` §X is that adjudication.
+ */
+export const SELF_EXCLUDED = [
+  'tools/tmp/al_lib.mjs', 'tools/tmp/al_sweep.mjs', 'tools/tmp/al_guard.mjs',
+];
 
 /**
  * Tracked text files worth scanning.
@@ -108,7 +168,8 @@ export function scanFiles() {
     .split('\n').filter(Boolean)
     .filter((f) => /\.(ts|tsx|mjs|js|md)$/.test(f))
     // this file and its two consumers describe the 1× map ON PURPOSE, as data.
-    .filter((f) => !/^tools\/tmp\/al_(lib|sweep|guard)\.mjs$/.test(f));
+    // ⚠️ They are NOT unadjudicated: `al_guard` §X judges exactly this list. See `SELF_EXCLUDED`.
+    .filter((f) => !SELF_EXCLUDED.includes(f));
   return out;
 }
 
@@ -221,8 +282,11 @@ export function extract(rel, text) {
 
     // ── R2. Fog / safe radius requests. ──
     // ⚠️ `fog` is in the list because that is what every station table in this repo calls
-    // the column (`{ id: 'west_lane', x: 600, y: 1000, fog: 1985 }`), and leaving it out
+    // the column (`{ id: 'west_lane', x: 600, y: 1000, fog: <radius> }`), and leaving it out
     // meant the scalar arm could not see a 1× radius sitting in a fixture row.
+    // ⚠️ The `<radius>` placeholder used to be a literal `1985` — a retired ×4 opening ring
+    // sitting in an illustration, in the file that defines the catalogue of retired rings.
+    // §X flags it now, which is how it was found.
     for (const m of ln.matchAll(new RegExp(String.raw`\b(?:fogRadius|safeRadius|maxSafeRadius|maxR|fogArg|fog)\s*[=:]\s*(${NUM})`, 'g'))) {
       push(i, 'radius', Number(m[1]), 'fog/safe radius literal');
     }
@@ -343,13 +407,27 @@ export function is1xScalar(role, v) {
   const near = (a, b) => Math.abs(a - b) <= 0.6;
   // ⚠️ OLD WORDING, KEPT WITH THE REASON: this returned
   //    `` `1× maxSafeRadius (${v}; the map's is 1985)` ``
-  // and **1985 went stale on 2026-08-12** — `6d5c4d6` moved `MATCH_DURATION_MS` 45 s → 150 s and
-  // `MAX_SAFE_RADIUS = fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` now derives **1792**, which
-  // `ax_layout --selftest` reports as `derived 1792 vs dumped 1985`. `src/arena/shared.ts:225`
-  // already records that `tools/arena.gameplay.json` "bakes the stale 1985".
+  // and **1985 went stale on 2026-08-12**, when `6d5c4d6` replaced the clock-coupled division
+  // with `rules.ts:fogOpeningRadiusFor` — the half-diagonal, unrounded.
   // 🚨 So the guard against hardcoded arena scalars was itself hardcoding one, in the very
   // sentence that tells you not to. The number is gone rather than updated: today's correct
   // literal is the next generation's stale one, which is this file's own opening argument.
+  //
+  // 🚨 **AND THE REPLACEMENT WORDING WAS ITSELF FALSE FOR A DAY — SAME DEFECT, SECOND TAKE.**
+  // It said `MAX_SAFE_RADIUS = fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` *"now derives 1792,
+  // which `ax_layout --selftest` reports as `derived 1792 vs dumped 1985`"*. Both halves were
+  // wrong, and wrong in the way that is hardest to see — a plausible number from a formula
+  // that no longer describes the game:
+  //   * **1792 is the DEAD formula's output**, `round(halfDiag / (1 − 6000/150000))`, not the
+  //     derivation's. `fogOpeningRadiusFor` returns the half-diagonal: 1720.4650534085254.
+  //   * `ax_layout --selftest` no longer *reports a gap* — `c858e3e` made that row an
+  //     identity, and `56aa864` refreshed the dump. Both read 1720.4650534085254 today, and
+  //     the 1792 survives there only as `legacyClockCoupledMaxSafe`, a named known-bad.
+  // ⚠️ It also cited `src/arena/shared.ts:225` for *"the dump bakes the stale 1985"*. That
+  // sentence is still in `shared.ts` and **is now false itself** — routed to its owner, not
+  // fixed here. The lesson is that the correction repeated the original mistake: **a comment
+  // that quotes a VALUE is a copy of a constant and ages exactly like one. Quote the
+  // DERIVATION and name the file that owns it.**
   if (role === 'radius' && MAXR_1X.includes(v)) {
     return `1× maxSafeRadius (${v}) — the shipped one is DERIVED, `
       + `src/arena/shared.ts:MAX_SAFE_RADIUS via rules.ts:fogOpeningRadiusFor. Do not retype it`;

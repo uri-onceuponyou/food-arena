@@ -29,6 +29,62 @@
 
 import { createMatch, stepMatch } from '../../src/game/sim.ts';
 import { createRng } from '../../src/game/economy/rng.ts';
+import {
+  COUNTDOWN_FROM, COUNTDOWN_START_FLASH_MS, MATCH_DURATION_MS, SUDDEN_DEATH_MS,
+} from '../../src/game/rules.ts';
+
+/**
+ * ── THE TICK BUDGETS, DERIVED — AND WHY THEY USED TO BE LITERALS ────────────
+ *
+ * 🚨 `buildSuddenDeathState` defaulted to **`maxTicks = 4000`** and `buildEndedState` to
+ * **`6000`**. Both were sized against a clock that no longer exists: 4000 ticks is **66.7 s**
+ * against a sudden death that `6d5c4d6` moved to **138.7 s**, and 6000 ticks is **100 s**
+ * against a timeout that cannot arrive before **153.7 s**.
+ *
+ * ⚠️ **AND THE FIRST ONE WAS ALREADY BITING, LOUDLY.** `node tools/tmp/nw_fixture.mjs` — this
+ * file's own demo, which exists so a reader can see the fixture's shape — threw on its first
+ * `suddenDeath` row. That is the builder's throw doing precisely what its header promises, so
+ * the failure was never a wrong number; it was a broken demo that reads like a broken fixture.
+ * `nw_delta` had already worked around it by deriving the bound **caller-side**, and said in
+ * its own comment that `nw_fixture.mjs` "is not this file's to change".
+ *
+ * ── SHOULD A DEFAULT EXIST AT ALL? ──────────────────────────────────────────
+ * The case for refusing without an explicit bound is *"a throw beats a wrong number"* — but
+ * **a too-small bound here already throws**, with `phase`, `safeRadius` and `elapsed` in the
+ * message, so there is no wrong number to prevent. What refusing WOULD do is push this
+ * derivation into every caller, and a duplicated derivation that agrees by construction until
+ * a constant moves is exactly the defect `c858e3e` removed from `ax_layout`'s fog formula.
+ * So: **derive it once, here, and keep the throw as the backstop.**
+ *
+ * ── THE BOUNDS ARE EXACT, AND THAT IS ASSERTED RATHER THAN PADDED ───────────
+ * After step index `t` the state holds `elapsed = (t+1) * dt`, so the first index at which a
+ * milestone at `X` ms has been reached is `ceil(X / dt) - 1`, and a loop bounded by
+ * `ceil(X / dt)` reaches it with nothing to spare. Measured on the shipped fixture at
+ * `dt = 1000/60`: `safeRadius === 0` first at tick **8321** (elapsed 138 700 ms) at BOTH N=2
+ * and N=6, `+ dwell` → **8352**; and **8351 throws**. The bound is not padded, deliberately —
+ * `nw_delta`'s caller-side copy carried `+ 2000 ms + 60` of slack, and slack is how a bound
+ * stops describing anything. If the sim ever arms the collapse a tick later, this throws and
+ * says so, which is the report you want.
+ */
+const COUNTDOWN_MS = COUNTDOWN_FROM * 1000 + COUNTDOWN_START_FLASH_MS;
+
+/** Ticks needed for `elapsed` to REACH `ms`, at `dt`. Exclusive bound for a `t < n` loop. */
+export const ticksToReach = (ms, dt) => Math.ceil(ms / dt);
+
+/**
+ * The tick at which `safeRadius` collapses to 0, plus the dwell the builder wants after it.
+ * `SUDDEN_DEATH_MS` is PLAY milliseconds (`sim.ts` keys it off `timeRemaining`, not
+ * `elapsed`), so the countdown is paid on top — the same asymmetry `fogRadiusAt` documents.
+ */
+export const suddenDeathTicks = (dt, dwell) => ticksToReach(COUNTDOWN_MS + SUDDEN_DEATH_MS, dt) + dwell;
+
+/**
+ * The tick by which a match MUST be over: `resolveTimeout` fires at `timeRemaining <= 0`.
+ * ⚠️ Not observably wrong at the shipped seed — N=2 ends by knockout at tick 1994 and N=6 at
+ * 2915, so the old 6000 was never reached — which is exactly why it survived. **A bound that
+ * no longer bounds is still a defect**; the first stalemate seed anyone tries would have hit it.
+ */
+export const endedTicks = (dt) => ticksToReach(COUNTDOWN_MS + MATCH_DURATION_MS, dt);
 
 /**
  * A 2800x2000 arena with six 180-degree-symmetric spawns.
@@ -180,7 +236,15 @@ function forceEdgeShapes(state, arena) {
  * fake while every check went green — the same failure shape as the two known-bads in
  * `nw_stack.mjs` that passed falsely because they tampered with a tick inside the countdown.
  */
-export function buildSuddenDeathState(arena, n, { seed = 4242, dt = 1000 / 60, humans = 1, maxTicks = 4000, dwell = 30 } = {}) {
+export function buildSuddenDeathState(arena, n, {
+  seed = 4242, dt = 1000 / 60, humans = 1, dwell = 30,
+  // ⚠️ WAS `maxTicks = 4000` — 66.7 s against a 138.7 s collapse. See the tick-budget block
+  // at the top of this file: the literal was sized on the pre-`6d5c4d6` clock, this file's own
+  // demo threw on it, and `nw_delta` had to derive the bound caller-side to get past it.
+  // ⚠️ `dwell` is listed BEFORE `maxTicks` on purpose — a destructuring default may only read
+  // bindings to its left, and this one reads both `dt` and `dwell`.
+  maxTicks = suddenDeathTicks(dt, dwell),
+} = {}) {
   const state = createMatch(arena, fixtureConfigs(arena, n, { humans }));
   let armedAt = -1;
   for (let t = 0; t < maxTicks; t++) {
@@ -213,7 +277,13 @@ export function buildSuddenDeathState(arena, n, { seed = 4242, dt = 1000 / 60, h
  * where a fresh fighter holds `-Infinity`. Throws if the match never ends, for the same reason
  * as above.
  */
-export function buildEndedState(arena, n, { seed = 4242, dt = 1000 / 60, humans = 1, maxTicks = 6000 } = {}) {
+export function buildEndedState(arena, n, {
+  seed = 4242, dt = 1000 / 60, humans = 1,
+  // ⚠️ WAS `maxTicks = 6000` — 100 s, short of the 153.7 s a TIMEOUT needs. Unlike the
+  // sudden-death bound this one was never observed to bite, because every shipped seed ends by
+  // knockout first; see `endedTicks`.
+  maxTicks = endedTicks(dt),
+} = {}) {
   const state = createMatch(arena, fixtureConfigs(arena, n, { humans }));
   for (let t = 0; t < maxTicks; t++) {
     const inputs = [];

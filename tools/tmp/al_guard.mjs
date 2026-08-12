@@ -32,7 +32,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ROOT, MAP_1X, MAXR_1X, loadArena, scanFiles, extract, classify,
+  ROOT, MAP_1X, MAXR_1X, MAXR_RETIRED_X4, SELF_EXCLUDED, isRetiredX4Scalar,
+  loadArena, scanFiles, extract, classify,
   addressesShippedArena, coverAt, quadrant, isDocFile,
 } from './al_lib.mjs';
 
@@ -83,7 +84,10 @@ const ACK = [
     + 'excludes because they describe the 1× map ON PURPOSE — but excluding the whole file would '
     + 'blind this guard to the rest of it, so it is acknowledged by CODE instead. ⚠️ ROUTED to the '
     + 'owner: the literal is incidental to what that control proves (any radius works), so replacing '
-    + '850 with 1985 there would retire this entry. Peer-owned file; not mine to edit.' },
+    + '850 with a radius that is not a retired scalar would retire this entry. Peer-owned file; not '
+    + 'mine to edit. ⚠️ THIS ADVICE USED TO READ "replacing 850 with 1985", which would have swapped '
+    + 'a 1x fossil for a x4 one — 1985 is itself retired (see al_lib:MAXR_RETIRED_X4), and the entry '
+    + 'would have gone on looking discharged. Name the derivation, never a number.' },
 
   // ── (1) FACTS OF THE MAP, not defects ───────────────────────────────────────
   // `boiling_pot` is centred on the arena centre, so ANY fixture aimed at the exact
@@ -207,14 +211,26 @@ function collect() {
 function run() {
   const { arena, files, rows } = collect();
   console.log(`al_guard — arena ${arena.w}×${arena.h}, centre (${arena.cx},${arena.cy}), `
-    // ⚠️ `maxSafeRadius` is printed AS DUMPED and labelled so, because on 2026-08-12 the dump's
-    // 1985 no longer matches what `rules.ts:fogOpeningRadiusFor` derives under `6d5c4d6`'s
-    // 150 s clock (1792 — `ax_layout --selftest` reports the gap). `loadArena` cross-checks the
-    // dump against `shared.ts` on ARENA_W/H **only**, so this one number is unverified here.
-    // NOT tightened into a throw: that would make this guard red for a defect in someone else's
-    // file, which is precisely the permanently-red-gate failure this pass removed. No arm reads
-    // it — the 1× arm compares against `MAXR_1X`, and cover/spawns come from the same dump.
-    + `maxSafeRadius ${arena.maxSafeRadius} (as dumped — UNVERIFIED, see the note in the source), `
+    // ⚠️ OLD WORDING, KEPT WITH THE REASON, BECAUSE IT WAS FALSE AND IT WAS FALSE HERE:
+    //    > "`maxSafeRadius` is printed AS DUMPED and labelled so, because on 2026-08-12 the
+    //    > dump's 1985 no longer matches what `rules.ts:fogOpeningRadiusFor` derives under
+    //    > `6d5c4d6`'s 150 s clock (1792 — `ax_layout --selftest` reports the gap)."
+    // Every clause of that is now wrong, and two of them were wrong when written. The dump is
+    // NOT 1985 (`56aa864` refreshed it); `fogOpeningRadiusFor` does not derive 1792 (it returns
+    // the half-diagonal — 1792 is the DEAD `round(halfDiag / (1 − 6000/T))` formula's output on
+    // the 150 s clock); and `ax_layout --selftest` reports no gap (`c858e3e` turned that row
+    // into an identity, and it is green). See `al_lib:MAXR_RETIRED_X4`.
+    //
+    // ⚠️ **IT IS STILL PRINTED AS DUMPED**, and that part was and is right: `loadArena`
+    // cross-checks the dump against `shared.ts` on ARENA_W/H **only**, so no arm here verifies
+    // this number. NOT tightened into a throw, and NOT re-derived here either — a second copy
+    // of the derivation is the `ax_layout` defect `c858e3e` removed, which agreed by
+    // construction until the clock moved. **The assertion exists and it is somebody else's:**
+    // `ax_layout --selftest` — *"the shipped dump's maxSafeRadius is the one `rules.ts`
+    // derives (a stale dump fails HERE, not silently inside every fixture built from it)"*.
+    // No arm here reads it — the 1× arm compares against `MAXR_1X`, cover/spawns come from the
+    // same dump, and §X compares against `MAXR_RETIRED_X4`.
+    + `maxSafeRadius ${arena.maxSafeRadius} (as dumped — verified by \`ax_layout --selftest\`, not here), `
     + `half-diagonal ${arena.halfDiagonal.toFixed(2)}`);
   console.log(`${files.length} tracked text files · ${rows.length} candidates extracted by syntactic role\n`);
 
@@ -371,8 +387,138 @@ function run() {
   check('the 1× map and the shipped map are actually different (else every arm is vacuous)',
     arena.w !== MAP_1X.w || arena.h !== MAP_1X.h, `${arena.w}×${arena.h} vs ${MAP_1X.w}×${MAP_1X.h}`);
 
+  // §X — the retired ×4 opening ring, and the three files this guard exempts from itself.
+  retiredArm(arena, rows);
+
   console.log(`\n${fail === 0 ? '✅ PASS' : '🔴 FAIL'}  al_guard: ${pass} passed, ${fail} failed\n`);
   return fail;
+}
+
+/**
+ * ── §X — THE RETIRED ×4 OPENING RING ────────────────────────────────────────
+ *
+ * 🚨 **WHY THIS ARM EXISTS: TWO SENTENCES IN THIS FILE SET STATED A RETIRED `maxSafeRadius`
+ * AS FACT, AND NOTHING IN THE REPO COULD SEE THEM.** `al_lib:is1xScalar` said
+ * `fogOpeningRadiusFor` *"now derives 1792"* (it derives the half-diagonal; 1792 is the DEAD
+ * formula's output) and this file said the dump *"says 1985"* (`56aa864` refreshed it). Asked
+ * "what assertion would have caught this?", the answer was **none**, for two structural
+ * reasons that are worth naming because neither is a bug in the checkers:
+ *
+ *   1. `al_lib.scanFiles` drops `al_lib`/`al_sweep`/`al_guard` WHOLESALE — they describe the
+ *      1× map on purpose — so the guard is blind to itself by construction, and both
+ *      falsehoods landed inside that exemption.
+ *   2. `rc_prose` is the gate for *"prose that states a superseded constant as fact"*, and its
+ *      corpus is **four hand-listed `src/` files** (`AUDIT`). It reads nothing under `tools/`.
+ *
+ * ⚠️ **AND THE CATALOGUE ITSELF WAS HALF-EMPTY.** `is1xScalar` knows 850/890/993 — the 1×
+ * map's retired rings — and nothing about the ×4 map's, so a file holding **1985** is invisible
+ * to every arm. Measured 2026-08-12 over `scanFiles()`: **24 radius-role hits in 14 files**,
+ * three of them a `const MAX_SAFE_RADIUS = 1985` that other code computes from
+ * (`simfix`, `sc_fogstill`, `valuescan`), while `tools/arena-scan.mjs:409` — the file all three
+ * name as their source — has already been re-derived.
+ *
+ * ── WHY IT IS HARD ON THREE FILES AND A PRINTED CENSUS ON THE REST ──────────
+ * Wiring `isRetiredX4Scalar` into `classify` would fail this gate on ~24 hits in peer-owned
+ * files. That is the permanently-red-gate failure the ACK block above was written to remove:
+ * a gate that is red for somebody else's file gets switched off, and then it guards nothing.
+ * So the assertion binds where this file set is the owner, and the rest is ROUTED, printed
+ * with file and line so the routing is actionable rather than a number.
+ *
+ * ⚠️ **A PRINTED CENSUS IS NOT A GUARD** (`sp_gate --endgame` was report-only and stayed false
+ * straight through the commit that falsified it). So the census does not stand alone: X3 fires
+ * the detector at a PLANTED known-bad through the same code path, so the census reading zero
+ * can never be confused with the detector having stopped working.
+ *
+ * ── 🚨 WHAT THIS ARM DOES **NOT** COVER, MEASURED RATHER THAN ASSUMED ───────
+ * The whole arm was proved both ways by planting into the real `al_lib.mjs` and requiring a
+ * red run (exit 1), then restoring. **Two lines were planted and only ONE was caught:**
+ *
+ *   caught   a commented-out `const MAX_SAFE_RADIUS = <a MAXR_RETIRED_X4 value>;`
+ *                                                          → X2 red, al_guard exit 1
+ *   MISSED   the prose sentence *"`fogOpeningRadiusFor` now derives <the dead formula's
+ *            output>, which `ax_layout --selftest` reports as a gap against the dump"*
+ *                                                          → nothing fired
+ *
+ * ⚠️ **AND NOTE HOW THIS BLOCK IS WRITTEN.** The first draft of it quoted the planted line
+ * verbatim, X2 went red on it, and that is the arm being right: **inside these three files a
+ * retired ring may not appear in a syntactic role even inside a quotation.** There is no
+ * blockquote exemption here, deliberately — `rc_prose` needs one because it scans files whose
+ * job is something else, whereas these three exist to HOLD the catalogue, and the catalogue is
+ * `MAXR_RETIRED_X4`. Name the symbol; an exemption is a way to buy green.
+ *
+ * The missed line **is the exact sentence this pass was dispatched to fix.** `extract` works
+ * by SYNTACTIC ROLE — a named constant, a `fog:` column, a `?fogRadius=` param — and free
+ * prose has no role, so §X sees a retired ring only where something could compute from it.
+ * That half matters most (it is how `simfix`/`sc_fogstill`/`valuescan` came to hold a
+ * `const MAX_SAFE_RADIUS` that is 264.5 wu wrong) and it is the half this arm binds.
+ *
+ * **The prose half is `rc_prose`'s subject and it is not pointed here.** That tool already
+ * solves the hard part — a superseded figure is legal if it sits on a `>` blockquote line, so
+ * the house rule about keeping old wording is not banned — but its corpus is four hand-listed
+ * `src/` files (`AUDIT`) and it reads nothing under `tools/`. Widening it is a `rc_prose.mjs`
+ * change and is ROUTED, not attempted here. ⚠️ **Do not "fix" that by scanning these three
+ * files for a bare `1985`**: they discuss retired values as data on purpose, `gatecount`
+ * priced the identical widening at **16 false positives for 1 true one** on the real
+ * documents, and a guard that cries wolf gets switched off.
+ */
+function retiredArm(arena, rows) {
+  console.log('\n§X — the RETIRED ×4 opening ring (al_lib:MAXR_RETIRED_X4), and the files this guard exempts from itself');
+
+  // X0 — non-emptiness FIRST. Everything below filters, and a filter over an empty set passes.
+  const scanned = new Set(scanFiles());
+  const missing = SELF_EXCLUDED.filter((f) => !fs.existsSync(path.join(ROOT, f)));
+  check('X0  the three self-excluded files all exist and are all genuinely OUT of the corpus '
+    + '(if one drifts back in, §A fails on its 1× data and this arm is double-counting)',
+  missing.length === 0 && SELF_EXCLUDED.every((f) => !scanned.has(f)),
+  `missing=[${missing.join(',')}] inCorpus=[${SELF_EXCLUDED.filter((f) => scanned.has(f)).join(',')}]`);
+
+  const selfRows = [];
+  for (const rel of SELF_EXCLUDED) {
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    for (const h of extract(rel, text)) selfRows.push(h);
+  }
+  check('X1  the extractor actually reaches those three files (else X2 is vacuous)',
+    selfRows.length > 10, `${selfRows.length} candidates`);
+
+  // X2 — the hard assertion. THIS file set's own files may not carry a retired ×4 ring in a
+  // syntactic role — code or comment, since a commented-out constant is still copied. ⚠️ NOT
+  // free prose: see the "what this does not cover" block in the header, which is measured.
+  const selfHits = selfRows.filter((h) => isRetiredX4Scalar(h.role, h.value));
+  check('X2  0 retired ×4 opening rings in a SYNTACTIC ROLE in the self-excluded files '
+    + '(code or comment; free prose is rc_prose\'s and is not pointed here)',
+  selfHits.length === 0,
+    selfHits.map((h) => `${h.file}:${h.line} [${h.value}] ${h.text.slice(0, 90)}`).join('\n         '));
+
+  // X3 — the detector, on a planted known-bad, through the same path X2 uses. Without this,
+  // "0 hits" and "the detector is broken" are the same reading.
+  const plantBad = extract('tools/tmp/al_lib.mjs',
+    `// __matchArena\nconst MAX_SAFE_RADIUS = ${MAXR_RETIRED_X4[0]};\n`)
+    .filter((h) => isRetiredX4Scalar(h.role, h.value));
+  const plantGood = extract('tools/tmp/al_lib.mjs',
+    `// __matchArena\nconst MAX_SAFE_RADIUS = loadArena().maxSafeRadius;\n`)
+    .filter((h) => isRetiredX4Scalar(h.role, h.value));
+  check('X3  KNOWN-BAD  a planted `const MAX_SAFE_RADIUS = <retired>` IS flagged by the same '
+    + 'detector X2 runs — so a clean X2 is a measurement, not a dead code path',
+  plantBad.length === 1, `${plantBad.length} hits`);
+  check('X3b CONTROL  the derived form of the same line is flagged by nothing',
+    plantGood.length === 0, `${plantGood.length} hits`);
+
+  // X4 — the catalogue is about a value that is actually retired. If someone ever sets the
+  // opening ring BACK to one of these, this arm would be condemning the shipped answer.
+  check('X4  every retired value really is retired — none of them is the dumped maxSafeRadius',
+    !MAXR_RETIRED_X4.includes(arena.maxSafeRadius)
+      && !MAXR_RETIRED_X4.some((v) => MAXR_1X.includes(v)),
+    `dump ${arena.maxSafeRadius} vs [${MAXR_RETIRED_X4.join(', ')}]`);
+
+  // ── the ROUTED census over everything else. Printed, never failed — see the header. ──
+  const routed = rows.filter((h) => isRetiredX4Scalar(h.role, h.value));
+  const byFile = new Map();
+  for (const h of routed) byFile.set(h.file, (byFile.get(h.file) ?? 0) + 1);
+  console.log(`  ROUTED (printed, not failed — peer-owned files): ${routed.length} retired-ring `
+    + `hits in ${byFile.size} files`);
+  for (const h of routed) {
+    console.log(`         ${h.file}:${h.line} [${h.value}]${h.inComment ? ' (comment)' : ''}  ${h.text.slice(0, 88)}`);
+  }
 }
 
 // ── the selftest: every arm proved against a known-bad ──────────────────────
@@ -395,6 +541,25 @@ function selftest() {
     return out;
   };
 
+  /**
+   * 🚨 **THE FIXTURE RADIUS IS INTERPOLATED FROM THE DUMP, AND IT USED TO BE THE LITERAL
+   * `1985`.** Seven of the strings below carried it — including the CONTROL on the very case
+   * named *"`MAX_SAFE_RADIUS = 993`, the newest of the three 1× values"*, whose "fixed form"
+   * was therefore **the next generation's fossil**: `6d5c4d6` retired 1985 the same way 45 s
+   * retired 993, and because `is1xScalar` only knows the 1× values the control went on
+   * passing while endorsing a stale number. That is this file's own subject matter, inside
+   * this file's own controls, and §X is what found it.
+   *
+   * ⚠️ Interpolating is not cosmetic and it is not the same as picking a newer literal: the
+   * fixture is TEXT handed to the extractor, never code anyone ships, so the only thing a
+   * literal can do here is age. `RADIUS` is what the dump says today, whatever that is.
+   * ⚠️ Where the fixture is about a POSITION rather than a scalar, the radius is incidental
+   * and the row's `expect` does not mention it — but a fossil in an incidental slot is still
+   * a fossil the next agent copies, which is exactly how three of the 24 routed hits below
+   * became a `const MAX_SAFE_RADIUS` that other code computes from.
+   */
+  const RADIUS = arena.maxSafeRadius;
+
   const CASES = [
     { name: 'match-play\'s ARENA literal (the 1× size, centre AND maxR in one object)',
       bad: 'const ARENA = { w: 1400, h: 1000, cx: 700, cy: 500, maxR: 890 };',
@@ -406,23 +571,23 @@ function selftest() {
       expect: ['1X-SCALAR'] },
     { name: 'sc_fogstill\'s MAX_SAFE_RADIUS = 993 — the NEWEST of the three 1× values',
       bad: 'const MAX_SAFE_RADIUS = 993;',
-      good: 'const MAX_SAFE_RADIUS = 1985;',
+      good: `const MAX_SAFE_RADIUS = ${RADIUS};`,
       expect: ['1X-SCALAR'] },
     { name: 'limbmatch\'s object-form station table, pot_south inside a prep_counter',
-      bad: 'const STATIONS = {\n  pot_south: { x: 700, y: 640, fog: 1985 },\n};',
-      good: 'const STATIONS = {\n  pot_south: { x: 1400, y: 1200, fog: 1985 },\n};',
+      bad: `const STATIONS = {\n  pot_south: { x: 700, y: 640, fog: ${RADIUS} },\n};`,
+      good: `const STATIONS = {\n  pot_south: { x: 1400, y: 1200, fog: ${RADIUS} },\n};`,
       expect: ['IN-COVER'] },
     { name: 'arena-scan/valuescan\'s array-of-objects table, west_lane inside a freezer',
-      bad: 'const STATIONS = [\n  { id: \'west_lane\', x: 340, y: 500, fog: 1985 },\n];',
-      good: 'const STATIONS = [\n  { id: \'west_lane\', x: 600, y: 1000, fog: 1985 },\n];',
+      bad: `const STATIONS = [\n  { id: 'west_lane', x: 340, y: 500, fog: ${RADIUS} },\n];`,
+      good: `const STATIONS = [\n  { id: 'west_lane', x: 600, y: 1000, fog: ${RADIUS} },\n];`,
       expect: ['IN-COVER'] },
     { name: 'simfix\'s positional-tuple table',
       bad: 'const STATIONS = [\n  [\'west_lane\', 340, 500, 890],\n];',
-      good: 'const STATIONS = [\n  [\'west_lane\', 600, 1000, 1985],\n];',
+      good: `const STATIONS = [\n  ['west_lane', 600, 1000, ${RADIUS}],\n];`,
       expect: ['IN-COVER', '1X-SCALAR'] },
     { name: 'a probe URL teleporting the fighter into a prop',
-      bad: 'await p.goto(`${BASE}/?player=hamburger&px=340&py=500&fogRadius=1985`);',
-      good: 'await p.goto(`${BASE}/?player=hamburger&px=600&py=1000&fogRadius=1985`);',
+      bad: `await p.goto(\`\${BASE}/?player=hamburger&px=340&py=500&fogRadius=${RADIUS}\`);`,
+      good: `await p.goto(\`\${BASE}/?player=hamburger&px=600&py=1000&fogRadius=${RADIUS}\`);`,
       expect: ['IN-COVER'] },
     // ⚠️ THE CONTROL HERE WAS WRONG ON THE FIRST RUN AND THE SELFTEST SAID SO. It was
     // `const CENTER = { x: 1400, y: 1000 };` — the *correct* answer — and it tripped
@@ -453,7 +618,7 @@ function selftest() {
 
   // The quadrant arm cannot be exercised by a one-line fixture, so it gets its own.
   console.log('\n§KB-D — the one-quadrant arm, which is the only one that can see a table of individually-LEGAL points\n');
-  const mk = (pts) => `// __matchArena\nconst STATIONS = [\n${pts.map(([x, y], i) => `  ['s${i}', ${x}, ${y}, 1985],`).join('\n')}\n];`;
+  const mk = (pts) => `// __matchArena\nconst STATIONS = [\n${pts.map(([x, y], i) => `  ['s${i}', ${x}, ${y}, ${RADIUS}],`).join('\n')}\n];`;
   const quadOf = (text) => {
     const q = { NW: 0, NE: 0, SW: 0, SE: 0 };
     const hs = extract('tools/tmp/kb_fixture.mjs', text).filter((h) => h.role === 'pos');
