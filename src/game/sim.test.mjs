@@ -7405,9 +7405,24 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
   // No AI in the roster can clear `REACH.meleeHeavy` from separation 0 inside 1100 ms —
   // the fastest chase speed is 70.00 wu/s, worth 77.00 wu — so the achievability gate
   // correctly refuses to try, and the last row below asserts exactly that.
+  //
+  // 🚨 THE OPPONENT IS DERIVED, AND IT USED TO BE THE LITERAL `'soup'`. Measured 2026-08-12
+  // while `soup.Dump` was carrying a candidate `castMs` (derived, then REVERTED on balance —
+  // see the weapon): this row went red on its KNOWN-BAD and on nothing else, which is the row
+  // working. The control AI had opened its OWN wind-up, was rooted by it, and so did not
+  // close in — "the cast term is what moved it" would then have been satisfied by a fixture
+  // where the AI could not move for an unrelated reason. The candidate is gone and the
+  // hazard is not: a castless opponent is now FOUND rather than named, so the next
+  // conversion cannot re-break it silently. The search is asserted non-empty first because
+  // `find` returning `undefined` would put every row below inside `CHARACTERS[undefined]`.
   {
+    const CASTLESS_AI = CHARACTER_IDS.find((id) => id !== 'waterbottle'
+      && CHARACTERS[id].weapons.every((w) => (w.castMs ?? 0) === 0));
+    check('§33(l) has a castless opponent to run against — the fixture is not measuring its own wind-up',
+      CASTLESS_AI !== undefined,
+      `every character now carries a wind-up; this row can no longer isolate the cast term`);
     const dodgeFix = (sep) => {
-      const state = playingMatch(castArena(), 'waterbottle', 'soup');
+      const state = playingMatch(castArena(), 'waterbottle', CASTLESS_AI);
       state.player.x = 2000; state.player.y = 2000;
       state.enemy.x = 2000 + sep; state.enemy.y = 2000;
       state.player.hp = 1e9; state.player.maxHp = 1e9;
@@ -7447,6 +7462,163 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
     const hopelessSep = runFor(hopeless, MEGA.castMs);
     check('…so from separation 0 it does NOT flee a telegraph it cannot escape',
       hopelessSep < REACH.meleeHeavy, `separation ${hopelessSep.toFixed(2)}`);
+  }
+
+  // ── (m) EVERY WIND-UP IN THE ROSTER IS `melee`, BECAUSE `ai.ts` ONLY SEES THOSE ──
+  //
+  // 🚨 THIS IS A BLOCKER WRITTEN DOWN AS A GATE, NOT A STYLE RULE. `ai.ts:dangerSteer`'s
+  // cast hazard opens with `if (w === undefined || w.type !== 'melee') continue;`, and its
+  // own comment says the refusal is deliberate: *"There are no ranged casts today; this
+  // refuses them explicitly rather than by accident."* So a RANGED `castMs` shipped while
+  // that line stands is a telegraph **no AI can ever react to** — which is precisely the
+  // asymmetry (l) exists to prevent, pointed at the other seat, and it would measure as
+  // "the special got weaker" on every corpus in the repo without ever naming the cause.
+  //
+  // `Weapon.castMs` carries the three derived-but-unshipped values (`taco.Double` 1150,
+  // `burrito.Swarm` and `sushi.Catch` 1850) so lifting this is one edit rather than a
+  // re-derivation.
+  //
+  // ⚠️ THE FIRST ROW IS WHAT STOPS THIS BEING VACUOUS THE DAY `ai.ts` IS FIXED. Stated as
+  // "no ranged casts" alone, this section would keep passing for a reason that had ceased
+  // to exist — a guard whose premise evaporated, which is the shape `CLAUDE.md` #6 records
+  // three times in one session. So the premise is SCANNED, and when the ranged term lands
+  // this row goes red and says what to do.
+  {
+    const aiSrc = stripComments(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'ai.ts'), 'utf8'));
+    const refusesRanged = /w\.type\s*!==\s*'melee'\s*\)\s*continue/.test(aiSrc);
+    check('PREMISE: `ai.ts:dangerSteer` still refuses to steer out of a RANGED cast',
+      refusesRanged,
+      'the refusal is gone — the block is LIFTED: re-derive and ship the parenthesised '
+      + 'values in `rules.ts:Weapon.castMs`, then replace this row with the ranged dodge test');
+
+    const castWeapons = CHARACTER_IDS.flatMap((id) =>
+      CHARACTERS[id].weapons.filter((w) => (w.castMs ?? 0) > 0).map((w) => ({ id, w })));
+    check('…and the set this row runs over is NON-EMPTY before anything filters it',
+      castWeapons.length > 0, `${castWeapons.length} cast weapons`);
+    const ranged = castWeapons.filter(({ w }) => w.type !== 'melee');
+    check('…so no weapon in the roster carries a `castMs` the AI cannot steer out of',
+      ranged.length === 0,
+      `ranged casts: [${ranged.map(({ id, w }) => `${id}.${w.key} ${w.castMs}ms`).join(', ')}]`);
+
+    // KNOWN-BAD: plant the exact defect this row exists to catch. `sushi.Catch` is the
+    // weapon whose value is already derived, so the plant is the real candidate rather
+    // than a straw one, and the predicate must go FALSE.
+    const CATCH = CHARACTERS.sushi.weapons.find((w) => w.key === 'Catch');
+    CATCH.castMs = 1850;
+    const withPlant = CHARACTER_IDS.flatMap((id) =>
+      CHARACTERS[id].weapons.filter((w) => (w.castMs ?? 0) > 0 && w.type !== 'melee'));
+    delete CATCH.castMs;
+    check('KNOWN-BAD: give a RANGED special a wind-up and this row goes red',
+      withPlant.length === 1 && withPlant[0].key === 'Catch',
+      `planted set: [${withPlant.map((w) => w.key).join(', ')}]`);
+    check('…and the plant was undone, so no row below inherits it',
+      CHARACTERS.sushi.weapons.find((w) => w.key === 'Catch').castMs === undefined);
+  }
+
+  // ── (n) THE OTHER DIRECTION: A TARGET THAT STANDS STILL IS HIT ────────────
+  //
+  // 🚨 (d) VARIES `castMs` AND WOULD BE SATISFIED BY A WEAPON THAT NEVER LANDS. "The runner
+  // escaped" is the same observation as "the resolve is broken", and (d) buys its way out of
+  // that with a SHORTER wind-up. This row buys its way out with the INPUT instead: one
+  // fixture, one duration, the shipped `castMs`, and the only difference between the arms is
+  // whether the target presses a direction. Both arms are needed and neither is decoration —
+  // a telegraph nobody can escape is a wind-up, and one everybody escapes is a dead button.
+  //
+  // The target is the SLOWEST human (Egg/Soup, 105.60 wu/s), i.e. the roster's worst case
+  // for escaping, so "it got away" is the hardest version of that claim.
+  {
+    check('`waterbottle.Mega` carries a wind-up at all — (n) is not measuring a castless weapon',
+      (MEGA.castMs ?? 0) > 0, `castMs ${MEGA.castMs}`);
+
+    const run = (move) => {
+      const state = playingMatch(castArena(), 'egg', 'waterbottle');
+      state.enemy.x = 2000; state.enemy.y = 2000;
+      state.player.x = 2000 + 20; state.player.y = 2000;
+      state.enemy.facing = { x: 1, y: 0 };
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      const evs = [];
+      attemptAttack(state, state.enemy, MEGA_I, evs);
+      const input = { move, selectedWeapon: 0, attack: false };
+      let dealt = 0;
+      for (const e of megaHits(evs)) dealt += e.amount;
+      for (let i = 0; i < 400 && state.enemy.cast !== null; i++) {
+        for (const e of megaHits(stepMatch(state, CAST_TICK, input))) dealt += e.amount;
+      }
+      for (const e of megaHits(stepMatch(state, CAST_TICK, input))) dealt += e.amount;
+      return { dealt, sep: Math.hypot(state.player.x - state.enemy.x, state.player.y - state.enemy.y) };
+    };
+
+    const stood = run({ x: 0, y: 0 });
+    check('a target that does NOT move eats the whole wind-up — the button is not dead',
+      stood.dealt > 0, `dealt ${stood.dealt} at separation ${stood.sep.toFixed(2)}`);
+    const ran = run({ x: 1, y: 0 });
+    check('…and the SAME fixture at the SAME `castMs` lands nothing on a target that runs',
+      ran.dealt === 0 && ran.sep > REACH.meleeHeavy,
+      `dealt ${ran.dealt} at separation ${ran.sep.toFixed(2)} vs reach ${REACH.meleeHeavy}`);
+  }
+
+  // ── (o) THE DURATION IS A FUNCTION OF THE GEOMETRY, NOT A NUMBER SOMEBODY LIKED ──
+  //
+  // `Weapon.castMs`'s roster-wide rule, asserted as a ratchet:
+  //
+  //     castMs = roundUp50( range / slowestHumanSpeed * 1000 + REACTION_MS )
+  //
+  // It is not a formula invented here to fit: it REPRODUCES the shipped 1100 that
+  // `16b635d` derived by hand from Mega's 795.45 ms, and it is what makes two weapons
+  // sharing one geometry share one number without that being a constant. The escape term is
+  // the melee closed form and is only valid because (m) proves every cast weapon is melee —
+  // the two rows compose deliberately.
+  //
+  // ⚠️ THE FLOOR AND THE CEILING ARE BOTH FAILURES AND BOTH ARE ASSERTED. Below the fastest
+  // human's window nobody escapes and it is a wind-up, not counterplay; far above the
+  // slowest human's window everybody escapes on reflex and it is a dead button. The
+  // reaction budget is what sits between them.
+  {
+    const REACTION_MS = 300;
+    const roundUp50 = (ms) => Math.ceil(ms / 50) * 50;
+    const humanSpeeds = CHARACTER_IDS.map((id) => speedFor(id, PLAYER_SPEED) * 1000);
+    const slowestHuman = Math.min(...humanSpeeds);
+    const fastestHuman = Math.max(...humanSpeeds);
+    const windowMs = (w, v) => ((w.range ?? 0) / v) * 1000;
+
+    const cast = CHARACTER_IDS.flatMap((id) =>
+      CHARACTERS[id].weapons.filter((w) => (w.castMs ?? 0) > 0).map((w) => ({ id, w })));
+    check('(o) runs over a NON-EMPTY set — the ratchet is not `[].every()`',
+      cast.length > 0, `${cast.length} cast weapons`);
+    for (const { id, w } of cast) {
+      const slow = windowMs(w, slowestHuman);
+      const fast = windowMs(w, fastestHuman);
+      check(`${id}.${w.key}'s wind-up is exactly what its geometry derives`,
+        w.castMs === roundUp50(slow + REACTION_MS),
+        `castMs ${w.castMs}, derived ${roundUp50(slow + REACTION_MS)} from range ${w.range} `
+        + `(escape ${fast.toFixed(2)}/${slow.toFixed(2)} ms fast/slow)`);
+      check(`…and it clears the floor, so the fastest human can actually escape it`,
+        w.castMs > fast, `castMs ${w.castMs} vs ${fast.toFixed(2)} ms`);
+    }
+
+    // KNOWN-BAD 1: a value below the floor. 300 ms is `3f28b39`'s own decomposition arm —
+    // the one measured to cost 13.8 pp with the dodge switched off BY ARITHMETIC.
+    const MEGA_SAVED = MEGA.castMs;
+    MEGA.castMs = 300;
+    const belowFloor = MEGA.castMs > windowMs(MEGA, fastestHuman);
+    const belowRule = MEGA.castMs === roundUp50(windowMs(MEGA, slowestHuman) + REACTION_MS);
+    MEGA.castMs = MEGA_SAVED;
+    check('KNOWN-BAD: `castMs: 300` fails BOTH the rule and the escape floor',
+      !belowFloor && !belowRule, `floor ${belowFloor} rule ${belowRule}`);
+    check('…and `castMs` was restored to the ROSTER value, not to a literal',
+      MEGA.castMs === SHIPPED_CAST_MS && SHIPPED_CAST_MS > 0, `castMs ${MEGA.castMs}`);
+
+    // KNOWN-BAD 2 — AND IT IS THE RECORD OF WHY `lollipop.Giant` IS NOT CONVERTED.
+    // Run the same rule over the one special that was refused: a 360° slam at
+    // `REACH.ultimateSlam` needs the slowest human to cross 400 wu, so the rule returns a
+    // wind-up longer than half its own cooldown. There is no duration at which that weapon
+    // is both dodgeable and pressable, which is the answer to `DECISIONS §9`.
+    const GIANT = CHARACTERS.lollipop.weapons.find((w) => w.key === 'Giant');
+    check('`lollipop.Giant` has NO wind-up, and the rule says why',
+      (GIANT.castMs ?? 0) === 0
+      && roundUp50(windowMs(GIANT, slowestHuman) + REACTION_MS) > GIANT.cooldown / 2,
+      `derived ${roundUp50(windowMs(GIANT, slowestHuman) + REACTION_MS)} ms against a `
+      + `${GIANT.cooldown} ms cooldown; escape window ${windowMs(GIANT, slowestHuman).toFixed(2)} ms`);
   }
 }
 

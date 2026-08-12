@@ -2325,6 +2325,68 @@ export interface Weapon {
    * *"huge damage"* and *"one giant bottle"*; the numbers do not say that yet. Shortening
    * `castMs` to buy the winrate back would spend the one property Uri asked for.
    * ⚠️ And do NOT pay it back with `cooldown` — see the throughput note above.
+   *
+   * ── 🚨 THE ROSTER-WIDE RULE, AND THE FOUR SPECIALS IT REFUSES ──────────────
+   *
+   * Everything above derives ONE weapon. Extending it needed the rule stated as a function,
+   * and stating it exposed that the melee closed form above is not the general case:
+   *
+   *     castMs = roundUp50( escapeWindow(slowest human) + REACTION_MS )      REACTION_MS = 300
+   *
+   * `escapeWindow` is *"how long the target must run, from separation 0, before this weapon
+   * can no longer put damage on it"* — the quantity Uri's *"a telegraph you can dodge"*
+   * actually names. It reproduces the shipped 1100 from Mega's own 795.45, which is why it
+   * is trusted on the others. It is MEASURED per weapon by `tools/tmp/u5_derive.mjs`, which
+   * bisects the smallest `castMs` at which a runner takes zero, driving the real
+   * `stepMatch` — because for four of these six the closed form is wrong:
+   *
+   *     weapon             type    shape              escape ms  fast/slow    castMs    verdict
+   *     waterbottle.Mega   melee   84 wu disc             683.67 /  790.39      1100    SHIPPED 16b635d
+   *     soup.Dump          melee   84 wu disc             683.67 /  790.39     (1100)   REFUSED — balance
+   *     taco.Double        ranged  ±10° fan, 128 wu       667.67 /  823.39     (1150)   REFUSED — ai.ts
+   *     burrito.Swarm      ranged  homing, 140 wu        1350.67 / 1523.39     (1850)   REFUSED — ai.ts + cycle
+   *     sushi.Catch        ranged  homing, 140 wu        1350.67 / 1540.39     (1850)   REFUSED — ai.ts + cycle
+   *     lollipop.Giant     melee   360°, 400 wu          3317.67 / 3773.39     (4100)   REFUSED — arithmetic
+   *
+   * 🚨 **ONE OF SIX SHIPS, AND FIVE REFUSALS EACH HAVE A NUMBER RATHER THAN AN OPINION.**
+   * Every parenthesised value above is DERIVED and MEASURED, so lifting any of these is one
+   * edit and not a re-derivation.
+   *
+   *   * **`soup.Dump` is the only one the geometry accepts, and the BALANCE measurement
+   *     killed it: -49.7 pp (smart2) and -71.1 pp (chase), to a strength of 0.6% / 2.8%.**
+   *     Implemented, gated, measured on 3520 paired matches per policy, reverted. The full
+   *     table and the un-run ablation are recorded at the weapon itself.
+   *
+   *   * **`lollipop.Giant` IS REFUSED BY THE NUMBER ALONE, AND THIS IS THE ANSWER TO
+   *     `DECISIONS §9`'s parked question.** A 360° slam at `REACH.ultimateSlam` threatens a
+   *     400 wu disc, so the slowest human needs **3773.39 ms** of running to leave it and the
+   *     rule returns a **4100 ms** wind-up — **59% of its own 7000 ms cooldown spent rooted**,
+   *     against 31% for Mega. There is no duration at which this weapon is both dodgeable and
+   *     pressable: below ~3.3 s NOBODY escapes, so a wind-up here buys the ROOT and the
+   *     INTERRUPT and calls them a telegraph. §19(b) already caps its damage precisely
+   *     BECAUSE it cannot be dodged, and a wind-up does not change that fact — it is the same
+   *     undodgeable 18 arriving later. `ai.ts:dangerSteer` independently agrees, in code: its
+   *     *"only run from a telegraph you can actually clear"* gate names this exact weapon as
+   *     the case it exists for. **If Uri wants a tell on Giant it is an INTERRUPT window, not
+   *     a dodge, and that is a different feature with a different justification.**
+   *   * **THE THREE RANGED SPECIALS ARE BLOCKED ON A FILE THIS PASS DOES NOT OWN.**
+   *     `ai.ts:dangerSteer` steers away from an incoming cast with `if (w.type !== 'melee')
+   *     continue;` — deliberately, and its comment says so: *"There are no ranged casts
+   *     today; this refuses them explicitly rather than by accident."* So a ranged `castMs`
+   *     shipped today is a telegraph **no AI can ever react to**, which is exactly the
+   *     asymmetry that comment exists to prevent, pointed at the other seat. The numbers are
+   *     derived and the values are parenthesised above so the routing is one edit, not a
+   *     re-derivation. `sim.test.mjs` §33(m) is the ratchet: it FAILS the moment a ranged
+   *     weapon grows a `castMs` while that refusal stands.
+   *   * ⚠️ **AND THE `ai.ts` COMMENT'S REASON IS HALF WRONG, WHICH CHANGES THE FIX.** It says
+   *     a ranged `range` is *"how far the projectile TRAVELS, not an area around the caster,
+   *     and reading it as a radius here would make an AI flee a circle that does not exist."*
+   *     That was true under path-length retirement. Under AUTHORISED DEVIATION #12 `traveled`
+   *     is charged with the ground GAINED on the target, so for a HOMING shot the circle is
+   *     exactly real: the threatened set is a disc of `range + hitRadius` = 165.20 wu, and
+   *     the measured 1523.39 ms is 165.20/105.60 to three figures. For a NON-HOMING fan
+   *     (`taco.Double`) it is not a disc — 823.39 ms is the ±10° fan walking off the target,
+   *     not the 1450.76 ms the disc would predict. **Two answers, and the file needs both.**
    */
   castMs?: number;
 }
@@ -3411,6 +3473,48 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     weapons: [
       { key: 'Splash', name: 'Soup Splash', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 750, speed: SPEED.closeFast, color: '#E8792A', effect: null, pellets: 3, spreadDeg: 25, emoji: '💦' },
       { key: 'Noodle', name: 'Noodle Toss', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 1000, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '🍜' },
+      // ── 🚨 `castMs: 1100` WAS DERIVED, IMPLEMENTED, MEASURED AND REVERTED. DO NOT RE-ADD IT ──
+      //
+      // This is the ONE remaining special whose geometry says yes. It is `melee` at
+      // `REACH.meleeHeavy` — byte-for-byte the shape `waterbottle.Mega` is — so
+      // `Weapon.castMs`'s roster rule returns the same 1100, and that is a derivation rather
+      // than a copy: `tools/tmp/u5_derive.mjs` drives the real `stepMatch` with real
+      // `MatchInput` and finds the escape boundary at **790.39 ms** (slowest human) /
+      // **683.67 ms** (fastest), inside one tick of the 795.45 closed form. Two weapons land
+      // on one number because they have one geometry.
+      //
+      // **AND THE BALANCE MEASUREMENT KILLED IT.** `roster_lab --seeds 32`, 3520 matches per
+      // policy, paired on identical seeds against a detached worktree of `2d4840e`:
+      //
+      //     policy   soup strength      Δ        roster sd        settled     paired
+      //     smart2   50.3% ->  0.6%   -49.7   11.9 -> 18.9 pp   30 -> 43    20/110 moved
+      //     chase    73.9% ->  2.8%   -71.1   19.1 -> 21.8 pp   48 -> 50    19/110 moved
+      //
+      // ⚠️ THE AGGREGATE IS THE WRONG NUMBER AND IT SAYS THE WRONG THING — smart2 -3.2 pp and
+      // chase +0.9 pp are both inside the ~9 pp floor while a character LEFT THE GAME. Read
+      // the paired column; they are never added.
+      //
+      // 0.6% is not "out of band", it is a character that loses every match, and on `chase`
+      // Soup was the roster's STRONGEST at 73.9%. `16b635d` shipped Mega's -35.0 pp because
+      // the SYSTEM was the deliverable and had to land somewhere; here the system already
+      // exists and only a value is being applied, so shipping a second character into the
+      // floor buys nothing that this comment does not.
+      //
+      // ⚠️ AND THE CAUSE IS NOT PROVEN, WHICH IS WHY NOTHING WAS TUNED. Dump is ~5.3 HP/s of a
+      // kit that also carries 12 HP/s of Splash, so a straight throughput loss does not
+      // explain -49.7 pp. `csx_castcost --seeds 8` says only **18.4% of RESOLVED Dumps land**
+      // against Mega's 64.1% (by subtraction on one corpus: 383 opened, 282 resolved, 52
+      // landed — contaminated only by the 16 soup-vs-waterbottle matches where both casts are
+      // live). The standing hypothesis is `ai.ts:pressValue` ranking a 16 above a 9 at melee
+      // range and so spending the window on a whiff instead of the pokes — but `3f28b39`
+      // REFUTED that exact story for Mega by ablation (suppressing the cast was WORSE), so it
+      // is a hypothesis and not a finding. The ablation for Soup was not run.
+      //
+      // → What this weapon needs is what `3f28b39` already concluded for Mega: **price the
+      //   ULTIMATE, not the telegraph.** That is `DECISIONS §68`'s pass and it is not
+      //   authorised here. Shortening `castMs` to buy the win rate back spends the one
+      //   property the feature exists for, and `cooldown` is barred outright (`lastUsed` is
+      //   stamped at the PRESS, so throughput never moved).
       { key: 'Dump', name: 'Soup Dump', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 3000, cone: 90, color: '#E8792A', effect: 'slow', emoji: '🌊' },
     ],
     abilities: [
