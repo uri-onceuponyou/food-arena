@@ -140,6 +140,19 @@ export interface WeaponVfxCtx {
    * hit-reaction particle pools in `game/vfx.ts`, which deliberately keep animating
    * through hit-stop. `undefined` for every other hook. */
   dt?: number;
+  /**
+   * `telegraph()` only: how long the wind-up this hook is drawing will run, in
+   * MILLISECONDS — i.e. `Weapon.castMs`, the same number the sim counted down and the
+   * same number the HUD's cast bar fills over.
+   *
+   * ⚠️ **Author every beat as a FRACTION of this, never as a fixed number of
+   * seconds.** `castMs` differs per weapon (the two `meleeHeavy` ultimates are
+   * specified at 1100 ms and `lollipop.Giant` at 1500) and a hook that hard-codes
+   * "0.3 s of gathering, then hold" is silently wrong on the other one. The generic
+   * telegraph in `game/vfx.ts` derives everything from `progress` for exactly this
+   * reason. `undefined` for every other hook.
+   */
+  castMs?: number;
 }
 
 export interface WeaponVfx {
@@ -160,8 +173,39 @@ export interface WeaponVfx {
    * Omit to keep the generic impact burst (flash + rings + shards). */
   impact?(ctx: WeaponVfxCtx): void;
   /** Muzzle/wind-up flash at the attacker, fired once per `weapon-fired` event this
-   * weapon caused. Omit to keep the generic cast flash. */
+   * weapon caused. Omit to keep the generic cast flash.
+   *
+   * ⚠️ **`weapon-fired` NOW MEANS "IT RESOLVED", NOT "THE BUTTON WAS PRESSED".** For a
+   * weapon with `castMs > 0` the sim emits `weapon-fired` at the END of the wind-up,
+   * so this hook is the moment the blow LANDS, not the moment it is started. For every
+   * weapon with no `castMs` the two instants are the same tick and nothing changed.
+   * The wind-up belongs in `telegraph()` below. */
   cast?(ctx: WeaponVfxCtx): void;
+  /**
+   * The WIND-UP, fired once per `cast-started` event this weapon caused, and torn down
+   * on `cast-cancelled` or at the resolve. `ctx.castMs` is how long it has to run.
+   *
+   * ── Why this is a hook and not just a longer `cast()` ──────────────────────────
+   *
+   * `cast()` is a one-shot: it fires and the effect owns its own lifetime. A telegraph
+   * has to be **KILLABLE**, because the sim can cancel a cast (an applied stun, or the
+   * caster dying), and a wind-up that keeps playing out of a corpse is worse than no
+   * wind-up at all. Everything spawned from this hook's `ctx.spawnTransient` is owned
+   * by the telegraph and removed with it — you do not have to unwind anything.
+   *
+   * ── The one rule that is not negotiable: SUSTAIN ───────────────────────────────
+   *
+   * `game/vfx.ts` already draws the generic hitbox footprint for you and that alone
+   * clears the delivered-pixel floor at every slice. What this hook must not do is
+   * peak and die: `tools/tmp/tg_tele.mjs` measures the **MINIMUM** 100 ms slice across
+   * `[0, castMs]`, not the peak, because a bespoke effect that flashes at 4,000 px and
+   * is gone 150 ms later is `docs/LESSONS.md`'s 36-px invisible-sculpt failure wearing
+   * a good peak number. Author a HELD gesture that evolves, not a burst.
+   *
+   * Omit the hook entirely to keep just the generic footprint + fill clock, which is a
+   * complete, legible telegraph on its own.
+   */
+  telegraph?(ctx: WeaponVfxCtx): void;
 }
 
 /** `${characterId}.${weapon.key}` — the registry's lookup key (see `index.ts`).

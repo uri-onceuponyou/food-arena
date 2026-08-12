@@ -42,7 +42,7 @@
  */
 
 import * as THREE from 'three';
-import type { Fighter, FighterRole, MatchState, Projectile, Splat, TrailMark, Vec2 } from './state';
+import type { Fighter, FighterId, FighterRole, MatchState, Projectile, Splat, TrailMark, Vec2 } from './state';
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream — see `roster.ts` for why every resolver has a legacy-role fallback.
 import { fighterOf, fightersOf, slotOf } from './roster';
@@ -83,7 +83,7 @@ declare global {
      *
      * Published by `VfxLayer`'s constructor, cleared by `dispose()`.
      */
-    __vfxSpawnTest?: (kind: VfxSpawnTestKind, xWU: number, yWU: number, amount?: number, color?: string, who?: CharacterId, weaponKey?: string) => void;
+    __vfxSpawnTest?: (kind: VfxSpawnTestKind, xWU: number, yWU: number, amount?: number, color?: string, who?: CharacterId, weaponKey?: string, castMs?: number) => void;
     /**
      * QA-only handle on the live `VfxLayer`, in the same spirit as `window.__stage`
      * and `window.__audio`. Never read by game logic.
@@ -117,7 +117,7 @@ interface VfxFighterSnapshot {
   x: number; y: number; hp: number; alive: boolean; terrainSlowFactor: number;
 }
 
-type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash' | 'coverScuff';
+type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' | 'puddleSplash' | 'coverScuff' | 'castTelegraph';
 
 /**
  * Every kind `window.__vfxSpawnTest` can fire. A superset of `VfxQaKey`: the QA
@@ -138,7 +138,7 @@ type VfxQaKey = 'cast' | 'meleeArc' | 'impact' | 'death' | 'heal' | 'giantSlam' 
 type VfxSpawnTestKind = VfxQaKey | 'weaponFired';
 
 function bumpVfxQaCount(key: VfxQaKey): void {
-  window.__vfxQaCounts ??= { cast: 0, meleeArc: 0, impact: 0, death: 0, heal: 0, giantSlam: 0, puddleSplash: 0, coverScuff: 0 };
+  window.__vfxQaCounts ??= { cast: 0, meleeArc: 0, impact: 0, death: 0, heal: 0, giantSlam: 0, puddleSplash: 0, coverScuff: 0, castTelegraph: 0 };
   window.__vfxQaCounts[key]++;
 }
 
@@ -973,6 +973,45 @@ function buildWedgeGradientTexture(): THREE.CanvasTexture {
  * separation here is VALUE and SATURATION: these marks are dark and saturated where
  * the arena's permanent spills are light and desaturated.
  */
+/**
+ * The cast telegraph's outer band — a DANGER BOUNDARY, not a wash.
+ *
+ * `wedgeGradientTex` was the obvious thing to reuse and it was wrong here, visibly:
+ * it is an apex-to-rim ramp already at **0.55 alpha by 55% of the radius**, which is
+ * correct for a 0.3 s swing (it wants to read as a swept volume) and is a near-white
+ * film over the whole footprint when it is held for 1100 ms. Judged on the rendered
+ * PNG, the first version's two-tone construction was invisible under it — the shape
+ * came out as one pale translucent haze, i.e. *exactly* the flat translucent pie-wedge
+ * this whole pass exists because Uri named.
+ *
+ * So the telegraph gets its own ramp: nothing until 78% of the radius, hard up to full
+ * at 94%, and a slight fall at the very edge so the line has a soft outside. What the
+ * player reads is a bright arc at the range boundary — the one line that answers "am I
+ * inside it or not", which is the only question a dodge is asking.
+ */
+function buildTelegraphRimTexture(): THREE.CanvasTexture {
+  const w = 8;
+  const h = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(255,255,255,0)');
+  grad.addColorStop(0.78, 'rgba(255,255,255,0)');
+  grad.addColorStop(0.88, 'rgba(255,255,255,0.85)');
+  grad.addColorStop(0.94, 'rgba(255,255,255,1)');
+  grad.addColorStop(1, 'rgba(255,255,255,0.75)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  const tex = new THREE.CanvasTexture(canvas);
+  // Same reason as `buildWedgeGradientTexture`: with the default flip this directional
+  // ramp comes out inverted and the "rim" lands at the apex.
+  tex.flipY = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 function buildGlazeMarkTexture(variant: number): THREE.CanvasTexture {
   const size = 128;
   const c = size / 2;
@@ -1690,6 +1729,75 @@ const PARTICLE_POOL_SIZE = 96;
 const WEDGE_POOL_SIZE = 10;
 const RING_POOL_SIZE = 16;
 
+/**
+ * How long a cast telegraph keeps drawing PAST its `castMs`, in seconds.
+ *
+ * The telegraph runs on `updateEffects`'s clock and the sim's `resolvesAt` runs on
+ * `state.elapsed`, which hit-stop trickles — so the two can part by a few frames inside
+ * a long cast. Without a tail that shows up as a hole between the telegraph vanishing
+ * and `weapon-fired`'s melee arc arriving; with one it shows up as a brief overlap,
+ * which is what a real swing looks like anyway. Deliberately shorter than the arc's own
+ * 0.3 s life so the arc, not the wind-up, owns the moment of impact.
+ */
+const TELEGRAPH_TAIL_S = 0.09;
+/** How long an INTERRUPTED telegraph takes to collapse. Long enough to be seen as a
+ * distinct event (the stun landed and it WORKED) and short enough that it cannot be
+ * mistaken for the cast still running. */
+const TELEGRAPH_FIZZLE_S = 0.2;
+
+/**
+ * Dispose any material an object owns outright.
+ *
+ * Every other material in this file is a module- or instance-level singleton reused for
+ * the life of the layer, so nothing ever needed this. A cast telegraph is the exception:
+ * its three layers animate on independent curves and so cannot share, and it is created
+ * and destroyed per cast. Marked with `userData.__ownMat` at construction rather than
+ * inferred, because "is this material shared?" is not answerable from the material.
+ */
+/**
+ * Mix two colours the way a PALETTE does — in sRGB — not the way `Color.lerp` does.
+ *
+ * 🚨 **THIS COST A ROUND OF RENDERED SHEETS AND IT IS NOT OBVIOUS FROM ANY CALL SITE.**
+ * `THREE.ColorManagement` is enabled by default from r152 and we are on 0.180.0, so
+ * `new THREE.Color('#1E90D8')` stores LINEAR components (0.013, 0.258, 0.680) and every
+ * `lerp` / `multiplyScalar` runs on those. Linear values for mid-tones are small, so
+ * lerping 22% toward white in linear space is a much bigger move in the space a human
+ * eye reads:
+ *
+ *     `c.lerp(WHITE, 0.22)`   intended #4FA8E1     actually rendered ~#85ADE0
+ *     `c.lerp(WHITE, 0.45)`   intended #83C2EA     actually rendered ~#B7CFF0
+ *
+ * Judged on the PNG, the telegraph came out as a **pale near-white film** at both
+ * settings — which is precisely the *"flat translucent pie-wedge"* this whole pass
+ * exists to replace, arrived at from the opposite direction. And the second-order trap:
+ * the obvious reaction to "too pale" is to reach for more saturation somewhere else,
+ * when the authored saturation was never lost — it was being mixed away by a colour
+ * space nobody names at the call site.
+ *
+ * ⚠️ Deliberately NOT applied to `spawnMeleeArc`'s `lerp(INK, 0.14)` or to any other
+ * existing call. Those were tuned by eye against the rendered result, so their numbers
+ * already absorb this; "correcting" them would move shipped, critic-reviewed colour.
+ */
+function mixSRGB(base: THREE.Color, target: THREE.Color, k: number): THREE.Color {
+  const a = base.clone().convertLinearToSRGB();
+  const b = target.clone().convertLinearToSRGB();
+  return a.lerp(b, k).convertSRGBToLinear();
+}
+
+/** `multiplyScalar` in sRGB — a VALUE change that keeps the hue and the saturation the
+ * eye sees. See `mixSRGB` for why the linear-space version is not that. */
+function scaleSRGB(base: THREE.Color, k: number): THREE.Color {
+  return base.clone().convertLinearToSRGB().multiplyScalar(k).convertSRGBToLinear();
+}
+
+function disposeOwnedMaterials(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mat = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) if (m.userData?.__ownMat) m.dispose();
+  });
+}
+
 interface WedgeSlot {
   mesh: THREE.Mesh;
   mat: THREE.MeshBasicMaterial;
@@ -1757,7 +1865,34 @@ export class VfxLayer {
     life: number;
     maxLife: number;
     onUpdate?: (progress: number, elapsedSeconds: number) => void;
+    /**
+     * Which cast telegraph owns this transient, if any (`Fighter.id`).
+     *
+     * A telegraph is the one effect in this file that can be **KILLED EARLY** — the
+     * sim cancels a cast on an applied stun or on the caster's death — and a bespoke
+     * `telegraph()` hook spawns its gathering beats through the ordinary
+     * `ctx.spawnTransient`, i.e. into this same list. Without an owner tag, cancelling
+     * would tear down the generic footprint and leave the bespoke half animating over
+     * a corpse. Set for the duration of the `telegraph()` call and for the generic
+     * parts; `undefined` for every other transient in the file, which is every
+     * pre-existing one.
+     */
+    telegraphOwner?: FighterId;
   }> = [];
+  /**
+   * Live cast telegraphs, keyed by the CASTER's `Fighter.id`.
+   *
+   * Keyed on `id` and not on slot index for the same reason `state.ts` gave the
+   * fighters ids at all: a slot is a position in an array that a rematch reshuffles,
+   * an id identifies the fighter. `cast-started` / `cast-cancelled` both carry
+   * `fighterId`, so the key is handed to us by the event stream rather than derived.
+   *
+   * The value is the generic telegraph's own root group; the bespoke hook's transients
+   * are found by `telegraphOwner` instead of being parented to it, because a bespoke
+   * beat may want to sit at a different height or scale from the ground footprint and
+   * parenting would silently apply the footprint's transform to it.
+   */
+  private readonly castTelegraphs = new Map<FighterId, THREE.Object3D>();
   /** `state.elapsed` (sim ms) as of the previous `sync()` call — lets `sync()`
    * derive a SIM-time delta to hand bespoke `trail()` hooks as `ctx.dt`, so a
    * projectile's own per-frame animation freezes during hit-stop right along with
@@ -1864,6 +1999,10 @@ export class VfxLayer {
   private readonly streakTex = buildStreakTexture();
   private readonly shardTex = buildShardTexture();
   private readonly wedgeGradientTex = buildWedgeGradientTexture();
+  /** The cast telegraph's outer band. Deliberately NOT `wedgeGradientTex` — see
+   * `buildTelegraphRimTexture` for the rendered-PNG evidence that reusing it turned the
+   * two-tone telegraph into one pale film. */
+  private readonly telegraphRimTex = buildTelegraphRimTexture();
   private readonly particles: ParticleSlot[] = [];
   private readonly wedges: WedgeSlot[] = [];
   private readonly rings: RingSlot[] = [];
@@ -2062,7 +2201,7 @@ export class VfxLayer {
     this.ensureSlots(2);
 
     // QA-only on-demand spawn — see the `__vfxSpawnTest` declaration above.
-    window.__vfxSpawnTest = (kind, xWU, yWU, amount = 14, color = '#FFC93C', who, weaponKey) => {
+    window.__vfxSpawnTest = (kind, xWU, yWU, amount = 14, color = '#FFC93C', who, weaponKey, castMs) => {
       // Resolve a real Weapon up front: BOTH the impact and cast paths consult the
       // bespoke registry through it, and passing nothing means every QA spawn silently
       // falls back to the generic burst. A first version of this hook wired only the cast
@@ -2098,6 +2237,16 @@ export class VfxLayer {
       }
       else if (kind === 'coverScuff') {
         this.spawnCoverScuff(xWU, yWU, qaWeapon?.color ?? color, 1, 0);
+      }
+      else if (kind === 'castTelegraph') {
+        // Fighter id 0 — the QA driver only ever runs one telegraph at a time, and
+        // `cancelCastTelegraph(0, ...)` is how a probe measures the interrupt read.
+        // `castMs` falls back to the weapon's own once `rules.ts` carries one, then to
+        // the 1100 ms specified for the two `meleeHeavy` ultimates, so a probe that
+        // passes nothing still measures a real duration rather than zero.
+        const weapon = qaWeapon ?? ({ key: 'qa', name: 'qa', type: 'melee', range: 84, cone: 100, damage: amount, cooldown: 1, color, effect: null } as unknown as Weapon);
+        const ms = castMs ?? (weapon as Weapon & { castMs?: number }).castMs ?? 1100;
+        this.spawnCastTelegraph(0, xWU, yWU, { x: 1, y: 0 }, weapon, qaId, ms);
       }
       else if (kind === 'weaponFired') {
         const weapon = qaWeapon ?? ({ key: 'qa', name: 'qa', type: 'ranged', range: 100, damage: amount, cooldown: 1, color, effect: null } as unknown as Weapon);
@@ -2572,6 +2721,14 @@ export class VfxLayer {
       eff.life += dtSeconds;
       if (eff.life >= eff.maxLife) {
         this.group.remove(eff.object);
+        // A cast telegraph owns materials nothing else in the file does (one triple per
+        // live telegraph, animated independently), so its expiry has to release them —
+        // and has to drop the map entry, or a second cast by the same fighter would be
+        // refused by `spawnCastTelegraph`'s own double-start guard forever after.
+        disposeOwnedMaterials(eff.object);
+        if (eff.telegraphOwner !== undefined && this.castTelegraphs.get(eff.telegraphOwner) === eff.object) {
+          this.castTelegraphs.delete(eff.telegraphOwner);
+        }
         this.transientEffects.splice(i, 1);
         continue;
       }
@@ -2587,12 +2744,304 @@ export class VfxLayer {
     object: THREE.Object3D,
     lifetimeSeconds: number,
     onUpdate?: (progress: number, elapsedSeconds: number) => void,
+    telegraphOwner?: FighterId,
   ): void {
     this.group.add(object);
-    this.transientEffects.push({ object, life: 0, maxLife: Math.max(0.001, lifetimeSeconds), onUpdate });
+    this.transientEffects.push({ object, life: 0, maxLife: Math.max(0.001, lifetimeSeconds), onUpdate, telegraphOwner });
   }
 
   // ── Spawn API — called from match.ts's event handling ─────────────────────────
+
+  /**
+   * THE WIND-UP, DRAWN — everything one `cast-started` event puts on screen.
+   *
+   * ── The contract, and it is an EVENT contract ─────────────────────────────────
+   *
+   * `match.ts` calls this on `cast-started{fighterRole, fighterId, weaponKey, castMs}`
+   * and `cancelCastTelegraph` on `cast-cancelled{reason}`. Nothing here reads sim
+   * state; this layer and `audio/` are both consumers of the same stream, which is the
+   * established pattern (`state.ts`'s `GameEvent` union). The resolve needs no call —
+   * the telegraph's own lifetime is `castMs`, and `weapon-fired`, which the sim now
+   * emits at the RESOLVE rather than at the press, brings `spawnWeaponCast`'s melee
+   * arc in on top of it as the payoff.
+   *
+   * ── Why this is not just `spawnMeleeArc` with a longer life ───────────────────
+   *
+   * Two reasons, and the first is a measured one.
+   *
+   * **`spawnMeleeArc` sets `maxLife = 0.3` and `updateEffects` fades every wedge on
+   * `startOpacity * (1 - t^1.8)`.** At `castMs = 1100` that curve is at 18% opacity by
+   * 900 ms — the telegraph would be brightest when there is nothing to react to and
+   * effectively gone at the instant the blow lands. A wind-up is the one effect in
+   * this file that must get STRONGER with time, and the pooled wedge cannot: its curve
+   * is hard-coded in the shared update loop, one statement for ten slots.
+   *
+   * **And a telegraph carries a second quantity the arc has no way to say.** The arc
+   * answers WHERE. A wind-up has to answer WHEN, because "a telegraph you can dodge"
+   * is the whole authorised design goal — a player who can see the hitbox but not the
+   * clock cannot time anything. So the shape is deliberately TWO-TONE:
+   *
+   *   * `castTelegraphBase` — the full hitbox at the weapon's real `range`/`cone`,
+   *     DARK (the weapon colour at 0.30 value, so the hue is the weapon's and rule 4's
+   *     blocking-violet band is a property of `rules.ts` rather than of this mix), held
+   *     at constant area for the whole cast. This is WHERE, and because its area never
+   *     changes it is also what guarantees the sustain floor at every slice.
+   *   * `castTelegraphFill` — the same wedge, BRIGHT, its radius scaling `0 → 1` across
+   *     the cast. This is WHEN: full means now. The hard boundary between the two tones
+   *     is the moving edge, which is the construction the giant-slam note above already
+   *     records as *"a strictly better hitbox indicator than a borderless flat disc"*.
+   *   * `castTelegraphRim` — the footprint again through `wedgeGradientTex`, whose UV.y
+   *     ramp puts its brightness at the RIM. That outer line is the danger boundary,
+   *     i.e. the single line a dodging player is actually reading, and it brightens as
+   *     the resolve approaches.
+   *
+   * ── The colour, checked against this file's own contract ──────────────────────
+   *
+   * Weapon colour `c`, floor `#8A5F6F` (`arena/shared.ts`, HSL L 0.457), cast L 0.302.
+   * For `waterbottle.Mega`'s `#1E90D8`, mixed in sRGB (`mixSRGB` / `scaleSRGB` — see
+   * their note for why `Color.lerp` is the wrong tool and what it rendered):
+   *
+   *     base   scaleSRGB(c, 0.26)     #081F38   L 0.125   composited 0.67a -> 0.234
+   *     fill   mixSRGB(c, WHITE 0.22) #4FA8E1   L 0.596   vs cast +0.294
+   *     rim    mixSRGB(c, WHITE 0.60) #A5D3EF   L 0.792   vs cast +0.490
+   *
+   * Rule 1 (transient clears the cast by >= 0.15 UPWARD) holds on fill and rim; the
+   * ground-mark form of rule 3 (clear the FLOOR by >= 0.10 DOWNWARD) holds on the base,
+   * at 0.223. Base-to-fill separation is 0.47 of luma, which is what makes the two-tone
+   * read survive any floor it is drawn on rather than only this one.
+   *
+   * ⚠️ And the direction is deliberate against `DECISIONS §73`: the cast's own hue band
+   * is WARM (358), the telegraph is COOL (205 for Mega). It cannot compete with the
+   * characters for figure/ground because it is on the other side of the wheel — which
+   * is the opposite of what a warm telegraph would do to `topCellsInCastBand`.
+   *
+   * ── The clock this runs on ────────────────────────────────────────────────────
+   *
+   * `updateEffects`'s dt, i.e. the one that deliberately does NOT slow during hit-stop,
+   * exactly like every other one-shot here. The sim's `resolvesAt` is on `state.elapsed`,
+   * which hit-stop DOES trickle, so a hit-stop landing inside a cast lets the drawn bar
+   * finish marginally before the blow does. That is a known, bounded drift and it is
+   * accepted rather than plumbed: the alternative is a second statement of "when does
+   * this cast end", one in the sim and one here, and this project's five worst AI bugs
+   * all had that exact shape. The tail below (`TELEGRAPH_TAIL_S`) exists so the drift
+   * shows up as a brief overlap with the melee arc rather than as a gap.
+   */
+  spawnCastTelegraph(
+    fighterId: FighterId,
+    xWU: number,
+    yWU: number,
+    facing: Vec2,
+    weapon: Weapon,
+    characterId: CharacterId,
+    castMs: number,
+  ): void {
+    if (!(castMs > 0)) return;
+    const rangeWU = weapon.range ?? 0;
+    if (!(rangeWU > 0)) return;
+    bumpVfxQaCount('castTelegraph');
+
+    // The sim refuses a press while `cast !== null`, so a second `cast-started` for a
+    // fighter already casting cannot happen in a real match. The renderer must not
+    // depend on that anyway: a QA driver fires these directly, and a restart replays.
+    this.cancelCastTelegraph(fighterId, 'resolved');
+
+    const origin = groundPos(xWU, yWU);
+    // A melee cast's footprint IS its cone. A ranged one's is its spread lane — using
+    // the melee default of 360 there would draw a disc the size of the weapon's whole
+    // travel range and claim the caster threatens all of it, which is a lie about the
+    // hitbox and the exact information-free wash the giant-slam note above measured at
+    // 73% of the frame. Phase 1 ships no ranged `castMs` (a projectile is already
+    // dodgeable in flight), so this branch is measured but unexercised by the roster.
+    const coneDeg = weapon.type === 'melee' ? (weapon.cone ?? 360) : Math.max(12, weapon.spreadDeg ?? 18);
+    const radiusM = wu(rangeWU);
+
+    // ── The one case where the generic footprint STANDS DOWN ────────────────────
+    //
+    // Exactly the arbitration `spawnWeaponCast` already makes for the melee wedge, and
+    // for a stronger reason: a wind-up lasts FOUR TO FIVE TIMES longer than the wedge.
+    //
+    // Measured on `lollipop.Giant` (`REACH.ultimateSlam` 400 wu, 360 deg) at castMs
+    // 1500, 800x450 readback, `tools/tmp/tg_tele.mjs`: **259,315 px — 64.0% of the
+    // frame — held for the whole 1.5 s, 15 of 16 slices above 259,000.** The wedge's
+    // own 0.3 s version of that shape is already on record two functions below at
+    // 262,797 px / 73.0% and is described there as *"information-free wash that erases
+    // the arena the player is trying to read"*. This would be the same defect, five
+    // times longer, on the frame the player most needs to read.
+    //
+    // And it would not even be a telegraph. 400 wu is twice the radius the camera
+    // guarantees is visible (`render/camera.ts`), so the footprint has NO EDGE ON
+    // SCREEN — the one line a dodging player is actually reading is off frame by
+    // construction, and 360 degrees means it has no direction either. A shape with no
+    // edge and no direction cannot tell anyone where to run.
+    //
+    // 🚨 SO A `giantSlam` GETS ITS TELEGRAPH FROM ITS BESPOKE `telegraph()` HOOK OR NOT
+    // AT ALL, and today `lollipop.Giant` has no such hook, so it gets nothing. That is
+    // a deliberate, measured refusal rather than a wash — and it is a gap someone must
+    // close before any `giantSlam` ships a `castMs`. The right shape for it is NOT the
+    // hitbox: the escapable band for Giant starts at `400 - 105.60 x 1.5 = 241.6 wu`
+    // (slowest human speed), i.e. inside 241.6 wu running does not help and outside it
+    // does — THAT boundary is the actionable line, and it is a different circle from
+    // the one this function draws. Routed rather than guessed at.
+    const bespokeTelegraph = getWeaponVfx(characterId, weapon.key)?.telegraph;
+    const genericFootprint = !(weapon.giantSlam === true);
+    if (!genericFootprint && !bespokeTelegraph) return;
+
+    const geoKey = `${Math.round(coneDeg)}_${radiusM.toFixed(3)}`;
+    let geo = this.wedgeGeoCache.get(geoKey);
+    if (!geo) {
+      geo = buildWedgeGeometry(radiusM, coneDeg);
+      this.wedgeGeoCache.set(geoKey, geo);
+    }
+
+    const c = new THREE.Color(weapon.color);
+    const rotY = Math.atan2(facing.x, facing.y);
+
+    /** One telegraph layer. `map: null` is a FLAT fill; `wedgeGradientTex` puts the
+     * brightness at the rim. Materials are owned by this telegraph and disposed with
+     * it (`__ownMat`) — three per live cast, at most `MAX_FIGHTERS` casts at once, and
+     * they cannot be shared because all three animate on independent curves. */
+    const layer = (name: string, color: THREE.Color, yOff: number, order: number, mapped: boolean): THREE.Mesh => {
+      // Same flags as the pooled melee wedge built in the constructor — `depthWrite`
+      // off (a transparent ground shape must not occlude what is behind it) with depth
+      // TESTING left on, so a fighter standing on the footprint still occludes it.
+      const mat = new THREE.MeshBasicMaterial({
+        color, map: mapped ? this.telegraphRimTex : null,
+        transparent: true, opacity: 0, depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      mat.userData.__ownMat = true;
+      const mesh = new THREE.Mesh(geo, mat);
+      // 🚨 NAMED. An unnamed mesh is invisible to every diagnostic in this repo —
+      // ablation, part maps and the coverage probes all key on `name`.
+      mesh.name = name;
+      mesh.rotation.y = rotY;
+      mesh.position.set(0, yOff, 0);
+      mesh.renderOrder = order;
+      return mesh;
+    };
+
+    const group = new THREE.Group();
+    group.name = 'castTelegraph';
+    group.position.set(origin.x, GROUND_VFX_Y, origin.z);
+
+    // `null` for a `giantSlam` — see the stand-down block above. The group still
+    // exists, empty, because it is the CANCEL ANCHOR: `cancelCastTelegraph` finds the
+    // bespoke half through this fighter's entry, and a `giantSlam` with a bespoke hook
+    // and no generic footprint must still be interruptible.
+    // ⚠️ The white-mix numbers came DOWN after the first rendered sheet. `lerp(WHITE,
+    // 0.45)` on the fill plus a full-radius near-white rim produced one pale film — and
+    // "do not fix anything by desaturating" is falsified four times in this project.
+    // The fill stays SATURATED (0.22 toward white is enough to clear the cast's luma by
+    // 0.15) and the value contrast is carried by the dark base underneath it instead.
+    const base = genericFootprint ? layer('castTelegraphBase', scaleSRGB(c, 0.26), 0, 5, false) : null;
+    const fill = genericFootprint ? layer('castTelegraphFill', mixSRGB(c, WHITE, 0.22), 0.012, 5.01, false) : null;
+    const rim = genericFootprint ? layer('castTelegraphRim', mixSRGB(c, WHITE, 0.60), 0.024, 5.02, true) : null;
+    if (base && fill && rim) group.add(base, fill, rim);
+
+    const castSec = castMs / 1000;
+    const baseMat = base?.material as THREE.MeshBasicMaterial | undefined;
+    const fillMat = fill?.material as THREE.MeshBasicMaterial | undefined;
+    const rimMat = rim?.material as THREE.MeshBasicMaterial | undefined;
+
+    this.castTelegraphs.set(fighterId, group);
+    const drive = (_p: number, elapsed: number): void => {
+      if (!base || !fill || !rim || !baseMat || !fillMat || !rimMat) return;
+      const t = THREE.MathUtils.clamp(elapsed / castSec, 0, 1);
+      // Tail: after the resolve instant the whole thing ramps out under the melee arc
+      // that `weapon-fired` just spawned, instead of popping off a frame before it.
+      const out = elapsed <= castSec ? 1 : Math.max(0, 1 - (elapsed - castSec) / TELEGRAPH_TAIL_S);
+      // A heartbeat that ACCELERATES. Frequency is expressed in cycles-of-the-whole-
+      // cast, not in Hz, so the same curve reads identically at 1100 ms and at 1500 —
+      // a fixed-Hz pulse would give the two shipped cast lengths different urgency for
+      // no design reason.
+      const beat = 0.5 + 0.5 * Math.sin(Math.PI * 2 * (2 * t + 3 * t * t));
+      baseMat.opacity = (0.60 + 0.14 * beat) * out;
+      // The fill never starts at literally zero area: a telegraph whose first 100 ms
+      // deliver a few pixels is the invisible-sculpt failure with a good peak, which is
+      // the standing finding this whole effect is measured against.
+      const s = 0.10 + 0.90 * t;
+      fill.scale.set(s, 1, s);
+      fillMat.opacity = (0.70 + 0.22 * t) * out;
+      rimMat.opacity = (0.62 + 0.36 * t * t) * out;
+    };
+    // 🚨 DRIVEN ONCE AT SPAWN, BEFORE ANYTHING RENDERS. Every layer is built at
+    // `opacity: 0` and only `drive()` lifts it, so a telegraph that waits for the first
+    // `updateEffects` tick is INVISIBLE FOR ITS FIRST FRAME — measured at exactly 0 px
+    // on the opening slice by `tools/tmp/tg_tele.mjs`, against 11,551 px one tick later.
+    // Whether that frame is ever rendered depends on the order `match.ts` happens to
+    // call `sync` / `updateEffects` / `render` in, which is not this file's to know and
+    // not a thing to depend on. One frame of a 1100 ms wind-up is small; a telegraph
+    // whose correctness depends on a call order in a file owned by someone else is not.
+    drive(0, 0);
+    this.spawnTransientObject(group, castSec + TELEGRAPH_TAIL_S, drive, fighterId);
+
+    if (!bespokeTelegraph) return;
+    const ctx: WeaponVfxCtx = {
+      THREE,
+      position: new THREE.Vector3(origin.x, CAST_HEIGHT, origin.z),
+      direction: new THREE.Vector3(facing.x, 0, facing.y).normalize(),
+      color: weapon.color,
+      damage: weapon.damage,
+      weapon,
+      characterId,
+      castMs,
+      // Everything the hook spawns is TAGGED WITH THE CASTER, so `cancelCastTelegraph`
+      // tears the bespoke half down with the generic half. Without this an interrupted
+      // cast would keep its gathering beats animating over a corpse.
+      spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate, fighterId),
+    };
+    bespokeTelegraph(ctx);
+  }
+
+  /**
+   * Tear a live cast telegraph down.
+   *
+   * `'resolved'` removes it immediately — `weapon-fired` has already fired the melee
+   * arc, and two ground shapes at the same instant is the over-paint this file's
+   * `spawnWeaponCast` note exists to prevent.
+   *
+   * `'stun'` / `'death'` are the INTERRUPT, and it gets its own read: the bespoke
+   * gathering beats stop dead (that is what being interrupted looks like) while the
+   * ground footprint craters inward over `TELEGRAPH_FIZZLE_S`. The player who landed
+   * the stun has to be able to see that they landed it — the measured design decision
+   * behind this feature is that an applied stun, and only an applied stun, cancels
+   * (880 matches, 1171 press opportunities: "any damage cancels" leaves 24.8% of
+   * ultimates alive at 900 ms against stun-only's 84.1%), and a counter nobody can see
+   * work is not counterplay.
+   */
+  cancelCastTelegraph(fighterId: FighterId, reason: 'stun' | 'death' | 'resolved'): void {
+    const group = this.castTelegraphs.get(fighterId);
+    if (!group) return;
+    this.castTelegraphs.delete(fighterId);
+
+    for (let i = this.transientEffects.length - 1; i >= 0; i--) {
+      const eff = this.transientEffects[i];
+      if (eff.telegraphOwner !== fighterId) continue;
+      if (eff.object === group && reason !== 'resolved') {
+        // Retime IN PLACE rather than respawning: a fresh transient would restart
+        // `elapsed` at 0 and the collapse would read as a second, different effect.
+        const start = eff.life;
+        // Snapshot the opacities the telegraph had reached. Multiplying the LIVE
+        // opacity by a decay every frame compounds — it would be gone in three ticks
+        // and the interrupt would read as a pop, not as a collapse.
+        const held = group.children.map((child) => ((child as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity);
+        eff.maxLife = start + TELEGRAPH_FIZZLE_S;
+        eff.onUpdate = (_p, elapsed) => {
+          const k = THREE.MathUtils.clamp((elapsed - start) / TELEGRAPH_FIZZLE_S, 0, 1);
+          const shrink = Math.max(0.001, 1 - k);
+          group.scale.set(shrink, 1, shrink);
+          for (let j = 0; j < group.children.length; j++) {
+            const m = (group.children[j] as THREE.Mesh).material as THREE.MeshBasicMaterial;
+            m.opacity = held[j] * (1 - k);
+          }
+        };
+        continue;
+      }
+      this.group.remove(eff.object);
+      disposeOwnedMaterials(eff.object);
+      this.transientEffects.splice(i, 1);
+    }
+  }
 
   /**
    * EVERYTHING one `weapon-fired` event draws, arbitrated in ONE place.
@@ -3562,8 +4011,14 @@ export class VfxLayer {
     // bespoke `impact()`/`cast()` hook is exactly the kind of stale VFX this method
     // exists to drop; see `lastSyncElapsedMs`'s own reset just below for why the
     // sim-time-delta tracking resets here too.
-    for (const eff of this.transientEffects) this.group.remove(eff.object);
+    for (const eff of this.transientEffects) {
+      this.group.remove(eff.object);
+      disposeOwnedMaterials(eff.object);
+    }
     this.transientEffects.length = 0;
+    // Cleared AFTER the loop above, which is where the meshes actually leave the scene:
+    // this map is an index into `transientEffects`, not a second owner of anything.
+    this.castTelegraphs.clear();
     this.lastSyncElapsedMs = 0;
     for (let slot = 0; slot < this.statusBySlot.length; slot++) {
       const vis = this.statusBySlot[slot];
@@ -3618,6 +4073,7 @@ export class VfxLayer {
     this.streakTex.dispose();
     this.shardTex.dispose();
     this.wedgeGradientTex.dispose();
+    this.telegraphRimTex.dispose();
     for (const p of this.particles) p.mat.dispose();
     for (const w of this.wedges) w.mat.dispose();
     for (const r of this.rings) r.mat.dispose();
