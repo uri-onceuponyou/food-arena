@@ -5085,3 +5085,75 @@ Four things, and the fourth is the one with a trap in it:
    is the "shows a number the model does not compute" class**, which this repo has now paid
    for four separate times (the stat card, the rarity ramp, the shop's *"Epic or better"*,
    and 20 of 34 weapon descriptions). **Say what state each seat is in, honestly.**
+
+---
+
+## 75. ✅ ANSWERED — the status LOCK, and movement speed. Both from playing, both measured.
+
+**Uri, 2026-08-12, after playing the new schedule:**
+
+  > *"All characters are moving too fast, and the cooldown of the weapons is too short, so if
+  > you slow down or stun someone, you essentially lock him to place since you can continue to
+  > fire at him and redo the cast."*
+
+### The measurement — he is right, and it is worse than "too short"
+
+A shrug-off guard **does** exist (`combat.ts:statusReadyAt`, `STUN_GRACE_MS`/`SLOW_GRACE_MS` = 500).
+It is far too short against the effect it guards. Locked share = `duration / (ceil((duration +
+grace) / cooldown) * cooldown)`:
+
+| weapon | cd | effect | **locked** |
+|---|---|---|---|
+| **Noodle** | 1000 | slow | **83.3%** |
+| Tomato | 800 | slow | 78.1% |
+| **Cheese** | 1300 | stun | **76.9%** |
+| Roll | 1400 | stun | 71.4% |
+| Glass / Lettuce | 1100 | stun | 60.6% |
+
+**Stun is movement locked to 0**, so Cheese holds a target at zero movement for **77% of a fight**.
+
+🚨 **THREE FINDINGS THAT MAKE "JUST LENGTHEN THE COOLDOWNS" THE WRONG FIX:**
+
+1. **The duty cycle is a SAWTOOTH in cooldown, so a LONGER cooldown can be WORSE.** Cheese at
+   **1300 ms locks 76.9%** while Glass at **1100 ms locks 60.6%** — 2×1300 lands just past the
+   2500 ms guard, while 3×1100 overshoots it by 800. **Tuning cooldowns could silently worsen the
+   exact thing being reported**, and nothing in the repo would have shown it.
+2. **`statusReadyAt` is PER-EFFECT** — slow immunity and stun immunity are independent timers, so
+   a character carrying one of each runs **both locks at once** and neither grace protects against
+   the other.
+3. **`Noodle`'s 1000 ms cooldown divides the 3000 ms cycle EXACTLY**, so it re-applies on the
+   frame the guard opens, indefinitely. That is not a tuning miss; it is a resonance.
+
+### The two answers
+
+**(a) DIMINISHING RETURNS**, not a longer grace and not shorter effects. Each re-application
+within a window is weaker than the last — **100% / 50% / 25% / immune**, the genre standard.
+Chosen because it is **the only option that cannot be defeated by a cooldown that happens to
+divide the cycle** — the other two leave the resonance in place and only lower its ceiling.
+Being chain-targeted still hurts, but it always ends, and the counterplay is legible.
+
+**(b) `PLAYER_SPEED` 120 → 90 wu/s (−25%).** At 120 a fighter **closes maximum weapon range
+(140 wu) in 1.17 s** and mid range in 0.83 s, so ranged weapons barely get to be ranged; you cross
+your own 42 wu body in 0.35 s, which is the twitchiness he is describing. At 90: max range 1.56 s,
+mid 1.11 s, map crossing 23 s → 31 s — **which the 150 s clock (§72) now easily affords, and did
+not before.**
+
+### ⚠️ What implementing this must not get wrong
+
+* **It needs per-fighter, per-effect application state**, so it lands in `state.ts:Fighter` beside
+  `status`, **never on the shared `Weapon` records** — `CHARACTERS` is a module-level `Record` and
+  `ai.ts:PRESS_VALUE` keys on Weapon **object identity**, so weapon objects are process-wide
+  singletons. `Fighter.lastUsed[]` and `Fighter.cast` are the precedents.
+* It must be **a real own enumerable property initialised in `createFighter()`**, not `undefined`
+  and not a getter — `conceal_lab --bitid` walks state with `Object.keys`/spread and an accessor
+  is silently dropped from the differ.
+* **This is a nerf to every status weapon**, and the roster range is **9.8 pp**. Measure aggregate
+  and paired **separately** (aggregate floor ~9 pp; a paired per-matchup delta on identical seeds
+  is EXACT — once an aggregate moved 0.8 pp while **58 of 110 matchups moved, max 34.4 pp**).
+* ⚠️ **`AI_SLOW_MULTIPLIER` (0.35) is harsher than `SLOW_MOVE_MULTIPLIER` (0.45)** — a slowed bot
+  is slowed *more* than a slowed player. Diminishing returns must apply to both or the asymmetry
+  compounds.
+* The player must be able to **see** the rule: `statusReadyAt`'s own header says it is exported so
+  the HUD can render the shrug-off window, because *"a player who cannot see the rule cannot learn
+  it."* Diminishing returns needs the same treatment — otherwise it is invisible and reads as
+  inconsistency.
