@@ -4958,3 +4958,60 @@ seeds is EXACT).
 ⚠️ And a third, which is a *benefit*: `minSafeRadiusFor(N)` and the whole scaled-ring pass become
 **live for the first time**, which closes `STATE.md` correction 10's *"§4 item 2 and this row
 cannot both be live"* in the direction that keeps both.
+
+---
+
+## 73. ❓ THE ARENA'S WARM PROBLEM IS FIXED — and the fix landed in the ONE PLACE the contract reserves for the cast
+
+`arena-scan` was re-baselined at `072f245` (`43932ce`). The old baseline was pinned to `36ee0a6`,
+**61 commits before the ×4 map**, so for a day it compared the 2800×2000 arena against a 1400×1000
+one. On the real map:
+
+| rail | 36ee0a6 (1× map) | 072f245 (×4 map) | |
+|---|---|---|---|
+| **warm chroma** | 0.0596 **FAIL** | **0.0823 PASS** | the one rail that was out of contract |
+| arena-only warm | 0.0580 **WARN** | **0.0828 PASS** | |
+| cool chroma | 0.4077 (19% over target) | 0.3856 (12% over) | moved *toward* target |
+| warm share | 0.1258 | 0.1735 | was 0.006 above its floor; now 0.054 |
+
+**All 11 rails now pass — the first time `--gate` has fired on nothing.** Floor first: four
+independent sweeps of the same commit spread **0.0002** on warm chroma, so +0.0227 is **114× the
+noise**. This is real.
+
+**⚠️ But the warm went into the ENVIRONMENT, and the contract reserves warm for the CAST.**
+
+| | 36ee0a6 | 072f245 |
+|---|---|---|
+| loudest non-player cells wearing the cast's own hue | **30%** | **65%** |
+| env chroma sitting in the cast's hue band | 0.1198 | 0.1700 |
+| cast↔env hue separation | 133.5° | **97.1°** |
+
+65% reproduced on three separate sweeps, so it is not noise. In the frames it is the large **yellow
+counter tops at hue ~50°** — the burger's own dominant hue bin. `995ea7d` deliberately bought this
+number *down* (37% → 24%) by moving the gold trim, plank pads, floor grime and pot stack out of that
+band, and gained 10 places of player salience doing it. **The ×4 map has spent much of that back.**
+Every rail still PASSES, so **nothing gates it** and no future run will mention it.
+
+### The call, and it is a real trade because the two goods are the SAME PIXELS
+
+The warm that fixed the rail *is* the warm sitting in the hero's hue band. You cannot simply have
+both. Three options, cheapest first:
+
+1. **Leave it.** Every rail passes and the arena reads bright and warm. Cost: the hero competes with
+   his own background — the exact defect `995ea7d` was written to remove.
+2. **Shift the counter tops off 0–60°** (toward the cream/steel end, or cooler). Recovers the
+   separation; likely pushes warm chroma back down toward the 0.0725 floor it just cleared.
+3. **Re-spend the warm on things the contract *does* reserve it for** — hazards, pickups, the danger
+   ring — and vacate the large flat surfaces. Most work, and the only option that plausibly keeps
+   both numbers.
+
+**A note that may change how you weigh this:** the 0.145 warm target the rail chases is a **mean
+pulled up by a single plate**. Per-plate warm chroma runs 0.017 · 0.022 · 0.065 · 0.079 · 0.079 ·
+0.095 · 0.115 · 0.135 · 0.171 · 0.213 · **0.603**. The **median is 0.0950**, and our 0.0823 is
+**87% of it** with 5 of the 11 plates now *below* us. By the median we are essentially there, which
+makes option 2 or 3 cheaper than the 0.145 figure suggests — **and raises a second, smaller
+question: should the warm band be rebuilt on the median rather than the mean?** That is a one-line
+change to `RAILS` in `tools/arena-scan.mjs`, and it would move the floor from 0.0725 to ~0.0475.
+
+*No agent should act on this without your read — options 2 and 3 both spend the rail that just came
+into contract for the first time.*
