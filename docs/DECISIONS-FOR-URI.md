@@ -5015,3 +5015,73 @@ change to `RAILS` in `tools/arena-scan.mjs`, and it would move the floor from 0.
 
 *No agent should act on this without your read — options 2 and 3 both spend the rail that just came
 into contract for the first time.*
+
+---
+
+## 74. ✅ ANSWERED — §33 the phone, and §66 the six-player lobby
+
+**Both answered by Uri on 2026-08-12.**
+
+### §33 — the device, and the first real number this project has ever had for it
+
+**iPhone 15 Pro · iOS 26.5.2.** Two Safari captures supplied, in
+`reference/video/` (**gitignored — never commit, never `git add -f`**), one from
+**2026-08-11** and one from **2026-08-12** *after* the phone pass and the fog schedule.
+Same device, same recorder, same 384×848 portrait pipeline — so they are **paired**.
+
+Measured with `tools/tmp/vid_frames.mjs` (frame timing straight out of the MP4 `stts`
+table; no ffmpeg on this machine, no pixel decoding):
+
+| | 2026-08-11 | 2026-08-12 |
+|---|---|---|
+| delivered | 48.86 fps | **53.04 fps** |
+| p99 frame interval | 50.00 ms | **33.33 ms** |
+| **max frame interval** | **618.33 ms** | **33.33 ms** |
+| severe stalls (>3.5× median) | 5 (0.43%) | **0** |
+| time lost to stalls | 18.57% | **11.65%** |
+
+🚨 **The headline is the MAX, not the mean.** A **618 ms** frame is over half a second of
+frozen screen. In the new capture **max == p99 == 33.33 ms**: not one frame in 1,002
+exceeded two display intervals. That is a *ceiling*, which is a far stronger statement
+than an average, and it is what "smooth" means to a player.
+
+⚠️ **THE INSTRUMENT IS ONE-SIDED BY CONSTRUCTION AND MUST BE QUOTED THAT WAY.** It reads
+the **capture pipeline**, not the render loop. A long interval proves *something* stalled.
+A short one does **not** prove the app rendered every frame — iOS records the display, so
+an app running at 30 fps under a 60 Hz recorder writes duplicate frames this never sees.
+**It can prove jank; it cannot prove smoothness.**
+
+⚠️ And this **does not validate the −47.9% main-thread figure**, which remains desktop
+Chromium under SwiftShader (`§62`, against a ±0.71 ms floor). Different quantity, different
+engine, different machine. What it does establish is that **the device-side experience
+improved on the axis a player actually feels**, and it is the first WebKit-on-hardware
+evidence in the project.
+
+⚠️ **Both captures are PORTRAIT (384×848).** Every landscape number — the weapon tray at
+7.92% → 0.00% of guaranteed-visible arena, the clock at 13.12% → 0.49% — describes a mode
+neither capture is in. `docs/PHONE.md` §6 asked for landscape and got portrait, which is a
+finding about the ask, not about Uri: **portrait is evidently how he actually plays.**
+
+### §66 — the six-player lobby. **The default is withdrawn; build the affordance.**
+
+The row above said *"stays behind `?fighters=` and no player can reach it"*. Uri's answer:
+
+  > *"We need the lobby where the gameplay is set, to be able to choose how many players,
+  > and assign bots to the one who plays locally. Also wire it up to multiplayer — real
+  > users can join the game as well (from UI perspective); the actual connection to
+  > multiplayer will be done later."*
+
+Four things, and the fourth is the one with a trap in it:
+
+1. **A lobby screen** — a real place where a match is configured, not a tile that starts one.
+2. **Choose the player count** — 2–6, the range `MAX_FIGHTERS`, the payout curve and
+   `minSafeRadiusFor(N)` already span.
+3. **Bots fill the remaining seats** for the local player. `economy/levels.ts:enemyLevelFor`
+   is *"the single place Uri's answer lives"* on bot level and must stay so.
+4. 🚨 **The multiplayer join UI ships, the transport does not.** `src/net/` is built and
+   inert — wire codec, delta compression 7.1×, loopback host/client, 77+28+67 assertions —
+   with **no server and no session**. So the lobby must present seats that a human *could*
+   occupy without implying one *can* today. **A join affordance that silently does nothing
+   is the "shows a number the model does not compute" class**, which this repo has now paid
+   for four separate times (the stat card, the rarity ramp, the shop's *"Epic or better"*,
+   and 20 of 34 weapon descriptions). **Say what state each seat is in, honestly.**
