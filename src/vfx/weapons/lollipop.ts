@@ -629,6 +629,92 @@ function spawnGiantLollipop(ctx: WeaponVfxCtx, x: number, z: number, dirX: numbe
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Giant Lollipop — THE WIND-UP, and it is the ONLY telegraph this weapon gets
+//
+// 🚨 READ `game/vfx.ts:spawnCastTelegraph`'s stand-down block before touching this.
+// `Giant` is `giantSlam`, and the generic two-tone footprint DELIBERATELY REFUSES to
+// draw for it: at `REACH.ultimateSlam` 400 wu / 360° the hitbox measured **259,315 px
+// — 64.0% of the frame — held for the whole 1.5 s, 15 of 16 slices above 259,000**
+// (`tools/tmp/tg_tele.mjs`). That shape has no edge on screen (400 wu is twice the
+// radius the camera guarantees is visible) and no direction (360°), so it cannot tell
+// anyone where to run; it just erases the arena. That refusal left this weapon with
+// **no telegraph at all**, which the block names as a gap someone must close.
+//
+// This is that closure, and it inherits the refusal's reasoning:
+//
+//   * **The drawn footprint is NOT the hitbox, and says so.** It is the ground the
+//     giant candy `spawnGiantLollipop` actually drops at the resolve — same forward
+//     offset, same radius, derived from the same two expressions — so the wind-up
+//     points at the object that is about to appear. It UNDER-claims the danger, which
+//     is the safe direction: it reads "she is charging, here" and never "you are safe
+//     outside this line" about a hit that reaches the whole map.
+//   * **The two-tone construction is `game/vfx.ts`'s, reused rather than reinvented.**
+//     A dark base at constant area answers WHERE and guarantees the sustain floor at
+//     every slice; a bright fill scaling 0->1 answers WHEN; a rim carries the edge.
+//     That is the measured shape, at a radius the camera can actually show.
+//   * **And the card gets drawn.** *"Grows huge"* — the candy itself swells overhead
+//     across the whole wind-up, which is the one clause no footprint can say.
+//
+// 🚨 AND IT IS DORMANT TODAY — WHICH IS THE SAME FINDING FROM THE OTHER SIDE.
+// `edadf78` ("five specials, five REFUSALS") priced every remaining ultimate's wind-up
+// and shipped none, and `sim.test.mjs` now asserts *"`lollipop.Giant` has NO wind-up,
+// and the rule says why"*: its derived escape window exceeds half its own 7,000 ms
+// cooldown. With `castMs` 0 the sim never emits `cast-started`, so nothing below runs.
+// It is the drawn half, held ready and measured, against a decision that could move —
+// and it is what closes `spawnCastTelegraph`'s routed gap the day it does.
+//
+// ⚠️ STILL OPEN, and deliberately not guessed at here: `spawnCastTelegraph` routes a
+// SECOND shape — the escapable band, `range - slowestSpeed * castSec` (241.6 wu at
+// castMs 1500) — as the line a dodging player is actually reading. At 241.6 wu that
+// circle is 12.08 m, against the ~10 m the camera guarantees, so it is partly off
+// frame by construction and pricing it needs a camera-framing read this file cannot
+// do. Reported, not shipped.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The giant candy's head radius and forward offset at the resolve. Both are copied
+ * from `spawnGiantLollipop` ON PURPOSE and must move with it: the wind-up's whole
+ * claim is that it marks the ground that prop lands on. */
+const GIANT_HEAD_R = CHARACTER_HEIGHT * 0.85;  // 1.79 m radius = 3.6 m across
+const GIANT_FWD = GIANT_HEAD_R + CHARACTER_HEIGHT * 0.5;
+const GIANT_STICK_LEN = CHARACTER_HEIGHT * 1.7;
+
+/**
+ * The two-tone ramp, mixed in sRGB against `CANDY_RED` #E63946 exactly as
+ * `game/vfx.ts:spawnCastTelegraph` documents for the generic footprint — `scaleSRGB(c,
+ * 0.26)` for the base, `mixSRGB(c, WHITE, 0.22)` for the fill, `0.60` for the rim.
+ * Written out as literals because those two helpers are private to `game/vfx.ts`;
+ * the ARITHMETIC is theirs, so this weapon's telegraph sits on the same luma ladder
+ * as every other one rather than on a hand-picked pair.
+ *
+ * ⚠️ The white-mix numbers are the ones `game/vfx.ts` ALREADY came down to after its
+ * first rendered sheet: a heavier mix produced one pale film, and *"do not fix
+ * anything by desaturating"* is falsified four times in this project.
+ */
+const TELE_BASE = '#3C0F12';
+const TELE_FILL = '#EC656F';
+const TELE_RIM = '#F5B0B5';
+
+/** Dedicated pools — one user each per gesture, so nothing here can round-robin onto
+ * a live material the way `waterbottle.ts` records its bottles' fill doing. */
+const nextTeleBaseMat = materialPool(2, () => new THREE.MeshBasicMaterial({
+  map: aoeFillTex, color: TELE_BASE, transparent: true, opacity: 0, depthWrite: false,
+}));
+const nextTeleFillMat = materialPool(2, () => new THREE.MeshBasicMaterial({
+  map: aoeFillTex, color: TELE_FILL, transparent: true, opacity: 0, depthWrite: false,
+}));
+const nextTeleRimMat = materialPool(2, () => new THREE.MeshBasicMaterial({
+  map: edgeRingTex, color: TELE_RIM, transparent: true, opacity: 0, depthWrite: false,
+}));
+const nextTeleHeadMat = materialPool(2, () => new THREE.MeshBasicMaterial({
+  color: CANDY_WHITE, transparent: true, opacity: 1, depthWrite: false,
+}));
+const nextTeleHeadSwirlMat = materialPool(2, () => new THREE.MeshBasicMaterial({
+  map: swirlTex, color: CANDY_RED, transparent: true, opacity: 0.95, depthWrite: false,
+}));
+const nextTeleStickMat = materialPool(2, () => new THREE.MeshBasicMaterial({
+  color: '#FBF7EE', transparent: true, opacity: 1, depthWrite: false,
+}));
+
 export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
   /**
    * Lollipop Smash — she swings herself like a hammer. The cast is the candy head
@@ -858,6 +944,147 @@ export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
 
       // ── Epicentre bonus: the giant lollipop itself ───────────────────────────
       spawnGiantLollipop(ctx, x, z, ctx.direction.x, ctx.direction.z);
+    },
+
+    /**
+     * GIANT LOLLIPOP — the wind-up. See the block above this export for why this is
+     * the only telegraph the weapon has and why its footprint is the PROP's, not the
+     * hitbox's.
+     *
+     * ── The beats, as fractions of `castMs` ───────────────────────────────────
+     *
+     *     0.00 - 1.00   THE CLOCK   the bright fill sweeps 0.12 -> 1.0 of the base
+     *                               disc; full means now. Constant-area dark base
+     *                               underneath, so every 100 ms slice has area.
+     *     0.00 - 0.78   GROWS HUGE  the candy swells 0.28 -> 1.0 of the head it
+     *                               lands at, rising and spinning up
+     *     0.78 - 1.00   THE RAISE   it lifts and cocks back for the drop
+     *
+     * ⚠️ Everything is a fraction of `ctx.castMs`, never a fixed number of seconds:
+     * `castMs` is per weapon and a hook that hard-codes "0.3 s of rising" is silently
+     * wrong the moment anything retunes it.
+     */
+    telegraph(ctx) {
+      const T = ctx.THREE;
+      const castSec = Math.max(0.2, (ctx.castMs ?? 1500) / 1000);
+
+      const root = new T.Group();
+      root.name = 'teleLolliRoot';
+      const feet = ctx.position.clone();
+      feet.y -= CHARACTER_HEIGHT * 0.55; // `ctx.position` arrives at muzzle height
+      root.position.copy(feet);
+      root.rotation.y = Math.atan2(ctx.direction.x, ctx.direction.z);
+
+      // ── The ground half: `game/vfx.ts`'s two-tone footprint at the prop's radius.
+      const baseMat = nextTeleBaseMat();
+      const base = new T.Mesh(unitDiscGeo, baseMat);
+      base.name = 'teleLolliBase';
+      base.scale.setScalar(GIANT_HEAD_R);
+      base.position.set(0, 0.02, GIANT_FWD);
+      base.renderOrder = 5;
+      root.add(base);
+
+      const fillMat = nextTeleFillMat();
+      const fill = new T.Mesh(unitDiscGeo, fillMat);
+      fill.name = 'teleLolliFill';
+      fill.position.set(0, 0.032, GIANT_FWD);
+      fill.renderOrder = 5.01;
+      root.add(fill);
+
+      const rimMat = nextTeleRimMat();
+      const rim = new T.Mesh(unitDiscGeo, rimMat);
+      rim.name = 'teleLolliRim';
+      rim.scale.setScalar(GIANT_HEAD_R * 1.06);
+      rim.position.set(0, 0.044, GIANT_FWD);
+      rim.renderOrder = 5.02;
+      root.add(rim);
+
+      // ── The card's own clause: it GROWS. ────────────────────────────────────
+      const candy = new T.Group();
+      candy.name = 'teleLolliCandy';
+      root.add(candy);
+
+      const headMat = nextTeleHeadMat();
+      const head = new T.Mesh(giantHeadGeo, headMat);
+      head.name = 'teleLolliHead';
+      head.scale.set(GIANT_HEAD_R, 1, GIANT_HEAD_R);
+      candy.add(head);
+
+      const swirlMat = nextTeleHeadSwirlMat();
+      const swirl = new T.Mesh(unitDiscGeo, swirlMat);
+      swirl.name = 'teleLolliSwirl';
+      swirl.scale.setScalar(GIANT_HEAD_R * 0.99);
+      swirl.position.y = 0.13;
+      swirl.renderOrder = 13;
+      candy.add(swirl);
+
+      const stickMat = nextTeleStickMat();
+      const stick = new T.Mesh(giantStickGeo, stickMat);
+      stick.name = 'teleLolliStick';
+      stick.scale.set(1, GIANT_STICK_LEN, 1);
+      // `giantStickGeo` is a +Y cylinder; rotating -90° about X sends +Y to -Z, i.e.
+      // lays the stick down pointing BEHIND her, the same way `spawnGiantLollipop`
+      // lays it at the resolve. A quaternion is only needed when the axis is
+      // arbitrary (as it is there, in world space); inside this yawed root it is not.
+      stick.rotation.x = -Math.PI / 2;
+      stick.position.z = -(GIANT_HEAD_R + GIANT_STICK_LEN * 0.5) * 0.92;
+      candy.add(stick);
+
+      const beat = (t: number, a: number, b: number): number => {
+        const k = T.MathUtils.clamp((t - a) / (b - a), 0, 1);
+        return k * k * (3 - 2 * k);
+      };
+
+      const drive = (_p: number, elapsed: number): void => {
+        const t = T.MathUtils.clamp(elapsed / castSec, 0, 1);
+        const grow = beat(t, 0.0, 0.78);
+        const raise = beat(t, 0.78, 1.0);
+
+        // ── THE CLOCK ────────────────────────────────────────────────────────
+        // A heartbeat that ACCELERATES, expressed in cycles-of-the-whole-cast rather
+        // than in Hz — the same curve `game/vfx.ts` uses, so 1100 ms and 1500 ms read
+        // with identical urgency instead of differing for no design reason.
+        const pulse = 0.5 + 0.5 * Math.sin(Math.PI * 2 * (2 * t + 3 * t * t));
+        baseMat.opacity = 0.60 + 0.14 * pulse;
+        // Never literally zero area: a first slice worth a few pixels is the
+        // invisible-sculpt failure wearing a good peak.
+        const s = GIANT_HEAD_R * (0.12 + 0.88 * t);
+        fill.scale.setScalar(s);
+        fillMat.opacity = 0.70 + 0.22 * t;
+        rimMat.opacity = 0.62 + 0.36 * t * t;
+
+        // ── GROWS HUGE ───────────────────────────────────────────────────────
+        const g = 0.28 + 0.72 * grow;
+        candy.scale.setScalar(g);
+        // Rides above the ground mark it is about to fall onto, so the two halves of
+        // the telegraph are visibly the same event. Held inside ~2 character heights
+        // of her: at 58° vertical distance becomes screen distance fast, and
+        // `waterbottle.ts` records a beat that strayed further reading as an
+        // unrelated object floating over the arena.
+        candy.position.set(
+          0,
+          CHARACTER_HEIGHT * (0.55 + 1.05 * grow + 0.55 * raise),
+          GIANT_FWD * (0.35 + 0.65 * grow) - GIANT_STICK_LEN * 0.10 * raise,
+        );
+        // A YAW, not a tumble: the head is a flat disc and its swirl is the read, so
+        // spinning it about world up keeps the face presented at 58°. Accelerates
+        // into the raise, which is the "about to come down" cue.
+        candy.rotation.y = t * (2.2 + 5.5 * t);
+        // ...and it tilts back as she cocks it, which is the only frame that says
+        // DOWNWARD is next.
+        candy.rotation.x = -0.55 * raise;
+
+        const outline = 0.85 + 0.15 * pulse;
+        headMat.opacity = outline;
+        stickMat.opacity = outline;
+        swirlMat.opacity = 0.95 * outline;
+      };
+
+      // Posed before the layer sees it — the meshes are built at their authoring
+      // transform, and whether the first `updateEffects` tick beats the first
+      // `render` is a `match.ts` call-order detail this file must not depend on.
+      drive(0, 0);
+      ctx.spawnTransient(root, castSec + 0.06, drive);
     },
 
     /**

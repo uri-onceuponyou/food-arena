@@ -972,6 +972,79 @@ function tossCast(ctx: WeaponVfxCtx, kinds: Array<'meat' | 'lettuce' | 'tomato' 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Double Toss — THE WIND-UP
+//
+// 🚨 THIS HOOK IS DORMANT TODAY, AND THAT IS A DELIBERATE, MEASURED DECISION IN
+// `rules.ts` — NOT AN OVERSIGHT AND NOT A BUG TO "FIX" BY ADDING A `castMs`.
+//
+// `game/vfx.ts:spawnCastTelegraph` returns immediately on `!(castMs > 0)`, and the
+// sim only emits `cast-started` for a weapon that has one. `edadf78` ("five specials,
+// five REFUSALS") priced all five remaining ultimates and shipped **zero** of them:
+// `waterbottle.Mega` is still the only weapon in the roster with a `castMs`. Read the
+// refusal blocks in `rules.ts` before touching that — Soup's was derived, implemented,
+// measured on 3,520 paired matches, and reverted because it took a character from
+// 50.3% to **0.6%**.
+//
+// So this draw is READY, MEASURED AND UNREACHED. It costs nothing while dormant (the
+// hook is simply never called) and it is what appears the moment a `castMs` is ever
+// justified for this weapon. Measured at the shipped match pitch of 58 through
+// `tools/tmp/tg_tele.mjs`, driven at 1100 ms through the QA path.
+//
+// Follows `vfx/weapons/waterbottle.ts`'s `Mega` conversion exactly (read its header
+// first): one root group, one `onUpdate`, every TIME a fraction of `ctx.castMs` and
+// every SIZE a fraction of `CHARACTER_HEIGHT`.
+//
+// ⚠️ SIZE IS THE FAILURE MODE, NOT HUE. The standing finding this is measured against
+// is a bespoke sculpt delivering **36 px against the generic path's 686** at a
+// perfectly respectable 18.8° of hue, and `waterbottle.ts` records the same class
+// twice more (a cast beat at 21 delivered px, an impact at 264) — every one of them
+// authored against a PROJECTILE radius. So the charged payloads below are sized in
+// `CHARACTER_HEIGHT`, not in `MEAT_R`/`ONION_R`: `buildFillingClump` at scale 1 spans
+// ~0.62 m, which is right for a thing in flight and far too small for a 2.5 s wind-up
+// that has to be legible at every 100 ms slice of its life.
+//
+// And this weapon needs it more than the melee ultimates do. `game/vfx.ts`'s generic
+// footprint for a RANGED cast is the spread LANE, not a cone: at `rangedLong` 128 wu
+// and no `spreadDeg` (so the 18° default) that is a 6.4 m sliver, an order less area
+// than the 90-100° melee wedges. The bespoke half is most of what a player sees here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The charged payload's own unit. One of these is roughly two-thirds of a fighter's
+ * height across, so two of them either side of him read as "he is holding something
+ * heavy" rather than as two thrown-sized lumps that happen to be early. */
+const TELE_PAYLOAD = (CH * 0.83) / (MEAT_R * 2.8); // 2.82x -> ~1.74 m across at full charge
+
+/** Heat between the two hands. Additive, warm, and small — `DECISIONS §73` has warm
+ * inside the cast's own hue band, so this is a few hundred px of glow at the join and
+ * not a wash. */
+const teleSparkGeo = new THREE.SphereGeometry(CH * 0.06, 7, 6);
+/** Dedicated pool. `waterbottle.ts` records the bug this avoids: sharing one
+ * round-robin pool between two element classes of ONE gesture silently drove the
+ * bottles' fill opacity to zero, and the payoff frame was the emptiest one. Six
+ * sparks per gesture, pool of 8. */
+const nextTeleSparkMat = materialPool(8, () => fading('#FFF3D6', { blending: THREE.AdditiveBlending, opacity: 0 }));
+
+/**
+ * 🚨 NAME THE CHILDREN, NOT JUST THE GROUP — AND THIS WAS CAUGHT BY MEASUREMENT.
+ *
+ * `buildFillingClump` / `buildOnion` return a `Group` whose meshes are unnamed, which
+ * is fine for a projectile and is NOT fine here. Every diagnostic in this repo keys on
+ * `name`, and `tools/tmp/tg_tele.mjs` keys on `isMesh && name.startsWith(...)`: with
+ * the group named and its meshes not, the first run of this telegraph reported
+ * **`bs6`** — six spark meshes — for a gesture holding two whole payloads, and its
+ * ablation arm then swapped six materials out of fifteen and FAILED, reporting
+ * *"8,725 px ablated where the shipped effect painted 10,641 — the named meshes are
+ * not what is on screen."* That fault was correct: they were not.
+ *
+ * Sushi's version of the same gesture reported **`bs0`**, i.e. a bespoke telegraph
+ * that every census in this repo would have called absent while it painted 10,633 px.
+ */
+function nameParts(root: THREE.Object3D, prefix: string): void {
+  let i = 0;
+  root.traverse((c) => {
+    if ((c as THREE.Mesh).isMesh && !c.name) c.name = `${prefix}Part${i++}`;
+  });
+}
 
 export const tacoWeaponVfx: CharacterWeaponVfxMap = {
   // ── Filling Toss ───────────────────────────────────────────────────────────
@@ -1028,6 +1101,162 @@ export const tacoWeaponVfx: CharacterWeaponVfxMap = {
     // Fired ONCE per `weapon-fired` event for the whole combo (`ctx.damage` is the
     // weapon's own 0, not a part's), so this is the two-handed version: a wider
     // sweep and one of each filling going out together.
+    //
+    // ⚠️ `weapon-fired` NOW MEANS "IT RESOLVED". With a `castMs` on this weapon the
+    // sim emits it at the END of the wind-up, so this is the RELEASE — which is what
+    // a two-handed throw should be — and the wind-up is `telegraph()` below.
     cast(ctx) { tossCast(ctx, ['meat', 'onion', 'tomato'], 1.25); },
+
+    /**
+     * DOUBLE TOSS — the card, drawn: *"throws filling and onion together for massive
+     * damage"*. Two payloads, gathered, drawn back, and cocked at the exact two
+     * angles `comboParts` fires them at.
+     *
+     * ── The beats, as fractions of `castMs` ───────────────────────────────────
+     *
+     *     0.00 - 0.42   GATHER   one payload condenses in each hand, growing out of
+     *                            nothing to full charge
+     *     0.30 - 0.82   DRAW     both swing BACK behind him and up, tumbling — the
+     *                            windmill every thrower makes before a heavy throw
+     *     0.82 - 1.00   COCK     they snap forward onto the -10 / +10 fan and the
+     *                            heat between his hands goes bright
+     *
+     * The beats OVERLAP deliberately: a strictly sequential wind-up has a dead frame
+     * at every seam, and `tools/tmp/tg_tele.mjs` reports the MINIMUM 100 ms slice of
+     * the whole cast rather than the peak precisely to catch that.
+     *
+     * ── Why the angles come from `rules.ts` and not from here ─────────────────
+     *
+     * `comboParts[i].angle` is the real fan the two projectiles leave on. A telegraph
+     * that cocks them at some other pair of angles is lying about where the shot is
+     * going, and this file's whole authorised purpose is *"a telegraph you can
+     * dodge"*. `ctx.direction` is the caster's frozen facing — the sim roots a caster
+     * for the whole wind-up — so the yaw below cannot go stale mid-cast either.
+     *
+     * ── One transient, one `onUpdate` ─────────────────────────────────────────
+     *
+     * `game/vfx.ts` tears a telegraph down when the sim cancels the cast (an applied
+     * stun, or the caster dying) by removing every transient tagged with the caster.
+     * One object with one driver means an interrupt removes the gesture WHOLE,
+     * mid-beat, which is what being interrupted looks like.
+     */
+    telegraph(ctx) {
+      const T = ctx.THREE;
+      const castSec = Math.max(0.2, (ctx.castMs ?? 1100) / 1000);
+
+      const root = new T.Group();
+      root.name = 'teleTacoRoot';
+      const feet = ctx.position.clone();
+      // `ctx.position` arrives at muzzle height; the gesture is anchored on the body.
+      feet.y -= CH * 0.55;
+      root.position.copy(feet);
+      // Local +Z is the caster's facing, so every offset below is stated in "ahead /
+      // behind / across" rather than in world axes.
+      root.rotation.y = Math.atan2(ctx.direction.x, ctx.direction.z);
+
+      const parts = ctx.weapon.comboParts ?? [];
+      const meat = buildFillingClump(parts[0]?.color ?? ctx.color);
+      meat.name = 'teleTacoFilling';
+      const onion = buildOnion(parts[1]?.color ?? '#B497D6');
+      onion.name = 'teleTacoOnion';
+      nameParts(meat, 'teleTacoFilling');
+      nameParts(onion, 'teleTacoOnion');
+      root.add(meat, onion);
+
+      const SPARKS = 6;
+      const sparks: THREE.Mesh[] = [];
+      for (let i = 0; i < SPARKS; i++) {
+        const s = new T.Mesh(teleSparkGeo, nextTeleSparkMat());
+        s.name = `teleTacoSpark${i}`;
+        sparks.push(s);
+        root.add(s);
+      }
+
+      /** Smoothstep on a named beat window — every beat reads its progress out of
+       * this, so a retuned `castMs` re-times the whole gesture at once. */
+      const beat = (t: number, a: number, b: number): number => {
+        const k = T.MathUtils.clamp((t - a) / (b - a), 0, 1);
+        return k * k * (3 - 2 * k);
+      };
+
+      /** How far apart his hands are, and how high the payloads ride. Kept inside
+       * roughly one character height of him: `waterbottle.ts` records what happens
+       * when a wind-up strays further — at 58° vertical distance turns into screen
+       * distance fast and the beats read as unrelated objects floating over the
+       * arena rather than as this fighter's own. */
+      const HAND_OUT = CH * 0.48; // ~1.0 m — the sim's own collision radius
+      const HAND_Y = CH * 0.72;
+
+      const angles = [
+        T.MathUtils.degToRad(parts[0]?.angle ?? -10),
+        T.MathUtils.degToRad(parts[1]?.angle ?? 10),
+      ];
+
+      const drive = (_p: number, elapsed: number): void => {
+        const t = T.MathUtils.clamp(elapsed / castSec, 0, 1);
+        const gather = beat(t, 0.0, 0.42);
+        const draw = beat(t, 0.30, 0.82);
+        const cock = beat(t, 0.82, 1.0);
+
+        for (let i = 0; i < 2; i++) {
+          const obj = i === 0 ? meat : onion;
+          const side = i === 0 ? -1 : 1;
+
+          // ── 1. GATHER ────────────────────────────────────────────────────────
+          // ⚠️ 0.35 -> 1.0 FIRST, AND THE OPENING SLICE MEASURED 183 px.
+          // `tg_tele.mjs`'s bespoke-only arm reads the sculpt with the generic
+          // footprint hidden: at a 0.35 opening charge this gesture delivered 183 px
+          // at t=0 against 5,772 at the resolve, i.e. under floor for a THIRD of the
+          // wind-up. Area goes as the square of the charge, so a "condenses out of
+          // nothing" opening is arithmetically the invisible-sculpt failure — the
+          // same one `game/vfx.ts` guards against with *"the fill never starts at
+          // literally zero area"*. The arc is smaller now and the whole gesture is
+          // bigger; legibility at every slice is the requirement, the dramatic ramp
+          // is not.
+          const charge = 0.76 + 0.24 * gather;
+          // ── 2. DRAW ──────────────────────────────────────────────────────────
+          // Back along local -Z and up. `draw` also pulls them slightly wider, so
+          // the pair opens as it cocks instead of crossing over his own body.
+          const backZ = -CH * 0.62 * draw;
+          const out = HAND_OUT * (0.55 + 0.65 * gather + 0.35 * draw);
+          // ── 3. COCK ──────────────────────────────────────────────────────────
+          // Forward onto the real firing angle, ahead of him, where the shot leaves.
+          const ang = angles[i];
+          const reach = CH * 0.85 * cock;
+          const x = side * out + Math.sin(ang) * reach;
+          const z = backZ + Math.cos(ang) * reach;
+
+          obj.position.set(x, HAND_Y + CH * (0.20 * draw + 0.10 * cock), z);
+          obj.scale.setScalar(TELE_PAYLOAD * charge * (1 + 0.18 * cock));
+          // A TUMBLE, not a spin about one axis: both payloads are near-round, so a
+          // single-axis spin changes nothing on screen (the mistake `waterbottle.ts`
+          // records for its bottle, which is a surface of revolution).
+          obj.rotation.set(t * 5.5 * (i === 0 ? 1 : -1), t * 3.1, t * 2.2 * side);
+        }
+
+        // The heat between his hands. It rides the midpoint of the two payloads and
+        // brightens through the whole gesture, so "charged" is a VALUE change and
+        // still reads once the silhouettes have stopped growing.
+        for (let i = 0; i < SPARKS; i++) {
+          const s = sparks[i];
+          const a = (i / SPARKS) * TWO_PI + t * 6.5;
+          const r = HAND_OUT * (0.25 + 0.85 * gather);
+          s.position.set(Math.cos(a) * r, HAND_Y + Math.sin(a * 1.7) * CH * 0.16 + CH * 0.18 * draw, Math.sin(a) * r * 0.55 - CH * 0.30 * draw);
+          const grow = 0.85 + 1.15 * t;
+          s.scale.setScalar(grow);
+          // Opening opacity was `0.22 * 0.35 = 0.077` — a mesh that is present, named
+          // and effectively transparent, which is the same failure as an undersized
+          // one and reads identically on every count in this repo.
+          (s.material as THREE.MeshBasicMaterial).opacity = 0.45 + 0.45 * t;
+        }
+      };
+
+      // Posed BEFORE it is handed to the layer: every mesh above is built at its
+      // authoring transform, not at its t=0 transform, and whether the first
+      // `updateEffects` tick beats the first `render` is a `match.ts` call-order
+      // detail this file must not depend on.
+      drive(0, 0);
+      ctx.spawnTransient(root, castSec + 0.06, drive);
+    },
   },
 };

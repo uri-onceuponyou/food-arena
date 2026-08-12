@@ -620,6 +620,71 @@ function buildRoll(color: string): THREE.Group {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Big Catch — THE WIND-UP
+//
+// 🚨 DORMANT TODAY, BY A MEASURED DECISION IN `rules.ts`. `edadf78` ("five specials,
+// five REFUSALS") priced every remaining ultimate's wind-up and shipped none of them,
+// so `waterbottle.Mega` is still the only weapon with a `castMs` — and
+// `game/vfx.ts:spawnCastTelegraph` returns immediately without one, so this hook is
+// never called. Not an oversight to fix by adding a `castMs`: read the refusal blocks
+// in `rules.ts` first. The draw below is ready, measured at the shipped match pitch of
+// 58 (`tools/tmp/tg_tele.mjs`, driven at 1100 ms through the QA path), and costs
+// nothing until a wind-up is ever justified for this weapon.
+//
+// Built to `vfx/weapons/waterbottle.ts`'s `Mega` template (read its header first):
+// one root, one `onUpdate`, TIMES as fractions of `ctx.castMs`, SIZES as fractions of
+// `CHARACTER_HEIGHT`.
+//
+// ⚠️ `buildRoll` is authored at 0.78 m across and flown at 0.6 -> 1.28 scale, i.e.
+// sized for a pellet. Held still for a whole wind-up that is the 36-px
+// invisible-sculpt failure this project has on record. So the rolls below grow to
+// `TELE_ROLL_GROW`, which is also the only honest reading of the card: *"the fish
+// GROW HUGE"* is this weapon's own text and the one clause a footprint cannot say.
+//
+// And Sushi needs the bespoke half more than the melee ultimates do:
+// `game/vfx.ts`'s generic footprint for a RANGED cast is the spread LANE. At
+// `rangedMax` 140 wu and `spreadDeg` 40 that is a 7 m wedge, a fraction of the area a
+// 90-100° melee cone covers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Full-charge multiplier on `buildRoll`'s authored size: 0.78 m -> ~2.1 m across,
+ * i.e. a roll the height of a fighter. "Huge" has to mean huge next to HIM. */
+/**
+ * ⚠️ 2.7 FIRST, AND THE RENDERED PNG SAID NO. At 2.7 each roll was ~2.1 m across —
+ * a fighter wide — and three of them converging on a 2.14 m fan radius merged into
+ * ONE near-black mass that covered the caster and the ground either side of him.
+ * Every number was green (14,162 px sustain, 2,342 bespoke, hide clean); the numbers
+ * were measuring the mass. `game/vfx.ts` records the same class at arena scale as
+ * *"information-free wash that erases the arena the player is trying to read"*.
+ *
+ * 1.9 is ~1.48 m across, still visibly bigger than the 0.78 m roll that flies — which
+ * is the card's clause — while three of them at the wider fan radius below stay THREE
+ * objects. "Huge" has to survive being counted.
+ */
+const TELE_ROLL_GROW = 1.9;
+
+/**
+ * 🚨 NAME THE CHILDREN, NOT JUST THE GROUP — MEASURED, NOT ANTICIPATED.
+ *
+ * `buildRoll` and `buildNoriSheet` return `Group`s whose meshes are unnamed, which is
+ * fine for a projectile and wrong for a telegraph. Every diagnostic here keys on
+ * `name`, and `tools/tmp/tg_tele.mjs` counts `isMesh && name.startsWith(...)`: the
+ * first run of this hook reported **`bs0` bespoke meshes while painting 10,633 px** —
+ * a telegraph that every census in this repo would have called absent, and its
+ * ablation arm had nothing to swap. That is the "assert over an empty set" vacuity
+ * `CLAUDE.md` rule 6 names, arriving through naming rather than through filtering.
+ *
+ * ⚠️ Deliberately duplicated per character file rather than shared — `./types.ts` is
+ * not this file's to grow, and this is four lines with no behaviour to go stale.
+ */
+function nameParts(root: THREE.Object3D, prefix: string): void {
+  let i = 0;
+  root.traverse((c) => {
+    if ((c as THREE.Mesh).isMesh && !c.name) c.name = `${prefix}Part${i++}`;
+  });
+}
+
 export const sushiWeaponVfx: CharacterWeaponVfxMap = {
   // ── Rice Spray ─────────────────────────────────────────────────────────────
   // `rangedClose`, 5 pellets, 2 damage each — the cheapest weapon in the roster, so
@@ -1061,6 +1126,132 @@ export const sushiWeaponVfx: CharacterWeaponVfxMap = {
           GRAIN_LEN * 0.8, 0.3, Math.random() < 0.4,
         );
       }
+    },
+
+    /**
+     * BIG CATCH — the card, drawn: *"throws seaweed with fish — the fish grow huge
+     * and the seaweed scatters across the map"*. The growing is the wind-up; the
+     * throwing is `cast()` above, which the sim now emits at the RESOLVE.
+     *
+     * ── The beats, as fractions of `castMs` ───────────────────────────────────
+     *
+     *     0.00 - 0.38   THE BAIT   a sheet of nori unfurls and whips overhead, so
+     *                              the first frames have a big moving mass in them
+     *     0.15 - 0.88   THEY GROW  three rolls rise around him and swell 0.5 -> 2.7
+     *                              of their flight size, staggered so they arrive as
+     *                              a stream rather than as one expanding disc
+     *     0.88 - 1.00   THE CAST   they turn their cut faces forward and settle onto
+     *                              the weapon's real 40° fan
+     *
+     * The beats OVERLAP on purpose. `tools/tmp/tg_tele.mjs` reports the MINIMUM
+     * 100 ms slice across the cast, not the peak, because the failure on record is an
+     * effect that peaks well and is invisible either side of it — a seam between
+     * beats is exactly that failure in miniature.
+     *
+     * ⚠️ The fan and the pellet count come from `ctx.weapon`, never from literals: a
+     * wind-up that shows a different spread from the one `rules.ts` fires is lying
+     * about where the shot goes, and *"a telegraph you can dodge"* is the whole point.
+     */
+    telegraph(ctx) {
+      const T = ctx.THREE;
+      const castSec = Math.max(0.2, (ctx.castMs ?? 1100) / 1000);
+
+      const root = new T.Group();
+      root.name = 'teleSushiRoot';
+      const feet = ctx.position.clone();
+      feet.y -= CH * 0.55; // `ctx.position` arrives at muzzle height
+      root.position.copy(feet);
+      // Local +Z is his facing, so every offset below is "ahead / across".
+      root.rotation.y = Math.atan2(ctx.direction.x, ctx.direction.z);
+
+      const nori = buildNoriSheet(ctx.color);
+      nori.name = 'teleSushiNori';
+      nameParts(nori, 'teleSushiNori');
+      root.add(nori);
+
+      const N = Math.max(1, ctx.weapon.pellets ?? 3);
+      const rolls: THREE.Group[] = [];
+      for (let i = 0; i < N; i++) {
+        const r = buildRoll(ctx.color);
+        r.name = `teleSushiRoll${i}`;
+        nameParts(r, `teleSushiRoll${i}`);
+        rolls.push(r);
+        root.add(r);
+      }
+
+      const beat = (t: number, a: number, b: number): number => {
+        const k = T.MathUtils.clamp((t - a) / (b - a), 0, 1);
+        return k * k * (3 - 2 * k);
+      };
+
+      const half = ((ctx.weapon.spreadDeg ?? 40) * Math.PI) / 360;
+      /** Chest height, and the rolls stay inside roughly one character height of him:
+       * at 58° vertical distance turns into screen distance fast, and
+       * `waterbottle.ts` records a beat that strayed further reading as unrelated
+       * objects floating over the arena rather than as this fighter's own. */
+      const HOLD_Y = CH * 0.70;
+
+      const drive = (_p: number, elapsed: number): void => {
+        const t = T.MathUtils.clamp(elapsed / castSec, 0, 1);
+        const bait = beat(t, 0.0, 0.38);
+        const send = beat(t, 0.88, 1.0);
+
+        // ── 1. THE BAIT ──────────────────────────────────────────────────────
+        // The sheet is a flat form, so it is kept LEANING rather than laid flat: at
+        // 58° a horizontal plane is nearly edge-on to nothing and a vertical one is
+        // nearly edge-on to the camera. The lean is what gives it area at both
+        // pitches, which is the same reason `waterbottle.ts` leans its bottle instead
+        // of spinning it about its own axis.
+        nori.position.set(
+          Math.sin(t * 3.1) * CH * 0.30,
+          HOLD_Y + CH * (0.70 + 0.34 * bait),
+          CH * (0.10 + 0.34 * bait),
+        );
+        nori.rotation.set(-0.95 - 0.30 * Math.sin(t * 4.2), t * 2.6, 0.35 * Math.sin(t * 3.4));
+        // ⚠️ 1.20 -> 1.90 rendered as a 1.8 x 1.2 m near-black rectangle lying across
+        // the caster. `bodyNoriMat` is #22301F, the darkest value in this file, and a
+        // dark mass that size over a fighter is a hole in the frame rather than a
+        // telegraph. It is a whipping strip above his head now, not a tarpaulin.
+        const ns = 0.85 + 0.45 * bait;
+        nori.scale.set(ns, 1, ns * (1 + 0.25 * Math.sin(t * 5.0)));
+
+        // ── 2. THEY GROW + 3. THE CAST ───────────────────────────────────────
+        for (let i = 0; i < N; i++) {
+          const r = rolls[i];
+          const lag = i * 0.10;
+          const grow = beat(t, 0.15 + lag, 0.88);
+          // The angle this pellet will actually leave on — evenly spaced across the
+          // real spread, exactly as the sim fans `pellets`.
+          const target = N === 1 ? 0 : (i / (N - 1) - 0.5) * 2 * half;
+          const orbit = (i / N) * TWO_PI + t * (2.4 + 2.0 * grow);
+          const ang = T.MathUtils.lerp(orbit, target, send);
+          // Wide enough from the first slice that three rolls are three objects and
+          // none of them sits on his silhouette — see `TELE_ROLL_GROW`'s note.
+          const radius = CH * (0.62 + 0.30 * grow + 0.34 * send);
+          r.position.set(
+            Math.sin(ang) * radius,
+            HOLD_Y + Math.sin(orbit * 1.4) * CH * 0.14 * (1 - send) + CH * 0.16 * grow,
+            Math.cos(ang) * radius * (0.6 + 0.4 * send),
+          );
+          // ⚠️ 0.5 -> 2.7 FIRST, AND THE OPENING SLICE MEASURED 560 px.
+          // Area goes as the square of the scale, so an opening at 18% of the final
+          // linear size is 3% of the final area: this gesture peaked at 10,633 px and
+          // spent a quarter of the wind-up under the 1,500 px floor. That is the
+          // invisible-sculpt failure wearing a good peak, which is exactly what
+          // `tg_tele.mjs` reports a MINIMUM slice rather than a peak to catch.
+          r.scale.setScalar(1.1 + (TELE_ROLL_GROW - 1.1) * grow);
+          // YAW ONLY, exactly as `trail()` does for this weapon and for the same
+          // reason: the roll's read is its round cut face, and a tumble spends half
+          // of every revolution edge-on, which on a short cylinder is a thin line.
+          r.rotation.y = orbit * 1.5;
+        }
+      };
+
+      // Posed before the layer sees it — see `waterbottle.ts`: every mesh is built at
+      // its authoring transform, and whether the first `updateEffects` tick beats the
+      // first `render` is a `match.ts` call-order detail this file must not depend on.
+      drive(0, 0);
+      ctx.spawnTransient(root, castSec + 0.06, drive);
     },
   },
 };

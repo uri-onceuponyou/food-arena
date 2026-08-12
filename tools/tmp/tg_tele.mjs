@@ -128,6 +128,22 @@ const RW = Math.round(W / 2);           // 800
 const RH = Math.round(H / 2);           // 450
 const DELTA = Number(args.delta ?? 6);  // same changed-pixel threshold as vfx_wcov
 const FLOOR = Number(args.floor ?? 1500);
+/**
+ * The BESPOKE-ONLY floor, and it is deliberately the SAME number as the total floor.
+ *
+ * Not a second, softer target. The whole reason the bespoke hooks exist is that the
+ * generic footprint alone plateaued in critique, and the whole reason this arm exists
+ * is `pj_probe`'s finding that an authored sculpt can deliver **36 px against a
+ * generic path's 686** and still be correct code at a respectable hue. A bespoke half
+ * that cannot clear the same bar the generic half clears is decoration: the player is
+ * reacting to the wedge, and the character-specific gesture is costing draw calls to
+ * say nothing. Stated up front, before the numbers, exactly as CLAUDE.md rule 10 asks.
+ *
+ * ⚠️ It is NOT applied to rows with no bespoke hook (GEN) or to the payoff rows
+ * (DUMP), and the verdict block asserts the set it runs over is non-empty first —
+ * `[].every()` is `true`, and that vacuity fired three times in three files here.
+ */
+const BFLOOR = Number(args.bfloor ?? 1500);
 const STEP = Number(args.step ?? 100);
 const PLAYER = args.player ?? 'waterbottle';
 const PITCH = args.pitch ? Number(args.pitch) : null;
@@ -227,18 +243,84 @@ export const ErrorOverlay=class{}; export default {};`,
         step(ms) { window.__clk.advance(ms); window.__vfxLayer.updateEffects(ms / 1000); },
         reset() { window.__vfxLayer.clear(); },
         cancel(reason) { window.__vfxLayer.cancelCastTelegraph(0, reason); },
-        /** How many meshes named `castTelegraph*` / `mega*` are live in the VFX layer.
-         * A pixel count of zero is ambiguous between "nothing spawned" and "it spawned
-         * and is invisible"; this disambiguates without looking at a pixel. */
+        /** How many meshes named `castTelegraph*` / `mega*` / `tele*` are live in the
+         * VFX layer. A pixel count of zero is ambiguous between "nothing spawned" and
+         * "it spawned and is invisible"; this disambiguates without looking at a pixel.
+         *
+         * 🚨 `tele*` WAS ADDED WHEN THE OTHER FIVE ULTIMATES LANDED, AND FORGETTING IT
+         * WOULD HAVE BEEN A SILENT VACUITY. `waterbottle.Mega`'s meshes are named
+         * `mega*`; the five conversions after it use `tele<Character>*`. Without this
+         * line every bespoke mesh they build would have counted as neither bucket,
+         * `census.bespoke` would have read 0, `ablate()` would have found nothing to
+         * swap — and the assertions below that FILTER on those numbers would each have
+         * been asserting over an empty set, which `[].every()` reports as a pass.
+         * Hence the non-empty guards in the verdict block. */
         census() {
           let telegraph = 0; let bespoke = 0; let unnamed = 0;
           layer.traverse((o) => {
             if (!o.isMesh) return;
             if (!o.name) { unnamed++; return; }
             if (o.name.startsWith('castTelegraph')) telegraph++;
-            else if (o.name.startsWith('mega')) bespoke++;
+            else if (o.name.startsWith('mega') || o.name.startsWith('tele')) bespoke++;
           });
           return { telegraph, bespoke, unnamed };
+        },
+        /**
+         * DELIVERED PIXELS OF THE BESPOKE SCULPT ALONE.
+         *
+         * The standing finding this whole tool exists under is an AREA one, not a hue
+         * one: a bespoke sculpt delivered **36 px against the generic path's 686** at a
+         * perfectly respectable 18.8° of hue (`pj_probe`). The total slice cannot see
+         * that, because `game/vfx.ts`'s generic footprint is underneath every one of
+         * these rows and clears the floor by itself for a melee cast — so a bespoke
+         * half worth 36 px and one worth 6,000 px produce nearly the same total.
+         *
+         * Hiding the generic layers and re-reading against the SAME base is the
+         * attribution. It is measured at the same instant as the total it is compared
+         * against; the ablation arm's own header records what happens when a probe
+         * compares two different moments of a changing effect under one threshold.
+         */
+        bespokeOnly() {
+          const hidden = [];
+          layer.traverse((o) => {
+            if (!o.isMesh || !o.visible) return;
+            if (!o.name.startsWith('castTelegraph')) return;
+            o.visible = false;
+            hidden.push(o);
+          });
+          const px = changed(grab());
+          for (const o of hidden) o.visible = true;
+          return { px, hidden: hidden.length };
+        },
+        /**
+         * THE HIDE TEST — the same question the ablation arm asks, asked the other way
+         * round, and it is IMMUNE TO THE POST CHAIN in a way the ablation arm is not.
+         *
+         * Ablation asserts `magenta >= shipped`: force every named mesh to an
+         * unmissable colour and it must paint at least as much. That is sound only if
+         * repainting cannot LOSE pixels — and it can, because `render/stage.ts` runs a
+         * bloom pass. A bright additive highlight spreads changed pixels well past its
+         * own geometry; flat magenta at the same coverage does not. So a healthy effect
+         * whose identity is carried by bright additive elements can ablate BELOW its
+         * shipped reading with nothing wrong.
+         *
+         * Hiding cannot have that asymmetry. If every mesh that painted is addressed by
+         * these names, hiding all of them must return the frame to the base — bloom and
+         * all, because the source of the bloom is gone too. A non-zero remainder is
+         * exactly the finding the ablation arm was reaching for: something is on screen
+         * that these names do not address.
+         */
+        hideAll() {
+          const hidden = [];
+          layer.traverse((o) => {
+            if (!o.isMesh || !o.visible) return;
+            if (!(o.name.startsWith('castTelegraph') || o.name.startsWith('mega') || o.name.startsWith('tele'))) return;
+            o.visible = false;
+            hidden.push(o);
+          });
+          const px = changed(grab());
+          for (const o of hidden) o.visible = true;
+          return { px, hidden: hidden.length };
         },
         /** Ablate every telegraph/bespoke mesh to magenta with depth test off, count,
          * then restore. Materials are saved BY IDENTITY, not per mesh: `vfx/weapons/*`
@@ -257,7 +339,7 @@ export const ErrorOverlay=class{}; export default {};`,
           const seen = new Set();
           layer.traverse((o) => {
             if (!o.isMesh || !o.visible) return;
-            if (!(o.name.startsWith('castTelegraph') || o.name.startsWith('mega'))) return;
+            if (!(o.name.startsWith('castTelegraph') || o.name.startsWith('mega') || o.name.startsWith('tele'))) return;
             const mats = Array.isArray(o.material) ? o.material : [o.material];
             for (const m of mats) {
               if (!m || seen.has(m)) continue;
@@ -303,11 +385,17 @@ export const ErrorOverlay=class{}; export default {};`,
       const r = await page.evaluate(async ([fa, step, n]) => {
         window.__vfxSpawnTest(...fa);
         const series = [];
+        const bespoke = [];
         // Slice 0 is measured with NO advance: the effect exists but no time has passed,
         // which is the frame a player sees first.
         series.push(window.__tg.count());
-        for (let i = 1; i < n; i++) { window.__tg.step(step); series.push(window.__tg.count()); }
-        return { series, census: window.__tg.census(), ablate: window.__tg.ablate() };
+        bespoke.push(window.__tg.bespokeOnly().px);
+        for (let i = 1; i < n; i++) {
+          window.__tg.step(step);
+          series.push(window.__tg.count());
+          bespoke.push(window.__tg.bespokeOnly().px);
+        }
+        return { series, bespoke, census: window.__tg.census(), ablate: window.__tg.ablate(), hide: window.__tg.hideAll() };
       }, [fire, STEP, nSlices]);
 
       const series = r.series;
@@ -315,6 +403,9 @@ export const ErrorOverlay=class{}; export default {};`,
       const peak = Math.max(...series);
       const under = series.filter((v) => v < FLOOR).length;
       const mean = Math.round(series.reduce((a, b) => a + b, 0) / series.length);
+      const bMin = Math.min(...r.bespoke);
+      const bPeak = Math.max(...r.bespoke);
+      const bUnder = r.bespoke.filter((v) => v < BFLOOR).length;
 
       let shotFile = null;
       if (SHOTS && opts.shot) {
@@ -336,9 +427,14 @@ export const ErrorOverlay=class{}; export default {};`,
         }
       }
 
-      log(`${label.padEnd(28)} min ${String(min).padStart(6)}  peak ${String(peak).padStart(6)}  mean ${String(mean).padStart(6)}  under ${String(under).padStart(2)}/${nSlices}  meshes tg${r.census.telegraph}/bs${r.census.bespoke}  ablate ${r.ablate.px}/${r.ablate.before}px (${r.ablate.mats} mats)`);
+      log(`${label.padEnd(28)} min ${String(min).padStart(6)}  peak ${String(peak).padStart(6)}  mean ${String(mean).padStart(6)}  under ${String(under).padStart(2)}/${nSlices}  meshes tg${r.census.telegraph}/bs${r.census.bespoke}  ablate ${r.ablate.px}/${r.ablate.before}px (${r.ablate.mats} mats)  hide ${r.hide.px}px (${r.hide.hidden} meshes)`);
       log(`${' '.repeat(28)} series ${series.join(' ')}`);
-      return { label, castMs, series, min, peak, mean, under, nSlices, census: r.census, ablate: r.ablate, shots: shotFile };
+      log(`${' '.repeat(28)} BESPOKE-ONLY min ${String(bMin).padStart(6)}  peak ${String(bPeak).padStart(6)}  under ${bUnder}/${nSlices}   ${r.bespoke.join(' ')}`);
+      return {
+        label, castMs, series, min, peak, mean, under, nSlices,
+        bespoke: r.bespoke, bMin, bPeak, bUnder,
+        census: r.census, ablate: r.ablate, hide: r.hide, shots: shotFile,
+      };
     }
 
     const results = [];
@@ -357,6 +453,25 @@ export const ErrorOverlay=class{}; export default {};`,
     // bespoke half and its contribution is attributable.
     results.push(await runCase('GEN.generic-only@1100', ['castTelegraph', f.x, f.y, 18, '#1E90D8', 'hamburger', undefined, 1100], 1100, { shot: true }));
     results.push(await runCase('MEGA.waterbottle@1100', ['castTelegraph', f.x, f.y, 18, '#1E90D8', 'waterbottle', 'Mega', 1100], 1100, { shot: true }));
+
+    // ── The other five ultimates ──────────────────────────────────────────────────
+    //
+    // `castMs` is passed EXPLICITLY here and is not read out of `rules.ts`: a peer is
+    // choosing the five real values in parallel, and a probe that silently inherits
+    // whatever is half-saved in `rules.ts` would report a different duration every run
+    // with nothing in the output saying so. 1100 is the value the two `meleeHeavy`
+    // ultimates ship at, so every row below is directly comparable to MEGA's.
+    //
+    // ⚠️ Three of the five are RANGED, which exercises a branch of
+    // `spawnCastTelegraph` its own comment calls *"measured but unexercised by the
+    // roster"*: a ranged footprint is the spread LANE (`max(12, spreadDeg ?? 18)`),
+    // not a cone. Taco has no `spreadDeg` at all, so it draws the narrowest footprint
+    // in the roster and its bespoke half carries almost the whole read.
+    results.push(await runCase('TACO.Double@1100', ['castTelegraph', f.x, f.y, 0, '#6B3E26', 'taco', 'Double', 1100], 1100, { shot: true }));
+    results.push(await runCase('BURRITO.Swarm@1100', ['castTelegraph', f.x, f.y, 4, '#7CB518', 'burrito', 'Swarm', 1100], 1100, { shot: true }));
+    results.push(await runCase('SUSHI.Catch@1100', ['castTelegraph', f.x, f.y, 9, '#FF8C42', 'sushi', 'Catch', 1100], 1100, { shot: true }));
+    results.push(await runCase('SOUP.Dump@1100', ['castTelegraph', f.x, f.y, 16, '#E8792A', 'soup', 'Dump', 1100], 1100, { shot: true }));
+
     // ── SLAM: the REFUSAL arm, and it has a known-bad with a number ────────────────
     //
     // `lollipop.Giant` is `giantSlam`, `REACH.ultimateSlam` 400 wu, 360 deg. Before
@@ -366,16 +481,43 @@ export const ErrorOverlay=class{}; export default {};`,
     // already refuses for the 0.3 s melee wedge (recorded there at 262,797 px / 73.0%),
     // five times longer, and it has no edge on screen to dodge relative to.
     //
-    // So this arm asserts the OPPOSITE of the two above: it must draw NOTHING. The
-    // sustain floor does not apply to a shape that is deliberately absent, and asserting
-    // it here would make the guard cry wolf on its own success.
-    const slam = await runCase('SLAM.lollipop@1500', ['castTelegraph', f.x, f.y, 30, '#FF5FA2', 'lollipop', 'Giant', 1500], 1500);
+    // 🚨 ASSERTION REVERSED — OLD WORDING KEPT, WITH THE REASON.
+    //
+    //   WAS: "So this arm asserts the OPPOSITE of the two above: it must draw NOTHING.
+    //   The sustain floor does not apply to a shape that is deliberately absent, and
+    //   asserting it here would make the guard cry wolf on its own success."
+    //     if (slam.peak > 0 || slam.census.telegraph > 0) fail.push(...)
+    //
+    // That was correct while `lollipop.Giant` had **no `telegraph()` hook**, which the
+    // stand-down block in `game/vfx.ts` named in capitals as *"a gap someone must close
+    // before any `giantSlam` ships a `castMs`"*. It is closed: `vfx/weapons/lollipop.ts`
+    // now draws a bespoke wind-up, and this weapon's telegraph is ENTIRELY bespoke.
+    //
+    // So the assertion splits into the two claims that were being conflated:
+    //
+    //   * the GENERIC footprint still stands down — `census.telegraph` must stay 0, and
+    //     that is the arm that guards the 259,315 px wash from coming back. Unchanged
+    //     in force, and it is the half that was actually load-bearing.
+    //   * the BESPOKE half must now clear the sustain floor like every other row,
+    //     because with no generic footprint underneath it there is nothing else on
+    //     screen. It is the only telegraph in the roster with no safety net.
+    //
+    // Left as its own block rather than folded into `measured` because the two halves
+    // assert opposite things about the same row, which no generic loop can express.
+    const slam = await runCase('SLAM.lollipop@1500', ['castTelegraph', f.x, f.y, 18, '#E63946', 'lollipop', 'Giant', 1500], 1500, { shot: true });
     slam.refusal = true;
     results.push(slam);
-    if (slam.peak > 0 || slam.census.telegraph > 0) {
-      fail.push(`SLAM: a giantSlam painted ${slam.peak} px / ${slam.census.telegraph} meshes. The stand-down is not firing — this is the 259,315 px wash coming back.`);
+    if (slam.census.telegraph > 0) {
+      fail.push(`SLAM: the GENERIC footprint painted ${slam.census.telegraph} meshes for a giantSlam. The stand-down is not firing — this is the 259,315 px wash coming back.`);
     } else {
-      log(`  ✓ giantSlam stands down: 0 px, 0 meshes, against a pre-guard 259,315 px (64.0% of frame) held for 1.5 s.\n`);
+      log(`  ✓ generic footprint stands down: 0 meshes, against a pre-guard 259,315 px (64.0% of frame) held for 1.5 s.`);
+    }
+    if (slam.census.bespoke === 0) {
+      fail.push(`SLAM: 0 bespoke meshes. With the generic footprint standing down that is a weapon with NO telegraph at all, which is the gap game/vfx.ts routes.`);
+    } else if (slam.under > 0) {
+      fail.push(`SLAM: ${slam.under}/${slam.nSlices} slices under the ${FLOOR} px sustain floor (min ${slam.min}). This is the one telegraph with no generic footprint underneath it.`);
+    } else {
+      log(`  ✓ bespoke wind-up carries it alone: ${slam.census.bespoke} meshes, min ${slam.min} px across ${slam.nSlices} slices.\n`);
     }
 
     // ── RESOLVE: what `weapon-fired` draws now that it means "it landed" ──────────
@@ -446,16 +588,72 @@ export const ErrorOverlay=class{}; export default {};`,
       if (r.census.telegraph > 0 && r.ablate.mats > 0 && r.ablate.px === 0 && r.ablate.before === 0) {
         fail.push(`${r.label}: INSTRUMENT FAULT, not a finding — ${r.census.telegraph} telegraph meshes and ${r.ablate.mats} materials exist, and an unmissable magenta version of them still moved 0 px. The camera is not pointed at the subject (see --pitch in this file's header).`);
       }
-      // The ablation arm asks ONE question: is the object that painted `before` px the
-      // same object these names address? Force it to an unmissable colour with depth
-      // test off and it must paint AT LEAST as much. Less means the names and the
-      // pixels are not the same thing.
-      if (r.ablate.px < r.ablate.before) {
-        fail.push(`${r.label}: ablation painted ${r.ablate.px} px where the shipped effect painted ${r.ablate.before} at the same instant — the named meshes are not what is on screen.`);
+      // 🚨 ASSERTION REVERSED — OLD WORDING KEPT, WITH THE REASON AND THE NUMBER.
+      //
+      //   WAS: "The ablation arm asks ONE question: is the object that painted
+      //   `before` px the same object these names address? Force it to an unmissable
+      //   colour with depth test off and it must paint AT LEAST as much. Less means
+      //   the names and the pixels are not the same thing."
+      //     if (r.ablate.px < r.ablate.before) fail.push('...not what is on screen')
+      //
+      // The question is right; `>=` is the wrong test for it, and the five ultimates
+      // added after `Mega` are what exposed that. `TACO.Double` ablated to **6,272 px
+      // where it had painted 12,285**, and `SUSHI.Catch` to **14,521 against 16,523**
+      // — while `hideAll()` returned BOTH frames to **0 px from base**, i.e. every
+      // painting mesh was addressed by these names after all. Both rows would have
+      // been reported as "the named meshes are not what is on screen", which is a
+      // devastating and false finding.
+      //
+      // The cause is the post chain, not the names: `render/stage.ts` blooms, a bright
+      // additive highlight spreads changed pixels well past its own geometry, and flat
+      // magenta at the same coverage does not. Taco's wind-up is carried by six
+      // additive sparks and Sushi's by a pale rice cap; `Mega`'s is carried by large
+      // flat translucent bodies, which is why it cleared `>=` (16,842 vs 16,420) and
+      // hid the asymmetry for a whole pass.
+      //
+      // So the ablation number is still PRINTED and still guards the instrument-fault
+      // case above (meshes exist, materials exist, magenta moves nothing => the camera
+      // is pointed elsewhere). What it no longer does is assert an inequality that
+      // bloom can break on a healthy effect. The naming claim is now carried by
+      // `hideAll()`, which has no such asymmetry: hide every named mesh and the frame
+      // must return to base, bloom included, because the source of the bloom goes with
+      // it. That is a STRICTLY STRONGER test — it would catch an unnamed mesh the
+      // ablation arm could only catch by arithmetic.
+      if (r.hide.px > FLOOR * 0.02) {
+        fail.push(`${r.label}: hiding every castTelegraph*/mega*/tele* mesh left ${r.hide.px} px of ${r.series[r.series.length - 1]} on screen — something is painting that these names do not address (an unnamed mesh, or a second program such as a shadow or decal).`);
+      }
+      if (r.hide.hidden === 0) {
+        fail.push(`${r.label}: the hide test found ZERO meshes to hide — it is asserting over an empty set.`);
       }
       if (r.ablate.mats === 0) {
         fail.push(`${r.label}: ablation found ZERO materials to swap — it is asserting over an empty set.`);
       }
+    }
+
+    // ── The bespoke half, on its own ──────────────────────────────────────────────
+    //
+    // `GEN` is the control: it is driven on a character with no `telegraph()` hook, so
+    // its bespoke-only reading must be ZERO. That is what makes every other row's
+    // number attributable rather than assumed — and it is also the known-bad for this
+    // arm, because a `bespokeOnly()` that hid nothing, or that hid everything, would
+    // report a plausible number on every row including this one.
+    const gen = results.find((r) => r.label.startsWith('GEN.'));
+    if (!gen) fail.push('VACUOUS: no GEN control row — the bespoke-only readings are unattributable.');
+    else if (gen.bPeak > 0 || gen.census.bespoke > 0) {
+      fail.push(`BESPOKE CONTROL: GEN has no telegraph() hook yet reported ${gen.bPeak} px / ${gen.census.bespoke} meshes of "bespoke". bespokeOnly() is not hiding what it claims to hide.`);
+    } else {
+      log(`\n  ✓ bespoke control: GEN (no telegraph hook) reads 0 px, 0 meshes.`);
+    }
+
+    const bespokeRows = results.filter((r) => r.census.bespoke > 0 && !r.label.startsWith('PAIR.') && !r.label.startsWith('DUMP.'));
+    // 🚨 NON-EMPTY FIRST — `[].every()` is `true`, and this filter is exactly the shape
+    // that has silently emptied three times in this repo.
+    if (!bespokeRows.length) fail.push('VACUOUS: not one row carried a bespoke telegraph mesh. Either no hook fired, or census() no longer recognises their names.');
+    log(`\nBESPOKE-ONLY VERDICT (floor ${BFLOOR} px at ${RW}x${RH}, every ${STEP} ms — the sculpt alone, generic footprint hidden)`);
+    for (const r of bespokeRows) {
+      const ok = r.bUnder === 0;
+      log(`  ${ok ? '✓' : '✗'} ${r.label.padEnd(26)} min ${String(r.bMin).padStart(6)} px   peak ${String(r.bPeak).padStart(6)}   ${r.bUnder}/${r.nSlices} slices under floor`);
+      if (!ok) fail.push(`${r.label}: the BESPOKE half is under ${BFLOOR} px at ${r.bUnder}/${r.nSlices} slices (min ${r.bMin}). pj_probe's 36-px invisible sculpt is this exact number.`);
     }
 
     await writeFile(`${OUT}/tg_tele.json`, JSON.stringify({

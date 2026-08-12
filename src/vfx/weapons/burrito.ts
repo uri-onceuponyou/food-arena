@@ -1110,6 +1110,69 @@ function throwCast(ctx: WeaponVfxCtx, mult: number): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Topping Swarm — THE WIND-UP
+//
+// 🚨 DORMANT TODAY, BY A MEASURED DECISION IN `rules.ts`. `edadf78` ("five specials,
+// five REFUSALS") priced every remaining ultimate's wind-up and shipped none of them,
+// so `waterbottle.Mega` is still the only weapon with a `castMs` — and
+// `game/vfx.ts:spawnCastTelegraph` returns immediately without one, so this hook is
+// never called. That is not an oversight to fix by adding a `castMs`: read the refusal
+// blocks in `rules.ts` first. The draw below is ready, measured at the shipped match
+// pitch of 58 (`tools/tmp/tg_tele.mjs`, driven at 1100 ms through the QA path), and
+// costs nothing until a wind-up is ever justified for this weapon.
+//
+// Built to `vfx/weapons/waterbottle.ts`'s `Mega` template (read its header first):
+// one root, one `onUpdate`, TIMES as fractions of `ctx.castMs`, SIZES as fractions of
+// `CHARACTER_HEIGHT`.
+//
+// ⚠️ `buildTopping` spans 0.36-0.42 m by design — "~17 px at shipped framing", sized
+// for a pellet in flight. Four of those held still for a whole wind-up is the 36-px
+// invisible-sculpt failure this project has on record. The swarm below therefore
+// scales them up to `TELE_TOPPING_GROW` while they gather and drops them back to 1.0
+// nowhere: the things being squeezed out are BIGGER than the things that fly, which
+// is also what "squeezes out ALL his toppings" has to look like to be worth 3.6 s.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Full-charge multiplier on a topping's authored (flight) size: 0.4 m -> ~1.45 m.
+ *
+ * ⚠️ 2.7 first, ON A GESTURE WHOSE BULGE WAS DOING THE WORK. When the bulge was cut
+ * back from the wash it rendered as (see `bs` in `telegraph()`), the four toppings
+ * were left carrying the read alone and the bespoke half fell to **701 px, under
+ * floor for 7 of 12 slices** — from 1,614 px that had been almost entirely blob. The
+ * cut was right and it exposed that the toppings had never been the read at all.
+ * They are now the largest thing in the gesture, which is what the card describes.
+ */
+const TELE_TOPPING_GROW = 3.6;
+/** The bulge at the open end the toppings are squeezed out of — a soft mass, not a
+ * flash, so it holds area for the whole cast rather than peaking and dying. */
+const teleBulgeGeo = new THREE.SphereGeometry(1, 14, 10);
+/** Dedicated pools. One gesture uses 1 bulge + 1 shell + 4 wisps, so both pools are
+ * >= their simultaneous users — `waterbottle.ts` records the round-robin collision
+ * that silently emptied its own bottles when two element classes shared one pool. */
+const nextTeleBulgeMat = materialPool(4, () => fading(WRAP_BAND, { opacity: 0.85 }));
+const nextTeleShellMat = materialPool(4, () => fading(TORTILLA, { opacity: 0.7 }));
+
+/**
+ * 🚨 NAME THE CHILDREN, NOT JUST THE GROUP. `buildTopping` returns a `Group` whose
+ * meshes are unnamed — fine for a projectile, wrong for anything a diagnostic has to
+ * address. Every tool here keys on `name`, and `tools/tmp/tg_tele.mjs` keys on
+ * `isMesh && name.startsWith(...)`: measured, the first run of this telegraph reported
+ * **`bs2`** (the bulge and the shell) for a gesture also holding four whole toppings,
+ * and Sushi's equivalent reported **`bs0`** while painting 10,633 px.
+ *
+ * ⚠️ Deliberately duplicated per character file rather than shared. The shared surface
+ * is `./types.ts`, which is not this file's to grow, and `docs/LESSONS.md` §5's
+ * warning is about a copied DRIVER — a stale copy that silently produces wrong
+ * numbers. This is four lines with no behaviour to go stale; the alternative is a
+ * cross-file dependency between two agents' owned sets.
+ */
+function nameParts(root: THREE.Object3D, prefix: string): void {
+  let i = 0;
+  root.traverse((c) => {
+    if ((c as THREE.Mesh).isMesh && !c.name) c.name = `${prefix}Part${i++}`;
+  });
+}
 
 export const burritoWeaponVfx: CharacterWeaponVfxMap = {
   // ── Burrito Disc ───────────────────────────────────────────────────────────
@@ -1318,6 +1381,153 @@ export const burritoWeaponVfx: CharacterWeaponVfxMap = {
           0.8, 0.26,
         );
       }
+    },
+
+    /**
+     * TOPPING SWARM — the card, drawn: *"squeezes out all his toppings, which fly
+     * everywhere and chase enemies"*. The squeeze is the wind-up; the flying
+     * everywhere is `cast()` above, which the sim now emits at the RESOLVE.
+     *
+     * ── The beats, as fractions of `castMs` ───────────────────────────────────
+     *
+     *     0.00 - 0.40   SQUEEZE   a bulge swells at the open end and the wrap
+     *                             compresses around it
+     *     0.18 - 0.85   EMERGE    the four toppings push out one after another —
+     *                             staggered, because four leaving together reads as
+     *                             one expanding disc, which is the generic effect
+     *                             this replaces — orbiting wider and faster
+     *     0.85 - 1.00   FAN       they snap onto the weapon's real 55° spread, at
+     *                             the angles the pellets will actually leave on
+     *
+     * Overlapping on purpose: `tools/tmp/tg_tele.mjs` reports the MINIMUM 100 ms
+     * slice of the cast, not the peak, so a seam between beats is a measured fault.
+     *
+     * ⚠️ The fan comes from `ctx.weapon.spreadDeg`, never from a literal. A wind-up
+     * that shows a different spread from the one `rules.ts` fires is lying about
+     * where the shot goes, and *"a telegraph you can dodge"* is the whole point.
+     */
+    telegraph(ctx) {
+      const T = ctx.THREE;
+      const castSec = Math.max(0.2, (ctx.castMs ?? 1100) / 1000);
+
+      const root = new T.Group();
+      root.name = 'teleBurritoRoot';
+      const feet = ctx.position.clone();
+      feet.y -= CH * 0.55; // `ctx.position` arrives at muzzle height
+      root.position.copy(feet);
+      // Local +Z is his facing, so every offset below is "ahead / across".
+      root.rotation.y = Math.atan2(ctx.direction.x, ctx.direction.z);
+
+      const bulgeMat = nextTeleBulgeMat();
+      const bulge = new T.Mesh(teleBulgeGeo, bulgeMat);
+      bulge.name = 'teleBurritoBulge';
+      root.add(bulge);
+
+      const shellMat = nextTeleShellMat();
+      const shell = new T.Mesh(teleBulgeGeo, shellMat);
+      shell.name = 'teleBurritoShell';
+      root.add(shell);
+
+      const N = 4;
+      const toppings: THREE.Group[] = [];
+      for (let i = 0; i < N; i++) {
+        const g = buildTopping(i);
+        g.name = `teleBurritoTopping${i}`;
+        nameParts(g, `teleBurritoTopping${i}`);
+        toppings.push(g);
+        root.add(g);
+      }
+
+      const beat = (t: number, a: number, b: number): number => {
+        const k = T.MathUtils.clamp((t - a) / (b - a), 0, 1);
+        return k * k * (3 - 2 * k);
+      };
+
+      /** Where the squeeze happens: chest height, just ahead of him. Everything stays
+       * inside roughly one character height — at 58° vertical distance becomes screen
+       * distance fast, and `waterbottle.ts` records a beat that strayed further
+       * reading as unrelated objects floating over the arena. */
+      const VENT_Y = CH * 0.78;
+      const VENT_Z = CH * 0.22;
+      const half = ((ctx.weapon.spreadDeg ?? 55) * Math.PI) / 360;
+
+      const drive = (_p: number, elapsed: number): void => {
+        const t = T.MathUtils.clamp(elapsed / castSec, 0, 1);
+        const squeeze = beat(t, 0.0, 0.40);
+        const fan = beat(t, 0.85, 1.0);
+
+        // ── 1. SQUEEZE ───────────────────────────────────────────────────────
+        // Never starts at zero area: a first slice worth a handful of pixels is the
+        // invisible-sculpt failure wearing a good peak.
+        // 🚨 JUDGED ON THE RENDERED PNG, AND IT WAS A WASH.
+        //
+        // At `0.22 + 0.28 * squeeze` this sphere reached 1.05 m of RADIUS — 2.1 m
+        // across, i.e. the whole fighter — in the wrapper's saturated orange, sitting
+        // over his head and torso. The frame showed one flat orange blob with the
+        // character and all four toppings buried inside it. Every number was green:
+        // 17,354 px of sustain, 1,614 px of bespoke, ablation and hide both clean.
+        // The numbers were measuring the wash.
+        //
+        // That is `game/vfx.ts`'s own recorded failure mode ("information-free wash
+        // that erases the arena the player is trying to read", 262,797 px / 73.0%) at
+        // character scale, and this file's `Roll` block already states the budget it
+        // breaks: the character keeps its silhouette. The bulge is a CUE at the open
+        // end now — 0.21 -> 0.48 m of radius — and the read is carried by the four
+        // toppings, which is what the card is about.
+        const bs = CH * (0.13 + 0.15 * squeeze) * (1 - 0.35 * fan);
+        bulge.position.set(0, VENT_Y, VENT_Z);
+        bulge.scale.set(bs, bs * (0.82 + 0.25 * Math.sin(t * 11)), bs);
+        bulgeMat.opacity = (0.55 + 0.40 * squeeze) * (1 - fan * 0.8);
+        // The wrap compressing around it — a second, paler mass a touch behind, so
+        // the bulge has something to be squeezed OUT of. Same size cut as the bulge
+        // above and for the same reason: at 0.71 m of radius in near-white tortilla
+        // this was the second half of the blob that erased him.
+        const ss = CH * (0.17 - 0.05 * squeeze);
+        shell.position.set(0, VENT_Y - CH * 0.04, VENT_Z - CH * 0.16);
+        shell.scale.set(ss, ss * (1.25 - 0.30 * squeeze), ss);
+        shellMat.opacity = 0.62 * (1 - fan * 0.9);
+
+        // ── 2. EMERGE + 3. FAN ───────────────────────────────────────────────
+        for (let i = 0; i < N; i++) {
+          const g = toppings[i];
+          // Each topping lags the one before it, so they leave as a stream.
+          const lag = i * 0.09;
+          const out = beat(t, 0.18 + lag, 0.85);
+          // The angle it will actually be fired on: evenly spaced across the real
+          // spread, exactly as `sim.ts` fans `pellets`.
+          // `N` is fixed at 4 here — `buildTopping` has exactly four authored forms,
+          // one per `pelletColors` slot — so unlike sushi's telegraph this does not
+          // need an N=1 guard on the divisor.
+          const target = (i / (N - 1) - 0.5) * 2 * half;
+          // Orbiting while it gathers, then converging on that angle.
+          const spin = (i / N) * TWO_PI + t * (3.2 + 2.4 * out);
+          const ang = T.MathUtils.lerp(spin, target, fan);
+          // ⚠️ `0.10 + ...` PUT ALL FOUR TOPPINGS INSIDE THE BULGE AT t=0, so the
+          // opening frames were the bulge alone and the toppings only emerged from
+          // inside a shape that was already covering them. They orbit CLEAR of his
+          // silhouette from the first slice now: 0.88 m out, widening to 1.5 m.
+          const radius = CH * (0.42 + 0.34 * out + 0.26 * fan);
+          g.position.set(
+            Math.sin(ang) * radius,
+            VENT_Y + Math.sin(spin * 1.6) * CH * 0.10 * (1 - fan) + CH * 0.10 * out,
+            VENT_Z + Math.cos(ang) * radius * (0.55 + 0.45 * fan),
+          );
+          // 1.9 left the OPENING slice at 1,461 px — 39 under the floor, on the one
+          // frame a player sees first. Area is quadratic in this number, so 2.2 is
+          // a 34% lift on it and nothing else in the gesture had to move.
+          const grow = 2.2 + (TELE_TOPPING_GROW - 2.2) * out;
+          g.scale.setScalar(grow);
+          // A tumble on all three axes — these are irregular clumps, and a
+          // single-axis spin on a near-symmetric form changes nothing on screen.
+          g.rotation.set(t * 4.2 + i, t * 3.0 - i, t * 2.4);
+        }
+      };
+
+      // Posed before it is handed to the layer — see `waterbottle.ts`: the meshes are
+      // built at their authoring transform, and whether the first `updateEffects`
+      // tick beats the first `render` is a `match.ts` call-order detail.
+      drive(0, 0);
+      ctx.spawnTransient(root, castSec + 0.06, drive);
     },
   },
 };

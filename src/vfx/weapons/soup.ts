@@ -308,6 +308,37 @@ const nextNoodleMat = materialPool(16, () => flatLiquid(NOODLE_PALE, 1));
 const nextBodyBrothMat = materialPool(6, () => flatLiquid('#E8792A', 1));
 const nextBodyHotMat = materialPool(6, () => flatLiquid(BROTH_HOT, 1));
 const nextBodyNoodleMat = materialPool(12, () => flatLiquid(NOODLE_PALE, 1));
+/**
+ * Soup Dump's WIND-UP gets its own three pools, and that is not tidiness.
+ *
+ * `waterbottle.ts` records the bug: `materialPool` is round-robin, so a gesture that
+ * borrows a pool a busier hook is already cycling lands on live material instances,
+ * and its own animation drives THEIR opacity. Measured there as the payoff frame
+ * being the emptiest one, with nothing at the call site looking wrong. The telegraph
+ * runs for the whole `castMs` while `Splash` fires on a 750 ms cooldown into
+ * `nextBrothMat`/`nextHotMat`/`nextNoodleMat`, so sharing would be exactly that case.
+ * One user each per gesture (1 body, 1 lip, 3 strands); pools sized above that.
+ */
+/**
+ * 🚨 THE WIND-UP'S BODY IS `BROTH_DEEP`, NOT THE WEAPON COLOUR, AND THAT IS A
+ * FIGURE/GROUND FIX JUDGED ON THE RENDERED PNG.
+ *
+ * At `#E8792A` — Soup Dump's own `Weapon.color` — the gesture sat inside
+ * `game/vfx.ts`'s generic 90° footprint, which is drawn as `mixSRGB(c, WHITE, 0.22)`
+ * of that same colour. Rendered, the frame was one orange wedge with an orange mass
+ * on it: **the bespoke half was invisible against its own telegraph**, at 2,045 px of
+ * measured bespoke area. Both numbers were green and both were describing pixels
+ * nobody could tell apart.
+ *
+ * `BROTH_DEEP` is a VALUE drop inside the same warm family, so it separates
+ * downward from the bright fill while `nextTeleLipMat`'s `BROTH_HOT` separates
+ * upward — the same two-tone construction `game/vfx.ts` uses for the footprint
+ * itself. ⚠️ It is explicitly NOT a desaturation, which is falsified four times in
+ * this project; both ends stay saturated and only the lightness moves.
+ */
+const nextTeleBrothMat = materialPool(3, () => flatLiquid(BROTH_DEEP, 0.92));
+const nextTeleLipMat = materialPool(3, () => flatLiquid(BROTH_HOT, 0.9));
+const nextTeleNoodleMat = materialPool(6, () => flatLiquid(NOODLE_PALE, 1));
 /** Steam: NORMAL blending at low alpha, not additive — additive white over this
  * arena's bright warm floor blows straight to a clipped highlight and stops reading
  * as vapour at all. */
@@ -897,6 +928,184 @@ const Dump = {
         CH * 0.16, CH * 0.42, 0.6,
       );
     }
+  },
+
+  /**
+   * SOUP DUMP — the wind-up: *"tips himself over onto an enemy, pouring all his soup
+   * and noodles"*. The tipping is here; the pour is `cast()` above, which the sim now
+   * emits at the RESOLVE.
+   *
+   * Built to `vfx/weapons/waterbottle.ts`'s `Mega` template (read its header first):
+   * one root, one `onUpdate`, TIMES as fractions of `ctx.castMs`, SIZES as fractions
+   * of `CHARACTER_HEIGHT`.
+   *
+   * 🚨 DORMANT TODAY, AND THIS WEAPON IS THE SHARPEST CASE OF IT. `rules.ts` carries a
+   * block above `Dump` headed *"`castMs: 1100` WAS DERIVED, IMPLEMENTED, MEASURED AND
+   * REVERTED. DO NOT RE-ADD IT"*: Soup Dump is byte-for-byte the geometry
+   * `waterbottle.Mega` is, so the derivation returned the same 1,100 ms — and
+   * `roster_lab --seeds 32`, 3,520 paired matches, measured Soup going from **50.3% to
+   * 0.6%** on `smart2` and **73.9% to 2.8%** on `chase`. With `castMs` 0 the sim never
+   * emits `cast-started` and nothing below runs. The draw is ready and measured
+   * (`tools/tmp/tg_tele.mjs` at the shipped 58° pitch, driven at 1100 ms through the QA
+   * path); the wind-up it draws is a balance decision, not a rendering one.
+   *
+   * ── The beats, as fractions of `castMs` ─────────────────────────────────────
+   *
+   *     0.00 - 0.45   THE FILL    the broth rises and swells above the bowl, more of
+   *                               it than the bowl can hold — the "all his soup" beat
+   *     0.25 - 0.85   THE SLOSH   the mass leans toward the target and rocks, the
+   *                               wobble growing; three noodles surface out of it
+   *     0.85 - 1.00   THE TIP     the whole thing rotates hard onto the facing, and
+   *                               the lip goes bright: he is going over
+   *
+   * ⚠️ THE BUDGET THIS FILE ALREADY HOLDS ITSELF TO APPLIES HERE AND IS INVERTED.
+   * The block above this weapon states it: *"the ground carries the mass, the
+   * character keeps its silhouette — a 2.6 m mark lying flat costs the character
+   * nothing, where a 2.6 m airborne bloom erases it. Airborne elements stay
+   * droplet-sized throughout."* That is right for a 0.4 s payoff and WRONG for a
+   * wind-up, which has nothing on the ground yet and must be legible at every 100 ms
+   * slice. So this one gesture is deliberately airborne and character-sized — and it
+   * ends the frame it hands over to `cast()`, which puts the mass back on the floor.
+   *
+   * ⚠️ And it is one transient with one driver: `game/vfx.ts` tears a telegraph down
+   * when the sim cancels the cast (an applied stun, or the caster dying), so the
+   * gesture has to be removable WHOLE, mid-beat. That is what being interrupted
+   * looks like.
+   */
+  telegraph(ctx: WeaponVfxCtx): void {
+    const T = ctx.THREE;
+    const castSec = Math.max(0.2, (ctx.castMs ?? 1100) / 1000);
+
+    const root = new T.Group();
+    root.name = 'teleSoupRoot';
+    const feet = ctx.position.clone();
+    feet.y -= CH * 0.55; // `ctx.position` arrives at muzzle height
+    root.position.copy(feet);
+    // Local +Z is his facing, so "leans toward the target" below is a single axis.
+    root.rotation.y = Math.atan2(ctx.direction.x, ctx.direction.z);
+
+    /**
+     * 🚨 THE TIP LIVES ON A CHILD, AND THAT IS A CORRECTNESS FIX, NOT A STYLE ONE.
+     *
+     * `Object3D.rotation` composes as RX·RY·RZ in THREE's default 'XYZ' order, so
+     * setting `root.rotation.x` on the SAME object that carries the yaw tips it about
+     * the WORLD x axis — i.e. in a fixed compass direction, sideways for half the
+     * facings on the map. A child of the yawed root tips about the root's LOCAL x,
+     * which is "forward, toward the target", at every facing. `waterbottle.ts` avoids
+     * the same trap the other way round, by never yawing its root and composing the
+     * lean out of `ctx.direction`'s components instead.
+     */
+    const tilt = new T.Group();
+    tilt.name = 'teleSoupTilt';
+    root.add(tilt);
+
+    const bodyMat = nextTeleBrothMat();
+    const body = new T.Mesh(blobGeo, bodyMat);
+    body.name = 'teleSoupBroth';
+    tilt.add(body);
+
+    const lipMat = nextTeleLipMat();
+    const lip = new T.Mesh(blobGeo, lipMat);
+    lip.name = 'teleSoupLip';
+    tilt.add(lip);
+
+    const STRANDS = 3;
+    const strands: THREE.Mesh[] = [];
+    for (let i = 0; i < STRANDS; i++) {
+      const m = new T.Mesh(nextNoodleGeo(), nextTeleNoodleMat());
+      m.name = `teleSoupNoodle${i}`;
+      strands.push(m);
+      tilt.add(m);
+    }
+
+    const beat = (t: number, a: number, b: number): number => {
+      const k = T.MathUtils.clamp((t - a) / (b - a), 0, 1);
+      return k * k * (3 - 2 * k);
+    };
+
+    /**
+     * Where the broth sits. ⚠️ `0.62` first — bowl height, on his centre line — and
+     * the rendered frame showed the mass lying INSIDE the ground wedge, sharing both
+     * its hue and its screen position, which is half of why it was invisible (see
+     * `nextTeleBrothMat` for the other half). At 0.98 it clears his head, so the
+     * gesture is separated from the footprint in SPACE as well as in value.
+     *
+     * Still inside roughly one character height of him: at 58° vertical distance
+     * turns into screen distance fast, and `waterbottle.ts` records a beat that
+     * strayed further reading as an unrelated object floating over the arena.
+     */
+    const BOWL_Y = CH * 0.98;
+
+    const drive = (_p: number, elapsed: number): void => {
+      const t = T.MathUtils.clamp(elapsed / castSec, 0, 1);
+      const fill = beat(t, 0.0, 0.45);
+      const slosh = beat(t, 0.25, 0.85);
+      const tip = beat(t, 0.85, 1.0);
+
+      // ── 1. THE FILL ──────────────────────────────────────────────────────
+      // Never starts at zero area: a telegraph whose first 100 ms deliver a handful
+      // of pixels is the invisible-sculpt failure wearing a good peak, which is what
+      // the sustain floor exists to catch.
+      // ⚠️ `0.24 + 0.34 * fill` FIRST, AND THE OPENING SLICE MEASURED 542 px.
+      // Area goes as the square of the radius, so opening at 41% of the final linear
+      // size is 17% of the final area: this gesture peaked at 4,407 px and spent a
+      // quarter of the wind-up under the 1,500 px bespoke floor. `tg_tele.mjs` reports
+      // the MINIMUM slice rather than the peak for precisely this shape of failure.
+      const swell = CH * (0.45 + 0.22 * fill);
+      // Squashed on Y and rocking — a body of liquid, not a ball. The wobble
+      // ACCELERATES with `slosh`, so "about to go over" is legible from the motion
+      // even at the frames where the silhouette has stopped growing.
+      const rock = Math.sin(t * (7 + 9 * slosh));
+      body.position.set(
+        Math.sin(t * (5 + 7 * slosh)) * CH * 0.06 * slosh,
+        BOWL_Y + CH * 0.10 * fill,
+        CH * 0.30 * slosh,
+      );
+      body.scale.set(swell * (1 + 0.10 * rock), swell * (0.72 - 0.10 * rock), swell);
+      bodyMat.opacity = 0.80 + 0.15 * fill;
+
+      // The hot lip riding the leading edge, bright at the tip. "Charged" is a VALUE
+      // change here, not a size change, so it still reads once the mass has stopped
+      // growing — the same construction `waterbottle.ts` uses for its water level.
+      const ls = swell * (0.48 + 0.30 * tip);
+      lip.position.set(
+        body.position.x,
+        body.position.y + swell * (0.30 - 0.34 * tip),
+        body.position.z + swell * (0.42 + 0.55 * tip),
+      );
+      lip.scale.set(ls, ls * 0.55, ls);
+      lipMat.opacity = 0.35 + 0.60 * tip + 0.15 * slosh;
+
+      // ── 2. THE SLOSH — "...and his noodles." ─────────────────────────────
+      for (let i = 0; i < STRANDS; i++) {
+        const s = strands[i];
+        const a = (i / STRANDS) * Math.PI * 2 + t * 3.4;
+        const surface = beat(t, 0.25 + i * 0.08, 0.9);
+        const r = swell * (0.35 + 0.75 * surface);
+        s.position.set(
+          body.position.x + Math.cos(a) * r,
+          body.position.y + swell * (0.35 + 0.45 * surface),
+          body.position.z + Math.sin(a) * r * 0.7,
+        );
+        s.scale.setScalar(NOODLE_LENGTH * (0.5 + 0.85 * surface));
+        // A tumble on all three axes: a bent strand is irregular, and a single-axis
+        // spin on it changes little on screen.
+        s.rotation.set(a * 1.3, t * 4.1 + i, a * 0.8);
+        (s.material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.45 * surface;
+      }
+
+      // ── 3. THE TIP ───────────────────────────────────────────────────────
+      // He goes over toward the target. `ctx.direction` is the caster's FROZEN
+      // facing — the sim roots a caster for the whole wind-up, so this is also the
+      // direction the blow resolves in and the telegraph cannot lie about it.
+      tilt.rotation.x = tip * 0.75 + slosh * 0.12;
+    };
+
+    // Posed before the layer sees it — every mesh above is built at its authoring
+    // transform, and whether the first `updateEffects` tick beats the first `render`
+    // is a `match.ts` call-order detail this file must not depend on.
+    drive(0, 0);
+    ctx.spawnTransient(root, castSec + 0.06, drive);
   },
 
   /** The landing. All the weight is here: a mass compresses down onto the floor, the
