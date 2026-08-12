@@ -2286,6 +2286,45 @@ export interface Weapon {
    * ⚠️ **AND IT IS UNDODGEABLE AGAINST A SLOWED TARGET** — 1767.68 ms at
    * `SLOW_MOVE_MULTIPLIER` — which matters because Water Bottle's own Spray applies
    * `slow`. Spray -> Mega is a two-press combo on one character. `DECISIONS §74(c)`.
+   *
+   * ── 🚨 WHAT A WIND-UP COSTS, DECOMPOSED — AND IT IS NOT WHAT I FIRST REPORTED ──
+   *
+   * `roster_lab --seeds 32`, four arms, each a full 3520-match corpus paired on identical
+   * seeds against a worktree of `2f907a7`. Water Bottle's strength, `smart2`:
+   *
+   *     arm                                   strength    delta   matchups moved   roster sd
+   *     baseline (no cast system at all)        48.1%        —          —            3.1 pp
+   *     the system, castMs 0                    48.1%      +0.0        0/110         3.1 pp
+   *     castMs 300  (BELOW the dodge floor)     34.4%     -13.8       19/110         6.0 pp
+   *     castMs 1100 (SHIPPED)                   13.1%     -35.0       19/110        11.9 pp
+   *     Mega deleted from the AI entirely       12.2%     -35.9       20/110        12.3 pp
+   *
+   * Read the rows in order, because each one is the control for the next:
+   *
+   *   * **The scaffolding is exactly inert.** `castMs 0` moved 0 of 110 matchups and 0.0 pp
+   *     on every character. Whatever the wind-up costs, none of it is the refactor.
+   *   * **300 ms costs 13.8 pp and NOBODY CAN DODGE IT** — 300 is below the 700.00 ms floor
+   *     at which the fastest human first escapes. So that 13.8 pp is the ROOT and the
+   *     INTERRUPT alone, with the dodge switched off by arithmetic rather than by a flag.
+   *   * **The last row is the one that mattered and it refuted my own commit message.** I
+   *     had written that the cost was `ai.ts:pressValue` being blind to this field, so the
+   *     driver over-used a rooted, dodgeable 18 over an instant 9 — the file's oldest defect
+   *     shape, and a tidy story. **Suppressing the cast entirely is WORSE (-35.9), not
+   *     better.** The AI is not making a mistake by pressing it; there is nothing to fix in
+   *     the ranking key, and a discount factor there would have been a fabricated fix to a
+   *     fabricated cause.
+   *
+   * The real finding is simpler and it is about THIS WEAPON, not about the mechanic:
+   * **Mega is worth ~36 pp of Water Bottle's entire strength** (48.1 with it, 12.2 without),
+   * and an 1100 ms root removes 35.0 of those 36 — **97% of its contribution**. The
+   * telegraph works exactly as designed (35.9% of resolved casts are dodged, measured on
+   * play by `tools/tmp/csx_castcost.mjs`); what fails is that 18 damage in an 84 wu / 100°
+   * cone was authored for an INSTANT press and does not justify standing still for 1.1 s.
+   *
+   * → **The follow-on pass prices the ULTIMATE, not the telegraph.** Its own card promises
+   * *"huge damage"* and *"one giant bottle"*; the numbers do not say that yet. Shortening
+   * `castMs` to buy the winrate back would spend the one property Uri asked for.
+   * ⚠️ And do NOT pay it back with `cooldown` — see the throughput note above.
    */
   castMs?: number;
 }
