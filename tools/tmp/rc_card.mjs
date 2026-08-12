@@ -30,8 +30,19 @@
  *
  * ## Sections
  *
- *   §A  24 two-seat end states, rendered through the real `hud.ts`, byte-identical to an
- *       oracle recorded at the pre-change commit. RED under `--arm payout2`.
+ *   §A  24 two-seat end states, rendered through the real `hud.ts`, byte-identical to the
+ *       oracle. RED under `--arm payout2`.
+ *       ⚠️ **THE ORACLE WAS RE-RECORDED AT THE PER-FIGHTER-WRAPPER COMMIT.** It had been
+ *       recorded on a detached worktree of the commit before the loser-order/payout change;
+ *       `hud.ts` now wraps each fighter in a `.hud-go-fighter` span so a wrapping subtitle
+ *       cannot break between a portrait and its name, which moves the DOM at EVERY seat
+ *       count — so §A went red, correctly, and the recording was refreshed deliberately:
+ *         node tools/tmp/sx_snap.mjs --root <worktree of this commit> -- \
+ *           node tools/tmp/rc_card.mjs --url '{URL}' --emit tools/tmp/rc_oracle.json --only A
+ *       §G is what stops that from being a silently erased guard.
+ *   §G  OPT-IN (`--pre <old oracle>`), no browser: the delta between the pre-change
+ *       recording and the re-recorded one is EXACTLY one wrapper element per fighter,
+ *       stated as an invertible transformation. RED under `--arm strayclass`.
  *   §B  six seats: the loser list is in FINISHING order, including the dead/alive split.
  *       RED under `--arm noorder`.
  *   §C  a malformed order falls back WHOLESALE and drops nobody — plus the counterfactual
@@ -79,6 +90,8 @@ const ARM = flag('arm', 'base');
 const ONLY = flag('only', null);            // e.g. "A" or "ABC" — restrict to those sections
 const EMIT = flag('emit', null);
 const ORACLE = flag('oracle', `${ROOT}/tools/tmp/rc_oracle.json`);
+/** §G only: the oracle recorded BEFORE the per-fighter wrapper landed. No default. */
+const PRE = flag('pre', null);
 const SHOT = flag('shot', null);
 const MATCH_WALL_MS = Number(flag('wall', '240000'));
 
@@ -158,13 +171,34 @@ const PAGE_RENDER = (spec) => {
     for (const c of el.children) walk(c);
   };
   walk(card);
-  // Names are the bare TEXT NODES of the subtitle: `named()` emits
-  // `<span class="hud-go-emoji">…</span>NAME` and `group()` emits a `.hud-go-vs` verb span,
-  // so filtering to text nodes yields [winner, ...losers] in DOM order and nothing else.
-  const names = [...sub.childNodes]
-    .filter((n) => n.nodeType === 3)
-    .map((n) => n.textContent.trim())
-    .filter(Boolean);
+  // ⚠️ THIS USED TO READ THE SUBTITLE'S DIRECT TEXT CHILDREN, AND THAT STOPPED WORKING:
+  //
+  //   const names = [...sub.childNodes].filter((n) => n.nodeType === 3)
+  //     .map((n) => n.textContent.trim()).filter(Boolean);
+  //
+  //   "Names are the bare TEXT NODES of the subtitle: `named()` emits
+  //    `<span class="hud-go-emoji">…</span>NAME` and `group()` emits a `.hud-go-vs` verb
+  //    span, so filtering to text nodes yields [winner, ...losers] in DOM order."
+  //
+  // `named()` now wraps each fighter in a `.hud-go-fighter` span so a wrapping subtitle
+  // cannot break between a portrait and its name, which puts every name ONE LEVEL DOWN.
+  // The old expression returns [] against the shipped card — and §B's rows are all of the
+  // form `names.length === 6 && names.every(...)`, so they would have gone red loudly rather
+  // than vacuously. Kept anyway, because the next reader needs to know why the walk is a
+  // walk: it is a TreeWalker so it works on BOTH shapes, and the verb spans are excluded by
+  // ancestry rather than by position, which is what makes "DOM order" still mean
+  // [winner, ...losers].
+  const names = (() => {
+    const out = [];
+    const w = document.createTreeWalker(sub, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) {
+      const n = w.currentNode;
+      if (n.parentElement?.closest('.hud-go-vs')) continue;
+      const t = n.textContent.trim();
+      if (t) out.push(t);
+    }
+    return out;
+  })();
   return {
     html: card.innerHTML,
     visible: visible.join('\n'),
@@ -199,10 +233,20 @@ const PAGE_BANKED = () => {
     ended: !!(card && card.closest('.hud-gameover')?.style.display === 'flex'),
     title: card?.querySelector('.hud-gameover-title')?.textContent ?? null,
     place: card?.querySelector('.hud-gameover-place')?.textContent ?? null,
-    names: card
-      ? [...card.querySelector('.hud-gameover-subtitle').childNodes]
-        .filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).filter(Boolean)
-      : null,
+    // Same walk as PAGE_RENDER's, and for the same reason — see the note there. This one
+    // is reported rather than asserted on, which is exactly why it would have gone to []
+    // silently if it had been left alone.
+    names: card ? (() => {
+      const out = [];
+      const w = document.createTreeWalker(card.querySelector('.hud-gameover-subtitle'), NodeFilter.SHOW_TEXT);
+      while (w.nextNode()) {
+        const n = w.currentNode;
+        if (n.parentElement?.closest('.hud-go-vs')) continue;
+        const t = n.textContent.trim();
+        if (t) out.push(t);
+      }
+      return out;
+    })() : null,
     chips: pay ? [...pay.querySelectorAll('.hud-go-pay b')].map((e) => e.textContent) : null,
     frames: window.__matchDebug?.frames ?? null,
   };
@@ -322,17 +366,27 @@ async function runSections(browser) {
             vDiff.length
               ? `${vDiff.length}/${keys.length} moved, first: ${vDiff[0]}`
               : `${keys.length}/${keys.length} identical`);
-          // ── ROW 2: and the MARKUP moved by exactly one additive, hidden element. ──
-          // Stated as a subtraction rather than waved away: strip HTML comments and the
-          // one new element, and the remaining markup must be the oracle's, character for
-          // character. Anything else that had moved — a class, an attribute, the subtitle's
-          // own shape — survives the strip and turns this red.
+          // ── ROW 2: and the raw MARKUP is the oracle's, character for character. ──
+          //
+          // ⚠️ THIS ROW USED TO READ "the only markup delta is the additive hidden payout
+          // element", and it is kept here with its reason because the RULE it encoded has
+          // been reversed rather than deleted:
+          //
+          //   const strip = (s) => norm(s).replace(
+          //     /<div class="hud-gameover-payout"[^>]*>(?:(?!<\/div>).)*<\/div>/, '');
+          //   const hDiff = keys.filter((k) => strip(got[k].html) !== norm(ref[k].html));
+          //
+          // That subtraction existed because the oracle predated the payout element, so
+          // `got` carried a hidden div that `ref` could not. The oracle has since been
+          // RE-RECORDED (see §G and the header), and the re-recorded one contains that div
+          // — so subtracting it from `got` alone would now MANUFACTURE a difference on
+          // every card. The correct statement against an oracle recorded at this commit is
+          // plain equality, and it is strictly stronger: nothing is exempt from it.
           const norm = (s) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/>\s+</g, '><').trim();
-          const strip = (s) => norm(s).replace(/<div class="hud-gameover-payout"[^>]*>(?:(?!<\/div>).)*<\/div>/, '');
-          const hDiff = keys.filter((k) => strip(got[k].html) !== norm(ref[k].html));
-          check('A', 'the only markup delta is the additive hidden payout element',
+          const hDiff = keys.filter((k) => norm(got[k].html) !== norm(ref[k].html));
+          check('A', 'the raw markup is the oracle\'s, character for character',
             hDiff.length === 0,
-            hDiff.length ? `${hDiff.length} cards differ beyond it, first: ${hDiff[0]}` : `${keys.length} cards`);
+            hDiff.length ? `${hDiff.length} cards differ, first: ${hDiff[0]}` : `${keys.length} cards`);
           // ── ROW 3: an order-fed card and an order-free card agree at two seats. ──
           // ⚠️ DECLARED TAUTOLOGICAL in the header and kept anyway: it is the sentence the
           // fix claims, and a permutation guard that wrongly REJECTED a valid order — or
@@ -458,6 +512,11 @@ async function runSections(browser) {
 
   // ── §F ──────────────────────────────────────────────────────────────────────
   if (wanted('F')) sectionF();
+
+  // ── §G ── OPT-IN, and deliberately so: it runs only when handed a `--pre` oracle,
+  // which keeps the DEFAULT row count of this tool unchanged. `docs/TOOLS.md`'s gate table
+  // is the one place an expected count may live and this file's owner does not own it.
+  if (PRE && wanted('G')) sectionG();
 
   if (EMIT) {
     mkdirSync(dirname(resolve(EMIT)), { recursive: true });
@@ -637,12 +696,141 @@ function sectionF() {
   check('F', 'no other screen banks a match result', others.length === 0, others.join(' ') || 'none');
 }
 
+/**
+ * §G — THE ORACLE WAS RE-RECORDED, AND THIS IS WHAT MAKES THAT SAFE.
+ *
+ * 🚨 A RE-RECORDED ORACLE IS AN ERASED GUARD UNLESS THE ERASURE IS ITSELF CHECKED.
+ * §A's whole value is *"the two-seat card did not move"*, measured against a frozen
+ * recording. Wrapping each fighter in a `.hud-go-fighter` span moves the DOM at every seat
+ * count, so §A had to go red — correctly — and the oracle had to be re-recorded. But
+ * "I re-recorded it" is exactly what an agent that had broken the card would also say.
+ *
+ * So the pre-change recording is KEPT (`tools/tmp/rcw_oracle_pre.json`, the file §A was
+ * comparing against at `072f245`) and this section states the delta as an EXACT, INVERTIBLE
+ * TRANSFORMATION rather than as a tolerance:
+ *
+ *   * flatten every `span.hud-go-fighter` out of the new recording — drop its own line and
+ *     re-attach its text to the subtitle, which is where that text used to live — and the
+ *     result must equal the OLD recording, character for character, on all 24 states;
+ *   * do the same on the raw markup, removing each wrapper element while keeping its
+ *     children, and the result must equal the old markup character for character;
+ *   * and the number of wrappers removed must be exactly 2 per card, so a build that had
+ *     LOST the wrapper could not pass these rows by having nothing to flatten.
+ *
+ * 🚨 WHAT WOULD FAIL IT. `--arm strayclass` renames one unrelated class in the new
+ * recording before flattening. Nothing about the wrapper changes; the delta stops being
+ * exactly the wrapper, and both rows go red. Without that arm these would be two string
+ * comparisons whose inputs nobody had shown could disagree.
+ *
+ * ⚠️ THE PIXELS ARE A SEPARATE, STRONGER CLAIM AND LIVE ELSEWHERE. This section is about
+ * the DOM. `tools/tmp/rcw_pixels.mjs` screenshots 48 two-seat cards on a detached worktree
+ * of `072f245` and on this tree and reports **28/28 layout-identical cards differing by
+ * EXACTLY 0 pixels**, with a one-pixel `--arm nudge` proving the comparison is not blind.
+ */
+function sectionG() {
+  const readJson = (p) => JSON.parse(readFileSync(resolve(p), 'utf8'));
+  let pre, now;
+  try { pre = readJson(PRE).twoSeat; } catch (e) { check('G', 'the pre-change oracle loads', false, String(e.message)); return; }
+  try { now = readJson(ORACLE).twoSeat; } catch (e) { check('G', 'the current oracle loads', false, String(e.message)); return; }
+  const keys = Object.keys(pre ?? {}).sort();
+  // 🚨 NON-EMPTY AND SAME-KEYED BEFORE ANYTHING IS COMPARED.
+  if (!check('G', 'both oracles are non-empty and cover the same 24 states',
+    keys.length === 24 && keys.join() === Object.keys(now ?? {}).sort().join(),
+    `${keys.length} vs ${Object.keys(now ?? {}).length}`)) return;
+
+  /** Drop each `span.hud-go-fighter` line and re-attach its own text to the subtitle. */
+  const unwrapVisible = (s) => {
+    const out = []; const names = []; let subIdx = -1;
+    for (const ln of s.split('\n')) {
+      if (ln.startsWith('span.hud-go-fighter')) {
+        const i = ln.indexOf('|');
+        if (i >= 0) names.push(ln.slice(i + 1));
+        continue;
+      }
+      if (ln.startsWith('div.hud-gameover-subtitle')) subIdx = out.length;
+      out.push(ln);
+    }
+    if (subIdx < 0) return { text: s, removed: -1 };
+    // The subtitle must have NO own text of its own in the wrapped shape; if it does, the
+    // transformation is ambiguous and must not silently pick an order.
+    if (names.length && out[subIdx].includes('|')) return { text: s, removed: -2 };
+    if (names.length) out[subIdx] = `${out[subIdx]}|${names.join(' ')}`;
+    return { text: out.join('\n'), removed: names.length };
+  };
+
+  /** Remove each `<span class="hud-go-fighter">…</span>`, keeping its children. Depth-
+   *  tracked rather than regex'd: the wrapper CONTAINS spans, so a lazy match would close
+   *  on the portrait's tag and silently corrupt the string it is about to compare. */
+  const OPEN = '<span class="hud-go-fighter">';
+  const unwrapHtml = (html) => {
+    let out = html, removed = 0;
+    for (let guard = 0; guard < 64; guard++) {
+      const i = out.indexOf(OPEN);
+      if (i < 0) return { text: out, removed };
+      let depth = 1, j = i + OPEN.length, close = -1;
+      while (depth > 0) {
+        const nO = out.indexOf('<span', j);
+        const nC = out.indexOf('</span>', j);
+        if (nC < 0) return { text: out, removed: -1 };
+        if (nO >= 0 && nO < nC) { depth++; j = nO + 5; } else { depth--; close = nC; j = nC + 7; }
+      }
+      out = out.slice(0, i) + out.slice(i + OPEN.length, close) + out.slice(close + 7);
+      removed++;
+    }
+    return { text: out, removed: -1 };
+  };
+
+  const norm = (s) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/>\s+</g, '><').trim();
+  const poison = (s) => (ARM === 'strayclass' ? s.split('hud-go-vs').join('hud-go-verb') : s);
+
+  // 🚨 THE MARKUP DELTA SPANS TWO CHANGES, NOT ONE, AND THAT IS A MEASURED CORRECTION.
+  // The first version of this section subtracted only the wrapper and went red 24/24. The
+  // residue was not a mistake in the wrapper: the pre-change recording predates the HIDDEN
+  // PAYOUT DIV as well, which is why the row this section replaced carried a `strip()` for
+  // it. The old recording spans BOTH `7743f08`'s payout element and this commit's wrapper,
+  // so both are subtracted — and each is asserted PRESENT on the new side and ABSENT on the
+  // old, so neither strip can be quietly removing nothing.
+  const PAY = /<div class="hud-gameover-payout"[^>]*>(?:(?!<\/div>).)*<\/div>/;
+  const stripPay = (s) => s.replace(PAY, '');
+  check('G', 'the hidden payout div is present in the new recording and absent from the old',
+    keys.every((k) => PAY.test(now[k].html)) && keys.every((k) => !PAY.test(pre[k].html)),
+    `new ${keys.filter((k) => PAY.test(now[k].html)).length}/${keys.length},`
+      + ` old ${keys.filter((k) => PAY.test(pre[k].html)).length}/${keys.length}`);
+
+  let wrappers = 0;
+  const vBad = []; const hBad = [];
+  for (const k of keys) {
+    const uv = unwrapVisible(poison(now[k].visible));
+    if (uv.removed < 0) { vBad.push(`${k} (transform refused: ${uv.removed})`); continue; }
+    wrappers += uv.removed;
+    if (uv.text !== pre[k].visible) vBad.push(k);
+    const uh = unwrapHtml(poison(now[k].html));
+    if (uh.removed < 0) { hBad.push(`${k} (unbalanced)`); continue; }
+    if (stripPay(norm(uh.text)) !== norm(pre[k].html)) hBad.push(k);
+  }
+  // 🚨 THE NON-VACUITY ROW, AND IT COMES FIRST. With zero wrappers to remove both rows
+  // below are string comparisons of a value against itself.
+  check('G', 'exactly one wrapper element per fighter was removed (2 per card, 48 total)',
+    wrappers === keys.length * 2, `${wrappers} wrappers over ${keys.length} cards`);
+  check('G', 'flattening the wrapper reproduces the pre-change VISIBLE digest exactly',
+    vBad.length === 0, vBad.length ? `${vBad.length}/${keys.length} differ, first ${vBad[0]}` : `${keys.length} states`);
+  check('G', 'flattening the wrapper and the payout div reproduces the pre-change MARKUP exactly',
+    hBad.length === 0, hBad.length ? `${hBad.length}/${keys.length} differ, first ${hBad[0]}` : `${keys.length} states`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // --selftest: run every known-bad arm and require the row it targets to be RED.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SELFTEST = [
   { arm: 'payout2', only: 'A', mustFail: 'two-seat card byte-identical' },
+  // ⚠️ THIS ARM TAKES `--selftest` FROM 5 ROWS TO 6, and that number is documented in
+  // `docs/TOOLS.md`'s gate table, which this file's owner does not own. Reported rather than
+  // edited (AGENT-BRIEF §1: a gate-table row is executable and is NOT covered by the
+  // additive-doc valve). Leaving a known-bad out of `--selftest` to protect a count would be
+  // the worse trade: an unexercised known-bad rots, and §G exists precisely because a
+  // re-recorded oracle is an erased guard.
+  { arm: 'strayclass', only: 'G', pre: `${ROOT}/tools/tmp/rcw_oracle_pre.json`, mustFail: 'reproduces the pre-change VISIBLE digest' },
   { arm: 'noorder', only: 'B', mustFail: 'six-seat loser list is in FINISHING order' },
   { arm: 'nopay', only: 'D', mustFail: 'payout chips render exactly what they are handed' },
   { arm: 'fakeimport', only: 'F', mustFail: 'imports nothing that can move money' },
@@ -656,6 +844,7 @@ async function selftest() {
   for (const t of SELFTEST) {
     const args = [self, '--url', BASE, '--arm', t.arm, '--only', t.only];
     if (ORACLE) args.push('--oracle', ORACLE);
+    if (t.pre) args.push('--pre', t.pre);
     const r = spawnSync(process.execPath, args, { encoding: 'utf8' });
     const out = r.stdout ?? '';
     const line = out.split('\n').find((l) => l.includes(t.mustFail));

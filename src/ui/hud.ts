@@ -1532,8 +1532,28 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         // (one "defeated" group, no "outlasted" group) or alive (the reverse), which is
         // precisely what `timedOut ? 'outlasted' : 'defeated'` emitted. `timedOut` is
         // still read below for the stats line, where it is the right question.
+        // ── ONE ELEMENT PER FIGHTER, AND THE WRAPPER IS THE WHOLE POINT ───────────
+        // This used to emit the portrait span and the name as SIBLINGS with no wrapper:
+        //
+        //   `<span class="hud-go-emoji">…</span>${CHARACTERS[f.characterId].name}`
+        //
+        // which is correct only while the subtitle is a single non-wrapping line. It is
+        // not any more (see `.hud-gameover-subtitle`'s `flex-wrap`), and a flex line can
+        // only break BETWEEN items — so as siblings, a break was free to land between a
+        // fighter's portrait and that fighter's name. Silently: nothing would be missing,
+        // nothing would be off-screen, and the card would read "SUSHI defeated 🍔 / EGG
+        // 🍩 HAMBURGER" with a portrait attached to the wrong name. That is a worse
+        // defect than the 705px overflow this row was widened to fix.
+        //
+        // An `inline-flex` wrapper makes each fighter ONE flex item, and a flex line
+        // cannot break inside one. Measured rather than argued: `tools/tmp/rcw_fit.mjs`
+        // §2 pairs each `.hud-go-emoji` with the next text node in document order — the
+        // same walk on both DOM shapes — and requires the two to share a line, with
+        // `--arm split` (`display: contents` on this wrapper, i.e. the old sibling
+        // arrangement with wrapping on) as the known-bad that turns it red.
         const named = (f: { characterId: CharacterId }): string =>
-          `<span class="hud-go-emoji">${portraitMarkup(f.characterId, { crop: 'head' })}</span>${CHARACTERS[f.characterId].name}`;
+          `<span class="hud-go-fighter"><span class="hud-go-emoji">${
+            portraitMarkup(f.characterId, { crop: 'head' })}</span>${CHARACTERS[f.characterId].name}</span>`;
         const group = (verb: string, list: readonly typeof roster[number][]): string =>
           (list.length ? `<span class="hud-go-vs">${verb}</span>${list.map(named).join('')}` : '');
         gameoverSubtitleEl.innerHTML =
@@ -1543,9 +1563,27 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         hydratePortraits(gameoverSubtitleEl, { generate: false });
 
         // ── The finishing place, when somebody upstream knows it ──────────────────
-        // Absent today at every seat count, so this branch writes nothing and the
-        // element stays `display: none` — the card is byte-identical to before. See
-        // `HudFrameInfo.place` for why the HUD does not derive it.
+        // ⚠️ THIS COMMENT USED TO READ, AND IT IS KEPT BECAUSE IT WAS TRUE FOR FOUR
+        // MINUTES AND STALE FOR A DAY:
+        //
+        //   "Absent today at every seat count, so this branch writes nothing and the
+        //    element stays `display: none` — the card is byte-identical to before."
+        //
+        // It was written by `48ad6ca` at 20:32:26. `bb00d66` landed `match.ts`'s
+        // `hudPlace()` at 20:36:16 — four minutes later — and `hudResult()` spreads it
+        // into BOTH `hud.update` call sites. `hudPlace()` returns non-null for any
+        // ended match with `seats > 1`, which is every match there is.
+        //
+        // MEASURED, not inferred from two commit timestamps: `tools/tmp/rcw_place.mjs`
+        // plays a real TWO-seat match through the shipped screens and reads
+        // `"2nd of 2"` with `display: block`. Its `--arm nofeed` rewrites the served
+        // `match.ts` to hand `place: null` — the pre-`bb00d66` world this comment
+        // described — and the row goes red, so the check measures the game filling the
+        // element in rather than the element merely existing.
+        //
+        // So this branch is LIVE on every card a player sees, and the byte-identity
+        // claim above belonged to the commit that wrote it, not to this one. See
+        // `HudFrameInfo.place` for why the HUD still does not derive it.
         const place = frame.place ?? null;
         if (place && place.of > 1) {
           const n = place.place;
@@ -2653,20 +2691,74 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 }
 
 /* ── Game over card ───────────────────────────────────────────────────────── */
+/* (No backticks anywhere below: this whole sheet is a template literal and one
+   would close it. The rule is already recorded at .hud-go-pay .fa-ic.)
+
+   The padding is the card's GUTTER, and it is what max-width:100% on the card
+   resolves against — the * { box-sizing: border-box } in index.html means the card's
+   100% is this element's CONTENT box, so twelve pixels here is twelve pixels of
+   breathing room on each side and nothing else has to know about it. Safe insets
+   are added on every edge for the same reason the top bar adds them: a landscape
+   phone eats 44px to the notch, and a result card pushed under it is unreadable on
+   exactly the device this card is smallest on. */
 .hud-gameover {
   position: absolute;
   inset: 0;
   display: none;
   align-items: center;
   justify-content: center;
+  padding:
+    calc(var(--fa-safe-t, 0px) + 12px) calc(var(--fa-safe-r, 0px) + 12px)
+    calc(var(--fa-safe-b, 0px) + 12px) calc(var(--fa-safe-l, 0px) + 12px);
   background: rgba(10,6,16,0.55);
   pointer-events: auto;
 }
+/* ── THE CARD IS BOUNDED, AND IT WAS NOT ──────────────────────────────────────
+   DECISIONS §70, measured and reproduced before this line was written: at
+   430x932 the SIX-fighter card was 705.08px wide with its left edge at -137.53px,
+   so the winner's portrait (l=-101.5) and name (l=-67.5) were entirely off-screen
+   on the one screen whose whole job is to say who won. The overflow is symmetric
+   because this is a centred flex column with no width bound: it grows to its
+   widest child and half the excess goes off each edge.
+
+   ⚠️ IT WAS NEVER A SIX-SEAT DEFECT. The same run measured 530.5px at THREE seats
+   with a mixed dead/alive card (left -50.2), and the widest case anywhere was
+   776.5px at 360x800 with the left edge at -208.3. Six is where it was noticed.
+
+   max-width:100% is a NO-OP on every card that already fitted — it can only
+   bite where the card was overflowing, which is the whole of the change at two
+   seats on a desktop.
+
+   🚨 AND THERE IS DELIBERATELY NO max-height/overflow-y HERE, WHICH IS A REVERSAL:
+   this shipped for one round as max-height:100% + overflow-y:auto, to keep the box
+   inside the screen if a future row made it taller. It was ABLATED and removed, on
+   two measurements:
+
+     * rcw_pixels, 48 two-seat cards on a detached worktree of the pre-change
+       commit against this tree: with overflow-y:auto, 16 of the 28 cards whose
+       layout was rect-for-rect IDENTICAL still differed by 18-412 antialiased
+       pixels at a max channel delta of 6/255 — every one of them on a CURVE (the
+       portrait discs, the chip pills, the Play Again corners), none on text.
+       Removing it took all 28 to EXACTLY ZERO. A scroll container rasterises its
+       own rounded edges through a different path in Chromium, and pixel identity
+       at two seats is the claim this whole change is judged on.
+     * It also silently changed the failure mode. A flex item whose overflow is not
+       visible has its automatic minimum size resolve to 0 rather than to its
+       min-content width, so a card whose content could not wrap was squeezed to the
+       scrim and CLIPPED (measured: 406px, not the 705px it actually wanted) instead
+       of hanging off the edge. That is a quieter bug, not a smaller one.
+
+   The height budget is held by the max-height:640px rules at the bottom of this
+   sheet instead, where it is arithmetic rather than a runtime backstop, and
+   rcw_fit's vertical rows go red if a future row breaks it. Nothing overflows
+   today: over 126 cards x 9 viewports the tightest vertical slack is 76px, at
+   667x375. */
 .hud-gameover-card {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 18px;
+  max-width: 100%;
   background: rgba(26,18,36,0.94);
   border: 4px solid #1a1224;
   border-radius: 26px;
@@ -2703,9 +2795,17 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
   -webkit-text-stroke: 1px #1a1224;
 }
 .hud-gameover-place.is-podium { color: #F4A300; }
+/* flex-wrap:wrap is the other half of the card's bound. Without it this row lays
+   out on one line and grows without limit, and since the card sizes to its widest
+   child, THIS is the element that made the card 705px wide. justify-content:
+   center only has an effect once a line is short of the container's width, which
+   cannot happen while the container is shrink-to-fit — so on a card that already
+   fitted, both properties are inert. */
 .hud-gameover-subtitle {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   margin-top: -8px;
   font-family: 'Rubik', sans-serif;
@@ -2715,8 +2815,27 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
   text-transform: uppercase;
   color: #FFF3DE;
 }
+/* ── ONE FIGHTER, ONE FLEX ITEM ───────────────────────────────────────────────
+   A flex line breaks only BETWEEN items, so wrapping a portrait and its name into
+   one item is what makes flex-wrap above safe. The 8px gap here is the same 8px
+   the subtitle used to put between them when they were siblings, which is why the
+   two-seat card does not move: [emoji, NAME, verb, emoji, NAME] at 8px and
+   [ [emoji NAME], verb, [emoji NAME] ] at 8px inside and out lay out to the same
+   pixels. That is asserted, not assumed — tools/tmp/rcw_pixels.mjs screenshots
+   the two-seat card on a detached worktree of the pre-change commit and on this
+   tree and requires a zero-pixel difference.
+
+   flex:0 0 auto on the portrait because a flex item's default flex-shrink:1
+   would let a tight line squash the 26px badge into a smudge rather than wrap —
+   the failure mode this whole section exists to remove, one level down. */
+.hud-go-fighter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 .hud-go-emoji {
   display: inline-flex;
+  flex: 0 0 auto;
   width: 26px;
   height: 26px;
   font-size: 26px;
@@ -2751,9 +2870,16 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
    one screen a player wants to leave. The plate under each chip is what keeps a
    -5 legible next to a +44 without colouring them differently — the sign is the
    information, and tinting it green/red would repeat the title's verdict. */
+/* Wraps for the same reason the subtitle does, and it is not hypothetical: a
+   chest credit makes this FOUR chips, which measured 381px of content against a
+   334px budget at 430x932. Each chip is already one atomic inline-flex box, so
+   unlike the subtitle this row needed no wrapper — nothing inside a chip can be
+   separated from the rest of it. */
 .hud-gameover-payout {
   display: none;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   margin-top: -4px;
 }
@@ -3212,6 +3338,31 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 /* Short viewports (19.5:9 / 21:9 phones) — keep the radar clear of the weapon bar. */
 @media (max-height: 640px) {
   .hud-radar-map { width: 105px; height: 75px; }
+  /* ── ...AND THE RESULT CARD IS THE ONE ELEMENT HEIGHT ACTUALLY BINDS ─────────
+     Arithmetic, measured at 844x390 (the landscape phone menu_accept uses):
+
+       before this pass, TWO seats  = 373px of card in a 390px viewport (95.6%)
+       WITHOUT these rules, SIX     = 399px, i.e. 9px PAST the bottom. That is
+                                      rcw_fit --arm tallcard, which reverts exactly
+                                      this block and is the known-bad for the
+                                      vertical row.
+       WITH them, SIX               = 265px, and 299px at 667x375.
+
+     This viewport is above the max-width:720px regime, so it is still being
+     handed the 48px title and 38x56 padding a desktop gets — on the shortest
+     screen the game supports. The rules below give back ~108px: 40 of padding,
+     40 of column gap, ~21 of title and ~7 of place.
+
+     ⚠️ Keyed on HEIGHT, not on width or on touch, because height is what runs
+     out: 1024x768 and 1280x800 carry the same 825px six-fighter card with 395px
+     and 427px of vertical slack and must not shrink. There is no runtime backstop
+     under this — see .hud-gameover-card for why max-height/overflow-y was measured
+     and removed — so this arithmetic is the whole of the height budget, and
+     rcw_fit's vertical rows are what hold it. 667x375 is the shortest viewport in
+     that matrix, not 844x390. */
+  .hud-gameover-card { padding: 18px 28px; gap: 10px; }
+  .hud-gameover-title { font-size: 30px; }
+  .hud-gameover-place { font-size: 20px; }
 }
 
 /* ── Narrow PORTRAIT: the tray and the radar cannot share the bottom edge ───
